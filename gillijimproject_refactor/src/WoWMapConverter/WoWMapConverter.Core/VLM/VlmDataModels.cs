@@ -196,7 +196,12 @@ public record VlmLiquidData(
     [property: JsonPropertyName("min_height")] float MinHeight,
     [property: JsonPropertyName("max_height")] float MaxHeight,
     [property: JsonPropertyName("mask_path")] string? MaskPath,
-    [property: JsonPropertyName("heights")] float[]? Heights  // 9×9 = 81 values if present
+    [property: JsonPropertyName("heights")] float[]? Heights,  // 9×9 = 81 values if present
+    [property: JsonPropertyName("x_offset")] int XOffset = 0,
+    [property: JsonPropertyName("y_offset")] int YOffset = 0,
+    [property: JsonPropertyName("width")] int Width = 8,
+    [property: JsonPropertyName("height")] int Height = 8,
+    [property: JsonPropertyName("exists_bitmap")] string? ExistsBitmapBase64 = null
 );
 
 /// <summary>

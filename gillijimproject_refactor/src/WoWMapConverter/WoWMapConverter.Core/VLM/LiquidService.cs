@@ -1,5 +1,6 @@
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using WoWMapConverter.Core.Formats.Liquids;
 
 namespace WoWMapConverter.Core.VLM;
 
@@ -22,62 +23,59 @@ public static class LiquidService
 
     /// <summary>
     /// Extract liquid data from MH2O chunk for a single chunk.
-    /// MH2O uses per-chunk headers with variable data.
+    /// Uses the active MH2O parser and selects the largest visible layer for this chunk.
     /// </summary>
     public static VlmLiquidData? ExtractMH2O(byte[] mh2oData, int chunkIndex, int baseOffset)
     {
-        // MH2O structure: 256 headers (16 bytes each), then variable data
-        int headerOffset = chunkIndex * 16;  // sizeof(MH2O_Header)
-        
-        if (headerOffset + 12 > mh2oData.Length)
+        _ = baseOffset;
+
+        if (mh2oData == null || mh2oData.Length == 0)
             return null;
 
-        // Read MH2O_Header
-        int ofsInformation = BitConverter.ToInt32(mh2oData, headerOffset);
-        int nLayers = BitConverter.ToInt32(mh2oData, headerOffset + 4);
-        int ofsAttributes = BitConverter.ToInt32(mh2oData, headerOffset + 8);
+        var mh2o = Mh2oChunk.Parse(mh2oData);
+        var instance = mh2o.GetInstancesForChunk(chunkIndex)
+            .OrderByDescending(GetVisibleTileCount)
+            .ThenByDescending(inst => inst.HeightMap?.Length ?? 0)
+            .FirstOrDefault();
 
-        if (nLayers == 0 || ofsInformation == 0)
+        return instance == null ? null : CreateMh2oLiquid(instance);
+    }
+
+    public static VlmLiquidData? CreateMh2oLiquid(Mh2oInstance instance)
+    {
+        int width = instance.Width;
+        if (width < 1) width = 1;
+        else if (width > 8) width = 8;
+
+        int height = instance.Height;
+        if (height < 1) height = 1;
+        else if (height > 8) height = 8;
+        if (width <= 0 || height <= 0)
             return null;
 
-        // Read MH2O_Information (relative to baseOffset)
-        int infoOffset = ofsInformation;
-        if (infoOffset + 24 > mh2oData.Length)
-            return null;
-
-        ushort liquidId = BitConverter.ToUInt16(mh2oData, infoOffset);
-        ushort liquidVertexFormat = BitConverter.ToUInt16(mh2oData, infoOffset + 2);
-        float minHeight = BitConverter.ToSingle(mh2oData, infoOffset + 4);
-        float maxHeight = BitConverter.ToSingle(mh2oData, infoOffset + 8);
-        byte xOffset = mh2oData[infoOffset + 12];
-        byte yOffset = mh2oData[infoOffset + 13];
-        byte width = mh2oData[infoOffset + 14];
-        byte height = mh2oData[infoOffset + 15];
-        int ofsInfoMask = BitConverter.ToInt32(mh2oData, infoOffset + 16);
-        int ofsHeightMap = BitConverter.ToInt32(mh2oData, infoOffset + 20);
-
-        // Read height data if present
-        float[]? heights = null;
-        if (ofsHeightMap != 0 && liquidVertexFormat == 0)
+        float[]? heights = instance.HeightMap;
+        if ((heights == null || heights.Length == 0) && instance.VertexFormat == Mh2oVertexFormat.DepthOnly)
         {
-            int heightDataOffset = ofsHeightMap;
-            int vertCount = (width + 1) * (height + 1);
-            heights = new float[vertCount];
-            
-            for (int i = 0; i < vertCount && heightDataOffset + i * 4 < mh2oData.Length; i++)
-            {
-                heights[i] = BitConverter.ToSingle(mh2oData, heightDataOffset + i * 4);
-            }
+            heights = new float[(width + 1) * (height + 1)];
+            Array.Fill(heights, instance.MinHeightLevel);
         }
 
+        string? existsBitmapBase64 = instance.ExistsBitmap is { Length: > 0 }
+            ? Convert.ToBase64String(instance.ExistsBitmap)
+            : null;
+
         return new VlmLiquidData(
-            chunkIndex,
-            (int)(liquidId & 3),  // Basic type mask
-            minHeight,
-            maxHeight,
-            null,  // Mask path set later
-            heights
-        );
+            instance.ChunkIndex,
+            MapLiquidTypeIdToBasicType(instance.LiquidTypeId),
+            instance.MinHeightLevel,
+            instance.MaxHeightLevel,
+            null,
+            heights,
+            instance.XOffset,
+            instance.YOffset,
+            width,
+            height,
+            existsBitmapBase64);
     }
 
     /// <summary>
@@ -108,11 +106,17 @@ public static class LiquidService
         // Determine liquid type from tile flags (at offset 8 + 81*8)
         int tileStart = vertexStart + 81 * 8;
         int liquidType = 0;  // Default water
+        string? existsBitmapBase64 = null;
         
-        if (tileStart < mclqData.Length)
+        if (tileStart + 64 <= mclqData.Length)
         {
-            byte tileFlags = mclqData[tileStart];
-            liquidType = tileFlags & 0x07;  // Lower 3 bits
+            byte[] tileFlags = new byte[64];
+            Array.Copy(mclqData, tileStart, tileFlags, 0, tileFlags.Length);
+            liquidType = InferLiquidTypeFromTileFlags(tileFlags);
+
+            byte[]? existsBitmap = BuildExistsBitmapFromTileFlags(tileFlags);
+            if (existsBitmap != null)
+                existsBitmapBase64 = Convert.ToBase64String(existsBitmap);
         }
 
         return new VlmLiquidData(
@@ -121,8 +125,88 @@ public static class LiquidService
             minHeight,
             maxHeight,
             null,
-            heights
+            heights,
+            0,
+            0,
+            8,
+            8,
+            existsBitmapBase64
         );
+    }
+
+    public static int MapLiquidTypeIdToBasicType(ushort liquidTypeId)
+    {
+        return liquidTypeId switch
+        {
+            17 => (int)LiquidBasicType.Ocean,
+            19 => (int)LiquidBasicType.Magma,
+            20 => (int)LiquidBasicType.Slime,
+            _ => (int)LiquidBasicType.Water,
+        };
+    }
+
+    private static int GetVisibleTileCount(Mh2oInstance instance)
+    {
+        int width = instance.Width;
+        if (width < 1) width = 1;
+        else if (width > 8) width = 8;
+
+        int height = instance.Height;
+        if (height < 1) height = 1;
+        else if (height > 8) height = 8;
+        if (instance.ExistsBitmap == null)
+            return width * height;
+
+        int visibleTiles = 0;
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int tileIndex = (y * width) + x;
+                int byteIndex = tileIndex / 8;
+                if (byteIndex >= instance.ExistsBitmap.Length)
+                    continue;
+
+                int bitIndex = tileIndex % 8;
+                if ((instance.ExistsBitmap[byteIndex] & (1 << bitIndex)) != 0)
+                    visibleTiles++;
+            }
+        }
+
+        return visibleTiles;
+    }
+
+    private static int InferLiquidTypeFromTileFlags(byte[] tileFlags)
+    {
+        foreach (byte tileFlag in tileFlags)
+        {
+            if ((tileFlag & 0x0F) == 0x0F)
+                continue;
+
+            return tileFlag & 0x07;
+        }
+
+        return 0;
+    }
+
+    private static byte[]? BuildExistsBitmapFromTileFlags(byte[] tileFlags)
+    {
+        byte[] bitmap = new byte[8];
+        bool allVisible = true;
+
+        for (int tileIndex = 0; tileIndex < 64 && tileIndex < tileFlags.Length; tileIndex++)
+        {
+            bool visible = (tileFlags[tileIndex] & 0x0F) != 0x0F;
+            if (!visible)
+            {
+                allVisible = false;
+                continue;
+            }
+
+            bitmap[tileIndex / 8] |= (byte)(1 << (tileIndex % 8));
+        }
+
+        return allVisible ? null : bitmap;
     }
 
     /// <summary>

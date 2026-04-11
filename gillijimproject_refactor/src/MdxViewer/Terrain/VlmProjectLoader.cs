@@ -270,7 +270,11 @@ public class VlmProjectLoader
         if (liquids == null || liquids.Length == 0)
             return null;
 
-        var l = liquids.FirstOrDefault(x => x.ChunkIndex == chunkIndex);
+        var l = liquids
+            .Where(x => x.ChunkIndex == chunkIndex)
+            .OrderByDescending(GetLiquidCoverage)
+            .ThenByDescending(x => x.Heights?.Length ?? 0)
+            .FirstOrDefault();
         if (l == null)
             return null;
 
@@ -282,7 +286,7 @@ public class VlmProjectLoader
             _ => LiquidType.Water
         };
 
-        var heights = ConvertHeightsTo9x9(l.Heights, l.MinHeight);
+        var heights = ConvertHeightsTo9x9(l.Heights, l.MinHeight, l.XOffset, l.YOffset, l.Width, l.Height);
         if (heights == null)
             return null;
 
@@ -293,6 +297,7 @@ public class VlmProjectLoader
             Heights = heights,
             VertexData = new uint[81],
             TileGrid = new float[16],
+            TileFlags = BuildTileFlags(l),
             Type = type,
             WorldPosition = worldPos,
             TileX = tileX,
@@ -302,7 +307,7 @@ public class VlmProjectLoader
         };
     }
 
-    private static float[]? ConvertHeightsTo9x9(float[]? src, float fallbackHeight)
+    private static float[]? ConvertHeightsTo9x9(float[]? src, float fallbackHeight, int xOffset, int yOffset, int width, int height)
     {
         if (src == null || src.Length == 0)
         {
@@ -311,11 +316,35 @@ public class VlmProjectLoader
             return flat;
         }
 
-        if (src.Length >= 81)
+        int clampedWidth = Math.Clamp(width <= 0 ? 8 : width, 1, 8);
+        int clampedHeight = Math.Clamp(height <= 0 ? 8 : height, 1, 8);
+        int clampedXOffset = Math.Clamp(xOffset, 0, 7);
+        int clampedYOffset = Math.Clamp(yOffset, 0, 7);
+        int vertexWidth = clampedWidth + 1;
+        int vertexHeight = clampedHeight + 1;
+        int requiredVertexCount = vertexWidth * vertexHeight;
+
+        if (src.Length >= 81 && clampedXOffset == 0 && clampedYOffset == 0 && clampedWidth == 8 && clampedHeight == 8)
         {
             var dst = new float[81];
             Array.Copy(src, dst, 81);
             return dst;
+        }
+
+        if (src.Length >= requiredVertexCount)
+        {
+            var placed = new float[81];
+            Array.Fill(placed, fallbackHeight);
+
+            for (int y = 0; y < vertexHeight && clampedYOffset + y < 9; y++)
+            {
+                for (int x = 0; x < vertexWidth && clampedXOffset + x < 9; x++)
+                {
+                    placed[((clampedYOffset + y) * 9) + clampedXOffset + x] = src[(y * vertexWidth) + x];
+                }
+            }
+
+            return placed;
         }
 
         // MH2O can store partial sub-rect height grids (<= 9x9). Infer a small grid size and place it
@@ -355,6 +384,82 @@ public class VlmProjectLoader
         }
 
         return outHeights;
+    }
+
+    private static int GetLiquidCoverage(VlmLiquidData liquid)
+    {
+        int width = Math.Clamp(liquid.Width <= 0 ? 8 : liquid.Width, 1, 8);
+        int height = Math.Clamp(liquid.Height <= 0 ? 8 : liquid.Height, 1, 8);
+        byte[]? existsBitmap = DecodeExistsBitmap(liquid.ExistsBitmapBase64);
+        if (existsBitmap == null)
+            return width * height;
+
+        int coverage = 0;
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                if (LiquidTileExists(existsBitmap, width, x, y))
+                    coverage++;
+            }
+        }
+
+        return coverage;
+    }
+
+    private static byte[]? BuildTileFlags(VlmLiquidData liquid)
+    {
+        int width = Math.Clamp(liquid.Width <= 0 ? 8 : liquid.Width, 1, 8);
+        int height = Math.Clamp(liquid.Height <= 0 ? 8 : liquid.Height, 1, 8);
+        int xOffset = Math.Clamp(liquid.XOffset, 0, 7);
+        int yOffset = Math.Clamp(liquid.YOffset, 0, 7);
+        byte[]? existsBitmap = DecodeExistsBitmap(liquid.ExistsBitmapBase64);
+
+        if (existsBitmap == null && xOffset == 0 && yOffset == 0 && width == 8 && height == 8)
+            return null;
+
+        var tileFlags = Enumerable.Repeat((byte)0x0F, 64).ToArray();
+        for (int y = 0; y < height && yOffset + y < 8; y++)
+        {
+            for (int x = 0; x < width && xOffset + x < 8; x++)
+            {
+                if (!LiquidTileExists(existsBitmap, width, x, y))
+                    continue;
+
+                tileFlags[((yOffset + y) * 8) + xOffset + x] = 0;
+            }
+        }
+
+        return tileFlags;
+    }
+
+    private static byte[]? DecodeExistsBitmap(string? existsBitmapBase64)
+    {
+        if (string.IsNullOrWhiteSpace(existsBitmapBase64))
+            return null;
+
+        try
+        {
+            return Convert.FromBase64String(existsBitmapBase64);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool LiquidTileExists(byte[]? existsBitmap, int width, int x, int y)
+    {
+        if (existsBitmap == null)
+            return true;
+
+        int tileIndex = (y * width) + x;
+        int byteIndex = tileIndex / 8;
+        if ((uint)byteIndex >= (uint)existsBitmap.Length)
+            return false;
+
+        int bitIndex = tileIndex % 8;
+        return (existsBitmap[byteIndex] & (1 << bitIndex)) != 0;
     }
 
     /// <summary>

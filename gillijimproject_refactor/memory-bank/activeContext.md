@@ -1,5 +1,22 @@
 # Active Context
 
+## Apr 11, 2026 - The active LK exporter now materializes MH2O liquids again, and wow-viewer has a first shared root-ADT MH2O reader
+
+- followed the direct correction after the V7 signal audit and the user pushback narrowed the real regression: WotLK or modern `ml-export` was still dropping `terrain_data.liquids` entirely even though the current codebase already had MH2O-aware consumer paths
+- active behavior after this slice:
+	- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtLiquidReader.cs` plus `wow-viewer/src/core/WowViewer.Core/Maps/AdtLiquidFile.cs` now provide the first shared root-ADT MH2O payload reader in `wow-viewer`, with synthetic coverage in `wow-viewer/tests/WowViewer.Core.Tests/AdtLiquidReaderTests.cs`
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDatasetExporter.cs` now captures root `MH2O`, parses it through the active `Formats/Liquids/Mh2oChunk.cs` seam, and emits non-null `terrain_data.liquids` for LK tiles instead of hardcoding `Liquids: null`
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDataModels.cs` now preserves MH2O rectangle metadata on each liquid layer (`x_offset`, `y_offset`, `width`, `height`, `exists_bitmap`) so the dataset contract can carry partial sub-rect liquid coverage instead of only whole-chunk approximations
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/TileStitchingService.cs` and `src/MdxViewer/Terrain/VlmProjectLoader.cs` now respect that metadata when building stitched liquid masks/heights and viewer-side `TileFlags`, rather than assuming any liquid means a full 8x8 chunk is wet
+	- `src/WoWMapConverter/WoWMapConverter.Core.Tests/VLM/TileStitchingServiceLiquidTests.cs` now adds a focused first-party regression seam for partial MH2O mask placement in the active converter tree
+- validation completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter AdtLiquidReaderTests` passed
+	- `dotnet test i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core.Tests/WoWMapConverter.Core.Tests.csproj -c Debug --filter TileStitchingServiceLiquidTests` passed
+	- real-data smoke export succeeded with `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj --configuration Debug -- ml-export --client "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --out i:/parp/parp-tools/output/tmp/mh2o-smoke-335-azeroth --limit 1`; the live run logged `Parsed 256 MH2O liquid layers for Azeroth_35_20`, emitted `liquids/Azeroth_35_20_liq_mask.png` plus `liquids/Azeroth_35_20_liq_height.png`, and the tile JSON now has non-null `terrain_data.liquids`
+- important boundary:
+	- the real-data proof so far is a one-tile `3.3.5.12340` smoke on `Azeroth_35_20`, which appears to be an ocean-heavy full-coverage tile; this proves the dead-liquid-signal regression is repaired, not that partial-rect MH2O coverage has been revalidated across broader real corpora
+	- stitched `liquid_min` or `liquid_max` on that smoke tile remained `0`, so treat this slice as export-signal recovery rather than final liquid-height semantic signoff
+
 ## Apr 10, 2026 - LK ML exports now emit normalmaps, and the first honest V7 smoke ran on a real 3.3.5 dataset root
 
 - followed the reprioritized "basic thing first" direction after auditing the existing corpus and proving the current blocker was not theoretical: live `3.3.5.12340` exports were still writing `terrain_data.normalmap = null`, so `train_v7.py` could not consume the exported roots in strict mode

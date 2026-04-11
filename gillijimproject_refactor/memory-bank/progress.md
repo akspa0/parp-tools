@@ -1,5 +1,30 @@
 # Progress
 
+### Apr 11, 2026 - Repaired the dead MH2O liquid channel in the active LK exporter and landed the first shared wow-viewer MH2O reader
+
+- followed the direct implementation request after the audit proved current corpora still had 0% effective liquid supervision: the active WotLK exporter branch was creating a liquid list and then returning `Liquids: null`
+- landed active behavior:
+	- `wow-viewer` now has a shared root-ADT MH2O payload seam via `src/core/WowViewer.Core.IO/Maps/AdtLiquidReader.cs` and `src/core/WowViewer.Core/Maps/AdtLiquidFile.cs`, with focused synthetic and development-path coverage in `wow-viewer/tests/WowViewer.Core.Tests/AdtLiquidReaderTests.cs`
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDatasetExporter.cs` now reads root `MH2O`, materializes `terrain_data.liquids`, and stops dropping the liquid channel on LK exports
+	- the active dataset contract now carries MH2O placement metadata (`x_offset`, `y_offset`, `width`, `height`, `exists_bitmap`), and both the stitched liquid outputs plus the `MdxViewer` dataset loader now use that metadata instead of painting every liquid chunk as full coverage
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core.Tests/VLM/TileStitchingServiceLiquidTests.cs` now covers partial liquid-mask placement in the active converter tree
+- validation completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter AdtLiquidReaderTests` passed
+	- `dotnet test i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core.Tests/WoWMapConverter.Core.Tests.csproj -c Debug --filter TileStitchingServiceLiquidTests` passed
+	- one-tile real-data smoke export to `i:/parp/parp-tools/output/tmp/mh2o-smoke-335-azeroth` on the fixed `3.3.5.12340` client logged `Parsed 256 MH2O liquid layers for Azeroth_35_20`, wrote stitched `liquid_mask` and `liquid_height` outputs, and the tile JSON now contains a non-null `liquids` array
+- proof boundary:
+	- this proves the active exporter no longer leaves the liquid channel dead on the validated smoke tile, but it is not yet a broad corpus rerun or a cross-map signoff on partial-rect MH2O fidelity
+
+### Apr 10, 2026 - Set the repo-shape direction for ML dataset and training workflow cutover toward wow-viewer ownership
+
+- followed the architectural correction after the V7 signal audit proved the active corpora had silently lost effective liquid/object supervision: dataset gathering, corpus auditing, and training-workflow contracts should stop living across split legacy surfaces
+- landed active planning guidance:
+	- `gillijimproject_refactor/plans/wow_viewer_ml_tool_suite_cutover_plan_2026-04-10.md` now defines `wow-viewer` as the canonical owner for ML dataset contracts, shared signal extraction, headless corpus export or audit surfaces, and eventual training-workflow repo ownership
+	- the same plan keeps `MdxViewer` only as a transitional GUI host for existing interactive validation or preview flows until equivalent `wow-viewer` app surfaces exist, instead of letting viewer-local ML business logic deepen again
+	- the plan explicitly stages the next work as contract or audit first, then real liquid/object extraction parity, then thin-host GUI cutover, and only then trainer relocation
+- proof boundary:
+	- this is a direction or ownership reset only; it does not mean the wow-viewer ML export surface already has parity with the legacy exporter or that the dead liquid/object channels are already repaired
+
 ### Apr 10, 2026 - Switched VLM terrain heightmap or normalmap baking onto the MdxViewer-compatible 257x257 tile stitch path
 
 - followed the direct correction to stop patching the old approximate exporter rasterizer in isolation and instead move the converter-side terrain bake onto the same coherent tile reconstruction logic already proven in `MdxViewer`

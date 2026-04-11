@@ -401,18 +401,31 @@ public static class TileStitchingService
         foreach (var liquid in liquids)
         {
             if (liquid.Heights == null) continue;
+
+            int width = GetLiquidWidth(liquid);
+            int height = GetLiquidHeight(liquid);
+            int xOffset = GetLiquidXOffset(liquid);
+            int yOffset = GetLiquidYOffset(liquid);
+            int vertexWidth = width + 1;
+            int requiredHeights = vertexWidth * (height + 1);
+            if (liquid.Heights.Length < requiredHeights)
+                continue;
+
+            byte[]? existsBitmap = DecodeExistsBitmap(liquid.ExistsBitmapBase64);
             
             int cx = liquid.ChunkIndex % ChunksPerRow;
             int cy = liquid.ChunkIndex / ChunksPerRow;
             int px = cx * ChunkSize;
             int py = cy * ChunkSize;
             
-            // Render 9x9 grid to 64x64 area (8x8 blocks)
-            for (int ly = 0; ly < 8; ly++)
+            for (int ly = 0; ly < height; ly++)
             {
-                for (int lx = 0; lx < 8; lx++)
+                for (int lx = 0; lx < width; lx++)
                 {
-                    float hVal = liquid.Heights[ly * 9 + lx];
+                    if (!LiquidTileExists(existsBitmap, width, lx, ly))
+                        continue;
+
+                    float hVal = liquid.Heights[(ly * vertexWidth) + lx];
                     
                     byte val = 0;
                     if (range > 0.001f)
@@ -423,7 +436,7 @@ public static class TileStitchingService
                     var color = new L8(val);
                     for (int by = 0; by < 8; by++)
                         for (int bx = 0; bx < 8; bx++)
-                            tileImage[px + lx * 8 + bx, py + ly * 8 + by] = color;
+                            tileImage[px + ((xOffset + lx) * 8) + bx, py + ((yOffset + ly) * 8) + by] = color;
                 }
             }
         }
@@ -443,32 +456,86 @@ public static class TileStitchingService
         
         foreach (var liquid in liquids)
         {
+            int width = GetLiquidWidth(liquid);
+            int height = GetLiquidHeight(liquid);
+            int xOffset = GetLiquidXOffset(liquid);
+            int yOffset = GetLiquidYOffset(liquid);
+            byte[]? existsBitmap = DecodeExistsBitmap(liquid.ExistsBitmapBase64);
+
             int cx = liquid.ChunkIndex % ChunksPerRow;
             int cy = liquid.ChunkIndex / ChunksPerRow;
             int px = cx * ChunkSize;
             int py = cy * ChunkSize;
-            
-            // Fill chunk with "Liquid Present" (255)
-            // Later we can support specific liquid types
-            // For now, just binary mask where liquid exists.
-            
-            // Check valid mask if exists, otherwise fill whole chunk
-            // Currently VlmLiquidData doesn't store per-pixel mask, just assumed from MCLQ
-            // MCLQ implies 8x8 flags. 
-            // We should ideally use those flags.
-            // But VlmLiquidData currently just stores "Heights" if existing.
-            // If Heights != null, liquid exists.
-            
-            // Fill the 64x64 area for this chunk
+
             var white = new L8(255);
-            for (int y = 0; y < ChunkSize; y++)
-                for (int x = 0; x < ChunkSize; x++)
-                    tileImage[px + x, py + y] = white;
+            for (int ly = 0; ly < height; ly++)
+            {
+                for (int lx = 0; lx < width; lx++)
+                {
+                    if (!LiquidTileExists(existsBitmap, width, lx, ly))
+                        continue;
+
+                    for (int by = 0; by < 8; by++)
+                    {
+                        for (int bx = 0; bx < 8; bx++)
+                            tileImage[px + ((xOffset + lx) * 8) + bx, py + ((yOffset + ly) * 8) + by] = white;
+                    }
+                }
+            }
         }
         
         using var ms = new MemoryStream();
         tileImage.SaveAsPng(ms);
         return ms.ToArray();
+    }
+
+    private static int GetLiquidWidth(VlmLiquidData liquid)
+    {
+        return Math.Clamp(liquid.Width <= 0 ? 8 : liquid.Width, 1, 8);
+    }
+
+    private static int GetLiquidHeight(VlmLiquidData liquid)
+    {
+        return Math.Clamp(liquid.Height <= 0 ? 8 : liquid.Height, 1, 8);
+    }
+
+    private static int GetLiquidXOffset(VlmLiquidData liquid)
+    {
+        return Math.Clamp(liquid.XOffset, 0, 7);
+    }
+
+    private static int GetLiquidYOffset(VlmLiquidData liquid)
+    {
+        return Math.Clamp(liquid.YOffset, 0, 7);
+    }
+
+    private static byte[]? DecodeExistsBitmap(string? existsBitmapBase64)
+    {
+        if (string.IsNullOrWhiteSpace(existsBitmapBase64))
+            return null;
+
+        try
+        {
+            return Convert.FromBase64String(existsBitmapBase64);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool LiquidTileExists(byte[]? existsBitmap, int width, int x, int y)
+    {
+        if (existsBitmap == null)
+            return true;
+
+        int tileIndex = (y * width) + x;
+        int byteIndex = tileIndex / 8;
+        if ((uint)byteIndex >= (uint)existsBitmap.Length)
+            return false;
+
+        int bitIndex = tileIndex % 8;
+        return (existsBitmap[byteIndex] & (1 << bitIndex)) != 0;
     }
 
     /// <summary>

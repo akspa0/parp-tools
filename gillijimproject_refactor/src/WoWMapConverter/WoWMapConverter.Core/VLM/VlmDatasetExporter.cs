@@ -3,6 +3,7 @@ using System.Text.Json;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using WoWMapConverter.Core.Formats.Liquids;
 using WoWMapConverter.Core.Services;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
@@ -1137,6 +1138,7 @@ public class VlmDatasetExporter
             var textures = new List<string>();
             var m2Names = new List<string>();
             var wmoNames = new List<string>();
+            byte[]? mh2oData = null;
             var shadowMapData = new byte[256][];
             
             // Find MHDR chunk (on-disk 'RDHM')
@@ -1196,6 +1198,11 @@ public class VlmDatasetExporter
                 else if (fcc == "OMWM") // MWMO reversed
                 {
                     wmoNames.AddRange(ParseNullStrings(adtBytes, dataStart, sz));
+                }
+                else if (fcc == "O2HM" || fcc == "MH2O")
+                {
+                    mh2oData = new byte[sz];
+                    Array.Copy(adtBytes, dataStart, mh2oData, 0, sz);
                 }
                 
                 if (next <= i) break;
@@ -1360,6 +1367,27 @@ public class VlmDatasetExporter
                     Console.WriteLine($"[Error] Failed to parse MCNK at index {chunkIndex}: {ex.Message}");
                 }
             }
+
+            if (mh2oData is { Length: > 0 })
+            {
+                try
+                {
+                    var mh2o = Mh2oChunk.Parse(mh2oData);
+                    foreach (var instance in mh2o.Instances)
+                    {
+                        var liquid = LiquidService.CreateMh2oLiquid(instance);
+                        if (liquid != null)
+                            liquids.Add(liquid);
+                    }
+
+                    if (liquids.Count > 0)
+                        Console.WriteLine($"[DEBUG] Parsed {liquids.Count} MH2O liquid layers for {tileName}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[LK ADT] Failed to parse MH2O in {tileName}: {ex.Message}");
+                }
+            }
             
             Console.WriteLine($"[DEBUG] Parsed {heights.Count} chunks with heights, range {heightMin:F2} to {heightMax:F2}");
             
@@ -1412,7 +1440,7 @@ public class VlmDatasetExporter
                 NoLiquidMinimapPath: null,
                 Textures: textures,
                 ChunkLayers: chunkLayers.ToArray(),
-                Liquids: null,
+                Liquids: liquids.Count > 0 ? liquids.ToArray() : null,
                 Objects: objectPlacements,
                 WdlHeights: wdlHeights,
                 HeightMin: heightMin == float.MaxValue ? 0 : heightMin,
