@@ -108,6 +108,47 @@ Use `train_v7.py` for:
 - minimap + WDL + known-loss channels -> terrain heights
 - outputs: global height, local height, bounds
 
+#### V7.3 Performance Profile (Apr 12, 2026)
+
+`train_v7.py` now has live training telemetry and Tensor Core-oriented defaults:
+
+- live tqdm updates include rolling generator/discriminator loss, learning rate, and VRAM
+- per-epoch summary now includes throughput (`steps/s`, `samples/s`)
+- CUDA path defaults to AMP + TF32 + cuDNN benchmark (`--no-amp`, `--no-tf32`, `--no-cudnn-benchmark` disable each)
+- AMP dtype is selectable (`--amp-dtype auto|bfloat16|float16`), with `auto` preferring `bfloat16` on supported GPUs
+- default loader profile is now `train_workers=4`, `val_workers=2`, `prefetch_factor=2`
+
+Measured benchmark on `NVIDIA GeForce RTX 4070 Ti SUPER` over a one-epoch `Northrend` subset (`limit=640`, batch size 4):
+
+- baseline (AMP off, TF32 off): `1.47 steps/s`, `72.15s`
+- Tensor Core path (AMP auto + TF32 on): `1.60 steps/s`, `69.10s`
+- measured speedup: `+8.8%`
+
+Frequency-loss FFT now runs in float32 even under AMP to avoid NaN instability.
+
+#### Recommended Full Trusted-Corpus Resume Command
+
+```powershell
+$base = "i:/parp/parp-tools/output/ml-corpus"
+$roots = Get-ChildItem $base -Directory |
+	ForEach-Object { Get-ChildItem $_.FullName -Directory -ErrorAction SilentlyContinue } |
+	Where-Object { $_.FullName -notmatch "__UNTRUSTED_DO_NOT_USE" -and (Test-Path (Join-Path $_.FullName "dataset")) }
+
+$args = @(
+	"i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py",
+	"--profile", "manual",
+	"--epochs", "10",
+	"--resume", "i:/parp/parp-tools/output/ml-training/v7_3_all_trusted_maps_20260411_235624/checkpoint.pt",
+	"--output-dir", "i:/parp/parp-tools/output/ml-training/v7_3_all_trusted_maps_20260411_235624",
+	"--amp-dtype", "auto",
+	"--train-workers", "4",
+	"--val-workers", "2",
+	"--log-every", "5"
+)
+foreach ($r in $roots) { $args += @("--dataset-root", $r.FullName) }
+python @args
+```
+
 ### Texture Model
 
 Use `train_texture_v1.py` for:

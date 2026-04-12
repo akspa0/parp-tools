@@ -1,5 +1,55 @@
 # Progress
 
+### Apr 12, 2026 - Landed live V7.3 CLI telemetry, explicit Tensor Core controls, and a measured +8.8% throughput gain on the benchmark slice
+
+- implemented training-runtime visibility and performance controls in `src/WoWMapConverter/scripts/train_v7.py`:
+	- tqdm live metrics now show rolling generator/discriminator loss, LR, and VRAM
+	- per-epoch summary now prints throughput (`steps/s`, `samples/s`)
+	- added `--amp-dtype auto|bfloat16|float16`, `--no-tf32`, `--no-amp`, `--no-cudnn-benchmark`, `--train-workers`, `--val-workers`, and `--log-every`
+	- Tensor Core path now explicitly enables TF32 matmul/cuDNN by default when CUDA is active
+	- stabilized AMP by forcing FFT frequency-loss inputs to float32 (fixed NaN path seen in the first mixed-precision benchmark)
+	- updated default loader profile to the measured faster setting on this machine: train workers `4`, val workers `2`
+- benchmark evidence (`Northrend`, one epoch, `limit=640`, batch `4`, RTX 4070 Ti SUPER):
+	- baseline (`--no-amp --no-tf32 --no-cudnn-benchmark`, workers 4/2): `1.47 steps/s`, wall `72.15s`
+	- Tensor Core profile (`--amp-dtype auto`, TF32 on, workers 4/2): `1.60 steps/s`, wall `69.10s`
+	- measured throughput gain: `+8.8%`
+- documentation sync:
+	- `docs/VLM_Training_Guide.md` now includes the performance profile, benchmark values, and a ready-to-run trusted-corpus resume command
+- proof boundary:
+	- this proves practical speed gain on the benchmark slice and stable mixed-precision execution; it is not by itself full-corpus quality/convergence signoff
+
+### Apr 12, 2026 - Completed full trusted-corpus V7.3 resume through epoch 5 (best val loss 0.0493)
+
+- completed the requested continuation run by resuming `output/ml-training/v7_3_all_trusted_maps_20260411_235624/checkpoint.pt` and training through epoch 5 on the same all-trusted root set
+- trust gate held during execution: 31 non-quarantined roots only; no `__UNTRUSTED_DO_NOT_USE` paths included
+- run outcome after resume (`output/ml-training/v7_3_all_trusted_maps_20260411_235624`):
+	- resumed at epoch 1, completed epochs `2..5` on CUDA (`809` steps per epoch)
+	- validation losses: epoch 2 `0.0807`, epoch 3 `0.0529`, epoch 4 `0.0678`, epoch 5 `0.0493`
+	- best validation loss improved from prior `0.0979` baseline to `0.0493` (saved best model at epoch 5)
+	- corpus shape remained stable: `6070` valid samples (`2708` blank skipped), train/val `5451/619`, curated train `3233`
+- documentation/continuity sync completed:
+	- `output/v73-model-architecture-guide.html` updated from "resume planned" to completed epoch-5 baseline state
+	- `memory-bank/activeContext.md` updated with resumed-run evidence and current proof boundary
+- proof boundary:
+	- this is completed broad trusted-corpus baseline training with real run logs/artifacts, not final map-restoration quality signoff
+	- no new external benchmark/eval pass was added in this step
+
+### Apr 11, 2026 - Completed one-epoch full trusted-corpus V7.3 run across all collected non-quarantined ml-corpus roots
+
+- executed full-scope training over every non-quarantined dataset root under `output/ml-corpus` (31 roots), including Development, Azeroth, EmeraldDream, Northrend, LostIsles, Kalimdor, Expansion01, and available PvP/Cata families
+- quarantine guard held: no `__UNTRUSTED_DO_NOT_USE` roots were passed to training
+- run outcome (`output/ml-training/v7_3_all_trusted_maps_20260411_235624`):
+	- loaded `6070` valid samples (`2708` blank skipped)
+	- train/val split: `5451 / 619`
+	- curated train set: `3233`
+	- epoch completed on CUDA (`809` train steps)
+	- final metrics: `Train Loss 0.1762`, `Val Loss 0.0979`, `Best Val Loss 0.0979`
+- startup behavior confirmed with new cache path:
+	- frequent roots reported `index cache hit`
+	- validation dataset startup reused preloaded sample index (`Reusing preloaded V7 sample index (6070 samples)`), avoiding a second parse pass
+- proof boundary:
+	- this is one-epoch smoke proof for full trusted-corpus coverage, not long-horizon convergence or final restoration-quality signoff
+
 ### Apr 11, 2026 - Added persistent V7 dataset index caching and stitched full-map object-mask outputs
 
 - implemented startup acceleration in `src/WoWMapConverter/scripts/train_v7.py`:

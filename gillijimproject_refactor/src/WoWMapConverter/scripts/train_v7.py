@@ -49,6 +49,8 @@ import argparse
 import json
 import random
 import re
+import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -91,6 +93,11 @@ MASK_MAX_ABOVE_TERRAIN = 8.0
 MASK_MIN_BELOW_TERRAIN = -3.0
 DATASET_INDEX_CACHE_VERSION = 1
 DATASET_INDEX_CACHE_FILE = ".v7_dataset_index_cache.json"
+DEFAULT_TRAIN_WORKERS = 4
+DEFAULT_VAL_WORKERS = 2
+DEFAULT_PREFETCH_FACTOR = 2
+DEFAULT_LIVE_LOG_EVERY = 20
+DEFAULT_AMP_DTYPE = "auto"
 
 DEFAULT_DATASET_SEARCH_ROOTS = [
     Path(r"i:\parp\parp-tools\gillijimproject_refactor\test_data\vlm-datasets"),
@@ -1023,8 +1030,11 @@ def frequency_loss(predicted: torch.Tensor, target: torch.Tensor) -> torch.Tenso
     Uses log1p on FFT magnitudes so that high-frequency content (ridges, cliffs,
     terrain edges) receives fair weight relative to the dominant low-frequency bulk.
     """
-    pred_fft = torch.fft.rfft2(predicted[:, :2])
-    target_fft = torch.fft.rfft2(target[:, :2])
+    # Keep FFT in float32 for numerical stability under AMP.
+    pred_float = predicted[:, :2].float()
+    target_float = target[:, :2].float()
+    pred_fft = torch.fft.rfft2(pred_float)
+    target_fft = torch.fft.rfft2(target_float)
     pred_mag = torch.log1p(pred_fft.abs())
     target_mag = torch.log1p(target_fft.abs())
     return F.l1_loss(pred_mag, target_mag)
@@ -1457,8 +1467,30 @@ def train(args: argparse.Namespace) -> None:
     )
     val_dataset = Subset(val_base_dataset, val_indices)
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
+    use_cuda = torch.cuda.is_available()
+
+    train_loader_kwargs: Dict[str, Any] = {
+        "batch_size": args.batch_size,
+        "shuffle": True,
+        "num_workers": args.train_workers,
+        "pin_memory": use_cuda,
+    }
+    if args.train_workers > 0:
+        train_loader_kwargs["persistent_workers"] = True
+        train_loader_kwargs["prefetch_factor"] = args.prefetch_factor
+
+    val_loader_kwargs: Dict[str, Any] = {
+        "batch_size": args.batch_size,
+        "shuffle": False,
+        "num_workers": args.val_workers,
+        "pin_memory": use_cuda,
+    }
+    if args.val_workers > 0:
+        val_loader_kwargs["persistent_workers"] = True
+        val_loader_kwargs["prefetch_factor"] = args.prefetch_factor
+
+    train_loader = DataLoader(train_dataset, **train_loader_kwargs)
+    val_loader = DataLoader(val_dataset, **val_loader_kwargs)
 
     preview_batch: Optional[Dict[str, torch.Tensor]] = None
     try:
@@ -1487,14 +1519,49 @@ def train(args: argparse.Namespace) -> None:
     except Exception as exc:
         print(f"Warning: failed to precompute preview batch, falling back to first val batch: {exc}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if use_cuda else "cpu")
+    if use_cuda:
+        torch.backends.cudnn.benchmark = not args.no_cudnn_benchmark
+        if args.no_tf32:
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
+        else:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        torch.set_float32_matmul_precision("high")
+
+    amp_dtype: Optional[torch.dtype] = None
+    if use_cuda and not args.no_amp:
+        if args.amp_dtype == "auto":
+            amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        elif args.amp_dtype == "bfloat16":
+            amp_dtype = torch.bfloat16
+        else:
+            amp_dtype = torch.float16
+
+    use_amp = amp_dtype is not None
     print(f"Training on {device}")
+    if use_cuda:
+        gpu_name = torch.cuda.get_device_name(0)
+        amp_name = str(amp_dtype).split(".")[-1] if amp_dtype is not None else "off"
+        print(
+            f"GPU: {gpu_name} | AMP: {amp_name} | "
+            f"TF32(matmul/cudnn): {'on' if torch.backends.cuda.matmul.allow_tf32 else 'off'}/"
+            f"{'on' if torch.backends.cudnn.allow_tf32 else 'off'} | "
+            f"cuDNN benchmark: {'on' if torch.backends.cudnn.benchmark else 'off'}"
+        )
+    print(
+        "DataLoader config: "
+        f"train_workers={args.train_workers}, val_workers={args.val_workers}, "
+        f"prefetch_factor={args.prefetch_factor}, pin_memory={'on' if use_cuda else 'off'}"
+    )
 
     model = MultiChannelUNetV7().to(device)
     discriminator = PatchDiscriminator().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     disc_optimizer = torch.optim.Adam(discriminator.parameters(), lr=DISCRIMINATOR_LR, betas=(0.5, 0.999))
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=2, factor=0.5)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_cuda else None
 
     history = {
         "epochs": [],
@@ -1526,39 +1593,71 @@ def train(args: argparse.Namespace) -> None:
         disc_losses: List[float] = []
         epoch_parts: Dict[str, float] = {}
 
-        progress = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{args.epochs}")
-        for batch in progress:
-            inputs = batch["input"].to(device)
-            targets = batch["target"].to(device)
-            bounds = batch["height_bounds"].to(device)
+        epoch_train_start = time.perf_counter()
+        progress = tqdm(enumerate(train_loader, start=1), total=len(train_loader), desc=f"Epoch {epoch + 1}/{args.epochs}")
+        for step_index, batch in progress:
+            inputs = batch["input"].to(device, non_blocking=use_cuda)
+            targets = batch["target"].to(device, non_blocking=use_cuda)
+            bounds = batch["height_bounds"].to(device, non_blocking=use_cuda)
+
+            amp_context = torch.autocast(device_type="cuda", dtype=amp_dtype) if use_amp else nullcontext()
 
             # --- Generator forward ---
-            outputs, output_bounds = model(inputs)
+            with amp_context:
+                outputs, output_bounds = model(inputs)
 
             # --- Discriminator step ---
             disc_optimizer.zero_grad(set_to_none=True)
-            real_pred = discriminator(targets)
-            fake_pred = discriminator(outputs.detach())
-            disc_real_loss = F.mse_loss(real_pred, torch.ones_like(real_pred))
-            disc_fake_loss = F.mse_loss(fake_pred, torch.zeros_like(fake_pred))
-            disc_loss = (disc_real_loss + disc_fake_loss) * 0.5
-            disc_loss.backward()
-            disc_optimizer.step()
+            with amp_context:
+                real_pred = discriminator(targets)
+                fake_pred = discriminator(outputs.detach())
+                disc_real_loss = F.mse_loss(real_pred, torch.ones_like(real_pred))
+                disc_fake_loss = F.mse_loss(fake_pred, torch.zeros_like(fake_pred))
+                disc_loss = (disc_real_loss + disc_fake_loss) * 0.5
+            if scaler is not None:
+                scaler.scale(disc_loss).backward()
+                scaler.step(disc_optimizer)
+            else:
+                disc_loss.backward()
+                disc_optimizer.step()
             disc_losses.append(float(disc_loss.item()))
 
             # --- Generator step ---
             optimizer.zero_grad(set_to_none=True)
-            fake_pred_for_gen = discriminator(outputs)
-            adv_loss = F.mse_loss(fake_pred_for_gen, torch.ones_like(fake_pred_for_gen))
-            loss, parts = combined_loss(outputs, output_bounds, targets, bounds, adv_loss=adv_loss)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
+            with amp_context:
+                fake_pred_for_gen = discriminator(outputs)
+                adv_loss = F.mse_loss(fake_pred_for_gen, torch.ones_like(fake_pred_for_gen))
+                loss, parts = combined_loss(outputs, output_bounds, targets, bounds, adv_loss=adv_loss)
+            if scaler is not None:
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
 
             train_losses.append(float(loss.item()))
             for key, value in parts.items():
                 epoch_parts[key] = epoch_parts.get(key, 0.0) + value
-            progress.set_postfix(loss=f"{loss.item():.4f}")
+
+            if step_index % max(args.log_every, 1) == 0 or step_index == len(train_loader):
+                current_lr = optimizer.param_groups[0]["lr"]
+                postfix: Dict[str, str] = {
+                    "g": f"{float(np.mean(train_losses[-args.log_every:])):.4f}",
+                    "d": f"{float(np.mean(disc_losses[-args.log_every:])):.4f}",
+                    "lr": f"{current_lr:.1e}",
+                }
+                if use_cuda:
+                    vram_gb = torch.cuda.memory_allocated() / (1024.0 ** 3)
+                    postfix["vram"] = f"{vram_gb:.2f}G"
+                progress.set_postfix(postfix)
+
+        train_phase_seconds = max(time.perf_counter() - epoch_train_start, 1e-9)
+        train_steps_per_second = len(train_loader) / train_phase_seconds
+        train_samples_per_second = len(train_dataset) / train_phase_seconds
 
         for key in epoch_parts:
             epoch_parts[key] /= max(len(train_loader), 1)
@@ -1567,11 +1666,13 @@ def train(args: argparse.Namespace) -> None:
         val_losses: List[float] = []
         with torch.no_grad():
             for batch in val_loader:
-                inputs = batch["input"].to(device)
-                targets = batch["target"].to(device)
-                bounds = batch["height_bounds"].to(device)
-                outputs, output_bounds = model(inputs)
-                loss, _ = combined_loss(outputs, output_bounds, targets, bounds)
+                inputs = batch["input"].to(device, non_blocking=use_cuda)
+                targets = batch["target"].to(device, non_blocking=use_cuda)
+                bounds = batch["height_bounds"].to(device, non_blocking=use_cuda)
+                amp_context = torch.autocast(device_type="cuda", dtype=amp_dtype) if use_amp else nullcontext()
+                with amp_context:
+                    outputs, output_bounds = model(inputs)
+                    loss, _ = combined_loss(outputs, output_bounds, targets, bounds)
                 val_losses.append(float(loss.item()))
 
         average_train_loss = float(np.mean(train_losses))
@@ -1621,6 +1722,12 @@ def train(args: argparse.Namespace) -> None:
                 limit=args.patience,
             )
         )
+        print(
+            "  Throughput: {steps:.2f} steps/s | {samples:.1f} samples/s".format(
+                steps=train_steps_per_second,
+                samples=train_samples_per_second,
+            )
+        )
 
         scheduler.step(average_val_loss)
 
@@ -1668,6 +1775,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--limit", type=int, help="Optional per-root sample cap for quick debugging.")
     parser.add_argument("--resume", type=str, help="Resume from an existing checkpoint.")
+    parser.add_argument("--train-workers", type=int, default=DEFAULT_TRAIN_WORKERS,
+                        help=f"DataLoader worker count for training (default: {DEFAULT_TRAIN_WORKERS}).")
+    parser.add_argument("--val-workers", type=int, default=DEFAULT_VAL_WORKERS,
+                        help=f"DataLoader worker count for validation (default: {DEFAULT_VAL_WORKERS}).")
+    parser.add_argument("--prefetch-factor", type=int, default=DEFAULT_PREFETCH_FACTOR,
+                        help=f"Batches prefetched per worker when workers > 0 (default: {DEFAULT_PREFETCH_FACTOR}).")
+    parser.add_argument("--log-every", type=int, default=DEFAULT_LIVE_LOG_EVERY,
+                        help=f"Update tqdm live metrics every N training steps (default: {DEFAULT_LIVE_LOG_EVERY}).")
+    parser.add_argument("--no-amp", action="store_true", help="Disable CUDA automatic mixed precision.")
+    parser.add_argument("--amp-dtype", choices=["auto", "float16", "bfloat16"], default=DEFAULT_AMP_DTYPE,
+                        help=f"Autocast dtype when AMP is enabled (default: {DEFAULT_AMP_DTYPE}).")
+    parser.add_argument("--no-tf32", action="store_true",
+                        help="Disable TF32 Tensor Core paths for matmul/cuDNN.")
+    parser.add_argument("--no-cudnn-benchmark", action="store_true",
+                        help="Disable cuDNN benchmark autotuning for fixed-size training tensors.")
     parser.add_argument("--no-augment", action="store_true", help="Disable RGB jitter and random flips.")
     parser.add_argument("--no-curate", action="store_true", help="Disable complexity-based dataset curation.")
     parser.add_argument("--min-height-range", type=float, default=DEFAULT_MIN_HEIGHT_RANGE,

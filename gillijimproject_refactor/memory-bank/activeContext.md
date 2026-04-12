@@ -1,5 +1,36 @@
 # Active Context
 
+## Apr 12, 2026 - V7.3 now has live metric updates and a validated Tensor Core training profile (+8.8% on measured subset)
+
+- followed the request to show live CLI values, verify real GPU usage, and make practical speed improvements before continuing training
+- active behavior and proof this session:
+	- `train_v7.py` now prints richer live tqdm telemetry (`g`, `d`, `lr`, `vram`) plus per-epoch throughput (`steps/s`, `samples/s`)
+	- CUDA path now explicitly enables TF32 (`torch.backends.cuda.matmul.allow_tf32 = True`, `torch.backends.cudnn.allow_tf32 = True` unless disabled) and exposes `--amp-dtype auto|bfloat16|float16`
+	- AMP instability from FFT frequency loss was repaired by forcing frequency-loss FFT inputs to float32 under autocast
+	- benchmark evidence on `NVIDIA GeForce RTX 4070 Ti SUPER` (`Northrend`, `limit=640`, batch 4, one epoch):
+		- baseline (`--no-amp --no-tf32 --no-cudnn-benchmark`, workers 4/2): `1.47 steps/s`, `72.15s`
+		- Tensor Core profile (`--amp-dtype auto`, TF32 on, workers 4/2): `1.60 steps/s`, `69.10s`
+		- measured improvement: `+8.8%`
+	- loader defaults were set to the measured faster profile (`train_workers=4`, `val_workers=2`) rather than the prior over-threaded dynamic default on this machine
+- important boundary:
+	- benchmark was a controlled one-epoch subset run, not full-corpus convergence proof
+	- Tensor Core path improves throughput here but can still alter optimization dynamics; quality tracking remains val-loss-led
+
+## Apr 12, 2026 - Full trusted-corpus V7.3 resume completed through epoch 5 with improved best validation loss
+
+- followed the explicit continuation request to update documentation/memory and resume the all-trusted corpus run to epoch 5
+- active behavior and proof this session:
+	- resumed from `output/ml-training/v7_3_all_trusted_maps_20260411_235624/checkpoint.pt` at epoch 1 and completed epochs `2..5`
+	- trust gating held for the resumed run: all 31 dataset roots were non-quarantined (`__UNTRUSTED_DO_NOT_USE` roots excluded)
+	- corpus/sample shape remained stable during resume: `6070` valid samples (`2708` blank skipped), train/val `5451/619`, curated train `3233`
+	- best validation loss improved from `0.0979` (epoch 1) to `0.0493` at epoch 5
+	- per-epoch validation losses during resume: epoch 2 `0.0807`, epoch 3 `0.0529`, epoch 4 `0.0678`, epoch 5 `0.0493`
+	- artifacts were updated in-place under `output/ml-training/v7_3_all_trusted_maps_20260411_235624` (`best.pt`, `checkpoint.pt`, `training_log.json`, previews)
+	- `output/v73-model-architecture-guide.html` now reflects completed epoch-5 baseline status instead of "resume planned"
+- important boundary:
+	- this is broad real-data training-baseline proof on trusted roots, not final terrain-restoration quality signoff
+	- no new automated model-quality benchmark suite was introduced in this slice; validation is run-log + artifact continuity
+
 ## Apr 11, 2026 - Object masking is not trustworthy in older ml-corpus roots; fresh mask-gated smoke exports passed and V7.3 training was restarted on that validated subset
 
 - followed the direct request to stop trusting stale assumptions and prove object masking before resuming training
