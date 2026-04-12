@@ -676,6 +676,22 @@ public class VlmDatasetExporter
                 progress?.Report($"Created full minimap: {minimapOutput}");
             }
 
+            var noObjectMinimapOutput = Path.Combine(stitchedDir, $"{mapName}_full_minimap_no_objects.png");
+            var noObjectMinimapBounds = TileStitchingService.StitchFullMap(
+                imagesDir, mapName, 256, noObjectMinimapOutput, "_no_objects.png");
+            if (noObjectMinimapBounds.HasValue)
+            {
+                progress?.Report($"Created full no-object minimap: {noObjectMinimapOutput}");
+            }
+
+            var objectMaskOutput = Path.Combine(stitchedDir, $"{mapName}_full_object_visibility_mask.png");
+            var objectMaskBounds = TileStitchingService.StitchFullMap(
+                imagesDir, mapName, 256, objectMaskOutput, "_object_visibility_mask.png");
+            if (objectMaskBounds.HasValue)
+            {
+                progress?.Report($"Created full object visibility mask: {objectMaskOutput}");
+            }
+
             // Stitch shadow maps (1024 resolution)
             var shadowOutput = Path.Combine(stitchedDir, $"{mapName}_full_shadows.png");
             var shadowBounds = TileStitchingService.StitchFullMap(

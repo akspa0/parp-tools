@@ -1,5 +1,23 @@
 # Progress
 
+### Apr 11, 2026 - Added persistent V7 dataset index caching and stitched full-map object-mask outputs
+
+- implemented startup acceleration in `src/WoWMapConverter/scripts/train_v7.py`:
+	- added per-root persistent index cache (`.v7_dataset_index_cache.json`) keyed by json-count + latest mtime + total-size signature
+	- switched sample collection to use cached index entries when signatures match instead of reparsing every tile JSON
+	- removed duplicate startup scan for validation by reusing the first dataset's preloaded sample index (`preloaded_samples`) for `val_base_dataset`
+- implemented stitched object-mask outputs in `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDatasetExporter.cs`:
+	- now emits full-map stitched no-object minimap: `stitched/<map>_full_minimap_no_objects.png`
+	- now emits full-map stitched object-visibility mask: `stitched/<map>_full_object_visibility_mask.png`
+- validation completed:
+	- startup cache probe on core restoration roots (Development/Azeroth/EmeraldDream/Northrend/LostIsles) with `--epochs 0` measured `first=142.05s`, `second=16.42s`
+	- real-data export smoke (`Northrend`, 12 tiles, 3.0.1.8303 client) produced:
+		- `output/tmp/vlm_stitch_object_mask_smoke/stitched/Northrend_full_minimap_no_objects.png`
+		- `output/tmp/vlm_stitch_object_mask_smoke/stitched/Northrend_full_object_visibility_mask.png`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug` succeeded (warnings only)
+- proof boundary:
+	- no new automated tests were added in `WoWMapConverter.Core.Tests`; validation here is build + real-data export smoke + measured startup timing
+
 ### Apr 11, 2026 - Hard-blocked quarantined dataset roots on the new CK24 OpenCV mask-refinement path
 
 - honored the explicit do-not-use instruction for `output/ml-corpus/3_3_5_12340_devcopy__UNTRUSTED_DO_NOT_USE`

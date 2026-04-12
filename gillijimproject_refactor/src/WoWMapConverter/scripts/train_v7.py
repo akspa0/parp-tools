@@ -51,7 +51,7 @@ import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -89,6 +89,8 @@ MAP_ORIGIN = 32.0 * TILE_SIZE
 MASK_CONTEXT_MARGIN_TILES = 0.20
 MASK_MAX_ABOVE_TERRAIN = 8.0
 MASK_MIN_BELOW_TERRAIN = -3.0
+DATASET_INDEX_CACHE_VERSION = 1
+DATASET_INDEX_CACHE_FILE = ".v7_dataset_index_cache.json"
 
 DEFAULT_DATASET_SEARCH_ROOTS = [
     Path(r"i:\parp\parp-tools\gillijimproject_refactor\test_data\vlm-datasets"),
@@ -423,18 +425,23 @@ class WoWTileDatasetV7(Dataset):
         augment: bool = True,
         limit: Optional[int] = None,
         min_height_range: float = DEFAULT_MIN_HEIGHT_RANGE,
+        preloaded_samples: Optional[Sequence[TileSample]] = None,
     ) -> None:
         self.input_size = input_size
         self.augment = augment
         self.min_height_range = min_height_range
         self.include_maps = {value.lower() for value in include_maps if value}
         self.exclude_maps = {value.lower() for value in exclude_maps if value}
-        self.samples: List[TileSample] = []
+        self.samples: List[TileSample] = list(preloaded_samples) if preloaded_samples is not None else []
 
         self.to_tensor = transforms.ToTensor()
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         self.blur = transforms.GaussianBlur(kernel_size=3, sigma=DEFAULT_BLUR_SIGMA)
         self.color_jitter = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)
+
+        if preloaded_samples is not None:
+            print(f"Reusing preloaded V7 sample index ({len(self.samples)} samples)")
+            return
 
         blank_skipped = 0
         print("Loading V7 dataset roots...")
@@ -451,33 +458,33 @@ class WoWTileDatasetV7(Dataset):
             print(f"Warning: dataset folder missing in {dataset_root}")
             return [], 0
 
+        json_paths = sorted(dataset_dir.glob("*.json"))
+        signature = self._build_index_signature(json_paths)
+
+        cached_entries, cached_stats = self._load_index_cache(dataset_root, signature)
+        if cached_entries is not None:
+            entries = cached_entries
+            print(f"  {dataset_root.name}: index cache hit ({len(entries)} entries)")
+        else:
+            entries, cached_stats = self._build_index_entries(json_paths)
+            self._save_index_cache(dataset_root, signature, entries, cached_stats)
+            print(f"  {dataset_root.name}: index cache rebuilt ({len(entries)} entries)")
+
         collected: List[TileSample] = []
         blank_skipped = 0
         rejected = {
-            "json_read_error": 0,
-            "tile_name_invalid": 0,
+            "json_read_error": int(cached_stats.get("json_read_error", 0)),
+            "tile_name_invalid": int(cached_stats.get("tile_name_invalid", 0)),
             "map_filtered": 0,
             "height_range_too_low": 0,
             "missing_path_refs": 0,
             "missing_input_files": 0,
         }
-        for json_path in sorted(dataset_dir.glob("*.json")):
-            try:
-                with open(json_path, "r", encoding="utf-8") as handle:
-                    payload = json.load(handle)
-            except Exception as exc:
-                print(f"Warning: failed to read {json_path}: {exc}")
-                rejected["json_read_error"] += 1
-                continue
-
-            terrain = payload.get("terrain_data", {})
-            tile_name = terrain.get("adt_tile") or json_path.stem
-
-            try:
-                map_name, tile_x, tile_y = parse_tile_identity(tile_name)
-            except ValueError:
-                rejected["tile_name_invalid"] += 1
-                continue
+        for entry in entries:
+            tile_name = str(entry["tile_name"])
+            map_name = str(entry["map_name"])
+            tile_x = int(entry["tile_x"])
+            tile_y = int(entry["tile_y"])
 
             map_key = map_name.lower()
             if self.include_maps and map_key not in self.include_maps:
@@ -488,28 +495,28 @@ class WoWTileDatasetV7(Dataset):
                 continue
 
             # Skip blank/flat tiles (ocean, void) that have no useful height variation
-            height_min = float(terrain.get("height_min", 0.0))
-            height_max = float(terrain.get("height_max", 0.0))
+            height_min = float(entry.get("height_min", 0.0))
+            height_max = float(entry.get("height_max", 0.0))
             if (height_max - height_min) < self.min_height_range:
                 blank_skipped += 1
                 rejected["height_range_too_low"] += 1
                 continue
 
-            heightmap_global_rel = terrain.get("heightmap_global") or terrain.get("heightmap")
-            heightmap_local_rel = terrain.get("heightmap_local") or terrain.get("heightmap")
-            normalmap_rel = terrain.get("normalmap")
+            heightmap_global_rel = entry.get("heightmap_global")
+            heightmap_local_rel = entry.get("heightmap_local")
+            normalmap_rel = entry.get("normalmap")
             if not heightmap_global_rel or not heightmap_local_rel or not normalmap_rel:
                 rejected["missing_path_refs"] += 1
                 continue
 
-            minimap_rel = payload.get("image") or terrain.get("no_object_minimap")
+            minimap_rel = entry.get("image") or entry.get("no_object_minimap")
             if minimap_rel:
                 minimap_path = dataset_root / str(minimap_rel)
             else:
                 minimap_path = dataset_root / "images" / f"{tile_name}.png"
 
-            if not minimap_path.exists() and terrain.get("no_object_minimap"):
-                fallback_minimap = terrain.get("no_object_minimap")
+            if not minimap_path.exists() and entry.get("no_object_minimap"):
+                fallback_minimap = entry.get("no_object_minimap")
                 if fallback_minimap:
                     minimap_path = dataset_root / str(fallback_minimap)
 
@@ -520,12 +527,16 @@ class WoWTileDatasetV7(Dataset):
                 rejected["missing_input_files"] += 1
                 continue
 
-            liquid_mask_path = dataset_root / terrain["liquid_mask"] if terrain.get("liquid_mask") else None
-            liquid_height_path = dataset_root / terrain["liquid_height"] if terrain.get("liquid_height") else None
+            liquid_mask_rel = entry.get("liquid_mask")
+            liquid_height_rel = entry.get("liquid_height")
+            liquid_mask_path = dataset_root / str(liquid_mask_rel) if liquid_mask_rel else None
+            liquid_height_path = dataset_root / str(liquid_height_rel) if liquid_height_rel else None
 
-            objects = terrain.get("objects")
-            tile_object_count = len(objects) if isinstance(objects, list) else 0
+            tile_object_count = int(entry.get("object_count", 0))
             tile_has_liquid = bool(liquid_mask_path and liquid_mask_path.exists())
+
+            json_name = str(entry.get("json_name", f"{tile_name}.json"))
+            json_path = dataset_dir / json_name
 
             collected.append(
                 TileSample(
@@ -557,6 +568,132 @@ class WoWTileDatasetV7(Dataset):
             f"filtered {rejected['map_filtered']}, invalid tile ids {rejected['tile_name_invalid']})"
         )
         return collected, blank_skipped
+
+    def _build_index_signature(self, json_paths: Sequence[Path]) -> Dict[str, int]:
+        latest_mtime_ns = 0
+        total_size = 0
+        for path in json_paths:
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            latest_mtime_ns = max(latest_mtime_ns, int(stat.st_mtime_ns))
+            total_size += int(stat.st_size)
+
+        return {
+            "json_count": len(json_paths),
+            "latest_mtime_ns": latest_mtime_ns,
+            "total_size": total_size,
+        }
+
+    def _cache_file_path(self, dataset_root: Path) -> Path:
+        return dataset_root / DATASET_INDEX_CACHE_FILE
+
+    def _load_index_cache(
+        self,
+        dataset_root: Path,
+        signature: Dict[str, int],
+    ) -> Tuple[Optional[List[Dict[str, Any]]], Dict[str, int]]:
+        cache_path = self._cache_file_path(dataset_root)
+        if not cache_path.exists():
+            return None, {"json_read_error": 0, "tile_name_invalid": 0}
+
+        try:
+            with open(cache_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except Exception:
+            return None, {"json_read_error": 0, "tile_name_invalid": 0}
+
+        if int(payload.get("version", -1)) != DATASET_INDEX_CACHE_VERSION:
+            return None, {"json_read_error": 0, "tile_name_invalid": 0}
+
+        cached_signature = payload.get("signature") or {}
+        if (
+            int(cached_signature.get("json_count", -1)) != int(signature["json_count"])
+            or int(cached_signature.get("latest_mtime_ns", -1)) != int(signature["latest_mtime_ns"])
+            or int(cached_signature.get("total_size", -1)) != int(signature["total_size"])
+        ):
+            return None, {"json_read_error": 0, "tile_name_invalid": 0}
+
+        entries = payload.get("entries")
+        if not isinstance(entries, list):
+            return None, {"json_read_error": 0, "tile_name_invalid": 0}
+
+        stats = payload.get("build_stats") or {}
+        return entries, {
+            "json_read_error": int(stats.get("json_read_error", 0)),
+            "tile_name_invalid": int(stats.get("tile_name_invalid", 0)),
+        }
+
+    def _save_index_cache(
+        self,
+        dataset_root: Path,
+        signature: Dict[str, int],
+        entries: List[Dict[str, Any]],
+        build_stats: Dict[str, int],
+    ) -> None:
+        cache_path = self._cache_file_path(dataset_root)
+        payload = {
+            "version": DATASET_INDEX_CACHE_VERSION,
+            "signature": signature,
+            "entries": entries,
+            "build_stats": build_stats,
+        }
+
+        try:
+            with open(cache_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+        except Exception:
+            # Cache write failure should never block training.
+            return
+
+    def _build_index_entries(self, json_paths: Sequence[Path]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+        entries: List[Dict[str, Any]] = []
+        stats = {"json_read_error": 0, "tile_name_invalid": 0}
+
+        for json_path in json_paths:
+            try:
+                with open(json_path, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except Exception:
+                stats["json_read_error"] += 1
+                continue
+
+            terrain = payload.get("terrain_data", {})
+            tile_name = terrain.get("adt_tile") or json_path.stem
+
+            try:
+                map_name, tile_x, tile_y = parse_tile_identity(str(tile_name))
+            except ValueError:
+                stats["tile_name_invalid"] += 1
+                continue
+
+            heightmap_global_rel = terrain.get("heightmap_global") or terrain.get("heightmap")
+            heightmap_local_rel = terrain.get("heightmap_local") or terrain.get("heightmap")
+            normalmap_rel = terrain.get("normalmap")
+            objects = terrain.get("objects")
+
+            entries.append(
+                {
+                    "json_name": json_path.name,
+                    "tile_name": str(tile_name),
+                    "map_name": map_name,
+                    "tile_x": int(tile_x),
+                    "tile_y": int(tile_y),
+                    "height_min": float(terrain.get("height_min", 0.0)),
+                    "height_max": float(terrain.get("height_max", 0.0)),
+                    "image": payload.get("image"),
+                    "no_object_minimap": terrain.get("no_object_minimap"),
+                    "normalmap": normalmap_rel,
+                    "heightmap_global": heightmap_global_rel,
+                    "heightmap_local": heightmap_local_rel,
+                    "liquid_mask": terrain.get("liquid_mask"),
+                    "liquid_height": terrain.get("liquid_height"),
+                    "object_count": len(objects) if isinstance(objects, list) else 0,
+                }
+            )
+
+        return entries, stats
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -1316,6 +1453,7 @@ def train(args: argparse.Namespace) -> None:
         augment=False,
         limit=args.limit,
         min_height_range=args.min_height_range,
+        preloaded_samples=dataset.samples,
     )
     val_dataset = Subset(val_base_dataset, val_indices)
 
