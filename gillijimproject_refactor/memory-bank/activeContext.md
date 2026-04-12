@@ -1,5 +1,60 @@
 # Active Context
 
+## Apr 12, 2026 - Full trusted-corpus signal audit completed in wow-viewer and the next audited V7 run is live
+
+- ran [`ml-audit-signals`](../../wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs) across the trusted corpus roots into `output/build-validation/ml-audit/trusted/`
+- current bounded truth summary from the trusted audit set:
+	- `27` audit reports
+	- `10,541` audited tiles total
+	- `1,180` tiles missing source minimaps
+	- `1,018` tiles missing global heightmaps, all concentrated in `output/ml-corpus/301_8303/Kalimdor`
+	- `0` audits currently report stitched alpha-mask coverage (`tiles_with_any_alpha_mask = 0` across the trusted set)
+	- `16` tiles flagged as `below-terrain-likely` liquid
+	- `158` tiles flagged as `uncertain` liquid
+- current training gate decision:
+	- geometry-only V7 training can still proceed on the audited trusted set because the active trainer in `train_v7.py` hard-requires minimap + normalmap + local/global heightmaps, not alpha atlases
+	- `301_8303/Kalimdor` was excluded from the launched run because its audit shows `0/1018` global heightmaps
+	- quarantined roots remain excluded even though the first broad audit command also proved they can be scanned
+- launched new run from `C:\Users\akspa\anaconda3\python.exe` into `output/ml-training/v7_4_audited_all_trusted_20260412`
+	- profile: manual audited roots only
+	- launch settings: `--epochs 16 --learning-rate 8e-5 --disc-learning-rate 5e-5 --adversarial-scale 0.20 --start-gan-epoch 6 --disc-every 2 --patience 8 --amp-dtype auto --train-workers 4 --val-workers 2 --log-every 5`
+	- current live terminal state shows preview-tile selection completed and training is active on CUDA (`NVIDIA GeForce RTX 4070 Ti SUPER`, AMP `bfloat16`, TF32 on/on)
+- user correction to preserve for the next curation slice:
+	- dedupe and future brush/prefab comparison should not stop at tile-level grouping
+	- treat each tile as `16x16` chunks, and each chunk as `16x16` candidate patch cells for the next prefab/brush dedupe surface
+	- this means the current audit is only the tile-scale gate; patch-scale prefab archaeology remains the next deeper ownership seam
+
+## Apr 12, 2026 - wow-viewer now has a first `ml-audit-signals` corpus-truth audit command for V7.4 curation work
+
+- landed the first bounded wow-viewer-owned ML audit seam in `wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs`
+- new command surface:
+	- `wowviewer-converter ml-audit-signals --dataset-root <path> [--output <report.json>] [--limit <count>]`
+- active audit behavior:
+	- reads legacy ML dataset tile JSONs from `<dataset-root>/dataset`
+	- emits a machine-readable audit report with:
+		- dedupe groups
+		- concept clusters
+		- per-tile retention recommendation (`canonical` vs `review-duplicate`)
+		- liquid semantic classification (`visible-surface`, `below-terrain-likely`, `uncertain`, `none`)
+		- source/minimap/height/liquid/object/alpha presence counts
+	- uses a bounded heuristic first pass rather than claiming final semantic truth:
+		- dedupe groups are built from source/alpha/textures/object-count/liquid-class signatures
+		- concept clusters are built from coarser perceptual/hash buckets plus content buckets
+		- liquid sanity compares source minimap vs `no_liquid_minimap` under `liquid_mask` and marks low-delta cases as `below-terrain-likely`
+- real validation captured for this slice:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- ml-audit-signals --dataset-root i:/parp/parp-tools/output/ml-corpus/301_8303/Northrend --output i:/parp/parp-tools/output/build-validation/ml-audit/northrend_signal_audit.json --limit 32` passed
+	- first real audit output reported:
+		- `32` tiles processed
+		- `21` concept clusters
+		- `24` dedupe groups
+		- `26` `visible-surface` liquid tiles
+		- `3` `below-terrain-likely` liquid tiles
+		- `1` `uncertain` liquid tile
+- important boundary:
+	- this is a first curation/audit seam for V7.4 dataset truth ownership, not full canonical ML-contract cutover
+	- concept clustering and liquid semantics are heuristic-first and intended to gate review/reruns, not to claim final authoring truth yet
+
 ## Apr 12, 2026 - Post-epoch-5 drift response: V7.3 fine-tune controls added and best-checkpoint continuation path defined
 
 - after the epoch 6..10 continuation reported sustained val regression (`0.1433 -> 0.1758`) with best still pinned at epoch 5 (`0.0493`), the trainer was extended for controlled fine-tuning instead of continuing the same GAN pressure profile

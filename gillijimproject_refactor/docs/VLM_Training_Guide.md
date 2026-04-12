@@ -58,6 +58,24 @@ pwsh ./gillijimproject_refactor/scripts/export_ml_corpus.ps1
 
 It uses [gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json](gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json) and currently targets the fixed `3.0.1.8303`, `3.3.5.12340`, and `4.0.0.11927` roots with a narrow checked-in subset: `Northrend` plus `PVPZone01` through `PVPZone04` from `3.0.1.8303`, `Azeroth` from `3.3.5.12340`, and `LostIsles` from `4.0.0.11927`. The wrapper writes dataset roots under `output/ml-corpus/` and then runs `ml-harvest` for each exported map.
 
+### Corpus Truth Audit For V7.4 Curation
+
+Use the wow-viewer audit command before treating a corpus as V7.4-ready:
+
+```powershell
+dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- ml-audit-signals --dataset-root i:/parp/parp-tools/output/ml-corpus/301_8303/Northrend --output i:/parp/parp-tools/output/build-validation/ml-audit/northrend_signal_audit.json --limit 32
+```
+
+The audit currently reports:
+
+- dedupe groups
+- concept clusters
+- per-tile retention recommendation (`canonical` or `review-duplicate`)
+- liquid semantic class (`visible-surface`, `below-terrain-likely`, `uncertain`, `none`)
+- signal coverage counts for minimap, heights, alpha, objects, liquids, and `no_liquid_minimap`
+
+This is the first gate toward the V7.4 canvas-aware curation flow. Do not treat it as final semantic truth yet; it is a bounded audit layer meant to identify duplicate density and suspect liquid supervision before retraining.
+
 ### Syntax
 ```bash
 cd src/WoWMapConverter

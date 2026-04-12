@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WoW Terrain Regressor V7.3 — Model Architecture Guide</title>
+<title>WoW Terrain Regressor V7.3 — Architecture Guide</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -157,7 +157,7 @@
 <body>
 
 <h1>WoW Terrain Regressor V7.3</h1>
-<p class="subtitle">Multichannel U-Net with adversarial sharpening for height-field reconstruction from game minimaps — updated Apr 12, 2026 with fresh epoch-0 full-corpus restart in progress</p>
+<p class="subtitle">12-channel terrain regressor with PatchGAN sharpening — updated Apr 12, 2026 with full trusted-corpus auditing complete and the audited run through epoch 1</p>
 
 <!-- Stats overview -->
 <div class="stats-row">
@@ -174,68 +174,76 @@
     <div class="stat-label">Resolution</div>
   </div>
   <div class="stat-box">
-    <div class="stat-num">6070</div>
-    <div class="stat-label">Valid Corpus Samples</div>
+    <div class="stat-num">10,541</div>
+    <div class="stat-label">Audited Tiles</div>
   </div>
   <div class="stat-box">
     <div class="stat-num">9</div>
     <div class="stat-label">Loss Components</div>
   </div>
   <div class="stat-box">
-    <div class="stat-num">31</div>
-    <div class="stat-label">Trusted Dataset Roots</div>
+    <div class="stat-num">27</div>
+    <div class="stat-label">Trusted Audit Reports</div>
   </div>
   <div class="stat-box">
-    <div class="stat-num">16.4s</div>
-    <div class="stat-label">Warm Startup (Cache)</div>
+    <div class="stat-num">26</div>
+    <div class="stat-label">Launched Training Roots</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-num">0.1530</div>
+    <div class="stat-label">Epoch 1 Val Loss</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-num">0.0493</div>
+    <div class="stat-label">Best Completed Val Loss</div>
   </div>
 </div>
 
 <!-- Section 1: Input Channels -->
 <div class="section" style="margin-top: 40px;">
   <h2>1. Input Channels — What the Model Sees</h2>
-  <p class="desc">Each terrain tile is encoded as a 12-channel 512×512 image tensor. The channels are organized into three semantic groups that together resolve the fundamental ambiguity: a minimap photo alone cannot distinguish a flat green field from a hilltop meadow.</p>
+  <p class="desc">Each tile becomes a 12-channel 512×512 tensor. RGB appearance, surface orientation, coarse world priors, and occlusion hints give the model enough context to infer terrain shape instead of guessing from color alone.</p>
 
   <div class="channel-grid">
     <div class="channel-card visual">
       <div class="ch-num">Channels 1–3</div>
       <div class="ch-name">Minimap RGB</div>
-      <div class="ch-desc">Satellite-style terrain photograph from the game client. Shows color and surface texture.</div>
+      <div class="ch-desc">Rendered terrain appearance from the client.</div>
     </div>
     <div class="channel-card visual">
       <div class="ch-num">Channels 4–6</div>
       <div class="ch-name">Normal Map RGB</div>
-      <div class="ch-desc">Per-pixel surface orientation vectors. Encodes slope direction and steepness at every point.</div>
+      <div class="ch-desc">Per-pixel slope direction and surface orientation.</div>
     </div>
     <div class="channel-card structural">
       <div class="ch-num">Channel 7</div>
       <div class="ch-name">WDL Height Prior</div>
-      <div class="ch-desc">Low-resolution 17×17 coarse terrain skeleton from the game's world definition file, upsampled to 512×512.</div>
+      <div class="ch-desc">Low-resolution world-height scaffold from WDL.</div>
     </div>
     <div class="channel-card structural">
       <div class="ch-num">Channel 8</div>
       <div class="ch-name">Height Min Hint</div>
-      <div class="ch-desc">Per-tile minimum elevation bound. Tells the model the floor of the height range.</div>
+      <div class="ch-desc">Per-tile lower elevation bound.</div>
     </div>
     <div class="channel-card structural">
       <div class="ch-num">Channel 9</div>
       <div class="ch-name">Height Max Hint</div>
-      <div class="ch-desc">Per-tile maximum elevation bound. Tells the model the ceiling of the height range.</div>
+      <div class="ch-desc">Per-tile upper elevation bound.</div>
     </div>
     <div class="channel-card occlusion">
       <div class="ch-num">Channel 10</div>
       <div class="ch-name">Liquid Mask</div>
-      <div class="ch-desc">Binary mask of where water, lava, or slime covers and hides the terrain surface below.</div>
+      <div class="ch-desc">Where liquid covers the terrain surface.</div>
     </div>
     <div class="channel-card occlusion">
       <div class="ch-num">Channel 11</div>
       <div class="ch-name">Liquid Height</div>
-      <div class="ch-desc">Water surface elevation. The model knows terrain must be at or below this in liquid areas.</div>
+      <div class="ch-desc">Liquid-surface elevation in masked regions.</div>
     </div>
     <div class="channel-card occlusion">
       <div class="ch-num">Channel 12</div>
       <div class="ch-name">Object Footprint</div>
-      <div class="ch-desc">Mask of where buildings, trees, and placed objects obscure terrain and often imply flat ground.</div>
+      <div class="ch-desc">Where WMOs obscure terrain and imply structure.</div>
     </div>
   </div>
 </div>
@@ -243,7 +251,7 @@
 <!-- Section 2: Architecture -->
 <div class="section">
   <h2>2. Model Architecture — 5-Level U-Net + PatchGAN</h2>
-  <p class="desc">The generator is a symmetric encoder-decoder with skip connections that preserve fine detail. A separate PatchGAN discriminator enforces local realism during training, preventing the blurry output that pure regression produces.</p>
+  <p class="desc">The generator is a 5-level encoder-decoder with skip connections for detail retention. A PatchGAN discriminator sharpens local structure during training.</p>
 
   <div class="mermaid">
 graph TB
@@ -277,17 +285,15 @@ graph TB
   </div>
 
   <p class="desc" style="margin-top: 16px;">
-    <strong>Key V7.3 improvements:</strong>
-    Residual conv blocks improve gradient flow at every level.
-    Bilinear upsampling eliminates checkerboard artifacts from transposed convolutions.
-    Hard clamp (0–1) replaces sigmoid, preserving gradients at height extremes.
+    <strong>Key V7.3 changes:</strong>
+    residual blocks improve optimization, bilinear upsampling avoids checkerboard artifacts, and hard clamp replaces sigmoid at the output.
   </p>
 </div>
 
 <!-- Section 3: Loss Function -->
 <div class="section">
   <h2>3. Training Signals — 9-Component Loss Function</h2>
-  <p class="desc">The model optimizes a weighted combination of nine loss terms. Each focuses on a different aspect of terrain quality, from raw pixel accuracy to high-frequency sharpness to adversarial realism.</p>
+  <p class="desc">Nine loss terms balance absolute height accuracy, slope and edge fidelity, curvature, structure, frequency detail, and adversarial sharpness.</p>
 
   <div class="loss-grid">
     <div class="loss-card pixel">
@@ -341,65 +347,71 @@ graph TB
 <!-- Section 4: Data Pipeline -->
 <div class="section">
   <h2>4. Data Pipeline — Training Corpus to Terrain Reconstruction</h2>
-  <p class="desc">Current validated status: historical epoch-5 best remains the strongest completed checkpoint, and a fresh epoch-0 full trusted-corpus restart is now the active trajectory using the latest trainer controls.</p>
+  <p class="desc">Current status: the trusted corpus was audited first, then the next full run launched from the audit-cleared root set. Tile-scale audit is live; the next deeper step is identifying repeated patch imprints left by WoWEdit 3D brushes.</p>
 
   <div class="mermaid">
 graph LR
   subgraph SOURCES["Trusted Sources (Apr 12, 2026)"]
-  S1["All non-quarantined ml-corpus roots<br>31 dataset roots"]
-  S2["Coverage includes development/Azeroth/<br>EmeraldDream/Northrend/LostIsles + others"]
+  S1["Trusted ml-corpus roots<br>27 audited reports"]
+  S2["10,541 audited tiles across<br>Alpha / 3.0.1 / 3.3.5 / 4.0.0 families"]
     end
 
     SOURCES --> EXPORT["CLI Exporter<br>Extracts 12 channels per tile<br>from ADT + WDT + WDL + MPQ"]
 
-    EXPORT --> CORPUS["Active Corpus<br>trusted multi-map roots with<br>JSON metadata + PNGs"]
+    EXPORT --> CORPUS["Tile Corpus<br>JSON metadata + PNG artifacts"]
 
-    CORPUS --> CURATE["Index Cache + Trust Gating<br>quarantined roots blocked<br>warm startup: 16.4s"]
+    CORPUS --> CURATE["wow-viewer Audit Gate<br>tile-scale clusters + liquid sanity<br>trust filter"]
 
-    CURATE --> TRAIN["V7.3 Fresh Full Trusted Run<br>6070 usable samples<br>epoch-0 restart active"]
+    CURATE --> TRAIN["Audited Full Run<br>26 launched roots<br>301_8303/Kalimdor excluded"]
+
+    CURATE -.-> BRUSH["Next Slice<br>identify repeated 16×16 patch / patch-group imprints<br>build separate brush dataset"]
 
     TRAIN --> MODEL["Trained Model<br>best.pt checkpoint"]
 
     MODEL --> INFER["Inference Pipeline"]
 
     subgraph TARGET["Current Proven Target"]
-      DEV["Historical best checkpoint<br>best val loss: 0.0493<br>fresh restart now active"]
+      DEV["Best completed baseline<br>best val loss: 0.0493<br>new audited run now live"]
     end
 
     TARGET --> INFER
-    INFER --> RESULT["Full trusted-corpus baseline<br>pipeline executes at broad map scope<br>still not final restoration signoff"]
+    INFER --> RESULT["Broad real-data execution proof<br>not final restoration signoff"]
   </div>
 </div>
 
 <!-- Section 5: Development Map Coverage -->
 <div class="section">
   <h2>5. Full Trusted-Corpus Coverage Snapshot</h2>
-  <p class="desc">Coverage and historical best snapshot from the pre-restart trajectory over all non-quarantined roots under output/ml-corpus.</p>
+  <p class="desc">Latest audit-first snapshot for the trusted corpus and the audited launch decision.</p>
 
   <div class="stats-row" style="flex-wrap: wrap;">
     <div class="stat-box">
-      <div class="stat-num">31</div>
-      <div class="stat-label">Trusted Dataset Roots</div>
+      <div class="stat-num">27</div>
+      <div class="stat-label">Trusted Audit Reports</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">6070</div>
-      <div class="stat-label">Valid Samples Loaded</div>
+      <div class="stat-num">10,541</div>
+      <div class="stat-label">Audited Tiles</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">5451/619</div>
-      <div class="stat-label">Train/Val Split</div>
+      <div class="stat-num">26</div>
+      <div class="stat-label">Roots Launched</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">3233</div>
-      <div class="stat-label">Curated Train Samples</div>
+      <div class="stat-num">1180</div>
+      <div class="stat-label">Missing Source-Minimap Tiles</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">0.0493</div>
-      <div class="stat-label">Best Historical Val Loss</div>
+      <div class="stat-num">1018</div>
+      <div class="stat-label">Missing Global-Height Tiles</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">PASS</div>
-      <div class="stat-label">Full Trusted-Corpus Smoke</div>
+      <div class="stat-num">16 / 158</div>
+      <div class="stat-label">Below-Terrain / Uncertain Liquid Tiles</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">0</div>
+      <div class="stat-label">Audits With Alpha Coverage</div>
     </div>
   </div>
 </div>
@@ -407,44 +419,56 @@ graph LR
 <!-- Section 6: Preflight -->
 <div class="section">
   <h2>6. Training Execution + Startup Performance</h2>
-  <p class="desc">Operational checkpoints captured during full trusted-corpus runs, cache rollout, Apr 12 Tensor Core benchmarking, and the active fresh restart.</p>
+  <p class="desc">Current launch settings and epoch-1 status for the active audited run.</p>
 
   <div class="stats-row" style="flex-wrap: wrap;">
     <div class="stat-box">
-      <div class="stat-num">142.05s</div>
-      <div class="stat-label">Cold Startup (Cache Build)</div>
+      <div class="stat-num">RTX 4070 Ti SUPER</div>
+      <div class="stat-label">Training GPU</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">16.42s</div>
-      <div class="stat-label">Warm Startup (Cache Hit)</div>
+      <div class="stat-num">bfloat16</div>
+      <div class="stat-label">AMP Mode</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">+8.8%</div>
-      <div class="stat-label">Tensor Core Throughput Gain</div>
+      <div class="stat-num">TF32 On/On</div>
+      <div class="stat-label">MatMul / cuDNN</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">1.60</div>
-      <div class="stat-label">Steps/s (Tensor Core Profile)</div>
+      <div class="stat-num">16</div>
+      <div class="stat-label">Planned Epochs</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">809</div>
-      <div class="stat-label">Train Steps Per Epoch</div>
+      <div class="stat-num">8e-5</div>
+      <div class="stat-label">Generator LR</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">4</div>
-      <div class="stat-label">Resumed Epochs Completed</div>
+      <div class="stat-num">5e-5</div>
+      <div class="stat-label">Discriminator LR</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">31</div>
-      <div class="stat-label">Roots Passed Trust Filter</div>
+      <div class="stat-num">4 / 2</div>
+      <div class="stat-label">Train / Val Workers</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">2</div>
-      <div class="stat-label">New Stitched Object Outputs</div>
+      <div class="stat-num">6</div>
+      <div class="stat-label">GAN Start Epoch</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">PASS</div>
-      <div class="stat-label">Cache + Fresh Restart Active</div>
+      <div class="stat-num">0.1740 / 0.1530</div>
+      <div class="stat-label">Epoch 1 Train / Val Loss</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">3.50</div>
+      <div class="stat-label">Epoch 1 Steps/s</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">14.0</div>
+      <div class="stat-label">Epoch 1 Samples/s</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">RUNNING</div>
+      <div class="stat-label">Audited Run Status</div>
     </div>
   </div>
 </div>
@@ -453,38 +477,25 @@ graph LR
 <div class="section">
   <h2>7. The Goal — Reconstructing Lost Terrain</h2>
   <p class="desc" style="font-size: 1.05rem; line-height: 1.8; max-width: 800px; margin: 0 auto;">
-    In 2010, Blizzard accidentally deployed internal development map files in a
-    4.0.0.12304 Cataclysm beta PTR build. The patcher began remotely deleting them,
-    but one person noticed, stopped the updater, and saved what they could. Not
-    everything was caught in time — 114 files were zeroed out before the patcher
-    was stopped. That zip was kept safe for over 15 years.
+    In 2010, internal development map files briefly shipped in a `4.0.0.12304`
+    Cataclysm beta PTR build. Some files were deleted before the updater was
+    stopped, but the surviving data was preserved.
     <br><br>
-    The long-term goal remains full terrain reconstruction quality for damaged and
-    missing map regions. The current state is now broader than the earlier two-root
-    smoke: the full trusted-corpus baseline has completed across all non-quarantined
-    collected roots through epoch 5 with an improved best validation loss.
+    The goal is still terrain reconstruction from real game evidence, not synthetic
+    guesses. The current model uses minimaps, normals, WDL priors, liquid cues, and
+    object footprints to predict terrain height.
     <br><br>
-    WoW data files are essentially highly optimized SQL tables: each ADT or PM4
-    packs intense amounts of structured records across dozens of chunk types.
-    The PM4 pathfinding format contains navigation meshes with terrain geometry
-    encoded inside, but no one had made much sense of them. After 2.5 years of
-    reverse engineering, we've decoded the chunk linkage and data structures
-    further than anyone else in those 15 years.
+    The current state is straightforward: tile-scale trusted-corpus audit landed,
+    the next audited full run is live, and the next deeper curation step is to
+    identify repeated `16×16` patch and patch-group imprints left by the original
+    WoWEdit 3D brush workflow.
     <br><br>
-    Prior development map restoration efforts (2021) worked without ML and
-    reached a ceiling. This model learns the correlation between what terrain
-    <em>looks like</em> and what terrain <em>is</em>, but every claim here is now scoped
-    to validated evidence from current smoke runs.
+    The strongest completed checkpoint is still the earlier `0.0493` validation-loss
+    baseline. The current audited run completed epoch 1 at `train 0.1740 / val 0.1530`.
+    Brush-pattern discovery is a separate data problem and likely needs its own model.
     <br><br>
-    The 363 tiles with minimaps and PM4 data but no ADTs can use PM4 meshes to
-    generate object masks — telling the model where pathfinding obstacles sit
-    on the terrain. The WDL provides the coarse elevation anchor. Every scrap of
-    real data we can give the model makes the predictions better.
-    <br><br>
-    The current output includes a historical epoch-5 best baseline plus an active
-    fresh epoch-0 restart with measured startup-cache acceleration and stitched
-    object-mask exports, not final map
-    restoration signoff.
+    This document describes the architecture and the current audited-training state.
+    It does not claim final terrain-restoration closure.
   </p>
 </div>
 

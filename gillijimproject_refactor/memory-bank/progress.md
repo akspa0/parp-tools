@@ -1,5 +1,55 @@
 # Progress
 
+### Apr 12, 2026 - Audited the trusted ML corpus at scale and launched the next V7 run from the audited root set
+
+- executed the new wow-viewer audit command across the trusted corpus into `output/build-validation/ml-audit/trusted/`
+- audit coverage/result summary:
+	- `27` trusted audit reports generated
+	- `10,541` tiles audited
+	- `1,180` tiles missing source minimaps
+	- `1,018` missing global-height tiles, isolated to `301_8303/Kalimdor`
+	- `0` trusted audits currently expose stitched alpha-mask coverage
+	- liquid review counts: `16` `below-terrain-likely`, `158` `uncertain`
+- launch decision:
+	- excluded quarantined roots as before
+	- excluded `301_8303/Kalimdor` from the training launch because the audit proved the active trainer's required `heightmap_global` target is absent there
+	- kept the rest of the audited roots for the next geometry-first/full-corpus run because the current trainer does not depend on alpha-mask coverage
+- started a new training run with `C:\Users\akspa\anaconda3\python.exe`:
+	- script: `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py`
+	- output: `output/ml-training/v7_4_audited_all_trusted_20260412`
+	- args: `--profile manual --epochs 16 --learning-rate 8e-5 --disc-learning-rate 5e-5 --adversarial-scale 0.20 --start-gan-epoch 6 --disc-every 2 --patience 8 --amp-dtype auto --train-workers 4 --val-workers 2 --log-every 5`
+	- live startup proof captured: preview-tile ranking printed, CUDA training initialized on `NVIDIA GeForce RTX 4070 Ti SUPER`, AMP `bfloat16`, TF32 on/on
+- preserved next-slice requirement from user correction:
+	- future prefab/brush dedupe must go below tile scale
+	- treat tiles as `16x16` chunks and chunks as `16x16` patch candidates for later patch-level dedupe/brush harvesting work
+- proof boundary:
+	- this completes the first full trusted-corpus audit pass and starts the next run, but it does not yet prove convergence or patch-scale prefab recovery
+
+### Apr 12, 2026 - Landed first wow-viewer `ml-audit-signals` command for V7.4 corpus truth auditing
+
+- implemented a new headless audit command in `wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs`:
+	- `wowviewer-converter ml-audit-signals --dataset-root <path> [--output <report.json>] [--limit <count>]`
+- landed active audit/report behavior:
+	- reads legacy dataset tile JSONs from `dataset/`
+	- computes per-tile signatures and grouped summaries for:
+		- dedupe groups
+		- concept clusters
+		- retention recommendation (`canonical` / `review-duplicate`)
+		- liquid semantic class (`visible-surface`, `below-terrain-likely`, `uncertain`, `none`)
+		- signal coverage counts for minimap, heights, alpha, objects, liquids, and `no_liquid_minimap`
+	- keeps the first slice inside wow-viewer command ownership without requiring immediate trainer changes or full schema migration first
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- ml-audit-signals --dataset-root i:/parp/parp-tools/output/ml-corpus/301_8303/Northrend --output i:/parp/parp-tools/output/build-validation/ml-audit/northrend_signal_audit.json --limit 32` passed
+	- produced `output/build-validation/ml-audit/northrend_signal_audit.json` with first real sample metrics:
+		- `32` tiles processed
+		- `21` concept clusters
+		- `24` dedupe groups
+		- `8` tiles flagged as `review-duplicate`
+		- liquid split: `26` visible-surface / `3` below-terrain-likely / `1` uncertain / `2` none
+- proof boundary:
+	- this is first-pass curation/audit proof on a bounded real corpus sample, not full corpus rerun coverage and not final semantic signoff for liquid supervision or concept identity
+
 ### Apr 12, 2026 - Added V7.3 fine-tune controls after epoch-6..10 validation drift and documented best-checkpoint continuation recipe
 
 - observed continuation drift on the full trusted-corpus resume (`epochs 6..10`) while best stayed at `0.0493` from epoch 5:
