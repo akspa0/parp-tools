@@ -603,8 +603,27 @@ Total: 9×9 outer (81) + 8×8 inner (64) = 145 vertices
 
 **Python** (for AI tools):
 ```bash
-pip install torch transformers pillow numpy scipy scikit-image tqdm
+pip install torch transformers pillow numpy scipy scikit-image tqdm opencv-python
 ```
+
+### CK24 Object Mask Refinement (OpenCV)
+
+When CK24/PM4 object masks are available but too broad, refine them into tighter
+2D silhouettes without destroying raw minimap inputs:
+
+```bash
+python refine_ck24_object_masks.py \
+  --dataset-root "output/build-validation/mask-audit/fresh-northrend-12-tight" \
+  --dataset-root "output/build-validation/mask-audit/fresh-lostisles-12-tight" \
+  --report-json "output/build-validation/mask-audit/cv2_refine_report.json"
+```
+
+This writes:
+- `images/<tile>_object_visibility_mask_cv2.png` (refined mask)
+- `terrain_data.object_visibility_mask_cv2` in each tile JSON
+
+The original `object_visibility_mask` remains unchanged so training/inference can
+choose either conservative seed masks or CV2-refined silhouettes.
 
 **C#** (for minimap baking):
 - .NET 9.0

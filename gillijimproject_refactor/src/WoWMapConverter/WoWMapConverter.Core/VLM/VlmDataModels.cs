@@ -46,8 +46,12 @@ public record VlmTerrainData(
     [property: JsonPropertyName("liquid_min")] float LiquidMinHeight,
     [property: JsonPropertyName("liquid_max")] float LiquidMaxHeight,
 
-        // Synthesized minimap with liquid areas inpainted to show underlying terrain.
-        [property: JsonPropertyName("no_liquid_minimap")] string? NoLiquidMinimapPath,
+    // Synthesized minimap with liquid areas inpainted to show underlying terrain.
+    [property: JsonPropertyName("no_liquid_minimap")] string? NoLiquidMinimapPath,
+
+    // Exported object visibility mask and synthesized minimap with visible objects inpainted out.
+    [property: JsonPropertyName("object_visibility_mask")] string? ObjectVisibilityMaskPath,
+    [property: JsonPropertyName("no_object_minimap")] string? NoObjectMinimapPath,
     
     // Textures
     [property: JsonPropertyName("textures")] List<string> Textures,

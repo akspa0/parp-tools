@@ -18,6 +18,11 @@ namespace WoWMapConverter.Core.Formats.LichKing
         {
             public bool UseHeaderAlphaSize { get; init; }
             public bool UseHeaderShadowSize { get; init; }
+            /// <summary>
+            /// When true, skip the 128-byte MCNK header and start sub-chunk scanning
+            /// at offset 0.  Used for Cata+ _tex0.adt MCNK chunks which are headerless.
+            /// </summary>
+            public bool SkipHeader { get; init; }
         }
 
         public const string Signature = "MCNK";
@@ -50,11 +55,19 @@ namespace WoWMapConverter.Core.Formats.LichKing
 
         private void Parse(byte[] data)
         {
-            if (data.Length < 128)
-                throw new InvalidDataException("MCNK data too short for header");
+            if (_parseOptions.SkipHeader)
+            {
+                Header = default;
+                ScanSubchunks(data, startOffset: 0);
+            }
+            else
+            {
+                if (data.Length < 128)
+                    throw new InvalidDataException("MCNK data too short for header");
 
-            Header = ReadHeader(data);
-            ScanSubchunks(data);
+                Header = ReadHeader(data);
+                ScanSubchunks(data, startOffset: 0x80);
+            }
         }
 
         /// <summary>
@@ -64,10 +77,10 @@ namespace WoWMapConverter.Core.Formats.LichKing
         private static int _diagCount = 0;
         private static bool _diagLiquidDone = false;
 
-        private void ScanSubchunks(byte[] data)
+        private void ScanSubchunks(byte[] data, int startOffset = 0x80)
         {
-            int pos = 0x80;
-            int remaining = data.Length - 0x80;
+            int pos = startOffset;
+            int remaining = data.Length - startOffset;
             // Diag: first chunk, AND first chunk with liquid flags
             uint rawFlags = data.Length >= 4 ? BitConverter.ToUInt32(data, 0) : 0;
             bool hasLiquidFlags = (rawFlags & 0x3C) != 0; // River|Ocean|Magma|Slime

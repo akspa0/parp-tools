@@ -24,6 +24,10 @@ using System.IO;
 /// </summary>
 public class VlmDatasetExporter
 {
+    private const float TileSize = 533.33333f;
+    private const float MapOrigin = 32f * TileSize;
+    private const float ObjectMaskMarginTiles = 0.25f;
+
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         WriteIndented = true,
@@ -391,27 +395,56 @@ public class VlmDatasetExporter
                 }
                 else
                 {
-                    // LK/Cata format: Read ADT from MPQ
+                    // LK/Cata format: Read ADT from MPQ or loose files on disk
                     // Check for Split ADT files (Cataclysm+)
                     var adtBase = $"World\\Maps\\{mapName}\\{mapName}_{x}_{y}";
                     var rootAdtPath = $"{adtBase}.adt";
                     var texAdtPath = $"{adtBase}_tex0.adt";
                     var objAdtPath = $"{adtBase}_obj0.adt";
 
-                    var adtBytes = archiveCatalog.ReadFile(rootAdtPath);
+                    // Try loose files on disk first, then fall back to archive catalog
+                    byte[]? adtBytes = null;
                     byte[]? texBytes = null;
                     byte[]? objBytes = null;
 
-                    if (archiveCatalog.FileExists(texAdtPath))
+                    foreach (var bp in searchPaths)
                     {
-                        texBytes = archiveCatalog.ReadFile(texAdtPath);
-                        progress?.Report($"[Split ADT] Found tex0 for {tileName}");
+                        var diskRoot = Path.Combine(bp, rootAdtPath);
+                        if (File.Exists(diskRoot))
+                        {
+                            adtBytes = await File.ReadAllBytesAsync(diskRoot);
+                            var diskTex = Path.Combine(bp, texAdtPath);
+                            if (File.Exists(diskTex))
+                            {
+                                texBytes = await File.ReadAllBytesAsync(diskTex);
+                                progress?.Report($"[Split ADT] Found tex0 for {tileName}");
+                            }
+                            var diskObj = Path.Combine(bp, objAdtPath);
+                            if (File.Exists(diskObj))
+                            {
+                                objBytes = await File.ReadAllBytesAsync(diskObj);
+                                progress?.Report($"[Split ADT] Found obj0 for {tileName}");
+                            }
+                            break;
+                        }
                     }
 
-                    if (archiveCatalog.FileExists(objAdtPath))
+                    // Fall back to archive catalog (MPQ) if not found on disk
+                    if (adtBytes == null || adtBytes.Length == 0)
                     {
-                        objBytes = archiveCatalog.ReadFile(objAdtPath);
-                         progress?.Report($"[Split ADT] Found obj0 for {tileName}");
+                        adtBytes = archiveCatalog.ReadFile(rootAdtPath);
+
+                        if (archiveCatalog.FileExists(texAdtPath))
+                        {
+                            texBytes = archiveCatalog.ReadFile(texAdtPath);
+                            progress?.Report($"[Split ADT] Found tex0 for {tileName}");
+                        }
+
+                        if (archiveCatalog.FileExists(objAdtPath))
+                        {
+                            objBytes = archiveCatalog.ReadFile(objAdtPath);
+                            progress?.Report($"[Split ADT] Found obj0 for {tileName}");
+                        }
                     }
                     
                     if (adtBytes == null || adtBytes.Length == 0)
@@ -488,7 +521,34 @@ public class VlmDatasetExporter
                         string? lHeightPath = null;
                         string? lMaskPath = null;
                         string? noLiquidMinimapPath = null;
+                        string? objectVisibilityMaskPath = null;
+                        string? noObjectMinimapPath = null;
                         float lMin = 0f, lMax = 0f;
+
+                        string? sourceMinimapPath = sample.ImagePath;
+                        if (!string.IsNullOrWhiteSpace(sourceMinimapPath) && !Path.IsPathRooted(sourceMinimapPath))
+                            sourceMinimapPath = Path.Combine(outputDir, sourceMinimapPath);
+
+                        if (!string.IsNullOrWhiteSpace(sourceMinimapPath) && File.Exists(sourceMinimapPath))
+                        {
+                            using Image<Rgba32> minimapForMask = Image.Load<Rgba32>(sourceMinimapPath);
+                            if (minimapForMask.Width > 0 && minimapForMask.Height > 0)
+                            {
+                                byte[] objectMask = BuildObjectVisibilityMask(sample.TerrainData, minimapForMask.Width, minimapForMask.Height);
+                                if (objectMask.Length > 0)
+                                {
+                                    objectVisibilityMaskPath = $"images/{tileName}_object_visibility_mask.png";
+                                    await File.WriteAllBytesAsync(Path.Combine(outputDir, objectVisibilityMaskPath), objectMask);
+
+                                    byte[] noObjectBytes = SynthesizeMaskedMinimap(sourceMinimapPath, objectMask);
+                                    if (noObjectBytes.Length > 0)
+                                    {
+                                        noObjectMinimapPath = $"images/{tileName}_no_objects.png";
+                                        await File.WriteAllBytesAsync(Path.Combine(outputDir, noObjectMinimapPath), noObjectBytes);
+                                    }
+                                }
+                            }
+                        }
 
                         if (sample.TerrainData.Liquids != null)
                         {
@@ -512,13 +572,9 @@ public class VlmDatasetExporter
                                 await File.WriteAllBytesAsync(Path.Combine(outputDir, lMaskPath), liqMask);
 
                                 // Generate a synthetic no-liquid minimap for training.
-                                var sourceMinimapPath = sample.ImagePath;
-                                if (!Path.IsPathRooted(sourceMinimapPath))
-                                    sourceMinimapPath = Path.Combine(outputDir, sourceMinimapPath);
-
-                                if (File.Exists(sourceMinimapPath))
+                                if (!string.IsNullOrWhiteSpace(sourceMinimapPath) && File.Exists(sourceMinimapPath))
                                 {
-                                    var noLiqBytes = SynthesizeNoLiquidMinimap(sourceMinimapPath, liqMask);
+                                    var noLiqBytes = SynthesizeMaskedMinimap(sourceMinimapPath, liqMask);
                                     if (noLiqBytes.Length > 0)
                                     {
                                         noLiquidMinimapPath = $"images/{tileName}_no_liquid.png";
@@ -537,6 +593,8 @@ public class VlmDatasetExporter
                             LiquidHeightPath = lHeightPath,
                             LiquidMaskPath = lMaskPath,
                             NoLiquidMinimapPath = noLiquidMinimapPath,
+                            ObjectVisibilityMaskPath = objectVisibilityMaskPath,
+                            NoObjectMinimapPath = noObjectMinimapPath,
                             LiquidMinHeight = lMin,
                             LiquidMaxHeight = lMax
                         };
@@ -1063,6 +1121,8 @@ public class VlmDatasetExporter
             LiquidMinHeight: 0f,
             LiquidMaxHeight: 0f,
             NoLiquidMinimapPath: null,
+            ObjectVisibilityMaskPath: null,
+            NoObjectMinimapPath: null,
             Textures: textures,
             ChunkLayers: chunkLayers.Count > 0 ? chunkLayers.ToArray() : null,
             Liquids: liquids.Count > 0 ? liquids.ToArray() : null,
@@ -1170,18 +1230,83 @@ public class VlmDatasetExporter
             int mhdrStart = mhdrOffset + 8;
             int mcinOff = mhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
             
-            if (mcinOff == 0)
+            List<int> mcnkOffsets;
+            if (mcinOff != 0)
             {
-                Console.WriteLine($"[LK ADT] MCIN offset is zero in {tileName}");
-                return null;
+                var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mhdrStart + mcinOff);
+                mcnkOffsets = mcin.GetMcnkOffsets();
+                Console.WriteLine($"[DEBUG] Found {mcnkOffsets.Count} MCNK offsets via MCIN for {tileName}");
+            }
+            else
+            {
+                // Cata 4.0.0+ split-ADT: no MCIN chunk, scan sequentially for MCNK (on-disk 'KNCM')
+                mcnkOffsets = new List<int>();
+                for (int i = 0; i + 8 <= adtBytes.Length;)
+                {
+                    string fcc = System.Text.Encoding.ASCII.GetString(adtBytes, i, 4);
+                    int sz = BitConverter.ToInt32(adtBytes, i + 4);
+                    if (sz < 0 || i + 8 + sz > adtBytes.Length) break;
+                    if (fcc == "KNCM")
+                        mcnkOffsets.Add(i);
+                    int next = i + 8 + sz;
+                    if (next <= i) break;
+                    i = next;
+                }
+                Console.WriteLine($"[Split ADT] Found {mcnkOffsets.Count} MCNK offsets via sequential scan for {tileName}");
             }
             
-            var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mhdrStart + mcinOff);
-            var mcnkOffsets = mcin.GetMcnkOffsets();
-            
-            Console.WriteLine($"[DEBUG] Found {mcnkOffsets.Count} MCNK offsets via MCIN for {tileName}");
-            
             CollectTopLevelChunkData(adtBytes, textures, rootM2Names, rootWmoNames, ref mh2oData, ref rootMddfRaw, ref rootModfRaw);
+
+            // Split-ADT: parse _tex0 for texture names and per-chunk layer/alpha data
+            Dictionary<int, WoWMapConverter.Core.Formats.LichKing.Mcnk>? texMcnkByChunkIndex = null;
+            if (texBytes is { Length: > 16 })
+            {
+                // Get MTEX from _tex0 (in split-ADT, texture names live here)
+                var tex0Textures = new List<string>();
+                byte[]? ignoreMh2o = null;
+                byte[]? ignoreMddf = null;
+                byte[]? ignoreModf = null;
+                CollectTopLevelChunkData(texBytes, tex0Textures, null, null, ref ignoreMh2o, ref ignoreMddf, ref ignoreModf);
+                if (tex0Textures.Count > 0 && textures.Count == 0)
+                {
+                    textures.AddRange(tex0Textures);
+                    Console.WriteLine($"[Split ADT] Loaded {tex0Textures.Count} textures from _tex0 for {tileName}");
+                }
+
+                // Build MCNK index map from _tex0 for per-chunk layer data
+                texMcnkByChunkIndex = new Dictionary<int, WoWMapConverter.Core.Formats.LichKing.Mcnk>();
+                var texOffsets = new List<int>();
+                for (int i = 0; i + 8 <= texBytes.Length;)
+                {
+                    string fcc = System.Text.Encoding.ASCII.GetString(texBytes, i, 4);
+                    int sz = BitConverter.ToInt32(texBytes, i + 4);
+                    if (sz < 0 || i + 8 + sz > texBytes.Length) break;
+                    if (fcc == "KNCM")
+                        texOffsets.Add(i);
+                    int next = i + 8 + sz;
+                    if (next <= i) break;
+                    i = next;
+                }
+
+                // Cata+ _tex0 MCNK chunks are headerless — sub-chunks start at offset 0
+                var tex0ParseOptions = new WoWMapConverter.Core.Formats.LichKing.Mcnk.ParseOptions { SkipHeader = true };
+                for (int ci = 0; ci < Math.Min(256, texOffsets.Count); ci++)
+                {
+                    int off = texOffsets[ci];
+                    if (off + 8 > texBytes.Length) continue;
+                    int mcnkSize = BitConverter.ToInt32(texBytes, off + 4);
+                    if (mcnkSize <= 0 || off + 8 + mcnkSize > texBytes.Length) continue;
+                    var mcnkBody = new byte[mcnkSize];
+                    Array.Copy(texBytes, off + 8, mcnkBody, 0, mcnkSize);
+                    try
+                    {
+                        var texMcnk = new WoWMapConverter.Core.Formats.LichKing.Mcnk(mcnkBody, tex0ParseOptions);
+                        texMcnkByChunkIndex[ci] = texMcnk;
+                    }
+                    catch { /* skip unparseable tex0 chunks */ }
+                }
+                Console.WriteLine($"[Split ADT] Parsed {texMcnkByChunkIndex.Count} texture MCNK chunks from _tex0 for {tileName}");
+            }
 
             IReadOnlyList<string> m2NamesForPlacements = rootM2Names;
             IReadOnlyList<string> wmoNamesForPlacements = rootWmoNames;
@@ -1308,18 +1433,24 @@ public class VlmDatasetExporter
                         heights.Add(new VlmChunkHeights(chunkIndex, absHeights));
                     }
 
-                    // 3. Layers & Alpha Maps
-                    var layers = new List<VlmTextureLayer>();
-                    if (mcnk.TextureLayers != null)
+                    // 3. Layers & Alpha Maps — use _tex0 MCNK if split-ADT
+                    var layerSource = mcnk;
+                    if (texMcnkByChunkIndex != null && texMcnkByChunkIndex.TryGetValue(chunkIndex, out var texMcnk))
                     {
-                        foreach (var layer in mcnk.TextureLayers)
+                        layerSource = texMcnk;
+                    }
+                    
+                    var layers = new List<VlmTextureLayer>();
+                    if (layerSource.TextureLayers != null)
+                    {
+                        foreach (var layer in layerSource.TextureLayers)
                         {
                             string texPath = ((int)layer.TextureId) < textures.Count ? textures[(int)layer.TextureId] : "";
                             
                             byte[]? alphaInfo = null;
-                            if (mcnk.AlphaMaps != null)
+                            if (layerSource.AlphaMaps != null)
                             {
-                                alphaInfo = mcnk.AlphaMaps.GetAlphaMapForLayer(layer, false);
+                                alphaInfo = layerSource.AlphaMaps.GetAlphaMapForLayer(layer, false);
                             }
 
                             layers.Add(new VlmTextureLayer(
@@ -1359,10 +1490,11 @@ public class VlmDatasetExporter
                         chunkLayers.Add(new VlmChunkLayers(chunkIndex, layers.ToArray(), null, normalsArray, mccvColors, areaId, chunkFlags));
                     }
 
-                    // 4. Shadows (MCSH)
-                    if (mcnk.McshData != null && mcnk.McshData.Length == 512)
+                    // 4. Shadows (MCSH) — prefer _tex0 MCNK shadow if base has none (matches MdxViewer)
+                    var shadowSource = mcnk.McshData ?? layerSource.McshData;
+                    if (shadowSource != null && shadowSource.Length == 512)
                     {
-                        shadowMapData[chunkIndex] = mcnk.McshData;
+                        shadowMapData[chunkIndex] = shadowSource;
                     }
 
                     // 5. Early LK/legacy liquids can still be stored as per-chunk MCLQ.
@@ -1458,6 +1590,8 @@ public class VlmDatasetExporter
                 LiquidMinHeight: 0f,
                 LiquidMaxHeight: 0f,
                 NoLiquidMinimapPath: null,
+                ObjectVisibilityMaskPath: null,
+                NoObjectMinimapPath: null,
                 Textures: textures,
                 ChunkLayers: chunkLayers.ToArray(),
                 Liquids: liquids.Count > 0 ? liquids.ToArray() : null,
@@ -1891,6 +2025,12 @@ public class VlmDatasetExporter
         candidates.Add($"World/Minimaps/{mapName}/map{x}_{y}.blp");
         candidates.Add($"Textures/Minimap/{mapName}_{x2}_{y2}.blp");
         candidates.Add($"Textures/Minimap/{mapName}_{x}_{y}.blp");
+
+        // 5. Pre-converted PNG variants (minimaps already converted from BLP)
+        candidates.Add($"World/Textures/Minimap/{mapName}_{x}_{y}.png");
+        candidates.Add($"World/Textures/Minimap/{mapName}_{x2}_{y2}.png");
+        candidates.Add($"Textures/Minimap/{mapName}_{x}_{y}.png");
+        candidates.Add($"Textures/Minimap/{mapName}_{x2}_{y2}.png");
 
         // PRIORITY 1: Check MD5 Index for ANY candidate
         bool debugTile = (x == 18 && y == 10) || (x == 44 && y == 26);  // Only debug specific tiles
@@ -2435,11 +2575,239 @@ public class VlmDatasetExporter
         return ms.ToArray();
     }
 
+    private static byte[] BuildObjectVisibilityMask(VlmTerrainData terrainData, int width, int height)
+    {
+        if (width <= 0 || height <= 0 || terrainData.Objects.Count == 0)
+            return Array.Empty<byte>();
+
+        using Image<L8> objectMask = new(width, height);
+        bool hasAnyCoverage = false;
+        var projectedWmoObjects = new Dictionary<uint, (int CenterX, int CenterY, int Radius)>();
+
+        foreach (VlmObjectPlacement obj in terrainData.Objects)
+        {
+            if (!obj.Category.Contains("wmo", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (!TryProjectObjectToTilePixel(obj, terrainData.AdtTile, width, height, out int centerX, out int centerY))
+                continue;
+
+            int radius = EstimateObjectRadiusPixels(obj, width, height);
+            if (radius <= 0)
+                continue;
+
+            projectedWmoObjects[obj.UniqueId] = (centerX, centerY, radius);
+        }
+
+        if (terrainData.ShadowAnalysis != null && projectedWmoObjects.Count > 0)
+        {
+            float scaleX = width / 1024f;
+            float scaleY = height / 1024f;
+
+            foreach (VlmChunkShadowAnalysis chunk in terrainData.ShadowAnalysis)
+            {
+                int chunkX = chunk.ChunkIndex % 16;
+                int chunkY = chunk.ChunkIndex / 16;
+
+                foreach (VlmShadowRegion region in chunk.Regions)
+                {
+                    if (region.CandidateObjectIds.Length == 0)
+                        continue;
+
+                    if (region.BoundingBoxMinPixels.Length < 2 || region.BoundingBoxMaxPixels.Length < 2)
+                        continue;
+
+                    int x0Shadow = (chunkX * 64) + region.BoundingBoxMinPixels[0];
+                    int y0Shadow = (chunkY * 64) + region.BoundingBoxMinPixels[1];
+                    int x1Shadow = (chunkX * 64) + region.BoundingBoxMaxPixels[0];
+                    int y1Shadow = (chunkY * 64) + region.BoundingBoxMaxPixels[1];
+
+                    int x0 = Math.Clamp((int)MathF.Floor(x0Shadow * scaleX), 0, width - 1);
+                    int y0 = Math.Clamp((int)MathF.Floor(y0Shadow * scaleY), 0, height - 1);
+                    int x1 = Math.Clamp((int)MathF.Ceiling((x1Shadow + 1) * scaleX), 0, width);
+                    int y1 = Math.Clamp((int)MathF.Ceiling((y1Shadow + 1) * scaleY), 0, height);
+
+                    if (x1 <= x0 || y1 <= y0)
+                        continue;
+
+                    // Keep shadow-derived masking local to each projected WMO footprint.
+                    // This avoids wiping large terrain regions when a shadow region is broad.
+                    foreach (uint candidateObjectId in region.CandidateObjectIds)
+                    {
+                        if (!projectedWmoObjects.TryGetValue(candidateObjectId, out var projected))
+                            continue;
+
+                        int localRadius = Math.Max(4, projected.Radius * 2);
+                        int localX0 = Math.Max(0, projected.CenterX - localRadius);
+                        int localY0 = Math.Max(0, projected.CenterY - localRadius);
+                        int localX1 = Math.Min(width, projected.CenterX + localRadius + 1);
+                        int localY1 = Math.Min(height, projected.CenterY + localRadius + 1);
+
+                        int clippedX0 = Math.Max(x0, localX0);
+                        int clippedY0 = Math.Max(y0, localY0);
+                        int clippedX1 = Math.Min(x1, localX1);
+                        int clippedY1 = Math.Min(y1, localY1);
+
+                        if (clippedX1 <= clippedX0 || clippedY1 <= clippedY0)
+                            continue;
+
+                        FillMaskRectangle(objectMask, clippedX0, clippedY0, clippedX1, clippedY1);
+                        hasAnyCoverage = true;
+                    }
+                }
+            }
+        }
+
+        foreach ((int centerX, int centerY, int radius) in projectedWmoObjects.Values)
+        {
+            DrawFilledCircle(objectMask, centerX, centerY, radius);
+            hasAnyCoverage = true;
+        }
+
+        if (!hasAnyCoverage)
+            return Array.Empty<byte>();
+
+        using MemoryStream ms = new();
+        objectMask.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
+    private static void FillMaskRectangle(Image<L8> image, int minX, int minY, int maxXExclusive, int maxYExclusive)
+    {
+        for (int y = minY; y < maxYExclusive; y++)
+        {
+            for (int x = minX; x < maxXExclusive; x++)
+                image[x, y] = new L8(255);
+        }
+    }
+
+    private static void DrawFilledCircle(Image<L8> image, int centerX, int centerY, int radius)
+    {
+        if (radius <= 0)
+            return;
+
+        int minX = Math.Max(0, centerX - radius);
+        int maxX = Math.Min(image.Width - 1, centerX + radius);
+        int minY = Math.Max(0, centerY - radius);
+        int maxY = Math.Min(image.Height - 1, centerY + radius);
+        int radiusSquared = radius * radius;
+
+        for (int y = minY; y <= maxY; y++)
+        {
+            int dy = y - centerY;
+            for (int x = minX; x <= maxX; x++)
+            {
+                int dx = x - centerX;
+                if ((dx * dx) + (dy * dy) > radiusSquared)
+                    continue;
+
+                image[x, y] = new L8(255);
+            }
+        }
+    }
+
+    private static int EstimateObjectRadiusPixels(VlmObjectPlacement obj, int width, int height)
+    {
+        float pixelsPerWorld = MathF.Min(width, height) / TileSize;
+        float scale = float.IsFinite(obj.Scale) && obj.Scale > 0f ? obj.Scale : 1f;
+
+        if (obj.BoundsMin != null && obj.BoundsMax != null && obj.BoundsMin.Length >= 3 && obj.BoundsMax.Length >= 3)
+        {
+            float halfWidthWorld = MathF.Abs(obj.BoundsMax[0] - obj.BoundsMin[0]) * 0.5f * scale;
+            float halfDepthWorld = MathF.Abs(obj.BoundsMax[2] - obj.BoundsMin[2]) * 0.5f * scale;
+            float radiusWorld = MathF.Max(halfWidthWorld, halfDepthWorld);
+            return Math.Max(2, (int)MathF.Round(radiusWorld * pixelsPerWorld));
+        }
+
+        if (obj.BoundsMin != null && obj.BoundsMax != null && obj.BoundsMin.Length >= 2 && obj.BoundsMax.Length >= 2)
+        {
+            float halfWidthWorld = MathF.Abs(obj.BoundsMax[0] - obj.BoundsMin[0]) * 0.5f * scale;
+            float halfDepthWorld = MathF.Abs(obj.BoundsMax[1] - obj.BoundsMin[1]) * 0.5f * scale;
+            float radiusWorld = MathF.Max(halfWidthWorld, halfDepthWorld);
+            return Math.Max(2, (int)MathF.Round(radiusWorld * pixelsPerWorld));
+        }
+
+        float baseRadiusWorld = obj.Category.Contains("wmo", StringComparison.OrdinalIgnoreCase) ? 6f : 3f;
+        return Math.Max(2, (int)MathF.Round(baseRadiusWorld * scale * pixelsPerWorld));
+    }
+
+    private static bool TryProjectObjectToTilePixel(
+        VlmObjectPlacement obj,
+        string adtTile,
+        int width,
+        int height,
+        out int centerX,
+        out int centerY)
+    {
+        centerX = 0;
+        centerY = 0;
+
+        if (!TryParseTileCoordinates(adtTile, out int tileX, out int tileY))
+            return false;
+
+        List<(float U, float V)> candidates = new();
+        if (MathF.Abs(obj.X) < 2f && MathF.Abs(obj.Y) < 2f)
+        {
+            candidates.Add((((obj.Y + 1f) * 0.5f), ((obj.X + 1f) * 0.5f)));
+        }
+
+        candidates.AddRange(BuildTileUvCandidates(obj.X, obj.Z, tileX, tileY));
+        candidates.AddRange(BuildTileUvCandidates(obj.X, obj.Y, tileX, tileY));
+
+        if (candidates.Count == 0)
+            return false;
+
+        (float U, float V) best = candidates[0];
+        float bestOverflow = float.PositiveInfinity;
+
+        foreach ((float u, float v) in candidates)
+        {
+            float overflow =
+                MathF.Max(0f, -u) + MathF.Max(0f, u - 1f) +
+                MathF.Max(0f, -v) + MathF.Max(0f, v - 1f);
+            if (overflow < bestOverflow)
+            {
+                best = (u, v);
+                bestOverflow = overflow;
+                if (overflow <= 0.000001f)
+                    break;
+            }
+        }
+
+        if (best.U < -ObjectMaskMarginTiles || best.U > 1f + ObjectMaskMarginTiles ||
+            best.V < -ObjectMaskMarginTiles || best.V > 1f + ObjectMaskMarginTiles)
+        {
+            return false;
+        }
+
+        centerX = Math.Clamp((int)MathF.Round(Math.Clamp(best.U, 0f, 1f) * (width - 1)), 0, width - 1);
+        centerY = Math.Clamp((int)MathF.Round(Math.Clamp(best.V, 0f, 1f) * (height - 1)), 0, height - 1);
+        return true;
+    }
+
+    private static IEnumerable<(float U, float V)> BuildTileUvCandidates(float worldA, float worldB, int tileX, int tileY)
+    {
+        yield return ((worldA / TileSize) - tileX, (worldB / TileSize) - tileY);
+        yield return (((MapOrigin - worldB) / TileSize) - tileX, ((MapOrigin - worldA) / TileSize) - tileY);
+    }
+
+    private static bool TryParseTileCoordinates(string adtTile, out int tileX, out int tileY)
+    {
+        tileX = 0;
+        tileY = 0;
+
+        string[] parts = adtTile.Split('_');
+        if (parts.Length < 3)
+            return false;
+
+        return int.TryParse(parts[^2], out tileX) && int.TryParse(parts[^1], out tileY);
+    }
+
     /// <summary>
-    /// Produces a synthesized minimap where liquid-covered pixels are replaced with estimated
-    /// terrain color sampled from surrounding non-liquid pixels.
+    /// Produces a synthesized minimap where masked pixels are replaced with estimated
+    /// terrain color sampled from surrounding unmasked pixels.
     /// </summary>
-    private static byte[] SynthesizeNoLiquidMinimap(string sourceMinimapPath, byte[] liquidMaskPngBytes)
+    private static byte[] SynthesizeMaskedMinimap(string sourceMinimapPath, byte[] maskPngBytes)
     {
         try
         {
@@ -2447,7 +2815,7 @@ public class VlmDatasetExporter
             int w = srcImage.Width;
             int h = srcImage.Height;
 
-            using var maskStream = new MemoryStream(liquidMaskPngBytes);
+            using var maskStream = new MemoryStream(maskPngBytes);
             using var maskImage = Image.Load<L8>(maskStream);
             if (maskImage.Width != w || maskImage.Height != h)
                 maskImage.Mutate(ctx => ctx.Resize(w, h));
@@ -2661,6 +3029,13 @@ public class VlmDatasetExporter
     {
         try
         {
+            // If source is already a PNG, just copy it to the output location
+            if (blpPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase) && File.Exists(blpPath))
+            {
+                File.Copy(blpPath, pngPath, overwrite: true);
+                return true;
+            }
+
             byte[]? blpData = null;
             
             if (blpPath.StartsWith("MPQ:"))

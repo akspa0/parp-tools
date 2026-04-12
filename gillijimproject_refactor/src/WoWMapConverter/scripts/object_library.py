@@ -103,31 +103,40 @@ class ObjectLibrary:
         
         # Expecting directory structure: library_dir/ObjectName/crop.png
         for root, dirs, files in os.walk(self.library_dir):
-             for dir_name in dirs:
-                  obj_dir = Path(root) / dir_name
-                  # Look for representative crop
-                  crop_path = obj_dir / "crop_0.png"
-                  if crop_path.exists():
-                       try:
-                            img = Image.open(crop_path).convert("RGB")
-                            emb = self.compute_embedding(img)
-                            
-                            entry = ObjectEntry(
-                                 name=dir_name,
-                                 asset_path=f"World/wmo/{dir_name}.wmo", # Placeholder
-                                 designkit="Unknown",
-                                 object_type="wmo",
-                                 embedding=emb,
-                                 instances=[]
-                            )
-                            self.entries[dir_name] = entry
-                            embeddings.append(emb)
-                            count += 1
-                       except Exception as e:
-                            print(f"Failed to process object {dir_name}: {e}")
-                  
-                  if count >= limit: break
-             if count >= limit: break
+            for dir_name in dirs:
+                obj_dir = Path(root) / dir_name
+                # Look for representative crop (legacy crop_0.png or first png in folder)
+                crop_path = obj_dir / "crop_0.png"
+                if not crop_path.exists():
+                    png_candidates = sorted(
+                        p for p in obj_dir.glob("*.png")
+                        if not p.name.lower().endswith("_mask.png")
+                    )
+                    crop_path = png_candidates[0] if png_candidates else crop_path
+
+                if crop_path.exists():
+                    try:
+                        img = Image.open(crop_path).convert("RGB")
+                        emb = self.compute_embedding(img)
+
+                        entry = ObjectEntry(
+                            name=dir_name,
+                            asset_path=f"World/wmo/{dir_name}.wmo",  # Placeholder
+                            designkit="Unknown",
+                            object_type="wmo",
+                            embedding=emb,
+                            instances=[]
+                        )
+                        self.entries[dir_name] = entry
+                        embeddings.append(emb)
+                        count += 1
+                    except Exception as e:
+                        print(f"Failed to process object {dir_name}: {e}")
+
+                if count >= limit:
+                    break
+            if count >= limit:
+                break
 
         if embeddings:
             embeddings_np = np.vstack(embeddings).astype('float32')
@@ -135,4 +144,4 @@ class ObjectLibrary:
             self.index.add(embeddings_np)
             print(f"Indexed {len(embeddings)} objects.")
         else:
-             print("No objects found to index.")
+            print("No objects found to index.")

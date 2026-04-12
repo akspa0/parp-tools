@@ -21,13 +21,13 @@ import argparse
 import json
 import shutil
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from PIL import Image
-from scipy.ndimage import gaussian_filter
 from torchvision import transforms
 
 try:
@@ -44,6 +44,70 @@ except ImportError:
 
 
 TILE_SIZE = 533.33333
+MAP_ORIGIN = 32.0 * TILE_SIZE
+MASK_CONTEXT_MARGIN_TILES = 0.20
+MASK_MAX_ABOVE_TERRAIN = 8.0
+MASK_MIN_BELOW_TERRAIN = -3.0
+_SCIPY_GAUSSIAN_FILTER = None
+_SCIPY_IMPORT_ATTEMPTED = False
+
+
+def tile_uv_candidates(world_a: float, world_b: float, tile_x: int, tile_y: int) -> List[Tuple[float, float]]:
+    return [
+        (world_a / TILE_SIZE - float(tile_x), world_b / TILE_SIZE - float(tile_y)),
+        ((MAP_ORIGIN - world_b) / TILE_SIZE - float(tile_x), (MAP_ORIGIN - world_a) / TILE_SIZE - float(tile_y)),
+    ]
+
+
+def apply_gaussian_smoothing(heightmap: np.ndarray, sigma: float) -> np.ndarray:
+    global _SCIPY_GAUSSIAN_FILTER
+    global _SCIPY_IMPORT_ATTEMPTED
+
+    if sigma <= 0:
+        return heightmap
+
+    if not _SCIPY_IMPORT_ATTEMPTED:
+        _SCIPY_IMPORT_ATTEMPTED = True
+        try:
+            from scipy.ndimage import gaussian_filter as _imported_gaussian_filter
+
+            _SCIPY_GAUSSIAN_FILTER = _imported_gaussian_filter
+        except Exception:
+            _SCIPY_GAUSSIAN_FILTER = None
+
+    if _SCIPY_GAUSSIAN_FILTER is not None:
+        return _SCIPY_GAUSSIAN_FILTER(heightmap, sigma=sigma)
+
+    # Fallback for environments where SciPy is unavailable or ABI-incompatible.
+    radius = max(1, int(round(3.0 * sigma)))
+    coords = torch.arange(-radius, radius + 1, dtype=torch.float32)
+    kernel = torch.exp(-(coords ** 2) / (2.0 * sigma * sigma))
+    kernel = kernel / kernel.sum()
+
+    tensor = torch.from_numpy(heightmap.astype(np.float32, copy=False)).unsqueeze(0).unsqueeze(0)
+    kernel_x = kernel.view(1, 1, 1, -1)
+    kernel_y = kernel.view(1, 1, -1, 1)
+    tensor = torch.nn.functional.conv2d(tensor, kernel_x, padding=(0, radius))
+    tensor = torch.nn.functional.conv2d(tensor, kernel_y, padding=(radius, 0))
+    return tensor.squeeze(0).squeeze(0).numpy()
+
+
+def load_heightmap_16bit(path: Path, target_size: int = OUTPUT_SIZE) -> torch.Tensor:
+    image = Image.open(path)
+    if image.mode == "I;16":
+        array = np.asarray(image, dtype=np.float32) / 65535.0
+    elif image.mode == "I":
+        array = np.asarray(image, dtype=np.float32)
+        array = (array - array.min()) / (array.max() - array.min() + 1e-8)
+    else:
+        array = np.asarray(image.convert("L"), dtype=np.float32) / 255.0
+
+    if array.shape[0] != target_size or array.shape[1] != target_size:
+        tensor = torch.from_numpy(array).unsqueeze(0).unsqueeze(0)
+        tensor = F.interpolate(tensor, size=(target_size, target_size), mode="bilinear", align_corners=False)
+        return tensor.squeeze(0)
+
+    return torch.from_numpy(array).unsqueeze(0)
 
 
 class V7InferenceEngine:
@@ -75,7 +139,17 @@ class V7InferenceEngine:
             payload = json.load(handle)
         terrain = payload.get("terrain_data", {})
 
-        minimap_path = dataset_root / "images" / f"{tile_name}.png"
+        minimap_rel = payload.get("image") or terrain.get("no_object_minimap")
+        if minimap_rel:
+            minimap_path = dataset_root / str(minimap_rel)
+        else:
+            minimap_path = dataset_root / "images" / f"{tile_name}.png"
+
+        if not minimap_path.exists() and terrain.get("no_object_minimap"):
+            fallback_minimap = terrain.get("no_object_minimap")
+            if fallback_minimap:
+                minimap_path = dataset_root / str(fallback_minimap)
+
         normalmap_rel = terrain.get("normalmap")
         if not normalmap_rel:
             raise FileNotFoundError(f"Missing normalmap reference for {tile_name}")
@@ -116,7 +190,15 @@ class V7InferenceEngine:
             if liquid_height_path.exists():
                 liquid_height_prior = load_heightmap_16bit(liquid_height_path, OUTPUT_SIZE) * liquid_mask
 
-        object_mask = self._build_object_mask(terrain.get("objects"))
+        tile_x, tile_y = parse_tile_coords(tile_name)
+        object_mask = self._build_object_mask(terrain.get("objects"), tile_x, tile_y, terrain.get("wdl_heights"))
+        pm4_mask = self._load_optional_binary_mask(
+            dataset_root,
+            terrain,
+            keys=["object_visibility_mask_cv2", "object_visibility_mask", "pm4_mask", "pm4_object_mask", "collision_mask"],
+        )
+        object_mask = torch.maximum(object_mask, pm4_mask)
+
         input_tensor = torch.cat(
             [
                 minimap_tensor,
@@ -159,40 +241,166 @@ class V7InferenceEngine:
         image = image.resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.BILINEAR)
         return self.to_tensor(image)
 
-    def _build_object_mask(self, objects: Optional[Sequence[Dict[str, object]]]) -> torch.Tensor:
+    def _load_optional_binary_mask(self, dataset_root: Path, terrain: Dict[str, object], keys: Sequence[str]) -> torch.Tensor:
+        for key in keys:
+            rel = terrain.get(key)
+            if not rel:
+                continue
+            candidate = dataset_root / str(rel)
+            if not candidate.exists():
+                continue
+            mask_image = Image.open(candidate).convert("L").resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.NEAREST)
+            return (self.to_tensor(mask_image) > 0.1).float()
+
+        return torch.zeros((1, OUTPUT_SIZE, OUTPUT_SIZE), dtype=torch.float32)
+
+    def _build_wdl_height_sampler(
+        self,
+        wdl_data: Optional[Dict[str, object]],
+    ) -> Optional[Callable[[float, float, Optional[float]], Optional[float]]]:
+        if not wdl_data:
+            return None
+
+        outer = np.asarray(wdl_data.get("outer_17", []), dtype=np.float32)
+        if len(outer) != 289 or not np.all(np.isfinite(outer)):
+            return None
+
+        grid = outer.reshape(17, 17)
+
+        def bilinear(sample_x: float, sample_y: float) -> float:
+            x = float(np.clip(sample_x, 0.0, 16.0))
+            y = float(np.clip(sample_y, 0.0, 16.0))
+            x0 = int(np.floor(x))
+            y0 = int(np.floor(y))
+            x1 = min(16, x0 + 1)
+            y1 = min(16, y0 + 1)
+            tx = x - x0
+            ty = y - y0
+
+            v00 = float(grid[y0, x0])
+            v01 = float(grid[y1, x0])
+            v10 = float(grid[y0, x1])
+            v11 = float(grid[y1, x1])
+            return (
+                v00 * (1.0 - tx) * (1.0 - ty)
+                + v10 * tx * (1.0 - ty)
+                + v01 * (1.0 - tx) * ty
+                + v11 * tx * ty
+            )
+
+        def sample(local_x: float, local_y: float, reference_height: Optional[float] = None) -> Optional[float]:
+            gx = float(np.clip(local_x, 0.0, 1.0)) * 16.0
+            gy = float(np.clip(local_y, 0.0, 1.0)) * 16.0
+
+            height_xy = bilinear(gx, gy)
+            height_yx = bilinear(gy, gx)
+
+            if reference_height is None or not np.isfinite(reference_height):
+                return height_xy
+
+            if abs(reference_height - height_yx) < abs(reference_height - height_xy):
+                return height_yx
+
+            return height_xy
+
+        return sample
+
+    def _build_object_mask(
+        self,
+        objects: Optional[Sequence[Dict[str, object]]],
+        tile_x: int,
+        tile_y: int,
+        wdl_heights: Optional[Dict[str, object]],
+    ) -> torch.Tensor:
         object_mask = torch.zeros((1, OUTPUT_SIZE, OUTPUT_SIZE), dtype=torch.float32)
         if not objects:
             return object_mask
 
         image = np.zeros((OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.float32)
+        pixels_per_world = OUTPUT_SIZE / TILE_SIZE
+        wdl_sampler = self._build_wdl_height_sampler(wdl_heights)
         for obj in objects:
             pos_x = float(obj.get("x", obj.get("pos_x", 0.0)))
             pos_y = float(obj.get("y", obj.get("pos_y", 0.0)))
+            pos_z = float(obj.get("z", obj.get("pos_z", pos_y)))
             scale = float(obj.get("scale", 1.0))
+            if not np.isfinite(scale) or scale <= 0.0:
+                scale = 1.0
 
+            candidate_uvs: List[Tuple[float, float]] = []
+            if abs(pos_x) < 2 and abs(pos_y) < 2:
+                # Legacy fallback for normalized tile-local coordinates.
+                candidate_uvs.append(((pos_y + 1.0) * 0.5, (pos_x + 1.0) * 0.5))
+
+            candidate_uvs.extend(tile_uv_candidates(pos_x, pos_z, tile_x, tile_y))
+            if np.isfinite(pos_y):
+                candidate_uvs.extend(tile_uv_candidates(pos_x, pos_y, tile_x, tile_y))
+
+            local_x = 0.0
+            local_y = 0.0
+            best_overflow = float("inf")
+            for cand_x, cand_y in candidate_uvs:
+                overflow = (
+                    max(0.0, -cand_x)
+                    + max(0.0, cand_x - 1.0)
+                    + max(0.0, -cand_y)
+                    + max(0.0, cand_y - 1.0)
+                )
+                if overflow < best_overflow:
+                    best_overflow = overflow
+                    local_x = cand_x
+                    local_y = cand_y
+                if overflow <= 1e-6:
+                    break
+
+            if (
+                local_x < -MASK_CONTEXT_MARGIN_TILES
+                or local_x > 1.0 + MASK_CONTEXT_MARGIN_TILES
+                or local_y < -MASK_CONTEXT_MARGIN_TILES
+                or local_y > 1.0 + MASK_CONTEXT_MARGIN_TILES
+            ):
+                continue
+
+            center_x = int(round(local_x * (OUTPUT_SIZE - 1)))
+            center_y = int(round(local_y * (OUTPUT_SIZE - 1)))
+
+            category = str(obj.get("category", "")).lower()
             bounds_min = obj.get("bounds_min")
             bounds_max = obj.get("bounds_max")
-            if bounds_min and bounds_max and len(bounds_min) >= 2 and len(bounds_max) >= 2:
-                half_width = abs(float(bounds_max[0]) - float(bounds_min[0])) * 0.5 * scale
-                half_depth = abs(float(bounds_max[1]) - float(bounds_min[1])) * 0.5 * scale
-                pixels_per_unit = OUTPUT_SIZE / TILE_SIZE
-                radius_x = max(1, int(half_width * pixels_per_unit))
-                radius_y = max(1, int(half_depth * pixels_per_unit))
+            if bounds_min and bounds_max and len(bounds_min) >= 3 and len(bounds_max) >= 3:
+                half_width_world = abs(float(bounds_max[0]) - float(bounds_min[0])) * 0.5 * scale
+                half_depth_world = abs(float(bounds_max[2]) - float(bounds_min[2])) * 0.5 * scale
+                radius_x = max(1, int(round(half_width_world * pixels_per_world)))
+                radius_y = max(1, int(round(half_depth_world * pixels_per_world)))
+            elif bounds_min and bounds_max and len(bounds_min) >= 2 and len(bounds_max) >= 2:
+                half_width_world = abs(float(bounds_max[0]) - float(bounds_min[0])) * 0.5 * scale
+                half_depth_world = abs(float(bounds_max[1]) - float(bounds_min[1])) * 0.5 * scale
+                radius_x = max(1, int(round(half_width_world * pixels_per_world)))
+                radius_y = max(1, int(round(half_depth_world * pixels_per_world)))
             else:
-                radius_x = max(1, int(5 * scale))
+                base_radius_world = 3.0 * scale
+                if "wmo" in category:
+                    base_radius_world *= 2.0
+                radius_x = max(1, int(round(base_radius_world * pixels_per_world)))
                 radius_y = radius_x
 
-            if abs(pos_x) < 2 and abs(pos_y) < 2:
-                normalized_x = int((pos_x + 1) * 0.5 * OUTPUT_SIZE)
-                normalized_y = int((pos_y + 1) * 0.5 * OUTPUT_SIZE)
-            else:
-                normalized_x = int((pos_x / TILE_SIZE) * OUTPUT_SIZE) % OUTPUT_SIZE
-                normalized_y = int((pos_y / TILE_SIZE) * OUTPUT_SIZE) % OUTPUT_SIZE
+            is_wmo = "wmo" in category
+            if not is_wmo:
+                continue
 
-            x1 = max(0, normalized_x - radius_x)
-            y1 = max(0, normalized_y - radius_y)
-            x2 = min(OUTPUT_SIZE, normalized_x + radius_x)
-            y2 = min(OUTPUT_SIZE, normalized_y + radius_y)
+            if np.isfinite(pos_y) and wdl_sampler is not None:
+                terrain_height = wdl_sampler(local_x, local_y, pos_y)
+                if terrain_height is not None and np.isfinite(terrain_height):
+                    delta = float(pos_y - terrain_height)
+                    if delta < MASK_MIN_BELOW_TERRAIN or delta > MASK_MAX_ABOVE_TERRAIN:
+                        continue
+
+            x1 = max(0, center_x - radius_x)
+            y1 = max(0, center_y - radius_y)
+            x2 = min(OUTPUT_SIZE, center_x + radius_x + 1)
+            y2 = min(OUTPUT_SIZE, center_y + radius_y + 1)
+            if x1 >= x2 or y1 >= y2:
+                continue
             image[y1:y2, x1:x2] = 1.0
 
         return torch.from_numpy(image).unsqueeze(0)
@@ -260,7 +468,7 @@ class V7InferenceEngine:
         normalmap = input_tensor[0, 3:6].cpu()
         wdl = input_tensor[0, 6:7].cpu().repeat(3, 1, 1)
         water = input_tensor[0, 9:10].cpu().repeat(3, 1, 1) * torch.tensor([0.0, 0.0, 1.0]).view(3, 1, 1)
-        objects = input_tensor[0, 10:11].cpu().repeat(3, 1, 1) * torch.tensor([1.0, 0.5, 0.0]).view(3, 1, 1)
+        objects = input_tensor[0, 11:12].cpu().repeat(3, 1, 1) * torch.tensor([1.0, 0.5, 0.0]).view(3, 1, 1)
         prediction = predicted_heightmap[0, 0:1].cpu()
 
         mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
@@ -337,7 +545,7 @@ def run_batch_inference(
             if abs(z_scale - 1.0) > 1e-6:
                 heightmap_world *= z_scale
             if smooth_sigma > 0:
-                heightmap_world = gaussian_filter(heightmap_world, sigma=smooth_sigma)
+                heightmap_world = apply_gaussian_smoothing(heightmap_world, sigma=smooth_sigma)
             if out_res != OUTPUT_SIZE:
                 resized = Image.fromarray(heightmap_world, mode="F")
                 resized = resized.resize((out_res, out_res), Image.BILINEAR)

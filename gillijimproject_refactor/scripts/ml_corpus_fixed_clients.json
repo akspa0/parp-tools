@@ -3,9 +3,18 @@
   "default_output_root": "i:\\parp\\parp-tools\\output\\ml-corpus",
   "clients": [
     {
+      "client_path": "0.X_Pre-Release_Windows_enUS_0.7.0.3694\\World of Warcraft",
+      "version": "0.7.0.3694",
+      "maps": [
+        "EmeraldDream"
+      ],
+      "generate_depth": false
+    },
+    {
       "client_path": "3.X_Pre-Release_Windows_enUS_3.0.1.8303\\World of Warcraft",
       "version": "3.0.1.8303",
       "maps": [
+        "EmeraldDream",
         "Northrend",
         "PVPZone01",
         "PVPZone02",
@@ -18,7 +27,8 @@
       "client_path": "WoW335\\3.X_Retail_Windows_enUS_3.3.5.12340\\World of Warcraft",
       "version": "3.3.5.12340",
       "maps": [
-        "Azeroth"
+        "Azeroth",
+        "EmeraldDream"
       ],
       "generate_depth": false
     },
@@ -26,7 +36,8 @@
       "client_path": "World of Warcraft Cata beta 11927",
       "version": "4.0.0.11927",
       "maps": [
-        "LostIsles"
+        "LostIsles",
+        "EmeraldDream"
       ],
       "generate_depth": false
     }

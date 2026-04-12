@@ -1,5 +1,35 @@
 # Progress
 
+### Apr 11, 2026 - Hard-blocked quarantined dataset roots on the new CK24 OpenCV mask-refinement path
+
+- honored the explicit do-not-use instruction for `output/ml-corpus/3_3_5_12340_devcopy__UNTRUSTED_DO_NOT_USE`
+- `src/WoWMapConverter/scripts/refine_ck24_object_masks.py` now hard-fails any `--dataset-root` containing `__UNTRUSTED_DO_NOT_USE` (case-insensitive), matching the strict trust-gating behavior already used by active training discovery
+- validation completed:
+	- `python .../refine_ck24_object_masks.py --dataset-root "i:/parp/parp-tools/output/ml-corpus/3_3_5_12340_devcopy__UNTRUSTED_DO_NOT_USE" --dry-run` exits with `Refusing quarantined dataset root...`
+- proof boundary:
+	- this blocks the new CV2 refinement seam from consuming quarantined roots; it does not retroactively relabel historical artifacts that were generated before the guard
+
+### Apr 11, 2026 - Stopped trusting old object-mask assumptions, proved fresh mask gating on small real exports, and resumed V7.3 training on that validated subset
+
+- followed the explicit requirement to validate detection/masking on a few tiles before trusting another training attempt
+- validation and run outcomes:
+	- sampled legacy trusted roots under `output/ml-corpus/...` and confirmed stale object-mask state on checked WMO tiles (`object_visibility_mask` / `no_object_minimap` null) in `output/build-validation/mask-audit/few_tile_mask_check.json`
+	- generated fresh real-data exports with current pipeline:
+		- `output/build-validation/mask-audit/fresh-northrend-12`
+		- `output/build-validation/mask-audit/fresh-lostisles-12`
+	- fresh audit (`output/build-validation/mask-audit/fresh_mask_check.json`) reported:
+		- `24` tiles total, `11` tiles with WMO objects
+		- `8` tiles with non-empty object mask + no-object artifact files
+		- `3` WMO tiles missing artifacts
+	- projection diagnostics on those `3` tiles showed all had out-of-footprint WMO placements (`projectable_in_margin = 0`), so they are not in-tile mask misses
+	- projection-aware pass report (`output/build-validation/mask-audit/fresh_mask_check_projectable.json`) showed `8/8` pass on projectable-WMO tiles
+	- restarted V7.3 on only the fresh validated roots:
+		- `python ... train_v7.py --profile manual --dataset-root fresh-northrend-12 --dataset-root fresh-lostisles-12 --include-map Northrend --include-map LostIsles --epochs 1`
+		- `19` usable samples (`17/2` train/val), one-epoch CUDA smoke finished with best val loss `0.1949`
+- proof boundary:
+	- this is a focused smoke gate and smoke training restart, not full-corpus object-mask signoff across existing `output/ml-corpus/*`
+	- no new automated tests were added; this is real-data audit + smoke training evidence
+
 ### Apr 11, 2026 - Repaired the dead MH2O liquid channel in the active LK exporter and landed the first shared wow-viewer MH2O reader
 
 - followed the direct implementation request after the audit proved current corpora still had 0% effective liquid supervision: the active WotLK exporter branch was creating a liquid list and then returning `Liquids: null`

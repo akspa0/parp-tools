@@ -1,5 +1,22 @@
 # Active Context
 
+## Apr 11, 2026 - Object masking is not trustworthy in older ml-corpus roots; fresh mask-gated smoke exports passed and V7.3 training was restarted on that validated subset
+
+- followed the direct request to stop trusting stale assumptions and prove object masking before resuming training
+- active behavior and proof this session:
+	- trusted legacy roots used in earlier manual training (`output/ml-corpus/...`) were sampled for WMO-bearing tiles and still showed `object_visibility_mask = null` / `no_object_minimap = null` on the checked tiles; this was captured in `output/build-validation/mask-audit/few_tile_mask_check.json`
+	- fresh real-data exports were generated with the current exporter for `Northrend` (`3.0.1.8303`) and `LostIsles` (`4.0.0.11927`) using `--limit 12` each, under:
+		- `output/build-validation/mask-audit/fresh-northrend-12`
+		- `output/build-validation/mask-audit/fresh-lostisles-12`
+	- mask audit on those fresh roots (`output/build-validation/mask-audit/fresh_mask_check.json`) showed 11 tiles with WMO objects, with 8 tiles producing non-empty object mask/no-object artifacts; the 3 misses were investigated and were out-of-footprint placements (no projectable WMO in tile space), not in-tile detection failures
+	- projection-aware gating report (`output/build-validation/mask-audit/fresh_mask_check_projectable.json`) showed `8/8` pass on tiles where at least one WMO projected into tile footprint
+	- V7.3 was restarted on only the fresh validated roots and completed a one-epoch smoke run:
+		- `python .../train_v7.py --profile manual --dataset-root fresh-northrend-12 --dataset-root fresh-lostisles-12 --include-map Northrend --include-map LostIsles --epochs 1`
+		- usable samples: `19` (`17/2` train/val), best validation loss: `0.1949`
+- important boundary:
+	- this is smoke-level mask gating and training proof only on two small fresh roots; it is not full-corpus signoff for all existing `output/ml-corpus/*` roots
+	- old corpus roots should be treated as requiring regeneration/validation for object masking before being trusted in larger runs
+
 ## Apr 11, 2026 - The active LK exporter now materializes MH2O liquids again, and wow-viewer has a first shared root-ADT MH2O reader
 
 - followed the direct correction after the V7 signal audit and the user pushback narrowed the real regression: WotLK or modern `ml-export` was still dropping `terrain_data.liquids` entirely even though the current codebase already had MH2O-aware consumer paths
