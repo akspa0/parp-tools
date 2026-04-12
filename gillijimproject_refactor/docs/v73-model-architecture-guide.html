@@ -157,7 +157,7 @@
 <body>
 
 <h1>WoW Terrain Regressor V7.3</h1>
-<p class="subtitle">12-channel terrain regressor with PatchGAN sharpening — updated Apr 12, 2026 with full trusted-corpus auditing complete and the audited run through epoch 1</p>
+<p class="subtitle">12-channel terrain regressor with PatchGAN sharpening — updated Apr 12, 2026 with full trusted-corpus auditing complete and the audited run finished by early stopping</p>
 
 <!-- Stats overview -->
 <div class="stats-row">
@@ -190,8 +190,8 @@
     <div class="stat-label">Launched Training Roots</div>
   </div>
   <div class="stat-box">
-    <div class="stat-num">0.1530</div>
-    <div class="stat-label">Epoch 1 Val Loss</div>
+    <div class="stat-num">0.1256</div>
+    <div class="stat-label">Best Audited Run Val Loss</div>
   </div>
   <div class="stat-box">
     <div class="stat-num">0.0493</div>
@@ -419,7 +419,7 @@ graph LR
 <!-- Section 6: Preflight -->
 <div class="section">
   <h2>6. Training Execution + Startup Performance</h2>
-  <p class="desc">Current launch settings and epoch-1 status for the active audited run.</p>
+  <p class="desc">Final launch settings and completion stats for the audited run.</p>
 
   <div class="stats-row" style="flex-wrap: wrap;">
     <div class="stat-box">
@@ -455,20 +455,24 @@ graph LR
       <div class="stat-label">GAN Start Epoch</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">0.1740 / 0.1530</div>
-      <div class="stat-label">Epoch 1 Train / Val Loss</div>
+      <div class="stat-num">0.1917 / 0.1594</div>
+      <div class="stat-label">Final Epoch Train / Val Loss</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">3.50</div>
-      <div class="stat-label">Epoch 1 Steps/s</div>
+      <div class="stat-num">4.63</div>
+      <div class="stat-label">Final Epoch Steps/s</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">14.0</div>
-      <div class="stat-label">Epoch 1 Samples/s</div>
+      <div class="stat-num">18.5</div>
+      <div class="stat-label">Final Epoch Samples/s</div>
     </div>
     <div class="stat-box">
-      <div class="stat-num">RUNNING</div>
+      <div class="stat-num">EARLY STOP</div>
       <div class="stat-label">Audited Run Status</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">0.1256</div>
+      <div class="stat-label">Run Best Val Loss</div>
     </div>
   </div>
 </div>
@@ -491,7 +495,8 @@ graph LR
     WoWEdit 3D brush workflow.
     <br><br>
     The strongest completed checkpoint is still the earlier `0.0493` validation-loss
-    baseline. The current audited run completed epoch 1 at `train 0.1740 / val 0.1530`.
+    baseline. The audited run finished by early stopping with best validation loss
+    `0.1256` and final epoch `train 0.1917 / val 0.1594`.
     Brush-pattern discovery is a separate data problem and likely needs its own model.
     <br><br>
     This document describes the architecture and the current audited-training state.
