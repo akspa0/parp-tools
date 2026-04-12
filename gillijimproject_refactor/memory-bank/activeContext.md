@@ -30,6 +30,18 @@
 - current status:
 	- run is active on CUDA with AMP bfloat16 and TF32 on/on, awaiting first post-pivot epoch summary
 
+## Apr 12, 2026 - Fresh full-corpus restart launched from epoch 0 to avoid cross-run architecture/training-setting drift
+
+- accepted the restart rationale after multiple resume/fine-tune experiments stayed above the old best (`0.0493`)
+- stopped the geometry-recovery resume and started a true fresh run with no checkpoint resume in a new folder:
+	- `output/ml-training/v7_3_all_trusted_maps_fresh_20260412`
+	- trusted roots: 31 (quarantine filter still enforced)
+	- `--epochs 16 --learning-rate 8e-5 --disc-learning-rate 5e-5`
+	- `--adversarial-scale 0.20 --start-gan-epoch 6 --disc-every 2 --patience 8`
+	- `--amp-dtype auto --train-workers 4 --val-workers 2 --log-every 5`
+- current status:
+	- run bootstrapped successfully on CUDA (RTX 4070 Ti SUPER), AMP bfloat16, TF32 on/on; training loop is active and awaiting first epoch summary
+
 ## Apr 12, 2026 - V7.3 now has live metric updates and a validated Tensor Core training profile (+8.8% on measured subset)
 
 - followed the request to show live CLI values, verify real GPU usage, and make practical speed improvements before continuing training

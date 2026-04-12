@@ -1349,29 +1349,35 @@ def save_training_preview(model: nn.Module, batch: Dict[str, torch.Tensor], epoc
         targets = batch["target"].to(device)
         predictions, _ = model(inputs)
 
-    rows: List[torch.Tensor] = []
+    rows_global: List[torch.Tensor] = []
+    rows_local: List[torch.Tensor] = []
     sample_count = min(DEFAULT_PREVIEW_COUNT, inputs.shape[0])
     mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
     std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
+    def normalize_for_display(tensor: torch.Tensor) -> torch.Tensor:
+        tensor = tensor - tensor.min()
+        return tensor / (tensor.max() + 1e-6)
 
     for index in range(sample_count):
         minimap = torch.clamp(inputs[index, 0:3].cpu() * std + mean, 0.0, 1.0)
         normal = torch.clamp(inputs[index, 3:6].cpu() * std + mean, 0.0, 1.0)
         water = inputs[index, 9:10].cpu().repeat(3, 1, 1) * torch.tensor([0.0, 0.0, 1.0]).view(3, 1, 1)
-        prediction = predictions[index, 1:2].cpu()
-        target = targets[index, 1:2].cpu()
 
-        def normalize_for_display(tensor: torch.Tensor) -> torch.Tensor:
-            tensor = tensor - tensor.min()
-            return tensor / (tensor.max() + 1e-6)
+        # Global channel (ch 0): absolute height — most readable in early training
+        pred_global = normalize_for_display(predictions[index, 0:1].cpu()).repeat(3, 1, 1)
+        gt_global = normalize_for_display(targets[index, 0:1].cpu()).repeat(3, 1, 1)
+        rows_global.append(torch.cat([minimap, normal, water, pred_global, gt_global], dim=2))
 
-        prediction_viz = normalize_for_display(prediction).repeat(3, 1, 1)
-        target_viz = normalize_for_display(target).repeat(3, 1, 1)
-        rows.append(torch.cat([minimap, normal, water, prediction_viz, target_viz], dim=2))
+        # Local channel (ch 1): within-tile normalized detail
+        pred_local = normalize_for_display(predictions[index, 1:2].cpu()).repeat(3, 1, 1)
+        gt_local = normalize_for_display(targets[index, 1:2].cpu()).repeat(3, 1, 1)
+        rows_local.append(torch.cat([minimap, normal, water, pred_local, gt_local], dim=2))
 
-    grid = torch.cat(rows, dim=1)
-    grid = torch.clamp(grid, 0.0, 1.0)
-    transforms.ToPILImage()(grid).save(output_dir / f"val_epoch_{epoch:04d}.png")
+    global_grid = torch.clamp(torch.cat(rows_global, dim=1), 0.0, 1.0)
+    local_grid = torch.clamp(torch.cat(rows_local, dim=1), 0.0, 1.0)
+    transforms.ToPILImage()(global_grid).save(output_dir / f"val_epoch_{epoch:04d}.png")
+    transforms.ToPILImage()(local_grid).save(output_dir / f"val_epoch_{epoch:04d}_local.png")
 
 
 def checkpoint_metadata_from_args(

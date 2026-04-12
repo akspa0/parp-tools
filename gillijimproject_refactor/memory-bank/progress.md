@@ -30,6 +30,18 @@
 - current status:
 	- run started successfully with CUDA + AMP bfloat16 + TF32 enabled; awaiting first post-pivot epoch summary for quality check
 
+### Apr 12, 2026 - Restarted full trusted-corpus training from epoch 0 with current architecture/settings
+
+- after repeated resume/fine-tune trajectories remained far above the epoch-5 best, switched to a clean restart to remove cross-run optimizer/schedule/history effects
+- launched new run in `output/ml-training/v7_3_all_trusted_maps_fresh_20260412` with no `--resume`
+- launch profile:
+	- `--epochs 16 --learning-rate 8e-5 --disc-learning-rate 5e-5`
+	- `--adversarial-scale 0.20 --start-gan-epoch 6 --disc-every 2 --patience 8`
+	- `--amp-dtype auto --train-workers 4 --val-workers 2 --log-every 5`
+	- 31 trust-filtered dataset roots (no quarantined lineage)
+- current status:
+	- run started cleanly on CUDA and is now the active canonical training trajectory to evaluate against the prior `0.0493` best
+
 ### Apr 12, 2026 - Landed live V7.3 CLI telemetry, explicit Tensor Core controls, and a measured +8.8% throughput gain on the benchmark slice
 
 - implemented training-runtime visibility and performance controls in `src/WoWMapConverter/scripts/train_v7.py`:

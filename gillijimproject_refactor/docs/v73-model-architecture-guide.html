@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WoW Terrain Regressor V7.3 — Model Architecture Guide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #0d1117;
+    color: #c9d1d9;
+    padding: 40px;
+    line-height: 1.6;
+  }
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: #58a6ff;
+    text-align: center;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #8b949e;
+    font-size: 1rem;
+    margin-bottom: 48px;
+  }
+  .section {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 32px;
+    margin-bottom: 40px;
+    page-break-inside: avoid;
+  }
+  .section h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #f0f6fc;
+    margin-bottom: 6px;
+  }
+  .section .desc {
+    color: #8b949e;
+    font-size: 0.95rem;
+    margin-bottom: 24px;
+  }
+  .mermaid {
+    display: flex;
+    justify-content: center;
+    overflow-x: auto;
+  }
+  .mermaid svg { max-width: 100%; }
+  .channel-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-top: 24px;
+  }
+  .channel-card {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+  .channel-card .ch-num {
+    font-size: 0.75rem;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .channel-card .ch-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #f0f6fc;
+    margin: 4px 0;
+  }
+  .channel-card .ch-desc {
+    font-size: 0.8rem;
+    color: #8b949e;
+  }
+  .channel-card.visual { border-left: 3px solid #3fb950; }
+  .channel-card.structural { border-left: 3px solid #a371f7; }
+  .channel-card.occlusion { border-left: 3px solid #58a6ff; }
+  .loss-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 24px;
+  }
+  .loss-card {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .loss-card .loss-name {
+    font-weight: 600;
+    color: #f0f6fc;
+    font-size: 0.95rem;
+  }
+  .loss-card .loss-weight {
+    font-size: 0.8rem;
+    color: #f78166;
+    margin: 2px 0 6px 0;
+  }
+  .loss-card .loss-desc {
+    font-size: 0.8rem;
+    color: #8b949e;
+  }
+  .loss-card.pixel { border-top: 3px solid #3fb950; }
+  .loss-card.sharp { border-top: 3px solid #d29922; }
+  .loss-card.struct { border-top: 3px solid #a371f7; }
+  .stats-row {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+    margin-top: 24px;
+  }
+  .stat-box {
+    text-align: center;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 20px 32px;
+  }
+  .stat-box .stat-num {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #58a6ff;
+  }
+  .stat-box .stat-label {
+    font-size: 0.8rem;
+    color: #8b949e;
+    margin-top: 4px;
+  }
+  footer {
+    text-align: center;
+    color: #484f58;
+    font-size: 0.8rem;
+    margin-top: 40px;
+    padding-top: 24px;
+    border-top: 1px solid #21262d;
+  }
+  @media print {
+    body { background: #fff; color: #1a1a1a; padding: 20px; }
+    .section { background: #f8f8f8; border-color: #ddd; }
+    .channel-card, .loss-card, .stat-box { background: #fff; border-color: #ddd; }
+    h1 { color: #0969da; }
+    .section h2 { color: #1a1a1a; }
+    .channel-card .ch-name, .loss-card .loss-name { color: #1a1a1a; }
+  }
+</style>
+</head>
+<body>
+
+<h1>WoW Terrain Regressor V7.3</h1>
+<p class="subtitle">Multichannel U-Net with adversarial sharpening for height-field reconstruction from game minimaps — updated Apr 12, 2026 with fresh epoch-0 full-corpus restart in progress</p>
+
+<!-- Stats overview -->
+<div class="stats-row">
+  <div class="stat-box">
+    <div class="stat-num">12</div>
+    <div class="stat-label">Input Channels</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-num">2</div>
+    <div class="stat-label">Output Channels</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-num">512×512</div>
+    <div class="stat-label">Resolution</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-num">6070</div>
+    <div class="stat-label">Valid Corpus Samples</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-num">9</div>
+    <div class="stat-label">Loss Components</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-num">31</div>
+    <div class="stat-label">Trusted Dataset Roots</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-num">16.4s</div>
+    <div class="stat-label">Warm Startup (Cache)</div>
+  </div>
+</div>
+
+<!-- Section 1: Input Channels -->
+<div class="section" style="margin-top: 40px;">
+  <h2>1. Input Channels — What the Model Sees</h2>
+  <p class="desc">Each terrain tile is encoded as a 12-channel 512×512 image tensor. The channels are organized into three semantic groups that together resolve the fundamental ambiguity: a minimap photo alone cannot distinguish a flat green field from a hilltop meadow.</p>
+
+  <div class="channel-grid">
+    <div class="channel-card visual">
+      <div class="ch-num">Channels 1–3</div>
+      <div class="ch-name">Minimap RGB</div>
+      <div class="ch-desc">Satellite-style terrain photograph from the game client. Shows color and surface texture.</div>
+    </div>
+    <div class="channel-card visual">
+      <div class="ch-num">Channels 4–6</div>
+      <div class="ch-name">Normal Map RGB</div>
+      <div class="ch-desc">Per-pixel surface orientation vectors. Encodes slope direction and steepness at every point.</div>
+    </div>
+    <div class="channel-card structural">
+      <div class="ch-num">Channel 7</div>
+      <div class="ch-name">WDL Height Prior</div>
+      <div class="ch-desc">Low-resolution 17×17 coarse terrain skeleton from the game's world definition file, upsampled to 512×512.</div>
+    </div>
+    <div class="channel-card structural">
+      <div class="ch-num">Channel 8</div>
+      <div class="ch-name">Height Min Hint</div>
+      <div class="ch-desc">Per-tile minimum elevation bound. Tells the model the floor of the height range.</div>
+    </div>
+    <div class="channel-card structural">
+      <div class="ch-num">Channel 9</div>
+      <div class="ch-name">Height Max Hint</div>
+      <div class="ch-desc">Per-tile maximum elevation bound. Tells the model the ceiling of the height range.</div>
+    </div>
+    <div class="channel-card occlusion">
+      <div class="ch-num">Channel 10</div>
+      <div class="ch-name">Liquid Mask</div>
+      <div class="ch-desc">Binary mask of where water, lava, or slime covers and hides the terrain surface below.</div>
+    </div>
+    <div class="channel-card occlusion">
+      <div class="ch-num">Channel 11</div>
+      <div class="ch-name">Liquid Height</div>
+      <div class="ch-desc">Water surface elevation. The model knows terrain must be at or below this in liquid areas.</div>
+    </div>
+    <div class="channel-card occlusion">
+      <div class="ch-num">Channel 12</div>
+      <div class="ch-name">Object Footprint</div>
+      <div class="ch-desc">Mask of where buildings, trees, and placed objects obscure terrain and often imply flat ground.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Section 2: Architecture -->
+<div class="section">
+  <h2>2. Model Architecture — 5-Level U-Net + PatchGAN</h2>
+  <p class="desc">The generator is a symmetric encoder-decoder with skip connections that preserve fine detail. A separate PatchGAN discriminator enforces local realism during training, preventing the blurry output that pure regression produces.</p>
+
+  <div class="mermaid">
+graph TB
+    INPUT["12-Channel Input<br>512 × 512"] --> E1
+
+    E1["Enc 1: 64 filters — 512×512<br>Detail edges, texture boundaries"] --> E2
+    E2["Enc 2: 128 filters — 256×256<br>Terrain texture patterns"] --> E3
+    E3["Enc 3: 256 filters — 128×128<br>Slope and ridge patterns"] --> E4
+    E4["Enc 4: 512 filters — 64×64<br>Landform structures"] --> E5
+    E5["Enc 5: 1024 filters — 32×32<br>Mountain/valley shapes"] --> BOTTLE
+
+    BOTTLE["Bottleneck: 2048 @ 16×16<br>Deepest terrain understanding"] --> D5
+
+    BOTTLE --> BOUNDS["Height Bounds Head<br>Global pool → 4 values<br>min / max / global_min / global_max"]
+
+    D5["Dec 5: 1024 — bilinear upsample + skip"] --> D4
+    D4["Dec 4: 512 — bilinear upsample + skip"] --> D3
+    D3["Dec 3: 256 — bilinear upsample + skip"] --> D2
+    D2["Dec 2: 128 — bilinear upsample + skip"] --> D1
+    D1["Dec 1: 64 — bilinear upsample + skip"] --> OUT
+
+    E5 -.->|skip| D5
+    E4 -.->|skip| D4
+    E3 -.->|skip| D3
+    E2 -.->|skip| D2
+    E1 -.->|skip| D1
+
+    OUT["Output: 2-Channel Heightmap<br>Ch 1: Global height · Ch 2: Local detail"]
+
+    OUT -.->|training only| DISC["PatchGAN Discriminator<br>70×70 patch critic<br>stamps each patch: real or fake?"]
+  </div>
+
+  <p class="desc" style="margin-top: 16px;">
+    <strong>Key V7.3 improvements:</strong>
+    Residual conv blocks improve gradient flow at every level.
+    Bilinear upsampling eliminates checkerboard artifacts from transposed convolutions.
+    Hard clamp (0–1) replaces sigmoid, preserving gradients at height extremes.
+  </p>
+</div>
+
+<!-- Section 3: Loss Function -->
+<div class="section">
+  <h2>3. Training Signals — 9-Component Loss Function</h2>
+  <p class="desc">The model optimizes a weighted combination of nine loss terms. Each focuses on a different aspect of terrain quality, from raw pixel accuracy to high-frequency sharpness to adversarial realism.</p>
+
+  <div class="loss-grid">
+    <div class="loss-card pixel">
+      <div class="loss-name">L1 Global Height</div>
+      <div class="loss-weight">Weight: 0.08</div>
+      <div class="loss-desc">Per-pixel absolute error on the full-range global heightmap channel. Drives overall elevation accuracy.</div>
+    </div>
+    <div class="loss-card pixel">
+      <div class="loss-name">L1 Local Height</div>
+      <div class="loss-weight">Weight: 0.14</div>
+      <div class="loss-desc">Per-pixel absolute error on the locally-normalized heightmap. Emphasizes within-tile detail.</div>
+    </div>
+    <div class="loss-card pixel">
+      <div class="loss-name">Bounds MSE</div>
+      <div class="loss-weight">Weight: 0.04</div>
+      <div class="loss-desc">Mean squared error on the 4-value height bounds prediction (min, max, global min, global max).</div>
+    </div>
+    <div class="loss-card sharp">
+      <div class="loss-name">Gradient L1</div>
+      <div class="loss-weight">Weight: 0.10</div>
+      <div class="loss-desc">First-order spatial derivatives (dx, dy). Penalizes incorrect terrain slopes — hillsides, ramps, inclines.</div>
+    </div>
+    <div class="loss-card sharp">
+      <div class="loss-name">Edge (Sobel)</div>
+      <div class="loss-weight">Weight: 0.12</div>
+      <div class="loss-desc">Sobel-filtered edge magnitude matching. Forces correct ridgeline placement and cliff boundaries.</div>
+    </div>
+    <div class="loss-card sharp">
+      <div class="loss-name">Laplacian</div>
+      <div class="loss-weight">Weight: 0.12</div>
+      <div class="loss-desc">Second-order curvature (∇²). Preserves sharp terrain features — peaks, valleys, and convexity changes.</div>
+    </div>
+    <div class="loss-card struct">
+      <div class="loss-name">SSIM</div>
+      <div class="loss-weight">Weight: 0.05</div>
+      <div class="loss-desc">Structural Similarity Index. Perceptual quality metric — luminance, contrast, and structure at window scale.</div>
+    </div>
+    <div class="loss-card struct">
+      <div class="loss-name">FFT Frequency</div>
+      <div class="loss-weight">Weight: 0.08</div>
+      <div class="loss-desc">Frequency-domain magnitude matching via log-FFT. Preserves high-frequency terrain texture.</div>
+    </div>
+    <div class="loss-card struct">
+      <div class="loss-name">Adversarial (GAN)</div>
+      <div class="loss-weight">Weight: 0.12</div>
+      <div class="loss-desc">PatchGAN discriminator signal. The critic punishes blurry patches, forcing the generator to produce sharp, realistic terrain.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Section 4: Data Pipeline -->
+<div class="section">
+  <h2>4. Data Pipeline — Training Corpus to Terrain Reconstruction</h2>
+  <p class="desc">Current validated status: historical epoch-5 best remains the strongest completed checkpoint, and a fresh epoch-0 full trusted-corpus restart is now the active trajectory using the latest trainer controls.</p>
+
+  <div class="mermaid">
+graph LR
+  subgraph SOURCES["Trusted Sources (Apr 12, 2026)"]
+  S1["All non-quarantined ml-corpus roots<br>31 dataset roots"]
+  S2["Coverage includes development/Azeroth/<br>EmeraldDream/Northrend/LostIsles + others"]
+    end
+
+    SOURCES --> EXPORT["CLI Exporter<br>Extracts 12 channels per tile<br>from ADT + WDT + WDL + MPQ"]
+
+    EXPORT --> CORPUS["Active Corpus<br>trusted multi-map roots with<br>JSON metadata + PNGs"]
+
+    CORPUS --> CURATE["Index Cache + Trust Gating<br>quarantined roots blocked<br>warm startup: 16.4s"]
+
+    CURATE --> TRAIN["V7.3 Fresh Full Trusted Run<br>6070 usable samples<br>epoch-0 restart active"]
+
+    TRAIN --> MODEL["Trained Model<br>best.pt checkpoint"]
+
+    MODEL --> INFER["Inference Pipeline"]
+
+    subgraph TARGET["Current Proven Target"]
+      DEV["Historical best checkpoint<br>best val loss: 0.0493<br>fresh restart now active"]
+    end
+
+    TARGET --> INFER
+    INFER --> RESULT["Full trusted-corpus baseline<br>pipeline executes at broad map scope<br>still not final restoration signoff"]
+  </div>
+</div>
+
+<!-- Section 5: Development Map Coverage -->
+<div class="section">
+  <h2>5. Full Trusted-Corpus Coverage Snapshot</h2>
+  <p class="desc">Coverage and historical best snapshot from the pre-restart trajectory over all non-quarantined roots under output/ml-corpus.</p>
+
+  <div class="stats-row" style="flex-wrap: wrap;">
+    <div class="stat-box">
+      <div class="stat-num">31</div>
+      <div class="stat-label">Trusted Dataset Roots</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">6070</div>
+      <div class="stat-label">Valid Samples Loaded</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">5451/619</div>
+      <div class="stat-label">Train/Val Split</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">3233</div>
+      <div class="stat-label">Curated Train Samples</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">0.0493</div>
+      <div class="stat-label">Best Historical Val Loss</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">PASS</div>
+      <div class="stat-label">Full Trusted-Corpus Smoke</div>
+    </div>
+  </div>
+</div>
+
+<!-- Section 6: Preflight -->
+<div class="section">
+  <h2>6. Training Execution + Startup Performance</h2>
+  <p class="desc">Operational checkpoints captured during full trusted-corpus runs, cache rollout, Apr 12 Tensor Core benchmarking, and the active fresh restart.</p>
+
+  <div class="stats-row" style="flex-wrap: wrap;">
+    <div class="stat-box">
+      <div class="stat-num">142.05s</div>
+      <div class="stat-label">Cold Startup (Cache Build)</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">16.42s</div>
+      <div class="stat-label">Warm Startup (Cache Hit)</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">+8.8%</div>
+      <div class="stat-label">Tensor Core Throughput Gain</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">1.60</div>
+      <div class="stat-label">Steps/s (Tensor Core Profile)</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">809</div>
+      <div class="stat-label">Train Steps Per Epoch</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">4</div>
+      <div class="stat-label">Resumed Epochs Completed</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">31</div>
+      <div class="stat-label">Roots Passed Trust Filter</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">2</div>
+      <div class="stat-label">New Stitched Object Outputs</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-num">PASS</div>
+      <div class="stat-label">Cache + Fresh Restart Active</div>
+    </div>
+  </div>
+</div>
+
+<!-- Section 7: End Goal -->
+<div class="section">
+  <h2>7. The Goal — Reconstructing Lost Terrain</h2>
+  <p class="desc" style="font-size: 1.05rem; line-height: 1.8; max-width: 800px; margin: 0 auto;">
+    In 2010, Blizzard accidentally deployed internal development map files in a
+    4.0.0.12304 Cataclysm beta PTR build. The patcher began remotely deleting them,
+    but one person noticed, stopped the updater, and saved what they could. Not
+    everything was caught in time — 114 files were zeroed out before the patcher
+    was stopped. That zip was kept safe for over 15 years.
+    <br><br>
+    The long-term goal remains full terrain reconstruction quality for damaged and
+    missing map regions. The current state is now broader than the earlier two-root
+    smoke: the full trusted-corpus baseline has completed across all non-quarantined
+    collected roots through epoch 5 with an improved best validation loss.
+    <br><br>
+    WoW data files are essentially highly optimized SQL tables: each ADT or PM4
+    packs intense amounts of structured records across dozens of chunk types.
+    The PM4 pathfinding format contains navigation meshes with terrain geometry
+    encoded inside, but no one had made much sense of them. After 2.5 years of
+    reverse engineering, we've decoded the chunk linkage and data structures
+    further than anyone else in those 15 years.
+    <br><br>
+    Prior development map restoration efforts (2021) worked without ML and
+    reached a ceiling. This model learns the correlation between what terrain
+    <em>looks like</em> and what terrain <em>is</em>, but every claim here is now scoped
+    to validated evidence from current smoke runs.
+    <br><br>
+    The 363 tiles with minimaps and PM4 data but no ADTs can use PM4 meshes to
+    generate object masks — telling the model where pathfinding obstacles sit
+    on the terrain. The WDL provides the coarse elevation anchor. Every scrap of
+    real data we can give the model makes the predictions better.
+    <br><br>
+    The current output includes a historical epoch-5 best baseline plus an active
+    fresh epoch-0 restart with measured startup-cache acceleration and stitched
+    object-mask exports, not final map
+    restoration signoff.
+  </p>
+</div>
+
+<footer>
+  WoW Terrain Regressor V7.3 — parp-tools · April 2026<br>
+  Development map source: WoW 4.0.0.12304 Cataclysm Beta PTR (rescued ~2010, preserved 15+ years)
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#1f6feb',
+      primaryTextColor: '#c9d1d9',
+      primaryBorderColor: '#30363d',
+      lineColor: '#58a6ff',
+      secondaryColor: '#161b22',
+      tertiaryColor: '#0d1117',
+      fontSize: '14px'
+    },
+    flowchart: {
+      curve: 'basis',
+      padding: 16
+    }
+  });
+</script>
+
+</body>
+</html>
