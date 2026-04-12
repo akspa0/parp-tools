@@ -946,6 +946,12 @@ class WoWTileDatasetV7(Dataset):
             keys=["object_visibility_mask_cv2", "object_visibility_mask", "pm4_mask", "pm4_object_mask", "collision_mask"],
         )
         object_mask = torch.maximum(object_mask, pm4_mask)
+        # NOTE: object_mask is passed as ch11 input context only.
+        # We do NOT blank minimap/normal map here because _build_object_mask produces
+        # inaccurate footprints (WMOs have no bounds in the JSON, fallback radius is ~6px
+        # while real buildings are hundreds of yards wide, and coordinate mapping is unreliable).
+        # Masking with bad silhouettes is worse than not masking at all.
+        # Fix required upstream: exporter must render real WMO footprint images.
 
         input_tensor = torch.cat(
             [
@@ -1775,19 +1781,21 @@ def train(args: argparse.Namespace) -> None:
 
         scheduler.step(average_val_loss)
 
+        # Save a preview every epoch unconditionally so there is always something to inspect.
+        try:
+            if preview_batch is not None:
+                save_training_preview(model, preview_batch, epoch + 1, output_dir / "previews", device)
+            else:
+                fallback_batch = next(iter(val_loader))
+                save_training_preview(model, fallback_batch, epoch + 1, output_dir / "previews", device)
+        except Exception as exc:
+            print(f"  Failed to save preview: {exc}")
+
         if average_val_loss < best_loss:
             best_loss = average_val_loss
             patience_counter = 0
             torch.save(checkpoint, output_dir / "best.pt")
             print("  Saved best model")
-            try:
-                if preview_batch is not None:
-                    save_training_preview(model, preview_batch, epoch + 1, output_dir / "previews", device)
-                else:
-                    fallback_batch = next(iter(val_loader))
-                    save_training_preview(model, fallback_batch, epoch + 1, output_dir / "previews", device)
-            except Exception as exc:
-                print(f"  Failed to save preview: {exc}")
         else:
             patience_counter += 1
             if patience_counter >= args.patience:
