@@ -149,6 +149,53 @@ foreach ($r in $roots) { $args += @("--dataset-root", $r.FullName) }
 python @args
 ```
 
+#### Fine-Tune Recipe When Validation Drifts After a Strong Early Best
+
+Observed Apr 12 run behavior on the full trusted corpus:
+
+- best remained at epoch 5 (`val=0.0493`)
+- later epochs drifted (`epoch 8: 0.1723`, `epoch 9: 0.1682`, `epoch 10: 0.1758`)
+- adversarial pressure and discriminator confidence kept rising while val did not recover
+
+Use the fine-tune controls added to `train_v7.py` to continue from `best.pt` with gentler GAN pressure:
+
+- `--adversarial-scale`: down-weight adversarial contribution
+- `--start-gan-epoch`: delay GAN objective for a few epochs
+- `--disc-every`: update discriminator less frequently
+- `--disc-learning-rate`: lower discriminator learning rate
+- resume now restores optimizer/discriminator/scheduler/scaler states unless `--no-resume-optimizer` is passed
+
+Suggested command for the next continuation:
+
+```powershell
+$base = "i:/parp/parp-tools/output/ml-corpus"
+$roots = Get-ChildItem $base -Directory |
+	ForEach-Object { Get-ChildItem $_.FullName -Directory -ErrorAction SilentlyContinue } |
+	Where-Object { $_.FullName -notmatch "__UNTRUSTED_DO_NOT_USE" -and (Test-Path (Join-Path $_.FullName "dataset")) }
+
+$out = "i:/parp/parp-tools/output/ml-training/v7_3_all_trusted_maps_finetune_20260412"
+$args = @(
+	"i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py",
+	"--profile", "manual",
+	"--epochs", "14",
+	"--resume", "i:/parp/parp-tools/output/ml-training/v7_3_all_trusted_maps_20260411_235624/best.pt",
+	"--output-dir", $out,
+	"--learning-rate", "5e-5",
+	"--disc-learning-rate", "5e-5",
+	"--adversarial-scale", "0.35",
+	"--start-gan-epoch", "8",
+	"--disc-every", "2",
+	"--amp-dtype", "auto",
+	"--train-workers", "4",
+	"--val-workers", "2",
+	"--log-every", "5"
+)
+foreach ($r in $roots) { $args += @("--dataset-root", $r.FullName) }
+python @args
+```
+
+Keep the old run unchanged for traceability; compare this new run's best checkpoint against the prior `0.0493` baseline.
+
 ### Texture Model
 
 Use `train_texture_v1.py` for:

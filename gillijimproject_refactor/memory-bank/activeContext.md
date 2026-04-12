@@ -1,5 +1,35 @@
 # Active Context
 
+## Apr 12, 2026 - Post-epoch-5 drift response: V7.3 fine-tune controls added and best-checkpoint continuation path defined
+
+- after the epoch 6..10 continuation reported sustained val regression (`0.1433 -> 0.1758`) with best still pinned at epoch 5 (`0.0493`), the trainer was extended for controlled fine-tuning instead of continuing the same GAN pressure profile
+- active behavior now in `train_v7.py`:
+	- checkpoint resume can restore optimizer/discriminator/scheduler/scaler state (`--no-resume-optimizer` to disable)
+	- adversarial influence is now tunable (`--adversarial-scale`)
+	- GAN objective can be delayed to later epochs (`--start-gan-epoch`)
+	- discriminator updates can be throttled (`--disc-every`)
+	- discriminator LR is now configurable (`--disc-learning-rate`)
+	- checkpoint payload now stores optimizer/discriminator/scheduler/scaler state and patience counter for true continuity
+- updated the training guide with a dedicated fine-tune recipe that resumes from `best.pt` into a new output folder and uses reduced GAN pressure
+- important boundary:
+	- this slice lands control/sequencing changes and a concrete fine-tune recipe; quality outcome depends on the new continuation run results, not code changes alone
+
+## Apr 12, 2026 - Geometry-first recovery run launched after GAN-tuned continuation still drifted at epochs 7-8
+
+- observed in-flight fine-tune drift from user-reported/live metrics: epoch 7 val `0.1813`, epoch 8 val `0.1706`, best still `0.0493`
+- stopped the active GAN-tuned continuation and pivoted to a conservative geometry recovery profile from `best.pt`
+- launched new run in `output/ml-training/v7_3_all_trusted_maps_geom_recover_20260412` with:
+	- `--learning-rate 1e-5`
+	- `--disc-learning-rate 1e-5`
+	- `--adversarial-scale 0.0`
+	- `--start-gan-epoch 999`
+	- `--disc-every 4`
+	- `--no-augment`
+	- `--no-resume-optimizer`
+	- trust filter still enforced across all 31 non-quarantined roots
+- current status:
+	- run is active on CUDA with AMP bfloat16 and TF32 on/on, awaiting first post-pivot epoch summary
+
 ## Apr 12, 2026 - V7.3 now has live metric updates and a validated Tensor Core training profile (+8.8% on measured subset)
 
 - followed the request to show live CLI values, verify real GPU usage, and make practical speed improvements before continuing training
@@ -7,6 +37,7 @@
 	- `train_v7.py` now prints richer live tqdm telemetry (`g`, `d`, `lr`, `vram`) plus per-epoch throughput (`steps/s`, `samples/s`)
 	- CUDA path now explicitly enables TF32 (`torch.backends.cuda.matmul.allow_tf32 = True`, `torch.backends.cudnn.allow_tf32 = True` unless disabled) and exposes `--amp-dtype auto|bfloat16|float16`
 	- AMP instability from FFT frequency loss was repaired by forcing frequency-loss FFT inputs to float32 under autocast
+	- launched a real full trusted-corpus continuation run to epoch 10 with the tuned profile (`--amp-dtype auto --train-workers 4 --val-workers 2 --log-every 5`) from `v7_3_all_trusted_maps_20260411_235624/checkpoint.pt`; run is currently in progress
 	- benchmark evidence on `NVIDIA GeForce RTX 4070 Ti SUPER` (`Northrend`, `limit=640`, batch 4, one epoch):
 		- baseline (`--no-amp --no-tf32 --no-cudnn-benchmark`, workers 4/2): `1.47 steps/s`, `72.15s`
 		- Tensor Core profile (`--amp-dtype auto`, TF32 on, workers 4/2): `1.60 steps/s`, `69.10s`

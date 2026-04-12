@@ -1066,6 +1066,7 @@ def combined_loss(
     target_heightmap: torch.Tensor,
     target_bounds: torch.Tensor,
     adv_loss: Optional[torch.Tensor] = None,
+    adversarial_scale: float = 1.0,
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
     global_loss = F.l1_loss(predicted_heightmap[:, 0:1], target_heightmap[:, 0:1])
     local_loss = F.l1_loss(predicted_heightmap[:, 1:2], target_heightmap[:, 1:2])
@@ -1096,7 +1097,7 @@ def combined_loss(
 
     adv_value = 0.0
     if adv_loss is not None:
-        total = total + LOSS_WEIGHTS["adversarial"] * adv_loss
+        total = total + (LOSS_WEIGHTS["adversarial"] * adversarial_scale) * adv_loss
         adv_value = float(adv_loss.item())
 
     return total, {
@@ -1559,9 +1560,17 @@ def train(args: argparse.Namespace) -> None:
     model = MultiChannelUNetV7().to(device)
     discriminator = PatchDiscriminator().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
-    disc_optimizer = torch.optim.Adam(discriminator.parameters(), lr=DISCRIMINATOR_LR, betas=(0.5, 0.999))
+    disc_optimizer = torch.optim.Adam(discriminator.parameters(), lr=args.disc_learning_rate, betas=(0.5, 0.999))
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=2, factor=0.5)
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_cuda else None
+
+    print(
+        "Fine-tune config: "
+        f"adv_scale={args.adversarial_scale:.3f}, "
+        f"start_gan_epoch={args.start_gan_epoch}, "
+        f"disc_every={args.disc_every}, "
+        f"disc_lr={args.disc_learning_rate:.2e}"
+    )
 
     history = {
         "epochs": [],
@@ -1584,7 +1593,18 @@ def train(args: argparse.Namespace) -> None:
         model.load_state_dict(checkpoint["model_state_dict"])
         start_epoch = int(checkpoint.get("epoch", -1)) + 1
         best_loss = float(checkpoint.get("val_loss", best_loss))
+        patience_counter = int(checkpoint.get("patience_counter", patience_counter))
+        if not args.no_resume_optimizer:
+            if "optimizer_state_dict" in checkpoint:
+                optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            if "disc_optimizer_state_dict" in checkpoint:
+                disc_optimizer.load_state_dict(checkpoint["disc_optimizer_state_dict"])
+            if "scheduler_state_dict" in checkpoint:
+                scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            if scaler is not None and "scaler_state_dict" in checkpoint and checkpoint["scaler_state_dict"] is not None:
+                scaler.load_state_dict(checkpoint["scaler_state_dict"])
         print(f"Resumed from {resume_path} at epoch {start_epoch}")
+        print("Resume optimizer state: enabled" if not args.no_resume_optimizer else "Resume optimizer state: disabled (--no-resume-optimizer)")
 
     for epoch in range(start_epoch, args.epochs):
         model.train()
@@ -1607,27 +1627,39 @@ def train(args: argparse.Namespace) -> None:
                 outputs, output_bounds = model(inputs)
 
             # --- Discriminator step ---
-            disc_optimizer.zero_grad(set_to_none=True)
-            with amp_context:
-                real_pred = discriminator(targets)
-                fake_pred = discriminator(outputs.detach())
-                disc_real_loss = F.mse_loss(real_pred, torch.ones_like(real_pred))
-                disc_fake_loss = F.mse_loss(fake_pred, torch.zeros_like(fake_pred))
-                disc_loss = (disc_real_loss + disc_fake_loss) * 0.5
-            if scaler is not None:
-                scaler.scale(disc_loss).backward()
-                scaler.step(disc_optimizer)
-            else:
-                disc_loss.backward()
-                disc_optimizer.step()
-            disc_losses.append(float(disc_loss.item()))
+            do_disc_step = args.disc_every <= 1 or (step_index % args.disc_every == 0)
+            if do_disc_step:
+                disc_optimizer.zero_grad(set_to_none=True)
+                with amp_context:
+                    real_pred = discriminator(targets)
+                    fake_pred = discriminator(outputs.detach())
+                    disc_real_loss = F.mse_loss(real_pred, torch.ones_like(real_pred))
+                    disc_fake_loss = F.mse_loss(fake_pred, torch.zeros_like(fake_pred))
+                    disc_loss = (disc_real_loss + disc_fake_loss) * 0.5
+                if scaler is not None:
+                    scaler.scale(disc_loss).backward()
+                    scaler.step(disc_optimizer)
+                else:
+                    disc_loss.backward()
+                    disc_optimizer.step()
+                disc_losses.append(float(disc_loss.item()))
 
             # --- Generator step ---
             optimizer.zero_grad(set_to_none=True)
+            use_gan_objective = (epoch + 1) >= args.start_gan_epoch
             with amp_context:
-                fake_pred_for_gen = discriminator(outputs)
-                adv_loss = F.mse_loss(fake_pred_for_gen, torch.ones_like(fake_pred_for_gen))
-                loss, parts = combined_loss(outputs, output_bounds, targets, bounds, adv_loss=adv_loss)
+                adv_loss = None
+                if use_gan_objective:
+                    fake_pred_for_gen = discriminator(outputs)
+                    adv_loss = F.mse_loss(fake_pred_for_gen, torch.ones_like(fake_pred_for_gen))
+                loss, parts = combined_loss(
+                    outputs,
+                    output_bounds,
+                    targets,
+                    bounds,
+                    adv_loss=adv_loss,
+                    adversarial_scale=args.adversarial_scale,
+                )
             if scaler is not None:
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
@@ -1650,6 +1682,7 @@ def train(args: argparse.Namespace) -> None:
                     "d": f"{float(np.mean(disc_losses[-args.log_every:])):.4f}",
                     "lr": f"{current_lr:.1e}",
                 }
+                postfix["gan"] = "on" if use_gan_objective else "off"
                 if use_cuda:
                     vram_gb = torch.cuda.memory_allocated() / (1024.0 ** 3)
                     postfix["vram"] = f"{vram_gb:.2f}G"
@@ -1689,7 +1722,12 @@ def train(args: argparse.Namespace) -> None:
         checkpoint = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "disc_optimizer_state_dict": disc_optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
             "val_loss": average_val_loss,
+            "patience_counter": patience_counter,
             "metadata": checkpoint_metadata_from_args(args, dataset_roots, len(dataset), len(train_indices), len(val_indices), train_groups, val_groups),
         }
         torch.save(checkpoint, output_dir / "checkpoint.pt")
@@ -1768,13 +1806,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE)
+    parser.add_argument("--disc-learning-rate", type=float, default=DISCRIMINATOR_LR,
+                        help=f"Discriminator learning rate (default: {DISCRIMINATOR_LR}).")
     parser.add_argument("--epochs", type=int, default=DEFAULT_NUM_EPOCHS)
     parser.add_argument("--patience", type=int, default=DEFAULT_EARLY_STOP_PATIENCE)
+    parser.add_argument("--adversarial-scale", type=float, default=1.0,
+                        help="Scale applied to adversarial loss weight (1.0 keeps current behavior).")
+    parser.add_argument("--start-gan-epoch", type=int, default=1,
+                        help="Epoch number (1-based) when adversarial loss turns on.")
+    parser.add_argument("--disc-every", type=int, default=1,
+                        help="Update discriminator every N train steps (default: 1).")
     parser.add_argument("--val-fraction", type=float, default=DEFAULT_VAL_FRACTION)
     parser.add_argument("--spatial-group-size", type=int, default=DEFAULT_SPATIAL_GROUP_SIZE)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--limit", type=int, help="Optional per-root sample cap for quick debugging.")
     parser.add_argument("--resume", type=str, help="Resume from an existing checkpoint.")
+    parser.add_argument("--no-resume-optimizer", action="store_true",
+                        help="Do not restore optimizer/discriminator/scheduler/scaler state from checkpoint.")
     parser.add_argument("--train-workers", type=int, default=DEFAULT_TRAIN_WORKERS,
                         help=f"DataLoader worker count for training (default: {DEFAULT_TRAIN_WORKERS}).")
     parser.add_argument("--val-workers", type=int, default=DEFAULT_VAL_WORKERS,

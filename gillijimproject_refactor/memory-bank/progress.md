@@ -1,5 +1,35 @@
 # Progress
 
+### Apr 12, 2026 - Added V7.3 fine-tune controls after epoch-6..10 validation drift and documented best-checkpoint continuation recipe
+
+- observed continuation drift on the full trusted-corpus resume (`epochs 6..10`) while best stayed at `0.0493` from epoch 5:
+	- val loss path: `0.1433`, `0.1589`, `0.1723`, `0.1682`, `0.1758`
+	- throughput remained high (`4.32 steps/s`, `17.3 samples/s`) but quality did not recover
+- landed trainer controls in `src/WoWMapConverter/scripts/train_v7.py` to support controlled GAN fine-tuning:
+	- `--adversarial-scale`, `--start-gan-epoch`, `--disc-every`, `--disc-learning-rate`
+	- resume state restoration for optimizer/discriminator/scheduler/scaler (opt-out with `--no-resume-optimizer`)
+	- checkpoint payload now stores optimizer/discriminator/scheduler/scaler state plus patience counter
+- documentation sync:
+	- `docs/VLM_Training_Guide.md` now includes a dedicated "Fine-Tune Recipe" that resumes from `best.pt` into a new output folder with reduced GAN pressure
+- proof boundary:
+	- this improves control of late-epoch GAN pressure and resume continuity; improvement in best val requires the next continuation run to validate
+
+### Apr 12, 2026 - Pivoted to geometry-first recovery run after epoch 7/8 drift persisted under reduced GAN pressure
+
+- live continuation evidence showed no recovery after controls were introduced (`epoch 7 val 0.1813`, `epoch 8 val 0.1706`, best still `0.0493`)
+- stopped the active run and launched a stricter recovery profile from `best.pt` into `output/ml-training/v7_3_all_trusted_maps_geom_recover_20260412`
+- recovery profile settings:
+	- `--learning-rate 1e-5`
+	- `--disc-learning-rate 1e-5`
+	- `--adversarial-scale 0.0`
+	- `--start-gan-epoch 999`
+	- `--disc-every 4`
+	- `--no-augment`
+	- `--no-resume-optimizer`
+	- trust-filtered 31-root corpus (no `__UNTRUSTED_DO_NOT_USE`)
+- current status:
+	- run started successfully with CUDA + AMP bfloat16 + TF32 enabled; awaiting first post-pivot epoch summary for quality check
+
 ### Apr 12, 2026 - Landed live V7.3 CLI telemetry, explicit Tensor Core controls, and a measured +8.8% throughput gain on the benchmark slice
 
 - implemented training-runtime visibility and performance controls in `src/WoWMapConverter/scripts/train_v7.py`:
@@ -15,6 +45,9 @@
 	- measured throughput gain: `+8.8%`
 - documentation sync:
 	- `docs/VLM_Training_Guide.md` now includes the performance profile, benchmark values, and a ready-to-run trusted-corpus resume command
+- continuation execution:
+	- started full trusted-corpus continuation run to epoch `10` from `output/ml-training/v7_3_all_trusted_maps_20260411_235624/checkpoint.pt` with `--amp-dtype auto --train-workers 4 --val-workers 2 --log-every 5`
+	- startup confirms trusted root filtering (`31` roots), cache hits, CUDA `AMP: bfloat16`, and TF32 matmul/cuDNN both enabled
 - proof boundary:
 	- this proves practical speed gain on the benchmark slice and stable mixed-precision execution; it is not by itself full-corpus quality/convergence signoff
 
