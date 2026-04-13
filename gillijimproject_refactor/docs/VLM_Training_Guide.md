@@ -131,9 +131,49 @@ Use this longer geometry-first schedule as the new default baseline before concl
 
 If a run reports a negative validation loss, treat that checkpoint as invalid numeric output rather than as a real improvement. The trainer now keeps the forward pass under AMP but computes the structural loss stack in float32 and refuses to treat negative or non-finite validation loss as a valid `best.pt` candidate.
 
+Validation currently influences training in several concrete ways:
+
+- it chooses `best.pt`
+- it drives `ReduceLROnPlateau`
+- it drives early-stop patience once that counter is allowed to count
+- it now arms best-triggered GAN refinement bursts when `--gan-burst-after-best` is enabled
+
+Important boundary:
+
+- the validation split is a real held-out slice, but it is still drawn from the same audited corpus family
+- that means it is useful feedback for overfitting and checkpoint selection, but it is not a full guarantee of performance on truly unseen minimaps or unseen map families
+
+To make preview monitoring less misleading, each epoch now renders a mixed validation preview set by default:
+
+- `2` fixed high-signal validation tiles
+- `2` random held-out validation tiles
+
+Each preview epoch also writes a small JSON sidecar next to the PNGs listing the exact tile labels shown in that preview grid.
+
+The preview output now also includes `val_epoch_XXXX_context.png`, which is specifically for object-mask validation. Its columns are:
+
+- raw minimap
+- minimap with object-mask overlay
+- minimap with object-mask regions blanked out as a diagnostic view
+- raw object mask
+- liquid mask
+- brush mask
+
+This does not mean the model is currently zeroing the minimap input itself during training. The active training path still feeds the raw minimap plus a separate object-mask channel. The context preview is there so you can visually confirm what object-corrupted regions the model was told about.
+
+If you want to change the mix, use:
+
+- `--static-preview-count`
+- `--random-preview-count`
+
 ### Best-Triggered GAN Refinement Bursts
 
 The active scheduling strategy is now best-triggered refinement instead of a fixed late-epoch GAN phase.
+
+Current practical training guidance:
+
+- treat `100` epochs as the upper bound unless a run is still making real validation progress late
+- let early stopping count from the start for best-triggered GAN runs, because validation is now part of the control loop instead of being artificially gated behind a long warmup
 
 New primary control:
 
@@ -175,7 +215,7 @@ New-Item -ItemType Directory -Force $outDir | Out-Null
 $args = @(
 	'.\gillijimproject_refactor\src\WoWMapConverter\scripts\train_v7.py',
 	'--profile', 'manual',
-	'--epochs', '140',
+	'--epochs', '100',
 	'--patience', '12',
 	'--output-dir', $outDir,
 	'--learning-rate', '8e-5',
@@ -198,6 +238,8 @@ That example means:
 - if one of those GAN-assisted epochs also becomes the new best, the `2`-epoch burst is armed again
 
 The older `--start-gan-epoch`, `--gan-cycle-length`, `--gan-cycle-on-epochs`, and `--gan-cooldown-after-best` controls still exist as fallback schedule tools, but they are no longer the preferred strategy.
+
+In practice, if a run already looked good around epoch `30..40` and later spent many epochs with no meaningful validation improvement, do not keep stretching it to `140`. Keep the ceiling near `100` and let patience stop it earlier.
 
 ### Syntax
 ```bash

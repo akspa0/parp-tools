@@ -1,5 +1,69 @@
 # Active Context
 
+## Apr 13, 2026 - Development-map inference side-quest exposed tile-edge curl, and the active V7 path now anchors exported borders plus trains against them explicitly
+
+- after running the epoch-51 `output/ml-training/v7_4_brush_channel_bestburst_20260413/best.pt` checkpoint against `output/ml-corpus/400_12304/development`, the first exported OBJs showed two distinct failure modes:
+	- soft ramping across terrain transitions that should stay sharper
+	- tile-border curl, where all four outer edges could slope away instead of staying stitchable for a quilted whole-map export
+- active code changes now in place:
+	- `gillijimproject_refactor/src/WoWMapConverter/scripts/infer_v7.py` now supports the live `13`-channel checkpoint contract including brush masks, and it now anchors the outer tile band back to the WDL prior with `--edge-anchor-width`
+	- `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` now adds two new loss components:
+		- `transition` loss: increases reconstruction pressure around sharp target terrain changes so cut or dry segments do not blur into ramps as easily
+		- `tile_edge` loss: increases reconstruction pressure on the outer border band so the model learns stitchable tile edges instead of curled borders
+- bounded real-data proof from the re-exported development batch in `output/tmp/v7_4_dev_infer_full_edgeanchored_20260413`:
+	- adjacent seam mismatch `development_31_36 south` vs `development_31_37 north` dropped from about `118.8` mean 16-bit units to about `13.4`
+	- adjacent seam mismatch `development_30_36 east` vs `development_31_36 west` dropped from about `406.2` to about `29.2`
+	- this is inference/export proof plus trainer-objective proof, not yet a retrained-model proof
+
+## Apr 13, 2026 - The first full V7.4 best-triggered run finished close to target, with best val `0.0506` at epoch `51`
+
+- completed `output/ml-training/v7_4_brush_channel_bestburst_20260413`
+- exact summary from `training_log.json`:
+	- `112` epochs completed before early stop
+	- best epoch: `51`
+	- best val loss: `0.05059416059936796`
+	- final epoch: train `0.04502828886709463`, val `0.05751752530454428`
+	- dataset shape: `6070` valid samples, curated train `3237`, val `613`, launched roots `26`
+	- input channels: `13`
+- practical read:
+	- this is the closest full audited-corpus run so far and materially better than the previous audited `0.1256` result
+	- late epochs still did not beat the epoch-51 checkpoint, so resume/retrain work should start from that best checkpoint rather than from the final state
+
+## Apr 13, 2026 - Validation previews now include mixed held-out tiles and an explicit object-mask context sheet
+
+- `train_v7.py` preview behavior changed again after the user asked for more confidence that object-masked minimap regions are being conveyed to the model
+- active preview behavior now:
+	- each epoch uses a mixed validation preview set by default: `2` fixed high-signal held-out tiles plus `2` random held-out tiles
+	- each epoch writes `val_epoch_XXXX.json` listing the exact tiles used in that preview
+	- each epoch also writes `val_epoch_XXXX_context.png` with columns:
+		- minimap
+		- object-mask overlay
+		- masked-minimap diagnostic
+		- object mask
+		- liquid mask
+		- brush mask
+- bounded real-data proof:
+	- verified on `output/tmp/v7_objectmask_preview_smoke_20260413/previews/val_epoch_0001_context.png`
+	- verified sidecar metadata at `output/tmp/v7_objectmask_preview_smoke_20260413/previews/val_epoch_0001.json`
+- important boundary:
+	- this improves validation visibility only; the active trainer still uses raw minimap plus separate mask channels rather than hard-zeroing minimap pixels under object masks
+
+## Apr 13, 2026 - Discriminator stabilization controls are now in the trainer and were finally proven on a real multi-step GAN smoke
+
+- after the user called out earlier `Disc: 0` collapse/un-collapse behavior, `train_v7.py` gained conservative discriminator stabilizers:
+	- real/fake target smoothing (`--disc-real-target`, `--disc-fake-target`)
+	- small target jitter (`--disc-label-noise`)
+	- discriminator input noise (`--disc-input-noise-std`)
+	- discriminator gradient clipping (`--disc-grad-clip`)
+	- discriminator real/fake mean logging in the epoch summary
+- meaningful proof required a multi-step smoke because earlier tiny development smokes never hit a discriminator update when `disc_every=2`
+- bounded real-data proof now exists from `output/tmp/v7_disc_real_smoke_20260413` using `LostIsles`, `--disc-every 1`, and `--gan-burst-after-best 1`:
+	- epoch 2 GAN-on summary reported `Disc: 0.9667`
+	- discriminator real/fake means: `0.4209 / 0.3878`
+	- this proves the stabilized discriminator path is actually executing and no longer only syntactically present
+- next action preserved:
+	- relaunch the audited-corpus run from `v7_4_brush_channel_bestburst_20260413/best.pt` into a new folder with the discriminator stabilizers enabled
+
 ## Apr 13, 2026 - Negative validation loss in the brush-channel geometry-first run was a trainer numerics bug, not a real best checkpoint
 
 - investigated the impossible `best val = -0.0060` reported by `output/ml-training/v7_4_brush_channel_geomfirst_20260413`
@@ -59,6 +123,18 @@
 - important boundary:
 	- this proves best-triggered arming works on real data; it does not yet prove the optimal burst length for the full audited corpus
 	- the earlier fixed `start_gan_epoch=101` idea should now be treated as a fallback knob, not the preferred path
+
+## Apr 13, 2026 - The current run evidence says `100` epochs is the practical ceiling, not `140+`
+
+- the best-triggered audited-corpus run reached best val `0.0506` at epoch `51`
+- later training continued until epoch `112`, then early-stopped after `12` non-improving patience steps with no better result than the epoch-51 checkpoint
+- preserved user guidance:
+	- epoch `30..40` already looked close
+	- `140` is longer than needed for this regime
+	- treat `100` epochs as the upper bound unless future evidence shows real late validation gains
+- active training-policy change:
+	- `train_v7.py` default epochs reduced to `100`
+	- `train_v7.py` default `early_stop_start_epoch` reduced to `1` so validation can actually stop a best-triggered run instead of being artificially delayed past the new horizon
 
 ## Apr 13, 2026 - Trainer defaults now bias toward a long geometry-first phase before GAN pressure
 

@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WoW Terrain Regressor V7.4 Architecture</title>
+<style>
+  :root {
+    --bg: #0d1318;
+    --panel: #152028;
+    --panel-2: #10181f;
+    --text: #d7e1ea;
+    --muted: #95a6b6;
+    --line: #2c3d4a;
+    --accent: #4ea1ff;
+    --accent-2: #63d48c;
+    --accent-3: #f2b35a;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+    background: linear-gradient(180deg, #0d1318 0%, #101a22 100%);
+    color: var(--text);
+    line-height: 1.55;
+  }
+
+  main {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 28px 18px 56px;
+  }
+
+  header {
+    margin-bottom: 24px;
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: clamp(2rem, 4vw, 2.7rem);
+    line-height: 1.1;
+    color: #eef6ff;
+  }
+
+  .subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: 1rem;
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin: 24px 0 32px;
+  }
+
+  .stat {
+    background: rgba(21, 32, 40, 0.9);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+  }
+
+  .stat strong {
+    display: block;
+    font-size: 1.4rem;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+
+  .section {
+    background: rgba(21, 32, 40, 0.92);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 22px;
+    margin-bottom: 18px;
+  }
+
+  h2 {
+    margin: 0 0 8px;
+    font-size: 1.35rem;
+    color: #eef6ff;
+  }
+
+  p, li { color: var(--text); }
+  .muted { color: var(--muted); }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .card {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+  }
+
+  .eyebrow {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  .card h3 {
+    margin: 6px 0;
+    font-size: 1rem;
+    color: #eef6ff;
+  }
+
+  .card.visual { border-left: 4px solid var(--accent-2); }
+  .card.structural { border-left: 4px solid var(--accent); }
+  .card.occlusion { border-left: 4px solid var(--accent-3); }
+
+  .mermaid-wrap {
+    overflow-x: auto;
+    margin-top: 16px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel-2);
+  }
+
+  .mermaid {
+    min-width: 320px;
+  }
+
+  code {
+    font-family: Consolas, monospace;
+    background: #0c141a;
+    border: 1px solid #24323c;
+    border-radius: 6px;
+    padding: 1px 6px;
+    color: #f2f7fb;
+  }
+
+  ul {
+    margin: 10px 0 0 18px;
+    padding: 0;
+  }
+
+  footer {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-top: 24px;
+    text-align: center;
+  }
+
+  @media (max-width: 700px) {
+    main { padding: 18px 12px 42px; }
+    .section { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>WoW Terrain Regressor V7.4</h1>
+    <p class="subtitle">Responsive architecture guide for the current V7.4 code path, including WDL-trestle work, reflect padding, edge-focused losses, and validation-control behavior.</p>
+  </header>
+
+  <section class="stats">
+    <div class="stat"><strong>13</strong>Input channels</div>
+    <div class="stat"><strong>2</strong>Output channels</div>
+    <div class="stat"><strong>0.0506</strong>Best val loss</div>
+    <div class="stat"><strong>51</strong>Best epoch</div>
+    <div class="stat"><strong>6070</strong>Valid samples</div>
+    <div class="stat"><strong>3237 / 613</strong>Curated train / val</div>
+    <div class="stat"><strong>26</strong>Audited roots</div>
+    <div class="stat"><strong>100</strong>Practical epoch cap</div>
+  </section>
+
+  <section class="section">
+    <h2>1. Input Contract</h2>
+    <p class="muted">V7.4 consumes visual cues, terrain priors, and explicit occlusion or editing context. The important architectural change is that WDL is not just decorative context; it is the coarse terrain scaffold the model is increasingly expected to conform to.</p>
+    <div class="cards">
+      <div class="card visual"><div class="eyebrow">Channels 1-3</div><h3>Minimap RGB</h3><p>Primary visible surface evidence.</p></div>
+      <div class="card visual"><div class="eyebrow">Channels 4-6</div><h3>Normal Map RGB</h3><p>Slope and orientation cues.</p></div>
+      <div class="card structural"><div class="eyebrow">Channel 7</div><h3>WDL Height Prior</h3><p>17x17 coarse height lattice resized into the same normalized global range as the terrain target.</p></div>
+      <div class="card structural"><div class="eyebrow">Channels 8-9</div><h3>Height Min / Max Hints</h3><p>Per-tile range hints for absolute terrain scale.</p></div>
+      <div class="card occlusion"><div class="eyebrow">Channels 10-11</div><h3>Liquid Mask / Liquid Height</h3><p>Water coverage and supporting elevation prior.</p></div>
+      <div class="card occlusion"><div class="eyebrow">Channel 12</div><h3>Object Footprint Mask</h3><p>Regions where minimap pixels are known to be terrain-poor or overwritten.</p></div>
+      <div class="card occlusion"><div class="eyebrow">Channel 13</div><h3>Brush Mask</h3><p>Patch-scale editing archaeology distilled into a tile mask.</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>2. Generator</h2>
+    <p class="muted">The generator is still a 5-level U-Net, but the active code path now uses reflect padding and supports a WDL-trestle global head. New runs are meant to refine the global surface over WDL instead of hallucinating the entire absolute surface from scratch.</p>
+    <div class="mermaid-wrap">
+      <div class="mermaid">
+flowchart TD
+    A[13-channel input] --> B[Encoder 64]
+    B --> C[Encoder 128]
+    C --> D[Encoder 256]
+    D --> E[Encoder 512]
+    E --> F[Encoder 1024]
+    F --> G[Bottleneck 2048]
+    G --> H[Bounds head x4]
+    G --> I[Decoder 1024]
+    I --> J[Decoder 512]
+    J --> K[Decoder 256]
+    K --> L[Decoder 128]
+    L --> M[Decoder 64]
+    M --> N[Raw 2-channel output]
+    A --> O[WDL channel]
+    O --> P[Global trestle path]
+    N --> Q[Global delta via tanh]
+    Q --> R[Clamp WDL plus scaled delta]
+    N --> S[Local detail channel]
+    R --> T[Final global channel]
+    S --> U[Final local channel]
+      </div>
+    </div>
+    <ul>
+      <li>Encoder and discriminator convolutions use <code>padding_mode="reflect"</code> in the active code path to avoid the artificial void introduced by zero padding.</li>
+      <li>The global channel can operate as <code>WDL + learned residual</code> rather than absolute terrain-only prediction.</li>
+      <li>The local channel remains a bounded detail surface for within-tile structure.</li>
+      <li>The bounds head still predicts tile/global range hints.</li>
+    </ul>
+  </section>
+
+  <section class="section">
+    <h2>3. Discriminator</h2>
+    <p class="muted">PatchGAN remains lightweight, but the schedule and stabilization controls are now part of the architecture story because they materially affect what the model learns late in training.</p>
+    <div class="mermaid-wrap">
+      <div class="mermaid">
+flowchart LR
+    A[Predicted or real 2-channel height] --> B[PatchGAN 64]
+    B --> C[PatchGAN 128]
+    C --> D[PatchGAN 256]
+    D --> E[PatchGAN 512]
+    E --> F[Patch map]
+      </div>
+    </div>
+    <ul>
+      <li>Real/fake target smoothing, label noise, input noise, and discriminator gradient clipping are active controls.</li>
+      <li>Best-triggered GAN bursts remain the preferred schedule strategy.</li>
+    </ul>
+  </section>
+
+  <section class="section">
+    <h2>4. Loss Stack</h2>
+    <p class="muted">The current objective is explicitly sharper and more stitch-aware than the earlier V7.x path.</p>
+    <div class="cards">
+      <div class="card structural"><div class="eyebrow">Base</div><h3>Global / Local / Bounds</h3><p>Primary terrain reconstruction terms.</p></div>
+      <div class="card structural"><div class="eyebrow">Sharpness</div><h3>Gradient / Edge / Laplacian / Frequency / SSIM</h3><p>First and second derivative plus frequency-domain pressure.</p></div>
+      <div class="card structural"><div class="eyebrow">New</div><h3>Transition Loss</h3><p>Upweights target regions with strong terrain changes so hard breaks stop collapsing into ramps.</p></div>
+      <div class="card structural"><div class="eyebrow">New</div><h3>Tile-Edge Loss</h3><p>Upweights the outer border band so tiles learn to stay stitchable in a quilt.</p></div>
+      <div class="card structural"><div class="eyebrow">Adversarial</div><h3>Best-Triggered GAN</h3><p>GAN pressure comes in short bursts after validation improvements.</p></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>5. Validation And Preview Loop</h2>
+    <p class="muted">Validation is an active control surface, not passive reporting.</p>
+    <div class="mermaid-wrap">
+      <div class="mermaid">
+flowchart TD
+    A[Train epoch] --> B[Validation pass]
+    B --> C{Valid best?}
+    C -->|yes| D[Write best.pt]
+    D --> E[Arm GAN burst]
+    C -->|no| F[Patience increments]
+    B --> G[ReduceLROnPlateau]
+    B --> H[Write preview PNGs and JSON]
+    H --> I[Static sentinel tiles plus random held-out tiles]
+      </div>
+    </div>
+    <ul>
+      <li>Mixed previews include fixed high-signal tiles and random held-out tiles each epoch.</li>
+      <li>Context sheets explicitly show object mask, liquid mask, and brush mask inputs.</li>
+      <li>The practical cap is now 100 epochs because the best validated run peaked at epoch 51 and was finished by early stop at epoch 112.</li>
+    </ul>
+  </section>
+
+  <section class="section">
+    <h2>6. Compatibility And Proof Boundary</h2>
+    <p class="muted">The new code path is stronger, but proof levels differ.</p>
+    <ul>
+      <li>Old checkpoints can still load under legacy semantics through checkpoint metadata.</li>
+      <li>New runs are intended to use the <code>wdl-trestle-reflect-v1</code> variant.</li>
+      <li>Inference currently also includes an edge-anchor safety rail to WDL for exported development-map tiles.</li>
+      <li>The new architecture changes are code-complete, but retrained-model proof still requires a fresh run from the best epoch-51 checkpoint or a new run under the improved variant.</li>
+    </ul>
+  </section>
+
+  <footer>
+    parp-tools · V7.4 architecture guide · updated Apr 13, 2026<br>
+    Responsive HTML version. See the Markdown sibling for editor-friendly Mermaid source.
+  </footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#152028',
+      primaryTextColor: '#d7e1ea',
+      primaryBorderColor: '#2c3d4a',
+      lineColor: '#7cb6ff',
+      secondaryColor: '#10181f',
+      tertiaryColor: '#10181f',
+      fontSize: '14px'
+    },
+    flowchart: {
+      useMaxWidth: true,
+      htmlLabels: true,
+      curve: 'basis'
+    }
+  });
+</script>
+</body>
+</html>

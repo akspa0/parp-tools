@@ -2,7 +2,7 @@
 """
 WoW Height Regressor V7.1 - inference engine.
 
-Inference restores the original multichannel V7.1 contract:
+Inference restores the active multichannel V7.x contract:
 - minimap RGB
 - normal map RGB
 - WDL prior
@@ -10,6 +10,7 @@ Inference restores the original multichannel V7.1 contract:
 - liquid mask
 - liquid height prior
 - object footprint mask
+- brush imprint mask when the checkpoint expects it
 
 The primary mesh export still uses the predicted global height channel. The
 terrain checkpoint no longer owns alpha-mask prediction.
@@ -31,14 +32,35 @@ from PIL import Image
 from torchvision import transforms
 
 try:
-    from train_v7 import HEIGHT_GLOBAL_MAX, HEIGHT_GLOBAL_MIN, MultiChannelUNetV7, OUTPUT_SIZE
+    from train_v7 import (
+        BRUSH_MANIFEST_FILE,
+        DEFAULT_BLUR_SIGMA,
+        DEFAULT_GLOBAL_RESIDUAL_SCALE,
+        HEIGHT_GLOBAL_MAX,
+        HEIGHT_GLOBAL_MIN,
+        MultiChannelUNetV7,
+        OUTPUT_SIZE,
+        resolve_model_architecture_from_metadata,
+    )
 except ImportError:
     OUTPUT_SIZE = 512
     HEIGHT_GLOBAL_MIN = -1000.0
     HEIGHT_GLOBAL_MAX = 3000.0
+    BRUSH_MANIFEST_FILE = "brush_imprint_manifest.json"
+    DEFAULT_BLUR_SIGMA = 0.0
+    DEFAULT_GLOBAL_RESIDUAL_SCALE = 0.20
+
+    def resolve_model_architecture_from_metadata(metadata: Optional[Dict[str, object]]) -> Tuple[bool, float]:
+        return False, DEFAULT_GLOBAL_RESIDUAL_SCALE
 
     class MultiChannelUNetV7(nn.Module):
-        def __init__(self, in_channels: int = 12, out_channels: int = 2):
+        def __init__(
+            self,
+            in_channels: int = 13,
+            out_channels: int = 2,
+            use_wdl_global_trestle: bool = False,
+            global_residual_scale: float = DEFAULT_GLOBAL_RESIDUAL_SCALE,
+        ):
             super().__init__()
             raise ImportError("train_v7.py is required so the V7.1 architecture matches the checkpoint.")
 
@@ -50,6 +72,7 @@ MASK_MAX_ABOVE_TERRAIN = 8.0
 MASK_MIN_BELOW_TERRAIN = -3.0
 _SCIPY_GAUSSIAN_FILTER = None
 _SCIPY_IMPORT_ATTEMPTED = False
+DEFAULT_EDGE_ANCHOR_WIDTH = 12
 
 
 def tile_uv_candidates(world_a: float, world_b: float, tile_x: int, tile_y: int) -> List[Tuple[float, float]]:
@@ -92,6 +115,41 @@ def apply_gaussian_smoothing(heightmap: np.ndarray, sigma: float) -> np.ndarray:
     return tensor.squeeze(0).squeeze(0).numpy()
 
 
+def render_wdl_height_prior_world(wdl_data: Optional[Dict[str, object]], target_size: int) -> Optional[np.ndarray]:
+    if not wdl_data:
+        return None
+
+    outer = np.asarray(wdl_data.get("outer_17", []), dtype=np.float32)
+    if len(outer) != 289 or not np.all(np.isfinite(outer)):
+        return None
+
+    grid = outer.reshape(17, 17)
+    tensor = torch.from_numpy(grid).unsqueeze(0).unsqueeze(0)
+    resized = F.interpolate(tensor, size=(target_size, target_size), mode="bilinear", align_corners=True)
+    return resized.squeeze(0).squeeze(0).numpy()
+
+
+def anchor_heightmap_edges(heightmap_world: np.ndarray, edge_prior_world: Optional[np.ndarray], edge_width: int) -> np.ndarray:
+    if edge_prior_world is None or edge_width <= 0:
+        return heightmap_world
+
+    result = np.array(heightmap_world, copy=True)
+    height, width = result.shape
+    border_distance = np.minimum.reduce(
+        np.meshgrid(
+            np.minimum(np.arange(width), np.arange(width)[::-1]),
+            np.minimum(np.arange(height), np.arange(height)[::-1]),
+            indexing="xy",
+        )
+    ).astype(np.float32)
+    border_weight = np.clip((float(edge_width) - border_distance) / max(float(edge_width), 1.0), 0.0, 1.0)
+    if not np.any(border_weight > 0):
+        return result
+
+    result = result * (1.0 - border_weight) + edge_prior_world * border_weight
+    return result.astype(np.float32, copy=False)
+
+
 def load_heightmap_16bit(path: Path, target_size: int = OUTPUT_SIZE) -> torch.Tensor:
     image = Image.open(path)
     if image.mode == "I;16":
@@ -118,17 +176,76 @@ class V7InferenceEngine:
         checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         self.metadata: Dict[str, object] = dict(checkpoint.get("metadata", {}))
         state_dict = checkpoint["model_state_dict"] if "model_state_dict" in checkpoint else checkpoint
-        in_channels = state_dict["enc1.0.weight"].shape[1]
-        out_channels = state_dict["out_conv.weight"].shape[0]
+        in_channels = self._infer_input_channels(state_dict)
+        out_channels = self._infer_output_channels(state_dict)
+        self.expected_in_channels = int(in_channels)
+        use_wdl_global_trestle, global_residual_scale = resolve_model_architecture_from_metadata(self.metadata)
         print(f"Detected input channels: {in_channels}")
 
-        self.model = MultiChannelUNetV7(in_channels=in_channels, out_channels=out_channels).to(self.device)
+        self.model = MultiChannelUNetV7(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            use_wdl_global_trestle=use_wdl_global_trestle,
+            global_residual_scale=global_residual_scale,
+        ).to(self.device)
         self.model.load_state_dict(state_dict)
         self.model.eval()
 
         self.to_tensor = transforms.ToTensor()
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        self.blur = transforms.GaussianBlur(kernel_size=3, sigma=0.5)
+        blur_sigma = float(self.metadata.get("blur_sigma", 0.5))
+        self.blur = transforms.GaussianBlur(kernel_size=3, sigma=blur_sigma) if blur_sigma > 0 else None
+        self._brush_manifest_cache: Dict[Path, Optional[Dict[str, object]]] = {}
+
+    @staticmethod
+    def _infer_input_channels(state_dict: Dict[str, torch.Tensor]) -> int:
+        for key, value in state_dict.items():
+            if key.endswith("weight") and value.ndim == 4:
+                return int(value.shape[1])
+        raise KeyError("Could not infer input channel count from checkpoint state_dict.")
+
+    @staticmethod
+    def _infer_output_channels(state_dict: Dict[str, torch.Tensor]) -> int:
+        for key, value in reversed(list(state_dict.items())):
+            if key.endswith("weight") and value.ndim == 4:
+                return int(value.shape[0])
+        raise KeyError("Could not infer output channel count from checkpoint state_dict.")
+
+    def _load_brush_manifest(self, dataset_root: Path) -> Optional[Dict[str, object]]:
+        if dataset_root in self._brush_manifest_cache:
+            return self._brush_manifest_cache[dataset_root]
+
+        manifest_path = dataset_root / "brush_imprints" / BRUSH_MANIFEST_FILE
+        if not manifest_path.exists():
+            self._brush_manifest_cache[dataset_root] = None
+            return None
+
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as handle:
+                manifest = json.load(handle)
+        except Exception:
+            manifest = None
+
+        self._brush_manifest_cache[dataset_root] = manifest
+        return manifest
+
+    def _resolve_brush_mask_path(self, dataset_root: Path, tile_name: str) -> Optional[Path]:
+        manifest = self._load_brush_manifest(dataset_root)
+        if not manifest:
+            return None
+
+        for tile in manifest.get("tiles", []):
+            if str(tile.get("tile_name", "")) != tile_name:
+                continue
+
+            rel = tile.get("brush_mask_path")
+            if not rel:
+                return None
+
+            candidate = dataset_root / "brush_imprints" / str(rel)
+            return candidate if candidate.exists() else None
+
+        return None
 
     def prepare_input(self, dataset_root: Path, tile_name: str) -> Tuple[torch.Tensor, Dict[str, float], Path]:
         json_path = dataset_root / "dataset" / f"{tile_name}.json"
@@ -159,18 +276,19 @@ class V7InferenceEngine:
             raise FileNotFoundError(f"Missing input images for {tile_name}")
 
         minimap = Image.open(minimap_path).convert("RGB").resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.BILINEAR)
-        minimap = self.blur(minimap)
+        if self.blur is not None:
+            minimap = self.blur(minimap)
         normalmap = Image.open(normalmap_path).convert("RGB").resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.BILINEAR)
-
-        minimap_tensor = self.normalize(self.to_tensor(minimap))
-        normalmap_tensor = self.normalize(self.to_tensor(normalmap))
-        wdl_tensor = self._render_wdl(terrain.get("wdl_heights"))
 
         height_min = float(terrain.get("height_min", 0.0))
         height_max = float(terrain.get("height_max", 100.0))
         global_min = float(terrain.get("height_global_min", HEIGHT_GLOBAL_MIN))
         global_max = float(terrain.get("height_global_max", HEIGHT_GLOBAL_MAX))
         global_range = max(global_max - global_min, 1e-6)
+
+        minimap_tensor = self.normalize(self.to_tensor(minimap))
+        normalmap_tensor = self.normalize(self.to_tensor(normalmap))
+        wdl_tensor = self._render_wdl(terrain.get("wdl_heights"), global_min, global_max)
 
         height_min_mask = torch.full((1, OUTPUT_SIZE, OUTPUT_SIZE), np.clip((height_min - global_min) / global_range, 0.0, 1.0), dtype=torch.float32)
         height_max_mask = torch.full((1, OUTPUT_SIZE, OUTPUT_SIZE), np.clip((height_max - global_min) / global_range, 0.0, 1.0), dtype=torch.float32)
@@ -190,6 +308,14 @@ class V7InferenceEngine:
             if liquid_height_path.exists():
                 liquid_height_prior = load_heightmap_16bit(liquid_height_path, OUTPUT_SIZE) * liquid_mask
 
+        brush_mask = torch.zeros((1, OUTPUT_SIZE, OUTPUT_SIZE), dtype=torch.float32)
+        if self.expected_in_channels >= 13:
+            brush_mask_path = self._resolve_brush_mask_path(dataset_root, tile_name)
+            if brush_mask_path and brush_mask_path.exists():
+                brush_image = Image.open(brush_mask_path).convert("L").resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.NEAREST)
+                brush_tensor = self.to_tensor(brush_image)
+                brush_mask = (brush_tensor > 0.1).float()
+
         tile_x, tile_y = parse_tile_coords(tile_name)
         object_mask = self._build_object_mask(terrain.get("objects"), tile_x, tile_y, terrain.get("wdl_heights"))
         pm4_mask = self._load_optional_binary_mask(
@@ -199,19 +325,26 @@ class V7InferenceEngine:
         )
         object_mask = torch.maximum(object_mask, pm4_mask)
 
-        input_tensor = torch.cat(
-            [
-                minimap_tensor,
-                normalmap_tensor,
-                wdl_tensor,
-                height_min_mask,
-                height_max_mask,
-                liquid_mask,
-                liquid_height_prior,
-                object_mask,
-            ],
-            dim=0,
-        ).unsqueeze(0)
+        channels = [
+            minimap_tensor,
+            normalmap_tensor,
+            wdl_tensor,
+            height_min_mask,
+            height_max_mask,
+            liquid_mask,
+            liquid_height_prior,
+            object_mask,
+        ]
+        if self.expected_in_channels >= 13:
+            channels.append(brush_mask)
+
+        input_tensor = torch.cat(channels, dim=0)
+        if input_tensor.shape[0] != self.expected_in_channels:
+            raise RuntimeError(
+                f"Prepared {input_tensor.shape[0]} input channels for {tile_name}, but checkpoint expects {self.expected_in_channels}."
+            )
+
+        input_tensor = input_tensor.unsqueeze(0)
 
         bounds_info = {
             "h_min": height_min,
@@ -221,7 +354,7 @@ class V7InferenceEngine:
         }
         return input_tensor.to(self.device), bounds_info, minimap_path
 
-    def _render_wdl(self, wdl_data: Optional[Dict[str, object]]) -> torch.Tensor:
+    def _render_wdl(self, wdl_data: Optional[Dict[str, object]], global_min: float, global_max: float) -> torch.Tensor:
         if not wdl_data:
             return torch.full((1, OUTPUT_SIZE, OUTPUT_SIZE), 0.5)
 
@@ -230,12 +363,8 @@ class V7InferenceEngine:
             return torch.full((1, OUTPUT_SIZE, OUTPUT_SIZE), 0.5)
 
         grid = outer.reshape(17, 17)
-        minimum = float(grid.min())
-        maximum = float(grid.max())
-        if maximum - minimum > 1e-6:
-            grid = (grid - minimum) / (maximum - minimum)
-        else:
-            grid[:] = 0.5
+        global_range = max(global_max - global_min, 1e-6)
+        grid = np.clip((grid - global_min) / global_range, 0.0, 1.0)
 
         image = Image.fromarray((grid * 255).astype(np.uint8), mode="L")
         image = image.resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.BILINEAR)
@@ -469,6 +598,9 @@ class V7InferenceEngine:
         wdl = input_tensor[0, 6:7].cpu().repeat(3, 1, 1)
         water = input_tensor[0, 9:10].cpu().repeat(3, 1, 1) * torch.tensor([0.0, 0.0, 1.0]).view(3, 1, 1)
         objects = input_tensor[0, 11:12].cpu().repeat(3, 1, 1) * torch.tensor([1.0, 0.5, 0.0]).view(3, 1, 1)
+        brush = None
+        if input_tensor.shape[1] > 12:
+            brush = input_tensor[0, 12:13].cpu().repeat(3, 1, 1) * torch.tensor([1.0, 0.75, 0.0]).view(3, 1, 1)
         prediction = predicted_heightmap[0, 0:1].cpu()
 
         mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
@@ -480,7 +612,12 @@ class V7InferenceEngine:
         prediction = prediction / (prediction.max() + 1e-6)
         prediction = prediction.repeat(3, 1, 1)
 
-        grid = torch.cat([minimap, normalmap, wdl, water, objects, prediction], dim=2)
+        columns = [minimap, normalmap, wdl, water, objects]
+        if brush is not None:
+            columns.append(brush)
+        columns.append(prediction)
+
+        grid = torch.cat(columns, dim=2)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         transforms.ToPILImage()(grid).save(output_path)
 
@@ -518,6 +655,7 @@ def run_batch_inference(
     z_scale: float = 1.0,
     smooth_sigma: float = 0.0,
     out_res: int = OUTPUT_SIZE,
+    edge_anchor_width: int = DEFAULT_EDGE_ANCHOR_WIDTH,
 ) -> None:
     engine = V7InferenceEngine(model_path)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -537,6 +675,9 @@ def run_batch_inference(
 
         try:
             input_tensor, bounds_info, texture_path = engine.prepare_input(dataset_root, tile_name)
+            with open(json_file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            terrain = payload.get("terrain_data", {})
             predicted_heightmap, predicted_bounds = engine.predict(input_tensor)
 
             heightmap_normalized = predicted_heightmap[0, 0]
@@ -546,6 +687,8 @@ def run_batch_inference(
                 heightmap_world *= z_scale
             if smooth_sigma > 0:
                 heightmap_world = apply_gaussian_smoothing(heightmap_world, sigma=smooth_sigma)
+            edge_prior_world = render_wdl_height_prior_world(terrain.get("wdl_heights"), heightmap_world.shape[0])
+            heightmap_world = anchor_heightmap_edges(heightmap_world, edge_prior_world, edge_anchor_width)
             if out_res != OUTPUT_SIZE:
                 resized = Image.fromarray(heightmap_world, mode="F")
                 resized = resized.resize((out_res, out_res), Image.BILINEAR)
@@ -586,6 +729,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--z-scale", type=float, default=1.0, help="Optional scale factor for output world heights")
     parser.add_argument("--smooth-output", type=float, default=0.0, help="Optional Gaussian smoothing sigma")
     parser.add_argument("--res", type=int, default=OUTPUT_SIZE, help="Output mesh and heightmap resolution")
+    parser.add_argument("--edge-anchor-width", type=int, default=DEFAULT_EDGE_ANCHOR_WIDTH,
+                        help=f"Feather width in pixels for anchoring tile borders to the WDL prior (default: {DEFAULT_EDGE_ANCHOR_WIDTH}).")
     return parser
 
 
@@ -600,4 +745,5 @@ if __name__ == "__main__":
         z_scale=arguments.z_scale,
         smooth_sigma=arguments.smooth_output,
         out_res=arguments.res,
+        edge_anchor_width=arguments.edge_anchor_width,
     )

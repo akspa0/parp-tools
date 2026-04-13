@@ -78,13 +78,15 @@ HEIGHT_GLOBAL_RANGE = HEIGHT_GLOBAL_MAX - HEIGHT_GLOBAL_MIN
 DEFAULT_OUTPUT_DIR = Path("./vlm_output")
 DEFAULT_BATCH_SIZE = 4
 DEFAULT_LEARNING_RATE = 1e-4
-DEFAULT_NUM_EPOCHS = 500
+DEFAULT_NUM_EPOCHS = 100
 DEFAULT_EARLY_STOP_PATIENCE = 5
 DEFAULT_VAL_FRACTION = 0.10
 DEFAULT_SPATIAL_GROUP_SIZE = 4
 DEFAULT_SEED = 1337
-DEFAULT_BLUR_SIGMA = 0.5
+DEFAULT_BLUR_SIGMA = 0.0
 DEFAULT_PREVIEW_COUNT = 4
+DEFAULT_STATIC_PREVIEW_COUNT = 2
+DEFAULT_RANDOM_PREVIEW_COUNT = 2
 PREVIEW_MIN_VISUAL_VARIANCE = 0.008
 DEFAULT_MIN_HEIGHT_RANGE = 0.5
 TILE_SIZE = 533.33333
@@ -103,13 +105,22 @@ DEFAULT_AMP_DTYPE = "auto"
 DEFAULT_ADVERSARIAL_SCALE = 0.20
 DEFAULT_START_GAN_EPOCH = 101
 DEFAULT_DISC_EVERY = 2
+DEFAULT_DISC_REAL_TARGET = 0.90
+DEFAULT_DISC_FAKE_TARGET = 0.10
+DEFAULT_DISC_LABEL_NOISE = 0.02
+DEFAULT_DISC_INPUT_NOISE_STD = 0.01
+DEFAULT_DISC_GRAD_CLIP = 1.0
 DEFAULT_GAN_CYCLE_LENGTH = 0
 DEFAULT_GAN_CYCLE_ON_EPOCHS = 0
 DEFAULT_GAN_COOLDOWN_AFTER_BEST = 0
 DEFAULT_GAN_BURST_AFTER_BEST = 0
-DEFAULT_EARLY_STOP_START_EPOCH = 101
+DEFAULT_EARLY_STOP_START_EPOCH = 1
 DEFAULT_LR_PLATEAU_PATIENCE = 8
 DEFAULT_LR_PLATEAU_FACTOR = 0.5
+DEFAULT_USE_WDL_GLOBAL_TRESTLE = True
+DEFAULT_GLOBAL_RESIDUAL_SCALE = 0.20
+MODEL_VARIANT_WDL_TRESTLE_REFLECT = "wdl-trestle-reflect-v1"
+MODEL_VARIANT_LEGACY = "legacy-absolute-v1"
 
 DEFAULT_DATASET_SEARCH_ROOTS = [
     Path(r"i:\parp\parp-tools\gillijimproject_refactor\test_data\vlm-datasets"),
@@ -157,7 +168,12 @@ LOSS_WEIGHTS = {
     "frequency": 0.08,
     "adversarial": 0.12,
     "laplacian": 0.12,
+    "transition": 0.10,
+    "tile_edge": 0.12,
 }
+
+EDGE_FOCUS_WIDTH = 12
+TRANSITION_FOCUS_GAIN = 3.0
 
 DISCRIMINATOR_LR = 2e-4
 
@@ -279,9 +295,9 @@ class ResConvBlock(nn.Module):
 
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, padding_mode="reflect")
         self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, padding_mode="reflect")
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.use_residual = in_channels == out_channels
 
@@ -312,8 +328,16 @@ class MultiChannelUNetV7(nn.Module):
     V7.3: residual conv blocks, bilinear upsampling, hard-clamp output.
     """
 
-    def __init__(self, in_channels: int = MODEL_INPUT_CHANNELS, out_channels: int = MODEL_OUTPUT_CHANNELS):
+    def __init__(
+        self,
+        in_channels: int = MODEL_INPUT_CHANNELS,
+        out_channels: int = MODEL_OUTPUT_CHANNELS,
+        use_wdl_global_trestle: bool = False,
+        global_residual_scale: float = DEFAULT_GLOBAL_RESIDUAL_SCALE,
+    ):
         super().__init__()
+        self.use_wdl_global_trestle = use_wdl_global_trestle
+        self.global_residual_scale = float(global_residual_scale)
 
         self.enc1 = ResConvBlock(in_channels, 64)
         self.enc2 = ResConvBlock(64, 128)
@@ -376,7 +400,17 @@ class MultiChannelUNetV7(nn.Module):
         dec1 = self.dec1(dec1)
 
         # Hard clamp instead of sigmoid — preserves gradients at extremes
-        outputs = torch.clamp(self.out_conv(dec1), 0.0, 1.0)
+        raw_outputs = self.out_conv(dec1)
+        global_output = raw_outputs[:, 0:1]
+        if self.use_wdl_global_trestle and inputs.shape[1] > 6:
+            wdl_base = inputs[:, 6:7]
+            global_delta = torch.tanh(global_output) * self.global_residual_scale
+            global_output = torch.clamp(wdl_base + global_delta, 0.0, 1.0)
+        else:
+            global_output = torch.clamp(global_output, 0.0, 1.0)
+
+        local_output = torch.clamp(raw_outputs[:, 1:2], 0.0, 1.0)
+        outputs = torch.cat([global_output, local_output], dim=1)
         if outputs.shape[-2:] != (OUTPUT_SIZE, OUTPUT_SIZE):
             outputs = F.interpolate(outputs, size=(OUTPUT_SIZE, OUTPUT_SIZE), mode="bilinear", align_corners=False)
 
@@ -395,22 +429,22 @@ class PatchDiscriminator(nn.Module):
         super().__init__()
         self.model = nn.Sequential(
             # 512 -> 256
-            nn.Conv2d(in_channels, 64, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(in_channels, 64, kernel_size=4, stride=2, padding=1, padding_mode="reflect"),
             nn.LeakyReLU(0.2, inplace=True),
             # 256 -> 128
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, padding_mode="reflect"),
             nn.InstanceNorm2d(128),
             nn.LeakyReLU(0.2, inplace=True),
             # 128 -> 64
-            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1, padding_mode="reflect"),
             nn.InstanceNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
             # 64 -> 63 (stride=1)
-            nn.Conv2d(256, 512, kernel_size=4, stride=1, padding=1),
+            nn.Conv2d(256, 512, kernel_size=4, stride=1, padding=1, padding_mode="reflect"),
             nn.InstanceNorm2d(512),
             nn.LeakyReLU(0.2, inplace=True),
             # 63 -> 62 patch map
-            nn.Conv2d(512, 1, kernel_size=4, stride=1, padding=1),
+            nn.Conv2d(512, 1, kernel_size=4, stride=1, padding=1, padding_mode="reflect"),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -456,7 +490,7 @@ class WoWTileDatasetV7(Dataset):
 
         self.to_tensor = transforms.ToTensor()
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        self.blur = transforms.GaussianBlur(kernel_size=3, sigma=DEFAULT_BLUR_SIGMA)
+        self.blur = transforms.GaussianBlur(kernel_size=3, sigma=DEFAULT_BLUR_SIGMA) if DEFAULT_BLUR_SIGMA > 0 else None
         self.color_jitter = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)
         self._brush_manifest_cache: Dict[Path, Optional[Dict[str, Any]]] = {}
 
@@ -757,7 +791,7 @@ class WoWTileDatasetV7(Dataset):
     def __len__(self) -> int:
         return len(self.samples)
 
-    def _render_wdl(self, wdl_data: Optional[Dict[str, object]]) -> torch.Tensor:
+    def _render_wdl(self, wdl_data: Optional[Dict[str, object]], global_min: float, global_max: float) -> torch.Tensor:
         if not wdl_data:
             return torch.full((1, self.input_size, self.input_size), 0.5)
 
@@ -766,12 +800,8 @@ class WoWTileDatasetV7(Dataset):
             return torch.full((1, self.input_size, self.input_size), 0.5)
 
         grid = outer.reshape(17, 17)
-        minimum = float(grid.min())
-        maximum = float(grid.max())
-        if maximum - minimum > 1e-6:
-            grid = (grid - minimum) / (maximum - minimum)
-        else:
-            grid[:] = 0.5
+        global_range = max(global_max - global_min, 1e-6)
+        grid = np.clip((grid - global_min) / global_range, 0.0, 1.0)
 
         image = Image.fromarray((grid * 255).astype(np.uint8), mode="L")
         image = image.resize((self.input_size, self.input_size), Image.BILINEAR)
@@ -954,19 +984,20 @@ class WoWTileDatasetV7(Dataset):
         minimap = minimap.resize((self.input_size, self.input_size), Image.BILINEAR)
         normalmap = normalmap.resize((self.input_size, self.input_size), Image.BILINEAR)
 
-        minimap = self.blur(minimap)
+        if self.blur is not None:
+            minimap = self.blur(minimap)
         if self.augment:
             minimap = self.color_jitter(minimap)
-
-        minimap_tensor = self.normalize(self.to_tensor(minimap))
-        normalmap_tensor = self.normalize(self.to_tensor(normalmap))
-        wdl_tensor = self._render_wdl(terrain.get("wdl_heights"))
 
         height_min = float(terrain.get("height_min", 0.0))
         height_max = float(terrain.get("height_max", 100.0))
         global_min = float(terrain.get("height_global_min", HEIGHT_GLOBAL_MIN))
         global_max = float(terrain.get("height_global_max", HEIGHT_GLOBAL_MAX))
         global_range = max(global_max - global_min, 1e-6)
+
+        minimap_tensor = self.normalize(self.to_tensor(minimap))
+        normalmap_tensor = self.normalize(self.to_tensor(normalmap))
+        wdl_tensor = self._render_wdl(terrain.get("wdl_heights"), global_min, global_max)
 
         height_min_normalized = np.clip((height_min - global_min) / global_range, 0.0, 1.0)
         height_max_normalized = np.clip((height_max - global_min) / global_range, 0.0, 1.0)
@@ -1136,6 +1167,42 @@ def laplacian_loss(predicted: torch.Tensor, target: torch.Tensor) -> torch.Tenso
     return F.l1_loss(apply_laplacian(predicted[:, :2]), apply_laplacian(target[:, :2]))
 
 
+def weighted_l1_loss(predicted: torch.Tensor, target: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
+    weighted_error = (predicted - target).abs() * weights
+    return weighted_error.sum() / torch.clamp(weights.sum(), min=1e-6)
+
+
+def transition_focus_loss(predicted: torch.Tensor, target: torch.Tensor, gain: float = TRANSITION_FOCUS_GAIN) -> torch.Tensor:
+    sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=torch.float32, device=target.device).view(1, 1, 3, 3)
+    sobel_y = sobel_x.transpose(2, 3)
+
+    weight_maps = []
+    for channel in range(target.shape[1]):
+        current = target[:, channel:channel + 1]
+        grad_x = F.conv2d(current, sobel_x, padding=1)
+        grad_y = F.conv2d(current, sobel_y, padding=1)
+        magnitude = torch.sqrt(torch.clamp(grad_x * grad_x + grad_y * grad_y, min=0.0))
+        normalized = magnitude / (magnitude.mean(dim=(2, 3), keepdim=True) + 1e-6)
+        weight_maps.append(1.0 + gain * torch.clamp(normalized, min=0.0, max=1.0))
+
+    weights = torch.cat(weight_maps, dim=1)
+    return weighted_l1_loss(predicted[:, :2], target[:, :2], weights)
+
+
+def tile_edge_loss(predicted: torch.Tensor, target: torch.Tensor, edge_width: int = EDGE_FOCUS_WIDTH) -> torch.Tensor:
+    if edge_width <= 0:
+        return torch.zeros((), dtype=predicted.dtype, device=predicted.device)
+
+    _, channels, height, width = predicted[:, :2].shape
+    border_mask = torch.zeros((1, 1, height, width), dtype=predicted.dtype, device=predicted.device)
+    border_mask[:, :, :edge_width, :] = 1.0
+    border_mask[:, :, -edge_width:, :] = 1.0
+    border_mask[:, :, :, :edge_width] = 1.0
+    border_mask[:, :, :, -edge_width:] = 1.0
+    border_mask = border_mask.expand(predicted.shape[0], channels, height, width)
+    return weighted_l1_loss(predicted[:, :2], target[:, :2], border_mask)
+
+
 def combined_loss(
     predicted_heightmap: torch.Tensor,
     predicted_bounds: torch.Tensor,
@@ -1164,6 +1231,8 @@ def combined_loss(
     edge_component = edge_loss(predicted_heightmap, target_heightmap)
     frequency_component = frequency_loss(predicted_heightmap, target_heightmap)
     laplacian_component = laplacian_loss(predicted_heightmap, target_heightmap)
+    transition_component = transition_focus_loss(predicted_heightmap, target_heightmap)
+    tile_edge_component = tile_edge_loss(predicted_heightmap, target_heightmap)
 
     total = (
         LOSS_WEIGHTS["heightmap_global"] * global_loss
@@ -1174,6 +1243,8 @@ def combined_loss(
         + LOSS_WEIGHTS["edge"] * edge_component
         + LOSS_WEIGHTS["frequency"] * frequency_component
         + LOSS_WEIGHTS["laplacian"] * laplacian_component
+        + LOSS_WEIGHTS["transition"] * transition_component
+        + LOSS_WEIGHTS["tile_edge"] * tile_edge_component
     )
 
     adv_value = 0.0
@@ -1191,6 +1262,8 @@ def combined_loss(
         "edge": float(edge_component.item()),
         "frequency": float(frequency_component.item()),
         "laplacian": float(laplacian_component.item()),
+        "transition": float(transition_component.item()),
+        "tile_edge": float(tile_edge_component.item()),
         "adversarial": adv_value,
     }
 
@@ -1422,7 +1495,46 @@ def build_preview_batch(dataset: WoWTileDatasetV7, dataset_indices: Sequence[int
     return batch, loaded_indices, skipped_indices
 
 
-def save_training_preview(model: nn.Module, batch: Dict[str, torch.Tensor], epoch: int, output_dir: Path, device: torch.device) -> None:
+def select_epoch_preview_indices(
+    samples: Sequence[TileSample],
+    val_indices: Sequence[int],
+    static_indices: Sequence[int],
+    epoch_number: int,
+    static_preview_count: int,
+    random_preview_count: int,
+    seed: int,
+) -> List[int]:
+    selected: List[int] = []
+
+    for index in static_indices[: max(static_preview_count, 0)]:
+        if index not in selected:
+            selected.append(index)
+
+    if random_preview_count > 0:
+        pool = [index for index in val_indices if index not in selected]
+        rng = random.Random(seed + 100_003 + epoch_number)
+        rng.shuffle(pool)
+        for index in pool[:random_preview_count]:
+            if index not in selected:
+                selected.append(index)
+
+    if not selected:
+        fallback_count = max(1, static_preview_count + random_preview_count)
+        for index in list(val_indices)[:fallback_count]:
+            if index not in selected:
+                selected.append(index)
+
+    return selected
+
+
+def save_training_preview(
+    model: nn.Module,
+    batch: Dict[str, torch.Tensor],
+    epoch: int,
+    output_dir: Path,
+    device: torch.device,
+    preview_labels: Optional[Sequence[str]] = None,
+) -> None:
     model.eval()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1433,9 +1545,13 @@ def save_training_preview(model: nn.Module, batch: Dict[str, torch.Tensor], epoc
 
     rows_global: List[torch.Tensor] = []
     rows_local: List[torch.Tensor] = []
+    rows_context: List[torch.Tensor] = []
     sample_count = min(DEFAULT_PREVIEW_COUNT, inputs.shape[0])
     mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
     std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    red = torch.tensor([1.0, 0.0, 0.0]).view(3, 1, 1)
+    blue = torch.tensor([0.0, 0.0, 1.0]).view(3, 1, 1)
+    amber = torch.tensor([1.0, 0.65, 0.0]).view(3, 1, 1)
 
     def normalize_for_display(tensor: torch.Tensor) -> torch.Tensor:
         tensor = tensor - tensor.min()
@@ -1444,7 +1560,14 @@ def save_training_preview(model: nn.Module, batch: Dict[str, torch.Tensor], epoc
     for index in range(sample_count):
         minimap = torch.clamp(inputs[index, 0:3].cpu() * std + mean, 0.0, 1.0)
         normal = torch.clamp(inputs[index, 3:6].cpu() * std + mean, 0.0, 1.0)
-        water = inputs[index, 9:10].cpu().repeat(3, 1, 1) * torch.tensor([0.0, 0.0, 1.0]).view(3, 1, 1)
+        water_mask = inputs[index, 9:10].cpu()
+        water = water_mask.repeat(3, 1, 1) * blue
+        object_mask = inputs[index, 11:12].cpu()
+        brush_mask = inputs[index, 12:13].cpu()
+        object_overlay = torch.clamp(minimap * (1.0 - 0.65 * object_mask) + red * object_mask * 0.85, 0.0, 1.0)
+        masked_minimap = torch.clamp(minimap * (1.0 - object_mask), 0.0, 1.0)
+        object_mask_rgb = object_mask.repeat(3, 1, 1) * red
+        brush_mask_rgb = brush_mask.repeat(3, 1, 1) * amber
 
         # Global channel (ch 0): absolute height — most readable in early training
         pred_global = normalize_for_display(predictions[index, 0:1].cpu()).repeat(3, 1, 1)
@@ -1456,10 +1579,31 @@ def save_training_preview(model: nn.Module, batch: Dict[str, torch.Tensor], epoc
         gt_local = normalize_for_display(targets[index, 1:2].cpu()).repeat(3, 1, 1)
         rows_local.append(torch.cat([minimap, normal, water, pred_local, gt_local], dim=2))
 
+        rows_context.append(
+            torch.cat([minimap, object_overlay, masked_minimap, object_mask_rgb, water, brush_mask_rgb], dim=2)
+        )
+
     global_grid = torch.clamp(torch.cat(rows_global, dim=1), 0.0, 1.0)
     local_grid = torch.clamp(torch.cat(rows_local, dim=1), 0.0, 1.0)
+    context_grid = torch.clamp(torch.cat(rows_context, dim=1), 0.0, 1.0)
     transforms.ToPILImage()(global_grid).save(output_dir / f"val_epoch_{epoch:04d}.png")
     transforms.ToPILImage()(local_grid).save(output_dir / f"val_epoch_{epoch:04d}_local.png")
+    transforms.ToPILImage()(context_grid).save(output_dir / f"val_epoch_{epoch:04d}_context.png")
+    if preview_labels is not None:
+        metadata = {
+            "epoch": epoch,
+            "labels": list(preview_labels)[:sample_count],
+            "context_columns": [
+                "minimap",
+                "object_overlay",
+                "masked_minimap",
+                "object_mask",
+                "liquid_mask",
+                "brush_mask",
+            ],
+        }
+        with open(output_dir / f"val_epoch_{epoch:04d}.json", "w", encoding="utf-8") as handle:
+            json.dump(metadata, handle, indent=2)
 
 
 def checkpoint_metadata_from_args(
@@ -1472,6 +1616,11 @@ def checkpoint_metadata_from_args(
     val_groups: int,
 ) -> Dict[str, object]:
     return {
+        "model_variant": MODEL_VARIANT_WDL_TRESTLE_REFLECT if DEFAULT_USE_WDL_GLOBAL_TRESTLE else MODEL_VARIANT_LEGACY,
+        "use_wdl_global_trestle": DEFAULT_USE_WDL_GLOBAL_TRESTLE,
+        "global_residual_scale": DEFAULT_GLOBAL_RESIDUAL_SCALE,
+        "conv_padding_mode": "reflect",
+        "blur_sigma": DEFAULT_BLUR_SIGMA,
         "profile": args.profile,
         "dataset_roots": [str(root) for root in dataset_roots],
         "include_maps": list(args.include_map),
@@ -1498,6 +1647,15 @@ def checkpoint_metadata_from_args(
     }
 
 
+def resolve_model_architecture_from_metadata(metadata: Optional[Dict[str, object]]) -> Tuple[bool, float]:
+    if not metadata:
+        return False, DEFAULT_GLOBAL_RESIDUAL_SCALE
+
+    use_wdl_global_trestle = bool(metadata.get("use_wdl_global_trestle", False))
+    global_residual_scale = float(metadata.get("global_residual_scale", DEFAULT_GLOBAL_RESIDUAL_SCALE))
+    return use_wdl_global_trestle, global_residual_scale
+
+
 def resolve_gan_schedule(epoch_number: int, args: argparse.Namespace, gan_schedule_remaining: int) -> Tuple[bool, str]:
     if args.adversarial_scale <= 0.0:
         return False, "disabled"
@@ -1515,6 +1673,20 @@ def resolve_gan_schedule(epoch_number: int, args: argparse.Namespace, gan_schedu
         gan_enabled = cycle_offset < cycle_on_epochs
         return gan_enabled, f"cycle({cycle_offset + 1}/{args.gan_cycle_length})"
     return True, "steady"
+
+
+def build_discriminator_targets(prediction: torch.Tensor, target_value: float, label_noise: float) -> torch.Tensor:
+    targets = torch.full_like(prediction, target_value)
+    if label_noise > 0.0:
+        jitter = (torch.rand_like(prediction) * 2.0 - 1.0) * label_noise
+        targets = torch.clamp(targets + jitter, 0.0, 1.0)
+    return targets
+
+
+def apply_discriminator_input_noise(tensor: torch.Tensor, noise_std: float) -> torch.Tensor:
+    if noise_std <= 0.0:
+        return tensor
+    return torch.clamp(tensor + torch.randn_like(tensor) * noise_std, 0.0, 1.0)
 
 
 def train(args: argparse.Namespace) -> None:
@@ -1606,14 +1778,18 @@ def train(args: argparse.Namespace) -> None:
     train_loader = DataLoader(train_dataset, **train_loader_kwargs)
     val_loader = DataLoader(val_dataset, **val_loader_kwargs)
 
-    preview_batch: Optional[Dict[str, torch.Tensor]] = None
+    static_preview_indices: List[int] = []
     try:
-        preview_candidates = select_preview_candidates(val_base_dataset.samples, val_indices, DEFAULT_PREVIEW_COUNT)
-        preview_indices = [index for index, _, _ in preview_candidates]
-        preview_batch, loaded_preview_indices, skipped_preview_indices = build_preview_batch(val_base_dataset, preview_indices)
+        preview_candidates = select_preview_candidates(
+            val_base_dataset.samples,
+            val_indices,
+            max(args.static_preview_count, 1),
+        )
+        static_preview_indices = [index for index, _, _ in preview_candidates]
+        _, loaded_preview_indices, skipped_preview_indices = build_preview_batch(val_base_dataset, static_preview_indices)
         loaded_preview_index_set = set(loaded_preview_indices)
 
-        print("Preview tiles (ranked for visual signal):")
+        print("Static preview tiles (ranked for visual signal):")
         for index, score, visual_variance in preview_candidates:
             sample = val_base_dataset.samples[index]
             skipped_suffix = " [skipped]" if index not in loaded_preview_index_set else ""
@@ -1631,7 +1807,7 @@ def train(args: argparse.Namespace) -> None:
         if skipped_preview_indices:
             print(f"Warning: skipped {len(skipped_preview_indices)} preview tile(s) that failed to load.")
     except Exception as exc:
-        print(f"Warning: failed to precompute preview batch, falling back to first val batch: {exc}")
+        print(f"Warning: failed to precompute static preview candidates, falling back to validation order: {exc}")
 
     device = torch.device("cuda" if use_cuda else "cpu")
     if use_cuda:
@@ -1670,7 +1846,22 @@ def train(args: argparse.Namespace) -> None:
         f"prefetch_factor={args.prefetch_factor}, pin_memory={'on' if use_cuda else 'off'}"
     )
 
-    model = MultiChannelUNetV7().to(device)
+    resume_checkpoint: Optional[Dict[str, Any]] = None
+    use_wdl_global_trestle = DEFAULT_USE_WDL_GLOBAL_TRESTLE
+    global_residual_scale = DEFAULT_GLOBAL_RESIDUAL_SCALE
+    if args.resume:
+        resume_path = Path(args.resume)
+        if not resume_path.exists():
+            raise SystemExit(f"Resume checkpoint not found: {resume_path}")
+        resume_checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
+        use_wdl_global_trestle, global_residual_scale = resolve_model_architecture_from_metadata(
+            dict(resume_checkpoint.get("metadata", {}))
+        )
+
+    model = MultiChannelUNetV7(
+        use_wdl_global_trestle=use_wdl_global_trestle,
+        global_residual_scale=global_residual_scale,
+    ).to(device)
     discriminator = PatchDiscriminator().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     disc_optimizer = torch.optim.Adam(discriminator.parameters(), lr=args.disc_learning_rate, betas=(0.5, 0.999))
@@ -1692,6 +1883,9 @@ def train(args: argparse.Namespace) -> None:
         f"early_stop_start_epoch={args.early_stop_start_epoch}, "
         f"disc_every={args.disc_every}, "
         f"disc_lr={args.disc_learning_rate:.2e}, "
+        f"disc_targets={args.disc_real_target:.2f}/{args.disc_fake_target:.2f}, "
+        f"disc_label_noise={args.disc_label_noise:.3f}, "
+        f"disc_input_noise_std={args.disc_input_noise_std:.3f}, "
         f"lr_plateau_patience={args.lr_plateau_patience}"
     )
 
@@ -1710,10 +1904,7 @@ def train(args: argparse.Namespace) -> None:
 
     if args.resume:
         resume_path = Path(args.resume)
-        if not resume_path.exists():
-            raise SystemExit(f"Resume checkpoint not found: {resume_path}")
-
-        checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
+        checkpoint = resume_checkpoint if resume_checkpoint is not None else torch.load(resume_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
         start_epoch = int(checkpoint.get("epoch", -1)) + 1
         best_loss = float(checkpoint.get("val_loss", best_loss))
@@ -1748,6 +1939,8 @@ def train(args: argparse.Namespace) -> None:
         discriminator.train()
         train_losses: List[float] = []
         disc_losses: List[float] = []
+        disc_real_scores: List[float] = []
+        disc_fake_scores: List[float] = []
         epoch_parts: Dict[str, float] = {}
 
         epoch_train_start = time.perf_counter()
@@ -1768,18 +1961,27 @@ def train(args: argparse.Namespace) -> None:
             if gan_enabled_epoch and do_disc_step:
                 disc_optimizer.zero_grad(set_to_none=True)
                 with amp_context:
-                    real_pred = discriminator(targets)
-                    fake_pred = discriminator(outputs.detach())
-                    disc_real_loss = F.mse_loss(real_pred, torch.ones_like(real_pred))
-                    disc_fake_loss = F.mse_loss(fake_pred, torch.zeros_like(fake_pred))
+                    real_disc_input = apply_discriminator_input_noise(targets, args.disc_input_noise_std)
+                    fake_disc_input = apply_discriminator_input_noise(outputs.detach(), args.disc_input_noise_std)
+                    real_pred = discriminator(real_disc_input)
+                    fake_pred = discriminator(fake_disc_input)
+                    real_targets = build_discriminator_targets(real_pred, args.disc_real_target, args.disc_label_noise)
+                    fake_targets = build_discriminator_targets(fake_pred, args.disc_fake_target, args.disc_label_noise)
+                    disc_real_loss = F.mse_loss(real_pred, real_targets)
+                    disc_fake_loss = F.mse_loss(fake_pred, fake_targets)
                     disc_loss = (disc_real_loss + disc_fake_loss) * 0.5
                 if scaler is not None:
                     scaler.scale(disc_loss).backward()
+                    scaler.unscale_(disc_optimizer)
+                    torch.nn.utils.clip_grad_norm_(discriminator.parameters(), max_norm=args.disc_grad_clip)
                     scaler.step(disc_optimizer)
                 else:
                     disc_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(discriminator.parameters(), max_norm=args.disc_grad_clip)
                     disc_optimizer.step()
                 disc_losses.append(float(disc_loss.item()))
+                disc_real_scores.append(float(real_pred.mean().item()))
+                disc_fake_scores.append(float(fake_pred.mean().item()))
 
             # --- Generator step ---
             optimizer.zero_grad(set_to_none=True)
@@ -1788,7 +1990,8 @@ def train(args: argparse.Namespace) -> None:
                 adv_loss = None
                 if use_gan_objective:
                     fake_pred_for_gen = discriminator(outputs)
-                    adv_loss = F.mse_loss(fake_pred_for_gen, torch.ones_like(fake_pred_for_gen))
+                    gen_targets = torch.full_like(fake_pred_for_gen, args.disc_real_target)
+                    adv_loss = F.mse_loss(fake_pred_for_gen, gen_targets)
                 loss, parts = combined_loss(
                     outputs,
                     output_bounds,
@@ -1891,6 +2094,12 @@ def train(args: argparse.Namespace) -> None:
             )
         )
         print(
+            "  Disc Real/Fake Mean: {real:.4f}/{fake:.4f}".format(
+                real=float(np.mean(disc_real_scores)) if disc_real_scores else 0.0,
+                fake=float(np.mean(disc_fake_scores)) if disc_fake_scores else 0.0,
+            )
+        )
+        print(
             "  Throughput: {steps:.2f} steps/s | {samples:.1f} samples/s".format(
                 steps=train_steps_per_second,
                 samples=train_samples_per_second,
@@ -1909,13 +2118,35 @@ def train(args: argparse.Namespace) -> None:
 
         # Save a preview every epoch unconditionally so there is always something to inspect.
         try:
-            if preview_batch is not None:
-                save_training_preview(model, preview_batch, epoch + 1, output_dir / "previews", device)
-            else:
-                fallback_batch = next(iter(val_loader))
-                save_training_preview(model, fallback_batch, epoch + 1, output_dir / "previews", device)
+            preview_indices = select_epoch_preview_indices(
+                val_base_dataset.samples,
+                val_indices,
+                static_preview_indices,
+                epoch_number,
+                args.static_preview_count,
+                args.random_preview_count,
+                args.seed,
+            )
+            preview_batch, loaded_preview_indices, skipped_preview_indices = build_preview_batch(
+                val_base_dataset,
+                preview_indices,
+            )
+            preview_labels = [
+                f"{val_base_dataset.samples[index].dataset_name}:{val_base_dataset.samples[index].tile_name}"
+                for index in loaded_preview_indices
+            ]
+            save_training_preview(
+                model,
+                preview_batch,
+                epoch + 1,
+                output_dir / "previews",
+                device,
+                preview_labels=preview_labels,
+            )
+            if skipped_preview_indices:
+                print(f"  Skipped {len(skipped_preview_indices)} preview tile(s) while building epoch preview batch")
         except Exception as exc:
-            print(f"  Failed to save preview: {exc}")
+            print(f"  Failed to save mixed preview batch: {exc}")
 
         saved_new_best = False
         schedule_rearmed_this_epoch = False
@@ -1992,6 +2223,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE)
     parser.add_argument("--disc-learning-rate", type=float, default=DISCRIMINATOR_LR,
                         help=f"Discriminator learning rate (default: {DISCRIMINATOR_LR}).")
+    parser.add_argument("--disc-real-target", type=float, default=DEFAULT_DISC_REAL_TARGET,
+                        help=f"Least-squares GAN target for real patches (default: {DEFAULT_DISC_REAL_TARGET}).")
+    parser.add_argument("--disc-fake-target", type=float, default=DEFAULT_DISC_FAKE_TARGET,
+                        help=f"Least-squares GAN target for fake patches (default: {DEFAULT_DISC_FAKE_TARGET}).")
+    parser.add_argument("--disc-label-noise", type=float, default=DEFAULT_DISC_LABEL_NOISE,
+                        help=f"Uniform label jitter applied around discriminator targets (default: {DEFAULT_DISC_LABEL_NOISE}).")
+    parser.add_argument("--disc-input-noise-std", type=float, default=DEFAULT_DISC_INPUT_NOISE_STD,
+                        help=f"Gaussian noise std added to discriminator inputs while GAN is active (default: {DEFAULT_DISC_INPUT_NOISE_STD}).")
+    parser.add_argument("--disc-grad-clip", type=float, default=DEFAULT_DISC_GRAD_CLIP,
+                        help=f"Gradient clipping max-norm for discriminator updates (default: {DEFAULT_DISC_GRAD_CLIP}).")
     parser.add_argument("--epochs", type=int, default=DEFAULT_NUM_EPOCHS)
     parser.add_argument("--patience", type=int, default=DEFAULT_EARLY_STOP_PATIENCE)
     parser.add_argument("--early-stop-start-epoch", type=int, default=DEFAULT_EARLY_STOP_START_EPOCH,
@@ -2017,6 +2258,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--val-fraction", type=float, default=DEFAULT_VAL_FRACTION)
     parser.add_argument("--spatial-group-size", type=int, default=DEFAULT_SPATIAL_GROUP_SIZE)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--static-preview-count", type=int, default=DEFAULT_STATIC_PREVIEW_COUNT,
+                        help=f"How many fixed high-signal validation tiles to keep in every preview grid (default: {DEFAULT_STATIC_PREVIEW_COUNT}).")
+    parser.add_argument("--random-preview-count", type=int, default=DEFAULT_RANDOM_PREVIEW_COUNT,
+                        help=f"How many random validation tiles to add to each epoch preview grid (default: {DEFAULT_RANDOM_PREVIEW_COUNT}).")
     parser.add_argument("--limit", type=int, help="Optional per-root sample cap for quick debugging.")
     parser.add_argument("--resume", type=str, help="Resume from an existing checkpoint.")
     parser.add_argument("--no-resume-optimizer", action="store_true",
