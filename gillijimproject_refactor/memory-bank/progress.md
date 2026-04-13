@@ -1,5 +1,56 @@
 # Progress
 
+### Apr 13, 2026 - Scaled brush-imprint harvest across the trusted corpus and added a first brush mask input channel to V7
+
+- executed `ml-harvest-brushes` across the trusted corpus into `output/build-validation/brush-imprints/trusted/`
+- all-corpus brush harvest summary:
+	- `27` manifests
+	- `10,541` processed tiles
+	- `259,216` grouped candidates
+	- `51,741,807` patch cells
+	- only one zero-group root observed so far: `400_11927_Uldum`
+- updated the harvester in `wow-viewer/tools/converter/WowViewer.Tool.Converter/MlBrushImprintHarvester.cs` so each tile now also emits a tile-level `brush_mask_path` under `brush_imprints/tile_masks/`
+- integrated the first brush-conditioning seam into `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py`
+	- raised `MODEL_INPUT_CHANNELS` from `12` to `13`
+	- `TileSample` now carries `brush_mask_path`
+	- dataset loader now reads `brush_imprints/brush_imprint_manifest.json` and resolves per-tile brush masks
+	- training input tensor now appends the brush mask after the object mask channel
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
+	- `C:\Users\akspa\anaconda3\python.exe -m py_compile i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` passed
+	- dry trainer smoke on `output/ml-corpus/400_12304/development` with `--epochs 0 --batch-size 1 --limit 4 --no-augment` loaded `3` usable samples and reached CUDA startup successfully with the new brush channel present
+- proof boundary:
+	- this is a first tile-level brush mask conditioning seam only
+	- grouped brush candidates are harvested and stored, but not yet embedded or consumed directly as a separate brush model or retrieval system
+	- next work should decide whether to keep iterating on tile-mask conditioning or split immediately into a dedicated brush-pattern model family over the harvested candidate dataset
+
+### Apr 13, 2026 - Added first wow-viewer patch-scale brush-imprint harvester and validated it on rescued development tiles
+
+- implemented a new wow-viewer command in `wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs` backed by `wow-viewer/tools/converter/WowViewer.Tool.Converter/MlBrushImprintHarvester.cs`
+	- command: `ml-harvest-brushes --dataset-root <path> [--output-dir <dir>] [--limit <count>] [--write-previews]`
+- landed active behavior:
+	- reads ML dataset JSON from `dataset/`
+	- converts each tile into a `16x16` chunk grid and a `256x256` patch-cell grid
+	- scores patch cells from terrain-shape change on the `257x257` global height lattice
+	- flood-groups adjacent strong cells into candidate patch-group imprints
+	- writes:
+		- `brush_imprint_manifest.json`
+		- one JSON file per grouped candidate under `groups/`
+		- optional preview masks under `previews/`
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed after the new command landed
+	- real-data subset validation passed with:
+		- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- ml-harvest-brushes --dataset-root i:/parp/parp-tools/output/ml-corpus/400_12304/development --output-dir i:/parp/parp-tools/output/build-validation/brush-imprints/development_40012304 --limit 6 --write-previews`
+	- subset results written under `output/build-validation/brush-imprints/development_40012304/`:
+		- `6` tiles processed
+		- `250` grouped candidates
+		- `17,699` patch cells across those groups
+		- previews written for inspection
+	- representative output: `output/build-validation/brush-imprints/development_40012304/groups/development_34_34_g0001.json`
+- proof boundary:
+	- this is the first patch-scale archaeology dataset seam, not final brush identity recovery or final dedupe/classification
+	- current grouping is terrain-shape-first and intended to seed the separate brush dataset the user asked for; deeper clustering/modeling is still next
+
 ### Apr 12, 2026 - Audited the trusted ML corpus at scale and launched the next V7 run from the audited root set
 
 - executed the new wow-viewer audit command across the trusted corpus into `output/build-validation/ml-audit/trusted/`

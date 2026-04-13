@@ -1,5 +1,60 @@
 # Active Context
 
+## Apr 13, 2026 - Brush-imprint harvest now runs corpus-wide and the terrain trainer can consume a first brush mask channel
+
+- ran `ml-harvest-brushes` across the trusted `output/ml-corpus` set into `output/build-validation/brush-imprints/trusted/`
+- corpus-wide brush harvest summary:
+	- `27` manifests
+	- `10,541` processed tiles
+	- `259,216` grouped candidates
+	- `51,741,807` patch cells written
+	- one zero-group root so far: `400_11927_Uldum`
+	- largest roots by grouped output currently include `400_11927_Kalimdor`, `301_8303_Kalimdor`, `335_12340_Kalimdor`, `400_11927_Azeroth`, and `335_12340_Azeroth`
+- exporter/harvester behavior change:
+	- `ml-harvest-brushes` now also writes per-tile brush masks under `brush_imprints/tile_masks/`
+	- each tile summary in `brush_imprint_manifest.json` now carries `brush_mask_path`
+- first trainer integration landed in `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py`
+	- `MODEL_INPUT_CHANNELS` increased from `12` to `13`
+	- `TileSample` now carries `brush_mask_path`
+	- dataset loader resolves `brush_imprints/brush_imprint_manifest.json` and tile-level mask paths per dataset root
+	- `__getitem__` now loads the tile brush mask as an additional binary conditioning channel appended after the current object mask
+- validation captured:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed after the harvester updates
+	- `C:\Users\akspa\anaconda3\python.exe -m py_compile i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` passed
+	- a dry trainer smoke with `--epochs 0 --batch-size 1 --limit 4 --no-augment --dataset-root output/ml-corpus/400_12304/development` loaded `3` valid samples successfully after the brush channel integration and reached CUDA startup without input-shape failure
+- important boundary:
+	- current trainer integration is intentionally minimal: a tile-level brush mask channel only
+	- it does not yet use grouped candidate geometry directly, patch-group embeddings, or a separate brush model
+	- this is the first safe path to let the terrain regressor see where harvested brush-like imprints cluster while the separate brush dataset/model path is still being built
+
+## Apr 13, 2026 - First brush-imprint harvester landed for patch-scale WoWEdit archaeology
+
+- landed a new wow-viewer command surface in `wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs`:
+	- `ml-harvest-brushes --dataset-root <path> [--output-dir <dir>] [--limit <count>] [--write-previews]`
+- implementation now lives in `wow-viewer/tools/converter/WowViewer.Tool.Converter/MlBrushImprintHarvester.cs`
+- current scope of the harvester:
+	- reads ML dataset tile JSONs from `dataset/`
+	- loads `heightmap_global` (resizing `512x512` exports down to the terrain-native `257x257` lattice when needed)
+	- treats each tile as `16x16` chunks and each chunk as `16x16` candidate patch cells
+	- scores patch cells from local relief / slope / diagonal change over the `257x257` terrain lattice
+	- flood-groups adjacent high-score patch cells into candidate patch-group imprints
+	- emits one JSON per grouped candidate plus a manifest and optional preview masks
+- important boundary:
+	- this is not the final brush-dedupe system and does not yet prove recovered WoWEdit brush identity
+	- it is a first archaeology seam that isolates repeated patch or patch-group terrain imprints into a separate dataset for later analysis/modeling
+	- texture-layer evidence is currently weak because active corpora mostly carry `texture_path` ordering without live `alpha_bits`; the first harvester therefore leans on terrain-shape imprints first and carries texture signatures only when available
+- first real-data validation captured:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- ml-harvest-brushes --dataset-root i:/parp/parp-tools/output/ml-corpus/400_12304/development --output-dir i:/parp/parp-tools/output/build-validation/brush-imprints/development_40012304 --limit 6 --write-previews` passed
+	- output summary from `output/build-validation/brush-imprints/development_40012304/brush_imprint_manifest.json`:
+		- `6` tiles processed
+		- `250` grouped brush candidates written
+		- `17,699` patch cells written across those groups
+	- example candidate file `output/build-validation/brush-imprints/development_40012304/groups/development_34_34_g0001.json` shows a grouped imprint spanning patch bounds `64..80 x 213..225`, `94` active patch cells, and an `18x14` normalized height micro-grid suitable for later clustering/model work
+- preserved next requirement from user correction:
+	- the real goal is identifying patch or patch-group imprints left by the original WoWEdit 3D brush workflow and sorting them into their own dataset
+	- actual dedupe/retrieval/classification should happen later over this harvested imprint dataset, likely with a separate model family
+
 ## Apr 12, 2026 - Full trusted-corpus signal audit completed in wow-viewer and the next audited V7 run is live
 
 - ran [`ml-audit-signals`](../../wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs) across the trusted corpus roots into `output/build-validation/ml-audit/trusted/`

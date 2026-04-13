@@ -26,6 +26,7 @@ Inputs:
 - liquid mask
 - liquid height prior
 - object footprint mask
+- brush imprint mask
 
 Outputs:
 - global heightmap
@@ -67,7 +68,7 @@ from tqdm import tqdm
 
 INPUT_SIZE = 512
 OUTPUT_SIZE = 512
-MODEL_INPUT_CHANNELS = 12
+MODEL_INPUT_CHANNELS = 13
 MODEL_OUTPUT_CHANNELS = 2
 
 HEIGHT_GLOBAL_MIN = -1000.0
@@ -93,6 +94,7 @@ MASK_MAX_ABOVE_TERRAIN = 8.0
 MASK_MIN_BELOW_TERRAIN = -3.0
 DATASET_INDEX_CACHE_VERSION = 1
 DATASET_INDEX_CACHE_FILE = ".v7_dataset_index_cache.json"
+BRUSH_MANIFEST_FILE = "brush_imprint_manifest.json"
 DEFAULT_TRAIN_WORKERS = 4
 DEFAULT_VAL_WORKERS = 2
 DEFAULT_PREFETCH_FACTOR = 2
@@ -165,6 +167,7 @@ class TileSample:
     heightmap_local_path: Path
     liquid_mask_path: Optional[Path]
     liquid_height_path: Optional[Path]
+    brush_mask_path: Optional[Path]
     height_range: float
     object_count: int
     has_liquid: bool
@@ -445,6 +448,7 @@ class WoWTileDatasetV7(Dataset):
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         self.blur = transforms.GaussianBlur(kernel_size=3, sigma=DEFAULT_BLUR_SIGMA)
         self.color_jitter = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)
+        self._brush_manifest_cache: Dict[Path, Optional[Dict[str, Any]]] = {}
 
         if preloaded_samples is not None:
             print(f"Reusing preloaded V7 sample index ({len(self.samples)} samples)")
@@ -538,6 +542,7 @@ class WoWTileDatasetV7(Dataset):
             liquid_height_rel = entry.get("liquid_height")
             liquid_mask_path = dataset_root / str(liquid_mask_rel) if liquid_mask_rel else None
             liquid_height_path = dataset_root / str(liquid_height_rel) if liquid_height_rel else None
+            brush_mask_path = self._resolve_brush_mask_path(dataset_root, tile_name)
 
             tile_object_count = int(entry.get("object_count", 0))
             tile_has_liquid = bool(liquid_mask_path and liquid_mask_path.exists())
@@ -560,6 +565,7 @@ class WoWTileDatasetV7(Dataset):
                     heightmap_local_path=heightmap_local_path,
                     liquid_mask_path=liquid_mask_path,
                     liquid_height_path=liquid_height_path,
+                    brush_mask_path=brush_mask_path,
                     height_range=height_max - height_min,
                     object_count=tile_object_count,
                     has_liquid=tile_has_liquid,
@@ -653,6 +659,42 @@ class WoWTileDatasetV7(Dataset):
         except Exception:
             # Cache write failure should never block training.
             return
+
+    def _load_brush_manifest(self, dataset_root: Path) -> Optional[Dict[str, Any]]:
+        if dataset_root in self._brush_manifest_cache:
+            return self._brush_manifest_cache[dataset_root]
+
+        manifest_path = dataset_root / "brush_imprints" / BRUSH_MANIFEST_FILE
+        if not manifest_path.exists():
+            self._brush_manifest_cache[dataset_root] = None
+            return None
+
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as handle:
+                manifest = json.load(handle)
+        except Exception:
+            manifest = None
+
+        self._brush_manifest_cache[dataset_root] = manifest
+        return manifest
+
+    def _resolve_brush_mask_path(self, dataset_root: Path, tile_name: str) -> Optional[Path]:
+        manifest = self._load_brush_manifest(dataset_root)
+        if not manifest:
+            return None
+
+        for tile in manifest.get("tiles", []):
+            if str(tile.get("tile_name", "")) != tile_name:
+                continue
+
+            rel = tile.get("brush_mask_path")
+            if not rel:
+                return None
+
+            candidate = dataset_root / "brush_imprints" / str(rel)
+            return candidate if candidate.exists() else None
+
+        return None
 
     def _build_index_entries(self, json_paths: Sequence[Path]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
         entries: List[Dict[str, Any]] = []
@@ -934,6 +976,12 @@ class WoWTileDatasetV7(Dataset):
         if sample.liquid_height_path and sample.liquid_height_path.exists():
             liquid_height_prior = load_heightmap_16bit(sample.liquid_height_path, self.input_size) * liquid_mask
 
+        brush_mask = torch.zeros((1, self.input_size, self.input_size), dtype=torch.float32)
+        if sample.brush_mask_path and sample.brush_mask_path.exists():
+            brush_image = Image.open(sample.brush_mask_path).convert("L").resize((self.input_size, self.input_size), Image.NEAREST)
+            brush_tensor = self.to_tensor(brush_image)
+            brush_mask = (brush_tensor > 0.1).float()
+
         object_mask = self._build_object_mask(
             terrain.get("objects"),
             sample.tile_x,
@@ -963,6 +1011,7 @@ class WoWTileDatasetV7(Dataset):
                 liquid_mask,
                 liquid_height_prior,
                 object_mask,
+                brush_mask,
             ],
             dim=0,
         )

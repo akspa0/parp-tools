@@ -76,6 +76,43 @@ The audit currently reports:
 
 This is the first gate toward the V7.4 canvas-aware curation flow. Do not treat it as final semantic truth yet; it is a bounded audit layer meant to identify duplicate density and suspect liquid supervision before retraining.
 
+### Brush-Imprint Harvest For WoWEdit Archaeology
+
+The next deeper dataset seam is not tile dedupe alone. It is harvesting repeated patch and patch-group terrain imprints that likely reflect hidden 3D brush usage in the original WoWEdit workflow.
+
+Use the wow-viewer harvester:
+
+```powershell
+dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- ml-harvest-brushes --dataset-root i:/parp/parp-tools/output/ml-corpus/400_12304/development --output-dir i:/parp/parp-tools/output/build-validation/brush-imprints/development_40012304 --limit 6 --write-previews
+```
+
+Current behavior:
+
+- treats each tile as `16x16` chunks
+- treats each chunk as `16x16` patch cells
+- scores terrain-shape change on the `257x257` global height lattice
+- groups adjacent high-score cells into candidate brush-imprint regions
+- writes a separate dataset surface under `brush_imprints/` for later clustering, retrieval, or separate-model work
+- also writes a tile-level `brush_mask_path` that can be consumed as a first conditioning channel by the terrain trainer
+
+Important boundary:
+
+- this is first-pass brush-imprint harvesting, not final brush dedupe
+- the goal is to isolate the imprints into their own dataset first, then analyze them separately
+
+### First Brush Channel In `train_v7.py`
+
+`train_v7.py` now has a first brush-imprint conditioning seam.
+
+Current behavior:
+
+- `MODEL_INPUT_CHANNELS` is now `13`
+- the dataset loader looks for `brush_imprints/brush_imprint_manifest.json` under each dataset root
+- when a tile-level `brush_mask_path` exists, it is loaded as an extra binary input channel
+- the current terrain model therefore sees one coarse brush-imprint mask, but not yet grouped brush identity or a learned brush embedding
+
+This is intentionally the smallest safe integration step. It proves the terrain model can consume a brush-derived context channel while the separate brush dataset and future brush-specific model are still being built.
+
 ### Syntax
 ```bash
 cd src/WoWMapConverter

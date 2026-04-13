@@ -30,12 +30,15 @@ string[] tail = args.Skip(1).ToArray();
 		case "ml-corpus":
 			RunMlCorpus(tail);
 			break;
-		case "ml-audit-signals":
-			RunMlAuditSignals(tail);
-			break;
-		case "ml-synth-no-liquid":
-			RunMlSynthNoLiquid(tail);
-			break;
+	case "ml-audit-signals":
+		RunMlAuditSignals(tail);
+		break;
+	case "ml-harvest-brushes":
+		MlBrushImprintHarvester.Run(tail);
+		break;
+	case "ml-synth-no-liquid":
+		RunMlSynthNoLiquid(tail);
+		break;
 	case "export-tex-json":
 		RunExportTexJson(tail);
 		break;
@@ -1280,6 +1283,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-converter ml-corpus --config <ml-corpus.json> [--archive-root <path>] [--output-root <path>] [--dry-run]");
 	Console.WriteLine("  wowviewer-converter ml-audit-signals --dataset-root <path> [--output <report.json>] [--limit <count>]");
+	Console.WriteLine("  wowviewer-converter ml-harvest-brushes --dataset-root <path> [--output-dir <dir>] [--limit <count>] [--write-previews]");
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input <minimap.png> --mask <liquid-mask.png> --output <no-liquid.png>");
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input-dir <images> --mask-dir <masks> --output-dir <images>");
 }
