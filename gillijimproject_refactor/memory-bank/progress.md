@@ -1,5 +1,80 @@
 # Progress
 
+### Apr 13, 2026 - Fixed V7 trainer numerics so impossible negative validation loss can no longer overwrite `best.pt`
+
+- investigated the `output/ml-training/v7_4_brush_channel_geomfirst_20260413` anomaly where epoch 28 reported `Val Loss: -0.0060`
+- landed trainer-side repairs in `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py`:
+	- cast structural loss inputs to float32 before SSIM, gradient, edge, frequency, laplacian, and bounds loss assembly
+	- clamped SSIM variance and denominator terms to avoid invalid ratios under AMP
+	- rejected non-finite or negative validation loss as invalid for LR scheduling and `best.pt` updates
+	- fixed geometry-first telemetry so empty discriminator windows print `0.0000` instead of triggering NumPy warnings while GAN is off
+- documentation sync:
+	- updated `gillijimproject_refactor/docs/VLM_Training_Guide.md` to state that negative validation loss is an invalid numeric artifact, not a real improvement
+- validation completed:
+	- `C:\Users\akspa\anaconda3\python.exe -m py_compile i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` passed
+	- tiny real-data smoke run on `output/ml-corpus/400_12304/development` completed one epoch with sane metrics (`Val Loss: 0.1466`) and no empty-discriminator warnings
+- proof boundary:
+	- this proves the active trainer no longer reproduces the negative-validation bug in the bounded smoke path
+	- the old `v7_4_brush_channel_geomfirst_20260413/best.pt` remains untrusted because it was written before the validity guard existed
+
+### Apr 13, 2026 - Added periodic GAN cadence controls and verified cooldown-driven GAN reactivation on real data
+
+- extended `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` with:
+	- `--gan-cycle-length`
+	- `--gan-cycle-on-epochs`
+	- `--gan-cooldown-after-best`
+- trainer behavior now supports intermittent GAN detail passes instead of a single continuous adversarial phase
+- checkpoint/history updates now persist GAN cadence state and cooldown state so resume continues the same schedule
+- validation completed with a bounded real-data smoke on `output/ml-corpus/400_12304/development`:
+	- command used `--start-gan-epoch 1 --gan-cycle-length 3 --gan-cycle-on-epochs 1 --gan-cooldown-after-best 2`
+	- observed live cadence:
+		- epoch 1 GAN on
+		- epoch 2 GAN off via cooldown
+		- epoch 3 GAN off via cooldown countdown
+		- epoch 4 GAN on again after cooldown expired
+- documentation sync:
+	- updated `gillijimproject_refactor/docs/VLM_Training_Guide.md` with the new cadence flags and an audited-corpus launch example
+- proof boundary:
+	- this is real-data proof of the scheduling behavior, not yet evidence that a specific cadence is optimal for the full trusted brush-conditioned corpus
+
+### Apr 13, 2026 - Switched the active GAN schedule strategy to best-triggered refinement bursts
+
+- user rejected the arbitrary fixed warmup rule and requested GAN activation at any and every new best model instead
+- extended `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` with `--gan-burst-after-best`
+- when `--gan-burst-after-best > 0`, the trainer now:
+	- waits with GAN off until a best checkpoint is achieved
+	- arms GAN for the next `N` epochs after that best
+	- rearms the burst again whenever a later best appears
+	- overrides the older epoch-calendar GAN cadence path while active
+- validation completed with a bounded real-data smoke on `output/ml-corpus/400_12304/development` using `--gan-burst-after-best 2`
+	- observed live behavior:
+		- epoch 1 GAN off while waiting for best
+		- epoch 1 saved best and armed GAN
+		- epoch 2 GAN on via `best-burst(2)`
+		- epoch 2 saved best and rearmed GAN
+		- epoch 3 GAN on again via rearmed burst
+- documentation sync:
+	- updated `gillijimproject_refactor/docs/VLM_Training_Guide.md` to make best-triggered GAN bursts the preferred launch recipe
+- proof boundary:
+	- this proves the best-trigger mechanism itself, not that `2` epochs is the final best burst length for the audited trusted corpus
+
+### Apr 13, 2026 - Retuned `train_v7.py` defaults for a long geometry-first warmup before GAN activation
+
+- changed trainer defaults in `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` after the brush-conditioned run still showed the same wobble pattern rather than settling cleanly
+- landed behavior changes:
+	- `--adversarial-scale` default: `0.20`
+	- `--start-gan-epoch` default: `101`
+	- `--disc-every` default: `2`
+	- `--early-stop-start-epoch` default: `101`
+	- ReduceLROnPlateau now uses parser-controlled patience/factor with default patience `8`
+	- early-stop patience no longer counts during the geometry-first warmup window
+- rationale:
+	- let the model learn terrain structure first
+	- delay GAN until the base geometry path has a chance to settle
+	- avoid scheduler/early-stop reactions that were previously too aggressive for the intended long-run regime
+- proof boundary:
+	- this is code-level schedule correction only; a new real run is still required to prove that the longer geometry-first phase improves convergence
+
 ### Apr 13, 2026 - Scaled brush-imprint harvest across the trusted corpus and added a first brush mask input channel to V7
 
 - executed `ml-harvest-brushes` across the trusted corpus into `output/build-validation/brush-imprints/trusted/`

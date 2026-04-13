@@ -113,6 +113,92 @@ Current behavior:
 
 This is intentionally the smallest safe integration step. It proves the terrain model can consume a brush-derived context channel while the separate brush dataset and future brush-specific model are still being built.
 
+### Geometry-First Default Training Strategy
+
+The trainer defaults are now biased toward a long geometry-first phase before GAN activation.
+
+Current default behavior in `train_v7.py`:
+
+- `--adversarial-scale 0.20`
+- `--start-gan-epoch 101`
+- `--disc-every 2`
+- `--early-stop-start-epoch 101`
+- `--lr-plateau-patience 8`
+
+This means the model can spend roughly the first `100` epochs learning large-scale terrain structure before adversarial sharpening turns on, and early-stop patience will not count during that warmup period.
+
+Use this longer geometry-first schedule as the new default baseline before concluding that the architecture itself has topped out.
+
+If a run reports a negative validation loss, treat that checkpoint as invalid numeric output rather than as a real improvement. The trainer now keeps the forward pass under AMP but computes the structural loss stack in float32 and refuses to treat negative or non-finite validation loss as a valid `best.pt` candidate.
+
+### Best-Triggered GAN Refinement Bursts
+
+The active scheduling strategy is now best-triggered refinement instead of a fixed late-epoch GAN phase.
+
+New primary control:
+
+- `--gan-burst-after-best`: after any new best checkpoint, automatically arm GAN for this many subsequent epochs
+
+This gives a simpler pattern:
+
+- geometry-only training runs first
+- whenever validation sets a new best checkpoint, GAN turns on automatically for a short refinement burst
+- if GAN-assisted epochs continue improving validation, the burst rearms again
+
+This directly matches the practical goal: use adversarial pressure only when the model has just demonstrated a meaningful improvement, rather than guessing a fixed calendar epoch to turn GAN on.
+
+Example best-triggered command:
+
+```powershell
+$audits = Get-ChildItem '.\output\build-validation\ml-audit\trusted' -Filter '*_signal_audit.json' -File |
+	ForEach-Object {
+		$j = Get-Content $_.FullName -Raw | ConvertFrom-Json
+		[PSCustomObject]@{
+			Name = $_.BaseName
+			DatasetRoot = [string]$j.dataset_root
+			Tiles = [int]$j.tile_count
+			Local = [int]$j.coverage.tiles_with_local_heightmap
+			Global = [int]$j.coverage.tiles_with_global_heightmap
+		}
+	}
+
+$eligible = $audits | Where-Object {
+	$_.Local -eq $_.Tiles -and
+	$_.Global -eq $_.Tiles -and
+	$_.Name -ne '301_8303_Kalimdor_signal_audit' -and
+	$_.Name -notmatch '__UNTRUSTED_DO_NOT_USE'
+}
+
+$outDir = '.\output\ml-training\v7_4_brush_channel_bestburst_20260413'
+New-Item -ItemType Directory -Force $outDir | Out-Null
+
+$args = @(
+	'.\gillijimproject_refactor\src\WoWMapConverter\scripts\train_v7.py',
+	'--profile', 'manual',
+	'--epochs', '140',
+	'--patience', '12',
+	'--output-dir', $outDir,
+	'--learning-rate', '8e-5',
+	'--disc-learning-rate', '5e-5',
+	'--amp-dtype', 'auto',
+	'--train-workers', '4',
+	'--val-workers', '2',
+	'--log-every', '5',
+	'--gan-burst-after-best', '2'
+)
+
+foreach ($entry in $eligible) { $args += @('--dataset-root', $entry.DatasetRoot) }
+C:\Users\akspa\anaconda3\python.exe @args
+```
+
+That example means:
+
+- GAN stays off until a best checkpoint appears
+- after each new best checkpoint, GAN is armed for the next `2` epochs
+- if one of those GAN-assisted epochs also becomes the new best, the `2`-epoch burst is armed again
+
+The older `--start-gan-epoch`, `--gan-cycle-length`, `--gan-cycle-on-epochs`, and `--gan-cooldown-after-best` controls still exist as fallback schedule tools, but they are no longer the preferred strategy.
+
 ### Syntax
 ```bash
 cd src/WoWMapConverter

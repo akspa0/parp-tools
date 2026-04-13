@@ -1,5 +1,82 @@
 # Active Context
 
+## Apr 13, 2026 - Negative validation loss in the brush-channel geometry-first run was a trainer numerics bug, not a real best checkpoint
+
+- investigated the impossible `best val = -0.0060` reported by `output/ml-training/v7_4_brush_channel_geomfirst_20260413`
+- root cause narrowed to the structural-loss path in `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py`:
+	- validation and training loss were being computed under AMP autocast
+	- SSIM had no numeric guardrails on variance/denominator terms
+	- the trainer accepted any lower validation scalar, including impossible negative values, as a new `best.pt`
+- active fix now in `train_v7.py`:
+	- structural losses are computed in float32 even when model forward stays under AMP
+	- SSIM now clamps variance terms non-negative, clamps the denominator, and clamps the SSIM map to `[-1, 1]`
+	- validation loss must be finite and non-negative before it can drive the LR scheduler or overwrite `best.pt`
+	- geometry-first epochs with GAN off no longer emit `numpy` empty-mean warnings for discriminator telemetry
+- validation completed:
+	- `C:\Users\akspa\anaconda3\python.exe -m py_compile i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` passed
+	- tiny real-data smoke passed on `output/ml-corpus/400_12304/development` with `--epochs 1 --limit 4 --batch-size 1 --no-augment --train-workers 0 --val-workers 0`; result stayed sane (`Val Loss: 0.1466`) with no negative-loss or empty-discriminator warnings
+- important boundary:
+	- this fixes the trainer numerics going forward; it does not rehabilitate the previously written `output/ml-training/v7_4_brush_channel_geomfirst_20260413/best.pt`
+	- treat that negative-loss checkpoint as invalid and resume only from a last sane checkpoint or restart the run under the fixed trainer
+
+## Apr 13, 2026 - V7 trainer now supports periodic GAN detail bursts with cooldown after GAN-assisted best checkpoints
+
+- landed new scheduling controls in `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py`:
+	- `--gan-cycle-length`
+	- `--gan-cycle-on-epochs`
+	- `--gan-cooldown-after-best`
+- active behavior:
+	- GAN can stay off through the long geometry warmup as before
+	- after `--start-gan-epoch`, GAN can run only for selected epochs within a repeating cadence instead of staying on continuously
+	- if a new best checkpoint is achieved while GAN is on, the trainer can force GAN back off for a configurable cooldown stretch before allowing another detail pass
+	- cooldown state is persisted in `checkpoint.pt` and `best.pt` so resume behavior matches the live run state
+- bounded real-data proof:
+	- tiny smoke on `output/ml-corpus/400_12304/development` with `--start-gan-epoch 1 --gan-cycle-length 3 --gan-cycle-on-epochs 1 --gan-cooldown-after-best 2` showed the intended pattern in live output:
+		- epoch 1: GAN on
+		- epoch 2: GAN off (`cooldown(2)`)
+		- epoch 3: GAN off (`cooldown(1)`)
+		- epoch 4: GAN on again
+- important boundary:
+	- this proves schedule control behavior and checkpoint continuity, not full-corpus convergence quality
+	- cadence values still need real-run tuning against the audited trusted corpus
+
+## Apr 13, 2026 - Best-triggered GAN refinement bursts replaced the arbitrary fixed warmup idea as the active schedule strategy
+
+- user explicitly rejected the `100`-epoch GAN warmup rule as arbitrary and asked for GAN to auto-run at any and every new best model instead
+- `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` now supports `--gan-burst-after-best <epochs>`
+- active behavior when `--gan-burst-after-best > 0`:
+	- GAN stays off while waiting for the next best checkpoint
+	- any new best checkpoint arms GAN for the next configured number of epochs
+	- if a GAN-assisted epoch also becomes the new best, the burst rearms again
+	- this mode overrides the older epoch-calendar GAN cadence controls
+- bounded real-data proof:
+	- smoke on `output/ml-corpus/400_12304/development` with `--gan-burst-after-best 2` showed:
+		- epoch 1: GAN off (`waiting-for-best`)
+		- epoch 1 saved best and armed a 2-epoch burst
+		- epoch 2: GAN on (`best-burst(2)`)
+		- epoch 2 saved best and rearmed the burst
+		- epoch 3: GAN on (`best-burst(2)`)
+- important boundary:
+	- this proves best-triggered arming works on real data; it does not yet prove the optimal burst length for the full audited corpus
+	- the earlier fixed `start_gan_epoch=101` idea should now be treated as a fallback knob, not the preferred path
+
+## Apr 13, 2026 - Trainer defaults now bias toward a long geometry-first phase before GAN pressure
+
+- after the brush-conditioned full run finished at best val `0.1225` with continued late-epoch wobble, the training code in `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` was retuned so the default schedule no longer turns GAN on immediately
+- new default training behavior:
+	- `--adversarial-scale` default is now `0.20`
+	- `--start-gan-epoch` default is now `101`
+	- `--disc-every` default is now `2`
+	- `--early-stop-start-epoch` default is now `101`
+	- ReduceLROnPlateau patience is now configurable and defaults to `8` instead of the prior hardcoded `2`
+- practical intent of this change:
+	- let geometry training stabilize for a long warmup window before adversarial pressure begins
+	- stop early-stop patience from killing the run during the geometry-only phase
+	- avoid the previous pattern where GAN or scheduler pressure began too early and validation never settled into the low-loss regime we want
+- important boundary:
+	- this is a training-schedule correction only; it does not claim the brush channel or current corpus has solved the broader reconstruction problem
+	- the next proof step is to run the new defaults on a real corpus and compare against the prior audited brush-conditioned run (`best 0.1225`) and the non-brush audited run (`best 0.1256`)
+
 ## Apr 13, 2026 - Brush-imprint harvest now runs corpus-wide and the terrain trainer can consume a first brush mask channel
 
 - ran `ml-harvest-brushes` across the trusted `output/ml-corpus` set into `output/build-validation/brush-imprints/trusted/`

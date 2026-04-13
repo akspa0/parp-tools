@@ -100,6 +100,16 @@ DEFAULT_VAL_WORKERS = 2
 DEFAULT_PREFETCH_FACTOR = 2
 DEFAULT_LIVE_LOG_EVERY = 20
 DEFAULT_AMP_DTYPE = "auto"
+DEFAULT_ADVERSARIAL_SCALE = 0.20
+DEFAULT_START_GAN_EPOCH = 101
+DEFAULT_DISC_EVERY = 2
+DEFAULT_GAN_CYCLE_LENGTH = 0
+DEFAULT_GAN_CYCLE_ON_EPOCHS = 0
+DEFAULT_GAN_COOLDOWN_AFTER_BEST = 0
+DEFAULT_GAN_BURST_AFTER_BEST = 0
+DEFAULT_EARLY_STOP_START_EPOCH = 101
+DEFAULT_LR_PLATEAU_PATIENCE = 8
+DEFAULT_LR_PLATEAU_FACTOR = 0.5
 
 DEFAULT_DATASET_SEARCH_ROOTS = [
     Path(r"i:\parp\parp-tools\gillijimproject_refactor\test_data\vlm-datasets"),
@@ -1037,6 +1047,8 @@ class WoWTileDatasetV7(Dataset):
 
 
 def ssim_loss(predicted: torch.Tensor, target: torch.Tensor, window_size: int = 11) -> torch.Tensor:
+    predicted = predicted.float()
+    target = target.float()
     c1 = 0.01 ** 2
     c2 = 0.03 ** 2
 
@@ -1055,14 +1067,23 @@ def ssim_loss(predicted: torch.Tensor, target: torch.Tensor, window_size: int = 
     mu_target_sq = mu_target.pow(2)
     mu_pred_target = mu_pred * mu_target
 
-    sigma_pred_sq = F.conv2d(predicted * predicted, window, padding=window_size // 2, groups=predicted.shape[1]) - mu_pred_sq
-    sigma_target_sq = F.conv2d(target * target, window, padding=window_size // 2, groups=target.shape[1]) - mu_target_sq
+    sigma_pred_sq = torch.clamp(
+        F.conv2d(predicted * predicted, window, padding=window_size // 2, groups=predicted.shape[1]) - mu_pred_sq,
+        min=0.0,
+    )
+    sigma_target_sq = torch.clamp(
+        F.conv2d(target * target, window, padding=window_size // 2, groups=target.shape[1]) - mu_target_sq,
+        min=0.0,
+    )
     sigma_pred_target = F.conv2d(predicted * target, window, padding=window_size // 2, groups=predicted.shape[1]) - mu_pred_target
 
-    ssim_map = ((2 * mu_pred_target + c1) * (2 * sigma_pred_target + c2)) / (
-        (mu_pred_sq + mu_target_sq + c1) * (sigma_pred_sq + sigma_target_sq + c2)
+    numerator = (2 * mu_pred_target + c1) * (2 * sigma_pred_target + c2)
+    denominator = torch.clamp(
+        (mu_pred_sq + mu_target_sq + c1) * (sigma_pred_sq + sigma_target_sq + c2),
+        min=1e-8,
     )
-    return 1 - ssim_map.mean()
+    ssim_map = torch.clamp(numerator / denominator, min=-1.0, max=1.0)
+    return torch.clamp(1 - ssim_map.mean(), min=0.0)
 
 
 def edge_loss(predicted: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -1123,6 +1144,11 @@ def combined_loss(
     adv_loss: Optional[torch.Tensor] = None,
     adversarial_scale: float = 1.0,
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
+    predicted_heightmap = predicted_heightmap.float()
+    predicted_bounds = predicted_bounds.float()
+    target_heightmap = target_heightmap.float()
+    target_bounds = target_bounds.float()
+
     global_loss = F.l1_loss(predicted_heightmap[:, 0:1], target_heightmap[:, 0:1])
     local_loss = F.l1_loss(predicted_heightmap[:, 1:2], target_heightmap[:, 1:2])
     bounds_loss = F.mse_loss(predicted_bounds, target_bounds)
@@ -1152,6 +1178,7 @@ def combined_loss(
 
     adv_value = 0.0
     if adv_loss is not None:
+        adv_loss = adv_loss.float()
         total = total + (LOSS_WEIGHTS["adversarial"] * adversarial_scale) * adv_loss
         adv_value = float(adv_loss.item())
 
@@ -1462,7 +1489,32 @@ def checkpoint_metadata_from_args(
         "seed": args.seed,
         "height_global_min": HEIGHT_GLOBAL_MIN,
         "height_global_max": HEIGHT_GLOBAL_MAX,
+        "adversarial_scale": args.adversarial_scale,
+        "start_gan_epoch": args.start_gan_epoch,
+        "gan_cycle_length": args.gan_cycle_length,
+        "gan_cycle_on_epochs": args.gan_cycle_on_epochs,
+        "gan_cooldown_after_best": args.gan_cooldown_after_best,
+        "gan_burst_after_best": args.gan_burst_after_best,
     }
+
+
+def resolve_gan_schedule(epoch_number: int, args: argparse.Namespace, gan_schedule_remaining: int) -> Tuple[bool, str]:
+    if args.adversarial_scale <= 0.0:
+        return False, "disabled"
+    if args.gan_burst_after_best > 0:
+        if gan_schedule_remaining > 0:
+            return True, f"best-burst({gan_schedule_remaining})"
+        return False, "waiting-for-best"
+    if epoch_number < args.start_gan_epoch:
+        return False, f"warmup-until-{args.start_gan_epoch}"
+    if gan_schedule_remaining > 0:
+        return False, f"cooldown({gan_schedule_remaining})"
+    if args.gan_cycle_length > 0 and args.gan_cycle_on_epochs > 0:
+        cycle_on_epochs = min(args.gan_cycle_on_epochs, args.gan_cycle_length)
+        cycle_offset = (epoch_number - args.start_gan_epoch) % args.gan_cycle_length
+        gan_enabled = cycle_offset < cycle_on_epochs
+        return gan_enabled, f"cycle({cycle_offset + 1}/{args.gan_cycle_length})"
+    return True, "steady"
 
 
 def train(args: argparse.Namespace) -> None:
@@ -1622,15 +1674,25 @@ def train(args: argparse.Namespace) -> None:
     discriminator = PatchDiscriminator().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     disc_optimizer = torch.optim.Adam(discriminator.parameters(), lr=args.disc_learning_rate, betas=(0.5, 0.999))
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=2, factor=0.5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        patience=args.lr_plateau_patience,
+        factor=args.lr_plateau_factor,
+    )
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_cuda else None
 
     print(
         "Fine-tune config: "
         f"adv_scale={args.adversarial_scale:.3f}, "
         f"start_gan_epoch={args.start_gan_epoch}, "
+        f"gan_cycle={args.gan_cycle_on_epochs}/{args.gan_cycle_length if args.gan_cycle_length > 0 else 0}, "
+        f"gan_cooldown_after_best={args.gan_cooldown_after_best}, "
+        f"gan_burst_after_best={args.gan_burst_after_best}, "
+        f"early_stop_start_epoch={args.early_stop_start_epoch}, "
         f"disc_every={args.disc_every}, "
-        f"disc_lr={args.disc_learning_rate:.2e}"
+        f"disc_lr={args.disc_learning_rate:.2e}, "
+        f"lr_plateau_patience={args.lr_plateau_patience}"
     )
 
     history = {
@@ -1644,6 +1706,7 @@ def train(args: argparse.Namespace) -> None:
     start_epoch = 0
     best_loss = float("inf")
     patience_counter = 0
+    gan_schedule_remaining = 0
 
     if args.resume:
         resume_path = Path(args.resume)
@@ -1655,6 +1718,15 @@ def train(args: argparse.Namespace) -> None:
         start_epoch = int(checkpoint.get("epoch", -1)) + 1
         best_loss = float(checkpoint.get("val_loss", best_loss))
         patience_counter = int(checkpoint.get("patience_counter", patience_counter))
+        gan_schedule_remaining = int(
+            checkpoint.get(
+                "gan_schedule_remaining",
+                checkpoint.get(
+                    "gan_refinement_remaining",
+                    checkpoint.get("gan_cooldown_remaining", gan_schedule_remaining),
+                ),
+            )
+        )
         if not args.no_resume_optimizer:
             if "optimizer_state_dict" in checkpoint:
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -1666,8 +1738,12 @@ def train(args: argparse.Namespace) -> None:
                 scaler.load_state_dict(checkpoint["scaler_state_dict"])
         print(f"Resumed from {resume_path} at epoch {start_epoch}")
         print("Resume optimizer state: enabled" if not args.no_resume_optimizer else "Resume optimizer state: disabled (--no-resume-optimizer)")
+        print(f"Resume GAN schedule remaining: {gan_schedule_remaining}")
 
     for epoch in range(start_epoch, args.epochs):
+        epoch_number = epoch + 1
+        gan_enabled_epoch, gan_phase = resolve_gan_schedule(epoch_number, args, gan_schedule_remaining)
+        gan_schedule_active_this_epoch = gan_schedule_remaining > 0
         model.train()
         discriminator.train()
         train_losses: List[float] = []
@@ -1689,7 +1765,7 @@ def train(args: argparse.Namespace) -> None:
 
             # --- Discriminator step ---
             do_disc_step = args.disc_every <= 1 or (step_index % args.disc_every == 0)
-            if do_disc_step:
+            if gan_enabled_epoch and do_disc_step:
                 disc_optimizer.zero_grad(set_to_none=True)
                 with amp_context:
                     real_pred = discriminator(targets)
@@ -1707,7 +1783,7 @@ def train(args: argparse.Namespace) -> None:
 
             # --- Generator step ---
             optimizer.zero_grad(set_to_none=True)
-            use_gan_objective = (epoch + 1) >= args.start_gan_epoch
+            use_gan_objective = gan_enabled_epoch
             with amp_context:
                 adv_loss = None
                 if use_gan_objective:
@@ -1738,9 +1814,10 @@ def train(args: argparse.Namespace) -> None:
 
             if step_index % max(args.log_every, 1) == 0 or step_index == len(train_loader):
                 current_lr = optimizer.param_groups[0]["lr"]
+                avg_disc_window = float(np.mean(disc_losses[-args.log_every:])) if disc_losses else 0.0
                 postfix: Dict[str, str] = {
                     "g": f"{float(np.mean(train_losses[-args.log_every:])):.4f}",
-                    "d": f"{float(np.mean(disc_losses[-args.log_every:])):.4f}",
+                    "d": f"{avg_disc_window:.4f}",
                     "lr": f"{current_lr:.1e}",
                 }
                 postfix["gan"] = "on" if use_gan_objective else "off"
@@ -1771,27 +1848,19 @@ def train(args: argparse.Namespace) -> None:
 
         average_train_loss = float(np.mean(train_losses))
         average_val_loss = float(np.mean(val_losses))
+        val_loss_valid = bool(np.isfinite(average_val_loss) and average_val_loss >= 0.0)
         current_lr = optimizer.param_groups[0]["lr"]
 
-        history["epochs"].append(epoch + 1)
+        history["epochs"].append(epoch_number)
         history["train_loss"].append(average_train_loss)
         history["val_loss"].append(average_val_loss)
+        history.setdefault("val_loss_valid", []).append(val_loss_valid)
+        history.setdefault("gan_enabled", []).append(gan_enabled_epoch)
+        history.setdefault("gan_phase", []).append(gan_phase)
+        history.setdefault("gan_schedule_remaining", []).append(gan_schedule_remaining)
         history["components"].append(epoch_parts)
         with open(output_dir / "training_log.json", "w", encoding="utf-8") as handle:
             json.dump(history, handle, indent=2)
-
-        checkpoint = {
-            "epoch": epoch,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "disc_optimizer_state_dict": disc_optimizer.state_dict(),
-            "scheduler_state_dict": scheduler.state_dict(),
-            "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
-            "val_loss": average_val_loss,
-            "patience_counter": patience_counter,
-            "metadata": checkpoint_metadata_from_args(args, dataset_roots, len(dataset), len(train_indices), len(val_indices), train_groups, val_groups),
-        }
-        torch.save(checkpoint, output_dir / "checkpoint.pt")
 
         print(f"\nEpoch {epoch + 1}/{args.epochs}")
         print(f"  Train Loss: {average_train_loss:.4f} | Val Loss: {average_val_loss:.4f} | Best: {best_loss:.4f}")
@@ -1827,8 +1896,16 @@ def train(args: argparse.Namespace) -> None:
                 samples=train_samples_per_second,
             )
         )
+        print(
+            f"  GAN: {'on' if gan_enabled_epoch else 'off'} | Phase: {gan_phase} | Schedule Remaining: {gan_schedule_remaining}"
+        )
 
-        scheduler.step(average_val_loss)
+        if val_loss_valid:
+            scheduler.step(average_val_loss)
+        else:
+            print(
+                "  Warning: validation loss was invalid; skipping LR scheduler and best-checkpoint update for this epoch"
+            )
 
         # Save a preview every epoch unconditionally so there is always something to inspect.
         try:
@@ -1840,16 +1917,60 @@ def train(args: argparse.Namespace) -> None:
         except Exception as exc:
             print(f"  Failed to save preview: {exc}")
 
-        if average_val_loss < best_loss:
+        saved_new_best = False
+        schedule_rearmed_this_epoch = False
+        if val_loss_valid and average_val_loss < best_loss:
             best_loss = average_val_loss
             patience_counter = 0
-            torch.save(checkpoint, output_dir / "best.pt")
+            saved_new_best = True
+            if args.gan_burst_after_best > 0:
+                gan_schedule_remaining = args.gan_burst_after_best
+                schedule_rearmed_this_epoch = True
+            elif gan_enabled_epoch and args.gan_cooldown_after_best > 0:
+                gan_schedule_remaining = args.gan_cooldown_after_best
+                schedule_rearmed_this_epoch = True
             print("  Saved best model")
+            if args.gan_burst_after_best > 0:
+                print(
+                    f"  GAN refinement burst armed for next {args.gan_burst_after_best} epoch(s) after best checkpoint"
+                )
+            elif gan_enabled_epoch and args.gan_cooldown_after_best > 0:
+                print(
+                    f"  GAN cooldown armed for next {args.gan_cooldown_after_best} epoch(s) after GAN-assisted best"
+                )
         else:
-            patience_counter += 1
-            if patience_counter >= args.patience:
-                print(f"\nEarly stopping: no improvement for {args.patience} epochs")
-                break
+            if not val_loss_valid:
+                continue
+            if epoch_number >= args.early_stop_start_epoch:
+                patience_counter += 1
+                if patience_counter >= args.patience:
+                    print(f"\nEarly stopping: no improvement for {args.patience} epochs")
+                    break
+            else:
+                print(
+                    f"  Early-stop warmup active until epoch {args.early_stop_start_epoch}; "
+                    "patience not counting yet"
+                )
+
+        if gan_schedule_active_this_epoch and not schedule_rearmed_this_epoch:
+            gan_schedule_remaining = max(gan_schedule_remaining - 1, 0)
+
+        checkpoint = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "disc_optimizer_state_dict": disc_optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
+            "val_loss": average_val_loss,
+            "val_loss_valid": val_loss_valid,
+            "patience_counter": patience_counter,
+            "gan_schedule_remaining": gan_schedule_remaining,
+            "metadata": checkpoint_metadata_from_args(args, dataset_roots, len(dataset), len(train_indices), len(val_indices), train_groups, val_groups),
+        }
+        torch.save(checkpoint, output_dir / "checkpoint.pt")
+        if saved_new_best:
+            torch.save(checkpoint, output_dir / "best.pt")
 
     print(f"\nTraining complete. Best validation loss: {best_loss:.4f}")
 
@@ -1873,12 +1994,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help=f"Discriminator learning rate (default: {DISCRIMINATOR_LR}).")
     parser.add_argument("--epochs", type=int, default=DEFAULT_NUM_EPOCHS)
     parser.add_argument("--patience", type=int, default=DEFAULT_EARLY_STOP_PATIENCE)
-    parser.add_argument("--adversarial-scale", type=float, default=1.0,
-                        help="Scale applied to adversarial loss weight (1.0 keeps current behavior).")
-    parser.add_argument("--start-gan-epoch", type=int, default=1,
-                        help="Epoch number (1-based) when adversarial loss turns on.")
-    parser.add_argument("--disc-every", type=int, default=1,
-                        help="Update discriminator every N train steps (default: 1).")
+    parser.add_argument("--early-stop-start-epoch", type=int, default=DEFAULT_EARLY_STOP_START_EPOCH,
+                        help=f"Epoch number (1-based) when early-stop patience begins counting (default: {DEFAULT_EARLY_STOP_START_EPOCH}).")
+    parser.add_argument("--adversarial-scale", type=float, default=DEFAULT_ADVERSARIAL_SCALE,
+                        help=f"Scale applied to adversarial loss weight (default: {DEFAULT_ADVERSARIAL_SCALE}, geometry-first safer default).")
+    parser.add_argument("--start-gan-epoch", type=int, default=DEFAULT_START_GAN_EPOCH,
+                        help=f"Epoch number (1-based) when adversarial loss turns on (default: {DEFAULT_START_GAN_EPOCH}).")
+    parser.add_argument("--gan-cycle-length", type=int, default=DEFAULT_GAN_CYCLE_LENGTH,
+                        help=f"Optional GAN cadence length in epochs after start-gan-epoch (default: {DEFAULT_GAN_CYCLE_LENGTH}, disabled).")
+    parser.add_argument("--gan-cycle-on-epochs", type=int, default=DEFAULT_GAN_CYCLE_ON_EPOCHS,
+                        help=f"How many epochs per GAN cadence run with adversarial loss enabled (default: {DEFAULT_GAN_CYCLE_ON_EPOCHS}, disabled).")
+    parser.add_argument("--gan-cooldown-after-best", type=int, default=DEFAULT_GAN_COOLDOWN_AFTER_BEST,
+                        help=f"Force GAN off for this many subsequent epochs after a new GAN-assisted best checkpoint (default: {DEFAULT_GAN_COOLDOWN_AFTER_BEST}).")
+    parser.add_argument("--gan-burst-after-best", type=int, default=DEFAULT_GAN_BURST_AFTER_BEST,
+                        help=f"Automatically arm GAN for this many subsequent epochs after any new best checkpoint (default: {DEFAULT_GAN_BURST_AFTER_BEST}, disabled). Overrides epoch-based GAN cadence when > 0.")
+    parser.add_argument("--disc-every", type=int, default=DEFAULT_DISC_EVERY,
+                        help=f"Update discriminator every N train steps (default: {DEFAULT_DISC_EVERY}).")
+    parser.add_argument("--lr-plateau-patience", type=int, default=DEFAULT_LR_PLATEAU_PATIENCE,
+                        help=f"ReduceLROnPlateau patience in epochs (default: {DEFAULT_LR_PLATEAU_PATIENCE}).")
+    parser.add_argument("--lr-plateau-factor", type=float, default=DEFAULT_LR_PLATEAU_FACTOR,
+                        help=f"ReduceLROnPlateau factor (default: {DEFAULT_LR_PLATEAU_FACTOR}).")
     parser.add_argument("--val-fraction", type=float, default=DEFAULT_VAL_FRACTION)
     parser.add_argument("--spatial-group-size", type=int, default=DEFAULT_SPATIAL_GROUP_SIZE)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
