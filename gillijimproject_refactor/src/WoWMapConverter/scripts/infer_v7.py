@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-WoW Height Regressor V7.1 - inference engine.
+WoW Height Regressor V7.5.1 - inference engine.
 
 Inference restores the active multichannel V7.x contract:
-- minimap RGB
+- terrain-only minimap RGB when exported, otherwise the older cleaned/raw precedence
 - normal map RGB
 - WDL prior
 - per-tile bounds hints
@@ -62,7 +62,7 @@ except ImportError:
             global_residual_scale: float = DEFAULT_GLOBAL_RESIDUAL_SCALE,
         ):
             super().__init__()
-            raise ImportError("train_v7.py is required so the V7.1 architecture matches the checkpoint.")
+            raise ImportError("train_v7.py is required so the V7.5.1 architecture matches the checkpoint.")
 
 
 TILE_SIZE = 533.33333
@@ -180,7 +180,7 @@ def load_heightmap_16bit(path: Path, target_size: int = OUTPUT_SIZE) -> torch.Te
 class V7InferenceEngine:
     def __init__(self, model_path: Path, device: str = "auto") -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() and device == "auto" else "cpu")
-        print(f"Loading V7.1 model from {model_path} on {self.device}...")
+        print(f"Loading V7.5.1 model from {model_path} on {self.device}...")
 
         checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         self.metadata: Dict[str, object] = dict(checkpoint.get("metadata", {}))
@@ -265,7 +265,7 @@ class V7InferenceEngine:
             payload = json.load(handle)
         terrain = payload.get("terrain_data", {})
 
-        minimap_rel = terrain.get("no_object_minimap") or terrain.get("no_mccv_minimap") or payload.get("image")
+        minimap_rel = terrain.get("terrain_only_minimap") or terrain.get("no_object_minimap") or terrain.get("no_mccv_minimap") or payload.get("image")
         if minimap_rel:
             minimap_path = dataset_root / str(minimap_rel)
         else:
@@ -533,10 +533,6 @@ class V7InferenceEngine:
                 radius_x = max(1, int(round(base_radius_world * pixels_per_world)))
                 radius_y = radius_x
 
-            is_wmo = "wmo" in category
-            if not is_wmo:
-                continue
-
             if np.isfinite(pos_y) and wdl_sampler is not None:
                 terrain_height = wdl_sampler(local_x, local_y, pos_y)
                 if terrain_height is not None and np.isfinite(terrain_height):
@@ -740,7 +736,7 @@ def run_batch_inference(
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run V7.1 multichannel inference.")
+    parser = argparse.ArgumentParser(description="Run V7.5.1 multichannel inference.")
     parser.add_argument("--model", required=True, help="Path to best.pt checkpoint")
     parser.add_argument("--dataset", required=True, help="Path to dataset root containing dataset/ and images/")
     parser.add_argument("--out", required=True, help="Output directory")

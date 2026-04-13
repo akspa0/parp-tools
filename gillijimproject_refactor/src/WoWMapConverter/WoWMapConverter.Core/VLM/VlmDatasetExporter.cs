@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Buffers.Binary;
 using System.Numerics;
 using System.Text.Json;
 using SixLabors.ImageSharp;
@@ -7,10 +8,16 @@ using SixLabors.ImageSharp.Processing;
 using WoWMapConverter.Core.Formats.Liquids;
 using WoWMapConverter.Core.Formats.PM4;
 using WoWMapConverter.Core.Services;
+using WowViewer.Core.Chunks;
+using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Wmo;
+using WowViewer.Core.M2;
+using WowViewer.Core.Mdx;
+using WowViewer.Core.Wmo;
 using GillijimProject.WowFiles.Alpha;
 using WdtAlpha = GillijimProject.WowFiles.Alpha.WdtAlpha;
 using SharedMd5TranslateIndex = WowViewer.Core.IO.Files.Md5TranslateIndex;
@@ -28,6 +35,16 @@ public class VlmDatasetExporter
     private const float TileSize = 533.33333f;
     private const float MapOrigin = 32f * TileSize;
     private const float ObjectMaskMarginTiles = 0.25f;
+    private const int MaxFootprintSamplesPerSource = 2048;
+
+    private enum ObjectProjectionAxis
+    {
+        Y,
+        Z,
+    }
+
+    private readonly record struct ObjectProjectionMode(ObjectProjectionAxis SecondaryAxis, bool UseMapOrigin, bool UseNormalized);
+    private readonly record struct ProjectionCandidate(ObjectProjectionMode Mode, float U, float V);
 
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -37,6 +54,24 @@ public class VlmDatasetExporter
     };
     
     private readonly ConcurrentDictionary<string, (float[] Min, float[] Max)?> _modelBoundsCache = new();
+    private readonly ConcurrentDictionary<string, Vector2[][]?> _modelFootprintCache = new();
+
+    private static readonly HashSet<FourCC> KnownWmoGroupSubchunkIds =
+    [
+        WmoChunkIds.Mopy,
+        WmoChunkIds.Movi,
+        WmoChunkIds.Moin,
+        WmoChunkIds.Movt,
+        WmoChunkIds.Monr,
+        WmoChunkIds.Motv,
+        WmoChunkIds.Moba,
+        WmoChunkIds.Molr,
+        WmoChunkIds.Mobn,
+        WmoChunkIds.Mobr,
+        WmoChunkIds.Mocv,
+        WmoChunkIds.Mliq,
+        WmoChunkIds.Modr,
+    ];
 
     public async Task ExportBatchAsync(VlmBatchExportConfig config, IProgress<string>? progress = null)
     {
@@ -58,7 +93,8 @@ public class VlmDatasetExporter
         IProgress<string>? progress = null,
         int limit = int.MaxValue,
         string? listfilePath = null,
-        bool generateDepth = false)
+        bool generateDepth = false,
+        string? minimapRoot = null)
     {
         progress?.Report($"Starting VLM export for map: {mapName}");
 
@@ -93,13 +129,26 @@ public class VlmDatasetExporter
             searchPaths.Add(clientPath);
         }
 
-        // Try multiple WDT locations
-        var wdtPaths = new[]
+        var minimapSearchPaths = string.IsNullOrWhiteSpace(minimapRoot)
+            ? searchPaths
+            : BuildSearchPaths(minimapRoot);
+
+        if (!string.IsNullOrWhiteSpace(minimapRoot))
         {
-            Path.Combine(dataPath, "World", "Maps", mapName, $"{mapName}.wdt"),
-            Path.Combine(clientPath, "Data", "World", "Maps", mapName, $"{mapName}.wdt"),
-            Path.Combine(clientPath, "World", "Maps", mapName, $"{mapName}.wdt"),
-        };
+            if (minimapSearchPaths.Count == 0)
+            {
+                progress?.Report($"Explicit minimap root does not expose a readable World tree: {minimapRoot}");
+            }
+            else
+            {
+                progress?.Report($"Using explicit minimap root: {minimapRoot}");
+            }
+        }
+
+        // Resolve directory names before any map file lookup so clients whose on-disk
+        // folder differs from the requested map label still find WDT/ADT/WDL payloads.
+        string[] wdtPaths;
+        string[] wdtArchivePaths;
 
         string? wdtPath = null;
         byte[]? wdtData = null;
@@ -118,6 +167,34 @@ public class VlmDatasetExporter
             ? listfilePath
             : listfileSearchPaths.FirstOrDefault(File.Exists);
         ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, searchPaths, resolvedListfile);
+
+        var mapDirectoryLookup = new MapDirectoryLookup();
+        mapDirectoryLookup.Load(searchPaths, archiveCatalog);
+
+        string? resolvedMapDirectory = mapDirectoryLookup.ResolveDirectory(mapName);
+        string mapDirectory = resolvedMapDirectory
+            ?? TryResolveArchiveMapDirectoryAlias(mapName, archiveCatalog.GetAllKnownFiles())
+            ?? mapName;
+        if (!string.Equals(mapDirectory, mapName, StringComparison.Ordinal))
+        {
+            string resolutionSource = resolvedMapDirectory is not null ? "Map.dbc" : "archive file names";
+            Console.WriteLine($"Resolved map '{mapName}' to directory '{mapDirectory}' via {resolutionSource}");
+        }
+
+        string[] mapPathCandidates = DistinctMapNames(mapName, mapDirectory).ToArray();
+        wdtPaths = mapPathCandidates
+            .SelectMany(directoryName => new[]
+            {
+                Path.Combine(dataPath, "World", "Maps", directoryName, $"{directoryName}.wdt"),
+                Path.Combine(clientPath, "Data", "World", "Maps", directoryName, $"{directoryName}.wdt"),
+                Path.Combine(clientPath, "World", "Maps", directoryName, $"{directoryName}.wdt"),
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        wdtArchivePaths = mapPathCandidates
+            .Select(directoryName => $"World\\Maps\\{directoryName}\\{directoryName}.wdt")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
         foreach (var tryPath in wdtPaths)
         {
@@ -144,9 +221,11 @@ public class VlmDatasetExporter
         // Fallback: Try reading from large MPQ archives (3.3.5+, world.mpq, etc.)
         if (wdtPath == null)
         {
-            var wdtInternalPath = $"World\\Maps\\{mapName}\\{mapName}.wdt";
-            if (archiveCatalog.FileExists(wdtInternalPath))
+            foreach (var wdtInternalPath in wdtArchivePaths)
             {
+                if (!archiveCatalog.FileExists(wdtInternalPath))
+                    continue;
+
                 wdtData = archiveCatalog.ReadFile(wdtInternalPath);
                 if (wdtData != null)
                 {
@@ -154,6 +233,7 @@ public class VlmDatasetExporter
                     await File.WriteAllBytesAsync(tempWdt, wdtData);
                     wdtPath = tempWdt;
                     progress?.Report($"Found WDT in MPQ archive: {wdtInternalPath}");
+                    break;
                 }
             }
         }
@@ -164,19 +244,10 @@ public class VlmDatasetExporter
             progress?.Report($"Searched paths:");
             foreach (var p in wdtPaths)
                 progress?.Report($"  - {p} (and {p}.MPQ)");
-            progress?.Report($"Also searched in loaded MPQ archives for: World\\Maps\\{mapName}\\{mapName}.wdt");
+            foreach (var p in wdtArchivePaths)
+                progress?.Report($"  - archive: {p}");
             progress?.Report("Ensure MPQ archives (world.mpq, terrain.mpq, etc.) are in the Data folder.");
             return new VlmExportResult(0, 0, 0, outputDir);
-        }
-
-
-        var mapDirectoryLookup = new MapDirectoryLookup();
-        mapDirectoryLookup.Load(searchPaths, archiveCatalog);
-
-        string mapDirectory = mapDirectoryLookup.ResolveDirectory(mapName) ?? mapName;
-        if (!string.Equals(mapDirectory, mapName, StringComparison.Ordinal))
-        {
-            Console.WriteLine($"Resolved map '{mapName}' to directory '{mapDirectory}' via Map.dbc");
         }
 
         // Initialize MD5 Translate Service (Legacy)
@@ -249,6 +320,16 @@ public class VlmDatasetExporter
             return new VlmExportResult(0, 0, 0, outputDir);
         }
 
+        if (!isAlphaFormat)
+        {
+            int reachableBeforeFilter = existingTiles.Count;
+            existingTiles = FilterReachableLkTiles(existingTiles, searchPaths, archiveCatalog, mapDirectory);
+            if (existingTiles.Count != reachableBeforeFilter)
+            {
+                progress?.Report($"Filtered LK tile list to {existingTiles.Count} reachable root ADTs (from {reachableBeforeFilter} WDT-flagged tiles)");
+            }
+        }
+
         // Load WDL if available
         WdlParser.WdlData? wdlData = null;
         try
@@ -269,13 +350,16 @@ public class VlmDatasetExporter
                  // Try to find .wdl.MPQ in all search paths
                  foreach (var path in searchPaths)
                  {
-                     var wdlMpqDiscovered = Path.Combine(path, "World", "Maps", mapName, $"{mapName}.wdl.MPQ");
-                     if (!File.Exists(wdlMpqDiscovered)) 
-                        wdlMpqDiscovered = Path.Combine(path, "World", "Maps", mapName, $"{mapName}.wdl.mpq");
-                        
-                     if (File.Exists(wdlMpqDiscovered))
+                     foreach (string directoryName in mapPathCandidates)
                      {
-                         var wdlExpectedPath = Path.Combine(path, "World", "Maps", mapName, $"{mapName}.wdl");
+                         var wdlMpqDiscovered = Path.Combine(path, "World", "Maps", directoryName, $"{directoryName}.wdl.MPQ");
+                         if (!File.Exists(wdlMpqDiscovered))
+                            wdlMpqDiscovered = Path.Combine(path, "World", "Maps", directoryName, $"{directoryName}.wdl.mpq");
+
+                         if (!File.Exists(wdlMpqDiscovered))
+                            continue;
+
+                         var wdlExpectedPath = Path.Combine(path, "World", "Maps", directoryName, $"{directoryName}.wdl");
                          var wdlBytes = AlphaArchiveReader.ReadFromMpq(
                              wdlMpqDiscovered,
                              AlphaArchiveReader.BuildInternalNameCandidates(wdlExpectedPath));
@@ -287,19 +371,26 @@ public class VlmDatasetExporter
                              break;
                          }
                      }
+
+                     if (loaded)
+                         break;
                  }
 
                  // 3. Try standard MPQ path (Modern/Legacy)
                  if (!loaded)
                  {
-                    var wdlInternalPath = $"World\\Maps\\{mapName}\\{mapName}.wdl";
-                    if (archiveCatalog.FileExists(wdlInternalPath))
+                    foreach (string directoryName in mapPathCandidates)
                     {
+                        var wdlInternalPath = $"World\\Maps\\{directoryName}\\{directoryName}.wdl";
+                        if (!archiveCatalog.FileExists(wdlInternalPath))
+                            continue;
+
                         var wdlBytes = archiveCatalog.ReadFile(wdlInternalPath);
                         if (wdlBytes != null)
                         {
                             wdlData = WdlParser.Parse(wdlBytes);
                             progress?.Report($"Loaded WDL data from MPQ internal: {wdlInternalPath}");
+                            break;
                         }
                     }
                  }
@@ -352,12 +443,11 @@ public class VlmDatasetExporter
                 string? imageRelPath = null;
                 
                 // Try to find minimap (common to both formats)
-                var minimapPath = FindMinimapTile(searchPaths, archiveCatalog, md5Index, mapDirectory, x, y);
+                var minimapPath = FindMinimapTile(minimapSearchPaths, archiveCatalog, md5Index, mapDirectory, x, y);
                 if (minimapPath != null)
                 {
                     var imageFileName = $"{tileName}.png";
                     var outputImagePath = Path.Combine(imagesDir, imageFileName);
-                    
                     if (ConvertBlpToPng(minimapPath, outputImagePath, archiveCatalog))
                     {
                         imageRelPath = $"images/{imageFileName}";
@@ -398,7 +488,7 @@ public class VlmDatasetExporter
                 {
                     // LK/Cata format: Read ADT from MPQ or loose files on disk
                     // Check for Split ADT files (Cataclysm+)
-                    var adtBase = $"World\\Maps\\{mapName}\\{mapName}_{x}_{y}";
+                    var adtBase = $"World\\Maps\\{mapDirectory}\\{mapDirectory}_{x}_{y}";
                     var rootAdtPath = $"{adtBase}.adt";
                     var texAdtPath = $"{adtBase}_tex0.adt";
                     var objAdtPath = $"{adtBase}_obj0.adt";
@@ -526,7 +616,11 @@ public class VlmDatasetExporter
                         string? objectVisibilityMaskPath = null;
                         string? pm4MaskPath = null;
                         string? noObjectMinimapPath = null;
+                        string? terrainOnlyMinimapPath = null;
                         float lMin = 0f, lMax = 0f;
+                        byte[] objectMaskBytes = Array.Empty<byte>();
+                        byte[] pm4MaskBytes = Array.Empty<byte>();
+                        byte[] liquidMaskBytes = Array.Empty<byte>();
 
                         string? sourceMinimapPath = sample.ImagePath;
                         if (!string.IsNullOrWhiteSpace(sourceMinimapPath) && !Path.IsPathRooted(sourceMinimapPath))
@@ -571,29 +665,27 @@ public class VlmDatasetExporter
                                         tileY);
                                     if (positionRefs.Count > 0)
                                     {
-                                        byte[] pm4Mask = VlmPm4MaskService.BuildPm4Mask(
+                                        pm4MaskBytes = VlmPm4MaskService.BuildPm4Mask(
                                             tileName,
                                             positionRefs,
                                             minimapForMask.Width,
                                             minimapForMask.Height);
-                                        if (pm4Mask.Length > 0)
+                                        if (pm4MaskBytes.Length > 0)
                                         {
                                             pm4MaskPath = $"images/{tileName}_pm4_mask.png";
-                                            await File.WriteAllBytesAsync(Path.Combine(outputDir, pm4MaskPath), pm4Mask);
+                                            await File.WriteAllBytesAsync(Path.Combine(outputDir, pm4MaskPath), pm4MaskBytes);
                                         }
                                     }
                                 }
 
-                                byte[] objectMask = BuildObjectVisibilityMask(sample.TerrainData, minimapForMask.Width, minimapForMask.Height);
-                                if (objectMask.Length > 0)
+                                objectMaskBytes = BuildObjectVisibilityMask(sample.TerrainData, minimapForMask.Width, minimapForMask.Height, archiveCatalog);
+                                if (objectMaskBytes.Length > 0)
                                 {
                                     objectVisibilityMaskPath = $"images/{tileName}_object_visibility_mask.png";
-                                    await File.WriteAllBytesAsync(Path.Combine(outputDir, objectVisibilityMaskPath), objectMask);
+                                    await File.WriteAllBytesAsync(Path.Combine(outputDir, objectVisibilityMaskPath), objectMaskBytes);
                                 }
 
-                                byte[] removalMask = CombineMaskPngBytes(objectMask, pm4MaskPath != null
-                                    ? await File.ReadAllBytesAsync(Path.Combine(outputDir, pm4MaskPath))
-                                    : Array.Empty<byte>());
+                                byte[] removalMask = CombineMaskPngBytes(objectMaskBytes, pm4MaskBytes);
                                 if (removalMask.Length > 0)
                                 {
                                     byte[] noObjectBytes = SynthesizeMaskedMinimap(cleanedTerrainMinimapPath ?? sourceMinimapPath, removalMask);
@@ -624,6 +716,7 @@ public class VlmDatasetExporter
                             var liqMask = TileStitchingService.StitchLiquidMask(liquidsList, tileName);
                             if (liqMask.Length > 0)
                             {
+                                liquidMaskBytes = liqMask;
                                 lMaskPath = $"liquids/{tileName}_liq_mask.png";
                                 await File.WriteAllBytesAsync(Path.Combine(outputDir, lMaskPath), liqMask);
 
@@ -636,6 +729,24 @@ public class VlmDatasetExporter
                                         noLiquidMinimapPath = $"images/{tileName}_no_liquid.png";
                                         await File.WriteAllBytesAsync(Path.Combine(outputDir, noLiquidMinimapPath), noLiqBytes);
                                     }
+                                }
+                            }
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(sourceMinimapPath) && File.Exists(sourceMinimapPath))
+                        {
+                            byte[] terrainOnlyRemovalMask = await BuildCombinedTerrainOnlyMaskAsync(
+                                alphaPaths.Concat(shadowPath != null ? new[] { shadowPath } : Array.Empty<string>()),
+                                objectMaskBytes,
+                                pm4MaskBytes,
+                                liquidMaskBytes);
+                            if (terrainOnlyRemovalMask.Length > 0)
+                            {
+                                byte[] terrainOnlyBytes = SynthesizeMaskedMinimap(cleanedTerrainMinimapPath ?? sourceMinimapPath, terrainOnlyRemovalMask);
+                                if (terrainOnlyBytes.Length > 0)
+                                {
+                                    terrainOnlyMinimapPath = $"images/{tileName}_terrain_only.png";
+                                    await File.WriteAllBytesAsync(Path.Combine(outputDir, terrainOnlyMinimapPath), terrainOnlyBytes);
                                 }
                             }
                         }
@@ -653,6 +764,7 @@ public class VlmDatasetExporter
                             ObjectVisibilityMaskPath = objectVisibilityMaskPath,
                             Pm4MaskPath = pm4MaskPath,
                             NoObjectMinimapPath = noObjectMinimapPath,
+                            TerrainOnlyMinimapPath = terrainOnlyMinimapPath,
                             LiquidMinHeight = lMin,
                             LiquidMaxHeight = lMax
                         };
@@ -805,6 +917,52 @@ public class VlmDatasetExporter
 
         progress?.Report($"Export complete: {tilesExported} tiles exported, {tilesSkipped} skipped");
         return new VlmExportResult(tilesExported, tilesSkipped, allTextures.Count, outputDir);
+    }
+
+    private static List<string> BuildSearchPaths(string rootPath)
+    {
+        var paths = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(rootPath))
+            return paths;
+
+        if (Directory.Exists(Path.Combine(rootPath, "World")))
+            paths.Add(rootPath);
+
+        var dataRoot = Path.Combine(rootPath, "Data");
+        if (Directory.Exists(Path.Combine(dataRoot, "World")))
+            paths.Add(dataRoot);
+
+        if (Directory.Exists(rootPath))
+            paths.Add(rootPath);
+
+        return paths
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<int> FilterReachableLkTiles(
+        IEnumerable<int> tiles,
+        IEnumerable<string> searchPaths,
+        IArchiveReader archiveReader,
+        string mapDirectory)
+    {
+        var reachable = new List<int>();
+
+        foreach (int tileIndex in tiles)
+        {
+            int x = tileIndex % 64;
+            int y = tileIndex / 64;
+            string rootAdtPath = $"World\\Maps\\{mapDirectory}\\{mapDirectory}_{x}_{y}.adt";
+
+            bool foundOnDisk = searchPaths.Any(basePath => File.Exists(Path.Combine(basePath, rootAdtPath)));
+            bool foundInArchive = archiveReader.FileExists(rootAdtPath);
+
+            if (foundOnDisk || foundInArchive)
+                reachable.Add(tileIndex);
+        }
+
+        return reachable;
     }
 
     private async Task UpdateJsonWithDepthPaths(string datasetDir, IProgress<string>? progress)
@@ -1131,7 +1289,7 @@ public class VlmDatasetExporter
                     }
                 }
                 
-                objects.Add(new VlmObjectPlacement(name, nameId, uniqueId, px, py, pz, rx, ry, rz, scale / 1024f, "m2", boundsMin, boundsMax));
+                objects.Add(new VlmObjectPlacement(name, nameId, uniqueId, px, py, pz, rx, ry, rz, scale / 1024f, "m2", boundsMin, boundsMax, fullPath));
             }
             
             var modfRaw = adt.GetModfRaw();
@@ -1166,7 +1324,7 @@ public class VlmDatasetExporter
                     }
                 }
                 
-                objects.Add(new VlmObjectPlacement(name, nameId, uniqueId, px, py, pz, rx, ry, rz, scale / 1024f, "wmo", boundsMin, boundsMax));
+                objects.Add(new VlmObjectPlacement(name, nameId, uniqueId, px, py, pz, rx, ry, rz, scale / 1024f, "wmo", boundsMin, boundsMax, fullPath));
             }
         }
         catch { }
@@ -1207,6 +1365,7 @@ public class VlmDatasetExporter
             ObjectVisibilityMaskPath: null,
             Pm4MaskPath: null,
             NoObjectMinimapPath: null,
+            TerrainOnlyMinimapPath: null,
             Textures: textures,
             ChunkLayers: chunkLayers.Count > 0 ? chunkLayers.ToArray() : null,
             Liquids: liquids.Count > 0 ? liquids.ToArray() : null,
@@ -1678,6 +1837,7 @@ public class VlmDatasetExporter
                 ObjectVisibilityMaskPath: null,
                 Pm4MaskPath: null,
                 NoObjectMinimapPath: null,
+                TerrainOnlyMinimapPath: null,
                 Textures: textures,
                 ChunkLayers: chunkLayers.ToArray(),
                 Liquids: liquids.Count > 0 ? liquids.ToArray() : null,
@@ -1835,7 +1995,8 @@ public class VlmDatasetExporter
                 scale / 1024f,
                 category,
                 boundsMin,
-                boundsMax));
+                boundsMax,
+                fullPath));
         }
     }
 
@@ -2594,7 +2755,11 @@ public class VlmDatasetExporter
              (float r, float g, float b, float a) GetC(int index)
              {
                  int baseIdx = index * 4;
-                 return (cData[baseIdx] / 255.0f, cData[baseIdx + 1] / 255.0f, cData[baseIdx + 2] / 255.0f, cData[baseIdx + 3] / 255.0f);
+                 return (
+                     cData[baseIdx + 0] / 255.0f,
+                     cData[baseIdx + 1] / 255.0f,
+                     cData[baseIdx + 2] / 255.0f,
+                     cData[baseIdx + 3] / 255.0f);
              }
 
              var vTL = GetC(iy * 9 + ix);
@@ -2644,7 +2809,7 @@ public class VlmDatasetExporter
 
                 if (!mccvDict.TryGetValue(chunkIndex, out var cData))
                 {
-                    image[x, y] = new SixLabors.ImageSharp.PixelFormats.Rgba32(127, 127, 127, 255);
+                    image[x, y] = new SixLabors.ImageSharp.PixelFormats.Rgba32(127, 127, 127, 127);
                     continue;
                 }
 
@@ -2661,92 +2826,58 @@ public class VlmDatasetExporter
         return ms.ToArray();
     }
 
-    private static byte[] BuildObjectVisibilityMask(VlmTerrainData terrainData, int width, int height)
+    private byte[] BuildObjectVisibilityMask(VlmTerrainData terrainData, int width, int height, IArchiveReader archiveReader)
     {
         if (width <= 0 || height <= 0 || terrainData.Objects.Count == 0)
             return Array.Empty<byte>();
 
         using Image<L8> objectMask = new(width, height);
         bool hasAnyCoverage = false;
-        var projectedWmoObjects = new Dictionary<uint, (int CenterX, int CenterY, int Radius)>();
 
         foreach (VlmObjectPlacement obj in terrainData.Objects)
         {
-            if (!obj.Category.Contains("wmo", StringComparison.OrdinalIgnoreCase))
+            if (!TryResolveObjectProjectionMode(obj, terrainData.AdtTile, out int tileX, out int tileY, out ObjectProjectionMode projectionMode))
+                continue;
+
+            bool wroteObject = false;
+
+            if (!projectionMode.UseNormalized && !string.IsNullOrWhiteSpace(obj.ModelPath))
+            {
+                Vector2[][]? footprintPolygons = GetModelFootprintPolygons(obj.ModelPath, obj.Category, archiveReader);
+                if (footprintPolygons != null)
+                {
+                    foreach (Vector2[] localPolygon in footprintPolygons)
+                    {
+                        if (!TryProjectFootprintPolygon(localPolygon, obj, projectionMode, tileX, tileY, width, height, out Vector2[] projectedPolygon))
+                            continue;
+
+                        if (!FillMaskPolygon(objectMask, projectedPolygon))
+                            continue;
+
+                        wroteObject = true;
+                        hasAnyCoverage = true;
+                    }
+                }
+            }
+
+            if (!wroteObject && TryBuildBoundsFootprintPolygon(obj, out Vector2[] boundsPolygon))
+            {
+                if (TryProjectFootprintPolygon(boundsPolygon, obj, projectionMode, tileX, tileY, width, height, out Vector2[] projectedBoundsPolygon)
+                    && FillMaskPolygon(objectMask, projectedBoundsPolygon))
+                {
+                    wroteObject = true;
+                    hasAnyCoverage = true;
+                }
+            }
+
+            if (wroteObject)
                 continue;
 
             if (!TryProjectObjectToTilePixel(obj, terrainData.AdtTile, width, height, out int centerX, out int centerY))
                 continue;
 
-            int radius = EstimateObjectRadiusPixels(obj, width, height);
-            if (radius <= 0)
-                continue;
-
-            projectedWmoObjects[obj.UniqueId] = (centerX, centerY, radius);
-        }
-
-        if (terrainData.ShadowAnalysis != null && projectedWmoObjects.Count > 0)
-        {
-            float scaleX = width / 1024f;
-            float scaleY = height / 1024f;
-
-            foreach (VlmChunkShadowAnalysis chunk in terrainData.ShadowAnalysis)
-            {
-                int chunkX = chunk.ChunkIndex % 16;
-                int chunkY = chunk.ChunkIndex / 16;
-
-                foreach (VlmShadowRegion region in chunk.Regions)
-                {
-                    if (region.CandidateObjectIds.Length == 0)
-                        continue;
-
-                    if (region.BoundingBoxMinPixels.Length < 2 || region.BoundingBoxMaxPixels.Length < 2)
-                        continue;
-
-                    int x0Shadow = (chunkX * 64) + region.BoundingBoxMinPixels[0];
-                    int y0Shadow = (chunkY * 64) + region.BoundingBoxMinPixels[1];
-                    int x1Shadow = (chunkX * 64) + region.BoundingBoxMaxPixels[0];
-                    int y1Shadow = (chunkY * 64) + region.BoundingBoxMaxPixels[1];
-
-                    int x0 = Math.Clamp((int)MathF.Floor(x0Shadow * scaleX), 0, width - 1);
-                    int y0 = Math.Clamp((int)MathF.Floor(y0Shadow * scaleY), 0, height - 1);
-                    int x1 = Math.Clamp((int)MathF.Ceiling((x1Shadow + 1) * scaleX), 0, width);
-                    int y1 = Math.Clamp((int)MathF.Ceiling((y1Shadow + 1) * scaleY), 0, height);
-
-                    if (x1 <= x0 || y1 <= y0)
-                        continue;
-
-                    // Keep shadow-derived masking local to each projected WMO footprint.
-                    // This avoids wiping large terrain regions when a shadow region is broad.
-                    foreach (uint candidateObjectId in region.CandidateObjectIds)
-                    {
-                        if (!projectedWmoObjects.TryGetValue(candidateObjectId, out var projected))
-                            continue;
-
-                        int localRadius = Math.Max(4, projected.Radius * 2);
-                        int localX0 = Math.Max(0, projected.CenterX - localRadius);
-                        int localY0 = Math.Max(0, projected.CenterY - localRadius);
-                        int localX1 = Math.Min(width, projected.CenterX + localRadius + 1);
-                        int localY1 = Math.Min(height, projected.CenterY + localRadius + 1);
-
-                        int clippedX0 = Math.Max(x0, localX0);
-                        int clippedY0 = Math.Max(y0, localY0);
-                        int clippedX1 = Math.Min(x1, localX1);
-                        int clippedY1 = Math.Min(y1, localY1);
-
-                        if (clippedX1 <= clippedX0 || clippedY1 <= clippedY0)
-                            continue;
-
-                        FillMaskRectangle(objectMask, clippedX0, clippedY0, clippedX1, clippedY1);
-                        hasAnyCoverage = true;
-                    }
-                }
-            }
-        }
-
-        foreach ((int centerX, int centerY, int radius) in projectedWmoObjects.Values)
-        {
-            DrawFilledCircle(objectMask, centerX, centerY, radius);
+            EstimateObjectRadiiPixels(obj, width, height, out int radiusX, out int radiusY);
+            DrawFilledEllipse(objectMask, centerX, centerY, radiusX, radiusY);
             hasAnyCoverage = true;
         }
 
@@ -2834,33 +2965,215 @@ public class VlmDatasetExporter
             yield return mapDirectory;
     }
 
-    private static void FillMaskRectangle(Image<L8> image, int minX, int minY, int maxXExclusive, int maxYExclusive)
+    internal static string? TryResolveArchiveMapDirectoryAlias(string mapName, IReadOnlyList<string> knownFiles)
     {
-        for (int y = minY; y < maxYExclusive; y++)
+        if (string.IsNullOrWhiteSpace(mapName) || knownFiles.Count == 0)
+            return null;
+
+        string requestedToken = NormalizeMapToken(mapName);
+        if (requestedToken.Length == 0)
+            return null;
+
+        HashSet<string> candidates = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string knownFile in knownFiles)
         {
-            for (int x = minX; x < maxXExclusive; x++)
-                image[x, y] = new L8(255);
+            if (string.IsNullOrWhiteSpace(knownFile))
+                continue;
+
+            string normalizedPath = knownFile.Replace('\\', '/');
+            if (!normalizedPath.StartsWith("World/Maps/", StringComparison.OrdinalIgnoreCase)
+                || !normalizedPath.EndsWith(".wdt", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string[] segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length < 4)
+                continue;
+
+            string directoryName = segments[2];
+            string fileName = Path.GetFileNameWithoutExtension(segments[^1]);
+            if (!string.Equals(directoryName, fileName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            candidates.Add(directoryName);
         }
+
+        foreach (string candidate in candidates)
+        {
+            if (string.Equals(NormalizeMapToken(candidate), requestedToken, StringComparison.Ordinal))
+                return candidate;
+        }
+
+        string? bestCandidate = null;
+        int bestDistance = int.MaxValue;
+        bool isAmbiguous = false;
+
+        foreach (string candidate in candidates)
+        {
+            string candidateToken = NormalizeMapToken(candidate);
+            if (candidateToken.Length == 0 || candidateToken[0] != requestedToken[0])
+                continue;
+
+            if (Math.Abs(candidateToken.Length - requestedToken.Length) > 2)
+                continue;
+
+            int distance = ComputeLevenshteinDistance(requestedToken, candidateToken, 2);
+            if (distance > 2)
+                continue;
+
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestCandidate = candidate;
+                isAmbiguous = false;
+            }
+            else if (distance == bestDistance && !string.Equals(bestCandidate, candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                isAmbiguous = true;
+            }
+        }
+
+        return isAmbiguous ? null : bestCandidate;
     }
 
-    private static void DrawFilledCircle(Image<L8> image, int centerX, int centerY, int radius)
+    private static string NormalizeMapToken(string value)
     {
-        if (radius <= 0)
-            return;
+        Span<char> buffer = stackalloc char[value.Length];
+        int length = 0;
+        foreach (char ch in value)
+        {
+            if (!char.IsLetterOrDigit(ch))
+                continue;
 
-        int minX = Math.Max(0, centerX - radius);
-        int maxX = Math.Min(image.Width - 1, centerX + radius);
-        int minY = Math.Max(0, centerY - radius);
-        int maxY = Math.Min(image.Height - 1, centerY + radius);
-        int radiusSquared = radius * radius;
+            buffer[length++] = char.ToLowerInvariant(ch);
+        }
+
+        return length == 0 ? string.Empty : new string(buffer[..length]);
+    }
+
+    private static int ComputeLevenshteinDistance(string source, string target, int maxDistance)
+    {
+        int sourceLength = source.Length;
+        int targetLength = target.Length;
+
+        if (sourceLength == 0)
+            return targetLength;
+        if (targetLength == 0)
+            return sourceLength;
+        if (Math.Abs(sourceLength - targetLength) > maxDistance)
+            return maxDistance + 1;
+
+        int[] previous = new int[targetLength + 1];
+        int[] current = new int[targetLength + 1];
+
+        for (int j = 0; j <= targetLength; j++)
+            previous[j] = j;
+
+        for (int i = 1; i <= sourceLength; i++)
+        {
+            current[0] = i;
+            int rowMin = current[0];
+
+            for (int j = 1; j <= targetLength; j++)
+            {
+                int substitutionCost = source[i - 1] == target[j - 1] ? 0 : 1;
+                current[j] = Math.Min(
+                    Math.Min(previous[j] + 1, current[j - 1] + 1),
+                    previous[j - 1] + substitutionCost);
+                rowMin = Math.Min(rowMin, current[j]);
+            }
+
+            if (rowMin > maxDistance)
+                return maxDistance + 1;
+
+            (previous, current) = (current, previous);
+        }
+
+        return previous[targetLength];
+    }
+
+    private static bool FillMaskPolygon(Image<L8> image, IReadOnlyList<Vector2> polygon)
+    {
+        if (polygon.Count < 3)
+            return false;
+
+        float minYFloat = float.MaxValue;
+        float maxYFloat = float.MinValue;
+        foreach (Vector2 point in polygon)
+        {
+            if (!IsFinite(point.X) || !IsFinite(point.Y))
+                return false;
+
+            minYFloat = MathF.Min(minYFloat, point.Y);
+            maxYFloat = MathF.Max(maxYFloat, point.Y);
+        }
+
+        int minY = Math.Max(0, (int)MathF.Floor(minYFloat));
+        int maxY = Math.Min(image.Height - 1, (int)MathF.Ceiling(maxYFloat));
+        if (maxY < minY)
+            return false;
+
+        List<float> intersections = new(polygon.Count);
+        bool wroteAny = false;
 
         for (int y = minY; y <= maxY; y++)
         {
-            int dy = y - centerY;
+            float scanY = y + 0.5f;
+            intersections.Clear();
+
+            for (int index = 0; index < polygon.Count; index++)
+            {
+                Vector2 a = polygon[index];
+                Vector2 b = polygon[(index + 1) % polygon.Count];
+                if ((a.Y <= scanY && b.Y > scanY) || (b.Y <= scanY && a.Y > scanY))
+                {
+                    float x = a.X + ((scanY - a.Y) * (b.X - a.X) / (b.Y - a.Y));
+                    intersections.Add(x);
+                }
+            }
+
+            if (intersections.Count < 2)
+                continue;
+
+            intersections.Sort();
+            for (int i = 0; i + 1 < intersections.Count; i += 2)
+            {
+                int startX = Math.Max(0, (int)MathF.Ceiling(intersections[i]));
+                int endX = Math.Min(image.Width - 1, (int)MathF.Floor(intersections[i + 1]));
+                if (endX < startX)
+                    continue;
+
+                for (int x = startX; x <= endX; x++)
+                    image[x, y] = new L8(255);
+
+                wroteAny = true;
+            }
+        }
+
+        return wroteAny;
+    }
+
+    private static void DrawFilledEllipse(Image<L8> image, int centerX, int centerY, int radiusX, int radiusY)
+    {
+        radiusX = Math.Max(2, radiusX);
+        radiusY = Math.Max(2, radiusY);
+
+        int minX = Math.Max(0, centerX - radiusX);
+        int maxX = Math.Min(image.Width - 1, centerX + radiusX);
+        int minY = Math.Max(0, centerY - radiusY);
+        int maxY = Math.Min(image.Height - 1, centerY + radiusY);
+        float invRadiusXSquared = 1f / (radiusX * radiusX);
+        float invRadiusYSquared = 1f / (radiusY * radiusY);
+
+        for (int y = minY; y <= maxY; y++)
+        {
+            float dy = y - centerY;
+            float dyTerm = dy * dy * invRadiusYSquared;
             for (int x = minX; x <= maxX; x++)
             {
-                int dx = x - centerX;
-                if ((dx * dx) + (dy * dy) > radiusSquared)
+                float dx = x - centerX;
+                if ((dx * dx * invRadiusXSquared) + dyTerm > 1f)
                     continue;
 
                 image[x, y] = new L8(255);
@@ -2868,7 +3181,7 @@ public class VlmDatasetExporter
         }
     }
 
-    private static int EstimateObjectRadiusPixels(VlmObjectPlacement obj, int width, int height)
+    private static void EstimateObjectRadiiPixels(VlmObjectPlacement obj, int width, int height, out int radiusX, out int radiusY)
     {
         float pixelsPerWorld = MathF.Min(width, height) / TileSize;
         float scale = float.IsFinite(obj.Scale) && obj.Scale > 0f ? obj.Scale : 1f;
@@ -2877,20 +3190,191 @@ public class VlmDatasetExporter
         {
             float halfWidthWorld = MathF.Abs(obj.BoundsMax[0] - obj.BoundsMin[0]) * 0.5f * scale;
             float halfDepthWorld = MathF.Abs(obj.BoundsMax[2] - obj.BoundsMin[2]) * 0.5f * scale;
-            float radiusWorld = MathF.Max(halfWidthWorld, halfDepthWorld);
-            return Math.Max(2, (int)MathF.Round(radiusWorld * pixelsPerWorld));
+            radiusX = Math.Max(2, (int)MathF.Round(halfWidthWorld * pixelsPerWorld));
+            radiusY = Math.Max(2, (int)MathF.Round(halfDepthWorld * pixelsPerWorld));
+            return;
         }
 
         if (obj.BoundsMin != null && obj.BoundsMax != null && obj.BoundsMin.Length >= 2 && obj.BoundsMax.Length >= 2)
         {
             float halfWidthWorld = MathF.Abs(obj.BoundsMax[0] - obj.BoundsMin[0]) * 0.5f * scale;
             float halfDepthWorld = MathF.Abs(obj.BoundsMax[1] - obj.BoundsMin[1]) * 0.5f * scale;
-            float radiusWorld = MathF.Max(halfWidthWorld, halfDepthWorld);
-            return Math.Max(2, (int)MathF.Round(radiusWorld * pixelsPerWorld));
+            radiusX = Math.Max(2, (int)MathF.Round(halfWidthWorld * pixelsPerWorld));
+            radiusY = Math.Max(2, (int)MathF.Round(halfDepthWorld * pixelsPerWorld));
+            return;
         }
 
         float baseRadiusWorld = obj.Category.Contains("wmo", StringComparison.OrdinalIgnoreCase) ? 6f : 3f;
-        return Math.Max(2, (int)MathF.Round(baseRadiusWorld * scale * pixelsPerWorld));
+        int radius = Math.Max(2, (int)MathF.Round(baseRadiusWorld * scale * pixelsPerWorld));
+        radiusX = radius;
+        radiusY = radius;
+    }
+
+    private static bool TryBuildBoundsFootprintPolygon(VlmObjectPlacement obj, out Vector2[] polygon)
+    {
+        polygon = Array.Empty<Vector2>();
+
+        if (obj.BoundsMin != null && obj.BoundsMax != null && obj.BoundsMin.Length >= 3 && obj.BoundsMax.Length >= 3)
+        {
+            polygon =
+            [
+                new Vector2(obj.BoundsMin[0], obj.BoundsMin[2]),
+                new Vector2(obj.BoundsMax[0], obj.BoundsMin[2]),
+                new Vector2(obj.BoundsMax[0], obj.BoundsMax[2]),
+                new Vector2(obj.BoundsMin[0], obj.BoundsMax[2]),
+            ];
+            return true;
+        }
+
+        if (obj.BoundsMin != null && obj.BoundsMax != null && obj.BoundsMin.Length >= 2 && obj.BoundsMax.Length >= 2)
+        {
+            polygon =
+            [
+                new Vector2(obj.BoundsMin[0], obj.BoundsMin[1]),
+                new Vector2(obj.BoundsMax[0], obj.BoundsMin[1]),
+                new Vector2(obj.BoundsMax[0], obj.BoundsMax[1]),
+                new Vector2(obj.BoundsMin[0], obj.BoundsMax[1]),
+            ];
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryProjectFootprintPolygon(
+        IReadOnlyList<Vector2> localPolygon,
+        VlmObjectPlacement obj,
+        ObjectProjectionMode projectionMode,
+        int tileX,
+        int tileY,
+        int width,
+        int height,
+        out Vector2[] projectedPolygon)
+    {
+        projectedPolygon = Array.Empty<Vector2>();
+        if (projectionMode.UseNormalized || localPolygon.Count < 3)
+            return false;
+
+        float scale = float.IsFinite(obj.Scale) && obj.Scale > 0f ? obj.Scale : 1f;
+        float angle = obj.RotZ * MathF.PI / 180f;
+        float cos = MathF.Cos(angle);
+        float sin = MathF.Sin(angle);
+        float baseSecondary = GetProjectionSecondaryCoordinate(obj, projectionMode.SecondaryAxis);
+
+        float minU = float.MaxValue;
+        float minV = float.MaxValue;
+        float maxU = float.MinValue;
+        float maxV = float.MinValue;
+        projectedPolygon = new Vector2[localPolygon.Count];
+
+        for (int index = 0; index < localPolygon.Count; index++)
+        {
+            Vector2 localPoint = localPolygon[index];
+            float scaledX = localPoint.X * scale;
+            float scaledY = localPoint.Y * scale;
+            float worldA = obj.X + (scaledX * cos) - (scaledY * sin);
+            float worldB = baseSecondary + (scaledX * sin) + (scaledY * cos);
+            (float u, float v) = ProjectToTileUv(worldA, worldB, tileX, tileY, projectionMode);
+            if (!IsFinite(u) || !IsFinite(v))
+                return false;
+
+            minU = MathF.Min(minU, u);
+            minV = MathF.Min(minV, v);
+            maxU = MathF.Max(maxU, u);
+            maxV = MathF.Max(maxV, v);
+            projectedPolygon[index] = new Vector2(u * (width - 1), v * (height - 1));
+        }
+
+        if (maxU < -ObjectMaskMarginTiles || minU > 1f + ObjectMaskMarginTiles ||
+            maxV < -ObjectMaskMarginTiles || minV > 1f + ObjectMaskMarginTiles)
+        {
+            projectedPolygon = Array.Empty<Vector2>();
+            return false;
+        }
+
+        return true;
+    }
+
+    private static float GetProjectionSecondaryCoordinate(VlmObjectPlacement obj, ObjectProjectionAxis secondaryAxis)
+    {
+        return secondaryAxis == ObjectProjectionAxis.Z ? obj.Z : obj.Y;
+    }
+
+    private static (float U, float V) ProjectToTileUv(float worldA, float worldB, int tileX, int tileY, ObjectProjectionMode projectionMode)
+    {
+        if (projectionMode.UseNormalized)
+            return (((worldB + 1f) * 0.5f), ((worldA + 1f) * 0.5f));
+
+        if (!projectionMode.UseMapOrigin)
+            return ((worldA / TileSize) - tileX, (worldB / TileSize) - tileY);
+
+        return (((MapOrigin - worldB) / TileSize) - tileX, ((MapOrigin - worldA) / TileSize) - tileY);
+    }
+
+    private static bool TryResolveObjectProjectionMode(
+        VlmObjectPlacement obj,
+        string adtTile,
+        out int tileX,
+        out int tileY,
+        out ObjectProjectionMode projectionMode)
+    {
+        tileX = 0;
+        tileY = 0;
+        projectionMode = default;
+
+        if (!TryParseTileCoordinates(adtTile, out tileX, out tileY))
+            return false;
+
+        List<ProjectionCandidate> candidates = new();
+        if (MathF.Abs(obj.X) < 2f && MathF.Abs(obj.Y) < 2f)
+        {
+            candidates.Add(new ProjectionCandidate(
+                new ObjectProjectionMode(ObjectProjectionAxis.Y, UseMapOrigin: false, UseNormalized: true),
+                (obj.Y + 1f) * 0.5f,
+                (obj.X + 1f) * 0.5f));
+        }
+
+        candidates.Add(new ProjectionCandidate(
+            new ObjectProjectionMode(ObjectProjectionAxis.Z, UseMapOrigin: false, UseNormalized: false),
+            (obj.X / TileSize) - tileX,
+            (obj.Z / TileSize) - tileY));
+        candidates.Add(new ProjectionCandidate(
+            new ObjectProjectionMode(ObjectProjectionAxis.Z, UseMapOrigin: true, UseNormalized: false),
+            ((MapOrigin - obj.Z) / TileSize) - tileX,
+            ((MapOrigin - obj.X) / TileSize) - tileY));
+        candidates.Add(new ProjectionCandidate(
+            new ObjectProjectionMode(ObjectProjectionAxis.Y, UseMapOrigin: false, UseNormalized: false),
+            (obj.X / TileSize) - tileX,
+            (obj.Y / TileSize) - tileY));
+        candidates.Add(new ProjectionCandidate(
+            new ObjectProjectionMode(ObjectProjectionAxis.Y, UseMapOrigin: true, UseNormalized: false),
+            ((MapOrigin - obj.Y) / TileSize) - tileX,
+            ((MapOrigin - obj.X) / TileSize) - tileY));
+
+        ProjectionCandidate best = candidates[0];
+        float bestOverflow = float.PositiveInfinity;
+        foreach (ProjectionCandidate candidate in candidates)
+        {
+            float overflow =
+                MathF.Max(0f, -candidate.U) + MathF.Max(0f, candidate.U - 1f) +
+                MathF.Max(0f, -candidate.V) + MathF.Max(0f, candidate.V - 1f);
+            if (overflow < bestOverflow)
+            {
+                best = candidate;
+                bestOverflow = overflow;
+                if (overflow <= 0.000001f)
+                    break;
+            }
+        }
+
+        if (best.U < -ObjectMaskMarginTiles || best.U > 1f + ObjectMaskMarginTiles ||
+            best.V < -ObjectMaskMarginTiles || best.V > 1f + ObjectMaskMarginTiles)
+        {
+            return false;
+        }
+
+        projectionMode = best.Mode;
+        return true;
     }
 
     private static bool TryProjectObjectToTilePixel(
@@ -2904,53 +3388,14 @@ public class VlmDatasetExporter
         centerX = 0;
         centerY = 0;
 
-        if (!TryParseTileCoordinates(adtTile, out int tileX, out int tileY))
+        if (!TryResolveObjectProjectionMode(obj, adtTile, out int tileX, out int tileY, out ObjectProjectionMode projectionMode))
             return false;
 
-        List<(float U, float V)> candidates = new();
-        if (MathF.Abs(obj.X) < 2f && MathF.Abs(obj.Y) < 2f)
-        {
-            candidates.Add((((obj.Y + 1f) * 0.5f), ((obj.X + 1f) * 0.5f)));
-        }
-
-        candidates.AddRange(BuildTileUvCandidates(obj.X, obj.Z, tileX, tileY));
-        candidates.AddRange(BuildTileUvCandidates(obj.X, obj.Y, tileX, tileY));
-
-        if (candidates.Count == 0)
-            return false;
-
-        (float U, float V) best = candidates[0];
-        float bestOverflow = float.PositiveInfinity;
-
-        foreach ((float u, float v) in candidates)
-        {
-            float overflow =
-                MathF.Max(0f, -u) + MathF.Max(0f, u - 1f) +
-                MathF.Max(0f, -v) + MathF.Max(0f, v - 1f);
-            if (overflow < bestOverflow)
-            {
-                best = (u, v);
-                bestOverflow = overflow;
-                if (overflow <= 0.000001f)
-                    break;
-            }
-        }
-
-        if (best.U < -ObjectMaskMarginTiles || best.U > 1f + ObjectMaskMarginTiles ||
-            best.V < -ObjectMaskMarginTiles || best.V > 1f + ObjectMaskMarginTiles)
-        {
-            return false;
-        }
-
+        float secondary = GetProjectionSecondaryCoordinate(obj, projectionMode.SecondaryAxis);
+        (float U, float V) best = ProjectToTileUv(obj.X, secondary, tileX, tileY, projectionMode);
         centerX = Math.Clamp((int)MathF.Round(Math.Clamp(best.U, 0f, 1f) * (width - 1)), 0, width - 1);
         centerY = Math.Clamp((int)MathF.Round(Math.Clamp(best.V, 0f, 1f) * (height - 1)), 0, height - 1);
         return true;
-    }
-
-    private static IEnumerable<(float U, float V)> BuildTileUvCandidates(float worldA, float worldB, int tileX, int tileY)
-    {
-        yield return ((worldA / TileSize) - tileX, (worldB / TileSize) - tileY);
-        yield return (((MapOrigin - worldB) / TileSize) - tileX, ((MapOrigin - worldA) / TileSize) - tileY);
     }
 
     private static bool TryParseTileCoordinates(string adtTile, out int tileX, out int tileY)
@@ -2963,6 +3408,407 @@ public class VlmDatasetExporter
             return false;
 
         return int.TryParse(parts[^2], out tileX) && int.TryParse(parts[^1], out tileY);
+    }
+
+    private Vector2[][]? GetModelFootprintPolygons(string modelPath, string category, IArchiveReader archiveReader)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return null;
+
+        string cacheKey = NormalizeModelPath(modelPath).ToLowerInvariant();
+        if (_modelFootprintCache.TryGetValue(cacheKey, out Vector2[][]? cached))
+            return cached;
+
+        try
+        {
+            foreach (string candidatePath in EnumerateModelPathCandidates(modelPath))
+            {
+                if (!archiveReader.FileExists(candidatePath))
+                    continue;
+
+                byte[]? data = archiveReader.ReadFile(candidatePath);
+                if (data is null || data.Length < 16)
+                    continue;
+
+                Vector2[][]? polygons = TryReadFootprintPolygonsFromModelBytes(data, candidatePath, category, archiveReader);
+                if (polygons is null || polygons.Length == 0)
+                    continue;
+
+                _modelFootprintCache[cacheKey] = polygons;
+                string candidateCacheKey = NormalizeModelPath(candidatePath).ToLowerInvariant();
+                _modelFootprintCache[candidateCacheKey] = polygons;
+                return polygons;
+            }
+        }
+        catch
+        {
+        }
+
+        _modelFootprintCache[cacheKey] = null;
+        return null;
+    }
+
+    private Vector2[][]? TryReadFootprintPolygonsFromModelBytes(byte[] data, string sourcePath, string category, IArchiveReader archiveReader)
+    {
+        string extension = Path.GetExtension(sourcePath);
+        bool preferWmo = category.Contains("wmo", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".wmo", StringComparison.OrdinalIgnoreCase);
+        bool preferMdx = extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase);
+
+        if (preferWmo)
+        {
+            Vector2[][]? wmoPolygons = TryReadWmoFootprintPolygons(data, sourcePath, archiveReader);
+            if (wmoPolygons is { Length: > 0 })
+                return wmoPolygons;
+        }
+
+        if (preferMdx)
+        {
+            Vector2[][]? mdxPolygons = TryReadMdxFootprintPolygons(data, sourcePath);
+            if (mdxPolygons is { Length: > 0 })
+                return mdxPolygons;
+
+            Vector2[][]? m2Polygons = TryReadM2FootprintPolygons(data, sourcePath);
+            if (m2Polygons is { Length: > 0 })
+                return m2Polygons;
+        }
+        else
+        {
+            Vector2[][]? m2Polygons = TryReadM2FootprintPolygons(data, sourcePath);
+            if (m2Polygons is { Length: > 0 })
+                return m2Polygons;
+
+            Vector2[][]? mdxPolygons = TryReadMdxFootprintPolygons(data, sourcePath);
+            if (mdxPolygons is { Length: > 0 })
+                return mdxPolygons;
+        }
+
+        return preferWmo ? null : TryReadWmoFootprintPolygons(data, sourcePath, archiveReader);
+    }
+
+    private static Vector2[][]? TryReadM2FootprintPolygons(byte[] data, string sourcePath)
+    {
+        try
+        {
+            using MemoryStream stream = new(data, writable: false);
+            M2GeometryDocument geometry = M2GeometryReader.Read(stream, sourcePath);
+            Vector2[]? hull = BuildFootprintHull(
+                geometry.Vertices.Count,
+                index => new Vector2(geometry.Vertices[index].Position.X, geometry.Vertices[index].Position.Z));
+            return hull is { Length: >= 3 } ? [hull] : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static Vector2[][]? TryReadMdxFootprintPolygons(byte[] data, string sourcePath)
+    {
+        try
+        {
+            using MemoryStream stream = new(data, writable: false);
+            MdxGeometryFile geometry = MdxGeometryReader.Read(stream, sourcePath);
+            List<Vector2[]> polygons = [];
+            foreach (MdxGeosetGeometry geoset in geometry.Geosets)
+            {
+                Vector2[]? hull = BuildFootprintHull(
+                    geoset.Vertices.Count,
+                    index => new Vector2(geoset.Vertices[index].X, geoset.Vertices[index].Z));
+                if (hull is { Length: >= 3 })
+                    polygons.Add(hull);
+            }
+
+            return polygons.Count > 0 ? [.. polygons] : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private Vector2[][]? TryReadWmoFootprintPolygons(byte[] data, string sourcePath, IArchiveReader archiveReader)
+    {
+        try
+        {
+            List<Vector2[]> polygons = [];
+            AppendEmbeddedWmoFootprintPolygons(data, polygons);
+
+            using MemoryStream stream = new(data, writable: false);
+            WmoSummary summary = WmoSummaryReader.Read(stream, sourcePath);
+            if (summary.ReportedGroupCount > 0)
+                AppendSplitWmoFootprintPolygons(sourcePath, summary.ReportedGroupCount, archiveReader, polygons);
+
+            return polygons.Count > 0 ? [.. polygons] : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void AppendEmbeddedWmoFootprintPolygons(byte[] data, List<Vector2[]> polygons)
+    {
+        using MemoryStream stream = new(data, writable: false);
+        IReadOnlyList<ChunkSpan> chunks = ReadExpandedWmoRootChunks(stream);
+        foreach (ChunkSpan chunk in chunks)
+        {
+            if (chunk.Header.Id != WmoChunkIds.Mogp)
+                continue;
+
+            byte[] mogp = ReadChunkPayload(stream, chunk);
+            Vector2[]? hull = TryReadWmoGroupHullFromMogpPayload(mogp);
+            if (hull is { Length: >= 3 })
+                polygons.Add(hull);
+        }
+    }
+
+    private static void AppendSplitWmoFootprintPolygons(string sourcePath, int groupCount, IArchiveReader archiveReader, List<Vector2[]> polygons)
+    {
+        string normalizedRootPath = NormalizeModelPath(sourcePath);
+        string directory = Path.GetDirectoryName(normalizedRootPath) ?? string.Empty;
+        string baseName = Path.GetFileNameWithoutExtension(normalizedRootPath);
+
+        for (int index = 0; index < groupCount; index++)
+        {
+            string groupPath = string.IsNullOrEmpty(directory)
+                ? $"{baseName}_{index:D3}.wmo"
+                : $"{directory}\\{baseName}_{index:D3}.wmo";
+            if (!archiveReader.FileExists(groupPath))
+                continue;
+
+            byte[]? groupBytes = archiveReader.ReadFile(groupPath);
+            if (groupBytes is null || groupBytes.Length < ChunkHeader.SizeInBytes)
+                continue;
+
+            Vector2[]? hull = TryReadWmoGroupHullFromGroupBytes(groupBytes);
+            if (hull is { Length: >= 3 })
+                polygons.Add(hull);
+        }
+    }
+
+    private static IReadOnlyList<ChunkSpan> ReadExpandedWmoRootChunks(Stream stream)
+    {
+        IReadOnlyList<ChunkSpan> topLevelChunks = ChunkedFileReader.ReadTopLevelChunks(stream);
+        if (topLevelChunks.Count <= 1 || topLevelChunks[1].Header.Id != WmoChunkIds.Momo)
+            return topLevelChunks;
+
+        List<ChunkSpan> expandedChunks = new(topLevelChunks.Count + 8);
+        foreach (ChunkSpan chunk in topLevelChunks)
+        {
+            if (chunk.Header.Id != WmoChunkIds.Momo)
+            {
+                expandedChunks.Add(chunk);
+                continue;
+            }
+
+            long previousPosition = stream.Position;
+            byte[] headerBytes = new byte[ChunkHeader.SizeInBytes];
+            try
+            {
+                long offset = chunk.DataOffset;
+                while (offset + ChunkHeader.SizeInBytes <= chunk.EndOffset)
+                {
+                    stream.Position = offset;
+                    stream.ReadExactly(headerBytes);
+                    FourCC id = FourCC.FromFileBytes(headerBytes.AsSpan(0, 4));
+                    uint size = BinaryPrimitives.ReadUInt32LittleEndian(headerBytes.AsSpan(4, 4));
+                    long dataOffset = offset + ChunkHeader.SizeInBytes;
+                    long endOffset = dataOffset + size;
+                    if (endOffset > chunk.EndOffset)
+                        break;
+
+                    expandedChunks.Add(new ChunkSpan(new ChunkHeader(id, size), offset, dataOffset));
+                    offset = endOffset;
+                }
+            }
+            finally
+            {
+                stream.Position = previousPosition;
+            }
+        }
+
+        return expandedChunks;
+    }
+
+    private static byte[] ReadChunkPayload(Stream stream, ChunkSpan chunk)
+    {
+        long previousPosition = stream.Position;
+        try
+        {
+            stream.Position = chunk.DataOffset;
+            byte[] payload = new byte[chunk.Header.Size];
+            stream.ReadExactly(payload);
+            return payload;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static Vector2[]? TryReadWmoGroupHullFromGroupBytes(byte[] groupBytes)
+    {
+        using MemoryStream stream = new(groupBytes, writable: false);
+        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
+        ChunkSpan mogpChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Mogp);
+        if (mogpChunk.Header.Id != WmoChunkIds.Mogp)
+            return null;
+
+        byte[] mogp = ReadChunkPayload(stream, mogpChunk);
+        return TryReadWmoGroupHullFromMogpPayload(mogp);
+    }
+
+    private static Vector2[]? TryReadWmoGroupHullFromMogpPayload(byte[] mogp)
+    {
+        if (mogp.Length < 0x38)
+            return null;
+
+        int headerSize = FindWmoGroupHeaderSize(mogp);
+        byte[]? movtPayload = TryReadWmoSubchunkPayload(mogp, headerSize, WmoChunkIds.Movt);
+        if (movtPayload is null || movtPayload.Length < 36 || (movtPayload.Length % 12) != 0)
+            return null;
+
+        int vertexCount = movtPayload.Length / 12;
+        return BuildFootprintHull(
+            vertexCount,
+            index =>
+            {
+                int offset = index * 12;
+                float x = BitConverter.ToSingle(movtPayload, offset);
+                float z = BitConverter.ToSingle(movtPayload, offset + 8);
+                return new Vector2(x, z);
+            });
+    }
+
+    private static int FindWmoGroupHeaderSize(byte[] mogp)
+    {
+        foreach (int candidate in new[] { 0x44, 0x80 })
+        {
+            if (HasKnownWmoGroupSubchunkAt(mogp, candidate))
+                return candidate;
+        }
+
+        for (int candidate = 0x38; candidate <= mogp.Length - ChunkHeader.SizeInBytes; candidate += 4)
+        {
+            if (HasKnownWmoGroupSubchunkAt(mogp, candidate))
+                return candidate;
+        }
+
+        return Math.Min(0x80, mogp.Length);
+    }
+
+    private static bool HasKnownWmoGroupSubchunkAt(byte[] mogp, int offset)
+    {
+        if (offset > mogp.Length - ChunkHeader.SizeInBytes)
+            return false;
+
+        if (!ChunkHeaderReader.TryRead(mogp.AsSpan(offset, ChunkHeader.SizeInBytes), out ChunkHeader header))
+            return false;
+
+        return KnownWmoGroupSubchunkIds.Contains(header.Id)
+            && (long)offset + ChunkHeader.SizeInBytes + header.Size <= mogp.Length;
+    }
+
+    private static byte[]? TryReadWmoSubchunkPayload(byte[] mogp, int headerSizeBytes, FourCC chunkId)
+    {
+        int position = headerSizeBytes;
+        while (position <= mogp.Length - ChunkHeader.SizeInBytes)
+        {
+            if (!ChunkHeaderReader.TryRead(mogp.AsSpan(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
+                return null;
+
+            int dataOffset = position + ChunkHeader.SizeInBytes;
+            long endOffset = (long)dataOffset + header.Size;
+            if (endOffset > mogp.Length)
+                return null;
+
+            if (header.Id == chunkId)
+                return mogp.AsSpan(dataOffset, checked((int)header.Size)).ToArray();
+
+            position = checked((int)endOffset);
+        }
+
+        return null;
+    }
+
+    private static Vector2[]? BuildFootprintHull(int pointCount, Func<int, Vector2> pointAccessor)
+    {
+        if (pointCount < 3)
+            return null;
+
+        int step = Math.Max(1, (int)Math.Ceiling(pointCount / (double)MaxFootprintSamplesPerSource));
+        List<Vector2> points = new(Math.Min(pointCount, MaxFootprintSamplesPerSource) + 1);
+        for (int index = 0; index < pointCount; index += step)
+        {
+            Vector2 point = pointAccessor(index);
+            if (IsFinite(point.X) && IsFinite(point.Y))
+                points.Add(point);
+        }
+
+        int lastIndex = pointCount - 1;
+        if ((lastIndex % step) != 0)
+        {
+            Vector2 point = pointAccessor(lastIndex);
+            if (IsFinite(point.X) && IsFinite(point.Y))
+                points.Add(point);
+        }
+
+        return BuildConvexHull(points);
+    }
+
+    private static Vector2[]? BuildConvexHull(List<Vector2> points)
+    {
+        if (points.Count < 3)
+            return null;
+
+        points.Sort(static (left, right) =>
+        {
+            int compareX = left.X.CompareTo(right.X);
+            return compareX != 0 ? compareX : left.Y.CompareTo(right.Y);
+        });
+
+        List<Vector2> uniquePoints = new(points.Count);
+        foreach (Vector2 point in points)
+        {
+            if (uniquePoints.Count > 0 && Vector2.DistanceSquared(uniquePoints[^1], point) < 0.000001f)
+                continue;
+
+            uniquePoints.Add(point);
+        }
+
+        if (uniquePoints.Count < 3)
+            return null;
+
+        List<Vector2> hull = new(uniquePoints.Count * 2);
+        foreach (Vector2 point in uniquePoints)
+        {
+            while (hull.Count >= 2 && Cross(hull[^2], hull[^1], point) <= 0f)
+                hull.RemoveAt(hull.Count - 1);
+            hull.Add(point);
+        }
+
+        int lowerCount = hull.Count;
+        for (int index = uniquePoints.Count - 2; index >= 0; index--)
+        {
+            Vector2 point = uniquePoints[index];
+            while (hull.Count > lowerCount && Cross(hull[^2], hull[^1], point) <= 0f)
+                hull.RemoveAt(hull.Count - 1);
+            hull.Add(point);
+        }
+
+        if (hull.Count <= 3)
+            return null;
+
+        hull.RemoveAt(hull.Count - 1);
+        return hull.ToArray();
+    }
+
+    private static float Cross(Vector2 origin, Vector2 left, Vector2 right)
+    {
+        Vector2 a = left - origin;
+        Vector2 b = right - origin;
+        return (a.X * b.Y) - (a.Y * b.X);
     }
 
     /// <summary>
@@ -3143,6 +3989,35 @@ public class VlmDatasetExporter
         {
             return validMasks[0];
         }
+    }
+
+    private static async Task<byte[]> BuildCombinedTerrainOnlyMaskAsync(IEnumerable<string> maskPaths, params byte[][] inMemoryMasks)
+    {
+        var masks = new List<byte[]>();
+
+        foreach (byte[] mask in inMemoryMasks)
+        {
+            if (mask != null && mask.Length > 0)
+                masks.Add(mask);
+        }
+
+        foreach (string path in maskPaths)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                continue;
+
+            try
+            {
+                byte[] maskBytes = await File.ReadAllBytesAsync(path);
+                if (maskBytes.Length > 0)
+                    masks.Add(maskBytes);
+            }
+            catch
+            {
+            }
+        }
+
+        return masks.Count > 0 ? CombineMaskPngBytes(masks.ToArray()) : Array.Empty<byte>();
     }
 
     private async Task GenerateGlobalHeightmapsAsync(string datasetDir, string outputDir, IProgress<string>? progress)

@@ -1,8 +1,19 @@
 {
   "archive_root": "H:\\CLIENTS",
-  "default_output_root": "i:\\parp\\parp-tools\\output\\ml-corpus",
+  "default_output_root": "i:\\parp\\parp-tools\\datasets",
   "clients": [
     {
+      "label": "original_development",
+      "client_path": "i:\\parp\\parp-tools\\gillijimproject_refactor\\test_data\\original_development",
+      "minimap_root": "i:\\parp\\parp-tools\\gillijimproject_refactor\\test_data\\development",
+      "version": "original_development",
+      "maps": [
+        "development"
+      ],
+      "generate_depth": false
+    },
+    {
+      "label": "0_7_0_3694",
       "client_path": "0.X_Pre-Release_Windows_enUS_0.7.0.3694\\World of Warcraft",
       "version": "0.7.0.3694",
       "maps": [
@@ -11,6 +22,7 @@
       "generate_depth": false
     },
     {
+      "label": "3_0_1_8303",
       "client_path": "3.X_Pre-Release_Windows_enUS_3.0.1.8303\\World of Warcraft",
       "version": "3.0.1.8303",
       "maps": [
@@ -24,6 +36,7 @@
       "generate_depth": false
     },
     {
+      "label": "3_3_5_12340",
       "client_path": "WoW335\\3.X_Retail_Windows_enUS_3.3.5.12340\\World of Warcraft",
       "version": "3.3.5.12340",
       "maps": [
@@ -33,9 +46,12 @@
       "generate_depth": false
     },
     {
+      "label": "4_0_0_11927",
       "client_path": "World of Warcraft Cata beta 11927",
       "version": "4.0.0.11927",
       "maps": [
+        "Azeroth",
+        "Deepholm",
         "LostIsles",
         "EmeraldDream"
       ],

@@ -81,7 +81,7 @@ if (-not (Test-Path $ConfigPath)) {
 $resolvedConfigPath = (Resolve-Path $ConfigPath).Path
 $configDirectory = Split-Path -Parent $resolvedConfigPath
 
-$config = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json -Depth 8
+$config = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
 $configArchiveRoot = Get-JsonPropertyValue -Object $config -Name 'archive_root'
 $configDefaultOutputRoot = Get-JsonPropertyValue -Object $config -Name 'default_output_root'
 $configLegacyOutputRoot = Get-JsonPropertyValue -Object $config -Name 'output_root'
@@ -89,7 +89,7 @@ $configListfilePath = Get-JsonPropertyValue -Object $config -Name 'listfile_path
 $configHarvestAfterExport = Get-JsonPropertyValue -Object $config -Name 'harvest_after_export'
 
 $resolvedArchiveRoot = if ($configArchiveRoot) { Resolve-ConfigPathValue -Value ([string]$configArchiveRoot) -BaseRoot $null } else { $null }
-$resolvedOutputRoot = if ($OutputRoot) { Resolve-ConfigPathValue -Value $OutputRoot -BaseRoot $null } elseif ($configDefaultOutputRoot) { Resolve-ConfigPathValue -Value ([string]$configDefaultOutputRoot) -BaseRoot $null } elseif ($configLegacyOutputRoot) { Resolve-ConfigPathValue -Value ([string]$configLegacyOutputRoot) -BaseRoot $null } else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\output\ml-corpus')) }
+$resolvedOutputRoot = if ($OutputRoot) { Resolve-ConfigPathValue -Value $OutputRoot -BaseRoot $null } elseif ($configDefaultOutputRoot) { Resolve-ConfigPathValue -Value ([string]$configDefaultOutputRoot) -BaseRoot $null } elseif ($configLegacyOutputRoot) { Resolve-ConfigPathValue -Value ([string]$configLegacyOutputRoot) -BaseRoot $null } else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\datasets')) }
 $resolvedListfilePath = if ($ListfilePath) { Resolve-ConfigPathValue -Value $ListfilePath -BaseRoot $null } elseif ($configListfilePath) { Resolve-ConfigPathValue -Value ([string]$configListfilePath) -BaseRoot $null } else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\test_data\community-listfile-withcapitals.csv')) }
 $harvestConfigured = if ($null -ne $configHarvestAfterExport) { [bool]$configHarvestAfterExport } else { $true }
 $harvestAfterExport = -not $SkipHarvest -and $harvestConfigured
@@ -102,10 +102,12 @@ foreach ($client in $config.clients) {
     $clientLabelValue = Get-JsonPropertyValue -Object $client -Name 'label'
     $clientOutputRootValue = Get-JsonPropertyValue -Object $client -Name 'output_root'
     $clientGenerateDepth = Get-JsonPropertyValue -Object $client -Name 'generate_depth'
+    $clientMinimapRootValue = Get-JsonPropertyValue -Object $client -Name 'minimap_root'
 
     $clientLabel = if ($clientLabelValue) { [string]$clientLabelValue } else { ([string]$client.version).Replace('.', '_') }
     $clientOutputRoot = if ($clientOutputRootValue) { Resolve-ConfigPathValue -Value ([string]$clientOutputRootValue) -BaseRoot $null } else { Join-Path $resolvedOutputRoot $clientLabel }
     $resolvedClientPath = Resolve-ConfigPathValue -Value ([string]$client.client_path) -BaseRoot $resolvedArchiveRoot
+    $resolvedMinimapRoot = if ($clientMinimapRootValue) { Resolve-ConfigPathValue -Value ([string]$clientMinimapRootValue) -BaseRoot $resolvedArchiveRoot } else { $null }
 
     if (-not $DryRun) {
         New-Item -ItemType Directory -Path $clientOutputRoot -Force | Out-Null
@@ -133,6 +135,10 @@ foreach ($client in $config.clients) {
                 '--listfile', $resolvedListfilePath
             )
 
+            if (-not [string]::IsNullOrWhiteSpace($resolvedMinimapRoot)) {
+                $exportArgs += @('--minimap-root', $resolvedMinimapRoot)
+            }
+
             if ($null -ne $clientGenerateDepth -and [bool]$clientGenerateDepth) {
                 $exportArgs += '--depth'
             }
@@ -141,6 +147,16 @@ foreach ($client in $config.clients) {
         }
 
         if ($harvestAfterExport) {
+            $datasetFiles = @()
+            if (Test-Path $datasetJsonDir) {
+                $datasetFiles = @(Get-ChildItem -Path $datasetJsonDir -Filter '*.json' -File -ErrorAction SilentlyContinue)
+            }
+
+            if ($datasetFiles.Count -eq 0) {
+                Write-Warning "Skipping harvest for $datasetOutput because no tile JSON files were found under $datasetJsonDir."
+                continue
+            }
+
             $manifestPath = Join-Path $datasetOutput 'ml_dataset_manifest.json'
             $harvestArgs = @(
                 'run',

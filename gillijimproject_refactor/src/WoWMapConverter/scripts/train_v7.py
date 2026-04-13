@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-WoW Height Regressor V7.3 - multichannel terrain model with adversarial sharpening.
+WoW Height Regressor V7.5.1 - multichannel terrain model with terrain-only minimap cleanup.
 
-V7.3 is not a pure minimap-to-height regressor. It works because it combines
+V7.5.1 is not a pure minimap-to-height regressor. It works because it combines
 the minimap with auxiliary terrain context that resolves ambiguity the minimap
 cannot carry on its own.
 
@@ -17,6 +17,12 @@ The key long-term reconstruction seam is WDL:
 The remaining auxiliary channels mark known losses in the minimap surface:
 - liquids flatten or overwrite visible terrain cues
 - placed objects obscure terrain and often imply locally flat support surfaces
+- stitched alpha and shadow payloads can leak texture-blend and baked-lighting evidence
+
+V7.5.1 keeps the same tensor contract as V7.5, but it assumes the exporter-side
+dataset cleanup fixes are present so the RGB surface prefers an exported
+terrain-only minimap when present. That cleaned image starts from the no-MCCV
+variant and inpaints out strong object, PM4, liquid, alpha, and shadow masks.
 
 Inputs:
 - minimap RGB
@@ -33,7 +39,7 @@ Outputs:
 - local heightmap
 - height bounds head
 
-V7.3 changes over V7.2:
+V7.5.1 changes over the earlier V7.5/V7.4/V7.3 line:
 - Replaced ConvTranspose2d upsampling with bilinear + Conv2d to eliminate
   checkerboard artifacts that soften terrain detail.
 - Replaced sigmoid output activation with hard clamp — sigmoid squashes
@@ -42,6 +48,7 @@ V7.3 changes over V7.2:
 - Added lightweight PatchGAN discriminator that enforces local realism in
   heightmap patches, the proven fix for L1 regression blur.
 - Same enlarged multi-version corpus and FFT frequency loss from V7.2.
+- Preferred terrain-only cleaned minimap export when the dataset root provides it.
 """
 
 from __future__ import annotations
@@ -94,6 +101,9 @@ MAP_ORIGIN = 32.0 * TILE_SIZE
 MASK_CONTEXT_MARGIN_TILES = 0.20
 MASK_MAX_ABOVE_TERRAIN = 8.0
 MASK_MIN_BELOW_TERRAIN = -3.0
+MAX_PRECISE_OBJECT_MASK_COVERAGE = 0.50
+MAX_SEEDED_OBJECT_MASK_COVERAGE = 0.25
+MAX_FALLBACK_OBJECT_MASK_COVERAGE = 0.20
 PRECISE_OBJECT_MASK_KEYS = (
     "object_visibility_mask_cv2",
     "pm4_mask",
@@ -106,7 +116,7 @@ SEEDED_OBJECT_MASK_KEYS = (
 PINNED_VALIDATION_REFERENCE_TILES = (
     ("development", "development_0_0"),
 )
-DATASET_INDEX_CACHE_VERSION = 2
+DATASET_INDEX_CACHE_VERSION = 4
 DATASET_INDEX_CACHE_FILE = ".v7_dataset_index_cache.json"
 BRUSH_MANIFEST_FILE = "brush_imprint_manifest.json"
 DEFAULT_TRAIN_WORKERS = 4
@@ -115,7 +125,7 @@ DEFAULT_PREFETCH_FACTOR = 2
 DEFAULT_LIVE_LOG_EVERY = 20
 DEFAULT_AMP_DTYPE = "auto"
 DEFAULT_ADVERSARIAL_SCALE = 0.20
-DEFAULT_START_GAN_EPOCH = 101
+DEFAULT_START_GAN_EPOCH = 1
 DEFAULT_DISC_EVERY = 2
 DEFAULT_DISC_REAL_TARGET = 0.90
 DEFAULT_DISC_FAKE_TARGET = 0.10
@@ -337,7 +347,7 @@ class BilinearUp(nn.Module):
 class MultiChannelUNetV7(nn.Module):
     """5-level U-Net for 512x512 multichannel terrain inputs.
 
-    V7.3: residual conv blocks, bilinear upsampling, hard-clamp output.
+    V7.5.1: residual conv blocks, bilinear upsampling, hard-clamp output.
     """
 
     def __init__(
@@ -517,7 +527,7 @@ class WoWTileDatasetV7(Dataset):
             self.samples.extend(samples)
             blank_skipped += skipped
 
-        print(f"Loaded {len(self.samples)} valid samples (V7.1 strict mode, {blank_skipped} blank tiles skipped)")
+        print(f"Loaded {len(self.samples)} valid samples (V7.5.1 strict mode, {blank_skipped} blank tiles skipped)")
 
     def _collect_root_samples(self, dataset_root: Path, limit: Optional[int]) -> Tuple[List[TileSample], int]:
         dataset_dir = dataset_root / "dataset"
@@ -576,7 +586,7 @@ class WoWTileDatasetV7(Dataset):
                 rejected["missing_path_refs"] += 1
                 continue
 
-            minimap_rel = entry.get("no_object_minimap") or entry.get("no_mccv_minimap") or entry.get("image")
+            minimap_rel = entry.get("terrain_only_minimap") or entry.get("no_object_minimap") or entry.get("no_mccv_minimap") or entry.get("image")
             if minimap_rel:
                 minimap_path = dataset_root / str(minimap_rel)
             else:
@@ -788,6 +798,7 @@ class WoWTileDatasetV7(Dataset):
                     "height_min": float(terrain.get("height_min", 0.0)),
                     "height_max": float(terrain.get("height_max", 0.0)),
                     "image": payload.get("image"),
+                    "terrain_only_minimap": terrain.get("terrain_only_minimap"),
                     "no_object_minimap": terrain.get("no_object_minimap"),
                     "no_mccv_minimap": terrain.get("no_mccv_minimap"),
                     "normalmap": normalmap_rel,
@@ -839,19 +850,31 @@ class WoWTileDatasetV7(Dataset):
         terrain: Dict[str, object],
     ) -> torch.Tensor:
         precise_mask = self._load_optional_binary_mask(sample.dataset_root, terrain, keys=PRECISE_OBJECT_MASK_KEYS)
-        if bool(torch.any(precise_mask > 0)):
+        if self._is_object_mask_usable(precise_mask, MAX_PRECISE_OBJECT_MASK_COVERAGE):
             return precise_mask
 
         seeded_mask = self._load_optional_binary_mask(sample.dataset_root, terrain, keys=SEEDED_OBJECT_MASK_KEYS)
-        if bool(torch.any(seeded_mask > 0)):
+        if self._is_object_mask_usable(seeded_mask, MAX_SEEDED_OBJECT_MASK_COVERAGE):
             return seeded_mask
 
-        return self._build_object_mask(
+        fallback_mask = self._build_object_mask(
             terrain.get("objects"),
             sample.tile_x,
             sample.tile_y,
             terrain.get("wdl_heights"),
         )
+        if self._is_object_mask_usable(fallback_mask, MAX_FALLBACK_OBJECT_MASK_COVERAGE):
+            return fallback_mask
+
+        return torch.zeros((1, self.input_size, self.input_size), dtype=torch.float32)
+
+    @staticmethod
+    def _is_object_mask_usable(mask: torch.Tensor, max_coverage: float) -> bool:
+        if not bool(torch.any(mask > 0)):
+            return False
+
+        coverage = float((mask > 0.1).float().mean().item())
+        return coverage <= max_coverage
 
     def _build_wdl_height_sampler(
         self,
@@ -983,11 +1006,6 @@ class WoWTileDatasetV7(Dataset):
                 radius_x = max(1, int(round(base_radius_world * pixels_per_world)))
                 radius_y = radius_x
 
-            is_wmo = "wmo" in category
-            if not is_wmo:
-                # Minimap captures are WMO-focused; skip M2/doodad mask contribution.
-                continue
-
             if np.isfinite(pos_y) and wdl_sampler is not None:
                 terrain_height = wdl_sampler(local_x, local_y, pos_y)
                 if terrain_height is not None and np.isfinite(terrain_height):
@@ -1001,7 +1019,12 @@ class WoWTileDatasetV7(Dataset):
             y2 = min(self.input_size, center_y + radius_y + 1)
             if x1 >= x2 or y1 >= y2:
                 continue
-            image[y1:y2, x1:x2] = 1.0
+
+            yy, xx = np.ogrid[y1:y2, x1:x2]
+            norm_x = ((xx - center_x) / max(radius_x, 1)) ** 2
+            norm_y = ((yy - center_y) / max(radius_y, 1)) ** 2
+            ellipse = (norm_x + norm_y) <= 1.0
+            image[y1:y2, x1:x2][ellipse] = 1.0
 
         return torch.from_numpy(image).unsqueeze(0)
 
@@ -1293,7 +1316,7 @@ def build_validation_groups(samples: Sequence[TileSample], block_size: int) -> D
     for index, sample in enumerate(samples):
         block_x = sample.tile_x // block_size
         block_y = sample.tile_y // block_size
-        group_key = f"{sample.dataset_name}:{sample.map_name}:{block_x}:{block_y}"
+        group_key = f"{sample.dataset_root}:{sample.map_name}:{block_x}:{block_y}"
         groups.setdefault(group_key, []).append(index)
     return groups
 
@@ -1345,6 +1368,17 @@ def split_grouped_indices(samples: Sequence[TileSample], val_fraction: float, se
         val_indices = train_indices[-max(1, len(train_indices) // 10):]
         val_index_set = set(val_indices)
         train_indices = [index for index in train_indices if index not in val_index_set]
+
+    pinned_indices = [index for index, sample in enumerate(samples) if is_pinned_validation_reference(sample)]
+    missing_pinned = [index for index in pinned_indices if index not in val_index_set]
+    if missing_pinned:
+        train_index_set = set(train_indices)
+        for index in missing_pinned:
+            if index in train_index_set:
+                train_indices.remove(index)
+                train_index_set.remove(index)
+            val_indices.append(index)
+            val_index_set.add(index)
 
     train_groups = len({key for key, indices in groups.items() if any(index in train_indices for index in indices)})
     val_groups = len({key for key, indices in groups.items() if any(index in val_index_set for index in indices)})
@@ -1688,9 +1722,11 @@ def checkpoint_metadata_from_args(
     val_groups: int,
 ) -> Dict[str, object]:
     return {
+        "trainer_version": "v7.5.1",
         "model_variant": MODEL_VARIANT_WDL_TRESTLE_REFLECT if DEFAULT_USE_WDL_GLOBAL_TRESTLE else MODEL_VARIANT_LEGACY,
         "use_wdl_global_trestle": DEFAULT_USE_WDL_GLOBAL_TRESTLE,
         "global_residual_scale": DEFAULT_GLOBAL_RESIDUAL_SCALE,
+        "minimap_contract": "terrain-only-preferred-v1.1",
         "conv_padding_mode": "reflect",
         "blur_sigma": DEFAULT_BLUR_SIGMA,
         "profile": args.profile,
@@ -1728,22 +1764,36 @@ def resolve_model_architecture_from_metadata(metadata: Optional[Dict[str, object
     return use_wdl_global_trestle, global_residual_scale
 
 
-def resolve_gan_schedule(epoch_number: int, args: argparse.Namespace, gan_schedule_remaining: int) -> Tuple[bool, str]:
+def resolve_gan_schedule(
+    epoch_number: int,
+    args: argparse.Namespace,
+    gan_schedule_remaining: int,
+    gan_schedule_mode: str,
+) -> Tuple[bool, str]:
     if args.adversarial_scale <= 0.0:
         return False, "disabled"
-    if args.gan_burst_after_best > 0:
-        if gan_schedule_remaining > 0:
-            return True, f"best-burst({gan_schedule_remaining})"
-        return False, "waiting-for-best"
-    if epoch_number < args.start_gan_epoch:
-        return False, f"warmup-until-{args.start_gan_epoch}"
-    if gan_schedule_remaining > 0:
+
+    if gan_schedule_mode == "cooldown" and gan_schedule_remaining > 0:
         return False, f"cooldown({gan_schedule_remaining})"
+
+    if gan_schedule_mode == "burst" and gan_schedule_remaining > 0:
+        if args.gan_cycle_length > 0 and args.gan_cycle_on_epochs > 0:
+            cycle_start_epoch = max(1, args.start_gan_epoch)
+            cycle_on_epochs = min(args.gan_cycle_on_epochs, args.gan_cycle_length)
+            cycle_offset = (epoch_number - cycle_start_epoch) % args.gan_cycle_length
+            return True, f"best-burst({gan_schedule_remaining})+cycle({cycle_offset + 1}/{args.gan_cycle_length})"
+        return True, f"best-burst({gan_schedule_remaining})"
+
+    if epoch_number < args.start_gan_epoch:
+        return False, f"deferred-until-{args.start_gan_epoch}"
+
     if args.gan_cycle_length > 0 and args.gan_cycle_on_epochs > 0:
         cycle_on_epochs = min(args.gan_cycle_on_epochs, args.gan_cycle_length)
-        cycle_offset = (epoch_number - args.start_gan_epoch) % args.gan_cycle_length
+        cycle_start_epoch = max(1, args.start_gan_epoch)
+        cycle_offset = (epoch_number - cycle_start_epoch) % args.gan_cycle_length
         gan_enabled = cycle_offset < cycle_on_epochs
         return gan_enabled, f"cycle({cycle_offset + 1}/{args.gan_cycle_length})"
+
     return True, "steady"
 
 
@@ -1777,7 +1827,7 @@ def train(args: argparse.Namespace) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 72)
-    print("WoW V7.3 Training - GAN + curated data + laplacian sharpness")
+    print("WoW V7.5.1 Training - cleaned dataset export + terrain-only minimap cleanup + GAN")
     print("=" * 72)
     print("Dataset roots:")
     for root in dataset_roots:
@@ -1807,6 +1857,16 @@ def train(args: argparse.Namespace) -> None:
     )
     print(f"Train/val samples: {len(train_indices)} / {len(val_indices)}")
     print(f"Train/val spatial groups: {train_groups} / {val_groups}")
+
+    pinned_validation_labels = [
+        f"{dataset.samples[index].dataset_name}:{dataset.samples[index].tile_name}"
+        for index in val_indices
+        if is_pinned_validation_reference(dataset.samples[index])
+    ]
+    if pinned_validation_labels:
+        print(f"Pinned validation refs: {', '.join(dict.fromkeys(pinned_validation_labels))}")
+    else:
+        print("Warning: no pinned validation references were present in the resolved validation set")
 
     if not args.no_curate:
         train_indices = curate_training_set(dataset.samples, train_indices, args.seed)
@@ -1973,6 +2033,7 @@ def train(args: argparse.Namespace) -> None:
     best_loss = float("inf")
     patience_counter = 0
     gan_schedule_remaining = 0
+    gan_schedule_mode = "none"
 
     if args.resume:
         resume_path = Path(args.resume)
@@ -1981,15 +2042,27 @@ def train(args: argparse.Namespace) -> None:
         start_epoch = int(checkpoint.get("epoch", -1)) + 1
         best_loss = float(checkpoint.get("val_loss", best_loss))
         patience_counter = int(checkpoint.get("patience_counter", patience_counter))
+        legacy_burst_remaining = int(checkpoint.get("gan_refinement_remaining", 0))
+        legacy_cooldown_remaining = int(checkpoint.get("gan_cooldown_remaining", 0))
         gan_schedule_remaining = int(
             checkpoint.get(
                 "gan_schedule_remaining",
-                checkpoint.get(
-                    "gan_refinement_remaining",
-                    checkpoint.get("gan_cooldown_remaining", gan_schedule_remaining),
-                ),
+                legacy_burst_remaining if legacy_burst_remaining > 0 else legacy_cooldown_remaining,
             )
         )
+        gan_schedule_mode = str(
+            checkpoint.get(
+                "gan_schedule_mode",
+                "burst" if legacy_burst_remaining > 0 else "cooldown" if legacy_cooldown_remaining > 0 else "none",
+            )
+        )
+        if gan_schedule_remaining > 0 and gan_schedule_mode == "none":
+            if args.gan_burst_after_best > 0:
+                gan_schedule_mode = "burst"
+            elif args.gan_cooldown_after_best > 0:
+                gan_schedule_mode = "cooldown"
+        if gan_schedule_remaining <= 0:
+            gan_schedule_mode = "none"
         if not args.no_resume_optimizer:
             if "optimizer_state_dict" in checkpoint:
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -2001,12 +2074,12 @@ def train(args: argparse.Namespace) -> None:
                 scaler.load_state_dict(checkpoint["scaler_state_dict"])
         print(f"Resumed from {resume_path} at epoch {start_epoch}")
         print("Resume optimizer state: enabled" if not args.no_resume_optimizer else "Resume optimizer state: disabled (--no-resume-optimizer)")
-        print(f"Resume GAN schedule remaining: {gan_schedule_remaining}")
+        print(f"Resume GAN schedule: mode={gan_schedule_mode}, remaining={gan_schedule_remaining}")
 
     for epoch in range(start_epoch, args.epochs):
         epoch_number = epoch + 1
-        gan_enabled_epoch, gan_phase = resolve_gan_schedule(epoch_number, args, gan_schedule_remaining)
-        gan_schedule_active_this_epoch = gan_schedule_remaining > 0
+        gan_enabled_epoch, gan_phase = resolve_gan_schedule(epoch_number, args, gan_schedule_remaining, gan_schedule_mode)
+        gan_schedule_active_this_epoch = gan_schedule_mode != "none" and gan_schedule_remaining > 0
         model.train()
         discriminator.train()
         train_losses: List[float] = []
@@ -2132,6 +2205,7 @@ def train(args: argparse.Namespace) -> None:
         history.setdefault("val_loss_valid", []).append(val_loss_valid)
         history.setdefault("gan_enabled", []).append(gan_enabled_epoch)
         history.setdefault("gan_phase", []).append(gan_phase)
+        history.setdefault("gan_schedule_mode", []).append(gan_schedule_mode)
         history.setdefault("gan_schedule_remaining", []).append(gan_schedule_remaining)
         history["components"].append(epoch_parts)
         with open(output_dir / "training_log.json", "w", encoding="utf-8") as handle:
@@ -2227,9 +2301,11 @@ def train(args: argparse.Namespace) -> None:
             patience_counter = 0
             saved_new_best = True
             if args.gan_burst_after_best > 0:
+                gan_schedule_mode = "burst"
                 gan_schedule_remaining = args.gan_burst_after_best
                 schedule_rearmed_this_epoch = True
             elif gan_enabled_epoch and args.gan_cooldown_after_best > 0:
+                gan_schedule_mode = "cooldown"
                 gan_schedule_remaining = args.gan_cooldown_after_best
                 schedule_rearmed_this_epoch = True
             print("  Saved best model")
@@ -2257,6 +2333,8 @@ def train(args: argparse.Namespace) -> None:
 
         if gan_schedule_active_this_epoch and not schedule_rearmed_this_epoch:
             gan_schedule_remaining = max(gan_schedule_remaining - 1, 0)
+            if gan_schedule_remaining == 0:
+                gan_schedule_mode = "none"
 
         checkpoint = {
             "epoch": epoch,
@@ -2268,6 +2346,7 @@ def train(args: argparse.Namespace) -> None:
             "val_loss": average_val_loss,
             "val_loss_valid": val_loss_valid,
             "patience_counter": patience_counter,
+            "gan_schedule_mode": gan_schedule_mode,
             "gan_schedule_remaining": gan_schedule_remaining,
             "metadata": checkpoint_metadata_from_args(args, dataset_roots, len(dataset), len(train_indices), len(val_indices), train_groups, val_groups),
         }
@@ -2279,7 +2358,7 @@ def train(args: argparse.Namespace) -> None:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train the V7.3 multichannel terrain regressor with GAN and curated data.")
+    parser = argparse.ArgumentParser(description="Train the V7.5.1 multichannel terrain regressor with cleaned dataset export, terrain-only minimap cleanup, GAN, and curated data.")
     parser.add_argument("--dataset-root", action="append", default=[], help="Explicit dataset root. Repeat for multiple roots.")
     parser.add_argument(
         "--search-root",
@@ -2312,7 +2391,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adversarial-scale", type=float, default=DEFAULT_ADVERSARIAL_SCALE,
                         help=f"Scale applied to adversarial loss weight (default: {DEFAULT_ADVERSARIAL_SCALE}, geometry-first safer default).")
     parser.add_argument("--start-gan-epoch", type=int, default=DEFAULT_START_GAN_EPOCH,
-                        help=f"Epoch number (1-based) when adversarial loss turns on (default: {DEFAULT_START_GAN_EPOCH}).")
+                        help=f"Epoch number (1-based) when the base GAN cadence becomes eligible to start (default: {DEFAULT_START_GAN_EPOCH}).")
     parser.add_argument("--gan-cycle-length", type=int, default=DEFAULT_GAN_CYCLE_LENGTH,
                         help=f"Optional GAN cadence length in epochs after start-gan-epoch (default: {DEFAULT_GAN_CYCLE_LENGTH}, disabled).")
     parser.add_argument("--gan-cycle-on-epochs", type=int, default=DEFAULT_GAN_CYCLE_ON_EPOCHS,
@@ -2320,7 +2399,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gan-cooldown-after-best", type=int, default=DEFAULT_GAN_COOLDOWN_AFTER_BEST,
                         help=f"Force GAN off for this many subsequent epochs after a new GAN-assisted best checkpoint (default: {DEFAULT_GAN_COOLDOWN_AFTER_BEST}).")
     parser.add_argument("--gan-burst-after-best", type=int, default=DEFAULT_GAN_BURST_AFTER_BEST,
-                        help=f"Automatically arm GAN for this many subsequent epochs after any new best checkpoint (default: {DEFAULT_GAN_BURST_AFTER_BEST}, disabled). Overrides epoch-based GAN cadence when > 0.")
+                        help=f"Force GAN on for this many subsequent epochs after any new best checkpoint (default: {DEFAULT_GAN_BURST_AFTER_BEST}, disabled). This layers on top of the base epoch cadence instead of replacing it.")
     parser.add_argument("--disc-every", type=int, default=DEFAULT_DISC_EVERY,
                         help=f"Update discriminator every N train steps (default: {DEFAULT_DISC_EVERY}).")
     parser.add_argument("--lr-plateau-patience", type=int, default=DEFAULT_LR_PLATEAU_PATIENCE,

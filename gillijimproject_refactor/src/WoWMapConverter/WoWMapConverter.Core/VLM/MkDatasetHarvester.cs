@@ -40,6 +40,51 @@ public sealed class MkDatasetManifest
     public List<MkDatasetTileManifest> Tiles { get; set; } = new();
 }
 
+public sealed class HfDatasetInfo
+{
+    public string SchemaVersion { get; set; } = "hf-imagefolder-metadata.v1";
+    public string Format { get; set; } = "imagefolder+metadata.jsonl";
+    public string DatasetRoot { get; set; } = string.Empty;
+    public string MetadataFile { get; set; } = "metadata.jsonl";
+    public string PrimaryImageField { get; set; } = "file_name";
+    public string SourceManifest { get; set; } = "ml_dataset_manifest.json";
+    public int Rows { get; set; }
+}
+
+public sealed class HfDatasetMetadataRow
+{
+    public string FileName { get; set; } = string.Empty;
+    public string TileName { get; set; } = string.Empty;
+    public string MapName { get; set; } = string.Empty;
+    public string TileJson { get; set; } = string.Empty;
+    public string? TileBin { get; set; }
+    public string? Depth { get; set; }
+    public string? HeightmapLocal { get; set; }
+    public string? HeightmapGlobal { get; set; }
+    public string? Normalmap { get; set; }
+    public string? MccvMap { get; set; }
+    public string? LiquidMask { get; set; }
+    public string? LiquidHeight { get; set; }
+    public string? NoLiquidMinimap { get; set; }
+    public string? NoMccvMinimap { get; set; }
+    public string? ObjectVisibilityMask { get; set; }
+    public string? Pm4Mask { get; set; }
+    public string? NoObjectMinimap { get; set; }
+    public string? TerrainOnlyMinimap { get; set; }
+    public string? AlphaAtlas { get; set; }
+    public List<string> ShadowMaps { get; set; } = new();
+    public List<string> AlphaMasks { get; set; } = new();
+    public int ObjectCount { get; set; }
+    public int ChunkLayerCount { get; set; }
+    public int LiquidCount { get; set; }
+    public float HeightMin { get; set; }
+    public float HeightMax { get; set; }
+    public float HeightGlobalMin { get; set; }
+    public float HeightGlobalMax { get; set; }
+    public bool IsInterleaved { get; set; }
+    public string CompletenessClass { get; set; } = "partial";
+}
+
 public sealed class MkDatasetCoverageSummary
 {
     public int TilesProcessed { get; set; }
@@ -148,6 +193,7 @@ public sealed class MkDatasetHarvester
             TileJsonDirectory = RelativizePath(datasetRoot, datasetDirectory),
             ReferenceMinimapDirectory = RelativizePath(datasetRoot, referenceDirectory)
         };
+        var hfRows = new List<HfDatasetMetadataRow>(datasetFiles.Length);
 
         foreach (string datasetFile in datasetFiles)
         {
@@ -247,6 +293,49 @@ public sealed class MkDatasetHarvester
                 ReferenceMinimapExists = referenceMinimapExists,
                 ReferenceMinimapGenerated = referenceMinimapGenerated
             });
+
+            string tileBinPath = RelativizePath(datasetRoot, Path.Combine(datasetDirectory, $"{tileName}.bin"));
+            if (!TryResolveDatasetPath(datasetRoot, tileBinPath))
+                tileBinPath = string.Empty;
+
+            hfRows.Add(new HfDatasetMetadataRow
+            {
+                FileName = NormalizeDatasetRelativePath(sourceMinimapPath) ?? string.Empty,
+                TileName = tileName,
+                MapName = mapName,
+                TileJson = RelativizePath(datasetRoot, datasetFile),
+                TileBin = string.IsNullOrWhiteSpace(tileBinPath) ? null : tileBinPath,
+                Depth = NormalizeDatasetRelativePath(sample?.DepthPath),
+                HeightmapLocal = NormalizeDatasetRelativePath(heightmapLocalPath),
+                HeightmapGlobal = NormalizeDatasetRelativePath(heightmapGlobalPath),
+                Normalmap = NormalizeDatasetRelativePath(normalMapPath),
+                MccvMap = NormalizeDatasetRelativePath(mccvMapPath),
+                LiquidMask = NormalizeDatasetRelativePath(sample?.TerrainData?.LiquidMaskPath),
+                LiquidHeight = NormalizeDatasetRelativePath(sample?.TerrainData?.LiquidHeightPath),
+                NoLiquidMinimap = NormalizeDatasetRelativePath(sample?.TerrainData?.NoLiquidMinimapPath),
+                NoMccvMinimap = NormalizeDatasetRelativePath(sample?.TerrainData?.NoMccvMinimapPath),
+                ObjectVisibilityMask = NormalizeDatasetRelativePath(sample?.TerrainData?.ObjectVisibilityMaskPath),
+                Pm4Mask = NormalizeDatasetRelativePath(sample?.TerrainData?.Pm4MaskPath),
+                NoObjectMinimap = NormalizeDatasetRelativePath(sample?.TerrainData?.NoObjectMinimapPath),
+                TerrainOnlyMinimap = NormalizeDatasetRelativePath(sample?.TerrainData?.TerrainOnlyMinimapPath),
+                AlphaAtlas = NormalizeDatasetRelativePath(alphaAtlasPath),
+                ShadowMaps = shadowMapPaths,
+                AlphaMasks = alphaMaskPaths,
+                ObjectCount = sample?.TerrainData?.Objects?.Count ?? 0,
+                ChunkLayerCount = sample?.TerrainData?.ChunkLayers?.Length ?? 0,
+                LiquidCount = sample?.TerrainData?.Liquids?.Length ?? 0,
+                HeightMin = sample?.TerrainData?.HeightMin ?? 0f,
+                HeightMax = sample?.TerrainData?.HeightMax ?? 0f,
+                HeightGlobalMin = sample?.TerrainData?.HeightGlobalMin ?? 0f,
+                HeightGlobalMax = sample?.TerrainData?.HeightGlobalMax ?? 0f,
+                IsInterleaved = sample?.TerrainData?.IsInterleaved ?? false,
+                CompletenessClass = BuildCompletenessClass(
+                    sourceMinimapExists,
+                    heightmapLocalExists,
+                    heightmapGlobalExists,
+                    existingAlphaMaskCount,
+                    sample?.TerrainData?.ChunkLayers?.Length ?? 0)
+            });
         }
 
         manifest.Coverage = new MkDatasetCoverageSummary
@@ -271,6 +360,7 @@ public sealed class MkDatasetHarvester
         string manifestPath = Path.GetFullPath(options.ManifestOutputPath ?? Path.Combine(datasetRoot, "ml_dataset_manifest.json"));
         Directory.CreateDirectory(Path.GetDirectoryName(manifestPath) ?? datasetRoot);
         await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, _manifestJsonOptions)).ConfigureAwait(false);
+        await WriteHuggingFaceMetadataAsync(datasetRoot, hfRows).ConfigureAwait(false);
 
         return new MkDatasetHarvestResult(
             ManifestPath: manifestPath,
@@ -281,6 +371,23 @@ public sealed class MkDatasetHarvester
             TilesWithAlphaMasks: manifest.Coverage.TilesWithAnyAlphaMask,
             ReferenceMinimapsGenerated: manifest.Coverage.ReferenceMinimapsGenerated,
             ReferenceMinimapDirectory: referenceDirectory);
+    }
+
+    private async Task WriteHuggingFaceMetadataAsync(string datasetRoot, IReadOnlyList<HfDatasetMetadataRow> rows)
+    {
+        string metadataPath = Path.Combine(datasetRoot, "metadata.jsonl");
+        string infoPath = Path.Combine(datasetRoot, "dataset_info.json");
+
+        var metadataLines = rows.Select(row => JsonSerializer.Serialize(row, _manifestJsonOptions));
+        await File.WriteAllLinesAsync(metadataPath, metadataLines).ConfigureAwait(false);
+
+        var info = new HfDatasetInfo
+        {
+            DatasetRoot = datasetRoot,
+            Rows = rows.Count
+        };
+
+        await File.WriteAllTextAsync(infoPath, JsonSerializer.Serialize(info, _manifestJsonOptions)).ConfigureAwait(false);
     }
 
     private static string BuildCompletenessClass(bool sourceMinimapExists, bool heightmapLocalExists, bool heightmapGlobalExists, int existingAlphaMaskCount, int chunkLayerCount)

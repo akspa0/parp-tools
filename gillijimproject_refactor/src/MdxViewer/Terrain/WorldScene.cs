@@ -848,6 +848,7 @@ public class WorldScene : ISceneRenderer
     private WdlTerrainRenderer? _wdlTerrain;
     public WdlTerrainRenderer? WdlTerrain => _wdlTerrain;
     public bool ShowWdlTerrain { get; set; } = true;
+    public bool ShowSky { get; set; } = true;
 
     // Bounding box debug rendering
     private bool _showBoundingBoxes = false;
@@ -7845,9 +7846,25 @@ public class WorldScene : ISceneRenderer
                     _lastHoverPickFogEnd = fogEnd;
                     (objectFogStart, objectFogEnd) = ComputeObjectFogRange(fogStart, fogEnd, _objectFogEnabled);
                 },
-                () => frame.SkyMs = MeasureDurationMs(() => _skyDome.Render(view, proj, camPos)),
                 () =>
                 {
+                    if (!ShowSky)
+                    {
+                        frame.SkyMs = 0;
+                        return;
+                    }
+
+                    frame.SkyMs = MeasureDurationMs(() => _skyDome.Render(view, proj, camPos));
+                },
+                () =>
+                {
+                    if (!ShowSky)
+                    {
+                        _gl.ClearColor(0f, 0f, 0f, 1f);
+                        frame.SkyboxBackdropMs = 0;
+                        return;
+                    }
+
                     // Also set clear color to horizon color so any gaps match the sky
                     _gl.ClearColor(_skyDome.HorizonColor.X, _skyDome.HorizonColor.Y, _skyDome.HorizonColor.Z, 1f);
                     frame.SkyboxBackdropMs = MeasureDurationMs(() => RenderSkyboxBackdrop(view, proj, camPos, fogColor, fogStart, fogEnd, lighting));

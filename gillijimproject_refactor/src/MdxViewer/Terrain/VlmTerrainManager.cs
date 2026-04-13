@@ -49,6 +49,7 @@ public class VlmTerrainManager : ISceneRenderer
     public TerrainLighting Lighting => _terrainRenderer.Lighting;
     public TerrainRenderer Renderer => _terrainRenderer;
     public LiquidRenderer LiquidRenderer => _liquidRenderer;
+    public bool TerrainVisible { get; set; } = true;
     public string MapName => _loader.MapName;
     public VlmProjectLoader Loader => _loader;
     public bool IgnoreTerrainHolesGlobally
@@ -300,6 +301,9 @@ public class VlmTerrainManager : ISceneRenderer
 
     public void Render(Matrix4x4 view, Matrix4x4 proj)
     {
+        if (!TerrainVisible)
+            return;
+
         _terrainRenderer.Render(view, proj, _cameraPos);
         // Liquid rendered separately via RenderLiquid() after all opaque geometry
     }
@@ -307,6 +311,9 @@ public class VlmTerrainManager : ISceneRenderer
     public void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos)
     {
         _cameraPos = cameraPos;
+        if (!TerrainVisible)
+            return;
+
         _terrainRenderer.Render(view, proj, cameraPos);
     }
 

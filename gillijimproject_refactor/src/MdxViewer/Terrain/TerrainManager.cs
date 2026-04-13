@@ -92,6 +92,7 @@ public class TerrainManager : ISceneRenderer
     public TerrainLighting Lighting => _terrainRenderer.Lighting;
     public TerrainRenderer Renderer => _terrainRenderer;
     public LiquidRenderer LiquidRenderer => _liquidRenderer;
+    public bool TerrainVisible { get; set; } = true;
     public string MapName { get; }
     public int DetailedTileCountOverride
     {
@@ -732,6 +733,9 @@ public class TerrainManager : ISceneRenderer
 
     public void Render(Matrix4x4 view, Matrix4x4 proj)
     {
+        if (!TerrainVisible)
+            return;
+
         _terrainRenderer.Render(view, proj, _cameraPos);
         // Liquid is rendered separately AFTER all opaque geometry (WMOs, MDX)
         // so objects below the water surface are visible through the transparent water.
@@ -744,6 +748,9 @@ public class TerrainManager : ISceneRenderer
     public void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, FrustumCuller? frustum = null)
     {
         _cameraPos = cameraPos;
+        if (!TerrainVisible)
+            return;
+
         _terrainRenderer.Render(view, proj, cameraPos, frustum);
     }
 

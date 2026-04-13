@@ -1,5 +1,7 @@
 # WoW Terrain Regressor V7.4
 
+Superseded by `docs/v75-model-architecture-guide.md` for the active terrain-only-minimap dataset contract.
+
 Updated Apr 13, 2026.
 
 This is the editor-friendly V7.4 architecture guide. It reflects the current code direction: WDL as a real low-resolution trestle, reflect padding to avoid border void artifacts, sharper transition losses, and tile-edge supervision.

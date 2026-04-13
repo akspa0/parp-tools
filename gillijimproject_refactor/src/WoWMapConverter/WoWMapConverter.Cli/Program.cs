@@ -298,9 +298,17 @@ public static class Program
                 if (!Path.IsPathRooted(clientPath) && !string.IsNullOrWhiteSpace(archiveRoot))
                     clientPath = Path.GetFullPath(Path.Combine(archiveRoot, clientPath));
 
+                string? minimapRoot = client.MinimapRoot;
+                if (!string.IsNullOrWhiteSpace(minimapRoot) && !Path.IsPathRooted(minimapRoot) && !string.IsNullOrWhiteSpace(archiveRoot))
+                    minimapRoot = Path.GetFullPath(Path.Combine(archiveRoot, minimapRoot));
+
+                string clientFolderName = !string.IsNullOrWhiteSpace(client.Label)
+                    ? client.Label
+                    : client.ClientVersion.Replace('.', '_');
+
                 string clientOutputRoot = !string.IsNullOrWhiteSpace(client.OutputRoot) ? client.OutputRoot
-                    : !string.IsNullOrWhiteSpace(defaultOutputRoot) ? Path.Combine(defaultOutputRoot, client.ClientVersion)
-                    : Path.Combine("output", "ml-corpus", client.ClientVersion);
+                    : !string.IsNullOrWhiteSpace(defaultOutputRoot) ? Path.Combine(defaultOutputRoot, clientFolderName)
+                    : Path.Combine("datasets", clientFolderName);
 
                 foreach (var map in client.Maps)
                 {
@@ -310,6 +318,8 @@ public static class Program
                     Console.WriteLine();
                     Console.WriteLine($"[{totalJobs}] {client.ClientVersion} / {map}");
                     Console.WriteLine($"    client : {clientPath}");
+                    if (!string.IsNullOrWhiteSpace(minimapRoot))
+                        Console.WriteLine($"    minimap: {minimapRoot}");
                     Console.WriteLine($"    output : {mapOutput}");
 
                     if (dryRun) continue;
@@ -320,8 +330,17 @@ public static class Program
                         {
                             Console.WriteLine("    => ml-export");
                             var exportResult = await exporter.ExportMapAsync(
-                                clientPath, map, mapOutput, progress, generateDepth: client.GenerateDepth);
+                                clientPath, map, mapOutput, progress, generateDepth: client.GenerateDepth, minimapRoot: minimapRoot);
                             Console.WriteLine($"    exported {exportResult.TilesExported} tiles, skipped {exportResult.TilesSkipped}");
+                        }
+
+                        string datasetJsonDir = Path.Combine(mapOutput, "dataset");
+                        bool hasDatasetJson = Directory.Exists(datasetJsonDir)
+                            && Directory.EnumerateFiles(datasetJsonDir, "*.json", SearchOption.TopDirectoryOnly).Any();
+                        if (!hasDatasetJson)
+                        {
+                            Console.WriteLine("    => ml-harvest skipped (no tile JSON files found)");
+                            continue;
                         }
 
                         Console.WriteLine("    => ml-harvest");
@@ -1640,6 +1659,7 @@ public static class Program
         string? mapName = null;
         string? outputDir = null;
         string? listfilePath = null;
+        string? minimapRoot = null;
         int limit = int.MaxValue;
         bool generateDepth = false;
         bool batchAll = false;
@@ -1663,6 +1683,9 @@ public static class Program
                 case "--listfile":
                 case "-l":
                     if (i + 1 < args.Length) listfilePath = args[++i];
+                    break;
+                case "--minimap-root":
+                    if (i + 1 < args.Length) minimapRoot = args[++i];
                     break;
                 case "--limit":
                 case "-n":
@@ -1694,8 +1717,15 @@ public static class Program
             Console.WriteLine("Optional:");
             Console.WriteLine("  --batch-all           Automatically export 8 standard maps (Azeroth, Kalimdor, etc)");
             Console.WriteLine("  --listfile, -l <csv>  Path to listfile for name resolution");
+            Console.WriteLine("  --minimap-root <dir>  Optional explicit root for minimap lookup; keeps terrain input and minimap source separate");
             Console.WriteLine("  --limit, -n <N>       Export only first N tiles");
             Console.WriteLine("  --depth, -d           Generate depth maps (requires DepthAnything3)");
+            return 1;
+        }
+
+        if (!string.IsNullOrWhiteSpace(minimapRoot) && !Directory.Exists(minimapRoot))
+        {
+            Console.WriteLine($"Error: minimap root not found: {minimapRoot}");
             return 1;
         }
 
@@ -1724,7 +1754,7 @@ public static class Program
                     
                     try 
                     {
-                        var res = await exporter.ExportMapAsync(clientPath, map, mapOutputDir, progress, limit, listfilePath, generateDepth);
+                        var res = await exporter.ExportMapAsync(clientPath, map, mapOutputDir, progress, limit, listfilePath, generateDepth, minimapRoot);
                         Console.WriteLine($"[BATCH] {map} Complete: {res.TilesExported} tiles.");
                     }
                     catch (Exception ex)
@@ -1742,8 +1772,10 @@ public static class Program
                 Console.WriteLine($"ML Dataset Export: {mapName}");
                 Console.WriteLine($"  Client: {clientPath}");
                 Console.WriteLine($"  Output: {outputDir}");
+                if (!string.IsNullOrWhiteSpace(minimapRoot))
+                    Console.WriteLine($"  Minimap root: {minimapRoot}");
                 
-                var result = await exporter.ExportMapAsync(clientPath, mapName, outputDir, progress, limit, listfilePath, generateDepth);
+                var result = await exporter.ExportMapAsync(clientPath, mapName!, outputDir, progress, limit, listfilePath, generateDepth, minimapRoot);
                 
                 Console.WriteLine();
                 Console.WriteLine($"Export complete:");

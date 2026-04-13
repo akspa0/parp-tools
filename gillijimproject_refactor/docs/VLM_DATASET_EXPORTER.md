@@ -313,8 +313,8 @@ reasoning implicit in ad hoc notebooks.
 
 ```bash
 cd src/WoWMapConverter/WoWMapConverter.Cli
-dotnet run -- ml-export --client "H:\CLIENTS\World of Warcraft Cata beta 11927" --map LostIsles --out "I:\parp\parp-tools\output\ml-corpus\400_11927\LostIsles"
-dotnet run -- ml-harvest --dataset "I:\parp\parp-tools\output\ml-corpus\400_11927\LostIsles" --output "I:\parp\parp-tools\output\ml-corpus\400_11927\LostIsles\ml_dataset_manifest.json"
+dotnet run -- ml-export --client "H:\CLIENTS\World of Warcraft Cata beta 11927" --map LostIsles --out "I:\parp\parp-tools\datasets\4_0_0_11927\LostIsles"
+dotnet run -- ml-harvest --dataset "I:\parp\parp-tools\datasets\4_0_0_11927\LostIsles" --output "I:\parp\parp-tools\datasets\4_0_0_11927\LostIsles\ml_dataset_manifest.json"
 ```
 
 ## Fixed-Client Corpus Wrapper
@@ -327,7 +327,7 @@ pwsh ./gillijimproject_refactor/scripts/export_ml_corpus.ps1 -DryRun
 pwsh ./gillijimproject_refactor/scripts/export_ml_corpus.ps1
 ```
 
-The wrapper reads [gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json](gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json), exports each configured map into `output/ml-corpus/<client>/<map>/`, and runs `ml-harvest` to generate `ml_dataset_manifest.json` for each dataset root. The current checked-in subset is intentionally narrow: `3.0.1.8303` exports `Northrend` plus `PVPZone01` through `PVPZone04`, `3.3.5.12340` exports `Azeroth`, and `4.0.0.11927` exports `LostIsles`.
+The wrapper reads [gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json](gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json), exports each configured map into `datasets/<label>/<map>/`, and runs `ml-harvest` to generate `ml_dataset_manifest.json` plus the root-level `metadata.jsonl` and `dataset_info.json` files for each dataset root. The current checked-in subset is intentionally narrow and now also includes the split-root `original_development` seam.
 
 ## Shadow-Scar Recovery Reference
 

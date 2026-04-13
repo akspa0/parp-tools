@@ -1,6 +1,33 @@
 # Critical Data Paths - NEVER ASK WHERE DATA IS
 
-## THE SOURCE PATH (ALWAYS)
+## Canonical Dataset Root
+```
+datasets/
+```
+
+- New ML dataset exports should land here, not under `output/ml-corpus`.
+- Root-level HF-style parsing files now live alongside each dataset root: `metadata.jsonl`, `dataset_info.json`, and `ml_dataset_manifest.json`.
+
+## Development Roots
+
+### V7 Terrain Export / Sampling Root
+```
+test_data/original_development/World/Maps/development
+```
+
+- Use this as the terrain and ADT source for current V7 terrain-model export proof work.
+- Do not silently substitute `test_data/development/World/Maps/development` as the sampling root for that path.
+- If minimaps are needed and they are not present under `original_development`, use an explicit minimap root instead of broadening the terrain source.
+
+### V7 Development Minimap-Only Root
+```
+test_data/development
+```
+
+- Current bounded proof uses this only for minimap lookup while keeping `original_development` as the terrain source.
+- Do not describe this as the terrain sampling root for the V7 proof path.
+
+### Development Repair / Constituent Reconstruction Root
 ```
 test_data/development/World/Maps/development
 ```

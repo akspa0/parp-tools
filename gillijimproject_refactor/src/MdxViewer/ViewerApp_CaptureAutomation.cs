@@ -83,6 +83,7 @@ public partial class ViewerApp
         public bool IsMkHarvestViewerValidationCapture { get; set; }
         public bool HideTerrainLiquids { get; set; }
         public bool HideObjects { get; set; }
+        public bool HideTerrain { get; set; }
     }
 
     private sealed class CaptureQueueOptions
@@ -97,6 +98,7 @@ public partial class ViewerApp
         public bool IsMkHarvestViewerValidationCapture { get; init; }
         public bool HideTerrainLiquids { get; init; }
         public bool HideObjects { get; init; }
+        public bool HideTerrain { get; init; }
     }
 
     private sealed class MkHarvestViewerValidationCaptureTile
@@ -107,6 +109,7 @@ public partial class ViewerApp
         public string OutputPath { get; set; } = string.Empty;
         public bool HideTerrainLiquids { get; set; }
         public bool HideObjects { get; set; }
+        public bool HideTerrain { get; set; }
     }
 
     private sealed class MkHarvestViewerValidationCapturePlan
@@ -116,6 +119,7 @@ public partial class ViewerApp
         public string OutputDirectory { get; set; } = string.Empty;
         public string NoLiquidsOutputDirectory { get; set; } = string.Empty;
         public string NoObjectsOutputDirectory { get; set; } = string.Empty;
+        public string ObjectsOnlyOutputDirectory { get; set; } = string.Empty;
         public int RequestedResolution { get; set; }
         public bool RestoreWorldRequested { get; set; }
         public List<MkHarvestViewerValidationCaptureTile> Tiles { get; set; } = new();
@@ -134,7 +138,11 @@ public partial class ViewerApp
         public required Vector3 PreviousVlmLightDirection { get; init; }
         public required bool PreviousTerrainLiquidsVisible { get; init; }
         public required bool PreviousVlmTerrainLiquidsVisible { get; init; }
+        public required bool PreviousTerrainVisible { get; init; }
+        public required bool PreviousVlmTerrainVisible { get; init; }
         public required bool PreviousObjectFogEnabled { get; init; }
+        public required bool PreviousShowWdlTerrain { get; init; }
+        public required bool PreviousShowSky { get; init; }
         public required bool PreviousObjectsVisible { get; init; }
         public required bool PreviousWmosVisible { get; init; }
         public required bool PreviousDoodadsVisible { get; init; }
@@ -146,6 +154,7 @@ public partial class ViewerApp
         public required string OutputDirectory { get; init; }
         public required string NoLiquidsOutputDirectory { get; init; }
         public required string NoObjectsOutputDirectory { get; init; }
+        public required string ObjectsOnlyOutputDirectory { get; init; }
         public required int RequestedResolution { get; init; }
         public int RemainingCaptures { get; set; }
     }
@@ -492,6 +501,7 @@ public partial class ViewerApp
             IsMkHarvestViewerValidationCapture = options?.IsMkHarvestViewerValidationCapture == true,
             HideTerrainLiquids = options?.HideTerrainLiquids == true,
             HideObjects = options?.HideObjects == true,
+            HideTerrain = options?.HideTerrain == true,
         });
 
         string mode = includeUi ? "with_ui" : "no_ui";
@@ -521,12 +531,20 @@ public partial class ViewerApp
         if (_terrainManager?.LiquidRenderer != null)
             _terrainManager.LiquidRenderer.ShowLiquid = showTerrainLiquids;
 
+        if (_terrainManager != null)
+            _terrainManager.TerrainVisible = !request.HideTerrain;
+
         if (_vlmTerrainManager?.LiquidRenderer != null)
             _vlmTerrainManager.LiquidRenderer.ShowLiquid = showTerrainLiquids;
+
+        if (_vlmTerrainManager != null)
+            _vlmTerrainManager.TerrainVisible = !request.HideTerrain;
 
         if (_worldScene != null)
         {
             _worldScene.ShowWlLiquids = false;
+            _worldScene.ShowWdlTerrain = !request.HideTerrain;
+            _worldScene.ShowSky = !request.HideTerrain;
 
             bool showObjects = !request.HideObjects;
             _worldScene.ObjectsVisible = showObjects;
@@ -695,7 +713,11 @@ public partial class ViewerApp
             PreviousVlmLightDirection = vlmLighting?.ExternalLightDirection ?? Vector3.Zero,
             PreviousTerrainLiquidsVisible = _terrainManager.LiquidRenderer?.ShowLiquid ?? true,
             PreviousVlmTerrainLiquidsVisible = _vlmTerrainManager?.LiquidRenderer?.ShowLiquid ?? true,
+            PreviousTerrainVisible = _terrainManager.TerrainVisible,
+            PreviousVlmTerrainVisible = _vlmTerrainManager?.TerrainVisible ?? true,
             PreviousObjectFogEnabled = _worldScene?.ObjectFogEnabled ?? true,
+            PreviousShowWdlTerrain = _worldScene?.ShowWdlTerrain ?? true,
+            PreviousShowSky = _worldScene?.ShowSky ?? true,
             PreviousObjectsVisible = _worldScene?.ObjectsVisible ?? true,
             PreviousWmosVisible = _worldScene?.WmosVisible ?? true,
             PreviousDoodadsVisible = _worldScene?.DoodadsVisible ?? true,
@@ -707,6 +729,7 @@ public partial class ViewerApp
             OutputDirectory = plan.OutputDirectory,
             NoLiquidsOutputDirectory = plan.NoLiquidsOutputDirectory,
             NoObjectsOutputDirectory = plan.NoObjectsOutputDirectory,
+            ObjectsOnlyOutputDirectory = plan.ObjectsOnlyOutputDirectory,
             RequestedResolution = requestedResolution,
             RemainingCaptures = plan.Tiles.Count,
         };
@@ -745,17 +768,20 @@ public partial class ViewerApp
                     TargetTileY = tile.TileY,
                     RequiredSettledFrames = 24,
                     MaxFramesBeforeCapture = 1800,
-                    CaptureLabel = tile.HideObjects
-                        ? $"{tile.TileName} (noobjects)"
-                        : (tile.HideTerrainLiquids ? $"{tile.TileName} (noliquids)" : tile.TileName),
+                    CaptureLabel = tile.HideTerrain
+                        ? $"{tile.TileName} (objectsonly)"
+                        : (tile.HideObjects
+                            ? $"{tile.TileName} (noobjects)"
+                            : (tile.HideTerrainLiquids ? $"{tile.TileName} (noliquids)" : tile.TileName)),
                     IsMkHarvestViewerValidationCapture = true,
                     HideTerrainLiquids = tile.HideTerrainLiquids,
                     HideObjects = tile.HideObjects,
+                    HideTerrain = tile.HideTerrain,
                 });
         }
 
         AppendMkHarvestLogLine(
-            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} capture(s). Viewer chrome is hidden, doodads and WL liquids are disabled for all variants, object path filters are disabled, the primary output keeps terrain liquids and visible objects, the 'noliquids' sub-folder disables terrain liquids, the 'noobjects' sub-folder hides world objects, object streaming is widened, the validation sun direction is forced for deterministic top-down shading, the batch waits for world assets to settle, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
+            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} capture(s). Viewer chrome is hidden, doodads and WL liquids are disabled for all variants, object path filters are disabled, the primary output keeps terrain liquids and visible objects, the 'noliquids' sub-folder disables terrain liquids, the 'noobjects' sub-folder hides world objects, the 'objectsonly' sub-folder hides terrain, WDL, liquids, and sky while keeping visible world objects, object streaming is widened, the validation sun direction is forced for deterministic top-down shading, the batch waits for world assets to settle, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
     }
 
     private static Vector3 BuildMkHarvestViewerValidationLightDirection(Vector3 currentLightDirection)
@@ -862,6 +888,7 @@ public partial class ViewerApp
             _terrainManager.DetailedTileCountOverride = batch.PreviousDetailedTileCountOverride;
             _terrainManager.Lighting.FogStart = batch.PreviousFogStart;
             _terrainManager.Lighting.FogEnd = batch.PreviousFogEnd;
+            _terrainManager.TerrainVisible = batch.PreviousTerrainVisible;
             if (_terrainManager.LiquidRenderer != null)
                 _terrainManager.LiquidRenderer.ShowLiquid = batch.PreviousTerrainLiquidsVisible;
             if (batch.PreviousTerrainLightDirectionOverride)
@@ -872,6 +899,7 @@ public partial class ViewerApp
 
         if (_vlmTerrainManager != null)
         {
+            _vlmTerrainManager.TerrainVisible = batch.PreviousVlmTerrainVisible;
             if (_vlmTerrainManager.LiquidRenderer != null)
                 _vlmTerrainManager.LiquidRenderer.ShowLiquid = batch.PreviousVlmTerrainLiquidsVisible;
             if (batch.PreviousVlmLightDirectionOverride)
@@ -883,6 +911,8 @@ public partial class ViewerApp
         if (_worldScene != null)
         {
             _worldScene.ObjectFogEnabled = batch.PreviousObjectFogEnabled;
+            _worldScene.ShowWdlTerrain = batch.PreviousShowWdlTerrain;
+            _worldScene.ShowSky = batch.PreviousShowSky;
             _worldScene.ObjectsVisible = batch.PreviousObjectsVisible;
             _worldScene.WmosVisible = batch.PreviousWmosVisible;
             _worldScene.DoodadsVisible = batch.PreviousDoodadsVisible;
@@ -896,8 +926,9 @@ public partial class ViewerApp
             batch.OutputDirectory,
             batch.NoLiquidsOutputDirectory,
             batch.NoObjectsOutputDirectory,
+            batch.ObjectsOnlyOutputDirectory,
             batch.RequestedResolution);
-        GenerateMkHarvestViewerValidationObjectArtifacts(batch.DatasetRoot, batch.OutputDirectory, batch.NoObjectsOutputDirectory);
+        GenerateMkHarvestViewerValidationObjectArtifacts(batch.DatasetRoot, batch.OutputDirectory, batch.NoObjectsOutputDirectory, batch.ObjectsOnlyOutputDirectory);
 
         if (!string.IsNullOrWhiteSpace(statusMessage))
         {
@@ -911,11 +942,13 @@ public partial class ViewerApp
         string outputDirectory,
         string noLiquidsOutputDirectory,
         string noObjectsOutputDirectory,
+        string objectsOnlyOutputDirectory,
         int requestedResolution)
     {
         TryStitchMkHarvestViewerValidationDirectory(outputDirectory, mapName, requestedResolution, "viewer_validation_minimaps");
         TryStitchMkHarvestViewerValidationDirectory(noLiquidsOutputDirectory, mapName, requestedResolution, "viewer_validation_minimaps/noliquids");
         TryStitchMkHarvestViewerValidationDirectory(noObjectsOutputDirectory, mapName, requestedResolution, "viewer_validation_minimaps/noobjects");
+        TryStitchMkHarvestViewerValidationDirectory(objectsOnlyOutputDirectory, mapName, requestedResolution, "viewer_validation_minimaps/objectsonly");
     }
 
     private static readonly JsonSerializerOptions MkDatasetJsonOptions = new()
@@ -928,7 +961,8 @@ public partial class ViewerApp
     private void GenerateMkHarvestViewerValidationObjectArtifacts(
         string datasetRoot,
         string withObjectsOutputDirectory,
-        string noObjectsOutputDirectory)
+        string noObjectsOutputDirectory,
+        string objectsOnlyOutputDirectory)
     {
         if (string.IsNullOrWhiteSpace(datasetRoot)
             || string.IsNullOrWhiteSpace(withObjectsOutputDirectory)
@@ -973,7 +1007,8 @@ public partial class ViewerApp
                     noObjectsImage.Mutate(ctx => ctx.Resize(withObjectsImage.Width, withObjectsImage.Height));
                 }
 
-                using Image<L8> maskImage = BuildObjectVisibilityDiffMask(withObjectsImage, noObjectsImage);
+                using Image<L8> maskImage = TryBuildDirectObjectVisibilityMask(tileName, withObjectsImage.Width, withObjectsImage.Height, objectsOnlyOutputDirectory)
+                    ?? BuildObjectVisibilityDiffMask(withObjectsImage, noObjectsImage);
 
                 string objectMaskFileName = $"{tileName}_object_visibility_mask.png";
                 string noObjectFileName = $"{tileName}_no_objects.png";
@@ -1009,7 +1044,41 @@ public partial class ViewerApp
             }
         }
 
-        AppendMkHarvestLogLine($"Object-visibility artifacts: updated {updatedTiles} tile json(s), skipped {skippedTiles} tile(s) without matching captures.");
+        AppendMkHarvestLogLine($"Object-visibility artifacts: updated {updatedTiles} tile json(s), skipped {skippedTiles} tile(s) without matching captures. Direct object-only masks are preferred when available; with/no-object diff remains the fallback.");
+    }
+
+    private static Image<L8>? TryBuildDirectObjectVisibilityMask(string tileName, int width, int height, string objectsOnlyOutputDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(objectsOnlyOutputDirectory) || !Directory.Exists(objectsOnlyOutputDirectory))
+            return null;
+
+        string objectsOnlyPath = Path.Combine(objectsOnlyOutputDirectory, $"{tileName}_viewer_validation.png");
+        if (!File.Exists(objectsOnlyPath))
+            return null;
+
+        using Image<Rgba32> objectsOnlyImage = SixLabors.ImageSharp.Image.Load<Rgba32>(objectsOnlyPath);
+        if (objectsOnlyImage.Width != width || objectsOnlyImage.Height != height)
+            objectsOnlyImage.Mutate(ctx => ctx.Resize(width, height));
+
+        return BuildObjectVisibilityMaskFromObjectsOnlyCapture(objectsOnlyImage);
+    }
+
+    private static Image<L8> BuildObjectVisibilityMaskFromObjectsOnlyCapture(Image<Rgba32> objectsOnly)
+    {
+        const int intensityThreshold = 4;
+        var mask = new Image<L8>(objectsOnly.Width, objectsOnly.Height);
+
+        for (int y = 0; y < objectsOnly.Height; y++)
+        {
+            for (int x = 0; x < objectsOnly.Width; x++)
+            {
+                Rgba32 pixel = objectsOnly[x, y];
+                int intensity = Math.Max(pixel.R, Math.Max(pixel.G, pixel.B));
+                mask[x, y] = new L8((byte)(intensity > intensityThreshold ? 255 : 0));
+            }
+        }
+
+        return mask;
     }
 
     private static Image<L8> BuildObjectVisibilityDiffMask(Image<Rgba32> withObjects, Image<Rgba32> noObjects)

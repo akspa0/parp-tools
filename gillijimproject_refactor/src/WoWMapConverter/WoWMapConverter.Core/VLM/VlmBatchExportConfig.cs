@@ -22,8 +22,14 @@ public class VlmBatchExportConfig
 
 public class VlmClientConfig
 {
+    [JsonPropertyName("label")]
+    public string? Label { get; set; }
+
     [JsonPropertyName("client_path")]
     public string ClientPath { get; set; } = "";
+
+    [JsonPropertyName("minimap_root")]
+    public string? MinimapRoot { get; set; }
 
     [JsonPropertyName("version")]
     public string ClientVersion { get; set; } = "3.3.5"; // e.g. "0.5.3", "3.3.5", "4.x"

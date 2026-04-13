@@ -28,16 +28,43 @@ class ImageStatsAccumulator:
     count: int = 0
     channel_mean_sum: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     channel_std_sum: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    luma_mean_sum: float = 0.0
+    luma_std_sum: float = 0.0
+    luma_p10_sum: float = 0.0
+    luma_p50_sum: float = 0.0
+    luma_p90_sum: float = 0.0
 
     def add(self, image_path: Path) -> None:
         image = Image.open(image_path).convert("RGB")
         stat = ImageStat.Stat(image)
         means = [value / 255.0 for value in stat.mean[:3]]
         stddevs = [value / 255.0 for value in stat.stddev[:3]]
+        luma = image.convert("L")
+        luma_stat = ImageStat.Stat(luma)
+        histogram = luma.histogram()
+
+        def percentile_from_histogram(target_percentile: float) -> float:
+            cutoff = self._histogram_total(histogram) * target_percentile
+            running = 0
+            for value, count in enumerate(histogram):
+                running += count
+                if running >= cutoff:
+                    return value / 255.0
+            return 1.0
+
         self.count += 1
         for index in range(3):
             self.channel_mean_sum[index] += means[index]
             self.channel_std_sum[index] += stddevs[index]
+        self.luma_mean_sum += luma_stat.mean[0] / 255.0
+        self.luma_std_sum += luma_stat.stddev[0] / 255.0
+        self.luma_p10_sum += percentile_from_histogram(0.10)
+        self.luma_p50_sum += percentile_from_histogram(0.50)
+        self.luma_p90_sum += percentile_from_histogram(0.90)
+
+    @staticmethod
+    def _histogram_total(histogram: List[int]) -> int:
+        return sum(histogram)
 
     def format_summary(self) -> str:
         if self.count == 0:
@@ -45,9 +72,18 @@ class ImageStatsAccumulator:
 
         means = [value / self.count for value in self.channel_mean_sum]
         stddevs = [value / self.count for value in self.channel_std_sum]
+        luma_mean = self.luma_mean_sum / self.count
+        luma_std = self.luma_std_sum / self.count
+        luma_p10 = self.luma_p10_sum / self.count
+        luma_p50 = self.luma_p50_sum / self.count
+        luma_p90 = self.luma_p90_sum / self.count
         mean_text = ", ".join(f"{value:.3f}" for value in means)
         std_text = ", ".join(f"{value:.3f}" for value in stddevs)
-        return f"mean=[{mean_text}] std=[{std_text}]"
+        return (
+            f"mean=[{mean_text}] std=[{std_text}] "
+            f"luma_mean={luma_mean:.3f} luma_std={luma_std:.3f} "
+            f"luma_p10={luma_p10:.3f} luma_p50={luma_p50:.3f} luma_p90={luma_p90:.3f}"
+        )
 
 
 @dataclass
@@ -55,6 +91,7 @@ class DatasetSignalStats:
     dataset_root: Path
     tile_count: int = 0
     minimap_present: int = 0
+    terrain_only_minimap_present: int = 0
     normalmap_present: int = 0
     heightmap_local_present: int = 0
     heightmap_global_present: int = 0
@@ -164,7 +201,10 @@ def audit_dataset_root(dataset_root: Path, image_sample_limit: int) -> DatasetSi
         stats.tile_count += 1
 
         tile_name = str(terrain.get("adt_tile") or json_path.stem)
-        minimap_path = dataset_root / "images" / f"{tile_name}.png"
+        terrain_only_minimap_path = resolve_dataset_path(dataset_root, terrain.get("terrain_only_minimap"))
+        no_object_minimap_path = resolve_dataset_path(dataset_root, terrain.get("no_object_minimap"))
+        no_mccv_minimap_path = resolve_dataset_path(dataset_root, terrain.get("no_mccv_minimap"))
+        minimap_path = terrain_only_minimap_path or no_object_minimap_path or no_mccv_minimap_path or dataset_root / "images" / f"{tile_name}.png"
         normalmap_path = resolve_dataset_path(dataset_root, terrain.get("normalmap"))
         heightmap_local_path = resolve_dataset_path(dataset_root, terrain.get("heightmap_local") or terrain.get("heightmap"))
         heightmap_global_path = resolve_dataset_path(dataset_root, terrain.get("heightmap_global") or terrain.get("heightmap"))
@@ -177,6 +217,9 @@ def audit_dataset_root(dataset_root: Path, image_sample_limit: int) -> DatasetSi
             stats.minimap_present += 1
             if stats.minimap_stats.count < image_sample_limit:
                 stats.minimap_stats.add(minimap_path)
+
+        if terrain_only_minimap_path and terrain_only_minimap_path.exists():
+            stats.terrain_only_minimap_present += 1
 
         if normalmap_path and normalmap_path.exists():
             stats.normalmap_present += 1
@@ -265,6 +308,7 @@ def print_dataset_summary(stats: DatasetSignalStats) -> None:
     print(f"  heightmap_local:     {pct(stats.heightmap_local_present, stats.tile_count)}")
     print(f"  heightmap_global:    {pct(stats.heightmap_global_present, stats.tile_count)}")
     print("Auxiliary signals:")
+    print(f"  terrain_only_minimap:{pct(stats.terrain_only_minimap_present, stats.tile_count)}")
     print(f"  liquid_records:      {pct(stats.liquids_declared, stats.tile_count)}")
     print(f"  liquid_mask_field:   {pct(stats.liquid_mask_path_present, stats.tile_count)}")
     print(f"  liquid_mask_file:    {pct(stats.liquid_mask_file_present, stats.tile_count)}")
@@ -288,14 +332,15 @@ def print_dataset_summary(stats: DatasetSignalStats) -> None:
 
 def print_encoding_notes() -> None:
     print("\nCurrent V7 signal encodings in train_v7.py:")
-    print("  minimap_rgb: RGB image, bilinear resize to 512, Gaussian blur on minimap only, ImageNet normalization")
+    print("  minimap_rgb: prefers terrain_only_minimap, then no_object_minimap, then no_mccv_minimap, then raw image; bilinear resize to 512, Gaussian blur on minimap only, ImageNet normalization")
+    print("  brightness audit: use luma_mean/std/p10/p50/p90 as a dataset cleanliness diagnostic, not as a direct height prior")
     print("  normal_rgb: RGB image, bilinear resize to 512, ImageNet normalization")
     print("  wdl_prior: outer_17 grid only, per-tile min/max normalization, bilinear upsample to 512")
     print("  bounds_hints: two constant full-frame masks from height_min and height_max normalized against global range")
     print("  liquid_mask: binary mask thresholded from stitched liquid-mask PNG, nearest resize")
     print("  liquid_height_prior: normalized stitched liquid-height raster masked to liquid coverage; WL-derived heights can feed the same channel later")
     print("  object_mask: binary rectangle footprints rendered from objects list using bounds when present, otherwise scale fallback")
-    print("  unused-but-available candidates: mccv_map, alpha_masks, alpha_atlas, shadow_maps, chunk_layers, holes, no_liquid_minimap")
+    print("  raw auxiliary assets still available beyond the cleaned RGB surface: mccv_map, alpha_masks, alpha_atlas, shadow_maps, chunk_layers, holes, no_liquid_minimap")
 
 
 def parse_args() -> argparse.Namespace:

@@ -1,5 +1,156 @@
 # Progress
 
+### Apr 13, 2026 - Broader cleaned-input retrain rerun completed and established the current non-adversarial baseline
+
+- completed the broader rerun under `output/ml-training/v7_5_1_cleaned_inputs_20260413_rerun` after refreshing and re-auditing current dataset roots
+- run outcome from `training_log.json`:
+	- `12` epochs completed before stopping
+	- best validation loss about `0.06906226947903633` at epoch `7`
+	- final epoch train/val about `0.06429274735920545 / 0.07939258947968483`
+	- metadata recorded `921` total loaded samples, `573` train, `98` val, `66` train groups, and `8` val groups
+- dataset-root set recorded in metadata included the current cross-version cleaned-input corpus:
+	- `0_7_0_3694/EmeraldDream`
+	- `3_0_1_8303/EmeraldDream`, `Northrend`, `PVPZone01`, `PVPZone02`, `PVPZone03`, `PVPZone04`
+	- `3_3_5_12340/Azeroth`, `3_3_5_12340/EmeraldDream`
+	- `4_0_0_11927/Azeroth`, `Deepholm`, `EmeraldDream`, `LostIsles`
+	- `original_development/development`
+- paired audit output lives at `output/build-validation/ml-audit/v7_5_1_dataset_signal_audit_20260413_rerun.txt`
+	- key refreshed roots now show `terrain_only_minimap` coverage of `198/352` for `original_development/development`, `25/100` for `Deepholm`, and `77/149` for `LostIsles`
+	- the same audit reports nonzero object-mask files on `49/352`, `39/100`, and `12/149` of those roots respectively
+- important boundary:
+	- this rerun used cleaned inputs, but it did not exercise the intended GAN-on V7.5.1 schedule
+	- saved metadata still shows `start_gan_epoch = 101`, `gan_enabled = false` for all epochs, and `gan_burst_after_best = 0`
+	- treat it as the current cleaned-input non-adversarial baseline, not as final closure on the intended V7.5.1 adversarial training cadence
+
+### Apr 13, 2026 - Exporter object-mask geometry path is live, refreshed roots were regenerated, and the new corpora pass a mixed-root training smoke
+
+- landed the exporter-side object-mask overhaul in `WoWMapConverter.Core/VLM/VlmDatasetExporter.cs`:
+	- `VlmObjectPlacement` now persists `model_path`
+	- exporter masks now prefer projected footprint hulls from real `M2`, `MDX`, and `WMO` geometry instead of the earlier shadow-rectangle plus circle heuristic
+	- fallback remains bounds-polygon or ellipse based when geometry is unavailable
+- refreshed real-data dataset roots after the exporter change:
+	- `dotnet run -- ... ml-export --client i:/parp/parp-tools/gillijimproject_refactor/test_data/original_development --minimap-root i:/parp/parp-tools/gillijimproject_refactor/test_data/development --map development --out i:/parp/parp-tools/datasets/original_development/development`
+		- exported `352` tiles, skipped `0`
+		- `ml-harvest` rebuilt the manifest with `352` processed tiles
+	- `dotnet run -- ... ml-export --client H:/CLIENTS/World of Warcraft Cata beta 11927 --map Deepholm --out i:/parp/parp-tools/datasets/4_0_0_11927/Deepholm`
+		- exported `100` tiles, skipped `0`
+		- `ml-harvest` rebuilt the manifest with `100` processed tiles
+	- `dotnet run -- ... ml-export --client H:/CLIENTS/World of Warcraft Cata beta 11927 --map LostIsles --out i:/parp/parp-tools/datasets/4_0_0_11927/LostIsles`
+		- exported `149` tiles, skipped `0`
+		- `ml-harvest` rebuilt the manifest with `149` processed tiles
+- mixed-root training smoke on refreshed corpora completed:
+	- dataset roots: refreshed `original_development/development`, `4_0_0_11927/Deepholm`, and `4_0_0_11927/LostIsles`
+	- `466` valid samples loaded after blank-tile filtering
+	- train/val split `418 / 48`
+	- pinned validation refs still included `development:development_0_0`
+	- epoch `1` finished with train `0.2071`, val `0.1754`, discriminator `0.4504`, GAN phase `steady`, and a saved best model under `output/tmp/v7_5_1_geometry_mask_refresh_smoke_20260413`
+- exporter-output audit after refresh:
+	- `original_development/development` object masks: `38` mask PNGs, average coverage about `3.58%`, worst tile about `17.09%`
+	- `4_0_0_11927/Deepholm` object masks: `25` mask PNGs, average coverage about `33.49%`, worst tile about `88.69%`
+	- `4_0_0_11927/LostIsles` object masks: `11` mask PNGs, average coverage about `20.72%`, worst tile about `71.17%`
+- important boundary:
+	- this is real refreshed-corpus proof plus trainability proof
+	- it is not final exporter signoff for Cataclysm roots because some refreshed 4.x object masks are still pathologically large and are currently being kept in check mainly by trainer-side coverage rejection
+
+### Apr 13, 2026 - MCCV parity fix now matches MdxViewer export and render behavior
+
+- fixed the remaining MCCV correctness issue in the active VLM path by following `MdxViewer` exactly instead of only swapping channels:
+	- `mccv_map` generation now matches `MdxViewer.Export.TerrainMccvIo.BuildTileImage(...)` and preserves raw MCCV bytes in PNG channel order
+	- `no_mccv_minimap` cleanup now inverts the actual terrain shader tint model from `MdxViewer.Terrain.TerrainRenderer` by dividing out `clamp(vertexColor.rgb * 2.0, 0.0, 2.0)` after decoding the raw-view PNG back to BGRA tint
+- focused validation completed:
+	- `dotnet test i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core.Tests/WoWMapConverter.Core.Tests.csproj -c Debug --filter VlmMinimapCleanupServiceTests` passed (`4/4`)
+	- bounded real-data export probe on `H:\CLIENTS\World of Warcraft Cata beta 11927` with `--map Deepholm --limit 1` succeeded and regenerated corrected MCCV artifacts in `output/tmp/deepholm_mccv_inverse_probe_20260413`
+- important boundary:
+	- this is code/test/build proof plus bounded real-data artifact proof
+	- existing harvested dataset roots still need re-export before training can fully benefit from the corrected MCCV cleanup
+
+### Apr 13, 2026 - Recovered the failing 11927 `Deepholm` export path and made corpus harvest non-fatal on empty exports
+
+- fixed the concrete corpus blocker reported by the user:
+	- `ml-export --map Deepholm` under the 4.0.0.11927 client had been failing with `WDT not found`
+	- listfile/archive inspection showed the internal directory is actually `Deephome`
+- active exporter behavior now:
+	- `VlmDatasetExporter` still prefers `Map.dbc` directory resolution first
+	- when that does not resolve a requested map label, it now scans archive-known `World/Maps/*/*.wdt` entries and recovers exact normalized or small edit-distance aliases, which fixes `Deepholm -> Deephome`
+- active corpus-runner behavior now:
+	- `scripts/export_ml_corpus.ps1` no longer calls `ml-harvest` on a dataset root with zero tile JSON files
+	- `WoWMapConverter.Cli ml-corpus` also skips harvest for empty dataset roots instead of turning the whole job into a false-negative failure
+- validation completed:
+	- added focused unit tests in `WoWMapConverter.Core.Tests/VLM/VlmDatasetExporterTests.cs` for normalized alias recovery and the concrete `Deepholm -> Deephome` case
+	- `dotnet test i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core.Tests/WoWMapConverter.Core.Tests.csproj -c Debug --filter VlmDatasetExporterTests` passed (`2/2`)
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug` succeeded with existing warnings only
+	- bounded real-data probe `ml-export --client H:\CLIENTS\World of Warcraft Cata beta 11927 --map Deepholm --limit 1` succeeded, resolved `Deephome`, and exported `1` tile
+- important boundary:
+	- this fixes the immediate dataset refresh blocker
+	- the forced full V7.5.1 corpus rerun and retraining still need to run to completion before the cleaned model can be evaluated
+
+### Apr 13, 2026 - Dataset workflow now targets `datasets/` and emits HF-style metadata surfaces
+
+- workflow changes landed:
+	- `ml-corpus` now honors per-client `label` and `minimap_root`
+	- `scripts/export_ml_corpus.ps1` now defaults to `datasets/` and passes `--minimap-root` through when configured
+	- `scripts/ml_corpus_fixed_clients.json` now points its configured jobs at `i:/parp/parp-tools/datasets` and includes the `original_development` split-root job alongside the fixed client builds/maps
+	- `ml-harvest` now writes root-level `metadata.jsonl` and `dataset_info.json` for HF-style parsing in addition to `ml_dataset_manifest.json`
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug` succeeded after the workflow changes
+	- dry-run of `scripts/export_ml_corpus.ps1` showed all configured jobs writing under `datasets/<label>/<map>` and the `original_development` job carrying `--minimap-root i:/parp/parp-tools/gillijimproject_refactor/test_data/development`
+- cleanup completed:
+	- migrated the bounded proof root into `datasets/original_development/development_proof_20260413`
+	- archived the old `output/ml-corpus` root to `output/archive/ml-corpus_legacy_20260413`
+
+### Apr 13, 2026 - Bounded V7.5 export proof now succeeds on `original_development` with a separate minimap-only root
+
+- completed a real bounded export proof for the V7.5 dataset path using:
+	- terrain source: `gillijimproject_refactor/test_data/original_development/World/Maps/development`
+	- minimap-only root: `gillijimproject_refactor/test_data/development`
+	- output: `datasets/original_development/development_proof_20260413`
+- exporter fix landed first because the approved terrain source is sparse:
+	- WDT `MAIN` reported `1496` tiles
+	- only `352` root ADTs were actually reachable in the loose `original_development` tree
+	- `VlmDatasetExporter` now filters the LK tile list against reachable root ADTs before selection so bounded runs stop choosing nonexistent center tiles and silently skipping them
+- bounded proof result:
+	- `4` tiles exported, `0` skipped
+	- exported tile set included `development_30_36`, `development_31_36`, `development_33_31`, and `development_34_34`
+	- stitched outputs were produced for full minimap, full no-object minimap, full object visibility mask, full PM4 mask, and full heightmaps
+- verified V7.5 payload examples:
+	- `development_31_36.json` contains `mccv_map`, `no_mccv_minimap`, `object_visibility_mask`, `pm4_mask`, `no_object_minimap`, and `terrain_only_minimap`
+	- `development_34_34.json` contains `mccv_map`, `no_liquid_minimap`, `no_mccv_minimap`, and `terrain_only_minimap` while object/PM4 fields remain null for that tile
+- important boundary:
+	- this proves the bounded export path, the explicit terrain-vs-minimap root separation, and the new root-level HF metadata emission on a real dataset root
+	- it does not yet prove a full-map export, retraining quality, or that `WoWMuseum/335-dev` is a sufficient minimap source for this workflow
+
+### Apr 13, 2026 - Fallback object masking now covers all object families instead of only `wmo`
+
+- fixed a real masking bug in the active terrain path:
+	- exporter fallback object masks in `VlmDatasetExporter.cs` had been limited to `wmo`
+	- trainer and inference fallback object-context masks in `train_v7.py` / `infer_v7.py` also skipped non-`wmo` placements
+- active behavior now includes all projected object placements in the fallback mask path, while still preferring exported precise PM4/seeded masks when available
+- practical meaning:
+	- maps without PM4 support are no longer forced into a WMO-only fallback assumption
+	- M2/doodad occlusion can now contribute to the fallback mask instead of leaking straight into the minimap RGB/context path
+- validation completed:
+	- file-level diagnostics were clean for the touched exporter/masking files
+	- `python -m py_compile` passed for `train_v7.py` and `infer_v7.py`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug` succeeded again after also fixing the old `VlmMinimapCleanupService.cs` build blocker
+- important boundary:
+	- no real-data dataset re-export has been run yet, so this is code/build proof rather than corpus-output proof
+
+### Apr 13, 2026 - Promoted the active terrain line to V7.5 with terrain-only minimap precedence
+
+- landed the V7.5 contract bump across exporter, trainer, inference, audit, and docs
+- active behavior now:
+	- exporter writes `terrain_only_minimap` when it has enough auxiliary masks to build one
+	- the cleaned minimap starts from `no_mccv_minimap` when available and then removes object, PM4, liquid, stitched alpha, and stitched shadow contamination before inpainting
+	- `train_v7.py` and `infer_v7.py` now prefer `terrain_only_minimap` ahead of `no_object_minimap`, `no_mccv_minimap`, and raw `image`
+	- dataset index cache version was bumped so stale root caches do not mask the new field
+	- audit/docs now reflect the V7.5 semantics, and a new architecture guide lives at `docs/v75-model-architecture-guide.md`
+- validation completed:
+	- file-level diagnostics were clean for the touched exporter and script files
+	- `python -m py_compile` passed for `train_v7.py`, `infer_v7.py`, and `audit_v7_signals.py`
+- important boundary:
+	- full `WoWMapConverter.Core` compile proof is still blocked by existing unrelated errors in `VlmMinimapCleanupService.cs`
+	- no real-data re-export or bounded V7.5 training smoke has been run yet, so this is not trained-model proof
+
 ### Apr 13, 2026 - Relaunched the full improved V7.4 run with pinned `development_0_0` validation and safer object-mask precedence
 
 - patched `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` and `infer_v7.py` so object-mask context now prefers:
@@ -21,6 +172,23 @@
 	- earlier audit-filter and PowerShell argument-shape issues were already fixed before this relaunch
 	- live startup now confirms `26` audited roots, `6070` valid samples, raw train/val `5449 / 621`, curated train `3230`, and static previews beginning with `development:development_0_0`
 - proof boundary:
+
+### Apr 13, 2026 - Trainer now rejects pathological object-mask coverage and hard-forces pinned validation refs after the split
+
+- patched `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` again after real-data audit showed some current seeded object masks still covered most of a tile
+- active trainer behavior now:
+	- precise object masks are accepted only when coverage is `<= 50%`
+	- seeded exported masks are accepted only when coverage is `<= 25%`
+	- trainer fallback masks are accepted only when coverage is `<= 20%`
+	- fallback object footprints now rasterize as ellipses instead of axis-aligned rectangles
+	- validation grouping now keys by full dataset-root path instead of short `dataset_name`
+	- pinned validation refs such as `development_0_0` are explicitly moved into validation after split if they somehow miss the grouped selection path
+	- trainer startup now prints `Pinned validation refs: ...` so that regression is visible immediately in logs
+- bounded real-data proof:
+	- audit on `datasets/4_0_0_11927/Deepholm` and `datasets/4_0_0_11927/LostIsles` reduced worst observed trainer-side object-mask coverage from near-full-tile seeded masks to about `0.1024`
+	- one-epoch smoke on `datasets/original_development/development` + `datasets/4_0_0_11927/LostIsles` printed `Pinned validation refs: development:development_0_0`, listed that tile first in static previews, and produced non-zero GAN/discriminator metrics on epoch `1`
+- boundary:
+	- this is trainer-side mitigation, not exporter closure; current corpora can still contain oversized seeded masks, but the trainer no longer trusts them blindly
 	- this records the corrected full-run relaunch and the validation/mask-path behavior change, not new convergence proof yet
 
 ### Apr 13, 2026 - Development-map V7.4 inference now exports anchored tile borders, and the trainer now penalizes both transition blur and border curl

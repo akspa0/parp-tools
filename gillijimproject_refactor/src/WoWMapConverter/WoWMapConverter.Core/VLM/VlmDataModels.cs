@@ -54,6 +54,7 @@ public record VlmTerrainData(
     [property: JsonPropertyName("object_visibility_mask")] string? ObjectVisibilityMaskPath,
     [property: JsonPropertyName("pm4_mask")] string? Pm4MaskPath,
     [property: JsonPropertyName("no_object_minimap")] string? NoObjectMinimapPath,
+    [property: JsonPropertyName("terrain_only_minimap")] string? TerrainOnlyMinimapPath,
     
     // Textures
     [property: JsonPropertyName("textures")] List<string> Textures,
@@ -169,7 +170,7 @@ public record VlmChunkLayers(
     // Legacy per-chunk shadow path for reconstruction. May be null when raw shadow bits are present on the tile.
     [property: JsonPropertyName("shadow_path")] string? ShadowPath = null,
     [property: JsonPropertyName("normals")] sbyte[]? Normals = null,  // MCNR 448 bytes (145 * 3 + 13 padding)
-    [property: JsonPropertyName("mccv_colors")] byte[]? MccvColors = null,  // MCCV vertex colors (145 * 4 RGBA = 580 bytes)
+    [property: JsonPropertyName("mccv_colors")] byte[]? MccvColors = null,  // MCCV vertex colors (145 * 4 BGRA = 580 bytes)
     [property: JsonPropertyName("area_id")] uint AreaId = 0,
     [property: JsonPropertyName("flags")] uint Flags = 0
 );
@@ -226,7 +227,8 @@ public record VlmObjectPlacement(
     [property: JsonPropertyName("scale")] float Scale,
     [property: JsonPropertyName("category")] string Category,  // "wmo" or "m2"
     [property: JsonPropertyName("bounds_min")] float[]? BoundsMin = null,  // [x, y, z] local min
-    [property: JsonPropertyName("bounds_max")] float[]? BoundsMax = null   // [x, y, z] local max
+    [property: JsonPropertyName("bounds_max")] float[]? BoundsMax = null,  // [x, y, z] local max
+    [property: JsonPropertyName("model_path")] string? ModelPath = null
 );
 
 /// <summary>

@@ -5403,6 +5403,8 @@ void main() {
         Directory.CreateDirectory(validationNoLiquidsOutputDirectory);
         string validationNoObjectsOutputDirectory = Path.Combine(validationOutputDirectory, "noobjects");
         Directory.CreateDirectory(validationNoObjectsOutputDirectory);
+        string validationObjectsOnlyOutputDirectory = Path.Combine(validationOutputDirectory, "objectsonly");
+        Directory.CreateDirectory(validationObjectsOnlyOutputDirectory);
 
         var plan = new MkHarvestViewerValidationCapturePlan
         {
@@ -5410,6 +5412,7 @@ void main() {
             OutputDirectory = validationOutputDirectory,
             NoLiquidsOutputDirectory = validationNoLiquidsOutputDirectory,
             NoObjectsOutputDirectory = validationNoObjectsOutputDirectory,
+            ObjectsOnlyOutputDirectory = validationObjectsOnlyOutputDirectory,
             RequestedResolution = Math.Clamp(requestedResolution, 512, 4096)
         };
 
@@ -5469,10 +5472,28 @@ void main() {
                     HideObjects = true,
                 });
             }
+
+            string objectsOnlyOutputPath = Path.Combine(validationObjectsOnlyOutputDirectory, $"{tileName}_viewer_validation.png");
+            if (forceRegenerate || !File.Exists(objectsOnlyOutputPath))
+            {
+                plan.Tiles.Add(new MkHarvestViewerValidationCaptureTile
+                {
+                    TileName = tileName,
+                    TileX = tileX,
+                    TileY = tileY,
+                    OutputPath = objectsOnlyOutputPath,
+                    HideTerrainLiquids = true,
+                    HideTerrain = true,
+                });
+            }
         }
 
         plan.Tiles.Sort(static (left, right) =>
         {
+            int terrainCompare = left.HideTerrain.CompareTo(right.HideTerrain);
+            if (terrainCompare != 0)
+                return terrainCompare;
+
             int objectCompare = left.HideObjects.CompareTo(right.HideObjects);
             if (objectCompare != 0)
                 return objectCompare;
@@ -5498,13 +5519,13 @@ void main() {
         if (plan.Tiles.Count == 0)
         {
             statusMessage = skippedFiles > 0
-                ? $"No new MdxViewer validation captures were queued; {skippedFiles} dataset tile file(s) could not be parsed and the rest already had primary, noliquids, and noobjects outputs. Refreshing stitched composites from existing files."
-                : "No new MdxViewer validation captures were queued because primary, noliquids, and noobjects outputs already exist for every dataset tile. Refreshing stitched composites from existing files.";
+                ? $"No new MdxViewer validation captures were queued; {skippedFiles} dataset tile file(s) could not be parsed and the rest already had primary, noliquids, noobjects, and objectsonly outputs. Refreshing stitched composites from existing files."
+                : "No new MdxViewer validation captures were queued because primary, noliquids, noobjects, and objectsonly outputs already exist for every dataset tile. Refreshing stitched composites from existing files.";
             return plan;
         }
 
         if (skippedFiles > 0)
-            statusMessage = $"Queued {plan.Tiles.Count} MdxViewer validation capture(s) across the primary, noliquids, and noobjects output families; skipped {skippedFiles} dataset tile file(s) with unparseable names.";
+            statusMessage = $"Queued {plan.Tiles.Count} MdxViewer validation capture(s) across the primary, noliquids, noobjects, and objectsonly output families; skipped {skippedFiles} dataset tile file(s) with unparseable names.";
 
         return plan;
     }
@@ -5971,7 +5992,7 @@ void main() {
                             _pendingMkHarvestViewerValidationCapturePlan = validationPlan;
                             _mkHarvestViewerValidationQueued = validationPlan.Tiles.Count;
                             AppendMkHarvestLogLine(
-                                $"Queued {validationPlan.Tiles.Count} MdxViewer validation capture(s) at {validationPlan.RequestedResolution}px into {validationPlan.OutputDirectory} with matching noliquids captures under {validationPlan.NoLiquidsOutputDirectory} and noobjects captures under {validationPlan.NoObjectsOutputDirectory}.");
+                                $"Queued {validationPlan.Tiles.Count} MdxViewer validation capture(s) at {validationPlan.RequestedResolution}px into {validationPlan.OutputDirectory} with matching noliquids captures under {validationPlan.NoLiquidsOutputDirectory}, noobjects captures under {validationPlan.NoObjectsOutputDirectory}, and objectsonly captures under {validationPlan.ObjectsOnlyOutputDirectory}.");
                         }
                         else
                         {
@@ -5980,6 +6001,7 @@ void main() {
                                 validationPlan.OutputDirectory,
                                 validationPlan.NoLiquidsOutputDirectory,
                                 validationPlan.NoObjectsOutputDirectory,
+                                validationPlan.ObjectsOnlyOutputDirectory,
                                 validationPlan.RequestedResolution);
                         }
                     }
