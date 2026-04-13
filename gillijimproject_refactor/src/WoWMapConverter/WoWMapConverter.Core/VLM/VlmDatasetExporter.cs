@@ -5,6 +5,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using WoWMapConverter.Core.Formats.Liquids;
+using WoWMapConverter.Core.Formats.PM4;
 using WoWMapConverter.Core.Services;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
@@ -521,7 +522,9 @@ public class VlmDatasetExporter
                         string? lHeightPath = null;
                         string? lMaskPath = null;
                         string? noLiquidMinimapPath = null;
+                        string? noMccvMinimapPath = null;
                         string? objectVisibilityMaskPath = null;
+                        string? pm4MaskPath = null;
                         string? noObjectMinimapPath = null;
                         float lMin = 0f, lMax = 0f;
 
@@ -529,18 +532,71 @@ public class VlmDatasetExporter
                         if (!string.IsNullOrWhiteSpace(sourceMinimapPath) && !Path.IsPathRooted(sourceMinimapPath))
                             sourceMinimapPath = Path.Combine(outputDir, sourceMinimapPath);
 
+                        string? cleanedTerrainMinimapPath = sourceMinimapPath;
+
+                        if (!string.IsNullOrWhiteSpace(sourceMinimapPath)
+                            && File.Exists(sourceMinimapPath)
+                            && !string.IsNullOrWhiteSpace(sample.TerrainData.MccvMapPath))
+                        {
+                            string absoluteMccvPath = sample.TerrainData.MccvMapPath!;
+                            if (!Path.IsPathRooted(absoluteMccvPath))
+                                absoluteMccvPath = Path.Combine(outputDir, absoluteMccvPath);
+
+                            if (File.Exists(absoluteMccvPath))
+                            {
+                                byte[] noMccvBytes = VlmMinimapCleanupService.RemoveMccvTint(sourceMinimapPath, absoluteMccvPath);
+                                if (noMccvBytes.Length > 0)
+                                {
+                                    noMccvMinimapPath = $"images/{tileName}_no_mccv.png";
+                                    cleanedTerrainMinimapPath = Path.Combine(outputDir, noMccvMinimapPath);
+                                    await File.WriteAllBytesAsync(cleanedTerrainMinimapPath, noMccvBytes);
+                                }
+                            }
+                        }
+
                         if (!string.IsNullOrWhiteSpace(sourceMinimapPath) && File.Exists(sourceMinimapPath))
                         {
                             using Image<Rgba32> minimapForMask = Image.Load<Rgba32>(sourceMinimapPath);
                             if (minimapForMask.Width > 0 && minimapForMask.Height > 0)
                             {
+                                if (TryParseTileCoordinates(tileName, out int tileX, out int tileY))
+                                {
+                                    IReadOnlyList<MprlEntry> positionRefs = LoadPm4PositionRefs(
+                                        searchPaths,
+                                        archiveCatalog,
+                                        mapName,
+                                        mapDirectory,
+                                        tileName,
+                                        tileX,
+                                        tileY);
+                                    if (positionRefs.Count > 0)
+                                    {
+                                        byte[] pm4Mask = VlmPm4MaskService.BuildPm4Mask(
+                                            tileName,
+                                            positionRefs,
+                                            minimapForMask.Width,
+                                            minimapForMask.Height);
+                                        if (pm4Mask.Length > 0)
+                                        {
+                                            pm4MaskPath = $"images/{tileName}_pm4_mask.png";
+                                            await File.WriteAllBytesAsync(Path.Combine(outputDir, pm4MaskPath), pm4Mask);
+                                        }
+                                    }
+                                }
+
                                 byte[] objectMask = BuildObjectVisibilityMask(sample.TerrainData, minimapForMask.Width, minimapForMask.Height);
                                 if (objectMask.Length > 0)
                                 {
                                     objectVisibilityMaskPath = $"images/{tileName}_object_visibility_mask.png";
                                     await File.WriteAllBytesAsync(Path.Combine(outputDir, objectVisibilityMaskPath), objectMask);
+                                }
 
-                                    byte[] noObjectBytes = SynthesizeMaskedMinimap(sourceMinimapPath, objectMask);
+                                byte[] removalMask = CombineMaskPngBytes(objectMask, pm4MaskPath != null
+                                    ? await File.ReadAllBytesAsync(Path.Combine(outputDir, pm4MaskPath))
+                                    : Array.Empty<byte>());
+                                if (removalMask.Length > 0)
+                                {
+                                    byte[] noObjectBytes = SynthesizeMaskedMinimap(cleanedTerrainMinimapPath ?? sourceMinimapPath, removalMask);
                                     if (noObjectBytes.Length > 0)
                                     {
                                         noObjectMinimapPath = $"images/{tileName}_no_objects.png";
@@ -574,7 +630,7 @@ public class VlmDatasetExporter
                                 // Generate a synthetic no-liquid minimap for training.
                                 if (!string.IsNullOrWhiteSpace(sourceMinimapPath) && File.Exists(sourceMinimapPath))
                                 {
-                                    var noLiqBytes = SynthesizeMaskedMinimap(sourceMinimapPath, liqMask);
+                                    var noLiqBytes = SynthesizeMaskedMinimap(cleanedTerrainMinimapPath ?? sourceMinimapPath, liqMask);
                                     if (noLiqBytes.Length > 0)
                                     {
                                         noLiquidMinimapPath = $"images/{tileName}_no_liquid.png";
@@ -593,7 +649,9 @@ public class VlmDatasetExporter
                             LiquidHeightPath = lHeightPath,
                             LiquidMaskPath = lMaskPath,
                             NoLiquidMinimapPath = noLiquidMinimapPath,
+                            NoMccvMinimapPath = noMccvMinimapPath,
                             ObjectVisibilityMaskPath = objectVisibilityMaskPath,
+                            Pm4MaskPath = pm4MaskPath,
                             NoObjectMinimapPath = noObjectMinimapPath,
                             LiquidMinHeight = lMin,
                             LiquidMaxHeight = lMax
@@ -690,6 +748,14 @@ public class VlmDatasetExporter
             if (objectMaskBounds.HasValue)
             {
                 progress?.Report($"Created full object visibility mask: {objectMaskOutput}");
+            }
+
+            var pm4MaskOutput = Path.Combine(stitchedDir, $"{mapName}_full_pm4_mask.png");
+            var pm4MaskBounds = TileStitchingService.StitchFullMap(
+                imagesDir, mapName, 256, pm4MaskOutput, "_pm4_mask.png");
+            if (pm4MaskBounds.HasValue)
+            {
+                progress?.Report($"Created full PM4 mask: {pm4MaskOutput}");
             }
 
             // Stitch shadow maps (1024 resolution)
@@ -1137,7 +1203,9 @@ public class VlmDatasetExporter
             LiquidMinHeight: 0f,
             LiquidMaxHeight: 0f,
             NoLiquidMinimapPath: null,
+            NoMccvMinimapPath: null,
             ObjectVisibilityMaskPath: null,
+            Pm4MaskPath: null,
             NoObjectMinimapPath: null,
             Textures: textures,
             ChunkLayers: chunkLayers.Count > 0 ? chunkLayers.ToArray() : null,
@@ -1606,7 +1674,9 @@ public class VlmDatasetExporter
                 LiquidMinHeight: 0f,
                 LiquidMaxHeight: 0f,
                 NoLiquidMinimapPath: null,
+                NoMccvMinimapPath: null,
                 ObjectVisibilityMaskPath: null,
+                Pm4MaskPath: null,
                 NoObjectMinimapPath: null,
                 Textures: textures,
                 ChunkLayers: chunkLayers.ToArray(),
@@ -2688,6 +2758,82 @@ public class VlmDatasetExporter
         return ms.ToArray();
     }
 
+    private static IReadOnlyList<MprlEntry> LoadPm4PositionRefs(
+        IReadOnlyList<string> searchPaths,
+        IArchiveCatalog archiveCatalog,
+        string mapName,
+        string mapDirectory,
+        string tileName,
+        int tileX,
+        int tileY)
+    {
+        try
+        {
+            foreach (string candidate in BuildPm4InternalPathCandidates(mapName, mapDirectory, tileX, tileY))
+            {
+                foreach (string basePath in searchPaths)
+                {
+                    string diskCandidate = Path.Combine(basePath, candidate);
+                    if (!File.Exists(diskCandidate))
+                        continue;
+
+                    Pm4File diskPm4File = Pm4File.FromFile(diskCandidate);
+                    return diskPm4File.PositionRefs;
+                }
+
+                if (!archiveCatalog.FileExists(candidate))
+                    continue;
+
+                byte[]? data = archiveCatalog.ReadFile(candidate);
+                if (data == null || data.Length == 0)
+                    continue;
+
+                Pm4File archivePm4File = new(data);
+                return archivePm4File.PositionRefs;
+            }
+
+            foreach (string fileName in BuildPm4FileNameCandidates(mapName, mapDirectory, tileName, tileX, tileY))
+            {
+                foreach (string basePath in searchPaths)
+                {
+                    string diskCandidate = Path.Combine(basePath, fileName);
+                    if (!File.Exists(diskCandidate))
+                        continue;
+
+                    Pm4File loosePm4File = Pm4File.FromFile(diskCandidate);
+                    return loosePm4File.PositionRefs;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return Array.Empty<MprlEntry>();
+    }
+
+    private static IEnumerable<string> BuildPm4InternalPathCandidates(string mapName, string mapDirectory, int tileX, int tileY)
+    {
+        foreach (string directoryName in DistinctMapNames(mapName, mapDirectory))
+            yield return Path.Combine("World", "Maps", directoryName, $"{directoryName}_{tileX}_{tileY}.pm4");
+    }
+
+    private static IEnumerable<string> BuildPm4FileNameCandidates(string mapName, string mapDirectory, string tileName, int tileX, int tileY)
+    {
+        yield return $"{tileName}.pm4";
+        foreach (string directoryName in DistinctMapNames(mapName, mapDirectory))
+            yield return $"{directoryName}_{tileX}_{tileY}.pm4";
+    }
+
+    private static IEnumerable<string> DistinctMapNames(string mapName, string mapDirectory)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(mapName) && seen.Add(mapName))
+            yield return mapName;
+        if (!string.IsNullOrWhiteSpace(mapDirectory) && seen.Add(mapDirectory))
+            yield return mapDirectory;
+    }
+
     private static void FillMaskRectangle(Image<L8> image, int minX, int minY, int maxXExclusive, int maxYExclusive)
     {
         for (int y = minY; y < maxYExclusive; y++)
@@ -2953,6 +3099,49 @@ public class VlmDatasetExporter
         catch
         {
             return Array.Empty<byte>();
+        }
+    }
+
+    private static byte[] CombineMaskPngBytes(params byte[][] maskPngs)
+    {
+        byte[][] validMasks = maskPngs
+            .Where(mask => mask != null && mask.Length > 0)
+            .ToArray();
+        if (validMasks.Length == 0)
+            return Array.Empty<byte>();
+
+        if (validMasks.Length == 1)
+            return validMasks[0];
+
+        try
+        {
+            using MemoryStream firstStream = new(validMasks[0]);
+            using Image<L8> merged = Image.Load<L8>(firstStream);
+
+            for (int index = 1; index < validMasks.Length; index++)
+            {
+                using MemoryStream overlayStream = new(validMasks[index]);
+                using Image<L8> overlay = Image.Load<L8>(overlayStream);
+                if (overlay.Width != merged.Width || overlay.Height != merged.Height)
+                    overlay.Mutate(ctx => ctx.Resize(merged.Width, merged.Height));
+
+                for (int y = 0; y < merged.Height; y++)
+                {
+                    for (int x = 0; x < merged.Width; x++)
+                    {
+                        if (overlay[x, y].PackedValue > merged[x, y].PackedValue)
+                            merged[x, y] = overlay[x, y];
+                    }
+                }
+            }
+
+            using MemoryStream output = new();
+            merged.SaveAsPng(output);
+            return output.ToArray();
+        }
+        catch
+        {
+            return validMasks[0];
         }
     }
 

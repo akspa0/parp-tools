@@ -1,5 +1,30 @@
 # Active Context
 
+## Apr 13, 2026 - Full improved V7.4 run was relaunched with pinned `development_0_0` validation and safer object-mask precedence
+
+- after the user pointed out that coarse object masks were wiping legitimate terrain on the left side of the preview tile, `train_v7.py` and `infer_v7.py` were corrected so object-context precedence is now:
+	- precise exported silhouettes first: `object_visibility_mask_cv2`, `pm4_mask`, `pm4_object_mask`, `collision_mask`
+	- exported seed mask next: `object_visibility_mask`
+	- coarse fallback WMO-box projection only when no exported mask exists
+- this avoids unioning a broad coarse WMO box over a tighter exported PM4/CV2 silhouette when one is available
+- trainer-side validation selection also changed so the trusted reference tile `development_0_0` is always forced into validation and static previews when present in the loaded dataset roots
+- bounded validation proof from a real-data smoke on `output/ml-corpus/4_0_0_12304_original/development`:
+	- static preview tiles printed `development:development_0_0` first
+	- the bounded run completed one epoch and wrote a best checkpoint under `output/tmp/v7_4_validation_pin_smoke_20260413`
+- the first full improved launch under the new architecture was then restarted into `output/ml-training/v7_4_wdl_trestle_reflect_brush_bestburst_pinval_20260413` so the pinned-reference behavior applies from epoch `1`
+- live launch facts now confirmed from terminal output:
+	- `26` audited dataset roots selected
+	- `6070` valid samples loaded
+	- raw train/val changed to `5449 / 621` because the pinned development reference group is now held out for validation
+	- curated train count changed to `3230`
+	- static preview sentinels now start with `development:development_0_0`, then `Northrend:Northrend_20_24`
+	- trainer is running on CUDA with AMP `bfloat16`, TF32 enabled, `disc_lr=5e-5`, and `--gan-burst-after-best 2`
+- important upstream boundary:
+	- sampled ML corpora checked during this change still had no exported precise PM4/MPRL mask payloads on representative development tiles, including `development_31_36` and `development_0_0`
+	- the trainer and inference path are now ready to honor those precise masks, but the exporter still needs a real PM4 or MPRL-driven silhouette seam before that signal materially changes current corpora
+- proof boundary:
+	- this is code-path proof, validation-selection proof, and fresh launch proof; it is not yet retrained-model proof on the relaunched full run
+
 ## Apr 13, 2026 - Development-map inference side-quest exposed tile-edge curl, and the active V7 path now anchors exported borders plus trains against them explicitly
 
 - after running the epoch-51 `output/ml-training/v7_4_brush_channel_bestburst_20260413/best.pt` checkpoint against `output/ml-corpus/400_12304/development`, the first exported OBJs showed two distinct failure modes:
@@ -27,7 +52,8 @@
 	- input channels: `13`
 - practical read:
 	- this is the closest full audited-corpus run so far and materially better than the previous audited `0.1256` result
-	- late epochs still did not beat the epoch-51 checkpoint, so resume/retrain work should start from that best checkpoint rather than from the final state
+	- late epochs still did not beat the epoch-51 checkpoint, so it remains the best legacy-semantics reference point
+	- do not resume that checkpoint into the new WDL-trestle and reflect-padding variant; fresh improved runs should start clean under the new semantics unless a checkpoint was written by that same variant
 
 ## Apr 13, 2026 - Validation previews now include mixed held-out tiles and an explicit object-mask context sheet
 

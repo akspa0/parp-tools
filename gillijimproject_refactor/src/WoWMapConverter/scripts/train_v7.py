@@ -94,7 +94,19 @@ MAP_ORIGIN = 32.0 * TILE_SIZE
 MASK_CONTEXT_MARGIN_TILES = 0.20
 MASK_MAX_ABOVE_TERRAIN = 8.0
 MASK_MIN_BELOW_TERRAIN = -3.0
-DATASET_INDEX_CACHE_VERSION = 1
+PRECISE_OBJECT_MASK_KEYS = (
+    "object_visibility_mask_cv2",
+    "pm4_mask",
+    "pm4_object_mask",
+    "collision_mask",
+)
+SEEDED_OBJECT_MASK_KEYS = (
+    "object_visibility_mask",
+)
+PINNED_VALIDATION_REFERENCE_TILES = (
+    ("development", "development_0_0"),
+)
+DATASET_INDEX_CACHE_VERSION = 2
 DATASET_INDEX_CACHE_FILE = ".v7_dataset_index_cache.json"
 BRUSH_MANIFEST_FILE = "brush_imprint_manifest.json"
 DEFAULT_TRAIN_WORKERS = 4
@@ -564,14 +576,14 @@ class WoWTileDatasetV7(Dataset):
                 rejected["missing_path_refs"] += 1
                 continue
 
-            minimap_rel = entry.get("image") or entry.get("no_object_minimap")
+            minimap_rel = entry.get("no_object_minimap") or entry.get("no_mccv_minimap") or entry.get("image")
             if minimap_rel:
                 minimap_path = dataset_root / str(minimap_rel)
             else:
                 minimap_path = dataset_root / "images" / f"{tile_name}.png"
 
-            if not minimap_path.exists() and entry.get("no_object_minimap"):
-                fallback_minimap = entry.get("no_object_minimap")
+            if not minimap_path.exists() and entry.get("image"):
+                fallback_minimap = entry.get("image")
                 if fallback_minimap:
                     minimap_path = dataset_root / str(fallback_minimap)
 
@@ -777,6 +789,7 @@ class WoWTileDatasetV7(Dataset):
                     "height_max": float(terrain.get("height_max", 0.0)),
                     "image": payload.get("image"),
                     "no_object_minimap": terrain.get("no_object_minimap"),
+                    "no_mccv_minimap": terrain.get("no_mccv_minimap"),
                     "normalmap": normalmap_rel,
                     "heightmap_global": heightmap_global_rel,
                     "heightmap_local": heightmap_local_rel,
@@ -819,6 +832,26 @@ class WoWTileDatasetV7(Dataset):
             return (self.to_tensor(mask_image) > 0.1).float()
 
         return torch.zeros((1, self.input_size, self.input_size), dtype=torch.float32)
+
+    def _build_object_context_mask(
+        self,
+        sample: TileSample,
+        terrain: Dict[str, object],
+    ) -> torch.Tensor:
+        precise_mask = self._load_optional_binary_mask(sample.dataset_root, terrain, keys=PRECISE_OBJECT_MASK_KEYS)
+        if bool(torch.any(precise_mask > 0)):
+            return precise_mask
+
+        seeded_mask = self._load_optional_binary_mask(sample.dataset_root, terrain, keys=SEEDED_OBJECT_MASK_KEYS)
+        if bool(torch.any(seeded_mask > 0)):
+            return seeded_mask
+
+        return self._build_object_mask(
+            terrain.get("objects"),
+            sample.tile_x,
+            sample.tile_y,
+            terrain.get("wdl_heights"),
+        )
 
     def _build_wdl_height_sampler(
         self,
@@ -1023,24 +1056,11 @@ class WoWTileDatasetV7(Dataset):
             brush_tensor = self.to_tensor(brush_image)
             brush_mask = (brush_tensor > 0.1).float()
 
-        object_mask = self._build_object_mask(
-            terrain.get("objects"),
-            sample.tile_x,
-            sample.tile_y,
-            terrain.get("wdl_heights"),
-        )
-        pm4_mask = self._load_optional_binary_mask(
-            sample.dataset_root,
-            terrain,
-            keys=["object_visibility_mask_cv2", "object_visibility_mask", "pm4_mask", "pm4_object_mask", "collision_mask"],
-        )
-        object_mask = torch.maximum(object_mask, pm4_mask)
+        object_mask = self._build_object_context_mask(sample, terrain)
         # NOTE: object_mask is passed as ch11 input context only.
-        # We do NOT blank minimap/normal map here because _build_object_mask produces
-        # inaccurate footprints (WMOs have no bounds in the JSON, fallback radius is ~6px
-        # while real buildings are hundreds of yards wide, and coordinate mapping is unreliable).
-        # Masking with bad silhouettes is worse than not masking at all.
-        # Fix required upstream: exporter must render real WMO footprint images.
+        # We do NOT blank minimap/normal map here because this channel is still context,
+        # not a hard cutout. Prefer precise exported PM4/CV2 silhouettes when available,
+        # then exported seed masks, and only fall back to coarse WMO box projection.
 
         input_tensor = torch.cat(
             [
@@ -1278,14 +1298,35 @@ def build_validation_groups(samples: Sequence[TileSample], block_size: int) -> D
     return groups
 
 
+def is_pinned_validation_reference(sample: TileSample) -> bool:
+    tile_name = sample.tile_name.lower()
+    map_name = sample.map_name.lower()
+    dataset_name = sample.dataset_name.lower()
+    for ref_map_name, ref_tile_name in PINNED_VALIDATION_REFERENCE_TILES:
+        if tile_name != ref_tile_name.lower():
+            continue
+        normalized_ref_map = ref_map_name.lower()
+        if map_name == normalized_ref_map or dataset_name == normalized_ref_map:
+            return True
+    return False
+
+
 def split_grouped_indices(samples: Sequence[TileSample], val_fraction: float, seed: int, block_size: int) -> Tuple[List[int], List[int], int, int]:
     groups = build_validation_groups(samples, block_size)
-    group_keys = list(groups.keys())
+    pinned_group_keys = {
+        group_key
+        for group_key, indices in groups.items()
+        if any(is_pinned_validation_reference(samples[index]) for index in indices)
+    }
+    group_keys = [key for key in groups.keys() if key not in pinned_group_keys]
     random.Random(seed).shuffle(group_keys)
 
     target_val_samples = max(1, int(round(len(samples) * val_fraction)))
     val_indices: List[int] = []
     val_group_count = 0
+    for group_key in sorted(pinned_group_keys):
+        val_indices.extend(groups[group_key])
+        val_group_count += 1
     for group_key in group_keys:
         if len(val_indices) >= target_val_samples and val_group_count > 0:
             break
@@ -1437,14 +1478,19 @@ def compute_preview_interest_score(sample: TileSample) -> float:
 
 
 def select_preview_candidates(samples: Sequence[TileSample], val_indices: Sequence[int], preview_count: int) -> List[Tuple[int, float, float]]:
+    pinned: List[Tuple[int, float, float]] = []
     scored: List[Tuple[int, float, float]] = []
     for index in val_indices:
         if index < 0 or index >= len(samples):
             continue
         metrics = compute_preview_interest_metrics(samples[index])
-        scored.append((index, metrics["score"], metrics["visual_variance"]))
+        item = (index, metrics["score"], metrics["visual_variance"])
+        if is_pinned_validation_reference(samples[index]):
+            pinned.append(item)
+        else:
+            scored.append(item)
 
-    if not scored:
+    if not scored and not pinned:
         return []
 
     target_count = max(1, preview_count)
@@ -1458,12 +1504,38 @@ def select_preview_candidates(samples: Sequence[TileSample], val_indices: Sequen
             samples[item[0]].tile_y,
         )
     )
+    pinned.sort(
+        key=lambda item: (
+            samples[item[0]].dataset_name,
+            samples[item[0]].map_name,
+            samples[item[0]].tile_x,
+            samples[item[0]].tile_y,
+        )
+    )
 
     non_blank = [item for item in scored if item[2] >= PREVIEW_MIN_VISUAL_VARIANCE]
-    if non_blank:
-        return non_blank[:target_count]
+    selected: List[Tuple[int, float, float]] = []
+    for item in pinned:
+        if item not in selected:
+            selected.append(item)
 
-    return scored[:target_count]
+    if non_blank:
+        for item in non_blank:
+            if item in selected:
+                continue
+            selected.append(item)
+            if len(selected) >= target_count:
+                break
+        return selected[:target_count]
+
+    for item in scored:
+        if item in selected:
+            continue
+        selected.append(item)
+        if len(selected) >= target_count:
+            break
+
+    return selected[:target_count]
 
 
 def build_preview_batch(dataset: WoWTileDatasetV7, dataset_indices: Sequence[int]) -> Tuple[Dict[str, torch.Tensor], List[int], List[Tuple[int, str]]]:

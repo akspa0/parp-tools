@@ -1,5 +1,28 @@
 # Progress
 
+### Apr 13, 2026 - Relaunched the full improved V7.4 run with pinned `development_0_0` validation and safer object-mask precedence
+
+- patched `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` and `infer_v7.py` so object-mask context now prefers:
+	- `object_visibility_mask_cv2`, `pm4_mask`, `pm4_object_mask`, `collision_mask`
+	- then `object_visibility_mask`
+	- then coarse fallback WMO-box projection only if no exported mask exists
+- added trainer-side validation pinning for trusted reference tile `development_0_0`
+	- validation groups now always include the group containing that tile when it exists
+	- static preview candidates now keep that tile in the fixed preview set instead of letting visual-score ranking push it out
+- bounded real-data proof from `output/tmp/v7_4_validation_pin_smoke_20260413` on `output/ml-corpus/4_0_0_12304_original/development`:
+	- static preview printed `development:development_0_0` first, followed by `development:development_0_1`
+	- one-epoch smoke completed with train `0.1875`, val `0.2269`
+- sampled representative corpus roots still showed no exported precise PM4/MPRL mask payloads yet:
+	- checked roots included `4_0_0_12304_original/development` and `400_12304/development`
+	- representative tiles `development_0_0` and `development_31_36` still had `object_visibility_mask_cv2`, `object_visibility_mask`, `pm4_mask`, `pm4_object_mask`, and `collision_mask` all `null`
+	- practical meaning: the trainer/inference path is now ready for precise PM4-driven silhouettes, but current corpora still need the exporter seam to emit them
+- restarted the full audited-corpus improved run into `output/ml-training/v7_4_wdl_trestle_reflect_brush_bestburst_pinval_20260413`
+- launch debugging/result:
+	- earlier audit-filter and PowerShell argument-shape issues were already fixed before this relaunch
+	- live startup now confirms `26` audited roots, `6070` valid samples, raw train/val `5449 / 621`, curated train `3230`, and static previews beginning with `development:development_0_0`
+- proof boundary:
+	- this records the corrected full-run relaunch and the validation/mask-path behavior change, not new convergence proof yet
+
 ### Apr 13, 2026 - Development-map V7.4 inference now exports anchored tile borders, and the trainer now penalizes both transition blur and border curl
 
 - ran the epoch-51 checkpoint `output/ml-training/v7_4_brush_channel_bestburst_20260413/best.pt` against the exported `development` dataset as a real-data side-quest before retraining
@@ -31,7 +54,8 @@
 	- metadata confirms `13` input channels, `6070` valid samples, curated train `3237`, val `613`, `26` launched roots
 - practical conclusion:
 	- V7.4 is now clearly in the right regime
-	- later epochs did not outperform the epoch-51 checkpoint, so future retrains should resume from `best.pt`, not from the late-stop endpoint
+	- later epochs did not outperform the epoch-51 checkpoint, so it remains the best legacy-semantics reference checkpoint
+	- that does not mean new WDL-trestle and reflect-padding runs should resume from it; fresh improved-variant training should start clean unless resuming a checkpoint from the same variant
 
 ### Apr 13, 2026 - Added mixed validation previews and explicit object-mask context previews
 

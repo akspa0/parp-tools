@@ -70,6 +70,15 @@ MAP_ORIGIN = 32.0 * TILE_SIZE
 MASK_CONTEXT_MARGIN_TILES = 0.20
 MASK_MAX_ABOVE_TERRAIN = 8.0
 MASK_MIN_BELOW_TERRAIN = -3.0
+PRECISE_OBJECT_MASK_KEYS = (
+    "object_visibility_mask_cv2",
+    "pm4_mask",
+    "pm4_object_mask",
+    "collision_mask",
+)
+SEEDED_OBJECT_MASK_KEYS = (
+    "object_visibility_mask",
+)
 _SCIPY_GAUSSIAN_FILTER = None
 _SCIPY_IMPORT_ATTEMPTED = False
 DEFAULT_EDGE_ANCHOR_WIDTH = 12
@@ -256,14 +265,14 @@ class V7InferenceEngine:
             payload = json.load(handle)
         terrain = payload.get("terrain_data", {})
 
-        minimap_rel = payload.get("image") or terrain.get("no_object_minimap")
+        minimap_rel = terrain.get("no_object_minimap") or terrain.get("no_mccv_minimap") or payload.get("image")
         if minimap_rel:
             minimap_path = dataset_root / str(minimap_rel)
         else:
             minimap_path = dataset_root / "images" / f"{tile_name}.png"
 
-        if not minimap_path.exists() and terrain.get("no_object_minimap"):
-            fallback_minimap = terrain.get("no_object_minimap")
+        if not minimap_path.exists() and payload.get("image"):
+            fallback_minimap = payload.get("image")
             if fallback_minimap:
                 minimap_path = dataset_root / str(fallback_minimap)
 
@@ -317,13 +326,7 @@ class V7InferenceEngine:
                 brush_mask = (brush_tensor > 0.1).float()
 
         tile_x, tile_y = parse_tile_coords(tile_name)
-        object_mask = self._build_object_mask(terrain.get("objects"), tile_x, tile_y, terrain.get("wdl_heights"))
-        pm4_mask = self._load_optional_binary_mask(
-            dataset_root,
-            terrain,
-            keys=["object_visibility_mask_cv2", "object_visibility_mask", "pm4_mask", "pm4_object_mask", "collision_mask"],
-        )
-        object_mask = torch.maximum(object_mask, pm4_mask)
+        object_mask = self._build_object_context_mask(dataset_root, terrain, tile_x, tile_y)
 
         channels = [
             minimap_tensor,
@@ -382,6 +385,23 @@ class V7InferenceEngine:
             return (self.to_tensor(mask_image) > 0.1).float()
 
         return torch.zeros((1, OUTPUT_SIZE, OUTPUT_SIZE), dtype=torch.float32)
+
+    def _build_object_context_mask(
+        self,
+        dataset_root: Path,
+        terrain: Dict[str, object],
+        tile_x: int,
+        tile_y: int,
+    ) -> torch.Tensor:
+        precise_mask = self._load_optional_binary_mask(dataset_root, terrain, keys=PRECISE_OBJECT_MASK_KEYS)
+        if bool(torch.any(precise_mask > 0)):
+            return precise_mask
+
+        seeded_mask = self._load_optional_binary_mask(dataset_root, terrain, keys=SEEDED_OBJECT_MASK_KEYS)
+        if bool(torch.any(seeded_mask > 0)):
+            return seeded_mask
+
+        return self._build_object_mask(terrain.get("objects"), tile_x, tile_y, terrain.get("wdl_heights"))
 
     def _build_wdl_height_sampler(
         self,
