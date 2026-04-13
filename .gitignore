@@ -606,3 +606,5 @@ wow-viewer/src/core/WowViewer.Core.PM4/obj/Release/net10.0/WowViewer.Core.PM4.pd
 wow-viewer/src/core/WowViewer.Core.PM4/obj/Release/net10.0/WowViewer.Core.PM4.sourcelink.json
 wow-viewer/src/core/WowViewer.Core.PM4/obj/Release/net10.0/ref/WowViewer.Core.PM4.dll
 wow-viewer/src/core/WowViewer.Core.PM4/obj/Release/net10.0/refint/WowViewer.Core.PM4.dll
+datasets/*
+gillijimproject_refactor/datasets/*
