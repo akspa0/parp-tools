@@ -25,6 +25,10 @@ This package is the traceable record of harvested terrain supervision. It is not
 - derived helper channels are acceptable only when they are deterministic transforms of those harvested assets
 - GAN outputs, preview outputs, and experimental prefab outputs are not part of the package's ground-truth contract
 
+This document covers harvested input datasets only.
+
+Predicted output packages for the separate V7.6 image-to-height+albedo branch are documented in `docs/v76-output-dataset-spec.md` and should never be confused with harvested corpus roots.
+
 For the end-to-end provenance story and the active brush-vs-prefab policy, see `docs/ML_DATASET_GROUNDING.md`.
 
 ## Current Root Layout
@@ -35,7 +39,6 @@ An exported dataset root can contain the following directories and files:
 <dataset-root>/
 |- dataset/
 |  |- <tile>.json
-|  |- <tile>.bin
 |- images/
 |  |- <tile>.png
 |  |- <tile>_heightmap.png
@@ -83,7 +86,7 @@ Not every export contains every directory:
 - Paths inside JSON and manifest files are dataset-root-relative and use `/` separators.
 - Tile identity is anchored by `terrain_data.adt_tile` and matches the file stem, for example `Azeroth_32_48`.
 - Cross-build training should currently treat dataset-root provenance as the primary build selector. The documented tile schema guarantees stable tile/map identity, but it does not currently document a canonical per-tile client-build field.
-- `dataset/<tile>.bin` is a compatibility binary payload emitted alongside JSON. New tooling should prefer JSON and manifest metadata unless it explicitly needs the binary layout.
+- legacy `.bin` payloads are no longer part of the canonical active export surface; new tooling should use JSON plus manifest metadata.
 - Stitched terrain supervision outputs now live under `stitched/`. Tooling must not assume old root-level `shadows/` or `masks/` directories exist.
 - Viewer validation captures are not a core package directory. They may be written outside the dataset root, so training or audit tooling should not depend on them.
 

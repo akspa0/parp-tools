@@ -4,6 +4,8 @@ Updated Apr 14, 2026.
 
 This is the active architecture guide for the terrain regressor after the dataset-contract bump from V7.4 to V7.5. The network shape is still the same `13`-channel, `2`-output multichannel terrain model, but the RGB input contract is stricter: prefer a terrain-only cleaned minimap whenever the exporter can build one.
 
+For the separate paired-output image-to-height+albedo branch, see `docs/v76-model-architecture-guide.md`.
+
 ## Snapshot
 
 - Input channels: 13

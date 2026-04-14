@@ -21,6 +21,9 @@ The terrain-model dataset and training path now have a dedicated grounding docum
 - [docs/ML_DATASET_GROUNDING.md](docs/ML_DATASET_GROUNDING.md) explains the real client roots, archive staging workflow, active harvested channels, and why GAN is not the source of the dataset.
 - [docs/VLM_DATASET_EXPORTER.md](docs/VLM_DATASET_EXPORTER.md) documents the dataset package contract and per-tile payload layout.
 - [docs/VLM_Training_Guide.md](docs/VLM_Training_Guide.md) documents the current training workflow over that harvested corpus.
+- [docs/v75-model-architecture-guide.md](docs/v75-model-architecture-guide.md) is the active multichannel terrain-regressor guide.
+- [docs/v76-model-architecture-guide.md](docs/v76-model-architecture-guide.md) documents the separate paired-output V7.6 image-to-height+albedo branch.
+- [docs/v76-output-dataset-spec.md](docs/v76-output-dataset-spec.md) specifies the intended structured output package for V7.6 inference results.
 
 ## v0.4.7.1 release snapshot
 

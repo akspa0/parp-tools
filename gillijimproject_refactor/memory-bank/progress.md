@@ -1,5 +1,27 @@
 # Progress
 
+### Apr 14, 2026 - Added a separate V7.6 doc set and a structured predicted-output dataset spec
+
+- documented the checked-in V7.6 branch as its own model line at `gillijimproject_refactor/docs/v76-model-architecture-guide.md`
+	- explains that V7.6 is a paired-output image-to-height+albedo branch, not the active V7.5.1 harvested-corpus terrain model
+	- explains what the input image, target height, and synthesized target albedo are meant to teach the shared encoder and the two decoder heads
+	- explains that the branch is meant to turn arbitrary image input into a structured predicted terrain dataset rather than a loose file dump
+- added `gillijimproject_refactor/docs/v76-output-dataset-spec.md`
+	- defines a structured output package with per-sample JSON, run-level manifest, `metadata.jsonl`, `dataset_info.json`, source-image copies, predicted height/albedo assets, optional mesh exports, and optional stitched quilt outputs
+	- makes the provenance rule explicit so predicted outputs cannot be mistaken for harvested truth
+- updated the surrounding docs to route readers correctly and keep the stories separated:
+	- `README.md`
+	- `docs/ML_DATASET_GROUNDING.md`
+	- `docs/VLM_DATASET_EXPORTER.md`
+	- `docs/VLM_Training_Guide.md`
+	- `docs/V7_HEIGHT_REGRESSOR.md`
+	- `docs/v75-model-architecture-guide.md`
+- additional docs cleanup landed in the same pass:
+	- `docs/VLM_DATASET_EXPORTER.md` no longer presents legacy per-tile `.bin` payloads as part of the canonical active export surface
+- important boundary:
+	- this is documentation and spec work only
+	- the checked-in V7.6 inference scripts still write loose outputs today; the new spec is the intended replacement contract, not proof that the scripts already implement it
+
 ### Apr 14, 2026 - Dataset-grounding docs now explain the real harvest pipeline and defer prefab from the trusted supervision story
 
 - added a dedicated provenance doc at `gillijimproject_refactor/docs/ML_DATASET_GROUNDING.md`

@@ -1,5 +1,11 @@
 # WoW Height Regressor V7.1
 
+Historical note:
+
+- this file documents the older V7.1 contract
+- the active harvested multichannel terrain line is documented in `docs/v75-model-architecture-guide.md`
+- the separate paired-output V7.6 image-to-height+albedo branch is documented in `docs/v76-model-architecture-guide.md`
+
 ## Scope
 
 V7.1 is a multichannel terrain regressor, not a pure minimap-to-height model.

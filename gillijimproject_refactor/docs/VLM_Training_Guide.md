@@ -19,6 +19,24 @@ Practical rules:
 - treat the brush channel as active grounded supervision
 - treat the prefab channel as experimental and deferred from the trusted training contract
 
+## Model Lines
+
+This repo currently has two different model stories that should be documented separately.
+
+### V7.5.1 Terrain Line
+
+- active grounded terrain-regression path
+- multichannel input over harvested dataset roots
+- documented in `docs/v75-model-architecture-guide.md`
+
+### V7.6 Paired Reconstruction Line
+
+- separate image-to-height+albedo branch
+- meant to learn both geometry and a cleaner terrain-material surface from image input
+- should emit a structured predicted dataset rather than loose files
+- documented in `docs/v76-model-architecture-guide.md`
+- output package contract documented in `docs/v76-output-dataset-spec.md`
+
 ## Prerequisites
 
 - **NVIDIA GPU**: RTX 30xx/40xx recommended (8GB+ VRAM).
@@ -59,6 +77,14 @@ The exported dataset supports three different learning problems:
 1. terrain reconstruction: minimap plus WDL plus known-loss channels -> height
 2. texture decomposition: minimap -> terrain texture palette plus alpha masks
 3. shadow-scar object recovery: minimap plus `MCSH` shadow evidence plus surviving placements -> missing-object candidates
+
+For the separate paired-output V7.6 branch, the harvested dataset can also be converted into cached paired tensors where:
+
+- the source minimap becomes the model input
+- the global heightmap becomes the geometry target
+- a synthesized terrain albedo becomes the appearance target
+
+That V7.6 cache-and-train path is documented separately because it is not the same contract as the active V7.5.1 multichannel terrain line.
 
 ### Fixed-Client Corpus Export
 
@@ -163,6 +189,19 @@ Prefab harvesting is not part of the current trusted training contract.
 The repo still contains prefab tooling and review surfaces, but until that path is validated to the same standard as the brush harvest it should be treated as experimental dataset research rather than active supervision.
 
 If you are explaining what grounds the current terrain model in reality, point to the exported tile corpus and the brush-imprint pass, not the prefab outputs.
+
+### V7.6 Output Packaging Goal
+
+When V7.6 is used on arbitrary image inputs, the result should be a structured predicted dataset, not a loose folder of PNGs and OBJ files.
+
+The intent is to mirror the strengths of the harvested input-dataset packaging:
+
+- stable manifests
+- per-sample JSON records
+- explicit source provenance
+- explicit model provenance
+
+That predicted-output contract is defined in `docs/v76-output-dataset-spec.md`.
 
 ### Geometry-First Default Training Strategy
 

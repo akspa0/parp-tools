@@ -207,6 +207,34 @@ Examples:
 
 Those are still acceptable grounding channels because they can be traced back to real tile data and re-derived reproducibly.
 
+## Harvested Input Datasets Versus Predicted Output Datasets
+
+The project now needs two different packaging stories, and they must not be conflated.
+
+### Harvested Input Dataset
+
+This is the dataset under `datasets/` built from real client or map data.
+
+- it is the training-truth side of the workflow
+- it is documented in `docs/VLM_DATASET_EXPORTER.md`
+- it is what grounds the model in reality when the export path is verified
+
+### Predicted Output Dataset
+
+This is what a model like V7.6 should emit when asked to infer terrain from an arbitrary image input.
+
+- it is a derivative package, not harvested truth
+- it should still be structured, inspectable, and provenance-preserving
+- it must explicitly record that the files are model predictions
+
+The V7.6 predicted-output contract is documented in `docs/v76-output-dataset-spec.md`.
+
+This distinction matters for public clarity:
+
+- harvested input datasets are evidence
+- predicted output datasets are model interpretations of evidence or of arbitrary source imagery
+- neither should be mislabeled as the other
+
 ## Brush Versus Prefab Policy
 
 The current documentation and public progress framing should treat these two channels differently.
@@ -252,3 +280,4 @@ The safest accurate public description today is:
 - brush evidence is a real harvested auxiliary channel
 - prefab work exists, but it is not currently part of the trusted active supervision story
 - GAN is a refinement objective inside training, not the source of the dataset
+- V7.6-style predicted datasets are useful derivative outputs, but they must stay clearly labeled as model-generated packages rather than harvested truth

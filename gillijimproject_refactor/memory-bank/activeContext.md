@@ -1,5 +1,24 @@
 # Active Context
 
+## Apr 14, 2026 - V7.6 docs now distinguish the paired-output branch from the active harvested-corpus terrain line
+
+- added a separate V7.6 doc set instead of overloading the V7.5.1 terrain docs:
+	- `gillijimproject_refactor/docs/v76-model-architecture-guide.md`
+	- `gillijimproject_refactor/docs/v76-output-dataset-spec.md`
+- active documentation boundary is now explicit:
+	- `v75-model-architecture-guide.md` still owns the active grounded multichannel terrain-regressor story over harvested `datasets/`
+	- V7.6 is documented as a separate paired-output image-to-height+albedo branch built around `cache_v7_6_data.py`, `train_v7_6.py`, `inference_v7_6.py`, and `stitch_full_map.py`
+	- V7.6 predicted outputs are now documented as a structured derivative dataset surface, not as harvested truth and not as a replacement label for `datasets/`
+- shared docs were updated to route readers correctly:
+	- `README.md`
+	- `docs/ML_DATASET_GROUNDING.md`
+	- `docs/VLM_DATASET_EXPORTER.md`
+	- `docs/VLM_Training_Guide.md`
+	- `docs/V7_HEIGHT_REGRESSOR.md`
+	- `docs/v75-model-architecture-guide.md`
+- important boundary:
+	- V7.6 remains a documented code branch with loose-file current outputs and heuristic world-scale assumptions; the new spec defines the intended structured output package but does not mean the inference scripts already emit it
+
 ## Apr 14, 2026 - Dataset grounding docs now make the real-data provenance and channel policy explicit
 
 - documentation now has a dedicated grounding surface at:
