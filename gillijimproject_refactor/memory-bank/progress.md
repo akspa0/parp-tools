@@ -1,5 +1,57 @@
 # Progress
 
+### Apr 14, 2026 - V7 trainer now supports subset-manifest tile allowlists; interesting-tile smoke train passed end-to-end
+
+- added exact subset training support in `src/WoWMapConverter/scripts/train_v7.py`:
+	- new CLI option `--tile-manifest <path>` accepts the focused subset artifact (`interesting_tile_subset_manifest.json`)
+	- loader now builds a root-scoped tile allowlist from `selected_tiles[*].dataset_map_root + tile_name`
+	- dataset indexing keeps all existing checks (missing refs/files, map filters, blank skip), then applies tile allowlist filtering
+	- checkpoint/training metadata now records `tile_manifest`
+- real smoke proof completed with the focused subset roots (`0_5_3_3368/Azeroth`, `3_3_5_12340/EmeraldDream`, `4_0_0_11927/Azeroth`):
+	- command used `--profile manual --tile-manifest ...interesting_tile_subset_manifest.json --epochs 1 --batch-size 2 --adversarial-scale 0`
+	- loaded `46` samples (`48` selected tiles minus `2` skipped by default `--min-height-range 0.5` blank-tile guard)
+	- split: train/val `41 / 5`
+	- epoch 1 completed and wrote `best.pt`, `checkpoint.pt`, previews, and `training_log.json` under `output/ml-training/interesting_subset_smoke`
+- important boundary:
+	- this is confirmed trainability on the focused subset path, not a long-run quality signoff
+	- run used CPU in this chat environment and disabled GAN for fast readiness proof
+
+### Apr 13, 2026 - Focused Azeroth/EmeraldDream interesting-tile subset completed (48/48)
+
+- user-directed pivot executed away from broad all-map corpus expansion to a focused subset harvest:
+	- broad `export_ml_corpus.ps1 -Force` run was stopped once enough base output existed
+	- interesting tile IDs were derived from historical validation previews under `output/ml-training/**/previews/val_epoch_*.json` for only `Azeroth` and `EmeraldDream`
+- new helper script landed:
+	- `scripts/harvest_interesting_tile_subset.py`
+	- builds `interesting_tile_subset_manifest.json` and `interesting_tile_subset_missing_plan.json` from current `datasets/*/*/ml_dataset_manifest.json`
+- targeted fill completed for missing tiles only:
+	- `3_3_5_12340/EmeraldDream`: exported and harvested 11 specific interesting tiles via `ml-export --tile`
+	- `4_0_0_11927/Azeroth`: exported and harvested `Azeroth_25_43` (missing in 3.3.5)
+- final subset status:
+	- `interesting_tile_count = 48`
+	- `harvested_tile_rows = 48`
+	- `missing_tile_count = 0`
+	- composition: `Azeroth=37`, `EmeraldDream=11`; clients used `0_5_3_3368=36`, `3_3_5_12340=11`, `4_0_0_11927=1`
+- output artifacts:
+	- `output/build-validation/ml-audit/interesting_tile_subset_manifest.json`
+	- `output/build-validation/ml-audit/interesting_tile_subset_missing_plan.json`
+
+### Apr 14, 2026 - Full all-map corpus rerun is now wired and actively running from a clean datasets root
+
+- landed workflow changes to support user-requested full-client map coverage rather than fixed map lists:
+	- `WoWMapConverter.Cli` now exposes `ml-list-maps` (alias `vlm-list-maps`) for dynamic per-client map discovery
+	- map discovery now recognizes both `.wdt` and legacy disk `.wdt.MPQ` layouts (critical for the `0_5_5_3494` client root)
+	- `scripts/export_ml_corpus.ps1` now supports per-client `all_maps: true`, discovers map lists at runtime, and records per-map failures instead of silently passing
+	- `scripts/ml_corpus_fixed_clients.json` now includes `0_5_3_3368`, `0_5_5_3494`, and `0_6_0_3592`, with `all_maps: true` enabled for all real client builds
+- dataset reset and rerun status:
+	- `i:/parp/parp-tools/datasets` was wiped and recreated before launch
+	- full rerun launched with `scripts/export_ml_corpus.ps1 -Force` and is currently running through discovered maps (early status observed: `original_development/development` completed and next client jobs started)
+- post-processing tooling added and smoke-validated:
+	- new `scripts/build_minimal_ml_manifest.py` builds a deduplicated tile manifest plus a map-level minimal export plan from harvested manifests
+	- partial-run smoke against live output succeeded (`1` manifest scanned, `352` tiles, `299` unique groups)
+- boundary:
+	- full all-client/all-map rerun is long-running and not yet complete in this chat; final dedupe/minimal artifacts must be regenerated after export+harvest completes for every map
+
 ### Apr 13, 2026 - Next chat should resume at the full corpus rerun and model-training stage
 
 - the current user priority is no longer another incremental exporter probe; it is the end-to-end dataset and model workflow:

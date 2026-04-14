@@ -190,7 +190,7 @@ public record VlmTextureLayer(
     // Legacy per-chunk alpha PNG path. May be null when alpha_bits are present.
     [property: JsonPropertyName("alpha_path")] string? AlphaPath = null,
     
-    // Raw alpha bytes (Not serialized to JSON, used for .bin export)
+    // Raw alpha bytes (not serialized to JSON, kept for in-memory processing).
     [property: JsonIgnore] byte[]? AlphaData = null
 );
 

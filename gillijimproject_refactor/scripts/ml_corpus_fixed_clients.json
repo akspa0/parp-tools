@@ -10,51 +10,63 @@
       "maps": [
         "development"
       ],
+      "all_maps": false,
+      "generate_depth": false
+    },
+    {
+      "label": "0_5_3_3368",
+      "client_path": "H:\\053-client",
+      "version": "0.5.3.3368",
+      "maps": [],
+      "all_maps": true,
+      "generate_depth": false
+    },
+    {
+      "label": "0_5_5_3494",
+      "client_path": "H:\\CLIENTS\\0.X_Pre-Release_OSX_enUS_0.5.5.3494\\World of Warcraft",
+      "version": "0.5.5.3494",
+      "maps": [],
+      "all_maps": true,
+      "generate_depth": false
+    },
+    {
+      "label": "0_6_0_3592",
+      "client_path": "H:\\CLIENTS\\0.X_Pre-Release_OSX_enUS_0.6.0.3592\\World of Warcraft",
+      "version": "0.6.0.3592",
+      "maps": [],
+      "all_maps": true,
       "generate_depth": false
     },
     {
       "label": "0_7_0_3694",
       "client_path": "0.X_Pre-Release_Windows_enUS_0.7.0.3694\\World of Warcraft",
       "version": "0.7.0.3694",
-      "maps": [
-        "EmeraldDream"
-      ],
+      "maps": [],
+      "all_maps": true,
       "generate_depth": false
     },
     {
       "label": "3_0_1_8303",
       "client_path": "3.X_Pre-Release_Windows_enUS_3.0.1.8303\\World of Warcraft",
       "version": "3.0.1.8303",
-      "maps": [
-        "EmeraldDream",
-        "Northrend",
-        "PVPZone01",
-        "PVPZone02",
-        "PVPZone03",
-        "PVPZone04"
-      ],
+      "maps": [],
+      "all_maps": true,
       "generate_depth": false
     },
     {
       "label": "3_3_5_12340",
       "client_path": "WoW335\\3.X_Retail_Windows_enUS_3.3.5.12340\\World of Warcraft",
       "version": "3.3.5.12340",
-      "maps": [
-        "Azeroth",
-        "EmeraldDream"
-      ],
+      "maps": [],
+      "all_maps": true,
       "generate_depth": false
     },
     {
       "label": "4_0_0_11927",
       "client_path": "World of Warcraft Cata beta 11927",
       "version": "4.0.0.11927",
-      "maps": [
-        "Azeroth",
-        "Deepholm",
-        "LostIsles",
-        "EmeraldDream"
-      ],
+      "maps": [],
+      "all_maps": true,
       "generate_depth": false
     }
   ]

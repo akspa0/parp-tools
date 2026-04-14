@@ -294,17 +294,13 @@ public sealed class MkDatasetHarvester
                 ReferenceMinimapGenerated = referenceMinimapGenerated
             });
 
-            string tileBinPath = RelativizePath(datasetRoot, Path.Combine(datasetDirectory, $"{tileName}.bin"));
-            if (!TryResolveDatasetPath(datasetRoot, tileBinPath))
-                tileBinPath = string.Empty;
-
             hfRows.Add(new HfDatasetMetadataRow
             {
                 FileName = NormalizeDatasetRelativePath(sourceMinimapPath) ?? string.Empty,
                 TileName = tileName,
                 MapName = mapName,
                 TileJson = RelativizePath(datasetRoot, datasetFile),
-                TileBin = string.IsNullOrWhiteSpace(tileBinPath) ? null : tileBinPath,
+                TileBin = null,
                 Depth = NormalizeDatasetRelativePath(sample?.DepthPath),
                 HeightmapLocal = NormalizeDatasetRelativePath(heightmapLocalPath),
                 HeightmapGlobal = NormalizeDatasetRelativePath(heightmapGlobalPath),

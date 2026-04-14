@@ -5,6 +5,7 @@ using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.Formats.PM4;
 using WoWMapConverter.Core.Services;
 using WoWMapConverter.Core.VLM;
+using WowViewer.Core.IO.Files;
 
 namespace WoWMapConverter.Cli;
 
@@ -39,6 +40,7 @@ public static class Program
             "terrain-texture-transfer" => RunTerrainTextureTransfer(args.Skip(1).ToArray()),
             "wmo-info" => RunWmoInfo(args.Skip(1).ToArray()),
             "ml-export" => await RunVlmExportAsync(args.Skip(1).ToArray()),
+            "ml-list-maps" => await RunMlListMapsAsync(args.Skip(1).ToArray()),
             "ml-decode" => await RunVlmDecodeAsync(args.Skip(1).ToArray()),
             "ml-bake" => await RunVlmBakeAsync(args.Skip(1).ToArray()),
             "ml-bake-heightmap" => await RunVlmBakeHeightmapAsync(args.Skip(1).ToArray()),
@@ -52,6 +54,7 @@ public static class Program
             "mk-synth" => await RunVlmSynthAsync(args.Skip(1).ToArray()),
             "mk-harvest" => await RunMkHarvestAsync(args.Skip(1).ToArray()),
             "vlm-export" => await RunVlmExportAsync(args.Skip(1).ToArray()),
+            "vlm-list-maps" => await RunMlListMapsAsync(args.Skip(1).ToArray()),
             "vlm-decode" => await RunVlmDecodeAsync(args.Skip(1).ToArray()),
             "vlm-bake" => await RunVlmBakeAsync(args.Skip(1).ToArray()),
             "vlm-bake-heightmap" => await RunVlmBakeHeightmapAsync(args.Skip(1).ToArray()),
@@ -1646,6 +1649,211 @@ public static class Program
         return 0;
     }
 
+    private static async Task<int> RunMlListMapsAsync(string[] args)
+    {
+        string? clientPath = null;
+        string? listfilePath = null;
+        string? outputJsonPath = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i].ToLowerInvariant())
+            {
+                case "--client":
+                case "-c":
+                    if (i + 1 < args.Length) clientPath = args[++i];
+                    break;
+                case "--listfile":
+                case "-l":
+                    if (i + 1 < args.Length) listfilePath = args[++i];
+                    break;
+                case "--output-json":
+                case "-o":
+                    if (i + 1 < args.Length) outputJsonPath = args[++i];
+                    break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(clientPath))
+        {
+            Console.WriteLine("ML Map Discovery - list all map directories visible for a client root");
+            Console.WriteLine();
+            Console.WriteLine("Usage: ml-list-maps --client <path> [--listfile <csv>] [--output-json <file>]  (legacy alias: vlm-list-maps)");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --client, -c <path>      Client root (or root containing Data)");
+            Console.WriteLine("  --listfile, -l <csv>     Optional explicit listfile path");
+            Console.WriteLine("  --output-json, -o <file> Optional JSON output path for scripting");
+            return 1;
+        }
+
+        try
+        {
+            var maps = DiscoverClientMapDirectories(clientPath!, listfilePath);
+
+            if (!string.IsNullOrWhiteSpace(outputJsonPath))
+            {
+                string fullOutput = Path.GetFullPath(outputJsonPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(fullOutput) ?? Directory.GetCurrentDirectory());
+                await File.WriteAllTextAsync(fullOutput, JsonSerializer.Serialize(maps, new JsonSerializerOptions { WriteIndented = true }));
+            }
+
+            foreach (string map in maps)
+                Console.WriteLine(map);
+
+            return maps.Count > 0 ? 0 : 1;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static List<string> DiscoverClientMapDirectories(string clientPath, string? listfilePath)
+    {
+        string dataPath = clientPath;
+        if (!Directory.Exists(Path.Combine(clientPath, "World")) &&
+            Directory.Exists(Path.Combine(clientPath, "Data", "World")))
+        {
+            dataPath = Path.Combine(clientPath, "Data");
+        }
+
+        var searchPaths = new List<string> { dataPath };
+        if (!string.Equals(clientPath, dataPath, StringComparison.OrdinalIgnoreCase))
+            searchPaths.Add(clientPath);
+
+        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+
+        string[] listfileSearchPaths =
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdxViewer", "community-listfile-withcapitals.csv"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "community-listfile-withcapitals.csv"),
+            "community-listfile-withcapitals.csv",
+            "listfile.csv",
+        };
+
+        string? resolvedListfile = !string.IsNullOrWhiteSpace(listfilePath) && File.Exists(listfilePath)
+            ? listfilePath
+            : listfileSearchPaths.FirstOrDefault(File.Exists);
+
+        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, searchPaths, resolvedListfile);
+
+        var maps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Disk-backed discovery for extracted clients.
+        foreach (string basePath in searchPaths)
+        {
+            string mapsDir = Path.Combine(basePath, "World", "Maps");
+            if (!Directory.Exists(mapsDir))
+                continue;
+
+            IEnumerable<string> diskWdtCandidates = Directory
+                .EnumerateFiles(mapsDir, "*.wdt", SearchOption.AllDirectories)
+                .Concat(Directory.EnumerateFiles(mapsDir, "*.wdt.mpq", SearchOption.AllDirectories));
+
+            foreach (string wdtPath in diskWdtCandidates)
+            {
+                if (TryExtractDiskMapDirectory(wdtPath, out string? mapDirectory))
+                    maps.Add(mapDirectory!);
+            }
+        }
+
+        // Archive-backed discovery for MPQ clients.
+        var archiveWdtCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string knownFile in archiveCatalog.GetAllKnownFiles())
+        {
+            if (!TryExtractMapDirectoryFromWdtPath(knownFile, out _, out string? normalizedPath))
+                continue;
+
+            archiveWdtCandidates.Add(normalizedPath!);
+        }
+
+        foreach (string candidatePath in archiveWdtCandidates)
+        {
+            if (!archiveCatalog.FileExists(candidatePath))
+                continue;
+
+            if (TryExtractMapDirectoryFromWdtPath(candidatePath, out string? mapDirectory, out _))
+                maps.Add(mapDirectory!);
+        }
+
+        return maps.OrderBy(static name => name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static bool TryExtractDiskMapDirectory(string wdtPath, out string? mapDirectory)
+    {
+        mapDirectory = null;
+        if (string.IsNullOrWhiteSpace(wdtPath))
+            return false;
+
+        string fileName = Path.GetFileName(wdtPath);
+        if (!TryGetWdtBaseName(fileName, out string fileStem))
+            return false;
+
+        string directoryName = new DirectoryInfo(Path.GetDirectoryName(wdtPath) ?? string.Empty).Name;
+        if (string.IsNullOrWhiteSpace(directoryName))
+            return false;
+
+        if (!fileStem.Equals(directoryName, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        mapDirectory = directoryName;
+        return true;
+    }
+
+    private static bool TryExtractMapDirectoryFromWdtPath(string virtualPath, out string? mapDirectory, out string? normalizedPath)
+    {
+        mapDirectory = null;
+        normalizedPath = null;
+
+        if (string.IsNullOrWhiteSpace(virtualPath))
+            return false;
+
+        string normalized = virtualPath.Replace('\\', '/').TrimStart('/');
+
+        string[] segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 4)
+            return false;
+
+        int worldIndex = Array.FindIndex(segments, static segment => segment.Equals("World", StringComparison.OrdinalIgnoreCase));
+        if (worldIndex < 0 || worldIndex + 3 >= segments.Length)
+            return false;
+
+        if (!segments[worldIndex + 1].Equals("Maps", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        string candidateMapDirectory = segments[worldIndex + 2];
+        string fileName = segments[worldIndex + 3];
+        if (!TryGetWdtBaseName(fileName, out string fileStem))
+            return false;
+
+        if (!fileStem.Equals(candidateMapDirectory, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        mapDirectory = candidateMapDirectory;
+        normalizedPath = normalized;
+        return true;
+    }
+
+    private static bool TryGetWdtBaseName(string fileName, out string baseName)
+    {
+        baseName = string.Empty;
+        if (string.IsNullOrWhiteSpace(fileName))
+            return false;
+
+        if (fileName.EndsWith(".wdt.mpq", StringComparison.OrdinalIgnoreCase))
+        {
+            baseName = fileName[..^8];
+        }
+        else if (fileName.EndsWith(".wdt", StringComparison.OrdinalIgnoreCase))
+        {
+            baseName = fileName[..^4];
+        }
+
+        return !string.IsNullOrWhiteSpace(baseName);
+    }
+
 
     private static async Task<int> RunDefaultConvertAsync(string[] args)
     {
@@ -2296,6 +2504,7 @@ public static class Program
         Console.WriteLine("  wowmapconverter terrain-texture-transfer [options]      Transfer MCAL/MCLY/MCSH/holes across mapped tiles");
         Console.WriteLine("  wowmapconverter wmo-info <wmo> [options]                List WMO groups and structure info");
         Console.WriteLine("  wowmapconverter ml-export [options]                     Export ML dataset (legacy aliases: mk-export, vlm-export)");
+        Console.WriteLine("  wowmapconverter ml-list-maps [options]                  Discover all map directories for a client root");
         Console.WriteLine("  wowmapconverter ml-harvest [options]                    Harvest ML dataset coverage and references");
             Console.WriteLine("  wowmapconverter ml-corpus --config <file> [options]     Run full export+harvest pipeline from a config file");
         Console.WriteLine("  wowmapconverter ml-decode [options]                     Decode ML dataset JSON to ADT");

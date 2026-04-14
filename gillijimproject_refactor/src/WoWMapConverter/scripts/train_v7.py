@@ -312,6 +312,69 @@ def resolve_dataset_roots(args: argparse.Namespace) -> List[Path]:
     )
 
 
+def normalize_dataset_map_root(value: str) -> str:
+    parts = [part.strip().lower() for part in str(value).replace("\\", "/").split("/") if part.strip()]
+    if not parts:
+        return ""
+    if len(parts) >= 2:
+        return f"{parts[-2]}/{parts[-1]}"
+    return parts[-1]
+
+
+def dataset_root_key(dataset_root: Path) -> str:
+    parts = [
+        str(part).strip().lower()
+        for part in dataset_root.parts
+        if str(part).strip() and str(part).lower() != str(dataset_root.anchor).lower()
+    ]
+    if not parts:
+        return ""
+    if len(parts) >= 2:
+        return f"{parts[-2]}/{parts[-1]}"
+    return parts[-1]
+
+
+def load_tile_allowlist_by_root(tile_manifest_path: Optional[str]) -> Dict[str, set[str]]:
+    if not tile_manifest_path:
+        return {}
+
+    manifest_path = Path(tile_manifest_path)
+    if not manifest_path.exists() or not manifest_path.is_file():
+        raise SystemExit(f"Tile manifest not found: {manifest_path}")
+
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception as exc:
+        raise SystemExit(f"Failed to read tile manifest '{manifest_path}': {exc}") from exc
+
+    selected_tiles = payload.get("selected_tiles") if isinstance(payload, dict) else None
+    if not isinstance(selected_tiles, list):
+        raise SystemExit(
+            "Tile manifest format not supported. Expected a JSON object with a 'selected_tiles' list "
+            "containing 'dataset_map_root' and 'tile_name'."
+        )
+
+    allowlist_by_root: Dict[str, set[str]] = {}
+    for entry in selected_tiles:
+        if not isinstance(entry, dict):
+            continue
+
+        tile_name = str(entry.get("tile_name", "")).strip()
+        root_hint = normalize_dataset_map_root(str(entry.get("dataset_map_root", "")))
+        if not tile_name or not root_hint:
+            continue
+
+        allowlist_by_root.setdefault(root_hint, set()).add(tile_name.lower())
+
+    if not allowlist_by_root:
+        raise SystemExit(
+            f"Tile manifest '{manifest_path}' resolved zero usable root/tile allowlist entries."
+        )
+
+    return allowlist_by_root
+
+
 class ResConvBlock(nn.Module):
     """Two-conv block with a residual skip when channel counts match."""
 
@@ -497,6 +560,7 @@ class WoWTileDatasetV7(Dataset):
         dataset_roots: Sequence[Path],
         include_maps: Sequence[str],
         exclude_maps: Sequence[str],
+        tile_allowlist_by_root: Optional[Dict[str, set[str]]] = None,
         input_size: int = INPUT_SIZE,
         augment: bool = True,
         limit: Optional[int] = None,
@@ -508,6 +572,11 @@ class WoWTileDatasetV7(Dataset):
         self.min_height_range = min_height_range
         self.include_maps = {value.lower() for value in include_maps if value}
         self.exclude_maps = {value.lower() for value in exclude_maps if value}
+        self.tile_allowlist_by_root = {
+            normalize_dataset_map_root(root_key): {tile.lower() for tile in tiles}
+            for root_key, tiles in (tile_allowlist_by_root or {}).items()
+            if normalize_dataset_map_root(root_key)
+        }
         self.samples: List[TileSample] = list(preloaded_samples) if preloaded_samples is not None else []
 
         self.to_tensor = transforms.ToTensor()
@@ -535,6 +604,12 @@ class WoWTileDatasetV7(Dataset):
             print(f"Warning: dataset folder missing in {dataset_root}")
             return [], 0
 
+        root_key = dataset_root_key(dataset_root)
+        allowed_tiles = self.tile_allowlist_by_root.get(root_key)
+        if self.tile_allowlist_by_root and allowed_tiles is None:
+            print(f"  {dataset_root.name}: skipped (dataset root not present in tile allowlist)")
+            return [], 0
+
         json_paths = sorted(dataset_dir.glob("*.json"))
         signature = self._build_index_signature(json_paths)
 
@@ -553,6 +628,7 @@ class WoWTileDatasetV7(Dataset):
             "json_read_error": int(cached_stats.get("json_read_error", 0)),
             "tile_name_invalid": int(cached_stats.get("tile_name_invalid", 0)),
             "map_filtered": 0,
+            "tile_filtered": 0,
             "height_range_too_low": 0,
             "missing_path_refs": 0,
             "missing_input_files": 0,
@@ -562,6 +638,10 @@ class WoWTileDatasetV7(Dataset):
             map_name = str(entry["map_name"])
             tile_x = int(entry["tile_x"])
             tile_y = int(entry["tile_y"])
+
+            if allowed_tiles is not None and tile_name.lower() not in allowed_tiles:
+                rejected["tile_filtered"] += 1
+                continue
 
             map_key = map_name.lower()
             if self.include_maps and map_key not in self.include_maps:
@@ -644,7 +724,8 @@ class WoWTileDatasetV7(Dataset):
         print(
             f"  {dataset_root.name}: {len(collected)} usable samples ({blank_skipped} blank skipped; "
             f"missing refs {rejected['missing_path_refs']}, missing files {rejected['missing_input_files']}, "
-            f"filtered {rejected['map_filtered']}, invalid tile ids {rejected['tile_name_invalid']})"
+            f"map-filtered {rejected['map_filtered']}, tile-filtered {rejected['tile_filtered']}, "
+            f"invalid tile ids {rejected['tile_name_invalid']})"
         )
         return collected, blank_skipped
 
@@ -1731,6 +1812,7 @@ def checkpoint_metadata_from_args(
         "blur_sigma": DEFAULT_BLUR_SIGMA,
         "profile": args.profile,
         "dataset_roots": [str(root) for root in dataset_roots],
+        "tile_manifest": args.tile_manifest,
         "include_maps": list(args.include_map),
         "exclude_maps": list(args.exclude_map),
         "input_channels": MODEL_INPUT_CHANNELS,
@@ -1819,6 +1901,7 @@ def train(args: argparse.Namespace) -> None:
         torch.cuda.manual_seed_all(args.seed)
 
     dataset_roots = resolve_dataset_roots(args)
+    tile_allowlist_by_root = load_tile_allowlist_by_root(args.tile_manifest)
     include_maps = list(args.include_map)
     if not include_maps and args.profile != "manual":
         include_maps = list(PROFILE_PRESETS[args.profile]["include_maps"])
@@ -1832,6 +1915,12 @@ def train(args: argparse.Namespace) -> None:
     print("Dataset roots:")
     for root in dataset_roots:
         print(f"  - {root}")
+    if tile_allowlist_by_root:
+        allowlist_tile_count = sum(len(tiles) for tiles in tile_allowlist_by_root.values())
+        print(
+            f"Tile allowlist active from {args.tile_manifest}: "
+            f"{allowlist_tile_count} tiles across {len(tile_allowlist_by_root)} dataset roots"
+        )
     if include_maps:
         print(f"Included maps: {', '.join(include_maps)}")
     if args.exclude_map:
@@ -1841,6 +1930,7 @@ def train(args: argparse.Namespace) -> None:
         dataset_roots=dataset_roots,
         include_maps=include_maps,
         exclude_maps=args.exclude_map,
+        tile_allowlist_by_root=tile_allowlist_by_root,
         input_size=INPUT_SIZE,
         augment=not args.no_augment,
         limit=args.limit,
@@ -1877,6 +1967,7 @@ def train(args: argparse.Namespace) -> None:
         dataset_roots=dataset_roots,
         include_maps=include_maps,
         exclude_maps=args.exclude_map,
+        tile_allowlist_by_root=tile_allowlist_by_root,
         input_size=INPUT_SIZE,
         augment=False,
         limit=args.limit,
@@ -2360,6 +2451,11 @@ def train(args: argparse.Namespace) -> None:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train the V7.5.1 multichannel terrain regressor with cleaned dataset export, terrain-only minimap cleanup, GAN, and curated data.")
     parser.add_argument("--dataset-root", action="append", default=[], help="Explicit dataset root. Repeat for multiple roots.")
+    parser.add_argument(
+        "--tile-manifest",
+        type=str,
+        help="Optional interesting-tile subset manifest. When set, training is restricted to selected root/tile rows.",
+    )
     parser.add_argument(
         "--search-root",
         action="append",
