@@ -58,4 +58,43 @@ public sealed class Md5TranslateResolverTests
                 Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public void TryLoad_DiskCandidateOverridesArchiveCandidate()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"wowviewer-md5translate-{Guid.NewGuid():N}");
+        try
+        {
+            string mapDirectory = Path.Combine(root, "World", "Maps", "Azeroth");
+            Directory.CreateDirectory(mapDirectory);
+            File.WriteAllText(
+                Path.Combine(mapDirectory, "md5translate.trs"),
+                "map00_00.blp\tdiskhash.blp\n",
+                Encoding.UTF8);
+
+            byte[] archiveContents = Encoding.UTF8.GetBytes("map00_00.blp\tarchivehash.blp\n");
+            Dictionary<string, byte[]> archive = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["World\\Maps\\Azeroth\\md5translate.trs"] = archiveContents,
+            };
+
+            bool loaded = Md5TranslateResolver.TryLoad(
+                searchPaths: [root],
+                archiveFileExists: path => archive.ContainsKey(path),
+                archiveReadFile: path => archive.TryGetValue(path, out byte[]? bytes) ? bytes : null,
+                index: out Md5TranslateIndex? index,
+                extraCandidates: ["World/Maps/Azeroth/md5translate.trs"]);
+
+            Assert.True(loaded);
+            Assert.NotNull(index);
+            Assert.Equal(
+                "textures/minimap/diskhash.blp",
+                index!.PlainToHash["textures/minimap/azeroth/map00_00.blp"]);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
 }

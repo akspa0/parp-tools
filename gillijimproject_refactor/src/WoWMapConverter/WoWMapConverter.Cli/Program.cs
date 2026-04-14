@@ -1660,6 +1660,7 @@ public static class Program
         string? outputDir = null;
         string? listfilePath = null;
         string? minimapRoot = null;
+        string? tileFilter = null;
         int limit = int.MaxValue;
         bool generateDepth = false;
         bool batchAll = false;
@@ -1686,6 +1687,9 @@ public static class Program
                     break;
                 case "--minimap-root":
                     if (i + 1 < args.Length) minimapRoot = args[++i];
+                    break;
+                case "--tile":
+                    if (i + 1 < args.Length) tileFilter = args[++i];
                     break;
                 case "--limit":
                 case "-n":
@@ -1718,6 +1722,7 @@ public static class Program
             Console.WriteLine("  --batch-all           Automatically export 8 standard maps (Azeroth, Kalimdor, etc)");
             Console.WriteLine("  --listfile, -l <csv>  Path to listfile for name resolution");
             Console.WriteLine("  --minimap-root <dir>  Optional explicit root for minimap lookup; keeps terrain input and minimap source separate");
+            Console.WriteLine("  --tile <x_y>          Export only one specific tile coordinate");
             Console.WriteLine("  --limit, -n <N>       Export only first N tiles");
             Console.WriteLine("  --depth, -d           Generate depth maps (requires DepthAnything3)");
             return 1;
@@ -1754,7 +1759,7 @@ public static class Program
                     
                     try 
                     {
-                        var res = await exporter.ExportMapAsync(clientPath, map, mapOutputDir, progress, limit, listfilePath, generateDepth, minimapRoot);
+                        var res = await exporter.ExportMapAsync(clientPath, map, mapOutputDir, progress, limit, listfilePath, generateDepth, minimapRoot, tileFilter);
                         Console.WriteLine($"[BATCH] {map} Complete: {res.TilesExported} tiles.");
                     }
                     catch (Exception ex)
@@ -1775,7 +1780,7 @@ public static class Program
                 if (!string.IsNullOrWhiteSpace(minimapRoot))
                     Console.WriteLine($"  Minimap root: {minimapRoot}");
                 
-                var result = await exporter.ExportMapAsync(clientPath, mapName!, outputDir, progress, limit, listfilePath, generateDepth, minimapRoot);
+                var result = await exporter.ExportMapAsync(clientPath, mapName!, outputDir, progress, limit, listfilePath, generateDepth, minimapRoot, tileFilter);
                 
                 Console.WriteLine();
                 Console.WriteLine($"Export complete:");

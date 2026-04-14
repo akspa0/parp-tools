@@ -2,6 +2,20 @@
 
 # wow-viewer Shared I/O Library Plan
 
+## Apr 13, 2026 - Shared md5translate loose-override precedence slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.IO.Files.Md5TranslateResolver` now loads loose disk `md5translate` candidates before archive-backed candidates, including map-specific extra candidates such as `World/Maps/<Map>/md5translate.trs`
+  - this keeps loose patched translation tables from being shadowed by older archive mappings once the shared `Md5TranslateIndex` is built
+  - the current `VlmDatasetExporter` consumer also now reuses a loose-first virtual asset helper for mapped minimaps and model-adjacent reads so the shared resolver change is not neutralized by archive-first consumer code
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter Md5TranslateResolverTests`
+  - `dotnet test i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core.Tests/WoWMapConverter.Core.Tests.csproj -c Debug --filter VlmDatasetExporterTests`
+- notes:
+  - this is override-precedence proof only; it does not by itself prove that every local client root contains useful loose patched assets or that a particular minimap gap is closed on real data
+  - WL fallback for missing Cataclysm liquids remains a separate follow-up slice and should stay blocked on evidence that the target client roots actually contain `WL*` payloads worth consuming
+
 ## Apr 03, 2026 - Shared per-build ADT UniqueId report slice
 
 - status: landed

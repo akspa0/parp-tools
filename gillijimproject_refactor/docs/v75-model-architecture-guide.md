@@ -12,6 +12,7 @@ This is the active architecture guide for the terrain regressor after the datase
 - Auxiliary schedule: best-triggered GAN bursts on top of a geometry-first default
 - Practical epoch cap: 100
 - Dataset contract bump: terrain-only minimap precedence
+- Early-development corpus anchors: `0.5.3`, `0.5.5`, and `0.6.0`
 
 ## What Changed From V7.4
 
@@ -34,14 +35,13 @@ New V7.5 precedence:
 
 That matters because minimaps often still carry non-mesh evidence Blizzard baked into the capture path:
 
-- `MCSH`-derived or similar shadow darkening
 - lighting direction or horizon tint from the original minimap renderer
 - object occlusion
 - PM4-obscured regions
 - alpha-layer blend signatures from texture overlays
 - liquid overwrite regions
 
-V7.5 treats those as contamination the exporter should compensate for before the RGB surface reaches the model.
+V7.5 treats those as contamination the exporter should compensate for before the RGB surface reaches the model. Exported `MCSH` shadow data remains useful as a diagnostic surface, but it is not treated as removable terrain contamination for `terrain_only_minimap`.
 
 ## Input Contract
 
@@ -66,7 +66,7 @@ Cleanup order:
 1. Start from raw `image`
 2. If `mccv_map` exists, generate `no_mccv_minimap`
 3. Build object and PM4 masks
-4. Stitch liquid, alpha, and shadow masks when present
+4. Stitch liquid and alpha masks when present
 5. Union the strongest masks into one removal surface
 6. Inpaint masked pixels into `terrain_only_minimap`
 
@@ -81,12 +81,10 @@ flowchart TD
     E --> G[Union PM4 mask]
     E --> H[Union liquid mask]
     E --> I[Union stitched alpha masks]
-    E --> J[Union stitched shadow map]
     F --> K[Combined terrain-only removal mask]
     G --> K
     H --> K
     I --> K
-    J --> K
     K --> L[Inpaint neighboring terrain color]
     L --> M[terrain_only_minimap]
 ```
@@ -133,7 +131,6 @@ V7.5 is not just “the same model but cleaned data.” The learned function cha
 
 Practical effect:
 
-- less baked-lighting pressure from shadowed minimap regions
 - less temptation to overfit alpha-blend patterns as terrain shape cues
 - less object or liquid imprint contamination in the RGB scaffold
 - stronger bias toward mesh-consistent terrain evidence flowing through RGB, while masks remain available as separate context channels
@@ -170,6 +167,24 @@ The active control loop is unchanged in broad structure:
 
 What changes in V7.5 is that the preview and training RGB input should now usually show the terrain-only cleaned surface when the dataset root has the new export.
 
+## Corpus Policy
+
+The active V7.5 corpus should keep the early development clients in scope instead of starting only at later release-era builds.
+
+Required early-build anchors:
+
+1. `0.5.3`
+2. `0.5.5`
+3. `0.6.0`
+
+Why these stay in the default planning set:
+
+- they preserve early terrain and world-layout concepts that later clients still express in cleaner forms
+- they expose minimap and loose-file irregularities that the exporter must handle instead of silently assuming fully packed later-client behavior
+- they widen the visual and structural supervision range before the corpus reaches Wrath and Cataclysm-era data
+
+This does not require equal weighting in every run. It does mean the default corpus policy should assume those builds remain first-class dataset sources unless a specific experiment deliberately excludes them.
+
 ## Proof Boundary
 
 What V7.5 proves by code alone:
@@ -180,7 +195,7 @@ What V7.5 proves by code alone:
 
 What V7.5 does not prove by code alone:
 
-- that every corpus root has enough alpha or shadow coverage to produce a useful terrain-only image
+- that every corpus root has enough alpha, object, PM4, or liquid coverage to produce a useful terrain-only image
 - that the new cleaned RGB surface improves convergence on every map family
 - that the new exporter path is fully validated on real data without rerunning corpus export and training
 

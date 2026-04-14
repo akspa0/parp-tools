@@ -1,5 +1,55 @@
 # Active Context
 
+## Apr 13, 2026 - Fresh-chat continuation should resume with the full multi-client dataset refresh and training run, not more narrow probes
+
+- explicit user directive for the next chat:
+	- run the dataset extract across all already-indicated fixed client roots and configured corpus maps
+	- harvest everything, re-audit the outputs, and then train the terrain model on the refreshed corpus
+	- do not spend the next continuation on more narrow one-tile archaeology unless a concrete exporter blocker stops the full run
+- practical next-run sequence:
+	- rerun the corpus export/harvest flow against the fixed configured roots under `datasets/`
+	- make sure the rerun picks up the latest exporter corrections, including:
+		- MCSH no longer participating in `terrain_only_minimap`
+		- MCCV inverse cleanup parity
+		- loose override precedence
+		- geometry-derived object masks
+	- rerun dataset signal audit on the refreshed roots
+	- launch the intended V7.5.1 training pass with the corrected schedule, then inspect the real training outputs instead of treating the older GAN-off rerun as closure
+- known unresolved blocker to keep visible, but not to let sprawl again:
+	- Cataclysm `MH2O` / liquid-loss behavior is still unresolved for the failing `LostIsles_23_24` path and likely sits in the current MH2O parse path rather than the later stitching stage
+
+## Apr 13, 2026 - `terrain_only_minimap` no longer treats stitched MCSH shadows as removable contamination
+
+- the over-mask bug was real in the active V7.5 exporter path:
+	- `VlmDatasetExporter` built the `terrain_only_minimap` removal surface from stitched alpha masks plus the stitched shadow map
+	- real exported 3.0.1.8303 corpus tiles such as `datasets/3_0_1_8303/EmeraldDream/dataset/EmeraldDream_24_25.json` showed the bad pattern clearly: `shadow_maps` present, `alpha_masks` empty, `no_liquid_minimap` null, `object_visibility_mask` null, `pm4_mask` null, yet `terrain_only_minimap` still existed
+- active behavior now:
+	- `terrain_only_minimap` only unions stitched alpha masks plus object, PM4, and liquid masks
+	- stitched `MCSH` shadow output is still exported for diagnostics, but it is no longer fed into the minimap inpaint-removal path
+- focused validation completed:
+	- `dotnet test i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core.Tests/WoWMapConverter.Core.Tests.csproj -c Debug --filter VlmDatasetExporterTests` passed (`12/12`)
+	- bounded real-data re-export on `H:\CLIENTS\3.X_Pre-Release_Windows_enUS_3.0.1.8303\World of Warcraft` for `EmeraldDream --tile 24_25` now keeps `shadow_maps`, leaves `alpha_masks` empty, leaves `no_liquid_minimap` / object / PM4 masks null, and writes `terrain_only_minimap: null` under `output/build-validation/emeralddream_tile_24_25_shadow_rule/dataset/EmeraldDream_24_25.json`
+- important boundary:
+	- this fixes the shadow-only false-positive cleanup path in code, focused tests, and bounded real-data export proof
+	- it does not change shadow export itself, only whether MCSH participates in terrain-only minimap masking
+
+## Apr 13, 2026 - Shared md5translate and exporter asset reads now prefer loose overrides before archive-backed copies
+
+- the loose-file patching gap was real in two different places:
+	- `WowViewer.Core.IO.Files.Md5TranslateResolver` loaded archive `md5translate` candidates before loose files, so a loose patched `.trs` or `.txt` could not override an archive-backed mapping once the index was built
+	- `VlmDatasetExporter` still had several archive-first virtual asset reads for mapped minimaps, model bounds, WMO split-group footprint reads, tileset BLP export, and LK tile scoring
+- active behavior now:
+	- `Md5TranslateResolver.TryLoad(...)` checks loose disk candidates before archive candidates for both shared defaults and map-specific extra candidates
+	- `VlmDatasetExporter` now routes minimap hash mappings, tileset texture export, model bounds reads, model-footprint reads, split WMO group reads, and LK tile-content scoring through a loose-first virtual asset helper before falling back to archive reads
+- focused validation completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter Md5TranslateResolverTests` passed (`3/3`)
+	- `dotnet test i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core.Tests/WoWMapConverter.Core.Tests.csproj -c Debug --filter VlmDatasetExporterTests` passed (`6/6`)
+	- bounded real-data baseline on the untouched `H:\CLIENTS\World of Warcraft Cata beta 11927` root exported `LostIsles_29_32` from archive-backed minimap path `textures/minimap/807183b22bf2ba9e1f0305a2d345c015.blp`, with logged center pixel `79,142,255,255`
+	- bounded overlay proof on `output/tmp/cata_loose_override_overlay_20260413` reused the real 11927 archives via a `Data` junction plus a loose `World/Maps/LostIsles/md5translate.trs` override mapping to `textures/minimap/override.png`; the exported `LostIsles_29_32.png` center pixel changed to `255,0,255,255`, proving the loose override path actually won end-to-end over the archive-backed baseline
+- important boundary:
+	- this is real-archive validation plus a temporary overlay proof, not evidence that the stock 11927 client already contains natural loose minimap overrides
+	- WL fallback for missing Cataclysm liquid masks is still deferred until there is concrete evidence that those client roots actually ship usable `WL*` payloads
+
 ## Apr 13, 2026 - The broader cleaned-input rerun completed on current dataset roots, but this particular run stayed GAN-off and should be treated as the non-adversarial cleaned-input baseline
 
 - the larger rerun requested after the exporter refresh completed under `output/ml-training/v7_5_1_cleaned_inputs_20260413_rerun`

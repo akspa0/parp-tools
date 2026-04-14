@@ -69,6 +69,9 @@ public static class Md5TranslateResolver
         {
             foreach (string candidate in extraCandidates)
             {
+                if (TryLoadDiskCandidate(searchPaths, candidate, translateIndex, inferDirectoryFromCandidate: true))
+                    foundAny = true;
+
                 if (TryLoadArchiveCandidate(candidate, archiveFileExists, archiveReadFile, translateIndex, inferDirectoryFromCandidate: true))
                     foundAny = true;
             }
@@ -76,22 +79,11 @@ public static class Md5TranslateResolver
 
         foreach (string candidate in Candidates)
         {
+            if (TryLoadDiskCandidate(searchPaths, candidate, translateIndex, inferDirectoryFromCandidate: false))
+                foundAny = true;
+
             if (TryLoadArchiveCandidate(candidate, archiveFileExists, archiveReadFile, translateIndex, inferDirectoryFromCandidate: false))
                 foundAny = true;
-        }
-
-        foreach (string basePath in searchPaths)
-        {
-            foreach (string candidate in Candidates)
-            {
-                string fullPath = Path.Combine(basePath, candidate);
-                if (!File.Exists(fullPath))
-                    continue;
-
-                using FileStream stream = File.OpenRead(fullPath);
-                ParseStream(stream, translateIndex);
-                foundAny = true;
-            }
         }
 
         if (!foundAny)
@@ -99,6 +91,31 @@ public static class Md5TranslateResolver
 
         index = translateIndex;
         return true;
+    }
+
+    private static bool TryLoadDiskCandidate(
+        IEnumerable<string> searchPaths,
+        string candidate,
+        Md5TranslateIndex index,
+        bool inferDirectoryFromCandidate)
+    {
+        string candidatePath = candidate.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        string? initialDirectory = inferDirectoryFromCandidate
+            ? TryInferInitialDirectory(candidate.Replace('/', '\\'), index)
+            : null;
+
+        foreach (string basePath in searchPaths)
+        {
+            string fullPath = Path.Combine(basePath, candidatePath);
+            if (!File.Exists(fullPath))
+                continue;
+
+            using FileStream stream = File.OpenRead(fullPath);
+            ParseStream(stream, index, initialDirectory);
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryLoadArchiveCandidate(

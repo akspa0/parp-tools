@@ -94,7 +94,8 @@ public class VlmDatasetExporter
         int limit = int.MaxValue,
         string? listfilePath = null,
         bool generateDepth = false,
-        string? minimapRoot = null)
+        string? minimapRoot = null,
+        string? tileFilter = null)
     {
         progress?.Report($"Starting VLM export for map: {mapName}");
 
@@ -330,6 +331,16 @@ public class VlmDatasetExporter
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(tileFilter))
+        {
+            if (!TryParseTileFilter(tileFilter, out int tileX, out int tileY))
+                throw new ArgumentException($"Invalid tile filter '{tileFilter}'. Expected format x_y.", nameof(tileFilter));
+
+            int requestedTileIndex = tileY * 64 + tileX;
+            existingTiles = existingTiles.Where(tileIndex => tileIndex == requestedTileIndex).ToList();
+            progress?.Report($"Tile filter active: {tileX}_{tileY} ({existingTiles.Count} matching tile(s))");
+        }
+
         // Load WDL if available
         WdlParser.WdlData? wdlData = null;
         try
@@ -429,7 +440,7 @@ public class VlmDatasetExporter
 
         // Parallel tile processing with configurable degree of parallelism
         var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
-        var tilesToProcess = SelectTilesForProcessing(existingTiles, limit, isAlphaFormat, mapDirectory, archiveCatalog);
+        var tilesToProcess = SelectTilesForProcessing(existingTiles, limit, isAlphaFormat, mapDirectory, archiveCatalog, searchPaths);
         
         await Parallel.ForEachAsync(tilesToProcess, parallelOptions, async (tileIndex, ct) =>
         {
@@ -546,7 +557,7 @@ public class VlmDatasetExporter
 
                     // Extract terrain data using LK/Modern ADT parsing
                     sample = await ExtractFromLkAdt(adtBytes, texBytes, objBytes, tileIndex, tileName, outputDir,
-                        shadowsDir, masksDir, allTextures, archiveCatalog, groundEffectLookup, wdlTile, wdtMphdFlags);
+                        shadowsDir, masksDir, allTextures, archiveCatalog, searchPaths, groundEffectLookup, wdlTile, wdtMphdFlags);
                 }
 
                 if (sample == null)
@@ -678,7 +689,7 @@ public class VlmDatasetExporter
                                     }
                                 }
 
-                                objectMaskBytes = BuildObjectVisibilityMask(sample.TerrainData, minimapForMask.Width, minimapForMask.Height, archiveCatalog);
+                                objectMaskBytes = BuildObjectVisibilityMask(sample.TerrainData, minimapForMask.Width, minimapForMask.Height, archiveCatalog, searchPaths);
                                 if (objectMaskBytes.Length > 0)
                                 {
                                     objectVisibilityMaskPath = $"images/{tileName}_object_visibility_mask.png";
@@ -736,7 +747,7 @@ public class VlmDatasetExporter
                         if (!string.IsNullOrWhiteSpace(sourceMinimapPath) && File.Exists(sourceMinimapPath))
                         {
                             byte[] terrainOnlyRemovalMask = await BuildCombinedTerrainOnlyMaskAsync(
-                                alphaPaths.Concat(shadowPath != null ? new[] { shadowPath } : Array.Empty<string>()),
+                                GetTerrainOnlyMaskPaths(alphaPaths, shadowPath),
                                 objectMaskBytes,
                                 pm4MaskBytes,
                                 liquidMaskBytes);
@@ -798,25 +809,11 @@ public class VlmDatasetExporter
                     
                     // Try common locations
                     // Try common locations
-                    var candidates = new List<string>();
-                    
-                    // Try MPQ first (most likely for tilesets)
-                    // Ensure texture has backslashes for consistency, though NativeMpq handles it
-                    candidates.Add($"MPQ:{texture}");
-                    
-                    // Also try looking on disk (Data folder)
-                    candidates.Add(Path.Combine(dataPath, texture));
-
-                    
-                    bool converted = false;
-                     foreach (var path in candidates)
-                    {
-                         if (ConvertBlpToPng(path, pngPath, archiveCatalog))
-                         {
-                             converted = true;
-                             break;
-                         }
-                    }
+                    string normalizedTexturePath = NormalizeVirtualAssetPath(texture);
+                    string? looseTexturePath = TryResolveLooseAssetPath(searchPaths, normalizedTexturePath);
+                    bool converted = looseTexturePath != null
+                        ? ConvertBlpToPng(looseTexturePath, pngPath, archiveCatalog)
+                        : ConvertBlpToPng($"MPQ:{normalizedTexturePath}", pngPath, archiveCatalog);
 
                     if (converted) textureCount++;
                 }
@@ -1386,6 +1383,7 @@ public class VlmDatasetExporter
         byte[] adtBytes, byte[]? texBytes, byte[]? objBytes, int tileIndex, string tileName,
         string outputDir, string shadowsDir, string masksDir,
         ConcurrentDictionary<string, byte> textureCollector, IArchiveReader archiveReader,
+        IReadOnlyList<string> searchPaths,
         GroundEffectLookup? groundEffectLookup = null, WdlParser.WdlTile? wdlTile = null,
         uint wdtMphdFlags = 0)
     {
@@ -1775,14 +1773,18 @@ public class VlmDatasetExporter
                 }
             }
 
-            if (liquids.Count == 0 && legacyMclqLiquids.Count > 0)
+            if (legacyMclqLiquids.Count > 0)
             {
-                liquids.AddRange(legacyMclqLiquids);
-                Console.WriteLine($"[DEBUG] Parsed {legacyMclqLiquids.Count} MCLQ liquid chunks for {tileName}");
+                int liquidCountBeforeLegacyMerge = liquids.Count;
+                liquids.AddRange(MergeLegacyLiquids(liquids, legacyMclqLiquids));
+
+                int mergedLegacyChunkCount = liquids.Count - liquidCountBeforeLegacyMerge;
+                if (mergedLegacyChunkCount > 0)
+                    Console.WriteLine($"[DEBUG] Added {mergedLegacyChunkCount} legacy MCLQ liquid chunks for {tileName}");
             }
 
-            AppendObjectPlacementsFromRaw(objectPlacements, mddfRawForPlacements, m2NamesForPlacements, "m2", archiveReader);
-            AppendObjectPlacementsFromRaw(objectPlacements, modfRawForPlacements, wmoNamesForPlacements, "wmo", archiveReader);
+            AppendObjectPlacementsFromRaw(objectPlacements, mddfRawForPlacements, m2NamesForPlacements, "m2", archiveReader, searchPaths);
+            AppendObjectPlacementsFromRaw(objectPlacements, modfRawForPlacements, wmoNamesForPlacements, "wmo", archiveReader, searchPaths);
             
             Console.WriteLine($"[DEBUG] Parsed {heights.Count} chunks with heights, range {heightMin:F2} to {heightMax:F2}");
             
@@ -1945,7 +1947,8 @@ public class VlmDatasetExporter
         byte[]? raw,
         IReadOnlyList<string> names,
         string category,
-        IArchiveReader archiveReader)
+        IArchiveReader archiveReader,
+        IReadOnlyList<string> searchPaths)
     {
         if (raw == null || raw.Length == 0)
             return;
@@ -1974,7 +1977,7 @@ public class VlmDatasetExporter
             float[]? boundsMax = null;
             if (!string.IsNullOrWhiteSpace(fullPath))
             {
-                var bounds = GetModelBounds(fullPath, archiveReader);
+                var bounds = GetModelBounds(fullPath, archiveReader, searchPaths);
                 if (bounds.HasValue)
                 {
                     boundsMin = bounds.Value.Min;
@@ -2064,7 +2067,7 @@ public class VlmDatasetExporter
         return tiles;
     }
 
-    private static List<int> SelectTilesForProcessing(List<int> existingTiles, int limit, bool isAlphaFormat, string mapDirectory, IArchiveReader archiveReader)
+    private static List<int> SelectTilesForProcessing(List<int> existingTiles, int limit, bool isAlphaFormat, string mapDirectory, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
     {
         if (existingTiles.Count == 0)
             return existingTiles;
@@ -2079,7 +2082,7 @@ public class VlmDatasetExporter
                 {
                     int x = tileIndex % 64;
                     int y = tileIndex / 64;
-                    int contentScore = ScoreLkTileContent(mapDirectory, x, y, archiveReader);
+                    int contentScore = ScoreLkTileContent(mapDirectory, x, y, archiveReader, searchPaths);
                     return (tileIndex, contentScore);
                 })
                 .ToList();
@@ -2103,7 +2106,7 @@ public class VlmDatasetExporter
         return OrderTilesByCenter(existingTiles).Take(limit).ToList();
     }
 
-    private static int ScoreLkTileContent(string mapDirectory, int x, int y, IArchiveReader archiveReader)
+    private static int ScoreLkTileContent(string mapDirectory, int x, int y, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
     {
         string adtBase = $"World/Maps/{mapDirectory}/{mapDirectory}_{x}_{y}";
 
@@ -2111,7 +2114,7 @@ public class VlmDatasetExporter
 
         try
         {
-            byte[]? rootAdt = archiveReader.ReadFile($"{adtBase}.adt");
+            byte[]? rootAdt = ReadVirtualAssetBytes(searchPaths, $"{adtBase}.adt", archiveReader);
             if (rootAdt is { Length: > 0 })
             {
                 if (ContainsTopLevelChunk(rootAdt, "MH2O"))
@@ -2130,7 +2133,7 @@ public class VlmDatasetExporter
 
         try
         {
-            byte[]? objAdt = archiveReader.ReadFile($"{adtBase}_obj0.adt");
+            byte[]? objAdt = ReadVirtualAssetBytes(searchPaths, $"{adtBase}_obj0.adt", archiveReader);
             if (objAdt is { Length: > 0 } && (ContainsTopLevelChunk(objAdt, "MDDF") || ContainsTopLevelChunk(objAdt, "MODF")))
                 score += 10;
         }
@@ -2197,6 +2200,23 @@ public class VlmDatasetExporter
         return new string(chars);
     }
 
+    internal static IEnumerable<VlmLiquidData> MergeLegacyLiquids(
+        IReadOnlyCollection<VlmLiquidData> mh2oLiquids,
+        IReadOnlyCollection<VlmLiquidData> legacyMclqLiquids)
+    {
+        if (legacyMclqLiquids.Count == 0)
+            return Array.Empty<VlmLiquidData>();
+
+        HashSet<int> mh2oChunkIndices = mh2oLiquids.Count > 0
+            ? mh2oLiquids.Select(liquid => liquid.ChunkIndex).ToHashSet()
+            : [];
+
+        if (mh2oChunkIndices.Count == 0)
+            return legacyMclqLiquids;
+
+        return legacyMclqLiquids.Where(liquid => !mh2oChunkIndices.Contains(liquid.ChunkIndex)).ToArray();
+    }
+
     private static List<int> OrderTilesByCenter(List<int> existingTiles)
     {
         if (existingTiles.Count == 0)
@@ -2232,6 +2252,24 @@ public class VlmDatasetExporter
             .ThenBy(tileIndex => tileIndex / 64)
             .ThenBy(tileIndex => tileIndex % 64)
             .ToList();
+    }
+
+    internal static bool TryParseTileFilter(string tileFilter, out int tileX, out int tileY)
+    {
+        tileX = 0;
+        tileY = 0;
+
+        if (string.IsNullOrWhiteSpace(tileFilter))
+            return false;
+
+        string[] parts = tileFilter.Split(['_', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+            return false;
+
+        return int.TryParse(parts[0], out tileX)
+            && int.TryParse(parts[1], out tileY)
+            && tileX >= 0 && tileX < 64
+            && tileY >= 0 && tileY < 64;
     }
 
     private string? FindMinimapTile(IEnumerable<string> searchPaths, IArchiveReader archiveReader, SharedMd5TranslateIndex? index, string mapName, int x, int y)
@@ -2347,11 +2385,19 @@ public class VlmDatasetExporter
                     Console.WriteLine($"  Found directly: YES -> '{hashed}'");
                 }
 
-                if (found)
+                if (found && !string.IsNullOrWhiteSpace(hashed))
                 {
                     // Found a mapping!
                     // The 'hashed' value is the filename in the MPQ.
-                    var mpqKey = hashed.Replace("/", "\\");
+                    if (TryResolveLooseAssetPath(searchPaths, hashed) is { } looseMappedPath)
+                    {
+                        if (debugTile)
+                            Console.WriteLine($"  Found loose override on disk: {looseMappedPath}");
+
+                        return looseMappedPath;
+                    }
+
+                    var mpqKey = NormalizeVirtualAssetPath(hashed);
                     
                     if (debugTile)
                     {
@@ -2362,17 +2408,6 @@ public class VlmDatasetExporter
                     {
                         Console.WriteLine($"[Match] Translated '{candidate}' -> '{hashed}' (Found in MPQ)");
                         return $"MPQ:{mpqKey}";
-                    }
-                    
-                    // Also check disk
-                    foreach (var bp in searchPaths)
-                    {
-                         var hp = Path.Combine(bp, hashed);
-                         if (File.Exists(hp))
-                         {
-                             if (debugTile) Console.WriteLine($"  Found on disk: {hp}");
-                             return hp;
-                         }
                     }
                     
                     if (debugTile)
@@ -2394,22 +2429,14 @@ public class VlmDatasetExporter
         // PRIORITY 2: Check standard candidates on Disk/MPQ (Loose or Plain)
         foreach (var candidate in candidates)
         {
-             foreach (var basePath in searchPaths)
+             if (TryResolveLooseAssetPath(searchPaths, candidate) is { } looseCandidatePath)
              {
-                 var fullPath = Path.Combine(basePath, candidate);
-                 if (File.Exists(fullPath)) 
-                 {
-                     Console.WriteLine($"Found minimap on disk: {fullPath}");
-                     return fullPath;
-                 }
-                 if (File.Exists(fullPath + ".MPQ"))
-                 {
-                     return fullPath + ".MPQ";
-                 }
+                 Console.WriteLine($"Found minimap on disk: {looseCandidatePath}");
+                 return looseCandidatePath;
              }
              
              // Check MPQ by plain name (fallback)
-             var mpqPlainKey = candidate.Replace("/", "\\");
+             var mpqPlainKey = NormalizeVirtualAssetPath(candidate);
              if (archiveReader.FileExists(mpqPlainKey))
              {
                  Console.WriteLine($"Found minimap in Archive (Plain): {mpqPlainKey}");
@@ -2737,7 +2764,7 @@ public class VlmDatasetExporter
         return $"images/{filename}";
     }
 
-    private byte[] RenderMccvImage(Dictionary<int, byte[]> mccvDict, int size)
+    internal static byte[] RenderMccvImage(Dictionary<int, byte[]> mccvDict, int size)
     {
         using var image = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(size, size);
 
@@ -2816,7 +2843,9 @@ public class VlmDatasetExporter
                 float lx = Math.Clamp(cx - cIx, 0f, 1f);
                 float ly = Math.Clamp(cy - cIy, 0f, 1f);
                 var (r, g, b, a) = SampleColor(cData, lx, ly);
-                
+
+                // Intentionally preserve the raw stored MCCV channel order in the PNG.
+                // The cleanup path decodes this back to renderer RGB before removing tint.
                 image[x, y] = new SixLabors.ImageSharp.PixelFormats.Rgba32(r, g, b, a);
             }
         }
@@ -2826,7 +2855,7 @@ public class VlmDatasetExporter
         return ms.ToArray();
     }
 
-    private byte[] BuildObjectVisibilityMask(VlmTerrainData terrainData, int width, int height, IArchiveReader archiveReader)
+    private byte[] BuildObjectVisibilityMask(VlmTerrainData terrainData, int width, int height, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
     {
         if (width <= 0 || height <= 0 || terrainData.Objects.Count == 0)
             return Array.Empty<byte>();
@@ -2843,7 +2872,7 @@ public class VlmDatasetExporter
 
             if (!projectionMode.UseNormalized && !string.IsNullOrWhiteSpace(obj.ModelPath))
             {
-                Vector2[][]? footprintPolygons = GetModelFootprintPolygons(obj.ModelPath, obj.Category, archiveReader);
+                Vector2[][]? footprintPolygons = GetModelFootprintPolygons(obj.ModelPath, obj.Category, archiveReader, searchPaths);
                 if (footprintPolygons != null)
                 {
                     foreach (Vector2[] localPolygon in footprintPolygons)
@@ -3410,7 +3439,7 @@ public class VlmDatasetExporter
         return int.TryParse(parts[^2], out tileX) && int.TryParse(parts[^1], out tileY);
     }
 
-    private Vector2[][]? GetModelFootprintPolygons(string modelPath, string category, IArchiveReader archiveReader)
+    private Vector2[][]? GetModelFootprintPolygons(string modelPath, string category, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
     {
         if (string.IsNullOrWhiteSpace(modelPath))
             return null;
@@ -3423,14 +3452,11 @@ public class VlmDatasetExporter
         {
             foreach (string candidatePath in EnumerateModelPathCandidates(modelPath))
             {
-                if (!archiveReader.FileExists(candidatePath))
-                    continue;
-
-                byte[]? data = archiveReader.ReadFile(candidatePath);
+                byte[]? data = ReadVirtualAssetBytes(searchPaths, candidatePath, archiveReader);
                 if (data is null || data.Length < 16)
                     continue;
 
-                Vector2[][]? polygons = TryReadFootprintPolygonsFromModelBytes(data, candidatePath, category, archiveReader);
+                Vector2[][]? polygons = TryReadFootprintPolygonsFromModelBytes(data, candidatePath, category, archiveReader, searchPaths);
                 if (polygons is null || polygons.Length == 0)
                     continue;
 
@@ -3448,7 +3474,7 @@ public class VlmDatasetExporter
         return null;
     }
 
-    private Vector2[][]? TryReadFootprintPolygonsFromModelBytes(byte[] data, string sourcePath, string category, IArchiveReader archiveReader)
+    private Vector2[][]? TryReadFootprintPolygonsFromModelBytes(byte[] data, string sourcePath, string category, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
     {
         string extension = Path.GetExtension(sourcePath);
         bool preferWmo = category.Contains("wmo", StringComparison.OrdinalIgnoreCase)
@@ -3457,7 +3483,7 @@ public class VlmDatasetExporter
 
         if (preferWmo)
         {
-            Vector2[][]? wmoPolygons = TryReadWmoFootprintPolygons(data, sourcePath, archiveReader);
+            Vector2[][]? wmoPolygons = TryReadWmoFootprintPolygons(data, sourcePath, archiveReader, searchPaths);
             if (wmoPolygons is { Length: > 0 })
                 return wmoPolygons;
         }
@@ -3483,7 +3509,7 @@ public class VlmDatasetExporter
                 return mdxPolygons;
         }
 
-        return preferWmo ? null : TryReadWmoFootprintPolygons(data, sourcePath, archiveReader);
+        return preferWmo ? null : TryReadWmoFootprintPolygons(data, sourcePath, archiveReader, searchPaths);
     }
 
     private static Vector2[][]? TryReadM2FootprintPolygons(byte[] data, string sourcePath)
@@ -3527,7 +3553,7 @@ public class VlmDatasetExporter
         }
     }
 
-    private Vector2[][]? TryReadWmoFootprintPolygons(byte[] data, string sourcePath, IArchiveReader archiveReader)
+    private Vector2[][]? TryReadWmoFootprintPolygons(byte[] data, string sourcePath, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
     {
         try
         {
@@ -3537,7 +3563,7 @@ public class VlmDatasetExporter
             using MemoryStream stream = new(data, writable: false);
             WmoSummary summary = WmoSummaryReader.Read(stream, sourcePath);
             if (summary.ReportedGroupCount > 0)
-                AppendSplitWmoFootprintPolygons(sourcePath, summary.ReportedGroupCount, archiveReader, polygons);
+                AppendSplitWmoFootprintPolygons(sourcePath, summary.ReportedGroupCount, archiveReader, searchPaths, polygons);
 
             return polygons.Count > 0 ? [.. polygons] : null;
         }
@@ -3563,7 +3589,7 @@ public class VlmDatasetExporter
         }
     }
 
-    private static void AppendSplitWmoFootprintPolygons(string sourcePath, int groupCount, IArchiveReader archiveReader, List<Vector2[]> polygons)
+    private static void AppendSplitWmoFootprintPolygons(string sourcePath, int groupCount, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths, List<Vector2[]> polygons)
     {
         string normalizedRootPath = NormalizeModelPath(sourcePath);
         string directory = Path.GetDirectoryName(normalizedRootPath) ?? string.Empty;
@@ -3574,10 +3600,7 @@ public class VlmDatasetExporter
             string groupPath = string.IsNullOrEmpty(directory)
                 ? $"{baseName}_{index:D3}.wmo"
                 : $"{directory}\\{baseName}_{index:D3}.wmo";
-            if (!archiveReader.FileExists(groupPath))
-                continue;
-
-            byte[]? groupBytes = archiveReader.ReadFile(groupPath);
+            byte[]? groupBytes = ReadVirtualAssetBytes(searchPaths, groupPath, archiveReader);
             if (groupBytes is null || groupBytes.Length < ChunkHeader.SizeInBytes)
                 continue;
 
@@ -3991,6 +4014,16 @@ public class VlmDatasetExporter
         }
     }
 
+    internal static IEnumerable<string> GetTerrainOnlyMaskPaths(IEnumerable<string> alphaPaths, string? shadowPath)
+    {
+        ArgumentNullException.ThrowIfNull(alphaPaths);
+        _ = shadowPath;
+
+        // MCSH darkening is part of the baked minimap in the general case, so terrain-only cleanup
+        // should only remove actual overlay masks and other non-terrain occluders.
+        return alphaPaths.Where(path => !string.IsNullOrWhiteSpace(path));
+    }
+
     private static async Task<byte[]> BuildCombinedTerrainOnlyMaskAsync(IEnumerable<string> maskPaths, params byte[][] inMemoryMasks)
     {
         var masks = new List<byte[]>();
@@ -4298,7 +4331,7 @@ public class VlmDatasetExporter
     /// <summary>
     /// Get model bounding box from MDX or WMO file.
     /// </summary>
-    private (float[] Min, float[] Max)? GetModelBounds(string modelPath, IArchiveReader archiveReader)
+    private (float[] Min, float[] Max)? GetModelBounds(string modelPath, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
     {
         if (string.IsNullOrWhiteSpace(modelPath))
             return null;
@@ -4311,7 +4344,7 @@ public class VlmDatasetExporter
         {
             foreach (string candidatePath in EnumerateModelPathCandidates(modelPath))
             {
-                byte[]? data = archiveReader.ReadFile(candidatePath);
+                byte[]? data = ReadVirtualAssetBytes(searchPaths, candidatePath, archiveReader);
                 if (data is null || data.Length < 16)
                     continue;
 
@@ -4426,6 +4459,46 @@ public class VlmDatasetExporter
         return !float.IsNaN(value) && !float.IsInfinity(value);
     }
 
+    internal static string? TryResolveLooseAssetPath(IEnumerable<string> searchPaths, string virtualPath)
+    {
+        ArgumentNullException.ThrowIfNull(searchPaths);
+        ArgumentException.ThrowIfNullOrWhiteSpace(virtualPath);
+
+        string normalizedPath = NormalizeVirtualAssetPath(virtualPath);
+        string relativePath = normalizedPath.Replace('\\', Path.DirectorySeparatorChar);
+
+        foreach (string basePath in searchPaths)
+        {
+            if (string.IsNullOrWhiteSpace(basePath))
+                continue;
+
+            string fullPath = Path.Combine(basePath, relativePath);
+            if (File.Exists(fullPath))
+                return fullPath;
+
+            string mpqPath = fullPath + ".MPQ";
+            if (File.Exists(mpqPath))
+                return mpqPath;
+        }
+
+        return null;
+    }
+
+    internal static byte[]? ReadVirtualAssetBytes(IEnumerable<string> searchPaths, string virtualPath, IArchiveReader archiveReader)
+    {
+        ArgumentNullException.ThrowIfNull(archiveReader);
+
+        if (TryResolveLooseAssetPath(searchPaths, virtualPath) is { } loosePath)
+        {
+            if (loosePath.EndsWith(".MPQ", StringComparison.OrdinalIgnoreCase))
+                return AlphaArchiveReader.ReadFromMpq(loosePath);
+
+            return File.ReadAllBytes(loosePath);
+        }
+
+        return archiveReader.ReadFile(NormalizeVirtualAssetPath(virtualPath));
+    }
+
     private static IEnumerable<string> EnumerateModelPathCandidates(string modelPath)
     {
         string normalized = NormalizeModelPath(modelPath);
@@ -4453,9 +4526,14 @@ public class VlmDatasetExporter
         return candidates;
     }
 
-    private static string NormalizeModelPath(string path)
+    private static string NormalizeVirtualAssetPath(string path)
     {
         return path.Replace('/', '\\').TrimStart('\\');
+    }
+
+    private static string NormalizeModelPath(string path)
+    {
+        return NormalizeVirtualAssetPath(path);
     }
     
     private int FindChunkOffset(byte[] data, string chunkId)
