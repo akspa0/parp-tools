@@ -20,6 +20,7 @@ Route the current request to the correct focused prompt in `.github/prompts/` so
 
 ## Companion Prompts
 
+- `wow-viewer-dataset-builder-plan.prompt.md`
 - `wow-viewer-editor-plan-set.prompt.md`
 - `wow-viewer-minimap-generation-plan-set.prompt.md`
 - `wow-viewer-pm4-library-implementation.prompt.md`
@@ -38,6 +39,7 @@ Route the current request to the correct focused prompt in `.github/prompts/` so
 - Use `wow-viewer-pm4-library-implementation.prompt.md` when the problem is the next `Core.PM4` extraction, such as `pm4 inspect`, `pm4 audit`, `pm4 linkage`, `pm4 mscn`, `pm4 unknowns`, or `pm4 export-json`, a PM4 regression coverage slice, or a narrow PM4 consumer or solver seam that should stay library-first.
 - If the PM4 ask is specifically about terminology reconciliation, decode-confidence, or whether current field names are documentation-backed versus local aliases, still route to `wow-viewer-pm4-library-implementation.prompt.md` and require a raw-doc-name versus local-alias breakdown.
 - Use `wow-viewer-shared-io-implementation.prompt.md` when the problem is the next real `Core` or `Core.IO` shared-format slice, such as ADT root or split-ADT (`_tex0.adt`, `_obj0.adt`, `_lod.adt`) work, WDT summary work, WMO or BLP or DBC or DB2 detection work, a file detector, a chunk reader, a non-PM4 inspect verb, a converter command, or a shared-format regression update.
+- Use `wow-viewer-dataset-builder-plan.prompt.md` when the problem is dataset corpus export cutover, terrain-supervision artifact ownership, manifest or harvest cutover, minimap cleanup or mask-stitch ownership, dataset explorer design, supervised training-tooling ownership, BYOD distribution policy, or planning a new `wow-viewer` dataset tool over shared services instead of extending `WoWMapConverter` as the design owner.
 - Use `wow-viewer-editor-plan-set.prompt.md` when the problem is turning `wow-viewer` into an editor, including PM4 `MPRL`-assisted terrain conform, saved object choices, moved-object persistence, map save ownership, or viewer-vs-editor workspace design.
 - Use `wow-viewer-minimap-generation-plan-set.prompt.md` when the problem is deterministic one-PNG-per-ADT capture, path-family-based minimap filtering, wow-viewer CLI minimap generation, resumable tile jobs, or minimap-driven `WorldScene` extraction sequencing.
 - Use `wow-viewer-world-runtime-plan-set.prompt.md` when the problem is splitting `WorldScene`, extracting world-runtime services, suppressing repeated asset-miss churn such as `.skin` lookup spam, or sequencing terrain/WMO/MDX/overlay runtime ownership into `wow-viewer`.

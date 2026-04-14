@@ -1,6 +1,6 @@
 ---
 name: wow-viewer-shared-io-library
-description: 'Use when implementing or reviewing a wow-viewer Core or Core.IO shared format slice such as ADT root, _tex0.adt, _obj0.adt, _lod.adt, WDT, WMO, BLP, DBC, DB2, file detection, chunk readers, map inspect, converter detect, or shared-format regression tests. Includes the current source-of-truth rule, validation commands, and update checklist.'
+description: 'Use when implementing or reviewing a wow-viewer Core or Core.IO shared format slice such as ADT root, _tex0.adt, _obj0.adt, _lod.adt, WDT, WMO, BLP, DBC, DB2, file detection, chunk readers, map inspect, converter detect, shared-format regression tests, or archive-backed client validation that should stage WoWArchive clients locally first.'
 argument-hint: 'Describe the shared I/O slice, file family, detector, reader, or tool consumer you want to change'
 user-invocable: true
 ---
@@ -15,14 +15,16 @@ user-invocable: true
 - You are adding or updating `WowViewer.Tool.Inspect` non-PM4 verbs such as `map inspect`.
 - You are adding or updating `WowViewer.Tool.Converter` non-PM4 commands that should sit on shared library seams instead of tool-local parsing.
 - You need to add or adjust regression coverage in `wow-viewer/tests/WowViewer.Core.Tests`.
+- You need to validate a shared-format slice against archive-backed client roots or decide how WoWArchive-mounted data should be staged before broader scans.
 
 ## Read First
 
 1. `gillijimproject_refactor/memory-bank/activeContext.md`
 2. `gillijimproject_refactor/memory-bank/progress.md`
-3. `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md`
-4. `wow-viewer/README.md`
-5. `.github/copilot-instructions.md`
+3. `gillijimproject_refactor/memory-bank/data-paths.md`
+4. `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md`
+5. `wow-viewer/README.md`
+6. `.github/copilot-instructions.md`
 
 ## Current Source Of Truth
 
@@ -44,10 +46,13 @@ user-invocable: true
 4. Keep evidence levels explicit.
    Say clearly whether the slice proves detection, top-level summary, or deeper payload parsing. Do not blur those together.
 
-5. Validate concretely.
+5. Stage archive-backed clients before wide real-data scans.
+   If the proof depends on WoWArchive-mounted clients or another slow mounted archive surface, use `.github/skills/wowarchive-client-staging/SKILL.md` and prefer a local staged working root before broad inspect or converter or export runs.
+
+6. Validate concretely.
    Add or update the smallest high-value test in `wow-viewer/tests/WowViewer.Core.Tests`. If the slice changes inspect or converter output, also run the relevant command on the fixed development dataset.
 
-6. Update shared continuity files.
+7. Update shared continuity files.
    Sync `wow-viewer/README.md`, the relevant memory-bank file, and `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md` when the active workflow, commands, or migration boundary changes.
 
 ## High-Value Files
@@ -76,3 +81,4 @@ user-invocable: true
 - Do not route non-PM4 shared-format work back into PM4 prompts or PM4 plans.
 - Do not flatten Alpha and standard terrain handling together when the format boundary is real.
 - Keep readable FourCC handling in memory and reverse only at I/O boundaries.
+- Do not treat a mounted WoWArchive path as the preferred working root for heavy validation when a staged local copy is practical.

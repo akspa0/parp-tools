@@ -15,6 +15,27 @@ public class VlmBatchExportConfig
     [JsonPropertyName("archive_root")]
     public string? ArchiveRoot { get; set; }
 
+    /// <summary>
+    /// Optional mounted WoWArchive root used for resolving archive-backed client paths.
+    /// </summary>
+    [JsonPropertyName("mount_root")]
+    public string? MountRoot { get; set; }
+
+    /// <summary>
+    /// Optional mount script used when MountRoot is not currently available.
+    /// </summary>
+    [JsonPropertyName("mount_script")]
+    public string? MountScript { get; set; }
+
+    /// <summary>
+    /// Optional staging root where archive-backed clients should be copied locally.
+    /// </summary>
+    [JsonPropertyName("staging_root")]
+    public string? StagingRoot { get; set; }
+
+    [JsonPropertyName("prune_staged_clients")]
+    public bool PruneStagedClients { get; set; } = false;
+
     /// <summary>Path where all dataset output lands when clients omit output_root.</summary>
     [JsonPropertyName("default_output_root")]
     public string? DefaultOutputRoot { get; set; }
@@ -28,14 +49,29 @@ public class VlmClientConfig
     [JsonPropertyName("client_path")]
     public string ClientPath { get; set; } = "";
 
+    [JsonPropertyName("local_client_path")]
+    public string? LocalClientPath { get; set; }
+
+    [JsonPropertyName("archive_client_path")]
+    public string? ArchiveClientPath { get; set; }
+
     [JsonPropertyName("minimap_root")]
     public string? MinimapRoot { get; set; }
+
+    [JsonPropertyName("local_minimap_root")]
+    public string? LocalMinimapRoot { get; set; }
+
+    [JsonPropertyName("archive_minimap_root")]
+    public string? ArchiveMinimapRoot { get; set; }
 
     [JsonPropertyName("version")]
     public string ClientVersion { get; set; } = "3.3.5"; // e.g. "0.5.3", "3.3.5", "4.x"
 
     [JsonPropertyName("maps")]
     public List<string> Maps { get; set; } = new();
+
+    [JsonPropertyName("all_maps")]
+    public bool AllMaps { get; set; } = false;
 
     [JsonPropertyName("output_root")]
     public string OutputRoot { get; set; } = "";

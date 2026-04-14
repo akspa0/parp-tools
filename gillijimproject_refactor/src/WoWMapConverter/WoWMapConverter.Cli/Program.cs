@@ -1,5 +1,6 @@
 using SixLabors.ImageSharp;
 using System.Text.Json;
+using System.Diagnostics;
 using SixLabors.ImageSharp.PixelFormats;
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.Formats.PM4;
@@ -215,154 +216,540 @@ public static class Program
             return 1;
         }
     }
-        private static async Task<int> RunMlCorpusAsync(string[] args)
+    private static async Task<int> RunMlCorpusAsync(string[] args)
+    {
+        string? configPath = null;
+        string? archiveRootOverride = null;
+        string? mountRootOverride = null;
+        string? mountScriptOverride = null;
+        string? stagingRootOverride = null;
+        string? outOverride = null;
+        bool dryRun = false;
+        bool harvestOnly = false;
+        bool pruneStagedClients = false;
+        bool forceRestage = false;
+
+        for (int i = 0; i < args.Length; i++)
         {
-            string? configPath = null;
-            string? archiveRootOverride = null;
-            string? outOverride = null;
-            bool dryRun = false;
-            bool harvestOnly = false;
-
-            for (int i = 0; i < args.Length; i++)
+            switch (args[i].ToLowerInvariant())
             {
-                switch (args[i].ToLowerInvariant())
-                {
-                    case "--config":
-                    case "-c":
-                        if (i + 1 < args.Length) configPath = args[++i];
-                        break;
-                    case "--archive-root":
-                    case "-a":
-                        if (i + 1 < args.Length) archiveRootOverride = args[++i];
-                        break;
-                    case "--out":
-                    case "-o":
-                        if (i + 1 < args.Length) outOverride = args[++i];
-                        break;
-                    case "--dry-run":
-                        dryRun = true;
-                        break;
-                    case "--harvest-only":
-                        harvestOnly = true;
-                        break;
-                }
+                case "--config":
+                case "-c":
+                    if (i + 1 < args.Length) configPath = args[++i];
+                    break;
+                case "--archive-root":
+                case "-a":
+                    if (i + 1 < args.Length) archiveRootOverride = args[++i];
+                    break;
+                case "--mount-root":
+                    if (i + 1 < args.Length) mountRootOverride = args[++i];
+                    break;
+                case "--mount-script":
+                    if (i + 1 < args.Length) mountScriptOverride = args[++i];
+                    break;
+                case "--staging-root":
+                    if (i + 1 < args.Length) stagingRootOverride = args[++i];
+                    break;
+                case "--out":
+                case "-o":
+                    if (i + 1 < args.Length) outOverride = args[++i];
+                    break;
+                case "--dry-run":
+                    dryRun = true;
+                    break;
+                case "--harvest-only":
+                    harvestOnly = true;
+                    break;
+                case "--prune-staged-clients":
+                    pruneStagedClients = true;
+                    break;
+                case "--force-restage":
+                    forceRestage = true;
+                    break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(configPath))
+        {
+            Console.WriteLine("ml-corpus — run the full ML dataset pipeline from a config file.");
+            Console.WriteLine();
+            Console.WriteLine("Usage: ml-corpus --config <corpus.json> [--archive-root <dir>] [--mount-root <dir>] [--staging-root <dir>] [--out <dir>] [--dry-run] [--harvest-only]");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --config, -c <path>          JSON config file (VlmBatchExportConfig format)");
+            Console.WriteLine("  --archive-root, -a <dir>     Override or set legacy archive_root for resolving relative local client paths");
+            Console.WriteLine("  --mount-root <dir>           Override or set mount_root for archive-backed client staging");
+            Console.WriteLine("  --mount-script <path>        Override or set mount_script for bringing WoWArchive online");
+            Console.WriteLine("  --staging-root <dir>         Override or set the local stage root for archive-backed clients");
+            Console.WriteLine("  --out, -o <dir>              Override default_output_root from config");
+            Console.WriteLine("  --dry-run                    Print what would run without executing");
+            Console.WriteLine("  --harvest-only               Skip export, only run ml-harvest on existing datasets");
+            Console.WriteLine("  --prune-staged-clients       Remove stale staged archive-backed client copies after the run");
+            Console.WriteLine("  --force-restage              Recopy staged archive-backed clients even when a matching stage exists");
+            Console.WriteLine();
+            Console.WriteLine("Config search order: <arg>, ./ml_corpus.json, <exe_dir>/ml_corpus.json");
+            return 1;
+        }
+
+        if (!File.Exists(configPath))
+        {
+            Console.Error.WriteLine($"Config not found: {configPath}");
+            return 1;
+        }
+
+        string resolvedConfigPath = Path.GetFullPath(configPath);
+        string configDirectory = Path.GetDirectoryName(resolvedConfigPath) ?? Directory.GetCurrentDirectory();
+
+        VlmBatchExportConfig config;
+        try
+        {
+            string json = await File.ReadAllTextAsync(resolvedConfigPath);
+            config = JsonSerializer.Deserialize<VlmBatchExportConfig>(json,
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower })
+                ?? throw new InvalidDataException("Config deserialized to null.");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to read config: {ex.Message}");
+            return 1;
+        }
+
+        string? archiveRoot = ResolveMlCorpusPath(archiveRootOverride ?? config.ArchiveRoot, null, configDirectory);
+        string? mountRoot = ResolveMlCorpusPath(mountRootOverride ?? config.MountRoot, null, configDirectory);
+        string? mountScript = ResolveMlCorpusPath(mountScriptOverride ?? config.MountScript, null, configDirectory);
+        string stagingRoot = ResolveMlCorpusPath(stagingRootOverride ?? config.StagingRoot, null, configDirectory)
+            ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "output", "tmp", "wowarchive-clients"));
+        string? defaultOutputRoot = ResolveMlCorpusPath(outOverride ?? config.DefaultOutputRoot, null, configDirectory);
+        bool shouldPruneStagedClients = pruneStagedClients || config.PruneStagedClients;
+        string? legacyClientBaseRoot = archiveRoot ?? mountRoot;
+        string? archiveClientBaseRoot = mountRoot ?? archiveRoot;
+
+        int totalJobs = 0;
+        int failedJobs = 0;
+        var exporter = new VlmDatasetExporter();
+        var harvester = new MkDatasetHarvester();
+        var progress = new Progress<string>(msg => Console.WriteLine($"  {msg}"));
+        var stagedLabelsToKeep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var client in config.Clients)
+        {
+            string clientFolderName = !string.IsNullOrWhiteSpace(client.Label)
+                ? client.Label
+                : client.ClientVersion.Replace('.', '_');
+
+            MlCorpusWorkingRootResolution clientRoot = ResolveMlCorpusWorkingRoot(
+                label: clientFolderName,
+                directPath: client.ClientPath,
+                directBaseRoot: legacyClientBaseRoot,
+                localPath: client.LocalClientPath,
+                archivePath: client.ArchiveClientPath,
+                archiveBaseRoot: archiveClientBaseRoot,
+                mountRoot: mountRoot,
+                mountScript: mountScript,
+                stagingRoot: stagingRoot,
+                forceRestage: forceRestage,
+                dryRun: dryRun,
+                configDirectory: configDirectory);
+
+            string clientPath = clientRoot.WorkingPath;
+            string discoveryClientPath = dryRun && clientRoot.Staged && !Directory.Exists(clientPath)
+                ? clientRoot.SourcePath
+                : clientPath;
+
+            MlCorpusWorkingRootResolution? minimapRootResolution = null;
+            string? minimapRoot = null;
+            if (!string.IsNullOrWhiteSpace(client.MinimapRoot)
+                || !string.IsNullOrWhiteSpace(client.LocalMinimapRoot)
+                || !string.IsNullOrWhiteSpace(client.ArchiveMinimapRoot))
+            {
+                minimapRootResolution = ResolveMlCorpusWorkingRoot(
+                    label: $"{clientFolderName}-minimap",
+                    directPath: client.MinimapRoot,
+                    directBaseRoot: legacyClientBaseRoot,
+                    localPath: client.LocalMinimapRoot,
+                    archivePath: client.ArchiveMinimapRoot,
+                    archiveBaseRoot: archiveClientBaseRoot,
+                    mountRoot: mountRoot,
+                    mountScript: mountScript,
+                    stagingRoot: stagingRoot,
+                    forceRestage: forceRestage,
+                    dryRun: dryRun,
+                    configDirectory: configDirectory);
+                minimapRoot = minimapRootResolution.WorkingPath;
             }
 
-            if (string.IsNullOrWhiteSpace(configPath))
-            {
-                Console.WriteLine("ml-corpus — run the full ML dataset pipeline from a config file.");
-                Console.WriteLine();
-                Console.WriteLine("Usage: ml-corpus --config <corpus.json> [--archive-root <dir>] [--out <dir>] [--dry-run] [--harvest-only]");
-                Console.WriteLine();
-                Console.WriteLine("Options:");
-                Console.WriteLine("  --config, -c <path>          JSON config file (VlmBatchExportConfig format)");
-                Console.WriteLine("  --archive-root, -a <dir>     Override or set archive_root for resolving relative client paths");
-                Console.WriteLine("  --out, -o <dir>              Override default_output_root from config");
-                Console.WriteLine("  --dry-run                    Print what would run without executing");
-                Console.WriteLine("  --harvest-only               Skip export, only run ml-harvest on existing datasets");
-                Console.WriteLine();
-                Console.WriteLine("Config search order: <arg>, ./ml_corpus.json, <exe_dir>/ml_corpus.json");
-                return 1;
-            }
+            if (clientRoot.Staged)
+                stagedLabelsToKeep.Add(clientFolderName);
 
-            if (!File.Exists(configPath))
-            {
-                Console.Error.WriteLine($"Config not found: {configPath}");
-                return 1;
-            }
+            if (minimapRootResolution is not null && minimapRootResolution.Staged)
+                stagedLabelsToKeep.Add($"{clientFolderName}-minimap");
 
-            VlmBatchExportConfig config;
-            try
-            {
-                var json = await File.ReadAllTextAsync(configPath);
-                config = System.Text.Json.JsonSerializer.Deserialize<VlmBatchExportConfig>(json,
-                    new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower })
-                    ?? throw new InvalidDataException("Config deserialized to null.");
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Failed to read config: {ex.Message}");
-                return 1;
-            }
-
-            string? archiveRoot = archiveRootOverride ?? config.ArchiveRoot;
-            string? defaultOutputRoot = outOverride ?? config.DefaultOutputRoot;
-
-            int totalJobs = 0;
-            int failedJobs = 0;
-            var exporter = new VlmDatasetExporter();
-            var harvester = new MkDatasetHarvester();
-            var progress = new Progress<string>(msg => Console.WriteLine($"  {msg}"));
-
-            foreach (var client in config.Clients)
-            {
-                // Resolve client path against archive root when the path is relative.
-                string clientPath = client.ClientPath;
-                if (!Path.IsPathRooted(clientPath) && !string.IsNullOrWhiteSpace(archiveRoot))
-                    clientPath = Path.GetFullPath(Path.Combine(archiveRoot, clientPath));
-
-                string? minimapRoot = client.MinimapRoot;
-                if (!string.IsNullOrWhiteSpace(minimapRoot) && !Path.IsPathRooted(minimapRoot) && !string.IsNullOrWhiteSpace(archiveRoot))
-                    minimapRoot = Path.GetFullPath(Path.Combine(archiveRoot, minimapRoot));
-
-                string clientFolderName = !string.IsNullOrWhiteSpace(client.Label)
-                    ? client.Label
-                    : client.ClientVersion.Replace('.', '_');
-
-                string clientOutputRoot = !string.IsNullOrWhiteSpace(client.OutputRoot) ? client.OutputRoot
-                    : !string.IsNullOrWhiteSpace(defaultOutputRoot) ? Path.Combine(defaultOutputRoot, clientFolderName)
+            string clientOutputRoot = !string.IsNullOrWhiteSpace(client.OutputRoot)
+                ? ResolveMlCorpusPath(client.OutputRoot, null, configDirectory)!
+                : !string.IsNullOrWhiteSpace(defaultOutputRoot)
+                    ? Path.Combine(defaultOutputRoot, clientFolderName)
                     : Path.Combine("datasets", clientFolderName);
 
-                foreach (var map in client.Maps)
+            List<string> mapsToProcess;
+            if (client.AllMaps)
+            {
+                mapsToProcess = DiscoverClientMapDirectories(discoveryClientPath, listfilePath: null);
+                if (mapsToProcess.Count == 0)
                 {
-                    totalJobs++;
-                    string mapOutput = Path.GetFullPath(Path.Combine(clientOutputRoot, map));
-
-                    Console.WriteLine();
-                    Console.WriteLine($"[{totalJobs}] {client.ClientVersion} / {map}");
-                    Console.WriteLine($"    client : {clientPath}");
-                    if (!string.IsNullOrWhiteSpace(minimapRoot))
-                        Console.WriteLine($"    minimap: {minimapRoot}");
-                    Console.WriteLine($"    output : {mapOutput}");
-
-                    if (dryRun) continue;
-
-                    try
+                    if (dryRun)
                     {
-                        if (!harvestOnly)
-                        {
-                            Console.WriteLine("    => ml-export");
-                            var exportResult = await exporter.ExportMapAsync(
-                                clientPath, map, mapOutput, progress, generateDepth: client.GenerateDepth, minimapRoot: minimapRoot);
-                            Console.WriteLine($"    exported {exportResult.TilesExported} tiles, skipped {exportResult.TilesSkipped}");
-                        }
-
-                        string datasetJsonDir = Path.Combine(mapOutput, "dataset");
-                        bool hasDatasetJson = Directory.Exists(datasetJsonDir)
-                            && Directory.EnumerateFiles(datasetJsonDir, "*.json", SearchOption.TopDirectoryOnly).Any();
-                        if (!hasDatasetJson)
-                        {
-                            Console.WriteLine("    => ml-harvest skipped (no tile JSON files found)");
-                            continue;
-                        }
-
-                        Console.WriteLine("    => ml-harvest");
-                        var harvestResult = await harvester.HarvestAsync(
-                            new MkDatasetHarvestOptions(DatasetRoot: mapOutput), progress);
-                        Console.WriteLine($"    harvested {harvestResult.TilesProcessed} tiles");
+                        Console.WriteLine($"[dry-run] No maps discovered for {clientFolderName} at {discoveryClientPath}");
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        Console.Error.WriteLine($"    FAILED: {ex.Message}");
+                        Console.Error.WriteLine($"FAILED: No maps discovered for {clientFolderName} at {discoveryClientPath}");
                         failedJobs++;
                     }
+
+                    continue;
                 }
+
+                Console.WriteLine($"Discovered {mapsToProcess.Count} maps for {clientFolderName}");
+            }
+            else
+            {
+                mapsToProcess = client.Maps;
             }
 
-            Console.WriteLine();
-            Console.WriteLine($"ml-corpus done. {totalJobs - failedJobs}/{totalJobs} jobs succeeded.");
-            return failedJobs == 0 ? 0 : 1;
+            foreach (string map in mapsToProcess)
+            {
+                totalJobs++;
+                string mapOutput = Path.GetFullPath(Path.Combine(clientOutputRoot, map));
+
+                Console.WriteLine();
+                Console.WriteLine($"[{totalJobs}] {client.ClientVersion} / {map}");
+                Console.WriteLine($"    client : {clientPath} [{clientRoot.SourceType}]");
+                if (clientRoot.Staged)
+                    Console.WriteLine($"    source : {clientRoot.SourcePath}");
+                if (!string.IsNullOrWhiteSpace(minimapRoot))
+                {
+                    string minimapMode = minimapRootResolution?.SourceType ?? "direct";
+                    Console.WriteLine($"    minimap: {minimapRoot} [{minimapMode}]");
+                }
+                Console.WriteLine($"    output : {mapOutput}");
+
+                if (dryRun)
+                    continue;
+
+                try
+                {
+                    if (!harvestOnly)
+                    {
+                        Console.WriteLine("    => ml-export");
+                        var exportResult = await exporter.ExportMapAsync(
+                            clientPath, map, mapOutput, progress, generateDepth: client.GenerateDepth, minimapRoot: minimapRoot);
+                        Console.WriteLine($"    exported {exportResult.TilesExported} tiles, skipped {exportResult.TilesSkipped}");
+                    }
+
+                    string datasetJsonDir = Path.Combine(mapOutput, "dataset");
+                    bool hasDatasetJson = Directory.Exists(datasetJsonDir)
+                        && Directory.EnumerateFiles(datasetJsonDir, "*.json", SearchOption.TopDirectoryOnly).Any();
+                    if (!hasDatasetJson)
+                    {
+                        Console.WriteLine("    => ml-harvest skipped (no tile JSON files found)");
+                        continue;
+                    }
+
+                    Console.WriteLine("    => ml-harvest");
+                    var harvestResult = await harvester.HarvestAsync(
+                        new MkDatasetHarvestOptions(DatasetRoot: mapOutput), progress);
+                    Console.WriteLine($"    harvested {harvestResult.TilesProcessed} tiles");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"    FAILED: {ex.Message}");
+                    failedJobs++;
+                }
+            }
         }
+
+        if (shouldPruneStagedClients)
+        {
+            List<string> removedStages = RemoveStaleMlCorpusStages(stagingRoot, stagedLabelsToKeep, dryRun);
+            if (removedStages.Count > 0)
+                Console.WriteLine($"Pruned {removedStages.Count} stale staged client(s).");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"ml-corpus done. {totalJobs - failedJobs}/{totalJobs} jobs succeeded.");
+        return failedJobs == 0 ? 0 : 1;
+    }
+
+    private const string MlCorpusStageMetadataFileName = ".wowarchive-stage.json";
+
+    private sealed record MlCorpusStageMetadata(string Label, string SourcePath, string SourceType, string UpdatedAtUtc);
+
+    private sealed record MlCorpusWorkingRootResolution(string WorkingPath, string SourcePath, string SourceType, bool Staged, string? StagePath);
+
+    private static string? ResolveMlCorpusPath(string? value, string? baseRoot, string configDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        if (Path.IsPathRooted(value))
+            return Path.GetFullPath(value);
+
+        if (!string.IsNullOrWhiteSpace(baseRoot))
+            return Path.GetFullPath(Path.Combine(baseRoot, value));
+
+        return Path.GetFullPath(Path.Combine(configDirectory, value));
+    }
+
+    private static bool IsPathWithinRoot(string? path, string? root)
+    {
+        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(root))
+            return false;
+
+        string fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (fullPath.Equals(fullRoot, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (fullPath.Length <= fullRoot.Length)
+            return false;
+
+        string prefix = fullRoot + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void EnsureMlCorpusArchiveMounted(string? mountRoot, string? mountScript, bool dryRun)
+    {
+        if (string.IsNullOrWhiteSpace(mountRoot) || Directory.Exists(mountRoot))
+            return;
+
+        if (string.IsNullOrWhiteSpace(mountScript))
+            throw new InvalidOperationException($"Archive mount root '{mountRoot}' is unavailable and no mount script was provided.");
+
+        if (!File.Exists(mountScript))
+            throw new FileNotFoundException($"Archive mount script not found: {mountScript}");
+
+        Console.WriteLine($"Mounting WoWArchive via {mountScript}");
+        if (dryRun)
+            return;
+
+        string workingDirectory = Path.GetDirectoryName(mountScript) ?? Directory.GetCurrentDirectory();
+        var processStartInfo = new ProcessStartInfo("cmd.exe")
+        {
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        processStartInfo.ArgumentList.Add("/c");
+        processStartInfo.ArgumentList.Add(mountScript);
+
+        using Process process = Process.Start(processStartInfo)
+            ?? throw new InvalidOperationException($"Failed to start mount script: {mountScript}");
+
+        string stdOut = process.StandardOutput.ReadToEnd();
+        string stdErr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        if (!string.IsNullOrWhiteSpace(stdOut))
+            Console.Write(stdOut);
+        if (!string.IsNullOrWhiteSpace(stdErr))
+            Console.Error.Write(stdErr);
+
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"Mount script failed with exit code {process.ExitCode}: {mountScript}");
+
+        if (!Directory.Exists(mountRoot))
+            throw new DirectoryNotFoundException($"Archive mount root still not available after mount script completed: {mountRoot}");
+    }
+
+    private static MlCorpusWorkingRootResolution ResolveMlCorpusWorkingRoot(
+        string label,
+        string? directPath,
+        string? directBaseRoot,
+        string? localPath,
+        string? archivePath,
+        string? archiveBaseRoot,
+        string? mountRoot,
+        string? mountScript,
+        string? stagingRoot,
+        bool forceRestage,
+        bool dryRun,
+        string configDirectory)
+    {
+        string? resolvedDirectPath = ResolveMlCorpusPath(directPath, directBaseRoot, configDirectory);
+        string? resolvedLocalPath = ResolveMlCorpusPath(localPath, null, configDirectory);
+        string? resolvedArchivePath = ResolveMlCorpusPath(archivePath, archiveBaseRoot, configDirectory);
+
+        if (!string.IsNullOrWhiteSpace(resolvedLocalPath) && Directory.Exists(resolvedLocalPath))
+            return new MlCorpusWorkingRootResolution(resolvedLocalPath, resolvedLocalPath, "local-fixed", false, null);
+
+        if (!string.IsNullOrWhiteSpace(resolvedArchivePath))
+            return StageMlCorpusArchiveRoot(label, resolvedArchivePath, mountRoot, mountScript, stagingRoot, forceRestage, dryRun);
+
+        if (!string.IsNullOrWhiteSpace(resolvedDirectPath) && IsPathWithinRoot(resolvedDirectPath, mountRoot))
+            return StageMlCorpusArchiveRoot(label, resolvedDirectPath, mountRoot, mountScript, stagingRoot, forceRestage, dryRun);
+
+        if (!string.IsNullOrWhiteSpace(resolvedDirectPath) && (dryRun || Directory.Exists(resolvedDirectPath)))
+            return new MlCorpusWorkingRootResolution(resolvedDirectPath, resolvedDirectPath, "direct", false, null);
+
+        var attemptedPaths = new[] { resolvedLocalPath, resolvedArchivePath, resolvedDirectPath }
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .ToArray();
+
+        throw new DirectoryNotFoundException(
+            attemptedPaths.Length > 0
+                ? $"Could not resolve a usable client root for '{label}'. Checked: {string.Join("; ", attemptedPaths)}"
+                : $"Could not resolve a usable client root for '{label}'. No client path values were provided.");
+    }
+
+    private static MlCorpusWorkingRootResolution StageMlCorpusArchiveRoot(
+        string label,
+        string sourcePath,
+        string? mountRoot,
+        string? mountScript,
+        string? stagingRoot,
+        bool forceRestage,
+        bool dryRun)
+    {
+        string resolvedSourcePath = Path.GetFullPath(sourcePath);
+        if (IsPathWithinRoot(resolvedSourcePath, mountRoot) && !Directory.Exists(resolvedSourcePath))
+            EnsureMlCorpusArchiveMounted(mountRoot, mountScript, dryRun);
+
+        if (!Directory.Exists(resolvedSourcePath) && !dryRun)
+            throw new DirectoryNotFoundException($"Archive-backed client root not found: {resolvedSourcePath}");
+
+        string resolvedStagingRoot = !string.IsNullOrWhiteSpace(stagingRoot)
+            ? Path.GetFullPath(stagingRoot)
+            : Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "output", "tmp", "wowarchive-clients"));
+
+        string stagePath = Path.Combine(resolvedStagingRoot, label);
+        MlCorpusStageMetadata? existingMetadata = Directory.Exists(stagePath)
+            ? TryReadMlCorpusStageMetadata(stagePath)
+            : null;
+
+        bool sourceMatchesMetadata = existingMetadata is not null
+            && Path.GetFullPath(existingMetadata.SourcePath).Equals(resolvedSourcePath, StringComparison.OrdinalIgnoreCase);
+
+        bool shouldRestage = forceRestage || !Directory.Exists(stagePath) || !sourceMatchesMetadata;
+        if (shouldRestage)
+        {
+            Console.WriteLine($"Staging archive-backed client: {resolvedSourcePath} -> {stagePath}");
+            if (!dryRun)
+            {
+                if (Directory.Exists(stagePath))
+                    DeleteMlCorpusStageDirectory(stagePath, resolvedStagingRoot);
+
+                CopyMlCorpusDirectory(resolvedSourcePath, stagePath);
+                WriteMlCorpusStageMetadata(stagePath, label, resolvedSourcePath, "archive-staged");
+            }
+        }
+        else
+        {
+            Console.WriteLine($"Reusing staged client: {stagePath}");
+        }
+
+        if (!dryRun && !shouldRestage)
+            WriteMlCorpusStageMetadata(stagePath, label, resolvedSourcePath, "archive-staged");
+
+        return new MlCorpusWorkingRootResolution(stagePath, resolvedSourcePath, "archive-staged", true, stagePath);
+    }
+
+    private static List<string> RemoveStaleMlCorpusStages(string stagingRoot, IEnumerable<string> keepLabels, bool dryRun)
+    {
+        string resolvedStagingRoot = Path.GetFullPath(stagingRoot);
+        if (!Directory.Exists(resolvedStagingRoot))
+            return new List<string>();
+
+        var keepSet = new HashSet<string>(keepLabels.Where(label => !string.IsNullOrWhiteSpace(label)), StringComparer.OrdinalIgnoreCase);
+        List<string> removed = new();
+
+        foreach (string stageDirectory in Directory.EnumerateDirectories(resolvedStagingRoot))
+        {
+            string label = Path.GetFileName(stageDirectory);
+            if (keepSet.Contains(label))
+                continue;
+
+            if (!File.Exists(GetMlCorpusStageMetadataPath(stageDirectory)))
+                continue;
+
+            Console.WriteLine($"Removing staged client: {stageDirectory}");
+            if (!dryRun)
+                DeleteMlCorpusStageDirectory(stageDirectory, resolvedStagingRoot);
+
+            removed.Add(stageDirectory);
+        }
+
+        return removed;
+    }
+
+    private static void CopyMlCorpusDirectory(string sourcePath, string destinationPath)
+    {
+        Directory.CreateDirectory(destinationPath);
+
+        foreach (string directory in Directory.EnumerateDirectories(sourcePath, "*", SearchOption.AllDirectories))
+        {
+            string relativePath = Path.GetRelativePath(sourcePath, directory);
+            Directory.CreateDirectory(Path.Combine(destinationPath, relativePath));
+        }
+
+        foreach (string file in Directory.EnumerateFiles(sourcePath, "*", SearchOption.AllDirectories))
+        {
+            string relativePath = Path.GetRelativePath(sourcePath, file);
+            string destinationFile = Path.Combine(destinationPath, relativePath);
+            string? destinationDirectory = Path.GetDirectoryName(destinationFile);
+            if (!string.IsNullOrWhiteSpace(destinationDirectory))
+                Directory.CreateDirectory(destinationDirectory);
+
+            File.Copy(file, destinationFile, overwrite: true);
+        }
+    }
+
+    private static void DeleteMlCorpusStageDirectory(string stagePath, string stagingRoot)
+    {
+        if (!IsPathWithinRoot(stagePath, stagingRoot))
+            throw new InvalidOperationException($"Refusing to remove stage path outside staging root: {stagePath}");
+
+        if (Directory.Exists(stagePath))
+            Directory.Delete(stagePath, recursive: true);
+    }
+
+    private static string GetMlCorpusStageMetadataPath(string stagePath)
+        => Path.Combine(stagePath, MlCorpusStageMetadataFileName);
+
+    private static MlCorpusStageMetadata? TryReadMlCorpusStageMetadata(string stagePath)
+    {
+        string metadataPath = GetMlCorpusStageMetadataPath(stagePath);
+        if (!File.Exists(metadataPath))
+            return null;
+
+        string rawJson = File.ReadAllText(metadataPath);
+        if (string.IsNullOrWhiteSpace(rawJson))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<MlCorpusStageMetadata>(rawJson);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void WriteMlCorpusStageMetadata(string stagePath, string label, string sourcePath, string sourceType)
+    {
+        Directory.CreateDirectory(stagePath);
+        MlCorpusStageMetadata metadata = new(
+            label,
+            Path.GetFullPath(sourcePath),
+            sourceType,
+            DateTime.UtcNow.ToString("o"));
+
+        string metadataPath = GetMlCorpusStageMetadataPath(stagePath);
+        File.WriteAllText(metadataPath, JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true }));
+    }
 
     private static async Task<int> RunConvertAsync(string[] args)
     {

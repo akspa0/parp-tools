@@ -41,13 +41,11 @@ Outputs:
 
 V7.5.1 changes over the earlier V7.5/V7.4/V7.3 line:
 - Replaced ConvTranspose2d upsampling with bilinear + Conv2d to eliminate
-  checkerboard artifacts that soften terrain detail.
-- Replaced sigmoid output activation with hard clamp — sigmoid squashes
-  gradients near 0/1 and kills sharp height extremes.
+    checkerboard artifacts that soften terrain detail.
+- Replaced sigmoid output activation with hard clamp so sharp height extremes
+    do not get squashed.
 - Added residual connections in conv blocks for better gradient flow.
-- Added lightweight PatchGAN discriminator that enforces local realism in
-  heightmap patches, the proven fix for L1 regression blur.
-- Same enlarged multi-version corpus and FFT frequency loss from V7.2.
+- Added lightweight PatchGAN discriminator for local terrain realism.
 - Preferred terrain-only cleaned minimap export when the dataset root provides it.
 """
 
@@ -65,175 +63,40 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset, Subset, WeightedRandomSampler
 from torchvision import transforms
 from tqdm import tqdm
 
-
-INPUT_SIZE = 512
-OUTPUT_SIZE = 512
-MODEL_INPUT_CHANNELS = 13
-MODEL_OUTPUT_CHANNELS = 2
+from v7_losses import LOSS_WEIGHTS, build_recovery_mask, combined_loss
+from v7_model import (
+    DEFAULT_GLOBAL_RESIDUAL_SCALE,
+    MODEL_INPUT_CHANNELS,
+    MODEL_OUTPUT_CHANNELS,
+    MODEL_VARIANT_LEGACY,
+    MODEL_VARIANT_WDL_TRESTLE_REFLECT,
+    MultiChannelUNetV7,
+    OUTPUT_SIZE,
+    PatchDiscriminator,
+    resolve_model_architecture_from_metadata,
+)
+from v7_object_masks import (
+    MAP_ORIGIN,
+    MASK_CONTEXT_MARGIN_TILES,
+    MASK_MAX_ABOVE_TERRAIN,
+    MASK_MIN_BELOW_TERRAIN,
+    MAX_FALLBACK_OBJECT_MASK_COVERAGE,
+    MAX_PRECISE_OBJECT_MASK_COVERAGE,
+    MAX_SEEDED_OBJECT_MASK_COVERAGE,
+    PRECISE_OBJECT_MASK_KEYS,
+    SEEDED_OBJECT_MASK_KEYS,
+    TILE_SIZE,
+    build_object_context_mask as build_filtered_object_context_mask,
+)
 
 HEIGHT_GLOBAL_MIN = -1000.0
 HEIGHT_GLOBAL_MAX = 3000.0
-HEIGHT_GLOBAL_RANGE = HEIGHT_GLOBAL_MAX - HEIGHT_GLOBAL_MIN
-
-DEFAULT_OUTPUT_DIR = Path("./vlm_output")
-DEFAULT_BATCH_SIZE = 4
-DEFAULT_LEARNING_RATE = 1e-4
-DEFAULT_NUM_EPOCHS = 100
-DEFAULT_EARLY_STOP_PATIENCE = 5
-DEFAULT_VAL_FRACTION = 0.10
-DEFAULT_SPATIAL_GROUP_SIZE = 4
-DEFAULT_SEED = 1337
-DEFAULT_BLUR_SIGMA = 0.0
-DEFAULT_PREVIEW_COUNT = 4
-DEFAULT_STATIC_PREVIEW_COUNT = 2
-DEFAULT_RANDOM_PREVIEW_COUNT = 2
-PREVIEW_MIN_VISUAL_VARIANCE = 0.008
-DEFAULT_MIN_HEIGHT_RANGE = 0.5
-TILE_SIZE = 533.33333
-MAP_ORIGIN = 32.0 * TILE_SIZE
-MASK_CONTEXT_MARGIN_TILES = 0.20
-MASK_MAX_ABOVE_TERRAIN = 8.0
-MASK_MIN_BELOW_TERRAIN = -3.0
-MAX_PRECISE_OBJECT_MASK_COVERAGE = 0.50
-MAX_SEEDED_OBJECT_MASK_COVERAGE = 0.25
-MAX_FALLBACK_OBJECT_MASK_COVERAGE = 0.20
-PRECISE_OBJECT_MASK_KEYS = (
-    "object_visibility_mask_cv2",
-    "pm4_mask",
-    "pm4_object_mask",
-    "collision_mask",
-)
-SEEDED_OBJECT_MASK_KEYS = (
-    "object_visibility_mask",
-)
-PINNED_VALIDATION_REFERENCE_TILES = (
-    ("development", "development_0_0"),
-)
-DATASET_INDEX_CACHE_VERSION = 4
-DATASET_INDEX_CACHE_FILE = ".v7_dataset_index_cache.json"
-BRUSH_MANIFEST_FILE = "brush_imprint_manifest.json"
-DEFAULT_TRAIN_WORKERS = 4
-DEFAULT_VAL_WORKERS = 2
-DEFAULT_PREFETCH_FACTOR = 2
-DEFAULT_LIVE_LOG_EVERY = 20
-DEFAULT_AMP_DTYPE = "auto"
-DEFAULT_ADVERSARIAL_SCALE = 0.20
-DEFAULT_START_GAN_EPOCH = 1
-DEFAULT_DISC_EVERY = 2
-DEFAULT_DISC_REAL_TARGET = 0.90
-DEFAULT_DISC_FAKE_TARGET = 0.10
-DEFAULT_DISC_LABEL_NOISE = 0.02
-DEFAULT_DISC_INPUT_NOISE_STD = 0.01
-DEFAULT_DISC_GRAD_CLIP = 1.0
-DEFAULT_GAN_CYCLE_LENGTH = 0
-DEFAULT_GAN_CYCLE_ON_EPOCHS = 0
-DEFAULT_GAN_COOLDOWN_AFTER_BEST = 0
-DEFAULT_GAN_BURST_AFTER_BEST = 0
-DEFAULT_EARLY_STOP_START_EPOCH = 1
-DEFAULT_LR_PLATEAU_PATIENCE = 8
-DEFAULT_LR_PLATEAU_FACTOR = 0.5
-DEFAULT_USE_WDL_GLOBAL_TRESTLE = True
-DEFAULT_GLOBAL_RESIDUAL_SCALE = 0.20
-MODEL_VARIANT_WDL_TRESTLE_REFLECT = "wdl-trestle-reflect-v1"
-MODEL_VARIANT_LEGACY = "legacy-absolute-v1"
-
-DEFAULT_DATASET_SEARCH_ROOTS = [
-    Path(r"i:\parp\parp-tools\gillijimproject_refactor\test_data\vlm-datasets"),
-    Path(r"i:\parp\parp-tools\output\ml-corpus"),
-    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets"),
-    Path(r"J:\wowDev\parp-tools\output\ml-corpus"),
-]
-
-PROFILE_PRESETS = {
-    "manual": {
-        "description": "Use only explicit --dataset-root values.",
-        "include_maps": [],
-        "discover": [],
-    },
-    "development-map": {
-        "description": "Prioritize 3.0.1 Northrend, add EmeraldDream cross-version signals, and optionally supplement with 4.0.0.11927 LostIsles.",
-        "include_maps": ["Northrend", "LostIsles", "EmeraldDream"],
-        "discover": [
-            {
-                "label": "prototype-emerald-dream",
-                "map_tokens": ["emeralddream", "emerald_dream", "emerald dream"],
-                "build_tokens": ["070", "0.7.0", "3694", "301", "3.0.1", "8303", "335", "3.3.5", "12340", "400", "4.0.0", "11927"],
-            },
-            {
-                "label": "wrath-northrend",
-                "map_tokens": ["northrend"],
-                "build_tokens": ["301", "3.0.1", "8303", "wrath", "wotlk"],
-            },
-            {
-                "label": "cata-lostisles",
-                "map_tokens": ["lostisles", "lost_isles"],
-                "build_tokens": ["400", "4.0.0", "11927", "cata", "cataclysm"],
-            },
-        ],
-    },
-}
-
-LOSS_WEIGHTS = {
-    "heightmap_global": 0.08,
-    "heightmap_local": 0.14,
-    "bounds": 0.04,
-    "ssim": 0.05,
-    "gradient": 0.10,
-    "edge": 0.12,
-    "frequency": 0.08,
-    "adversarial": 0.12,
-    "laplacian": 0.12,
-    "transition": 0.10,
-    "tile_edge": 0.12,
-}
-
-EDGE_FOCUS_WIDTH = 12
-TRANSITION_FOCUS_GAIN = 3.0
-
-DISCRIMINATOR_LR = 2e-4
-
-
-@dataclass(frozen=True)
-class TileSample:
-    dataset_root: Path
-    dataset_name: str
-    json_path: Path
-    tile_name: str
-    map_name: str
-    tile_x: int
-    tile_y: int
-    minimap_path: Path
-    normalmap_path: Path
-    heightmap_global_path: Path
-    heightmap_local_path: Path
-    liquid_mask_path: Optional[Path]
-    liquid_height_path: Optional[Path]
-    brush_mask_path: Optional[Path]
-    height_range: float
-    object_count: int
-    has_liquid: bool
-
-
-def normalize_token(value: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", value.lower())
-
-
-def parse_tile_identity(tile_name: str) -> Tuple[str, int, int]:
-    parts = tile_name.split("_")
-    if len(parts) < 3:
-        raise ValueError(f"Tile name '{tile_name}' is not in <map>_<x>_<y> form.")
-    map_name = "_".join(parts[:-2])
-    tile_x = int(parts[-2])
-    tile_y = int(parts[-1])
-    return map_name, tile_x, tile_y
-
 
 def tile_uv_candidates(world_a: float, world_b: float, tile_x: int, tile_y: int) -> List[Tuple[float, float]]:
     """Return plausible tile-local UV candidates for map-space and centered-world conventions."""
@@ -375,167 +238,6 @@ def load_tile_allowlist_by_root(tile_manifest_path: Optional[str]) -> Dict[str, 
     return allowlist_by_root
 
 
-class ResConvBlock(nn.Module):
-    """Two-conv block with a residual skip when channel counts match."""
-
-    def __init__(self, in_channels: int, out_channels: int):
-        super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, padding_mode="reflect")
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, padding_mode="reflect")
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.use_residual = in_channels == out_channels
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        identity = x
-        out = F.relu(self.bn1(self.conv1(x)), inplace=True)
-        out = self.bn2(self.conv2(out))
-        if self.use_residual:
-            out = out + identity
-        return F.relu(out, inplace=True)
-
-
-class BilinearUp(nn.Module):
-    """Bilinear upsample + 1x1 conv to replace ConvTranspose2d (no checkerboard)."""
-
-    def __init__(self, in_channels: int, out_channels: int):
-        super().__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False)
-        return self.conv(x)
-
-
-class MultiChannelUNetV7(nn.Module):
-    """5-level U-Net for 512x512 multichannel terrain inputs.
-
-    V7.5.1: residual conv blocks, bilinear upsampling, hard-clamp output.
-    """
-
-    def __init__(
-        self,
-        in_channels: int = MODEL_INPUT_CHANNELS,
-        out_channels: int = MODEL_OUTPUT_CHANNELS,
-        use_wdl_global_trestle: bool = False,
-        global_residual_scale: float = DEFAULT_GLOBAL_RESIDUAL_SCALE,
-    ):
-        super().__init__()
-        self.use_wdl_global_trestle = use_wdl_global_trestle
-        self.global_residual_scale = float(global_residual_scale)
-
-        self.enc1 = ResConvBlock(in_channels, 64)
-        self.enc2 = ResConvBlock(64, 128)
-        self.enc3 = ResConvBlock(128, 256)
-        self.enc4 = ResConvBlock(256, 512)
-        self.enc5 = ResConvBlock(512, 1024)
-        self.bottleneck = ResConvBlock(1024, 2048)
-
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.height_bounds_fc = nn.Sequential(
-            nn.Linear(2048, 512),
-            nn.ReLU(inplace=True),
-            nn.Linear(512, 4),
-        )
-
-        self.up5 = BilinearUp(2048, 1024)
-        self.dec5 = ResConvBlock(2048, 1024)
-        self.up4 = BilinearUp(1024, 512)
-        self.dec4 = ResConvBlock(1024, 512)
-        self.up3 = BilinearUp(512, 256)
-        self.dec3 = ResConvBlock(512, 256)
-        self.up2 = BilinearUp(256, 128)
-        self.dec2 = ResConvBlock(256, 128)
-        self.up1 = BilinearUp(128, 64)
-        self.dec1 = ResConvBlock(128, 64)
-
-        self.out_conv = nn.Conv2d(64, out_channels, kernel_size=1)
-        self.pool = nn.MaxPool2d(2)
-
-    def forward(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        enc1 = self.enc1(inputs)
-        enc2 = self.enc2(self.pool(enc1))
-        enc3 = self.enc3(self.pool(enc2))
-        enc4 = self.enc4(self.pool(enc3))
-        enc5 = self.enc5(self.pool(enc4))
-
-        bottleneck = self.bottleneck(self.pool(enc5))
-
-        pooled = self.global_pool(bottleneck).view(bottleneck.size(0), -1)
-        bounds = self.height_bounds_fc(pooled)
-
-        dec5 = self.up5(bottleneck)
-        dec5 = torch.cat([dec5, enc5], dim=1)
-        dec5 = self.dec5(dec5)
-
-        dec4 = self.up4(dec5)
-        dec4 = torch.cat([dec4, enc4], dim=1)
-        dec4 = self.dec4(dec4)
-
-        dec3 = self.up3(dec4)
-        dec3 = torch.cat([dec3, enc3], dim=1)
-        dec3 = self.dec3(dec3)
-
-        dec2 = self.up2(dec3)
-        dec2 = torch.cat([dec2, enc2], dim=1)
-        dec2 = self.dec2(dec2)
-
-        dec1 = self.up1(dec2)
-        dec1 = torch.cat([dec1, enc1], dim=1)
-        dec1 = self.dec1(dec1)
-
-        # Hard clamp instead of sigmoid — preserves gradients at extremes
-        raw_outputs = self.out_conv(dec1)
-        global_output = raw_outputs[:, 0:1]
-        if self.use_wdl_global_trestle and inputs.shape[1] > 6:
-            wdl_base = inputs[:, 6:7]
-            global_delta = torch.tanh(global_output) * self.global_residual_scale
-            global_output = torch.clamp(wdl_base + global_delta, 0.0, 1.0)
-        else:
-            global_output = torch.clamp(global_output, 0.0, 1.0)
-
-        local_output = torch.clamp(raw_outputs[:, 1:2], 0.0, 1.0)
-        outputs = torch.cat([global_output, local_output], dim=1)
-        if outputs.shape[-2:] != (OUTPUT_SIZE, OUTPUT_SIZE):
-            outputs = F.interpolate(outputs, size=(OUTPUT_SIZE, OUTPUT_SIZE), mode="bilinear", align_corners=False)
-
-        return outputs, bounds
-
-
-class PatchDiscriminator(nn.Module):
-    """Lightweight 70x70 PatchGAN discriminator.
-
-    Takes the 2-channel heightmap (global + local) and classifies each
-    overlapping 70x70 patch as real or generated.  Adds ~2M params and
-    ~10-15 % training overhead.
-    """
-
-    def __init__(self, in_channels: int = MODEL_OUTPUT_CHANNELS):
-        super().__init__()
-        self.model = nn.Sequential(
-            # 512 -> 256
-            nn.Conv2d(in_channels, 64, kernel_size=4, stride=2, padding=1, padding_mode="reflect"),
-            nn.LeakyReLU(0.2, inplace=True),
-            # 256 -> 128
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, padding_mode="reflect"),
-            nn.InstanceNorm2d(128),
-            nn.LeakyReLU(0.2, inplace=True),
-            # 128 -> 64
-            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1, padding_mode="reflect"),
-            nn.InstanceNorm2d(256),
-            nn.LeakyReLU(0.2, inplace=True),
-            # 64 -> 63 (stride=1)
-            nn.Conv2d(256, 512, kernel_size=4, stride=1, padding=1, padding_mode="reflect"),
-            nn.InstanceNorm2d(512),
-            nn.LeakyReLU(0.2, inplace=True),
-            # 63 -> 62 patch map
-            nn.Conv2d(512, 1, kernel_size=4, stride=1, padding=1, padding_mode="reflect"),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x)
-
-
 def load_heightmap_16bit(path: Path, target_size: int = OUTPUT_SIZE) -> torch.Tensor:
     image = Image.open(path)
     if image.mode == "I;16":
@@ -565,11 +267,27 @@ class WoWTileDatasetV7(Dataset):
         augment: bool = True,
         limit: Optional[int] = None,
         min_height_range: float = DEFAULT_MIN_HEIGHT_RANGE,
+        skip_liquid_obscured_tiles: bool = DEFAULT_SKIP_LIQUID_OBSCURED_TILES,
+        skip_malformed_emeralddream_minimaps: bool = DEFAULT_SKIP_MALFORMED_EMERALDDREAM_MINIMAPS,
+        max_liquid_obscured_coverage: float = DEFAULT_MAX_LIQUID_OBSCURED_COVERAGE,
+        max_liquid_obscured_combined_variance: float = DEFAULT_MAX_LIQUID_OBSCURED_COMBINED_VARIANCE,
+        max_liquid_obscured_combined_gradient: float = DEFAULT_MAX_LIQUID_OBSCURED_COMBINED_GRADIENT,
+        emeralddream_malformed_variance: float = DEFAULT_EMERALDDREAM_MALFORMED_VARIANCE,
+        emeralddream_malformed_gradient: float = DEFAULT_EMERALDDREAM_MALFORMED_GRADIENT,
+        emeralddream_malformed_extreme_fraction: float = DEFAULT_EMERALDDREAM_MALFORMED_EXTREME_FRACTION,
         preloaded_samples: Optional[Sequence[TileSample]] = None,
     ) -> None:
         self.input_size = input_size
         self.augment = augment
         self.min_height_range = min_height_range
+        self.skip_liquid_obscured_tiles = skip_liquid_obscured_tiles
+        self.skip_malformed_emeralddream_minimaps = skip_malformed_emeralddream_minimaps
+        self.max_liquid_obscured_coverage = max_liquid_obscured_coverage
+        self.max_liquid_obscured_combined_variance = max_liquid_obscured_combined_variance
+        self.max_liquid_obscured_combined_gradient = max_liquid_obscured_combined_gradient
+        self.emeralddream_malformed_variance = emeralddream_malformed_variance
+        self.emeralddream_malformed_gradient = emeralddream_malformed_gradient
+        self.emeralddream_malformed_extreme_fraction = emeralddream_malformed_extreme_fraction
         self.include_maps = {value.lower() for value in include_maps if value}
         self.exclude_maps = {value.lower() for value in exclude_maps if value}
         self.tile_allowlist_by_root = {
@@ -584,6 +302,10 @@ class WoWTileDatasetV7(Dataset):
         self.blur = transforms.GaussianBlur(kernel_size=3, sigma=DEFAULT_BLUR_SIGMA) if DEFAULT_BLUR_SIGMA > 0 else None
         self.color_jitter = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)
         self._brush_manifest_cache: Dict[Path, Optional[Dict[str, Any]]] = {}
+        self._image_signal_cache: Dict[Path, Dict[str, float]] = {}
+        self._liquid_coverage_cache: Dict[Path, float] = {}
+        self.rejection_summary: List[Dict[str, object]] = []
+        self.rejected_tiles: List[Dict[str, object]] = []
 
         if preloaded_samples is not None:
             print(f"Reusing preloaded V7 sample index ({len(self.samples)} samples)")
@@ -592,23 +314,32 @@ class WoWTileDatasetV7(Dataset):
         blank_skipped = 0
         print("Loading V7 dataset roots...")
         for dataset_root in dataset_roots:
-            samples, skipped = self._collect_root_samples(dataset_root, limit)
+            samples, skipped, rejected, rejected_entries = self._collect_root_samples(dataset_root, limit)
             self.samples.extend(samples)
             blank_skipped += skipped
+            self.rejection_summary.append(
+                {
+                    "dataset_root": str(dataset_root),
+                    "usable_samples": len(samples),
+                    "blank_skipped": skipped,
+                    **rejected,
+                }
+            )
+            self.rejected_tiles.extend(rejected_entries)
 
         print(f"Loaded {len(self.samples)} valid samples (V7.5.1 strict mode, {blank_skipped} blank tiles skipped)")
 
-    def _collect_root_samples(self, dataset_root: Path, limit: Optional[int]) -> Tuple[List[TileSample], int]:
+    def _collect_root_samples(self, dataset_root: Path, limit: Optional[int]) -> Tuple[List[TileSample], int, Dict[str, int], List[Dict[str, object]]]:
         dataset_dir = dataset_root / "dataset"
         if not dataset_dir.exists():
             print(f"Warning: dataset folder missing in {dataset_root}")
-            return [], 0
+            return [], 0, {}, []
 
         root_key = dataset_root_key(dataset_root)
         allowed_tiles = self.tile_allowlist_by_root.get(root_key)
         if self.tile_allowlist_by_root and allowed_tiles is None:
             print(f"  {dataset_root.name}: skipped (dataset root not present in tile allowlist)")
-            return [], 0
+            return [], 0, {}, []
 
         json_paths = sorted(dataset_dir.glob("*.json"))
         signature = self._build_index_signature(json_paths)
@@ -623,6 +354,7 @@ class WoWTileDatasetV7(Dataset):
             print(f"  {dataset_root.name}: index cache rebuilt ({len(entries)} entries)")
 
         collected: List[TileSample] = []
+        rejected_entries: List[Dict[str, object]] = []
         blank_skipped = 0
         rejected = {
             "json_read_error": int(cached_stats.get("json_read_error", 0)),
@@ -632,6 +364,8 @@ class WoWTileDatasetV7(Dataset):
             "height_range_too_low": 0,
             "missing_path_refs": 0,
             "missing_input_files": 0,
+            "liquid_obscured": 0,
+            "malformed_minimap": 0,
         }
         for entry in entries:
             tile_name = str(entry["tile_name"])
@@ -689,6 +423,69 @@ class WoWTileDatasetV7(Dataset):
             liquid_mask_path = dataset_root / str(liquid_mask_rel) if liquid_mask_rel else None
             liquid_height_path = dataset_root / str(liquid_height_rel) if liquid_height_rel else None
             brush_mask_path = self._resolve_brush_mask_path(dataset_root, tile_name)
+            brush_patch_candidates, brush_groups_written = self._lookup_brush_tile_stats(dataset_root, tile_name)
+
+            minimap_metrics = self._image_signal_cache.get(minimap_path)
+            if minimap_metrics is None:
+                minimap_metrics = _image_signal_metrics(minimap_path)
+                self._image_signal_cache[minimap_path] = minimap_metrics
+
+            normal_metrics = self._image_signal_cache.get(normalmap_path)
+            if normal_metrics is None:
+                normal_metrics = _image_signal_metrics(normalmap_path)
+                self._image_signal_cache[normalmap_path] = normal_metrics
+
+            liquid_coverage = 0.0
+            if liquid_mask_path and liquid_mask_path.exists():
+                if liquid_mask_path not in self._liquid_coverage_cache:
+                    self._liquid_coverage_cache[liquid_mask_path] = _liquid_coverage(liquid_mask_path)
+                liquid_coverage = self._liquid_coverage_cache[liquid_mask_path]
+
+            if self.skip_liquid_obscured_tiles and is_liquid_obscured_tile(
+                minimap_metrics,
+                normal_metrics,
+                liquid_coverage,
+                max_liquid_coverage=self.max_liquid_obscured_coverage,
+                max_combined_variance=self.max_liquid_obscured_combined_variance,
+                max_combined_gradient=self.max_liquid_obscured_combined_gradient,
+            ):
+                rejected["liquid_obscured"] += 1
+                rejected_entries.append(
+                    {
+                        "dataset_root": str(dataset_root),
+                        "tile_name": tile_name,
+                        "map_name": map_name,
+                        "reason": "liquid_obscured",
+                        "liquid_coverage": liquid_coverage,
+                        "minimap_variance": float(minimap_metrics.get("variance", 0.0)),
+                        "minimap_gradient": float(minimap_metrics.get("gradient", 0.0)),
+                        "normal_variance": float(normal_metrics.get("variance", 0.0)),
+                        "normal_gradient": float(normal_metrics.get("gradient", 0.0)),
+                    }
+                )
+                continue
+
+            if self.skip_malformed_emeralddream_minimaps and is_malformed_emeralddream_minimap(
+                map_name,
+                minimap_metrics,
+                variance_threshold=self.emeralddream_malformed_variance,
+                gradient_threshold=self.emeralddream_malformed_gradient,
+                extreme_fraction_threshold=self.emeralddream_malformed_extreme_fraction,
+            ):
+                rejected["malformed_minimap"] += 1
+                rejected_entries.append(
+                    {
+                        "dataset_root": str(dataset_root),
+                        "tile_name": tile_name,
+                        "map_name": map_name,
+                        "reason": "malformed_minimap",
+                        "liquid_coverage": liquid_coverage,
+                        "minimap_variance": float(minimap_metrics.get("variance", 0.0)),
+                        "minimap_gradient": float(minimap_metrics.get("gradient", 0.0)),
+                        "minimap_extreme_fraction": float(minimap_metrics.get("extreme_fraction", 0.0)),
+                    }
+                )
+                continue
 
             tile_object_count = int(entry.get("object_count", 0))
             tile_has_liquid = bool(liquid_mask_path and liquid_mask_path.exists())
@@ -712,9 +509,12 @@ class WoWTileDatasetV7(Dataset):
                     liquid_mask_path=liquid_mask_path,
                     liquid_height_path=liquid_height_path,
                     brush_mask_path=brush_mask_path,
+                    brush_patch_candidates=brush_patch_candidates,
+                    brush_groups_written=brush_groups_written,
                     height_range=height_max - height_min,
                     object_count=tile_object_count,
                     has_liquid=tile_has_liquid,
+                    liquid_coverage=liquid_coverage,
                 )
             )
 
@@ -724,10 +524,11 @@ class WoWTileDatasetV7(Dataset):
         print(
             f"  {dataset_root.name}: {len(collected)} usable samples ({blank_skipped} blank skipped; "
             f"missing refs {rejected['missing_path_refs']}, missing files {rejected['missing_input_files']}, "
+            f"liquid-obscured {rejected['liquid_obscured']}, malformed minimap {rejected['malformed_minimap']}, "
             f"map-filtered {rejected['map_filtered']}, tile-filtered {rejected['tile_filtered']}, "
             f"invalid tile ids {rejected['tile_name_invalid']})"
         )
-        return collected, blank_skipped
+        return collected, blank_skipped, rejected, rejected_entries
 
     def _build_index_signature(self, json_paths: Sequence[Path]) -> Dict[str, int]:
         latest_mtime_ns = 0
@@ -825,92 +626,18 @@ class WoWTileDatasetV7(Dataset):
         self._brush_manifest_cache[dataset_root] = manifest
         return manifest
 
-    def _resolve_brush_mask_path(self, dataset_root: Path, tile_name: str) -> Optional[Path]:
+    def _lookup_brush_tile_stats(self, dataset_root: Path, tile_name: str) -> Tuple[int, int]:
         manifest = self._load_brush_manifest(dataset_root)
         if not manifest:
-            return None
+            return 0, 0
 
         for tile in manifest.get("tiles", []):
             if str(tile.get("tile_name", "")) != tile_name:
                 continue
 
-            rel = tile.get("brush_mask_path")
-            if not rel:
-                return None
+            return int(tile.get("patch_candidates", 0) or 0), int(tile.get("groups_written", 0) or 0)
 
-            candidate = dataset_root / "brush_imprints" / str(rel)
-            return candidate if candidate.exists() else None
-
-        return None
-
-    def _build_index_entries(self, json_paths: Sequence[Path]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
-        entries: List[Dict[str, Any]] = []
-        stats = {"json_read_error": 0, "tile_name_invalid": 0}
-
-        for json_path in json_paths:
-            try:
-                with open(json_path, "r", encoding="utf-8") as handle:
-                    payload = json.load(handle)
-            except Exception:
-                stats["json_read_error"] += 1
-                continue
-
-            terrain = payload.get("terrain_data", {})
-            tile_name = terrain.get("adt_tile") or json_path.stem
-
-            try:
-                map_name, tile_x, tile_y = parse_tile_identity(str(tile_name))
-            except ValueError:
-                stats["tile_name_invalid"] += 1
-                continue
-
-            heightmap_global_rel = terrain.get("heightmap_global") or terrain.get("heightmap")
-            heightmap_local_rel = terrain.get("heightmap_local") or terrain.get("heightmap")
-            normalmap_rel = terrain.get("normalmap")
-            objects = terrain.get("objects")
-
-            entries.append(
-                {
-                    "json_name": json_path.name,
-                    "tile_name": str(tile_name),
-                    "map_name": map_name,
-                    "tile_x": int(tile_x),
-                    "tile_y": int(tile_y),
-                    "height_min": float(terrain.get("height_min", 0.0)),
-                    "height_max": float(terrain.get("height_max", 0.0)),
-                    "image": payload.get("image"),
-                    "terrain_only_minimap": terrain.get("terrain_only_minimap"),
-                    "no_object_minimap": terrain.get("no_object_minimap"),
-                    "no_mccv_minimap": terrain.get("no_mccv_minimap"),
-                    "normalmap": normalmap_rel,
-                    "heightmap_global": heightmap_global_rel,
-                    "heightmap_local": heightmap_local_rel,
-                    "liquid_mask": terrain.get("liquid_mask"),
-                    "liquid_height": terrain.get("liquid_height"),
-                    "object_count": len(objects) if isinstance(objects, list) else 0,
-                }
-            )
-
-        return entries, stats
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def _render_wdl(self, wdl_data: Optional[Dict[str, object]], global_min: float, global_max: float) -> torch.Tensor:
-        if not wdl_data:
-            return torch.full((1, self.input_size, self.input_size), 0.5)
-
-        outer = np.asarray(wdl_data.get("outer_17", []), dtype=np.float32)
-        if len(outer) != 289:
-            return torch.full((1, self.input_size, self.input_size), 0.5)
-
-        grid = outer.reshape(17, 17)
-        global_range = max(global_max - global_min, 1e-6)
-        grid = np.clip((grid - global_min) / global_range, 0.0, 1.0)
-
-        image = Image.fromarray((grid * 255).astype(np.uint8), mode="L")
-        image = image.resize((self.input_size, self.input_size), Image.BILINEAR)
-        return self.to_tensor(image)
+        return 0, 0
 
     def _load_optional_binary_mask(self, dataset_root: Path, terrain: Dict[str, object], keys: Sequence[str]) -> torch.Tensor:
         for key in keys:
@@ -925,29 +652,19 @@ class WoWTileDatasetV7(Dataset):
 
         return torch.zeros((1, self.input_size, self.input_size), dtype=torch.float32)
 
-    def _build_object_context_mask(
-        self,
-        sample: TileSample,
-        terrain: Dict[str, object],
-    ) -> torch.Tensor:
-        precise_mask = self._load_optional_binary_mask(sample.dataset_root, terrain, keys=PRECISE_OBJECT_MASK_KEYS)
-        if self._is_object_mask_usable(precise_mask, MAX_PRECISE_OBJECT_MASK_COVERAGE):
-            return precise_mask
-
-        seeded_mask = self._load_optional_binary_mask(sample.dataset_root, terrain, keys=SEEDED_OBJECT_MASK_KEYS)
-        if self._is_object_mask_usable(seeded_mask, MAX_SEEDED_OBJECT_MASK_COVERAGE):
-            return seeded_mask
-
-        fallback_mask = self._build_object_mask(
-            terrain.get("objects"),
-            sample.tile_x,
-            sample.tile_y,
-            terrain.get("wdl_heights"),
+    def _build_object_context_mask(self, sample: TileSample, terrain: Dict[str, object]) -> torch.Tensor:
+        return build_filtered_object_context_mask(
+            dataset_root=sample.dataset_root,
+            terrain=terrain,
+            tile_x=sample.tile_x,
+            tile_y=sample.tile_y,
+            output_size=self.input_size,
+            precise_keys=PRECISE_OBJECT_MASK_KEYS,
+            seeded_keys=SEEDED_OBJECT_MASK_KEYS,
+            max_precise_coverage=MAX_PRECISE_OBJECT_MASK_COVERAGE,
+            max_seeded_coverage=MAX_SEEDED_OBJECT_MASK_COVERAGE,
+            max_fallback_coverage=MAX_FALLBACK_OBJECT_MASK_COVERAGE,
         )
-        if self._is_object_mask_usable(fallback_mask, MAX_FALLBACK_OBJECT_MASK_COVERAGE):
-            return fallback_mask
-
-        return torch.zeros((1, self.input_size, self.input_size), dtype=torch.float32)
 
     @staticmethod
     def _is_object_mask_usable(mask: torch.Tensor, max_coverage: float) -> bool:
@@ -975,14 +692,14 @@ class WoWTileDatasetV7(Dataset):
             y = float(np.clip(sample_y, 0.0, 16.0))
             x0 = int(np.floor(x))
             y0 = int(np.floor(y))
-            x1 = min(16, x0 + 1)
-            y1 = min(16, y0 + 1)
+            x1 = min(x0 + 1, 16)
+            y1 = min(y0 + 1, 16)
             tx = x - x0
             ty = y - y0
 
             v00 = float(grid[y0, x0])
-            v01 = float(grid[y1, x0])
             v10 = float(grid[y0, x1])
+            v01 = float(grid[y1, x0])
             v11 = float(grid[y1, x1])
             return (
                 v00 * (1.0 - tx) * (1.0 - ty)
@@ -1032,7 +749,6 @@ class WoWTileDatasetV7(Dataset):
 
             candidate_uvs: List[Tuple[float, float]] = []
             if abs(pos_x) < 2 and abs(pos_y) < 2:
-                # Legacy fallback for normalized tile-local coordinates.
                 candidate_uvs.append(((pos_y + 1.0) * 0.5, (pos_x + 1.0) * 0.5))
 
             candidate_uvs.extend(tile_uv_candidates(pos_x, pos_z, tile_x, tile_y))
@@ -1161,10 +877,9 @@ class WoWTileDatasetV7(Dataset):
             brush_mask = (brush_tensor > 0.1).float()
 
         object_mask = self._build_object_context_mask(sample, terrain)
-        # NOTE: object_mask is passed as ch11 input context only.
-        # We do NOT blank minimap/normal map here because this channel is still context,
-        # not a hard cutout. Prefer precise exported PM4/CV2 silhouettes when available,
-        # then exported seed masks, and only fall back to coarse WMO box projection.
+        recovery_mask = build_recovery_mask(object_mask=object_mask, liquid_mask=liquid_mask, brush_mask=brush_mask)
+        minimap_tensor = minimap_tensor * (1.0 - recovery_mask * MASKED_RGB_ATTENUATION)
+        normalmap_tensor = normalmap_tensor * (1.0 - recovery_mask * MASKED_NORMAL_ATTENUATION)
 
         input_tensor = torch.cat(
             [
@@ -1296,6 +1011,27 @@ def weighted_l1_loss(predicted: torch.Tensor, target: torch.Tensor, weights: tor
     return weighted_error.sum() / torch.clamp(weights.sum(), min=1e-6)
 
 
+def derive_recovery_mask_from_inputs(inputs: torch.Tensor) -> torch.Tensor:
+    liquid_mask = inputs[:, 9:10] if inputs.shape[1] > 9 else torch.zeros_like(inputs[:, 0:1])
+    object_mask = inputs[:, 11:12] if inputs.shape[1] > 11 else torch.zeros_like(inputs[:, 0:1])
+    brush_mask = inputs[:, 12:13] if inputs.shape[1] > 12 else torch.zeros_like(inputs[:, 0:1])
+
+    recovery_mask = torch.maximum(object_mask, liquid_mask)
+    recovery_mask = torch.maximum(recovery_mask, brush_mask * 0.5)
+    if bool(torch.any(recovery_mask > 0)):
+        recovery_mask = F.max_pool2d(recovery_mask, kernel_size=5, stride=1, padding=2)
+    return torch.clamp(recovery_mask, 0.0, 1.0)
+
+
+def recovery_focus_loss(predicted: torch.Tensor, target: torch.Tensor, recovery_mask: torch.Tensor) -> torch.Tensor:
+    if not bool(torch.any(recovery_mask > 0)):
+        return torch.zeros((), dtype=predicted.dtype, device=predicted.device)
+
+    recovery_mask = recovery_mask.expand(predicted.shape[0], 2, predicted.shape[2], predicted.shape[3])
+    weights = 1.0 + RECOVERY_FOCUS_GAIN * recovery_mask
+    return weighted_l1_loss(predicted[:, :2], target[:, :2], weights)
+
+
 def transition_focus_loss(predicted: torch.Tensor, target: torch.Tensor, gain: float = TRANSITION_FOCUS_GAIN) -> torch.Tensor:
     sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=torch.float32, device=target.device).view(1, 1, 3, 3)
     sobel_y = sobel_x.transpose(2, 3)
@@ -1332,6 +1068,7 @@ def combined_loss(
     predicted_bounds: torch.Tensor,
     target_heightmap: torch.Tensor,
     target_bounds: torch.Tensor,
+    input_context: Optional[torch.Tensor] = None,
     adv_loss: Optional[torch.Tensor] = None,
     adversarial_scale: float = 1.0,
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
@@ -1357,6 +1094,10 @@ def combined_loss(
     laplacian_component = laplacian_loss(predicted_heightmap, target_heightmap)
     transition_component = transition_focus_loss(predicted_heightmap, target_heightmap)
     tile_edge_component = tile_edge_loss(predicted_heightmap, target_heightmap)
+    recovery_component = torch.zeros((), dtype=predicted_heightmap.dtype, device=predicted_heightmap.device)
+    if input_context is not None:
+        recovery_mask = derive_recovery_mask_from_inputs(input_context.float())
+        recovery_component = recovery_focus_loss(predicted_heightmap, target_heightmap, recovery_mask)
 
     total = (
         LOSS_WEIGHTS["heightmap_global"] * global_loss
@@ -1369,6 +1110,7 @@ def combined_loss(
         + LOSS_WEIGHTS["laplacian"] * laplacian_component
         + LOSS_WEIGHTS["transition"] * transition_component
         + LOSS_WEIGHTS["tile_edge"] * tile_edge_component
+        + LOSS_WEIGHTS["recovery"] * recovery_component
     )
 
     adv_value = 0.0
@@ -1388,6 +1130,7 @@ def combined_loss(
         "laplacian": float(laplacian_component.item()),
         "transition": float(transition_component.item()),
         "tile_edge": float(tile_edge_component.item()),
+        "recovery": float(recovery_component.item()),
         "adversarial": adv_value,
     }
 
@@ -1503,7 +1246,11 @@ def curate_training_set(
     tier_high = [idx for idx, _ in scored[:high_cutoff]]
     tier_mid = [idx for idx, _ in scored[high_cutoff:mid_cutoff]]
     tier_low = [idx for idx, _ in scored[mid_cutoff:]]
-    water_tiles = {idx for idx in train_indices if samples[idx].has_liquid}
+    water_tiles = {
+        idx
+        for idx in train_indices
+        if samples[idx].has_liquid and samples[idx].liquid_coverage <= DEFAULT_MAX_CURATED_LIQUID_COVERAGE
+    }
 
     rng.shuffle(tier_mid)
     rng.shuffle(tier_low)
@@ -1522,6 +1269,37 @@ def curate_training_set(
     return curated
 
 
+def build_weighted_train_sampler(
+    samples: Sequence[TileSample],
+    train_indices: Sequence[int],
+    brush_sample_bonus: float,
+    brush_patch_scale: float,
+) -> Optional[WeightedRandomSampler]:
+    if len(train_indices) < 2:
+        return None
+
+    weights: List[float] = []
+    brush_rich_count = 0
+    for idx in train_indices:
+        sample = samples[idx]
+        weight = 1.0
+        if sample.brush_groups_written > 0 or sample.brush_patch_candidates > 0 or sample.brush_mask_path is not None:
+            brush_rich_count += 1
+            patch_signal = np.log1p(max(sample.brush_patch_candidates, 0))
+            group_signal = np.log1p(max(sample.brush_groups_written, 0))
+            weight *= max(1.0, brush_sample_bonus + brush_patch_scale * (0.65 * patch_signal + 0.35 * group_signal))
+        weights.append(float(weight))
+
+    if brush_rich_count == 0:
+        return None
+
+    return WeightedRandomSampler(
+        weights=torch.tensor(weights, dtype=torch.double),
+        num_samples=len(train_indices),
+        replacement=True,
+    )
+
+
 def _image_luma_variance(path: Path, size: int = 64) -> float:
     try:
         with Image.open(path).convert("L") as image:
@@ -1530,6 +1308,62 @@ def _image_luma_variance(path: Path, size: int = 64) -> float:
         return float(np.var(pixels))
     except Exception:
         return 0.0
+
+
+def _image_signal_metrics(path: Path, size: int = 64) -> Dict[str, float]:
+    try:
+        with Image.open(path).convert("L") as image:
+            reduced = image.resize((size, size), Image.BILINEAR)
+            pixels = np.asarray(reduced, dtype=np.float32) / 255.0
+
+        gradient = float(np.abs(np.diff(pixels, axis=1)).mean() + np.abs(np.diff(pixels, axis=0)).mean())
+        extreme_fraction = float(((pixels < 0.02) | (pixels > 0.98)).mean())
+        return {
+            "variance": float(np.var(pixels)),
+            "gradient": gradient,
+            "extreme_fraction": extreme_fraction,
+        }
+    except Exception:
+        return {
+            "variance": 0.0,
+            "gradient": 0.0,
+            "extreme_fraction": 0.0,
+        }
+
+
+def is_liquid_obscured_tile(
+    minimap_metrics: Dict[str, float],
+    normal_metrics: Dict[str, float],
+    liquid_coverage: float,
+    max_liquid_coverage: float,
+    max_combined_variance: float,
+    max_combined_gradient: float,
+) -> bool:
+    if liquid_coverage < max_liquid_coverage:
+        return False
+
+    combined_variance = float(minimap_metrics.get("variance", 0.0) + normal_metrics.get("variance", 0.0))
+    combined_gradient = float(minimap_metrics.get("gradient", 0.0) + normal_metrics.get("gradient", 0.0))
+    return combined_variance <= max_combined_variance and combined_gradient <= max_combined_gradient
+
+
+def is_malformed_emeralddream_minimap(
+    map_name: str,
+    minimap_metrics: Dict[str, float],
+    variance_threshold: float,
+    gradient_threshold: float,
+    extreme_fraction_threshold: float,
+) -> bool:
+    if map_name.strip().lower() != "emeralddream":
+        return False
+
+    variance = float(minimap_metrics.get("variance", 0.0))
+    gradient = float(minimap_metrics.get("gradient", 0.0))
+    extreme_fraction = float(minimap_metrics.get("extreme_fraction", 0.0))
+    if variance > variance_threshold:
+        return False
+
+    return gradient <= gradient_threshold or extreme_fraction >= extreme_fraction_threshold
 
 
 def _liquid_coverage(path: Optional[Path], size: int = 64) -> float:
@@ -1834,6 +1668,19 @@ def checkpoint_metadata_from_args(
         "gan_cycle_on_epochs": args.gan_cycle_on_epochs,
         "gan_cooldown_after_best": args.gan_cooldown_after_best,
         "gan_burst_after_best": args.gan_burst_after_best,
+        "gan_patience": args.gan_patience,
+        "gan_min_gap_epochs": args.gan_min_gap_epochs,
+        "concept_recovery_epochs": args.concept_recovery_epochs,
+        "brush_sample_bonus": args.brush_sample_bonus,
+        "brush_patch_scale": args.brush_patch_scale,
+        "keep_liquid_obscured_tiles": args.keep_liquid_obscured_tiles,
+        "max_liquid_obscured_coverage": args.max_liquid_obscured_coverage,
+        "max_liquid_obscured_combined_variance": args.max_liquid_obscured_combined_variance,
+        "max_liquid_obscured_combined_gradient": args.max_liquid_obscured_combined_gradient,
+        "keep_malformed_emeralddream_minimaps": args.keep_malformed_emeralddream_minimaps,
+        "emeralddream_malformed_variance": args.emeralddream_malformed_variance,
+        "emeralddream_malformed_gradient": args.emeralddream_malformed_gradient,
+        "emeralddream_malformed_extreme_fraction": args.emeralddream_malformed_extreme_fraction,
     }
 
 
@@ -1855,6 +1702,9 @@ def resolve_gan_schedule(
     if args.adversarial_scale <= 0.0:
         return False, "disabled"
 
+    if gan_schedule_mode == "concept-recovery" and gan_schedule_remaining > 0:
+        return False, f"concept-recovery({gan_schedule_remaining})"
+
     if gan_schedule_mode == "cooldown" and gan_schedule_remaining > 0:
         return False, f"cooldown({gan_schedule_remaining})"
 
@@ -1875,6 +1725,9 @@ def resolve_gan_schedule(
         cycle_offset = (epoch_number - cycle_start_epoch) % args.gan_cycle_length
         gan_enabled = cycle_offset < cycle_on_epochs
         return gan_enabled, f"cycle({cycle_offset + 1}/{args.gan_cycle_length})"
+
+    if args.gan_cycle_on_epochs > 0:
+        return False, "controller-idle"
 
     return True, "steady"
 
@@ -1925,6 +1778,15 @@ def train(args: argparse.Namespace) -> None:
         print(f"Included maps: {', '.join(include_maps)}")
     if args.exclude_map:
         print(f"Excluded maps: {', '.join(args.exclude_map)}")
+    print(
+        "Dataset curation: "
+        f"skip_liquid_obscured={'on' if not args.keep_liquid_obscured_tiles else 'off'} "
+        f"(coverage>={args.max_liquid_obscured_coverage:.2f}, combined_var<={args.max_liquid_obscured_combined_variance:.4f}, "
+        f"combined_grad<={args.max_liquid_obscured_combined_gradient:.4f}) | "
+        f"skip_malformed_emeralddream={'on' if not args.keep_malformed_emeralddream_minimaps else 'off'} "
+        f"(var<={args.emeralddream_malformed_variance:.4f}, grad<={args.emeralddream_malformed_gradient:.4f}, "
+        f"extreme>={args.emeralddream_malformed_extreme_fraction:.2f})"
+    )
 
     dataset = WoWTileDatasetV7(
         dataset_roots=dataset_roots,
@@ -1935,9 +1797,29 @@ def train(args: argparse.Namespace) -> None:
         augment=not args.no_augment,
         limit=args.limit,
         min_height_range=args.min_height_range,
+        skip_liquid_obscured_tiles=not args.keep_liquid_obscured_tiles,
+        skip_malformed_emeralddream_minimaps=not args.keep_malformed_emeralddream_minimaps,
+        max_liquid_obscured_coverage=args.max_liquid_obscured_coverage,
+        max_liquid_obscured_combined_variance=args.max_liquid_obscured_combined_variance,
+        max_liquid_obscured_combined_gradient=args.max_liquid_obscured_combined_gradient,
+        emeralddream_malformed_variance=args.emeralddream_malformed_variance,
+        emeralddream_malformed_gradient=args.emeralddream_malformed_gradient,
+        emeralddream_malformed_extreme_fraction=args.emeralddream_malformed_extreme_fraction,
     )
     if len(dataset) == 0:
         raise SystemExit("No samples found. Regenerate the dataset with V7 exporter outputs intact.")
+
+    rejection_audit = {
+        "dataset_roots": [str(root) for root in dataset_roots],
+        "summary": dataset.rejection_summary,
+        "rejected_tiles": dataset.rejected_tiles,
+    }
+    with open(output_dir / "dataset_rejection_audit.json", "w", encoding="utf-8") as handle:
+        json.dump(rejection_audit, handle, indent=2)
+    print(
+        f"Dataset rejection audit: {len(dataset.rejected_tiles)} rejected tiles "
+        f"written to {output_dir / 'dataset_rejection_audit.json'}"
+    )
 
     train_indices, val_indices, train_groups, val_groups = split_grouped_indices(
         dataset.samples,
@@ -1962,6 +1844,27 @@ def train(args: argparse.Namespace) -> None:
         train_indices = curate_training_set(dataset.samples, train_indices, args.seed)
         print(f"Curated train samples: {len(train_indices)}")
 
+    train_sampler = build_weighted_train_sampler(
+        dataset.samples,
+        train_indices,
+        brush_sample_bonus=args.brush_sample_bonus,
+        brush_patch_scale=args.brush_patch_scale,
+    )
+    brush_train_tiles = sum(
+        1
+        for index in train_indices
+        if dataset.samples[index].brush_groups_written > 0
+        or dataset.samples[index].brush_patch_candidates > 0
+        or dataset.samples[index].brush_mask_path is not None
+    )
+    if train_sampler is not None:
+        print(
+            f"Brush-aware sampling: {brush_train_tiles}/{len(train_indices)} train tiles carry brush signal | "
+            f"sample_bonus={args.brush_sample_bonus:.2f} | patch_scale={args.brush_patch_scale:.2f}"
+        )
+    else:
+        print("Brush-aware sampling: inactive (no brush-bearing train tiles found)")
+
     train_dataset = Subset(dataset, train_indices)
     val_base_dataset = WoWTileDatasetV7(
         dataset_roots=dataset_roots,
@@ -1972,6 +1875,14 @@ def train(args: argparse.Namespace) -> None:
         augment=False,
         limit=args.limit,
         min_height_range=args.min_height_range,
+        skip_liquid_obscured_tiles=not args.keep_liquid_obscured_tiles,
+        skip_malformed_emeralddream_minimaps=not args.keep_malformed_emeralddream_minimaps,
+        max_liquid_obscured_coverage=args.max_liquid_obscured_coverage,
+        max_liquid_obscured_combined_variance=args.max_liquid_obscured_combined_variance,
+        max_liquid_obscured_combined_gradient=args.max_liquid_obscured_combined_gradient,
+        emeralddream_malformed_variance=args.emeralddream_malformed_variance,
+        emeralddream_malformed_gradient=args.emeralddream_malformed_gradient,
+        emeralddream_malformed_extreme_fraction=args.emeralddream_malformed_extreme_fraction,
         preloaded_samples=dataset.samples,
     )
     val_dataset = Subset(val_base_dataset, val_indices)
@@ -1980,7 +1891,8 @@ def train(args: argparse.Namespace) -> None:
 
     train_loader_kwargs: Dict[str, Any] = {
         "batch_size": args.batch_size,
-        "shuffle": True,
+        "shuffle": train_sampler is None,
+        "sampler": train_sampler,
         "num_workers": args.train_workers,
         "pin_memory": use_cuda,
     }
@@ -2103,13 +2015,18 @@ def train(args: argparse.Namespace) -> None:
         f"gan_cycle={args.gan_cycle_on_epochs}/{args.gan_cycle_length if args.gan_cycle_length > 0 else 0}, "
         f"gan_cooldown_after_best={args.gan_cooldown_after_best}, "
         f"gan_burst_after_best={args.gan_burst_after_best}, "
+        f"gan_patience={args.gan_patience}, "
+        f"gan_min_gap_epochs={args.gan_min_gap_epochs}, "
+        f"concept_recovery_epochs={args.concept_recovery_epochs}, "
         f"early_stop_start_epoch={args.early_stop_start_epoch}, "
         f"disc_every={args.disc_every}, "
         f"disc_lr={args.disc_learning_rate:.2e}, "
         f"disc_targets={args.disc_real_target:.2f}/{args.disc_fake_target:.2f}, "
         f"disc_label_noise={args.disc_label_noise:.3f}, "
         f"disc_input_noise_std={args.disc_input_noise_std:.3f}, "
-        f"lr_plateau_patience={args.lr_plateau_patience}"
+        f"lr_plateau_patience={args.lr_plateau_patience}, "
+        f"brush_sample_bonus={args.brush_sample_bonus:.2f}, "
+        f"brush_patch_scale={args.brush_patch_scale:.2f}"
     )
 
     history = {
@@ -2123,8 +2040,11 @@ def train(args: argparse.Namespace) -> None:
     start_epoch = 0
     best_loss = float("inf")
     patience_counter = 0
+    gan_patience_counter = 0
     gan_schedule_remaining = 0
     gan_schedule_mode = "none"
+    last_best_epoch = 0
+    last_gan_epoch = 0
 
     if args.resume:
         resume_path = Path(args.resume)
@@ -2133,6 +2053,9 @@ def train(args: argparse.Namespace) -> None:
         start_epoch = int(checkpoint.get("epoch", -1)) + 1
         best_loss = float(checkpoint.get("val_loss", best_loss))
         patience_counter = int(checkpoint.get("patience_counter", patience_counter))
+        gan_patience_counter = int(checkpoint.get("gan_patience_counter", gan_patience_counter))
+        last_best_epoch = int(checkpoint.get("last_best_epoch", last_best_epoch))
+        last_gan_epoch = int(checkpoint.get("last_gan_epoch", last_gan_epoch))
         legacy_burst_remaining = int(checkpoint.get("gan_refinement_remaining", 0))
         legacy_cooldown_remaining = int(checkpoint.get("gan_cooldown_remaining", 0))
         gan_schedule_remaining = int(
@@ -2166,11 +2089,33 @@ def train(args: argparse.Namespace) -> None:
         print(f"Resumed from {resume_path} at epoch {start_epoch}")
         print("Resume optimizer state: enabled" if not args.no_resume_optimizer else "Resume optimizer state: disabled (--no-resume-optimizer)")
         print(f"Resume GAN schedule: mode={gan_schedule_mode}, remaining={gan_schedule_remaining}")
+        print(f"Resume phase counters: best_epoch={last_best_epoch}, gan_epoch={last_gan_epoch}, gan_patience={gan_patience_counter}")
 
     for epoch in range(start_epoch, args.epochs):
         epoch_number = epoch + 1
+        if (
+            args.adversarial_scale > 0.0
+            and gan_schedule_mode == "none"
+            and args.gan_cycle_length <= 0
+            and args.gan_cycle_on_epochs > 0
+            and last_gan_epoch == 0
+            and epoch_number >= args.start_gan_epoch
+        ):
+            gan_schedule_mode = "burst"
+            gan_schedule_remaining = args.gan_cycle_on_epochs
+        if (
+            args.adversarial_scale > 0.0
+            and gan_schedule_mode == "none"
+            and epoch_number >= args.start_gan_epoch
+            and (epoch_number - last_gan_epoch) >= max(args.gan_min_gap_epochs, 1)
+            and gan_patience_counter >= args.gan_patience
+        ):
+            gan_schedule_mode = "burst"
+            gan_schedule_remaining = max(args.gan_cycle_on_epochs, 1)
         gan_enabled_epoch, gan_phase = resolve_gan_schedule(epoch_number, args, gan_schedule_remaining, gan_schedule_mode)
         gan_schedule_active_this_epoch = gan_schedule_mode != "none" and gan_schedule_remaining > 0
+        if gan_enabled_epoch:
+            last_gan_epoch = epoch_number
         model.train()
         discriminator.train()
         train_losses: List[float] = []
@@ -2233,6 +2178,7 @@ def train(args: argparse.Namespace) -> None:
                     output_bounds,
                     targets,
                     bounds,
+                    input_context=inputs,
                     adv_loss=adv_loss,
                     adversarial_scale=args.adversarial_scale,
                 )
@@ -2282,7 +2228,7 @@ def train(args: argparse.Namespace) -> None:
                 amp_context = torch.autocast(device_type="cuda", dtype=amp_dtype) if use_amp else nullcontext()
                 with amp_context:
                     outputs, output_bounds = model(inputs)
-                    loss, _ = combined_loss(outputs, output_bounds, targets, bounds)
+                    loss, _ = combined_loss(outputs, output_bounds, targets, bounds, input_context=inputs)
                 val_losses.append(float(loss.item()))
 
         average_train_loss = float(np.mean(train_losses))
@@ -2298,6 +2244,7 @@ def train(args: argparse.Namespace) -> None:
         history.setdefault("gan_phase", []).append(gan_phase)
         history.setdefault("gan_schedule_mode", []).append(gan_schedule_mode)
         history.setdefault("gan_schedule_remaining", []).append(gan_schedule_remaining)
+        history.setdefault("gan_patience", []).append(gan_patience_counter)
         history["components"].append(epoch_parts)
         with open(output_dir / "training_log.json", "w", encoding="utf-8") as handle:
             json.dump(history, handle, indent=2)
@@ -2390,8 +2337,14 @@ def train(args: argparse.Namespace) -> None:
         if val_loss_valid and average_val_loss < best_loss:
             best_loss = average_val_loss
             patience_counter = 0
+            gan_patience_counter = 0
+            last_best_epoch = epoch_number
             saved_new_best = True
-            if args.gan_burst_after_best > 0:
+            if gan_enabled_epoch:
+                gan_schedule_mode = "concept-recovery"
+                gan_schedule_remaining = max(args.concept_recovery_epochs, 0)
+                schedule_rearmed_this_epoch = True
+            elif args.gan_burst_after_best > 0:
                 gan_schedule_mode = "burst"
                 gan_schedule_remaining = args.gan_burst_after_best
                 schedule_rearmed_this_epoch = True
@@ -2400,7 +2353,11 @@ def train(args: argparse.Namespace) -> None:
                 gan_schedule_remaining = args.gan_cooldown_after_best
                 schedule_rearmed_this_epoch = True
             print("  Saved best model")
-            if args.gan_burst_after_best > 0:
+            if gan_enabled_epoch:
+                print(
+                    f"  GAN hit a best; switching to concept recovery for next {args.concept_recovery_epochs} epoch(s)"
+                )
+            elif args.gan_burst_after_best > 0:
                 print(
                     f"  GAN refinement burst armed for next {args.gan_burst_after_best} epoch(s) after best checkpoint"
                 )
@@ -2411,11 +2368,15 @@ def train(args: argparse.Namespace) -> None:
         else:
             if not val_loss_valid:
                 continue
+            gan_patience_counter += 1
             if epoch_number >= args.early_stop_start_epoch:
                 patience_counter += 1
-                if patience_counter >= args.patience:
+                phase_blocks_early_stop = gan_schedule_mode in {"burst", "concept-recovery", "cooldown"}
+                if patience_counter >= args.patience and not phase_blocks_early_stop:
                     print(f"\nEarly stopping: no improvement for {args.patience} epochs")
                     break
+                if patience_counter >= args.patience and phase_blocks_early_stop:
+                    print("  Early stop deferred while GAN/concept-recovery controller still has unresolved phases")
             else:
                 print(
                     f"  Early-stop warmup active until epoch {args.early_stop_start_epoch}; "
@@ -2437,8 +2398,11 @@ def train(args: argparse.Namespace) -> None:
             "val_loss": average_val_loss,
             "val_loss_valid": val_loss_valid,
             "patience_counter": patience_counter,
+            "gan_patience_counter": gan_patience_counter,
             "gan_schedule_mode": gan_schedule_mode,
             "gan_schedule_remaining": gan_schedule_remaining,
+            "last_best_epoch": last_best_epoch,
+            "last_gan_epoch": last_gan_epoch,
             "metadata": checkpoint_metadata_from_args(args, dataset_roots, len(dataset), len(train_indices), len(val_indices), train_groups, val_groups),
         }
         torch.save(checkpoint, output_dir / "checkpoint.pt")
@@ -2496,6 +2460,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help=f"Force GAN off for this many subsequent epochs after a new GAN-assisted best checkpoint (default: {DEFAULT_GAN_COOLDOWN_AFTER_BEST}).")
     parser.add_argument("--gan-burst-after-best", type=int, default=DEFAULT_GAN_BURST_AFTER_BEST,
                         help=f"Force GAN on for this many subsequent epochs after any new best checkpoint (default: {DEFAULT_GAN_BURST_AFTER_BEST}, disabled). This layers on top of the base epoch cadence instead of replacing it.")
+    parser.add_argument("--gan-patience", type=int, default=DEFAULT_GAN_PATIENCE,
+                        help=f"Non-improving epochs to tolerate before automatically re-arming a GAN burst (default: {DEFAULT_GAN_PATIENCE}).")
+    parser.add_argument("--gan-min-gap-epochs", type=int, default=DEFAULT_GAN_MIN_GAP_EPOCHS,
+                        help=f"Minimum epochs between GAN-active epochs when controller re-arms bursts (default: {DEFAULT_GAN_MIN_GAP_EPOCHS}).")
+    parser.add_argument("--concept-recovery-epochs", type=int, default=DEFAULT_CONCEPT_RECOVERY_EPOCHS,
+                        help=f"Non-GAN epochs to run after a GAN-assisted best so the generator can consolidate geometry before the next burst (default: {DEFAULT_CONCEPT_RECOVERY_EPOCHS}).")
     parser.add_argument("--disc-every", type=int, default=DEFAULT_DISC_EVERY,
                         help=f"Update discriminator every N train steps (default: {DEFAULT_DISC_EVERY}).")
     parser.add_argument("--lr-plateau-patience", type=int, default=DEFAULT_LR_PLATEAU_PATIENCE,
@@ -2530,8 +2500,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Disable cuDNN benchmark autotuning for fixed-size training tensors.")
     parser.add_argument("--no-augment", action="store_true", help="Disable RGB jitter and random flips.")
     parser.add_argument("--no-curate", action="store_true", help="Disable complexity-based dataset curation.")
+    parser.add_argument("--brush-sample-bonus", type=float, default=DEFAULT_BRUSH_SAMPLE_BONUS,
+                        help=f"Base multiplicative sampler bonus for tiles with brush signal (default: {DEFAULT_BRUSH_SAMPLE_BONUS}).")
+    parser.add_argument("--brush-patch-scale", type=float, default=DEFAULT_BRUSH_PATCH_SCALE,
+                        help=f"Additional sampler gain driven by per-tile brush patch counts (default: {DEFAULT_BRUSH_PATCH_SCALE}).")
     parser.add_argument("--min-height-range", type=float, default=DEFAULT_MIN_HEIGHT_RANGE,
                         help=f"Skip tiles with less than this height variation in game units (default: {DEFAULT_MIN_HEIGHT_RANGE}).")
+    parser.add_argument("--keep-liquid-obscured-tiles", action="store_true",
+                        help="Keep tiles that are almost entirely liquid-covered even when minimap and normal signal are effectively absent.")
+    parser.add_argument("--max-liquid-obscured-coverage", type=float, default=DEFAULT_MAX_LIQUID_OBSCURED_COVERAGE,
+                        help=f"Liquid coverage threshold for rejecting liquid-obscured tiles (default: {DEFAULT_MAX_LIQUID_OBSCURED_COVERAGE}).")
+    parser.add_argument("--max-liquid-obscured-combined-variance", type=float, default=DEFAULT_MAX_LIQUID_OBSCURED_COMBINED_VARIANCE,
+                        help=f"Maximum combined minimap+normal luma variance for liquid-obscured rejection (default: {DEFAULT_MAX_LIQUID_OBSCURED_COMBINED_VARIANCE}).")
+    parser.add_argument("--max-liquid-obscured-combined-gradient", type=float, default=DEFAULT_MAX_LIQUID_OBSCURED_COMBINED_GRADIENT,
+                        help=f"Maximum combined minimap+normal gradient energy for liquid-obscured rejection (default: {DEFAULT_MAX_LIQUID_OBSCURED_COMBINED_GRADIENT}).")
+    parser.add_argument("--keep-malformed-emeralddream-minimaps", action="store_true",
+                        help="Keep EmeraldDream tiles even when the minimap matches the known malformed low-signal corruption pattern.")
+    parser.add_argument("--emeralddream-malformed-variance", type=float, default=DEFAULT_EMERALDDREAM_MALFORMED_VARIANCE,
+                        help=f"Maximum minimap luma variance for the EmeraldDream malformed-minimap filter (default: {DEFAULT_EMERALDDREAM_MALFORMED_VARIANCE}).")
+    parser.add_argument("--emeralddream-malformed-gradient", type=float, default=DEFAULT_EMERALDDREAM_MALFORMED_GRADIENT,
+                        help=f"Maximum minimap gradient energy for the EmeraldDream malformed-minimap filter (default: {DEFAULT_EMERALDDREAM_MALFORMED_GRADIENT}).")
+    parser.add_argument("--emeralddream-malformed-extreme-fraction", type=float, default=DEFAULT_EMERALDDREAM_MALFORMED_EXTREME_FRACTION,
+                        help=f"Extreme-pixel fraction that also marks an EmeraldDream minimap as malformed (default: {DEFAULT_EMERALDDREAM_MALFORMED_EXTREME_FRACTION}).")
     return parser
 
 

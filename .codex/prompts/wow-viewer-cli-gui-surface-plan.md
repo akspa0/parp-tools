@@ -25,6 +25,8 @@ Define how the new tool suite exposes the same shared capability through both CL
 - asset-catalog and screenshot workflows
 - PM4 and WDL utilities
 - terrain import/export and related panel-driven workflows
+- dataset explorer and supervision or curation workflows
+- training-review or launch workflows that need local-only reproducibility without bundled proprietary outputs
 
 ## Existing CLI/Headless Inputs To Account For
 
@@ -33,6 +35,7 @@ Define how the new tool suite exposes the same shared capability through both CL
 - `Pm4Research.Cli`
 - `WlAnalyzer`
 - any old console-style tools in `parpToolbox`, `PM4Tool`, `ADTPrefabTool`, and `WoWRollback`
+- Python-side dataset or training scripts that should eventually become wow-viewer-owned orchestration or manifest surfaces instead of permanent standalone owners
 
 ## Non-Negotiable Constraints
 
@@ -41,6 +44,9 @@ Define how the new tool suite exposes the same shared capability through both CL
 - CLI tools must not become second-class wrappers around hidden GUI behavior.
 - Batch/headless workflows must remain possible for converter/export/audit operations.
 - Long-running operations should have service boundaries that work in both interactive and non-interactive hosts.
+- Bring Your Own Data constraints must hold across both surfaces; the tool should not depend on shipping copyrighted corpora, trained models, or proprietary model outputs.
+- Training or inference orchestration should be driven by shared configs and service boundaries, not separate ad-hoc GUI-only or CLI-only launch code.
+- Do not assume CUDA-only execution in the long-range design. Backend-specific runners should plug into the same shared orchestration seams.
 
 ## What The Plan Must Produce
 
@@ -51,6 +57,8 @@ Define how the new tool suite exposes the same shared capability through both CL
 5. Progress/reporting/cancellation design across both surfaces.
 6. The first dual-surface workflow to build.
 7. The migration risks if surfaces stay duplicated.
+8. Which training or explorer capabilities should remain local-only and non-distributable.
+9. Where backend-runner abstraction belongs.
 
 ## Deliverables
 

@@ -2,6 +2,23 @@
 
 # wow-viewer Shared I/O Library Plan
 
+## Apr 14, 2026 - Archive-backed client validation should stage WoWArchive clients locally first
+
+- status: active workflow note
+- canonical broad client source is now `G:\WoW\WoWArchive-0.X-3.X`, mounted through `G:\WoW\WoWArchive-0.X-3.X\MountAll.bat`
+- treat the mounted archive as the source surface only; for repeated or wide shared-I/O validation, inspect, or converter work, copy the required client into `i:/parp/parp-tools/output/tmp/wowarchive-clients` first and use that staged copy as the working root
+- keep the fixed `H:\CLIENTS\...` roots when they already exist locally; use staged WoWArchive copies when broader build coverage is needed
+- delete staged clients that are no longer needed after the run so the temp area does not silently grow into a second unmanaged archive
+
+## Apr 14, 2026 - Shared I/O now carries the dataset-builder convergence boundary
+
+- status: active ownership note
+- new dataset corpus export, terrain-supervision artifact generation, manifest or harvest ownership, and shared minimap or mask or atlas semantics should now be treated as `wow-viewer` work, not as more permanent architecture in `WoWMapConverter.Core/VLM`
+- use `gillijimproject_refactor/plans/wow_viewer_dataset_builder_tool_plan_2026-04-14.md` as the current continuity note for the new `wow-viewer` dataset-builder surface
+- practical implication for shared-I/O slices:
+  - when a dataset artifact rule depends on format decode or shared file access, land that seam in `WowViewer.Core` or `WowViewer.Core.IO` first
+  - keep `WoWMapConverter` and `MdxViewer` dataset/export code as reference inputs or bounded compatibility hosts only
+
 ## Apr 13, 2026 - Shared md5translate loose-override precedence slice
 
 - status: landed

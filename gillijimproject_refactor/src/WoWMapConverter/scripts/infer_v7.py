@@ -12,8 +12,9 @@ Inference restores the active multichannel V7.x contract:
 - object footprint mask
 - brush imprint mask when the checkpoint expects it
 
-The primary mesh export still uses the predicted global height channel. The
-terrain checkpoint no longer owns alpha-mask prediction.
+Mesh reconstruction uses the predicted global height channel as the continuity
+prior and blends in the local height channel for interior detail. The terrain
+checkpoint no longer owns alpha-mask prediction.
 """
 
 from __future__ import annotations
@@ -31,39 +32,21 @@ import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
 
-try:
-    from train_v7 import (
-        BRUSH_MANIFEST_FILE,
-        DEFAULT_BLUR_SIGMA,
-        DEFAULT_GLOBAL_RESIDUAL_SCALE,
-        HEIGHT_GLOBAL_MAX,
-        HEIGHT_GLOBAL_MIN,
-        MultiChannelUNetV7,
-        OUTPUT_SIZE,
-        resolve_model_architecture_from_metadata,
-    )
-except ImportError:
-    OUTPUT_SIZE = 512
-    HEIGHT_GLOBAL_MIN = -1000.0
-    HEIGHT_GLOBAL_MAX = 3000.0
-    BRUSH_MANIFEST_FILE = "brush_imprint_manifest.json"
-    DEFAULT_BLUR_SIGMA = 0.0
-    DEFAULT_GLOBAL_RESIDUAL_SCALE = 0.20
+from v7_losses import build_recovery_mask
+from v7_model import DEFAULT_GLOBAL_RESIDUAL_SCALE, MultiChannelUNetV7, OUTPUT_SIZE, resolve_model_architecture_from_metadata
+from v7_object_masks import (
+    MAX_FALLBACK_OBJECT_MASK_COVERAGE,
+    MAX_PRECISE_OBJECT_MASK_COVERAGE,
+    MAX_SEEDED_OBJECT_MASK_COVERAGE,
+    PRECISE_OBJECT_MASK_KEYS,
+    SEEDED_OBJECT_MASK_KEYS,
+    build_object_context_mask as build_filtered_object_context_mask,
+)
 
-    def resolve_model_architecture_from_metadata(metadata: Optional[Dict[str, object]]) -> Tuple[bool, float]:
-        return False, DEFAULT_GLOBAL_RESIDUAL_SCALE
-
-    class MultiChannelUNetV7(nn.Module):
-        def __init__(
-            self,
-            in_channels: int = 13,
-            out_channels: int = 2,
-            use_wdl_global_trestle: bool = False,
-            global_residual_scale: float = DEFAULT_GLOBAL_RESIDUAL_SCALE,
-        ):
-            super().__init__()
-            raise ImportError("train_v7.py is required so the V7.5.1 architecture matches the checkpoint.")
-
+HEIGHT_GLOBAL_MIN = -1000.0
+HEIGHT_GLOBAL_MAX = 3000.0
+BRUSH_MANIFEST_FILE = "brush_imprint_manifest.json"
+DEFAULT_BLUR_SIGMA = 0.0
 
 TILE_SIZE = 533.33333
 MAP_ORIGIN = 32.0 * TILE_SIZE
@@ -82,6 +65,9 @@ SEEDED_OBJECT_MASK_KEYS = (
 _SCIPY_GAUSSIAN_FILTER = None
 _SCIPY_IMPORT_ATTEMPTED = False
 DEFAULT_EDGE_ANCHOR_WIDTH = 12
+DEFAULT_LOCAL_DETAIL_BLEND = 0.60
+MASKED_RGB_ATTENUATION = 0.85
+MASKED_NORMAL_ATTENUATION = 0.70
 
 
 def tile_uv_candidates(world_a: float, world_b: float, tile_x: int, tile_y: int) -> List[Tuple[float, float]]:
@@ -157,6 +143,23 @@ def anchor_heightmap_edges(heightmap_world: np.ndarray, edge_prior_world: Option
 
     result = result * (1.0 - border_weight) + edge_prior_world * border_weight
     return result.astype(np.float32, copy=False)
+
+
+def blend_global_local_heightmaps(
+    global_heightmap_world: np.ndarray,
+    local_heightmap_world: np.ndarray,
+    local_detail_blend: float,
+) -> np.ndarray:
+    local_detail_blend = float(np.clip(local_detail_blend, 0.0, 1.0))
+    if local_detail_blend <= 0.0:
+        return np.asarray(global_heightmap_world, dtype=np.float32)
+    if local_detail_blend >= 1.0:
+        return np.asarray(local_heightmap_world, dtype=np.float32)
+
+    return (
+        np.asarray(global_heightmap_world, dtype=np.float32) * (1.0 - local_detail_blend)
+        + np.asarray(local_heightmap_world, dtype=np.float32) * local_detail_blend
+    ).astype(np.float32, copy=False)
 
 
 def load_heightmap_16bit(path: Path, target_size: int = OUTPUT_SIZE) -> torch.Tensor:
@@ -327,6 +330,9 @@ class V7InferenceEngine:
 
         tile_x, tile_y = parse_tile_coords(tile_name)
         object_mask = self._build_object_context_mask(dataset_root, terrain, tile_x, tile_y)
+        recovery_mask = build_recovery_mask(object_mask=object_mask, liquid_mask=liquid_mask, brush_mask=brush_mask)
+        minimap_tensor = minimap_tensor * (1.0 - recovery_mask * MASKED_RGB_ATTENUATION)
+        normalmap_tensor = normalmap_tensor * (1.0 - recovery_mask * MASKED_NORMAL_ATTENUATION)
 
         channels = [
             minimap_tensor,
@@ -393,15 +399,18 @@ class V7InferenceEngine:
         tile_x: int,
         tile_y: int,
     ) -> torch.Tensor:
-        precise_mask = self._load_optional_binary_mask(dataset_root, terrain, keys=PRECISE_OBJECT_MASK_KEYS)
-        if bool(torch.any(precise_mask > 0)):
-            return precise_mask
-
-        seeded_mask = self._load_optional_binary_mask(dataset_root, terrain, keys=SEEDED_OBJECT_MASK_KEYS)
-        if bool(torch.any(seeded_mask > 0)):
-            return seeded_mask
-
-        return self._build_object_mask(terrain.get("objects"), tile_x, tile_y, terrain.get("wdl_heights"))
+        return build_filtered_object_context_mask(
+            dataset_root=dataset_root,
+            terrain=terrain,
+            tile_x=tile_x,
+            tile_y=tile_y,
+            output_size=OUTPUT_SIZE,
+            precise_keys=PRECISE_OBJECT_MASK_KEYS,
+            seeded_keys=SEEDED_OBJECT_MASK_KEYS,
+            max_precise_coverage=MAX_PRECISE_OBJECT_MASK_COVERAGE,
+            max_seeded_coverage=MAX_SEEDED_OBJECT_MASK_COVERAGE,
+            max_fallback_coverage=MAX_FALLBACK_OBJECT_MASK_COVERAGE,
+        )
 
     def _build_wdl_height_sampler(
         self,
@@ -560,6 +569,32 @@ class V7InferenceEngine:
         return normalized_heightmap * (global_max - global_min) + global_min
 
     @staticmethod
+    def denormalize_local_heightmap(normalized_heightmap: np.ndarray, height_min: float, height_max: float) -> np.ndarray:
+        return normalized_heightmap * max(height_max - height_min, 1e-6) + height_min
+
+    @staticmethod
+    def decode_predicted_local_bounds(predicted_bounds: np.ndarray, bounds_info: Dict[str, float]) -> Tuple[float, float]:
+        global_min = float(bounds_info["g_min"])
+        global_max = float(bounds_info["g_max"])
+        global_range = max(global_max - global_min, 1e-6)
+
+        fallback_min = float(bounds_info["h_min"])
+        fallback_max = float(bounds_info["h_max"])
+
+        if predicted_bounds.size < 2 or not np.all(np.isfinite(predicted_bounds[:2])):
+            return fallback_min, fallback_max
+
+        predicted_min = float(np.clip(predicted_bounds[0], 0.0, 1.0) * global_range + global_min)
+        predicted_max = float(np.clip(predicted_bounds[1], 0.0, 1.0) * global_range + global_min)
+        if predicted_max < predicted_min:
+            predicted_min, predicted_max = predicted_max, predicted_min
+
+        if (predicted_max - predicted_min) < 1.0:
+            return fallback_min, fallback_max
+
+        return predicted_min, predicted_max
+
+    @staticmethod
     def save_obj(heightmap: np.ndarray, output_path: Path, tile_x: int, tile_y: int, texture_path: Optional[Path] = None) -> None:
         resolution = heightmap.shape[0]
         step = TILE_SIZE / max(resolution - 1, 1)
@@ -672,6 +707,7 @@ def run_batch_inference(
     smooth_sigma: float = 0.0,
     out_res: int = OUTPUT_SIZE,
     edge_anchor_width: int = DEFAULT_EDGE_ANCHOR_WIDTH,
+    local_detail_blend: float = DEFAULT_LOCAL_DETAIL_BLEND,
 ) -> None:
     engine = V7InferenceEngine(model_path)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -696,14 +732,30 @@ def run_batch_inference(
             terrain = payload.get("terrain_data", {})
             predicted_heightmap, predicted_bounds = engine.predict(input_tensor)
 
-            heightmap_normalized = predicted_heightmap[0, 0]
-            heightmap_world = engine.denormalize_heightmap(heightmap_normalized, bounds_info["g_min"], bounds_info["g_max"])
+            global_heightmap_normalized = predicted_heightmap[0, 0]
+            global_heightmap_world = engine.denormalize_heightmap(global_heightmap_normalized, bounds_info["g_min"], bounds_info["g_max"])
+            heightmap_world = global_heightmap_world
+            if predicted_heightmap.shape[1] > 1:
+                local_heightmap_normalized = predicted_heightmap[0, 1]
+                predicted_height_min, predicted_height_max = engine.decode_predicted_local_bounds(predicted_bounds[0], bounds_info)
+                local_heightmap_world = engine.denormalize_local_heightmap(
+                    local_heightmap_normalized,
+                    predicted_height_min,
+                    predicted_height_max,
+                )
+                heightmap_world = blend_global_local_heightmaps(
+                    global_heightmap_world,
+                    local_heightmap_world,
+                    local_detail_blend,
+                )
 
             if abs(z_scale - 1.0) > 1e-6:
                 heightmap_world *= z_scale
             if smooth_sigma > 0:
                 heightmap_world = apply_gaussian_smoothing(heightmap_world, sigma=smooth_sigma)
-            edge_prior_world = render_wdl_height_prior_world(terrain.get("wdl_heights"), heightmap_world.shape[0])
+            edge_prior_world = global_heightmap_world
+            if predicted_heightmap.shape[1] <= 1:
+                edge_prior_world = render_wdl_height_prior_world(terrain.get("wdl_heights"), heightmap_world.shape[0])
             heightmap_world = anchor_heightmap_edges(heightmap_world, edge_prior_world, edge_anchor_width)
             if out_res != OUTPUT_SIZE:
                 resized = Image.fromarray(heightmap_world, mode="F")
@@ -746,7 +798,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--smooth-output", type=float, default=0.0, help="Optional Gaussian smoothing sigma")
     parser.add_argument("--res", type=int, default=OUTPUT_SIZE, help="Output mesh and heightmap resolution")
     parser.add_argument("--edge-anchor-width", type=int, default=DEFAULT_EDGE_ANCHOR_WIDTH,
-                        help=f"Feather width in pixels for anchoring tile borders to the WDL prior (default: {DEFAULT_EDGE_ANCHOR_WIDTH}).")
+                        help=f"Feather width in pixels for anchoring tile borders to the continuity prior (default: {DEFAULT_EDGE_ANCHOR_WIDTH}).")
+    parser.add_argument("--local-detail-blend", type=float, default=DEFAULT_LOCAL_DETAIL_BLEND,
+                        help=f"Blend factor for injecting local-height detail into the global continuity surface (default: {DEFAULT_LOCAL_DETAIL_BLEND}).")
     return parser
 
 
@@ -762,4 +816,5 @@ if __name__ == "__main__":
         smooth_sigma=arguments.smooth_output,
         out_res=arguments.res,
         edge_anchor_width=arguments.edge_anchor_width,
+        local_detail_blend=arguments.local_detail_blend,
     )

@@ -1,5 +1,76 @@
 # Progress
 
+### Apr 14, 2026 - Corpus export now stages archive-backed clients locally before heavy reads in both PowerShell and direct CLI paths
+
+- implemented the first real archive-staging cutover instead of just documenting it:
+	- added reusable helpers in `gillijimproject_refactor/scripts/wowarchive_client_staging.ps1`
+	- added standalone helper `gillijimproject_refactor/scripts/stage_wowarchive_client.ps1` for staging one mounted client and pruning stale staged copies
+	- updated `gillijimproject_refactor/scripts/export_ml_corpus.ps1` so archive-backed runs prefer staged local working roots before `ml-list-maps` or `ml-export`
+	- updated direct `WoWMapConverter.Cli ml-corpus` so it resolves `local_client_path` versus `archive_client_path`, stages mounted roots, supports `all_maps`, and can prune stale staged copies itself
+	- updated `gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json` with explicit `local_client_path` or `archive_client_path` entries plus `mount_root`, `mount_script`, `staging_root`, and `prune_staged_clients` defaults for the new workflow
+- current resolution behavior in the PowerShell corpus runner:
+	- prefer `local_client_path` or an already-local direct `client_path` when available
+	- otherwise stage `archive_client_path` or mounted direct paths under the configured mount root into the configured staging root
+	- optionally resolve explicit minimap roots through the same local-vs-archive policy
+	- prune stale staged copies after the run while keeping the clients touched by the active job
+- current resolution behavior in the direct CLI now matches that shape closely enough for the live config:
+	- `ml-corpus` can resolve the same top-level mount and staging fields directly from JSON or command-line overrides
+	- `all_maps` now works inside direct `ml-corpus` instead of only in the PowerShell wrapper
+	- dry-run keeps using the mounted source for discovery when no staged copy exists yet, while non-dry runs copy first and then discover against the staged root
+- validation completed in this chat:
+	- script diagnostics reported no errors for the new helpers or the updated corpus runner
+	- synthetic mounted-client smoke proved stage plus prune behavior end to end
+	- synthetic `export_ml_corpus.ps1 -DryRun` proved the real corpus runner resolves an archive-backed config entry to the staged working root before invoking `ml-export`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug` succeeded
+	- direct CLI real-data dry-run against the mounted `3.0.1.8303` client printed the staged working root plus the mounted source path for `Azeroth`
+	- direct CLI synthetic `--harvest-only` validation with `all_maps: true` discovered `SynthMap`, skipped harvest due missing dataset JSON as expected, and removed a stale staged client directory
+- important boundary:
+	- the live WoWArchive surface still appears to be `0.X-3.X`; keep `4_0_0_11927` local-only until a real archive-backed 4.x root is verified
+
+### Apr 14, 2026 - WoWArchive client staging is now a first-class workflow rule
+
+- added a dedicated WoWArchive staging workflow surface so future chats stop treating the mounted archive as the default heavy-read root:
+	- new skills at `.github/skills/wowarchive-client-staging/SKILL.md` and `.codex/skills/wowarchive-client-staging/SKILL.md`
+	- `.github/copilot-instructions.md` and `AGENTS.md` now name that skill, document the `MountAll.bat` workflow, and explicitly mention the `Explore` subagent as an available read-only discovery helper
+	- shared-I/O and migration-continuation skills now point to staged local copies for broad archive-backed validation instead of direct mounted reads
+	- `gillijimproject_refactor/memory-bank/data-paths.md`, `wow-viewer/README.md`, and the shared-I/O continuity plan now carry the same archive-source plus local-staging rule
+- important boundary:
+	- this is workflow and continuity enforcement only
+	- no automated client-staging command or shared library implementation has been added yet
+
+### Apr 14, 2026 - Workspace routing now treats dataset-builder ownership as canonical wow-viewer work
+
+- updated the workspace workflow surface so future chats stop defaulting dataset-builder architecture into the legacy exporter path:
+	- `.github/copilot-instructions.md` and `AGENTS.md` now route dataset-builder cutover, ML corpus export ownership, and terrain-supervision artifact generation into `wow-viewer`
+	- new planning prompts were added at `.github/prompts/wow-viewer-dataset-builder-plan.prompt.md` and `.codex/prompts/wow-viewer-dataset-builder-plan.md`
+	- migration-continuation skills and tool-suite plan-set prompts now route dataset-builder requests to that new prompt
+	- `wow-viewer/README.md`, `plans/wow_viewer_shared_io_library_plan_2026-03-26.md`, and the new continuity file `plans/wow_viewer_dataset_builder_tool_plan_2026-04-14.md` now capture the same ownership rule
+- the same workflow surface now also carries the next-level policy constraints:
+	- target surfaces are shared library plus CLI plus viewer/editor plus dataset explorer plus supervised training tooling
+	- the toolchain stays Bring Your Own Data and should not plan around distributing copyrighted corpora, model weights, or model outputs
+	- long-range orchestration should keep backend seams open beyond CUDA-only assumptions
+- important boundary:
+	- this is workflow and continuity enforcement only
+	- no shared dataset contract or `wow-viewer` dataset-builder tool implementation has been migrated yet
+
+### Apr 14, 2026 - Trainer now hard-filters liquid-obscured junk tiles and known malformed EmeraldDream minimaps before train/val split
+
+- added dataset-side curation in `src/WoWMapConverter/scripts/train_v7.py` so bad tiles are rejected during sample indexing instead of merely showing up later in previews:
+	- liquid-obscured rejection is now on by default when `liquid_coverage >= 0.98` and combined minimap+normal signal is effectively absent (`combined variance <= 0.0010`, `combined gradient <= 0.0050`)
+	- known malformed `EmeraldDream` minimaps are now rejected by default when they match the low-signal Blizzard-tooling corruption pattern (`variance <= 0.0022` and either `gradient <= 0.0040` or `extreme_fraction >= 0.90`)
+	- both filters are exposed as CLI knobs so future runs can tighten or relax them without another code edit
+- fixed a second curation bug in the same trainer:
+	- complexity curation had been force-including every tile with any liquid mask at all
+	- it now only auto-keeps liquid-bearing tiles when `liquid_coverage <= 0.85`, so water-heavy junk no longer dominates the curated train set
+- recovered-corpus zero-epoch preflight after the change:
+	- usable sample count dropped from the earlier `2358` to `2161`
+	- per-root hard rejections included `111` liquid-obscured tiles on `3_0_1_8303/Northrend`, `21` on `0_5_3_3368/Azeroth`, `17` on `3_3_5_12340/Azeroth`, `5` on `original_development/development`, and `4` on `4_0_0_11927/LostIsles`
+	- malformed `EmeraldDream` rejections were `19` on `3_0_1_8303/EmeraldDream`, `19` on `4_0_0_11927/EmeraldDream`, and `1` on `3_3_5_12340/EmeraldDream`
+	- curated train count dropped from `1302` to `1247` after the liquid auto-inclusion fix, while brush-bearing curated tiles remained strong at `797 / 1247`
+- important boundary:
+	- this is dataset-culling proof and full-corpus preflight proof, not long-run model-quality proof yet
+	- the next real CUDA run should use this curated loader path instead of the earlier pre-cull `2358`-sample state
+
 ### Apr 14, 2026 - V7 trainer now supports subset-manifest tile allowlists; interesting-tile smoke train passed end-to-end
 
 - added exact subset training support in `src/WoWMapConverter/scripts/train_v7.py`:

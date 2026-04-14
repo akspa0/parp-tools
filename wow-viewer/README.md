@@ -32,12 +32,28 @@ Current implementation policy:
 - Build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` only when a slice explicitly changes consumer compatibility or the user asks for that check.
 - The explicit long-range target is full first-party ownership of every active format family currently handled by `MdxViewer`; current detector and summary seams are stepping stones, not the final boundary.
 
+Current dataset-builder continuity note:
+
+- New dataset corpus export, terrain-supervision artifact generation, manifest or harvest ownership, and shared minimap or mask or atlas semantics should converge into `wow-viewer`, not continue growing `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM` as the design owner.
+- The intended long-range target is a dedicated `wow-viewer` dataset-builder tool over shared `Core` and `Core.IO` seams, plus explicit CLI or viewer-editor or dataset-explorer surfaces over the same contracts.
+- ML training or inference scripts remain downstream consumers; they are not the canonical owners of format decode, artifact packing, or dataset-manifest semantics.
+- The distributable product should stay Bring Your Own Data: do not plan around shipping copyrighted corpora, trained models, or model outputs derived from proprietary data.
+- Long-range training or inference orchestration should keep backend seams open for more than CUDA alone, with portability left available for runners such as Vulkan or OpenCL or MLX where practical.
+
+Current client-root workflow note:
+
+- Broader build coverage can now come from `G:\WoW\WoWArchive-0.X-3.X`, using `G:\WoW\WoWArchive-0.X-3.X\MountAll.bat` as the current mount entrypoint.
+- Treat the mounted archive as the source surface only. For repeated or wide export or inspect or converter or training-prep work, copy the required client into `i:/parp/parp-tools/output/tmp/wowarchive-clients` first and process the staged copy there.
+- Existing fixed local `H:\CLIENTS\...` roots remain valid when already present.
+- Delete staged client copies that are no longer needed after the run, and be explicit in validation notes about whether a proof used a fixed local root, a mounted archive path, or a staged copy.
+
 Current converter ML workflow note:
 
 - `WowViewer.Tool.Converter` now includes:
 	- `ml-corpus --config <ml-corpus.json> [--archive-root <path>] [--output-root <path>] [--dry-run]` for shared-reader-driven ADT corpus reporting (no per-chunk PNG emission), now with archive-backed WDT tile discovery plus split `_tex0.adt` and `_obj0.adt` preference when those companions exist
 	- `ml-synth-no-liquid` for synthesized no-liquid minimap generation from minimap + liquid-mask PNG inputs
 - current proof level for `ml-corpus` is report-oriented and dry-run validated, not full legacy export parity: the fixed-client config now completes archive-backed dry-run discovery across `16` configured maps / `7409` tiles, while some `3.0.1.8303` tiles still fall back to empty texture-name lists because shared `AdtTextureReader` overflows on part of that older corpus
+- treat the current converter ML surface as a compatibility bridge, not the final home for new shared dataset-builder behavior
 
 Current M2-native continuity note:
 

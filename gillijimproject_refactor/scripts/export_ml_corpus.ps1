@@ -2,15 +2,28 @@ param(
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'ml_corpus_fixed_clients.json'),
     [string]$ProjectPath = (Join-Path $PSScriptRoot '..\src\WoWMapConverter\WoWMapConverter.Cli\WoWMapConverter.Cli.csproj'),
     [string]$OutputRoot,
+    [string]$ArchiveRoot,
+    [string]$ArchiveMountRoot,
+    [string]$MountScript,
+    [string]$StagingRoot,
     [string]$ListfilePath,
     [string]$Configuration = 'Debug',
     [switch]$SkipHarvest,
+    [switch]$PruneStagedClients,
+    [switch]$ForceRestage,
     [switch]$Force,
     [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$wowArchiveHelperPath = Join-Path $PSScriptRoot 'wowarchive_client_staging.ps1'
+if (-not (Test-Path $wowArchiveHelperPath)) {
+    throw "WoWArchive helper script not found: $wowArchiveHelperPath"
+}
+
+. $wowArchiveHelperPath
 
 $configDirectory = $null
 
@@ -51,6 +64,37 @@ function Get-JsonPropertyValue {
     }
 
     return $property.Value
+}
+
+function Resolve-ConfiguredWorkingRoot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Label,
+        [AllowNull()]
+        [string]$DirectPath,
+        [AllowNull()]
+        [string]$DirectBaseRoot,
+        [AllowNull()]
+        [string]$LocalPath,
+        [AllowNull()]
+        [string]$ArchivePath,
+        [AllowNull()]
+        [string]$ArchiveBaseRoot,
+        [AllowNull()]
+        [string]$MountRoot,
+        [AllowNull()]
+        [string]$MountScript,
+        [AllowNull()]
+        [string]$StagingRoot,
+        [switch]$ForceRestage,
+        [switch]$DryRun
+    )
+
+    $resolvedDirectPath = if ([string]::IsNullOrWhiteSpace($DirectPath)) { $null } else { Resolve-ConfigPathValue -Value $DirectPath -BaseRoot $DirectBaseRoot }
+    $resolvedLocalPath = if ([string]::IsNullOrWhiteSpace($LocalPath)) { $null } else { Resolve-ConfigPathValue -Value $LocalPath -BaseRoot $null }
+    $resolvedArchivePath = if ([string]::IsNullOrWhiteSpace($ArchivePath)) { $null } else { Resolve-ConfigPathValue -Value $ArchivePath -BaseRoot $ArchiveBaseRoot }
+
+    return Resolve-WoWClientWorkingRoot -Label $Label -DirectPath $resolvedDirectPath -PreferredLocalPath $resolvedLocalPath -ArchiveSourcePath $resolvedArchivePath -MountRoot $MountRoot -MountScript $MountScript -StagingRoot $StagingRoot -ForceRestage:$ForceRestage -DryRun:$DryRun
 }
 
 function Invoke-LoggedCommand {
@@ -151,40 +195,79 @@ $configDirectory = Split-Path -Parent $resolvedConfigPath
 
 $config = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
 $configArchiveRoot = Get-JsonPropertyValue -Object $config -Name 'archive_root'
+$configMountRoot = Get-JsonPropertyValue -Object $config -Name 'mount_root'
+$configMountScript = Get-JsonPropertyValue -Object $config -Name 'mount_script'
+$configStagingRoot = Get-JsonPropertyValue -Object $config -Name 'staging_root'
 $configDefaultOutputRoot = Get-JsonPropertyValue -Object $config -Name 'default_output_root'
 $configLegacyOutputRoot = Get-JsonPropertyValue -Object $config -Name 'output_root'
 $configListfilePath = Get-JsonPropertyValue -Object $config -Name 'listfile_path'
 $configHarvestAfterExport = Get-JsonPropertyValue -Object $config -Name 'harvest_after_export'
+$configPruneStagedClients = Get-JsonPropertyValue -Object $config -Name 'prune_staged_clients'
 
-$resolvedArchiveRoot = if ($configArchiveRoot) { Resolve-ConfigPathValue -Value ([string]$configArchiveRoot) -BaseRoot $null } else { $null }
+$resolvedArchiveRoot = if ($ArchiveRoot) { Resolve-ConfigPathValue -Value $ArchiveRoot -BaseRoot $null } elseif ($configArchiveRoot) { Resolve-ConfigPathValue -Value ([string]$configArchiveRoot) -BaseRoot $null } else { $null }
+$resolvedMountRoot = if ($ArchiveMountRoot) { Resolve-ConfigPathValue -Value $ArchiveMountRoot -BaseRoot $null } elseif ($configMountRoot) { Resolve-ConfigPathValue -Value ([string]$configMountRoot) -BaseRoot $null } else { $null }
+$resolvedMountScript = if ($MountScript) { Resolve-ConfigPathValue -Value $MountScript -BaseRoot $null } elseif ($configMountScript) { Resolve-ConfigPathValue -Value ([string]$configMountScript) -BaseRoot $null } else { $null }
+$resolvedStagingRoot = if ($StagingRoot) { Resolve-ConfigPathValue -Value $StagingRoot -BaseRoot $null } elseif ($configStagingRoot) { Resolve-ConfigPathValue -Value ([string]$configStagingRoot) -BaseRoot $null } else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\output\tmp\wowarchive-clients')) }
+$resolvedLegacyPathBase = if (-not [string]::IsNullOrWhiteSpace($resolvedArchiveRoot)) { $resolvedArchiveRoot } else { $resolvedMountRoot }
+$resolvedArchiveSourceBase = if (-not [string]::IsNullOrWhiteSpace($resolvedMountRoot)) { $resolvedMountRoot } else { $resolvedArchiveRoot }
 $resolvedOutputRoot = if ($OutputRoot) { Resolve-ConfigPathValue -Value $OutputRoot -BaseRoot $null } elseif ($configDefaultOutputRoot) { Resolve-ConfigPathValue -Value ([string]$configDefaultOutputRoot) -BaseRoot $null } elseif ($configLegacyOutputRoot) { Resolve-ConfigPathValue -Value ([string]$configLegacyOutputRoot) -BaseRoot $null } else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\datasets')) }
 $resolvedListfilePath = if ($ListfilePath) { Resolve-ConfigPathValue -Value $ListfilePath -BaseRoot $null } elseif ($configListfilePath) { Resolve-ConfigPathValue -Value ([string]$configListfilePath) -BaseRoot $null } else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\test_data\community-listfile-withcapitals.csv')) }
 $harvestConfigured = if ($null -ne $configHarvestAfterExport) { [bool]$configHarvestAfterExport } else { $true }
 $harvestAfterExport = -not $SkipHarvest -and $harvestConfigured
+$pruneConfigured = if ($null -ne $configPruneStagedClients) { [bool]$configPruneStagedClients } else { $false }
+$shouldPruneStagedClients = $PruneStagedClients -or $pruneConfigured
 
 if (-not $DryRun) {
     New-Item -ItemType Directory -Path $resolvedOutputRoot -Force | Out-Null
 }
 
 $jobFailures = 0
+$stagedLabelsToKeep = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
 foreach ($client in $config.clients) {
     $clientLabelValue = Get-JsonPropertyValue -Object $client -Name 'label'
     $clientOutputRootValue = Get-JsonPropertyValue -Object $client -Name 'output_root'
     $clientGenerateDepth = Get-JsonPropertyValue -Object $client -Name 'generate_depth'
     $clientMinimapRootValue = Get-JsonPropertyValue -Object $client -Name 'minimap_root'
+    $clientLocalPathValue = Get-JsonPropertyValue -Object $client -Name 'local_client_path'
+    $clientArchivePathValue = Get-JsonPropertyValue -Object $client -Name 'archive_client_path'
+    $clientLocalMinimapRootValue = Get-JsonPropertyValue -Object $client -Name 'local_minimap_root'
+    $clientArchiveMinimapRootValue = Get-JsonPropertyValue -Object $client -Name 'archive_minimap_root'
     $clientAllMapsValue = Get-JsonPropertyValue -Object $client -Name 'all_maps'
 
     $clientLabel = if ($clientLabelValue) { [string]$clientLabelValue } else { ([string]$client.version).Replace('.', '_') }
     $clientOutputRoot = if ($clientOutputRootValue) { Resolve-ConfigPathValue -Value ([string]$clientOutputRootValue) -BaseRoot $null } else { Join-Path $resolvedOutputRoot $clientLabel }
-    $resolvedClientPath = Resolve-ConfigPathValue -Value ([string]$client.client_path) -BaseRoot $resolvedArchiveRoot
-    $resolvedMinimapRoot = if ($clientMinimapRootValue) { Resolve-ConfigPathValue -Value ([string]$clientMinimapRootValue) -BaseRoot $resolvedArchiveRoot } else { $null }
+
+    $clientRootInfo = Resolve-ConfiguredWorkingRoot -Label $clientLabel -DirectPath ([string](Get-JsonPropertyValue -Object $client -Name 'client_path')) -DirectBaseRoot $resolvedLegacyPathBase -LocalPath ([string]$clientLocalPathValue) -ArchivePath ([string]$clientArchivePathValue) -ArchiveBaseRoot $resolvedArchiveSourceBase -MountRoot $resolvedMountRoot -MountScript $resolvedMountScript -StagingRoot $resolvedStagingRoot -ForceRestage:$ForceRestage -DryRun:$DryRun
+    $resolvedClientPath = $clientRootInfo.WorkingPath
+
+    $minimapRootInfo = $null
+    $resolvedMinimapRoot = $null
+    if ($clientMinimapRootValue -or $clientLocalMinimapRootValue -or $clientArchiveMinimapRootValue) {
+        $minimapRootInfo = Resolve-ConfiguredWorkingRoot -Label ("{0}-minimap" -f $clientLabel) -DirectPath ([string]$clientMinimapRootValue) -DirectBaseRoot $resolvedLegacyPathBase -LocalPath ([string]$clientLocalMinimapRootValue) -ArchivePath ([string]$clientArchiveMinimapRootValue) -ArchiveBaseRoot $resolvedArchiveSourceBase -MountRoot $resolvedMountRoot -MountScript $resolvedMountScript -StagingRoot $resolvedStagingRoot -ForceRestage:$ForceRestage -DryRun:$DryRun
+        $resolvedMinimapRoot = $minimapRootInfo.WorkingPath
+    }
+
+    if ($clientRootInfo.Staged) {
+        [void]$stagedLabelsToKeep.Add($clientLabel)
+    }
+
+    if ($minimapRootInfo -and $minimapRootInfo.Staged) {
+        [void]$stagedLabelsToKeep.Add(("{0}-minimap" -f $clientLabel))
+    }
 
     if (-not $DryRun) {
         New-Item -ItemType Directory -Path $clientOutputRoot -Force | Out-Null
     }
 
-    Write-Host "Client $clientLabel -> $resolvedClientPath" -ForegroundColor Yellow
+    Write-Host ("Client {0} -> {1} [{2}]" -f $clientLabel, $resolvedClientPath, $clientRootInfo.SourceType) -ForegroundColor Yellow
+    if ($clientRootInfo.Staged) {
+        Write-Host ("  staged from: {0}" -f $clientRootInfo.SourcePath) -ForegroundColor DarkYellow
+    }
+    if ($resolvedMinimapRoot) {
+        $minimapMode = if ($minimapRootInfo) { $minimapRootInfo.SourceType } else { 'direct' }
+        Write-Host ("  minimap -> {0} [{1}]" -f $resolvedMinimapRoot, $minimapMode) -ForegroundColor DarkYellow
+    }
 
     $mapsToProcess = @()
     $clientAllMaps = $false
@@ -210,7 +293,8 @@ foreach ($client in $config.clients) {
     else {
         $mapsToProcess = @($client.maps)
     }
-
+            $mapDiscoveryClientPath = if ($DryRun -and $clientRootInfo.Staged -and -not (Test-Path $resolvedClientPath)) { $clientRootInfo.SourcePath } else { $resolvedClientPath }
+            $mapsToProcess = Resolve-ClientMapList -ClientPath $mapDiscoveryClientPath -ProjectPath $ProjectPath -Configuration $Configuration -ListfilePath $resolvedListfilePath
     foreach ($map in $mapsToProcess) {
         $datasetOutput = Join-Path $clientOutputRoot $map
         $datasetJsonDir = Join-Path $datasetOutput 'dataset'
@@ -280,6 +364,13 @@ foreach ($client in $config.clients) {
                 continue
             }
         }
+    }
+}
+
+if ($shouldPruneStagedClients) {
+    $removedStages = @(Remove-StaleWoWArchiveStages -StagingRoot $resolvedStagingRoot -KeepLabels @($stagedLabelsToKeep) -DryRun:$DryRun)
+    if ($removedStages.Count -gt 0) {
+        Write-Host ("Pruned {0} stale staged client(s)." -f $removedStages.Count) -ForegroundColor DarkGreen
     }
 }
 

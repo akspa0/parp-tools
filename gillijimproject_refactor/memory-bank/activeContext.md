@@ -1,5 +1,53 @@
 # Active Context
 
+## Apr 14, 2026 - Archive-backed corpus export now stages mounted clients through both the PowerShell workflow and direct `ml-corpus`
+
+- the archive workflow is no longer just documentation:
+	- `scripts/wowarchive_client_staging.ps1` now contains reusable mount or stage or prune helpers for WoWArchive-backed client roots
+	- `scripts/stage_wowarchive_client.ps1` is the standalone helper for staging one mounted client and pruning stale staged copies
+	- `scripts/export_ml_corpus.ps1` now prefers fixed local roots when present and otherwise stages archive-backed client roots into `output/tmp/wowarchive-clients` before map discovery or export
+	- `src/WoWMapConverter/WoWMapConverter.Cli/Program.cs` `ml-corpus` now honors the same `mount_root` or `mount_script` or `staging_root` or `prune_staged_clients` policy directly instead of relying on the PowerShell wrapper
+- current config surface for that workflow now includes:
+	- top-level `mount_root`, `mount_script`, `staging_root`, and `prune_staged_clients`
+	- per-client `local_client_path`, `archive_client_path`, `local_minimap_root`, `archive_minimap_root`, and `all_maps`
+	- `scripts/ml_corpus_fixed_clients.json` now uses explicit `local_client_path` plus `archive_client_path` entries for the verified WoWArchive-backed 0.x or 3.x clients, while `4_0_0_11927` stays local-only because the mounted `0.X-3.X` archive does not appear to contain that build
+- validated state in this chat:
+	- synthetic mounted-client smoke proved stage plus prune behavior through `stage_wowarchive_client.ps1`
+	- synthetic `export_ml_corpus.ps1 -DryRun` proved archive-backed config entries resolve to the staged working root before `ml-export` would run
+	- real-data direct CLI dry-run against mounted `3.X_Pre-Release_Windows_enUS_3.0.1.8303/World of Warcraft` proved `archive_client_path` resolves to the staged working root and reports the mounted source path explicitly
+	- synthetic direct CLI `--harvest-only` proof with `all_maps: true` staged a fake archive-backed client, discovered `SynthMap`, and pruned a stale staged client directory end to end
+- important boundary:
+	- live `all_maps` discovery is still expensive when you force a dry-run directly against a mounted archive source because the dry-run intentionally avoids the actual copy step; the intended fast path remains the real staged run
+
+## Apr 14, 2026 - WoWArchive should be treated as a mounted source plus staged-client workflow
+
+- user provided a new canonical client-access rule for broad multi-build work:
+	- source large client coverage from `G:\WoW\WoWArchive-0.X-3.X`
+	- mount it with `G:\WoW\WoWArchive-0.X-3.X\MountAll.bat`
+	- treat the mounted archive as the source surface only, not the preferred processing root
+	- for repeated or wide export or audit or inspect or training-prep work, copy the required client into `output/tmp/wowarchive-clients/` first
+	- delete staged clients that are no longer needed after the run
+- practical implication for continuations:
+	- stop treating direct mounted-archive reads as the default path for large archive-backed jobs
+	- keep validation notes explicit about whether a proof used fixed `H:\CLIENTS\...` roots, direct mounted paths, or staged copies
+	- route future client-root staging questions through `.github/skills/wowarchive-client-staging/SKILL.md`
+
+## Apr 14, 2026 - Dataset-builder convergence is now an explicit workflow rule
+
+- user directive is now explicit:
+	- all shared dataset or export or terrain-supervision seams should converge into `wow-viewer`
+	- the intended long-range dataset-builder surface is a new `wow-viewer` tool over shared libraries, not more architecture inside `WoWMapConverter`
+	- the user-facing target should be shared library plus CLI plus viewer/editor workflows plus dataset explorer plus supervised training tooling over the same contracts
+	- the workflow must stay Bring Your Own Data; do not ship copyrighted corpora, trained models, or model outputs
+	- CUDA can remain an early host, but the long-range orchestration shape should not hard-lock the design away from Vulkan or OpenCL or MLX or other local runners
+- practical implication for the next continuation:
+	- stop treating `WoWMapConverter.Core/VLM` fixes as the default path when the real issue is shared ownership, new capability, or artifact semantics
+	- route dataset-builder planning through `.github/prompts/wow-viewer-dataset-builder-plan.prompt.md` and the continuity file `plans/wow_viewer_dataset_builder_tool_plan_2026-04-14.md`
+	- use `WoWMapConverter` and `MdxViewer` dataset/export code as extraction or compatibility references only unless a bounded legacy hotfix is explicitly requested
+- important boundary:
+	- this is a workflow and ownership correction only
+	- no `wow-viewer` dataset-builder tool implementation or full shared-contract cutover is landed yet
+
 ## Apr 13, 2026 - Fresh-chat continuation should resume with the full multi-client dataset refresh and training run, not more narrow probes
 
 - explicit user directive for the next chat:
