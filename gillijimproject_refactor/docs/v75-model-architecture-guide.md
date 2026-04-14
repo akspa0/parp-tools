@@ -14,6 +14,7 @@ This is the active architecture guide for the terrain regressor after the datase
 - Dataset contract bump: terrain-only minimap precedence
 - Early-development corpus anchors: `0.5.3`, `0.5.5`, and `0.6.0`
 - Brush utilization: brush-aware train sampler biases toward tiles with trusted brush imprint evidence
+- Prefab status: deferred and review-only, not part of the active training contract
 
 ## What Changed From V7.4
 
@@ -192,56 +193,20 @@ The trainer now reads per-tile brush stats from `brush_imprints/brush_imprint_ma
 
 This is intentionally a sampling bias, not a hard filter. The brush archaeology is good enough to steer training toward constructive terrain-edit evidence, but not complete enough to become the sole supervision path.
 
-## Prefab Library
+## Prefab Status
 
-V7.6 needs a dataset-side prefab library, not just another per-tile auxiliary mask.
+Prefab work exists in the repo, but it is not part of the active trusted training contract.
 
-The active seam for that library is now `src/WoWMapConverter/scripts/build_prefab_library.py`.
+Current rule:
 
-It treats brush-group discoveries as small terrain objects and writes a deduplicated prefab surface back under each dataset root:
+- keep prefab tooling available for research, review, and future dataset exploration
+- do not present prefab outputs as part of the current grounded supervision story
+- do not describe prefab surfaces as active model inputs
+- keep brush harvesting as the stronger and more trusted patch-scale archaeology channel for the current model line
 
-- `prefab_library/prefab_library_manifest.json`
-- `prefab_library/prefab_library.json`
-- `prefab_library/prefab_instances.json`
-- one JSON object per unique prefab under `prefab_library/prefabs/`
+This distinction matters because the project needs to be legible to readers who are worried the corpus is synthetic. The strongest grounded story today is still the exported tile corpus plus deterministic brush harvesting over those tiles.
 
-The active review surface for those outputs is now `src/WoWMapConverter/scripts/render_prefab_review_report.py`.
-
-It renders a visual review bundle beside any prefab-library output:
-
-- `review_report/index.html`
-- `review_report/contact_sheets/*.png`
-- `review_report/thumbnails/*.png`
-
-That report groups harvested prefabs by patch-count size bucket and shows cropped source-minimap thumbnails for representative occurrences so harvest quality can be approved or rejected visually instead of by hash alone.
-
-The active 3D exploration surface is now `src/WoWMapConverter/scripts/export_prefab_obj_library.py`.
-
-It writes one OBJ bundle per detected prefab from an existing prefab-library output:
-
-- `obj_library/prefab_XXXXX/prefab_XXXXX.obj`
-- `obj_library/prefab_XXXXX/prefab_XXXXX.mtl`
-- `obj_library/prefab_XXXXX/prefab_XXXXX_texture.png`
-- `obj_library/prefab_XXXXX/prefab_XXXXX.json`
-
-Those bundles currently export the representative prefab terrain mesh from the harvested height grid plus simple marker geometry for any nearby projected objects when the sampled prefab cluster contains them.
-
-Each prefab occurrence currently fuses four kinds of evidence:
-
-- patch-scale terrain footprint from the harvested brush group
-- normalized local height grid with a multiscale fractal-detail score
-- chunk-layer texture and alpha-layout signature for the touched terrain region
-- nearby object clustering projected into tile-local patch space
-
-This makes the prefab library usable as a structural dataset surface instead of a loose note about interesting tiles. Repeated terrain motifs can now be carried around as explicit objects with their own signatures, occurrences, and nearby object layouts.
-
-Current proof boundary:
-
-- the builder was validated on real `original_development/development` brush groups around `development_28_40`
-- the emitted prefab objects already capture nearby Azjol-Nerub column layouts and fractal-detail scores for those groups
-- the proofed tiles did not expose non-empty stitched `alpha_masks` or non-null per-layer `alpha_bits`, so the current alpha signal is limited to the available chunk-layer layout metadata on those roots
-
-That last point matters. The library seam now exists, but true alpha-cut prefab recovery still depends on richer exported alpha payloads being present in the dataset roots we build from.
+If future work raises prefab validation to the same standard, it can return as a first-class dataset channel. For now it stays deferred.
 
 ## Corpus Policy
 

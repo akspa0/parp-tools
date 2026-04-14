@@ -1,5 +1,24 @@
 # Progress
 
+### Apr 14, 2026 - Dataset-grounding docs now explain the real harvest pipeline and defer prefab from the trusted supervision story
+
+- added a dedicated provenance doc at `gillijimproject_refactor/docs/ML_DATASET_GROUNDING.md`
+	- explains the real client roots and checked-in development root that seed `datasets/`
+	- explains the staged harvest flow through `export_ml_corpus.ps1`, `ml-list-maps`, `ml-export`, `ml-harvest`, `ml-harvest-brushes`, and `ml-audit-signals`
+	- enumerates the active V7.5.1 channels and states which ones are raw harvested assets versus deterministic derived channels
+	- explicitly states that GAN is a training-time refinement objective, not the source of the dataset
+- updated entry-point docs so readers can actually find that story:
+	- `gillijimproject_refactor/README.md`
+	- `gillijimproject_refactor/docs/VLM_DATASET_EXPORTER.md`
+	- `gillijimproject_refactor/docs/VLM_Training_Guide.md`
+	- `gillijimproject_refactor/docs/v75-model-architecture-guide.md`
+- active policy correction captured in docs:
+	- brush harvesting stays the trusted active auxiliary channel for the terrain model
+	- prefab tooling remains available, but it is now documented as deferred or experimental and should not be presented as part of the current grounded supervision contract
+- important boundary:
+	- this is documentation and continuity correction only
+	- it does not newly validate prefab outputs or change the underlying exporter or trainer behavior
+
 ### Apr 14, 2026 - Corpus export now stages archive-backed clients locally before heavy reads in both PowerShell and direct CLI paths
 
 - implemented the first real archive-staging cutover instead of just documenting it:

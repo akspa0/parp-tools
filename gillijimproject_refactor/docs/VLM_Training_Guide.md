@@ -6,6 +6,19 @@ For the specific `MCSH`/missing-object problem statement, also read [gillijimpro
 
 This guide details the process of training a Vision Language Model (Qwen2-VL via Unsloth) to understand and reconstruct World of Warcraft terrain data.
 
+## Reality Grounding
+
+Before treating any training run as meaningful, read `docs/ML_DATASET_GROUNDING.md`.
+
+The active claim for this project is not that a GAN can invent plausible terrain. The active claim is that the model is trained against supervision harvested from real client data and deterministic cleanup or analysis passes over that real data.
+
+Practical rules:
+
+- treat `datasets/` as the authoritative harvested corpus surface
+- treat GAN as a training-time refinement objective, not a dataset source
+- treat the brush channel as active grounded supervision
+- treat the prefab channel as experimental and deferred from the trusted training contract
+
 ## Prerequisites
 
 - **NVIDIA GPU**: RTX 30xx/40xx recommended (8GB+ VRAM).
@@ -101,7 +114,8 @@ Current precedence in `train_v7.py` and `infer_v7.py`:
 - PM4 masks
 - liquid masks
 - stitched alpha masks
-- stitched shadow maps
+
+Exported `MCSH` shadow maps remain useful as diagnostics, but they are not currently removed as terrain contamination in the active `terrain_only_minimap` path.
 
 This is the main semantic bump from V7.4 to V7.5. The model shape stays stable, but the preferred RGB evidence is more terrain-focused and less polluted by baked lighting, blend overlays, and object occlusion.
 
@@ -141,6 +155,14 @@ Current behavior:
 - the current terrain model therefore sees one coarse brush-imprint mask, but not yet grouped brush identity or a learned brush embedding
 
 This is intentionally the smallest safe integration step. It proves the terrain model can consume a brush-derived context channel while the separate brush dataset and future brush-specific model are still being built.
+
+### Prefab Status
+
+Prefab harvesting is not part of the current trusted training contract.
+
+The repo still contains prefab tooling and review surfaces, but until that path is validated to the same standard as the brush harvest it should be treated as experimental dataset research rather than active supervision.
+
+If you are explaining what grounds the current terrain model in reality, point to the exported tile corpus and the brush-imprint pass, not the prefab outputs.
 
 ### Geometry-First Default Training Strategy
 

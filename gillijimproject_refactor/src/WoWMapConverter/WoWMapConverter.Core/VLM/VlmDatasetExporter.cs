@@ -3282,26 +3282,20 @@ public class VlmDatasetExporter
         if (projectionMode.UseNormalized || localPolygon.Count < 3)
             return false;
 
-        float scale = float.IsFinite(obj.Scale) && obj.Scale > 0f ? obj.Scale : 1f;
-        float angle = obj.RotZ * MathF.PI / 180f;
-        float cos = MathF.Cos(angle);
-        float sin = MathF.Sin(angle);
-        float baseSecondary = GetProjectionSecondaryCoordinate(obj, projectionMode.SecondaryAxis);
+        Vector2[] transformedPolygon = TransformFootprintPolygonToWorld(localPolygon, obj, projectionMode);
+        if (transformedPolygon.Length < 3)
+            return false;
 
         float minU = float.MaxValue;
         float minV = float.MaxValue;
         float maxU = float.MinValue;
         float maxV = float.MinValue;
-        projectedPolygon = new Vector2[localPolygon.Count];
+        projectedPolygon = new Vector2[transformedPolygon.Length];
 
-        for (int index = 0; index < localPolygon.Count; index++)
+        for (int index = 0; index < transformedPolygon.Length; index++)
         {
-            Vector2 localPoint = localPolygon[index];
-            float scaledX = localPoint.X * scale;
-            float scaledY = localPoint.Y * scale;
-            float worldA = obj.X + (scaledX * cos) - (scaledY * sin);
-            float worldB = baseSecondary + (scaledX * sin) + (scaledY * cos);
-            (float u, float v) = ProjectToTileUv(worldA, worldB, tileX, tileY, projectionMode);
+            Vector2 worldPoint = transformedPolygon[index];
+            (float u, float v) = ProjectToTileUv(worldPoint.X, worldPoint.Y, tileX, tileY, projectionMode);
             if (!IsFinite(u) || !IsFinite(v))
                 return false;
 
@@ -3320,6 +3314,42 @@ public class VlmDatasetExporter
         }
 
         return true;
+    }
+
+    internal static Vector2[] TransformFootprintPolygonToWorldForTesting(IReadOnlyList<Vector2> localPolygon, VlmObjectPlacement obj, bool secondaryAxisIsZ)
+    {
+        ObjectProjectionMode projectionMode = new(
+            secondaryAxisIsZ ? ObjectProjectionAxis.Z : ObjectProjectionAxis.Y,
+            UseMapOrigin: false,
+            UseNormalized: false);
+        return TransformFootprintPolygonToWorld(localPolygon, obj, projectionMode);
+    }
+
+    private static Vector2[] TransformFootprintPolygonToWorld(
+        IReadOnlyList<Vector2> localPolygon,
+        VlmObjectPlacement obj,
+        ObjectProjectionMode projectionMode)
+    {
+        float scale = float.IsFinite(obj.Scale) && obj.Scale > 0f ? obj.Scale : 1f;
+        float rotationDegrees = projectionMode.SecondaryAxis == ObjectProjectionAxis.Z ? obj.RotY : obj.RotZ;
+        float angle = rotationDegrees * MathF.PI / 180f;
+        float cos = MathF.Cos(angle);
+        float sin = MathF.Sin(angle);
+        float baseSecondary = GetProjectionSecondaryCoordinate(obj, projectionMode.SecondaryAxis);
+
+        Vector2[] transformedPolygon = new Vector2[localPolygon.Count];
+
+        for (int index = 0; index < localPolygon.Count; index++)
+        {
+            Vector2 localPoint = localPolygon[index];
+            float scaledX = localPoint.X * scale;
+            float scaledY = localPoint.Y * scale;
+            float worldA = obj.X + (scaledX * cos) - (scaledY * sin);
+            float worldB = baseSecondary + (scaledX * sin) + (scaledY * cos);
+            transformedPolygon[index] = new Vector2(worldA, worldB);
+        }
+
+        return transformedPolygon;
     }
 
     private static float GetProjectionSecondaryCoordinate(VlmObjectPlacement obj, ObjectProjectionAxis secondaryAxis)

@@ -17,6 +17,16 @@ The ML dataset package is meant to be a durable interchange surface for:
 - curation and dedupe tooling that needs image signatures and coverage summaries
 - viewer or reconstruction tooling that needs the full per-tile metadata, not just baked PNGs
 
+## Reality Grounding
+
+This package is the traceable record of harvested terrain supervision. It is not meant to hide provenance behind training jargon.
+
+- dataset roots are built from real client roots or checked-in real map roots
+- derived helper channels are acceptable only when they are deterministic transforms of those harvested assets
+- GAN outputs, preview outputs, and experimental prefab outputs are not part of the package's ground-truth contract
+
+For the end-to-end provenance story and the active brush-vs-prefab policy, see `docs/ML_DATASET_GROUNDING.md`.
+
 ## Current Root Layout
 
 An exported dataset root can contain the following directories and files:

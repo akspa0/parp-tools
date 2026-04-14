@@ -14,6 +14,14 @@ This README is intentionally high level. The detailed viewer workflow lives in [
   - a WMO and MDX/M2 inspection/export tool
   - a front end for several converter and validation utilities already in this repo
 
+## ML Dataset Docs
+
+The terrain-model dataset and training path now have a dedicated grounding document so the corpus provenance is explicit instead of implied.
+
+- [docs/ML_DATASET_GROUNDING.md](docs/ML_DATASET_GROUNDING.md) explains the real client roots, archive staging workflow, active harvested channels, and why GAN is not the source of the dataset.
+- [docs/VLM_DATASET_EXPORTER.md](docs/VLM_DATASET_EXPORTER.md) documents the dataset package contract and per-tile payload layout.
+- [docs/VLM_Training_Guide.md](docs/VLM_Training_Guide.md) documents the current training workflow over that harvested corpus.
+
 ## v0.4.7.1 release snapshot
 
 - `parp-tools WoW Viewer` `0.4.7.1` is the current release target in this tree.

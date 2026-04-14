@@ -1,5 +1,20 @@
 # Active Context
 
+## Apr 14, 2026 - Dataset grounding docs now make the real-data provenance and channel policy explicit
+
+- documentation now has a dedicated grounding surface at:
+	- `gillijimproject_refactor/docs/ML_DATASET_GROUNDING.md`
+	- linked from `gillijimproject_refactor/README.md`, `docs/VLM_DATASET_EXPORTER.md`, `docs/VLM_Training_Guide.md`, and `docs/v75-model-architecture-guide.md`
+- active public framing is now explicit:
+	- the terrain corpus is harvested from real client roots or the checked-in real `original_development` split-root seam
+	- GAN is a training-time refinement objective, not a dataset generator and not a source of ground-truth supervision
+	- deterministic derived channels are allowed only when they are reproducible transforms over harvested real tile assets
+- active channel policy is now explicit too:
+	- brush harvesting remains the trusted patch-scale archaeology channel and part of the current grounded training story
+	- prefab work remains in the repo as research or review tooling, but it is now explicitly deferred from the trusted active supervision narrative until it is validated to the same standard as brush harvest
+- important boundary:
+	- `terrain_only_minimap` is still a derived cleaned surface rather than a raw capture, but it is documented as a deterministic cleanup over real exported minimap plus mask channels rather than as synthetic label generation
+
 ## Apr 14, 2026 - Archive-backed corpus export now stages mounted clients through both the PowerShell workflow and direct `ml-corpus`
 
 - the archive workflow is no longer just documentation:

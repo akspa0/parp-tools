@@ -3,6 +3,7 @@ using Xunit;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Text;
+using System.Numerics;
 using WowViewer.Core.IO.Files;
 
 namespace WoWMapConverter.Core.Tests.VLM;
@@ -146,6 +147,69 @@ public sealed class VlmDatasetExporterTests
         Assert.Equal(
             ["stitched/tile_alpha_0.png", "stitched/tile_alpha_1.png"],
             filtered);
+    }
+
+    [Fact]
+    public void TransformFootprintPolygonToWorldForTesting_UsesRotYForXzFootprints()
+    {
+        Vector2[] localPolygon =
+        [
+            new Vector2(1f, 0f),
+            new Vector2(0f, 1f),
+            new Vector2(-1f, 0f),
+        ];
+        VlmObjectPlacement obj = new(
+            Name: "test",
+            NameId: 1,
+            UniqueId: 1,
+            X: 100f,
+            Y: 200f,
+            Z: 300f,
+            RotX: 0f,
+            RotY: 90f,
+            RotZ: 0f,
+            Scale: 1f,
+            Category: "m2");
+
+        Vector2[] transformed = VlmDatasetExporter.TransformFootprintPolygonToWorldForTesting(localPolygon, obj, secondaryAxisIsZ: true);
+
+        Assert.Equal(3, transformed.Length);
+        Assert.Equal(100f, transformed[0].X, 3);
+        Assert.Equal(301f, transformed[0].Y, 3);
+        Assert.Equal(99f, transformed[1].X, 3);
+        Assert.Equal(300f, transformed[1].Y, 3);
+        Assert.Equal(100f, transformed[2].X, 3);
+        Assert.Equal(299f, transformed[2].Y, 3);
+    }
+
+    [Fact]
+    public void TransformFootprintPolygonToWorldForTesting_UsesRotZForXyFallbackFootprints()
+    {
+        Vector2[] localPolygon =
+        [
+            new Vector2(1f, 0f),
+            new Vector2(0f, 1f),
+        ];
+        VlmObjectPlacement obj = new(
+            Name: "test",
+            NameId: 1,
+            UniqueId: 1,
+            X: 100f,
+            Y: 200f,
+            Z: 300f,
+            RotX: 0f,
+            RotY: 0f,
+            RotZ: 90f,
+            Scale: 1f,
+            Category: "m2");
+
+        Vector2[] transformed = VlmDatasetExporter.TransformFootprintPolygonToWorldForTesting(localPolygon, obj, secondaryAxisIsZ: false);
+
+        Assert.Equal(2, transformed.Length);
+        Assert.Equal(100f, transformed[0].X, 3);
+        Assert.Equal(201f, transformed[0].Y, 3);
+        Assert.Equal(99f, transformed[1].X, 3);
+        Assert.Equal(200f, transformed[1].Y, 3);
     }
 
     [Theory]
