@@ -171,6 +171,8 @@ internal static class AssetProbe
         int failedSkinCount = 0;
         Exception? lastSkinFailure = null;
 
+        ReplaceableTextureResolver? replaceableResolver = TryCreateReplaceableTextureResolver(dataSource, buildVersion);
+
         foreach (string skinPath in skinCandidates)
         {
             byte[]? skinBytes = dataSource.ReadFile(skinPath)
@@ -186,7 +188,7 @@ internal static class AssetProbe
             {
                 var runtimeModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, skinBytes, normalizedModelPath, buildVersion);
                 Console.WriteLine($"[M2-ADAPT-PROBE] Selected skin: {skinPath}");
-                PrintRendererEquivalentDiagnostics(runtimeModel, normalizedModelPath, skinPath);
+                    PrintRendererEquivalentDiagnostics(runtimeModel, normalizedModelPath, skinPath, replaceableResolver, null);
                 return;
             }
             catch (Exception ex)
@@ -201,7 +203,7 @@ internal static class AssetProbe
         {
             Console.WriteLine("[M2-ADAPT-PROBE] No external .skin resolved; trying embedded root-profile fallback.");
             var runtimeModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, null, normalizedModelPath, buildVersion);
-            PrintRendererEquivalentDiagnostics(runtimeModel, normalizedModelPath, "<embedded-root-profile>");
+                PrintRendererEquivalentDiagnostics(runtimeModel, normalizedModelPath, "<embedded-root-profile>", replaceableResolver, null);
             return;
         }
 
@@ -276,8 +278,11 @@ internal static class AssetProbe
             lastSkinFailure);
     }
 
-    private static void PrintRendererEquivalentDiagnostics(MdxFile runtimeModel, string modelPath, string selectedSkinPath)
+    private static void PrintRendererEquivalentDiagnostics(MdxFile runtimeModel, string modelPath, string selectedSkinPath, ReplaceableTextureResolver? replaceableResolver, int? replaceableDisplayIndex)
     {
+        replaceableDisplayIndex ??= TrySelectReplaceableDisplayIndex(replaceableResolver, modelPath, runtimeModel);
+        IReadOnlyCollection<uint>? defaultCharacterGroups = replaceableResolver?.GetDefaultCharacterSelectionGroups(modelPath);
+
         int totalGeosets = runtimeModel.Geosets.Count;
         int validGeosets = 0;
         int indexRejected = 0;
@@ -310,6 +315,11 @@ internal static class AssetProbe
         Console.WriteLine(
             $"[M2-DIAG-CPU] {modelPath}: {totalGeosets} geosets, {validGeosets} valid, {indexRejected} index-rejected, {emptySkipped} empty-skipped (skin={selectedSkinPath})");
         Console.WriteLine($"[M2-DIAG-CPU] {WarcraftNetM2Adapter.SummarizeGeometry(runtimeModel)}");
+        if (defaultCharacterGroups != null && defaultCharacterGroups.Count > 0)
+        {
+            Console.WriteLine(
+                $"[M2-DIAG-CHAR-GROUPS] default={string.Join(",", defaultCharacterGroups.OrderBy(static value => value))}");
+        }
 
         int maxTextureSummaries = Math.Min(runtimeModel.Textures.Count, 8);
         for (int textureIndex = 0; textureIndex < maxTextureSummaries; textureIndex++)
@@ -317,6 +327,19 @@ internal static class AssetProbe
             var texture = runtimeModel.Textures[textureIndex];
             Console.WriteLine(
                 $"[M2-DIAG-TEX] texture={textureIndex} replaceable={texture.ReplaceableId} flags={texture.Flags} path={texture.Path}");
+
+            if (texture.ReplaceableId > 0 && replaceableResolver != null)
+            {
+                string? resolved = replaceableResolver.Resolve(modelPath, texture.ReplaceableId, replaceableDisplayIndex ?? 0, 0, 0);
+                Console.WriteLine(
+                    $"[M2-DIAG-TEX-RESOLVE] texture={textureIndex} resolved={(resolved ?? "<null>")} displayIndex={(replaceableDisplayIndex?.ToString() ?? "n/a")}");
+
+                foreach (var candidate in replaceableResolver.GetReplaceableResolutionCandidates(modelPath, texture.ReplaceableId, 0, 0, 0).Take(6))
+                {
+                    Console.WriteLine(
+                        $"[M2-DIAG-TEX-CAND] texture={textureIndex} source={candidate.Source} exists={candidate.Exists} path={candidate.Path}");
+                }
+            }
         }
 
         var animator = new MdxAnimator(runtimeModel);
@@ -333,13 +356,14 @@ internal static class AssetProbe
                 $"[M2-DIAG-SEQ] seq={sequenceIndex} name={sequence.Name} range={sequence.Time.Start}-{sequence.Time.End} tIn={stats.TranslationKeysInSequence}/{stats.TranslationKeysTotal} rIn={stats.RotationKeysInSequence}/{stats.RotationKeysTotal} sIn={stats.ScalingKeysInSequence}/{stats.ScalingKeysTotal} min={stats.MinKeyTime} max={stats.MaxKeyTime}");
         }
 
-        int maxGeosetSummaries = Math.Min(runtimeModel.Geosets.Count, 12);
+        int maxGeosetSummaries = runtimeModel.Geosets.Count;
         for (int geosetIndex = 0; geosetIndex < maxGeosetSummaries; geosetIndex++)
         {
             var geoset = runtimeModel.Geosets[geosetIndex];
             string materialSummary = DescribeProbeMaterial(runtimeModel, geoset.MaterialId);
+            bool defaultVisible = defaultCharacterGroups?.Contains(geoset.SelectionGroup) ?? false;
             Console.WriteLine(
-                $"[M2-DIAG-MAT] geoset={geosetIndex} material={geoset.MaterialId} verts={geoset.Vertices.Count} tris={geoset.Indices.Count / 3} layers={materialSummary}");
+                $"[M2-DIAG-MAT] geoset={geosetIndex} material={geoset.MaterialId} selectionGroup={geoset.SelectionGroup} defaultVisible={defaultVisible} verts={geoset.Vertices.Count} tris={geoset.Indices.Count / 3} layers={materialSummary}");
         }
     }
 

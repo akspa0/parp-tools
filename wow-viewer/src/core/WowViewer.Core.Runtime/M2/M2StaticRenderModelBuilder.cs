@@ -28,8 +28,6 @@ public static class M2StaticRenderModelBuilder
             if (activeSection.IndexCount < 3)
                 continue;
 
-            M2ActiveSkinBatch? batch = activeSection.Batches.Count > 0 ? activeSection.Batches[0] : null;
-            M2StaticRenderMaterial material = BuildMaterial(geometry, batch);
             List<M2StaticRenderVertex> vertices = new();
             List<uint> indices = new();
             Dictionary<ushort, uint> remap = new();
@@ -67,12 +65,31 @@ public static class M2StaticRenderModelBuilder
             if (vertices.Count == 0 || indices.Count < 3)
                 continue;
 
-            sections.Add(new M2StaticRenderSection(
-                activeSection.SectionIndex,
-                activeSection.SkinSectionId,
-                vertices,
-                indices,
-                material));
+            IReadOnlyList<M2ActiveSkinBatch> orderedBatches = activeSection.Batches
+                .OrderBy(static value => value.MaterialLayer)
+                .ThenBy(static value => value.BatchIndex)
+                .ToArray();
+
+            if (orderedBatches.Count == 0)
+            {
+                sections.Add(new M2StaticRenderSection(
+                    activeSection.SectionIndex,
+                    activeSection.SkinSectionId,
+                    vertices,
+                    indices,
+                    BuildMaterial(geometry, batch: null)));
+                continue;
+            }
+
+            foreach (M2ActiveSkinBatch batch in orderedBatches)
+            {
+                sections.Add(new M2StaticRenderSection(
+                    activeSection.SectionIndex,
+                    activeSection.SkinSectionId,
+                    vertices,
+                    indices,
+                    BuildMaterial(geometry, batch)));
+            }
         }
 
         return new M2StaticRenderModel(geometry.Model, sections, activeSkinProfile.UsesCompatibilityFallback);
@@ -102,8 +119,12 @@ public static class M2StaticRenderModelBuilder
         int batchIndex = batch?.BatchIndex ?? -1;
         byte batchFlags = batch?.Flags ?? 0;
         byte priorityPlane = batch?.PriorityPlane ?? 0;
+        ushort shaderId = batch?.ShaderId ?? 0;
+        ushort geosetIndex = batch?.GeosetIndex ?? 0;
         short colorIndex = batch?.ColorIndex ?? (short)-1;
-        ushort materialIndex = batch?.MaterialIndex ?? 0;
+        ushort renderFlagsIndex = batch?.RenderFlagsIndex ?? 0;
+        ushort materialLayer = batch?.MaterialLayer ?? 0;
+        ushort textureCount = batch?.TextureCount ?? 0;
         ushort textureComboIndex = batch?.TextureComboIndex ?? 0;
         ushort textureCoordComboIndex = batch?.TextureCoordComboIndex ?? 0;
         ushort transparencyComboIndex = batch?.TransparencyComboIndex ?? 0;
@@ -112,9 +133,9 @@ public static class M2StaticRenderModelBuilder
         ushort renderFlags = 0;
         ushort rawBlendMode = 0;
         M2BlendMode blendMode = M2BlendMode.Opaque;
-        if (materialIndex < geometry.RenderFlags.Count)
+        if (renderFlagsIndex < geometry.RenderFlags.Count)
         {
-            M2GeometryRenderFlag renderFlag = geometry.RenderFlags[materialIndex];
+            M2GeometryRenderFlag renderFlag = geometry.RenderFlags[renderFlagsIndex];
             renderFlags = renderFlag.Flags;
             rawBlendMode = renderFlag.RawBlendMode;
             blendMode = renderFlag.BlendMode;
@@ -139,8 +160,12 @@ public static class M2StaticRenderModelBuilder
             batchIndex,
             batchFlags,
             priorityPlane,
+            shaderId,
+            geosetIndex,
             colorIndex,
-            materialIndex,
+            renderFlagsIndex,
+            materialLayer,
+            textureCount,
             textureComboIndex,
             textureCoordComboIndex,
             transparencyComboIndex,

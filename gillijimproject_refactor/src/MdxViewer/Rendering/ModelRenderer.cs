@@ -374,7 +374,71 @@ public class MdxRenderer : IModelRenderer
         if (wantedGroups == null || wantedGroups.Count == 0)
             return;
 
+        wantedGroups = FilterPreReleaseCharacterGroupsWithUnresolvedReplaceables(wantedGroups);
+
         ApplyCharacterSelectionGroups(wantedGroups, reasonLabel: "default character geosets");
+    }
+
+    private IReadOnlyCollection<uint> FilterPreReleaseCharacterGroupsWithUnresolvedReplaceables(IReadOnlyCollection<uint> wantedGroups)
+    {
+        if (!_isM2AdapterModel || !_usesPreRelease301M2Profile || _texResolver == null || string.IsNullOrWhiteSpace(_modelVirtualPath))
+            return wantedGroups;
+
+        HashSet<int> unresolvedTextureIds = new();
+        for (int textureIndex = 0; textureIndex < _mdx.Textures.Count; textureIndex++)
+        {
+            MdlTexture texture = _mdx.Textures[textureIndex];
+            if (texture.ReplaceableId == 0)
+                continue;
+
+            if (ResolveExplicitTextureVariation(texture.ReplaceableId) != null)
+                continue;
+
+            string? resolved = _texResolver.Resolve(
+                _modelVirtualPath,
+                texture.ReplaceableId,
+                _selectedReplaceableDisplayIndex ?? 0,
+                _characterHairVariationId,
+                _characterFacialHairVariationId);
+            if (resolved == null)
+                unresolvedTextureIds.Add(textureIndex);
+        }
+
+        if (unresolvedTextureIds.Count == 0)
+            return wantedGroups;
+
+        HashSet<uint> filteredGroups = wantedGroups as HashSet<uint> ?? new HashSet<uint>(wantedGroups);
+        List<uint> removedGroups = new();
+
+        foreach (MdlGeoset geoset in _mdx.Geosets)
+        {
+            uint selectionGroup = geoset.SelectionGroup;
+            if (selectionGroup == 0 || selectionGroup >= 100 || !filteredGroups.Contains(selectionGroup))
+                continue;
+            if (geoset.MaterialId < 0 || geoset.MaterialId >= _mdx.Materials.Count)
+                continue;
+
+            MdlMaterial material = _mdx.Materials[geoset.MaterialId];
+            bool usesUnresolvedReplaceable = material.Layers.Any(layer =>
+                layer.TextureId >= 0
+                && layer.TextureId < _mdx.Textures.Count
+                && unresolvedTextureIds.Contains(layer.TextureId));
+
+            if (!usesUnresolvedReplaceable)
+                continue;
+
+            if (filteredGroups.Remove(selectionGroup))
+                removedGroups.Add(selectionGroup);
+        }
+
+        if (removedGroups.Count > 0)
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[MDX] Suppressed unresolved pre-release character groups for {_modelVirtualPath}: {string.Join(",", removedGroups.OrderBy(static value => value))}");
+        }
+
+        return filteredGroups;
     }
 
     private void ApplyCharacterSelectionGroups(IReadOnlyCollection<uint> wantedGroups, string? reasonLabel)

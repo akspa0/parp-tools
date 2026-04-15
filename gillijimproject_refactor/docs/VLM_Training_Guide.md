@@ -382,6 +382,35 @@ Use `train_v7.py` for:
 - minimap + WDL + known-loss channels -> terrain heights
 - outputs: global height, local height, bounds
 
+#### Training Environment Bootstrap (uv)
+
+Use the dedicated uv bootstrap script before training so the venv gets a
+hardware-matched torch build instead of falling back to whatever is already
+installed in a random workspace venv.
+
+PowerShell:
+
+```powershell
+./gillijimproject_refactor/scripts/setup_training_env.ps1 -Backend auto -Recreate
+```
+
+Bash:
+
+```bash
+./gillijimproject_refactor/scripts/setup_training_env.sh --backend auto --recreate
+```
+
+Then run training through that dedicated interpreter:
+
+```powershell
+i:/parp/parp-tools/gillijimproject_refactor/.venv-train/Scripts/python.exe `
+	i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py `
+	--profile development-map
+```
+
+`train_v7.py` now refuses implicit CPU fallback when CUDA is unavailable.
+If you intentionally want a CPU-only debug run, pass `--allow-cpu` explicitly.
+
 #### V7.3 Performance Profile (Apr 12, 2026)
 
 `train_v7.py` now has live training telemetry and Tensor Core-oriented defaults:

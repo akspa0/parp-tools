@@ -89,9 +89,14 @@ function Test-DatasetManifestCurrent {
     param(
         [Parameter(Mandatory = $true)]
         [string]$DatasetOutput,
+            [AllowEmptyCollection()]
         [Parameter(Mandatory = $true)]
         [object[]]$DatasetFiles
     )
+
+        if ($null -eq $DatasetFiles) {
+            $DatasetFiles = @()
+        }
 
     if ($DatasetFiles.Count -eq 0) {
         return $false
@@ -525,7 +530,7 @@ function Resolve-ClientMapList {
             return ,@()
         }
 
-        & dotnet @args
+        & dotnet @args | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Map discovery command failed with exit code ${LASTEXITCODE}: $commandText"
         }
@@ -541,20 +546,39 @@ function Resolve-ClientMapList {
 
         $parsed = $json | ConvertFrom-Json
         if ($parsed -is [System.Array]) {
-            return ,@($parsed | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            return ,@(Get-SanitizedMapNames -MapNames @($parsed | ForEach-Object { [string]$_ }))
         }
 
         if ($null -eq $parsed) {
             return ,@()
         }
 
-        return ,@([string]$parsed)
+        return ,@(Get-SanitizedMapNames -MapNames @([string]$parsed))
     }
     finally {
         if (Test-Path $tmpJson) {
             Remove-Item -Path $tmpJson -Force -ErrorAction SilentlyContinue
         }
     }
+}
+
+function Get-SanitizedMapNames {
+    param(
+        [AllowEmptyCollection()]
+        [string[]]$MapNames
+    )
+
+    if ($null -eq $MapNames) {
+        return @()
+    }
+
+    return @(
+        $MapNames |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -match '^[A-Za-z0-9_\-]+$' } |
+            Select-Object -Unique
+    )
 }
 
 if (-not (Test-Path $ConfigPath)) {

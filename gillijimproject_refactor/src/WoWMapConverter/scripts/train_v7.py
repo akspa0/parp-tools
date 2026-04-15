@@ -58,6 +58,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -2161,11 +2162,38 @@ def apply_discriminator_input_noise(tensor: torch.Tensor, noise_std: float) -> t
     return torch.clamp(tensor + torch.randn_like(tensor) * noise_std, 0.0, 1.0)
 
 
+def resolve_training_device(args: argparse.Namespace) -> Tuple[torch.device, bool]:
+    use_cuda = torch.cuda.is_available()
+    if use_cuda:
+        return torch.device("cuda"), True
+
+    if args.allow_cpu:
+        print(
+            "Warning: CUDA is unavailable and --allow-cpu is set. "
+            "Training will run on CPU and will be significantly slower."
+        )
+        return torch.device("cpu"), False
+
+    torch_cuda = torch.version.cuda
+    torch_hip = getattr(torch.version, "hip", None)
+    raise SystemExit(
+        "CUDA is not available for this run, so train_v7.py is refusing the implicit CPU fallback.\n"
+        f"Python executable: {sys.executable}\n"
+        f"torch version: {torch.__version__}\n"
+        f"torch.version.cuda: {torch_cuda}\n"
+        f"torch.version.hip: {torch_hip}\n"
+        "Use gillijimproject_refactor/scripts/setup_training_env.ps1 (or .sh) to deploy a hardware-matched uv training environment.\n"
+        "If you intentionally want a CPU-only debug run, pass --allow-cpu explicitly."
+    )
+
+
 def train(args: argparse.Namespace) -> None:
+    device, use_cuda = resolve_training_device(args)
+
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
+    if use_cuda:
         torch.cuda.manual_seed_all(args.seed)
 
     dataset_roots = resolve_dataset_roots(args)
@@ -2314,8 +2342,6 @@ def train(args: argparse.Namespace) -> None:
     )
     val_dataset = Subset(val_base_dataset, val_indices)
 
-    use_cuda = torch.cuda.is_available()
-
     train_loader_kwargs: Dict[str, Any] = {
         "batch_size": args.batch_size,
         "shuffle": train_sampler is None,
@@ -2371,7 +2397,6 @@ def train(args: argparse.Namespace) -> None:
     except Exception as exc:
         print(f"Warning: failed to precompute static preview candidates, falling back to validation order: {exc}")
 
-    device = torch.device("cuda" if use_cuda else "cpu")
     if use_cuda:
         torch.backends.cudnn.benchmark = not args.no_cudnn_benchmark
         if args.no_tf32:
@@ -2922,6 +2947,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log-every", type=int, default=DEFAULT_LIVE_LOG_EVERY,
                         help=f"Update tqdm live metrics every N training steps (default: {DEFAULT_LIVE_LOG_EVERY}).")
     parser.add_argument("--no-amp", action="store_true", help="Disable CUDA automatic mixed precision.")
+    parser.add_argument(
+        "--allow-cpu",
+        action="store_true",
+        help="Allow CPU training when CUDA is unavailable. By default train_v7 fails fast to avoid accidental CPU runs.",
+    )
     parser.add_argument("--amp-dtype", choices=["auto", "float16", "bfloat16"], default=DEFAULT_AMP_DTYPE,
                         help=f"Autocast dtype when AMP is enabled (default: {DEFAULT_AMP_DTYPE}).")
     parser.add_argument("--no-tf32", action="store_true",

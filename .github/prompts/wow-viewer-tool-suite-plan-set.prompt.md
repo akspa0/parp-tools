@@ -21,6 +21,7 @@ Route the current request to the correct focused prompt in `.github/prompts/` so
 ## Companion Prompts
 
 - `wow-viewer-dataset-builder-plan.prompt.md`
+- `wow-viewer-full-m2-parser-renderer-plan.prompt.md`
 - `wow-viewer-editor-plan-set.prompt.md`
 - `wow-viewer-minimap-generation-plan-set.prompt.md`
 - `wow-viewer-pm4-library-implementation.prompt.md`
@@ -43,6 +44,7 @@ Route the current request to the correct focused prompt in `.github/prompts/` so
 - Use `wow-viewer-editor-plan-set.prompt.md` when the problem is turning `wow-viewer` into an editor, including PM4 `MPRL`-assisted terrain conform, saved object choices, moved-object persistence, map save ownership, or viewer-vs-editor workspace design.
 - Use `wow-viewer-minimap-generation-plan-set.prompt.md` when the problem is deterministic one-PNG-per-ADT capture, path-family-based minimap filtering, wow-viewer CLI minimap generation, resumable tile jobs, or minimap-driven `WorldScene` extraction sequencing.
 - Use `wow-viewer-world-runtime-plan-set.prompt.md` when the problem is splitting `WorldScene`, extracting world-runtime services, suppressing repeated asset-miss churn such as `.skin` lookup spam, or sequencing terrain/WMO/MDX/overlay runtime ownership into `wow-viewer`.
+- Use `wow-viewer-full-m2-parser-renderer-plan.prompt.md` when the user is explicitly rejecting more compatibility-only M2 fixes and wants the full first-party M2 parser plus runtime plus renderer cutover planned as one coherent ownership sequence, especially when the ask mentions `Warcraft.NET`, `WarcraftNetM2Adapter`, `noggit-red`, mixed M2-vs-MDX assumptions, or replacing the current tangled M2 path in `wow-viewer`.
 - Use `wow-viewer-m2-runtime-plan-set.prompt.md` when the problem is M2 runtime ownership, exact `%02d.skin` behavior, active section classification, material/effect routing, animation/lighting state, scene submission/batching, or planning how M2 rendering moves into `wow-viewer` instead of staying trapped in `MdxViewer`.
 - Use `m2-cross-build-native-investigation.prompt.md` when the problem is recovering native behavior differences across multiple client builds (for example 3.3.5 through 6.x) before committing parser or runtime ownership decisions.
 - Use `wow-viewer-bootstrap-layout-plan.prompt.md` when the problem is repo shape, solution structure, bootstrap scripts, project layout, or where each tool/app/lib should live.

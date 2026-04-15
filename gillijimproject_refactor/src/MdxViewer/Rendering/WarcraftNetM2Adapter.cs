@@ -1525,14 +1525,14 @@ internal static class WarcraftNetM2Adapter
             for (uint i = 0; i < selected.Value.BatchCount; i++)
             {
                 int batchOffset = checked((int)(selected.Value.BatchOffset + (i * 0x18u)));
-                short colorIndex = BitConverter.ToInt16(modelBytes, batchOffset + 0x06);
-                ushort materialIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x08);
-                ushort materialLayer = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0A);
-                ushort textureCount = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0C);
-                ushort textureComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0E);
-                ushort textureCoordComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x10);
-                ushort transparencyComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x12);
-                ushort textureAnimationLookupIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x14);
+                short colorIndex = BitConverter.ToInt16(modelBytes, batchOffset + 0x08);
+                ushort materialIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0A);
+                ushort materialLayer = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0C);
+                ushort textureCount = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0E);
+                ushort textureComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x10);
+                ushort textureCoordComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x12);
+                ushort transparencyComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x14);
+                ushort textureAnimationLookupIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x16);
                 int submeshIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x04);
                 if (submeshIndex < skin.Submeshes.Count)
                 {

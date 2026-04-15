@@ -68,6 +68,7 @@ Current M2-native continuity note:
 - Raw native evidence still lives in `docs/architecture/m2-native-client-research-2026-03-31.md`.
 - Treat the consolidated `docs/architecture/m2/` folder as the first handoff for future `wow-viewer` M2 parser, runtime, lighting, shader, and performance work.
 - Do not keep growing `MdxViewer` as the design owner for those M2 seams unless the task is explicitly compatibility-only.
+- For requests that are broader than one staged runtime slice and are really about replacing the mixed M2 ownership model itself, use `.github/prompts/wow-viewer-full-m2-parser-renderer-plan.prompt.md` first.
 - The staged workflow surface for this work now lives in `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md` and `.github/prompts/wow-viewer-m2-runtime/`.
 - Cross-build recovery from Wrath through 6.x now routes through `.github/prompts/m2-cross-build-native-investigation.prompt.md`.
 - The matching continuity plan lives in `../gillijimproject_refactor/plans/wow_viewer_m2_runtime_plan_2026-03-31.md`.

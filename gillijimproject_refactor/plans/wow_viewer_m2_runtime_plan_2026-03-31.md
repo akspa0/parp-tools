@@ -16,6 +16,23 @@
   - first M2 ownership seam is already landed in `wow-viewer` (`Core/M2`, `Core.IO/M2`, `Core.Runtime/M2`, `m2 inspect`, and foundation tests)
   - the main architectural gap is now slice completion after foundation: section/material routing, animation/light/effect runtime, scene submission/batching, and consumer cutover
 
+## Apr 15, 2026 reset
+
+- the user explicitly rejected more `MdxViewer`-owned bandaid work after two separate signals converged:
+  - remaining player-model texturing/parity failures such as impossible back-facing facial/texturing artifacts
+  - the broader training/tooling drift that still allowed live CPU training because the active `.venv` had a CPU-only torch build
+- active corrective direction is now stricter:
+  - keep `MdxViewer` as a compatibility proof source only when a bounded old-repo check is actually needed
+  - treat the main implementation target as full first-party M2 parser plus runtime plus renderer ownership in `wow-viewer`
+  - use wowdev docs, native-client research, and `noggit-red` as reference inputs for behavior recovery, not as reasons to keep the mixed current design
+- concrete immediate gap after the landed slice-01 foundation is now clearer than when this plan was first written:
+  - `WowViewer.Core.IO/M2/M2GeometryReader.cs` still depended on `Warcraft.NET` before the current parser-ownership recovery pass
+  - active skin/material projection was still too thin and could flatten a section to its first batch, which is exactly the sort of MDX-shaped simplification the user wants removed
+  - inspect tooling was still too summary-only to act as a real first-party M2 debugging surface
+- a new workflow asset now exists for this reset:
+  - `.github/prompts/wow-viewer-full-m2-parser-renderer-plan.prompt.md`
+  - use it when the ask is broader than one staged slice and is really about replacing the mixed M2 ownership model itself
+
 ## Apr 03, 2026 Status Snapshot
 
 - slice 01 (`MD20` and skin runtime foundation): landed
@@ -55,7 +72,8 @@
 	- current proof is build/test plus inspect ownership only; no real extracted asset signoff is claimed here
 
 - target problem:
-  - this seam existed as a gap when the plan was written; it is now covered by the landed slice-01 library/runtime foundation
+  - this seam existed as a gap when the plan was written; the first version is landed, but residual foundation ownership still matters when root-payload tables or exact skin/runtime contracts are not yet fully first-party
+  - current residual examples include root payload geometry/material-table ownership and richer inspect/export surfaces for real M2 debugging
 - likely destination:
   - `wow-viewer/src/core/WowViewer.Core/M2/*`
   - `wow-viewer/src/core/WowViewer.Core.IO/M2/*`
@@ -68,6 +86,7 @@
 - target problem:
   - the native client treats `.skin` initialization as structural render-state work, but the current runtime still tends to flatten sections/batches too early
   - unresolved native flags like `0x20` and propagated `0x40` need to remain visible instead of being erased by generic geoset assumptions
+  - current practical risk is not hypothetical: player-model texturing failures and wrong layered section behavior are consistent with a still-too-thin batch/material contract
 - likely destination:
   - `wow-viewer/src/core/WowViewer.Core/M2/*`
   - `wow-viewer/src/core/WowViewer.Core.Runtime/M2/*`
@@ -110,6 +129,8 @@
 
 - root router:
   - `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md`
+- full-cutover route:
+  - `.github/prompts/wow-viewer-full-m2-parser-renderer-plan.prompt.md`
 - ordered prompts:
   - `.github/prompts/wow-viewer-m2-runtime/01-md20-and-skin-runtime-foundation.prompt.md`
   - `.github/prompts/wow-viewer-m2-runtime/02-section-classification-and-material-routing.prompt.md`

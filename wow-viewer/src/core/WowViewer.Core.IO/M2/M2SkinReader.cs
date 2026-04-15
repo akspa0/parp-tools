@@ -152,9 +152,13 @@ public static class M2SkinReader
             values.Add(new M2SkinBatch(
                 data[entryOffset + 0x00],
                 data[entryOffset + 0x01],
+                ReadUInt16At(data, entryOffset + 0x02),
                 ReadUInt16At(data, entryOffset + 0x04),
+                ReadUInt16At(data, entryOffset + 0x06),
                 ReadInt16At(data, entryOffset + 0x08),
                 ReadUInt16At(data, entryOffset + 0x0A),
+                ReadUInt16At(data, entryOffset + 0x0C),
+                ReadUInt16At(data, entryOffset + 0x0E),
                 ReadUInt16At(data, entryOffset + 0x10),
                 ReadUInt16At(data, entryOffset + 0x12),
                 ReadUInt16At(data, entryOffset + 0x14),

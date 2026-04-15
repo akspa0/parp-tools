@@ -1,5 +1,42 @@
 # Progress
 
+### Apr 15, 2026 - landed uv-based training deployment scripts and removed implicit CPU fallback in train_v7
+
+- implemented dedicated uv-managed training environment bootstrap scripts:
+	- `gillijimproject_refactor/scripts/setup_training_env.ps1`
+	- `gillijimproject_refactor/scripts/setup_training_env.sh`
+	- `gillijimproject_refactor/scripts/requirements_train_v7.txt`
+- bootstrap flow now creates a dedicated training venv (default `.venv-train`) on Python `3.11`, installs shared non-torch deps, installs backend-specific torch wheels (`cu128`, `rocm6.2.4`, `cpu`, or PyPI for `mps`), and validates requested accelerator capability before declaring success
+- `src/WoWMapConverter/scripts/train_v7.py` no longer silently trains on CPU when CUDA is unavailable:
+	- added explicit training-device resolver with hard failure by default when CUDA is missing
+	- added `--allow-cpu` for intentional CPU-only debug runs
+	- fail-fast diagnostic now prints Python executable plus torch CUDA/HIP build metadata and points users to the uv bootstrap scripts
+- updated training docs:
+	- `gillijimproject_refactor/docs/VLM_Training_Guide.md` now includes uv bootstrap commands and the new explicit CPU-override behavior
+- proof boundary:
+	- this slice is deployment/bootstrap and trainer safety behavior only
+	- it does not yet implement a full pyproject/lockfile training packaging workflow or cross-repo training runner abstraction
+
+### Apr 15, 2026 - recorded the real CPU training failure and redirected M2 continuation back to wow-viewer-owned parser/renderer work
+
+- confirmed the immediate training failure was environment drift, not a mystery trainer choice:
+	- active interpreter: `i:/parp/parp-tools/.venv/Scripts/python.exe`
+	- active torch build: `2.11.0+cpu`
+	- `torch.version.cuda = None`
+	- `torch.cuda.is_available() = False`
+	- host GPU remains visible through `nvidia-smi` (`RTX 4070 Ti SUPER`, driver `595.97`)
+- confirmed the current trainer logic in `src/WoWMapConverter/scripts/train_v7.py` still silently falls back to CPU with `torch.device("cuda" if use_cuda else "cpu")` instead of failing fast when the environment is wrong
+- captured the new workflow directive in continuity:
+	- stop accepting haphazard training env selection; future training-env work should use a reproducible `uv`-managed bootstrap and deployment validation for target hardware
+	- stop routing M2 fix work back into `MdxViewer` bandaids as the design owner
+	- active corrective path is now a full first-party M2 parser/renderer cutover in `wow-viewer`
+- added a new workflow asset for that correction:
+	- `.github/prompts/wow-viewer-full-m2-parser-renderer-plan.prompt.md`
+- refreshed the existing M2 prompt routing so future chats can distinguish:
+	- full parser/renderer cutover planning
+	- residual foundation ownership cleanup
+	- narrower staged runtime follow-on slices
+
 ### Apr 15, 2026 - ML corpus export now has an explicit resume path instead of re-exporting completed map roots forever
 
 - the user-reported rerun waste was real:

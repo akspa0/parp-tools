@@ -1,5 +1,39 @@
 # Active Context
 
+## Apr 15, 2026 - uv-managed training bootstrap is now implemented, and train_v7 no longer silently falls back to CPU
+
+- implemented new dedicated training bootstrap scripts:
+	- `gillijimproject_refactor/scripts/setup_training_env.ps1`
+	- `gillijimproject_refactor/scripts/setup_training_env.sh`
+	- shared deps file `gillijimproject_refactor/scripts/requirements_train_v7.txt`
+- bootstrap behavior now:
+	- uses `uv` to install a pinned Python runtime (default `3.11`), create a dedicated training venv (default `.venv-train`), install common deps, then install torch/torchvision/torchaudio from backend-specific indexes (`cu128`, `rocm6.2.4`, `cpu`, or standard PyPI for `mps`)
+	- supports explicit backend selection plus `auto` backend resolution
+	- runs post-install runtime validation for requested accelerator capability unless `DryRun`/`--dry-run` is used
+- `src/WoWMapConverter/scripts/train_v7.py` now fails fast when CUDA is unavailable unless `--allow-cpu` is explicitly provided:
+	- new resolver reports Python and torch diagnostics (`torch.__version__`, `torch.version.cuda`, `torch.version.hip`) and exits with remediation guidance
+	- explicit CPU runs remain possible for debug-only usage via `--allow-cpu`
+	- this removes the old silent `torch.cuda.is_available()` -> CPU fallback behavior that triggered the long-running accidental CPU training run
+- docs updated:
+	- `gillijimproject_refactor/docs/VLM_Training_Guide.md` now includes the uv bootstrap workflow and the explicit `--allow-cpu` note
+
+## Apr 15, 2026 - training env drift was real, and M2 ownership is now explicitly back on the wow-viewer first-party path
+
+- the CPU training fallback was an environment failure, not an acceptable runtime choice:
+	- configured interpreter was `i:/parp/parp-tools/.venv/Scripts/python.exe`
+	- that environment currently reports `torch 2.11.0+cpu`, `torch.version.cuda = None`, `torch.cuda.is_available() = False`
+	- the host GPU is visible and healthy through `nvidia-smi` (`NVIDIA GeForce RTX 4070 Ti SUPER`, driver `595.97`)
+	- `src/WoWMapConverter/scripts/train_v7.py` still does a silent capability gate: `use_cuda = torch.cuda.is_available()` then `device = torch.device("cuda" if use_cuda else "cpu")`, so a CPU-only torch build falls straight through into live CPU training instead of failing fast
+- active workflow correction from the user:
+	- stop treating ad hoc `.venv` reuse or random conda fallback as acceptable for training
+	- future training environment work should move to an explicit `uv`-managed bootstrap with deployment scripts that install the correct hardware-specific torch/runtime stack and verify the target accelerator before training starts
+	- trainer entrypoints should fail loudly when a GPU-required run lands in a CPU-only environment instead of quietly training on CPU
+- active M2 ownership correction from the same user directive:
+	- stop spending continuation budget on more `MdxViewer` bandaid fixes as the design owner for M2 rendering
+	- treat the new corrective path as full first-party M2 parser plus runtime plus renderer ownership in `wow-viewer`
+	- use `MdxViewer`, `WarcraftNetM2Adapter`, wowdev docs, native-client notes, and `noggit-red` only as extraction/reference inputs unless a bounded compatibility proof is explicitly requested
+	- new planning surface for that reset is `.github/prompts/wow-viewer-full-m2-parser-renderer-plan.prompt.md`, with the existing staged runtime prompts staying as the narrower follow-on slices
+
 ## Apr 15, 2026 - corpus export now has resume-aware map completion instead of unconditional full reruns
 
 - the active corpus workflow bug was not imagined:

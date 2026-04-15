@@ -12,6 +12,8 @@ public static class M2ModelReader
     private const int VersionOffset = 0x04;
     private const int NameCountOffset = 0x08;
     private const int NameOffsetOffset = 0x0C;
+    private const int FlagsOffset = 0x10;
+    private const int ViewCountOffset = 0x44;
     private const int EmbeddedSkinProfileCountOffset = 0x4C;
     private const int EmbeddedSkinProfileOffsetOffset = 0x50;
     private const int BoundsOffset = 0xB4;
@@ -49,6 +51,8 @@ public static class M2ModelReader
                 throw new InvalidDataException($"M2 file '{sourcePath}' does not contain a strict MD20 root. Found '{FormatSignature(signatureBytes)}'.");
 
             uint version = ReadUInt32At(stream, VersionOffset);
+            uint flags = ReadUInt32At(stream, FlagsOffset);
+            uint viewCount = ReadUInt32At(stream, ViewCountOffset);
             string? modelName = TryReadName(stream, sourcePath);
             Vector3 boundsMin = ReadFiniteVector3At(stream, BoundsOffset, sourcePath, "boundsMin");
             Vector3 boundsMax = ReadFiniteVector3At(stream, BoundsOffset + 0x0C, sourcePath, "boundsMax");
@@ -60,6 +64,8 @@ public static class M2ModelReader
                 identity,
                 signature,
                 version,
+                flags,
+                viewCount,
                 modelName,
                 boundsMin,
                 boundsMax,

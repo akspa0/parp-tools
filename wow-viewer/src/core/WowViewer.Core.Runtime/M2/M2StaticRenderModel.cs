@@ -73,8 +73,12 @@ public sealed class M2StaticRenderMaterial
         int batchIndex,
         byte batchFlags,
         byte priorityPlane,
+        ushort shaderId,
+        ushort geosetIndex,
         short colorIndex,
-        ushort materialIndex,
+        ushort renderFlagsIndex,
+        ushort materialLayer,
+        ushort textureCount,
         ushort textureComboIndex,
         ushort textureCoordComboIndex,
         ushort transparencyComboIndex,
@@ -89,8 +93,12 @@ public sealed class M2StaticRenderMaterial
         BatchIndex = batchIndex;
         BatchFlags = batchFlags;
         PriorityPlane = priorityPlane;
+        ShaderId = shaderId;
+        GeosetIndex = geosetIndex;
         ColorIndex = colorIndex;
-        MaterialIndex = materialIndex;
+        RenderFlagsIndex = renderFlagsIndex;
+        MaterialLayer = materialLayer;
+        TextureCount = textureCount;
         TextureComboIndex = textureComboIndex;
         TextureCoordComboIndex = textureCoordComboIndex;
         TransparencyComboIndex = transparencyComboIndex;
@@ -109,9 +117,19 @@ public sealed class M2StaticRenderMaterial
 
     public byte PriorityPlane { get; }
 
+    public ushort ShaderId { get; }
+
+    public ushort GeosetIndex { get; }
+
     public short ColorIndex { get; }
 
-    public ushort MaterialIndex { get; }
+    public ushort RenderFlagsIndex { get; }
+
+    public ushort MaterialIndex => RenderFlagsIndex;
+
+    public ushort MaterialLayer { get; }
+
+    public ushort TextureCount { get; }
 
     public ushort TextureComboIndex { get; }
 

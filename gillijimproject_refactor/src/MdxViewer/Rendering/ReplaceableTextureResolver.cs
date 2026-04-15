@@ -597,10 +597,11 @@ public class ReplaceableTextureResolver
         string? resolved = replaceableId switch
         {
             1 => TryResolveCharacterSectionTexture(modelPath, raceId, sexId, baseSection: 0, variationIndex: 0, colorIndex: 0, textureIndices: new[] { 0 }),
+                2 => TryResolveCharacterSkinExtraTexture(modelPath, raceId, sexId, variationIndex: 0, colorIndex: 0),
             8 => TryResolveCharacterSkinExtraTexture(modelPath, raceId, sexId, variationIndex: 0, colorIndex: 0),
-            6 => TryResolveCharacterSectionTexture(modelPath, raceId, sexId, baseSection: 4, variationIndex: resolvedHairVariationId, colorIndex: 0, textureIndices: new[] { 0 }),
-            7 => TryResolveCharacterSectionTexture(modelPath, raceId, sexId, baseSection: 2, variationIndex: resolvedFacialHairVariationId, colorIndex: 0, textureIndices: new[] { 0 }),
-            10 => TryResolveCharacterSectionTexture(modelPath, raceId, sexId, baseSection: 4, variationIndex: resolvedHairVariationId, colorIndex: 0, textureIndices: new[] { 0 }),
+            6 => TryResolvePreferredCharacterSectionTexture(modelPath, raceId, sexId, baseSection: 4, variationIndex: resolvedHairVariationId, colorIndex: 0, replaceableId),
+            7 => TryResolvePreferredCharacterSectionTexture(modelPath, raceId, sexId, baseSection: 2, variationIndex: resolvedFacialHairVariationId, colorIndex: 0, replaceableId),
+            10 => TryResolvePreferredCharacterSectionTexture(modelPath, raceId, sexId, baseSection: 4, variationIndex: resolvedHairVariationId, colorIndex: 0, replaceableId),
             _ => null,
         };
 
@@ -632,6 +633,21 @@ public class ReplaceableTextureResolver
             string? resolved = TryResolveCharacterTextureCandidate(modelPath, section.TextureNames, textureIndex);
             if (resolved != null)
                 return resolved;
+        }
+
+        return null;
+    }
+
+    private string? TryResolvePreferredCharacterSectionTexture(string modelPath, int raceId, int sexId, int baseSection, int variationIndex, int colorIndex, uint replaceableId)
+    {
+        foreach ((CharacterSectionData section, _) in EnumerateCharacterSectionFallbacks(raceId, sexId, baseSection, variationIndex, colorIndex))
+        {
+            foreach (int textureIndex in GetPreferredCharacterTextureIndices(section.TextureNames, replaceableId))
+            {
+                string? resolved = TryResolveCharacterTextureCandidate(modelPath, section.TextureNames, textureIndex);
+                if (resolved != null)
+                    return resolved;
+            }
         }
 
         return null;
@@ -714,20 +730,24 @@ public class ReplaceableTextureResolver
                 AddCharacterSectionCandidates(candidates, modelPath, raceId, sexId, baseSection: 0, variationIndex: 0, colorIndex: 0, textureIndices: new[] { 0 }, sourceRoot: "char-section-body");
                 break;
 
+            case 2:
+                AddCharacterSkinExtraCandidates(candidates, modelPath, raceId, sexId, variationIndex: 0, colorIndex: 0);
+                break;
+
             case 8:
                 AddCharacterSkinExtraCandidates(candidates, modelPath, raceId, sexId, variationIndex: 0, colorIndex: 0);
                 break;
 
             case 6:
-                AddCharacterSectionCandidates(candidates, modelPath, raceId, sexId, baseSection: 4, variationIndex: resolvedHairVariationId, colorIndex: 0, textureIndices: new[] { 0 }, sourceRoot: $"char-section-hair[var={resolvedHairVariationId}]");
+                AddPreferredCharacterSectionCandidates(candidates, modelPath, raceId, sexId, baseSection: 4, variationIndex: resolvedHairVariationId, colorIndex: 0, replaceableId, sourceRoot: $"char-section-hair[var={resolvedHairVariationId}]");
                 break;
 
             case 7:
-                AddCharacterSectionCandidates(candidates, modelPath, raceId, sexId, baseSection: 2, variationIndex: resolvedFacialHairVariationId, colorIndex: 0, textureIndices: new[] { 0 }, sourceRoot: $"char-section-facial[var={resolvedFacialHairVariationId}]");
+                AddPreferredCharacterSectionCandidates(candidates, modelPath, raceId, sexId, baseSection: 2, variationIndex: resolvedFacialHairVariationId, colorIndex: 0, replaceableId, sourceRoot: $"char-section-facial[var={resolvedFacialHairVariationId}]");
                 break;
 
             case 10:
-                AddCharacterSectionCandidates(candidates, modelPath, raceId, sexId, baseSection: 4, variationIndex: resolvedHairVariationId, colorIndex: 0, textureIndices: new[] { 0 }, sourceRoot: $"char-section-mane[var={resolvedHairVariationId}]");
+                AddPreferredCharacterSectionCandidates(candidates, modelPath, raceId, sexId, baseSection: 4, variationIndex: resolvedHairVariationId, colorIndex: 0, replaceableId, sourceRoot: $"char-section-mane[var={resolvedHairVariationId}]");
                 break;
         }
 
@@ -786,6 +806,26 @@ public class ReplaceableTextureResolver
         }
     }
 
+    private void AddPreferredCharacterSectionCandidates(List<ReplaceableResolutionCandidate> candidates, string modelPath, int raceId, int sexId, int baseSection, int variationIndex, int colorIndex, uint replaceableId, string sourceRoot)
+    {
+        int initialCount = candidates.Count;
+        foreach ((CharacterSectionData section, string fallbackLabel) in EnumerateCharacterSectionFallbacks(raceId, sexId, baseSection, variationIndex, colorIndex))
+        {
+            foreach (int textureIndex in GetPreferredCharacterTextureIndices(section.TextureNames, replaceableId))
+            {
+                AddCharacterTextureCandidate(candidates, modelPath, section.TextureNames, textureIndex, $"{sourceRoot}/{fallbackLabel}/tex{textureIndex}");
+            }
+        }
+
+        if (candidates.Count == initialCount)
+        {
+            candidates.Add(new ReplaceableResolutionCandidate(
+                $"{sourceRoot}/missing-section",
+                "<no preferred CharSections texture>",
+                false));
+        }
+    }
+
     private IEnumerable<(CharacterSectionData Section, string Label)> EnumerateCharacterSectionFallbacks(int raceId, int sexId, int baseSection, int variationIndex, int colorIndex)
     {
         CharacterSectionKey[] keys =
@@ -827,6 +867,61 @@ public class ReplaceableTextureResolver
 
         string candidate = BuildTexturePath(texName, modelPath);
         candidates.Add(new ReplaceableResolutionCandidate(source, candidate, TexturePathExists(candidate)));
+    }
+
+    private static IEnumerable<int> GetPreferredCharacterTextureIndices(string[] textureNames, uint replaceableId)
+    {
+        return Enumerable.Range(0, textureNames.Length)
+            .Select(index => new { Index = index, Score = ScoreCharacterSectionTextureName(textureNames[index], replaceableId) })
+            .Where(entry => entry.Score > 0)
+            .OrderByDescending(entry => entry.Score)
+            .ThenBy(entry => entry.Index)
+            .Select(entry => entry.Index);
+    }
+
+    private static int ScoreCharacterSectionTextureName(string textureName, uint replaceableId)
+    {
+        string name = Path.GetFileNameWithoutExtension(textureName ?? string.Empty).ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(name))
+            return 0;
+
+        return replaceableId switch
+        {
+            6 => ScoreHairLikeTextureName(name),
+            7 => ScoreFacialLikeTextureName(name),
+            10 => ScoreManeLikeTextureName(name),
+            _ => 0,
+        };
+    }
+
+    private static int ScoreHairLikeTextureName(string name)
+    {
+        int score = 0;
+        if (name.Contains("hair", StringComparison.Ordinal)) score += 100;
+        if (name.Contains("scalp", StringComparison.Ordinal)) score += 60;
+        if (name.Contains("braid", StringComparison.Ordinal) || name.Contains("pigtail", StringComparison.Ordinal) || name.Contains("ponytail", StringComparison.Ordinal)) score += 40;
+        if (name.Contains("facial", StringComparison.Ordinal) || name.Contains("beard", StringComparison.Ordinal) || name.Contains("mustache", StringComparison.Ordinal) || name.Contains("moustache", StringComparison.Ordinal)) score -= 80;
+        if (name.Contains("pelvis", StringComparison.Ordinal) || name.Contains("naked", StringComparison.Ordinal) || name.Contains("skin", StringComparison.Ordinal)) score -= 120;
+        return score;
+    }
+
+    private static int ScoreFacialLikeTextureName(string name)
+    {
+        int score = 0;
+        if (name.Contains("facial", StringComparison.Ordinal) || name.Contains("beard", StringComparison.Ordinal) || name.Contains("mustache", StringComparison.Ordinal) || name.Contains("moustache", StringComparison.Ordinal) || name.Contains("sideburn", StringComparison.Ordinal) || name.Contains("goatee", StringComparison.Ordinal)) score += 100;
+        if (name.Contains("hair", StringComparison.Ordinal) || name.Contains("mane", StringComparison.Ordinal)) score -= 60;
+        if (name.Contains("pelvis", StringComparison.Ordinal) || name.Contains("naked", StringComparison.Ordinal) || name.Contains("skin", StringComparison.Ordinal)) score -= 120;
+        return score;
+    }
+
+    private static int ScoreManeLikeTextureName(string name)
+    {
+        int score = 0;
+        if (name.Contains("mane", StringComparison.Ordinal)) score += 100;
+        if (name.Contains("hair", StringComparison.Ordinal)) score += 60;
+        if (name.Contains("facial", StringComparison.Ordinal) || name.Contains("beard", StringComparison.Ordinal)) score -= 60;
+        if (name.Contains("pelvis", StringComparison.Ordinal) || name.Contains("naked", StringComparison.Ordinal) || name.Contains("skin", StringComparison.Ordinal)) score -= 120;
+        return score;
     }
 
     private string? ResolveFromCharacterDirectory(string modelPath, uint replaceableId, int? hairVariationId, int? facialHairVariationId)

@@ -5,7 +5,7 @@ argument-hint: "Optional real asset, model family, skin-profile seam, or current
 agent: "agent"
 ---
 
-Implement or plan the first shared M2-owned runtime seam in `wow-viewer`: canonical `.m2` identity plus exact numbered skin-profile ownership.
+Implement or plan the residual shared M2-owned foundation seam in `wow-viewer`: canonical `.m2` identity plus exact numbered skin-profile ownership, with any remaining root-payload/runtime foundation still brought under first-party ownership.
 
 ## Read First
 
@@ -28,16 +28,20 @@ Create the first wow-viewer-owned M2 parser/runtime seam for:
 - explicit choose/load/init skin-profile staging
 - active skin-profile result contracts that later renderer slices can consume
 
+When slice-01 foundation already exists, use this prompt for the remaining foundation cleanup that still blocks true first-party ownership.
+
 ## Current Concrete Problem
 
+- the first foundation seam is already landed in `wow-viewer`, but residual foundation ownership is still easy to leave half-finished
 - native evidence says the client canonicalizes model-family paths to `.m2`
 - skin ownership is exact numbered `%02d.skin`, not a fuzzy sidecar search as the design truth
 - skin-profile load/init materially changes renderable state and rebuilds instances
-- wow-viewer still has no M2-owned seam for any of that; the current practical ownership is trapped in compatibility code and ad hoc adapter paths
+- residual risk now lives in the remaining mixed seams such as root payload table ownership, too-thin runtime contracts, and inspect surfaces that are still weaker than the data/recovery work requires
 
 ## Non-Negotiable Constraints
 
 - Do not turn this slice into the full renderer rewrite.
+- Do not pretend slice 01 is still completely missing if the real issue is a smaller residual ownership gap.
 - Do not let best-effort fallback skin search become the authoritative wow-viewer contract.
 - Keep `MdxViewer` as a reference/compatibility input, not the design owner.
 - Keep strict parse failures and proof boundaries explicit.

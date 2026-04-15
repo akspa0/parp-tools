@@ -27,11 +27,12 @@ Create a wow-viewer-owned active section contract that preserves the native stru
 - native `.skin` initialization copies/remaps section records into active runtime state
 - unresolved native section flags such as `0x20` and propagated `0x40` still matter even though their final semantics are not closed
 - the current compatibility path still tends to blend together section ownership, material routing, and renderer behavior too early
+- a concrete version of that problem is already visible in the active wow-viewer path when section/batch intent is flattened too aggressively and player-model texturing/layering behavior stops making sense
 
 ## Non-Negotiable Constraints
 
 - Do not erase unresolved native flags just because their names are not closed yet.
-- Do not collapse every section/batch into one generic renderable geoset model.
+- Do not collapse every section/batch into one generic renderable geoset model or one first-batch-per-section simplification.
 - Keep raw/native terminology distinct from local aliases or guesses.
 - Do not claim final shader/effect parity from section-contract work alone.
 - Keep this slice narrower than full animation or scene-submission ownership.

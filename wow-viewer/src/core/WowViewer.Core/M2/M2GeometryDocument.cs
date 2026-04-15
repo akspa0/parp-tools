@@ -22,19 +22,31 @@ public sealed class M2GeometryDocument
         IReadOnlyList<M2GeometryVertex> vertices,
         IReadOnlyList<M2GeometryTexture> textures,
         IReadOnlyList<M2GeometryRenderFlag> renderFlags,
-        IReadOnlyList<M2GeometryTextureLookup> textureLookup)
+        IReadOnlyList<M2GeometryTextureLookup> textureLookup,
+        IReadOnlyList<M2GeometryTextureUnitLookup> textureUnitLookup,
+        IReadOnlyList<M2GeometryTransparencyLookup> transparencyLookup,
+        IReadOnlyList<M2GeometryTextureAnimationLookup> textureAnimationLookup,
+        IReadOnlyList<M2GeometryBoneLookup> boneLookup)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(vertices);
         ArgumentNullException.ThrowIfNull(textures);
         ArgumentNullException.ThrowIfNull(renderFlags);
         ArgumentNullException.ThrowIfNull(textureLookup);
+        ArgumentNullException.ThrowIfNull(textureUnitLookup);
+        ArgumentNullException.ThrowIfNull(transparencyLookup);
+        ArgumentNullException.ThrowIfNull(textureAnimationLookup);
+        ArgumentNullException.ThrowIfNull(boneLookup);
 
         Model = model;
         Vertices = vertices;
         Textures = textures;
         RenderFlags = renderFlags;
         TextureLookup = textureLookup;
+        TextureUnitLookup = textureUnitLookup;
+        TransparencyLookup = transparencyLookup;
+        TextureAnimationLookup = textureAnimationLookup;
+        BoneLookup = boneLookup;
     }
 
     public M2ModelDocument Model { get; }
@@ -46,6 +58,14 @@ public sealed class M2GeometryDocument
     public IReadOnlyList<M2GeometryRenderFlag> RenderFlags { get; }
 
     public IReadOnlyList<M2GeometryTextureLookup> TextureLookup { get; }
+
+    public IReadOnlyList<M2GeometryTextureUnitLookup> TextureUnitLookup { get; }
+
+    public IReadOnlyList<M2GeometryTransparencyLookup> TransparencyLookup { get; }
+
+    public IReadOnlyList<M2GeometryTextureAnimationLookup> TextureAnimationLookup { get; }
+
+    public IReadOnlyList<M2GeometryBoneLookup> BoneLookup { get; }
 }
 
 public readonly record struct M2GeometryVertex(
@@ -101,3 +121,11 @@ public sealed class M2GeometryTextureLookup
 
     public ushort TextureId { get; }
 }
+
+public readonly record struct M2GeometryTextureUnitLookup(ushort BatchIndex);
+
+public readonly record struct M2GeometryTransparencyLookup(ushort TransparencyIndex);
+
+public readonly record struct M2GeometryTextureAnimationLookup(ushort TextureAnimationIndex);
+
+public readonly record struct M2GeometryBoneLookup(ushort BoneIndex);

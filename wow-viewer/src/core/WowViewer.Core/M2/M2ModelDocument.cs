@@ -8,6 +8,8 @@ public sealed class M2ModelDocument
         M2ModelIdentity identity,
         string signature,
         uint version,
+        uint flags,
+        uint viewCount,
         string? modelName,
         Vector3 boundsMin,
         Vector3 boundsMax,
@@ -21,6 +23,8 @@ public sealed class M2ModelDocument
         Identity = identity;
         Signature = signature;
         Version = version;
+        Flags = flags;
+        ViewCount = viewCount;
         ModelName = modelName;
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
@@ -35,6 +39,10 @@ public sealed class M2ModelDocument
 
     public uint Version { get; }
 
+    public uint Flags { get; }
+
+    public uint ViewCount { get; }
+
     public string? ModelName { get; }
 
     public Vector3 BoundsMin { get; }
@@ -48,4 +56,6 @@ public sealed class M2ModelDocument
     public uint EmbeddedSkinProfileOffset { get; }
 
     public bool HasEmbeddedSkinProfiles => EmbeddedSkinProfileCount > 0;
+
+    public bool HasPhysicsSidecar => (Flags & 0x20u) != 0;
 }

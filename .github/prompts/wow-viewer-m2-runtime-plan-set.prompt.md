@@ -1,5 +1,5 @@
 ---
-description: "Route staged wow-viewer M2 runtime and renderer recovery to the right ordered prompt. Use when planning or implementing M2 parser ownership, exact %02d.skin handling, active section classification, material/effect routing, animation/lighting state, scene batching, or consumer cutover."
+description: "Route staged wow-viewer M2 runtime and renderer recovery to the right ordered prompt. Use when planning or implementing residual M2 foundation ownership, exact %02d.skin handling, active section classification, material/effect routing, animation/lighting state, scene batching, consumer cutover, or deciding whether the request is really a broader full first-party M2 parser/renderer cutover plan."
 name: "wow-viewer M2 Runtime Plan Set"
 argument-hint: "Describe the M2 runtime seam, renderer problem, or migration slice you want to attack next"
 agent: "agent"
@@ -30,10 +30,12 @@ Route the current request to the correct ordered prompt in `.github/prompts/wow-
 
 ## Companion Prompt
 
+- `wow-viewer-full-m2-parser-renderer-plan.prompt.md`
 - `m2-cross-build-native-investigation.prompt.md`
 
 ## Routing Rules
 
+- Use `wow-viewer-full-m2-parser-renderer-plan.prompt.md` first when the request is broader than one slice and is really about replacing the mixed M2 ownership model itself, especially when the user explicitly wants to stop relying on `Warcraft.NET`, `WarcraftNetM2Adapter`, `MdxViewer` renderer ownership, or MDX-shaped simplifications in the current M2 path.
 - Use `01-md20-and-skin-runtime-foundation.prompt.md` when the problem is canonical `.m2` identity, strict `MD20` validation, exact numbered `%02d.skin` ownership, skin-profile choose/load/init behavior, or the first wow-viewer-owned M2 runtime contract.
 - Use `02-section-classification-and-material-routing.prompt.md` when the problem is active renderable section ownership, bone-palette/influence remap, unresolved native flags such as `0x20` or `0x40`, material/layer routing, or effect-recipe classification.
 - Use `03-animation-lighting-and-effect-runtime.prompt.md` when the problem is external `%04d-%02d.anim` loading, alias chains, animated material/texture state, model-local diffuse/emissive evaluation, or explicit combiner/effect runtime state.
@@ -47,7 +49,7 @@ Return all items:
 
 1. the best next prompt to run
 2. why it is the correct slice now
-3. which ordered prompt should follow after it
+3. which ordered prompt or full-cutover prompt should follow after it
 4. what concrete repo and file scope the next slice should include
 5. what should stay out of scope for the next slice
 6. what proof level is realistic for that slice
