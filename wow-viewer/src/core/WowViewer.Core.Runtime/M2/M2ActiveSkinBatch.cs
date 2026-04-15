@@ -11,9 +11,13 @@ public sealed class M2ActiveSkinBatch
         BatchIndex = batchIndex;
         Flags = batch.Flags;
         PriorityPlane = batch.PriorityPlane;
+        ShaderId = batch.ShaderId;
         SkinSectionIndex = batch.SkinSectionIndex;
+        GeosetIndex = batch.GeosetIndex;
         ColorIndex = batch.ColorIndex;
-        MaterialIndex = batch.MaterialIndex;
+        RenderFlagsIndex = batch.RenderFlagsIndex;
+        MaterialLayer = batch.MaterialLayer;
+        TextureCount = batch.TextureCount;
         TextureComboIndex = batch.TextureComboIndex;
         TextureCoordComboIndex = batch.TextureCoordComboIndex;
         TransparencyComboIndex = batch.TransparencyComboIndex;
@@ -26,11 +30,21 @@ public sealed class M2ActiveSkinBatch
 
     public byte PriorityPlane { get; }
 
+    public ushort ShaderId { get; }
+
     public ushort SkinSectionIndex { get; }
+
+    public ushort GeosetIndex { get; }
 
     public short ColorIndex { get; }
 
-    public ushort MaterialIndex { get; }
+    public ushort RenderFlagsIndex { get; }
+
+    public ushort MaterialLayer { get; }
+
+    public ushort TextureCount { get; }
+
+    public ushort MaterialIndex => RenderFlagsIndex;
 
     public ushort TextureComboIndex { get; }
 

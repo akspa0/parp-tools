@@ -8,19 +8,24 @@ public sealed class M2StaticRenderModel
     public M2StaticRenderModel(
         M2ModelDocument model,
         IReadOnlyList<M2StaticRenderSection> sections,
+        IReadOnlyList<M2StructuredRenderSection> structuredSections,
         bool usesCompatibilityFallback)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(sections);
+        ArgumentNullException.ThrowIfNull(structuredSections);
 
         Model = model;
         Sections = sections;
+        StructuredSections = structuredSections;
         UsesCompatibilityFallback = usesCompatibilityFallback;
     }
 
     public M2ModelDocument Model { get; }
 
     public IReadOnlyList<M2StaticRenderSection> Sections { get; }
+
+    public IReadOnlyList<M2StructuredRenderSection> StructuredSections { get; }
 
     public bool UsesCompatibilityFallback { get; }
 
@@ -60,6 +65,54 @@ public sealed class M2StaticRenderSection
     public M2StaticRenderMaterial Material { get; }
 }
 
+public sealed class M2StructuredRenderSection
+{
+    public M2StructuredRenderSection(
+        int sectionIndex,
+        ushort skinSectionId,
+        IReadOnlyList<M2StaticRenderVertex> vertices,
+        IReadOnlyList<uint> indices,
+        IReadOnlyList<M2StructuredRenderPass> passes)
+    {
+        ArgumentNullException.ThrowIfNull(vertices);
+        ArgumentNullException.ThrowIfNull(indices);
+        ArgumentNullException.ThrowIfNull(passes);
+
+        SectionIndex = sectionIndex;
+        SkinSectionId = skinSectionId;
+        Vertices = vertices;
+        Indices = indices;
+        Passes = passes;
+    }
+
+    public int SectionIndex { get; }
+
+    public ushort SkinSectionId { get; }
+
+    public IReadOnlyList<M2StaticRenderVertex> Vertices { get; }
+
+    public IReadOnlyList<uint> Indices { get; }
+
+    public IReadOnlyList<M2StructuredRenderPass> Passes { get; }
+
+    public int PassCount => Passes.Count;
+}
+
+public sealed class M2StructuredRenderPass
+{
+    public M2StructuredRenderPass(int passIndex, M2StaticRenderMaterial material)
+    {
+        ArgumentNullException.ThrowIfNull(material);
+
+        PassIndex = passIndex;
+        Material = material;
+    }
+
+    public int PassIndex { get; }
+
+    public M2StaticRenderMaterial Material { get; }
+}
+
 public readonly record struct M2StaticRenderVertex(
     Vector3 Position,
     Vector3 Normal,
@@ -88,8 +141,13 @@ public sealed class M2StaticRenderMaterial
         M2BlendMode blendMode,
         string? texturePath,
         uint replaceableId,
-        uint textureFlags)
+        uint textureFlags,
+        IReadOnlyList<M2StaticRenderTextureBinding> textureBindings,
+        M2EffectRecipe effectRecipe)
     {
+        ArgumentNullException.ThrowIfNull(textureBindings);
+        ArgumentNullException.ThrowIfNull(effectRecipe);
+
         BatchIndex = batchIndex;
         BatchFlags = batchFlags;
         PriorityPlane = priorityPlane;
@@ -109,6 +167,8 @@ public sealed class M2StaticRenderMaterial
         TexturePath = texturePath;
         ReplaceableId = replaceableId;
         TextureFlags = textureFlags;
+        TextureBindings = textureBindings;
+        EffectRecipe = effectRecipe;
     }
 
     public int BatchIndex { get; }
@@ -151,9 +211,68 @@ public sealed class M2StaticRenderMaterial
 
     public uint TextureFlags { get; }
 
+    public IReadOnlyList<M2StaticRenderTextureBinding> TextureBindings { get; }
+
+    public M2EffectRecipe EffectRecipe { get; }
+
     public bool IsTransparent => BlendMode != M2BlendMode.Opaque;
 
     public bool IsUnshaded => (RenderFlags & 0x1) != 0;
 
     public bool IsTwoSided => (RenderFlags & 0x4) != 0;
+}
+
+public sealed class M2StaticRenderTextureBinding
+{
+    public M2StaticRenderTextureBinding(
+        int stageIndex,
+        int? textureLookupIndex,
+        ushort? textureId,
+        string? texturePath,
+        uint replaceableId,
+        uint textureFlags,
+        int? textureCoordLookupIndex,
+        ushort? textureCoordLookupValue,
+        int? transparencyLookupIndex,
+        ushort? transparencyLookupValue,
+        int? textureAnimationLookupIndex,
+        ushort? textureAnimationLookupValue)
+    {
+        StageIndex = stageIndex;
+        TextureLookupIndex = textureLookupIndex;
+        TextureId = textureId;
+        TexturePath = texturePath;
+        ReplaceableId = replaceableId;
+        TextureFlags = textureFlags;
+        TextureCoordLookupIndex = textureCoordLookupIndex;
+        TextureCoordLookupValue = textureCoordLookupValue;
+        TransparencyLookupIndex = transparencyLookupIndex;
+        TransparencyLookupValue = transparencyLookupValue;
+        TextureAnimationLookupIndex = textureAnimationLookupIndex;
+        TextureAnimationLookupValue = textureAnimationLookupValue;
+    }
+
+    public int StageIndex { get; }
+
+    public int? TextureLookupIndex { get; }
+
+    public ushort? TextureId { get; }
+
+    public string? TexturePath { get; }
+
+    public uint ReplaceableId { get; }
+
+    public uint TextureFlags { get; }
+
+    public int? TextureCoordLookupIndex { get; }
+
+    public ushort? TextureCoordLookupValue { get; }
+
+    public int? TransparencyLookupIndex { get; }
+
+    public ushort? TransparencyLookupValue { get; }
+
+    public int? TextureAnimationLookupIndex { get; }
+
+    public ushort? TextureAnimationLookupValue { get; }
 }

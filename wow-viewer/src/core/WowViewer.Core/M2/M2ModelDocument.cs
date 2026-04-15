@@ -6,11 +6,19 @@ public sealed class M2ModelDocument
 {
     public M2ModelDocument(
         M2ModelIdentity identity,
+        byte[] rawBytes,
         string signature,
         uint version,
         uint flags,
         uint viewCount,
         string? modelName,
+        IReadOnlyList<uint> globalLoops,
+        IReadOnlyList<M2SequenceDefinition> sequences,
+        IReadOnlyList<short> sequenceLookup,
+        IReadOnlyList<M2ColorDefinition> colors,
+        IReadOnlyList<M2TextureWeightDefinition> textureWeights,
+        IReadOnlyList<M2TextureTransformDefinition> textureTransforms,
+        IReadOnlyList<M2LightDefinition> lights,
         Vector3 boundsMin,
         Vector3 boundsMax,
         float boundsRadius,
@@ -18,14 +26,30 @@ public sealed class M2ModelDocument
         uint embeddedSkinProfileOffset)
     {
         ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(rawBytes);
         ArgumentException.ThrowIfNullOrWhiteSpace(signature);
+        ArgumentNullException.ThrowIfNull(globalLoops);
+        ArgumentNullException.ThrowIfNull(sequences);
+        ArgumentNullException.ThrowIfNull(sequenceLookup);
+        ArgumentNullException.ThrowIfNull(colors);
+        ArgumentNullException.ThrowIfNull(textureWeights);
+        ArgumentNullException.ThrowIfNull(textureTransforms);
+        ArgumentNullException.ThrowIfNull(lights);
 
         Identity = identity;
+        RawBytes = rawBytes;
         Signature = signature;
         Version = version;
         Flags = flags;
         ViewCount = viewCount;
         ModelName = modelName;
+        GlobalLoops = globalLoops;
+        Sequences = sequences;
+        SequenceLookup = sequenceLookup;
+        Colors = colors;
+        TextureWeights = textureWeights;
+        TextureTransforms = textureTransforms;
+        Lights = lights;
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
         BoundsRadius = boundsRadius;
@@ -34,6 +58,8 @@ public sealed class M2ModelDocument
     }
 
     public M2ModelIdentity Identity { get; }
+
+    public byte[] RawBytes { get; }
 
     public string Signature { get; }
 
@@ -45,6 +71,20 @@ public sealed class M2ModelDocument
 
     public string? ModelName { get; }
 
+    public IReadOnlyList<uint> GlobalLoops { get; }
+
+    public IReadOnlyList<M2SequenceDefinition> Sequences { get; }
+
+    public IReadOnlyList<short> SequenceLookup { get; }
+
+    public IReadOnlyList<M2ColorDefinition> Colors { get; }
+
+    public IReadOnlyList<M2TextureWeightDefinition> TextureWeights { get; }
+
+    public IReadOnlyList<M2TextureTransformDefinition> TextureTransforms { get; }
+
+    public IReadOnlyList<M2LightDefinition> Lights { get; }
+
     public Vector3 BoundsMin { get; }
 
     public Vector3 BoundsMax { get; }
@@ -54,6 +94,20 @@ public sealed class M2ModelDocument
     public uint EmbeddedSkinProfileCount { get; }
 
     public uint EmbeddedSkinProfileOffset { get; }
+
+    public int GlobalLoopCount => GlobalLoops.Count;
+
+    public int SequenceCount => Sequences.Count;
+
+    public int SequenceLookupCount => SequenceLookup.Count;
+
+    public int ColorCount => Colors.Count;
+
+    public int TextureWeightCount => TextureWeights.Count;
+
+    public int TextureTransformCount => TextureTransforms.Count;
+
+    public int LightCount => Lights.Count;
 
     public bool HasEmbeddedSkinProfiles => EmbeddedSkinProfileCount > 0;
 

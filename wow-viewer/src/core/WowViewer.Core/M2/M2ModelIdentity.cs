@@ -34,6 +34,20 @@ public sealed class M2ModelIdentity
             $"{basePath}{profileIndex:D2}.skin");
     }
 
+    public string BuildAnimationPath(int animationId, int variationIndex)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(animationId);
+        ArgumentOutOfRangeException.ThrowIfNegative(variationIndex);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(animationId, 9999);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(variationIndex, 99);
+
+        string extension = Path.GetExtension(CanonicalModelPath);
+        string basePath = CanonicalModelPath[..^extension.Length];
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{basePath}{animationId:D4}-{variationIndex:D2}.anim");
+    }
+
     public static M2ModelIdentity FromPath(string requestedPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(requestedPath);

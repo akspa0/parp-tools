@@ -191,14 +191,37 @@ static void RunM2Inspect(string[] args)
 	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
 		return;
 	string? profileIndexText = GetOption(args, "--profile-index", "-p");
+	string? sequenceIndexText = GetOption(args, "--sequence-index", "-s");
+	string? timeMsText = GetOption(args, "--time-ms", "-t");
 	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
 		virtualPath = input;
 
 	int profileIndex = 0;
+	int? sequenceIndex = null;
+	int timeMs = 0;
 	if (!string.IsNullOrWhiteSpace(profileIndexText)
 		&& (!int.TryParse(profileIndexText, out profileIndex) || profileIndex < 0 || profileIndex > 99))
 	{
 		Console.Error.WriteLine("Error: --profile-index must be an integer in the range 0..99.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!string.IsNullOrWhiteSpace(sequenceIndexText))
+	{
+		if (!int.TryParse(sequenceIndexText, out int parsedSequenceIndex) || parsedSequenceIndex < 0)
+		{
+			Console.Error.WriteLine("Error: --sequence-index must be a non-negative integer.");
+			Environment.ExitCode = 1;
+			return;
+		}
+
+		sequenceIndex = parsedSequenceIndex;
+	}
+
+	if (!string.IsNullOrWhiteSpace(timeMsText) && !int.TryParse(timeMsText, out timeMs))
+	{
+		Console.Error.WriteLine("Error: --time-ms must be an integer.");
 		Environment.ExitCode = 1;
 		return;
 	}
@@ -214,20 +237,17 @@ static void RunM2Inspect(string[] args)
 	string sourceLabel = !string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath)
 		? virtualPath
 		: input!;
-	Stream OpenInputStream()
+	byte[] ReadInputBytes()
 	{
 		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
-		{
-			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], archiveBootstrapOptions);
-			return new MemoryStream(archivedBytes, writable: false);
-		}
+			return archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], archiveBootstrapOptions);
 
 		if (File.Exists(input) && !input.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
-			return File.OpenRead(input);
+			return File.ReadAllBytes(input);
 
 		archivedBytes ??= AlphaArchiveReader.ReadWithMpqFallback(input!)
 			?? throw new FileNotFoundException($"Could not read inspect input '{input}' directly or from a companion MPQ archive.", input);
-		return new MemoryStream(archivedBytes, writable: false);
+		return archivedBytes;
 	}
 
 	byte[]? TryReadExactSkinBytes(string companionPath)
@@ -247,9 +267,39 @@ static void RunM2Inspect(string[] args)
 		return File.Exists(companionPath) ? File.ReadAllBytes(companionPath) : null;
 	}
 
+	byte[]? TryReadExactAnimBytes(string companionPath)
+	{
+		if (!string.IsNullOrWhiteSpace(archiveRoot))
+		{
+			try
+			{
+				return ArchiveVirtualFileReader.ReadVirtualFile(companionPath, [archiveRoot], archiveBootstrapOptions);
+			}
+			catch (FileNotFoundException)
+			{
+				return null;
+			}
+		}
+
+		return File.Exists(companionPath) ? File.ReadAllBytes(companionPath) : null;
+	}
+
+	byte[] modelBytes = ReadInputBytes();
 	M2ModelDocument model;
-	using (Stream stream = OpenInputStream())
+	using (MemoryStream stream = new(modelBytes, writable: false))
 		model = M2ModelReader.Read(stream, sourceLabel);
+
+	M2GeometryDocument? geometry = null;
+	string? geometryError = null;
+	try
+	{
+		using MemoryStream stream = new(modelBytes, writable: false);
+		geometry = M2GeometryReader.Read(stream, sourceLabel);
+	}
+	catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+	{
+		geometryError = ex.Message;
+	}
 
 	M2SkinProfileRuntimeState state = M2SkinProfileRuntime.Choose(model, profileIndex);
 	byte[]? skinBytes = TryReadExactSkinBytes(state.Selection.CompanionPath);
@@ -261,7 +311,59 @@ static void RunM2Inspect(string[] args)
 		state = M2SkinProfileRuntime.Initialize(state);
 	}
 
-	PrintM2Summary(model, state);
+	M2StaticRenderModel? renderModel = null;
+	if (geometry is not null && state.ActiveSkinProfile is not null)
+		renderModel = M2StaticRenderModelBuilder.Build(geometry, state);
+
+	M2ExternalAnimationRuntimeState? externalAnimationState = null;
+	string? externalAnimationError = null;
+	M2AnimatedRenderState? animatedRenderState = null;
+	string? animatedRenderError = null;
+	if (sequenceIndex is not null)
+	{
+		try
+		{
+			externalAnimationState = M2ExternalAnimationRuntime.Choose(model, sequenceIndex.Value);
+			if (externalAnimationState.UsesExternalFile && !string.IsNullOrWhiteSpace(externalAnimationState.CompanionPath))
+			{
+				byte[]? animBytes = TryReadExactAnimBytes(externalAnimationState.CompanionPath);
+				if (animBytes is not null)
+				{
+					using MemoryStream animStream = new(animBytes, writable: false);
+					M2ExternalAnimationDocument animation = M2AnimationReader.Read(animStream, externalAnimationState.CompanionPath);
+					externalAnimationState = M2ExternalAnimationRuntime.Load(externalAnimationState, animation);
+				}
+			}
+		}
+		catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentOutOfRangeException or ArgumentException)
+		{
+			externalAnimationError = ex.Message;
+		}
+	}
+
+	if (renderModel is not null && sequenceIndex is not null && string.IsNullOrWhiteSpace(externalAnimationError))
+	{
+		bool animationPayloadAvailable = externalAnimationState is null
+			|| !externalAnimationState.UsesExternalFile
+			|| externalAnimationState.LoadedAnimation is not null;
+		if (animationPayloadAvailable)
+		{
+			try
+			{
+				animatedRenderState = M2AnimatedRenderStateEvaluator.Evaluate(model, renderModel, sequenceIndex.Value, timeMs, externalAnimationState);
+			}
+			catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or ArgumentOutOfRangeException or ArgumentException or NotSupportedException)
+			{
+				animatedRenderError = ex.Message;
+			}
+		}
+		else
+		{
+			animatedRenderError = "external animation payload not loaded";
+		}
+	}
+
+	PrintM2Summary(model, state, geometry, geometryError, renderModel, externalAnimationState, externalAnimationError, animatedRenderState, animatedRenderError);
 }
 
 static void RunMdx(string[] args)
@@ -339,17 +441,30 @@ static void RunMdxInspect(string[] args)
 	PrintMdxSummary(summary);
 }
 
-static void PrintM2Summary(M2ModelDocument model, M2SkinProfileRuntimeState state)
+static void PrintM2Summary(M2ModelDocument model, M2SkinProfileRuntimeState state, M2GeometryDocument? geometry, string? geometryError, M2StaticRenderModel? renderModel, M2ExternalAnimationRuntimeState? externalAnimationState, string? externalAnimationError, M2AnimatedRenderState? animatedRenderState, string? animatedRenderError)
 {
 	string modelName = string.IsNullOrWhiteSpace(model.ModelName) ? "n/a" : model.ModelName;
-	Console.WriteLine($"M2: requestedPath={model.Identity.RequestedPath} canonicalPath={model.Identity.CanonicalModelPath} canonicalized={model.Identity.WasCanonicalized} signature={model.Signature} version=0x{model.Version:X} model={modelName} boundsMin={FormatVector(model.BoundsMin)} boundsMax={FormatVector(model.BoundsMax)} boundsRadius={model.BoundsRadius:F3} embeddedSkinProfiles={model.EmbeddedSkinProfileCount}");
+	Console.WriteLine($"M2: requestedPath={model.Identity.RequestedPath} canonicalPath={model.Identity.CanonicalModelPath} canonicalized={model.Identity.WasCanonicalized} signature={model.Signature} version=0x{model.Version:X} model={modelName} boundsMin={FormatVector(model.BoundsMin)} boundsMax={FormatVector(model.BoundsMax)} boundsRadius={model.BoundsRadius:F3} skinProfiles={model.ViewCount} colors={model.ColorCount} transparencyDefs={model.TextureWeightCount} textureTransforms={model.TextureTransformCount} lights={model.LightCount}");
+	int externalCandidateCount = model.Sequences.Count(static value => value.UsesExternalAnimationFile);
+	int aliasCount = model.Sequences.Count(static value => value.IsAlias);
+	Console.WriteLine($"ANIM: sequences={model.SequenceCount} externalCandidates={externalCandidateCount} aliases={aliasCount} globalLoops={model.GlobalLoopCount} sequenceLookup={model.SequenceLookupCount}");
+	if (geometry is null)
+	{
+		string errorText = string.IsNullOrWhiteSpace(geometryError) ? "n/a" : geometryError;
+		Console.WriteLine($"GEOMETRY: available=false error={errorText}");
+	}
+	else
+	{
+		Console.WriteLine($"GEOMETRY: available=true vertices={geometry.Vertices.Count} textures={geometry.Textures.Count} renderFlags={geometry.RenderFlags.Count} textureLookup={geometry.TextureLookup.Count} textureUnitLookup={geometry.TextureUnitLookup.Count} transparencyLookup={geometry.TransparencyLookup.Count} textureAnimationLookup={geometry.TextureAnimationLookup.Count} boneLookup={geometry.BoneLookup.Count}");
+	}
 
 	if (state.LoadedSkin is null)
 	{
-		string compatibilityHint = model.HasEmbeddedSkinProfiles
-			? " compatibilityFallbackHint=embedded-root-profile-present"
-			: string.Empty;
-		Console.WriteLine($"SKIN: stage={state.Stage} profileIndex={state.Selection.ProfileIndex} exactPath={state.Selection.CompanionPath} loaded=false{compatibilityHint}");
+		Console.WriteLine($"SKIN: stage={state.Stage} profileIndex={state.Selection.ProfileIndex} exactPath={state.Selection.CompanionPath} loaded=false");
+		if (externalAnimationState is not null || !string.IsNullOrWhiteSpace(externalAnimationError))
+			PrintExternalAnimationSummary(externalAnimationState, externalAnimationError);
+		if (animatedRenderState is not null || !string.IsNullOrWhiteSpace(animatedRenderError))
+			PrintAnimatedRenderSummary(animatedRenderState, animatedRenderError);
 		return;
 	}
 
@@ -367,7 +482,27 @@ static void PrintM2Summary(M2ModelDocument model, M2SkinProfileRuntimeState stat
 			for (int batchIndex = 0; batchIndex < section.Batches.Count; batchIndex++)
 			{
 				M2ActiveSkinBatch batch = section.Batches[batchIndex];
-				Console.WriteLine($"ACTIVE.SECTION[{index}].BATCH[{batchIndex}]: batchIndex={batch.BatchIndex} flags=0x{batch.Flags:X2} priorityPlane={batch.PriorityPlane} colorIndex={batch.ColorIndex} materialIndex={batch.MaterialIndex} textureComboIndex={batch.TextureComboIndex} textureCoordComboIndex={batch.TextureCoordComboIndex} transparencyComboIndex={batch.TransparencyComboIndex} textureAnimationLookupIndex={batch.TextureAnimationLookupIndex}");
+				Console.WriteLine($"ACTIVE.SECTION[{index}].BATCH[{batchIndex}]: batchIndex={batch.BatchIndex} flags=0x{batch.Flags:X2} priorityPlane={batch.PriorityPlane} shaderId={batch.ShaderId} geosetIndex={batch.GeosetIndex} colorIndex={batch.ColorIndex} renderFlagsIndex={batch.RenderFlagsIndex} materialIndex={batch.MaterialIndex} materialLayer={batch.MaterialLayer} textureCount={batch.TextureCount} textureComboIndex={batch.TextureComboIndex} textureCoordComboIndex={batch.TextureCoordComboIndex} transparencyComboIndex={batch.TransparencyComboIndex} textureAnimationLookupIndex={batch.TextureAnimationLookupIndex}");
+			}
+		}
+	}
+	if (renderModel is not null)
+	{
+		Console.WriteLine($"RENDER: compatibilitySections={renderModel.Sections.Count} structuredSections={renderModel.StructuredSections.Count} compatibilityMode={renderModel.UsesCompatibilityFallback}");
+		for (int sectionIndex = 0; sectionIndex < renderModel.StructuredSections.Count; sectionIndex++)
+		{
+			M2StructuredRenderSection section = renderModel.StructuredSections[sectionIndex];
+			Console.WriteLine($"RENDER.SECTION[{sectionIndex}]: skinSectionId={section.SkinSectionId} vertices={section.Vertices.Count} indices={section.Indices.Count} passes={section.PassCount}");
+			for (int passIndex = 0; passIndex < section.Passes.Count; passIndex++)
+			{
+				M2StructuredRenderPass pass = section.Passes[passIndex];
+				M2StaticRenderMaterial material = pass.Material;
+				Console.WriteLine($"RENDER.SECTION[{sectionIndex}].PASS[{passIndex}]: batchIndex={material.BatchIndex} flags=0x{material.BatchFlags:X2} priorityPlane={material.PriorityPlane} shaderId={material.ShaderId} geosetIndex={material.GeosetIndex} colorIndex={material.ColorIndex} renderFlagsIndex={material.RenderFlagsIndex} materialLayer={material.MaterialLayer} textureCount={material.TextureCount} blend={material.BlendMode} renderFlags=0x{material.RenderFlags:X4} transparent={material.IsTransparent} unshaded={material.IsUnshaded} twoSided={material.IsTwoSided} effect={material.EffectRecipe.RecipeKey} projected={material.EffectRecipe.IsProjected} animated={material.EffectRecipe.IsAnimated} colorAnim={material.EffectRecipe.UsesColorAnimation} transparencyAnim={material.EffectRecipe.UsesTransparencyAnimation} textureTransformAnim={material.EffectRecipe.UsesTextureTransformAnimation} suppressCombinedAlpha={material.EffectRecipe.SuppressCombinedTransparency}");
+				for (int bindingIndex = 0; bindingIndex < material.TextureBindings.Count; bindingIndex++)
+				{
+					M2StaticRenderTextureBinding binding = material.TextureBindings[bindingIndex];
+					Console.WriteLine($"RENDER.SECTION[{sectionIndex}].PASS[{passIndex}].TEXTURE[{bindingIndex}]: lookupIndex={FormatNullableInt(binding.TextureLookupIndex)} textureId={FormatNullableUShort(binding.TextureId)} path={binding.TexturePath ?? "n/a"} replaceableId={binding.ReplaceableId} flags=0x{binding.TextureFlags:X8} coordLookupIndex={FormatNullableInt(binding.TextureCoordLookupIndex)} coordLookupValue={FormatNullableUShort(binding.TextureCoordLookupValue)} transparencyLookupIndex={FormatNullableInt(binding.TransparencyLookupIndex)} transparencyLookupValue={FormatNullableUShort(binding.TransparencyLookupValue)} textureAnimationLookupIndex={FormatNullableInt(binding.TextureAnimationLookupIndex)} textureAnimationLookupValue={FormatNullableUShort(binding.TextureAnimationLookupValue)}");
+				}
 			}
 		}
 	}
@@ -379,9 +514,83 @@ static void PrintM2Summary(M2ModelDocument model, M2SkinProfileRuntimeState stat
 	for (int index = 0; index < skin.Batches.Count; index++)
 	{
 		M2SkinBatch batch = skin.Batches[index];
-		Console.WriteLine($"SKIN.BATCH[{index}]: flags=0x{batch.Flags:X2} priorityPlane={batch.PriorityPlane} skinSectionIndex={batch.SkinSectionIndex} colorIndex={batch.ColorIndex} materialIndex={batch.MaterialIndex} textureComboIndex={batch.TextureComboIndex} textureCoordComboIndex={batch.TextureCoordComboIndex} transparencyComboIndex={batch.TransparencyComboIndex} textureAnimationLookupIndex={batch.TextureAnimationLookupIndex}");
+		Console.WriteLine($"SKIN.BATCH[{index}]: flags=0x{batch.Flags:X2} priorityPlane={batch.PriorityPlane} shaderId={batch.ShaderId} skinSectionIndex={batch.SkinSectionIndex} geosetIndex={batch.GeosetIndex} colorIndex={batch.ColorIndex} renderFlagsIndex={batch.RenderFlagsIndex} materialIndex={batch.MaterialIndex} materialLayer={batch.MaterialLayer} textureCount={batch.TextureCount} textureComboIndex={batch.TextureComboIndex} textureCoordComboIndex={batch.TextureCoordComboIndex} transparencyComboIndex={batch.TransparencyComboIndex} textureAnimationLookupIndex={batch.TextureAnimationLookupIndex}");
+	}
+
+	if (externalAnimationState is not null || !string.IsNullOrWhiteSpace(externalAnimationError))
+		PrintExternalAnimationSummary(externalAnimationState, externalAnimationError);
+
+	if (animatedRenderState is not null || !string.IsNullOrWhiteSpace(animatedRenderError))
+		PrintAnimatedRenderSummary(animatedRenderState, animatedRenderError);
+}
+
+static void PrintExternalAnimationSummary(M2ExternalAnimationRuntimeState? state, string? error)
+{
+	if (!string.IsNullOrWhiteSpace(error))
+	{
+		Console.WriteLine($"ANIM.SELECTION: error={error}");
+		return;
+	}
+
+	if (state is null)
+		return;
+
+	string aliasChain = string.Join(",", state.AliasChain);
+	string readyIndices = state.ReadySequenceIndices.Count == 0
+		? "n/a"
+		: string.Join(",", state.ReadySequenceIndices);
+	Console.WriteLine($"ANIM.SELECTION: requestedSequenceIndex={state.RequestedSequenceIndex} resolvedSequenceIndex={state.ResolvedSequenceIndex} aliasChain={aliasChain} stage={state.Stage} usesExternalFile={state.UsesExternalFile} exactPath={state.CompanionPath ?? "n/a"}");
+	Console.WriteLine($"ANIM.SEQUENCE: animationId={state.ResolvedSequence.AnimationId} variationIndex={state.ResolvedSequence.VariationIndex} duration={state.ResolvedSequence.Duration} flags=0x{state.ResolvedSequence.Flags:X8} frequency={state.ResolvedSequence.Frequency} replay=[{state.ResolvedSequence.ReplayMinimum},{state.ResolvedSequence.ReplayMaximum}] blend=[{state.ResolvedSequence.BlendTimeIn},{state.ResolvedSequence.BlendTimeOut}] inline={state.ResolvedSequence.UsesInlineAnimationData} alias={state.ResolvedSequence.IsAlias} externalCandidate={state.ResolvedSequence.UsesExternalAnimationFile}");
+	if (state.LoadedAnimation is not null)
+	{
+		Console.WriteLine($"ANIM.FILE: loaded=true payloadBytes={state.LoadedAnimation.PayloadSizeBytes} chunked={state.LoadedAnimation.IsChunkedContainer} container={state.LoadedAnimation.ContainerSignature ?? "raw"} readySequenceIndices={readyIndices}");
+	}
+	else
+	{
+		Console.WriteLine($"ANIM.FILE: loaded=false readySequenceIndices={readyIndices}");
 	}
 }
+
+static void PrintAnimatedRenderSummary(M2AnimatedRenderState? state, string? error)
+{
+	if (!string.IsNullOrWhiteSpace(error))
+	{
+		Console.WriteLine($"ANIM.RUNTIME: error={error}");
+		return;
+	}
+
+	if (state is null)
+		return;
+
+	Console.WriteLine($"ANIM.RUNTIME: requestedSequenceIndex={state.RequestedSequenceIndex} resolvedSequenceIndex={state.ResolvedSequenceIndex} timeMs={state.TimeMs} usesExternalPayload={state.UsesExternalPayload} passStates={state.Passes.Count} lightStates={state.Lights.Count}");
+	for (int passIndex = 0; passIndex < state.Passes.Count; passIndex++)
+	{
+		M2AnimatedRenderPassState pass = state.Passes[passIndex];
+		Console.WriteLine($"ANIM.RUNTIME.PASS[{passIndex}]: sectionIndex={pass.SectionIndex} passIndex={pass.PassIndex} batchIndex={pass.BatchIndex} color={FormatVector(pass.Color)} colorAlpha={pass.ColorAlpha:F3} combinedAlpha={pass.CombinedAlpha:F3} bindings={pass.TextureBindings.Count}");
+		for (int bindingIndex = 0; bindingIndex < pass.TextureBindings.Count; bindingIndex++)
+		{
+			M2AnimatedTextureBindingState binding = pass.TextureBindings[bindingIndex];
+			Console.WriteLine($"ANIM.RUNTIME.PASS[{passIndex}].BINDING[{bindingIndex}]: stageIndex={binding.StageIndex} transparencyAlpha={binding.TransparencyAlpha:F3} translation={FormatVector(binding.Translation)} rotation={FormatQuaternion(binding.Rotation)} scaling={FormatVector(binding.Scaling)}");
+		}
+	}
+
+	for (int lightIndex = 0; lightIndex < state.Lights.Count; lightIndex++)
+	{
+		M2AnimatedLightState light = state.Lights[lightIndex];
+		Console.WriteLine($"ANIM.RUNTIME.LIGHT[{lightIndex}]: lightIndex={light.LightIndex} type={light.Type} boneIndex={light.BoneIndex} position={FormatVector(light.Position)} ambientColor={FormatVector(light.AmbientColor)} ambientIntensity={light.AmbientIntensity:F3} diffuseColor={FormatVector(light.DiffuseColor)} diffuseIntensity={light.DiffuseIntensity:F3} attenuationStart={light.AttenuationStart:F3} attenuationEnd={light.AttenuationEnd:F3} visible={light.Visible}");
+	}
+}
+
+static string FormatNullableInt(int? value)
+{
+	return value?.ToString() ?? "n/a";
+}
+
+static string FormatNullableUShort(ushort? value)
+{
+	return value?.ToString() ?? "n/a";
+}
+
 static void RunMdxExportJson(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
@@ -2902,8 +3111,8 @@ static void ShowLitUsage()
 static void ShowM2Usage()
 {
 	Console.WriteLine("M2 commands:");
-	Console.WriteLine("  m2 inspect --input <file.m2|file.mdx|file.mdl> [--profile-index <n>]");
-	Console.WriteLine("  m2 inspect --archive-root <game|data dir> --virtual-path <path/to/file.m2|file.mdx|file.mdl> [--listfile <listfile.txt>] [--profile-index <n>]");
+	Console.WriteLine("  m2 inspect --input <file.m2|file.mdx|file.mdl> [--profile-index <n>] [--sequence-index <n>]");
+	Console.WriteLine("  m2 inspect --archive-root <game|data dir> --virtual-path <path/to/file.m2|file.mdx|file.mdl> [--listfile <listfile.txt>] [--profile-index <n>] [--sequence-index <n>]");
 }
 
 static void ShowMdxUsage()
