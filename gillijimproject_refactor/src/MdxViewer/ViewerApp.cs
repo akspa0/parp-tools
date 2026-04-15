@@ -8680,7 +8680,8 @@ void main() {
                 {
                     ViewerLog.Trace($"[M2] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
                     M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(m2Bytes, skinBytes, resolvedModelPath, skinPath);
-                        LoadM2RuntimeModel(runtimeModel, null, dir, resolvedModelPath);
+                        var adaptedMdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, resolvedModelPath, _dbcBuild);
+                        LoadM2RuntimeModel(runtimeModel, adaptedMdx, dir, resolvedModelPath);
                     CaptureWorldReturnState();
                     ViewerLog.Info(ViewerLog.Category.Mdx,
                         $"[M2] Selected skin for {Path.GetFileName(originalPath)}: {skinPath} ({skinBytes.Length} bytes)");
@@ -9976,7 +9977,7 @@ void main() {
 
     private void RefreshStandaloneCharacterCustomizationState(string? modelPath, bool isM2AdapterModel)
     {
-        if (isM2AdapterModel || _texResolver == null || string.IsNullOrWhiteSpace(modelPath))
+        if (_texResolver == null || string.IsNullOrWhiteSpace(modelPath))
         {
             ClearStandaloneCharacterCustomizationState(resetOverrides: true);
             return;

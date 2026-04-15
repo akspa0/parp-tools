@@ -659,6 +659,7 @@ internal static class WarcraftNetM2Adapter
                 var geoset = new MdlGeoset
                 {
                     MaterialId = materialIds[materialSlot],
+                    SelectionGroup = unchecked((uint)section.SkinSectionId),
                 };
 
                 var remap = new Dictionary<ushort, ushort>();
@@ -1494,7 +1495,7 @@ internal static class WarcraftNetM2Adapter
             ushort indexStart = br.ReadUInt16();
             ushort indexCount = br.ReadUInt16();
             _ = br.ReadUInt16();
-            _ = br.ReadUInt16();
+            ushort boneComboIndex = br.ReadUInt16();
             _ = br.ReadUInt16();
             _ = br.ReadUInt16();
 
@@ -1511,6 +1512,7 @@ internal static class WarcraftNetM2Adapter
                     VertexCount = vertexCount,
                     IndexStart = indexStart,
                     IndexCount = indexCount,
+                    BoneComboIndex = boneComboIndex,
                 });
             }
 
@@ -1729,17 +1731,24 @@ internal static class WarcraftNetM2Adapter
                 long entryPos = ofsSubmeshes + (i * (uint)profile.SkinLikeAStride);
                 br.BaseStream.Position = entryPos;
 
-                _ = br.ReadUInt16();
-                _ = br.ReadUInt16();
-                _ = br.ReadUInt16();
-                _ = br.ReadUInt16();
+                ushort skinSectionId = br.ReadUInt16();
+                ushort level = br.ReadUInt16();
+                ushort vertexStart = br.ReadUInt16();
+                ushort vertexCount = br.ReadUInt16();
                 ushort indexStart = br.ReadUInt16();
                 ushort indexCount = br.ReadUInt16();
+                _ = br.ReadUInt16();
+                ushort boneComboIndex = br.ReadUInt16();
 
                 data.Submeshes.Add(new SkinSubmeshData
                 {
+                    SkinSectionId = skinSectionId,
+                    Level = level,
+                    VertexStart = vertexStart,
+                    VertexCount = vertexCount,
                     IndexStart = indexStart,
                     IndexCount = indexCount,
+                    BoneComboIndex = boneComboIndex,
                 });
             }
         }
@@ -1836,7 +1845,6 @@ internal static class WarcraftNetM2Adapter
         uint ofsSubmeshes = br.ReadUInt32();
         uint nTextureUnits = br.ReadUInt32();
         uint ofsTextureUnits = br.ReadUInt32();
-        uint globalVertexOffset = 0;
         uint shadowBatchCount = 0;
         uint ofsShadowBatches = 0;
 
@@ -1846,7 +1854,7 @@ internal static class WarcraftNetM2Adapter
         if (hasStrictSkinHeader)
         {
             if (br.BaseStream.Position + 4 <= br.BaseStream.Length)
-                globalVertexOffset = br.ReadUInt32();
+                _ = br.ReadUInt32();
 
             if (br.BaseStream.Position + 8 <= br.BaseStream.Length)
             {
@@ -1859,10 +1867,7 @@ internal static class WarcraftNetM2Adapter
             _ = br.ReadUInt32(); // boneCountMax (optional)
         }
 
-        var data = new SkinData
-        {
-            GlobalVertexOffset = globalVertexOffset,
-        };
+        var data = new SkinData();
 
         if (ofsIndices + (nIndices * 2) <= skinBytes.Length)
         {
@@ -1878,9 +1883,7 @@ internal static class WarcraftNetM2Adapter
                 data.TriangleIndices.Add(br.ReadUInt16());
         }
 
-        int submeshStride = hasStrictSkinHeader
-            ? 0x30
-            : InferStride(ofsSubmeshes, nSubmeshes, ofsTextureUnits, skinBytes.Length, 48, 24);
+        int submeshStride = InferStride(ofsSubmeshes, nSubmeshes, ofsTextureUnits, skinBytes.Length, 48, 24);
         if (submeshStride >= 12 && ofsSubmeshes < skinBytes.Length)
         {
             for (uint i = 0; i < nSubmeshes; i++)
@@ -1889,16 +1892,27 @@ internal static class WarcraftNetM2Adapter
                 if (entryPos + 12 > skinBytes.Length) break;
 
                 br.BaseStream.Position = entryPos;
-                _ = br.ReadUInt32();
-                _ = br.ReadUInt16();
-                _ = br.ReadUInt16();
+                ushort skinSectionId = br.ReadUInt16();
+                ushort level = br.ReadUInt16();
+                ushort vertexStart = br.ReadUInt16();
+                ushort vertexCount = br.ReadUInt16();
                 ushort startTriangle = br.ReadUInt16();
                 ushort triangleCount = br.ReadUInt16();
+                if (entryPos + 16 > skinBytes.Length)
+                    break;
+
+                _ = br.ReadUInt16();
+                ushort boneComboIndex = br.ReadUInt16();
 
                 data.Submeshes.Add(new SkinSubmeshData
                 {
+                    SkinSectionId = skinSectionId,
+                    Level = level,
+                    VertexStart = vertexStart,
+                    VertexCount = vertexCount,
                     IndexStart = startTriangle,
                     IndexCount = triangleCount,
+                    BoneComboIndex = boneComboIndex,
                 });
             }
         }
