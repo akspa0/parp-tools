@@ -13,8 +13,27 @@
 - current proof floor:
   - native 3.3.5 OS X and 3.3.5 PTR OS X PowerPC behavior-recovery notes now live in `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`
   - the active `MdxViewer` path has enough real regressions isolated to tell us what should not remain the long-term design owner
-  - first M2 ownership seam is already landed in `wow-viewer` (`Core/M2`, `Core.IO/M2`, `Core.Runtime/M2`, `m2 inspect`, and foundation tests)
-  - the main architectural gap is now slice completion after foundation: section/material routing, animation/light/effect runtime, scene submission/batching, and consumer cutover
+  - first-party M2 ownership is now landed through slice 02 and part of slice 03 in `wow-viewer` (`Core/M2`, `Core.IO/M2`, `Core.Runtime/M2`, richer `m2 inspect`, and foundation tests)
+  - the main architectural gap is now after those landed seams: animated bone/skinning application, render-consumer use of evaluated material/light state, scene submission/batching, and consumer cutover beyond inspect
+
+## Apr 15, 2026 implementation update
+
+- landed in `wow-viewer` since the earlier reset state:
+  - strict `MD20` root parse plus exact `%02d.skin` choose/load/init contracts
+  - first-party geometry/material tables and structured section/pass/material routing
+  - effect-recipe classification owned by `WowViewer.Core.Runtime/M2`
+  - external `%04d-%02d.anim` selection/load and alias ready-state ownership
+  - first-party animated block parsing for colors, texture weights, texture transforms, and lights
+  - first-pass animated runtime evaluation over root or external payloads
+  - `WowViewer.Tool.Inspect m2 inspect --time-ms` proof surface for evaluated animated runtime state
+- real proof floor now includes:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter M2FoundationTests` passing `19/19`
+  - real asset probe on fixed local client root `H:/CLIENTS/World of Warcraft Cata beta 11927` for `Creature/Wolf/Wolf.m2`, sequence `20`, with external `Wolf0096-00.anim` loading and `ANIM.RUNTIME` printed from the first-party evaluator
+- remaining work for the next continuation is no longer “get parser ownership started”; it is:
+  - animated bone pose solve and skinned-vertex application
+  - render-consumer application of evaluated material/light state instead of inspect-only ownership
+  - remaining model-local lighting/emissive semantics in the real render path
+  - family-specific runtime ownership, scene submission/batching, and consumer cutover beyond inspect
 
 ## Apr 15, 2026 reset
 
@@ -33,13 +52,13 @@
   - `.github/prompts/wow-viewer-full-m2-parser-renderer-plan.prompt.md`
   - use it when the ask is broader than one staged slice and is really about replacing the mixed M2 ownership model itself
 
-## Apr 03, 2026 Status Snapshot
+## Apr 15, 2026 Status Snapshot
 
 - slice 01 (`MD20` and skin runtime foundation): landed
-- slice 02 (section classification and material routing): open
-- slice 03 (animation, lighting, and effect runtime): open
+- slice 02 (section classification and material routing): landed first pass, with residual flag/bone-palette fidelity still possible as follow-on work
+- slice 03 (animation, lighting, and effect runtime): partially landed through external animation ownership, animated block parsing, and first-pass evaluator state; render-consumer application and animated bone solve remain open
 - slice 04 (scene submission and batching): open
-- slice 05 (consumer cutover and parity harness): open
+- slice 05 (consumer cutover and parity harness): partially landed as an inspect consumer only; broader app/bridge/parity work remains open
 
 ## Why This Plan Exists
 
@@ -83,6 +102,11 @@
 
 ### Slice 02 - Section Classification And Material Routing
 
+- status update:
+  - a first pass of this slice is now landed in `wow-viewer` with structured section/pass/material routing and effect-recipe classification
+  - real proof exists through `M2FoundationTests` and real-asset `m2 inspect` output
+  - residual work in this slice is now narrow: unresolved flag fidelity, bone-palette/influence details, and any remaining section/batch ownership mismatch that the next chat can prove concretely
+
 - target problem:
   - the native client treats `.skin` initialization as structural render-state work, but the current runtime still tends to flatten sections/batches too early
   - unresolved native flags like `0x20` and propagated `0x40` need to remain visible instead of being erased by generic geoset assumptions
@@ -95,8 +119,15 @@
 
 ### Slice 03 - Animation, Lighting, And Effect Runtime
 
+- status update:
+	- first-pass external animation selection/load, alias readiness, animated block parsing, and animated material/light state evaluation are now landed in `wow-viewer`
+	- current proof is library/test coverage plus real `Wolf.m2` inspect output that loads `Wolf0096-00.anim` and prints evaluated `ANIM.RUNTIME`
+	- the remaining gap is not “start owning external animations”; it is finishing runtime application and animated bone-driven behavior in real consumers
+
 - target problem:
-  - external `%04d-%02d.anim` ownership, alias chains, animated material/texture state, and model-local diffuse/emissive evaluation are still not first-class runtime seams
+  - animated bone pose solve and skinned-vertex application are still not owned end to end in `wow-viewer`
+  - evaluated material or texture or light state is still primarily an inspect/library seam rather than a real renderer-consumed runtime seam
+  - model-local diffuse/emissive/lighting behavior still needs render-path ownership, not just typed evaluation output
 - likely destination:
   - `wow-viewer/src/core/WowViewer.Core/M2/*`
   - `wow-viewer/src/core/WowViewer.Core.IO/M2/*`
@@ -117,13 +148,13 @@
 ### Slice 05 - Consumer Cutover And Parity Harness
 
 - target problem:
-  - extracted M2 seams still need a concrete consumer and a realistic parity harness over fixed real assets
+  - the extracted M2 seams now have an inspect consumer, but they still need a stronger app/bridge consumer and a realistic parity harness over fixed real assets
 - likely destination:
   - `wow-viewer/src/viewer/WowViewer.App/*` when that consumer becomes active
   - narrow compatibility-only hooks in `gillijimproject_refactor/src/MdxViewer/*` only when needed to prove reuse of the extracted wow-viewer seam
   - `WowViewer.Tool.Inspect` if an M2 diagnostic/inspect verb is the right first consumer before app cutover
 - proof goal:
-  - at least one consumer exercises the extracted wow-viewer M2 seam directly, with fixed real-asset validation and without claiming full production runtime parity
+  - a consumer beyond the current inspect-only path exercises the extracted wow-viewer M2 seam directly, with fixed real-asset validation and without claiming full production runtime parity
 
 ## Prompt Surface
 

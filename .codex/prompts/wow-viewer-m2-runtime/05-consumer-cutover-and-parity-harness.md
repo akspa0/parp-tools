@@ -1,5 +1,5 @@
 ---
-description: "Implement or plan the first consumer/parity slice after the wow-viewer M2 runtime seams exist. Use when adding an inspect harness, a wow-viewer app consumer, or a narrow MdxViewer compatibility bridge over already-extracted M2 runtime contracts."
+description: "Implement or plan the first consumer/parity slice after the wow-viewer M2 runtime seams exist. Use when moving beyond the already-real inspect harness into a wow-viewer app consumer, a materially stronger parity harness, or a narrow MdxViewer compatibility bridge over already-extracted M2 runtime contracts."
 name: "wow-viewer M2 Runtime 05 Consumer Cutover And Parity Harness"
 argument-hint: "Optional consumer, real asset set, inspect verb, or compatibility seam to prioritize"
 agent: "codex"
@@ -22,9 +22,15 @@ Make one real consumer exercise the extracted wow-viewer M2 runtime seam without
 
 Potential consumers:
 
-- a new or expanded `WowViewer.Tool.Inspect` M2 verb
+- a materially expanded `WowViewer.Tool.Inspect` parity/debug harness beyond the current animated-state CLI
 - a direct `wow-viewer` app/runtime consumer when that app seam is ready
 - a narrow compatibility-only `MdxViewer` bridge that explicitly consumes wow-viewer-owned M2 contracts instead of re-owning them
+
+## Current Validated Baseline
+
+- `WowViewer.Tool.Inspect` is already a real first consumer for parser/runtime ownership
+- it can already show strict root/skin state, structured section/material state, external animation readiness, and evaluated animated runtime state on real assets
+- the next consumer/parity slice should therefore move beyond “add one more inspect summary line”
 
 ## Non-Negotiable Constraints
 
@@ -32,6 +38,7 @@ Potential consumers:
 - Do not call compatibility wiring the new design owner.
 - Use fixed real assets and explicit proof language.
 - Do not claim full active-viewer runtime parity from one inspect verb or one bridged asset.
+- Do not pretend the current `m2 inspect` surface is missing; start from that existing consumer baseline.
 
 ## What The Work Must Produce
 

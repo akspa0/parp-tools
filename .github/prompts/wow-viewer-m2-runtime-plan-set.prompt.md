@@ -1,5 +1,5 @@
 ---
-description: "Route staged wow-viewer M2 runtime and renderer recovery to the right ordered prompt. Use when planning or implementing residual M2 foundation ownership, exact %02d.skin handling, active section classification, material/effect routing, animation/lighting state, scene batching, consumer cutover, or deciding whether the request is really a broader full first-party M2 parser/renderer cutover plan."
+description: "Route staged wow-viewer M2 runtime and renderer recovery to the right ordered prompt. Use when planning or implementing residual section/material fidelity, animated bone/skinning work, animated material/light application, scene batching, consumer cutover, or deciding whether the request is really a broader full first-party M2 parser/renderer cutover plan."
 name: "wow-viewer M2 Runtime Plan Set"
 argument-hint: "Describe the M2 runtime seam, renderer problem, or migration slice you want to attack next"
 agent: "agent"
@@ -20,6 +20,16 @@ Choose the right detailed prompt for the staged `wow-viewer` M2 runtime and rend
 
 Route the current request to the correct ordered prompt in `.github/prompts/wow-viewer-m2-runtime/` so M2 ownership moves into `wow-viewer` as a sequence of narrow, validated slices instead of another run of mixed parser/renderer/viewer hotfixes.
 
+## Current Validated Baseline
+
+- slices 01 and 02 are already real in `wow-viewer`
+- slice 03 is partially real already:
+	- external `%04d-%02d.anim` choose/load and alias ready-state ownership exist
+	- effect-recipe classification exists
+	- first-party animated block parsing/evaluation for colors, texture weights, texture transforms, and lights exists
+	- `WowViewer.Tool.Inspect m2 inspect --time-ms` can print evaluated animated runtime state on real assets
+- the next chat should not restart from “build strict MD20 parsing” or “invent the first inspect surface” unless it is correcting a concrete regression in already-landed work
+
 ## Ordered Prompts
 
 - `wow-viewer-m2-runtime/01-md20-and-skin-runtime-foundation.prompt.md`
@@ -36,11 +46,11 @@ Route the current request to the correct ordered prompt in `.github/prompts/wow-
 ## Routing Rules
 
 - Use `wow-viewer-full-m2-parser-renderer-plan.prompt.md` first when the request is broader than one slice and is really about replacing the mixed M2 ownership model itself, especially when the user explicitly wants to stop relying on `Warcraft.NET`, `WarcraftNetM2Adapter`, `MdxViewer` renderer ownership, or MDX-shaped simplifications in the current M2 path.
-- Use `01-md20-and-skin-runtime-foundation.prompt.md` when the problem is canonical `.m2` identity, strict `MD20` validation, exact numbered `%02d.skin` ownership, skin-profile choose/load/init behavior, or the first wow-viewer-owned M2 runtime contract.
-- Use `02-section-classification-and-material-routing.prompt.md` when the problem is active renderable section ownership, bone-palette/influence remap, unresolved native flags such as `0x20` or `0x40`, material/layer routing, or effect-recipe classification.
-- Use `03-animation-lighting-and-effect-runtime.prompt.md` when the problem is external `%04d-%02d.anim` loading, alias chains, animated material/texture state, model-local diffuse/emissive evaluation, or explicit combiner/effect runtime state.
+- Use `01-md20-and-skin-runtime-foundation.prompt.md` only when the problem is correcting a concrete regression in already-landed strict root or exact skin runtime ownership, not as the default next slice.
+- Use `02-section-classification-and-material-routing.prompt.md` when the remaining problem is genuinely residual section/material fidelity: active renderable section ownership gaps, bone-palette/influence remap, unresolved native flags such as `0x20` or `0x40`, or a still-proven section/batch/material-routing mismatch.
+- Use `03-animation-lighting-and-effect-runtime.prompt.md` when the remaining problem is completing runtime application after the now-landed evaluator baseline: animated bone/skinning solve, applying evaluated material/light state into a render consumer, model-local diffuse/emissive semantics, or residual effect-runtime behavior beyond simple recipe classification.
 - Use `04-scene-submission-and-batching.prompt.md` when the problem is render-entry family classification, doodad/particle/ribbon submission differences, batching rules, state-sort behavior, clip-plane/z-fill/additive-sort policy, or a narrow M2 runtime coordinator.
-- Use `05-consumer-cutover-and-parity-harness.prompt.md` when the problem is making a real consumer exercise the extracted wow-viewer M2 seam, adding an inspect/diagnostic harness, or wiring a narrow compatibility-only `MdxViewer` bridge after the earlier slices are already real.
+- Use `05-consumer-cutover-and-parity-harness.prompt.md` when the problem is moving beyond the already-real inspect consumer into an app consumer, a materially stronger parity harness, or a narrow compatibility-only `MdxViewer` bridge after the earlier slices are already real.
 - Use `m2-cross-build-native-investigation.prompt.md` when the task is to recover and compare native M2 behavior across multiple client versions (for example 3.3.5 through 6.x) before committing implementation changes.
 
 ## Deliverables

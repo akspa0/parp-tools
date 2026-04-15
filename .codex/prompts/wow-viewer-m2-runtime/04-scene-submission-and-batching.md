@@ -7,6 +7,12 @@ agent: "codex"
 
 Implement or plan the M2 runtime slice that owns classified scene submission and batching policy in wow-viewer.
 
+## Current Validated Baseline
+
+- section/pass/material routing is already real enough to provide structured runtime input
+- animated block parsing/evaluation and inspect-time animated runtime output already exist
+- this slice should assume those inputs are available and focus on render-entry families, queues, sorting, and batching
+
 ## Read First
 
 1. `gillijimproject_refactor/memory-bank/activeContext.md`
@@ -35,6 +41,7 @@ Create an explicit wow-viewer-owned M2 scene/submission model that can express:
 - Keep batch boundaries and runtime knobs explicit.
 - Do not claim full render parity from one coordinator/batcher seam.
 - Keep family-specific behavior concrete instead of introducing a speculative backend abstraction.
+- Do not spend this slice redoing parser/evaluator work that already belongs to slices 01-03.
 
 ## What The Work Must Produce
 

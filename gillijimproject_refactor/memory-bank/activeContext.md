@@ -1,5 +1,28 @@
 # Active Context
 
+## Apr 15, 2026 - wow-viewer M2 now owns first-pass animated material/light state, and the next chat should resume after that baseline instead of re-planning it
+
+- landed first-party `wow-viewer` M2 seams now include:
+	- strict `MD20` root parsing and exact `%02d.skin` choose/load/init runtime
+	- first-party geometry/material tables plus structured section or pass or material routing
+	- effect-recipe classification in `WowViewer.Core.Runtime/M2`
+	- external `%04d-%02d.anim` selection/load plus alias ready-state ownership
+	- first-party animated block definitions and parsing for colors, texture weights, texture transforms, and lights
+	- first-pass animated runtime evaluation for material/pass and light state from root or external payloads
+	- `WowViewer.Tool.Inspect m2 inspect --time-ms` output for evaluated animated runtime state
+- bounded proof completed in this chat:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter M2FoundationTests` passed `19/19`
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug` succeeded
+	- real asset proof on fixed client root `H:/CLIENTS/World of Warcraft Cata beta 11927` for `Creature/Wolf/Wolf.m2`, sequence `20`, loaded external `Creature/Wolf/Wolf0096-00.anim` and printed `ANIM.RUNTIME` from the first-party evaluator
+- remaining M2 seam for the next fresh chat is now narrower and should be treated as such:
+	- bone pose solve and animated skinning application
+	- applying evaluated material/light state into a real renderer or consumer path instead of inspect-only ownership
+	- remaining model-local lighting or emissive semantics not yet consumed by rendering
+	- particle or ribbon or other family-specific runtime ownership as needed before submission work
+	- explicit scene submission or batching coordinator and a consumer cutover beyond inspect
+- important boundary:
+	- this does not mean active-viewer runtime parity or full first-party M2 renderer closure; it is parser/runtime/evaluator ownership plus inspect proof only
+
 ## Apr 15, 2026 - uv-managed training bootstrap is now implemented, and train_v7 no longer silently falls back to CPU
 
 - implemented new dedicated training bootstrap scripts:

@@ -1,11 +1,11 @@
 ---
-description: "Implement or plan the M2 runtime slice for external animation ownership, model-local lighting, and effect state. Use when `%04d-%02d.anim`, alias chains, diffuse/emissive evaluation, or combiner/effect routing still live only in native notes or compatibility code."
+description: "Implement or plan the M2 runtime slice for remaining animated-state ownership after the first parser/evaluator pass is real. Use when animated bone/skinning solve, sequence-driven material/light application, model-local diffuse/emissive semantics, or residual effect runtime behavior still live only in notes, inspect output, or compatibility code."
 name: "wow-viewer M2 Runtime 03 Animation Lighting And Effect Runtime"
 argument-hint: "Optional sequence family, lighting seam, effect recipe, or real asset to prioritize"
 agent: "codex"
 ---
 
-Implement or plan the wow-viewer M2 runtime slice that owns animation-file state, model-local lighting, and effect/combiner runtime decisions.
+Implement or plan the wow-viewer M2 runtime slice that finishes animated runtime ownership after the first parser/evaluator baseline.
 
 ## Read First
 
@@ -20,13 +20,19 @@ Implement or plan the wow-viewer M2 runtime slice that owns animation-file state
 
 ## Goal
 
-Move animation/runtime state that the native client treats as first-class into wow-viewer-owned contracts:
+Complete the remaining animation/runtime state that the native client treats as first-class inside wow-viewer-owned contracts:
 
-- external `%04d-%02d.anim` files and alias chains
-- sequence readiness state
-- animated scalar/texture/material state
-- model-local diffuse/emissive evaluation
-- explicit effect/combiner recipe state instead of ad hoc renderer-local choices
+- animated bone pose and skinned-vertex application
+- applying already-evaluated scalar/texture/material/light state into a real render consumer
+- model-local diffuse/emissive evaluation in the real runtime path
+- residual effect/combiner runtime semantics beyond simple recipe classification
+
+## Current Validated Baseline
+
+- external `%04d-%02d.anim` choose/load and alias ready-state ownership are already real
+- effect-recipe classification is already real
+- first-party animated block parsing/evaluation for colors, texture weights, texture transforms, and lights is already real
+- `WowViewer.Tool.Inspect m2 inspect --time-ms` can already print evaluated animated runtime state on real assets
 
 ## Non-Negotiable Constraints
 
@@ -35,12 +41,13 @@ Move animation/runtime state that the native client treats as first-class into w
 - Keep alias chains and readiness state explicit.
 - Keep native effect/combiner names labeled as behavior-recovery evidence, not raw format terms.
 - Do not widen this slice into a world-runtime refactor.
+- Do not spend this slice re-planning already-landed external animation loading or inspect-only evaluator ownership as if they are missing.
 
 ## What The Work Must Produce
 
-1. the exact wow-viewer contracts for animation file ownership and runtime state
-2. the exact files that should own effect recipes and lighting evaluation
-3. the narrowest real proof that animated/effect state is library-owned instead of viewer-local
+1. the exact wow-viewer contracts for animated bone/state application and runtime consumption
+2. the exact files that should own render-consumer application of effect recipes and lighting evaluation
+3. the narrowest real proof that animated state is no longer inspect-only or viewer-local
 4. the explicit boundary that still remains for slice 04 scene submission
 
 ## Deliverables

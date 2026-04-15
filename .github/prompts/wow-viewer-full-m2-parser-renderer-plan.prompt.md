@@ -35,15 +35,20 @@ Define the real implementation sequence for replacing the mixed current M2 owner
 
 - the user no longer wants more `MdxViewer` bandaid work as the design owner for M2
 - remaining player-model texturing failures are a sign that the mixed current path is still structurally wrong, not just missing one more hotfix
-- the active `wow-viewer` foundation is real, but it is still incomplete in exactly the places that matter for first-party ownership:
-	- root payload readers and runtime contracts are still thinner than the native/runtime evidence requires
-	- current section/material projection can still flatten or simplify real batch intent too early
-	- inspect tooling is still too weak to act as the main first-party debugging harness
+- the active `wow-viewer` baseline is now materially beyond foundation:
+	- strict `MD20` root/skin runtime, geometry/material-table ownership, structured section/pass/material routing, effect recipes, external animation selection/load, animated block parsing, and first-pass evaluator output are already real
+	- `WowViewer.Tool.Inspect` can already print evaluated animated runtime state on real assets
+- the remaining incompleteness is now narrower and more important:
+	- animated bone pose solve and skinned-vertex application are still not owned end to end in `wow-viewer`
+	- evaluated material/light state exists as a library or inspect seam but is not yet consumed by a real renderer/app path
+	- particle/ribbon/family-specific runtime and scene submission/batching still need first-party ownership
+	- consumer cutover/parity proof beyond inspect is still open
 - the user explicitly wants the fix path to use wowdev docs, native-client evidence, and `noggit-red` as references while moving real parser/runtime/renderer ownership into `wow-viewer`
 
 ## Non-Negotiable Constraints
 
 - `wow-viewer` is the canonical implementation target.
+- Start from the current landed baseline; do not re-plan already-landed slice-01/02 work as though it is still missing.
 - Do not route the design back into `MdxViewer`, `WarcraftNetM2Adapter`, or `Warcraft.NET` as default owners.
 - Use `MdxViewer`, native-client notes, and `noggit-red` as extraction or parity references only.
 - Keep raw format names, native-client/research labels, and local convenience aliases clearly separated.
@@ -53,12 +58,13 @@ Define the real implementation sequence for replacing the mixed current M2 owner
 ## What The Plan Must Produce
 
 1. the exact ordered implementation waves for a full first-party M2 cutover
-2. the exact `wow-viewer` file and project scope for each wave
-3. the temporary compatibility-only seams that may remain during transition
-4. the inspect or export tooling needed to make the parser/runtime debuggable on real assets
-5. the real-asset proof floor for each wave
-6. the items that must stay explicitly labeled research or unresolved
-7. the continuity files and workflow assets that must be updated as each wave lands
+2. which parts of the current baseline are already landed and therefore out of scope for the next wave unless a concrete regression is being fixed
+3. the exact `wow-viewer` file and project scope for each wave
+4. the temporary compatibility-only seams that may remain during transition
+5. the inspect or export tooling needed to make the parser/runtime debuggable on real assets
+6. the real-asset proof floor for each wave
+7. the items that must stay explicitly labeled research or unresolved
+8. the continuity files and workflow assets that must be updated as each wave lands
 
 ## Deliverables
 

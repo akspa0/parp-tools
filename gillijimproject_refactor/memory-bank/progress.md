@@ -1,5 +1,24 @@
 # Progress
 
+### Apr 15, 2026 - wow-viewer M2 slices 01 and 02 are now real, and slice 03 is partially landed
+
+- landed `wow-viewer` M2 ownership now includes:
+	- strict `MD20` root parse, exact `%02d.skin` choose/load/init runtime, and first-party geometry/material tables
+	- structured section/pass/material routing plus effect-recipe classification
+	- external `%04d-%02d.anim` selection/load and alias ready-state ownership
+	- first-party animated block parsing for colors, transparency weights, texture transforms, and lights
+	- first-pass animated runtime evaluation and `m2 inspect --time-ms` output
+- focused proof completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter M2FoundationTests` passed `19/19`
+	- real asset probe on `Creature/Wolf/Wolf.m2` from `H:/CLIENTS/World of Warcraft Cata beta 11927` loaded external `Wolf0096-00.anim` and printed first-party `ANIM.RUNTIME` output
+- remaining M2 work is no longer “foundation”:
+	- animated bone pose and skinning application
+	- render-consumer use of evaluated material/light state
+	- family-specific runtime ownership and scene submission/batching
+	- consumer cutover/parity harness beyond inspect
+- proof boundary:
+	- this is still not active-viewer runtime signoff or full renderer parity
+
 ### Apr 15, 2026 - landed uv-based training deployment scripts and removed implicit CPU fallback in train_v7
 
 - implemented dedicated uv-managed training environment bootstrap scripts:

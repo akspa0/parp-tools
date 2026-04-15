@@ -1,5 +1,5 @@
 ---
-description: "Implement or plan the second wow-viewer M2 runtime slice. Use when active section ownership, bone-palette remap, unresolved native flags such as `0x20` and `0x40`, or material/effect routing still collapse into generic geoset assumptions."
+description: "Implement or plan residual wow-viewer M2 section/material work. Use when active section ownership, bone-palette remap, unresolved native flags such as `0x20` and `0x40`, or remaining material/effect routing fidelity still collapse into generic geoset assumptions after the first structured section/pass/material slice has already landed."
 name: "wow-viewer M2 Runtime 02 Section Classification And Material Routing"
 argument-hint: "Optional real asset, section flag, material family, or adapter seam to prioritize"
 agent: "agent"
@@ -24,6 +24,7 @@ Create a wow-viewer-owned active section contract that preserves the native stru
 
 ## Current Concrete Problem
 
+- a first pass of structured section/pass/material routing is already landed in `wow-viewer`, so this is no longer the default next slice
 - native `.skin` initialization copies/remaps section records into active runtime state
 - unresolved native section flags such as `0x20` and propagated `0x40` still matter even though their final semantics are not closed
 - the current compatibility path still tends to blend together section ownership, material routing, and renderer behavior too early
@@ -36,6 +37,7 @@ Create a wow-viewer-owned active section contract that preserves the native stru
 - Keep raw/native terminology distinct from local aliases or guesses.
 - Do not claim final shader/effect parity from section-contract work alone.
 - Keep this slice narrower than full animation or scene-submission ownership.
+- Do not use this prompt as the default next chat when the real remaining work is animated runtime application or consumer cutover.
 
 ## What The Work Must Produce
 
