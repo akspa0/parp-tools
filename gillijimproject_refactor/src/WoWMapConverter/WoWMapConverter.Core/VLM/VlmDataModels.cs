@@ -55,6 +55,13 @@ public record VlmTerrainData(
     [property: JsonPropertyName("pm4_mask")] string? Pm4MaskPath,
     [property: JsonPropertyName("no_object_minimap")] string? NoObjectMinimapPath,
     [property: JsonPropertyName("terrain_only_minimap")] string? TerrainOnlyMinimapPath,
+
+    // Semantic context rasters exported at tile scope.
+    [property: JsonPropertyName("holes_mask")] string? HolesMaskPath,
+    [property: JsonPropertyName("area_id_map")] string? AreaIdMapPath,
+    [property: JsonPropertyName("chunk_flags_map")] string? ChunkFlagsMapPath,
+    [property: JsonPropertyName("liquid_type_map")] string? LiquidTypeMapPath,
+    [property: JsonPropertyName("dominant_effect_id_map")] string? DominantEffectIdMapPath,
     
     // Textures
     [property: JsonPropertyName("textures")] List<string> Textures,

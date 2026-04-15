@@ -131,6 +131,8 @@ dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Too
 `ml-harvest-brushes` reads the exported tile JSON and heightmaps, identifies patch-scale terrain edits, groups them, and writes:
 
 - `brush_imprints/brush_imprint_manifest.json`
+- `brush_imprints/brush_archetype_manifest.json`
+- `brush_imprints/archetypes/*.json`
 - `brush_imprints/groups/*.json`
 - `brush_imprints/tile_masks/*_brush_mask.png`
 
@@ -152,7 +154,7 @@ The active V7.5.1 model consumes `13` input channels. Not every exported channel
 
 | Channel family | How it is harvested or derived | Current role |
 | --- | --- | --- |
-| `terrain_only_minimap` / `no_object_minimap` / `no_mccv_minimap` / raw `image` RGB | Starts from a real exported minimap tile and may be deterministically cleaned with real exported masks | Primary RGB evidence |
+| `terrain_only_minimap` / `no_object_minimap` / `no_mccv_minimap` / raw `image` RGB | Starts from a real exported minimap tile and may be deterministically cleaned with real exported masks plus chunk texture rebake | Primary RGB evidence |
 | `normalmap` RGB | Deterministically rendered from real ADT terrain heights | Local surface-shape cue |
 | `wdl_heights` prior | Exported from real WDL data when present | Low-resolution global terrain prior |
 | `height_min` / `height_max` hint masks | Scalar bounds from the real tile height range | Height decoding context |
@@ -172,6 +174,7 @@ These are not all direct inputs to the current terrain model, but they are still
 | `mccv_map` | Exported from real MCCV bytes | Cleanup and tint analysis |
 | `shadow_maps` | Exported from real shadow payloads | Diagnostic and audit only for terrain-only cleanup; not currently removed from `terrain_only_minimap` |
 | `pm4_mask` | Exported from real PM4 overlays when available | Cleanup and later collision-context work |
+| `holes_mask` / `area_id_map` / `chunk_flags_map` / `liquid_type_map` / `dominant_effect_id_map` | Deterministically rasterized from real chunk metadata and liquid records | Semantic context, audit, and future conditioning work |
 | `objects` | Real MDDF/MODF object placements with bounds when available | Object analysis and mask construction |
 
 ## What The GAN Does And Does Not Do
@@ -200,10 +203,10 @@ Some active channels are not raw client captures. They are deterministic transfo
 
 Examples:
 
-- `terrain_only_minimap` starts from the exported minimap and removes known contaminants using exported masks
+- `terrain_only_minimap` starts from the exported minimap and replaces masked regions using chunk texture rebake plus nearest-base fallback
 - `normalmap` is rendered from exported terrain heights
 - `object_visibility_mask` is projected from real placements plus geometry or bounds
-- `brush_mask_path` is a deterministic terrain-analysis result over exported heightmaps
+- `brush_mask_path` and brush archetype summaries are deterministic terrain-analysis results over exported heightmaps
 
 Those are still acceptable grounding channels because they can be traced back to real tile data and re-derived reproducibly.
 

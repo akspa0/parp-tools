@@ -95,7 +95,10 @@ public class VlmDatasetExporter
         string? listfilePath = null,
         bool generateDepth = false,
         string? minimapRoot = null,
-        string? tileFilter = null)
+        string? tileFilter = null,
+        bool skipDerivedAssets = false,
+        bool interestingOnly = false,
+        int interestingMinScore = 1)
     {
         progress?.Report($"Starting VLM export for map: {mapName}");
 
@@ -440,7 +443,15 @@ public class VlmDatasetExporter
 
         // Parallel tile processing with configurable degree of parallelism
         var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
-        var tilesToProcess = SelectTilesForProcessing(existingTiles, limit, isAlphaFormat, mapDirectory, archiveCatalog, searchPaths);
+        var tilesToProcess = SelectTilesForProcessing(
+            existingTiles,
+            limit,
+            isAlphaFormat,
+            mapDirectory,
+            archiveCatalog,
+            searchPaths,
+            interestingOnly,
+            interestingMinScore);
         
         await Parallel.ForEachAsync(tilesToProcess, parallelOptions, async (tileIndex, ct) =>
         {
@@ -592,13 +603,24 @@ public class VlmDatasetExporter
         var textureDb = new { count = allTextures.Count, textures = allTextures.Keys.ToList() };
         await File.WriteAllTextAsync(textureDbPath, JsonSerializer.Serialize(textureDb, _jsonOptions));
 
+        if (!skipDerivedAssets && allTextures.Count > 0)
+        {
+            progress?.Report($"Exporting {allTextures.Count} unique tileset textures...");
+            int textureCount = ExportTilesetTextures(outputDir, allTextures.Keys, archiveCatalog, searchPaths);
+            progress?.Report($"Exported {textureCount} textures");
+        }
+
         // Stitch chunk data into tile-level images
-        if (tilesExported > 0)
+        if (!skipDerivedAssets && tilesExported > 0)
         {
             progress?.Report("Stitching tile images...");
             var stitchedDir = Path.Combine(outputDir, "stitched");
+            var semanticDir = Path.Combine(outputDir, "semantic");
             // liquidsDir already declared/created at start
             Directory.CreateDirectory(stitchedDir);
+            Directory.CreateDirectory(semanticDir);
+
+            var minimapBakeService = new MinimapBakeService(outputDir);
             
             var jsonFiles = Directory.GetFiles(datasetDir, "*.json");
             int stitchedCount = 0;
@@ -626,10 +648,17 @@ public class VlmDatasetExporter
                         string? pm4MaskPath = null;
                         string? noObjectMinimapPath = null;
                         string? terrainOnlyMinimapPath = null;
+                        string? holesMaskPath = null;
+                        string? areaIdMapPath = null;
+                        string? chunkFlagsMapPath = null;
+                        string? liquidTypeMapPath = null;
+                        string? dominantEffectIdMapPath = null;
                         float lMin = 0f, lMax = 0f;
                         byte[] objectMaskBytes = Array.Empty<byte>();
                         byte[] pm4MaskBytes = Array.Empty<byte>();
                         byte[] liquidMaskBytes = Array.Empty<byte>();
+                        int semanticWidth = 256;
+                        int semanticHeight = 256;
 
                         string? sourceMinimapPath = sample.ImagePath;
                         if (!string.IsNullOrWhiteSpace(sourceMinimapPath) && !Path.IsPathRooted(sourceMinimapPath))
@@ -662,6 +691,9 @@ public class VlmDatasetExporter
                             using Image<Rgba32> minimapForMask = Image.Load<Rgba32>(sourceMinimapPath);
                             if (minimapForMask.Width > 0 && minimapForMask.Height > 0)
                             {
+                                semanticWidth = minimapForMask.Width;
+                                semanticHeight = minimapForMask.Height;
+
                                 if (TryParseTileCoordinates(tileName, out int tileX, out int tileY))
                                 {
                                     IReadOnlyList<MprlEntry> positionRefs = LoadPm4PositionRefs(
@@ -751,13 +783,52 @@ public class VlmDatasetExporter
                                 liquidMaskBytes);
                             if (terrainOnlyRemovalMask.Length > 0)
                             {
-                                byte[] terrainOnlyBytes = SynthesizeMaskedMinimap(cleanedTerrainMinimapPath ?? sourceMinimapPath, terrainOnlyRemovalMask);
+                                byte[] terrainOnlyBytes = await SynthesizeTerrainOnlyMinimapAsync(
+                                    cleanedTerrainMinimapPath ?? sourceMinimapPath,
+                                    terrainOnlyRemovalMask,
+                                    sample.TerrainData,
+                                    minimapBakeService);
                                 if (terrainOnlyBytes.Length > 0)
                                 {
                                     terrainOnlyMinimapPath = $"images/{tileName}_terrain_only.png";
                                     await File.WriteAllBytesAsync(Path.Combine(outputDir, terrainOnlyMinimapPath), terrainOnlyBytes);
                                 }
                             }
+                        }
+
+                        byte[] holesMaskBytes = RenderHolesMask(sample.TerrainData.Holes, semanticWidth, semanticHeight);
+                        if (holesMaskBytes.Length > 0)
+                        {
+                            holesMaskPath = $"semantic/{tileName}_holes_mask.png";
+                            await File.WriteAllBytesAsync(Path.Combine(outputDir, holesMaskPath), holesMaskBytes);
+                        }
+
+                        byte[] areaIdMapBytes = RenderChunkValueMap(BuildChunkAreaIdValues(sample.TerrainData.ChunkLayers), semanticWidth, semanticHeight);
+                        if (areaIdMapBytes.Length > 0)
+                        {
+                            areaIdMapPath = $"semantic/{tileName}_area_id_map.png";
+                            await File.WriteAllBytesAsync(Path.Combine(outputDir, areaIdMapPath), areaIdMapBytes);
+                        }
+
+                        byte[] chunkFlagsMapBytes = RenderChunkFlagMap(BuildChunkFlagValues(sample.TerrainData.ChunkLayers), semanticWidth, semanticHeight);
+                        if (chunkFlagsMapBytes.Length > 0)
+                        {
+                            chunkFlagsMapPath = $"semantic/{tileName}_chunk_flags_map.png";
+                            await File.WriteAllBytesAsync(Path.Combine(outputDir, chunkFlagsMapPath), chunkFlagsMapBytes);
+                        }
+
+                        byte[] liquidTypeMapBytes = RenderChunkValueMap(BuildLiquidTypeValues(sample.TerrainData.Liquids), semanticWidth, semanticHeight);
+                        if (liquidTypeMapBytes.Length > 0)
+                        {
+                            liquidTypeMapPath = $"semantic/{tileName}_liquid_type_map.png";
+                            await File.WriteAllBytesAsync(Path.Combine(outputDir, liquidTypeMapPath), liquidTypeMapBytes);
+                        }
+
+                        byte[] dominantEffectIdMapBytes = RenderChunkValueMap(BuildDominantEffectIdValues(sample.TerrainData.ChunkLayers), semanticWidth, semanticHeight);
+                        if (dominantEffectIdMapBytes.Length > 0)
+                        {
+                            dominantEffectIdMapPath = $"semantic/{tileName}_dominant_effect_id_map.png";
+                            await File.WriteAllBytesAsync(Path.Combine(outputDir, dominantEffectIdMapPath), dominantEffectIdMapBytes);
                         }
 
                         // Update Terrain Data
@@ -774,6 +845,11 @@ public class VlmDatasetExporter
                             Pm4MaskPath = pm4MaskPath,
                             NoObjectMinimapPath = noObjectMinimapPath,
                             TerrainOnlyMinimapPath = terrainOnlyMinimapPath,
+                            HolesMaskPath = holesMaskPath,
+                            AreaIdMapPath = areaIdMapPath,
+                            ChunkFlagsMapPath = chunkFlagsMapPath,
+                            LiquidTypeMapPath = liquidTypeMapPath,
+                            DominantEffectIdMapPath = dominantEffectIdMapPath,
                             LiquidMinHeight = lMin,
                             LiquidMaxHeight = lMax
                         };
@@ -786,37 +862,6 @@ public class VlmDatasetExporter
                 catch { }
             }
             progress?.Report($"Stitched images and updated JSON for {stitchedCount} tiles");
-
-            // Export Tileset Textures
-            progress?.Report($"Exporting {allTextures.Count} unique tileset textures...");
-            var tilesetsDir = Path.Combine(outputDir, "tilesets");
-            Directory.CreateDirectory(tilesetsDir);
-            
-            int textureCount = 0;
-            foreach (var texture in allTextures.Keys)
-            {
-                var texName = Path.GetFileName(texture); // e.g. "grass.blp"
-                var pngName = Path.ChangeExtension(texName, ".png");
-                var pngPath = Path.Combine(tilesetsDir, pngName);
-                
-                if (!File.Exists(pngPath))
-                {
-                    // Try to find the BLP in client
-                    // 'texture' might be full path or relative. 
-                    // Usually it is relative like "Textures\Grass.blp"
-                    
-                    // Try common locations
-                    // Try common locations
-                    string normalizedTexturePath = NormalizeVirtualAssetPath(texture);
-                    string? looseTexturePath = TryResolveLooseAssetPath(searchPaths, normalizedTexturePath);
-                    bool converted = looseTexturePath != null
-                        ? ConvertBlpToPng(looseTexturePath, pngPath, archiveCatalog)
-                        : ConvertBlpToPng($"MPQ:{normalizedTexturePath}", pngPath, archiveCatalog);
-
-                    if (converted) textureCount++;
-                }
-            }
-            progress?.Report($"Exported {textureCount} textures");
         }
 
         // Generate global heightmaps for each tile (per-map min/max)
@@ -827,7 +872,7 @@ public class VlmDatasetExporter
         }
 
         // Stitch full world map images
-        if (tilesExported > 0)
+        if (!skipDerivedAssets && tilesExported > 0)
         {
             progress?.Report("Stitching full world map images...");
             var stitchedDir = Path.Combine(outputDir, "stitched");
@@ -908,6 +953,11 @@ public class VlmDatasetExporter
             {
                 progress?.Report($"Created full global heightmap: {heightmapGlobalOutput} ({heightmapGlobalBounds.Value.width}x{heightmapGlobalBounds.Value.height})");
             }
+        }
+
+        if (skipDerivedAssets)
+        {
+            progress?.Report("Skipped derived tileset, stitched, and semantic assets by request.");
         }
 
         progress?.Report($"Export complete: {tilesExported} tiles exported, {tilesSkipped} skipped");
@@ -1361,6 +1411,11 @@ public class VlmDatasetExporter
             Pm4MaskPath: null,
             NoObjectMinimapPath: null,
             TerrainOnlyMinimapPath: null,
+            HolesMaskPath: null,
+            AreaIdMapPath: null,
+            ChunkFlagsMapPath: null,
+            LiquidTypeMapPath: null,
+            DominantEffectIdMapPath: null,
             Textures: textures,
             ChunkLayers: chunkLayers.Count > 0 ? chunkLayers.ToArray() : null,
             Liquids: liquids.Count > 0 ? liquids.ToArray() : null,
@@ -1838,6 +1893,11 @@ public class VlmDatasetExporter
                 Pm4MaskPath: null,
                 NoObjectMinimapPath: null,
                 TerrainOnlyMinimapPath: null,
+                HolesMaskPath: null,
+                AreaIdMapPath: null,
+                ChunkFlagsMapPath: null,
+                LiquidTypeMapPath: null,
+                DominantEffectIdMapPath: null,
                 Textures: textures,
                 ChunkLayers: chunkLayers.ToArray(),
                 Liquids: liquids.Count > 0 ? liquids.ToArray() : null,
@@ -2065,46 +2125,77 @@ public class VlmDatasetExporter
         return tiles;
     }
 
-    private static List<int> SelectTilesForProcessing(List<int> existingTiles, int limit, bool isAlphaFormat, string mapDirectory, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
+    private static List<int> SelectTilesForProcessing(
+        List<int> existingTiles,
+        int limit,
+        bool isAlphaFormat,
+        string mapDirectory,
+        IArchiveReader archiveReader,
+        IReadOnlyList<string> searchPaths,
+        bool interestingOnly,
+        int interestingMinScore)
     {
         if (existingTiles.Count == 0)
             return existingTiles;
 
+        var fallbackOrder = OrderTilesByCenter(existingTiles);
+        var fallbackIndex = fallbackOrder
+            .Select((tileIndex, index) => (tileIndex, index))
+            .ToDictionary(entry => entry.tileIndex, entry => entry.index);
+
+        bool shouldRankTiles = interestingOnly || (!isAlphaFormat && limit > 0 && limit < existingTiles.Count) || isAlphaFormat;
+        if (!shouldRankTiles)
+        {
+            if (limit <= 0 || limit >= existingTiles.Count)
+                return existingTiles.ToList();
+
+            return fallbackOrder.Take(limit).ToList();
+        }
+
+        var rankedTiles = existingTiles
+            .Select(tileIndex =>
+            {
+                int x = tileIndex % 64;
+                int y = tileIndex / 64;
+                int contentScore = ScoreTileContent(mapDirectory, x, y, isAlphaFormat, archiveReader, searchPaths);
+                return (tileIndex, contentScore);
+            })
+            .ToList();
+
+        if (interestingOnly)
+        {
+            var interestingTiles = rankedTiles
+                .Where(entry => entry.contentScore >= interestingMinScore)
+                .OrderByDescending(entry => entry.contentScore)
+                .ThenBy(entry => fallbackIndex[entry.tileIndex]);
+
+            var selectedInterestingTiles = limit > 0 && limit < existingTiles.Count
+                ? interestingTiles.Take(limit).Select(entry => entry.tileIndex).ToList()
+                : interestingTiles.Select(entry => entry.tileIndex).ToList();
+
+            if (selectedInterestingTiles.Count > 0)
+                return selectedInterestingTiles;
+
+            return fallbackOrder.Take(1).ToList();
+        }
+
         if (limit <= 0 || limit >= existingTiles.Count)
             return existingTiles.ToList();
 
-        if (!isAlphaFormat)
+        if (rankedTiles.Any(entry => entry.contentScore > 0))
         {
-            var rankedTiles = existingTiles
-                .Select(tileIndex =>
-                {
-                    int x = tileIndex % 64;
-                    int y = tileIndex / 64;
-                    int contentScore = ScoreLkTileContent(mapDirectory, x, y, archiveReader, searchPaths);
-                    return (tileIndex, contentScore);
-                })
+            return rankedTiles
+                .OrderByDescending(entry => entry.contentScore)
+                .ThenBy(entry => fallbackIndex[entry.tileIndex])
+                .Take(limit)
+                .Select(entry => entry.tileIndex)
                 .ToList();
-
-            if (rankedTiles.Any(entry => entry.contentScore > 0))
-            {
-                var fallbackOrder = OrderTilesByCenter(existingTiles);
-                var fallbackIndex = fallbackOrder
-                    .Select((tileIndex, index) => (tileIndex, index))
-                    .ToDictionary(entry => entry.tileIndex, entry => entry.index);
-
-                return rankedTiles
-                    .OrderByDescending(entry => entry.contentScore)
-                    .ThenBy(entry => fallbackIndex[entry.tileIndex])
-                    .Take(limit)
-                    .Select(entry => entry.tileIndex)
-                    .ToList();
-            }
         }
 
-        return OrderTilesByCenter(existingTiles).Take(limit).ToList();
+        return fallbackOrder.Take(limit).ToList();
     }
 
-    private static int ScoreLkTileContent(string mapDirectory, int x, int y, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
+    private static int ScoreTileContent(string mapDirectory, int x, int y, bool isAlphaFormat, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
     {
         string adtBase = $"World/Maps/{mapDirectory}/{mapDirectory}_{x}_{y}";
 
@@ -2112,7 +2203,7 @@ public class VlmDatasetExporter
 
         try
         {
-            byte[]? rootAdt = ReadVirtualAssetBytes(searchPaths, $"{adtBase}.adt", archiveReader);
+            byte[]? rootAdt = ReadTileAssetBytesForScoring(searchPaths, $"{adtBase}.adt", archiveReader, isAlphaFormat);
             if (rootAdt is { Length: > 0 })
             {
                 if (ContainsTopLevelChunk(rootAdt, "MH2O"))
@@ -2120,6 +2211,15 @@ public class VlmDatasetExporter
 
                 if (ContainsChunkToken(rootAdt, "MCLQ"))
                     score += 80;
+
+                if (ContainsChunkToken(rootAdt, "MCAL"))
+                    score += 8;
+
+                if (ContainsChunkToken(rootAdt, "MCLY"))
+                    score += 6;
+
+                if (ContainsChunkToken(rootAdt, "MCNK"))
+                    score += 4;
 
                 if (ContainsTopLevelChunk(rootAdt, "MDDF") || ContainsTopLevelChunk(rootAdt, "MODF"))
                     score += 10;
@@ -2131,7 +2231,23 @@ public class VlmDatasetExporter
 
         try
         {
-            byte[]? objAdt = ReadVirtualAssetBytes(searchPaths, $"{adtBase}_obj0.adt", archiveReader);
+            byte[]? texAdt = ReadTileAssetBytesForScoring(searchPaths, $"{adtBase}_tex0.adt", archiveReader, isAlphaFormat);
+            if (texAdt is { Length: > 0 })
+            {
+                if (ContainsChunkToken(texAdt, "MCAL"))
+                    score += 8;
+
+                if (ContainsChunkToken(texAdt, "MCLY"))
+                    score += 6;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            byte[]? objAdt = ReadTileAssetBytesForScoring(searchPaths, $"{adtBase}_obj0.adt", archiveReader, isAlphaFormat);
             if (objAdt is { Length: > 0 } && (ContainsTopLevelChunk(objAdt, "MDDF") || ContainsTopLevelChunk(objAdt, "MODF")))
                 score += 10;
         }
@@ -2140,6 +2256,38 @@ public class VlmDatasetExporter
         }
 
         return score;
+    }
+
+    internal static int ScoreTileContentForTesting(string mapDirectory, int x, int y, bool isAlphaFormat, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
+        => ScoreTileContent(mapDirectory, x, y, isAlphaFormat, archiveReader, searchPaths);
+
+    internal static List<int> SelectTilesForProcessingForTesting(
+        List<int> existingTiles,
+        int limit,
+        bool isAlphaFormat,
+        string mapDirectory,
+        IArchiveReader archiveReader,
+        IReadOnlyList<string> searchPaths,
+        bool interestingOnly,
+        int interestingMinScore)
+        => SelectTilesForProcessing(existingTiles, limit, isAlphaFormat, mapDirectory, archiveReader, searchPaths, interestingOnly, interestingMinScore);
+
+    private static byte[]? ReadTileAssetBytesForScoring(IReadOnlyList<string> searchPaths, string virtualPath, IArchiveReader archiveReader, bool isAlphaFormat)
+    {
+        byte[]? bytes = ReadVirtualAssetBytes(searchPaths, virtualPath, archiveReader);
+        if (bytes is { Length: > 0 } || !isAlphaFormat)
+            return bytes;
+
+        string normalizedPath = NormalizeVirtualAssetPath(virtualPath);
+        foreach (string basePath in searchPaths)
+        {
+            string diskCandidate = Path.Combine(basePath, normalizedPath);
+            bytes = AlphaArchiveReader.ReadWithMpqFallback(diskCandidate);
+            if (bytes is { Length: > 0 })
+                return bytes;
+        }
+
+        return null;
     }
 
     private static bool ContainsTopLevelChunk(byte[] fileBytes, string fourCc)
@@ -3999,6 +4147,80 @@ public class VlmDatasetExporter
         }
     }
 
+    private async Task<byte[]> SynthesizeTerrainOnlyMinimapAsync(
+        string sourceMinimapPath,
+        byte[] maskPngBytes,
+        VlmTerrainData terrainData,
+        MinimapBakeService minimapBakeService)
+    {
+        if (terrainData.ChunkLayers == null || terrainData.ChunkLayers.Length == 0)
+            return Array.Empty<byte>();
+
+        try
+        {
+            using var result = Image.Load<Rgba32>(sourceMinimapPath);
+            using var maskStream = new MemoryStream(maskPngBytes);
+            using var maskImage = Image.Load<L8>(maskStream);
+            if (maskImage.Width != result.Width || maskImage.Height != result.Height)
+                maskImage.Mutate(ctx => ctx.Resize(result.Width, result.Height));
+
+            string?[] fallbackTexturePaths = ResolveChunkTextureFallbackPaths(terrainData.ChunkLayers);
+            bool anyReplaced = false;
+
+            foreach (VlmChunkLayers chunk in terrainData.ChunkLayers)
+            {
+                if (chunk.ChunkIndex < 0 || chunk.ChunkIndex >= 256)
+                    continue;
+
+                var bounds = GetChunkBounds(chunk.ChunkIndex, result.Width, result.Height);
+                if (!ChunkHasMaskedPixels(maskImage, bounds))
+                    continue;
+
+                string? fallbackTexturePath = chunk.ChunkIndex < fallbackTexturePaths.Length
+                    ? fallbackTexturePaths[chunk.ChunkIndex]
+                    : null;
+
+                Image<Rgba32>? bakedChunk = await minimapBakeService.TryBakeChunkAsync(chunk, fallbackTexturePath);
+                if (bakedChunk == null)
+                    continue;
+
+                using (bakedChunk)
+                {
+                    int chunkWidth = bounds.EndX - bounds.StartX;
+                    int chunkHeight = bounds.EndY - bounds.StartY;
+                    if (chunkWidth <= 0 || chunkHeight <= 0)
+                        continue;
+
+                    if (bakedChunk.Width != chunkWidth || bakedChunk.Height != chunkHeight)
+                        bakedChunk.Mutate(ctx => ctx.Resize(chunkWidth, chunkHeight));
+
+                    for (int y = 0; y < chunkHeight; y++)
+                    {
+                        for (int x = 0; x < chunkWidth; x++)
+                        {
+                            if (maskImage[bounds.StartX + x, bounds.StartY + y].PackedValue < 128)
+                                continue;
+
+                            result[bounds.StartX + x, bounds.StartY + y] = bakedChunk[x, y];
+                            anyReplaced = true;
+                        }
+                    }
+                }
+            }
+
+            if (!anyReplaced)
+                return Array.Empty<byte>();
+
+            using var output = new MemoryStream();
+            result.SaveAsPng(output);
+            return output.ToArray();
+        }
+        catch
+        {
+            return Array.Empty<byte>();
+        }
+    }
+
     private static byte[] CombineMaskPngBytes(params byte[][] maskPngs)
     {
         byte[][] validMasks = maskPngs
@@ -4079,6 +4301,255 @@ public class VlmDatasetExporter
         }
 
         return masks.Count > 0 ? CombineMaskPngBytes(masks.ToArray()) : Array.Empty<byte>();
+    }
+
+    internal static string?[] ResolveChunkTextureFallbackPaths(VlmChunkLayers[]? chunkLayers)
+    {
+        string?[] fallbackPaths = new string?[256];
+        if (chunkLayers == null || chunkLayers.Length == 0)
+            return fallbackPaths;
+
+        foreach (VlmChunkLayers chunk in chunkLayers)
+        {
+            if (chunk.ChunkIndex < 0 || chunk.ChunkIndex >= fallbackPaths.Length)
+                continue;
+
+            fallbackPaths[chunk.ChunkIndex] = GetPrimaryTexturePath(chunk);
+        }
+
+        for (int index = 0; index < fallbackPaths.Length; index++)
+        {
+            if (!string.IsNullOrWhiteSpace(fallbackPaths[index]))
+                continue;
+
+            int chunkX = index % 16;
+            int chunkY = index / 16;
+            int bestDistance = int.MaxValue;
+            string? bestTexture = null;
+
+            for (int candidateIndex = 0; candidateIndex < fallbackPaths.Length; candidateIndex++)
+            {
+                string? candidateTexture = fallbackPaths[candidateIndex];
+                if (string.IsNullOrWhiteSpace(candidateTexture))
+                    continue;
+
+                int candidateX = candidateIndex % 16;
+                int candidateY = candidateIndex / 16;
+                int distance = Math.Abs(candidateX - chunkX) + Math.Abs(candidateY - chunkY);
+                if (distance >= bestDistance)
+                    continue;
+
+                bestDistance = distance;
+                bestTexture = candidateTexture;
+            }
+
+            fallbackPaths[index] = bestTexture;
+        }
+
+        return fallbackPaths;
+    }
+
+    internal static byte[] RenderChunkValueMap(ushort[] chunkValues, int width, int height)
+    {
+        if (chunkValues == null || chunkValues.Length == 0 || width <= 0 || height <= 0)
+            return Array.Empty<byte>();
+
+        using var image = new Image<L16>(width, height);
+        for (int chunkIndex = 0; chunkIndex < Math.Min(chunkValues.Length, 256); chunkIndex++)
+        {
+            ushort value = chunkValues[chunkIndex];
+            var bounds = GetChunkBounds(chunkIndex, width, height);
+            for (int y = bounds.StartY; y < bounds.EndY; y++)
+            {
+                for (int x = bounds.StartX; x < bounds.EndX; x++)
+                    image[x, y] = new L16(value);
+            }
+        }
+
+        using var output = new MemoryStream();
+        image.SaveAsPng(output);
+        return output.ToArray();
+    }
+
+    internal static byte[] RenderChunkFlagMap(uint[] chunkFlags, int width, int height)
+    {
+        if (chunkFlags == null || chunkFlags.Length == 0 || width <= 0 || height <= 0)
+            return Array.Empty<byte>();
+
+        using var image = new Image<Rgba32>(width, height);
+        for (int chunkIndex = 0; chunkIndex < Math.Min(chunkFlags.Length, 256); chunkIndex++)
+        {
+            uint value = chunkFlags[chunkIndex];
+            var color = new Rgba32(
+                (byte)(value & 0xFF),
+                (byte)((value >> 8) & 0xFF),
+                (byte)((value >> 16) & 0xFF),
+                (byte)((value >> 24) & 0xFF));
+            var bounds = GetChunkBounds(chunkIndex, width, height);
+            for (int y = bounds.StartY; y < bounds.EndY; y++)
+            {
+                for (int x = bounds.StartX; x < bounds.EndX; x++)
+                    image[x, y] = color;
+            }
+        }
+
+        using var output = new MemoryStream();
+        image.SaveAsPng(output);
+        return output.ToArray();
+    }
+
+    internal static byte[] RenderHolesMask(int[]? holes, int width, int height)
+    {
+        if (holes == null || holes.Length == 0 || width <= 0 || height <= 0)
+            return Array.Empty<byte>();
+
+        using var image = new Image<L8>(width, height);
+        for (int chunkIndex = 0; chunkIndex < Math.Min(holes.Length, 256); chunkIndex++)
+        {
+            int holeMask = holes[chunkIndex];
+            if (holeMask == 0)
+                continue;
+
+            var bounds = GetChunkBounds(chunkIndex, width, height);
+            for (int cellY = 0; cellY < 4; cellY++)
+            {
+                for (int cellX = 0; cellX < 4; cellX++)
+                {
+                    int holeBit = 1 << (cellX + (cellY * 4));
+                    if ((holeMask & holeBit) == 0)
+                        continue;
+
+                    int startX = bounds.StartX + (cellX * (bounds.EndX - bounds.StartX)) / 4;
+                    int endX = bounds.StartX + ((cellX + 1) * (bounds.EndX - bounds.StartX)) / 4;
+                    int startY = bounds.StartY + (cellY * (bounds.EndY - bounds.StartY)) / 4;
+                    int endY = bounds.StartY + ((cellY + 1) * (bounds.EndY - bounds.StartY)) / 4;
+
+                    for (int y = startY; y < endY; y++)
+                    {
+                        for (int x = startX; x < endX; x++)
+                            image[x, y] = new L8(255);
+                    }
+                }
+            }
+        }
+
+        using var output = new MemoryStream();
+        image.SaveAsPng(output);
+        return output.ToArray();
+    }
+
+    internal static ushort[] BuildChunkAreaIdValues(VlmChunkLayers[]? chunkLayers)
+    {
+        ushort[] values = new ushort[256];
+        if (chunkLayers == null)
+            return values;
+
+        foreach (VlmChunkLayers chunk in chunkLayers)
+        {
+            if (chunk.ChunkIndex < 0 || chunk.ChunkIndex >= values.Length)
+                continue;
+
+            values[chunk.ChunkIndex] = (ushort)Math.Min(chunk.AreaId, ushort.MaxValue);
+        }
+
+        return values;
+    }
+
+    internal static uint[] BuildChunkFlagValues(VlmChunkLayers[]? chunkLayers)
+    {
+        uint[] values = new uint[256];
+        if (chunkLayers == null)
+            return values;
+
+        foreach (VlmChunkLayers chunk in chunkLayers)
+        {
+            if (chunk.ChunkIndex < 0 || chunk.ChunkIndex >= values.Length)
+                continue;
+
+            values[chunk.ChunkIndex] = chunk.Flags;
+        }
+
+        return values;
+    }
+
+    internal static ushort[] BuildLiquidTypeValues(VlmLiquidData[]? liquids)
+    {
+        ushort[] values = new ushort[256];
+        if (liquids == null)
+            return values;
+
+        foreach (VlmLiquidData liquid in liquids)
+        {
+            if (liquid.ChunkIndex < 0 || liquid.ChunkIndex >= values.Length)
+                continue;
+
+            values[liquid.ChunkIndex] = (ushort)Math.Clamp(liquid.LiquidType, 0, ushort.MaxValue);
+        }
+
+        return values;
+    }
+
+    internal static ushort[] BuildDominantEffectIdValues(VlmChunkLayers[]? chunkLayers)
+    {
+        ushort[] values = new ushort[256];
+        if (chunkLayers == null)
+            return values;
+
+        foreach (VlmChunkLayers chunk in chunkLayers)
+        {
+            if (chunk.ChunkIndex < 0 || chunk.ChunkIndex >= values.Length || chunk.Layers == null || chunk.Layers.Length == 0)
+                continue;
+
+            uint effectId = chunk.Layers
+                .Where(layer => layer != null)
+                .Select(layer => layer.EffectId)
+                .FirstOrDefault(id => id != 0);
+            if (effectId == 0)
+                effectId = chunk.Layers[0].EffectId;
+
+            values[chunk.ChunkIndex] = (ushort)Math.Min(effectId, ushort.MaxValue);
+        }
+
+        return values;
+    }
+
+    private static bool ChunkHasMaskedPixels(Image<L8> maskImage, (int StartX, int StartY, int EndX, int EndY) bounds)
+    {
+        for (int y = bounds.StartY; y < bounds.EndY; y++)
+        {
+            for (int x = bounds.StartX; x < bounds.EndX; x++)
+            {
+                if (maskImage[x, y].PackedValue >= 128)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static (int StartX, int StartY, int EndX, int EndY) GetChunkBounds(int chunkIndex, int width, int height)
+    {
+        int chunkX = chunkIndex % 16;
+        int chunkY = chunkIndex / 16;
+        int startX = (chunkX * width) / 16;
+        int endX = ((chunkX + 1) * width) / 16;
+        int startY = (chunkY * height) / 16;
+        int endY = ((chunkY + 1) * height) / 16;
+        return (startX, startY, endX, endY);
+    }
+
+    private static string? GetPrimaryTexturePath(VlmChunkLayers chunk)
+    {
+        if (chunk.Layers == null)
+            return null;
+
+        foreach (VlmTextureLayer layer in chunk.Layers)
+        {
+            if (!string.IsNullOrWhiteSpace(layer.TexturePath))
+                return layer.TexturePath;
+        }
+
+        return null;
     }
 
     private async Task GenerateGlobalHeightmapsAsync(string datasetDir, string outputDir, IProgress<string>? progress)
@@ -4164,6 +4635,34 @@ public class VlmDatasetExporter
         }
 
         progress?.Report($"Global heightmaps generated with range {globalMin} to {globalMax}");
+    }
+
+    private int ExportTilesetTextures(string outputDir, IEnumerable<string> textures, IArchiveReader archiveCatalog, IReadOnlyList<string> searchPaths)
+    {
+        var tilesetsDir = Path.Combine(outputDir, "tilesets");
+        Directory.CreateDirectory(tilesetsDir);
+
+        int textureCount = 0;
+        foreach (string texture in textures)
+        {
+            var texName = Path.GetFileName(texture);
+            var pngName = Path.ChangeExtension(texName, ".png");
+            var pngPath = Path.Combine(tilesetsDir, pngName);
+
+            if (File.Exists(pngPath))
+                continue;
+
+            string normalizedTexturePath = NormalizeVirtualAssetPath(texture);
+            string? looseTexturePath = TryResolveLooseAssetPath(searchPaths, normalizedTexturePath);
+            bool converted = looseTexturePath != null
+                ? ConvertBlpToPng(looseTexturePath, pngPath, archiveCatalog)
+                : ConvertBlpToPng($"MPQ:{normalizedTexturePath}", pngPath, archiveCatalog);
+
+            if (converted)
+                textureCount++;
+        }
+
+        return textureCount;
     }
 
     private bool ConvertBlpToPng(string blpPath, string pngPath, IArchiveReader? archiveReader = null)

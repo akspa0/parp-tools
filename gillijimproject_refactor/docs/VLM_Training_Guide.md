@@ -134,7 +134,7 @@ Current precedence in `train_v7.py` and `infer_v7.py`:
 3. `no_mccv_minimap`
 4. raw exported `image`
 
-`terrain_only_minimap` is generated during dataset export when enough auxiliary masks exist. It starts from the no-MCCV-cleaned minimap when available, then inpaints out the strongest non-mesh contaminant regions currently exported for that tile:
+`terrain_only_minimap` is generated during dataset export when enough auxiliary masks exist. It starts from the no-MCCV-cleaned minimap when available, then replaces the strongest non-mesh contaminant regions with chunk texture rebake and nearest-chunk base-texture fallback:
 
 - object visibility masks
 - PM4 masks
@@ -162,6 +162,7 @@ Current behavior:
 - scores terrain-shape change on the `257x257` global height lattice
 - groups adjacent high-score cells into candidate brush-imprint regions
 - writes a separate dataset surface under `brush_imprints/` for later clustering, retrieval, or separate-model work
+- assigns deterministic brush archetype IDs and corpus-level archetype summaries under `brush_imprints/brush_archetype_manifest.json` and `brush_imprints/archetypes/*.json`
 - also writes a tile-level `brush_mask_path` that can be consumed as a first conditioning channel by the terrain trainer
 
 Important boundary:

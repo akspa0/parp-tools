@@ -1,5 +1,5 @@
+from contextlib import nullcontext
 
-import os
 import random
 import torch
 import torch.nn as nn
@@ -30,7 +30,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # --- Dataset ---
 class V8Dataset(Dataset):
     def __init__(self, cached_dir):
-        self.files = list(cached_dir.glob("input_*.pt"))
+        self.files = sorted(cached_dir.glob("input_*.pt"))
         print(f"Loaded {len(self.files)} samples from {cached_dir}.")
         
     def __len__(self):
@@ -38,12 +38,10 @@ class V8Dataset(Dataset):
         
     def __getitem__(self, idx):
         inp_path = self.files[idx]
-        # Parse coordinates
-        parts = inp_path.stem.split('_')
-        x, y = parts[1], parts[2]
-        
-        tgt_h_path = self.files[idx].parent / f"target_height_{x}_{y}.pt"
-        tgt_a_path = self.files[idx].parent / f"target_albedo_{x}_{y}.pt"
+        suffix = inp_path.stem[len("input_"):]
+
+        tgt_h_path = self.files[idx].parent / f"target_height_{suffix}.pt"
+        tgt_a_path = self.files[idx].parent / f"target_albedo_{suffix}.pt"
         
         # Load
         inp = torch.load(inp_path).float()
@@ -209,7 +207,8 @@ def train():
     dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
     
     model = MultiHeadUNet().to(DEVICE)
-    scaler = torch.amp.GradScaler('cuda')
+    use_cuda_amp = DEVICE.startswith("cuda")
+    scaler = torch.amp.GradScaler('cuda', enabled=use_cuda_amp)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     
     criterion_L1 = nn.L1Loss()
@@ -225,7 +224,7 @@ def train():
         for inputs, gt_h, gt_a in loop:
             inputs, gt_h, gt_a = inputs.to(DEVICE), gt_h.to(DEVICE), gt_a.to(DEVICE)
             
-            with torch.amp.autocast('cuda'):
+            with (torch.amp.autocast('cuda') if use_cuda_amp else nullcontext()):
                 pred_h, pred_a = model(inputs)
                 
                 if True: # DEBUG SHAPES ONCE

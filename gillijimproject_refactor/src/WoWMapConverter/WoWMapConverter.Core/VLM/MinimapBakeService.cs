@@ -34,6 +34,8 @@ public class MinimapBakeService
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
     };
 
+    private const int ChunkBakeSize = 256;
+
     public MinimapBakeService(string datasetRoot)
     {
         _datasetRoot = datasetRoot;
@@ -276,7 +278,7 @@ public class MinimapBakeService
     /// </summary>
     private async Task<(Image<Rgba32>? Raw, Image<Rgba32>? Weighted, Image<Rgba32>? Cumulative)[]> BakeChunkLayersAsync(VlmChunkLayers chunk)
     {
-        const int size = 256;
+        const int size = ChunkBakeSize;
         
         if (chunk.Layers == null || chunk.Layers.Length == 0)
             return Array.Empty<(Image<Rgba32>?, Image<Rgba32>?, Image<Rgba32>?)>();
@@ -285,37 +287,14 @@ public class MinimapBakeService
         
         // Load all textures and alpha masks first
         var textures = new Image<Rgba32>?[chunk.Layers.Length];
-        var alphas = new byte[chunk.Layers.Length][];
+        var alphas = new byte[]?[chunk.Layers.Length];
         
         for (int i = 0; i < chunk.Layers.Length; i++)
         {
             var layer = chunk.Layers[i];
-            if (string.IsNullOrEmpty(layer.TexturePath)) continue;
-
-            var texName = Path.GetFileNameWithoutExtension(layer.TexturePath) + ".png";
-            var texPath = Path.Combine(_tilesetsDir, texName);
-            if (!File.Exists(texPath)) continue;
-
-            textures[i] = await Image.LoadAsync<Rgba32>(texPath);
-            if (textures[i]!.Width != size || textures[i]!.Height != size)
-                textures[i]!.Mutate(x => x.Resize(size, size));
-
-            // Load alpha mask for layers 1+
-            if (i > 0 && !string.IsNullOrEmpty(layer.AlphaPath))
-            {
-                var maskPath = Path.Combine(_datasetRoot, layer.AlphaPath);
-                if (File.Exists(maskPath))
-                {
-                    using var maskImage = await Image.LoadAsync<L8>(maskPath);
-                    if (maskImage.Width != size || maskImage.Height != size)
-                        maskImage.Mutate(x => x.Resize(size, size));
-                    
-                    alphas[i] = new byte[size * size];
-                    for (int y = 0; y < size; y++)
-                        for (int x = 0; x < size; x++)
-                            alphas[i][y * size + x] = maskImage[x, y].PackedValue;
-                }
-            }
+            textures[i] = await LoadChunkTextureAsync(layer.TexturePath, size);
+            if (i > 0)
+                alphas[i] = await LoadLayerAlphaAsync(layer, size);
         }
 
         // Calculate weights per pixel using WoW algorithm
@@ -429,50 +408,49 @@ public class MinimapBakeService
     /// - Layer N weight = alpha[N]
     /// - Final color = sum(layer[i].rgb * weight[i]) / sum(weights)
     /// </summary>
-    public async Task<Image<Rgba32>> BakeChunkAsync(VlmChunkLayers chunk)
+    public Task<Image<Rgba32>> BakeChunkAsync(VlmChunkLayers chunk)
     {
-        const int size = 256;
-        var chunkImage = new Image<Rgba32>(size, size);
-        
+        return BakeChunkAsync(chunk, fallbackTexturePath: null);
+    }
+
+    public async Task<Image<Rgba32>> BakeChunkAsync(VlmChunkLayers chunk, string? fallbackTexturePath)
+    {
+        return await TryBakeChunkAsync(chunk, fallbackTexturePath) ?? new Image<Rgba32>(ChunkBakeSize, ChunkBakeSize);
+    }
+
+    public async Task<Image<Rgba32>?> TryBakeChunkAsync(VlmChunkLayers chunk, string? fallbackTexturePath = null)
+    {
+        const int size = ChunkBakeSize;
+
         if (chunk.Layers == null || chunk.Layers.Length == 0)
-            return chunkImage;
+            return await LoadChunkTextureAsync(fallbackTexturePath, size);
 
         // Load all textures and alpha masks
         var textures = new Image<Rgba32>[chunk.Layers.Length];
-        var alphas = new byte[chunk.Layers.Length][];
+        var alphas = new byte[]?[chunk.Layers.Length];
+        bool anyTextureLoaded = false;
         
         for (int i = 0; i < chunk.Layers.Length; i++)
         {
             var layer = chunk.Layers[i];
-            if (string.IsNullOrEmpty(layer.TexturePath)) continue;
+            string? requestedTexturePath = !string.IsNullOrWhiteSpace(layer.TexturePath)
+                ? layer.TexturePath
+                : i == 0 ? fallbackTexturePath : null;
 
-            var texName = Path.GetFileNameWithoutExtension(layer.TexturePath) + ".png";
-            var texPath = Path.Combine(_tilesetsDir, texName);
+            textures[i] = await LoadChunkTextureAsync(requestedTexturePath, size);
+            if (textures[i] == null && i == 0 && !string.IsNullOrWhiteSpace(fallbackTexturePath))
+                textures[i] = await LoadChunkTextureAsync(fallbackTexturePath, size);
 
-            if (!File.Exists(texPath)) continue;
+            anyTextureLoaded |= textures[i] != null;
 
-            textures[i] = await Image.LoadAsync<Rgba32>(texPath);
-            if (textures[i].Width != size || textures[i].Height != size)
-                textures[i].Mutate(x => x.Resize(size, size));
-
-            // Load alpha mask for layers 1+
-            if (i > 0 && !string.IsNullOrEmpty(layer.AlphaPath))
-            {
-                var maskPath = Path.Combine(_datasetRoot, layer.AlphaPath);
-                if (File.Exists(maskPath))
-                {
-                    using var maskImage = await Image.LoadAsync<L8>(maskPath);
-                    // Alpha masks are 64x64, upscale to 256x256
-                    if (maskImage.Width != size || maskImage.Height != size)
-                        maskImage.Mutate(x => x.Resize(size, size));
-                    
-                    alphas[i] = new byte[size * size];
-                    for (int y = 0; y < size; y++)
-                        for (int x = 0; x < size; x++)
-                            alphas[i][y * size + x] = maskImage[x, y].PackedValue;
-                }
-            }
+            if (i > 0)
+                alphas[i] = await LoadLayerAlphaAsync(layer, size);
         }
+
+        if (!anyTextureLoaded)
+            return null;
+
+        var chunkImage = new Image<Rgba32>(size, size);
 
         // WoW blending algorithm (from adt.fragment.shader):
         // layer_weights[0] = 1.0 - clamp(sum(alphas[1..N]), 0, 1)
@@ -527,6 +505,13 @@ public class MinimapBakeService
                         g /= weightSum;
                         b /= weightSum;
                     }
+                    else if (textures[0] != null)
+                    {
+                        var basePixel = textures[0][x, y];
+                        r = basePixel.R;
+                        g = basePixel.G;
+                        b = basePixel.B;
+                    }
 
                     row[x] = new Rgba32(
                         (byte)Math.Clamp(r, 0, 255),
@@ -543,6 +528,89 @@ public class MinimapBakeService
             tex?.Dispose();
 
         return chunkImage;
+    }
+
+    private async Task<Image<Rgba32>?> LoadChunkTextureAsync(string? texturePath, int size)
+    {
+        if (string.IsNullOrWhiteSpace(texturePath))
+            return null;
+
+        string texName = Path.GetFileNameWithoutExtension(texturePath) + ".png";
+        string texPath = Path.Combine(_tilesetsDir, texName);
+        if (!File.Exists(texPath))
+            return null;
+
+        Image<Rgba32> texture = await Image.LoadAsync<Rgba32>(texPath);
+        if (texture.Width != size || texture.Height != size)
+            texture.Mutate(x => x.Resize(size, size));
+
+        return texture;
+    }
+
+    private async Task<byte[]?> LoadLayerAlphaAsync(VlmTextureLayer layer, int size)
+    {
+        byte[]? rawAlpha = layer.AlphaData;
+        if ((rawAlpha == null || rawAlpha.Length == 0) && !string.IsNullOrWhiteSpace(layer.AlphaBitsBase64))
+        {
+            try
+            {
+                rawAlpha = Convert.FromBase64String(layer.AlphaBitsBase64);
+            }
+            catch
+            {
+                rawAlpha = null;
+            }
+        }
+
+        if (rawAlpha != null && rawAlpha.Length > 0)
+            return ExpandAlphaBytes(rawAlpha, size);
+
+        if (string.IsNullOrWhiteSpace(layer.AlphaPath))
+            return null;
+
+        string maskPath = Path.Combine(_datasetRoot, layer.AlphaPath);
+        if (!File.Exists(maskPath))
+            return null;
+
+        using var maskImage = await Image.LoadAsync<L8>(maskPath);
+        if (maskImage.Width != size || maskImage.Height != size)
+            maskImage.Mutate(x => x.Resize(size, size));
+
+        return FlattenAlphaImage(maskImage);
+    }
+
+    private byte[]? ExpandAlphaBytes(byte[] alphaBytes, int size)
+    {
+        int sourceSize = alphaBytes.Length switch
+        {
+            ChunkBakeSize * ChunkBakeSize => ChunkBakeSize,
+            64 * 64 => 64,
+            _ => 0,
+        };
+
+        if (sourceSize == 0)
+            return null;
+
+        using var alphaImage = Image.LoadPixelData<L8>(alphaBytes, sourceSize, sourceSize);
+        if (alphaImage.Width != size || alphaImage.Height != size)
+            alphaImage.Mutate(x => x.Resize(size, size));
+
+        return FlattenAlphaImage(alphaImage);
+    }
+
+    private byte[] FlattenAlphaImage(Image<L8> alphaImage)
+    {
+        byte[] bytes = new byte[alphaImage.Width * alphaImage.Height];
+        for (int y = 0; y < alphaImage.Height; y++)
+        {
+            for (int x = 0; x < alphaImage.Width; x++)
+            {
+                byte value = alphaImage[x, y].PackedValue;
+                bytes[(y * alphaImage.Width) + x] = InvertAlpha ? (byte)(255 - value) : value;
+            }
+        }
+
+        return bytes;
     }
 
     private void ApplyAlphaMask(Image<Rgba32> image, Image<L8> mask)

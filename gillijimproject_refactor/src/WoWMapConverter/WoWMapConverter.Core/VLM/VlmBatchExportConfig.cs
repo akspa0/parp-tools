@@ -7,6 +7,15 @@ public class VlmBatchExportConfig
     [JsonPropertyName("clients")]
     public List<VlmClientConfig> Clients { get; set; } = new();
 
+    [JsonPropertyName("run_minimal_curation_after_export")]
+    public bool RunMinimalCurationAfterExport { get; set; } = false;
+
+    [JsonPropertyName("minimal_curation_output")]
+    public string? MinimalCurationOutput { get; set; }
+
+    [JsonPropertyName("minimal_curation_plan_output")]
+    public string? MinimalCurationPlanOutput { get; set; }
+
     /// <summary>
     /// Optional root path to a WoWArchive or similar versioned client store.
     /// When set, relative ClientPath values in each VlmClientConfig are resolved
@@ -78,4 +87,19 @@ public class VlmClientConfig
     
     [JsonPropertyName("generate_depth")]
     public bool GenerateDepth { get; set; } = false;
+
+    [JsonPropertyName("tile_limit")]
+    public int? TileLimit { get; set; }
+
+    [JsonPropertyName("interesting_only")]
+    public bool InterestingOnly { get; set; } = false;
+
+    [JsonPropertyName("interesting_min_score")]
+    public int InterestingMinScore { get; set; } = 1;
+
+    [JsonPropertyName("skip_derived_assets")]
+    public bool SkipDerivedAssets { get; set; } = false;
+
+    [JsonPropertyName("finalize_derived_assets_after_export")]
+    public bool FinalizeDerivedAssetsAfterExport { get; set; } = false;
 }

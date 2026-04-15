@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SixLabors.ImageSharp;
@@ -14,6 +16,8 @@ internal static class MlBrushImprintHarvester
 	private const string ManifestFileName = "brush_imprint_manifest.json";
 	private const string GroupDirectoryName = "groups";
 	private const string TileMaskDirectoryName = "tile_masks";
+	private const string ArchetypeDirectoryName = "archetypes";
+	private const string ArchetypeManifestFileName = "brush_archetype_manifest.json";
 
 	public static void Run(string[] args)
 	{
@@ -62,6 +66,8 @@ internal static class MlBrushImprintHarvester
 		Directory.CreateDirectory(groupsDirectory);
 		string tileMasksDirectory = Path.Combine(outputDirectory, TileMaskDirectoryName);
 		Directory.CreateDirectory(tileMasksDirectory);
+		string archetypesDirectory = Path.Combine(outputDirectory, ArchetypeDirectoryName);
+		Directory.CreateDirectory(archetypesDirectory);
 		string previewsDirectory = Path.Combine(outputDirectory, "previews");
 		if (writePreviews)
 			Directory.CreateDirectory(previewsDirectory);
@@ -76,6 +82,7 @@ internal static class MlBrushImprintHarvester
 		MlBrushIssueTracker issueTracker = new();
 		List<MlBrushTileSummary> tileSummaries = new(datasetFiles.Count);
 		List<string> groupFiles = [];
+		Dictionary<string, MlBrushArchetypeAccumulator> archetypeAccumulators = new(StringComparer.Ordinal);
 		int tilesSkippedMissingHeightmap = 0;
 		int groupsWritten = 0;
 		int patchesWritten = 0;
@@ -129,10 +136,18 @@ internal static class MlBrushImprintHarvester
 				{
 					MlBrushGroupCandidate group = groups[index];
 					string groupId = $"{tileName}_g{(index + 1).ToString("D4", CultureInfo.InvariantCulture)}";
-					MlBrushGroupReport report = group.ToReport(groupId, datasetRoot, sample, heightmapPath);
+					MlBrushArchetypeDescriptor archetype = group.DescribeArchetype();
+					MlBrushGroupReport report = group.ToReport(groupId, datasetRoot, sample, heightmapPath, archetype);
 					string groupPath = Path.Combine(groupsDirectory, groupId + ".json");
 					File.WriteAllText(groupPath, JsonSerializer.Serialize(report, CreateBrushJsonOptions()));
-					groupFiles.Add(Path.GetRelativePath(outputDirectory, groupPath).Replace('\\', '/'));
+					string relativeGroupPath = Path.GetRelativePath(outputDirectory, groupPath).Replace('\\', '/');
+					groupFiles.Add(relativeGroupPath);
+					if (!archetypeAccumulators.TryGetValue(archetype.ArchetypeId, out MlBrushArchetypeAccumulator? accumulator) || accumulator is null)
+					{
+						accumulator = new MlBrushArchetypeAccumulator(archetype);
+						archetypeAccumulators.Add(archetype.ArchetypeId, accumulator);
+					}
+					accumulator.Add(report, relativeGroupPath);
 					groupsWritten++;
 					patchesWritten += report.PatchCount;
 
@@ -157,6 +172,31 @@ internal static class MlBrushImprintHarvester
 			}
 		}
 
+		List<string> archetypeFiles = [];
+		List<MlBrushArchetypeSummary> archetypeSummaries = [];
+		foreach (MlBrushArchetypeAccumulator accumulator in archetypeAccumulators.Values
+			.OrderByDescending(static entry => entry.GroupCount)
+			.ThenBy(static entry => entry.ArchetypeId, StringComparer.Ordinal))
+		{
+			MlBrushArchetypeSummary summary = accumulator.ToSummary();
+			string archetypePath = Path.Combine(archetypesDirectory, summary.ArchetypeId + ".json");
+			File.WriteAllText(archetypePath, JsonSerializer.Serialize(summary, CreateBrushJsonOptions()));
+			archetypeFiles.Add(Path.GetRelativePath(outputDirectory, archetypePath).Replace('\\', '/'));
+			archetypeSummaries.Add(summary);
+		}
+
+		MlBrushArchetypeManifest archetypeManifest = new(
+			SchemaVersion: "wowviewer-ml-brush-archetype.v1",
+			GeneratedUtc: DateTime.UtcNow,
+			DatasetRoot: datasetRoot,
+			OutputDirectory: outputDirectory,
+			ArchetypeCount: archetypeSummaries.Count,
+			ArchetypeFiles: archetypeFiles,
+			Archetypes: archetypeSummaries);
+
+		string archetypeManifestPath = Path.Combine(outputDirectory, ArchetypeManifestFileName);
+		File.WriteAllText(archetypeManifestPath, JsonSerializer.Serialize(archetypeManifest, CreateBrushJsonOptions()));
+
 		MlBrushHarvestManifest manifest = new(
 			SchemaVersion: "wowviewer-ml-brush-imprint.v1",
 			GeneratedUtc: DateTime.UtcNow,
@@ -167,6 +207,8 @@ internal static class MlBrushImprintHarvester
 			TilesSkippedMissingHeightmap: tilesSkippedMissingHeightmap,
 			GroupsWritten: groupsWritten,
 			PatchesWritten: patchesWritten,
+			ArchetypeCount: archetypeSummaries.Count,
+			ArchetypeManifestPath: Path.GetFileName(archetypeManifestPath),
 			GroupFiles: groupFiles,
 			Tiles: tileSummaries);
 
@@ -174,8 +216,9 @@ internal static class MlBrushImprintHarvester
 		File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, CreateBrushJsonOptions()));
 
 		issueTracker.Print();
-		Console.WriteLine($"Brush harvest complete: processed_tiles={manifest.TilesProcessed} skipped_missing_heightmap={tilesSkippedMissingHeightmap} groups={groupsWritten} patches={patchesWritten}");
+		Console.WriteLine($"Brush harvest complete: processed_tiles={manifest.TilesProcessed} skipped_missing_heightmap={tilesSkippedMissingHeightmap} groups={groupsWritten} patches={patchesWritten} archetypes={archetypeSummaries.Count}");
 		Console.WriteLine($"Wrote {manifestPath}");
+		Console.WriteLine($"Wrote {archetypeManifestPath}");
 	}
 
 	private static float[] LoadHeightmapL16(string path)
@@ -307,7 +350,7 @@ internal static class MlBrushImprintHarvester
 					if (nx < 0 || ny < 0 || nx >= TilePatchGridSize || ny >= TilePatchGridSize)
 						continue;
 
-					if (!lookup.TryGetValue((nx, ny), out MlBrushPatchCell next))
+					if (!lookup.TryGetValue((nx, ny), out MlBrushPatchCell? next) || next is null)
 						continue;
 
 					if (visited.Add((nx, ny)))
@@ -541,10 +584,41 @@ internal sealed class MlBrushGroupCandidate
 		return new MlBrushGroupCandidate(tileName, mapName, minPatchX, minPatchY, maxPatchX, maxPatchY, patches, normalized, heightGridWidth, heightGridHeight, textureSignatures);
 	}
 
-	public MlBrushGroupReport ToReport(string groupId, string datasetRoot, MlBrushDatasetSample sample, string heightmapPath)
+	public MlBrushArchetypeDescriptor DescribeArchetype()
+	{
+		int patchWidth = (MaxPatchX - MinPatchX) + 1;
+		int patchHeight = (MaxPatchY - MinPatchY) + 1;
+		float fillRatio = patchWidth <= 0 || patchHeight <= 0
+			? 0f
+			: MathF.Round(Patches.Count / (float)(patchWidth * patchHeight), 6);
+		float meanRelief = Patches.Count == 0 ? 0f : MathF.Round(Patches.Average(static patch => patch.Relief), 6);
+		float meanSlope = Patches.Count == 0 ? 0f : MathF.Round(Patches.Average(static patch => patch.Slope), 6);
+		string textureFamilyKey = BuildTextureFamilyKey(TextureSignatures);
+		string shapeFingerprint = BuildShapeFingerprint(NormalizedHeightGrid, HeightGridWidth, HeightGridHeight);
+		string label = BuildArchetypeLabel(patchWidth, patchHeight, fillRatio, meanRelief, meanSlope);
+		string archetypeKey = string.Create(CultureInfo.InvariantCulture, $"{label}|{Bucket(patchWidth, 8)}x{Bucket(patchHeight, 8)}|fill:{Bucket(fillRatio, 0.1f)}|relief:{Bucket(meanRelief, 0.01f)}|slope:{Bucket(meanSlope, 0.01f)}|tex:{textureFamilyKey}|shape:{shapeFingerprint}");
+		string archetypeId = "br_" + Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(archetypeKey)))[..10].ToLowerInvariant();
+
+		return new MlBrushArchetypeDescriptor(
+			ArchetypeId: archetypeId,
+			ArchetypeKey: archetypeKey,
+			ArchetypeLabel: label,
+			ShapeFingerprint: shapeFingerprint,
+			TextureFamilyKey: textureFamilyKey,
+			PatchWidth: patchWidth,
+			PatchHeight: patchHeight,
+			PatchCount: Patches.Count,
+			FillRatio: fillRatio,
+			MeanRelief: meanRelief,
+			MeanSlope: meanSlope);
+	}
+
+	public MlBrushGroupReport ToReport(string groupId, string datasetRoot, MlBrushDatasetSample sample, string heightmapPath, MlBrushArchetypeDescriptor archetype)
 	{
 		float meanScore = Patches.Count == 0 ? 0f : Patches.Average(static patch => patch.Score);
 		float maxScore = Patches.Count == 0 ? 0f : Patches.Max(static patch => patch.Score);
+		float meanRelief = Patches.Count == 0 ? 0f : Patches.Average(static patch => patch.Relief);
+		float meanSlope = Patches.Count == 0 ? 0f : Patches.Average(static patch => patch.Slope);
 		int minChunkIndex = Patches.Min(static patch => patch.ChunkIndex);
 		int maxChunkIndex = Patches.Max(static patch => patch.ChunkIndex);
 
@@ -565,6 +639,10 @@ internal sealed class MlBrushGroupCandidate
 		return new MlBrushGroupReport(
 			SchemaVersion: "wowviewer-ml-brush-group.v1",
 			GroupId: groupId,
+			ArchetypeId: archetype.ArchetypeId,
+			ArchetypeKey: archetype.ArchetypeKey,
+			ArchetypeLabel: archetype.ArchetypeLabel,
+			ShapeFingerprint: archetype.ShapeFingerprint,
 			DatasetRoot: datasetRoot,
 			TileName: TileName,
 			MapName: MapName,
@@ -579,13 +657,96 @@ internal sealed class MlBrushGroupCandidate
 			PatchCount: patchPoints.Count,
 			ChunkMinIndex: minChunkIndex,
 			ChunkMaxIndex: maxChunkIndex,
+			FillRatio: archetype.FillRatio,
 			MeanScore: MathF.Round(meanScore, 6),
+			MeanRelief: MathF.Round(meanRelief, 6),
+			MeanSlope: MathF.Round(meanSlope, 6),
 			MaxScore: MathF.Round(maxScore, 6),
 			TextureSignatures: TextureSignatures,
 			HeightGridWidth: HeightGridWidth,
 			HeightGridHeight: HeightGridHeight,
 			NormalizedHeightGrid: NormalizedHeightGrid,
 			Patches: patchPoints);
+	}
+
+	private static string BuildTextureFamilyKey(IEnumerable<string> signatures)
+	{
+		List<string> families = signatures
+			.SelectMany(static signature => signature.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+			.Select(static signature => Path.GetFileNameWithoutExtension(signature).ToLowerInvariant())
+			.Where(static signature => !string.IsNullOrWhiteSpace(signature))
+			.Distinct(StringComparer.Ordinal)
+			.OrderBy(static signature => signature, StringComparer.Ordinal)
+			.Take(3)
+			.ToList();
+
+		return families.Count == 0 ? "none" : string.Join("+", families);
+	}
+
+	private static string BuildShapeFingerprint(float[] normalizedHeightGrid, int width, int height)
+	{
+		if (normalizedHeightGrid.Length == 0 || width <= 0 || height <= 0)
+			return "0000000000000000";
+
+		StringBuilder builder = new(capacity: 16);
+		for (int cellY = 0; cellY < 4; cellY++)
+		{
+			for (int cellX = 0; cellX < 4; cellX++)
+			{
+				int startX = (cellX * width) / 4;
+				int endX = ((cellX + 1) * width) / 4;
+				int startY = (cellY * height) / 4;
+				int endY = ((cellY + 1) * height) / 4;
+
+				float sum = 0f;
+				int count = 0;
+				for (int y = startY; y < endY; y++)
+				{
+					for (int x = startX; x < endX; x++)
+					{
+						sum += normalizedHeightGrid[(y * width) + x];
+						count++;
+					}
+				}
+
+				float average = count == 0 ? 0f : sum / count;
+				int bucket = Math.Clamp((int)MathF.Round(average * 15f), 0, 15);
+				builder.Append(bucket.ToString("x", CultureInfo.InvariantCulture));
+			}
+		}
+
+		return builder.ToString();
+	}
+
+	private static string BuildArchetypeLabel(int patchWidth, int patchHeight, float fillRatio, float meanRelief, float meanSlope)
+	{
+		float aspectRatio = patchWidth >= patchHeight
+			? patchWidth / (float)Math.Max(1, patchHeight)
+			: patchHeight / (float)Math.Max(1, patchWidth);
+
+		if (fillRatio < 0.35f)
+			return "trace";
+		if (meanSlope >= 0.08f && aspectRatio >= 2.5f)
+			return "ridge";
+		if (meanRelief >= 0.05f && fillRatio >= 0.55f)
+			return "mound";
+		if (meanRelief < 0.02f && meanSlope < 0.02f)
+			return "shelf";
+		if (aspectRatio >= 2.0f)
+			return "band";
+		return "terrace";
+	}
+
+	private static string Bucket(float value, float step)
+	{
+		int bucket = step <= 0f ? 0 : (int)MathF.Round(value / step);
+		return bucket.ToString(CultureInfo.InvariantCulture);
+	}
+
+	private static string Bucket(int value, int step)
+	{
+		int bucket = step <= 0 ? value : (int)MathF.Round(value / (float)step);
+		return bucket.ToString(CultureInfo.InvariantCulture);
 	}
 }
 
@@ -602,6 +763,10 @@ internal sealed record MlBrushPatchPoint(
 internal sealed record MlBrushGroupReport(
 	[property: JsonPropertyName("schema_version")] string SchemaVersion,
 	[property: JsonPropertyName("group_id")] string GroupId,
+	[property: JsonPropertyName("archetype_id")] string ArchetypeId,
+	[property: JsonPropertyName("archetype_key")] string ArchetypeKey,
+	[property: JsonPropertyName("archetype_label")] string ArchetypeLabel,
+	[property: JsonPropertyName("shape_fingerprint")] string ShapeFingerprint,
 	[property: JsonPropertyName("dataset_root")] string DatasetRoot,
 	[property: JsonPropertyName("tile_name")] string TileName,
 	[property: JsonPropertyName("map_name")] string MapName,
@@ -616,7 +781,10 @@ internal sealed record MlBrushGroupReport(
 	[property: JsonPropertyName("patch_count")] int PatchCount,
 	[property: JsonPropertyName("chunk_min_index")] int ChunkMinIndex,
 	[property: JsonPropertyName("chunk_max_index")] int ChunkMaxIndex,
+	[property: JsonPropertyName("fill_ratio")] float FillRatio,
 	[property: JsonPropertyName("mean_score")] float MeanScore,
+	[property: JsonPropertyName("mean_relief")] float MeanRelief,
+	[property: JsonPropertyName("mean_slope")] float MeanSlope,
 	[property: JsonPropertyName("max_score")] float MaxScore,
 	[property: JsonPropertyName("texture_signatures")] List<string> TextureSignatures,
 	[property: JsonPropertyName("height_grid_width")] int HeightGridWidth,
@@ -642,8 +810,133 @@ internal sealed record MlBrushHarvestManifest(
 	[property: JsonPropertyName("tiles_skipped_missing_heightmap")] int TilesSkippedMissingHeightmap,
 	[property: JsonPropertyName("groups_written")] int GroupsWritten,
 	[property: JsonPropertyName("patches_written")] int PatchesWritten,
+	[property: JsonPropertyName("archetype_count")] int ArchetypeCount,
+	[property: JsonPropertyName("archetype_manifest_path")] string ArchetypeManifestPath,
 	[property: JsonPropertyName("group_files")] List<string> GroupFiles,
 	[property: JsonPropertyName("tiles")] List<MlBrushTileSummary> Tiles);
+
+internal sealed record MlBrushArchetypeDescriptor(
+	string ArchetypeId,
+	string ArchetypeKey,
+	string ArchetypeLabel,
+	string ShapeFingerprint,
+	string TextureFamilyKey,
+	int PatchWidth,
+	int PatchHeight,
+	int PatchCount,
+	float FillRatio,
+	float MeanRelief,
+	float MeanSlope);
+
+internal sealed record MlBrushArchetypeSummary(
+	[property: JsonPropertyName("schema_version")] string SchemaVersion,
+	[property: JsonPropertyName("archetype_id")] string ArchetypeId,
+	[property: JsonPropertyName("archetype_key")] string ArchetypeKey,
+	[property: JsonPropertyName("archetype_label")] string ArchetypeLabel,
+	[property: JsonPropertyName("shape_fingerprint")] string ShapeFingerprint,
+	[property: JsonPropertyName("texture_family_key")] string TextureFamilyKey,
+	[property: JsonPropertyName("group_count")] int GroupCount,
+	[property: JsonPropertyName("patch_count")] int PatchCount,
+	[property: JsonPropertyName("average_patch_width")] float AveragePatchWidth,
+	[property: JsonPropertyName("average_patch_height")] float AveragePatchHeight,
+	[property: JsonPropertyName("average_fill_ratio")] float AverageFillRatio,
+	[property: JsonPropertyName("average_mean_score")] float AverageMeanScore,
+	[property: JsonPropertyName("average_mean_relief")] float AverageMeanRelief,
+	[property: JsonPropertyName("average_mean_slope")] float AverageMeanSlope,
+	[property: JsonPropertyName("texture_signatures")] List<string> TextureSignatures,
+	[property: JsonPropertyName("representative_group_id")] string RepresentativeGroupId,
+	[property: JsonPropertyName("representative_group_file")] string RepresentativeGroupFile,
+	[property: JsonPropertyName("group_ids")] List<string> GroupIds);
+
+internal sealed record MlBrushArchetypeManifest(
+	[property: JsonPropertyName("schema_version")] string SchemaVersion,
+	[property: JsonPropertyName("generated_utc")] DateTime GeneratedUtc,
+	[property: JsonPropertyName("dataset_root")] string DatasetRoot,
+	[property: JsonPropertyName("output_directory")] string OutputDirectory,
+	[property: JsonPropertyName("archetype_count")] int ArchetypeCount,
+	[property: JsonPropertyName("archetype_files")] List<string> ArchetypeFiles,
+	[property: JsonPropertyName("archetypes")] List<MlBrushArchetypeSummary> Archetypes);
+
+internal sealed class MlBrushArchetypeAccumulator
+{
+	private readonly HashSet<string> _textureSignatures = new(StringComparer.Ordinal);
+	private readonly List<string> _groupIds = [];
+	private string? _representativeGroupId;
+	private string? _representativeGroupFile;
+	private int _representativePatchCount = -1;
+	private float _representativeScore = float.MinValue;
+	private float _averagePatchWidthSum;
+	private float _averagePatchHeightSum;
+	private float _averageFillRatioSum;
+	private float _averageMeanScoreSum;
+	private float _averageMeanReliefSum;
+	private float _averageMeanSlopeSum;
+
+	public MlBrushArchetypeAccumulator(MlBrushArchetypeDescriptor descriptor)
+	{
+		ArchetypeId = descriptor.ArchetypeId;
+		ArchetypeKey = descriptor.ArchetypeKey;
+		ArchetypeLabel = descriptor.ArchetypeLabel;
+		ShapeFingerprint = descriptor.ShapeFingerprint;
+		TextureFamilyKey = descriptor.TextureFamilyKey;
+	}
+
+	public string ArchetypeId { get; }
+	public string ArchetypeKey { get; }
+	public string ArchetypeLabel { get; }
+	public string ShapeFingerprint { get; }
+	public string TextureFamilyKey { get; }
+	public int GroupCount { get; private set; }
+
+	public void Add(MlBrushGroupReport report, string relativeGroupPath)
+	{
+		GroupCount++;
+		PatchCount += report.PatchCount;
+		_averagePatchWidthSum += report.PatchWidth;
+		_averagePatchHeightSum += report.PatchHeight;
+		_averageFillRatioSum += report.FillRatio;
+		_averageMeanScoreSum += report.MeanScore;
+		_averageMeanReliefSum += report.MeanRelief;
+		_averageMeanSlopeSum += report.MeanSlope;
+		_groupIds.Add(report.GroupId);
+		foreach (string signature in report.TextureSignatures)
+			_textureSignatures.Add(signature);
+
+		if (report.PatchCount > _representativePatchCount || (report.PatchCount == _representativePatchCount && report.MeanScore > _representativeScore))
+		{
+			_representativePatchCount = report.PatchCount;
+			_representativeScore = report.MeanScore;
+			_representativeGroupId = report.GroupId;
+			_representativeGroupFile = relativeGroupPath;
+		}
+	}
+
+	public int PatchCount { get; private set; }
+
+	public MlBrushArchetypeSummary ToSummary()
+	{
+		float divisor = Math.Max(GroupCount, 1);
+		return new MlBrushArchetypeSummary(
+			SchemaVersion: "wowviewer-ml-brush-archetype-summary.v1",
+			ArchetypeId: ArchetypeId,
+			ArchetypeKey: ArchetypeKey,
+			ArchetypeLabel: ArchetypeLabel,
+			ShapeFingerprint: ShapeFingerprint,
+			TextureFamilyKey: TextureFamilyKey,
+			GroupCount: GroupCount,
+			PatchCount: PatchCount,
+			AveragePatchWidth: MathF.Round(_averagePatchWidthSum / divisor, 6),
+			AveragePatchHeight: MathF.Round(_averagePatchHeightSum / divisor, 6),
+			AverageFillRatio: MathF.Round(_averageFillRatioSum / divisor, 6),
+			AverageMeanScore: MathF.Round(_averageMeanScoreSum / divisor, 6),
+			AverageMeanRelief: MathF.Round(_averageMeanReliefSum / divisor, 6),
+			AverageMeanSlope: MathF.Round(_averageMeanSlopeSum / divisor, 6),
+			TextureSignatures: _textureSignatures.OrderBy(static value => value, StringComparer.Ordinal).ToList(),
+			RepresentativeGroupId: _representativeGroupId ?? string.Empty,
+			RepresentativeGroupFile: _representativeGroupFile ?? string.Empty,
+			GroupIds: _groupIds.OrderBy(static value => value, StringComparer.Ordinal).ToList());
+	}
+}
 
 internal sealed class MlBrushIssueTracker
 {

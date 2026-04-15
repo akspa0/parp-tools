@@ -17,12 +17,13 @@ The key long-term reconstruction seam is WDL:
 The remaining auxiliary channels mark known losses in the minimap surface:
 - liquids flatten or overwrite visible terrain cues
 - placed objects obscure terrain and often imply locally flat support surfaces
-- stitched alpha and shadow payloads can leak texture-blend and baked-lighting evidence
+- stitched alpha payloads can leak texture-blend evidence, while chunk metadata preserves the area, liquid, hole, and effect context around those losses
 
 V7.5.1 keeps the same tensor contract as V7.5, but it assumes the exporter-side
 dataset cleanup fixes are present so the RGB surface prefers an exported
 terrain-only minimap when present. That cleaned image starts from the no-MCCV
-variant and inpaints out strong object, PM4, liquid, alpha, and shadow masks.
+variant and rebakes masked regions from chunk texture layers with nearest-chunk
+base-texture fallback for object, PM4, liquid, and alpha contamination.
 
 Inputs:
 - minimap RGB

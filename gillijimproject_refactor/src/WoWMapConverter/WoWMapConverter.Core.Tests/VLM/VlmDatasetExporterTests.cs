@@ -150,6 +150,67 @@ public sealed class VlmDatasetExporterTests
     }
 
     [Fact]
+    public void ResolveChunkTextureFallbackPaths_UsesNearestChunkBaseTexture()
+    {
+        VlmChunkLayers[] chunks =
+        [
+            new(
+                ChunkIndex: 0,
+                Layers:
+                [
+                    new(TextureId: 1, TexturePath: "Textures/terrain/grass.blp", Flags: 0, AlphaOffset: 0, EffectId: 0)
+                ]),
+            new(
+                ChunkIndex: 17,
+                Layers: [])
+        ];
+
+        string?[] resolved = VlmDatasetExporter.ResolveChunkTextureFallbackPaths(chunks);
+
+        Assert.Equal("Textures/terrain/grass.blp", resolved[0]);
+        Assert.Equal("Textures/terrain/grass.blp", resolved[17]);
+    }
+
+    [Fact]
+    public void RenderChunkValueMap_FillsChunkBlocksWithUInt16Values()
+    {
+        ushort[] values = new ushort[256];
+        values[0] = 1024;
+        values[17] = 2048;
+
+        byte[] imageBytes = VlmDatasetExporter.RenderChunkValueMap(values, 32, 32);
+
+        using Image<L16> image = Image.Load<L16>(imageBytes);
+        Assert.Equal((ushort)1024, image[0, 0].PackedValue);
+        Assert.Equal((ushort)2048, image[2, 2].PackedValue);
+    }
+
+    [Fact]
+    public void RenderChunkFlagMap_PacksUInt32FlagsIntoRgbaChannels()
+    {
+        uint[] flags = new uint[256];
+        flags[0] = 0x12345678;
+
+        byte[] imageBytes = VlmDatasetExporter.RenderChunkFlagMap(flags, 16, 16);
+
+        using Image<Rgba32> image = Image.Load<Rgba32>(imageBytes);
+        Assert.Equal(new Rgba32(0x78, 0x56, 0x34, 0x12), image[0, 0]);
+    }
+
+    [Fact]
+    public void RenderHolesMask_MapsChunkHoleBitsToTilePixels()
+    {
+        int[] holes = new int[256];
+        holes[0] = 1 << 5;
+
+        byte[] imageBytes = VlmDatasetExporter.RenderHolesMask(holes, 64, 64);
+
+        using Image<L8> image = Image.Load<L8>(imageBytes);
+        Assert.Equal((byte)255, image[1, 1].PackedValue);
+        Assert.Equal((byte)0, image[0, 0].PackedValue);
+    }
+
+    [Fact]
     public void TransformFootprintPolygonToWorldForTesting_UsesRotYForXzFootprints()
     {
         Vector2[] localPolygon =
@@ -212,6 +273,62 @@ public sealed class VlmDatasetExporterTests
         Assert.Equal(200f, transformed[1].Y, 3);
     }
 
+    [Fact]
+    public void ScoreTileContentForTesting_UsesTerrainAndObjectSignals()
+    {
+        FakeArchiveReader archiveReader = new(new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["World\\Maps\\Azeroth\\Azeroth_1_2.adt"] = BuildChunkedFile("MH2O", "MDDF", "MCLQ", "MCNK"),
+            ["World\\Maps\\Azeroth\\Azeroth_1_2_tex0.adt"] = BuildChunkedFile("MCAL", "MCLY"),
+            ["World\\Maps\\Azeroth\\Azeroth_1_2_obj0.adt"] = BuildChunkedFile("MODF")
+        });
+
+        int score = VlmDatasetExporter.ScoreTileContentForTesting("Azeroth", 1, 2, false, archiveReader, Array.Empty<string>());
+
+        Assert.Equal(218, score);
+    }
+
+    [Fact]
+    public void SelectTilesForProcessingForTesting_InterestingOnlyPrefersScoredTiles()
+    {
+        FakeArchiveReader archiveReader = new(new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["World\\Maps\\Azeroth\\Azeroth_0_0.adt"] = BuildChunkedFile("MCNK"),
+            ["World\\Maps\\Azeroth\\Azeroth_1_0.adt"] = BuildChunkedFile("MH2O")
+        });
+
+        List<int> selected = VlmDatasetExporter.SelectTilesForProcessingForTesting(
+            [0, 1],
+            1,
+            false,
+            "Azeroth",
+            archiveReader,
+            Array.Empty<string>(),
+            true,
+            1);
+
+        Assert.Equal([1], selected);
+    }
+
+    [Fact]
+    public void SelectTilesForProcessingForTesting_InterestingOnlyFallsBackToSingleRepresentativeTile()
+    {
+        FakeArchiveReader archiveReader = new(new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase));
+
+        List<int> selected = VlmDatasetExporter.SelectTilesForProcessingForTesting(
+            [0, 1, 2],
+            32,
+            false,
+            "Azeroth",
+            archiveReader,
+            Array.Empty<string>(),
+            true,
+            1);
+
+        Assert.Single(selected);
+        Assert.Equal(1, selected[0]);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("23")]
@@ -242,5 +359,17 @@ public sealed class VlmDatasetExporterTests
         {
             return _files.TryGetValue(virtualPath.Replace('/', '\\'), out byte[]? bytes) ? bytes : null;
         }
+    }
+
+    private static byte[] BuildChunkedFile(params string[] fourCcs)
+    {
+        using MemoryStream stream = new();
+        foreach (string fourCc in fourCcs)
+        {
+            stream.Write(Encoding.ASCII.GetBytes(fourCc));
+            stream.Write(BitConverter.GetBytes(0));
+        }
+
+        return stream.ToArray();
     }
 }

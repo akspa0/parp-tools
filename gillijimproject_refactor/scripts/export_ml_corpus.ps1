@@ -118,6 +118,74 @@ function Invoke-LoggedCommand {
     }
 }
 
+function Resolve-PythonExecutable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectRoot
+    )
+
+    $candidateRoots = @(
+        $ProjectRoot,
+        [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot '..'))
+    ) | Select-Object -Unique
+
+    foreach ($candidateRoot in $candidateRoots) {
+        $venvPython = Join-Path $candidateRoot '.venv\Scripts\python.exe'
+        if (Test-Path $venvPython) {
+            return $venvPython
+        }
+    }
+
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -ne $pythonCommand) {
+        return $pythonCommand.Source
+    }
+
+    throw "Python interpreter not found. Expected a workspace .venv or a python executable on PATH."
+}
+
+function Invoke-MinimalManifestCuration {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$DatasetsRoot,
+        [AllowNull()]
+        [string]$ManifestOutput,
+        [AllowNull()]
+        [string]$PlanOutput
+    )
+
+    $pythonExecutable = Resolve-PythonExecutable -ProjectRoot $ProjectRoot
+    $scriptPath = Join-Path $ProjectRoot 'scripts\build_minimal_ml_manifest.py'
+    if (-not (Test-Path $scriptPath)) {
+        throw "Minimal manifest curation script not found: $scriptPath"
+    }
+
+    $arguments = @($scriptPath, '--datasets-root', $DatasetsRoot)
+    if (-not [string]::IsNullOrWhiteSpace($ManifestOutput)) {
+        $arguments += @('--output', $ManifestOutput)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($PlanOutput)) {
+        $arguments += @('--plan-output', $PlanOutput)
+    }
+
+    $commandText = '"' + $pythonExecutable + '" ' + (($arguments | ForEach-Object {
+        if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
+    }) -join ' ')
+
+    Write-Host $commandText -ForegroundColor Cyan
+    if ($DryRun) {
+        return
+    }
+
+    & $pythonExecutable @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Minimal manifest curation failed with exit code ${LASTEXITCODE}: $commandText"
+    }
+}
+
 function Resolve-ClientMapList {
     param(
         [Parameter(Mandatory = $true)]
@@ -203,6 +271,9 @@ $configLegacyOutputRoot = Get-JsonPropertyValue -Object $config -Name 'output_ro
 $configListfilePath = Get-JsonPropertyValue -Object $config -Name 'listfile_path'
 $configHarvestAfterExport = Get-JsonPropertyValue -Object $config -Name 'harvest_after_export'
 $configPruneStagedClients = Get-JsonPropertyValue -Object $config -Name 'prune_staged_clients'
+$configRunMinimalCurationAfterExport = Get-JsonPropertyValue -Object $config -Name 'run_minimal_curation_after_export'
+$configMinimalCurationOutput = Get-JsonPropertyValue -Object $config -Name 'minimal_curation_output'
+$configMinimalCurationPlanOutput = Get-JsonPropertyValue -Object $config -Name 'minimal_curation_plan_output'
 
 $resolvedArchiveRoot = if ($ArchiveRoot) { Resolve-ConfigPathValue -Value $ArchiveRoot -BaseRoot $null } elseif ($configArchiveRoot) { Resolve-ConfigPathValue -Value ([string]$configArchiveRoot) -BaseRoot $null } else { $null }
 $resolvedMountRoot = if ($ArchiveMountRoot) { Resolve-ConfigPathValue -Value $ArchiveMountRoot -BaseRoot $null } elseif ($configMountRoot) { Resolve-ConfigPathValue -Value ([string]$configMountRoot) -BaseRoot $null } else { $null }
@@ -216,6 +287,10 @@ $harvestConfigured = if ($null -ne $configHarvestAfterExport) { [bool]$configHar
 $harvestAfterExport = -not $SkipHarvest -and $harvestConfigured
 $pruneConfigured = if ($null -ne $configPruneStagedClients) { [bool]$configPruneStagedClients } else { $false }
 $shouldPruneStagedClients = $PruneStagedClients -or $pruneConfigured
+$runMinimalCurationAfterExport = if ($null -ne $configRunMinimalCurationAfterExport) { [bool]$configRunMinimalCurationAfterExport } else { $false }
+$resolvedMinimalCurationOutput = if ($configMinimalCurationOutput) { Resolve-ConfigPathValue -Value ([string]$configMinimalCurationOutput) -BaseRoot $null } else { $null }
+$resolvedMinimalCurationPlanOutput = if ($configMinimalCurationPlanOutput) { Resolve-ConfigPathValue -Value ([string]$configMinimalCurationPlanOutput) -BaseRoot $null } else { $null }
+$projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 
 if (-not $DryRun) {
     New-Item -ItemType Directory -Path $resolvedOutputRoot -Force | Out-Null
@@ -228,6 +303,10 @@ foreach ($client in $config.clients) {
     $clientLabelValue = Get-JsonPropertyValue -Object $client -Name 'label'
     $clientOutputRootValue = Get-JsonPropertyValue -Object $client -Name 'output_root'
     $clientGenerateDepth = Get-JsonPropertyValue -Object $client -Name 'generate_depth'
+    $clientSkipDerivedAssets = Get-JsonPropertyValue -Object $client -Name 'skip_derived_assets'
+    $clientTileLimitValue = Get-JsonPropertyValue -Object $client -Name 'tile_limit'
+    $clientInterestingOnlyValue = Get-JsonPropertyValue -Object $client -Name 'interesting_only'
+    $clientInterestingMinScoreValue = Get-JsonPropertyValue -Object $client -Name 'interesting_min_score'
     $clientMinimapRootValue = Get-JsonPropertyValue -Object $client -Name 'minimap_root'
     $clientLocalPathValue = Get-JsonPropertyValue -Object $client -Name 'local_client_path'
     $clientArchivePathValue = Get-JsonPropertyValue -Object $client -Name 'archive_client_path'
@@ -275,8 +354,10 @@ foreach ($client in $config.clients) {
         $clientAllMaps = [bool]$clientAllMapsValue
     }
 
+    $mapDiscoveryClientPath = if ($DryRun -and $clientRootInfo.Staged -and -not (Test-Path $resolvedClientPath)) { $clientRootInfo.SourcePath } else { $resolvedClientPath }
+
     if ($clientAllMaps) {
-        $mapsToProcess = Resolve-ClientMapList -ClientPath $resolvedClientPath -ProjectPath $ProjectPath -Configuration $Configuration -ListfilePath $resolvedListfilePath
+        $mapsToProcess = Resolve-ClientMapList -ClientPath $mapDiscoveryClientPath -ProjectPath $ProjectPath -Configuration $Configuration -ListfilePath $resolvedListfilePath
         if ($mapsToProcess.Count -eq 0) {
             if ($DryRun) {
                 Write-Warning "Dry-run map discovery returned no maps for client '$clientLabel'."
@@ -293,44 +374,65 @@ foreach ($client in $config.clients) {
     else {
         $mapsToProcess = @($client.maps)
     }
-            $mapDiscoveryClientPath = if ($DryRun -and $clientRootInfo.Staged -and -not (Test-Path $resolvedClientPath)) { $clientRootInfo.SourcePath } else { $resolvedClientPath }
-            $mapsToProcess = Resolve-ClientMapList -ClientPath $mapDiscoveryClientPath -ProjectPath $ProjectPath -Configuration $Configuration -ListfilePath $resolvedListfilePath
+
     foreach ($map in $mapsToProcess) {
         $datasetOutput = Join-Path $clientOutputRoot $map
         $datasetJsonDir = Join-Path $datasetOutput 'dataset'
 
-        if ((-not $Force) -and (Test-Path $datasetJsonDir)) {
-            Write-Host "Skipping existing export: $datasetOutput" -ForegroundColor DarkYellow
+        if ($Force -and (Test-Path $datasetOutput)) {
+            Write-Host "Clearing existing export output: $datasetOutput" -ForegroundColor DarkYellow
+            if (-not $DryRun) {
+                Remove-Item -Path $datasetOutput -Recurse -Force
+            }
         }
-        else {
-            $exportArgs = @(
-                'run',
-                '--project', $ProjectPath,
-                '--configuration', $Configuration,
-                '--',
-                'ml-export',
-                '--client', $resolvedClientPath,
-                '--map', [string]$map,
-                '--out', $datasetOutput,
-                '--listfile', $resolvedListfilePath
-            )
 
-            if (-not [string]::IsNullOrWhiteSpace($resolvedMinimapRoot)) {
-                $exportArgs += @('--minimap-root', $resolvedMinimapRoot)
-            }
+        # Re-export every targeted map so partial datasets cannot be preserved just because a dataset/ folder exists.
+        $exportArgs = @(
+            'run',
+            '--project', $ProjectPath,
+            '--configuration', $Configuration,
+            '--',
+            'ml-export',
+            '--client', $resolvedClientPath,
+            '--map', [string]$map,
+            '--out', $datasetOutput,
+            '--listfile', $resolvedListfilePath
+        )
 
-            if ($null -ne $clientGenerateDepth -and [bool]$clientGenerateDepth) {
-                $exportArgs += '--depth'
-            }
+        if (-not [string]::IsNullOrWhiteSpace($resolvedMinimapRoot)) {
+            $exportArgs += @('--minimap-root', $resolvedMinimapRoot)
+        }
 
-            try {
-                Invoke-LoggedCommand -Arguments $exportArgs
+        if ($null -ne $clientGenerateDepth -and [bool]$clientGenerateDepth) {
+            $exportArgs += '--depth'
+        }
+
+        if ($null -ne $clientTileLimitValue) {
+            $clientTileLimit = [int]$clientTileLimitValue
+            if ($clientTileLimit -gt 0) {
+                $exportArgs += @('--limit', [string]$clientTileLimit)
             }
-            catch {
-                Write-Warning ("Export failed for {0}/{1}: {2}" -f $clientLabel, $map, $_.Exception.Message)
-                $jobFailures++
-                continue
-            }
+        }
+
+        if ($null -ne $clientInterestingOnlyValue -and [bool]$clientInterestingOnlyValue) {
+            $exportArgs += '--interesting-only'
+        }
+
+        if ($null -ne $clientInterestingMinScoreValue) {
+            $exportArgs += @('--interesting-min-score', [string]([int]$clientInterestingMinScoreValue))
+        }
+
+        if ($null -ne $clientSkipDerivedAssets -and [bool]$clientSkipDerivedAssets) {
+            $exportArgs += '--skip-derived-assets'
+        }
+
+        try {
+            Invoke-LoggedCommand -Arguments $exportArgs
+        }
+        catch {
+            Write-Warning ("Export failed for {0}/{1}: {2}" -f $clientLabel, $map, $_.Exception.Message)
+            $jobFailures++
+            continue
         }
 
         if ($harvestAfterExport) {
@@ -376,6 +478,10 @@ if ($shouldPruneStagedClients) {
 
 if ($jobFailures -gt 0) {
     throw "ML corpus export workflow completed with $jobFailures failed map jobs."
+}
+
+if ($runMinimalCurationAfterExport) {
+    Invoke-MinimalManifestCuration -ProjectRoot $projectRoot -DatasetsRoot $resolvedOutputRoot -ManifestOutput $resolvedMinimalCurationOutput -PlanOutput $resolvedMinimalCurationPlanOutput
 }
 
 Write-Host "ML corpus export workflow complete." -ForegroundColor Green

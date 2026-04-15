@@ -109,6 +109,11 @@ class DatasetSignalStats:
     liquid_mask_nonzero: int = 0
     liquid_height_file_present: int = 0
     no_liquid_minimap_present: int = 0
+    holes_mask_present: int = 0
+    area_id_map_present: int = 0
+    chunk_flags_map_present: int = 0
+    liquid_type_map_present: int = 0
+    dominant_effect_id_map_present: int = 0
     objects_declared: int = 0
     object_bounds_present: int = 0
     nonzero_object_mask_tiles: int = 0
@@ -212,6 +217,11 @@ def audit_dataset_root(dataset_root: Path, image_sample_limit: int) -> DatasetSi
         liquid_mask_path = resolve_dataset_path(dataset_root, terrain.get("liquid_mask"))
         liquid_height_path = resolve_dataset_path(dataset_root, terrain.get("liquid_height"))
         no_liquid_minimap_path = resolve_dataset_path(dataset_root, terrain.get("no_liquid_minimap"))
+        holes_mask_path = resolve_dataset_path(dataset_root, terrain.get("holes_mask"))
+        area_id_map_path = resolve_dataset_path(dataset_root, terrain.get("area_id_map"))
+        chunk_flags_map_path = resolve_dataset_path(dataset_root, terrain.get("chunk_flags_map"))
+        liquid_type_map_path = resolve_dataset_path(dataset_root, terrain.get("liquid_type_map"))
+        dominant_effect_id_map_path = resolve_dataset_path(dataset_root, terrain.get("dominant_effect_id_map"))
 
         if minimap_path.exists():
             stats.minimap_present += 1
@@ -234,6 +244,16 @@ def audit_dataset_root(dataset_root: Path, image_sample_limit: int) -> DatasetSi
             stats.mccv_map_present += 1
         if no_liquid_minimap_path and no_liquid_minimap_path.exists():
             stats.no_liquid_minimap_present += 1
+        if holes_mask_path and holes_mask_path.exists():
+            stats.holes_mask_present += 1
+        if area_id_map_path and area_id_map_path.exists():
+            stats.area_id_map_present += 1
+        if chunk_flags_map_path and chunk_flags_map_path.exists():
+            stats.chunk_flags_map_present += 1
+        if liquid_type_map_path and liquid_type_map_path.exists():
+            stats.liquid_type_map_present += 1
+        if dominant_effect_id_map_path and dominant_effect_id_map_path.exists():
+            stats.dominant_effect_id_map_present += 1
 
         shadow_maps = terrain.get("shadow_maps") or []
         if isinstance(shadow_maps, list) and shadow_maps:
@@ -325,6 +345,11 @@ def print_dataset_summary(stats: DatasetSignalStats) -> None:
     print(f"  shadow_maps:         {pct(stats.shadow_maps_present, stats.tile_count)}")
     print(f"  chunk_layers:        {pct(stats.chunk_layers_present, stats.tile_count)}")
     print(f"  holes_nonzero:       {pct(stats.holes_present, stats.tile_count)}")
+    print(f"  holes_mask:          {pct(stats.holes_mask_present, stats.tile_count)}")
+    print(f"  area_id_map:         {pct(stats.area_id_map_present, stats.tile_count)}")
+    print(f"  chunk_flags_map:     {pct(stats.chunk_flags_map_present, stats.tile_count)}")
+    print(f"  liquid_type_map:     {pct(stats.liquid_type_map_present, stats.tile_count)}")
+    print(f"  dominant_effect_map: {pct(stats.dominant_effect_id_map_present, stats.tile_count)}")
     print("Input image statistics:")
     print(f"  minimap_rgb:         {stats.minimap_stats.format_summary()}")
     print(f"  normal_rgb:          {stats.normalmap_stats.format_summary()}")
@@ -340,7 +365,8 @@ def print_encoding_notes() -> None:
     print("  liquid_mask: binary mask thresholded from stitched liquid-mask PNG, nearest resize")
     print("  liquid_height_prior: normalized stitched liquid-height raster masked to liquid coverage; WL-derived heights can feed the same channel later")
     print("  object_mask: binary rectangle footprints rendered from objects list using bounds when present, otherwise scale fallback")
-    print("  raw auxiliary assets still available beyond the cleaned RGB surface: mccv_map, alpha_masks, alpha_atlas, shadow_maps, chunk_layers, holes, no_liquid_minimap")
+    print("  terrain_only cleanup: the exporter now rebakes masked regions from chunk texture layers and nearest-chunk base-texture fallback instead of generic neighbor fill")
+    print("  raw auxiliary assets still available beyond the cleaned RGB surface: mccv_map, alpha_masks, alpha_atlas, shadow_maps, chunk_layers, holes, holes_mask, area_id_map, chunk_flags_map, liquid_type_map, dominant_effect_id_map, no_liquid_minimap")
 
 
 def parse_args() -> argparse.Namespace:

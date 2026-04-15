@@ -1,5 +1,61 @@
 # Active Context
 
+## Apr 14, 2026 - `original_development` now stages onto a real 4.0.0.11927 base client instead of exporting from the sparse loose tree directly
+
+- the old `original_development` corpus entry was still pointing straight at `gillijimproject_refactor/test_data/original_development`, which left the exporter on a sparse loose root with no real client `Data` surface behind it
+- a reusable staging helper now exists at:
+	- `gillijimproject_refactor/scripts/stage_original_development_overlay.ps1`
+- current staged overlay root is:
+	- `i:/parp/parp-tools/output/tmp/original_development_client_4_0_0_11927`
+- that staged root is composed from:
+	- base client `H:\CLIENTS\World of Warcraft Cata beta 11927\Data`
+	- loose development map `gillijimproject_refactor/test_data/original_development/World/Maps/development`
+	- development minimaps `gillijimproject_refactor/test_data/development/World/Textures/Minimap`
+- `scripts/ml_corpus_fixed_clients.json` now points the `original_development` client entry at the staged 11927-backed root instead of the raw loose tree
+- bounded real-data proof succeeded with:
+	- `dotnet run --project ...WoWMapConverter.Cli.csproj -- ml-export --client i:/parp/parp-tools/output/tmp/original_development_client_4_0_0_11927 --map development --tile 31_36 --out i:/parp/parp-tools/output/build-validation/original_development_11927_overlay_probe --listfile i:/parp/parp-tools/gillijimproject_refactor/test_data/community-listfile-withcapitals.csv`
+- proof outcome on `development_31_36`:
+	- loose `development.wdt` / `development.wdl` plus split `_tex0` / `_obj0` were found from the overlay root
+	- hashed minimap resolution succeeded against the 11927 base data and wrote `images/development_31_36.png`
+	- exporter produced `heightmap_local`, `heightmap_global`, `object_visibility_mask`, `pm4_mask`, and semantic rasters under `output/build-validation/original_development_11927_overlay_probe`
+	- stitched full-map outputs for the bounded one-tile probe were also written under the same root
+- important boundary:
+	- this is proven against 4.0.0.11927 because it is the closest fixed local base client currently on disk to the PM4 build hints (`11927` / `12304`)
+	- if a real `4.0.1.12304` client is found later, rebuild the overlay root against that client and prefer it over `11927`
+
+## Apr 14, 2026 - 4.0.0.11927 world-root recovery now uses fast core export and no longer preserves partial map roots silently
+
+- the user-reported Cataclysm beta corpus gap was real:
+	- `datasets/4_0_0_11927` only had `Azeroth`, `EmeraldDream`, and `LostIsles` when checked
+	- `Azeroth/ml_dataset_manifest.json` showed only `1` processed tile before recovery
+	- fixed local client discovery on `H:\CLIENTS\World of Warcraft Cata beta 11927` proved that missing worlds like `Kalimdor` were present in the client and that the dataset state, not the client, was incomplete
+- workflow fixes landed to stop partial roots from being treated as complete:
+	- `gillijimproject_refactor/scripts/export_ml_corpus.ps1` now uses the correct map-discovery client path during dry-run/staged-client cases, removes the accidental duplicate discovery override, and no longer skips a map just because `dataset/` already exists
+	- `-Force` on the wrapper now clears an existing map root explicitly instead of leaving stale partial exports behind
+	- `WoWMapConverter.Cli ml-export` now accepts `--skip-derived-assets`, and `WoWMapConverter.Core/VLM/VlmDatasetExporter.ExportMapAsync(...)` uses it to skip tilesets, stitched outputs, and semantic postprocess while still writing tile JSON, local heightmaps, and global-normalized heightmaps
+- bounded real-data recovery on the fixed local 4.0.0.11927 client now produced these root-level manifests under `datasets/4_0_0_11927`:
+	- `Azeroth`: `839` tiles processed, including a follow-up fast rerun that backfilled the previously missing `839/839` global heightmaps after an interrupted earlier run
+	- `Kalimdor`: `1011` tiles processed
+	- `Deepholm`: `100` tiles processed (archive directory resolved as `Deephome` during export)
+	- `EmeraldDream`: `256` tiles processed
+	- `LostIsles`: `149` tiles processed
+- important boundary:
+	- this recovery closed the missing world-root / missing-global-heightmap problem for the targeted 4.0.0.11927 roots, but it did not make every per-channel surface uniformly dense; current manifests still show partial source-minimap coverage on some maps (for example `Kalimdor 1006/1011`, `Azeroth 835/839`, `EmeraldDream 91/256`), so do not describe the whole 4.0.0.11927 corpus as fully dense across every harvested channel without map-by-map proof
+
+## Apr 14, 2026 - Terrain-only rebake now has bounded real-data proof on a fixed 3.0.1 client tile
+
+- bounded exporter proof was run against the fixed local `3.0.1.8303` client root:
+	- command shape: `dotnet run --project .../WoWMapConverter.Cli.csproj -- ml-export --client "H:/CLIENTS/3.X_Pre-Release_Windows_enUS_3.0.1.8303/World of Warcraft" --map EmeraldDream --tile 26_26 --out i:/parp/parp-tools/output/build-validation/emeralddream_26_26_terrain_rebake_probe`
+	- tile `EmeraldDream_26_26` was chosen because the existing harvested corpus already had a legacy `terrain_only_minimap`, real `chunk_layers`, real tileset textures, and an object mask
+- proof outcome on the fresh export:
+	- exporter loaded and converted `4` real tileset textures from the client archives
+	- fresh tile JSON under `output/build-validation/emeralddream_26_26_terrain_rebake_probe/dataset/EmeraldDream_26_26.json` now includes `terrain_only_minimap` plus the new semantic rasters `holes_mask`, `area_id_map`, `chunk_flags_map`, `liquid_type_map`, and `dominant_effect_id_map`
+	- cropped comparison against the legacy dataset `terrain_only_minimap` showed the strongest changes localized to the object-mask footprint, with `782 / 861` masked pixels changing by more than `8` intensity levels and masked-region RGB MAE about `19.49`
+	- the updated `src/WoWMapConverter/scripts/audit_v7_signals.py` run on the fresh probe reported `1/1` coverage for `terrain_only_minimap`, `holes_mask`, `area_id_map`, `chunk_flags_map`, `liquid_type_map`, and `dominant_effect_map`
+	- bounded real-data brush proof also now exists for the new archetype pass: `ml-harvest-brushes --dataset-root i:/parp/parp-tools/datasets/original_development/development --output-dir i:/parp/parp-tools/output/build-validation/brush-imprints/original_development_archetype_probe_20260414 --limit 6 --write-previews` processed `6` tiles, wrote `117` group files, and emitted `brush_archetype_manifest.json` with `115` archetypes plus per-group `archetype_id` / `archetype_key` / `archetype_label` / `shape_fingerprint`
+- important boundary:
+	- the checked-in `test_data/original_development` split root still lacks the source BLP payloads needed for honest texture-rebake proof; a bounded probe there reached the export path but logged `Exported 0 textures`, so real rebake validation should use a fixed local client root or a staged archive-backed copy when texture evidence matters
+
 ## Apr 14, 2026 - V7.6 docs now distinguish the paired-output branch from the active harvested-corpus terrain line
 
 - added a separate V7.6 doc set instead of overloading the V7.5.1 terrain docs:

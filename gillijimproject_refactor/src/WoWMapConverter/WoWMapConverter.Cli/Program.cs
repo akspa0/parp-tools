@@ -441,8 +441,20 @@ public static class Program
                     if (!harvestOnly)
                     {
                         Console.WriteLine("    => ml-export");
+                        int tileLimit = client.TileLimit ?? int.MaxValue;
                         var exportResult = await exporter.ExportMapAsync(
-                            clientPath, map, mapOutput, progress, generateDepth: client.GenerateDepth, minimapRoot: minimapRoot);
+                            clientPath,
+                            map,
+                            mapOutput,
+                            progress,
+                            tileLimit,
+                            listfilePath: null,
+                            generateDepth: client.GenerateDepth,
+                            minimapRoot: minimapRoot,
+                            tileFilter: null,
+                            skipDerivedAssets: client.SkipDerivedAssets,
+                            interestingOnly: client.InterestingOnly,
+                            interestingMinScore: client.InterestingMinScore);
                         Console.WriteLine($"    exported {exportResult.TilesExported} tiles, skipped {exportResult.TilesSkipped}");
                     }
 
@@ -2259,6 +2271,9 @@ public static class Program
         int limit = int.MaxValue;
         bool generateDepth = false;
         bool batchAll = false;
+        bool skipDerivedAssets = false;
+        bool interestingOnly = false;
+        int interestingMinScore = 1;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -2298,6 +2313,16 @@ public static class Program
                 case "--batch-all":
                     batchAll = true;
                     break;
+                case "--skip-derived-assets":
+                    skipDerivedAssets = true;
+                    break;
+                case "--interesting-only":
+                    interestingOnly = true;
+                    break;
+                case "--interesting-min-score":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out int parsedInterestingMinScore))
+                        interestingMinScore = parsedInterestingMinScore;
+                    break;
             }
         }
 
@@ -2320,6 +2345,9 @@ public static class Program
             Console.WriteLine("  --tile <x_y>          Export only one specific tile coordinate");
             Console.WriteLine("  --limit, -n <N>       Export only first N tiles");
             Console.WriteLine("  --depth, -d           Generate depth maps (requires DepthAnything3)");
+            Console.WriteLine("  --skip-derived-assets Skip tilesets, stitched outputs, and semantic postprocess assets for faster core export coverage");
+            Console.WriteLine("  --interesting-only    Only export scored interesting tiles, with a one-tile fallback for otherwise empty maps");
+            Console.WriteLine("  --interesting-min-score <N> Minimum tile-interest score when --interesting-only is enabled");
             return 1;
         }
 
@@ -2354,7 +2382,7 @@ public static class Program
                     
                     try 
                     {
-                        var res = await exporter.ExportMapAsync(clientPath, map, mapOutputDir, progress, limit, listfilePath, generateDepth, minimapRoot, tileFilter);
+                        var res = await exporter.ExportMapAsync(clientPath, map, mapOutputDir, progress, limit, listfilePath, generateDepth, minimapRoot, tileFilter, skipDerivedAssets, interestingOnly, interestingMinScore);
                         Console.WriteLine($"[BATCH] {map} Complete: {res.TilesExported} tiles.");
                     }
                     catch (Exception ex)
@@ -2374,8 +2402,12 @@ public static class Program
                 Console.WriteLine($"  Output: {outputDir}");
                 if (!string.IsNullOrWhiteSpace(minimapRoot))
                     Console.WriteLine($"  Minimap root: {minimapRoot}");
+                if (skipDerivedAssets)
+                    Console.WriteLine("  Derived assets: skipped");
+                if (interestingOnly)
+                    Console.WriteLine($"  Interesting tile curation: enabled (min score {interestingMinScore})");
                 
-                var result = await exporter.ExportMapAsync(clientPath, mapName!, outputDir, progress, limit, listfilePath, generateDepth, minimapRoot, tileFilter);
+                var result = await exporter.ExportMapAsync(clientPath, mapName!, outputDir, progress, limit, listfilePath, generateDepth, minimapRoot, tileFilter, skipDerivedAssets, interestingOnly, interestingMinScore);
                 
                 Console.WriteLine();
                 Console.WriteLine($"Export complete:");

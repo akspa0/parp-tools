@@ -63,7 +63,7 @@ The channel count remains `13` because the RGB minimap is still three channels. 
 
 ## Terrain-Only Minimap Pipeline
 
-The exporter now has an explicit terrain-only cleanup path. It does not invent new geometry. It removes strong known contaminants from the rendered minimap and inpaints from adjacent surviving terrain color.
+The exporter now has an explicit terrain-only cleanup path. It does not invent new geometry. It removes strong known contaminants from the rendered minimap and rebakes masked regions from real chunk texture layers, falling back to the nearest chunk base texture when a chunk cannot resolve its own base layer cleanly.
 
 Cleanup order:
 
@@ -72,7 +72,7 @@ Cleanup order:
 3. Build object and PM4 masks
 4. Stitch liquid and alpha masks when present
 5. Union the strongest masks into one removal surface
-6. Inpaint masked pixels into `terrain_only_minimap`
+6. Rebuild masked pixels from chunk texture layers into `terrain_only_minimap`
 
 ```mermaid
 flowchart TD
@@ -89,7 +89,7 @@ flowchart TD
     G --> K
     H --> K
     I --> K
-    K --> L[Inpaint neighboring terrain color]
+    K --> L[Chunk texture rebake plus nearest-base fallback]
     L --> M[terrain_only_minimap]
 ```
 

@@ -39,6 +39,19 @@ test_data/original_development/World/Maps/development
 - Do not silently substitute `test_data/development/World/Maps/development` as the sampling root for that path.
 - If minimaps are needed and they are not present under `original_development`, use an explicit minimap root instead of broadening the terrain source.
 
+### Staged Original Development Client Overlay
+```
+output/tmp/original_development_client_4_0_0_11927
+```
+
+- This is the current composite client root for running `original_development` against a real Cataclysm data surface.
+- It is built from:
+	- base client `H:\CLIENTS\World of Warcraft Cata beta 11927\Data`
+	- loose map overlay `test_data/original_development/World/Maps/development`
+	- development minimaps `test_data/development/World/Textures/Minimap`
+- Rebuild it with `gillijimproject_refactor/scripts/stage_original_development_overlay.ps1 -Force` when the source loose data changes.
+- If a real `4.0.1.12304` client is found later, rebuild this staged root against that client and prefer it over `11927` for PM4-era development-map work.
+
 ### V7 Development Minimap-Only Root
 ```
 test_data/development
