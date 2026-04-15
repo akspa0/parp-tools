@@ -11,6 +11,7 @@ param(
     [switch]$SkipHarvest,
     [switch]$PruneStagedClients,
     [switch]$ForceRestage,
+    [switch]$Resume,
     [switch]$Force,
     [switch]$DryRun
 )
@@ -26,6 +27,7 @@ if (-not (Test-Path $wowArchiveHelperPath)) {
 . $wowArchiveHelperPath
 
 $configDirectory = $null
+$mlCorpusResumeStateFileName = '.ml-corpus-resume-state.json'
 
 function Resolve-ConfigPathValue {
     param(
@@ -64,6 +66,307 @@ function Get-JsonPropertyValue {
     }
 
     return $property.Value
+}
+
+function Get-DatasetJsonFiles {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DatasetOutput
+    )
+
+    $datasetJsonDir = Join-Path $DatasetOutput 'dataset'
+    if (-not (Test-Path $datasetJsonDir)) {
+        return @()
+    }
+
+    return @(
+        Get-ChildItem -Path $datasetJsonDir -Filter '*.json' -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne 'texture_database.json' }
+    )
+}
+
+function Test-DatasetManifestCurrent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DatasetOutput,
+        [Parameter(Mandatory = $true)]
+        [object[]]$DatasetFiles
+    )
+
+    if ($DatasetFiles.Count -eq 0) {
+        return $false
+    }
+
+    $manifestPath = Join-Path $DatasetOutput 'ml_dataset_manifest.json'
+    if (-not (Test-Path $manifestPath)) {
+        return $false
+    }
+
+    try {
+        $manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
+    }
+    catch {
+        return $false
+    }
+
+    $coverage = Get-JsonPropertyValue -Object $manifest -Name 'coverage'
+    if ($null -eq $coverage) {
+        return $false
+    }
+
+    $tilesProcessed = Get-JsonPropertyValue -Object $coverage -Name 'tiles_processed'
+    if ($null -eq $tilesProcessed) {
+        return $false
+    }
+
+    if ([int]$tilesProcessed -ne $DatasetFiles.Count) {
+        return $false
+    }
+
+    $manifestWriteTimeUtc = (Get-Item -LiteralPath $manifestPath).LastWriteTimeUtc
+    $latestDatasetWriteTimeUtc = ($DatasetFiles | Measure-Object -Property LastWriteTimeUtc -Maximum).Maximum
+    return $manifestWriteTimeUtc -ge $latestDatasetWriteTimeUtc
+}
+
+function Read-ResumeState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DatasetOutput
+    )
+
+    $statePath = Join-Path $DatasetOutput $mlCorpusResumeStateFileName
+    if (-not (Test-Path $statePath)) {
+        return $null
+    }
+
+    try {
+        return Get-Content -Raw -Path $statePath | ConvertFrom-Json
+    }
+    catch {
+        return $null
+    }
+}
+
+function Test-ResumeStateMatches {
+    param(
+        [AllowNull()]
+        [object]$State,
+        [Parameter(Mandatory = $true)]
+        [string]$ClientLabel,
+        [Parameter(Mandatory = $true)]
+        [string]$ClientVersion,
+        [Parameter(Mandatory = $true)]
+        [string]$Map,
+        [Parameter(Mandatory = $true)]
+        [bool]$GenerateDepth,
+        [AllowNull()]
+        [int]$TileLimit,
+        [Parameter(Mandatory = $true)]
+        [bool]$InterestingOnly,
+        [Parameter(Mandatory = $true)]
+        [int]$InterestingMinScore,
+        [Parameter(Mandatory = $true)]
+        [bool]$SkipDerivedAssets,
+        [AllowNull()]
+        [string]$MinimapRoot
+    )
+
+    if ($null -eq $State) {
+        return $false
+    }
+
+    $stateSchemaVersion = [string](Get-JsonPropertyValue -Object $State -Name 'schema_version')
+    if ($stateSchemaVersion -ne 'ml-corpus-resume-state.v1') {
+        return $false
+    }
+
+    $stateTileLimitValue = Get-JsonPropertyValue -Object $State -Name 'tile_limit'
+    $stateTileLimit = if ($null -eq $stateTileLimitValue) { $null } else { [int]$stateTileLimitValue }
+
+    $stateMinimapRootValue = Get-JsonPropertyValue -Object $State -Name 'minimap_root'
+    $stateMinimapRoot = if ([string]::IsNullOrWhiteSpace([string]$stateMinimapRootValue)) { $null } else { [string]$stateMinimapRootValue }
+
+    return [string]::Equals([string](Get-JsonPropertyValue -Object $State -Name 'client_label'), $ClientLabel, [System.StringComparison]::OrdinalIgnoreCase) -and
+        [string]::Equals([string](Get-JsonPropertyValue -Object $State -Name 'client_version'), $ClientVersion, [System.StringComparison]::OrdinalIgnoreCase) -and
+        [string]::Equals([string](Get-JsonPropertyValue -Object $State -Name 'map_name'), $Map, [System.StringComparison]::OrdinalIgnoreCase) -and
+        ([bool](Get-JsonPropertyValue -Object $State -Name 'generate_depth') -eq $GenerateDepth) -and
+        (($null -eq $stateTileLimit -and $null -eq $TileLimit) -or ($null -ne $stateTileLimit -and $null -ne $TileLimit -and $stateTileLimit -eq $TileLimit)) -and
+        ([bool](Get-JsonPropertyValue -Object $State -Name 'interesting_only') -eq $InterestingOnly) -and
+        ([int](Get-JsonPropertyValue -Object $State -Name 'interesting_min_score') -eq $InterestingMinScore) -and
+        ([bool](Get-JsonPropertyValue -Object $State -Name 'skip_derived_assets') -eq $SkipDerivedAssets) -and
+        [string]::Equals($stateMinimapRoot, $MinimapRoot, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Write-ResumeState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DatasetOutput,
+        [Parameter(Mandatory = $true)]
+        [string]$ClientLabel,
+        [Parameter(Mandatory = $true)]
+        [string]$ClientVersion,
+        [Parameter(Mandatory = $true)]
+        [string]$Map,
+        [Parameter(Mandatory = $true)]
+        [bool]$HarvestRequested,
+        [Parameter(Mandatory = $true)]
+        [bool]$ExportCompleted,
+        [Parameter(Mandatory = $true)]
+        [bool]$HarvestCompleted,
+        [Parameter(Mandatory = $true)]
+        [bool]$GenerateDepth,
+        [AllowNull()]
+        [int]$TileLimit,
+        [Parameter(Mandatory = $true)]
+        [bool]$InterestingOnly,
+        [Parameter(Mandatory = $true)]
+        [int]$InterestingMinScore,
+        [Parameter(Mandatory = $true)]
+        [bool]$SkipDerivedAssets,
+        [AllowNull()]
+        [string]$MinimapRoot,
+        [Parameter(Mandatory = $true)]
+        [int]$TileJsonCount
+    )
+
+    if ($DryRun) {
+        return
+    }
+
+    $statePath = Join-Path $DatasetOutput $mlCorpusResumeStateFileName
+    $state = [ordered]@{
+        schema_version = 'ml-corpus-resume-state.v1'
+        client_label = $ClientLabel
+        client_version = $ClientVersion
+        map_name = $Map
+        harvest_requested = $HarvestRequested
+        export_completed = $ExportCompleted
+        harvest_completed = $HarvestCompleted
+        generate_depth = $GenerateDepth
+        tile_limit = $TileLimit
+        interesting_only = $InterestingOnly
+        interesting_min_score = $InterestingMinScore
+        skip_derived_assets = $SkipDerivedAssets
+        minimap_root = $MinimapRoot
+        tile_json_count = $TileJsonCount
+        updated_at_utc = [DateTime]::UtcNow.ToString('o')
+    }
+
+    $state | ConvertTo-Json -Depth 4 | Set-Content -Path $statePath -Encoding UTF8
+}
+
+function Get-ResumeDecision {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DatasetOutput,
+        [Parameter(Mandatory = $true)]
+        [string]$ClientLabel,
+        [Parameter(Mandatory = $true)]
+        [string]$ClientVersion,
+        [Parameter(Mandatory = $true)]
+        [string]$Map,
+        [Parameter(Mandatory = $true)]
+        [bool]$HarvestRequested,
+        [Parameter(Mandatory = $true)]
+        [bool]$GenerateDepth,
+        [AllowNull()]
+        [int]$TileLimit,
+        [Parameter(Mandatory = $true)]
+        [bool]$InterestingOnly,
+        [Parameter(Mandatory = $true)]
+        [int]$InterestingMinScore,
+        [Parameter(Mandatory = $true)]
+        [bool]$SkipDerivedAssets,
+        [AllowNull()]
+        [string]$MinimapRoot
+    )
+
+    $datasetFiles = @(Get-DatasetJsonFiles -DatasetOutput $DatasetOutput)
+    $datasetTileCount = $datasetFiles.Count
+    $manifestCurrent = Test-DatasetManifestCurrent -DatasetOutput $DatasetOutput -DatasetFiles $datasetFiles
+    $state = Read-ResumeState -DatasetOutput $DatasetOutput
+    $stateMatches = Test-ResumeStateMatches -State $state -ClientLabel $ClientLabel -ClientVersion $ClientVersion -Map $Map -GenerateDepth $GenerateDepth -TileLimit $TileLimit -InterestingOnly $InterestingOnly -InterestingMinScore $InterestingMinScore -SkipDerivedAssets $SkipDerivedAssets -MinimapRoot $MinimapRoot
+    $stateExportCompleted = $stateMatches -and [bool](Get-JsonPropertyValue -Object $state -Name 'export_completed')
+    $stateHarvestCompleted = $stateMatches -and [bool](Get-JsonPropertyValue -Object $state -Name 'harvest_completed')
+
+    if ($stateExportCompleted) {
+        if (-not $HarvestRequested) {
+            return [pscustomobject]@{ Kind = 'skip-all'; Reason = 'resume state already marks export complete for the same job settings'; DatasetTileCount = $datasetTileCount }
+        }
+
+        if ($stateHarvestCompleted -and $manifestCurrent) {
+            return [pscustomobject]@{ Kind = 'skip-all'; Reason = 'resume state and manifest already mark this map complete'; DatasetTileCount = $datasetTileCount }
+        }
+
+        return [pscustomobject]@{ Kind = 'run-harvest-only'; Reason = 'resume state marks export complete but harvest metadata is missing or stale'; DatasetTileCount = $datasetTileCount }
+    }
+
+    if ($manifestCurrent) {
+        return [pscustomobject]@{ Kind = 'skip-all'; Reason = 'existing manifest is current for this dataset root'; DatasetTileCount = $datasetTileCount }
+    }
+
+    return [pscustomobject]@{ Kind = 'run-export'; Reason = 'no matching completion state was found'; DatasetTileCount = $datasetTileCount }
+}
+
+function Get-JobPlanAction {
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool]$ResumeEnabled,
+        [Parameter(Mandatory = $true)]
+        [string]$DatasetOutput,
+        [Parameter(Mandatory = $true)]
+        [string]$ClientLabel,
+        [Parameter(Mandatory = $true)]
+        [string]$ClientVersion,
+        [Parameter(Mandatory = $true)]
+        [string]$Map,
+        [Parameter(Mandatory = $true)]
+        [bool]$HarvestRequested,
+        [Parameter(Mandatory = $true)]
+        [bool]$GenerateDepth,
+        [AllowNull()]
+        [int]$TileLimit,
+        [Parameter(Mandatory = $true)]
+        [bool]$InterestingOnly,
+        [Parameter(Mandatory = $true)]
+        [int]$InterestingMinScore,
+        [Parameter(Mandatory = $true)]
+        [bool]$SkipDerivedAssets,
+        [AllowNull()]
+        [string]$MinimapRoot
+    )
+
+    if (-not $ResumeEnabled) {
+        return [pscustomobject]@{ Kind = 'run-export'; Reason = 'force requested; resume bypassed' }
+    }
+
+    return Get-ResumeDecision -DatasetOutput $DatasetOutput -ClientLabel $ClientLabel -ClientVersion $ClientVersion -Map $Map -HarvestRequested $HarvestRequested -GenerateDepth $GenerateDepth -TileLimit $TileLimit -InterestingOnly $InterestingOnly -InterestingMinScore $InterestingMinScore -SkipDerivedAssets $SkipDerivedAssets -MinimapRoot $MinimapRoot
+}
+
+function Write-JobPlanSummary {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$JobPlans,
+        [Parameter(Mandatory = $true)]
+        [bool]$ResumeEnabled,
+        [Parameter(Mandatory = $true)]
+        [bool]$HarvestRequested,
+        [Parameter(Mandatory = $true)]
+        [bool]$ForceRequested
+    )
+
+    $skipCount = @($JobPlans | Where-Object { $_.Action -eq 'skip-all' }).Count
+    $harvestOnlyCount = @($JobPlans | Where-Object { $_.Action -eq 'run-harvest-only' }).Count
+    $fullExportCount = @($JobPlans | Where-Object { $_.Action -eq 'run-export' }).Count
+
+    Write-Host "ML corpus preflight summary:" -ForegroundColor Yellow
+    Write-Host ("  total map jobs : {0}" -f $JobPlans.Count) -ForegroundColor DarkYellow
+    Write-Host ("  skip complete  : {0}" -f $skipCount) -ForegroundColor DarkYellow
+    Write-Host ("  harvest-only   : {0}" -f $harvestOnlyCount) -ForegroundColor DarkYellow
+    Write-Host ("  full export    : {0}" -f $fullExportCount) -ForegroundColor DarkYellow
+    Write-Host ("  resume enabled : {0}" -f $ResumeEnabled) -ForegroundColor DarkYellow
+    Write-Host ("  harvest after  : {0}" -f $HarvestRequested) -ForegroundColor DarkYellow
+    Write-Host ("  force requested: {0}" -f $ForceRequested) -ForegroundColor DarkYellow
 }
 
 function Resolve-ConfiguredWorkingRoot {
@@ -219,7 +522,7 @@ function Resolve-ClientMapList {
 
         Write-Host $commandText -ForegroundColor Cyan
         if ($DryRun) {
-            return @()
+            return ,@()
         }
 
         & dotnet @args
@@ -233,19 +536,19 @@ function Resolve-ClientMapList {
 
         $json = Get-Content -Raw -Path $tmpJson
         if ([string]::IsNullOrWhiteSpace($json)) {
-            return @()
+            return ,@()
         }
 
         $parsed = $json | ConvertFrom-Json
         if ($parsed -is [System.Array]) {
-            return @($parsed | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            return ,@($parsed | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         }
 
         if ($null -eq $parsed) {
-            return @()
+            return ,@()
         }
 
-        return @([string]$parsed)
+        return ,@([string]$parsed)
     }
     finally {
         if (Test-Path $tmpJson) {
@@ -287,6 +590,7 @@ $harvestConfigured = if ($null -ne $configHarvestAfterExport) { [bool]$configHar
 $harvestAfterExport = -not $SkipHarvest -and $harvestConfigured
 $pruneConfigured = if ($null -ne $configPruneStagedClients) { [bool]$configPruneStagedClients } else { $false }
 $shouldPruneStagedClients = $PruneStagedClients -or $pruneConfigured
+$resumeEnabled = -not $Force
 $runMinimalCurationAfterExport = if ($null -ne $configRunMinimalCurationAfterExport) { [bool]$configRunMinimalCurationAfterExport } else { $false }
 $resolvedMinimalCurationOutput = if ($configMinimalCurationOutput) { Resolve-ConfigPathValue -Value ([string]$configMinimalCurationOutput) -BaseRoot $null } else { $null }
 $resolvedMinimalCurationPlanOutput = if ($configMinimalCurationPlanOutput) { Resolve-ConfigPathValue -Value ([string]$configMinimalCurationPlanOutput) -BaseRoot $null } else { $null }
@@ -297,6 +601,7 @@ if (-not $DryRun) {
 }
 
 $jobFailures = 0
+$jobPlans = @()
 $stagedLabelsToKeep = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
 foreach ($client in $config.clients) {
@@ -377,95 +682,133 @@ foreach ($client in $config.clients) {
 
     foreach ($map in $mapsToProcess) {
         $datasetOutput = Join-Path $clientOutputRoot $map
-        $datasetJsonDir = Join-Path $datasetOutput 'dataset'
+        $clientGenerateDepthEnabled = $null -ne $clientGenerateDepth -and [bool]$clientGenerateDepth
+        $clientTileLimit = if ($null -ne $clientTileLimitValue) { [int]$clientTileLimitValue } else { $null }
+        $clientInterestingOnly = $null -ne $clientInterestingOnlyValue -and [bool]$clientInterestingOnlyValue
+        $clientInterestingMinScore = if ($null -ne $clientInterestingMinScoreValue) { [int]$clientInterestingMinScoreValue } else { 1 }
+        $clientSkipDerivedAssetsEnabled = $null -ne $clientSkipDerivedAssets -and [bool]$clientSkipDerivedAssets
 
-        if ($Force -and (Test-Path $datasetOutput)) {
-            Write-Host "Clearing existing export output: $datasetOutput" -ForegroundColor DarkYellow
-            if (-not $DryRun) {
-                Remove-Item -Path $datasetOutput -Recurse -Force
-            }
+        $jobDecision = Get-JobPlanAction -ResumeEnabled $resumeEnabled -DatasetOutput $datasetOutput -ClientLabel $clientLabel -ClientVersion ([string]$client.version) -Map ([string]$map) -HarvestRequested $harvestAfterExport -GenerateDepth $clientGenerateDepthEnabled -TileLimit $clientTileLimit -InterestingOnly $clientInterestingOnly -InterestingMinScore $clientInterestingMinScore -SkipDerivedAssets $clientSkipDerivedAssetsEnabled -MinimapRoot $resolvedMinimapRoot
+
+        $jobPlans += [pscustomobject]@{
+            ClientLabel = $clientLabel
+            ClientVersion = [string]$client.version
+            ResolvedClientPath = $resolvedClientPath
+            ClientRootInfo = $clientRootInfo
+            ResolvedMinimapRoot = $resolvedMinimapRoot
+            MinimapRootInfo = $minimapRootInfo
+            DatasetOutput = $datasetOutput
+            DatasetJsonDir = (Join-Path $datasetOutput 'dataset')
+            Map = [string]$map
+            GenerateDepth = $clientGenerateDepthEnabled
+            TileLimit = $clientTileLimit
+            InterestingOnly = $clientInterestingOnly
+            InterestingMinScore = $clientInterestingMinScore
+            SkipDerivedAssets = $clientSkipDerivedAssetsEnabled
+            Action = [string]$jobDecision.Kind
+            ActionReason = [string]$jobDecision.Reason
         }
+    }
+}
 
-        # Re-export every targeted map so partial datasets cannot be preserved just because a dataset/ folder exists.
+Write-JobPlanSummary -JobPlans $jobPlans -ResumeEnabled $resumeEnabled -HarvestRequested $harvestAfterExport -ForceRequested $Force
+
+foreach ($job in $jobPlans) {
+    if ($job.Action -eq 'skip-all') {
+        Write-Host ("Resume skip for {0}/{1}: {2}" -f $job.ClientLabel, $job.Map, $job.ActionReason) -ForegroundColor DarkGreen
+        continue
+    }
+
+    if ($Force -and (Test-Path $job.DatasetOutput)) {
+        Write-Host "Clearing existing export output: $($job.DatasetOutput)" -ForegroundColor DarkYellow
+        if (-not $DryRun) {
+            Remove-Item -Path $job.DatasetOutput -Recurse -Force
+        }
+    }
+
+    if ($job.Action -eq 'run-harvest-only') {
+        Write-Host ("Resume export skip for {0}/{1}: {2}" -f $job.ClientLabel, $job.Map, $job.ActionReason) -ForegroundColor DarkGreen
+    }
+
+    if ($job.Action -eq 'run-export') {
         $exportArgs = @(
             'run',
             '--project', $ProjectPath,
             '--configuration', $Configuration,
             '--',
             'ml-export',
-            '--client', $resolvedClientPath,
-            '--map', [string]$map,
-            '--out', $datasetOutput,
+            '--client', $job.ResolvedClientPath,
+            '--map', $job.Map,
+            '--out', $job.DatasetOutput,
             '--listfile', $resolvedListfilePath
         )
 
-        if (-not [string]::IsNullOrWhiteSpace($resolvedMinimapRoot)) {
-            $exportArgs += @('--minimap-root', $resolvedMinimapRoot)
+        if (-not [string]::IsNullOrWhiteSpace($job.ResolvedMinimapRoot)) {
+            $exportArgs += @('--minimap-root', $job.ResolvedMinimapRoot)
         }
 
-        if ($null -ne $clientGenerateDepth -and [bool]$clientGenerateDepth) {
+        if ($job.GenerateDepth) {
             $exportArgs += '--depth'
         }
 
-        if ($null -ne $clientTileLimitValue) {
-            $clientTileLimit = [int]$clientTileLimitValue
-            if ($clientTileLimit -gt 0) {
-                $exportArgs += @('--limit', [string]$clientTileLimit)
-            }
+        if ($null -ne $job.TileLimit -and $job.TileLimit -gt 0) {
+            $exportArgs += @('--limit', [string]$job.TileLimit)
         }
 
-        if ($null -ne $clientInterestingOnlyValue -and [bool]$clientInterestingOnlyValue) {
+        if ($job.InterestingOnly) {
             $exportArgs += '--interesting-only'
         }
 
-        if ($null -ne $clientInterestingMinScoreValue) {
-            $exportArgs += @('--interesting-min-score', [string]([int]$clientInterestingMinScoreValue))
-        }
+        $exportArgs += @('--interesting-min-score', [string]$job.InterestingMinScore)
 
-        if ($null -ne $clientSkipDerivedAssets -and [bool]$clientSkipDerivedAssets) {
+        if ($job.SkipDerivedAssets) {
             $exportArgs += '--skip-derived-assets'
         }
 
         try {
             Invoke-LoggedCommand -Arguments $exportArgs
+            $datasetTileCountAfterExport = (Get-DatasetJsonFiles -DatasetOutput $job.DatasetOutput).Count
+            Write-ResumeState -DatasetOutput $job.DatasetOutput -ClientLabel $job.ClientLabel -ClientVersion $job.ClientVersion -Map $job.Map -HarvestRequested $harvestAfterExport -ExportCompleted $true -HarvestCompleted $false -GenerateDepth $job.GenerateDepth -TileLimit $job.TileLimit -InterestingOnly $job.InterestingOnly -InterestingMinScore $job.InterestingMinScore -SkipDerivedAssets $job.SkipDerivedAssets -MinimapRoot $job.ResolvedMinimapRoot -TileJsonCount $datasetTileCountAfterExport
         }
         catch {
-            Write-Warning ("Export failed for {0}/{1}: {2}" -f $clientLabel, $map, $_.Exception.Message)
+            Write-Warning ("Export failed for {0}/{1}: {2}" -f $job.ClientLabel, $job.Map, $_.Exception.Message)
             $jobFailures++
             continue
         }
+    }
 
-        if ($harvestAfterExport) {
-            $datasetFiles = @()
-            if (Test-Path $datasetJsonDir) {
-                $datasetFiles = @(Get-ChildItem -Path $datasetJsonDir -Filter '*.json' -File -ErrorAction SilentlyContinue)
-            }
+    if ($harvestAfterExport) {
+        $datasetFiles = @(Get-DatasetJsonFiles -DatasetOutput $job.DatasetOutput)
 
-            if ($datasetFiles.Count -eq 0) {
-                Write-Warning "Skipping harvest for $datasetOutput because no tile JSON files were found under $datasetJsonDir."
-                continue
-            }
-
-            $manifestPath = Join-Path $datasetOutput 'ml_dataset_manifest.json'
-            $harvestArgs = @(
-                'run',
-                '--project', $ProjectPath,
-                '--configuration', $Configuration,
-                '--',
-                'ml-harvest',
-                '--dataset', $datasetOutput,
-                '--output', $manifestPath
-            )
-
-            try {
-                Invoke-LoggedCommand -Arguments $harvestArgs
-            }
-            catch {
-                Write-Warning ("Harvest failed for {0}/{1}: {2}" -f $clientLabel, $map, $_.Exception.Message)
-                $jobFailures++
-                continue
-            }
+        if ($datasetFiles.Count -eq 0) {
+            Write-Warning "Skipping harvest for $($job.DatasetOutput) because no tile JSON files were found under $($job.DatasetJsonDir)."
+            continue
         }
+
+        $manifestPath = Join-Path $job.DatasetOutput 'ml_dataset_manifest.json'
+        $harvestArgs = @(
+            'run',
+            '--project', $ProjectPath,
+            '--configuration', $Configuration,
+            '--',
+            'ml-harvest',
+            '--dataset', $job.DatasetOutput,
+            '--output', $manifestPath
+        )
+
+        try {
+            Invoke-LoggedCommand -Arguments $harvestArgs
+            Write-ResumeState -DatasetOutput $job.DatasetOutput -ClientLabel $job.ClientLabel -ClientVersion $job.ClientVersion -Map $job.Map -HarvestRequested $harvestAfterExport -ExportCompleted $true -HarvestCompleted $true -GenerateDepth $job.GenerateDepth -TileLimit $job.TileLimit -InterestingOnly $job.InterestingOnly -InterestingMinScore $job.InterestingMinScore -SkipDerivedAssets $job.SkipDerivedAssets -MinimapRoot $job.ResolvedMinimapRoot -TileJsonCount $datasetFiles.Count
+        }
+        catch {
+            Write-Warning ("Harvest failed for {0}/{1}: {2}" -f $job.ClientLabel, $job.Map, $_.Exception.Message)
+            $jobFailures++
+            continue
+        }
+    }
+    elseif ($job.Action -eq 'run-export') {
+        $datasetTileCount = (Get-DatasetJsonFiles -DatasetOutput $job.DatasetOutput).Count
+        Write-ResumeState -DatasetOutput $job.DatasetOutput -ClientLabel $job.ClientLabel -ClientVersion $job.ClientVersion -Map $job.Map -HarvestRequested $harvestAfterExport -ExportCompleted $true -HarvestCompleted $false -GenerateDepth $job.GenerateDepth -TileLimit $job.TileLimit -InterestingOnly $job.InterestingOnly -InterestingMinScore $job.InterestingMinScore -SkipDerivedAssets $job.SkipDerivedAssets -MinimapRoot $job.ResolvedMinimapRoot -TileJsonCount $datasetTileCount
     }
 }
 

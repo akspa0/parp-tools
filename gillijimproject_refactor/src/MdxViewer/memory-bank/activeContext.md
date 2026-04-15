@@ -1,5 +1,54 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 15, 2026 - Successful M2 runtime loads now stay on the runtime draw path instead of silently dropping back into the legacy MDX renderer
+
+- followed the continued live M2 regression report after the user showed that standalone `DraeneiFemale.m2` was still rendering through the UI path labeled `wow-viewer runtime + legacy draw backend`
+- root cause confirmed in code:
+   - standalone load in `ViewerApp.cs`, world M2 load in `Terrain/WorldAssetManager.cs`, and WMO doodad M2 load in `Rendering/WmoRenderer.cs` were all doing the same thing on successful `.skin` resolution: build a `M2StaticRenderModel`, then also build an adapted `MdxFile`, then hand the renderer to `new M2Renderer(new MdxRenderer(...), runtimeModel, ...)`
+   - inside `Rendering/M2Renderer.cs`, every render entry point short-circuits to `_legacyRenderer` when that compatibility constructor is used, so the runtime model was feeding stats and metadata while the actual draw path still ran through the old MDX compatibility pipeline
+- active `src/MdxViewer` behavior after this slice:
+   - successful runtime-backed M2 loads now stay on `new M2Renderer(_gl, runtimeModel, ...)` in:
+      - standalone viewer M2 loading
+      - streamed world M2 loading
+      - WMO doodad M2 loading
+   - the legacy adapted-MDX path is still present only as an explicit fallback when runtime loading cannot proceed, such as root-profile or converted fallback cases
+- validation completed:
+   - `get_errors` returned clean for `ViewerApp.cs`, `Terrain/WorldAssetManager.cs`, and `Rendering/WmoRenderer.cs`
+   - isolated build validation passed with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir="i:/parp/parp-tools/output/build-validation/m2-runtime-cutover/"`
+- important boundary:
+   - this slice removes the accidental runtime-to-MDX reconvergence for successful loads, but it does not yet deliver full textured-material parity in the pure runtime renderer; current runtime shading is still a simplified flat or tinted surface path
+   - no fresh live viewer screenshot or real runtime capture has been recorded yet after this cutover, so this is compile-validated routing correction, not final visual signoff
+
+## Apr 15, 2026 - World transparent ordering now separates WMO opaque and WMO transparent work, and adapted M2 skinning is opt-in again
+
+- followed the next live runtime regression after the adapted-M2 geometry blow-up screenshot and the later report that render order was visibly wrong across both WMOs and M2-family objects
+- active `src/MdxViewer` behavior after this slice:
+   - `Rendering/ModelRenderer.cs` no longer enables adapted M2 skeletal animation by default; compatibility skinning uploads now stay off unless `PARP_M2_ENABLE_ANIMATION=1` is set explicitly
+   - `Rendering/WmoRenderer.cs` now supports an explicit `WmoRenderPass` split so world rendering can request `Opaque` or `Transparent` instead of always running the full WMO shell+doodad+liquid stack in one call
+   - `Terrain/WorldScene.cs` now sends visible WMO instances through `WmoRenderPass.Opaque` during the opaque world stage and moves WMO transparent shell/liquid/doodad-transparent work into the later world transparent stage
+   - that later world transparent stage now sorts visible WMOs together with visible transparent MDX instances back-to-front before rendering, instead of letting WMO transparency bypass the shared world ordering path
+- validation completed:
+   - `get_errors` returned clean for `WmoRenderer.cs`, `WorldScene.cs`, and `ModelRenderer.cs`
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` succeeded with existing workspace warnings only
+- important boundary:
+   - no live post-fix viewer capture has been recorded yet for this ordering fix in the current chat
+   - the broader solution build still has an unrelated `AlphaWdtAnalyzer.Core` deps-file problem; use the targeted `MdxViewer.csproj` build as the proof point for this slice
+
+## Apr 15, 2026 - MCCV terrain tint no longer ignores alpha-neutral regions
+
+- followed a live viewer regression report that MCCV was still rendering wrong after the earlier BGRA + mid-gray semantic correction
+- active `src/MdxViewer` behavior after this slice:
+   - `TerrainRenderer` no longer applies MCCV as a blind `clamp(vVertexColor.rgb * 2.0, 0.0, 2.0)` multiply with alpha ignored
+   - the terrain shader now treats RGB as the tint color around mid-gray and uses vertex alpha as the tint-strength gate, so transparent or low-alpha MCCV regions stay neutral instead of darkening terrain toward black
+   - converter-side `VlmMinimapCleanupService.RemoveMccvTint(...)` now mirrors that same alpha-gated tint model so `no_mccv_minimap` cleanup stays aligned with the active viewer path
+- validation completed:
+   - `dotnet test i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core.Tests/WoWMapConverter.Core.Tests.csproj -c Debug --filter VlmMinimapCleanupServiceTests` passed with the new alpha-neutral regression cases
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` succeeded with existing workspace warnings only
+- important boundary:
+   - no real-data viewer screenshot or runtime capture has been recorded yet for this MCCV alpha-gating fix in the current chat
+   - do not interrupt the current dataset harvest to chase viewer parity right now; the user wants the `3.3.5` harvest to finish first, then the `4.0.0` pass, and only after that should bounded `MdxViewer` MCCV validation/fix-up resume
+   - when that validation resumes, scope it to `3.0.1+` client roots because pre-`3.0.1` formats do not carry MCCV data
+
 ## Apr 10, 2026 - Validation minimaps now use orthographic top-down rendering during active capture batches
 
 - followed the user repro that live `MdxViewer` validation minimaps were still offset from the source tile borders after the earlier settle or doodad or WL fixes

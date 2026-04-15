@@ -424,6 +424,15 @@ internal static class WarcraftNetM2Adapter
                 blendMode = model.RenderFlags[batch.MaterialIndex].BlendingMode;
             }
 
+            int textureId = ResolveTextureId(model, batch.TextureComboIndex, preferDirectTextureIndices);
+            var textureFlags = (textureId >= 0 && textureId < model.Textures.Count)
+                ? model.Textures[textureId].Flags
+                : 0;
+            string texturePath = (textureId >= 0 && textureId < model.Textures.Count)
+                ? model.Textures[textureId].Filename
+                : string.Empty;
+            int coordId = ResolveTextureCoordId(model, batch.TextureCoordComboIndex);
+
             if (!batchMaterialIdsBySection.TryGetValue(batch.SkinSectionIndex, out List<int>? materialIdsForSection))
             {
                 materialIdsForSection = new List<int>();
@@ -450,43 +459,29 @@ internal static class WarcraftNetM2Adapter
                     sectionMaterialIds[batch.SkinSectionIndex] = materialId;
             }
 
-            int textureLayerCount = Math.Max(1, batch.TextureCount);
-            for (int textureLayerIndex = 0; textureLayerIndex < textureLayerCount; textureLayerIndex++)
+            material.Layers.Add(new MdlTexLayer
             {
-                int textureLookupIndex = batch.TextureComboIndex + textureLayerIndex;
-                int textureId = ResolveTextureId(model, textureLookupIndex, preferDirectTextureIndices);
-                var textureFlags = (textureId >= 0 && textureId < model.Textures.Count)
-                    ? model.Textures[textureId].Flags
-                    : 0;
-                string texturePath = (textureId >= 0 && textureId < model.Textures.Count)
-                    ? model.Textures[textureId].Filename
-                    : string.Empty;
-                int coordId = ResolveTextureCoordId(model, batch.TextureCoordComboIndex + textureLayerIndex);
+                BlendMode = MapBlendMode(blendMode),
+                TextureId = textureId,
+                CoordId = coordId,
+                TransformId = -1,
+                StaticAlpha = 1.0f,
+                StaticColor = new C3Color(1.0f, 1.0f, 1.0f),
+                StaticColorAlpha = 1.0f,
+                Flags = MapLayerFlags(renderFlagBits, textureFlags, 0),
+            });
 
-                material.Layers.Add(new MdlTexLayer
-                {
-                    BlendMode = textureLayerIndex == 0 ? MapBlendMode(blendMode) : MdlTexOp.Modulate,
-                    TextureId = textureId,
-                    CoordId = coordId,
-                    TransformId = -1,
-                    StaticAlpha = 1.0f,
-                    StaticColor = new C3Color(1.0f, 1.0f, 1.0f),
-                    StaticColorAlpha = 1.0f,
-                    Flags = MapLayerFlags(renderFlagBits, textureFlags, 0),
-                });
+            ApplyLayerAnimationMetadata(
+                material.Layers[^1],
+                mdx,
+                model,
+                batch.ColorIndex,
+                batch.TransparencyComboIndex,
+                batch.TextureAnimationLookupIndex);
 
-                ApplyLayerAnimationMetadata(
-                    material.Layers[^1],
-                    mdx,
-                    model,
-                    batch.ColorIndex,
-                    batch.TransparencyComboIndex + textureLayerIndex,
-                    batch.TextureAnimationLookupIndex + textureLayerIndex);
-
-                ViewerLog.Debug(
-                    ViewerLog.Category.Mdx,
-                    $"[M2-BATCH] {modelName} section={batch.SkinSectionIndex} materialLayer={batch.MaterialLayer} priority={batch.PriorityPlane} materialIndex={batch.MaterialIndex} textureComboIndex={batch.TextureComboIndex} lookupIndex={textureLookupIndex} blend={blendMode} textureId={textureId} coord={coordId} texture='{texturePath}' materialSlot={materialId} textureLayer={textureLayerIndex + 1}/{textureLayerCount} directFallback={(preferDirectTextureIndices ? 1 : 0)} layerCount={material.Layers.Count}");
-            }
+            ViewerLog.Debug(
+                ViewerLog.Category.Mdx,
+                $"[M2-BATCH] {modelName} section={batch.SkinSectionIndex} materialLayer={batch.MaterialLayer} priority={batch.PriorityPlane} materialIndex={batch.MaterialIndex} textureComboIndex={batch.TextureComboIndex} blend={blendMode} textureId={textureId} coord={coordId} texture='{texturePath}' materialSlot={materialId} directFallback={(preferDirectTextureIndices ? 1 : 0)} layerCount={material.Layers.Count}");
         }
 
         return new MaterialAssignmentMap(sectionMaterialIds, batchMaterialIdsBySection);

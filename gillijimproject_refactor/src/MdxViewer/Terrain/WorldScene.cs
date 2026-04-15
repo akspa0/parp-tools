@@ -7958,7 +7958,7 @@ public class WorldScene : ISceneRenderer
                             if (renderer == null)
                                 return;
 
-                            renderer.RenderWithTransform(visible.Instance.Transform, view, proj,
+                            renderer.RenderWithTransform(visible.Instance.Transform, view, proj, WmoRenderPass.Opaque,
                                 fogColor, objectFogStart, objectFogEnd, cameraPos,
                                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                         });
@@ -8040,39 +8040,57 @@ public class WorldScene : ISceneRenderer
                 () =>
                 {
                     // ── PASS 3: TRANSPARENT (back-to-front, frustum-culled) ─────────
-                    // Render transparent/blended layers sorted by distance to camera.
+                    // Render transparent/blended object layers sorted by distance to camera.
                     // Depth test ON but depth write OFF so transparent objects don't
                     // occlude each other incorrectly.
                     frame.MdxTransparentSubmissionMs = MeasureDurationMs(() =>
                     {
-                        batchRenderer?.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
-                            lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-
                         _gl.Enable(EnableCap.DepthTest);
                         _gl.DepthFunc(DepthFunction.Lequal);
 
-                        (frame.TransparentBatchedMdxCount, frame.TransparentUnbatchedMdxCount) =
-                            WorldObjectPassCoordinator.ExecutePlannedTransparentMdx(
-                                frame.ObjectPasses,
-                                frame.Visibility,
-                                visible =>
-                                {
-                                    IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
-                                    if (renderer == null)
-                                        return;
+                        var transparentObjectSort = new List<(bool IsWmo, int Index, float DistanceSq)>(
+                            frame.Visibility.VisibleWmos.Count + frame.ObjectPasses.TransparentVisibleMdxRoutes.Count);
 
-                                    renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Transparent, visible.TransparentFade,
-                                        fogColor, objectFogStart, objectFogEnd, cameraPos,
-                                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-                                },
-                                visible =>
-                                {
-                                    IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
-                                    if (renderer == null)
-                                        return;
+                        for (int i = 0; i < frame.Visibility.VisibleWmos.Count; i++)
+                            transparentObjectSort.Add((true, i, frame.Visibility.VisibleWmos[i].CenterDistanceSq));
 
-                                    renderer.RenderInstance(visible.Instance.Transform, RenderPass.Transparent, visible.TransparentFade);
-                                });
+                        for (int i = 0; i < frame.ObjectPasses.TransparentVisibleMdxRoutes.Count; i++)
+                        {
+                            var route = frame.ObjectPasses.TransparentVisibleMdxRoutes[i];
+                            var visible = frame.Visibility.VisibleMdx[route.VisibleMdxIndex];
+                            transparentObjectSort.Add((false, route.VisibleMdxIndex, visible.CenterDistanceSq));
+                        }
+
+                        transparentObjectSort.Sort((left, right) => right.DistanceSq.CompareTo(left.DistanceSq));
+
+                        frame.TransparentBatchedMdxCount = 0;
+                        frame.TransparentUnbatchedMdxCount = 0;
+
+                        foreach (var entry in transparentObjectSort)
+                        {
+                            if (entry.IsWmo)
+                            {
+                                var visibleWmo = frame.Visibility.VisibleWmos[entry.Index];
+                                WmoRenderer? renderer = ResolveVisibleWmoRenderer(frame, visibleWmo.Instance.ModelKey);
+                                if (renderer == null)
+                                    continue;
+
+                                renderer.RenderWithTransform(visibleWmo.Instance.Transform, view, proj, WmoRenderPass.Transparent,
+                                    fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                continue;
+                            }
+
+                            var visibleMdx = frame.Visibility.VisibleMdx[entry.Index];
+                            IModelRenderer? mdxRenderer = ResolveVisibleMdxRenderer(frame, visibleMdx.Instance.ModelKey);
+                            if (mdxRenderer == null)
+                                continue;
+
+                            mdxRenderer.RenderWithTransform(visibleMdx.Instance.Transform, view, proj, RenderPass.Transparent, visibleMdx.TransparentFade,
+                                fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                            frame.TransparentUnbatchedMdxCount++;
+                        }
                     });
                     if (!_renderDiagPrinted) _renderDiagPrinted = true;
                 },

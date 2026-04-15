@@ -51,13 +51,37 @@ public sealed class VlmMinimapCleanupServiceTests
         Assert.Equal(new Rgba32(104, 153, 161, 255), output[0, 0]);
     }
 
-    private static Image<Rgba32> CreateSolidImage(byte r, byte g, byte b)
+    [Fact]
+    public void RemoveMccvTint_MidGrayAlphaStaysNeutral()
+    {
+        using Image<Rgba32> source = CreateSolidImage(120, 140, 160);
+        using Image<Rgba32> neutral = CreateSolidImage(127, 127, 127, 127);
+
+        byte[] outputBytes = VlmMinimapCleanupService.RemoveMccvTint(source, neutral);
+
+        using Image<Rgba32> output = Image.Load<Rgba32>(outputBytes);
+        Assert.Equal(new Rgba32(120, 140, 160, 255), output[0, 0]);
+    }
+
+    [Fact]
+    public void RemoveMccvTint_TransparentTintDoesNotDarken()
+    {
+        using Image<Rgba32> source = CreateSolidImage(120, 140, 160);
+        using Image<Rgba32> transparent = CreateSolidImage(0, 0, 255, 0);
+
+        byte[] outputBytes = VlmMinimapCleanupService.RemoveMccvTint(source, transparent);
+
+        using Image<Rgba32> output = Image.Load<Rgba32>(outputBytes);
+        Assert.Equal(new Rgba32(120, 140, 160, 255), output[0, 0]);
+    }
+
+    private static Image<Rgba32> CreateSolidImage(byte r, byte g, byte b, byte a = 255)
     {
         Image<Rgba32> image = new(4, 4);
         for (int y = 0; y < image.Height; y++)
         {
             for (int x = 0; x < image.Width; x++)
-                image[x, y] = new Rgba32(r, g, b, 255);
+                image[x, y] = new Rgba32(r, g, b, a);
         }
 
         return image;

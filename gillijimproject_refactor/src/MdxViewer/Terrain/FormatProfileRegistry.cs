@@ -384,7 +384,7 @@ public static class FormatProfileRegistry
     {
         ProfileId = "M2Profile_335_12340",
         RequiredRootMagic = ModelRootMagic.MD20,
-        AllowMd21Container = true,
+            AllowMd21Container = true,
         MinSupportedVersion = 0x108,
         MaxSupportedVersion = 0x108,
         UseTypedOffsetCountTable = true,

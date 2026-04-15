@@ -20,6 +20,13 @@ public readonly record struct WmoDoodadInfo(
     bool Visible,
     bool IsLoaded);
 
+public enum WmoRenderPass
+{
+    Both,
+    Opaque,
+    Transparent,
+}
+
 /// <summary>
 /// Renders a WMO (World Map Object) using OpenGL.
 /// Uses WoWMapConverter.Core's WmoV14Data model for geometry.
@@ -429,7 +436,7 @@ public class WmoRenderer : ISceneRenderer
 
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj)
     {
-        RenderWithTransform(Matrix4x4.Identity, view, proj);
+        RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Both);
     }
 
     private int GetBaselineMliqRotationQuarterTurns()
@@ -444,9 +451,24 @@ public class WmoRenderer : ISceneRenderer
         Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
         Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
     {
+        RenderWithTransform(modelMatrix, view, proj, WmoRenderPass.Both,
+            fogColor, fogStart, fogEnd, cameraPos,
+            lightDir, lightColor, ambientColor);
+    }
+
+    /// <summary>
+    /// Render this WMO with a custom world transform (for placed WMO instances in WorldScene).
+    /// </summary>
+    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, WmoRenderPass pass,
+        Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
+        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
+    {
         ProcessDeferredMaterialTextureLoads();
         EnsureLiquidMeshesUpToDate();
         ProcessDeferredDoodadLoads();
+
+        bool renderOpaquePass = pass != WmoRenderPass.Transparent;
+        bool renderTransparentPass = pass != WmoRenderPass.Opaque;
 
         // WMO render order: opaque shell → doodad opaque → liquids → doodad transparent → transparent shell.
         _gl.UseProgram(_shaderProgram);
@@ -481,48 +503,51 @@ public class WmoRenderer : ISceneRenderer
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
 
         // Pass 1: Opaque geometry (BlendMode 0) — depth write ON, no blending
-        _gl.Enable(EnableCap.DepthTest);
-        _gl.DepthMask(true);
-        _gl.Disable(EnableCap.Blend);
-        _gl.Uniform1(_uAlphaTest, 0.0f);
-
-        foreach (var gb in _groups)
+        if (renderOpaquePass)
         {
-            if (!gb.IsVisible) continue;
-            var group = _wmo.Groups[gb.GroupIndex];
-            _gl.BindVertexArray(gb.Vao);
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthMask(true);
+            _gl.Disable(EnableCap.Blend);
+            _gl.Uniform1(_uAlphaTest, 0.0f);
 
-            if (group.Batches.Count > 0)
+            foreach (var gb in _groups)
             {
-                foreach (var batch in group.Batches)
+                if (!gb.IsVisible) continue;
+                var group = _wmo.Groups[gb.GroupIndex];
+                _gl.BindVertexArray(gb.Vao);
+
+                if (group.Batches.Count > 0)
                 {
-                    int matId = ResolveBatchMaterialId(group, batch);
-                    uint rawBlendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
-                    EGxBlend blendMode = ResolveWmoBlendMode(rawBlendMode);
-                    if (blendMode != EGxBlend.Opaque && blendMode != EGxBlend.AlphaKey)
-                        continue;
-
-                    if (blendMode == EGxBlend.AlphaKey)
+                    foreach (var batch in group.Batches)
                     {
-                        _gl.Disable(EnableCap.Blend);
-                        _gl.DepthMask(true);
-                        _gl.Uniform1(_uAlphaTest, WoWConstants.AlphaKeyThreshold);
-                    }
-                    else
-                    {
-                        _gl.Disable(EnableCap.Blend);
-                        _gl.DepthMask(true);
-                        _gl.Uniform1(_uAlphaTest, 0.0f);
-                    }
+                        int matId = ResolveBatchMaterialId(group, batch);
+                        uint rawBlendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
+                        EGxBlend blendMode = ResolveWmoBlendMode(rawBlendMode);
+                        if (blendMode != EGxBlend.Opaque && blendMode != EGxBlend.AlphaKey)
+                            continue;
 
-                    DrawBatch(gb, batch, matId);
+                        if (blendMode == EGxBlend.AlphaKey)
+                        {
+                            _gl.Disable(EnableCap.Blend);
+                            _gl.DepthMask(true);
+                            _gl.Uniform1(_uAlphaTest, WoWConstants.AlphaKeyThreshold);
+                        }
+                        else
+                        {
+                            _gl.Disable(EnableCap.Blend);
+                            _gl.DepthMask(true);
+                            _gl.Uniform1(_uAlphaTest, 0.0f);
+                        }
+
+                        DrawBatch(gb, batch, matId);
+                    }
                 }
+                else
+                {
+                    DrawGroupFallback(gb);
+                }
+                _gl.BindVertexArray(0);
             }
-            else
-            {
-                DrawGroupFallback(gb);
-            }
-            _gl.BindVertexArray(0);
         }
 
         // Pass 2: Doodad opaque layers.
@@ -530,8 +555,6 @@ public class WmoRenderer : ISceneRenderer
         int visibleDoodadRenderCount = 0;
         if (_doodadsVisible && _runtimeDoodadsVisible && _doodadInstances.Count > 0)
         {
-            // Animated doodads rendered via RenderWithTransform need explicit per-frame animator updates.
-            // Update once per model to avoid redundant work when many instances share the same MDX.
             _updatedDoodadModelsScratch.Clear();
             _visibleDoodadsScratch.Clear();
 
@@ -545,7 +568,7 @@ public class WmoRenderer : ISceneRenderer
                 if (_runtimeVisibleDoodadDefIndices.Count > 0 && !_runtimeVisibleDoodadDefIndices.Contains(inst.DoodadDefIndex))
                     continue;
 
-                if (_updatedDoodadModelsScratch.Add(inst.ModelPath))
+                if (renderOpaquePass && _updatedDoodadModelsScratch.Add(inst.ModelPath))
                     inst.Renderer.UpdateAnimation();
 
                 // Transform local position to world space
@@ -565,14 +588,17 @@ public class WmoRenderer : ISceneRenderer
             {
                 var inst = _doodadInstances[_visibleDoodadsScratch[vi].idx];
                 var doodadWorld = inst.Transform * modelMatrix;
-                inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Opaque, 1.0f,
-                    fogColor, fogStart, fogEnd, cameraPos,
-                    lightDir, lightColor, ambientColor);
+                if (renderOpaquePass)
+                {
+                    inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Opaque, 1.0f,
+                        fogColor, fogStart, fogEnd, cameraPos,
+                        lightDir, lightColor, ambientColor);
+                }
             }
         }
 
         // Pass 3: Liquid surfaces (semi-transparent, before transparent WMO geometry)
-        if (_liquidMeshes.Count > 0)
+        if (renderTransparentPass && _liquidMeshes.Count > 0)
         {
             _gl.UseProgram(_liquidShader);
             _gl.UniformMatrix4(_uLiqModel, 1, false, (float*)&model);
@@ -599,7 +625,7 @@ public class WmoRenderer : ISceneRenderer
         }
 
         // Pass 4: Doodad transparent layers back-to-front so model glass/reflection stays above liquids.
-        if (visibleDoodadRenderCount > 0)
+        if (renderTransparentPass && visibleDoodadRenderCount > 0)
         {
             for (int vi = visibleDoodadRenderCount - 1; vi >= 0; vi--)
             {
@@ -617,75 +643,78 @@ public class WmoRenderer : ISceneRenderer
         // Pass 5: Transparent geometry (BlendMode 1+ = alpha key/blend)
         // Alpha key (BlendMode 1): hard cutout at alpha < 0.5
         // Alpha blend (BlendMode 2+): smooth blending with depth writes off
-        _gl.UseProgram(_shaderProgram);
-        _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
-        _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
-        _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
-        // Re-set fog uniforms after UseProgram (doodad rendering may have changed active program)
-        _gl.Uniform3(_uFogColor, fc.X, fc.Y, fc.Z);
-        _gl.Uniform1(_uFogStart, fogStart);
-        _gl.Uniform1(_uFogEnd, fogEnd);
-        _gl.Uniform3(_uCameraPos, cp.X, cp.Y, cp.Z);
-
-        _gl.Enable(EnableCap.Blend);
-        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-
-        _transparentGroupSortScratch.Clear();
-        for (int groupBufferIndex = 0; groupBufferIndex < _groups.Count; groupBufferIndex++)
+        if (renderTransparentPass)
         {
-            var groupBuffer = _groups[groupBufferIndex];
-            if (!groupBuffer.IsVisible)
-                continue;
+            _gl.UseProgram(_shaderProgram);
+            _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
+            _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
+            _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+            // Re-set fog uniforms after UseProgram (doodad rendering may have changed active program)
+            _gl.Uniform3(_uFogColor, fc.X, fc.Y, fc.Z);
+            _gl.Uniform1(_uFogStart, fogStart);
+            _gl.Uniform1(_uFogEnd, fogEnd);
+            _gl.Uniform3(_uCameraPos, cp.X, cp.Y, cp.Z);
 
-            Vector3 worldCenter = Vector3.Transform(groupBuffer.GroupCenter, modelMatrix);
-            float distSq = Vector3.DistanceSquared(cp, worldCenter);
-            _transparentGroupSortScratch.Add((groupBufferIndex, distSq));
-        }
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
 
-        _transparentGroupSortScratch.Sort((a, b) => b.distSq.CompareTo(a.distSq));
-
-        foreach (var (groupBufferIndex, _) in _transparentGroupSortScratch)
-        {
-            var gb = _groups[groupBufferIndex];
-            if (!gb.IsVisible) continue;
-            var group = _wmo.Groups[gb.GroupIndex];
-            _gl.BindVertexArray(gb.Vao);
-
-            if (group.Batches.Count > 0)
+            _transparentGroupSortScratch.Clear();
+            for (int groupBufferIndex = 0; groupBufferIndex < _groups.Count; groupBufferIndex++)
             {
-                foreach (var batch in group.Batches)
-                {
-                    int matId = ResolveBatchMaterialId(group, batch);
-                    uint rawBlendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
-                    EGxBlend blendMode = ResolveWmoBlendMode(rawBlendMode);
-                    if (blendMode == EGxBlend.Opaque || blendMode == EGxBlend.AlphaKey)
-                        continue;
+                var groupBuffer = _groups[groupBufferIndex];
+                if (!groupBuffer.IsVisible)
+                    continue;
 
-                    _gl.DepthMask(false);
-                    _gl.Uniform1(_uAlphaTest, 0.0f);
-
-                    switch (blendMode)
-                    {
-                        case EGxBlend.Blend:
-                            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-                            break;
-                        case EGxBlend.Add:
-                            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
-                            break;
-                        default:
-                            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-                            break;
-                    }
-
-                    DrawBatch(gb, batch, matId);
-                }
+                Vector3 worldCenter = Vector3.Transform(groupBuffer.GroupCenter, modelMatrix);
+                float distSq = Vector3.DistanceSquared(cp, worldCenter);
+                _transparentGroupSortScratch.Add((groupBufferIndex, distSq));
             }
-            _gl.BindVertexArray(0);
-        }
 
-        _gl.DepthMask(true);
-        _gl.Disable(EnableCap.Blend);
-        _gl.Uniform1(_uAlphaTest, 0.0f);
+            _transparentGroupSortScratch.Sort((a, b) => b.distSq.CompareTo(a.distSq));
+
+            foreach (var (groupBufferIndex, _) in _transparentGroupSortScratch)
+            {
+                var gb = _groups[groupBufferIndex];
+                if (!gb.IsVisible) continue;
+                var group = _wmo.Groups[gb.GroupIndex];
+                _gl.BindVertexArray(gb.Vao);
+
+                if (group.Batches.Count > 0)
+                {
+                    foreach (var batch in group.Batches)
+                    {
+                        int matId = ResolveBatchMaterialId(group, batch);
+                        uint rawBlendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
+                        EGxBlend blendMode = ResolveWmoBlendMode(rawBlendMode);
+                        if (blendMode == EGxBlend.Opaque || blendMode == EGxBlend.AlphaKey)
+                            continue;
+
+                        _gl.DepthMask(false);
+                        _gl.Uniform1(_uAlphaTest, 0.0f);
+
+                        switch (blendMode)
+                        {
+                            case EGxBlend.Blend:
+                                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                                break;
+                            case EGxBlend.Add:
+                                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
+                                break;
+                            default:
+                                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                                break;
+                        }
+
+                        DrawBatch(gb, batch, matId);
+                    }
+                }
+                _gl.BindVertexArray(0);
+            }
+
+            _gl.DepthMask(true);
+            _gl.Disable(EnableCap.Blend);
+            _gl.Uniform1(_uAlphaTest, 0.0f);
+        }
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.CullFace);
     }
@@ -1856,14 +1885,9 @@ void main() {
             {
                 ViewerLog.Trace($"[M2] Trying WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
                 M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelData, skinBytes, resolvedModelPath, skinPath);
-                var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, _buildVersion);
-                string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
                 ViewerLog.Info(ViewerLog.Category.Mdx,
                     $"[M2] Selected WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
-                return new M2Renderer(
-                    new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
-                    runtimeModel,
-                    resolvedModelPath);
+                    return new M2Renderer(_gl, runtimeModel, resolvedModelPath);
             }
             catch (Exception ex)
             {

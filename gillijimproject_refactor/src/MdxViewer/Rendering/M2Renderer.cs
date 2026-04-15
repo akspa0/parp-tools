@@ -114,7 +114,7 @@ public sealed class M2Renderer : IModelRenderer
         }
     }
 
-    public bool RequiresUnbatchedWorldRender => _legacyRenderer?.RequiresUnbatchedWorldRender ?? false;
+    public bool RequiresUnbatchedWorldRender => true;
 
     public MdxAnimator? Animator => _legacyRenderer?.Animator;
 

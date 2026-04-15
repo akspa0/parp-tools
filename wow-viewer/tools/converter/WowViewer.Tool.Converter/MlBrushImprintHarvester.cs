@@ -16,8 +16,11 @@ internal static class MlBrushImprintHarvester
 	private const string ManifestFileName = "brush_imprint_manifest.json";
 	private const string GroupDirectoryName = "groups";
 	private const string TileMaskDirectoryName = "tile_masks";
+	private const string StitchedDirectoryName = "stitched";
 	private const string ArchetypeDirectoryName = "archetypes";
 	private const string ArchetypeManifestFileName = "brush_archetype_manifest.json";
+	internal const float DefaultFractalCandidateThreshold = 0.035f;
+	private const int MaxFractalLevels = 4;
 
 	public static void Run(string[] args)
 	{
@@ -66,6 +69,8 @@ internal static class MlBrushImprintHarvester
 		Directory.CreateDirectory(groupsDirectory);
 		string tileMasksDirectory = Path.Combine(outputDirectory, TileMaskDirectoryName);
 		Directory.CreateDirectory(tileMasksDirectory);
+		string stitchedDirectory = Path.Combine(outputDirectory, StitchedDirectoryName);
+		Directory.CreateDirectory(stitchedDirectory);
 		string archetypesDirectory = Path.Combine(outputDirectory, ArchetypeDirectoryName);
 		Directory.CreateDirectory(archetypesDirectory);
 		string previewsDirectory = Path.Combine(outputDirectory, "previews");
@@ -82,6 +87,7 @@ internal static class MlBrushImprintHarvester
 		MlBrushIssueTracker issueTracker = new();
 		List<MlBrushTileSummary> tileSummaries = new(datasetFiles.Count);
 		List<string> groupFiles = [];
+		List<string> stitchedFiles = [];
 		Dictionary<string, MlBrushArchetypeAccumulator> archetypeAccumulators = new(StringComparer.Ordinal);
 		int tilesSkippedMissingHeightmap = 0;
 		int groupsWritten = 0;
@@ -112,6 +118,16 @@ internal static class MlBrushImprintHarvester
 						TileName: tileName,
 						MapName: mapName,
 						BrushMaskPath: null,
+						FractalDetailPath: null,
+						FractalCandidateMaskPath: null,
+						LayerStackDepthPath: null,
+						FractalStackProxyPath: null,
+						FractalStackCandidateMaskPath: null,
+						FractalMeanScore: 0f,
+						FractalMaxScore: 0f,
+						FractalStackMeanScore: 0f,
+						FractalStackMaxScore: 0f,
+						LayerStackMaxDepth: 0f,
 						PatchCandidates: 0,
 						GroupsWritten: 0,
 						SkippedReason: "missing-heightmap-global"));
@@ -119,17 +135,64 @@ internal static class MlBrushImprintHarvester
 				}
 
 				float[] heightmap = LoadHeightmapL16(heightmapPath);
+				float[] patchHeightGrid = BuildPatchHeightGrid(heightmap);
+				float[] layerStackDepthGrid = BuildLayerStackDepthGrid(sample.TerrainData.ChunkLayers);
+				MlBrushFractalArtifacts fractalArtifacts = BuildFractalArtifacts(
+					patchHeightGrid,
+					layerStackDepthGrid,
+					TilePatchGridSize,
+					TilePatchGridSize);
 				string[] chunkTextureSignatures = BuildChunkTextureSignatures(sample.TerrainData.ChunkLayers);
 				MlBrushPatchCell[] patchCells = BuildPatchCells(heightmap, chunkTextureSignatures);
 				MlBrushPatchCell[] activeCells = SelectActivePatchCells(patchCells);
 
 				List<MlBrushGroupCandidate> groups = BuildGroups(tileName, mapName, heightmap, activeCells);
 				string? brushMaskRelativePath = null;
+				string? fractalDetailRelativePath = null;
+				string? fractalCandidateRelativePath = null;
+				string? layerStackDepthRelativePath = null;
+				string? fractalStackProxyRelativePath = null;
+				string? fractalStackCandidateRelativePath = null;
 				if (groups.Count > 0)
 				{
 					string tileMaskPath = Path.Combine(tileMasksDirectory, tileName + "_brush_mask.png");
 					WriteTileGroupMask(groups, tileMaskPath);
 					brushMaskRelativePath = Path.GetRelativePath(outputDirectory, tileMaskPath).Replace('\\', '/');
+				}
+
+				if (fractalArtifacts.HeatmapPngBytes.Length > 0)
+				{
+					string fractalDetailPath = Path.Combine(tileMasksDirectory, tileName + "_fractal_detail.png");
+					File.WriteAllBytes(fractalDetailPath, fractalArtifacts.HeatmapPngBytes);
+					fractalDetailRelativePath = Path.GetRelativePath(outputDirectory, fractalDetailPath).Replace('\\', '/');
+				}
+
+				if (fractalArtifacts.CandidateMaskPngBytes.Length > 0)
+				{
+					string fractalCandidatePath = Path.Combine(tileMasksDirectory, tileName + "_fractal_candidate_mask.png");
+					File.WriteAllBytes(fractalCandidatePath, fractalArtifacts.CandidateMaskPngBytes);
+					fractalCandidateRelativePath = Path.GetRelativePath(outputDirectory, fractalCandidatePath).Replace('\\', '/');
+				}
+
+				if (fractalArtifacts.LayerStackDepthPngBytes.Length > 0)
+				{
+					string layerStackDepthPath = Path.Combine(tileMasksDirectory, tileName + "_layer_stack_depth.png");
+					File.WriteAllBytes(layerStackDepthPath, fractalArtifacts.LayerStackDepthPngBytes);
+					layerStackDepthRelativePath = Path.GetRelativePath(outputDirectory, layerStackDepthPath).Replace('\\', '/');
+				}
+
+				if (fractalArtifacts.StackedProxyPngBytes.Length > 0)
+				{
+					string fractalStackProxyPath = Path.Combine(tileMasksDirectory, tileName + "_fractal_stack_proxy.png");
+					File.WriteAllBytes(fractalStackProxyPath, fractalArtifacts.StackedProxyPngBytes);
+					fractalStackProxyRelativePath = Path.GetRelativePath(outputDirectory, fractalStackProxyPath).Replace('\\', '/');
+				}
+
+				if (fractalArtifacts.StackedCandidateMaskPngBytes.Length > 0)
+				{
+					string fractalStackCandidatePath = Path.Combine(tileMasksDirectory, tileName + "_fractal_stack_candidate_mask.png");
+					File.WriteAllBytes(fractalStackCandidatePath, fractalArtifacts.StackedCandidateMaskPngBytes);
+					fractalStackCandidateRelativePath = Path.GetRelativePath(outputDirectory, fractalStackCandidatePath).Replace('\\', '/');
 				}
 
 				for (int index = 0; index < groups.Count; index++)
@@ -162,6 +225,16 @@ internal static class MlBrushImprintHarvester
 					TileName: tileName,
 					MapName: mapName,
 					BrushMaskPath: brushMaskRelativePath,
+					FractalDetailPath: fractalDetailRelativePath,
+					FractalCandidateMaskPath: fractalCandidateRelativePath,
+					LayerStackDepthPath: layerStackDepthRelativePath,
+					FractalStackProxyPath: fractalStackProxyRelativePath,
+					FractalStackCandidateMaskPath: fractalStackCandidateRelativePath,
+					FractalMeanScore: fractalArtifacts.MeanScore,
+					FractalMaxScore: fractalArtifacts.MaxScore,
+					FractalStackMeanScore: fractalArtifacts.StackedMeanScore,
+					FractalStackMaxScore: fractalArtifacts.StackedMaxScore,
+					LayerStackMaxDepth: fractalArtifacts.MaxLayerStackDepth,
 					PatchCandidates: activeCells.Length,
 					GroupsWritten: groups.Count,
 					SkippedReason: null));
@@ -171,6 +244,8 @@ internal static class MlBrushImprintHarvester
 				issueTracker.Record(datasetFile, ex);
 			}
 		}
+
+		stitchedFiles.AddRange(WriteStitchedTileLayers(tileSummaries, outputDirectory, stitchedDirectory));
 
 		List<string> archetypeFiles = [];
 		List<MlBrushArchetypeSummary> archetypeSummaries = [];
@@ -209,6 +284,7 @@ internal static class MlBrushImprintHarvester
 			PatchesWritten: patchesWritten,
 			ArchetypeCount: archetypeSummaries.Count,
 			ArchetypeManifestPath: Path.GetFileName(archetypeManifestPath),
+			StitchedFiles: stitchedFiles,
 			GroupFiles: groupFiles,
 			Tiles: tileSummaries);
 
@@ -303,6 +379,309 @@ internal static class MlBrushImprintHarvester
 		return patches;
 	}
 
+	private static float[] BuildPatchHeightGrid(float[] heightmap)
+	{
+		float[] patchHeights = new float[TilePatchGridSize * TilePatchGridSize];
+		for (int patchY = 0; patchY < TilePatchGridSize; patchY++)
+		{
+			for (int patchX = 0; patchX < TilePatchGridSize; patchX++)
+			{
+				float h00 = heightmap[(patchY * TileVertexGridSize) + patchX];
+				float h10 = heightmap[(patchY * TileVertexGridSize) + patchX + 1];
+				float h01 = heightmap[((patchY + 1) * TileVertexGridSize) + patchX];
+				float h11 = heightmap[((patchY + 1) * TileVertexGridSize) + patchX + 1];
+				patchHeights[(patchY * TilePatchGridSize) + patchX] = (h00 + h10 + h01 + h11) * 0.25f;
+			}
+		}
+
+		return patchHeights;
+	}
+
+	private static float[] BuildLayerStackDepthGrid(MlBrushChunkLayers[]? chunks)
+	{
+		float[] patchDepths = new float[TilePatchGridSize * TilePatchGridSize];
+		if (chunks is null || chunks.Length == 0)
+			return patchDepths;
+
+		float[] chunkDepths = new float[ChunkCountPerRow * ChunkCountPerRow];
+		foreach (MlBrushChunkLayers chunk in chunks)
+		{
+			if (chunk.ChunkIndex < 0 || chunk.ChunkIndex >= chunkDepths.Length)
+				continue;
+
+			chunkDepths[chunk.ChunkIndex] = Math.Max(0, (chunk.Layers?.Length ?? 0) - 1);
+		}
+
+		for (int patchY = 0; patchY < TilePatchGridSize; patchY++)
+		{
+			for (int patchX = 0; patchX < TilePatchGridSize; patchX++)
+			{
+				int chunkX = patchX / PatchCountPerChunk;
+				int chunkY = patchY / PatchCountPerChunk;
+				int chunkIndex = (chunkY * ChunkCountPerRow) + chunkX;
+				patchDepths[(patchY * TilePatchGridSize) + patchX] = chunkDepths[chunkIndex];
+			}
+		}
+
+		return patchDepths;
+	}
+
+	private static MlBrushFractalArtifacts BuildFractalArtifacts(float[] patchHeightGrid, float[] layerStackDepthGrid, int width, int height)
+	{
+		float[] scores = ComputeFractalDetailHeatmap(patchHeightGrid, width, height);
+		if (scores.Length == 0)
+			return new MlBrushFractalArtifacts(
+				Array.Empty<byte>(),
+				Array.Empty<byte>(),
+				Array.Empty<byte>(),
+				Array.Empty<byte>(),
+				Array.Empty<byte>(),
+				0f,
+				0f,
+				0f,
+				0f,
+				0f);
+
+		float maxScore = 0f;
+		double sumScore = 0d;
+		for (int index = 0; index < scores.Length; index++)
+		{
+			float score = scores[index];
+			if (score > maxScore)
+				maxScore = score;
+			sumScore += score;
+		}
+
+		float meanScore = scores.Length == 0 ? 0f : (float)(sumScore / scores.Length);
+		float maxLayerDepth = 0f;
+		for (int index = 0; index < layerStackDepthGrid.Length; index++)
+		{
+			if (layerStackDepthGrid[index] > maxLayerDepth)
+				maxLayerDepth = layerStackDepthGrid[index];
+		}
+
+		float[] stackedScores = BuildStackedFractalProxy(scores, layerStackDepthGrid, maxLayerDepth);
+		float stackedMaxScore = 0f;
+		double stackedSumScore = 0d;
+		for (int index = 0; index < stackedScores.Length; index++)
+		{
+			float score = stackedScores[index];
+			if (score > stackedMaxScore)
+				stackedMaxScore = score;
+			stackedSumScore += score;
+		}
+		float stackedMeanScore = stackedScores.Length == 0 ? 0f : (float)(stackedSumScore / stackedScores.Length);
+
+		byte[] heatmapPng = RenderFractalHeatmap(scores, width, height, maxScore);
+		byte[] candidateMaskPng = RenderFractalCandidateMask(scores, width, height, DefaultFractalCandidateThreshold);
+		byte[] layerStackDepthPng = RenderFractalHeatmap(layerStackDepthGrid, width, height, MathF.Max(maxLayerDepth, 1f));
+		byte[] stackedProxyPng = RenderFractalHeatmap(stackedScores, width, height, MathF.Max(stackedMaxScore, 1e-6f));
+		byte[] stackedCandidateMaskPng = RenderStackedFractalCandidateMask(stackedScores, layerStackDepthGrid, width, height, DefaultFractalCandidateThreshold);
+		return new MlBrushFractalArtifacts(
+			HeatmapPngBytes: heatmapPng,
+			CandidateMaskPngBytes: candidateMaskPng,
+			LayerStackDepthPngBytes: layerStackDepthPng,
+			StackedProxyPngBytes: stackedProxyPng,
+			StackedCandidateMaskPngBytes: stackedCandidateMaskPng,
+			MeanScore: MathF.Round(meanScore, 6),
+			MaxScore: MathF.Round(maxScore, 6),
+			StackedMeanScore: MathF.Round(stackedMeanScore, 6),
+			StackedMaxScore: MathF.Round(stackedMaxScore, 6),
+			MaxLayerStackDepth: MathF.Round(maxLayerDepth, 6));
+	}
+
+	private static float[] BuildStackedFractalProxy(float[] fractalScores, float[] layerStackDepthGrid, float maxLayerDepth)
+	{
+		float[] combined = new float[fractalScores.Length];
+		float layerNormalizer = MathF.Max(maxLayerDepth, 1f);
+		for (int index = 0; index < combined.Length; index++)
+		{
+			float layerWeight = Math.Clamp(layerStackDepthGrid[index] / layerNormalizer, 0f, 1f);
+			float baseScore = fractalScores[index];
+			combined[index] = baseScore + (baseScore * layerWeight * 2f) + (DefaultFractalCandidateThreshold * 0.75f * layerWeight);
+		}
+
+		return combined;
+	}
+
+	private static float[] ComputeFractalDetailHeatmap(float[] values, int width, int height)
+	{
+		if (values.Length == 0 || width <= 1 || height <= 1)
+			return [];
+
+		float[] baseScores = new float[width * height];
+		float[] current = values.ToArray();
+		int currentWidth = width;
+		int currentHeight = height;
+		float totalWeight = 0f;
+
+		for (int level = 0; level < MaxFractalLevels; level++)
+		{
+			float[]? downsampled = BlockAverage(current, currentWidth, currentHeight, out int downWidth, out int downHeight);
+			if (downsampled == null)
+				break;
+
+			float[] approximated = UpsampleNearest(downsampled, downWidth, downHeight, currentWidth, currentHeight);
+			float[] residual = new float[current.Length];
+			for (int index = 0; index < current.Length; index++)
+				residual[index] = MathF.Abs(current[index] - approximated[index]);
+
+			float[] residualAtBase = currentWidth == width && currentHeight == height
+				? residual
+				: UpsampleNearest(residual, currentWidth, currentHeight, width, height);
+
+			float weight = level + 1;
+			for (int index = 0; index < baseScores.Length; index++)
+				baseScores[index] += residualAtBase[index] * weight;
+
+			totalWeight += weight;
+			current = downsampled;
+			currentWidth = downWidth;
+			currentHeight = downHeight;
+		}
+
+		if (totalWeight <= 0f)
+			return baseScores;
+
+		for (int index = 0; index < baseScores.Length; index++)
+			baseScores[index] /= totalWeight;
+
+		return baseScores;
+	}
+
+	internal static float ComputeFractalDetailScore(float[] values, int width, int height)
+	{
+		if (values.Length == 0 || width <= 1 || height <= 1)
+			return 0f;
+
+		float[] current = values.ToArray();
+		int currentWidth = width;
+		int currentHeight = height;
+		List<float> residuals = [];
+
+		for (int level = 0; level < MaxFractalLevels; level++)
+		{
+			float[]? downsampled = BlockAverage(current, currentWidth, currentHeight, out int downWidth, out int downHeight);
+			if (downsampled == null)
+				break;
+
+			float[] approximated = UpsampleNearest(downsampled, downWidth, downHeight, currentWidth, currentHeight);
+			double residualMean = 0d;
+			for (int index = 0; index < current.Length; index++)
+				residualMean += MathF.Abs(current[index] - approximated[index]);
+
+			residuals.Add((float)(residualMean / current.Length));
+			current = downsampled;
+			currentWidth = downWidth;
+			currentHeight = downHeight;
+		}
+
+		if (residuals.Count == 0)
+			return 0f;
+
+		float weighted = 0f;
+		float normalizer = 0f;
+		for (int index = 0; index < residuals.Count; index++)
+		{
+			float weight = index + 1;
+			weighted += residuals[index] * weight;
+			normalizer += weight;
+		}
+
+		return MathF.Round(weighted / MathF.Max(normalizer, 1f), 6);
+	}
+
+	private static float[]? BlockAverage(float[] values, int width, int height, out int pooledWidth, out int pooledHeight)
+	{
+		pooledWidth = width / 2;
+		pooledHeight = height / 2;
+		if (pooledWidth < 2 || pooledHeight < 2)
+			return null;
+
+		float[] pooled = new float[pooledWidth * pooledHeight];
+		for (int y = 0; y < pooledHeight; y++)
+		{
+			for (int x = 0; x < pooledWidth; x++)
+			{
+				int sourceX = x * 2;
+				int sourceY = y * 2;
+				float sum = values[(sourceY * width) + sourceX]
+					+ values[(sourceY * width) + sourceX + 1]
+					+ values[((sourceY + 1) * width) + sourceX]
+					+ values[((sourceY + 1) * width) + sourceX + 1];
+				pooled[(y * pooledWidth) + x] = sum * 0.25f;
+			}
+		}
+
+		return pooled;
+	}
+
+	private static float[] UpsampleNearest(float[] values, int sourceWidth, int sourceHeight, int targetWidth, int targetHeight)
+	{
+		float[] upsampled = new float[targetWidth * targetHeight];
+		for (int y = 0; y < targetHeight; y++)
+		{
+			int sourceY = Math.Min(sourceHeight - 1, y * sourceHeight / Math.Max(targetHeight, 1));
+			for (int x = 0; x < targetWidth; x++)
+			{
+				int sourceX = Math.Min(sourceWidth - 1, x * sourceWidth / Math.Max(targetWidth, 1));
+				upsampled[(y * targetWidth) + x] = values[(sourceY * sourceWidth) + sourceX];
+			}
+		}
+
+		return upsampled;
+	}
+
+	private static byte[] RenderFractalHeatmap(float[] scores, int width, int height, float maxScore)
+	{
+		using Image<L8> image = new(width, height);
+		float normalizer = MathF.Max(maxScore, 1e-6f);
+		for (int y = 0; y < height; y++)
+		{
+			for (int x = 0; x < width; x++)
+			{
+				float normalized = Math.Clamp(scores[(y * width) + x] / normalizer, 0f, 1f);
+				image[x, y] = new L8((byte)Math.Clamp(MathF.Round(normalized * 255f), 0f, 255f));
+			}
+		}
+
+		using MemoryStream stream = new();
+		image.SaveAsPng(stream);
+		return stream.ToArray();
+	}
+
+	private static byte[] RenderFractalCandidateMask(float[] scores, int width, int height, float threshold)
+	{
+		using Image<L8> image = new(width, height);
+		for (int y = 0; y < height; y++)
+		{
+			for (int x = 0; x < width; x++)
+				image[x, y] = new L8(scores[(y * width) + x] >= threshold ? (byte)255 : (byte)0);
+		}
+
+		using MemoryStream stream = new();
+		image.SaveAsPng(stream);
+		return stream.ToArray();
+	}
+
+	private static byte[] RenderStackedFractalCandidateMask(float[] scores, float[] layerStackDepthGrid, int width, int height, float threshold)
+	{
+		using Image<L8> image = new(width, height);
+		for (int y = 0; y < height; y++)
+		{
+			for (int x = 0; x < width; x++)
+			{
+				int index = (y * width) + x;
+				bool active = layerStackDepthGrid[index] > 0f && scores[index] >= threshold;
+				image[x, y] = new L8(active ? (byte)255 : (byte)0);
+			}
+		}
+
+		using MemoryStream stream = new();
+		image.SaveAsPng(stream);
+		return stream.ToArray();
+	}
+
 	private static MlBrushPatchCell[] SelectActivePatchCells(MlBrushPatchCell[] patchCells)
 	{
 		float[] positiveScores = patchCells
@@ -384,6 +763,90 @@ internal static class MlBrushImprintHarvester
 				image[patch.PatchX, patch.PatchY] = new L8(255);
 		}
 		image.SaveAsPng(outputPath);
+	}
+
+	private static List<string> WriteStitchedTileLayers(IReadOnlyList<MlBrushTileSummary> tileSummaries, string outputDirectory, string stitchedDirectory)
+	{
+		List<string> stitchedFiles = [];
+		foreach (IGrouping<string, MlBrushTileSummary> mapGroup in tileSummaries
+			.Where(static tile => string.IsNullOrWhiteSpace(tile.SkippedReason))
+			.GroupBy(static tile => tile.MapName, StringComparer.OrdinalIgnoreCase))
+		{
+			TryWriteStitchedLayer(mapGroup, outputDirectory, stitchedDirectory, static tile => tile.BrushMaskPath, mapGroup.Key + "_full_brush_mask.png", stitchedFiles);
+			TryWriteStitchedLayer(mapGroup, outputDirectory, stitchedDirectory, static tile => tile.FractalDetailPath, mapGroup.Key + "_full_fractal_detail.png", stitchedFiles);
+			TryWriteStitchedLayer(mapGroup, outputDirectory, stitchedDirectory, static tile => tile.FractalCandidateMaskPath, mapGroup.Key + "_full_fractal_candidate_mask.png", stitchedFiles);
+			TryWriteStitchedLayer(mapGroup, outputDirectory, stitchedDirectory, static tile => tile.LayerStackDepthPath, mapGroup.Key + "_full_layer_stack_depth.png", stitchedFiles);
+			TryWriteStitchedLayer(mapGroup, outputDirectory, stitchedDirectory, static tile => tile.FractalStackProxyPath, mapGroup.Key + "_full_fractal_stack_proxy.png", stitchedFiles);
+			TryWriteStitchedLayer(mapGroup, outputDirectory, stitchedDirectory, static tile => tile.FractalStackCandidateMaskPath, mapGroup.Key + "_full_fractal_stack_candidate_mask.png", stitchedFiles);
+		}
+
+		return stitchedFiles;
+	}
+
+	private static void TryWriteStitchedLayer(
+		IEnumerable<MlBrushTileSummary> tiles,
+		string outputDirectory,
+		string stitchedDirectory,
+		Func<MlBrushTileSummary, string?> pathSelector,
+		string outputFileName,
+		List<string> stitchedFiles)
+	{
+		List<(int TileX, int TileY, string Path)> resolvedTiles = [];
+		foreach (MlBrushTileSummary tile in tiles)
+		{
+			string? relativePath = pathSelector(tile);
+			if (string.IsNullOrWhiteSpace(relativePath) || !TryParseTileCoordinates(tile.TileName, out int tileX, out int tileY))
+				continue;
+
+			string absolutePath = Path.Combine(outputDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
+			if (!File.Exists(absolutePath))
+				continue;
+
+			resolvedTiles.Add((tileX, tileY, absolutePath));
+		}
+
+		if (resolvedTiles.Count == 0)
+			return;
+
+		int minX = resolvedTiles.Min(static tile => tile.TileX);
+		int minY = resolvedTiles.Min(static tile => tile.TileY);
+		int maxX = resolvedTiles.Max(static tile => tile.TileX);
+		int maxY = resolvedTiles.Max(static tile => tile.TileY);
+
+		using Image<L8> firstTile = Image.Load<L8>(resolvedTiles[0].Path);
+		int tileWidth = firstTile.Width;
+		int tileHeight = firstTile.Height;
+		using Image<L8> stitched = new((maxX - minX + 1) * tileWidth, (maxY - minY + 1) * tileHeight);
+
+		foreach ((int tileX, int tileY, string path) in resolvedTiles)
+		{
+			using Image<L8> tileImage = Image.Load<L8>(path);
+			if (tileImage.Width != tileWidth || tileImage.Height != tileHeight)
+				tileImage.Mutate(ctx => ctx.Resize(tileWidth, tileHeight));
+
+			int destX = (tileX - minX) * tileWidth;
+			int destY = (tileY - minY) * tileHeight;
+			stitched.Mutate(ctx => ctx.DrawImage(tileImage, new Point(destX, destY), 1f));
+		}
+
+		string outputPath = Path.Combine(stitchedDirectory, outputFileName);
+		stitched.SaveAsPng(outputPath);
+		stitchedFiles.Add(Path.GetRelativePath(outputDirectory, outputPath).Replace('\\', '/'));
+	}
+
+	private static bool TryParseTileCoordinates(string tileName, out int tileX, out int tileY)
+	{
+		tileX = 0;
+		tileY = 0;
+		if (string.IsNullOrWhiteSpace(tileName))
+			return false;
+
+		string[] parts = tileName.Split('_', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		if (parts.Length < 3)
+			return false;
+
+		return int.TryParse(parts[^2], NumberStyles.Integer, CultureInfo.InvariantCulture, out tileX)
+			&& int.TryParse(parts[^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out tileY);
 	}
 
 	private static JsonSerializerOptions CreateBrushJsonOptions()
@@ -619,6 +1082,7 @@ internal sealed class MlBrushGroupCandidate
 		float maxScore = Patches.Count == 0 ? 0f : Patches.Max(static patch => patch.Score);
 		float meanRelief = Patches.Count == 0 ? 0f : Patches.Average(static patch => patch.Relief);
 		float meanSlope = Patches.Count == 0 ? 0f : Patches.Average(static patch => patch.Slope);
+		float fractalDetailScore = MlBrushImprintHarvester.ComputeFractalDetailScore(NormalizedHeightGrid, HeightGridWidth, HeightGridHeight);
 		int minChunkIndex = Patches.Min(static patch => patch.ChunkIndex);
 		int maxChunkIndex = Patches.Max(static patch => patch.ChunkIndex);
 
@@ -661,6 +1125,8 @@ internal sealed class MlBrushGroupCandidate
 			MeanScore: MathF.Round(meanScore, 6),
 			MeanRelief: MathF.Round(meanRelief, 6),
 			MeanSlope: MathF.Round(meanSlope, 6),
+			FractalDetailScore: fractalDetailScore,
+			FractalCandidate: fractalDetailScore >= MlBrushImprintHarvester.DefaultFractalCandidateThreshold,
 			MaxScore: MathF.Round(maxScore, 6),
 			TextureSignatures: TextureSignatures,
 			HeightGridWidth: HeightGridWidth,
@@ -785,6 +1251,8 @@ internal sealed record MlBrushGroupReport(
 	[property: JsonPropertyName("mean_score")] float MeanScore,
 	[property: JsonPropertyName("mean_relief")] float MeanRelief,
 	[property: JsonPropertyName("mean_slope")] float MeanSlope,
+	[property: JsonPropertyName("fractal_detail_score")] float FractalDetailScore,
+	[property: JsonPropertyName("fractal_candidate")] bool FractalCandidate,
 	[property: JsonPropertyName("max_score")] float MaxScore,
 	[property: JsonPropertyName("texture_signatures")] List<string> TextureSignatures,
 	[property: JsonPropertyName("height_grid_width")] int HeightGridWidth,
@@ -796,6 +1264,16 @@ internal sealed record MlBrushTileSummary(
 	[property: JsonPropertyName("tile_name")] string TileName,
 	[property: JsonPropertyName("map_name")] string MapName,
 	[property: JsonPropertyName("brush_mask_path")] string? BrushMaskPath,
+	[property: JsonPropertyName("fractal_detail_path")] string? FractalDetailPath,
+	[property: JsonPropertyName("fractal_candidate_mask_path")] string? FractalCandidateMaskPath,
+	[property: JsonPropertyName("layer_stack_depth_path")] string? LayerStackDepthPath,
+	[property: JsonPropertyName("fractal_stack_proxy_path")] string? FractalStackProxyPath,
+	[property: JsonPropertyName("fractal_stack_candidate_mask_path")] string? FractalStackCandidateMaskPath,
+	[property: JsonPropertyName("fractal_mean_score")] float FractalMeanScore,
+	[property: JsonPropertyName("fractal_max_score")] float FractalMaxScore,
+	[property: JsonPropertyName("fractal_stack_mean_score")] float FractalStackMeanScore,
+	[property: JsonPropertyName("fractal_stack_max_score")] float FractalStackMaxScore,
+	[property: JsonPropertyName("layer_stack_max_depth")] float LayerStackMaxDepth,
 	[property: JsonPropertyName("patch_candidates")] int PatchCandidates,
 	[property: JsonPropertyName("groups_written")] int GroupsWritten,
 	[property: JsonPropertyName("skipped_reason")] string? SkippedReason);
@@ -812,8 +1290,21 @@ internal sealed record MlBrushHarvestManifest(
 	[property: JsonPropertyName("patches_written")] int PatchesWritten,
 	[property: JsonPropertyName("archetype_count")] int ArchetypeCount,
 	[property: JsonPropertyName("archetype_manifest_path")] string ArchetypeManifestPath,
+	[property: JsonPropertyName("stitched_files")] List<string> StitchedFiles,
 	[property: JsonPropertyName("group_files")] List<string> GroupFiles,
 	[property: JsonPropertyName("tiles")] List<MlBrushTileSummary> Tiles);
+
+internal sealed record MlBrushFractalArtifacts(
+	byte[] HeatmapPngBytes,
+	byte[] CandidateMaskPngBytes,
+	byte[] LayerStackDepthPngBytes,
+	byte[] StackedProxyPngBytes,
+	byte[] StackedCandidateMaskPngBytes,
+	float MeanScore,
+	float MaxScore,
+	float StackedMeanScore,
+	float StackedMaxScore,
+	float MaxLayerStackDepth);
 
 internal sealed record MlBrushArchetypeDescriptor(
 	string ArchetypeId,

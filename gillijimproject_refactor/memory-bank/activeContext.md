@@ -1,5 +1,21 @@
 # Active Context
 
+## Apr 15, 2026 - corpus export now has resume-aware map completion instead of unconditional full reruns
+
+- the active corpus workflow bug was not imagined:
+	- `scripts/export_ml_corpus.ps1` had been deliberately changed to re-export every configured map so stale partial roots would not survive just because `dataset/` existed
+	- that also meant completed roots kept being re-exported on every broad run, including expensive fixed-client jobs the user already had on disk
+- active behavior now:
+	- `scripts/export_ml_corpus.ps1` supports `-Resume`
+	- `WoWMapConverter.Cli ml-corpus` supports `--resume`
+	- both paths now write `.ml-corpus-resume-state.json` inside each dataset map root and use it together with `ml_dataset_manifest.json` freshness to decide whether a map is complete, needs harvest only, or needs a full export
+	- resume skips fully completed roots, reruns only incomplete roots, and can do harvest-only recovery when export already finished but manifest coverage is stale
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug` succeeded
+	- `scripts/export_ml_corpus.ps1 -DryRun -Resume` now cleanly skips `original_development/development` without printing export or harvest commands for that same map
+- important boundary:
+	- wrapper dry-run still does not execute live `ml-list-maps`, so `all_maps` clients appear empty there by design; use a real `-Resume` run when you want actual map scheduling instead of a syntax or routing smoke
+
 ## Apr 14, 2026 - `original_development` now stages onto a real 4.0.0.11927 base client instead of exporting from the sparse loose tree directly
 
 - the old `original_development` corpus entry was still pointing straight at `gillijimproject_refactor/test_data/original_development`, which left the exporter on a sparse loose root with no real client `Data` surface behind it

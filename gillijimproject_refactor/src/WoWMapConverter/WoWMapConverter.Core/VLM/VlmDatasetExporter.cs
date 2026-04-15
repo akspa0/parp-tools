@@ -729,7 +729,11 @@ public class VlmDatasetExporter
                                 byte[] removalMask = CombineMaskPngBytes(objectMaskBytes, pm4MaskBytes);
                                 if (removalMask.Length > 0)
                                 {
-                                    byte[] noObjectBytes = SynthesizeMaskedMinimap(cleanedTerrainMinimapPath ?? sourceMinimapPath, removalMask);
+                                    byte[] noObjectBytes = await SynthesizeTerrainMaskedMinimapAsync(
+                                        cleanedTerrainMinimapPath ?? sourceMinimapPath,
+                                        removalMask,
+                                        sample.TerrainData,
+                                        minimapBakeService);
                                     if (noObjectBytes.Length > 0)
                                     {
                                         noObjectMinimapPath = $"images/{tileName}_no_objects.png";
@@ -783,7 +787,7 @@ public class VlmDatasetExporter
                                 liquidMaskBytes);
                             if (terrainOnlyRemovalMask.Length > 0)
                             {
-                                byte[] terrainOnlyBytes = await SynthesizeTerrainOnlyMinimapAsync(
+                                byte[] terrainOnlyBytes = await SynthesizeTerrainMaskedMinimapAsync(
                                     cleanedTerrainMinimapPath ?? sourceMinimapPath,
                                     terrainOnlyRemovalMask,
                                     sample.TerrainData,
@@ -4147,7 +4151,7 @@ public class VlmDatasetExporter
         }
     }
 
-    private async Task<byte[]> SynthesizeTerrainOnlyMinimapAsync(
+    private async Task<byte[]> SynthesizeTerrainMaskedMinimapAsync(
         string sourceMinimapPath,
         byte[] maskPngBytes,
         VlmTerrainData terrainData,
@@ -4164,49 +4168,11 @@ public class VlmDatasetExporter
             if (maskImage.Width != result.Width || maskImage.Height != result.Height)
                 maskImage.Mutate(ctx => ctx.Resize(result.Width, result.Height));
 
-            string?[] fallbackTexturePaths = ResolveChunkTextureFallbackPaths(terrainData.ChunkLayers);
-            bool anyReplaced = false;
-
-            foreach (VlmChunkLayers chunk in terrainData.ChunkLayers)
-            {
-                if (chunk.ChunkIndex < 0 || chunk.ChunkIndex >= 256)
-                    continue;
-
-                var bounds = GetChunkBounds(chunk.ChunkIndex, result.Width, result.Height);
-                if (!ChunkHasMaskedPixels(maskImage, bounds))
-                    continue;
-
-                string? fallbackTexturePath = chunk.ChunkIndex < fallbackTexturePaths.Length
-                    ? fallbackTexturePaths[chunk.ChunkIndex]
-                    : null;
-
-                Image<Rgba32>? bakedChunk = await minimapBakeService.TryBakeChunkAsync(chunk, fallbackTexturePath);
-                if (bakedChunk == null)
-                    continue;
-
-                using (bakedChunk)
-                {
-                    int chunkWidth = bounds.EndX - bounds.StartX;
-                    int chunkHeight = bounds.EndY - bounds.StartY;
-                    if (chunkWidth <= 0 || chunkHeight <= 0)
-                        continue;
-
-                    if (bakedChunk.Width != chunkWidth || bakedChunk.Height != chunkHeight)
-                        bakedChunk.Mutate(ctx => ctx.Resize(chunkWidth, chunkHeight));
-
-                    for (int y = 0; y < chunkHeight; y++)
-                    {
-                        for (int x = 0; x < chunkWidth; x++)
-                        {
-                            if (maskImage[bounds.StartX + x, bounds.StartY + y].PackedValue < 128)
-                                continue;
-
-                            result[bounds.StartX + x, bounds.StartY + y] = bakedChunk[x, y];
-                            anyReplaced = true;
-                        }
-                    }
-                }
-            }
+            bool anyReplaced = await ReplaceMaskedPixelsWithBakedChunksAsync(
+                result,
+                maskImage,
+                terrainData.ChunkLayers,
+                minimapBakeService.TryBakeChunkAsync);
 
             if (!anyReplaced)
                 return Array.Empty<byte>();
@@ -4219,6 +4185,66 @@ public class VlmDatasetExporter
         {
             return Array.Empty<byte>();
         }
+    }
+
+    internal static async Task<bool> ReplaceMaskedPixelsWithBakedChunksAsync(
+        Image<Rgba32> result,
+        Image<L8> maskImage,
+        VlmChunkLayers[]? chunkLayers,
+        Func<VlmChunkLayers, string?, Task<Image<Rgba32>?>> bakeChunkAsync)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(maskImage);
+        ArgumentNullException.ThrowIfNull(bakeChunkAsync);
+
+        if (chunkLayers == null || chunkLayers.Length == 0)
+            return false;
+
+        string?[] fallbackTexturePaths = ResolveChunkTextureFallbackPaths(chunkLayers);
+        bool anyReplaced = false;
+
+        foreach (VlmChunkLayers chunk in chunkLayers)
+        {
+            if (chunk.ChunkIndex < 0 || chunk.ChunkIndex >= 256)
+                continue;
+
+            var bounds = GetChunkBounds(chunk.ChunkIndex, result.Width, result.Height);
+            if (!ChunkHasMaskedPixels(maskImage, bounds))
+                continue;
+
+            string? fallbackTexturePath = chunk.ChunkIndex < fallbackTexturePaths.Length
+                ? fallbackTexturePaths[chunk.ChunkIndex]
+                : null;
+
+            Image<Rgba32>? bakedChunk = await bakeChunkAsync(chunk, fallbackTexturePath);
+            if (bakedChunk == null)
+                continue;
+
+            using (bakedChunk)
+            {
+                int chunkWidth = bounds.EndX - bounds.StartX;
+                int chunkHeight = bounds.EndY - bounds.StartY;
+                if (chunkWidth <= 0 || chunkHeight <= 0)
+                    continue;
+
+                if (bakedChunk.Width != chunkWidth || bakedChunk.Height != chunkHeight)
+                    bakedChunk.Mutate(ctx => ctx.Resize(chunkWidth, chunkHeight));
+
+                for (int y = 0; y < chunkHeight; y++)
+                {
+                    for (int x = 0; x < chunkWidth; x++)
+                    {
+                        if (maskImage[bounds.StartX + x, bounds.StartY + y].PackedValue < 128)
+                            continue;
+
+                        result[bounds.StartX + x, bounds.StartY + y] = bakedChunk[x, y];
+                        anyReplaced = true;
+                    }
+                }
+            }
+        }
+
+        return anyReplaced;
     }
 
     private static byte[] CombineMaskPngBytes(params byte[][] maskPngs)

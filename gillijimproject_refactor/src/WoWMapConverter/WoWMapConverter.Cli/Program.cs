@@ -226,6 +226,7 @@ public static class Program
         string? outOverride = null;
         bool dryRun = false;
         bool harvestOnly = false;
+        bool resume = false;
         bool pruneStagedClients = false;
         bool forceRestage = false;
 
@@ -260,6 +261,9 @@ public static class Program
                 case "--harvest-only":
                     harvestOnly = true;
                     break;
+                case "--resume":
+                    resume = true;
+                    break;
                 case "--prune-staged-clients":
                     pruneStagedClients = true;
                     break;
@@ -273,7 +277,7 @@ public static class Program
         {
             Console.WriteLine("ml-corpus — run the full ML dataset pipeline from a config file.");
             Console.WriteLine();
-            Console.WriteLine("Usage: ml-corpus --config <corpus.json> [--archive-root <dir>] [--mount-root <dir>] [--staging-root <dir>] [--out <dir>] [--dry-run] [--harvest-only]");
+            Console.WriteLine("Usage: ml-corpus --config <corpus.json> [--archive-root <dir>] [--mount-root <dir>] [--staging-root <dir>] [--out <dir>] [--dry-run] [--harvest-only] [--resume]");
             Console.WriteLine();
             Console.WriteLine("Options:");
             Console.WriteLine("  --config, -c <path>          JSON config file (VlmBatchExportConfig format)");
@@ -284,6 +288,7 @@ public static class Program
             Console.WriteLine("  --out, -o <dir>              Override default_output_root from config");
             Console.WriteLine("  --dry-run                    Print what would run without executing");
             Console.WriteLine("  --harvest-only               Skip export, only run ml-harvest on existing datasets");
+            Console.WriteLine("  --resume                     Skip fully completed map roots and only rerun incomplete export or harvest work");
             Console.WriteLine("  --prune-staged-clients       Remove stale staged archive-backed client copies after the run");
             Console.WriteLine("  --force-restage              Recopy staged archive-backed clients even when a matching stage exists");
             Console.WriteLine();
@@ -420,6 +425,37 @@ public static class Program
             {
                 totalJobs++;
                 string mapOutput = Path.GetFullPath(Path.Combine(clientOutputRoot, map));
+                bool skipExport = false;
+
+                if (resume && !harvestOnly)
+                {
+                    MlCorpusResumeDecision resumeDecision = EvaluateMlCorpusResume(
+                        mapOutput,
+                        clientFolderName,
+                        client.ClientVersion,
+                        map,
+                        harvestRequested: true,
+                        client.GenerateDepth,
+                        client.TileLimit,
+                        client.InterestingOnly,
+                        client.InterestingMinScore,
+                        client.SkipDerivedAssets,
+                        minimapRoot);
+
+                    if (resumeDecision.Kind == MlCorpusResumeDecisionKind.SkipAll)
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine($"[{totalJobs}] {client.ClientVersion} / {map}");
+                        Console.WriteLine($"    output : {mapOutput}");
+                        Console.WriteLine($"    => resume skip ({resumeDecision.Reason})");
+                        continue;
+                    }
+
+                    if (resumeDecision.Kind == MlCorpusResumeDecisionKind.RunHarvestOnly)
+                    {
+                        skipExport = true;
+                    }
+                }
 
                 Console.WriteLine();
                 Console.WriteLine($"[{totalJobs}] {client.ClientVersion} / {map}");
@@ -438,7 +474,7 @@ public static class Program
 
                 try
                 {
-                    if (!harvestOnly)
+                    if (!harvestOnly && !skipExport)
                     {
                         Console.WriteLine("    => ml-export");
                         int tileLimit = client.TileLimit ?? int.MaxValue;
@@ -456,11 +492,35 @@ public static class Program
                             interestingOnly: client.InterestingOnly,
                             interestingMinScore: client.InterestingMinScore);
                         Console.WriteLine($"    exported {exportResult.TilesExported} tiles, skipped {exportResult.TilesSkipped}");
+
+                        WriteMlCorpusResumeState(
+                            mapOutput,
+                            new MlCorpusResumeState
+                            {
+                                ClientLabel = clientFolderName,
+                                ClientVersion = client.ClientVersion,
+                                MapName = map,
+                                HarvestRequested = true,
+                                ExportCompleted = true,
+                                HarvestCompleted = false,
+                                GenerateDepth = client.GenerateDepth,
+                                TileLimit = client.TileLimit,
+                                InterestingOnly = client.InterestingOnly,
+                                InterestingMinScore = client.InterestingMinScore,
+                                SkipDerivedAssets = client.SkipDerivedAssets,
+                                MinimapRoot = NormalizeMlCorpusResumePath(minimapRoot),
+                                TileJsonCount = CountMlCorpusDatasetJsonFiles(mapOutput),
+                                UpdatedAtUtc = DateTime.UtcNow
+                            });
+                    }
+                    else if (skipExport)
+                    {
+                        Console.WriteLine("    => ml-export skipped (resume state marked export complete)");
                     }
 
                     string datasetJsonDir = Path.Combine(mapOutput, "dataset");
-                    bool hasDatasetJson = Directory.Exists(datasetJsonDir)
-                        && Directory.EnumerateFiles(datasetJsonDir, "*.json", SearchOption.TopDirectoryOnly).Any();
+                    int datasetJsonCount = CountMlCorpusDatasetJsonFiles(mapOutput);
+                    bool hasDatasetJson = Directory.Exists(datasetJsonDir) && datasetJsonCount > 0;
                     if (!hasDatasetJson)
                     {
                         Console.WriteLine("    => ml-harvest skipped (no tile JSON files found)");
@@ -471,6 +531,26 @@ public static class Program
                     var harvestResult = await harvester.HarvestAsync(
                         new MkDatasetHarvestOptions(DatasetRoot: mapOutput), progress);
                     Console.WriteLine($"    harvested {harvestResult.TilesProcessed} tiles");
+
+                    WriteMlCorpusResumeState(
+                        mapOutput,
+                        new MlCorpusResumeState
+                        {
+                            ClientLabel = clientFolderName,
+                            ClientVersion = client.ClientVersion,
+                            MapName = map,
+                            HarvestRequested = true,
+                            ExportCompleted = true,
+                            HarvestCompleted = true,
+                            GenerateDepth = client.GenerateDepth,
+                            TileLimit = client.TileLimit,
+                            InterestingOnly = client.InterestingOnly,
+                            InterestingMinScore = client.InterestingMinScore,
+                            SkipDerivedAssets = client.SkipDerivedAssets,
+                            MinimapRoot = NormalizeMlCorpusResumePath(minimapRoot),
+                            TileJsonCount = datasetJsonCount,
+                            UpdatedAtUtc = DateTime.UtcNow
+                        });
                 }
                 catch (Exception ex)
                 {
@@ -493,10 +573,55 @@ public static class Program
     }
 
     private const string MlCorpusStageMetadataFileName = ".wowarchive-stage.json";
+    private const string MlCorpusResumeStateFileName = ".ml-corpus-resume-state.json";
 
     private sealed record MlCorpusStageMetadata(string Label, string SourcePath, string SourceType, string UpdatedAtUtc);
 
     private sealed record MlCorpusWorkingRootResolution(string WorkingPath, string SourcePath, string SourceType, bool Staged, string? StagePath);
+
+    private enum MlCorpusResumeDecisionKind
+    {
+        RunExport,
+        RunHarvestOnly,
+        SkipAll,
+    }
+
+    private sealed record MlCorpusResumeDecision(MlCorpusResumeDecisionKind Kind, string Reason);
+
+    private sealed class MlCorpusResumeState
+    {
+        public string SchemaVersion { get; set; } = "ml-corpus-resume-state.v1";
+        public string ClientLabel { get; set; } = string.Empty;
+        public string ClientVersion { get; set; } = string.Empty;
+        public string MapName { get; set; } = string.Empty;
+        public bool HarvestRequested { get; set; }
+        public bool ExportCompleted { get; set; }
+        public bool HarvestCompleted { get; set; }
+        public bool GenerateDepth { get; set; }
+        public int? TileLimit { get; set; }
+        public bool InterestingOnly { get; set; }
+        public int InterestingMinScore { get; set; }
+        public bool SkipDerivedAssets { get; set; }
+        public string? MinimapRoot { get; set; }
+        public int TileJsonCount { get; set; }
+        public DateTime UpdatedAtUtc { get; set; }
+    }
+
+    private sealed class MlCorpusManifestCoverage
+    {
+        public int TilesProcessed { get; set; }
+    }
+
+    private sealed class MlCorpusManifestEnvelope
+    {
+        public MlCorpusManifestCoverage? Coverage { get; set; }
+    }
+
+    private static readonly JsonSerializerOptions MlCorpusResumeJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        WriteIndented = true,
+    };
 
     private static string? ResolveMlCorpusPath(string? value, string? baseRoot, string configDirectory)
     {
@@ -510,6 +635,158 @@ public static class Program
             return Path.GetFullPath(Path.Combine(baseRoot, value));
 
         return Path.GetFullPath(Path.Combine(configDirectory, value));
+    }
+
+    private static string? NormalizeMlCorpusResumePath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return Path.GetFullPath(value).Replace('\\', '/');
+    }
+
+    private static IEnumerable<string> EnumerateMlCorpusDatasetJsonFiles(string mapOutput)
+    {
+        string datasetJsonDir = Path.Combine(mapOutput, "dataset");
+        if (!Directory.Exists(datasetJsonDir))
+            yield break;
+
+        foreach (string path in Directory.EnumerateFiles(datasetJsonDir, "*.json", SearchOption.TopDirectoryOnly))
+        {
+            if (string.Equals(Path.GetFileName(path), "texture_database.json", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            yield return path;
+        }
+    }
+
+    private static int CountMlCorpusDatasetJsonFiles(string mapOutput)
+        => EnumerateMlCorpusDatasetJsonFiles(mapOutput).Count();
+
+    private static bool IsMlCorpusManifestCurrent(string mapOutput, int datasetJsonCount)
+    {
+        if (datasetJsonCount == 0)
+            return false;
+
+        string manifestPath = Path.Combine(mapOutput, "ml_dataset_manifest.json");
+        if (!File.Exists(manifestPath))
+            return false;
+
+        try
+        {
+            string json = File.ReadAllText(manifestPath);
+            MlCorpusManifestEnvelope? manifest = JsonSerializer.Deserialize<MlCorpusManifestEnvelope>(json, MlCorpusResumeJsonOptions);
+            if (manifest?.Coverage is null || manifest.Coverage.TilesProcessed != datasetJsonCount)
+                return false;
+
+            DateTime manifestWriteTimeUtc = File.GetLastWriteTimeUtc(manifestPath);
+            DateTime latestDatasetWriteTimeUtc = EnumerateMlCorpusDatasetJsonFiles(mapOutput)
+                .Select(File.GetLastWriteTimeUtc)
+                .DefaultIfEmpty(DateTime.MinValue)
+                .Max();
+            return manifestWriteTimeUtc >= latestDatasetWriteTimeUtc;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static MlCorpusResumeState? TryReadMlCorpusResumeState(string mapOutput)
+    {
+        string statePath = Path.Combine(mapOutput, MlCorpusResumeStateFileName);
+        if (!File.Exists(statePath))
+            return null;
+
+        try
+        {
+            string json = File.ReadAllText(statePath);
+            return JsonSerializer.Deserialize<MlCorpusResumeState>(json, MlCorpusResumeJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void WriteMlCorpusResumeState(string mapOutput, MlCorpusResumeState state)
+    {
+        Directory.CreateDirectory(mapOutput);
+        string statePath = Path.Combine(mapOutput, MlCorpusResumeStateFileName);
+        string json = JsonSerializer.Serialize(state, MlCorpusResumeJsonOptions);
+        File.WriteAllText(statePath, json);
+    }
+
+    private static bool MlCorpusResumeStateMatches(
+        MlCorpusResumeState? state,
+        string clientLabel,
+        string clientVersion,
+        string mapName,
+        bool generateDepth,
+        int? tileLimit,
+        bool interestingOnly,
+        int interestingMinScore,
+        bool skipDerivedAssets,
+        string? minimapRoot)
+    {
+        if (state is null)
+            return false;
+
+        return string.Equals(state.SchemaVersion, "ml-corpus-resume-state.v1", StringComparison.Ordinal)
+            && string.Equals(state.ClientLabel, clientLabel, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(state.ClientVersion, clientVersion, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(state.MapName, mapName, StringComparison.OrdinalIgnoreCase)
+            && state.GenerateDepth == generateDepth
+            && state.TileLimit == tileLimit
+            && state.InterestingOnly == interestingOnly
+            && state.InterestingMinScore == interestingMinScore
+            && state.SkipDerivedAssets == skipDerivedAssets
+            && string.Equals(state.MinimapRoot, NormalizeMlCorpusResumePath(minimapRoot), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static MlCorpusResumeDecision EvaluateMlCorpusResume(
+        string mapOutput,
+        string clientLabel,
+        string clientVersion,
+        string mapName,
+        bool harvestRequested,
+        bool generateDepth,
+        int? tileLimit,
+        bool interestingOnly,
+        int interestingMinScore,
+        bool skipDerivedAssets,
+        string? minimapRoot)
+    {
+        int datasetJsonCount = CountMlCorpusDatasetJsonFiles(mapOutput);
+        bool manifestCurrent = IsMlCorpusManifestCurrent(mapOutput, datasetJsonCount);
+        MlCorpusResumeState? state = TryReadMlCorpusResumeState(mapOutput);
+        bool stateMatches = MlCorpusResumeStateMatches(
+            state,
+            clientLabel,
+            clientVersion,
+            mapName,
+            generateDepth,
+            tileLimit,
+            interestingOnly,
+            interestingMinScore,
+            skipDerivedAssets,
+            minimapRoot);
+
+        if (stateMatches && state!.ExportCompleted)
+        {
+            if (!harvestRequested)
+                return new MlCorpusResumeDecision(MlCorpusResumeDecisionKind.SkipAll, "resume state already marks export complete for the same job settings");
+
+            if (state.HarvestCompleted && manifestCurrent)
+                return new MlCorpusResumeDecision(MlCorpusResumeDecisionKind.SkipAll, "resume state and manifest already mark this map complete");
+
+            return new MlCorpusResumeDecision(MlCorpusResumeDecisionKind.RunHarvestOnly, "resume state marks export complete but harvest metadata is missing or stale");
+        }
+
+        if (manifestCurrent)
+            return new MlCorpusResumeDecision(MlCorpusResumeDecisionKind.SkipAll, "existing manifest is current for this dataset root");
+
+        return new MlCorpusResumeDecision(MlCorpusResumeDecisionKind.RunExport, "no matching completion state was found");
     }
 
     private static bool IsPathWithinRoot(string? path, string? root)

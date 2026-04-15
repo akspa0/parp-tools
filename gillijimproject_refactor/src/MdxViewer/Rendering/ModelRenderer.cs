@@ -170,7 +170,7 @@ public class MdxRenderer : IModelRenderer
     public Vector3 BoundsMax => _effectiveBoundsMax;
     public bool IsM2AdapterModel => _isM2AdapterModel;
     public bool HasTransparentWorldPass => !_forceM2SolidDebug && ComputeHasTransparentWorldPass();
-    public bool RequiresUnbatchedWorldRender => _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
+    public bool RequiresUnbatchedWorldRender => _isM2AdapterModel || _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
     public MdxAnimator? Animator => _animator;
@@ -196,11 +196,11 @@ public class MdxRenderer : IModelRenderer
             ? GetDeclaredModelBounds(_mdx)
             : ComputeRenderableBounds(_mdx);
         string? m2AnimationSetting = Environment.GetEnvironmentVariable("PARP_M2_ENABLE_ANIMATION");
-        bool disableM2Animation = !string.IsNullOrWhiteSpace(m2AnimationSetting)
-            && (string.Equals(m2AnimationSetting, "0", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(m2AnimationSetting, "false", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(m2AnimationSetting, "no", StringComparison.OrdinalIgnoreCase));
-        _enableM2Animation = !_isM2AdapterModel || !disableM2Animation;
+        bool enableAdaptedM2Animation = !string.IsNullOrWhiteSpace(m2AnimationSetting)
+            && (string.Equals(m2AnimationSetting, "1", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(m2AnimationSetting, "true", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(m2AnimationSetting, "yes", StringComparison.OrdinalIgnoreCase));
+        _enableM2Animation = !_isM2AdapterModel || enableAdaptedM2Animation;
         string? forceSolidSetting = Environment.GetEnvironmentVariable("PARP_M2_FORCE_SOLID");
         _forceM2SolidDebug = _isM2AdapterModel
             && !string.IsNullOrWhiteSpace(forceSolidSetting)
@@ -243,9 +243,9 @@ public class MdxRenderer : IModelRenderer
             LoadTextures();
 
         // Initialize animation system.
-        // Adapted M2 models keep material/geoset/UV animation guardrails, but skeletal motion
-        // is enabled by default again because the compatibility path already advances animators
-        // in both standalone and world rendering. Set PARP_M2_ENABLE_ANIMATION=0 to disable it.
+        // Adapted M2 models keep material/geoset/UV animation guardrails, and skeletal motion
+        // stays disabled by default until the compatibility skinning path matches runtime bone
+        // semantics again. Set PARP_M2_ENABLE_ANIMATION=1 to opt back into adapted M2 skinning.
         if (_enableM2Animation && (mdx.Bones.Count > 0 || MdxAnimator.HasAnimationData(mdx)))
         {
             _animator = new MdxAnimator(mdx);
@@ -263,7 +263,7 @@ public class MdxRenderer : IModelRenderer
         {
             ViewerLog.Info(
                 ViewerLog.Category.Mdx,
-                $"[M2-DIAG] Skeletal animation disabled for adapted model: {_modelVirtualPath ?? modelDir} (set PARP_M2_ENABLE_ANIMATION=0 only when debugging compatibility regressions)");
+                $"[M2-DIAG] Skeletal animation disabled for adapted model: {_modelVirtualPath ?? modelDir} (set PARP_M2_ENABLE_ANIMATION=1 only when debugging compatibility regressions)");
         }
 
         // Initialize particle emitters from PRE2 chunk data
@@ -2393,15 +2393,6 @@ void main() {
 
     private bool LayerNeedsTransparentPass(int layerIndex, int textureId, MdlTexOp declaredBlendMode)
     {
-        if (_isM2AdapterModel
-            && _deferInitialTextureLoads
-            && layerIndex == 0
-            && declaredBlendMode == MdlTexOp.Load
-            && !_textureAlphaKinds.ContainsKey(textureId))
-        {
-            return true;
-        }
-
         MdlTexOp effectiveBlendMode = GetEffectiveBlendMode(layerIndex, textureId, declaredBlendMode);
         bool isAlphaCutout = ShouldUseAlphaCutout(layerIndex, textureId, declaredBlendMode, effectiveBlendMode);
         return !isAlphaCutout && (layerIndex > 0 || effectiveBlendMode != MdlTexOp.Load);

@@ -1,5 +1,201 @@
 # Progress
 
+### Apr 15, 2026 - ML corpus export now has an explicit resume path instead of re-exporting completed map roots forever
+
+- the user-reported rerun waste was real:
+	- `scripts/export_ml_corpus.ps1` had been changed to always re-export every configured map so partial roots would not be silently treated as complete
+	- that fixed stale partial datasets, but it also meant broad corpus reruns kept re-running already finished roots like `datasets/3_3_5_12340/*` with no durable notion of completion state
+- active behavior now:
+	- `gillijimproject_refactor/scripts/export_ml_corpus.ps1` accepts `-Resume`
+	- `WoWMapConverter.Cli ml-corpus` accepts `--resume`
+	- both entrypoints now persist per-map resume metadata in `.ml-corpus-resume-state.json` inside each dataset map root
+	- resume considers a map complete when either:
+		- matching resume state says export and harvest already finished for the same job settings, or
+		- the existing `ml_dataset_manifest.json` is current against the actual tile JSON count and timestamps
+	- when export is complete but harvest metadata is stale, resume skips `ml-export` and runs only `ml-harvest`
+	- wrapper harvest gating now counts only real tile JSON files and ignores helper files like `texture_database.json`
+- focused validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug` succeeded with existing workspace warnings only
+	- PowerShell parse validation for `scripts/export_ml_corpus.ps1` passed after the resume patches
+	- `scripts/export_ml_corpus.ps1 -DryRun -Resume` now skips the already-complete `original_development/development` root without falling through into `ml-export` or `ml-harvest`
+	- direct `ml-corpus --dry-run --resume` also reports the completed `original_development/development` root as a resume skip instead of scheduling fresh export work
+- important boundary:
+	- PowerShell wrapper dry-run still does not execute live `ml-list-maps`, so `all_maps` clients report no discovered maps in dry-run mode by design; use a real `-Resume` run for end-to-end map scheduling proof
+	- existing completed roots do not need a pre-existing resume-state file because resume falls back to the current `ml_dataset_manifest.json` when it is fresh enough
+
+### Apr 15, 2026 - World transparency now stops drawing WMO transparent shell and WMO doodad transparency during the earlier opaque world stage
+
+- followed the live viewer regression where render order was visibly broken across both WMOs and M2-family objects, not just the adapted-M2 skinning path
+- the concrete shared ordering bug was in world-pass composition:
+	- `WorldScene` still treated WMOs as part of the earlier opaque world stage
+	- but `WmoRenderer.RenderWithTransform(...)` internally rendered its full stack there: opaque shell, opaque doodads, liquids, transparent doodads, and transparent shell
+	- this meant WMO transparent layers were never participating in the later global world transparent stage, so they could overpaint or underpaint free-standing MDX transparency out of order
+- active behavior now:
+	- `WmoRenderer` has an explicit world-pass split via `WmoRenderPass` so world rendering can request `Opaque` or `Transparent` instead of always running the full internal stack
+	- `WorldScene` now calls visible WMO renderers with `WmoRenderPass.Opaque` during the earlier opaque stage only
+	- the later world transparent stage now builds one back-to-front combined transparent sort over visible WMOs plus visible transparent MDX instances and renders:
+		- WMO transparent/liquid/doodad-transparent work via `WmoRenderPass.Transparent`
+		- MDX transparent layers via `RenderPass.Transparent`
+	- adapted M2 skeletal animation is also back to opt-in only in `ModelRenderer`; `PARP_M2_ENABLE_ANIMATION=1` is now required before adapted M2 skinning uploads bone matrices again
+- focused validation completed:
+	- `get_errors` returned clean for `Rendering/WmoRenderer.cs`, `Terrain/WorldScene.cs`, and `Rendering/ModelRenderer.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` succeeded with existing workspace warnings only
+- important boundary:
+	- full-solution `MdxViewer.sln` build still hit an unrelated `AlphaWdtAnalyzer.Core` deps-file failure on `DBCD.dll`; the targeted viewer project build is the relevant proof for this slice
+	- no live post-fix viewer rerender or screenshot proof has been captured yet in this chat, so this is compile-validated render-path correction rather than runtime visual signoff
+
+### Apr 15, 2026 - MCCV terrain tint now gates through alpha instead of darkening transparent regions
+
+- followed the live viewer regression report that MCCV was still rendering wrong in the active terrain path after the earlier BGRA and mid-gray cleanup work
+- the concrete mismatch was still in runtime semantics, not parser ownership:
+	- `StandardTerrainAdapter` still passes raw `MCCV` bytes through unchanged from ADT payloads
+	- `TerrainMeshBuilder` / `TerrainTileMeshBuilder` still decode those raw bytes as BGRA into the vertex attribute
+	- but `TerrainRenderer` was still applying tint as `clamp(vVertexColor.rgb * 2.0, 0.0, 2.0)` while ignoring MCCV alpha entirely
+- active behavior now:
+	- `MdxViewer.Terrain.TerrainRenderer` treats RGB as the tint color around mid-gray and uses alpha as the tint-strength gate via `mix(vec3(1.0), tintColor, tintStrength)`
+	- alpha values at or below mid-gray now stay neutral instead of letting transparent MCCV regions darken terrain toward black
+	- `WoWMapConverter.Core.VLM.VlmMinimapCleanupService.RemoveMccvTint(...)` was updated to invert that same alpha-gated shader model so dataset cleanup remains parity-correct with the viewer
+	- `TerrainChunkData` docs now explicitly call the stored chunk payload raw BGRA bytes instead of RGBA
+- focused validation completed:
+	- `dotnet test i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core.Tests/WoWMapConverter.Core.Tests.csproj -c Debug --filter VlmMinimapCleanupServiceTests` passed (`6/6`), including new cases for mid-gray-alpha neutrality and transparent MCCV tint not darkening the minimap cleanup output
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing workspace warnings only
+- important boundary:
+	- no real-data viewer rerender or screenshot proof was captured in this slice yet
+	- this closes the code-path mismatch that kept alpha-neutral MCCV regions wrong, but runtime visual signoff is still deferred until the active dataset harvest finishes
+	- the intended post-harvest viewer check should target `3.0.1+` roots only, because older clients do not carry MCCV payloads to validate here
+	- current sequencing from the user is: finish the active `3.3.5` harvest first, process `4.0.0` next, then do bounded `MdxViewer` MCCV fix-up validation after those loads complete
+
+### Apr 15, 2026 - `wow-viewer` now repairs dataset normalmaps from `heightmap_local` when erased terrain detail survives there
+
+- `wow-viewer/tools/converter/WowViewer.Tool.Converter/MlRepairNormalmapsCommand.cs` now adds `ml-repair-normalmaps`, a dataset-side repair command that synthesizes `_normal.png` outputs from exported heightmaps instead of leaving missing or flattened normals to trainer-side fallback only:
+	- prefers `terrain_data.heightmap_local`
+	- falls back to `terrain_data.heightmap_global` when local data is unavailable
+	- updates tile JSON with `normalmap_generated_from` and `normalmap_generated_reason`
+	- can rewrite existing normalmaps with `--rewrite-existing` or `--rewrite-when-local-differs <mae>` when local/global surfaces materially disagree
+	- supports `--only-liquid-tiles`, `--limit`, `--report`, and `--dry-run` so bounded probes stay traceable
+- rationale for the slice:
+	- the active erased-terrain case is not primarily missing MCNR alone; WoWEdit can flatten or squash chunk geometry while exported `heightmap_local` still preserves the more useful local relief
+	- this makes `heightmap_local` the better reconstruction source for “developer” terrain shapes that no longer survive in the live flattened surface or its prior normalmap
+- bounded proof succeeded with real data:
+	- dry-run probe: `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- ml-repair-normalmaps --dataset-root i:/parp/parp-tools/datasets/4_0_0_11927/Kalimdor --limit 5 --dry-run --report i:/parp/parp-tools/output/build-validation/kalimdor_normalmap_repair_dryrun.json`
+	- dry-run outcome:
+		- no missing-normal repairs in the first five tiles because those references and files already existed
+		- `Kalimdor_0_1` still surfaced as a rewrite candidate with `local_global_mean_absolute_delta = 7.084023842588067` and `local_global_max_absolute_delta = 178.98297119140625`
+	- isolated rewrite proof: `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- ml-repair-normalmaps --dataset-root i:/parp/parp-tools/output/build-validation/kalimdor_0_1_normalmap_repair_probe --limit 1 --rewrite-when-local-differs 1.0 --report i:/parp/parp-tools/output/build-validation/kalimdor_0_1_normalmap_repair_probe/repair_report.json`
+	- rewrite outcome:
+		- regenerated `images/Kalimdor_0_1_normal.png` from `heightmap_local`
+		- recorded `normalmap_generated_from = heightmap_local`
+		- recorded `normalmap_generated_reason = rewrite_local_global_divergence`
+- important boundary:
+	- this slice proves converter-side repair and reporting only
+	- it does not yet audit a full corpus for all erased-terrain candidates or prove active viewer runtime behavior from the regenerated normalmaps
+
+### Apr 15, 2026 - `train_v7.py` now auto-wires synthetic controls into dataset loading, curation, and validation
+
+- `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py` now restores the missing runtime seams that the current trainer file was referencing but not defining:
+	- `TileSample`
+	- `normalize_token(...)`
+	- `parse_tile_identity(...)`
+	- dataset index construction and cache write/read helpers for the current JSON surface
+	- brush mask resolution
+	- WDL prior rendering
+	- dataset length and map-index rebuilding
+- the same trainer now automatically ensures a synthetic control dataset unless `--no-synthetic-controls` is set:
+	- default root: `output/build-validation/training_synthetic_controls`
+	- auto-generation command: `wow-viewer` `ml-generate-controls`
+	- auto-harvest follow-up: `wow-viewer` `ml-harvest-brushes`
+	- optional controls for the workflow surface:
+		- `--synthetic-control-root`
+		- `--regenerate-synthetic-controls`
+- trainer-side admission rules now keep synthetic controls usable instead of discarding them as blank tiles:
+	- missing synthetic metadata no longer stringifies to fake truthy values
+	- synthetic controls are allowed through the low-height-range rejection path
+	- synthetic tiles without a real exported normal map now receive a flat fallback normal prior instead of being rejected outright
+	- curated training keeps synthetic controls instead of letting low-complexity sampling drop them
+	- pinned validation now keeps `synthetic_controls_0_0` (`white_plate`) in the validation split as the stable non-interesting baseline control
+- bounded proof succeeded with the live trainer code and real + synthetic roots:
+	- import/parser smoke: `i:/parp/parp-tools/.venv/Scripts/python.exe gillijimproject_refactor/src/WoWMapConverter/scripts/train_v7.py --help`
+	- bounded loader proof used:
+		- real probe root `output/build-validation/original_development_11927_overlay_probe`
+		- auto-generated synthetic root `output/build-validation/training_synthetic_controls`
+	- proof outcome:
+		- trainer auto-generated and auto-harvested the synthetic root on first use
+		- bounded dataset load produced `2` samples total with `1` real tile and `1` synthetic tile
+		- `white_plate` (`synthetic_controls_0_0`) survived indexing and remained tagged as synthetic while the real tile stayed non-synthetic
+		- split proof showed validation tiles = `synthetic_controls_0_0`, confirming the pinned baseline control path
+- important boundary:
+	- this slice wires deterministic synthetic controls into the existing trainer surface only
+	- it does not yet add the next requested harvested-data hybrid control family inside `MlSyntheticControlGenerator`
+
+### Apr 14, 2026 - `wow-viewer` now has deterministic synthetic control tiles, including a guaranteed blank `white_plate`
+
+- `wow-viewer/tools/converter/WowViewer.Tool.Converter/MlSyntheticControlGenerator.cs` now adds `ml-generate-controls`, which writes dataset-shaped synthetic tiles under a target root instead of loose demo images only:
+	- tile JSON in `dataset/`
+	- source minimaps in `images/`
+	- local/global heightmaps in `images/`
+	- packed alpha atlas plus per-layer alpha masks and shadow under `stitched/`
+	- `metadata.jsonl`, `dataset_info.json`, and `synthetic_control_manifest.json`
+- current default synthetic control set includes:
+	- `white_plate` as the explicit non-interesting flat control tile
+	- `diagonal_ramp`
+	- `ring_mound`
+	- `terrace_steps`
+- each synthetic tile now carries explicit control metadata in JSON, including:
+	- `expected_interest_class`
+	- `expected_brush_groups`
+	- `expected_layer_stack_depth`
+- bounded synthetic proof succeeded with:
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter -- ml-generate-controls --dataset-root i:/parp/parp-tools/output/build-validation/synthetic_controls_probe`
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter -- ml-audit-signals --dataset-root i:/parp/parp-tools/output/build-validation/synthetic_controls_probe --output i:/parp/parp-tools/output/build-validation/synthetic_controls_probe/signal_audit.json`
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter -- ml-harvest-brushes --dataset-root i:/parp/parp-tools/output/build-validation/synthetic_controls_probe --output-dir i:/parp/parp-tools/output/build-validation/synthetic_controls_probe/brush_imprints`
+- proof outcome:
+	- `white_plate` was generated with a base-only `chunk_layers` contract, zero alpha structure, and a packed alpha atlas path still present for contract stability
+	- downstream brush harvest on the same synthetic root reported `patch_candidates: 0` and `groups_written: 0` for `synthetic_controls_0_0`, while patterned controls remained harvestable
+- important boundary:
+	- this first slice generates deterministic synthetic controls only; it does not yet synthesize hybrid controls by compositing harvested real tile payloads into fake tiles, which is still the next higher-value control-family follow-up
+
+### Apr 14, 2026 - `ml-harvest-brushes` now emits stitched brush layers and first-pass fractal visuals in `wow-viewer`
+
+- `wow-viewer/tools/converter/WowViewer.Tool.Converter/MlBrushImprintHarvester.cs` now writes additional deterministic brush-analysis outputs when harvesting succeeds:
+	- tile-level `tile_masks/*_fractal_detail.png`
+	- tile-level `tile_masks/*_fractal_candidate_mask.png`
+	- tile-level `tile_masks/*_layer_stack_depth.png`
+	- tile-level `tile_masks/*_fractal_stack_proxy.png`
+	- tile-level `tile_masks/*_fractal_stack_candidate_mask.png`
+	- stitched full-map layers under `brush_imprints/stitched/` when multiple tile masks exist, currently:
+		- `<map>_full_brush_mask.png`
+		- `<map>_full_fractal_detail.png`
+		- `<map>_full_fractal_candidate_mask.png`
+		- `<map>_full_layer_stack_depth.png`
+		- `<map>_full_fractal_stack_proxy.png`
+		- `<map>_full_fractal_stack_candidate_mask.png`
+- tile summaries in `brush_imprint_manifest.json` now carry:
+	- `fractal_detail_path`
+	- `fractal_candidate_mask_path`
+	- `layer_stack_depth_path`
+	- `fractal_stack_proxy_path`
+	- `fractal_stack_candidate_mask_path`
+	- `fractal_mean_score`
+	- `fractal_max_score`
+	- `fractal_stack_mean_score`
+	- `fractal_stack_max_score`
+	- `layer_stack_max_depth`
+- group JSONs now also carry per-group `fractal_detail_score` and `fractal_candidate` using the same multiscale residual family already used downstream in the prefab-library Python tooling
+- bounded real-data proof succeeded with:
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug -- ml-harvest-brushes --dataset-root i:/parp/parp-tools/datasets/original_development/development --output-dir i:/parp/parp-tools/output/build-validation/brush-imprints/original_development_fractal_stitch_probe_20260414 --limit 6 --write-previews`
+	- output wrote stitched files:
+		- `stitched/development_full_brush_mask.png`
+		- `stitched/development_full_fractal_detail.png`
+		- `stitched/development_full_fractal_candidate_mask.png`
+		- `stitched/development_full_layer_stack_depth.png`
+		- `stitched/development_full_fractal_stack_proxy.png`
+		- `stitched/development_full_fractal_stack_candidate_mask.png`
+	- probe manifest recorded new tile-level fractal paths and scores for all six processed tiles, while group JSONs on real brush-bearing tiles such as `development_0_0_g0001.json` recorded nonzero `fractal_detail_score` values above the current candidate threshold
+- current limitation:
+	- the new stacked outputs are still a chunk-layer-count proxy fused with the existing multiscale height residual, not true layered-alpha reconstruction, because the inspected harvested corpora still show `alpha_bits: null`, `alpha_path: null`, `alpha_masks: []`, and `alpha_atlas: null`
+- important boundary:
+	- there is still no first-party automated test project covering `WowViewer.Tool.Converter`; this slice is currently proven by `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` plus the bounded real-data harvest above
+
 ### Apr 14, 2026 - `original_development` is now applied to a staged 4.0.0.11927 base client
 
 - added a reusable overlay-staging helper at `gillijimproject_refactor/scripts/stage_original_development_overlay.ps1`

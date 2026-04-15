@@ -172,6 +172,65 @@ public sealed class VlmDatasetExporterTests
     }
 
     [Fact]
+    public async Task ReplaceMaskedPixelsWithBakedChunksAsync_UsesNearestChunkBaseTextureFallback()
+    {
+        using Image<Rgba32> result = new(32, 32);
+        using Image<L8> mask = new(32, 32);
+
+        for (int y = 0; y < result.Height; y++)
+        {
+            for (int x = 0; x < result.Width; x++)
+                result[x, y] = new Rgba32(10, 20, 30, 255);
+        }
+
+        for (int y = 2; y < 4; y++)
+        {
+            for (int x = 2; x < 4; x++)
+                mask[x, y] = new L8(255);
+        }
+
+        VlmChunkLayers[] chunks =
+        [
+            new(
+                ChunkIndex: 0,
+                Layers:
+                [
+                    new(TextureId: 1, TexturePath: "Textures/terrain/grass.blp", Flags: 0, AlphaOffset: 0, EffectId: 0)
+                ]),
+            new(
+                ChunkIndex: 17,
+                Layers: [])
+        ];
+
+        List<(int ChunkIndex, string? FallbackTexturePath)> calls = [];
+
+        async Task<Image<Rgba32>?> BakeChunkAsync(VlmChunkLayers chunk, string? fallbackTexturePath)
+        {
+            calls.Add((chunk.ChunkIndex, fallbackTexturePath));
+
+            if (chunk.ChunkIndex != 17)
+                return null;
+
+            Image<Rgba32> baked = new(2, 2);
+            for (int y = 0; y < baked.Height; y++)
+            {
+                for (int x = 0; x < baked.Width; x++)
+                    baked[x, y] = new Rgba32(200, 150, 100, 255);
+            }
+
+            return await Task.FromResult<Image<Rgba32>?>(baked);
+        }
+
+        bool replaced = await VlmDatasetExporter.ReplaceMaskedPixelsWithBakedChunksAsync(result, mask, chunks, BakeChunkAsync);
+
+        Assert.True(replaced);
+        Assert.Single(calls);
+        Assert.Equal((17, "Textures/terrain/grass.blp"), calls[0]);
+        Assert.Equal(new Rgba32(200, 150, 100, 255), result[2, 2]);
+        Assert.Equal(new Rgba32(10, 20, 30, 255), result[0, 0]);
+    }
+
+    [Fact]
     public void RenderChunkValueMap_FillsChunkBlocksWithUInt16Values()
     {
         ushort[] values = new ushort[256];

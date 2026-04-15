@@ -50,7 +50,7 @@ public record VlmTerrainData(
     [property: JsonPropertyName("no_liquid_minimap")] string? NoLiquidMinimapPath,
     [property: JsonPropertyName("no_mccv_minimap")] string? NoMccvMinimapPath,
 
-    // Exported object visibility mask and synthesized minimap with visible objects inpainted out.
+    // Exported object visibility mask and synthesized minimap with visible objects replaced by terrain rebake.
     [property: JsonPropertyName("object_visibility_mask")] string? ObjectVisibilityMaskPath,
     [property: JsonPropertyName("pm4_mask")] string? Pm4MaskPath,
     [property: JsonPropertyName("no_object_minimap")] string? NoObjectMinimapPath,

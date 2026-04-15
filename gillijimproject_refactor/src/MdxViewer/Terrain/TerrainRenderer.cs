@@ -1504,7 +1504,9 @@ void main() {
         result = mix(result, c3.rgb * lighting, a3);
     }
 
-    vec3 vertexTint = (uUseMccv == 1) ? clamp(vVertexColor.rgb * 2.0, 0.0, 2.0) : vec3(1.0);
+    vec3 tintColor = clamp(vVertexColor.rgb * 2.0, 0.0, 2.0);
+    float tintStrength = clamp(vVertexColor.a * 2.0 - 1.0, 0.0, 1.0);
+    vec3 vertexTint = (uUseMccv == 1) ? mix(vec3(1.0), tintColor, tintStrength) : vec3(1.0);
     result *= vertexTint;
 
     if (uShowShadowMap == 1 && uHasShadowMap == 1) {
@@ -1708,7 +1710,9 @@ void main() {
         result = mix(result, c3.rgb * lighting, a3);
     }
 
-    vec3 vertexTint = (uUseMccv == 1) ? clamp(vVertexColor.rgb * 2.0, 0.0, 2.0) : vec3(1.0);
+    vec3 tintColor = clamp(vVertexColor.rgb * 2.0, 0.0, 2.0);
+    float tintStrength = clamp(vVertexColor.a * 2.0 - 1.0, 0.0, 1.0);
+    vec3 vertexTint = (uUseMccv == 1) ? mix(vec3(1.0), tintColor, tintStrength) : vec3(1.0);
     result *= vertexTint;
 
     if (uShowShadowMap == 1) {

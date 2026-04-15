@@ -56,6 +56,8 @@ import argparse
 import json
 import random
 import re
+import shutil
+import subprocess
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -98,6 +100,285 @@ from v7_object_masks import (
 
 HEIGHT_GLOBAL_MIN = -1000.0
 HEIGHT_GLOBAL_MAX = 3000.0
+INPUT_SIZE = OUTPUT_SIZE
+
+WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
+DEFAULT_OUTPUT_DIR = WORKSPACE_ROOT / "output" / "ml-training" / "v7_5_1"
+DEFAULT_SYNTHETIC_CONTROL_ROOT = WORKSPACE_ROOT / "output" / "build-validation" / "training_synthetic_controls"
+DEFAULT_BATCH_SIZE = 4
+DEFAULT_LEARNING_RATE = 1e-4
+DEFAULT_NUM_EPOCHS = 500
+DEFAULT_EARLY_STOP_PATIENCE = 25
+DEFAULT_EARLY_STOP_START_EPOCH = 8
+DEFAULT_ADVERSARIAL_SCALE = 0.10
+DEFAULT_START_GAN_EPOCH = 101
+DEFAULT_GAN_CYCLE_LENGTH = 0
+DEFAULT_GAN_CYCLE_ON_EPOCHS = 0
+DEFAULT_GAN_COOLDOWN_AFTER_BEST = 4
+DEFAULT_GAN_BURST_AFTER_BEST = 0
+DEFAULT_GAN_PATIENCE = 8
+DEFAULT_GAN_MIN_GAP_EPOCHS = 2
+DEFAULT_CONCEPT_RECOVERY_EPOCHS = 3
+DISCRIMINATOR_LR = 5e-5
+DEFAULT_DISC_REAL_TARGET = 0.95
+DEFAULT_DISC_FAKE_TARGET = 0.05
+DEFAULT_DISC_LABEL_NOISE = 0.03
+DEFAULT_DISC_INPUT_NOISE_STD = 0.01
+DEFAULT_DISC_GRAD_CLIP = 1.0
+DEFAULT_DISC_EVERY = 1
+DEFAULT_LR_PLATEAU_PATIENCE = 5
+DEFAULT_LR_PLATEAU_FACTOR = 0.5
+DEFAULT_VAL_FRACTION = 0.10
+DEFAULT_SPATIAL_GROUP_SIZE = 4
+DEFAULT_SEED = 1337
+DEFAULT_STATIC_PREVIEW_COUNT = 4
+DEFAULT_RANDOM_PREVIEW_COUNT = 4
+DEFAULT_PREVIEW_COUNT = 4
+DEFAULT_TRAIN_WORKERS = 0
+DEFAULT_VAL_WORKERS = 0
+DEFAULT_PREFETCH_FACTOR = 2
+DEFAULT_LIVE_LOG_EVERY = 10
+DEFAULT_AMP_DTYPE = "auto"
+DEFAULT_BLUR_SIGMA = 0.5
+DEFAULT_BRUSH_SAMPLE_BONUS = 1.75
+DEFAULT_BRUSH_PATCH_SCALE = 0.35
+DEFAULT_MIN_HEIGHT_RANGE = 8.0
+DEFAULT_SKIP_LIQUID_OBSCURED_TILES = True
+DEFAULT_MAX_LIQUID_OBSCURED_COVERAGE = 0.95
+DEFAULT_MAX_LIQUID_OBSCURED_COMBINED_VARIANCE = 0.0015
+DEFAULT_MAX_LIQUID_OBSCURED_COMBINED_GRADIENT = 0.03
+DEFAULT_SKIP_MALFORMED_EMERALDDREAM_MINIMAPS = True
+DEFAULT_EMERALDDREAM_MALFORMED_VARIANCE = 0.0008
+DEFAULT_EMERALDDREAM_MALFORMED_GRADIENT = 0.015
+DEFAULT_EMERALDDREAM_MALFORMED_EXTREME_FRACTION = 0.35
+DEFAULT_MAX_CURATED_LIQUID_COVERAGE = 0.85
+DEFAULT_USE_WDL_GLOBAL_TRESTLE = True
+PREVIEW_MIN_VISUAL_VARIANCE = 0.002
+RECOVERY_FOCUS_GAIN = 2.0
+TRANSITION_FOCUS_GAIN = 2.0
+EDGE_FOCUS_WIDTH = 12
+MASKED_RGB_ATTENUATION = 0.85
+MASKED_NORMAL_ATTENUATION = 0.70
+DATASET_INDEX_CACHE_VERSION = 2
+DATASET_INDEX_CACHE_FILE = ".train_v7_index.json"
+BRUSH_MANIFEST_FILE = "brush_imprint_manifest.json"
+DEFAULT_DATASET_SEARCH_ROOTS = [
+    WORKSPACE_ROOT / "datasets",
+    WORKSPACE_ROOT / "output" / "build-validation",
+]
+PINNED_VALIDATION_REFERENCE_TILES = (
+    ("synthetic_controls", "synthetic_controls_0_0"),
+)
+PROFILE_PRESETS = {
+    "manual": {
+        "description": "Use only explicit --dataset-root values.",
+        "include_maps": [],
+        "discover": [],
+    },
+    "development-map": {
+        "description": "Discover active grounded terrain corpus roots and synthetic control roots.",
+        "include_maps": [],
+        "discover": [
+            {
+                "label": "development",
+                "map_tokens": ["development"],
+                "build_tokens": ["original", "development", "11927", "4_0_0"],
+            },
+            {
+                "label": "classic",
+                "map_tokens": ["emeralddream", "azeroth"],
+                "build_tokens": ["0_7_0", "3694", "classic", "alpha"],
+            },
+            {
+                "label": "wrath",
+                "map_tokens": [
+                    "emeralddream",
+                    "azeroth",
+                    "northrend",
+                    "pvpzone01",
+                    "pvpzone02",
+                    "pvpzone03",
+                    "pvpzone04",
+                ],
+                "build_tokens": ["3_0_1", "8303", "3_3_5", "12340", "wrath", "lk"],
+            },
+            {
+                "label": "cata",
+                "map_tokens": ["azeroth", "kalimdor", "deepholm", "lostisles", "lost_isles", "development"],
+                "build_tokens": ["4_0_0", "11927", "cata", "cataclysm"],
+            },
+        ],
+    },
+}
+
+
+@dataclass(frozen=True)
+class TileSample:
+    dataset_root: Path
+    dataset_name: str
+    json_path: Path
+    tile_name: str
+    map_name: str
+    tile_x: int
+    tile_y: int
+    minimap_path: Path
+    normalmap_path: Optional[Path]
+    heightmap_global_path: Path
+    heightmap_local_path: Path
+    liquid_mask_path: Optional[Path]
+    liquid_height_path: Optional[Path]
+    brush_mask_path: Optional[Path]
+    brush_patch_candidates: int
+    brush_groups_written: int
+    height_range: float
+    object_count: int
+    has_liquid: bool
+    liquid_coverage: float
+    synthetic_control_name: Optional[str] = None
+    synthetic_expected_interest_class: Optional[str] = None
+    synthetic_expected_brush_groups: Optional[int] = None
+    synthetic_expected_layer_stack_depth: Optional[int] = None
+
+    @property
+    def is_synthetic_control(self) -> bool:
+        return bool(self.synthetic_control_name)
+
+
+def normalize_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value).strip().lower())
+
+
+def parse_tile_identity(tile_name: str) -> Optional[Tuple[str, int, int]]:
+    match = re.match(r"^(?P<map>.+)_(?P<x>-?\d+)_(?P<y>-?\d+)$", str(tile_name).strip())
+    if not match:
+        return None
+    return match.group("map"), int(match.group("x")), int(match.group("y"))
+
+
+def optional_text(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _synthetic_manifest_path(dataset_root: Path) -> Path:
+    return dataset_root / "synthetic_control_manifest.json"
+
+
+def _synthetic_brush_manifest_path(dataset_root: Path) -> Path:
+    return dataset_root / "brush_imprints" / BRUSH_MANIFEST_FILE
+
+
+def _synthetic_control_tiles(dataset_root: Path) -> set[str]:
+    manifest_path = _synthetic_manifest_path(dataset_root)
+    if manifest_path.exists():
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            return {
+                str(control.get("tile_name", "")).strip().lower()
+                for control in payload.get("controls", [])
+                if str(control.get("tile_name", "")).strip()
+            }
+        except Exception:
+            return set()
+
+    dataset_dir = dataset_root / "dataset"
+    if not dataset_dir.exists():
+        return set()
+
+    return {path.stem.lower() for path in dataset_dir.glob("*.json")}
+
+
+def _run_dotnet_command(command: Sequence[str], cwd: Path) -> bool:
+    try:
+        completed = subprocess.run(
+            list(command),
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as exc:
+        print(f"Warning: failed to run {' '.join(command)}: {exc}")
+        return False
+
+    if completed.returncode == 0:
+        if completed.stdout.strip():
+            print(completed.stdout.strip())
+        return True
+
+    print(f"Warning: command failed ({completed.returncode}): {' '.join(command)}")
+    if completed.stdout.strip():
+        print(completed.stdout.strip())
+    if completed.stderr.strip():
+        print(completed.stderr.strip())
+    return False
+
+
+def ensure_synthetic_control_root(args: argparse.Namespace) -> Optional[Path]:
+    if getattr(args, "no_synthetic_controls", False):
+        return None
+
+    dataset_root = Path(args.synthetic_control_root) if args.synthetic_control_root else DEFAULT_SYNTHETIC_CONTROL_ROOT
+    dataset_root = dataset_root.resolve()
+    manifest_path = _synthetic_manifest_path(dataset_root)
+    brush_manifest_path = _synthetic_brush_manifest_path(dataset_root)
+    converter_project = WORKSPACE_ROOT / "wow-viewer" / "tools" / "converter" / "WowViewer.Tool.Converter" / "WowViewer.Tool.Converter.csproj"
+
+    if not shutil.which("dotnet"):
+        if manifest_path.exists():
+            return dataset_root
+        print("Warning: dotnet is not available, so synthetic controls cannot be auto-generated.")
+        return None
+
+    if not converter_project.exists():
+        if manifest_path.exists():
+            return dataset_root
+        print(f"Warning: synthetic control generator project not found: {converter_project}")
+        return None
+
+    should_generate = bool(getattr(args, "regenerate_synthetic_controls", False)) or not manifest_path.exists()
+    if should_generate:
+        dataset_root.mkdir(parents=True, exist_ok=True)
+        print(f"Ensuring synthetic control dataset at {dataset_root}")
+        generation_ok = _run_dotnet_command(
+            [
+                "dotnet",
+                "run",
+                "--project",
+                str(converter_project),
+                "--",
+                "ml-generate-controls",
+                "--dataset-root",
+                str(dataset_root),
+            ],
+            cwd=WORKSPACE_ROOT,
+        )
+        if not generation_ok or not manifest_path.exists():
+            return None
+
+    should_harvest = bool(getattr(args, "regenerate_synthetic_controls", False)) or not brush_manifest_path.exists()
+    if should_harvest:
+        print(f"Ensuring synthetic brush harvest at {dataset_root / 'brush_imprints'}")
+        _run_dotnet_command(
+            [
+                "dotnet",
+                "run",
+                "--project",
+                str(converter_project),
+                "--",
+                "ml-harvest-brushes",
+                "--dataset-root",
+                str(dataset_root),
+                "--output-dir",
+                str(dataset_root / "brush_imprints"),
+            ],
+            cwd=WORKSPACE_ROOT,
+        )
+
+    return dataset_root if manifest_path.exists() else None
 
 def tile_uv_candidates(world_a: float, world_b: float, tile_x: int, tile_y: int) -> List[Tuple[float, float]]:
     """Return plausible tile-local UV candidates for map-space and centered-world conventions."""
@@ -152,6 +433,20 @@ def discover_profile_roots(profile_name: str, search_roots: Sequence[str]) -> Li
                     seen.add(child)
                     discovered.append(child)
                     break
+
+            for nested in sorted(child.iterdir()):
+                if not nested.is_dir():
+                    continue
+                if is_quarantined_root(nested):
+                    continue
+                normalized_nested_name = normalize_token(nested.name)
+                for rule in profile["discover"]:
+                    map_hit = any(normalize_token(token) in normalized_nested_name for token in rule["map_tokens"])
+                    build_hit = any(normalize_token(token) in normalized_name for token in rule["build_tokens"])
+                    if map_hit and build_hit and nested not in seen:
+                        seen.add(nested)
+                        discovered.append(nested)
+                        break
 
     return discovered
 
@@ -297,6 +592,7 @@ class WoWTileDatasetV7(Dataset):
             if normalize_dataset_map_root(root_key)
         }
         self.samples: List[TileSample] = list(preloaded_samples) if preloaded_samples is not None else []
+        self._map_to_indices: Dict[str, List[int]] = {}
 
         self.to_tensor = transforms.ToTensor()
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -309,6 +605,7 @@ class WoWTileDatasetV7(Dataset):
         self.rejected_tiles: List[Dict[str, object]] = []
 
         if preloaded_samples is not None:
+            self._rebuild_map_indices()
             print(f"Reusing preloaded V7 sample index ({len(self.samples)} samples)")
             return
 
@@ -328,7 +625,19 @@ class WoWTileDatasetV7(Dataset):
             )
             self.rejected_tiles.extend(rejected_entries)
 
+        self._rebuild_map_indices()
         print(f"Loaded {len(self.samples)} valid samples (V7.5.1 strict mode, {blank_skipped} blank tiles skipped)")
+
+    def _rebuild_map_indices(self) -> None:
+        self._map_to_indices = {}
+        for index, sample in enumerate(self.samples):
+            self._map_to_indices.setdefault(sample.map_name, []).append(index)
+
+    def get_map_indices(self) -> Dict[str, List[int]]:
+        return self._map_to_indices
+
+    def __len__(self) -> int:
+        return len(self.samples)
 
     def _collect_root_samples(self, dataset_root: Path, limit: Optional[int]) -> Tuple[List[TileSample], int, Dict[str, int], List[Dict[str, object]]]:
         dataset_dir = dataset_root / "dataset"
@@ -389,7 +698,11 @@ class WoWTileDatasetV7(Dataset):
             # Skip blank/flat tiles (ocean, void) that have no useful height variation
             height_min = float(entry.get("height_min", 0.0))
             height_max = float(entry.get("height_max", 0.0))
-            if (height_max - height_min) < self.min_height_range:
+            synthetic_control_name = optional_text(entry.get("synthetic_control_name"))
+            synthetic_expected_interest_class = optional_text(entry.get("synthetic_expected_interest_class"))
+            synthetic_expected_brush_groups = entry.get("synthetic_expected_brush_groups")
+            synthetic_expected_layer_stack_depth = entry.get("synthetic_expected_layer_stack_depth")
+            if (height_max - height_min) < self.min_height_range and not synthetic_control_name:
                 blank_skipped += 1
                 rejected["height_range_too_low"] += 1
                 continue
@@ -397,7 +710,7 @@ class WoWTileDatasetV7(Dataset):
             heightmap_global_rel = entry.get("heightmap_global")
             heightmap_local_rel = entry.get("heightmap_local")
             normalmap_rel = entry.get("normalmap")
-            if not heightmap_global_rel or not heightmap_local_rel or not normalmap_rel:
+            if not heightmap_global_rel or not heightmap_local_rel or (not normalmap_rel and not synthetic_control_name):
                 rejected["missing_path_refs"] += 1
                 continue
 
@@ -412,10 +725,11 @@ class WoWTileDatasetV7(Dataset):
                 if fallback_minimap:
                     minimap_path = dataset_root / str(fallback_minimap)
 
-            normalmap_path = dataset_root / normalmap_rel
+            normalmap_path = dataset_root / normalmap_rel if normalmap_rel else None
             heightmap_global_path = dataset_root / heightmap_global_rel
             heightmap_local_path = dataset_root / heightmap_local_rel
-            if not minimap_path.exists() or not normalmap_path.exists() or not heightmap_global_path.exists() or not heightmap_local_path.exists():
+            missing_normalmap = normalmap_path is not None and not normalmap_path.exists()
+            if not minimap_path.exists() or missing_normalmap or not heightmap_global_path.exists() or not heightmap_local_path.exists():
                 rejected["missing_input_files"] += 1
                 continue
 
@@ -431,10 +745,13 @@ class WoWTileDatasetV7(Dataset):
                 minimap_metrics = _image_signal_metrics(minimap_path)
                 self._image_signal_cache[minimap_path] = minimap_metrics
 
-            normal_metrics = self._image_signal_cache.get(normalmap_path)
-            if normal_metrics is None:
-                normal_metrics = _image_signal_metrics(normalmap_path)
-                self._image_signal_cache[normalmap_path] = normal_metrics
+            if normalmap_path is not None:
+                normal_metrics = self._image_signal_cache.get(normalmap_path)
+                if normal_metrics is None:
+                    normal_metrics = _image_signal_metrics(normalmap_path)
+                    self._image_signal_cache[normalmap_path] = normal_metrics
+            else:
+                normal_metrics = {"variance": 0.0, "gradient": 0.0, "extreme_fraction": 0.0}
 
             liquid_coverage = 0.0
             if liquid_mask_path and liquid_mask_path.exists():
@@ -516,6 +833,10 @@ class WoWTileDatasetV7(Dataset):
                     object_count=tile_object_count,
                     has_liquid=tile_has_liquid,
                     liquid_coverage=liquid_coverage,
+                    synthetic_control_name=synthetic_control_name,
+                    synthetic_expected_interest_class=synthetic_expected_interest_class,
+                    synthetic_expected_brush_groups=int(synthetic_expected_brush_groups) if synthetic_expected_brush_groups is not None else None,
+                    synthetic_expected_layer_stack_depth=int(synthetic_expected_layer_stack_depth) if synthetic_expected_layer_stack_depth is not None else None,
                 )
             )
 
@@ -530,6 +851,58 @@ class WoWTileDatasetV7(Dataset):
             f"invalid tile ids {rejected['tile_name_invalid']})"
         )
         return collected, blank_skipped, rejected, rejected_entries
+
+    def _build_index_entries(self, json_paths: Sequence[Path]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+        entries: List[Dict[str, Any]] = []
+        stats = {
+            "json_read_error": 0,
+            "tile_name_invalid": 0,
+        }
+
+        for json_path in json_paths:
+            try:
+                with open(json_path, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except Exception:
+                stats["json_read_error"] += 1
+                continue
+
+            terrain = payload.get("terrain_data", {})
+            tile_name = str(terrain.get("adt_tile") or json_path.stem)
+            parsed = parse_tile_identity(tile_name)
+            if parsed is None:
+                stats["tile_name_invalid"] += 1
+                continue
+
+            map_name, tile_x, tile_y = parsed
+            synthetic_control = payload.get("synthetic_control") or {}
+            entries.append(
+                {
+                    "json_name": json_path.name,
+                    "tile_name": tile_name,
+                    "map_name": map_name,
+                    "tile_x": tile_x,
+                    "tile_y": tile_y,
+                    "height_min": float(terrain.get("height_min", 0.0) or 0.0),
+                    "height_max": float(terrain.get("height_max", 0.0) or 0.0),
+                    "heightmap_global": terrain.get("heightmap_global") or terrain.get("heightmap"),
+                    "heightmap_local": terrain.get("heightmap_local") or terrain.get("heightmap"),
+                    "normalmap": terrain.get("normalmap"),
+                    "image": payload.get("image"),
+                    "terrain_only_minimap": terrain.get("terrain_only_minimap"),
+                    "no_object_minimap": terrain.get("no_object_minimap"),
+                    "no_mccv_minimap": terrain.get("no_mccv_minimap"),
+                    "liquid_mask": terrain.get("liquid_mask"),
+                    "liquid_height": terrain.get("liquid_height"),
+                    "object_count": len(terrain.get("objects") or []),
+                    "synthetic_control_name": synthetic_control.get("name"),
+                    "synthetic_expected_interest_class": synthetic_control.get("expected_interest_class"),
+                    "synthetic_expected_brush_groups": synthetic_control.get("expected_brush_groups"),
+                    "synthetic_expected_layer_stack_depth": synthetic_control.get("expected_layer_stack_depth"),
+                }
+            )
+
+        return entries, stats
 
     def _build_index_signature(self, json_paths: Sequence[Path]) -> Dict[str, int]:
         latest_mtime_ns = 0
@@ -639,6 +1012,42 @@ class WoWTileDatasetV7(Dataset):
             return int(tile.get("patch_candidates", 0) or 0), int(tile.get("groups_written", 0) or 0)
 
         return 0, 0
+
+    def _resolve_brush_mask_path(self, dataset_root: Path, tile_name: str) -> Optional[Path]:
+        manifest = self._load_brush_manifest(dataset_root)
+        if manifest:
+            for tile in manifest.get("tiles", []):
+                if str(tile.get("tile_name", "")) != tile_name:
+                    continue
+                brush_rel = tile.get("brush_mask_path")
+                if brush_rel:
+                    candidate = dataset_root / str(brush_rel)
+                    if candidate.exists():
+                        return candidate
+
+        for candidate in (
+            dataset_root / "brush_imprints" / "tile_masks" / f"{tile_name}_brush_mask.png",
+            dataset_root / "brush_imprints" / f"{tile_name}_brush_mask.png",
+        ):
+            if candidate.exists():
+                return candidate
+
+        return None
+
+    def _render_wdl(self, wdl_data: Optional[Dict[str, object]], global_min: float, global_max: float) -> torch.Tensor:
+        if not wdl_data:
+            return torch.full((1, self.input_size, self.input_size), 0.5, dtype=torch.float32)
+
+        outer = np.asarray(wdl_data.get("outer_17", []), dtype=np.float32)
+        if len(outer) != 289 or not np.all(np.isfinite(outer)):
+            return torch.full((1, self.input_size, self.input_size), 0.5, dtype=torch.float32)
+
+        grid = outer.reshape(17, 17)
+        global_range = max(float(global_max - global_min), 1e-6)
+        grid = np.clip((grid - float(global_min)) / global_range, 0.0, 1.0)
+        tensor = torch.from_numpy(grid).unsqueeze(0).unsqueeze(0)
+        tensor = F.interpolate(tensor, size=(self.input_size, self.input_size), mode="bilinear", align_corners=True)
+        return tensor.squeeze(0)
 
     def _load_optional_binary_mask(self, dataset_root: Path, terrain: Dict[str, object], keys: Sequence[str]) -> torch.Tensor:
         for key in keys:
@@ -834,7 +1243,10 @@ class WoWTileDatasetV7(Dataset):
         terrain = payload.get("terrain_data", {})
 
         minimap = Image.open(sample.minimap_path).convert("RGB")
-        normalmap = Image.open(sample.normalmap_path).convert("RGB")
+        if sample.normalmap_path and sample.normalmap_path.exists():
+            normalmap = Image.open(sample.normalmap_path).convert("RGB")
+        else:
+            normalmap = Image.new("RGB", minimap.size, (128, 128, 255))
         minimap = minimap.resize((self.input_size, self.input_size), Image.BILINEAR)
         normalmap = normalmap.resize((self.input_size, self.input_size), Image.BILINEAR)
 
@@ -1252,12 +1664,14 @@ def curate_training_set(
         for idx in train_indices
         if samples[idx].has_liquid and samples[idx].liquid_coverage <= DEFAULT_MAX_CURATED_LIQUID_COVERAGE
     }
+    synthetic_tiles = {idx for idx in train_indices if samples[idx].is_synthetic_control}
 
     rng.shuffle(tier_mid)
     rng.shuffle(tier_low)
 
     selected: set[int] = set(tier_high)
     selected.update(water_tiles)
+    selected.update(synthetic_tiles)
     selected.update(tier_mid[: int(len(tier_mid) * 0.50)])
     selected.update(tier_low[: int(len(tier_low) * 0.20)])
 
@@ -1756,6 +2170,16 @@ def train(args: argparse.Namespace) -> None:
 
     dataset_roots = resolve_dataset_roots(args)
     tile_allowlist_by_root = load_tile_allowlist_by_root(args.tile_manifest)
+    synthetic_control_root = ensure_synthetic_control_root(args)
+    if synthetic_control_root is not None and synthetic_control_root not in dataset_roots:
+        dataset_roots.append(synthetic_control_root)
+
+    if synthetic_control_root is not None and tile_allowlist_by_root:
+        synthetic_root_key = dataset_root_key(synthetic_control_root)
+        synthetic_tiles = _synthetic_control_tiles(synthetic_control_root)
+        if synthetic_tiles:
+            tile_allowlist_by_root.setdefault(synthetic_root_key, set()).update(synthetic_tiles)
+
     include_maps = list(args.include_map)
     if not include_maps and args.profile != "manual":
         include_maps = list(PROFILE_PRESETS[args.profile]["include_maps"])
@@ -1769,6 +2193,8 @@ def train(args: argparse.Namespace) -> None:
     print("Dataset roots:")
     for root in dataset_roots:
         print(f"  - {root}")
+    if synthetic_control_root is not None:
+        print(f"Synthetic control root: {synthetic_control_root}")
     if tile_allowlist_by_root:
         allowlist_tile_count = sum(len(tiles) for tiles in tile_allowlist_by_root.values())
         print(
@@ -2416,6 +2842,9 @@ def train(args: argparse.Namespace) -> None:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train the V7.5.1 multichannel terrain regressor with cleaned dataset export, terrain-only minimap cleanup, GAN, and curated data.")
     parser.add_argument("--dataset-root", action="append", default=[], help="Explicit dataset root. Repeat for multiple roots.")
+    parser.add_argument("--synthetic-control-root", type=str, help="Optional synthetic control dataset root. Defaults to the shared build-validation control root.")
+    parser.add_argument("--no-synthetic-controls", action="store_true", help="Disable automatic synthetic control generation and dataset inclusion.")
+    parser.add_argument("--regenerate-synthetic-controls", action="store_true", help="Force regeneration and brush re-harvest of the synthetic control dataset before training.")
     parser.add_argument(
         "--tile-manifest",
         type=str,

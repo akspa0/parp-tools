@@ -54,9 +54,9 @@ public static class VlmMinimapCleanupService
                 Rgba32 tint = DecodeStoredMccvColor(overlay[x, y]);
 
                 working[x, y] = new Rgba32(
-                    RemoveTint(src.R, tint.R),
-                    RemoveTint(src.G, tint.G),
-                    RemoveTint(src.B, tint.B),
+                    RemoveTint(src.R, tint.R, tint.A),
+                    RemoveTint(src.G, tint.G, tint.A),
+                    RemoveTint(src.B, tint.B, tint.A),
                     src.A);
             }
         }
@@ -66,10 +66,14 @@ public static class VlmMinimapCleanupService
         return ms.ToArray();
     }
 
-    private static byte RemoveTint(byte source, byte tintChannel)
+    private static byte RemoveTint(byte source, byte tintChannel, byte tintAlpha)
     {
-        // Match MdxViewer's terrain shader: vertexTint = clamp(vVertexColor.rgb * 2.0, 0.0, 2.0)
-        float tintFactor = Math.Clamp((tintChannel / 255f) * 2f, 1f / 255f, 2f);
+        // Match MdxViewer's terrain shader: RGB encodes the tint color around mid-gray,
+        // and alpha gates how strongly that tint is applied. Alpha values at or below
+        // mid-gray remain neutral so transparent MCCV regions do not darken terrain.
+        float tintColor = Math.Clamp((tintChannel / 255f) * 2f, 0f, 2f);
+        float tintStrength = Math.Clamp((tintAlpha / 255f) * 2f - 1f, 0f, 1f);
+        float tintFactor = Math.Clamp(1f + ((tintColor - 1f) * tintStrength), 1f / 255f, 2f);
         return (byte)Math.Clamp((int)MathF.Round(source / tintFactor), 0, 255);
     }
 

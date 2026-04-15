@@ -36,6 +36,12 @@ string[] tail = args.Skip(1).ToArray();
 	case "ml-harvest-brushes":
 		MlBrushImprintHarvester.Run(tail);
 		break;
+	case "ml-generate-controls":
+		MlSyntheticControlGenerator.Run(tail);
+		break;
+	case "ml-repair-normalmaps":
+		MlRepairNormalmapsCommand.Run(tail);
+		break;
 	case "ml-synth-no-liquid":
 		RunMlSynthNoLiquid(tail);
 		break;
@@ -1284,6 +1290,8 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter ml-corpus --config <ml-corpus.json> [--archive-root <path>] [--output-root <path>] [--dry-run]");
 	Console.WriteLine("  wowviewer-converter ml-audit-signals --dataset-root <path> [--output <report.json>] [--limit <count>]");
 	Console.WriteLine("  wowviewer-converter ml-harvest-brushes --dataset-root <path> [--output-dir <dir>] [--limit <count>] [--write-previews]");
+	Console.WriteLine("  wowviewer-converter ml-generate-controls [--dataset-root <path>] [--map-name <name>]");
+	Console.WriteLine("  wowviewer-converter ml-repair-normalmaps --dataset-root <path> [--report <report.json>] [--limit <count>] [--rewrite-existing] [--rewrite-when-local-differs <mae>] [--only-liquid-tiles] [--dry-run]");
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input <minimap.png> --mask <liquid-mask.png> --output <no-liquid.png>");
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input-dir <images> --mask-dir <masks> --output-dir <images>");
 }
