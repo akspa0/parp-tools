@@ -1008,6 +1008,24 @@ This mirrors the later native probe/warm-up pattern closely enough that the Cata
 - what is still missing is live runtime confirmation in x64dbg for at least one contiguous choose/load/init/effect chain and at least one world-path sample
 - the attempted x64dbg continuation in this session failed when the debug session dropped while trying to recover the live module base for rebased breakpoints
 
+#### Cataclysm Wolf skin header sanity from first-party runtime proof (Apr 15, 2026)
+
+Real `wow-viewer` runtime debugging against the fixed local client root `H:/CLIENTS/World of Warcraft Cata beta 11927` surfaced one concrete semantic correction for the strict numbered-skin path.
+
+- target asset: `Creature/Wolf/Wolf.m2` with exact `Creature/Wolf/Wolf00.skin`
+- the active proof showed:
+	- geometry vertices: `557`
+	- skin vertex lookup count: `557`
+	- strict skin header field at `0x2C`: `53`
+- treating that `0x2C` field as a blind vertex base offset produced the user-visible collapsed random-geometry result, because the runtime shifted most local skin lookup entries by `53` before resolving them into the MD20 vertex table
+- for this asset, `53` instead matches the wowdev-observed `boneCountMax` family (`256`, `64`, `53`, `21`) and is not a sane LOD0 vertex-base value for a full-count local lookup table
+- the corrected first-party runtime now resolves the direct skin lookup entry first and only treats the extra header field as a fallback when the direct lookup is invalid
+- the same pass also showed that optional Cataclysm shadow-batch metadata must be validated before acceptance; otherwise payload bytes can be misreported as impossible values such as `shadowBatches=393221`
+
+This does not fully settle the cross-build meaning of header field `0x2C` for every M2 family, but it does close one real Cataclysm correctness bug: `Creature/Wolf/Wolf00.skin` must not be rendered by blindly shifting its lookup table by that field.
+
+The same `Creature/Wolf/Wolf.m2` idle proof was then rerun on the fixed Wrath root `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft` and produced the same corrected counts and hashes (`render-frame = 86048f9de460bb5e75a557d526609700f4292b61ccc0f8eae4b4bd6206f012bb`, `software visual = 71aff63b3d0fba7e1eba03bcad894f2af0f2c87448fc9d706a976506b9f17ee5`). Keep the active runtime-debug baseline anchored to `3.3.5.12340`; the Cataclysm run here is useful cross-build evidence, not the default target unless the task explicitly moves there.
+
 #### Live open-path trace update (Apr 02, 2026)
 
 After restarting x64dbg and reattaching to the same Win32 process, a targeted live trace sampled the Storm open wrapper path at `FUN_004609b0`:

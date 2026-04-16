@@ -46,3 +46,9 @@ These remain raw evidence or historical workflow inputs. They are still useful, 
 - Keep proof levels explicit: `static-only`, `runtime-only`, `static + runtime`, or `research`.
 - Do not infer later-build behavior from Wrath unless the build matrix says the evidence is direct.
 - Keep unresolved semantics visible instead of flattening them away.
+
+## Current Proof Surface
+
+- `WowViewer.Tool.Inspect m2 inspect --time-ms <ms> --golden-output <json> --render-frame-output <json> --visual-output <bmp>` is the detailed parser/runtime proof harness.
+- `WowViewer.App m2-frame --sequence-index <n> --time-ms <ms> --golden-output <json> --render-frame-output <json> --visual-output <bmp>` is the app-level consumer of the same runtime frame.
+- Matching golden, render-frame, and software-visual hashes prove deterministic runtime state across both consumers, not final visual renderer parity.

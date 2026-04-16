@@ -20,7 +20,9 @@ using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.M2;
 using WowViewer.Core.Maps;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Runtime.World.Visibility;
@@ -8660,6 +8662,13 @@ void main() {
         }
 
         WarcraftNetM2Adapter.ValidateModelProfile(m2Bytes, resolvedModelPath, profile, _dbcBuild);
+
+        if (TryLoadStandaloneCameraPathM2(m2Bytes, resolvedModelPath))
+        {
+            CaptureWorldReturnState();
+            return;
+        }
+
         var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
 
         Exception? lastError = null;
@@ -8785,6 +8794,32 @@ void main() {
         ViewerLog.Error(ViewerLog.Category.Mdx,
             $"[M2] {adaptFailure.Message} for '{resolvedModelPath}' (build={_dbcBuild ?? "unknown"}): {DescribeExceptionChain(lastError ?? adaptFailure)}");
         throw adaptFailure;
+    }
+
+    private bool TryLoadStandaloneCameraPathM2(byte[] m2Bytes, string resolvedModelPath)
+    {
+        if (!WarcraftNetM2Adapter.IsMd20(m2Bytes))
+            return false;
+
+        try
+        {
+            using MemoryStream stream = new(m2Bytes, writable: false);
+            M2ModelDocument model = M2ModelReader.Read(stream, resolvedModelPath);
+            if (!M2CameraPathOverlayBuilder.CanBuild(model))
+                return false;
+
+            M2CameraPathVisualization visualization = M2CameraPathOverlayBuilder.Build(model);
+            LoadStandaloneCameraPathModel(model, visualization, resolvedModelPath);
+            ViewerLog.Info(ViewerLog.Category.Mdx,
+                $"[M2] Loaded camera-path visualization for {Path.GetFileName(resolvedModelPath)}: cameras={model.CameraCount}, sequences={model.SequenceCount}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                $"[M2] Camera-path probe skipped for {Path.GetFileName(resolvedModelPath)}: {ex.Message}");
+            return false;
+        }
     }
 
     private static string DescribeExceptionChain(Exception ex, int maxDepth = 6)
@@ -9671,18 +9706,16 @@ void main() {
         _loadedWmo = null;
         _loadedMdx = null;
         _loadedM2Runtime = runtimeModel;
-        if (adaptedMdx != null)
-        {
-            string resolvedModelDir = modelDir ?? Path.GetDirectoryName(virtualPath ?? runtimeModel.Model.Identity.CanonicalModelPath) ?? string.Empty;
-            _renderer = new M2Renderer(
-                new MdxRenderer(_gl, adaptedMdx, resolvedModelDir, _dataSource, _texResolver, virtualPath ?? runtimeModel.Model.Identity.CanonicalModelPath, true, _dbcBuild),
-                runtimeModel,
-                virtualPath ?? runtimeModel.Model.Identity.CanonicalModelPath);
-        }
-        else
-        {
-            _renderer = new M2Renderer(_gl, runtimeModel, virtualPath ?? runtimeModel.Model.Identity.CanonicalModelPath);
-        }
+        string sourceModelPath = virtualPath ?? runtimeModel.Model.Identity.CanonicalModelPath;
+        _renderer = WowViewerM2RuntimeBridge.CreateRenderer(
+            _gl,
+            runtimeModel,
+            adaptedMdx,
+            modelDir,
+            _dataSource,
+            _texResolver,
+            _dbcBuild,
+            sourceModelPath);
 
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();
@@ -9697,9 +9730,10 @@ void main() {
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList()!;
 
-        string runtimeTypeLabel = adaptedMdx != null
-            ? "M2 (wow-viewer runtime + legacy draw backend)"
-            : "M2 (wow-viewer static runtime)";
+        bool usesNativeStaticRenderer = WowViewerM2RuntimeBridge.ShouldUseNativeStaticRenderer(adaptedMdx);
+        string runtimeTypeLabel = usesNativeStaticRenderer
+            ? "M2 (wow-viewer static renderer in MdxViewer)"
+            : "M2 (wow-viewer runtime + legacy draw backend)";
 
         _modelInfo = $"Type: {runtimeTypeLabel}\n" +
                      $"Version: {runtimeModel.Model.Version}\n" +
@@ -9719,9 +9753,66 @@ void main() {
 
         _modelInfo += "\nRuntime Notes:\n" +
                       "  Geometry is submitted from wow-viewer active skin sections.\n" +
+                      (usesNativeStaticRenderer
+                          ? "  Draw path is the wow-viewer static renderer in MdxViewer (enabled automatically for pure-runtime loads or via PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1).\n  Current shading uses primary-stage runtime textures and simple lighting, not full native material or animation parity.\n"
+                          : "  Draw path still uses the legacy MDX backend for textured compatibility while the wow-viewer runtime supplies geometry/state.\n") +
                       "  This slice is static-only; animation and full material parity are still pending.\n";
 
         _statusMessage = $"Loaded M2: {_loadedFileName} ({sectionCount} sections, {vertexCount:N0} verts, {triangleCount:N0} tris)";
+    }
+
+    private void LoadStandaloneCameraPathModel(M2ModelDocument cameraModel, M2CameraPathVisualization visualization, string virtualPath)
+    {
+        ArgumentNullException.ThrowIfNull(cameraModel);
+        ArgumentNullException.ThrowIfNull(visualization);
+
+        _loadedWmo = null;
+        _loadedMdx = null;
+        _loadedM2Runtime = null;
+        _renderer = new M2CameraPathRenderer(_gl, visualization, virtualPath);
+        ClearStandaloneCharacterCustomizationState(resetOverrides: true);
+
+        if (_autoFrameModelOnLoad)
+            FrameCurrentModel();
+
+        var info = new StringBuilder();
+        info.AppendLine("Type: M2 camera path");
+        info.AppendLine($"Version: {cameraModel.Version}");
+        info.AppendLine($"Name: {cameraModel.ModelName ?? Path.GetFileNameWithoutExtension(cameraModel.Identity.CanonicalModelPath)}");
+        info.AppendLine();
+        info.AppendLine($"Cameras: {cameraModel.CameraCount}");
+        info.AppendLine($"Sequences: {cameraModel.SequenceCount}");
+        info.AppendLine($"Bounds Radius: {cameraModel.BoundsRadius:F3}");
+        info.AppendLine();
+        info.AppendLine("Camera Definitions:");
+
+        foreach (M2CameraDefinition camera in cameraModel.Cameras)
+        {
+            string typeLabel = DescribeStandaloneCameraType(camera.Type);
+            string fovLabel = camera.HasAnimatedFieldOfView
+                ? "animated FoV"
+                : $"FoV {camera.StaticFieldOfView.GetValueOrDefault():F3} rad";
+            info.AppendLine($"  [{camera.Index}] {typeLabel}: near {camera.NearClip:F2}, far {camera.FarClip:F2}, {fovLabel}");
+        }
+
+        info.AppendLine();
+        info.AppendLine("Runtime Notes:");
+        info.AppendLine("  Geometry-less camera-only M2 assets are visualized as sampled camera and target paths.");
+        info.AppendLine("  This path intentionally bypasses .skin resolution because flyby cameras can be valid MD20 assets without mesh data.");
+
+        _modelInfo = info.ToString();
+        _statusMessage = $"Loaded M2 camera path: {_loadedFileName} ({cameraModel.CameraCount} cameras)";
+    }
+
+    private static string DescribeStandaloneCameraType(int cameraType)
+    {
+        return cameraType switch
+        {
+            0 => "portrait",
+            1 => "character info",
+            -1 => "flyby",
+            _ => $"type {cameraType}",
+        };
     }
 
     private MdxRuntimeSharedInfo? TryReadSharedMdxRuntimeInfo(string sourcePath, byte[] modelBytes)

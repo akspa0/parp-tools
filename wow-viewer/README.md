@@ -72,6 +72,10 @@ Current M2-native continuity note:
 - The staged workflow surface for this work now lives in `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md` and `.github/prompts/wow-viewer-m2-runtime/`.
 - Cross-build recovery from Wrath through 6.x now routes through `.github/prompts/m2-cross-build-native-investigation.prompt.md`.
 - The matching continuity plan lives in `../gillijimproject_refactor/plans/wow_viewer_m2_runtime_plan_2026-03-31.md`.
+- Current landed M2 runtime ownership now includes strict root/skin/section/material/external-animation seams, bone pose evaluation, CPU-side skinned render vertices, render-consumer pass state, resolved effect-object state, particle/ribbon submission descriptors, explicit scene family policies, and a deterministic golden-frame snapshot builder.
+- Camera-only `*_cam.m2` assets now also have a wow-viewer-owned runtime overlay contract: `M2CameraPathOverlayBuilder` and `M2CameraPathVisualization` classify geometry-less flyby models and produce sampled camera/target paths plus bounds for thin consumer adapters.
+- `WowViewer.App m2-frame` and `WowViewer.Tool.Inspect m2 inspect` now share the same runtime-frame pipeline; both can emit golden JSON, render-frame JSON, and software visual BMP proof outputs for fixed-asset validation.
+- The proof level is app/runtime/golden-state plus deterministic render-frame or software-visual proof, not active visual renderer, shader backend, particle/ribbon simulation, or `MdxViewer` runtime signoff yet.
 
 Current PM4 terminology policy:
 

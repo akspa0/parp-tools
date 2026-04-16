@@ -19,6 +19,8 @@ public static class M2ModelReader
     private const int SequenceOffsetOffset = 0x20;
     private const int SequenceLookupCountOffset = 0x24;
     private const int SequenceLookupOffsetOffset = 0x28;
+    private const int BoneCountOffset = 0x2C;
+    private const int BoneOffsetOffset = 0x30;
     private const int ViewCountOffset = 0x44;
     private const int ColorCountOffset = 0x48;
     private const int ColorOffsetOffset = 0x4C;
@@ -30,11 +32,24 @@ public static class M2ModelReader
     private const int BoundsRadiusOffset = 0xB8;
     private const int LightCountOffset = 0x108;
     private const int LightOffsetOffset = 0x10C;
+    private const int CameraCountOffset = 0x110;
+    private const int CameraOffsetOffset = 0x114;
+    private const int RibbonCountOffset = 0x120;
+    private const int RibbonOffsetOffset = 0x124;
+    private const int ParticleCountOffset = 0x128;
+    private const int ParticleOffsetOffset = 0x12C;
     private const int SequenceStride = 0x40;
+    private const int BoneStride = 0x58;
     private const int ColorStride = 0x28;
     private const int TextureWeightStride = 0x14;
     private const int TextureTransformStride = 0x3C;
     private const int LightStride = 0x9C;
+    private const int CameraStrideClassic = 0x64;
+    private const int CameraStrideModern = 0x74;
+    private const int RibbonStrideClassic = 0xAC;
+    private const int RibbonStrideModern = 0xB0;
+    private const int ParticleStrideClassic = 0x1DC;
+    private const int ParticleStrideModern = 0x1EC;
     private const int TrackStride = 0x14;
 
     public static M2ModelDocument Read(string path)
@@ -75,10 +90,14 @@ public static class M2ModelReader
         List<uint> globalLoops = ReadUInt32Table(dataStream, sourcePath, "globalLoops", GlobalLoopCountOffset, GlobalLoopOffsetOffset);
         List<M2SequenceDefinition> sequences = ReadSequences(dataStream, sourcePath);
         List<short> sequenceLookup = ReadInt16Table(dataStream, sourcePath, "sequenceLookup", SequenceLookupCountOffset, SequenceLookupOffsetOffset);
+        List<M2BoneDefinition> bones = ReadBones(data, globalLoops.Count, sourcePath);
         List<M2ColorDefinition> colors = ReadColors(data, globalLoops.Count, sourcePath);
         List<M2TextureWeightDefinition> textureWeights = ReadTextureWeights(data, globalLoops.Count, sourcePath);
         List<M2TextureTransformDefinition> textureTransforms = ReadTextureTransforms(data, globalLoops.Count, sourcePath);
         List<M2LightDefinition> lights = ReadLights(data, globalLoops.Count, sourcePath);
+        List<M2CameraDefinition> cameras = ReadCameras(data, globalLoops.Count, version, sourcePath);
+        List<M2RibbonDefinition> ribbons = ReadRibbons(data, globalLoops.Count, sourcePath);
+        List<M2ParticleDefinition> particles = ReadParticles(data, globalLoops.Count, version, flags, sourcePath);
         Vector3 boundsMin = ReadFiniteVector3At(data, BoundsOffset, sourcePath, "boundsMin");
         Vector3 boundsMax = ReadFiniteVector3At(data, BoundsOffset + 0x0C, sourcePath, "boundsMax");
         float boundsRadius = ReadFiniteSingleAt(data, BoundsRadiusOffset, sourcePath, "boundsRadius");
@@ -98,11 +117,15 @@ public static class M2ModelReader
             textureWeights,
             textureTransforms,
             lights,
+            cameras,
             boundsMin,
             boundsMax,
             boundsRadius,
             embeddedSkinProfileCount: 0,
-            embeddedSkinProfileOffset: 0);
+            embeddedSkinProfileOffset: 0,
+            bones,
+            ribbons,
+            particles);
     }
 
     private static string? TryReadName(Stream stream, string sourcePath)
@@ -152,6 +175,16 @@ public static class M2ModelReader
         return BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset, sizeof(uint)));
     }
 
+    private static bool TryReadUInt32At(byte[] data, int offset, out uint value)
+    {
+        value = 0;
+        if (offset < 0 || offset > data.Length - sizeof(uint))
+            return false;
+
+        value = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset, sizeof(uint)));
+        return true;
+    }
+
     private static ushort ReadUInt16At(Stream stream, int offset)
     {
         long previousPosition = stream.Position;
@@ -194,6 +227,12 @@ public static class M2ModelReader
     {
         EnsureReadable(data, offset, sizeof(short), "m2 data", "int16");
         return BinaryPrimitives.ReadInt16LittleEndian(data.AsSpan(offset, sizeof(short)));
+    }
+
+    private static sbyte ReadSByteAt(byte[] data, int offset)
+    {
+        EnsureReadable(data, offset, sizeof(sbyte), "m2 data", "sbyte");
+        return unchecked((sbyte)data[offset]);
     }
 
     private static float ReadFiniteSingleAt(Stream stream, int offset, string sourcePath, string label)
@@ -257,6 +296,31 @@ public static class M2ModelReader
     {
         EnsureReadable(data, offset, sizeof(byte), "m2 data", "byte");
         return data[offset];
+    }
+
+    private static string? ReadStringAt(byte[] data, string sourcePath, string label, uint count, uint offset)
+    {
+        if (count == 0)
+            return null;
+
+        ValidateSpan(count, offset, sizeof(byte), data.Length, sourcePath, label);
+        ReadOnlySpan<byte> bytes = data.AsSpan(checked((int)offset), checked((int)count));
+        int terminator = bytes.IndexOf((byte)0);
+        int length = terminator >= 0 ? terminator : bytes.Length;
+        return length == 0 ? null : Encoding.UTF8.GetString(bytes[..length]);
+    }
+
+    private static List<ushort> ReadUInt16Array(byte[] data, string sourcePath, string label, int countOffset, int offsetOffset)
+    {
+        uint count = ReadUInt32At(data, countOffset);
+        uint offset = ReadUInt32At(data, offsetOffset);
+        ValidateSpan(count, offset, sizeof(ushort), data.Length, sourcePath, label);
+
+        List<ushort> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+            values.Add(ReadUInt16At(data, checked((int)offset + (index * sizeof(ushort)))));
+
+        return values;
     }
 
     private static List<uint> ReadUInt32Table(Stream stream, string sourcePath, string label, int countOffset, int offsetOffset)
@@ -336,6 +400,32 @@ public static class M2ModelReader
         return values;
     }
 
+    private static List<M2BoneDefinition> ReadBones(byte[] data, int globalLoopCount, string sourcePath)
+    {
+        uint count = ReadUInt32At(data, BoneCountOffset);
+        uint offset = ReadUInt32At(data, BoneOffsetOffset);
+        ValidateSpan(count, offset, BoneStride, data.Length, sourcePath, "bones");
+
+        List<M2BoneDefinition> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * BoneStride));
+            values.Add(new M2BoneDefinition(
+                index,
+                BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(entryOffset + 0x00, sizeof(int))),
+                ReadUInt32At(data, entryOffset + 0x04),
+                ReadInt16At(data, entryOffset + 0x08),
+                ReadUInt16At(data, entryOffset + 0x0A),
+                ReadUInt32At(data, entryOffset + 0x0C),
+                ReadTrackDefinition<Vector3>(data, entryOffset + 0x10, globalLoopCount, sourcePath, $"bones[{index}].translation"),
+                ReadTrackDefinition<M2CompQuaternion>(data, entryOffset + 0x24, globalLoopCount, sourcePath, $"bones[{index}].rotation"),
+                ReadTrackDefinition<Vector3>(data, entryOffset + 0x38, globalLoopCount, sourcePath, $"bones[{index}].scaling"),
+                ReadFiniteVector3At(data, entryOffset + 0x4C, sourcePath, $"bones[{index}].pivot")));
+        }
+
+        return values;
+    }
+
     private static List<M2TextureWeightDefinition> ReadTextureWeights(byte[] data, int globalLoopCount, string sourcePath)
     {
         uint count = ReadUInt32At(data, TextureWeightCountOffset);
@@ -401,6 +491,154 @@ public static class M2ModelReader
         return values;
     }
 
+    private static List<M2CameraDefinition> ReadCameras(byte[] data, int globalLoopCount, uint version, string sourcePath)
+    {
+        if (!TryReadUInt32At(data, CameraCountOffset, out uint count)
+            || !TryReadUInt32At(data, CameraOffsetOffset, out uint offset)
+            || count == 0)
+        {
+            return [];
+        }
+
+        int preferredStride = version > 264u ? CameraStrideModern : CameraStrideClassic;
+        int fallbackStride = preferredStride == CameraStrideModern ? CameraStrideClassic : CameraStrideModern;
+        int stride = ResolveAvailableStride(count, offset, data.Length, preferredStride, fallbackStride, sourcePath, "cameras");
+
+        List<M2CameraDefinition> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * stride));
+            bool modernCamera = stride >= CameraStrideModern;
+            float? staticFieldOfView = modernCamera
+                ? null
+                : ReadFiniteSingleAt(data, entryOffset + 0x04, sourcePath, $"cameras[{index}].fieldOfView");
+            int farClipOffset = modernCamera ? 0x04 : 0x08;
+            int nearClipOffset = modernCamera ? 0x08 : 0x0C;
+            int positionTrackOffset = modernCamera ? 0x0C : 0x10;
+            int positionBaseOffset = modernCamera ? 0x20 : 0x24;
+            int targetTrackOffset = modernCamera ? 0x2C : 0x30;
+            int targetBaseOffset = modernCamera ? 0x40 : 0x44;
+            int rollTrackOffset = modernCamera ? 0x4C : 0x50;
+            int fieldOfViewTrackOffset = modernCamera ? 0x60 : -1;
+
+            values.Add(new M2CameraDefinition(
+                index,
+                unchecked((int)ReadUInt32At(data, entryOffset + 0x00)),
+                staticFieldOfView,
+                ReadFiniteSingleAt(data, entryOffset + farClipOffset, sourcePath, $"cameras[{index}].farClip"),
+                ReadFiniteSingleAt(data, entryOffset + nearClipOffset, sourcePath, $"cameras[{index}].nearClip"),
+                ReadTrackDefinition<Vector3>(data, entryOffset + positionTrackOffset, globalLoopCount, sourcePath, $"cameras[{index}].positionTrack"),
+                ReadFiniteVector3At(data, entryOffset + positionBaseOffset, sourcePath, $"cameras[{index}].positionBase"),
+                ReadTrackDefinition<Vector3>(data, entryOffset + targetTrackOffset, globalLoopCount, sourcePath, $"cameras[{index}].targetPositionTrack"),
+                ReadFiniteVector3At(data, entryOffset + targetBaseOffset, sourcePath, $"cameras[{index}].targetPositionBase"),
+                ReadTrackDefinition<float>(data, entryOffset + rollTrackOffset, globalLoopCount, sourcePath, $"cameras[{index}].rollTrack"),
+                modernCamera
+                    ? ReadTrackDefinition<float>(data, entryOffset + fieldOfViewTrackOffset, globalLoopCount, sourcePath, $"cameras[{index}].fieldOfViewTrack")
+                    : null));
+        }
+
+        return values;
+    }
+
+    private static List<M2RibbonDefinition> ReadRibbons(byte[] data, int globalLoopCount, string sourcePath)
+    {
+        if (!TryReadUInt32At(data, RibbonCountOffset, out uint count)
+            || !TryReadUInt32At(data, RibbonOffsetOffset, out uint offset)
+            || !TryResolveOptionalStride(count, offset, data.Length, RibbonStrideModern, RibbonStrideClassic, out int stride))
+        {
+            return [];
+        }
+
+        List<M2RibbonDefinition> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * stride));
+            values.Add(new M2RibbonDefinition(
+                index,
+                ReadUInt32At(data, entryOffset + 0x00),
+                ReadUInt32At(data, entryOffset + 0x04),
+                ReadFiniteVector3At(data, entryOffset + 0x08, sourcePath, $"ribbons[{index}].position"),
+                ReadUInt16Array(data, sourcePath, $"ribbons[{index}].textureIndices", entryOffset + 0x14, entryOffset + 0x18),
+                ReadUInt16Array(data, sourcePath, $"ribbons[{index}].materialIndices", entryOffset + 0x1C, entryOffset + 0x20),
+                ReadTrackDefinition<Vector3>(data, entryOffset + 0x24, globalLoopCount, sourcePath, $"ribbons[{index}].color"),
+                ReadTrackDefinition<short>(data, entryOffset + 0x38, globalLoopCount, sourcePath, $"ribbons[{index}].alpha"),
+                ReadTrackDefinition<float>(data, entryOffset + 0x4C, globalLoopCount, sourcePath, $"ribbons[{index}].heightAbove"),
+                ReadTrackDefinition<float>(data, entryOffset + 0x60, globalLoopCount, sourcePath, $"ribbons[{index}].heightBelow"),
+                ReadFiniteSingleAt(data, entryOffset + 0x74, sourcePath, $"ribbons[{index}].edgesPerSecond"),
+                ReadFiniteSingleAt(data, entryOffset + 0x78, sourcePath, $"ribbons[{index}].edgeLifetime"),
+                ReadFiniteSingleAt(data, entryOffset + 0x7C, sourcePath, $"ribbons[{index}].gravity"),
+                ReadUInt16At(data, entryOffset + 0x80),
+                ReadUInt16At(data, entryOffset + 0x82),
+                ReadTrackDefinition<ushort>(data, entryOffset + 0x84, globalLoopCount, sourcePath, $"ribbons[{index}].textureSlot"),
+                ReadTrackDefinition<byte>(data, entryOffset + 0x98, globalLoopCount, sourcePath, $"ribbons[{index}].visibility"),
+                stride >= RibbonStrideModern ? ReadInt16At(data, entryOffset + 0xAC) : (short)0,
+                stride >= RibbonStrideModern ? ReadSByteAt(data, entryOffset + 0xAE) : (sbyte)-1,
+                stride >= RibbonStrideModern ? ReadSByteAt(data, entryOffset + 0xAF) : (sbyte)-1));
+        }
+
+        return values;
+    }
+
+    private static List<M2ParticleDefinition> ReadParticles(byte[] data, int globalLoopCount, uint version, uint flags, string sourcePath)
+    {
+        if (!TryReadUInt32At(data, ParticleCountOffset, out uint count)
+            || !TryReadUInt32At(data, ParticleOffsetOffset, out uint offset))
+        {
+            return [];
+        }
+
+        int preferredStride = ((flags & 0x200u) != 0 || version > 271u) ? ParticleStrideModern : ParticleStrideClassic;
+        int fallbackStride = preferredStride == ParticleStrideModern ? ParticleStrideClassic : ParticleStrideModern;
+        if (!TryResolveOptionalStride(count, offset, data.Length, preferredStride, fallbackStride, out int stride))
+            return [];
+
+        List<M2ParticleDefinition> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * stride));
+            ushort blendingType = version >= 262u
+                ? ReadByteAt(data, entryOffset + 0x28)
+                : ReadUInt16At(data, entryOffset + 0x28);
+            ushort emitterType = version >= 262u
+                ? ReadByteAt(data, entryOffset + 0x29)
+                : ReadUInt16At(data, entryOffset + 0x2A);
+            ushort particleColorIndex = version >= 262u
+                ? ReadUInt16At(data, entryOffset + 0x2A)
+                : (ushort)0;
+
+            values.Add(new M2ParticleDefinition(
+                index,
+                ReadUInt32At(data, entryOffset + 0x00),
+                ReadUInt32At(data, entryOffset + 0x04),
+                ReadFiniteVector3At(data, entryOffset + 0x08, sourcePath, $"particles[{index}].position"),
+                ReadUInt16At(data, entryOffset + 0x14),
+                ReadUInt16At(data, entryOffset + 0x16),
+                ReadStringAt(data, sourcePath, $"particles[{index}].geometryModel", ReadUInt32At(data, entryOffset + 0x18), ReadUInt32At(data, entryOffset + 0x1C)),
+                ReadStringAt(data, sourcePath, $"particles[{index}].recursionModel", ReadUInt32At(data, entryOffset + 0x20), ReadUInt32At(data, entryOffset + 0x24)),
+                blendingType,
+                emitterType,
+                particleColorIndex,
+                ReadByteAt(data, entryOffset + 0x2C),
+                ReadByteAt(data, entryOffset + 0x2D),
+                ReadInt16At(data, entryOffset + 0x2E),
+                ReadUInt16At(data, entryOffset + 0x30),
+                ReadUInt16At(data, entryOffset + 0x32),
+                ReadTrackDefinition<float>(data, entryOffset + 0x34, globalLoopCount, sourcePath, $"particles[{index}].emissionSpeed"),
+                ReadTrackDefinition<float>(data, entryOffset + 0x48, globalLoopCount, sourcePath, $"particles[{index}].speedVariation"),
+                ReadTrackDefinition<float>(data, entryOffset + 0x5C, globalLoopCount, sourcePath, $"particles[{index}].verticalRange"),
+                ReadTrackDefinition<float>(data, entryOffset + 0x70, globalLoopCount, sourcePath, $"particles[{index}].horizontalRange"),
+                ReadTrackDefinition<float>(data, entryOffset + 0x84, globalLoopCount, sourcePath, $"particles[{index}].gravity"),
+                ReadTrackDefinition<float>(data, entryOffset + 0x98, globalLoopCount, sourcePath, $"particles[{index}].lifespan"),
+                ReadTrackDefinition<float>(data, entryOffset + 0xB0, globalLoopCount, sourcePath, $"particles[{index}].emissionRate"),
+                ReadTrackDefinition<float>(data, entryOffset + 0xC8, globalLoopCount, sourcePath, $"particles[{index}].emissionAreaLength"),
+                ReadTrackDefinition<float>(data, entryOffset + 0xDC, globalLoopCount, sourcePath, $"particles[{index}].emissionAreaWidth"),
+                ReadTrackDefinition<float>(data, entryOffset + 0xF0, globalLoopCount, sourcePath, $"particles[{index}].zSource"),
+                ReadTrackDefinition<byte>(data, entryOffset + 0x1C8, globalLoopCount, sourcePath, $"particles[{index}].enabled")));
+        }
+
+        return values;
+    }
+
     private static M2TrackDefinition<T> ReadTrackDefinition<T>(byte[] data, int offset, int globalLoopCount, string sourcePath, string label)
     {
         EnsureReadable(data, offset, TrackStride, sourcePath, label);
@@ -457,6 +695,61 @@ public static class M2ModelReader
             throw new InvalidDataException(
                 $"M2 file '{sourcePath}' has an out-of-range span for '{label}': count={count}, offset=0x{offset:X}, stride=0x{stride:X}, length=0x{length:X}.");
         }
+    }
+
+    private static int ResolveAvailableStride(uint count, uint offset, long length, int preferredStride, int fallbackStride, string sourcePath, string label)
+    {
+        if (count == 0)
+            return preferredStride;
+
+        if (offset == 0)
+            throw new InvalidDataException($"M2 file '{sourcePath}' has a zero offset for non-empty span '{label}'.");
+
+        if (SpanFits(count, offset, preferredStride, length))
+            return preferredStride;
+
+        if (SpanFits(count, offset, fallbackStride, length))
+            return fallbackStride;
+
+        ValidateSpan(count, offset, (uint)preferredStride, length, sourcePath, label);
+        return preferredStride;
+    }
+
+    private static bool TryResolveOptionalStride(uint count, uint offset, long length, int preferredStride, int fallbackStride, out int stride)
+    {
+        stride = preferredStride;
+        if (count == 0)
+            return false;
+
+        if (offset == 0)
+            return false;
+
+        if (SpanFits(count, offset, preferredStride, length))
+        {
+            stride = preferredStride;
+            return true;
+        }
+
+        if (SpanFits(count, offset, fallbackStride, length))
+        {
+            stride = fallbackStride;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool SpanFits(uint count, uint offset, int stride, long length)
+    {
+        if (count == 0)
+            return true;
+
+        if (offset == 0 || stride <= 0)
+            return false;
+
+        ulong total = (ulong)count * (uint)stride;
+        ulong end = (ulong)offset + total;
+        return (ulong)offset < (ulong)length && end <= (ulong)length && end >= offset;
     }
 
     private static void EnsureReadable(byte[] data, int offset, int size, string sourcePath, string label)

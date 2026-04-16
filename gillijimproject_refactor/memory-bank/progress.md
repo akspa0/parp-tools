@@ -1,5 +1,165 @@
 # Progress
 
+### Apr 16, 2026 - projected object sections in the pure runtime M2 path were being culled away, which made `FoodHerbs_Level01.m2` crates look hollow
+
+- what changed:
+	- `Rendering/M2Renderer.cs` no longer enables backface culling for the pure runtime M2 renderer; it now matches the established legacy M2 path and keeps culling disabled while projected and mixed-winding object sections remain unproven
+- validation:
+	- fixed local Wrath client proof on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `World/Generic/PassiveDoodads/AHNQIRAJ/FoodHerbs_Level01.M2`, with `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1`, wrote:
+		- before no-cull fix: `output/build-validation/m2-foodherbs-runtime-correct/standalone/3.3.5.12340/20260416_051238388_current_20260416_051238_no_ui.png`
+		- after no-cull fix: `output/build-validation/m2-foodherbs-runtime-after-cull-fix/standalone/3.3.5.12340/20260416_051511729_current_20260416_051511_no_ui.png`
+	- legacy control on the same asset wrote:
+		- `output/build-validation/m2-foodherbs-legacy-correct/standalone/3.3.5.12340/20260416_051302760_current_20260416_051302_no_ui.png`
+	- `WowViewer.Tool.Inspect m2 inspect` on the same asset showed that the visibly broken crate and prop sections were largely `Diffuse_Projected:*` opaque or alpha-key passes, which fits the culling failure shape more than a texture-binding bug
+- boundary:
+	- this materially improves object-family runtime rendering for at least one real projected-heavy Wrath asset, but it is not a blanket closure for the separate character-model parity problems
+
+### Apr 16, 2026 - runtime static M2 UV preservation moved `Band_DrumSet.m2` from black-failure proof to textured live capture, but projected or additive material parity is still open
+
+- what changed:
+	- `WowViewer.Core.Runtime/M2/M2StaticRenderModel.cs` and `M2StaticRenderModelBuilder.cs` now preserve both `TextureCoords0` and `TextureCoords1` into the runtime static vertex contract instead of flattening everything to UV0
+	- `Rendering/M2Renderer.cs` now uploads both UV streams and lets each runtime texture binding choose UV0 or UV1
+	- the pure runtime shader path also stopped multiplying sections by arbitrary debug tint, and it now treats `coordLookupValue=65535` as generated view-normal coordinates instead of blindly sampling UV0
+- validation:
+	- focused `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "M2FoundationTests|M2RuntimeTests"` passed `34/34`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` succeeded with the same existing invalid `LIB` path warnings only
+	- fixed local Wrath client proof on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Creature/band/Band_DrumSet.M2`, with `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1`, wrote:
+		- `output/build-validation/m2-native-static-texture-path/standalone/3.3.5.12340/standalone/3.3.5.12340/20260416_045415087_current_20260416_045415_no_ui.png`
+	- legacy control capture on the same fixed local root and asset wrote:
+		- `output/build-validation/m2-native-static-texture-path/legacy-control/standalone/3.3.5.12340/20260416_045517327_current_20260416_045517_no_ui.png`
+- boundary:
+	- this closes the earlier black or missing-texture live failure for one real geoset-heavy Wrath asset, but the pure runtime renderer still trails the legacy compatibility path on projected and additive material behavior
+	- the `Band_DrumSet` control comparison still shows that `Diffuse_Projected:*` and additive overlay passes are not yet at parity even after the UV-contract repair; do not describe this as full geoset or material signoff
+
+### Apr 16, 2026 - native static M2 texturing now has real viewer proof, and MPQ-backed `Scry_cam.m2` now renders through the camera-path route instead of failing on empty geometry
+
+- what changed:
+	- `Rendering/WowViewerM2RuntimeBridge.cs` now hands the pure runtime `M2Renderer` the data-source and replaceable-texture dependencies it was already shaped to use
+	- `Rendering/M2Renderer.cs` now uploads UVs, resolves primary-stage texture bindings from the runtime material state, samples the resolved texture in the shader, and cleans up owned GL textures
+	- `WowViewer.Core.Runtime/M2/M2CameraPathOverlayBuilder.cs` no longer rejects real camera-only assets just because they advertise one dummy view or carry a helper bone; the runtime now accepts camera-style canonical paths such as `*_cam.m2` or `Cameras\...` when the asset has cameras and no ribbon or particle families
+	- added focused regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/M2RuntimeTests.cs` for the dummy-view-count camera asset shape
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "M2FoundationTests|M2RuntimeTests"` passed `34/34`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` succeeded with existing invalid `LIB` path warnings only
+	- fixed local Wrath client proof on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft` via startup automation wrote:
+		- textured Wolf capture: `output/build-validation/m2-native-static-texture-path/standalone/3.3.5.12340/20260416_040737484_current_20260416_040737_no_ui.png`
+		- camera-path `Scry_cam` capture: `output/build-validation/m2-native-static-texture-path/standalone/3.3.5.12340/20260416_042648038_current_20260416_042648_no_ui.png`
+- boundary:
+	- this is real active-viewer proof for one textured static M2 and one camera-only `*_cam.m2` asset on the Wrath baseline, but the static path is still simplified runtime shading rather than full native render parity
+	- the camera-only path remains sampled overlay visualization rather than mesh rendering
+
+### Apr 16, 2026 - standalone `*_cam.m2` assets now bypass `.skin` loading and render as camera-path overlays
+
+- what changed:
+	- `WowViewer.Core.IO/M2/M2ModelReader.cs` strict MD20 ownership now includes first-class camera definitions on `M2ModelDocument`
+	- `WowViewer.Core.Runtime/M2/M2CameraPathOverlayBuilder.cs` plus `M2CameraPathVisualization.cs` now own camera-only M2 classification, sampled path generation, and overlay bounds in the canonical repo
+	- `MdxViewer` standalone M2 loading now probes the strict MD20 root, asks the wow-viewer runtime whether the asset is a camera-path candidate, and consumes the prebuilt overlay layout instead of owning that sampling logic locally
+	- `Rendering/M2CameraPathRenderer.cs` is now only the GL line-draw consumer over wow-viewer-owned overlay data instead of being the design owner for camera-path interpretation
+	- standalone model info and the model sidebar framing action now work for the camera-path renderer too
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "M2FoundationTests|M2RuntimeTests"` passed `33/33`
+	- added focused strict-reader coverage for a synthetic camera-only MD20 root in `M2FoundationTests`
+	- added focused runtime coverage for camera-path overlay generation in `M2RuntimeTests`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` still fails, but the remaining errors are from the earlier unfinished `M2Renderer` texture-path slice (`SelectBestReplaceableDisplayIndex`, `LoadSectionTextures`) rather than the new camera-path work
+- boundary:
+	- this closes the over-strict `.skin` assumption for standalone geometry-less flyby camera assets and moves the interpretation logic into `wow-viewer`, but it is still path visualization only and not a general fix for the separate unfinished textured static M2 renderer work
+
+### Apr 15, 2026 - MdxViewer can now opt into the pure wow-viewer M2 renderer for live testing
+
+- what changed:
+	- `Rendering/WowViewerM2RuntimeBridge.cs` now centralizes M2 renderer-route selection for successful runtime-backed M2 loads
+	- setting `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1` now makes standalone M2 loads, streamed world M2 loads, and WMO doodad M2 loads use the pure static `M2Renderer(_gl, runtimeModel, ...)` path inside `MdxViewer`
+	- without that env var, the previous compatibility path still stays available through the legacy MDX draw backend
+	- standalone model info now tells the user whether the currently loaded M2 is using the pure wow-viewer static renderer or the legacy compatibility draw path
+- validation:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` succeeded with existing workspace warnings only
+	- live viewer testing with `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1` now indicates the route is stronger than a geometry-only curiosity: most non-character objects look plausibly correct, including M2 doodads inside WMOs
+- boundary:
+	- character-family assets remain the main visible problem area; texturing, geoset correctness, and some surface/material ordering still need focused work there
+	- this is still not full textured-material parity; the exposed pure runtime renderer remains a simplified static shaded path
+
+### Apr 15, 2026 - wow-viewer Wolf M2 geometry corruption was fixed in the static mesh path
+
+- root cause:
+	- `WowViewer.Core.Runtime/M2/M2StaticRenderModelBuilder.TryGetVertex` was treating strict skin header field `0x2C` as a blind vertex base offset before trying the direct skin lookup entry
+	- on the real Cataclysm `Creature/Wolf/Wolf00.skin` proof, that field reported `53`, which matches documented `boneCountMax` values and produced a bad vertex shift over an already-complete `557`-entry local lookup table
+	- the same session also proved the corruption was present in the static mesh output before skinning, so pose math was not the primary fault
+- fix:
+	- runtime vertex fetch now resolves the direct skin lookup entry first and only uses the extra header field as a fallback when the direct lookup is invalid
+	- strict skin parsing now suppresses bogus optional shadow-batch metadata unless the advertised span is actually valid
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with existing invalid `LIB` path warnings only
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter "FullyQualifiedName~M2FoundationTests|FullyQualifiedName~M2RuntimeTests"` passed with `31` matching core tests
+	- fixed local client proof on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Creature/Wolf/Wolf.m2`, sequence `0`, time `0`, wrote:
+		- `output/build-validation/wow-viewer-m2-wolf-idle-static-visual-fixed.bmp`
+		- `output/build-validation/wow-viewer-m2-wolf-idle-skinned-visual-fixed.bmp`
+	- those new proof outputs now read as a recognizable quadruped silhouette instead of the earlier wedge-like random geometry
+	- the same proof now reports `shadowBatches=0`, render-frame hash `86048f9de460bb5e75a557d526609700f4292b61ccc0f8eae4b4bd6206f012bb`, and software visual hash `71aff63b3d0fba7e1eba03bcad894f2af0f2c87448fc9d706a976506b9f17ee5`
+	- the same Wolf asset on `H:/CLIENTS/World of Warcraft Cata beta 11927` produced matching corrected counts and hashes, but that was a cross-build check rather than the active baseline
+- remaining boundary:
+	- this is a real first-party mesh-assembly fix in `wow-viewer`, but it is still software-proof validation rather than final GPU renderer signoff
+
+### Apr 15, 2026 - wow-viewer M2 now has a shared app/inspect frame pipeline plus render-frame and software-visual proof outputs
+
+- advanced the consumer slice beyond separate app and inspect orchestration:
+	- extracted end-to-end M2 frame assembly into `WowViewer.Core.Runtime/M2/M2RuntimeFramePipeline`
+	- the shared result now carries animated state, bone pose, skinned render model, render-consumer state, effect runtime state, submission plan, render frame, software visual snapshot, and golden frame
+	- `WowViewer.App m2-frame` now consumes that shared runtime pipeline directly
+	- `WowViewer.Tool.Inspect m2 inspect` now consumes the same pipeline and supports `--render-frame-output` plus `--visual-output` alongside `--golden-output`
+	- added focused coverage in `M2RuntimeTests` for the shared pipeline result and deterministic render or visual hashes
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with existing invalid `LIB` path warnings only
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter "M2FoundationTests|M2RuntimeTests"` passed with `31` matching core tests
+	- fixed local client proof on `H:/CLIENTS/World of Warcraft Cata beta 11927`, `Creature/Wolf/Wolf.m2`, sequence `20`, time `500`, produced matching app and inspect hashes for:
+		- runtime golden state `113f55daaad3e996476eeff4c9e6fe37aa4c4d3cc364a48e38c6a86bc6fb980e`
+		- render frame `a285c8ef68b0d3304a55d93a30a34f4722fea7c9ed9d429fd5bf1db903932988`
+		- software visual snapshot `8880ba87d37662a59c8b07d040a7eeb40b1a1060585c9593b197712db6ccf5ec`
+- remaining boundary:
+	- this is still not active visual renderer signoff or GPU backend parity
+	- the current visual output is a deterministic software proof harness over runtime draw data, which is useful for regression evidence but not final render closure
+
+### Apr 15, 2026 - wow-viewer M2 runtime now has app-level frame consumption and golden snapshot proof
+
+- advanced the staged M2 runtime work in `wow-viewer` beyond the previous inspect-only boundary:
+	- added `M2EffectRegistry` / `M2ResolvedEffect` so runtime effect consumption now exposes native-style effect object keys, native family keys, blend/depth/alpha-test decisions, lighting flags, and state buckets
+	- added family-aware particle/ribbon submission descriptors and explicit scene family policies with named handlers
+	- moved core render-entry construction into `M2SceneSubmissionEntryBuilder` so inspect and app consumers share the same runtime contract
+	- added `M2RuntimeGoldenFrameBuilder` for deterministic golden snapshots and runtime hashes
+	- replaced the `WowViewer.App` console skeleton with an `m2-frame` command that loads `MD20`, exact skin, external anim, pose/skinning, render-consumer state, submission plan, and optional golden JSON
+	- extended `m2 inspect` with `--golden-output` / `-g`, resolved effect-object output, and handler/state-scope submission output
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter "M2FoundationTests|M2RuntimeTests"` passed with `27` matching core tests
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed with existing invalid `LIB` path warnings only
+	- fixed local client proof on `H:/CLIENTS/World of Warcraft Cata beta 11927`, `Creature/Wolf/Wolf.m2`, sequence `20`, time `500`, produced app and inspect golden snapshots with matching hash `113f55daaad3e996476eeff4c9e6fe37aa4c4d3cc364a48e38c6a86bc6fb980e`
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with existing invalid `LIB` path warnings only
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with `263` `WowViewer.Core.Tests` and `36` `WowViewer.Core.PM4.Tests`
+- remaining boundary:
+	- this is first app/runtime consumer proof and golden-state proof, not visual renderer signoff
+	- particle/ribbon parser, simulation, generated geometry, and GPU submission remain future work; the landed slice closes the contract and handler-policy layer first
+
+### Apr 15, 2026 - wow-viewer M2 slice 03 advanced past inspect-only animation, and slice 04 now has a first coordinator seam
+
+- landed new `wow-viewer` M2 runtime ownership:
+	- typed `M2BoneDefinition` parsing from `MD20`
+	- shared `M2TrackSampler` with compressed M2 quaternion sampling
+	- `M2BonePoseEvaluator` for sequence/time pose matrices
+	- `M2SkinnedRenderModelBuilder` for CPU-side skinned render vertices over the structured render sections
+	- `M2RenderConsumerFrameStateBuilder` so evaluated material/light state becomes renderer-facing pass state instead of remaining inspect-only data
+	- `M2SceneSubmissionCoordinator` plus runtime option flags for first-pass family/state/capacity batching policy
+	- inspect output now includes `ANIM.POSE`, `RENDER.CONSUMER`, and `SCENE.SUBMISSION`
+- focused tests added in `M2RuntimeTests` for:
+	- bone table parsing
+	- parented pose solve plus skinning through skin bone lookup metadata
+	- render-consumer light/material state
+	- scene submission grouping, capacity splitting, and particle batching policy
+- validation:
+	- focused M2 test filter passed `24/24`
+	- full `wow-viewer` build passed
+	- full `wow-viewer` test suite passed: `260` core tests and `36` PM4 tests
+	- real fixed-client proof used `H:/CLIENTS/World of Warcraft Cata beta 11927`, `Creature/Wolf/Wolf.m2`, sequence `20`, exact `Wolf0096-00.anim`, and printed the new runtime consumer/submission summaries
+- remaining boundary:
+	- this does not yet mean active app renderer cutover, final shader/effect parity, particle/ribbon submission implementation, or old `MdxViewer` runtime parity
+
 ### Apr 15, 2026 - wow-viewer M2 slices 01 and 02 are now real, and slice 03 is partially landed
 
 - landed `wow-viewer` M2 ownership now includes:
@@ -571,6 +731,7 @@
 	- `4_0_0_11927/LostIsles` object masks: `11` mask PNGs, average coverage about `20.72%`, worst tile about `71.17%`
 - important boundary:
 	- this is real refreshed-corpus proof plus trainability proof
+	- future geometry-derived object-mask proof should pair at least one real `3_3_5_12340` root with one real `4_0_0_11927` root instead of treating the current 4.x runs as sufficient alone
 	- it is not final exporter signoff for Cataclysm roots because some refreshed 4.x object masks are still pathologically large and are currently being kept in check mainly by trainer-side coverage rejection
 
 ### Apr 13, 2026 - MCCV parity fix now matches MdxViewer export and render behavior

@@ -9,8 +9,8 @@ public sealed class M2SkinDocument
         uint vertexLookupOffset,
         IReadOnlyList<ushort> triangleIndices,
         uint triangleIndexOffset,
-        IReadOnlyList<ushort> boneLookup,
-        uint boneLookupOffset,
+        IReadOnlyList<M2SkinBoneEntry> boneEntries,
+        uint boneEntryOffset,
         IReadOnlyList<M2SkinSubmesh> submeshes,
         uint submeshOffset,
         IReadOnlyList<M2SkinBatch> batches,
@@ -23,7 +23,7 @@ public sealed class M2SkinDocument
         ArgumentException.ThrowIfNullOrWhiteSpace(signature);
         ArgumentNullException.ThrowIfNull(vertexLookup);
         ArgumentNullException.ThrowIfNull(triangleIndices);
-        ArgumentNullException.ThrowIfNull(boneLookup);
+        ArgumentNullException.ThrowIfNull(boneEntries);
         ArgumentNullException.ThrowIfNull(submeshes);
         ArgumentNullException.ThrowIfNull(batches);
 
@@ -35,9 +35,9 @@ public sealed class M2SkinDocument
         TriangleIndices = triangleIndices;
         TriangleIndexCount = triangleIndices.Count;
         TriangleIndexOffset = triangleIndexOffset;
-        BoneLookup = boneLookup;
-        BoneLookupCount = boneLookup.Count;
-        BoneLookupOffset = boneLookupOffset;
+        BoneEntries = boneEntries;
+        BoneEntryCount = boneEntries.Count;
+        BoneEntryOffset = boneEntryOffset;
         Submeshes = submeshes;
         SubmeshCount = submeshes.Count;
         SubmeshOffset = submeshOffset;
@@ -65,11 +65,11 @@ public sealed class M2SkinDocument
 
     public uint TriangleIndexOffset { get; }
 
-    public IReadOnlyList<ushort> BoneLookup { get; }
+    public IReadOnlyList<M2SkinBoneEntry> BoneEntries { get; }
 
-    public int BoneLookupCount { get; }
+    public int BoneEntryCount { get; }
 
-    public uint BoneLookupOffset { get; }
+    public uint BoneEntryOffset { get; }
 
     public IReadOnlyList<M2SkinSubmesh> Submeshes { get; }
 
@@ -91,3 +91,9 @@ public sealed class M2SkinDocument
 
     public bool HasShadowBatches => ShadowBatchCount > 0;
 }
+
+public readonly record struct M2SkinBoneEntry(
+    byte Bone0,
+    byte Bone1,
+    byte Bone2,
+    byte Bone3);

@@ -1451,7 +1451,7 @@ public partial class ViewerApp
 
         ImGui.TextWrapped(_modelInfo);
 
-        if (_renderer is MdxRenderer || _renderer is WmoRenderer)
+        if (_renderer is IModelRenderer || _renderer is WmoRenderer)
         {
             ImGui.Separator();
             ImGui.Checkbox("Auto-frame on load", ref _autoFrameModelOnLoad);

@@ -70,6 +70,14 @@ Only after the above, expand into:
 - family-aware batching
 - consumer cutover and parity harnesses
 
+Current status:
+
+- `WowViewer.Core.Runtime` now owns the first family-aware scene-submission coordinator, resolved effect-object state, particle/ribbon submission descriptors, and deterministic golden-frame snapshots.
+- `M2RuntimeFramePipeline` now gives app and inspect one shared path for runtime frame assembly, render-frame proof, software visual proof, and golden-state output.
+- `WowViewer.App m2-frame` is now the first app-level consumer of that shared runtime frame.
+- `WowViewer.Tool.Inspect m2 inspect --golden-output --render-frame-output --visual-output` writes the same proof artifacts while keeping richer debug lines for parser/runtime review.
+- This is still not a visual renderer cutover; shader backend wiring, particle/ribbon parser and simulation, generated ribbon/particle geometry, and screenshot or native-visual parity remain future proof levels.
+
 ## MdxViewer Use Rules
 
 `MdxViewer` should be used for:
@@ -114,4 +122,5 @@ Use these older docs as targeted source material, not as the primary implementat
 
 - this cutover document does not claim full runtime parity in either `wow-viewer` or `MdxViewer`
 - it does not claim all native M2 semantics are closed
+- app-level golden-frame consumption does not claim active visual renderer signoff
 - it does not replace the raw evidence logs; it only consolidates how to use them

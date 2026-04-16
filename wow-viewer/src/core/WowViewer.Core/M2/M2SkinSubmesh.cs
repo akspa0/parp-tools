@@ -8,7 +8,11 @@ public sealed class M2SkinSubmesh
         ushort vertexStart,
         ushort vertexCount,
         ushort indexStart,
-        ushort indexCount)
+        ushort indexCount,
+        ushort boneCount = 0,
+        ushort boneComboIndex = 0,
+        ushort boneInfluences = 0,
+        ushort centerBoneIndex = 0)
     {
         SkinSectionId = skinSectionId;
         Level = level;
@@ -16,6 +20,10 @@ public sealed class M2SkinSubmesh
         VertexCount = vertexCount;
         IndexStart = indexStart;
         IndexCount = indexCount;
+        BoneCount = boneCount;
+        BoneComboIndex = boneComboIndex;
+        BoneInfluences = boneInfluences;
+        CenterBoneIndex = centerBoneIndex;
     }
 
     public ushort SkinSectionId { get; }
@@ -29,4 +37,12 @@ public sealed class M2SkinSubmesh
     public ushort IndexStart { get; }
 
     public ushort IndexCount { get; }
+
+    public ushort BoneCount { get; }
+
+    public ushort BoneComboIndex { get; }
+
+    public ushort BoneInfluences { get; }
+
+    public ushort CenterBoneIndex { get; }
 }

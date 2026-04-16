@@ -19,11 +19,15 @@ public sealed class M2ModelDocument
         IReadOnlyList<M2TextureWeightDefinition> textureWeights,
         IReadOnlyList<M2TextureTransformDefinition> textureTransforms,
         IReadOnlyList<M2LightDefinition> lights,
+        IReadOnlyList<M2CameraDefinition>? cameras,
         Vector3 boundsMin,
         Vector3 boundsMax,
         float boundsRadius,
         uint embeddedSkinProfileCount,
-        uint embeddedSkinProfileOffset)
+        uint embeddedSkinProfileOffset,
+        IReadOnlyList<M2BoneDefinition>? bones = null,
+        IReadOnlyList<M2RibbonDefinition>? ribbons = null,
+        IReadOnlyList<M2ParticleDefinition>? particles = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(rawBytes);
@@ -50,6 +54,10 @@ public sealed class M2ModelDocument
         TextureWeights = textureWeights;
         TextureTransforms = textureTransforms;
         Lights = lights;
+        Cameras = cameras ?? [];
+        Bones = bones ?? [];
+        Ribbons = ribbons ?? [];
+        Particles = particles ?? [];
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
         BoundsRadius = boundsRadius;
@@ -85,6 +93,14 @@ public sealed class M2ModelDocument
 
     public IReadOnlyList<M2LightDefinition> Lights { get; }
 
+    public IReadOnlyList<M2CameraDefinition> Cameras { get; }
+
+    public IReadOnlyList<M2BoneDefinition> Bones { get; }
+
+    public IReadOnlyList<M2RibbonDefinition> Ribbons { get; }
+
+    public IReadOnlyList<M2ParticleDefinition> Particles { get; }
+
     public Vector3 BoundsMin { get; }
 
     public Vector3 BoundsMax { get; }
@@ -108,6 +124,14 @@ public sealed class M2ModelDocument
     public int TextureTransformCount => TextureTransforms.Count;
 
     public int LightCount => Lights.Count;
+
+    public int CameraCount => Cameras.Count;
+
+    public int BoneCount => Bones.Count;
+
+    public int RibbonCount => Ribbons.Count;
+
+    public int ParticleCount => Particles.Count;
 
     public bool HasEmbeddedSkinProfiles => EmbeddedSkinProfileCount > 0;
 

@@ -12,11 +12,9 @@ using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
-using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.IO.Models;
 using WowViewer.Core.IO.Wmo;
-using WowViewer.Core.M2;
-using WowViewer.Core.Mdx;
 using WowViewer.Core.Wmo;
 using GillijimProject.WowFiles.Alpha;
 using WdtAlpha = GillijimProject.WowFiles.Alpha.WdtAlpha;
@@ -3659,7 +3657,6 @@ public class VlmDatasetExporter
         string extension = Path.GetExtension(sourcePath);
         bool preferWmo = category.Contains("wmo", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".wmo", StringComparison.OrdinalIgnoreCase);
-        bool preferMdx = extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase);
 
         if (preferWmo)
         {
@@ -3668,69 +3665,11 @@ public class VlmDatasetExporter
                 return wmoPolygons;
         }
 
-        if (preferMdx)
-        {
-            Vector2[][]? mdxPolygons = TryReadMdxFootprintPolygons(data, sourcePath);
-            if (mdxPolygons is { Length: > 0 })
-                return mdxPolygons;
-
-            Vector2[][]? m2Polygons = TryReadM2FootprintPolygons(data, sourcePath);
-            if (m2Polygons is { Length: > 0 })
-                return m2Polygons;
-        }
-        else
-        {
-            Vector2[][]? m2Polygons = TryReadM2FootprintPolygons(data, sourcePath);
-            if (m2Polygons is { Length: > 0 })
-                return m2Polygons;
-
-            Vector2[][]? mdxPolygons = TryReadMdxFootprintPolygons(data, sourcePath);
-            if (mdxPolygons is { Length: > 0 })
-                return mdxPolygons;
-        }
+        Vector2[][]? sharedModelPolygons = ModelFootprintReader.TryRead(data, sourcePath);
+        if (sharedModelPolygons is { Length: > 0 })
+            return sharedModelPolygons;
 
         return preferWmo ? null : TryReadWmoFootprintPolygons(data, sourcePath, archiveReader, searchPaths);
-    }
-
-    private static Vector2[][]? TryReadM2FootprintPolygons(byte[] data, string sourcePath)
-    {
-        try
-        {
-            using MemoryStream stream = new(data, writable: false);
-            M2GeometryDocument geometry = M2GeometryReader.Read(stream, sourcePath);
-            Vector2[]? hull = BuildFootprintHull(
-                geometry.Vertices.Count,
-                index => new Vector2(geometry.Vertices[index].Position.X, geometry.Vertices[index].Position.Z));
-            return hull is { Length: >= 3 } ? [hull] : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static Vector2[][]? TryReadMdxFootprintPolygons(byte[] data, string sourcePath)
-    {
-        try
-        {
-            using MemoryStream stream = new(data, writable: false);
-            MdxGeometryFile geometry = MdxGeometryReader.Read(stream, sourcePath);
-            List<Vector2[]> polygons = [];
-            foreach (MdxGeosetGeometry geoset in geometry.Geosets)
-            {
-                Vector2[]? hull = BuildFootprintHull(
-                    geoset.Vertices.Count,
-                    index => new Vector2(geoset.Vertices[index].X, geoset.Vertices[index].Z));
-                if (hull is { Length: >= 3 })
-                    polygons.Add(hull);
-            }
-
-            return polygons.Count > 0 ? [.. polygons] : null;
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private Vector2[][]? TryReadWmoFootprintPolygons(byte[] data, string sourcePath, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)

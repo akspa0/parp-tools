@@ -9,15 +9,18 @@ public sealed class M2StaticRenderModel
         M2ModelDocument model,
         IReadOnlyList<M2StaticRenderSection> sections,
         IReadOnlyList<M2StructuredRenderSection> structuredSections,
+        IReadOnlyList<ushort> boneLookup,
         bool usesCompatibilityFallback)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(sections);
         ArgumentNullException.ThrowIfNull(structuredSections);
+        ArgumentNullException.ThrowIfNull(boneLookup);
 
         Model = model;
         Sections = sections;
         StructuredSections = structuredSections;
+        BoneLookup = boneLookup;
         UsesCompatibilityFallback = usesCompatibilityFallback;
     }
 
@@ -26,6 +29,8 @@ public sealed class M2StaticRenderModel
     public IReadOnlyList<M2StaticRenderSection> Sections { get; }
 
     public IReadOnlyList<M2StructuredRenderSection> StructuredSections { get; }
+
+    public IReadOnlyList<ushort> BoneLookup { get; }
 
     public bool UsesCompatibilityFallback { get; }
 
@@ -39,6 +44,10 @@ public sealed class M2StaticRenderSection
     public M2StaticRenderSection(
         int sectionIndex,
         ushort skinSectionId,
+        ushort boneComboIndex,
+        ushort boneCount,
+        ushort boneInfluences,
+        ushort centerBoneIndex,
         IReadOnlyList<M2StaticRenderVertex> vertices,
         IReadOnlyList<uint> indices,
         M2StaticRenderMaterial material)
@@ -49,6 +58,10 @@ public sealed class M2StaticRenderSection
 
         SectionIndex = sectionIndex;
         SkinSectionId = skinSectionId;
+        BoneComboIndex = boneComboIndex;
+        BoneCount = boneCount;
+        BoneInfluences = boneInfluences;
+        CenterBoneIndex = centerBoneIndex;
         Vertices = vertices;
         Indices = indices;
         Material = material;
@@ -57,6 +70,14 @@ public sealed class M2StaticRenderSection
     public int SectionIndex { get; }
 
     public ushort SkinSectionId { get; }
+
+    public ushort BoneComboIndex { get; }
+
+    public ushort BoneCount { get; }
+
+    public ushort BoneInfluences { get; }
+
+    public ushort CenterBoneIndex { get; }
 
     public IReadOnlyList<M2StaticRenderVertex> Vertices { get; }
 
@@ -70,6 +91,10 @@ public sealed class M2StructuredRenderSection
     public M2StructuredRenderSection(
         int sectionIndex,
         ushort skinSectionId,
+        ushort boneComboIndex,
+        ushort boneCount,
+        ushort boneInfluences,
+        ushort centerBoneIndex,
         IReadOnlyList<M2StaticRenderVertex> vertices,
         IReadOnlyList<uint> indices,
         IReadOnlyList<M2StructuredRenderPass> passes)
@@ -80,6 +105,10 @@ public sealed class M2StructuredRenderSection
 
         SectionIndex = sectionIndex;
         SkinSectionId = skinSectionId;
+        BoneComboIndex = boneComboIndex;
+        BoneCount = boneCount;
+        BoneInfluences = boneInfluences;
+        CenterBoneIndex = centerBoneIndex;
         Vertices = vertices;
         Indices = indices;
         Passes = passes;
@@ -88,6 +117,14 @@ public sealed class M2StructuredRenderSection
     public int SectionIndex { get; }
 
     public ushort SkinSectionId { get; }
+
+    public ushort BoneComboIndex { get; }
+
+    public ushort BoneCount { get; }
+
+    public ushort BoneInfluences { get; }
+
+    public ushort CenterBoneIndex { get; }
 
     public IReadOnlyList<M2StaticRenderVertex> Vertices { get; }
 
@@ -116,7 +153,8 @@ public sealed class M2StructuredRenderPass
 public readonly record struct M2StaticRenderVertex(
     Vector3 Position,
     Vector3 Normal,
-    Vector2 TextureCoords,
+    Vector2 TextureCoords0,
+    Vector2 TextureCoords1,
     Vector4 BoneIndices,
     Vector4 BoneWeights);
 

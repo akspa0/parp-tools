@@ -16,6 +16,10 @@ public sealed class M2ActiveSkinSection
         VertexCount = submesh.VertexCount;
         IndexStart = submesh.IndexStart;
         IndexCount = submesh.IndexCount;
+        BoneCount = submesh.BoneCount;
+        BoneComboIndex = submesh.BoneComboIndex;
+        BoneInfluences = submesh.BoneInfluences;
+        CenterBoneIndex = submesh.CenterBoneIndex;
         Batches = batches;
     }
 
@@ -32,6 +36,14 @@ public sealed class M2ActiveSkinSection
     public ushort IndexStart { get; }
 
     public ushort IndexCount { get; }
+
+    public ushort BoneCount { get; }
+
+    public ushort BoneComboIndex { get; }
+
+    public ushort BoneInfluences { get; }
+
+    public ushort CenterBoneIndex { get; }
 
     public IReadOnlyList<M2ActiveSkinBatch> Batches { get; }
 

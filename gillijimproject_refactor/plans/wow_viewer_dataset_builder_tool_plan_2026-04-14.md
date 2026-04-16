@@ -37,6 +37,10 @@
    - liquid masks and liquid heights
    - object and PM4 masks
    - cleaned minimap variants such as no-liquid, no-MCCV, no-object, and terrain-only outputs
+
+Cross-build expectation for object and PM4 masks:
+- for the current fixed local clients, treat `3.3.5.12340` and `4.0.0.11927` as the paired minimum target builds for object-mask and other footprint-derived artifact work
+- do not assume `4.0.0` mask behavior is automatically identical just because the current `M2` footprint extraction is shared-format; require a bounded proof on each root before calling the seam closed
 4. Dataset JSON or manifest or metadata ownership.
 5. Batch corpus orchestration and resumable tile-map export semantics.
 6. Dataset explorer indexing, filtering, preview, and provenance ownership.
@@ -81,6 +85,7 @@
 - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
 - real-data validation on the fixed client roots and dataset roots from `gillijimproject_refactor/memory-bank/data-paths.md`
+- when the slice touches object masks, PM4 masks, no-object cleanup, or geometry-derived footprint extraction, include both the fixed `3.3.5.12340` and fixed `4.0.0.11927` roots in the bounded real-data proof unless the user explicitly narrows the build target
 - do not describe a build or a narrow test pass as full dataset-builder cutover proof without regenerated real artifacts
 - do not describe a launcher or explorer build as distribution proof for models or outputs; the policy target is local reproducibility, not shipped results
 

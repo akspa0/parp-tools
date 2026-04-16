@@ -1,3 +1,5 @@
+using WowViewer.Core.M2;
+
 namespace WowViewer.Core.Runtime.M2;
 
 public enum M2DiffuseEffectFamily
@@ -86,4 +88,125 @@ public sealed class M2EffectRecipe
     };
 
     public string RecipeKey => $"{DiffuseFamilyName}:{CombinerFamilyName}";
+
+    public string NativeEffectFamilyKey => $"{DiffuseFamilyName}{CombinerFamilyName}";
+}
+
+public sealed class M2ResolvedEffect
+{
+    public M2ResolvedEffect(
+        string recipeKey,
+        string nativeEffectFamilyKey,
+        string effectObjectKey,
+        M2BlendMode blendMode,
+        bool depthWrite,
+        bool alphaTest,
+        bool isTransparent,
+        bool isAdditive,
+        bool receivesLighting,
+        bool isTwoSided,
+        bool isProjected,
+        bool isHeuristic,
+        int stateBucket)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(recipeKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(nativeEffectFamilyKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(effectObjectKey);
+
+        RecipeKey = recipeKey;
+        NativeEffectFamilyKey = nativeEffectFamilyKey;
+        EffectObjectKey = effectObjectKey;
+        BlendMode = blendMode;
+        DepthWrite = depthWrite;
+        AlphaTest = alphaTest;
+        IsTransparent = isTransparent;
+        IsAdditive = isAdditive;
+        ReceivesLighting = receivesLighting;
+        IsTwoSided = isTwoSided;
+        IsProjected = isProjected;
+        IsHeuristic = isHeuristic;
+        StateBucket = stateBucket;
+    }
+
+    public string RecipeKey { get; }
+
+    public string NativeEffectFamilyKey { get; }
+
+    public string EffectObjectKey { get; }
+
+    public M2BlendMode BlendMode { get; }
+
+    public bool DepthWrite { get; }
+
+    public bool AlphaTest { get; }
+
+    public bool IsTransparent { get; }
+
+    public bool IsAdditive { get; }
+
+    public bool ReceivesLighting { get; }
+
+    public bool IsTwoSided { get; }
+
+    public bool IsProjected { get; }
+
+    public bool IsHeuristic { get; }
+
+    public int StateBucket { get; }
+}
+
+public static class M2EffectRegistry
+{
+    public static M2ResolvedEffect Resolve(M2StaticRenderMaterial material)
+    {
+        ArgumentNullException.ThrowIfNull(material);
+
+        M2EffectRecipe recipe = material.EffectRecipe;
+        bool isAdditive = material.BlendMode is M2BlendMode.NoAlphaAdd or M2BlendMode.Add or M2BlendMode.BlendAdd;
+        bool alphaTest = material.BlendMode == M2BlendMode.AlphaKey;
+        bool depthWrite = material.BlendMode is M2BlendMode.Opaque or M2BlendMode.AlphaKey;
+        bool receivesLighting = !material.IsUnshaded;
+        string effectPrefix = recipe.IsProjected ? "Model2Displ_" : "Model2_";
+        string nativeEffectFamilyKey = recipe.NativeEffectFamilyKey;
+        int stateBucket = BuildStateBucket(material, depthWrite, alphaTest, receivesLighting, isAdditive);
+
+        return new M2ResolvedEffect(
+            recipe.RecipeKey,
+            nativeEffectFamilyKey,
+            effectPrefix + nativeEffectFamilyKey,
+            material.BlendMode,
+            depthWrite,
+            alphaTest,
+            material.IsTransparent,
+            isAdditive,
+            receivesLighting,
+            material.IsTwoSided,
+            recipe.IsProjected,
+            recipe.IsHeuristic,
+            stateBucket);
+    }
+
+    private static int BuildStateBucket(
+        M2StaticRenderMaterial material,
+        bool depthWrite,
+        bool alphaTest,
+        bool receivesLighting,
+        bool isAdditive)
+    {
+        int bucket = (int)material.BlendMode & 0xF;
+        if (depthWrite)
+            bucket |= 1 << 4;
+        if (alphaTest)
+            bucket |= 1 << 5;
+        if (material.IsTwoSided)
+            bucket |= 1 << 6;
+        if (!receivesLighting)
+            bucket |= 1 << 7;
+        if (isAdditive)
+            bucket |= 1 << 8;
+        if (material.EffectRecipe.IsProjected)
+            bucket |= 1 << 9;
+
+        return bucket;
+    }
 }

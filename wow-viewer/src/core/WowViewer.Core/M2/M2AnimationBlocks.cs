@@ -164,3 +164,358 @@ public sealed class M2LightDefinition
 
     public M2TrackDefinition<byte> VisibilityTrack { get; }
 }
+
+public sealed class M2CameraDefinition
+{
+    public M2CameraDefinition(
+        int index,
+        int type,
+        float? staticFieldOfView,
+        float farClip,
+        float nearClip,
+        M2TrackDefinition<Vector3> positionTrack,
+        Vector3 positionBase,
+        M2TrackDefinition<Vector3> targetPositionTrack,
+        Vector3 targetPositionBase,
+        M2TrackDefinition<float> rollTrack,
+        M2TrackDefinition<float>? fieldOfViewTrack = null)
+    {
+        ArgumentNullException.ThrowIfNull(positionTrack);
+        ArgumentNullException.ThrowIfNull(targetPositionTrack);
+        ArgumentNullException.ThrowIfNull(rollTrack);
+
+        Index = index;
+        Type = type;
+        StaticFieldOfView = staticFieldOfView;
+        FarClip = farClip;
+        NearClip = nearClip;
+        PositionTrack = positionTrack;
+        PositionBase = positionBase;
+        TargetPositionTrack = targetPositionTrack;
+        TargetPositionBase = targetPositionBase;
+        RollTrack = rollTrack;
+        FieldOfViewTrack = fieldOfViewTrack;
+    }
+
+    public int Index { get; }
+
+    public int Type { get; }
+
+    public float? StaticFieldOfView { get; }
+
+    public float FarClip { get; }
+
+    public float NearClip { get; }
+
+    public M2TrackDefinition<Vector3> PositionTrack { get; }
+
+    public Vector3 PositionBase { get; }
+
+    public M2TrackDefinition<Vector3> TargetPositionTrack { get; }
+
+    public Vector3 TargetPositionBase { get; }
+
+    public M2TrackDefinition<float> RollTrack { get; }
+
+    public M2TrackDefinition<float>? FieldOfViewTrack { get; }
+
+    public bool HasAnimatedFieldOfView => FieldOfViewTrack != null;
+}
+
+public readonly record struct M2CompQuaternion(ushort X, ushort Y, ushort Z, ushort W)
+{
+    public static M2CompQuaternion Identity { get; } = new(32767, 32767, 32767, 65535);
+
+    public Quaternion ToQuaternion()
+    {
+        static float Decode(ushort value)
+        {
+            return Math.Clamp(((int)value - 32767) / 32767.0f, -1.0f, 1.0f);
+        }
+
+        Quaternion quaternion = new(Decode(X), Decode(Y), Decode(Z), Decode(W));
+        return quaternion.LengthSquared() > 0.000001f
+            ? Quaternion.Normalize(quaternion)
+            : Quaternion.Identity;
+    }
+}
+
+public sealed class M2BoneDefinition
+{
+    public M2BoneDefinition(
+        int index,
+        int keyBoneId,
+        uint flags,
+        short parentBone,
+        ushort submeshId,
+        uint boneNameCrc,
+        M2TrackDefinition<Vector3> translationTrack,
+        M2TrackDefinition<M2CompQuaternion> rotationTrack,
+        M2TrackDefinition<Vector3> scalingTrack,
+        Vector3 pivot)
+    {
+        ArgumentNullException.ThrowIfNull(translationTrack);
+        ArgumentNullException.ThrowIfNull(rotationTrack);
+        ArgumentNullException.ThrowIfNull(scalingTrack);
+
+        Index = index;
+        KeyBoneId = keyBoneId;
+        Flags = flags;
+        ParentBone = parentBone;
+        SubmeshId = submeshId;
+        BoneNameCrc = boneNameCrc;
+        TranslationTrack = translationTrack;
+        RotationTrack = rotationTrack;
+        ScalingTrack = scalingTrack;
+        Pivot = pivot;
+    }
+
+    public int Index { get; }
+
+    public int KeyBoneId { get; }
+
+    public uint Flags { get; }
+
+    public short ParentBone { get; }
+
+    public ushort SubmeshId { get; }
+
+    public uint BoneNameCrc { get; }
+
+    public M2TrackDefinition<Vector3> TranslationTrack { get; }
+
+    public M2TrackDefinition<M2CompQuaternion> RotationTrack { get; }
+
+    public M2TrackDefinition<Vector3> ScalingTrack { get; }
+
+    public Vector3 Pivot { get; }
+
+    public bool HasParent => ParentBone >= 0;
+}
+
+public sealed class M2RibbonDefinition
+{
+    public M2RibbonDefinition(
+        int index,
+        uint ribbonId,
+        uint boneIndex,
+        Vector3 position,
+        IReadOnlyList<ushort> textureIndices,
+        IReadOnlyList<ushort> materialIndices,
+        M2TrackDefinition<Vector3> colorTrack,
+        M2TrackDefinition<short> alphaTrack,
+        M2TrackDefinition<float> heightAboveTrack,
+        M2TrackDefinition<float> heightBelowTrack,
+        float edgesPerSecond,
+        float edgeLifetime,
+        float gravity,
+        ushort textureRows,
+        ushort textureColumns,
+        M2TrackDefinition<ushort> textureSlotTrack,
+        M2TrackDefinition<byte> visibilityTrack,
+        short priorityPlane,
+        sbyte ribbonColorIndex,
+        sbyte textureTransformLookupIndex)
+    {
+        ArgumentNullException.ThrowIfNull(textureIndices);
+        ArgumentNullException.ThrowIfNull(materialIndices);
+        ArgumentNullException.ThrowIfNull(colorTrack);
+        ArgumentNullException.ThrowIfNull(alphaTrack);
+        ArgumentNullException.ThrowIfNull(heightAboveTrack);
+        ArgumentNullException.ThrowIfNull(heightBelowTrack);
+        ArgumentNullException.ThrowIfNull(textureSlotTrack);
+        ArgumentNullException.ThrowIfNull(visibilityTrack);
+
+        Index = index;
+        RibbonId = ribbonId;
+        BoneIndex = boneIndex;
+        Position = position;
+        TextureIndices = textureIndices;
+        MaterialIndices = materialIndices;
+        ColorTrack = colorTrack;
+        AlphaTrack = alphaTrack;
+        HeightAboveTrack = heightAboveTrack;
+        HeightBelowTrack = heightBelowTrack;
+        EdgesPerSecond = edgesPerSecond;
+        EdgeLifetime = edgeLifetime;
+        Gravity = gravity;
+        TextureRows = textureRows;
+        TextureColumns = textureColumns;
+        TextureSlotTrack = textureSlotTrack;
+        VisibilityTrack = visibilityTrack;
+        PriorityPlane = priorityPlane;
+        RibbonColorIndex = ribbonColorIndex;
+        TextureTransformLookupIndex = textureTransformLookupIndex;
+    }
+
+    public int Index { get; }
+
+    public uint RibbonId { get; }
+
+    public uint BoneIndex { get; }
+
+    public Vector3 Position { get; }
+
+    public IReadOnlyList<ushort> TextureIndices { get; }
+
+    public IReadOnlyList<ushort> MaterialIndices { get; }
+
+    public M2TrackDefinition<Vector3> ColorTrack { get; }
+
+    public M2TrackDefinition<short> AlphaTrack { get; }
+
+    public M2TrackDefinition<float> HeightAboveTrack { get; }
+
+    public M2TrackDefinition<float> HeightBelowTrack { get; }
+
+    public float EdgesPerSecond { get; }
+
+    public float EdgeLifetime { get; }
+
+    public float Gravity { get; }
+
+    public ushort TextureRows { get; }
+
+    public ushort TextureColumns { get; }
+
+    public M2TrackDefinition<ushort> TextureSlotTrack { get; }
+
+    public M2TrackDefinition<byte> VisibilityTrack { get; }
+
+    public short PriorityPlane { get; }
+
+    public sbyte RibbonColorIndex { get; }
+
+    public sbyte TextureTransformLookupIndex { get; }
+}
+
+public sealed class M2ParticleDefinition
+{
+    public M2ParticleDefinition(
+        int index,
+        uint particleId,
+        uint flags,
+        Vector3 position,
+        ushort boneIndex,
+        ushort textureIndex,
+        string? geometryModelPath,
+        string? recursionModelPath,
+        ushort blendingType,
+        ushort emitterType,
+        ushort particleColorIndex,
+        byte particleType,
+        byte headOrTail,
+        short textureTileRotation,
+        ushort textureRows,
+        ushort textureColumns,
+        M2TrackDefinition<float> emissionSpeedTrack,
+        M2TrackDefinition<float> speedVariationTrack,
+        M2TrackDefinition<float> verticalRangeTrack,
+        M2TrackDefinition<float> horizontalRangeTrack,
+        M2TrackDefinition<float> gravityTrack,
+        M2TrackDefinition<float> lifespanTrack,
+        M2TrackDefinition<float> emissionRateTrack,
+        M2TrackDefinition<float> emissionAreaLengthTrack,
+        M2TrackDefinition<float> emissionAreaWidthTrack,
+        M2TrackDefinition<float> zSourceTrack,
+        M2TrackDefinition<byte> enabledTrack)
+    {
+        ArgumentNullException.ThrowIfNull(emissionSpeedTrack);
+        ArgumentNullException.ThrowIfNull(speedVariationTrack);
+        ArgumentNullException.ThrowIfNull(verticalRangeTrack);
+        ArgumentNullException.ThrowIfNull(horizontalRangeTrack);
+        ArgumentNullException.ThrowIfNull(gravityTrack);
+        ArgumentNullException.ThrowIfNull(lifespanTrack);
+        ArgumentNullException.ThrowIfNull(emissionRateTrack);
+        ArgumentNullException.ThrowIfNull(emissionAreaLengthTrack);
+        ArgumentNullException.ThrowIfNull(emissionAreaWidthTrack);
+        ArgumentNullException.ThrowIfNull(zSourceTrack);
+        ArgumentNullException.ThrowIfNull(enabledTrack);
+
+        Index = index;
+        ParticleId = particleId;
+        Flags = flags;
+        Position = position;
+        BoneIndex = boneIndex;
+        TextureIndex = textureIndex;
+        GeometryModelPath = geometryModelPath;
+        RecursionModelPath = recursionModelPath;
+        BlendingType = blendingType;
+        EmitterType = emitterType;
+        ParticleColorIndex = particleColorIndex;
+        ParticleType = particleType;
+        HeadOrTail = headOrTail;
+        TextureTileRotation = textureTileRotation;
+        TextureRows = textureRows;
+        TextureColumns = textureColumns;
+        EmissionSpeedTrack = emissionSpeedTrack;
+        SpeedVariationTrack = speedVariationTrack;
+        VerticalRangeTrack = verticalRangeTrack;
+        HorizontalRangeTrack = horizontalRangeTrack;
+        GravityTrack = gravityTrack;
+        LifespanTrack = lifespanTrack;
+        EmissionRateTrack = emissionRateTrack;
+        EmissionAreaLengthTrack = emissionAreaLengthTrack;
+        EmissionAreaWidthTrack = emissionAreaWidthTrack;
+        ZSourceTrack = zSourceTrack;
+        EnabledTrack = enabledTrack;
+    }
+
+    public int Index { get; }
+
+    public uint ParticleId { get; }
+
+    public uint Flags { get; }
+
+    public Vector3 Position { get; }
+
+    public ushort BoneIndex { get; }
+
+    public ushort TextureIndex { get; }
+
+    public string? GeometryModelPath { get; }
+
+    public string? RecursionModelPath { get; }
+
+    public ushort BlendingType { get; }
+
+    public ushort EmitterType { get; }
+
+    public ushort ParticleColorIndex { get; }
+
+    public byte ParticleType { get; }
+
+    public byte HeadOrTail { get; }
+
+    public short TextureTileRotation { get; }
+
+    public ushort TextureRows { get; }
+
+    public ushort TextureColumns { get; }
+
+    public M2TrackDefinition<float> EmissionSpeedTrack { get; }
+
+    public M2TrackDefinition<float> SpeedVariationTrack { get; }
+
+    public M2TrackDefinition<float> VerticalRangeTrack { get; }
+
+    public M2TrackDefinition<float> HorizontalRangeTrack { get; }
+
+    public M2TrackDefinition<float> GravityTrack { get; }
+
+    public M2TrackDefinition<float> LifespanTrack { get; }
+
+    public M2TrackDefinition<float> EmissionRateTrack { get; }
+
+    public M2TrackDefinition<float> EmissionAreaLengthTrack { get; }
+
+    public M2TrackDefinition<float> EmissionAreaWidthTrack { get; }
+
+    public M2TrackDefinition<float> ZSourceTrack { get; }
+
+    public M2TrackDefinition<byte> EnabledTrack { get; }
+
+    public bool UsesModelParticle => !string.IsNullOrWhiteSpace(GeometryModelPath);
+
+    public bool UsesRecursiveParticleModel => !string.IsNullOrWhiteSpace(RecursionModelPath);
+}

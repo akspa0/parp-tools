@@ -1,3 +1,6 @@
+using MdxLTool.Formats.Mdx;
+using MdxViewer.DataSources;
+using Silk.NET.OpenGL;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.M2;
 using WowViewer.Core.Runtime.M2;
@@ -6,6 +9,8 @@ namespace MdxViewer.Rendering;
 
 internal static class WowViewerM2RuntimeBridge
 {
+    private const string NativeRendererSettingName = "PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER";
+
     public static M2StaticRenderModel BuildStaticRenderModel(byte[] modelBytes, byte[] skinBytes, string modelPath, string skinPath)
     {
         ArgumentNullException.ThrowIfNull(modelBytes);
@@ -26,6 +31,47 @@ internal static class WowViewerM2RuntimeBridge
         M2SkinProfileRuntimeState initialized = M2SkinProfileRuntime.Initialize(loaded);
 
         return M2StaticRenderModelBuilder.Build(geometry, initialized);
+    }
+
+    public static bool PreferNativeStaticRenderer
+    {
+        get
+        {
+            string? value = Environment.GetEnvironmentVariable(NativeRendererSettingName);
+            return value != null
+                && (string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(value, "on", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    public static bool ShouldUseNativeStaticRenderer(MdxFile? adaptedMdx)
+        => adaptedMdx == null || PreferNativeStaticRenderer;
+
+    public static M2Renderer CreateRenderer(
+        GL gl,
+        M2StaticRenderModel runtimeModel,
+        MdxFile? adaptedMdx,
+        string? modelDir,
+        IDataSource? dataSource,
+        ReplaceableTextureResolver? texResolver,
+        string? buildVersion,
+        string sourceModelPath,
+        bool deferInitialTextureLoads = false)
+    {
+        ArgumentNullException.ThrowIfNull(gl);
+        ArgumentNullException.ThrowIfNull(runtimeModel);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceModelPath);
+
+        if (ShouldUseNativeStaticRenderer(adaptedMdx))
+            return new M2Renderer(gl, runtimeModel, sourceModelPath, dataSource, texResolver);
+
+        string resolvedModelDir = modelDir ?? Path.GetDirectoryName(sourceModelPath) ?? string.Empty;
+        return new M2Renderer(
+            new MdxRenderer(gl, adaptedMdx!, resolvedModelDir, dataSource, texResolver, sourceModelPath, true, buildVersion, deferInitialTextureLoads: deferInitialTextureLoads),
+            runtimeModel,
+            sourceModelPath);
     }
 
     private static int GuessProfileIndex(string modelPath, string skinPath)

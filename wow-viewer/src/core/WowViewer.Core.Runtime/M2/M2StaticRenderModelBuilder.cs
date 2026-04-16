@@ -52,6 +52,7 @@ public static class M2StaticRenderModelBuilder
                         vertex.Position,
                         vertex.Normal,
                         vertex.TextureCoords0,
+                        vertex.TextureCoords1,
                         vertex.BoneIndices,
                         vertex.BoneWeights));
                 }
@@ -75,6 +76,10 @@ public static class M2StaticRenderModelBuilder
             structuredSections.Add(new M2StructuredRenderSection(
                 activeSection.SectionIndex,
                 activeSection.SkinSectionId,
+                activeSection.BoneComboIndex,
+                activeSection.BoneCount,
+                activeSection.BoneInfluences,
+                activeSection.CenterBoneIndex,
                 vertices,
                 indices,
                 passes));
@@ -84,13 +89,18 @@ public static class M2StaticRenderModelBuilder
                 compatibilitySections.Add(new M2StaticRenderSection(
                     activeSection.SectionIndex,
                     activeSection.SkinSectionId,
+                    activeSection.BoneComboIndex,
+                    activeSection.BoneCount,
+                    activeSection.BoneInfluences,
+                    activeSection.CenterBoneIndex,
                     vertices,
                     indices,
                     pass.Material));
             }
         }
 
-        return new M2StaticRenderModel(geometry.Model, compatibilitySections, structuredSections, activeSkinProfile.UsesCompatibilityFallback);
+        ushort[] boneLookup = geometry.BoneLookup.Select(static entry => entry.BoneIndex).ToArray();
+        return new M2StaticRenderModel(geometry.Model, compatibilitySections, structuredSections, boneLookup, activeSkinProfile.UsesCompatibilityFallback);
     }
 
     private static List<M2StructuredRenderPass> BuildStructuredPasses(M2GeometryDocument geometry, IReadOnlyList<M2ActiveSkinBatch> orderedBatches)
@@ -116,10 +126,10 @@ public static class M2StaticRenderModelBuilder
         if (localSkinVertexIndex >= skin.VertexLookup.Count)
             return false;
 
-        int globalIndex = skin.VertexLookup[localSkinVertexIndex] + (int)skin.GlobalVertexOffset;
+        int globalIndex = skin.VertexLookup[localSkinVertexIndex];
         if (globalIndex < 0 || globalIndex >= geometry.Vertices.Count)
         {
-            globalIndex = skin.VertexLookup[localSkinVertexIndex];
+            globalIndex = skin.VertexLookup[localSkinVertexIndex] + (int)skin.GlobalVertexOffset;
             if (globalIndex < 0 || globalIndex >= geometry.Vertices.Count)
                 return false;
         }

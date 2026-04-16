@@ -1,5 +1,9 @@
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Numerics;
+using MdxViewer.DataSources;
 using MdxViewer.Logging;
+using SereniaBLPLib;
 using Silk.NET.OpenGL;
 using WowViewer.Core.Runtime.M2;
 
@@ -8,10 +12,16 @@ namespace MdxViewer.Rendering;
 public sealed class M2Renderer : IModelRenderer
 {
     private readonly GL? _gl;
+    private readonly IDataSource? _dataSource;
+    private readonly ReplaceableTextureResolver? _texResolver;
     private readonly MdxRenderer? _legacyRenderer;
     private readonly M2StaticRenderModel? _runtimeModel;
     private readonly List<SectionBuffers> _sections = new();
     private readonly List<bool> _sectionVisibility = new();
+    private readonly Dictionary<string, uint> _loadedTextureCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<uint> _ownedTextureIds = new();
+    private readonly string _modelDir = string.Empty;
+    private readonly int? _selectedReplaceableDisplayIndex;
     private bool _wireframe;
     private bool _batchStateValid;
     private Matrix4x4 _batchView;
@@ -37,6 +47,11 @@ public sealed class M2Renderer : IModelRenderer
     private static int _uAmbientColor;
     private static int _uBaseColor;
     private static int _uUnshaded;
+    private static int _uHasTexture;
+    private static int _uUvSet;
+    private static int _uGeneratedTexCoord;
+    private static int _uTexture0;
+    private static int _uAlphaCutout;
     private static bool _shaderInitialized;
     private static int _shaderRefCount;
 
@@ -67,21 +82,26 @@ public sealed class M2Renderer : IModelRenderer
             $"[M2] wow-viewer runtime metadata + legacy draw backend ready for {Path.GetFileName(SourceModelPath)}: sections={runtimeModel.Sections.Count}, compatibilityFallback={runtimeModel.UsesCompatibilityFallback}");
     }
 
-    public M2Renderer(GL gl, M2StaticRenderModel runtimeModel, string sourceModelPath)
+    public M2Renderer(GL gl, M2StaticRenderModel runtimeModel, string sourceModelPath, IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null)
     {
         ArgumentNullException.ThrowIfNull(gl);
         ArgumentNullException.ThrowIfNull(runtimeModel);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceModelPath);
 
         _gl = gl;
+        _dataSource = dataSource;
+        _texResolver = texResolver;
         _runtimeModel = runtimeModel;
         SourceModelPath = sourceModelPath.Replace('/', '\\');
+        _modelDir = Path.GetDirectoryName(SourceModelPath)?.Replace('/', '\\') ?? string.Empty;
+        _selectedReplaceableDisplayIndex = SelectBestReplaceableDisplayIndex(runtimeModel, SourceModelPath, texResolver);
 
         for (int index = 0; index < runtimeModel.Sections.Count; index++)
             _sectionVisibility.Add(true);
 
         InitShaders();
         InitBuffers();
+        LoadSectionTextures();
 
         ViewerLog.Info(
             ViewerLog.Category.Mdx,
@@ -343,6 +363,12 @@ public sealed class M2Renderer : IModelRenderer
 
         _sections.Clear();
 
+        foreach (uint textureId in _ownedTextureIds)
+            _gl.DeleteTexture(textureId);
+
+        _ownedTextureIds.Clear();
+        _loadedTextureCache.Clear();
+
         _shaderRefCount--;
         if (_shaderRefCount <= 0 && _shaderProgram != 0)
         {
@@ -360,17 +386,21 @@ public sealed class M2Renderer : IModelRenderer
 
         foreach (M2StaticRenderSection section in _runtimeModel.Sections)
         {
-            float[] vertexData = new float[section.Vertices.Count * 6];
+            float[] vertexData = new float[section.Vertices.Count * 10];
             for (int index = 0; index < section.Vertices.Count; index++)
             {
                 M2StaticRenderVertex vertex = section.Vertices[index];
-                int offset = index * 6;
+                int offset = index * 10;
                 vertexData[offset + 0] = vertex.Position.X;
                 vertexData[offset + 1] = vertex.Position.Y;
                 vertexData[offset + 2] = vertex.Position.Z;
                 vertexData[offset + 3] = vertex.Normal.X;
                 vertexData[offset + 4] = vertex.Normal.Y;
                 vertexData[offset + 5] = vertex.Normal.Z;
+                vertexData[offset + 6] = vertex.TextureCoords0.X;
+                vertexData[offset + 7] = vertex.TextureCoords0.Y;
+                vertexData[offset + 8] = vertex.TextureCoords1.X;
+                vertexData[offset + 9] = vertex.TextureCoords1.Y;
             }
 
             uint[] indices = section.Indices.ToArray();
@@ -393,10 +423,14 @@ public sealed class M2Renderer : IModelRenderer
                     _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(uint)), indexPtr, BufferUsageARB.StaticDraw);
                 }
 
-                _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6u * sizeof(float), (void*)0);
+                _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)0);
                 _gl.EnableVertexAttribArray(0);
-                _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6u * sizeof(float), (void*)(3 * sizeof(float)));
+                _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)(3 * sizeof(float)));
                 _gl.EnableVertexAttribArray(1);
+                _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)(6 * sizeof(float)));
+                _gl.EnableVertexAttribArray(2);
+                _gl.VertexAttribPointer(3, 2, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)(8 * sizeof(float)));
+                _gl.EnableVertexAttribArray(3);
             }
 
             _gl.BindVertexArray(0);
@@ -459,15 +493,9 @@ public sealed class M2Renderer : IModelRenderer
             if (pass == RenderPass.Transparent && !transparent)
                 continue;
 
-            if (section.Material.IsTwoSided || backdrop)
-            {
-                _gl.Disable(EnableCap.CullFace);
-            }
-            else
-            {
-                _gl.Enable(EnableCap.CullFace);
-                _gl.CullFace(TriangleFace.Back);
-            }
+            // Keep parity with the established M2 compatibility path until the
+            // pure runtime renderer has proven stable winding or projected-pass rules.
+            _gl.Disable(EnableCap.CullFace);
 
             if (!backdrop && transparent)
             {
@@ -484,11 +512,20 @@ public sealed class M2Renderer : IModelRenderer
             Vector3 baseColor = ComputeSectionColor(section.SectionIndex, section.Material, fadeAlpha);
             _gl.Uniform3(_uBaseColor, baseColor.X, baseColor.Y, baseColor.Z);
             _gl.Uniform1(_uUnshaded, section.Material.IsUnshaded ? 1 : 0);
+            _gl.Uniform1(_uHasTexture, section.HasTexture ? 1 : 0);
+            _gl.Uniform1(_uUvSet, section.UvSet);
+            _gl.Uniform1(_uGeneratedTexCoord, section.GeneratedTexCoord ? 1 : 0);
+            _gl.Uniform1(_uAlphaCutout, section.AlphaCutout ? 1 : 0);
+
+            _gl.ActiveTexture(TextureUnit.Texture0);
+            _gl.BindTexture(TextureTarget.Texture2D, section.HasTexture ? section.TextureId : 0u);
+            _gl.Uniform1(_uTexture0, 0);
 
             _gl.BindVertexArray(section.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, section.IndexCount, DrawElementsType.UnsignedInt, null);
         }
 
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
         _gl.BindVertexArray(0);
         _gl.Disable(EnableCap.Blend);
         _gl.Enable(EnableCap.DepthTest);
@@ -523,12 +560,10 @@ public sealed class M2Renderer : IModelRenderer
 
     private static Vector3 ComputeSectionColor(int sectionIndex, M2StaticRenderMaterial material, float fadeAlpha)
     {
-        float tintSeed = ((sectionIndex * 37) % 100) / 100f;
-        Vector3 baseColor = material.IsTransparent
-            ? new Vector3(0.72f, 0.83f, 0.98f)
-            : new Vector3(0.84f, 0.84f, 0.82f);
-        Vector3 tint = new(0.08f * tintSeed, 0.04f * (1f - tintSeed), 0.06f * (0.5f - tintSeed));
-        return Vector3.Clamp((baseColor + tint) * Math.Clamp(fadeAlpha, 0.1f, 1.0f), Vector3.Zero, Vector3.One);
+        _ = sectionIndex;
+        _ = material;
+        float brightness = Math.Clamp(fadeAlpha, 0.1f, 1.0f);
+        return new Vector3(brightness, brightness, brightness);
     }
 
     private void InitShaders()
@@ -544,6 +579,8 @@ public sealed class M2Renderer : IModelRenderer
             #version 330 core
             layout (location = 0) in vec3 aPos;
             layout (location = 1) in vec3 aNormal;
+            layout (location = 2) in vec2 aTexCoord0;
+            layout (location = 3) in vec2 aTexCoord1;
 
             uniform mat4 uModel;
             uniform mat4 uView;
@@ -551,12 +588,18 @@ public sealed class M2Renderer : IModelRenderer
 
             out vec3 vWorldPos;
             out vec3 vNormal;
+            out vec3 vViewNormal;
+            out vec2 vTexCoord0;
+            out vec2 vTexCoord1;
 
             void main()
             {
                 vec4 worldPos = uModel * vec4(aPos, 1.0);
                 vWorldPos = worldPos.xyz;
                 vNormal = normalize(mat3(uModel) * aNormal);
+                vViewNormal = mat3(uView) * vNormal;
+                vTexCoord0 = aTexCoord0;
+                vTexCoord1 = aTexCoord1;
                 gl_Position = uProj * uView * worldPos;
             }
             """;
@@ -565,6 +608,7 @@ public sealed class M2Renderer : IModelRenderer
             #version 330 core
             in vec3 vWorldPos;
             in vec3 vNormal;
+            in vec3 vViewNormal;
 
             uniform vec3 uFogColor;
             uniform float uFogStart;
@@ -575,18 +619,42 @@ public sealed class M2Renderer : IModelRenderer
             uniform vec3 uAmbientColor;
             uniform vec3 uBaseColor;
             uniform int uUnshaded;
+            uniform int uHasTexture;
+            uniform int uUvSet;
+            uniform int uGeneratedTexCoord;
+            uniform sampler2D uTexture0;
+            uniform int uAlphaCutout;
+
+            in vec2 vTexCoord0;
+            in vec2 vTexCoord1;
 
             out vec4 FragColor;
 
             void main()
             {
+                vec2 texCoord = uUvSet == 1 ? vTexCoord1 : vTexCoord0;
+                if (uGeneratedTexCoord == 1)
+                {
+                    vec3 viewNormal = normalize(vViewNormal);
+                    if (!gl_FrontFacing)
+                        viewNormal = -viewNormal;
+
+                    texCoord = viewNormal.xy * 0.5 + 0.5;
+                }
+
+                vec4 textureSample = uHasTexture == 1
+                    ? texture(uTexture0, texCoord)
+                    : vec4(1.0, 1.0, 1.0, 1.0);
+                if (uAlphaCutout == 1 && textureSample.a < 0.5)
+                    discard;
+
                 float diffuseStrength = uUnshaded == 1 ? 1.0 : max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
-                vec3 litColor = uBaseColor * (uAmbientColor + (uLightColor * diffuseStrength));
+                vec3 litColor = (uBaseColor * textureSample.rgb) * (uAmbientColor + (uLightColor * diffuseStrength));
                 float distanceToCamera = distance(vWorldPos, uCameraPos);
                 float fogRange = max(uFogEnd - uFogStart, 0.001);
                 float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
                 vec3 finalColor = mix(uFogColor, litColor, fogFactor);
-                FragColor = vec4(finalColor, 1.0);
+                FragColor = vec4(finalColor, textureSample.a);
             }
             """;
 
@@ -616,6 +684,11 @@ public sealed class M2Renderer : IModelRenderer
         _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
         _uBaseColor = _gl.GetUniformLocation(_shaderProgram, "uBaseColor");
         _uUnshaded = _gl.GetUniformLocation(_shaderProgram, "uUnshaded");
+        _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
+        _uUvSet = _gl.GetUniformLocation(_shaderProgram, "uUvSet");
+        _uGeneratedTexCoord = _gl.GetUniformLocation(_shaderProgram, "uGeneratedTexCoord");
+        _uTexture0 = _gl.GetUniformLocation(_shaderProgram, "uTexture0");
+        _uAlphaCutout = _gl.GetUniformLocation(_shaderProgram, "uAlphaCutout");
         _shaderInitialized = true;
     }
 
@@ -632,6 +705,310 @@ public sealed class M2Renderer : IModelRenderer
             throw new InvalidOperationException($"Failed to compile M2 runtime shader ({shaderType}): {_gl.GetShaderInfoLog(shader)}");
 
         return shader;
+    }
+
+    private static int? SelectBestReplaceableDisplayIndex(M2StaticRenderModel runtimeModel, string modelPath, ReplaceableTextureResolver? texResolver)
+    {
+        if (texResolver == null)
+            return null;
+
+        uint[] replaceableIds = runtimeModel.Sections
+            .SelectMany(static section => section.Material.TextureBindings)
+            .Select(static binding => binding.ReplaceableId)
+            .Where(static replaceableId => replaceableId != 0)
+            .Distinct()
+            .ToArray();
+
+        return replaceableIds.Length == 0
+            ? null
+            : texResolver.SelectBestDisplayIndex(modelPath, replaceableIds);
+    }
+
+    private void LoadSectionTextures()
+    {
+        if (_gl == null)
+            return;
+
+        foreach (SectionBuffers section in _sections)
+        {
+            section.AlphaCutout = section.Material.BlendMode == WowViewer.Core.M2.M2BlendMode.AlphaKey;
+            if (TryLoadMaterialTexture(section.Material, out uint textureId, out int uvSet, out bool generatedTexCoord))
+            {
+                section.TextureId = textureId;
+                section.HasTexture = true;
+                section.UvSet = uvSet;
+                section.GeneratedTexCoord = generatedTexCoord;
+            }
+        }
+    }
+
+    private bool TryLoadMaterialTexture(M2StaticRenderMaterial material, out uint textureId, out int uvSet, out bool generatedTexCoord)
+    {
+        textureId = 0;
+        uvSet = 0;
+        generatedTexCoord = false;
+
+        foreach ((string? TexturePath, uint ReplaceableId, uint TextureFlags, int UvSet, bool GeneratedTexCoord) candidate in EnumerateTextureCandidates(material))
+        {
+            string? resolvedPath = candidate.TexturePath;
+            if (string.IsNullOrWhiteSpace(resolvedPath) && candidate.ReplaceableId != 0)
+                resolvedPath = ResolveReplaceableTexture(candidate.ReplaceableId);
+
+            if (string.IsNullOrWhiteSpace(resolvedPath))
+                continue;
+
+            bool clampS = (candidate.TextureFlags & 0x1u) == 0;
+            bool clampT = (candidate.TextureFlags & 0x2u) == 0;
+            if (TryGetOrLoadTexture(resolvedPath, clampS, clampT, out textureId))
+            {
+                uvSet = candidate.UvSet;
+                generatedTexCoord = candidate.GeneratedTexCoord;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<(string? TexturePath, uint ReplaceableId, uint TextureFlags, int UvSet, bool GeneratedTexCoord)> EnumerateTextureCandidates(M2StaticRenderMaterial material)
+    {
+        if (material.TextureBindings.Count > 0)
+        {
+            foreach (M2StaticRenderTextureBinding binding in material.TextureBindings.OrderBy(static binding => binding.StageIndex))
+                yield return (
+                    binding.TexturePath,
+                    binding.ReplaceableId,
+                    binding.TextureFlags,
+                    NormalizeUvSet(binding.TextureCoordLookupValue),
+                    UsesGeneratedTexCoord(binding.TextureCoordLookupValue));
+
+            yield break;
+        }
+
+        yield return (material.TexturePath, material.ReplaceableId, material.TextureFlags, 0, false);
+    }
+
+    private static int NormalizeUvSet(ushort? textureCoordLookupValue)
+    {
+        return textureCoordLookupValue == 1 ? 1 : 0;
+    }
+
+    private static bool UsesGeneratedTexCoord(ushort? textureCoordLookupValue)
+    {
+        return textureCoordLookupValue == ushort.MaxValue;
+    }
+
+    private string? ResolveReplaceableTexture(uint replaceableId)
+    {
+        if (_texResolver == null)
+            return null;
+
+        return _texResolver.Resolve(SourceModelPath, replaceableId, _selectedReplaceableDisplayIndex ?? 0);
+    }
+
+    private bool TryGetOrLoadTexture(string texturePath, bool clampS, bool clampT, out uint textureId)
+    {
+        textureId = 0;
+        string cacheKey = BuildTextureCacheKey(texturePath, clampS, clampT);
+        if (_loadedTextureCache.TryGetValue(cacheKey, out textureId))
+            return textureId != 0;
+
+        if (TryLoadTexture(texturePath, clampS, clampT, out textureId, out string resolvedPath))
+        {
+            _loadedTextureCache[cacheKey] = textureId;
+            _loadedTextureCache[BuildTextureCacheKey(resolvedPath, clampS, clampT)] = textureId;
+            _ownedTextureIds.Add(textureId);
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryLoadTexture(string texturePath, bool clampS, bool clampT, out uint textureId, out string resolvedPath)
+    {
+        textureId = 0;
+        resolvedPath = texturePath.Replace('/', '\\');
+
+        if (TryResolveImagePath(texturePath, ".png", out string pngPath))
+        {
+            textureId = LoadTextureFromImage(pngPath, clampS, clampT);
+            if (textureId != 0)
+            {
+                resolvedPath = pngPath;
+                return true;
+            }
+        }
+
+        if (!TryReadTextureBytes(texturePath, out byte[]? blpData, out resolvedPath) || blpData == null || blpData.Length == 0)
+            return false;
+
+        textureId = LoadTextureFromBlp(blpData, resolvedPath, clampS, clampT);
+        return textureId != 0;
+    }
+
+    private bool TryReadTextureBytes(string texturePath, out byte[]? bytes, out string resolvedPath)
+    {
+        bytes = null;
+        resolvedPath = texturePath.Replace('/', '\\');
+
+        IEnumerable<string> candidates = EnumerateTexturePathCandidates(texturePath);
+        foreach (string candidate in candidates)
+        {
+            if (_dataSource is MpqDataSource mpqDataSource)
+            {
+                string? actualPath = mpqDataSource.FindInFileSet(candidate)
+                    ?? mpqDataSource.FindInFileSet(candidate.Replace('\\', '/'));
+                if (!string.IsNullOrWhiteSpace(actualPath))
+                {
+                    bytes = _dataSource.ReadFile(actualPath);
+                    if (bytes != null && bytes.Length > 0)
+                    {
+                        resolvedPath = actualPath.Replace('/', '\\');
+                        return true;
+                    }
+                }
+            }
+
+            if (_dataSource != null)
+            {
+                bytes = _dataSource.ReadFile(candidate)
+                    ?? _dataSource.ReadFile(candidate.Replace('\\', '/'));
+                if (bytes != null && bytes.Length > 0)
+                {
+                    resolvedPath = candidate.Replace('/', '\\');
+                    return true;
+                }
+            }
+
+            if (File.Exists(candidate))
+            {
+                bytes = File.ReadAllBytes(candidate);
+                resolvedPath = Path.GetFullPath(candidate);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private IEnumerable<string> EnumerateTexturePathCandidates(string texturePath)
+    {
+        string normalized = texturePath.Replace('/', '\\').TrimStart('\\');
+        yield return normalized;
+
+        string fileName = Path.GetFileName(normalized);
+        if (!string.IsNullOrWhiteSpace(_modelDir) && !string.IsNullOrWhiteSpace(fileName))
+        {
+            yield return Path.Combine(_modelDir, fileName);
+            yield return Path.Combine(_modelDir, normalized);
+        }
+    }
+
+    private bool TryResolveImagePath(string texturePath, string extension, out string resolvedPath)
+    {
+        resolvedPath = string.Empty;
+        foreach (string candidate in EnumerateTexturePathCandidates(texturePath))
+        {
+            string imagePath = Path.ChangeExtension(candidate, extension);
+            if (!File.Exists(imagePath))
+                continue;
+
+            resolvedPath = Path.GetFullPath(imagePath);
+            return true;
+        }
+
+        return false;
+    }
+
+    private unsafe uint LoadTextureFromBlp(byte[] blpData, string name, bool clampS, bool clampT)
+    {
+        try
+        {
+            using MemoryStream memoryStream = new(blpData, writable: false);
+            using BlpFile blp = new(memoryStream);
+            using Bitmap bitmap = blp.GetBitmap(0);
+            return UploadBitmap(bitmap, clampS, clampT);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Failed to decode BLP '{name}': {ex.Message}");
+            return 0;
+        }
+    }
+
+    private uint LoadTextureFromImage(string imagePath, bool clampS, bool clampT)
+    {
+        try
+        {
+            using Bitmap bitmap = new(imagePath);
+            using Bitmap converted = bitmap.Clone(new Rectangle(0, 0, bitmap.Width, bitmap.Height), System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            return UploadBitmap(converted, clampS, clampT);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Failed to load image '{imagePath}': {ex.Message}");
+            return 0;
+        }
+    }
+
+    private unsafe uint UploadBitmap(Bitmap bitmap, bool clampS, bool clampT)
+    {
+        if (_gl == null)
+            return 0;
+
+        Rectangle rect = new(0, 0, bitmap.Width, bitmap.Height);
+        BitmapData bitmapData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        try
+        {
+            byte[] sourceBytes = new byte[bitmapData.Stride * bitmapData.Height];
+            System.Runtime.InteropServices.Marshal.Copy(bitmapData.Scan0, sourceBytes, 0, sourceBytes.Length);
+
+            byte[] pixels = new byte[bitmap.Width * bitmap.Height * 4];
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    int sourceOffset = (y * bitmapData.Stride) + (x * 4);
+                    int destinationOffset = ((y * bitmap.Width) + x) * 4;
+                    pixels[destinationOffset + 0] = sourceBytes[sourceOffset + 2];
+                    pixels[destinationOffset + 1] = sourceBytes[sourceOffset + 1];
+                    pixels[destinationOffset + 2] = sourceBytes[sourceOffset + 0];
+                    pixels[destinationOffset + 3] = sourceBytes[sourceOffset + 3];
+                }
+            }
+
+            return UploadTexture(pixels, (uint)bitmap.Width, (uint)bitmap.Height, clampS, clampT);
+        }
+        finally
+        {
+            bitmap.UnlockBits(bitmapData);
+        }
+    }
+
+    private unsafe uint UploadTexture(byte[] pixels, uint width, uint height, bool clampS, bool clampT)
+    {
+        if (_gl == null)
+            return 0;
+
+        uint textureId = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, textureId);
+        fixed (byte* pixelPtr = pixels)
+        {
+            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba, width, height, 0, Silk.NET.OpenGL.PixelFormat.Rgba, PixelType.UnsignedByte, pixelPtr);
+        }
+
+        TextureWrapMode wrapS = clampS ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
+        TextureWrapMode wrapT = clampT ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
+        RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true, wrapS, wrapT);
+        _gl.GenerateMipmap(TextureTarget.Texture2D);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+        return textureId;
+    }
+
+    private static string BuildTextureCacheKey(string texturePath, bool clampS, bool clampT)
+    {
+        string normalizedPath = texturePath.Replace('/', '\\').ToLowerInvariant();
+        return $"{normalizedPath}|s={(clampS ? 1 : 0)}|t={(clampT ? 1 : 0)}";
     }
 
     private sealed class SectionBuffers
@@ -660,6 +1037,16 @@ public sealed class M2Renderer : IModelRenderer
         public uint IndexCount { get; }
 
         public M2StaticRenderMaterial Material { get; }
+
+        public uint TextureId { get; set; }
+
+        public bool HasTexture { get; set; }
+
+        public int UvSet { get; set; }
+
+        public bool GeneratedTexCoord { get; set; }
+
+        public bool AlphaCutout { get; set; }
 
         public bool Visible { get; set; } = true;
     }

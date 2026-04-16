@@ -1,23 +1,60 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
-## Apr 15, 2026 - Successful M2 runtime loads now stay on the runtime draw path instead of silently dropping back into the legacy MDX renderer
+## Apr 16, 2026 - pure runtime M2 object rendering was still culling projected or mixed-winding crate sections away, and `FoodHerbs_Level01.m2` proved the fix shape
 
-- followed the continued live M2 regression report after the user showed that standalone `DraeneiFemale.m2` was still rendering through the UI path labeled `wow-viewer runtime + legacy draw backend`
-- root cause confirmed in code:
-   - standalone load in `ViewerApp.cs`, world M2 load in `Terrain/WorldAssetManager.cs`, and WMO doodad M2 load in `Rendering/WmoRenderer.cs` were all doing the same thing on successful `.skin` resolution: build a `M2StaticRenderModel`, then also build an adapted `MdxFile`, then hand the renderer to `new M2Renderer(new MdxRenderer(...), runtimeModel, ...)`
-   - inside `Rendering/M2Renderer.cs`, every render entry point short-circuits to `_legacyRenderer` when that compatibility constructor is used, so the runtime model was feeding stats and metadata while the actual draw path still ran through the old MDX compatibility pipeline
+- followed the user's new live repro that `FoodHerbs_Level01.m2` looked hollow in the pure runtime path even though it should read as a solid crate with props resting on top
+- real-data comparison on the fixed Wrath root `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft` showed:
+   - pure runtime before fix: `output/build-validation/m2-foodherbs-runtime-correct/standalone/3.3.5.12340/20260416_051238388_current_20260416_051238_no_ui.png`
+   - legacy control: `output/build-validation/m2-foodherbs-legacy-correct/standalone/3.3.5.12340/20260416_051302760_current_20260416_051302_no_ui.png`
+   - the runtime path dropped solid crate faces and made props appear to float, while the legacy path kept the crate volume intact
+- inspect proof on the same asset showed the broken sections were mostly `Diffuse_Projected:*` opaque or alpha-key passes, not additive overlays, and the current runtime shader path was still enabling culling where the legacy `MdxRenderer` path does not
 - active `src/MdxViewer` behavior after this slice:
-   - successful runtime-backed M2 loads now stay on `new M2Renderer(_gl, runtimeModel, ...)` in:
+   - `Rendering/M2Renderer.cs` now keeps culling disabled for the pure runtime M2 path, matching the established legacy M2 draw behavior until projected or mixed-winding rules are better understood
+   - rerunning the same runtime capture now writes `output/build-validation/m2-foodherbs-runtime-after-cull-fix/standalone/3.3.5.12340/20260416_051511729_current_20260416_051511_no_ui.png`, which restores the solid-crate read much closer to the legacy control
+- important boundary:
+   - this is a real fix for at least one projected-heavy object-family runtime failure, but it does not close the separate character-model nightmare the user called out; character parity still needs its own focused follow-up
+
+## Apr 16, 2026 - Band_DrumSet live proof shows the UV-contract fix is real, but projected or additive runtime material parity is still missing
+
+- followed the user's live report that the pure runtime M2 path still had geoset texturing problems and reversed-looking mapping on some assets even after Wolf and camera-path proof work
+- concrete contract bug now closed in the canonical runtime path:
+   - `WowViewer.Core.Runtime/M2/M2StaticRenderModelBuilder.cs` had been flattening runtime static vertices to `TextureCoords0` only even though `M2GeometryVertex` already carried both UV sets
+   - `Rendering/M2Renderer.cs` had also only uploaded and sampled one UV stream, so any section needing UV1 could never render correctly through the pure runtime path in `MdxViewer`
+- active `src/MdxViewer` behavior after this slice:
+   - `Rendering/M2Renderer.cs` now uploads both UV streams and chooses UV0 or UV1 from the selected runtime texture binding
+   - the runtime shader path no longer injects arbitrary per-section debug tint into textured output
+   - `coordLookupValue=65535` now maps to generated view-normal texcoords in the pure runtime shader instead of silently falling back to UV0
+- real-data proof boundary after rerunning on the fixed local Wrath root `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`:
+   - `Creature/band/Band_DrumSet.M2` through `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1` now produces a textured live capture at `output/build-validation/m2-native-static-texture-path/standalone/3.3.5.12340/standalone/3.3.5.12340/20260416_045415087_current_20260416_045415_no_ui.png` instead of the earlier black-failure shape
+   - legacy control on the same asset wrote `output/build-validation/m2-native-static-texture-path/legacy-control/standalone/3.3.5.12340/20260416_045517327_current_20260416_045517_no_ui.png`
+   - that side-by-side comparison says the remaining gap is no longer “missing UVs” but still specifically projected and additive material parity for the pure runtime renderer
+- important boundary:
+   - do not claim this path has full geoset-texture or reversed-mapping closure yet; the live `Band_DrumSet` proof shows meaningful improvement, but projected `Diffuse_Projected:*` passes and additive overlays still differ from the legacy control path
+
+## Apr 15, 2026 - MdxViewer now has an opt-in pure wow-viewer M2 renderer route for standalone, world, and WMO doodad testing
+
+- followed the user's direct request to stop keeping the new M2 parser/renderer proof isolated from the active viewer and expose a real `MdxViewer` test path
+- root cause confirmed in code before this slice:
+   - standalone load in `ViewerApp.cs`, world M2 load in `Terrain/WorldAssetManager.cs`, and WMO doodad M2 load in `Rendering/WmoRenderer.cs` were all still hardwiring successful `.skin` runtime loads back into `new M2Renderer(new MdxRenderer(...), runtimeModel, ...)`
+   - that meant the wow-viewer runtime was providing geometry metadata and section stats, but the visible draw path still reconverged into the legacy MDX renderer unless runtime loading failed completely
+- active `src/MdxViewer` behavior after this slice:
+   - `Rendering/WowViewerM2RuntimeBridge.cs` now owns the renderer route choice for successful runtime-backed M2 loads
+   - setting `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1` now routes successful runtime-backed M2 loads through the pure static renderer path `new M2Renderer(_gl, runtimeModel, ...)` in:
       - standalone viewer M2 loading
       - streamed world M2 loading
       - WMO doodad M2 loading
-   - the legacy adapted-MDX path is still present only as an explicit fallback when runtime loading cannot proceed, such as root-profile or converted fallback cases
+   - when that env var is not set, the previous compatibility route stays available via `new M2Renderer(new MdxRenderer(...), runtimeModel, ...)`
+   - standalone model info now states whether the current asset is using the pure wow-viewer static renderer or the legacy draw backend
 - validation completed:
-   - `get_errors` returned clean for `ViewerApp.cs`, `Terrain/WorldAssetManager.cs`, and `Rendering/WmoRenderer.cs`
-   - isolated build validation passed with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir="i:/parp/parp-tools/output/build-validation/m2-runtime-cutover/"`
+   - `get_errors` returned clean for `Rendering/WowViewerM2RuntimeBridge.cs`, `ViewerApp.cs`, `Terrain/WorldAssetManager.cs`, and `Rendering/WmoRenderer.cs`
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` succeeded with existing workspace warnings only
+   - live user validation after launching `MdxViewer` with `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1` materially tightened the proof boundary:
+      - many non-character objects render plausibly through the pure wow-viewer static renderer
+      - WMO doodad M2s also look mostly correct in that same route
+      - the remaining obvious problems are concentrated in character-family assets, especially texturing, geoset correctness, and some surface ordering/material behavior
 - important boundary:
-   - this slice removes the accidental runtime-to-MDX reconvergence for successful loads, but it does not yet deliver full textured-material parity in the pure runtime renderer; current runtime shading is still a simplified flat or tinted surface path
-   - no fresh live viewer screenshot or real runtime capture has been recorded yet after this cutover, so this is compile-validated routing correction, not final visual signoff
+   - the pure runtime renderer exposed here is still the simplified static shaded path in `Rendering/M2Renderer.cs`; it is appropriate for geometry, section, bounds, and placement validation, not full textured-material parity
+   - no fresh live viewer screenshot or real runtime capture has been recorded yet after enabling this route, so this is compile-validated viewer integration plus a user-testable switch, not final visual signoff
 
 ## Apr 15, 2026 - World transparent ordering now separates WMO opaque and WMO transparent work, and adapted M2 skinning is opt-in again
 

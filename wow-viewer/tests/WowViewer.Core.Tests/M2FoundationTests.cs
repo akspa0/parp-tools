@@ -122,6 +122,28 @@ public sealed class M2FoundationTests
     }
 
     [Fact]
+    public void Read_CameraOnlyMd20Model_ParsesCameraDefinitions()
+    {
+        byte[] bytes = CreateMd20BytesWithCamera();
+
+        using MemoryStream stream = new(bytes);
+        M2ModelDocument document = M2ModelReader.Read(stream, "Cameras\\Synthetic_cam.m2");
+
+        Assert.Equal(0u, document.ViewCount);
+        M2CameraDefinition camera = Assert.Single(document.Cameras);
+        Assert.Equal(-1, camera.Type);
+        Assert.Equal(1.2f, camera.StaticFieldOfView!.Value, 3);
+        Assert.Equal(750.0f, camera.FarClip, 3);
+        Assert.Equal(1.5f, camera.NearClip, 3);
+        Assert.Equal(new Vector3(100.0f, 200.0f, 300.0f), camera.PositionBase);
+        Assert.Equal(new Vector3(110.0f, 220.0f, 295.0f), camera.TargetPositionBase);
+        Assert.Equal(M2TrackInterpolation.Linear, camera.PositionTrack.Interpolation);
+        Assert.Equal(M2TrackInterpolation.Linear, camera.TargetPositionTrack.Interpolation);
+        Assert.Equal(M2TrackInterpolation.None, camera.RollTrack.Interpolation);
+        Assert.False(camera.HasAnimatedFieldOfView);
+    }
+
+    [Fact]
     public void Read_Md21Root_ThrowsForStrictMd20Contract()
     {
         byte[] bytes = new byte[0x110];
@@ -194,8 +216,9 @@ public sealed class M2FoundationTests
         Assert.Equal([10, 11, 12, 13], document.VertexLookup);
         Assert.Equal(6, document.TriangleIndexCount);
         Assert.Equal([0, 1, 2, 2, 3, 0], document.TriangleIndices);
-        Assert.Equal(4, document.BoneLookupCount);
-        Assert.Equal([5, 6, 7, 8], document.BoneLookup);
+        Assert.Equal(4, document.BoneEntryCount);
+        Assert.Equal(new M2SkinBoneEntry(5, 6, 7, 8), document.BoneEntries[0]);
+        Assert.Equal(new M2SkinBoneEntry(9, 10, 11, 12), document.BoneEntries[1]);
         Assert.Equal(1, document.SubmeshCount);
         Assert.Equal((ushort)7, document.Submeshes[0].SkinSectionId);
         Assert.Equal((ushort)6, document.Submeshes[0].IndexCount);
@@ -355,10 +378,10 @@ public sealed class M2FoundationTests
         M2GeometryDocument geometry = new(
             model,
             [
-                new M2GeometryVertex(new Vector3(0f, 0f, 0f), Vector3.UnitZ, new Vector2(0f, 0f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
-                new M2GeometryVertex(new Vector3(1f, 0f, 0f), Vector3.UnitZ, new Vector2(1f, 0f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
-                new M2GeometryVertex(new Vector3(1f, 1f, 0f), Vector3.UnitZ, new Vector2(1f, 1f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
-                new M2GeometryVertex(new Vector3(0f, 1f, 0f), Vector3.UnitZ, new Vector2(0f, 1f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(0f, 0f, 0f), Vector3.UnitZ, new Vector2(0f, 0f), new Vector2(0.1f, 0.2f), Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(1f, 0f, 0f), Vector3.UnitZ, new Vector2(1f, 0f), new Vector2(0.9f, 0.2f), Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(1f, 1f, 0f), Vector3.UnitZ, new Vector2(1f, 1f), new Vector2(0.9f, 0.8f), Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(0f, 1f, 0f), Vector3.UnitZ, new Vector2(0f, 1f), new Vector2(0.1f, 0.8f), Vector4.Zero, Vector4.Zero),
             ],
             [new M2GeometryTexture("Creature\\SyntheticRuntime\\synthetic.blp", 0, 0)],
             [new M2GeometryRenderFlag(flags: 0x4, rawBlendMode: 2)],
@@ -375,8 +398,8 @@ public sealed class M2FoundationTests
             vertexLookupOffset: 0,
             triangleIndices: [0, 1, 2, 2, 3, 0],
             triangleIndexOffset: 0,
-            boneLookup: [],
-            boneLookupOffset: 0,
+            boneEntries: [],
+            boneEntryOffset: 0,
             submeshes: [new M2SkinSubmesh(skinSectionId: 7, level: 0, vertexStart: 0, vertexCount: 4, indexStart: 0, indexCount: 6)],
             submeshOffset: 0,
             batches: [new M2SkinBatch(flags: 0x2, priorityPlane: 3, shaderId: 4, skinSectionIndex: 0, geosetIndex: 5, colorIndex: -1, renderFlagsIndex: 0, materialLayer: 0, textureCount: 1, textureComboIndex: 0, textureCoordComboIndex: 0, transparencyComboIndex: 0, textureAnimationLookupIndex: 0)],
@@ -426,10 +449,10 @@ public sealed class M2FoundationTests
         M2GeometryDocument geometry = new(
             model,
             [
-                new M2GeometryVertex(new Vector3(0f, 0f, 0f), Vector3.UnitZ, new Vector2(0f, 0f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
-                new M2GeometryVertex(new Vector3(1f, 0f, 0f), Vector3.UnitZ, new Vector2(1f, 0f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
-                new M2GeometryVertex(new Vector3(1f, 1f, 0f), Vector3.UnitZ, new Vector2(1f, 1f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
-                new M2GeometryVertex(new Vector3(0f, 1f, 0f), Vector3.UnitZ, new Vector2(0f, 1f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(0f, 0f, 0f), Vector3.UnitZ, new Vector2(0f, 0f), new Vector2(0.1f, 0.2f), Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(1f, 0f, 0f), Vector3.UnitZ, new Vector2(1f, 0f), new Vector2(0.9f, 0.2f), Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(1f, 1f, 0f), Vector3.UnitZ, new Vector2(1f, 1f), new Vector2(0.9f, 0.8f), Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(0f, 1f, 0f), Vector3.UnitZ, new Vector2(0f, 1f), new Vector2(0.1f, 0.8f), Vector4.Zero, Vector4.Zero),
             ],
             [
                 new M2GeometryTexture("Creature\\SyntheticRouting\\base.blp", 0, 0),
@@ -468,8 +491,8 @@ public sealed class M2FoundationTests
             vertexLookupOffset: 0,
             triangleIndices: [0, 1, 2, 2, 3, 0],
             triangleIndexOffset: 0,
-            boneLookup: [],
-            boneLookupOffset: 0,
+            boneEntries: [],
+            boneEntryOffset: 0,
             submeshes: [new M2SkinSubmesh(skinSectionId: 9, level: 0, vertexStart: 0, vertexCount: 4, indexStart: 0, indexCount: 6)],
             submeshOffset: 0,
             batches:
@@ -497,6 +520,8 @@ public sealed class M2FoundationTests
         Assert.Equal(2, structuredSection.PassCount);
         Assert.Equal(4, structuredSection.Vertices.Count);
         Assert.Equal(6, structuredSection.Indices.Count);
+        Assert.Equal(new Vector2(0f, 0f), structuredSection.Vertices[0].TextureCoords0);
+        Assert.Equal(new Vector2(0.1f, 0.2f), structuredSection.Vertices[0].TextureCoords1);
 
         M2StaticRenderMaterial firstPass = structuredSection.Passes[0].Material;
         Assert.Equal(0, firstPass.MaterialLayer);
@@ -560,8 +585,8 @@ public sealed class M2FoundationTests
             vertexLookupOffset: 0,
             triangleIndices: [0, 0, 0],
             triangleIndexOffset: 0,
-            boneLookup: [],
-            boneLookupOffset: 0,
+            boneEntries: [],
+            boneEntryOffset: 0,
             submeshes: [new M2SkinSubmesh(skinSectionId: 1, level: 0, vertexStart: 0, vertexCount: 1, indexStart: 0, indexCount: 3)],
             submeshOffset: 0,
             batches: [new M2SkinBatch(flags: 0x4, priorityPlane: 0, shaderId: 0, skinSectionIndex: 0, geosetIndex: 0, colorIndex: -1, renderFlagsIndex: 0, materialLayer: 0, textureCount: 1, textureComboIndex: 0, textureCoordComboIndex: 0, transparencyComboIndex: ushort.MaxValue, textureAnimationLookupIndex: ushort.MaxValue)],
@@ -595,7 +620,7 @@ public sealed class M2FoundationTests
         sequenceLookup ??= [];
 
         byte[] nameBytes = Encoding.UTF8.GetBytes(modelName + "\0");
-        int nameOffset = 0x110;
+        int nameOffset = 0x120;
         int cursor = nameOffset + nameBytes.Length;
         int globalLoopOffset = Align(cursor, sizeof(uint));
         cursor = globalLoopOffset + (globalLoops.Count * sizeof(uint));
@@ -604,7 +629,7 @@ public sealed class M2FoundationTests
         int sequenceLookupOffset = Align(cursor, sizeof(short));
         cursor = sequenceLookupOffset + (sequenceLookup.Count * sizeof(short));
 
-        cursor = Math.Max(cursor, 0x110);
+        cursor = Math.Max(cursor, 0x120);
 
         byte[] data = new byte[cursor];
 
@@ -665,37 +690,50 @@ public sealed class M2FoundationTests
     {
         ushort[] vertexLookup = [10, 11, 12, 13];
         ushort[] triangleIndices = [0, 1, 2, 2, 3, 0];
-        ushort[] boneLookup = [5, 6, 7, 8];
+        M2SkinBoneEntry[] boneEntries =
+        [
+            new(5, 6, 7, 8),
+            new(9, 10, 11, 12),
+            new(13, 14, 15, 16),
+            new(17, 18, 19, 20),
+        ];
 
         const int headerSize = 60;
         int vertexLookupOffset = headerSize;
         int triangleIndexOffset = vertexLookupOffset + (vertexLookup.Length * sizeof(ushort));
-        int boneLookupOffset = triangleIndexOffset + (triangleIndices.Length * sizeof(ushort));
-        int submeshOffset = boneLookupOffset + (boneLookup.Length * sizeof(ushort));
+        int boneEntryOffset = triangleIndexOffset + (triangleIndices.Length * sizeof(ushort));
+        int submeshOffset = boneEntryOffset + (boneEntries.Length * 4);
         int batchOffset = submeshOffset + 0x30;
-        byte[] data = new byte[batchOffset + 0x18];
+        int shadowBatchOffset = batchOffset + 0x18;
+        byte[] data = new byte[shadowBatchOffset + (2 * 0x18)];
 
         Encoding.ASCII.GetBytes("SKIN").CopyTo(data, 0);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x04, 4), (uint)vertexLookup.Length);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x08, 4), (uint)vertexLookupOffset);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x0C, 4), (uint)triangleIndices.Length);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x10, 4), (uint)triangleIndexOffset);
-        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x14, 4), (uint)boneLookup.Length);
-        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x18, 4), (uint)boneLookupOffset);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x14, 4), (uint)boneEntries.Length);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x18, 4), (uint)boneEntryOffset);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x1C, 4), 1u);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x20, 4), (uint)submeshOffset);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x24, 4), 1u);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x28, 4), (uint)batchOffset);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x2C, 4), 12u);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x30, 4), 2u);
-        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x34, 4), 0x400u);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x34, 4), (uint)shadowBatchOffset);
 
         for (int index = 0; index < vertexLookup.Length; index++)
             BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(vertexLookupOffset + (index * sizeof(ushort)), sizeof(ushort)), vertexLookup[index]);
         for (int index = 0; index < triangleIndices.Length; index++)
             BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(triangleIndexOffset + (index * sizeof(ushort)), sizeof(ushort)), triangleIndices[index]);
-        for (int index = 0; index < boneLookup.Length; index++)
-            BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(boneLookupOffset + (index * sizeof(ushort)), sizeof(ushort)), boneLookup[index]);
+        for (int index = 0; index < boneEntries.Length; index++)
+        {
+            int offset = boneEntryOffset + (index * 4);
+            data[offset + 0] = boneEntries[index].Bone0;
+            data[offset + 1] = boneEntries[index].Bone1;
+            data[offset + 2] = boneEntries[index].Bone2;
+            data[offset + 3] = boneEntries[index].Bone3;
+        }
 
         BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(submeshOffset + 0x00, 2), 7);
         BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(submeshOffset + 0x02, 2), 1);
@@ -769,6 +807,74 @@ public sealed class M2FoundationTests
         return data;
     }
 
+    private static byte[] CreateMd20BytesWithCamera()
+    {
+        byte[] data = CreateMd20Bytes(
+            version: 0x108u,
+            modelName: "SyntheticCamera",
+            boundsMin: new Vector3(-4.0f, -4.0f, -4.0f),
+            boundsMax: new Vector3(4.0f, 4.0f, 4.0f),
+            boundsRadius: 8.0f,
+            embeddedSkinProfileCount: 0,
+            embeddedSkinProfileOffset: 0,
+            sequences:
+            [
+                new SyntheticSequence(AnimationId: 7, VariationIndex: 0, Duration: 1000u, MoveSpeed: 0f, Flags: (uint)M2SequenceFlags.StoredInline, Frequency: 0, ReplayMinimum: 0u, ReplayMaximum: 0u, BlendTimeIn: 0, BlendTimeOut: 0, BoundsMin: Vector3.Zero, BoundsMax: Vector3.One, BoundsRadius: 1.0f, VariationNext: -1, AliasNext: ushort.MaxValue),
+            ],
+            sequenceLookup: [(short)0]);
+
+        int cameraOffset = Align(data.Length, 4);
+        int positionTimestampRefOffset = cameraOffset + 0x64;
+        int positionValueRefOffset = positionTimestampRefOffset + 0x08;
+        int targetTimestampRefOffset = positionValueRefOffset + 0x08;
+        int targetValueRefOffset = targetTimestampRefOffset + 0x08;
+        int rollTimestampRefOffset = targetValueRefOffset + 0x08;
+        int rollValueRefOffset = rollTimestampRefOffset + 0x08;
+        int positionTimesOffset = Align(rollValueRefOffset + 0x08, 4);
+        int positionValuesOffset = positionTimesOffset + (2 * sizeof(uint));
+        int targetTimesOffset = positionValuesOffset + (2 * (sizeof(float) * 3));
+        int targetValuesOffset = targetTimesOffset + (2 * sizeof(uint));
+        int rollTimesOffset = targetValuesOffset + (2 * (sizeof(float) * 3));
+        int rollValuesOffset = rollTimesOffset + sizeof(uint);
+
+        Array.Resize(ref data, rollValuesOffset + sizeof(float));
+
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x110, 4), 1u);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x114, 4), (uint)cameraOffset);
+
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(cameraOffset + 0x00, 4), unchecked((uint)-1));
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(cameraOffset + 0x04, 4), BitConverter.SingleToInt32Bits(1.2f));
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(cameraOffset + 0x08, 4), BitConverter.SingleToInt32Bits(750.0f));
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(cameraOffset + 0x0C, 4), BitConverter.SingleToInt32Bits(1.5f));
+        WriteTrackHeader(data, cameraOffset + 0x10, interpolation: 1, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)positionTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)positionValueRefOffset);
+        WriteVector3(data, cameraOffset + 0x24, new Vector3(100.0f, 200.0f, 300.0f));
+        WriteTrackHeader(data, cameraOffset + 0x30, interpolation: 1, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)targetTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)targetValueRefOffset);
+        WriteVector3(data, cameraOffset + 0x44, new Vector3(110.0f, 220.0f, 295.0f));
+        WriteTrackHeader(data, cameraOffset + 0x50, interpolation: 0, globalSequence: ushort.MaxValue, timestampArrayCount: 1, timestampArrayOffset: (uint)rollTimestampRefOffset, valueArrayCount: 1, valueArrayOffset: (uint)rollValueRefOffset);
+
+        WriteTrackArrayReference(data, positionTimestampRefOffset, 2u, (uint)positionTimesOffset);
+        WriteTrackArrayReference(data, positionValueRefOffset, 2u, (uint)positionValuesOffset);
+        WriteTrackArrayReference(data, targetTimestampRefOffset, 2u, (uint)targetTimesOffset);
+        WriteTrackArrayReference(data, targetValueRefOffset, 2u, (uint)targetValuesOffset);
+        WriteTrackArrayReference(data, rollTimestampRefOffset, 1u, (uint)rollTimesOffset);
+        WriteTrackArrayReference(data, rollValueRefOffset, 1u, (uint)rollValuesOffset);
+
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(positionTimesOffset + 0x00, 4), 0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(positionTimesOffset + 0x04, 4), 1000u);
+        WriteVector3(data, positionValuesOffset + 0x00, new Vector3(0.0f, 0.0f, 0.0f));
+        WriteVector3(data, positionValuesOffset + 0x0C, new Vector3(10.0f, 0.0f, 5.0f));
+
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(targetTimesOffset + 0x00, 4), 0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(targetTimesOffset + 0x04, 4), 1000u);
+        WriteVector3(data, targetValuesOffset + 0x00, new Vector3(0.0f, 0.0f, 0.0f));
+        WriteVector3(data, targetValuesOffset + 0x0C, new Vector3(0.0f, 20.0f, -10.0f));
+
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(rollTimesOffset, 4), 0u);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(rollValuesOffset, 4), BitConverter.SingleToInt32Bits(0.0f));
+
+        return data;
+    }
+
     private static void WriteTrackHeader(byte[] data, int offset, ushort interpolation, ushort globalSequence, uint timestampArrayCount, uint timestampArrayOffset, uint valueArrayCount, uint valueArrayOffset)
     {
         BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(offset + 0x00, 2), interpolation);
@@ -777,6 +883,12 @@ public sealed class M2FoundationTests
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(offset + 0x08, 4), timestampArrayOffset);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(offset + 0x0C, 4), valueArrayCount);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(offset + 0x10, 4), valueArrayOffset);
+    }
+
+    private static void WriteTrackArrayReference(byte[] data, int offset, uint count, uint valueOffset)
+    {
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(offset + 0x00, 4), count);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(offset + 0x04, 4), valueOffset);
     }
 
     private static SyntheticAnimatedFixture CreateAnimatedEvaluationFixture(bool useExternalPayload)
@@ -827,6 +939,7 @@ public sealed class M2FoundationTests
             [textureWeight],
             [textureTransform],
             [light],
+            [],
             new Vector3(-1.0f, -1.0f, -1.0f),
             new Vector3(1.0f, 1.0f, 1.0f),
             2.0f,
@@ -856,8 +969,8 @@ public sealed class M2FoundationTests
             vertexLookupOffset: 0,
             triangleIndices: [0, 1, 2, 2, 3, 0],
             triangleIndexOffset: 0,
-            boneLookup: [],
-            boneLookupOffset: 0,
+            boneEntries: [],
+            boneEntryOffset: 0,
             submeshes: [new M2SkinSubmesh(skinSectionId: 1, level: 0, vertexStart: 0, vertexCount: 4, indexStart: 0, indexCount: 6)],
             submeshOffset: 0,
             batches: [new M2SkinBatch(flags: 0x2, priorityPlane: 0, shaderId: 0, skinSectionIndex: 0, geosetIndex: 0, colorIndex: 0, renderFlagsIndex: 0, materialLayer: 0, textureCount: 1, textureComboIndex: 0, textureCoordComboIndex: 0, transparencyComboIndex: 0, textureAnimationLookupIndex: 0)],

@@ -36,6 +36,25 @@ It should not keep accumulating its own separate long-term M2 design.
 
 ## Current Contract By Seam
 
+### Landed wow-viewer baseline as of Apr 15, 2026
+
+`wow-viewer` now owns these first-party runtime seams in code:
+
+- strict `MD20` root parsing, exact numbered skin-profile loading, and active section/pass/material routing
+- external `%04d-%02d.anim` selection and alias ready-state ownership
+- animated material/light evaluation plus render-consumer pass state
+- typed bone-definition parsing, compressed M2 quaternion sampling, bone-pose evaluation, and CPU-side skinned vertex application
+- resolved effect-object state for native-style `Model2_*` / `Model2Displ_*` keys and render-state buckets
+- first explicit scene-submission/batching coordinator for M2 render entries, including particle/ribbon descriptor inputs and family handler policies
+- deterministic runtime golden-frame snapshots consumed by both inspect and the first app-level M2 frame command
+
+Proof boundary:
+
+- focused M2 tests and full `wow-viewer` tests pass for this baseline
+- `WowViewer.Tool.Inspect m2 inspect --time-ms` exercises the runtime seams on fixed real assets
+- `WowViewer.App m2-frame` now consumes the same runtime frame and can write a golden JSON snapshot
+- this is not yet active visual renderer cutover, final shader backend parity, particle/ribbon parser/simulation/GPU behavior, or `MdxViewer` visual signoff
+
 ### 1. Model identity and extension gate
 
 Current contract:
@@ -120,6 +139,7 @@ Current contract:
 - native clients synthesize `Diffuse_*` and `Combiners_*` effect-family names explicitly
 - Wrath and early Cataclysm both expose a rich effect vocabulary rather than one flat blend-mode path
 - later Cataclysm also exposes a broader shader or effect stack around `.bls` assets and `ShaderEffectManager`
+- the current `wow-viewer` runtime resolves effect recipes into effect-object keys, native family keys, depth-write, alpha-test, additive, projected, and state-bucket decisions
 
 Implementation rule:
 
@@ -160,6 +180,7 @@ Current contract:
 - native M2 rendering uses family-aware submission and batching
 - doodads, particles, ribbons, and hit testing are not one monolithic render path
 - final draw-submission closure is still incomplete in the current evidence set
+- the current `wow-viewer` coordinator exposes named family handlers and typed particle/ribbon submission descriptors, but it does not yet parse or simulate final particle/ribbon payloads
 
 Implementation rule:
 

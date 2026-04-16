@@ -8,6 +8,7 @@ public static class M2SkinReader
     private const int SignatureSizeBytes = 4;
     private const int MinimumHeaderSizeBytes = 44;
     private const int ExtendedHeaderSizeBytes = 60;
+    private const int BoneEntryStride = 0x04;
     private const int SubmeshStride = 0x30;
     private const int BatchStride = 0x18;
 
@@ -42,8 +43,8 @@ public static class M2SkinReader
         uint vertexLookupOffset = ReadUInt32At(data, 0x08);
         int triangleIndexCount = checked((int)ReadUInt32At(data, 0x0C));
         uint triangleIndexOffset = ReadUInt32At(data, 0x10);
-        int boneLookupCount = checked((int)ReadUInt32At(data, 0x14));
-        uint boneLookupOffset = ReadUInt32At(data, 0x18);
+        int boneEntryCount = checked((int)ReadUInt32At(data, 0x14));
+        uint boneEntryOffset = ReadUInt32At(data, 0x18);
         int submeshCount = checked((int)ReadUInt32At(data, 0x1C));
         uint submeshOffset = ReadUInt32At(data, 0x20);
         int batchCount = checked((int)ReadUInt32At(data, 0x24));
@@ -54,13 +55,18 @@ public static class M2SkinReader
         uint shadowBatchOffset = 0;
         if (data.Length >= ExtendedHeaderSizeBytes)
         {
-            shadowBatchCount = ReadUInt32At(data, 0x30);
-            shadowBatchOffset = ReadUInt32At(data, 0x34);
+            uint candidateShadowBatchCount = ReadUInt32At(data, 0x30);
+            uint candidateShadowBatchOffset = ReadUInt32At(data, 0x34);
+            if (HasValidOptionalSpan(data.Length, candidateShadowBatchCount, candidateShadowBatchOffset, BatchStride))
+            {
+                shadowBatchCount = candidateShadowBatchCount;
+                shadowBatchOffset = candidateShadowBatchOffset;
+            }
         }
 
         List<ushort> vertexLookup = ReadUInt16Table(data, sourcePath, "vertexLookup", vertexLookupCount, vertexLookupOffset);
         List<ushort> triangleIndices = ReadUInt16Table(data, sourcePath, "triangleIndices", triangleIndexCount, triangleIndexOffset);
-        List<ushort> boneLookup = ReadUInt16Table(data, sourcePath, "boneLookup", boneLookupCount, boneLookupOffset);
+        List<M2SkinBoneEntry> boneEntries = ReadBoneEntries(data, sourcePath, boneEntryCount, boneEntryOffset);
         List<M2SkinSubmesh> submeshes = ReadSubmeshes(data, sourcePath, submeshCount, submeshOffset);
         List<M2SkinBatch> batches = ReadBatches(data, sourcePath, batchCount, batchOffset);
 
@@ -71,8 +77,8 @@ public static class M2SkinReader
             vertexLookupOffset,
             triangleIndices,
             triangleIndexOffset,
-            boneLookup,
-            boneLookupOffset,
+            boneEntries,
+            boneEntryOffset,
             submeshes,
             submeshOffset,
             batches,
@@ -123,6 +129,23 @@ public static class M2SkinReader
         return values;
     }
 
+    private static List<M2SkinBoneEntry> ReadBoneEntries(byte[] data, string sourcePath, int count, uint offset)
+    {
+        ValidateSpan(count, offset, BoneEntryStride, data.Length, sourcePath, "boneEntries");
+        List<M2SkinBoneEntry> values = new(count);
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * BoneEntryStride));
+            values.Add(new M2SkinBoneEntry(
+                data[entryOffset + 0x00],
+                data[entryOffset + 0x01],
+                data[entryOffset + 0x02],
+                data[entryOffset + 0x03]));
+        }
+
+        return values;
+    }
+
     private static List<M2SkinSubmesh> ReadSubmeshes(byte[] data, string sourcePath, int count, uint offset)
     {
         ValidateSpan(count, offset, SubmeshStride, data.Length, sourcePath, "submeshes");
@@ -136,7 +159,11 @@ public static class M2SkinReader
                 ReadUInt16At(data, entryOffset + 0x04),
                 ReadUInt16At(data, entryOffset + 0x06),
                 ReadUInt16At(data, entryOffset + 0x08),
-                ReadUInt16At(data, entryOffset + 0x0A)));
+                ReadUInt16At(data, entryOffset + 0x0A),
+                ReadUInt16At(data, entryOffset + 0x0C),
+                ReadUInt16At(data, entryOffset + 0x0E),
+                ReadUInt16At(data, entryOffset + 0x10),
+                ReadUInt16At(data, entryOffset + 0x12)));
         }
 
         return values;
@@ -185,5 +212,18 @@ public static class M2SkinReader
             throw new InvalidDataException(
                 $"Skin file '{sourcePath}' has an out-of-range span for '{label}': count={count}, offset=0x{offset:X}, stride=0x{stride:X}, length=0x{length:X}.");
         }
+    }
+
+    private static bool HasValidOptionalSpan(int length, uint count, uint offset, int stride)
+    {
+        if (count == 0)
+            return true;
+
+        if (offset == 0)
+            return false;
+
+        ulong total = (ulong)count * (ulong)stride;
+        ulong end = (ulong)offset + total;
+        return (ulong)offset < (ulong)length && end <= (ulong)length && end >= offset;
     }
 }
