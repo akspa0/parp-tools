@@ -1285,10 +1285,38 @@ public partial class ViewerApp
 
         DrawTerrainControlsAdjustmentContent();
         ImGui.Separator();
-        if (ImGui.Button("Open Chunk Clipboard"))
-            _showChunkClipboardWindow = true;
-        ImGui.SameLine();
-        ImGui.TextDisabled("Chunk copy/paste stays available as its own panel window.");
+        ImGui.TextDisabled("Open terrain editor windows from the Tools menu.");
+    }
+
+    private void DrawTerrainToolsWindow()
+    {
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer == null)
+        {
+            _showTerrainToolsWindow = false;
+            return;
+        }
+
+        ImGui.SetNextWindowSize(new Vector2(460f, 0f), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Terrain Tools", ref _showTerrainToolsWindow, ImGuiWindowFlags.NoCollapse))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.TextDisabled("Terrain editing controls live here. Open other editor windows from the Tools menu.");
+        ImGui.Separator();
+        DrawTerrainControlsAdjustmentContent();
+        ImGui.End();
+    }
+
+    private void ApplyTerrainWeakSignalRestoreQuickRange(float minHeight, float maxHeight)
+    {
+        _terrainWeakSignalRestoreCandidateMinHeight = ClampTerrainWeakSignalRestoreZ(minHeight);
+        _terrainWeakSignalRestoreCandidateMaxHeight = ClampTerrainWeakSignalRestoreZ(maxHeight);
+        GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
+        MarkTerrainWeakSignalRestoreDirty();
+        SaveViewerSettings();
     }
 
     private void DrawWorldObjectsPanelContent()
@@ -2264,7 +2292,77 @@ public partial class ViewerApp
                     SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Amplify weak, era-compressed ADT relief in the live viewer. Only affects the camera tile and its four direct neighbors, and only when the source tile stays inside the configured Z band.");
+                ImGui.SetTooltip("Restore weak, era-compressed terrain using the currently selected restore mode and Z band. Shadow-derived behavior stays disabled unless you explicitly turn it on below.");
+
+            bool restoreUseChunkMode = _terrainWeakSignalRestoreUseChunkMode;
+            if (ImGui.Checkbox("Per-Chunk Restore Mode", ref restoreUseChunkMode))
+            {
+                _terrainWeakSignalRestoreUseChunkMode = restoreUseChunkMode;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("When enabled, weak chunks inside mixed ADTs can be restored independently. Turn this off to require the whole tile to qualify and apply one shared restore scale.");
+
+            bool restoreSelectedChunksOnly = _terrainWeakSignalRestoreSelectedChunksOnly;
+            if (!_terrainWeakSignalRestoreUseChunkMode)
+                ImGui.BeginDisabled();
+            if (ImGui.Checkbox("Selected Chunks Only", ref restoreSelectedChunksOnly))
+            {
+                _terrainWeakSignalRestoreSelectedChunksOnly = restoreSelectedChunksOnly;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (!_terrainWeakSignalRestoreUseChunkMode)
+                ImGui.EndDisabled();
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Use only the currently selected chunks as restore targets. Open Chunk Clipboard from Tools, enable Chunk Tool, then Shift+LMB in the viewport to toggle chunk selection. Texture-guided subcells still localize the restore inside those selected chunks.");
+
+            if (_terrainWeakSignalRestoreUseChunkMode)
+            {
+                string chunkTargetSummary = _terrainWeakSignalRestoreSelectedChunksOnly
+                    ? (_selectedChunks.Count > 0 ? $"Targeted chunks: {_selectedChunks.Count} selected via Chunk Tool." : "Targeted chunks: none selected yet. Open Chunk Clipboard, enable Chunk Tool, then Shift+LMB in the viewport.")
+                    : "Targeted chunks: any chunk that qualifies in the current tile set.";
+                ImGui.TextDisabled(chunkTargetSummary);
+            }
+
+            bool useTextureSubdivisions = _terrainWeakSignalRestoreUseTextureSubdivisions;
+            if (!_terrainWeakSignalRestoreUseChunkMode)
+                ImGui.BeginDisabled();
+            if (ImGui.Checkbox("Use Texture-Tied Sub-Chunk Guidance", ref useTextureSubdivisions))
+            {
+                _terrainWeakSignalRestoreUseTextureSubdivisions = useTextureSubdivisions;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (!_terrainWeakSignalRestoreUseChunkMode)
+                ImGui.EndDisabled();
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Analyze 8x8 sub-cells inside each chunk, group weak cells by dominant texture family from the alpha maps, and only restore the texture-tied weak region instead of the whole chunk.");
+
+            bool useShadowHeuristic = _terrainWeakSignalRestoreUseShadowHeuristic;
+            if (!_terrainWeakSignalRestoreUseChunkMode)
+                ImGui.BeginDisabled();
+            if (ImGui.Checkbox("Use MCSH Shadow Edge Guidance", ref useShadowHeuristic))
+            {
+                _terrainWeakSignalRestoreUseShadowHeuristic = useShadowHeuristic;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (!_terrainWeakSignalRestoreUseChunkMode)
+                ImGui.EndDisabled();
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Optional experiment. Treat shadowed MCSH pixels as the mountain-foot edge, then bias restoration into the adjacent lit upslope side instead of lifting the shadowed side itself.");
+
+            bool restoreAllLoadedTiles = _terrainWeakSignalRestoreAllLoadedTiles;
+            if (ImGui.Checkbox("Restore All Loaded ADT Detail Tiles", ref restoreAllLoadedTiles))
+            {
+                _terrainWeakSignalRestoreAllLoadedTiles = restoreAllLoadedTiles;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("When enabled, every currently loaded ADT detail tile is scanned chunk-by-chunk for weak-signal candidates. Turn this off to go back to the camera tile plus its four direct neighbors.");
 
             float restoreRangeMin = _terrainWeakSignalRestoreCandidateMinHeight;
             if (ImGui.InputFloat("Restore Range Min Z", ref restoreRangeMin, 10f, 100f, "%.1f"))
@@ -2288,6 +2386,22 @@ public partial class ViewerApp
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Use this with the minimum bound to switch between early 0-floor data and later ocean-floor-compressed tiles.");
 
+            ImGui.TextDisabled("Quick ranges:");
+            if (ImGui.SmallButton("Packed +/-2.778"))
+                ApplyTerrainWeakSignalRestoreQuickRange(-2.778f, 2.778f);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Packed +/-3"))
+                ApplyTerrainWeakSignalRestoreQuickRange(-3f, 3f);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Early +/-5"))
+                ApplyTerrainWeakSignalRestoreQuickRange(-5f, 5f);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Early +/-10"))
+                ApplyTerrainWeakSignalRestoreQuickRange(-10f, 10f);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Late -5000..10"))
+                ApplyTerrainWeakSignalRestoreQuickRange(-5000f, 10f);
+
             ImGui.TextDisabled("Examples: early era -10..10, later era -5000..10.");
 
             bool weakSignalAuto = _terrainWeakSignalRestoreUseAutoFactor;
@@ -2298,22 +2412,46 @@ public partial class ViewerApp
                 SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Use the WDL-backed auto estimate. Turn this off to A/B the manual restore slider instead.");
+                ImGui.SetTooltip(_terrainWeakSignalRestoreUseChunkMode
+                    ? "Use WDL chunk relief first, then mixed-tile relief and tile-level guides as fallback. Turn this off to A/B the manual restore control instead."
+                    : "Use loaded-tile relief first, then WDL tile relief as the whole-tile auto restore guide. Turn this off to A/B the manual restore control instead.");
+
+            var wdlGuideTile = GetCameraTile();
+            if (TryGetTerrainWeakSignalWdlTile(wdlGuideTile.tileX, wdlGuideTile.tileY, out var wdlGuide) && wdlGuide != null)
+            {
+                ImGui.TextDisabled($"WDL guide ({wdlGuideTile.tileX}, {wdlGuideTile.tileY}): {wdlGuide.MinZ:F1}..{wdlGuide.MaxZ:F1}, center {wdlGuide.Height17[8, 8]:F1}, 17x17 + 16x16 samples");
+            }
+            else
+            {
+                ImGui.TextDisabled($"WDL guide ({wdlGuideTile.tileX}, {wdlGuideTile.tileY}): no tile data available");
+            }
 
             if (!_terrainWeakSignalRestoreUseAutoFactor)
             {
                 float manualRestoreScale = _terrainWeakSignalRestoreManualFactor;
-                if (ImGui.SliderFloat("Restore Scale", ref manualRestoreScale, 1f, TerrainWeakSignalRestoreMaxFactor, "%.2fx"))
+                if (ImGui.InputFloat("Restore Scale", ref manualRestoreScale, 0.25f, 1f, "%.2fx"))
                 {
-                    _terrainWeakSignalRestoreManualFactor = manualRestoreScale;
+                    _terrainWeakSignalRestoreManualFactor = Math.Clamp(manualRestoreScale, 1f, TerrainWeakSignalRestoreMaxFactor);
                     MarkTerrainWeakSignalRestoreDirty();
                     SaveViewerSettings();
                 }
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Manual viewer-only terrain relief multiplier. Reapplies from the original tile data so you can A/B without compounding.");
+                    ImGui.SetTooltip("Manual viewer-only terrain relief multiplier. Type the exact factor you want; the value is clamped to the supported restore range and reapplied from the original tile data so you can A/B without compounding.");
             }
 
-            ImGui.TextDisabled($"Candidates: camera tile + 4 neighbors, source Z in {_terrainWeakSignalRestoreCandidateMinHeight:0.#}..{_terrainWeakSignalRestoreCandidateMaxHeight:0.#}, amplified from z=0 or the source floor when already below sea level.");
+            string restoreScopeSummary = _terrainWeakSignalRestoreAllLoadedTiles
+                ? "all loaded ADT detail tiles"
+                : "camera tile + 4 neighbors";
+            string restoreModeSummary = _terrainWeakSignalRestoreUseChunkMode
+                ? (_terrainWeakSignalRestoreSelectedChunksOnly ? "selected chunks" : "candidate chunks")
+                : "whole tile";
+            string textureSummary = _terrainWeakSignalRestoreUseChunkMode && _terrainWeakSignalRestoreUseTextureSubdivisions
+                ? ", texture-guided subcells"
+                : string.Empty;
+            string shadowSummary = _terrainWeakSignalRestoreUseChunkMode && _terrainWeakSignalRestoreUseShadowHeuristic
+                ? ", shadow-edge guidance enabled"
+                : string.Empty;
+            ImGui.TextDisabled($"Candidates: {restoreScopeSummary}, mode {restoreModeSummary}{textureSummary}, source Z in {_terrainWeakSignalRestoreCandidateMinHeight:0.#}..{_terrainWeakSignalRestoreCandidateMaxHeight:0.#}{shadowSummary}.");
 
             if (!string.IsNullOrWhiteSpace(_terrainWeakSignalRestoreStatus))
                 ImGui.TextWrapped(_terrainWeakSignalRestoreStatus);
@@ -2431,13 +2569,7 @@ public partial class ViewerApp
         DrawRuntimeStatsPanelContent();
 
         ImGui.Separator();
-        if (ImGui.Button("Open Chunk Clipboard"))
-            _showChunkClipboardWindow = true;
-        ImGui.SameLine();
-        if (ImGui.Button("Open Terrain Analysis"))
-            _showTerrainAnalysisWindow = true;
-        ImGui.SameLine();
-        ImGui.TextDisabled("Chunk copy/paste stays available as a temporary pop-out panel.");
+        ImGui.TextDisabled("Open Terrain Tools, Chunk Clipboard, Terrain Analysis, and MCNK Explorer from the Tools menu.");
     }
 
     private bool SetIgnoreTerrainHolesGlobally(bool enabled)

@@ -244,55 +244,89 @@ public partial class ViewerApp
         if (ImGui.Begin("##statusbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
         {
-            ImGui.Text(_statusMessage);
-            if (!string.IsNullOrEmpty(_currentAreaName))
+            string leftStatusText = string.IsNullOrWhiteSpace(_statusMessage)
+                ? "Ready"
+                : _statusMessage.Replace(Environment.NewLine, " ").Trim();
+
+            if (ImGui.BeginTable("##statusbarLayout", 4,
+                ImGuiTableFlags.SizingFixedFit |
+                ImGuiTableFlags.NoSavedSettings |
+                ImGuiTableFlags.NoHostExtendX |
+                ImGuiTableFlags.PadOuterX))
             {
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(1f, 0.9f, 0.5f, 1f), $"  Area: {_currentAreaName}");
+                string coordText = string.Empty;
+                if (_terrainManager != null || _vlmTerrainManager != null)
+                {
+                    var pos = _camera.Position;
+                    float wowX = WoWConstants.MapOrigin - pos.Y;
+                    float wowY = WoWConstants.MapOrigin - pos.X;
+                    float wowZ = pos.Z;
+                    float facingDegrees = GetWorldFacingDegrees(_camera.Yaw);
+                    string facingLabel = GetWorldFacingLabel(facingDegrees);
+                    coordText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})  Facing: {facingDegrees:F1}° {facingLabel ?? string.Empty}";
+                }
+
+                string sceneSummary = string.Empty;
+                if (_worldScene != null || _terrainManager != null || _vlmTerrainManager != null)
+                {
+                    string targetSummary = GetWorkspaceTargetSummary();
+                    sceneSummary = $"Target: {targetSummary}";
+                    if (!string.IsNullOrWhiteSpace(_currentAreaName))
+                        sceneSummary = $"{sceneSummary}  |  Area: {_currentAreaName}";
+                }
+                else if (!string.IsNullOrWhiteSpace(_currentAreaName))
+                {
+                    sceneSummary = $"Area: {_currentAreaName}";
+                }
+
+                string fpsText = $"{_currentFps:F0} FPS  {_frameTimeMs:F1} ms";
+
+                ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthStretch, 1f);
+                ImGui.TableSetupColumn("Coords", ImGuiTableColumnFlags.WidthFixed, MathF.Max(280f, GetImGuiTextWidth(coordText) + 4f));
+                ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 150f);
+                ImGui.TableSetupColumn("Meta", ImGuiTableColumnFlags.WidthFixed, MathF.Max(180f, GetImGuiTextWidth(sceneSummary) + GetImGuiTextWidth(fpsText) + 28f));
+
+                ImGui.TableNextRow();
+
+                ImGui.TableSetColumnIndex(0);
+                ImGui.TextUnformatted(leftStatusText);
+
+                ImGui.TableSetColumnIndex(1);
+                if (!string.IsNullOrEmpty(coordText))
+                    ImGui.TextColored(new Vector4(0.7f, 0.85f, 1f, 1f), coordText);
+
+                ImGui.TableSetColumnIndex(2);
+                if (_terrainManager != null || _vlmTerrainManager != null)
+                {
+                    if (ImGui.SmallButton("Copy Scene##statusbar"))
+                        CopyTextToClipboard(BuildSceneBookmarkText(CreateCameraShotPoint("current")), "scene bookmark");
+
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton("Log Scene##statusbar"))
+                        LogSceneBookmark(CreateCameraShotPoint("current"));
+                }
+
+                ImGui.TableSetColumnIndex(3);
+                if (!string.IsNullOrEmpty(sceneSummary))
+                {
+                    ImGui.TextColored(new Vector4(1f, 0.9f, 0.65f, 1f), sceneSummary);
+                    ImGui.SameLine();
+                }
+
+                var fpsColor = _currentFps >= 30 ? new Vector4(0.4f, 1f, 0.4f, 1f)
+                             : _currentFps >= 15 ? new Vector4(1f, 1f, 0.4f, 1f)
+                             : new Vector4(1f, 0.4f, 0.4f, 1f);
+                ImGui.TextColored(fpsColor, fpsText);
+
+                ImGui.EndTable();
             }
-
-            if (_worldScene != null || _terrainManager != null || _vlmTerrainManager != null)
-            {
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(1f, 0.9f, 0.65f, 1f), $"  Target: {GetWorkspaceTargetSummary()}");
-
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(1f, 0.72f, 0.72f, 1f), $"  Save: {GetWorkspaceSaveStatusSummary()}");
-            }
-
-            if (_terrainManager != null || _vlmTerrainManager != null)
-            {
-                var pos = _camera.Position;
-                float wowX = WoWConstants.MapOrigin - pos.Y;
-                float wowY = WoWConstants.MapOrigin - pos.X;
-                float wowZ = pos.Z;
-                float facingDegrees = GetWorldFacingDegrees(_camera.Yaw);
-                string facingLabel = GetWorldFacingLabel(facingDegrees);
-                string coordText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})  Facing: {facingDegrees:F1}° {facingLabel}";
-                float coordWidth = ImGui.CalcTextSize(coordText).X;
-                float centerX = (io.DisplaySize.X - coordWidth) * 0.5f;
-                ImGui.SameLine(centerX);
-                ImGui.TextColored(new Vector4(0.7f, 0.85f, 1f, 1f), coordText);
-
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Copy Scene##statusbar"))
-                    CopyTextToClipboard(BuildSceneBookmarkText(CreateCameraShotPoint("current")), "scene bookmark");
-
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Log Scene##statusbar"))
-                    LogSceneBookmark(CreateCameraShotPoint("current"));
-            }
-
-            string fpsText = $"{_currentFps:F0} FPS  {_frameTimeMs:F1} ms";
-            float textWidth = ImGui.CalcTextSize(fpsText).X;
-            ImGui.SameLine(io.DisplaySize.X - textWidth - 16);
-            var fpsColor = _currentFps >= 30 ? new Vector4(0.4f, 1f, 0.4f, 1f)
-                         : _currentFps >= 15 ? new Vector4(1f, 1f, 0.4f, 1f)
-                         : new Vector4(1f, 0.4f, 0.4f, 1f);
-            ImGui.TextColored(fpsColor, fpsText);
         }
         ImGui.End();
         ImGui.PopStyleVar();
+    }
+    private static float GetImGuiTextWidth(string? text)
+    {
+        return string.IsNullOrEmpty(text) ? 0f : ImGui.CalcTextSize(text).X;
     }
 
     private void DrawMinimapWindow()

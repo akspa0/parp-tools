@@ -1,5 +1,26 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 16, 2026 - weak-signal terrain restore now has explicit whole-tile vs per-chunk modes, and mixed chunks can use texture-tied sub-cell guidance
+
+- followed the user correction that the first chunk-level shadow-lift pass was a regression because it forced heuristic terrain changes without an explicit user choice
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` now exposes an explicit restore-mode split: whole-tile restore remains available, and per-chunk restore is a separate user-selectable mode instead of the only behavior
+   - per-chunk restore now also supports an explicit `Selected Chunks Only` target path, reusing the existing Chunk Clipboard selection flow (`Enable Chunk Tool` + `Shift+LMB`) so restore targeting is no longer hidden behind an all-or-nothing chunk-mode switch
+   - the per-chunk path can now use 8x8 texture-tied sub-cell guidance inside a chunk, grouping weak cells by dominant texture family derived from the active alpha maps so half-valid side chunks are not discarded just because the other half of the chunk is strong or broken
+   - that texture-guided path now builds per-vertex blend weights, so restoration can stay localized to the weak texture-tied sub-region instead of amplifying the whole mixed chunk blindly
+   - auto restore still tries WDL chunk relief first, then mixed-tile relief, but it can now use the selected texture-guided sub-cell range when a mixed chunk carries only a partial weak signal
+   - the old one-factor-per-tile cache is gone; the viewer now tracks a chunk-restore plan signature per tile so mixed-tile rewrites can refresh without compounding from already-restored geometry
+   - the old shadow-based `+20` lift is gone; the opt-in shadow heuristic now treats MCSH shadowed pixels as a mountain-foot edge and expands restore weights into the adjacent lit upslope side instead of lifting the shadowed side itself
+   - `ViewerApp_Sidebars.cs` now exposes separate toggles for per-chunk restore mode, selected-chunk-only targeting, texture-tied sub-chunk guidance, and the optional MCSH shadow-edge guidance
+   - `ViewerApp_Investigation.cs` now surfaces a weak sub-cell summary for the inspected chunk so the user can see when partial signals cluster on a dominant texture family and along chunk borders before trusting the restore
+- build validation:
+   - direct `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore --no-dependencies -nologo -clp:Summary` hit the expected apphost lock because the live `ParpToolsWoWViewer.exe` process was running
+   - isolated build proof succeeded with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore --no-dependencies -nologo -clp:Summary -p:OutDir=i:/parp/parp-tools/output/build-validation/mdxviewer-chunk-restore-shadow/`
+- important boundary:
+   - this is compile-validated mode and texture-guidance behavior, not real-data runtime signoff yet
+   - texture-tied sub-cell guidance is still a bounded heuristic over the current alpha maps and sampled terrain heights; it is intended to preserve partial signals better than chunk-wide gating, not to claim final native-client parity yet
+   - the `+20` shadow lift remains intentionally heuristic and opt-in only until live Dragon Isles or comparable archaeology passes prove it materially improves the terrain without over-raising false positives
+
 ## Apr 16, 2026 - weak-signal terrain restore now exists as a live viewer checkbox, but only build validation is captured so far
 
 - followed the user's correction that the hidden-terrain path needed to stop being another analysis workflow and become a direct restore control in the active viewer
@@ -8,10 +29,10 @@
    - the same viewer path now hooks `TerrainManager` and `VlmTerrainManager` tile-load events, reapplies the restore pass to newly loaded tiles, and resets that session cache when the user swaps worlds or VLM projects
    - tile reconstruction goes through the existing `TerrainHeightmapIo.BuildTileHeightmap257(...)` and `ApplyHeightmap257ToChunks(...)` seam instead of inventing a second terrain-write path
    - restore-factor estimation still uses same-tile WDL coarse relief first via `WdlParser.WdlTile.MinZ` and `MaxZ`, but the active viewer path now also supports a manual restore slider for A/B work and reapplies from the cached original tile instead of compounding from already-restored geometry
-   - the active viewer now limits restore candidates to the camera tile plus its four direct neighbors, and only when the source tile stays at or below `10` z units so normal terrain is less likely to explode upward
+   - the active viewer now supports restoring either the camera tile plus its four direct neighbors or all currently loaded ADT detail tiles, while still requiring the source tile to stay inside the configured weak-signal Z band so normal terrain is less likely to explode upward
    - the current restore transform now scales terrain upward from `z=0` in the viewer-only pass instead of multiplying negative near-sea values farther below sea level
    - follow-up fix later the same day: `GetCameraTile()` now uses the same floored tile math as the rest of the viewer UI, auto restore now derives its first factor guess from the currently loaded terrain range before falling back to WDL, and the restore transform no longer flattens legitimate below-sea relief by hard-clamping all negative heights to zero
-   - `ViewerApp_Sidebars.cs` now exposes `Restore Weak-Signal Terrain`, `Auto Restore Scale`, and the manual `Restore Scale` slider in Terrain Controls, and shows the current restore status text there instead of hiding this behind the terrain-analysis tooling
+   - `ViewerApp_Sidebars.cs` now exposes `Restore Weak-Signal Terrain`, `Auto Restore Scale`, the manual `Restore Scale` numeric field, and quick packed-band range presets such as `-2.778..2.778` and `-3..3` in Terrain Controls, and shows the current restore status text there instead of hiding this behind the terrain-analysis tooling
    - `ViewerSettings` now persists the checkbox state plus the auto/manual restore-scale mode
 - build proof only:
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/mdxviewer-weak-signal-restore/` passed on Apr 16, 2026 with existing workspace warnings only; final summary reported `Build succeeded with 233 warning(s) in 24.3s`

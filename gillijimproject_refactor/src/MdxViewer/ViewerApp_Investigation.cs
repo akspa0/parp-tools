@@ -197,6 +197,14 @@ public partial class ViewerApp
         if (!ImGui.CollapsingHeader("ADT Chunk Investigation", flags))
             return;
 
+        DrawTerrainChunkInvestigationContent();
+    }
+
+    private void DrawTerrainChunkInvestigationContent()
+    {
+        if (_terrainManager == null && _vlmTerrainManager == null)
+            return;
+
         if (!TryGetTerrainChunkInspectionTarget(preferHoveredChunk: true, out TerrainRenderer.TerrainChunkInfo chunkInfo, out bool usingHoveredChunk))
         {
             ImGui.TextDisabled("Hover a loaded terrain chunk, or move the camera onto one, to inspect its visual data.");
@@ -216,6 +224,15 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Alpha maps: {chunkData.AlphaMaps.Count}  Shadow: {(chunkData.ShadowMap != null ? "yes" : "no")}  MCCV: {(chunkData.MccvColors != null ? "yes" : "no")}");
         ImGui.TextDisabled($"World origin: ({chunkData.WorldPosition.X:F1}, {chunkData.WorldPosition.Y:F1}, {chunkData.WorldPosition.Z:F1})");
 
+        if (TryBuildTerrainWeakSignalTextureGuidance(chunkData, out var textureGuidance) && textureGuidance != null)
+        {
+            ImGui.TextDisabled($"Weak sub-cells: {textureGuidance.SelectedCellCount} on dominant layer L{textureGuidance.DominantLayerIndex} ({textureGuidance.BorderSelectedCellCount} border cells)  range {textureGuidance.ObservedMinHeight:F1}..{textureGuidance.ObservedMaxHeight:F1}");
+        }
+        else
+        {
+            ImGui.TextDisabled("Weak sub-cells: none detected for the current source Z band and alpha-driven texture grouping.");
+        }
+
         string summary = BuildTerrainChunkTextureSummary(chunkInfo, chunkData, tileTextures);
         if (ImGui.SmallButton("Copy Chunk Texture Summary"))
             CopyTextToClipboard(summary, "chunk texture summary");
@@ -233,6 +250,28 @@ public partial class ViewerApp
             ImGui.BulletText($"L{layerIndex} [{baseLayerLabel}] tex#{layer.TextureIndex}: {textureName}");
             ImGui.TextDisabled($"flags=0x{layer.Flags:X8} effect={layer.EffectId} alpha={(hasAlpha ? "yes" : "no")}");
         }
+    }
+
+    private void DrawMcnkExplorerWindow()
+    {
+        if (_terrainManager == null && _vlmTerrainManager == null)
+        {
+            _showMcnkExplorerWindow = false;
+            return;
+        }
+
+        ImGui.SetNextWindowSize(new Vector2(480f, 0f), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("MCNK Explorer", ref _showMcnkExplorerWindow, ImGuiWindowFlags.NoCollapse))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.TextDisabled("Inspect the hovered or camera chunk, raw MCNK flags, layer stack, alpha usage, and weak-corner overlays.");
+        ImGui.TextDisabled("Uses the hovered chunk when available and falls back to the camera chunk.");
+        ImGui.Separator();
+        DrawTerrainChunkInvestigationContent();
+        ImGui.End();
     }
 
     private void DrawWlLiquidInvestigationPanel(bool defaultOpen)

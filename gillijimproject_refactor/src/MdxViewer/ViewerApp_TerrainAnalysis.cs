@@ -1,7 +1,9 @@
 using System.Numerics;
+using System.Text.Json;
 using ImGuiNET;
 using MdxViewer.Export;
 using Silk.NET.OpenGL;
+using Image = SixLabors.ImageSharp.Image;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
@@ -42,6 +44,10 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Refresh Current Tile"))
             RefreshTerrainAnalysisCurrentTile(_terrainAnalysisPreviewTile ?? cameraTile);
+
+        ImGui.SameLine();
+        if (ImGui.Button("Save Preview Set"))
+            SaveTerrainAnalysisPreviewSet(_terrainAnalysisPreviewTile ?? cameraTile);
 
         int scopeIndex = _terrainAnalysisGlobalScope == TerrainTileScope.WholeMap ? 1 : 0;
         string[] scopeLabels = { "Loaded tiles", "Whole map" };
@@ -407,6 +413,85 @@ public partial class ViewerApp
     {
         _terrainAnalysisFollowCameraTile = false;
         RefreshTerrainAnalysisCurrentTile(tile);
+    }
+
+    private string CreateTerrainAnalysisOutputDirectory((int tileX, int tileY) tile)
+    {
+        string root = Path.Combine(EnsureEditorProjectOutputDirectory(), "terrain-analysis", $"tile_{tile.tileX}_{tile.tileY}");
+        Directory.CreateDirectory(root);
+
+        string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+        string candidate = Path.Combine(root, timestamp);
+        int suffix = 1;
+        while (Directory.Exists(candidate))
+        {
+            candidate = Path.Combine(root, $"{timestamp}_{suffix:D2}");
+            suffix++;
+        }
+
+        Directory.CreateDirectory(candidate);
+        return candidate;
+    }
+
+    private void SaveTerrainAnalysisPreviewSet((int tileX, int tileY) tile)
+    {
+        var chunks = LoadTileChunksForExport(tile.tileX, tile.tileY);
+        if (chunks == null || chunks.Count == 0)
+        {
+            _terrainAnalysisStatus = $"No terrain data available to save for tile ({tile.tileX}, {tile.tileY}).";
+            return;
+        }
+
+        TerrainHeightmapIo.TileHeightmap257 tileHeightmap = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+        string outputDir = CreateTerrainAnalysisOutputDirectory(tile);
+        string tileStem = $"tile_{tile.tileX}_{tile.tileY}";
+
+        byte[] localPixels = BuildHeightPreviewPixels(
+            tileHeightmap.Heights,
+            tileHeightmap.MinHeight,
+            tileHeightmap.MaxHeight,
+            TerrainHeightmapIo.TileHeightmapSize,
+            TerrainHeightmapIo.TileHeightmapSize);
+        string localPath = Path.Combine(outputDir, $"{tileStem}_preview_local.png");
+        using (Image<Rgba32> localImage = Image.LoadPixelData<Rgba32>(localPixels, TerrainHeightmapIo.TileHeightmapSize, TerrainHeightmapIo.TileHeightmapSize))
+            localImage.SaveAsPng(localPath);
+
+        string? globalPath = null;
+        if (_terrainAnalysisHasGlobalBounds)
+        {
+            byte[] globalPixels = BuildHeightPreviewPixels(
+                tileHeightmap.Heights,
+                _terrainAnalysisGlobalMin,
+                _terrainAnalysisGlobalMax,
+                TerrainHeightmapIo.TileHeightmapSize,
+                TerrainHeightmapIo.TileHeightmapSize);
+            globalPath = Path.Combine(outputDir, $"{tileStem}_preview_global.png");
+            using (Image<Rgba32> globalImage = Image.LoadPixelData<Rgba32>(globalPixels, TerrainHeightmapIo.TileHeightmapSize, TerrainHeightmapIo.TileHeightmapSize))
+                globalImage.SaveAsPng(globalPath);
+        }
+
+        string atlasPath = Path.Combine(outputDir, $"{tileStem}_alpha_shadow_atlas.png");
+        using (Image<Rgba32> atlasImage = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks))
+            atlasImage.SaveAsPng(atlasPath);
+
+        string metadataPath = Path.Combine(outputDir, $"{tileStem}_preview_metadata.json");
+        var metadata = new
+        {
+            tile_x = tile.tileX,
+            tile_y = tile.tileY,
+            saved_at_utc = DateTime.UtcNow.ToString("O"),
+            local_min_height = tileHeightmap.MinHeight,
+            local_max_height = tileHeightmap.MaxHeight,
+            global_min_height = _terrainAnalysisHasGlobalBounds ? _terrainAnalysisGlobalMin : (float?)null,
+            global_max_height = _terrainAnalysisHasGlobalBounds ? _terrainAnalysisGlobalMax : (float?)null,
+            local_preview = Path.GetFileName(localPath),
+            global_preview = globalPath == null ? null : Path.GetFileName(globalPath),
+            alpha_shadow_atlas = Path.GetFileName(atlasPath),
+            global_bounds_source = _terrainAnalysisHasGlobalBounds ? _terrainAnalysisGlobalScope.ToString() : null,
+        };
+        File.WriteAllText(metadataPath, JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true }));
+
+        _terrainAnalysisStatus = $"Saved terrain analysis preview set for tile ({tile.tileX}, {tile.tileY}) to {outputDir}.";
     }
 
     private void RefreshHiddenTerrainCandidates()
