@@ -54,7 +54,7 @@ public sealed class M2CameraPathRenderer : IModelRenderer
 
     public bool RequiresUnbatchedWorldRender => true;
 
-    public MdxAnimator? Animator => null;
+    public IAnimationController? Animator => null;
 
     public int SubObjectCount => _cameraPaths.Count;
 

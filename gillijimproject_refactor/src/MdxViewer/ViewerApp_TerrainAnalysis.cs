@@ -60,6 +60,16 @@ public partial class ViewerApp
         if (_terrainAnalysisPreviewTile.HasValue)
             ImGui.Text($"Current Tile Range: {_terrainAnalysisPreviewTileMin:F3} to {_terrainAnalysisPreviewTileMax:F3}");
 
+        if (_terrainAnalysisHasGlobalBounds && _terrainAnalysisPreviewTile.HasValue)
+        {
+            ImGui.Text($"Current Tile Relief: {_terrainAnalysisPreviewTileMax - _terrainAnalysisPreviewTileMin:F3} ({_terrainAnalysisPreviewVisibilityRatio:P2} of global range, x{_terrainAnalysisPreviewAmplification:F1} local amplification)");
+            if (_terrainAnalysisPreviewCompareTile.HasValue && _terrainAnalysisPreviewSimilarity.HasValue)
+            {
+                var compareTile = _terrainAnalysisPreviewCompareTile.Value;
+                ImGui.Text($"Offset Match ({_terrainAnalysisHiddenCompareOffsetX:+#;-#;0}, {_terrainAnalysisHiddenCompareOffsetY:+#;-#;0}): tile ({compareTile.tileX}, {compareTile.tileY}) similarity {_terrainAnalysisPreviewSimilarity.Value:P1}");
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(_terrainAnalysisStatus))
             ImGui.TextWrapped(_terrainAnalysisStatus);
 
@@ -91,7 +101,127 @@ public partial class ViewerApp
             DrawTerrainAnalysisPreviewPane("Alpha/Shadow Atlas", _terrainAnalysisAlphaTexture, null);
         }
 
+        ImGui.Separator();
+        DrawHiddenTerrainCandidatesSection();
+
         ImGui.End();
+    }
+
+    private void DrawHiddenTerrainCandidatesSection()
+    {
+        if (_terrainManager == null && _vlmTerrainManager == null)
+        {
+            ImGui.TextDisabled("Hidden-terrain candidate scanning requires an active terrain source.");
+            return;
+        }
+
+        if (!ImGui.CollapsingHeader("Hidden Terrain Candidates", ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        ImGui.TextWrapped("Compares each tile's locally normalized relief against an offset neighbor using the active viewer terrain source. This works against normal map loading too, including odd split-ADT or placeholder cases already handled by the terrain adapters.");
+
+        int hiddenScopeIndex = _terrainAnalysisHiddenScope switch
+        {
+            TerrainTileScope.WholeMap => 1,
+            TerrainTileScope.CurrentTile => 2,
+            _ => 0,
+        };
+        string[] hiddenScopeLabels = { "Loaded tiles", "Whole map", "Current tile" };
+        ImGui.SetNextItemWidth(180f);
+        if (ImGui.Combo("Candidate Source", ref hiddenScopeIndex, hiddenScopeLabels, hiddenScopeLabels.Length))
+        {
+            _terrainAnalysisHiddenScope = hiddenScopeIndex switch
+            {
+                1 => TerrainTileScope.WholeMap,
+                2 => TerrainTileScope.CurrentTile,
+                _ => TerrainTileScope.LoadedTiles,
+            };
+        }
+
+        ImGui.SetNextItemWidth(120f);
+        ImGui.InputInt("Offset X", ref _terrainAnalysisHiddenCompareOffsetX);
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(120f);
+        ImGui.InputInt("Offset Y", ref _terrainAnalysisHiddenCompareOffsetY);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Use 2 Tiles South"))
+        {
+            _terrainAnalysisHiddenCompareOffsetX = 0;
+            _terrainAnalysisHiddenCompareOffsetY = 2;
+        }
+
+        ImGui.SetNextItemWidth(220f);
+        ImGui.SliderFloat("Min Similarity", ref _terrainAnalysisHiddenMinSimilarity, 0.50f, 0.999f, "%.3f");
+        ImGui.SetNextItemWidth(220f);
+        ImGui.SliderFloat("Max Visibility Ratio", ref _terrainAnalysisHiddenMaxVisibilityRatio, 0.005f, 0.250f, "%.3f");
+        ImGui.SetNextItemWidth(220f);
+        ImGui.SliderInt("Max Results", ref _terrainAnalysisHiddenMaxResults, 1, 100);
+
+        if (ImGui.Button("Scan Tiles"))
+            RefreshHiddenTerrainCandidates();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Clear Results"))
+        {
+            _terrainAnalysisHiddenCandidates.Clear();
+            _terrainAnalysisHiddenSelectedIndex = -1;
+            _terrainAnalysisHiddenStatus = "Hidden-terrain results cleared.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_terrainAnalysisHiddenStatus))
+            ImGui.TextWrapped(_terrainAnalysisHiddenStatus);
+
+        if (_terrainAnalysisHiddenCandidates.Count == 0)
+        {
+            ImGui.TextDisabled("No candidate tiles loaded yet.");
+            return;
+        }
+
+        if (!ImGui.BeginTable("##hiddenTerrainCandidates", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingStretchProp, new Vector2(0f, 280f)))
+            return;
+
+        ImGui.TableSetupColumn("Tile");
+        ImGui.TableSetupColumn("Offset Match");
+        ImGui.TableSetupColumn("Similarity");
+        ImGui.TableSetupColumn("Visibility");
+        ImGui.TableSetupColumn("Relief");
+        ImGui.TableSetupColumn("Preview", ImGuiTableColumnFlags.WidthFixed, 90f);
+        ImGui.TableHeadersRow();
+
+        for (int index = 0; index < _terrainAnalysisHiddenCandidates.Count; index++)
+        {
+            TerrainHiddenTileCandidate candidate = _terrainAnalysisHiddenCandidates[index];
+            ImGui.TableNextRow();
+
+            ImGui.TableNextColumn();
+            bool isSelected = _terrainAnalysisHiddenSelectedIndex == index;
+            if (ImGui.Selectable($"({candidate.Tile.tileX}, {candidate.Tile.tileY})##hiddenCandidate{index}", isSelected, ImGuiSelectableFlags.SpanAllColumns))
+            {
+                _terrainAnalysisHiddenSelectedIndex = index;
+                PreviewTerrainAnalysisTile(candidate.Tile);
+            }
+
+            ImGui.TableNextColumn();
+            ImGui.Text($"({candidate.CompareTile.tileX}, {candidate.CompareTile.tileY})");
+
+            ImGui.TableNextColumn();
+            ImGui.Text($"{candidate.Similarity:P1}");
+
+            ImGui.TableNextColumn();
+            ImGui.Text($"{candidate.VisibilityRatio:P2}");
+
+            ImGui.TableNextColumn();
+            ImGui.Text($"{candidate.ReliefRange:F3}");
+
+            ImGui.TableNextColumn();
+            if (ImGui.SmallButton($"Preview##hiddenPreview{index}"))
+            {
+                _terrainAnalysisHiddenSelectedIndex = index;
+                PreviewTerrainAnalysisTile(candidate.Tile);
+            }
+        }
+
+        ImGui.EndTable();
     }
 
     private void DrawTerrainAnalysisPreviewPane(string title, TerrainAnalysisPreviewTexture? texture, string? description)
@@ -127,6 +257,7 @@ public partial class ViewerApp
         _terrainAnalysisPreviewTile = tile;
         _terrainAnalysisPreviewTileMin = tileHeightmap.MinHeight;
         _terrainAnalysisPreviewTileMax = tileHeightmap.MaxHeight;
+        float reliefRange = Math.Max(tileHeightmap.MaxHeight - tileHeightmap.MinHeight, 0f);
 
         var localPixels = BuildHeightPreviewPixels(
             tileHeightmap.Heights,
@@ -138,6 +269,12 @@ public partial class ViewerApp
 
         if (_terrainAnalysisHasGlobalBounds)
         {
+            float globalRange = Math.Max(_terrainAnalysisGlobalMax - _terrainAnalysisGlobalMin, 1e-6f);
+            _terrainAnalysisPreviewVisibilityRatio = reliefRange / globalRange;
+            _terrainAnalysisPreviewAmplification = reliefRange > 1e-6f
+                ? globalRange / reliefRange
+                : 0f;
+
             var globalPixels = BuildHeightPreviewPixels(
                 tileHeightmap.Heights,
                 _terrainAnalysisGlobalMin,
@@ -148,9 +285,13 @@ public partial class ViewerApp
         }
         else
         {
+            _terrainAnalysisPreviewVisibilityRatio = 0f;
+            _terrainAnalysisPreviewAmplification = 1f;
             _terrainAnalysisGlobalTexture?.Dispose();
             _terrainAnalysisGlobalTexture = new TerrainAnalysisPreviewTexture(_gl);
         }
+
+        UpdateTerrainAnalysisPreviewSimilarity(tile, tileHeightmap);
 
         using (var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks))
         {
@@ -255,6 +396,177 @@ public partial class ViewerApp
             _terrainAnalysisGlobalTexture?.Dispose();
             _terrainAnalysisGlobalTexture = new TerrainAnalysisPreviewTexture(_gl);
         }
+
+        _terrainAnalysisPreviewCompareTile = null;
+        _terrainAnalysisPreviewSimilarity = null;
+        _terrainAnalysisPreviewVisibilityRatio = 0f;
+        _terrainAnalysisPreviewAmplification = 1f;
+    }
+
+    private void PreviewTerrainAnalysisTile((int tileX, int tileY) tile)
+    {
+        _terrainAnalysisFollowCameraTile = false;
+        RefreshTerrainAnalysisCurrentTile(tile);
+    }
+
+    private void RefreshHiddenTerrainCandidates()
+    {
+        _terrainAnalysisHiddenCandidates.Clear();
+        _terrainAnalysisHiddenSelectedIndex = -1;
+
+        if (_terrainManager == null && _vlmTerrainManager == null)
+        {
+            _terrainAnalysisHiddenStatus = "Hidden-terrain scanning requires an active terrain source.";
+            return;
+        }
+
+        IReadOnlyList<(int tileX, int tileY)> tiles = GetTileScopeList(_terrainAnalysisHiddenScope);
+        if (tiles.Count == 0)
+        {
+            _terrainAnalysisHiddenStatus = "No tiles are available for hidden-terrain scanning.";
+            return;
+        }
+
+        var summaries = new Dictionary<(int tileX, int tileY), TerrainHiddenTileSummary>(tiles.Count);
+        float globalMin = float.MaxValue;
+        float globalMax = float.MinValue;
+
+        foreach (var tile in tiles)
+        {
+            if (!TryBuildTerrainHiddenTileSummary(tile, out TerrainHiddenTileSummary summary))
+                continue;
+
+            summaries[tile] = summary;
+            if (summary.MinHeight < globalMin) globalMin = summary.MinHeight;
+            if (summary.MaxHeight > globalMax) globalMax = summary.MaxHeight;
+        }
+
+        if (summaries.Count == 0)
+        {
+            _terrainAnalysisHiddenStatus = "No valid tile heightmaps were available for hidden-terrain scanning.";
+            return;
+        }
+
+        float globalRange = Math.Max(globalMax - globalMin, 1e-6f);
+        foreach (var summary in summaries.Values)
+        {
+            var compareTile = (
+                summary.Tile.tileX + _terrainAnalysisHiddenCompareOffsetX,
+                summary.Tile.tileY + _terrainAnalysisHiddenCompareOffsetY);
+
+            if (!summaries.TryGetValue(compareTile, out TerrainHiddenTileSummary? compareSummary))
+                continue;
+
+            float visibilityRatio = summary.ReliefRange / globalRange;
+            if (visibilityRatio > _terrainAnalysisHiddenMaxVisibilityRatio)
+                continue;
+
+            float similarity = ComputeTerrainHiddenSimilarity(summary.Feature, compareSummary.Feature);
+            if (similarity < _terrainAnalysisHiddenMinSimilarity)
+                continue;
+
+            _terrainAnalysisHiddenCandidates.Add(new TerrainHiddenTileCandidate
+            {
+                Tile = summary.Tile,
+                CompareTile = compareTile,
+                ReliefRange = summary.ReliefRange,
+                VisibilityRatio = visibilityRatio,
+                Similarity = similarity
+            });
+        }
+
+        _terrainAnalysisHiddenCandidates.Sort(static (left, right) =>
+        {
+            int similarityCompare = right.Similarity.CompareTo(left.Similarity);
+            if (similarityCompare != 0)
+                return similarityCompare;
+
+            return left.VisibilityRatio.CompareTo(right.VisibilityRatio);
+        });
+
+        int maxResults = Math.Clamp(_terrainAnalysisHiddenMaxResults, 1, 100);
+        if (_terrainAnalysisHiddenCandidates.Count > maxResults)
+            _terrainAnalysisHiddenCandidates.RemoveRange(maxResults, _terrainAnalysisHiddenCandidates.Count - maxResults);
+
+        _terrainAnalysisHiddenStatus = _terrainAnalysisHiddenCandidates.Count == 0
+            ? $"No candidates matched similarity >= {_terrainAnalysisHiddenMinSimilarity:F3} with visibility <= {_terrainAnalysisHiddenMaxVisibilityRatio:F3}."
+            : $"Found {_terrainAnalysisHiddenCandidates.Count} candidate tile(s) using offset ({_terrainAnalysisHiddenCompareOffsetX:+#;-#;0}, {_terrainAnalysisHiddenCompareOffsetY:+#;-#;0}) across {summaries.Count} scanned tile(s) from {_terrainAnalysisHiddenScope}.";
+    }
+
+    private void UpdateTerrainAnalysisPreviewSimilarity((int tileX, int tileY) tile, TerrainHeightmapIo.TileHeightmap257 tileHeightmap)
+    {
+        _terrainAnalysisPreviewCompareTile = null;
+        _terrainAnalysisPreviewSimilarity = null;
+
+        var compareTile = (
+            tile.tileX + _terrainAnalysisHiddenCompareOffsetX,
+            tile.tileY + _terrainAnalysisHiddenCompareOffsetY);
+
+        if (!TryBuildTerrainHiddenTileSummary(compareTile, out TerrainHiddenTileSummary compareSummary))
+            return;
+
+        float[] currentFeature = BuildTerrainHiddenFeature(tileHeightmap.Heights, tileHeightmap.MinHeight, tileHeightmap.MaxHeight);
+        _terrainAnalysisPreviewCompareTile = compareTile;
+        _terrainAnalysisPreviewSimilarity = ComputeTerrainHiddenSimilarity(currentFeature, compareSummary.Feature);
+    }
+
+    private bool TryBuildTerrainHiddenTileSummary((int tileX, int tileY) tile, out TerrainHiddenTileSummary summary)
+    {
+        summary = new TerrainHiddenTileSummary();
+
+        IReadOnlyList<Terrain.TerrainChunkData>? chunks = LoadTileChunksForExport(tile.tileX, tile.tileY);
+        if (chunks == null || chunks.Count == 0)
+            return false;
+
+        TerrainHeightmapIo.TileHeightmap257 tileHeightmap = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+        summary = new TerrainHiddenTileSummary
+        {
+            Tile = tile,
+            MinHeight = tileHeightmap.MinHeight,
+            MaxHeight = tileHeightmap.MaxHeight,
+            ReliefRange = Math.Max(tileHeightmap.MaxHeight - tileHeightmap.MinHeight, 0f),
+            Feature = BuildTerrainHiddenFeature(tileHeightmap.Heights, tileHeightmap.MinHeight, tileHeightmap.MaxHeight)
+        };
+        return true;
+    }
+
+    private static float[] BuildTerrainHiddenFeature(float[] heights, float minHeight, float maxHeight)
+    {
+        const int featureSize = 33;
+        const int sourceSize = TerrainHeightmapIo.TileHeightmapSize;
+
+        var feature = new float[featureSize * featureSize];
+        float range = maxHeight - minHeight;
+        if (range <= 1e-6f)
+            range = 1f;
+
+        float step = (sourceSize - 1f) / (featureSize - 1f);
+        for (int y = 0; y < featureSize; y++)
+        {
+            int sampleY = Math.Min(sourceSize - 1, (int)MathF.Round(y * step));
+            for (int x = 0; x < featureSize; x++)
+            {
+                int sampleX = Math.Min(sourceSize - 1, (int)MathF.Round(x * step));
+                float height = heights[sampleY * sourceSize + sampleX];
+                feature[y * featureSize + x] = NormalizeHeight(height, minHeight, range);
+            }
+        }
+
+        return feature;
+    }
+
+    private static float ComputeTerrainHiddenSimilarity(float[] left, float[] right)
+    {
+        int count = Math.Min(left.Length, right.Length);
+        if (count == 0)
+            return 0f;
+
+        float diffSum = 0f;
+        for (int index = 0; index < count; index++)
+            diffSum += MathF.Abs(left[index] - right[index]);
+
+        float averageDifference = diffSum / count;
+        return Math.Clamp(1f - averageDifference, 0f, 1f);
     }
 
     private static byte[] BuildHeightPreviewPixels(float[] heights, float minHeight, float maxHeight, int width, int height)
@@ -339,6 +651,24 @@ public partial class ViewerApp
 
         return ((byte)(r * 255f), (byte)(g * 255f), (byte)(b * 255f));
     }
+}
+
+sealed class TerrainHiddenTileCandidate
+{
+    public (int tileX, int tileY) Tile { get; init; }
+    public (int tileX, int tileY) CompareTile { get; init; }
+    public float ReliefRange { get; init; }
+    public float VisibilityRatio { get; init; }
+    public float Similarity { get; init; }
+}
+
+sealed class TerrainHiddenTileSummary
+{
+    public (int tileX, int tileY) Tile { get; init; }
+    public float MinHeight { get; init; }
+    public float MaxHeight { get; init; }
+    public float ReliefRange { get; init; }
+    public float[] Feature { get; init; } = Array.Empty<float>();
 }
 
 sealed class TerrainAnalysisPreviewTexture : IDisposable

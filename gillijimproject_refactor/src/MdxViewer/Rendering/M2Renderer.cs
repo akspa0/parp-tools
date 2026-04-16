@@ -5,6 +5,7 @@ using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
+using WowViewer.Core.IO.M2;
 using WowViewer.Core.Runtime.M2;
 
 namespace MdxViewer.Rendering;
@@ -16,12 +17,17 @@ public sealed class M2Renderer : IModelRenderer
     private readonly ReplaceableTextureResolver? _texResolver;
     private readonly MdxRenderer? _legacyRenderer;
     private readonly M2StaticRenderModel? _runtimeModel;
+    private readonly M2RuntimeAnimator? _runtimeAnimator;
     private readonly List<SectionBuffers> _sections = new();
+    private readonly Dictionary<int, SectionBuffers> _sectionsByIndex = new();
+    private readonly Dictionary<int, M2StaticRenderSection> _staticSectionsByIndex = new();
     private readonly List<bool> _sectionVisibility = new();
     private readonly Dictionary<string, uint> _loadedTextureCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> _ownedTextureIds = new();
     private readonly string _modelDir = string.Empty;
     private readonly int? _selectedReplaceableDisplayIndex;
+    private int _characterHairVariationId;
+    private int _characterFacialHairVariationId;
     private bool _wireframe;
     private bool _batchStateValid;
     private Matrix4x4 _batchView;
@@ -33,6 +39,7 @@ public sealed class M2Renderer : IModelRenderer
     private Vector3 _batchLightDir;
     private Vector3 _batchLightColor;
     private Vector3 _batchAmbientColor;
+    private DateTime _lastAnimationUpdateTime = DateTime.UtcNow;
 
     private static uint _shaderProgram;
     private static int _uModel;
@@ -52,6 +59,11 @@ public sealed class M2Renderer : IModelRenderer
     private static int _uGeneratedTexCoord;
     private static int _uTexture0;
     private static int _uAlphaCutout;
+    private static int _uAlpha;
+    private static int _uHasUvTransform;
+    private static int _uUvTranslation;
+    private static int _uUvScale;
+    private static int _uUvRotation;
     private static bool _shaderInitialized;
     private static int _shaderRefCount;
 
@@ -92,9 +104,13 @@ public sealed class M2Renderer : IModelRenderer
         _dataSource = dataSource;
         _texResolver = texResolver;
         _runtimeModel = runtimeModel;
+        _runtimeAnimator = runtimeModel.Model.SequenceCount > 0 ? new M2RuntimeAnimator(runtimeModel.Model, dataSource) : null;
         SourceModelPath = sourceModelPath.Replace('/', '\\');
         _modelDir = Path.GetDirectoryName(SourceModelPath)?.Replace('/', '\\') ?? string.Empty;
         _selectedReplaceableDisplayIndex = SelectBestReplaceableDisplayIndex(runtimeModel, SourceModelPath, texResolver);
+
+        foreach (M2StaticRenderSection section in runtimeModel.Sections)
+            _staticSectionsByIndex[section.SectionIndex] = section;
 
         for (int index = 0; index < runtimeModel.Sections.Count; index++)
             _sectionVisibility.Add(true);
@@ -106,6 +122,13 @@ public sealed class M2Renderer : IModelRenderer
         ViewerLog.Info(
             ViewerLog.Category.Mdx,
             $"[M2] wow-viewer static runtime ready for {Path.GetFileName(SourceModelPath)}: sections={_sections.Count}, compatibilityFallback={runtimeModel.UsesCompatibilityFallback}");
+
+        if (_runtimeAnimator?.HasAnimation == true)
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[M2] Runtime animation enabled for {Path.GetFileName(SourceModelPath)}: sequences={_runtimeAnimator.Sequences.Count}, bones={runtimeModel.Model.BoneCount}");
+        }
     }
 
     public string SourceModelPath { get; }
@@ -136,7 +159,7 @@ public sealed class M2Renderer : IModelRenderer
 
     public bool RequiresUnbatchedWorldRender => true;
 
-    public MdxAnimator? Animator => _legacyRenderer?.Animator;
+    public IAnimationController? Animator => _legacyRenderer?.Animator ?? _runtimeAnimator;
 
     public int SubObjectCount => _runtimeModel?.Sections.Count ?? _legacyRenderer?.SubObjectCount ?? _sections.Count;
 
@@ -203,9 +226,57 @@ public sealed class M2Renderer : IModelRenderer
             _sections[index].Visible = visible;
     }
 
+    public bool TryApplyCharacterSelectionGroups(IReadOnlyCollection<uint>? wantedGroups, string? reasonLabel = null)
+    {
+        if (_legacyRenderer != null)
+            return _legacyRenderer.TryApplyCharacterSelectionGroups(wantedGroups, reasonLabel);
+
+        if (_runtimeModel == null || wantedGroups == null || wantedGroups.Count == 0 || _sections.Count == 0)
+            return false;
+
+        ApplyCharacterSelectionGroups(wantedGroups, reasonLabel);
+        return true;
+    }
+
+    public bool TryApplyCharacterCustomization(IReadOnlyCollection<uint>? wantedGroups, int? hairVariationId = null, int? facialHairVariationId = null, string? reasonLabel = null)
+    {
+        if (_legacyRenderer != null)
+            return _legacyRenderer.TryApplyCharacterCustomization(wantedGroups, hairVariationId, facialHairVariationId, reasonLabel);
+
+        if (!TryApplyCharacterSelectionGroups(wantedGroups, reasonLabel))
+            return false;
+
+        if (!UpdateCharacterTextureVariationState(hairVariationId, facialHairVariationId))
+            return true;
+
+        ReloadCharacterTextures();
+        return true;
+    }
+
     public void UpdateAnimation()
     {
-        _legacyRenderer?.UpdateAnimation();
+        if (_legacyRenderer != null)
+        {
+            _legacyRenderer.UpdateAnimation();
+            return;
+        }
+
+        if (_runtimeAnimator == null || _runtimeModel == null || _gl == null)
+            return;
+
+        DateTime now = DateTime.UtcNow;
+        float deltaMs = (float)(now - _lastAnimationUpdateTime).TotalMilliseconds;
+        _lastAnimationUpdateTime = now;
+        _runtimeAnimator.Update(Math.Clamp(deltaMs, 0.0f, 100.0f));
+
+        int sequenceIndex = _runtimeAnimator.CurrentSequence;
+        int timeMs = _runtimeAnimator.GetCurrentTimeMs();
+        M2ExternalAnimationRuntimeState? externalAnimationState = _runtimeAnimator.ResolveExternalAnimationState();
+        M2AnimatedRenderState animatedState = M2AnimatedRenderStateEvaluator.Evaluate(_runtimeModel.Model, _runtimeModel, sequenceIndex, timeMs, externalAnimationState);
+        M2BonePoseState bonePoseState = M2BonePoseEvaluator.Evaluate(_runtimeModel.Model, sequenceIndex, timeMs, externalAnimationState);
+        M2SkinnedRenderModel skinnedRenderModel = M2SkinnedRenderModelBuilder.ApplyPose(_runtimeModel, bonePoseState);
+        M2RenderConsumerFrameState consumerState = M2RenderConsumerFrameStateBuilder.Build(_runtimeModel, animatedState);
+        ApplyAnimatedFrame(skinnedRenderModel, consumerState);
     }
 
     public void ApplyTextureSamplingSettings()
@@ -363,11 +434,7 @@ public sealed class M2Renderer : IModelRenderer
 
         _sections.Clear();
 
-        foreach (uint textureId in _ownedTextureIds)
-            _gl.DeleteTexture(textureId);
-
-        _ownedTextureIds.Clear();
-        _loadedTextureCache.Clear();
+        ReleaseOwnedTextures();
 
         _shaderRefCount--;
         if (_shaderRefCount <= 0 && _shaderProgram != 0)
@@ -414,7 +481,7 @@ public sealed class M2Renderer : IModelRenderer
             {
                 fixed (float* vertexPtr = vertexData)
                 {
-                    _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertexData.Length * sizeof(float)), vertexPtr, BufferUsageARB.StaticDraw);
+                    _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertexData.Length * sizeof(float)), vertexPtr, _runtimeAnimator != null ? BufferUsageARB.DynamicDraw : BufferUsageARB.StaticDraw);
                 }
 
                 _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
@@ -435,8 +502,110 @@ public sealed class M2Renderer : IModelRenderer
 
             _gl.BindVertexArray(0);
 
-            _sections.Add(new SectionBuffers(section.SectionIndex, section.SkinSectionId, vao, vbo, ebo, (uint)indices.Length, section.Material));
+            var buffers = new SectionBuffers(section.SectionIndex, section.SkinSectionId, vao, vbo, ebo, section.Vertices.Count, (uint)indices.Length, section.Material);
+            _sections.Add(buffers);
+            _sectionsByIndex[section.SectionIndex] = buffers;
         }
+    }
+
+    private void ApplyAnimatedFrame(M2SkinnedRenderModel skinnedRenderModel, M2RenderConsumerFrameState consumerState)
+    {
+        Dictionary<int, M2RenderConsumerPassState> firstPassBySection = consumerState.Passes
+            .GroupBy(static pass => pass.AnimatedPass.SectionIndex)
+            .ToDictionary(static group => group.Key, static group => group.First());
+
+        for (int index = 0; index < _sections.Count; index++)
+        {
+            SectionBuffers section = _sections[index];
+            bool baseVisible = index < _sectionVisibility.Count ? _sectionVisibility[index] : true;
+            if (firstPassBySection.TryGetValue(section.SectionIndex, out M2RenderConsumerPassState? passState))
+            {
+                section.Visible = baseVisible && passState.Visible;
+                section.AnimatedColor = passState.DiffuseColor;
+                section.AnimatedAlpha = passState.Alpha;
+                ApplyAnimatedTextureState(section, passState);
+            }
+            else
+            {
+                section.Visible = baseVisible;
+                section.AnimatedColor = Vector3.One;
+                section.AnimatedAlpha = 1.0f;
+                ResetAnimatedTextureState(section);
+            }
+        }
+
+        foreach (M2SkinnedRenderSection section in skinnedRenderModel.Sections)
+            UploadAnimatedVertices(section);
+    }
+
+    private void ApplyAnimatedTextureState(SectionBuffers section, M2RenderConsumerPassState passState)
+    {
+        M2RenderConsumerTextureState? textureState = passState.Textures
+            .OrderBy(static texture => texture.StageIndex)
+            .FirstOrDefault();
+
+        if (textureState == null)
+        {
+            ResetAnimatedTextureState(section);
+            return;
+        }
+
+        Matrix4x4 rotationMatrix = Matrix4x4.CreateFromQuaternion(textureState.Rotation);
+        section.AnimatedUvTranslation = new Vector2(textureState.Translation.X, textureState.Translation.Y);
+        section.AnimatedUvScale = new Vector2(
+            Math.Abs(textureState.Scaling.X) <= 0.0001f ? 1.0f : textureState.Scaling.X,
+            Math.Abs(textureState.Scaling.Y) <= 0.0001f ? 1.0f : textureState.Scaling.Y);
+        section.AnimatedUvRotation = new Vector2(rotationMatrix.M11, rotationMatrix.M21);
+        section.HasAnimatedUvTransform = section.AnimatedUvTranslation.LengthSquared() > 0.000001f
+            || Vector2.DistanceSquared(section.AnimatedUvScale, Vector2.One) > 0.000001f
+            || Vector2.DistanceSquared(section.AnimatedUvRotation, new Vector2(1.0f, 0.0f)) > 0.000001f;
+    }
+
+    private static void ResetAnimatedTextureState(SectionBuffers section)
+    {
+        section.HasAnimatedUvTransform = false;
+        section.AnimatedUvTranslation = Vector2.Zero;
+        section.AnimatedUvScale = Vector2.One;
+        section.AnimatedUvRotation = new Vector2(1.0f, 0.0f);
+    }
+
+    private unsafe void UploadAnimatedVertices(M2SkinnedRenderSection section)
+    {
+        if (_gl == null)
+            return;
+
+        if (!_sectionsByIndex.TryGetValue(section.Source.SectionIndex, out SectionBuffers? buffers)
+            || !_staticSectionsByIndex.TryGetValue(section.Source.SectionIndex, out M2StaticRenderSection? sourceSection)
+            || buffers.VertexCount != section.Vertices.Count
+            || sourceSection.Vertices.Count != section.Vertices.Count)
+        {
+            return;
+        }
+
+        float[] vertexData = new float[section.Vertices.Count * 10];
+        for (int index = 0; index < section.Vertices.Count; index++)
+        {
+            M2SkinnedRenderVertex animatedVertex = section.Vertices[index];
+            M2StaticRenderVertex sourceVertex = sourceSection.Vertices[index];
+            int offset = index * 10;
+            vertexData[offset + 0] = animatedVertex.Position.X;
+            vertexData[offset + 1] = animatedVertex.Position.Y;
+            vertexData[offset + 2] = animatedVertex.Position.Z;
+            vertexData[offset + 3] = animatedVertex.Normal.X;
+            vertexData[offset + 4] = animatedVertex.Normal.Y;
+            vertexData[offset + 5] = animatedVertex.Normal.Z;
+            vertexData[offset + 6] = sourceVertex.TextureCoords0.X;
+            vertexData[offset + 7] = sourceVertex.TextureCoords0.Y;
+            vertexData[offset + 8] = sourceVertex.TextureCoords1.X;
+            vertexData[offset + 9] = sourceVertex.TextureCoords1.Y;
+        }
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, buffers.Vbo);
+        fixed (float* vertexPtr = vertexData)
+        {
+            _gl.BufferSubData(BufferTargetARB.ArrayBuffer, 0, (nuint)(vertexData.Length * sizeof(float)), vertexPtr);
+        }
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
     }
 
     private unsafe void RenderCore(
@@ -509,13 +678,18 @@ public sealed class M2Renderer : IModelRenderer
                 _gl.DepthMask(!backdrop);
             }
 
-            Vector3 baseColor = ComputeSectionColor(section.SectionIndex, section.Material, fadeAlpha);
+            Vector3 baseColor = ComputeSectionColor(section, fadeAlpha);
             _gl.Uniform3(_uBaseColor, baseColor.X, baseColor.Y, baseColor.Z);
             _gl.Uniform1(_uUnshaded, section.Material.IsUnshaded ? 1 : 0);
             _gl.Uniform1(_uHasTexture, section.HasTexture ? 1 : 0);
             _gl.Uniform1(_uUvSet, section.UvSet);
             _gl.Uniform1(_uGeneratedTexCoord, section.GeneratedTexCoord ? 1 : 0);
             _gl.Uniform1(_uAlphaCutout, section.AlphaCutout ? 1 : 0);
+            _gl.Uniform1(_uAlpha, Math.Clamp(fadeAlpha * section.AnimatedAlpha, 0.0f, 1.0f));
+            _gl.Uniform1(_uHasUvTransform, section.HasAnimatedUvTransform ? 1 : 0);
+            _gl.Uniform2(_uUvTranslation, section.AnimatedUvTranslation.X, section.AnimatedUvTranslation.Y);
+            _gl.Uniform2(_uUvScale, section.AnimatedUvScale.X, section.AnimatedUvScale.Y);
+            _gl.Uniform2(_uUvRotation, section.AnimatedUvRotation.X, section.AnimatedUvRotation.Y);
 
             _gl.ActiveTexture(TextureUnit.Texture0);
             _gl.BindTexture(TextureTarget.Texture2D, section.HasTexture ? section.TextureId : 0u);
@@ -558,12 +732,14 @@ public sealed class M2Renderer : IModelRenderer
         }
     }
 
-    private static Vector3 ComputeSectionColor(int sectionIndex, M2StaticRenderMaterial material, float fadeAlpha)
+    private static Vector3 ComputeSectionColor(SectionBuffers section, float fadeAlpha)
     {
-        _ = sectionIndex;
-        _ = material;
         float brightness = Math.Clamp(fadeAlpha, 0.1f, 1.0f);
-        return new Vector3(brightness, brightness, brightness);
+        Vector3 animatedColor = new(
+            Math.Clamp(section.AnimatedColor.X, 0.0f, 1.0f),
+            Math.Clamp(section.AnimatedColor.Y, 0.0f, 1.0f),
+            Math.Clamp(section.AnimatedColor.Z, 0.0f, 1.0f));
+        return animatedColor * brightness;
     }
 
     private void InitShaders()
@@ -624,6 +800,11 @@ public sealed class M2Renderer : IModelRenderer
             uniform int uGeneratedTexCoord;
             uniform sampler2D uTexture0;
             uniform int uAlphaCutout;
+            uniform float uAlpha;
+            uniform int uHasUvTransform;
+            uniform vec2 uUvTranslation;
+            uniform vec2 uUvScale;
+            uniform vec2 uUvRotation;
 
             in vec2 vTexCoord0;
             in vec2 vTexCoord1;
@@ -642,6 +823,14 @@ public sealed class M2Renderer : IModelRenderer
                     texCoord = viewNormal.xy * 0.5 + 0.5;
                 }
 
+                if (uHasUvTransform == 1)
+                {
+                    mat2 uvRotationScale = mat2(
+                        uUvRotation.x * uUvScale.x, -uUvRotation.y * uUvScale.y,
+                        uUvRotation.y * uUvScale.x,  uUvRotation.x * uUvScale.y);
+                    texCoord = (uvRotationScale * texCoord) + uUvTranslation;
+                }
+
                 vec4 textureSample = uHasTexture == 1
                     ? texture(uTexture0, texCoord)
                     : vec4(1.0, 1.0, 1.0, 1.0);
@@ -654,7 +843,7 @@ public sealed class M2Renderer : IModelRenderer
                 float fogRange = max(uFogEnd - uFogStart, 0.001);
                 float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
                 vec3 finalColor = mix(uFogColor, litColor, fogFactor);
-                FragColor = vec4(finalColor, textureSample.a);
+                FragColor = vec4(finalColor, textureSample.a * uAlpha);
             }
             """;
 
@@ -689,6 +878,11 @@ public sealed class M2Renderer : IModelRenderer
         _uGeneratedTexCoord = _gl.GetUniformLocation(_shaderProgram, "uGeneratedTexCoord");
         _uTexture0 = _gl.GetUniformLocation(_shaderProgram, "uTexture0");
         _uAlphaCutout = _gl.GetUniformLocation(_shaderProgram, "uAlphaCutout");
+        _uAlpha = _gl.GetUniformLocation(_shaderProgram, "uAlpha");
+        _uHasUvTransform = _gl.GetUniformLocation(_shaderProgram, "uHasUvTransform");
+        _uUvTranslation = _gl.GetUniformLocation(_shaderProgram, "uUvTranslation");
+        _uUvScale = _gl.GetUniformLocation(_shaderProgram, "uUvScale");
+        _uUvRotation = _gl.GetUniformLocation(_shaderProgram, "uUvRotation");
         _shaderInitialized = true;
     }
 
@@ -739,6 +933,70 @@ public sealed class M2Renderer : IModelRenderer
                 section.UvSet = uvSet;
                 section.GeneratedTexCoord = generatedTexCoord;
             }
+        }
+    }
+
+    private void ApplyCharacterSelectionGroups(IReadOnlyCollection<uint> wantedGroups, string? reasonLabel)
+    {
+        HashSet<uint> wantedGroupSet = wantedGroups as HashSet<uint> ?? new HashSet<uint>(wantedGroups);
+        int hiddenCount = 0;
+
+        foreach (SectionBuffers section in _sections)
+        {
+            bool visible = wantedGroupSet.Contains(section.SkinSectionId);
+            section.Visible = visible;
+            if (section.SectionIndex >= 0 && section.SectionIndex < _sectionVisibility.Count)
+                _sectionVisibility[section.SectionIndex] = visible;
+            if (!visible)
+                hiddenCount++;
+        }
+
+        if (hiddenCount > 0)
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[M2] Applied {reasonLabel ?? "character geosets"} for {SourceModelPath}: visible={_sections.Count - hiddenCount}/{_sections.Count}, groups={string.Join(",", wantedGroupSet.OrderBy(static value => value))}");
+        }
+    }
+
+    private bool UpdateCharacterTextureVariationState(int? hairVariationId, int? facialHairVariationId)
+    {
+        int resolvedHairVariationId = hairVariationId ?? 0;
+        int resolvedFacialHairVariationId = facialHairVariationId ?? 0;
+        if (_characterHairVariationId == resolvedHairVariationId && _characterFacialHairVariationId == resolvedFacialHairVariationId)
+            return false;
+
+        _characterHairVariationId = resolvedHairVariationId;
+        _characterFacialHairVariationId = resolvedFacialHairVariationId;
+        return true;
+    }
+
+    private void ReloadCharacterTextures()
+    {
+        if (_gl == null)
+            return;
+
+        ReleaseOwnedTextures();
+        LoadSectionTextures();
+    }
+
+    private void ReleaseOwnedTextures()
+    {
+        if (_gl == null)
+            return;
+
+        foreach (uint textureId in _ownedTextureIds)
+            _gl.DeleteTexture(textureId);
+
+        _ownedTextureIds.Clear();
+        _loadedTextureCache.Clear();
+
+        foreach (SectionBuffers section in _sections)
+        {
+            section.TextureId = 0;
+            section.HasTexture = false;
+            section.UvSet = 0;
+            section.GeneratedTexCoord = false;
         }
     }
 
@@ -803,7 +1061,12 @@ public sealed class M2Renderer : IModelRenderer
         if (_texResolver == null)
             return null;
 
-        return _texResolver.Resolve(SourceModelPath, replaceableId, _selectedReplaceableDisplayIndex ?? 0);
+        return _texResolver.Resolve(
+            SourceModelPath,
+            replaceableId,
+            _selectedReplaceableDisplayIndex ?? 0,
+            _characterHairVariationId,
+            _characterFacialHairVariationId);
     }
 
     private bool TryGetOrLoadTexture(string texturePath, bool clampS, bool clampT, out uint textureId)
@@ -1013,13 +1276,14 @@ public sealed class M2Renderer : IModelRenderer
 
     private sealed class SectionBuffers
     {
-        public SectionBuffers(int sectionIndex, ushort skinSectionId, uint vao, uint vbo, uint ebo, uint indexCount, M2StaticRenderMaterial material)
+        public SectionBuffers(int sectionIndex, ushort skinSectionId, uint vao, uint vbo, uint ebo, int vertexCount, uint indexCount, M2StaticRenderMaterial material)
         {
             SectionIndex = sectionIndex;
             SkinSectionId = skinSectionId;
             Vao = vao;
             Vbo = vbo;
             Ebo = ebo;
+            VertexCount = vertexCount;
             IndexCount = indexCount;
             Material = material;
         }
@@ -1033,6 +1297,8 @@ public sealed class M2Renderer : IModelRenderer
         public uint Vbo { get; }
 
         public uint Ebo { get; }
+
+        public int VertexCount { get; }
 
         public uint IndexCount { get; }
 
@@ -1049,5 +1315,17 @@ public sealed class M2Renderer : IModelRenderer
         public bool AlphaCutout { get; set; }
 
         public bool Visible { get; set; } = true;
+
+        public Vector3 AnimatedColor { get; set; } = Vector3.One;
+
+        public float AnimatedAlpha { get; set; } = 1.0f;
+
+        public bool HasAnimatedUvTransform { get; set; }
+
+        public Vector2 AnimatedUvTranslation { get; set; } = Vector2.Zero;
+
+        public Vector2 AnimatedUvScale { get; set; } = Vector2.One;
+
+        public Vector2 AnimatedUvRotation { get; set; } = new(1.0f, 0.0f);
     }
 }

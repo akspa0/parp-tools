@@ -310,22 +310,13 @@ public static class M2TrackSampler
 
     private static Vector3 InterpolateVector3(TrackKeyFrame<Vector3> start, TrackKeyFrame<Vector3> end, float factor, M2TrackInterpolation interpolation)
     {
-        return interpolation switch
-        {
-            M2TrackInterpolation.Hermite => InterpolateCubic(start.Value, start.OutTangent, end.InTangent, end.Value, factor, hermite: true),
-            M2TrackInterpolation.Bezier => InterpolateCubic(start.Value, start.OutTangent, end.InTangent, end.Value, factor, hermite: false),
-            _ => Vector3.Lerp(start.Value, end.Value, factor),
-        };
+        return Vector3.Lerp(start.Value, end.Value, factor);
     }
 
     private static Quaternion InterpolateQuaternion(TrackKeyFrame<Quaternion> start, TrackKeyFrame<Quaternion> end, float factor, M2TrackInterpolation interpolation)
     {
-        Quaternion value = interpolation switch
-        {
-            M2TrackInterpolation.Hermite => NormalizeWeighted(start.Value, start.OutTangent, end.InTangent, end.Value, HermiteWeights(factor)),
-            M2TrackInterpolation.Bezier => NormalizeWeighted(start.Value, start.OutTangent, end.InTangent, end.Value, BezierWeights(factor)),
-            _ => Quaternion.Slerp(start.Value, end.Value, factor),
-        };
+        Quaternion startValue = EnsureSameHemisphere(start.Value, end.Value);
+        Quaternion value = Quaternion.Slerp(startValue, end.Value, factor);
 
         return value.LengthSquared() > 0.000001f ? Quaternion.Normalize(value) : Quaternion.Identity;
     }
@@ -346,14 +337,11 @@ public static class M2TrackSampler
         return (start * weights.X) + (startOut * weights.Y) + (endIn * weights.Z) + (end * weights.W);
     }
 
-    private static Quaternion NormalizeWeighted(Quaternion start, Quaternion startOut, Quaternion endIn, Quaternion end, Vector4 weights)
+    private static Quaternion EnsureSameHemisphere(Quaternion start, Quaternion end)
     {
-        Vector4 weighted = (ToVector4(start) * weights.X)
-            + (ToVector4(startOut) * weights.Y)
-            + (ToVector4(endIn) * weights.Z)
-            + (ToVector4(end) * weights.W);
-
-        return Quaternion.Normalize(new Quaternion(weighted.X, weighted.Y, weighted.Z, weighted.W));
+        return Quaternion.Dot(start, end) < 0.0f
+            ? new Quaternion(-start.X, -start.Y, -start.Z, -start.W)
+            : start;
     }
 
     private static Vector4 HermiteWeights(float factor)
@@ -409,16 +397,11 @@ public static class M2TrackSampler
     private static Quaternion ReadCompQuaternionValue(byte[] payload, int offset)
     {
         M2CompQuaternion value = new(
-            BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset + 0x00, sizeof(ushort))),
-            BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset + 0x02, sizeof(ushort))),
-            BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset + 0x04, sizeof(ushort))),
-            BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset + 0x06, sizeof(ushort))));
+            (short)-BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(offset + 0x02, sizeof(short))),
+            BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(offset + 0x00, sizeof(short))),
+            BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(offset + 0x04, sizeof(short))),
+            BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(offset + 0x06, sizeof(short))));
         return value.ToQuaternion();
-    }
-
-    private static Vector4 ToVector4(Quaternion value)
-    {
-        return new Vector4(value.X, value.Y, value.Z, value.W);
     }
 
     private readonly record struct TrackSample<T>(T Value, T InTangent, T OutTangent, int ValueSizeBytes);

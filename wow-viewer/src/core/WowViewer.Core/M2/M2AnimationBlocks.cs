@@ -222,15 +222,18 @@ public sealed class M2CameraDefinition
     public bool HasAnimatedFieldOfView => FieldOfViewTrack != null;
 }
 
-public readonly record struct M2CompQuaternion(ushort X, ushort Y, ushort Z, ushort W)
+public readonly record struct M2CompQuaternion(short X, short Y, short Z, short W)
 {
-    public static M2CompQuaternion Identity { get; } = new(32767, 32767, 32767, 65535);
+    public static M2CompQuaternion Identity { get; } = new(32767, 32767, 32767, -1);
 
     public Quaternion ToQuaternion()
     {
-        static float Decode(ushort value)
+        static float Decode(short value)
         {
-            return Math.Clamp(((int)value - 32767) / 32767.0f, -1.0f, 1.0f);
+            float normalized = value < 0
+                ? (value + 32768.0f) / 32767.0f
+                : (value - 32767.0f) / 32767.0f;
+            return Math.Clamp(normalized, -1.0f, 1.0f);
         }
 
         Quaternion quaternion = new(Decode(X), Decode(Y), Decode(Z), Decode(W));
@@ -238,6 +241,23 @@ public readonly record struct M2CompQuaternion(ushort X, ushort Y, ushort Z, ush
             ? Quaternion.Normalize(quaternion)
             : Quaternion.Identity;
     }
+}
+
+[System.Flags]
+public enum M2BoneFlags : uint
+{
+    None = 0,
+    IgnoreParentTranslate = 0x1,
+    IgnoreParentScale = 0x2,
+    IgnoreParentRotation = 0x4,
+    SphericalBillboard = 0x8,
+    CylindricalBillboardLockX = 0x10,
+    CylindricalBillboardLockY = 0x20,
+    CylindricalBillboardLockZ = 0x40,
+    Transformed = 0x200,
+    KinematicBone = 0x400,
+    HelmetAnimScaled = 0x1000,
+    SomethingSequenceId = 0x2000,
 }
 
 public sealed class M2BoneDefinition
@@ -276,6 +296,8 @@ public sealed class M2BoneDefinition
 
     public uint Flags { get; }
 
+    public M2BoneFlags FlagsValue => (M2BoneFlags)Flags;
+
     public short ParentBone { get; }
 
     public ushort SubmeshId { get; }
@@ -291,6 +313,12 @@ public sealed class M2BoneDefinition
     public Vector3 Pivot { get; }
 
     public bool HasParent => ParentBone >= 0;
+
+    public bool IgnoresParentTranslation => (Flags & (uint)M2BoneFlags.IgnoreParentTranslate) != 0;
+
+    public bool IgnoresParentScale => (Flags & (uint)M2BoneFlags.IgnoreParentScale) != 0;
+
+    public bool IgnoresParentRotation => (Flags & (uint)M2BoneFlags.IgnoreParentRotation) != 0;
 }
 
 public sealed class M2RibbonDefinition

@@ -9,10 +9,13 @@ using MdxViewer.Rendering;
 using MdxViewer.Terrain;
 using WowViewer.Core.Blp;
 using WowViewer.Core.Files;
+using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Blp;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.M2;
 using WowViewer.Core.Mdx;
+using WowViewer.Core.Runtime.M2;
 using CoreBlpCompressionType = WowViewer.Core.Blp.BlpCompressionType;
 using CoreBlpPixelFormat = WowViewer.Core.Blp.BlpPixelFormat;
 using CoreMdxChunkSummary = WowViewer.Core.Mdx.MdxChunkSummary;
@@ -72,6 +75,42 @@ internal static class AssetProbe
                 || arg.Equals("--probe-m2", StringComparison.OrdinalIgnoreCase));
         int m2RuntimeProbeIndex = Array.FindIndex(args,
             arg => arg.Equals("--probe-m2-runtime", StringComparison.OrdinalIgnoreCase));
+        int m2PoseCompareProbeIndex = Array.FindIndex(args,
+            arg => arg.Equals("--probe-m2-pose-compare", StringComparison.OrdinalIgnoreCase));
+
+        if (m2PoseCompareProbeIndex >= 0)
+        {
+            if (args.Length <= m2PoseCompareProbeIndex + 2)
+            {
+                Console.Error.WriteLine("Usage: MdxViewer --probe-m2-pose-compare <gamePath> <modelVirtualPath> [--build <version>] [--skin <virtualPath>] [--listfile <path>] [--sequence <index>] [--time-ms <value>]");
+                Environment.ExitCode = 1;
+                return true;
+            }
+
+            string compareGamePath = args[m2PoseCompareProbeIndex + 1];
+            string compareModelVirtualPath = args[m2PoseCompareProbeIndex + 2];
+            string compareBuildVersion = TryGetOptionValue(args, "--build") ?? "3.3.5.12340";
+            string? compareSkinOverride = TryGetOptionValue(args, "--skin");
+            string? compareListfilePath = TryGetOptionValue(args, "--listfile");
+            int compareSequenceIndex = TryGetOptionalInt(args, "--sequence") ?? 0;
+            int compareTimeMs = TryGetOptionalInt(args, "--time-ms") ?? 0;
+
+            ViewerLog.Verbose = true;
+            ViewerLog.Unmute(ViewerLog.Category.Mdx);
+            MdxFile.Verbose = true;
+
+            try
+            {
+                RunM2PoseCompareProbe(compareGamePath, compareModelVirtualPath, compareListfilePath, compareBuildVersion, compareSkinOverride, compareSequenceIndex, compareTimeMs);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AssetProbe:M2PoseCompare] Failed: {ex}");
+                Environment.ExitCode = 1;
+            }
+
+            return true;
+        }
 
         if (m2RuntimeProbeIndex >= 0)
         {
@@ -276,6 +315,174 @@ internal static class AssetProbe
         throw new InvalidDataException(
             $"No usable .skin for runtime probe {Path.GetFileName(normalizedModelPath)}. candidates={skinCandidates.Count}, missing={missingSkinCount}, failed={failedSkinCount}.",
             lastSkinFailure);
+    }
+
+    private static void RunM2PoseCompareProbe(string gamePath, string modelVirtualPath, string? listfilePath, string buildVersion, string? skinOverride, int sequenceIndex, int timeMs)
+    {
+        string normalizedModelPath = modelVirtualPath.Replace('/', '\\').TrimStart('\\');
+
+        Console.WriteLine($"[M2-POSE-COMPARE] Game path: {gamePath}");
+        Console.WriteLine($"[M2-POSE-COMPARE] Model path: {normalizedModelPath}");
+        Console.WriteLine($"[M2-POSE-COMPARE] Build: {buildVersion}");
+        Console.WriteLine($"[M2-POSE-COMPARE] Sequence: {sequenceIndex}");
+        Console.WriteLine($"[M2-POSE-COMPARE] TimeMs: {timeMs}");
+        if (!string.IsNullOrWhiteSpace(skinOverride))
+            Console.WriteLine($"[M2-POSE-COMPARE] Skin override: {skinOverride}");
+        if (!string.IsNullOrWhiteSpace(listfilePath))
+            Console.WriteLine($"[M2-POSE-COMPARE] Listfile: {listfilePath}");
+
+        using var dataSource = new MpqDataSource(gamePath, listfilePath);
+        byte[] modelBytes = dataSource.ReadFile(normalizedModelPath)
+            ?? dataSource.ReadFile(normalizedModelPath.Replace('\\', '/'))
+            ?? throw new FileNotFoundException($"Model not found in data source: {normalizedModelPath}");
+
+        M2Profile profile = FormatProfileRegistry.ResolveModelProfile(buildVersion)
+            ?? throw new InvalidOperationException($"No M2 profile is registered for build '{buildVersion}'.");
+        WarcraftNetM2Adapter.ValidateModelProfile(modelBytes, normalizedModelPath, profile, buildVersion);
+
+        foreach (string skinPath in ResolveSkinCandidates(normalizedModelPath, skinOverride))
+        {
+            byte[]? skinBytes = dataSource.ReadFile(skinPath)
+                ?? dataSource.ReadFile(skinPath.Replace('\\', '/'));
+            if (skinBytes == null || skinBytes.Length == 0)
+                continue;
+
+            Console.WriteLine($"[M2-POSE-COMPARE] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
+
+            M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelBytes, skinBytes, normalizedModelPath, skinPath);
+            MdxFile adaptedModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, skinBytes, normalizedModelPath, buildVersion);
+
+            if (sequenceIndex < 0 || sequenceIndex >= runtimeModel.Model.SequenceCount)
+                throw new ArgumentOutOfRangeException(nameof(sequenceIndex), $"Sequence index {sequenceIndex} is out of range for runtime model '{normalizedModelPath}'.");
+
+            var runtimeAnimator = new M2RuntimeAnimator(runtimeModel.Model, dataSource)
+            {
+                IsPlaying = false,
+                CurrentFrame = timeMs,
+            };
+            runtimeAnimator.SetSequence(sequenceIndex);
+            runtimeAnimator.CurrentFrame = timeMs;
+            M2ExternalAnimationRuntimeState? externalState = runtimeAnimator.ResolveExternalAnimationState();
+            M2BonePoseState runtimePose = M2BonePoseEvaluator.Evaluate(runtimeModel.Model, sequenceIndex, timeMs, externalState);
+
+            Console.WriteLine($"[M2-POSE-COMPARE] runtimeRequestedSequence={runtimePose.RequestedSequenceIndex} resolvedSequence={runtimePose.ResolvedSequenceIndex} usesExternalPayload={runtimePose.UsesExternalPayload}");
+            PrintFlaggedBoneSummary(runtimeModel.Model.Bones);
+            if (externalState != null)
+            {
+                Console.WriteLine($"[M2-POSE-COMPARE] externalStage={externalState.Stage} usesExternalFile={externalState.UsesExternalFile} companionPath={externalState.CompanionPath ?? "<none>"}");
+            }
+
+            var legacyAnimator = new MdxAnimator(adaptedModel)
+            {
+                IsPlaying = false,
+                CurrentFrame = timeMs,
+            };
+            legacyAnimator.SetSequence(sequenceIndex);
+            legacyAnimator.CurrentFrame = timeMs;
+            legacyAnimator.Update(0.0f);
+
+            PrintPoseComparison(runtimePose, legacyAnimator.BoneMatrices);
+            return;
+        }
+
+        throw new InvalidDataException($"No usable .skin resolved for pose compare probe: {normalizedModelPath}");
+    }
+
+    private static void PrintFlaggedBoneSummary(IReadOnlyList<M2BoneDefinition> bones)
+    {
+        var flaggedBones = bones.Where(static bone => bone.Flags != 0).ToArray();
+        Console.WriteLine($"[M2-POSE-COMPARE] flaggedBones={flaggedBones.Length}");
+        foreach (M2BoneDefinition bone in flaggedBones.Take(24))
+        {
+            Console.WriteLine(
+                $"[M2-POSE-COMPARE] boneFlags index={bone.Index} flags=0x{bone.Flags:X} parent={bone.ParentBone} keyBone={bone.KeyBoneId} ignoreT={bone.IgnoresParentTranslation} ignoreR={bone.IgnoresParentRotation} ignoreS={bone.IgnoresParentScale}");
+        }
+
+        if (flaggedBones.Length > 24)
+            Console.WriteLine($"[M2-POSE-COMPARE] flaggedBonesRemaining={flaggedBones.Length - 24}");
+    }
+
+    private static IEnumerable<string> ResolveSkinCandidates(string modelPath, string? skinOverride)
+    {
+        return string.IsNullOrWhiteSpace(skinOverride)
+            ? WarcraftNetM2Adapter.BuildSkinCandidates(modelPath).Distinct(StringComparer.OrdinalIgnoreCase)
+            : new[] { skinOverride.Replace('/', '\\').TrimStart('\\') };
+    }
+
+    private static void PrintPoseComparison(M2BonePoseState runtimePose, IReadOnlyList<Matrix4x4> legacyBoneMatrices)
+    {
+        int compareCount = Math.Min(runtimePose.BoneCount, legacyBoneMatrices.Count);
+        Console.WriteLine($"[M2-POSE-COMPARE] runtimeBones={runtimePose.BoneCount} legacyBones={legacyBoneMatrices.Count} compareCount={compareCount}");
+
+        float maxScaleComponent = 0.0f;
+        int maxScaleBone = -1;
+        Vector3 maxScaleValue = Vector3.One;
+        foreach (M2BonePose pose in runtimePose.Bones)
+        {
+            float scaleComponent = MathF.Max(MathF.Abs(pose.Scaling.X), MathF.Max(MathF.Abs(pose.Scaling.Y), MathF.Abs(pose.Scaling.Z)));
+            if (scaleComponent > maxScaleComponent)
+            {
+                maxScaleComponent = scaleComponent;
+                maxScaleBone = pose.BoneIndex;
+                maxScaleValue = pose.Scaling;
+            }
+        }
+
+        Console.WriteLine($"[M2-POSE-COMPARE] maxScaleComponent={maxScaleComponent:F6} bone={maxScaleBone} scale={maxScaleValue}");
+
+        float maxMatrixDelta = 0.0f;
+        float maxTranslationDelta = 0.0f;
+        int maxMatrixBone = -1;
+        int maxTranslationBone = -1;
+
+        List<(int BoneIndex, float MatrixDelta, float TranslationDelta)> worstBones = new(compareCount);
+        for (int boneIndex = 0; boneIndex < compareCount; boneIndex++)
+        {
+            Matrix4x4 runtimeMatrix = runtimePose.Matrices[boneIndex];
+            Matrix4x4 legacyMatrix = legacyBoneMatrices[boneIndex];
+            float matrixDelta = ComputeMatrixDelta(runtimeMatrix, legacyMatrix);
+            float translationDelta = Vector3.Distance(
+                new Vector3(runtimeMatrix.M41, runtimeMatrix.M42, runtimeMatrix.M43),
+                new Vector3(legacyMatrix.M41, legacyMatrix.M42, legacyMatrix.M43));
+
+            worstBones.Add((boneIndex, matrixDelta, translationDelta));
+
+            if (matrixDelta > maxMatrixDelta)
+            {
+                maxMatrixDelta = matrixDelta;
+                maxMatrixBone = boneIndex;
+            }
+
+            if (translationDelta > maxTranslationDelta)
+            {
+                maxTranslationDelta = translationDelta;
+                maxTranslationBone = boneIndex;
+            }
+        }
+
+        Console.WriteLine($"[M2-POSE-COMPARE] maxMatrixDelta={maxMatrixDelta:F6} bone={maxMatrixBone}");
+        Console.WriteLine($"[M2-POSE-COMPARE] maxTranslationDelta={maxTranslationDelta:F6} bone={maxTranslationBone}");
+
+        foreach (var entry in worstBones.OrderByDescending(static value => value.MatrixDelta).ThenByDescending(static value => value.TranslationDelta).Take(12))
+        {
+            Matrix4x4 runtimeMatrix = runtimePose.Matrices[entry.BoneIndex];
+            Matrix4x4 legacyMatrix = legacyBoneMatrices[entry.BoneIndex];
+            Console.WriteLine(
+                $"[M2-POSE-COMPARE] bone={entry.BoneIndex} matrixDelta={entry.MatrixDelta:F6} translationDelta={entry.TranslationDelta:F6} runtimeT=({runtimeMatrix.M41:F3},{runtimeMatrix.M42:F3},{runtimeMatrix.M43:F3}) legacyT=({legacyMatrix.M41:F3},{legacyMatrix.M42:F3},{legacyMatrix.M43:F3})");
+        }
+    }
+
+    private static float ComputeMatrixDelta(Matrix4x4 left, Matrix4x4 right)
+    {
+        float[] deltas =
+        [
+            MathF.Abs(left.M11 - right.M11), MathF.Abs(left.M12 - right.M12), MathF.Abs(left.M13 - right.M13), MathF.Abs(left.M14 - right.M14),
+            MathF.Abs(left.M21 - right.M21), MathF.Abs(left.M22 - right.M22), MathF.Abs(left.M23 - right.M23), MathF.Abs(left.M24 - right.M24),
+            MathF.Abs(left.M31 - right.M31), MathF.Abs(left.M32 - right.M32), MathF.Abs(left.M33 - right.M33), MathF.Abs(left.M34 - right.M34),
+            MathF.Abs(left.M41 - right.M41), MathF.Abs(left.M42 - right.M42), MathF.Abs(left.M43 - right.M43), MathF.Abs(left.M44 - right.M44),
+        ];
+
+        return deltas.Max();
     }
 
     private static void PrintRendererEquivalentDiagnostics(MdxFile runtimeModel, string modelPath, string selectedSkinPath, ReplaceableTextureResolver? replaceableResolver, int? replaceableDisplayIndex)
@@ -565,6 +772,15 @@ internal static class AssetProbe
         }
 
         return null;
+    }
+
+    private static int? TryGetOptionalInt(string[] args, string optionName)
+    {
+        string? rawValue = TryGetOptionValue(args, optionName);
+        if (string.IsNullOrWhiteSpace(rawValue))
+            return null;
+
+        return int.TryParse(rawValue, out int parsed) ? parsed : null;
     }
 
     private static void PrintReplaceableResolutionCandidates(IReadOnlyList<ReplaceableTextureResolver.ReplaceableResolutionCandidate> candidates)

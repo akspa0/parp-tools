@@ -139,11 +139,36 @@ public static class M2BonePoseEvaluator
             * Matrix4x4.CreateFromQuaternion(rotation)
             * Matrix4x4.CreateTranslation(bone.Pivot)
             * Matrix4x4.CreateTranslation(translation);
-        Matrix4x4 world = local * parentWorld;
+        Matrix4x4 world = local * FilterParentTransform(parentWorld, bone);
 
         worldMatrices[boneIndex] = world;
         solved[boneIndex] = true;
         poses[boneIndex] = new M2BonePose(bone.Index, bone.ParentBone, bone.Pivot, translation, rotation, scaling, local, world);
+    }
+
+    private static Matrix4x4 FilterParentTransform(Matrix4x4 parentWorld, M2BoneDefinition bone)
+    {
+        if (!bone.HasParent)
+            return Matrix4x4.Identity;
+
+        if (!bone.IgnoresParentTranslation && !bone.IgnoresParentRotation && !bone.IgnoresParentScale)
+            return parentWorld;
+
+        if (!Matrix4x4.Decompose(parentWorld, out Vector3 parentScale, out Quaternion parentRotation, out Vector3 parentTranslation))
+            return parentWorld;
+
+        if (bone.IgnoresParentScale)
+            parentScale = Vector3.One;
+
+        if (bone.IgnoresParentRotation)
+            parentRotation = Quaternion.Identity;
+
+        if (bone.IgnoresParentTranslation)
+            parentTranslation = Vector3.Zero;
+
+        return Matrix4x4.CreateScale(parentScale)
+            * Matrix4x4.CreateFromQuaternion(parentRotation)
+            * Matrix4x4.CreateTranslation(parentTranslation);
     }
 
     private static byte[] ResolvePayload(M2ModelDocument model, M2ExternalAnimationRuntimeState? externalAnimationState)

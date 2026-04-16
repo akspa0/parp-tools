@@ -1,0 +1,215 @@
+using MdxViewer.DataSources;
+using MdxViewer.Logging;
+using WowViewer.Core.IO.M2;
+using WowViewer.Core.M2;
+using WowViewer.Core.Runtime.M2;
+
+namespace MdxViewer.Rendering;
+
+internal sealed class M2RuntimeAnimator : IAnimationController
+{
+    private readonly M2ModelDocument _model;
+    private readonly IDataSource? _dataSource;
+    private readonly IReadOnlyList<AnimationSequenceDescriptor> _sequences;
+    private readonly Dictionary<int, M2ExternalAnimationRuntimeState?> _externalStates = new();
+    private readonly HashSet<string> _loggedAnimationPaths = new(StringComparer.OrdinalIgnoreCase);
+    private int _sequenceIndex;
+    private float _currentFrame;
+
+    public M2RuntimeAnimator(M2ModelDocument model, IDataSource? dataSource)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        _model = model;
+        _dataSource = dataSource;
+        _sequences = model.Sequences
+            .Select(static sequence => new AnimationSequenceDescriptor(
+                sequence.Index,
+                M2AnimationNameResolver.GetSequenceDisplayName(sequence.AnimationId, sequence.VariationIndex),
+                new AnimationTimeRange(0.0f, sequence.Duration)))
+            .ToArray();
+
+        if (_sequences.Count > 0)
+            SetSequence(0);
+    }
+
+    public bool HasAnimation => _sequences.Count > 0;
+
+    public IReadOnlyList<AnimationSequenceDescriptor> Sequences => _sequences;
+
+    public int CurrentSequence => _sequenceIndex;
+
+    public float CurrentFrame
+    {
+        get => _currentFrame;
+        set => _currentFrame = ClampFrame(value, _sequenceIndex);
+    }
+
+    public bool IsPlaying { get; set; } = true;
+
+    public void SetSequence(int index)
+    {
+        if ((uint)index >= (uint)_sequences.Count)
+            return;
+
+        _sequenceIndex = index;
+        _currentFrame = 0.0f;
+    }
+
+    public float StepToNextKeyframe()
+    {
+        if (!HasAnimation)
+            return _currentFrame;
+
+        float step = GetKeyframeStep(_sequenceIndex);
+        _currentFrame = ClampFrame(_currentFrame + step, _sequenceIndex);
+        return _currentFrame;
+    }
+
+    public float StepToPrevKeyframe()
+    {
+        if (!HasAnimation)
+            return _currentFrame;
+
+        float step = GetKeyframeStep(_sequenceIndex);
+        _currentFrame = ClampFrame(_currentFrame - step, _sequenceIndex);
+        return _currentFrame;
+    }
+
+    public AnimationTrackDebugStats GetTrackDebugStatsForCurrentSequence()
+    {
+        if (!HasAnimation)
+            return new AnimationTrackDebugStats(0, 0, 0, 0, 0, 0, null, null);
+
+        int duration = GetDurationMs(_sequenceIndex);
+        return new AnimationTrackDebugStats(0, 0, 0, 0, 0, 0, 0, duration);
+    }
+
+    public void Update(float deltaMs)
+    {
+        if (!HasAnimation || !IsPlaying)
+            return;
+
+        int duration = GetDurationMs(_sequenceIndex);
+        if (duration <= 0)
+        {
+            _currentFrame = 0.0f;
+            return;
+        }
+
+        _currentFrame += Math.Clamp(deltaMs, 0.0f, 100.0f);
+        if (_currentFrame > duration)
+            _currentFrame %= duration;
+    }
+
+    public int GetCurrentTimeMs()
+        => (int)MathF.Round(ClampFrame(_currentFrame, _sequenceIndex));
+
+    public M2ExternalAnimationRuntimeState? ResolveExternalAnimationState()
+    {
+        if (!HasAnimation)
+            return null;
+
+        if (_externalStates.TryGetValue(_sequenceIndex, out M2ExternalAnimationRuntimeState? cachedState))
+            return cachedState;
+
+        M2ExternalAnimationRuntimeState chosenState = M2ExternalAnimationRuntime.Choose(_model, _sequenceIndex);
+        if (!chosenState.UsesExternalFile || string.IsNullOrWhiteSpace(chosenState.CompanionPath))
+        {
+            _externalStates[_sequenceIndex] = chosenState;
+            return chosenState;
+        }
+
+        if (!TryReadAnimationBytes(chosenState.CompanionPath, out byte[]? animationBytes, out string resolvedPath)
+            || animationBytes == null
+            || animationBytes.Length == 0)
+        {
+            if (_loggedAnimationPaths.Add(chosenState.CompanionPath))
+            {
+                ViewerLog.Debug(
+                    ViewerLog.Category.Mdx,
+                    $"[M2] External animation companion missing for '{_model.Identity.CanonicalModelPath}': {chosenState.CompanionPath}");
+            }
+
+            _externalStates[_sequenceIndex] = chosenState;
+            return chosenState;
+        }
+
+        using MemoryStream animationStream = new(animationBytes, writable: false);
+        M2ExternalAnimationDocument animation = M2AnimationReader.Read(animationStream, resolvedPath);
+        M2ExternalAnimationRuntimeState loadedState = M2ExternalAnimationRuntime.Load(chosenState, animation);
+        if (_loggedAnimationPaths.Add(resolvedPath))
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[M2] Loaded external animation companion for '{Path.GetFileName(_model.Identity.CanonicalModelPath)}': {resolvedPath}");
+        }
+
+        _externalStates[_sequenceIndex] = loadedState;
+        return loadedState;
+    }
+
+    private int GetDurationMs(int sequenceIndex)
+    {
+        if ((uint)sequenceIndex >= (uint)_model.Sequences.Count)
+            return 0;
+
+        return checked((int)Math.Max(_model.Sequences[sequenceIndex].Duration, 0u));
+    }
+
+    private float GetKeyframeStep(int sequenceIndex)
+    {
+        int duration = GetDurationMs(sequenceIndex);
+        if (duration <= 0)
+            return 1.0f;
+
+        return Math.Max(duration / 30.0f, 1.0f);
+    }
+
+    private float ClampFrame(float frame, int sequenceIndex)
+    {
+        int duration = GetDurationMs(sequenceIndex);
+        if (duration <= 0)
+            return 0.0f;
+
+        return Math.Clamp(frame, 0.0f, duration);
+    }
+
+    private bool TryReadAnimationBytes(string animationPath, out byte[]? bytes, out string resolvedPath)
+    {
+        bytes = null;
+        resolvedPath = animationPath.Replace('/', '\\');
+
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            string? actualPath = mpqDataSource.FindInFileSet(animationPath)
+                ?? mpqDataSource.FindInFileSet(animationPath.Replace('\\', '/'));
+            if (!string.IsNullOrWhiteSpace(actualPath))
+            {
+                bytes = _dataSource.ReadFile(actualPath);
+                if (bytes != null && bytes.Length > 0)
+                {
+                    resolvedPath = actualPath.Replace('/', '\\');
+                    return true;
+                }
+            }
+        }
+
+        if (_dataSource != null)
+        {
+            bytes = _dataSource.ReadFile(animationPath)
+                ?? _dataSource.ReadFile(animationPath.Replace('\\', '/'));
+            if (bytes != null && bytes.Length > 0)
+                return true;
+        }
+
+        if (File.Exists(animationPath))
+        {
+            bytes = File.ReadAllBytes(animationPath);
+            resolvedPath = Path.GetFullPath(animationPath);
+            return true;
+        }
+
+        return false;
+    }
+}

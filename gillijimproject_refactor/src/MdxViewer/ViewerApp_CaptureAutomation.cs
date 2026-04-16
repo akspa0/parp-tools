@@ -8,6 +8,7 @@ using Silk.NET.OpenGL;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using MdxViewer.Terrain;
 using WoWMapConverter.Core.VLM;
@@ -418,10 +419,21 @@ public partial class ViewerApp
         _fovDegrees = Math.Clamp(shot.FovDegrees, 20f, 90f);
     }
 
-    private void QueueCurrentCameraCapture(bool includeUi, bool exitAfterCapture = false)
+    private void QueueCurrentCameraCapture(bool includeUi, bool exitAfterCapture = false, int captureAfterFrames = 1)
     {
         CameraShotPoint shot = CreateCameraShotPoint($"current_{DateTime.UtcNow:yyyyMMdd_HHmmss}");
-        EnqueueShotCapture(shot, includeUi, exitAfterCapture);
+        EnqueueShotCapture(
+            shot,
+            includeUi,
+            exitAfterCapture,
+            captureAfterFrames > 1
+                ? new CaptureQueueOptions
+                {
+                    WaitForSceneReady = true,
+                    RequiredSettledFrames = captureAfterFrames,
+                    MaxFramesBeforeCapture = Math.Max(captureAfterFrames * 12, 120),
+                }
+                : null);
     }
 
     private void EnqueueFilteredShotCaptures(bool includeUi)
@@ -572,6 +584,19 @@ public partial class ViewerApp
             ? $"Captured shot: {request.OutputPath}"
             : $"Capture failed: {request.OutputPath}";
 
+        if (ok)
+        {
+            ViewerLog.Important(ViewerLog.Category.Export,
+                $"[Capture] Saved {(includeUi ? "with-ui" : "scene-only")} frame: {request.OutputPath}");
+        }
+        else
+        {
+            string timeoutNote = request.TimedOutWaitingForScene ? " after scene-settle timeout" : string.Empty;
+            ViewerLog.Error(ViewerLog.Category.Export,
+                $"[Capture] Failed {(includeUi ? "with-ui" : "scene-only")} frame{timeoutNote}: {request.OutputPath}");
+            Environment.ExitCode = 1;
+        }
+
         if (request.IsMkHarvestViewerValidationCapture)
         {
             if (ok)
@@ -605,6 +630,18 @@ public partial class ViewerApp
 
         request.FramesSinceApplied++;
 
+        if (!HasCaptureSceneContent() || !HasCaptureFramebufferReady(request.IncludeUi))
+        {
+            request.SettledFrames = 0;
+            if (request.FramesSinceApplied < request.MaxFramesBeforeCapture)
+                return false;
+
+            request.TimedOutWaitingForScene = true;
+            ViewerLog.Error(ViewerLog.Category.Export,
+                $"[Capture] Scene readiness timeout: includeUi={request.IncludeUi} contentReady={HasCaptureSceneContent()} framebufferReady={HasCaptureFramebufferReady(request.IncludeUi)} frames={request.FramesSinceApplied}/{request.MaxFramesBeforeCapture}");
+            return true;
+        }
+
         if (request.IsMkHarvestViewerValidationCapture && _activeMkHarvestViewerValidationBatch != null)
         {
             Vector2D<int> framebufferSize = _window.FramebufferSize;
@@ -616,6 +653,8 @@ public partial class ViewerApp
                     return false;
 
                 request.TimedOutWaitingForScene = true;
+                ViewerLog.Error(ViewerLog.Category.Export,
+                    $"[Capture] Viewer validation timeout waiting for framebuffer size {framebufferSize.X}x{framebufferSize.Y}; required {_activeMkHarvestViewerValidationBatch.RequestedResolution}px; frames={request.FramesSinceApplied}/{request.MaxFramesBeforeCapture}");
                 return true;
             }
 
@@ -626,6 +665,8 @@ public partial class ViewerApp
                     return false;
 
                 request.TimedOutWaitingForScene = true;
+                ViewerLog.Error(ViewerLog.Category.Export,
+                    $"[Capture] Viewer validation timeout waiting for world objects: pending={_worldScene.PendingWorldObjectLoadCount} frames={request.FramesSinceApplied}/{request.MaxFramesBeforeCapture}");
                 return true;
             }
         }
@@ -639,6 +680,8 @@ public partial class ViewerApp
                     return false;
 
                 request.TimedOutWaitingForScene = true;
+                ViewerLog.Error(ViewerLog.Category.Export,
+                    $"[Capture] Tile readiness timeout: tile=({targetTileX},{targetTileY}) loaded={_terrainManager?.IsTileLoaded(targetTileX, targetTileY) == true} streaming={_terrainManager?.IsStreaming == true} frames={request.FramesSinceApplied}/{request.MaxFramesBeforeCapture}");
                 return true;
             }
         }
@@ -650,9 +693,25 @@ public partial class ViewerApp
                 return false;
 
             request.TimedOutWaitingForScene = true;
+            ViewerLog.Error(ViewerLog.Category.Export,
+                $"[Capture] Settle-frame timeout: settled={request.SettledFrames}/{request.RequiredSettledFrames} frames={request.FramesSinceApplied}/{request.MaxFramesBeforeCapture}");
         }
 
         return true;
+    }
+
+    private bool HasCaptureSceneContent()
+    {
+        return _renderer != null || _terrainManager != null || _worldScene != null;
+    }
+
+    private bool HasCaptureFramebufferReady(bool includeUi)
+    {
+        if (!includeUi && TryGetSceneFramebufferViewport(out _, out _, out uint sceneWidth, out uint sceneHeight))
+            return sceneWidth > 0 && sceneHeight > 0;
+
+        Vector2D<int> framebufferSize = _window.FramebufferSize;
+        return framebufferSize.X > 0 && framebufferSize.Y > 0;
     }
 
     private void PromotePendingMkHarvestViewerValidationCapturePlan()
@@ -1492,11 +1551,19 @@ public partial class ViewerApp
         try
         {
             if (!TryGetCaptureRegion(includeUi, out int readX, out int readY, out int width, out int height))
+            {
+                ViewerLog.Error(ViewerLog.Category.Export,
+                    $"[Capture] No valid capture region for {(includeUi ? "with-ui" : "scene-only")} request. Window={_window.FramebufferSize.X}x{_window.FramebufferSize.Y}");
                 return false;
+            }
 
             byte[] pixels = new byte[width * height * 4];
             if (!TryReadFramebufferRgba(readX, readY, width, height, pixels))
+            {
+                ViewerLog.Error(ViewerLog.Category.Export,
+                    $"[Capture] Failed to read framebuffer RGBA: rect=({readX},{readY},{width},{height}) includeUi={includeUi}");
                 return false;
+            }
 
             ForceOpaqueAlpha(pixels);
 
@@ -1512,6 +1579,8 @@ public partial class ViewerApp
         catch (Exception ex)
         {
             _statusMessage = $"Capture failed: {ex.Message}";
+            ViewerLog.Error(ViewerLog.Category.Export,
+                $"[Capture] Exception saving PNG '{outputPath}': {ex}");
             return false;
         }
     }

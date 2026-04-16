@@ -8,7 +8,7 @@ namespace MdxViewer.Rendering;
 /// Evaluates bone hierarchy transforms per-frame using keyframe interpolation.
 /// Based on the wow-mdx-viewer reference implementation.
 /// </summary>
-public class MdxAnimator
+public class MdxAnimator : IAnimationController
 {
     private readonly MdxFile _mdx;
     private readonly Matrix4x4[] _boneMatrices;
@@ -24,15 +24,7 @@ public class MdxAnimator
     private int _cachedKeyframeSeqIndex = -1;
     private int[]? _cachedKeyframes;
 
-    public readonly record struct AnimTrackDebugStats(
-        int TranslationKeysTotal,
-        int RotationKeysTotal,
-        int ScalingKeysTotal,
-        int TranslationKeysInSequence,
-        int RotationKeysInSequence,
-        int ScalingKeysInSequence,
-        int? MinKeyTime,
-        int? MaxKeyTime);
+    private readonly IReadOnlyList<AnimationSequenceDescriptor> _sequenceDescriptors;
 
     /// <summary>Number of bones in the skeleton</summary>
     public int BoneCount => _mdx.Bones.Count;
@@ -45,6 +37,8 @@ public class MdxAnimator
 
     /// <summary>Available animation sequences</summary>
     public IReadOnlyList<MdlSequence> Sequences => _mdx.Sequences;
+
+    IReadOnlyList<AnimationSequenceDescriptor> IAnimationController.Sequences => _sequenceDescriptors;
 
     /// <summary>Current sequence index</summary>
     public int CurrentSequence => _sequenceIndex;
@@ -151,10 +145,10 @@ public class MdxAnimator
         return EvalQuatTrack(track) ?? defaultValue;
     }
 
-    public AnimTrackDebugStats GetTrackDebugStatsForCurrentSequence()
+    public AnimationTrackDebugStats GetTrackDebugStatsForCurrentSequence()
     {
         if (_mdx.Sequences.Count == 0)
-            return new AnimTrackDebugStats(0, 0, 0, 0, 0, 0, null, null);
+            return new AnimationTrackDebugStats(0, 0, 0, 0, 0, 0, null, null);
 
         var seq = _mdx.Sequences[_sequenceIndex];
         int from = seq.Time.Start;
@@ -204,7 +198,7 @@ public class MdxAnimator
             }
         }
 
-        return new AnimTrackDebugStats(
+        return new AnimationTrackDebugStats(
             tTotal, rTotal, sTotal,
             tIn, rIn, sIn,
             hasAny ? min : null,
@@ -260,6 +254,12 @@ public class MdxAnimator
     public MdxAnimator(MdxFile mdx)
     {
         _mdx = mdx;
+        _sequenceDescriptors = mdx.Sequences
+            .Select((sequence, index) => new AnimationSequenceDescriptor(
+                index,
+                string.IsNullOrWhiteSpace(sequence.Name) ? $"Sequence {index}" : sequence.Name,
+                new AnimationTimeRange(sequence.Time.Start, sequence.Time.End)))
+            .ToArray();
         _boneMatrices = new Matrix4x4[Math.Max(mdx.Bones.Count, 1)];
 
         // Index bones by ObjectId and build parent-child hierarchy

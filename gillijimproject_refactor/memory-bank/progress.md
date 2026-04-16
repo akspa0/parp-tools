@@ -1,5 +1,74 @@
 # Progress
 
+### Apr 16, 2026 - the default wow-viewer M2 renderer in MdxViewer now advances skeletal animation and exposes runtime sequence controls instead of staying static-only
+
+- what changed:
+	- `src/MdxViewer/Rendering/IAnimationController.cs` now defines a renderer-agnostic animation-control contract so the viewer UI and keyboard controls no longer depend on `MdxAnimator` specifically
+	- `src/MdxViewer/Rendering/MdxAnimator.cs` now implements that shared controller contract for the legacy MDX path without changing its existing bone-evaluation behavior
+	- `src/MdxViewer/Rendering/M2RuntimeAnimator.cs` now owns pure-runtime sequence selection, frame advancement, and `%04d-%02d.anim` companion loading through the active `IDataSource`
+	- `src/MdxViewer/Rendering/M2Renderer.cs` now uses wow-viewer runtime animation evaluation (`M2AnimatedRenderStateEvaluator`, `M2BonePoseEvaluator`, `M2SkinnedRenderModelBuilder`, `M2RenderConsumerFrameStateBuilder`) on each viewer update, uploads posed vertices back into the GL VBOs, and exposes runtime sequence playback through the shared animation-controller surface
+	- `src/MdxViewer/ViewerApp_StartupAutomation.cs` and `src/MdxViewer/ViewerApp_CaptureAutomation.cs` now accept `--capture-after-frames` so startup captures can intentionally wait multiple settled frames before saving, which is useful for animation proof without manual UI interaction
+	- `src/MdxViewer/ViewerApp.cs` runtime-notes text no longer calls the pure runtime path static-only; it now says skeletal sequence playback is active while full material/effect parity is still pending
+- validation:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` succeeded with the same pre-existing workspace warnings only
+	- fixed local Wrath client proof on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Creature/Wolf/Wolf.m2`, using the default runtime renderer and startup capture delay support, wrote:
+		- early frame: `output/build-validation/m2-runtime-animation/wolf/frame-001/standalone/3.3.5.12340/20260416_055536139_current_20260416_055536_no_ui.png`
+		- later frame: `output/build-validation/m2-runtime-animation/wolf/frame-040/standalone/3.3.5.12340/20260416_055627078_current_20260416_055627_no_ui.png`
+	- direct RGB comparison between those two captures reported `4996` changed pixels with bounding box `(514, 308, 586, 468)`, which sits tightly on the rendered wolf and confirms the runtime viewer path is changing rendered pose across frames instead of only compiling animation code
+- boundary:
+	- this is real active-viewer proof for skeletal pose playback in the pure runtime M2 path, not full animation parity; texture-transform animation, richer material/effect behavior, particles, and ribbons still remain separate follow-up work
+
+### Apr 16, 2026 - the wow-viewer static M2 renderer is now the default viewer path, and the old env var now serves as a legacy opt-out instead of an opt-in
+
+- what changed:
+	- `Rendering/WowViewerM2RuntimeBridge.cs` now defaults successful runtime-backed M2 loads to the pure wow-viewer static renderer path even when `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER` is unset
+	- setting `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=0|false|no|off` now forces the old legacy compatibility draw backend when an adapted MDX fallback exists
+	- standalone model info in `ViewerApp.cs` now reports that the wow-viewer static renderer is the default and that the env var is the legacy escape hatch, not the activation switch
+- validation:
+	- `get_errors` returned clean for `src/MdxViewer/Rendering/WowViewerM2RuntimeBridge.cs` and the touched `src/MdxViewer/ViewerApp.cs` text update
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` succeeded with the same existing workspace warnings only
+	- fixed local Wrath client proof on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Character/Human/Male/HumanMale.m2`, with no `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER` variable set, wrote:
+		- `output/build-validation/m2-character-humanmale/default-no-env/standalone/3.3.5.12340/20260416_053846167_current_20260416_053846_no_ui.png`
+	- that no-env capture matches the already-fixed runtime character presentation rather than falling back to the old legacy-only default route
+- boundary:
+	- this changes the active viewer default, not the underlying runtime feature boundary; animation and full material parity are still pending
+
+### Apr 16, 2026 - the pure runtime standalone M2 path now applies default character geoset selection and character variation overrides instead of drawing the full raw HumanMale geoset stack
+
+- what changed:
+	- `Rendering/M2Renderer.cs` now exposes the same character customization seam the legacy path already had: it can apply character geoset-selection groups against runtime `SkinSectionId` values and reload replaceable textures with selected hair or facial variation ids
+	- `ViewerApp.cs` now refreshes standalone character customization state after `LoadM2RuntimeModel(...)` and routes `ApplyStandaloneCharacterCustomizationOverrides()` into both `MdxRenderer` and `M2Renderer`, instead of only the legacy MDX renderer path
+- validation:
+	- `get_errors` returned clean for `src/MdxViewer/Rendering/M2Renderer.cs` and `src/MdxViewer/ViewerApp.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` succeeded with the same existing workspace warnings only
+	- fixed local Wrath client proof on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Character/Human/Male/HumanMale.m2`, wrote:
+		- pure runtime before fix: `output/build-validation/m2-character-humanmale/runtime/standalone/3.3.5.12340/20260416_052736076_current_20260416_052736_no_ui.png`
+		- legacy control: `output/build-validation/m2-character-humanmale/legacy/standalone/3.3.5.12340/20260416_052750685_current_20260416_052750_no_ui.png`
+		- pure runtime after fix: `output/build-validation/m2-character-humanmale/runtime-after-character-fix/standalone/3.3.5.12340/20260416_053313303_current_20260416_053313_no_ui.png`
+	- the before image showed the pure runtime route still drawing the extra character geoset stack, while the after image collapses to the same default bare-body presentation as the legacy control
+- boundary:
+	- this closes one concrete standalone player-character repro around default geoset selection and variation handoff in `MdxViewer`
+	- it does not yet mean full character-model parity for animation, material behavior, or every player or NPC family
+
+### Apr 16, 2026 - the pure runtime no-cull fix appears to generalize across a small AhnQiraj passive-doodad object sweep, but character parity is still open
+
+- what changed:
+	- no new code landed in this slice; the goal was to validate whether the earlier `Rendering/M2Renderer.cs` no-cull change was a one-off `FoodHerbs_Level01.m2` repair or whether it closed the same failure shape across nearby doodad siblings
+- validation:
+	- fixed local Wrath client proof on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft` reran the same startup-capture comparison on three nearby AhnQiraj passive doodads
+	- pure runtime captures with `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1` wrote:
+		- `output/build-validation/m2-object-sweep/runtime/Food_Level02/standalone/3.3.5.12340/20260416_052054291_current_20260416_052054_no_ui.png`
+		- `output/build-validation/m2-object-sweep/runtime/Food_Level03/standalone/3.3.5.12340/20260416_052105099_current_20260416_052105_no_ui.png`
+		- `output/build-validation/m2-object-sweep/runtime/Cloth_Level01/standalone/3.3.5.12340/20260416_052116025_current_20260416_052116_no_ui.png`
+	- legacy control captures on the same assets wrote:
+		- `output/build-validation/m2-object-sweep/legacy/Food_Level02/standalone/3.3.5.12340/20260416_052131779_current_20260416_052131_no_ui.png`
+		- `output/build-validation/m2-object-sweep/legacy/Food_Level03/standalone/3.3.5.12340/20260416_052142675_current_20260416_052142_no_ui.png`
+		- `output/build-validation/m2-object-sweep/legacy/Cloth_Level01/standalone/3.3.5.12340/20260416_052156383_current_20260416_052156_no_ui.png`
+	- visual comparison says the earlier hollow or missing-face failure shape is no longer present on these three siblings; the two food variants look effectively aligned with the legacy controls, and the cloth sample is close enough that it does not show the previous projected-object collapse pattern
+- boundary:
+	- treat this as small real-data object-family evidence, not blanket M2 signoff
+	- the user-reported character-model problems remain a separate unresolved track
+
 ### Apr 16, 2026 - projected object sections in the pure runtime M2 path were being culled away, which made `FoodHerbs_Level01.m2` crates look hollow
 
 - what changed:
@@ -64,12 +133,13 @@
 - boundary:
 	- this closes the over-strict `.skin` assumption for standalone geometry-less flyby camera assets and moves the interpretation logic into `wow-viewer`, but it is still path visualization only and not a general fix for the separate unfinished textured static M2 renderer work
 
-### Apr 15, 2026 - MdxViewer can now opt into the pure wow-viewer M2 renderer for live testing
+### Apr 15, 2026 - MdxViewer first gained an opt-in pure wow-viewer M2 renderer route for live testing
 
-- what changed:
-	- `Rendering/WowViewerM2RuntimeBridge.cs` now centralizes M2 renderer-route selection for successful runtime-backed M2 loads
-	- setting `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1` now makes standalone M2 loads, streamed world M2 loads, and WMO doodad M2 loads use the pure static `M2Renderer(_gl, runtimeModel, ...)` path inside `MdxViewer`
-	- without that env var, the previous compatibility path still stays available through the legacy MDX draw backend
+
+- what changed at that time:
+	- `Rendering/WowViewerM2RuntimeBridge.cs` centralized M2 renderer-route selection for successful runtime-backed M2 loads
+	- at that stage, setting `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1` made standalone M2 loads, streamed world M2 loads, and WMO doodad M2 loads use the pure static `M2Renderer(_gl, runtimeModel, ...)` path inside `MdxViewer`
+	- the default changed later on Apr 16, 2026; the same env var is now the legacy opt-out switch instead of the activation switch
 	- standalone model info now tells the user whether the currently loaded M2 is using the pure wow-viewer static renderer or the legacy compatibility draw path
 - validation:
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` succeeded with existing workspace warnings only

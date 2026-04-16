@@ -412,6 +412,10 @@ public partial class ViewerApp : IDisposable
     private (int tileX, int tileY)? _terrainAnalysisPreviewTile;
     private float _terrainAnalysisPreviewTileMin;
     private float _terrainAnalysisPreviewTileMax;
+    private float _terrainAnalysisPreviewVisibilityRatio;
+    private float _terrainAnalysisPreviewAmplification = 1f;
+    private (int tileX, int tileY)? _terrainAnalysisPreviewCompareTile;
+    private float? _terrainAnalysisPreviewSimilarity;
     private float _terrainAnalysisGlobalMin;
     private float _terrainAnalysisGlobalMax;
     private int _terrainAnalysisGlobalTileCount;
@@ -419,6 +423,15 @@ public partial class ViewerApp : IDisposable
     private bool _terrainAnalysisHasGlobalBounds;
     private bool _terrainAnalysisFollowCameraTile = true;
     private string _terrainAnalysisStatus = string.Empty;
+    private int _terrainAnalysisHiddenCompareOffsetX;
+    private int _terrainAnalysisHiddenCompareOffsetY = 2;
+    private float _terrainAnalysisHiddenMinSimilarity = 0.85f;
+    private float _terrainAnalysisHiddenMaxVisibilityRatio = 0.05f;
+    private int _terrainAnalysisHiddenMaxResults = 24;
+    private TerrainTileScope _terrainAnalysisHiddenScope = TerrainTileScope.LoadedTiles;
+    private readonly List<TerrainHiddenTileCandidate> _terrainAnalysisHiddenCandidates = new();
+    private int _terrainAnalysisHiddenSelectedIndex = -1;
+    private string _terrainAnalysisHiddenStatus = string.Empty;
     private Terrain.BoundingBoxRenderer? _editorOverlayBb;
     private bool _standaloneWmoGroupOverlayEnabled = true;
     private bool _standaloneWmoOverlayIncludeHiddenGroups = true;
@@ -9716,6 +9729,8 @@ void main() {
             _texResolver,
             _dbcBuild,
             sourceModelPath);
+        RefreshStandaloneCharacterCustomizationState(sourceModelPath, isM2AdapterModel: adaptedMdx != null);
+        ApplyStandaloneCharacterCustomizationOverrides();
 
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();
@@ -9754,9 +9769,9 @@ void main() {
         _modelInfo += "\nRuntime Notes:\n" +
                       "  Geometry is submitted from wow-viewer active skin sections.\n" +
                       (usesNativeStaticRenderer
-                          ? "  Draw path is the wow-viewer static renderer in MdxViewer (enabled automatically for pure-runtime loads or via PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=1).\n  Current shading uses primary-stage runtime textures and simple lighting, not full native material or animation parity.\n"
+                          ? "  Draw path is the wow-viewer runtime renderer in MdxViewer.\n  This is now the default route for successful runtime-backed M2 loads; set PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=0 to force the legacy compatibility draw backend.\n  Skeletal sequence playback now advances through wow-viewer pose evaluation inside the runtime renderer. Current shading still uses primary-stage runtime textures and simple lighting, not full native material parity.\n"
                           : "  Draw path still uses the legacy MDX backend for textured compatibility while the wow-viewer runtime supplies geometry/state.\n") +
-                      "  This slice is static-only; animation and full material parity are still pending.\n";
+                      "  Full material/effect parity is still pending.\n";
 
         _statusMessage = $"Loaded M2: {_loadedFileName} ({sectionCount} sections, {vertexCount:N0} verts, {triangleCount:N0} tris)";
     }
@@ -10141,7 +10156,7 @@ void main() {
 
     private void ApplyStandaloneCharacterCustomizationOverrides()
     {
-        if (_renderer is not MdxRenderer mdxRenderer || _texResolver == null || string.IsNullOrWhiteSpace(_standaloneCharacterCustomizationModelPath))
+        if (_texResolver == null || string.IsNullOrWhiteSpace(_standaloneCharacterCustomizationModelPath))
             return;
 
         IReadOnlyCollection<uint>? selectedGroups = _texResolver.GetCharacterSelectionGroups(
@@ -10154,11 +10169,20 @@ void main() {
         string reasonLabel = _standaloneCharacterHairVariationOverride >= 0 || _standaloneCharacterFacialHairVariationOverride >= 0
             ? $"character geosets (hair={FormatStandaloneCharacterVariationLabel(_standaloneCharacterHairVariationOverride)}, facial={FormatStandaloneCharacterVariationLabel(_standaloneCharacterFacialHairVariationOverride)})"
             : "default character geosets";
-        mdxRenderer.TryApplyCharacterCustomization(
-            selectedGroups,
-            _standaloneCharacterHairVariationOverride >= 0 ? _standaloneCharacterHairVariationOverride : null,
-            _standaloneCharacterFacialHairVariationOverride >= 0 ? _standaloneCharacterFacialHairVariationOverride : null,
-            reasonLabel);
+
+        int? hairVariationId = _standaloneCharacterHairVariationOverride >= 0 ? _standaloneCharacterHairVariationOverride : null;
+        int? facialHairVariationId = _standaloneCharacterFacialHairVariationOverride >= 0 ? _standaloneCharacterFacialHairVariationOverride : null;
+
+        switch (_renderer)
+        {
+            case MdxRenderer mdxRenderer:
+                mdxRenderer.TryApplyCharacterCustomization(selectedGroups, hairVariationId, facialHairVariationId, reasonLabel);
+                break;
+
+            case M2Renderer m2Renderer:
+                m2Renderer.TryApplyCharacterCustomization(selectedGroups, hairVariationId, facialHairVariationId, reasonLabel);
+                break;
+        }
     }
 
     private static string FormatStandaloneCharacterVariationLabel(int variationId)
@@ -10181,6 +10205,12 @@ void main() {
     private void LoadVlmProject(string projectRoot)
     {
         _statusMessage = $"Loading MK dataset from {projectRoot}...";
+
+        _terrainAnalysisHiddenCandidates.Clear();
+        _terrainAnalysisHiddenSelectedIndex = -1;
+        _terrainAnalysisHiddenStatus = string.Empty;
+        _terrainAnalysisPreviewCompareTile = null;
+        _terrainAnalysisPreviewSimilarity = null;
 
         // Clean up any existing scene
         InvalidatePm4DerivedReports();

@@ -12,7 +12,7 @@ public interface IModelRenderer : ISceneRenderer
 
     bool RequiresUnbatchedWorldRender { get; }
 
-    MdxAnimator? Animator { get; }
+    IAnimationController? Animator { get; }
 
     void UpdateAnimation();
 

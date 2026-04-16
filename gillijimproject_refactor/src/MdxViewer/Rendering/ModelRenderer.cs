@@ -173,7 +173,7 @@ public class MdxRenderer : IModelRenderer
     public bool RequiresUnbatchedWorldRender => _isM2AdapterModel || _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
-    public MdxAnimator? Animator => _animator;
+    public IAnimationController? Animator => _animator;
 
     public MdxRenderer(GL gl, MdxFile mdx, string modelDir, IDataSource? dataSource = null,
         ReplaceableTextureResolver? texResolver = null, string? modelVirtualPath = null, bool isM2AdapterModel = false,

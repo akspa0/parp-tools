@@ -10,6 +10,62 @@ namespace WowViewer.Core.Tests;
 public sealed class M2RuntimeTests
 {
     [Fact]
+    public void CompressedQuaternion_DecodesRawIdentityQuaternion()
+    {
+        Quaternion decoded = M2CompQuaternion.Identity.ToQuaternion();
+
+        AssertQuaternionNear(Quaternion.Identity, decoded, 0.0001f);
+    }
+
+    [Fact]
+    public void TrackSampler_ReadsCompressedQuaternionTrack_WithM2ComponentRemap()
+    {
+        SyntheticTrackPayloadBuilder payload = new();
+        M2TrackDefinition<M2CompQuaternion> rotationTrack = payload.AddTrack(
+            M2TrackInterpolation.None,
+            -1,
+            [0u],
+            [M2CompQuaternion.Identity]);
+        M2ModelDocument model = CreateModel(payload.ToArray);
+
+        Quaternion sampled = M2TrackSampler.SampleCompressedQuaternion(payload.ToArray(), model, 0, 0, rotationTrack, Quaternion.Identity);
+
+        AssertQuaternionNear(Quaternion.Identity, sampled, 0.0001f);
+    }
+
+    [Fact]
+    public void TrackSampler_UsesSlerpForHermiteCompressedQuaternionTracks()
+    {
+        SyntheticTrackPayloadBuilder payload = new();
+        Quaternion start = Quaternion.Identity;
+        Quaternion end = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
+        Quaternion expectedHalf = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI * 0.5f);
+        M2TrackDefinition<M2CompQuaternion> rotationTrack = payload.AddTrack(
+            M2TrackInterpolation.Hermite,
+            -1,
+            [0u, 1000u],
+            [
+                new SyntheticTrackSample<M2CompQuaternion>(ToCompQuaternion(start), ToCompQuaternion(start), ToCompQuaternion(start)),
+                new SyntheticTrackSample<M2CompQuaternion>(ToCompQuaternion(end), ToCompQuaternion(end), ToCompQuaternion(end)),
+            ]);
+        M2ModelDocument model = CreateModel(payload.ToArray);
+
+        Quaternion sampled = M2TrackSampler.SampleCompressedQuaternion(payload.ToArray(), model, 0, 500, rotationTrack, Quaternion.Identity);
+
+        AssertQuaternionNear(expectedHalf, sampled, 0.03f);
+    }
+
+    [Theory]
+    [InlineData((ushort)0, (ushort)0, "Stand")]
+    [InlineData((ushort)4, (ushort)0, "Walk")]
+    [InlineData((ushort)17, (ushort)2, "Attack1H_02")]
+    [InlineData((ushort)999, (ushort)0, "Anim999")]
+    public void AnimationNameResolver_ReturnsExpectedDisplayNames(ushort animationId, ushort variationIndex, string expected)
+    {
+        Assert.Equal(expected, M2AnimationNameResolver.GetSequenceDisplayName(animationId, variationIndex));
+    }
+
+    [Fact]
     public void ModelReader_ReadsBoneDefinitions()
     {
         byte[] bytes = CreateMd20WithOneBone();
@@ -96,6 +152,117 @@ public sealed class M2RuntimeTests
         Assert.Equal(new Vector3(0.0f, 0.5f, 0.0f), pose.Bones[1].Translation);
         Assert.Single(skinned.Sections);
         AssertVectorNear(new Vector3(1.0f, 0.5f, 0.0f), skinned.Sections[0].Vertices[0].Position, 0.001f);
+    }
+
+    [Fact]
+    public void BonePoseEvaluator_HonorsIgnoreParentTranslateFlag()
+    {
+        SyntheticTrackPayloadBuilder payload = new();
+        M2ModelDocument model = CreateModel(
+            payload.ToArray,
+            bones:
+            [
+                new M2BoneDefinition(
+                    0,
+                    -1,
+                    flags: 0,
+                    parentBone: -1,
+                    submeshId: 0,
+                    boneNameCrc: 0,
+                    payload.AddTrack(M2TrackInterpolation.None, -1, [0u], [new Vector3(10.0f, 0.0f, 0.0f)]),
+                    payload.AddTrack(M2TrackInterpolation.None, -1, [0u], [ToCompQuaternion(Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI * 0.5f))]),
+                    EmptyVectorTrack(),
+                    Vector3.Zero),
+                new M2BoneDefinition(
+                    1,
+                    -1,
+                    flags: (uint)M2BoneFlags.IgnoreParentTranslate,
+                    parentBone: 0,
+                    submeshId: 0,
+                    boneNameCrc: 0,
+                    payload.AddTrack(M2TrackInterpolation.None, -1, [0u], [new Vector3(1.0f, 0.0f, 0.0f)]),
+                    EmptyCompressedRotationTrack(),
+                    EmptyVectorTrack(),
+                    Vector3.Zero),
+            ]);
+
+        M2BonePoseState pose = M2BonePoseEvaluator.Evaluate(model, sequenceIndex: 0, timeMs: 0);
+
+        AssertVectorNear(new Vector3(0.0f, 1.0f, 0.0f), Vector3.Transform(Vector3.Zero, pose.Bones[1].WorldTransform), 0.001f);
+    }
+
+    [Fact]
+    public void BonePoseEvaluator_HonorsIgnoreParentRotationFlag()
+    {
+        SyntheticTrackPayloadBuilder payload = new();
+        M2ModelDocument model = CreateModel(
+            payload.ToArray,
+            bones:
+            [
+                new M2BoneDefinition(
+                    0,
+                    -1,
+                    flags: 0,
+                    parentBone: -1,
+                    submeshId: 0,
+                    boneNameCrc: 0,
+                    payload.AddTrack(M2TrackInterpolation.None, -1, [0u], [new Vector3(10.0f, 0.0f, 0.0f)]),
+                    payload.AddTrack(M2TrackInterpolation.None, -1, [0u], [ToCompQuaternion(Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI * 0.5f))]),
+                    EmptyVectorTrack(),
+                    Vector3.Zero),
+                new M2BoneDefinition(
+                    1,
+                    -1,
+                    flags: (uint)M2BoneFlags.IgnoreParentRotation,
+                    parentBone: 0,
+                    submeshId: 0,
+                    boneNameCrc: 0,
+                    payload.AddTrack(M2TrackInterpolation.None, -1, [0u], [new Vector3(1.0f, 0.0f, 0.0f)]),
+                    EmptyCompressedRotationTrack(),
+                    EmptyVectorTrack(),
+                    Vector3.Zero),
+            ]);
+
+        M2BonePoseState pose = M2BonePoseEvaluator.Evaluate(model, sequenceIndex: 0, timeMs: 0);
+
+        AssertVectorNear(new Vector3(11.0f, 0.0f, 0.0f), Vector3.Transform(Vector3.Zero, pose.Bones[1].WorldTransform), 0.001f);
+    }
+
+    [Fact]
+    public void BonePoseEvaluator_HonorsIgnoreParentScaleFlag()
+    {
+        SyntheticTrackPayloadBuilder payload = new();
+        M2ModelDocument model = CreateModel(
+            payload.ToArray,
+            bones:
+            [
+                new M2BoneDefinition(
+                    0,
+                    -1,
+                    flags: 0,
+                    parentBone: -1,
+                    submeshId: 0,
+                    boneNameCrc: 0,
+                    EmptyVectorTrack(),
+                    EmptyCompressedRotationTrack(),
+                    payload.AddTrack(M2TrackInterpolation.None, -1, [0u], [new Vector3(2.0f, 3.0f, 1.0f)]),
+                    Vector3.Zero),
+                new M2BoneDefinition(
+                    1,
+                    -1,
+                    flags: (uint)M2BoneFlags.IgnoreParentScale,
+                    parentBone: 0,
+                    submeshId: 0,
+                    boneNameCrc: 0,
+                    payload.AddTrack(M2TrackInterpolation.None, -1, [0u], [new Vector3(1.0f, 1.0f, 0.0f)]),
+                    EmptyCompressedRotationTrack(),
+                    EmptyVectorTrack(),
+                    Vector3.Zero),
+            ]);
+
+        M2BonePoseState pose = M2BonePoseEvaluator.Evaluate(model, sequenceIndex: 0, timeMs: 0);
+
+        AssertVectorNear(new Vector3(1.0f, 1.0f, 0.0f), Vector3.Transform(Vector3.Zero, pose.Bones[1].WorldTransform), 0.001f);
     }
 
     [Fact]
@@ -765,11 +932,61 @@ public sealed class M2RuntimeTests
         Assert.InRange(actual.Z, expected.Z - tolerance, expected.Z + tolerance);
     }
 
+    private static void AssertQuaternionNear(Quaternion expected, Quaternion actual, float tolerance)
+    {
+        Assert.InRange(actual.X, expected.X - tolerance, expected.X + tolerance);
+        Assert.InRange(actual.Y, expected.Y - tolerance, expected.Y + tolerance);
+        Assert.InRange(actual.Z, expected.Z - tolerance, expected.Z + tolerance);
+        Assert.InRange(actual.W, expected.W - tolerance, expected.W + tolerance);
+    }
+
+    private static M2CompQuaternion ToCompQuaternion(Quaternion value)
+    {
+        Quaternion normalized = Quaternion.Normalize(value);
+        return new M2CompQuaternion(
+            ToCompComponent(normalized.X),
+            ToCompComponent(normalized.Y),
+            ToCompComponent(normalized.Z),
+            ToCompComponent(normalized.W));
+    }
+
+    private static short ToCompComponent(float value)
+    {
+        float clamped = Math.Clamp(value, -1.0f, 1.0f);
+        float encoded = clamped <= 0.0f
+            ? (clamped + 1.0f) * 32767.0f
+            : (clamped * 32767.0f) - 32768.0f;
+        return (short)Math.Clamp(MathF.Round(encoded), short.MinValue, short.MaxValue);
+    }
+
+    private readonly record struct SyntheticTrackSample<T>(T Value, T InTangent, T OutTangent);
+
     private sealed class SyntheticTrackPayloadBuilder
     {
         private readonly MemoryStream _stream = new();
 
         public M2TrackDefinition<T> AddTrack<T>(M2TrackInterpolation interpolation, int globalSequenceIndex, IReadOnlyList<uint> times, IReadOnlyList<T> values)
+        {
+            if (times.Count != values.Count)
+                throw new ArgumentException("Synthetic tracks require matching time/value counts.");
+
+            return AddTrackCore(interpolation, globalSequenceIndex, times, values, static (builder, value, _) => builder.WriteValue(value));
+        }
+
+        public M2TrackDefinition<T> AddTrack<T>(M2TrackInterpolation interpolation, int globalSequenceIndex, IReadOnlyList<uint> times, IReadOnlyList<SyntheticTrackSample<T>> values)
+        {
+            if (times.Count != values.Count)
+                throw new ArgumentException("Synthetic tracks require matching time/value counts.");
+
+            return AddTrackSampleCore(interpolation, globalSequenceIndex, times, values);
+        }
+
+        private M2TrackDefinition<TValue> AddTrackCore<TValue>(
+            M2TrackInterpolation interpolation,
+            int globalSequenceIndex,
+            IReadOnlyList<uint> times,
+            IReadOnlyList<TValue> values,
+            Action<SyntheticTrackPayloadBuilder, TValue, M2TrackInterpolation> writeValue)
         {
             if (times.Count != values.Count)
                 throw new ArgumentException("Synthetic tracks require matching time/value counts.");
@@ -792,8 +1009,43 @@ public sealed class M2RuntimeTests
 
             Align(4);
             uint valueDataOffset = checked((uint)_stream.Position);
-            foreach (T value in values)
-                WriteValue(value);
+            foreach (TValue value in values)
+                writeValue(this, value, interpolation);
+            PatchUInt32(valueDataPointerOffset, valueDataOffset);
+
+            return new M2TrackDefinition<TValue>(
+                interpolation,
+                globalSequenceIndex,
+                new M2TrackArrayReference(1u, timestampArrayOffset),
+                new M2TrackArrayReference(1u, valueArrayOffset));
+        }
+
+        private M2TrackDefinition<T> AddTrackSampleCore<T>(
+            M2TrackInterpolation interpolation,
+            int globalSequenceIndex,
+            IReadOnlyList<uint> times,
+            IReadOnlyList<SyntheticTrackSample<T>> values)
+        {
+            uint timestampArrayOffset = checked((uint)_stream.Position);
+            WriteUInt32((uint)times.Count);
+            long timestampDataPointerOffset = _stream.Position;
+            WriteUInt32(0);
+
+            uint valueArrayOffset = checked((uint)_stream.Position);
+            WriteUInt32((uint)values.Count);
+            long valueDataPointerOffset = _stream.Position;
+            WriteUInt32(0);
+
+            Align(4);
+            uint timestampDataOffset = checked((uint)_stream.Position);
+            foreach (uint time in times)
+                WriteUInt32(time);
+            PatchUInt32(timestampDataPointerOffset, timestampDataOffset);
+
+            Align(4);
+            uint valueDataOffset = checked((uint)_stream.Position);
+            foreach (SyntheticTrackSample<T> value in values)
+                WriteTrackSample(value, interpolation);
             PatchUInt32(valueDataPointerOffset, valueDataOffset);
 
             return new M2TrackDefinition<T>(
@@ -868,12 +1120,31 @@ public sealed class M2RuntimeTests
                 case ushort uint16Value:
                     WriteUInt16(uint16Value);
                     break;
+                case M2CompQuaternion quaternionValue:
+                    WriteInt16(quaternionValue.Y);
+                    WriteInt16((short)-quaternionValue.X);
+                    WriteInt16(quaternionValue.Z);
+                    WriteInt16(quaternionValue.W);
+                    break;
                 case byte byteValue:
                     _stream.WriteByte(byteValue);
                     break;
                 default:
                     throw new NotSupportedException($"Unsupported synthetic track value type '{typeof(T).FullName}'.");
             }
+        }
+
+        private void WriteTrackSample<T>(SyntheticTrackSample<T> value, M2TrackInterpolation interpolation)
+        {
+            if (interpolation is M2TrackInterpolation.Hermite or M2TrackInterpolation.Bezier)
+            {
+                WriteValue(value.Value);
+                WriteValue(value.InTangent);
+                WriteValue(value.OutTangent);
+                return;
+            }
+
+            WriteValue(value.Value);
         }
     }
 }

@@ -7,6 +7,7 @@ public partial class ViewerApp
     private sealed class StartupAutomationRequest
     {
         public string? GamePath { get; init; }
+        public string? ListfilePath { get; init; }
         public string? BuildVersion { get; init; }
         public string? LooseMapOverlayPath { get; init; }
         public string? WorldPath { get; init; }
@@ -14,6 +15,7 @@ public partial class ViewerApp
         public int? CharacterFacialHairVariationId { get; init; }
         public string? CaptureShotName { get; init; }
         public string? CaptureOutputDir { get; init; }
+        public int CaptureAfterFrames { get; init; }
         public bool CaptureIncludeUi { get; init; }
         public bool ExitAfterCapture { get; init; }
     }
@@ -30,7 +32,7 @@ public partial class ViewerApp
                 return;
             }
 
-            LoadMpqDataSource(request.GamePath, null, request.BuildVersion);
+            LoadMpqDataSource(request.GamePath, request.ListfilePath, request.BuildVersion);
         }
 
         if (!string.IsNullOrWhiteSpace(request.LooseMapOverlayPath))
@@ -57,7 +59,7 @@ public partial class ViewerApp
             _captureOutputDir = Path.GetFullPath(request.CaptureOutputDir);
 
         if (!string.IsNullOrWhiteSpace(request.CaptureShotName))
-            QueueNamedStartupCapture(request.CaptureShotName, request.CaptureIncludeUi, request.ExitAfterCapture);
+            QueueNamedStartupCapture(request.CaptureShotName, request.CaptureIncludeUi, request.ExitAfterCapture, request.CaptureAfterFrames);
     }
 
     private StartupAutomationRequest ParseStartupAutomationRequest(string[]? initialArgs, out string? legacyPath)
@@ -67,6 +69,7 @@ public partial class ViewerApp
             return new StartupAutomationRequest();
 
         string? gamePath = null;
+        string? listfilePath = null;
         string? buildVersion = null;
         string? looseMapOverlayPath = null;
         string? worldPath = null;
@@ -74,6 +77,7 @@ public partial class ViewerApp
         string? characterFacialHairVariation = null;
         string? captureShotName = null;
         string? captureOutputDir = null;
+        string? captureAfterFrames = null;
         bool captureIncludeUi = false;
         bool exitAfterCapture = false;
 
@@ -89,6 +93,11 @@ public partial class ViewerApp
 
                 case "--build":
                     if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out buildVersion))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--listfile":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out listfilePath))
                         return new StartupAutomationRequest();
                     break;
 
@@ -122,6 +131,11 @@ public partial class ViewerApp
                         return new StartupAutomationRequest();
                     break;
 
+                case "--capture-after-frames":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out captureAfterFrames))
+                        return new StartupAutomationRequest();
+                    break;
+
                 case "--capture-with-ui":
                     captureIncludeUi = true;
                     break;
@@ -152,9 +166,13 @@ public partial class ViewerApp
         if (!TryParseOptionalVariationId(characterFacialHairVariation, "--character-facial-variation", out int? characterFacialHairVariationId))
             return new StartupAutomationRequest();
 
+        if (!TryParseOptionalPositiveInt(captureAfterFrames, "--capture-after-frames", out int resolvedCaptureAfterFrames))
+            return new StartupAutomationRequest();
+
         return new StartupAutomationRequest
         {
             GamePath = NormalizeOptionalPath(gamePath),
+            ListfilePath = NormalizeOptionalPath(listfilePath),
             BuildVersion = NormalizeOptionalValue(buildVersion),
             LooseMapOverlayPath = NormalizeOptionalPath(looseMapOverlayPath),
             WorldPath = NormalizeOptionalValue(worldPath),
@@ -162,6 +180,7 @@ public partial class ViewerApp
             CharacterFacialHairVariationId = characterFacialHairVariationId,
             CaptureShotName = NormalizeOptionalValue(captureShotName),
             CaptureOutputDir = NormalizeOptionalPath(captureOutputDir),
+            CaptureAfterFrames = resolvedCaptureAfterFrames,
             CaptureIncludeUi = captureIncludeUi,
             ExitAfterCapture = exitAfterCapture,
         };
@@ -198,11 +217,11 @@ public partial class ViewerApp
         _statusMessage = $"Startup world/file path was not found on disk and no data source is loaded: {startupTarget}";
     }
 
-    private void QueueNamedStartupCapture(string shotName, bool includeUi, bool exitAfterCapture)
+    private void QueueNamedStartupCapture(string shotName, bool includeUi, bool exitAfterCapture, int captureAfterFrames = 1)
     {
         if (string.Equals(shotName, "current", StringComparison.OrdinalIgnoreCase))
         {
-            QueueCurrentCameraCapture(includeUi, exitAfterCapture);
+            QueueCurrentCameraCapture(includeUi, exitAfterCapture, captureAfterFrames);
             return;
         }
 
@@ -215,7 +234,34 @@ public partial class ViewerApp
             return;
         }
 
-        EnqueueShotCapture(shot, includeUi, exitAfterCapture);
+        EnqueueShotCapture(
+            shot,
+            includeUi,
+            exitAfterCapture,
+            captureAfterFrames > 1
+                ? new CaptureQueueOptions
+                {
+                    WaitForSceneReady = true,
+                    RequiredSettledFrames = captureAfterFrames,
+                    MaxFramesBeforeCapture = captureAfterFrames,
+                }
+                : null);
+    }
+
+    private bool TryParseOptionalPositiveInt(string? rawValue, string optionName, out int parsedValue)
+    {
+        parsedValue = 1;
+        string? normalized = NormalizeOptionalValue(rawValue);
+        if (normalized == null)
+            return true;
+
+        if (!int.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedValue) || parsedValue < 1)
+        {
+            _statusMessage = $"Startup option {optionName} expects an integer >= 1. Received '{rawValue}'.";
+            return false;
+        }
+
+        return true;
     }
 
     private static string? NormalizeOptionalPath(string? value)
