@@ -409,6 +409,26 @@ public partial class ViewerApp : IDisposable
     private TerrainAnalysisPreviewTexture? _terrainAnalysisLocalTexture;
     private TerrainAnalysisPreviewTexture? _terrainAnalysisGlobalTexture;
     private TerrainAnalysisPreviewTexture? _terrainAnalysisAlphaTexture;
+    private const float TerrainWeakSignalRestoreMinZLimit = -8192f;
+    private const float TerrainWeakSignalRestoreMaxZLimit = 512f;
+    private const float TerrainWeakSignalRestoreDefaultMinZ = -10f;
+    private const float TerrainWeakSignalRestoreDefaultMaxZ = 10f;
+    private const float TerrainWeakSignalRestoreMaxFactor = 512f;
+    private bool _terrainWeakSignalRestoreEnabled;
+    private bool _terrainWeakSignalRestoreUseAutoFactor = true;
+    private float _terrainWeakSignalRestoreManualFactor = 16f;
+    private float _terrainWeakSignalRestoreCandidateMinHeight = TerrainWeakSignalRestoreDefaultMinZ;
+    private float _terrainWeakSignalRestoreCandidateMaxHeight = TerrainWeakSignalRestoreDefaultMaxZ;
+    private string _terrainWeakSignalRestoreStatus = string.Empty;
+    private readonly Dictionary<(int tileX, int tileY), List<Terrain.TerrainChunkData>> _terrainWeakSignalOriginalTiles = new();
+    private readonly Dictionary<(int tileX, int tileY), float> _terrainWeakSignalAppliedFactors = new();
+    private readonly HashSet<(int tileX, int tileY)> _terrainWeakSignalApplyingTiles = new();
+    private Terrain.TerrainManager? _terrainWeakSignalHookedTerrainManager;
+    private Terrain.VlmTerrainManager? _terrainWeakSignalHookedVlmTerrainManager;
+    private string? _terrainWeakSignalWdlMapName;
+    private WdlParser.WdlData? _terrainWeakSignalWdlData;
+    private (int tileX, int tileY)? _terrainWeakSignalRestoreLastCameraTile;
+    private bool _terrainWeakSignalRestoreNeedsRefresh = true;
     private (int tileX, int tileY)? _terrainAnalysisPreviewTile;
     private float _terrainAnalysisPreviewTileMin;
     private float _terrainAnalysisPreviewTileMax;
@@ -995,6 +1015,7 @@ public partial class ViewerApp : IDisposable
             maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 4 : 1,
             maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 1.5);
         UpdateSqlSpawnStreaming();
+        UpdateTerrainWeakSignalRestoreForCamera();
     }
 
     private void UpdateSqlSpawnStreaming()
@@ -1016,8 +1037,8 @@ public partial class ViewerApp : IDisposable
 
     private (int tileX, int tileY) GetCameraTile()
     {
-        int tileX = (int)((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
-        int tileY = (int)((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
+        int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
+        int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
         return (tileX, tileY);
     }
 
@@ -3690,6 +3711,554 @@ void main() {
             McnkFlags = source.McnkFlags,
             AlphaSourceFlags = source.AlphaSourceFlags,
         };
+
+    private static List<Terrain.TerrainChunkData> CloneTerrainChunkList(IReadOnlyList<Terrain.TerrainChunkData> chunks)
+    {
+        var cloned = new List<Terrain.TerrainChunkData>(chunks.Count);
+        foreach (var chunk in chunks)
+        {
+            cloned.Add(CloneTerrainChunk(
+                chunk,
+                heights: chunk.Heights?.ToArray(),
+                normals: chunk.Normals?.ToArray(),
+                layers: chunk.Layers?.ToArray(),
+                alphaMaps: CloneChunkAlphaMaps(chunk.AlphaMaps),
+                shadowMap: chunk.ShadowMap?.ToArray(),
+                mccvColors: chunk.MccvColors?.ToArray()));
+        }
+
+        return cloned;
+    }
+
+    private static Dictionary<int, byte[]> CloneChunkAlphaMaps(Dictionary<int, byte[]>? alphaMaps)
+    {
+        if (alphaMaps == null || alphaMaps.Count == 0)
+            return new Dictionary<int, byte[]>();
+
+        var cloned = new Dictionary<int, byte[]>(alphaMaps.Count);
+        foreach (var entry in alphaMaps)
+            cloned[entry.Key] = entry.Value?.ToArray() ?? Array.Empty<byte>();
+
+        return cloned;
+    }
+
+    private void ResetTerrainWeakSignalRestoreSessionState(bool preserveToggle)
+    {
+        DetachTerrainWeakSignalRestoreHooks();
+        _terrainWeakSignalOriginalTiles.Clear();
+        _terrainWeakSignalAppliedFactors.Clear();
+        _terrainWeakSignalApplyingTiles.Clear();
+        _terrainWeakSignalWdlMapName = null;
+        _terrainWeakSignalWdlData = null;
+        _terrainWeakSignalRestoreLastCameraTile = null;
+        _terrainWeakSignalRestoreNeedsRefresh = true;
+
+        if (!preserveToggle)
+            _terrainWeakSignalRestoreEnabled = false;
+
+        _terrainWeakSignalRestoreStatus = string.Empty;
+    }
+
+    private void RefreshTerrainWeakSignalRestoreHooks()
+    {
+        if (!ReferenceEquals(_terrainWeakSignalHookedTerrainManager, _terrainManager))
+        {
+            if (_terrainWeakSignalHookedTerrainManager != null)
+                _terrainWeakSignalHookedTerrainManager.OnTileLoaded -= OnTerrainWeakSignalTileLoaded;
+
+            _terrainWeakSignalHookedTerrainManager = _terrainManager;
+            if (_terrainWeakSignalHookedTerrainManager != null)
+                _terrainWeakSignalHookedTerrainManager.OnTileLoaded += OnTerrainWeakSignalTileLoaded;
+        }
+
+        if (!ReferenceEquals(_terrainWeakSignalHookedVlmTerrainManager, _vlmTerrainManager))
+        {
+            if (_terrainWeakSignalHookedVlmTerrainManager != null)
+                _terrainWeakSignalHookedVlmTerrainManager.OnTileLoaded -= OnTerrainWeakSignalTileLoaded;
+
+            _terrainWeakSignalHookedVlmTerrainManager = _vlmTerrainManager;
+            if (_terrainWeakSignalHookedVlmTerrainManager != null)
+                _terrainWeakSignalHookedVlmTerrainManager.OnTileLoaded += OnTerrainWeakSignalTileLoaded;
+        }
+    }
+
+    private void DetachTerrainWeakSignalRestoreHooks()
+    {
+        if (_terrainWeakSignalHookedTerrainManager != null)
+            _terrainWeakSignalHookedTerrainManager.OnTileLoaded -= OnTerrainWeakSignalTileLoaded;
+
+        if (_terrainWeakSignalHookedVlmTerrainManager != null)
+            _terrainWeakSignalHookedVlmTerrainManager.OnTileLoaded -= OnTerrainWeakSignalTileLoaded;
+
+        _terrainWeakSignalHookedTerrainManager = null;
+        _terrainWeakSignalHookedVlmTerrainManager = null;
+    }
+
+    private bool SetTerrainWeakSignalRestoreEnabled(bool enabled)
+    {
+        if (_terrainWeakSignalRestoreEnabled == enabled)
+            return false;
+
+        _terrainWeakSignalRestoreEnabled = enabled;
+        _terrainWeakSignalRestoreNeedsRefresh = true;
+        _terrainWeakSignalRestoreLastCameraTile = null;
+        if (enabled)
+        {
+            RefreshTerrainWeakSignalRestoreHooks();
+            RefreshTerrainWeakSignalRestoreForLoadedTiles();
+        }
+        else
+        {
+            RestoreAllTerrainWeakSignalTiles();
+            _terrainWeakSignalRestoreStatus = "Weak-signal terrain restore disabled.";
+        }
+
+        return true;
+    }
+
+    private void MarkTerrainWeakSignalRestoreDirty()
+    {
+        _terrainWeakSignalRestoreNeedsRefresh = true;
+    }
+
+    private void UpdateTerrainWeakSignalRestoreForCamera()
+    {
+        if (!_terrainWeakSignalRestoreEnabled)
+            return;
+
+        var cameraTile = GetCameraTile();
+        if (_terrainWeakSignalRestoreNeedsRefresh
+            || _terrainWeakSignalRestoreLastCameraTile == null
+            || _terrainWeakSignalRestoreLastCameraTile.Value != cameraTile)
+        {
+            _terrainWeakSignalRestoreLastCameraTile = cameraTile;
+            RefreshTerrainWeakSignalRestoreForLoadedTiles();
+            _terrainWeakSignalRestoreNeedsRefresh = false;
+        }
+    }
+
+    private void RefreshTerrainWeakSignalRestoreForLoadedTiles()
+    {
+        if (!_terrainWeakSignalRestoreEnabled)
+            return;
+
+        var loadedKeys = new HashSet<(int tileX, int tileY)>();
+
+        if (_terrainManager != null)
+        {
+            foreach (var (tileX, tileY) in _terrainManager.LoadedTiles.ToList())
+            {
+                loadedKeys.Add((tileX, tileY));
+                if (_terrainManager.TryGetTileLoadResult(tileX, tileY, out var result))
+                {
+                    if (ShouldApplyTerrainWeakSignalRestoreToTile(tileX, tileY, result.Chunks))
+                        ApplyTerrainWeakSignalRestoreToTile(tileX, tileY, result.Chunks);
+                    else
+                        RestoreTerrainWeakSignalTile((tileX, tileY), clearCache: true);
+                }
+            }
+        }
+
+        if (_vlmTerrainManager != null)
+        {
+            foreach (var (tileX, tileY) in _vlmTerrainManager.LoadedTiles.ToList())
+            {
+                loadedKeys.Add((tileX, tileY));
+                if (_vlmTerrainManager.TryGetTileLoadResult(tileX, tileY, out var result))
+                {
+                    if (ShouldApplyTerrainWeakSignalRestoreToTile(tileX, tileY, result.Chunks))
+                        ApplyTerrainWeakSignalRestoreToTile(tileX, tileY, result.Chunks);
+                    else
+                        RestoreTerrainWeakSignalTile((tileX, tileY), clearCache: true);
+                }
+            }
+        }
+
+        foreach (var key in _terrainWeakSignalOriginalTiles.Keys.Where(key => !loadedKeys.Contains(key)).ToList())
+        {
+            _terrainWeakSignalOriginalTiles.Remove(key);
+            _terrainWeakSignalAppliedFactors.Remove(key);
+        }
+    }
+
+    private void RestoreAllTerrainWeakSignalTiles()
+    {
+        foreach (var key in _terrainWeakSignalOriginalTiles.Keys.ToList())
+            RestoreTerrainWeakSignalTile(key, clearCache: true);
+
+        _terrainWeakSignalOriginalTiles.Clear();
+        _terrainWeakSignalAppliedFactors.Clear();
+        _terrainWeakSignalApplyingTiles.Clear();
+    }
+
+    private void OnTerrainWeakSignalTileLoaded(int tileX, int tileY, TileLoadResult result)
+    {
+        if (!_terrainWeakSignalRestoreEnabled || result.Chunks.Count == 0)
+            return;
+
+        if (ShouldApplyTerrainWeakSignalRestoreToTile(tileX, tileY, result.Chunks))
+            ApplyTerrainWeakSignalRestoreToTile(tileX, tileY, result.Chunks);
+    }
+
+    private bool ShouldApplyTerrainWeakSignalRestoreToTile(
+        int tileX,
+        int tileY,
+        IReadOnlyList<Terrain.TerrainChunkData> sourceChunks)
+    {
+        if (sourceChunks.Count == 0)
+            return false;
+
+        var cameraTile = GetCameraTile();
+        int deltaX = Math.Abs(tileX - cameraTile.tileX);
+        int deltaY = Math.Abs(tileY - cameraTile.tileY);
+        if (deltaX + deltaY > 1)
+            return false;
+
+        var key = (tileX, tileY);
+        IReadOnlyList<Terrain.TerrainChunkData> baseChunks = _terrainWeakSignalOriginalTiles.TryGetValue(key, out var originalChunks)
+            ? originalChunks
+            : sourceChunks;
+
+        TerrainHeightmapIo.TileHeightmap257 tileHeightmap = TerrainHeightmapIo.BuildTileHeightmap257(baseChunks);
+        return IsTerrainWeakSignalRestoreCandidateHeightmap(tileHeightmap);
+    }
+
+    private bool IsTerrainWeakSignalRestoreCandidateHeightmap(TerrainHeightmapIo.TileHeightmap257 tileHeightmap)
+    {
+        GetTerrainWeakSignalRestoreCandidateRange(out float minHeight, out float maxHeight);
+        return tileHeightmap.MinHeight >= minHeight && tileHeightmap.MaxHeight <= maxHeight;
+    }
+
+    private void GetTerrainWeakSignalRestoreCandidateRange(out float minHeight, out float maxHeight)
+    {
+        minHeight = ClampTerrainWeakSignalRestoreZ(_terrainWeakSignalRestoreCandidateMinHeight);
+        maxHeight = ClampTerrainWeakSignalRestoreZ(_terrainWeakSignalRestoreCandidateMaxHeight);
+        if (minHeight > maxHeight)
+            (minHeight, maxHeight) = (maxHeight, minHeight);
+    }
+
+    private static float ClampTerrainWeakSignalRestoreZ(float value)
+        => Math.Clamp(value, TerrainWeakSignalRestoreMinZLimit, TerrainWeakSignalRestoreMaxZLimit);
+
+    private void ApplyTerrainWeakSignalRestoreToTile(int tileX, int tileY, IReadOnlyList<Terrain.TerrainChunkData> sourceChunks)
+    {
+        var key = (tileX, tileY);
+        if (_terrainWeakSignalApplyingTiles.Contains(key) || sourceChunks.Count == 0)
+            return;
+
+        bool hasOriginal = _terrainWeakSignalOriginalTiles.TryGetValue(key, out var originalChunks);
+        IReadOnlyList<Terrain.TerrainChunkData> baseChunks = hasOriginal
+            ? originalChunks!
+            : sourceChunks;
+
+        if (!TryBuildTerrainWeakSignalRestoredChunks(tileX, tileY, baseChunks, out var restoredChunks, out float factor, out string reason))
+            return;
+
+        if (hasOriginal
+            && _terrainWeakSignalAppliedFactors.TryGetValue(key, out float appliedFactor)
+            && MathF.Abs(appliedFactor - factor) < 0.001f)
+        {
+            return;
+        }
+
+        if (!hasOriginal)
+            _terrainWeakSignalOriginalTiles[key] = CloneTerrainChunkList(sourceChunks);
+
+        _terrainWeakSignalApplyingTiles.Add(key);
+        try
+        {
+            if (_terrainManager != null)
+                _terrainManager.ReplaceTileChunksAndRebuild(tileX, tileY, restoredChunks);
+            else
+                _vlmTerrainManager?.ReplaceTileChunksAndRebuild(tileX, tileY, restoredChunks);
+
+            _terrainWeakSignalAppliedFactors[key] = factor;
+            _terrainWeakSignalRestoreStatus = $"Weak-signal restore applied to tile ({tileX}, {tileY}) at x{factor:0.##} using {reason}.";
+        }
+        finally
+        {
+            _terrainWeakSignalApplyingTiles.Remove(key);
+        }
+    }
+
+    private void RestoreTerrainWeakSignalTile((int tileX, int tileY) key, bool clearCache)
+    {
+        if (!_terrainWeakSignalOriginalTiles.TryGetValue(key, out var originalChunks) || _terrainWeakSignalApplyingTiles.Contains(key))
+            return;
+
+        _terrainWeakSignalApplyingTiles.Add(key);
+        try
+        {
+            if (_terrainManager != null)
+                _terrainManager.ReplaceTileChunksAndRebuild(key.tileX, key.tileY, CloneTerrainChunkList(originalChunks));
+            else
+                _vlmTerrainManager?.ReplaceTileChunksAndRebuild(key.tileX, key.tileY, CloneTerrainChunkList(originalChunks));
+        }
+        finally
+        {
+            _terrainWeakSignalApplyingTiles.Remove(key);
+        }
+
+        if (clearCache)
+        {
+            _terrainWeakSignalOriginalTiles.Remove(key);
+
+            _terrainWeakSignalAppliedFactors.Remove(key);
+        }
+    }
+
+    private bool TryBuildTerrainWeakSignalRestoredChunks(
+        int tileX,
+        int tileY,
+        IReadOnlyList<Terrain.TerrainChunkData> sourceChunks,
+        out List<Terrain.TerrainChunkData> restoredChunks,
+        out float factor,
+        out string reason)
+    {
+        restoredChunks = new List<Terrain.TerrainChunkData>();
+        factor = 1f;
+        reason = string.Empty;
+
+        TerrainHeightmapIo.TileHeightmap257 tileHeightmap = TerrainHeightmapIo.BuildTileHeightmap257(sourceChunks);
+        if (!IsTerrainWeakSignalRestoreCandidateHeightmap(tileHeightmap))
+            return false;
+
+        if (_terrainWeakSignalRestoreUseAutoFactor)
+        {
+            if (!TryEstimateTerrainWeakSignalRestoreFactor(tileX, tileY, tileHeightmap, out factor, out reason))
+                return false;
+        }
+        else
+        {
+            factor = Math.Clamp(_terrainWeakSignalRestoreManualFactor, 1f, TerrainWeakSignalRestoreMaxFactor);
+            if (factor <= 1.001f)
+                return false;
+
+            reason = "manual scale";
+        }
+
+        float anchorHeight = tileHeightmap.MinHeight < 0f ? tileHeightmap.MinHeight : 0f;
+        bool preserveNegativeFloor = anchorHeight < 0f;
+        float[] restoredHeightmap = new float[tileHeightmap.Heights.Length];
+        for (int index = 0; index < tileHeightmap.Heights.Length; index++)
+        {
+            float sourceHeight = tileHeightmap.Heights[index];
+            float restoredHeight = anchorHeight + ((sourceHeight - anchorHeight) * factor);
+            if (!preserveNegativeFloor && restoredHeight < 0f)
+                restoredHeight = 0f;
+
+            restoredHeightmap[index] = restoredHeight;
+        }
+
+        restoredChunks = TerrainHeightmapIo.ApplyHeightmap257ToChunks(sourceChunks, restoredHeightmap);
+        reason += preserveNegativeFloor
+            ? ", amplified from source floor"
+            : ", amplified from z=0";
+        return true;
+    }
+
+    private bool TryEstimateTerrainWeakSignalRestoreFactor(
+        int tileX,
+        int tileY,
+        TerrainHeightmapIo.TileHeightmap257 tileHeightmap,
+        out float factor,
+        out string reason)
+    {
+        factor = 1f;
+        reason = string.Empty;
+
+        float observedMin = tileHeightmap.MinHeight;
+        float observedMax = tileHeightmap.MaxHeight;
+        float observedRange = Math.Max(observedMax - observedMin, 0f);
+        if (observedRange < 0.25f)
+            return false;
+
+        if (TryGetTerrainWeakSignalLoadedBounds(out float loadedMin, out float loadedMax, out int loadedTileCount))
+        {
+            float loadedRange = Math.Max(loadedMax - loadedMin, 0f);
+            float visibilityRatio = loadedRange > 0.001f
+                ? observedRange / loadedRange
+                : 1f;
+            float rawFactor = EstimateTerrainWeakSignalRestoreFactorFromRanges(observedMin, observedMax, loadedMin, loadedMax);
+            if (visibilityRatio <= 0.25f && rawFactor >= 1.25f)
+            {
+                factor = rawFactor;
+                reason = $"loaded-tile relief {loadedMin:F1}..{loadedMax:F1} across {loadedTileCount} tile(s)";
+                return true;
+            }
+        }
+
+        if (TryGetTerrainWeakSignalWdlBounds(tileX, tileY, out float coarseMin, out float coarseMax))
+        {
+            float rawFactor = EstimateTerrainWeakSignalRestoreFactorFromRanges(observedMin, observedMax, coarseMin, coarseMax);
+            if (rawFactor >= 1.25f)
+            {
+                factor = rawFactor;
+                reason = $"WDL coarse relief {coarseMin:F1}..{coarseMax:F1}";
+                return true;
+            }
+        }
+
+        float fallbackFactor = EstimateTerrainWeakSignalFallbackFactor(observedMin, observedMax);
+        if (fallbackFactor >= 1.25f)
+        {
+            factor = fallbackFactor;
+            reason = "sea-level fallback";
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryGetTerrainWeakSignalLoadedBounds(out float minHeight, out float maxHeight, out int tileCount)
+    {
+        float localMinHeight = float.MaxValue;
+        float localMaxHeight = float.MinValue;
+        int localTileCount = 0;
+
+        void AccumulateTile(int tileX, int tileY, IReadOnlyList<Terrain.TerrainChunkData> chunks)
+        {
+            var key = (tileX, tileY);
+            IReadOnlyList<Terrain.TerrainChunkData> baseChunks = _terrainWeakSignalOriginalTiles.TryGetValue(key, out var originalChunks)
+                ? originalChunks
+                : chunks;
+
+            TerrainHeightmapIo.TileHeightmap257 heightmap = TerrainHeightmapIo.BuildTileHeightmap257(baseChunks);
+            if (float.IsNaN(heightmap.MinHeight) || float.IsNaN(heightmap.MaxHeight))
+                return;
+
+            if (heightmap.MinHeight < localMinHeight)
+                localMinHeight = heightmap.MinHeight;
+
+            if (heightmap.MaxHeight > localMaxHeight)
+                localMaxHeight = heightmap.MaxHeight;
+
+            localTileCount++;
+        }
+
+        if (_terrainManager != null)
+        {
+            foreach (var (tileX, tileY) in _terrainManager.LoadedTiles)
+            {
+                if (_terrainManager.TryGetTileLoadResult(tileX, tileY, out var result) && result.Chunks.Count > 0)
+                    AccumulateTile(tileX, tileY, result.Chunks);
+            }
+        }
+
+        if (_vlmTerrainManager != null)
+        {
+            foreach (var (tileX, tileY) in _vlmTerrainManager.LoadedTiles)
+            {
+                if (_vlmTerrainManager.TryGetTileLoadResult(tileX, tileY, out var result) && result.Chunks.Count > 0)
+                    AccumulateTile(tileX, tileY, result.Chunks);
+            }
+        }
+
+        minHeight = localMinHeight;
+        maxHeight = localMaxHeight;
+        tileCount = localTileCount;
+        return tileCount > 0 && minHeight != float.MaxValue && maxHeight != float.MinValue && maxHeight > minHeight;
+    }
+
+    private bool TryGetTerrainWeakSignalWdlBounds(int tileX, int tileY, out float minHeight, out float maxHeight)
+    {
+        minHeight = 0f;
+        maxHeight = 0f;
+
+        if (_dataSource == null)
+            return false;
+
+        string? mapName = _terrainManager?.MapName ?? GetCurrentSessionMapName();
+        if (string.IsNullOrWhiteSpace(mapName))
+            return false;
+
+        if (!string.Equals(_terrainWeakSignalWdlMapName, mapName, StringComparison.OrdinalIgnoreCase))
+        {
+            _terrainWeakSignalWdlMapName = mapName;
+            _terrainWeakSignalWdlData = null;
+        }
+
+        if (_terrainWeakSignalWdlData == null)
+        {
+            if (_wdlPreviewCacheService != null)
+                _wdlPreviewCacheService.EnsurePrefetch(mapName);
+
+            if (!WdlDataSourceResolver.TryReadWdlBytes(_dataSource, mapName, out byte[]? wdlBytes, out _)
+                || wdlBytes == null
+                || wdlBytes.Length == 0)
+            {
+                return false;
+            }
+
+            _terrainWeakSignalWdlData = WdlParser.Parse(wdlBytes);
+        }
+
+        if (_terrainWeakSignalWdlData == null)
+            return false;
+
+        int tileIndex = tileY * 64 + tileX;
+        if ((uint)tileIndex >= _terrainWeakSignalWdlData.Tiles.Length)
+            return false;
+
+        WdlParser.WdlTile? tile = _terrainWeakSignalWdlData.Tiles[tileIndex];
+        if (tile?.HasData != true)
+            return false;
+
+        minHeight = tile.MinZ;
+        maxHeight = tile.MaxZ;
+        return maxHeight > minHeight;
+    }
+
+    private static float EstimateTerrainWeakSignalRestoreFactorFromRanges(float observedMin, float observedMax, float coarseMin, float coarseMax)
+    {
+        const float epsilon = 0.001f;
+        float observedRange = Math.Max(observedMax - observedMin, 0f);
+        float coarseRange = Math.Max(coarseMax - coarseMin, 0f);
+        if (observedRange <= epsilon || coarseRange <= epsilon)
+            return 1f;
+
+        float rawFactor = 1f;
+        if (coarseRange > observedRange * 1.15f)
+            rawFactor = Math.Max(rawFactor, coarseRange / observedRange);
+
+        float observedBelow = Math.Max(0f, -observedMin);
+        float coarseBelow = Math.Max(0f, -coarseMin);
+        if (observedBelow > epsilon && coarseBelow > observedBelow * 1.15f)
+            rawFactor = Math.Max(rawFactor, coarseBelow / observedBelow);
+
+        float observedAbove = Math.Max(0f, observedMax);
+        float coarseAbove = Math.Max(0f, coarseMax);
+        if (observedAbove > epsilon && coarseAbove > observedAbove * 1.15f)
+            rawFactor = Math.Max(rawFactor, coarseAbove / observedAbove);
+
+        return Math.Clamp(rawFactor, 1f, TerrainWeakSignalRestoreMaxFactor);
+    }
+
+    private static float EstimateTerrainWeakSignalFallbackFactor(float observedMin, float observedMax)
+    {
+        float observedBelow = Math.Max(0f, -observedMin);
+        float observedRange = Math.Max(observedMax - observedMin, 0f);
+        if (observedBelow < 0.5f || observedRange > 12f || observedMax > 4f)
+            return 1f;
+
+        float rawFactor = 16f / observedBelow;
+        return Math.Clamp(rawFactor, 1f, TerrainWeakSignalRestoreMaxFactor);
+    }
+
+    private static float SnapTerrainWeakSignalRestoreFactor(float rawFactor)
+    {
+        if (rawFactor <= 1f)
+            return 1f;
+
+        float[] supported = { 1f, 2f, 4f, 8f, 16f, 32f, 64f, 128f, 256f, 512f };
+        foreach (float value in supported)
+        {
+            if (rawFactor <= value)
+                return value;
+        }
+
+        return supported[^1];
+    }
 
     private void ApplyEditedTileChunks(
         int tileX,
@@ -9937,6 +10506,7 @@ void main() {
     {
         _statusMessage = $"Loading world from {Path.GetFileName(wdtPath)}...";
 
+        ResetTerrainWeakSignalRestoreSessionState(preserveToggle: true);
         InvalidatePm4DerivedReports();
         _worldScene?.Dispose();
         _worldScene = null;
@@ -9998,6 +10568,8 @@ void main() {
 
             _terrainManager = _worldScene.Terrain;
             _terrainManager.DetailedTileCountOverride = _savedDetailedAdtTileCountOverride;
+            RefreshTerrainWeakSignalRestoreHooks();
+            RefreshTerrainWeakSignalRestoreForLoadedTiles();
             _renderer = _worldScene;
             ApplyLayoutObjectPreviewModeToScene();
             ApplySavedPm4AlignmentToScene();
@@ -10211,6 +10783,7 @@ void main() {
         _terrainAnalysisHiddenStatus = string.Empty;
         _terrainAnalysisPreviewCompareTile = null;
         _terrainAnalysisPreviewSimilarity = null;
+        ResetTerrainWeakSignalRestoreSessionState(preserveToggle: true);
 
         // Clean up any existing scene
         InvalidatePm4DerivedReports();
@@ -10225,6 +10798,8 @@ void main() {
         try
         {
             _vlmTerrainManager = new VlmTerrainManager(_gl, projectRoot);
+            RefreshTerrainWeakSignalRestoreHooks();
+            RefreshTerrainWeakSignalRestoreForLoadedTiles();
             _renderer = _vlmTerrainManager;
 
             // Position camera at center of loaded tiles
@@ -12606,6 +13181,18 @@ void main() {
             _showRightSidebar = settings.ShowRightSidebar;
             _showWorkspaceBarsPanel = settings.ShowWorkspaceBarsPanel;
             _showBottomDrawer = false;
+            _terrainWeakSignalRestoreEnabled = settings.EnableWeakSignalTerrainRestore;
+            _terrainWeakSignalRestoreUseAutoFactor = settings.EnableWeakSignalTerrainRestoreAutoFactor;
+            _terrainWeakSignalRestoreManualFactor = float.IsFinite(settings.WeakSignalTerrainRestoreManualFactor)
+                ? Math.Clamp(settings.WeakSignalTerrainRestoreManualFactor, 1f, TerrainWeakSignalRestoreMaxFactor)
+                : 16f;
+            _terrainWeakSignalRestoreCandidateMinHeight = float.IsFinite(settings.WeakSignalTerrainRestoreCandidateMinHeight)
+                ? ClampTerrainWeakSignalRestoreZ(settings.WeakSignalTerrainRestoreCandidateMinHeight)
+                : TerrainWeakSignalRestoreDefaultMinZ;
+            _terrainWeakSignalRestoreCandidateMaxHeight = float.IsFinite(settings.WeakSignalTerrainRestoreCandidateMaxHeight)
+                ? ClampTerrainWeakSignalRestoreZ(settings.WeakSignalTerrainRestoreCandidateMaxHeight)
+                : TerrainWeakSignalRestoreDefaultMaxZ;
+            GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
             _leftSidebarWidth = float.IsFinite(settings.LeftSidebarWidth)
                 ? settings.LeftSidebarWidth
                 : DefaultSidebarWidth;
@@ -12795,6 +13382,11 @@ void main() {
                 ShowRightSidebar = _showRightSidebar,
                 ShowWorkspaceBarsPanel = _showWorkspaceBarsPanel,
                 ShowBottomDrawer = false,
+                EnableWeakSignalTerrainRestore = _terrainWeakSignalRestoreEnabled,
+                EnableWeakSignalTerrainRestoreAutoFactor = _terrainWeakSignalRestoreUseAutoFactor,
+                WeakSignalTerrainRestoreManualFactor = _terrainWeakSignalRestoreManualFactor,
+                WeakSignalTerrainRestoreCandidateMinHeight = _terrainWeakSignalRestoreCandidateMinHeight,
+                WeakSignalTerrainRestoreCandidateMaxHeight = _terrainWeakSignalRestoreCandidateMaxHeight,
                 LeftSidebarWidth = _leftSidebarWidth,
                 RightSidebarWidth = _rightSidebarWidth,
                 BottomDrawerHeight = _bottomDrawerHeight,
@@ -13042,6 +13634,11 @@ void main() {
         public bool ShowRightSidebar { get; set; } = true;
         public bool ShowWorkspaceBarsPanel { get; set; } = true;
         public bool ShowBottomDrawer { get; set; } = true;
+        public bool EnableWeakSignalTerrainRestore { get; set; }
+        public bool EnableWeakSignalTerrainRestoreAutoFactor { get; set; } = true;
+        public float WeakSignalTerrainRestoreManualFactor { get; set; } = 16f;
+        public float WeakSignalTerrainRestoreCandidateMinHeight { get; set; } = TerrainWeakSignalRestoreDefaultMinZ;
+        public float WeakSignalTerrainRestoreCandidateMaxHeight { get; set; } = TerrainWeakSignalRestoreDefaultMaxZ;
         public int ShellPanelLayoutVersion { get; set; } = CurrentShellPanelLayoutVersion;
         public float LeftSidebarWidth { get; set; } = DefaultSidebarWidth;
         public float RightSidebarWidth { get; set; } = DefaultSidebarWidth;

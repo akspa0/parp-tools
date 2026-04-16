@@ -1,5 +1,16 @@
 # Active Context
 
+## Apr 16, 2026 - MdxViewer weak-signal terrain restore now uses a persisted source-height band instead of a hard-coded `<= 10` gate
+
+- the user clarified that buried terrain compression is era-dependent rather than universally sea-level-based:
+	- early-era weak-signal tiles tend to live around `-10..10`
+	- later-era ocean-floor-compressed tiles can live closer to `-5000..10`
+- `MdxViewer` weak-signal restore now exposes persisted `Restore Range Min Z` and `Restore Range Max Z` controls so the viewer gate is user-driven instead of hard-coded to `source max Z <= 10`
+- the manual restore multiplier and shared auto-factor clamp now both allow values above `64x` so deeper later-era compression can still be amplified from the cached original tile data
+- current boundary:
+	- this is still viewer-side live restore gating only, not chunk-level saved-bundle export
+	- no new real-data runtime validation was completed in this chat yet; build validation still needs to be reported as build-only unless followed by a live viewer check
+
 ## Apr 16, 2026 - MdxViewer native static M2 path now uses primary runtime textures, and MPQ-backed `*_cam.m2` loads no longer fall through to dead geometry fallback
 
 - the user asked to finish the remaining native static M2 consumer slice after the earlier camera-path extraction work, so the active follow-up stayed bounded to `MdxViewer` as a `wow-viewer` consumer rather than reopening ownership

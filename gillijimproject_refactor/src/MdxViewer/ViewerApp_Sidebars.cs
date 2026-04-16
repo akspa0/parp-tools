@@ -2257,6 +2257,67 @@ public partial class ViewerApp
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Toggle low-detail WDL background terrain for testing terrain overlap issues.");
 
+            bool weakSignalRestore = _terrainWeakSignalRestoreEnabled;
+            if (ImGui.Checkbox("Restore Weak-Signal Terrain", ref weakSignalRestore))
+            {
+                if (SetTerrainWeakSignalRestoreEnabled(weakSignalRestore))
+                    SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Amplify weak, era-compressed ADT relief in the live viewer. Only affects the camera tile and its four direct neighbors, and only when the source tile stays inside the configured Z band.");
+
+            float restoreRangeMin = _terrainWeakSignalRestoreCandidateMinHeight;
+            if (ImGui.InputFloat("Restore Range Min Z", ref restoreRangeMin, 10f, 100f, "%.1f"))
+            {
+                _terrainWeakSignalRestoreCandidateMinHeight = ClampTerrainWeakSignalRestoreZ(restoreRangeMin);
+                GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Early-era buried terrain tends to sit around -10..10. Later-era ocean-floor-compressed data can need something closer to -5000..10.");
+
+            float restoreRangeMax = _terrainWeakSignalRestoreCandidateMaxHeight;
+            if (ImGui.InputFloat("Restore Range Max Z", ref restoreRangeMax, 10f, 100f, "%.1f"))
+            {
+                _terrainWeakSignalRestoreCandidateMaxHeight = ClampTerrainWeakSignalRestoreZ(restoreRangeMax);
+                GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Use this with the minimum bound to switch between early 0-floor data and later ocean-floor-compressed tiles.");
+
+            ImGui.TextDisabled("Examples: early era -10..10, later era -5000..10.");
+
+            bool weakSignalAuto = _terrainWeakSignalRestoreUseAutoFactor;
+            if (ImGui.Checkbox("Auto Restore Scale", ref weakSignalAuto))
+            {
+                _terrainWeakSignalRestoreUseAutoFactor = weakSignalAuto;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Use the WDL-backed auto estimate. Turn this off to A/B the manual restore slider instead.");
+
+            if (!_terrainWeakSignalRestoreUseAutoFactor)
+            {
+                float manualRestoreScale = _terrainWeakSignalRestoreManualFactor;
+                if (ImGui.SliderFloat("Restore Scale", ref manualRestoreScale, 1f, TerrainWeakSignalRestoreMaxFactor, "%.2fx"))
+                {
+                    _terrainWeakSignalRestoreManualFactor = manualRestoreScale;
+                    MarkTerrainWeakSignalRestoreDirty();
+                    SaveViewerSettings();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Manual viewer-only terrain relief multiplier. Reapplies from the original tile data so you can A/B without compounding.");
+            }
+
+            ImGui.TextDisabled($"Candidates: camera tile + 4 neighbors, source Z in {_terrainWeakSignalRestoreCandidateMinHeight:0.#}..{_terrainWeakSignalRestoreCandidateMaxHeight:0.#}, amplified from z=0 or the source floor when already below sea level.");
+
+            if (!string.IsNullOrWhiteSpace(_terrainWeakSignalRestoreStatus))
+                ImGui.TextWrapped(_terrainWeakSignalRestoreStatus);
+
             bool layoutObjectPreviewMode = _layoutObjectPreviewMode;
             if (ImGui.Checkbox("Pretextured Layout Mode", ref layoutObjectPreviewMode))
                 SetLayoutObjectPreviewMode(layoutObjectPreviewMode);

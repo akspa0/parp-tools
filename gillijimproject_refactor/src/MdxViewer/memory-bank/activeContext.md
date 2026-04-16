@@ -1,5 +1,23 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 16, 2026 - weak-signal terrain restore now exists as a live viewer checkbox, but only build validation is captured so far
+
+- followed the user's correction that the hidden-terrain path needed to stop being another analysis workflow and become a direct restore control in the active viewer
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` now keeps a reversible weak-signal terrain-restore session state, caching original tile chunks before any replacement so the live terrain can be restored or reverted per session
+   - the same viewer path now hooks `TerrainManager` and `VlmTerrainManager` tile-load events, reapplies the restore pass to newly loaded tiles, and resets that session cache when the user swaps worlds or VLM projects
+   - tile reconstruction goes through the existing `TerrainHeightmapIo.BuildTileHeightmap257(...)` and `ApplyHeightmap257ToChunks(...)` seam instead of inventing a second terrain-write path
+   - restore-factor estimation still uses same-tile WDL coarse relief first via `WdlParser.WdlTile.MinZ` and `MaxZ`, but the active viewer path now also supports a manual restore slider for A/B work and reapplies from the cached original tile instead of compounding from already-restored geometry
+   - the active viewer now limits restore candidates to the camera tile plus its four direct neighbors, and only when the source tile stays at or below `10` z units so normal terrain is less likely to explode upward
+   - the current restore transform now scales terrain upward from `z=0` in the viewer-only pass instead of multiplying negative near-sea values farther below sea level
+   - follow-up fix later the same day: `GetCameraTile()` now uses the same floored tile math as the rest of the viewer UI, auto restore now derives its first factor guess from the currently loaded terrain range before falling back to WDL, and the restore transform no longer flattens legitimate below-sea relief by hard-clamping all negative heights to zero
+   - `ViewerApp_Sidebars.cs` now exposes `Restore Weak-Signal Terrain`, `Auto Restore Scale`, and the manual `Restore Scale` slider in Terrain Controls, and shows the current restore status text there instead of hiding this behind the terrain-analysis tooling
+   - `ViewerSettings` now persists the checkbox state plus the auto/manual restore-scale mode
+- build proof only:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/mdxviewer-weak-signal-restore/` passed on Apr 16, 2026 with existing workspace warnings only; final summary reported `Build succeeded with 233 warning(s) in 24.3s`
+- important boundary:
+   - no real-data viewer runtime validation has been captured yet for the new restore neighborhood gate or zero-anchored scaling behavior, so do not claim the terrain-restoration math is visually correct on live map data until that proof exists
+
 ## Apr 16, 2026 - the default wow-viewer M2 renderer in MdxViewer is no longer static-only; it now advances skeletal runtime animation in the active viewer
 
 - followed the next user request after making the pure runtime renderer default: stop leaving animation as a known gap and wire the active viewer toward the existing wow-viewer pose and skinning pipeline
