@@ -14,6 +14,8 @@ internal sealed class M2PreviewLoadRequest
 
     public string? VirtualPath { get; init; }
 
+    public string? BuildLabel { get; init; }
+
     public int ProfileIndex { get; init; }
 
     public int SequenceIndex { get; init; }
@@ -49,9 +51,13 @@ internal sealed class M2PreviewLoadRequest
 
     public string DescribeSource()
     {
-        return UsesArchiveSource
+        string source = UsesArchiveSource
             ? $"archive:{ArchiveRoot}::{VirtualPath}"
             : Path.GetFullPath(InputPath!);
+
+        return string.IsNullOrWhiteSpace(BuildLabel)
+            ? source
+            : $"{source} [{BuildLabel}]";
     }
 }
 

@@ -66,6 +66,20 @@
 - out of scope:
   - no world runtime extraction yet
 
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer/src/viewer/WowViewer.App/`:
+  - `WowViewerSession.cs` now owns the typed app-local viewer session contract
+  - the session currently carries workspace mode, typed asset source kind, build label, profile index, sequence index, time, and preview size
+  - `WowViewerDesktopApp` now uses that session object instead of keeping raw source and preview fields directly on the host
+  - `WowViewerAppSettings` now persists the session object instead of a flat source-field blob
+  - `Program.cs` now parses `viewer` app bootstrap requests into a typed session object, while `m2-frame` still uses the narrower direct request path
+- proof completed:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - real-data loader proof still succeeds through the same app/runtime seam with `--build-label 3.3.5.12340` on `Creature/Wolf/Wolf.m2`
+- current boundary:
+  - this closes the app-side session boundary only; it does not yet create standalone workspaces, a GPU preview path, or world-session bootstrap
+
 ### Slice 03 - Standalone Asset Workspaces
 
 - target problem:
@@ -144,8 +158,7 @@
 
 ## Immediate Next Slice
 
-- slice 01: app state and settings persistence
+- slice 03: standalone asset workspaces
 - reason:
-  - it is a small standalone app-owned step
-  - it makes the new shell behave like a real app instead of a temporary probe
-  - it reduces friction for all later slices without pulling old `ViewerApp` code back in
+  - the app now has both persisted state and a typed session boundary, so the next clean step is reorganizing the shell around explicit workspaces instead of one monolithic control surface
+  - that gives the M2 path a stable home before any GPU preview or world bootstrap work starts

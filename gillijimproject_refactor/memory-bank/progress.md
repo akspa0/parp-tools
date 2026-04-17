@@ -1,5 +1,19 @@
 # Progress
 
+### Apr 17, 2026 - wow-viewer app slice 02 landed: the desktop host now runs through a typed viewer-session contract
+
+- what changed:
+	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` as the app-local session seam for workspace mode, typed asset source selection, build label, and preview request state
+	- `WowViewerDesktopApp.cs` now uses that session object instead of keeping raw source/build/preview fields directly on the host
+	- `WowViewerAppSettings.cs` now persists the session object rather than the earlier flat source-setting blob
+	- `Program.cs` now parses `viewer` bootstrap arguments into a typed session object, while `m2-frame` stays on the narrower request path used for direct runtime proof
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
+	- real-data app/runtime proof still succeeded via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- m2-frame --archive-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --virtual-path "Creature/Wolf/Wolf.m2" --build-label 3.3.5.12340 --sequence-index 0 --time-ms 0`
+	- that proof preserved the earlier Wolf hashes: runtime `9e9586068a443468ccec1abd62b3d717c0455e08999bd03beb21427a9df4ec30`, render-frame `177155d088dc8502be5b115b6b3d1a0fa67e75549cfe87c981bff6a8f8ac4122`, visual `b2fabb6da814c393ea149fb7321cbd3e05d24db8852f59dca35c755c29bfb177`
+- boundary:
+	- this closes the host-side session seam only; the app still does not have a dedicated workspace split, GPU preview renderer, or world-session bootstrap yet
+
 ### Apr 17, 2026 - wow-viewer viewer-app cutover now has an explicit staged plan, and slice 01 app settings persistence is landed
 
 - what changed:

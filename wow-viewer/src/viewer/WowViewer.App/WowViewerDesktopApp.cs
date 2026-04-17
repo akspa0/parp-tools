@@ -21,7 +21,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private static readonly MethodInfo? ImGuiControllerWindowResizedMethod =
         typeof(ImGuiController).GetMethod("WindowResized", BindingFlags.Instance | BindingFlags.NonPublic);
 
-    private readonly M2PreviewLoadRequest? _initialRequest;
+    private readonly WowViewerSession _session;
+    private readonly WowViewerSession? _initialSession;
     private readonly WowViewerAppSettings _settings;
 
     private IWindow? _window;
@@ -32,14 +33,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private Vector2D<int> _lastSyncedImGuiFramebufferSize;
     private bool _disposed;
     private bool _requestInitialLoad;
-    private bool _useArchiveSource = true;
-    private string _archiveRoot = string.Empty;
-    private string _virtualPath = string.Empty;
-    private string _inputPath = string.Empty;
-    private int _profileIndex;
-    private int _sequenceIndex;
-    private int _timeMs;
-    private int _visualSize = 384;
     private string _statusMessage = "Configure an archive-backed or local M2 source, then load a preview.";
     private string _lastLoadSummary = "No preview loaded.";
     private string? _lastError;
@@ -50,13 +43,15 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private bool _showDiagnosticsWindow = true;
     private bool _showBoundaryWindow = true;
 
-    public WowViewerDesktopApp(M2PreviewLoadRequest? initialRequest = null)
+    public WowViewerDesktopApp(WowViewerSession? initialSession = null)
     {
-        _initialRequest = initialRequest;
         _settings = WowViewerAppSettingsStore.Load();
+        _session = _settings.Session ?? WowViewerSession.CreateDefault();
+        _session.Normalize();
+        _initialSession = initialSession;
         ApplySettingsToState(_settings);
-        if (_initialRequest != null)
-            ApplyRequestToState(_initialRequest);
+        if (_initialSession != null)
+            ApplySession(_initialSession);
     }
 
     public void Run()
@@ -105,7 +100,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.Disable(EnableCap.CullFace);
 
-        _requestInitialLoad = _initialRequest != null;
+        _requestInitialLoad = _initialSession != null;
     }
 
     private void OnUpdate(double deltaSeconds)
@@ -209,58 +204,78 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         ImGui.TextWrapped("This first `wow-viewer` desktop shell stays library-first: it loads M2 assets only through the `wow-viewer` runtime pipeline and shows the software visual preview plus deterministic runtime diagnostics.");
         ImGui.Separator();
+        ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
+        ImGui.TextDisabled($"Source: {_session.Source.Describe()}");
+        ImGui.Separator();
 
-        bool useArchive = _useArchiveSource;
+        bool useArchive = _session.Source.UsesArchiveSource;
         if (ImGui.RadioButton("Archive-backed input", useArchive))
-            _useArchiveSource = true;
+            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
         ImGui.SameLine();
-        if (ImGui.RadioButton("Local file input", !_useArchiveSource))
-            _useArchiveSource = false;
+        if (ImGui.RadioButton("Local file input", !_session.Source.UsesArchiveSource))
+            _session.Source.Kind = WowViewerAssetSourceKind.LocalFile;
 
         ImGui.Separator();
-        if (_useArchiveSource)
+        if (_session.Source.UsesArchiveSource)
         {
-            ImGui.InputText("Archive Root", ref _archiveRoot, 1024);
-            ImGui.InputText("Virtual Path", ref _virtualPath, 1024);
+            string archiveRoot = _session.Source.ArchiveRoot;
+            string virtualPath = _session.Source.VirtualPath;
+            ImGui.InputText("Archive Root", ref archiveRoot, 1024);
+            ImGui.InputText("Virtual Path", ref virtualPath, 1024);
+            _session.Source.ArchiveRoot = archiveRoot;
+            _session.Source.VirtualPath = virtualPath;
         }
         else
         {
-            ImGui.InputText("Input File", ref _inputPath, 1024);
+            string inputPath = _session.Source.InputPath;
+            ImGui.InputText("Input File", ref inputPath, 1024);
+            _session.Source.InputPath = inputPath;
         }
 
-        ImGui.InputInt("Profile Index", ref _profileIndex);
-        ImGui.InputInt("Sequence Index", ref _sequenceIndex);
-        ImGui.InputInt("Time (ms)", ref _timeMs);
-        ImGui.InputInt("Preview Size", ref _visualSize);
+        string buildLabel = _session.Source.BuildLabel;
+        ImGui.InputText("Build Label", ref buildLabel, 256);
+        _session.Source.BuildLabel = buildLabel;
 
-        _profileIndex = Math.Clamp(_profileIndex, 0, 99);
-        _sequenceIndex = Math.Max(0, _sequenceIndex);
-        _timeMs = Math.Max(0, _timeMs);
-        _visualSize = Math.Clamp(_visualSize, 128, 1024);
+        int profileIndex = _session.ProfileIndex;
+        int sequenceIndex = _session.SequenceIndex;
+        int timeMs = _session.TimeMs;
+        int visualSize = _session.VisualSize;
+        ImGui.InputInt("Profile Index", ref profileIndex);
+        ImGui.InputInt("Sequence Index", ref sequenceIndex);
+        ImGui.InputInt("Time (ms)", ref timeMs);
+        ImGui.InputInt("Preview Size", ref visualSize);
+        _session.ProfileIndex = profileIndex;
+        _session.SequenceIndex = sequenceIndex;
+        _session.TimeMs = timeMs;
+        _session.VisualSize = visualSize;
+
+        _session.Normalize();
 
         if (ImGui.Button("Load Preview", new Vector2(-1, 0)))
             LoadPreview();
 
         if (ImGui.Button("Use Wolf Runtime Baseline", new Vector2(-1, 0)))
         {
-            _useArchiveSource = true;
-            _archiveRoot = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
-            _virtualPath = @"Creature/Wolf/Wolf.m2";
-            _profileIndex = 0;
-            _sequenceIndex = 0;
-            _timeMs = 0;
-            _visualSize = 384;
+            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
+            _session.Source.ArchiveRoot = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
+            _session.Source.VirtualPath = @"Creature/Wolf/Wolf.m2";
+            _session.Source.BuildLabel = "3.3.5.12340";
+            _session.ProfileIndex = 0;
+            _session.SequenceIndex = 0;
+            _session.TimeMs = 0;
+            _session.VisualSize = 384;
         }
 
         if (ImGui.Button("Use Camera Overlay Baseline", new Vector2(-1, 0)))
         {
-            _useArchiveSource = true;
-            _archiveRoot = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
-            _virtualPath = @"Cameras/Scry_cam.m2";
-            _profileIndex = 0;
-            _sequenceIndex = 0;
-            _timeMs = 0;
-            _visualSize = 384;
+            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
+            _session.Source.ArchiveRoot = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
+            _session.Source.VirtualPath = @"Cameras/Scry_cam.m2";
+            _session.Source.BuildLabel = "3.3.5.12340";
+            _session.ProfileIndex = 0;
+            _session.SequenceIndex = 0;
+            _session.TimeMs = 0;
+            _session.VisualSize = 384;
         }
 
         ImGui.Separator();
@@ -325,7 +340,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         M2RenderFrame render = frame.RenderFrame;
 
         ImGui.TextDisabled("Frame Summary");
-        ImGui.Text($"Source: {_currentPreview.Request.DescribeSource()}");
+        ImGui.Text($"Source: {_session.Source.Describe()}");
         ImGui.Text($"Load: {_currentPreview.LoadDuration.TotalMilliseconds:F1} ms");
         ImGui.Text($"Delta: {deltaSeconds * 1000f:F2} ms");
         ImGui.Text($"Runtime Hash: {golden.RuntimeHash}");
@@ -436,7 +451,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         try
         {
-            M2PreviewLoadRequest request = BuildRequestFromState();
+            M2PreviewLoadRequest request = _session.BuildM2PreviewRequest();
             M2PreviewLoadResult preview = M2PreviewLoader.Load(request);
             UploadPreviewTexture(preview.FrameResult.VisualSnapshot);
             _currentPreview = preview;
@@ -457,30 +472,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _lastLoadSummary = "No preview loaded.";
         _statusMessage = "Preview cleared.";
         DeletePreviewTexture();
-    }
-
-    private M2PreviewLoadRequest BuildRequestFromState()
-    {
-        return _useArchiveSource
-            ? new M2PreviewLoadRequest
-            {
-                ArchiveRoot = _archiveRoot,
-                VirtualPath = _virtualPath,
-                ProfileIndex = _profileIndex,
-                SequenceIndex = _sequenceIndex,
-                TimeMs = _timeMs,
-                VisualWidth = _visualSize,
-                VisualHeight = _visualSize,
-            }
-            : new M2PreviewLoadRequest
-            {
-                InputPath = _inputPath,
-                ProfileIndex = _profileIndex,
-                SequenceIndex = _sequenceIndex,
-                TimeMs = _timeMs,
-                VisualWidth = _visualSize,
-                VisualHeight = _visualSize,
-            };
     }
 
     private unsafe void UploadPreviewTexture(M2SoftwareVisualSnapshot snapshot)
@@ -522,28 +513,25 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _previewTextureHandle = 0;
     }
 
-    private void ApplyRequestToState(M2PreviewLoadRequest request)
+    private void ApplySession(WowViewerSession session)
     {
-        _useArchiveSource = request.UsesArchiveSource;
-        _archiveRoot = request.ArchiveRoot ?? string.Empty;
-        _virtualPath = request.VirtualPath ?? string.Empty;
-        _inputPath = request.InputPath ?? string.Empty;
-        _profileIndex = request.ProfileIndex;
-        _sequenceIndex = request.SequenceIndex;
-        _timeMs = request.TimeMs;
-        _visualSize = Math.Clamp(Math.Max(request.VisualWidth, request.VisualHeight), 128, 1024);
+        ArgumentNullException.ThrowIfNull(session);
+        _session.WorkspaceMode = session.WorkspaceMode;
+        _session.Source.Kind = session.Source.Kind;
+        _session.Source.ArchiveRoot = session.Source.ArchiveRoot ?? string.Empty;
+        _session.Source.VirtualPath = session.Source.VirtualPath ?? string.Empty;
+        _session.Source.InputPath = session.Source.InputPath ?? string.Empty;
+        _session.Source.BuildLabel = session.Source.BuildLabel ?? string.Empty;
+        _session.ProfileIndex = session.ProfileIndex;
+        _session.SequenceIndex = session.SequenceIndex;
+        _session.TimeMs = session.TimeMs;
+        _session.VisualSize = session.VisualSize;
+        _session.Normalize();
     }
 
     private void ApplySettingsToState(WowViewerAppSettings settings)
     {
-        _useArchiveSource = settings.UseArchiveSource;
-        _archiveRoot = settings.ArchiveRoot ?? string.Empty;
-        _virtualPath = settings.VirtualPath ?? string.Empty;
-        _inputPath = settings.InputPath ?? string.Empty;
-        _profileIndex = Math.Clamp(settings.ProfileIndex, 0, 99);
-        _sequenceIndex = Math.Max(0, settings.SequenceIndex);
-        _timeMs = Math.Max(0, settings.TimeMs);
-        _visualSize = Math.Clamp(settings.VisualSize, 128, 1024);
+        ApplySession(settings.Session ?? WowViewerSession.CreateDefault());
         _showAboutWindow = settings.ShowAboutWindow;
         _showControlWindow = settings.ShowControlWindow;
         _showDiagnosticsWindow = settings.ShowDiagnosticsWindow;
@@ -552,14 +540,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void SaveSettings()
     {
-        _settings.UseArchiveSource = _useArchiveSource;
-        _settings.ArchiveRoot = _archiveRoot;
-        _settings.VirtualPath = _virtualPath;
-        _settings.InputPath = _inputPath;
-        _settings.ProfileIndex = Math.Clamp(_profileIndex, 0, 99);
-        _settings.SequenceIndex = Math.Max(0, _sequenceIndex);
-        _settings.TimeMs = Math.Max(0, _timeMs);
-        _settings.VisualSize = Math.Clamp(_visualSize, 128, 1024);
+        _session.Normalize();
+        _settings.Session = _session;
         _settings.ShowAboutWindow = _showAboutWindow;
         _settings.ShowControlWindow = _showControlWindow;
         _settings.ShowDiagnosticsWindow = _showDiagnosticsWindow;

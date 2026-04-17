@@ -1,5 +1,23 @@
 # Active Context
 
+## Apr 17, 2026 - wow-viewer desktop app now has a typed viewer-session boundary, so the host no longer owns raw source fields directly
+
+- slice 02 from the new viewer-app cutover plan is now landed in `wow-viewer/src/viewer/WowViewer.App/`
+- `WowViewerSession.cs` now owns the app-local typed session contract:
+	- workspace mode
+	- typed asset source kind
+	- build label
+	- profile/sequence/time
+	- preview size
+- `WowViewerDesktopApp` now reads and writes that session object instead of carrying raw source paths and preview parameters as loose fields on the app host
+- `WowViewerAppSettings` now persists the session object instead of the earlier flat setting set
+- `Program.cs` now parses `viewer` bootstrap arguments into a session object, while `m2-frame` remains the narrower direct runtime request path
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+	- real fixed-root proof still succeeds through `WowViewer.App m2-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Creature/Wolf/Wolf.m2`, now also carrying `--build-label 3.3.5.12340`
+- current boundary:
+	- the session seam is now real, but the app still has only one standalone M2 workspace surface and still relies on the software visual snapshot rather than a true GPU preview path
+
 ## Apr 17, 2026 - wow-viewer viewer-app cutover is now staged through a dedicated plan, and slice 01 app settings persistence is landed
 
 - after the first wow-viewer desktop shell landed, the next risk was slipping back into broad ad hoc viewer work; that is now corrected with a dedicated continuity plan at `gillijimproject_refactor/plans/wow_viewer_viewer_app_cutover_plan_2026-04-17.md`

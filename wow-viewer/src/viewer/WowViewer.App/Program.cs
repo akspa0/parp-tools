@@ -32,7 +32,7 @@ internal static class Program
             {
                 case "viewer":
                 case "app":
-                    using (WowViewerDesktopApp app = new(ParseViewerRequest(tail)))
+                    using (WowViewerDesktopApp app = new(ParseViewerSession(tail)))
                         app.Run();
                     return 0;
 
@@ -40,7 +40,7 @@ internal static class Program
                     return RunM2Frame(tail);
 
                 default:
-                    using (WowViewerDesktopApp app = new(ParseViewerRequest(args)))
+                    using (WowViewerDesktopApp app = new(ParseViewerSession(args)))
                         app.Run();
                     return 0;
             }
@@ -80,11 +80,12 @@ internal static class Program
         return 0;
     }
 
-    private static M2PreviewLoadRequest? ParseViewerRequest(string[] args)
+    private static WowViewerSession? ParseViewerSession(string[] args)
     {
         string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
         string? archiveRoot = GetOption(args, "--archive-root", "-r");
         string? virtualPath = GetOption(args, "--virtual-path", "-v");
+        string? buildLabel = GetOption(args, "--build-label", "-b");
         string? profileIndexText = GetOption(args, "--profile-index", "-p");
         string? sequenceIndexText = GetOption(args, "--sequence-index", "-s");
         string? timeMsText = GetOption(args, "--time-ms", "-t");
@@ -100,17 +101,21 @@ internal static class Program
         if (visualSize < 16)
             visualSize = 384;
 
-        return new M2PreviewLoadRequest
-        {
-            InputPath = string.IsNullOrWhiteSpace(archiveRoot) ? input : null,
-            ArchiveRoot = archiveRoot,
-            VirtualPath = string.IsNullOrWhiteSpace(archiveRoot) ? null : (virtualPath ?? input),
-            ProfileIndex = profileIndex,
-            SequenceIndex = Math.Max(0, sequenceIndex),
-            TimeMs = Math.Max(0, timeMs),
-            VisualWidth = visualSize,
-            VisualHeight = visualSize,
-        };
+        WowViewerSession session = WowViewerSession.CreateDefault();
+        session.WorkspaceMode = WowViewerWorkspaceMode.StandaloneM2;
+        session.Source.Kind = string.IsNullOrWhiteSpace(archiveRoot)
+            ? WowViewerAssetSourceKind.LocalFile
+            : WowViewerAssetSourceKind.ArchiveVirtualPath;
+        session.Source.InputPath = string.IsNullOrWhiteSpace(archiveRoot) ? input ?? string.Empty : string.Empty;
+        session.Source.ArchiveRoot = archiveRoot ?? string.Empty;
+        session.Source.VirtualPath = string.IsNullOrWhiteSpace(archiveRoot) ? string.Empty : (virtualPath ?? input ?? string.Empty);
+        session.Source.BuildLabel = buildLabel ?? string.Empty;
+        session.ProfileIndex = profileIndex;
+        session.SequenceIndex = Math.Max(0, sequenceIndex);
+        session.TimeMs = Math.Max(0, timeMs);
+        session.VisualSize = visualSize;
+        session.Normalize();
+        return session;
     }
 
     private static M2PreviewLoadRequest ParseRequiredM2Request(string[] args, int defaultVisualSize)
@@ -118,6 +123,7 @@ internal static class Program
         string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
         string? archiveRoot = GetOption(args, "--archive-root", "-r");
         string? virtualPath = GetOption(args, "--virtual-path", "-v");
+        string? buildLabel = GetOption(args, "--build-label", "-b");
         string? profileIndexText = GetOption(args, "--profile-index", "-p");
         string? sequenceIndexText = GetOption(args, "--sequence-index", "-s");
         string? timeMsText = GetOption(args, "--time-ms", "-t");
@@ -146,7 +152,8 @@ internal static class Program
         {
             InputPath = string.IsNullOrWhiteSpace(archiveRoot) ? input : null,
             ArchiveRoot = archiveRoot,
-            VirtualPath = string.IsNullOrWhiteSpace(archiveRoot) ? null : virtualPath,
+            VirtualPath = string.IsNullOrWhiteSpace(archiveRoot) ? null : (virtualPath ?? input),
+            BuildLabel = buildLabel,
             ProfileIndex = profileIndex,
             SequenceIndex = sequenceIndex,
             TimeMs = timeMs,
@@ -218,8 +225,8 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  wowviewer-app");
-        Console.WriteLine("  wowviewer-app viewer [--archive-root <game|data dir> --virtual-path <path/to/file.m2> | --input <file.m2>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>]");
-        Console.WriteLine("  wowviewer-app m2-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
-        Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
+        Console.WriteLine("  wowviewer-app viewer [--archive-root <game|data dir> --virtual-path <path/to/file.m2> | --input <file.m2>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>]");
+        Console.WriteLine("  wowviewer-app m2-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
+        Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
     }
 }
