@@ -47,6 +47,9 @@ internal static class Program
                 case "m2-gpu-frame":
                     return RunM2GpuFrame(tail);
 
+                case "mdx-gpu-frame":
+                    return RunMdxGpuFrame(tail);
+
                 case "world-bootstrap":
                     return RunWorldBootstrap(tail);
 
@@ -92,7 +95,7 @@ internal static class Program
         if (!string.IsNullOrWhiteSpace(renderFrameOutput))
             WriteJson(renderFrameOutput, renderFrame);
         if (!string.IsNullOrWhiteSpace(visualOutput))
-            WriteBmp(visualOutput, result.FrameResult.VisualSnapshot);
+            WriteImage(visualOutput, result.FrameResult.VisualSnapshot);
 
         return 0;
     }
@@ -102,10 +105,23 @@ internal static class Program
         M2PreviewLoadRequest request = ParseRequiredM2Request(args, defaultVisualSize: 512);
         string? output = GetOption(args, "--output", "-o");
         if (string.IsNullOrWhiteSpace(output))
-            throw new ArgumentException("Provide --output <file.bmp> for m2-gpu-frame.");
+            throw new ArgumentException("Provide --output <file.bmp|file.png> for m2-gpu-frame.");
 
         string outputPath = Path.GetFullPath(output);
         M2GpuPreviewCaptureRunner.Capture(request, outputPath);
+        Console.WriteLine($"Wrote {outputPath}");
+        return 0;
+    }
+
+    private static int RunMdxGpuFrame(string[] args)
+    {
+        MdxPreviewLoadRequest request = ParseRequiredMdxRequest(args, defaultVisualWidth: 1920, defaultVisualHeight: 1080);
+        string? output = GetOption(args, "--output", "-o");
+        if (string.IsNullOrWhiteSpace(output))
+            throw new ArgumentException("Provide --output <file.bmp|file.png> for mdx-gpu-frame.");
+
+        string outputPath = Path.GetFullPath(output);
+        MdxGpuPreviewCaptureRunner.Capture(request, outputPath);
         Console.WriteLine($"Wrote {outputPath}");
         return 0;
     }
@@ -146,12 +162,13 @@ internal static class Program
         Console.WriteLine($"WowViewer.App world-frame placements: wmo={result.WmoInstances.Count} readyWmo={result.ReadyWmoCount} mdx={result.MdxInstances.Count} readyMdx={result.ReadyMdxCount} pending={result.PendingAssetKeys.Count}");
         Console.WriteLine($"WowViewer.App world-frame visibility: visibleWmo={result.Visibility.VisibleWmos.Count} culledWmo={result.CulledWmoCount} visibleMdx={result.Visibility.VisibleMdx.Count} culledMdx={result.CulledMdxCount} taxi={result.Visibility.VisibleTaxiMdxCount}");
         Console.WriteLine($"WowViewer.App world-frame passes: updatedMdx={result.Stats.MdxAnimation.SubmittedCount} wmoOpaque={result.Stats.WmoSubmission.SubmittedCount} mdxOpaque={result.Stats.MdxOpaqueSubmission.SubmittedCount} mdxTransparent={result.Stats.MdxTransparentSubmission.SubmittedCount} opaqueRoutes={result.PassFrame.OpaqueVisibleMdxRoutes.Count} transparentRoutes={result.PassFrame.TransparentVisibleMdxRoutes.Count}");
+        Console.WriteLine($"WowViewer.App world-frame gpu-plan: opaqueBatches={result.MdxRenderPlan.OpaqueBatchCount} transparentBatches={result.MdxRenderPlan.TransparentBatchCount} opaqueInstances={result.MdxRenderPlan.OpaqueInstanceCount} transparentInstances={result.MdxRenderPlan.TransparentInstanceCount}");
         Console.WriteLine($"WowViewer.App world-frame hint: {result.OptimizationHint}");
         if (result.PendingAssetKeys.Count > 0)
             Console.WriteLine($"WowViewer.App world-frame pending-sample: {string.Join(", ", result.PendingAssetKeys.Take(8))}");
 
         if (!string.IsNullOrWhiteSpace(terrainPreviewOutput))
-            WriteBmp(terrainPreviewOutput, result.TerrainVisualSnapshot);
+            WriteImage(terrainPreviewOutput, result.TerrainVisualSnapshot);
 
         return 0;
     }
@@ -434,6 +451,97 @@ internal static class Program
         };
     }
 
+    private static MdxPreviewLoadRequest ParseRequiredMdxRequest(string[] args, int defaultVisualWidth, int defaultVisualHeight)
+    {
+        string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+        string? archiveRoot = GetOption(args, "--archive-root", "-r");
+        string? virtualPath = GetOption(args, "--virtual-path", "-v");
+        string? buildLabel = GetOption(args, "--build-label", "-b");
+        string? visualSizeText = GetOption(args, "--visual-size");
+        string? visualWidthText = GetOption(args, "--visual-width");
+        string? visualHeightText = GetOption(args, "--visual-height");
+        string? cameraModeText = GetOption(args, "--camera-mode");
+        string? cameraPresetText = GetOption(args, "--camera-preset");
+        string? cameraAzimuthText = GetOption(args, "--camera-azimuth");
+        string? cameraElevationText = GetOption(args, "--camera-elevation");
+        string? cameraFovText = GetOption(args, "--camera-fov");
+        string? cameraZoomText = GetOption(args, "--camera-zoom");
+
+        if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
+            virtualPath = input;
+
+        if (string.IsNullOrWhiteSpace(input) && (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(virtualPath)))
+            throw new ArgumentException("Provide --input <file.mdx> or --archive-root <dir> with --virtual-path <path/to/file.mdx>.");
+
+        int visualWidth = defaultVisualWidth;
+        int visualHeight = defaultVisualHeight;
+        if (!string.IsNullOrWhiteSpace(visualSizeText))
+        {
+            if (!int.TryParse(visualSizeText, out int visualSize) || visualSize < 16)
+                throw new ArgumentOutOfRangeException(nameof(visualSizeText), "--visual-size must be an integer greater than or equal to 16.");
+
+            visualWidth = visualSize;
+            visualHeight = visualSize;
+        }
+
+        if (!string.IsNullOrWhiteSpace(visualWidthText)
+            && (!int.TryParse(visualWidthText, out visualWidth) || visualWidth < 16))
+            throw new ArgumentOutOfRangeException(nameof(visualWidthText), "--visual-width must be an integer greater than or equal to 16.");
+
+        if (!string.IsNullOrWhiteSpace(visualHeightText)
+            && (!int.TryParse(visualHeightText, out visualHeight) || visualHeight < 16))
+            throw new ArgumentOutOfRangeException(nameof(visualHeightText), "--visual-height must be an integer greater than or equal to 16.");
+
+        visualWidth = Math.Max(visualWidth, 1920);
+        visualHeight = Math.Max(visualHeight, 1080);
+
+        PreviewCameraMode cameraMode = PreviewCameraMode.Frame;
+        if (!string.IsNullOrWhiteSpace(cameraModeText))
+        {
+            if (!Enum.TryParse(cameraModeText, ignoreCase: true, out cameraMode))
+            throw new ArgumentOutOfRangeException(nameof(cameraModeText), "--camera-mode must be 'frame', 'orbit', or 'model'.");
+        }
+
+        float cameraAzimuth = 35.0f;
+        if (!string.IsNullOrWhiteSpace(cameraAzimuthText)
+            && (!float.TryParse(cameraAzimuthText, out cameraAzimuth) || !float.IsFinite(cameraAzimuth)))
+            throw new ArgumentOutOfRangeException(nameof(cameraAzimuthText), "--camera-azimuth must be a finite number of degrees.");
+
+        float cameraElevation = 25.0f;
+        if (!string.IsNullOrWhiteSpace(cameraElevationText)
+            && (!float.TryParse(cameraElevationText, out cameraElevation) || !float.IsFinite(cameraElevation)))
+            throw new ArgumentOutOfRangeException(nameof(cameraElevationText), "--camera-elevation must be a finite number of degrees.");
+
+        float cameraFov = 60.0f;
+        if (!string.IsNullOrWhiteSpace(cameraFovText)
+            && (!float.TryParse(cameraFovText, out cameraFov) || !float.IsFinite(cameraFov)))
+            throw new ArgumentOutOfRangeException(nameof(cameraFovText), "--camera-fov must be a finite number of degrees.");
+
+        float cameraZoom = 0.72f;
+        if (!string.IsNullOrWhiteSpace(cameraZoomText)
+            && (!float.TryParse(cameraZoomText, out cameraZoom) || !float.IsFinite(cameraZoom)))
+            throw new ArgumentOutOfRangeException(nameof(cameraZoomText), "--camera-zoom must be a finite number.");
+
+        return new MdxPreviewLoadRequest
+        {
+            InputPath = string.IsNullOrWhiteSpace(archiveRoot) ? input : null,
+            ArchiveRoot = archiveRoot,
+            VirtualPath = string.IsNullOrWhiteSpace(archiveRoot) ? null : (virtualPath ?? input),
+            BuildLabel = buildLabel,
+            VisualWidth = visualWidth,
+            VisualHeight = visualHeight,
+            Camera = new PreviewCameraSettings
+            {
+                Mode = cameraMode,
+                PresetName = cameraPresetText,
+                AzimuthDegrees = cameraAzimuth,
+                ElevationDegrees = cameraElevation,
+                FieldOfViewDegrees = cameraFov,
+                ZoomFactor = cameraZoom,
+            },
+        };
+    }
+
     private static void WriteJson<T>(string output, T payload)
     {
         string outputPath = Path.GetFullPath(output);
@@ -445,27 +553,17 @@ internal static class Program
         Console.WriteLine($"Wrote {outputPath}");
     }
 
-    private static void WriteBmp(string output, M2SoftwareVisualSnapshot snapshot)
+    private static void WriteImage(string output, M2SoftwareVisualSnapshot snapshot)
     {
         string outputPath = Path.GetFullPath(output);
-        string? directory = Path.GetDirectoryName(outputPath);
-        if (!string.IsNullOrWhiteSpace(directory))
-            Directory.CreateDirectory(directory);
-
-        using FileStream stream = File.Create(outputPath);
-        M2SoftwareVisualSnapshotBuilder.WriteBmp(stream, snapshot);
+        ImageOutputWriter.WriteRgbImage(outputPath, snapshot.Width, snapshot.Height, snapshot.RgbPixels);
         Console.WriteLine($"Wrote {outputPath}");
     }
 
-    private static void WriteBmp(string output, WorldTerrainVisualSnapshot snapshot)
+    private static void WriteImage(string output, WorldTerrainVisualSnapshot snapshot)
     {
         string outputPath = Path.GetFullPath(output);
-        string? directory = Path.GetDirectoryName(outputPath);
-        if (!string.IsNullOrWhiteSpace(directory))
-            Directory.CreateDirectory(directory);
-
-        using FileStream stream = File.Create(outputPath);
-        WorldTerrainVisualSnapshotBuilder.WriteBmp(stream, snapshot);
+        ImageOutputWriter.WriteRgbaImage(outputPath, snapshot.Width, snapshot.Height, snapshot.RgbaPixels, sourceOriginBottomLeft: false);
         Console.WriteLine($"Wrote {outputPath}");
     }
 
@@ -517,8 +615,10 @@ internal static class Program
         Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file> | --client-root <game dir> --map <directory|id|name>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay]");
         Console.WriteLine("  wowviewer-app m2-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
-        Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
-        Console.WriteLine("  wowviewer-app m2-gpu-frame --input <file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
+        Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp|file.png> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
+        Console.WriteLine("  wowviewer-app m2-gpu-frame --input <file.m2> --sequence-index <n> --output <file.bmp|file.png> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
+        Console.WriteLine("  wowviewer-app mdx-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.mdx> --output <file.bmp|file.png> [--build-label <label>] [--visual-width <px>] [--visual-height <px>] [--visual-size <px>] [--camera-mode frame|orbit|model] [--camera-preset front|back|left|right|top|three_quarter] [--camera-azimuth <deg>] [--camera-elevation <deg>] [--camera-fov <deg>] [--camera-zoom <factor>]");
+        Console.WriteLine("  wowviewer-app mdx-gpu-frame --input <file.mdx> --output <file.bmp|file.png> [--build-label <label>] [--visual-width <px>] [--visual-height <px>] [--visual-size <px>] [--camera-mode frame|orbit|model] [--camera-preset front|back|left|right|top|three_quarter] [--camera-azimuth <deg>] [--camera-elevation <deg>] [--camera-fov <deg>] [--camera-zoom <factor>]");
         Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--build-label <label>]");
         Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--terrain-preview-output <file.bmp>]");
         Console.WriteLine("  wowviewer-app world-placement-audit --client-root <game dir> --map <directory|id|name> [--build-label <label>] [--limit <count>]");

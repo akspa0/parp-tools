@@ -1,18 +1,40 @@
 # Progress
 
+### Apr 17, 2026 - standalone MDX preview now uses the ported Frame Model path and desktop camera controls
+
+- what changed:
+	- `wow-viewer/src/viewer/WowViewer.App/PreviewCameraPlanner.cs` now owns a reusable MDX preview camera surface that defaults to the old `MdxViewer` `FrameBounds(...)` behavior instead of the earlier fit-to-corners camera path, while keeping explicit `orbit` and `model` modes available for bounded alternate capture paths
+	- the same planner now uses a wider old-viewer-shaped default FOV for frame mode, and the standalone preview floor on legacy frame distance was reduced so small props no longer stay excessively far away
+	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now resolves preview bounds from actual renderable geoset vertices before declared summary bounds, matching the old `MdxViewer` renderer's local bounds preference for normal MDX and fixing the main cause of the zoomed-out first-view regression
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` now persists bounded MDX camera settings for the desktop app, and `WowViewerDesktopApp.cs` now exposes frame or orbit or model selection plus orbit preset or custom azimuth or elevation and FOV or zoom controls in the MDX workspace pane
+	- the MDX control surface now reloads the active preview with the current camera settings instead of leaving camera iteration as a CLI-only flow
+- validation:
+	- repeated `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passes succeeded through the camera-path port, bounds-source port, and desktop control wiring, with only the usual workspace `LIB` warnings plus existing nullable warnings in unrelated files
+	- real-data capture proof via `WowViewer.App mdx-gpu-frame` on `wow-viewer/testdata/0.5.3/tree/Creature/Banshee/Banshee.mdx` confirmed that the final default frame path is no longer stuck in the tiny-speck regression state
+	- real-data capture proof on `wow-viewer/testdata/0.6.0/World of Warcraft/Data/world/generic/activedoodads/chest01/chest01.mdx` confirmed the reduced standalone frame-distance floor improves small-prop framing without needing manual camera overrides
+- boundary:
+	- this closes bounded MDX first-frame camera parity plus app-side control plumbing only
+	- the next camera-facing follow-up should be either live viewport interaction in the standalone MDX workspace or a later visual-bounds-aware framing mode for particle-heavy assets
+
 ### Apr 17, 2026 - Alpha rich-tile world-frame proof now carries all ready MDX placements through visibility and pass planning on the canonical 0.5.5 client
 
 - what changed:
 	- `wow-viewer/src/viewer/WowViewer.App/Program.cs` now exposes `world-placement-audit`, a bounded CLI proof command that scans occupied tiles for placement counts without forcing the full world-frame runtime path first
 	- `wow-viewer/src/viewer/WowViewer.App/AlphaEmbeddedAdtReader.cs` now separates fast placement-only Alpha embedded-tile reads from the heavier full terrain or liquid fallback path and caches shared Alpha WDT state per map instead of re-reading the monolithic WDT for each tile
 	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now uses that placement-only Alpha path for tile selection and placement auditing, routes WMO readiness through the same Alpha-aware file resolver used for other Alpha assets instead of a retail-style archive existence probe, applies the legacy `MdxViewer` world MDX placement transform semantics, and runs the bounded frame through the `Quality` visibility profile so Alpha MDX uses an old-viewer-shaped culling contract instead of the stricter extracted balanced profile
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRenderCharacteristics.cs` now owns parser-derived MDX render traits (`HasOpaqueRenderContent`, `HasTransparentRenderContent`) from `MdxSummary`, and the shared `WorldObjectPassCoordinator` plus `WowViewerWorldRuntimeBridge` now consume those traits instead of keeping the decision logic inside the app layer
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/WorldMdxRenderPlan.cs` now owns a runtime-first MDX GPU-plan contract, grouping opaque and transparent route lists into renderer-facing batches while preserving pass order and unbatched-vs-batched separation
+	- `WowViewerWorldRuntimeBridge.cs` now threads that `WorldMdxRenderPlan` through the bounded frame result, and `Program.cs` now prints the derived GPU-plan batch counts in the `world-frame` proof path
+	- focused tests now cover both the new MDX render-trait analyzer and the new opaque-route inclusion filter in `WorldObjectPassCoordinator`
 - validation:
 	- isolated build proof: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -nologo -clp:Summary -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-alpha-bootstrap/` succeeded with the usual workspace `LIB` warnings plus existing nullable warnings in the touched Alpha/viewer helper files
 	- real-data placement proof on `H:/CLIENTS/0.X_Pre-Release_OSX_enUS_0.5.5.3494/World of Warcraft`, `Kalimdor` via `WowViewer.App world-placement-audit --limit 12` reported `scannedTiles=972`, `tilesWithPlacements=564`, and multiple rich Alpha tiles such as `(37,37)` with `2689` total placements and `(39,40)` with `1548` total placements, including concrete sample WMO and MDX paths from the embedded Alpha tile path
-	- real-data rich-tile runtime proof on tile `(39,40)` via `WowViewer.App world-frame` now reports `wmo=40 readyWmo=40 mdx=1508 readyMdx=1508 pending=0`, `visibleWmo=40`, `visibleMdx=1508`, `wmoOpaque=40`, `mdxOpaque=1508`, `mdxTransparent=1508`, and `objectPhase=True` while still using `...Kalimdor.wdt.MPQ#alpha-tile(39,40)` as the placement source
+	- focused library proof: `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxRenderCharacteristicsAnalyzerTests|WorldObjectPassCoordinatorTests"` passed
+	- focused library proof: `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WorldMdxRenderPlanBuilderTests|WorldObjectPassCoordinatorTests|MdxRenderCharacteristicsAnalyzerTests"` passed
+	- real-data rich-tile runtime proof on tile `(39,40)` via `WowViewer.App world-frame` now reports `wmo=40 readyWmo=40 mdx=1508 readyMdx=1508 pending=0`, `visibleWmo=40`, `visibleMdx=1508`, `wmoOpaque=40`, `mdxOpaque=1339`, `mdxTransparent=341`, `opaqueRoutes=1339`, `transparentRoutes=341`, `gpu-plan: opaqueBatches=853 transparentBatches=273 opaqueInstances=1339 transparentInstances=341`, and `objectPhase=True` while still using `...Kalimdor.wdt.MPQ#alpha-tile(39,40)` as the placement source
 - boundary:
 	- this closes Alpha placement discovery, Alpha WMO asset-readiness proof, and bounded Alpha MDX visibility or pass-routing proof on the canonical rich tile; it does not yet close broader interactive viewer signoff or MDX performance work
-	- the next local runtime slice should stay focused on MDX batching or state reduction costs, because the same proof now flags MDX submission volume as the next dominant world-frame cost instead of showing a visibility correctness gap
+	- the next local runtime slice should stay focused on turning the new runtime-owned MDX GPU plan into a real GPU consumer, because the same proof now shows we have a materially smaller batch surface to feed into renderer code without recreating `MdxViewer`-style parser or app coupling
 
 ### Apr 17, 2026 - migration priority corrected toward Alpha-first world-format closure and real viewer usability
 

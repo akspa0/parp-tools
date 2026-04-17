@@ -151,6 +151,18 @@ internal sealed class WowViewerSession
 
     public int VisualSize { get; set; } = 384;
 
+    public PreviewCameraMode MdxCameraMode { get; set; } = PreviewCameraMode.Frame;
+
+    public string MdxCameraPreset { get; set; } = PreviewCameraSettings.DefaultPresetName;
+
+    public float MdxCameraAzimuthDegrees { get; set; } = 35.0f;
+
+    public float MdxCameraElevationDegrees { get; set; } = 25.0f;
+
+    public float MdxCameraFieldOfViewDegrees { get; set; } = 60.0f;
+
+    public float MdxCameraZoomFactor { get; set; } = 0.72f;
+
     public static WowViewerSession CreateDefault() => new();
 
     public void Normalize()
@@ -159,6 +171,13 @@ internal sealed class WowViewerSession
         SequenceIndex = Math.Max(0, SequenceIndex);
         TimeMs = Math.Max(0, TimeMs);
         VisualSize = Math.Clamp(VisualSize, 128, 1024);
+        if (!Enum.IsDefined(MdxCameraMode))
+            MdxCameraMode = PreviewCameraMode.Frame;
+        MdxCameraPreset = MdxCameraPreset?.Trim() ?? string.Empty;
+        MdxCameraAzimuthDegrees = float.IsFinite(MdxCameraAzimuthDegrees) ? MdxCameraAzimuthDegrees : 35.0f;
+        MdxCameraElevationDegrees = float.IsFinite(MdxCameraElevationDegrees) ? MdxCameraElevationDegrees : 25.0f;
+        MdxCameraFieldOfViewDegrees = float.IsFinite(MdxCameraFieldOfViewDegrees) ? Math.Clamp(MdxCameraFieldOfViewDegrees, 1.0f, 170.0f) : 60.0f;
+        MdxCameraZoomFactor = float.IsFinite(MdxCameraZoomFactor) ? Math.Clamp(MdxCameraZoomFactor, 0.05f, 10.0f) : 0.72f;
         Source ??= new WowViewerAssetSource();
         World ??= new WowViewerWorldSessionState();
         World.Normalize();
@@ -178,6 +197,29 @@ internal sealed class WowViewerSession
             TimeMs = TimeMs,
             VisualWidth = VisualSize,
             VisualHeight = VisualSize,
+        };
+    }
+
+    public MdxPreviewLoadRequest BuildMdxPreviewRequest()
+    {
+        Normalize();
+        return new MdxPreviewLoadRequest
+        {
+            ArchiveRoot = Source.UsesArchiveSource ? Source.ArchiveRoot : null,
+            VirtualPath = Source.UsesArchiveSource ? Source.VirtualPath : null,
+            InputPath = Source.UsesArchiveSource ? null : Source.InputPath,
+            BuildLabel = Source.BuildLabel,
+            VisualWidth = VisualSize,
+            VisualHeight = VisualSize,
+            Camera = new PreviewCameraSettings
+            {
+                Mode = MdxCameraMode,
+                PresetName = string.IsNullOrWhiteSpace(MdxCameraPreset) ? null : MdxCameraPreset,
+                AzimuthDegrees = MdxCameraAzimuthDegrees,
+                ElevationDegrees = MdxCameraElevationDegrees,
+                FieldOfViewDegrees = MdxCameraFieldOfViewDegrees,
+                ZoomFactor = MdxCameraZoomFactor,
+            },
         };
     }
 
@@ -212,7 +254,7 @@ internal sealed class WowViewerSession
 
     public bool IsImplementedWorkspace()
     {
-        return WorkspaceMode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.WorldSession;
+        return WorkspaceMode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.StandaloneMdx or WowViewerWorkspaceMode.WorldSession;
     }
 
     public bool HasBootstrapInput()
@@ -221,6 +263,9 @@ internal sealed class WowViewerSession
         return WorkspaceMode switch
         {
             WowViewerWorkspaceMode.StandaloneM2 => Source.UsesArchiveSource
+                ? !string.IsNullOrWhiteSpace(Source.ArchiveRoot) && !string.IsNullOrWhiteSpace(Source.VirtualPath)
+                : !string.IsNullOrWhiteSpace(Source.InputPath),
+            WowViewerWorkspaceMode.StandaloneMdx => Source.UsesArchiveSource
                 ? !string.IsNullOrWhiteSpace(Source.ArchiveRoot) && !string.IsNullOrWhiteSpace(Source.VirtualPath)
                 : !string.IsNullOrWhiteSpace(Source.InputPath),
             WowViewerWorkspaceMode.WorldSession => World.HasBootstrapInput(),

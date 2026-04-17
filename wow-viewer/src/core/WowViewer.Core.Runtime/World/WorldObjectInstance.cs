@@ -21,4 +21,6 @@ public struct WorldObjectInstance
     public int TileY;
     public bool HasTileCoordinate;
     public bool BoundsResolved;
+    public bool HasOpaqueRenderContent;
+    public bool HasTransparentRenderContent;
 }

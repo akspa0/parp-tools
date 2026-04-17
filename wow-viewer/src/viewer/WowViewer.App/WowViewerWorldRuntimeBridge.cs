@@ -86,6 +86,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         int culledMdxCount,
         WorldVisibilityFrame visibility,
         WorldObjectPassFrame passFrame,
+        WorldMdxRenderPlan mdxRenderPlan,
         WorldFramePassOptions passOptions,
         WorldRenderFrameStats stats,
         bool objectPhaseExecuted,
@@ -114,6 +115,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         CulledMdxCount = culledMdxCount;
         Visibility = visibility;
         PassFrame = passFrame;
+        MdxRenderPlan = mdxRenderPlan;
         PassOptions = passOptions;
         Stats = stats;
         ObjectPhaseExecuted = objectPhaseExecuted;
@@ -161,6 +163,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
 
     public WorldObjectPassFrame PassFrame { get; }
 
+    public WorldMdxRenderPlan MdxRenderPlan { get; }
+
     public WorldFramePassOptions PassOptions { get; }
 
     public WorldRenderFrameStats Stats { get; }
@@ -182,7 +186,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
 
 internal static class WowViewerWorldRuntimeBridge
 {
-    private readonly record struct LocalBoundsResolution(bool AssetReady, Vector3 LocalMin, Vector3 LocalMax);
+    private readonly record struct LocalBoundsResolution(bool AssetReady, Vector3 LocalMin, Vector3 LocalMax, bool HasOpaqueRenderContent, bool HasTransparentRenderContent);
 
     public static WowViewerWorldPlacementAuditResult AuditPlacements(WowViewerWorldPlacementAuditRequest request)
     {
@@ -360,13 +364,14 @@ internal static class WowViewerWorldRuntimeBridge
                     WorldObjectPassCoordinator.PlanOpaqueMdxRoutes(
                         passFrame,
                         visibility,
-                        static visible => visible.OpaqueFade < 0.999f || visible.TransparentFade < 0.999f);
+                        static visible => visible.OpaqueFade < 0.999f || visible.TransparentFade < 0.999f,
+                        static visible => visible.Instance.HasOpaqueRenderContent);
 
                     Stopwatch transparentSortStopwatch = Stopwatch.StartNew();
                     WorldObjectPassCoordinator.PlanTransparentMdxRoutes(
                         passFrame,
                         visibility,
-                        static visible => visible.TransparentFade > 0f);
+                        static visible => visible.Instance.HasTransparentRenderContent && visible.TransparentFade > 0f);
                     transparentSortStopwatch.Stop();
                     mdxTransparentSortMs = transparentSortStopwatch.Elapsed.TotalMilliseconds;
                 },
@@ -440,6 +445,8 @@ internal static class WowViewerWorldRuntimeBridge
             MdxTransparentSubmission: new WorldRenderStageStats(mdxTransparentSubmissionMs, passFrame.TransparentVisibleMdxRoutes.Count, transparentBatchedMdxCount + transparentUnbatchedMdxCount),
             Overlay: new WorldRenderStageStats(0));
 
+        WorldMdxRenderPlan mdxRenderPlan = WorldMdxRenderPlanBuilder.Build(passFrame, visibility);
+
         return new WowViewerWorldRuntimeFrameResult(
             session,
             selectedTile.tileX,
@@ -459,6 +466,7 @@ internal static class WowViewerWorldRuntimeBridge
             culledMdxCount,
             visibility,
             passFrame,
+            mdxRenderPlan,
             appliedPassOptions,
             stats,
             objectPhaseExecuted,
@@ -668,6 +676,8 @@ internal static class WowViewerWorldRuntimeBridge
                 TileX = tileX,
                 TileY = tileY,
                 HasTileCoordinate = true,
+                HasOpaqueRenderContent = true,
+                HasTransparentRenderContent = false,
             });
         }
 
@@ -713,6 +723,8 @@ internal static class WowViewerWorldRuntimeBridge
                 TileX = tileX,
                 TileY = tileY,
                 HasTileCoordinate = true,
+                HasOpaqueRenderContent = resolution.HasOpaqueRenderContent,
+                HasTransparentRenderContent = resolution.HasTransparentRenderContent,
             });
         }
 
@@ -745,13 +757,16 @@ internal static class WowViewerWorldRuntimeBridge
             {
                 using MemoryStream m2Stream = new(data, writable: false);
                 M2ModelDocument document = M2ModelReader.Read(m2Stream, sourcePath);
-                return new LocalBoundsResolution(true, document.BoundsMin, document.BoundsMax);
+                return new LocalBoundsResolution(true, document.BoundsMin, document.BoundsMax, HasOpaqueRenderContent: true, HasTransparentRenderContent: true);
             }
 
             using MemoryStream mdxStream = new(data, writable: false);
             MdxSummary summary = MdxSummaryReader.Read(mdxStream, sourcePath);
             if (summary.BoundsMin is Vector3 boundsMin && summary.BoundsMax is Vector3 boundsMax)
-                return new LocalBoundsResolution(true, boundsMin, boundsMax);
+            {
+                MdxRenderCharacteristics characteristics = MdxRenderCharacteristicsAnalyzer.Analyze(summary);
+                return new LocalBoundsResolution(true, boundsMin, boundsMax, characteristics.HasOpaqueRenderContent, characteristics.HasTransparentRenderContent);
+            }
         }
         catch
         {
@@ -761,7 +776,7 @@ internal static class WowViewerWorldRuntimeBridge
         {
             using MemoryStream fallbackM2Stream = new(data, writable: false);
             M2ModelDocument document = M2ModelReader.Read(fallbackM2Stream, sourcePath);
-            return new LocalBoundsResolution(true, document.BoundsMin, document.BoundsMax);
+            return new LocalBoundsResolution(true, document.BoundsMin, document.BoundsMax, HasOpaqueRenderContent: true, HasTransparentRenderContent: true);
         }
         catch
         {
@@ -774,7 +789,7 @@ internal static class WowViewerWorldRuntimeBridge
     {
         float halfExtent = MathF.Max(2f, 4f * MathF.Max(1f, scale));
         Vector3 extent = new(halfExtent, halfExtent, halfExtent);
-        return new LocalBoundsResolution(assetReady, -extent, extent);
+        return new LocalBoundsResolution(assetReady, -extent, extent, HasOpaqueRenderContent: true, HasTransparentRenderContent: true);
     }
 
     private static bool TryReadVirtualOrLooseFile(

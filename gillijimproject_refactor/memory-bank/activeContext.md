@@ -2,6 +2,31 @@
 
 # Active Context
 
+## Apr 17, 2026 - wow-viewer standalone MDX preview now uses a ported Frame Model camera path and exposes app-side camera controls
+
+- the bounded standalone `MDX` preview path in `wow-viewer/src/viewer/WowViewer.App` no longer defaults to the earlier corner-fit camera solver for first-view framing
+- `wow-viewer/src/viewer/WowViewer.App/PreviewCameraPlanner.cs` now ports the old `MdxViewer` `FrameBounds(...)` camera semantics into a reusable preview-camera layer:
+	- `frame` mode is now the default MDX preview mode
+	- default frame-mode FOV now matches the old viewer-shaped wider interactive assumption instead of the narrower screenshot-capture FOV
+	- the standalone preview keeps explicit `orbit` and `model` camera modes as opt-in alternatives
+- the earlier over-zoomed MDX previews were narrowed to a local bounds-source mismatch rather than a pure camera-math defect:
+	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now resolves preview bounds from actual geoset vertices first, matching the old `MdxViewer` renderer's renderable-bounds preference for normal MDX instead of trusting declared summary bounds first
+	- the legacy frame-distance floor was also reduced for standalone preview use so very small props no longer inherit the old viewer's least useful hard clamp unchanged
+- `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` plus `WowViewerDesktopApp.cs` now carry MDX camera state through the desktop workspace itself:
+	- frame or orbit or model mode is selectable in-app
+	- orbit presets and custom azimuth or elevation are now configurable in-app
+	- FOV and orbit zoom are now configurable in-app
+	- the MDX control pane now reloads the active preview with the current camera settings instead of forcing camera iteration through CLI-only flags
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded after both the camera-path port and the desktop control wiring, with only the existing workspace `LIB` warnings plus the known nullable warnings in unrelated files
+	- real MDX capture proofs showed the framing regression move through the expected states as the controlling path was ported correctly:
+		- `Banshee.mdx` first moved from tiny-speck framing to over-tight framing once vertex-derived bounds were used with the legacy frame path
+		- after switching frame-mode back to the old viewer-shaped wider FOV, `Banshee.mdx` settled into a plausible old-viewer-style first frame
+		- `chest01.mdx` then confirmed the small-prop case needed a lower standalone frame-distance floor, and the final floor reduction improved that case without regressing the larger `Banshee` frame materially
+- current boundary:
+	- this closes the bounded standalone MDX first-view framing and app-side camera-control slice only; it does not yet add live mouse orbit or pan or zoom interaction in the preview viewport itself
+	- effect-heavy or particle-heavy assets may still need a later visual-bounds-aware framing mode because raw mesh bounds are not always the full visible story
+
 ## Apr 17, 2026 - wow-viewer Alpha world bring-up now has rich-tile MDX-visible runtime proof on the canonical 0.5.5 client
 
 - the earlier Alpha monolithic-WDT or embedded-ADT port in `wow-viewer/src/viewer/WowViewer.App/AlphaEmbeddedAdtReader.cs` is now split into two practical consumption paths:
@@ -30,7 +55,10 @@
 	- `WowViewerWorldRuntimeBridge.cs` now uses the legacy `MdxViewer` world MDX placement transform semantics instead of the earlier generic yaw or pitch or roll path
 	- the bounded world-frame visibility context now uses the `Quality` profile, matching the old viewer's simpler MDX culling contract more closely by dropping the extra projected-size gating that was suppressing Alpha doodads in the extracted runtime path
 - the immediate remaining local follow-up is now performance-shaped rather than visibility-shaped:
-	- the same rich tile proof now reports `updatedMdx=88` with `1508` opaque and `1508` transparent MDX routes, so the next world-runtime slice should focus on MDX batching or state reduction costs instead of reopening Alpha placement or visibility correctness
+	- the follow-up MDX route-pruning work no longer lives only in `WowViewer.App`: `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRenderCharacteristics.cs` now owns MDX render-trait classification from `MdxSummary`, keeping parser-derived render metadata in the library instead of leaving the app bridge to interpret format details directly
+	- the same rich tile proof on `(39,40)` still reports `visibleMdx=1508`, but pass routing is now split more honestly at `1339` opaque routes and `341` transparent routes, with `updatedMdx=88`
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/WorldMdxRenderPlan.cs` now owns the first world MDX GPU-plan contract in the runtime layer, grouping route lists into renderer-facing batch groups by pass and model key instead of leaving the app with only per-route loops
+	- the same rich tile proof now reports `gpu-plan: opaqueBatches=853 transparentBatches=273 opaqueInstances=1339 transparentInstances=341`, so the remaining GPU-facing work is narrower: turn those runtime-owned batches into a real MDX GPU consumer instead of inventing a second planner in the app
 
 ## Apr 17, 2026 - user direction reset: keep the wow-viewer migration anchored on real ADT-family ownership, Alpha-era world bring-up, and an actually interactive viewer
 

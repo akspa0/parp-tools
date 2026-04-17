@@ -69,6 +69,23 @@ public sealed class WorldObjectPassCoordinatorTests
     }
 
     [Fact]
+    public void PlanOpaqueMdxRoutes_SkipsTransparentOnlyEntries()
+    {
+        WorldVisibilityFrame visibility = new();
+        WorldObjectPassFrame passFrame = new();
+        visibility.VisibleMdx.Add(CreateMdx("transparent-only", 125f, hasOpaqueRenderContent: false, hasTransparentRenderContent: true));
+        visibility.VisibleMdx.Add(CreateMdx("opaque", 100f, hasOpaqueRenderContent: true, hasTransparentRenderContent: false));
+
+        WorldObjectPassCoordinator.PlanOpaqueMdxRoutes(
+            passFrame,
+            visibility,
+            static _ => false,
+            static visible => visible.Instance.HasOpaqueRenderContent);
+
+        Assert.Equal(["opaque"], passFrame.OpaqueVisibleMdxRoutes.Select(route => visibility.VisibleMdx[route.VisibleMdxIndex].Instance.ModelKey).ToArray());
+    }
+
+    [Fact]
     public void PlanTransparentMdxRoutes_SortsBackToFrontByDistance()
     {
         WorldVisibilityFrame visibility = new();
@@ -156,12 +173,12 @@ public sealed class WorldObjectPassCoordinatorTests
         Assert.Equal(["w1", "w2"], drawn);
     }
 
-    private static WorldVisibleMdxEntry CreateMdx(string modelKey, float distanceSq)
+    private static WorldVisibleMdxEntry CreateMdx(string modelKey, float distanceSq, bool hasOpaqueRenderContent = true, bool hasTransparentRenderContent = true)
     {
-        return new WorldVisibleMdxEntry(CreateInstance(modelKey), distanceSq, 1.0f, 1.0f, false);
+        return new WorldVisibleMdxEntry(CreateInstance(modelKey, hasOpaqueRenderContent, hasTransparentRenderContent), distanceSq, 1.0f, 1.0f, false);
     }
 
-    private static WorldObjectInstance CreateInstance(string modelKey)
+    private static WorldObjectInstance CreateInstance(string modelKey, bool hasOpaqueRenderContent = true, bool hasTransparentRenderContent = true)
     {
         return new WorldObjectInstance
         {
@@ -169,6 +186,8 @@ public sealed class WorldObjectPassCoordinatorTests
             ModelName = modelKey,
             ModelPath = modelKey,
             Transform = Matrix4x4.Identity,
+            HasOpaqueRenderContent = hasOpaqueRenderContent,
+            HasTransparentRenderContent = hasTransparentRenderContent,
         };
     }
 }

@@ -40,7 +40,8 @@ public static class WorldObjectPassCoordinator
     public static void PlanOpaqueMdxRoutes(
         WorldObjectPassFrame passFrame,
         WorldVisibilityFrame visibility,
-        Func<WorldVisibleMdxEntry, bool> requiresUnbatchedRender)
+        Func<WorldVisibleMdxEntry, bool> requiresUnbatchedRender,
+        Func<WorldVisibleMdxEntry, bool>? includeOpaque = null)
     {
         passFrame.OpaqueVisibleMdxRoutes.Clear();
         passFrame.UnbatchedVisibleMdxIndices.Clear();
@@ -49,6 +50,9 @@ public static class WorldObjectPassCoordinator
         for (int i = 0; i < visibility.VisibleMdx.Count; i++)
         {
             WorldVisibleMdxEntry visible = visibility.VisibleMdx[i];
+            if (includeOpaque != null && !includeOpaque(visible))
+                continue;
+
             bool requiresUnbatched = requiresUnbatchedRender(visible);
             passFrame.OpaqueVisibleMdxRoutes.Add(new WorldVisibleMdxPassRoute(i, requiresUnbatched));
 

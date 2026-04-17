@@ -8,6 +8,7 @@ using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using WowViewer.Core;
 using WowViewer.Core.Maps;
+using WowViewer.Core.Mdx;
 using WowViewer.Core.PM4;
 using WowViewer.Core.Runtime;
 using WowViewer.Core.Runtime.M2;
@@ -49,6 +50,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         bool WasAnimated);
 
     private const string WindowTitle = "WowViewer.App";
+    private static readonly string[] MdxCameraPresetLabels = ["Custom", "Front", "Back", "Left", "Right", "Top", "Three Quarter"];
+    private static readonly string?[] MdxCameraPresetValues = [null, "front", "back", "left", "right", "top", PreviewCameraSettings.DefaultPresetName];
     private static readonly MethodInfo? ImGuiControllerWindowResizedMethod =
         typeof(ImGuiController).GetMethod("WindowResized", BindingFlags.Instance | BindingFlags.NonPublic);
 
@@ -64,15 +67,17 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private Vector2D<int> _lastSyncedImGuiFramebufferSize;
     private bool _disposed;
     private bool _requestInitialLoad;
-    private string _statusMessage = "Configure an archive-backed or local M2 source, then load a preview.";
+    private string _statusMessage = "Configure an archive-backed or local asset source, then load a preview.";
     private string _lastLoadSummary = "No workspace loaded.";
     private string? _lastError;
     private M2PreviewLoadResult? _currentPreview;
+    private MdxPreviewLoadResult? _currentMdxPreview;
     private WowViewerWorldSessionBootstrapResult? _currentWorldSession;
     private WowViewerWorldRuntimeFrameResult? _currentWorldRuntimeFrame;
     private uint _previewTextureHandle;
     private uint _worldTerrainPreviewTextureHandle;
     private M2GpuPreviewRenderer? _gpuPreviewRenderer;
+    private MdxGpuPreviewRenderer? _mdxGpuPreviewRenderer;
     private bool _showAboutWindow = true;
     private bool _showWorkspaceWindow = true;
     private bool _showControlWindow = true;
@@ -124,6 +129,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _disposed = true;
         SaveSettings();
         _gpuPreviewRenderer?.Dispose();
+        _mdxGpuPreviewRenderer?.Dispose();
         DeletePreviewTexture();
         DeleteWorldTerrainPreviewTexture();
         _imGui?.Dispose();
@@ -146,6 +152,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.Disable(EnableCap.CullFace);
         _gpuPreviewRenderer = new M2GpuPreviewRenderer(_gl);
+        _mdxGpuPreviewRenderer = new MdxGpuPreviewRenderer(_gl);
 
         _requestInitialLoad = _initialSession?.HasBootstrapInput() == true;
     }
@@ -168,6 +175,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (_currentPreview != null && _gpuPreviewRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneM2)
             _gpuPreviewRenderer.Render(_session.VisualSize, _session.VisualSize);
+        if (_currentMdxPreview != null && _mdxGpuPreviewRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneMdx)
+            _mdxGpuPreviewRenderer.Render(_session.VisualSize, _session.VisualSize);
 
         _gl.Viewport(_window.FramebufferSize);
         _gl.ClearColor(0.08f, 0.09f, 0.11f, 1.0f);
@@ -229,7 +238,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             if (ImGui.MenuItem("Open Workspace"))
                 LoadActiveWorkspace();
 
-            if (ImGui.MenuItem("Clear Workspace", enabled: _currentPreview != null || _currentWorldSession != null))
+            if (ImGui.MenuItem("Clear Workspace", enabled: _currentPreview != null || _currentMdxPreview != null || _currentWorldSession != null))
                 ClearWorkspace();
 
             if (ImGui.MenuItem("Exit"))
@@ -264,12 +273,12 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        ImGui.TextWrapped("The viewer shell now exposes explicit standalone workspaces. Only the M2 workspace is implemented in this slice; WMO and MDX are deliberate placeholders so later consumers land on a stable app boundary.");
+        ImGui.TextWrapped("The viewer shell now exposes explicit standalone workspaces. M2 and MDX now have bounded GPU preview consumers in this slice; WMO remains a placeholder until its own consumer lands.");
         ImGui.Separator();
 
         DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneM2, "Runtime-backed standalone model preview over the shared wow-viewer M2 pipeline.");
         DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneWmo, "Planned standalone WMO inspection workspace. Not implemented yet.");
-        DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneMdx, "Planned standalone MDX inspection workspace. Not implemented yet.");
+        DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneMdx, "Static standalone MDX inspection workspace with a first GPU preview consumer.");
         DrawWorkspaceOption(WowViewerWorkspaceMode.WorldSession, "Bounded client-root attach and WDT-backed world session bootstrap. No world renderer yet.");
 
         ImGui.End();
@@ -285,7 +294,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
                 _session.WorkspaceMode = mode;
                 _lastError = null;
                 _statusMessage = IsImplementedWorkspace(mode)
-                    ? "M2 workspace active. Configure a source and load a preview."
+                    ? $"{GetWorkspaceLabel(mode)} active. Configure a source and load a preview."
                     : $"{GetWorkspaceLabel(mode)} is not implemented yet. This placeholder exists to keep the cutover honest about future standalone consumers.";
             }
         }
@@ -297,7 +306,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private static bool IsImplementedWorkspace(WowViewerWorkspaceMode mode)
     {
-        return mode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.WorldSession;
+        return mode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.StandaloneMdx or WowViewerWorkspaceMode.WorldSession;
     }
 
     private static string GetWorkspaceLabel(WowViewerWorkspaceMode mode)
@@ -325,6 +334,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         {
             case WowViewerWorkspaceMode.StandaloneM2:
                 DrawM2ControlContents();
+                break;
+            case WowViewerWorkspaceMode.StandaloneMdx:
+                DrawMdxControlContents();
                 break;
             case WowViewerWorkspaceMode.WorldSession:
                 DrawWorldControlContents();
@@ -417,6 +429,84 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _session.TimeMs = 0;
             _session.VisualSize = 384;
         }
+    }
+
+    private void DrawMdxControlContents()
+    {
+        ImGui.TextWrapped("This first standalone MDX slice stays narrow and GPU-first: it uses wow-viewer-owned MDX geometry and summary readers to drive a static OpenGL preview without claiming full animation or world-scene closure yet.");
+        ImGui.Separator();
+        ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
+        ImGui.TextDisabled($"Source: {_session.Source.Describe()}");
+        ImGui.Separator();
+
+        bool useArchive = _session.Source.UsesArchiveSource;
+        if (ImGui.RadioButton("Archive-backed input", useArchive))
+            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Local file input", !_session.Source.UsesArchiveSource))
+            _session.Source.Kind = WowViewerAssetSourceKind.LocalFile;
+
+        ImGui.Separator();
+        if (_session.Source.UsesArchiveSource)
+        {
+            string archiveRoot = _session.Source.ArchiveRoot;
+            string virtualPath = _session.Source.VirtualPath;
+            ImGui.InputText("Archive Root", ref archiveRoot, 1024);
+            ImGui.InputText("Virtual Path", ref virtualPath, 1024);
+            _session.Source.ArchiveRoot = archiveRoot;
+            _session.Source.VirtualPath = virtualPath;
+        }
+        else
+        {
+            string inputPath = _session.Source.InputPath;
+            ImGui.InputText("Input File", ref inputPath, 1024);
+            _session.Source.InputPath = inputPath;
+        }
+
+        string buildLabel = _session.Source.BuildLabel;
+        ImGui.InputText("Build Label", ref buildLabel, 256);
+        _session.Source.BuildLabel = buildLabel;
+
+        int visualSize = _session.VisualSize;
+        ImGui.InputInt("Preview Size", ref visualSize);
+        _session.VisualSize = visualSize;
+        _session.Normalize();
+
+        ImGui.Separator();
+        ImGui.TextDisabled("MDX Camera");
+        int cameraModeIndex = (int)_session.MdxCameraMode;
+        if (ImGui.Combo("Camera Mode", ref cameraModeIndex, "Frame\0Orbit\0Model\0"))
+            _session.MdxCameraMode = (PreviewCameraMode)cameraModeIndex;
+
+        float cameraFov = _session.MdxCameraFieldOfViewDegrees;
+        if (ImGui.SliderFloat("Camera FOV", ref cameraFov, 20.0f, 90.0f, "%.0f deg"))
+            _session.MdxCameraFieldOfViewDegrees = cameraFov;
+
+        if (_session.MdxCameraMode == PreviewCameraMode.Orbit)
+        {
+            int presetIndex = GetMdxCameraPresetIndex(_session.MdxCameraPreset);
+            if (ImGui.Combo("Orbit Preset", ref presetIndex, string.Join('\0', MdxCameraPresetLabels) + '\0'))
+                _session.MdxCameraPreset = MdxCameraPresetValues[presetIndex] ?? string.Empty;
+
+            if (presetIndex == 0)
+            {
+                float azimuth = _session.MdxCameraAzimuthDegrees;
+                float elevation = _session.MdxCameraElevationDegrees;
+                if (ImGui.SliderFloat("Azimuth", ref azimuth, -180.0f, 360.0f, "%.1f deg"))
+                    _session.MdxCameraAzimuthDegrees = azimuth;
+                if (ImGui.SliderFloat("Elevation", ref elevation, -89.0f, 89.0f, "%.1f deg"))
+                    _session.MdxCameraElevationDegrees = elevation;
+            }
+
+            float zoom = _session.MdxCameraZoomFactor;
+            if (ImGui.SliderFloat("Orbit Zoom", ref zoom, 0.1f, 2.0f, "%.2f"))
+                _session.MdxCameraZoomFactor = zoom;
+        }
+
+        _session.Normalize();
+
+        if (ImGui.Button(_currentMdxPreview == null ? "Load MDX Preview" : "Reload MDX Preview", new Vector2(-1, 0)))
+            LoadActiveWorkspace();
     }
 
     private void DrawWorldControlContents()
@@ -547,6 +637,28 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
+        if (_session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneMdx)
+        {
+            bool hasMdxPreview = _mdxGpuPreviewRenderer?.HasRenderableGeometry == true && _mdxGpuPreviewRenderer.PreviewTextureHandle != 0;
+            if (_currentMdxPreview == null || !hasMdxPreview)
+            {
+                ImGui.TextWrapped("No MDX GPU preview texture uploaded yet.");
+                ImGui.End();
+                return;
+            }
+
+            ImGui.TextDisabled(_lastLoadSummary);
+            ImGui.Separator();
+
+            Vector2 mdxAvailable = ImGui.GetContentRegionAvail();
+            float mdxSize = MathF.Min(mdxAvailable.X, mdxAvailable.Y);
+            mdxSize = MathF.Max(mdxSize, 128f);
+            ImGui.Image((nint)_mdxGpuPreviewRenderer!.PreviewTextureHandle, new Vector2(mdxSize, mdxSize), new Vector2(0, 1), new Vector2(1, 0));
+            ImGui.TextDisabled($"GPU Preview: {_session.VisualSize}x{_session.VisualSize} commands={_mdxGpuPreviewRenderer.CommandCount}");
+            ImGui.End();
+            return;
+        }
+
         bool hasGpuPreview = _gpuPreviewRenderer?.HasRenderableGeometry == true && _gpuPreviewRenderer.PreviewTextureHandle != 0;
         bool hasSoftwarePreview = _previewTextureHandle != 0;
         if (_currentPreview == null || (!hasGpuPreview && !hasSoftwarePreview))
@@ -661,6 +773,44 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_session.WorkspaceMode == WowViewerWorkspaceMode.WorldSession)
         {
             DrawWorldDiagnostics();
+            ImGui.End();
+            return;
+        }
+
+        if (_session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneMdx)
+        {
+            if (_currentMdxPreview == null)
+            {
+                ImGui.TextWrapped("Load an MDX preview to inspect geometry, material, and GPU-preview counts.");
+                ImGui.End();
+                return;
+            }
+
+            ImGui.TextDisabled("Frame Summary");
+            ImGui.Text($"Source: {_session.Source.Describe()}");
+            ImGui.Text($"Load: {_currentMdxPreview.LoadDuration.TotalMilliseconds:F1} ms");
+            ImGui.Text($"Delta: {deltaSeconds * 1000f:F2} ms");
+            ImGui.Text($"GPU Preview Commands: {_mdxGpuPreviewRenderer?.CommandCount ?? 0}");
+            ImGui.Separator();
+
+            ImGui.TextDisabled("MDX Summary");
+            ImGui.Text($"Model: {_currentMdxPreview.Summary.ModelName ?? _currentMdxPreview.Geometry.SourcePath}");
+            ImGui.Text($"Version: {(_currentMdxPreview.Summary.Version?.ToString() ?? "n/a")}");
+            ImGui.Text($"Geosets: {_currentMdxPreview.Geometry.GeosetCount}");
+            ImGui.Text($"Materials: {_currentMdxPreview.Summary.MaterialCount}");
+            ImGui.Text($"Textures: {_currentMdxPreview.Summary.TextureCount}");
+            ImGui.Text($"Layers: {_currentMdxPreview.Summary.MaterialLayerCount}");
+            ImGui.Text($"Particle Emitters 2: {_currentMdxPreview.Summary.ParticleEmitter2Count}");
+            ImGui.Text($"Ribbons: {_currentMdxPreview.Summary.RibbonCount}");
+
+            ImGui.Separator();
+            ImGui.TextDisabled("Geoset Samples");
+            foreach (MdxGeosetGeometry geoset in _currentMdxPreview.Geometry.Geosets.Take(12))
+                ImGui.BulletText($"#{geoset.Index} verts={geoset.VertexCount} tris={geoset.TriangleCount} material={geoset.MaterialId} uvSets={geoset.UvSetCount}");
+
+            if (_currentMdxPreview.Geometry.GeosetCount > 12)
+                ImGui.TextDisabled($"... {_currentMdxPreview.Geometry.GeosetCount - 12} more geosets");
+
             ImGui.End();
             return;
         }
@@ -1182,7 +1332,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (!IsImplementedWorkspace(_session.WorkspaceMode))
         {
-            _statusMessage = $"{_session.GetWorkspaceLabel()} is not implemented yet. Switch to Standalone M2 or World Session for a live workspace.";
+            _statusMessage = $"{_session.GetWorkspaceLabel()} is not implemented yet. Switch to Standalone M2, Standalone MDX, or World Session for a live workspace.";
             return;
         }
 
@@ -1190,6 +1340,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         {
             case WowViewerWorkspaceMode.StandaloneM2:
                 LoadPreview();
+                break;
+            case WowViewerWorkspaceMode.StandaloneMdx:
+                LoadMdxPreview();
                 break;
             case WowViewerWorkspaceMode.WorldSession:
                 LoadWorldSession();
@@ -1208,9 +1361,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
             UploadPreviewTexture(preview.FrameResult.VisualSnapshot);
             _gpuPreviewRenderer?.LoadPreview(preview);
             _currentPreview = preview;
+            _currentMdxPreview = null;
             _currentWorldSession = null;
             _currentWorldRuntimeFrame = null;
             _selectedWorldObject = null;
+            _mdxGpuPreviewRenderer?.ClearPreview();
             DeleteWorldTerrainPreviewTexture();
             _statusMessage = $"Loaded {preview.FrameResult.GoldenFrame.CanonicalModelPath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
             bool hasGpuPreview = _gpuPreviewRenderer?.HasRenderableGeometry == true;
@@ -1225,6 +1380,33 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
     }
 
+    private void LoadMdxPreview()
+    {
+        _lastError = null;
+
+        try
+        {
+            MdxPreviewLoadRequest request = _session.BuildMdxPreviewRequest();
+            MdxPreviewLoadResult preview = MdxPreviewLoader.Load(request);
+            _mdxGpuPreviewRenderer?.LoadPreview(preview);
+            _currentMdxPreview = preview;
+            _currentPreview = null;
+            _currentWorldSession = null;
+            _currentWorldRuntimeFrame = null;
+            _selectedWorldObject = null;
+            _gpuPreviewRenderer?.ClearPreview();
+            DeletePreviewTexture();
+            DeleteWorldTerrainPreviewTexture();
+            _statusMessage = $"Loaded {preview.Geometry.SourcePath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
+            _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, geosets {preview.Geometry.GeosetCount}, materials {preview.Summary.MaterialCount}, textures {preview.Summary.TextureCount}";
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            _lastError = ex.Message;
+            _statusMessage = "MDX preview load failed.";
+        }
+    }
+
     private void LoadWorldSession()
     {
         _lastError = null;
@@ -1235,8 +1417,10 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _currentWorldRuntimeFrame = runtimeFrame;
             _currentWorldSession = runtimeFrame.Session;
             _currentPreview = null;
+            _currentMdxPreview = null;
             _selectedWorldObject = SelectDefaultWorldObject(runtimeFrame);
             _gpuPreviewRenderer?.ClearPreview();
+            _mdxGpuPreviewRenderer?.ClearPreview();
             DeletePreviewTexture();
             UploadWorldTerrainPreviewTexture(runtimeFrame.TerrainVisualSnapshot);
             _statusMessage = $"Opened world runtime frame for {runtimeFrame.Session.ResolvedMapDirectory} tile ({runtimeFrame.SelectedTileX},{runtimeFrame.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
@@ -1249,9 +1433,21 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
     }
 
+    private static int GetMdxCameraPresetIndex(string? preset)
+    {
+        for (int index = 0; index < MdxCameraPresetValues.Length; index++)
+        {
+            if (string.Equals(MdxCameraPresetValues[index], preset, StringComparison.OrdinalIgnoreCase))
+                return index;
+        }
+
+        return 0;
+    }
+
     private void ClearWorkspace()
     {
         _currentPreview = null;
+        _currentMdxPreview = null;
         _currentWorldSession = null;
         _currentWorldRuntimeFrame = null;
         _selectedWorldObject = null;
@@ -1259,6 +1455,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _lastLoadSummary = "No workspace loaded.";
         _statusMessage = "Workspace cleared.";
         _gpuPreviewRenderer?.ClearPreview();
+        _mdxGpuPreviewRenderer?.ClearPreview();
         DeletePreviewTexture();
         DeleteWorldTerrainPreviewTexture();
     }

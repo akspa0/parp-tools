@@ -2,17 +2,25 @@ using System.Numerics;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
 using WowViewer.Core.IO.Files;
-using WowViewer.Core.M2;
-using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Mdx;
 
 namespace WowViewer.App;
 
-internal sealed class M2GpuPreviewRenderer : IDisposable
+internal sealed class MdxGpuPreviewRenderer : IDisposable
 {
+    private const uint MdxBlendModeTransparentKey = 1;
+    private const uint MdxBlendModeAdditive = 3;
+    private const uint MdxBlendModeAddAlpha = 4;
+    private const uint MdxBlendModeModulate = 5;
+    private const uint MdxBlendModeModulate2X = 6;
+    private const float PreviewFieldOfViewDegrees = 25.0f;
+    private const float PreviewPaddingScale = 1.04f;
+    private const float PreviewZoomFactor = 0.72f;
+
     private readonly GL _gl;
     private readonly Dictionary<string, uint> _loadedTextureCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<uint> _ownedTextureIds = [];
-    private readonly List<CommandBuffers> _commands = [];
+    private readonly HashSet<uint> _ownedTextureIds = new();
+    private readonly List<CommandBuffers> _commands = new();
 
     private uint _shaderProgram;
     private int _uView;
@@ -27,10 +35,6 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
     private int _uTexture0;
     private int _uAlphaCutout;
     private int _uReceivesLighting;
-    private int _uHasUvTransform;
-    private int _uUvTranslation;
-    private int _uUvScale;
-    private int _uUvRotation;
 
     private uint _framebuffer;
     private uint _colorTexture;
@@ -38,6 +42,8 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
     private uint _fallbackWhiteTexture;
     private int _frameWidth;
     private int _frameHeight;
+    private MdxSummary? _currentSummary;
+    private PreviewCameraSettings _cameraSettings = new();
     private Vector3 _boundsMin = new(-1.0f, -1.0f, -1.0f);
     private Vector3 _boundsMax = new(1.0f, 1.0f, 1.0f);
     private Vector3 _ambientColor = new(0.25f, 0.25f, 0.3f);
@@ -45,7 +51,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
     private readonly Vector3 _lightDir = Vector3.Normalize(new Vector3(-0.5f, 0.8f, 0.35f));
     private bool _disposed;
 
-    public M2GpuPreviewRenderer(GL gl)
+    public MdxGpuPreviewRenderer(GL gl)
     {
         _gl = gl ?? throw new ArgumentNullException(nameof(gl));
         InitializeShader();
@@ -93,59 +99,52 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
             command.Dispose(_gl);
 
         _commands.Clear();
+        _currentSummary = null;
     }
 
-    public void LoadPreview(M2PreviewLoadResult preview)
+    public void LoadPreview(MdxPreviewLoadResult preview)
     {
         ArgumentNullException.ThrowIfNull(preview);
 
         ClearPreview();
+        _currentSummary = preview.Summary;
+        _cameraSettings = preview.Request.Camera;
+        ResolveBounds(preview.Geometry, preview.Summary, out _boundsMin, out _boundsMax);
 
-        _boundsMin = preview.FrameResult.ConsumerState.RenderModel.BoundsMin;
-        _boundsMax = preview.FrameResult.ConsumerState.RenderModel.BoundsMax;
-        _ambientColor = Clamp01(preview.FrameResult.ConsumerState.ModelAmbient);
-        _lightColor = Clamp01(preview.FrameResult.ConsumerState.ModelDiffuse);
-        if (_ambientColor.LengthSquared() <= 0.0001f)
-            _ambientColor = new Vector3(0.25f, 0.25f, 0.3f);
-        if (_lightColor.LengthSquared() <= 0.0001f)
-            _lightColor = new Vector3(0.9f, 0.9f, 0.85f);
-
-        foreach (M2RenderDrawCommand command in preview.FrameResult.RenderFrame.DrawCommands)
+        foreach (MdxGeosetGeometry geoset in preview.Geometry.Geosets)
         {
-            if (command.Vertices.Count == 0 || command.Indices.Count == 0)
+            if (geoset.Vertices.Count == 0 || geoset.Indices.Count < 3)
                 continue;
 
-            M2RenderConsumerTextureState? textureState = command.Textures
-                .OrderBy(static texture => texture.StageIndex)
-                .FirstOrDefault();
+            MdxMaterialState material = ResolveMaterial(preview.Summary, geoset.MaterialId);
 
-            uint textureId = 0;
+            uint textureId = _fallbackWhiteTexture;
             bool hasTexture = false;
-            if (textureState != null && !string.IsNullOrWhiteSpace(textureState.TexturePath))
+            if (!string.IsNullOrWhiteSpace(material.TexturePath) && TryGetOrLoadTexture(preview.Request, material.TexturePath, out uint loadedTextureId))
             {
-                hasTexture = TryGetOrLoadTexture(preview.Request, textureState.TexturePath!, out textureId);
+                textureId = loadedTextureId;
+                hasTexture = true;
             }
 
-            Matrix4x4 rotationMatrix = textureState != null
-                ? Matrix4x4.CreateFromQuaternion(textureState.Rotation)
-                : Matrix4x4.Identity;
-
-            float[] vertexData = new float[command.Vertices.Count * 8];
-            for (int index = 0; index < command.Vertices.Count; index++)
+            float[] vertexData = new float[geoset.Vertices.Count * 8];
+            IReadOnlyList<Vector2> uvSet = geoset.PrimaryUvSet;
+            for (int index = 0; index < geoset.Vertices.Count; index++)
             {
-                M2RenderBackendVertex vertex = command.Vertices[index];
+                Vector3 position = geoset.Vertices[index];
+                Vector3 normal = index < geoset.Normals.Count ? geoset.Normals[index] : Vector3.UnitZ;
+                Vector2 uv = index < uvSet.Count ? uvSet[index] : Vector2.Zero;
                 int offset = index * 8;
-                vertexData[offset + 0] = vertex.Position.X;
-                vertexData[offset + 1] = vertex.Position.Y;
-                vertexData[offset + 2] = vertex.Position.Z;
-                vertexData[offset + 3] = vertex.Normal.X;
-                vertexData[offset + 4] = vertex.Normal.Y;
-                vertexData[offset + 5] = vertex.Normal.Z;
-                vertexData[offset + 6] = vertex.TextureCoords.X;
-                vertexData[offset + 7] = vertex.TextureCoords.Y;
+                vertexData[offset + 0] = position.X;
+                vertexData[offset + 1] = position.Y;
+                vertexData[offset + 2] = position.Z;
+                vertexData[offset + 3] = normal.X;
+                vertexData[offset + 4] = normal.Y;
+                vertexData[offset + 5] = normal.Z;
+                vertexData[offset + 6] = uv.X;
+                vertexData[offset + 7] = uv.Y;
             }
 
-            uint[] indices = command.Indices.ToArray();
+            ushort[] indices = geoset.Indices.ToArray();
             uint vao = _gl.GenVertexArray();
             uint vbo = _gl.GenBuffer();
             uint ebo = _gl.GenBuffer();
@@ -160,9 +159,9 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
                 }
 
                 _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
-                fixed (uint* indexPtr = indices)
+                fixed (ushort* indexPtr = indices)
                 {
-                    _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(uint)), indexPtr, BufferUsageARB.StaticDraw);
+                    _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(ushort)), indexPtr, BufferUsageARB.StaticDraw);
                 }
 
                 _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 8u * sizeof(float), (void*)0);
@@ -180,24 +179,17 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
                 vbo,
                 ebo,
                 (uint)indices.Length,
-                hasTexture ? textureId : _fallbackWhiteTexture,
+                textureId,
                 hasTexture,
-                command.IsTransparent,
-                command.IsAdditive,
-                command.DepthWrite,
-                command.AlphaTest,
-                command.IsTwoSided,
-                command.ReceivesLighting,
-                Clamp01(command.DiffuseColor),
-                Clamp01(command.EmissiveColor),
-                Math.Clamp(command.Alpha * (textureState?.Alpha ?? 1.0f), 0.0f, 1.0f),
-                textureState != null && HasMeaningfulUvTransform(textureState),
-                new Vector2(textureState?.Translation.X ?? 0.0f, textureState?.Translation.Y ?? 0.0f),
-                new Vector2(
-                    Math.Abs(textureState?.Scaling.X ?? 1.0f) <= 0.0001f ? 1.0f : textureState!.Scaling.X,
-                    Math.Abs(textureState?.Scaling.Y ?? 1.0f) <= 0.0001f ? 1.0f : textureState!.Scaling.Y),
-                new Vector2(rotationMatrix.M11, rotationMatrix.M21),
-                command.BlendMode));
+                material.IsTransparent,
+                material.IsAdditive,
+                material.DepthWrite,
+                material.AlphaCutout,
+                receivesLighting: true,
+                Vector3.One,
+                Vector3.Zero,
+                material.Alpha,
+                material.BlendMode));
         }
     }
 
@@ -212,7 +204,9 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
 
         if (_commands.Count > 0)
         {
-            BuildCamera(_boundsMin, _boundsMax, _frameWidth, _frameHeight, out Matrix4x4 view, out Matrix4x4 projection);
+            PreviewCameraPose pose = PreviewCameraPlanner.CreatePose(_boundsMin, _boundsMax, _cameraSettings, _currentSummary, _frameWidth, _frameHeight);
+            Matrix4x4 view = pose.View;
+            Matrix4x4 projection = pose.Projection;
             RenderPass(view, projection, transparentPass: false);
             RenderPass(view, projection, transparentPass: true);
         }
@@ -280,10 +274,6 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
             _gl.Uniform1(_uHasTexture, command.HasTexture ? 1 : 0);
             _gl.Uniform1(_uAlphaCutout, command.AlphaCutout ? 1 : 0);
             _gl.Uniform1(_uReceivesLighting, command.ReceivesLighting ? 1 : 0);
-            _gl.Uniform1(_uHasUvTransform, command.HasUvTransform ? 1 : 0);
-            _gl.Uniform2(_uUvTranslation, command.UvTranslation.X, command.UvTranslation.Y);
-            _gl.Uniform2(_uUvScale, command.UvScale.X, command.UvScale.Y);
-            _gl.Uniform2(_uUvRotation, command.UvRotation.X, command.UvRotation.Y);
 
             _gl.ActiveTexture(TextureUnit.Texture0);
             _gl.BindTexture(TextureTarget.Texture2D, command.TextureId);
@@ -291,7 +281,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
             _gl.BindVertexArray(command.Vao);
             unsafe
             {
-                _gl.DrawElements(PrimitiveType.Triangles, command.IndexCount, DrawElementsType.UnsignedInt, (void*)0);
+                _gl.DrawElements(PrimitiveType.Triangles, command.IndexCount, DrawElementsType.UnsignedShort, (void*)0);
             }
         }
 
@@ -302,21 +292,105 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
         _gl.UseProgram(0);
     }
 
-    private void ConfigureBlendMode(bool isAdditive, M2BlendMode blendMode)
+    private void ConfigureBlendMode(bool isAdditive, uint blendMode)
     {
-        if (isAdditive || blendMode is M2BlendMode.Add or M2BlendMode.NoAlphaAdd or M2BlendMode.BlendAdd)
+        if (isAdditive || blendMode is MdxBlendModeAdditive or MdxBlendModeAddAlpha)
         {
             _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
             return;
         }
 
-        if (blendMode is M2BlendMode.Mod or M2BlendMode.Mod2X)
+        if (blendMode is MdxBlendModeModulate or MdxBlendModeModulate2X)
         {
             _gl.BlendFunc(BlendingFactor.DstColor, BlendingFactor.Zero);
             return;
         }
 
         _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+    }
+
+    private static void ResolveBounds(MdxGeometryFile geometry, MdxSummary summary, out Vector3 min, out Vector3 max)
+    {
+        if (TryComputeRawRenderableBounds(geometry, out Vector3 rawMin, out Vector3 rawMax))
+        {
+            min = rawMin;
+            max = rawMax;
+            return;
+        }
+
+        if (summary.BoundsMin is Vector3 summaryMin && summary.BoundsMax is Vector3 summaryMax)
+        {
+            Vector3 summaryExtent = summaryMax - summaryMin;
+            if (float.IsFinite(summaryExtent.X) && float.IsFinite(summaryExtent.Y) && float.IsFinite(summaryExtent.Z)
+                && summaryExtent.LengthSquared() > 0.0001f)
+            {
+                min = summaryMin;
+                max = summaryMax;
+                return;
+            }
+        }
+
+        bool found = false;
+        min = new Vector3(float.MaxValue);
+        max = new Vector3(float.MinValue);
+        foreach (MdxGeosetGeometry geoset in geometry.Geosets)
+        {
+            if (geoset.BoundsMin is Vector3 geosetMin && geoset.BoundsMax is Vector3 geosetMax)
+            {
+                min = Vector3.Min(min, geosetMin);
+                max = Vector3.Max(max, geosetMax);
+                found = true;
+            }
+        }
+
+        if (!found)
+        {
+            min = new Vector3(-1.0f, -1.0f, -1.0f);
+            max = new Vector3(1.0f, 1.0f, 1.0f);
+        }
+    }
+
+    private static bool TryComputeRawRenderableBounds(MdxGeometryFile geometry, out Vector3 min, out Vector3 max)
+    {
+        min = new Vector3(float.MaxValue);
+        max = new Vector3(float.MinValue);
+        bool found = false;
+
+        foreach (MdxGeosetGeometry geoset in geometry.Geosets)
+        {
+            foreach (Vector3 vertex in geoset.Vertices)
+            {
+                if (!float.IsFinite(vertex.X) || !float.IsFinite(vertex.Y) || !float.IsFinite(vertex.Z))
+                    continue;
+
+                min = Vector3.Min(min, vertex);
+                max = Vector3.Max(max, vertex);
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
+    private static MdxMaterialState ResolveMaterial(MdxSummary summary, int materialId)
+    {
+        if (materialId < 0 || materialId >= summary.Materials.Count)
+            return new MdxMaterialState(null, false, false, true, false, 1.0f, 0);
+
+        MdxMaterialSummary material = summary.Materials[materialId];
+        if (material.LayerCount == 0)
+            return new MdxMaterialState(null, false, false, true, false, 1.0f, 0);
+
+        MdxMaterialLayerSummary layer = material.Layers[0];
+        string? texturePath = layer.TextureId >= 0 && layer.TextureId < summary.Textures.Count
+            ? summary.Textures[layer.TextureId].Path
+            : null;
+        float alpha = Math.Clamp(layer.StaticAlpha <= 0.0f ? 1.0f : layer.StaticAlpha, 0.0f, 1.0f);
+        bool isTransparent = layer.BlendMode != 0 || alpha < 0.999f;
+        bool alphaCutout = layer.BlendMode == MdxBlendModeTransparentKey;
+        bool isAdditive = layer.BlendMode is MdxBlendModeAdditive or MdxBlendModeAddAlpha;
+        bool depthWrite = !isTransparent || alphaCutout;
+        return new MdxMaterialState(texturePath, isTransparent, isAdditive, depthWrite, alphaCutout, alpha, layer.BlendMode);
     }
 
     private void EnsureFramebuffer(int width, int height)
@@ -352,7 +426,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
         _gl.BindTexture(TextureTarget.Texture2D, 0);
         _gl.BindRenderbuffer(GLEnum.Renderbuffer, 0);
         if (status != GLEnum.FramebufferComplete)
-            throw new InvalidOperationException($"GPU preview framebuffer is incomplete: {status}.");
+            throw new InvalidOperationException($"MDX GPU preview framebuffer is incomplete: {status}.");
     }
 
     private void DeleteFramebuffer()
@@ -389,10 +463,6 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
 
             uniform mat4 uView;
             uniform mat4 uProj;
-            uniform bool uHasUvTransform;
-            uniform vec2 uUvTranslation;
-            uniform vec2 uUvScale;
-            uniform vec2 uUvRotation;
 
             out vec3 vNormal;
             out vec2 vTexCoord;
@@ -401,18 +471,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
             {
                 gl_Position = uProj * uView * vec4(aPos, 1.0);
                 vNormal = aNormal;
-
-                vec2 uv = aTexCoord;
-                if (uHasUvTransform)
-                {
-                    vec2 centered = uv - vec2(0.5, 0.5);
-                    vec2 rotated = vec2(
-                        centered.x * uUvRotation.x - centered.y * uUvRotation.y,
-                        centered.x * uUvRotation.y + centered.y * uUvRotation.x);
-                    uv = rotated * uUvScale + vec2(0.5, 0.5) + uUvTranslation;
-                }
-
-                vTexCoord = uv;
+                vTexCoord = aTexCoord;
             }
             """;
 
@@ -467,7 +526,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
             string info = _gl.GetProgramInfoLog(_shaderProgram);
             _gl.DeleteShader(vertexShader);
             _gl.DeleteShader(fragmentShader);
-            throw new InvalidOperationException($"Failed to link GPU preview shader program: {info}");
+            throw new InvalidOperationException($"Failed to link MDX GPU preview shader program: {info}");
         }
 
         _gl.DetachShader(_shaderProgram, vertexShader);
@@ -487,10 +546,6 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
         _uTexture0 = _gl.GetUniformLocation(_shaderProgram, "uTexture0");
         _uAlphaCutout = _gl.GetUniformLocation(_shaderProgram, "uAlphaCutout");
         _uReceivesLighting = _gl.GetUniformLocation(_shaderProgram, "uReceivesLighting");
-        _uHasUvTransform = _gl.GetUniformLocation(_shaderProgram, "uHasUvTransform");
-        _uUvTranslation = _gl.GetUniformLocation(_shaderProgram, "uUvTranslation");
-        _uUvScale = _gl.GetUniformLocation(_shaderProgram, "uUvScale");
-        _uUvRotation = _gl.GetUniformLocation(_shaderProgram, "uUvRotation");
     }
 
     private uint CompileShader(ShaderType shaderType, string source)
@@ -503,7 +558,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
         {
             string info = _gl.GetShaderInfoLog(shader);
             _gl.DeleteShader(shader);
-            throw new InvalidOperationException($"Failed to compile GPU preview {shaderType}: {info}");
+            throw new InvalidOperationException($"Failed to compile MDX GPU preview {shaderType}: {info}");
         }
 
         return shader;
@@ -530,7 +585,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
         return textureId;
     }
 
-    private bool TryGetOrLoadTexture(M2PreviewLoadRequest request, string texturePath, out uint textureId)
+    private bool TryGetOrLoadTexture(MdxPreviewLoadRequest request, string texturePath, out uint textureId)
     {
         string cacheKey = texturePath.Replace('/', '\\').ToLowerInvariant();
         if (_loadedTextureCache.TryGetValue(cacheKey, out textureId))
@@ -561,7 +616,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
         }
     }
 
-    private bool TryReadTextureBytes(M2PreviewLoadRequest request, string texturePath, out byte[]? bytes)
+    private bool TryReadTextureBytes(MdxPreviewLoadRequest request, string texturePath, out byte[]? bytes)
     {
         bytes = null;
 
@@ -623,77 +678,6 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
         return textureId;
     }
 
-    private static void BuildCamera(Vector3 min, Vector3 max, int width, int height, out Matrix4x4 view, out Matrix4x4 projection)
-    {
-        Vector3 center = (min + max) * 0.5f;
-        Vector3 extent = max - min;
-        float radius = MathF.Max(extent.Length() * 0.5f, 1.0f);
-        float aspect = Math.Max(width, 1) / (float)Math.Max(height, 1);
-        float fov = 45.0f * MathF.PI / 180.0f;
-
-        float elev = 20.0f * MathF.PI / 180.0f;
-        float azim = 45.0f * MathF.PI / 180.0f;
-        float cosElev = MathF.Cos(elev);
-        Vector3 camDir = Vector3.Normalize(new Vector3(
-            cosElev * MathF.Cos(azim),
-            cosElev * MathF.Sin(azim),
-            -MathF.Sin(elev)));
-
-        Vector3[] corners =
-        [
-            new(min.X, min.Y, min.Z),
-            new(max.X, min.Y, min.Z),
-            new(min.X, max.Y, min.Z),
-            new(max.X, max.Y, min.Z),
-            new(min.X, min.Y, max.Z),
-            new(max.X, min.Y, max.Z),
-            new(min.X, max.Y, max.Z),
-            new(max.X, max.Y, max.Z),
-        ];
-
-        Vector3 tmpCam = center - camDir * radius;
-        Vector3 up = MathF.Abs(Vector3.Dot(camDir, Vector3.UnitZ)) > 0.99f ? Vector3.UnitX : Vector3.UnitZ;
-        Matrix4x4 tmpView = Matrix4x4.CreateLookAt(tmpCam, center, up);
-
-        float halfFovV = fov * 0.5f;
-        float halfFovH = MathF.Atan(MathF.Tan(halfFovV) * aspect);
-        float maxDist = radius;
-        foreach (Vector3 corner in corners)
-        {
-            Vector3 viewPos = Vector3.Transform(corner, tmpView);
-            float depth = -viewPos.Z;
-            float needV = MathF.Abs(viewPos.Y) / MathF.Tan(halfFovV) + depth;
-            float needH = MathF.Abs(viewPos.X) / MathF.Tan(halfFovH) + depth;
-            maxDist = MathF.Max(maxDist, MathF.Max(needV, needH));
-        }
-
-        float dist = maxDist * 1.15f;
-        Vector3 camPos = center - camDir * dist;
-        view = Matrix4x4.CreateLookAt(camPos, center, up);
-        projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, aspect, 0.01f, dist * 10.0f);
-    }
-
-    private static Vector3 Clamp01(Vector3 value)
-    {
-        return new Vector3(
-            Math.Clamp(value.X, 0.0f, 1.0f),
-            Math.Clamp(value.Y, 0.0f, 1.0f),
-            Math.Clamp(value.Z, 0.0f, 1.0f));
-    }
-
-    private static bool HasMeaningfulUvTransform(M2RenderConsumerTextureState textureState)
-    {
-        Matrix4x4 rotationMatrix = Matrix4x4.CreateFromQuaternion(textureState.Rotation);
-        Vector2 scale = new(
-            Math.Abs(textureState.Scaling.X) <= 0.0001f ? 1.0f : textureState.Scaling.X,
-            Math.Abs(textureState.Scaling.Y) <= 0.0001f ? 1.0f : textureState.Scaling.Y);
-        Vector2 translation = new(textureState.Translation.X, textureState.Translation.Y);
-        Vector2 rotation = new(rotationMatrix.M11, rotationMatrix.M21);
-        return translation.LengthSquared() > 0.000001f
-            || Vector2.DistanceSquared(scale, Vector2.One) > 0.000001f
-            || Vector2.DistanceSquared(rotation, new Vector2(1.0f, 0.0f)) > 0.000001f;
-    }
-
     private sealed class CommandBuffers
     {
         public CommandBuffers(
@@ -707,16 +691,11 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
             bool isAdditive,
             bool depthWrite,
             bool alphaCutout,
-            bool isTwoSided,
             bool receivesLighting,
             Vector3 baseColor,
             Vector3 emissiveColor,
             float alpha,
-            bool hasUvTransform,
-            Vector2 uvTranslation,
-            Vector2 uvScale,
-            Vector2 uvRotation,
-            M2BlendMode blendMode = M2BlendMode.Opaque)
+            uint blendMode)
         {
             Vao = vao;
             Vbo = vbo;
@@ -728,15 +707,10 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
             IsAdditive = isAdditive;
             DepthWrite = depthWrite;
             AlphaCutout = alphaCutout;
-            IsTwoSided = isTwoSided;
             ReceivesLighting = receivesLighting;
             BaseColor = baseColor;
             EmissiveColor = emissiveColor;
             Alpha = alpha;
-            HasUvTransform = hasUvTransform;
-            UvTranslation = uvTranslation;
-            UvScale = uvScale;
-            UvRotation = uvRotation;
             BlendMode = blendMode;
         }
 
@@ -760,8 +734,6 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
 
         public bool AlphaCutout { get; }
 
-        public bool IsTwoSided { get; }
-
         public bool ReceivesLighting { get; }
 
         public Vector3 BaseColor { get; }
@@ -770,15 +742,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
 
         public float Alpha { get; }
 
-        public bool HasUvTransform { get; }
-
-        public Vector2 UvTranslation { get; }
-
-        public Vector2 UvScale { get; }
-
-        public Vector2 UvRotation { get; }
-
-        public M2BlendMode BlendMode { get; }
+        public uint BlendMode { get; }
 
         public void Dispose(GL gl)
         {
@@ -787,4 +751,13 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
             gl.DeleteVertexArray(Vao);
         }
     }
+
+    private readonly record struct MdxMaterialState(
+        string? TexturePath,
+        bool IsTransparent,
+        bool IsAdditive,
+        bool DepthWrite,
+        bool AlphaCutout,
+        float Alpha,
+        uint BlendMode);
 }
