@@ -1,5 +1,18 @@
 # Active Context
 
+## Apr 17, 2026 - MdxViewer weak-signal terrain restore is back on a simpler camera-neighbor whole-tile path with range-based per-cell clamp
+
+- the user rejected the newer workbench-scope, loaded-tile, per-chunk, and shadow-heavy restore behavior and explicitly redirected the active design back toward the older reference around commit `336894c7c3a8c51f94da2efe6ad1accacc883352`
+- active `MdxViewer` weak-signal restore eligibility is again limited to the camera tile plus its four direct neighbors, but the gate now accepts either a full weak-range ADT or partial weak-signal evidence from per-cell observed ranges
+- the active restore application still routes through the whole-tile factor path, but the actual deformation is now clamped to every weak sub-cell detected from the configured source-height range across the ADT instead of narrowing the mask to chunk or texture buckets
+- the sidebar copy now describes one active mode (`whole-tile factor, per-cell weak-signal clamp`), and persisted settings still force the older loaded-tile and shadow toggles off so stale JSON state does not silently re-enable the abandoned branches
+- validation in this chat is still build-only:
+	- `get_errors` returned clean for `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- full `dotnet build` is currently blocked by the already-running `ParpToolsWoWViewer` process locking the active output binaries, so this chat does not yet have a fresh unlocked build pass after the latest per-cell restore change
+- current boundary:
+	- no fresh real-data runtime proof has been captured yet for the simplified camera-neighbor restore path with the new per-cell mask
+	- seam continuity is still not solved at the shared tile-grid level; if restored chunks still drift along boundaries, the next fix should apply the masked restore on `TileHeightmap257` before converting back to MCNK chunks
+
 ## Apr 16, 2026 - MdxViewer weak-signal terrain restore now uses a persisted source-height band instead of a hard-coded `<= 10` gate
 
 - the user clarified that buried terrain compression is era-dependent rather than universally sea-level-based:

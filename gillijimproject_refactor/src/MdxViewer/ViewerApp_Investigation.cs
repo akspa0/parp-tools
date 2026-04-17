@@ -226,7 +226,7 @@ public partial class ViewerApp
 
         if (TryBuildTerrainWeakSignalTextureGuidance(chunkData, out var textureGuidance) && textureGuidance != null)
         {
-            ImGui.TextDisabled($"Weak sub-cells: {textureGuidance.SelectedCellCount} on dominant layer L{textureGuidance.DominantLayerIndex} ({textureGuidance.BorderSelectedCellCount} border cells)  range {textureGuidance.ObservedMinHeight:F1}..{textureGuidance.ObservedMaxHeight:F1}");
+            ImGui.TextDisabled($"Weak sub-cells: {textureGuidance.SelectedCellCount} ({textureGuidance.BorderSelectedCellCount} border cells)  range {textureGuidance.ObservedMinHeight:F1}..{textureGuidance.ObservedMaxHeight:F1}");
         }
         else
         {

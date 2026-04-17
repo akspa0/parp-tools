@@ -1,5 +1,20 @@
 # Progress
 
+### Apr 17, 2026 - MdxViewer weak-signal terrain restore now covers full weak-signal ADT evidence again, with range-based per-cell masking instead of chunk or texture-bucket selection
+
+- what changed:
+	- `src/MdxViewer/ViewerApp.cs` now refreshes restore from camera movement again instead of using workbench-scope or loaded-tile precedence as the active path
+	- `ShouldApplyTerrainWeakSignalRestoreToTile(...)` is still limited to the camera tile plus four direct neighbors, but it now accepts partial weak-signal evidence from `HasTerrainWeakSignalRestoreWholeTileEvidence(...)` instead of requiring the entire ADT to sit inside the weak-signal Z band
+	- `TryBuildTerrainWeakSignalRestoredChunks(...)` still delegates to the whole-tile restore path, and the mixed-tile evidence path now uses only per-cell range checks instead of whole-chunk range checks or texture-bucket selection
+	- `src/MdxViewer/ViewerApp_Sidebars.cs` now describes one active mode (`whole-tile factor, per-cell weak-signal clamp`) and no longer exposes the loaded-tiles or MCSH shadow-edge toggles in the active restore UI
+	- persisted viewer settings now force the loaded-tiles and shadow flags off so older state files do not silently revive branches the user asked to abandon
+- validation:
+	- `get_errors` returned clean for `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- a fresh full `dotnet build` after this change is currently blocked by the already-running `ParpToolsWoWViewer` process locking `bin/Debug/net10.0-windows/ParpToolsWoWViewer.exe` and `.dll`
+- boundary:
+	- this is still not real-data validated; no fresh runtime proof was captured yet for the simplified camera-neighbor restore behavior with the broadened per-cell mask
+	- if boundary seams still look wrong, the next implementation step should move the masked restore onto the shared `TileHeightmap257` grid before writing back into per-chunk data
+
 ### Apr 16, 2026 - the default wow-viewer M2 renderer in MdxViewer now advances skeletal animation and exposes runtime sequence controls instead of staying static-only
 
 - what changed:

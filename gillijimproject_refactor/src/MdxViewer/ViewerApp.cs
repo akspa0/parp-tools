@@ -352,6 +352,7 @@ public partial class ViewerApp : IDisposable
         LoadedTiles = 1,
         WholeMap = 2,
         CustomList = 3,
+        RectRange = 4,
     }
 
     private enum TerrainExportKind
@@ -388,6 +389,18 @@ public partial class ViewerApp : IDisposable
     private TerrainTileScope _mapGlbScope = TerrainTileScope.CurrentTile;
     private string _terrainImportFolder = "";
     private string _terrainCustomTilesText = "";
+    private int _terrainTileRangeStartX;
+    private int _terrainTileRangeStartY;
+    private int _terrainTileRangeEndX = 63;
+    private int _terrainTileRangeEndY = 63;
+    private (int tileX, int tileY)? _terrainWorkbenchFocusedTile;
+    private bool _terrainWorkbenchTileSelectionActive;
+    private bool _terrainWorkbenchMapPanActive;
+    private Vector2 _terrainWorkbenchMapDragStart;
+    private Vector2 _terrainWorkbenchMapPanOrigin;
+    private (int tileX, int tileY)? _terrainWorkbenchTileSelectionAnchor;
+    private bool _terrainWorkbenchChunkSelectionActive;
+    private (int chunkX, int chunkY)? _terrainWorkbenchChunkSelectionAnchor;
 
     private bool _chunkToolEnabled;
     private ChunkClipboard? _chunkClipboard;
@@ -419,8 +432,6 @@ public partial class ViewerApp : IDisposable
     private const float TerrainWeakSignalShadowEdgeMinHeightDelta = 0.5f;
     private bool _terrainWeakSignalRestoreEnabled;
     private bool _terrainWeakSignalRestoreAllLoadedTiles = true;
-    private bool _terrainWeakSignalRestoreUseChunkMode;
-    private bool _terrainWeakSignalRestoreSelectedChunksOnly;
     private bool _terrainWeakSignalRestoreUseTextureSubdivisions = true;
     private bool _terrainWeakSignalRestoreUseAutoFactor = true;
     private bool _terrainWeakSignalRestoreUseShadowHeuristic;
@@ -2337,16 +2348,16 @@ void main() {
                     ExportAlphaCurrentTileChunksFolder();
                     break;
                 case TerrainExportKind.AlphaLoadedTilesFolder:
-                    ExportAlphaTilesFolder(wholeMap: false);
+                    ExportAlphaTilesFolder(TerrainTileScope.LoadedTiles);
                     break;
                 case TerrainExportKind.AlphaWholeMapFolder:
-                    ExportAlphaTilesFolder(wholeMap: true);
+                    ExportAlphaTilesFolder(TerrainTileScope.WholeMap);
                     break;
                 case TerrainExportKind.Heightmap257CurrentTilePerTile:
                     ExportHeightmap257CurrentTilePerTile();
                     break;
                 case TerrainExportKind.Heightmap257LoadedTilesFolderPerTile:
-                    ExportHeightmap257TilesFolderPerTile(wholeMap: false);
+                    ExportHeightmap257TilesFolderPerTile(TerrainTileScope.LoadedTiles);
                     break;
                 case TerrainExportKind.Heightmap257WholeMapFolderPerMap:
                     ExportHeightmap257TilesFolderPerMap();
@@ -2355,10 +2366,10 @@ void main() {
                     ExportMccvCurrentTilePng();
                     break;
                 case TerrainExportKind.MccvLoadedTilesFolder:
-                    ExportMccvTilesFolder(wholeMap: false);
+                    ExportMccvTilesFolder(TerrainTileScope.LoadedTiles);
                     break;
                 case TerrainExportKind.MccvWholeMapFolder:
-                    ExportMccvTilesFolder(wholeMap: true);
+                    ExportMccvTilesFolder(TerrainTileScope.WholeMap);
                     break;
             }
         }
@@ -2441,6 +2452,80 @@ void main() {
         }
     }
 
+    private void GetTerrainTileRange(out int startX, out int startY, out int endX, out int endY)
+    {
+        startX = Math.Clamp(Math.Min(_terrainTileRangeStartX, _terrainTileRangeEndX), 0, 63);
+        startY = Math.Clamp(Math.Min(_terrainTileRangeStartY, _terrainTileRangeEndY), 0, 63);
+        endX = Math.Clamp(Math.Max(_terrainTileRangeStartX, _terrainTileRangeEndX), 0, 63);
+        endY = Math.Clamp(Math.Max(_terrainTileRangeStartY, _terrainTileRangeEndY), 0, 63);
+    }
+
+    private IEnumerable<(int tileX, int tileY)> EnumerateTerrainTileRange()
+    {
+        GetTerrainTileRange(out int startX, out int startY, out int endX, out int endY);
+        for (int tileY = startY; tileY <= endY; tileY++)
+        {
+            for (int tileX = startX; tileX <= endX; tileX++)
+                yield return (tileX, tileY);
+        }
+    }
+
+    private void DrawTerrainTileScopeSelector(string idSuffix, bool includeCurrentTile)
+    {
+        int scope = (int)_terrainTileScope;
+        TerrainTileScope previousScope = _terrainTileScope;
+        if (includeCurrentTile)
+            ImGui.RadioButton($"Current tile##{idSuffix}", ref scope, (int)TerrainTileScope.CurrentTile);
+        ImGui.RadioButton($"Loaded tiles##{idSuffix}", ref scope, (int)TerrainTileScope.LoadedTiles);
+        ImGui.RadioButton($"Whole map##{idSuffix}", ref scope, (int)TerrainTileScope.WholeMap);
+        ImGui.RadioButton($"Custom list##{idSuffix}", ref scope, (int)TerrainTileScope.CustomList);
+        ImGui.RadioButton($"Row/Column range##{idSuffix}", ref scope, (int)TerrainTileScope.RectRange);
+        _terrainTileScope = (TerrainTileScope)scope;
+        bool restoreScopeChanged = previousScope != _terrainTileScope;
+
+        if (_terrainTileScope == TerrainTileScope.CustomList)
+        {
+            ImGui.TextDisabled("One tile per line: x y (or x,y)");
+            if (ImGui.InputTextMultiline($"##customTiles_{idSuffix}", ref _terrainCustomTilesText, 8192, new Vector2(480, 160)))
+                restoreScopeChanged = true;
+        }
+        else if (_terrainTileScope == TerrainTileScope.RectRange)
+        {
+            int startX = _terrainTileRangeStartX;
+            int startY = _terrainTileRangeStartY;
+            int endX = _terrainTileRangeEndX;
+            int endY = _terrainTileRangeEndY;
+            if (ImGui.InputInt($"Column Start##{idSuffix}", ref startX))
+            {
+                _terrainTileRangeStartX = Math.Clamp(startX, 0, 63);
+                restoreScopeChanged = true;
+            }
+            if (ImGui.InputInt($"Row Start##{idSuffix}", ref startY))
+            {
+                _terrainTileRangeStartY = Math.Clamp(startY, 0, 63);
+                restoreScopeChanged = true;
+            }
+            if (ImGui.InputInt($"Column End##{idSuffix}", ref endX))
+            {
+                _terrainTileRangeEndX = Math.Clamp(endX, 0, 63);
+                restoreScopeChanged = true;
+            }
+            if (ImGui.InputInt($"Row End##{idSuffix}", ref endY))
+            {
+                _terrainTileRangeEndY = Math.Clamp(endY, 0, 63);
+                restoreScopeChanged = true;
+            }
+
+            GetTerrainTileRange(out int normalizedStartX, out int normalizedStartY, out int normalizedEndX, out int normalizedEndY);
+            int width = normalizedEndX - normalizedStartX + 1;
+            int height = normalizedEndY - normalizedStartY + 1;
+            ImGui.TextDisabled($"Range: columns {normalizedStartX}..{normalizedEndX}, rows {normalizedStartY}..{normalizedEndY} ({width * height} tile(s)).");
+        }
+
+        if (restoreScopeChanged)
+            MarkTerrainWeakSignalRestoreDirty();
+    }
+
     private IReadOnlyList<(int tileX, int tileY)> GetTileScopeList(TerrainTileScope scope)
     {
         if (scope == TerrainTileScope.CurrentTile)
@@ -2451,6 +2536,9 @@ void main() {
 
         if (scope == TerrainTileScope.CustomList)
             return ParseCustomTileList(_terrainCustomTilesText).Distinct().ToList();
+
+        if (scope == TerrainTileScope.RectRange)
+            return EnumerateTerrainTileRange().ToList();
 
         if (_terrainManager != null)
         {
@@ -2551,7 +2639,7 @@ void main() {
         _statusMessage = $"Exported chunks: {folder}";
     }
 
-    private void ExportAlphaTilesFolder(bool wholeMap)
+    private void ExportAlphaTilesFolder(TerrainTileScope scope)
     {
         string? folder = ShowFolderDialogSTA(
             "Select output folder for tile alpha atlases",
@@ -2560,9 +2648,7 @@ void main() {
         if (string.IsNullOrEmpty(folder))
             return;
 
-        var tiles = wholeMap
-            ? GetTileScopeList(TerrainTileScope.WholeMap)
-            : GetTileScopeList(TerrainTileScope.LoadedTiles);
+        var tiles = GetTileScopeList(scope);
 
         int written = 0;
         foreach (var (tx, ty) in tiles)
@@ -2604,19 +2690,7 @@ void main() {
 
         ImGui.Text("Apply imported alpha masks to:");
         ImGui.Separator();
-
-        int scope = (int)_terrainTileScope;
-        ImGui.RadioButton("Current tile", ref scope, (int)TerrainTileScope.CurrentTile);
-        ImGui.RadioButton("Loaded tiles", ref scope, (int)TerrainTileScope.LoadedTiles);
-        ImGui.RadioButton("Whole map", ref scope, (int)TerrainTileScope.WholeMap);
-        ImGui.RadioButton("Custom list", ref scope, (int)TerrainTileScope.CustomList);
-        _terrainTileScope = (TerrainTileScope)scope;
-
-        if (_terrainTileScope == TerrainTileScope.CustomList)
-        {
-            ImGui.TextDisabled("One tile per line: x y (or x,y)");
-            ImGui.InputTextMultiline("##customTiles", ref _terrainCustomTilesText, 8192, new Vector2(480, 160));
-        }
+        DrawTerrainTileScopeSelector("AlphaImport", includeCurrentTile: true);
 
         ImGui.Separator();
         if (ImGui.Button("Import"))
@@ -2707,7 +2781,7 @@ void main() {
         _statusMessage = $"Exported: {picked}";
     }
 
-    private void ExportMccvTilesFolder(bool wholeMap)
+    private void ExportMccvTilesFolder(TerrainTileScope scope)
     {
         string? folder = ShowFolderDialogSTA(
             "Select output folder for tile MCCV PNGs",
@@ -2716,9 +2790,7 @@ void main() {
         if (string.IsNullOrEmpty(folder))
             return;
 
-        var tiles = wholeMap
-            ? GetTileScopeList(TerrainTileScope.WholeMap)
-            : GetTileScopeList(TerrainTileScope.LoadedTiles);
+        var tiles = GetTileScopeList(scope);
 
         int written = 0;
         foreach (var (tx, ty) in tiles)
@@ -2761,19 +2833,7 @@ void main() {
 
         ImGui.Text("Apply imported MCCV to:");
         ImGui.Separator();
-
-        int scope = (int)_terrainTileScope;
-        ImGui.RadioButton("Current tile", ref scope, (int)TerrainTileScope.CurrentTile);
-        ImGui.RadioButton("Loaded tiles", ref scope, (int)TerrainTileScope.LoadedTiles);
-        ImGui.RadioButton("Whole map", ref scope, (int)TerrainTileScope.WholeMap);
-        ImGui.RadioButton("Custom list", ref scope, (int)TerrainTileScope.CustomList);
-        _terrainTileScope = (TerrainTileScope)scope;
-
-        if (_terrainTileScope == TerrainTileScope.CustomList)
-        {
-            ImGui.TextDisabled("One tile per line: x y (or x,y)");
-            ImGui.InputTextMultiline("##customTiles", ref _terrainCustomTilesText, 8192, new Vector2(480, 160));
-        }
+        DrawTerrainTileScopeSelector("MccvImport", includeCurrentTile: true);
 
         ImGui.Separator();
         ImGui.TextDisabled("PNG channels preserve raw MCCV bytes in file order for VLM/tooling compatibility.");
@@ -2870,7 +2930,7 @@ void main() {
         _statusMessage = $"Exported: {picked}";
     }
 
-    private void ExportHeightmap257TilesFolderPerTile(bool wholeMap)
+    private void ExportHeightmap257TilesFolderPerTile(TerrainTileScope scope)
     {
         string? folder = ShowFolderDialogSTA(
             "Select output folder for tile heightmaps",
@@ -2879,9 +2939,7 @@ void main() {
         if (string.IsNullOrEmpty(folder))
             return;
 
-        var tiles = wholeMap
-            ? GetTileScopeList(TerrainTileScope.WholeMap)
-            : GetTileScopeList(TerrainTileScope.LoadedTiles);
+        var tiles = GetTileScopeList(scope);
 
         int written = 0;
         foreach (var (tx, ty) in tiles)
@@ -2991,19 +3049,7 @@ void main() {
 
         ImGui.Text("Apply imported heightmaps to:");
         ImGui.Separator();
-
-        int scope = (int)_terrainTileScope;
-        ImGui.RadioButton("Current tile", ref scope, (int)TerrainTileScope.CurrentTile);
-        ImGui.RadioButton("Loaded tiles", ref scope, (int)TerrainTileScope.LoadedTiles);
-        ImGui.RadioButton("Whole map", ref scope, (int)TerrainTileScope.WholeMap);
-        ImGui.RadioButton("Custom list", ref scope, (int)TerrainTileScope.CustomList);
-        _terrainTileScope = (TerrainTileScope)scope;
-
-        if (_terrainTileScope == TerrainTileScope.CustomList)
-        {
-            ImGui.TextDisabled("One tile per line: x y (or x,y)");
-            ImGui.InputTextMultiline("##customTiles", ref _terrainCustomTilesText, 8192, new Vector2(480, 160));
-        }
+        DrawTerrainTileScopeSelector("HeightImport", includeCurrentTile: true);
 
         ImGui.Separator();
         if (ImGui.Button("Import"))
@@ -3264,6 +3310,7 @@ void main() {
         }
 
         _chunkClipboardStatus = $"Selected {_selectedChunks.Count} chunk(s)";
+        MarkTerrainWeakSignalRestoreDirty();
         return true;
     }
 
@@ -3894,21 +3941,66 @@ void main() {
         _terrainWeakSignalRestoreNeedsRefresh = true;
     }
 
+    private bool TerrainWeakSignalRestoreUsesWorkbenchScope()
+        => _terrainTileScope == TerrainTileScope.CurrentTile
+            || _terrainTileScope == TerrainTileScope.CustomList
+            || _terrainTileScope == TerrainTileScope.RectRange;
+
+    private IReadOnlyList<(int tileX, int tileY)> GetTerrainWeakSignalRestoreScopedTiles()
+    {
+        if (_selectedChunks.Count > 0)
+        {
+            return _selectedChunks
+                .Select(chunk => (chunk.tileX, chunk.tileY))
+                .Distinct()
+                .OrderBy(tile => tile.tileX)
+                .ThenBy(tile => tile.tileY)
+                .ToList();
+        }
+
+        if (TerrainWeakSignalRestoreUsesWorkbenchScope())
+            return GetTileScopeList(_terrainTileScope);
+
+        if (_terrainWeakSignalRestoreAllLoadedTiles)
+            return GetTileScopeList(TerrainTileScope.LoadedTiles);
+
+        return new List<(int tileX, int tileY)> { GetCameraTile() };
+    }
+
+    private bool HasTerrainWeakSignalScopedChunkSelectionForTile(int tileX, int tileY)
+        => _selectedChunks.Count > 0 && _selectedChunks.Any(chunk => chunk.tileX == tileX && chunk.tileY == tileY);
+
+    private bool IsTerrainWeakSignalRestoreTileInScope(int tileX, int tileY)
+    {
+        if (_selectedChunks.Count > 0)
+            return HasTerrainWeakSignalScopedChunkSelectionForTile(tileX, tileY);
+
+        if (TerrainWeakSignalRestoreUsesWorkbenchScope())
+            return GetTerrainWeakSignalRestoreScopedTiles().Contains((tileX, tileY));
+
+        if (_terrainWeakSignalRestoreAllLoadedTiles)
+            return true;
+
+        return GetCameraTile() == (tileX, tileY);
+    }
+
+    private bool IsTerrainWeakSignalRestoreChunkInScope(int tileX, int tileY, int chunkX, int chunkY)
+    {
+        if (_selectedChunks.Count > 0)
+            return _selectedChunks.Contains((tileX, tileY, chunkX, chunkY));
+
+        return IsTerrainWeakSignalRestoreTileInScope(tileX, tileY);
+    }
+
+    private string GetTerrainWeakSignalRestoreScopeSummary()
+    {
+        return "camera tile + 4 neighbors";
+    }
+
     private void UpdateTerrainWeakSignalRestoreForCamera()
     {
         if (!_terrainWeakSignalRestoreEnabled)
             return;
-
-        if (_terrainWeakSignalRestoreAllLoadedTiles)
-        {
-            if (_terrainWeakSignalRestoreNeedsRefresh)
-            {
-                RefreshTerrainWeakSignalRestoreForLoadedTiles();
-                _terrainWeakSignalRestoreNeedsRefresh = false;
-            }
-
-            return;
-        }
 
         var cameraTile = GetCameraTile();
         if (_terrainWeakSignalRestoreNeedsRefresh
@@ -3992,24 +4084,18 @@ void main() {
         if (sourceChunks.Count == 0)
             return false;
 
-        if (!_terrainWeakSignalRestoreAllLoadedTiles)
-        {
-            var cameraTile = GetCameraTile();
-            int deltaX = Math.Abs(tileX - cameraTile.tileX);
-            int deltaY = Math.Abs(tileY - cameraTile.tileY);
-            if (deltaX + deltaY > 1)
-                return false;
-        }
+        var cameraTile = GetCameraTile();
+        int deltaX = Math.Abs(tileX - cameraTile.tileX);
+        int deltaY = Math.Abs(tileY - cameraTile.tileY);
+        if (deltaX + deltaY > 1)
+            return false;
 
         var key = (tileX, tileY);
         IReadOnlyList<Terrain.TerrainChunkData> baseChunks = _terrainWeakSignalOriginalTiles.TryGetValue(key, out var originalChunks)
             ? originalChunks
             : sourceChunks;
 
-        if (!_terrainWeakSignalRestoreUseChunkMode)
-            return HasTerrainWeakSignalRestoreWholeTileEvidence(tileX, tileY, baseChunks);
-
-        return HasTerrainWeakSignalRestoreCandidateChunks(tileX, tileY, baseChunks);
+        return HasTerrainWeakSignalRestoreWholeTileEvidence(tileX, tileY, baseChunks);
     }
 
     private bool IsTerrainWeakSignalRestoreCandidateHeightmap(TerrainHeightmapIo.TileHeightmap257 tileHeightmap)
@@ -4029,25 +4115,16 @@ void main() {
         if (sourceChunks.Count == 0)
             return false;
 
-        if (_terrainWeakSignalRestoreSelectedChunksOnly && !HasTerrainWeakSignalRestoreSelectedChunkOnTile(tileX, tileY))
-            return false;
-
         TerrainHeightmapIo.TileHeightmap257 tileHeightmap = TerrainHeightmapIo.BuildTileHeightmap257(sourceChunks);
         bool tileWeakSignalCandidate = IsTerrainWeakSignalRestoreCandidateHeightmap(tileHeightmap);
 
         for (int index = 0; index < sourceChunks.Count; index++)
         {
             Terrain.TerrainChunkData chunk = sourceChunks[index];
-            if (!IsTerrainWeakSignalRestoreChunkTargeted(tileX, tileY, chunk.ChunkX, chunk.ChunkY))
+            if (!IsTerrainWeakSignalRestoreChunkInScope(tileX, tileY, chunk.ChunkX, chunk.ChunkY))
                 continue;
 
-            bool hasChunkRange = TryGetTerrainChunkHeightRange(chunk, out float chunkMinHeight, out float chunkMaxHeight);
-            bool chunkWeakSignalCandidate = hasChunkRange && IsTerrainWeakSignalCandidateRange(chunkMinHeight, chunkMaxHeight);
-            TerrainWeakSignalTextureGuidance? textureGuidance = null;
-            if (!chunkWeakSignalCandidate && _terrainWeakSignalRestoreUseTextureSubdivisions)
-                TryBuildTerrainWeakSignalTextureGuidance(chunk, out textureGuidance);
-
-            if (!chunkWeakSignalCandidate && textureGuidance == null)
+            if (!TryBuildTerrainWeakSignalTextureGuidance(chunk, out TerrainWeakSignalTextureGuidance? textureGuidance) || textureGuidance == null)
                 continue;
 
             if (!_terrainWeakSignalRestoreUseAutoFactor)
@@ -4157,109 +4234,7 @@ void main() {
         out int planSignature,
         out string reason)
     {
-        if (!_terrainWeakSignalRestoreUseChunkMode)
-            return TryBuildTerrainWeakSignalRestoredWholeTile(tileX, tileY, sourceChunks, out restoredChunks, out planSignature, out reason);
-
-        restoredChunks = CloneTerrainChunkList(sourceChunks);
-        planSignature = 0;
-        reason = string.Empty;
-
-        if (_terrainWeakSignalRestoreSelectedChunksOnly && !HasTerrainWeakSignalRestoreSelectedChunkOnTile(tileX, tileY))
-        {
-            restoredChunks.Clear();
-            return false;
-        }
-
-        TerrainHeightmapIo.TileHeightmap257 tileHeightmap = TerrainHeightmapIo.BuildTileHeightmap257(sourceChunks);
-        bool tileWeakSignalCandidate = IsTerrainWeakSignalRestoreCandidateHeightmap(tileHeightmap);
-        var planHash = new HashCode();
-        int restoredChunkCount = 0;
-        int shadowLiftedChunkCount = 0;
-        float maxAppliedFactor = 1f;
-
-        for (int index = 0; index < sourceChunks.Count; index++)
-        {
-            Terrain.TerrainChunkData chunk = sourceChunks[index];
-            if (!IsTerrainWeakSignalRestoreChunkTargeted(tileX, tileY, chunk.ChunkX, chunk.ChunkY))
-                continue;
-
-            bool hasChunkRange = TryGetTerrainChunkHeightRange(chunk, out float chunkMinHeight, out float chunkMaxHeight);
-            bool chunkWeakSignalCandidate = hasChunkRange && IsTerrainWeakSignalCandidateRange(chunkMinHeight, chunkMaxHeight);
-            TerrainWeakSignalTextureGuidance? textureGuidance = null;
-            if (!chunkWeakSignalCandidate && _terrainWeakSignalRestoreUseTextureSubdivisions)
-                TryBuildTerrainWeakSignalTextureGuidance(chunk, out textureGuidance);
-
-            if (!chunkWeakSignalCandidate && textureGuidance == null)
-                continue;
-
-            float factor;
-            if (_terrainWeakSignalRestoreUseAutoFactor)
-            {
-                if (!TryEstimateTerrainWeakSignalRestoreFactorForChunk(tileX, tileY, chunk, tileHeightmap, tileWeakSignalCandidate, textureGuidance, out factor, out _))
-                    continue;
-            }
-            else
-            {
-                factor = Math.Clamp(_terrainWeakSignalRestoreManualFactor, 1f, TerrainWeakSignalRestoreMaxFactor);
-                if (factor <= 1.001f)
-                    continue;
-            }
-
-            bool useShadowGuidance = false;
-            float[]? vertexWeights = textureGuidance != null ? BuildTerrainWeakSignalTextureGuidanceVertexWeights(textureGuidance) : null;
-            if (_terrainWeakSignalRestoreUseShadowHeuristic
-                && TryBuildTerrainWeakSignalShadowEdgeVertexWeights(chunk, textureGuidance, out float[]? shadowVertexWeights))
-            {
-                vertexWeights = shadowVertexWeights;
-                useShadowGuidance = true;
-            }
-
-            float[] restoredHeights = BuildTerrainWeakSignalRestoredChunkHeights(chunk, factor, vertexWeights);
-            Vector3[] restoredNormals = GenerateNormalsForChunk(chunk, restoredHeights, chunk.HoleMask);
-            restoredChunks[index] = CloneTerrainChunk(chunk, heights: restoredHeights, normals: restoredNormals);
-
-            planHash.Add(chunk.ChunkX);
-            planHash.Add(chunk.ChunkY);
-            planHash.Add((int)MathF.Round(factor * 1000f));
-            planHash.Add(useShadowGuidance);
-
-            restoredChunkCount++;
-            if (useShadowGuidance)
-                shadowLiftedChunkCount++;
-            if (factor > maxAppliedFactor)
-                maxAppliedFactor = factor;
-        }
-
-        if (restoredChunkCount == 0)
-        {
-            restoredChunks.Clear();
-            return false;
-        }
-
-        planSignature = planHash.ToHashCode();
-        reason = _terrainWeakSignalRestoreUseAutoFactor
-            ? $"{restoredChunkCount} chunk(s), max x{maxAppliedFactor:0.##}{(shadowLiftedChunkCount > 0 ? $", {shadowLiftedChunkCount} shadow-edge guided" : string.Empty)}"
-            : $"manual x{maxAppliedFactor:0.##} on {restoredChunkCount} chunk(s){(shadowLiftedChunkCount > 0 ? $", {shadowLiftedChunkCount} shadow-edge guided" : string.Empty)}";
-        return true;
-    }
-
-    private bool HasTerrainWeakSignalRestoreSelectedChunkOnTile(int tileX, int tileY)
-    {
-        foreach (var selectedChunk in _selectedChunks)
-        {
-            if (selectedChunk.tileX == tileX && selectedChunk.tileY == tileY)
-                return true;
-        }
-
-        return false;
-    }
-
-    private bool IsTerrainWeakSignalRestoreChunkTargeted(int tileX, int tileY, int chunkX, int chunkY)
-    {
-        if (!_terrainWeakSignalRestoreUseChunkMode || !_terrainWeakSignalRestoreSelectedChunksOnly)
-            return true;
-
-        return _selectedChunks.Contains((tileX, tileY, chunkX, chunkY));
+        return TryBuildTerrainWeakSignalRestoredWholeTile(tileX, tileY, sourceChunks, out restoredChunks, out planSignature, out reason);
     }
 
     private bool TryBuildTerrainWeakSignalRestoredWholeTile(
@@ -4302,6 +4277,10 @@ void main() {
             reason = "manual scale";
         }
 
+        float? globalMaxHeight = TryGetTerrainWeakSignalGlobalMaxHeight(tileX, tileY, out float resolvedGlobalMaxHeight)
+            ? resolvedGlobalMaxHeight
+            : null;
+
         float anchorHeight = tileHeightmap.MinHeight < 0f ? tileHeightmap.MinHeight : 0f;
         bool preserveNegativeFloor = anchorHeight < 0f;
         float[] restoredHeightmap = new float[tileHeightmap.Heights.Length];
@@ -4311,15 +4290,61 @@ void main() {
             float restoredHeight = anchorHeight + ((sourceHeight - anchorHeight) * factor);
             if (!preserveNegativeFloor && restoredHeight < 0f)
                 restoredHeight = 0f;
+            if (globalMaxHeight.HasValue && restoredHeight > globalMaxHeight.Value)
+                restoredHeight = globalMaxHeight.Value;
 
             restoredHeightmap[index] = restoredHeight;
         }
 
-        restoredChunks = TerrainHeightmapIo.ApplyHeightmap257ToChunks(sourceChunks, restoredHeightmap);
+        List<Terrain.TerrainChunkData> wholeTileRestoredChunks = TerrainHeightmapIo.ApplyHeightmap257ToChunks(sourceChunks, restoredHeightmap);
+
+        if (_terrainWeakSignalRestoreUseTextureSubdivisions)
+        {
+            List<Terrain.TerrainChunkData> maskedChunks = CloneTerrainChunkList(sourceChunks);
+            var maskedPlanHash = new HashCode();
+            int maskedChunkCount = 0;
+            int guidedCellCount = 0;
+
+            for (int index = 0; index < sourceChunks.Count; index++)
+            {
+                Terrain.TerrainChunkData chunk = sourceChunks[index];
+                if (!TryBuildTerrainWeakSignalTextureGuidance(chunk, out TerrainWeakSignalTextureGuidance? textureGuidance) || textureGuidance == null)
+                    continue;
+
+                float[]? vertexWeights = BuildTerrainWeakSignalTextureGuidanceVertexWeights(textureGuidance);
+                Terrain.TerrainChunkData restoredChunk = wholeTileRestoredChunks[index];
+
+                float[] restoredHeights = BlendTerrainWeakSignalMaskedChunkHeights(chunk.Heights, restoredChunk.Heights, vertexWeights);
+                Vector3[] restoredNormals = GenerateNormalsForChunk(chunk, restoredHeights, chunk.HoleMask);
+                maskedChunks[index] = CloneTerrainChunk(chunk, heights: restoredHeights, normals: restoredNormals);
+
+                maskedPlanHash.Add(chunk.ChunkX);
+                maskedPlanHash.Add(chunk.ChunkY);
+                maskedPlanHash.Add(textureGuidance.SelectedCellCount);
+                maskedPlanHash.Add(GetTerrainWeakSignalSelectedMaskHash(textureGuidance.SelectedMask));
+                maskedPlanHash.Add((int)MathF.Round(factor * 1000f));
+
+                maskedChunkCount++;
+                guidedCellCount += textureGuidance.SelectedCellCount;
+            }
+
+            if (maskedChunkCount > 0)
+            {
+                restoredChunks = maskedChunks;
+                planSignature = maskedPlanHash.ToHashCode();
+                string maskedSignalSummary = tileWeakSignalCandidate
+                    ? "whole-tile weak range"
+                    : $"{observedSignalCount} partial weak signal source(s){(usedTextureGuidance ? ", cell-guided" : string.Empty)}";
+                reason += $", whole-tile factor clamped to {maskedChunkCount} cell-guided chunk(s) / {guidedCellCount} weak sub-cell(s) via {maskedSignalSummary}";
+                return true;
+            }
+        }
+
+        restoredChunks = wholeTileRestoredChunks;
         planSignature = HashCode.Combine(false, (int)MathF.Round(factor * 1000f));
         string signalSummary = tileWeakSignalCandidate
             ? "whole-tile weak range"
-            : $"{observedSignalCount} partial weak signal source(s){(usedTextureGuidance ? ", texture-guided" : string.Empty)}";
+            : $"{observedSignalCount} partial weak signal source(s){(usedTextureGuidance ? ", cell-guided" : string.Empty)}";
         reason += preserveNegativeFloor
             ? $", whole tile from source floor via {signalSummary}"
             : $", whole tile from z=0 via {signalSummary}";
@@ -4393,17 +4418,6 @@ void main() {
         for (int index = 0; index < sourceChunks.Count; index++)
         {
             Terrain.TerrainChunkData chunk = sourceChunks[index];
-            if (TryGetTerrainChunkHeightRange(chunk, out float chunkMinHeight, out float chunkMaxHeight)
-                && IsTerrainWeakSignalCandidateRange(chunkMinHeight, chunkMaxHeight))
-            {
-                if (chunkMinHeight < minHeight)
-                    minHeight = chunkMinHeight;
-                if (chunkMaxHeight > maxHeight)
-                    maxHeight = chunkMaxHeight;
-                signalCount++;
-                continue;
-            }
-
             if (!_terrainWeakSignalRestoreUseTextureSubdivisions)
                 continue;
 
@@ -4453,7 +4467,7 @@ void main() {
             {
                 factor = rawFactor;
                 reason = textureGuidance != null
-                    ? $"WDL chunk relief {chunkGuideMin:F1}..{chunkGuideMax:F1} from texture-guided cells (L{textureGuidance.DominantLayerIndex}, {textureGuidance.SelectedCellCount} cells)"
+                    ? $"WDL chunk relief {chunkGuideMin:F1}..{chunkGuideMax:F1} from {DescribeTerrainWeakSignalGuidance(textureGuidance)}"
                     : $"WDL chunk relief {chunkGuideMin:F1}..{chunkGuideMax:F1}";
                 return true;
             }
@@ -4466,7 +4480,7 @@ void main() {
             {
                 factor = mixedTileFactor;
                 reason = textureGuidance != null
-                    ? $"mixed-tile relief {tileHeightmap.MinHeight:F1}..{tileHeightmap.MaxHeight:F1} from texture-guided cells (L{textureGuidance.DominantLayerIndex})"
+                    ? $"mixed-tile relief {tileHeightmap.MinHeight:F1}..{tileHeightmap.MaxHeight:F1} from {DescribeTerrainWeakSignalGuidance(textureGuidance)}"
                     : $"mixed-tile relief {tileHeightmap.MinHeight:F1}..{tileHeightmap.MaxHeight:F1}";
                 return true;
             }
@@ -4591,6 +4605,38 @@ void main() {
         maxHeight = localMaxHeight;
         tileCount = localTileCount;
         return tileCount > 0 && minHeight != float.MaxValue && maxHeight != float.MinValue && maxHeight > minHeight;
+    }
+
+    private bool TryGetTerrainWeakSignalGlobalMaxHeight(int tileX, int tileY, out float maxHeight)
+    {
+        maxHeight = float.MinValue;
+
+        if (TryGetTerrainWeakSignalWdlTile(tileX, tileY, out _) && _terrainWeakSignalWdlData != null)
+        {
+            for (int index = 0; index < _terrainWeakSignalWdlData.Tiles.Length; index++)
+            {
+                WdlParser.WdlTile? tile = _terrainWeakSignalWdlData.Tiles[index];
+                if (tile?.HasData != true)
+                    continue;
+
+                if (float.IsNaN(tile.MaxZ) || float.IsInfinity(tile.MaxZ))
+                    continue;
+
+                if (tile.MaxZ > maxHeight)
+                    maxHeight = tile.MaxZ;
+            }
+
+            if (maxHeight != float.MinValue)
+                return true;
+        }
+
+        if (TryGetTerrainWeakSignalLoadedBounds(out _, out float loadedMaxHeight, out _))
+        {
+            maxHeight = loadedMaxHeight;
+            return true;
+        }
+
+        return false;
     }
 
     private bool TryGetTerrainWeakSignalWdlTile(int tileX, int tileY, out WdlParser.WdlTile? tile)
@@ -4796,6 +4842,14 @@ void main() {
         }
 
         int preferredLayer = textureGuidance?.DominantLayerIndex ?? -1;
+        bool hasDirectionalShadowAnchor = TryInferTerrainWeakSignalShadowDirection(
+            textureGuidance?.SelectedMask,
+            shadowCoverage,
+            averageHeights,
+            dominantLayers,
+            subDivisions,
+            preferredLayer,
+            out var litToShadowOffset);
         int selectedCellCount = selectedMask.Count(static value => value);
         for (int cellY = 0; cellY < subDivisions; cellY++)
         {
@@ -4814,7 +4868,18 @@ void main() {
                 if (!touchesSeed)
                     continue;
 
-                if (!TryGetTerrainWeakSignalShadowNeighborHeightRange(shadowCoverage, averageHeights, subDivisions, cellX, cellY, out float shadowNeighborAverageHeight))
+                bool foundShadowNeighbor = hasDirectionalShadowAnchor
+                    ? TryGetTerrainWeakSignalDirectionalShadowNeighborAverageHeight(
+                        shadowCoverage,
+                        averageHeights,
+                        subDivisions,
+                        cellX,
+                        cellY,
+                        litToShadowOffset.offsetX,
+                        litToShadowOffset.offsetY,
+                        out float shadowNeighborAverageHeight)
+                    : TryGetTerrainWeakSignalShadowNeighborHeightRange(shadowCoverage, averageHeights, subDivisions, cellX, cellY, out shadowNeighborAverageHeight);
+                if (!foundShadowNeighbor)
                     continue;
 
                 if (averageHeights[cellIndex] + TerrainWeakSignalShadowEdgeMinHeightDelta < shadowNeighborAverageHeight)
@@ -4843,7 +4908,18 @@ void main() {
                     if (preferredLayer >= 0 && dominantLayers[cellIndex] != preferredLayer)
                         continue;
 
-                    if (!TryGetTerrainWeakSignalSelectedNeighborAverageHeight(selectedMask, averageHeights, subDivisions, cellX, cellY, out float selectedNeighborAverageHeight))
+                    bool foundSelectedNeighbor = hasDirectionalShadowAnchor
+                        ? TryGetTerrainWeakSignalDirectionalSelectedNeighborAverageHeight(
+                            selectedMask,
+                            averageHeights,
+                            subDivisions,
+                            cellX,
+                            cellY,
+                            litToShadowOffset.offsetX,
+                            litToShadowOffset.offsetY,
+                            out float selectedNeighborAverageHeight)
+                        : TryGetTerrainWeakSignalSelectedNeighborAverageHeight(selectedMask, averageHeights, subDivisions, cellX, cellY, out selectedNeighborAverageHeight);
+                    if (!foundSelectedNeighbor)
                         continue;
 
                     if (averageHeights[cellIndex] + 0.25f < selectedNeighborAverageHeight)
@@ -4874,11 +4950,9 @@ void main() {
         const int subDivisions = 8;
         float cellSize = WoWConstants.ChunkSize / subDivisions;
         var cells = new TerrainWeakSignalSubChunkCell[subDivisions * subDivisions];
-        var candidateCountsByLayer = new Dictionary<int, int>();
-        var borderCountsByLayer = new Dictionary<int, int>();
-        var minByLayer = new Dictionary<int, float>();
-        var maxByLayer = new Dictionary<int, float>();
-        var avgSumByLayer = new Dictionary<int, float>();
+        float selectedMinHeight = float.MaxValue;
+        float selectedMaxHeight = float.MinValue;
+        float selectedAverageHeightSum = 0f;
 
         for (int cellY = 0; cellY < subDivisions; cellY++)
         {
@@ -4924,30 +4998,8 @@ void main() {
                     TouchesBorder = touchesBorder,
                 };
                 cells[cellY * subDivisions + cellX] = cell;
-
-                if (!isWeakSignalCandidate)
-                    continue;
-
-                candidateCountsByLayer[dominantLayerIndex] = candidateCountsByLayer.GetValueOrDefault(dominantLayerIndex) + 1;
-                if (touchesBorder)
-                    borderCountsByLayer[dominantLayerIndex] = borderCountsByLayer.GetValueOrDefault(dominantLayerIndex) + 1;
-
-                if (!minByLayer.TryGetValue(dominantLayerIndex, out float currentMin) || minHeight < currentMin)
-                    minByLayer[dominantLayerIndex] = minHeight;
-                if (!maxByLayer.TryGetValue(dominantLayerIndex, out float currentMax) || maxHeight > currentMax)
-                    maxByLayer[dominantLayerIndex] = maxHeight;
-                avgSumByLayer[dominantLayerIndex] = avgSumByLayer.GetValueOrDefault(dominantLayerIndex) + averageHeight;
             }
         }
-
-        if (candidateCountsByLayer.Count == 0)
-            return false;
-
-        int selectedLayerIndex = candidateCountsByLayer
-            .OrderByDescending(entry => borderCountsByLayer.GetValueOrDefault(entry.Key) * 4 + entry.Value)
-            .ThenByDescending(entry => entry.Value)
-            .ThenBy(entry => entry.Key)
-            .First().Key;
 
         bool[] selectedMask = new bool[subDivisions * subDivisions];
         int selectedCellCount = 0;
@@ -4955,13 +5007,18 @@ void main() {
         for (int index = 0; index < cells.Length; index++)
         {
             TerrainWeakSignalSubChunkCell cell = cells[index];
-            if (!cell.IsWeakSignalCandidate || cell.DominantLayerIndex != selectedLayerIndex)
+            if (!cell.IsWeakSignalCandidate)
                 continue;
 
             selectedMask[index] = true;
             selectedCellCount++;
             if (cell.TouchesBorder)
                 borderSelectedCellCount++;
+            if (cell.MinHeight < selectedMinHeight)
+                selectedMinHeight = cell.MinHeight;
+            if (cell.MaxHeight > selectedMaxHeight)
+                selectedMaxHeight = cell.MaxHeight;
+            selectedAverageHeightSum += cell.AverageHeight;
         }
 
         if (selectedCellCount == 0)
@@ -4971,12 +5028,12 @@ void main() {
         {
             Cells = cells,
             SelectedMask = selectedMask,
-            DominantLayerIndex = selectedLayerIndex,
+            DominantLayerIndex = -1,
             SelectedCellCount = selectedCellCount,
             BorderSelectedCellCount = borderSelectedCellCount,
-            ObservedMinHeight = minByLayer[selectedLayerIndex],
-            ObservedMaxHeight = maxByLayer[selectedLayerIndex],
-            ObservedAverageHeight = avgSumByLayer[selectedLayerIndex] / selectedCellCount,
+            ObservedMinHeight = selectedMinHeight,
+            ObservedMaxHeight = selectedMaxHeight,
+            ObservedAverageHeight = selectedAverageHeightSum / selectedCellCount,
         };
         return true;
     }
@@ -5031,15 +5088,43 @@ void main() {
         return BuildTerrainWeakSignalSubCellVertexWeights(guidance.SelectedMask, subDivisions);
     }
 
+    private static string DescribeTerrainWeakSignalGuidance(TerrainWeakSignalTextureGuidance guidance)
+    {
+        return $"cell-guided weak cells across {guidance.SelectedCellCount} cell(s)";
+    }
+
+    private static float[] BlendTerrainWeakSignalMaskedChunkHeights(float[] sourceHeights, float[] restoredHeights, float[]? vertexWeights)
+    {
+        float[] blendedHeights = new float[sourceHeights.Length];
+        for (int index = 0; index < sourceHeights.Length; index++)
+        {
+            float sourceHeight = sourceHeights[index];
+            float targetHeight = index < restoredHeights.Length ? restoredHeights[index] : sourceHeight;
+            float weight = vertexWeights != null && index < vertexWeights.Length ? Math.Clamp(vertexWeights[index], 0f, 1f) : 1f;
+            blendedHeights[index] = sourceHeight + ((targetHeight - sourceHeight) * weight);
+        }
+
+        return blendedHeights;
+    }
+
+    private static int GetTerrainWeakSignalSelectedMaskHash(bool[] selectedMask)
+    {
+        var hash = new HashCode();
+        for (int index = 0; index < selectedMask.Length; index++)
+            hash.Add(selectedMask[index]);
+
+        return hash.ToHashCode();
+    }
+
     private static float[] BuildTerrainWeakSignalSubCellVertexWeights(bool[] selectedMask, int subDivisions)
     {
         float[] weights = new float[145];
         for (int vertexIndex = 0; vertexIndex < weights.Length; vertexIndex++)
         {
             GetChunkVertexLocalPosition(vertexIndex, out float localX, out float localY);
-            float normalizedX = Math.Clamp(localX / WoWConstants.ChunkSize, 0f, 0.999f) * subDivisions;
-            float normalizedY = Math.Clamp(localY / WoWConstants.ChunkSize, 0f, 0.999f) * subDivisions;
-            weights[vertexIndex] = SampleTerrainWeakSignalSelectedMask(selectedMask, subDivisions, normalizedX, normalizedY);
+            int cellX = Math.Clamp((int)MathF.Floor(Math.Clamp(localX / WoWConstants.ChunkSize, 0f, 0.999f) * subDivisions), 0, subDivisions - 1);
+            int cellY = Math.Clamp((int)MathF.Floor(Math.Clamp(localY / WoWConstants.ChunkSize, 0f, 0.999f) * subDivisions), 0, subDivisions - 1);
+            weights[vertexIndex] = selectedMask[cellY * subDivisions + cellX] ? 1f : 0f;
         }
 
         return weights;
@@ -5096,6 +5181,40 @@ void main() {
         return true;
     }
 
+    private static bool TryGetTerrainWeakSignalDirectionalShadowNeighborAverageHeight(
+        float[] shadowCoverage,
+        float[] averageHeights,
+        int size,
+        int cellX,
+        int cellY,
+        int offsetX,
+        int offsetY,
+        out float averageHeight)
+    {
+        averageHeight = 0f;
+        int count = 0;
+        foreach (var (sampleOffsetX, sampleOffsetY) in EnumerateDirectionalOffsets(offsetX, offsetY))
+        {
+            int neighborX = cellX + sampleOffsetX;
+            int neighborY = cellY + sampleOffsetY;
+            if ((uint)neighborX >= size || (uint)neighborY >= size)
+                continue;
+
+            int neighborIndex = neighborY * size + neighborX;
+            if (shadowCoverage[neighborIndex] < TerrainWeakSignalShadowEdgeMinCoverage)
+                continue;
+
+            averageHeight += averageHeights[neighborIndex];
+            count++;
+        }
+
+        if (count == 0)
+            return false;
+
+        averageHeight /= count;
+        return true;
+    }
+
     private static bool TryGetTerrainWeakSignalSelectedNeighborAverageHeight(bool[] selectedMask, float[] averageHeights, int size, int cellX, int cellY, out float averageHeight)
     {
         averageHeight = 0f;
@@ -5126,6 +5245,149 @@ void main() {
 
         averageHeight /= count;
         return true;
+    }
+
+    private static bool TryGetTerrainWeakSignalDirectionalSelectedNeighborAverageHeight(
+        bool[] selectedMask,
+        float[] averageHeights,
+        int size,
+        int cellX,
+        int cellY,
+        int offsetX,
+        int offsetY,
+        out float averageHeight)
+    {
+        averageHeight = 0f;
+        int count = 0;
+        foreach (var (sampleOffsetX, sampleOffsetY) in EnumerateDirectionalOffsets(offsetX, offsetY))
+        {
+            int neighborX = cellX + sampleOffsetX;
+            int neighborY = cellY + sampleOffsetY;
+            if ((uint)neighborX >= size || (uint)neighborY >= size)
+                continue;
+
+            int neighborIndex = neighborY * size + neighborX;
+            if (!selectedMask[neighborIndex])
+                continue;
+
+            averageHeight += averageHeights[neighborIndex];
+            count++;
+        }
+
+        if (count == 0)
+            return false;
+
+        averageHeight /= count;
+        return true;
+    }
+
+    private static bool TryInferTerrainWeakSignalShadowDirection(
+        bool[]? seedMask,
+        float[] shadowCoverage,
+        float[] averageHeights,
+        int[] dominantLayers,
+        int size,
+        int preferredLayer,
+        out (int offsetX, int offsetY) litToShadowOffset)
+    {
+        litToShadowOffset = default;
+        float bestScore = float.MinValue;
+        int bestMatchCount = 0;
+
+        foreach ((int offsetX, int offsetY) in EnumerateNeighborDirections())
+        {
+            float score = 0f;
+            int matchCount = 0;
+
+            for (int cellY = 0; cellY < size; cellY++)
+            {
+                for (int cellX = 0; cellX < size; cellX++)
+                {
+                    int cellIndex = cellY * size + cellX;
+                    if (shadowCoverage[cellIndex] > TerrainWeakSignalShadowLitMaxCoverage)
+                        continue;
+
+                    if (preferredLayer >= 0 && dominantLayers[cellIndex] != preferredLayer)
+                        continue;
+
+                    bool relevantToSeed = seedMask == null
+                        || seedMask[cellIndex]
+                        || CellTouchesSelectedMask(seedMask, size, cellX, cellY);
+                    if (!relevantToSeed)
+                        continue;
+
+                    if (!TryGetTerrainWeakSignalDirectionalShadowNeighborAverageHeight(
+                        shadowCoverage,
+                        averageHeights,
+                        size,
+                        cellX,
+                        cellY,
+                        offsetX,
+                        offsetY,
+                        out float shadowNeighborAverageHeight))
+                    {
+                        continue;
+                    }
+
+                    float heightDelta = averageHeights[cellIndex] - shadowNeighborAverageHeight;
+                    if (heightDelta + TerrainWeakSignalShadowEdgeMinHeightDelta < 0f)
+                        continue;
+
+                    float localScore = 1f + Math.Max(heightDelta, 0f);
+                    if (seedMask != null && seedMask[cellIndex])
+                        localScore += 0.5f;
+
+                    score += localScore;
+                    matchCount++;
+                }
+            }
+
+            if (matchCount == 0)
+                continue;
+
+            if (score > bestScore || (Math.Abs(score - bestScore) < 0.001f && matchCount > bestMatchCount))
+            {
+                bestScore = score;
+                bestMatchCount = matchCount;
+                litToShadowOffset = (offsetX, offsetY);
+            }
+        }
+
+        return bestMatchCount > 0;
+    }
+
+    private static IEnumerable<(int offsetX, int offsetY)> EnumerateNeighborDirections()
+    {
+        yield return (-1, -1);
+        yield return (0, -1);
+        yield return (1, -1);
+        yield return (-1, 0);
+        yield return (1, 0);
+        yield return (-1, 1);
+        yield return (0, 1);
+        yield return (1, 1);
+    }
+
+    private static IEnumerable<(int offsetX, int offsetY)> EnumerateDirectionalOffsets(int offsetX, int offsetY)
+    {
+        yield return (offsetX, offsetY);
+
+        if (offsetX == 0)
+        {
+            yield return (-1, offsetY);
+            yield return (1, offsetY);
+            yield break;
+        }
+
+        if (offsetY == 0)
+        {
+            yield return (offsetX, -1);
+            yield return (offsetX, 1);
+            yield break;
+        }
+
+        yield return (offsetX, 0);
+        yield return (0, offsetY);
     }
 
     private static float ComputeTerrainWeakSignalShadowCoverage(byte[] shadowMap, int cellX, int cellY, int subDivisions)
@@ -5172,25 +5434,11 @@ void main() {
         return sampleCount > 0 ? averageHeight / sampleCount : 0f;
     }
 
-    private static float SampleTerrainWeakSignalSelectedMask(bool[] mask, int size, float x, float y)
-    {
-        int x0 = Math.Clamp((int)MathF.Floor(x), 0, size - 1);
-        int y0 = Math.Clamp((int)MathF.Floor(y), 0, size - 1);
-        int x1 = Math.Min(x0 + 1, size - 1);
-        int y1 = Math.Min(y0 + 1, size - 1);
-        float fx = Math.Clamp(x - x0, 0f, 1f);
-        float fy = Math.Clamp(y - y0, 0f, 1f);
-
-        float m00 = mask[y0 * size + x0] ? 1f : 0f;
-        float m10 = mask[y0 * size + x1] ? 1f : 0f;
-        float m01 = mask[y1 * size + x0] ? 1f : 0f;
-        float m11 = mask[y1 * size + x1] ? 1f : 0f;
-        float mx0 = m00 + (m10 - m00) * fx;
-        float mx1 = m01 + (m11 - m01) * fx;
-        return mx0 + (mx1 - mx0) * fy;
-    }
-
-    private static float[] BuildTerrainWeakSignalRestoredChunkHeights(Terrain.TerrainChunkData chunk, float factor, float[]? vertexWeights = null)
+    private static float[] BuildTerrainWeakSignalRestoredChunkHeights(
+        Terrain.TerrainChunkData chunk,
+        float factor,
+        float[]? vertexWeights = null,
+        float? globalMaxHeight = null)
     {
         float[] restoredHeights = new float[chunk.Heights.Length];
         float anchorHeight = 0f;
@@ -5209,6 +5457,8 @@ void main() {
             float restoredHeight = sourceHeight + ((amplifiedHeight - sourceHeight) * weight);
             if (!preserveNegativeFloor && restoredHeight < 0f)
                 restoredHeight = 0f;
+            if (globalMaxHeight.HasValue && restoredHeight > globalMaxHeight.Value)
+                restoredHeight = globalMaxHeight.Value;
 
             restoredHeights[index] = restoredHeight;
         }
@@ -14139,12 +14389,10 @@ void main() {
             _showWorkspaceBarsPanel = settings.ShowWorkspaceBarsPanel;
             _showBottomDrawer = false;
             _terrainWeakSignalRestoreEnabled = settings.EnableWeakSignalTerrainRestore;
-            _terrainWeakSignalRestoreAllLoadedTiles = settings.EnableWeakSignalTerrainRestoreAllLoadedTiles;
-            _terrainWeakSignalRestoreUseChunkMode = settings.EnableWeakSignalTerrainRestoreUseChunkMode;
-            _terrainWeakSignalRestoreSelectedChunksOnly = settings.EnableWeakSignalTerrainRestoreSelectedChunksOnly;
-            _terrainWeakSignalRestoreUseTextureSubdivisions = settings.EnableWeakSignalTerrainRestoreUseTextureSubdivisions;
+            _terrainWeakSignalRestoreAllLoadedTiles = false;
+            _terrainWeakSignalRestoreUseTextureSubdivisions = true;
             _terrainWeakSignalRestoreUseAutoFactor = settings.EnableWeakSignalTerrainRestoreAutoFactor;
-            _terrainWeakSignalRestoreUseShadowHeuristic = settings.EnableWeakSignalTerrainRestoreUseShadowHeuristic;
+            _terrainWeakSignalRestoreUseShadowHeuristic = false;
             _terrainWeakSignalRestoreManualFactor = float.IsFinite(settings.WeakSignalTerrainRestoreManualFactor)
                 ? Math.Clamp(settings.WeakSignalTerrainRestoreManualFactor, 1f, TerrainWeakSignalRestoreMaxFactor)
                 : 16f;
@@ -14345,12 +14593,11 @@ void main() {
                 ShowWorkspaceBarsPanel = _showWorkspaceBarsPanel,
                 ShowBottomDrawer = false,
                 EnableWeakSignalTerrainRestore = _terrainWeakSignalRestoreEnabled,
-                EnableWeakSignalTerrainRestoreAllLoadedTiles = _terrainWeakSignalRestoreAllLoadedTiles,
-                EnableWeakSignalTerrainRestoreUseChunkMode = _terrainWeakSignalRestoreUseChunkMode,
-                EnableWeakSignalTerrainRestoreSelectedChunksOnly = _terrainWeakSignalRestoreSelectedChunksOnly,
-                EnableWeakSignalTerrainRestoreUseTextureSubdivisions = _terrainWeakSignalRestoreUseTextureSubdivisions,
+                EnableWeakSignalTerrainRestoreAllLoadedTiles = false,
+                EnableWeakSignalTerrainRestoreUseChunkMode = false,
+                EnableWeakSignalTerrainRestoreUseTextureSubdivisions = true,
                 EnableWeakSignalTerrainRestoreAutoFactor = _terrainWeakSignalRestoreUseAutoFactor,
-                EnableWeakSignalTerrainRestoreUseShadowHeuristic = _terrainWeakSignalRestoreUseShadowHeuristic,
+                EnableWeakSignalTerrainRestoreUseShadowHeuristic = false,
                 WeakSignalTerrainRestoreManualFactor = _terrainWeakSignalRestoreManualFactor,
                 WeakSignalTerrainRestoreCandidateMinHeight = _terrainWeakSignalRestoreCandidateMinHeight,
                 WeakSignalTerrainRestoreCandidateMaxHeight = _terrainWeakSignalRestoreCandidateMaxHeight,
@@ -14604,7 +14851,6 @@ void main() {
         public bool EnableWeakSignalTerrainRestore { get; set; }
         public bool EnableWeakSignalTerrainRestoreAllLoadedTiles { get; set; } = true;
         public bool EnableWeakSignalTerrainRestoreUseChunkMode { get; set; }
-        public bool EnableWeakSignalTerrainRestoreSelectedChunksOnly { get; set; }
         public bool EnableWeakSignalTerrainRestoreUseTextureSubdivisions { get; set; } = true;
         public bool EnableWeakSignalTerrainRestoreAutoFactor { get; set; } = true;
         public bool EnableWeakSignalTerrainRestoreUseShadowHeuristic { get; set; }

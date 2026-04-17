@@ -1297,17 +1297,299 @@ public partial class ViewerApp
             return;
         }
 
-        ImGui.SetNextWindowSize(new Vector2(460f, 0f), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Terrain Tools", ref _showTerrainToolsWindow, ImGuiWindowFlags.NoCollapse))
+        ImGui.SetNextWindowSize(new Vector2(560f, 0f), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Terrain Workbench", ref _showTerrainToolsWindow, ImGuiWindowFlags.NoCollapse))
         {
             ImGui.End();
             return;
         }
 
-        ImGui.TextDisabled("Terrain editing controls live here. Open other editor windows from the Tools menu.");
+        ImGui.TextDisabled("Terrain workbench: tile targeting, chunk targeting, live restore tuning, and reusable heightmap saves in one place.");
+        ImGui.Separator();
+        DrawTerrainWorkbenchSelectionContent(renderer);
         ImGui.Separator();
         DrawTerrainControlsAdjustmentContent();
+
+        ImGui.Separator();
+        ImGui.Text("Terrain Export Scope");
+        DrawTerrainTileScopeSelector("TerrainToolsExport", includeCurrentTile: true);
+        var scopedTiles = GetTileScopeList(_terrainTileScope);
+        ImGui.TextDisabled($"Resolved export scope: {scopedTiles.Count} tile(s).");
+
+        ImGui.Separator();
+        ImGui.Text("Scoped Export");
+        ImGui.TextDisabled("Use Current tile, Loaded tiles, Whole map, Custom list, or a row/column rectangle before exporting partial ADT data.");
+        if (ImGui.Button("Export Alpha"))
+        {
+            if (_terrainTileScope == TerrainTileScope.CurrentTile)
+                ExportAlphaCurrentTileChunksFolder();
+            else
+                ExportAlphaTilesFolder(_terrainTileScope);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export Heightmap"))
+        {
+            if (_terrainTileScope == TerrainTileScope.CurrentTile)
+                ExportHeightmap257CurrentTilePerTile();
+            else
+                ExportHeightmap257TilesFolderPerTile(_terrainTileScope);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export MCCV"))
+        {
+            if (_terrainTileScope == TerrainTileScope.CurrentTile)
+                ExportMccvCurrentTilePng();
+            else
+                ExportMccvTilesFolder(_terrainTileScope);
+        }
+
+        ImGui.Separator();
+        if (ImGui.CollapsingHeader("Clipboard + Save", ImGuiTreeNodeFlags.DefaultOpen))
+            DrawChunkClipboardContent(renderer);
         ImGui.End();
+    }
+
+    private void DrawTerrainWorkbenchSelectionContent(TerrainRenderer renderer)
+    {
+        if (!TryGetActiveMinimapState(out var existingTiles, out var isTileLoaded, out int loadedTileCount, out string? mapName)
+            || existingTiles == null
+            || isTileLoaded == null)
+        {
+            ImGui.TextDisabled("Load a terrain-backed world to target tiles and chunks in the terrain workbench.");
+            return;
+        }
+
+        ImGui.Text("Selection Map");
+        ImGui.TextDisabled("LMB drag selects ADT tiles. RMB drag pans. Mouse wheel zooms. Click one tile to focus it for chunk-level work.");
+        ImGui.TextDisabled($"Loaded tiles: {loadedTileCount}");
+
+        float mapSize = MathF.Max(220f, MathF.Min(ImGui.GetContentRegionAvail().X, 360f));
+        Vector2 cursorPos = ImGui.GetCursorScreenPos();
+        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / MinimapWorldTileSize;
+        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / MinimapWorldTileSize;
+
+        MinimapHelpers.RenderMinimapContent(
+            cursorPos,
+            mapSize,
+            existingTiles,
+            isTileLoaded,
+            _minimapRenderer,
+            mapName,
+            camTileX,
+            camTileY,
+            _minimapZoom,
+            _minimapPanOffset,
+            _camera,
+            _worldScene,
+            out float viewMinTx,
+            out float viewMinTy,
+            out float cellSize);
+
+        DrawTerrainWorkbenchSelectionOverlay(cursorPos, mapSize, viewMinTx, viewMinTy, cellSize);
+        HandleTerrainWorkbenchSelectionInteraction(cursorPos, mapSize, viewMinTx, viewMinTy, cellSize);
+
+        ImGui.Dummy(new Vector2(mapSize, mapSize));
+
+        if (_terrainWorkbenchFocusedTile == null)
+            _terrainWorkbenchFocusedTile = GetCameraTile();
+
+        DrawTerrainWorkbenchFocusedTileSummary();
+        DrawTerrainWorkbenchChunkGrid(renderer);
+    }
+
+    private void DrawTerrainWorkbenchSelectionOverlay(Vector2 cursorPos, float mapSize, float viewMinTx, float viewMinTy, float cellSize)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        drawList.PushClipRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize), true);
+
+        if (_terrainTileScope == TerrainTileScope.RectRange)
+        {
+            GetTerrainTileRange(out int startX, out int startY, out int endX, out int endY);
+            Vector2 min = new(
+                cursorPos.X + (startY - viewMinTy) * cellSize,
+                cursorPos.Y + (startX - viewMinTx) * cellSize);
+            Vector2 max = new(
+                cursorPos.X + ((endY + 1) - viewMinTy) * cellSize,
+                cursorPos.Y + ((endX + 1) - viewMinTx) * cellSize);
+            drawList.AddRectFilled(min, max, 0x3FA8FF40);
+            drawList.AddRect(min, max, 0xFF7CFF40, 0f, ImDrawFlags.None, 2f);
+        }
+
+        if (_terrainWorkbenchFocusedTile is { } focusedTile)
+        {
+            Vector2 min = new(
+                cursorPos.X + (focusedTile.tileY - viewMinTy) * cellSize,
+                cursorPos.Y + (focusedTile.tileX - viewMinTx) * cellSize);
+            Vector2 max = new(
+                cursorPos.X + ((focusedTile.tileY + 1) - viewMinTy) * cellSize,
+                cursorPos.Y + ((focusedTile.tileX + 1) - viewMinTx) * cellSize);
+            drawList.AddRect(min, max, 0xFFFFFF00, 0f, ImDrawFlags.None, 2f);
+        }
+
+        drawList.PopClipRect();
+    }
+
+    private void HandleTerrainWorkbenchSelectionInteraction(Vector2 cursorPos, float mapSize, float viewMinTx, float viewMinTy, float cellSize)
+    {
+        ImGui.SetCursorScreenPos(cursorPos);
+        ImGui.InvisibleButton("##terrainWorkbenchSelectionMap", new Vector2(mapSize, mapSize));
+        bool hovered = ImGui.IsItemHovered();
+        Vector2 mousePos = ImGui.GetMousePos();
+        var io = ImGui.GetIO();
+
+        if (hovered && io.MouseWheel != 0f)
+            _minimapZoom = Math.Clamp(_minimapZoom - io.MouseWheel * 0.5f, 1f, 32f);
+
+        if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+        {
+            _terrainWorkbenchMapPanActive = true;
+            _terrainWorkbenchMapDragStart = mousePos;
+            _terrainWorkbenchMapPanOrigin = _minimapPanOffset;
+        }
+        else if (_terrainWorkbenchMapPanActive && ImGui.IsMouseDown(ImGuiMouseButton.Right))
+        {
+            Vector2 delta = mousePos - _terrainWorkbenchMapDragStart;
+            _minimapPanOffset = _terrainWorkbenchMapPanOrigin - new Vector2(delta.Y / cellSize, delta.X / cellSize);
+            ClampMinimapPanOffset();
+        }
+        else if (_terrainWorkbenchMapPanActive && ImGui.IsMouseReleased(ImGuiMouseButton.Right))
+        {
+            _terrainWorkbenchMapPanActive = false;
+        }
+
+        if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left)
+            && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float clickTileX, out float clickTileY))
+        {
+            int tileX = (int)MathF.Floor(clickTileX);
+            int tileY = (int)MathF.Floor(clickTileY);
+            _terrainWorkbenchTileSelectionActive = true;
+            _terrainWorkbenchTileSelectionAnchor = (tileX, tileY);
+            _terrainWorkbenchFocusedTile = (tileX, tileY);
+            _terrainTileRangeStartX = tileX;
+            _terrainTileRangeEndX = tileX;
+            _terrainTileRangeStartY = tileY;
+            _terrainTileRangeEndY = tileY;
+            _terrainTileScope = TerrainTileScope.RectRange;
+            MarkTerrainWeakSignalRestoreDirty();
+        }
+        else if (_terrainWorkbenchTileSelectionActive && ImGui.IsMouseDown(ImGuiMouseButton.Left)
+            && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float dragTileX, out float dragTileY)
+            && _terrainWorkbenchTileSelectionAnchor is { } anchor)
+        {
+            _terrainTileRangeStartX = anchor.tileX;
+            _terrainTileRangeStartY = anchor.tileY;
+            _terrainTileRangeEndX = (int)MathF.Floor(dragTileX);
+            _terrainTileRangeEndY = (int)MathF.Floor(dragTileY);
+            _terrainTileScope = TerrainTileScope.RectRange;
+            MarkTerrainWeakSignalRestoreDirty();
+        }
+        else if (_terrainWorkbenchTileSelectionActive && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+        {
+            _terrainWorkbenchTileSelectionActive = false;
+            _terrainWorkbenchTileSelectionAnchor = null;
+        }
+    }
+
+    private void DrawTerrainWorkbenchFocusedTileSummary()
+    {
+        if (_terrainWorkbenchFocusedTile is not { } focusedTile)
+            return;
+
+        ImGui.Text($"Focused ADT: ({focusedTile.tileX}, {focusedTile.tileY})");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Use Camera Tile"))
+        {
+            _terrainWorkbenchFocusedTile = GetCameraTile();
+            MarkTerrainWeakSignalRestoreDirty();
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Clear Tile Range"))
+        {
+            _terrainTileScope = TerrainTileScope.CurrentTile;
+            _terrainTileRangeStartX = focusedTile.tileX;
+            _terrainTileRangeEndX = focusedTile.tileX;
+            _terrainTileRangeStartY = focusedTile.tileY;
+            _terrainTileRangeEndY = focusedTile.tileY;
+            MarkTerrainWeakSignalRestoreDirty();
+        }
+    }
+
+    private void DrawTerrainWorkbenchChunkGrid(TerrainRenderer renderer)
+    {
+        if (_terrainWorkbenchFocusedTile is not { } focusedTile)
+            return;
+
+        ImGui.Text("Focused ADT Chunk Grid");
+        ImGui.TextDisabled("LMB drag selects chunks in the focused ADT. Ctrl keeps existing selection. Use Clipboard + Save below for copy, paste, invert, and save.");
+
+        float gridSize = MathF.Max(220f, MathF.Min(ImGui.GetContentRegionAvail().X, 320f));
+        float cellSize = gridSize / 16f;
+        Vector2 origin = ImGui.GetCursorScreenPos();
+        var drawList = ImGui.GetWindowDrawList();
+        drawList.AddRectFilled(origin, origin + new Vector2(gridSize, gridSize), 0xFF1C1C1C);
+
+        for (int chunkY = 0; chunkY < 16; chunkY++)
+        {
+            for (int chunkX = 0; chunkX < 16; chunkX++)
+            {
+                Vector2 min = new(origin.X + chunkY * cellSize, origin.Y + chunkX * cellSize);
+                Vector2 max = new(min.X + cellSize, min.Y + cellSize);
+                bool selected = _selectedChunks.Contains((focusedTile.tileX, focusedTile.tileY, chunkX, chunkY));
+                uint fill = selected ? 0x6FA8FF40u : 0x20202020u;
+                drawList.AddRectFilled(min, max, fill);
+                drawList.AddRect(min, max, 0x50505050);
+            }
+        }
+
+        ImGui.SetCursorScreenPos(origin);
+        ImGui.InvisibleButton("##terrainWorkbenchChunkGrid", new Vector2(gridSize, gridSize));
+        bool hovered = ImGui.IsItemHovered();
+        Vector2 mousePos = ImGui.GetMousePos();
+        if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            Vector2 local = mousePos - origin;
+            int chunkY = Math.Clamp((int)(local.X / cellSize), 0, 15);
+            int chunkX = Math.Clamp((int)(local.Y / cellSize), 0, 15);
+            _terrainWorkbenchChunkSelectionActive = true;
+            _terrainWorkbenchChunkSelectionAnchor = (chunkX, chunkY);
+
+            if (!ImGui.GetIO().KeyCtrl)
+                ClearSelectedChunksForTile(focusedTile.tileX, focusedTile.tileY);
+            MarkTerrainWeakSignalRestoreDirty();
+        }
+        else if (_terrainWorkbenchChunkSelectionActive && ImGui.IsMouseDown(ImGuiMouseButton.Left) && _terrainWorkbenchChunkSelectionAnchor is { } anchor)
+        {
+            Vector2 local = Vector2.Clamp(mousePos - origin, Vector2.Zero, new Vector2(gridSize - 1f, gridSize - 1f));
+            int chunkY = Math.Clamp((int)(local.X / cellSize), 0, 15);
+            int chunkX = Math.Clamp((int)(local.Y / cellSize), 0, 15);
+            ClearSelectedChunksForTile(focusedTile.tileX, focusedTile.tileY);
+            int minChunkX = Math.Min(anchor.chunkX, chunkX);
+            int maxChunkX = Math.Max(anchor.chunkX, chunkX);
+            int minChunkY = Math.Min(anchor.chunkY, chunkY);
+            int maxChunkY = Math.Max(anchor.chunkY, chunkY);
+            for (int selectedChunkY = minChunkY; selectedChunkY <= maxChunkY; selectedChunkY++)
+            {
+                for (int selectedChunkX = minChunkX; selectedChunkX <= maxChunkX; selectedChunkX++)
+                    _selectedChunks.Add((focusedTile.tileX, focusedTile.tileY, selectedChunkX, selectedChunkY));
+            }
+            _chunkClipboardStatus = $"Selected {_selectedChunks.Count} chunk(s) via terrain workbench.";
+            MarkTerrainWeakSignalRestoreDirty();
+        }
+        else if (_terrainWorkbenchChunkSelectionActive && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+        {
+            _terrainWorkbenchChunkSelectionActive = false;
+            _terrainWorkbenchChunkSelectionAnchor = null;
+        }
+
+        ImGui.Dummy(new Vector2(gridSize, gridSize));
+    }
+
+    private void ClearSelectedChunksForTile(int tileX, int tileY)
+    {
+        _selectedChunks.RemoveWhere(chunk => chunk.tileX == tileX && chunk.tileY == tileY);
+        MarkTerrainWeakSignalRestoreDirty();
     }
 
     private void ApplyTerrainWeakSignalRestoreQuickRange(float minHeight, float maxHeight)
@@ -2292,77 +2574,9 @@ public partial class ViewerApp
                     SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Restore weak, era-compressed terrain using the currently selected restore mode and Z band. Shadow-derived behavior stays disabled unless you explicitly turn it on below.");
+                ImGui.SetTooltip("Amplify weak, era-compressed terrain on the camera tile and its four direct neighbors, then clamp the actual motion to weak per-cell signal regions across the ADT instead of picking one whole chunk or one whole texture bucket.");
 
-            bool restoreUseChunkMode = _terrainWeakSignalRestoreUseChunkMode;
-            if (ImGui.Checkbox("Per-Chunk Restore Mode", ref restoreUseChunkMode))
-            {
-                _terrainWeakSignalRestoreUseChunkMode = restoreUseChunkMode;
-                MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
-            }
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("When enabled, weak chunks inside mixed ADTs can be restored independently. Turn this off to require the whole tile to qualify and apply one shared restore scale.");
-
-            bool restoreSelectedChunksOnly = _terrainWeakSignalRestoreSelectedChunksOnly;
-            if (!_terrainWeakSignalRestoreUseChunkMode)
-                ImGui.BeginDisabled();
-            if (ImGui.Checkbox("Selected Chunks Only", ref restoreSelectedChunksOnly))
-            {
-                _terrainWeakSignalRestoreSelectedChunksOnly = restoreSelectedChunksOnly;
-                MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
-            }
-            if (!_terrainWeakSignalRestoreUseChunkMode)
-                ImGui.EndDisabled();
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Use only the currently selected chunks as restore targets. Open Chunk Clipboard from Tools, enable Chunk Tool, then Shift+LMB in the viewport to toggle chunk selection. Texture-guided subcells still localize the restore inside those selected chunks.");
-
-            if (_terrainWeakSignalRestoreUseChunkMode)
-            {
-                string chunkTargetSummary = _terrainWeakSignalRestoreSelectedChunksOnly
-                    ? (_selectedChunks.Count > 0 ? $"Targeted chunks: {_selectedChunks.Count} selected via Chunk Tool." : "Targeted chunks: none selected yet. Open Chunk Clipboard, enable Chunk Tool, then Shift+LMB in the viewport.")
-                    : "Targeted chunks: any chunk that qualifies in the current tile set.";
-                ImGui.TextDisabled(chunkTargetSummary);
-            }
-
-            bool useTextureSubdivisions = _terrainWeakSignalRestoreUseTextureSubdivisions;
-            if (!_terrainWeakSignalRestoreUseChunkMode)
-                ImGui.BeginDisabled();
-            if (ImGui.Checkbox("Use Texture-Tied Sub-Chunk Guidance", ref useTextureSubdivisions))
-            {
-                _terrainWeakSignalRestoreUseTextureSubdivisions = useTextureSubdivisions;
-                MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
-            }
-            if (!_terrainWeakSignalRestoreUseChunkMode)
-                ImGui.EndDisabled();
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Analyze 8x8 sub-cells inside each chunk, group weak cells by dominant texture family from the alpha maps, and only restore the texture-tied weak region instead of the whole chunk.");
-
-            bool useShadowHeuristic = _terrainWeakSignalRestoreUseShadowHeuristic;
-            if (!_terrainWeakSignalRestoreUseChunkMode)
-                ImGui.BeginDisabled();
-            if (ImGui.Checkbox("Use MCSH Shadow Edge Guidance", ref useShadowHeuristic))
-            {
-                _terrainWeakSignalRestoreUseShadowHeuristic = useShadowHeuristic;
-                MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
-            }
-            if (!_terrainWeakSignalRestoreUseChunkMode)
-                ImGui.EndDisabled();
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Optional experiment. Treat shadowed MCSH pixels as the mountain-foot edge, then bias restoration into the adjacent lit upslope side instead of lifting the shadowed side itself.");
-
-            bool restoreAllLoadedTiles = _terrainWeakSignalRestoreAllLoadedTiles;
-            if (ImGui.Checkbox("Restore All Loaded ADT Detail Tiles", ref restoreAllLoadedTiles))
-            {
-                _terrainWeakSignalRestoreAllLoadedTiles = restoreAllLoadedTiles;
-                MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
-            }
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("When enabled, every currently loaded ADT detail tile is scanned chunk-by-chunk for weak-signal candidates. Turn this off to go back to the camera tile plus its four direct neighbors.");
+            ImGui.TextDisabled("Mode: whole-tile factor, per-cell weak-signal clamp.");
 
             float restoreRangeMin = _terrainWeakSignalRestoreCandidateMinHeight;
             if (ImGui.InputFloat("Restore Range Min Z", ref restoreRangeMin, 10f, 100f, "%.1f"))
@@ -2412,9 +2626,7 @@ public partial class ViewerApp
                 SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(_terrainWeakSignalRestoreUseChunkMode
-                    ? "Use WDL chunk relief first, then mixed-tile relief and tile-level guides as fallback. Turn this off to A/B the manual restore control instead."
-                    : "Use loaded-tile relief first, then WDL tile relief as the whole-tile auto restore guide. Turn this off to A/B the manual restore control instead.");
+                ImGui.SetTooltip("Use the WDL-backed whole-tile auto estimate, then clamp the resulting deformation to weak per-cell signal regions across the ADT. Turn this off to A/B the manual restore control instead.");
 
             var wdlGuideTile = GetCameraTile();
             if (TryGetTerrainWeakSignalWdlTile(wdlGuideTile.tileX, wdlGuideTile.tileY, out var wdlGuide) && wdlGuide != null)
@@ -2439,19 +2651,8 @@ public partial class ViewerApp
                     ImGui.SetTooltip("Manual viewer-only terrain relief multiplier. Type the exact factor you want; the value is clamped to the supported restore range and reapplied from the original tile data so you can A/B without compounding.");
             }
 
-            string restoreScopeSummary = _terrainWeakSignalRestoreAllLoadedTiles
-                ? "all loaded ADT detail tiles"
-                : "camera tile + 4 neighbors";
-            string restoreModeSummary = _terrainWeakSignalRestoreUseChunkMode
-                ? (_terrainWeakSignalRestoreSelectedChunksOnly ? "selected chunks" : "candidate chunks")
-                : "whole tile";
-            string textureSummary = _terrainWeakSignalRestoreUseChunkMode && _terrainWeakSignalRestoreUseTextureSubdivisions
-                ? ", texture-guided subcells"
-                : string.Empty;
-            string shadowSummary = _terrainWeakSignalRestoreUseChunkMode && _terrainWeakSignalRestoreUseShadowHeuristic
-                ? ", shadow-edge guidance enabled"
-                : string.Empty;
-            ImGui.TextDisabled($"Candidates: {restoreScopeSummary}, mode {restoreModeSummary}{textureSummary}, source Z in {_terrainWeakSignalRestoreCandidateMinHeight:0.#}..{_terrainWeakSignalRestoreCandidateMaxHeight:0.#}{shadowSummary}.");
+            string restoreScopeSummary = GetTerrainWeakSignalRestoreScopeSummary();
+            ImGui.TextDisabled($"Candidates: {restoreScopeSummary}, whole-tile factor with per-cell weak-signal clamp, source Z in {_terrainWeakSignalRestoreCandidateMinHeight:0.#}..{_terrainWeakSignalRestoreCandidateMaxHeight:0.#}.");
 
             if (!string.IsNullOrWhiteSpace(_terrainWeakSignalRestoreStatus))
                 ImGui.TextWrapped(_terrainWeakSignalRestoreStatus);
