@@ -16,6 +16,7 @@ using WowViewer.Core.Runtime.World.Liquid;
 using WowViewer.Core.Runtime.World.Passes;
 using WowViewer.Core.Runtime.World.Terrain;
 using WowViewer.Core.Runtime.World.Visibility;
+using WowViewer.Core.Runtime.World.Wdl;
 
 namespace WowViewer.App;
 
@@ -491,6 +492,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"Selected Tile: ({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})");
             ImGui.Text($"Visible Objects: {_currentWorldRuntimeFrame.Visibility.VisibleWmos.Count + _currentWorldRuntimeFrame.Visibility.VisibleMdx.Count}");
             ImGui.Text($"Pending Assets: {_currentWorldRuntimeFrame.PendingAssetKeys.Count}");
+            ImGui.Text($"WDL Range: {FormatHeightRange(_currentWorldRuntimeFrame.WdlTileData)}");
             ImGui.Text($"Terrain Chunks: {_currentWorldRuntimeFrame.Stats.TerrainChunksRendered}/{_currentWorldRuntimeFrame.TileStageSummary.TerrainChunkCount}");
             ImGui.Text($"Terrain Areas: {_currentWorldRuntimeFrame.TerrainTileData.DistinctAreaIdCount}");
             ImGui.Text($"Liquid Chunks: {_currentWorldRuntimeFrame.Stats.Liquid.VisibleCount}/{_currentWorldRuntimeFrame.TileStageSummary.LiquidChunkCount}");
@@ -801,6 +803,10 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Separator();
         ImGui.TextDisabled("Pass Coordination");
         ImGui.Text($"WDL Tiles: {result.Stats.WdlVisibleTileCount}/{result.TileStageSummary.WdlVisibleTileCount}");
+        ImGui.Text($"WDL Found: {result.WdlTileData.SourceFound}");
+        ImGui.Text($"WDL Version: {FormatOptionalUInt(result.WdlTileData.Version)}");
+        ImGui.Text($"WDL Range: {FormatHeightRange(result.WdlTileData)}");
+        ImGui.TextWrapped($"WDL Sample: center={FormatOptionalHeight(result.WdlTileData.CenterHeight)} {FormatWdlCorners(result.WdlTileData)}");
         ImGui.Text($"Terrain Chunks: {result.Stats.TerrainChunksRendered}/{result.TileStageSummary.TerrainChunkCount}");
         ImGui.Text($"Terrain Hole Chunks: {result.TileStageSummary.TerrainHoleChunkCount}");
         ImGui.Text($"Terrain Areas: {result.TerrainTileData.DistinctAreaIdCount}");
@@ -855,6 +861,32 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         return string.Join(", ", terrainTileData.Chunks.Take(4).Select(static chunk =>
             $"({chunk.IndexX},{chunk.IndexY}) area={chunk.AreaId} holes={chunk.HasHoles} liquidFlags={chunk.HasLiquidFlags}"));
+    }
+
+    private static string FormatHeightRange(WorldWdlTileData wdlTileData)
+    {
+        if (!wdlTileData.MinHeight.HasValue || !wdlTileData.MaxHeight.HasValue)
+            return "n/a";
+
+        return $"{wdlTileData.MinHeight.Value}..{wdlTileData.MaxHeight.Value}";
+    }
+
+    private static string FormatWdlCorners(WorldWdlTileData wdlTileData)
+    {
+        if (!wdlTileData.HasData)
+            return "n/a";
+
+        return $"nw={FormatOptionalHeight(wdlTileData.NorthWestHeight)} ne={FormatOptionalHeight(wdlTileData.NorthEastHeight)} sw={FormatOptionalHeight(wdlTileData.SouthWestHeight)} se={FormatOptionalHeight(wdlTileData.SouthEastHeight)}";
+    }
+
+    private static string FormatOptionalHeight(short? value)
+    {
+        return value.HasValue ? value.Value.ToString() : "n/a";
+    }
+
+    private static string FormatOptionalUInt(uint? value)
+    {
+        return value.HasValue ? value.Value.ToString() : "n/a";
     }
 
     private void DrawBoundaryWindow()

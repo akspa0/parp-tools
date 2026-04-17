@@ -2,6 +2,21 @@
 
 # Active Context
 
+## Apr 17, 2026 - wow-viewer app slice 13 landed: the bounded world frame now consumes a runtime-owned WDL tile service
+
+- slice 13 from the viewer-app cutover plan is now landed in `wow-viewer`
+- `WdlSummary.cs` and `WdlSummaryReader.cs` now own the shared WDL summary seam in `WowViewer.Core` and `WowViewer.Core.IO`, parsing MAOF/MARE tile data and tolerating both reversed and readable top-level chunk tags
+- `WorldWdlTileData.cs` and `WorldWdlTileBuilder.cs` now own the bounded WDL tile service seam in `WowViewer.Core.Runtime`, exposing whether the selected tile exists in the map WDL plus bounded low-resolution height-range and corner or center sample signals
+- `WowViewerWorldRuntimeBridge.cs` now resolves the selected map WDL through the same archive or loose-file path as the rest of the bounded world frame, carries that WDL service through `WowViewerWorldRuntimeFrameResult`, and uses actual WDL tile presence instead of the earlier hard-coded source count
+- `Program.cs` and `WowViewerDesktopApp.cs` now report WDL range and sample-height signals in the `world-frame` CLI proof path and desktop diagnostics, so the bounded world frame has a real WDL service seam instead of only a count
+- bounded proof in this chat:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WdlSummaryReaderTests|WorldWdlTileBuilderTests"` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+	- real fixed-root proof via `WowViewer.App world-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, now reports WDL range and sample-height signals for the auto-selected tile `(39,32)`, while rerunning with `--hide-wdl` still drops the active WDL stage count to zero without erasing the source-side WDL service data
+- current boundary:
+	- this closes bounded WDL tile service ownership only; it does not extract actual terrain rendering
+	- terrain rendering extraction remains the next real viewer-facing slice
+
 ## Apr 17, 2026 - wow-viewer app slice 12 landed: the bounded world frame now consumes a runtime-owned terrain chunk service over MCNK headers
 
 - slice 12 from the viewer-app cutover plan is now landed in `wow-viewer`

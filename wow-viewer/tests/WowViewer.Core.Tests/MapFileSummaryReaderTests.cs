@@ -145,6 +145,8 @@ internal static class MapTestPaths
 {
     public static string DevelopmentDirectoryPath => Path.Combine(GetWowViewerRoot(), "..", "gillijimproject_refactor", "test_data", "development", "World", "Maps", "development");
 
+    public static string DevelopmentWdlPath => Path.Combine(DevelopmentDirectoryPath, "development.wdl");
+
     public static string DevelopmentWdtPath => Path.Combine(DevelopmentDirectoryPath, "development.wdt");
 
     public static string DevelopmentRootAdtPath => Path.Combine(DevelopmentDirectoryPath, "development_0_0.adt");

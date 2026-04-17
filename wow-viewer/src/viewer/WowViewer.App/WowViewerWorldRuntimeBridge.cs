@@ -12,6 +12,7 @@ using WowViewer.Core.Runtime.World.Liquid;
 using WowViewer.Core.Runtime.World.Passes;
 using WowViewer.Core.Runtime.World.Terrain;
 using WowViewer.Core.Runtime.World.Visibility;
+using WowViewer.Core.Runtime.World.Wdl;
 
 namespace WowViewer.App;
 
@@ -31,6 +32,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         int selectedTileY,
         string placementSourcePath,
         WorldTileStageSummary tileStageSummary,
+        WorldWdlTileData wdlTileData,
         WorldTerrainTileData terrainTileData,
         WorldLiquidTileData liquidTileData,
         AdtPlacementCatalog placementCatalog,
@@ -57,6 +59,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         SelectedTileY = selectedTileY;
         PlacementSourcePath = placementSourcePath;
         TileStageSummary = tileStageSummary;
+        WdlTileData = wdlTileData;
         TerrainTileData = terrainTileData;
         LiquidTileData = liquidTileData;
         PlacementCatalog = placementCatalog;
@@ -88,6 +91,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
     public string PlacementSourcePath { get; }
 
     public WorldTileStageSummary TileStageSummary { get; }
+
+    public WorldWdlTileData WdlTileData { get; }
 
     public WorldTerrainTileData TerrainTileData { get; }
 
@@ -146,7 +151,8 @@ internal static class WowViewerWorldRuntimeBridge
 
         ((int tileX, int tileY) selectedTile, AdtPlacementCatalog placementCatalog, string placementSourcePath) =
             ResolveTileAndPlacements(session, request.TileX, request.TileY, archiveCatalog);
-        WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
+        WorldWdlTileData wdlTileData = ReadMapWdlTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
+        WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog, wdlTileData.HasData ? 1 : 0);
         WorldTerrainTileData terrainTileData = ReadRootTerrainTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
         WorldLiquidTileData liquidTileData = ReadRootLiquidTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
 
@@ -242,7 +248,7 @@ internal static class WowViewerWorldRuntimeBridge
                 () =>
                 {
                     Stopwatch wdlStopwatch = Stopwatch.StartNew();
-                    activeWdlTileCount = tileStageSummary.WdlVisibleTileCount;
+                    activeWdlTileCount = wdlTileData.HasData ? 1 : 0;
                     wdlStopwatch.Stop();
                     wdlMs = wdlStopwatch.Elapsed.TotalMilliseconds;
                 },
@@ -349,6 +355,7 @@ internal static class WowViewerWorldRuntimeBridge
             selectedTile.tileY,
             placementSourcePath,
             tileStageSummary,
+            wdlTileData,
             terrainTileData,
             liquidTileData,
             placementCatalog,
@@ -438,7 +445,8 @@ internal static class WowViewerWorldRuntimeBridge
         WowViewerWorldSessionBootstrapResult session,
         int tileX,
         int tileY,
-        IArchiveCatalog archiveCatalog)
+        IArchiveCatalog archiveCatalog,
+        int wdlVisibleTileCount)
     {
         string mapDirectory = session.ResolvedMapDirectory;
         string rootVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
@@ -448,7 +456,22 @@ internal static class WowViewerWorldRuntimeBridge
         using MemoryStream stream = new(rootData, writable: false);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
         stream.Position = 0;
-        return WorldTileStageSummaryBuilder.Read(stream, fileSummary);
+        return WorldTileStageSummaryBuilder.Read(stream, fileSummary, wdlVisibleTileCount);
+    }
+
+    private static WorldWdlTileData ReadMapWdlTileData(
+        WowViewerWorldSessionBootstrapResult session,
+        int tileX,
+        int tileY,
+        IArchiveCatalog archiveCatalog)
+    {
+        string mapDirectory = session.ResolvedMapDirectory;
+        string wdlVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}.wdl";
+        if (!TryReadVirtualOrLooseFile(session.ClientRoot, wdlVirtualPath, archiveCatalog, out byte[]? wdlData, out string sourcePath) || wdlData is null)
+            return WorldWdlTileData.Missing(wdlVirtualPath, tileX, tileY);
+
+        using MemoryStream stream = new(wdlData, writable: false);
+        return WorldWdlTileBuilder.Read(stream, sourcePath, tileX, tileY);
     }
 
     private static WorldLiquidTileData ReadRootLiquidTileData(

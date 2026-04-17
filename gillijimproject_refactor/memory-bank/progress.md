@@ -1,5 +1,21 @@
 # Progress
 
+### Apr 17, 2026 - wow-viewer app slice 13 landed: the bounded world frame now has runtime-owned WDL tile data
+
+- what changed:
+	- `wow-viewer/src/core/WowViewer.Core/Maps/WdlSummary.cs` plus `wow-viewer/src/core/WowViewer.Core.IO/Maps/WdlSummaryReader.cs` now own the shared WDL summary seam for MAOF/MARE tile data and tolerate both reversed and readable top-level chunk tags
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Wdl/WorldWdlTileData.cs` and `WorldWdlTileBuilder.cs` now own a bounded WDL tile service for selected-tile height ranges and corner or center samples
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now resolves the selected map WDL into that runtime-owned WDL service and uses actual tile presence instead of a hard-coded WDL source count in the bounded world frame
+	- `wow-viewer/src/viewer/WowViewer.App/Program.cs` and `WowViewerDesktopApp.cs` now report WDL range and sample-height signals in the CLI proof path and desktop world diagnostics surfaces
+	- `wow-viewer/tests/WowViewer.Core.Tests/WdlSummaryReaderTests.cs` and `WorldWdlTileBuilderTests.cs` now cover both the fixed development WDL and a synthetic readable-tag WDL fixture for focused regression coverage
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WdlSummaryReaderTests|WorldWdlTileBuilderTests"` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
+	- real-data runtime proof via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340` now reports WDL range and sample-height signals for the selected tile, and rerunning with `--hide-wdl` still drops the active WDL stage count to zero while preserving source-side WDL service data
+- boundary:
+	- this closes bounded WDL tile service ownership only
+	- actual terrain rendering extraction remains the immediate next follow-up slice
+
 ### Apr 17, 2026 - wow-viewer app slice 12 landed: the bounded world frame now has runtime-owned terrain chunk inventory
 
 - what changed:

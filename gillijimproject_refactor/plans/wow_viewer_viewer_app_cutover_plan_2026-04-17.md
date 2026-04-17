@@ -336,6 +336,34 @@
 - current boundary:
   - this closes bounded terrain chunk service ownership only
   - actual terrain rendering extraction remains the next deeper follow-up slice
+
+### Slice 13 - WDL Tile Service
+
+- target problem:
+  - the bounded world app consumer can toggle WDL and count it, but it still has no runtime-owned WDL tile service contract for real low-resolution height ranges or sample data on the selected tile
+- implementation scope:
+  - add a shared WDL summary reader in `WowViewer.Core.IO` that parses MAOF/MARE tile data and tolerates both standard and readable chunk-tag variants
+  - add a runtime-owned WDL tile service that exposes whether the selected tile exists in the map WDL plus bounded height-range and sample-height signals
+  - thread that service through the bounded world-frame bridge and current CLI or desktop diagnostics so WDL is no longer represented only by one active or source count
+  - keep the slice bounded to WDL summary and selected-tile service ownership; do not claim actual terrain rendering extraction yet
+- proof goal:
+  - the `world-frame` proof path reports real WDL height-range or sample signals on the selected tile, and the active WDL stage count still respects `--hide-wdl`
+
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer`:
+  - `wow-viewer/src/core/WowViewer.Core/Maps/WdlSummary.cs` plus `wow-viewer/src/core/WowViewer.Core.IO/Maps/WdlSummaryReader.cs` now own the shared WDL summary seam for MAOF/MARE tile data, including tolerance for both reversed and readable top-level chunk tags
+  - `wow-viewer/src/core/WowViewer.Core.Runtime/World/Wdl/WorldWdlTileData.cs` and `WorldWdlTileBuilder.cs` now own the bounded WDL tile service seam for selected-tile low-resolution height ranges and corner or center samples
+  - `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now resolves the selected map WDL through the same archive or loose-file path as the rest of the bounded world frame, carries the runtime-owned WDL tile service in the frame result, and uses actual tile presence instead of a hard-coded WDL source count
+  - `wow-viewer/src/viewer/WowViewer.App/Program.cs` and `WowViewerDesktopApp.cs` now report bounded WDL height-range and sample-height signals in the `world-frame` CLI proof path and the desktop world diagnostics surfaces
+  - `wow-viewer/tests/WowViewer.Core.Tests/WdlSummaryReaderTests.cs` and `WorldWdlTileBuilderTests.cs` now cover both the fixed development WDL and synthetic readable-tag WDL fixtures for focused regression coverage
+- proof completed:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WdlSummaryReaderTests|WorldWdlTileBuilderTests"`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - real-data runtime proof via `WowViewer.App world-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, showing WDL height-range or sample signals on the selected tile while still dropping the active WDL stage count to zero under `--hide-wdl`
+- current boundary:
+  - this closes bounded WDL tile service ownership only
+  - actual terrain rendering extraction remains the immediate next deeper follow-up slice
   - `wow-viewer/tests/WowViewer.Core.Tests/WorldFramePassCoordinatorTests.cs` now proves both the legacy ordered flow and the new disabled-layer behavior
 - proof completed:
   - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldFramePassCoordinatorTests`
