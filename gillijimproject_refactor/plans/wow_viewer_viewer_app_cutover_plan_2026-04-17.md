@@ -230,6 +230,19 @@
 - proof goal:
   - continuity docs and repo guidance point future viewer work at wow-viewer first
 
+#### Apr 17, 2026 implementation status update
+
+- landed in documentation and workflow guidance:
+  - added `wow-viewer/docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md` as the explicit viewer ownership boundary, naming what `WowViewer.App` owns now and which remaining `MdxViewer` surfaces are compatibility-only versus legacy editor or archaeology work
+  - `wow-viewer/README.md` now links to that boundary note so repo-local discovery no longer depends on memory-bank recovery alone
+  - `.github/copilot-instructions.md` and `AGENTS.md` now require that boundary note plus this cutover plan before new viewer-app shell or cutover work, and they now include explicit viewer-app guardrails that keep long-range shell design out of `MdxViewer`
+- proof completed:
+  - this slice is documentation and workflow guidance only; no code or runtime behavior changed
+  - the new proof is that the canonical repo instructions, README, cutover plan, and continuity files now all point future viewer work at `wow-viewer` first and classify remaining `MdxViewer` viewer surfaces explicitly
+- current boundary:
+  - this closes the documentation and workflow-routing side of the cutover review only
+  - it does not claim renderer parity, terrain-runtime ownership, or editor-feature migration closure
+
 ## Implementation Rule
 
 - each slice should land with one small proof and one honest boundary
@@ -239,7 +252,7 @@
 
 ## Immediate Next Slice
 
-- slice 08: legacy cutover review
+- next viewer-facing slice: a real world-runtime or renderer ownership vertical slice in `wow-viewer`
 - reason:
-  - the app now has persisted state, a typed session boundary, an explicit workspace split, a bounded standalone GPU M2 preview consumer, a bounded fixed-root world-session bootstrap path, a first bounded world runtime consumer over one selected tile, and bounded navigator or inspector surfaces around that frame
-  - the next honest step is documenting what still belongs to legacy `ViewerApp` or future editor work instead of implying that slice-07 shell usability closed renderer cutover
+  - the shell and cutover guidance are now explicit enough that future work should stop drifting back into `ViewerApp`
+  - the remaining meaningful gap is not more shell routing; it is actual runtime or renderer ownership for terrain, liquid, WDL, or broader world submission work

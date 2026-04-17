@@ -1,18 +1,16 @@
 # Progress
 
-### Apr 17, 2026 - wow-viewer app slice 07 landed: the desktop shell now supports bounded world inspection around one selected tile
+### Apr 17, 2026 - wow-viewer app slice 08 landed: viewer ownership routing is now explicit
 
 - what changed:
-	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now adds app-local world selection state, direct canvas picking, a world-status summary panel, a filterable world navigator, and a runtime-backed world inspector instead of stopping at a passive top-down tile canvas
-	- the navigator and inspector are grounded in the bounded `WowViewerWorldRuntimeFrameResult`, reusing actual visibility entries, placement state, bounds, and MDX pass-routing information instead of inventing a parallel shell-only inspection contract
-	- `wow-viewer/src/viewer/WowViewer.App/WowViewerAppSettings.cs` now persists the new panel visibility toggles so the shell surface stays stable across runs
+	- added `wow-viewer/docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md` to classify `WowViewer.App` as the canonical home for new shell work and to split remaining `MdxViewer` viewer surfaces into compatibility-only versus legacy editor or archaeology buckets
+	- updated `wow-viewer/README.md`, `.github/copilot-instructions.md`, and `AGENTS.md` so future repo-local discovery points new viewer work at `wow-viewer` first without needing prior chat recovery
+	- updated the viewer-app cutover plan and continuity files so the next viewer-facing slice moves back to runtime or renderer ownership instead of more shell routing
 - validation:
-	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
-	- real-data runtime proof still succeeded via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340`
-	- that proof auto-selected `Azeroth_39_32.adt`, found `24` WMO placements plus `2991` MDX placements, admitted `24` visible WMO plus `2464` visible MDX, and executed the shared object/pass phase with `objectPhase=True`
+	- documentation and workflow-guidance slice only; no build or runtime proof changed in this step
 - boundary:
-	- this closes bounded shell usability for one-tile world inspection only
-	- it is still not the final 3D world renderer, terrain/liquid submission path, or full `WorldScene` or `ViewerApp` parity
+	- this closes routing and ownership guidance only
+	- terrain, liquid, WDL, and broader world renderer ownership still remain implementation work, not documentation closure
 
 ### Apr 17, 2026 - wow-viewer app slice 05 landed: the desktop shell now has bounded world-session bootstrap over shared map readers
 

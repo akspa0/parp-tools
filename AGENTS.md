@@ -13,6 +13,7 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 
 - Before changing viewer, terrain, or format code, read `gillijimproject_refactor/memory-bank/activeContext.md`, `gillijimproject_refactor/memory-bank/progress.md`, `gillijimproject_refactor/memory-bank/data-paths.md`, and `gillijimproject_refactor/src/MdxViewer/memory-bank/activeContext.md` when it exists.
 - Before changing `wow-viewer` PM4, shared I/O, dataset-builder ownership, or migration workflow, also read `gillijimproject_refactor/plans/wow_viewer_pm4_library_plan_2026-03-25.md`, `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md`, `gillijimproject_refactor/plans/wow_viewer_dataset_builder_tool_plan_2026-04-14.md`, and `wow-viewer/README.md`.
+- Before changing `wow-viewer` viewer-app shell work, workspace or session surfaces, navigator or inspector or status panels, world-session UI, or legacy viewer cutover guidance, also read `gillijimproject_refactor/plans/wow_viewer_viewer_app_cutover_plan_2026-04-17.md` and `wow-viewer/docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md`.
 - Before changing `wow-viewer` M2 runtime ownership, model rendering, skin handling, model lighting, shader or effect routing, or M2 performance work, also read `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`.
 - Before working from archive-backed game clients, WoWArchive-mounted builds, or broad multi-client real-data validation, read `gillijimproject_refactor/memory-bank/data-paths.md`, `.codex/skills/wowarchive-client-staging/SKILL.md`, `G:\WoW\WoWArchive-0.X-3.X\Readme.txt`, and `G:\WoW\WoWArchive-0.X-3.X\MountAll.bat`.
 - Before changing workflow assets, read `.codex/README.md`, `.codex/prompts/wow-viewer-tool-suite-plan-set.md`, `.codex/prompts/wow-viewer-dataset-builder-plan.md`, `.codex/prompts/wow-viewer-editor-plan-set.md`, `.codex/prompts/wow-viewer-map-editing-foundation-plan.md`, `.codex/prompts/wow-viewer-editor-ui-surface-plan.md`, `.codex/prompts/wow-viewer-pm4-library-implementation.md`, `.codex/prompts/wow-viewer-shared-io-implementation.md`, `.codex/prompts/wow-viewer-world-runtime-plan-set.md`, `.codex/prompts/wow-viewer-m2-runtime-plan-set.md`, and `.codex/prompts/m2-cross-build-native-investigation.md`.
@@ -73,6 +74,13 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 - Use `MdxViewer`, `WarcraftNetM2Adapter`, `noggit-red`, legacy tools, and native-client Ghidra work as extraction or reference inputs only unless the user explicitly asks for compatibility work in the old app.
 - When a task is primarily reverse engineering or behavior recovery for M2, record the findings in `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md` and keep the continuity files in sync instead of leaving the evidence only in chat.
 - If a change only proves library or build behavior in `wow-viewer`, say that explicitly. Do not imply active-viewer runtime signoff.
+
+## wow-viewer Viewer-App Guardrails
+
+- Treat `wow-viewer/src/viewer/WowViewer.App` as the canonical home for new viewer-shell work, including session or workspace contracts, navigator or inspector or status surfaces, and bounded viewer-facing CLI proof paths.
+- Treat `gillijimproject_refactor/src/MdxViewer/ViewerApp*.cs` as compatibility-only or legacy editor or archaeology work unless the user explicitly asks for a bounded hotfix in the active old viewer.
+- Do not add new long-range shell architecture, panel design, or session-state ownership to `MdxViewer` when the seam belongs in `WowViewer.App`.
+- Keep `wow-viewer/docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md` aligned with future viewer ownership shifts so later sessions do not route new app work back into `ViewerApp` by default.
 
 ## Build And Validation
 

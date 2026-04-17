@@ -7,6 +7,7 @@ Current viewer-app reality:
 - `src/viewer/WowViewer.App` is no longer only a console placeholder.
 - It now has a real Silk.NET + ImGui desktop shell that can load `wow-viewer` M2 runtime previews directly through shared runtime code, with no `MdxViewer` dependency.
 - The active viewer-app cutover sequence now lives in `gillijimproject_refactor/plans/wow_viewer_viewer_app_cutover_plan_2026-04-17.md`.
+- The explicit viewer ownership boundary now lives in `wow-viewer/docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md`, including which remaining `MdxViewer` surfaces are compatibility-only or editor-only.
 - The app shell now also has a typed viewer-session boundary (`WowViewerSession`) for workspace mode, typed source selection, build label, and preview request state; the desktop host no longer owns those values as loose fields.
 - The desktop shell is now explicitly organized around standalone workspaces: `M2` is implemented, while `WMO` and `MDX` are surfaced as honest placeholders for later consumers instead of being implied future work with no shell boundary.
 - The M2 workspace now also has a bounded app-local GPU preview consumer over runtime draw commands, plus a hidden-window `m2-gpu-frame` BMP proof path for fixed-asset validation.
@@ -34,6 +35,7 @@ Current plan-adherence reality:
 - `WowViewer.Core.Runtime` now owns a first narrow world-render seam: shared render-frame telemetry contracts and optimization-hint logic extracted from `MdxViewer.WorldScene`.
 - `WowViewer.App` now owns the first app-shell slice in the new repo: command dispatch, desktop window host, docked UI shell, and runtime-backed M2 preview loading over shared `wow-viewer` runtime services.
 - `WowViewer.App` now also owns the first bounded world attach/open plus runtime-consumer flow in the new repo: fixed-root world-session bootstrap over shared `Core.IO` map readers, a `world-frame` CLI proof command that consumes the extracted world visibility and pass coordinators, and app-local navigator or inspector panels over that runtime frame.
+- The remaining `MdxViewer` viewer surfaces are now explicitly split between compatibility-consumer work and legacy editor or archaeology work in `docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md`; new shell design should not default back there.
 - staged `WorldScene` to `wow-viewer` runtime decomposition is now documented in `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md` and `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md`, with repeated `.skin` miss suppression called out as slice 01 before deeper pass extraction.
 - The repo is now starting to correct that with a real bootstrap script and a first non-PM4 chunk or FourCC foundation slice, but the broader shared I/O and runtime cutover is still missing.
 
