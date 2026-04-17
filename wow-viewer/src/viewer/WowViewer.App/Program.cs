@@ -3,6 +3,7 @@ using WowViewer.Core;
 using WowViewer.Core.PM4;
 using WowViewer.Core.Runtime;
 using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Runtime.World;
 
 namespace WowViewer.App;
 
@@ -44,6 +45,9 @@ internal static class Program
 
                 case "world-bootstrap":
                     return RunWorldBootstrap(tail);
+
+                case "world-frame":
+                    return RunWorldFrame(tail);
 
                 default:
                     using (WowViewerDesktopApp app = new(ParseViewerSession(args)))
@@ -119,6 +123,22 @@ internal static class Program
         return 0;
     }
 
+    private static int RunWorldFrame(string[] args)
+    {
+        WowViewerWorldRuntimeFrameRequest request = ParseRequiredWorldFrameRequest(args);
+        WowViewerWorldRuntimeFrameResult result = WowViewerWorldRuntimeBridge.Build(request);
+
+        Console.WriteLine($"WowViewer.App world-frame: map={result.Session.RequestedMapInput}->{result.Session.ResolvedMapDirectory} tile=({result.SelectedTileX},{result.SelectedTileY}) placementSource={result.PlacementSourcePath} objectPhase={result.ObjectPhaseExecuted} totalMs={result.Stats.TotalCpuMs:F2}");
+        Console.WriteLine($"WowViewer.App world-frame placements: wmo={result.WmoInstances.Count} readyWmo={result.ReadyWmoCount} mdx={result.MdxInstances.Count} readyMdx={result.ReadyMdxCount} pending={result.PendingAssetKeys.Count}");
+        Console.WriteLine($"WowViewer.App world-frame visibility: visibleWmo={result.Visibility.VisibleWmos.Count} culledWmo={result.CulledWmoCount} visibleMdx={result.Visibility.VisibleMdx.Count} culledMdx={result.CulledMdxCount} taxi={result.Visibility.VisibleTaxiMdxCount}");
+        Console.WriteLine($"WowViewer.App world-frame passes: updatedMdx={result.Stats.MdxAnimation.SubmittedCount} wmoOpaque={result.Stats.WmoSubmission.SubmittedCount} mdxOpaque={result.Stats.MdxOpaqueSubmission.SubmittedCount} mdxTransparent={result.Stats.MdxTransparentSubmission.SubmittedCount} opaqueRoutes={result.PassFrame.OpaqueVisibleMdxRoutes.Count} transparentRoutes={result.PassFrame.TransparentVisibleMdxRoutes.Count}");
+        Console.WriteLine($"WowViewer.App world-frame hint: {result.OptimizationHint}");
+        if (result.PendingAssetKeys.Count > 0)
+            Console.WriteLine($"WowViewer.App world-frame pending-sample: {string.Join(", ", result.PendingAssetKeys.Take(8))}");
+
+        return 0;
+    }
+
     private static WowViewerSession? ParseViewerSession(string[] args)
     {
         string? workspaceText = GetOption(args, "--workspace", "-w");
@@ -127,6 +147,8 @@ internal static class Program
         string? virtualPath = GetOption(args, "--virtual-path", "-v");
         string? clientRoot = GetOption(args, "--client-root", "-c");
         string? mapInput = GetOption(args, "--map", "-m");
+        string? tileXText = GetOption(args, "--tile-x");
+        string? tileYText = GetOption(args, "--tile-y");
         string? buildLabel = GetOption(args, "--build-label", "-b");
         string? profileIndexText = GetOption(args, "--profile-index", "-p");
         string? sequenceIndexText = GetOption(args, "--sequence-index", "-s");
@@ -155,6 +177,10 @@ internal static class Program
             session.World.ClientRoot = clientRoot ?? string.Empty;
             session.World.MapInput = mapInput ?? input ?? string.Empty;
             session.World.BuildLabel = buildLabel ?? string.Empty;
+            if (int.TryParse(tileXText, out int tileX))
+                session.World.TileX = tileX;
+            if (int.TryParse(tileYText, out int tileY))
+                session.World.TileY = tileY;
         }
         else
         {
@@ -188,6 +214,23 @@ internal static class Program
             throw new ArgumentException("Provide --map <directory|id|name> for world-bootstrap.");
 
         return new WowViewerWorldSessionOpenRequest(clientRoot, mapInput, buildLabel ?? string.Empty);
+    }
+
+    private static WowViewerWorldRuntimeFrameRequest ParseRequiredWorldFrameRequest(string[] args)
+    {
+        WowViewerWorldSessionOpenRequest request = ParseRequiredWorldRequest(args);
+        string? tileXText = GetOption(args, "--tile-x");
+        string? tileYText = GetOption(args, "--tile-y");
+
+        int tileX = -1;
+        int tileY = -1;
+        if (!string.IsNullOrWhiteSpace(tileXText) && (!int.TryParse(tileXText, out tileX) || tileX < 0 || tileX > 63))
+            throw new ArgumentOutOfRangeException(nameof(tileXText), "--tile-x must be in the range 0..63.");
+
+        if (!string.IsNullOrWhiteSpace(tileYText) && (!int.TryParse(tileYText, out tileY) || tileY < 0 || tileY > 63))
+            throw new ArgumentOutOfRangeException(nameof(tileYText), "--tile-y must be in the range 0..63.");
+
+        return new WowViewerWorldRuntimeFrameRequest(request.ClientRoot, request.MapInput, request.BuildLabel, tileX, tileY);
     }
 
     private static M2PreviewLoadRequest ParseRequiredM2Request(string[] args, int defaultVisualSize)
@@ -311,6 +354,7 @@ internal static class Program
         Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --input <file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--build-label <label>]");
+        Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>]");
     }
 
     private static WowViewerWorkspaceMode ParseWorkspaceMode(string? workspaceText)

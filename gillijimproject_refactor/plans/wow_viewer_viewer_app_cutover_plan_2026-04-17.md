@@ -181,6 +181,20 @@
 - out of scope:
   - no blanket replacement for all old overlay/editing tools
 
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer/src/viewer/WowViewer.App/`:
+  - `WowViewerWorldRuntimeBridge.cs` now owns a bounded app-local world runtime frame builder over one selected ADT tile, consuming shared `WorldObjectVisibilityCollector`, `WorldObjectPassCoordinator`, `WorldFramePassCoordinator`, `WorldRenderFrameStats`, and `WorldRenderOptimizationAdvisor`
+  - the bridge reuses the slice-05 attach/open flow, loads real ADT placement catalogs, resolves real WMO bounds plus real M2/MDX bounds from client data, and feeds those placements through the extracted runtime visibility/pass seams instead of inventing app-local fake object buckets
+  - `WowViewerSession.cs` now persists optional world tile selection, `Program.cs` now exposes `world-frame`, and `WowViewerDesktopApp.cs` now shows a bounded top-down tile view plus runtime diagnostics for visible WMO/MDX counts, pending assets, pass routes, and optimization hints
+- proof completed:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - real-data runtime bridge proof via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340`
+  - that proof auto-selected tile `(39,32)`, loaded `World\Maps\Azeroth\Azeroth_39_32.adt`, found `24` WMO placements plus `2991` MDX placements, admitted `24` visible WMO plus `2464` visible MDX through the shared runtime visibility collector, and executed the shared object/pass coordinators with `objectPhase=True`
+- current boundary:
+  - this is a bounded top-down world frame and runtime-summary consumer, not the final 3D world renderer or full `WorldScene` replacement
+  - terrain, liquid, WDL, renderer batching backends, and broader panel rebuilds remain later slices
+
 ### Slice 07 - Shell Surface Expansion
 
 - target problem:
@@ -210,7 +224,7 @@
 
 ## Immediate Next Slice
 
-- slice 06: world runtime consumer bridge
+- slice 07: shell surface expansion
 - reason:
-  - the app now has persisted state, a typed session boundary, an explicit workspace split, a bounded standalone GPU M2 preview consumer, and a bounded fixed-root world-session bootstrap path
-  - the next honest step is consuming the existing extracted world-runtime seams from the new app instead of stopping at WDT/session summary only
+  - the app now has persisted state, a typed session boundary, an explicit workspace split, a bounded standalone GPU M2 preview consumer, a bounded fixed-root world-session bootstrap path, and a first bounded world runtime consumer over one selected tile
+  - the next honest step is expanding navigator, selection, and diagnostics surfaces around that new runtime-owned world frame instead of claiming renderer parity too early

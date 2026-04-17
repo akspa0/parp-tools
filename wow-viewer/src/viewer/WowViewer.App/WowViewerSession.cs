@@ -48,17 +48,29 @@ internal sealed class WowViewerWorldSessionState
 
     public string BuildLabel { get; set; } = string.Empty;
 
+    public int TileX { get; set; } = -1;
+
+    public int TileY { get; set; } = -1;
+
     public void Normalize()
     {
         ClientRoot = ClientRoot?.Trim() ?? string.Empty;
         MapInput = MapInput?.Trim() ?? string.Empty;
         BuildLabel = BuildLabel?.Trim() ?? string.Empty;
+        TileX = TileX < 0 ? -1 : Math.Clamp(TileX, 0, 63);
+        TileY = TileY < 0 ? -1 : Math.Clamp(TileY, 0, 63);
     }
 
     public WowViewerWorldSessionOpenRequest BuildRequest()
     {
         Normalize();
         return new WowViewerWorldSessionOpenRequest(ClientRoot, MapInput, BuildLabel);
+    }
+
+    public WowViewerWorldRuntimeFrameRequest BuildRuntimeFrameRequest()
+    {
+        Normalize();
+        return new WowViewerWorldRuntimeFrameRequest(ClientRoot, MapInput, BuildLabel, TileX, TileY);
     }
 
     public string Describe()
@@ -71,9 +83,13 @@ internal sealed class WowViewerWorldSessionState
             ? "<map not set>"
             : MapInput;
 
+        string tile = TileX >= 0 && TileY >= 0
+            ? $" tile=({TileX},{TileY})"
+            : " tile=<auto>";
+
         return string.IsNullOrWhiteSpace(BuildLabel)
-            ? $"{source} :: {map}"
-            : $"{source} :: {map} [{BuildLabel}]";
+            ? $"{source} :: {map}{tile}"
+            : $"{source} :: {map}{tile} [{BuildLabel}]";
     }
 
     public bool HasBootstrapInput()

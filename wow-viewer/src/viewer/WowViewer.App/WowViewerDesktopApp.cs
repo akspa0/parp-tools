@@ -39,6 +39,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private string? _lastError;
     private M2PreviewLoadResult? _currentPreview;
     private WowViewerWorldSessionBootstrapResult? _currentWorldSession;
+    private WowViewerWorldRuntimeFrameResult? _currentWorldRuntimeFrame;
     private uint _previewTextureHandle;
     private M2GpuPreviewRenderer? _gpuPreviewRenderer;
     private bool _showAboutWindow = true;
@@ -380,12 +381,18 @@ internal sealed class WowViewerDesktopApp : IDisposable
         string clientRoot = _session.World.ClientRoot;
         string mapInput = _session.World.MapInput;
         string buildLabel = _session.World.BuildLabel;
+        int tileX = _session.World.TileX;
+        int tileY = _session.World.TileY;
         ImGui.InputText("Client Root", ref clientRoot, 1024);
         ImGui.InputText("Map", ref mapInput, 256);
         ImGui.InputText("Build Label", ref buildLabel, 256);
+        ImGui.InputInt("Tile X", ref tileX);
+        ImGui.InputInt("Tile Y", ref tileY);
         _session.World.ClientRoot = clientRoot;
         _session.World.MapInput = mapInput;
         _session.World.BuildLabel = buildLabel;
+        _session.World.TileX = tileX;
+        _session.World.TileY = tileY;
         _session.Normalize();
 
         if (ImGui.Button("Open World Session", new Vector2(-1, 0)))
@@ -397,6 +404,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _session.World.ClientRoot = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
             _session.World.MapInput = "Azeroth";
             _session.World.BuildLabel = "3.3.5.12340";
+            _session.World.TileX = -1;
+            _session.World.TileY = -1;
         }
     }
 
@@ -485,7 +494,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        ImGui.TextWrapped("World session bootstrap is active. This slice proves fixed-root attach plus shared WDT summary/tile discovery only; it does not render the world yet.");
+        ImGui.TextWrapped(_currentWorldRuntimeFrame == null
+            ? "World session bootstrap is active. This slice proves fixed-root attach plus shared WDT summary/tile discovery only; it does not render the world yet."
+            : "World runtime bridge is active over one selected ADT tile. This view consumes shared visibility and pass coordinators for a bounded top-down frame, not the final 3D world renderer.");
         ImGui.Separator();
         ImGui.TextDisabled($"Client Root: {_currentWorldSession.ClientRoot}");
         if (!string.IsNullOrWhiteSpace(_currentWorldSession.BuildLabel))
@@ -494,11 +505,30 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"WDT Source: {_currentWorldSession.WdtSourcePath}");
         ImGui.Text($"Load Source: {(_currentWorldSession.LoadedFromArchive ? "archive catalog" : "loose file")}");
         ImGui.Text($"Map.dbc Resolution: {(_currentWorldSession.ResolvedViaDbc ? "resolved" : (_currentWorldSession.UsedMapDirectoryLookup ? "direct directory fallback" : "lookup unavailable; direct directory fallback"))}");
+
+        if (_currentWorldRuntimeFrame == null)
+        {
+            ImGui.Separator();
+            ImGui.Text($"Tiles With Data: {_currentWorldSession.WdtSummary.TilesWithData}/{_currentWorldSession.WdtSummary.TotalTiles}");
+            ImGui.Text($"WMO Based: {_currentWorldSession.WdtSummary.IsWmoBased}");
+            ImGui.Text($"Top-level Chunks: {_currentWorldSession.FileSummary.ChunkCount}");
+            ImGui.Text($"Occupancy Sample: {FormatTileSample(_currentWorldSession.OccupiedTiles, 12)}");
+            return;
+        }
+
         ImGui.Separator();
-        ImGui.Text($"Tiles With Data: {_currentWorldSession.WdtSummary.TilesWithData}/{_currentWorldSession.WdtSummary.TotalTiles}");
-        ImGui.Text($"WMO Based: {_currentWorldSession.WdtSummary.IsWmoBased}");
-        ImGui.Text($"Top-level Chunks: {_currentWorldSession.FileSummary.ChunkCount}");
-        ImGui.Text($"Occupancy Sample: {FormatTileSample(_currentWorldSession.OccupiedTiles, 12)}");
+        ImGui.Text($"Selected Tile: ({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})");
+        ImGui.Text($"Placement Source: {_currentWorldRuntimeFrame.PlacementSourcePath}");
+        ImGui.Text($"Placements: WMO {_currentWorldRuntimeFrame.WmoInstances.Count} / MDX {_currentWorldRuntimeFrame.MdxInstances.Count}");
+        ImGui.Text($"Visible: WMO {_currentWorldRuntimeFrame.Visibility.VisibleWmos.Count} / MDX {_currentWorldRuntimeFrame.Visibility.VisibleMdx.Count}");
+        ImGui.Text($"Pending Assets: {_currentWorldRuntimeFrame.PendingAssetKeys.Count}");
+
+        Vector2 available = ImGui.GetContentRegionAvail();
+        float canvasSize = MathF.Max(200f, MathF.Min(available.X, available.Y));
+        Vector2 canvas = new(canvasSize, canvasSize);
+        Vector2 origin = ImGui.GetCursorScreenPos();
+        ImGui.InvisibleButton("worldRuntimeCanvas", canvas);
+        DrawWorldRuntimeCanvas(origin, canvas, _currentWorldRuntimeFrame);
     }
 
     private void DrawDiagnosticsWindow(float deltaSeconds)
@@ -602,6 +632,12 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
+        if (_currentWorldRuntimeFrame != null)
+        {
+            DrawWorldRuntimeDiagnostics(_currentWorldRuntimeFrame);
+            return;
+        }
+
         ImGui.TextDisabled("World Session Summary");
         ImGui.Text($"Root: {_currentWorldSession.ClientRoot}");
         ImGui.Text($"Map: {_currentWorldSession.RequestedMapInput} -> {_currentWorldSession.ResolvedMapDirectory}");
@@ -639,6 +675,48 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.TextWrapped(FormatTileSample(_currentWorldSession.OccupiedTiles, 24));
     }
 
+    private void DrawWorldRuntimeDiagnostics(WowViewerWorldRuntimeFrameResult result)
+    {
+        ImGui.TextDisabled("World Runtime Bridge");
+        ImGui.Text($"Tile: ({result.SelectedTileX},{result.SelectedTileY})");
+        ImGui.Text($"Placement Source: {result.PlacementSourcePath}");
+        ImGui.Text($"Camera: {FormatVector3(result.CameraPosition)} -> {FormatVector3(result.CameraForward)}");
+        ImGui.Text($"Object Phase Executed: {result.ObjectPhaseExecuted}");
+        ImGui.Text($"Total Cpu Ms: {result.Stats.TotalCpuMs:F2}");
+        ImGui.Separator();
+
+        ImGui.TextDisabled("Placement Inventory");
+        ImGui.Text($"WMO Total: {result.WmoInstances.Count}");
+        ImGui.Text($"WMO Ready: {result.ReadyWmoCount}");
+        ImGui.Text($"MDX Total: {result.MdxInstances.Count}");
+        ImGui.Text($"MDX Ready: {result.ReadyMdxCount}");
+        ImGui.Text($"Pending Assets: {result.PendingAssetKeys.Count}");
+        if (result.PendingAssetKeys.Count > 0)
+            ImGui.TextWrapped($"Pending Sample: {string.Join(", ", result.PendingAssetKeys.Take(8))}");
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Visibility");
+        ImGui.Text($"Visible WMO: {result.Visibility.VisibleWmos.Count}");
+        ImGui.Text($"Culled WMO: {result.CulledWmoCount}");
+        ImGui.Text($"Visible MDX: {result.Visibility.VisibleMdx.Count}");
+        ImGui.Text($"Culled MDX: {result.CulledMdxCount}");
+        ImGui.Text($"Taxi MDX: {result.Visibility.VisibleTaxiMdxCount}");
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Pass Coordination");
+        ImGui.Text($"WMO Submitted: {result.Stats.WmoSubmission.SubmittedCount}");
+        ImGui.Text($"MDX Animated: {result.Stats.MdxAnimation.SubmittedCount}");
+        ImGui.Text($"MDX Opaque Submitted: {result.Stats.MdxOpaqueSubmission.SubmittedCount}");
+        ImGui.Text($"MDX Transparent Submitted: {result.Stats.MdxTransparentSubmission.SubmittedCount}");
+        ImGui.Text($"Opaque Routes: {result.PassFrame.OpaqueVisibleMdxRoutes.Count}");
+        ImGui.Text($"Transparent Routes: {result.PassFrame.TransparentVisibleMdxRoutes.Count}");
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Timing Hint");
+        ImGui.TextWrapped(result.OptimizationHint);
+        ImGui.TextWrapped("Boundary: these timings are for the bounded app-side runtime bridge over visibility/pass coordination, not the final 3D world renderer.");
+    }
+
     private void DrawBoundaryWindow()
     {
         ImGui.SetNextWindowSize(new Vector2(420, 520), ImGuiCond.FirstUseEver);
@@ -663,9 +741,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Separator();
         ImGui.TextDisabled("Current Proof Boundary");
         ImGui.BulletText("This app proves a standalone wow-viewer-owned desktop shell.");
-        ImGui.BulletText("The active shell now proves two bounded consumers: standalone M2 preview and fixed-root world-session bootstrap.");
+        ImGui.BulletText("The active shell now proves two bounded consumers: standalone M2 preview and a world-session bridge over one selected ADT tile.");
         ImGui.BulletText("The M2 path now includes a bounded wow-viewer-owned GPU preview consumer, but it is still not full native material parity.");
-        ImGui.BulletText("World session bootstrap currently stops at attach/open plus WDT summary and occupied-tile discovery; world rendering remains a later slice.");
+        ImGui.BulletText("The world path now consumes shared visibility and pass coordinators for a bounded top-down frame summary, but world rendering still remains a later slice.");
 
         ImGui.End();
     }
@@ -679,13 +757,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        ImGui.TextWrapped("`WowViewer.App` now has a real desktop host, a bounded GPU M2 preview consumer, and a bounded world-session bootstrap path. This keeps the new repo as the owner of the app shell and attach/open flow instead of continuing to route viewer work through `MdxViewer`.");
+        ImGui.TextWrapped("`WowViewer.App` now has a real desktop host, a bounded GPU M2 preview consumer, and a bounded world runtime bridge over one selected ADT tile. This keeps the new repo as the owner of the app shell and attach/open flow instead of continuing to route viewer work through `MdxViewer`.");
         ImGui.Separator();
         ImGui.TextDisabled("Commands");
         ImGui.BulletText("No args: open the desktop viewer");
         ImGui.BulletText("viewer [options]: open the desktop viewer with an initial M2 or world-session request");
         ImGui.BulletText("m2-frame [options]: keep the existing CLI proof flow");
         ImGui.BulletText("world-bootstrap [options]: run bounded client-root plus WDT bootstrap proof");
+        ImGui.BulletText("world-frame [options]: run bounded tile placement plus runtime visibility/pass proof");
         ImGui.End();
     }
 
@@ -722,6 +801,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _gpuPreviewRenderer?.LoadPreview(preview);
             _currentPreview = preview;
             _currentWorldSession = null;
+            _currentWorldRuntimeFrame = null;
             _statusMessage = $"Loaded {preview.FrameResult.GoldenFrame.CanonicalModelPath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
             bool hasGpuPreview = _gpuPreviewRenderer?.HasRenderableGeometry == true;
             _lastLoadSummary = hasGpuPreview
@@ -741,18 +821,19 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         try
         {
-            WowViewerWorldSessionBootstrapResult result = WowViewerWorldSessionBootstrapper.Open(_session.World.BuildRequest());
-            _currentWorldSession = result;
+            WowViewerWorldRuntimeFrameResult runtimeFrame = WowViewerWorldRuntimeBridge.Build(_session.World.BuildRuntimeFrameRequest());
+            _currentWorldRuntimeFrame = runtimeFrame;
+            _currentWorldSession = runtimeFrame.Session;
             _currentPreview = null;
             _gpuPreviewRenderer?.ClearPreview();
             DeletePreviewTexture();
-            _statusMessage = $"Opened world session for {result.ResolvedMapDirectory} in {result.LoadDuration.TotalMilliseconds:F1} ms.";
-            _lastLoadSummary = $"{result.OccupiedTiles.Count} occupied tiles, WDT {result.FileSummary.Kind}, source {(result.LoadedFromArchive ? "archive" : "loose")}";
+            _statusMessage = $"Opened world runtime frame for {runtimeFrame.Session.ResolvedMapDirectory} tile ({runtimeFrame.SelectedTileX},{runtimeFrame.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
+            _lastLoadSummary = $"WMO {runtimeFrame.Visibility.VisibleWmos.Count}/{runtimeFrame.WmoInstances.Count}, MDX {runtimeFrame.Visibility.VisibleMdx.Count}/{runtimeFrame.MdxInstances.Count}, pending {runtimeFrame.PendingAssetKeys.Count}";
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
         {
             _lastError = ex.Message;
-            _statusMessage = "World session bootstrap failed.";
+            _statusMessage = "World runtime bridge failed.";
         }
     }
 
@@ -760,6 +841,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     {
         _currentPreview = null;
         _currentWorldSession = null;
+        _currentWorldRuntimeFrame = null;
         _lastError = null;
         _lastLoadSummary = "No workspace loaded.";
         _statusMessage = "Workspace cleared.";
@@ -818,6 +900,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _session.World.ClientRoot = session.World.ClientRoot ?? string.Empty;
         _session.World.MapInput = session.World.MapInput ?? string.Empty;
         _session.World.BuildLabel = session.World.BuildLabel ?? string.Empty;
+        _session.World.TileX = session.World.TileX;
+        _session.World.TileY = session.World.TileY;
         _session.ProfileIndex = session.ProfileIndex;
         _session.SequenceIndex = session.SequenceIndex;
         _session.TimeMs = session.TimeMs;
@@ -874,5 +958,49 @@ internal sealed class WowViewerDesktopApp : IDisposable
         return summary.DistinctNonZeroValues.Count == 0
             ? "none"
             : string.Join(",", summary.DistinctNonZeroValues.Select(static value => $"0x{value.Value:x}:{value.TileCount}"));
+    }
+
+    private void DrawWorldRuntimeCanvas(Vector2 origin, Vector2 size, WowViewerWorldRuntimeFrameResult result)
+    {
+        ImDrawListPtr drawList = ImGui.GetWindowDrawList();
+        uint background = ImGui.ColorConvertFloat4ToU32(new Vector4(0.08f, 0.09f, 0.11f, 1.0f));
+        uint border = ImGui.ColorConvertFloat4ToU32(new Vector4(0.32f, 0.35f, 0.40f, 1.0f));
+        uint wmoColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.88f, 0.58f, 0.24f, 0.35f));
+        uint wmoVisibleColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.98f, 0.76f, 0.36f, 1.0f));
+        uint mdxColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.30f, 0.66f, 0.94f, 0.28f));
+        uint mdxVisibleColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.40f, 0.82f, 1.0f, 1.0f));
+
+        drawList.AddRectFilled(origin, origin + size, background, 6f);
+        drawList.AddRect(origin, origin + size, border, 6f, ImDrawFlags.None, 1.5f);
+
+        Vector2 Map(Vector3 position)
+        {
+            Vector2 planarMin = result.PlanarMin;
+            Vector2 planarMax = result.PlanarMax;
+            float width = MathF.Max(1f, planarMax.X - planarMin.X);
+            float height = MathF.Max(1f, planarMax.Y - planarMin.Y);
+            float nx = (position.X - planarMin.X) / width;
+            float ny = (position.Y - planarMin.Y) / height;
+            return new Vector2(origin.X + (nx * size.X), origin.Y + ((1f - ny) * size.Y));
+        }
+
+        foreach (WorldObjectInstance instance in result.WmoInstances)
+            drawList.AddCircleFilled(Map(instance.PlacementPosition), 2.5f, wmoColor);
+
+        foreach (WorldObjectInstance instance in result.MdxInstances)
+            drawList.AddCircleFilled(Map(instance.PlacementPosition), 2.0f, mdxColor);
+
+        foreach (var visible in result.Visibility.VisibleWmos)
+            drawList.AddCircleFilled(Map(visible.Instance.PlacementPosition), 3.5f, wmoVisibleColor);
+
+        foreach (var visible in result.Visibility.VisibleMdx)
+            drawList.AddCircleFilled(Map(visible.Instance.PlacementPosition), 3.0f, mdxVisibleColor);
+
+        drawList.AddText(origin + new Vector2(8f, 8f), border, $"tile ({result.SelectedTileX},{result.SelectedTileY})");
+    }
+
+    private static string FormatVector3(Vector3 value)
+    {
+        return $"({value.X:F1}, {value.Y:F1}, {value.Z:F1})";
     }
 }

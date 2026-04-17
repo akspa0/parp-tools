@@ -10,8 +10,8 @@ Current viewer-app reality:
 - The app shell now also has a typed viewer-session boundary (`WowViewerSession`) for workspace mode, typed source selection, build label, and preview request state; the desktop host no longer owns those values as loose fields.
 - The desktop shell is now explicitly organized around standalone workspaces: `M2` is implemented, while `WMO` and `MDX` are surfaced as honest placeholders for later consumers instead of being implied future work with no shell boundary.
 - The M2 workspace now also has a bounded app-local GPU preview consumer over runtime draw commands, plus a hidden-window `m2-gpu-frame` BMP proof path for fixed-asset validation.
-- The desktop shell now also has a bounded `World Session` workspace that attaches to a fixed client root, resolves a selected map through shared `Map.dbc` + WDT readers, and reports WDT semantics plus occupied tiles without depending on `MdxViewer`.
-- The desktop shell is still a narrow first slice: the new GPU preview is a standalone M2 consumer, and the new world path is bootstrap-only rather than world-scene rendering.
+- The desktop shell now also has a bounded `World Session` workspace that attaches to a fixed client root, resolves a selected map through shared `Map.dbc` + WDT readers, and then builds a bounded app-local world runtime frame over one selected ADT tile.
+- That world frame is a top-down preview plus runtime visibility/pass summary over shared `WowViewer.Core.Runtime.World` seams, not a final 3D world renderer.
 
 Current first-pass project layout:
 
@@ -32,7 +32,7 @@ Current plan-adherence reality:
 - `WowViewer.Core`, `WowViewer.Core.IO`, and `WowViewer.Core.Runtime` are still early and should not be described as complete library boundaries yet.
 - `WowViewer.Core.Runtime` now owns a first narrow world-render seam: shared render-frame telemetry contracts and optimization-hint logic extracted from `MdxViewer.WorldScene`.
 - `WowViewer.App` now owns the first app-shell slice in the new repo: command dispatch, desktop window host, docked UI shell, and runtime-backed M2 preview loading over shared `wow-viewer` runtime services.
-- `WowViewer.App` now also owns the first bounded world attach/open flow in the new repo: fixed-root world-session bootstrap over shared `Core.IO` map readers plus a `world-bootstrap` CLI proof command.
+- `WowViewer.App` now also owns the first bounded world attach/open plus runtime-consumer flow in the new repo: fixed-root world-session bootstrap over shared `Core.IO` map readers plus a `world-frame` CLI proof command that consumes the extracted world visibility and pass coordinators.
 - staged `WorldScene` to `wow-viewer` runtime decomposition is now documented in `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md` and `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md`, with repeated `.skin` miss suppression called out as slice 01 before deeper pass extraction.
 - The repo is now starting to correct that with a real bootstrap script and a first non-PM4 chunk or FourCC foundation slice, but the broader shared I/O and runtime cutover is still missing.
 
@@ -88,7 +88,7 @@ Current M2-native continuity note:
 - Current landed M2 runtime ownership now includes strict root/skin/section/material/external-animation seams, bone pose evaluation, CPU-side skinned render vertices, render-consumer pass state, resolved effect-object state, particle/ribbon submission descriptors, explicit scene family policies, and a deterministic golden-frame snapshot builder.
 - Camera-only `*_cam.m2` assets now also have a wow-viewer-owned runtime overlay contract: `M2CameraPathOverlayBuilder` and `M2CameraPathVisualization` classify geometry-less flyby models and produce sampled camera/target paths plus bounds for thin consumer adapters.
 - `WowViewer.App m2-frame` and `WowViewer.Tool.Inspect m2 inspect` now share the same runtime-frame pipeline; both can emit golden JSON, render-frame JSON, and software visual BMP proof outputs for fixed-asset validation.
-- `WowViewer.App` with no arguments now opens the new desktop shell, `WowViewer.App viewer ...` can preseed that shell with an initial M2 or world-session request, and `WowViewer.App world-bootstrap ...` now provides a bounded fixed-root world-session proof path.
+- `WowViewer.App` with no arguments now opens the new desktop shell, `WowViewer.App viewer ...` can preseed that shell with an initial M2 or world-session request, `WowViewer.App world-bootstrap ...` provides the bounded fixed-root session bootstrap proof path, and `WowViewer.App world-frame ...` now provides the first bounded runtime-consumer proof over a selected tile.
 - The proof level is app/runtime/golden-state plus deterministic render-frame or software-visual proof, not active visual renderer, shader backend, particle/ribbon simulation, or `MdxViewer` runtime signoff yet.
 
 Current PM4 terminology policy:
