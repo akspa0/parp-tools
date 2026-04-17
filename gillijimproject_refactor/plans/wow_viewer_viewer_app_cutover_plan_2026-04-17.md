@@ -8,6 +8,7 @@
   - `wow-viewer/src/viewer/WowViewer.App` now has a real Silk.NET + ImGui desktop shell
   - the desktop shell and `m2-frame` share one `M2PreviewLoader` path over `wow-viewer` runtime code only
   - real fixed-root proof exists through `WowViewer.App m2-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Creature/Wolf/Wolf.m2`
+  - real fixed-root proof now also exists through `WowViewer.App world-bootstrap` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`
 
 ## Why This Plan Exists
 
@@ -22,9 +23,9 @@
   - shared M2 preview loading path
   - deterministic software visual preview for M2 runtime proof
   - runtime hash and submission diagnostics inside the new app
+  - fixed-root world-session bootstrap over shared `Map.dbc` and WDT readers
 - `wow-viewer` does not yet own:
   - a full GPU-backed viewer renderer
-  - world session bootstrap and map loading
   - app-owned world runtime consumption over extracted services
   - a replacement for the broad `ViewerApp` panel set from `MdxViewer`
 
@@ -153,6 +154,21 @@
   - no full panel parity
   - no terrain editor or PM4 workbench yet
 
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer/src/viewer/WowViewer.App/`:
+  - `WowViewerSession.cs` now carries typed `WorldSession` state for fixed client root, selected map input, and build label alongside the existing standalone asset session state
+  - `WowViewerWorldSessionBootstrapper.cs` now owns the bounded attach/open flow over shared `MapDirectoryLookup`, `ArchiveCatalogBootstrapper`, `MapFileSummaryReader`, `WdtSummaryReader`, and `WdtTileIndexReader`
+  - `WowViewerDesktopApp.cs` now exposes `World Session` as an implemented workspace with its own controls, summary surface, diagnostics, and honest boundary text stating that the slice stops at WDT/bootstrap proof rather than rendering
+  - `Program.cs` now supports `--workspace world`, world-session viewer bootstrap arguments, and a direct `world-bootstrap` proof command
+- proof completed:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - real-data world bootstrap proof via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-bootstrap --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340`
+  - that proof resolved `Azeroth -> Azeroth` via `Map.dbc`, opened `World\Maps\Azeroth\Azeroth.wdt` from archive data, reported `687/4096` occupied tiles, and summarized `MAIN` flags as `0x1:687`
+- current boundary:
+  - this closes bounded client-root attach plus map bootstrap only
+  - there is still no world renderer, terrain/WMO/MDX placement consumer, or old `ViewerApp` panel parity in the new app
+
 ### Slice 06 - World Runtime Consumer Bridge
 
 - target problem:
@@ -194,7 +210,7 @@
 
 ## Immediate Next Slice
 
-- slice 05: world session bootstrap
+- slice 06: world runtime consumer bridge
 - reason:
-  - the app now has persisted state, a typed session boundary, an explicit standalone workspace split, and a bounded standalone GPU M2 preview consumer
-  - the next honest step is giving the new app a typed attach/open flow for fixed client roots and map bootstrap instead of deepening standalone-only preview work
+  - the app now has persisted state, a typed session boundary, an explicit workspace split, a bounded standalone GPU M2 preview consumer, and a bounded fixed-root world-session bootstrap path
+  - the next honest step is consuming the existing extracted world-runtime seams from the new app instead of stopping at WDT/session summary only

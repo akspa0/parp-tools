@@ -2,6 +2,20 @@
 
 # Active Context
 
+## Apr 17, 2026 - wow-viewer app slice 05 landed: the shell now has a bounded world-session bootstrap path over shared WDT readers
+
+- slice 05 from the viewer-app cutover plan is now landed in `wow-viewer/src/viewer/WowViewer.App/`
+- `WowViewerSession.cs` now carries a typed `WorldSession` workspace state with fixed client root, selected map input, and build label, so the app session boundary now covers more than standalone asset preview requests
+- `WowViewerWorldSessionBootstrapper.cs` now owns the bounded attach/open flow over shared `MapDirectoryLookup`, archive bootstrap, `MapFileSummaryReader`, `WdtSummaryReader`, and `WdtTileIndexReader` instead of inventing app-local fake map metadata
+- `WowViewerDesktopApp.cs` now exposes `World Session` as an implemented workspace with a client-root attach panel, summary view, and diagnostics for WDT semantics and occupied-tile samples, while still stating honestly that no world render consumer exists yet
+- `Program.cs` now accepts `--workspace world` for desktop bootstrap and exposes a direct `world-bootstrap` CLI proof path over the same app-owned bootstrap service
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+	- real fixed-root world bootstrap proof succeeded via `WowViewer.App world-bootstrap` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, resolving through `Map.dbc` and reporting `World\Maps\Azeroth\Azeroth.wdt`, `687/4096` occupied tiles, and `MAIN` distinct flags `0x1:687`
+- current boundary:
+	- this is client-root attach plus WDT/session bootstrap only; it is not world rendering, terrain ownership, WMO/MDX placement consumption, or old `ViewerApp` parity
+	- the next real app slice is the world runtime consumer bridge
+
 ## Apr 17, 2026 - wow-viewer app slice 04 landed: the M2 workspace now has a bounded GPU preview consumer and capture path
 
 - slice 04 from the viewer-app cutover plan is now landed in `wow-viewer/src/viewer/WowViewer.App/`

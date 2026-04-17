@@ -1,5 +1,20 @@
 # Progress
 
+### Apr 17, 2026 - wow-viewer app slice 05 landed: the desktop shell now has bounded world-session bootstrap over shared map readers
+
+- what changed:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` now carries a typed `WorldSession` workspace state for fixed client root, selected map input, and build label
+	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSessionBootstrapper.cs` as the app-owned world bootstrap service over `MapDirectoryLookup`, `ArchiveCatalogBootstrapper`, `MapFileSummaryReader`, `WdtSummaryReader`, and `WdtTileIndexReader`
+	- `WowViewerDesktopApp.cs` now treats `World Session` as an implemented workspace with its own controls, summary surface, and WDT/tile diagnostics, while keeping the boundary explicit that no world renderer exists yet
+	- `Program.cs` now supports `--workspace world` for desktop bootstrap and a direct `world-bootstrap` CLI proof command
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
+	- real-data bootstrap proof succeeded via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-bootstrap --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340`
+	- that proof resolved `Azeroth` through `Map.dbc`, opened `World\Maps\Azeroth\Azeroth.wdt` from archive-backed data, and reported `687` occupied tiles with `MAIN` distinct flag summary `0x1:687`
+- boundary:
+	- this closes attach/open plus WDT/bootstrap proof only
+	- a real world runtime consumer still remains the next separate slice
+
 ### Apr 17, 2026 - wow-viewer app slice 04 landed: the standalone M2 workspace now has a bounded GPU preview consumer
 
 - what changed:

@@ -7,6 +7,7 @@ using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using WowViewer.Core;
+using WowViewer.Core.Maps;
 using WowViewer.Core.PM4;
 using WowViewer.Core.Runtime;
 using WowViewer.Core.Runtime.M2;
@@ -34,9 +35,10 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private bool _disposed;
     private bool _requestInitialLoad;
     private string _statusMessage = "Configure an archive-backed or local M2 source, then load a preview.";
-    private string _lastLoadSummary = "No preview loaded.";
+    private string _lastLoadSummary = "No workspace loaded.";
     private string? _lastError;
     private M2PreviewLoadResult? _currentPreview;
+    private WowViewerWorldSessionBootstrapResult? _currentWorldSession;
     private uint _previewTextureHandle;
     private M2GpuPreviewRenderer? _gpuPreviewRenderer;
     private bool _showAboutWindow = true;
@@ -104,7 +106,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _gl.Disable(EnableCap.CullFace);
         _gpuPreviewRenderer = new M2GpuPreviewRenderer(_gl);
 
-        _requestInitialLoad = _initialSession != null;
+        _requestInitialLoad = _initialSession?.HasBootstrapInput() == true;
     }
 
     private void OnUpdate(double deltaSeconds)
@@ -114,7 +116,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_requestInitialLoad)
         {
             _requestInitialLoad = false;
-            LoadPreview();
+            LoadActiveWorkspace();
         }
     }
 
@@ -177,11 +179,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (ImGui.BeginMenu("File"))
         {
-            if (ImGui.MenuItem("Load Preview"))
-                LoadPreview();
+            if (ImGui.MenuItem("Open Workspace"))
+                LoadActiveWorkspace();
 
-            if (ImGui.MenuItem("Clear Preview", enabled: _currentPreview != null))
-                ClearPreview();
+            if (ImGui.MenuItem("Clear Workspace", enabled: _currentPreview != null || _currentWorldSession != null))
+                ClearWorkspace();
 
             if (ImGui.MenuItem("Exit"))
                 _window?.Close();
@@ -218,6 +220,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneM2, "Runtime-backed standalone model preview over the shared wow-viewer M2 pipeline.");
         DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneWmo, "Planned standalone WMO inspection workspace. Not implemented yet.");
         DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneMdx, "Planned standalone MDX inspection workspace. Not implemented yet.");
+        DrawWorkspaceOption(WowViewerWorkspaceMode.WorldSession, "Bounded client-root attach and WDT-backed world session bootstrap. No world renderer yet.");
 
         ImGui.End();
     }
@@ -244,7 +247,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private static bool IsImplementedWorkspace(WowViewerWorkspaceMode mode)
     {
-        return mode == WowViewerWorkspaceMode.StandaloneM2;
+        return mode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.WorldSession;
     }
 
     private static string GetWorkspaceLabel(WowViewerWorkspaceMode mode)
@@ -254,6 +257,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             WowViewerWorkspaceMode.StandaloneM2 => "Standalone M2",
             WowViewerWorkspaceMode.StandaloneWmo => "Standalone WMO",
             WowViewerWorkspaceMode.StandaloneMdx => "Standalone MDX",
+            WowViewerWorkspaceMode.WorldSession => "World Session",
             _ => "Unknown",
         };
     }
@@ -267,9 +271,27 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        ImGui.TextWrapped(_session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneM2
-            ? "This first `wow-viewer` desktop shell stays library-first: it loads M2 assets only through the `wow-viewer` runtime pipeline and now exposes a bounded GPU preview consumer plus the existing deterministic software/runtime diagnostics."
-            : "This workspace is intentionally not implemented yet. The controls below define the future standalone-source contract without claiming a live consumer in this slice.");
+        switch (_session.WorkspaceMode)
+        {
+            case WowViewerWorkspaceMode.StandaloneM2:
+                DrawM2ControlContents();
+                break;
+            case WowViewerWorkspaceMode.WorldSession:
+                DrawWorldControlContents();
+                break;
+            default:
+                DrawPlaceholderControlContents();
+                break;
+        }
+
+        DrawStatusSection();
+
+        ImGui.End();
+    }
+
+    private void DrawM2ControlContents()
+    {
+        ImGui.TextWrapped("This first `wow-viewer` desktop shell stays library-first: it loads M2 assets only through the `wow-viewer` runtime pipeline and now exposes a bounded GPU preview consumer plus the existing deterministic software/runtime diagnostics.");
         ImGui.Separator();
         ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
         ImGui.TextDisabled($"Source: {_session.Source.Describe()}");
@@ -315,17 +337,10 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _session.SequenceIndex = sequenceIndex;
         _session.TimeMs = timeMs;
         _session.VisualSize = visualSize;
-
         _session.Normalize();
 
-        if (!IsImplementedWorkspace(_session.WorkspaceMode))
-            ImGui.BeginDisabled();
-
-        if (ImGui.Button("Load Preview", new Vector2(-1, 0)))
-            LoadPreview();
-
-        if (!IsImplementedWorkspace(_session.WorkspaceMode))
-            ImGui.EndDisabled();
+        if (ImGui.Button("Load M2 Preview", new Vector2(-1, 0)))
+            LoadActiveWorkspace();
 
         if (ImGui.Button("Use Wolf Runtime Baseline", new Vector2(-1, 0)))
         {
@@ -352,7 +367,49 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _session.TimeMs = 0;
             _session.VisualSize = 384;
         }
+    }
 
+    private void DrawWorldControlContents()
+    {
+        ImGui.TextWrapped("This slice adds a bounded wow-viewer-owned world bootstrap path over fixed client roots and shared map readers. It opens a map session, resolves a WDT, and reports tile coverage, but it does not render terrain or world objects yet.");
+        ImGui.Separator();
+        ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
+        ImGui.TextDisabled($"Source: {_session.World.Describe()}");
+        ImGui.Separator();
+
+        string clientRoot = _session.World.ClientRoot;
+        string mapInput = _session.World.MapInput;
+        string buildLabel = _session.World.BuildLabel;
+        ImGui.InputText("Client Root", ref clientRoot, 1024);
+        ImGui.InputText("Map", ref mapInput, 256);
+        ImGui.InputText("Build Label", ref buildLabel, 256);
+        _session.World.ClientRoot = clientRoot;
+        _session.World.MapInput = mapInput;
+        _session.World.BuildLabel = buildLabel;
+        _session.Normalize();
+
+        if (ImGui.Button("Open World Session", new Vector2(-1, 0)))
+            LoadActiveWorkspace();
+
+        if (ImGui.Button("Use WoW335 Azeroth Baseline", new Vector2(-1, 0)))
+        {
+            _session.WorkspaceMode = WowViewerWorkspaceMode.WorldSession;
+            _session.World.ClientRoot = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
+            _session.World.MapInput = "Azeroth";
+            _session.World.BuildLabel = "3.3.5.12340";
+        }
+    }
+
+    private void DrawPlaceholderControlContents()
+    {
+        ImGui.TextWrapped("This workspace is intentionally not implemented yet. The controls below define the future standalone-source contract without claiming a live consumer in this slice.");
+        ImGui.Separator();
+        ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
+        ImGui.TextDisabled("Status: placeholder only");
+    }
+
+    private void DrawStatusSection()
+    {
         ImGui.Separator();
         ImGui.TextDisabled("Status");
         ImGui.TextWrapped(_statusMessage);
@@ -361,8 +418,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Separator();
             ImGui.TextColored(new Vector4(0.95f, 0.42f, 0.32f, 1.0f), _lastError);
         }
-
-        ImGui.End();
     }
 
     private void DrawPreviewWindow()
@@ -378,6 +433,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
         {
             ImGui.TextWrapped($"{_session.GetWorkspaceLabel()} is a placeholder workspace in this slice. A dedicated preview consumer has not been implemented yet.");
             ImGui.TextDisabled("Current boundary: expose the workspace surface now, land the real consumer later.");
+            ImGui.End();
+            return;
+        }
+
+        if (_session.WorkspaceMode == WowViewerWorkspaceMode.WorldSession)
+        {
+            DrawWorldSessionPreview();
             ImGui.End();
             return;
         }
@@ -415,6 +477,30 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.End();
     }
 
+    private void DrawWorldSessionPreview()
+    {
+        if (_currentWorldSession == null)
+        {
+            ImGui.TextWrapped("No world session opened yet.");
+            return;
+        }
+
+        ImGui.TextWrapped("World session bootstrap is active. This slice proves fixed-root attach plus shared WDT summary/tile discovery only; it does not render the world yet.");
+        ImGui.Separator();
+        ImGui.TextDisabled($"Client Root: {_currentWorldSession.ClientRoot}");
+        if (!string.IsNullOrWhiteSpace(_currentWorldSession.BuildLabel))
+            ImGui.TextDisabled($"Build: {_currentWorldSession.BuildLabel}");
+        ImGui.Text($"Map: {_currentWorldSession.RequestedMapInput} -> {_currentWorldSession.ResolvedMapDirectory}");
+        ImGui.Text($"WDT Source: {_currentWorldSession.WdtSourcePath}");
+        ImGui.Text($"Load Source: {(_currentWorldSession.LoadedFromArchive ? "archive catalog" : "loose file")}");
+        ImGui.Text($"Map.dbc Resolution: {(_currentWorldSession.ResolvedViaDbc ? "resolved" : (_currentWorldSession.UsedMapDirectoryLookup ? "direct directory fallback" : "lookup unavailable; direct directory fallback"))}");
+        ImGui.Separator();
+        ImGui.Text($"Tiles With Data: {_currentWorldSession.WdtSummary.TilesWithData}/{_currentWorldSession.WdtSummary.TotalTiles}");
+        ImGui.Text($"WMO Based: {_currentWorldSession.WdtSummary.IsWmoBased}");
+        ImGui.Text($"Top-level Chunks: {_currentWorldSession.FileSummary.ChunkCount}");
+        ImGui.Text($"Occupancy Sample: {FormatTileSample(_currentWorldSession.OccupiedTiles, 12)}");
+    }
+
     private void DrawDiagnosticsWindow(float deltaSeconds)
     {
         ImGui.SetNextWindowSize(new Vector2(480, 720), ImGuiCond.FirstUseEver);
@@ -427,6 +513,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (!IsImplementedWorkspace(_session.WorkspaceMode))
         {
             ImGui.TextWrapped($"{_session.GetWorkspaceLabel()} diagnostics are not implemented yet. This workspace exists so later WMO or MDX consumers can land without reshaping the whole shell again.");
+            ImGui.End();
+            return;
+        }
+
+        if (_session.WorkspaceMode == WowViewerWorkspaceMode.WorldSession)
+        {
+            DrawWorldDiagnostics();
             ImGui.End();
             return;
         }
@@ -501,6 +594,51 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.End();
     }
 
+    private void DrawWorldDiagnostics()
+    {
+        if (_currentWorldSession == null)
+        {
+            ImGui.TextWrapped("Open a world session to inspect WDT summary, MAIN flags, and occupied tile samples.");
+            return;
+        }
+
+        ImGui.TextDisabled("World Session Summary");
+        ImGui.Text($"Root: {_currentWorldSession.ClientRoot}");
+        ImGui.Text($"Map: {_currentWorldSession.RequestedMapInput} -> {_currentWorldSession.ResolvedMapDirectory}");
+        ImGui.Text($"Load: {_currentWorldSession.LoadDuration.TotalMilliseconds:F1} ms");
+        ImGui.Text($"WDT Kind: {_currentWorldSession.FileSummary.Kind}");
+        ImGui.Text($"WDT Version: {_currentWorldSession.FileSummary.Version?.ToString() ?? "n/a"}");
+        ImGui.Text($"WDT Chunks: {_currentWorldSession.FileSummary.ChunkCount}");
+        ImGui.Separator();
+
+        WdtSummary summary = _currentWorldSession.WdtSummary;
+        ImGui.TextDisabled("WDT Semantics");
+        ImGui.Text($"Tiles With Data: {summary.TilesWithData}/{summary.TotalTiles}");
+        ImGui.Text($"Main Cell Bytes: {summary.MainCellSizeBytes}");
+        ImGui.Text($"Doodad Names: {summary.DoodadNameCount}");
+        ImGui.Text($"WMO Names: {summary.WorldModelNameCount}");
+        ImGui.Text($"Doodad Placements: {summary.DoodadPlacementCount}");
+        ImGui.Text($"WMO Placements: {summary.WorldModelPlacementCount}");
+        ImGui.Text($"WMO-based: {summary.IsWmoBased}");
+
+        if (summary.MainFlags is not null)
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled("MAIN Flags");
+            ImGui.Text($"Any Flags: {summary.MainFlags.CellsWithAnyFlags}");
+            ImGui.Text($"Has ADT: {summary.MainFlags.CellsWithHasAdt}");
+            ImGui.Text($"All Water: {summary.MainFlags.CellsWithAllWater}");
+            ImGui.Text($"Loaded: {summary.MainFlags.CellsWithLoaded}");
+            ImGui.Text($"Unknown: {summary.MainFlags.CellsWithUnknownFlags}");
+            ImGui.Text($"Async Ids: {summary.MainFlags.CellsWithAsyncId}");
+            ImGui.TextWrapped($"Distinct: {FormatWdtMainFlags(summary.MainFlags)}");
+        }
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Occupied Tile Sample");
+        ImGui.TextWrapped(FormatTileSample(_currentWorldSession.OccupiedTiles, 24));
+    }
+
     private void DrawBoundaryWindow()
     {
         ImGui.SetNextWindowSize(new Vector2(420, 520), ImGuiCond.FirstUseEver);
@@ -525,8 +663,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Separator();
         ImGui.TextDisabled("Current Proof Boundary");
         ImGui.BulletText("This app proves a standalone wow-viewer-owned desktop shell.");
-        ImGui.BulletText("The active preview path now includes a bounded wow-viewer-owned GPU M2 consumer, but it is still not full native/world-scene parity.");
-        ImGui.BulletText("WorldScene cutover remains a later runtime-consumer slice.");
+        ImGui.BulletText("The active shell now proves two bounded consumers: standalone M2 preview and fixed-root world-session bootstrap.");
+        ImGui.BulletText("The M2 path now includes a bounded wow-viewer-owned GPU preview consumer, but it is still not full native material parity.");
+        ImGui.BulletText("World session bootstrap currently stops at attach/open plus WDT summary and occupied-tile discovery; world rendering remains a later slice.");
 
         ImGui.End();
     }
@@ -540,24 +679,40 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        ImGui.TextWrapped("`WowViewer.App` now has a real desktop host plus a bounded GPU M2 preview consumer. This slice keeps the new repo as the owner of the app shell and preview path instead of continuing to route viewer work through `MdxViewer`.");
+        ImGui.TextWrapped("`WowViewer.App` now has a real desktop host, a bounded GPU M2 preview consumer, and a bounded world-session bootstrap path. This keeps the new repo as the owner of the app shell and attach/open flow instead of continuing to route viewer work through `MdxViewer`.");
         ImGui.Separator();
         ImGui.TextDisabled("Commands");
         ImGui.BulletText("No args: open the desktop viewer");
-        ImGui.BulletText("viewer [options]: open the desktop viewer with an initial M2 request");
+        ImGui.BulletText("viewer [options]: open the desktop viewer with an initial M2 or world-session request");
         ImGui.BulletText("m2-frame [options]: keep the existing CLI proof flow");
+        ImGui.BulletText("world-bootstrap [options]: run bounded client-root plus WDT bootstrap proof");
         ImGui.End();
     }
 
-    private void LoadPreview()
+    private void LoadActiveWorkspace()
     {
         _lastError = null;
 
         if (!IsImplementedWorkspace(_session.WorkspaceMode))
         {
-            _statusMessage = $"{_session.GetWorkspaceLabel()} is not implemented yet. Switch back to Standalone M2 for a live preview.";
+            _statusMessage = $"{_session.GetWorkspaceLabel()} is not implemented yet. Switch to Standalone M2 or World Session for a live workspace.";
             return;
         }
+
+        switch (_session.WorkspaceMode)
+        {
+            case WowViewerWorkspaceMode.StandaloneM2:
+                LoadPreview();
+                break;
+            case WowViewerWorkspaceMode.WorldSession:
+                LoadWorldSession();
+                break;
+        }
+    }
+
+    private void LoadPreview()
+    {
+        _lastError = null;
 
         try
         {
@@ -566,6 +721,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             UploadPreviewTexture(preview.FrameResult.VisualSnapshot);
             _gpuPreviewRenderer?.LoadPreview(preview);
             _currentPreview = preview;
+            _currentWorldSession = null;
             _statusMessage = $"Loaded {preview.FrameResult.GoldenFrame.CanonicalModelPath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
             bool hasGpuPreview = _gpuPreviewRenderer?.HasRenderableGeometry == true;
             _lastLoadSummary = hasGpuPreview
@@ -579,12 +735,34 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
     }
 
-    private void ClearPreview()
+    private void LoadWorldSession()
+    {
+        _lastError = null;
+
+        try
+        {
+            WowViewerWorldSessionBootstrapResult result = WowViewerWorldSessionBootstrapper.Open(_session.World.BuildRequest());
+            _currentWorldSession = result;
+            _currentPreview = null;
+            _gpuPreviewRenderer?.ClearPreview();
+            DeletePreviewTexture();
+            _statusMessage = $"Opened world session for {result.ResolvedMapDirectory} in {result.LoadDuration.TotalMilliseconds:F1} ms.";
+            _lastLoadSummary = $"{result.OccupiedTiles.Count} occupied tiles, WDT {result.FileSummary.Kind}, source {(result.LoadedFromArchive ? "archive" : "loose")}";
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            _lastError = ex.Message;
+            _statusMessage = "World session bootstrap failed.";
+        }
+    }
+
+    private void ClearWorkspace()
     {
         _currentPreview = null;
+        _currentWorldSession = null;
         _lastError = null;
-        _lastLoadSummary = "No preview loaded.";
-        _statusMessage = "Preview cleared.";
+        _lastLoadSummary = "No workspace loaded.";
+        _statusMessage = "Workspace cleared.";
         _gpuPreviewRenderer?.ClearPreview();
         DeletePreviewTexture();
     }
@@ -637,6 +815,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _session.Source.VirtualPath = session.Source.VirtualPath ?? string.Empty;
         _session.Source.InputPath = session.Source.InputPath ?? string.Empty;
         _session.Source.BuildLabel = session.Source.BuildLabel ?? string.Empty;
+        _session.World.ClientRoot = session.World.ClientRoot ?? string.Empty;
+        _session.World.MapInput = session.World.MapInput ?? string.Empty;
+        _session.World.BuildLabel = session.World.BuildLabel ?? string.Empty;
         _session.ProfileIndex = session.ProfileIndex;
         _session.SequenceIndex = session.SequenceIndex;
         _session.TimeMs = session.TimeMs;
@@ -677,5 +858,21 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _lastSyncedImGuiWindowSize = windowSize;
         _lastSyncedImGuiFramebufferSize = framebufferSize;
         ImGuiControllerWindowResizedMethod?.Invoke(_imGui, [windowSize]);
+    }
+
+    private static string FormatTileSample(IReadOnlyList<WdtTileCoordinate> tiles, int limit)
+    {
+        if (tiles.Count == 0)
+            return "none";
+
+        string sample = string.Join(", ", tiles.Take(limit).Select(static tile => $"({tile.TileX},{tile.TileY})"));
+        return tiles.Count > limit ? $"{sample}, ... ({tiles.Count - limit} more)" : sample;
+    }
+
+    private static string FormatWdtMainFlags(WdtMainFlagsSummary summary)
+    {
+        return summary.DistinctNonZeroValues.Count == 0
+            ? "none"
+            : string.Join(",", summary.DistinctNonZeroValues.Select(static value => $"0x{value.Value:x}:{value.TileCount}"));
     }
 }

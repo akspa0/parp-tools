@@ -5,6 +5,7 @@ internal enum WowViewerWorkspaceMode
     StandaloneM2 = 0,
     StandaloneWmo = 1,
     StandaloneMdx = 2,
+    WorldSession = 3,
 }
 
 internal enum WowViewerAssetSourceKind
@@ -39,11 +40,56 @@ internal sealed class WowViewerAssetSource
     }
 }
 
+internal sealed class WowViewerWorldSessionState
+{
+    public string ClientRoot { get; set; } = string.Empty;
+
+    public string MapInput { get; set; } = string.Empty;
+
+    public string BuildLabel { get; set; } = string.Empty;
+
+    public void Normalize()
+    {
+        ClientRoot = ClientRoot?.Trim() ?? string.Empty;
+        MapInput = MapInput?.Trim() ?? string.Empty;
+        BuildLabel = BuildLabel?.Trim() ?? string.Empty;
+    }
+
+    public WowViewerWorldSessionOpenRequest BuildRequest()
+    {
+        Normalize();
+        return new WowViewerWorldSessionOpenRequest(ClientRoot, MapInput, BuildLabel);
+    }
+
+    public string Describe()
+    {
+        string source = string.IsNullOrWhiteSpace(ClientRoot)
+            ? "<client root not set>"
+            : Path.GetFullPath(ClientRoot);
+
+        string map = string.IsNullOrWhiteSpace(MapInput)
+            ? "<map not set>"
+            : MapInput;
+
+        return string.IsNullOrWhiteSpace(BuildLabel)
+            ? $"{source} :: {map}"
+            : $"{source} :: {map} [{BuildLabel}]";
+    }
+
+    public bool HasBootstrapInput()
+    {
+        Normalize();
+        return !string.IsNullOrWhiteSpace(ClientRoot) && !string.IsNullOrWhiteSpace(MapInput);
+    }
+}
+
 internal sealed class WowViewerSession
 {
     public WowViewerWorkspaceMode WorkspaceMode { get; set; } = WowViewerWorkspaceMode.StandaloneM2;
 
     public WowViewerAssetSource Source { get; set; } = new();
+
+    public WowViewerWorldSessionState World { get; set; } = new();
 
     public int ProfileIndex { get; set; }
 
@@ -62,6 +108,8 @@ internal sealed class WowViewerSession
         TimeMs = Math.Max(0, TimeMs);
         VisualSize = Math.Clamp(VisualSize, 128, 1024);
         Source ??= new WowViewerAssetSource();
+        World ??= new WowViewerWorldSessionState();
+        World.Normalize();
     }
 
     public M2PreviewLoadRequest BuildM2PreviewRequest()
@@ -105,12 +153,26 @@ internal sealed class WowViewerSession
             WowViewerWorkspaceMode.StandaloneM2 => "Standalone M2",
             WowViewerWorkspaceMode.StandaloneWmo => "Standalone WMO",
             WowViewerWorkspaceMode.StandaloneMdx => "Standalone MDX",
+            WowViewerWorkspaceMode.WorldSession => "World Session",
             _ => "Unknown",
         };
     }
 
     public bool IsImplementedWorkspace()
     {
-        return WorkspaceMode == WowViewerWorkspaceMode.StandaloneM2;
+        return WorkspaceMode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.WorldSession;
+    }
+
+    public bool HasBootstrapInput()
+    {
+        Normalize();
+        return WorkspaceMode switch
+        {
+            WowViewerWorkspaceMode.StandaloneM2 => Source.UsesArchiveSource
+                ? !string.IsNullOrWhiteSpace(Source.ArchiveRoot) && !string.IsNullOrWhiteSpace(Source.VirtualPath)
+                : !string.IsNullOrWhiteSpace(Source.InputPath),
+            WowViewerWorkspaceMode.WorldSession => World.HasBootstrapInput(),
+            _ => false,
+        };
     }
 }

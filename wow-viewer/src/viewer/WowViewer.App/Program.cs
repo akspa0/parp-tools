@@ -42,6 +42,9 @@ internal static class Program
                 case "m2-gpu-frame":
                     return RunM2GpuFrame(tail);
 
+                case "world-bootstrap":
+                    return RunWorldBootstrap(tail);
+
                 default:
                     using (WowViewerDesktopApp app = new(ParseViewerSession(args)))
                         app.Run();
@@ -96,19 +99,45 @@ internal static class Program
         return 0;
     }
 
+    private static int RunWorldBootstrap(string[] args)
+    {
+        WowViewerWorldSessionOpenRequest request = ParseRequiredWorldRequest(args);
+        WowViewerWorldSessionBootstrapResult result = WowViewerWorldSessionBootstrapper.Open(request);
+
+        Console.WriteLine($"WowViewer.App world-bootstrap: root={result.ClientRoot} build={FormatOptionalValue(result.BuildLabel)} map={result.RequestedMapInput}->{result.ResolvedMapDirectory} source={(result.LoadedFromArchive ? "archive" : "loose")} lookupLoaded={result.UsedMapDirectoryLookup} resolvedViaDbc={result.ResolvedViaDbc} loadMs={result.LoadDuration.TotalMilliseconds:F1}");
+        Console.WriteLine($"WowViewer.App world-bootstrap wdt: path={result.WdtSourcePath} kind={result.FileSummary.Kind} version={result.FileSummary.Version?.ToString() ?? "n/a"} chunks={result.FileSummary.ChunkCount}");
+        Console.WriteLine($"WowViewer.App world-bootstrap semantics: wmoBased={result.WdtSummary.IsWmoBased} tiles={result.WdtSummary.TilesWithData}/{result.WdtSummary.TotalTiles} mainCellBytes={result.WdtSummary.MainCellSizeBytes} doodadNames={result.WdtSummary.DoodadNameCount} wmoNames={result.WdtSummary.WorldModelNameCount} doodadPlacements={result.WdtSummary.DoodadPlacementCount} wmoPlacements={result.WdtSummary.WorldModelPlacementCount}");
+        if (result.WdtSummary.MainFlags is not null)
+        {
+            Console.WriteLine($"WowViewer.App world-bootstrap main-flags: any={result.WdtSummary.MainFlags.CellsWithAnyFlags} hasAdt={result.WdtSummary.MainFlags.CellsWithHasAdt} allWater={result.WdtSummary.MainFlags.CellsWithAllWater} loaded={result.WdtSummary.MainFlags.CellsWithLoaded} unknown={result.WdtSummary.MainFlags.CellsWithUnknownFlags} asyncIds={result.WdtSummary.MainFlags.CellsWithAsyncId} distinct={FormatWdtMainFlags(result.WdtSummary.MainFlags)}");
+        }
+
+        string sampleTiles = result.OccupiedTiles.Count == 0
+            ? "none"
+            : string.Join(", ", result.OccupiedTiles.Take(12).Select(static tile => $"({tile.TileX},{tile.TileY})"));
+        Console.WriteLine($"WowViewer.App world-bootstrap occupied-tiles: count={result.OccupiedTiles.Count} sample={sampleTiles}");
+        return 0;
+    }
+
     private static WowViewerSession? ParseViewerSession(string[] args)
     {
         string? workspaceText = GetOption(args, "--workspace", "-w");
         string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
         string? archiveRoot = GetOption(args, "--archive-root", "-r");
         string? virtualPath = GetOption(args, "--virtual-path", "-v");
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? mapInput = GetOption(args, "--map", "-m");
         string? buildLabel = GetOption(args, "--build-label", "-b");
         string? profileIndexText = GetOption(args, "--profile-index", "-p");
         string? sequenceIndexText = GetOption(args, "--sequence-index", "-s");
         string? timeMsText = GetOption(args, "--time-ms", "-t");
         string? visualSizeText = GetOption(args, "--visual-size");
+        WowViewerWorkspaceMode workspaceMode = ParseWorkspaceMode(workspaceText);
+        bool hasExplicitWorkspace = !string.IsNullOrWhiteSpace(workspaceText);
+        bool hasM2Bootstrap = !string.IsNullOrWhiteSpace(input) || !string.IsNullOrWhiteSpace(archiveRoot) || !string.IsNullOrWhiteSpace(virtualPath);
+        bool hasWorldBootstrap = !string.IsNullOrWhiteSpace(clientRoot) || !string.IsNullOrWhiteSpace(mapInput);
 
-        if (string.IsNullOrWhiteSpace(input) && (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(virtualPath)))
+        if (!hasExplicitWorkspace && !hasM2Bootstrap && !hasWorldBootstrap)
             return null;
 
         int.TryParse(profileIndexText, out int profileIndex);
@@ -119,20 +148,46 @@ internal static class Program
             visualSize = 384;
 
         WowViewerSession session = WowViewerSession.CreateDefault();
-        session.WorkspaceMode = ParseWorkspaceMode(workspaceText);
-        session.Source.Kind = string.IsNullOrWhiteSpace(archiveRoot)
-            ? WowViewerAssetSourceKind.LocalFile
-            : WowViewerAssetSourceKind.ArchiveVirtualPath;
-        session.Source.InputPath = string.IsNullOrWhiteSpace(archiveRoot) ? input ?? string.Empty : string.Empty;
-        session.Source.ArchiveRoot = archiveRoot ?? string.Empty;
-        session.Source.VirtualPath = string.IsNullOrWhiteSpace(archiveRoot) ? string.Empty : (virtualPath ?? input ?? string.Empty);
-        session.Source.BuildLabel = buildLabel ?? string.Empty;
+        session.WorkspaceMode = workspaceMode;
+
+        if (workspaceMode == WowViewerWorkspaceMode.WorldSession)
+        {
+            session.World.ClientRoot = clientRoot ?? string.Empty;
+            session.World.MapInput = mapInput ?? input ?? string.Empty;
+            session.World.BuildLabel = buildLabel ?? string.Empty;
+        }
+        else
+        {
+            session.Source.Kind = string.IsNullOrWhiteSpace(archiveRoot)
+                ? WowViewerAssetSourceKind.LocalFile
+                : WowViewerAssetSourceKind.ArchiveVirtualPath;
+            session.Source.InputPath = string.IsNullOrWhiteSpace(archiveRoot) ? input ?? string.Empty : string.Empty;
+            session.Source.ArchiveRoot = archiveRoot ?? string.Empty;
+            session.Source.VirtualPath = string.IsNullOrWhiteSpace(archiveRoot) ? string.Empty : (virtualPath ?? input ?? string.Empty);
+            session.Source.BuildLabel = buildLabel ?? string.Empty;
+        }
+
         session.ProfileIndex = profileIndex;
         session.SequenceIndex = Math.Max(0, sequenceIndex);
         session.TimeMs = Math.Max(0, timeMs);
         session.VisualSize = visualSize;
         session.Normalize();
         return session;
+    }
+
+    private static WowViewerWorldSessionOpenRequest ParseRequiredWorldRequest(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? mapInput = GetOption(args, "--map", "-m") ?? GetFirstPositionalArgument(args);
+        string? buildLabel = GetOption(args, "--build-label", "-b");
+
+        if (string.IsNullOrWhiteSpace(clientRoot))
+            throw new ArgumentException("Provide --client-root <dir> for world-bootstrap.");
+
+        if (string.IsNullOrWhiteSpace(mapInput))
+            throw new ArgumentException("Provide --map <directory|id|name> for world-bootstrap.");
+
+        return new WowViewerWorldSessionOpenRequest(clientRoot, mapInput, buildLabel ?? string.Empty);
     }
 
     private static M2PreviewLoadRequest ParseRequiredM2Request(string[] args, int defaultVisualSize)
@@ -250,11 +305,12 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  wowviewer-app");
-        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>]");
+        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file> | --client-root <game dir> --map <directory|id|name>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app m2-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --input <file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
+        Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--build-label <label>]");
     }
 
     private static WowViewerWorkspaceMode ParseWorkspaceMode(string? workspaceText)
@@ -264,7 +320,20 @@ internal static class Program
             null or "" or "m2" => WowViewerWorkspaceMode.StandaloneM2,
             "wmo" => WowViewerWorkspaceMode.StandaloneWmo,
             "mdx" => WowViewerWorkspaceMode.StandaloneMdx,
-            _ => throw new ArgumentException("--workspace must be one of: m2, wmo, mdx."),
+            "world" => WowViewerWorkspaceMode.WorldSession,
+            _ => throw new ArgumentException("--workspace must be one of: m2, wmo, mdx, world."),
         };
+    }
+
+    private static string FormatOptionalValue(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "n/a" : value;
+    }
+
+    private static string FormatWdtMainFlags(WowViewer.Core.Maps.WdtMainFlagsSummary summary)
+    {
+        return summary.DistinctNonZeroValues.Count == 0
+            ? "none"
+            : string.Join(",", summary.DistinctNonZeroValues.Select(static value => $"0x{value.Value:x}:{value.TileCount}"));
     }
 }
