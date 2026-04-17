@@ -1,6 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Silk.NET" />
+    <PackageReference Include="Silk.NET.Input" />
+    <PackageReference Include="Silk.NET.OpenGL" />
+    <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" />
+    <PackageReference Include="Silk.NET.Windowing" />
     <ProjectReference Include="..\..\core\WowViewer.Core\WowViewer.Core.csproj" />
     <ProjectReference Include="..\..\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
     <ProjectReference Include="..\..\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />
@@ -13,6 +18,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
 </Project>

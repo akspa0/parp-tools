@@ -14388,7 +14388,7 @@ void main() {
             _showRightSidebar = settings.ShowRightSidebar;
             _showWorkspaceBarsPanel = settings.ShowWorkspaceBarsPanel;
             _showBottomDrawer = false;
-            _terrainWeakSignalRestoreEnabled = settings.EnableWeakSignalTerrainRestore;
+            _terrainWeakSignalRestoreEnabled = false;
             _terrainWeakSignalRestoreAllLoadedTiles = false;
             _terrainWeakSignalRestoreUseTextureSubdivisions = true;
             _terrainWeakSignalRestoreUseAutoFactor = settings.EnableWeakSignalTerrainRestoreAutoFactor;
@@ -14592,7 +14592,7 @@ void main() {
                 ShowRightSidebar = _showRightSidebar,
                 ShowWorkspaceBarsPanel = _showWorkspaceBarsPanel,
                 ShowBottomDrawer = false,
-                EnableWeakSignalTerrainRestore = _terrainWeakSignalRestoreEnabled,
+                EnableWeakSignalTerrainRestore = false,
                 EnableWeakSignalTerrainRestoreAllLoadedTiles = false,
                 EnableWeakSignalTerrainRestoreUseChunkMode = false,
                 EnableWeakSignalTerrainRestoreUseTextureSubdivisions = true,

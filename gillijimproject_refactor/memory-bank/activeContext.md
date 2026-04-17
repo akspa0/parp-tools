@@ -1,11 +1,45 @@
 # Active Context
 
+## Apr 17, 2026 - wow-viewer viewer-app cutover is now staged through a dedicated plan, and slice 01 app settings persistence is landed
+
+- after the first wow-viewer desktop shell landed, the next risk was slipping back into broad ad hoc viewer work; that is now corrected with a dedicated continuity plan at `gillijimproject_refactor/plans/wow_viewer_viewer_app_cutover_plan_2026-04-17.md`
+- the active ordered sequence is now explicit:
+	- slice 01 app state/settings persistence
+	- slice 02 viewer session boundary
+	- slice 03 standalone asset workspaces
+	- slice 04 GPU M2 preview consumer
+	- slice 05 world session bootstrap
+	- slice 06 world runtime consumer bridge
+	- later shell-surface expansion and legacy cutover review
+- slice 01 is now implemented in `wow-viewer/src/viewer/WowViewer.App/`:
+	- `WowViewerAppSettings.cs` owns wow-viewer-local persisted app settings under `output/settings/wowviewer_app_settings.json`
+	- `WowViewerDesktopApp.cs` now loads those settings on startup and saves them on dispose, keeping source selection, preview parameters, and app window toggles inside the new repo instead of falling back to old `ViewerApp` state
+- proof in this chat remains build-level for the settings slice:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+- current boundary:
+	- the plan exists and slice 01 is real, but the new app still does not have a typed viewer session object, standalone workspace split, GPU preview path, or world-session bootstrap yet
+
+## Apr 16, 2026 - wow-viewer now has its first real desktop viewer shell, but it is still an M2 preview host rather than a full world-scene consumer
+
+- the user explicitly redirected the work away from keeping `ViewerApp` trapped in `MdxViewer`; the active cutover target is now a true viewer app inside `wow-viewer`
+- `wow-viewer/src/viewer/WowViewer.App` is no longer only the `m2-frame` console harness:
+	- it now owns a Silk.NET + ImGui desktop host
+	- the desktop app loads M2 assets only through shared `wow-viewer` runtime code via a shared `M2PreviewLoader`
+	- the same app shows the deterministic software visual snapshot plus runtime hashes and submission diagnostics inside the new repo, with no `MdxViewer` project dependency
+- `m2-frame` still exists and now shares the exact same loader path as the desktop preview shell instead of duplicating that app-local runtime bootstrap
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+	- real fixed-root loader proof on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Creature/Wolf/Wolf.m2`, through `WowViewer.App m2-frame` succeeded and reported runtime hash `9e9586068a443468ccec1abd62b3d717c0455e08999bd03beb21427a9df4ec30` plus visual hash `b2fabb6da814c393ea149fb7321cbd3e05d24db8852f59dca35c755c29bfb177`
+- current boundary:
+	- this proves the first wow-viewer-owned desktop app shell plus shared M2 preview loading, not world-scene cutover, GPU renderer parity, or active interactive runtime signoff for the new windowed shell
+	- `WorldScene` extraction and a true wow-viewer world-runtime consumer still remain later slices under the existing world-runtime plan
+
 ## Apr 17, 2026 - MdxViewer weak-signal terrain restore is back on a simpler camera-neighbor whole-tile path with range-based per-cell clamp
 
 - the user rejected the newer workbench-scope, loaded-tile, per-chunk, and shadow-heavy restore behavior and explicitly redirected the active design back toward the older reference around commit `336894c7c3a8c51f94da2efe6ad1accacc883352`
 - active `MdxViewer` weak-signal restore eligibility is again limited to the camera tile plus its four direct neighbors, but the gate now accepts either a full weak-range ADT or partial weak-signal evidence from per-cell observed ranges
 - the active restore application still routes through the whole-tile factor path, but the actual deformation is now clamped to every weak sub-cell detected from the configured source-height range across the ADT instead of narrowing the mask to chunk or texture buckets
-- the sidebar copy now describes one active mode (`whole-tile factor, per-cell weak-signal clamp`), and persisted settings still force the older loaded-tile and shadow toggles off so stale JSON state does not silently re-enable the abandoned branches
+- the sidebar copy now describes one active mode (`whole-tile factor, per-cell weak-signal clamp`), and persisted settings now also force `EnableWeakSignalTerrainRestore=false` on load and save so the feature never auto-enables across launches
 - validation in this chat is still build-only:
 	- `get_errors` returned clean for `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/ViewerApp_Sidebars.cs`
 	- full `dotnet build` is currently blocked by the already-running `ParpToolsWoWViewer` process locking the active output binaries, so this chat does not yet have a fresh unlocked build pass after the latest per-cell restore change

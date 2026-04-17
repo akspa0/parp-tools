@@ -2,6 +2,13 @@
 
 Initial repository skeleton for the planned production split from parp-tools.
 
+Current viewer-app reality:
+
+- `src/viewer/WowViewer.App` is no longer only a console placeholder.
+- It now has a real Silk.NET + ImGui desktop shell that can load `wow-viewer` M2 runtime previews directly through shared runtime code, with no `MdxViewer` dependency.
+- The active viewer-app cutover sequence now lives in `gillijimproject_refactor/plans/wow_viewer_viewer_app_cutover_plan_2026-04-17.md`.
+- The desktop shell is still a narrow first slice: it currently previews the deterministic software visual snapshot and runtime diagnostics for M2 assets, not full GPU renderer parity or world-scene ownership.
+
 Current first-pass project layout:
 
 - `src/viewer/WowViewer.App`
@@ -13,13 +20,14 @@ Current first-pass project layout:
 - `tools/converter/WowViewer.Tool.Converter`
 - `tools/inspect/WowViewer.Tool.Inspect`
 
-This scaffold is intentionally minimal. It exists to lock the repo shape, project identities, and reference graph before the real code-port work starts.
+The repo shape is still intentionally conservative, but it is no longer only a bare scaffold. `WowViewer.App` now exists as the first real desktop app host in the new repo, while broader world-runtime and viewer cutover remain in progress.
 
 Current plan-adherence reality:
 
 - `Core.PM4` is the only core library area with substantial implementation today.
 - `WowViewer.Core`, `WowViewer.Core.IO`, and `WowViewer.Core.Runtime` are still early and should not be described as complete library boundaries yet.
 - `WowViewer.Core.Runtime` now owns a first narrow world-render seam: shared render-frame telemetry contracts and optimization-hint logic extracted from `MdxViewer.WorldScene`.
+- `WowViewer.App` now owns the first app-shell slice in the new repo: command dispatch, desktop window host, docked UI shell, and runtime-backed M2 preview loading over shared `wow-viewer` runtime services.
 - staged `WorldScene` to `wow-viewer` runtime decomposition is now documented in `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md` and `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md`, with repeated `.skin` miss suppression called out as slice 01 before deeper pass extraction.
 - The repo is now starting to correct that with a real bootstrap script and a first non-PM4 chunk or FourCC foundation slice, but the broader shared I/O and runtime cutover is still missing.
 
@@ -75,6 +83,7 @@ Current M2-native continuity note:
 - Current landed M2 runtime ownership now includes strict root/skin/section/material/external-animation seams, bone pose evaluation, CPU-side skinned render vertices, render-consumer pass state, resolved effect-object state, particle/ribbon submission descriptors, explicit scene family policies, and a deterministic golden-frame snapshot builder.
 - Camera-only `*_cam.m2` assets now also have a wow-viewer-owned runtime overlay contract: `M2CameraPathOverlayBuilder` and `M2CameraPathVisualization` classify geometry-less flyby models and produce sampled camera/target paths plus bounds for thin consumer adapters.
 - `WowViewer.App m2-frame` and `WowViewer.Tool.Inspect m2 inspect` now share the same runtime-frame pipeline; both can emit golden JSON, render-frame JSON, and software visual BMP proof outputs for fixed-asset validation.
+- `WowViewer.App` with no arguments now opens the new desktop shell, and `WowViewer.App viewer ...` can preseed that shell with an initial M2 request.
 - The proof level is app/runtime/golden-state plus deterministic render-frame or software-visual proof, not active visual renderer, shader backend, particle/ribbon simulation, or `MdxViewer` runtime signoff yet.
 
 Current PM4 terminology policy:
