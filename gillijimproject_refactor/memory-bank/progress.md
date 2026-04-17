@@ -1,5 +1,20 @@
 # Progress
 
+### Apr 17, 2026 - wow-viewer app slice 10 landed: the bounded world frame now has runtime-owned non-object tile-stage summary counts
+
+- what changed:
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Passes/WorldTileStageSummary.cs` and `WorldTileStageSummaryBuilder.cs` now own the bounded root-ADT summary seam for WDL tile presence, terrain chunk counts, terrain hole counts, liquid chunk counts, liquid layer counts, and visible liquid tile counts over shared ADT readers
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now resolves the selected tile's root ADT through the same archive or loose-file path used by the bounded frame, carries the runtime-owned tile-stage summary in the result, and uses it to populate active WDL or terrain or liquid stage counts instead of placeholder zeros
+	- `wow-viewer/src/viewer/WowViewer.App/Program.cs` and `WowViewerDesktopApp.cs` now report active-versus-source terrain-side counts in the `world-frame` CLI proof path and the desktop world-session status or diagnostics surfaces
+	- `wow-viewer/tests/WowViewer.Core.Tests/WorldTileStageSummaryBuilderTests.cs` now covers both the fixed development root ADT and a synthetic MH2O-bearing root ADT for focused terrain and liquid summary regression coverage
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldTileStageSummaryBuilderTests` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
+	- real-data runtime proof via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340` now reports terrain-side source and active counts on the selected tile, and rerunning with `--hide-wdl --hide-terrain --hide-liquid` drops the active WDL or terrain or liquid counts while preserving the source counts
+- boundary:
+	- this closes bounded non-object stage-summary ownership only
+	- actual terrain or WDL or liquid renderer extraction and overlay-stage ownership still remain separate follow-up work
+
 ### Apr 17, 2026 - wow-viewer app slice 09 landed: the bounded world frame now has runtime-owned pass options
 
 - what changed:

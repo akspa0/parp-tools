@@ -28,6 +28,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         int selectedTileX,
         int selectedTileY,
         string placementSourcePath,
+        WorldTileStageSummary tileStageSummary,
         AdtPlacementCatalog placementCatalog,
         IReadOnlyList<WorldObjectInstance> wmoInstances,
         IReadOnlyList<WorldObjectInstance> mdxInstances,
@@ -51,6 +52,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         SelectedTileX = selectedTileX;
         SelectedTileY = selectedTileY;
         PlacementSourcePath = placementSourcePath;
+        TileStageSummary = tileStageSummary;
         PlacementCatalog = placementCatalog;
         WmoInstances = wmoInstances;
         MdxInstances = mdxInstances;
@@ -78,6 +80,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
     public int SelectedTileY { get; }
 
     public string PlacementSourcePath { get; }
+
+    public WorldTileStageSummary TileStageSummary { get; }
 
     public AdtPlacementCatalog PlacementCatalog { get; }
 
@@ -132,6 +136,7 @@ internal static class WowViewerWorldRuntimeBridge
 
         ((int tileX, int tileY) selectedTile, AdtPlacementCatalog placementCatalog, string placementSourcePath) =
             ResolveTileAndPlacements(session, request.TileX, request.TileY, archiveCatalog);
+        WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
 
         Dictionary<string, LocalBoundsResolution> boundsCache = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, bool> assetReadyLookup = new(StringComparer.OrdinalIgnoreCase);
@@ -194,10 +199,17 @@ internal static class WowViewerWorldRuntimeBridge
         int transparentBatchedMdxCount = 0;
         int transparentUnbatchedMdxCount = 0;
         double mdxAnimationMs = 0;
+        double wdlMs = 0;
+        double terrainMs = 0;
         double wmoSubmissionMs = 0;
         double mdxOpaqueSubmissionMs = 0;
+        double liquidMs = 0;
         double mdxTransparentSortMs = 0;
         double mdxTransparentSubmissionMs = 0;
+        int activeWdlTileCount = 0;
+        int activeTerrainChunkCount = 0;
+        int activeLiquidChunkCount = 0;
+        int activeLiquidVisibleTileCount = 0;
 
         WorldFramePassOptions appliedPassOptions = new(
             objectsVisible: request.PassOptions.ObjectsVisible && (visibility.VisibleWmos.Count > 0 || visibility.VisibleMdx.Count > 0),
@@ -215,8 +227,20 @@ internal static class WowViewerWorldRuntimeBridge
                 static () => { },
                 static () => { },
                 static () => { },
-                static () => { },
-                static () => { },
+                () =>
+                {
+                    Stopwatch wdlStopwatch = Stopwatch.StartNew();
+                    activeWdlTileCount = tileStageSummary.WdlVisibleTileCount;
+                    wdlStopwatch.Stop();
+                    wdlMs = wdlStopwatch.Elapsed.TotalMilliseconds;
+                },
+                () =>
+                {
+                    Stopwatch terrainStopwatch = Stopwatch.StartNew();
+                    activeTerrainChunkCount = tileStageSummary.TerrainChunkCount;
+                    terrainStopwatch.Stop();
+                    terrainMs = terrainStopwatch.Elapsed.TotalMilliseconds;
+                },
                 () =>
                 {
                     Stopwatch animationStopwatch = Stopwatch.StartNew();
@@ -255,7 +279,14 @@ internal static class WowViewerWorldRuntimeBridge
                     opaqueStopwatch.Stop();
                     mdxOpaqueSubmissionMs = opaqueStopwatch.Elapsed.TotalMilliseconds;
                 },
-                static () => { },
+                () =>
+                {
+                    Stopwatch liquidStopwatch = Stopwatch.StartNew();
+                    activeLiquidChunkCount = tileStageSummary.LiquidChunkCount;
+                    activeLiquidVisibleTileCount = tileStageSummary.VisibleLiquidTileCount;
+                    liquidStopwatch.Stop();
+                    liquidMs = liquidStopwatch.Elapsed.TotalMilliseconds;
+                },
                 () =>
                 {
                     Stopwatch transparentStopwatch = Stopwatch.StartNew();
@@ -274,8 +305,8 @@ internal static class WowViewerWorldRuntimeBridge
         WorldRenderFrameStats stats = new(
             TotalCpuMs: totalStopwatch.Elapsed.TotalMilliseconds,
             PendingAssetLoadCount: pendingAssetKeys.Count,
-            TerrainChunksRendered: 0,
-            WdlVisibleTileCount: 0,
+            TerrainChunksRendered: activeTerrainChunkCount,
+            WdlVisibleTileCount: activeWdlTileCount,
             VisibleWmoCount: visibility.VisibleWmos.Count,
             VisibleMdxCount: visibility.VisibleMdx.Count,
             VisibleTaxiMdxCount: visibility.VisibleTaxiMdxCount,
@@ -288,14 +319,14 @@ internal static class WowViewerWorldRuntimeBridge
             Lighting: new WorldRenderStageStats(0),
             Sky: new WorldRenderStageStats(0),
             SkyboxBackdrop: new WorldRenderStageStats(0),
-            Wdl: new WorldRenderStageStats(0),
-            Terrain: new WorldRenderStageStats(0),
+            Wdl: new WorldRenderStageStats(wdlMs, activeWdlTileCount, activeWdlTileCount),
+            Terrain: new WorldRenderStageStats(terrainMs, activeTerrainChunkCount, activeTerrainChunkCount),
             WmoVisibility: new WorldRenderStageStats(wmoVisibilityStopwatch.Elapsed.TotalMilliseconds, wmoInstances.Count, visibility.VisibleWmos.Count),
             WmoSubmission: new WorldRenderStageStats(wmoSubmissionMs, visibility.VisibleWmos.Count, renderedWmoCount),
             MdxAnimation: new WorldRenderStageStats(mdxAnimationMs, visibility.VisibleMdx.Count, updatedMdxCount),
             MdxVisibility: new WorldRenderStageStats(mdxVisibilityStopwatch.Elapsed.TotalMilliseconds, mdxInstances.Count, visibility.VisibleMdx.Count),
             MdxOpaqueSubmission: new WorldRenderStageStats(mdxOpaqueSubmissionMs, visibility.VisibleMdx.Count, opaqueBatchedMdxCount + opaqueUnbatchedMdxCount),
-            Liquid: new WorldRenderStageStats(0),
+            Liquid: new WorldRenderStageStats(liquidMs, activeLiquidChunkCount, activeLiquidVisibleTileCount),
             MdxTransparentSort: new WorldRenderStageStats(mdxTransparentSortMs, visibility.VisibleMdx.Count, passFrame.TransparentVisibleMdxRoutes.Count),
             MdxTransparentSubmission: new WorldRenderStageStats(mdxTransparentSubmissionMs, passFrame.TransparentVisibleMdxRoutes.Count, transparentBatchedMdxCount + transparentUnbatchedMdxCount),
             Overlay: new WorldRenderStageStats(0));
@@ -305,6 +336,7 @@ internal static class WowViewerWorldRuntimeBridge
             selectedTile.tileX,
             selectedTile.tileY,
             placementSourcePath,
+            tileStageSummary,
             placementCatalog,
             wmoInstances,
             mdxInstances,
@@ -386,6 +418,23 @@ internal static class WowViewerWorldRuntimeBridge
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
         stream.Position = 0;
         return AdtPlacementReader.Read(stream, fileSummary);
+    }
+
+    private static WorldTileStageSummary ReadRootTileStageSummary(
+        WowViewerWorldSessionBootstrapResult session,
+        int tileX,
+        int tileY,
+        IArchiveCatalog archiveCatalog)
+    {
+        string mapDirectory = session.ResolvedMapDirectory;
+        string rootVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
+        if (!TryReadVirtualOrLooseFile(session.ClientRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out string sourcePath) || rootData is null)
+            throw new FileNotFoundException($"Could not locate root ADT for map '{mapDirectory}' tile ({tileX},{tileY}).", rootVirtualPath);
+
+        using MemoryStream stream = new(rootData, writable: false);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
+        stream.Position = 0;
+        return WorldTileStageSummaryBuilder.Read(stream, fileSummary);
     }
 
     private static List<WorldObjectInstance> BuildWmoInstances(

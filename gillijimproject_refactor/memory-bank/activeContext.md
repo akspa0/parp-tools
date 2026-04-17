@@ -2,6 +2,20 @@
 
 # Active Context
 
+## Apr 17, 2026 - wow-viewer app slice 10 landed: the bounded world frame now consumes a runtime-owned root-ADT stage summary for WDL, terrain, and liquid counts
+
+- slice 10 from the viewer-app cutover plan is now landed in `wow-viewer`
+- `WorldTileStageSummary.cs` and `WorldTileStageSummaryBuilder.cs` now own the bounded non-object root-ADT stage summary seam in `WowViewer.Core.Runtime`, using shared `AdtSummaryReader`, `AdtMcnkSummaryReader`, and `AdtLiquidReader` to expose WDL tile presence, terrain chunk counts, terrain hole counts, liquid chunk counts, liquid layer counts, and visible liquid tile counts for the selected tile
+- `WowViewerWorldRuntimeBridge.cs` now resolves the selected tile's root ADT through the same archive or loose-file path as the rest of the bounded frame, threads the new runtime-owned tile-stage summary through `WowViewerWorldRuntimeFrameResult`, and populates active WDL or terrain or liquid stage counts instead of hard-coded zero placeholders
+- `Program.cs` and `WowViewerDesktopApp.cs` now report active-versus-source terrain-side counts in the `world-frame` CLI proof and desktop diagnostics or status surfaces, so the bounded world frame exposes real non-object stage signals when the current tile has them
+- bounded proof in this chat:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldTileStageSummaryBuilderTests` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+	- real fixed-root proof via `WowViewer.App world-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, now reports source and active terrain-side counts for the auto-selected tile instead of all-zero WDL or terrain or liquid stage placeholders, and the active counts drop when `--hide-wdl`, `--hide-terrain`, or `--hide-liquid` disables those stages
+- current boundary:
+	- this closes bounded non-object stage-summary ownership only; it does not extract the actual terrain or WDL or liquid renderer path
+	- the next real viewer-facing slice should extract a true non-object renderer or service seam for terrain, WDL, liquid, or overlay work in `wow-viewer`
+
 ## Apr 17, 2026 - wow-viewer app slice 09 landed: the bounded world frame now consumes runtime-owned pass options
 
 - slice 09 from the viewer-app cutover plan is now landed in `wow-viewer`

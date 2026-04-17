@@ -258,6 +258,32 @@
 - landed in `wow-viewer`:
   - `wow-viewer/src/core/WowViewer.Core.Runtime/World/Passes/WorldFramePassCoordinator.cs` now exposes richer `WorldFramePassOptions` with runtime-owned flags for WMO/MDX family gating and sky/WDL/terrain/liquid/overlay stage gating while preserving the existing ordered pass contract
   - `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs`, `Program.cs`, `WowViewerWorldRuntimeBridge.cs`, and `WowViewerDesktopApp.cs` now thread those options through persisted world-session state, CLI `world-frame --hide-*` flags, the bounded runtime frame request/result, and the current desktop controls or diagnostics
+
+### Slice 10 - World Tile Stage Summary
+
+- target problem:
+  - the bounded world app consumer still zero-filled WDL, terrain, and liquid stage counts even after pass-option ownership moved into runtime
+- implementation scope:
+  - add a runtime-owned root-ADT stage-summary seam for WDL, terrain, and liquid counts over shared ADT readers
+  - thread that summary through the bounded world-frame bridge and shell surfaces so non-object stage counts are real and option-sensitive
+  - keep the slice bounded to summary ownership and current one-tile proof; do not claim terrain or liquid rendering extraction yet
+- proof goal:
+  - the `world-frame` proof path reports non-zero source terrain-side counts on a real tile and drops the active counts when `--hide-wdl`, `--hide-terrain`, or `--hide-liquid` disables those stages
+
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer`:
+  - `wow-viewer/src/core/WowViewer.Core.Runtime/World/Passes/WorldTileStageSummary.cs` and `WorldTileStageSummaryBuilder.cs` now own the bounded root-ADT summary seam for WDL tile presence, terrain chunk counts, hole-bearing terrain chunks, liquid chunk counts, liquid layer counts, and visible liquid tile counts over shared `AdtSummaryReader`, `AdtMcnkSummaryReader`, and `AdtLiquidReader`
+  - `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now resolves the selected tile's root ADT through the same archive or loose-file path, carries the runtime-owned tile-stage summary in the bounded frame result, and uses it to populate active WDL or terrain or liquid stage counts instead of hard-coded zeros
+  - `wow-viewer/src/viewer/WowViewer.App/Program.cs` and `WowViewerDesktopApp.cs` now report active-versus-source terrain-side counts for the bounded frame so CLI proof and desktop diagnostics expose the new runtime-owned summary directly
+  - `wow-viewer/tests/WowViewer.Core.Tests/WorldTileStageSummaryBuilderTests.cs` now covers both the fixed development root ADT and a synthetic MH2O-bearing root ADT so the new runtime summary seam has focused terrain and liquid regression coverage
+- proof completed:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldTileStageSummaryBuilderTests`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - real-data runtime proof via `WowViewer.App world-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, showing non-zero terrain-side source counts and then zero active WDL or terrain or liquid counts when the corresponding `--hide-*` flags are applied
+- current boundary:
+  - this closes bounded non-object stage-summary ownership only
+  - true terrain or WDL or liquid renderer extraction and overlay-stage ownership remain later slices
   - `wow-viewer/tests/WowViewer.Core.Tests/WorldFramePassCoordinatorTests.cs` now proves both the legacy ordered flow and the new disabled-layer behavior
 - proof completed:
   - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldFramePassCoordinatorTests`

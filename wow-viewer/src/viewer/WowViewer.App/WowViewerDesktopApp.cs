@@ -489,6 +489,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"Selected Tile: ({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})");
             ImGui.Text($"Visible Objects: {_currentWorldRuntimeFrame.Visibility.VisibleWmos.Count + _currentWorldRuntimeFrame.Visibility.VisibleMdx.Count}");
             ImGui.Text($"Pending Assets: {_currentWorldRuntimeFrame.PendingAssetKeys.Count}");
+            ImGui.Text($"Terrain Chunks: {_currentWorldRuntimeFrame.Stats.TerrainChunksRendered}/{_currentWorldRuntimeFrame.TileStageSummary.TerrainChunkCount}");
+            ImGui.Text($"Liquid Chunks: {_currentWorldRuntimeFrame.Stats.Liquid.VisibleCount}/{_currentWorldRuntimeFrame.TileStageSummary.LiquidChunkCount}");
             ImGui.Text($"Pass Options: WMO {_currentWorldRuntimeFrame.PassOptions.WmosVisible}, MDX {_currentWorldRuntimeFrame.PassOptions.DoodadsVisible}, WDL {_currentWorldRuntimeFrame.PassOptions.WdlVisible}, Terrain {_currentWorldRuntimeFrame.PassOptions.TerrainVisible}, Liquid {_currentWorldRuntimeFrame.PassOptions.LiquidVisible}, Overlay {_currentWorldRuntimeFrame.PassOptions.OverlayVisible}");
         }
     }
@@ -794,6 +796,12 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         ImGui.Separator();
         ImGui.TextDisabled("Pass Coordination");
+        ImGui.Text($"WDL Tiles: {result.Stats.WdlVisibleTileCount}/{result.TileStageSummary.WdlVisibleTileCount}");
+        ImGui.Text($"Terrain Chunks: {result.Stats.TerrainChunksRendered}/{result.TileStageSummary.TerrainChunkCount}");
+        ImGui.Text($"Terrain Hole Chunks: {result.TileStageSummary.TerrainHoleChunkCount}");
+        ImGui.Text($"Liquid Chunks: {result.Stats.Liquid.VisibleCount}/{result.TileStageSummary.LiquidChunkCount}");
+        ImGui.Text($"Liquid Layers: {result.TileStageSummary.LiquidLayerCount}");
+        ImGui.Text($"Liquid Visible Tiles: {result.Stats.Liquid.SubmittedCount}/{result.TileStageSummary.VisibleLiquidTileCount}");
         ImGui.Text($"WMO Submitted: {result.Stats.WmoSubmission.SubmittedCount}");
         ImGui.Text($"MDX Animated: {result.Stats.MdxAnimation.SubmittedCount}");
         ImGui.Text($"MDX Opaque Submitted: {result.Stats.MdxOpaqueSubmission.SubmittedCount}");
