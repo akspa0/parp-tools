@@ -129,6 +129,7 @@ internal static class Program
 
     private static int RunWorldFrame(string[] args)
     {
+        string? terrainPreviewOutput = GetOption(args, "--terrain-preview-output");
         WowViewerWorldRuntimeFrameRequest request = ParseRequiredWorldFrameRequest(args);
         WowViewerWorldRuntimeFrameResult result = WowViewerWorldRuntimeBridge.Build(request);
 
@@ -137,6 +138,7 @@ internal static class Program
         Console.WriteLine($"WowViewer.App world-frame terrain: source={result.TileStageSummary.SourcePath} wdlTiles={result.Stats.WdlVisibleTileCount}/{result.TileStageSummary.WdlVisibleTileCount} terrainChunks={result.Stats.TerrainChunksRendered}/{result.TileStageSummary.TerrainChunkCount} holes={result.TileStageSummary.TerrainHoleChunkCount} liquidChunks={result.Stats.Liquid.VisibleCount}/{result.TileStageSummary.LiquidChunkCount} liquidLayers={result.TileStageSummary.LiquidLayerCount} liquidVisibleTiles={result.Stats.Liquid.SubmittedCount}/{result.TileStageSummary.VisibleLiquidTileCount} hasWater={result.TileStageSummary.HasWater}");
         Console.WriteLine($"WowViewer.App world-frame wdl-service: found={result.WdlTileData.SourceFound} hasData={result.WdlTileData.HasData} source={result.WdlTileData.SourcePath} version={FormatOptionalUInt(result.WdlTileData.Version)} range={FormatHeightRange(result.WdlTileData)} center={FormatOptionalHeight(result.WdlTileData.CenterHeight)} corners={FormatWdlCorners(result.WdlTileData)} samples={result.WdlTileData.OuterHeightCount}+{result.WdlTileData.InnerHeightCount}");
         Console.WriteLine($"WowViewer.App world-frame terrain-service: sourceChunks={result.TerrainTileData.ChunkCount} holeChunks={result.TerrainTileData.HoleChunkCount} liquidFlagChunks={result.TerrainTileData.LiquidFlagChunkCount} areas={result.TerrainTileData.DistinctAreaIdCount} sample={FormatTerrainChunkSample(result.TerrainTileData)}");
+        Console.WriteLine($"WowViewer.App world-frame terrain-visual: size={result.TerrainVisualSnapshot.Width}x{result.TerrainVisualSnapshot.Height} sampled={result.TerrainVisualSnapshot.SampledPixelCount} range={FormatTerrainHeightRange(result.TerrainTileData)} center={FormatTerrainCenter(result.TerrainTileData)} corners={FormatTerrainCorners(result.TerrainTileData)} hash={result.TerrainVisualSnapshot.VisualHash}");
         Console.WriteLine($"WowViewer.App world-frame liquid-service: sourceChunks={result.LiquidTileData.ActiveChunkCount} sourceLayers={result.LiquidTileData.LayerCount} sourceVisibleTiles={result.LiquidTileData.VisibleTileCount} types={FormatLiquidTypeCounts(result.LiquidTileData)} sample={FormatLiquidChunkSample(result.LiquidTileData)}");
         Console.WriteLine($"WowViewer.App world-frame placements: wmo={result.WmoInstances.Count} readyWmo={result.ReadyWmoCount} mdx={result.MdxInstances.Count} readyMdx={result.ReadyMdxCount} pending={result.PendingAssetKeys.Count}");
         Console.WriteLine($"WowViewer.App world-frame visibility: visibleWmo={result.Visibility.VisibleWmos.Count} culledWmo={result.CulledWmoCount} visibleMdx={result.Visibility.VisibleMdx.Count} culledMdx={result.CulledMdxCount} taxi={result.Visibility.VisibleTaxiMdxCount}");
@@ -144,6 +146,9 @@ internal static class Program
         Console.WriteLine($"WowViewer.App world-frame hint: {result.OptimizationHint}");
         if (result.PendingAssetKeys.Count > 0)
             Console.WriteLine($"WowViewer.App world-frame pending-sample: {string.Join(", ", result.PendingAssetKeys.Take(8))}");
+
+        if (!string.IsNullOrWhiteSpace(terrainPreviewOutput))
+            WriteBmp(terrainPreviewOutput, result.TerrainVisualSnapshot);
 
         return 0;
     }
@@ -177,6 +182,30 @@ internal static class Program
 
         return string.Join(", ", terrainTileData.Chunks.Take(4).Select(static chunk =>
             $"({chunk.IndexX},{chunk.IndexY}) area={chunk.AreaId} holes={chunk.HasHoles} liquidFlags={chunk.HasLiquidFlags}"));
+    }
+
+    private static string FormatTerrainHeightRange(WorldTerrainTileData terrainTileData)
+    {
+        WorldTerrainHeightmapData? heightmap = terrainTileData.Heightmap;
+        if (heightmap is null)
+            return "n/a";
+
+        return $"{heightmap.MinHeight:F2}..{heightmap.MaxHeight:F2}";
+    }
+
+    private static string FormatTerrainCenter(WorldTerrainTileData terrainTileData)
+    {
+        WorldTerrainHeightmapData? heightmap = terrainTileData.Heightmap;
+        return heightmap is null ? "n/a" : $"{heightmap.CenterHeight:F2}";
+    }
+
+    private static string FormatTerrainCorners(WorldTerrainTileData terrainTileData)
+    {
+        WorldTerrainHeightmapData? heightmap = terrainTileData.Heightmap;
+        if (heightmap is null)
+            return "n/a";
+
+        return $"nw={heightmap.NorthWestHeight:F2} ne={heightmap.NorthEastHeight:F2} sw={heightmap.SouthWestHeight:F2} se={heightmap.SouthEastHeight:F2}";
     }
 
     private static string FormatHeightRange(WorldWdlTileData wdlTileData)
@@ -391,6 +420,18 @@ internal static class Program
         Console.WriteLine($"Wrote {outputPath}");
     }
 
+    private static void WriteBmp(string output, WorldTerrainVisualSnapshot snapshot)
+    {
+        string outputPath = Path.GetFullPath(output);
+        string? directory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        using FileStream stream = File.Create(outputPath);
+        WorldTerrainVisualSnapshotBuilder.WriteBmp(stream, snapshot);
+        Console.WriteLine($"Wrote {outputPath}");
+    }
+
     private static string? GetOption(string[] args, params string[] names)
     {
         for (int index = 0; index < args.Length; index++)
@@ -442,7 +483,7 @@ internal static class Program
         Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --input <file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--build-label <label>]");
-        Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay]");
+        Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--terrain-preview-output <file.bmp>]");
     }
 
     private static WowViewerWorkspaceMode ParseWorkspaceMode(string? workspaceText)

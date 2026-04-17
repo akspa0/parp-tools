@@ -71,6 +71,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private WowViewerWorldSessionBootstrapResult? _currentWorldSession;
     private WowViewerWorldRuntimeFrameResult? _currentWorldRuntimeFrame;
     private uint _previewTextureHandle;
+    private uint _worldTerrainPreviewTextureHandle;
     private M2GpuPreviewRenderer? _gpuPreviewRenderer;
     private bool _showAboutWindow = true;
     private bool _showWorkspaceWindow = true;
@@ -124,6 +125,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         SaveSettings();
         _gpuPreviewRenderer?.Dispose();
         DeletePreviewTexture();
+        DeleteWorldTerrainPreviewTexture();
         _imGui?.Dispose();
         _input?.Dispose();
         _window?.Dispose();
@@ -588,7 +590,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         ImGui.TextWrapped(_currentWorldRuntimeFrame == null
             ? "World session bootstrap is active. This slice proves fixed-root attach plus shared WDT summary/tile discovery only; it does not render the world yet."
-            : "World runtime bridge is active over one selected ADT tile. This view consumes shared visibility and pass coordinators for a bounded top-down frame, not the final 3D world renderer.");
+            : "World runtime bridge is active over one selected ADT tile. This view now includes a bounded software terrain preview plus shared visibility and pass coordinators, not the final 3D world renderer.");
         ImGui.Separator();
         ImGui.TextDisabled($"Client Root: {_currentWorldSession.ClientRoot}");
         if (!string.IsNullOrWhiteSpace(_currentWorldSession.BuildLabel))
@@ -617,6 +619,19 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(_currentWorldRuntimeFrame, _selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
             ImGui.Text($"Selection: {selectedEntry.Kind} {selectedEntry.Instance.ModelName} #{selectedEntry.Instance.UniqueId}");
 
+        if (_worldTerrainPreviewTextureHandle != 0)
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled("Terrain Preview");
+            Vector2 previewAvailable = ImGui.GetContentRegionAvail();
+            float previewSize = MathF.Max(180f, MathF.Min(previewAvailable.X, 320f));
+            ImGui.Image((nint)_worldTerrainPreviewTextureHandle, new Vector2(previewSize, previewSize), new Vector2(0, 1), new Vector2(1, 0));
+            ImGui.TextDisabled($"{_currentWorldRuntimeFrame.TerrainVisualSnapshot.Width}x{_currentWorldRuntimeFrame.TerrainVisualSnapshot.Height} samples={_currentWorldRuntimeFrame.TerrainVisualSnapshot.SampledPixelCount}");
+            ImGui.TextDisabled($"Range {FormatTerrainHeightRange(_currentWorldRuntimeFrame.TerrainTileData)} hash={_currentWorldRuntimeFrame.TerrainVisualSnapshot.VisualHash}");
+        }
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Object Navigator");
         Vector2 available = ImGui.GetContentRegionAvail();
         float canvasSize = MathF.Max(200f, MathF.Min(available.X, available.Y));
         Vector2 canvas = new(canvasSize, canvasSize);
@@ -810,6 +825,10 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"Terrain Chunks: {result.Stats.TerrainChunksRendered}/{result.TileStageSummary.TerrainChunkCount}");
         ImGui.Text($"Terrain Hole Chunks: {result.TileStageSummary.TerrainHoleChunkCount}");
         ImGui.Text($"Terrain Areas: {result.TerrainTileData.DistinctAreaIdCount}");
+        ImGui.Text($"Terrain Range: {FormatTerrainHeightRange(result.TerrainTileData)}");
+        ImGui.TextWrapped($"Terrain Heights: center={FormatTerrainCenter(result.TerrainTileData)} {FormatTerrainCorners(result.TerrainTileData)}");
+        ImGui.Text($"Terrain Preview: {result.TerrainVisualSnapshot.Width}x{result.TerrainVisualSnapshot.Height} samples={result.TerrainVisualSnapshot.SampledPixelCount}");
+        ImGui.TextWrapped($"Terrain Visual Hash: {result.TerrainVisualSnapshot.VisualHash}");
         ImGui.TextWrapped($"Terrain Sample: {FormatTerrainChunkSample(result.TerrainTileData)}");
         ImGui.Text($"Liquid Chunks: {result.Stats.Liquid.VisibleCount}/{result.TileStageSummary.LiquidChunkCount}");
         ImGui.Text($"Liquid Layers: {result.TileStageSummary.LiquidLayerCount}");
@@ -829,7 +848,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Separator();
         ImGui.TextDisabled("Timing Hint");
         ImGui.TextWrapped(result.OptimizationHint);
-        ImGui.TextWrapped("Boundary: these timings are for the bounded app-side runtime bridge over visibility/pass coordination, not the final 3D world renderer.");
+        ImGui.TextWrapped("Boundary: these timings are for the bounded app-side runtime bridge over the software terrain preview plus visibility/pass coordination, not the final 3D world renderer.");
     }
 
     private static string FormatLiquidTypeCounts(WorldLiquidTileData liquidTileData)
@@ -861,6 +880,30 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         return string.Join(", ", terrainTileData.Chunks.Take(4).Select(static chunk =>
             $"({chunk.IndexX},{chunk.IndexY}) area={chunk.AreaId} holes={chunk.HasHoles} liquidFlags={chunk.HasLiquidFlags}"));
+    }
+
+    private static string FormatTerrainHeightRange(WorldTerrainTileData terrainTileData)
+    {
+        WorldTerrainHeightmapData? heightmap = terrainTileData.Heightmap;
+        if (heightmap is null)
+            return "n/a";
+
+        return $"{heightmap.MinHeight:F2}..{heightmap.MaxHeight:F2}";
+    }
+
+    private static string FormatTerrainCenter(WorldTerrainTileData terrainTileData)
+    {
+        WorldTerrainHeightmapData? heightmap = terrainTileData.Heightmap;
+        return heightmap is null ? "n/a" : $"{heightmap.CenterHeight:F2}";
+    }
+
+    private static string FormatTerrainCorners(WorldTerrainTileData terrainTileData)
+    {
+        WorldTerrainHeightmapData? heightmap = terrainTileData.Heightmap;
+        if (heightmap is null)
+            return "n/a";
+
+        return $"nw={heightmap.NorthWestHeight:F2} ne={heightmap.NorthEastHeight:F2} sw={heightmap.SouthWestHeight:F2} se={heightmap.SouthEastHeight:F2}";
     }
 
     private static string FormatHeightRange(WorldWdlTileData wdlTileData)
@@ -915,7 +958,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.BulletText("This app proves a standalone wow-viewer-owned desktop shell.");
         ImGui.BulletText("The active shell now proves two bounded consumers: standalone M2 preview and a world-session bridge over one selected ADT tile.");
         ImGui.BulletText("The M2 path now includes a bounded wow-viewer-owned GPU preview consumer, but it is still not full native material parity.");
-        ImGui.BulletText("The world path now consumes shared visibility and pass coordinators for a bounded top-down frame summary plus navigator and inspector surfaces, but world rendering still remains a later slice.");
+        ImGui.BulletText("The world path now consumes shared terrain height or preview plus visibility and pass coordinators for a bounded frame summary and world-session surfaces, but textured or 3D world rendering still remains a later slice.");
 
         ImGui.End();
     }
@@ -1168,6 +1211,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _currentWorldSession = null;
             _currentWorldRuntimeFrame = null;
             _selectedWorldObject = null;
+            DeleteWorldTerrainPreviewTexture();
             _statusMessage = $"Loaded {preview.FrameResult.GoldenFrame.CanonicalModelPath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
             bool hasGpuPreview = _gpuPreviewRenderer?.HasRenderableGeometry == true;
             _lastLoadSummary = hasGpuPreview
@@ -1194,8 +1238,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _selectedWorldObject = SelectDefaultWorldObject(runtimeFrame);
             _gpuPreviewRenderer?.ClearPreview();
             DeletePreviewTexture();
+            UploadWorldTerrainPreviewTexture(runtimeFrame.TerrainVisualSnapshot);
             _statusMessage = $"Opened world runtime frame for {runtimeFrame.Session.ResolvedMapDirectory} tile ({runtimeFrame.SelectedTileX},{runtimeFrame.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
-            _lastLoadSummary = $"WMO {runtimeFrame.Visibility.VisibleWmos.Count}/{runtimeFrame.WmoInstances.Count}, MDX {runtimeFrame.Visibility.VisibleMdx.Count}/{runtimeFrame.MdxInstances.Count}, pending {runtimeFrame.PendingAssetKeys.Count}";
+            _lastLoadSummary = $"WMO {runtimeFrame.Visibility.VisibleWmos.Count}/{runtimeFrame.WmoInstances.Count}, MDX {runtimeFrame.Visibility.VisibleMdx.Count}/{runtimeFrame.MdxInstances.Count}, terrain {runtimeFrame.TerrainVisualSnapshot.Width}x{runtimeFrame.TerrainVisualSnapshot.Height}, pending {runtimeFrame.PendingAssetKeys.Count}";
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
         {
@@ -1215,6 +1260,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _statusMessage = "Workspace cleared.";
         _gpuPreviewRenderer?.ClearPreview();
         DeletePreviewTexture();
+        DeleteWorldTerrainPreviewTexture();
     }
 
     private unsafe void UploadPreviewTexture(M2SoftwareVisualSnapshot snapshot)
@@ -1254,6 +1300,36 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         _gl.DeleteTexture(_previewTextureHandle);
         _previewTextureHandle = 0;
+    }
+
+    private unsafe void UploadWorldTerrainPreviewTexture(WorldTerrainVisualSnapshot snapshot)
+    {
+        if (_gl == null)
+            return;
+
+        DeleteWorldTerrainPreviewTexture();
+        _worldTerrainPreviewTextureHandle = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, _worldTerrainPreviewTextureHandle);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+
+        fixed (byte* pixels = snapshot.RgbaPixels)
+        {
+            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8, (uint)snapshot.Width, (uint)snapshot.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+        }
+
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+    }
+
+    private void DeleteWorldTerrainPreviewTexture()
+    {
+        if (_gl == null || _worldTerrainPreviewTextureHandle == 0)
+            return;
+
+        _gl.DeleteTexture(_worldTerrainPreviewTextureHandle);
+        _worldTerrainPreviewTextureHandle = 0;
     }
 
     private void ApplySession(WowViewerSession session)

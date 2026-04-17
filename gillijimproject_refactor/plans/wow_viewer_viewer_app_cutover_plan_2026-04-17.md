@@ -29,6 +29,21 @@
   - app-owned world runtime consumption over extracted services
   - a replacement for the broad `ViewerApp` panel set from `MdxViewer`
 
+## Apr 17, 2026 direction correction
+
+- user direction in this chat:
+  - keep the migration sane by steadily refactoring the real `MdxViewer` capabilities into `wow-viewer` instead of mistaking bounded proof surfaces for viewer closure
+  - do not forget ADT-family ownership, Alpha-era world support, broader MDX support, and the fact that the current app still behaves more like a focused preview shell than a replacement viewer
+  - treat the M2 rework as necessary foundation for model ownership, not as evidence that the rest of the viewer cutover can stay narrow forever
+- current app reality that should stay explicit:
+  - the standalone M2 GPU preview currently uses a fixed auto-framed camera and does not yet expose real orbit or pan or zoom controls
+  - the world session is still a bounded top-down runtime inspection flow, not a real interactive world camera or final 3D terrain or object renderer
+  - WMO and MDX standalone workspaces are still placeholders rather than implemented consumers
+- routing consequence:
+  - future viewer-app slices should be chosen for consumer closure, especially where they force missing shared-I/O or runtime seams into `wow-viewer`
+  - high-value examples now include Alpha-world bootstrap over shared readers, real camera navigation for the new app, and first non-placeholder MDX or WMO consumer ownership
+  - avoid spending another slice on shell-only comfort work unless it directly unlocks a real viewer interaction or consumer seam
+
 ## Non-Goals For This Plan
 
 - do not restart terrain editing, PM4 workbench, dataset-builder, or world editor work inside `MdxViewer`
@@ -364,6 +379,35 @@
 - current boundary:
   - this closes bounded WDL tile service ownership only
   - actual terrain rendering extraction remains the immediate next deeper follow-up slice
+
+### Slice 14 - Terrain Heightmap And Software Preview
+
+- target problem:
+  - the bounded world app consumer can inventory terrain chunks, but it still has no runtime-owned terrain height contract or any real terrain visual consumer for the selected tile
+- implementation scope:
+  - extend the bounded terrain service in `WowViewer.Core.Runtime` from root MCNK header inventory to real MCVT-backed chunk heights plus a reconstructed 257x257 tile heightmap for the selected root ADT
+  - add a runtime-owned software terrain preview snapshot and BMP writer over that heightmap
+  - thread that terrain preview through the bounded world-frame bridge and current CLI or desktop world-session surfaces so terrain is no longer represented only by chunk counts
+  - keep the slice bounded to terrain heightmap plus software preview ownership; do not claim textured terrain composition or the final 3D terrain renderer yet
+- proof goal:
+  - the `world-frame` proof path reports real terrain height-range or sample signals on the selected tile and can write a deterministic terrain-preview BMP, while the active terrain stage count still respects `--hide-terrain`
+
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer`:
+  - `wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainChunkData.cs`, `WorldTerrainHeightmapData.cs`, `WorldTerrainTileData.cs`, and `WorldTerrainTileBuilder.cs` now own the bounded terrain height seam for selected root ADTs, including MCVT-backed chunk heights and reconstructed 257x257 tile heightmap data
+  - `wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainVisualSnapshot.cs` now owns the bounded software terrain preview seam plus BMP writer over that runtime-owned heightmap
+  - `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now carries the runtime-owned terrain preview through the bounded frame result
+  - `wow-viewer/src/viewer/WowViewer.App/Program.cs` and `WowViewerDesktopApp.cs` now report terrain height-range and sample signals plus the terrain-preview hash in the `world-frame` CLI proof path and the desktop world-session workspace, and `Program.cs` can now write `--terrain-preview-output <file.bmp>` from the same runtime-owned preview data
+  - `wow-viewer/tests/WowViewer.Core.Tests/WorldTerrainTileBuilderTests.cs` and `WorldTerrainVisualSnapshotBuilderTests.cs` now cover both fixed development terrain data and the bounded empty-preview fallback for focused regression coverage
+- proof completed:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WorldTerrainTileBuilderTests|WorldTerrainVisualSnapshotBuilderTests"`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - real-data runtime proof via `WowViewer.App world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340 --terrain-preview-output ".\output\build-validation\wow-viewer-world-terrain-preview\azeroth_39_32_terrain.bmp"`, showing `terrain-visual: size=257x257 sampled=33025 range=-118.89..72.67 center=-3.40 corners=nw=0.00 ne=1.37 sw=18.45 se=44.97 hash=b916f258c69622cdc903356e94f949a57cd49558db67a68ca64eeedc791b5725` for selected tile `(39,32)` and writing the BMP proof artifact
+  - real-data terrain-stage gating proof via the same fixed-root command plus `--hide-terrain`, still preserving the same source-side terrain-preview signals while dropping the active terrain stage count to `0/256`
+- current boundary:
+  - this closes bounded terrain heightmap plus software terrain preview ownership only
+  - textured terrain composition and true 3D terrain rendering remain later slices
   - `wow-viewer/tests/WowViewer.Core.Tests/WorldFramePassCoordinatorTests.cs` now proves both the legacy ordered flow and the new disabled-layer behavior
 - proof completed:
   - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldFramePassCoordinatorTests`
@@ -383,7 +427,7 @@
 
 ## Immediate Next Slice
 
-- next viewer-facing slice: a terrain/WDL/liquid or overlay runtime-service vertical slice in `wow-viewer`
+- next viewer-facing slice: textured terrain composition or a true 3D terrain submission path in `wow-viewer`
 - reason:
-  - the bounded app consumer now owns runtime pass options instead of loose host-only toggles
-  - the remaining meaningful gap is no longer option routing; it is explicit runtime-owned non-object stage or renderer service ownership for terrain, WDL, liquid, or overlay work
+  - the bounded app consumer now owns terrain counts, terrain heights, and a software terrain preview over runtime-owned seams
+  - the remaining meaningful terrain gap is no longer source data or preview ownership; it is textured terrain composition and eventual 3D world-render submission over those extracted seams

@@ -2,6 +2,39 @@
 
 # Active Context
 
+## Apr 17, 2026 - user direction reset: keep the wow-viewer migration anchored on real ADT-family ownership, Alpha-era world bring-up, and an actually interactive viewer
+
+- user directive in this chat:
+	- do not let the current bounded viewer-app slices obscure the still-missing core format work
+	- keep ADT-family ownership, Alpha-era WDT or ADT support, broader MDX support, and real viewer usability in scope as first-class migration goals
+	- prefer making `wow-viewer` work against Alpha client data first where that is a sane proving ground, with the earlier M2 rework treated as necessary model-foundation work rather than the finish line
+- current verified repo reality after slice 14:
+	- `wow-viewer` does own early standard-era shared seams for WDT summary, ADT summary, ADT placement, split-ADT family resolution, ADT texture or MCAL decoding, ADT liquid decode, ADT terrain chunk or MCVT height extraction, and bounded world-session consumption over one selected standard ADT tile
+	- `wow-viewer` also owns several classic `MDX` summary and payload readers plus the bounded standalone M2 runtime or GPU preview path
+	- but `wow-viewer` still does not own a dedicated Alpha-WDT reader or Alpha world-session bootstrap path, does not yet present full ADT-family parsing as a closed library boundary, and does not yet have a real standalone MDX consumer or a broad world renderer
+	- the current app is still not an actually interactive replacement viewer: the standalone M2 GPU preview uses a fixed auto-framed camera, the world workspace is still a bounded top-down inspection surface, and there is no orbit or pan or zoom camera-control path yet
+- migration consequence:
+	- the next planning and implementation slices should prioritize `wow-viewer` shared-I/O and runtime ownership for Alpha-era WDT or ADT plus remaining high-value ADT-family seams before more shell polish
+	- viewer-app follow-up should be judged by whether it closes a real consumer gap such as camera controls, Alpha-world bootstrap, or non-placeholder MDX or WMO consumers, not by whether another bounded proof window exists
+- caution:
+	- do not describe the current standard WDT or ADT readers, terrain preview, or MDX payload readers as full world-format closure
+	- do not describe the current app as a real viewer replacement while it still lacks broad world coverage and interactive camera navigation
+
+## Apr 17, 2026 - wow-viewer app slice 14 landed: the bounded world frame now consumes a runtime-owned terrain heightmap plus software terrain preview
+
+- slice 14 from the viewer-app cutover plan is now landed in `wow-viewer`
+- `WorldTerrainChunkData.cs`, `WorldTerrainHeightmapData.cs`, `WorldTerrainTileData.cs`, and `WorldTerrainTileBuilder.cs` now extend the bounded terrain seam in `WowViewer.Core.Runtime` from MCNK header inventory to real MCVT-backed terrain heights plus reconstructed 257x257 tile heightmap data for the selected tile
+- `WorldTerrainVisualSnapshot.cs` now owns a bounded runtime software terrain preview contract plus BMP writer in `WowViewer.Core.Runtime`, producing a deterministic terrain-preview image directly from the runtime-owned terrain heightmap instead of a legacy viewer-only renderer path
+- `WowViewerWorldRuntimeBridge.cs` now carries that runtime-owned terrain preview through `WowViewerWorldRuntimeFrameResult`, while `Program.cs` and `WowViewerDesktopApp.cs` now report terrain height range or corner or center samples and surface the terrain preview in the `world-frame` CLI proof path and desktop world-session workspace
+- bounded proof in this chat:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WorldTerrainTileBuilderTests|WorldTerrainVisualSnapshotBuilderTests"` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+	- real fixed-root proof via `WowViewer.App world-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, now reports `terrain-visual: size=257x257 sampled=33025 range=-118.89..72.67 center=-3.40 corners=nw=0.00 ne=1.37 sw=18.45 se=44.97 hash=b916f258c69622cdc903356e94f949a57cd49558db67a68ca64eeedc791b5725` for auto-selected tile `(39,32)` and writes `i:/parp/parp-tools/output/build-validation/wow-viewer-world-terrain-preview/azeroth_39_32_terrain.bmp`
+	- rerunning with `--hide-terrain` still drops the active terrain stage count to `0/256` while preserving the same source-side terrain service and terrain-preview signals
+- current boundary:
+	- this closes bounded terrain heightmap plus software terrain preview ownership only; it does not replace the final textured or 3D terrain renderer
+	- deeper terrain composition or true 3D world rendering remains the next real viewer-facing slice
+
 ## Apr 17, 2026 - wow-viewer app slice 13 landed: the bounded world frame now consumes a runtime-owned WDL tile service
 
 - slice 13 from the viewer-app cutover plan is now landed in `wow-viewer`

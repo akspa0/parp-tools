@@ -18,7 +18,17 @@ Current viewer-app reality:
 - That world frame now also consumes a runtime-owned WDL tile service over shared WDL summary parsing, so the bounded bridge can report real low-resolution height ranges and sample heights instead of only treating WDL as a count.
 - That world frame now also consumes a runtime-owned liquid tile service over shared MH2O decode, so the bounded bridge can report real liquid chunk or layer inventory and type breakdowns instead of only aggregate counts.
 - That world frame now also consumes a runtime-owned terrain chunk service over root MCNK headers, so the bounded bridge can report real terrain chunk inventory and hole or liquid-flag signals instead of only one terrain count.
+- That world frame now also consumes a runtime-owned terrain heightmap plus software terrain preview seam over root ADT MCVT data, so the bounded bridge can report real terrain height ranges and sample heights and can emit a deterministic terrain-preview BMP for fixed-root proof.
 - The world path is still a top-down preview plus runtime visibility/pass summary over shared `WowViewer.Core.Runtime.World` seams, not a final 3D world renderer.
+- The current desktop app is still not an actually interactive replacement viewer yet: the M2 GPU preview uses a fixed auto-framed camera, WMO and MDX workspaces remain placeholders, and the world workspace is still a bounded inspection surface rather than a navigable world camera.
+
+Current migration emphasis after the latest user direction:
+
+- Keep `wow-viewer` anchored on real library ownership of the active world and model families that still live in `MdxViewer`, not just on bounded proof windows.
+- ADT-family support is only partial today. `wow-viewer` has early standard WDT and ADT summary or placement or texture or liquid or terrain-height seams, but that is not the same as full ADT-family closure.
+- There is still no dedicated Alpha-WDT world path in `wow-viewer`, and Alpha-era world bring-up is now the preferred proving lane for the next broad shared-I/O and viewer-consumer slices where practical.
+- Classic `MDX` has several shared summary and payload readers in `wow-viewer`, but broader MDX consumer ownership is still incomplete and should be resumed only when it closes a real consumer gap.
+- The M2 runtime rework was necessary model-foundation work, not a signal that world-format extraction or viewer usability can stay narrow.
 
 Current first-pass project layout:
 
@@ -45,6 +55,7 @@ Current plan-adherence reality:
 - `WowViewer.Core.IO.Maps.WdlSummaryReader` plus `WowViewer.Core.Runtime.World.Wdl.WorldWdlTileBuilder` now own the bounded WDL tile service seam, and `WowViewer.App world-frame` now reports low-resolution height ranges and sample heights for the selected tile over that runtime-owned WDL data.
 - `WowViewer.Core.Runtime.World.Liquid.WorldLiquidTileBuilder` now owns the bounded liquid tile service seam for root ADT MH2O inventory, and `WowViewer.App world-frame` now reports chunk samples plus liquid type breakdowns over that runtime-owned liquid data.
 - `WowViewer.Core.Runtime.World.Terrain.WorldTerrainTileBuilder` now owns the bounded terrain chunk service seam for root ADT MCNK inventory, and `WowViewer.App world-frame` now reports terrain chunk samples plus area or hole or liquid-flag signals over that runtime-owned terrain data.
+- `WowViewer.Core.Runtime.World.Terrain.WorldTerrainHeightmapData` plus `WorldTerrainVisualSnapshotBuilder` now extend that terrain seam to real MCVT-backed tile heights and a bounded software terrain preview, and `WowViewer.App world-frame` now reports terrain height ranges or sample heights and can write a terrain preview BMP from the same runtime-owned data.
 - The remaining `MdxViewer` viewer surfaces are now explicitly split between compatibility-consumer work and legacy editor or archaeology work in `docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md`; new shell design should not default back there.
 - staged `WorldScene` to `wow-viewer` runtime decomposition is now documented in `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md` and `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md`, with repeated `.skin` miss suppression called out as slice 01 before deeper pass extraction.
 - The repo is now starting to correct that with a real bootstrap script and a first non-PM4 chunk or FourCC foundation slice, but the broader shared I/O and runtime cutover is still missing.

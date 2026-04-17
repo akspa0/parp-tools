@@ -2,6 +2,24 @@
 
 # wow-viewer Shared I/O Library Plan
 
+## Apr 17, 2026 - Alpha-first world-format directive over ADT-family completion
+
+- status: active workflow directive
+- user direction in this chat:
+  - do not lose sight of actual ADT support, Alpha-WDT ownership, broader MDX coverage, and the fact that the new viewer is still far from replacing the old one
+  - favor making `wow-viewer` work against Alpha client data first when choosing the next broad real-data proving lane
+- practical implication for shared-I/O continuation:
+  - treat the current standard-era WDT summary, ADT summary, placement, texture, liquid, and terrain-height seams as partial ownership only, not as complete ADT-family closure
+  - the next high-value shared-I/O wave should favor `wow-viewer`-owned Alpha-WDT and Alpha-ADT readers plus the missing ADT-family seams needed by real viewer consumers, instead of only adding more bounded summaries or thin shell-facing proofs
+  - when choosing between another cold format-summary slice and a slice that unlocks Alpha-world bring-up or actual ADT-family consumption, bias toward the latter
+- preferred narrow sequence from this state:
+  - shared Alpha-WDT summary or tile-index or asset-name seam in `WowViewer.Core` or `WowViewer.Core.IO`
+  - shared Alpha-ADT placement or terrain-semantics seam that can feed the same bounded world-session shape later
+  - follow-up ADT family completion for whichever standard or split or Alpha assets are still required by the chosen consumer slice
+  - real-data proof against a fixed local Alpha root before widening back out to the existing `3.3.5.12340` and `4.0.0.11927` coverage expectations used for later cross-build artifact work
+- guardrail:
+  - do not describe the current ADT-family seams as complete library ownership while Alpha-WDT and Alpha-world bring-up are still absent from `wow-viewer`
+
 ## Apr 14, 2026 - Archive-backed client validation should stage WoWArchive clients locally first
 
 - status: active workflow note

@@ -34,6 +34,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         WorldTileStageSummary tileStageSummary,
         WorldWdlTileData wdlTileData,
         WorldTerrainTileData terrainTileData,
+        WorldTerrainVisualSnapshot terrainVisualSnapshot,
         WorldLiquidTileData liquidTileData,
         AdtPlacementCatalog placementCatalog,
         IReadOnlyList<WorldObjectInstance> wmoInstances,
@@ -61,6 +62,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         TileStageSummary = tileStageSummary;
         WdlTileData = wdlTileData;
         TerrainTileData = terrainTileData;
+        TerrainVisualSnapshot = terrainVisualSnapshot;
         LiquidTileData = liquidTileData;
         PlacementCatalog = placementCatalog;
         WmoInstances = wmoInstances;
@@ -95,6 +97,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
     public WorldWdlTileData WdlTileData { get; }
 
     public WorldTerrainTileData TerrainTileData { get; }
+
+    public WorldTerrainVisualSnapshot TerrainVisualSnapshot { get; }
 
     public WorldLiquidTileData LiquidTileData { get; }
 
@@ -154,6 +158,7 @@ internal static class WowViewerWorldRuntimeBridge
         WorldWdlTileData wdlTileData = ReadMapWdlTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
         WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog, wdlTileData.HasData ? 1 : 0);
         WorldTerrainTileData terrainTileData = ReadRootTerrainTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
+        WorldTerrainVisualSnapshot terrainVisualSnapshot = WorldTerrainVisualSnapshotBuilder.Build(terrainTileData);
         WorldLiquidTileData liquidTileData = ReadRootLiquidTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
 
         Dictionary<string, LocalBoundsResolution> boundsCache = new(StringComparer.OrdinalIgnoreCase);
@@ -357,6 +362,7 @@ internal static class WowViewerWorldRuntimeBridge
             tileStageSummary,
             wdlTileData,
             terrainTileData,
+            terrainVisualSnapshot,
             liquidTileData,
             placementCatalog,
             wmoInstances,

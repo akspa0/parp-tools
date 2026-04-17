@@ -1,5 +1,33 @@
 # Progress
 
+### Apr 17, 2026 - migration priority corrected toward Alpha-first world-format closure and real viewer usability
+
+- what changed:
+	- recorded the user directive that the migration should stay anchored on full `wow-viewer` ownership of ADT-family parsing, Alpha-era WDT or ADT support, broader MDX support, and an actually usable viewer surface instead of drifting toward narrow bounded demos alone
+	- clarified the current repo boundary: `wow-viewer` has early standard WDT or ADT shared seams plus a bounded world frame and classic `MDX` payload readers, but it still lacks a dedicated Alpha-WDT path, broad ADT-family closure, an implemented standalone MDX consumer, and real orbit or pan or zoom camera controls in the new app
+	- set the next continuation bias toward Alpha-era world bring-up and shared-I/O extraction work that unlocks later viewer consumers cleanly
+- validation:
+	- repo-state confirmation in this chat via direct reads of `WdtSummaryReader`, `AdtSummaryReader`, `AdtPlacementReader`, `AdtV23SummaryReader`, `WowViewerDesktopApp`, `M2GpuPreviewRenderer`, `wow-viewer/README.md`, and the active cutover plans
+	- no new build or runtime proof was needed because this update is a continuity and routing correction over already-validated code
+- boundary:
+	- this is a planning correction only; it does not yet land Alpha-WDT support, broader ADT-family readers, MDX consumer closure, or app-side camera controls
+
+### Apr 17, 2026 - wow-viewer app slice 14 landed: the bounded world frame now has runtime-owned terrain heightmap and software preview data
+
+- what changed:
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainChunkData.cs`, `WorldTerrainHeightmapData.cs`, `WorldTerrainTileData.cs`, and `WorldTerrainTileBuilder.cs` now extend the bounded terrain seam from MCNK header inventory to real MCVT-backed chunk heights plus a reconstructed 257x257 tile heightmap for the selected root ADT
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainVisualSnapshot.cs` now owns a deterministic software terrain preview contract and BMP writer over that runtime-owned terrain heightmap
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now carries the terrain preview in the bounded world-frame result, while `Program.cs` and `WowViewerDesktopApp.cs` now report terrain height ranges or corner or center samples and surface the terrain preview in the CLI proof path and desktop world-session workspace
+	- `wow-viewer/tests/WowViewer.Core.Tests/WorldTerrainTileBuilderTests.cs` and `WorldTerrainVisualSnapshotBuilderTests.cs` now cover both the fixed development root ADT terrain-height seam and a bounded empty-preview fallback path for focused regression coverage
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WorldTerrainTileBuilderTests|WorldTerrainVisualSnapshotBuilderTests"` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
+	- real-data runtime proof via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340 --terrain-preview-output ".\output\build-validation\wow-viewer-world-terrain-preview\azeroth_39_32_terrain.bmp"` now reports terrain height-range and sample signals for the selected tile and writes a deterministic preview BMP from the runtime-owned terrain data
+	- rerunning with `--hide-terrain` still drops the active terrain stage count to zero while preserving the same source-side terrain preview hash
+- boundary:
+	- this closes bounded terrain heightmap plus software terrain preview ownership only
+	- textured terrain composition or true 3D terrain rendering remains the immediate next follow-up slice
+
 ### Apr 17, 2026 - wow-viewer app slice 13 landed: the bounded world frame now has runtime-owned WDL tile data
 
 - what changed:

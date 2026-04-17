@@ -9,14 +9,17 @@ public sealed class WorldTerrainChunkData
         uint areaId,
         uint flags,
         int layerCount,
-        bool hasHoles,
+        ushort holeMask,
         bool hasLiquidFlags,
-        bool hasVertexColors)
+        bool hasVertexColors,
+        float[]? heights)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(chunkIndex);
         ArgumentOutOfRangeException.ThrowIfNegative(indexX);
         ArgumentOutOfRangeException.ThrowIfNegative(indexY);
         ArgumentOutOfRangeException.ThrowIfNegative(layerCount);
+        if (heights is not null && heights.Length != 145)
+            throw new ArgumentException("Terrain chunk height payloads must contain exactly 145 MCVT samples.", nameof(heights));
 
         ChunkIndex = chunkIndex;
         IndexX = indexX;
@@ -24,9 +27,10 @@ public sealed class WorldTerrainChunkData
         AreaId = areaId;
         Flags = flags;
         LayerCount = layerCount;
-        HasHoles = hasHoles;
+        HoleMask = holeMask;
         HasLiquidFlags = hasLiquidFlags;
         HasVertexColors = hasVertexColors;
+        Heights = heights;
     }
 
     public int ChunkIndex { get; }
@@ -41,9 +45,15 @@ public sealed class WorldTerrainChunkData
 
     public int LayerCount { get; }
 
-    public bool HasHoles { get; }
+    public ushort HoleMask { get; }
+
+    public bool HasHoles => HoleMask != 0;
 
     public bool HasLiquidFlags { get; }
 
     public bool HasVertexColors { get; }
+
+    public float[]? Heights { get; }
+
+    public bool HasHeights => Heights is { Length: 145 };
 }
