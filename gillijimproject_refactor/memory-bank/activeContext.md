@@ -2,19 +2,19 @@
 
 # Active Context
 
-## Apr 17, 2026 - wow-viewer app slice 06 landed: the shell now consumes shared world-runtime seams over a bounded one-tile world frame
+## Apr 17, 2026 - wow-viewer app slice 07 landed: the shell now supports bounded world inspection around the one-tile runtime frame
 
-- slice 06 from the viewer-app cutover plan is now landed in `wow-viewer/src/viewer/WowViewer.App/`
-- `WowViewerWorldRuntimeBridge.cs` now owns a bounded app-local world frame builder that starts from the slice-05 attach/open flow, loads one selected ADT tile, resolves real WMO and M2/MDX bounds from client data, and feeds those placements through shared `WorldObjectVisibilityCollector`, `WorldObjectPassCoordinator`, and `WorldFramePassCoordinator`
-- `WowViewerDesktopApp.cs` now shows that result as a top-down world preview plus runtime diagnostics instead of stopping at WDT/bootstrap summary only, and `Program.cs` now exposes the same path through `world-frame`
-- `WowViewerSession.cs` now also persists optional world tile selection so the app-local session boundary includes the first bounded world-frame focus state
+- slice 07 from the viewer-app cutover plan is now landed in `wow-viewer/src/viewer/WowViewer.App/`
+- `WowViewerDesktopApp.cs` now keeps app-local world selection state, direct canvas picking, and dedicated `World Status`, `World Navigator`, and `World Inspector` panels over the bounded runtime frame instead of leaving world inspection at preview-plus-diagnostics only
+- the world navigator filters WMO vs MDX, visible-only vs full placement inventory, and model text; the world inspector reports actual placement, bounds, visibility, and MDX pass-routing state taken from the shared runtime frame
+- `WowViewerAppSettings.cs` now persists the new world-panel visibility toggles so the shell expansion is durable across app restarts
 - bounded proof in this chat:
 	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
-	- real fixed-root runtime bridge proof succeeded via `WowViewer.App world-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, auto-selecting tile `(39,32)` and `World\Maps\Azeroth\Azeroth_39_32.adt`
-	- that proof reported `24` WMO placements, `2991` MDX placements, `24` visible WMO, `2464` visible MDX, `objectPhase=True`, and the current runtime hint `Next win: MDX batching/state reduction is costing more than the other measured world layers.`
+	- real fixed-root runtime bridge proof still succeeded via `WowViewer.App world-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, auto-selecting tile `(39,32)` and `World\Maps\Azeroth\Azeroth_39_32.adt`
+	- that proof still reported `24` WMO placements, `2991` MDX placements, `24` visible WMO, `2464` visible MDX, `objectPhase=True`, and the current runtime hint `Next win: MDX batching/state reduction is costing more than the other measured world layers.`
 - current boundary:
-	- this is a bounded top-down world frame and runtime-summary consumer only; it is not the final 3D world renderer, terrain/liquid/WDL submission path, or old `ViewerApp` parity
-	- the next real app slice is shell surface expansion around the new runtime frame
+	- this is bounded shell usability for one-tile world inspection only; it is not the final interactive world renderer, terrain/liquid/WDL submission path, or full old `ViewerApp` parity
+	- the next real app slice is legacy cutover review so future viewer work stops drifting back toward `ViewerApp`
 
 ## Apr 17, 2026 - wow-viewer app slice 05 landed: the shell now has a bounded world-session bootstrap path over shared WDT readers
 

@@ -1,18 +1,18 @@
 # Progress
 
-### Apr 17, 2026 - wow-viewer app slice 06 landed: the desktop shell now consumes shared world-runtime seams over one selected tile
+### Apr 17, 2026 - wow-viewer app slice 07 landed: the desktop shell now supports bounded world inspection around one selected tile
 
 - what changed:
-	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` as the first app-local consumer over shared `WowViewer.Core.Runtime.World` seams, using real ADT placements and client-backed WMO/M2/MDX bounds to build a bounded world frame for one selected tile
-	- `WowViewerSession.cs` now persists optional world tile selection, `Program.cs` now exposes `world-frame`, and `WowViewerDesktopApp.cs` now shows a top-down world tile view plus runtime counts and optimization hints instead of stopping at WDT/bootstrap-only diagnostics
-	- the bridge specifically consumes `WorldObjectVisibilityCollector`, `WorldObjectPassCoordinator`, `WorldFramePassCoordinator`, `WorldRenderFrameStats`, and `WorldRenderOptimizationAdvisor` from the canonical runtime library instead of leaving those seams exercised only by legacy `MdxViewer`
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now adds app-local world selection state, direct canvas picking, a world-status summary panel, a filterable world navigator, and a runtime-backed world inspector instead of stopping at a passive top-down tile canvas
+	- the navigator and inspector are grounded in the bounded `WowViewerWorldRuntimeFrameResult`, reusing actual visibility entries, placement state, bounds, and MDX pass-routing information instead of inventing a parallel shell-only inspection contract
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerAppSettings.cs` now persists the new panel visibility toggles so the shell surface stays stable across runs
 - validation:
 	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
-	- real-data runtime bridge proof succeeded via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340`
+	- real-data runtime proof still succeeded via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340`
 	- that proof auto-selected `Azeroth_39_32.adt`, found `24` WMO placements plus `2991` MDX placements, admitted `24` visible WMO plus `2464` visible MDX, and executed the shared object/pass phase with `objectPhase=True`
 - boundary:
-	- this closes the first bounded app-side world runtime consumer only
-	- it is still a top-down frame summary, not the final 3D world renderer or full `WorldScene` parity
+	- this closes bounded shell usability for one-tile world inspection only
+	- it is still not the final 3D world renderer, terrain/liquid submission path, or full `WorldScene` or `ViewerApp` parity
 
 ### Apr 17, 2026 - wow-viewer app slice 05 landed: the desktop shell now has bounded world-session bootstrap over shared map readers
 

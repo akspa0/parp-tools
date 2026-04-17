@@ -15,6 +15,12 @@ internal sealed class WowViewerAppSettings
     public bool ShowDiagnosticsWindow { get; set; } = true;
 
     public bool ShowBoundaryWindow { get; set; } = true;
+
+    public bool ShowWorldStatusWindow { get; set; } = true;
+
+    public bool ShowNavigatorWindow { get; set; } = true;
+
+    public bool ShowInspectorWindow { get; set; } = true;
 }
 
 internal static class WowViewerAppSettingsStore

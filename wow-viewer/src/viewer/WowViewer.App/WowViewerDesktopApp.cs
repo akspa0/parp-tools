@@ -13,11 +13,38 @@ using WowViewer.Core.Runtime;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Runtime.World.Passes;
+using WowViewer.Core.Runtime.World.Visibility;
 
 namespace WowViewer.App;
 
 internal sealed class WowViewerDesktopApp : IDisposable
 {
+    private enum WorldSelectionKind
+    {
+        Wmo = 0,
+        Mdx = 1,
+    }
+
+    private readonly record struct WorldObjectSelection(
+        WorldSelectionKind Kind,
+        int TileX,
+        int TileY,
+        int PlacementEntryIndex,
+        int UniqueId,
+        string ModelKey);
+
+    private readonly record struct WorldNavigatorEntry(
+        WorldSelectionKind Kind,
+        WorldObjectInstance Instance,
+        bool IsVisible,
+        bool AssetReady,
+        float? CenterDistance,
+        bool IsTaxiActor,
+        bool HasOpaqueRoute,
+        bool HasTransparentRoute,
+        bool RequiresUnbatchedRender,
+        bool WasAnimated);
+
     private const string WindowTitle = "WowViewer.App";
     private static readonly MethodInfo? ImGuiControllerWindowResizedMethod =
         typeof(ImGuiController).GetMethod("WindowResized", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -47,6 +74,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private bool _showControlWindow = true;
     private bool _showDiagnosticsWindow = true;
     private bool _showBoundaryWindow = true;
+    private bool _showWorldStatusWindow = true;
+    private bool _showNavigatorWindow = true;
+    private bool _showInspectorWindow = true;
+    private bool _worldNavigatorVisibleOnly = true;
+    private bool _worldNavigatorShowWmo = true;
+    private bool _worldNavigatorShowMdx = true;
+    private string _worldNavigatorFilter = string.Empty;
+    private WorldObjectSelection? _selectedWorldObject;
 
     public WowViewerDesktopApp(WowViewerSession? initialSession = null)
     {
@@ -167,6 +202,12 @@ internal sealed class WowViewerDesktopApp : IDisposable
         DrawPreviewWindow();
         if (_showDiagnosticsWindow)
             DrawDiagnosticsWindow(deltaSeconds);
+        if (_showWorldStatusWindow)
+            DrawWorldStatusWindow();
+        if (_showNavigatorWindow)
+            DrawWorldNavigatorWindow();
+        if (_showInspectorWindow)
+            DrawWorldInspectorWindow();
         if (_showBoundaryWindow)
             DrawBoundaryWindow();
         if (_showAboutWindow)
@@ -197,6 +238,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.MenuItem("Workspaces", string.Empty, ref _showWorkspaceWindow);
             ImGui.MenuItem("Source Controls", string.Empty, ref _showControlWindow);
             ImGui.MenuItem("Diagnostics", string.Empty, ref _showDiagnosticsWindow);
+            ImGui.MenuItem("World Status", string.Empty, ref _showWorldStatusWindow);
+            ImGui.MenuItem("World Navigator", string.Empty, ref _showNavigatorWindow);
+            ImGui.MenuItem("World Inspector", string.Empty, ref _showInspectorWindow);
             ImGui.MenuItem("Runtime Boundaries", string.Empty, ref _showBoundaryWindow);
             ImGui.MenuItem("About", string.Empty, ref _showAboutWindow);
             ImGui.EndMenu();
@@ -372,7 +416,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void DrawWorldControlContents()
     {
-        ImGui.TextWrapped("This slice adds a bounded wow-viewer-owned world bootstrap path over fixed client roots and shared map readers. It opens a map session, resolves a WDT, and reports tile coverage, but it does not render terrain or world objects yet.");
+        ImGui.TextWrapped("This slice keeps the world path bounded: one selected ADT tile is opened through wow-viewer-owned bootstrap, placement, visibility, and pass-planning seams. The shell now adds navigator and inspector surfaces around that frame, but it still does not claim the final 3D world renderer.");
         ImGui.Separator();
         ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
         ImGui.TextDisabled($"Source: {_session.World.Describe()}");
@@ -406,6 +450,16 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _session.World.BuildLabel = "3.3.5.12340";
             _session.World.TileX = -1;
             _session.World.TileY = -1;
+        }
+
+        if (_currentWorldRuntimeFrame != null)
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled("Current Runtime Frame");
+            ImGui.Text($"Resolved Map: {_currentWorldRuntimeFrame.Session.ResolvedMapDirectory}");
+            ImGui.Text($"Selected Tile: ({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})");
+            ImGui.Text($"Visible Objects: {_currentWorldRuntimeFrame.Visibility.VisibleWmos.Count + _currentWorldRuntimeFrame.Visibility.VisibleMdx.Count}");
+            ImGui.Text($"Pending Assets: {_currentWorldRuntimeFrame.PendingAssetKeys.Count}");
         }
     }
 
@@ -522,12 +576,16 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"Placements: WMO {_currentWorldRuntimeFrame.WmoInstances.Count} / MDX {_currentWorldRuntimeFrame.MdxInstances.Count}");
         ImGui.Text($"Visible: WMO {_currentWorldRuntimeFrame.Visibility.VisibleWmos.Count} / MDX {_currentWorldRuntimeFrame.Visibility.VisibleMdx.Count}");
         ImGui.Text($"Pending Assets: {_currentWorldRuntimeFrame.PendingAssetKeys.Count}");
+        if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(_currentWorldRuntimeFrame, _selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
+            ImGui.Text($"Selection: {selectedEntry.Kind} {selectedEntry.Instance.ModelName} #{selectedEntry.Instance.UniqueId}");
 
         Vector2 available = ImGui.GetContentRegionAvail();
         float canvasSize = MathF.Max(200f, MathF.Min(available.X, available.Y));
         Vector2 canvas = new(canvasSize, canvasSize);
         Vector2 origin = ImGui.GetCursorScreenPos();
         ImGui.InvisibleButton("worldRuntimeCanvas", canvas);
+        if (ImGui.IsItemHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            TrySelectWorldObjectAtCanvasPoint(_currentWorldRuntimeFrame, origin, canvas, ImGui.GetIO().MousePos);
         DrawWorldRuntimeCanvas(origin, canvas, _currentWorldRuntimeFrame);
     }
 
@@ -743,7 +801,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.BulletText("This app proves a standalone wow-viewer-owned desktop shell.");
         ImGui.BulletText("The active shell now proves two bounded consumers: standalone M2 preview and a world-session bridge over one selected ADT tile.");
         ImGui.BulletText("The M2 path now includes a bounded wow-viewer-owned GPU preview consumer, but it is still not full native material parity.");
-        ImGui.BulletText("The world path now consumes shared visibility and pass coordinators for a bounded top-down frame summary, but world rendering still remains a later slice.");
+        ImGui.BulletText("The world path now consumes shared visibility and pass coordinators for a bounded top-down frame summary plus navigator and inspector surfaces, but world rendering still remains a later slice.");
 
         ImGui.End();
     }
@@ -757,7 +815,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        ImGui.TextWrapped("`WowViewer.App` now has a real desktop host, a bounded GPU M2 preview consumer, and a bounded world runtime bridge over one selected ADT tile. This keeps the new repo as the owner of the app shell and attach/open flow instead of continuing to route viewer work through `MdxViewer`.");
+        ImGui.TextWrapped("`WowViewer.App` now has a real desktop host, a bounded GPU M2 preview consumer, and a bounded world runtime bridge over one selected ADT tile with navigator and inspector surfaces. This keeps the new repo as the owner of the app shell and attach/open flow instead of continuing to route viewer work through `MdxViewer`.");
         ImGui.Separator();
         ImGui.TextDisabled("Commands");
         ImGui.BulletText("No args: open the desktop viewer");
@@ -765,6 +823,199 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.BulletText("m2-frame [options]: keep the existing CLI proof flow");
         ImGui.BulletText("world-bootstrap [options]: run bounded client-root plus WDT bootstrap proof");
         ImGui.BulletText("world-frame [options]: run bounded tile placement plus runtime visibility/pass proof");
+        ImGui.End();
+    }
+
+    private void DrawWorldStatusWindow()
+    {
+        ImGui.SetNextWindowSize(new Vector2(380, 260), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("World Status", ref _showWorldStatusWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        if (_session.WorkspaceMode != WowViewerWorkspaceMode.WorldSession)
+        {
+            ImGui.TextWrapped("Switch to World Session to inspect current map, tile, runtime counts, and selection state.");
+            ImGui.End();
+            return;
+        }
+
+        if (_currentWorldRuntimeFrame == null)
+        {
+            ImGui.TextWrapped("Open a world session to populate runtime status for the current tile.");
+            ImGui.End();
+            return;
+        }
+
+        WowViewerWorldRuntimeFrameResult result = _currentWorldRuntimeFrame;
+        ImGui.TextDisabled("Current World Frame");
+        ImGui.Text($"Map: {result.Session.RequestedMapInput} -> {result.Session.ResolvedMapDirectory}");
+        ImGui.Text($"Tile: ({result.SelectedTileX},{result.SelectedTileY})");
+        ImGui.Text($"Placement Source: {result.PlacementSourcePath}");
+        ImGui.Text($"Load Source: {(result.Session.LoadedFromArchive ? "archive catalog" : "loose file")}");
+        ImGui.Separator();
+        ImGui.TextDisabled("Runtime Summary");
+        ImGui.Text($"WMO Visible/Total: {result.Visibility.VisibleWmos.Count}/{result.WmoInstances.Count}");
+        ImGui.Text($"MDX Visible/Total: {result.Visibility.VisibleMdx.Count}/{result.MdxInstances.Count}");
+        ImGui.Text($"Pending Assets: {result.PendingAssetKeys.Count}");
+        ImGui.Text($"Object Phase: {result.ObjectPhaseExecuted}");
+        ImGui.Text($"Total Cpu Ms: {result.Stats.TotalCpuMs:F2}");
+
+        if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(result, _selectedWorldObject.Value, out WorldNavigatorEntry entry))
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled("Selection Summary");
+            ImGui.Text($"Type: {entry.Kind}");
+            ImGui.Text($"Model: {entry.Instance.ModelName}");
+            ImGui.Text($"Unique Id: {entry.Instance.UniqueId}");
+            ImGui.Text($"Visible: {entry.IsVisible}");
+        }
+
+        ImGui.End();
+    }
+
+    private void DrawWorldNavigatorWindow()
+    {
+        ImGui.SetNextWindowSize(new Vector2(460, 700), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("World Navigator", ref _showNavigatorWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        if (_session.WorkspaceMode != WowViewerWorkspaceMode.WorldSession)
+        {
+            ImGui.TextWrapped("Switch to World Session to navigate runtime objects for the current tile.");
+            ImGui.End();
+            return;
+        }
+
+        if (_currentWorldRuntimeFrame == null)
+        {
+            ImGui.TextWrapped("Open a world session to browse WMO and MDX placements admitted through the runtime bridge.");
+            ImGui.End();
+            return;
+        }
+
+        WowViewerWorldRuntimeFrameResult result = _currentWorldRuntimeFrame;
+        ImGui.TextDisabled("Filters");
+        ImGui.Checkbox("Visible Only", ref _worldNavigatorVisibleOnly);
+        ImGui.SameLine();
+        ImGui.Checkbox("WMO", ref _worldNavigatorShowWmo);
+        ImGui.SameLine();
+        ImGui.Checkbox("MDX", ref _worldNavigatorShowMdx);
+        ImGui.InputText("Model Filter", ref _worldNavigatorFilter, 256);
+        ImGui.Separator();
+
+        List<WorldNavigatorEntry> entries = BuildWorldNavigatorEntries(result);
+        ImGui.TextDisabled($"Entries: {entries.Count}");
+        ImGui.Separator();
+
+        if (!_worldNavigatorShowWmo && !_worldNavigatorShowMdx)
+        {
+            ImGui.TextWrapped("Enable at least one object family to populate the navigator.");
+            ImGui.End();
+            return;
+        }
+
+        if (entries.Count == 0)
+        {
+            ImGui.TextWrapped("No runtime objects match the current navigator filters.");
+            ImGui.End();
+            return;
+        }
+
+        if (ImGui.BeginChild("worldNavigatorList"))
+        {
+            foreach (WorldNavigatorEntry entry in entries)
+            {
+                WorldObjectSelection selection = CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
+                bool selected = _selectedWorldObject.HasValue && _selectedWorldObject.Value.Equals(selection);
+                ImGui.PushID($"{entry.Kind}:{entry.Instance.PlacementEntryIndex}:{entry.Instance.UniqueId}:{entry.Instance.ModelKey}");
+                if (ImGui.Selectable(BuildNavigatorLabel(entry), selected))
+                    SelectWorldObject(selection, entry);
+
+                if (selected)
+                    ImGui.SetItemDefaultFocus();
+
+                ImGui.PopID();
+            }
+
+            ImGui.EndChild();
+        }
+
+        ImGui.End();
+    }
+
+    private void DrawWorldInspectorWindow()
+    {
+        ImGui.SetNextWindowSize(new Vector2(420, 700), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("World Inspector", ref _showInspectorWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        if (_session.WorkspaceMode != WowViewerWorkspaceMode.WorldSession)
+        {
+            ImGui.TextWrapped("Switch to World Session to inspect the selected runtime object.");
+            ImGui.End();
+            return;
+        }
+
+        if (_currentWorldRuntimeFrame == null)
+        {
+            ImGui.TextWrapped("Open a world session to inspect runtime object details.");
+            ImGui.End();
+            return;
+        }
+
+        if (!_selectedWorldObject.HasValue || !TryResolveWorldNavigatorEntry(_currentWorldRuntimeFrame, _selectedWorldObject.Value, out WorldNavigatorEntry entry))
+        {
+            ImGui.TextWrapped("Select an object from the world canvas or navigator to inspect it.");
+            ImGui.End();
+            return;
+        }
+
+        ImGui.TextDisabled("Selection");
+        ImGui.Text($"Type: {entry.Kind}");
+        ImGui.Text($"Model: {entry.Instance.ModelName}");
+        ImGui.Text($"Model Key: {entry.Instance.ModelKey}");
+        ImGui.Text($"Unique Id: {entry.Instance.UniqueId}");
+        ImGui.Text($"Placement Index: {entry.Instance.PlacementEntryIndex}");
+        ImGui.Text($"Tile: ({entry.Instance.TileX},{entry.Instance.TileY})");
+        ImGui.Separator();
+
+        ImGui.TextDisabled("Placement");
+        ImGui.Text($"Position: {FormatVector3(entry.Instance.PlacementPosition)}");
+        ImGui.Text($"Rotation: {FormatVector3(entry.Instance.PlacementRotation)}");
+        ImGui.Text($"Scale: {entry.Instance.PlacementScale:F3}");
+        ImGui.Separator();
+
+        ImGui.TextDisabled("Bounds");
+        ImGui.Text($"Resolved: {entry.Instance.BoundsResolved}");
+        ImGui.Text($"World Min: {FormatVector3(entry.Instance.BoundsMin)}");
+        ImGui.Text($"World Max: {FormatVector3(entry.Instance.BoundsMax)}");
+        ImGui.Text($"Local Min: {FormatVector3(entry.Instance.LocalBoundsMin)}");
+        ImGui.Text($"Local Max: {FormatVector3(entry.Instance.LocalBoundsMax)}");
+        ImGui.Separator();
+
+        ImGui.TextDisabled("Runtime State");
+        ImGui.Text($"Asset Ready: {entry.AssetReady}");
+        ImGui.Text($"Visible: {entry.IsVisible}");
+        if (entry.CenterDistance.HasValue)
+            ImGui.Text($"Distance: {MathF.Sqrt(entry.CenterDistance.Value):F1}");
+        if (entry.Kind == WorldSelectionKind.Mdx)
+        {
+            ImGui.Text($"Taxi Actor: {entry.IsTaxiActor}");
+            ImGui.Text($"Animated Model: {entry.WasAnimated}");
+            ImGui.Text($"Opaque Route: {entry.HasOpaqueRoute}");
+            ImGui.Text($"Transparent Route: {entry.HasTransparentRoute}");
+            ImGui.Text($"Unbatched: {entry.RequiresUnbatchedRender}");
+        }
+
         ImGui.End();
     }
 
@@ -802,6 +1053,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _currentPreview = preview;
             _currentWorldSession = null;
             _currentWorldRuntimeFrame = null;
+            _selectedWorldObject = null;
             _statusMessage = $"Loaded {preview.FrameResult.GoldenFrame.CanonicalModelPath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
             bool hasGpuPreview = _gpuPreviewRenderer?.HasRenderableGeometry == true;
             _lastLoadSummary = hasGpuPreview
@@ -825,6 +1077,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _currentWorldRuntimeFrame = runtimeFrame;
             _currentWorldSession = runtimeFrame.Session;
             _currentPreview = null;
+            _selectedWorldObject = SelectDefaultWorldObject(runtimeFrame);
             _gpuPreviewRenderer?.ClearPreview();
             DeletePreviewTexture();
             _statusMessage = $"Opened world runtime frame for {runtimeFrame.Session.ResolvedMapDirectory} tile ({runtimeFrame.SelectedTileX},{runtimeFrame.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
@@ -842,6 +1095,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _currentPreview = null;
         _currentWorldSession = null;
         _currentWorldRuntimeFrame = null;
+        _selectedWorldObject = null;
         _lastError = null;
         _lastLoadSummary = "No workspace loaded.";
         _statusMessage = "Workspace cleared.";
@@ -917,6 +1171,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _showControlWindow = settings.ShowControlWindow;
         _showDiagnosticsWindow = settings.ShowDiagnosticsWindow;
         _showBoundaryWindow = settings.ShowBoundaryWindow;
+        _showWorldStatusWindow = settings.ShowWorldStatusWindow;
+        _showNavigatorWindow = settings.ShowNavigatorWindow;
+        _showInspectorWindow = settings.ShowInspectorWindow;
     }
 
     private void SaveSettings()
@@ -928,6 +1185,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _settings.ShowControlWindow = _showControlWindow;
         _settings.ShowDiagnosticsWindow = _showDiagnosticsWindow;
         _settings.ShowBoundaryWindow = _showBoundaryWindow;
+        _settings.ShowWorldStatusWindow = _showWorldStatusWindow;
+        _settings.ShowNavigatorWindow = _showNavigatorWindow;
+        _settings.ShowInspectorWindow = _showInspectorWindow;
         WowViewerAppSettingsStore.Save(_settings);
     }
 
@@ -973,30 +1233,335 @@ internal sealed class WowViewerDesktopApp : IDisposable
         drawList.AddRectFilled(origin, origin + size, background, 6f);
         drawList.AddRect(origin, origin + size, border, 6f, ImDrawFlags.None, 1.5f);
 
-        Vector2 Map(Vector3 position)
-        {
-            Vector2 planarMin = result.PlanarMin;
-            Vector2 planarMax = result.PlanarMax;
-            float width = MathF.Max(1f, planarMax.X - planarMin.X);
-            float height = MathF.Max(1f, planarMax.Y - planarMin.Y);
-            float nx = (position.X - planarMin.X) / width;
-            float ny = (position.Y - planarMin.Y) / height;
-            return new Vector2(origin.X + (nx * size.X), origin.Y + ((1f - ny) * size.Y));
-        }
-
         foreach (WorldObjectInstance instance in result.WmoInstances)
-            drawList.AddCircleFilled(Map(instance.PlacementPosition), 2.5f, wmoColor);
+            drawList.AddCircleFilled(MapWorldPositionToCanvas(instance.PlacementPosition, origin, size, result), 2.5f, wmoColor);
 
         foreach (WorldObjectInstance instance in result.MdxInstances)
-            drawList.AddCircleFilled(Map(instance.PlacementPosition), 2.0f, mdxColor);
+            drawList.AddCircleFilled(MapWorldPositionToCanvas(instance.PlacementPosition, origin, size, result), 2.0f, mdxColor);
 
         foreach (var visible in result.Visibility.VisibleWmos)
-            drawList.AddCircleFilled(Map(visible.Instance.PlacementPosition), 3.5f, wmoVisibleColor);
+            drawList.AddCircleFilled(MapWorldPositionToCanvas(visible.Instance.PlacementPosition, origin, size, result), 3.5f, wmoVisibleColor);
 
         foreach (var visible in result.Visibility.VisibleMdx)
-            drawList.AddCircleFilled(Map(visible.Instance.PlacementPosition), 3.0f, mdxVisibleColor);
+            drawList.AddCircleFilled(MapWorldPositionToCanvas(visible.Instance.PlacementPosition, origin, size, result), 3.0f, mdxVisibleColor);
+
+        if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(result, _selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
+        {
+            Vector2 center = MapWorldPositionToCanvas(selectedEntry.Instance.PlacementPosition, origin, size, result);
+            uint selectedColor = selectedEntry.Kind == WorldSelectionKind.Wmo
+                ? ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.96f, 0.56f, 1.0f))
+                : ImGui.ColorConvertFloat4ToU32(new Vector4(0.72f, 0.96f, 1.0f, 1.0f));
+            drawList.AddCircle(center, selectedEntry.Kind == WorldSelectionKind.Wmo ? 7f : 6f, selectedColor, 0, 2f);
+            drawList.AddCircle(center, selectedEntry.Kind == WorldSelectionKind.Wmo ? 10f : 9f, selectedColor, 0, 1f);
+        }
 
         drawList.AddText(origin + new Vector2(8f, 8f), border, $"tile ({result.SelectedTileX},{result.SelectedTileY})");
+    }
+
+    private static Vector2 MapWorldPositionToCanvas(Vector3 position, Vector2 origin, Vector2 size, WowViewerWorldRuntimeFrameResult result)
+    {
+        Vector2 planarMin = result.PlanarMin;
+        Vector2 planarMax = result.PlanarMax;
+        float width = MathF.Max(1f, planarMax.X - planarMin.X);
+        float height = MathF.Max(1f, planarMax.Y - planarMin.Y);
+        float nx = (position.X - planarMin.X) / width;
+        float ny = (position.Y - planarMin.Y) / height;
+        return new Vector2(origin.X + (nx * size.X), origin.Y + ((1f - ny) * size.Y));
+    }
+
+    private void TrySelectWorldObjectAtCanvasPoint(WowViewerWorldRuntimeFrameResult result, Vector2 origin, Vector2 size, Vector2 mousePosition)
+    {
+        WorldNavigatorEntry? nearestVisible = null;
+        float nearestVisibleDistanceSq = float.MaxValue;
+        WorldNavigatorEntry? nearestAny = null;
+        float nearestAnyDistanceSq = float.MaxValue;
+        const float pickRadius = 14f;
+        float pickRadiusSq = pickRadius * pickRadius;
+
+        foreach (WorldNavigatorEntry entry in EnumerateWorldNavigatorEntries(result))
+        {
+            Vector2 center = MapWorldPositionToCanvas(entry.Instance.PlacementPosition, origin, size, result);
+            float distanceSq = Vector2.DistanceSquared(center, mousePosition);
+            if (distanceSq > pickRadiusSq)
+                continue;
+
+            if (distanceSq < nearestAnyDistanceSq)
+            {
+                nearestAny = entry;
+                nearestAnyDistanceSq = distanceSq;
+            }
+
+            if (entry.IsVisible && distanceSq < nearestVisibleDistanceSq)
+            {
+                nearestVisible = entry;
+                nearestVisibleDistanceSq = distanceSq;
+            }
+        }
+
+        if (nearestVisible.HasValue)
+        {
+            WorldNavigatorEntry pickedVisible = nearestVisible.Value;
+            SelectWorldObject(CreateSelection(pickedVisible, result.SelectedTileX, result.SelectedTileY), pickedVisible);
+            return;
+        }
+
+        if (nearestAny.HasValue)
+        {
+            WorldNavigatorEntry picked = nearestAny.Value;
+            SelectWorldObject(CreateSelection(picked, result.SelectedTileX, result.SelectedTileY), picked);
+        }
+    }
+
+    private void SelectWorldObject(WorldObjectSelection selection, WorldNavigatorEntry entry)
+    {
+        _selectedWorldObject = selection;
+        _statusMessage = $"Selected {entry.Kind} {entry.Instance.ModelName} #{entry.Instance.UniqueId} on tile ({selection.TileX},{selection.TileY}).";
+    }
+
+    private static WorldObjectSelection? SelectDefaultWorldObject(WowViewerWorldRuntimeFrameResult result)
+    {
+        if (result.Visibility.VisibleWmos.Count > 0)
+        {
+            WorldVisibleWmoEntry visibleWmo = result.Visibility.VisibleWmos.OrderBy(static entry => entry.CenterDistanceSq).First();
+            WorldNavigatorEntry entry = CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, visibleWmo.Instance, visibleWmo.CenterDistanceSq, isVisible: true, isTaxiActor: false);
+            return CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
+        }
+
+        if (result.Visibility.VisibleMdx.Count > 0)
+        {
+            WorldVisibleMdxEntry visibleMdx = result.Visibility.VisibleMdx.OrderBy(static entry => entry.CenterDistanceSq).First();
+            WorldNavigatorEntry entry = CreateWorldNavigatorEntry(result, WorldSelectionKind.Mdx, visibleMdx.Instance, visibleMdx.CenterDistanceSq, isVisible: true, visibleMdx.IsTaxiActor);
+            return CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
+        }
+
+        if (result.WmoInstances.Count > 0)
+        {
+            WorldObjectInstance firstWmo = result.WmoInstances[0];
+            WorldNavigatorEntry entry = CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, firstWmo, centerDistanceSq: null, isVisible: false, isTaxiActor: false);
+            return CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
+        }
+
+        if (result.MdxInstances.Count > 0)
+        {
+            WorldObjectInstance firstMdx = result.MdxInstances[0];
+            WorldNavigatorEntry entry = CreateWorldNavigatorEntry(result, WorldSelectionKind.Mdx, firstMdx, centerDistanceSq: null, isVisible: false, isTaxiActor: false);
+            return CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
+        }
+
+        return null;
+    }
+
+    private List<WorldNavigatorEntry> BuildWorldNavigatorEntries(WowViewerWorldRuntimeFrameResult result)
+    {
+        string filter = _worldNavigatorFilter.Trim();
+        List<WorldNavigatorEntry> entries = new();
+        foreach (WorldNavigatorEntry entry in EnumerateWorldNavigatorEntries(result))
+        {
+            if (entry.Kind == WorldSelectionKind.Wmo && !_worldNavigatorShowWmo)
+                continue;
+
+            if (entry.Kind == WorldSelectionKind.Mdx && !_worldNavigatorShowMdx)
+                continue;
+
+            if (_worldNavigatorVisibleOnly && !entry.IsVisible)
+                continue;
+
+            if (!string.IsNullOrWhiteSpace(filter)
+                && entry.Instance.ModelName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0
+                && entry.Instance.ModelKey.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)
+                continue;
+
+            entries.Add(entry);
+        }
+
+        entries.Sort(static (left, right) =>
+        {
+            int visibleComparison = right.IsVisible.CompareTo(left.IsVisible);
+            if (visibleComparison != 0)
+                return visibleComparison;
+
+            int kindComparison = left.Kind.CompareTo(right.Kind);
+            if (kindComparison != 0)
+                return kindComparison;
+
+            float leftDistance = left.CenterDistance ?? float.MaxValue;
+            float rightDistance = right.CenterDistance ?? float.MaxValue;
+            int distanceComparison = leftDistance.CompareTo(rightDistance);
+            if (distanceComparison != 0)
+                return distanceComparison;
+
+            return string.Compare(left.Instance.ModelName, right.Instance.ModelName, StringComparison.OrdinalIgnoreCase);
+        });
+
+        return entries;
+    }
+
+    private IEnumerable<WorldNavigatorEntry> EnumerateWorldNavigatorEntries(WowViewerWorldRuntimeFrameResult result)
+    {
+        Dictionary<int, WorldVisibleWmoEntry> visibleWmoByIndex = result.Visibility.VisibleWmos.ToDictionary(static entry => entry.Instance.PlacementEntryIndex);
+        Dictionary<int, WorldVisibleMdxEntry> visibleMdxByIndex = result.Visibility.VisibleMdx.ToDictionary(static entry => entry.Instance.PlacementEntryIndex);
+        HashSet<int> opaqueRoutes = result.PassFrame.OpaqueVisibleMdxRoutes.Select(static route => route.VisibleMdxIndex).ToHashSet();
+        HashSet<int> transparentRoutes = result.PassFrame.TransparentVisibleMdxRoutes.Select(static route => route.VisibleMdxIndex).ToHashSet();
+        HashSet<int> unbatchedRoutes = result.PassFrame.UnbatchedVisibleMdxIndices;
+        HashSet<string> animatedModels = result.PassFrame.UpdatedMdxModelKeys;
+
+        foreach (WorldObjectInstance instance in result.WmoInstances)
+        {
+            if (visibleWmoByIndex.TryGetValue(instance.PlacementEntryIndex, out WorldVisibleWmoEntry visibleWmo))
+                yield return CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, visibleWmo.Instance, visibleWmo.CenterDistanceSq, isVisible: true, isTaxiActor: false);
+            else
+                yield return CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, instance, centerDistanceSq: null, isVisible: false, isTaxiActor: false);
+        }
+
+        for (int index = 0; index < result.MdxInstances.Count; index++)
+        {
+            WorldObjectInstance instance = result.MdxInstances[index];
+            if (visibleMdxByIndex.TryGetValue(instance.PlacementEntryIndex, out WorldVisibleMdxEntry visibleMdx))
+            {
+                yield return CreateWorldNavigatorEntry(
+                    result,
+                    WorldSelectionKind.Mdx,
+                    visibleMdx.Instance,
+                    visibleMdx.CenterDistanceSq,
+                    isVisible: true,
+                    visibleMdx.IsTaxiActor,
+                    opaqueRoutes.Contains(index),
+                    transparentRoutes.Contains(index),
+                    unbatchedRoutes.Contains(index),
+                    animatedModels.Contains(visibleMdx.Instance.ModelKey));
+            }
+            else
+            {
+                yield return CreateWorldNavigatorEntry(
+                    result,
+                    WorldSelectionKind.Mdx,
+                    instance,
+                    centerDistanceSq: null,
+                    isVisible: false,
+                    isTaxiActor: false,
+                    hasOpaqueRoute: false,
+                    hasTransparentRoute: false,
+                    requiresUnbatchedRender: false,
+                    wasAnimated: animatedModels.Contains(instance.ModelKey));
+            }
+        }
+    }
+
+    private static WorldNavigatorEntry CreateWorldNavigatorEntry(
+        WowViewerWorldRuntimeFrameResult result,
+        WorldSelectionKind kind,
+        WorldObjectInstance instance,
+        float? centerDistanceSq,
+        bool isVisible,
+        bool isTaxiActor,
+        bool hasOpaqueRoute = false,
+        bool hasTransparentRoute = false,
+        bool requiresUnbatchedRender = false,
+        bool wasAnimated = false)
+    {
+        bool assetReady = kind == WorldSelectionKind.Wmo
+            ? result.WmoInstances.Any(candidate => candidate.PlacementEntryIndex == instance.PlacementEntryIndex && candidate.BoundsResolved)
+            : result.MdxInstances.Any(candidate => candidate.PlacementEntryIndex == instance.PlacementEntryIndex && candidate.BoundsResolved);
+
+        return new WorldNavigatorEntry(
+            kind,
+            instance,
+            isVisible,
+            assetReady,
+            centerDistanceSq,
+            isTaxiActor,
+            hasOpaqueRoute,
+            hasTransparentRoute,
+            requiresUnbatchedRender,
+            wasAnimated);
+    }
+
+    private static WorldObjectSelection CreateSelection(WorldNavigatorEntry entry, int tileX, int tileY)
+    {
+        return new WorldObjectSelection(entry.Kind, tileX, tileY, entry.Instance.PlacementEntryIndex, entry.Instance.UniqueId, entry.Instance.ModelKey);
+    }
+
+    private static string BuildNavigatorLabel(WorldNavigatorEntry entry)
+    {
+        string visibility = entry.IsVisible ? "visible" : "hidden";
+        string ready = entry.AssetReady ? "ready" : "pending";
+        string distance = entry.CenterDistance.HasValue ? $" d={MathF.Sqrt(entry.CenterDistance.Value):F1}" : string.Empty;
+        return $"[{entry.Kind}] {entry.Instance.ModelName} #{entry.Instance.UniqueId} {visibility} {ready}{distance}";
+    }
+
+    private static bool TryResolveWorldNavigatorEntry(WowViewerWorldRuntimeFrameResult result, WorldObjectSelection selection, out WorldNavigatorEntry entry)
+    {
+        if (selection.TileX != result.SelectedTileX || selection.TileY != result.SelectedTileY)
+        {
+            entry = default;
+            return false;
+        }
+
+        foreach (WorldNavigatorEntry candidate in EnumerateWorldNavigatorEntriesStatic(result))
+        {
+            if (candidate.Kind == selection.Kind
+                && candidate.Instance.PlacementEntryIndex == selection.PlacementEntryIndex
+                && candidate.Instance.UniqueId == selection.UniqueId
+                && string.Equals(candidate.Instance.ModelKey, selection.ModelKey, StringComparison.OrdinalIgnoreCase))
+            {
+                entry = candidate;
+                return true;
+            }
+        }
+
+        entry = default;
+        return false;
+    }
+
+    private static IEnumerable<WorldNavigatorEntry> EnumerateWorldNavigatorEntriesStatic(WowViewerWorldRuntimeFrameResult result)
+    {
+        Dictionary<int, WorldVisibleWmoEntry> visibleWmoByIndex = result.Visibility.VisibleWmos.ToDictionary(static entry => entry.Instance.PlacementEntryIndex);
+        Dictionary<int, WorldVisibleMdxEntry> visibleMdxByIndex = result.Visibility.VisibleMdx.ToDictionary(static entry => entry.Instance.PlacementEntryIndex);
+        HashSet<int> opaqueRoutes = result.PassFrame.OpaqueVisibleMdxRoutes.Select(static route => route.VisibleMdxIndex).ToHashSet();
+        HashSet<int> transparentRoutes = result.PassFrame.TransparentVisibleMdxRoutes.Select(static route => route.VisibleMdxIndex).ToHashSet();
+        HashSet<int> unbatchedRoutes = result.PassFrame.UnbatchedVisibleMdxIndices;
+        HashSet<string> animatedModels = result.PassFrame.UpdatedMdxModelKeys;
+
+        foreach (WorldObjectInstance instance in result.WmoInstances)
+        {
+            if (visibleWmoByIndex.TryGetValue(instance.PlacementEntryIndex, out WorldVisibleWmoEntry visibleWmo))
+                yield return CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, visibleWmo.Instance, visibleWmo.CenterDistanceSq, isVisible: true, isTaxiActor: false);
+            else
+                yield return CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, instance, centerDistanceSq: null, isVisible: false, isTaxiActor: false);
+        }
+
+        for (int index = 0; index < result.MdxInstances.Count; index++)
+        {
+            WorldObjectInstance instance = result.MdxInstances[index];
+            if (visibleMdxByIndex.TryGetValue(instance.PlacementEntryIndex, out WorldVisibleMdxEntry visibleMdx))
+            {
+                yield return CreateWorldNavigatorEntry(
+                    result,
+                    WorldSelectionKind.Mdx,
+                    visibleMdx.Instance,
+                    visibleMdx.CenterDistanceSq,
+                    isVisible: true,
+                    visibleMdx.IsTaxiActor,
+                    opaqueRoutes.Contains(index),
+                    transparentRoutes.Contains(index),
+                    unbatchedRoutes.Contains(index),
+                    animatedModels.Contains(visibleMdx.Instance.ModelKey));
+            }
+            else
+            {
+                yield return CreateWorldNavigatorEntry(
+                    result,
+                    WorldSelectionKind.Mdx,
+                    instance,
+                    centerDistanceSq: null,
+                    isVisible: false,
+                    isTaxiActor: false,
+                    hasOpaqueRoute: false,
+                    hasTransparentRoute: false,
+                    requiresUnbatchedRender: false,
+                    wasAnimated: animatedModels.Contains(instance.ModelKey));
+            }
+        }
     }
 
     private static string FormatVector3(Vector3 value)

@@ -205,6 +205,21 @@
 - proof goal:
   - the new app is usable for bounded world inspection without falling back to old `ViewerApp`
 
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer/src/viewer/WowViewer.App/`:
+  - `WowViewerDesktopApp.cs` now carries app-local world selection state, interactive canvas picking, a `World Status` panel, a `World Navigator` panel, and a `World Inspector` panel over the bounded runtime frame instead of leaving the world workspace at top-down-canvas-only inspection
+  - the navigator can filter WMO vs MDX, visible-only vs full placement inventory, and model-name or model-key text; selection can come from either the navigator list or direct canvas clicks
+  - the inspector reports actual runtime-backed placement, bounds, visibility, and MDX pass-routing state from the shared world frame rather than inventing a second object-inspection contract
+  - `WowViewerAppSettings.cs` now persists the new world-panel visibility toggles so the shell surface itself remains stable across app restarts
+- proof completed:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - real-data runtime proof still succeeded via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340`
+  - that proof still auto-selected tile `(39,32)`, loaded `World\Maps\Azeroth\Azeroth_39_32.adt`, found `24` WMO placements plus `2991` MDX placements, admitted `24` visible WMO plus `2464` visible MDX, and executed the shared object/pass phase with `objectPhase=True`
+- current boundary:
+  - this slice proves bounded shell usability for one-tile world inspection only; it does not prove the interactive desktop renderer, terrain/liquid submission, or broader `ViewerApp` parity
+  - the next slice should review and state the remaining legacy boundary explicitly instead of conflating shell usability with renderer replacement
+
 ### Slice 08 - Legacy Cutover Review
 
 - target problem:
@@ -224,7 +239,7 @@
 
 ## Immediate Next Slice
 
-- slice 07: shell surface expansion
+- slice 08: legacy cutover review
 - reason:
-  - the app now has persisted state, a typed session boundary, an explicit workspace split, a bounded standalone GPU M2 preview consumer, a bounded fixed-root world-session bootstrap path, and a first bounded world runtime consumer over one selected tile
-  - the next honest step is expanding navigator, selection, and diagnostics surfaces around that new runtime-owned world frame instead of claiming renderer parity too early
+  - the app now has persisted state, a typed session boundary, an explicit workspace split, a bounded standalone GPU M2 preview consumer, a bounded fixed-root world-session bootstrap path, a first bounded world runtime consumer over one selected tile, and bounded navigator or inspector surfaces around that frame
+  - the next honest step is documenting what still belongs to legacy `ViewerApp` or future editor work instead of implying that slice-07 shell usability closed renderer cutover
