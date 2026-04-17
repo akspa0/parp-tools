@@ -1,5 +1,38 @@
 # Progress
 
+### Apr 17, 2026 - wow-viewer app slice 04 landed: the standalone M2 workspace now has a bounded GPU preview consumer
+
+- what changed:
+	- added `wow-viewer/src/viewer/WowViewer.App/M2GpuPreviewRenderer.cs` as an app-local GL consumer over `M2RenderFrame.DrawCommands`
+	- added `wow-viewer/src/viewer/WowViewer.App/M2GpuPreviewCaptureRunner.cs` and a new `m2-gpu-frame` command in `Program.cs` so the same renderer can write hidden-window BMP proof artifacts
+	- `WowViewerDesktopApp.cs` now uses that GPU renderer as the active standalone M2 preview path when loaded geometry exists, while keeping the software visual snapshot as an explicit fallback and diagnostic reference
+	- `WowViewer.App.csproj` now references the vendored `SereniaBLPLib` BLP decoder, and `wow-viewer/libs/WoW-Tools/SereniaBLPLib/SereniaBLPLib/SereniaBLPLib.csproj` now explicitly disables central package management so the vendored project can restore cleanly under this workspace
+	- `WowViewer.Core.Runtime/M2/M2RenderFrame.cs` now carries the per-command material/effect state the GPU consumer needs: diffuse or emissive color, alpha, blend mode, depth-write, alpha-test, transparency, additive state, and lighting flags
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
+	- real-data GPU proof succeeded via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- m2-gpu-frame --archive-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --virtual-path "Creature/Wolf/Wolf.m2" --build-label 3.3.5.12340 --sequence-index 0 --time-ms 0 --visual-size 512 --output "i:/parp/parp-tools/output/build-validation/wow-viewer-app-gpu-preview/wolf_335_gpu.bmp"`
+	- the resulting proof artifact exists at `output/build-validation/wow-viewer-app-gpu-preview/wolf_335_gpu.bmp` (`1048630` bytes)
+	- the older runtime proof still stayed stable through `m2-frame`, preserving runtime `9e9586068a443468ccec1abd62b3d717c0455e08999bd03beb21427a9df4ec30`, render-frame `177155d088dc8502be5b115b6b3d1a0fa67e75549cfe87c981bff6a8f8ac4122`, and visual `b2fabb6da814c393ea149fb7321cbd3e05d24db8852f59dca35c755c29bfb177`
+- boundary:
+	- this is a bounded standalone GPU preview slice only, not full native material parity or world ownership
+	- camera-only overlay parity, WMO/MDX consumers, and world-session bootstrap remain separate follow-up slices
+
+### Apr 17, 2026 - wow-viewer app slice 03 landed: the desktop shell now exposes explicit standalone workspaces
+
+- what changed:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` now defines explicit standalone workspace modes for M2, WMO, and MDX
+	- `WowViewerDesktopApp.cs` now has a dedicated `Workspaces` window and view toggle, and the control, preview, and diagnostics windows now reflect the active standalone workspace instead of always presenting as one generic M2 surface
+	- only `StandaloneM2` is implemented in this slice; `StandaloneWmo` and `StandaloneMdx` are deliberate placeholder surfaces that state they are not implemented yet
+	- `WowViewerAppSettings.cs` now persists workspace-window visibility, and `Program.cs` now supports `--workspace m2|wmo|mdx` when launching the desktop viewer
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- --help` showed the new workspace bootstrap surface
+	- real-data M2 proof still succeeded via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- m2-frame --archive-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --virtual-path "Creature/Wolf/Wolf.m2" --build-label 3.3.5.12340 --sequence-index 0 --time-ms 0`
+	- that proof preserved the earlier Wolf hashes: runtime `9e9586068a443468ccec1abd62b3d717c0455e08999bd03beb21427a9df4ec30`, render-frame `177155d088dc8502be5b115b6b3d1a0fa67e75549cfe87c981bff6a8f8ac4122`, visual `b2fabb6da814c393ea149fb7321cbd3e05d24db8852f59dca35c755c29bfb177`
+- boundary:
+	- this closes the shell-side workspace split only
+	- WMO and MDX are not implemented consumers yet, and the app still lacks a GPU preview renderer and world-session bootstrap
+
 ### Apr 17, 2026 - wow-viewer app slice 02 landed: the desktop host now runs through a typed viewer-session contract
 
 - what changed:

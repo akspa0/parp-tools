@@ -8,7 +8,9 @@ Current viewer-app reality:
 - It now has a real Silk.NET + ImGui desktop shell that can load `wow-viewer` M2 runtime previews directly through shared runtime code, with no `MdxViewer` dependency.
 - The active viewer-app cutover sequence now lives in `gillijimproject_refactor/plans/wow_viewer_viewer_app_cutover_plan_2026-04-17.md`.
 - The app shell now also has a typed viewer-session boundary (`WowViewerSession`) for workspace mode, typed source selection, build label, and preview request state; the desktop host no longer owns those values as loose fields.
-- The desktop shell is still a narrow first slice: it currently previews the deterministic software visual snapshot and runtime diagnostics for M2 assets, not full GPU renderer parity or world-scene ownership.
+- The desktop shell is now explicitly organized around standalone workspaces: `M2` is implemented, while `WMO` and `MDX` are surfaced as honest placeholders for later consumers instead of being implied future work with no shell boundary.
+- The M2 workspace now also has a bounded app-local GPU preview consumer over runtime draw commands, plus a hidden-window `m2-gpu-frame` BMP proof path for fixed-asset validation.
+- The desktop shell is still a narrow first slice: the new GPU preview is a standalone M2 consumer, not full native material parity or world-scene ownership.
 
 Current first-pass project layout:
 

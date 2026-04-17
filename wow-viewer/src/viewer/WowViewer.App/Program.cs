@@ -39,6 +39,9 @@ internal static class Program
                 case "m2-frame":
                     return RunM2Frame(tail);
 
+                case "m2-gpu-frame":
+                    return RunM2GpuFrame(tail);
+
                 default:
                     using (WowViewerDesktopApp app = new(ParseViewerSession(args)))
                         app.Run();
@@ -80,8 +83,22 @@ internal static class Program
         return 0;
     }
 
+    private static int RunM2GpuFrame(string[] args)
+    {
+        M2PreviewLoadRequest request = ParseRequiredM2Request(args, defaultVisualSize: 512);
+        string? output = GetOption(args, "--output", "-o");
+        if (string.IsNullOrWhiteSpace(output))
+            throw new ArgumentException("Provide --output <file.bmp> for m2-gpu-frame.");
+
+        string outputPath = Path.GetFullPath(output);
+        M2GpuPreviewCaptureRunner.Capture(request, outputPath);
+        Console.WriteLine($"Wrote {outputPath}");
+        return 0;
+    }
+
     private static WowViewerSession? ParseViewerSession(string[] args)
     {
+        string? workspaceText = GetOption(args, "--workspace", "-w");
         string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
         string? archiveRoot = GetOption(args, "--archive-root", "-r");
         string? virtualPath = GetOption(args, "--virtual-path", "-v");
@@ -102,7 +119,7 @@ internal static class Program
             visualSize = 384;
 
         WowViewerSession session = WowViewerSession.CreateDefault();
-        session.WorkspaceMode = WowViewerWorkspaceMode.StandaloneM2;
+        session.WorkspaceMode = ParseWorkspaceMode(workspaceText);
         session.Source.Kind = string.IsNullOrWhiteSpace(archiveRoot)
             ? WowViewerAssetSourceKind.LocalFile
             : WowViewerAssetSourceKind.ArchiveVirtualPath;
@@ -127,6 +144,7 @@ internal static class Program
         string? profileIndexText = GetOption(args, "--profile-index", "-p");
         string? sequenceIndexText = GetOption(args, "--sequence-index", "-s");
         string? timeMsText = GetOption(args, "--time-ms", "-t");
+        string? visualSizeText = GetOption(args, "--visual-size");
 
         if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
             virtualPath = input;
@@ -148,6 +166,13 @@ internal static class Program
         if (!string.IsNullOrWhiteSpace(timeMsText) && !int.TryParse(timeMsText, out timeMs))
             throw new ArgumentOutOfRangeException(nameof(timeMsText), "--time-ms must be an integer.");
 
+        int visualSize = defaultVisualSize;
+        if (!string.IsNullOrWhiteSpace(visualSizeText))
+        {
+            if (!int.TryParse(visualSizeText, out visualSize) || visualSize < 16)
+                throw new ArgumentOutOfRangeException(nameof(visualSizeText), "--visual-size must be an integer greater than or equal to 16.");
+        }
+
         return new M2PreviewLoadRequest
         {
             InputPath = string.IsNullOrWhiteSpace(archiveRoot) ? input : null,
@@ -157,8 +182,8 @@ internal static class Program
             ProfileIndex = profileIndex,
             SequenceIndex = sequenceIndex,
             TimeMs = timeMs,
-            VisualWidth = defaultVisualSize,
-            VisualHeight = defaultVisualSize,
+            VisualWidth = visualSize,
+            VisualHeight = visualSize,
         };
     }
 
@@ -225,8 +250,21 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  wowviewer-app");
-        Console.WriteLine("  wowviewer-app viewer [--archive-root <game|data dir> --virtual-path <path/to/file.m2> | --input <file.m2>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>]");
+        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app m2-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
+        Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
+        Console.WriteLine("  wowviewer-app m2-gpu-frame --input <file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
+    }
+
+    private static WowViewerWorkspaceMode ParseWorkspaceMode(string? workspaceText)
+    {
+        return workspaceText?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "m2" => WowViewerWorkspaceMode.StandaloneM2,
+            "wmo" => WowViewerWorkspaceMode.StandaloneWmo,
+            "mdx" => WowViewerWorkspaceMode.StandaloneMdx,
+            _ => throw new ArgumentException("--workspace must be one of: m2, wmo, mdx."),
+        };
     }
 }

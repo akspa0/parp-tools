@@ -6,6 +6,7 @@
     <PackageReference Include="Silk.NET.OpenGL" />
     <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" />
     <PackageReference Include="Silk.NET.Windowing" />
+    <ProjectReference Include="..\..\..\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
     <ProjectReference Include="..\..\core\WowViewer.Core\WowViewer.Core.csproj" />
     <ProjectReference Include="..\..\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
     <ProjectReference Include="..\..\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />

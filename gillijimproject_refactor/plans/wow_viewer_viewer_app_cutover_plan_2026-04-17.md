@@ -92,6 +92,23 @@
 - out of scope:
   - no world map viewer yet
 
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer/src/viewer/WowViewer.App/`:
+  - `WowViewerSession.cs` now carries explicit standalone workspace modes for `M2`, `WMO`, and `MDX`
+  - `WowViewerDesktopApp` now has a dedicated `Workspaces` window and view toggle so the shell is structured around explicit standalone workspace selection instead of only one generic M2 control surface
+  - the M2 workspace remains the only implemented consumer in this slice
+  - WMO and MDX now exist as honest placeholders with their own control, preview, and diagnostics surfaces stating that no live consumer is implemented yet
+  - `WowViewerAppSettings` now persists workspace-window visibility, and `Program.cs` now accepts `--workspace m2|wmo|mdx` for desktop-session bootstrap
+- proof completed:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- --help`
+  - real-data loader proof still succeeds through the unchanged shared M2 runtime path on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Creature/Wolf/Wolf.m2`, with the same runtime/render/visual hashes as slice 02
+- current boundary:
+  - this closes the shell-side standalone workspace split only
+  - WMO and MDX are not implemented consumers yet
+  - there is still no GPU preview renderer or world-session bootstrap in the app
+
 ### Slice 04 - GPU M2 Preview Consumer
 
 - target problem:
@@ -103,6 +120,25 @@
   - bounded real-data screenshots from the new app shell for fixed M2 assets
 - out of scope:
   - no world scene, no map loading, no old ViewerApp parity claims
+
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer/src/viewer/WowViewer.App/`:
+  - `M2GpuPreviewRenderer.cs` now owns an app-local GL consumer over `M2RenderFrame.DrawCommands` instead of building a second renderer contract outside the runtime frame
+  - the GPU preview path uses runtime draw-command vertices, indices, texture bindings, and resolved effect flags to render a bounded standalone M2 preview into an offscreen framebuffer texture shown in the desktop shell
+  - the existing software visual snapshot stays loaded as an explicit fallback and diagnostic reference instead of being deleted
+  - `M2GpuPreviewCaptureRunner.cs` plus `Program.cs` now expose `m2-gpu-frame` for hidden-window BMP capture proof over the same app-local GPU renderer
+  - `WowViewer.App.csproj` now references the vendored `SereniaBLPLib` decoder so archive-backed BLP textures can be sampled by the new preview path
+  - `M2RenderFrame.cs` now carries the per-command material/effect state a real consumer needs, including diffuse or emissive color, alpha, blend mode, depth-write, alpha-test, transparency, additive state, and lighting flags
+- proof completed:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - real-data GPU proof via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- m2-gpu-frame --archive-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --virtual-path "Creature/Wolf/Wolf.m2" --build-label 3.3.5.12340 --sequence-index 0 --time-ms 0 --visual-size 512 --output "i:/parp/parp-tools/output/build-validation/wow-viewer-app-gpu-preview/wolf_335_gpu.bmp"`
+  - the GPU proof artifact now exists at `output/build-validation/wow-viewer-app-gpu-preview/wolf_335_gpu.bmp` (`1048630` bytes)
+  - the earlier `m2-frame` proof still preserved the existing Wolf hashes after this slice: runtime `9e9586068a443468ccec1abd62b3d717c0455e08999bd03beb21427a9df4ec30`, render-frame `177155d088dc8502be5b115b6b3d1a0fa67e75549cfe87c981bff6a8f8ac4122`, visual `b2fabb6da814c393ea149fb7321cbd3e05d24db8852f59dca35c755c29bfb177`
+- current boundary:
+  - this closes a bounded standalone GPU M2 consumer only
+  - it is still a first-pass preview path over one primary texture stream and current runtime draw-command state, not native material parity or world-scene ownership
+  - camera-only overlays, WMO, MDX, and world-session bootstrap remain later slices
 
 ### Slice 05 - World Session Bootstrap
 
@@ -158,7 +194,7 @@
 
 ## Immediate Next Slice
 
-- slice 03: standalone asset workspaces
+- slice 05: world session bootstrap
 - reason:
-  - the app now has both persisted state and a typed session boundary, so the next clean step is reorganizing the shell around explicit workspaces instead of one monolithic control surface
-  - that gives the M2 path a stable home before any GPU preview or world bootstrap work starts
+  - the app now has persisted state, a typed session boundary, an explicit standalone workspace split, and a bounded standalone GPU M2 preview consumer
+  - the next honest step is giving the new app a typed attach/open flow for fixed client roots and map bootstrap instead of deepening standalone-only preview work

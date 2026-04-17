@@ -8,6 +8,8 @@ internal sealed class WowViewerAppSettings
 
     public bool ShowAboutWindow { get; set; } = true;
 
+    public bool ShowWorkspaceWindow { get; set; } = true;
+
     public bool ShowControlWindow { get; set; } = true;
 
     public bool ShowDiagnosticsWindow { get; set; } = true;

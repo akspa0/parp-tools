@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
+using WowViewer.Core.M2;
 
 namespace WowViewer.Core.Runtime.M2;
 
@@ -60,6 +61,16 @@ public sealed class M2RenderDrawCommand
         IReadOnlyList<M2RenderBackendVertex> vertices,
         IReadOnlyList<uint> indices,
         IReadOnlyList<M2RenderConsumerTextureState> textures,
+        Vector3 diffuseColor,
+        Vector3 emissiveColor,
+        float alpha,
+        bool receivesLighting,
+        M2BlendMode blendMode,
+        bool depthWrite,
+        bool alphaTest,
+        bool isTransparent,
+        bool isAdditive,
+        bool isTwoSided,
         string? effectObjectKey,
         string? nativeEffectFamilyKey)
     {
@@ -88,6 +99,16 @@ public sealed class M2RenderDrawCommand
         Vertices = vertices;
         Indices = indices;
         Textures = textures;
+        DiffuseColor = diffuseColor;
+        EmissiveColor = emissiveColor;
+        Alpha = alpha;
+        ReceivesLighting = receivesLighting;
+        BlendMode = blendMode;
+        DepthWrite = depthWrite;
+        AlphaTest = alphaTest;
+        IsTransparent = isTransparent;
+        IsAdditive = isAdditive;
+        IsTwoSided = isTwoSided;
         EffectObjectKey = effectObjectKey;
         NativeEffectFamilyKey = nativeEffectFamilyKey;
     }
@@ -121,6 +142,26 @@ public sealed class M2RenderDrawCommand
     public IReadOnlyList<uint> Indices { get; }
 
     public IReadOnlyList<M2RenderConsumerTextureState> Textures { get; }
+
+    public Vector3 DiffuseColor { get; }
+
+    public Vector3 EmissiveColor { get; }
+
+    public float Alpha { get; }
+
+    public bool ReceivesLighting { get; }
+
+    public M2BlendMode BlendMode { get; }
+
+    public bool DepthWrite { get; }
+
+    public bool AlphaTest { get; }
+
+    public bool IsTransparent { get; }
+
+    public bool IsAdditive { get; }
+
+    public bool IsTwoSided { get; }
 
     public string? EffectObjectKey { get; }
 
@@ -179,6 +220,7 @@ public static class M2RenderFrameBuilder
                 }
             }
 
+            M2ResolvedEffect? resolvedEffect = firstPass?.ResolvedEffect;
             commands.Add(new M2RenderDrawCommand(
                 batch.BatchIndex,
                 batch.Family,
@@ -195,8 +237,18 @@ public static class M2RenderFrameBuilder
                 vertices,
                 indices,
                 firstPass?.Textures ?? [],
-                firstPass?.ResolvedEffect.EffectObjectKey,
-                firstPass?.ResolvedEffect.NativeEffectFamilyKey));
+                firstPass?.DiffuseColor ?? Vector3.One,
+                firstPass?.EmissiveColor ?? Vector3.Zero,
+                firstPass?.Alpha ?? 1.0f,
+                firstPass?.ReceivesLighting ?? true,
+                firstPass?.SourcePass.Material.BlendMode ?? M2BlendMode.Opaque,
+                resolvedEffect?.DepthWrite ?? true,
+                resolvedEffect?.AlphaTest ?? false,
+                resolvedEffect?.IsTransparent ?? false,
+                resolvedEffect?.IsAdditive ?? false,
+                resolvedEffect?.IsTwoSided ?? false,
+                resolvedEffect?.EffectObjectKey,
+                resolvedEffect?.NativeEffectFamilyKey));
         }
 
         string hash = ComputeHash(renderModel.Model.Identity.CanonicalModelPath, timeMs, commands);

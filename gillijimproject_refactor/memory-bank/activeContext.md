@@ -1,5 +1,41 @@
 # Active Context
 
+# Active Context
+
+## Apr 17, 2026 - wow-viewer app slice 04 landed: the M2 workspace now has a bounded GPU preview consumer and capture path
+
+- slice 04 from the viewer-app cutover plan is now landed in `wow-viewer/src/viewer/WowViewer.App/`
+- `M2GpuPreviewRenderer.cs` now owns an app-local GL consumer over `M2RenderFrame.DrawCommands`, using runtime draw-command geometry, texture bindings, and resolved effect flags instead of inventing a second render contract outside the runtime frame
+- `WowViewerDesktopApp` now renders that GPU preview into an offscreen texture for the standalone M2 workspace while still loading the software visual snapshot as an explicit fallback and diagnostic reference
+- `Program.cs` plus `M2GpuPreviewCaptureRunner.cs` now expose `m2-gpu-frame`, so the same app-local GPU renderer can produce hidden-window BMP proof without manual UI interaction
+- `WowViewer.App.csproj` now references the vendored `SereniaBLPLib` decoder, and that vendored project now explicitly disables central package management so it can build under this workspace without package-version conflicts
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+	- real fixed-root GPU proof succeeded via `WowViewer.App m2-gpu-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Creature/Wolf/Wolf.m2`, writing `output/build-validation/wow-viewer-app-gpu-preview/wolf_335_gpu.bmp` (`1048630` bytes)
+	- the existing `m2-frame` proof still preserved runtime hash `9e9586068a443468ccec1abd62b3d717c0455e08999bd03beb21427a9df4ec30`, render-frame hash `177155d088dc8502be5b115b6b3d1a0fa67e75549cfe87c981bff6a8f8ac4122`, and visual hash `b2fabb6da814c393ea149fb7321cbd3e05d24db8852f59dca35c755c29bfb177`
+- current boundary:
+	- this is a bounded standalone GPU M2 consumer only; it is not world-session bootstrap, native material parity, or WMO/MDX consumer closure
+	- WMO and MDX remain placeholder workspaces, and the next real app slice is world session bootstrap
+
+## Apr 17, 2026 - wow-viewer app slice 03 landed: the shell now has explicit standalone M2/WMO/MDX workspaces, with only M2 implemented
+
+- slice 03 from the viewer-app cutover plan is now landed in `wow-viewer/src/viewer/WowViewer.App/`
+- `WowViewerSession.cs` now carries explicit standalone workspace modes for:
+	- `StandaloneM2`
+	- `StandaloneWmo`
+	- `StandaloneMdx`
+- `WowViewerDesktopApp` now exposes a dedicated `Workspaces` window and view toggle so the app shell is organized around explicit standalone workspace selection instead of only one generic M2 source panel
+- current truth of those workspaces is intentionally narrow:
+	- `StandaloneM2` is the only implemented live consumer and still uses the shared `M2PreviewLoader` plus software visual preview path
+	- `StandaloneWmo` and `StandaloneMdx` are placeholder workspaces only; their control, preview, and diagnostics panels state that the real consumers are not implemented yet
+- `Program.cs` now accepts `--workspace m2|wmo|mdx` when bootstrapping the desktop viewer, and `WowViewerAppSettings` now persists workspace-window visibility alongside the typed session
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- --help` now shows the new `--workspace m2|wmo|mdx` surface
+	- real fixed-root proof still succeeds through `WowViewer.App m2-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Creature/Wolf/Wolf.m2`, preserving runtime hash `9e9586068a443468ccec1abd62b3d717c0455e08999bd03beb21427a9df4ec30`, render-frame hash `177155d088dc8502be5b115b6b3d1a0fa67e75549cfe87c981bff6a8f8ac4122`, and visual hash `b2fabb6da814c393ea149fb7321cbd3e05d24db8852f59dca35c755c29bfb177`
+- current boundary:
+	- this is a shell-organization slice only; WMO and MDX remain explicit placeholders and there is still no GPU M2 consumer or world-session bootstrap yet
+
 ## Apr 17, 2026 - wow-viewer desktop app now has a typed viewer-session boundary, so the host no longer owns raw source fields directly
 
 - slice 02 from the new viewer-app cutover plan is now landed in `wow-viewer/src/viewer/WowViewer.App/`

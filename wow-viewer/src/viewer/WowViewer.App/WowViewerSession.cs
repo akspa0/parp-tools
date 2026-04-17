@@ -3,6 +3,8 @@ namespace WowViewer.App;
 internal enum WowViewerWorkspaceMode
 {
     StandaloneM2 = 0,
+    StandaloneWmo = 1,
+    StandaloneMdx = 2,
 }
 
 internal enum WowViewerAssetSourceKind
@@ -101,7 +103,14 @@ internal sealed class WowViewerSession
         return WorkspaceMode switch
         {
             WowViewerWorkspaceMode.StandaloneM2 => "Standalone M2",
+            WowViewerWorkspaceMode.StandaloneWmo => "Standalone WMO",
+            WowViewerWorkspaceMode.StandaloneMdx => "Standalone MDX",
             _ => "Unknown",
         };
+    }
+
+    public bool IsImplementedWorkspace()
+    {
+        return WorkspaceMode == WowViewerWorkspaceMode.StandaloneM2;
     }
 }

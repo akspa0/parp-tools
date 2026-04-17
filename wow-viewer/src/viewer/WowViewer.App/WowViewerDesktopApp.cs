@@ -38,7 +38,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private string? _lastError;
     private M2PreviewLoadResult? _currentPreview;
     private uint _previewTextureHandle;
+    private M2GpuPreviewRenderer? _gpuPreviewRenderer;
     private bool _showAboutWindow = true;
+    private bool _showWorkspaceWindow = true;
     private bool _showControlWindow = true;
     private bool _showDiagnosticsWindow = true;
     private bool _showBoundaryWindow = true;
@@ -79,6 +81,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         _disposed = true;
         SaveSettings();
+        _gpuPreviewRenderer?.Dispose();
         DeletePreviewTexture();
         _imGui?.Dispose();
         _input?.Dispose();
@@ -99,6 +102,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.Disable(EnableCap.CullFace);
+        _gpuPreviewRenderer = new M2GpuPreviewRenderer(_gl);
 
         _requestInitialLoad = _initialSession != null;
     }
@@ -118,6 +122,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
     {
         if (_gl == null || _imGui == null || _window == null)
             return;
+
+        if (_currentPreview != null && _gpuPreviewRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneM2)
+            _gpuPreviewRenderer.Render(_session.VisualSize, _session.VisualSize);
 
         _gl.Viewport(_window.FramebufferSize);
         _gl.ClearColor(0.08f, 0.09f, 0.11f, 1.0f);
@@ -150,6 +157,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         DrawMainMenuBar();
         ImGui.DockSpaceOverViewport();
 
+        if (_showWorkspaceWindow)
+            DrawWorkspaceWindow();
         if (_showControlWindow)
             DrawControlWindow();
         DrawPreviewWindow();
@@ -182,6 +191,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (ImGui.BeginMenu("View"))
         {
+            ImGui.MenuItem("Workspaces", string.Empty, ref _showWorkspaceWindow);
             ImGui.MenuItem("Source Controls", string.Empty, ref _showControlWindow);
             ImGui.MenuItem("Diagnostics", string.Empty, ref _showDiagnosticsWindow);
             ImGui.MenuItem("Runtime Boundaries", string.Empty, ref _showBoundaryWindow);
@@ -193,16 +203,73 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.EndMainMenuBar();
     }
 
-    private void DrawControlWindow()
+    private void DrawWorkspaceWindow()
     {
-        ImGui.SetNextWindowSize(new Vector2(430, 540), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("M2 Source", ref _showControlWindow))
+        ImGui.SetNextWindowSize(new Vector2(320, 280), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Workspaces", ref _showWorkspaceWindow))
         {
             ImGui.End();
             return;
         }
 
-        ImGui.TextWrapped("This first `wow-viewer` desktop shell stays library-first: it loads M2 assets only through the `wow-viewer` runtime pipeline and shows the software visual preview plus deterministic runtime diagnostics.");
+        ImGui.TextWrapped("The viewer shell now exposes explicit standalone workspaces. Only the M2 workspace is implemented in this slice; WMO and MDX are deliberate placeholders so later consumers land on a stable app boundary.");
+        ImGui.Separator();
+
+        DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneM2, "Runtime-backed standalone model preview over the shared wow-viewer M2 pipeline.");
+        DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneWmo, "Planned standalone WMO inspection workspace. Not implemented yet.");
+        DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneMdx, "Planned standalone MDX inspection workspace. Not implemented yet.");
+
+        ImGui.End();
+    }
+
+    private void DrawWorkspaceOption(WowViewerWorkspaceMode mode, string description)
+    {
+        bool selected = _session.WorkspaceMode == mode;
+        if (ImGui.Selectable(GetWorkspaceLabel(mode), selected))
+        {
+            if (_session.WorkspaceMode != mode)
+            {
+                _session.WorkspaceMode = mode;
+                _lastError = null;
+                _statusMessage = IsImplementedWorkspace(mode)
+                    ? "M2 workspace active. Configure a source and load a preview."
+                    : $"{GetWorkspaceLabel(mode)} is not implemented yet. This placeholder exists to keep the cutover honest about future standalone consumers.";
+            }
+        }
+
+        ImGui.TextDisabled(description);
+        ImGui.TextDisabled(IsImplementedWorkspace(mode) ? "Status: implemented in this slice" : "Status: placeholder only");
+        ImGui.Separator();
+    }
+
+    private static bool IsImplementedWorkspace(WowViewerWorkspaceMode mode)
+    {
+        return mode == WowViewerWorkspaceMode.StandaloneM2;
+    }
+
+    private static string GetWorkspaceLabel(WowViewerWorkspaceMode mode)
+    {
+        return mode switch
+        {
+            WowViewerWorkspaceMode.StandaloneM2 => "Standalone M2",
+            WowViewerWorkspaceMode.StandaloneWmo => "Standalone WMO",
+            WowViewerWorkspaceMode.StandaloneMdx => "Standalone MDX",
+            _ => "Unknown",
+        };
+    }
+
+    private void DrawControlWindow()
+    {
+        ImGui.SetNextWindowSize(new Vector2(430, 540), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin($"{_session.GetWorkspaceLabel()} Controls", ref _showControlWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.TextWrapped(_session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneM2
+            ? "This first `wow-viewer` desktop shell stays library-first: it loads M2 assets only through the `wow-viewer` runtime pipeline and now exposes a bounded GPU preview consumer plus the existing deterministic software/runtime diagnostics."
+            : "This workspace is intentionally not implemented yet. The controls below define the future standalone-source contract without claiming a live consumer in this slice.");
         ImGui.Separator();
         ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
         ImGui.TextDisabled($"Source: {_session.Source.Describe()}");
@@ -251,11 +318,18 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         _session.Normalize();
 
+        if (!IsImplementedWorkspace(_session.WorkspaceMode))
+            ImGui.BeginDisabled();
+
         if (ImGui.Button("Load Preview", new Vector2(-1, 0)))
             LoadPreview();
 
+        if (!IsImplementedWorkspace(_session.WorkspaceMode))
+            ImGui.EndDisabled();
+
         if (ImGui.Button("Use Wolf Runtime Baseline", new Vector2(-1, 0)))
         {
+            _session.WorkspaceMode = WowViewerWorkspaceMode.StandaloneM2;
             _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
             _session.Source.ArchiveRoot = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
             _session.Source.VirtualPath = @"Creature/Wolf/Wolf.m2";
@@ -268,6 +342,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (ImGui.Button("Use Camera Overlay Baseline", new Vector2(-1, 0)))
         {
+            _session.WorkspaceMode = WowViewerWorkspaceMode.StandaloneM2;
             _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
             _session.Source.ArchiveRoot = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
             _session.Source.VirtualPath = @"Cameras/Scry_cam.m2";
@@ -293,13 +368,23 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private void DrawPreviewWindow()
     {
         ImGui.SetNextWindowSize(new Vector2(880, 720), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Preview"))
+        if (!ImGui.Begin($"{_session.GetWorkspaceLabel()} Preview"))
         {
             ImGui.End();
             return;
         }
 
-        if (_currentPreview == null || _previewTextureHandle == 0)
+        if (!IsImplementedWorkspace(_session.WorkspaceMode))
+        {
+            ImGui.TextWrapped($"{_session.GetWorkspaceLabel()} is a placeholder workspace in this slice. A dedicated preview consumer has not been implemented yet.");
+            ImGui.TextDisabled("Current boundary: expose the workspace surface now, land the real consumer later.");
+            ImGui.End();
+            return;
+        }
+
+        bool hasGpuPreview = _gpuPreviewRenderer?.HasRenderableGeometry == true && _gpuPreviewRenderer.PreviewTextureHandle != 0;
+        bool hasSoftwarePreview = _previewTextureHandle != 0;
+        if (_currentPreview == null || (!hasGpuPreview && !hasSoftwarePreview))
         {
             ImGui.TextWrapped("No preview texture uploaded yet.");
             ImGui.End();
@@ -313,8 +398,19 @@ internal sealed class WowViewerDesktopApp : IDisposable
         Vector2 available = ImGui.GetContentRegionAvail();
         float size = MathF.Min(available.X, available.Y);
         size = MathF.Max(size, 128f);
-        ImGui.Image((nint)_previewTextureHandle, new Vector2(size, size), new Vector2(0, 1), new Vector2(1, 0));
-        ImGui.TextDisabled($"Preview: {snapshot.Width}x{snapshot.Height} litPixels={snapshot.LitPixelCount}");
+        if (hasGpuPreview)
+        {
+            ImGui.Image((nint)_gpuPreviewRenderer!.PreviewTextureHandle, new Vector2(size, size), new Vector2(0, 1), new Vector2(1, 0));
+            ImGui.TextDisabled($"GPU Preview: {_session.VisualSize}x{_session.VisualSize} commands={_gpuPreviewRenderer.CommandCount}");
+            if (hasSoftwarePreview)
+                ImGui.TextDisabled($"Software Snapshot: {snapshot.Width}x{snapshot.Height} litPixels={snapshot.LitPixelCount}");
+        }
+        else
+        {
+            ImGui.Image((nint)_previewTextureHandle, new Vector2(size, size), new Vector2(0, 1), new Vector2(1, 0));
+            ImGui.TextDisabled($"Software Snapshot: {snapshot.Width}x{snapshot.Height} litPixels={snapshot.LitPixelCount}");
+            ImGui.TextDisabled("GPU Preview: fallback inactive for this loaded frame.");
+        }
 
         ImGui.End();
     }
@@ -322,8 +418,15 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private void DrawDiagnosticsWindow(float deltaSeconds)
     {
         ImGui.SetNextWindowSize(new Vector2(480, 720), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Diagnostics", ref _showDiagnosticsWindow))
+        if (!ImGui.Begin($"{_session.GetWorkspaceLabel()} Diagnostics", ref _showDiagnosticsWindow))
         {
+            ImGui.End();
+            return;
+        }
+
+        if (!IsImplementedWorkspace(_session.WorkspaceMode))
+        {
+            ImGui.TextWrapped($"{_session.GetWorkspaceLabel()} diagnostics are not implemented yet. This workspace exists so later WMO or MDX consumers can land without reshaping the whole shell again.");
             ImGui.End();
             return;
         }
@@ -346,6 +449,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"Runtime Hash: {golden.RuntimeHash}");
         ImGui.Text($"Visual Hash: {frame.VisualSnapshot.VisualHash}");
         ImGui.Text($"Render Hash: {render.FrameHash}");
+        ImGui.Text($"GPU Preview Commands: {_gpuPreviewRenderer?.CommandCount ?? 0}");
         ImGui.Separator();
 
         ImGui.TextDisabled("M2 Runtime");
@@ -421,7 +525,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Separator();
         ImGui.TextDisabled("Current Proof Boundary");
         ImGui.BulletText("This app proves a standalone wow-viewer-owned desktop shell.");
-        ImGui.BulletText("The active render path is the deterministic software visual snapshot, not full GPU/world-scene parity.");
+        ImGui.BulletText("The active preview path now includes a bounded wow-viewer-owned GPU M2 consumer, but it is still not full native/world-scene parity.");
         ImGui.BulletText("WorldScene cutover remains a later runtime-consumer slice.");
 
         ImGui.End();
@@ -436,7 +540,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        ImGui.TextWrapped("`WowViewer.App` now has a real desktop host. This slice keeps the new repo as the owner of the app shell and runtime preview path instead of continuing to route viewer work through `MdxViewer`.");
+        ImGui.TextWrapped("`WowViewer.App` now has a real desktop host plus a bounded GPU M2 preview consumer. This slice keeps the new repo as the owner of the app shell and preview path instead of continuing to route viewer work through `MdxViewer`.");
         ImGui.Separator();
         ImGui.TextDisabled("Commands");
         ImGui.BulletText("No args: open the desktop viewer");
@@ -449,14 +553,24 @@ internal sealed class WowViewerDesktopApp : IDisposable
     {
         _lastError = null;
 
+        if (!IsImplementedWorkspace(_session.WorkspaceMode))
+        {
+            _statusMessage = $"{_session.GetWorkspaceLabel()} is not implemented yet. Switch back to Standalone M2 for a live preview.";
+            return;
+        }
+
         try
         {
             M2PreviewLoadRequest request = _session.BuildM2PreviewRequest();
             M2PreviewLoadResult preview = M2PreviewLoader.Load(request);
             UploadPreviewTexture(preview.FrameResult.VisualSnapshot);
+            _gpuPreviewRenderer?.LoadPreview(preview);
             _currentPreview = preview;
             _statusMessage = $"Loaded {preview.FrameResult.GoldenFrame.CanonicalModelPath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
-            _lastLoadSummary = $"{preview.FrameResult.VisualSnapshot.Width}x{preview.FrameResult.VisualSnapshot.Height} visual, {preview.FrameResult.RenderFrame.CommandCount} draw commands";
+            bool hasGpuPreview = _gpuPreviewRenderer?.HasRenderableGeometry == true;
+            _lastLoadSummary = hasGpuPreview
+                ? $"GPU {_session.VisualSize}x{_session.VisualSize}, software {preview.FrameResult.VisualSnapshot.Width}x{preview.FrameResult.VisualSnapshot.Height}, {preview.FrameResult.RenderFrame.CommandCount} draw commands"
+                : $"Software {preview.FrameResult.VisualSnapshot.Width}x{preview.FrameResult.VisualSnapshot.Height}, {preview.FrameResult.RenderFrame.CommandCount} draw commands";
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
         {
@@ -471,6 +585,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _lastError = null;
         _lastLoadSummary = "No preview loaded.";
         _statusMessage = "Preview cleared.";
+        _gpuPreviewRenderer?.ClearPreview();
         DeletePreviewTexture();
     }
 
@@ -533,6 +648,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     {
         ApplySession(settings.Session ?? WowViewerSession.CreateDefault());
         _showAboutWindow = settings.ShowAboutWindow;
+        _showWorkspaceWindow = settings.ShowWorkspaceWindow;
         _showControlWindow = settings.ShowControlWindow;
         _showDiagnosticsWindow = settings.ShowDiagnosticsWindow;
         _showBoundaryWindow = settings.ShowBoundaryWindow;
@@ -543,6 +659,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _session.Normalize();
         _settings.Session = _session;
         _settings.ShowAboutWindow = _showAboutWindow;
+        _settings.ShowWorkspaceWindow = _showWorkspaceWindow;
         _settings.ShowControlWindow = _showControlWindow;
         _settings.ShowDiagnosticsWindow = _showDiagnosticsWindow;
         _settings.ShowBoundaryWindow = _showBoundaryWindow;
