@@ -7,6 +7,9 @@
 	- the same planner now uses a wider old-viewer-shaped default FOV for frame mode, and the standalone preview floor on legacy frame distance was reduced so small props no longer stay excessively far away
 	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now resolves preview bounds from actual renderable geoset vertices before declared summary bounds, matching the old `MdxViewer` renderer's local bounds preference for normal MDX and fixing the main cause of the zoomed-out first-view regression
 	- the same MDX preview renderer now also uses an explicit legacy-style global sun setup with brighter ambient defaults and softer wrap lighting, fixing the darker backlit shader behavior that was leaving non-emissive preview models too close to black
+	- the same MDX preview renderer now also honors core per-geoset MDX render state that was already parsed but previously ignored in the standalone preview path, including `Unshaded`, `NoDepthTest`, `NoDepthSet`, and static geoset-animation alpha or color overrides
+	- the same MDX preview renderer now also resolves bounded replaceable-texture cases that previously collapsed to the white fallback texture, first trying classic same-directory `_SkinNN.blp` companions and then the old hardcoded replaceable defaults when the MDX texture entry only exposes a `ReplaceableId`
+	- `wow-viewer/src/viewer/WowViewer.App/PreviewCameraPlanner.cs` now keeps `frame` as the general default but auto-prefers the embedded portrait/model camera for MDX assets that expose both portrait cameras and replaceable textures, which fixes the back-facing first view on classic character-like assets without changing generic prop behavior
 	- `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` now persists bounded MDX camera settings for the desktop app, and `WowViewerDesktopApp.cs` now exposes frame or orbit or model selection plus orbit preset or custom azimuth or elevation and FOV or zoom controls in the MDX workspace pane
 	- the MDX control surface now reloads the active preview with the current camera settings instead of leaving camera iteration as a CLI-only flow
 - validation:
@@ -14,9 +17,14 @@
 	- real-data capture proof via `WowViewer.App mdx-gpu-frame` on `wow-viewer/testdata/0.5.3/tree/Creature/Banshee/Banshee.mdx` confirmed that the final default frame path is no longer stuck in the tiny-speck regression state
 	- real-data capture proof on `wow-viewer/testdata/0.6.0/World of Warcraft/Data/world/generic/activedoodads/chest01/chest01.mdx` confirmed the reduced standalone frame-distance floor improves small-prop framing without needing manual camera overrides
 	- fresh real-data capture proofs on both `Banshee.mdx` and `chest01.mdx` after the shader update confirmed the preview now has a stable global sun or ambient rig instead of leaving non-emissive models dependent on self-lighting alone
+	- a fresh `WowViewer.App mdx-gpu-frame` render on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx` completed successfully after the per-geoset state patch and wrote `i:/parp/parp-tools/output/tmp/wisp-mdx-state-pass.png`, proving the standalone preview still executes on an effect-heavy asset while using the new depth-state and geoset-animation override path
+	- focused inspect proof on `HumanMaleWarriorLight.mdx` confirmed the root texture case that had been missing in the standalone preview path: `replaceableTextures=1` with `TEXS[0]: replaceableId=11 ... path=n/a`
+	- real-data capture proof on `HumanMaleWarriorLight.mdx` after the replaceable-texture patch wrote `i:/parp/parp-tools/output/tmp/humanmalewarriorlight-replaceable.png`, confirming the standalone preview no longer falls back to a white untextured render on that asset
+	- real-data capture proof on the same asset with the unchanged default camera path then wrote `i:/parp/parp-tools/output/tmp/humanmalewarriorlight-default-fixed.png`, confirming the new automatic portrait-camera preference fixes the obvious back-facing first frame without requiring `--camera-mode model`
 - boundary:
 	- this closes bounded MDX first-frame camera parity plus app-side control plumbing only
 	- the next camera-facing follow-up should be either live viewport interaction in the standalone MDX workspace or a later visual-bounds-aware framing mode for particle-heavy assets
+	- broader MDX runtime work is still open, especially animated geoset tracks, particle or ribbon runtime ownership, and richer material or replaceable-texture semantics outside this bounded preview slice
 
 ### Apr 17, 2026 - LIT inspect now exposes parsed light entries and heuristic point sampling
 

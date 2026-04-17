@@ -13,11 +13,31 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
     private const uint MdxBlendModeAddAlpha = 4;
     private const uint MdxBlendModeModulate = 5;
     private const uint MdxBlendModeModulate2X = 6;
+    private const uint MdxGeosetFlagUnshaded = 0x1;
+    private const uint MdxGeosetFlagNoDepthTest = 0x40;
+    private const uint MdxGeosetFlagNoDepthSet = 0x80;
     private const float PreviewFieldOfViewDegrees = 25.0f;
     private const float PreviewPaddingScale = 1.04f;
     private const float PreviewZoomFactor = 0.72f;
 
     private readonly GL _gl;
+    private static readonly IReadOnlyDictionary<uint, string> DefaultReplaceableTextures = new Dictionary<uint, string>
+    {
+        [1] = @"Textures\ReplaceableTextures\CreatureSkin\CreatureSkin01.blp",
+        [2] = @"Textures\ReplaceableTextures\ObjectSkin\ObjectSkin01.blp",
+        [3] = @"Textures\ReplaceableTextures\WeaponBlade\WeaponBlade01.blp",
+        [4] = @"Textures\ReplaceableTextures\WeaponHandle\WeaponHandle01.blp",
+        [5] = @"Textures\ReplaceableTextures\Environment\Environment01.blp",
+        [6] = @"Textures\ReplaceableTextures\CharHair\CharHair00_00.blp",
+        [7] = @"Textures\ReplaceableTextures\CharFacialHair\CharFacialHair00_00.blp",
+        [8] = @"Textures\ReplaceableTextures\SkinExtra\SkinExtra01.blp",
+        [9] = @"Textures\ReplaceableTextures\UISkin\UISkin01.blp",
+        [10] = @"Textures\ReplaceableTextures\TaurenMane\TaurenMane00_00.blp",
+        [11] = @"Textures\ReplaceableTextures\Monster\Monster01_01.blp",
+        [12] = @"Textures\ReplaceableTextures\Monster\Monster01_02.blp",
+        [13] = @"Textures\ReplaceableTextures\Monster\Monster01_03.blp",
+    };
+
     private readonly Dictionary<string, uint> _loadedTextureCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> _ownedTextureIds = new();
     private readonly List<CommandBuffers> _commands = new();
@@ -117,10 +137,13 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
                 continue;
 
             MdxMaterialState material = ResolveMaterial(preview.Summary, geoset.MaterialId);
+            GeosetRenderState geosetState = ResolveGeosetRenderState(preview.Summary, geoset, material);
+            if (geosetState.Alpha <= 0.001f)
+                continue;
 
             uint textureId = _fallbackWhiteTexture;
             bool hasTexture = false;
-            if (!string.IsNullOrWhiteSpace(material.TexturePath) && TryGetOrLoadTexture(preview.Request, material.TexturePath, out uint loadedTextureId))
+            if (TryGetOrLoadMaterialTexture(preview.Request, material, out uint loadedTextureId))
             {
                 textureId = loadedTextureId;
                 hasTexture = true;
@@ -183,12 +206,13 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
                 hasTexture,
                 material.IsTransparent,
                 material.IsAdditive,
-                material.DepthWrite,
+                geosetState.DepthTest,
+                geosetState.DepthWrite,
                 material.AlphaCutout,
-                receivesLighting: true,
-                Vector3.One,
+                geosetState.ReceivesLighting,
+                geosetState.BaseColor,
                 Vector3.Zero,
-                material.Alpha,
+                geosetState.Alpha,
                 material.BlendMode));
         }
     }
@@ -256,6 +280,11 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             if (command.IsTransparent != transparentPass)
                 continue;
 
+            if (command.DepthTest)
+                _gl.Enable(EnableCap.DepthTest);
+            else
+                _gl.Disable(EnableCap.DepthTest);
+
             if (command.IsTransparent)
             {
                 _gl.Enable(EnableCap.Blend);
@@ -288,6 +317,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         _gl.BindVertexArray(0);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
         _gl.Disable(EnableCap.Blend);
+        _gl.Enable(EnableCap.DepthTest);
         _gl.DepthMask(true);
         _gl.UseProgram(0);
     }
@@ -448,22 +478,126 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
     private static MdxMaterialState ResolveMaterial(MdxSummary summary, int materialId)
     {
         if (materialId < 0 || materialId >= summary.Materials.Count)
-            return new MdxMaterialState(null, false, false, true, false, 1.0f, 0);
+            return new MdxMaterialState(null, 0, false, false, true, false, 1.0f, 0);
 
         MdxMaterialSummary material = summary.Materials[materialId];
         if (material.LayerCount == 0)
-            return new MdxMaterialState(null, false, false, true, false, 1.0f, 0);
+            return new MdxMaterialState(null, 0, false, false, true, false, 1.0f, 0);
 
         MdxMaterialLayerSummary layer = material.Layers[0];
-        string? texturePath = layer.TextureId >= 0 && layer.TextureId < summary.Textures.Count
-            ? summary.Textures[layer.TextureId].Path
-            : null;
+        string? texturePath = null;
+        uint replaceableId = 0;
+        if (layer.TextureId >= 0 && layer.TextureId < summary.Textures.Count)
+        {
+            MdxTextureSummary texture = summary.Textures[layer.TextureId];
+            texturePath = texture.Path;
+            replaceableId = texture.ReplaceableId;
+        }
+
         float alpha = Math.Clamp(layer.StaticAlpha <= 0.0f ? 1.0f : layer.StaticAlpha, 0.0f, 1.0f);
         bool isTransparent = layer.BlendMode != 0 || alpha < 0.999f;
         bool alphaCutout = layer.BlendMode == MdxBlendModeTransparentKey;
         bool isAdditive = layer.BlendMode is MdxBlendModeAdditive or MdxBlendModeAddAlpha;
         bool depthWrite = !isTransparent || alphaCutout;
-        return new MdxMaterialState(texturePath, isTransparent, isAdditive, depthWrite, alphaCutout, alpha, layer.BlendMode);
+        return new MdxMaterialState(texturePath, replaceableId, isTransparent, isAdditive, depthWrite, alphaCutout, alpha, layer.BlendMode);
+    }
+
+    private bool TryGetOrLoadMaterialTexture(MdxPreviewLoadRequest request, MdxMaterialState material, out uint textureId)
+    {
+        textureId = 0;
+
+        foreach (string candidate in EnumerateTextureCandidates(request, material))
+        {
+            if (!TryGetOrLoadTexture(request, candidate, out uint loadedTextureId))
+                continue;
+
+            textureId = loadedTextureId;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateTextureCandidates(MdxPreviewLoadRequest request, MdxMaterialState material)
+    {
+        if (!string.IsNullOrWhiteSpace(material.TexturePath))
+            yield return material.TexturePath;
+
+        if (material.ReplaceableId == 0)
+            yield break;
+
+        foreach (string candidate in EnumerateReplaceableTextureCandidates(request, material.ReplaceableId))
+            yield return candidate;
+    }
+
+    private static IEnumerable<string> EnumerateReplaceableTextureCandidates(MdxPreviewLoadRequest request, uint replaceableId)
+    {
+        string? modelPath = request.UsesArchiveSource ? request.VirtualPath : request.InputPath;
+        if (!string.IsNullOrWhiteSpace(modelPath))
+        {
+            string normalizedModelPath = modelPath.Replace('/', '\\');
+            string? modelDirectory = Path.GetDirectoryName(normalizedModelPath);
+            string? modelBaseName = Path.GetFileNameWithoutExtension(normalizedModelPath);
+            if (!string.IsNullOrWhiteSpace(modelDirectory) && !string.IsNullOrWhiteSpace(modelBaseName))
+            {
+                foreach (string sameDirectoryCandidate in EnumerateSameDirectoryReplaceableCandidates(modelDirectory, modelBaseName, replaceableId))
+                    yield return sameDirectoryCandidate;
+            }
+        }
+
+        if (DefaultReplaceableTextures.TryGetValue(replaceableId, out string? fallbackTexturePath))
+            yield return fallbackTexturePath;
+    }
+
+    private static IEnumerable<string> EnumerateSameDirectoryReplaceableCandidates(string modelDirectory, string modelBaseName, uint replaceableId)
+    {
+        int? skinIndex = replaceableId switch
+        {
+            1 or 11 => 1,
+            2 or 12 => 2,
+            3 or 13 => 3,
+            _ => null,
+        };
+
+        if (!skinIndex.HasValue)
+            yield break;
+
+        yield return $"{modelDirectory}\\{modelBaseName}_Skin{skinIndex.Value:00}.blp";
+        yield return $"{modelDirectory}\\{modelBaseName}Skin{skinIndex.Value:00}.blp";
+        yield return $"{modelDirectory}\\Skin{skinIndex.Value:00}.blp";
+    }
+
+    private static GeosetRenderState ResolveGeosetRenderState(MdxSummary summary, MdxGeosetGeometry geoset, MdxMaterialState material)
+    {
+        bool receivesLighting = (geoset.Flags & MdxGeosetFlagUnshaded) == 0;
+        bool depthTest = (geoset.Flags & MdxGeosetFlagNoDepthTest) == 0;
+        bool depthWrite = material.DepthWrite && (geoset.Flags & MdxGeosetFlagNoDepthSet) == 0;
+        Vector3 baseColor = Vector3.One;
+        float alpha = material.Alpha;
+
+        if (TryGetGeosetAnimation(summary, geoset.Index, out MdxGeosetAnimationSummary? geosetAnimation) && geosetAnimation is not null)
+        {
+            alpha *= Math.Clamp(geosetAnimation.StaticAlpha, 0.0f, 1.0f);
+            if (geosetAnimation.UsesStaticColor)
+                baseColor *= geosetAnimation.StaticColor;
+        }
+
+        return new GeosetRenderState(receivesLighting, depthTest, depthWrite, baseColor, Math.Clamp(alpha, 0.0f, 1.0f));
+    }
+
+    private static bool TryGetGeosetAnimation(MdxSummary summary, int geosetIndex, out MdxGeosetAnimationSummary? geosetAnimation)
+    {
+        foreach (MdxGeosetAnimationSummary candidate in summary.GeosetAnimations)
+        {
+            if (candidate.GeosetId != (uint)geosetIndex)
+                continue;
+
+            geosetAnimation = candidate;
+            return true;
+        }
+
+        geosetAnimation = null;
+        return false;
     }
 
     private void EnsureFramebuffer(int width, int height)
@@ -765,6 +899,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             bool hasTexture,
             bool isTransparent,
             bool isAdditive,
+            bool depthTest,
             bool depthWrite,
             bool alphaCutout,
             bool receivesLighting,
@@ -781,6 +916,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             HasTexture = hasTexture;
             IsTransparent = isTransparent;
             IsAdditive = isAdditive;
+            DepthTest = depthTest;
             DepthWrite = depthWrite;
             AlphaCutout = alphaCutout;
             ReceivesLighting = receivesLighting;
@@ -806,6 +942,8 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
 
         public bool IsAdditive { get; }
 
+        public bool DepthTest { get; }
+
         public bool DepthWrite { get; }
 
         public bool AlphaCutout { get; }
@@ -830,10 +968,18 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
 
     private readonly record struct MdxMaterialState(
         string? TexturePath,
+        uint ReplaceableId,
         bool IsTransparent,
         bool IsAdditive,
         bool DepthWrite,
         bool AlphaCutout,
         float Alpha,
         uint BlendMode);
+
+    private readonly record struct GeosetRenderState(
+        bool ReceivesLighting,
+        bool DepthTest,
+        bool DepthWrite,
+        Vector3 BaseColor,
+        float Alpha);
 }

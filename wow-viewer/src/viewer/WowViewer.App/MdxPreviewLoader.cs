@@ -15,6 +15,10 @@ internal sealed class MdxPreviewLoadRequest
 
     public string? BuildLabel { get; init; }
 
+    public int SequenceIndex { get; init; }
+
+    public int TimeMs { get; init; }
+
     public int VisualWidth { get; init; } = 384;
 
     public int VisualHeight { get; init; } = 384;
@@ -33,6 +37,12 @@ internal sealed class MdxPreviewLoadRequest
     {
         if (!UsesArchiveSource && string.IsNullOrWhiteSpace(InputPath))
             throw new ArgumentException("Provide --input <file.mdx> or --archive-root <dir> with --virtual-path <path/to/file.mdx>.");
+
+        if (SequenceIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(SequenceIndex), "Sequence index must be non-negative.");
+
+        if (TimeMs < 0)
+            throw new ArgumentOutOfRangeException(nameof(TimeMs), "Time must be non-negative.");
 
         if (VisualWidth < 16 || VisualHeight < 16)
             throw new ArgumentOutOfRangeException(nameof(VisualWidth), "Visual size must be at least 16x16.");

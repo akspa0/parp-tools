@@ -16,6 +16,16 @@
 		- default light direction now matches the legacy above or front directional light assumption
 		- ambient and light colors now match the brighter terrain or model preview defaults from `MdxViewer`
 		- the fragment shader now uses softer wrap lighting instead of the harsher one-sided diffuse path, so non-emissive models are no longer left effectively unlit when they face away from the old backlit direction
+	- the same renderer now also respects the first missing MDX per-geoset render signals that were already present in parsed summary data instead of flattening every preview draw to one shared state:
+		- geoset `Unshaded` now disables directional lighting for that draw instead of forcing all geometry through the lit path
+		- geoset `NoDepthTest` and `NoDepthSet` now flow into per-draw depth-test and depth-write state
+		- static geoset-animation alpha and static-color overrides now modulate preview draw alpha and base color for matching geosets, and zero-alpha geosets are skipped entirely in the bounded preview path
+	- bounded replaceable-texture fallback support is now present in the same standalone preview path:
+		- empty-path replaceable textures now try local same-directory `_SkinNN.blp` candidates first for classic character or creature assets
+		- when no same-directory skin variant exists, the preview falls back to the legacy hardcoded replaceable-texture defaults instead of silently sampling the white fallback texture
+	- `wow-viewer/src/viewer/WowViewer.App/PreviewCameraPlanner.cs` now also applies a narrow automatic camera preference on top of the earlier default `frame` mode:
+		- when the asset exposes a portrait camera and also uses replaceable textures, the default standalone preview now prefers the embedded model camera instead of the generic frame camera
+		- this keeps props and normal non-character assets on the bounded `frame` path while avoiding the obvious back-facing first frame on character-like assets such as `HumanMaleWarriorLight`
 - `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` plus `WowViewerDesktopApp.cs` now carry MDX camera state through the desktop workspace itself:
 	- frame or orbit or model mode is selectable in-app
 	- orbit presets and custom azimuth or elevation are now configurable in-app
@@ -28,6 +38,9 @@
 		- after switching frame-mode back to the old viewer-shaped wider FOV, `Banshee.mdx` settled into a plausible old-viewer-style first frame
 		- `chest01.mdx` then confirmed the small-prop case needed a lower standalone frame-distance floor, and the final floor reduction improved that case without regressing the larger `Banshee` frame materially
 		- after porting the old viewer's global sun defaults and softer wrap lighting into the standalone MDX shader, fresh `Banshee.mdx` and `chest01.mdx` captures confirmed the preview no longer depends on emissive content alone to stay readable
+		- after wiring per-geoset render state into the same preview path, a fresh `Wisp.mdx` capture still completed successfully while exercising the new per-draw depth and geoset-animation state path instead of the earlier one-state-for-all-geosets contract
+		- `HumanMaleWarriorLight.mdx` then exposed two bounded standalone MDX gaps in sequence: the preview originally missed its only texture because it used `replaceableId=11` with an empty path, and after that texture path was fixed the same asset still defaulted to a worse back-facing generic frame view instead of its embedded portrait camera
+		- fresh `HumanMaleWarriorLight.mdx` captures now confirm both bounded fixes: replaceable textures resolve through the standalone preview path, and the default camera now automatically lands on the embedded portrait view for this character-like asset instead of requiring a manual `--camera-mode model` override
 - current boundary:
 	- this closes the bounded standalone MDX first-view framing and app-side camera-control slice only; it does not yet add live mouse orbit or pan or zoom interaction in the preview viewport itself
 	- effect-heavy or particle-heavy assets may still need a later visual-bounds-aware framing mode because raw mesh bounds are not always the full visible story

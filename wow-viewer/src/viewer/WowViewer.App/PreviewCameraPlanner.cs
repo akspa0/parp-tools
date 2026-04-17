@@ -104,6 +104,13 @@ internal static class PreviewCameraPlanner
         PreviewCameraSettings resolved = settings.Resolve();
         resolved.Validate();
 
+        if (resolved.Mode == PreviewCameraMode.Frame
+            && ShouldPreferEmbeddedModelCamera(summary)
+            && TryCreateModelPose(min, max, resolved, summary, width, height, out PreviewCameraPose preferredModelPose))
+        {
+            return preferredModelPose;
+        }
+
         if (resolved.Mode == PreviewCameraMode.Model
             && TryCreateModelPose(min, max, resolved, summary, width, height, out PreviewCameraPose modelPose))
         {
@@ -114,6 +121,18 @@ internal static class PreviewCameraPlanner
             return CreateOrbitPose(min, max, resolved, summary, width, height);
 
         return CreateLegacyFramePose(min, max, resolved, width, height, mdxMirrorX: false);
+    }
+
+    private static bool ShouldPreferEmbeddedModelCamera(MdxSummary? summary)
+    {
+        if (summary is null || summary.Cameras.Count == 0)
+            return false;
+
+        if (summary.ReplaceableTextureCount <= 0)
+            return false;
+
+        return summary.Cameras.Any(static candidate =>
+            candidate.Name.Contains("portrait", StringComparison.OrdinalIgnoreCase));
     }
 
     public static PreviewInteractiveFrame CreateLegacyFrameBounds(Vector3 min, Vector3 max, bool mdxMirrorX)

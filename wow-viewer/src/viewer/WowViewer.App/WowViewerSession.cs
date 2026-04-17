@@ -209,6 +209,8 @@ internal sealed class WowViewerSession
             VirtualPath = Source.UsesArchiveSource ? Source.VirtualPath : null,
             InputPath = Source.UsesArchiveSource ? null : Source.InputPath,
             BuildLabel = Source.BuildLabel,
+            SequenceIndex = SequenceIndex,
+            TimeMs = TimeMs,
             VisualWidth = VisualSize,
             VisualHeight = VisualSize,
             Camera = new PreviewCameraSettings

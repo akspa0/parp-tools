@@ -457,6 +457,8 @@ internal static class Program
         string? archiveRoot = GetOption(args, "--archive-root", "-r");
         string? virtualPath = GetOption(args, "--virtual-path", "-v");
         string? buildLabel = GetOption(args, "--build-label", "-b");
+        string? sequenceIndexText = GetOption(args, "--sequence-index", "-s");
+        string? timeMsText = GetOption(args, "--time-ms", "-t");
         string? visualSizeText = GetOption(args, "--visual-size");
         string? visualWidthText = GetOption(args, "--visual-width");
         string? visualHeightText = GetOption(args, "--visual-height");
@@ -472,6 +474,20 @@ internal static class Program
 
         if (string.IsNullOrWhiteSpace(input) && (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(virtualPath)))
             throw new ArgumentException("Provide --input <file.mdx> or --archive-root <dir> with --virtual-path <path/to/file.mdx>.");
+
+        int sequenceIndex = 0;
+        if (!string.IsNullOrWhiteSpace(sequenceIndexText)
+            && (!int.TryParse(sequenceIndexText, out sequenceIndex) || sequenceIndex < 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(sequenceIndexText), "--sequence-index must be a non-negative integer.");
+        }
+
+        int timeMs = 0;
+        if (!string.IsNullOrWhiteSpace(timeMsText)
+            && (!int.TryParse(timeMsText, out timeMs) || timeMs < 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeMsText), "--time-ms must be a non-negative integer.");
+        }
 
         int visualWidth = defaultVisualWidth;
         int visualHeight = defaultVisualHeight;
@@ -528,6 +544,8 @@ internal static class Program
             ArchiveRoot = archiveRoot,
             VirtualPath = string.IsNullOrWhiteSpace(archiveRoot) ? null : (virtualPath ?? input),
             BuildLabel = buildLabel,
+            SequenceIndex = sequenceIndex,
+            TimeMs = timeMs,
             VisualWidth = visualWidth,
             VisualHeight = visualHeight,
             Camera = new PreviewCameraSettings
@@ -617,8 +635,8 @@ internal static class Program
         Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp|file.png> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --input <file.m2> --sequence-index <n> --output <file.bmp|file.png> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
-        Console.WriteLine("  wowviewer-app mdx-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.mdx> --output <file.bmp|file.png> [--build-label <label>] [--visual-width <px>] [--visual-height <px>] [--visual-size <px>] [--camera-mode frame|orbit|model] [--camera-preset front|back|left|right|top|three_quarter] [--camera-azimuth <deg>] [--camera-elevation <deg>] [--camera-fov <deg>] [--camera-zoom <factor>]");
-        Console.WriteLine("  wowviewer-app mdx-gpu-frame --input <file.mdx> --output <file.bmp|file.png> [--build-label <label>] [--visual-width <px>] [--visual-height <px>] [--visual-size <px>] [--camera-mode frame|orbit|model] [--camera-preset front|back|left|right|top|three_quarter] [--camera-azimuth <deg>] [--camera-elevation <deg>] [--camera-fov <deg>] [--camera-zoom <factor>]");
+        Console.WriteLine("  wowviewer-app mdx-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.mdx> --output <file.bmp|file.png> [--build-label <label>] [--sequence-index <n>] [--time-ms <ms>] [--visual-width <px>] [--visual-height <px>] [--visual-size <px>] [--camera-mode frame|orbit|model] [--camera-preset front|back|left|right|top|three_quarter] [--camera-azimuth <deg>] [--camera-elevation <deg>] [--camera-fov <deg>] [--camera-zoom <factor>]");
+        Console.WriteLine("  wowviewer-app mdx-gpu-frame --input <file.mdx> --output <file.bmp|file.png> [--build-label <label>] [--sequence-index <n>] [--time-ms <ms>] [--visual-width <px>] [--visual-height <px>] [--visual-size <px>] [--camera-mode frame|orbit|model] [--camera-preset front|back|left|right|top|three_quarter] [--camera-azimuth <deg>] [--camera-elevation <deg>] [--camera-fov <deg>] [--camera-zoom <factor>]");
         Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--build-label <label>]");
         Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--terrain-preview-output <file.bmp>]");
         Console.WriteLine("  wowviewer-app world-placement-audit --client-root <game dir> --map <directory|id|name> [--build-label <label>] [--limit <count>]");
