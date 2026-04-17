@@ -4,6 +4,7 @@ using WowViewer.Core.PM4;
 using WowViewer.Core.Runtime;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Runtime.World;
+using WowViewer.Core.Runtime.World.Passes;
 
 namespace WowViewer.App;
 
@@ -129,6 +130,7 @@ internal static class Program
         WowViewerWorldRuntimeFrameResult result = WowViewerWorldRuntimeBridge.Build(request);
 
         Console.WriteLine($"WowViewer.App world-frame: map={result.Session.RequestedMapInput}->{result.Session.ResolvedMapDirectory} tile=({result.SelectedTileX},{result.SelectedTileY}) placementSource={result.PlacementSourcePath} objectPhase={result.ObjectPhaseExecuted} totalMs={result.Stats.TotalCpuMs:F2}");
+        Console.WriteLine($"WowViewer.App world-frame options: wmo={result.PassOptions.WmosVisible} mdx={result.PassOptions.DoodadsVisible} sky={result.PassOptions.SkyVisible} wdl={result.PassOptions.WdlVisible} terrain={result.PassOptions.TerrainVisible} liquid={result.PassOptions.LiquidVisible} overlay={result.PassOptions.OverlayVisible}");
         Console.WriteLine($"WowViewer.App world-frame placements: wmo={result.WmoInstances.Count} readyWmo={result.ReadyWmoCount} mdx={result.MdxInstances.Count} readyMdx={result.ReadyMdxCount} pending={result.PendingAssetKeys.Count}");
         Console.WriteLine($"WowViewer.App world-frame visibility: visibleWmo={result.Visibility.VisibleWmos.Count} culledWmo={result.CulledWmoCount} visibleMdx={result.Visibility.VisibleMdx.Count} culledMdx={result.CulledMdxCount} taxi={result.Visibility.VisibleTaxiMdxCount}");
         Console.WriteLine($"WowViewer.App world-frame passes: updatedMdx={result.Stats.MdxAnimation.SubmittedCount} wmoOpaque={result.Stats.WmoSubmission.SubmittedCount} mdxOpaque={result.Stats.MdxOpaqueSubmission.SubmittedCount} mdxTransparent={result.Stats.MdxTransparentSubmission.SubmittedCount} opaqueRoutes={result.PassFrame.OpaqueVisibleMdxRoutes.Count} transparentRoutes={result.PassFrame.TransparentVisibleMdxRoutes.Count}");
@@ -181,6 +183,13 @@ internal static class Program
                 session.World.TileX = tileX;
             if (int.TryParse(tileYText, out int tileY))
                 session.World.TileY = tileY;
+            session.World.ShowWmos = !HasFlag(args, "--hide-wmos");
+            session.World.ShowDoodads = !HasFlag(args, "--hide-doodads");
+            session.World.ShowSky = !HasFlag(args, "--hide-sky");
+            session.World.ShowWdl = !HasFlag(args, "--hide-wdl");
+            session.World.ShowTerrain = !HasFlag(args, "--hide-terrain");
+            session.World.ShowLiquid = !HasFlag(args, "--hide-liquid");
+            session.World.ShowOverlay = !HasFlag(args, "--hide-overlay");
         }
         else
         {
@@ -230,7 +239,17 @@ internal static class Program
         if (!string.IsNullOrWhiteSpace(tileYText) && (!int.TryParse(tileYText, out tileY) || tileY < 0 || tileY > 63))
             throw new ArgumentOutOfRangeException(nameof(tileYText), "--tile-y must be in the range 0..63.");
 
-        return new WowViewerWorldRuntimeFrameRequest(request.ClientRoot, request.MapInput, request.BuildLabel, tileX, tileY);
+        WorldFramePassOptions passOptions = new(
+            objectsVisible: !HasFlag(args, "--hide-wmos") || !HasFlag(args, "--hide-doodads"),
+            wmosVisible: !HasFlag(args, "--hide-wmos"),
+            doodadsVisible: !HasFlag(args, "--hide-doodads"),
+            skyVisible: !HasFlag(args, "--hide-sky"),
+            wdlVisible: !HasFlag(args, "--hide-wdl"),
+            terrainVisible: !HasFlag(args, "--hide-terrain"),
+            liquidVisible: !HasFlag(args, "--hide-liquid"),
+            overlayVisible: !HasFlag(args, "--hide-overlay"));
+
+        return new WowViewerWorldRuntimeFrameRequest(request.ClientRoot, request.MapInput, request.BuildLabel, tileX, tileY, passOptions);
     }
 
     private static M2PreviewLoadRequest ParseRequiredM2Request(string[] args, int defaultVisualSize)
@@ -338,6 +357,11 @@ internal static class Program
         return null;
     }
 
+    private static bool HasFlag(string[] args, params string[] names)
+    {
+        return args.Any(arg => names.Contains(arg, StringComparer.OrdinalIgnoreCase));
+    }
+
     private static void ShowUsage()
     {
         Console.WriteLine("WowViewer.App");
@@ -348,13 +372,13 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  wowviewer-app");
-        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file> | --client-root <game dir> --map <directory|id|name>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>]");
+        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file> | --client-root <game dir> --map <directory|id|name>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay]");
         Console.WriteLine("  wowviewer-app m2-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --input <file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--build-label <label>]");
-        Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>]");
+        Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay]");
     }
 
     private static WowViewerWorkspaceMode ParseWorkspaceMode(string? workspaceText)

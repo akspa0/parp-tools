@@ -1,9 +1,43 @@
 namespace WowViewer.Core.Runtime.World.Passes;
 
-public readonly record struct WorldFramePassOptions(
-    bool ObjectsVisible,
-    bool WmosVisible,
-    bool DoodadsVisible);
+public readonly struct WorldFramePassOptions
+{
+    public WorldFramePassOptions(
+        bool objectsVisible,
+        bool wmosVisible,
+        bool doodadsVisible,
+        bool skyVisible = true,
+        bool wdlVisible = true,
+        bool terrainVisible = true,
+        bool liquidVisible = true,
+        bool overlayVisible = true)
+    {
+        ObjectsVisible = objectsVisible;
+        WmosVisible = wmosVisible;
+        DoodadsVisible = doodadsVisible;
+        SkyVisible = skyVisible;
+        WdlVisible = wdlVisible;
+        TerrainVisible = terrainVisible;
+        LiquidVisible = liquidVisible;
+        OverlayVisible = overlayVisible;
+    }
+
+    public bool ObjectsVisible { get; }
+
+    public bool WmosVisible { get; }
+
+    public bool DoodadsVisible { get; }
+
+    public bool SkyVisible { get; }
+
+    public bool WdlVisible { get; }
+
+    public bool TerrainVisible { get; }
+
+    public bool LiquidVisible { get; }
+
+    public bool OverlayVisible { get; }
+}
 
 public readonly record struct WorldFramePasses(
     Action RenderLighting,
@@ -23,10 +57,18 @@ public static class WorldFramePassCoordinator
     public static bool Execute(WorldFramePassOptions options, in WorldFramePasses passes)
     {
         passes.RenderLighting();
-        passes.RenderSky();
-        passes.RenderSkyboxBackdrop();
-        passes.RenderWdl();
-        passes.RenderTerrain();
+
+        if (options.SkyVisible)
+        {
+            passes.RenderSky();
+            passes.RenderSkyboxBackdrop();
+        }
+
+        if (options.WdlVisible)
+            passes.RenderWdl();
+
+        if (options.TerrainVisible)
+            passes.RenderTerrain();
 
         if (!options.ObjectsVisible)
             return false;
@@ -39,12 +81,15 @@ public static class WorldFramePassCoordinator
         if (options.DoodadsVisible)
             passes.RenderMdxOpaque();
 
-        passes.RenderLiquid();
+        if (options.LiquidVisible)
+            passes.RenderLiquid();
 
         if (options.DoodadsVisible)
             passes.RenderMdxTransparent();
 
-        passes.RenderOverlay();
+        if (options.OverlayVisible)
+            passes.RenderOverlay();
+
         return true;
     }
 }

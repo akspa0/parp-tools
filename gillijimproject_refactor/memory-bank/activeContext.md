@@ -2,17 +2,18 @@
 
 # Active Context
 
-## Apr 17, 2026 - wow-viewer app slice 08 landed: the legacy viewer boundary is now explicit in repo guidance
+## Apr 17, 2026 - wow-viewer app slice 09 landed: the bounded world frame now consumes runtime-owned pass options
 
-- slice 08 from the viewer-app cutover plan is now landed as documentation and workflow routing
-- added `wow-viewer/docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md` to state that `WowViewer.App` is the canonical home for new viewer-shell work and to classify remaining `MdxViewer` surfaces as either compatibility-only or legacy editor or archaeology work
-- `wow-viewer/README.md`, `.github/copilot-instructions.md`, and `AGENTS.md` now all route future viewer-app shell work through that boundary note and the current viewer-app cutover plan instead of leaving `ViewerApp` ownership ambiguous
+- slice 09 from the viewer-app cutover plan is now landed in `wow-viewer`
+- `WorldFramePassCoordinator.cs` now owns richer runtime pass options for WMO/MDX family gating plus sky/WDL/terrain/liquid/overlay stage gating instead of treating those as host-local loose booleans outside the runtime contract
+- `WowViewerSession.cs`, `Program.cs`, `WowViewerWorldRuntimeBridge.cs`, and `WowViewerDesktopApp.cs` now thread those options through persisted world-session state, CLI `world-frame --hide-*` flags, and the bounded world-session controls or diagnostics
 - bounded proof in this chat:
-	- this slice changed continuity and workflow guidance only; no code path or runtime proof changed
-	- the concrete closure is that repo-local discovery no longer depends on chat recovery to know that new viewer-shell work belongs in `wow-viewer`
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldFramePassCoordinatorTests` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+	- real fixed-root option proof via `WowViewer.App world-frame --hide-doodads` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, still auto-selected tile `(39,32)` and `World\Maps\Azeroth\Azeroth_39_32.adt`, but changed the bounded frame result to `visibleMdx=0`, `updatedMdx=0`, `mdxOpaque=0`, and `mdxTransparent=0` while WMO counts remained active
 - current boundary:
-	- this closes the documentation and routing side of the cutover review only
-	- the next real viewer-facing slice should be a world-runtime or renderer ownership slice in `wow-viewer`, not more shell work in `MdxViewer`
+	- this closes runtime-owned pass-option control for the bounded one-tile world frame only
+	- the next real viewer-facing slice should extract a non-object runtime service or renderer seam for terrain, WDL, liquid, or overlay work in `wow-viewer`
 
 ## Apr 17, 2026 - wow-viewer app slice 05 landed: the shell now has a bounded world-session bootstrap path over shared WDT readers
 

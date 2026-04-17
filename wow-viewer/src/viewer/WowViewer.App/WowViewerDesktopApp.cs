@@ -427,6 +427,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
         string buildLabel = _session.World.BuildLabel;
         int tileX = _session.World.TileX;
         int tileY = _session.World.TileY;
+        bool showWmos = _session.World.ShowWmos;
+        bool showDoodads = _session.World.ShowDoodads;
+        bool showSky = _session.World.ShowSky;
+        bool showWdl = _session.World.ShowWdl;
+        bool showTerrain = _session.World.ShowTerrain;
+        bool showLiquid = _session.World.ShowLiquid;
+        bool showOverlay = _session.World.ShowOverlay;
         ImGui.InputText("Client Root", ref clientRoot, 1024);
         ImGui.InputText("Map", ref mapInput, 256);
         ImGui.InputText("Build Label", ref buildLabel, 256);
@@ -437,6 +444,28 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _session.World.BuildLabel = buildLabel;
         _session.World.TileX = tileX;
         _session.World.TileY = tileY;
+        ImGui.Separator();
+        ImGui.TextDisabled("World Layers");
+        ImGui.Checkbox("Sky", ref showSky);
+        ImGui.SameLine();
+        ImGui.Checkbox("WDL", ref showWdl);
+        ImGui.SameLine();
+        ImGui.Checkbox("Terrain", ref showTerrain);
+        ImGui.Checkbox("Liquid", ref showLiquid);
+        ImGui.SameLine();
+        ImGui.Checkbox("Overlay", ref showOverlay);
+        ImGui.Separator();
+        ImGui.TextDisabled("Object Families");
+        ImGui.Checkbox("WMO", ref showWmos);
+        ImGui.SameLine();
+        ImGui.Checkbox("MDX", ref showDoodads);
+        _session.World.ShowWmos = showWmos;
+        _session.World.ShowDoodads = showDoodads;
+        _session.World.ShowSky = showSky;
+        _session.World.ShowWdl = showWdl;
+        _session.World.ShowTerrain = showTerrain;
+        _session.World.ShowLiquid = showLiquid;
+        _session.World.ShowOverlay = showOverlay;
         _session.Normalize();
 
         if (ImGui.Button("Open World Session", new Vector2(-1, 0)))
@@ -460,6 +489,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"Selected Tile: ({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})");
             ImGui.Text($"Visible Objects: {_currentWorldRuntimeFrame.Visibility.VisibleWmos.Count + _currentWorldRuntimeFrame.Visibility.VisibleMdx.Count}");
             ImGui.Text($"Pending Assets: {_currentWorldRuntimeFrame.PendingAssetKeys.Count}");
+            ImGui.Text($"Pass Options: WMO {_currentWorldRuntimeFrame.PassOptions.WmosVisible}, MDX {_currentWorldRuntimeFrame.PassOptions.DoodadsVisible}, WDL {_currentWorldRuntimeFrame.PassOptions.WdlVisible}, Terrain {_currentWorldRuntimeFrame.PassOptions.TerrainVisible}, Liquid {_currentWorldRuntimeFrame.PassOptions.LiquidVisible}, Overlay {_currentWorldRuntimeFrame.PassOptions.OverlayVisible}");
         }
     }
 
@@ -740,6 +770,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"Placement Source: {result.PlacementSourcePath}");
         ImGui.Text($"Camera: {FormatVector3(result.CameraPosition)} -> {FormatVector3(result.CameraForward)}");
         ImGui.Text($"Object Phase Executed: {result.ObjectPhaseExecuted}");
+        ImGui.Text($"Pass Options: sky={result.PassOptions.SkyVisible} wdl={result.PassOptions.WdlVisible} terrain={result.PassOptions.TerrainVisible} liquid={result.PassOptions.LiquidVisible} overlay={result.PassOptions.OverlayVisible}");
+        ImGui.Text($"Object Filters: wmo={result.PassOptions.WmosVisible} mdx={result.PassOptions.DoodadsVisible}");
         ImGui.Text($"Total Cpu Ms: {result.Stats.TotalCpuMs:F2}");
         ImGui.Separator();
 

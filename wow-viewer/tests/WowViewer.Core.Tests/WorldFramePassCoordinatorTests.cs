@@ -10,7 +10,7 @@ public sealed class WorldFramePassCoordinatorTests
         List<string> stages = new();
 
         bool continued = WorldFramePassCoordinator.Execute(
-            new WorldFramePassOptions(ObjectsVisible: true, WmosVisible: true, DoodadsVisible: true),
+            new WorldFramePassOptions(objectsVisible: true, wmosVisible: true, doodadsVisible: true),
             CreatePasses(stages));
 
         Assert.True(continued);
@@ -37,11 +37,41 @@ public sealed class WorldFramePassCoordinatorTests
         List<string> stages = new();
 
         bool continued = WorldFramePassCoordinator.Execute(
-            new WorldFramePassOptions(ObjectsVisible: false, WmosVisible: true, DoodadsVisible: true),
+            new WorldFramePassOptions(objectsVisible: false, wmosVisible: true, doodadsVisible: true),
             CreatePasses(stages));
 
         Assert.False(continued);
         Assert.Equal(["lighting", "sky", "skybox", "wdl", "terrain"], stages);
+    }
+
+    [Fact]
+    public void Execute_SkipsDisabledWorldLayers_WhileKeepingObjectPhaseOrder()
+    {
+        List<string> stages = new();
+
+        bool continued = WorldFramePassCoordinator.Execute(
+            new WorldFramePassOptions(
+                objectsVisible: true,
+                wmosVisible: true,
+                doodadsVisible: true,
+                skyVisible: false,
+                wdlVisible: false,
+                terrainVisible: true,
+                liquidVisible: false,
+                overlayVisible: false),
+            CreatePasses(stages));
+
+        Assert.True(continued);
+        Assert.Equal(
+        [
+            "lighting",
+            "terrain",
+            "prepare",
+            "wmo",
+            "mdx-opaque",
+            "mdx-transparent"
+        ],
+        stages);
     }
 
     [Fact]
@@ -50,7 +80,7 @@ public sealed class WorldFramePassCoordinatorTests
         List<string> stages = new();
 
         bool continued = WorldFramePassCoordinator.Execute(
-            new WorldFramePassOptions(ObjectsVisible: true, WmosVisible: false, DoodadsVisible: false),
+            new WorldFramePassOptions(objectsVisible: true, wmosVisible: false, doodadsVisible: false),
             CreatePasses(stages));
 
         Assert.True(continued);

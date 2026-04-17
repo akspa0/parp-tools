@@ -1,16 +1,18 @@
 # Progress
 
-### Apr 17, 2026 - wow-viewer app slice 08 landed: viewer ownership routing is now explicit
+### Apr 17, 2026 - wow-viewer app slice 09 landed: the bounded world frame now has runtime-owned pass options
 
 - what changed:
-	- added `wow-viewer/docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md` to classify `WowViewer.App` as the canonical home for new shell work and to split remaining `MdxViewer` viewer surfaces into compatibility-only versus legacy editor or archaeology buckets
-	- updated `wow-viewer/README.md`, `.github/copilot-instructions.md`, and `AGENTS.md` so future repo-local discovery points new viewer work at `wow-viewer` first without needing prior chat recovery
-	- updated the viewer-app cutover plan and continuity files so the next viewer-facing slice moves back to runtime or renderer ownership instead of more shell routing
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Passes/WorldFramePassCoordinator.cs` now owns richer pass options for WMO/MDX family gating plus sky/WDL/terrain/liquid/overlay stage gating, and `wow-viewer/tests/WowViewer.Core.Tests/WorldFramePassCoordinatorTests.cs` now proves the new disabled-layer behavior
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs`, `Program.cs`, `WowViewerWorldRuntimeBridge.cs`, and `WowViewerDesktopApp.cs` now consume that runtime-owned options seam through persisted world-session state, `world-frame --hide-*` flags, and the bounded world-session controls or diagnostics
+	- `wow-viewer/README.md` and the viewer-app cutover continuity files now describe this as the next landed runtime slice instead of leaving slice 08 as the active stop point
 - validation:
-	- documentation and workflow-guidance slice only; no build or runtime proof changed in this step
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldFramePassCoordinatorTests` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
+	- real-data runtime option proof succeeded via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340 --hide-doodads`, which changed the bounded frame result to zero visible or submitted MDX while keeping WMO counts active on the same auto-selected Azeroth tile `(39,32)`
 - boundary:
-	- this closes routing and ownership guidance only
-	- terrain, liquid, WDL, and broader world renderer ownership still remain implementation work, not documentation closure
+	- this closes runtime-owned pass-option control only
+	- terrain/WDL/liquid/overlay runtime-service extraction and broader renderer ownership still remain separate implementation work
 
 ### Apr 17, 2026 - wow-viewer app slice 05 landed: the desktop shell now has bounded world-session bootstrap over shared map readers
 

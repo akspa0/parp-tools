@@ -18,7 +18,8 @@ internal sealed record WowViewerWorldRuntimeFrameRequest(
     string MapInput,
     string BuildLabel,
     int TileX,
-    int TileY);
+    int TileY,
+    WorldFramePassOptions PassOptions);
 
 internal sealed class WowViewerWorldRuntimeFrameResult
 {
@@ -36,6 +37,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         int culledMdxCount,
         WorldVisibilityFrame visibility,
         WorldObjectPassFrame passFrame,
+        WorldFramePassOptions passOptions,
         WorldRenderFrameStats stats,
         bool objectPhaseExecuted,
         string optimizationHint,
@@ -58,6 +60,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         CulledMdxCount = culledMdxCount;
         Visibility = visibility;
         PassFrame = passFrame;
+        PassOptions = passOptions;
         Stats = stats;
         ObjectPhaseExecuted = objectPhaseExecuted;
         OptimizationHint = optimizationHint;
@@ -93,6 +96,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
     public WorldVisibilityFrame Visibility { get; }
 
     public WorldObjectPassFrame PassFrame { get; }
+
+    public WorldFramePassOptions PassOptions { get; }
 
     public WorldRenderFrameStats Stats { get; }
 
@@ -156,25 +161,29 @@ internal static class WowViewerWorldRuntimeBridge
         Stopwatch totalStopwatch = Stopwatch.StartNew();
 
         Stopwatch wmoVisibilityStopwatch = Stopwatch.StartNew();
-        int culledWmoCount = WorldObjectVisibilityCollector.CollectVisibleWmos(
-            visibility,
-            wmoInstances,
-            context,
-            static _ => false,
-            static (_, _) => true,
-            modelKey => assetReadyLookup.TryGetValue(modelKey, out bool ready) && ready,
-            (modelKey, _) => pendingAssetKeys.Add(modelKey));
+        int culledWmoCount = request.PassOptions.WmosVisible
+            ? WorldObjectVisibilityCollector.CollectVisibleWmos(
+                visibility,
+                wmoInstances,
+                context,
+                static _ => false,
+                static (_, _) => true,
+                modelKey => assetReadyLookup.TryGetValue(modelKey, out bool ready) && ready,
+                (modelKey, _) => pendingAssetKeys.Add(modelKey))
+            : 0;
         wmoVisibilityStopwatch.Stop();
 
         Stopwatch mdxVisibilityStopwatch = Stopwatch.StartNew();
-        int culledMdxCount = WorldObjectVisibilityCollector.CollectVisibleMdx(
-            visibility,
-            mdxInstances,
-            context,
-            static _ => false,
-            static (_, _) => true,
-            modelKey => assetReadyLookup.TryGetValue(modelKey, out bool ready) && ready,
-            (modelKey, _) => pendingAssetKeys.Add(modelKey));
+        int culledMdxCount = request.PassOptions.DoodadsVisible
+            ? WorldObjectVisibilityCollector.CollectVisibleMdx(
+                visibility,
+                mdxInstances,
+                context,
+                static _ => false,
+                static (_, _) => true,
+                modelKey => assetReadyLookup.TryGetValue(modelKey, out bool ready) && ready,
+                (modelKey, _) => pendingAssetKeys.Add(modelKey))
+            : 0;
         mdxVisibilityStopwatch.Stop();
 
         WorldObjectPassFrame passFrame = new();
@@ -190,11 +199,18 @@ internal static class WowViewerWorldRuntimeBridge
         double mdxTransparentSortMs = 0;
         double mdxTransparentSubmissionMs = 0;
 
+        WorldFramePassOptions appliedPassOptions = new(
+            objectsVisible: request.PassOptions.ObjectsVisible && (visibility.VisibleWmos.Count > 0 || visibility.VisibleMdx.Count > 0),
+            wmosVisible: request.PassOptions.WmosVisible && visibility.VisibleWmos.Count > 0,
+            doodadsVisible: request.PassOptions.DoodadsVisible && visibility.VisibleMdx.Count > 0,
+            skyVisible: request.PassOptions.SkyVisible,
+            wdlVisible: request.PassOptions.WdlVisible,
+            terrainVisible: request.PassOptions.TerrainVisible,
+            liquidVisible: request.PassOptions.LiquidVisible,
+            overlayVisible: request.PassOptions.OverlayVisible);
+
         bool objectPhaseExecuted = WorldFramePassCoordinator.Execute(
-            new WorldFramePassOptions(
-                ObjectsVisible: visibility.VisibleWmos.Count > 0 || visibility.VisibleMdx.Count > 0,
-                WmosVisible: visibility.VisibleWmos.Count > 0,
-                DoodadsVisible: visibility.VisibleMdx.Count > 0),
+            appliedPassOptions,
             new WorldFramePasses(
                 static () => { },
                 static () => { },
@@ -298,6 +314,7 @@ internal static class WowViewerWorldRuntimeBridge
             culledMdxCount,
             visibility,
             passFrame,
+            appliedPassOptions,
             stats,
             objectPhaseExecuted,
             WorldRenderOptimizationAdvisor.BuildHint(stats),

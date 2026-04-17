@@ -243,6 +243,31 @@
   - this closes the documentation and workflow-routing side of the cutover review only
   - it does not claim renderer parity, terrain-runtime ownership, or editor-feature migration closure
 
+### Slice 09 - World Frame Runtime Options
+
+- target problem:
+  - the bounded world app consumer still treated non-object passes as anonymous callbacks and could not drive runtime-owned stage or family gating
+- implementation scope:
+  - expand the runtime world-frame options contract so the current app consumer can control WMO/MDX family visibility and sky/WDL/terrain/liquid/overlay stage gating through runtime-owned options instead of host-local loose booleans
+  - keep the slice bounded to pass-option ownership and current app-consumer proof; do not claim terrain or liquid renderer extraction yet
+- proof goal:
+  - the `world-frame` proof path changes real frame results when runtime pass options are toggled
+
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer`:
+  - `wow-viewer/src/core/WowViewer.Core.Runtime/World/Passes/WorldFramePassCoordinator.cs` now exposes richer `WorldFramePassOptions` with runtime-owned flags for WMO/MDX family gating and sky/WDL/terrain/liquid/overlay stage gating while preserving the existing ordered pass contract
+  - `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs`, `Program.cs`, `WowViewerWorldRuntimeBridge.cs`, and `WowViewerDesktopApp.cs` now thread those options through persisted world-session state, CLI `world-frame --hide-*` flags, the bounded runtime frame request/result, and the current desktop controls or diagnostics
+  - `wow-viewer/tests/WowViewer.Core.Tests/WorldFramePassCoordinatorTests.cs` now proves both the legacy ordered flow and the new disabled-layer behavior
+- proof completed:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldFramePassCoordinatorTests`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - real-data option proof via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340 --hide-doodads`
+  - that proof still auto-selected tile `(39,32)` and `World\Maps\Azeroth\Azeroth_39_32.adt`, but now reported `mdx=False`, `visibleMdx=0`, `updatedMdx=0`, `mdxOpaque=0`, and `mdxTransparent=0` while WMO counts remained active, proving the runtime-owned family gating changed the bounded frame result on fixed real data
+- current boundary:
+  - this closes runtime-owned pass-option control for the bounded world frame only
+  - it still does not claim terrain/WDL/liquid renderer extraction, active desktop renderer parity, or full `WorldScene` host thinning
+
 ## Implementation Rule
 
 - each slice should land with one small proof and one honest boundary
@@ -252,7 +277,7 @@
 
 ## Immediate Next Slice
 
-- next viewer-facing slice: a real world-runtime or renderer ownership vertical slice in `wow-viewer`
+- next viewer-facing slice: a terrain/WDL/liquid or overlay runtime-service vertical slice in `wow-viewer`
 - reason:
-  - the shell and cutover guidance are now explicit enough that future work should stop drifting back into `ViewerApp`
-  - the remaining meaningful gap is not more shell routing; it is actual runtime or renderer ownership for terrain, liquid, WDL, or broader world submission work
+  - the bounded app consumer now owns runtime pass options instead of loose host-only toggles
+  - the remaining meaningful gap is no longer option routing; it is explicit runtime-owned non-object stage or renderer service ownership for terrain, WDL, liquid, or overlay work
