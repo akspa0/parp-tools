@@ -1,5 +1,19 @@
 # Progress
 
+### Apr 17, 2026 - Alpha rich-tile world-frame proof now carries all ready MDX placements through visibility and pass planning on the canonical 0.5.5 client
+
+- what changed:
+	- `wow-viewer/src/viewer/WowViewer.App/Program.cs` now exposes `world-placement-audit`, a bounded CLI proof command that scans occupied tiles for placement counts without forcing the full world-frame runtime path first
+	- `wow-viewer/src/viewer/WowViewer.App/AlphaEmbeddedAdtReader.cs` now separates fast placement-only Alpha embedded-tile reads from the heavier full terrain or liquid fallback path and caches shared Alpha WDT state per map instead of re-reading the monolithic WDT for each tile
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now uses that placement-only Alpha path for tile selection and placement auditing, routes WMO readiness through the same Alpha-aware file resolver used for other Alpha assets instead of a retail-style archive existence probe, applies the legacy `MdxViewer` world MDX placement transform semantics, and runs the bounded frame through the `Quality` visibility profile so Alpha MDX uses an old-viewer-shaped culling contract instead of the stricter extracted balanced profile
+- validation:
+	- isolated build proof: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -nologo -clp:Summary -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-alpha-bootstrap/` succeeded with the usual workspace `LIB` warnings plus existing nullable warnings in the touched Alpha/viewer helper files
+	- real-data placement proof on `H:/CLIENTS/0.X_Pre-Release_OSX_enUS_0.5.5.3494/World of Warcraft`, `Kalimdor` via `WowViewer.App world-placement-audit --limit 12` reported `scannedTiles=972`, `tilesWithPlacements=564`, and multiple rich Alpha tiles such as `(37,37)` with `2689` total placements and `(39,40)` with `1548` total placements, including concrete sample WMO and MDX paths from the embedded Alpha tile path
+	- real-data rich-tile runtime proof on tile `(39,40)` via `WowViewer.App world-frame` now reports `wmo=40 readyWmo=40 mdx=1508 readyMdx=1508 pending=0`, `visibleWmo=40`, `visibleMdx=1508`, `wmoOpaque=40`, `mdxOpaque=1508`, `mdxTransparent=1508`, and `objectPhase=True` while still using `...Kalimdor.wdt.MPQ#alpha-tile(39,40)` as the placement source
+- boundary:
+	- this closes Alpha placement discovery, Alpha WMO asset-readiness proof, and bounded Alpha MDX visibility or pass-routing proof on the canonical rich tile; it does not yet close broader interactive viewer signoff or MDX performance work
+	- the next local runtime slice should stay focused on MDX batching or state reduction costs, because the same proof now flags MDX submission volume as the next dominant world-frame cost instead of showing a visibility correctness gap
+
 ### Apr 17, 2026 - migration priority corrected toward Alpha-first world-format closure and real viewer usability
 
 - what changed:

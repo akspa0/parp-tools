@@ -53,6 +53,9 @@ internal static class Program
                 case "world-frame":
                     return RunWorldFrame(tail);
 
+                case "world-placement-audit":
+                    return RunWorldPlacementAudit(tail);
+
                 default:
                     using (WowViewerDesktopApp app = new(ParseViewerSession(args)))
                         app.Run();
@@ -149,6 +152,26 @@ internal static class Program
 
         if (!string.IsNullOrWhiteSpace(terrainPreviewOutput))
             WriteBmp(terrainPreviewOutput, result.TerrainVisualSnapshot);
+
+        return 0;
+    }
+
+    private static int RunWorldPlacementAudit(string[] args)
+    {
+        WowViewerWorldPlacementAuditRequest request = ParseRequiredWorldPlacementAuditRequest(args);
+        WowViewerWorldPlacementAuditResult result = WowViewerWorldRuntimeBridge.AuditPlacements(request);
+
+        Console.WriteLine($"WowViewer.App world-placement-audit: root={result.Session.ClientRoot} build={FormatOptionalValue(result.Session.BuildLabel)} map={result.Session.RequestedMapInput}->{result.Session.ResolvedMapDirectory} scannedTiles={result.ScannedTileCount} tilesWithPlacements={result.TilesWithPlacements}");
+        if (result.TopTiles.Count == 0)
+        {
+            Console.WriteLine("WowViewer.App world-placement-audit top: none");
+            return 0;
+        }
+
+        foreach (WowViewerWorldPlacementTileSummary tile in result.TopTiles)
+        {
+            Console.WriteLine($"WowViewer.App world-placement-audit tile=({tile.TileX},{tile.TileY}) total={tile.PlacementCount} wmo={tile.WmoCount} mdx={tile.MdxCount} source={tile.SourcePath} sampleWmo={FormatOptionalValue(tile.SampleWmoPath)} sampleMdx={FormatOptionalValue(tile.SampleMdxPath)}");
+        }
 
         return 0;
     }
@@ -345,6 +368,20 @@ internal static class Program
         return new WowViewerWorldRuntimeFrameRequest(request.ClientRoot, request.MapInput, request.BuildLabel, tileX, tileY, passOptions);
     }
 
+    private static WowViewerWorldPlacementAuditRequest ParseRequiredWorldPlacementAuditRequest(string[] args)
+    {
+        WowViewerWorldSessionOpenRequest request = ParseRequiredWorldRequest(args);
+        string? limitText = GetOption(args, "--limit");
+        int limit = 10;
+        if (!string.IsNullOrWhiteSpace(limitText)
+            && (!int.TryParse(limitText, out limit) || limit <= 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(limitText), "--limit must be a positive integer.");
+        }
+
+        return new WowViewerWorldPlacementAuditRequest(request.ClientRoot, request.MapInput, request.BuildLabel, limit);
+    }
+
     private static M2PreviewLoadRequest ParseRequiredM2Request(string[] args, int defaultVisualSize)
     {
         string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
@@ -484,6 +521,7 @@ internal static class Program
         Console.WriteLine("  wowviewer-app m2-gpu-frame --input <file.m2> --sequence-index <n> --output <file.bmp> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--build-label <label>]");
         Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--terrain-preview-output <file.bmp>]");
+        Console.WriteLine("  wowviewer-app world-placement-audit --client-root <game dir> --map <directory|id|name> [--build-label <label>] [--limit <count>]");
     }
 
     private static WowViewerWorkspaceMode ParseWorkspaceMode(string? workspaceText)

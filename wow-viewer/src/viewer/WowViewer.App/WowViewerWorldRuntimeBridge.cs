@@ -24,6 +24,47 @@ internal sealed record WowViewerWorldRuntimeFrameRequest(
     int TileY,
     WorldFramePassOptions PassOptions);
 
+internal sealed record WowViewerWorldPlacementAuditRequest(
+    string ClientRoot,
+    string MapInput,
+    string BuildLabel,
+    int Limit);
+
+internal sealed record WowViewerWorldPlacementTileSummary(
+    int TileX,
+    int TileY,
+    string SourcePath,
+    int MdxCount,
+    int WmoCount,
+    string? SampleMdxPath,
+    string? SampleWmoPath)
+{
+    public int PlacementCount => MdxCount + WmoCount;
+}
+
+internal sealed class WowViewerWorldPlacementAuditResult
+{
+    public WowViewerWorldPlacementAuditResult(
+        WowViewerWorldSessionBootstrapResult session,
+        int scannedTileCount,
+        int tilesWithPlacements,
+        IReadOnlyList<WowViewerWorldPlacementTileSummary> topTiles)
+    {
+        Session = session;
+        ScannedTileCount = scannedTileCount;
+        TilesWithPlacements = tilesWithPlacements;
+        TopTiles = topTiles;
+    }
+
+    public WowViewerWorldSessionBootstrapResult Session { get; }
+
+    public int ScannedTileCount { get; }
+
+    public int TilesWithPlacements { get; }
+
+    public IReadOnlyList<WowViewerWorldPlacementTileSummary> TopTiles { get; }
+}
+
 internal sealed class WowViewerWorldRuntimeFrameResult
 {
     public WowViewerWorldRuntimeFrameResult(
@@ -143,6 +184,51 @@ internal static class WowViewerWorldRuntimeBridge
 {
     private readonly record struct LocalBoundsResolution(bool AssetReady, Vector3 LocalMin, Vector3 LocalMax);
 
+    public static WowViewerWorldPlacementAuditResult AuditPlacements(WowViewerWorldPlacementAuditRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        WowViewerWorldSessionBootstrapResult session = WowViewerWorldSessionBootstrapper.Open(
+            new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel));
+
+        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [session.ClientRoot], new ArchiveCatalogBootstrapOptions());
+
+        List<WowViewerWorldPlacementTileSummary> populatedTiles = [];
+        foreach (WdtTileCoordinate tile in session.OccupiedTiles)
+        {
+            AdtPlacementCatalog catalog = ReadPlacementCatalog(session, tile.TileX, tile.TileY, archiveCatalog, out string sourcePath);
+            int mdxCount = catalog.ModelPlacements.Count;
+            int wmoCount = catalog.WorldModelPlacements.Count;
+            if (mdxCount == 0 && wmoCount == 0)
+                continue;
+
+            populatedTiles.Add(new WowViewerWorldPlacementTileSummary(
+                tile.TileX,
+                tile.TileY,
+                sourcePath,
+                mdxCount,
+                wmoCount,
+                catalog.ModelPlacements.FirstOrDefault()?.ModelPath,
+                catalog.WorldModelPlacements.FirstOrDefault()?.ModelPath));
+        }
+
+        IReadOnlyList<WowViewerWorldPlacementTileSummary> topTiles = populatedTiles
+            .OrderByDescending(static tile => tile.PlacementCount)
+            .ThenByDescending(static tile => tile.WmoCount)
+            .ThenByDescending(static tile => tile.MdxCount)
+            .ThenBy(static tile => tile.TileY)
+            .ThenBy(static tile => tile.TileX)
+            .Take(Math.Max(1, request.Limit))
+            .ToArray();
+
+        return new WowViewerWorldPlacementAuditResult(
+            session,
+            session.OccupiedTiles.Count,
+            populatedTiles.Count,
+            topTiles);
+    }
+
     public static WowViewerWorldRuntimeFrameResult Build(WowViewerWorldRuntimeFrameRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -164,7 +250,7 @@ internal static class WowViewerWorldRuntimeBridge
         Dictionary<string, LocalBoundsResolution> boundsCache = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, bool> assetReadyLookup = new(StringComparer.OrdinalIgnoreCase);
 
-        List<WorldObjectInstance> wmoInstances = BuildWmoInstances(placementCatalog, selectedTile.tileX, selectedTile.tileY, archiveCatalog, assetReadyLookup);
+        List<WorldObjectInstance> wmoInstances = BuildWmoInstances(session.ClientRoot, placementCatalog, selectedTile.tileX, selectedTile.tileY, archiveCatalog, assetReadyLookup);
         List<WorldObjectInstance> mdxInstances = BuildMdxInstances(session.ClientRoot, placementCatalog, selectedTile.tileX, selectedTile.tileY, archiveCatalog, boundsCache, assetReadyLookup);
 
         int readyWmoCount = wmoInstances.Count(instance => assetReadyLookup.TryGetValue(instance.ModelKey, out bool ready) && ready);
@@ -181,7 +267,7 @@ internal static class WowViewerWorldRuntimeBridge
             CullSmallDoodadsOnly: false,
             CountAsTaxiActor: false,
             VerticalFieldOfViewRadians: MathF.PI / 3f,
-            VisibilityProfile: WorldObjectVisibilityProfile.Balanced);
+            VisibilityProfile: WorldObjectVisibilityProfile.Quality);
 
         WorldVisibilityFrame visibility = new();
         HashSet<string> pendingAssetKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -436,6 +522,12 @@ internal static class WowViewerWorldRuntimeBridge
         if (TryReadVirtualOrLooseFile(session.ClientRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out sourcePath))
             return ReadPlacementCatalogFromBytes(rootData!, sourcePath);
 
+        if (AlphaEmbeddedAdtReader.TryReadPlacementCatalog(session.ClientRoot, mapDirectory, tileX, tileY, archiveCatalog, out AdtPlacementCatalog? alphaCatalog, out string alphaSourcePath))
+        {
+            sourcePath = alphaSourcePath;
+            return alphaCatalog!;
+        }
+
         throw new FileNotFoundException($"Could not locate placement ADT for map '{mapDirectory}' tile ({tileX},{tileY}).", rootVirtualPath);
     }
 
@@ -457,7 +549,21 @@ internal static class WowViewerWorldRuntimeBridge
         string mapDirectory = session.ResolvedMapDirectory;
         string rootVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
         if (!TryReadVirtualOrLooseFile(session.ClientRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out string sourcePath) || rootData is null)
+        {
+            if (AlphaEmbeddedAdtReader.TryReadTile(session.ClientRoot, mapDirectory, tileX, tileY, archiveCatalog, out AlphaEmbeddedAdtTileData? alphaTile))
+                return new WorldTileStageSummary(
+                    alphaTile.TileStageSummary.SourcePath,
+                    alphaTile.TileStageSummary.Kind,
+                    wdlVisibleTileCount,
+                    alphaTile.TileStageSummary.TerrainChunkCount,
+                    alphaTile.TileStageSummary.TerrainHoleChunkCount,
+                    alphaTile.TileStageSummary.LiquidChunkCount,
+                    alphaTile.TileStageSummary.LiquidLayerCount,
+                    alphaTile.TileStageSummary.VisibleLiquidTileCount,
+                    alphaTile.TileStageSummary.HasWater);
+
             throw new FileNotFoundException($"Could not locate root ADT for map '{mapDirectory}' tile ({tileX},{tileY}).", rootVirtualPath);
+        }
 
         using MemoryStream stream = new(rootData, writable: false);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
@@ -489,7 +595,12 @@ internal static class WowViewerWorldRuntimeBridge
         string mapDirectory = session.ResolvedMapDirectory;
         string rootVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
         if (!TryReadVirtualOrLooseFile(session.ClientRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out string sourcePath) || rootData is null)
+        {
+            if (AlphaEmbeddedAdtReader.TryReadTile(session.ClientRoot, mapDirectory, tileX, tileY, archiveCatalog, out AlphaEmbeddedAdtTileData? alphaTile))
+                return alphaTile.LiquidTileData;
+
             throw new FileNotFoundException($"Could not locate root ADT for map '{mapDirectory}' tile ({tileX},{tileY}).", rootVirtualPath);
+        }
 
         using MemoryStream stream = new(rootData, writable: false);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
@@ -506,7 +617,12 @@ internal static class WowViewerWorldRuntimeBridge
         string mapDirectory = session.ResolvedMapDirectory;
         string rootVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
         if (!TryReadVirtualOrLooseFile(session.ClientRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out string sourcePath) || rootData is null)
+        {
+            if (AlphaEmbeddedAdtReader.TryReadTile(session.ClientRoot, mapDirectory, tileX, tileY, archiveCatalog, out AlphaEmbeddedAdtTileData? alphaTile))
+                return alphaTile.TerrainTileData;
+
             throw new FileNotFoundException($"Could not locate root ADT for map '{mapDirectory}' tile ({tileX},{tileY}).", rootVirtualPath);
+        }
 
         using MemoryStream stream = new(rootData, writable: false);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
@@ -515,6 +631,7 @@ internal static class WowViewerWorldRuntimeBridge
     }
 
     private static List<WorldObjectInstance> BuildWmoInstances(
+        string clientRoot,
         AdtPlacementCatalog placementCatalog,
         int tileX,
         int tileY,
@@ -526,7 +643,7 @@ internal static class WowViewerWorldRuntimeBridge
         {
             AdtWorldModelPlacement placement = placementCatalog.WorldModelPlacements[index];
             string modelKey = NormalizeModelKey(placement.ModelPath);
-            bool assetReady = archiveCatalog.FileExists(modelKey) || archiveCatalog.FileExists(modelKey.Replace('\\', '/'));
+            bool assetReady = TryReadVirtualOrLooseFile(clientRoot, modelKey, archiveCatalog, out _, out _);
             assetReadyLookup[modelKey] = assetReady;
 
             Vector3 localMin = placement.BoundsMin - placement.Position;
@@ -574,7 +691,7 @@ internal static class WowViewerWorldRuntimeBridge
             LocalBoundsResolution resolution = ResolveLocalBounds(clientRoot, modelKey, archiveCatalog, boundsCache);
             assetReadyLookup[modelKey] = resolution.AssetReady;
 
-            Matrix4x4 transform = BuildPlacementTransform(placement.Position, placement.Rotation, placement.Scale);
+            Matrix4x4 transform = BuildLegacyMdxPlacementTransform(placement.Position, placement.Rotation, placement.Scale);
             (Vector3 worldMin, Vector3 worldMax) = TransformBounds(resolution.LocalMin, resolution.LocalMax, transform);
 
             instances.Add(new WorldObjectInstance
@@ -667,18 +784,7 @@ internal static class WowViewerWorldRuntimeBridge
         out byte[]? data,
         out string sourcePath)
     {
-        string normalizedPath = NormalizeModelKey(virtualPath);
-        string loosePath = Path.Combine(clientRoot, normalizedPath.Replace('\\', Path.DirectorySeparatorChar));
-        if (File.Exists(loosePath))
-        {
-            data = File.ReadAllBytes(loosePath);
-            sourcePath = Path.GetFullPath(loosePath);
-            return true;
-        }
-
-        data = archiveCatalog.ReadFile(normalizedPath) ?? archiveCatalog.ReadFile(normalizedPath.Replace('\\', '/'));
-        sourcePath = normalizedPath;
-        return data is { Length: > 0 };
+        return AlphaEmbeddedAdtReader.TryReadVirtualOrLooseFile(clientRoot, virtualPath, archiveCatalog, out data, out sourcePath);
     }
 
     private static string NormalizeModelKey(string modelPath)
@@ -686,13 +792,17 @@ internal static class WowViewerWorldRuntimeBridge
         return modelPath.Trim().Replace('/', '\\');
     }
 
-    private static Matrix4x4 BuildPlacementTransform(Vector3 position, Vector3 rotationDegrees, float scale)
+    private static Matrix4x4 BuildLegacyMdxPlacementTransform(Vector3 position, Vector3 rotationDegrees, float scale)
     {
-        float pitch = DegreesToRadians(rotationDegrees.X);
-        float yaw = DegreesToRadians(rotationDegrees.Y);
-        float roll = DegreesToRadians(rotationDegrees.Z);
-        return Matrix4x4.CreateScale(scale)
-            * Matrix4x4.CreateFromYawPitchRoll(yaw, pitch, roll)
+        // Match the old MdxViewer world MDX placement path rather than a generic Euler helper.
+        float rx = -DegreesToRadians(rotationDegrees.Y);
+        float ry = -DegreesToRadians(rotationDegrees.X);
+        float rz = DegreesToRadians(rotationDegrees.Z);
+        return Matrix4x4.CreateRotationZ(MathF.PI)
+            * Matrix4x4.CreateScale(scale)
+            * Matrix4x4.CreateRotationX(rx)
+            * Matrix4x4.CreateRotationY(ry)
+            * Matrix4x4.CreateRotationZ(rz)
             * Matrix4x4.CreateTranslation(position);
     }
 

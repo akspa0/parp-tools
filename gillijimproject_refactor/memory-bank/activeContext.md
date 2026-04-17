@@ -2,6 +2,36 @@
 
 # Active Context
 
+## Apr 17, 2026 - wow-viewer Alpha world bring-up now has rich-tile MDX-visible runtime proof on the canonical 0.5.5 client
+
+- the earlier Alpha monolithic-WDT or embedded-ADT port in `wow-viewer/src/viewer/WowViewer.App/AlphaEmbeddedAdtReader.cs` is now split into two practical consumption paths:
+	- `TryReadPlacementCatalog(...)` for fast placement-only scans over occupied Alpha WDT tiles
+	- `TryReadTile(...)` for the heavier full terrain or liquid or stage-summary fallback path
+- shared Alpha WDT state is now cached once per `(clientRoot, mapDirectory)` instead of being re-read for every occupied tile scan, so placement-rich tile discovery no longer pays full WDT parse plus full terrain decode costs on every tile
+- `WowViewer.App` now exposes a bounded CLI proof command:
+	- `world-placement-audit --client-root <dir> --map <name> [--build-label <label>] [--limit <count>]`
+	- this scans occupied tiles through the new Alpha-aware placement path only and prints the highest-count placement tiles plus sample WMO and MDX asset paths
+- real-data proof on `H:\CLIENTS\0.X_Pre-Release_OSX_enUS_0.5.5.3494\World of Warcraft`, `Kalimdor`, now shows that Alpha placement extraction is working broadly instead of only on one quiet sample tile:
+	- `scannedTiles=972`
+	- `tilesWithPlacements=564`
+	- top tile `(37,37)` reports `2689` placements (`4` WMO, `2685` MDX)
+	- another rich tile `(39,40)` reports `1548` placements (`40` WMO, `1508` MDX)
+- the Alpha world-frame path was then rerun on rich tile `(39,40)` and now proves more than terrain or WDL or liquid:
+	- `placementSource=...Kalimdor.wdt.MPQ#alpha-tile(39,40)`
+	- `wmo=40 readyWmo=40`
+	- `mdx=1508 readyMdx=1508`
+	- `visibleWmo=40`
+	- `visibleMdx=1508`
+	- `wmoOpaque=40`
+	- `mdxOpaque=1508`
+	- `mdxTransparent=1508`
+	- `objectPhase=True`
+- the local MDX visibility blocker was resolved in two bounded runtime steps:
+	- `WowViewerWorldRuntimeBridge.cs` now uses the legacy `MdxViewer` world MDX placement transform semantics instead of the earlier generic yaw or pitch or roll path
+	- the bounded world-frame visibility context now uses the `Quality` profile, matching the old viewer's simpler MDX culling contract more closely by dropping the extra projected-size gating that was suppressing Alpha doodads in the extracted runtime path
+- the immediate remaining local follow-up is now performance-shaped rather than visibility-shaped:
+	- the same rich tile proof now reports `updatedMdx=88` with `1508` opaque and `1508` transparent MDX routes, so the next world-runtime slice should focus on MDX batching or state reduction costs instead of reopening Alpha placement or visibility correctness
+
 ## Apr 17, 2026 - user direction reset: keep the wow-viewer migration anchored on real ADT-family ownership, Alpha-era world bring-up, and an actually interactive viewer
 
 - user directive in this chat:

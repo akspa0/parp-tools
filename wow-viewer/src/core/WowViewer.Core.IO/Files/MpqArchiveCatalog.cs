@@ -215,7 +215,7 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
         }
     }
 
-    public byte[]? ReadFile0FromPath(string mpqDiskPath)
+    public byte[]? ReadFile0FromPath(string mpqDiskPath, params string[] filenameHints)
     {
         try
         {
@@ -241,29 +241,24 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
             fileStream.Position = headerOffset + header.BlockTableOffset;
             BlockEntry[] blockTable = ReadBlockTable(reader, header.BlockTableEntries);
 
-            BlockEntry? file0Block = null;
-            foreach (HashEntry entry in hashTable)
-            {
-                if (entry.BlockIndex == HashEntryEmpty || entry.BlockIndex >= blockTable.Length)
-                {
-                    continue;
-                }
-
-                BlockEntry block = blockTable[entry.BlockIndex];
-                if ((block.Flags & FlagExists) != 0)
-                {
-                    file0Block = block;
-                    break;
-                }
-            }
+            IReadOnlyList<string> candidateNames = BuildPerAssetFilenameCandidates(mpqDiskPath, filenameHints);
+            BlockEntry? file0Block = TryGetPerAssetPrimaryBlock(blockTable, hashTable, candidateNames);
 
             if (file0Block is null)
             {
                 return null;
             }
 
-            fileStream.Position = headerOffset + file0Block.BlockOffset;
-            return ReadFileData(reader, file0Block, header.SectorSize, "file_0", fileStream.Position);
+            long fileBaseOffset = headerOffset + file0Block.BlockOffset;
+            foreach (string candidateName in candidateNames)
+            {
+                fileStream.Position = fileBaseOffset;
+                byte[]? data = ReadFileData(reader, file0Block, header.SectorSize, candidateName, fileBaseOffset);
+                if (data is { Length: > 0 })
+                    return data;
+            }
+
+            return null;
         }
         catch
         {
@@ -461,6 +456,81 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
     private static string NormalizeVirtualPath(string path)
     {
         return path.Replace('/', '\\');
+    }
+
+    private static IReadOnlyList<string> BuildPerAssetFilenameCandidates(string mpqDiskPath, IEnumerable<string> filenameHints)
+    {
+        HashSet<string> candidates = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string hint in filenameHints)
+        {
+            if (string.IsNullOrWhiteSpace(hint))
+                continue;
+
+            candidates.Add(NormalizeVirtualPath(hint.Trim()));
+        }
+
+        string fileNameWithoutMpq = Path.GetFileNameWithoutExtension(mpqDiskPath);
+        if (!string.IsNullOrWhiteSpace(fileNameWithoutMpq))
+            candidates.Add(NormalizeVirtualPath(fileNameWithoutMpq));
+
+        candidates.Add("file_0");
+        return candidates.ToArray();
+    }
+
+    private static BlockEntry? TryGetPerAssetPrimaryBlock(BlockEntry[] blockTable, HashEntry[] hashTable, IReadOnlyList<string> candidateNames)
+    {
+        foreach (string candidateName in candidateNames)
+        {
+            BlockEntry? block = TryFindBlockByName(blockTable, hashTable, candidateName);
+            if (block is { FileSize: > 0 })
+                return block;
+        }
+
+        if (blockTable.Length > 1 && blockTable[1].FileSize > 0)
+            return blockTable[1];
+
+        BlockEntry? largestBlock = null;
+        foreach (BlockEntry block in blockTable)
+        {
+            if ((block.Flags & FlagExists) == 0 || block.FileSize == 0)
+                continue;
+
+            if (largestBlock is null || block.FileSize > largestBlock.FileSize)
+                largestBlock = block;
+        }
+
+        return largestBlock;
+    }
+
+    private static BlockEntry? TryFindBlockByName(BlockEntry[] blockTable, HashEntry[] hashTable, string filename)
+    {
+        if (hashTable.Length == 0 || string.IsNullOrWhiteSpace(filename))
+            return null;
+
+        string normalized = NormalizeVirtualPath(filename);
+        uint hashIndex = HashString(normalized, HashTableIndex) % (uint)hashTable.Length;
+        uint nameA = HashString(normalized, HashNameA);
+        uint nameB = HashString(normalized, HashNameB);
+
+        for (uint i = 0; i < hashTable.Length; i++)
+        {
+            HashEntry entry = hashTable[(hashIndex + i) % hashTable.Length];
+            if (entry.BlockIndex == HashEntryEmpty)
+                break;
+
+            if (entry.BlockIndex == HashEntryDeleted || entry.BlockIndex >= blockTable.Length)
+                continue;
+
+            if (entry.Name1 != nameA || entry.Name2 != nameB)
+                continue;
+
+            BlockEntry block = blockTable[entry.BlockIndex];
+            if ((block.Flags & FlagExists) != 0)
+                return block;
+        }
+
+        return null;
     }
 
     private void AddKnownFileName(string name)

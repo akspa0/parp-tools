@@ -123,15 +123,47 @@ internal static class WowViewerWorldSessionBootstrapper
 
     private static (byte[] Data, string SourcePath, bool LoadedFromArchive) ReadWdt(string clientRoot, string mapDirectory, string wdtVirtualPath, IArchiveCatalog archiveCatalog)
     {
-        string loosePath = Path.Combine(clientRoot, "World", "Maps", mapDirectory, $"{mapDirectory}.wdt");
-        if (File.Exists(loosePath))
-            return (File.ReadAllBytes(loosePath), Path.GetFullPath(loosePath), false);
+        foreach ((string path, bool isPerAssetMpq) in EnumerateDiskWdtCandidates(clientRoot, mapDirectory))
+        {
+            if (!File.Exists(path))
+                continue;
+
+            if (!isPerAssetMpq)
+                return (File.ReadAllBytes(path), Path.GetFullPath(path), false);
+
+            if (archiveCatalog is MpqArchiveCatalog mpqArchiveCatalog)
+            {
+                byte[]? payload = mpqArchiveCatalog.ReadFile0FromPath(path, wdtVirtualPath, $"{mapDirectory}.wdt");
+                if (payload is { Length: > 0 })
+                    return (payload, Path.GetFullPath(path), true);
+            }
+        }
 
         byte[]? archiveData = archiveCatalog.ReadFile(wdtVirtualPath) ?? archiveCatalog.ReadFile(wdtVirtualPath.Replace('\\', '/'));
         if (archiveData is { Length: > 0 })
             return (archiveData, wdtVirtualPath, true);
 
-        throw new FileNotFoundException($"Could not find WDT for map '{mapDirectory}' at '{wdtVirtualPath}' under client root '{clientRoot}'.", loosePath);
+        string wdtMpqVirtualPath = wdtVirtualPath + ".MPQ";
+        byte[]? perAssetArchiveData = archiveCatalog.ReadFile(wdtMpqVirtualPath) ?? archiveCatalog.ReadFile(wdtMpqVirtualPath.Replace('\\', '/'));
+        if (perAssetArchiveData is { Length: > 0 })
+            return (perAssetArchiveData, wdtMpqVirtualPath, true);
+
+        throw new FileNotFoundException($"Could not find WDT for map '{mapDirectory}' at '{wdtVirtualPath}' under client root '{clientRoot}'.", Path.Combine(clientRoot, "Data", "World", "Maps", mapDirectory, $"{mapDirectory}.wdt.MPQ"));
+    }
+
+    private static IEnumerable<(string Path, bool IsPerAssetMpq)> EnumerateDiskWdtCandidates(string clientRoot, string mapDirectory)
+    {
+        string[] baseDirectories =
+        [
+            Path.Combine(clientRoot, "World", "Maps", mapDirectory),
+            Path.Combine(clientRoot, "Data", "World", "Maps", mapDirectory),
+        ];
+
+        foreach (string baseDirectory in baseDirectories.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            yield return (Path.Combine(baseDirectory, $"{mapDirectory}.wdt"), false);
+            yield return (Path.Combine(baseDirectory, $"{mapDirectory}.wdt.MPQ"), true);
+        }
     }
 
     private static string ExtractMapDirectory(string mapInput)
