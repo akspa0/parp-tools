@@ -4,7 +4,9 @@ using WowViewer.Core.PM4;
 using WowViewer.Core.Runtime;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Runtime.World;
+using WowViewer.Core.Runtime.World.Liquid;
 using WowViewer.Core.Runtime.World.Passes;
+using WowViewer.Core.Runtime.World.Terrain;
 
 namespace WowViewer.App;
 
@@ -132,6 +134,8 @@ internal static class Program
         Console.WriteLine($"WowViewer.App world-frame: map={result.Session.RequestedMapInput}->{result.Session.ResolvedMapDirectory} tile=({result.SelectedTileX},{result.SelectedTileY}) placementSource={result.PlacementSourcePath} objectPhase={result.ObjectPhaseExecuted} totalMs={result.Stats.TotalCpuMs:F2}");
         Console.WriteLine($"WowViewer.App world-frame options: wmo={result.PassOptions.WmosVisible} mdx={result.PassOptions.DoodadsVisible} sky={result.PassOptions.SkyVisible} wdl={result.PassOptions.WdlVisible} terrain={result.PassOptions.TerrainVisible} liquid={result.PassOptions.LiquidVisible} overlay={result.PassOptions.OverlayVisible}");
         Console.WriteLine($"WowViewer.App world-frame terrain: source={result.TileStageSummary.SourcePath} wdlTiles={result.Stats.WdlVisibleTileCount}/{result.TileStageSummary.WdlVisibleTileCount} terrainChunks={result.Stats.TerrainChunksRendered}/{result.TileStageSummary.TerrainChunkCount} holes={result.TileStageSummary.TerrainHoleChunkCount} liquidChunks={result.Stats.Liquid.VisibleCount}/{result.TileStageSummary.LiquidChunkCount} liquidLayers={result.TileStageSummary.LiquidLayerCount} liquidVisibleTiles={result.Stats.Liquid.SubmittedCount}/{result.TileStageSummary.VisibleLiquidTileCount} hasWater={result.TileStageSummary.HasWater}");
+        Console.WriteLine($"WowViewer.App world-frame terrain-service: sourceChunks={result.TerrainTileData.ChunkCount} holeChunks={result.TerrainTileData.HoleChunkCount} liquidFlagChunks={result.TerrainTileData.LiquidFlagChunkCount} areas={result.TerrainTileData.DistinctAreaIdCount} sample={FormatTerrainChunkSample(result.TerrainTileData)}");
+        Console.WriteLine($"WowViewer.App world-frame liquid-service: sourceChunks={result.LiquidTileData.ActiveChunkCount} sourceLayers={result.LiquidTileData.LayerCount} sourceVisibleTiles={result.LiquidTileData.VisibleTileCount} types={FormatLiquidTypeCounts(result.LiquidTileData)} sample={FormatLiquidChunkSample(result.LiquidTileData)}");
         Console.WriteLine($"WowViewer.App world-frame placements: wmo={result.WmoInstances.Count} readyWmo={result.ReadyWmoCount} mdx={result.MdxInstances.Count} readyMdx={result.ReadyMdxCount} pending={result.PendingAssetKeys.Count}");
         Console.WriteLine($"WowViewer.App world-frame visibility: visibleWmo={result.Visibility.VisibleWmos.Count} culledWmo={result.CulledWmoCount} visibleMdx={result.Visibility.VisibleMdx.Count} culledMdx={result.CulledMdxCount} taxi={result.Visibility.VisibleTaxiMdxCount}");
         Console.WriteLine($"WowViewer.App world-frame passes: updatedMdx={result.Stats.MdxAnimation.SubmittedCount} wmoOpaque={result.Stats.WmoSubmission.SubmittedCount} mdxOpaque={result.Stats.MdxOpaqueSubmission.SubmittedCount} mdxTransparent={result.Stats.MdxTransparentSubmission.SubmittedCount} opaqueRoutes={result.PassFrame.OpaqueVisibleMdxRoutes.Count} transparentRoutes={result.PassFrame.TransparentVisibleMdxRoutes.Count}");
@@ -140,6 +144,37 @@ internal static class Program
             Console.WriteLine($"WowViewer.App world-frame pending-sample: {string.Join(", ", result.PendingAssetKeys.Take(8))}");
 
         return 0;
+    }
+
+    private static string FormatLiquidTypeCounts(WorldLiquidTileData liquidTileData)
+    {
+        if (liquidTileData.Chunks.Count == 0)
+            return "none";
+
+        return string.Join(", ",
+            liquidTileData.Chunks
+                .SelectMany(static chunk => chunk.Layers)
+                .GroupBy(static layer => layer.BasicType)
+                .OrderBy(static group => group.Key)
+                .Select(static group => $"{group.Key}:{group.Count()}"));
+    }
+
+    private static string FormatLiquidChunkSample(WorldLiquidTileData liquidTileData)
+    {
+        if (liquidTileData.Chunks.Count == 0)
+            return "none";
+
+        return string.Join(", ", liquidTileData.Chunks.Take(4).Select(static chunk =>
+            $"({chunk.ChunkX},{chunk.ChunkY}) layers={chunk.Layers.Count} visible={chunk.VisibleTileCount} type={chunk.Layers[0].BasicType}"));
+    }
+
+    private static string FormatTerrainChunkSample(WorldTerrainTileData terrainTileData)
+    {
+        if (terrainTileData.Chunks.Count == 0)
+            return "none";
+
+        return string.Join(", ", terrainTileData.Chunks.Take(4).Select(static chunk =>
+            $"({chunk.IndexX},{chunk.IndexY}) area={chunk.AreaId} holes={chunk.HasHoles} liquidFlags={chunk.HasLiquidFlags}"));
     }
 
     private static WowViewerSession? ParseViewerSession(string[] args)

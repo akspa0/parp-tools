@@ -12,7 +12,9 @@ using WowViewer.Core.PM4;
 using WowViewer.Core.Runtime;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Runtime.World;
+using WowViewer.Core.Runtime.World.Liquid;
 using WowViewer.Core.Runtime.World.Passes;
+using WowViewer.Core.Runtime.World.Terrain;
 using WowViewer.Core.Runtime.World.Visibility;
 
 namespace WowViewer.App;
@@ -490,7 +492,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"Visible Objects: {_currentWorldRuntimeFrame.Visibility.VisibleWmos.Count + _currentWorldRuntimeFrame.Visibility.VisibleMdx.Count}");
             ImGui.Text($"Pending Assets: {_currentWorldRuntimeFrame.PendingAssetKeys.Count}");
             ImGui.Text($"Terrain Chunks: {_currentWorldRuntimeFrame.Stats.TerrainChunksRendered}/{_currentWorldRuntimeFrame.TileStageSummary.TerrainChunkCount}");
+            ImGui.Text($"Terrain Areas: {_currentWorldRuntimeFrame.TerrainTileData.DistinctAreaIdCount}");
             ImGui.Text($"Liquid Chunks: {_currentWorldRuntimeFrame.Stats.Liquid.VisibleCount}/{_currentWorldRuntimeFrame.TileStageSummary.LiquidChunkCount}");
+            ImGui.Text($"Liquid Types: {FormatLiquidTypeCounts(_currentWorldRuntimeFrame.LiquidTileData)}");
             ImGui.Text($"Pass Options: WMO {_currentWorldRuntimeFrame.PassOptions.WmosVisible}, MDX {_currentWorldRuntimeFrame.PassOptions.DoodadsVisible}, WDL {_currentWorldRuntimeFrame.PassOptions.WdlVisible}, Terrain {_currentWorldRuntimeFrame.PassOptions.TerrainVisible}, Liquid {_currentWorldRuntimeFrame.PassOptions.LiquidVisible}, Overlay {_currentWorldRuntimeFrame.PassOptions.OverlayVisible}");
         }
     }
@@ -799,9 +803,16 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"WDL Tiles: {result.Stats.WdlVisibleTileCount}/{result.TileStageSummary.WdlVisibleTileCount}");
         ImGui.Text($"Terrain Chunks: {result.Stats.TerrainChunksRendered}/{result.TileStageSummary.TerrainChunkCount}");
         ImGui.Text($"Terrain Hole Chunks: {result.TileStageSummary.TerrainHoleChunkCount}");
+        ImGui.Text($"Terrain Areas: {result.TerrainTileData.DistinctAreaIdCount}");
+        ImGui.TextWrapped($"Terrain Sample: {FormatTerrainChunkSample(result.TerrainTileData)}");
         ImGui.Text($"Liquid Chunks: {result.Stats.Liquid.VisibleCount}/{result.TileStageSummary.LiquidChunkCount}");
         ImGui.Text($"Liquid Layers: {result.TileStageSummary.LiquidLayerCount}");
         ImGui.Text($"Liquid Visible Tiles: {result.Stats.Liquid.SubmittedCount}/{result.TileStageSummary.VisibleLiquidTileCount}");
+        if (result.LiquidTileData.Chunks.Count > 0)
+        {
+            ImGui.TextWrapped($"Liquid Types: {FormatLiquidTypeCounts(result.LiquidTileData)}");
+            ImGui.TextWrapped($"Liquid Sample: {FormatLiquidChunkSample(result.LiquidTileData)}");
+        }
         ImGui.Text($"WMO Submitted: {result.Stats.WmoSubmission.SubmittedCount}");
         ImGui.Text($"MDX Animated: {result.Stats.MdxAnimation.SubmittedCount}");
         ImGui.Text($"MDX Opaque Submitted: {result.Stats.MdxOpaqueSubmission.SubmittedCount}");
@@ -813,6 +824,37 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.TextDisabled("Timing Hint");
         ImGui.TextWrapped(result.OptimizationHint);
         ImGui.TextWrapped("Boundary: these timings are for the bounded app-side runtime bridge over visibility/pass coordination, not the final 3D world renderer.");
+    }
+
+    private static string FormatLiquidTypeCounts(WorldLiquidTileData liquidTileData)
+    {
+        if (liquidTileData.Chunks.Count == 0)
+            return "none";
+
+        return string.Join(", ",
+            liquidTileData.Chunks
+                .SelectMany(static chunk => chunk.Layers)
+                .GroupBy(static layer => layer.BasicType)
+                .OrderBy(static group => group.Key)
+                .Select(static group => $"{group.Key}:{group.Count()}"));
+    }
+
+    private static string FormatLiquidChunkSample(WorldLiquidTileData liquidTileData)
+    {
+        if (liquidTileData.Chunks.Count == 0)
+            return "none";
+
+        return string.Join(", ", liquidTileData.Chunks.Take(4).Select(static chunk =>
+            $"({chunk.ChunkX},{chunk.ChunkY}) layers={chunk.Layers.Count} visible={chunk.VisibleTileCount} type={chunk.Layers[0].BasicType}"));
+    }
+
+    private static string FormatTerrainChunkSample(WorldTerrainTileData terrainTileData)
+    {
+        if (terrainTileData.Chunks.Count == 0)
+            return "none";
+
+        return string.Join(", ", terrainTileData.Chunks.Take(4).Select(static chunk =>
+            $"({chunk.IndexX},{chunk.IndexY}) area={chunk.AreaId} holes={chunk.HasHoles} liquidFlags={chunk.HasLiquidFlags}"));
     }
 
     private void DrawBoundaryWindow()

@@ -1,5 +1,35 @@
 # Progress
 
+### Apr 17, 2026 - wow-viewer app slice 12 landed: the bounded world frame now has runtime-owned terrain chunk inventory
+
+- what changed:
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainChunkData.cs`, `WorldTerrainTileData.cs`, and `WorldTerrainTileBuilder.cs` now own a bounded terrain chunk service over root MCNK headers, exposing chunk coordinates, area ids, hole signals, liquid-flag signals, and current layer-count header values
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now resolves the selected root ADT into that terrain chunk service and uses it as the terrain-stage source for the bounded world frame instead of only the earlier aggregate terrain count
+	- `wow-viewer/src/viewer/WowViewer.App/Program.cs` and `WowViewerDesktopApp.cs` now report terrain chunk samples in the CLI proof path and the desktop world diagnostics surfaces
+	- `wow-viewer/tests/WowViewer.Core.Tests/WorldTerrainTileBuilderTests.cs` now covers both the fixed development root ADT and a synthetic root ADT with explicit MCNK header signals for focused terrain-service regression coverage
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldTerrainTileBuilderTests` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
+	- real-data runtime proof via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340` now reports terrain chunk samples for the selected tile, and rerunning with `--hide-terrain` still drops the active terrain stage count to zero while preserving source-side terrain service data
+- boundary:
+	- this closes bounded terrain chunk service ownership only
+	- actual terrain rendering extraction remains the immediate next follow-up slice
+
+### Apr 17, 2026 - wow-viewer app slice 11 landed: the bounded world frame now has runtime-owned liquid tile inventory
+
+- what changed:
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Liquid/WorldLiquidLayerData.cs`, `WorldLiquidChunkData.cs`, `WorldLiquidTileData.cs`, and `WorldLiquidTileBuilder.cs` now own a bounded liquid tile service over shared MH2O decode, exposing chunk coordinates, layer metadata, visible liquid tile counts, and liquid-family grouping
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now resolves the selected root ADT into that liquid tile service and uses it as the liquid-stage source for the bounded world frame instead of only the earlier aggregate summary counts
+	- `wow-viewer/src/viewer/WowViewer.App/Program.cs` and `WowViewerDesktopApp.cs` now report liquid type breakdowns plus bounded chunk samples in the CLI proof path and the desktop world diagnostics surfaces
+	- `wow-viewer/tests/WowViewer.Core.Tests/WorldLiquidTileBuilderTests.cs` now covers both the fixed development root ADT and a synthetic MH2O-bearing root ADT for focused liquid-service regression coverage
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldLiquidTileBuilderTests` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the existing workspace `LIB` warnings only
+	- real-data runtime proof via `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -- world-frame --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --build-label 3.3.5.12340` now reports liquid chunk samples and type breakdowns for the selected tile, and rerunning with `--hide-liquid` still drops the active liquid stage count to zero while preserving source-side liquid service data
+- boundary:
+	- this closes bounded liquid service ownership only
+	- terrain service or renderer extraction remains the immediate next follow-up slice
+
 ### Apr 17, 2026 - wow-viewer app slice 10 landed: the bounded world frame now has runtime-owned non-object tile-stage summary counts
 
 - what changed:

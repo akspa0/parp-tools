@@ -284,6 +284,58 @@
 - current boundary:
   - this closes bounded non-object stage-summary ownership only
   - true terrain or WDL or liquid renderer extraction and overlay-stage ownership remain later slices
+
+### Slice 11 - Liquid Tile Service
+
+- target problem:
+  - the bounded world app consumer can count liquid chunks, but it still has no runtime-owned liquid-layer service contract for real chunk or layer inventory and type breakdowns
+- implementation scope:
+  - add a runtime-owned liquid tile service over shared root-ADT MH2O decode that exposes chunk coordinates, liquid-layer metadata, visible liquid tile counts, and basic liquid-family breakdowns
+  - thread that service through the bounded world-frame bridge and current CLI or desktop diagnostics so liquid is no longer represented only by one aggregate stage count
+  - keep the slice bounded to liquid service ownership and current one-tile proof; do not claim actual liquid rendering extraction yet
+- proof goal:
+  - the `world-frame` proof path reports real liquid chunk samples and type breakdowns on a tile with water, and the active liquid stage count still respects `--hide-liquid`
+
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer`:
+  - `wow-viewer/src/core/WowViewer.Core.Runtime/World/Liquid/WorldLiquidLayerData.cs`, `WorldLiquidChunkData.cs`, `WorldLiquidTileData.cs`, and `WorldLiquidTileBuilder.cs` now own the bounded liquid tile service seam over shared `AdtLiquidReader` output, including chunk coordinates, layer metadata, visible-tile counts, and basic liquid-family grouping
+  - `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now resolves the selected tile's root ADT into both the existing tile-stage summary and the new liquid tile service, then uses the runtime-owned liquid service as the liquid-stage source rather than only the earlier aggregate summary counts
+  - `wow-viewer/src/viewer/WowViewer.App/Program.cs` and `WowViewerDesktopApp.cs` now report liquid type breakdowns plus bounded liquid chunk samples in the `world-frame` CLI proof path and the desktop world diagnostics surfaces
+  - `wow-viewer/tests/WowViewer.Core.Tests/WorldLiquidTileBuilderTests.cs` now covers both the fixed development root ADT and a synthetic MH2O-bearing root ADT for focused liquid-service regression coverage
+- proof completed:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldLiquidTileBuilderTests`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - real-data runtime proof via `WowViewer.App world-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, showing liquid chunk samples and type breakdowns on the selected tile while still dropping the active liquid stage count to zero under `--hide-liquid`
+- current boundary:
+  - this closes bounded liquid service ownership only
+  - actual liquid rendering extraction and terrain-service ownership remain later slices
+
+### Slice 12 - Terrain Chunk Service
+
+- target problem:
+  - the bounded world app consumer can count terrain chunks, but it still has no runtime-owned terrain chunk service contract for real MCNK inventory, area ids, or hole or liquid-flag signals
+- implementation scope:
+  - add a runtime-owned terrain chunk service over root ADT MCNK headers that exposes chunk grid coordinates, area ids, hole flags, liquid flags, and current layer-count header values
+  - thread that service through the bounded world-frame bridge and current CLI or desktop diagnostics so terrain is no longer represented only by one aggregate count
+  - keep the slice bounded to terrain chunk service ownership and current one-tile proof; do not claim actual terrain rendering extraction yet
+- proof goal:
+  - the `world-frame` proof path reports real terrain chunk samples on the selected tile, and the active terrain stage count still respects `--hide-terrain`
+
+#### Apr 17, 2026 implementation status update
+
+- landed in `wow-viewer`:
+  - `wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainChunkData.cs`, `WorldTerrainTileData.cs`, and `WorldTerrainTileBuilder.cs` now own the bounded terrain chunk service seam over root MCNK headers, including chunk coordinates, area ids, hole signals, liquid-flag signals, and current layer-count header values
+  - `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now resolves the selected tile's root ADT into both the earlier tile-stage summary and the new terrain chunk service, then uses the runtime-owned terrain service as the terrain-stage source rather than only the earlier aggregate summary count
+  - `wow-viewer/src/viewer/WowViewer.App/Program.cs` and `WowViewerDesktopApp.cs` now report terrain chunk samples in the `world-frame` CLI proof path and the desktop world diagnostics surfaces
+  - `wow-viewer/tests/WowViewer.Core.Tests/WorldTerrainTileBuilderTests.cs` now covers both the fixed development root ADT and a synthetic root ADT with explicit MCNK header signals for focused terrain-service regression coverage
+- proof completed:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldTerrainTileBuilderTests`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+  - real-data runtime proof via `WowViewer.App world-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, showing terrain chunk samples on the selected tile while still dropping the active terrain stage count to zero under `--hide-terrain`
+- current boundary:
+  - this closes bounded terrain chunk service ownership only
+  - actual terrain rendering extraction remains the next deeper follow-up slice
   - `wow-viewer/tests/WowViewer.Core.Tests/WorldFramePassCoordinatorTests.cs` now proves both the legacy ordered flow and the new disabled-layer behavior
 - proof completed:
   - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldFramePassCoordinatorTests`

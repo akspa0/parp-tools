@@ -8,7 +8,9 @@ using WowViewer.Core.M2;
 using WowViewer.Core.Maps;
 using WowViewer.Core.Mdx;
 using WowViewer.Core.Runtime.World;
+using WowViewer.Core.Runtime.World.Liquid;
 using WowViewer.Core.Runtime.World.Passes;
+using WowViewer.Core.Runtime.World.Terrain;
 using WowViewer.Core.Runtime.World.Visibility;
 
 namespace WowViewer.App;
@@ -29,6 +31,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         int selectedTileY,
         string placementSourcePath,
         WorldTileStageSummary tileStageSummary,
+        WorldTerrainTileData terrainTileData,
+        WorldLiquidTileData liquidTileData,
         AdtPlacementCatalog placementCatalog,
         IReadOnlyList<WorldObjectInstance> wmoInstances,
         IReadOnlyList<WorldObjectInstance> mdxInstances,
@@ -53,6 +57,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         SelectedTileY = selectedTileY;
         PlacementSourcePath = placementSourcePath;
         TileStageSummary = tileStageSummary;
+        TerrainTileData = terrainTileData;
+        LiquidTileData = liquidTileData;
         PlacementCatalog = placementCatalog;
         WmoInstances = wmoInstances;
         MdxInstances = mdxInstances;
@@ -82,6 +88,10 @@ internal sealed class WowViewerWorldRuntimeFrameResult
     public string PlacementSourcePath { get; }
 
     public WorldTileStageSummary TileStageSummary { get; }
+
+    public WorldTerrainTileData TerrainTileData { get; }
+
+    public WorldLiquidTileData LiquidTileData { get; }
 
     public AdtPlacementCatalog PlacementCatalog { get; }
 
@@ -137,6 +147,8 @@ internal static class WowViewerWorldRuntimeBridge
         ((int tileX, int tileY) selectedTile, AdtPlacementCatalog placementCatalog, string placementSourcePath) =
             ResolveTileAndPlacements(session, request.TileX, request.TileY, archiveCatalog);
         WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
+        WorldTerrainTileData terrainTileData = ReadRootTerrainTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
+        WorldLiquidTileData liquidTileData = ReadRootLiquidTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
 
         Dictionary<string, LocalBoundsResolution> boundsCache = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, bool> assetReadyLookup = new(StringComparer.OrdinalIgnoreCase);
@@ -237,7 +249,7 @@ internal static class WowViewerWorldRuntimeBridge
                 () =>
                 {
                     Stopwatch terrainStopwatch = Stopwatch.StartNew();
-                    activeTerrainChunkCount = tileStageSummary.TerrainChunkCount;
+                    activeTerrainChunkCount = terrainTileData.ChunkCount;
                     terrainStopwatch.Stop();
                     terrainMs = terrainStopwatch.Elapsed.TotalMilliseconds;
                 },
@@ -282,8 +294,8 @@ internal static class WowViewerWorldRuntimeBridge
                 () =>
                 {
                     Stopwatch liquidStopwatch = Stopwatch.StartNew();
-                    activeLiquidChunkCount = tileStageSummary.LiquidChunkCount;
-                    activeLiquidVisibleTileCount = tileStageSummary.VisibleLiquidTileCount;
+                    activeLiquidChunkCount = liquidTileData.ActiveChunkCount;
+                    activeLiquidVisibleTileCount = liquidTileData.VisibleTileCount;
                     liquidStopwatch.Stop();
                     liquidMs = liquidStopwatch.Elapsed.TotalMilliseconds;
                 },
@@ -337,6 +349,8 @@ internal static class WowViewerWorldRuntimeBridge
             selectedTile.tileY,
             placementSourcePath,
             tileStageSummary,
+            terrainTileData,
+            liquidTileData,
             placementCatalog,
             wmoInstances,
             mdxInstances,
@@ -435,6 +449,40 @@ internal static class WowViewerWorldRuntimeBridge
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
         stream.Position = 0;
         return WorldTileStageSummaryBuilder.Read(stream, fileSummary);
+    }
+
+    private static WorldLiquidTileData ReadRootLiquidTileData(
+        WowViewerWorldSessionBootstrapResult session,
+        int tileX,
+        int tileY,
+        IArchiveCatalog archiveCatalog)
+    {
+        string mapDirectory = session.ResolvedMapDirectory;
+        string rootVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
+        if (!TryReadVirtualOrLooseFile(session.ClientRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out string sourcePath) || rootData is null)
+            throw new FileNotFoundException($"Could not locate root ADT for map '{mapDirectory}' tile ({tileX},{tileY}).", rootVirtualPath);
+
+        using MemoryStream stream = new(rootData, writable: false);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
+        stream.Position = 0;
+        return WorldLiquidTileBuilder.Read(stream, fileSummary);
+    }
+
+    private static WorldTerrainTileData ReadRootTerrainTileData(
+        WowViewerWorldSessionBootstrapResult session,
+        int tileX,
+        int tileY,
+        IArchiveCatalog archiveCatalog)
+    {
+        string mapDirectory = session.ResolvedMapDirectory;
+        string rootVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
+        if (!TryReadVirtualOrLooseFile(session.ClientRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out string sourcePath) || rootData is null)
+            throw new FileNotFoundException($"Could not locate root ADT for map '{mapDirectory}' tile ({tileX},{tileY}).", rootVirtualPath);
+
+        using MemoryStream stream = new(rootData, writable: false);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
+        stream.Position = 0;
+        return WorldTerrainTileBuilder.Read(stream, fileSummary);
     }
 
     private static List<WorldObjectInstance> BuildWmoInstances(

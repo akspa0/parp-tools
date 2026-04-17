@@ -15,6 +15,8 @@ Current viewer-app reality:
 - That world frame now includes shell-local navigator, status, and inspector surfaces over the shared runtime frame data, so bounded world inspection no longer stops at a passive top-down canvas.
 - That same world frame now also consumes runtime-owned world pass options for WMO/MDX family gating plus sky/WDL/terrain/liquid/overlay stage gating, and the `world-frame` proof path can now toggle those options directly.
 - That world frame now also consumes a runtime-owned root-ADT stage summary for WDL, terrain, and liquid counts, so the bounded bridge no longer reports those non-object stages as placeholder zeros.
+- That world frame now also consumes a runtime-owned liquid tile service over shared MH2O decode, so the bounded bridge can report real liquid chunk or layer inventory and type breakdowns instead of only aggregate counts.
+- That world frame now also consumes a runtime-owned terrain chunk service over root MCNK headers, so the bounded bridge can report real terrain chunk inventory and hole or liquid-flag signals instead of only one terrain count.
 - The world path is still a top-down preview plus runtime visibility/pass summary over shared `WowViewer.Core.Runtime.World` seams, not a final 3D world renderer.
 
 Current first-pass project layout:
@@ -39,6 +41,8 @@ Current plan-adherence reality:
 - `WowViewer.App` now also owns the first bounded world attach/open plus runtime-consumer flow in the new repo: fixed-root world-session bootstrap over shared `Core.IO` map readers, a `world-frame` CLI proof command that consumes the extracted world visibility and pass coordinators, and app-local navigator or inspector panels over that runtime frame.
 - `WowViewer.Core.Runtime.World.Passes.WorldFramePassOptions` now also owns runtime-side pass gating for the current world frame, and `WowViewer.App` consumes that seam through persisted world-session toggles and `world-frame --hide-*` proof flags.
 - `WowViewer.Core.Runtime.World.Passes.WorldTileStageSummaryBuilder` now owns the bounded non-object tile summary seam for root ADT terrain/WDL/liquid counts, and `WowViewer.App world-frame` now reports active-versus-source terrain-side counts over that runtime-owned summary.
+- `WowViewer.Core.Runtime.World.Liquid.WorldLiquidTileBuilder` now owns the bounded liquid tile service seam for root ADT MH2O inventory, and `WowViewer.App world-frame` now reports chunk samples plus liquid type breakdowns over that runtime-owned liquid data.
+- `WowViewer.Core.Runtime.World.Terrain.WorldTerrainTileBuilder` now owns the bounded terrain chunk service seam for root ADT MCNK inventory, and `WowViewer.App world-frame` now reports terrain chunk samples plus area or hole or liquid-flag signals over that runtime-owned terrain data.
 - The remaining `MdxViewer` viewer surfaces are now explicitly split between compatibility-consumer work and legacy editor or archaeology work in `docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md`; new shell design should not default back there.
 - staged `WorldScene` to `wow-viewer` runtime decomposition is now documented in `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md` and `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md`, with repeated `.skin` miss suppression called out as slice 01 before deeper pass extraction.
 - The repo is now starting to correct that with a real bootstrap script and a first non-PM4 chunk or FourCC foundation slice, but the broader shared I/O and runtime cutover is still missing.

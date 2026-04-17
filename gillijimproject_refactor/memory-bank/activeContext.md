@@ -2,6 +2,34 @@
 
 # Active Context
 
+## Apr 17, 2026 - wow-viewer app slice 12 landed: the bounded world frame now consumes a runtime-owned terrain chunk service over MCNK headers
+
+- slice 12 from the viewer-app cutover plan is now landed in `wow-viewer`
+- `WorldTerrainChunkData.cs`, `WorldTerrainTileData.cs`, and `WorldTerrainTileBuilder.cs` now own the bounded terrain chunk service seam in `WowViewer.Core.Runtime`, using root ADT MCNK headers to expose chunk coordinates, area ids, hole signals, liquid-flag signals, and current layer-count header values for the selected tile
+- `WowViewerWorldRuntimeBridge.cs` now resolves the selected tile's root ADT into both the earlier tile-stage summary and the new terrain chunk service, carries that terrain service through `WowViewerWorldRuntimeFrameResult`, and uses it as the active terrain-stage source rather than only the earlier aggregate count
+- `Program.cs` and `WowViewerDesktopApp.cs` now report terrain chunk samples in the `world-frame` CLI proof path and desktop diagnostics, so the bounded world frame has a real terrain chunk service seam instead of only aggregate terrain counters
+- bounded proof in this chat:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldTerrainTileBuilderTests` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+	- real fixed-root proof via `WowViewer.App world-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, now reports terrain chunk samples for the auto-selected tile `(39,32)`, while rerunning with `--hide-terrain` still drops the active terrain stage count to zero without erasing the source-side terrain service data
+- current boundary:
+	- this closes bounded terrain chunk service ownership only; it does not extract actual terrain rendering
+	- deeper terrain rendering or WDL service ownership remains the next real viewer-facing slice
+
+## Apr 17, 2026 - wow-viewer app slice 11 landed: the bounded world frame now consumes a runtime-owned liquid tile service over MH2O decode
+
+- slice 11 from the viewer-app cutover plan is now landed in `wow-viewer`
+- `WorldLiquidLayerData.cs`, `WorldLiquidChunkData.cs`, `WorldLiquidTileData.cs`, and `WorldLiquidTileBuilder.cs` now own the bounded liquid tile service seam in `WowViewer.Core.Runtime`, using shared `AdtLiquidReader` output to expose chunk coordinates, layer metadata, visible liquid tile counts, and liquid-family grouping for the selected root ADT
+- `WowViewerWorldRuntimeBridge.cs` now resolves the selected tile's root ADT into both the earlier tile-stage summary and the new liquid tile service, carries that liquid service through `WowViewerWorldRuntimeFrameResult`, and uses it as the active liquid-stage source rather than only the earlier aggregate summary counts
+- `Program.cs` and `WowViewerDesktopApp.cs` now report liquid type breakdowns plus bounded chunk samples in the `world-frame` CLI proof path and desktop diagnostics, so the bounded world frame has a real liquid-service seam instead of only aggregate liquid counters
+- bounded proof in this chat:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldLiquidTileBuilderTests` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded with the usual workspace `LIB` warnings only
+	- real fixed-root proof via `WowViewer.App world-frame` on `H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft`, `Azeroth`, now reports liquid chunk samples and liquid-family counts for the auto-selected tile `(39,32)`, while rerunning with `--hide-liquid` still drops the active liquid stage count to zero without erasing the source-side liquid service data
+- current boundary:
+	- this closes bounded liquid service ownership only; it does not extract actual liquid rendering
+	- terrain service or renderer ownership remains the next real viewer-facing slice
+
 ## Apr 17, 2026 - wow-viewer app slice 10 landed: the bounded world frame now consumes a runtime-owned root-ADT stage summary for WDL, terrain, and liquid counts
 
 - slice 10 from the viewer-app cutover plan is now landed in `wow-viewer`
