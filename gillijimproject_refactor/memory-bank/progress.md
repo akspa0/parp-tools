@@ -6,15 +6,32 @@
 	- `wow-viewer/src/viewer/WowViewer.App/PreviewCameraPlanner.cs` now owns a reusable MDX preview camera surface that defaults to the old `MdxViewer` `FrameBounds(...)` behavior instead of the earlier fit-to-corners camera path, while keeping explicit `orbit` and `model` modes available for bounded alternate capture paths
 	- the same planner now uses a wider old-viewer-shaped default FOV for frame mode, and the standalone preview floor on legacy frame distance was reduced so small props no longer stay excessively far away
 	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now resolves preview bounds from actual renderable geoset vertices before declared summary bounds, matching the old `MdxViewer` renderer's local bounds preference for normal MDX and fixing the main cause of the zoomed-out first-view regression
+	- the same MDX preview renderer now also uses an explicit legacy-style global sun setup with brighter ambient defaults and softer wrap lighting, fixing the darker backlit shader behavior that was leaving non-emissive preview models too close to black
 	- `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` now persists bounded MDX camera settings for the desktop app, and `WowViewerDesktopApp.cs` now exposes frame or orbit or model selection plus orbit preset or custom azimuth or elevation and FOV or zoom controls in the MDX workspace pane
 	- the MDX control surface now reloads the active preview with the current camera settings instead of leaving camera iteration as a CLI-only flow
 - validation:
 	- repeated `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passes succeeded through the camera-path port, bounds-source port, and desktop control wiring, with only the usual workspace `LIB` warnings plus existing nullable warnings in unrelated files
 	- real-data capture proof via `WowViewer.App mdx-gpu-frame` on `wow-viewer/testdata/0.5.3/tree/Creature/Banshee/Banshee.mdx` confirmed that the final default frame path is no longer stuck in the tiny-speck regression state
 	- real-data capture proof on `wow-viewer/testdata/0.6.0/World of Warcraft/Data/world/generic/activedoodads/chest01/chest01.mdx` confirmed the reduced standalone frame-distance floor improves small-prop framing without needing manual camera overrides
+	- fresh real-data capture proofs on both `Banshee.mdx` and `chest01.mdx` after the shader update confirmed the preview now has a stable global sun or ambient rig instead of leaving non-emissive models dependent on self-lighting alone
 - boundary:
 	- this closes bounded MDX first-frame camera parity plus app-side control plumbing only
 	- the next camera-facing follow-up should be either live viewport interaction in the standalone MDX workspace or a later visual-bounds-aware framing mode for particle-heavy assets
+
+### Apr 17, 2026 - LIT inspect now exposes parsed light entries and heuristic point sampling
+
+- what changed:
+	- `wow-viewer/src/core/WowViewer.Core/Lit` now includes typed `LitListEntrySummary` records and a bounded `LitSpatialSampler` helper over the existing `LitSummary` contract
+	- `wow-viewer/src/core/WowViewer.Core.IO/Lit/LitSummaryReader.cs` now parses each 64-byte `LIT` list entry into chunk coordinates, world position, radius, dropoff, and name data instead of stopping at aggregate counts alone
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` `lit inspect` now prints a preview of parsed `LIT` entries and accepts `--sample-position <x,y,z>` to report the heuristic candidate entry or default fallback for a world-space point
+	- `wow-viewer/tests/WowViewer.Core.Tests/LitSummaryReaderTests.cs` now covers both the parsed entry fields and the new spatial sampler behavior
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter LitSummaryReaderTests` passed
+	- real-data inspect proof on `world/maps/azeroth/lights.lit` through the 0.6.0 test archive root now reports `57` named light entries and successfully samples `0,0,0` back to the default global light record
+	- real-data inspect proof on `world/maps/azeroth/areatest.lit` confirms the older single-partial `LIT` shape still parses cleanly and does not fabricate list entries that are not present
+- boundary:
+	- this is still parser or inspect ownership plus heuristic spatial selection only
+	- actual `LIT` color-band decode and runtime fog or light-color application remain the next implementation slice
 
 ### Apr 17, 2026 - Alpha rich-tile world-frame proof now carries all ready MDX placements through visibility and pass planning on the canonical 0.5.5 client
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
 using WowViewer.Core.Blp;
@@ -1142,8 +1143,18 @@ static void RunLitInspect(string[] args)
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	string? virtualPath = GetOption(args, "--virtual-path", "-v");
+	string? samplePositionText = GetOption(args, "--sample-position", string.Empty);
 	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
 		return;
+
+	if (!TryParseVector3Option(samplePositionText, out Vector3 samplePosition, out string? samplePositionError))
+	{
+		Console.Error.WriteLine($"Error: {samplePositionError}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	bool hasSamplePosition = !string.IsNullOrWhiteSpace(samplePositionText);
 	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
 		virtualPath = input;
 
@@ -1178,7 +1189,7 @@ static void RunLitInspect(string[] args)
 	using (Stream stream = OpenInputStream())
 		summary = LitSummaryReader.Read(stream, sourceLabel);
 
-	PrintLitSummary(summary);
+	PrintLitSummary(summary, hasSamplePosition ? samplePosition : null);
 }
 
 static void RunMapUniqueIdReport(string[] args)
@@ -2161,6 +2172,32 @@ static string FormatVector(System.Numerics.Vector3 value)
 	return $"({value.X:F2}, {value.Y:F2}, {value.Z:F2})";
 }
 
+static bool TryParseVector3Option(string? text, out Vector3 value, out string? error)
+{
+	value = default;
+	error = null;
+	if (string.IsNullOrWhiteSpace(text))
+		return true;
+
+	string[] parts = text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+	if (parts.Length != 3)
+	{
+		error = "--sample-position must be in x,y,z form.";
+		return false;
+	}
+
+	if (!float.TryParse(parts[0], NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out float x)
+		|| !float.TryParse(parts[1], NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out float y)
+		|| !float.TryParse(parts[2], NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out float z))
+	{
+		error = "--sample-position requires three invariant-culture floating-point values, for example 100.0,200.0,15.5.";
+		return false;
+	}
+
+	value = new Vector3(x, y, z);
+	return true;
+}
+
 static string FormatQuaternion(System.Numerics.Quaternion value)
 {
 	return $"({value.X:F3}, {value.Y:F3}, {value.Z:F3}, {value.W:F3})";
@@ -2579,13 +2616,40 @@ static string FormatWdtMainFlags(WdtMainFlagsSummary summary)
 	return string.Join(",", summary.DistinctNonZeroValues.Select(static value => $"0x{value.Value:x}:{value.TileCount}"));
 }
 
-static void PrintLitSummary(LitSummary summary)
+static void PrintLitSummary(LitSummary summary, Vector3? samplePosition = null)
 {
 	Console.WriteLine("WowViewer.Tool.Inspect LIT report");
 	Console.WriteLine($"Input: {summary.SourcePath}");
 	Console.WriteLine($"Version: 0x{summary.VersionNumber:X8}");
 	Console.WriteLine($"LIT semantics: lightCount={summary.LightCount} listEntries={summary.ListEntryCount} singlePartial={summary.UsesSinglePartialEntry} defaultFirstEntry={summary.HasDefaultFirstEntry} namedEntries={summary.NamedEntryCount} remainingPayloadBytes={summary.RemainingPayloadBytes}");
-	Console.WriteLine("Proof boundary: parser-only summary; runtime .lit ownership is still unproven.");
+	if (summary.Entries.Count > 0)
+	{
+		int previewCount = Math.Min(summary.Entries.Count, 8);
+		Console.WriteLine($"LIT entry preview: showing {previewCount}/{summary.Entries.Count} list entries");
+		for (int index = 0; index < previewCount; index++)
+		{
+			LitListEntrySummary entry = summary.Entries[index];
+			string label = entry.HasName ? entry.Name : "<unnamed>";
+			Console.WriteLine($"LIT.ENTRY[{entry.Index}]: default={entry.IsDefaultEntry} name={label} chunk=({entry.ChunkX},{entry.ChunkY}) chunkRadius={entry.ChunkRadius} position={FormatVector(entry.Position)} radius={entry.LightRadius:F2} dropoff={entry.LightDropoff:F2} outerRadius={entry.OuterRadius:F2}");
+		}
+
+		if (summary.Entries.Count > previewCount)
+			Console.WriteLine($"LIT entry preview truncated: {summary.Entries.Count - previewCount} additional entries not shown.");
+	}
+
+	if (samplePosition is Vector3 position)
+	{
+		IReadOnlyList<LitSpatialSampleCandidate> candidates = LitSpatialSampler.Sample(summary, position);
+		Console.WriteLine($"LIT sample: query={FormatVector(position)} candidates={candidates.Count}");
+		foreach (LitSpatialSampleCandidate candidate in candidates)
+		{
+			string label = candidate.Entry.HasName ? candidate.Entry.Name : "<unnamed>";
+			Console.WriteLine($"LIT.SAMPLE[{candidate.Entry.Index}]: name={label} fallbackDefault={candidate.IsFallbackDefault} distance={candidate.Distance:F2} influence={candidate.Influence:F3} withinCore={candidate.WithinCoreRadius} withinOuter={candidate.WithinOuterRadius} entryPos={FormatVector(candidate.Entry.Position)} radius={candidate.Entry.LightRadius:F2} dropoff={candidate.Entry.LightDropoff:F2}");
+		}
+		Console.WriteLine("LIT sample boundary: spatial candidate selection is heuristic over list-entry radius/dropoff only; color-band payload sampling is still pending.");
+	}
+
+	Console.WriteLine("Proof boundary: parser summary plus spatial list-entry sampling only; runtime .lit color/fog ownership is still unproven.");
 }
 
 static void PrintWmoSummary(WmoSummary summary)
@@ -3312,8 +3376,8 @@ static void ShowBlpUsage()
 static void ShowLitUsage()
 {
 	Console.WriteLine("LIT commands:");
-	Console.WriteLine("  lit inspect --input <lights.lit>");
-	Console.WriteLine("  lit inspect --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>]");
+	Console.WriteLine("  lit inspect --input <lights.lit> [--sample-position <x,y,z>]");
+	Console.WriteLine("  lit inspect --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>] [--sample-position <x,y,z>]");
 }
 
 static void ShowM2Usage()

@@ -12,6 +12,10 @@
 - the earlier over-zoomed MDX previews were narrowed to a local bounds-source mismatch rather than a pure camera-math defect:
 	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now resolves preview bounds from actual geoset vertices first, matching the old `MdxViewer` renderer's renderable-bounds preference for normal MDX instead of trusting declared summary bounds first
 	- the legacy frame-distance floor was also reduced for standalone preview use so very small props no longer inherit the old viewer's least useful hard clamp unchanged
+	- the same preview renderer now also uses an explicit old-viewer-shaped global sun rig instead of the earlier darker backlit shader contract:
+		- default light direction now matches the legacy above or front directional light assumption
+		- ambient and light colors now match the brighter terrain or model preview defaults from `MdxViewer`
+		- the fragment shader now uses softer wrap lighting instead of the harsher one-sided diffuse path, so non-emissive models are no longer left effectively unlit when they face away from the old backlit direction
 - `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` plus `WowViewerDesktopApp.cs` now carry MDX camera state through the desktop workspace itself:
 	- frame or orbit or model mode is selectable in-app
 	- orbit presets and custom azimuth or elevation are now configurable in-app
@@ -23,9 +27,28 @@
 		- `Banshee.mdx` first moved from tiny-speck framing to over-tight framing once vertex-derived bounds were used with the legacy frame path
 		- after switching frame-mode back to the old viewer-shaped wider FOV, `Banshee.mdx` settled into a plausible old-viewer-style first frame
 		- `chest01.mdx` then confirmed the small-prop case needed a lower standalone frame-distance floor, and the final floor reduction improved that case without regressing the larger `Banshee` frame materially
+		- after porting the old viewer's global sun defaults and softer wrap lighting into the standalone MDX shader, fresh `Banshee.mdx` and `chest01.mdx` captures confirmed the preview no longer depends on emissive content alone to stay readable
 - current boundary:
 	- this closes the bounded standalone MDX first-view framing and app-side camera-control slice only; it does not yet add live mouse orbit or pan or zoom interaction in the preview viewport itself
 	- effect-heavy or particle-heavy assets may still need a later visual-bounds-aware framing mode because raw mesh bounds are not always the full visible story
+
+## Apr 17, 2026 - wow-viewer LIT support now exposes per-entry light metadata and heuristic spatial sampling through inspect
+
+- the earlier `wow-viewer` `LIT` seam in `WowViewer.Core` and `WowViewer.Core.IO` was parser-summary-only and stopped at header semantics such as count, default-entry presence, and remaining payload bytes
+- `wow-viewer/src/core/WowViewer.Core/Lit` now carries typed `LitListEntrySummary` records plus a first bounded `LitSpatialSampler` helper:
+	- each parsed list entry now exposes chunk coordinates, world position, light radius, dropoff, default-entry status, and name
+	- the sampler can now choose candidate entries for a world position using list-entry radius plus dropoff only, with explicit fallback to the default global record when no local volume matches
+- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect` `lit inspect` now surfaces that shared data instead of only the old aggregate count summary:
+	- entry preview now prints the first parsed `LIT` list entries with world position and radius/dropoff data
+	- `--sample-position <x,y,z>` now reports which parsed light entry volumes would affect a candidate point under the current heuristic sampler
+	- proof language stays explicit that this is still list-entry and payload-boundary work, not full runtime color-band or fog ownership yet
+- bounded proof in this chat:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter LitSummaryReaderTests` passed after adding parsed entry coverage plus focused spatial-sampler tests
+	- real-data `lit inspect` proof on `world/maps/azeroth/lights.lit` via the fixed 0.6.0 archive root now reports `57` named list entries and emits concrete spatial list-entry records such as `DuskWood`, `Swamp Of Sorrows`, and `WestFall`, while `--sample-position 0,0,0` correctly falls back to the default global light entry
+	- real-data `lit inspect` proof on `world/maps/azeroth/areatest.lit` now confirms the older single-partial file shape still parses as `lightCount=-1` / `singlePartial=True` without inventing missing list entries
+- current boundary:
+	- this closes parser-owned list-entry metadata plus heuristic spatial candidate selection only
+	- the heavier next slice is still unresolved: decode the per-entry color or fog bands from the remaining `LightData` payload so runtime consumers can test ambient, diffuse, fog, sky, and volumetric-fog-like color behavior instead of only choosing the candidate light volume
 
 ## Apr 17, 2026 - wow-viewer Alpha world bring-up now has rich-tile MDX-visible runtime proof on the canonical 0.5.5 client
 

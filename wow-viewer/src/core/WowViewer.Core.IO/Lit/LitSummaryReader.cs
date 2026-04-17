@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.Numerics;
+using System.Text;
 using WowViewer.Core.Lit;
 
 namespace WowViewer.Core.IO.Lit;
@@ -38,6 +40,7 @@ public static class LitSummaryReader
             int lightCount = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(4, 4));
             bool usesSinglePartialEntry = lightCount == -1;
             int listEntryCount = Math.Max(lightCount, 0);
+            List<LitListEntrySummary> entries = [];
 
             long requiredListBytes = (long)listEntryCount * LightListEntrySize;
             if (stream.Length < HeaderSize + requiredListBytes)
@@ -57,11 +60,20 @@ public static class LitSummaryReader
                 int chunkX = BinaryPrimitives.ReadInt32LittleEndian(entry.AsSpan(0, 4));
                 int chunkY = BinaryPrimitives.ReadInt32LittleEndian(entry.AsSpan(4, 4));
                 int chunkRadius = BinaryPrimitives.ReadInt32LittleEndian(entry.AsSpan(8, 4));
+                Vector3 position = new(
+                    BinaryPrimitives.ReadSingleLittleEndian(entry.AsSpan(0x0C, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(entry.AsSpan(0x10, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(entry.AsSpan(0x14, 4)));
+                float lightRadius = BinaryPrimitives.ReadSingleLittleEndian(entry.AsSpan(0x18, 4));
+                float lightDropoff = BinaryPrimitives.ReadSingleLittleEndian(entry.AsSpan(0x1C, 4));
+                string name = ReadName(entry.AsSpan(0x20, 0x20));
                 if (entryIndex == 0 && chunkX == -1 && chunkY == -1 && chunkRadius == -1)
                     hasDefaultFirstEntry = true;
 
                 if (HasMeaningfulName(entry.AsSpan(0x20, 0x20)))
                     namedEntryCount++;
+
+                entries.Add(new LitListEntrySummary(entryIndex, chunkX, chunkY, chunkRadius, position, lightRadius, lightDropoff, name));
             }
 
             int remainingPayloadBytes = checked((int)(stream.Length - stream.Position));
@@ -70,6 +82,7 @@ public static class LitSummaryReader
                 versionNumber,
                 lightCount,
                 listEntryCount,
+                entries,
                 usesSinglePartialEntry,
                 hasDefaultFirstEntry,
                 namedEntryCount,
@@ -79,6 +92,15 @@ public static class LitSummaryReader
         {
             stream.Position = previousPosition;
         }
+    }
+
+    private static string ReadName(ReadOnlySpan<byte> bytes)
+    {
+        int length = 0;
+        while (length < bytes.Length && bytes[length] != 0 && bytes[length] != 0xFD)
+            length++;
+
+        return length == 0 ? string.Empty : Encoding.UTF8.GetString(bytes[..length]).Trim();
     }
 
     private static bool HasMeaningfulName(ReadOnlySpan<byte> bytes)

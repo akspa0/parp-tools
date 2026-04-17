@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 namespace WowViewer.Core.Lit;
 
 public sealed class LitSummary
@@ -7,6 +9,7 @@ public sealed class LitSummary
         uint versionNumber,
         int lightCount,
         int listEntryCount,
+        IReadOnlyList<LitListEntrySummary> entries,
         bool usesSinglePartialEntry,
         bool hasDefaultFirstEntry,
         int namedEntryCount,
@@ -16,11 +19,13 @@ public sealed class LitSummary
         ArgumentOutOfRangeException.ThrowIfNegative(listEntryCount);
         ArgumentOutOfRangeException.ThrowIfNegative(namedEntryCount);
         ArgumentOutOfRangeException.ThrowIfNegative(remainingPayloadBytes);
+        ArgumentNullException.ThrowIfNull(entries);
 
         SourcePath = sourcePath;
         VersionNumber = versionNumber;
         LightCount = lightCount;
         ListEntryCount = listEntryCount;
+        Entries = new ReadOnlyCollection<LitListEntrySummary>(entries.ToArray());
         UsesSinglePartialEntry = usesSinglePartialEntry;
         HasDefaultFirstEntry = hasDefaultFirstEntry;
         NamedEntryCount = namedEntryCount;
@@ -34,6 +39,8 @@ public sealed class LitSummary
     public int LightCount { get; }
 
     public int ListEntryCount { get; }
+
+    public IReadOnlyList<LitListEntrySummary> Entries { get; }
 
     public bool UsesSinglePartialEntry { get; }
 

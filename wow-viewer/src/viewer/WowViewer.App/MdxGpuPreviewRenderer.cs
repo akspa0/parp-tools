@@ -46,9 +46,9 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
     private PreviewCameraSettings _cameraSettings = new();
     private Vector3 _boundsMin = new(-1.0f, -1.0f, -1.0f);
     private Vector3 _boundsMax = new(1.0f, 1.0f, 1.0f);
-    private Vector3 _ambientColor = new(0.25f, 0.25f, 0.3f);
-    private Vector3 _lightColor = new(0.9f, 0.9f, 0.85f);
-    private readonly Vector3 _lightDir = Vector3.Normalize(new Vector3(-0.5f, 0.8f, 0.35f));
+    private Vector3 _ambientColor = new(0.35f, 0.35f, 0.4f);
+    private Vector3 _lightColor = new(1.0f, 0.95f, 0.85f);
+    private readonly Vector3 _lightDir = Vector3.Normalize(new Vector3(0.5f, 0.3f, 1.0f));
     private bool _disposed;
 
     public MdxGpuPreviewRenderer(GL gl)
@@ -315,6 +315,14 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         {
             min = rawMin;
             max = rawMax;
+
+            if (NeedsEffectAwareFraming(summary)
+                && TryGetEffectAwareDeclaredBounds(summary, rawMin, rawMax, out Vector3 declaredMin, out Vector3 declaredMax))
+            {
+                min = Vector3.Min(min, declaredMin);
+                max = Vector3.Max(max, declaredMax);
+            }
+
             return;
         }
 
@@ -370,6 +378,71 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         }
 
         return found;
+    }
+
+    private static bool NeedsEffectAwareFraming(MdxSummary summary) => summary.ParticleEmitter2Count > 0 || summary.RibbonCount > 0;
+
+    private static bool TryGetEffectAwareDeclaredBounds(MdxSummary summary, Vector3 rawMin, Vector3 rawMax, out Vector3 min, out Vector3 max)
+    {
+        min = default;
+        max = default;
+        bool found = false;
+        float bestDiagonal = float.MaxValue;
+
+        if (TryConsiderDeclaredBounds(summary.BoundsMin, summary.BoundsMax, rawMin, rawMax, ref found, ref bestDiagonal, ref min, ref max))
+            found = true;
+
+        foreach (MdxSequenceSummary sequence in summary.Sequences)
+        {
+            if (TryConsiderDeclaredBounds(sequence.BoundsMin, sequence.BoundsMax, rawMin, rawMax, ref found, ref bestDiagonal, ref min, ref max))
+                found = true;
+        }
+
+        return found;
+    }
+
+    private static bool TryConsiderDeclaredBounds(
+        Vector3? candidateMin,
+        Vector3? candidateMax,
+        Vector3 rawMin,
+        Vector3 rawMax,
+        ref bool found,
+        ref float bestDiagonal,
+        ref Vector3 bestMin,
+        ref Vector3 bestMax)
+    {
+        if (candidateMin is not Vector3 min || candidateMax is not Vector3 max)
+            return false;
+
+        Vector3 extent = max - min;
+        if (!float.IsFinite(extent.X) || !float.IsFinite(extent.Y) || !float.IsFinite(extent.Z) || extent.LengthSquared() <= 0.0001f)
+            return false;
+
+        if (!ContainsBounds(min, max, rawMin, rawMax))
+            return false;
+
+        float candidateDiagonal = extent.Length();
+        float rawDiagonal = (rawMax - rawMin).Length();
+        if (candidateDiagonal <= rawDiagonal * 1.05f)
+            return false;
+
+        if (!found || candidateDiagonal < bestDiagonal)
+        {
+            bestDiagonal = candidateDiagonal;
+            bestMin = min;
+            bestMax = max;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsBounds(Vector3 outerMin, Vector3 outerMax, Vector3 innerMin, Vector3 innerMax)
+    {
+        const float epsilon = 0.01f;
+        return innerMin.X >= outerMin.X - epsilon && innerMax.X <= outerMax.X + epsilon
+            && innerMin.Y >= outerMin.Y - epsilon && innerMax.Y <= outerMax.Y + epsilon
+            && innerMin.Z >= outerMin.Z - epsilon && innerMax.Z <= outerMax.Z + epsilon;
     }
 
     private static MdxMaterialState ResolveMaterial(MdxSummary summary, int materialId)
@@ -504,8 +577,11 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
                 if (uReceivesLighting)
                 {
                     vec3 normal = normalize(vNormal);
-                    float diffuse = max(dot(normal, normalize(-uLightDir)), 0.0);
-                    shaded *= clamp(uAmbientColor + (uLightColor * diffuse), vec3(0.0), vec3(1.5));
+                    vec3 lightDir = normalize(uLightDir);
+                    float NdotL = dot(normal, lightDir);
+                    float diffuse = NdotL * 0.5 + 0.5;
+                    diffuse = diffuse * diffuse;
+                    shaded *= clamp(uAmbientColor + (uLightColor * diffuse), vec3(0.0), vec3(1.75));
                 }
 
                 shaded += uEmissiveColor;
