@@ -1,5 +1,71 @@
 # Progress
 
+### Apr 18, 2026 - standalone MDX preview now uses GPU palette skinning instead of CPU-skinned vertex uploads
+
+- what changed:
+	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` no longer uploads already-skinned classic `MDX` vertex positions/normals as the primary preview path
+	- the renderer now uploads bind-pose positions/normals/UVs in one vertex buffer and uploads per-vertex bone indices/weights in a separate skinning buffer when the geoset actually uses classic matrix groups
+	- the standalone MDX preview shader now accepts a bounded bone palette uniform array plus `uUseBoneSkinning` and applies weighted skinning for positions and normals in the vertex shader
+	- the same preview path still rebuilds the classic bone palette from `BONE`/`PIVT` runtime data, including the prior billboard-bone pose rules, so correctness stays anchored on the existing pose solver while the deformation work moves to the GPU
+	- posed/skinned bounds are still computed CPU-side for preview framing, but mesh deformation is no longer baked into uploaded vertex positions
+- validation:
+	- `dotnet build .\wow-viewer\src\viewer\WowViewer.App\WowViewer.App.csproj -c Debug` passed
+- boundary:
+	- this closes GPU palette skinning only for the bounded standalone classic `MDX` preview consumer
+	- helper/attachment/event runtime behavior, particles, ribbons, and broader classic `MDX` runtime cutover remain future slices
+
+### Apr 17, 2026 - standalone MDX preview now applies classic billboard bone rules during pose solving
+
+- what changed:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxBone.cs` now exposes explicit classic node-flag helpers for ignore-parent and billboard behaviors
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxBonePoseBuilder.cs` now accepts optional camera position and applies bounded billboard-facing rotation during pose solving for:
+		- spherical billboards
+		- cylindrical billboards using the documented axis-lock bits
+	- the same pose builder still keeps the bounded inheritance rule handling local to the runtime seam instead of leaking those semantics back into app-local code
+	- the standalone `MDX` preview in `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now benefits from that camera-aware pose solve in the same CPU-skinned path added in the prior slice
+	- added focused regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/MdxBonePoseBuilderTests.cs` for spherical and cylindrical billboard cases
+- validation:
+	- `dotnet test .\wow-viewer\tests\WowViewer.Core.Tests\WowViewer.Core.Tests.csproj -c Debug --filter "MdxBonePoseBuilderTests"` passed
+	- `dotnet build .\wow-viewer\src\viewer\WowViewer.App\WowViewer.App.csproj -c Debug` passed
+- boundary:
+	- this closes billboard bone handling only for the bounded standalone classic `MDX` preview path
+	- helper-node runtime usage, attachments/events, particles, ribbons, and broader world/runtime classic `MDX` cutover remain future slices
+
+### Apr 17, 2026 - standalone MDX preview now applies classic BONE/PIVT pose solving and CPU skinning
+
+- what changed:
+	- added shared classic bone payload ownership in `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxBoneReader.cs`, including typed `KGTR`/`KGRT`/`KGSC` payload reads plus deferred `PIVT` pivot assignment into the new `wow-viewer/src/core/WowViewer.Core/Mdx/MdxBone.cs` and `MdxBoneFile.cs` contracts
+	- added `wow-viewer/src/core/WowViewer.Core/Mdx/MdxBonePoseBuilder.cs` as the first reusable classic `MDX` hierarchy solver over sampled translation/rotation/scaling tracks and pivot-aware local transforms
+	- added `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSkinningHelper.cs` so classic `GEOS` matrix groups and matrix tables can be remapped to bone indices and used for weighted CPU skinning of vertices and normals
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads classic bone payloads alongside the earlier summary/geometry/`GEOA`/`TXAN` readers for standalone preview requests
+	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now builds classic bone matrices from the active sequence/time and skins geoset positions/normals before uploading preview buffers, with posed bounds preferred when skinned geometry is available
+	- added focused regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/MdxBoneReaderTests.cs` and `MdxBonePoseBuilderTests.cs`
+- validation:
+	- `dotnet test .\wow-viewer\tests\WowViewer.Core.Tests\WowViewer.Core.Tests.csproj -c Debug --filter "MdxBoneReaderTests|MdxBonePoseBuilderTests|MdxAnimationSamplerTests|MdxGeosetAnimationReaderTests"` passed
+	- `dotnet build .\wow-viewer\src\viewer\WowViewer.App\WowViewer.App.csproj -c Debug` passed
+- boundary:
+	- this closes classic standalone `MDX` bone payload ownership plus bounded pose/deformation playback in the standalone preview only
+	- helper/runtime nodes beyond bones, attachments/events, billboards, particles, ribbons, and world/runtime cutover remain open follow-up work
+
+### Apr 17, 2026 - standalone MDX preview now evaluates animated GEOA alpha/color and TXAN UV transforms
+
+- what changed:
+	- added shared classic `GEOA` payload ownership in `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxGeosetAnimationReader.cs` plus the new `wow-viewer/src/core/WowViewer.Core/Mdx/` payload contracts for animated geoset alpha/color keys instead of leaving that data at summary-only depth
+	- added `wow-viewer/src/core/WowViewer.Core/Mdx/MdxAnimationSampler.cs` as the first reusable classic `MDX` track-evaluation seam for sequence-relative and global-sequence-relative scalar/color/vector/quaternion sampling
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads shared `GEOA` and `TXAN` payload files alongside the existing summary/geometry readers for standalone preview requests
+	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now uses the session `SequenceIndex`/`TimeMs` values for real preview behavior instead of only carrying them through request plumbing:
+		- animated geoset alpha now modulates draw alpha through sampled `KGAO`
+		- animated geoset color now modulates draw color through sampled `KGAC`
+		- material UV animation now samples `KTAT`/`KTAR`/`KTAS` and applies the transform in shader space before texture fetch
+		- material `CoordId` now selects the correct UV set instead of always sampling UV set `0`
+	- added focused regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/MdxGeosetAnimationReaderTests.cs` and `wow-viewer/tests/WowViewer.Core.Tests/MdxAnimationSamplerTests.cs`
+- validation:
+	- `dotnet test .\wow-viewer\tests\WowViewer.Core.Tests\WowViewer.Core.Tests.csproj -c Debug --filter "MdxAnimationSamplerTests|MdxGeosetAnimationReaderTests|MdxTextureAnimationReaderTests|MdxSummaryReaderTests"` passed
+	- `dotnet build .\wow-viewer\src\viewer\WowViewer.App\WowViewer.App.csproj -c Debug` passed
+- boundary:
+	- this closes the first bounded animated standalone `MDX` preview slice only for `GEOA` alpha/color and `TXAN` UV transform playback
+	- classic `MDX` skeletal transforms, pivot-aware node evaluation, skinned deformation, billboard behavior, particles, ribbons, and broader runtime parity remain open follow-up work
+
 ### Apr 17, 2026 - standalone MDX preview now uses the ported Frame Model path and desktop camera controls
 
 - what changed:

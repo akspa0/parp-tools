@@ -55,6 +55,14 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
     private int _uTexture0;
     private int _uAlphaCutout;
     private int _uReceivesLighting;
+    private int _uUseBoneSkinning;
+    private int _uBoneCount;
+    private int _uBones;
+    private int _uUseUvTransform;
+    private int _uUvTranslation;
+    private int _uUvScale;
+    private int _uUvRotationRow0;
+    private int _uUvRotationRow1;
 
     private uint _framebuffer;
     private uint _colorTexture;
@@ -63,7 +71,9 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
     private int _frameWidth;
     private int _frameHeight;
     private MdxSummary? _currentSummary;
+    private MdxPreviewLoadResult? _currentPreview;
     private PreviewCameraSettings _cameraSettings = new();
+    private Matrix4x4[] _boneMatrices = [];
     private Vector3 _boundsMin = new(-1.0f, -1.0f, -1.0f);
     private Vector3 _boundsMax = new(1.0f, 1.0f, 1.0f);
     private Vector3 _ambientColor = new(0.35f, 0.35f, 0.4f);
@@ -119,7 +129,9 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             command.Dispose(_gl);
 
         _commands.Clear();
+        _currentPreview = null;
         _currentSummary = null;
+        _boneMatrices = [];
     }
 
     public void LoadPreview(MdxPreviewLoadResult preview)
@@ -127,9 +139,19 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         ArgumentNullException.ThrowIfNull(preview);
 
         ClearPreview();
+        _currentPreview = preview;
         _currentSummary = preview.Summary;
         _cameraSettings = preview.Request.Camera;
-        ResolveBounds(preview.Geometry, preview.Summary, out _boundsMin, out _boundsMax);
+
+        ResolveBounds(preview.Geometry, preview.Summary, out Vector3 initialMin, out Vector3 initialMax);
+        PreviewCameraPose initialPose = PreviewCameraPlanner.CreatePose(initialMin, initialMax, _cameraSettings, preview.Summary, preview.Request.VisualWidth, preview.Request.VisualHeight);
+        _boneMatrices = preview.Bones.BoneCount > 0
+            ? MdxBonePoseBuilder.Build(preview.Bones, preview.Summary, preview.Request.SequenceIndex, preview.Request.TimeMs, initialPose.CameraPosition)
+            : [];
+
+        bool hasSkinnedBounds = false;
+        Vector3 skinnedBoundsMin = new(float.MaxValue);
+        Vector3 skinnedBoundsMax = new(float.MinValue);
 
         foreach (MdxGeosetGeometry geoset in preview.Geometry.Geosets)
         {
@@ -137,7 +159,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
                 continue;
 
             MdxMaterialState material = ResolveMaterial(preview.Summary, geoset.MaterialId);
-            GeosetRenderState geosetState = ResolveGeosetRenderState(preview.Summary, geoset, material);
+            GeosetRenderState geosetState = ResolveGeosetRenderState(preview, geoset, material);
             if (geosetState.Alpha <= 0.001f)
                 continue;
 
@@ -150,12 +172,33 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             }
 
             float[] vertexData = new float[geoset.Vertices.Count * 8];
-            IReadOnlyList<Vector2> uvSet = geoset.PrimaryUvSet;
+            IReadOnlyList<Vector2> uvSet = material.CoordId >= 0 && material.CoordId < geoset.UvSetCount
+                ? geoset.UvSets[material.CoordId]
+                : geoset.PrimaryUvSet;
+
+            TextureTransformState textureTransform = ResolveTextureTransform(preview, material);
+            bool usesBoneSkinning = _boneMatrices.Length > 0 && geoset.VertexGroupCount > 0 && geoset.MatrixGroupCount > 0;
+            (Vector4[] boneIndices, Vector4[] boneWeights) = usesBoneSkinning
+                ? MdxSkinningHelper.BuildBoneWeights(geoset, preview.Bones.Bones)
+                : (Array.Empty<Vector4>(), Array.Empty<Vector4>());
             for (int index = 0; index < geoset.Vertices.Count; index++)
             {
                 Vector3 position = geoset.Vertices[index];
                 Vector3 normal = index < geoset.Normals.Count ? geoset.Normals[index] : Vector3.UnitZ;
+                if (usesBoneSkinning && index < boneIndices.Length && index < boneWeights.Length)
+                {
+                    position = MdxSkinningHelper.ApplySkinning(position, boneIndices[index], boneWeights[index], _boneMatrices);
+                    normal = MdxSkinningHelper.ApplySkinningNormal(normal, boneIndices[index], boneWeights[index], _boneMatrices);
+                }
+
                 Vector2 uv = index < uvSet.Count ? uvSet[index] : Vector2.Zero;
+                if (float.IsFinite(position.X) && float.IsFinite(position.Y) && float.IsFinite(position.Z))
+                {
+                    skinnedBoundsMin = Vector3.Min(skinnedBoundsMin, position);
+                    skinnedBoundsMax = Vector3.Max(skinnedBoundsMax, position);
+                    hasSkinnedBounds = true;
+                }
+
                 int offset = index * 8;
                 vertexData[offset + 0] = position.X;
                 vertexData[offset + 1] = position.Y;
@@ -171,6 +214,25 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             uint vao = _gl.GenVertexArray();
             uint vbo = _gl.GenBuffer();
             uint ebo = _gl.GenBuffer();
+
+            float[] skinningVertexData = new float[geoset.Vertices.Count * 8];
+            if (usesBoneSkinning)
+            {
+                for (int index = 0; index < geoset.Vertices.Count; index++)
+                {
+                    int offset = index * 8;
+                    Vector4 indices4 = index < boneIndices.Length ? boneIndices[index] : Vector4.Zero;
+                    Vector4 weights4 = index < boneWeights.Length ? boneWeights[index] : Vector4.Zero;
+                    skinningVertexData[offset + 0] = indices4.X;
+                    skinningVertexData[offset + 1] = indices4.Y;
+                    skinningVertexData[offset + 2] = indices4.Z;
+                    skinningVertexData[offset + 3] = indices4.W;
+                    skinningVertexData[offset + 4] = weights4.X;
+                    skinningVertexData[offset + 5] = weights4.Y;
+                    skinningVertexData[offset + 6] = weights4.Z;
+                    skinningVertexData[offset + 7] = weights4.W;
+                }
+            }
 
             _gl.BindVertexArray(vao);
             _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
@@ -193,27 +255,56 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
                 _gl.EnableVertexAttribArray(1);
                 _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, 8u * sizeof(float), (void*)(6 * sizeof(float)));
                 _gl.EnableVertexAttribArray(2);
+
+                uint skinningVbo = _gl.GenBuffer();
+                _gl.BindBuffer(BufferTargetARB.ArrayBuffer, skinningVbo);
+                fixed (float* skinningPtr = skinningVertexData)
+                {
+                    _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(skinningVertexData.Length * sizeof(float)), skinningPtr, BufferUsageARB.StaticDraw);
+                }
+
+                _gl.VertexAttribPointer(3, 4, VertexAttribPointerType.Float, false, 8u * sizeof(float), (void*)0);
+                _gl.EnableVertexAttribArray(3);
+                _gl.VertexAttribPointer(4, 4, VertexAttribPointerType.Float, false, 8u * sizeof(float), (void*)(4 * sizeof(float)));
+                _gl.EnableVertexAttribArray(4);
+
+                _commands.Add(new CommandBuffers(
+                    vao,
+                    vbo,
+                    skinningVbo,
+                    ebo,
+                    (uint)indices.Length,
+                    textureId,
+                    hasTexture,
+                    material.IsTransparent,
+                    material.IsAdditive,
+                    geosetState.DepthTest,
+                    geosetState.DepthWrite,
+                    material.AlphaCutout,
+                    geosetState.ReceivesLighting,
+                    usesBoneSkinning,
+                    textureTransform.UsesTransform,
+                    textureTransform.Translation,
+                    textureTransform.Scale,
+                    textureTransform.RotationRow0,
+                    textureTransform.RotationRow1,
+                    geosetState.BaseColor,
+                    Vector3.Zero,
+                    geosetState.Alpha,
+                    material.BlendMode));
             }
 
             _gl.BindVertexArray(0);
+        }
 
-            _commands.Add(new CommandBuffers(
-                vao,
-                vbo,
-                ebo,
-                (uint)indices.Length,
-                textureId,
-                hasTexture,
-                material.IsTransparent,
-                material.IsAdditive,
-                geosetState.DepthTest,
-                geosetState.DepthWrite,
-                material.AlphaCutout,
-                geosetState.ReceivesLighting,
-                geosetState.BaseColor,
-                Vector3.Zero,
-                geosetState.Alpha,
-                material.BlendMode));
+        if (hasSkinnedBounds)
+        {
+            _boundsMin = skinnedBoundsMin;
+            _boundsMax = skinnedBoundsMax;
+        }
+        else
+        {
+            ResolveBounds(preview.Geometry, preview.Summary, out _boundsMin, out _boundsMax);
         }
     }
 
@@ -229,6 +320,16 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         if (_commands.Count > 0)
         {
             PreviewCameraPose pose = PreviewCameraPlanner.CreatePose(_boundsMin, _boundsMax, _cameraSettings, _currentSummary, _frameWidth, _frameHeight);
+            if (_currentPreview is not null && _currentPreview.Bones.BoneCount > 0)
+            {
+                _boneMatrices = MdxBonePoseBuilder.Build(
+                    _currentPreview.Bones,
+                    _currentPreview.Summary,
+                    _currentPreview.Request.SequenceIndex,
+                    _currentPreview.Request.TimeMs,
+                    pose.CameraPosition);
+            }
+
             Matrix4x4 view = pose.View;
             Matrix4x4 projection = pose.Projection;
             RenderPass(view, projection, transparentPass: false);
@@ -274,6 +375,17 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         _gl.Uniform3(_uLightDir, _lightDir.X, _lightDir.Y, _lightDir.Z);
         _gl.Uniform3(_uLightColor, _lightColor.X, _lightColor.Y, _lightColor.Z);
         _gl.Uniform3(_uAmbientColor, _ambientColor.X, _ambientColor.Y, _ambientColor.Z);
+        _gl.Uniform1(_uBoneCount, Math.Min(_boneMatrices.Length, 128));
+        if (_boneMatrices.Length > 0)
+        {
+            unsafe
+            {
+                fixed (Matrix4x4* bonePtr = _boneMatrices)
+                {
+                    _gl.UniformMatrix4(_uBones, (uint)Math.Min(_boneMatrices.Length, 128), false, (float*)bonePtr);
+                }
+            }
+        }
 
         foreach (CommandBuffers command in _commands)
         {
@@ -303,6 +415,12 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             _gl.Uniform1(_uHasTexture, command.HasTexture ? 1 : 0);
             _gl.Uniform1(_uAlphaCutout, command.AlphaCutout ? 1 : 0);
             _gl.Uniform1(_uReceivesLighting, command.ReceivesLighting ? 1 : 0);
+            _gl.Uniform1(_uUseBoneSkinning, command.UsesBoneSkinning && _boneMatrices.Length > 0 ? 1 : 0);
+            _gl.Uniform1(_uUseUvTransform, command.UsesUvTransform ? 1 : 0);
+            _gl.Uniform2(_uUvTranslation, command.UvTranslation.X, command.UvTranslation.Y);
+            _gl.Uniform2(_uUvScale, command.UvScale.X, command.UvScale.Y);
+            _gl.Uniform2(_uUvRotationRow0, command.UvRotationRow0.X, command.UvRotationRow0.Y);
+            _gl.Uniform2(_uUvRotationRow1, command.UvRotationRow1.X, command.UvRotationRow1.Y);
 
             _gl.ActiveTexture(TextureUnit.Texture0);
             _gl.BindTexture(TextureTarget.Texture2D, command.TextureId);
@@ -478,11 +596,11 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
     private static MdxMaterialState ResolveMaterial(MdxSummary summary, int materialId)
     {
         if (materialId < 0 || materialId >= summary.Materials.Count)
-            return new MdxMaterialState(null, 0, false, false, true, false, 1.0f, 0);
+            return new MdxMaterialState(null, 0, -1, 0, false, false, true, false, 1.0f, 0);
 
         MdxMaterialSummary material = summary.Materials[materialId];
         if (material.LayerCount == 0)
-            return new MdxMaterialState(null, 0, false, false, true, false, 1.0f, 0);
+            return new MdxMaterialState(null, 0, -1, 0, false, false, true, false, 1.0f, 0);
 
         MdxMaterialLayerSummary layer = material.Layers[0];
         string? texturePath = null;
@@ -499,7 +617,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         bool alphaCutout = layer.BlendMode == MdxBlendModeTransparentKey;
         bool isAdditive = layer.BlendMode is MdxBlendModeAdditive or MdxBlendModeAddAlpha;
         bool depthWrite = !isTransparent || alphaCutout;
-        return new MdxMaterialState(texturePath, replaceableId, isTransparent, isAdditive, depthWrite, alphaCutout, alpha, layer.BlendMode);
+        return new MdxMaterialState(texturePath, replaceableId, layer.TransformId, layer.CoordId, isTransparent, isAdditive, depthWrite, alphaCutout, alpha, layer.BlendMode);
     }
 
     private bool TryGetOrLoadMaterialTexture(MdxPreviewLoadRequest request, MdxMaterialState material, out uint textureId)
@@ -567,27 +685,69 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         yield return $"{modelDirectory}\\Skin{skinIndex.Value:00}.blp";
     }
 
-    private static GeosetRenderState ResolveGeosetRenderState(MdxSummary summary, MdxGeosetGeometry geoset, MdxMaterialState material)
+    private static GeosetRenderState ResolveGeosetRenderState(MdxPreviewLoadResult preview, MdxGeosetGeometry geoset, MdxMaterialState material)
     {
+        MdxSummary summary = preview.Summary;
         bool receivesLighting = (geoset.Flags & MdxGeosetFlagUnshaded) == 0;
         bool depthTest = (geoset.Flags & MdxGeosetFlagNoDepthTest) == 0;
         bool depthWrite = material.DepthWrite && (geoset.Flags & MdxGeosetFlagNoDepthSet) == 0;
         Vector3 baseColor = Vector3.One;
         float alpha = material.Alpha;
 
-        if (TryGetGeosetAnimation(summary, geoset.Index, out MdxGeosetAnimationSummary? geosetAnimation) && geosetAnimation is not null)
+        if (TryGetGeosetAnimation(preview.GeosetAnimations, geoset.Index, out MdxGeosetAnimation? geosetAnimation) && geosetAnimation is not null)
         {
-            alpha *= Math.Clamp(geosetAnimation.StaticAlpha, 0.0f, 1.0f);
-            if (geosetAnimation.UsesStaticColor)
-                baseColor *= geosetAnimation.StaticColor;
+            alpha *= Math.Clamp(MdxAnimationSampler.SampleScalarTrack(geosetAnimation.AlphaTrack, summary, preview.Request.SequenceIndex, preview.Request.TimeMs, geosetAnimation.StaticAlpha), 0.0f, 1.0f);
+            if (geosetAnimation.UsesStaticColor || geosetAnimation.ColorTrack is not null)
+                baseColor *= MdxAnimationSampler.SampleColorTrack(geosetAnimation.ColorTrack, summary, preview.Request.SequenceIndex, preview.Request.TimeMs, geosetAnimation.StaticColor);
+        }
+        else if (TryGetGeosetAnimation(summary, geoset.Index, out MdxGeosetAnimationSummary? geosetAnimationSummary) && geosetAnimationSummary is not null)
+        {
+            alpha *= Math.Clamp(geosetAnimationSummary.StaticAlpha, 0.0f, 1.0f);
+            if (geosetAnimationSummary.UsesStaticColor)
+                baseColor *= geosetAnimationSummary.StaticColor;
         }
 
         return new GeosetRenderState(receivesLighting, depthTest, depthWrite, baseColor, Math.Clamp(alpha, 0.0f, 1.0f));
     }
 
+    private static TextureTransformState ResolveTextureTransform(MdxPreviewLoadResult preview, MdxMaterialState material)
+    {
+        if (material.TransformId < 0 || material.TransformId >= preview.TextureAnimations.TextureAnimationCount)
+            return TextureTransformState.Identity;
+
+        MdxTextureAnimation animation = preview.TextureAnimations.TextureAnimations[material.TransformId];
+        Vector3 translation = MdxAnimationSampler.SampleVector3Track(animation.TranslationTrack, preview.Summary, preview.Request.SequenceIndex, preview.Request.TimeMs, Vector3.Zero);
+        Vector3 scale = MdxAnimationSampler.SampleVector3Track(animation.ScalingTrack, preview.Summary, preview.Request.SequenceIndex, preview.Request.TimeMs, Vector3.One);
+        Quaternion rotation = MdxAnimationSampler.SampleQuaternionTrack(animation.RotationTrack, preview.Summary, preview.Request.SequenceIndex, preview.Request.TimeMs, Quaternion.Identity);
+        Matrix4x4 rotationMatrix = Matrix4x4.CreateFromQuaternion(rotation);
+
+        bool usesTransform = animation.HasTranslationTrack || animation.HasRotationTrack || animation.HasScalingTrack;
+        return new TextureTransformState(
+            usesTransform,
+            new Vector2(translation.X, translation.Y),
+            new Vector2(scale.X, scale.Y),
+            new Vector2(rotationMatrix.M11, rotationMatrix.M12),
+            new Vector2(rotationMatrix.M21, rotationMatrix.M22));
+    }
+
     private static bool TryGetGeosetAnimation(MdxSummary summary, int geosetIndex, out MdxGeosetAnimationSummary? geosetAnimation)
     {
         foreach (MdxGeosetAnimationSummary candidate in summary.GeosetAnimations)
+        {
+            if (candidate.GeosetId != (uint)geosetIndex)
+                continue;
+
+            geosetAnimation = candidate;
+            return true;
+        }
+
+        geosetAnimation = null;
+        return false;
+    }
+
+    private static bool TryGetGeosetAnimation(MdxGeosetAnimationFile geosetAnimationFile, int geosetIndex, out MdxGeosetAnimation? geosetAnimation)
+    {
+        foreach (MdxGeosetAnimation candidate in geosetAnimationFile.GeosetAnimations)
         {
             if (candidate.GeosetId != (uint)geosetIndex)
                 continue;
@@ -667,18 +827,83 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             layout (location = 0) in vec3 aPos;
             layout (location = 1) in vec3 aNormal;
             layout (location = 2) in vec2 aTexCoord;
+            layout (location = 3) in vec4 aBoneIndices;
+            layout (location = 4) in vec4 aBoneWeights;
 
             uniform mat4 uView;
             uniform mat4 uProj;
+            uniform bool uUseBoneSkinning;
+            uniform int uBoneCount;
+            uniform mat4 uBones[128];
+            uniform bool uUseUvTransform;
+            uniform vec2 uUvTranslation;
+            uniform vec2 uUvScale;
+            uniform vec2 uUvRotationRow0;
+            uniform vec2 uUvRotationRow1;
 
             out vec3 vNormal;
             out vec2 vTexCoord;
 
+            vec4 ApplySkinning(vec4 source, vec4 boneIndices, vec4 boneWeights)
+            {
+                if (!uUseBoneSkinning)
+                    return source;
+
+                float totalWeight = boneWeights.x + boneWeights.y + boneWeights.z + boneWeights.w;
+                if (totalWeight <= 0.0001)
+                    return source;
+
+                vec4 skinned = vec4(0.0);
+                bool applied = false;
+
+                int index0 = int(aBoneIndices.x + 0.5);
+                int index1 = int(aBoneIndices.y + 0.5);
+                int index2 = int(aBoneIndices.z + 0.5);
+                int index3 = int(aBoneIndices.w + 0.5);
+
+                if (boneWeights.x > 0.0 && index0 >= 0 && index0 < uBoneCount && index0 < 128)
+                {
+                    skinned += (uBones[index0] * source) * (boneWeights.x / totalWeight);
+                    applied = true;
+                }
+
+                if (boneWeights.y > 0.0 && index1 >= 0 && index1 < uBoneCount && index1 < 128)
+                {
+                    skinned += (uBones[index1] * source) * (boneWeights.y / totalWeight);
+                    applied = true;
+                }
+
+                if (boneWeights.z > 0.0 && index2 >= 0 && index2 < uBoneCount && index2 < 128)
+                {
+                    skinned += (uBones[index2] * source) * (boneWeights.z / totalWeight);
+                    applied = true;
+                }
+
+                if (boneWeights.w > 0.0 && index3 >= 0 && index3 < uBoneCount && index3 < 128)
+                {
+                    skinned += (uBones[index3] * source) * (boneWeights.w / totalWeight);
+                    applied = true;
+                }
+
+                return applied ? skinned : source;
+            }
+
             void main()
             {
-                gl_Position = uProj * uView * vec4(aPos, 1.0);
-                vNormal = aNormal;
-                vTexCoord = aTexCoord;
+                vec4 skinnedPosition = ApplySkinning(vec4(aPos, 1.0), aBoneIndices, aBoneWeights);
+                vec3 skinnedNormal = ApplySkinning(vec4(aNormal, 0.0), aBoneIndices, aBoneWeights).xyz;
+                gl_Position = uProj * uView * skinnedPosition;
+                vNormal = skinnedNormal;
+                vec2 texCoord = aTexCoord;
+                if (uUseUvTransform)
+                {
+                    vec2 centered = (texCoord - vec2(0.5, 0.5)) * uUvScale;
+                    texCoord = vec2(
+                        dot(centered, uUvRotationRow0),
+                        dot(centered, uUvRotationRow1)) + vec2(0.5, 0.5) + uUvTranslation;
+                }
+
+                vTexCoord = texCoord;
             }
             """;
 
@@ -697,7 +922,6 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             uniform sampler2D uTexture0;
             uniform bool uAlphaCutout;
             uniform bool uReceivesLighting;
-
             out vec4 FragColor;
 
             void main()
@@ -756,6 +980,14 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         _uTexture0 = _gl.GetUniformLocation(_shaderProgram, "uTexture0");
         _uAlphaCutout = _gl.GetUniformLocation(_shaderProgram, "uAlphaCutout");
         _uReceivesLighting = _gl.GetUniformLocation(_shaderProgram, "uReceivesLighting");
+        _uUseBoneSkinning = _gl.GetUniformLocation(_shaderProgram, "uUseBoneSkinning");
+        _uBoneCount = _gl.GetUniformLocation(_shaderProgram, "uBoneCount");
+        _uBones = _gl.GetUniformLocation(_shaderProgram, "uBones[0]");
+        _uUseUvTransform = _gl.GetUniformLocation(_shaderProgram, "uUseUvTransform");
+        _uUvTranslation = _gl.GetUniformLocation(_shaderProgram, "uUvTranslation");
+        _uUvScale = _gl.GetUniformLocation(_shaderProgram, "uUvScale");
+        _uUvRotationRow0 = _gl.GetUniformLocation(_shaderProgram, "uUvRotationRow0");
+        _uUvRotationRow1 = _gl.GetUniformLocation(_shaderProgram, "uUvRotationRow1");
     }
 
     private uint CompileShader(ShaderType shaderType, string source)
@@ -893,6 +1125,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         public CommandBuffers(
             uint vao,
             uint vbo,
+            uint skinningVbo,
             uint ebo,
             uint indexCount,
             uint textureId,
@@ -903,6 +1136,12 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             bool depthWrite,
             bool alphaCutout,
             bool receivesLighting,
+            bool usesBoneSkinning,
+            bool usesUvTransform,
+            Vector2 uvTranslation,
+            Vector2 uvScale,
+            Vector2 uvRotationRow0,
+            Vector2 uvRotationRow1,
             Vector3 baseColor,
             Vector3 emissiveColor,
             float alpha,
@@ -910,6 +1149,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         {
             Vao = vao;
             Vbo = vbo;
+            SkinningVbo = skinningVbo;
             Ebo = ebo;
             IndexCount = indexCount;
             TextureId = textureId;
@@ -920,6 +1160,12 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             DepthWrite = depthWrite;
             AlphaCutout = alphaCutout;
             ReceivesLighting = receivesLighting;
+            UsesBoneSkinning = usesBoneSkinning;
+            UsesUvTransform = usesUvTransform;
+            UvTranslation = uvTranslation;
+            UvScale = uvScale;
+            UvRotationRow0 = uvRotationRow0;
+            UvRotationRow1 = uvRotationRow1;
             BaseColor = baseColor;
             EmissiveColor = emissiveColor;
             Alpha = alpha;
@@ -929,6 +1175,8 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         public uint Vao { get; }
 
         public uint Vbo { get; }
+
+        public uint SkinningVbo { get; }
 
         public uint Ebo { get; }
 
@@ -950,6 +1198,18 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
 
         public bool ReceivesLighting { get; }
 
+        public bool UsesBoneSkinning { get; }
+
+        public bool UsesUvTransform { get; }
+
+        public Vector2 UvTranslation { get; }
+
+        public Vector2 UvScale { get; }
+
+        public Vector2 UvRotationRow0 { get; }
+
+        public Vector2 UvRotationRow1 { get; }
+
         public Vector3 BaseColor { get; }
 
         public Vector3 EmissiveColor { get; }
@@ -961,6 +1221,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         public void Dispose(GL gl)
         {
             gl.DeleteBuffer(Vbo);
+            gl.DeleteBuffer(SkinningVbo);
             gl.DeleteBuffer(Ebo);
             gl.DeleteVertexArray(Vao);
         }
@@ -969,12 +1230,24 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
     private readonly record struct MdxMaterialState(
         string? TexturePath,
         uint ReplaceableId,
+        int TransformId,
+        int CoordId,
         bool IsTransparent,
         bool IsAdditive,
         bool DepthWrite,
         bool AlphaCutout,
         float Alpha,
         uint BlendMode);
+
+    private readonly record struct TextureTransformState(
+        bool UsesTransform,
+        Vector2 Translation,
+        Vector2 Scale,
+        Vector2 RotationRow0,
+        Vector2 RotationRow1)
+    {
+        public static TextureTransformState Identity { get; } = new(false, Vector2.Zero, Vector2.One, new Vector2(1.0f, 0.0f), new Vector2(0.0f, 1.0f));
+    }
 
     private readonly record struct GeosetRenderState(
         bool ReceivesLighting,

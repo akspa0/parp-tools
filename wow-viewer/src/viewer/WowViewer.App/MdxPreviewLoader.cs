@@ -57,11 +57,17 @@ internal sealed class MdxPreviewLoadResult
         MdxPreviewLoadRequest request,
         MdxSummary summary,
         MdxGeometryFile geometry,
+        MdxBoneFile bones,
+        MdxTextureAnimationFile textureAnimations,
+        MdxGeosetAnimationFile geosetAnimations,
         TimeSpan loadDuration)
     {
         Request = request ?? throw new ArgumentNullException(nameof(request));
         Summary = summary ?? throw new ArgumentNullException(nameof(summary));
         Geometry = geometry ?? throw new ArgumentNullException(nameof(geometry));
+        Bones = bones ?? throw new ArgumentNullException(nameof(bones));
+        TextureAnimations = textureAnimations ?? throw new ArgumentNullException(nameof(textureAnimations));
+        GeosetAnimations = geosetAnimations ?? throw new ArgumentNullException(nameof(geosetAnimations));
         LoadDuration = loadDuration;
     }
 
@@ -70,6 +76,12 @@ internal sealed class MdxPreviewLoadResult
     public MdxSummary Summary { get; }
 
     public MdxGeometryFile Geometry { get; }
+
+    public MdxBoneFile Bones { get; }
+
+    public MdxTextureAnimationFile TextureAnimations { get; }
+
+    public MdxGeosetAnimationFile GeosetAnimations { get; }
 
     public TimeSpan LoadDuration { get; }
 }
@@ -90,8 +102,17 @@ internal static class MdxPreviewLoader
         using MemoryStream geometryStream = new(modelBytes, writable: false);
         MdxGeometryFile geometry = MdxGeometryReader.Read(geometryStream, request.SourceLabel);
 
+        using MemoryStream boneStream = new(modelBytes, writable: false);
+        MdxBoneFile bones = MdxBoneReader.Read(boneStream, request.SourceLabel);
+
+        using MemoryStream textureAnimationStream = new(modelBytes, writable: false);
+        MdxTextureAnimationFile textureAnimations = MdxTextureAnimationReader.Read(textureAnimationStream, request.SourceLabel);
+
+        using MemoryStream geosetAnimationStream = new(modelBytes, writable: false);
+        MdxGeosetAnimationFile geosetAnimations = MdxGeosetAnimationReader.Read(geosetAnimationStream, request.SourceLabel);
+
         stopwatch.Stop();
-        return new MdxPreviewLoadResult(request, summary, geometry, stopwatch.Elapsed);
+        return new MdxPreviewLoadResult(request, summary, geometry, bones, textureAnimations, geosetAnimations, stopwatch.Elapsed);
     }
 
     private static byte[] ReadBytes(MdxPreviewLoadRequest request)
