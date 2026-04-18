@@ -1,5 +1,27 @@
 # Progress
 
+### Apr 18, 2026 - wow-viewer now has shared classic PRE2 payload ownership with focused reader coverage
+
+- what changed:
+	- added shared MDX runtime contracts in:
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxParticleEmitter2.cs`
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxParticleEmitter2File.cs`
+	- added `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxParticleEmitter2Reader.cs` for full classic `PRE2` payload ownership over:
+		- node transform tracks
+		- deferred `PIVT` pivot assignment
+		- static particle-emitter fields
+		- spline-point and squirts payload parsing
+		- `KVIS` / `KP2V`, `KP2S`, `KP2R`, `KP2L`, `KPLN`, `KP2G`, `KLIF`, `KP2E`, `KP2W`, `KP2N`, and `KP2Z` scalar tracks
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads particle-emitter payloads into the standalone preview load result
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now surfaces particle-emitter runtime counts and sample payload details in standalone `MDX` diagnostics
+	- added focused coverage in `wow-viewer/tests/WowViewer.Core.Tests/MdxParticleEmitter2ReaderTests.cs`
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxParticleEmitter2ReaderTests -v minimal` passed with `1` test
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed
+- boundary:
+	- this lands shared classic `PRE2` payload ownership and app diagnostics exposure only
+	- classic particle simulation or rendering playback is still future Plan 04 work
+
 ### Apr 18, 2026 - wow-viewer now has shared classic RIBB payload ownership with focused reader coverage
 
 - what changed:

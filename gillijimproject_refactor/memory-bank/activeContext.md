@@ -2,6 +2,28 @@
 
 # Active Context
 
+## Apr 18, 2026 - wow-viewer now owns full classic `PRE2` payloads as a shared MDX runtime seam
+
+- this continues the active Plan 04 (`MDX` runtime and renderer closure) cut-away lane by removing another summary-only classic effect seam from standalone `MDX` preview ownership
+- active behavior after this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxParticleEmitter2.cs` and `MdxParticleEmitter2File.cs` now own shared typed runtime payloads for classic `PRE2` particle emitters
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxParticleEmitter2Reader.cs` now reads counted classic `PRE2` payloads for `v1300` and `v1400`, including:
+		- node transform tracks
+		- deferred `PIVT` pivot assignment
+		- static classic particle-emitter payload fields
+		- spline-point and squirts payload ownership
+		- `KVIS` / `KP2V`, `KP2S`, `KP2R`, `KP2L`, `KPLN`, `KP2G`, `KLIF`, `KP2E`, `KP2W`, `KP2N`, and `KP2Z` scalar-track ownership
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads particle-emitter payloads beside the other shared standalone preview seams
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now exposes shared runtime particle-emitter counts and sample payload details in the standalone `MDX` diagnostics surface
+- new focused regression coverage now exists in:
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxParticleEmitter2ReaderTests.cs`
+- bounded proof in this chat:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxParticleEmitter2ReaderTests -v minimal` passed with `1` focused test
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded
+- current boundary:
+	- this closes shared classic `PRE2` payload ownership only; the standalone renderer still does not simulate or draw classic particle-emitter behavior from that data
+	- the remaining Plan 04 work is now more about runtime consumption and visual behavior than missing shared payload ownership for classic standalone `MDX` preview
+
 ## Apr 18, 2026 - wow-viewer now owns full classic `RIBB` payloads as a shared MDX runtime seam
 
 - this continues the active Plan 04 (`MDX` runtime and renderer closure) cut-away lane by promoting classic ribbon-emitter payloads out of summary-only ownership

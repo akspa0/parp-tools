@@ -1008,8 +1008,12 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"Materials: {_currentMdxPreview.Summary.MaterialCount}");
             ImGui.Text($"Textures: {_currentMdxPreview.Summary.TextureCount}");
             ImGui.Text($"Layers: {_currentMdxPreview.Summary.MaterialLayerCount}");
-            ImGui.Text($"Particle Emitters 2: {_currentMdxPreview.Summary.ParticleEmitter2Count}");
-            ImGui.Text($"Ribbons: {_currentMdxPreview.Summary.RibbonCount}");
+            ImGui.Text($"Helpers: {_currentMdxPreview.Helpers.HelperCount}");
+            ImGui.Text($"Attachments: {_currentMdxPreview.Attachments.AttachmentCount}");
+            ImGui.Text($"Events: {_currentMdxPreview.Events.EventCount}");
+            ImGui.Text($"Particle Emitters 2: {_currentMdxPreview.ParticleEmitters.ParticleEmitterCount}");
+            ImGui.Text($"Ribbons: {_currentMdxPreview.Ribbons.RibbonCount}");
+            ImGui.Text($"Cameras: {_currentMdxPreview.Cameras.CameraCount}");
 
             ImGui.Separator();
             ImGui.TextDisabled("Geoset Samples");
@@ -1018,6 +1022,23 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
             if (_currentMdxPreview.Geometry.GeosetCount > 12)
                 ImGui.TextDisabled($"... {_currentMdxPreview.Geometry.GeosetCount - 12} more geosets");
+
+            if (_currentMdxPreview.ParticleEmitters.ParticleEmitterCount > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled("Particle Emitter Samples");
+                foreach (MdxParticleEmitter2 particleEmitter in _currentMdxPreview.ParticleEmitters.ParticleEmitters.Take(6))
+                {
+                    string models = particleEmitter.HasGeometryModel || particleEmitter.HasRecursionModel
+                        ? $" geo={particleEmitter.GeometryModel ?? "-"} recur={particleEmitter.RecursionModel ?? "-"}"
+                        : string.Empty;
+                    string tracks = $" tracks[v={(particleEmitter.VisibilityTrack is not null ? 1 : 0)} s={(particleEmitter.SpeedTrack is not null ? 1 : 0)} e={(particleEmitter.EmissionRateTrack is not null ? 1 : 0)} l={(particleEmitter.LifeTrack is not null ? 1 : 0)}]";
+                    ImGui.BulletText($"#{particleEmitter.Index} {particleEmitter.Name} tex={particleEmitter.TextureId} blend={particleEmitter.BlendMode} rows={particleEmitter.Rows} cols={particleEmitter.Columns}{models}{tracks}");
+                }
+
+                if (_currentMdxPreview.ParticleEmitters.ParticleEmitterCount > 6)
+                    ImGui.TextDisabled($"... {_currentMdxPreview.ParticleEmitters.ParticleEmitterCount - 6} more particle emitters");
+            }
 
             ImGui.End();
             return;
