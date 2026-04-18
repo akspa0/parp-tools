@@ -2,6 +2,25 @@
 
 # Active Context
 
+## Apr 18, 2026 - wow-viewer app host target is now cross-platform baseline with guarded Windows-only folder picker
+
+- user direction in this chat was explicit: the `wow-viewer` viewer itself should be cross-platform, not only the shared libraries
+- this slice keeps the app-shell ownership in `wow-viewer/src/viewer/WowViewer.App` while removing the direct Windows-target lock:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj` now targets `net10.0` instead of `net10.0-windows`
+	- direct `<UseWindowsForms>true</UseWindowsForms>` was removed so the app host no longer hard-requires WinForms at project-target level
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` no longer directly constructs `System.Windows.Forms.FolderBrowserDialog`
+	- the old `ShowFolderDialogSTA(...)` path is now `TryShowFolderDialog(...)` with bounded runtime guards:
+		- non-Windows hosts return `null` immediately
+		- Windows hosts attempt reflective dialog access (`System.Windows.Forms` type lookup) and fail closed to `null`
+		- UI status now reports a manual-entry fallback message when picker support is unavailable (`Archive Root` / `Client Root` text fields remain the canonical fallback path)
+- bounded proof in this chat:
+	- `dotnet build .\wow-viewer\src\viewer\WowViewer.App\WowViewer.App.csproj -c Debug` succeeded with `WowViewer.App` compiling as `net10.0`
+	- `dotnet test .\wow-viewer\tests\WowViewer.Core.Tests\WowViewer.Core.Tests.csproj -c Debug --filter "MdxSkinningHelperTests|MdxBonePoseBuilderTests"` succeeded with `7` passing tests
+	- existing workspace `LIB`-path `CS1668` warnings remained unchanged
+- current boundary:
+	- this closes the project-target/platform boundary so the app host can compile as a cross-platform TFM and avoids hard WinForms compile coupling
+	- this does not yet add native folder-picker UX parity for Linux/macOS desktop environments, and it is not runtime signoff across all OSes/GPUs/window stacks
+
 ## Apr 18, 2026 - standalone MDX GPU skinning path now has bounded CPU/GPU packing-parity coverage
 
 - after the Apr 18 GPU palette-skinning refactor, the standalone preview path still built per-vertex skinning payload arrays inline in `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs`

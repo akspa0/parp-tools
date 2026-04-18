@@ -639,7 +639,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         _wantOpenGameFolder = false;
 
-        string? selectedPath = ShowFolderDialogSTA(
+        string? selectedPath = TryShowFolderDialog(
             "Select WoW game folder (containing Data/ with MPQs)",
             showNewFolderButton: false);
 
@@ -653,36 +653,67 @@ internal sealed class WowViewerDesktopApp : IDisposable
             SaveSettings();
             _statusMessage = $"Opened game folder: {selectedPath}";
         }
+        else
+        {
+            _statusMessage = "Folder picker unavailable on this platform/runtime. Enter the client path manually in Archive Root/Client Root.";
+        }
     }
 
-    private static string? ShowFolderDialogSTA(string description, string? initialDir = null, bool showNewFolderButton = false)
+    private static string? TryShowFolderDialog(string description, string? initialDir = null, bool showNewFolderButton = false)
     {
+        if (!OperatingSystem.IsWindows())
+            return null;
+
+        string? result = null;
+
         var thread = new System.Threading.Thread(() =>
         {
-            using var dialog = new System.Windows.Forms.FolderBrowserDialog
+            try
             {
-                Description = description,
-                ShowNewFolderButton = showNewFolderButton,
-            };
+                const string folderDialogTypeName = "System.Windows.Forms.FolderBrowserDialog, System.Windows.Forms";
+                const string dialogResultTypeName = "System.Windows.Forms.DialogResult, System.Windows.Forms";
 
-            if (!string.IsNullOrEmpty(initialDir) && Directory.Exists(initialDir))
-                dialog.SelectedPath = initialDir;
+                Type? folderDialogType = Type.GetType(folderDialogTypeName, throwOnError: false);
+                Type? dialogResultType = Type.GetType(dialogResultTypeName, throwOnError: false);
+                if (folderDialogType == null || dialogResultType == null)
+                    return;
 
-            _folderDialogResult = dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK
-                ? dialog.SelectedPath
-                : null;
+                using IDisposable? dialog = Activator.CreateInstance(folderDialogType) as IDisposable;
+                if (dialog == null)
+                    return;
+
+                folderDialogType.GetProperty("Description")?.SetValue(dialog, description);
+                folderDialogType.GetProperty("ShowNewFolderButton")?.SetValue(dialog, showNewFolderButton);
+
+                if (!string.IsNullOrEmpty(initialDir) && Directory.Exists(initialDir))
+                    folderDialogType.GetProperty("SelectedPath")?.SetValue(dialog, initialDir);
+
+                object? okResult = Enum.Parse(dialogResultType, "OK");
+                object? dialogResult = folderDialogType.GetMethod("ShowDialog", Type.EmptyTypes)?.Invoke(dialog, null);
+
+                if (dialogResult != null && okResult != null && dialogResult.Equals(okResult))
+                    result = folderDialogType.GetProperty("SelectedPath")?.GetValue(dialog) as string;
+            }
+            catch
+            {
+                // Keep this bounded and non-fatal for cross-platform hosts.
+            }
         });
 
-        thread.SetApartmentState(System.Threading.ApartmentState.STA);
+        try
+        {
+            thread.SetApartmentState(System.Threading.ApartmentState.STA);
+        }
+        catch
+        {
+            return null;
+        }
+
         thread.Start();
         thread.Join();
 
-        string? result = _folderDialogResult;
-        _folderDialogResult = null;
         return result;
     }
-
-    private static string? _folderDialogResult;
 
     private void DrawWorldControlContents()
     {

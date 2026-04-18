@@ -1,5 +1,22 @@
 # Progress
 
+### Apr 18, 2026 - wow-viewer app host now targets cross-platform `net10.0` with bounded Windows-only picker fallback
+
+- what changed:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj` now targets `net10.0` instead of `net10.0-windows`
+	- removed `<UseWindowsForms>true</UseWindowsForms>` from the app project so target resolution no longer forces WinForms at compile level
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` replaced direct WinForms folder-dialog usage with `TryShowFolderDialog(...)`:
+		- non-Windows hosts return `null` immediately
+		- Windows hosts attempt reflective `System.Windows.Forms` dialog access and fail closed when unavailable
+		- `HandleOpenGameFolderDialog()` now emits a clear status fallback that users can manually enter archive/client paths in existing input fields when picker support is unavailable
+- validation:
+	- `dotnet build .\wow-viewer\src\viewer\WowViewer.App\WowViewer.App.csproj -c Debug` passed (`WowViewer.App` built as `net10.0`)
+	- `dotnet test .\wow-viewer\tests\WowViewer.Core.Tests\WowViewer.Core.Tests.csproj -c Debug --filter "MdxSkinningHelperTests|MdxBonePoseBuilderTests"` passed with `7` tests
+	- existing `CS1668` `LIB`-path environment warnings remained unchanged
+- boundary:
+	- this lands the project-target/platform correction and removes hard compile-time WinForms dependency from the app host
+	- this does not yet provide native folder-picker parity on non-Windows desktops; manual path entry remains the bounded cross-platform fallback
+
 ### Apr 18, 2026 - standalone MDX GPU skinning path now has bounded CPU/GPU packing-parity coverage
 
 - what changed:
