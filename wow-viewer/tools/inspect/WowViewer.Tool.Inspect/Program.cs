@@ -433,6 +433,9 @@ static void RunMdx(string[] args)
 		case "inspect":
 			RunMdxInspect(tail);
 			break;
+		case "skin-diagnostics":
+			RunMdxSkinDiagnostics(tail);
+			break;
 		default:
 			Console.Error.WriteLine($"Unknown mdx command '{command}'.");
 			ShowMdxUsage();
@@ -899,6 +902,206 @@ static void RunMdxExportJson(string[] args)
 	}
 
 	Console.WriteLine(json);
+}
+
+static void RunMdxSkinDiagnostics(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? virtualPath = GetOption(args, "--virtual-path", "-v");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
+		virtualPath = input;
+
+	if (string.IsNullOrWhiteSpace(input) && (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(virtualPath)))
+	{
+		Console.Error.WriteLine("Error: provide --input <file.mdx> or --archive-root <dir> with --virtual-path <path/to/file.mdx>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	byte[]? archivedBytes = null;
+	string sourceLabel = !string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath)
+		? virtualPath
+		: input!;
+	Stream OpenInputStream()
+	{
+		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
+		{
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], archiveBootstrapOptions);
+			return new MemoryStream(archivedBytes, writable: false);
+		}
+
+		if (File.Exists(input) && !input.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+			return File.OpenRead(input);
+
+		archivedBytes ??= AlphaArchiveReader.ReadWithMpqFallback(input!)
+			?? throw new FileNotFoundException($"Could not read inspect input '{input}' directly or from a companion MPQ archive.", input);
+		return new MemoryStream(archivedBytes, writable: false);
+	}
+
+	// Read summary for bone data
+	MdxSummary summary;
+	using (Stream stream = OpenInputStream())
+		summary = MdxSummaryReader.Read(stream, sourceLabel);
+
+	// Read full geometry for skinning data
+	MdxGeometryFile geometry;
+	using (Stream stream = OpenInputStream())
+		geometry = MdxGeometryReader.Read(stream, sourceLabel);
+
+	// Read bones
+	MdxBoneFile bones;
+	using (Stream stream = OpenInputStream())
+		bones = MdxBoneReader.Read(stream, sourceLabel);
+
+	PrintMdxSkinningDiagnostics(summary, geometry, bones);
+}
+
+static void PrintMdxSkinningDiagnostics(MdxSummary summary, MdxGeometryFile geometry, MdxBoneFile bones)
+{
+	Console.WriteLine($"SKIN.DIAG: model={summary.ModelName ?? "n/a"} bones={summary.BoneCount} geosets={summary.GeosetCount}");
+
+	// Build ObjectId -> bone index mapping
+	Dictionary<uint, int> objectIdToBoneIndex = new();
+	for (int i = 0; i < bones.Bones.Count; i++)
+		objectIdToBoneIndex[(uint)bones.Bones[i].ObjectId] = i;
+
+	// Analyze each geoset
+	for (int g = 0; g < geometry.Geosets.Count; g++)
+	{
+		MdxGeosetGeometry geo = geometry.Geosets[g];
+		Console.WriteLine($"SKIN.GEOSET[{g}]: vertices={geo.VertexCount} vertexGroups={geo.VertexGroupCount} matrixGroups={geo.MatrixGroupCount} matrixIndices={geo.MatrixIndexCount} boneIndices={geo.BoneIndexCount} boneWeights={geo.BoneWeightCount}");
+
+		// Analyze BIDX/BWGT data (per-vertex bone indices/weights)
+		if (geo.BoneIndexCount > 0 && geo.BoneWeightCount > 0)
+		{
+			Console.WriteLine($"  BIDX/BWGT: count={geo.BoneIndexCount}/{geo.BoneWeightCount}");
+			// BIDX/BWGT should have 4 entries per vertex if it's per-vertex data
+			int expectedBidxPerVertex = geo.VertexCount * 4;
+			Console.WriteLine($"  BIDX.RATIO: expected={expectedBidxPerVertex} actual={geo.BoneIndexCount} perVertex={geo.BoneIndexCount / (float)Math.Max(1, geo.VertexCount):F2}");
+		}
+
+		// Analyze GNDX/MTGC/MATS data (matrix groups)
+		if (geo.MatrixGroupCount > 0 && geo.MatrixIndexCount > 0)
+		{
+			Console.WriteLine($"  GNDX/MTGC/MATS: groups={geo.MatrixGroupCount} totalIndices={geo.MatrixIndexCount}");
+
+			// Calculate group offsets
+			int[] groupOffsets = new int[geo.MatrixGroupCount];
+			int offset = 0;
+			for (int gi = 0; gi < geo.MatrixGroupCount; gi++)
+			{
+				groupOffsets[gi] = offset;
+				offset += (int)geo.MatrixGroups[gi];
+			}
+
+			// Analyze first few vertices
+			int sampleCount = Math.Min(10, geo.VertexCount);
+			Console.WriteLine($"  SAMPLE.VERTEX_BONES (first {sampleCount} vertices):");
+			for (int v = 0; v < sampleCount; v++)
+			{
+				byte groupIndex = v < geo.VertexGroups.Count ? geo.VertexGroups[v] : (byte)0;
+				if (groupIndex >= geo.MatrixGroupCount)
+				{
+					Console.WriteLine($"    v[{v}]: group={groupIndex} INVALID_GROUP (>= {geo.MatrixGroupCount})");
+					continue;
+				}
+
+				uint boneCount = geo.MatrixGroups[groupIndex];
+				int matrixOffset = groupOffsets[groupIndex];
+
+				// Get bone indices from MATS
+				uint[] boneIndices = new uint[Math.Min(boneCount, 4)];
+				float[] boneWeights = new float[Math.Min(boneCount, 4)];
+				float weight = boneCount > 0 ? 1.0f / boneCount : 1.0f;
+
+				for (int b = 0; b < boneIndices.Length; b++)
+				{
+					if (matrixOffset + b < geo.MatrixIndexCount)
+					{
+						uint matsValue = geo.MatrixIndices[matrixOffset + b];
+						boneIndices[b] = matsValue;
+
+						// Try to remap MATS value to bone index
+						if (objectIdToBoneIndex.TryGetValue(matsValue, out int remappedIdx))
+							boneIndices[b] = (uint)remappedIdx;
+						else if (matsValue < (uint)bones.Bones.Count)
+							; // Already a valid index
+						else
+							boneIndices[b] = uint.MaxValue; // Invalid
+
+						boneWeights[b] = weight;
+					}
+				}
+
+				Console.WriteLine($"    v[{v}]: group={groupIndex} bones=[{string.Join(",", boneIndices)}] weights=[{string.Join(",", boneWeights.Select(w => w.ToString("F2")))}]");
+			}
+		}
+
+		// Check for mismatch between data sources
+		bool hasBidx = geo.BoneIndexCount > 0;
+		bool hasMats = geo.MatrixIndexCount > 0;
+		if (hasBidx && hasMats)
+		{
+			Console.WriteLine($"  WARNING: Both BIDX ({geo.BoneIndexCount}) and MATS ({geo.MatrixIndexCount}) present - potential data conflict");
+		}
+	}
+
+	// Summary of bone usage
+	Console.WriteLine($"SKIN.BONES: total={bones.Bones.Count}");
+	Dictionary<int, int> boneRefCount = new();
+	for (int i = 0; i < bones.Bones.Count; i++)
+		boneRefCount[i] = 0;
+
+	// Count references from MATS
+	for (int g = 0; g < geometry.Geosets.Count; g++)
+	{
+		MdxGeosetGeometry geo = geometry.Geosets[g];
+		int[] groupOffsets = new int[geo.MatrixGroupCount];
+		int offset = 0;
+		for (int gi = 0; gi < geo.MatrixGroupCount; gi++)
+		{
+			groupOffsets[gi] = offset;
+			offset += (int)geo.MatrixGroups[gi];
+		}
+
+		for (int v = 0; v < geo.VertexCount && v < geo.VertexGroups.Count; v++)
+		{
+			byte groupIndex = geo.VertexGroups[v];
+			if (groupIndex >= geo.MatrixGroupCount)
+				continue;
+
+			uint boneCount = geo.MatrixGroups[groupIndex];
+			int matrixOffset = groupOffsets[groupIndex];
+
+			for (int b = 0; b < Math.Min(boneCount, 4); b++)
+			{
+				if (matrixOffset + b >= geo.MatrixIndexCount)
+					break;
+
+				uint matsValue = geo.MatrixIndices[matrixOffset + b];
+				if (objectIdToBoneIndex.TryGetValue(matsValue, out int boneIdx) && boneIdx < bones.Bones.Count)
+					boneRefCount[boneIdx]++;
+				else if (matsValue < (uint)bones.Bones.Count)
+					boneRefCount[(int)matsValue]++;
+			}
+		}
+	}
+
+	Console.WriteLine($"SKIN.BONE_REFERENCES:");
+	int unreferencedBones = 0;
+	for (int i = 0; i < bones.Bones.Count; i++)
+	{
+		if (boneRefCount[i] == 0)
+			unreferencedBones++;
+	}
+	Console.WriteLine($"  unreferenced_bones={unreferencedBones}/{bones.Bones.Count}");
+	if (unreferencedBones > 0)
+	{
+		Console.WriteLine($"  WARNING: {unreferencedBones} bones are not referenced by any vertex via MATS");
+	}
 }
 
 static void RunMdxChunkCarriers(string[] args)
@@ -3345,6 +3548,8 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect mdx export-json --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>] [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]");
 	Console.WriteLine("  wowviewer-inspect mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --input <file|directory> [--path-filter <text>] [--limit <n>]");
 	Console.WriteLine("  wowviewer-inspect mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --archive-root <game|data dir> [--listfile <listfile.txt>] [--path-filter <text>] [--limit <n>]");
+	Console.WriteLine("  wowviewer-inspect mdx-render --input <file.mdx> --output <bmp> [--width <n>] [--height <n>] [--sequence <n>] [--time <ms>] [--bones]");
+	Console.WriteLine("  wowviewer-inspect mdx-render --archive-root <dir> --virtual-path <path/to/file.mdx> --output <bmp> [--width <n>] [--height <n>] [--sequence <n>] [--time <ms>] [--bones]");
 	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt|file.error>");
 	Console.WriteLine("  wowviewer-inspect lit inspect --input <lights.lit>");
 	Console.WriteLine("  wowviewer-inspect lit inspect --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>]");
@@ -3394,6 +3599,8 @@ static void ShowMdxUsage()
 	Console.WriteLine("  mdx inspect --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]");
 	Console.WriteLine("  mdx export-json --input <file.mdx> [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]");
 	Console.WriteLine("  mdx export-json --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>] [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]");
+	Console.WriteLine("  mdx skin-diagnostics --input <file.mdx>");
+	Console.WriteLine("  mdx skin-diagnostics --archive-root <game|data dir> --virtual-path <path/to/file.mdx>");
 	Console.WriteLine("  mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --input <file|directory> [--path-filter <text>] [--limit <n>]");
 	Console.WriteLine("  mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --archive-root <game|data dir> [--listfile <listfile.txt>] [--path-filter <text>] [--limit <n>]");
 }

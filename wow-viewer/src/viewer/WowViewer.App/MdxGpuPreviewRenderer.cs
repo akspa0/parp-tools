@@ -215,24 +215,10 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             uint vbo = _gl.GenBuffer();
             uint ebo = _gl.GenBuffer();
 
-            float[] skinningVertexData = new float[geoset.Vertices.Count * 8];
-            if (usesBoneSkinning)
-            {
-                for (int index = 0; index < geoset.Vertices.Count; index++)
-                {
-                    int offset = index * 8;
-                    Vector4 indices4 = index < boneIndices.Length ? boneIndices[index] : Vector4.Zero;
-                    Vector4 weights4 = index < boneWeights.Length ? boneWeights[index] : Vector4.Zero;
-                    skinningVertexData[offset + 0] = indices4.X;
-                    skinningVertexData[offset + 1] = indices4.Y;
-                    skinningVertexData[offset + 2] = indices4.Z;
-                    skinningVertexData[offset + 3] = indices4.W;
-                    skinningVertexData[offset + 4] = weights4.X;
-                    skinningVertexData[offset + 5] = weights4.Y;
-                    skinningVertexData[offset + 6] = weights4.Z;
-                    skinningVertexData[offset + 7] = weights4.W;
-                }
-            }
+            float[] skinningVertexData = MdxSkinningHelper.BuildSkinningVertexData(
+                boneIndices,
+                boneWeights,
+                geoset.Vertices.Count);
 
             _gl.BindVertexArray(vao);
             _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);

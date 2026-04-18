@@ -2,6 +2,23 @@
 
 # Active Context
 
+## Apr 18, 2026 - standalone MDX GPU skinning path now has bounded CPU/GPU packing-parity coverage
+
+- after the Apr 18 GPU palette-skinning refactor, the standalone preview path still built per-vertex skinning payload arrays inline in `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs`
+- this follow-up keeps behavior bounded while making parity testable in shared core code:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSkinningHelper.cs` now owns `BuildSkinningVertexData(...)`, which packs per-vertex classic bone indices/weights into the same interleaved 8-float layout consumed by the standalone preview shader attributes
+	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now delegates skinning-buffer packing to that shared helper instead of duplicating manual packing logic in the app path
+	- new focused tests in `wow-viewer/tests/WowViewer.Core.Tests/MdxSkinningHelperTests.cs` now lock:
+		- deterministic interleaving layout for per-vertex index/weight payloads
+		- zero-fill fallback behavior when vertex packing count exceeds provided bone-index/weight rows
+		- bounded parity by unpacking helper-packed payloads and proving `ApplySkinning(...)` / `ApplySkinningNormal(...)` outputs match the direct CPU reference path for the same vertices, weights, and bone matrices
+- bounded proof in this chat:
+	- `dotnet test .\wow-viewer\tests\WowViewer.Core.Tests\WowViewer.Core.Tests.csproj -c Debug --filter "MdxSkinningHelperTests|MdxBonePoseBuilderTests"` succeeded with `7` passing tests
+	- `dotnet build .\wow-viewer\src\viewer\WowViewer.App\WowViewer.App.csproj -c Debug` succeeded with the existing workspace `LIB` warnings and known unrelated nullable warnings
+- current boundary:
+	- this closes packing/parity proof for the standalone classic `MDX` GPU skinning input layout only
+	- it does not yet add shader-output image assertions, helper/attachment/event runtime behavior, particles/ribbons, or broader world/runtime classic `MDX` cutover
+
 ## Apr 18, 2026 - wow-viewer standalone MDX preview now uses GPU palette skinning instead of CPU-skinned vertex uploads
 
 - the earlier standalone classic `MDX` preview path in `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` had correct animated deformation, but it still rebuilt and uploaded already-skinned vertex positions and normals on the CPU every load/update cycle

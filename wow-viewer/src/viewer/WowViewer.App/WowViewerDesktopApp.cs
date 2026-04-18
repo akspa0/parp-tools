@@ -86,6 +86,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private bool _showWorldStatusWindow = true;
     private bool _showNavigatorWindow = true;
     private bool _showInspectorWindow = true;
+    private bool _showFileBrowserWindow = true;
+    private MdxFileBrowserState? _mdxFileBrowserState;
+    private bool _wantOpenGameFolder;
     private bool _worldNavigatorVisibleOnly = true;
     private bool _worldNavigatorShowWmo = true;
     private bool _worldNavigatorShowMdx = true;
@@ -166,6 +169,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _requestInitialLoad = false;
             LoadActiveWorkspace();
         }
+
+        HandleOpenGameFolderDialog();
     }
 
     private unsafe void OnRender(double deltaSeconds)
@@ -213,6 +218,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
             DrawWorkspaceWindow();
         if (_showControlWindow)
             DrawControlWindow();
+        if (_showFileBrowserWindow && _session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneMdx)
+            DrawMdxFileBrowserWindow();
         DrawPreviewWindow();
         if (_showDiagnosticsWindow)
             DrawDiagnosticsWindow(deltaSeconds);
@@ -235,11 +242,41 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (ImGui.BeginMenu("File"))
         {
-            if (ImGui.MenuItem("Open Workspace"))
+            if (ImGui.MenuItem("Open Game Folder (MPQ)..."))
+                PromptOpenGameFolder();
+
+            if (ImGui.BeginMenu("Open Saved Game Folder", _settings.KnownGoodClients.Count > 0))
+            {
+                foreach (var client in _settings.KnownGoodClients)
+                {
+                    if (ImGui.MenuItem($"{client.Name}##open_saved_{client.Path}"))
+                        OpenSavedGameFolder(client);
+                }
+                ImGui.EndMenu();
+            }
+
+            if (ImGui.MenuItem("Save Current As Known-Good Base", enabled: !string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot)))
+                SaveCurrentAsKnownGood();
+
+            if (ImGui.BeginMenu("Forget Known-Good Base", _settings.KnownGoodClients.Count > 0))
+            {
+                foreach (var client in _settings.KnownGoodClients)
+                {
+                    if (ImGui.MenuItem($"{client.Name}##forget_{client.Path}"))
+                        ForgetKnownGoodClient(client.Path);
+                }
+                ImGui.EndMenu();
+            }
+
+            ImGui.Separator();
+
+            if (ImGui.MenuItem("Open Workspace", enabled: !string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot) || !string.IsNullOrWhiteSpace(_session.Source.InputPath)))
                 LoadActiveWorkspace();
 
             if (ImGui.MenuItem("Clear Workspace", enabled: _currentPreview != null || _currentMdxPreview != null || _currentWorldSession != null))
                 ClearWorkspace();
+
+            ImGui.Separator();
 
             if (ImGui.MenuItem("Exit"))
                 _window?.Close();
@@ -251,6 +288,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         {
             ImGui.MenuItem("Workspaces", string.Empty, ref _showWorkspaceWindow);
             ImGui.MenuItem("Source Controls", string.Empty, ref _showControlWindow);
+            ImGui.MenuItem("File Browser", string.Empty, ref _showFileBrowserWindow);
             ImGui.MenuItem("Diagnostics", string.Empty, ref _showDiagnosticsWindow);
             ImGui.MenuItem("World Status", string.Empty, ref _showWorldStatusWindow);
             ImGui.MenuItem("World Navigator", string.Empty, ref _showNavigatorWindow);
@@ -450,10 +488,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_session.Source.UsesArchiveSource)
         {
             string archiveRoot = _session.Source.ArchiveRoot;
-            string virtualPath = _session.Source.VirtualPath;
             ImGui.InputText("Archive Root", ref archiveRoot, 1024);
-            ImGui.InputText("Virtual Path", ref virtualPath, 1024);
             _session.Source.ArchiveRoot = archiveRoot;
+
+            string virtualPath = _session.Source.VirtualPath;
+            ImGui.InputText("Virtual Path", ref virtualPath, 1024);
             _session.Source.VirtualPath = virtualPath;
         }
         else
@@ -462,6 +501,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.InputText("Input File", ref inputPath, 1024);
             _session.Source.InputPath = inputPath;
         }
+
+        if (ImGui.Button("Browse..."))
+            PromptOpenGameFolder();
 
         string buildLabel = _session.Source.BuildLabel;
         ImGui.InputText("Build Label", ref buildLabel, 256);
@@ -507,7 +549,140 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (ImGui.Button(_currentMdxPreview == null ? "Load MDX Preview" : "Reload MDX Preview", new Vector2(-1, 0)))
             LoadActiveWorkspace();
+
+        ImGui.Separator();
+
+        if (ImGui.Button("Browse Files...", new Vector2(-1, 0)))
+        {
+            _showFileBrowserWindow = true;
+            _mdxFileBrowserState ??= new MdxFileBrowserState();
+        }
     }
+
+    private void DrawMdxFileBrowserWindow()
+    {
+        _mdxFileBrowserState ??= new MdxFileBrowserState();
+
+        string archiveRoot = _session.Source.ArchiveRoot;
+        if (FileBrowserEx.DrawMdxFileBrowser("MDX File Browser", ref _showFileBrowserWindow, archiveRoot, _mdxFileBrowserState, OnMdxFileBrowserFileSelected))
+        {
+            // File was selected - the control window state is already updated by OnMdxFileBrowserFileSelected
+        }
+    }
+
+    private void OnMdxFileBrowserFileSelected(string virtualPath)
+    {
+        _session.WorkspaceMode = WowViewerWorkspaceMode.StandaloneMdx;
+        _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
+        _session.Source.ArchiveRoot = _session.Source.ArchiveRoot;
+        _session.Source.VirtualPath = virtualPath;
+        LoadActiveWorkspace();
+    }
+
+    private void PromptOpenGameFolder()
+    {
+        _wantOpenGameFolder = true;
+    }
+
+    private void OpenSavedGameFolder(KnownGoodClientEntry client)
+    {
+        _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
+        _session.Source.ArchiveRoot = client.Path;
+        _session.Source.BuildLabel = client.BuildLabel;
+        _session.Source.VirtualPath = string.Empty;
+        _settings.LastOpenedClientPath = client.Path;
+        SaveSettings();
+        _statusMessage = $"Loaded saved client: {client.Name}";
+    }
+
+    private void SaveCurrentAsKnownGood()
+    {
+        var path = _session.Source.ArchiveRoot;
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        string name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        string buildLabel = _session.Source.BuildLabel;
+
+        var existing = _settings.KnownGoodClients.FindIndex(c =>
+            string.Equals(c.Path, path, StringComparison.OrdinalIgnoreCase));
+
+        var entry = new KnownGoodClientEntry
+        {
+            Path = path,
+            Name = name,
+            BuildLabel = buildLabel,
+            BuildVersion = buildLabel,
+        };
+
+        if (existing >= 0)
+            _settings.KnownGoodClients[existing] = entry;
+        else
+            _settings.KnownGoodClients.Add(entry);
+
+        SaveSettings();
+        _statusMessage = $"Saved '{name}' as known-good base.";
+    }
+
+    private void ForgetKnownGoodClient(string path)
+    {
+        _settings.KnownGoodClients.RemoveAll(c =>
+            string.Equals(c.Path, path, StringComparison.OrdinalIgnoreCase));
+        SaveSettings();
+        _statusMessage = "Removed known-good base.";
+    }
+
+    private void HandleOpenGameFolderDialog()
+    {
+        if (!_wantOpenGameFolder)
+            return;
+
+        _wantOpenGameFolder = false;
+
+        string? selectedPath = ShowFolderDialogSTA(
+            "Select WoW game folder (containing Data/ with MPQs)",
+            showNewFolderButton: false);
+
+        if (!string.IsNullOrEmpty(selectedPath) && Directory.Exists(selectedPath))
+        {
+            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
+            _session.Source.ArchiveRoot = selectedPath;
+            _session.Source.BuildLabel = string.Empty;
+            _session.Source.VirtualPath = string.Empty;
+            _settings.LastOpenedClientPath = selectedPath;
+            SaveSettings();
+            _statusMessage = $"Opened game folder: {selectedPath}";
+        }
+    }
+
+    private static string? ShowFolderDialogSTA(string description, string? initialDir = null, bool showNewFolderButton = false)
+    {
+        var thread = new System.Threading.Thread(() =>
+        {
+            using var dialog = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = description,
+                ShowNewFolderButton = showNewFolderButton,
+            };
+
+            if (!string.IsNullOrEmpty(initialDir) && Directory.Exists(initialDir))
+                dialog.SelectedPath = initialDir;
+
+            _folderDialogResult = dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK
+                ? dialog.SelectedPath
+                : null;
+        });
+
+        thread.SetApartmentState(System.Threading.ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        string? result = _folderDialogResult;
+        _folderDialogResult = null;
+        return result;
+    }
+
+    private static string? _folderDialogResult;
 
     private void DrawWorldControlContents()
     {

@@ -21,6 +21,21 @@ internal sealed class WowViewerAppSettings
     public bool ShowNavigatorWindow { get; set; } = true;
 
     public bool ShowInspectorWindow { get; set; } = true;
+
+    public List<KnownGoodClientEntry> KnownGoodClients { get; set; } = [];
+
+    public string? LastOpenedClientPath { get; set; }
+}
+
+public sealed class KnownGoodClientEntry
+{
+    public string Path { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
+
+    public string BuildLabel { get; set; } = string.Empty;
+
+    public string BuildVersion { get; set; } = string.Empty;
 }
 
 internal static class WowViewerAppSettingsStore

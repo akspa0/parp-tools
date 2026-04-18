@@ -87,6 +87,32 @@ public static class MdxSkinningHelper
         return transformed.LengthSquared() <= 0.000001f ? Vector3.UnitZ : transformed;
     }
 
+    public static float[] BuildSkinningVertexData(IReadOnlyList<Vector4> boneIndices, IReadOnlyList<Vector4> boneWeights, int vertexCount)
+    {
+        ArgumentNullException.ThrowIfNull(boneIndices);
+        ArgumentNullException.ThrowIfNull(boneWeights);
+        ArgumentOutOfRangeException.ThrowIfNegative(vertexCount);
+
+        float[] skinningVertexData = new float[checked(vertexCount * 8)];
+        for (int vertexIndex = 0; vertexIndex < vertexCount; vertexIndex++)
+        {
+            int offset = vertexIndex * 8;
+            Vector4 indices = vertexIndex < boneIndices.Count ? boneIndices[vertexIndex] : Vector4.Zero;
+            Vector4 weights = vertexIndex < boneWeights.Count ? boneWeights[vertexIndex] : Vector4.Zero;
+
+            skinningVertexData[offset + 0] = indices.X;
+            skinningVertexData[offset + 1] = indices.Y;
+            skinningVertexData[offset + 2] = indices.Z;
+            skinningVertexData[offset + 3] = indices.W;
+            skinningVertexData[offset + 4] = weights.X;
+            skinningVertexData[offset + 5] = weights.Y;
+            skinningVertexData[offset + 6] = weights.Z;
+            skinningVertexData[offset + 7] = weights.W;
+        }
+
+        return skinningVertexData;
+    }
+
     private static Vector3 ApplyWeightedTransform(
         Vector4 source,
         Vector3 fallback,

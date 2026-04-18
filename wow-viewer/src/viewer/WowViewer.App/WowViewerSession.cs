@@ -32,13 +32,17 @@ internal sealed class WowViewerAssetSource
 
     public string Describe()
     {
-        string source = UsesArchiveSource
-            ? $"archive:{ArchiveRoot}::{VirtualPath}"
-            : Path.GetFullPath(InputPath);
+        if (UsesArchiveSource)
+        {
+            return string.IsNullOrWhiteSpace(BuildLabel)
+                ? $"archive:{ArchiveRoot}::{VirtualPath}"
+                : $"archive:{ArchiveRoot}::{VirtualPath} [{BuildLabel}]";
+        }
 
-        return string.IsNullOrWhiteSpace(BuildLabel)
-            ? source
-            : $"{source} [{BuildLabel}]";
+        if (string.IsNullOrWhiteSpace(InputPath))
+            return "(no file selected)";
+
+        return Path.GetFullPath(InputPath);
     }
 }
 

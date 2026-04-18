@@ -1,5 +1,21 @@
 # Progress
 
+### Apr 18, 2026 - standalone MDX GPU skinning path now has bounded CPU/GPU packing-parity coverage
+
+- what changed:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSkinningHelper.cs` now owns `BuildSkinningVertexData(...)` so the standalone preview's skinning payload packing lives in shared core code instead of app-local inline loops
+	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now delegates skinning-buffer packing to that shared helper while preserving the same 8-float interleaved attribute layout for `aBoneIndices` and `aBoneWeights`
+	- added `wow-viewer/tests/WowViewer.Core.Tests/MdxSkinningHelperTests.cs` with bounded parity coverage for:
+		- deterministic packed layout ordering
+		- zero-fill behavior when requested vertex count exceeds provided index/weight rows
+		- CPU-reference parity by unpacking helper-packed payloads and proving `ApplySkinning(...)` / `ApplySkinningNormal(...)` results match direct CPU inputs for the same vertices/bones/matrices
+- validation:
+	- `dotnet test .\wow-viewer\tests\WowViewer.Core.Tests\WowViewer.Core.Tests.csproj -c Debug --filter "MdxSkinningHelperTests|MdxBonePoseBuilderTests"` passed with `7` passing tests
+	- `dotnet build .\wow-viewer\src\viewer\WowViewer.App\WowViewer.App.csproj -c Debug` passed with the existing workspace `LIB` warnings and known unrelated nullable warnings
+- boundary:
+	- this closes bounded packing/parity coverage for standalone classic `MDX` GPU skinning input preparation only
+	- this does not yet add shader-output pixel/image assertions, helper/attachment/event runtime behavior, particles/ribbons, or broader classic `MDX` world/runtime cutover
+
 ### Apr 18, 2026 - standalone MDX preview now uses GPU palette skinning instead of CPU-skinned vertex uploads
 
 - what changed:
