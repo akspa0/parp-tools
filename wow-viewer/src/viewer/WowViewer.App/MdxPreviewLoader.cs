@@ -2,6 +2,7 @@ using System.Diagnostics;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.Mdx;
+using WowViewer.Core.Runtime.Mdx;
 
 namespace WowViewer.App;
 
@@ -63,6 +64,7 @@ internal sealed class MdxPreviewLoadResult
         MdxEventFile events,
         MdxParticleEmitter2File particleEmitters,
         MdxRibbonEmitterFile ribbons,
+        MdxEffectRuntimeState effectRuntimeState,
         MdxCameraFile cameras,
         MdxTextureAnimationFile textureAnimations,
         MdxGeosetAnimationFile geosetAnimations,
@@ -77,6 +79,7 @@ internal sealed class MdxPreviewLoadResult
         Events = events ?? throw new ArgumentNullException(nameof(events));
         ParticleEmitters = particleEmitters ?? throw new ArgumentNullException(nameof(particleEmitters));
         Ribbons = ribbons ?? throw new ArgumentNullException(nameof(ribbons));
+        EffectRuntimeState = effectRuntimeState ?? throw new ArgumentNullException(nameof(effectRuntimeState));
         Cameras = cameras ?? throw new ArgumentNullException(nameof(cameras));
         TextureAnimations = textureAnimations ?? throw new ArgumentNullException(nameof(textureAnimations));
         GeosetAnimations = geosetAnimations ?? throw new ArgumentNullException(nameof(geosetAnimations));
@@ -100,6 +103,8 @@ internal sealed class MdxPreviewLoadResult
     public MdxParticleEmitter2File ParticleEmitters { get; }
 
     public MdxRibbonEmitterFile Ribbons { get; }
+
+    public MdxEffectRuntimeState EffectRuntimeState { get; }
 
     public MdxCameraFile Cameras { get; }
 
@@ -144,6 +149,8 @@ internal static class MdxPreviewLoader
         using MemoryStream ribbonStream = new(modelBytes, writable: false);
         MdxRibbonEmitterFile ribbons = MdxRibbonEmitterReader.Read(ribbonStream, request.SourceLabel);
 
+        MdxEffectRuntimeState effectRuntimeState = MdxEffectRuntimeEvaluator.Evaluate(summary, events, particleEmitters, ribbons, request.SequenceIndex, request.TimeMs);
+
         using MemoryStream cameraStream = new(modelBytes, writable: false);
         MdxCameraFile cameras = MdxCameraReader.Read(cameraStream, request.SourceLabel);
 
@@ -154,7 +161,7 @@ internal static class MdxPreviewLoader
         MdxGeosetAnimationFile geosetAnimations = MdxGeosetAnimationReader.Read(geosetAnimationStream, request.SourceLabel);
 
         stopwatch.Stop();
-        return new MdxPreviewLoadResult(request, summary, geometry, bones, helpers, attachments, events, particleEmitters, ribbons, cameras, textureAnimations, geosetAnimations, stopwatch.Elapsed);
+        return new MdxPreviewLoadResult(request, summary, geometry, bones, helpers, attachments, events, particleEmitters, ribbons, effectRuntimeState, cameras, textureAnimations, geosetAnimations, stopwatch.Elapsed);
     }
 
     private static byte[] ReadBytes(MdxPreviewLoadRequest request)

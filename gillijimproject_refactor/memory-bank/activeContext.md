@@ -2,6 +2,27 @@
 
 # Active Context
 
+## Apr 18, 2026 - wow-viewer standalone MDX preview now consumes shared PRE2, RIBB, and EVTS runtime state instead of parsed payloads only
+
+- this continues the active Plan 04 (`MDX` runtime and renderer closure) lane by moving classic effect seams one step past shared payload ownership into shared runtime evaluation
+- active behavior after this slice:
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/Mdx/MdxEffectRuntime.cs` now owns shared runtime-state evaluation for classic standalone `MDX` effects over:
+		- `EVTS` event trigger state
+		- `PRE2` particle-emitter sampled visibility, scalar payload state, and estimated dispatch counts
+		- `RIBB` ribbon sampled visibility, color or alpha or texture-slot state, and estimated edge counts
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxAnimationSampler.cs` now exposes shared integer-track sampling for classic `KRTX`-style consumers instead of leaving that interpolation gap to app-local code
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now evaluates shared `MDX` effect runtime state during standalone preview loading and carries it in the preview result
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now surfaces runtime effect counts and sample event or particle or ribbon state in standalone `MDX` diagnostics instead of only raw reader counts
+- new focused regression coverage now exists in:
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxEffectRuntimeEvaluatorTests.cs`
+- bounded proof in this chat:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxEffectRuntimeEvaluatorTests -v minimal` passed with `1` focused test
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded
+- current boundary:
+	- this closes shared runtime evaluation and standalone diagnostics consumption only; the standalone renderer still does not simulate or draw classic particle quads, ribbon trails, or event-driven effect behavior from that runtime state
+	- the next meaningful Plan 04 work is visual runtime consumption, not more summary-to-runtime data lifting for these classic seams
+
 ## Apr 18, 2026 - wow-viewer now owns full classic `PRE2` payloads as a shared MDX runtime seam
 
 - this continues the active Plan 04 (`MDX` runtime and renderer closure) cut-away lane by removing another summary-only classic effect seam from standalone `MDX` preview ownership

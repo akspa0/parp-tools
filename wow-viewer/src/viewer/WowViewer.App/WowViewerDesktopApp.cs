@@ -11,6 +11,7 @@ using WowViewer.Core.Maps;
 using WowViewer.Core.Mdx;
 using WowViewer.Core.PM4;
 using WowViewer.Core.Runtime;
+using WowViewer.Core.Runtime.Mdx;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Runtime.World.Liquid;
@@ -1016,6 +1017,12 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"Cameras: {_currentMdxPreview.Cameras.CameraCount}");
 
             ImGui.Separator();
+            ImGui.TextDisabled("MDX Runtime");
+            ImGui.Text($"Triggered Events: {_currentMdxPreview.EffectRuntimeState.TriggeredEventCount}/{_currentMdxPreview.EffectRuntimeState.Events.Count}");
+            ImGui.Text($"Visible Particles: {_currentMdxPreview.EffectRuntimeState.VisibleParticleEmitterCount}/{_currentMdxPreview.EffectRuntimeState.Particles.Count}");
+            ImGui.Text($"Visible Ribbons: {_currentMdxPreview.EffectRuntimeState.VisibleRibbonEmitterCount}/{_currentMdxPreview.EffectRuntimeState.Ribbons.Count}");
+
+            ImGui.Separator();
             ImGui.TextDisabled("Geoset Samples");
             foreach (MdxGeosetGeometry geoset in _currentMdxPreview.Geometry.Geosets.Take(12))
                 ImGui.BulletText($"#{geoset.Index} verts={geoset.VertexCount} tris={geoset.TriangleCount} material={geoset.MaterialId} uvSets={geoset.UvSetCount}");
@@ -1038,6 +1045,41 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
                 if (_currentMdxPreview.ParticleEmitters.ParticleEmitterCount > 6)
                     ImGui.TextDisabled($"... {_currentMdxPreview.ParticleEmitters.ParticleEmitterCount - 6} more particle emitters");
+            }
+
+            if (_currentMdxPreview.EffectRuntimeState.Events.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled("Event Runtime Samples");
+                foreach (MdxEventRuntimeState effectEvent in _currentMdxPreview.EffectRuntimeState.Events.Take(6))
+                {
+                    string state = effectEvent.Triggered ? "triggered" : "idle";
+                    string nextKey = effectEvent.NextKeyTime?.ToString() ?? "-";
+                    ImGui.BulletText($"#{effectEvent.Index} {effectEvent.Name} {effectEvent.Tag} {state} frame={effectEvent.ResolvedFrameTime} next={nextKey}");
+                }
+            }
+
+            if (_currentMdxPreview.EffectRuntimeState.Particles.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled("Particle Runtime Samples");
+                foreach (MdxParticleEmitter2RuntimeState particle in _currentMdxPreview.EffectRuntimeState.Particles.Take(6))
+                {
+                    string state = particle.Enabled ? "on" : "off";
+                    string modelFlag = particle.UsesModelParticles ? " model" : string.Empty;
+                    ImGui.BulletText($"#{particle.Index} {particle.Name} {state} count={particle.EstimatedParticleCount} emit={particle.EmissionRate:F2} life={particle.Life:F2} speed={particle.Speed:F2} fx={particle.EffectKey}{modelFlag}");
+                }
+            }
+
+            if (_currentMdxPreview.EffectRuntimeState.Ribbons.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled("Ribbon Runtime Samples");
+                foreach (MdxRibbonRuntimeState ribbon in _currentMdxPreview.EffectRuntimeState.Ribbons.Take(6))
+                {
+                    string state = ribbon.Visible ? "on" : "off";
+                    ImGui.BulletText($"#{ribbon.Index} {ribbon.Name} {state} edges={ribbon.EstimatedEdgeCount} alpha={ribbon.Alpha:F2} slot={ribbon.TextureSlot} fx={ribbon.EffectKey}");
+                }
             }
 
             ImGui.End();
@@ -1627,7 +1669,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             DeletePreviewTexture();
             DeleteWorldTerrainPreviewTexture();
             _statusMessage = $"Loaded {preview.Geometry.SourcePath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
-            _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, geosets {preview.Geometry.GeosetCount}, materials {preview.Summary.MaterialCount}, textures {preview.Summary.TextureCount}";
+            _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, geosets {preview.Geometry.GeosetCount}, materials {preview.Summary.MaterialCount}, particles {preview.EffectRuntimeState.VisibleParticleEmitterCount}/{preview.EffectRuntimeState.Particles.Count}, ribbons {preview.EffectRuntimeState.VisibleRibbonEmitterCount}/{preview.EffectRuntimeState.Ribbons.Count}";
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
         {

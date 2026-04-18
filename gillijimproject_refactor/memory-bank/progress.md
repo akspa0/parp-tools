@@ -1,5 +1,25 @@
 # Progress
 
+### Apr 18, 2026 - wow-viewer now has shared classic MDX effect runtime evaluation for PRE2, RIBB, and EVTS
+
+- what changed:
+	- added `wow-viewer/src/core/WowViewer.Core.Runtime/Mdx/MdxEffectRuntime.cs` with shared runtime-state contracts and evaluator logic for classic `MDX` effect seams:
+		- `MdxEventRuntimeState`
+		- `MdxParticleEmitter2RuntimeState`
+		- `MdxRibbonRuntimeState`
+		- `MdxEffectRuntimeEvaluator`
+	- extended `wow-viewer/src/core/WowViewer.Core/Mdx/MdxAnimationSampler.cs` with shared integer-track sampling so classic ribbon texture-slot animation can be consumed from shared runtime code
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now evaluates shared effect runtime state during standalone `MDX` preview loading and carries it in `MdxPreviewLoadResult`
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now surfaces runtime effect counts plus event or particle or ribbon sample state in standalone `MDX` diagnostics and status text
+	- added focused runtime coverage in `wow-viewer/tests/WowViewer.Core.Tests/MdxEffectRuntimeEvaluatorTests.cs`
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxEffectRuntimeEvaluatorTests -v minimal` passed with `1` test
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed
+- boundary:
+	- this lands shared classic `MDX` effect runtime evaluation and app diagnostics consumption only
+	- actual PRE2 particle rendering, ribbon trail rendering, and event-driven runtime behavior are still future Plan 04 work
+
 ### Apr 18, 2026 - wow-viewer now has shared classic PRE2 payload ownership with focused reader coverage
 
 - what changed:

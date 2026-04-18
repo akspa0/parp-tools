@@ -48,6 +48,15 @@ public static class MdxAnimationSampler
         return SampleVector3Track(track, frameTime, defaultValue);
     }
 
+    public static int SampleIntTrack(MdxIntTrack? track, MdxSummary summary, int sequenceIndex, int timeMs, int defaultValue)
+    {
+        if (track is null || track.KeyCount == 0)
+            return defaultValue;
+
+        int frameTime = ResolveTrackFrame(summary, sequenceIndex, timeMs, track.GlobalSequenceId);
+        return SampleIntTrack(track, frameTime, defaultValue);
+    }
+
     public static Quaternion SampleQuaternionTrack(MdxQuaternionNodeTrack? track, MdxSummary summary, int sequenceIndex, int timeMs, Quaternion defaultValue)
     {
         if (track is null || track.KeyCount == 0)
@@ -150,6 +159,35 @@ public static class MdxAnimationSampler
         return Quaternion.Normalize(interpolated);
     }
 
+    public static int SampleIntTrack(MdxIntTrack track, int frameTime, int defaultValue)
+    {
+        ArgumentNullException.ThrowIfNull(track);
+        if (!TryFindKeyframePair(track.Keys, frameTime, out MdxIntKeyframe? left, out MdxIntKeyframe? right) || left is null)
+            return defaultValue;
+
+        if (right is null || left.Time == right.Time)
+            return left.Value;
+
+        float t = ComputeInterpolationFactor(left.Time, right.Time, frameTime);
+        return track.InterpolationType switch
+        {
+            MdxTrackInterpolationType.None => left.Value,
+            MdxTrackInterpolationType.Hermite => (int)MathF.Round(Hermite(
+                left.Value,
+                left.OutTangent ?? left.Value,
+                right.InTangent ?? right.Value,
+                right.Value,
+                t)),
+            MdxTrackInterpolationType.Bezier => (int)MathF.Round(Bezier(
+                left.Value,
+                left.OutTangent ?? left.Value,
+                right.InTangent ?? right.Value,
+                right.Value,
+                t)),
+            _ => (int)MathF.Round(Lerp(left.Value, right.Value, t)),
+        };
+    }
+
     private static int ResolveTrackFrame(MdxSummary summary, int sequenceIndex, int timeMs, int globalSequenceId)
     {
         ArgumentNullException.ThrowIfNull(summary);
@@ -213,6 +251,7 @@ public static class MdxAnimationSampler
             MdxColorKeyframe color => color.Time,
             MdxVector3Keyframe vector => vector.Time,
             MdxQuaternionKeyframe quaternion => quaternion.Time,
+            MdxIntKeyframe integer => integer.Time,
             _ => throw new InvalidOperationException($"Unsupported MDX keyframe type '{typeof(T).FullName}'."),
         };
     }
