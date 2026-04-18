@@ -37,6 +37,68 @@ internal static class MdxTrackReader
         return new MdxScalarTrack(tag, (MdxTrackInterpolationType)interpolationType, globalSequenceId, keys);
     }
 
+    public static MdxIntTrack ReadIntTrack(Stream stream, long limit, string tag, string contextLabel, string overrunMessage)
+    {
+        uint keyCount = ReadUInt32(stream);
+        if (keyCount > 100000)
+            throw new InvalidDataException($"{contextLabel}: invalid {tag} key count {keyCount}.");
+
+        uint interpolationType = ReadUInt32(stream);
+        int globalSequenceId = ReadInt32(stream);
+        List<MdxIntKeyframe> keys = new(checked((int)keyCount));
+
+        for (uint keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            int time = ReadInt32(stream);
+            int value = ReadInt32(stream);
+            int? inTangent = null;
+            int? outTangent = null;
+            if (TrackUsesTangents(interpolationType))
+            {
+                inTangent = ReadInt32(stream);
+                outTangent = ReadInt32(stream);
+            }
+
+            keys.Add(new MdxIntKeyframe(time, value, inTangent, outTangent));
+        }
+
+        if (stream.Position > limit)
+            throw new InvalidDataException(overrunMessage);
+
+        return new MdxIntTrack(tag, (MdxTrackInterpolationType)interpolationType, globalSequenceId, keys);
+    }
+
+    public static MdxColorTrack ReadColorTrack(Stream stream, long limit, string tag, string contextLabel, string overrunMessage)
+    {
+        uint keyCount = ReadUInt32(stream);
+        if (keyCount > 100000)
+            throw new InvalidDataException($"{contextLabel}: invalid {tag} key count {keyCount}.");
+
+        uint interpolationType = ReadUInt32(stream);
+        int globalSequenceId = ReadInt32(stream);
+        List<MdxColorKeyframe> keys = new(checked((int)keyCount));
+
+        for (uint keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            int time = ReadInt32(stream);
+            Vector3 value = ReadVector3(stream);
+            Vector3? inTangent = null;
+            Vector3? outTangent = null;
+            if (TrackUsesTangents(interpolationType))
+            {
+                inTangent = ReadVector3(stream);
+                outTangent = ReadVector3(stream);
+            }
+
+            keys.Add(new MdxColorKeyframe(time, value, inTangent, outTangent));
+        }
+
+        if (stream.Position > limit)
+            throw new InvalidDataException(overrunMessage);
+
+        return new MdxColorTrack(tag, (MdxTrackInterpolationType)interpolationType, globalSequenceId, keys);
+    }
+
     public static MdxVector3NodeTrack ReadVector3Track(Stream stream, long limit, string tag, string contextLabel, string overrunMessage)
     {
         uint keyCount = ReadUInt32(stream);

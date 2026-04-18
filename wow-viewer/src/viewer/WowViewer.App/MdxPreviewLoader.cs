@@ -58,6 +58,10 @@ internal sealed class MdxPreviewLoadResult
         MdxSummary summary,
         MdxGeometryFile geometry,
         MdxBoneFile bones,
+        MdxHelperFile helpers,
+        MdxAttachmentFile attachments,
+        MdxEventFile events,
+        MdxRibbonEmitterFile ribbons,
         MdxCameraFile cameras,
         MdxTextureAnimationFile textureAnimations,
         MdxGeosetAnimationFile geosetAnimations,
@@ -67,6 +71,10 @@ internal sealed class MdxPreviewLoadResult
         Summary = summary ?? throw new ArgumentNullException(nameof(summary));
         Geometry = geometry ?? throw new ArgumentNullException(nameof(geometry));
         Bones = bones ?? throw new ArgumentNullException(nameof(bones));
+        Helpers = helpers ?? throw new ArgumentNullException(nameof(helpers));
+        Attachments = attachments ?? throw new ArgumentNullException(nameof(attachments));
+        Events = events ?? throw new ArgumentNullException(nameof(events));
+        Ribbons = ribbons ?? throw new ArgumentNullException(nameof(ribbons));
         Cameras = cameras ?? throw new ArgumentNullException(nameof(cameras));
         TextureAnimations = textureAnimations ?? throw new ArgumentNullException(nameof(textureAnimations));
         GeosetAnimations = geosetAnimations ?? throw new ArgumentNullException(nameof(geosetAnimations));
@@ -80,6 +88,14 @@ internal sealed class MdxPreviewLoadResult
     public MdxGeometryFile Geometry { get; }
 
     public MdxBoneFile Bones { get; }
+
+    public MdxHelperFile Helpers { get; }
+
+    public MdxAttachmentFile Attachments { get; }
+
+    public MdxEventFile Events { get; }
+
+    public MdxRibbonEmitterFile Ribbons { get; }
 
     public MdxCameraFile Cameras { get; }
 
@@ -109,6 +125,18 @@ internal static class MdxPreviewLoader
         using MemoryStream boneStream = new(modelBytes, writable: false);
         MdxBoneFile bones = MdxBoneReader.Read(boneStream, request.SourceLabel);
 
+        using MemoryStream helperStream = new(modelBytes, writable: false);
+        MdxHelperFile helpers = MdxHelperReader.Read(helperStream, request.SourceLabel);
+
+        using MemoryStream attachmentStream = new(modelBytes, writable: false);
+        MdxAttachmentFile attachments = MdxAttachmentReader.Read(attachmentStream, request.SourceLabel);
+
+        using MemoryStream eventStream = new(modelBytes, writable: false);
+        MdxEventFile events = MdxEventReader.Read(eventStream, request.SourceLabel);
+
+        using MemoryStream ribbonStream = new(modelBytes, writable: false);
+        MdxRibbonEmitterFile ribbons = MdxRibbonEmitterReader.Read(ribbonStream, request.SourceLabel);
+
         using MemoryStream cameraStream = new(modelBytes, writable: false);
         MdxCameraFile cameras = MdxCameraReader.Read(cameraStream, request.SourceLabel);
 
@@ -119,7 +147,7 @@ internal static class MdxPreviewLoader
         MdxGeosetAnimationFile geosetAnimations = MdxGeosetAnimationReader.Read(geosetAnimationStream, request.SourceLabel);
 
         stopwatch.Stop();
-        return new MdxPreviewLoadResult(request, summary, geometry, bones, cameras, textureAnimations, geosetAnimations, stopwatch.Elapsed);
+        return new MdxPreviewLoadResult(request, summary, geometry, bones, helpers, attachments, events, ribbons, cameras, textureAnimations, geosetAnimations, stopwatch.Elapsed);
     }
 
     private static byte[] ReadBytes(MdxPreviewLoadRequest request)

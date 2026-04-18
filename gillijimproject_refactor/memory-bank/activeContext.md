@@ -2,6 +2,68 @@
 
 # Active Context
 
+## Apr 18, 2026 - wow-viewer now owns full classic `RIBB` payloads as a shared MDX runtime seam
+
+- this continues the active Plan 04 (`MDX` runtime and renderer closure) cut-away lane by promoting classic ribbon-emitter payloads out of summary-only ownership
+- active behavior after this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRibbonEmitter.cs` and `MdxRibbonEmitterFile.cs` now own shared typed runtime payloads for classic ribbon emitters
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxIntKeyframe.cs` and `MdxIntTrack.cs` now provide the missing shared integer-track contract needed for `KRTX` texture-slot animation
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxTrackReader.cs` now owns reusable `ReadColorTrack(...)` and `ReadIntTrack(...)` helpers so later classic `MDX` effect readers do not need to duplicate that parsing logic
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxRibbonEmitterReader.cs` now reads counted classic `RIBB` payloads for `v1300` and `v1400`, including:
+		- node transform tracks
+		- deferred `PIVT` pivot assignment
+		- static ribbon payload fields
+		- `KRHA` / `KRHB` / `KRAL` scalar tracks
+		- `KRCO` color tracks
+		- `KRTX` integer texture-slot tracks
+		- `KVIS` / `KATV` visibility tracks
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads ribbon payloads beside the other shared standalone preview seams
+- new focused regression coverage now exists in:
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxRibbonEmitterReaderTests.cs`
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --no-build --no-restore --filter "FullyQualifiedName=WowViewer.Core.Tests.MdxRibbonEmitterReaderTests.Read_SyntheticClassicRibbonPayload_AssignsPivotsAndTracks"` passed with `1` focused test
+- current boundary:
+	- this closes shared classic `RIBB` payload ownership only; the standalone renderer still does not simulate or draw ribbon trails from that data
+	- `PRE2` is now the largest remaining classic MDX effect/runtime payload seam in this lane
+
+## Apr 18, 2026 - wow-viewer now owns full classic `EVTS` payloads as a shared MDX runtime seam
+
+- this continues the first active execution lane under Plan 04 (`MDX` runtime and renderer closure) by closing another payload that had still been trapped in summary-only ownership
+- active behavior after this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxEventTrack.cs`, `MdxEvent.cs`, and `MdxEventFile.cs` now own shared typed runtime event payloads for classic `EVTS`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxEventReader.cs` now reads counted classic `EVTS` payloads for `v1300` and `v1400`, including:
+		- node transform tracks
+		- deferred `PIVT` pivot assignment
+		- raw `KEVT` key-time ownership plus global-sequence id
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads event payloads beside the existing summary/geometry/bone/helper/attachment/camera/texture-animation/geoset-animation seams, so future runtime consumers do not need to reopen the summary reader to reach `EVTS`
+- new focused regression coverage now exists in:
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxEventReaderTests.cs`
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --no-build --no-restore --filter "FullyQualifiedName~MdxEventReaderTests"` passed with `1` focused test
+- current boundary:
+	- this closes shared classic `EVTS` payload ownership only; no event-driven runtime behavior or emitter triggering is wired into the preview renderer yet
+	- `PRE2` and `RIBB` remain the next major MDX effect/runtime seams if we keep pushing the same cut-away lane
+
+## Apr 18, 2026 - wow-viewer now owns full classic `HELP` and `ATCH` payloads as shared MDX runtime seams
+
+- this is the first concrete execution slice after defining the top-level numbered cut-away roadmap, and it stays inside Plan 04 (`MDX` runtime and renderer closure) instead of spreading out into world/runtime or legacy-shell work
+- active behavior after this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxHelper.cs`, `MdxHelperFile.cs`, `MdxAttachment.cs`, and `MdxAttachmentFile.cs` now own shared typed runtime payloads for classic helper and attachment nodes instead of leaving those seams summary-only
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxHelperReader.cs` now reads counted classic `HELP` payloads for `v1300` and `v1400`, including node tracks plus deferred `PIVT` pivot assignment
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxAttachmentReader.cs` now reads counted classic `ATCH` payloads for `v1300` and `v1400`, including node tracks plus attachment id/path plus `KVIS` or `KATV` visibility tracks plus deferred `PIVT` pivot assignment
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads helper and attachment payloads beside the existing summary/geometry/bone/camera/texture-animation/geoset-animation seams, so standalone preview consumers can start depending on shared attachment/helper ownership instead of the summary reader
+- new focused regression coverage now exists in:
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxHelperReaderTests.cs`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxAttachmentReaderTests.cs`
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --no-build --no-restore --filter "MdxHelperReaderTests|MdxAttachmentReaderTests"` passed with `2` focused tests
+- current boundary:
+	- this closes shared payload ownership for helpers and attachments only; the renderer still does not yet consume them for socket-follow, helper-driven transforms, or attachment-visibility behavior
+	- `EVTS`, `PRE2`, and `RIBB` remain the next obvious MDX effect/runtime seams after this slice
+
 ## Apr 18, 2026 - wow-viewer now has an explicit top-level numbered cut-away roadmap for full old MdxViewer feature parity
 
 - user direction in this chat was explicit: the target is not bounded preview parity or another sequence of legacy hotfixes, but full old `MdxViewer` feature parity re-implemented in `wow-viewer` with a real cut-away approach

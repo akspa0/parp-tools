@@ -1,5 +1,75 @@
 # Progress
 
+### Apr 18, 2026 - wow-viewer now has shared classic RIBB payload ownership with focused reader coverage
+
+- what changed:
+	- added shared MDX runtime contracts in:
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRibbonEmitter.cs`
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRibbonEmitterFile.cs`
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxIntKeyframe.cs`
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxIntTrack.cs`
+	- extended `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxTrackReader.cs` with reusable color-track and int-track readers
+	- added `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxRibbonEmitterReader.cs` for full classic `RIBB` payload ownership over:
+		- node transform tracks
+		- deferred `PIVT` pivot assignment
+		- static ribbon fields
+		- `KRHA` / `KRHB` / `KRAL` scalar tracks
+		- `KRCO` color tracks
+		- `KRTX` integer texture-slot tracks
+		- `KVIS` / `KATV` visibility tracks
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads ribbon payloads into the standalone preview load result
+	- added focused coverage in `wow-viewer/tests/WowViewer.Core.Tests/MdxRibbonEmitterReaderTests.cs`
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --no-build --no-restore --filter "FullyQualifiedName=WowViewer.Core.Tests.MdxRibbonEmitterReaderTests.Read_SyntheticClassicRibbonPayload_AssignsPivotsAndTracks"` passed with `1` test
+- boundary:
+	- this lands shared classic ribbon-emitter payload ownership only
+	- ribbon simulation/render playback and `PRE2` particle-emitter ownership remain future Plan 04 work
+
+### Apr 18, 2026 - wow-viewer now has shared classic EVTS payload ownership with focused reader coverage
+
+- what changed:
+	- added shared MDX runtime contracts in:
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxEventTrack.cs`
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxEvent.cs`
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxEventFile.cs`
+	- added `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxEventReader.cs` for full classic `EVTS` payload ownership over:
+		- node transform tracks
+		- deferred `PIVT` pivot assignment
+		- raw `KEVT` key-time parsing with global-sequence id
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads events into the standalone preview load result beside the other shared MDX payload seams
+	- added focused coverage in `wow-viewer/tests/WowViewer.Core.Tests/MdxEventReaderTests.cs`
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --no-build --no-restore --filter "FullyQualifiedName~MdxEventReaderTests"` passed with `1` test
+- boundary:
+	- this lands shared classic `EVTS` payload ownership only
+	- event-driven runtime behavior plus `PRE2` / `RIBB` emitter ownership are still future Plan 04 slices
+
+### Apr 18, 2026 - wow-viewer now has shared helper and attachment MDX payload ownership with focused reader coverage
+
+- what changed:
+	- added shared MDX runtime contracts in:
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxHelper.cs`
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxHelperFile.cs`
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxAttachment.cs`
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxAttachmentFile.cs`
+	- added shared readers in:
+		- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxHelperReader.cs`
+		- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxAttachmentReader.cs`
+	- both readers now own classic `v1300` / `v1400` payload parsing with full node-track parsing and deferred `PIVT` pivot assignment
+	- attachment payload ownership now includes attachment id/path plus `KVIS` or `KATV` visibility-track parsing instead of only summary metadata
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads helper and attachment payloads alongside the existing standalone preview MDX seams
+	- added focused tests in:
+		- `wow-viewer/tests/WowViewer.Core.Tests/MdxHelperReaderTests.cs`
+		- `wow-viewer/tests/WowViewer.Core.Tests/MdxAttachmentReaderTests.cs`
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --no-build --no-restore --filter "MdxHelperReaderTests|MdxAttachmentReaderTests"` passed with `2` tests
+- boundary:
+	- this lands shared payload ownership and focused regression coverage for classic helper/attachment nodes
+	- it does not yet add runtime consumption in the renderer for helper-driven transforms, attachment placement, or visibility playback, and `EVTS` / `PRE2` / `RIBB` remain future Plan 04 seams
+
 ### Apr 18, 2026 - wow-viewer now has a top-level numbered cut-away program for full old MdxViewer feature parity
 
 - what changed:
