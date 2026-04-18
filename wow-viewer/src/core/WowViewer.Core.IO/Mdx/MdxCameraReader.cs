@@ -6,12 +6,13 @@ using WowViewer.Core.Mdx;
 
 namespace WowViewer.Core.IO.Mdx;
 
-public static class MdxGeosetAnimationReader
+public static class MdxCameraReader
 {
     private const int SignatureSizeBytes = 4;
     private const int ModlNameSizeBytes = 0x50;
+    private const int CamsNameSizeBytes = 0x50;
 
-    public static MdxGeosetAnimationFile Read(string path)
+    public static MdxCameraFile Read(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
@@ -19,13 +20,13 @@ public static class MdxGeosetAnimationReader
         return Read(stream, Path.GetFullPath(path));
     }
 
-    public static MdxGeosetAnimationFile Read(Stream stream, string sourcePath = "<memory>")
+    public static MdxCameraFile Read(Stream stream, string sourcePath = "<memory>")
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
         if (!stream.CanSeek)
-            throw new ArgumentException("MDX geoset-animation reading requires a seekable stream.", nameof(stream));
+            throw new ArgumentException("MDX camera reading requires a seekable stream.", nameof(stream));
 
         if (stream.Length < SignatureSizeBytes)
             throw new InvalidDataException($"MDX file '{sourcePath}' is too small to contain a signature.");
@@ -43,7 +44,7 @@ public static class MdxGeosetAnimationReader
 
             uint? version = null;
             string? modelName = null;
-            List<MdxGeosetAnimation> geosetAnimations = [];
+            List<MdxCamera> cameras = [];
             Span<byte> headerBytes = stackalloc byte[ChunkHeader.SizeInBytes];
 
             while (stream.Position <= stream.Length - ChunkHeader.SizeInBytes)
@@ -66,15 +67,15 @@ public static class MdxGeosetAnimationReader
                 {
                     modelName = ReadFixedAsciiAt(stream, dataOffset, ModlNameSizeBytes);
                 }
-                else if (header.Id == MdxChunkIds.Geoa)
+                else if (header.Id == MdxChunkIds.Cams)
                 {
-                    geosetAnimations = ReadClassicGeosetAnimations(stream, dataOffset, header.Size, version);
+                    cameras = ReadClassicCameras(stream, dataOffset, header.Size, version);
                 }
 
                 stream.Position = endOffset;
             }
 
-            return new MdxGeosetAnimationFile(sourcePath, signature, version, modelName, geosetAnimations);
+            return new MdxCameraFile(sourcePath, signature, version, modelName, cameras);
         }
         finally
         {
@@ -82,7 +83,7 @@ public static class MdxGeosetAnimationReader
         }
     }
 
-    private static List<MdxGeosetAnimation> ReadClassicGeosetAnimations(Stream stream, long dataOffset, uint size, uint? version)
+    private static List<MdxCamera> ReadClassicCameras(Stream stream, long dataOffset, uint size, uint? version)
     {
         if (version is not null and not 1300u and not 1400u)
             return [];
@@ -93,41 +94,55 @@ public static class MdxGeosetAnimationReader
             long chunkEnd = checked(dataOffset + size);
             stream.Position = dataOffset;
             if (chunkEnd - stream.Position < sizeof(uint))
-                throw new InvalidDataException("GEOA(v1300): missing geoset animation count.");
+                throw new InvalidDataException("CAMS(v1300): missing camera count.");
 
-            uint animationCount = ReadUInt32(stream);
-            if (animationCount > 100000)
-                throw new InvalidDataException($"GEOA(v1300): invalid geoset animation count {animationCount}.");
+            uint cameraCount = ReadUInt32(stream);
+            if (cameraCount > 100000)
+                throw new InvalidDataException($"CAMS(v1300): invalid camera count {cameraCount}.");
 
-            List<MdxGeosetAnimation> geosetAnimations = new(checked((int)animationCount));
-            for (int index = 0; index < animationCount; index++)
+            List<MdxCamera> cameras = new(checked((int)cameraCount));
+            for (int index = 0; index < cameraCount; index++)
             {
-                if (chunkEnd - stream.Position < sizeof(uint))
-                    throw new InvalidDataException($"GEOA(v1300): truncated section header at index {index}.");
-
                 long entryStart = stream.Position;
+                if (chunkEnd - entryStart < sizeof(uint))
+                    throw new InvalidDataException($"CAMS(v1300): truncated camera header at index {index}.");
+
                 uint entrySize = ReadUInt32(stream);
                 long entryEnd = checked(entryStart + entrySize);
                 if (entryEnd > chunkEnd || entryEnd <= entryStart)
-                    throw new InvalidDataException($"GEOA(v1300): invalid section size 0x{entrySize:X} at index {index}.");
+                    throw new InvalidDataException($"CAMS(v1300): invalid camera size 0x{entrySize:X} at index {index}.");
 
-                uint geosetId = ReadUInt32(stream);
-                float staticAlpha = ReadSingle(stream);
-                Vector3 staticColor = ReadVector3(stream);
-                uint flags = ReadUInt32(stream);
+                if (entryEnd - stream.Position < CamsNameSizeBytes + 36)
+                    throw new InvalidDataException($"CAMS(v1300): truncated camera payload at index {index}.");
 
-                MdxScalarTrack? alphaTrack = null;
-                MdxColorTrack? colorTrack = null;
+                string name = ReadFixedAscii(stream, CamsNameSizeBytes);
+                Vector3 pivotPoint = ReadVector3(stream);
+                float fieldOfView = ReadSingle(stream);
+                float farClip = ReadSingle(stream);
+                float nearClip = ReadSingle(stream);
+                Vector3 targetPivotPoint = ReadVector3(stream);
+
+                MdxVector3NodeTrack? positionTrack = null;
+                MdxScalarTrack? rollTrack = null;
+                MdxScalarTrack? visibilityTrack = null;
+                MdxVector3NodeTrack? targetPositionTrack = null;
+
                 while (stream.Position <= entryEnd - 4)
                 {
                     string tag = ReadTag(stream);
                     switch (tag)
                     {
-                        case "KGAO":
-                            alphaTrack = MdxTrackReader.ReadScalarTrack(stream, entryEnd, tag, "GEOA(v1300)", $"GEOA(v1300): {tag} payload overran the section.");
+                        case "KCTR":
+                            positionTrack = MdxTrackReader.ReadVector3Track(stream, entryEnd, tag, "CAMS(v1300)", $"CAMS(v1300): {tag} payload overran the camera.");
                             break;
-                        case "KGAC":
-                            colorTrack = ReadColorTrack(stream, entryEnd, tag, "GEOA(v1300)", $"GEOA(v1300): {tag} payload overran the section.");
+                        case "KCRL":
+                            rollTrack = MdxTrackReader.ReadScalarTrack(stream, entryEnd, tag, "CAMS(v1300)", $"CAMS(v1300): {tag} payload overran the camera.");
+                            break;
+                        case "KVIS":
+                            visibilityTrack = MdxTrackReader.ReadScalarTrack(stream, entryEnd, tag, "CAMS(v1300)", $"CAMS(v1300): {tag} payload overran the camera.");
+                            break;
+                        case "KTTR":
+                            targetPositionTrack = MdxTrackReader.ReadVector3Track(stream, entryEnd, tag, "CAMS(v1300)", $"CAMS(v1300): {tag} payload overran the camera.");
                             break;
                         default:
                             stream.Position = entryEnd;
@@ -136,50 +151,17 @@ public static class MdxGeosetAnimationReader
                 }
 
                 stream.Position = entryEnd;
-                geosetAnimations.Add(new MdxGeosetAnimation(index, geosetId, staticAlpha, staticColor, flags, alphaTrack, colorTrack));
+                cameras.Add(new MdxCamera(index, name, pivotPoint, fieldOfView, farClip, nearClip, targetPivotPoint, positionTrack, rollTrack, visibilityTrack, targetPositionTrack));
             }
 
             stream.Position = chunkEnd;
-            return geosetAnimations;
+            return cameras;
         }
         finally
         {
             stream.Position = previousPosition;
         }
     }
-
-    private static MdxColorTrack ReadColorTrack(Stream stream, long limit, string tag, string contextLabel, string overrunMessage)
-    {
-        uint keyCount = ReadUInt32(stream);
-        if (keyCount > 100000)
-            throw new InvalidDataException($"{contextLabel}: invalid {tag} key count {keyCount}.");
-
-        uint interpolationType = ReadUInt32(stream);
-        int globalSequenceId = ReadInt32(stream);
-        List<MdxColorKeyframe> keys = new(checked((int)keyCount));
-
-        for (uint keyIndex = 0; keyIndex < keyCount; keyIndex++)
-        {
-            int time = ReadInt32(stream);
-            Vector3 value = ReadVector3(stream);
-            Vector3? inTangent = null;
-            Vector3? outTangent = null;
-            if (TrackUsesTangents(interpolationType))
-            {
-                inTangent = ReadVector3(stream);
-                outTangent = ReadVector3(stream);
-            }
-
-            keys.Add(new MdxColorKeyframe(time, value, inTangent, outTangent));
-        }
-
-        if (stream.Position > limit)
-            throw new InvalidDataException(overrunMessage);
-
-        return new MdxColorTrack(tag, (MdxTrackInterpolationType)interpolationType, globalSequenceId, keys);
-    }
-
-    private static bool TrackUsesTangents(uint interpolationType) => interpolationType >= 2u;
 
     private static bool TryReadMdxChunkHeader(ReadOnlySpan<byte> data, out ChunkHeader header)
     {
@@ -246,8 +228,6 @@ public static class MdxGeosetAnimationReader
         stream.ReadExactly(bytes);
         return BinaryPrimitives.ReadUInt32LittleEndian(bytes);
     }
-
-    private static int ReadInt32(Stream stream) => unchecked((int)ReadUInt32(stream));
 
     private static float ReadSingle(Stream stream)
     {

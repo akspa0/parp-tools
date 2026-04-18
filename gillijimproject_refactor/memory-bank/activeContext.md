@@ -2,6 +2,109 @@
 
 # Active Context
 
+## Apr 18, 2026 - wow-viewer now has an explicit top-level numbered cut-away roadmap for full old MdxViewer feature parity
+
+- user direction in this chat was explicit: the target is not bounded preview parity or another sequence of legacy hotfixes, but full old `MdxViewer` feature parity re-implemented in `wow-viewer` with a real cut-away approach
+- the missing continuity surface was a top-level program that ties the already-existing narrow plans together instead of leaving them as separate M2/world/viewer/editor tracks
+- new planning surface now exists in `gillijimproject_refactor/plans/wow_viewer_mdxviewer_feature_parity_cutaway_plan_2026-04-18.md`
+- that plan defines the current migration as one numbered parity program:
+	- Plan 01 - program control, parity matrix, and exit gates
+	- Plan 02 - shared format ownership closure for active viewer data
+	- Plan 03 - M2 runtime and renderer final closure
+	- Plan 04 - MDX runtime and renderer closure
+	- Plan 05 - WMO runtime and rendering closure
+	- Plan 06 - world runtime and 3D world consumer cutover
+	- Plan 07 - viewer shell, UX, and workflow surface parity
+	- Plan 08 - tool/inspect/converter/dataset cutover
+	- Plan 09 - editor foundation and save-capable cutover
+	- Plan 10 - compatibility retirement and final de-ownership
+- current practical recommendation in that new top-level plan:
+	- keep the immediate execution focus on `MDX` closure, shared format ownership, and real `WowViewer.App` world-consumer cutover rather than spending another cycle on abstract planning or legacy-shell growth
+- current boundary:
+	- this is a planning/continuity slice only; it does not itself close any renderer/runtime gap
+	- the value is that future sessions now have one canonical top-level parity/cut-away program to route through before choosing the next narrow implementation slice
+
+## Apr 18, 2026 - wow-viewer standalone MDX preview now has a manifest-driven real-data visual regression harness
+
+- user direction in this chat was to automate the visual testing we had been doing manually so MDX parser/renderer work can keep moving with repeatable real-data validation
+- active behavior after this slice:
+	- `wow-viewer/src/viewer/WowViewer.App/Program.cs` now exposes `mdx-visual-regression`
+	- `wow-viewer/src/viewer/WowViewer.App/MdxVisualRegressionRunner.cs` now owns a manifest-driven MDX GPU regression flow over the existing hidden-window `mdx-gpu-frame` capture path:
+		- loads real preview requests from JSON cases
+		- writes actual captures
+		- updates baselines when requested
+		- compares actual vs baseline PNGs with bounded differing-pixel and per-channel-delta thresholds
+		- emits diff PNGs for failing cases when a diff output root is provided
+	- `wow-viewer/testdata/visual/mdx-gpu-regression.manifest.json` now defines the first repo-backed real-data cases:
+		- `alpha053_wisp_default_frame`
+		- `alpha053_banshee_default_frame`
+	- `wow-viewer/testdata/visual/mdx-gpu/` now carries the matching baseline captures for those first bounded cases
+	- `wow-viewer/scripts/run_mdx_visual_regression.ps1` now provides a thin wrapper over the built app DLL so visual compare/update runs can be repeated without retyping the full CLI
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded
+	- `dotnet i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/bin/Debug/net10.0/WowViewer.App.dll mdx-visual-regression --manifest i:/parp/parp-tools/wow-viewer/testdata/visual/mdx-gpu-regression.manifest.json --write-actual-root i:/parp/parp-tools/output/build-validation/mdx-gpu-visual-regression/actual --write-diff-root i:/parp/parp-tools/output/build-validation/mdx-gpu-visual-regression/diff --update-baselines` succeeded and wrote the initial baselines
+	- `& 'I:\parp\parp-tools\wow-viewer\scripts\run_mdx_visual_regression.ps1'` then passed with `2` / `2` cases against those baselines
+- current boundary:
+	- this closes a bounded standalone `MDX` preview regression harness only; it does not yet add xUnit-hosted GPU tests, broader model coverage, camera-variant sweeps, or world-scene visual regression coverage
+	- the current harness is baseline-image based, so intentional renderer changes still require explicit baseline refresh instead of being self-updating
+
+## Apr 18, 2026 - wow-viewer standalone MDX preview now consumes full `CAMS` payloads instead of static summary pivots only
+
+- user direction in this chat was to keep the `wow-viewer` MDX implementation moving forward and to make sure automated-test-backed seams exist for continued parser or renderer work
+- active behavior after this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxCamera.cs`, `MdxCameraFile.cs`, and `MdxCameraResolver.cs` now own full shared classic `MDX` camera payloads plus runtime camera-state evaluation
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxCameraReader.cs` now reads classic counted `CAMS` entries for `v1300` and `v1400`, including fixed payload fields plus full `KCTR` or `KCRL` or `KVIS` or `KTTR` track ownership instead of summary metadata only
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads that camera file beside the existing summary, geometry, bone, texture-animation, and geoset-animation payloads
+	- `wow-viewer/src/viewer/WowViewer.App/PreviewCameraPlanner.cs` now resolves animated model-camera state from the shared core seam when a portrait/model camera is selected or auto-preferred, so the standalone preview can follow camera translation or target translation or roll or visibility tracks instead of only static `CAMS` pivots
+- new focused regression coverage now exists in:
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxCameraReaderTests.cs` for synthetic full-payload `CAMS` parsing
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxCameraResolverTests.cs` for runtime camera offset or roll or visibility evaluation
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter "MdxCameraReaderTests|MdxCameraResolverTests"` passed with `4` focused tests
+- current boundary:
+	- this closes shared classic `CAMS` payload ownership and standalone preview camera playback only
+	- it does not yet add helper or attachment or event runtime ownership, world-scene `MDX` camera consumers, or broader classic `MDX` effect/runtime cutover beyond the bounded standalone preview path
+
+## Apr 18, 2026 - wow-viewer MDX preview render-state shaping now lives in shared core code with focused regression coverage
+
+- user direction in this chat was to keep the `wow-viewer` MDX implementation moving and to add automated tests so parser or renderer work can continue without leaning only on screenshot proofs
+- active behavior after this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRenderStateResolver.cs` now owns the bounded MDX preview render-state shaping that had previously been private inside `WowViewer.App`
+	- the new shared seam now resolves:
+		- first-layer material state for classic MDX preview consumers, including replaceable-texture ids, transparent or additive classification, alpha-cutout classification, and depth-write behavior
+		- per-geoset render state over geoset flags plus runtime or summary geoset-animation alpha/color signals
+		- texture-animation transform state over `KTAT` or `KTAR` or `KTAS` tracks
+	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now consumes that shared resolver instead of keeping those semantics trapped in app-private methods
+- new focused regression coverage now exists in `wow-viewer/tests/WowViewer.Core.Tests/MdxRenderStateResolverTests.cs` for:
+	- transparent-key material handling
+	- additive material depth-write behavior
+	- runtime geoset-animation alpha/color evaluation combined with geoset render flags
+	- summary-only geoset-animation fallback behavior when runtime payloads are absent
+	- texture-animation translation/rotation/scale transform shaping
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter MdxRenderStateResolverTests` passed with `5` focused tests
+- current boundary:
+	- this closes a renderer-facing semantics and testability slice only; it does not yet add attachments/helpers/event runtime consumption, particles/ribbons simulation, or world-scene MDX renderer ownership beyond the current bounded preview path
+
+## Apr 17, 2026 - wow-viewer desktop shell close path no longer disposes the Silk window from inside the Closing callback
+
+- user repro in this chat hit `System.InvalidOperationException: You cannot call Reset inside of the render loop!` while closing `wow-viewer/src/viewer/WowViewer.App`
+- root cause was local to the new app shell shutdown path:
+	- `WowViewerDesktopApp.Run()` subscribed `_window.Closing += OnClose`
+	- `OnClose()` immediately called `Dispose()`
+	- `Dispose()` then called `_window.Dispose()` while Silk.NET was already tearing the window down from inside its own render-loop close path
+- active behavior after this fix:
+	- `WowViewerDesktopApp` no longer disposes itself from the `Closing` callback
+	- cleanup now happens after `Run()` returns through the normal outer `using` scope in `Program.cs`
+	- `Dispose()` now detaches the remaining window event handlers before disposing the window object, so shutdown stays one-way instead of re-entering the app callbacks during teardown
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded after the shutdown-path change
+- current boundary:
+	- this is a close-loop safety fix for the desktop shell lifecycle only
+	- no GUI runtime close proof was captured in this chat, so treat the fix as compile-validated until the user re-runs the app and confirms the close path is clean
+
 ## Apr 18, 2026 - wow-viewer app host target is now cross-platform baseline with guarded Windows-only folder picker
 
 - user direction in this chat was explicit: the `wow-viewer` viewer itself should be cross-platform, not only the shared libraries

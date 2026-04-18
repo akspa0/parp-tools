@@ -13,9 +13,6 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
     private const uint MdxBlendModeAddAlpha = 4;
     private const uint MdxBlendModeModulate = 5;
     private const uint MdxBlendModeModulate2X = 6;
-    private const uint MdxGeosetFlagUnshaded = 0x1;
-    private const uint MdxGeosetFlagNoDepthTest = 0x40;
-    private const uint MdxGeosetFlagNoDepthSet = 0x80;
     private const float PreviewFieldOfViewDegrees = 25.0f;
     private const float PreviewPaddingScale = 1.04f;
     private const float PreviewZoomFactor = 0.72f;
@@ -144,7 +141,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         _cameraSettings = preview.Request.Camera;
 
         ResolveBounds(preview.Geometry, preview.Summary, out Vector3 initialMin, out Vector3 initialMax);
-        PreviewCameraPose initialPose = PreviewCameraPlanner.CreatePose(initialMin, initialMax, _cameraSettings, preview.Summary, preview.Request.VisualWidth, preview.Request.VisualHeight);
+        PreviewCameraPose initialPose = PreviewCameraPlanner.CreatePose(initialMin, initialMax, _cameraSettings, preview.Summary, preview.Cameras, preview.Request.SequenceIndex, preview.Request.TimeMs, preview.Request.VisualWidth, preview.Request.VisualHeight);
         _boneMatrices = preview.Bones.BoneCount > 0
             ? MdxBonePoseBuilder.Build(preview.Bones, preview.Summary, preview.Request.SequenceIndex, preview.Request.TimeMs, initialPose.CameraPosition)
             : [];
@@ -158,8 +155,14 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             if (geoset.Vertices.Count == 0 || geoset.Indices.Count < 3)
                 continue;
 
-            MdxMaterialState material = ResolveMaterial(preview.Summary, geoset.MaterialId);
-            GeosetRenderState geosetState = ResolveGeosetRenderState(preview, geoset, material);
+            MdxResolvedMaterialState material = MdxRenderStateResolver.ResolveMaterial(preview.Summary, geoset.MaterialId);
+            MdxResolvedGeosetRenderState geosetState = MdxRenderStateResolver.ResolveGeosetRenderState(
+                preview.Summary,
+                preview.GeosetAnimations,
+                preview.Request.SequenceIndex,
+                preview.Request.TimeMs,
+                geoset,
+                material);
             if (geosetState.Alpha <= 0.001f)
                 continue;
 
@@ -176,7 +179,12 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
                 ? geoset.UvSets[material.CoordId]
                 : geoset.PrimaryUvSet;
 
-            TextureTransformState textureTransform = ResolveTextureTransform(preview, material);
+            MdxResolvedTextureTransform textureTransform = MdxRenderStateResolver.ResolveTextureTransform(
+                preview.Summary,
+                preview.TextureAnimations,
+                preview.Request.SequenceIndex,
+                preview.Request.TimeMs,
+                material);
             bool usesBoneSkinning = _boneMatrices.Length > 0 && geoset.VertexGroupCount > 0 && geoset.MatrixGroupCount > 0;
             (Vector4[] boneIndices, Vector4[] boneWeights) = usesBoneSkinning
                 ? MdxSkinningHelper.BuildBoneWeights(geoset, preview.Bones.Bones)
@@ -305,7 +313,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
 
         if (_commands.Count > 0)
         {
-            PreviewCameraPose pose = PreviewCameraPlanner.CreatePose(_boundsMin, _boundsMax, _cameraSettings, _currentSummary, _frameWidth, _frameHeight);
+            PreviewCameraPose pose = PreviewCameraPlanner.CreatePose(_boundsMin, _boundsMax, _cameraSettings, _currentSummary, _currentPreview?.Cameras, _currentPreview?.Request.SequenceIndex ?? 0, _currentPreview?.Request.TimeMs ?? 0, _frameWidth, _frameHeight);
             if (_currentPreview is not null && _currentPreview.Bones.BoneCount > 0)
             {
                 _boneMatrices = MdxBonePoseBuilder.Build(
@@ -579,34 +587,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
             && innerMin.Z >= outerMin.Z - epsilon && innerMax.Z <= outerMax.Z + epsilon;
     }
 
-    private static MdxMaterialState ResolveMaterial(MdxSummary summary, int materialId)
-    {
-        if (materialId < 0 || materialId >= summary.Materials.Count)
-            return new MdxMaterialState(null, 0, -1, 0, false, false, true, false, 1.0f, 0);
-
-        MdxMaterialSummary material = summary.Materials[materialId];
-        if (material.LayerCount == 0)
-            return new MdxMaterialState(null, 0, -1, 0, false, false, true, false, 1.0f, 0);
-
-        MdxMaterialLayerSummary layer = material.Layers[0];
-        string? texturePath = null;
-        uint replaceableId = 0;
-        if (layer.TextureId >= 0 && layer.TextureId < summary.Textures.Count)
-        {
-            MdxTextureSummary texture = summary.Textures[layer.TextureId];
-            texturePath = texture.Path;
-            replaceableId = texture.ReplaceableId;
-        }
-
-        float alpha = Math.Clamp(layer.StaticAlpha <= 0.0f ? 1.0f : layer.StaticAlpha, 0.0f, 1.0f);
-        bool isTransparent = layer.BlendMode != 0 || alpha < 0.999f;
-        bool alphaCutout = layer.BlendMode == MdxBlendModeTransparentKey;
-        bool isAdditive = layer.BlendMode is MdxBlendModeAdditive or MdxBlendModeAddAlpha;
-        bool depthWrite = !isTransparent || alphaCutout;
-        return new MdxMaterialState(texturePath, replaceableId, layer.TransformId, layer.CoordId, isTransparent, isAdditive, depthWrite, alphaCutout, alpha, layer.BlendMode);
-    }
-
-    private bool TryGetOrLoadMaterialTexture(MdxPreviewLoadRequest request, MdxMaterialState material, out uint textureId)
+    private bool TryGetOrLoadMaterialTexture(MdxPreviewLoadRequest request, MdxResolvedMaterialState material, out uint textureId)
     {
         textureId = 0;
 
@@ -622,7 +603,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         return false;
     }
 
-    private static IEnumerable<string> EnumerateTextureCandidates(MdxPreviewLoadRequest request, MdxMaterialState material)
+    private static IEnumerable<string> EnumerateTextureCandidates(MdxPreviewLoadRequest request, MdxResolvedMaterialState material)
     {
         if (!string.IsNullOrWhiteSpace(material.TexturePath))
             yield return material.TexturePath;
@@ -669,81 +650,6 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         yield return $"{modelDirectory}\\{modelBaseName}_Skin{skinIndex.Value:00}.blp";
         yield return $"{modelDirectory}\\{modelBaseName}Skin{skinIndex.Value:00}.blp";
         yield return $"{modelDirectory}\\Skin{skinIndex.Value:00}.blp";
-    }
-
-    private static GeosetRenderState ResolveGeosetRenderState(MdxPreviewLoadResult preview, MdxGeosetGeometry geoset, MdxMaterialState material)
-    {
-        MdxSummary summary = preview.Summary;
-        bool receivesLighting = (geoset.Flags & MdxGeosetFlagUnshaded) == 0;
-        bool depthTest = (geoset.Flags & MdxGeosetFlagNoDepthTest) == 0;
-        bool depthWrite = material.DepthWrite && (geoset.Flags & MdxGeosetFlagNoDepthSet) == 0;
-        Vector3 baseColor = Vector3.One;
-        float alpha = material.Alpha;
-
-        if (TryGetGeosetAnimation(preview.GeosetAnimations, geoset.Index, out MdxGeosetAnimation? geosetAnimation) && geosetAnimation is not null)
-        {
-            alpha *= Math.Clamp(MdxAnimationSampler.SampleScalarTrack(geosetAnimation.AlphaTrack, summary, preview.Request.SequenceIndex, preview.Request.TimeMs, geosetAnimation.StaticAlpha), 0.0f, 1.0f);
-            if (geosetAnimation.UsesStaticColor || geosetAnimation.ColorTrack is not null)
-                baseColor *= MdxAnimationSampler.SampleColorTrack(geosetAnimation.ColorTrack, summary, preview.Request.SequenceIndex, preview.Request.TimeMs, geosetAnimation.StaticColor);
-        }
-        else if (TryGetGeosetAnimation(summary, geoset.Index, out MdxGeosetAnimationSummary? geosetAnimationSummary) && geosetAnimationSummary is not null)
-        {
-            alpha *= Math.Clamp(geosetAnimationSummary.StaticAlpha, 0.0f, 1.0f);
-            if (geosetAnimationSummary.UsesStaticColor)
-                baseColor *= geosetAnimationSummary.StaticColor;
-        }
-
-        return new GeosetRenderState(receivesLighting, depthTest, depthWrite, baseColor, Math.Clamp(alpha, 0.0f, 1.0f));
-    }
-
-    private static TextureTransformState ResolveTextureTransform(MdxPreviewLoadResult preview, MdxMaterialState material)
-    {
-        if (material.TransformId < 0 || material.TransformId >= preview.TextureAnimations.TextureAnimationCount)
-            return TextureTransformState.Identity;
-
-        MdxTextureAnimation animation = preview.TextureAnimations.TextureAnimations[material.TransformId];
-        Vector3 translation = MdxAnimationSampler.SampleVector3Track(animation.TranslationTrack, preview.Summary, preview.Request.SequenceIndex, preview.Request.TimeMs, Vector3.Zero);
-        Vector3 scale = MdxAnimationSampler.SampleVector3Track(animation.ScalingTrack, preview.Summary, preview.Request.SequenceIndex, preview.Request.TimeMs, Vector3.One);
-        Quaternion rotation = MdxAnimationSampler.SampleQuaternionTrack(animation.RotationTrack, preview.Summary, preview.Request.SequenceIndex, preview.Request.TimeMs, Quaternion.Identity);
-        Matrix4x4 rotationMatrix = Matrix4x4.CreateFromQuaternion(rotation);
-
-        bool usesTransform = animation.HasTranslationTrack || animation.HasRotationTrack || animation.HasScalingTrack;
-        return new TextureTransformState(
-            usesTransform,
-            new Vector2(translation.X, translation.Y),
-            new Vector2(scale.X, scale.Y),
-            new Vector2(rotationMatrix.M11, rotationMatrix.M12),
-            new Vector2(rotationMatrix.M21, rotationMatrix.M22));
-    }
-
-    private static bool TryGetGeosetAnimation(MdxSummary summary, int geosetIndex, out MdxGeosetAnimationSummary? geosetAnimation)
-    {
-        foreach (MdxGeosetAnimationSummary candidate in summary.GeosetAnimations)
-        {
-            if (candidate.GeosetId != (uint)geosetIndex)
-                continue;
-
-            geosetAnimation = candidate;
-            return true;
-        }
-
-        geosetAnimation = null;
-        return false;
-    }
-
-    private static bool TryGetGeosetAnimation(MdxGeosetAnimationFile geosetAnimationFile, int geosetIndex, out MdxGeosetAnimation? geosetAnimation)
-    {
-        foreach (MdxGeosetAnimation candidate in geosetAnimationFile.GeosetAnimations)
-        {
-            if (candidate.GeosetId != (uint)geosetIndex)
-                continue;
-
-            geosetAnimation = candidate;
-            return true;
-        }
-
-        geosetAnimation = null;
-        return false;
     }
 
     private void EnsureFramebuffer(int width, int height)
@@ -1213,32 +1119,4 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         }
     }
 
-    private readonly record struct MdxMaterialState(
-        string? TexturePath,
-        uint ReplaceableId,
-        int TransformId,
-        int CoordId,
-        bool IsTransparent,
-        bool IsAdditive,
-        bool DepthWrite,
-        bool AlphaCutout,
-        float Alpha,
-        uint BlendMode);
-
-    private readonly record struct TextureTransformState(
-        bool UsesTransform,
-        Vector2 Translation,
-        Vector2 Scale,
-        Vector2 RotationRow0,
-        Vector2 RotationRow1)
-    {
-        public static TextureTransformState Identity { get; } = new(false, Vector2.Zero, Vector2.One, new Vector2(1.0f, 0.0f), new Vector2(0.0f, 1.0f));
-    }
-
-    private readonly record struct GeosetRenderState(
-        bool ReceivesLighting,
-        bool DepthTest,
-        bool DepthWrite,
-        Vector3 BaseColor,
-        float Alpha);
 }

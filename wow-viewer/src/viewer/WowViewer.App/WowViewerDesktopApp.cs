@@ -120,7 +120,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _window.Render += OnRender;
         _window.Resize += OnWindowResize;
         _window.FramebufferResize += OnFramebufferResize;
-        _window.Closing += OnClose;
         _window.Run();
     }
 
@@ -137,6 +136,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
         DeleteWorldTerrainPreviewTexture();
         _imGui?.Dispose();
         _input?.Dispose();
+        if (_window != null)
+        {
+            _window.Load -= OnLoad;
+            _window.Update -= OnUpdate;
+            _window.Render -= OnRender;
+            _window.Resize -= OnWindowResize;
+            _window.FramebufferResize -= OnFramebufferResize;
+        }
         _window?.Dispose();
     }
 
@@ -202,11 +209,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _gl.Viewport(size);
 
         SyncImGuiWindowMetrics(_window?.Size ?? size, size);
-    }
-
-    private void OnClose()
-    {
-        Dispose();
     }
 
     private void DrawUi(float deltaSeconds)

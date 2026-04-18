@@ -97,7 +97,7 @@ internal static class PreviewCameraPresets
 
 internal static class PreviewCameraPlanner
 {
-    public static PreviewCameraPose CreatePose(Vector3 min, Vector3 max, PreviewCameraSettings settings, MdxSummary? summary, int width, int height)
+    public static PreviewCameraPose CreatePose(Vector3 min, Vector3 max, PreviewCameraSettings settings, MdxSummary? summary, MdxCameraFile? cameraFile, int sequenceIndex, int timeMs, int width, int height)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -105,34 +105,34 @@ internal static class PreviewCameraPlanner
         resolved.Validate();
 
         if (resolved.Mode == PreviewCameraMode.Frame
-            && ShouldPreferEmbeddedModelCamera(summary)
-            && TryCreateModelPose(min, max, resolved, summary, width, height, out PreviewCameraPose preferredModelPose))
+            && ShouldPreferEmbeddedModelCamera(summary, cameraFile)
+            && TryCreateModelPose(min, max, resolved, summary, cameraFile, sequenceIndex, timeMs, width, height, out PreviewCameraPose preferredModelPose))
         {
             return preferredModelPose;
         }
 
         if (resolved.Mode == PreviewCameraMode.Model
-            && TryCreateModelPose(min, max, resolved, summary, width, height, out PreviewCameraPose modelPose))
+            && TryCreateModelPose(min, max, resolved, summary, cameraFile, sequenceIndex, timeMs, width, height, out PreviewCameraPose modelPose))
         {
             return modelPose;
         }
 
         if (resolved.Mode == PreviewCameraMode.Orbit)
-            return CreateOrbitPose(min, max, resolved, summary, width, height);
+            return CreateOrbitPose(min, max, resolved, summary, cameraFile, sequenceIndex, timeMs, width, height);
 
         return CreateLegacyFramePose(min, max, resolved, width, height, mdxMirrorX: false);
     }
 
-    private static bool ShouldPreferEmbeddedModelCamera(MdxSummary? summary)
+    private static bool ShouldPreferEmbeddedModelCamera(MdxSummary? summary, MdxCameraFile? cameraFile)
     {
-        if (summary is null || summary.Cameras.Count == 0)
+        if (summary is null)
             return false;
 
         if (summary.ReplaceableTextureCount <= 0)
             return false;
 
-        return summary.Cameras.Any(static candidate =>
-            candidate.Name.Contains("portrait", StringComparison.OrdinalIgnoreCase));
+        return EnumerateModelCameraNames(summary, cameraFile).Any(static name =>
+            name.Contains("portrait", StringComparison.OrdinalIgnoreCase));
     }
 
     public static PreviewInteractiveFrame CreateLegacyFrameBounds(Vector3 min, Vector3 max, bool mdxMirrorX)
@@ -163,11 +163,11 @@ internal static class PreviewCameraPlanner
         return new PreviewCameraPose(view, projection, frame.Position, frame.FocusPoint);
     }
 
-    private static PreviewCameraPose CreateOrbitPose(Vector3 min, Vector3 max, PreviewCameraSettings settings, MdxSummary? summary, int width, int height)
+    private static PreviewCameraPose CreateOrbitPose(Vector3 min, Vector3 max, PreviewCameraSettings settings, MdxSummary? summary, MdxCameraFile? cameraFile, int sequenceIndex, int timeMs, int width, int height)
     {
         Vector3 center = (min + max) * 0.5f;
         Vector3 focusPoint = center;
-        if (TryGetPreferredFocusPoint(summary, min, max, out Vector3 preferredFocus))
+        if (TryGetPreferredFocusPoint(summary, cameraFile, sequenceIndex, timeMs, min, max, out Vector3 preferredFocus))
             focusPoint = preferredFocus;
 
         float aspect = Math.Max(width, 1) / (float)Math.Max(height, 1);
@@ -211,35 +211,58 @@ internal static class PreviewCameraPlanner
         return new PreviewCameraPose(view, projection, cameraPosition, focusPoint);
     }
 
-    private static bool TryCreateModelPose(Vector3 min, Vector3 max, PreviewCameraSettings settings, MdxSummary? summary, int width, int height, out PreviewCameraPose pose)
+    private static bool TryCreateModelPose(Vector3 min, Vector3 max, PreviewCameraSettings settings, MdxSummary? summary, MdxCameraFile? cameraFile, int sequenceIndex, int timeMs, int width, int height, out PreviewCameraPose pose)
     {
         pose = default;
 
-        if (summary is null || summary.Cameras.Count == 0)
-            return false;
+        Vector3 eye;
+        Vector3 target;
+        Vector3 up;
+        float fieldOfView;
+        float nearClip;
+        float farClip;
 
-        MdxCameraSummary camera = summary.Cameras
-            .FirstOrDefault(static candidate => candidate.Name.Contains("portrait", StringComparison.OrdinalIgnoreCase))
-            ?? summary.Cameras[0];
+        if (TryResolveAnimatedModelCamera(summary, cameraFile, sequenceIndex, timeMs, out MdxResolvedCameraState resolvedCamera))
+        {
+            eye = resolvedCamera.Position;
+            target = resolvedCamera.Target;
+            up = resolvedCamera.Up;
+            fieldOfView = resolvedCamera.FieldOfView;
+            nearClip = resolvedCamera.NearClip;
+            farClip = resolvedCamera.FarClip;
+        }
+        else
+        {
+            if (summary is null || summary.Cameras.Count == 0)
+                return false;
 
-        Vector3 eye = camera.PivotPoint;
-        Vector3 target = camera.TargetPivotPoint;
-        Vector3 forward = target - eye;
-        if (!IsFinite(eye) || !IsFinite(target) || forward.LengthSquared() <= 0.0001f)
-            return false;
+            MdxCameraSummary camera = summary.Cameras
+                .FirstOrDefault(static candidate => candidate.Name.Contains("portrait", StringComparison.OrdinalIgnoreCase))
+                ?? summary.Cameras[0];
+
+            eye = camera.PivotPoint;
+            target = camera.TargetPivotPoint;
+            Vector3 forward = target - eye;
+            if (!IsFinite(eye) || !IsFinite(target) || forward.LengthSquared() <= 0.0001f)
+                return false;
+
+            fieldOfView = camera.FieldOfView;
+            nearClip = camera.NearClip;
+            farClip = camera.FarClip;
+            up = MathF.Abs(Vector3.Dot(Vector3.Normalize(forward), Vector3.UnitZ)) > 0.99f ? Vector3.UnitX : Vector3.UnitZ;
+        }
 
         float aspect = Math.Max(width, 1) / (float)Math.Max(height, 1);
-        float fov = float.IsFinite(camera.FieldOfView) && camera.FieldOfView > 0.05f && camera.FieldOfView < MathF.PI - 0.05f
-            ? camera.FieldOfView
+        float fov = float.IsFinite(fieldOfView) && fieldOfView > 0.05f && fieldOfView < MathF.PI - 0.05f
+            ? fieldOfView
             : settings.FieldOfViewDegrees * MathF.PI / 180.0f;
-        float nearClip = float.IsFinite(camera.NearClip) && camera.NearClip > 0.001f ? camera.NearClip : 0.01f;
-        float farClip = float.IsFinite(camera.FarClip) && camera.FarClip > nearClip + 0.1f
-            ? camera.FarClip
-            : MathF.Max(nearClip + 10.0f, (max - min).Length() * 8.0f);
+        float resolvedNearClip = float.IsFinite(nearClip) && nearClip > 0.001f ? nearClip : 0.01f;
+        float resolvedFarClip = float.IsFinite(farClip) && farClip > resolvedNearClip + 0.1f
+            ? farClip
+            : MathF.Max(resolvedNearClip + 10.0f, (max - min).Length() * 8.0f);
 
-        Vector3 up = MathF.Abs(Vector3.Dot(Vector3.Normalize(forward), Vector3.UnitZ)) > 0.99f ? Vector3.UnitX : Vector3.UnitZ;
         Matrix4x4 view = Matrix4x4.CreateLookAt(eye, target, up);
-        Matrix4x4 projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, aspect, nearClip, farClip);
+        Matrix4x4 projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, aspect, resolvedNearClip, resolvedFarClip);
         pose = new PreviewCameraPose(view, projection, eye, target);
         return true;
     }
@@ -267,9 +290,18 @@ internal static class PreviewCameraPlanner
             MathF.Sin(pitchRadians)));
     }
 
-    private static bool TryGetPreferredFocusPoint(MdxSummary? summary, Vector3 min, Vector3 max, out Vector3 focusPoint)
+    private static bool TryGetPreferredFocusPoint(MdxSummary? summary, MdxCameraFile? cameraFile, int sequenceIndex, int timeMs, Vector3 min, Vector3 max, out Vector3 focusPoint)
     {
         focusPoint = default;
+        if (TryResolveAnimatedModelCamera(summary, cameraFile, sequenceIndex, timeMs, out MdxResolvedCameraState resolvedCamera))
+        {
+            if (!IsFinite(resolvedCamera.Target) || !IsPointNearBounds(resolvedCamera.Target, min, max))
+                return false;
+
+            focusPoint = resolvedCamera.Target;
+            return true;
+        }
+
         if (summary is null || summary.Cameras.Count == 0)
             return false;
 
@@ -283,6 +315,37 @@ internal static class PreviewCameraPlanner
 
         focusPoint = target;
         return true;
+    }
+
+    private static bool TryResolveAnimatedModelCamera(MdxSummary? summary, MdxCameraFile? cameraFile, int sequenceIndex, int timeMs, out MdxResolvedCameraState cameraState)
+    {
+        cameraState = default;
+
+        if (summary is null || cameraFile is null || cameraFile.CameraCount == 0)
+            return false;
+
+        MdxCamera camera = cameraFile.Cameras
+            .FirstOrDefault(static candidate => candidate.Name.Contains("portrait", StringComparison.OrdinalIgnoreCase))
+            ?? cameraFile.Cameras[0];
+
+        MdxResolvedCameraState resolved = MdxCameraResolver.Resolve(summary, camera, sequenceIndex, timeMs);
+        Vector3 forward = resolved.Target - resolved.Position;
+        if (!resolved.Visible || !IsFinite(resolved.Position) || !IsFinite(resolved.Target) || !IsFinite(resolved.Up) || forward.LengthSquared() <= 0.0001f)
+            return false;
+
+        cameraState = resolved;
+        return true;
+    }
+
+    private static IEnumerable<string> EnumerateModelCameraNames(MdxSummary? summary, MdxCameraFile? cameraFile)
+    {
+        if (cameraFile is not null && cameraFile.CameraCount > 0)
+            return cameraFile.Cameras.Select(static camera => camera.Name);
+
+        if (summary is not null && summary.Cameras.Count > 0)
+            return summary.Cameras.Select(static camera => camera.Name);
+
+        return [];
     }
 
     private static bool IsPointNearBounds(Vector3 point, Vector3 min, Vector3 max)

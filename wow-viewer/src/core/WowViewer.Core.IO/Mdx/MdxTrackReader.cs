@@ -6,6 +6,37 @@ namespace WowViewer.Core.IO.Mdx;
 
 internal static class MdxTrackReader
 {
+    public static MdxScalarTrack ReadScalarTrack(Stream stream, long limit, string tag, string contextLabel, string overrunMessage)
+    {
+        uint keyCount = ReadUInt32(stream);
+        if (keyCount > 100000)
+            throw new InvalidDataException($"{contextLabel}: invalid {tag} key count {keyCount}.");
+
+        uint interpolationType = ReadUInt32(stream);
+        int globalSequenceId = ReadInt32(stream);
+        List<MdxScalarKeyframe> keys = new(checked((int)keyCount));
+
+        for (uint keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            int time = ReadInt32(stream);
+            float value = ReadSingle(stream);
+            float? inTangent = null;
+            float? outTangent = null;
+            if (TrackUsesTangents(interpolationType))
+            {
+                inTangent = ReadSingle(stream);
+                outTangent = ReadSingle(stream);
+            }
+
+            keys.Add(new MdxScalarKeyframe(time, value, inTangent, outTangent));
+        }
+
+        if (stream.Position > limit)
+            throw new InvalidDataException(overrunMessage);
+
+        return new MdxScalarTrack(tag, (MdxTrackInterpolationType)interpolationType, globalSequenceId, keys);
+    }
+
     public static MdxVector3NodeTrack ReadVector3Track(Stream stream, long limit, string tag, string contextLabel, string overrunMessage)
     {
         uint keyCount = ReadUInt32(stream);

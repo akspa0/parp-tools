@@ -561,6 +561,8 @@ gillijimproject_refactor/reference_data/\[WoW]\[3.3.5.12340] Info Dump Thread_fi
 
 # wow-viewer test data
 wow-viewer/testdata/*
+!wow-viewer/testdata/visual/
+!wow-viewer/testdata/visual/**
 wow-viewer/src/core/WowViewer.Core.PM4/bin/Debug/net10.0/WowViewer.Core.dll
 wow-viewer/src/core/WowViewer.Core.PM4/bin/Debug/net10.0/WowViewer.Core.pdb
 wow-viewer/src/core/WowViewer.Core.PM4/bin/Debug/net10.0/WowViewer.Core.PM4.deps.json

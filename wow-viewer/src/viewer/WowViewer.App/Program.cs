@@ -50,6 +50,9 @@ internal static class Program
                 case "mdx-gpu-frame":
                     return RunMdxGpuFrame(tail);
 
+                case "mdx-visual-regression":
+                    return RunMdxVisualRegression(tail);
+
                 case "world-bootstrap":
                     return RunWorldBootstrap(tail);
 
@@ -124,6 +127,16 @@ internal static class Program
         MdxGpuPreviewCaptureRunner.Capture(request, outputPath);
         Console.WriteLine($"Wrote {outputPath}");
         return 0;
+    }
+
+    private static int RunMdxVisualRegression(string[] args)
+    {
+        string? manifestPath = GetOption(args, "--manifest", "-m");
+        string? actualRoot = GetOption(args, "--write-actual-root");
+        string? diffRoot = GetOption(args, "--write-diff-root");
+        bool updateBaselines = HasFlag(args, "--update-baselines");
+
+        return MdxVisualRegressionRunner.Run(manifestPath ?? string.Empty, actualRoot, diffRoot, updateBaselines);
     }
 
     private static int RunWorldBootstrap(string[] args)
@@ -637,6 +650,7 @@ internal static class Program
         Console.WriteLine("  wowviewer-app m2-gpu-frame --input <file.m2> --sequence-index <n> --output <file.bmp|file.png> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
         Console.WriteLine("  wowviewer-app mdx-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.mdx> --output <file.bmp|file.png> [--build-label <label>] [--sequence-index <n>] [--time-ms <ms>] [--visual-width <px>] [--visual-height <px>] [--visual-size <px>] [--camera-mode frame|orbit|model] [--camera-preset front|back|left|right|top|three_quarter] [--camera-azimuth <deg>] [--camera-elevation <deg>] [--camera-fov <deg>] [--camera-zoom <factor>]");
         Console.WriteLine("  wowviewer-app mdx-gpu-frame --input <file.mdx> --output <file.bmp|file.png> [--build-label <label>] [--sequence-index <n>] [--time-ms <ms>] [--visual-width <px>] [--visual-height <px>] [--visual-size <px>] [--camera-mode frame|orbit|model] [--camera-preset front|back|left|right|top|three_quarter] [--camera-azimuth <deg>] [--camera-elevation <deg>] [--camera-fov <deg>] [--camera-zoom <factor>]");
+        Console.WriteLine("  wowviewer-app mdx-visual-regression --manifest <cases.json> [--write-actual-root <dir>] [--write-diff-root <dir>] [--update-baselines]");
         Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--build-label <label>]");
         Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--terrain-preview-output <file.bmp>]");
         Console.WriteLine("  wowviewer-app world-placement-audit --client-root <game dir> --map <directory|id|name> [--build-label <label>] [--limit <count>]");
