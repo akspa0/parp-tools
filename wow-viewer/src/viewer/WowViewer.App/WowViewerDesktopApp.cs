@@ -189,7 +189,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_currentPreview != null && _gpuPreviewRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneM2)
             _gpuPreviewRenderer.Render(_session.VisualSize, _session.VisualSize);
         if (_currentMdxPreview != null && _mdxGpuPreviewRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneMdx)
-            _mdxGpuPreviewRenderer.Render(_session.VisualSize, _session.VisualSize);
+            _mdxGpuPreviewRenderer.Render(_session.VisualSize, _session.VisualSize, deltaSeconds);
 
         _gl.Viewport(_window.FramebufferSize);
         _gl.ClearColor(0.08f, 0.09f, 0.11f, 1.0f);

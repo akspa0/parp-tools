@@ -66,6 +66,7 @@ internal sealed class MdxPreviewLoadResult
         MdxRibbonEmitterFile ribbons,
         MdxEffectRuntimeState effectRuntimeState,
         MdxCameraFile cameras,
+        MdxMaterialFile materials,
         MdxTextureAnimationFile textureAnimations,
         MdxGeosetAnimationFile geosetAnimations,
         TimeSpan loadDuration)
@@ -81,6 +82,7 @@ internal sealed class MdxPreviewLoadResult
         Ribbons = ribbons ?? throw new ArgumentNullException(nameof(ribbons));
         EffectRuntimeState = effectRuntimeState ?? throw new ArgumentNullException(nameof(effectRuntimeState));
         Cameras = cameras ?? throw new ArgumentNullException(nameof(cameras));
+        Materials = materials ?? throw new ArgumentNullException(nameof(materials));
         TextureAnimations = textureAnimations ?? throw new ArgumentNullException(nameof(textureAnimations));
         GeosetAnimations = geosetAnimations ?? throw new ArgumentNullException(nameof(geosetAnimations));
         LoadDuration = loadDuration;
@@ -107,6 +109,8 @@ internal sealed class MdxPreviewLoadResult
     public MdxEffectRuntimeState EffectRuntimeState { get; }
 
     public MdxCameraFile Cameras { get; }
+
+    public MdxMaterialFile Materials { get; }
 
     public MdxTextureAnimationFile TextureAnimations { get; }
 
@@ -154,6 +158,9 @@ internal static class MdxPreviewLoader
         using MemoryStream cameraStream = new(modelBytes, writable: false);
         MdxCameraFile cameras = MdxCameraReader.Read(cameraStream, request.SourceLabel);
 
+        using MemoryStream materialStream = new(modelBytes, writable: false);
+        MdxMaterialFile materials = MdxMaterialReader.Read(materialStream, request.SourceLabel);
+
         using MemoryStream textureAnimationStream = new(modelBytes, writable: false);
         MdxTextureAnimationFile textureAnimations = MdxTextureAnimationReader.Read(textureAnimationStream, request.SourceLabel);
 
@@ -161,7 +168,7 @@ internal static class MdxPreviewLoader
         MdxGeosetAnimationFile geosetAnimations = MdxGeosetAnimationReader.Read(geosetAnimationStream, request.SourceLabel);
 
         stopwatch.Stop();
-        return new MdxPreviewLoadResult(request, summary, geometry, bones, helpers, attachments, events, particleEmitters, ribbons, effectRuntimeState, cameras, textureAnimations, geosetAnimations, stopwatch.Elapsed);
+        return new MdxPreviewLoadResult(request, summary, geometry, bones, helpers, attachments, events, particleEmitters, ribbons, effectRuntimeState, cameras, materials, textureAnimations, geosetAnimations, stopwatch.Elapsed);
     }
 
     private static byte[] ReadBytes(MdxPreviewLoadRequest request)

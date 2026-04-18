@@ -27,7 +27,7 @@ public sealed class MdxRenderStateResolverTests
         Assert.Equal(11u, state.ReplaceableId);
         Assert.Equal(2, state.TransformId);
         Assert.Equal(3, state.CoordId);
-        Assert.True(state.IsTransparent);
+        Assert.False(state.IsTransparent);
         Assert.False(state.IsAdditive);
         Assert.True(state.DepthWrite);
         Assert.True(state.AlphaCutout);
@@ -63,6 +63,62 @@ public sealed class MdxRenderStateResolverTests
     }
 
     [Fact]
+    public void ResolveMaterial_RuntimeLayerAlphaTrack_ModulatesStaticAlpha()
+    {
+        MdxSummary summary = CreateSummary(
+            sequences:
+            [
+                new MdxSequenceSummary(0, "Stand", 0, 100, 0.0f, 0u, 0.0f, 0, 100, null, null, null, null),
+            ],
+            textures:
+            [
+                new MdxTextureSummary(0, 0u, @"Textures\Layer.blp", 0u),
+            ],
+            materials:
+            [
+                new MdxMaterialSummary(0, 0,
+                [
+                    new MdxMaterialLayerSummary(0, 2u, 0u, 0, -1, 0, 0.5f),
+                ]),
+            ]);
+        MdxMaterialFile materialFile = new(
+            "synthetic_material_tracks.mdx",
+            "MDLX",
+            1300u,
+            "Synthetic",
+            [
+                new MdxMaterial(0, 0,
+                [
+                    new MdxMaterialLayer(
+                        0,
+                        2u,
+                        0u,
+                        0,
+                        -1,
+                        0,
+                        0.5f,
+                        0.0f,
+                        null,
+                        new MdxScalarTrack(
+                            "KMTA",
+                            MdxTrackInterpolationType.Linear,
+                            -1,
+                            [
+                                new MdxScalarKeyframe(0, 1.0f, null, null),
+                                new MdxScalarKeyframe(100, 0.25f, null, null),
+                            ]),
+                        null),
+                ]),
+            ]);
+
+        MdxResolvedMaterialState state = MdxRenderStateResolver.ResolveMaterial(summary, materialFile, 0, 0, 0, 50);
+
+        Assert.True(state.IsTransparent);
+        Assert.Equal(0.3125f, state.Alpha, 4);
+        Assert.Equal(@"Textures\Layer.blp", state.TexturePath);
+    }
+
+    [Fact]
     public void ResolveGeosetRenderState_RuntimeAnimationAndFlags_ProduceExpectedState()
     {
         MdxSummary summary = CreateSummary(
@@ -77,8 +133,12 @@ public sealed class MdxRenderStateResolverTests
             CoordId: 0,
             IsTransparent: false,
             IsAdditive: false,
+            DepthTest: true,
             DepthWrite: true,
             AlphaCutout: false,
+            ReceivesLighting: true,
+            UsesSphereEnvMap: false,
+            LayerFlags: 0u,
             Alpha: 0.8f,
             BlendMode: 0u);
         MdxGeosetGeometry geoset = CreateGeoset(index: 0, flags: 0x1u | 0x40u | 0x80u);
@@ -114,9 +174,9 @@ public sealed class MdxRenderStateResolverTests
 
         MdxResolvedGeosetRenderState state = MdxRenderStateResolver.ResolveGeosetRenderState(summary, geosetAnimations, 0, 50, geoset, material);
 
-        Assert.False(state.ReceivesLighting);
-        Assert.False(state.DepthTest);
-        Assert.False(state.DepthWrite);
+        Assert.True(state.ReceivesLighting);
+        Assert.True(state.DepthTest);
+        Assert.True(state.DepthWrite);
         Assert.Equal(0.4f, state.Alpha, 4);
         AssertVector3Equal(new Vector3(0.6f, 0.7f, 0.8f), state.BaseColor);
     }
@@ -136,8 +196,12 @@ public sealed class MdxRenderStateResolverTests
             CoordId: 0,
             IsTransparent: false,
             IsAdditive: false,
+            DepthTest: true,
             DepthWrite: true,
             AlphaCutout: false,
+            ReceivesLighting: true,
+            UsesSphereEnvMap: false,
+            LayerFlags: 0u,
             Alpha: 0.5f,
             BlendMode: 0u);
         MdxGeosetGeometry geoset = CreateGeoset(index: 0, flags: 0u);
@@ -166,8 +230,12 @@ public sealed class MdxRenderStateResolverTests
             CoordId: 0,
             IsTransparent: false,
             IsAdditive: false,
+            DepthTest: true,
             DepthWrite: true,
             AlphaCutout: false,
+            ReceivesLighting: true,
+            UsesSphereEnvMap: false,
+            LayerFlags: 0u,
             Alpha: 1.0f,
             BlendMode: 0u);
         Quaternion rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 2.0f);

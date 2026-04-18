@@ -9,8 +9,12 @@ public readonly record struct MdxResolvedMaterialState(
     int CoordId,
     bool IsTransparent,
     bool IsAdditive,
+    bool DepthTest,
     bool DepthWrite,
     bool AlphaCutout,
+    bool ReceivesLighting,
+    bool UsesSphereEnvMap,
+    uint LayerFlags,
     float Alpha,
     uint BlendMode);
 
@@ -42,32 +46,74 @@ public static class MdxRenderStateResolver
     private const uint MdxGeosetFlagNoDepthSet = 0x80;
 
     public static MdxResolvedMaterialState ResolveMaterial(MdxSummary summary, int materialId)
+        => ResolveMaterial(summary, materialId, 0);
+
+    public static MdxResolvedMaterialState ResolveMaterial(MdxSummary summary, int materialId, int layerIndex)
+        => ResolveMaterial(summary, null, materialId, layerIndex, 0, 0);
+
+    public static MdxResolvedMaterialState ResolveMaterial(
+        MdxSummary summary,
+        MdxMaterialFile? materialFile,
+        int materialId,
+        int layerIndex,
+        int sequenceIndex,
+        int timeMs)
     {
         ArgumentNullException.ThrowIfNull(summary);
 
         if (materialId < 0 || materialId >= summary.Materials.Count)
-            return new MdxResolvedMaterialState(null, 0, -1, 0, false, false, true, false, 1.0f, 0);
+            return new MdxResolvedMaterialState(null, 0, -1, 0, false, false, true, true, false, true, false, 0, 1.0f, 0);
 
         MdxMaterialSummary material = summary.Materials[materialId];
         if (material.LayerCount == 0)
-            return new MdxResolvedMaterialState(null, 0, -1, 0, false, false, true, false, 1.0f, 0);
+            return new MdxResolvedMaterialState(null, 0, -1, 0, false, false, true, true, false, true, false, 0, 1.0f, 0);
 
-        MdxMaterialLayerSummary layer = material.Layers[0];
+        if (layerIndex < 0 || layerIndex >= material.LayerCount)
+            return new MdxResolvedMaterialState(null, 0, -1, 0, false, false, true, true, false, true, false, 0, 1.0f, 0);
+
+        MdxMaterialLayerSummary summaryLayer = material.Layers[layerIndex];
+        MdxMaterialLayer? runtimeLayer = null;
+        if (materialFile is not null
+            && materialId >= 0
+            && materialId < materialFile.MaterialCount
+            && layerIndex >= 0
+            && layerIndex < materialFile.Materials[materialId].LayerCount)
+        {
+            runtimeLayer = materialFile.Materials[materialId].Layers[layerIndex];
+        }
+
+        uint blendMode = runtimeLayer?.BlendMode ?? summaryLayer.BlendMode;
+        uint flags = runtimeLayer?.Flags ?? summaryLayer.Flags;
+        int textureId = runtimeLayer?.TextureId ?? summaryLayer.TextureId;
+        int transformId = runtimeLayer?.TransformId ?? summaryLayer.TransformId;
+        int coordId = runtimeLayer?.CoordId ?? summaryLayer.CoordId;
         string? texturePath = null;
         uint replaceableId = 0;
-        if (layer.TextureId >= 0 && layer.TextureId < summary.Textures.Count)
+        if (textureId >= 0 && textureId < summary.Textures.Count)
         {
-            MdxTextureSummary texture = summary.Textures[layer.TextureId];
+            MdxTextureSummary texture = summary.Textures[textureId];
             texturePath = texture.Path;
             replaceableId = texture.ReplaceableId;
         }
 
-        float alpha = Math.Clamp(layer.StaticAlpha <= 0.0f ? 1.0f : layer.StaticAlpha, 0.0f, 1.0f);
-        bool isTransparent = layer.BlendMode != 0 || alpha < 0.999f;
-        bool alphaCutout = layer.BlendMode == MdxBlendModeTransparentKey;
-        bool isAdditive = layer.BlendMode is MdxBlendModeAdditive or MdxBlendModeAddAlpha;
-        bool depthWrite = !isTransparent || alphaCutout;
-        return new MdxResolvedMaterialState(texturePath, replaceableId, layer.TransformId, layer.CoordId, isTransparent, isAdditive, depthWrite, alphaCutout, alpha, layer.BlendMode);
+        float staticAlpha = runtimeLayer?.StaticAlpha ?? summaryLayer.StaticAlpha;
+        float alpha = Math.Clamp(staticAlpha <= 0.0f ? 1.0f : staticAlpha, 0.0f, 1.0f);
+        if (runtimeLayer?.AlphaTrack is not null)
+        {
+            alpha *= Math.Clamp(
+                MdxAnimationSampler.SampleScalarTrack(runtimeLayer.AlphaTrack, summary, sequenceIndex, timeMs, 1.0f),
+                0.0f,
+                1.0f);
+        }
+
+        bool alphaCutout = blendMode == MdxBlendModeTransparentKey;
+        bool isTransparent = !alphaCutout && (blendMode != 0 || alpha < 0.999f);
+        bool isAdditive = blendMode is MdxBlendModeAdditive or MdxBlendModeAddAlpha;
+        bool depthTest = (flags & MdxGeosetFlagNoDepthTest) == 0;
+        bool depthWrite = (!isTransparent || alphaCutout) && (flags & MdxGeosetFlagNoDepthSet) == 0;
+        bool receivesLighting = (flags & MdxGeosetFlagUnshaded) == 0;
+        bool usesSphereEnvMap = (flags & 0x2) != 0;
+        return new MdxResolvedMaterialState(texturePath, replaceableId, transformId, coordId, isTransparent, isAdditive, depthTest, depthWrite, alphaCutout, receivesLighting, usesSphereEnvMap, flags, alpha, blendMode);
     }
 
     public static MdxResolvedGeosetRenderState ResolveGeosetRenderState(
@@ -81,9 +127,9 @@ public static class MdxRenderStateResolver
         ArgumentNullException.ThrowIfNull(summary);
         ArgumentNullException.ThrowIfNull(geoset);
 
-        bool receivesLighting = (geoset.Flags & MdxGeosetFlagUnshaded) == 0;
-        bool depthTest = (geoset.Flags & MdxGeosetFlagNoDepthTest) == 0;
-        bool depthWrite = material.DepthWrite && (geoset.Flags & MdxGeosetFlagNoDepthSet) == 0;
+        bool receivesLighting = material.ReceivesLighting;
+        bool depthTest = material.DepthTest;
+        bool depthWrite = material.DepthWrite;
         Vector3 baseColor = Vector3.One;
         float alpha = material.Alpha;
 

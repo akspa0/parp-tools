@@ -1,6 +1,30 @@
 # Progress
 
-### Apr 18, 2026 - wow-viewer now has shared classic MDX effect runtime evaluation for PRE2, RIBB, and EVTS
+### Apr 18, 2026 - wow-viewer now has shared classic MTLS payload ownership with focused reader and resolver coverage
+
+- what changed:
+	- added shared MDX material payload contracts in:
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxMaterialLayer.cs`
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxMaterial.cs`
+		- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxMaterialFile.cs`
+	- added `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxMaterialReader.cs` for full classic `MTLS` payload ownership over:
+		- per-material priority plane parsing
+		- fixed `TEXTURELAYER` fields
+		- static emissive-gain ownership
+		- `KMTE`, `KMTA`, and `KMTF` track parsing
+	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads shared material payloads into the standalone preview result
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRenderStateResolver.cs` now resolves material layers against runtime `MTLS` payloads when available and samples `KMTA` alpha tracks through the shared animation sampler
+	- added focused coverage in:
+		- `wow-viewer/tests/WowViewer.Core.Tests/MdxMaterialReaderTests.cs`
+		- `wow-viewer/tests/WowViewer.Core.Tests/MdxRenderStateResolverTests.cs`
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxMaterialReaderTests|MdxRenderStateResolverTests"` passed with `7` tests
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed
+- boundary:
+	- this lands shared classic `MTLS` payload ownership plus animated layer-alpha consumption for the standalone preview path
+	- texture-layer animation and full emissive routing are still future material-parity work even though their payload tracks are now owned in shared code
+
+### Apr 18, 2026 - wow-viewer standalone MDX preview now ports the existing MdxViewer PRE2 loop and keeps EVTS or RIBB non-fabricated
 
 - what changed:
 	- added `wow-viewer/src/core/WowViewer.Core.Runtime/Mdx/MdxEffectRuntime.cs` with shared runtime-state contracts and evaluator logic for classic `MDX` effect seams:
@@ -11,14 +35,24 @@
 	- extended `wow-viewer/src/core/WowViewer.Core/Mdx/MdxAnimationSampler.cs` with shared integer-track sampling so classic ribbon texture-slot animation can be consumed from shared runtime code
 	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now evaluates shared effect runtime state during standalone `MDX` preview loading and carries it in `MdxPreviewLoadResult`
 	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now surfaces runtime effect counts plus event or particle or ribbon sample state in standalone `MDX` diagnostics and status text
+	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now turns that shared runtime state into first visible preview output:
+		- renderer-owned stepped effect time advances classic `MDX` runtime state over real frame time without reloading the preview
+		- classic `PRE2` emitters now use a direct port of the existing `gillijimproject_refactor/src/MdxViewer/Rendering/ParticleSystem.cs` update loop, including random cone spawning, parent-bone-follow transforms, per-particle gravity integration, and fixed three-stage lifecycle interpolation
+		- bone-followed particle emitter transforms now update at the stepped preview time instead of staying pinned to the original load frame
+		- classic MDX geosets now rebuild on the stepped animation clock, so skinned vertices, geoset alpha, and texture-animation UV transforms no longer stay frozen at preview-load time
+		- transparent MDX geosets now sort by material priority plane and camera distance during the transparent pass instead of staying in insertion order
+		- classic MDX geosets now render one command per material layer instead of collapsing every material to layer `0`, which restores layered texture submission and per-layer UV selection in the standalone preview path
+		- per-layer MDX lighting and depth behavior now resolves from material-layer flags inside `MdxRenderStateResolver`, so legacy `Unshaded` or `NoDepthTest` or `NoDepthSet` behavior is no longer dropped on the preview side
+		- sphere-environment mapped MDX layers now drive view-space-normal UV generation in the preview shader instead of being treated like ordinary UV-mapped layers
+		- classic `RIBB` payloads or runtime samples still surface in diagnostics, but ribbon rendering is no longer claimed as ported behavior in `WowViewer.App`
+		- classic `EVTS` remains non-visual in the preview because the current file payload exposes trigger keys but not a native visual consumer mapping
 	- added focused runtime coverage in `wow-viewer/tests/WowViewer.Core.Tests/MdxEffectRuntimeEvaluatorTests.cs`
 - validation:
-	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxEffectRuntimeEvaluatorTests -v minimal` passed with `1` test
-	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed
-	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed after the PRE2 renderer switched from app-local approximation logic to the MdxViewer loop
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` also passed after the later multi-layer material, layer-flag, and sphere-environment-map preview updates
 - boundary:
-	- this lands shared classic `MDX` effect runtime evaluation and app diagnostics consumption only
-	- actual PRE2 particle rendering, ribbon trail rendering, and event-driven runtime behavior are still future Plan 04 work
+	- this now lands shared classic `MDX` effect runtime evaluation plus renderer-local persistent preview playback for `PRE2`, stepped geoset-animation updates, multi-layer material submission, and layer-flag/env-map shaping, while keeping `EVTS` native-shaped and non-visual and dropping unsupported ribbon preview claims
+	- current rendering is still bounded preview behavior rather than full native parity: persistent PRE2 simulation and geoset-command rebuilds are app-local, native `EVTS` consumers are not yet recovered, ribbon rendering is still unported, and there is still no active viewer runtime signoff
 
 ### Apr 18, 2026 - wow-viewer now has shared classic PRE2 payload ownership with focused reader coverage
 
