@@ -121,6 +121,12 @@ DEFAULT_DETAIL_PRESSURE_PATIENCE = 3
 DEFAULT_DETAIL_PRESSURE_EVERY = 3
 DEFAULT_DETAIL_PRESSURE_STEP = 0.08
 DEFAULT_DETAIL_PRESSURE_MAX = 1.60
+DEFAULT_OVERFIT_GUARD_START_EPOCH = 20
+DEFAULT_OVERFIT_GUARD_GAP = 0.006
+DEFAULT_OVERFIT_GUARD_PATIENCE = 6
+DEFAULT_OVERFIT_GUARD_LR_SCALE = 0.70
+DEFAULT_OVERFIT_GUARD_GAN_COOLDOWN = 4
+DEFAULT_OVERFIT_GUARD_MAX_TRIGGERS = 3
 DEFAULT_ADVERSARIAL_SCALE = 0.10
 DEFAULT_START_GAN_EPOCH = 101
 DEFAULT_GAN_CYCLE_LENGTH = 0
@@ -1595,7 +1601,22 @@ def split_grouped_indices(samples: Sequence[TileSample], val_fraction: float, se
         if any(is_pinned_validation_reference(samples[index]) for index in indices)
     }
     group_keys = [key for key in groups.keys() if key not in pinned_group_keys]
-    random.Random(seed).shuffle(group_keys)
+
+    # Build root/map buckets so validation does not collapse into a single map area.
+    buckets: Dict[Tuple[str, str], List[str]] = {}
+    for group_key in group_keys:
+        indices = groups[group_key]
+        if not indices:
+            continue
+        sample = samples[indices[0]]
+        signature = (str(sample.dataset_root), sample.map_name)
+        buckets.setdefault(signature, []).append(group_key)
+
+    rng = random.Random(seed)
+    for bucket in buckets.values():
+        rng.shuffle(bucket)
+    bucket_signatures = list(buckets.keys())
+    rng.shuffle(bucket_signatures)
 
     target_val_samples = max(1, int(round(len(samples) * val_fraction)))
     val_indices: List[int] = []
@@ -1603,11 +1624,31 @@ def split_grouped_indices(samples: Sequence[TileSample], val_fraction: float, se
     for group_key in sorted(pinned_group_keys):
         val_indices.extend(groups[group_key])
         val_group_count += 1
-    for group_key in group_keys:
-        if len(val_indices) >= target_val_samples and val_group_count > 0:
-            break
+
+    # Seed one group per bucket first so a single dense group cannot monopolize validation.
+    for signature in bucket_signatures:
+        bucket = buckets.get(signature)
+        if not bucket:
+            continue
+        group_key = bucket.pop()
         val_indices.extend(groups[group_key])
         val_group_count += 1
+
+    # Then continue round-robin selection across map/root buckets.
+    while len(val_indices) < target_val_samples and bucket_signatures:
+        progressed = False
+        for signature in bucket_signatures:
+            bucket = buckets.get(signature)
+            if not bucket:
+                continue
+            group_key = bucket.pop()
+            val_indices.extend(groups[group_key])
+            val_group_count += 1
+            progressed = True
+            if len(val_indices) >= target_val_samples and val_group_count > 0:
+                break
+        if not progressed:
+            break
 
     val_index_set = set(val_indices)
     train_indices = [index for index in range(len(samples)) if index not in val_index_set]
@@ -1899,8 +1940,30 @@ def select_preview_candidates(samples: Sequence[TileSample], val_indices: Sequen
         if item not in selected:
             selected.append(item)
 
-    if non_blank:
-        for item in non_blank:
+    # Prefer one high-signal candidate per dataset/map before taking additional from the same region.
+    candidate_pool = non_blank if non_blank else scored
+    by_signature: Dict[Tuple[str, str], List[Tuple[int, float, float]]] = {}
+    for item in candidate_pool:
+        sample = samples[item[0]]
+        signature = (sample.dataset_name, sample.map_name)
+        by_signature.setdefault(signature, []).append(item)
+
+    for group in by_signature.values():
+        group.sort(key=lambda item: (-item[1], -item[2]))
+
+    top_per_signature = sorted(
+        (items[0] for items in by_signature.values() if items),
+        key=lambda item: (-item[1], -item[2]),
+    )
+    for item in top_per_signature:
+        if item in selected:
+            continue
+        selected.append(item)
+        if len(selected) >= target_count:
+            return selected[:target_count]
+
+    if candidate_pool:
+        for item in candidate_pool:
             if item in selected:
                 continue
             selected.append(item)
@@ -2117,6 +2180,12 @@ def checkpoint_metadata_from_args(
         "detail_pressure_every": args.detail_pressure_every,
         "detail_pressure_step": args.detail_pressure_step,
         "detail_pressure_max": args.detail_pressure_max,
+        "overfit_guard_start_epoch": args.overfit_guard_start_epoch,
+        "overfit_guard_gap": args.overfit_guard_gap,
+        "overfit_guard_patience": args.overfit_guard_patience,
+        "overfit_guard_lr_scale": args.overfit_guard_lr_scale,
+        "overfit_guard_gan_cooldown": args.overfit_guard_gan_cooldown,
+        "overfit_guard_max_triggers": args.overfit_guard_max_triggers,
         "scheduler_mode": args.scheduler_mode,
         "min_learning_rate": args.min_learning_rate,
         "lr_plateau_cooldown": args.lr_plateau_cooldown,
@@ -2253,6 +2322,13 @@ def compute_detail_proxy(epoch_parts: Dict[str, float]) -> float:
 def apply_detail_pressure(detail_weight_baseline: Dict[str, float], pressure_scale: float) -> None:
     for key, baseline in detail_weight_baseline.items():
         LOSS_WEIGHTS[key] = baseline * pressure_scale
+
+
+def scale_optimizer_lr(optimizer: torch.optim.Optimizer, scale: float, min_lr: float) -> None:
+    safe_scale = max(0.0, float(scale))
+    for group in optimizer.param_groups:
+        current = float(group.get("lr", 0.0))
+        group["lr"] = max(min_lr, current * safe_scale)
 
 
 def snapshot_training_state(
@@ -2743,6 +2819,10 @@ def train(args: argparse.Namespace) -> None:
         f"detail_patience_reward={args.detail_patience_reward}, "
         f"detail_pressure={args.detail_pressure_step:.2f}/max{args.detail_pressure_max:.2f} "
         f"after {args.detail_pressure_patience} + every {args.detail_pressure_every} epoch(s), "
+        f"overfit_guard=gap>{args.overfit_guard_gap:.4f} for {args.overfit_guard_patience} epoch(s), "
+        f"overfit_lr_scale={args.overfit_guard_lr_scale:.2f}, "
+        f"overfit_gan_cooldown={args.overfit_guard_gan_cooldown}, "
+        f"overfit_max_triggers={args.overfit_guard_max_triggers}, "
         f"disc_every={args.disc_every}, "
         f"disc_lr={args.disc_learning_rate:.2e}, "
         f"disc_targets={args.disc_real_target:.2f}/{args.disc_fake_target:.2f}, "
@@ -2779,6 +2859,8 @@ def train(args: argparse.Namespace) -> None:
     detail_weight_baseline = {key: float(LOSS_WEIGHTS[key]) for key in DETAIL_PRESSURE_KEYS}
     detail_pressure_scale = 1.0
     apply_detail_pressure(detail_weight_baseline, detail_pressure_scale)
+    overfit_guard_counter = 0
+    overfit_guard_trigger_count = 0
 
     if args.resume:
         resume_path = Path(args.resume)
@@ -2815,6 +2897,8 @@ def train(args: argparse.Namespace) -> None:
             gan_schedule_mode = "none"
         detail_pressure_scale = float(checkpoint.get("detail_pressure_scale", detail_pressure_scale))
         apply_detail_pressure(detail_weight_baseline, detail_pressure_scale)
+        overfit_guard_counter = int(checkpoint.get("overfit_guard_counter", overfit_guard_counter))
+        overfit_guard_trigger_count = int(checkpoint.get("overfit_guard_trigger_count", overfit_guard_trigger_count))
         if not args.no_resume_optimizer:
             if "optimizer_state_dict" in checkpoint:
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -2834,6 +2918,10 @@ def train(args: argparse.Namespace) -> None:
         print(
             "Resume detail state: "
             f"best_detail={best_detail_proxy:.6f}, detail_patience={detail_patience_counter}, detail_pressure={detail_pressure_scale:.2f}x"
+        )
+        print(
+            "Resume overfit guard: "
+            f"counter={overfit_guard_counter}, triggers={overfit_guard_trigger_count}/{args.overfit_guard_max_triggers}"
         )
 
     for epoch in range(start_epoch, args.epochs):
@@ -2980,6 +3068,8 @@ def train(args: argparse.Namespace) -> None:
         history.setdefault("detail_proxy", []).append(detail_proxy)
         history.setdefault("detail_patience", []).append(detail_patience_counter)
         history.setdefault("detail_pressure_scale", []).append(detail_pressure_scale)
+        history.setdefault("overfit_guard_counter", []).append(overfit_guard_counter)
+        history.setdefault("overfit_guard_triggers", []).append(overfit_guard_trigger_count)
         history["components"].append(epoch_parts)
         with open(output_dir / "training_log.json", "w", encoding="utf-8") as handle:
             json.dump(history, handle, indent=2)
@@ -3008,6 +3098,17 @@ def train(args: argparse.Namespace) -> None:
                 detail_patience=detail_patience_counter,
                 detail_limit=(args.detail_patience if args.detail_patience > 0 else args.patience),
                 pressure=detail_pressure_scale,
+            )
+        )
+        overfit_gap = max(0.0, float(average_val_loss - best_loss)) if val_loss_valid and best_loss < float("inf") else 0.0
+        print(
+            "  Overfit Guard: gap={gap:.4f}/{thresh:.4f} | Counter: {counter}/{limit} | Triggers: {triggers}/{max_triggers}".format(
+                gap=overfit_gap,
+                thresh=args.overfit_guard_gap,
+                counter=overfit_guard_counter,
+                limit=args.overfit_guard_patience,
+                triggers=overfit_guard_trigger_count,
+                max_triggers=args.overfit_guard_max_triggers,
             )
         )
         print(
@@ -3057,6 +3158,7 @@ def train(args: argparse.Namespace) -> None:
             patience_counter = 0
             detail_patience_counter = 0
             gan_patience_counter = 0
+            overfit_guard_counter = 0
             last_best_epoch = epoch_number
             saved_new_best = True
             if gan_enabled_epoch:
@@ -3145,13 +3247,47 @@ def train(args: argparse.Namespace) -> None:
                     print("  Early stop deferred while GAN/concept-recovery controller still has unresolved phases")
                 if patience_counter >= args.patience and detail_patience_counter < detail_patience_limit:
                     print(
-                        "  Early stop deferred because detail proxy is still progressing "
+                        "  Early stop deferred because detail guard window is not exhausted yet "
                         f"({detail_patience_counter}/{detail_patience_limit})"
                     )
             else:
                 print(
                     f"  Early-stop warmup active until epoch {args.early_stop_start_epoch}; "
                     "patience not counting yet"
+                )
+
+        if val_loss_valid and best_loss < float("inf") and epoch_number >= max(1, args.overfit_guard_start_epoch):
+            if (average_val_loss - best_loss) > args.overfit_guard_gap:
+                overfit_guard_counter += 1
+            else:
+                overfit_guard_counter = max(0, overfit_guard_counter - 1)
+
+            if (
+                overfit_guard_counter >= args.overfit_guard_patience
+                and overfit_guard_trigger_count < args.overfit_guard_max_triggers
+            ):
+                best_checkpoint_path = output_dir / "best.pt"
+                if best_checkpoint_path.exists():
+                    try:
+                        best_checkpoint = torch.load(best_checkpoint_path, map_location=device, weights_only=False)
+                        model.load_state_dict(best_checkpoint["model_state_dict"])
+                    except Exception as exc:
+                        print(f"  Overfit guard: failed to restore best model state ({exc})")
+
+                scale_optimizer_lr(optimizer, args.overfit_guard_lr_scale, args.min_learning_rate)
+                scale_optimizer_lr(disc_optimizer, args.overfit_guard_lr_scale, min(args.disc_learning_rate, args.min_learning_rate))
+                detail_pressure_scale = 1.0
+                apply_detail_pressure(detail_weight_baseline, detail_pressure_scale)
+                gan_schedule_mode = "concept-recovery"
+                gan_schedule_remaining = max(args.overfit_guard_gan_cooldown, 0)
+                overfit_guard_trigger_count += 1
+                overfit_guard_counter = 0
+                patience_counter = max(0, patience_counter - 1)
+                detail_patience_counter = max(0, detail_patience_counter - 1)
+
+                print(
+                    "  Overfit guard triggered: restored best weights, reduced LR, reset detail pressure, "
+                    f"and forced concept-recovery for {gan_schedule_remaining} epoch(s)"
                 )
 
         desired_detail_pressure = 1.0
@@ -3186,6 +3322,8 @@ def train(args: argparse.Namespace) -> None:
             "detail_patience_counter": detail_patience_counter,
             "gan_patience_counter": gan_patience_counter,
             "detail_pressure_scale": detail_pressure_scale,
+            "overfit_guard_counter": overfit_guard_counter,
+            "overfit_guard_trigger_count": overfit_guard_trigger_count,
             "gan_schedule_mode": gan_schedule_mode,
             "gan_schedule_remaining": gan_schedule_remaining,
             "last_best_epoch": last_best_epoch,
@@ -3259,6 +3397,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help=f"Pressure increment applied to detail-focused loss weights (default: {DEFAULT_DETAIL_PRESSURE_STEP}).")
     parser.add_argument("--detail-pressure-max", type=float, default=DEFAULT_DETAIL_PRESSURE_MAX,
                         help=f"Maximum multiplicative scale for detail-focused loss weights (default: {DEFAULT_DETAIL_PRESSURE_MAX}).")
+    parser.add_argument("--overfit-guard-start-epoch", type=int, default=DEFAULT_OVERFIT_GUARD_START_EPOCH,
+                        help=f"Epoch number (1-based) when overfit guard starts monitoring sustained val drift (default: {DEFAULT_OVERFIT_GUARD_START_EPOCH}).")
+    parser.add_argument("--overfit-guard-gap", type=float, default=DEFAULT_OVERFIT_GUARD_GAP,
+                        help=f"Absolute validation-loss gap above best that counts toward overfit guard (default: {DEFAULT_OVERFIT_GUARD_GAP}).")
+    parser.add_argument("--overfit-guard-patience", type=int, default=DEFAULT_OVERFIT_GUARD_PATIENCE,
+                        help=f"Consecutive overfit-gap epochs before intervention (default: {DEFAULT_OVERFIT_GUARD_PATIENCE}).")
+    parser.add_argument("--overfit-guard-lr-scale", type=float, default=DEFAULT_OVERFIT_GUARD_LR_SCALE,
+                        help=f"LR multiplier applied on each overfit intervention (default: {DEFAULT_OVERFIT_GUARD_LR_SCALE}).")
+    parser.add_argument("--overfit-guard-gan-cooldown", type=int, default=DEFAULT_OVERFIT_GUARD_GAN_COOLDOWN,
+                        help=f"Concept-recovery epochs forced after an overfit intervention (default: {DEFAULT_OVERFIT_GUARD_GAN_COOLDOWN}).")
+    parser.add_argument("--overfit-guard-max-triggers", type=int, default=DEFAULT_OVERFIT_GUARD_MAX_TRIGGERS,
+                        help=f"Maximum overfit interventions per run (default: {DEFAULT_OVERFIT_GUARD_MAX_TRIGGERS}).")
     parser.add_argument("--adversarial-scale", type=float, default=DEFAULT_ADVERSARIAL_SCALE,
                         help=f"Scale applied to adversarial loss weight (default: {DEFAULT_ADVERSARIAL_SCALE}, geometry-first safer default).")
     parser.add_argument("--start-gan-epoch", type=int, default=DEFAULT_START_GAN_EPOCH,
