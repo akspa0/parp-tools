@@ -15,6 +15,7 @@
     <ProjectReference Include="..\..\..\WoWRollback\WoWRollback.LkToAlphaModule\WoWRollback.LkToAlphaModule.csproj" />
     <ProjectReference Include="..\..\..\WoWRollback\WoWRollback.PM4Module\WoWRollback.PM4Module.csproj" />
     <ProjectReference Include="..\..\..\..\wow-viewer\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
+    <ProjectReference Include="..\..\..\..\wow-viewer\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />
     <ProjectReference Include="..\..\..\lib\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" />
     <ProjectReference Include="..\..\..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
     <ProjectReference Include="..\..\..\lib\wow.tools.local\DBCD\DBCD.IO\DBCD.IO.csproj" />

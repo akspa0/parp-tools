@@ -57,6 +57,7 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 
 - Use `.codex/prompts/wow-viewer-tool-suite-plan-set.md` to route broader `wow-viewer` planning asks to the right focused prompt.
 - Use `.codex/prompts/wow-viewer-dataset-builder-plan.md` for planning the new `wow-viewer` dataset-builder tool, dataset explorer surface, supervised training-tooling cutover, ML corpus export ownership, terrain-supervision artifact ownership, manifest or harvest cutover, BYOD distribution constraints, or deciding what shared data seams must move out of `WoWMapConverter` before legacy exporter replacement.
+- Use `.codex/prompts/wow-viewer-training-plan-set.md` for routing `v7.5.1` grounded training recovery, `v7.6` paired training alignment, shared dataset-truth gates, or the fastest path to a first trustworthy retrain.
 - Use `.codex/prompts/wow-viewer-editor-plan-set.md` for broader editor-transition planning, including PM4 `MPRL`-assisted terrain conform, object-save ownership, map persistence, and viewer-vs-editor workspace routing.
 - Use `.codex/prompts/wow-viewer-map-editing-foundation-plan.md` for planning the first true terrain or object editing or dirty-map or save pipeline slice.
 - Use `.codex/prompts/wow-viewer-editor-ui-surface-plan.md` for planning viewer and editor workspace presets, editor task clustering, and panel reorganization.

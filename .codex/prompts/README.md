@@ -5,6 +5,7 @@ Codex-oriented prompt docs live here. They are converted from `.github/prompts/*
 ## Core wow-viewer prompts
 
 - `wow-viewer-tool-suite-plan-set.md`
+- `wow-viewer-training-plan-set.md`
 - `wow-viewer-pm4-library-implementation.md`
 - `wow-viewer-shared-io-implementation.md`
 - `wow-viewer-shared-io-library-plan.md`
@@ -12,6 +13,13 @@ Codex-oriented prompt docs live here. They are converted from `.github/prompts/*
 - `wow-viewer-tool-inventory-cutover-plan.md`
 - `wow-viewer-cli-gui-surface-plan.md`
 - `wow-viewer-bootstrap-layout-plan.md`
+
+## Training and dataset prompts
+
+- `wow-viewer-training-plan-set.md`
+- `wow-viewer-training/01-shared-dataset-truth-gates.md`
+- `wow-viewer-training/02-v75-grounded-training-recovery.md`
+- `wow-viewer-training/03-v76-paired-training-alignment.md`
 
 ## Viewer performance and parity prompts
 

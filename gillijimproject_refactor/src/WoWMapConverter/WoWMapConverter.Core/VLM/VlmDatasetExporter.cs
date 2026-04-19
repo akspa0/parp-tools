@@ -12,9 +12,12 @@ using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Models;
 using WowViewer.Core.IO.Wmo;
+using WowViewer.Core.M2;
+using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Wmo;
 using GillijimProject.WowFiles.Alpha;
 using WdtAlpha = GillijimProject.WowFiles.Alpha.WdtAlpha;
@@ -96,7 +99,8 @@ public class VlmDatasetExporter
         string? tileFilter = null,
         bool skipDerivedAssets = false,
         bool interestingOnly = false,
-        int interestingMinScore = 1)
+        int interestingMinScore = 1,
+        bool skipFullMapStitching = false)
     {
         progress?.Report($"Starting VLM export for map: {mapName}");
 
@@ -622,6 +626,7 @@ public class VlmDatasetExporter
             
             var jsonFiles = Directory.GetFiles(datasetDir, "*.json");
             int stitchedCount = 0;
+            int reusedDerivedCount = 0;
             foreach (var jsonPath in jsonFiles)
             {
                 var tileName = Path.GetFileNameWithoutExtension(jsonPath);
@@ -633,6 +638,16 @@ public class VlmDatasetExporter
                     
                     if (sample != null && sample.TerrainData != null)
                     {
+                        var restoredTerrain = TryRestoreExistingDerivedAssets(sample, outputDir, tileName);
+                        if (restoredTerrain != null)
+                        {
+                            var restoredSample = sample with { TerrainData = restoredTerrain };
+                            await File.WriteAllTextAsync(jsonPath, JsonSerializer.Serialize(restoredSample, _jsonOptions));
+                            stitchedCount++;
+                            reusedDerivedCount++;
+                            continue;
+                        }
+
                         // Stitch shadows and alpha layers from serialized per-chunk data.
                         var (shadowPath, alphaPaths, alphaAtlasPath) = await TileStitchingService.StitchTileWithPackedAtlasAsync(
                             sample.TerrainData, tileName, stitchedDir);
@@ -863,7 +878,7 @@ public class VlmDatasetExporter
                 }
                 catch { }
             }
-            progress?.Report($"Stitched images and updated JSON for {stitchedCount} tiles");
+            progress?.Report($"Stitched images and updated JSON for {stitchedCount} tiles ({reusedDerivedCount} reused existing derived asset sets)");
         }
 
         // Generate global heightmaps for each tile (per-map min/max)
@@ -874,7 +889,7 @@ public class VlmDatasetExporter
         }
 
         // Stitch full world map images
-        if (!skipDerivedAssets && tilesExported > 0)
+        if (!skipDerivedAssets && !skipFullMapStitching && tilesExported > 0)
         {
             progress?.Report("Stitching full world map images...");
             var stitchedDir = Path.Combine(outputDir, "stitched");
@@ -961,6 +976,10 @@ public class VlmDatasetExporter
         {
             progress?.Report("Skipped derived tileset, stitched, and semantic assets by request.");
         }
+        else if (skipFullMapStitching)
+        {
+            progress?.Report("Skipped full-world stitched atlas outputs by request.");
+        }
 
         progress?.Report($"Export complete: {tilesExported} tiles exported, {tilesSkipped} skipped");
         return new VlmExportResult(tilesExported, tilesSkipped, allTextures.Count, outputDir);
@@ -986,6 +1005,138 @@ public class VlmDatasetExporter
         return paths
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static VlmTerrainData? TryRestoreExistingDerivedAssets(VlmTrainingSample sample, string outputDir, string tileName)
+    {
+        if (sample.TerrainData == null)
+            return null;
+
+        string stitchedDir = Path.Combine(outputDir, "stitched");
+        string imagesDir = Path.Combine(outputDir, "images");
+        string liquidsDir = Path.Combine(outputDir, "liquids");
+        string semanticDir = Path.Combine(outputDir, "semantic");
+
+        string? shadowPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(stitchedDir, $"{tileName}_shadow.png"));
+        string[] alphaPaths = Directory.Exists(stitchedDir)
+            ? Directory.GetFiles(stitchedDir, $"{tileName}_alpha_l*.png")
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .Select(path => Path.GetRelativePath(outputDir, path).Replace("\\", "/"))
+                .ToArray()
+            : Array.Empty<string>();
+        string? alphaAtlasPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(stitchedDir, $"{tileName}_alpha_atlas.png"));
+        string? liquidHeightPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(liquidsDir, $"{tileName}_liq_height.png"));
+        string? liquidMaskPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(liquidsDir, $"{tileName}_liq_mask.png"));
+        string? noLiquidMinimapPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(imagesDir, $"{tileName}_no_liquid.png"));
+        string? noMccvMinimapPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(imagesDir, $"{tileName}_no_mccv.png"));
+        string? objectVisibilityMaskPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(imagesDir, $"{tileName}_object_visibility_mask.png"));
+        string? pm4MaskPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(imagesDir, $"{tileName}_pm4_mask.png"));
+        string? noObjectMinimapPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(imagesDir, $"{tileName}_no_objects.png"));
+        string? terrainOnlyMinimapPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(imagesDir, $"{tileName}_terrain_only.png"));
+        string? holesMaskPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(semanticDir, $"{tileName}_holes_mask.png"));
+        string? areaIdMapPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(semanticDir, $"{tileName}_area_id_map.png"));
+        string? chunkFlagsMapPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(semanticDir, $"{tileName}_chunk_flags_map.png"));
+        string? liquidTypeMapPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(semanticDir, $"{tileName}_liquid_type_map.png"));
+        string? dominantEffectIdMapPath = ResolveExistingDatasetRelativePath(outputDir, Path.Combine(semanticDir, $"{tileName}_dominant_effect_id_map.png"));
+
+        bool expectsShadow = sample.TerrainData.ShadowBits?.Length > 0;
+        int expectedAlphaLayerCount = GetExpectedAlphaLayerCount(sample.TerrainData.ChunkLayers);
+        bool sourceMinimapExists = ResolveSourceFileExists(outputDir, sample.ImagePath);
+        bool expectsLiquids = sample.TerrainData.Liquids?.Length > 0;
+        bool expectsNoMccv = sourceMinimapExists && ResolveSourceFileExists(outputDir, sample.TerrainData.MccvMapPath);
+        bool hasExpensiveCleanupOutputs =
+            objectVisibilityMaskPath != null
+            || pm4MaskPath != null
+            || noObjectMinimapPath != null
+            || terrainOnlyMinimapPath != null;
+
+        bool shadowReady = !expectsShadow || shadowPath != null;
+        bool alphaReady = alphaPaths.Length >= expectedAlphaLayerCount
+            && (expectedAlphaLayerCount == 0 || alphaAtlasPath != null);
+        bool liquidsReady = !expectsLiquids
+            || (liquidHeightPath != null && liquidMaskPath != null && (!sourceMinimapExists || noLiquidMinimapPath != null));
+        bool mccvReady = !expectsNoMccv || noMccvMinimapPath != null;
+
+        if (!hasExpensiveCleanupOutputs || !shadowReady || !alphaReady || !liquidsReady || !mccvReady)
+            return null;
+
+        var (liquidMin, liquidMax) = GetLiquidRange(sample.TerrainData.Liquids);
+
+        return sample.TerrainData with
+        {
+            ShadowMaps = shadowPath != null ? [shadowPath] : null,
+            AlphaMasks = alphaPaths.Length > 0 ? alphaPaths : null,
+            AlphaAtlasPath = alphaAtlasPath,
+            LiquidHeightPath = liquidHeightPath,
+            LiquidMaskPath = liquidMaskPath,
+            NoLiquidMinimapPath = noLiquidMinimapPath,
+            NoMccvMinimapPath = noMccvMinimapPath,
+            ObjectVisibilityMaskPath = objectVisibilityMaskPath,
+            Pm4MaskPath = pm4MaskPath,
+            NoObjectMinimapPath = noObjectMinimapPath,
+            TerrainOnlyMinimapPath = terrainOnlyMinimapPath,
+            HolesMaskPath = holesMaskPath,
+            AreaIdMapPath = areaIdMapPath,
+            ChunkFlagsMapPath = chunkFlagsMapPath,
+            LiquidTypeMapPath = liquidTypeMapPath,
+            DominantEffectIdMapPath = dominantEffectIdMapPath,
+            LiquidMinHeight = liquidMin,
+            LiquidMaxHeight = liquidMax
+        };
+    }
+
+    private static string? ResolveExistingDatasetRelativePath(string outputDir, string absolutePath)
+    {
+        return File.Exists(absolutePath)
+            ? Path.GetRelativePath(outputDir, absolutePath).Replace("\\", "/")
+            : null;
+    }
+
+    private static bool ResolveSourceFileExists(string outputDir, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        string absolutePath = Path.IsPathRooted(path)
+            ? path
+            : Path.Combine(outputDir, path);
+
+        return File.Exists(absolutePath);
+    }
+
+    private static int GetExpectedAlphaLayerCount(IReadOnlyCollection<VlmChunkLayers>? chunkLayers)
+    {
+        if (chunkLayers == null || chunkLayers.Count == 0)
+            return 0;
+
+        int count = 0;
+        for (int layer = 1; layer <= 4; layer++)
+        {
+            bool present = chunkLayers.Any(chunk =>
+                chunk.Layers != null
+                && layer < chunk.Layers.Length
+                && !string.IsNullOrWhiteSpace(chunk.Layers[layer].AlphaBitsBase64));
+            if (present)
+                count++;
+        }
+
+        return count;
+    }
+
+    private static (float Min, float Max) GetLiquidRange(IReadOnlyCollection<VlmLiquidData>? liquids)
+    {
+        if (liquids == null || liquids.Count == 0)
+            return (0f, 0f);
+
+        float min = float.MaxValue;
+        float max = float.MinValue;
+        foreach (var liquid in liquids)
+        {
+            min = Math.Min(min, liquid.MinHeight);
+            max = Math.Max(max, liquid.MaxHeight);
+        }
+
+        return min == float.MaxValue || max == float.MinValue ? (0f, 0f) : (min, max);
     }
 
     private static List<int> FilterReachableLkTiles(
@@ -3665,11 +3816,55 @@ public class VlmDatasetExporter
                 return wmoPolygons;
         }
 
+        Vector2[][]? runtimeM2Polygons = TryReadM2RuntimeFootprintPolygons(data, sourcePath, archiveReader, searchPaths);
+        if (runtimeM2Polygons is { Length: > 0 })
+            return runtimeM2Polygons;
+
         Vector2[][]? sharedModelPolygons = ModelFootprintReader.TryRead(data, sourcePath);
         if (sharedModelPolygons is { Length: > 0 })
             return sharedModelPolygons;
 
         return preferWmo ? null : TryReadWmoFootprintPolygons(data, sourcePath, archiveReader, searchPaths);
+    }
+
+    private Vector2[][]? TryReadM2RuntimeFootprintPolygons(byte[] data, string sourcePath, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
+    {
+        try
+        {
+            using MemoryStream geometryStream = new(data, writable: false);
+            M2GeometryDocument geometry = M2GeometryReader.Read(geometryStream, sourcePath);
+            M2SkinProfileRuntimeState skinState = M2SkinProfileRuntime.Choose(geometry.Model);
+            byte[]? skinBytes = ReadVirtualAssetBytes(searchPaths, skinState.Selection.CompanionPath, archiveReader);
+            if (skinBytes is null || skinBytes.Length < 44)
+                return null;
+
+            using MemoryStream skinStream = new(skinBytes, writable: false);
+            M2SkinDocument skin = M2SkinReader.Read(skinStream, skinState.Selection.CompanionPath);
+            skinState = M2SkinProfileRuntime.Load(skinState, skin);
+            skinState = M2SkinProfileRuntime.Initialize(skinState);
+
+            M2StaticRenderModel renderModel = M2StaticRenderModelBuilder.Build(geometry, skinState);
+            List<Vector2[]> polygons = new(renderModel.StructuredSections.Count);
+            foreach (M2StructuredRenderSection section in renderModel.StructuredSections)
+            {
+                Vector2[]? hull = BuildFootprintHull(
+                    section.Vertices.Count,
+                    index =>
+                    {
+                        Vector3 position = section.Vertices[index].Position;
+                        return new Vector2(position.X, position.Z);
+                    });
+
+                if (hull is { Length: >= 3 })
+                    polygons.Add(hull);
+            }
+
+            return polygons.Count > 0 ? [.. polygons] : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private Vector2[][]? TryReadWmoFootprintPolygons(byte[] data, string sourcePath, IArchiveReader archiveReader, IReadOnlyList<string> searchPaths)
@@ -4869,14 +5064,39 @@ public class VlmDatasetExporter
             if (wmoBounds.HasValue)
                 return wmoBounds;
 
+            (float[] Min, float[] Max)? fallbackM2Bounds = TryReadM2Bounds(data, sourcePath);
+            if (fallbackM2Bounds.HasValue)
+                return fallbackM2Bounds;
+
             return TryReadMdxBounds(data, sourcePath);
         }
+
+        (float[] Min, float[] Max)? runtimeM2Bounds = TryReadM2Bounds(data, sourcePath);
+        if (runtimeM2Bounds.HasValue)
+            return runtimeM2Bounds;
 
         (float[] Min, float[] Max)? mdxBounds = TryReadMdxBounds(data, sourcePath);
         if (mdxBounds.HasValue)
             return mdxBounds;
 
         return TryReadWmoBounds(data, sourcePath);
+    }
+
+    private static (float[] Min, float[] Max)? TryReadM2Bounds(byte[] data, string sourcePath)
+    {
+        try
+        {
+            using MemoryStream stream = new(data, writable: false);
+            M2ModelDocument model = M2ModelReader.Read(stream, sourcePath);
+            if (!TryConvertBounds(model.BoundsMin, model.BoundsMax, out float[] boundsMin, out float[] boundsMax))
+                return null;
+
+            return (boundsMin, boundsMax);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static (float[] Min, float[] Max)? TryReadMdxBounds(byte[] data, string sourcePath)

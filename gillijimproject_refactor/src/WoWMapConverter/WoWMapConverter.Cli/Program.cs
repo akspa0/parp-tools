@@ -2549,6 +2549,7 @@ public static class Program
         bool generateDepth = false;
         bool batchAll = false;
         bool skipDerivedAssets = false;
+        bool skipFullMapStitching = false;
         bool interestingOnly = false;
         int interestingMinScore = 1;
 
@@ -2593,6 +2594,9 @@ public static class Program
                 case "--skip-derived-assets":
                     skipDerivedAssets = true;
                     break;
+                case "--skip-full-map-stitching":
+                    skipFullMapStitching = true;
+                    break;
                 case "--interesting-only":
                     interestingOnly = true;
                     break;
@@ -2623,6 +2627,7 @@ public static class Program
             Console.WriteLine("  --limit, -n <N>       Export only first N tiles");
             Console.WriteLine("  --depth, -d           Generate depth maps (requires DepthAnything3)");
             Console.WriteLine("  --skip-derived-assets Skip tilesets, stitched outputs, and semantic postprocess assets for faster core export coverage");
+            Console.WriteLine("  --skip-full-map-stitching Skip optional full-world atlas quilting while still keeping per-tile training channels");
             Console.WriteLine("  --interesting-only    Only export scored interesting tiles, with a one-tile fallback for otherwise empty maps");
             Console.WriteLine("  --interesting-min-score <N> Minimum tile-interest score when --interesting-only is enabled");
             return 1;
@@ -2659,7 +2664,7 @@ public static class Program
                     
                     try 
                     {
-                        var res = await exporter.ExportMapAsync(clientPath, map, mapOutputDir, progress, limit, listfilePath, generateDepth, minimapRoot, tileFilter, skipDerivedAssets, interestingOnly, interestingMinScore);
+                        var res = await exporter.ExportMapAsync(clientPath, map, mapOutputDir, progress, limit, listfilePath, generateDepth, minimapRoot, tileFilter, skipDerivedAssets, interestingOnly, interestingMinScore, skipFullMapStitching);
                         Console.WriteLine($"[BATCH] {map} Complete: {res.TilesExported} tiles.");
                     }
                     catch (Exception ex)
@@ -2681,10 +2686,12 @@ public static class Program
                     Console.WriteLine($"  Minimap root: {minimapRoot}");
                 if (skipDerivedAssets)
                     Console.WriteLine("  Derived assets: skipped");
+                if (skipFullMapStitching)
+                    Console.WriteLine("  Full-map stitching: skipped");
                 if (interestingOnly)
                     Console.WriteLine($"  Interesting tile curation: enabled (min score {interestingMinScore})");
                 
-                var result = await exporter.ExportMapAsync(clientPath, mapName!, outputDir, progress, limit, listfilePath, generateDepth, minimapRoot, tileFilter, skipDerivedAssets, interestingOnly, interestingMinScore);
+                var result = await exporter.ExportMapAsync(clientPath, mapName!, outputDir, progress, limit, listfilePath, generateDepth, minimapRoot, tileFilter, skipDerivedAssets, interestingOnly, interestingMinScore, skipFullMapStitching);
                 
                 Console.WriteLine();
                 Console.WriteLine($"Export complete:");

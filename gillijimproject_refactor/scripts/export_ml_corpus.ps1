@@ -764,7 +764,8 @@ foreach ($job in $jobPlans) {
             '--client', $job.ResolvedClientPath,
             '--map', $job.Map,
             '--out', $job.DatasetOutput,
-            '--listfile', $resolvedListfilePath
+            '--listfile', $resolvedListfilePath,
+            '--skip-full-map-stitching'
         )
 
         if (-not [string]::IsNullOrWhiteSpace($job.ResolvedMinimapRoot)) {
