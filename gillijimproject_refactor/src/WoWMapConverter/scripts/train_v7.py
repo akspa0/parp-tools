@@ -123,6 +123,8 @@ DEFAULT_DETAIL_PRESSURE_PATIENCE = 3
 DEFAULT_DETAIL_PRESSURE_EVERY = 3
 DEFAULT_DETAIL_PRESSURE_STEP = 0.08
 DEFAULT_DETAIL_PRESSURE_MAX = 1.60
+DEFAULT_STRICT_VAL_PATIENCE = False
+DEFAULT_DETAIL_REWARD_REQUIRES_VAL_IMPROVEMENT = False
 DEFAULT_OVERFIT_GUARD_START_EPOCH = 20
 DEFAULT_OVERFIT_GUARD_GAP = 0.006
 DEFAULT_OVERFIT_GUARD_PATIENCE = 6
@@ -2182,6 +2184,8 @@ def checkpoint_metadata_from_args(
         "detail_pressure_every": args.detail_pressure_every,
         "detail_pressure_step": args.detail_pressure_step,
         "detail_pressure_max": args.detail_pressure_max,
+        "strict_val_patience": args.strict_val_patience,
+        "detail_reward_requires_val_improvement": args.detail_reward_requires_val_improvement,
         "overfit_guard_start_epoch": args.overfit_guard_start_epoch,
         "overfit_guard_gap": args.overfit_guard_gap,
         "overfit_guard_patience": args.overfit_guard_patience,
@@ -2841,8 +2845,10 @@ def train(args: argparse.Namespace) -> None:
         f"early_stop_start_epoch={args.early_stop_start_epoch}, "
         f"min_val_improvement={args.min_val_improvement:.2e}, "
         f"min_detail_improvement={args.min_detail_improvement:.2e}, "
+        f"strict_val_patience={'on' if args.strict_val_patience else 'off'}, "
         f"detail_patience={args.detail_patience if args.detail_patience > 0 else args.patience}, "
         f"detail_patience_reward={args.detail_patience_reward}, "
+        f"detail_reward_requires_val={'on' if args.detail_reward_requires_val_improvement else 'off'}, "
         f"detail_pressure={args.detail_pressure_step:.2f}/max{args.detail_pressure_max:.2f} "
         f"after {args.detail_pressure_patience} + every {args.detail_pressure_every} epoch(s), "
         f"overfit_guard=gap>{args.overfit_guard_gap:.4f} for {args.overfit_guard_patience} epoch(s), "
@@ -3261,25 +3267,32 @@ def train(args: argparse.Namespace) -> None:
             if detail_improved:
                 best_detail_proxy = detail_proxy
                 detail_patience_counter = 0
-                if epoch_number >= args.early_stop_start_epoch:
+                if epoch_number >= args.early_stop_start_epoch and not args.strict_val_patience and not args.detail_reward_requires_val_improvement:
                     patience_counter = max(0, patience_counter - max(args.detail_patience_reward, 0))
                 print(
                     "  Detail proxy improved without new val-best; "
-                    f"reducing global patience pressure (reward={max(args.detail_patience_reward, 0)})"
+                    + (
+                        f"reducing global patience pressure (reward={max(args.detail_patience_reward, 0)})"
+                        if (not args.strict_val_patience and not args.detail_reward_requires_val_improvement)
+                        else "not reducing global patience pressure under current strict-detail settings"
+                    )
                 )
             else:
                 detail_patience_counter += 1
             if epoch_number >= args.early_stop_start_epoch:
-                if not detail_improved:
+                if not detail_improved or args.strict_val_patience:
                     patience_counter += 1
                 phase_blocks_early_stop = gan_schedule_mode in {"burst", "concept-recovery", "cooldown"}
-                early_stop_ready = patience_counter >= args.patience and detail_patience_counter >= detail_patience_limit
+                if args.strict_val_patience:
+                    early_stop_ready = patience_counter >= args.patience
+                else:
+                    early_stop_ready = patience_counter >= args.patience and detail_patience_counter >= detail_patience_limit
                 if early_stop_ready and not phase_blocks_early_stop:
                     print(f"\nEarly stopping: no improvement for {args.patience} epochs")
                     break
                 if early_stop_ready and phase_blocks_early_stop:
                     print("  Early stop deferred while GAN/concept-recovery controller still has unresolved phases")
-                if patience_counter >= args.patience and detail_patience_counter < detail_patience_limit:
+                if (not args.strict_val_patience) and patience_counter >= args.patience and detail_patience_counter < detail_patience_limit:
                     print(
                         "  Early stop deferred because detail guard window is not exhausted yet "
                         f"({detail_patience_counter}/{detail_patience_limit})"
@@ -3292,7 +3305,7 @@ def train(args: argparse.Namespace) -> None:
 
         if val_loss_valid and best_loss < float("inf") and epoch_number >= max(1, args.overfit_guard_start_epoch):
             if (average_val_loss - best_loss) > args.overfit_guard_gap:
-                overfit_guard_counter += 1
+                overfit_guard_counter = min(overfit_guard_counter + 1, args.overfit_guard_patience)
             else:
                 overfit_guard_counter = max(0, overfit_guard_counter - 1)
 
@@ -3312,8 +3325,12 @@ def train(args: argparse.Namespace) -> None:
                 scale_optimizer_lr(disc_optimizer, args.overfit_guard_lr_scale, min(args.disc_learning_rate, args.min_learning_rate))
                 detail_pressure_scale = 1.0
                 apply_detail_pressure(detail_weight_baseline, detail_pressure_scale)
-                gan_schedule_mode = "concept-recovery"
-                gan_schedule_remaining = max(args.overfit_guard_gan_cooldown, 0)
+                if args.adversarial_scale > 0.0:
+                    gan_schedule_mode = "concept-recovery"
+                    gan_schedule_remaining = max(args.overfit_guard_gan_cooldown, 0)
+                else:
+                    gan_schedule_mode = "none"
+                    gan_schedule_remaining = 0
                 overfit_guard_trigger_count += 1
                 overfit_guard_counter = 0
                 patience_counter = max(0, patience_counter - 1)
@@ -3431,6 +3448,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help=f"Pressure increment applied to detail-focused loss weights (default: {DEFAULT_DETAIL_PRESSURE_STEP}).")
     parser.add_argument("--detail-pressure-max", type=float, default=DEFAULT_DETAIL_PRESSURE_MAX,
                         help=f"Maximum multiplicative scale for detail-focused loss weights (default: {DEFAULT_DETAIL_PRESSURE_MAX}).")
+    parser.add_argument("--strict-val-patience", action="store_true",
+                        help="Count patience strictly from validation-best improvement only; detail improvements will not defer early stopping.")
+    parser.add_argument("--detail-reward-requires-val-improvement", action="store_true",
+                        help="Only allow detail-based patience reward when validation best also improves in the same epoch.")
     parser.add_argument("--overfit-guard-start-epoch", type=int, default=DEFAULT_OVERFIT_GUARD_START_EPOCH,
                         help=f"Epoch number (1-based) when overfit guard starts monitoring sustained val drift (default: {DEFAULT_OVERFIT_GUARD_START_EPOCH}).")
     parser.add_argument("--overfit-guard-gap", type=float, default=DEFAULT_OVERFIT_GUARD_GAP,
