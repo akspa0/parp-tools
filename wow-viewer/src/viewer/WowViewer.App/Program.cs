@@ -62,6 +62,9 @@ internal static class Program
                 case "world-placement-audit":
                     return RunWorldPlacementAudit(tail);
 
+                case "m2-bounds":
+                    return RunM2Bounds(tail);
+
                 default:
                     using (WowViewerDesktopApp app = new(ParseViewerSession(args)))
                         app.Run();
@@ -73,6 +76,90 @@ internal static class Program
             Console.Error.WriteLine($"Error: {ex.Message}");
             return 1;
         }
+    }
+
+    private static int RunM2Bounds(string[] args)
+    {
+        string? archiveRoot = GetOption(args, "--archive-root");
+        string? modelListPath = GetOption(args, "--model-list");
+        string? singleVirtualPath = GetOption(args, "--virtual-path");
+        string? buildLabel = GetOption(args, "--build-label");
+        string? outputPath = GetOption(args, "--output");
+
+        if (string.IsNullOrWhiteSpace(archiveRoot))
+            throw new ArgumentException("Provide --archive-root <game|data dir> for m2-bounds.");
+
+        IEnumerable<string> virtualPaths;
+        if (!string.IsNullOrWhiteSpace(modelListPath))
+        {
+            if (!File.Exists(modelListPath))
+                throw new FileNotFoundException($"Model list file not found: {modelListPath}", modelListPath);
+            virtualPaths = File.ReadAllLines(modelListPath)
+                .Select(static line => line.Trim())
+                .Where(static line => line.Length > 0 && !line.StartsWith("#", StringComparison.Ordinal));
+        }
+        else if (!string.IsNullOrWhiteSpace(singleVirtualPath))
+        {
+            virtualPaths = [singleVirtualPath];
+        }
+        else
+        {
+            throw new ArgumentException("Provide --model-list <file.txt> or --virtual-path <path> for m2-bounds.");
+        }
+
+        var results = new List<object>();
+        int succeeded = 0;
+        int failed = 0;
+
+        foreach (string virtualPath in virtualPaths)
+        {
+            try
+            {
+                byte[] bytes = VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(virtualPath, archiveRoot, null);
+                using MemoryStream stream = new(bytes, writable: false);
+                WowViewer.Core.M2.M2ModelDocument model = WowViewer.Core.IO.M2.M2ModelReader.Read(stream, virtualPath);
+
+                results.Add(new
+                {
+                    model_path = virtualPath,
+                    bounds_min = new float[] { model.BoundsMin.X, model.BoundsMin.Y, model.BoundsMin.Z },
+                    bounds_max = new float[] { model.BoundsMax.X, model.BoundsMax.Y, model.BoundsMax.Z },
+                    bounds_radius = model.BoundsRadius,
+                    error = (string?)null,
+                });
+                succeeded++;
+            }
+            catch (Exception ex)
+            {
+                results.Add(new
+                {
+                    model_path = virtualPath,
+                    bounds_min = (float[]?)null,
+                    bounds_max = (float[]?)null,
+                    bounds_radius = (float?)null,
+                    error = ex.Message,
+                });
+                failed++;
+            }
+        }
+
+        string json = System.Text.Json.JsonSerializer.Serialize(results, new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
+
+        if (!string.IsNullOrWhiteSpace(outputPath))
+        {
+            string fullOutput = Path.GetFullPath(outputPath);
+            string? dir = Path.GetDirectoryName(fullOutput);
+            if (!string.IsNullOrWhiteSpace(dir))
+                Directory.CreateDirectory(dir);
+            File.WriteAllText(fullOutput, json);
+            Console.WriteLine($"WowViewer.App m2-bounds: models={succeeded + failed} succeeded={succeeded} failed={failed} output={fullOutput}");
+        }
+        else
+        {
+            Console.WriteLine(json);
+        }
+
+        return failed > 0 && succeeded == 0 ? 1 : 0;
     }
 
     private static int RunM2Frame(string[] args)
@@ -653,7 +740,7 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  wowviewer-app");
-        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file> | --client-root <game dir> --map <directory|id|name>] [--loose-overlay-root <dir>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay]");
+        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world|dataset] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file> | --client-root <game dir> --map <directory|id|name>] [--loose-overlay-root <dir>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay]");
         Console.WriteLine("  wowviewer-app m2-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp|file.png> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
@@ -664,6 +751,8 @@ internal static class Program
         Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--loose-overlay-root <dir>] [--build-label <label>]");
         Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--loose-overlay-root <dir>] [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--terrain-preview-output <file.bmp>]");
         Console.WriteLine("  wowviewer-app world-placement-audit --client-root <game dir> --map <directory|id|name> [--loose-overlay-root <dir>] [--build-label <label>] [--limit <count>]");
+        Console.WriteLine("  wowviewer-app m2-bounds --archive-root <game|data dir> --model-list <paths.txt> [--output <bounds.json>] [--build-label <label>]");
+        Console.WriteLine("  wowviewer-app m2-bounds --archive-root <game|data dir> --virtual-path <path/to/file.m2> [--output <bounds.json>]");
     }
 
     private static WowViewerWorkspaceMode ParseWorkspaceMode(string? workspaceText)
@@ -674,7 +763,8 @@ internal static class Program
             "wmo" => WowViewerWorkspaceMode.StandaloneWmo,
             "mdx" => WowViewerWorkspaceMode.StandaloneMdx,
             "world" => WowViewerWorkspaceMode.WorldSession,
-            _ => throw new ArgumentException("--workspace must be one of: m2, wmo, mdx, world."),
+            "dataset" => WowViewerWorkspaceMode.DatasetTooling,
+            _ => throw new ArgumentException("--workspace must be one of: m2, wmo, mdx, world, dataset."),
         };
     }
 

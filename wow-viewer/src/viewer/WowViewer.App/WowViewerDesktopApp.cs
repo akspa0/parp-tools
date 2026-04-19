@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Reflection;
+using System.Diagnostics;
 using ImGuiNET;
 using Silk.NET.Input;
 using Silk.NET.Maths;
@@ -99,6 +100,21 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private bool _worldNavigatorShowMdx = true;
     private string _worldNavigatorFilter = string.Empty;
     private WorldObjectSelection? _selectedWorldObject;
+    private string _datasetSearchRoot = "datasets";
+    private string _datasetBuildFilter = string.Empty;
+    private string _datasetArchiveRootsFile = string.Empty;
+    private string _datasetArchiveRootFallback = string.Empty;
+    private string _datasetResumeCheckpoint = string.Empty;
+    private string _datasetOutputDir = string.Empty;
+    private string _datasetCacheDir = string.Empty;
+    private bool _datasetAllowCpu = true;
+    private bool _datasetDryRun;
+    private bool _datasetSkipMasks;
+    private bool _datasetSkipCache;
+    private bool _datasetForceRemask;
+    private int _datasetNumEpochs;
+    private int _datasetBatchSize;
+    private string _datasetLastCommand = "No dataset command run from the shell yet.";
 
     public WowViewerDesktopApp(WowViewerSession? initialSession = null)
     {
@@ -380,7 +396,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void DrawWorkspaceWindow()
     {
-        ImGui.SetNextWindowSize(new Vector2(320, 280), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(360, 420), ImGuiCond.FirstUseEver);
         if (!ImGui.Begin("Workspaces", ref _showWorkspaceWindow))
         {
             ImGui.End();
@@ -390,10 +406,15 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.TextWrapped("The viewer shell now exposes explicit standalone workspaces. M2 and MDX now have bounded GPU preview consumers in this slice; WMO remains a placeholder until its own consumer lands.");
         ImGui.Separator();
 
-        DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneM2, "Runtime-backed standalone model preview over the shared wow-viewer M2 pipeline.");
-        DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneWmo, "Planned standalone WMO inspection workspace. Not implemented yet.");
-        DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneMdx, "Static standalone MDX inspection workspace with a first GPU preview consumer.");
-        DrawWorkspaceOption(WowViewerWorkspaceMode.WorldSession, "Bounded client-root attach and WDT-backed world session bootstrap. No world renderer yet.");
+        if (ImGui.BeginChild("WorkspaceList", new Vector2(0, 0), false, ImGuiWindowFlags.AlwaysVerticalScrollbar))
+        {
+            DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneM2, "Runtime-backed standalone model preview over the shared wow-viewer M2 pipeline.");
+            DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneWmo, "Planned standalone WMO inspection workspace. Not implemented yet.");
+            DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneMdx, "Static standalone MDX inspection workspace with a first GPU preview consumer.");
+            DrawWorkspaceOption(WowViewerWorkspaceMode.WorldSession, "Bounded client-root attach and WDT-backed world session bootstrap. No world renderer yet.");
+            DrawWorkspaceOption(WowViewerWorkspaceMode.DatasetTooling, "Dataset and training orchestration owned by wow-viewer, including mask generation pipelines.");
+        }
+        ImGui.EndChild();
 
         ImGui.End();
     }
@@ -407,9 +428,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
             {
                 _session.WorkspaceMode = mode;
                 _lastError = null;
-                _statusMessage = IsImplementedWorkspace(mode)
-                    ? $"{GetWorkspaceLabel(mode)} active. Configure a source and load a preview."
-                    : $"{GetWorkspaceLabel(mode)} is not implemented yet. This placeholder exists to keep the cutover honest about future standalone consumers.";
+                _statusMessage = mode == WowViewerWorkspaceMode.DatasetTooling
+                    ? "Dataset Tooling active. Use the control panel to launch mask generation and training pipelines."
+                    : IsImplementedWorkspace(mode)
+                        ? $"{GetWorkspaceLabel(mode)} active. Configure a source and load a preview."
+                        : $"{GetWorkspaceLabel(mode)} is not implemented yet. This placeholder exists to keep the cutover honest about future standalone consumers.";
             }
         }
 
@@ -420,7 +443,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private static bool IsImplementedWorkspace(WowViewerWorkspaceMode mode)
     {
-        return mode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.StandaloneMdx or WowViewerWorkspaceMode.WorldSession;
+        return mode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.StandaloneMdx or WowViewerWorkspaceMode.WorldSession or WowViewerWorkspaceMode.DatasetTooling;
     }
 
     private static string GetWorkspaceLabel(WowViewerWorkspaceMode mode)
@@ -431,6 +454,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             WowViewerWorkspaceMode.StandaloneWmo => "Standalone WMO",
             WowViewerWorkspaceMode.StandaloneMdx => "Standalone MDX",
             WowViewerWorkspaceMode.WorldSession => "World Session",
+            WowViewerWorkspaceMode.DatasetTooling => "Dataset Tooling",
             _ => "Unknown",
         };
     }
@@ -454,6 +478,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
                 break;
             case WowViewerWorkspaceMode.WorldSession:
                 DrawWorldControlContents();
+                break;
+            case WowViewerWorkspaceMode.DatasetTooling:
+                DrawDatasetToolingControlContents();
                 break;
             default:
                 DrawPlaceholderControlContents();
@@ -981,6 +1008,250 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
     }
 
+    private void DrawDatasetToolingControlContents()
+    {
+        ImGui.TextWrapped("This workspace makes dataset prep and training entrypoints first-class wow-viewer shell actions. The current execution path launches wow-viewer-owned scripts that orchestrate mask generation and model training.");
+        ImGui.Separator();
+        string scriptRootLabel = TryResolveDatasetScriptRoot(out string? scriptRoot)
+            ? scriptRoot!
+            : $"unresolved (base: {AppContext.BaseDirectory})";
+        ImGui.TextDisabled("Workflow Root: wow-viewer/scripts");
+        ImGui.TextDisabled($"Resolved Script Root: {scriptRootLabel}");
+
+        string searchRoot = _datasetSearchRoot;
+        string buildFilter = _datasetBuildFilter;
+        string archiveRootsFile = _datasetArchiveRootsFile;
+        string archiveRootFallback = _datasetArchiveRootFallback;
+        string resumeCheckpoint = _datasetResumeCheckpoint;
+        string outputDir = _datasetOutputDir;
+        string cacheDir = _datasetCacheDir;
+        int numEpochs = _datasetNumEpochs;
+        int batchSize = _datasetBatchSize;
+
+        ImGui.InputText("Search Root", ref searchRoot, 1024);
+        ImGui.InputText("Build Filter", ref buildFilter, 128);
+        ImGui.InputText("Archive Roots File", ref archiveRootsFile, 1024);
+        ImGui.InputText("Archive Root Fallback", ref archiveRootFallback, 1024);
+        ImGui.InputText("Resume Checkpoint", ref resumeCheckpoint, 1024);
+        ImGui.InputText("Output Dir Override", ref outputDir, 1024);
+        ImGui.InputText("Cache Dir (v7.6)", ref cacheDir, 1024);
+        ImGui.InputInt("Epoch Override", ref numEpochs);
+        ImGui.InputInt("Batch Override", ref batchSize);
+
+        _datasetSearchRoot = searchRoot;
+        _datasetBuildFilter = buildFilter;
+        _datasetArchiveRootsFile = archiveRootsFile;
+        _datasetArchiveRootFallback = archiveRootFallback;
+        _datasetResumeCheckpoint = resumeCheckpoint;
+        _datasetOutputDir = outputDir;
+        _datasetCacheDir = cacheDir;
+        _datasetNumEpochs = Math.Max(0, numEpochs);
+        _datasetBatchSize = Math.Max(0, batchSize);
+
+        ImGui.Checkbox("Allow CPU", ref _datasetAllowCpu);
+        ImGui.SameLine();
+        ImGui.Checkbox("Dry Run", ref _datasetDryRun);
+        ImGui.Checkbox("Skip Masks", ref _datasetSkipMasks);
+        ImGui.SameLine();
+        ImGui.Checkbox("Force Remask", ref _datasetForceRemask);
+        ImGui.Checkbox("Skip Cache (v7.6)", ref _datasetSkipCache);
+
+        ImGui.Separator();
+        if (ImGui.Button("Generate M2 Masks", new Vector2(-1, 0)))
+            LaunchDatasetPowerShellJob("generate_m2_masks.py", BuildMaskGenerationCommand());
+
+        if (ImGui.Button("Run V7.5.1 Pipeline", new Vector2(-1, 0)))
+            LaunchDatasetPowerShellJob("run_v751_pipeline.ps1", BuildV751Command());
+
+        if (ImGui.Button("Run V7.6 Pipeline", new Vector2(-1, 0)))
+            LaunchDatasetPowerShellJob("run_v76_pipeline.ps1", BuildV76Command());
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Last launch command:");
+        ImGui.TextWrapped(_datasetLastCommand);
+    }
+
+    private string BuildMaskGenerationCommand()
+    {
+        string searchRoot = NormalizeSearchRootForCommand(_datasetSearchRoot);
+        List<string> args =
+        [
+            "python",
+            "./generate_m2_masks.py",
+            "--search-root", QuoteIfNeeded(searchRoot),
+            "--skip-existing", _datasetForceRemask ? "false" : "true",
+        ];
+
+        if (!string.IsNullOrWhiteSpace(_datasetBuildFilter))
+            args.AddRange(["--build-filter", QuoteIfNeeded(_datasetBuildFilter)]);
+        if (!string.IsNullOrWhiteSpace(_datasetArchiveRootsFile))
+            args.AddRange(["--archive-roots-file", QuoteIfNeeded(_datasetArchiveRootsFile)]);
+        if (!string.IsNullOrWhiteSpace(_datasetArchiveRootFallback))
+            args.AddRange(["--archive-root-fallback", QuoteIfNeeded(_datasetArchiveRootFallback)]);
+        if (_datasetDryRun)
+            args.Add("--dry-run");
+
+        return string.Join(' ', args);
+    }
+
+    private string BuildV751Command()
+    {
+        string searchRoot = NormalizeSearchRootForCommand(_datasetSearchRoot);
+        List<string> args =
+        [
+            "./run_v751_pipeline.ps1",
+            "-SearchRoots", QuoteIfNeeded(searchRoot),
+        ];
+
+        if (_datasetSkipMasks)
+            args.Add("-SkipMasks");
+        if (_datasetForceRemask)
+            args.Add("-ForceRemask");
+        if (_datasetAllowCpu)
+            args.Add("-AllowCpu");
+        if (_datasetDryRun)
+            args.Add("-DryRun");
+        if (!string.IsNullOrWhiteSpace(_datasetBuildFilter))
+            args.AddRange(["-BuildFilter", QuoteIfNeeded(_datasetBuildFilter)]);
+        if (!string.IsNullOrWhiteSpace(_datasetArchiveRootsFile))
+            args.AddRange(["-ArchiveRootsFile", QuoteIfNeeded(_datasetArchiveRootsFile)]);
+        if (!string.IsNullOrWhiteSpace(_datasetArchiveRootFallback))
+            args.AddRange(["-ArchiveRootFallback", QuoteIfNeeded(_datasetArchiveRootFallback)]);
+        if (!string.IsNullOrWhiteSpace(_datasetResumeCheckpoint))
+            args.AddRange(["-ResumeFrom", QuoteIfNeeded(_datasetResumeCheckpoint)]);
+        if (!string.IsNullOrWhiteSpace(_datasetOutputDir))
+            args.AddRange(["-OutputDir", QuoteIfNeeded(_datasetOutputDir)]);
+        if (_datasetNumEpochs > 0)
+            args.AddRange(["-NumEpochs", _datasetNumEpochs.ToString()]);
+        if (_datasetBatchSize > 0)
+            args.AddRange(["-BatchSize", _datasetBatchSize.ToString()]);
+
+        return string.Join(' ', args);
+    }
+
+    private string BuildV76Command()
+    {
+        string searchRoot = NormalizeSearchRootForCommand(_datasetSearchRoot);
+        List<string> args =
+        [
+            "./run_v76_pipeline.ps1",
+            "-SearchRoots", QuoteIfNeeded(searchRoot),
+        ];
+
+        if (_datasetSkipMasks)
+            args.Add("-SkipMasks");
+        if (_datasetForceRemask)
+            args.Add("-ForceRemask");
+        if (_datasetSkipCache)
+            args.Add("-SkipCache");
+        if (_datasetAllowCpu)
+            args.Add("-AllowCpu");
+        if (_datasetDryRun)
+            args.Add("-DryRun");
+        if (!string.IsNullOrWhiteSpace(_datasetBuildFilter))
+            args.AddRange(["-BuildFilter", QuoteIfNeeded(_datasetBuildFilter)]);
+        if (!string.IsNullOrWhiteSpace(_datasetArchiveRootsFile))
+            args.AddRange(["-ArchiveRootsFile", QuoteIfNeeded(_datasetArchiveRootsFile)]);
+        if (!string.IsNullOrWhiteSpace(_datasetArchiveRootFallback))
+            args.AddRange(["-ArchiveRootFallback", QuoteIfNeeded(_datasetArchiveRootFallback)]);
+        if (!string.IsNullOrWhiteSpace(_datasetResumeCheckpoint))
+            args.AddRange(["-ResumeFrom", QuoteIfNeeded(_datasetResumeCheckpoint)]);
+        if (!string.IsNullOrWhiteSpace(_datasetOutputDir))
+            args.AddRange(["-OutputDir", QuoteIfNeeded(_datasetOutputDir)]);
+        if (!string.IsNullOrWhiteSpace(_datasetCacheDir))
+            args.AddRange(["-CacheDir", QuoteIfNeeded(_datasetCacheDir)]);
+        if (_datasetNumEpochs > 0)
+            args.AddRange(["-NumEpochs", _datasetNumEpochs.ToString()]);
+        if (_datasetBatchSize > 0)
+            args.AddRange(["-BatchSize", _datasetBatchSize.ToString()]);
+
+        return string.Join(' ', args);
+    }
+
+    private void LaunchDatasetPowerShellJob(string label, string command)
+    {
+        try
+        {
+            if (!TryResolveDatasetScriptRoot(out string? scriptRoot) || string.IsNullOrWhiteSpace(scriptRoot))
+            {
+                _statusMessage = $"Dataset script root not found (base: {AppContext.BaseDirectory}).";
+                return;
+            }
+
+            string quotedScriptRoot = QuoteForPowerShellSingle(scriptRoot);
+            string psCommand = $"Set-Location '{quotedScriptRoot}'; {command}";
+
+            ProcessStartInfo info = new()
+            {
+                FileName = "pwsh",
+                Arguments = $"-NoExit -ExecutionPolicy Bypass -Command \"{psCommand.Replace("\"", "`\"")}\"",
+                UseShellExecute = true,
+                WorkingDirectory = scriptRoot,
+            };
+
+            Process.Start(info);
+            _datasetLastCommand = $"[{label}] {command}";
+            _statusMessage = $"Launched dataset command in a new PowerShell window: {label}";
+        }
+        catch (Exception ex)
+        {
+            _lastError = ex.Message;
+            _statusMessage = "Failed to launch dataset command.";
+        }
+    }
+
+    private static bool TryResolveDatasetScriptRoot(out string? scriptRoot)
+    {
+        scriptRoot = null;
+        DirectoryInfo? cursor = new(AppContext.BaseDirectory);
+
+        for (int depth = 0; depth < 12 && cursor != null; depth++)
+        {
+            string candidate = Path.Combine(cursor.FullName, "scripts");
+            if (Directory.Exists(candidate)
+                && File.Exists(Path.Combine(candidate, "run_v751_pipeline.ps1"))
+                && File.Exists(Path.Combine(candidate, "run_v76_pipeline.ps1"))
+                && File.Exists(Path.Combine(candidate, "generate_m2_masks.py")))
+            {
+                scriptRoot = candidate;
+                return true;
+            }
+
+            cursor = cursor.Parent;
+        }
+
+        return false;
+    }
+
+    private static string NormalizeSearchRootForCommand(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+
+        if (Path.IsPathRooted(value))
+            return value;
+
+        if (!TryResolveDatasetScriptRoot(out string? scriptRoot) || string.IsNullOrWhiteSpace(scriptRoot))
+            return value;
+
+        string wowViewerRoot = Path.GetFullPath(Path.Combine(scriptRoot, ".."));
+        string parpToolsRoot = Path.GetFullPath(Path.Combine(wowViewerRoot, ".."));
+        return Path.GetFullPath(Path.Combine(parpToolsRoot, value));
+    }
+
+    private static string QuoteIfNeeded(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+
+        return value.Contains(' ') ? $"\"{value}\"" : value;
+    }
+
+    private static string QuoteForPowerShellSingle(string value)
+    {
+        return value.Replace("'", "''");
+    }
+
     private void DrawPlaceholderControlContents()
     {
         ImGui.TextWrapped("This workspace is intentionally not implemented yet. The controls below define the future standalone-source contract without claiming a live consumer in this slice.");
@@ -1021,6 +1292,15 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_session.WorkspaceMode == WowViewerWorkspaceMode.WorldSession)
         {
             DrawWorldSessionPreview();
+            ImGui.End();
+            return;
+        }
+
+        if (_session.WorkspaceMode == WowViewerWorkspaceMode.DatasetTooling)
+        {
+            ImGui.TextWrapped("Dataset tooling uses external pipeline scripts launched from this shell. Open the controls panel to run mask generation and training jobs.");
+            ImGui.Separator();
+            ImGui.TextDisabled(_datasetLastCommand);
             ImGui.End();
             return;
         }
@@ -1796,6 +2076,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
                 break;
             case WowViewerWorkspaceMode.WorldSession:
                 LoadWorldSession();
+                break;
+            case WowViewerWorkspaceMode.DatasetTooling:
+                _statusMessage = "Dataset Tooling does not have a preview load action. Use the control panel buttons to launch jobs.";
                 break;
         }
     }

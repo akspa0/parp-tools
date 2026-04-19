@@ -9,7 +9,7 @@ Current viewer-app reality:
 - The active viewer-app cutover sequence now lives in `gillijimproject_refactor/plans/wow_viewer_viewer_app_cutover_plan_2026-04-17.md`.
 - The explicit viewer ownership boundary now lives in `wow-viewer/docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md`, including which remaining `MdxViewer` surfaces are compatibility-only or editor-only.
 - The app shell now also has a typed viewer-session boundary (`WowViewerSession`) for workspace mode, typed source selection, build label, and preview request state; the desktop host no longer owns those values as loose fields.
-- The desktop shell is now explicitly organized around standalone workspaces: `M2` is implemented, while `WMO` and `MDX` are surfaced as honest placeholders for later consumers instead of being implied future work with no shell boundary.
+- The desktop shell is now explicitly organized around standalone workspaces: `M2` and `MDX` have bounded implemented consumers, `World Session` has a bounded runtime-inspection path, and `Dataset Tooling` now provides first-shell entrypoints that launch wow-viewer-owned mask-generation and training orchestration scripts.
 - The M2 workspace now also has a bounded app-local GPU preview consumer over runtime draw commands, plus a hidden-window `m2-gpu-frame` BMP proof path for fixed-asset validation.
 - The desktop shell now also has a bounded `World Session` workspace that attaches to a fixed client root, resolves a selected map through shared `Map.dbc` + WDT readers, and then builds a bounded app-local world runtime frame over one selected ADT tile.
 - That world frame now includes shell-local navigator, status, and inspector surfaces over the shared runtime frame data, so bounded world inspection no longer stops at a passive top-down canvas.
@@ -20,7 +20,7 @@ Current viewer-app reality:
 - That world frame now also consumes a runtime-owned terrain chunk service over root MCNK headers, so the bounded bridge can report real terrain chunk inventory and hole or liquid-flag signals instead of only one terrain count.
 - That world frame now also consumes a runtime-owned terrain heightmap plus software terrain preview seam over root ADT MCVT data, so the bounded bridge can report real terrain height ranges and sample heights and can emit a deterministic terrain-preview BMP for fixed-root proof.
 - The world path is still a top-down preview plus runtime visibility/pass summary over shared `WowViewer.Core.Runtime.World` seams, not a final 3D world renderer.
-- The current desktop app is still not an actually interactive replacement viewer yet: the M2 GPU preview uses a fixed auto-framed camera, WMO and MDX workspaces remain placeholders, and the world workspace is still a bounded inspection surface rather than a navigable world camera.
+- The current desktop app is still not an actually interactive replacement viewer yet: the M2 GPU preview uses a fixed auto-framed camera, WMO remains a placeholder, world is still a bounded inspection surface rather than a navigable world camera, and dataset tooling currently launches external script jobs rather than embedding a native in-app training runner.
 
 Current migration emphasis after the latest user direction:
 

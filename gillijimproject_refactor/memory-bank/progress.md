@@ -1,5 +1,24 @@
 # Progress
 
+### Apr 19, 2026 - wow-viewer app shell now exposes a Dataset Tooling workspace with first-party pipeline launch entrypoints
+
+- what changed:
+	- added `Dataset Tooling` as an implemented workspace mode in `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` and `wow-viewer/src/viewer/WowViewer.App/Program.cs` (`--workspace dataset`)
+	- updated `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` with a dedicated Dataset Tooling control surface that can launch:
+		- `wow-viewer/scripts/generate_m2_masks.py`
+		- `wow-viewer/scripts/run_v751_pipeline.ps1`
+		- `wow-viewer/scripts/run_v76_pipeline.ps1`
+	- dataset pipeline scripts now live under `wow-viewer/scripts` as the ownership boundary, while the current training implementation still calls legacy training scripts under `gillijimproject_refactor/src/WoWMapConverter/scripts` as a transition bridge
+	- fixed PowerShell runner argument-forwarding bugs so script paths and flags are now passed correctly in dry-run and regular launches
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug --no-restore` passed
+	- dry-run script entrypoint checks from `wow-viewer/scripts` passed:
+		- `./run_v751_pipeline.ps1 -DryRun -SkipMasks -AllowCpu`
+		- `./run_v76_pipeline.ps1 -DryRun -SkipMasks -SkipCache -AllowCpu`
+- boundary:
+	- this lands shell-level dataset tooling ownership and discoverability inside `WowViewer.App`
+	- dataset execution still launches external script jobs in PowerShell windows; it does not yet provide a fully native in-app runner, in-app log stream, or shared-core dataset/training orchestration service
+
 ### Apr 18, 2026 - wow-viewer world bootstrap/runtime now honors external loose overlay roots
 
 - what changed:

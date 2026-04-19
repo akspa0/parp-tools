@@ -53,6 +53,7 @@ V7.5.1 changes over the earlier V7.5/V7.4/V7.3 line:
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import random
 import re
@@ -129,6 +130,11 @@ DEFAULT_DISC_GRAD_CLIP = 1.0
 DEFAULT_DISC_EVERY = 1
 DEFAULT_LR_PLATEAU_PATIENCE = 5
 DEFAULT_LR_PLATEAU_FACTOR = 0.5
+DEFAULT_LR_PLATEAU_COOLDOWN = 1
+DEFAULT_MIN_LEARNING_RATE = 1e-5
+DEFAULT_SCHEDULER_MODE = "plateau"
+DEFAULT_COSINE_CYCLE_EPOCHS = 6
+DEFAULT_COSINE_T_MULT = 1
 DEFAULT_VAL_FRACTION = 0.10
 DEFAULT_SPATIAL_GROUP_SIZE = 4
 DEFAULT_SEED = 1337
@@ -1971,9 +1977,13 @@ def save_training_preview(
     output_dir: Path,
     device: torch.device,
     preview_labels: Optional[Sequence[str]] = None,
+    filename_tag: str = "",
 ) -> None:
     model.eval()
     output_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"best_epoch_{epoch:04d}"
+    if filename_tag:
+        stem = f"{stem}_{filename_tag}"
 
     with torch.no_grad():
         inputs = batch["input"].to(device)
@@ -2023,12 +2033,13 @@ def save_training_preview(
     global_grid = torch.clamp(torch.cat(rows_global, dim=1), 0.0, 1.0)
     local_grid = torch.clamp(torch.cat(rows_local, dim=1), 0.0, 1.0)
     context_grid = torch.clamp(torch.cat(rows_context, dim=1), 0.0, 1.0)
-    transforms.ToPILImage()(global_grid).save(output_dir / f"val_epoch_{epoch:04d}.png")
-    transforms.ToPILImage()(local_grid).save(output_dir / f"val_epoch_{epoch:04d}_local.png")
-    transforms.ToPILImage()(context_grid).save(output_dir / f"val_epoch_{epoch:04d}_context.png")
+    transforms.ToPILImage()(global_grid).save(output_dir / f"{stem}.png")
+    transforms.ToPILImage()(local_grid).save(output_dir / f"{stem}_local.png")
+    transforms.ToPILImage()(context_grid).save(output_dir / f"{stem}_context.png")
     if preview_labels is not None:
         metadata = {
             "epoch": epoch,
+            "filename_tag": filename_tag,
             "labels": list(preview_labels)[:sample_count],
             "context_columns": [
                 "minimap",
@@ -2039,7 +2050,7 @@ def save_training_preview(
                 "brush_mask",
             ],
         }
-        with open(output_dir / f"val_epoch_{epoch:04d}.json", "w", encoding="utf-8") as handle:
+        with open(output_dir / f"{stem}.json", "w", encoding="utf-8") as handle:
             json.dump(metadata, handle, indent=2)
 
 
@@ -2082,11 +2093,17 @@ def checkpoint_metadata_from_args(
         "start_gan_epoch": args.start_gan_epoch,
         "gan_cycle_length": args.gan_cycle_length,
         "gan_cycle_on_epochs": args.gan_cycle_on_epochs,
+        "gan_dual_lane": args.gan_dual_lane,
         "gan_cooldown_after_best": args.gan_cooldown_after_best,
         "gan_burst_after_best": args.gan_burst_after_best,
         "gan_patience": args.gan_patience,
         "gan_min_gap_epochs": args.gan_min_gap_epochs,
         "concept_recovery_epochs": args.concept_recovery_epochs,
+        "scheduler_mode": args.scheduler_mode,
+        "min_learning_rate": args.min_learning_rate,
+        "lr_plateau_cooldown": args.lr_plateau_cooldown,
+        "cosine_cycle_epochs": args.cosine_cycle_epochs,
+        "cosine_t_mult": args.cosine_t_mult,
         "brush_sample_bonus": args.brush_sample_bonus,
         "brush_patch_scale": args.brush_patch_scale,
         "keep_liquid_obscured_tiles": args.keep_liquid_obscured_tiles,
@@ -2185,6 +2202,193 @@ def resolve_training_device(args: argparse.Namespace) -> Tuple[torch.device, boo
         "Use gillijimproject_refactor/scripts/setup_training_env.ps1 (or .sh) to deploy a hardware-matched uv training environment.\n"
         "If you intentionally want a CPU-only debug run, pass --allow-cpu explicitly."
     )
+
+
+def snapshot_training_state(
+    model: nn.Module,
+    discriminator: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    disc_optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
+    scaler: Optional[torch.amp.GradScaler],
+) -> Dict[str, Any]:
+    return {
+        "model": copy.deepcopy(model.state_dict()),
+        "discriminator": copy.deepcopy(discriminator.state_dict()),
+        "optimizer": copy.deepcopy(optimizer.state_dict()),
+        "disc_optimizer": copy.deepcopy(disc_optimizer.state_dict()),
+        "scheduler": copy.deepcopy(scheduler.state_dict()),
+        "scaler": copy.deepcopy(scaler.state_dict()) if scaler is not None else None,
+    }
+
+
+def restore_training_state(
+    state: Dict[str, Any],
+    model: nn.Module,
+    discriminator: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    disc_optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
+    scaler: Optional[torch.amp.GradScaler],
+) -> None:
+    model.load_state_dict(state["model"])
+    discriminator.load_state_dict(state["discriminator"])
+    optimizer.load_state_dict(state["optimizer"])
+    disc_optimizer.load_state_dict(state["disc_optimizer"])
+    scheduler.load_state_dict(state["scheduler"])
+    if scaler is not None and state.get("scaler") is not None:
+        scaler.load_state_dict(state["scaler"])
+
+
+def run_training_epoch_pass(
+    epoch_number: int,
+    args: argparse.Namespace,
+    model: nn.Module,
+    discriminator: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    disc_optimizer: torch.optim.Optimizer,
+    scaler: Optional[torch.amp.GradScaler],
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    train_dataset_size: int,
+    device: torch.device,
+    use_cuda: bool,
+    use_amp: bool,
+    amp_dtype: Optional[torch.dtype],
+    gan_enabled_epoch: bool,
+    lane_label: str,
+) -> Dict[str, Any]:
+    model.train()
+    discriminator.train()
+    train_losses: List[float] = []
+    disc_losses: List[float] = []
+    disc_real_scores: List[float] = []
+    disc_fake_scores: List[float] = []
+    epoch_parts: Dict[str, float] = {}
+
+    epoch_train_start = time.perf_counter()
+    progress = tqdm(
+        enumerate(train_loader, start=1),
+        total=len(train_loader),
+        desc=f"Epoch {epoch_number}/{args.epochs} [{lane_label}]",
+    )
+    for step_index, batch in progress:
+        inputs = batch["input"].to(device, non_blocking=use_cuda)
+        targets = batch["target"].to(device, non_blocking=use_cuda)
+        bounds = batch["height_bounds"].to(device, non_blocking=use_cuda)
+
+        amp_context = torch.autocast(device_type="cuda", dtype=amp_dtype) if use_amp else nullcontext()
+
+        with amp_context:
+            outputs, output_bounds = model(inputs)
+
+        do_disc_step = args.disc_every <= 1 or (step_index % args.disc_every == 0)
+        if gan_enabled_epoch and do_disc_step:
+            disc_optimizer.zero_grad(set_to_none=True)
+            with amp_context:
+                real_disc_input = apply_discriminator_input_noise(targets, args.disc_input_noise_std)
+                fake_disc_input = apply_discriminator_input_noise(outputs.detach(), args.disc_input_noise_std)
+                real_pred = discriminator(real_disc_input)
+                fake_pred = discriminator(fake_disc_input)
+                real_targets = build_discriminator_targets(real_pred, args.disc_real_target, args.disc_label_noise)
+                fake_targets = build_discriminator_targets(fake_pred, args.disc_fake_target, args.disc_label_noise)
+                disc_real_loss = F.mse_loss(real_pred, real_targets)
+                disc_fake_loss = F.mse_loss(fake_pred, fake_targets)
+                disc_loss = (disc_real_loss + disc_fake_loss) * 0.5
+            if scaler is not None:
+                scaler.scale(disc_loss).backward()
+                scaler.unscale_(disc_optimizer)
+                torch.nn.utils.clip_grad_norm_(discriminator.parameters(), max_norm=args.disc_grad_clip)
+                scaler.step(disc_optimizer)
+            else:
+                disc_loss.backward()
+                torch.nn.utils.clip_grad_norm_(discriminator.parameters(), max_norm=args.disc_grad_clip)
+                disc_optimizer.step()
+            disc_losses.append(float(disc_loss.item()))
+            disc_real_scores.append(float(real_pred.mean().item()))
+            disc_fake_scores.append(float(fake_pred.mean().item()))
+
+        optimizer.zero_grad(set_to_none=True)
+        with amp_context:
+            adv_loss = None
+            if gan_enabled_epoch:
+                fake_pred_for_gen = discriminator(outputs)
+                gen_targets = torch.full_like(fake_pred_for_gen, args.disc_real_target)
+                adv_loss = F.mse_loss(fake_pred_for_gen, gen_targets)
+            loss, parts = combined_loss(
+                outputs,
+                output_bounds,
+                targets,
+                bounds,
+                input_context=inputs,
+                adv_loss=adv_loss,
+                adversarial_scale=args.adversarial_scale,
+            )
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+
+        train_losses.append(float(loss.item()))
+        for key, value in parts.items():
+            epoch_parts[key] = epoch_parts.get(key, 0.0) + value
+
+        if step_index % max(args.log_every, 1) == 0 or step_index == len(train_loader):
+            current_lr = optimizer.param_groups[0]["lr"]
+            avg_disc_window = float(np.mean(disc_losses[-args.log_every:])) if disc_losses else 0.0
+            postfix: Dict[str, str] = {
+                "g": f"{float(np.mean(train_losses[-args.log_every:])):.4f}",
+                "d": f"{avg_disc_window:.4f}",
+                "lr": f"{current_lr:.1e}",
+                "gan": "on" if gan_enabled_epoch else "off",
+            }
+            if use_cuda:
+                vram_gb = torch.cuda.memory_allocated() / (1024.0 ** 3)
+                postfix["vram"] = f"{vram_gb:.2f}G"
+            progress.set_postfix(postfix)
+
+    train_phase_seconds = max(time.perf_counter() - epoch_train_start, 1e-9)
+    train_steps_per_second = len(train_loader) / train_phase_seconds
+    train_samples_per_second = train_dataset_size / train_phase_seconds
+
+    for key in epoch_parts:
+        epoch_parts[key] /= max(len(train_loader), 1)
+
+    model.eval()
+    val_losses: List[float] = []
+    with torch.no_grad():
+        for batch in val_loader:
+            inputs = batch["input"].to(device, non_blocking=use_cuda)
+            targets = batch["target"].to(device, non_blocking=use_cuda)
+            bounds = batch["height_bounds"].to(device, non_blocking=use_cuda)
+            amp_context = torch.autocast(device_type="cuda", dtype=amp_dtype) if use_amp else nullcontext()
+            with amp_context:
+                outputs, output_bounds = model(inputs)
+                loss, _ = combined_loss(outputs, output_bounds, targets, bounds, input_context=inputs)
+            val_losses.append(float(loss.item()))
+
+    average_train_loss = float(np.mean(train_losses))
+    average_val_loss = float(np.mean(val_losses))
+    val_loss_valid = bool(np.isfinite(average_val_loss) and average_val_loss >= 0.0)
+
+    return {
+        "average_train_loss": average_train_loss,
+        "average_val_loss": average_val_loss,
+        "val_loss_valid": val_loss_valid,
+        "current_lr": float(optimizer.param_groups[0]["lr"]),
+        "epoch_parts": epoch_parts,
+        "avg_disc": float(np.mean(disc_losses)) if disc_losses else 0.0,
+        "disc_real_mean": float(np.mean(disc_real_scores)) if disc_real_scores else 0.0,
+        "disc_fake_mean": float(np.mean(disc_fake_scores)) if disc_fake_scores else 0.0,
+        "train_steps_per_second": train_steps_per_second,
+        "train_samples_per_second": train_samples_per_second,
+    }
 
 
 def train(args: argparse.Namespace) -> None:
@@ -2452,12 +2656,22 @@ def train(args: argparse.Namespace) -> None:
     discriminator = PatchDiscriminator().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     disc_optimizer = torch.optim.Adam(discriminator.parameters(), lr=args.disc_learning_rate, betas=(0.5, 0.999))
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        patience=args.lr_plateau_patience,
-        factor=args.lr_plateau_factor,
-    )
+    if args.scheduler_mode == "plateau":
+        scheduler: Any = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            patience=args.lr_plateau_patience,
+            factor=args.lr_plateau_factor,
+            cooldown=args.lr_plateau_cooldown,
+            min_lr=args.min_learning_rate,
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=max(1, args.cosine_cycle_epochs),
+            T_mult=max(1, args.cosine_t_mult),
+            eta_min=args.min_learning_rate,
+        )
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_cuda else None
 
     print(
@@ -2465,6 +2679,7 @@ def train(args: argparse.Namespace) -> None:
         f"adv_scale={args.adversarial_scale:.3f}, "
         f"start_gan_epoch={args.start_gan_epoch}, "
         f"gan_cycle={args.gan_cycle_on_epochs}/{args.gan_cycle_length if args.gan_cycle_length > 0 else 0}, "
+        f"gan_dual_lane={'on' if args.gan_dual_lane else 'off'}, "
         f"gan_cooldown_after_best={args.gan_cooldown_after_best}, "
         f"gan_burst_after_best={args.gan_burst_after_best}, "
         f"gan_patience={args.gan_patience}, "
@@ -2476,7 +2691,12 @@ def train(args: argparse.Namespace) -> None:
         f"disc_targets={args.disc_real_target:.2f}/{args.disc_fake_target:.2f}, "
         f"disc_label_noise={args.disc_label_noise:.3f}, "
         f"disc_input_noise_std={args.disc_input_noise_std:.3f}, "
+        f"scheduler={args.scheduler_mode}, "
+        f"min_lr={args.min_learning_rate:.2e}, "
         f"lr_plateau_patience={args.lr_plateau_patience}, "
+        f"lr_plateau_cooldown={args.lr_plateau_cooldown}, "
+        f"cosine_cycle_epochs={args.cosine_cycle_epochs}, "
+        f"cosine_t_mult={args.cosine_t_mult}, "
         f"brush_sample_bonus={args.brush_sample_bonus:.2f}, "
         f"brush_patch_scale={args.brush_patch_scale:.2f}"
     )
@@ -2535,7 +2755,10 @@ def train(args: argparse.Namespace) -> None:
             if "disc_optimizer_state_dict" in checkpoint:
                 disc_optimizer.load_state_dict(checkpoint["disc_optimizer_state_dict"])
             if "scheduler_state_dict" in checkpoint:
-                scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                try:
+                    scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                except Exception as exc:
+                    print(f"Warning: scheduler state was not restored ({exc}); continuing with current scheduler settings")
             if scaler is not None and "scaler_state_dict" in checkpoint and checkpoint["scaler_state_dict"] is not None:
                 scaler.load_state_dict(checkpoint["scaler_state_dict"])
         print(f"Resumed from {resume_path} at epoch {start_epoch}")
@@ -2564,135 +2787,121 @@ def train(args: argparse.Namespace) -> None:
         ):
             gan_schedule_mode = "burst"
             gan_schedule_remaining = max(args.gan_cycle_on_epochs, 1)
-        gan_enabled_epoch, gan_phase = resolve_gan_schedule(epoch_number, args, gan_schedule_remaining, gan_schedule_mode)
+        scheduled_gan_enabled, gan_phase = resolve_gan_schedule(epoch_number, args, gan_schedule_remaining, gan_schedule_mode)
         gan_schedule_active_this_epoch = gan_schedule_mode != "none" and gan_schedule_remaining > 0
+        selected_lane = "scheduled"
+        if scheduled_gan_enabled and args.gan_dual_lane:
+            base_state = snapshot_training_state(model, discriminator, optimizer, disc_optimizer, scheduler, scaler)
+            gan_result = run_training_epoch_pass(
+                epoch_number=epoch_number,
+                args=args,
+                model=model,
+                discriminator=discriminator,
+                optimizer=optimizer,
+                disc_optimizer=disc_optimizer,
+                scaler=scaler,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                train_dataset_size=len(train_dataset),
+                device=device,
+                use_cuda=use_cuda,
+                use_amp=use_amp,
+                amp_dtype=amp_dtype,
+                gan_enabled_epoch=True,
+                lane_label="gan",
+            )
+            gan_state = snapshot_training_state(model, discriminator, optimizer, disc_optimizer, scheduler, scaler)
+
+            restore_training_state(base_state, model, discriminator, optimizer, disc_optimizer, scheduler, scaler)
+            base_result = run_training_epoch_pass(
+                epoch_number=epoch_number,
+                args=args,
+                model=model,
+                discriminator=discriminator,
+                optimizer=optimizer,
+                disc_optimizer=disc_optimizer,
+                scaler=scaler,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                train_dataset_size=len(train_dataset),
+                device=device,
+                use_cuda=use_cuda,
+                use_amp=use_amp,
+                amp_dtype=amp_dtype,
+                gan_enabled_epoch=False,
+                lane_label="base",
+            )
+            base_state_after = snapshot_training_state(model, discriminator, optimizer, disc_optimizer, scheduler, scaler)
+
+            if gan_result["val_loss_valid"] and base_result["val_loss_valid"]:
+                choose_gan_lane = gan_result["average_val_loss"] <= base_result["average_val_loss"]
+            elif gan_result["val_loss_valid"]:
+                choose_gan_lane = True
+            elif base_result["val_loss_valid"]:
+                choose_gan_lane = False
+            else:
+                choose_gan_lane = True
+
+            if choose_gan_lane:
+                restore_training_state(gan_state, model, discriminator, optimizer, disc_optimizer, scheduler, scaler)
+                epoch_result = gan_result
+                gan_enabled_epoch = True
+                selected_lane = "gan"
+            else:
+                restore_training_state(base_state_after, model, discriminator, optimizer, disc_optimizer, scheduler, scaler)
+                epoch_result = base_result
+                gan_enabled_epoch = False
+                selected_lane = "base"
+
+            print(
+                "  Dual-lane epoch: gan_val={gan:.4f} vs base_val={base:.4f} -> selected {selected}".format(
+                    gan=gan_result["average_val_loss"],
+                    base=base_result["average_val_loss"],
+                    selected=selected_lane,
+                )
+            )
+        else:
+            gan_enabled_epoch = scheduled_gan_enabled
+            epoch_result = run_training_epoch_pass(
+                epoch_number=epoch_number,
+                args=args,
+                model=model,
+                discriminator=discriminator,
+                optimizer=optimizer,
+                disc_optimizer=disc_optimizer,
+                scaler=scaler,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                train_dataset_size=len(train_dataset),
+                device=device,
+                use_cuda=use_cuda,
+                use_amp=use_amp,
+                amp_dtype=amp_dtype,
+                gan_enabled_epoch=gan_enabled_epoch,
+                lane_label="scheduled",
+            )
+
         if gan_enabled_epoch:
             last_gan_epoch = epoch_number
-        model.train()
-        discriminator.train()
-        train_losses: List[float] = []
-        disc_losses: List[float] = []
-        disc_real_scores: List[float] = []
-        disc_fake_scores: List[float] = []
-        epoch_parts: Dict[str, float] = {}
 
-        epoch_train_start = time.perf_counter()
-        progress = tqdm(enumerate(train_loader, start=1), total=len(train_loader), desc=f"Epoch {epoch + 1}/{args.epochs}")
-        for step_index, batch in progress:
-            inputs = batch["input"].to(device, non_blocking=use_cuda)
-            targets = batch["target"].to(device, non_blocking=use_cuda)
-            bounds = batch["height_bounds"].to(device, non_blocking=use_cuda)
-
-            amp_context = torch.autocast(device_type="cuda", dtype=amp_dtype) if use_amp else nullcontext()
-
-            # --- Generator forward ---
-            with amp_context:
-                outputs, output_bounds = model(inputs)
-
-            # --- Discriminator step ---
-            do_disc_step = args.disc_every <= 1 or (step_index % args.disc_every == 0)
-            if gan_enabled_epoch and do_disc_step:
-                disc_optimizer.zero_grad(set_to_none=True)
-                with amp_context:
-                    real_disc_input = apply_discriminator_input_noise(targets, args.disc_input_noise_std)
-                    fake_disc_input = apply_discriminator_input_noise(outputs.detach(), args.disc_input_noise_std)
-                    real_pred = discriminator(real_disc_input)
-                    fake_pred = discriminator(fake_disc_input)
-                    real_targets = build_discriminator_targets(real_pred, args.disc_real_target, args.disc_label_noise)
-                    fake_targets = build_discriminator_targets(fake_pred, args.disc_fake_target, args.disc_label_noise)
-                    disc_real_loss = F.mse_loss(real_pred, real_targets)
-                    disc_fake_loss = F.mse_loss(fake_pred, fake_targets)
-                    disc_loss = (disc_real_loss + disc_fake_loss) * 0.5
-                if scaler is not None:
-                    scaler.scale(disc_loss).backward()
-                    scaler.unscale_(disc_optimizer)
-                    torch.nn.utils.clip_grad_norm_(discriminator.parameters(), max_norm=args.disc_grad_clip)
-                    scaler.step(disc_optimizer)
-                else:
-                    disc_loss.backward()
-                    torch.nn.utils.clip_grad_norm_(discriminator.parameters(), max_norm=args.disc_grad_clip)
-                    disc_optimizer.step()
-                disc_losses.append(float(disc_loss.item()))
-                disc_real_scores.append(float(real_pred.mean().item()))
-                disc_fake_scores.append(float(fake_pred.mean().item()))
-
-            # --- Generator step ---
-            optimizer.zero_grad(set_to_none=True)
-            use_gan_objective = gan_enabled_epoch
-            with amp_context:
-                adv_loss = None
-                if use_gan_objective:
-                    fake_pred_for_gen = discriminator(outputs)
-                    gen_targets = torch.full_like(fake_pred_for_gen, args.disc_real_target)
-                    adv_loss = F.mse_loss(fake_pred_for_gen, gen_targets)
-                loss, parts = combined_loss(
-                    outputs,
-                    output_bounds,
-                    targets,
-                    bounds,
-                    input_context=inputs,
-                    adv_loss=adv_loss,
-                    adversarial_scale=args.adversarial_scale,
-                )
-            if scaler is not None:
-                scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                optimizer.step()
-
-            train_losses.append(float(loss.item()))
-            for key, value in parts.items():
-                epoch_parts[key] = epoch_parts.get(key, 0.0) + value
-
-            if step_index % max(args.log_every, 1) == 0 or step_index == len(train_loader):
-                current_lr = optimizer.param_groups[0]["lr"]
-                avg_disc_window = float(np.mean(disc_losses[-args.log_every:])) if disc_losses else 0.0
-                postfix: Dict[str, str] = {
-                    "g": f"{float(np.mean(train_losses[-args.log_every:])):.4f}",
-                    "d": f"{avg_disc_window:.4f}",
-                    "lr": f"{current_lr:.1e}",
-                }
-                postfix["gan"] = "on" if use_gan_objective else "off"
-                if use_cuda:
-                    vram_gb = torch.cuda.memory_allocated() / (1024.0 ** 3)
-                    postfix["vram"] = f"{vram_gb:.2f}G"
-                progress.set_postfix(postfix)
-
-        train_phase_seconds = max(time.perf_counter() - epoch_train_start, 1e-9)
-        train_steps_per_second = len(train_loader) / train_phase_seconds
-        train_samples_per_second = len(train_dataset) / train_phase_seconds
-
-        for key in epoch_parts:
-            epoch_parts[key] /= max(len(train_loader), 1)
-
-        model.eval()
-        val_losses: List[float] = []
-        with torch.no_grad():
-            for batch in val_loader:
-                inputs = batch["input"].to(device, non_blocking=use_cuda)
-                targets = batch["target"].to(device, non_blocking=use_cuda)
-                bounds = batch["height_bounds"].to(device, non_blocking=use_cuda)
-                amp_context = torch.autocast(device_type="cuda", dtype=amp_dtype) if use_amp else nullcontext()
-                with amp_context:
-                    outputs, output_bounds = model(inputs)
-                    loss, _ = combined_loss(outputs, output_bounds, targets, bounds, input_context=inputs)
-                val_losses.append(float(loss.item()))
-
-        average_train_loss = float(np.mean(train_losses))
-        average_val_loss = float(np.mean(val_losses))
-        val_loss_valid = bool(np.isfinite(average_val_loss) and average_val_loss >= 0.0)
-        current_lr = optimizer.param_groups[0]["lr"]
+        average_train_loss = epoch_result["average_train_loss"]
+        average_val_loss = epoch_result["average_val_loss"]
+        val_loss_valid = epoch_result["val_loss_valid"]
+        current_lr = epoch_result["current_lr"]
+        epoch_parts = epoch_result["epoch_parts"]
+        avg_disc = epoch_result["avg_disc"]
+        train_steps_per_second = epoch_result["train_steps_per_second"]
+        train_samples_per_second = epoch_result["train_samples_per_second"]
+        disc_real_mean = epoch_result["disc_real_mean"]
+        disc_fake_mean = epoch_result["disc_fake_mean"]
 
         history["epochs"].append(epoch_number)
         history["train_loss"].append(average_train_loss)
         history["val_loss"].append(average_val_loss)
         history.setdefault("val_loss_valid", []).append(val_loss_valid)
         history.setdefault("gan_enabled", []).append(gan_enabled_epoch)
+        history.setdefault("gan_scheduled", []).append(scheduled_gan_enabled)
+        history.setdefault("gan_lane_selected", []).append(selected_lane)
         history.setdefault("gan_phase", []).append(gan_phase)
         history.setdefault("gan_schedule_mode", []).append(gan_schedule_mode)
         history.setdefault("gan_schedule_remaining", []).append(gan_schedule_remaining)
@@ -2710,7 +2919,6 @@ def train(args: argparse.Namespace) -> None:
                 bounds=epoch_parts.get("bounds", 0.0),
             )
         )
-        avg_disc = float(np.mean(disc_losses)) if disc_losses else 0.0
         print(
             "  Grad: {gradient:.4f} | SSIM: {ssim:.4f} | Edge: {edge:.4f} | Freq: {freq:.4f} | Lap: {lap:.4f}".format(
                 gradient=epoch_parts.get("gradient", 0.0),
@@ -2731,8 +2939,8 @@ def train(args: argparse.Namespace) -> None:
         )
         print(
             "  Disc Real/Fake Mean: {real:.4f}/{fake:.4f}".format(
-                real=float(np.mean(disc_real_scores)) if disc_real_scores else 0.0,
-                fake=float(np.mean(disc_fake_scores)) if disc_fake_scores else 0.0,
+                real=disc_real_mean,
+                fake=disc_fake_mean,
             )
         )
         print(
@@ -2742,47 +2950,18 @@ def train(args: argparse.Namespace) -> None:
             )
         )
         print(
-            f"  GAN: {'on' if gan_enabled_epoch else 'off'} | Phase: {gan_phase} | Schedule Remaining: {gan_schedule_remaining}"
+            f"  GAN: {'on' if gan_enabled_epoch else 'off'} | Phase: {gan_phase} | Lane: {selected_lane} | Schedule Remaining: {gan_schedule_remaining}"
         )
 
-        if val_loss_valid:
-            scheduler.step(average_val_loss)
+        if args.scheduler_mode == "plateau":
+            if val_loss_valid:
+                scheduler.step(average_val_loss)
+            else:
+                print(
+                    "  Warning: validation loss was invalid; skipping plateau LR scheduler and best-checkpoint update for this epoch"
+                )
         else:
-            print(
-                "  Warning: validation loss was invalid; skipping LR scheduler and best-checkpoint update for this epoch"
-            )
-
-        # Save a preview every epoch unconditionally so there is always something to inspect.
-        try:
-            preview_indices = select_epoch_preview_indices(
-                val_base_dataset.samples,
-                val_indices,
-                static_preview_indices,
-                epoch_number,
-                args.static_preview_count,
-                args.random_preview_count,
-                args.seed,
-            )
-            preview_batch, loaded_preview_indices, skipped_preview_indices = build_preview_batch(
-                val_base_dataset,
-                preview_indices,
-            )
-            preview_labels = [
-                f"{val_base_dataset.samples[index].dataset_name}:{val_base_dataset.samples[index].tile_name}"
-                for index in loaded_preview_indices
-            ]
-            save_training_preview(
-                model,
-                preview_batch,
-                epoch + 1,
-                output_dir / "previews",
-                device,
-                preview_labels=preview_labels,
-            )
-            if skipped_preview_indices:
-                print(f"  Skipped {len(skipped_preview_indices)} preview tile(s) while building epoch preview batch")
-        except Exception as exc:
-            print(f"  Failed to save mixed preview batch: {exc}")
+            scheduler.step()
 
         saved_new_best = False
         schedule_rearmed_this_epoch = False
@@ -2817,6 +2996,40 @@ def train(args: argparse.Namespace) -> None:
                 print(
                     f"  GAN cooldown armed for next {args.gan_cooldown_after_best} epoch(s) after GAN-assisted best"
                 )
+
+            try:
+                preview_indices = select_epoch_preview_indices(
+                    val_base_dataset.samples,
+                    val_indices,
+                    static_preview_indices,
+                    epoch_number,
+                    args.static_preview_count,
+                    args.random_preview_count,
+                    args.seed,
+                )
+                preview_batch, loaded_preview_indices, skipped_preview_indices = build_preview_batch(
+                    val_base_dataset,
+                    preview_indices,
+                )
+                preview_labels = [
+                    f"{val_base_dataset.samples[index].dataset_name}:{val_base_dataset.samples[index].tile_name}"
+                    for index in loaded_preview_indices
+                ]
+                phase_tag = gan_phase.replace("(", "-").replace(")", "").replace("/", "-").replace(" ", "-")
+                preview_tag = f"gan-{'on' if gan_enabled_epoch else 'off'}_lane-{selected_lane}_phase-{phase_tag}"
+                save_training_preview(
+                    model,
+                    preview_batch,
+                    epoch + 1,
+                    output_dir / "previews",
+                    device,
+                    preview_labels=preview_labels,
+                    filename_tag=preview_tag,
+                )
+                if skipped_preview_indices:
+                    print(f"  Skipped {len(skipped_preview_indices)} preview tile(s) while building best-preview batch")
+            except Exception as exc:
+                print(f"  Failed to save best-preview batch: {exc}")
         else:
             if not val_loss_valid:
                 continue
@@ -2911,6 +3124,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help=f"Optional GAN cadence length in epochs after start-gan-epoch (default: {DEFAULT_GAN_CYCLE_LENGTH}, disabled).")
     parser.add_argument("--gan-cycle-on-epochs", type=int, default=DEFAULT_GAN_CYCLE_ON_EPOCHS,
                         help=f"How many epochs per GAN cadence run with adversarial loss enabled (default: {DEFAULT_GAN_CYCLE_ON_EPOCHS}, disabled).")
+    parser.add_argument("--gan-dual-lane", action="store_true",
+                        help="At GAN-scheduled epochs, train/evaluate both GAN and non-GAN branches from the same starting checkpoint and keep the better validation-loss branch.")
     parser.add_argument("--gan-cooldown-after-best", type=int, default=DEFAULT_GAN_COOLDOWN_AFTER_BEST,
                         help=f"Force GAN off for this many subsequent epochs after a new GAN-assisted best checkpoint (default: {DEFAULT_GAN_COOLDOWN_AFTER_BEST}).")
     parser.add_argument("--gan-burst-after-best", type=int, default=DEFAULT_GAN_BURST_AFTER_BEST,
@@ -2927,6 +3142,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help=f"ReduceLROnPlateau patience in epochs (default: {DEFAULT_LR_PLATEAU_PATIENCE}).")
     parser.add_argument("--lr-plateau-factor", type=float, default=DEFAULT_LR_PLATEAU_FACTOR,
                         help=f"ReduceLROnPlateau factor (default: {DEFAULT_LR_PLATEAU_FACTOR}).")
+    parser.add_argument("--lr-plateau-cooldown", type=int, default=DEFAULT_LR_PLATEAU_COOLDOWN,
+                        help=f"ReduceLROnPlateau cooldown in epochs (default: {DEFAULT_LR_PLATEAU_COOLDOWN}).")
+    parser.add_argument("--scheduler-mode", choices=["plateau", "cosine"], default=DEFAULT_SCHEDULER_MODE,
+                        help=f"LR scheduler mode (default: {DEFAULT_SCHEDULER_MODE}).")
+    parser.add_argument("--min-learning-rate", type=float, default=DEFAULT_MIN_LEARNING_RATE,
+                        help=f"Minimum LR floor for both scheduler modes (default: {DEFAULT_MIN_LEARNING_RATE}).")
+    parser.add_argument("--cosine-cycle-epochs", type=int, default=DEFAULT_COSINE_CYCLE_EPOCHS,
+                        help=f"Cosine warm restart initial cycle length in epochs (default: {DEFAULT_COSINE_CYCLE_EPOCHS}).")
+    parser.add_argument("--cosine-t-mult", type=int, default=DEFAULT_COSINE_T_MULT,
+                        help=f"Cosine warm restart cycle multiplier (default: {DEFAULT_COSINE_T_MULT}).")
     parser.add_argument("--val-fraction", type=float, default=DEFAULT_VAL_FRACTION)
     parser.add_argument("--spatial-group-size", type=int, default=DEFAULT_SPATIAL_GROUP_SIZE)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)

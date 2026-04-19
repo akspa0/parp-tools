@@ -8,6 +8,7 @@ internal enum WowViewerWorkspaceMode
     StandaloneWmo = 1,
     StandaloneMdx = 2,
     WorldSession = 3,
+    DatasetTooling = 4,
 }
 
 internal enum WowViewerAssetSourceKind
@@ -275,13 +276,14 @@ internal sealed class WowViewerSession
             WowViewerWorkspaceMode.StandaloneWmo => "Standalone WMO",
             WowViewerWorkspaceMode.StandaloneMdx => "Standalone MDX",
             WowViewerWorkspaceMode.WorldSession => "World Session",
+            WowViewerWorkspaceMode.DatasetTooling => "Dataset Tooling",
             _ => "Unknown",
         };
     }
 
     public bool IsImplementedWorkspace()
     {
-        return WorkspaceMode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.StandaloneMdx or WowViewerWorkspaceMode.WorldSession;
+        return WorkspaceMode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.StandaloneMdx or WowViewerWorkspaceMode.WorldSession or WowViewerWorkspaceMode.DatasetTooling;
     }
 
     public bool HasBootstrapInput()
@@ -296,6 +298,7 @@ internal sealed class WowViewerSession
                 ? !string.IsNullOrWhiteSpace(Source.ArchiveRoot) && !string.IsNullOrWhiteSpace(Source.VirtualPath)
                 : !string.IsNullOrWhiteSpace(Source.InputPath),
             WowViewerWorkspaceMode.WorldSession => World.HasBootstrapInput(),
+            WowViewerWorkspaceMode.DatasetTooling => false,
             _ => false,
         };
     }
