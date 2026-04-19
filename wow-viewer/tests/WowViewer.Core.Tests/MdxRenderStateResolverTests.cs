@@ -119,6 +119,61 @@ public sealed class MdxRenderStateResolverTests
     }
 
     [Fact]
+    public void ResolveMaterial_RuntimeTextureLayerTrack_SelectsAnimatedTexture()
+    {
+        MdxSummary summary = CreateSummary(
+            sequences:
+            [
+                new MdxSequenceSummary(0, "Stand", 0, 100, 0.0f, 0u, 0.0f, 0, 100, null, null, null, null),
+            ],
+            textures:
+            [
+                new MdxTextureSummary(0, 0u, @"Textures\LayerA.blp", 0u),
+                new MdxTextureSummary(1, 0u, @"Textures\LayerB.blp", 0u),
+            ],
+            materials:
+            [
+                new MdxMaterialSummary(0, 0,
+                [
+                    new MdxMaterialLayerSummary(0, 2u, 0u, 0, -1, 0, 1.0f),
+                ]),
+            ]);
+        MdxMaterialFile materialFile = new(
+            "synthetic_material_tracks.mdx",
+            "MDLX",
+            1300u,
+            "Synthetic",
+            [
+                new MdxMaterial(0, 0,
+                [
+                    new MdxMaterialLayer(
+                        0,
+                        2u,
+                        0u,
+                        0,
+                        -1,
+                        0,
+                        1.0f,
+                        0.0f,
+                        null,
+                        null,
+                        new MdxIntTrack(
+                            "KMTF",
+                            MdxTrackInterpolationType.Linear,
+                            -1,
+                            [
+                                new MdxIntKeyframe(0, 0, null, null),
+                                new MdxIntKeyframe(100, 1, null, null),
+                            ])),
+                ]),
+            ]);
+
+        MdxResolvedMaterialState state = MdxRenderStateResolver.ResolveMaterial(summary, materialFile, 0, 0, 0, 99);
+
+        Assert.Equal(@"Textures\LayerB.blp", state.TexturePath);
+    }
+
+    [Fact]
     public void ResolveGeosetRenderState_RuntimeAnimationAndFlags_ProduceExpectedState()
     {
         MdxSummary summary = CreateSummary(

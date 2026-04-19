@@ -15,7 +15,9 @@
 		- `KMTA` alpha tracks
 		- `KMTF` texture-layer tracks
 	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads shared material payloads into `MdxPreviewLoadResult` instead of leaving the preview with summary-only material metadata
-	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRenderStateResolver.cs` now has a runtime-material overload that samples `KMTA` alpha tracks through `MdxAnimationSampler` so standalone preview material alpha can follow real layer animation instead of static summary alpha only
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRenderStateResolver.cs` now has a runtime-material overload that samples:
+		- `KMTA` alpha tracks through `MdxAnimationSampler` so standalone preview material alpha follows real layer animation
+		- `KMTF` texture-layer tracks through `MdxAnimationSampler` so standalone preview layer texture selection can animate from runtime `MTLS` payloads
 	- the already-landed standalone preview material parity slice is now backed by the shared MTLS payload seam:
 		- transparent-key layers stay classified as opaque alpha-cutout layers instead of transparent-pass draws
 		- blend-mode-specific alpha handling remains in `MdxGpuPreviewRenderer`
@@ -24,11 +26,11 @@
 	- `wow-viewer/tests/WowViewer.Core.Tests/MdxMaterialReaderTests.cs`
 	- `wow-viewer/tests/WowViewer.Core.Tests/MdxRenderStateResolverTests.cs`
 - bounded proof in this chat:
-	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxMaterialReaderTests|MdxRenderStateResolverTests"` passed with `7` focused tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxMaterialReaderTests|MdxRenderStateResolverTests"` passed with `8` focused tests
 	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded after wiring `MTLS` payload ownership through the preview path
 - current boundary:
 	- this now closes shared classic `MTLS` payload ownership for standalone preview material alpha and related layer-state consumption, but it does not yet prove full legacy material parity in motion
-	- `KMTF` texture-layer animation is parsed into shared payloads but is not yet consumed for flipbook-style texture slot behavior in the preview path
+	- runtime `KMTF` texture-layer slot selection is now consumed in shared material resolution, but broader flipbook-family parity and any renderer-side atlas conventions still need dedicated validation slices
 	- emissive-track payload ownership exists, but preview material emission routing is still not fully ported from the legacy renderer
 	- standalone preview signoff here remains bounded build plus focused-test proof, not interactive runtime parity signoff
 

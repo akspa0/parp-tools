@@ -85,6 +85,15 @@ public static class MdxRenderStateResolver
         uint blendMode = runtimeLayer?.BlendMode ?? summaryLayer.BlendMode;
         uint flags = runtimeLayer?.Flags ?? summaryLayer.Flags;
         int textureId = runtimeLayer?.TextureId ?? summaryLayer.TextureId;
+        if (runtimeLayer?.TextureLayerTrack is not null)
+        {
+            textureId = MdxAnimationSampler.SampleIntTrack(
+                runtimeLayer.TextureLayerTrack,
+                summary,
+                sequenceIndex,
+                timeMs,
+                textureId);
+        }
         int transformId = runtimeLayer?.TransformId ?? summaryLayer.TransformId;
         int coordId = runtimeLayer?.CoordId ?? summaryLayer.CoordId;
         string? texturePath = null;

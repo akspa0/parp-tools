@@ -13,16 +13,18 @@
 		- static emissive-gain ownership
 		- `KMTE`, `KMTA`, and `KMTF` track parsing
 	- `wow-viewer/src/viewer/WowViewer.App/MdxPreviewLoader.cs` now loads shared material payloads into the standalone preview result
-	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRenderStateResolver.cs` now resolves material layers against runtime `MTLS` payloads when available and samples `KMTA` alpha tracks through the shared animation sampler
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRenderStateResolver.cs` now resolves material layers against runtime `MTLS` payloads when available and samples:
+		- `KMTA` alpha tracks for animated layer alpha
+		- `KMTF` texture-layer tracks for animated runtime texture slot selection
 	- added focused coverage in:
 		- `wow-viewer/tests/WowViewer.Core.Tests/MdxMaterialReaderTests.cs`
 		- `wow-viewer/tests/WowViewer.Core.Tests/MdxRenderStateResolverTests.cs`
 - validation:
-	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxMaterialReaderTests|MdxRenderStateResolverTests"` passed with `7` tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxMaterialReaderTests|MdxRenderStateResolverTests"` passed with `8` tests
 	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed
 - boundary:
-	- this lands shared classic `MTLS` payload ownership plus animated layer-alpha consumption for the standalone preview path
-	- texture-layer animation and full emissive routing are still future material-parity work even though their payload tracks are now owned in shared code
+	- this lands shared classic `MTLS` payload ownership plus animated layer-alpha and animated texture-slot consumption for the standalone preview material path
+	- full emissive routing is still future material-parity work even though emissive payload tracks are now owned in shared code
 
 ### Apr 18, 2026 - wow-viewer standalone MDX preview now ports the existing MdxViewer PRE2 loop and keeps EVTS or RIBB non-fabricated
 
