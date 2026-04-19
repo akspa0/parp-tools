@@ -33,7 +33,13 @@ from PIL import Image
 from torchvision import transforms
 
 from v7_losses import build_recovery_mask
-from v7_model import DEFAULT_GLOBAL_RESIDUAL_SCALE, MultiChannelUNetV7, OUTPUT_SIZE, resolve_model_architecture_from_metadata
+from v7_model import (
+    DEFAULT_GLOBAL_RESIDUAL_SCALE,
+    MultiChannelUNetV7,
+    OUTPUT_SIZE,
+    resolve_model_architecture_from_metadata,
+    resolve_output_head_mode_from_metadata,
+)
 from v7_object_masks import (
     MAX_FALLBACK_OBJECT_MASK_COVERAGE,
     MAX_PRECISE_OBJECT_MASK_COVERAGE,
@@ -192,6 +198,7 @@ class V7InferenceEngine:
         out_channels = self._infer_output_channels(state_dict)
         self.expected_in_channels = int(in_channels)
         use_wdl_global_trestle, global_residual_scale = resolve_model_architecture_from_metadata(self.metadata)
+        output_head_mode = resolve_output_head_mode_from_metadata(self.metadata)
         norm_type = str(self.metadata.get("norm_type", "batch")).strip().lower()
         if norm_type not in {"batch", "group"}:
             norm_type = "batch"
@@ -203,6 +210,7 @@ class V7InferenceEngine:
             out_channels=out_channels,
             use_wdl_global_trestle=use_wdl_global_trestle,
             global_residual_scale=global_residual_scale,
+            output_head_mode=output_head_mode,
             norm_type=norm_type,
             groupnorm_groups=groupnorm_groups,
         ).to(self.device)

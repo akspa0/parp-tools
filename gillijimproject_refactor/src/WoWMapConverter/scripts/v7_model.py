@@ -12,6 +12,7 @@ MODEL_OUTPUT_CHANNELS = 2
 MODEL_OUTPUT_CHANNELS_V77 = 3
 DEFAULT_GLOBAL_RESIDUAL_SCALE = 0.20
 DEFAULT_DETAIL_RESIDUAL_SCALE = 1.0
+DEFAULT_OUTPUT_HEAD_MODE = "legacy_clamped"
 DEFAULT_NORM_TYPE = "group"
 DEFAULT_GROUPNORM_GROUPS = 16
 MODEL_VARIANT_WDL_TRESTLE_REFLECT = "wdl-trestle-reflect-v1"
@@ -73,6 +74,7 @@ class MultiChannelUNetV7(nn.Module):
         global_residual_scale: float = DEFAULT_GLOBAL_RESIDUAL_SCALE,
         use_detail_head: bool = False,
         detail_residual_scale: float = DEFAULT_DETAIL_RESIDUAL_SCALE,
+        output_head_mode: str = DEFAULT_OUTPUT_HEAD_MODE,
         norm_type: str = DEFAULT_NORM_TYPE,
         groupnorm_groups: int = DEFAULT_GROUPNORM_GROUPS,
     ):
@@ -81,6 +83,7 @@ class MultiChannelUNetV7(nn.Module):
         self.global_residual_scale = float(global_residual_scale)
         self.use_detail_head = bool(use_detail_head)
         self.detail_residual_scale = float(detail_residual_scale)
+        self.output_head_mode = str(output_head_mode).strip().lower()
         self.norm_type = str(norm_type).strip().lower()
         self.groupnorm_groups = max(1, int(groupnorm_groups))
 
@@ -146,17 +149,30 @@ class MultiChannelUNetV7(nn.Module):
 
         raw_outputs = self.out_conv(dec1)
         global_output = raw_outputs[:, 0:1]
-        if self.use_wdl_global_trestle and inputs.shape[1] > 6:
-            wdl_base = inputs[:, 6:7]
-            global_delta = torch.tanh(global_output) * self.global_residual_scale
-            global_output = torch.clamp(wdl_base + global_delta, 0.0, 1.0)
-        else:
-            global_output = torch.clamp(global_output, 0.0, 1.0)
+        local_output = raw_outputs[:, 1:2]
 
-        local_output = torch.clamp(raw_outputs[:, 1:2], 0.0, 1.0)
+        if self.output_head_mode == "linear_unclamped_train":
+            if self.use_wdl_global_trestle and inputs.shape[1] > 6:
+                wdl_base = inputs[:, 6:7]
+                global_output = wdl_base + global_output * self.global_residual_scale
+            if not self.training:
+                global_output = torch.clamp(global_output, 0.0, 1.0)
+                local_output = torch.clamp(local_output, 0.0, 1.0)
+        else:
+            if self.use_wdl_global_trestle and inputs.shape[1] > 6:
+                wdl_base = inputs[:, 6:7]
+                global_delta = torch.tanh(global_output) * self.global_residual_scale
+                global_output = torch.clamp(wdl_base + global_delta, 0.0, 1.0)
+            else:
+                global_output = torch.clamp(global_output, 0.0, 1.0)
+            local_output = torch.clamp(local_output, 0.0, 1.0)
+
         outputs = torch.cat([global_output, local_output], dim=1)
         if self.use_detail_head and raw_outputs.shape[1] > 2:
-            detail_output = torch.tanh(raw_outputs[:, 2:3]) * self.detail_residual_scale
+            if self.output_head_mode == "linear_unclamped_train":
+                detail_output = raw_outputs[:, 2:3] * self.detail_residual_scale
+            else:
+                detail_output = torch.tanh(raw_outputs[:, 2:3]) * self.detail_residual_scale
             outputs = torch.cat([outputs, detail_output], dim=1)
         if outputs.shape[-2:] != (OUTPUT_SIZE, OUTPUT_SIZE):
             outputs = F.interpolate(outputs, size=(OUTPUT_SIZE, OUTPUT_SIZE), mode="bilinear", align_corners=False)
@@ -213,3 +229,13 @@ def resolve_model_detail_head_from_metadata(metadata: Optional[Dict[str, object]
         use_detail_head = True
     detail_residual_scale = float(metadata.get("detail_residual_scale", DEFAULT_DETAIL_RESIDUAL_SCALE))
     return use_detail_head, detail_residual_scale
+
+
+def resolve_output_head_mode_from_metadata(metadata: Optional[Dict[str, object]]) -> str:
+    if not metadata:
+        return DEFAULT_OUTPUT_HEAD_MODE
+
+    output_head_mode = str(metadata.get("output_head_mode", DEFAULT_OUTPUT_HEAD_MODE)).strip().lower()
+    if output_head_mode not in {"legacy_clamped", "linear_unclamped_train"}:
+        output_head_mode = DEFAULT_OUTPUT_HEAD_MODE
+    return output_head_mode

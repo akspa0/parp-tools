@@ -81,6 +81,7 @@ from v7_model import (
     DEFAULT_GLOBAL_RESIDUAL_SCALE,
     DEFAULT_GROUPNORM_GROUPS,
     DEFAULT_NORM_TYPE,
+    DEFAULT_OUTPUT_HEAD_MODE,
     MODEL_INPUT_CHANNELS,
     MODEL_OUTPUT_CHANNELS,
     MODEL_OUTPUT_CHANNELS_V77,
@@ -90,6 +91,7 @@ from v7_model import (
     MultiChannelUNetV7,
     OUTPUT_SIZE,
     PatchDiscriminator,
+    resolve_output_head_mode_from_metadata,
 )
 from v7_object_masks import (
     MAP_ORIGIN,
@@ -114,6 +116,8 @@ DEFAULT_OUTPUT_DIR = WORKSPACE_ROOT / "output" / "ml-training" / "v7_5_1"
 DEFAULT_MODEL_FAMILY = "v7_5_1"
 DEFAULT_DETAIL_HEAD_WEIGHT = 0.10
 DEFAULT_DETAIL_HEAD_START_EPOCH = 1
+DEFAULT_BOUNDS_LOSS_SCALE = 1.0
+DEFAULT_BOUNDS_LOSS_START_EPOCH = 1
 DEFAULT_SYNTHETIC_CONTROL_ROOT = WORKSPACE_ROOT / "output" / "build-validation" / "training_synthetic_controls"
 DEFAULT_BATCH_SIZE = 4
 DEFAULT_LEARNING_RATE = 1e-4
@@ -633,6 +637,7 @@ class WoWTileDatasetV7(Dataset):
         self._brush_manifest_cache: Dict[Path, Optional[Dict[str, Any]]] = {}
         self._image_signal_cache: Dict[Path, Dict[str, float]] = {}
         self._liquid_coverage_cache: Dict[Path, float] = {}
+        self._payload_cache: Dict[Path, Dict[str, Any]] = {}
         self.rejection_summary: List[Dict[str, object]] = []
         self.rejected_tiles: List[Dict[str, object]] = []
 
@@ -659,6 +664,107 @@ class WoWTileDatasetV7(Dataset):
 
         self._rebuild_map_indices()
         print(f"Loaded {len(self.samples)} valid samples (V7.5.1 strict mode, {blank_skipped} blank tiles skipped)")
+
+    def _transform_normal_tensor(
+        self,
+        normal_tensor: torch.Tensor,
+        rotation_quarters: int,
+        flip_horizontal: bool,
+        flip_vertical: bool,
+    ) -> torch.Tensor:
+        transformed = normal_tensor
+        if rotation_quarters:
+            transformed = torch.rot90(transformed, k=rotation_quarters, dims=[1, 2])
+
+        x = transformed[0:1] * 2.0 - 1.0
+        y = transformed[1:2] * 2.0 - 1.0
+        z = transformed[2:3]
+
+        if rotation_quarters == 1:
+            x, y = -y, x
+        elif rotation_quarters == 2:
+            x, y = -x, -y
+        elif rotation_quarters == 3:
+            x, y = y, -x
+
+        if flip_horizontal:
+            transformed = torch.flip(transformed, dims=[2])
+            x = -x
+        if flip_vertical:
+            transformed = torch.flip(transformed, dims=[1])
+            y = -y
+
+        transformed = transformed.clone()
+        transformed[0:1] = torch.clamp((x + 1.0) * 0.5, 0.0, 1.0)
+        transformed[1:2] = torch.clamp((y + 1.0) * 0.5, 0.0, 1.0)
+        transformed[2:3] = z
+        return transformed
+
+    def _apply_spatial_augmentation(
+        self,
+        minimap_tensor: torch.Tensor,
+        normalmap_tensor: torch.Tensor,
+        wdl_tensor: torch.Tensor,
+        height_min_mask: torch.Tensor,
+        height_max_mask: torch.Tensor,
+        liquid_mask: torch.Tensor,
+        liquid_height_prior: torch.Tensor,
+        object_mask: torch.Tensor,
+        brush_mask: torch.Tensor,
+        heightmap_global_tensor: torch.Tensor,
+        heightmap_local_tensor: torch.Tensor,
+    ) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        rotation_quarters = int(torch.randint(0, 4, (1,)).item())
+        flip_horizontal = bool(torch.rand(1).item() > 0.5)
+        flip_vertical = bool(torch.rand(1).item() > 0.5)
+
+        def transform_spatial(tensor: torch.Tensor) -> torch.Tensor:
+            transformed = tensor
+            if rotation_quarters:
+                transformed = torch.rot90(transformed, k=rotation_quarters, dims=[1, 2])
+            if flip_horizontal:
+                transformed = torch.flip(transformed, dims=[2])
+            if flip_vertical:
+                transformed = torch.flip(transformed, dims=[1])
+            return transformed
+
+        minimap_tensor = transform_spatial(minimap_tensor)
+        normalmap_tensor = self._transform_normal_tensor(normalmap_tensor, rotation_quarters, flip_horizontal, flip_vertical)
+        wdl_tensor = transform_spatial(wdl_tensor)
+        height_min_mask = transform_spatial(height_min_mask)
+        height_max_mask = transform_spatial(height_max_mask)
+        liquid_mask = transform_spatial(liquid_mask)
+        liquid_height_prior = transform_spatial(liquid_height_prior)
+        object_mask = transform_spatial(object_mask)
+        brush_mask = transform_spatial(brush_mask)
+        heightmap_global_tensor = transform_spatial(heightmap_global_tensor)
+        heightmap_local_tensor = transform_spatial(heightmap_local_tensor)
+
+        return (
+            minimap_tensor,
+            normalmap_tensor,
+            wdl_tensor,
+            height_min_mask,
+            height_max_mask,
+            liquid_mask,
+            liquid_height_prior,
+            object_mask,
+            brush_mask,
+            heightmap_global_tensor,
+            heightmap_local_tensor,
+        )
 
     def _rebuild_map_indices(self) -> None:
         self._map_to_indices = {}
@@ -1066,6 +1172,16 @@ class WoWTileDatasetV7(Dataset):
 
         return None
 
+    def _load_payload_cached(self, json_path: Path) -> Dict[str, Any]:
+        cached = self._payload_cache.get(json_path)
+        if cached is not None:
+            return cached
+
+        with open(json_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        self._payload_cache[json_path] = payload
+        return payload
+
     def _render_wdl(self, wdl_data: Optional[Dict[str, object]], global_min: float, global_max: float) -> torch.Tensor:
         if not wdl_data:
             return torch.full((1, self.input_size, self.input_size), 0.5, dtype=torch.float32)
@@ -1270,8 +1386,7 @@ class WoWTileDatasetV7(Dataset):
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
         sample = self.samples[index]
 
-        with open(sample.json_path, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
+        payload = self._load_payload_cached(sample.json_path)
         terrain = payload.get("terrain_data", {})
 
         minimap = Image.open(sample.minimap_path).convert("RGB")
@@ -1293,8 +1408,8 @@ class WoWTileDatasetV7(Dataset):
         global_max = float(terrain.get("height_global_max", HEIGHT_GLOBAL_MAX))
         global_range = max(global_max - global_min, 1e-6)
 
-        minimap_tensor = self.normalize(self.to_tensor(minimap))
-        normalmap_tensor = self.normalize(self.to_tensor(normalmap))
+        minimap_tensor = self.to_tensor(minimap)
+        normalmap_tensor = self.to_tensor(normalmap)
         wdl_tensor = self._render_wdl(terrain.get("wdl_heights"), global_min, global_max)
 
         height_min_normalized = np.clip((height_min - global_min) / global_range, 0.0, 1.0)
@@ -1323,8 +1438,39 @@ class WoWTileDatasetV7(Dataset):
 
         object_mask = self._build_object_context_mask(sample, terrain)
         recovery_mask = build_recovery_mask(object_mask=object_mask, liquid_mask=liquid_mask, brush_mask=brush_mask)
-        minimap_tensor = minimap_tensor * (1.0 - recovery_mask * MASKED_RGB_ATTENUATION)
-        normalmap_tensor = normalmap_tensor * (1.0 - recovery_mask * MASKED_NORMAL_ATTENUATION)
+        heightmap_global_tensor = load_heightmap_16bit(sample.heightmap_global_path, OUTPUT_SIZE)
+        heightmap_local_tensor = load_heightmap_16bit(sample.heightmap_local_path, OUTPUT_SIZE)
+
+        if self.augment:
+            (
+                minimap_tensor,
+                normalmap_tensor,
+                wdl_tensor,
+                height_min_mask,
+                height_max_mask,
+                liquid_mask,
+                liquid_height_prior,
+                object_mask,
+                brush_mask,
+                heightmap_global_tensor,
+                heightmap_local_tensor,
+            ) = self._apply_spatial_augmentation(
+                minimap_tensor,
+                normalmap_tensor,
+                wdl_tensor,
+                height_min_mask,
+                height_max_mask,
+                liquid_mask,
+                liquid_height_prior,
+                object_mask,
+                brush_mask,
+                heightmap_global_tensor,
+                heightmap_local_tensor,
+            )
+
+        recovery_mask = build_recovery_mask(object_mask=object_mask, liquid_mask=liquid_mask, brush_mask=brush_mask)
+        minimap_tensor = self.normalize(minimap_tensor * (1.0 - recovery_mask * MASKED_RGB_ATTENUATION))
+        normalmap_tensor = self.normalize(normalmap_tensor * (1.0 - recovery_mask * MASKED_NORMAL_ATTENUATION))
 
         input_tensor = torch.cat(
             [
@@ -1341,18 +1487,10 @@ class WoWTileDatasetV7(Dataset):
             dim=0,
         )
 
-        heightmap_global_tensor = load_heightmap_16bit(sample.heightmap_global_path, OUTPUT_SIZE)
-        heightmap_local_tensor = load_heightmap_16bit(sample.heightmap_local_path, OUTPUT_SIZE)
-
         bounds_tensor = torch.tensor(
             [height_min_normalized, height_max_normalized, global_min_normalized, global_max_normalized],
             dtype=torch.float32,
         )
-
-        if self.augment and torch.rand(1).item() > 0.5:
-            input_tensor = torch.flip(input_tensor, dims=[2])
-            heightmap_global_tensor = torch.flip(heightmap_global_tensor, dims=[2])
-            heightmap_local_tensor = torch.flip(heightmap_local_tensor, dims=[2])
 
         return {
             "input": input_tensor,
@@ -1517,6 +1655,7 @@ def combined_loss(
     adv_loss: Optional[torch.Tensor] = None,
     adversarial_scale: float = 1.0,
     detail_head_weight: float = 0.0,
+    bounds_loss_scale: float = 1.0,
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
     predicted_heightmap = predicted_heightmap.float()
     predicted_bounds = predicted_bounds.float()
@@ -1554,7 +1693,7 @@ def combined_loss(
         LOSS_WEIGHTS["heightmap_global"] * global_loss
         + LOSS_WEIGHTS["heightmap_local"] * local_loss
         + (LOSS_WEIGHTS["detail_aux"] * detail_head_weight) * detail_aux_component
-        + LOSS_WEIGHTS["bounds"] * bounds_loss
+        + (LOSS_WEIGHTS["bounds"] * max(0.0, float(bounds_loss_scale))) * bounds_loss
         + LOSS_WEIGHTS["gradient"] * gradient_component
         + LOSS_WEIGHTS["ssim"] * ssim_component
         + LOSS_WEIGHTS["edge"] * edge_component
@@ -2174,16 +2313,27 @@ def checkpoint_metadata_from_args(
     resolved_norm_type = str(getattr(args, "resolved_norm_type", args.norm_type))
     resolved_groupnorm_groups = int(getattr(args, "resolved_groupnorm_groups", args.groupnorm_groups))
     resolved_detail_residual_scale = float(getattr(args, "resolved_detail_residual_scale", DEFAULT_DETAIL_RESIDUAL_SCALE))
+    resolved_output_head_mode = str(getattr(args, "resolved_output_head_mode", args.output_head_mode)).strip().lower()
+    resolved_global_residual_scale = float(
+        getattr(
+            args,
+            "resolved_global_residual_scale",
+            args.global_residual_scale if args.global_residual_scale is not None else DEFAULT_GLOBAL_RESIDUAL_SCALE,
+        )
+    )
     return {
         "trainer_version": "v7.7" if resolved_model_family == "v7_7" else "v7.5.1",
         "model_family": resolved_model_family,
         "model_variant": resolved_model_variant,
         "use_wdl_global_trestle": DEFAULT_USE_WDL_GLOBAL_TRESTLE,
-        "global_residual_scale": DEFAULT_GLOBAL_RESIDUAL_SCALE,
+        "global_residual_scale": resolved_global_residual_scale,
         "use_detail_head": resolved_use_detail_head,
         "detail_head_weight": args.detail_head_weight,
         "detail_head_start_epoch": args.detail_head_start_epoch,
         "detail_residual_scale": resolved_detail_residual_scale,
+        "output_head_mode": resolved_output_head_mode,
+        "bounds_loss_scale": args.bounds_loss_scale,
+        "bounds_loss_start_epoch": args.bounds_loss_start_epoch,
         "minimap_contract": "terrain-only-preferred-v1.1",
         "conv_padding_mode": "reflect",
         "blur_sigma": DEFAULT_BLUR_SIGMA,
@@ -2488,6 +2638,7 @@ def run_training_epoch_pass(
         if getattr(args, "resolved_model_family", args.model_family) == "v7_7" and epoch_number >= args.detail_head_start_epoch
         else 0.0
     )
+    bounds_loss_scale = args.bounds_loss_scale if epoch_number >= args.bounds_loss_start_epoch else 0.0
 
     epoch_train_start = time.perf_counter()
     progress = tqdm(
@@ -2547,6 +2698,7 @@ def run_training_epoch_pass(
                 adv_loss=adv_loss,
                 adversarial_scale=args.adversarial_scale,
                 detail_head_weight=detail_head_weight,
+                bounds_loss_scale=bounds_loss_scale,
             )
         if scaler is not None:
             scaler.scale(loss).backward()
@@ -2601,6 +2753,7 @@ def run_training_epoch_pass(
                     bounds,
                     input_context=inputs,
                     detail_head_weight=detail_head_weight,
+                    bounds_loss_scale=bounds_loss_scale,
                 )
             val_losses.append(float(loss.item()))
 
@@ -2870,12 +3023,13 @@ def train(args: argparse.Namespace) -> None:
 
     resume_checkpoint: Optional[Dict[str, Any]] = None
     use_wdl_global_trestle = DEFAULT_USE_WDL_GLOBAL_TRESTLE
-    global_residual_scale = DEFAULT_GLOBAL_RESIDUAL_SCALE
+    global_residual_scale = DEFAULT_GLOBAL_RESIDUAL_SCALE if args.global_residual_scale is None else float(args.global_residual_scale)
     resolved_model_family = args.model_family if args.model_family != "auto" else DEFAULT_MODEL_FAMILY
     resolved_norm_type = args.norm_type
     resolved_groupnorm_groups = max(1, args.groupnorm_groups)
     use_detail_head = resolved_model_family == "v7_7"
     detail_residual_scale = DEFAULT_DETAIL_RESIDUAL_SCALE
+    resolved_output_head_mode = args.output_head_mode if args.output_head_mode != "auto" else DEFAULT_OUTPUT_HEAD_MODE
     if args.resume:
         resume_path = Path(args.resume)
         if not resume_path.exists():
@@ -2889,16 +3043,24 @@ def train(args: argparse.Namespace) -> None:
         checkpoint_use_detail_head, checkpoint_detail_residual_scale = resolve_model_detail_head_from_metadata(
             resume_metadata
         )
+        checkpoint_output_head_mode = resolve_output_head_mode_from_metadata(resume_metadata)
         checkpoint_norm_type, checkpoint_groupnorm_groups = resolve_model_norm_from_metadata(resume_metadata)
+        if args.global_residual_scale is None:
+            _, global_residual_scale = resolve_model_architecture_from_metadata(resume_metadata)
         if args.model_family == "auto":
             resolved_model_family = checkpoint_model_family
             use_detail_head = checkpoint_use_detail_head
             detail_residual_scale = checkpoint_detail_residual_scale
+        if args.output_head_mode == "auto":
+            resolved_output_head_mode = checkpoint_output_head_mode
         if args.norm_type == "auto":
             resolved_norm_type = checkpoint_norm_type
             resolved_groupnorm_groups = checkpoint_groupnorm_groups
     elif args.norm_type == "auto":
         resolved_norm_type = DEFAULT_NORM_TYPE
+
+    if resolved_model_family == "v7_7" and args.output_head_mode == "auto":
+        resolved_output_head_mode = "linear_unclamped_train"
 
     if resolved_model_family == "v7_7":
         use_detail_head = True
@@ -2916,6 +3078,8 @@ def train(args: argparse.Namespace) -> None:
     args.resolved_model_variant = resolved_model_variant
     args.resolved_use_detail_head = use_detail_head
     args.resolved_detail_residual_scale = detail_residual_scale
+    args.resolved_output_head_mode = resolved_output_head_mode
+    args.resolved_global_residual_scale = global_residual_scale
 
     model = MultiChannelUNetV7(
         out_channels=resolved_output_channels,
@@ -2923,6 +3087,7 @@ def train(args: argparse.Namespace) -> None:
         global_residual_scale=global_residual_scale,
         use_detail_head=use_detail_head,
         detail_residual_scale=detail_residual_scale,
+        output_head_mode=resolved_output_head_mode,
         norm_type=resolved_norm_type,
         groupnorm_groups=resolved_groupnorm_groups,
     ).to(device)
@@ -2980,6 +3145,9 @@ def train(args: argparse.Namespace) -> None:
         f"detail_head={'on' if use_detail_head else 'off'}, "
         f"detail_head_weight={args.detail_head_weight:.3f}, "
         f"detail_head_start_epoch={args.detail_head_start_epoch}, "
+        f"global_residual_scale={global_residual_scale:.3f}, "
+        f"output_head_mode={resolved_output_head_mode}, "
+        f"bounds_loss_scale={args.bounds_loss_scale:.3f}(start@{args.bounds_loss_start_epoch}), "
         f"norm={resolved_norm_type}, "
         f"groupnorm_groups={resolved_groupnorm_groups}, "
         f"scheduler={args.scheduler_mode}, "
@@ -3630,6 +3798,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help=f"Auxiliary supervision weight for the V7.7 detail head (default: {DEFAULT_DETAIL_HEAD_WEIGHT}).")
     parser.add_argument("--detail-head-start-epoch", type=int, default=DEFAULT_DETAIL_HEAD_START_EPOCH,
                         help=f"Epoch number (1-based) when V7.7 detail-head supervision starts (default: {DEFAULT_DETAIL_HEAD_START_EPOCH}).")
+    parser.add_argument("--global-residual-scale", type=float, default=None,
+                        help=(
+                            "Override global residual amplitude around WDL. "
+                            "When unset, resumed runs use checkpoint metadata and fresh runs use the model default."
+                        ))
+    parser.add_argument("--output-head-mode", choices=["auto", "legacy_clamped", "linear_unclamped_train"], default="auto",
+                        help="Output-head behavior. 'auto' keeps legacy compatibility and uses the linear unclamped mode for fresh V7.7 runs.")
+    parser.add_argument("--bounds-loss-scale", type=float, default=DEFAULT_BOUNDS_LOSS_SCALE,
+                        help=f"Multiplier for bounds-head loss contribution (default: {DEFAULT_BOUNDS_LOSS_SCALE}).")
+    parser.add_argument("--bounds-loss-start-epoch", type=int, default=DEFAULT_BOUNDS_LOSS_START_EPOCH,
+                        help=f"Epoch number (1-based) when bounds-head loss starts contributing (default: {DEFAULT_BOUNDS_LOSS_START_EPOCH}).")
     parser.add_argument("--val-fraction", type=float, default=DEFAULT_VAL_FRACTION)
     parser.add_argument("--spatial-group-size", type=int, default=DEFAULT_SPATIAL_GROUP_SIZE)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
