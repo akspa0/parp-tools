@@ -192,6 +192,10 @@ class V7InferenceEngine:
         out_channels = self._infer_output_channels(state_dict)
         self.expected_in_channels = int(in_channels)
         use_wdl_global_trestle, global_residual_scale = resolve_model_architecture_from_metadata(self.metadata)
+        norm_type = str(self.metadata.get("norm_type", "batch")).strip().lower()
+        if norm_type not in {"batch", "group"}:
+            norm_type = "batch"
+        groupnorm_groups = max(1, int(self.metadata.get("groupnorm_groups", 16)))
         print(f"Detected input channels: {in_channels}")
 
         self.model = MultiChannelUNetV7(
@@ -199,6 +203,8 @@ class V7InferenceEngine:
             out_channels=out_channels,
             use_wdl_global_trestle=use_wdl_global_trestle,
             global_residual_scale=global_residual_scale,
+            norm_type=norm_type,
+            groupnorm_groups=groupnorm_groups,
         ).to(self.device)
         self.model.load_state_dict(state_dict)
         self.model.eval()

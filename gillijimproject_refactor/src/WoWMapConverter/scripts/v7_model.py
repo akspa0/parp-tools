@@ -10,17 +10,36 @@ OUTPUT_SIZE = 512
 MODEL_INPUT_CHANNELS = 13
 MODEL_OUTPUT_CHANNELS = 2
 DEFAULT_GLOBAL_RESIDUAL_SCALE = 0.20
+DEFAULT_NORM_TYPE = "group"
+DEFAULT_GROUPNORM_GROUPS = 16
 MODEL_VARIANT_WDL_TRESTLE_REFLECT = "wdl-trestle-reflect-v1"
 MODEL_VARIANT_LEGACY = "legacy-absolute-v1"
 
 
+def _resolve_group_count(channels: int, preferred_groups: int) -> int:
+    preferred_groups = max(1, int(preferred_groups))
+    for group_count in range(min(preferred_groups, channels), 0, -1):
+        if channels % group_count == 0:
+            return group_count
+    return 1
+
+
+def _build_norm_layer(channels: int, norm_type: str, groupnorm_groups: int) -> nn.Module:
+    norm_key = str(norm_type).strip().lower()
+    if norm_key == "batch":
+        return nn.BatchNorm2d(channels)
+
+    groups = _resolve_group_count(channels, groupnorm_groups)
+    return nn.GroupNorm(groups, channels)
+
+
 class ResConvBlock(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int):
+    def __init__(self, in_channels: int, out_channels: int, norm_type: str = "batch", groupnorm_groups: int = 16):
         super().__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, padding_mode="reflect")
-        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.bn1 = _build_norm_layer(out_channels, norm_type, groupnorm_groups)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, padding_mode="reflect")
-        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.bn2 = _build_norm_layer(out_channels, norm_type, groupnorm_groups)
         self.use_residual = in_channels == out_channels
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -49,17 +68,21 @@ class MultiChannelUNetV7(nn.Module):
         out_channels: int = MODEL_OUTPUT_CHANNELS,
         use_wdl_global_trestle: bool = False,
         global_residual_scale: float = DEFAULT_GLOBAL_RESIDUAL_SCALE,
+        norm_type: str = DEFAULT_NORM_TYPE,
+        groupnorm_groups: int = DEFAULT_GROUPNORM_GROUPS,
     ):
         super().__init__()
         self.use_wdl_global_trestle = use_wdl_global_trestle
         self.global_residual_scale = float(global_residual_scale)
+        self.norm_type = str(norm_type).strip().lower()
+        self.groupnorm_groups = max(1, int(groupnorm_groups))
 
-        self.enc1 = ResConvBlock(in_channels, 64)
-        self.enc2 = ResConvBlock(64, 128)
-        self.enc3 = ResConvBlock(128, 256)
-        self.enc4 = ResConvBlock(256, 512)
-        self.enc5 = ResConvBlock(512, 1024)
-        self.bottleneck = ResConvBlock(1024, 2048)
+        self.enc1 = ResConvBlock(in_channels, 64, self.norm_type, self.groupnorm_groups)
+        self.enc2 = ResConvBlock(64, 128, self.norm_type, self.groupnorm_groups)
+        self.enc3 = ResConvBlock(128, 256, self.norm_type, self.groupnorm_groups)
+        self.enc4 = ResConvBlock(256, 512, self.norm_type, self.groupnorm_groups)
+        self.enc5 = ResConvBlock(512, 1024, self.norm_type, self.groupnorm_groups)
+        self.bottleneck = ResConvBlock(1024, 2048, self.norm_type, self.groupnorm_groups)
 
         self.global_pool = nn.AdaptiveAvgPool2d(1)
         self.height_bounds_fc = nn.Sequential(
@@ -69,15 +92,15 @@ class MultiChannelUNetV7(nn.Module):
         )
 
         self.up5 = BilinearUp(2048, 1024)
-        self.dec5 = ResConvBlock(2048, 1024)
+        self.dec5 = ResConvBlock(2048, 1024, self.norm_type, self.groupnorm_groups)
         self.up4 = BilinearUp(1024, 512)
-        self.dec4 = ResConvBlock(1024, 512)
+        self.dec4 = ResConvBlock(1024, 512, self.norm_type, self.groupnorm_groups)
         self.up3 = BilinearUp(512, 256)
-        self.dec3 = ResConvBlock(512, 256)
+        self.dec3 = ResConvBlock(512, 256, self.norm_type, self.groupnorm_groups)
         self.up2 = BilinearUp(256, 128)
-        self.dec2 = ResConvBlock(256, 128)
+        self.dec2 = ResConvBlock(256, 128, self.norm_type, self.groupnorm_groups)
         self.up1 = BilinearUp(128, 64)
-        self.dec1 = ResConvBlock(128, 64)
+        self.dec1 = ResConvBlock(128, 64, self.norm_type, self.groupnorm_groups)
 
         self.out_conv = nn.Conv2d(64, out_channels, kernel_size=1)
         self.pool = nn.MaxPool2d(2)

@@ -77,6 +77,8 @@ from tqdm import tqdm
 from v7_losses import LOSS_WEIGHTS, build_recovery_mask, combined_loss
 from v7_model import (
     DEFAULT_GLOBAL_RESIDUAL_SCALE,
+    DEFAULT_GROUPNORM_GROUPS,
+    DEFAULT_NORM_TYPE,
     MODEL_INPUT_CHANNELS,
     MODEL_OUTPUT_CHANNELS,
     MODEL_VARIANT_LEGACY,
@@ -2201,6 +2203,8 @@ def checkpoint_metadata_from_args(
         "emeralddream_malformed_variance": args.emeralddream_malformed_variance,
         "emeralddream_malformed_gradient": args.emeralddream_malformed_gradient,
         "emeralddream_malformed_extreme_fraction": args.emeralddream_malformed_extreme_fraction,
+        "norm_type": args.norm_type,
+        "groupnorm_groups": args.groupnorm_groups,
     }
 
 
@@ -2211,6 +2215,17 @@ def resolve_model_architecture_from_metadata(metadata: Optional[Dict[str, object
     use_wdl_global_trestle = bool(metadata.get("use_wdl_global_trestle", False))
     global_residual_scale = float(metadata.get("global_residual_scale", DEFAULT_GLOBAL_RESIDUAL_SCALE))
     return use_wdl_global_trestle, global_residual_scale
+
+
+def resolve_model_norm_from_metadata(metadata: Optional[Dict[str, object]]) -> Tuple[str, int]:
+    if not metadata:
+        return "batch", DEFAULT_GROUPNORM_GROUPS
+
+    norm_type = str(metadata.get("norm_type", "batch")).strip().lower()
+    if norm_type not in {"batch", "group"}:
+        norm_type = "batch"
+    groupnorm_groups = max(1, int(metadata.get("groupnorm_groups", DEFAULT_GROUPNORM_GROUPS)))
+    return norm_type, groupnorm_groups
 
 
 def resolve_gan_schedule(
@@ -2767,18 +2782,29 @@ def train(args: argparse.Namespace) -> None:
     resume_checkpoint: Optional[Dict[str, Any]] = None
     use_wdl_global_trestle = DEFAULT_USE_WDL_GLOBAL_TRESTLE
     global_residual_scale = DEFAULT_GLOBAL_RESIDUAL_SCALE
+    resolved_norm_type = args.norm_type
+    resolved_groupnorm_groups = max(1, args.groupnorm_groups)
     if args.resume:
         resume_path = Path(args.resume)
         if not resume_path.exists():
             raise SystemExit(f"Resume checkpoint not found: {resume_path}")
         resume_checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
+        resume_metadata = dict(resume_checkpoint.get("metadata", {}))
         use_wdl_global_trestle, global_residual_scale = resolve_model_architecture_from_metadata(
-            dict(resume_checkpoint.get("metadata", {}))
+            resume_metadata
         )
+        checkpoint_norm_type, checkpoint_groupnorm_groups = resolve_model_norm_from_metadata(resume_metadata)
+        if args.norm_type == "auto":
+            resolved_norm_type = checkpoint_norm_type
+            resolved_groupnorm_groups = checkpoint_groupnorm_groups
+    elif args.norm_type == "auto":
+        resolved_norm_type = DEFAULT_NORM_TYPE
 
     model = MultiChannelUNetV7(
         use_wdl_global_trestle=use_wdl_global_trestle,
         global_residual_scale=global_residual_scale,
+        norm_type=resolved_norm_type,
+        groupnorm_groups=resolved_groupnorm_groups,
     ).to(device)
     discriminator = PatchDiscriminator().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
@@ -2828,6 +2854,8 @@ def train(args: argparse.Namespace) -> None:
         f"disc_targets={args.disc_real_target:.2f}/{args.disc_fake_target:.2f}, "
         f"disc_label_noise={args.disc_label_noise:.3f}, "
         f"disc_input_noise_std={args.disc_input_noise_std:.3f}, "
+        f"norm={resolved_norm_type}, "
+        f"groupnorm_groups={resolved_groupnorm_groups}, "
         f"scheduler={args.scheduler_mode}, "
         f"min_lr={args.min_learning_rate:.2e}, "
         f"lr_plateau_patience={args.lr_plateau_patience}, "
@@ -3174,6 +3202,12 @@ def train(args: argparse.Namespace) -> None:
                 gan_schedule_remaining = args.gan_cooldown_after_best
                 schedule_rearmed_this_epoch = True
             print("  Saved best model")
+            print(
+                "  State reset after best: "
+                f"patience={patience_counter}/{args.patience}, "
+                f"detail_patience={detail_patience_counter}/{detail_patience_limit}, "
+                f"overfit_counter={overfit_guard_counter}/{args.overfit_guard_patience}"
+            )
             if gan_enabled_epoch:
                 print(
                     f"  GAN hit a best; switching to concept recovery for next {args.concept_recovery_epochs} epoch(s)"
@@ -3445,6 +3479,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help=f"Cosine warm restart initial cycle length in epochs (default: {DEFAULT_COSINE_CYCLE_EPOCHS}).")
     parser.add_argument("--cosine-t-mult", type=int, default=DEFAULT_COSINE_T_MULT,
                         help=f"Cosine warm restart cycle multiplier (default: {DEFAULT_COSINE_T_MULT}).")
+    parser.add_argument("--norm-type", choices=["auto", "batch", "group"], default="auto",
+                        help="Normalization style for conv blocks. 'auto' uses checkpoint metadata when resuming and group norm for fresh runs.")
+    parser.add_argument("--groupnorm-groups", type=int, default=DEFAULT_GROUPNORM_GROUPS,
+                        help=f"Preferred group count for group normalization (default: {DEFAULT_GROUPNORM_GROUPS}).")
     parser.add_argument("--val-fraction", type=float, default=DEFAULT_VAL_FRACTION)
     parser.add_argument("--spatial-group-size", type=int, default=DEFAULT_SPATIAL_GROUP_SIZE)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
