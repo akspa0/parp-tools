@@ -118,6 +118,11 @@ DEFAULT_DETAIL_HEAD_WEIGHT = 0.10
 DEFAULT_DETAIL_HEAD_START_EPOCH = 1
 DEFAULT_BOUNDS_LOSS_SCALE = 1.0
 DEFAULT_BOUNDS_LOSS_START_EPOCH = 1
+DEFAULT_MULTISCALE_GLOBAL_WEIGHT = 0.0
+DEFAULT_MULTISCALE_LOCAL_WEIGHT = 0.0
+DEFAULT_WDL_COARSE_WEIGHT = 0.0
+DEFAULT_MULTISCALE_SIZES = "256,128,64"
+DEFAULT_WDL_COARSE_SIZE = 17
 DEFAULT_SYNTHETIC_CONTROL_ROOT = WORKSPACE_ROOT / "output" / "build-validation" / "training_synthetic_controls"
 DEFAULT_BATCH_SIZE = 4
 DEFAULT_LEARNING_RATE = 1e-4
@@ -586,6 +591,20 @@ def load_heightmap_16bit(path: Path, target_size: int = OUTPUT_SIZE) -> torch.Te
         return tensor.squeeze(0)
 
     return torch.from_numpy(array).unsqueeze(0)
+
+
+def parse_multiscale_sizes(value: str) -> Tuple[int, ...]:
+    sizes: List[int] = []
+    for token in str(value).split(","):
+        token = token.strip()
+        if not token:
+            continue
+        size = int(token)
+        if size <= 0:
+            raise ValueError(f"Multiscale sizes must be positive integers, got '{token}'.")
+        if size not in sizes:
+            sizes.append(size)
+    return tuple(sizes)
 
 
 class WoWTileDatasetV7(Dataset):
@@ -1656,6 +1675,11 @@ def combined_loss(
     adversarial_scale: float = 1.0,
     detail_head_weight: float = 0.0,
     bounds_loss_scale: float = 1.0,
+    multiscale_sizes: Sequence[int] = (),
+    multiscale_global_weight: float = 0.0,
+    multiscale_local_weight: float = 0.0,
+    wdl_coarse_weight: float = 0.0,
+    wdl_coarse_size: int = DEFAULT_WDL_COARSE_SIZE,
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
     predicted_heightmap = predicted_heightmap.float()
     predicted_bounds = predicted_bounds.float()
@@ -1664,12 +1688,49 @@ def combined_loss(
 
     global_loss = F.l1_loss(predicted_heightmap[:, 0:1], target_heightmap[:, 0:1])
     local_loss = F.l1_loss(predicted_heightmap[:, 1:2], target_heightmap[:, 1:2])
+    multiscale_global_component = torch.zeros((), dtype=predicted_heightmap.dtype, device=predicted_heightmap.device)
+    multiscale_local_component = torch.zeros((), dtype=predicted_heightmap.dtype, device=predicted_heightmap.device)
     detail_aux_component = torch.zeros((), dtype=predicted_heightmap.dtype, device=predicted_heightmap.device)
     if detail_head_weight > 0.0 and predicted_heightmap.shape[1] > 2:
         target_detail = target_heightmap[:, 1:2] - target_heightmap[:, 0:1]
         predicted_detail = predicted_heightmap[:, 2:3]
         detail_aux_component = F.l1_loss(predicted_detail, target_detail)
     bounds_loss = F.mse_loss(predicted_bounds, target_bounds)
+    wdl_coarse_component = torch.zeros((), dtype=predicted_heightmap.dtype, device=predicted_heightmap.device)
+
+    valid_multiscale_sizes = []
+    max_target_size = min(int(predicted_heightmap.shape[2]), int(predicted_heightmap.shape[3]))
+    for size in multiscale_sizes:
+        size = int(size)
+        if size <= 0 or size >= max_target_size:
+            continue
+        valid_multiscale_sizes.append(size)
+
+    if multiscale_global_weight > 0.0 and valid_multiscale_sizes:
+        coarse_losses = [
+            F.l1_loss(
+                F.adaptive_avg_pool2d(predicted_heightmap[:, 0:1], (size, size)),
+                F.adaptive_avg_pool2d(target_heightmap[:, 0:1], (size, size)),
+            )
+            for size in valid_multiscale_sizes
+        ]
+        multiscale_global_component = torch.stack(coarse_losses).mean()
+
+    if multiscale_local_weight > 0.0 and valid_multiscale_sizes:
+        coarse_losses = [
+            F.l1_loss(
+                F.adaptive_avg_pool2d(predicted_heightmap[:, 1:2], (size, size)),
+                F.adaptive_avg_pool2d(target_heightmap[:, 1:2], (size, size)),
+            )
+            for size in valid_multiscale_sizes
+        ]
+        multiscale_local_component = torch.stack(coarse_losses).mean()
+
+    if input_context is not None and wdl_coarse_weight > 0.0 and input_context.shape[1] > 6:
+        coarse_size = max(1, int(wdl_coarse_size))
+        predicted_global_coarse = F.adaptive_avg_pool2d(predicted_heightmap[:, 0:1], (coarse_size, coarse_size))
+        wdl_coarse = F.adaptive_avg_pool2d(input_context[:, 6:7].float(), (coarse_size, coarse_size))
+        wdl_coarse_component = F.l1_loss(predicted_global_coarse, wdl_coarse)
 
     def get_gradient(tensor: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return tensor[:, :, :, 1:] - tensor[:, :, :, :-1], tensor[:, :, 1:, :] - tensor[:, :, :-1, :]
@@ -1692,6 +1753,9 @@ def combined_loss(
     total = (
         LOSS_WEIGHTS["heightmap_global"] * global_loss
         + LOSS_WEIGHTS["heightmap_local"] * local_loss
+        + max(0.0, float(multiscale_global_weight)) * multiscale_global_component
+        + max(0.0, float(multiscale_local_weight)) * multiscale_local_component
+        + max(0.0, float(wdl_coarse_weight)) * wdl_coarse_component
         + (LOSS_WEIGHTS["detail_aux"] * detail_head_weight) * detail_aux_component
         + (LOSS_WEIGHTS["bounds"] * max(0.0, float(bounds_loss_scale))) * bounds_loss
         + LOSS_WEIGHTS["gradient"] * gradient_component
@@ -1713,6 +1777,9 @@ def combined_loss(
     return total, {
         "heightmap_global": float(global_loss.item()),
         "heightmap_local": float(local_loss.item()),
+        "multiscale_global": float(multiscale_global_component.item()),
+        "multiscale_local": float(multiscale_local_component.item()),
+        "wdl_coarse": float(wdl_coarse_component.item()),
         "detail_aux": float(detail_aux_component.item()),
         "bounds": float(bounds_loss.item()),
         "gradient": float(gradient_component.item()),
@@ -2334,6 +2401,11 @@ def checkpoint_metadata_from_args(
         "output_head_mode": resolved_output_head_mode,
         "bounds_loss_scale": args.bounds_loss_scale,
         "bounds_loss_start_epoch": args.bounds_loss_start_epoch,
+        "multiscale_sizes": list(getattr(args, "resolved_multiscale_sizes", ())),
+        "multiscale_global_weight": args.multiscale_global_weight,
+        "multiscale_local_weight": args.multiscale_local_weight,
+        "wdl_coarse_weight": args.wdl_coarse_weight,
+        "wdl_coarse_size": args.wdl_coarse_size,
         "minimap_contract": "terrain-only-preferred-v1.1",
         "conv_padding_mode": "reflect",
         "blur_sigma": DEFAULT_BLUR_SIGMA,
@@ -2639,6 +2711,7 @@ def run_training_epoch_pass(
         else 0.0
     )
     bounds_loss_scale = args.bounds_loss_scale if epoch_number >= args.bounds_loss_start_epoch else 0.0
+    multiscale_sizes = getattr(args, "resolved_multiscale_sizes", ())
 
     epoch_train_start = time.perf_counter()
     progress = tqdm(
@@ -2699,6 +2772,11 @@ def run_training_epoch_pass(
                 adversarial_scale=args.adversarial_scale,
                 detail_head_weight=detail_head_weight,
                 bounds_loss_scale=bounds_loss_scale,
+                multiscale_sizes=multiscale_sizes,
+                multiscale_global_weight=args.multiscale_global_weight,
+                multiscale_local_weight=args.multiscale_local_weight,
+                wdl_coarse_weight=args.wdl_coarse_weight,
+                wdl_coarse_size=args.wdl_coarse_size,
             )
         if scaler is not None:
             scaler.scale(loss).backward()
@@ -2754,6 +2832,11 @@ def run_training_epoch_pass(
                     input_context=inputs,
                     detail_head_weight=detail_head_weight,
                     bounds_loss_scale=bounds_loss_scale,
+                    multiscale_sizes=multiscale_sizes,
+                    multiscale_global_weight=args.multiscale_global_weight,
+                    multiscale_local_weight=args.multiscale_local_weight,
+                    wdl_coarse_weight=args.wdl_coarse_weight,
+                    wdl_coarse_size=args.wdl_coarse_size,
                 )
             val_losses.append(float(loss.item()))
 
@@ -2802,6 +2885,7 @@ def train(args: argparse.Namespace) -> None:
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    args.resolved_multiscale_sizes = parse_multiscale_sizes(args.multiscale_sizes)
 
     print("=" * 72)
     print("WoW V7.5.1 Training - cleaned dataset export + terrain-only minimap cleanup + GAN")
@@ -3148,6 +3232,10 @@ def train(args: argparse.Namespace) -> None:
         f"global_residual_scale={global_residual_scale:.3f}, "
         f"output_head_mode={resolved_output_head_mode}, "
         f"bounds_loss_scale={args.bounds_loss_scale:.3f}(start@{args.bounds_loss_start_epoch}), "
+        f"multiscale_global_weight={args.multiscale_global_weight:.3f}, "
+        f"multiscale_local_weight={args.multiscale_local_weight:.3f}, "
+        f"wdl_coarse_weight={args.wdl_coarse_weight:.3f}@{args.wdl_coarse_size}, "
+        f"multiscale_sizes={list(args.resolved_multiscale_sizes)}, "
         f"norm={resolved_norm_type}, "
         f"groupnorm_groups={resolved_groupnorm_groups}, "
         f"scheduler={args.scheduler_mode}, "
@@ -3403,6 +3491,13 @@ def train(args: argparse.Namespace) -> None:
                 global_loss=epoch_parts.get("heightmap_global", 0.0),
                 local_loss=epoch_parts.get("heightmap_local", 0.0),
                 bounds=epoch_parts.get("bounds", 0.0),
+            )
+        )
+        print(
+            "  MS_G: {multiscale_global:.4f} | MS_L: {multiscale_local:.4f} | WDL17: {wdl_coarse:.4f}".format(
+                multiscale_global=epoch_parts.get("multiscale_global", 0.0),
+                multiscale_local=epoch_parts.get("multiscale_local", 0.0),
+                wdl_coarse=epoch_parts.get("wdl_coarse", 0.0),
             )
         )
         print(
@@ -3809,6 +3904,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help=f"Multiplier for bounds-head loss contribution (default: {DEFAULT_BOUNDS_LOSS_SCALE}).")
     parser.add_argument("--bounds-loss-start-epoch", type=int, default=DEFAULT_BOUNDS_LOSS_START_EPOCH,
                         help=f"Epoch number (1-based) when bounds-head loss starts contributing (default: {DEFAULT_BOUNDS_LOSS_START_EPOCH}).")
+    parser.add_argument("--multiscale-sizes", type=str, default=DEFAULT_MULTISCALE_SIZES,
+                        help=f"Comma-separated pooled supervision sizes derived from existing targets (default: {DEFAULT_MULTISCALE_SIZES}).")
+    parser.add_argument("--multiscale-global-weight", type=float, default=DEFAULT_MULTISCALE_GLOBAL_WEIGHT,
+                        help=f"Weight for auxiliary multi-scale global-height supervision (default: {DEFAULT_MULTISCALE_GLOBAL_WEIGHT}).")
+    parser.add_argument("--multiscale-local-weight", type=float, default=DEFAULT_MULTISCALE_LOCAL_WEIGHT,
+                        help=f"Weight for auxiliary multi-scale local-height supervision (default: {DEFAULT_MULTISCALE_LOCAL_WEIGHT}).")
+    parser.add_argument("--wdl-coarse-weight", type=float, default=DEFAULT_WDL_COARSE_WEIGHT,
+                        help=f"Weight for coarse global-to-WDL alignment supervision derived from the WDL input prior (default: {DEFAULT_WDL_COARSE_WEIGHT}).")
+    parser.add_argument("--wdl-coarse-size", type=int, default=DEFAULT_WDL_COARSE_SIZE,
+                        help=f"Coarse pooled resolution used for WDL alignment supervision (default: {DEFAULT_WDL_COARSE_SIZE}).")
     parser.add_argument("--val-fraction", type=float, default=DEFAULT_VAL_FRACTION)
     parser.add_argument("--spatial-group-size", type=int, default=DEFAULT_SPATIAL_GROUP_SIZE)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)

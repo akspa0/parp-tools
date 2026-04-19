@@ -1,5 +1,18 @@
 # Progress
 
+### Apr 19, 2026 - pivoted the next terrain-training line to v9 as the primary branch, with v7.8 reduced to optional bounded sanity checks only
+
+- what changed:
+	- added `gillijimproject_refactor/plans/v7_8_and_v9_native_signal_training_plan_2026-04-19.md`
+	- rewrote that plan as a `v9`-first roadmap after concluding that the `v7.x` image-heavy contract is itself the likely ceiling
+	- planning boundary now is:
+		- `v9`: primary execution lane, grounded in native terrain truth from harvested JSON/native arrays/cached tensors
+		- `v7.8`: optional legacy ablation lane only if a bounded sanity check is still useful while `v9` is being built
+- validation:
+	- planning-only slice; no new runtime or training validation yet
+- boundary:
+	- this updates the roadmap and priority only; it does not yet implement the `v9` branch
+
 ### Apr 19, 2026 - wow-viewer app shell now exposes a Dataset Tooling workspace with first-party pipeline launch entrypoints
 
 - what changed:

@@ -22,6 +22,10 @@ def build_v77_arg_parser():
         detail_head_start_epoch=1,
         bounds_loss_scale=0.40,
         bounds_loss_start_epoch=8,
+        multiscale_global_weight=0.04,
+        multiscale_local_weight=0.03,
+        wdl_coarse_weight=0.02,
+        wdl_coarse_size=17,
         output_head_mode="linear_unclamped_train",
     )
     return parser
