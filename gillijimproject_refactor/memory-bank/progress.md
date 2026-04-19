@@ -13,6 +13,53 @@
 - boundary:
 	- this updates the roadmap and priority only; it does not yet implement the `v9` branch
 
+### Apr 19, 2026 - added the first v9 native tensor-cache builder from harvested tile JSON
+
+- what changed:
+	- added `gillijimproject_refactor/src/WoWMapConverter/scripts/build_v9_native_tensor_cache.py`
+	- the new builder reads harvested dataset tile JSON directly and emits compressed `.npz` shards instead of relying on PNG heightmaps as the training truth surface
+	- current shard contents include raw `256x145` chunk heights, stitched native `257x257` terrain, native stride-aligned downsampled terrain levels (`129`, `65`, `33`, `17`), `wdl_17` when present, hole masks, and minimap RGB as a visual side input
+- validation:
+	- pending immediate syntax check and one-tile smoke run
+- boundary:
+	- this is the first cache-builder slice only; it does not yet include a `v9` dataset loader or trainer path
+
+### Apr 19, 2026 - built the first end-to-end v9 native training lane with sane-sample auditing and a mixed-root smoke run
+
+- what changed:
+	- added `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9.py`
+	- added audit-time sanity filtering for native tensor shards using height range, minimap variance or gradient, WDL alignment, and required-input presence checks
+	- added quality-ranked curation so the trainer can target a small high-signal subset instead of taking the first tiles in manifest order
+	- updated `build_v9_native_tensor_cache.py` with `--limit-per-root` so mixed-root cache builds stay balanced
+- validation:
+	- built a balanced mixed-root cache at `output/ml-training/v9_native_cache_mixed`
+	- audited 224 shards and accepted 27 sane tiles with the relaxed-but-bounded thresholds used for the first smoke run
+	- trained `train_v9.py` for 6 epochs on the curated 27-tile subset at `output/ml-training/v9_run_mixed_train`
+	- observed val loss improving from `0.0940` to `0.0252`
+	- observed steady-state throughput around `65-68` train samples or second after the slow first epoch warm-up, far above the active `v7.7` image-heavy path
+- boundary:
+	- this is still a smoke-run lane and not a full replacement for `train_v7.py`; it proves the native cached contract, sane-sample audit path, and first training loop are viable and materially faster
+
+### Apr 19, 2026 - upgraded v9 with explicit multi-scale heads, preview export, and side-by-side cohort runs
+
+- what changed:
+	- upgraded `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9.py` from a coarse-plus-detail path into an explicit coarse `17`, mid `65`, and full `257` native supervision path
+	- added preview export so each best checkpoint writes comparison PNGs for minimap, full prediction, target, error, and coarse or mid native levels
+	- added cohort-size workflow support so ranked sane pools can be trained as `27`, `48`, `64`, or other explicit cohort sizes in one command
+	- removed the Pillow preview deprecation warnings while keeping the preview path intact
+- validation:
+	- built a larger balanced native cache at `output/ml-training/v9_native_cache_mixed_512`
+	- audited 416 shards into a sane pool of 101 with the current bounded thresholds
+	- ran `27`, `48`, and `64` cohort smoke runs for 2 epochs each at `output/ml-training/v9_cohort_27_48_64`
+	- best val losses after 2 epochs were:
+		- `27`: `0.0717`
+		- `48`: `0.0356`
+		- `64`: `0.0368`
+	- early evidence says the `48` cohort currently gives the best short-run validation result among the tested sane subsets
+	- previews were written successfully under each trained cohort output directory
+- boundary:
+	- this is still early-stage comparison evidence, not long-run convergence proof, but it establishes that the upgraded native v9 path can support explicit cohort sweeps and visually inspectable outputs
+
 ### Apr 19, 2026 - wow-viewer app shell now exposes a Dataset Tooling workspace with first-party pipeline launch entrypoints
 
 - what changed:
