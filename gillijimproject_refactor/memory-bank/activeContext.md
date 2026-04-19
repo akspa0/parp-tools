@@ -2,6 +2,22 @@
 
 # Active Context
 
+## Apr 18, 2026 - wow-viewer world session/runtime now supports external loose-overlay roots on top of base clients
+
+- this extends the previous saved-base + loose-overlay source work from standalone preview consumers into world session bootstrap/runtime flows
+- active behavior after this slice:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` world session state now carries `LooseOverlayRoot` and includes it in world request builders
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSessionBootstrapper.cs` now accepts loose overlay root in open requests and prefers overlay `WDT` reads before existing client-root/archive fallback
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now accepts loose overlay root for `world-frame`/`world-placement-audit` requests and routes world `WDL`/`ADT`/placement/model reads through overlay-first fallback
+	- `wow-viewer/src/viewer/WowViewer.App/VirtualAssetOverlayResolver.cs` now has a source-path-returning loose-read overload so world diagnostics can report overlay-backed sources
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` world controls now expose `Loose Overlay Root` and persist it via session state
+	- `wow-viewer/src/viewer/WowViewer.App/Program.cs` now accepts `--loose-overlay-root` for `viewer` world mode, `world-bootstrap`, `world-frame`, and `world-placement-audit`, and reports active overlay root in command output
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded after world overlay integration
+- current boundary:
+	- this closes external loose-overlay-root wiring for bounded world bootstrap/runtime reads in `WowViewer.App`
+	- it does not yet claim full old `MdxViewer` world/editor/runtime parity or final 3D world renderer closure
+
 ## Apr 18, 2026 - wow-viewer now ports saved-base plus loose-overlay source flow for standalone MDX/M2 loading
 
 - this continues the `wow-viewer` viewer-shell ownership lane by moving the legacy `MdxViewer` "saved base client + loose files on top" source workflow into `WowViewer.App`

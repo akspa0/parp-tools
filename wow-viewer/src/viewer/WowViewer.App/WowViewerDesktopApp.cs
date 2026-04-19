@@ -905,6 +905,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         string clientRoot = _session.World.ClientRoot;
         string mapInput = _session.World.MapInput;
         string buildLabel = _session.World.BuildLabel;
+        string looseOverlayRoot = _session.World.LooseOverlayRoot;
         int tileX = _session.World.TileX;
         int tileY = _session.World.TileY;
         bool showWmos = _session.World.ShowWmos;
@@ -917,11 +918,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.InputText("Client Root", ref clientRoot, 1024);
         ImGui.InputText("Map", ref mapInput, 256);
         ImGui.InputText("Build Label", ref buildLabel, 256);
+        ImGui.InputText("Loose Overlay Root", ref looseOverlayRoot, 1024);
         ImGui.InputInt("Tile X", ref tileX);
         ImGui.InputInt("Tile Y", ref tileY);
         _session.World.ClientRoot = clientRoot;
         _session.World.MapInput = mapInput;
         _session.World.BuildLabel = buildLabel;
+        _session.World.LooseOverlayRoot = looseOverlayRoot;
         _session.World.TileX = tileX;
         _session.World.TileY = tileY;
         ImGui.Separator();
@@ -1989,6 +1992,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _session.World.ClientRoot = session.World.ClientRoot ?? string.Empty;
         _session.World.MapInput = session.World.MapInput ?? string.Empty;
         _session.World.BuildLabel = session.World.BuildLabel ?? string.Empty;
+        _session.World.LooseOverlayRoot = session.World.LooseOverlayRoot ?? string.Empty;
         _session.World.TileX = session.World.TileX;
         _session.World.TileY = session.World.TileY;
         _session.ProfileIndex = session.ProfileIndex;

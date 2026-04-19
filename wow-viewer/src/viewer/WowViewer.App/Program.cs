@@ -145,6 +145,8 @@ internal static class Program
         WowViewerWorldSessionBootstrapResult result = WowViewerWorldSessionBootstrapper.Open(request);
 
         Console.WriteLine($"WowViewer.App world-bootstrap: root={result.ClientRoot} build={FormatOptionalValue(result.BuildLabel)} map={result.RequestedMapInput}->{result.ResolvedMapDirectory} source={(result.LoadedFromArchive ? "archive" : "loose")} lookupLoaded={result.UsedMapDirectoryLookup} resolvedViaDbc={result.ResolvedViaDbc} loadMs={result.LoadDuration.TotalMilliseconds:F1}");
+        if (!string.IsNullOrWhiteSpace(result.LooseOverlayRoot))
+            Console.WriteLine($"WowViewer.App world-bootstrap loose-overlay: {result.LooseOverlayRoot}");
         Console.WriteLine($"WowViewer.App world-bootstrap wdt: path={result.WdtSourcePath} kind={result.FileSummary.Kind} version={result.FileSummary.Version?.ToString() ?? "n/a"} chunks={result.FileSummary.ChunkCount}");
         Console.WriteLine($"WowViewer.App world-bootstrap semantics: wmoBased={result.WdtSummary.IsWmoBased} tiles={result.WdtSummary.TilesWithData}/{result.WdtSummary.TotalTiles} mainCellBytes={result.WdtSummary.MainCellSizeBytes} doodadNames={result.WdtSummary.DoodadNameCount} wmoNames={result.WdtSummary.WorldModelNameCount} doodadPlacements={result.WdtSummary.DoodadPlacementCount} wmoPlacements={result.WdtSummary.WorldModelPlacementCount}");
         if (result.WdtSummary.MainFlags is not null)
@@ -166,6 +168,8 @@ internal static class Program
         WowViewerWorldRuntimeFrameResult result = WowViewerWorldRuntimeBridge.Build(request);
 
         Console.WriteLine($"WowViewer.App world-frame: map={result.Session.RequestedMapInput}->{result.Session.ResolvedMapDirectory} tile=({result.SelectedTileX},{result.SelectedTileY}) placementSource={result.PlacementSourcePath} objectPhase={result.ObjectPhaseExecuted} totalMs={result.Stats.TotalCpuMs:F2}");
+        if (!string.IsNullOrWhiteSpace(result.Session.LooseOverlayRoot))
+            Console.WriteLine($"WowViewer.App world-frame loose-overlay: {result.Session.LooseOverlayRoot}");
         Console.WriteLine($"WowViewer.App world-frame options: wmo={result.PassOptions.WmosVisible} mdx={result.PassOptions.DoodadsVisible} sky={result.PassOptions.SkyVisible} wdl={result.PassOptions.WdlVisible} terrain={result.PassOptions.TerrainVisible} liquid={result.PassOptions.LiquidVisible} overlay={result.PassOptions.OverlayVisible}");
         Console.WriteLine($"WowViewer.App world-frame terrain: source={result.TileStageSummary.SourcePath} wdlTiles={result.Stats.WdlVisibleTileCount}/{result.TileStageSummary.WdlVisibleTileCount} terrainChunks={result.Stats.TerrainChunksRendered}/{result.TileStageSummary.TerrainChunkCount} holes={result.TileStageSummary.TerrainHoleChunkCount} liquidChunks={result.Stats.Liquid.VisibleCount}/{result.TileStageSummary.LiquidChunkCount} liquidLayers={result.TileStageSummary.LiquidLayerCount} liquidVisibleTiles={result.Stats.Liquid.SubmittedCount}/{result.TileStageSummary.VisibleLiquidTileCount} hasWater={result.TileStageSummary.HasWater}");
         Console.WriteLine($"WowViewer.App world-frame wdl-service: found={result.WdlTileData.SourceFound} hasData={result.WdlTileData.HasData} source={result.WdlTileData.SourcePath} version={FormatOptionalUInt(result.WdlTileData.Version)} range={FormatHeightRange(result.WdlTileData)} center={FormatOptionalHeight(result.WdlTileData.CenterHeight)} corners={FormatWdlCorners(result.WdlTileData)} samples={result.WdlTileData.OuterHeightCount}+{result.WdlTileData.InnerHeightCount}");
@@ -192,6 +196,8 @@ internal static class Program
         WowViewerWorldPlacementAuditResult result = WowViewerWorldRuntimeBridge.AuditPlacements(request);
 
         Console.WriteLine($"WowViewer.App world-placement-audit: root={result.Session.ClientRoot} build={FormatOptionalValue(result.Session.BuildLabel)} map={result.Session.RequestedMapInput}->{result.Session.ResolvedMapDirectory} scannedTiles={result.ScannedTileCount} tilesWithPlacements={result.TilesWithPlacements}");
+        if (!string.IsNullOrWhiteSpace(result.Session.LooseOverlayRoot))
+            Console.WriteLine($"WowViewer.App world-placement-audit loose-overlay: {result.Session.LooseOverlayRoot}");
         if (result.TopTiles.Count == 0)
         {
             Console.WriteLine("WowViewer.App world-placement-audit top: none");
@@ -295,6 +301,7 @@ internal static class Program
         string? virtualPath = GetOption(args, "--virtual-path", "-v");
         string? clientRoot = GetOption(args, "--client-root", "-c");
         string? mapInput = GetOption(args, "--map", "-m");
+        string? looseOverlayRoot = GetOption(args, "--loose-overlay-root");
         string? tileXText = GetOption(args, "--tile-x");
         string? tileYText = GetOption(args, "--tile-y");
         string? buildLabel = GetOption(args, "--build-label", "-b");
@@ -325,6 +332,7 @@ internal static class Program
             session.World.ClientRoot = clientRoot ?? string.Empty;
             session.World.MapInput = mapInput ?? input ?? string.Empty;
             session.World.BuildLabel = buildLabel ?? string.Empty;
+            session.World.LooseOverlayRoot = looseOverlayRoot ?? string.Empty;
             if (int.TryParse(tileXText, out int tileX))
                 session.World.TileX = tileX;
             if (int.TryParse(tileYText, out int tileY))
@@ -346,6 +354,7 @@ internal static class Program
             session.Source.ArchiveRoot = archiveRoot ?? string.Empty;
             session.Source.VirtualPath = string.IsNullOrWhiteSpace(archiveRoot) ? string.Empty : (virtualPath ?? input ?? string.Empty);
             session.Source.BuildLabel = buildLabel ?? string.Empty;
+            session.Source.LooseOverlayRoot = looseOverlayRoot ?? string.Empty;
         }
 
         session.ProfileIndex = profileIndex;
@@ -361,6 +370,7 @@ internal static class Program
         string? clientRoot = GetOption(args, "--client-root", "-c");
         string? mapInput = GetOption(args, "--map", "-m") ?? GetFirstPositionalArgument(args);
         string? buildLabel = GetOption(args, "--build-label", "-b");
+        string? looseOverlayRoot = GetOption(args, "--loose-overlay-root");
 
         if (string.IsNullOrWhiteSpace(clientRoot))
             throw new ArgumentException("Provide --client-root <dir> for world-bootstrap.");
@@ -368,7 +378,7 @@ internal static class Program
         if (string.IsNullOrWhiteSpace(mapInput))
             throw new ArgumentException("Provide --map <directory|id|name> for world-bootstrap.");
 
-        return new WowViewerWorldSessionOpenRequest(clientRoot, mapInput, buildLabel ?? string.Empty);
+        return new WowViewerWorldSessionOpenRequest(clientRoot, mapInput, buildLabel ?? string.Empty, looseOverlayRoot ?? string.Empty);
     }
 
     private static WowViewerWorldRuntimeFrameRequest ParseRequiredWorldFrameRequest(string[] args)
@@ -395,7 +405,7 @@ internal static class Program
             liquidVisible: !HasFlag(args, "--hide-liquid"),
             overlayVisible: !HasFlag(args, "--hide-overlay"));
 
-        return new WowViewerWorldRuntimeFrameRequest(request.ClientRoot, request.MapInput, request.BuildLabel, tileX, tileY, passOptions);
+        return new WowViewerWorldRuntimeFrameRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot, tileX, tileY, passOptions);
     }
 
     private static WowViewerWorldPlacementAuditRequest ParseRequiredWorldPlacementAuditRequest(string[] args)
@@ -409,7 +419,7 @@ internal static class Program
             throw new ArgumentOutOfRangeException(nameof(limitText), "--limit must be a positive integer.");
         }
 
-        return new WowViewerWorldPlacementAuditRequest(request.ClientRoot, request.MapInput, request.BuildLabel, limit);
+        return new WowViewerWorldPlacementAuditRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot, limit);
     }
 
     private static M2PreviewLoadRequest ParseRequiredM2Request(string[] args, int defaultVisualSize)
@@ -643,7 +653,7 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  wowviewer-app");
-        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file> | --client-root <game dir> --map <directory|id|name>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay]");
+        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file> | --client-root <game dir> --map <directory|id|name>] [--loose-overlay-root <dir>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay]");
         Console.WriteLine("  wowviewer-app m2-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp|file.png> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
@@ -651,9 +661,9 @@ internal static class Program
         Console.WriteLine("  wowviewer-app mdx-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.mdx> --output <file.bmp|file.png> [--build-label <label>] [--sequence-index <n>] [--time-ms <ms>] [--visual-width <px>] [--visual-height <px>] [--visual-size <px>] [--camera-mode frame|orbit|model] [--camera-preset front|back|left|right|top|three_quarter] [--camera-azimuth <deg>] [--camera-elevation <deg>] [--camera-fov <deg>] [--camera-zoom <factor>]");
         Console.WriteLine("  wowviewer-app mdx-gpu-frame --input <file.mdx> --output <file.bmp|file.png> [--build-label <label>] [--sequence-index <n>] [--time-ms <ms>] [--visual-width <px>] [--visual-height <px>] [--visual-size <px>] [--camera-mode frame|orbit|model] [--camera-preset front|back|left|right|top|three_quarter] [--camera-azimuth <deg>] [--camera-elevation <deg>] [--camera-fov <deg>] [--camera-zoom <factor>]");
         Console.WriteLine("  wowviewer-app mdx-visual-regression --manifest <cases.json> [--write-actual-root <dir>] [--write-diff-root <dir>] [--update-baselines]");
-        Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--build-label <label>]");
-        Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--terrain-preview-output <file.bmp>]");
-        Console.WriteLine("  wowviewer-app world-placement-audit --client-root <game dir> --map <directory|id|name> [--build-label <label>] [--limit <count>]");
+        Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--loose-overlay-root <dir>] [--build-label <label>]");
+        Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--loose-overlay-root <dir>] [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--terrain-preview-output <file.bmp>]");
+        Console.WriteLine("  wowviewer-app world-placement-audit --client-root <game dir> --map <directory|id|name> [--loose-overlay-root <dir>] [--build-label <label>] [--limit <count>]");
     }
 
     private static WowViewerWorkspaceMode ParseWorkspaceMode(string? workspaceText)

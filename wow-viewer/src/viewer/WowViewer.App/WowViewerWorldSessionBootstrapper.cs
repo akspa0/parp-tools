@@ -6,7 +6,7 @@ using WowViewer.Core.Maps;
 
 namespace WowViewer.App;
 
-internal sealed record WowViewerWorldSessionOpenRequest(string ClientRoot, string MapInput, string BuildLabel);
+internal sealed record WowViewerWorldSessionOpenRequest(string ClientRoot, string MapInput, string BuildLabel, string LooseOverlayRoot);
 
 internal sealed class WowViewerWorldSessionBootstrapResult
 {
@@ -20,6 +20,7 @@ internal sealed class WowViewerWorldSessionBootstrapResult
         string wdtVirtualPath,
         string wdtSourcePath,
         bool loadedFromArchive,
+        string looseOverlayRoot,
         MapFileSummary fileSummary,
         WdtSummary wdtSummary,
         IReadOnlyList<WdtTileCoordinate> occupiedTiles,
@@ -34,6 +35,7 @@ internal sealed class WowViewerWorldSessionBootstrapResult
         WdtVirtualPath = wdtVirtualPath;
         WdtSourcePath = wdtSourcePath;
         LoadedFromArchive = loadedFromArchive;
+        LooseOverlayRoot = looseOverlayRoot;
         FileSummary = fileSummary;
         WdtSummary = wdtSummary;
         OccupiedTiles = occupiedTiles;
@@ -58,6 +60,8 @@ internal sealed class WowViewerWorldSessionBootstrapResult
 
     public bool LoadedFromArchive { get; }
 
+    public string LooseOverlayRoot { get; }
+
     public MapFileSummary FileSummary { get; }
 
     public WdtSummary WdtSummary { get; }
@@ -77,6 +81,12 @@ internal static class WowViewerWorldSessionBootstrapper
         if (!Directory.Exists(clientRoot))
             throw new DirectoryNotFoundException($"Client root does not exist: {clientRoot}");
 
+        string looseOverlayRoot = string.IsNullOrWhiteSpace(request.LooseOverlayRoot)
+            ? string.Empty
+            : Path.GetFullPath(request.LooseOverlayRoot);
+        if (!string.IsNullOrWhiteSpace(looseOverlayRoot) && !Directory.Exists(looseOverlayRoot))
+            throw new DirectoryNotFoundException($"Loose overlay root does not exist: {looseOverlayRoot}");
+
         if (string.IsNullOrWhiteSpace(request.MapInput))
             throw new ArgumentException("Provide a map directory, map id, or Map.dbc name via --map.", nameof(request.MapInput));
 
@@ -95,7 +105,7 @@ internal static class WowViewerWorldSessionBootstrapper
 
         string resolvedMapDirectory = string.IsNullOrWhiteSpace(resolvedFromDbc) ? directDirectory : resolvedFromDbc;
         string wdtVirtualPath = $@"World\Maps\{resolvedMapDirectory}\{resolvedMapDirectory}.wdt";
-        (byte[] data, string sourcePath, bool loadedFromArchive) = ReadWdt(clientRoot, resolvedMapDirectory, wdtVirtualPath, archiveCatalog);
+        (byte[] data, string sourcePath, bool loadedFromArchive) = ReadWdt(clientRoot, looseOverlayRoot, resolvedMapDirectory, wdtVirtualPath, archiveCatalog);
 
         using MemoryStream stream = new(data, writable: false);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, loadedFromArchive ? wdtVirtualPath : sourcePath);
@@ -115,14 +125,21 @@ internal static class WowViewerWorldSessionBootstrapper
             wdtVirtualPath,
             sourcePath,
             loadedFromArchive,
+            looseOverlayRoot,
             fileSummary,
             wdtSummary,
             occupiedTiles,
             stopwatch.Elapsed);
     }
 
-    private static (byte[] Data, string SourcePath, bool LoadedFromArchive) ReadWdt(string clientRoot, string mapDirectory, string wdtVirtualPath, IArchiveCatalog archiveCatalog)
+    private static (byte[] Data, string SourcePath, bool LoadedFromArchive) ReadWdt(string clientRoot, string looseOverlayRoot, string mapDirectory, string wdtVirtualPath, IArchiveCatalog archiveCatalog)
     {
+        if (VirtualAssetOverlayResolver.TryReadLooseVirtualFile(wdtVirtualPath, looseOverlayRoot, out byte[]? overlayData, out string overlaySourcePath)
+            && overlayData is { Length: > 0 })
+        {
+            return (overlayData, overlaySourcePath, false);
+        }
+
         foreach ((string path, bool isPerAssetMpq) in EnumerateDiskWdtCandidates(clientRoot, mapDirectory))
         {
             if (!File.Exists(path))

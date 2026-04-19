@@ -14,7 +14,13 @@ internal static class VirtualAssetOverlayResolver
 
     public static bool TryReadLooseVirtualFile(string virtualPath, string? looseOverlayRoot, out byte[]? bytes)
     {
+        return TryReadLooseVirtualFile(virtualPath, looseOverlayRoot, out bytes, out _);
+    }
+
+    public static bool TryReadLooseVirtualFile(string virtualPath, string? looseOverlayRoot, out byte[]? bytes, out string sourcePath)
+    {
         bytes = null;
+        sourcePath = string.Empty;
 
         if (string.IsNullOrWhiteSpace(looseOverlayRoot))
             return false;
@@ -29,6 +35,7 @@ internal static class VirtualAssetOverlayResolver
             return false;
 
         bytes = File.ReadAllBytes(candidate);
+        sourcePath = Path.GetFullPath(candidate);
         return bytes.Length > 0;
     }
 

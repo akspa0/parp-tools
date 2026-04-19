@@ -60,6 +60,8 @@ internal sealed class WowViewerWorldSessionState
 
     public string BuildLabel { get; set; } = string.Empty;
 
+    public string LooseOverlayRoot { get; set; } = string.Empty;
+
     public int TileX { get; set; } = -1;
 
     public int TileY { get; set; } = -1;
@@ -83,6 +85,7 @@ internal sealed class WowViewerWorldSessionState
         ClientRoot = ClientRoot?.Trim() ?? string.Empty;
         MapInput = MapInput?.Trim() ?? string.Empty;
         BuildLabel = BuildLabel?.Trim() ?? string.Empty;
+        LooseOverlayRoot = LooseOverlayRoot?.Trim() ?? string.Empty;
         TileX = TileX < 0 ? -1 : Math.Clamp(TileX, 0, 63);
         TileY = TileY < 0 ? -1 : Math.Clamp(TileY, 0, 63);
     }
@@ -90,13 +93,13 @@ internal sealed class WowViewerWorldSessionState
     public WowViewerWorldSessionOpenRequest BuildRequest()
     {
         Normalize();
-        return new WowViewerWorldSessionOpenRequest(ClientRoot, MapInput, BuildLabel);
+        return new WowViewerWorldSessionOpenRequest(ClientRoot, MapInput, BuildLabel, LooseOverlayRoot);
     }
 
     public WowViewerWorldRuntimeFrameRequest BuildRuntimeFrameRequest()
     {
         Normalize();
-        return new WowViewerWorldRuntimeFrameRequest(ClientRoot, MapInput, BuildLabel, TileX, TileY, BuildPassOptions());
+        return new WowViewerWorldRuntimeFrameRequest(ClientRoot, MapInput, BuildLabel, LooseOverlayRoot, TileX, TileY, BuildPassOptions());
     }
 
     public WorldFramePassOptions BuildPassOptions()
@@ -128,14 +131,18 @@ internal sealed class WowViewerWorldSessionState
             ? $" tile=({TileX},{TileY})"
             : " tile=<auto>";
 
+        string loose = string.IsNullOrWhiteSpace(LooseOverlayRoot)
+            ? string.Empty
+            : $" loose={Path.GetFullPath(LooseOverlayRoot)}";
+
         bool usingDefaultLayers = ShowWmos && ShowDoodads && ShowSky && ShowWdl && ShowTerrain && ShowLiquid && ShowOverlay;
         string layerSummary = usingDefaultLayers
             ? string.Empty
             : $" layers[wmo={ShowWmos}, mdx={ShowDoodads}, sky={ShowSky}, wdl={ShowWdl}, terrain={ShowTerrain}, liquid={ShowLiquid}, overlay={ShowOverlay}]";
 
         return string.IsNullOrWhiteSpace(BuildLabel)
-            ? $"{source} :: {map}{tile}{layerSummary}"
-            : $"{source} :: {map}{tile} [{BuildLabel}]{layerSummary}";
+            ? $"{source} :: {map}{tile}{loose}{layerSummary}"
+            : $"{source} :: {map}{tile} [{BuildLabel}]{loose}{layerSummary}";
     }
 
     public bool HasBootstrapInput()

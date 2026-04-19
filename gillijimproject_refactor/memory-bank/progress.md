@@ -1,5 +1,24 @@
 # Progress
 
+### Apr 18, 2026 - wow-viewer world bootstrap/runtime now honors external loose overlay roots
+
+- what changed:
+	- extended world request/session contracts with loose-overlay-root ownership:
+		- `WowViewerWorldSessionOpenRequest`
+		- `WowViewerWorldRuntimeFrameRequest`
+		- `WowViewerWorldPlacementAuditRequest`
+		- `WowViewerWorldSessionState.LooseOverlayRoot`
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSessionBootstrapper.cs` now prefers overlay `WDT` source reads before existing client-root/archive fallback and carries overlay root in bootstrap result metadata
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now routes world placement/terrain/liquid/WDL/object/model reads through overlay-first fallback before legacy client-root loose/archive probing
+	- `wow-viewer/src/viewer/WowViewer.App/VirtualAssetOverlayResolver.cs` now exposes a loose-read overload that returns source path for world diagnostics/output
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` world controls now expose a `Loose Overlay Root` field and persist it through session state
+	- `wow-viewer/src/viewer/WowViewer.App/Program.cs` now supports `--loose-overlay-root` for `viewer` world bootstrap, `world-bootstrap`, `world-frame`, and `world-placement-audit` flows and reports overlay roots in output when active
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed
+- boundary:
+	- this lands overlay-root read ownership in bounded world bootstrap/runtime paths
+	- it does not yet close full world-scene renderer parity or broader old-viewer/editor surface parity
+
 ### Apr 18, 2026 - wow-viewer now supports saved-base plus loose-overlay source loading for standalone MDX/M2
 
 - what changed:
