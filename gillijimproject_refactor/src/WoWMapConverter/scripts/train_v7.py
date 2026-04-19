@@ -68,6 +68,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Subset, WeightedRandomSampler
@@ -76,17 +77,19 @@ from tqdm import tqdm
 
 from v7_losses import LOSS_WEIGHTS, build_recovery_mask, combined_loss
 from v7_model import (
+    DEFAULT_DETAIL_RESIDUAL_SCALE,
     DEFAULT_GLOBAL_RESIDUAL_SCALE,
     DEFAULT_GROUPNORM_GROUPS,
     DEFAULT_NORM_TYPE,
     MODEL_INPUT_CHANNELS,
     MODEL_OUTPUT_CHANNELS,
+    MODEL_OUTPUT_CHANNELS_V77,
     MODEL_VARIANT_LEGACY,
     MODEL_VARIANT_WDL_TRESTLE_REFLECT,
+    MODEL_VARIANT_WDL_TRESTLE_REFLECT_V77,
     MultiChannelUNetV7,
     OUTPUT_SIZE,
     PatchDiscriminator,
-    resolve_model_architecture_from_metadata,
 )
 from v7_object_masks import (
     MAP_ORIGIN,
@@ -108,6 +111,9 @@ INPUT_SIZE = OUTPUT_SIZE
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_OUTPUT_DIR = WORKSPACE_ROOT / "output" / "ml-training" / "v7_5_1"
+DEFAULT_MODEL_FAMILY = "v7_5_1"
+DEFAULT_DETAIL_HEAD_WEIGHT = 0.10
+DEFAULT_DETAIL_HEAD_START_EPOCH = 1
 DEFAULT_SYNTHETIC_CONTROL_ROOT = WORKSPACE_ROOT / "output" / "build-validation" / "training_synthetic_controls"
 DEFAULT_BATCH_SIZE = 4
 DEFAULT_LEARNING_RATE = 1e-4
@@ -1510,6 +1516,7 @@ def combined_loss(
     input_context: Optional[torch.Tensor] = None,
     adv_loss: Optional[torch.Tensor] = None,
     adversarial_scale: float = 1.0,
+    detail_head_weight: float = 0.0,
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
     predicted_heightmap = predicted_heightmap.float()
     predicted_bounds = predicted_bounds.float()
@@ -1518,6 +1525,11 @@ def combined_loss(
 
     global_loss = F.l1_loss(predicted_heightmap[:, 0:1], target_heightmap[:, 0:1])
     local_loss = F.l1_loss(predicted_heightmap[:, 1:2], target_heightmap[:, 1:2])
+    detail_aux_component = torch.zeros((), dtype=predicted_heightmap.dtype, device=predicted_heightmap.device)
+    if detail_head_weight > 0.0 and predicted_heightmap.shape[1] > 2:
+        target_detail = target_heightmap[:, 1:2] - target_heightmap[:, 0:1]
+        predicted_detail = predicted_heightmap[:, 2:3]
+        detail_aux_component = F.l1_loss(predicted_detail, target_detail)
     bounds_loss = F.mse_loss(predicted_bounds, target_bounds)
 
     def get_gradient(tensor: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -1541,6 +1553,7 @@ def combined_loss(
     total = (
         LOSS_WEIGHTS["heightmap_global"] * global_loss
         + LOSS_WEIGHTS["heightmap_local"] * local_loss
+        + (LOSS_WEIGHTS["detail_aux"] * detail_head_weight) * detail_aux_component
         + LOSS_WEIGHTS["bounds"] * bounds_loss
         + LOSS_WEIGHTS["gradient"] * gradient_component
         + LOSS_WEIGHTS["ssim"] * ssim_component
@@ -1561,6 +1574,7 @@ def combined_loss(
     return total, {
         "heightmap_global": float(global_loss.item()),
         "heightmap_local": float(local_loss.item()),
+        "detail_aux": float(detail_aux_component.item()),
         "bounds": float(bounds_loss.item()),
         "gradient": float(gradient_component.item()),
         "ssim": float(ssim_component.item()),
@@ -2139,11 +2153,37 @@ def checkpoint_metadata_from_args(
     train_groups: int,
     val_groups: int,
 ) -> Dict[str, object]:
+    resolved_model_family = str(getattr(args, "resolved_model_family", args.model_family)).strip().lower()
+    resolved_use_detail_head = bool(getattr(args, "resolved_use_detail_head", resolved_model_family == "v7_7"))
+    resolved_output_channels = int(
+        getattr(
+            args,
+            "resolved_output_channels",
+            MODEL_OUTPUT_CHANNELS_V77 if resolved_use_detail_head else MODEL_OUTPUT_CHANNELS,
+        )
+    )
+    resolved_model_variant = str(
+        getattr(
+            args,
+            "resolved_model_variant",
+            MODEL_VARIANT_WDL_TRESTLE_REFLECT_V77 if resolved_use_detail_head else (
+                MODEL_VARIANT_WDL_TRESTLE_REFLECT if DEFAULT_USE_WDL_GLOBAL_TRESTLE else MODEL_VARIANT_LEGACY
+            ),
+        )
+    )
+    resolved_norm_type = str(getattr(args, "resolved_norm_type", args.norm_type))
+    resolved_groupnorm_groups = int(getattr(args, "resolved_groupnorm_groups", args.groupnorm_groups))
+    resolved_detail_residual_scale = float(getattr(args, "resolved_detail_residual_scale", DEFAULT_DETAIL_RESIDUAL_SCALE))
     return {
-        "trainer_version": "v7.5.1",
-        "model_variant": MODEL_VARIANT_WDL_TRESTLE_REFLECT if DEFAULT_USE_WDL_GLOBAL_TRESTLE else MODEL_VARIANT_LEGACY,
+        "trainer_version": "v7.7" if resolved_model_family == "v7_7" else "v7.5.1",
+        "model_family": resolved_model_family,
+        "model_variant": resolved_model_variant,
         "use_wdl_global_trestle": DEFAULT_USE_WDL_GLOBAL_TRESTLE,
         "global_residual_scale": DEFAULT_GLOBAL_RESIDUAL_SCALE,
+        "use_detail_head": resolved_use_detail_head,
+        "detail_head_weight": args.detail_head_weight,
+        "detail_head_start_epoch": args.detail_head_start_epoch,
+        "detail_residual_scale": resolved_detail_residual_scale,
         "minimap_contract": "terrain-only-preferred-v1.1",
         "conv_padding_mode": "reflect",
         "blur_sigma": DEFAULT_BLUR_SIGMA,
@@ -2153,7 +2193,7 @@ def checkpoint_metadata_from_args(
         "include_maps": list(args.include_map),
         "exclude_maps": list(args.exclude_map),
         "input_channels": MODEL_INPUT_CHANNELS,
-        "output_channels": MODEL_OUTPUT_CHANNELS,
+        "output_channels": resolved_output_channels,
         "input_size": INPUT_SIZE,
         "output_size": OUTPUT_SIZE,
         "sample_count": sample_count,
@@ -2207,8 +2247,8 @@ def checkpoint_metadata_from_args(
         "emeralddream_malformed_variance": args.emeralddream_malformed_variance,
         "emeralddream_malformed_gradient": args.emeralddream_malformed_gradient,
         "emeralddream_malformed_extreme_fraction": args.emeralddream_malformed_extreme_fraction,
-        "norm_type": args.norm_type,
-        "groupnorm_groups": args.groupnorm_groups,
+        "norm_type": resolved_norm_type,
+        "groupnorm_groups": resolved_groupnorm_groups,
     }
 
 
@@ -2216,9 +2256,41 @@ def resolve_model_architecture_from_metadata(metadata: Optional[Dict[str, object
     if not metadata:
         return False, DEFAULT_GLOBAL_RESIDUAL_SCALE
 
+    variant = str(metadata.get("model_variant", "")).strip().lower()
     use_wdl_global_trestle = bool(metadata.get("use_wdl_global_trestle", False))
+    if variant in {MODEL_VARIANT_WDL_TRESTLE_REFLECT, MODEL_VARIANT_WDL_TRESTLE_REFLECT_V77}:
+        use_wdl_global_trestle = True
+    elif variant == MODEL_VARIANT_LEGACY:
+        use_wdl_global_trestle = False
     global_residual_scale = float(metadata.get("global_residual_scale", DEFAULT_GLOBAL_RESIDUAL_SCALE))
     return use_wdl_global_trestle, global_residual_scale
+
+
+def resolve_model_family_from_metadata(metadata: Optional[Dict[str, object]]) -> str:
+    if not metadata:
+        return DEFAULT_MODEL_FAMILY
+
+    model_family = str(metadata.get("model_family", "")).strip().lower()
+    if model_family in {"v7_5_1", "v7.5.1"}:
+        return "v7_5_1"
+    if model_family in {"v7_7", "v7.7"}:
+        return "v7_7"
+
+    variant = str(metadata.get("model_variant", "")).strip().lower()
+    if variant == MODEL_VARIANT_WDL_TRESTLE_REFLECT_V77 or bool(metadata.get("use_detail_head", False)):
+        return "v7_7"
+    return DEFAULT_MODEL_FAMILY
+
+
+def resolve_model_detail_head_from_metadata(metadata: Optional[Dict[str, object]]) -> Tuple[bool, float]:
+    if not metadata:
+        return False, DEFAULT_DETAIL_RESIDUAL_SCALE
+
+    use_detail_head = bool(metadata.get("use_detail_head", False))
+    if resolve_model_family_from_metadata(metadata) == "v7_7":
+        use_detail_head = True
+    detail_residual_scale = float(metadata.get("detail_residual_scale", DEFAULT_DETAIL_RESIDUAL_SCALE))
+    return use_detail_head, detail_residual_scale
 
 
 def resolve_model_norm_from_metadata(metadata: Optional[Dict[str, object]]) -> Tuple[str, int]:
@@ -2411,6 +2483,11 @@ def run_training_epoch_pass(
     disc_real_scores: List[float] = []
     disc_fake_scores: List[float] = []
     epoch_parts: Dict[str, float] = {}
+    detail_head_weight = (
+        args.detail_head_weight
+        if getattr(args, "resolved_model_family", args.model_family) == "v7_7" and epoch_number >= args.detail_head_start_epoch
+        else 0.0
+    )
 
     epoch_train_start = time.perf_counter()
     progress = tqdm(
@@ -2432,8 +2509,8 @@ def run_training_epoch_pass(
         if gan_enabled_epoch and do_disc_step:
             disc_optimizer.zero_grad(set_to_none=True)
             with amp_context:
-                real_disc_input = apply_discriminator_input_noise(targets, args.disc_input_noise_std)
-                fake_disc_input = apply_discriminator_input_noise(outputs.detach(), args.disc_input_noise_std)
+                real_disc_input = apply_discriminator_input_noise(targets[:, :2], args.disc_input_noise_std)
+                fake_disc_input = apply_discriminator_input_noise(outputs[:, :2].detach(), args.disc_input_noise_std)
                 real_pred = discriminator(real_disc_input)
                 fake_pred = discriminator(fake_disc_input)
                 real_targets = build_discriminator_targets(real_pred, args.disc_real_target, args.disc_label_noise)
@@ -2458,7 +2535,7 @@ def run_training_epoch_pass(
         with amp_context:
             adv_loss = None
             if gan_enabled_epoch:
-                fake_pred_for_gen = discriminator(outputs)
+                fake_pred_for_gen = discriminator(outputs[:, :2])
                 gen_targets = torch.full_like(fake_pred_for_gen, args.disc_real_target)
                 adv_loss = F.mse_loss(fake_pred_for_gen, gen_targets)
             loss, parts = combined_loss(
@@ -2469,6 +2546,7 @@ def run_training_epoch_pass(
                 input_context=inputs,
                 adv_loss=adv_loss,
                 adversarial_scale=args.adversarial_scale,
+                detail_head_weight=detail_head_weight,
             )
         if scaler is not None:
             scaler.scale(loss).backward()
@@ -2516,7 +2594,14 @@ def run_training_epoch_pass(
             amp_context = torch.autocast(device_type="cuda", dtype=amp_dtype) if use_amp else nullcontext()
             with amp_context:
                 outputs, output_bounds = model(inputs)
-                loss, _ = combined_loss(outputs, output_bounds, targets, bounds, input_context=inputs)
+                loss, _ = combined_loss(
+                    outputs,
+                    output_bounds,
+                    targets,
+                    bounds,
+                    input_context=inputs,
+                    detail_head_weight=detail_head_weight,
+                )
             val_losses.append(float(loss.item()))
 
     average_train_loss = float(np.mean(train_losses))
@@ -2786,27 +2871,58 @@ def train(args: argparse.Namespace) -> None:
     resume_checkpoint: Optional[Dict[str, Any]] = None
     use_wdl_global_trestle = DEFAULT_USE_WDL_GLOBAL_TRESTLE
     global_residual_scale = DEFAULT_GLOBAL_RESIDUAL_SCALE
+    resolved_model_family = args.model_family if args.model_family != "auto" else DEFAULT_MODEL_FAMILY
     resolved_norm_type = args.norm_type
     resolved_groupnorm_groups = max(1, args.groupnorm_groups)
+    use_detail_head = resolved_model_family == "v7_7"
+    detail_residual_scale = DEFAULT_DETAIL_RESIDUAL_SCALE
     if args.resume:
         resume_path = Path(args.resume)
         if not resume_path.exists():
             raise SystemExit(f"Resume checkpoint not found: {resume_path}")
         resume_checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
         resume_metadata = dict(resume_checkpoint.get("metadata", {}))
+        checkpoint_model_family = resolve_model_family_from_metadata(resume_metadata)
         use_wdl_global_trestle, global_residual_scale = resolve_model_architecture_from_metadata(
             resume_metadata
         )
+        checkpoint_use_detail_head, checkpoint_detail_residual_scale = resolve_model_detail_head_from_metadata(
+            resume_metadata
+        )
         checkpoint_norm_type, checkpoint_groupnorm_groups = resolve_model_norm_from_metadata(resume_metadata)
+        if args.model_family == "auto":
+            resolved_model_family = checkpoint_model_family
+            use_detail_head = checkpoint_use_detail_head
+            detail_residual_scale = checkpoint_detail_residual_scale
         if args.norm_type == "auto":
             resolved_norm_type = checkpoint_norm_type
             resolved_groupnorm_groups = checkpoint_groupnorm_groups
     elif args.norm_type == "auto":
         resolved_norm_type = DEFAULT_NORM_TYPE
 
+    if resolved_model_family == "v7_7":
+        use_detail_head = True
+
+    resolved_output_channels = MODEL_OUTPUT_CHANNELS_V77 if use_detail_head else MODEL_OUTPUT_CHANNELS
+    resolved_model_variant = (
+        MODEL_VARIANT_WDL_TRESTLE_REFLECT_V77 if use_detail_head else (
+            MODEL_VARIANT_WDL_TRESTLE_REFLECT if use_wdl_global_trestle else MODEL_VARIANT_LEGACY
+        )
+    )
+    args.resolved_model_family = resolved_model_family
+    args.resolved_norm_type = resolved_norm_type
+    args.resolved_groupnorm_groups = resolved_groupnorm_groups
+    args.resolved_output_channels = resolved_output_channels
+    args.resolved_model_variant = resolved_model_variant
+    args.resolved_use_detail_head = use_detail_head
+    args.resolved_detail_residual_scale = detail_residual_scale
+
     model = MultiChannelUNetV7(
+        out_channels=resolved_output_channels,
         use_wdl_global_trestle=use_wdl_global_trestle,
         global_residual_scale=global_residual_scale,
+        use_detail_head=use_detail_head,
+        detail_residual_scale=detail_residual_scale,
         norm_type=resolved_norm_type,
         groupnorm_groups=resolved_groupnorm_groups,
     ).to(device)
@@ -2860,6 +2976,10 @@ def train(args: argparse.Namespace) -> None:
         f"disc_targets={args.disc_real_target:.2f}/{args.disc_fake_target:.2f}, "
         f"disc_label_noise={args.disc_label_noise:.3f}, "
         f"disc_input_noise_std={args.disc_input_noise_std:.3f}, "
+        f"model_family={resolved_model_family}, "
+        f"detail_head={'on' if use_detail_head else 'off'}, "
+        f"detail_head_weight={args.detail_head_weight:.3f}, "
+        f"detail_head_start_epoch={args.detail_head_start_epoch}, "
         f"norm={resolved_norm_type}, "
         f"groupnorm_groups={resolved_groupnorm_groups}, "
         f"scheduler={args.scheduler_mode}, "
@@ -3389,7 +3509,7 @@ def train(args: argparse.Namespace) -> None:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train the V7.5.1 multichannel terrain regressor with cleaned dataset export, terrain-only minimap cleanup, GAN, and curated data.")
+    parser = argparse.ArgumentParser(description="Train the V7 terrain regressor family, including the stable V7.5.1 path and the unified V7.7 detail-head variant.")
     parser.add_argument("--dataset-root", action="append", default=[], help="Explicit dataset root. Repeat for multiple roots.")
     parser.add_argument("--synthetic-control-root", type=str, help="Optional synthetic control dataset root. Defaults to the shared build-validation control root.")
     parser.add_argument("--no-synthetic-controls", action="store_true", help="Disable automatic synthetic control generation and dataset inclusion.")
@@ -3504,6 +3624,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Normalization style for conv blocks. 'auto' uses checkpoint metadata when resuming and group norm for fresh runs.")
     parser.add_argument("--groupnorm-groups", type=int, default=DEFAULT_GROUPNORM_GROUPS,
                         help=f"Preferred group count for group normalization (default: {DEFAULT_GROUPNORM_GROUPS}).")
+    parser.add_argument("--model-family", choices=["auto", "v7_5_1", "v7_7"], default="auto",
+                        help="Model family to train. 'auto' keeps V7.5.1 for fresh runs and honors checkpoint metadata when resuming.")
+    parser.add_argument("--detail-head-weight", type=float, default=DEFAULT_DETAIL_HEAD_WEIGHT,
+                        help=f"Auxiliary supervision weight for the V7.7 detail head (default: {DEFAULT_DETAIL_HEAD_WEIGHT}).")
+    parser.add_argument("--detail-head-start-epoch", type=int, default=DEFAULT_DETAIL_HEAD_START_EPOCH,
+                        help=f"Epoch number (1-based) when V7.7 detail-head supervision starts (default: {DEFAULT_DETAIL_HEAD_START_EPOCH}).")
     parser.add_argument("--val-fraction", type=float, default=DEFAULT_VAL_FRACTION)
     parser.add_argument("--spatial-group-size", type=int, default=DEFAULT_SPATIAL_GROUP_SIZE)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)

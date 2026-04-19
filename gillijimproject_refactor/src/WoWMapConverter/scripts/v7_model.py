@@ -9,11 +9,14 @@ import torch.nn.functional as F
 OUTPUT_SIZE = 512
 MODEL_INPUT_CHANNELS = 13
 MODEL_OUTPUT_CHANNELS = 2
+MODEL_OUTPUT_CHANNELS_V77 = 3
 DEFAULT_GLOBAL_RESIDUAL_SCALE = 0.20
+DEFAULT_DETAIL_RESIDUAL_SCALE = 1.0
 DEFAULT_NORM_TYPE = "group"
 DEFAULT_GROUPNORM_GROUPS = 16
 MODEL_VARIANT_WDL_TRESTLE_REFLECT = "wdl-trestle-reflect-v1"
 MODEL_VARIANT_LEGACY = "legacy-absolute-v1"
+MODEL_VARIANT_WDL_TRESTLE_REFLECT_V77 = "wdl-trestle-reflect-v77"
 
 
 def _resolve_group_count(channels: int, preferred_groups: int) -> int:
@@ -68,12 +71,16 @@ class MultiChannelUNetV7(nn.Module):
         out_channels: int = MODEL_OUTPUT_CHANNELS,
         use_wdl_global_trestle: bool = False,
         global_residual_scale: float = DEFAULT_GLOBAL_RESIDUAL_SCALE,
+        use_detail_head: bool = False,
+        detail_residual_scale: float = DEFAULT_DETAIL_RESIDUAL_SCALE,
         norm_type: str = DEFAULT_NORM_TYPE,
         groupnorm_groups: int = DEFAULT_GROUPNORM_GROUPS,
     ):
         super().__init__()
         self.use_wdl_global_trestle = use_wdl_global_trestle
         self.global_residual_scale = float(global_residual_scale)
+        self.use_detail_head = bool(use_detail_head)
+        self.detail_residual_scale = float(detail_residual_scale)
         self.norm_type = str(norm_type).strip().lower()
         self.groupnorm_groups = max(1, int(groupnorm_groups))
 
@@ -148,6 +155,9 @@ class MultiChannelUNetV7(nn.Module):
 
         local_output = torch.clamp(raw_outputs[:, 1:2], 0.0, 1.0)
         outputs = torch.cat([global_output, local_output], dim=1)
+        if self.use_detail_head and raw_outputs.shape[1] > 2:
+            detail_output = torch.tanh(raw_outputs[:, 2:3]) * self.detail_residual_scale
+            outputs = torch.cat([outputs, detail_output], dim=1)
         if outputs.shape[-2:] != (OUTPUT_SIZE, OUTPUT_SIZE):
             outputs = F.interpolate(outputs, size=(OUTPUT_SIZE, OUTPUT_SIZE), mode="bilinear", align_corners=False)
 
@@ -184,8 +194,22 @@ def resolve_model_architecture_from_metadata(metadata: Optional[Dict[str, object
     use_wdl_global_trestle = bool(metadata.get("use_wdl_global_trestle", False))
     if variant == MODEL_VARIANT_WDL_TRESTLE_REFLECT:
         use_wdl_global_trestle = True
+    elif variant == MODEL_VARIANT_WDL_TRESTLE_REFLECT_V77:
+        use_wdl_global_trestle = True
     elif variant == MODEL_VARIANT_LEGACY:
         use_wdl_global_trestle = False
 
     global_residual_scale = float(metadata.get("global_residual_scale", DEFAULT_GLOBAL_RESIDUAL_SCALE))
     return use_wdl_global_trestle, global_residual_scale
+
+
+def resolve_model_detail_head_from_metadata(metadata: Optional[Dict[str, object]]) -> Tuple[bool, float]:
+    if not metadata:
+        return False, DEFAULT_DETAIL_RESIDUAL_SCALE
+
+    variant = str(metadata.get("model_variant", "")).strip().lower()
+    use_detail_head = bool(metadata.get("use_detail_head", False))
+    if variant == MODEL_VARIANT_WDL_TRESTLE_REFLECT_V77:
+        use_detail_head = True
+    detail_residual_scale = float(metadata.get("detail_residual_scale", DEFAULT_DETAIL_RESIDUAL_SCALE))
+    return use_detail_head, detail_residual_scale

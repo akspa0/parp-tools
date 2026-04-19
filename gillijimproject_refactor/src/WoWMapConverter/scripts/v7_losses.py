@@ -8,6 +8,7 @@ import torch.nn.functional as F
 LOSS_WEIGHTS = {
     "heightmap_global": 0.08,
     "heightmap_local": 0.14,
+    "detail_aux": 0.08,
     "bounds": 0.04,
     "ssim": 0.05,
     "gradient": 0.10,
@@ -170,6 +171,7 @@ def combined_loss(
     input_context: Optional[torch.Tensor] = None,
     adv_loss: Optional[torch.Tensor] = None,
     adversarial_scale: float = 1.0,
+    detail_head_weight: float = 0.0,
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
     predicted_heightmap = predicted_heightmap.float()
     predicted_bounds = predicted_bounds.float()
@@ -178,6 +180,11 @@ def combined_loss(
 
     global_loss = F.l1_loss(predicted_heightmap[:, 0:1], target_heightmap[:, 0:1])
     local_loss = F.l1_loss(predicted_heightmap[:, 1:2], target_heightmap[:, 1:2])
+    detail_aux_component = torch.zeros((), dtype=predicted_heightmap.dtype, device=predicted_heightmap.device)
+    if detail_head_weight > 0.0 and predicted_heightmap.shape[1] > 2:
+        target_detail = target_heightmap[:, 1:2] - target_heightmap[:, 0:1]
+        predicted_detail = predicted_heightmap[:, 2:3]
+        detail_aux_component = F.l1_loss(predicted_detail, target_detail)
     bounds_loss = F.mse_loss(predicted_bounds, target_bounds)
 
     def get_gradient(tensor: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -201,6 +208,7 @@ def combined_loss(
     total = (
         LOSS_WEIGHTS["heightmap_global"] * global_loss
         + LOSS_WEIGHTS["heightmap_local"] * local_loss
+        + (LOSS_WEIGHTS["detail_aux"] * detail_head_weight) * detail_aux_component
         + LOSS_WEIGHTS["bounds"] * bounds_loss
         + LOSS_WEIGHTS["gradient"] * gradient_component
         + LOSS_WEIGHTS["ssim"] * ssim_component
@@ -221,6 +229,7 @@ def combined_loss(
     return total, {
         "heightmap_global": float(global_loss.item()),
         "heightmap_local": float(local_loss.item()),
+        "detail_aux": float(detail_aux_component.item()),
         "bounds": float(bounds_loss.item()),
         "gradient": float(gradient_component.item()),
         "ssim": float(ssim_component.item()),
