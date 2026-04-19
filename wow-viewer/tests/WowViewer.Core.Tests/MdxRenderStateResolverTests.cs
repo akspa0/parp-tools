@@ -31,6 +31,7 @@ public sealed class MdxRenderStateResolverTests
         Assert.False(state.IsAdditive);
         Assert.True(state.DepthWrite);
         Assert.True(state.AlphaCutout);
+        Assert.Equal(0.0f, state.EmissiveGain, 4);
         Assert.Equal(0.5f, state.Alpha, 4);
         Assert.Equal(1u, state.BlendMode);
     }
@@ -58,6 +59,7 @@ public sealed class MdxRenderStateResolverTests
         Assert.True(state.IsAdditive);
         Assert.False(state.DepthWrite);
         Assert.False(state.AlphaCutout);
+        Assert.Equal(0.0f, state.EmissiveGain, 4);
         Assert.Equal(1.0f, state.Alpha, 4);
         Assert.Equal(3u, state.BlendMode);
     }
@@ -114,8 +116,59 @@ public sealed class MdxRenderStateResolverTests
         MdxResolvedMaterialState state = MdxRenderStateResolver.ResolveMaterial(summary, materialFile, 0, 0, 0, 50);
 
         Assert.True(state.IsTransparent);
+        Assert.Equal(0.0f, state.EmissiveGain, 4);
         Assert.Equal(0.3125f, state.Alpha, 4);
         Assert.Equal(@"Textures\Layer.blp", state.TexturePath);
+    }
+
+    [Fact]
+    public void ResolveMaterial_RuntimeLayerEmissiveTrack_SamplesRuntimeGain()
+    {
+        MdxSummary summary = CreateSummary(
+            sequences:
+            [
+                new MdxSequenceSummary(0, "Stand", 0, 100, 0.0f, 0u, 0.0f, 0, 100, null, null, null, null),
+            ],
+            materials:
+            [
+                new MdxMaterialSummary(0, 0,
+                [
+                    new MdxMaterialLayerSummary(0, 0u, 0u, -1, -1, 0, 1.0f),
+                ]),
+            ]);
+        MdxMaterialFile materialFile = new(
+            "synthetic_emissive_tracks.mdx",
+            "MDLX",
+            1300u,
+            "Synthetic",
+            [
+                new MdxMaterial(0, 0,
+                [
+                    new MdxMaterialLayer(
+                        0,
+                        0u,
+                        0u,
+                        -1,
+                        -1,
+                        0,
+                        1.0f,
+                        0.2f,
+                        new MdxScalarTrack(
+                            "KMTE",
+                            MdxTrackInterpolationType.Linear,
+                            -1,
+                            [
+                                new MdxScalarKeyframe(0, 0.2f, null, null),
+                                new MdxScalarKeyframe(100, 0.8f, null, null),
+                            ]),
+                        null,
+                        null),
+                ]),
+            ]);
+
+        MdxResolvedMaterialState state = MdxRenderStateResolver.ResolveMaterial(summary, materialFile, 0, 0, 0, 50);
+
+        Assert.Equal(0.5f, state.EmissiveGain, 4);
     }
 
     [Fact]
@@ -194,6 +247,7 @@ public sealed class MdxRenderStateResolverTests
             ReceivesLighting: true,
             UsesSphereEnvMap: false,
             LayerFlags: 0u,
+            EmissiveGain: 0.0f,
             Alpha: 0.8f,
             BlendMode: 0u);
         MdxGeosetGeometry geoset = CreateGeoset(index: 0, flags: 0x1u | 0x40u | 0x80u);
@@ -257,6 +311,7 @@ public sealed class MdxRenderStateResolverTests
             ReceivesLighting: true,
             UsesSphereEnvMap: false,
             LayerFlags: 0u,
+            EmissiveGain: 0.0f,
             Alpha: 0.5f,
             BlendMode: 0u);
         MdxGeosetGeometry geoset = CreateGeoset(index: 0, flags: 0u);
@@ -291,6 +346,7 @@ public sealed class MdxRenderStateResolverTests
             ReceivesLighting: true,
             UsesSphereEnvMap: false,
             LayerFlags: 0u,
+            EmissiveGain: 0.0f,
             Alpha: 1.0f,
             BlendMode: 0u);
         Quaternion rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 2.0f);

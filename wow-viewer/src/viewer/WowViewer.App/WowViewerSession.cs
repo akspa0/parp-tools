@@ -28,15 +28,21 @@ internal sealed class WowViewerAssetSource
 
     public string BuildLabel { get; set; } = string.Empty;
 
+    public string LooseOverlayRoot { get; set; } = string.Empty;
+
     public bool UsesArchiveSource => Kind == WowViewerAssetSourceKind.ArchiveVirtualPath;
 
     public string Describe()
     {
         if (UsesArchiveSource)
         {
+            string overlay = string.IsNullOrWhiteSpace(LooseOverlayRoot)
+                ? string.Empty
+                : $" + loose:{LooseOverlayRoot}";
+
             return string.IsNullOrWhiteSpace(BuildLabel)
-                ? $"archive:{ArchiveRoot}::{VirtualPath}"
-                : $"archive:{ArchiveRoot}::{VirtualPath} [{BuildLabel}]";
+                ? $"archive:{ArchiveRoot}::{VirtualPath}{overlay}"
+                : $"archive:{ArchiveRoot}::{VirtualPath} [{BuildLabel}]{overlay}";
         }
 
         if (string.IsNullOrWhiteSpace(InputPath))
@@ -184,6 +190,11 @@ internal sealed class WowViewerSession
         MdxCameraZoomFactor = float.IsFinite(MdxCameraZoomFactor) ? Math.Clamp(MdxCameraZoomFactor, 0.05f, 10.0f) : 0.72f;
         Source ??= new WowViewerAssetSource();
         World ??= new WowViewerWorldSessionState();
+        Source.ArchiveRoot = Source.ArchiveRoot?.Trim() ?? string.Empty;
+        Source.VirtualPath = Source.VirtualPath?.Trim() ?? string.Empty;
+        Source.InputPath = Source.InputPath?.Trim() ?? string.Empty;
+        Source.BuildLabel = Source.BuildLabel?.Trim() ?? string.Empty;
+        Source.LooseOverlayRoot = Source.LooseOverlayRoot?.Trim() ?? string.Empty;
         World.Normalize();
     }
 
@@ -194,6 +205,7 @@ internal sealed class WowViewerSession
         {
             ArchiveRoot = Source.UsesArchiveSource ? Source.ArchiveRoot : null,
             VirtualPath = Source.UsesArchiveSource ? Source.VirtualPath : null,
+            LooseOverlayRoot = Source.UsesArchiveSource ? Source.LooseOverlayRoot : null,
             InputPath = Source.UsesArchiveSource ? null : Source.InputPath,
             BuildLabel = Source.BuildLabel,
             ProfileIndex = ProfileIndex,
@@ -211,6 +223,7 @@ internal sealed class WowViewerSession
         {
             ArchiveRoot = Source.UsesArchiveSource ? Source.ArchiveRoot : null,
             VirtualPath = Source.UsesArchiveSource ? Source.VirtualPath : null,
+            LooseOverlayRoot = Source.UsesArchiveSource ? Source.LooseOverlayRoot : null,
             InputPath = Source.UsesArchiveSource ? null : Source.InputPath,
             BuildLabel = Source.BuildLabel,
             SequenceIndex = SequenceIndex,
@@ -239,6 +252,7 @@ internal sealed class WowViewerSession
         Source.VirtualPath = request.VirtualPath ?? string.Empty;
         Source.InputPath = request.InputPath ?? string.Empty;
         Source.BuildLabel = request.BuildLabel ?? string.Empty;
+        Source.LooseOverlayRoot = request.LooseOverlayRoot ?? string.Empty;
         ProfileIndex = request.ProfileIndex;
         SequenceIndex = request.SequenceIndex;
         TimeMs = request.TimeMs;

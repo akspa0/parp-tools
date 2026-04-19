@@ -15,6 +15,7 @@ public readonly record struct MdxResolvedMaterialState(
     bool ReceivesLighting,
     bool UsesSphereEnvMap,
     uint LayerFlags,
+    float EmissiveGain,
     float Alpha,
     uint BlendMode);
 
@@ -62,14 +63,14 @@ public static class MdxRenderStateResolver
         ArgumentNullException.ThrowIfNull(summary);
 
         if (materialId < 0 || materialId >= summary.Materials.Count)
-            return new MdxResolvedMaterialState(null, 0, -1, 0, false, false, true, true, false, true, false, 0, 1.0f, 0);
+            return new MdxResolvedMaterialState(null, 0, -1, 0, false, false, true, true, false, true, false, 0, 0.0f, 1.0f, 0);
 
         MdxMaterialSummary material = summary.Materials[materialId];
         if (material.LayerCount == 0)
-            return new MdxResolvedMaterialState(null, 0, -1, 0, false, false, true, true, false, true, false, 0, 1.0f, 0);
+            return new MdxResolvedMaterialState(null, 0, -1, 0, false, false, true, true, false, true, false, 0, 0.0f, 1.0f, 0);
 
         if (layerIndex < 0 || layerIndex >= material.LayerCount)
-            return new MdxResolvedMaterialState(null, 0, -1, 0, false, false, true, true, false, true, false, 0, 1.0f, 0);
+            return new MdxResolvedMaterialState(null, 0, -1, 0, false, false, true, true, false, true, false, 0, 0.0f, 1.0f, 0);
 
         MdxMaterialLayerSummary summaryLayer = material.Layers[layerIndex];
         MdxMaterialLayer? runtimeLayer = null;
@@ -115,6 +116,10 @@ public static class MdxRenderStateResolver
                 1.0f);
         }
 
+        float emissiveGain = Math.Max(runtimeLayer?.StaticEmissiveGain ?? 0.0f, 0.0f);
+        if (runtimeLayer?.EmissiveTrack is not null)
+            emissiveGain = Math.Max(MdxAnimationSampler.SampleScalarTrack(runtimeLayer.EmissiveTrack, summary, sequenceIndex, timeMs, emissiveGain), 0.0f);
+
         bool alphaCutout = blendMode == MdxBlendModeTransparentKey;
         bool isTransparent = !alphaCutout && (blendMode != 0 || alpha < 0.999f);
         bool isAdditive = blendMode is MdxBlendModeAdditive or MdxBlendModeAddAlpha;
@@ -122,7 +127,7 @@ public static class MdxRenderStateResolver
         bool depthWrite = (!isTransparent || alphaCutout) && (flags & MdxGeosetFlagNoDepthSet) == 0;
         bool receivesLighting = (flags & MdxGeosetFlagUnshaded) == 0;
         bool usesSphereEnvMap = (flags & 0x2) != 0;
-        return new MdxResolvedMaterialState(texturePath, replaceableId, transformId, coordId, isTransparent, isAdditive, depthTest, depthWrite, alphaCutout, receivesLighting, usesSphereEnvMap, flags, alpha, blendMode);
+        return new MdxResolvedMaterialState(texturePath, replaceableId, transformId, coordId, isTransparent, isAdditive, depthTest, depthWrite, alphaCutout, receivesLighting, usesSphereEnvMap, flags, emissiveGain, alpha, blendMode);
     }
 
     public static MdxResolvedGeosetRenderState ResolveGeosetRenderState(

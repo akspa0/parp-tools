@@ -569,7 +569,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
         {
             try
             {
-                bytes = ArchiveVirtualFileReader.ReadVirtualFile(texturePath, [request.ArchiveRoot!], new ArchiveCatalogBootstrapOptions());
+                bytes = VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(texturePath, request.ArchiveRoot!, request.LooseOverlayRoot);
                 return bytes.Length > 0;
             }
             catch

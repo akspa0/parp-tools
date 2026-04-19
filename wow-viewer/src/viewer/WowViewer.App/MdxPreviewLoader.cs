@@ -16,6 +16,8 @@ internal sealed class MdxPreviewLoadRequest
 
     public string? BuildLabel { get; init; }
 
+    public string? LooseOverlayRoot { get; init; }
+
     public int SequenceIndex { get; init; }
 
     public int TimeMs { get; init; }
@@ -174,7 +176,7 @@ internal static class MdxPreviewLoader
     private static byte[] ReadBytes(MdxPreviewLoadRequest request)
     {
         if (request.UsesArchiveSource)
-            return ArchiveVirtualFileReader.ReadVirtualFile(request.VirtualPath!, [request.ArchiveRoot!], new ArchiveCatalogBootstrapOptions());
+            return VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(request.VirtualPath!, request.ArchiveRoot!, request.LooseOverlayRoot);
 
         if (!string.IsNullOrWhiteSpace(request.InputPath) && File.Exists(request.InputPath))
             return File.ReadAllBytes(request.InputPath);

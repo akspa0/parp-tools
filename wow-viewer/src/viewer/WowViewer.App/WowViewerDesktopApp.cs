@@ -90,6 +90,10 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private bool _showFileBrowserWindow = true;
     private MdxFileBrowserState? _mdxFileBrowserState;
     private bool _wantOpenGameFolder;
+    private bool _wantAttachLooseFolder;
+    private string? _pendingKnownGoodClientPath;
+    private string? _pendingKnownGoodClientBuildLabel;
+    private bool _pendingKnownGoodClientAttachLooseFolder;
     private bool _worldNavigatorVisibleOnly = true;
     private bool _worldNavigatorShowWmo = true;
     private bool _worldNavigatorShowMdx = true;
@@ -236,6 +240,62 @@ internal sealed class WowViewerDesktopApp : IDisposable
             DrawBoundaryWindow();
         if (_showAboutWindow)
             DrawAboutWindow();
+
+        DrawGlobalStatusBar();
+    }
+
+
+    private void DrawGlobalStatusBar()
+    {
+        ImGuiViewportPtr viewport = ImGui.GetMainViewport();
+        float barHeight = ImGui.GetFrameHeightWithSpacing() + 6.0f;
+        Vector2 barPos = new(viewport.Pos.X, viewport.Pos.Y + viewport.Size.Y - barHeight);
+        Vector2 barSize = new(viewport.Size.X, barHeight);
+
+        ImGui.SetNextWindowPos(barPos);
+        ImGui.SetNextWindowSize(barSize);
+
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoDocking
+            | ImGuiWindowFlags.NoDecoration
+            | ImGuiWindowFlags.NoMove
+            | ImGuiWindowFlags.NoSavedSettings
+            | ImGuiWindowFlags.NoNav
+            | ImGuiWindowFlags.NoBringToFrontOnFocus
+            | ImGuiWindowFlags.NoFocusOnAppearing
+            | ImGuiWindowFlags.NoInputs;
+
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0.0f);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0.0f);
+        if (ImGui.Begin("##GlobalStatusBar", flags))
+        {
+            float fps = ImGui.GetIO().Framerate;
+            float frameMs = fps > 0.0f ? 1000.0f / fps : 0.0f;
+            double heapMb = GC.GetTotalMemory(false) / (1024.0 * 1024.0);
+            int gpuCommands = GetActiveGpuCommandCount();
+
+            string summary = $"FPS {fps:F1} | Frame {frameMs:F2} ms | Heap {heapMb:F1} MB | GPU Cmds {gpuCommands}";
+            if (_currentWorldRuntimeFrame is not null)
+            {
+                int visibleObjects = _currentWorldRuntimeFrame.Visibility.VisibleWmos.Count + _currentWorldRuntimeFrame.Visibility.VisibleMdx.Count;
+                summary += $" | World CPU {_currentWorldRuntimeFrame.Stats.TotalCpuMs:F2} ms | Visible {visibleObjects}";
+            }
+
+            summary += $" | {_session.GetWorkspaceLabel()}";
+            ImGui.TextUnformatted(summary);
+        }
+
+        ImGui.End();
+        ImGui.PopStyleVar(2);
+    }
+
+    private int GetActiveGpuCommandCount()
+    {
+        return _session.WorkspaceMode switch
+        {
+            WowViewerWorkspaceMode.StandaloneM2 => _gpuPreviewRenderer?.CommandCount ?? 0,
+            WowViewerWorkspaceMode.StandaloneMdx => _mdxGpuPreviewRenderer?.CommandCount ?? 0,
+            _ => 0,
+        };
     }
 
     private void DrawMainMenuBar()
@@ -260,6 +320,19 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
             if (ImGui.MenuItem("Save Current As Known-Good Base", enabled: !string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot)))
                 SaveCurrentAsKnownGood();
+
+            if (ImGui.MenuItem("Attach Loose Folder...", enabled: !string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot)))
+                PromptAttachLooseFolder();
+
+            if (ImGui.BeginMenu("Load Loose Folder Against Saved Base", _settings.KnownGoodClients.Count > 0))
+            {
+                foreach (var client in _settings.KnownGoodClients)
+                {
+                    if (ImGui.MenuItem($"{client.Name}##attach_saved_{client.Path}"))
+                        QueueKnownGoodClientAction(client.Path, client.BuildLabel, attachLooseFolder: true);
+                }
+                ImGui.EndMenu();
+            }
 
             if (ImGui.BeginMenu("Forget Known-Good Base", _settings.KnownGoodClients.Count > 0))
             {
@@ -412,10 +485,16 @@ internal sealed class WowViewerDesktopApp : IDisposable
         {
             string archiveRoot = _session.Source.ArchiveRoot;
             string virtualPath = _session.Source.VirtualPath;
+            string looseOverlayRoot = _session.Source.LooseOverlayRoot;
             ImGui.InputText("Archive Root", ref archiveRoot, 1024);
             ImGui.InputText("Virtual Path", ref virtualPath, 1024);
+            ImGui.InputText("Loose Overlay Root", ref looseOverlayRoot, 1024);
             _session.Source.ArchiveRoot = archiveRoot;
             _session.Source.VirtualPath = virtualPath;
+            _session.Source.LooseOverlayRoot = looseOverlayRoot;
+
+            if (ImGui.Button("Attach Loose Folder...", new Vector2(-1, 0)))
+                PromptAttachLooseFolder();
         }
         else
         {
@@ -491,12 +570,19 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_session.Source.UsesArchiveSource)
         {
             string archiveRoot = _session.Source.ArchiveRoot;
+            string looseOverlayRoot = _session.Source.LooseOverlayRoot;
             ImGui.InputText("Archive Root", ref archiveRoot, 1024);
             _session.Source.ArchiveRoot = archiveRoot;
 
             string virtualPath = _session.Source.VirtualPath;
             ImGui.InputText("Virtual Path", ref virtualPath, 1024);
             _session.Source.VirtualPath = virtualPath;
+
+            ImGui.InputText("Loose Overlay Root", ref looseOverlayRoot, 1024);
+            _session.Source.LooseOverlayRoot = looseOverlayRoot;
+
+            if (ImGui.Button("Attach Loose Folder...", new Vector2(-1, 0)))
+                PromptAttachLooseFolder();
         }
         else
         {
@@ -567,7 +653,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _mdxFileBrowserState ??= new MdxFileBrowserState();
 
         string archiveRoot = _session.Source.ArchiveRoot;
-        if (FileBrowserEx.DrawMdxFileBrowser("MDX File Browser", ref _showFileBrowserWindow, archiveRoot, _mdxFileBrowserState, OnMdxFileBrowserFileSelected))
+        string looseOverlayRoot = _session.Source.LooseOverlayRoot;
+        if (FileBrowserEx.DrawMdxFileBrowser("MDX File Browser", ref _showFileBrowserWindow, archiveRoot, looseOverlayRoot, _mdxFileBrowserState, OnMdxFileBrowserFileSelected))
         {
             // File was selected - the control window state is already updated by OnMdxFileBrowserFileSelected
         }
@@ -587,15 +674,50 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _wantOpenGameFolder = true;
     }
 
+    private void PromptAttachLooseFolder()
+    {
+        _wantAttachLooseFolder = true;
+    }
+
+    private void QueueKnownGoodClientAction(string gamePath, string? buildLabel, bool attachLooseFolder)
+    {
+        _pendingKnownGoodClientPath = gamePath;
+        _pendingKnownGoodClientBuildLabel = buildLabel;
+        _pendingKnownGoodClientAttachLooseFolder = attachLooseFolder;
+    }
+
     private void OpenSavedGameFolder(KnownGoodClientEntry client)
     {
         _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
         _session.Source.ArchiveRoot = client.Path;
         _session.Source.BuildLabel = client.BuildLabel;
         _session.Source.VirtualPath = string.Empty;
+        _session.Source.LooseOverlayRoot = string.Empty;
         _settings.LastOpenedClientPath = client.Path;
         SaveSettings();
         _statusMessage = $"Loaded saved client: {client.Name}";
+    }
+
+    private void AttachLooseFolder(string selectedPath)
+    {
+        if (string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot))
+        {
+            _statusMessage = "Load a base game folder before attaching a loose overlay folder.";
+            return;
+        }
+
+        string normalizedRoot = Path.GetFullPath(selectedPath);
+        if (!Directory.Exists(normalizedRoot))
+        {
+            _statusMessage = $"Loose overlay folder does not exist: {selectedPath}";
+            return;
+        }
+
+        _session.Source.LooseOverlayRoot = normalizedRoot;
+        _settings.LastOpenedLooseOverlayPath = normalizedRoot;
+        _mdxFileBrowserState = null;
+        SaveSettings();
+        _statusMessage = $"Attached loose overlay: {normalizedRoot}";
     }
 
     private void SaveCurrentAsKnownGood()
@@ -637,28 +759,82 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void HandleOpenGameFolderDialog()
     {
-        if (!_wantOpenGameFolder)
-            return;
-
-        _wantOpenGameFolder = false;
-
-        string? selectedPath = TryShowFolderDialog(
-            "Select WoW game folder (containing Data/ with MPQs)",
-            showNewFolderButton: false);
-
-        if (!string.IsNullOrEmpty(selectedPath) && Directory.Exists(selectedPath))
+        if (_wantOpenGameFolder)
         {
-            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
-            _session.Source.ArchiveRoot = selectedPath;
-            _session.Source.BuildLabel = string.Empty;
-            _session.Source.VirtualPath = string.Empty;
-            _settings.LastOpenedClientPath = selectedPath;
-            SaveSettings();
-            _statusMessage = $"Opened game folder: {selectedPath}";
+            _wantOpenGameFolder = false;
+
+            string? selectedPath = TryShowFolderDialog(
+                "Select WoW game folder (containing Data/ with MPQs)",
+                _settings.LastOpenedClientPath,
+                showNewFolderButton: false);
+
+            if (!string.IsNullOrEmpty(selectedPath) && Directory.Exists(selectedPath))
+            {
+                _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
+                _session.Source.ArchiveRoot = selectedPath;
+                _session.Source.BuildLabel = string.Empty;
+                _session.Source.VirtualPath = string.Empty;
+                _session.Source.LooseOverlayRoot = string.Empty;
+                _settings.LastOpenedClientPath = selectedPath;
+                SaveSettings();
+                _statusMessage = $"Opened game folder: {selectedPath}";
+            }
+            else
+            {
+                _statusMessage = "Folder picker unavailable on this platform/runtime. Enter the client path manually in Archive Root/Client Root.";
+            }
         }
-        else
+
+        if (_wantAttachLooseFolder)
         {
-            _statusMessage = "Folder picker unavailable on this platform/runtime. Enter the client path manually in Archive Root/Client Root.";
+            _wantAttachLooseFolder = false;
+
+            string? overlayPath = TryShowFolderDialog(
+                "Select loose overlay folder",
+                _settings.LastOpenedLooseOverlayPath,
+                showNewFolderButton: false);
+
+            if (!string.IsNullOrWhiteSpace(overlayPath))
+                AttachLooseFolder(overlayPath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_pendingKnownGoodClientPath))
+        {
+            string savedBasePath = _pendingKnownGoodClientPath!;
+            string? savedBuildLabel = _pendingKnownGoodClientBuildLabel;
+            bool attachLooseFolder = _pendingKnownGoodClientAttachLooseFolder;
+            _pendingKnownGoodClientPath = null;
+            _pendingKnownGoodClientBuildLabel = null;
+            _pendingKnownGoodClientAttachLooseFolder = false;
+
+            if (!Directory.Exists(savedBasePath))
+            {
+                _statusMessage = $"Saved client path no longer exists: {savedBasePath}";
+                return;
+            }
+
+            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
+            _session.Source.ArchiveRoot = savedBasePath;
+            _session.Source.BuildLabel = savedBuildLabel ?? string.Empty;
+            _session.Source.VirtualPath = string.Empty;
+            _session.Source.LooseOverlayRoot = string.Empty;
+            _settings.LastOpenedClientPath = savedBasePath;
+            SaveSettings();
+
+            if (attachLooseFolder)
+            {
+                string? overlayPath = TryShowFolderDialog(
+                    "Select loose folder to load against the saved base client",
+                    _settings.LastOpenedLooseOverlayPath,
+                    showNewFolderButton: false);
+
+                if (!string.IsNullOrWhiteSpace(overlayPath))
+                    AttachLooseFolder(overlayPath);
+            }
+            else
+            {
+                _statusMessage = $"Loaded saved client: {savedBasePath}";
+            }
         }
     }
 
@@ -1809,6 +1985,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _session.Source.VirtualPath = session.Source.VirtualPath ?? string.Empty;
         _session.Source.InputPath = session.Source.InputPath ?? string.Empty;
         _session.Source.BuildLabel = session.Source.BuildLabel ?? string.Empty;
+        _session.Source.LooseOverlayRoot = session.Source.LooseOverlayRoot ?? string.Empty;
         _session.World.ClientRoot = session.World.ClientRoot ?? string.Empty;
         _session.World.MapInput = session.World.MapInput ?? string.Empty;
         _session.World.BuildLabel = session.World.BuildLabel ?? string.Empty;

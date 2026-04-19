@@ -2,6 +2,41 @@
 
 # Active Context
 
+## Apr 18, 2026 - wow-viewer now ports saved-base plus loose-overlay source flow for standalone MDX/M2 loading
+
+- this continues the `wow-viewer` viewer-shell ownership lane by moving the legacy `MdxViewer` "saved base client + loose files on top" source workflow into `WowViewer.App`
+- active behavior after this slice:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` file menu now includes:
+		- `Attach Loose Folder...` for the active archive-backed source
+		- `Load Loose Folder Against Saved Base` over saved known-good clients
+	- standalone `M2` and `MDX` controls now expose `Loose Overlay Root` so archive-backed loads can override files from a loose folder before falling back to archive reads
+	- `wow-viewer/src/viewer/WowViewer.App/MdxFileBrowser.cs` now merges archive catalog entries with loose-overlay virtual files in one browser list instead of archive-only browsing
+	- `wow-viewer/src/viewer/WowViewer.App/M2PreviewLoader.cs`, `MdxPreviewLoader.cs`, `M2GpuPreviewRenderer.cs`, and `MdxGpuPreviewRenderer.cs` now resolve virtual files/texture loads through loose-first fallback via new `VirtualAssetOverlayResolver`
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` and `WowViewerAppSettings.cs` now persist loose-overlay source state (`LooseOverlayRoot` + last opened loose overlay folder path)
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded after integration
+- current boundary:
+	- this closes archive-base + loose-overlay source parity for standalone preview consumers and MDX file browsing in `WowViewer.App`
+	- it does not yet claim full old `MdxViewer` feature parity across world/editor shells or all legacy MDX/WMO/world runtime consumers
+
+## Apr 18, 2026 - wow-viewer viewer shell now has a global performance status bar
+
+- this continues the `wow-viewer` viewer-shell ownership lane in `WowViewer.App` by adding an app-global performance surface instead of per-workspace-only diagnostics
+- active behavior after this slice:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now renders a persistent bottom status bar overlay across all workspaces
+	- the status bar currently reports global runtime/perf counters:
+		- FPS
+		- frame time in milliseconds
+		- managed heap MB snapshot
+		- active GPU command count for the implemented standalone renderer workspace (`M2` or `MDX`)
+		- world-frame CPU ms and visible object count when a world runtime frame is active
+		- active workspace label
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded after status-bar integration
+- current boundary:
+	- this adds a shell-level global perf/status surface only; it does not claim MDX feature parity closure with the old `MdxViewer`
+	- deeper renderer-specific perf counters (for example stage-level GPU timings) remain future instrumentation work
+
 ## Apr 18, 2026 - wow-viewer standalone MDX preview now owns full classic MTLS payloads for animated layer alpha instead of summary-only material state
 
 - this keeps the active Plan 04 (`MDX` runtime and renderer closure) lane inside real classic material parity work rather than inventing preview-only behavior
@@ -18,6 +53,8 @@
 	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRenderStateResolver.cs` now has a runtime-material overload that samples:
 		- `KMTA` alpha tracks through `MdxAnimationSampler` so standalone preview material alpha follows real layer animation
 		- `KMTF` texture-layer tracks through `MdxAnimationSampler` so standalone preview layer texture selection can animate from runtime `MTLS` payloads
+		- `KMTE` emissive tracks plus static emissive gain, exposed through resolved material state for preview shading
+	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now routes resolved material emissive gain into geoset command emissive color so runtime material emission affects preview shader output
 	- the already-landed standalone preview material parity slice is now backed by the shared MTLS payload seam:
 		- transparent-key layers stay classified as opaque alpha-cutout layers instead of transparent-pass draws
 		- blend-mode-specific alpha handling remains in `MdxGpuPreviewRenderer`
@@ -26,12 +63,12 @@
 	- `wow-viewer/tests/WowViewer.Core.Tests/MdxMaterialReaderTests.cs`
 	- `wow-viewer/tests/WowViewer.Core.Tests/MdxRenderStateResolverTests.cs`
 - bounded proof in this chat:
-	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxMaterialReaderTests|MdxRenderStateResolverTests"` passed with `8` focused tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxMaterialReaderTests|MdxRenderStateResolverTests"` passed with `9` focused tests
 	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded after wiring `MTLS` payload ownership through the preview path
 - current boundary:
 	- this now closes shared classic `MTLS` payload ownership for standalone preview material alpha and related layer-state consumption, but it does not yet prove full legacy material parity in motion
 	- runtime `KMTF` texture-layer slot selection is now consumed in shared material resolution, but broader flipbook-family parity and any renderer-side atlas conventions still need dedicated validation slices
-	- emissive-track payload ownership exists, but preview material emission routing is still not fully ported from the legacy renderer
+	- shared emissive payloads now feed standalone geoset preview shading, but this remains bounded preview behavior rather than full legacy/native emission parity
 	- standalone preview signoff here remains bounded build plus focused-test proof, not interactive runtime parity signoff
 
 ## Apr 18, 2026 - wow-viewer standalone MDX preview now ports the existing MdxViewer PRE2 loop and keeps EVTS or RIBB non-fabricated

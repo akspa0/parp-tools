@@ -16,6 +16,8 @@ internal sealed class M2PreviewLoadRequest
 
     public string? BuildLabel { get; init; }
 
+    public string? LooseOverlayRoot { get; init; }
+
     public int ProfileIndex { get; init; }
 
     public int SequenceIndex { get; init; }
@@ -54,6 +56,9 @@ internal sealed class M2PreviewLoadRequest
         string source = UsesArchiveSource
             ? $"archive:{ArchiveRoot}::{VirtualPath}"
             : Path.GetFullPath(InputPath!);
+
+        if (UsesArchiveSource && !string.IsNullOrWhiteSpace(LooseOverlayRoot))
+            source += $" + loose:{LooseOverlayRoot}";
 
         return string.IsNullOrWhiteSpace(BuildLabel)
             ? source
@@ -131,7 +136,7 @@ internal static class M2PreviewLoader
     private static byte[] ReadBytes(M2PreviewLoadRequest request)
     {
         if (request.UsesArchiveSource)
-            return ArchiveVirtualFileReader.ReadVirtualFile(request.VirtualPath!, [request.ArchiveRoot!], new ArchiveCatalogBootstrapOptions());
+            return VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(request.VirtualPath!, request.ArchiveRoot!, request.LooseOverlayRoot);
 
         if (!string.IsNullOrWhiteSpace(request.InputPath) && File.Exists(request.InputPath))
             return File.ReadAllBytes(request.InputPath);
@@ -142,7 +147,7 @@ internal static class M2PreviewLoader
     private static byte[] ReadCompanionBytes(M2PreviewLoadRequest request, string companionPath)
     {
         if (request.UsesArchiveSource)
-            return ArchiveVirtualFileReader.ReadVirtualFile(companionPath, [request.ArchiveRoot!], new ArchiveCatalogBootstrapOptions());
+            return VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(companionPath, request.ArchiveRoot!, request.LooseOverlayRoot);
 
         string localPath = companionPath;
         if (!Path.IsPathRooted(localPath) && !string.IsNullOrWhiteSpace(request.InputPath))

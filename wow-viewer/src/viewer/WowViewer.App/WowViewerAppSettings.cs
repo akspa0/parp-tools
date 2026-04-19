@@ -25,6 +25,8 @@ internal sealed class WowViewerAppSettings
     public List<KnownGoodClientEntry> KnownGoodClients { get; set; } = [];
 
     public string? LastOpenedClientPath { get; set; }
+
+    public string? LastOpenedLooseOverlayPath { get; set; }
 }
 
 public sealed class KnownGoodClientEntry

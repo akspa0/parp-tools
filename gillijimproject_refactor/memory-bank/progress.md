@@ -1,5 +1,45 @@
 # Progress
 
+### Apr 18, 2026 - wow-viewer now supports saved-base plus loose-overlay source loading for standalone MDX/M2
+
+- what changed:
+	- updated `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` to port legacy source-flow features into the new app shell:
+		- `Attach Loose Folder...` menu action for active archive-backed source
+		- `Load Loose Folder Against Saved Base` over saved known-good clients
+		- pending saved-client action routing for optional loose-folder attach behavior
+		- archive-backed source controls for standalone `M2` and `MDX` now include editable `Loose Overlay Root`
+	- added `wow-viewer/src/viewer/WowViewer.App/VirtualAssetOverlayResolver.cs` and routed archive-backed virtual file reads through loose-first fallback in:
+		- `M2PreviewLoader.cs`
+		- `MdxPreviewLoader.cs`
+		- `M2GpuPreviewRenderer.cs`
+		- `MdxGpuPreviewRenderer.cs`
+	- extended `wow-viewer/src/viewer/WowViewer.App/MdxFileBrowser.cs` to merge archive catalog files and loose-overlay virtual files into one browser list
+	- updated persisted source/session state in:
+		- `wow-viewer/src/viewer/WowViewer.App/WowViewerSession.cs` (`LooseOverlayRoot`)
+		- `wow-viewer/src/viewer/WowViewer.App/WowViewerAppSettings.cs` (`LastOpenedLooseOverlayPath`)
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed
+- boundary:
+	- this lands source-flow and file-resolution parity for archive base plus loose overlay in standalone preview consumers
+	- it does not yet close full old `MdxViewer` feature parity across all shell/editor/world/runtime surfaces
+
+### Apr 18, 2026 - wow-viewer app shell now exposes a global status bar with performance counters
+
+- what changed:
+	- updated `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` to render a persistent bottom status bar across all workspaces
+	- added app-level perf/status reporting in that bar:
+		- FPS
+		- frame time in milliseconds
+		- managed heap MB
+		- active GPU command count for implemented standalone preview workspaces (`M2`/`MDX`)
+		- world runtime CPU ms and visible object count when a world frame is active
+		- current workspace label
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed
+- boundary:
+	- this lands global shell-level performance surfacing only
+	- it does not claim MDX feature parity closure or full renderer instrumentation parity with legacy/native paths
+
 ### Apr 18, 2026 - wow-viewer now has shared classic MTLS payload ownership with focused reader and resolver coverage
 
 - what changed:
@@ -16,15 +56,17 @@
 	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxRenderStateResolver.cs` now resolves material layers against runtime `MTLS` payloads when available and samples:
 		- `KMTA` alpha tracks for animated layer alpha
 		- `KMTF` texture-layer tracks for animated runtime texture slot selection
+		- `KMTE` emissive tracks (with static emissive gain fallback) for animated runtime emissive gain
+	- `wow-viewer/src/viewer/WowViewer.App/MdxGpuPreviewRenderer.cs` now emits geoset command emissive color from resolved material emissive gain instead of forcing geoset emissive to zero
 	- added focused coverage in:
 		- `wow-viewer/tests/WowViewer.Core.Tests/MdxMaterialReaderTests.cs`
 		- `wow-viewer/tests/WowViewer.Core.Tests/MdxRenderStateResolverTests.cs`
 - validation:
-	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxMaterialReaderTests|MdxRenderStateResolverTests"` passed with `8` tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxMaterialReaderTests|MdxRenderStateResolverTests"` passed with `9` tests
 	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed
 - boundary:
-	- this lands shared classic `MTLS` payload ownership plus animated layer-alpha and animated texture-slot consumption for the standalone preview material path
-	- full emissive routing is still future material-parity work even though emissive payload tracks are now owned in shared code
+	- this lands shared classic `MTLS` payload ownership plus animated layer-alpha, animated texture-slot, and animated emissive-gain consumption for the standalone preview material path
+	- this is still bounded preview proof and not full legacy/native material-emission parity signoff
 
 ### Apr 18, 2026 - wow-viewer standalone MDX preview now ports the existing MdxViewer PRE2 loop and keeps EVTS or RIBB non-fabricated
 

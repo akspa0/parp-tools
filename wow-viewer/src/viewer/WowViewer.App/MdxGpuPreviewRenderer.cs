@@ -300,7 +300,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
                     textureTransform.RotationRow0,
                     textureTransform.RotationRow1,
                     geosetState.BaseColor,
-                    Vector3.Zero,
+                    new Vector3(material.EmissiveGain),
                     geosetState.Alpha,
                     material.BlendMode,
                     geoset.MaterialId >= 0 && geoset.MaterialId < preview.Summary.MaterialCount
@@ -1763,7 +1763,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         {
             try
             {
-                bytes = ArchiveVirtualFileReader.ReadVirtualFile(texturePath, [request.ArchiveRoot!], new ArchiveCatalogBootstrapOptions());
+                bytes = VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(texturePath, request.ArchiveRoot!, request.LooseOverlayRoot);
                 return bytes.Length > 0;
             }
             catch

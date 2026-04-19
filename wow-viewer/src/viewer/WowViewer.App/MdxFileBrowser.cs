@@ -15,6 +15,8 @@ internal sealed class MdxFileBrowserState
     private int _selectedIndex = -1;
     private bool _catalogLoaded;
     private string _lastError = string.Empty;
+    private string _currentArchiveRoot = string.Empty;
+    private string _currentLooseOverlayRoot = string.Empty;
 
     private static readonly (string Value, string Label)[] ExtensionFilters =
     [
@@ -27,31 +29,41 @@ internal sealed class MdxFileBrowserState
         ? _filteredFiles[_selectedIndex]
         : null;
 
-    public bool TryLoadCatalog(string archiveRoot)
+    public bool TryLoadCatalog(string archiveRoot, string? looseOverlayRoot)
     {
         try
         {
             ClearCatalog();
 
-            var factory = new MpqArchiveCatalogFactory();
-            _catalog = factory.Create();
-            _catalog.LoadArchives([archiveRoot]);
+            _currentArchiveRoot = archiveRoot?.Trim() ?? string.Empty;
+            _currentLooseOverlayRoot = looseOverlayRoot?.Trim() ?? string.Empty;
 
-            var options = new ArchiveCatalogBootstrapOptions
-            {
-                ExternalListfilePath = Path.Combine(AppContext.BaseDirectory, "test_data", "community-listfile-withcapitals.csv")
-            };
+            HashSet<string> mergedFiles = new(StringComparer.OrdinalIgnoreCase);
 
-            if (File.Exists(options.ExternalListfilePath))
+            if (!string.IsNullOrWhiteSpace(_currentArchiveRoot))
             {
-                _catalog.LoadListfile(options.ExternalListfilePath);
+                var factory = new MpqArchiveCatalogFactory();
+                _catalog = factory.Create();
+                _catalog.LoadArchives([_currentArchiveRoot]);
+
+                var options = new ArchiveCatalogBootstrapOptions
+                {
+                    ExternalListfilePath = Path.Combine(AppContext.BaseDirectory, "test_data", "community-listfile-withcapitals.csv")
+                };
+
+                if (File.Exists(options.ExternalListfilePath))
+                    _catalog.LoadListfile(options.ExternalListfilePath);
+                else
+                    _catalog.LoadListfileEntries([]);
+
+                foreach (string file in _catalog.GetAllKnownFiles())
+                    mergedFiles.Add(file.Replace('\\', '/'));
             }
-            else
-            {
-                _catalog.LoadListfileEntries([]);
-            }
 
-            _allFiles = _catalog.GetAllKnownFiles().ToList();
+            foreach (string file in VirtualAssetOverlayResolver.EnumerateLooseVirtualFiles(_currentLooseOverlayRoot))
+                mergedFiles.Add(file.Replace('\\', '/'));
+
+            _allFiles = mergedFiles.ToList();
             _catalogLoaded = true;
             RefreshFilteredFiles();
             _lastError = string.Empty;
@@ -111,14 +123,20 @@ internal sealed class MdxFileBrowserState
 
     public void Draw(string archiveRoot, Action onFileSelected)
     {
+        string normalizedArchiveRoot = archiveRoot?.Trim() ?? string.Empty;
+        bool sourceChanged = !string.Equals(normalizedArchiveRoot, _currentArchiveRoot, StringComparison.OrdinalIgnoreCase);
+
         bool catalogLoaded = _catalogLoaded;
         if (ImGui.Checkbox("Catalog Loaded", ref catalogLoaded))
         {
             if (catalogLoaded && !_catalogLoaded)
-                TryLoadCatalog(archiveRoot);
+                TryLoadCatalog(normalizedArchiveRoot, _currentLooseOverlayRoot);
             else if (!catalogLoaded && _catalogLoaded)
                 ClearCatalog();
         }
+
+        if (_catalogLoaded && sourceChanged)
+            TryLoadCatalog(normalizedArchiveRoot, _currentLooseOverlayRoot);
 
         if (!_catalogLoaded)
         {
@@ -187,6 +205,17 @@ internal sealed class MdxFileBrowserState
             ImGui.TextColored(new Vector4(1f, 0f, 0f, 1f), _lastError);
     }
 
+    public void SetLooseOverlayRoot(string? looseOverlayRoot)
+    {
+        string normalized = looseOverlayRoot?.Trim() ?? string.Empty;
+        if (string.Equals(_currentLooseOverlayRoot, normalized, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _currentLooseOverlayRoot = normalized;
+        if (_catalogLoaded)
+            TryLoadCatalog(_currentArchiveRoot, _currentLooseOverlayRoot);
+    }
+
     private static void GetVisibleListRange(int itemCount, float rowHeight, out int startIndex, out int endIndex)
     {
         float clipY = ImGui.GetScrollY();
@@ -206,6 +235,7 @@ internal static class FileBrowserEx
         string label,
         ref bool browserOpen,
         string archiveRoot,
+        string? looseOverlayRoot,
         MdxFileBrowserState state,
         Action<string> onFileSelected)
     {
@@ -218,7 +248,11 @@ internal static class FileBrowserEx
         }
 
         ImGui.Text($"Archive Root: {archiveRoot}");
+        if (!string.IsNullOrWhiteSpace(looseOverlayRoot))
+            ImGui.Text($"Loose Overlay: {Path.GetFullPath(looseOverlayRoot)}");
         ImGui.Separator();
+
+        state.SetLooseOverlayRoot(looseOverlayRoot);
 
         state.Draw(archiveRoot, () =>
         {
