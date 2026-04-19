@@ -112,6 +112,15 @@ DEFAULT_LEARNING_RATE = 1e-4
 DEFAULT_NUM_EPOCHS = 500
 DEFAULT_EARLY_STOP_PATIENCE = 25
 DEFAULT_EARLY_STOP_START_EPOCH = 8
+DEFAULT_MIN_VAL_IMPROVEMENT = 5e-4
+DEFAULT_MIN_DETAIL_IMPROVEMENT = 5e-4
+DEFAULT_DETAIL_PATIENCE = 0
+DEFAULT_DETAIL_PATIENCE_REWARD = 1
+DEFAULT_DETAIL_PRESSURE_START_EPOCH = 6
+DEFAULT_DETAIL_PRESSURE_PATIENCE = 3
+DEFAULT_DETAIL_PRESSURE_EVERY = 3
+DEFAULT_DETAIL_PRESSURE_STEP = 0.08
+DEFAULT_DETAIL_PRESSURE_MAX = 1.60
 DEFAULT_ADVERSARIAL_SCALE = 0.10
 DEFAULT_START_GAN_EPOCH = 101
 DEFAULT_GAN_CYCLE_LENGTH = 0
@@ -2099,6 +2108,15 @@ def checkpoint_metadata_from_args(
         "gan_patience": args.gan_patience,
         "gan_min_gap_epochs": args.gan_min_gap_epochs,
         "concept_recovery_epochs": args.concept_recovery_epochs,
+        "min_val_improvement": args.min_val_improvement,
+        "min_detail_improvement": args.min_detail_improvement,
+        "detail_patience": args.detail_patience,
+        "detail_patience_reward": args.detail_patience_reward,
+        "detail_pressure_start_epoch": args.detail_pressure_start_epoch,
+        "detail_pressure_patience": args.detail_pressure_patience,
+        "detail_pressure_every": args.detail_pressure_every,
+        "detail_pressure_step": args.detail_pressure_step,
+        "detail_pressure_max": args.detail_pressure_max,
         "scheduler_mode": args.scheduler_mode,
         "min_learning_rate": args.min_learning_rate,
         "lr_plateau_cooldown": args.lr_plateau_cooldown,
@@ -2202,6 +2220,39 @@ def resolve_training_device(args: argparse.Namespace) -> Tuple[torch.device, boo
         "Use gillijimproject_refactor/scripts/setup_training_env.ps1 (or .sh) to deploy a hardware-matched uv training environment.\n"
         "If you intentionally want a CPU-only debug run, pass --allow-cpu explicitly."
     )
+
+
+DETAIL_PROXY_WEIGHTS = {
+    "ssim": 0.30,
+    "edge": 0.18,
+    "frequency": 0.18,
+    "laplacian": 0.14,
+    "gradient": 0.10,
+    "tile_edge": 0.10,
+}
+
+DETAIL_PRESSURE_KEYS = (
+    "ssim",
+    "edge",
+    "frequency",
+    "laplacian",
+    "gradient",
+    "transition",
+    "tile_edge",
+    "recovery",
+)
+
+
+def compute_detail_proxy(epoch_parts: Dict[str, float]) -> float:
+    """Lower is better. Tracks high-frequency/detail reconstruction quality."""
+    return float(
+        sum(float(epoch_parts.get(key, 0.0)) * weight for key, weight in DETAIL_PROXY_WEIGHTS.items())
+    )
+
+
+def apply_detail_pressure(detail_weight_baseline: Dict[str, float], pressure_scale: float) -> None:
+    for key, baseline in detail_weight_baseline.items():
+        LOSS_WEIGHTS[key] = baseline * pressure_scale
 
 
 def snapshot_training_state(
@@ -2686,6 +2737,12 @@ def train(args: argparse.Namespace) -> None:
         f"gan_min_gap_epochs={args.gan_min_gap_epochs}, "
         f"concept_recovery_epochs={args.concept_recovery_epochs}, "
         f"early_stop_start_epoch={args.early_stop_start_epoch}, "
+        f"min_val_improvement={args.min_val_improvement:.2e}, "
+        f"min_detail_improvement={args.min_detail_improvement:.2e}, "
+        f"detail_patience={args.detail_patience if args.detail_patience > 0 else args.patience}, "
+        f"detail_patience_reward={args.detail_patience_reward}, "
+        f"detail_pressure={args.detail_pressure_step:.2f}/max{args.detail_pressure_max:.2f} "
+        f"after {args.detail_pressure_patience} + every {args.detail_pressure_every} epoch(s), "
         f"disc_every={args.disc_every}, "
         f"disc_lr={args.disc_learning_rate:.2e}, "
         f"disc_targets={args.disc_real_target:.2f}/{args.disc_fake_target:.2f}, "
@@ -2711,12 +2768,17 @@ def train(args: argparse.Namespace) -> None:
 
     start_epoch = 0
     best_loss = float("inf")
+    best_detail_proxy = float("inf")
     patience_counter = 0
+    detail_patience_counter = 0
     gan_patience_counter = 0
     gan_schedule_remaining = 0
     gan_schedule_mode = "none"
     last_best_epoch = 0
     last_gan_epoch = 0
+    detail_weight_baseline = {key: float(LOSS_WEIGHTS[key]) for key in DETAIL_PRESSURE_KEYS}
+    detail_pressure_scale = 1.0
+    apply_detail_pressure(detail_weight_baseline, detail_pressure_scale)
 
     if args.resume:
         resume_path = Path(args.resume)
@@ -2724,7 +2786,9 @@ def train(args: argparse.Namespace) -> None:
         model.load_state_dict(checkpoint["model_state_dict"])
         start_epoch = int(checkpoint.get("epoch", -1)) + 1
         best_loss = float(checkpoint.get("val_loss", best_loss))
+        best_detail_proxy = float(checkpoint.get("best_detail_proxy", best_detail_proxy))
         patience_counter = int(checkpoint.get("patience_counter", patience_counter))
+        detail_patience_counter = int(checkpoint.get("detail_patience_counter", detail_patience_counter))
         gan_patience_counter = int(checkpoint.get("gan_patience_counter", gan_patience_counter))
         last_best_epoch = int(checkpoint.get("last_best_epoch", last_best_epoch))
         last_gan_epoch = int(checkpoint.get("last_gan_epoch", last_gan_epoch))
@@ -2749,6 +2813,8 @@ def train(args: argparse.Namespace) -> None:
                 gan_schedule_mode = "cooldown"
         if gan_schedule_remaining <= 0:
             gan_schedule_mode = "none"
+        detail_pressure_scale = float(checkpoint.get("detail_pressure_scale", detail_pressure_scale))
+        apply_detail_pressure(detail_weight_baseline, detail_pressure_scale)
         if not args.no_resume_optimizer:
             if "optimizer_state_dict" in checkpoint:
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -2765,6 +2831,10 @@ def train(args: argparse.Namespace) -> None:
         print("Resume optimizer state: enabled" if not args.no_resume_optimizer else "Resume optimizer state: disabled (--no-resume-optimizer)")
         print(f"Resume GAN schedule: mode={gan_schedule_mode}, remaining={gan_schedule_remaining}")
         print(f"Resume phase counters: best_epoch={last_best_epoch}, gan_epoch={last_gan_epoch}, gan_patience={gan_patience_counter}")
+        print(
+            "Resume detail state: "
+            f"best_detail={best_detail_proxy:.6f}, detail_patience={detail_patience_counter}, detail_pressure={detail_pressure_scale:.2f}x"
+        )
 
     for epoch in range(start_epoch, args.epochs):
         epoch_number = epoch + 1
@@ -2889,6 +2959,7 @@ def train(args: argparse.Namespace) -> None:
         val_loss_valid = epoch_result["val_loss_valid"]
         current_lr = epoch_result["current_lr"]
         epoch_parts = epoch_result["epoch_parts"]
+        detail_proxy = compute_detail_proxy(epoch_parts)
         avg_disc = epoch_result["avg_disc"]
         train_steps_per_second = epoch_result["train_steps_per_second"]
         train_samples_per_second = epoch_result["train_samples_per_second"]
@@ -2906,6 +2977,9 @@ def train(args: argparse.Namespace) -> None:
         history.setdefault("gan_schedule_mode", []).append(gan_schedule_mode)
         history.setdefault("gan_schedule_remaining", []).append(gan_schedule_remaining)
         history.setdefault("gan_patience", []).append(gan_patience_counter)
+        history.setdefault("detail_proxy", []).append(detail_proxy)
+        history.setdefault("detail_patience", []).append(detail_patience_counter)
+        history.setdefault("detail_pressure_scale", []).append(detail_pressure_scale)
         history["components"].append(epoch_parts)
         with open(output_dir / "training_log.json", "w", encoding="utf-8") as handle:
             json.dump(history, handle, indent=2)
@@ -2926,6 +3000,14 @@ def train(args: argparse.Namespace) -> None:
                 edge=epoch_parts.get("edge", 0.0),
                 freq=epoch_parts.get("frequency", 0.0),
                 lap=epoch_parts.get("laplacian", 0.0),
+            )
+        )
+        print(
+            "  Detail Proxy: {detail:.4f} | Detail Patience: {detail_patience}/{detail_limit} | Detail Pressure: {pressure:.2f}x".format(
+                detail=detail_proxy,
+                detail_patience=detail_patience_counter,
+                detail_limit=(args.detail_patience if args.detail_patience > 0 else args.patience),
+                pressure=detail_pressure_scale,
             )
         )
         print(
@@ -2965,9 +3047,15 @@ def train(args: argparse.Namespace) -> None:
 
         saved_new_best = False
         schedule_rearmed_this_epoch = False
-        if val_loss_valid and average_val_loss < best_loss:
+        val_improved = val_loss_valid and average_val_loss < (best_loss - args.min_val_improvement)
+        detail_improved = detail_proxy < (best_detail_proxy - args.min_detail_improvement)
+        detail_patience_limit = args.detail_patience if args.detail_patience > 0 else args.patience
+        if val_improved:
             best_loss = average_val_loss
+            if detail_proxy < best_detail_proxy:
+                best_detail_proxy = detail_proxy
             patience_counter = 0
+            detail_patience_counter = 0
             gan_patience_counter = 0
             last_best_epoch = epoch_number
             saved_new_best = True
@@ -3034,19 +3122,50 @@ def train(args: argparse.Namespace) -> None:
             if not val_loss_valid:
                 continue
             gan_patience_counter += 1
+            if detail_improved:
+                best_detail_proxy = detail_proxy
+                detail_patience_counter = 0
+                if epoch_number >= args.early_stop_start_epoch:
+                    patience_counter = max(0, patience_counter - max(args.detail_patience_reward, 0))
+                print(
+                    "  Detail proxy improved without new val-best; "
+                    f"reducing global patience pressure (reward={max(args.detail_patience_reward, 0)})"
+                )
+            else:
+                detail_patience_counter += 1
             if epoch_number >= args.early_stop_start_epoch:
-                patience_counter += 1
+                if not detail_improved:
+                    patience_counter += 1
                 phase_blocks_early_stop = gan_schedule_mode in {"burst", "concept-recovery", "cooldown"}
-                if patience_counter >= args.patience and not phase_blocks_early_stop:
+                early_stop_ready = patience_counter >= args.patience and detail_patience_counter >= detail_patience_limit
+                if early_stop_ready and not phase_blocks_early_stop:
                     print(f"\nEarly stopping: no improvement for {args.patience} epochs")
                     break
-                if patience_counter >= args.patience and phase_blocks_early_stop:
+                if early_stop_ready and phase_blocks_early_stop:
                     print("  Early stop deferred while GAN/concept-recovery controller still has unresolved phases")
+                if patience_counter >= args.patience and detail_patience_counter < detail_patience_limit:
+                    print(
+                        "  Early stop deferred because detail proxy is still progressing "
+                        f"({detail_patience_counter}/{detail_patience_limit})"
+                    )
             else:
                 print(
                     f"  Early-stop warmup active until epoch {args.early_stop_start_epoch}; "
                     "patience not counting yet"
                 )
+
+        desired_detail_pressure = 1.0
+        if epoch_number >= max(1, args.detail_pressure_start_epoch):
+            if not val_improved and not detail_improved and detail_patience_counter >= args.detail_pressure_patience:
+                pressure_steps = 1 + (detail_patience_counter - args.detail_pressure_patience) // max(args.detail_pressure_every, 1)
+                desired_detail_pressure = min(
+                    args.detail_pressure_max,
+                    1.0 + max(0, pressure_steps) * max(args.detail_pressure_step, 0.0),
+                )
+        if abs(desired_detail_pressure - detail_pressure_scale) > 1e-9:
+            detail_pressure_scale = desired_detail_pressure
+            apply_detail_pressure(detail_weight_baseline, detail_pressure_scale)
+            print(f"  Detail-pressure updated to {detail_pressure_scale:.2f}x")
 
         if gan_schedule_active_this_epoch and not schedule_rearmed_this_epoch:
             gan_schedule_remaining = max(gan_schedule_remaining - 1, 0)
@@ -3062,8 +3181,11 @@ def train(args: argparse.Namespace) -> None:
             "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
             "val_loss": average_val_loss,
             "val_loss_valid": val_loss_valid,
+            "best_detail_proxy": best_detail_proxy,
             "patience_counter": patience_counter,
+            "detail_patience_counter": detail_patience_counter,
             "gan_patience_counter": gan_patience_counter,
+            "detail_pressure_scale": detail_pressure_scale,
             "gan_schedule_mode": gan_schedule_mode,
             "gan_schedule_remaining": gan_schedule_remaining,
             "last_best_epoch": last_best_epoch,
@@ -3116,6 +3238,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--patience", type=int, default=DEFAULT_EARLY_STOP_PATIENCE)
     parser.add_argument("--early-stop-start-epoch", type=int, default=DEFAULT_EARLY_STOP_START_EPOCH,
                         help=f"Epoch number (1-based) when early-stop patience begins counting (default: {DEFAULT_EARLY_STOP_START_EPOCH}).")
+    parser.add_argument("--min-val-improvement", type=float, default=DEFAULT_MIN_VAL_IMPROVEMENT,
+                        help=f"Minimum validation-loss drop required to count as a new best (default: {DEFAULT_MIN_VAL_IMPROVEMENT}).")
+    parser.add_argument("--min-detail-improvement", type=float, default=DEFAULT_MIN_DETAIL_IMPROVEMENT,
+                        help=f"Minimum detail-proxy drop required to count as detail progress (default: {DEFAULT_MIN_DETAIL_IMPROVEMENT}).")
+    parser.add_argument("--detail-patience", type=int, default=DEFAULT_DETAIL_PATIENCE,
+                        help=(
+                            "Detail patience limit used alongside --patience for early stopping; "
+                            "0 means reuse --patience."
+                        ))
+    parser.add_argument("--detail-patience-reward", type=int, default=DEFAULT_DETAIL_PATIENCE_REWARD,
+                        help=f"How much to reduce patience counter when detail improves without a new val best (default: {DEFAULT_DETAIL_PATIENCE_REWARD}).")
+    parser.add_argument("--detail-pressure-start-epoch", type=int, default=DEFAULT_DETAIL_PRESSURE_START_EPOCH,
+                        help=f"Epoch number (1-based) when adaptive detail-pressure can begin (default: {DEFAULT_DETAIL_PRESSURE_START_EPOCH}).")
+    parser.add_argument("--detail-pressure-patience", type=int, default=DEFAULT_DETAIL_PRESSURE_PATIENCE,
+                        help=f"Non-detail-improving epochs before increasing detail-pressure (default: {DEFAULT_DETAIL_PRESSURE_PATIENCE}).")
+    parser.add_argument("--detail-pressure-every", type=int, default=DEFAULT_DETAIL_PRESSURE_EVERY,
+                        help=f"Additional non-detail-improving epochs per pressure increment (default: {DEFAULT_DETAIL_PRESSURE_EVERY}).")
+    parser.add_argument("--detail-pressure-step", type=float, default=DEFAULT_DETAIL_PRESSURE_STEP,
+                        help=f"Pressure increment applied to detail-focused loss weights (default: {DEFAULT_DETAIL_PRESSURE_STEP}).")
+    parser.add_argument("--detail-pressure-max", type=float, default=DEFAULT_DETAIL_PRESSURE_MAX,
+                        help=f"Maximum multiplicative scale for detail-focused loss weights (default: {DEFAULT_DETAIL_PRESSURE_MAX}).")
     parser.add_argument("--adversarial-scale", type=float, default=DEFAULT_ADVERSARIAL_SCALE,
                         help=f"Scale applied to adversarial loss weight (default: {DEFAULT_ADVERSARIAL_SCALE}, geometry-first safer default).")
     parser.add_argument("--start-gan-epoch", type=int, default=DEFAULT_START_GAN_EPOCH,
