@@ -28,6 +28,8 @@ internal sealed class PreviewCameraSettings
 
     public float ZoomFactor { get; init; } = 0.72f;
 
+    public Vector3 TargetOffset { get; init; } = Vector3.Zero;
+
     public PreviewCameraSettings Resolve()
     {
         float azimuth = AzimuthDegrees;
@@ -50,6 +52,7 @@ internal sealed class PreviewCameraSettings
             FieldOfViewDegrees = FieldOfViewDegrees,
             PaddingScale = PaddingScale,
             ZoomFactor = ZoomFactor,
+            TargetOffset = TargetOffset,
         };
     }
 
@@ -169,6 +172,7 @@ internal static class PreviewCameraPlanner
         Vector3 focusPoint = center;
         if (TryGetPreferredFocusPoint(summary, cameraFile, sequenceIndex, timeMs, min, max, out Vector3 preferredFocus))
             focusPoint = preferredFocus;
+        focusPoint += settings.TargetOffset;
 
         float aspect = Math.Max(width, 1) / (float)Math.Max(height, 1);
         float fov = settings.FieldOfViewDegrees * MathF.PI / 180.0f;

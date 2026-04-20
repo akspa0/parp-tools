@@ -1,5 +1,23 @@
 # Progress
 
+### Apr 19, 2026 - planned the next ML lane as a separate v9 texture-and-alpha refiner over real exported layer data
+
+- what changed:
+	- added `gillijimproject_refactor/plans/v9_texture_alpha_refiner_plan_2026-04-19.md`
+	- defined the next implementation lane as chunk-first inverse rendering over:
+		- exported alpha masks
+		- exported tileset textures
+		- terrain-only minimap targets
+		- semantic masks and `v9.1` terrain-shape priors
+	- explicitly kept the first refiner non-GAN-first:
+		- first prove texture-slot and alpha-mask decomposition plus forward minimap reconstruction
+		- only then add a bounded PatchGAN over rendered terrain-only minimap patches if it helps local realism
+- validation:
+	- planning-only slice; no new training or build validation required
+- boundary:
+	- this adds the implementation plan and target architecture only
+	- it does not yet add the data-audit script, cache builder, refiner trainer, or forward compositor
+
 ### Apr 19, 2026 - pivoted the next terrain-training line to v9 as the primary branch, with v7.8 reduced to optional bounded sanity checks only
 
 - what changed:

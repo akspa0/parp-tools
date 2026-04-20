@@ -5,6 +5,7 @@ import json
 import math
 import random
 import time
+from collections import defaultdict, deque
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,6 +18,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Subset
+
+from v7_losses import build_recovery_mask
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
@@ -41,7 +44,51 @@ DEFAULT_VAL_WORKERS = 0
 DEFAULT_AMP_DTYPE = "auto"
 DEFAULT_TARGET_CURATED_SAMPLES = 27
 DEFAULT_PREVIEW_COUNT = 4
+DEFAULT_PREVIEW_EVERY_EPOCHS = 10
+DEFAULT_PREVIEW_ARCHIVE_EVERY_EPOCHS = 10
+DEFAULT_LR_PLATEAU_PATIENCE = 20
+DEFAULT_LR_PLATEAU_FACTOR = 0.5
+DEFAULT_MIN_LEARNING_RATE = 1e-5
+DEFAULT_EARLY_STOP_PATIENCE = 120
+DEFAULT_EARLY_STOP_MIN_EPOCHS = 120
+DEFAULT_CURATION_MODE = "diverse-quality"
+DEFAULT_CURATION_DIVERSITY_BLOCK_SIZE = 8
+DEFAULT_CURATION_MAX_PER_GROUP = 2
+DEFAULT_SELECTION_METRIC = "auto"
+DEFAULT_DEV_EVAL_EVERY = 1
+DEFAULT_DEV_EVAL_BLOCK_SIZE = 8
+DEFAULT_AUX_LOSS_DECAY_START_EPOCH = 48
+DEFAULT_AUX_LOSS_DECAY_EPOCHS = 192
+DEFAULT_LATE_MID_L1_WEIGHT = 0.45
+DEFAULT_LATE_COARSE_L1_WEIGHT = 0.15
+DEFAULT_LATE_GRADIENT_WEIGHT = 0.35
+DEFAULT_LATE_MID_RESIDUAL_WEIGHT = 0.08
+DEFAULT_LATE_DETAIL_RESIDUAL_WEIGHT = 0.05
+MASKED_RGB_ATTENUATION = 0.85
+MASKED_NORMAL_ATTENUATION = 0.70
+DEFAULT_NORMAL_RGB = (128, 128, 255)
 
+IMAGENET_RGB_MEAN = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(3, 1, 1)
+IMAGENET_RGB_STD = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(3, 1, 1)
+
+V9_ACTIVE_INPUT_SIGNALS = [
+    "terrain_only_or_no_object_or_no_mccv_or_image_minimap_rgb",
+    "normal_rgb",
+    "wdl_17_or_height_17_base_prior",
+    "height_min_mask",
+    "height_max_mask",
+    "liquid_mask",
+    "liquid_height_prior",
+    "object_footprint_mask",
+    "brush_imprint_mask",
+    "hole_mask_16x16",
+]
+
+V9_NATIVE_TARGET_SIGNALS = [
+    "height_17",
+    "height_65",
+    "height_257",
+]
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -91,6 +138,86 @@ def avg_gradient_magnitude(image: np.ndarray) -> float:
         return 0.0
     magnitude = np.sqrt(dx[: dy.shape[0], :] ** 2 + dy[:, : dx.shape[1]] ** 2)
     return float(np.mean(magnitude))
+
+
+def _resize_channel_tensor(tensor: torch.Tensor, size: tuple[int, int], mode: str, align_corners: bool | None = None) -> torch.Tensor:
+    kwargs: dict[str, object] = {"size": size, "mode": mode}
+    if align_corners is not None and mode in {"bilinear", "bicubic"}:
+        kwargs["align_corners"] = align_corners
+    return F.interpolate(tensor.unsqueeze(0), **kwargs).squeeze(0)
+
+
+def _rgb_array_to_tensor(rgb: np.ndarray | None, fallback_rgb: tuple[int, int, int]) -> torch.Tensor:
+    if rgb is None:
+        rgb = np.full((256, 256, 3), fallback_rgb, dtype=np.uint8)
+    tensor = torch.from_numpy(rgb.astype(np.float32) / 255.0).permute(2, 0, 1)
+    return _resize_channel_tensor(tensor, (257, 257), mode="bilinear", align_corners=False)
+
+
+def _single_channel_array_to_tensor(array: np.ndarray | None, default_value: float = 0.0, resize_mode: str = "nearest") -> torch.Tensor:
+    if array is None:
+        return torch.full((1, 257, 257), float(default_value), dtype=torch.float32)
+
+    tensor = torch.from_numpy(array.astype(np.float32)).unsqueeze(0)
+    if tensor.shape[-2:] != (257, 257):
+        align_corners = False if resize_mode == "bilinear" else None
+        tensor = _resize_channel_tensor(tensor, (257, 257), mode=resize_mode, align_corners=align_corners)
+    return tensor
+
+
+def _normalize_rgb_input(rgb_tensor: torch.Tensor, recovery_mask: torch.Tensor, attenuation: float) -> tuple[torch.Tensor, torch.Tensor]:
+    attenuated = torch.clamp(rgb_tensor * (1.0 - recovery_mask * attenuation), 0.0, 1.0)
+    normalized = (attenuated - IMAGENET_RGB_MEAN) / IMAGENET_RGB_STD
+    return attenuated, normalized
+
+
+def _build_v9_input_channels(
+    arrays: dict[str, np.ndarray],
+    base_257_scaled: torch.Tensor,
+    *,
+    include_brush_mask: bool = True,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    minimap_rgb = _rgb_array_to_tensor(arrays.get("minimap_rgb_256"), fallback_rgb=(0, 0, 0))
+    normal_rgb = _rgb_array_to_tensor(arrays.get("normal_rgb_256"), fallback_rgb=DEFAULT_NORMAL_RGB)
+
+    height_hints = arrays.get("height_hints_v7")
+    if height_hints is None or len(height_hints) < 2:
+        height_min_value = 0.5
+        height_max_value = 0.5
+    else:
+        height_min_value = float(height_hints[0])
+        height_max_value = float(height_hints[1])
+
+    height_min_mask = torch.full((1, 257, 257), height_min_value, dtype=torch.float32)
+    height_max_mask = torch.full((1, 257, 257), height_max_value, dtype=torch.float32)
+    liquid_mask = _single_channel_array_to_tensor(arrays.get("liquid_mask_257"), resize_mode="nearest")
+    liquid_height_prior = _single_channel_array_to_tensor(arrays.get("liquid_height_257"), resize_mode="bilinear") * liquid_mask
+    object_mask = _single_channel_array_to_tensor(arrays.get("object_mask_257"), resize_mode="nearest")
+    brush_mask = _single_channel_array_to_tensor(arrays.get("brush_mask_257"), resize_mode="nearest")
+    if not include_brush_mask:
+        brush_mask = torch.zeros_like(brush_mask)
+    hole_mask_257 = _single_channel_array_to_tensor(arrays.get("hole_mask_16x16"), resize_mode="nearest")
+
+    recovery_mask = build_recovery_mask(object_mask=object_mask, liquid_mask=liquid_mask, brush_mask=brush_mask)
+    preview_minimap_rgb, minimap_input = _normalize_rgb_input(minimap_rgb, recovery_mask, MASKED_RGB_ATTENUATION)
+    _, normal_input = _normalize_rgb_input(normal_rgb, recovery_mask, MASKED_NORMAL_ATTENUATION)
+
+    inputs = torch.cat(
+        [
+            minimap_input,
+            normal_input,
+            base_257_scaled,
+            height_min_mask,
+            height_max_mask,
+            liquid_mask,
+            liquid_height_prior,
+            object_mask,
+            brush_mask,
+            hole_mask_257,
+        ],
+        dim=0,
+    )
+    return inputs, preview_minimap_rgb
 
 
 @dataclass(frozen=True)
@@ -178,11 +305,23 @@ def audit_entry(
     max_mean_wdl_delta: float,
     max_abs_wdl_delta: float,
 ) -> AuditedEntry:
+    max_mean_wdl_delta_threshold = max_mean_wdl_delta
+    max_abs_wdl_delta_threshold = max_abs_wdl_delta
     if not entry.shard_path.exists():
         return AuditedEntry(entry, 0.0, 0.0, math.inf, math.inf, 0.0, False, "missing_shard")
 
     arrays = load_npz_arrays(entry.shard_path)
-    required_arrays = ("height_257", "height_17", "hole_mask_16x16")
+    required_arrays = (
+        "height_257",
+        "height_17",
+        "hole_mask_16x16",
+        "normal_rgb_256",
+        "height_hints_v7",
+        "liquid_mask_257",
+        "liquid_height_257",
+        "object_mask_257",
+        "brush_mask_257",
+    )
     for name in required_arrays:
         if name not in arrays:
             return AuditedEntry(entry, 0.0, 0.0, math.inf, math.inf, 0.0, False, f"missing_{name}")
@@ -223,9 +362,9 @@ def audit_entry(
         wdl_delta = height_17 - wdl_17
         mean_wdl_delta = float(np.mean(np.abs(wdl_delta)))
         max_abs_wdl_delta = float(np.max(np.abs(wdl_delta)))
-        if mean_wdl_delta > max_mean_wdl_delta:
+        if mean_wdl_delta > max_mean_wdl_delta_threshold:
             return AuditedEntry(entry, minimap_variance, minimap_gradient, mean_wdl_delta, max_abs_wdl_delta, float(hole_mask.mean()), False, "mean_wdl_delta_too_high")
-        if max_abs_wdl_delta > max_abs_wdl_delta:
+        if max_abs_wdl_delta > max_abs_wdl_delta_threshold:
             return AuditedEntry(entry, minimap_variance, minimap_gradient, mean_wdl_delta, max_abs_wdl_delta, float(hole_mask.mean()), False, "max_wdl_delta_too_high")
 
     return AuditedEntry(
@@ -276,6 +415,9 @@ def audit_entries(
 def select_curated_entries(
     audited_entries: Sequence[AuditedEntry],
     limit: Optional[int],
+    curation_mode: str,
+    diversity_block_size: int,
+    max_per_group: int,
 ) -> list[V9SampleEntry]:
     accepted = [entry for entry in audited_entries if entry.accepted]
     accepted.sort(
@@ -287,8 +429,108 @@ def select_curated_entries(
         ),
         reverse=True,
     )
-    selected = accepted[:limit] if limit is not None else accepted
-    return [entry.sample for entry in selected]
+    if limit is None or curation_mode == "top-quality":
+        selected = accepted[:limit] if limit is not None else accepted
+        return [entry.sample for entry in selected]
+
+    grouped: dict[str, deque[AuditedEntry]] = defaultdict(deque)
+    for entry in accepted:
+        block_x = entry.sample.tile_x // max(1, diversity_block_size)
+        block_y = entry.sample.tile_y // max(1, diversity_block_size)
+        group_key = f"{entry.sample.dataset_key}:{entry.sample.map_name}:{block_x}:{block_y}"
+        grouped[group_key].append(entry)
+
+    group_order = sorted(
+        grouped.keys(),
+        key=lambda key: (
+            grouped[key][0].quality_score,
+            grouped[key][0].sample.height_range,
+            grouped[key][0].minimap_gradient,
+        ),
+        reverse=True,
+    )
+
+    selected_samples: list[V9SampleEntry] = []
+    selected_ids: set[str] = set()
+    per_group_count: dict[str, int] = defaultdict(int)
+    working_order = list(group_order)
+    while working_order and len(selected_samples) < limit:
+        next_order: list[str] = []
+        progressed = False
+        for group_key in working_order:
+            queue = grouped[group_key]
+            if max_per_group > 0 and per_group_count[group_key] >= max_per_group:
+                continue
+            if not queue:
+                continue
+
+            chosen = queue.popleft()
+            chosen_id = f"{chosen.sample.dataset_key}:{chosen.sample.tile_name}"
+            if chosen_id in selected_ids:
+                continue
+
+            selected_samples.append(chosen.sample)
+            selected_ids.add(chosen_id)
+            per_group_count[group_key] += 1
+            progressed = True
+
+            if queue and (max_per_group <= 0 or per_group_count[group_key] < max_per_group):
+                next_order.append(group_key)
+            if len(selected_samples) >= limit:
+                break
+
+        if not progressed:
+            break
+        working_order = next_order
+
+    if len(selected_samples) < limit:
+        for entry in accepted:
+            entry_id = f"{entry.sample.dataset_key}:{entry.sample.tile_name}"
+            if entry_id in selected_ids:
+                continue
+            selected_samples.append(entry.sample)
+            selected_ids.add(entry_id)
+            if len(selected_samples) >= limit:
+                break
+
+    return selected_samples
+
+
+def select_diverse_eval_entries(
+    entries: Sequence[V9SampleEntry],
+    limit: Optional[int],
+    block_size: int,
+    seed: int,
+) -> list[V9SampleEntry]:
+    ordered_entries = sorted(entries, key=lambda entry: (entry.dataset_key, entry.map_name, entry.tile_y, entry.tile_x, entry.tile_name))
+    if limit is None or len(ordered_entries) <= limit:
+        return ordered_entries
+
+    grouped: dict[str, deque[V9SampleEntry]] = defaultdict(deque)
+    for entry in ordered_entries:
+        block_x = entry.tile_x // max(1, block_size)
+        block_y = entry.tile_y // max(1, block_size)
+        group_key = f"{entry.dataset_key}:{entry.map_name}:{block_x}:{block_y}"
+        grouped[group_key].append(entry)
+
+    group_order = list(grouped.keys())
+    rng = random.Random(seed)
+    rng.shuffle(group_order)
+    selected: list[V9SampleEntry] = []
+    while group_order and len(selected) < limit:
+        next_order: list[str] = []
+        for group_key in group_order:
+            queue = grouped[group_key]
+            if not queue:
+                continue
+            selected.append(queue.popleft())
+            if queue:
+                next_order.append(group_key)
+            if len(selected) >= limit:
+                break
+        group_order = next_order
+
+    return selected[:limit]
 
 
 def build_validation_groups(entries: Sequence[V9SampleEntry], block_size: int) -> dict[str, list[int]]:
@@ -326,10 +568,11 @@ def split_grouped_indices(entries: Sequence[V9SampleEntry], val_fraction: float,
 
 
 class V9NativeDataset(Dataset):
-    def __init__(self, entries: Sequence[V9SampleEntry], height_scale: float, residual_scale: float):
+    def __init__(self, entries: Sequence[V9SampleEntry], height_scale: float, residual_scale: float, include_brush_mask: bool = True):
         self.entries = list(entries)
         self.height_scale = float(height_scale)
         self.residual_scale = float(residual_scale)
+        self.include_brush_mask = bool(include_brush_mask)
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -349,16 +592,6 @@ class V9NativeDataset(Dataset):
         base_257 = F.interpolate(base_17.unsqueeze(0), size=(257, 257), mode="bilinear", align_corners=True).squeeze(0)
         height_65 = torch.from_numpy(arrays["height_65"].astype(np.float32)).unsqueeze(0)
 
-        minimap = arrays.get("minimap_rgb_256")
-        if minimap is None:
-            minimap_tensor = torch.zeros((3, 257, 257), dtype=torch.float32)
-        else:
-            minimap_tensor = torch.from_numpy(minimap.astype(np.float32) / 255.0).permute(2, 0, 1)
-            minimap_tensor = F.interpolate(minimap_tensor.unsqueeze(0), size=(257, 257), mode="bilinear", align_corners=False).squeeze(0)
-
-        hole_mask = torch.from_numpy(arrays["hole_mask_16x16"].astype(np.float32)).unsqueeze(0)
-        hole_mask_257 = F.interpolate(hole_mask.unsqueeze(0), size=(257, 257), mode="nearest").squeeze(0)
-
         base_65_scaled = base_65 / self.height_scale
         base_257_scaled = base_257 / self.height_scale
         height_257_scaled = height_257 / self.height_scale
@@ -368,10 +601,15 @@ class V9NativeDataset(Dataset):
         mid_residual_target_65 = (height_65 - base_65) / self.residual_scale
         detail_target_257 = (height_257 - F.interpolate(height_65.unsqueeze(0), size=(257, 257), mode="bilinear", align_corners=True).squeeze(0)) / self.residual_scale
 
-        inputs = torch.cat([minimap_tensor, base_257_scaled, hole_mask_257], dim=0)
+        inputs, preview_minimap_rgb = _build_v9_input_channels(
+            arrays=arrays,
+            base_257_scaled=base_257_scaled,
+            include_brush_mask=self.include_brush_mask,
+        )
 
         return {
             "inputs": inputs,
+            "preview_minimap_rgb": preview_minimap_rgb,
             "target_height_257": height_257_scaled,
             "target_height_65": height_65_scaled,
             "target_height_17": height_17 / self.height_scale,
@@ -410,7 +648,7 @@ def _resolve_group_count(channels: int, preferred_groups: int) -> int:
 
 
 class V9TerrainModel(nn.Module):
-    def __init__(self, in_channels: int = 5, hidden_channels: int = DEFAULT_HIDDEN_CHANNELS, blocks_per_stage: int = DEFAULT_BLOCKS_PER_STAGE):
+    def __init__(self, in_channels: int = 14, hidden_channels: int = DEFAULT_HIDDEN_CHANNELS, blocks_per_stage: int = DEFAULT_BLOCKS_PER_STAGE):
         super().__init__()
         self.stem = nn.Sequential(
             nn.Conv2d(in_channels, hidden_channels, kernel_size=5, padding=2, padding_mode="reflect"),
@@ -488,6 +726,24 @@ def build_predictions(
     return coarse_height_17, mid_height_65, full_height_257
 
 
+def resolve_loss_weights(epoch: int, args: argparse.Namespace) -> dict[str, float]:
+    decay_start = max(1, int(args.aux_loss_decay_start_epoch))
+    decay_epochs = max(1, int(args.aux_loss_decay_epochs))
+    progress = min(max((epoch - decay_start) / decay_epochs, 0.0), 1.0)
+
+    def lerp(start: float, end: float) -> float:
+        return float(start + ((end - start) * progress))
+
+    return {
+        "full_l1": 1.0,
+        "mid_l1": lerp(0.70, args.late_mid_l1_weight),
+        "coarse_l1": lerp(0.45, args.late_coarse_l1_weight),
+        "gradient": lerp(0.25, args.late_gradient_weight),
+        "mid_residual": lerp(0.20, args.late_mid_residual_weight),
+        "detail_residual": lerp(0.20, args.late_detail_residual_weight),
+    }
+
+
 def compute_v9_loss(
     coarse_delta_17: torch.Tensor,
     mid_delta_65: torch.Tensor,
@@ -495,6 +751,7 @@ def compute_v9_loss(
     batch: dict[str, torch.Tensor],
     residual_scale: float,
     height_scale: float,
+    loss_weights: dict[str, float],
 ) -> tuple[torch.Tensor, dict[str, float]]:
     coarse_height_17, mid_height_65, full_height_257 = build_predictions(
         coarse_delta_17=coarse_delta_17,
@@ -520,12 +777,12 @@ def compute_v9_loss(
     mid_residual_loss = F.l1_loss(mid_delta_65, batch["target_mid_residual_65"])
     detail_residual_loss = F.l1_loss(detail_delta_257, batch["target_detail_residual_257"])
     total = (
-        full_l1
-        + (0.7 * mid_l1)
-        + (0.45 * coarse_l1)
-        + (0.25 * gradient_loss)
-        + (0.20 * mid_residual_loss)
-        + (0.20 * detail_residual_loss)
+        (loss_weights["full_l1"] * full_l1)
+        + (loss_weights["mid_l1"] * mid_l1)
+        + (loss_weights["coarse_l1"] * coarse_l1)
+        + (loss_weights["gradient"] * gradient_loss)
+        + (loss_weights["mid_residual"] * mid_residual_loss)
+        + (loss_weights["detail_residual"] * detail_residual_loss)
     )
     return total, {
         "full_l1": float(full_l1.item()),
@@ -556,6 +813,8 @@ def run_epoch(
     residual_scale: float,
     height_scale: float,
     channels_last: bool,
+    current_epoch: int,
+    args: argparse.Namespace,
 ) -> tuple[float, dict[str, float], float]:
     is_training = optimizer is not None
     model.train(is_training)
@@ -565,6 +824,7 @@ def run_epoch(
     start = time.perf_counter()
 
     autocast_enabled = device.type == "cuda" and amp_dtype in {torch.float16, torch.bfloat16}
+    loss_weights = resolve_loss_weights(current_epoch, args)
 
     for batch in loader:
         batch = move_batch_to_device(batch, device, channels_last)
@@ -580,6 +840,7 @@ def run_epoch(
                 batch=batch,
                 residual_scale=residual_scale,
                 height_scale=height_scale,
+                loss_weights=loss_weights,
             )
 
         if is_training:
@@ -603,6 +864,266 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
+
+
+def write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(content)
+
+
+def build_entry_signature(entries: Sequence[V9SampleEntry]) -> list[str]:
+    return [f"{entry.dataset_key}:{entry.tile_name}" for entry in entries]
+
+
+def build_training_checkpoint(
+    *,
+    args: argparse.Namespace,
+    epoch: int,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
+    history: Sequence[dict[str, Any]],
+    best_val_loss: float,
+    best_val_epoch: int,
+    best_selection_metric_name: str,
+    best_selection_metric_value: float,
+    best_epoch: int,
+    epochs_since_best: int,
+    selected_entries: Sequence[V9SampleEntry],
+    train_entries: Sequence[V9SampleEntry],
+    val_entries: Sequence[V9SampleEntry],
+) -> dict[str, Any]:
+    return {
+        "schema_version": "v9-train-checkpoint.v1",
+        "created_at_utc": utc_now_iso(),
+        "epoch": int(epoch),
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+        "history": list(history),
+        "best_val_loss": float(best_val_loss),
+        "best_val_epoch": int(best_val_epoch),
+        "best_selection_metric_name": best_selection_metric_name,
+        "best_selection_metric_value": float(best_selection_metric_value),
+        "best_epoch": int(best_epoch),
+        "epochs_since_best": int(epochs_since_best),
+        "config": vars(args),
+        "feature_contract": build_v9_feature_contract(args),
+        "selected_signature": build_entry_signature(selected_entries),
+        "train_signature": build_entry_signature(train_entries),
+        "val_signature": build_entry_signature(val_entries),
+    }
+
+
+def load_resume_state(
+    *,
+    checkpoint_path: Path,
+    args: argparse.Namespace,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
+    selected_entries: Sequence[V9SampleEntry],
+    train_entries: Sequence[V9SampleEntry],
+    val_entries: Sequence[V9SampleEntry],
+    device: torch.device,
+) -> dict[str, Any]:
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint["model"])
+    optimizer.load_state_dict(checkpoint["optimizer"])
+    scheduler.load_state_dict(checkpoint["scheduler"])
+
+    selected_signature = build_entry_signature(selected_entries)
+    train_signature = build_entry_signature(train_entries)
+    val_signature = build_entry_signature(val_entries)
+    if checkpoint.get("selected_signature") != selected_signature:
+        raise SystemExit("Resume checkpoint selected sample signature does not match the current run inputs.")
+    if checkpoint.get("train_signature") != train_signature:
+        raise SystemExit("Resume checkpoint train split does not match the current run inputs.")
+    if checkpoint.get("val_signature") != val_signature:
+        raise SystemExit("Resume checkpoint validation split does not match the current run inputs.")
+
+    saved_config = dict(checkpoint.get("config", {}))
+    for key in (
+        "batch_size",
+        "learning_rate",
+        "val_fraction",
+        "seed",
+        "height_scale",
+        "residual_scale",
+        "group_block_size",
+        "hidden_channels",
+        "blocks_per_stage",
+        "curation_mode",
+        "curation_diversity_block_size",
+        "curation_max_per_group",
+        "selection_metric",
+        "dev_eval_cache_manifest",
+        "dev_eval_limit",
+        "dev_eval_every",
+        "dev_eval_block_size",
+        "disable_brush_mask",
+    ):
+        if key in saved_config and getattr(args, key) != saved_config[key]:
+            raise SystemExit(f"Resume checkpoint config mismatch for '{key}': current={getattr(args, key)!r} saved={saved_config[key]!r}")
+
+    return {
+        "history": list(checkpoint.get("history", [])),
+        "start_epoch": int(checkpoint.get("epoch", 0)),
+        "best_val_loss": float(checkpoint.get("best_val_loss", math.inf)),
+        "best_val_epoch": int(checkpoint.get("best_val_epoch", 0)),
+        "best_selection_metric_name": str(checkpoint.get("best_selection_metric_name", "val_loss")),
+        "best_selection_metric_value": float(checkpoint.get("best_selection_metric_value", math.inf)),
+        "best_epoch": int(checkpoint.get("best_epoch", 0)),
+        "epochs_since_best": int(checkpoint.get("epochs_since_best", 0)),
+    }
+
+
+def resolve_selection_metric_name(args: argparse.Namespace) -> str:
+    if args.selection_metric != "auto":
+        return str(args.selection_metric)
+    if args.dev_eval_cache_manifest:
+        return "dev_wdl_mae_improvement"
+    return "val_loss"
+
+
+def resolve_selection_metric(
+    *,
+    selection_metric_name: str,
+    val_loss: float,
+    dev_eval: dict[str, float] | None,
+) -> tuple[float, bool, bool]:
+    if selection_metric_name == "val_loss":
+        return float(val_loss), False, True
+    if dev_eval is None:
+        return 0.0, True, False
+    if selection_metric_name == "dev_global_mae":
+        return float(dev_eval["model_global_mae"]), False, True
+    if selection_metric_name == "dev_wdl_mae_improvement":
+        return float(dev_eval["wdl_global_mae"] - dev_eval["model_global_mae"]), True, True
+    raise ValueError(f"Unsupported selection metric: {selection_metric_name}")
+
+
+def evaluate_model_on_entries(
+    *,
+    model: nn.Module,
+    entries: Sequence[V9SampleEntry],
+    device: torch.device,
+    amp_dtype: torch.dtype,
+    height_scale: float,
+    residual_scale: float,
+    channels_last: bool,
+    include_brush_mask: bool,
+) -> dict[str, float]:
+    if not entries:
+        raise ValueError("Development evaluation requires at least one cache entry.")
+
+    autocast_enabled = device.type == "cuda" and amp_dtype in {torch.float16, torch.bfloat16}
+    model_was_training = model.training
+    model.eval()
+
+    wdl_abs_sum = 0.0
+    wdl_sq_sum = 0.0
+    model_abs_sum = 0.0
+    model_sq_sum = 0.0
+    total_pixels = 0
+    tile_wdl_mae_sum = 0.0
+    tile_model_mae_sum = 0.0
+    tile_count = 0
+
+    with torch.no_grad():
+        for entry in entries:
+            arrays = load_npz_arrays(entry.shard_path)
+            gt = arrays["height_257"].astype(np.float32)
+
+            height_17 = torch.from_numpy(arrays["height_17"].astype(np.float32)).unsqueeze(0)
+            if "wdl_17" in arrays:
+                base_17 = torch.from_numpy(arrays["wdl_17"].astype(np.float32)).unsqueeze(0)
+            else:
+                base_17 = height_17.clone()
+
+            base_65 = F.interpolate(base_17.unsqueeze(0), size=(65, 65), mode="bilinear", align_corners=True).squeeze(0)
+            base_257 = F.interpolate(base_17.unsqueeze(0), size=(257, 257), mode="bilinear", align_corners=True).squeeze(0)
+            inputs, _ = _build_v9_input_channels(
+                arrays=arrays,
+                base_257_scaled=base_257 / height_scale,
+                include_brush_mask=include_brush_mask,
+            )
+
+            device_inputs = inputs.unsqueeze(0).to(device)
+            if channels_last:
+                device_inputs = device_inputs.contiguous(memory_format=torch.channels_last)
+            device_base_17 = (base_17 / height_scale).unsqueeze(0).to(device)
+            device_base_65 = (base_65 / height_scale).unsqueeze(0).to(device)
+            device_base_257 = (base_257 / height_scale).unsqueeze(0).to(device)
+
+            with (torch.autocast(device_type="cuda", dtype=amp_dtype) if autocast_enabled else nullcontext()):
+                coarse_delta_17, mid_delta_65, detail_delta_257 = model(device_inputs)
+                _, _, full_height_257 = build_predictions(
+                    coarse_delta_17=coarse_delta_17,
+                    mid_delta_65=mid_delta_65,
+                    detail_delta_257=detail_delta_257,
+                    base_height_17=device_base_17,
+                    base_height_65=device_base_65,
+                    base_height_257=device_base_257,
+                    residual_scale=residual_scale,
+                    height_scale=height_scale,
+                )
+
+            model_pred = (full_height_257.squeeze(0).squeeze(0).detach().cpu().numpy() * height_scale).astype(np.float32)
+            wdl_pred = base_257.squeeze(0).cpu().numpy().astype(np.float32)
+
+            wdl_err = wdl_pred - gt
+            model_err = model_pred - gt
+            wdl_abs = np.abs(wdl_err)
+            model_abs = np.abs(model_err)
+
+            wdl_abs_sum += float(wdl_abs.sum())
+            wdl_sq_sum += float((wdl_err ** 2).sum())
+            model_abs_sum += float(model_abs.sum())
+            model_sq_sum += float((model_err ** 2).sum())
+            total_pixels += int(gt.size)
+            tile_wdl_mae_sum += float(wdl_abs.mean())
+            tile_model_mae_sum += float(model_abs.mean())
+            tile_count += 1
+
+    model.train(model_was_training)
+
+    return {
+        "tile_count": float(tile_count),
+        "wdl_global_mae": wdl_abs_sum / max(total_pixels, 1),
+        "wdl_global_rmse": math.sqrt(wdl_sq_sum / max(total_pixels, 1)),
+        "wdl_mean_tile_mae": tile_wdl_mae_sum / max(tile_count, 1),
+        "model_global_mae": model_abs_sum / max(total_pixels, 1),
+        "model_global_rmse": math.sqrt(model_sq_sum / max(total_pixels, 1)),
+        "model_mean_tile_mae": tile_model_mae_sum / max(tile_count, 1),
+        "wdl_mae_improvement": (wdl_abs_sum / max(total_pixels, 1)) - (model_abs_sum / max(total_pixels, 1)),
+    }
+
+
+def build_v9_feature_contract(args: argparse.Namespace | None = None) -> dict[str, list[str] | str]:
+    zeroed_input_signals: list[str] = []
+    if args is not None and getattr(args, "disable_brush_mask", False):
+        zeroed_input_signals.append("brush_imprint_mask")
+
+    return {
+        "contract_version": "v9-native-inputs.v2",
+        "active_input_signals": list(V9_ACTIVE_INPUT_SIGNALS),
+        "native_target_signals": list(V9_NATIVE_TARGET_SIGNALS),
+        "zeroed_input_signals": zeroed_input_signals,
+        "summary": (
+            "V9 now consumes the V7.7 multichannel context stack plus the native hole mask, "
+            "while keeping raw native terrain targets instead of PNG heightmaps."
+        ),
+    }
+
+
+def describe_v9_input_stack(args: argparse.Namespace) -> str:
+    brush_state = "disabled" if getattr(args, "disable_brush_mask", False) else "enabled"
+    return (
+        "Active v9 inputs | cleaned/fallback minimap RGB + normal RGB + WDL/base prior + "
+        f"height hints + liquid/object masks + brush mask {brush_state} + liquid height + hole mask"
+    )
 
 
 def parse_cohort_sizes(value: str | None) -> list[int]:
@@ -638,6 +1159,17 @@ def _resize_rgb(rgb: np.ndarray, size: int) -> np.ndarray:
     return np.asarray(Image.fromarray(rgb).resize((size, size), Image.Resampling.NEAREST), dtype=np.uint8)
 
 
+def select_preview_entries(entries: Sequence[V9SampleEntry], preview_count: int, preview_seed: int) -> list[V9SampleEntry]:
+    if preview_count <= 0 or not entries:
+        return []
+    if len(entries) <= preview_count:
+        return list(entries)
+
+    rng = random.Random(preview_seed)
+    selected_indices = sorted(rng.sample(range(len(entries)), preview_count))
+    return [entries[index] for index in selected_indices]
+
+
 def export_preview_images(
     model: nn.Module,
     entries: Sequence[V9SampleEntry],
@@ -648,13 +1180,55 @@ def export_preview_images(
     residual_scale: float,
     preview_count: int,
     channels_last: bool,
+    preview_seed: int,
+    include_brush_mask: bool,
+    epoch: int,
+    archive_every_epochs: int,
 ) -> None:
     if not entries or preview_count <= 0:
         return
 
     preview_dir = output_dir / "previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
-    dataset = V9NativeDataset(entries[:preview_count], height_scale=height_scale, residual_scale=residual_scale)
+    for existing_preview in preview_dir.glob("*.png"):
+        existing_preview.unlink()
+
+    archive_dir: Path | None = None
+    if archive_every_epochs > 0 and epoch % archive_every_epochs == 0:
+        archive_dir = preview_dir / "history" / f"epoch_{epoch:04d}"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+
+    preview_entries = select_preview_entries(entries, preview_count, preview_seed)
+    selected_names = ", ".join(entry.tile_name for entry in preview_entries)
+    readme_text = (
+        "Preview layout\n"
+        "Top row, left to right:\n"
+        "1. Minimap RGB input\n"
+        "2. Predicted full 257x257 terrain height\n"
+        "3. Ground-truth full 257x257 terrain height\n"
+        "4. Absolute full-height error heatmap (red = larger error)\n\n"
+        "Bottom row, left to right:\n"
+        "1. Predicted coarse 17x17 terrain, resized for display\n"
+        "2. Ground-truth 17x17 terrain, resized for display\n"
+        "3. Predicted mid 65x65 terrain, resized for display\n"
+        "4. Ground-truth 65x65 terrain, resized for display\n\n"
+        "Reading guide\n"
+        "- Good results have similar large-scale landform shapes in columns 2 and 3 of the top row.\n"
+        "- The error panel should get darker and less red over time.\n"
+        "- The bottom row shows whether the model is learning the right coarse terrain scaffold before fine detail.\n"
+        "- Small texture-like minimap details do not have to match height directly; terrain shape matters more than color similarity.\n"
+        f"- This export is a rotating validation subset, not a fixed first-N list. Current tiles: {selected_names or 'none'}.\n"
+        f"- Source epoch: {epoch}.\n"
+    )
+    write_text(preview_dir / "README.txt", readme_text)
+    if archive_dir is not None:
+        write_text(archive_dir / "README.txt", readme_text)
+    dataset = V9NativeDataset(
+        preview_entries,
+        height_scale=height_scale,
+        residual_scale=residual_scale,
+        include_brush_mask=include_brush_mask,
+    )
     autocast_enabled = device.type == "cuda" and amp_dtype in {torch.float16, torch.bfloat16}
 
     model_was_training = model.training
@@ -676,7 +1250,7 @@ def export_preview_images(
                     height_scale=height_scale,
                 )
 
-            minimap = (batch["inputs"][:3].permute(1, 2, 0).cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
+            minimap = (batch["preview_minimap_rgb"].permute(1, 2, 0).cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
             target_257 = batch["target_height_257"].squeeze(0).cpu().numpy()
             target_65 = batch["target_height_65"].squeeze(0).cpu().numpy()
             target_17 = batch["target_height_17"].squeeze(0).cpu().numpy()
@@ -705,8 +1279,11 @@ def export_preview_images(
                 axis=1,
             )
             preview = np.concatenate([row_one, row_two], axis=0)
-            tile_name = entries[index].tile_name
-            Image.fromarray(preview).save(preview_dir / f"{index:02d}_{tile_name}.png")
+            tile_name = preview_entries[index].tile_name
+            preview_name = f"{index:02d}_{tile_name}.png"
+            Image.fromarray(preview).save(preview_dir / preview_name)
+            if archive_dir is not None:
+                Image.fromarray(preview).save(archive_dir / preview_name)
 
     model.train(model_was_training)
 
@@ -725,11 +1302,23 @@ def train_single_run(
     train_entries = [selected_entries[index] for index in train_indices]
     val_entries = [selected_entries[index] for index in val_indices]
 
-    train_dataset = V9NativeDataset(train_entries, height_scale=args.height_scale, residual_scale=args.residual_scale)
-    val_dataset = V9NativeDataset(val_entries, height_scale=args.height_scale, residual_scale=args.residual_scale)
+    train_dataset = V9NativeDataset(
+        train_entries,
+        height_scale=args.height_scale,
+        residual_scale=args.residual_scale,
+        include_brush_mask=not args.disable_brush_mask,
+    )
+    val_dataset = V9NativeDataset(
+        val_entries,
+        height_scale=args.height_scale,
+        residual_scale=args.residual_scale,
+        include_brush_mask=not args.disable_brush_mask,
+    )
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.train_workers, pin_memory=device.type == "cuda")
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.val_workers, pin_memory=device.type == "cuda")
+    train_batches = len(train_loader)
+    val_batches = len(val_loader)
 
     model = V9TerrainModel(hidden_channels=args.hidden_channels, blocks_per_stage=args.blocks_per_stage).to(device)
     if args.channels_last:
@@ -738,11 +1327,65 @@ def train_single_run(
         model = torch.compile(model)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=args.lr_plateau_factor,
+        patience=args.lr_plateau_patience,
+        min_lr=args.min_learning_rate,
+    )
     history: list[dict[str, Any]] = []
     best_val_loss = math.inf
+    best_epoch = 0
     best_state: Optional[dict[str, Any]] = None
+    epochs_since_best = 0
+    start_epoch = 0
+    resumed_from: str | None = None
+    last_checkpoint_path = run_output_dir / "last_checkpoint.pt"
 
-    for epoch in range(1, args.epochs + 1):
+    if args.resume_from:
+        resume_path = Path(args.resume_from)
+        if not resume_path.exists():
+            raise SystemExit(f"Resume checkpoint does not exist: {resume_path}")
+        resume_state = load_resume_state(
+            checkpoint_path=resume_path,
+            args=args,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            selected_entries=selected_entries,
+            train_entries=train_entries,
+            val_entries=val_entries,
+            device=device,
+        )
+        history = resume_state["history"]
+        start_epoch = int(resume_state["start_epoch"])
+        best_val_loss = float(resume_state["best_val_loss"])
+        best_epoch = int(resume_state["best_epoch"])
+        epochs_since_best = int(resume_state["epochs_since_best"])
+        resumed_from = str(resume_path)
+
+    print(
+        f"Training V9 | epochs={args.epochs} | batch={args.batch_size} | lr={args.learning_rate:.2e} | "
+        f"plateau_patience={args.lr_plateau_patience} | early_stop_patience={args.early_stop_patience} | "
+        f"preview_count={args.preview_count} | preview_every={args.preview_every_epochs} | preview_archive_every={args.preview_archive_every_epochs}"
+    )
+    print(
+        f"Dataset split | train_samples={len(train_entries)} ({train_batches} batch(es)) | "
+        f"val_samples={len(val_entries)} ({val_batches} batch(es))"
+    )
+    print(
+        "Preview legend: top=minimap | pred257 | target257 | abs-error ; "
+        "bottom=pred17 | target17 | pred65 | target65"
+    )
+    print(describe_v9_input_stack(args))
+    if resumed_from is not None:
+        print(f"Resuming from checkpoint | path={resumed_from} | start_epoch={start_epoch + 1} | best {best_val_loss:.6f}@{best_epoch}")
+
+    if start_epoch >= args.epochs:
+        print(f"Resume checkpoint is already at epoch {start_epoch}, which meets or exceeds requested epochs={args.epochs}; skipping training.")
+
+    for epoch in range(start_epoch + 1, args.epochs + 1):
         train_loss, train_components, train_sps = run_epoch(
             model=model,
             loader=train_loader,
@@ -752,6 +1395,8 @@ def train_single_run(
             residual_scale=args.residual_scale,
             height_scale=args.height_scale,
             channels_last=args.channels_last,
+            current_epoch=epoch,
+            args=args,
         )
         val_loss, val_components, val_sps = run_epoch(
             model=model,
@@ -762,7 +1407,11 @@ def train_single_run(
             residual_scale=args.residual_scale,
             height_scale=args.height_scale,
             channels_last=args.channels_last,
+            current_epoch=epoch,
+            args=args,
         )
+
+        loss_weights = resolve_loss_weights(epoch, args)
 
         epoch_record = {
             "epoch": epoch,
@@ -772,23 +1421,51 @@ def train_single_run(
             "val_components": val_components,
             "train_samples_per_second": train_sps,
             "val_samples_per_second": val_sps,
+            "learning_rate": float(optimizer.param_groups[0]["lr"]),
+            "loss_weights": loss_weights,
         }
         history.append(epoch_record)
+
+        previous_best = best_val_loss
+        is_best = val_loss < best_val_loss
+        if is_best:
+            best_val_loss = val_loss
+            best_epoch = epoch
+            epochs_since_best = 0
+        else:
+            epochs_since_best += 1
+
+        val_delta = 0.0 if not math.isfinite(previous_best) else val_loss - previous_best
+        train_val_gap = val_loss - train_loss
+        current_lr = float(optimizer.param_groups[0]["lr"])
+        status = "BEST" if is_best else f"stall={epochs_since_best}"
         print(
-            f"epoch {epoch:03d} | train {train_loss:.6f} | val {val_loss:.6f} | "
-            f"train_sps {train_sps:.2f} | val_sps {val_sps:.2f} | "
-            f"mid {val_components['mid_l1']:.6f} | coarse {val_components['coarse_l1']:.6f} | grad {val_components['gradient']:.6f}"
+            f"epoch {epoch:03d}/{args.epochs} | {status} | train {train_loss:.6f} | val {val_loss:.6f} | "
+            f"delta {val_delta:+.6f} | gap {train_val_gap:+.6f} | best {best_val_loss:.6f}@{best_epoch} | lr {current_lr:.2e}"
+        )
+        print(
+            f"  full {val_components['full_l1']:.6f} | mid {val_components['mid_l1']:.6f} | coarse {val_components['coarse_l1']:.6f} | "
+            f"grad {val_components['gradient']:.6f} | mid_res {val_components['mid_residual']:.6f} | detail_res {val_components['detail_residual']:.6f} | "
+            f"train_sps {train_sps:.2f} | val_sps {val_sps:.2f}"
+        )
+        print(
+            f"  loss_w full {loss_weights['full_l1']:.2f} | mid {loss_weights['mid_l1']:.2f} | coarse {loss_weights['coarse_l1']:.2f} | "
+            f"grad {loss_weights['gradient']:.2f} | mid_res {loss_weights['mid_residual']:.2f} | detail_res {loss_weights['detail_residual']:.2f}"
         )
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        should_export_previews = is_best or (args.preview_every_epochs > 0 and epoch % args.preview_every_epochs == 0)
+
+        if is_best:
             best_state = {
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
                 "epoch": epoch,
                 "best_val_loss": best_val_loss,
                 "config": vars(args),
             }
+
+        if should_export_previews:
             export_preview_images(
                 model=model,
                 entries=val_entries,
@@ -799,7 +1476,52 @@ def train_single_run(
                 residual_scale=args.residual_scale,
                 preview_count=args.preview_count,
                 channels_last=args.channels_last,
+                preview_seed=args.seed + epoch,
+                include_brush_mask=not args.disable_brush_mask,
+                epoch=epoch,
+                archive_every_epochs=args.preview_archive_every_epochs,
             )
+            preview_message = f"  refreshed previews in {run_output_dir / 'previews'}"
+            if args.preview_archive_every_epochs > 0 and epoch % args.preview_archive_every_epochs == 0:
+                preview_message += f" and archived epoch {epoch}"
+            print(preview_message)
+
+        if is_best:
+            print(f"  saved best checkpoint in {run_output_dir / 'best_model.pt'}")
+
+        previous_lr = current_lr
+        scheduler.step(val_loss)
+        new_lr = float(optimizer.param_groups[0]["lr"])
+        if new_lr < previous_lr:
+            print(f"  learning rate reduced: {previous_lr:.2e} -> {new_lr:.2e}")
+
+        torch.save(
+            build_training_checkpoint(
+                args=args,
+                epoch=epoch,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                history=history,
+                best_val_loss=best_val_loss,
+                best_val_epoch=best_epoch,
+                best_selection_metric_name="val_loss",
+                best_selection_metric_value=best_val_loss,
+                best_epoch=best_epoch,
+                epochs_since_best=epochs_since_best,
+                selected_entries=selected_entries,
+                train_entries=train_entries,
+                val_entries=val_entries,
+            ),
+            last_checkpoint_path,
+        )
+
+        if epoch >= args.early_stop_min_epochs and epochs_since_best >= args.early_stop_patience:
+            print(
+                f"  early stop: no new best for {epochs_since_best} epoch(s) after epoch {best_epoch}; "
+                f"best val remained {best_val_loss:.6f}"
+            )
+            break
 
     run_summary = {
         "schema_version": "v9-train-run.v1",
@@ -810,9 +1532,16 @@ def train_single_run(
         "train_samples": len(train_entries),
         "val_samples": len(val_entries),
         "history": history,
+        "start_epoch": start_epoch,
+        "final_epoch": history[-1]["epoch"] if history else start_epoch,
         "best_val_loss": best_val_loss,
+        "best_epoch": best_epoch,
+        "resumed_from": resumed_from,
         "config": vars(args),
         "preview_count": args.preview_count,
+        "final_learning_rate": float(optimizer.param_groups[0]["lr"]),
+        "last_checkpoint_path": str(last_checkpoint_path),
+        "feature_contract": build_v9_feature_contract(args),
     }
     write_json(run_output_dir / "run_summary.json", run_summary)
     if best_state is not None:
@@ -848,10 +1577,29 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-curated-samples", type=int, default=DEFAULT_TARGET_CURATED_SAMPLES)
     parser.add_argument("--cohort-sizes", default=None, help="Comma-separated cohort sizes to train side by side from the ranked sane pool, for example '27,48,64'.")
     parser.add_argument("--preview-count", type=int, default=DEFAULT_PREVIEW_COUNT)
+    parser.add_argument("--preview-every-epochs", type=int, default=DEFAULT_PREVIEW_EVERY_EPOCHS, help="Refresh the live validation preview set every N epochs. Set 0 to disable periodic refreshes and only update on best epochs.")
+    parser.add_argument("--preview-archive-every-epochs", type=int, default=DEFAULT_PREVIEW_ARCHIVE_EVERY_EPOCHS, help="Keep archived preview snapshots every N epochs under previews/history. Set 0 to disable archiving.")
+    parser.add_argument("--lr-plateau-patience", type=int, default=DEFAULT_LR_PLATEAU_PATIENCE)
+    parser.add_argument("--lr-plateau-factor", type=float, default=DEFAULT_LR_PLATEAU_FACTOR)
+    parser.add_argument("--min-learning-rate", type=float, default=DEFAULT_MIN_LEARNING_RATE)
+    parser.add_argument("--early-stop-patience", type=int, default=DEFAULT_EARLY_STOP_PATIENCE)
+    parser.add_argument("--early-stop-min-epochs", type=int, default=DEFAULT_EARLY_STOP_MIN_EPOCHS)
+    parser.add_argument("--aux-loss-decay-start-epoch", type=int, default=DEFAULT_AUX_LOSS_DECAY_START_EPOCH)
+    parser.add_argument("--aux-loss-decay-epochs", type=int, default=DEFAULT_AUX_LOSS_DECAY_EPOCHS)
+    parser.add_argument("--late-mid-l1-weight", type=float, default=DEFAULT_LATE_MID_L1_WEIGHT)
+    parser.add_argument("--late-coarse-l1-weight", type=float, default=DEFAULT_LATE_COARSE_L1_WEIGHT)
+    parser.add_argument("--late-gradient-weight", type=float, default=DEFAULT_LATE_GRADIENT_WEIGHT)
+    parser.add_argument("--late-mid-residual-weight", type=float, default=DEFAULT_LATE_MID_RESIDUAL_WEIGHT)
+    parser.add_argument("--late-detail-residual-weight", type=float, default=DEFAULT_LATE_DETAIL_RESIDUAL_WEIGHT)
+    parser.add_argument("--curation-mode", choices=["diverse-quality", "top-quality"], default=DEFAULT_CURATION_MODE)
+    parser.add_argument("--curation-diversity-block-size", type=int, default=DEFAULT_CURATION_DIVERSITY_BLOCK_SIZE)
+    parser.add_argument("--curation-max-per-group", type=int, default=DEFAULT_CURATION_MAX_PER_GROUP)
+    parser.add_argument("--disable-brush-mask", action=argparse.BooleanOptionalAction, default=False, help="Zero the brush imprint mask channel and remove brush-driven RGB attenuation.")
     parser.add_argument("--channels-last", action="store_true")
     parser.add_argument("--compile", dest="use_compile", action="store_true")
     parser.add_argument("--audit-only", action="store_true")
     parser.add_argument("--write-curated-manifest", action="store_true")
+    parser.add_argument("--resume-from", default=None, help="Optional path to a last_checkpoint.pt file to resume training from.")
     return parser
 
 
@@ -876,8 +1624,20 @@ def main() -> None:
     )
 
     curated_limit = args.limit if args.limit is not None else args.target_curated_samples
-    accepted_entries = select_curated_entries(audited, curated_limit)
-    ranked_sane_entries = select_curated_entries(audited, None)
+    accepted_entries = select_curated_entries(
+        audited,
+        curated_limit,
+        args.curation_mode,
+        args.curation_diversity_block_size,
+        args.curation_max_per_group,
+    )
+    ranked_sane_entries = select_curated_entries(
+        audited,
+        None,
+        args.curation_mode,
+        args.curation_diversity_block_size,
+        args.curation_max_per_group,
+    )
 
     audit_payload = {
         "schema_version": "v9-native-audit.v1",

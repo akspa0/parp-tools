@@ -6,7 +6,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
+import torch
+import torch.nn.functional as F
 from PIL import Image
+
+from v7_object_masks import (
+    MAX_FALLBACK_OBJECT_MASK_COVERAGE,
+    MAX_PRECISE_OBJECT_MASK_COVERAGE,
+    MAX_SEEDED_OBJECT_MASK_COVERAGE,
+    PRECISE_OBJECT_MASK_KEYS,
+    SEEDED_OBJECT_MASK_KEYS,
+    build_object_context_mask,
+)
 
 
 TILE_HEIGHTMAP_SIZE = 257
@@ -14,6 +25,13 @@ HALF_STEPS_PER_CHUNK = 16
 DEFAULT_OUTPUT_DIR = Path("output/ml-training/v9_native_tensor_cache")
 MANIFEST_FILE = "v9_tensor_cache_manifest.json"
 SUPPORTED_NATIVE_SIZES = (257, 129, 65, 33, 17)
+INPUT_SIZE = 257
+HEIGHT_GLOBAL_MIN = -1000.0
+HEIGHT_GLOBAL_MAX = 3000.0
+DEFAULT_NORMAL_RGB = (128, 128, 255)
+BRUSH_MANIFEST_FILE = "brush_manifest.json"
+
+_BRUSH_MANIFEST_CACHE: dict[Path, dict[str, object] | None] = {}
 
 
 def utc_now_iso() -> str:
@@ -117,6 +135,18 @@ def dataset_root_key(dataset_root: Path) -> str:
     return dataset_root.name or "dataset"
 
 
+def parse_tile_coordinates(tile_name: str) -> tuple[str, int, int]:
+    parts = tile_name.rsplit("_", 2)
+    if len(parts) != 3:
+        return tile_name, 0, 0
+
+    map_name, tile_x_text, tile_y_text = parts
+    try:
+        return map_name, int(tile_x_text), int(tile_y_text)
+    except ValueError:
+        return tile_name, 0, 0
+
+
 def iter_tile_json_paths(dataset_root: Path) -> list[Path]:
     manifest_path = dataset_root / "ml_dataset_manifest.json"
     if manifest_path.exists():
@@ -145,6 +175,48 @@ def resolve_dataset_path(dataset_root: Path, relative_path: str | None) -> Path 
     candidate = dataset_root / relative_path
     if candidate.exists():
         return candidate
+    return None
+
+
+def load_brush_manifest(dataset_root: Path) -> dict[str, object] | None:
+    if dataset_root in _BRUSH_MANIFEST_CACHE:
+        return _BRUSH_MANIFEST_CACHE[dataset_root]
+
+    manifest_path = dataset_root / "brush_imprints" / BRUSH_MANIFEST_FILE
+    if not manifest_path.exists():
+        _BRUSH_MANIFEST_CACHE[dataset_root] = None
+        return None
+
+    try:
+        with manifest_path.open("r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except Exception:
+        manifest = None
+
+    _BRUSH_MANIFEST_CACHE[dataset_root] = manifest
+    return manifest
+
+
+def resolve_brush_mask_path(dataset_root: Path, tile_name: str) -> Path | None:
+    manifest = load_brush_manifest(dataset_root)
+    if manifest:
+        for tile in manifest.get("tiles", []):
+            if str(tile.get("tile_name", "")) != tile_name:
+                continue
+            brush_rel = tile.get("brush_mask_path")
+            if not brush_rel:
+                continue
+            candidate = dataset_root / str(brush_rel)
+            if candidate.exists():
+                return candidate
+
+    for candidate in (
+        dataset_root / "brush_imprints" / "tile_masks" / f"{tile_name}_brush_mask.png",
+        dataset_root / "brush_imprints" / f"{tile_name}_brush_mask.png",
+    ):
+        if candidate.exists():
+            return candidate
+
     return None
 
 
@@ -318,21 +390,117 @@ def downsample_native_height(height_257: np.ndarray, size: int) -> np.ndarray:
     return height_257[::step, ::step].copy()
 
 
-def load_minimap(dataset_root: Path, tile_json: dict) -> np.ndarray | None:
-    minimap_path = resolve_dataset_path(dataset_root, tile_json.get("image"))
-    if minimap_path is None:
-        return None
+def load_rgb_image(path: Path | None, size: int, fallback_rgb: tuple[int, int, int] | None = None) -> np.ndarray | None:
+    if path is None or not path.exists():
+        if fallback_rgb is None:
+            return None
+        return np.full((size, size, 3), fallback_rgb, dtype=np.uint8)
 
-    with Image.open(minimap_path) as image:
+    with Image.open(path) as image:
         rgb = image.convert("RGB")
-        if rgb.size != (256, 256):
-            rgb = rgb.resize((256, 256), Image.Resampling.BILINEAR)
+        if rgb.size != (size, size):
+            rgb = rgb.resize((size, size), Image.Resampling.BILINEAR)
         return np.asarray(rgb, dtype=np.uint8)
 
 
+def load_binary_mask(path: Path | None, size: int) -> np.ndarray:
+    if path is None or not path.exists():
+        return np.zeros((size, size), dtype=np.uint8)
+
+    with Image.open(path) as image:
+        mask = image.convert("L")
+        if mask.size != (size, size):
+            mask = mask.resize((size, size), Image.Resampling.NEAREST)
+        return (np.asarray(mask, dtype=np.uint8) > 0).astype(np.uint8)
+
+
+def load_heightmap_16bit(path: Path | None, target_size: int) -> np.ndarray:
+    if path is None or not path.exists():
+        return np.zeros((target_size, target_size), dtype=np.float32)
+
+    with Image.open(path) as image:
+        if image.mode == "I;16":
+            array = np.asarray(image, dtype=np.float32) / 65535.0
+        elif image.mode == "I":
+            array = np.asarray(image, dtype=np.float32)
+            array = (array - array.min()) / (array.max() - array.min() + 1e-8)
+        else:
+            array = np.asarray(image.convert("L"), dtype=np.float32) / 255.0
+
+    if array.shape != (target_size, target_size):
+        tensor = torch.from_numpy(array).unsqueeze(0).unsqueeze(0)
+        tensor = F.interpolate(tensor, size=(target_size, target_size), mode="bilinear", align_corners=False)
+        return tensor.squeeze(0).squeeze(0).numpy().astype(np.float32)
+
+    return array.astype(np.float32)
+
+
+def select_minimap_path(dataset_root: Path, tile_json: dict, terrain_data: dict) -> tuple[Path | None, str]:
+    candidates = (
+        (terrain_data.get("terrain_only_minimap"), "terrain_only_minimap"),
+        (terrain_data.get("no_object_minimap"), "no_object_minimap"),
+        (terrain_data.get("no_mccv_minimap"), "no_mccv_minimap"),
+        (tile_json.get("image"), "image"),
+    )
+    for relative_path, source_name in candidates:
+        candidate = resolve_dataset_path(dataset_root, relative_path)
+        if candidate is not None:
+            return candidate, source_name
+    return None, "missing"
+
+
+def load_minimap(dataset_root: Path, tile_json: dict) -> np.ndarray | None:
+    terrain_data = tile_json.get("terrain_data", tile_json)
+    minimap_path, _ = select_minimap_path(dataset_root, tile_json, terrain_data)
+    return load_rgb_image(minimap_path, size=256)
+
+
+def load_normalmap(dataset_root: Path, terrain_data: dict) -> tuple[np.ndarray, bool]:
+    normalmap_path = resolve_dataset_path(dataset_root, terrain_data.get("normalmap"))
+    normalmap = load_rgb_image(normalmap_path, size=256, fallback_rgb=DEFAULT_NORMAL_RGB)
+    return normalmap, normalmap_path is not None
+
+
+def build_height_hints_v7(terrain_data: dict) -> np.ndarray:
+    height_min = float(terrain_data.get("height_min", 0.0) or 0.0)
+    height_max = float(terrain_data.get("height_max", 100.0) or 100.0)
+    global_min = float(terrain_data.get("height_global_min", HEIGHT_GLOBAL_MIN) or HEIGHT_GLOBAL_MIN)
+    global_max = float(terrain_data.get("height_global_max", HEIGHT_GLOBAL_MAX) or HEIGHT_GLOBAL_MAX)
+    global_range = max(global_max - global_min, 1e-6)
+
+    return np.asarray(
+        [
+            float(np.clip((height_min - global_min) / global_range, 0.0, 1.0)),
+            float(np.clip((height_max - global_min) / global_range, 0.0, 1.0)),
+        ],
+        dtype=np.float32,
+    )
+
+
+def build_object_mask_257(dataset_root: Path, terrain_data: dict, tile_name: str) -> np.ndarray:
+    _, tile_x, tile_y = parse_tile_coordinates(tile_name)
+    object_mask = build_object_context_mask(
+        dataset_root=dataset_root,
+        terrain=terrain_data,
+        tile_x=tile_x,
+        tile_y=tile_y,
+        output_size=INPUT_SIZE,
+        precise_keys=PRECISE_OBJECT_MASK_KEYS,
+        seeded_keys=SEEDED_OBJECT_MASK_KEYS,
+        max_precise_coverage=MAX_PRECISE_OBJECT_MASK_COVERAGE,
+        max_seeded_coverage=MAX_SEEDED_OBJECT_MASK_COVERAGE,
+        max_fallback_coverage=MAX_FALLBACK_OBJECT_MASK_COVERAGE,
+    )
+    return object_mask.squeeze(0).numpy().astype(np.uint8)
+
+
 def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved: bool) -> tuple[dict[str, np.ndarray], dict[str, object]] | None:
-    with json_path.open("r", encoding="utf-8") as handle:
-        tile_json = json.load(handle)
+    try:
+        with json_path.open("r", encoding="utf-8") as handle:
+            tile_json = json.load(handle)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        print(f"Skipping unreadable tile JSON: {json_path} ({exc})")
+        return None
 
     terrain_data = tile_json.get("terrain_data", tile_json)
     chunk_heights = extract_chunk_heights(terrain_data)
@@ -346,6 +514,14 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
     hole_mask_16 = extract_hole_mask(terrain_data)
     wdl_17 = extract_wdl_17(terrain_data)
     minimap_rgb_256 = load_minimap(dataset_root, tile_json)
+    _, minimap_source = select_minimap_path(dataset_root, tile_json, terrain_data)
+    normal_rgb_256, has_normal_rgb_256 = load_normalmap(dataset_root, terrain_data)
+    height_hints_v7 = build_height_hints_v7(terrain_data)
+    liquid_mask_257 = load_binary_mask(resolve_dataset_path(dataset_root, terrain_data.get("liquid_mask")), INPUT_SIZE)
+    liquid_height_257 = load_heightmap_16bit(resolve_dataset_path(dataset_root, terrain_data.get("liquid_height")), INPUT_SIZE)
+    liquid_height_257 *= liquid_mask_257.astype(np.float32)
+    object_mask_257 = build_object_mask_257(dataset_root, terrain_data, tile_name)
+    brush_mask_257 = load_binary_mask(resolve_brush_mask_path(dataset_root, tile_name), INPUT_SIZE)
 
     payload: dict[str, np.ndarray] = {
         "chunk_heights_256x145": chunk_heights,
@@ -355,6 +531,12 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
         "height_33": downsample_native_height(height_257, 33),
         "height_17": downsample_native_height(height_257, 17),
         "hole_mask_16x16": hole_mask_16,
+        "normal_rgb_256": normal_rgb_256,
+        "height_hints_v7": height_hints_v7,
+        "liquid_mask_257": liquid_mask_257,
+        "liquid_height_257": liquid_height_257.astype(np.float32),
+        "object_mask_257": object_mask_257,
+        "brush_mask_257": brush_mask_257,
     }
     if wdl_17 is not None:
         payload["wdl_17"] = wdl_17
@@ -370,6 +552,8 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
         "height_max": float(np.max(height_257)),
         "has_wdl_17": wdl_17 is not None,
         "has_minimap_rgb_256": minimap_rgb_256 is not None,
+        "has_normal_rgb_256": has_normal_rgb_256,
+        "minimap_source": minimap_source,
         "array_names": sorted(payload.keys()),
     }
     return payload, metadata
@@ -430,7 +614,7 @@ def main() -> None:
             break
 
     manifest = {
-        "schema_version": "v9-native-tensor-cache.v1",
+        "schema_version": "v9-native-tensor-cache.v2",
         "created_at_utc": utc_now_iso(),
         "output_dir": str(output_dir),
         "dataset_roots": [str(root) for root in dataset_roots],

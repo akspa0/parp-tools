@@ -58,6 +58,10 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
 
     public int CommandCount => _commands.Count;
 
+    public Vector3 BoundsMin => _boundsMin;
+
+    public Vector3 BoundsMax => _boundsMax;
+
     public void Dispose()
     {
         if (_disposed)
@@ -201,7 +205,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
         }
     }
 
-    public void Render(int width, int height)
+    public void Render(int width, int height, float azimuthDegrees, float elevationDegrees, float zoomFactor, Vector3 targetOffset)
     {
         EnsureFramebuffer(width, height);
 
@@ -212,7 +216,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
 
         if (_commands.Count > 0)
         {
-            BuildCamera(_boundsMin, _boundsMax, _frameWidth, _frameHeight, out Matrix4x4 view, out Matrix4x4 projection);
+            BuildCamera(_boundsMin, _boundsMax, _frameWidth, _frameHeight, azimuthDegrees, elevationDegrees, zoomFactor, targetOffset, out Matrix4x4 view, out Matrix4x4 projection);
             RenderPass(view, projection, transparentPass: false);
             RenderPass(view, projection, transparentPass: true);
         }
@@ -224,7 +228,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
 
-        Render(width, height);
+        Render(width, height, 45.0f, 20.0f, 1.15f, Vector3.Zero);
 
         _gl.BindFramebuffer(GLEnum.Framebuffer, _framebuffer);
         byte[] rgbaPixels = new byte[_frameWidth * _frameHeight * 4];
@@ -623,16 +627,16 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
         return textureId;
     }
 
-    private static void BuildCamera(Vector3 min, Vector3 max, int width, int height, out Matrix4x4 view, out Matrix4x4 projection)
+    private static void BuildCamera(Vector3 min, Vector3 max, int width, int height, float azimuthDegrees, float elevationDegrees, float zoomFactor, Vector3 targetOffset, out Matrix4x4 view, out Matrix4x4 projection)
     {
-        Vector3 center = (min + max) * 0.5f;
+        Vector3 center = ((min + max) * 0.5f) + targetOffset;
         Vector3 extent = max - min;
         float radius = MathF.Max(extent.Length() * 0.5f, 1.0f);
         float aspect = Math.Max(width, 1) / (float)Math.Max(height, 1);
         float fov = 45.0f * MathF.PI / 180.0f;
 
-        float elev = 20.0f * MathF.PI / 180.0f;
-        float azim = 45.0f * MathF.PI / 180.0f;
+        float elev = elevationDegrees * MathF.PI / 180.0f;
+        float azim = azimuthDegrees * MathF.PI / 180.0f;
         float cosElev = MathF.Cos(elev);
         Vector3 camDir = Vector3.Normalize(new Vector3(
             cosElev * MathF.Cos(azim),
@@ -667,7 +671,7 @@ internal sealed class M2GpuPreviewRenderer : IDisposable
             maxDist = MathF.Max(maxDist, MathF.Max(needV, needH));
         }
 
-        float dist = maxDist * 1.15f;
+        float dist = maxDist * Math.Max(zoomFactor, 0.05f);
         Vector3 camPos = center - camDir * dist;
         view = Matrix4x4.CreateLookAt(camPos, center, up);
         projection = Matrix4x4.CreatePerspectiveFieldOfView(fov, aspect, 0.01f, dist * 10.0f);

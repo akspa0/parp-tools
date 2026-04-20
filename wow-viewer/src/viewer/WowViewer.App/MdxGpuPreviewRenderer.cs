@@ -107,6 +107,10 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
 
     public int CommandCount => _commands.Count + _effectCommands.Count;
 
+    public Vector3 BoundsMin => _boundsMin;
+
+    public Vector3 BoundsMax => _boundsMax;
+
     public void Dispose()
     {
         if (_disposed)
@@ -162,6 +166,11 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         _simulatedEffectTimeMs = preview.Request.TimeMs;
         InitializeEffectSimulation(preview, preview.EffectRuntimeState);
         RebuildGeometryCommands(preview, preview.Request.TimeMs);
+    }
+
+    public void SetCameraSettings(PreviewCameraSettings settings)
+    {
+        _cameraSettings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
     private void ClearGeometryCommands()

@@ -389,6 +389,10 @@ internal static class Program
         string? clientRoot = GetOption(args, "--client-root", "-c");
         string? mapInput = GetOption(args, "--map", "-m");
         string? looseOverlayRoot = GetOption(args, "--loose-overlay-root");
+        string? modelOutputVariantText = GetOption(args, "--model-output-variant");
+        string? modelOutputAzimuthText = GetOption(args, "--model-output-camera-azimuth");
+        string? modelOutputElevationText = GetOption(args, "--model-output-camera-elevation");
+        string? modelOutputZoomText = GetOption(args, "--model-output-camera-zoom");
         string? tileXText = GetOption(args, "--tile-x");
         string? tileYText = GetOption(args, "--tile-y");
         string? buildLabel = GetOption(args, "--build-label", "-b");
@@ -431,6 +435,17 @@ internal static class Program
             session.World.ShowTerrain = !HasFlag(args, "--hide-terrain");
             session.World.ShowLiquid = !HasFlag(args, "--hide-liquid");
             session.World.ShowOverlay = !HasFlag(args, "--hide-overlay");
+        }
+        else if (workspaceMode == WowViewerWorkspaceMode.ModelOutputs)
+        {
+            session.ModelOutput.InputPath = input ?? string.Empty;
+            session.ModelOutput.Variant = ParseModelOutputVariant(modelOutputVariantText);
+            if (float.TryParse(modelOutputAzimuthText, out float azimuth))
+                session.ModelOutput.CameraAzimuthDegrees = azimuth;
+            if (float.TryParse(modelOutputElevationText, out float elevation))
+                session.ModelOutput.CameraElevationDegrees = elevation;
+            if (float.TryParse(modelOutputZoomText, out float zoom))
+                session.ModelOutput.CameraZoomFactor = zoom;
         }
         else
         {
@@ -740,7 +755,7 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  wowviewer-app");
-        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world|dataset] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file> | --client-root <game dir> --map <directory|id|name>] [--loose-overlay-root <dir>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay]");
+        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world|dataset|model-output] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file|dir> | --client-root <game dir> --map <directory|id|name>] [--loose-overlay-root <dir>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--model-output-variant predicted|wdl] [--model-output-camera-azimuth <deg>] [--model-output-camera-elevation <deg>] [--model-output-camera-zoom <factor>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay]");
         Console.WriteLine("  wowviewer-app m2-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp|file.png> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");
@@ -764,7 +779,18 @@ internal static class Program
             "mdx" => WowViewerWorkspaceMode.StandaloneMdx,
             "world" => WowViewerWorkspaceMode.WorldSession,
             "dataset" => WowViewerWorkspaceMode.DatasetTooling,
-            _ => throw new ArgumentException("--workspace must be one of: m2, wmo, mdx, world, dataset."),
+            "model-output" or "modeloutputs" or "model-outputs" => WowViewerWorkspaceMode.ModelOutputs,
+            _ => throw new ArgumentException("--workspace must be one of: m2, wmo, mdx, world, dataset, model-output."),
+        };
+    }
+
+    private static WowViewerModelOutputVariant ParseModelOutputVariant(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "predicted" => WowViewerModelOutputVariant.Predicted,
+            "wdl" or "baseline" or "wdl-baseline" => WowViewerModelOutputVariant.WdlBaseline,
+            _ => throw new ArgumentException("--model-output-variant must be one of: predicted, wdl."),
         };
     }
 
