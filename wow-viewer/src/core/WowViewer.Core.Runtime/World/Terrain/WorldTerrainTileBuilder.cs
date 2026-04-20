@@ -55,7 +55,8 @@ public static class WorldTerrainTileBuilder
             int layerCount = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x0C, 4)));
             uint areaId = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x34, 4));
             ushort holes = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(0x3C, 2));
-            float[]? heights = TryReadMcvtHeights(payload);
+            float baseHeight = BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan(0x68, 4));
+            float[]? heights = TryReadMcvtHeights(payload, baseHeight);
 
             chunks.Add(new WorldTerrainChunkData(
                 chunkOrdinal,
@@ -90,7 +91,7 @@ public static class WorldTerrainTileBuilder
         }
     }
 
-    private static float[]? TryReadMcvtHeights(byte[] payload)
+    private static float[]? TryReadMcvtHeights(byte[] payload, float baseHeight)
     {
         int position = RootMcnkSubchunkOffset;
         while (position <= payload.Length - ChunkHeader.SizeInBytes)
@@ -114,7 +115,7 @@ public static class WorldTerrainTileBuilder
                 int dataOffset = position + ChunkHeader.SizeInBytes;
                 float[] heights = new float[McvtSampleCount];
                 for (int index = 0; index < heights.Length; index++)
-                    heights[index] = BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan(dataOffset + (index * sizeof(float)), sizeof(float)));
+                    heights[index] = baseHeight + BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan(dataOffset + (index * sizeof(float)), sizeof(float)));
 
                 return heights;
             }

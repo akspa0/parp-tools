@@ -1,6 +1,10 @@
 ﻿using System.Security.Cryptography;
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Numerics;
+using SereniaBLPLib;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
@@ -11,8 +15,21 @@ using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 using WowViewer.Core.PM4;
+using WowViewer.Core.Runtime.World.Terrain;
 using WowViewer.Core.Wmo;
+using WowViewer.Core.Runtime.World.Wdl;
 using WowViewer.Tools.Shared;
+
+const int NativeTileSize = 257;
+const int NativeMinimapSize = 256;
+const float HeightGlobalMin = -1000f;
+const float HeightGlobalMax = 3000f;
+const float WorldTileSize = 533.33333f;
+const float WorldMapOrigin = 32f * WorldTileSize;
+const string V9TensorCacheManifestFile = "v9_tensor_cache_manifest.json";
+const byte DefaultNormalR = 128;
+const byte DefaultNormalG = 128;
+const byte DefaultNormalB = 255;
 
 if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
 {
@@ -27,6 +44,18 @@ string[] tail = args.Skip(1).ToArray();
 	{
 		case "dataset-scan":
 			RunDatasetScan(tail);
+			break;
+		case "dataset-merge":
+			RunDatasetMerge(tail);
+			break;
+		case "dataset-audit":
+			RunDatasetAudit(tail);
+			break;
+		case "dataset-curate":
+			RunDatasetCurate(tail);
+			break;
+		case "dataset-build-cache":
+			RunDatasetBuildCache(tail);
 			break;
 		case "detect":
 			RunDetect(tail);
@@ -308,6 +337,438 @@ static void RunDatasetScan(string[] args)
 	Console.WriteLine(json);
 }
 
+static void RunDatasetMerge(string[] args)
+{
+	List<string> inputPaths = [];
+	string? outputOption = null;
+
+	for (int index = 0; index < args.Length; index++)
+	{
+		string arg = args[index];
+		if (string.Equals(arg, "--input", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(arg, "-i", StringComparison.OrdinalIgnoreCase))
+		{
+			if (index + 1 >= args.Length)
+			{
+				Console.Error.WriteLine("Error: dataset-merge requires a path after --input.");
+				Environment.ExitCode = 1;
+				return;
+			}
+
+			inputPaths.Add(Path.GetFullPath(args[++index]));
+			continue;
+		}
+
+		if (string.Equals(arg, "--output", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(arg, "-o", StringComparison.OrdinalIgnoreCase))
+		{
+			if (index + 1 >= args.Length)
+			{
+				Console.Error.WriteLine("Error: dataset-merge requires a path after --output.");
+				Environment.ExitCode = 1;
+				return;
+			}
+
+			outputOption = Path.GetFullPath(args[++index]);
+			continue;
+		}
+
+		if (!arg.StartsWith('-'))
+			inputPaths.Add(Path.GetFullPath(arg));
+	}
+
+	if (inputPaths.Count == 0)
+	{
+		Console.Error.WriteLine("Error: dataset-merge requires one or more input manifests via --input <path> or positional paths.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	List<TerrainTrainingSampleManifest> manifests = inputPaths.Select(ReadTerrainTrainingManifest).ToList();
+	TerrainTrainingSampleManifest firstManifest = manifests[0];
+	foreach (TerrainTrainingSampleManifest manifest in manifests.Skip(1))
+	{
+		if (!string.Equals(manifest.SourceManifestKind, firstManifest.SourceManifestKind, StringComparison.OrdinalIgnoreCase))
+		{
+			Console.Error.WriteLine($"Error: dataset-merge requires all manifests to have the same SourceManifestKind. Found '{firstManifest.SourceManifestKind}' and '{manifest.SourceManifestKind}'.");
+			Environment.ExitCode = 1;
+			return;
+		}
+
+		if (!string.Equals(manifest.SchemaVersion, firstManifest.SchemaVersion, StringComparison.OrdinalIgnoreCase))
+		{
+			Console.Error.WriteLine($"Error: dataset-merge requires all manifests to have the same SchemaVersion. Found '{firstManifest.SchemaVersion}' and '{manifest.SchemaVersion}'.");
+			Environment.ExitCode = 1;
+			return;
+		}
+	}
+
+	Dictionary<string, TerrainTrainingSampleDescriptor> mergedBySampleId = new(StringComparer.Ordinal);
+	foreach (TerrainTrainingSampleManifest manifest in manifests)
+	{
+		foreach (TerrainTrainingSampleDescriptor entry in manifest.Entries)
+		{
+			if (!mergedBySampleId.TryAdd(entry.SampleId, entry))
+			{
+				Console.Error.WriteLine($"Error: dataset-merge found duplicate SampleId '{entry.SampleId}'. Inputs must be non-overlapping.");
+				Environment.ExitCode = 1;
+				return;
+			}
+		}
+	}
+
+	List<TerrainTrainingSampleDescriptor> mergedEntries = mergedBySampleId.Values
+		.OrderBy(static entry => entry.BuildLabel, StringComparer.OrdinalIgnoreCase)
+		.ThenBy(static entry => entry.MapName, StringComparer.OrdinalIgnoreCase)
+		.ThenBy(static entry => entry.TileY)
+		.ThenBy(static entry => entry.TileX)
+		.ThenBy(static entry => entry.SampleId, StringComparer.Ordinal)
+		.ToList();
+
+	TerrainTrainingSampleManifest mergedManifest = new(
+		schemaVersion: firstManifest.SchemaVersion,
+		createdAtUtc: DateTimeOffset.UtcNow,
+		sourceManifestKind: firstManifest.SourceManifestKind,
+		entries: mergedEntries);
+
+	Console.WriteLine("WowViewer.Tool.Converter dataset-merge report");
+	Console.WriteLine($"SourceManifestKind: {mergedManifest.SourceManifestKind}");
+	Console.WriteLine($"SchemaVersion: {mergedManifest.SchemaVersion}");
+	Console.WriteLine($"Inputs: {inputPaths.Count}");
+	Console.WriteLine($"MergedSamples: {mergedEntries.Count}");
+
+	string json = JsonSerializer.Serialize(mergedManifest, CreateJsonOptions());
+	if (!string.IsNullOrWhiteSpace(outputOption))
+	{
+		string? outputDirectory = Path.GetDirectoryName(outputOption);
+		if (!string.IsNullOrWhiteSpace(outputDirectory))
+			Directory.CreateDirectory(outputDirectory);
+
+		File.WriteAllText(outputOption, json);
+		Console.WriteLine($"Wrote {outputOption}");
+		return;
+	}
+
+	Console.WriteLine(json);
+}
+
+static void RunDatasetAudit(string[] args)
+{
+	string? inputOption = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? outputOption = GetOption(args, "--output", "-o");
+	int? limit = GetIntOption(args, "--limit", "-n");
+
+	if (string.IsNullOrWhiteSpace(inputOption))
+	{
+		Console.Error.WriteLine("Error: dataset-audit requires --input <manifest.json>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string inputPath = Path.GetFullPath(inputOption);
+	TerrainTrainingSampleManifest sourceManifest = ReadTerrainTrainingManifest(inputPath);
+	if (!string.Equals(sourceManifest.SourceManifestKind, "scan", StringComparison.OrdinalIgnoreCase))
+	{
+		Console.Error.WriteLine($"Error: dataset-audit requires a direct dataset-scan manifest, but '{inputPath}' has SourceManifestKind='{sourceManifest.SourceManifestKind}'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	List<TerrainTrainingSampleDescriptor> sourceEntries = sourceManifest.Entries.ToList();
+	if (limit is > 0)
+		sourceEntries = sourceEntries.Take(limit.Value).ToList();
+
+	Dictionary<string, IArchiveCatalog> archiveCatalogs = new(StringComparer.OrdinalIgnoreCase);
+	Dictionary<string, WdlSummary?> wdlCache = new(StringComparer.OrdinalIgnoreCase);
+	Dictionary<string, Md5TranslateIndex?> minimapMd5Cache = new(StringComparer.OrdinalIgnoreCase);
+	List<TerrainTrainingSampleDescriptor> auditedEntries = new(sourceEntries.Count);
+	int liquidSampleCount = 0;
+	int holeSampleCount = 0;
+	int wdlDeltaSampleCount = 0;
+
+	try
+	{
+		foreach (TerrainTrainingSampleDescriptor entry in sourceEntries)
+		{
+			TerrainTrainingSampleDescriptor auditedEntry = AuditDatasetEntry(entry, archiveCatalogs, wdlCache, minimapMd5Cache);
+			auditedEntries.Add(auditedEntry);
+			if (auditedEntry.Metrics.LiquidCoverage > 0f)
+				liquidSampleCount++;
+			if (auditedEntry.Metrics.HoleCoverage > 0f)
+				holeSampleCount++;
+			if (auditedEntry.Metrics.MaxAbsWdlDelta > 0f)
+				wdlDeltaSampleCount++;
+		}
+	}
+	finally
+	{
+		foreach (IArchiveCatalog archiveCatalog in archiveCatalogs.Values)
+			archiveCatalog.Dispose();
+	}
+
+	TerrainTrainingSampleManifest auditedManifest = new(
+		schemaVersion: "terrain-training-audit.v1",
+		createdAtUtc: DateTimeOffset.UtcNow,
+		sourceManifestKind: "audit",
+		entries: auditedEntries);
+
+	Console.WriteLine("WowViewer.Tool.Converter dataset-audit report");
+	Console.WriteLine($"Input: {inputPath}");
+	Console.WriteLine($"Samples: {auditedEntries.Count}");
+	Console.WriteLine($"LiquidSamples: {liquidSampleCount}");
+	Console.WriteLine($"HoleSamples: {holeSampleCount}");
+	Console.WriteLine($"WdlDeltaSamples: {wdlDeltaSampleCount}");
+
+	string json = JsonSerializer.Serialize(auditedManifest, CreateJsonOptions());
+	if (!string.IsNullOrWhiteSpace(outputOption))
+	{
+		string outputPath = Path.GetFullPath(outputOption);
+		string? outputDirectory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(outputDirectory))
+			Directory.CreateDirectory(outputDirectory);
+
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine(json);
+}
+
+static void RunDatasetCurate(string[] args)
+{
+	string? inputOption = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? outputOption = GetOption(args, "--output", "-o");
+	string? reportOption = GetOption(args, "--report", "-r");
+	int? limit = GetIntOption(args, "--limit", "-n");
+	int maxPerGroup = GetIntOption(args, "--max-per-group", "-g") ?? int.MaxValue;
+	float minHeightRange = GetFloatOption(args, "--min-height-range", "-h") ?? 32f;
+	float minMinimapVariance = GetFloatOption(args, "--min-minimap-variance", "-v") ?? 1e-5f;
+	float minMinimapGradient = GetFloatOption(args, "--min-minimap-gradient", "-m") ?? 2e-3f;
+	float maxMeanWdlDelta = GetFloatOption(args, "--max-mean-wdl-delta", "-w") ?? 256f;
+	float maxAbsWdlDelta = GetFloatOption(args, "--max-abs-wdl-delta", "-a") ?? 1024f;
+	bool requireWdl = ResolveBooleanOption(args, "--require-wdl", "--no-require-wdl", defaultValue: true);
+	bool requireMinimap = ResolveBooleanOption(args, "--require-minimap", "--no-require-minimap", defaultValue: false);
+
+	if (string.IsNullOrWhiteSpace(inputOption) || string.IsNullOrWhiteSpace(outputOption))
+	{
+		Console.Error.WriteLine("Error: dataset-curate requires --input <audit.json> and --output <curated.json>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string inputPath = Path.GetFullPath(inputOption);
+	TerrainTrainingSampleManifest sourceManifest = ReadTerrainTrainingManifest(inputPath);
+	if (!string.Equals(sourceManifest.SourceManifestKind, "audit", StringComparison.OrdinalIgnoreCase))
+	{
+		Console.Error.WriteLine($"Error: dataset-curate requires a dataset-audit manifest, but '{inputPath}' has SourceManifestKind='{sourceManifest.SourceManifestKind}'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	List<DatasetCurateEvaluation> evaluations = sourceManifest.Entries
+		.Select(entry => EvaluateCurateEntry(
+			entry,
+			requireWdl,
+			requireMinimap,
+			minHeightRange,
+			minMinimapVariance,
+			minMinimapGradient,
+			maxMeanWdlDelta,
+			maxAbsWdlDelta))
+		.ToList();
+
+	List<DatasetCurateEvaluation> acceptedPool = evaluations
+		.Where(static evaluation => evaluation.Accepted)
+		.ToList();
+	List<TerrainTrainingSampleDescriptor> curatedEntries = SelectCuratedEntries(acceptedPool, limit, maxPerGroup);
+
+	TerrainTrainingSampleManifest curatedManifest = new(
+		schemaVersion: "terrain-training-curate.v1",
+		createdAtUtc: DateTimeOffset.UtcNow,
+		sourceManifestKind: "curate",
+		entries: curatedEntries);
+
+	Console.WriteLine("WowViewer.Tool.Converter dataset-curate report");
+	Console.WriteLine($"Input: {inputPath}");
+	Console.WriteLine($"AcceptedPool: {acceptedPool.Count}");
+	Console.WriteLine($"Curated: {curatedEntries.Count}");
+	Console.WriteLine($"Rejected: {evaluations.Count - acceptedPool.Count}");
+
+	string outputPath = Path.GetFullPath(outputOption);
+	string? outputDirectory = Path.GetDirectoryName(outputPath);
+	if (!string.IsNullOrWhiteSpace(outputDirectory))
+		Directory.CreateDirectory(outputDirectory);
+
+	File.WriteAllText(outputPath, JsonSerializer.Serialize(curatedManifest, CreateJsonOptions()));
+	Console.WriteLine($"Wrote {outputPath}");
+
+	if (!string.IsNullOrWhiteSpace(reportOption))
+	{
+		string reportPath = Path.GetFullPath(reportOption);
+		string? reportDirectory = Path.GetDirectoryName(reportPath);
+		if (!string.IsNullOrWhiteSpace(reportDirectory))
+			Directory.CreateDirectory(reportDirectory);
+
+		object reportPayload = new
+		{
+			schema_version = "terrain-training-curate-report.v1",
+			created_at_utc = DateTimeOffset.UtcNow,
+			source_manifest = inputPath,
+			accepted = curatedEntries.Count,
+			accepted_pool = acceptedPool.Count,
+			rejected = evaluations.Count - acceptedPool.Count,
+			config = new
+			{
+				require_wdl = requireWdl,
+				require_minimap = requireMinimap,
+				min_height_range = minHeightRange,
+				min_minimap_variance = minMinimapVariance,
+				min_minimap_gradient = minMinimapGradient,
+				max_mean_wdl_delta = maxMeanWdlDelta,
+				max_abs_wdl_delta = maxAbsWdlDelta,
+				limit,
+				max_per_group = maxPerGroup,
+			},
+			items = evaluations.Select(evaluation => new
+			{
+				evaluation.Entry.SampleId,
+				evaluation.Entry.BuildLabel,
+				evaluation.Entry.MapName,
+				evaluation.Entry.TileName,
+				evaluation.Accepted,
+				evaluation.RejectionReason,
+				evaluation.QualityScore,
+				evaluation.Entry.Metrics.HeightRange,
+				evaluation.Entry.Metrics.LiquidCoverage,
+				evaluation.Entry.Metrics.HoleCoverage,
+				evaluation.Entry.Metrics.MinimapVariance,
+				evaluation.Entry.Metrics.MinimapGradient,
+				evaluation.Entry.Metrics.MeanWdlDelta,
+				evaluation.Entry.Metrics.MaxAbsWdlDelta,
+				evaluation.Entry.Signals.HasWdl,
+				evaluation.Entry.Signals.HasMinimap,
+			}),
+		};
+
+		File.WriteAllText(reportPath, JsonSerializer.Serialize(reportPayload, CreateJsonOptions()));
+		Console.WriteLine($"Wrote {reportPath}");
+	}
+}
+
+static void RunDatasetBuildCache(string[] args)
+{
+	string? inputOption = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? outputDirOption = GetOption(args, "--output-dir", "-o");
+	int? limit = GetIntOption(args, "--limit", "-n");
+	bool overwrite = HasFlag(args, "--overwrite");
+	bool includeMinimap = ResolveBooleanOption(args, "--include-minimap", "--no-include-minimap", defaultValue: true);
+	bool writeDebugJson = ResolveBooleanOption(args, "--write-debug-json", "--no-write-debug-json", defaultValue: true);
+
+	if (string.IsNullOrWhiteSpace(inputOption) || string.IsNullOrWhiteSpace(outputDirOption))
+	{
+		Console.Error.WriteLine("Error: dataset-build-cache requires --input <audit-or-curate.json> and --output-dir <dir>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string inputPath = Path.GetFullPath(inputOption);
+	string outputDir = Path.GetFullPath(outputDirOption);
+	TerrainTrainingSampleManifest sourceManifest = ReadTerrainTrainingManifest(inputPath);
+	if (!string.Equals(sourceManifest.SourceManifestKind, "audit", StringComparison.OrdinalIgnoreCase)
+		&& !string.Equals(sourceManifest.SourceManifestKind, "curate", StringComparison.OrdinalIgnoreCase))
+	{
+		Console.Error.WriteLine($"Error: dataset-build-cache requires a dataset-audit or dataset-curate manifest, but '{inputPath}' has SourceManifestKind='{sourceManifest.SourceManifestKind}'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Directory.CreateDirectory(outputDir);
+	Dictionary<string, IArchiveCatalog> archiveCatalogs = new(StringComparer.OrdinalIgnoreCase);
+	Dictionary<string, WdlSummary?> wdlCache = new(StringComparer.OrdinalIgnoreCase);
+	Dictionary<string, Md5TranslateIndex?> minimapMd5Cache = new(StringComparer.OrdinalIgnoreCase);
+	List<Dictionary<string, object?>> manifestEntries = [];
+	int processed = 0;
+	int skipped = 0;
+
+	try
+	{
+		IEnumerable<TerrainTrainingSampleDescriptor> sourceEntries = sourceManifest.Entries;
+		if (limit is > 0)
+			sourceEntries = sourceEntries.Take(limit.Value);
+
+		foreach (TerrainTrainingSampleDescriptor entry in sourceEntries)
+		{
+			DirectCacheBuildResult? built = BuildDirectCacheEntry(
+				entry,
+				archiveCatalogs,
+				wdlCache,
+				minimapMd5Cache,
+				outputDir,
+				inputPath,
+				includeMinimap,
+				writeDebugJson,
+				overwrite);
+			if (built is null)
+			{
+				skipped++;
+				continue;
+			}
+
+			manifestEntries.Add(new Dictionary<string, object?>
+			{
+				["dataset_root"] = entry.SourceRoot,
+				["dataset_key"] = built.DatasetKey,
+				["tile_name"] = entry.TileName,
+				["shard_path"] = built.ShardPath,
+				["source_json"] = built.DebugJsonPath,
+				["height_min"] = built.HeightMin,
+				["height_max"] = built.HeightMax,
+				["has_wdl_17"] = built.HasWdl17,
+				["has_minimap_rgb_256"] = built.HasMinimap,
+				["has_normal_rgb_256"] = built.HasNativeNormalMap,
+				["liquid_coverage"] = built.LiquidCoverage,
+				["object_coverage"] = built.ObjectCoverage,
+				["brush_coverage"] = built.BrushCoverage,
+				["hole_coverage"] = built.HoleCoverage,
+				["minimap_variance"] = built.MinimapVariance,
+				["minimap_gradient"] = built.MinimapGradient,
+				["detail_energy"] = built.DetailEnergy,
+				["array_names"] = built.ArrayNames,
+				["minimap_source"] = built.MinimapSource,
+			});
+			processed++;
+		}
+	}
+	finally
+	{
+		foreach (IArchiveCatalog archiveCatalog in archiveCatalogs.Values)
+			archiveCatalog.Dispose();
+	}
+
+	object manifestPayload = new
+	{
+		schema_version = "v9-native-tensor-cache.v2",
+		created_at_utc = DateTimeOffset.UtcNow,
+		output_dir = outputDir,
+		source_manifest = inputPath,
+		source_manifest_kind = sourceManifest.SourceManifestKind,
+		processed,
+		skipped,
+		supported_native_sizes = new[] { 257, 129, 65, 33, 17 },
+		entries = manifestEntries,
+	};
+
+	string manifestPath = Path.Combine(outputDir, V9TensorCacheManifestFile);
+	File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifestPayload, CreateJsonOptions()));
+
+	Console.WriteLine("WowViewer.Tool.Converter dataset-build-cache report");
+	Console.WriteLine($"Input: {inputPath}");
+	Console.WriteLine($"Processed: {processed}");
+	Console.WriteLine($"Skipped: {skipped}");
+	Console.WriteLine($"Wrote {manifestPath}");
+}
+
 static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromDirectory(string clientRoot, string buildLabel, string mapName, string mapPath, int? limit)
 {
 	List<string> adtFiles = Directory
@@ -506,6 +967,1330 @@ static TerrainTrainingSampleDescriptor CreateDatasetScanEntry(
 			TextureLayerCount = summary.TextureNameCount,
 		},
 	};
+}
+
+static TerrainTrainingSampleDescriptor AuditDatasetEntry(
+	TerrainTrainingSampleDescriptor entry,
+	Dictionary<string, IArchiveCatalog> archiveCatalogs,
+	Dictionary<string, WdlSummary?> wdlCache,
+	Dictionary<string, Md5TranslateIndex?> minimapMd5Cache)
+{
+	(bool useArchive, WorldTerrainTileData terrain, AdtLiquidFile liquid, AdtMcnkSummary mcnkSummary) = ReadDatasetAuditSource(entry, archiveCatalogs);
+	WdlSummary? wdlSummary = TryGetCachedWdlSummary(entry, useArchive, archiveCatalogs, wdlCache);
+	(bool hasWdlTile, float meanWdlDelta, float maxAbsWdlDelta) = ComputeWdlDeltaMetrics(terrain, wdlSummary, entry.TileX, entry.TileY);
+	(float liquidCoverage, bool hasLiquidHeights) = ComputeLiquidMetrics(liquid, mcnkSummary);
+	byte[]? minimapRgb256 = TryLoadMinimapRgb(entry, archiveCatalogs, minimapMd5Cache, out _);
+	float minimapVariance = minimapRgb256 is not null ? ComputeRgbVariance(minimapRgb256) : 0f;
+	float minimapGradient = minimapRgb256 is not null ? ComputeAverageGradientMagnitude(minimapRgb256, NativeMinimapSize, NativeMinimapSize) : 0f;
+	float holeCoverage = ComputeHoleCoverage(terrain);
+	bool hasLiquidSignal = liquidCoverage > 0f || mcnkSummary.ChunksWithMclq > 0;
+	WorldTerrainHeightmapData? heightmap = terrain.Heightmap;
+
+	return new TerrainTrainingSampleDescriptor(
+		sampleId: entry.SampleId,
+		sourceKind: entry.SourceKind,
+		buildLabel: entry.BuildLabel,
+		mapName: entry.MapName,
+		tileX: entry.TileX,
+		tileY: entry.TileY,
+		sourceRoot: entry.SourceRoot,
+		rootAdtPath: entry.RootAdtPath)
+	{
+		ObjAdtPath = entry.ObjAdtPath,
+		TexAdtPath = entry.TexAdtPath,
+		LodAdtPath = entry.LodAdtPath,
+		WdlPath = entry.WdlPath,
+		LooseOverlayRoot = entry.LooseOverlayRoot,
+		CompatibilityTileJsonPath = entry.CompatibilityTileJsonPath,
+		Signals = new TerrainTrainingSignalAvailability
+		{
+			HasRootAdt = true,
+			HasObjAdt = entry.ObjAdtPath is not null,
+			HasTexAdt = entry.TexAdtPath is not null,
+			HasWdl = hasWdlTile,
+			HasMinimap = minimapRgb256 is not null,
+			HasTerrainOnlyMinimap = entry.Signals.HasTerrainOnlyMinimap,
+			HasNoLiquidMinimap = entry.Signals.HasNoLiquidMinimap,
+			HasNoObjectMinimap = entry.Signals.HasNoObjectMinimap,
+			HasNoMccvMinimap = entry.Signals.HasNoMccvMinimap,
+			HasNormalMap = entry.Signals.HasNormalMap,
+			HasLiquidMask = hasLiquidSignal,
+			HasLiquidHeight = hasLiquidHeights || mcnkSummary.ChunksWithMclq > 0,
+			HasObjectMask = entry.Signals.HasObjectMask,
+			HasBrushMask = entry.Signals.HasBrushMask,
+			HasPm4Mask = entry.Signals.HasPm4Mask,
+			HasHoleMask = holeCoverage > 0f,
+			HasAreaIdMap = terrain.DistinctAreaIdCount > 0,
+			HasChunkFlagsMap = terrain.ChunkCount > 0,
+			HasAlphaLayers = entry.Signals.HasAlphaLayers,
+			HasTextureMetadata = entry.Signals.HasTextureMetadata,
+		},
+		Metrics = new TerrainTrainingSampleMetrics
+		{
+			HeightMin = heightmap?.MinHeight ?? 0f,
+			HeightMax = heightmap?.MaxHeight ?? 0f,
+			HeightRange = heightmap is not null ? heightmap.MaxHeight - heightmap.MinHeight : 0f,
+			LiquidCoverage = liquidCoverage,
+			ObjectCoverage = entry.Metrics.ObjectCoverage,
+			BrushCoverage = entry.Metrics.BrushCoverage,
+			Pm4Coverage = entry.Metrics.Pm4Coverage,
+			HoleCoverage = holeCoverage,
+			MinimapVariance = minimapVariance,
+			MinimapGradient = minimapGradient,
+			MeanWdlDelta = meanWdlDelta,
+			MaxAbsWdlDelta = maxAbsWdlDelta,
+			TextureLayerCount = Math.Max(entry.Metrics.TextureLayerCount, mcnkSummary.MaxLayerCount),
+		},
+	};
+}
+
+static (bool UseArchive, WorldTerrainTileData Terrain, AdtLiquidFile Liquid, AdtMcnkSummary McnkSummary) ReadDatasetAuditSource(
+	TerrainTrainingSampleDescriptor entry,
+	Dictionary<string, IArchiveCatalog> archiveCatalogs)
+{
+	bool useArchive = entry.SourceKind == TerrainTrainingSampleSourceKind.MountedArchive;
+	if (useArchive)
+	{
+		IArchiveCatalog archiveCatalog = GetOrCreateArchiveCatalog(entry.SourceRoot, archiveCatalogs);
+		byte[] rootBytes = archiveCatalog.ReadFile(entry.RootAdtPath)
+			?? throw new FileNotFoundException($"Could not read archive-backed root ADT '{entry.RootAdtPath}' for '{entry.SampleId}'.", entry.RootAdtPath);
+		using MemoryStream stream = new(rootBytes, writable: false);
+		MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, entry.RootAdtPath);
+		return (
+			UseArchive: true,
+			Terrain: WorldTerrainTileBuilder.Read(stream, fileSummary),
+			Liquid: AdtLiquidReader.Read(stream, fileSummary),
+			McnkSummary: AdtMcnkSummaryReader.Read(stream, fileSummary));
+	}
+
+	using FileStream fileStream = File.OpenRead(entry.RootAdtPath);
+	MapFileSummary filesystemSummary = MapFileSummaryReader.Read(fileStream, Path.GetFullPath(entry.RootAdtPath));
+	return (
+		UseArchive: false,
+		Terrain: WorldTerrainTileBuilder.Read(fileStream, filesystemSummary),
+		Liquid: AdtLiquidReader.Read(fileStream, filesystemSummary),
+		McnkSummary: AdtMcnkSummaryReader.Read(fileStream, filesystemSummary));
+}
+
+static TerrainTrainingSampleManifest ReadTerrainTrainingManifest(string inputPath)
+{
+	string json = File.ReadAllText(inputPath);
+	TerrainTrainingSampleManifest? manifest = JsonSerializer.Deserialize<TerrainTrainingSampleManifest>(json, CreateJsonOptions());
+	if (manifest is null)
+		throw new InvalidDataException($"Could not deserialize terrain-training manifest '{inputPath}'.");
+
+	return manifest;
+}
+
+static IArchiveCatalog GetOrCreateArchiveCatalog(string clientRoot, Dictionary<string, IArchiveCatalog> archiveCatalogs)
+{
+	if (archiveCatalogs.TryGetValue(clientRoot, out IArchiveCatalog? existing))
+		return existing;
+
+	IArchiveCatalog archiveCatalog = CreateArchiveCatalog(clientRoot);
+	archiveCatalogs[clientRoot] = archiveCatalog;
+	return archiveCatalog;
+}
+
+static WdlSummary? TryGetCachedWdlSummary(
+	TerrainTrainingSampleDescriptor entry,
+	bool useArchive,
+	Dictionary<string, IArchiveCatalog> archiveCatalogs,
+	Dictionary<string, WdlSummary?> wdlCache)
+{
+	if (string.IsNullOrWhiteSpace(entry.WdlPath))
+		return null;
+
+	string cacheKey = $"{entry.SourceKind}|{entry.SourceRoot}|{entry.WdlPath}";
+	if (wdlCache.TryGetValue(cacheKey, out WdlSummary? cached))
+		return cached;
+
+	WdlSummary? resolved = null;
+	if (useArchive)
+	{
+		IArchiveCatalog archiveCatalog = GetOrCreateArchiveCatalog(entry.SourceRoot, archiveCatalogs);
+		byte[]? wdlBytes = archiveCatalog.ReadFile(entry.WdlPath);
+		if (wdlBytes is { Length: > 0 })
+		{
+			using MemoryStream stream = new(wdlBytes, writable: false);
+			resolved = WdlSummaryReader.Read(stream, entry.WdlPath);
+		}
+	}
+	else if (File.Exists(entry.WdlPath))
+	{
+		resolved = WdlSummaryReader.Read(entry.WdlPath);
+	}
+
+	wdlCache[cacheKey] = resolved;
+	return resolved;
+}
+
+static (bool HasDelta, float MeanWdlDelta, float MaxAbsWdlDelta) ComputeWdlDeltaMetrics(
+	WorldTerrainTileData terrain,
+	WdlSummary? summary,
+	int tileX,
+	int tileY)
+{
+	WorldTerrainHeightmapData? heightmap = terrain.Heightmap;
+	if (heightmap is null || summary is null || !summary.TryGetTile(tileX, tileY, out WdlTileSummary? tile) || tile is null)
+		return (false, 0f, 0f);
+
+	float[] height17 = DownsampleHeightGrid(heightmap.Heights.ToArray(), NativeTileSize, 17);
+	WdlAlignment? alignment = TryBuildAlignedWdl17(height17, summary, tileX, tileY);
+	if (alignment is null)
+		return (false, 0f, 0f);
+
+	return (true, alignment.MeanAbsoluteDelta, alignment.MaxAbsoluteDelta);
+}
+
+static (float LiquidCoverage, bool HasLiquidHeights) ComputeLiquidMetrics(AdtLiquidFile liquidFile, AdtMcnkSummary mcnkSummary)
+{
+	float mh2oCoverage = ComputeMh2oCoverage(liquidFile);
+	float mclqFallbackCoverage = mcnkSummary.McnkCount > 0
+		? (float)mcnkSummary.ChunksWithMclq / mcnkSummary.McnkCount
+		: 0f;
+	bool hasLiquidHeights = liquidFile.Chunks.Any(static chunk => chunk.Layers.Any(static layer => layer.Heights is { Length: > 0 }))
+		|| mcnkSummary.ChunksWithMclq > 0;
+	return (Math.Clamp(MathF.Max(mh2oCoverage, mclqFallbackCoverage), 0f, 1f), hasLiquidHeights);
+}
+
+static float ComputeMh2oCoverage(AdtLiquidFile liquidFile)
+{
+	if (liquidFile.Chunks.Count == 0)
+		return 0f;
+
+	int visibleTileCount = 0;
+	foreach (AdtLiquidChunk chunk in liquidFile.Chunks)
+	{
+		bool[] occupied = new bool[64];
+		foreach (AdtLiquidLayer layer in chunk.Layers)
+		{
+			for (int localY = 0; localY < layer.Height; localY++)
+			{
+				for (int localX = 0; localX < layer.Width; localX++)
+				{
+					if (!layer.TileExists(localX, localY))
+						continue;
+
+					int chunkX = layer.XOffset + localX;
+					int chunkY = layer.YOffset + localY;
+					if ((uint)chunkX >= 8 || (uint)chunkY >= 8)
+						continue;
+
+					occupied[(chunkY * 8) + chunkX] = true;
+				}
+			}
+		}
+
+		for (int index = 0; index < occupied.Length; index++)
+		{
+			if (occupied[index])
+				visibleTileCount++;
+		}
+	}
+
+	return (float)visibleTileCount / (liquidFile.Chunks.Count * 64);
+}
+
+static float ComputeHoleCoverage(WorldTerrainTileData terrain)
+{
+	if (terrain.ChunkCount == 0)
+		return 0f;
+
+	int totalHoleBits = 0;
+	foreach (WorldTerrainChunkData chunk in terrain.Chunks)
+		totalHoleBits += BitOperations.PopCount((uint)chunk.HoleMask);
+
+	return (float)totalHoleBits / (terrain.ChunkCount * 16);
+}
+
+static DatasetCurateEvaluation EvaluateCurateEntry(
+	TerrainTrainingSampleDescriptor entry,
+	bool requireWdl,
+	bool requireMinimap,
+	float minHeightRange,
+	float minMinimapVariance,
+	float minMinimapGradient,
+	float maxMeanWdlDelta,
+	float maxAbsWdlDelta)
+{
+	string? rejectionReason = null;
+	if (entry.Metrics.HeightRange < minHeightRange)
+		rejectionReason = "height_range";
+	else if (requireWdl && !entry.Signals.HasWdl)
+		rejectionReason = "missing_wdl";
+	else if (requireMinimap && !entry.Signals.HasMinimap)
+		rejectionReason = "missing_minimap";
+	else if (entry.Signals.HasMinimap && entry.Metrics.MinimapVariance < minMinimapVariance)
+		rejectionReason = "low_minimap_variance";
+	else if (entry.Signals.HasMinimap && entry.Metrics.MinimapGradient < minMinimapGradient)
+		rejectionReason = "low_minimap_gradient";
+	else if (entry.Signals.HasWdl && entry.Metrics.MeanWdlDelta > maxMeanWdlDelta)
+		rejectionReason = "high_mean_wdl_delta";
+	else if (entry.Signals.HasWdl && entry.Metrics.MaxAbsWdlDelta > maxAbsWdlDelta)
+		rejectionReason = "high_abs_wdl_delta";
+
+	float qualityScore = -1f;
+	if (rejectionReason is null)
+	{
+		float heightScore = MathF.Min(entry.Metrics.HeightRange / 64f, 4f);
+		float minimapScore = entry.Signals.HasMinimap
+			? MathF.Min(entry.Metrics.MinimapGradient / 0.02f, 3f) + MathF.Min(entry.Metrics.MinimapVariance / 0.01f, 3f)
+			: 0f;
+		float wdlPenalty = entry.Signals.HasWdl
+			? MathF.Min(entry.Metrics.MeanWdlDelta / 128f, 2f) + MathF.Min(entry.Metrics.MaxAbsWdlDelta / 512f, 2f)
+			: 0f;
+		float holePenalty = MathF.Min(entry.Metrics.HoleCoverage * 2f, 1f);
+		qualityScore = heightScore + minimapScore - wdlPenalty - holePenalty;
+	}
+
+	return new DatasetCurateEvaluation(entry, rejectionReason is null, rejectionReason, qualityScore);
+}
+
+static List<TerrainTrainingSampleDescriptor> SelectCuratedEntries(
+	IReadOnlyList<DatasetCurateEvaluation> acceptedPool,
+	int? limit,
+	int maxPerGroup)
+{
+	Dictionary<string, Queue<DatasetCurateEvaluation>> grouped = acceptedPool
+		.GroupBy(static evaluation => $"{evaluation.Entry.BuildLabel}::{evaluation.Entry.MapName}", StringComparer.OrdinalIgnoreCase)
+		.ToDictionary(
+			static group => group.Key,
+			static group => new Queue<DatasetCurateEvaluation>(group
+				.OrderByDescending(static evaluation => evaluation.QualityScore)
+				.ThenBy(static evaluation => evaluation.Entry.TileY)
+				.ThenBy(static evaluation => evaluation.Entry.TileX)),
+			StringComparer.OrdinalIgnoreCase);
+
+	Dictionary<string, int> acceptedPerGroup = new(StringComparer.OrdinalIgnoreCase);
+	List<TerrainTrainingSampleDescriptor> selected = [];
+	List<string> groupOrder = grouped
+		.OrderByDescending(static pair => pair.Value.Count > 0 ? pair.Value.Peek().QualityScore : float.MinValue)
+		.Select(static pair => pair.Key)
+		.ToList();
+
+	while (groupOrder.Count > 0 && (!limit.HasValue || selected.Count < limit.Value))
+	{
+		bool anyAdded = false;
+		for (int index = 0; index < groupOrder.Count && (!limit.HasValue || selected.Count < limit.Value); index++)
+		{
+			string groupKey = groupOrder[index];
+			Queue<DatasetCurateEvaluation> queue = grouped[groupKey];
+			int currentCount = acceptedPerGroup.TryGetValue(groupKey, out int existingCount) ? existingCount : 0;
+			if (currentCount >= maxPerGroup)
+				continue;
+			if (queue.Count == 0)
+				continue;
+
+			selected.Add(queue.Dequeue().Entry);
+			acceptedPerGroup[groupKey] = currentCount + 1;
+			anyAdded = true;
+		}
+
+		groupOrder = groupOrder
+			.Where(groupKey => grouped[groupKey].Count > 0 && (acceptedPerGroup.TryGetValue(groupKey, out int count) ? count : 0) < maxPerGroup)
+			.ToList();
+
+		if (!anyAdded)
+			break;
+	}
+
+	return selected;
+}
+
+static DirectCacheBuildResult? BuildDirectCacheEntry(
+	TerrainTrainingSampleDescriptor entry,
+	Dictionary<string, IArchiveCatalog> archiveCatalogs,
+	Dictionary<string, WdlSummary?> wdlCache,
+	Dictionary<string, Md5TranslateIndex?> minimapMd5Cache,
+	string outputDir,
+	string sourceManifestPath,
+	bool includeMinimap,
+	bool writeDebugJson,
+	bool overwrite)
+{
+	(bool useArchive, WorldTerrainTileData terrain, AdtLiquidFile liquid, AdtMcnkSummary mcnkSummary) = ReadDatasetAuditSource(entry, archiveCatalogs);
+	WorldTerrainHeightmapData? heightmap = terrain.Heightmap;
+	if (heightmap is null)
+		return null;
+
+	string datasetKey = BuildDirectDatasetKey(entry);
+	string shardDirectory = Path.Combine(outputDir, "shards", datasetKey);
+	Directory.CreateDirectory(shardDirectory);
+	string shardPath = Path.Combine(shardDirectory, $"{entry.TileName}.npz");
+	if (File.Exists(shardPath) && !overwrite)
+	{
+		string debugExistingPath = Path.Combine(outputDir, "debug", datasetKey, $"{entry.TileName}.json");
+		return new DirectCacheBuildResult(
+			DatasetKey: datasetKey,
+			ShardPath: shardPath,
+			DebugJsonPath: File.Exists(debugExistingPath) ? debugExistingPath : sourceManifestPath,
+			HeightMin: heightmap.MinHeight,
+			HeightMax: heightmap.MaxHeight,
+			LiquidCoverage: entry.Metrics.LiquidCoverage,
+			ObjectCoverage: entry.Metrics.ObjectCoverage,
+			BrushCoverage: entry.Metrics.BrushCoverage,
+			HoleCoverage: entry.Metrics.HoleCoverage,
+			MinimapVariance: entry.Metrics.MinimapVariance,
+			MinimapGradient: entry.Metrics.MinimapGradient,
+			DetailEnergy: 0f,
+			HasWdl17: false,
+			HasMinimap: entry.Signals.HasMinimap,
+			HasNativeNormalMap: false,
+			MinimapSource: "existing-shard",
+			ArrayNames: Array.Empty<string>());
+	}
+
+	float[] chunkHeights = BuildChunkHeightsTensor(terrain);
+	float[] height257 = heightmap.Heights.ToArray();
+	float[] height129 = DownsampleHeightGrid(height257, NativeTileSize, 129);
+	float[] height65 = DownsampleHeightGrid(height257, NativeTileSize, 65);
+	float[] height33 = DownsampleHeightGrid(height257, NativeTileSize, 33);
+	float[] height17 = DownsampleHeightGrid(height257, NativeTileSize, 17);
+	byte[] holeMask16 = BuildHoleMask16x16(terrain);
+	byte[] normalRgb256 = CreateSolidRgbImage(NativeMinimapSize, NativeMinimapSize, DefaultNormalR, DefaultNormalG, DefaultNormalB);
+	float[] heightHints = BuildHeightHints(heightmap.MinHeight, heightmap.MaxHeight);
+	(byte[] liquidMask257, float[] liquidHeight257, bool hasNativeLiquidHeights, string liquidMode) = RasterizeLiquidSignals(terrain, liquid, mcnkSummary, height257);
+	WdlSummary? wdlSummary = TryGetCachedWdlSummary(entry, useArchive, archiveCatalogs, wdlCache);
+	WdlAlignment? wdlAlignment = TryBuildAlignedWdl17(height17, wdlSummary, entry.TileX, entry.TileY);
+	bool includeVerifiedWdl = IsVerifiedWdlAlignment(wdlAlignment);
+	float[]? wdl17 = includeVerifiedWdl ? wdlAlignment!.AlignedHeights17 : null;
+	string? minimapSourceName = null;
+	byte[]? minimapRgb256 = includeMinimap ? TryLoadMinimapRgb(entry, archiveCatalogs, minimapMd5Cache, out minimapSourceName) : null;
+	string minimapSource = includeMinimap && minimapRgb256 is not null ? minimapSourceName! : "missing";
+	byte[] objectMask257 = BuildObjectMask257(entry, archiveCatalogs);
+	byte[] brushMask257 = new byte[NativeTileSize * NativeTileSize];
+	float liquidCoverage = ComputeBinaryCoverage(liquidMask257);
+	float objectCoverage = ComputeBinaryCoverage(objectMask257);
+	float brushCoverage = ComputeBinaryCoverage(brushMask257);
+	float holeCoverage = ComputeBinaryCoverage(holeMask16);
+	float minimapVariance = minimapRgb256 is not null ? ComputeRgbVariance(minimapRgb256) : 0f;
+	float minimapGradient = minimapRgb256 is not null ? ComputeAverageGradientMagnitude(minimapRgb256, NativeMinimapSize, NativeMinimapSize) : 0f;
+	float detailEnergy = ComputeDetailEnergy(height257, height65);
+
+	List<(string Name, NpyArray Array)> payload =
+	[
+		("chunk_heights_256x145", NpyArray.FromFloat32(chunkHeights, 256, 145)),
+		("height_257", NpyArray.FromFloat32(height257, NativeTileSize, NativeTileSize)),
+		("height_129", NpyArray.FromFloat32(height129, 129, 129)),
+		("height_65", NpyArray.FromFloat32(height65, 65, 65)),
+		("height_33", NpyArray.FromFloat32(height33, 33, 33)),
+		("height_17", NpyArray.FromFloat32(height17, 17, 17)),
+		("hole_mask_16x16", NpyArray.FromUInt8(holeMask16, 16, 16)),
+		("normal_rgb_256", NpyArray.FromUInt8(normalRgb256, NativeMinimapSize, NativeMinimapSize, 3)),
+		("height_hints_v7", NpyArray.FromFloat32(heightHints, 2)),
+		("liquid_mask_257", NpyArray.FromUInt8(liquidMask257, NativeTileSize, NativeTileSize)),
+		("liquid_height_257", NpyArray.FromFloat32(liquidHeight257, NativeTileSize, NativeTileSize)),
+		("object_mask_257", NpyArray.FromUInt8(objectMask257, NativeTileSize, NativeTileSize)),
+		("brush_mask_257", NpyArray.FromUInt8(brushMask257, NativeTileSize, NativeTileSize)),
+	];
+	if (wdl17 is not null)
+	{
+		payload.Add(("wdl_17", NpyArray.FromFloat32(wdl17, 17, 17)));
+		payload.Add(("wdl_delta_17", NpyArray.FromFloat32(SubtractGrids(height17, wdl17), 17, 17)));
+	}
+	if (minimapRgb256 is not null)
+		payload.Add(("minimap_rgb_256", NpyArray.FromUInt8(minimapRgb256, NativeMinimapSize, NativeMinimapSize, 3)));
+
+	WriteNpz(shardPath, payload);
+
+	string debugJsonPath = sourceManifestPath;
+	if (writeDebugJson)
+	{
+		string debugDirectory = Path.Combine(outputDir, "debug", datasetKey);
+		Directory.CreateDirectory(debugDirectory);
+		debugJsonPath = Path.Combine(debugDirectory, $"{entry.TileName}.json");
+		object debugPayload = new
+		{
+			schema_version = "terrain-training-cache-debug.v1",
+			created_at_utc = DateTimeOffset.UtcNow,
+			source_manifest = sourceManifestPath,
+			sample = new
+			{
+				entry.SampleId,
+				entry.BuildLabel,
+				entry.MapName,
+				entry.TileX,
+				entry.TileY,
+				entry.SourceRoot,
+				entry.RootAdtPath,
+				entry.ObjAdtPath,
+				entry.TexAdtPath,
+				entry.WdlPath,
+				SourceKind = entry.SourceKind.ToString(),
+			},
+			terrain = new
+			{
+				terrain.ChunkCount,
+				terrain.DistinctAreaIdCount,
+				terrain.LiquidFlagChunkCount,
+				HeightMin = heightmap.MinHeight,
+				HeightMax = heightmap.MaxHeight,
+				HeightRange = heightmap.MaxHeight - heightmap.MinHeight,
+				AuthoritativeSamples = heightmap.AuthoritativeSampleCount,
+			},
+			liquid = new
+			{
+				liquid.Chunks.Count,
+				LayerCount = liquid.Chunks.Sum(static chunk => chunk.Layers.Count),
+				liquidMode,
+				has_native_liquid_heights = hasNativeLiquidHeights,
+				liquid_coverage = liquidCoverage,
+				mcnkSummary.ChunksWithMclq,
+				mcnkSummary.ChunksWithLiquidFlags,
+			},
+			wdl = new
+			{
+				has_wdl_17 = wdl17 is not null,
+				alignment_verified = includeVerifiedWdl,
+				alignment_offset = wdlAlignment?.VerticalOffset ?? 0f,
+				mean_wdl_delta = wdlAlignment?.MeanAbsoluteDelta ?? 0f,
+				max_abs_wdl_delta = wdlAlignment?.MaxAbsoluteDelta ?? 0f,
+			},
+			minimap = new
+			{
+				has_minimap = minimapRgb256 is not null,
+				minimap_source = minimapSource,
+				minimap_variance = minimapVariance,
+				minimap_gradient = minimapGradient,
+			},
+			objects = new
+			{
+				coverage = objectCoverage,
+				mode = objectCoverage > 0f ? "placement-centroids" : "none",
+			},
+			brush = new
+			{
+				coverage = brushCoverage,
+				mode = "none",
+			},
+			arrays = payload.Select(item => new { name = item.Name, shape = item.Array.Shape, dtype = item.Array.Descriptor }),
+		};
+
+		File.WriteAllText(debugJsonPath, JsonSerializer.Serialize(debugPayload, CreateJsonOptions()));
+	}
+
+	return new DirectCacheBuildResult(
+		DatasetKey: datasetKey,
+		ShardPath: shardPath,
+		DebugJsonPath: debugJsonPath,
+		HeightMin: heightmap.MinHeight,
+		HeightMax: heightmap.MaxHeight,
+		LiquidCoverage: liquidCoverage,
+		ObjectCoverage: objectCoverage,
+		BrushCoverage: brushCoverage,
+		HoleCoverage: holeCoverage,
+		MinimapVariance: minimapVariance,
+		MinimapGradient: minimapGradient,
+		DetailEnergy: detailEnergy,
+		HasWdl17: wdl17 is not null,
+		HasMinimap: minimapRgb256 is not null,
+		HasNativeNormalMap: false,
+		MinimapSource: minimapSource,
+		ArrayNames: payload.Select(static item => item.Name).OrderBy(static name => name, StringComparer.Ordinal).ToArray());
+}
+
+static string BuildDirectDatasetKey(TerrainTrainingSampleDescriptor entry)
+{
+	return $"{SanitizeDatasetKeySegment(entry.BuildLabel)}__{SanitizeDatasetKeySegment(entry.MapName)}";
+}
+
+static string SanitizeDatasetKeySegment(string value)
+{
+	Span<char> buffer = stackalloc char[value.Length];
+	int written = 0;
+	foreach (char character in value)
+	{
+		buffer[written++] = char.IsLetterOrDigit(character) ? char.ToLowerInvariant(character) : '_';
+	}
+
+	string sanitized = new string(buffer[..written]).Trim('_');
+	return string.IsNullOrWhiteSpace(sanitized) ? "dataset" : sanitized;
+}
+
+static float[] BuildChunkHeightsTensor(WorldTerrainTileData terrain)
+{
+	float[] tensor = new float[256 * 145];
+	foreach (WorldTerrainChunkData chunk in terrain.Chunks)
+	{
+		if (chunk.Heights is null || !chunk.HasHeights)
+			continue;
+
+		int chunkIndex = (chunk.IndexY * 16) + chunk.IndexX;
+		if ((uint)chunkIndex >= 256)
+			continue;
+
+		Buffer.BlockCopy(chunk.Heights, 0, tensor, chunkIndex * 145 * sizeof(float), 145 * sizeof(float));
+	}
+
+	return tensor;
+}
+
+static byte[] BuildHoleMask16x16(WorldTerrainTileData terrain)
+{
+	byte[] mask = new byte[16 * 16];
+	foreach (WorldTerrainChunkData chunk in terrain.Chunks)
+	{
+		int index = (chunk.IndexY * 16) + chunk.IndexX;
+		if ((uint)index >= mask.Length)
+			continue;
+
+		mask[index] = chunk.HoleMask != 0 ? (byte)1 : (byte)0;
+	}
+
+	return mask;
+}
+
+static float[] BuildHeightHints(float heightMin, float heightMax)
+{
+	float globalRange = MathF.Max(HeightGlobalMax - HeightGlobalMin, 1e-6f);
+	return
+	[
+		Math.Clamp((heightMin - HeightGlobalMin) / globalRange, 0f, 1f),
+		Math.Clamp((heightMax - HeightGlobalMin) / globalRange, 0f, 1f),
+	];
+}
+
+static float[] DownsampleHeightGrid(float[] source, int sourceSize, int targetSize)
+{
+	int step = (sourceSize - 1) / (targetSize - 1);
+	float[] result = new float[targetSize * targetSize];
+	for (int y = 0; y < targetSize; y++)
+	{
+		for (int x = 0; x < targetSize; x++)
+			result[(y * targetSize) + x] = source[(y * step * sourceSize) + (x * step)];
+	}
+
+	return result;
+}
+
+static float[] ResizeFloatGridBilinear(float[] source, int sourceWidth, int sourceHeight, int targetWidth, int targetHeight)
+{
+	float[] result = new float[targetWidth * targetHeight];
+	for (int y = 0; y < targetHeight; y++)
+	{
+		float sourceY = targetHeight == 1 ? 0f : y * (sourceHeight - 1f) / (targetHeight - 1f);
+		int y0 = Math.Clamp((int)MathF.Floor(sourceY), 0, sourceHeight - 1);
+		int y1 = Math.Clamp(y0 + 1, 0, sourceHeight - 1);
+		float fy = sourceY - y0;
+		for (int x = 0; x < targetWidth; x++)
+		{
+			float sourceX = targetWidth == 1 ? 0f : x * (sourceWidth - 1f) / (targetWidth - 1f);
+			int x0 = Math.Clamp((int)MathF.Floor(sourceX), 0, sourceWidth - 1);
+			int x1 = Math.Clamp(x0 + 1, 0, sourceWidth - 1);
+			float fx = sourceX - x0;
+
+			float top = Lerp(source[(y0 * sourceWidth) + x0], source[(y0 * sourceWidth) + x1], fx);
+			float bottom = Lerp(source[(y1 * sourceWidth) + x0], source[(y1 * sourceWidth) + x1], fx);
+			result[(y * targetWidth) + x] = Lerp(top, bottom, fy);
+		}
+	}
+
+	return result;
+}
+
+static float[] SubtractGrids(float[] left, float[] right)
+{
+	float[] result = new float[left.Length];
+	for (int index = 0; index < left.Length; index++)
+		result[index] = left[index] - right[index];
+
+	return result;
+}
+
+static float Lerp(float a, float b, float t) => a + ((b - a) * t);
+
+static float ComputeDetailEnergy(float[] height257, float[] height65)
+{
+	float[] upsampled = ResizeFloatGridBilinear(height65, 65, 65, NativeTileSize, NativeTileSize);
+	float sum = 0f;
+	for (int index = 0; index < height257.Length; index++)
+		sum += MathF.Abs(height257[index] - upsampled[index]);
+
+	return sum / height257.Length;
+}
+
+static byte[] CreateSolidRgbImage(int width, int height, byte r, byte g, byte b)
+{
+	byte[] rgb = new byte[width * height * 3];
+	for (int index = 0; index < rgb.Length; index += 3)
+	{
+		rgb[index] = r;
+		rgb[index + 1] = g;
+		rgb[index + 2] = b;
+	}
+
+	return rgb;
+}
+
+static (byte[] Mask, float[] Heights, bool HasNativeHeights, string Mode) RasterizeLiquidSignals(
+	WorldTerrainTileData terrain,
+	AdtLiquidFile liquid,
+	AdtMcnkSummary mcnkSummary,
+	float[] terrainHeight257)
+{
+	byte[] mask = new byte[NativeTileSize * NativeTileSize];
+	float[] heights = new float[NativeTileSize * NativeTileSize];
+	bool[] resolved = new bool[NativeTileSize * NativeTileSize];
+	bool hasNativeHeights = false;
+
+	foreach (AdtLiquidChunk chunk in liquid.Chunks)
+	{
+		int chunkX = chunk.ChunkIndex % 16;
+		int chunkY = chunk.ChunkIndex / 16;
+		foreach (AdtLiquidLayer layer in chunk.Layers)
+		{
+			for (int localY = 0; localY < layer.Height; localY++)
+			{
+				for (int localX = 0; localX < layer.Width; localX++)
+				{
+					if (!layer.TileExists(localX, localY))
+						continue;
+
+					int gridBaseX = (chunkX * 16) + ((layer.XOffset + localX) * 2);
+					int gridBaseY = (chunkY * 16) + ((layer.YOffset + localY) * 2);
+					for (int dy = 0; dy <= 2; dy++)
+					{
+						for (int dx = 0; dx <= 2; dx++)
+						{
+							int x = gridBaseX + dx;
+							int y = gridBaseY + dy;
+							if ((uint)x >= NativeTileSize || (uint)y >= NativeTileSize)
+								continue;
+
+							int index = (y * NativeTileSize) + x;
+							mask[index] = 1;
+							float height = layer.MinHeight;
+							if (TrySampleLiquidHeight(layer, localX, localY, dx * 0.5f, dy * 0.5f, out float sampledHeight))
+							{
+								height = sampledHeight;
+								hasNativeHeights = true;
+							}
+
+							if (!resolved[index] || height > heights[index])
+							{
+								heights[index] = height;
+								resolved[index] = true;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (!mask.Any(static value => value != 0) && (terrain.LiquidFlagChunkCount > 0 || mcnkSummary.ChunksWithMclq > 0))
+	{
+		PaintChunkLiquidFallback(mask, heights, resolved, terrain, terrainHeight257);
+		return (mask, heights, false, "chunk-liquid-flag-fallback");
+	}
+
+	for (int index = 0; index < heights.Length; index++)
+	{
+		if (mask[index] == 0)
+			heights[index] = 0f;
+	}
+
+	return (mask, heights, hasNativeHeights, hasNativeHeights ? "mh2o-native" : "mh2o-flat");
+}
+
+static void PaintChunkLiquidFallback(byte[] mask, float[] heights, bool[] resolved, WorldTerrainTileData terrain, float[] terrainHeight257)
+{
+	foreach (WorldTerrainChunkData chunk in terrain.Chunks)
+	{
+		if (!chunk.HasLiquidFlags)
+			continue;
+
+		int baseX = chunk.IndexX * 16;
+		int baseY = chunk.IndexY * 16;
+		for (int localY = 0; localY <= 16; localY++)
+		{
+			for (int localX = 0; localX <= 16; localX++)
+			{
+				int x = baseX + localX;
+				int y = baseY + localY;
+				if ((uint)x >= NativeTileSize || (uint)y >= NativeTileSize)
+					continue;
+
+				int index = (y * NativeTileSize) + x;
+				mask[index] = 1;
+				if (!resolved[index])
+					heights[index] = terrainHeight257[index];
+			}
+		}
+	}
+}
+
+static bool TrySampleLiquidHeight(AdtLiquidLayer layer, int tileX, int tileY, float offsetX, float offsetY, out float height)
+{
+	height = layer.MinHeight;
+	if (layer.Heights is null)
+		return false;
+
+	int vertexWidth = layer.Width + 1;
+	int vertexHeight = layer.Height + 1;
+	if (layer.Heights.Length < vertexWidth * vertexHeight)
+		return false;
+
+	float sourceX = tileX + Math.Clamp(offsetX, 0f, 1f);
+	float sourceY = tileY + Math.Clamp(offsetY, 0f, 1f);
+	int x0 = Math.Clamp((int)MathF.Floor(sourceX), 0, vertexWidth - 1);
+	int y0 = Math.Clamp((int)MathF.Floor(sourceY), 0, vertexHeight - 1);
+	int x1 = Math.Clamp(x0 + 1, 0, vertexWidth - 1);
+	int y1 = Math.Clamp(y0 + 1, 0, vertexHeight - 1);
+	float fx = sourceX - x0;
+	float fy = sourceY - y0;
+
+	float top = Lerp(layer.Heights[(y0 * vertexWidth) + x0], layer.Heights[(y0 * vertexWidth) + x1], fx);
+	float bottom = Lerp(layer.Heights[(y1 * vertexWidth) + x0], layer.Heights[(y1 * vertexWidth) + x1], fx);
+	height = Lerp(top, bottom, fy);
+	return true;
+}
+
+static float[]? TryBuildWdl17(WdlSummary? summary, int tileX, int tileY)
+{
+	if (summary is null || !summary.TryGetTile(tileX, tileY, out WdlTileSummary? tile) || tile is null)
+		return null;
+
+	float[] heights = new float[WdlTileSummary.OuterHeightCount];
+	for (int index = 0; index < heights.Length; index++)
+		heights[index] = tile.OuterHeights[index];
+
+	return heights;
+}
+
+static WdlAlignment? TryBuildAlignedWdl17(float[] terrainHeight17, WdlSummary? summary, int tileX, int tileY)
+{
+	float[]? rawWdl17 = TryBuildWdl17(summary, tileX, tileY);
+	if (rawWdl17 is null || terrainHeight17.Length != rawWdl17.Length)
+		return null;
+
+	float[] deltas = new float[terrainHeight17.Length];
+	for (int index = 0; index < deltas.Length; index++)
+		deltas[index] = terrainHeight17[index] - rawWdl17[index];
+
+	float verticalOffset = ComputeMedian(deltas);
+	float[] alignedHeights17 = new float[rawWdl17.Length];
+	float absoluteDeltaSum = 0f;
+	float maxAbsoluteDelta = 0f;
+	for (int index = 0; index < alignedHeights17.Length; index++)
+	{
+		float aligned = rawWdl17[index] + verticalOffset;
+		alignedHeights17[index] = aligned;
+		float absoluteDelta = MathF.Abs(terrainHeight17[index] - aligned);
+		absoluteDeltaSum += absoluteDelta;
+		if (absoluteDelta > maxAbsoluteDelta)
+			maxAbsoluteDelta = absoluteDelta;
+	}
+
+	return new WdlAlignment(
+		AlignedHeights17: alignedHeights17,
+		VerticalOffset: verticalOffset,
+		MeanAbsoluteDelta: absoluteDeltaSum / alignedHeights17.Length,
+		MaxAbsoluteDelta: maxAbsoluteDelta);
+}
+
+static bool IsVerifiedWdlAlignment(WdlAlignment? alignment)
+{
+	return alignment is not null
+		&& alignment.MeanAbsoluteDelta <= 256f
+		&& alignment.MaxAbsoluteDelta <= 1024f;
+}
+
+static float ComputeMedian(float[] values)
+{
+	ArgumentNullException.ThrowIfNull(values);
+	if (values.Length == 0)
+		return 0f;
+
+	float[] copy = values.ToArray();
+	Array.Sort(copy);
+	int middle = copy.Length / 2;
+	if ((copy.Length & 1) == 1)
+		return copy[middle];
+
+	return (copy[middle - 1] + copy[middle]) * 0.5f;
+}
+
+static byte[]? TryLoadMinimapRgb(
+	TerrainTrainingSampleDescriptor entry,
+	Dictionary<string, IArchiveCatalog> archiveCatalogs,
+	Dictionary<string, Md5TranslateIndex?> minimapMd5Cache,
+	out string? sourceName)
+{
+	IArchiveCatalog? archiveCatalog = null;
+	if (entry.SourceKind == TerrainTrainingSampleSourceKind.MountedArchive)
+		archiveCatalog = GetOrCreateArchiveCatalog(entry.SourceRoot, archiveCatalogs);
+
+	foreach (string candidate in EnumerateMinimapCandidates(entry.MapName, entry.TileX, entry.TileY))
+	{
+		if (entry.SourceKind == TerrainTrainingSampleSourceKind.MountedArchive)
+		{
+			byte[]? candidateBytes = archiveCatalog!.ReadFile(candidate);
+			if (candidateBytes is { Length: > 0 })
+			{
+				sourceName = candidate;
+				return DecodeArchiveBackedMinimap(candidateBytes, candidate);
+			}
+		}
+		else
+		{
+			string? path = ResolveFilesystemMinimapPath(entry.SourceRoot, candidate);
+			if (path is not null)
+			{
+				sourceName = path;
+				return DecodeFilesystemMinimap(path);
+			}
+		}
+	}
+
+	if (archiveCatalog is not null)
+	{
+		Md5TranslateIndex? translateIndex = TryGetCachedMinimapMd5Index(entry, archiveCatalogs, minimapMd5Cache);
+		if (translateIndex is not null)
+		{
+			foreach (string candidate in EnumerateMinimapCandidates(entry.MapName, entry.TileX, entry.TileY))
+			{
+				string lookupKey = translateIndex.Normalize(candidate);
+				if (!translateIndex.PlainToHash.TryGetValue(lookupKey, out string? translatedPath) || string.IsNullOrWhiteSpace(translatedPath))
+					continue;
+
+				string archivePath = translatedPath.Replace('/', '\\');
+				byte[]? candidateBytes = archiveCatalog.ReadFile(archivePath);
+				if (candidateBytes is not { Length: > 0 })
+					continue;
+
+				sourceName = archivePath;
+				return DecodeArchiveBackedMinimap(candidateBytes, archivePath);
+			}
+		}
+	}
+
+	sourceName = null;
+	return null;
+}
+
+static Md5TranslateIndex? TryGetCachedMinimapMd5Index(
+	TerrainTrainingSampleDescriptor entry,
+	Dictionary<string, IArchiveCatalog> archiveCatalogs,
+	Dictionary<string, Md5TranslateIndex?> minimapMd5Cache)
+{
+	if (entry.SourceKind != TerrainTrainingSampleSourceKind.MountedArchive)
+		return null;
+
+	string cacheKey = $"{entry.SourceRoot}|{entry.MapName}";
+	if (minimapMd5Cache.TryGetValue(cacheKey, out Md5TranslateIndex? cachedIndex))
+		return cachedIndex;
+
+	IArchiveCatalog archiveCatalog = GetOrCreateArchiveCatalog(entry.SourceRoot, archiveCatalogs);
+	string spacedMap = InsertSpaceBeforeCapitals(entry.MapName);
+	List<string> extraCandidates =
+	[
+		$"World\\Maps\\{entry.MapName}\\md5translate.trs",
+		$"World\\Maps\\{entry.MapName}\\md5translate.txt",
+	];
+	if (!string.Equals(spacedMap, entry.MapName, StringComparison.Ordinal))
+	{
+		extraCandidates.Add($"World\\Maps\\{spacedMap}\\md5translate.trs");
+		extraCandidates.Add($"World\\Maps\\{spacedMap}\\md5translate.txt");
+	}
+
+	Md5TranslateResolver.TryLoad(
+		searchPaths: [entry.SourceRoot],
+		archiveFileExists: archiveCatalog.FileExists,
+		archiveReadFile: archiveCatalog.ReadFile,
+		index: out Md5TranslateIndex? resolvedIndex,
+		extraCandidates: extraCandidates);
+
+	minimapMd5Cache[cacheKey] = resolvedIndex;
+	return resolvedIndex;
+}
+
+static IEnumerable<string> EnumerateMinimapCandidates(string mapName, int tileX, int tileY)
+{
+	string x2 = tileX.ToString("D2");
+	string y2 = tileY.ToString("D2");
+	string trsName = $"map{tileX}_{y2}.blp";
+	string paddedName = $"map{x2}_{y2}.blp";
+	string spacedMap = InsertSpaceBeforeCapitals(mapName);
+	HashSet<string> yielded = new(StringComparer.OrdinalIgnoreCase);
+
+	IEnumerable<string> EmitMapFolderCandidates(string folderName)
+	{
+		yield return $"{folderName}\\{trsName}";
+		yield return $"{folderName}\\{paddedName}";
+		yield return $"textures\\minimap\\{folderName}\\{trsName}";
+		yield return $"textures\\minimap\\{folderName}\\{paddedName}";
+		yield return $"World\\Minimaps\\{folderName}\\{trsName}";
+		yield return $"World\\Minimaps\\{folderName}\\{paddedName}";
+	}
+
+	foreach (string candidate in EmitMapFolderCandidates(mapName))
+	{
+		if (yielded.Add(candidate))
+			yield return candidate;
+	}
+
+	string lowerFolderCandidate = MinimapService.GetMinimapTilePath(mapName, tileX, tileY).Replace('/', '\\');
+	if (yielded.Add(lowerFolderCandidate))
+		yield return lowerFolderCandidate;
+
+	string lowerFolderTrs = $"textures\\minimap\\{mapName.ToLowerInvariant()}\\{trsName}";
+	if (yielded.Add(lowerFolderTrs))
+		yield return lowerFolderTrs;
+
+	if (!string.Equals(spacedMap, mapName, StringComparison.Ordinal))
+	{
+		foreach (string candidate in EmitMapFolderCandidates(spacedMap))
+		{
+			if (yielded.Add(candidate))
+				yield return candidate;
+		}
+
+		string spacedLowerFolderTrs = $"textures\\minimap\\{spacedMap.ToLowerInvariant()}\\{trsName}";
+		if (yielded.Add(spacedLowerFolderTrs))
+			yield return spacedLowerFolderTrs;
+
+		string spacedLowerFolderPadded = $"textures\\minimap\\{spacedMap.ToLowerInvariant()}\\{paddedName}";
+		if (yielded.Add(spacedLowerFolderPadded))
+			yield return spacedLowerFolderPadded;
+	}
+
+	string mapTileName = $"{mapName}_{x2}_{y2}.blp";
+	string mapTileNameRaw = $"{mapName}_{tileX}_{tileY}.blp";
+	string mapTilePng = $"{mapName}_{tileX}_{tileY}.png";
+	string mapTilePaddedPng = $"{mapName}_{x2}_{y2}.png";
+	foreach (string candidate in new[]
+	{
+		$"Textures\\Minimap\\{mapTileName}",
+		$"Textures\\Minimap\\{mapTileNameRaw}",
+		$"World\\Textures\\Minimap\\{mapTilePng}",
+		$"World\\Textures\\Minimap\\{mapTilePaddedPng}",
+		$"Textures\\Minimap\\{mapTilePng}",
+		$"Textures\\Minimap\\{mapTilePaddedPng}",
+	})
+	{
+		if (yielded.Add(candidate))
+			yield return candidate;
+	}
+}
+
+static string InsertSpaceBeforeCapitals(string input)
+{
+	if (string.IsNullOrWhiteSpace(input))
+		return input;
+
+	StringBuilder builder = new(input.Length + 4);
+	for (int index = 0; index < input.Length; index++)
+	{
+		char character = input[index];
+		if (index > 0 && char.IsUpper(character) && !char.IsWhiteSpace(input[index - 1]))
+			builder.Append(' ');
+		builder.Append(character);
+	}
+
+	return builder.ToString();
+}
+
+static string? ResolveFilesystemMinimapPath(string clientRoot, string relativePath)
+{
+	string normalized = relativePath.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+	string underData = Path.Combine(clientRoot, "Data", normalized);
+	if (File.Exists(underData))
+		return underData;
+
+	string underRoot = Path.Combine(clientRoot, normalized);
+	return File.Exists(underRoot) ? underRoot : null;
+}
+
+static byte[]? DecodeArchiveBackedMinimap(byte[] bytes, string sourcePath)
+{
+	if (sourcePath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+		return DecodeRgbImage(bytes);
+
+	using MemoryStream stream = new(bytes, writable: false);
+	using BlpFile blp = new(stream);
+	using System.Drawing.Bitmap bitmap = blp.GetBitmap(0);
+	return NormalizeBitmap(bitmap, NativeMinimapSize, NativeMinimapSize);
+}
+
+static byte[]? DecodeFilesystemMinimap(string path)
+{
+	if (path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+		return DecodeRgbImage(File.ReadAllBytes(path));
+
+	using FileStream stream = File.OpenRead(path);
+	using BlpFile blp = new(stream);
+	using System.Drawing.Bitmap bitmap = blp.GetBitmap(0);
+	return NormalizeBitmap(bitmap, NativeMinimapSize, NativeMinimapSize);
+}
+
+static byte[]? DecodeRgbImage(byte[] bytes)
+{
+	using Image<Rgba32> image = Image.Load<Rgba32>(bytes);
+	if (image.Width != NativeMinimapSize || image.Height != NativeMinimapSize)
+		image.Mutate(context => context.Resize(NativeMinimapSize, NativeMinimapSize));
+
+	return FlattenImageRgb(image);
+}
+
+static byte[] NormalizeRgbPixels(byte[] rgbaPixels, int width, int height, int targetWidth, int targetHeight)
+{
+	using Image<Rgba32> image = Image.LoadPixelData<Rgba32>(rgbaPixels, width, height);
+	if (image.Width != targetWidth || image.Height != targetHeight)
+		image.Mutate(context => context.Resize(targetWidth, targetHeight));
+
+	return FlattenImageRgb(image);
+}
+
+static byte[] NormalizeBitmap(System.Drawing.Bitmap bitmap, int targetWidth, int targetHeight)
+{
+	using MemoryStream pngStream = new();
+	bitmap.Save(pngStream, System.Drawing.Imaging.ImageFormat.Png);
+	return DecodeRgbImage(pngStream.ToArray())!;
+}
+
+static byte[] FlattenImageRgb(Image<Rgba32> image)
+{
+	byte[] rgb = new byte[image.Width * image.Height * 3];
+	image.ProcessPixelRows(accessor =>
+	{
+		for (int y = 0; y < image.Height; y++)
+		{
+			Span<Rgba32> row = accessor.GetRowSpan(y);
+			int offset = y * image.Width * 3;
+			for (int x = 0; x < image.Width; x++)
+			{
+				rgb[offset++] = row[x].R;
+				rgb[offset++] = row[x].G;
+				rgb[offset++] = row[x].B;
+			}
+		}
+	});
+
+	return rgb;
+}
+
+static float ComputeBinaryCoverage(byte[] values)
+{
+	if (values.Length == 0)
+		return 0f;
+
+	int nonZero = 0;
+	for (int index = 0; index < values.Length; index++)
+	{
+		if (values[index] != 0)
+			nonZero++;
+	}
+
+	return (float)nonZero / values.Length;
+}
+
+static float ComputeRgbVariance(byte[] rgb)
+{
+	if (rgb.Length == 0)
+		return 0f;
+
+	double sum = 0d;
+	double sumSquares = 0d;
+	int sampleCount = rgb.Length / 3;
+	for (int index = 0; index < rgb.Length; index += 3)
+	{
+		double gray = (rgb[index] + rgb[index + 1] + rgb[index + 2]) / (3d * 255d);
+		sum += gray;
+		sumSquares += gray * gray;
+	}
+
+	double mean = sum / sampleCount;
+	return (float)Math.Max(0d, (sumSquares / sampleCount) - (mean * mean));
+}
+
+static float ComputeAverageGradientMagnitude(byte[] rgb, int width, int height)
+{
+	if (width <= 1 || height <= 1)
+		return 0f;
+
+	float[] gray = new float[width * height];
+	for (int index = 0, pixel = 0; index < gray.Length; index++, pixel += 3)
+		gray[index] = (rgb[pixel] + rgb[pixel + 1] + rgb[pixel + 2]) / (3f * 255f);
+
+	double sum = 0d;
+	int samples = 0;
+	for (int y = 0; y < height - 1; y++)
+	{
+		for (int x = 0; x < width - 1; x++)
+		{
+			float dx = gray[(y * width) + (x + 1)] - gray[(y * width) + x];
+			float dy = gray[((y + 1) * width) + x] - gray[(y * width) + x];
+			sum += Math.Sqrt((dx * dx) + (dy * dy));
+			samples++;
+		}
+	}
+
+	return samples == 0 ? 0f : (float)(sum / samples);
+}
+
+static float ComputeMeanAbsoluteDifference(float[] left, float[] right)
+{
+	double sum = 0d;
+	for (int index = 0; index < left.Length; index++)
+		sum += Math.Abs(left[index] - right[index]);
+
+	return (float)(sum / left.Length);
+}
+
+static float ComputeMaxAbsoluteDifference(float[] left, float[] right)
+{
+	float max = 0f;
+	for (int index = 0; index < left.Length; index++)
+		max = MathF.Max(max, MathF.Abs(left[index] - right[index]));
+
+	return max;
+}
+
+static byte[] BuildObjectMask257(TerrainTrainingSampleDescriptor entry, Dictionary<string, IArchiveCatalog> archiveCatalogs)
+{
+	byte[] mask = new byte[NativeTileSize * NativeTileSize];
+	AdtPlacementCatalog? placements = TryReadPlacementCatalogForBuildCache(entry, archiveCatalogs);
+	if (placements is null)
+		return mask;
+
+	foreach (AdtModelPlacement placement in placements.ModelPlacements)
+		PaintPlacementCentroid(mask, placement.Position, entry.TileX, entry.TileY, radiusPixels: 2);
+	foreach (AdtWorldModelPlacement placement in placements.WorldModelPlacements)
+		PaintPlacementCentroid(mask, placement.Position, entry.TileX, entry.TileY, radiusPixels: 3);
+
+	return mask;
+}
+
+static AdtPlacementCatalog? TryReadPlacementCatalogForBuildCache(TerrainTrainingSampleDescriptor entry, Dictionary<string, IArchiveCatalog> archiveCatalogs)
+{
+	string? placementPath = entry.ObjAdtPath ?? entry.RootAdtPath;
+	if (string.IsNullOrWhiteSpace(placementPath))
+		return null;
+
+	if (entry.SourceKind == TerrainTrainingSampleSourceKind.MountedArchive)
+	{
+		IArchiveCatalog archiveCatalog = GetOrCreateArchiveCatalog(entry.SourceRoot, archiveCatalogs);
+		byte[] bytes = archiveCatalog.ReadFile(placementPath) ?? [];
+		if (bytes.Length == 0)
+			return null;
+
+		using MemoryStream stream = new(bytes, writable: false);
+		MapFileSummary summary = MapFileSummaryReader.Read(stream, placementPath);
+		return AdtPlacementReader.Read(stream, summary);
+	}
+
+	if (!File.Exists(placementPath))
+		return null;
+
+	using FileStream fileStream = File.OpenRead(placementPath);
+	MapFileSummary filesystemSummary = MapFileSummaryReader.Read(fileStream, Path.GetFullPath(placementPath));
+	return AdtPlacementReader.Read(fileStream, filesystemSummary);
+}
+
+static void PaintPlacementCentroid(byte[] mask, Vector3 position, int tileX, int tileY, int radiusPixels)
+{
+	if (!TryProjectPlacementToTilePixel(position, tileX, tileY, out int centerX, out int centerY))
+		return;
+
+	int radiusSquared = radiusPixels * radiusPixels;
+	for (int dy = -radiusPixels; dy <= radiusPixels; dy++)
+	{
+		for (int dx = -radiusPixels; dx <= radiusPixels; dx++)
+		{
+			if ((dx * dx) + (dy * dy) > radiusSquared)
+				continue;
+
+			int x = centerX + dx;
+			int y = centerY + dy;
+			if ((uint)x >= NativeTileSize || (uint)y >= NativeTileSize)
+				continue;
+
+			mask[(y * NativeTileSize) + x] = 1;
+		}
+	}
+}
+
+static bool TryProjectPlacementToTilePixel(Vector3 position, int tileX, int tileY, out int pixelX, out int pixelY)
+{
+	pixelX = 0;
+	pixelY = 0;
+	(float U, float V)[] candidates =
+	[
+		((position.X / WorldTileSize) - tileX, (position.Z / WorldTileSize) - tileY),
+		(((WorldMapOrigin - position.Z) / WorldTileSize) - tileX, ((WorldMapOrigin - position.X) / WorldTileSize) - tileY),
+		((position.X / WorldTileSize) - tileX, (position.Y / WorldTileSize) - tileY),
+		(((WorldMapOrigin - position.Y) / WorldTileSize) - tileX, ((WorldMapOrigin - position.X) / WorldTileSize) - tileY),
+	];
+
+	float bestScore = float.MinValue;
+	(float U, float V) best = default;
+	bool found = false;
+	foreach ((float U, float V) candidate in candidates)
+	{
+		if (candidate.U < -0.25f || candidate.U > 1.25f || candidate.V < -0.25f || candidate.V > 1.25f)
+			continue;
+
+		float distanceToCenter = MathF.Abs(candidate.U - 0.5f) + MathF.Abs(candidate.V - 0.5f);
+		float score = -distanceToCenter;
+		if (score > bestScore)
+		{
+			bestScore = score;
+			best = candidate;
+			found = true;
+		}
+	}
+
+	if (!found)
+		return false;
+
+	pixelX = Math.Clamp((int)MathF.Round(best.U * (NativeTileSize - 1)), 0, NativeTileSize - 1);
+	pixelY = Math.Clamp((int)MathF.Round(best.V * (NativeTileSize - 1)), 0, NativeTileSize - 1);
+	return true;
+}
+
+static void WriteNpz(string path, IReadOnlyList<(string Name, NpyArray Array)> payload)
+{
+	using FileStream stream = File.Create(path);
+	using ZipArchive archive = new(stream, ZipArchiveMode.Create, leaveOpen: false);
+	foreach ((string name, NpyArray array) in payload)
+	{
+		ZipArchiveEntry entry = archive.CreateEntry($"{name}.npy", CompressionLevel.Optimal);
+		using Stream entryStream = entry.Open();
+		WriteNpy(entryStream, array);
+	}
+}
+
+static void WriteNpy(Stream stream, NpyArray array)
+{
+	byte[] magic = [0x93, (byte)'N', (byte)'U', (byte)'M', (byte)'P', (byte)'Y', 0x01, 0x00];
+	stream.Write(magic);
+
+	string shapeText = array.Shape.Length == 1
+		? $"({array.Shape[0]},)"
+		: $"({string.Join(", ", array.Shape)})";
+	string headerText = $"{{'descr': '{array.Descriptor}', 'fortran_order': False, 'shape': {shapeText}, }}";
+	int preambleLength = magic.Length + 2;
+	int paddedLength = headerText.Length + 1;
+	while ((paddedLength + preambleLength) % 16 != 0)
+		paddedLength++;
+	string finalHeader = headerText.PadRight(paddedLength - 1, ' ') + '\n';
+	byte[] headerBytes = System.Text.Encoding.ASCII.GetBytes(finalHeader);
+	ushort headerLength = checked((ushort)headerBytes.Length);
+	stream.WriteByte((byte)(headerLength & 0xFF));
+	stream.WriteByte((byte)(headerLength >> 8));
+	stream.Write(headerBytes);
+	stream.Write(array.Data);
+}
+
+static bool ResolveBooleanOption(string[] args, string enableName, string disableName, bool defaultValue)
+{
+	if (HasFlag(args, enableName))
+		return true;
+	if (HasFlag(args, disableName))
+		return false;
+	return defaultValue;
 }
 
 static bool TryParseTileCoordinates(string tileStem, out int tileX, out int tileY)
@@ -1550,6 +3335,15 @@ static int? GetIntOption(string[] args, string longName, string shortName)
 	return int.TryParse(value, out int parsed) ? parsed : null;
 }
 
+static float? GetFloatOption(string[] args, string longName, string shortName)
+{
+	string? value = GetOption(args, longName, shortName);
+	if (string.IsNullOrWhiteSpace(value))
+		return null;
+
+	return float.TryParse(value, out float parsed) ? parsed : null;
+}
+
 static string? GetOption(string[] args, string longName, string shortName)
 {
 	for (int index = 0; index < args.Length - 1; index++)
@@ -1579,6 +3373,10 @@ static void ShowUsage()
 	Console.WriteLine("WowViewer.Tool.Converter");
 	Console.WriteLine("Usage:");
 	Console.WriteLine("  wowviewer-converter dataset-scan --client-root <path> --map <name> [--build <label>] [--output <manifest.json>] [--limit <count>]");
+	Console.WriteLine("  wowviewer-converter dataset-merge --input <manifest.json> [--input <manifest.json> ...] [--output <merged.json>] [manifest.json ...]");
+	Console.WriteLine("  wowviewer-converter dataset-audit --input <scan.json> [--output <audit.json>] [--limit <count>]");
+	Console.WriteLine("  wowviewer-converter dataset-curate --input <audit.json> --output <curated.json> [--report <curation-report.json>] [--limit <count>] [--max-per-group <count>] [--require-wdl|--no-require-wdl] [--require-minimap|--no-require-minimap]");
+	Console.WriteLine("  wowviewer-converter dataset-build-cache --input <audit-or-curate.json> --output-dir <dir> [--limit <count>] [--overwrite] [--include-minimap|--no-include-minimap] [--write-debug-json|--no-write-debug-json]");
 	Console.WriteLine("  wowviewer-converter detect --input <file>");
 	Console.WriteLine("  wowviewer-converter export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-converter ml-corpus --config <ml-corpus.json> [--archive-root <path>] [--output-root <path>] [--dry-run]");
@@ -1618,6 +3416,52 @@ file sealed class MlCorpusClientConfig
 
 	[JsonPropertyName("maps")]
 	public List<string> Maps { get; set; } = [];
+}
+
+file sealed record DatasetCurateEvaluation(
+	TerrainTrainingSampleDescriptor Entry,
+	bool Accepted,
+	string? RejectionReason,
+	float QualityScore);
+
+file sealed record DirectCacheBuildResult(
+	string DatasetKey,
+	string ShardPath,
+	string DebugJsonPath,
+	float HeightMin,
+	float HeightMax,
+	float LiquidCoverage,
+	float ObjectCoverage,
+	float BrushCoverage,
+	float HoleCoverage,
+	float MinimapVariance,
+	float MinimapGradient,
+	float DetailEnergy,
+	bool HasWdl17,
+	bool HasMinimap,
+	bool HasNativeNormalMap,
+	string MinimapSource,
+	IReadOnlyList<string> ArrayNames);
+
+file sealed record WdlAlignment(
+	float[] AlignedHeights17,
+	float VerticalOffset,
+	float MeanAbsoluteDelta,
+	float MaxAbsoluteDelta);
+
+file sealed record NpyArray(string Descriptor, int[] Shape, byte[] Data)
+{
+	public static NpyArray FromFloat32(float[] values, params int[] shape)
+	{
+		byte[] bytes = new byte[values.Length * sizeof(float)];
+		Buffer.BlockCopy(values, 0, bytes, 0, bytes.Length);
+		return new NpyArray("<f4", shape, bytes);
+	}
+
+	public static NpyArray FromUInt8(byte[] values, params int[] shape)
+	{
+		return new NpyArray("|u1", shape, values);
+	}
 }
 
 file sealed class MlCorpusMapConfig

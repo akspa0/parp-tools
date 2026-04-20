@@ -61,7 +61,7 @@ def compute_detail_energy(height_257: np.ndarray, height_65: np.ndarray) -> floa
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build V9 native tensor shards from harvested dataset roots or a curated manifest."
+        description="Build V9 native tensor shards from the legacy harvested-dataset compatibility path. The canonical long-range path is wow-viewer direct scan/audit/build-cache over game data."
     )
     parser.add_argument(
         "dataset_roots",
@@ -78,6 +78,11 @@ def parse_args() -> argparse.Namespace:
         "--curated-manifest",
         default=None,
         help="Optional curated manifest path. When provided, the builder reads listed tile JSON paths directly instead of discovering dataset roots.",
+    )
+    parser.add_argument(
+        "--allow-harvested-dataset-compat",
+        action="store_true",
+        help="Required to use harvested dataset roots or compatibility tile JSON manifests. Without this flag the builder stops so the legacy export-first path cannot masquerade as the canonical direct wow-viewer ML pipeline.",
     )
     parser.add_argument(
         "--output-dir",
@@ -141,6 +146,13 @@ def discover_dataset_roots(search_roots: list[str]) -> list[Path]:
 
 
 def resolve_dataset_roots(args: argparse.Namespace) -> list[Path]:
+    if not args.allow_harvested_dataset_compat:
+        raise SystemExit(
+            "build_v9_native_tensor_cache.py is a harvested-dataset compatibility builder. "
+            "Pass --allow-harvested-dataset-compat only for bounded legacy compatibility use; "
+            "the canonical ML path should run through wow-viewer direct game-root scan/audit/build-cache commands instead."
+        )
+
     if args.dataset_roots:
         roots = [Path(value) for value in args.dataset_roots]
     else:
@@ -158,9 +170,23 @@ def infer_dataset_root_from_json_path(json_path: Path) -> Path:
     return json_path.parent
 
 
-def load_curated_manifest_entries(curated_manifest_path: Path) -> list[tuple[Path, Path]]:
+def load_curated_manifest_entries(curated_manifest_path: Path, *, allow_harvested_dataset_compat: bool) -> list[tuple[Path, Path]]:
     with curated_manifest_path.open("r", encoding="utf-8") as handle:
         manifest = json.load(handle)
+
+    source_manifest_kind = str(manifest.get("sourceManifestKind") or manifest.get("source_manifest_kind") or "").strip().lower()
+    if source_manifest_kind == "scan":
+        raise SystemExit(
+            f"Curated manifest '{curated_manifest_path}' is a wow-viewer direct scan manifest. "
+            "This compatibility builder cannot consume summary-only scan entries because it still expects harvested tile JSON/image artifacts. "
+            "Implement or use the wow-viewer direct dataset build-cache path instead of routing scan manifests back through dataset-folder compatibility code."
+        )
+
+    if not allow_harvested_dataset_compat:
+        raise SystemExit(
+            f"Curated manifest '{curated_manifest_path}' resolved to the harvested-dataset compatibility builder. "
+            "Pass --allow-harvested-dataset-compat only for bounded legacy use; the canonical ML path should remain direct wow-viewer game-data scan/audit/build-cache."
+        )
 
     entries = manifest.get("entries")
     if not isinstance(entries, list):
@@ -664,7 +690,10 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     curated_manifest_path = Path(args.curated_manifest).resolve() if args.curated_manifest else None
-    curated_entries = load_curated_manifest_entries(curated_manifest_path) if curated_manifest_path else None
+    curated_entries = load_curated_manifest_entries(
+        curated_manifest_path,
+        allow_harvested_dataset_compat=args.allow_harvested_dataset_compat,
+    ) if curated_manifest_path else None
     dataset_roots = [] if curated_entries is not None else resolve_dataset_roots(args)
 
     manifest_entries: list[dict[str, object]] = []

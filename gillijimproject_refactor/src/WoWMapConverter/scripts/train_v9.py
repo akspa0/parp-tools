@@ -860,6 +860,10 @@ class V9NativeDataset(Dataset):
         return {
             "inputs": inputs,
             "preview_minimap_rgb": preview_minimap_rgb,
+            "preview_liquid_mask": torch.from_numpy(arrays.get("liquid_mask_257", np.zeros((257, 257), dtype=np.uint8)).astype(np.float32)).unsqueeze(0),
+            "preview_liquid_height": torch.from_numpy(arrays.get("liquid_height_257", np.zeros((257, 257), dtype=np.float32)).astype(np.float32)).unsqueeze(0) / self.height_scale,
+            "preview_object_mask": torch.from_numpy(arrays.get("object_mask_257", np.zeros((257, 257), dtype=np.uint8)).astype(np.float32)).unsqueeze(0),
+            "preview_hole_mask": torch.from_numpy(arrays.get("hole_mask_16x16", np.zeros((16, 16), dtype=np.uint8)).astype(np.float32)).unsqueeze(0),
             "sample_key": entry.sample_key,
             "target_height_257": height_257_scaled,
             "target_height_65": height_65_scaled,
@@ -1440,6 +1444,18 @@ def _error_to_rgb(predicted: np.ndarray, target: np.ndarray, height_scale: float
     return np.stack([red, np.zeros_like(red), blue], axis=2)
 
 
+def _single_channel_to_rgb(channel: np.ndarray, min_value: float | None = None, max_value: float | None = None) -> np.ndarray:
+    channel = channel.astype(np.float32)
+    if min_value is None:
+        min_value = float(np.min(channel)) if channel.size else 0.0
+    if max_value is None:
+        max_value = float(np.max(channel)) if channel.size else 1.0
+    scale = max(float(max_value) - float(min_value), 1e-6)
+    normalized = np.clip((channel - float(min_value)) / scale, 0.0, 1.0)
+    grayscale = (normalized * 255.0).astype(np.uint8)
+    return np.repeat(grayscale[:, :, None], 3, axis=2)
+
+
 def _resize_rgb(rgb: np.ndarray, size: int) -> np.ndarray:
     return np.asarray(Image.fromarray(rgb).resize((size, size), Image.Resampling.NEAREST), dtype=np.uint8)
 
@@ -1497,10 +1513,16 @@ def export_preview_images(
         "2. Ground-truth 17x17 terrain, resized for display\n"
         "3. Predicted mid 65x65 terrain, resized for display\n"
         "4. Ground-truth 65x65 terrain, resized for display\n\n"
+        "Third row, left to right:\n"
+        "1. Liquid mask input (white = liquid, black = none)\n"
+        "2. Liquid height prior input\n"
+        "3. Object footprint mask input\n"
+        "4. Hole mask input\n\n"
         "Reading guide\n"
         "- Good results have similar large-scale landform shapes in columns 2 and 3 of the top row.\n"
         "- The error panel should get darker and less red over time.\n"
         "- The bottom row shows whether the model is learning the right coarse terrain scaffold before fine detail.\n"
+        "- The third row shows whether the cached tile actually carried liquid and other masking priors into training.\n"
         "- Small texture-like minimap details do not have to match height directly; terrain shape matters more than color similarity.\n"
         f"- This export is a rotating validation subset, not a fixed first-N list. Current tiles: {selected_names or 'none'}.\n"
         f"- Source epoch: {epoch}.\n"
@@ -1548,6 +1570,10 @@ def export_preview_images(
             pred_257 = full_height_257.squeeze(0).squeeze(0).detach().cpu().numpy()
             pred_65 = mid_height_65.squeeze(0).squeeze(0).detach().cpu().numpy()
             pred_17 = coarse_height_17.squeeze(0).squeeze(0).detach().cpu().numpy()
+            liquid_mask = batch["preview_liquid_mask"].squeeze(0).cpu().numpy()
+            liquid_height = batch["preview_liquid_height"].squeeze(0).cpu().numpy()
+            object_mask = batch["preview_object_mask"].squeeze(0).cpu().numpy()
+            hole_mask = batch["preview_hole_mask"].squeeze(0).cpu().numpy()
 
             preview_min = float(min(target_257.min(), pred_257.min()))
             preview_max = float(max(target_257.max(), pred_257.max()))
@@ -1569,7 +1595,16 @@ def export_preview_images(
                 ],
                 axis=1,
             )
-            preview = np.concatenate([row_one, row_two], axis=0)
+            row_three = np.concatenate(
+                [
+                    _single_channel_to_rgb(liquid_mask, 0.0, 1.0),
+                    _single_channel_to_rgb(liquid_height, preview_min, preview_max),
+                    _single_channel_to_rgb(object_mask, 0.0, 1.0),
+                    _resize_rgb(_single_channel_to_rgb(hole_mask, 0.0, 1.0), 257),
+                ],
+                axis=1,
+            )
+            preview = np.concatenate([row_one, row_two, row_three], axis=0)
             tile_name = preview_entries[index].tile_name
             preview_name = f"{index:02d}_{tile_name}.png"
             Image.fromarray(preview).save(preview_dir / preview_name)
@@ -1581,6 +1616,7 @@ def export_preview_images(
 
 def train_single_run(
     selected_entries: Sequence[V9SampleEntry],
+    dev_eval_entries: Sequence[V9SampleEntry],
     args: argparse.Namespace,
     run_output_dir: Path,
     device: torch.device,
@@ -1588,6 +1624,10 @@ def train_single_run(
 ) -> dict[str, Any]:
     if len(selected_entries) < 2:
         raise SystemExit("Need at least 2 accepted samples to train and validate.")
+
+    selected_liquid_coverage = float(sum(entry.liquid_coverage for entry in selected_entries))
+    if selected_liquid_coverage <= 0.0:
+        print("WARNING: selected run pool has zero liquid coverage; liquid-mask and liquid-height input channels are present in code but effectively empty for this run.")
 
     train_indices, val_indices = split_grouped_indices(selected_entries, args.val_fraction, args.seed, args.group_block_size)
     train_entries = [selected_entries[index] for index in train_indices]
@@ -1625,6 +1665,8 @@ def train_single_run(
     )
     history: list[dict[str, Any]] = []
     best_val_loss = math.inf
+    selection_metric_name = resolve_selection_metric_name(args)
+    best_selection_metric_value = -math.inf if selection_metric_name == "dev_wdl_mae_improvement" else math.inf
     best_epoch = 0
     best_state: Optional[dict[str, Any]] = None
     epochs_since_best = 0
@@ -1652,6 +1694,8 @@ def train_single_run(
         history = resume_state["history"]
         start_epoch = int(resume_state["start_epoch"])
         best_val_loss = float(resume_state["best_val_loss"])
+        selection_metric_name = str(resume_state["best_selection_metric_name"])
+        best_selection_metric_value = float(resume_state["best_selection_metric_value"])
         best_epoch = int(resume_state["best_epoch"])
         epochs_since_best = int(resume_state["epochs_since_best"])
         resumed_from = str(resume_path)
@@ -1671,7 +1715,8 @@ def train_single_run(
     )
     print(
         "Preview legend: top=minimap | pred257 | target257 | abs-error ; "
-        "bottom=pred17 | target17 | pred65 | target65"
+        "bottom=pred17 | target17 | pred65 | target65 ; "
+        "third=liquid_mask | liquid_height | object_mask | hole_mask"
     )
     print(describe_v9_input_stack(args))
     if resumed_from is not None:
@@ -1709,6 +1754,20 @@ def train_single_run(
             args=args,
         )
 
+        dev_eval_metrics: dict[str, float] | None = None
+        should_run_dev_eval = bool(dev_eval_entries) and args.dev_eval_every > 0 and epoch % args.dev_eval_every == 0
+        if should_run_dev_eval:
+            dev_eval_metrics = evaluate_model_on_entries(
+                model=model,
+                entries=dev_eval_entries,
+                device=device,
+                amp_dtype=amp_dtype,
+                height_scale=args.height_scale,
+                residual_scale=args.residual_scale,
+                channels_last=args.channels_last,
+                include_brush_mask=not args.disable_brush_mask,
+            )
+
         loss_weights = resolve_loss_weights(epoch, args, epochs_since_best)
 
         epoch_record = {
@@ -1722,12 +1781,25 @@ def train_single_run(
             "learning_rate": float(optimizer.param_groups[0]["lr"]),
             "loss_weights": loss_weights,
         }
+        if dev_eval_metrics is not None:
+            epoch_record["dev_eval"] = dev_eval_metrics
         history.append(epoch_record)
 
         previous_best = best_val_loss
-        is_best = val_loss < best_val_loss
+        selection_metric_value, selection_metric_higher_is_better, selection_metric_ready = resolve_selection_metric(
+            selection_metric_name=selection_metric_name,
+            val_loss=val_loss,
+            dev_eval=dev_eval_metrics,
+        )
+        if not selection_metric_ready:
+            is_best = False
+        elif selection_metric_higher_is_better:
+            is_best = selection_metric_value > best_selection_metric_value
+        else:
+            is_best = selection_metric_value < best_selection_metric_value
         if is_best:
             best_val_loss = val_loss
+            best_selection_metric_value = selection_metric_value
             best_epoch = epoch
             epochs_since_best = 0
         else:
@@ -1750,6 +1822,14 @@ def train_single_run(
             f"  loss_w full {loss_weights['full_l1']:.2f} | mid {loss_weights['mid_l1']:.2f} | coarse {loss_weights['coarse_l1']:.2f} | "
             f"grad {loss_weights['gradient']:.2f} | mid_res {loss_weights['mid_residual']:.2f} | detail_res {loss_weights['detail_residual']:.2f}"
         )
+        if dev_eval_metrics is not None:
+            print(
+                f"  dev_eval tiles {dev_eval_metrics['tile_count']:.0f} | model_mae {dev_eval_metrics['model_global_mae']:.6f} | "
+                f"wdl_mae {dev_eval_metrics['wdl_global_mae']:.6f} | wdl_gain {dev_eval_metrics['wdl_mae_improvement']:.6f} | "
+                f"selection {selection_metric_name}={selection_metric_value:.6f}"
+            )
+        elif selection_metric_name != "val_loss" and not selection_metric_ready:
+            print(f"  dev_eval pending | selection metric {selection_metric_name} not computed this epoch")
         if train_sample_losses:
             hardest_sample_key, hardest_sample_loss = max(train_sample_losses.items(), key=lambda item: item[1])
             focus_label = " detail-focus" if detail_focus_active else ""
@@ -1807,8 +1887,8 @@ def train_single_run(
                 history=history,
                 best_val_loss=best_val_loss,
                 best_val_epoch=best_epoch,
-                best_selection_metric_name="val_loss",
-                best_selection_metric_value=best_val_loss,
+                best_selection_metric_name=selection_metric_name,
+                best_selection_metric_value=best_selection_metric_value,
                 best_epoch=best_epoch,
                 epochs_since_best=epochs_since_best,
                 selected_entries=selected_entries,
@@ -1847,6 +1927,8 @@ def train_single_run(
         "final_epoch": history[-1]["epoch"] if history else start_epoch,
         "best_val_loss": best_val_loss,
         "best_epoch": best_epoch,
+        "best_selection_metric_name": selection_metric_name,
+        "best_selection_metric_value": best_selection_metric_value,
         "stop_reason": stop_reason,
         "resumed_from": resumed_from,
         "config": vars(args),
@@ -1888,6 +1970,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--amp-dtype", choices=["auto", "bf16", "fp16"], default=DEFAULT_AMP_DTYPE)
     parser.add_argument("--target-curated-samples", type=int, default=DEFAULT_TARGET_CURATED_SAMPLES)
     parser.add_argument("--cohort-sizes", default=None, help="Comma-separated cohort sizes to train side by side from the ranked sane pool, for example '27,48,64'.")
+    parser.add_argument("--selection-metric", choices=["auto", "val_loss", "dev_global_mae", "dev_wdl_mae_improvement"], default=DEFAULT_SELECTION_METRIC,
+                        help="Metric used to decide the best checkpoint and drive early-stop stall counting.")
+    parser.add_argument("--dev-eval-cache-manifest", default=None,
+                        help="Optional separate cache manifest used as a stable development holdout for checkpoint selection.")
+    parser.add_argument("--dev-eval-limit", type=int, default=None,
+                        help="Optional limit on the number of dev-eval holdout entries after diversity selection.")
+    parser.add_argument("--dev-eval-every", type=int, default=DEFAULT_DEV_EVAL_EVERY,
+                        help="Run development holdout evaluation every N epochs. Set 0 to disable dev-eval passes.")
+    parser.add_argument("--dev-eval-block-size", type=int, default=DEFAULT_DEV_EVAL_BLOCK_SIZE,
+                        help="Diversity block size used when selecting the dev-eval holdout subset.")
     parser.add_argument("--preview-count", type=int, default=DEFAULT_PREVIEW_COUNT)
     parser.add_argument("--train-sampler", choices=["random", "bucketed"], default=DEFAULT_TRAIN_SAMPLER,
                         help="Training sample order. 'bucketed' interleaves terrain complexity and coverage buckets instead of using naive random shuffle.")
@@ -1951,6 +2043,10 @@ def main() -> None:
         raise SystemExit("--detail-focus-stall-threshold must be 0 or greater.")
     if not 0.0 < args.detail_focus_top_fraction <= 1.0:
         raise SystemExit("--detail-focus-top-fraction must be greater than 0 and at most 1.")
+    if args.dev_eval_every < 0:
+        raise SystemExit("--dev-eval-every must be 0 or greater.")
+    if args.dev_eval_block_size < 1:
+        raise SystemExit("--dev-eval-block-size must be at least 1.")
     if args.epochs > MAX_ALLOWED_EPOCHS:
         print(f"Requested epochs {args.epochs} exceed cap {MAX_ALLOWED_EPOCHS}; clamping to {MAX_ALLOWED_EPOCHS}.")
         args.epochs = MAX_ALLOWED_EPOCHS
@@ -2043,6 +2139,35 @@ def main() -> None:
     if args.audit_only:
         return
 
+    dev_eval_entries: list[V9SampleEntry] = []
+    if args.dev_eval_cache_manifest:
+        dev_eval_manifest_path = Path(args.dev_eval_cache_manifest)
+        dev_eval_all_entries = load_cache_manifest(dev_eval_manifest_path)
+        _, dev_eval_sane_entries, dev_eval_rejection_counts = audit_entries(
+            entries=dev_eval_all_entries,
+            require_wdl=args.require_wdl,
+            require_minimap=args.require_minimap,
+            min_height_range=args.min_height_range,
+            min_minimap_variance=args.min_minimap_variance,
+            min_minimap_gradient=args.min_minimap_gradient,
+            max_mean_wdl_delta=args.max_mean_wdl_delta,
+            max_abs_wdl_delta=args.max_abs_wdl_delta,
+        )
+        dev_eval_entries = select_diverse_eval_entries(
+            dev_eval_sane_entries,
+            args.dev_eval_limit,
+            args.dev_eval_block_size,
+            args.seed + 1009,
+        )
+        print(
+            f"Dev-eval holdout | source={dev_eval_manifest_path} | sane_pool={len(dev_eval_sane_entries)} | "
+            f"selected={len(dev_eval_entries)} | selection_metric={resolve_selection_metric_name(args)}"
+        )
+        if dev_eval_rejection_counts:
+            print(f"Dev-eval rejection counts: {dev_eval_rejection_counts}")
+        if not dev_eval_entries and args.selection_metric != "val_loss":
+            raise SystemExit("Dev-eval selection metric requested, but the dev-eval holdout resolved to zero accepted entries.")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     amp_dtype = resolve_amp_dtype(args.amp_dtype, device)
     if device.type == "cuda":
@@ -2085,7 +2210,7 @@ def main() -> None:
         write_json(output_dir / "cohort_summary.json", {"schema_version": "v9-cohort-summary.v1", "created_at_utc": utc_now_iso(), "results": cohort_results, "config": vars(args)})
         return
 
-    train_single_run(accepted_entries, args, output_dir, device, amp_dtype)
+    train_single_run(accepted_entries, dev_eval_entries, args, output_dir, device, amp_dtype)
 
 
 if __name__ == "__main__":

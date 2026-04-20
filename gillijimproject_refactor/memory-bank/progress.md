@@ -1,5 +1,124 @@
 # Progress
 
+### Apr 20, 2026 - landed the first direct wow-viewer multimap or multibuild composition seam and validated the new wrapper on bounded real data
+
+- what changed:
+	- added `dataset-merge` to `wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs` so shared terrain-training manifests can now be merged inside `wow-viewer` instead of relying on ad hoc JSON composition
+	- the new merge command enforces same `SourceManifestKind`, same `SchemaVersion`, and duplicate-`SampleId` rejection before writing a deterministically sorted merged manifest
+	- added `wow-viewer/scripts/run_v9_direct_pipeline.ps1` as the first `wow-viewer`-owned direct `v9` wrapper over `dataset-scan`, `dataset-merge`, `dataset-audit`, `dataset-curate`, `dataset-build-cache`, and downstream `train_v9.py`
+	- the wrapper now defaults early-build inclusion to `0_5_3_3368`, `0_5_5_3494`, and `0_7_0_3694` alongside `3_3_5_12340` and `4_0_0_11927`, resolving those early builds from staged roots under `output/tmp/wowarchive-clients`
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed after adding `dataset-merge`
+	- bounded merge proof on fixed local `3.3.5.12340` data succeeded:
+		- `dataset-scan --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map EmeraldDream --build 3_3_5_12340 --output i:/parp/parp-tools/output/tmp/dataset_scan_smoke_335_emeralddream.json --limit 1`
+		- `dataset-merge --input i:/parp/parp-tools/output/tmp/dataset_scan_smoke_335_azeroth.json --input i:/parp/parp-tools/output/tmp/dataset_scan_smoke_335_emeralddream.json --output i:/parp/parp-tools/output/tmp/dataset_scan_smoke_335_multi.json`
+		- `dataset-audit --input i:/parp/parp-tools/output/tmp/dataset_scan_smoke_335_multi.json --output i:/parp/parp-tools/output/tmp/dataset_audit_smoke_335_multi.json --limit 3`
+	- bounded wrapper proof on the fixed local `3.3.5.12340` root succeeded:
+		- `pwsh -NoProfile -File i:/parp/parp-tools/wow-viewer/scripts/run_v9_direct_pipeline.ps1 -Mode audit -IncludeBuilds 3_3_5_12340 -NoRequireMinimap -NoRequireWdl -PerMapScanLimit 1 -AuditLimit 4 -CurateLimit 4 -CacheLimit 4 -TrainerLimit 4 -OutputDir i:/parp/parp-tools/output/tmp/v9_direct_pipeline_smoke_335`
+	- the final wrapper run reported `MergedSamples = 8`, `Curated = 1`, `Processed = 1`, and trainer audit `rejected = 0`
+- boundary:
+	- this proves the new merge surface and wrapper only on the fixed local `3.3.5.12340` client root under optional minimap and optional WDL gates
+	- the `0.5.x` and `0.7.0` build family is now wired into the direct workflow surface, but those staged early-build roots were not present during validation so direct-read proof for them is still pending
+
+### Apr 20, 2026 - landed the first direct wow-viewer curate plus build-cache path and proved trainer-audit compatibility on a bounded smoke set
+
+- what changed:
+	- added `dataset-curate` to `wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs` so direct audited manifests can now be ranked and reduced inside `wow-viewer` instead of routing curation back through harvested dataset ownership
+	- added `dataset-build-cache` to the same converter so direct scan or audit or curate manifests can now materialize v9-style `.npz` shards plus per-tile debug JSON sidecars straight from shared terrain, liquid, placement, and optional minimap seams
+	- the direct cache writer now exports the trainer-required core arrays (`height_*`, `hole_mask_16x16`, `normal_rgb_256`, `height_hints_v7`, `liquid_mask_257`, `liquid_height_257`, `object_mask_257`, `brush_mask_257`) and explicitly withholds `wdl_17` until the shared WDL alignment seam is proven instead of reintroducing the known bogus deltas
+	- central package management was also aligned to `SixLabors.ImageSharp 3.1.12` so `WowViewer.Tool.Converter` can use `SereniaBLPLib` for client-root minimap decode attempts without restore downgrade failures
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed after the curate/build-cache slice and the WDL export correction
+	- bounded real-data smoke proof on the fixed local `3.3.5.12340` root succeeded:
+		- `dataset-curate --input i:/parp/parp-tools/output/tmp/dataset_audit_smoke_335_azeroth.json --output i:/parp/parp-tools/output/tmp/dataset_curate_smoke_335_azeroth.json --report i:/parp/parp-tools/output/tmp/dataset_curate_smoke_335_azeroth_report.json --limit 2 --no-require-minimap`
+		- `dataset-build-cache --input i:/parp/parp-tools/output/tmp/dataset_curate_smoke_335_azeroth.json --output-dir i:/parp/parp-tools/output/tmp/direct_v9_cache_smoke_335_azeroth --limit 2 --overwrite`
+		- `i:/parp/parp-tools/.venv/Scripts/python.exe i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9.py i:/parp/parp-tools/output/tmp/direct_v9_cache_smoke_335_azeroth/v9_tensor_cache_manifest.json --audit-only --output-dir i:/parp/parp-tools/output/tmp/train_v9_audit_direct_cache_smoke --no-require-minimap --no-require-wdl`
+	- the final trainer audit smoke reported `sane_pool = 2`, `curated_subset = 2`, and `rejected = 0`
+- boundary:
+	- this proves the direct cache path only for the current core training contract under optional minimap and optional WDL gates
+	- current archive-backed Wrath smoke tiles still emitted `has_minimap_rgb_256 = false`, so the default trainer minimap requirement still rejects them unless the caller disables that gate
+	- verified WDL alignment remains intentionally withheld from the direct cache until the shared terrain-vs-WDL absolute-height seam is proven instead of guessed
+
+### Apr 20, 2026 - landed the first direct wow-viewer dataset-audit command over shared terrain and liquid readers
+
+- what changed:
+	- added `dataset-audit` to `wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs` as the first real post-scan direct-audit slice for terrain-training manifests
+	- the new command consumes a direct `dataset-scan` manifest, reopens each root ADT from filesystem or archive, and recomputes training metrics from shared readers instead of trusting the old summary placeholders
+	- current direct audit now fills:
+		- real terrain height min/max/range from `WorldTerrainTileBuilder`
+		- real MH2O-derived liquid coverage with bounded MCLQ fallback from `AdtMcnkSummaryReader`
+		- real hole coverage from MCNK hole masks
+		- truthful WDL tile availability, while leaving WDL delta metrics at `0` until the shared absolute-height alignment seam is proven
+	- `WorldTerrainTileBuilder` now also adds the MCNK base Z from the header to raw `MCVT` samples instead of treating the chunk heights as permanently relative-only
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed after the new command and the terrain-height fix
+	- bounded real-data smoke proof on the fixed local `3.3.5.12340` root succeeded:
+		- `dataset-scan --client-root "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --limit 2`
+		- `dataset-audit --input i:/parp/parp-tools/output/tmp/dataset_scan_smoke_335_azeroth.json`
+	- the final audit smoke produced `LiquidSamples = 2`, `HoleSamples = 0`, and `WdlDeltaSamples = 0`, which is the intended honest boundary for this slice
+- boundary:
+	- this lands the first real direct audit step only; it does not yet implement `dataset curate` or `dataset build-cache`
+	- WDL tile presence is now available in the audited manifest, but WDL delta metrics remain intentionally withheld until the shared terrain/WDL height alignment is validated instead of guessed
+
+### Apr 20, 2026 - stopped the legacy v9 Python cache builder from silently masquerading as the canonical direct ML pipeline
+
+- what changed:
+	- updated `gillijimproject_refactor/src/WoWMapConverter/scripts/build_v9_native_tensor_cache.py` so the harvested-dataset cache builder is now explicit compatibility-only behavior instead of an implied default ML path
+	- the script now requires `--allow-harvested-dataset-compat` before it will consume dataset roots or curated manifests that resolve to harvested tile JSON paths
+	- the script now also hard-fails on wow-viewer direct `dataset-scan` manifests (`sourceManifestKind = scan`) with an explicit message that summary-only direct scans must be consumed by a real wow-viewer `dataset build-cache` implementation instead of being routed back through dataset-folder JSON/image compatibility code
+- validation:
+	- `python -m py_compile src/WoWMapConverter/scripts/build_v9_native_tensor_cache.py` passed
+	- a bounded probe against `output/ml-training/v9_4_detail_focus_holdout64_v77_seed20260422/v9_curated_manifest.json` now exits immediately with the intended compatibility warning instead of silently continuing the export-first path
+- boundary:
+	- this does not yet implement the direct wow-viewer `dataset build-cache` command; it only blocks the legacy compatibility path from pretending to be the long-range design owner
+	- the next real implementation slice still needs to land direct cache materialization from wow-viewer shared readers, including raw terrain/liquid/object signals rather than harvested image-mask artifacts
+
+### Apr 20, 2026 - built a non-overlapping detail-heavy v9 dev-eval holdout and launched the first real branch against it
+
+- what changed:
+	- added `src/WoWMapConverter/scripts/build_v9_dev_eval_holdout.py` to carve a reproducible detail-heavy dev-eval holdout plus a training remainder manifest from an existing `v9_tensor_cache_manifest.json`
+	- generated a real split from `output/ml-training/v9_native_cache_mixed_512_v77/v9_tensor_cache_manifest.json` under `output/ml-training/v9_dev_eval_detail_holdout_v77_seed20260420`
+	- the split reserved `64` detail-heavy tiles into `v9_dev_eval_holdout_manifest.json` and left `1480` accepted tiles in `v9_training_remainder_manifest.json`
+	- launched `output/ml-training/v9_4_detail_focus_holdout64_v77_seed20260422` against the remainder manifest with `--selection-metric dev_wdl_mae_improvement` and the non-overlapping holdout bound through `--dev-eval-cache-manifest`
+- validation:
+	- `python -m py_compile src/WoWMapConverter/scripts/build_v9_dev_eval_holdout.py` passed
+	- the holdout summary reported a materially more detail-heavy holdout than the remainder (`detail_energy_mean 1.407` vs `0.762`)
+	- launch output confirmed the new branch is using the intended split: `Audited 1480 shard(s): sane pool 1480, curated subset 128, rejected 0` and `Dev-eval holdout ... sane_pool=64 | selected=64 | selection_metric=dev_wdl_mae_improvement`
+- boundary:
+	- the new branch is still in progress, so there is no comparative result against `v9_3_detail_focus_cohort128_v77_seed20260421` yet
+	- this is the first real proof path with a clean external holdout for checkpoint selection; the next comparison should focus on whether the branch picks a better checkpoint than the prior val-loss-driven baseline, not just whether it trains longer
+
+### Apr 20, 2026 - wired the v9 trainer's dormant dev-eval holdout path into real best-checkpoint selection and early-stop stall tracking
+
+- what changed:
+	- exposed the existing dormant selection hooks in `src/WoWMapConverter/scripts/train_v9.py` through new CLI flags: `--selection-metric`, `--dev-eval-cache-manifest`, `--dev-eval-limit`, `--dev-eval-every`, and `--dev-eval-block-size`
+	- loaded and audited a separate dev-eval cache manifest in `main()` and selected a stable, diversity-filtered holdout subset with `select_diverse_eval_entries(...)`
+	- changed the live training loop so checkpoint selection, `best_model.pt`, `epochs_since_best`, and early-stop stall counting can now follow the chosen selection metric instead of always hardcoding `val_loss`
+	- preserved the selected metric in `last_checkpoint.pt` and `run_summary.json` so resumed runs stay bound to the same holdout-selection policy
+- validation:
+	- `python -m py_compile src/WoWMapConverter/scripts/train_v9.py` passed after the wiring change
+	- a 1-epoch smoke run at `output/ml-training/v9_3_dev_eval_smoke_train` with `--selection-metric dev_wdl_mae_improvement --dev-eval-cache-manifest ... --dev-eval-every 1` printed the dev-eval metrics, marked epoch 1 as `BEST`, and wrote `best_model.pt`
+- boundary:
+	- this proves the holdout-selection surface works end to end, but it does not yet prove that a particular dev-eval manifest materially improves generalization on a longer real branch
+	- the next meaningful proof is a real multi-epoch branch that uses a stable external dev-eval holdout distinct from the training cache
+
+### Apr 20, 2026 - detail-focus v9.3 branch beat the prior cohort96 baseline and then self-stopped at plateau without manual pause babysitting
+
+- what changed:
+	- ran a real larger-cache branch at `output/ml-training/v9_3_detail_focus_cohort128_v77_seed20260421` using the new self-guided detail-focus trainer path over the large `v9_native_cache_mixed_512_v77` cache
+	- kept brush masking disabled and used the new automatic detail-focus epochs plus boosted late gradient/detail weights instead of relying on manual intervention to preserve fine terrain structure pressure
+- validation:
+	- the run reached a new best `val_loss = 0.008874` at `epoch 271`
+	- this beat the prior stalled cohort96 baseline at `output/ml-training/v9_2_bucketed_replay_cohort96_v77_seed20260420`, which had peaked at `0.010738`
+	- the branch then continued until the built-in `early_stop_patience = 200` logic fired at `epoch 471`, proving the new trainer can stop itself cleanly when the branch has flattened instead of requiring manual pause review to cut it off
+	- late-stage logs confirmed the new mode stayed active in the intended regime:
+		- `sampler bucketed detail-focus`
+		- `gradient` weight held at `0.40`
+		- `detail_residual` weight held at `0.12`
+- boundary:
+	- this is a meaningful improvement over the prior cohort96 branch, but it still ultimately plateaued and overfit after the best epoch
+	- detail-focus improved the direct-data training loop enough to reduce wasted unattended runtime, but it is not the final answer; the next likely gains are larger or better-curated cohorts, stronger selection metrics, or a more explicit dev-eval or detail-holdout selection surface
+
 ### Apr 20, 2026 - added self-guided detail-focus epochs to the v9 trainer and persisted per-sample detail energy in future cache manifests
 
 - what changed:

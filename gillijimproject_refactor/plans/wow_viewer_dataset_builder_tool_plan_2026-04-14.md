@@ -1,5 +1,35 @@
 # wow-viewer Dataset Builder Tool Plan
 
+## Apr 20, 2026 - landed the first direct wow-viewer multimap or multibuild composition seam and wrapper
+
+- status: partial execution update
+- landed surface:
+  - `WowViewer.Tool.Converter dataset-merge --input <manifest.json> ... --output <merged.json>` now exists as the first direct manifest-composition step for shared terrain-training manifests inside `wow-viewer`
+  - the merge command rejects mixed schema or manifest-kind inputs and duplicate `SampleId` collisions instead of depending on ad hoc external JSON stitching
+  - `wow-viewer/scripts/run_v9_direct_pipeline.ps1` now exists as the first `wow-viewer`-owned direct wrapper over `dataset-scan`, `dataset-merge`, `dataset-audit`, `dataset-curate`, `dataset-build-cache`, and downstream `train_v9.py`
+  - the wrapper defaults `IncludeBuilds` to `0_5_3_3368`, `0_5_5_3494`, `0_7_0_3694`, `3_3_5_12340`, and `4_0_0_11927`, with early builds expected from staged roots under `output/tmp/wowarchive-clients`
+- current proof:
+  - `dataset-merge` merged two bounded direct `3.3.5.12340` scan manifests (`Azeroth` plus `EmeraldDream`) into one `terrain-training-scan.v2` manifest, and `dataset-audit` consumed that merged result without special handling
+  - `run_v9_direct_pipeline.ps1` completed end to end on the fixed local `3.3.5.12340` root in bounded audit mode, scanning one tile per default map, merging `8` scans, auditing `4` samples, curating `1`, building `1` cache shard, and finishing `train_v9.py --audit-only` with `rejected = 0`
+- current guardrail:
+  - do not describe this as proof that early-build direct reads are closed; `0.5.x` and `0.7.0` are only wired into the wrapper defaults so far because the staged client roots were not present during validation
+  - do not describe this as proof that default minimap or WDL gates are closed across the broad direct workflow; the bounded wrapper proof still ran with `--no-require-minimap --no-require-wdl`
+
+## Apr 20, 2026 - first direct wow-viewer curate plus build-cache smoke is now landed
+
+- status: partial execution update
+- landed surface:
+  - `WowViewer.Tool.Converter dataset-curate --input <audit.json> --output <curated.json> ...` now exists as the first direct curation step over audited manifests
+  - `WowViewer.Tool.Converter dataset-build-cache --input <audit-or-curate.json> --output-dir <dir> ...` now exists as the first direct cache-materialization step for v9-style training shards and per-tile debug JSON sidecars
+  - the direct cache now writes the core trainer-required arrays from shared terrain/liquid seams without routing through harvested dataset-folder ownership
+- current proof:
+  - bounded real-data smoke on the fixed local `3.3.5.12340` Azeroth sample (`2` tiles) completed end to end through `dataset-curate`, `dataset-build-cache`, and `train_v9.py --audit-only --no-require-minimap --no-require-wdl`
+  - the resulting direct cache manifest reported `processed = 2`, `skipped = 0`, and the trainer audit reported `rejected = 0`
+- current guardrail:
+  - do not describe the current direct cache slice as proof that archive-backed minimap sourcing is closed; the smoke tiles still had `has_minimap_rgb_256 = false`
+  - do not describe the current direct cache slice as proof that WDL alignment is closed; `wdl_17` is now intentionally withheld from the direct cache until the shared terrain/WDL absolute-height seam is validated
+  - treat this as the first working direct cache baseline, not the end of auxiliary-signal recovery
+
 ## Apr 19, 2026 - direct game-root-to-curated-cache ML pipeline directive
 
 - status: active ownership and workflow directive
@@ -12,6 +42,18 @@
   - new dataset-builder and training-orchestration work should bias toward a direct shared-reader command surface such as `scan`, `audit`, `curate`, and `build-cache` instead of another export-first bridge script
 - continuity:
   - use `gillijimproject_refactor/plans/wow_viewer_direct_ml_pipeline_plan_2026-04-19.md` as the focused plan for this direct pipeline cutover
+
+## Apr 20, 2026 - first direct wow-viewer dataset-audit slice is now landed, but build-cache is still open
+
+- status: partial execution update
+- landed surface:
+  - `WowViewer.Tool.Converter dataset-scan` remains the direct discovery step for client-root or archive-root tiles
+  - `WowViewer.Tool.Converter dataset-audit --input <scan.json> ...` now exists as the first direct post-scan audit step over shared terrain/liquid readers
+  - the current audit slice recomputes real terrain height min/max/range, MH2O-derived liquid coverage, bounded MCLQ fallback coverage, and hole coverage from root ADT data instead of using the old `HasWater ? 1 : 0` placeholder
+- current guardrail:
+  - treat the new audit command as proof of direct raw-signal sampling only for terrain/liquid/hole availability and coverage
+  - do not describe the current audit slice as final WDL-alignment proof; WDL tile availability is surfaced, but WDL delta metrics remain intentionally withheld until the shared terrain/WDL absolute-height seam is validated
+  - do not describe this as `dataset build-cache` ownership; cache materialization still remains the next major implementation gap after audit
 
 ## Apr 14, 2026 - Dataset-builder convergence directive
 
@@ -104,7 +146,7 @@ Cross-build expectation for object and PM4 masks:
 
 ## What This Plan Does Not Claim Yet
 
-- no `wow-viewer` dataset-builder tool implementation is landed yet
+- no full `wow-viewer` dataset-builder tool implementation is landed yet beyond the current direct `dataset-scan` plus `dataset-audit` CLI slices
 - no shared dataset contract has been fully cut over yet
 - no parity claim is made for the current legacy VLM exporter beyond existing bounded proofs
 - no `wow-viewer` dataset explorer or training orchestration surface is landed yet
