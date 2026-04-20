@@ -49,6 +49,12 @@ DEFAULT_TRAIN_SAMPLER = "bucketed"
 DEFAULT_HARD_REPLAY_FRACTION = 0.20
 DEFAULT_HARD_REPLAY_WARMUP_EPOCHS = 1
 DEFAULT_HARD_REPLAY_EMA_DECAY = 0.70
+DEFAULT_DETAIL_FOCUS_EVERY_EPOCHS = 12
+DEFAULT_DETAIL_FOCUS_MIN_EPOCH = 24
+DEFAULT_DETAIL_FOCUS_STALL_THRESHOLD = 24
+DEFAULT_DETAIL_FOCUS_TOP_FRACTION = 0.35
+DEFAULT_DETAIL_FOCUS_GRADIENT_WEIGHT = 0.40
+DEFAULT_DETAIL_FOCUS_DETAIL_RESIDUAL_WEIGHT = 0.12
 DEFAULT_PAUSE_EVERY_EPOCHS = 50
 DEFAULT_PREVIEW_EVERY_EPOCHS = 10
 DEFAULT_PREVIEW_ARCHIVE_EVERY_EPOCHS = 10
@@ -244,6 +250,7 @@ class V9SampleEntry:
     hole_coverage: float
     minimap_variance: float
     minimap_gradient: float
+    detail_energy: float
     has_wdl_17: bool
     has_minimap_rgb_256: bool
 
@@ -300,7 +307,8 @@ def load_cache_manifest(manifest_path: Path) -> list[V9SampleEntry]:
         hole_coverage = entry.get("hole_coverage")
         minimap_variance = entry.get("minimap_variance")
         minimap_gradient = entry.get("minimap_gradient")
-        if any(value is None for value in (liquid_coverage, object_coverage, brush_coverage, hole_coverage, minimap_variance, minimap_gradient)) and shard_path.exists():
+        detail_energy = entry.get("detail_energy")
+        if any(value is None for value in (liquid_coverage, object_coverage, brush_coverage, hole_coverage, minimap_variance, minimap_gradient, detail_energy)) and shard_path.exists():
             arrays = load_npz_arrays(shard_path)
             if liquid_coverage is None:
                 liquid_mask = arrays.get("liquid_mask_257")
@@ -327,6 +335,16 @@ def load_cache_manifest(manifest_path: Path) -> list[V9SampleEntry]:
                         minimap_variance = 0.0
                     if minimap_gradient is None:
                         minimap_gradient = 0.0
+            if detail_energy is None:
+                height_257 = arrays.get("height_257")
+                height_65 = arrays.get("height_65")
+                if height_257 is not None and height_65 is not None:
+                    height_257_tensor = torch.from_numpy(height_257.astype(np.float32)).unsqueeze(0)
+                    height_65_tensor = torch.from_numpy(height_65.astype(np.float32)).unsqueeze(0)
+                    upsampled_65 = F.interpolate(height_65_tensor.unsqueeze(0), size=(257, 257), mode="bilinear", align_corners=True).squeeze(0)
+                    detail_energy = float(torch.mean(torch.abs(height_257_tensor - upsampled_65)).item())
+                else:
+                    detail_energy = 0.0
 
         entries.append(
             V9SampleEntry(
@@ -346,6 +364,7 @@ def load_cache_manifest(manifest_path: Path) -> list[V9SampleEntry]:
                 hole_coverage=float(hole_coverage or 0.0),
                 minimap_variance=float(minimap_variance or 0.0),
                 minimap_gradient=float(minimap_gradient or 0.0),
+                detail_energy=float(detail_energy or 0.0),
                 has_wdl_17=bool(entry.get("has_wdl_17", False)),
                 has_minimap_rgb_256=bool(entry.get("has_minimap_rgb_256", False)),
             )
@@ -372,7 +391,7 @@ def _coverage_bucket(value: float, light_threshold: float, heavy_threshold: floa
     return 0
 
 
-def build_sampling_bucket_key(entry: V9SampleEntry) -> tuple[str, int, int, int, int]:
+def build_sampling_bucket_key(entry: V9SampleEntry) -> tuple[str, int, int, int, int, int]:
     if entry.height_range >= 192.0:
         height_bucket = 3
     elif entry.height_range >= 96.0:
@@ -385,7 +404,16 @@ def build_sampling_bucket_key(entry: V9SampleEntry) -> tuple[str, int, int, int,
     liquid_bucket = _coverage_bucket(entry.liquid_coverage, 0.01, 0.15)
     object_bucket = _coverage_bucket(entry.object_coverage, 0.01, 0.08)
     hole_bucket = 1 if entry.hole_coverage >= 0.01 else 0
-    return (entry.build_key, height_bucket, liquid_bucket, object_bucket, hole_bucket)
+    detail_bucket = _coverage_bucket(entry.detail_energy, 4.0, 12.0)
+    return (entry.build_key, height_bucket, liquid_bucket, object_bucket, hole_bucket, detail_bucket)
+
+
+def is_detail_focus_epoch(epoch: int, args: argparse.Namespace, current_stall: int) -> bool:
+    if epoch < max(1, int(args.detail_focus_min_epoch)):
+        return False
+    periodic_focus = args.detail_focus_every_epochs > 0 and epoch % args.detail_focus_every_epochs == 0
+    stall_focus = args.detail_focus_stall_threshold > 0 and current_stall >= args.detail_focus_stall_threshold
+    return periodic_focus or stall_focus
 
 
 def build_epoch_training_order(
@@ -397,6 +425,8 @@ def build_epoch_training_order(
     hard_replay_fraction: float,
     hard_replay_warmup_epochs: int,
     sample_loss_ema: dict[str, float],
+    detail_focus_active: bool,
+    detail_focus_top_fraction: float,
 ) -> list[int]:
     indices = list(range(len(entries)))
     rng = random.Random(seed + epoch)
@@ -404,8 +434,26 @@ def build_epoch_training_order(
         rng.shuffle(indices)
         return indices
 
-    grouped_indices: dict[tuple[str, int, int, int, int], list[int]] = defaultdict(list)
-    for index, entry in enumerate(entries):
+    if detail_focus_active and indices:
+        target_count = min(
+            len(indices),
+            max(1, int(round(len(indices) * float(np.clip(detail_focus_top_fraction, 0.05, 1.0))))),
+        )
+        indices = sorted(
+            indices,
+            key=lambda index: (
+                entries[index].detail_energy,
+                sample_loss_ema.get(entries[index].sample_key, 0.0),
+                entries[index].minimap_gradient,
+                entries[index].height_range,
+            ),
+            reverse=True,
+        )[:target_count]
+        rng.shuffle(indices)
+
+    grouped_indices: dict[tuple[str, int, int, int, int, int], list[int]] = defaultdict(list)
+    for index in indices:
+        entry = entries[index]
         grouped_indices[build_sampling_bucket_key(entry)].append(index)
 
     replay_active = hard_replay_fraction > 0.0 and epoch > hard_replay_warmup_epochs and bool(sample_loss_ema)
@@ -463,7 +511,8 @@ def build_train_loader(
     device: torch.device,
     epoch: int,
     sample_loss_ema: dict[str, float],
-) -> DataLoader:
+) -> tuple[DataLoader, bool]:
+    detail_focus_active = is_detail_focus_epoch(epoch, args, getattr(args, "current_stall", 0))
     sampler = OrderedIndexSampler(
         build_epoch_training_order(
             entries,
@@ -473,6 +522,8 @@ def build_train_loader(
             hard_replay_fraction=args.hard_replay_fraction,
             hard_replay_warmup_epochs=args.hard_replay_warmup_epochs,
             sample_loss_ema=sample_loss_ema,
+            detail_focus_active=detail_focus_active,
+            detail_focus_top_fraction=args.detail_focus_top_fraction,
         )
     )
     return DataLoader(
@@ -482,7 +533,7 @@ def build_train_loader(
         sampler=sampler,
         num_workers=args.train_workers,
         pin_memory=device.type == "cuda",
-    )
+    ), detail_focus_active
 
 
 def reduce_samplewise_mean(value: torch.Tensor) -> torch.Tensor:
@@ -926,7 +977,7 @@ def build_predictions(
     return coarse_height_17, mid_height_65, full_height_257
 
 
-def resolve_loss_weights(epoch: int, args: argparse.Namespace) -> dict[str, float]:
+def resolve_loss_weights(epoch: int, args: argparse.Namespace, current_stall: int = 0) -> dict[str, float]:
     decay_start = max(1, int(args.aux_loss_decay_start_epoch))
     decay_epochs = max(1, int(args.aux_loss_decay_epochs))
     progress = min(max((epoch - decay_start) / decay_epochs, 0.0), 1.0)
@@ -934,7 +985,7 @@ def resolve_loss_weights(epoch: int, args: argparse.Namespace) -> dict[str, floa
     def lerp(start: float, end: float) -> float:
         return float(start + ((end - start) * progress))
 
-    return {
+    weights = {
         "full_l1": 1.0,
         "mid_l1": lerp(0.70, args.late_mid_l1_weight),
         "coarse_l1": lerp(0.45, args.late_coarse_l1_weight),
@@ -942,6 +993,10 @@ def resolve_loss_weights(epoch: int, args: argparse.Namespace) -> dict[str, floa
         "mid_residual": lerp(0.20, args.late_mid_residual_weight),
         "detail_residual": lerp(0.20, args.late_detail_residual_weight),
     }
+    if is_detail_focus_epoch(epoch, args, current_stall):
+        weights["gradient"] = max(weights["gradient"], float(args.detail_focus_gradient_weight))
+        weights["detail_residual"] = max(weights["detail_residual"], float(args.detail_focus_detail_residual_weight))
+    return weights
 
 
 def compute_v9_loss(
@@ -1187,6 +1242,12 @@ def load_resume_state(
         "dev_eval_every",
         "dev_eval_block_size",
         "disable_brush_mask",
+        "detail_focus_every_epochs",
+        "detail_focus_min_epoch",
+        "detail_focus_stall_threshold",
+        "detail_focus_top_fraction",
+        "detail_focus_gradient_weight",
+        "detail_focus_detail_residual_weight",
     ):
         if key in saved_config and getattr(args, key) != saved_config[key]:
             raise SystemExit(f"Resume checkpoint config mismatch for '{key}': current={getattr(args, key)!r} saved={saved_config[key]!r}")
@@ -1599,9 +1660,11 @@ def train_single_run(
         f"Training V9 | epochs={args.epochs} | batch={args.batch_size} | lr={args.learning_rate:.2e} | "
         f"plateau_patience={args.lr_plateau_patience} | early_stop_patience={args.early_stop_patience} | "
         f"preview_count={args.preview_count} | preview_every={args.preview_every_epochs} | preview_archive_every={args.preview_archive_every_epochs} | "
-        f"train_sampler={args.train_sampler} | hard_replay_fraction={args.hard_replay_fraction:.2f}"
+        f"train_sampler={args.train_sampler} | hard_replay_fraction={args.hard_replay_fraction:.2f} | "
+        f"detail_focus_every={args.detail_focus_every_epochs} | detail_focus_top_fraction={args.detail_focus_top_fraction:.2f}"
     )
-    initial_train_loader = build_train_loader(train_dataset, train_entries, args, device, max(start_epoch + 1, 1), sample_loss_ema)
+    args.current_stall = epochs_since_best
+    initial_train_loader, _ = build_train_loader(train_dataset, train_entries, args, device, max(start_epoch + 1, 1), sample_loss_ema)
     print(
         f"Dataset split | train_samples={len(train_entries)} ({len(initial_train_loader)} batch(es)) | "
         f"val_samples={len(val_entries)} ({val_batches} batch(es))"
@@ -1618,7 +1681,8 @@ def train_single_run(
         print(f"Resume checkpoint is already at epoch {start_epoch}, which meets or exceeds requested epochs={args.epochs}; skipping training.")
 
     for epoch in range(start_epoch + 1, args.epochs + 1):
-        train_loader = build_train_loader(train_dataset, train_entries, args, device, epoch, sample_loss_ema)
+        args.current_stall = epochs_since_best
+        train_loader, detail_focus_active = build_train_loader(train_dataset, train_entries, args, device, epoch, sample_loss_ema)
         train_loss, train_components, train_sps, train_sample_losses = run_epoch(
             model=model,
             loader=train_loader,
@@ -1645,7 +1709,7 @@ def train_single_run(
             args=args,
         )
 
-        loss_weights = resolve_loss_weights(epoch, args)
+        loss_weights = resolve_loss_weights(epoch, args, epochs_since_best)
 
         epoch_record = {
             "epoch": epoch,
@@ -1688,7 +1752,8 @@ def train_single_run(
         )
         if train_sample_losses:
             hardest_sample_key, hardest_sample_loss = max(train_sample_losses.items(), key=lambda item: item[1])
-            print(f"  sampler {args.train_sampler} | hardest replay sample {hardest_sample_key} loss {hardest_sample_loss:.6f}")
+            focus_label = " detail-focus" if detail_focus_active else ""
+            print(f"  sampler {args.train_sampler}{focus_label} | hardest replay sample {hardest_sample_key} loss {hardest_sample_loss:.6f}")
 
         should_export_previews = is_best or (args.preview_every_epochs > 0 and epoch % args.preview_every_epochs == 0)
 
@@ -1832,6 +1897,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Number of initial epochs to run before epoch-to-epoch hard-example replay becomes eligible.")
     parser.add_argument("--hard-replay-ema-decay", type=float, default=DEFAULT_HARD_REPLAY_EMA_DECAY,
                         help="EMA decay used when tracking sample difficulty across epochs for replay ordering.")
+    parser.add_argument("--detail-focus-every-epochs", type=int, default=DEFAULT_DETAIL_FOCUS_EVERY_EPOCHS,
+                        help="Run a detail-focused epoch every N epochs by training only on the highest-detail tiles. Set 0 to disable periodic detail focus.")
+    parser.add_argument("--detail-focus-min-epoch", type=int, default=DEFAULT_DETAIL_FOCUS_MIN_EPOCH,
+                        help="Minimum epoch before periodic or stall-triggered detail focus can activate.")
+    parser.add_argument("--detail-focus-stall-threshold", type=int, default=DEFAULT_DETAIL_FOCUS_STALL_THRESHOLD,
+                        help="Automatically switch to detail-focused epochs after this many epochs without a new best. Set 0 to disable stall-triggered focus.")
+    parser.add_argument("--detail-focus-top-fraction", type=float, default=DEFAULT_DETAIL_FOCUS_TOP_FRACTION,
+                        help="Fraction of the train split kept during a detail-focused epoch, ranked by detail energy and replay loss.")
+    parser.add_argument("--detail-focus-gradient-weight", type=float, default=DEFAULT_DETAIL_FOCUS_GRADIENT_WEIGHT,
+                        help="Minimum gradient-loss weight enforced during detail-focused epochs.")
+    parser.add_argument("--detail-focus-detail-residual-weight", type=float, default=DEFAULT_DETAIL_FOCUS_DETAIL_RESIDUAL_WEIGHT,
+                        help="Minimum detail-residual weight enforced during detail-focused epochs.")
     parser.add_argument("--pause-every-epochs", type=int, default=DEFAULT_PAUSE_EVERY_EPOCHS,
                         help="Write the normal checkpoint and stop cleanly every N epochs so the run can be inspected and resumed. Set 0 to disable periodic pauses.")
     parser.add_argument("--preview-every-epochs", type=int, default=DEFAULT_PREVIEW_EVERY_EPOCHS, help="Refresh the live validation preview set every N epochs. Set 0 to disable periodic refreshes and only update on best epochs.")
@@ -1866,6 +1943,14 @@ def main() -> None:
         raise SystemExit("--epochs must be at least 1.")
     if args.pause_every_epochs < 0:
         raise SystemExit("--pause-every-epochs must be 0 or greater.")
+    if args.detail_focus_every_epochs < 0:
+        raise SystemExit("--detail-focus-every-epochs must be 0 or greater.")
+    if args.detail_focus_min_epoch < 1:
+        raise SystemExit("--detail-focus-min-epoch must be at least 1.")
+    if args.detail_focus_stall_threshold < 0:
+        raise SystemExit("--detail-focus-stall-threshold must be 0 or greater.")
+    if not 0.0 < args.detail_focus_top_fraction <= 1.0:
+        raise SystemExit("--detail-focus-top-fraction must be greater than 0 and at most 1.")
     if args.epochs > MAX_ALLOWED_EPOCHS:
         print(f"Requested epochs {args.epochs} exceed cap {MAX_ALLOWED_EPOCHS}; clamping to {MAX_ALLOWED_EPOCHS}.")
         args.epochs = MAX_ALLOWED_EPOCHS

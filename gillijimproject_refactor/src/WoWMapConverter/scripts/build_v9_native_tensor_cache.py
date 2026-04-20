@@ -52,6 +52,13 @@ def avg_gradient_magnitude(image: np.ndarray) -> float:
     return float(np.mean(magnitude))
 
 
+def compute_detail_energy(height_257: np.ndarray, height_65: np.ndarray) -> float:
+    height_257_tensor = torch.from_numpy(height_257.astype(np.float32)).unsqueeze(0)
+    height_65_tensor = torch.from_numpy(height_65.astype(np.float32)).unsqueeze(0)
+    upsampled_65 = F.interpolate(height_65_tensor.unsqueeze(0), size=(257, 257), mode="bilinear", align_corners=True).squeeze(0)
+    return float(torch.mean(torch.abs(height_257_tensor - upsampled_65)).item())
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build V9 native tensor shards from harvested dataset roots or a curated manifest."
@@ -616,6 +623,7 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
     hole_coverage = float(hole_mask_16.mean())
     minimap_variance = float(np.var(minimap_rgb_256.astype(np.float32) / 255.0)) if minimap_rgb_256 is not None else 0.0
     minimap_gradient = avg_gradient_magnitude(minimap_rgb_256) if minimap_rgb_256 is not None else 0.0
+    detail_energy = compute_detail_energy(height_257, payload["height_65"])
 
     metadata = {
         "tile_name": tile_name,
@@ -632,6 +640,7 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
         "hole_coverage": hole_coverage,
         "minimap_variance": minimap_variance,
         "minimap_gradient": minimap_gradient,
+        "detail_energy": detail_energy,
         "minimap_source": minimap_source,
         "array_names": sorted(payload.keys()),
     }

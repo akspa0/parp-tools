@@ -1,5 +1,23 @@
 # Progress
 
+### Apr 20, 2026 - added self-guided detail-focus epochs to the v9 trainer and persisted per-sample detail energy in future cache manifests
+
+- what changed:
+	- updated `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9.py` so each sample now carries `detail_energy`, backfilled from shard payloads when older manifests do not already provide it
+	- added periodic and stall-triggered detail-focus epochs that automatically restrict training to the highest-detail tiles instead of relying only on broad bucket interleaving and manual human pause reviews
+	- detail-focus epochs now automatically raise the minimum gradient and detail-residual loss weights so late training does not decay detail pressure as aggressively when the run starts to flatten
+	- updated `gillijimproject_refactor/src/WoWMapConverter/scripts/build_v9_native_tensor_cache.py` so fresh cache manifests persist `detail_energy` directly, avoiding repeated shard-side inference on future runs
+- validation:
+	- `python -m py_compile` passed for both touched Python files after the edit
+	- forced detail-focus smoke proof at `output/ml-training/v9_2_detail_focus_smoke` ran successfully with `--detail-focus-every-epochs 2 --detail-focus-min-epoch 1 --detail-focus-top-fraction 0.5`
+	- smoke logs showed the expected trainer behavior on epoch `2`:
+		- `sampler bucketed detail-focus`
+		- gradient loss weight raised from `0.25` to `0.40`
+		- run completed and wrote normal checkpoints and previews
+- boundary:
+	- this lands the first self-guided high-detail training loop for the direct native-data path, but it is still early evidence from a smoke proof
+	- the next real proof should come from a new larger-cache branch using the updated trainer rather than resuming one of the already-stalled pre-detail-focus runs
+
 ### Apr 20, 2026 - capped long v9 runs at 500 epochs and added resumable inspection pauses every 50 epochs
 
 - what changed:
