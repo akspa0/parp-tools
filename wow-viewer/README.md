@@ -73,6 +73,8 @@ Current dataset-builder continuity note:
 
 - New dataset corpus export, terrain-supervision artifact generation, manifest or harvest ownership, and shared minimap or mask or atlas semantics should converge into `wow-viewer`, not continue growing `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM` as the design owner.
 - The intended long-range target is a dedicated `wow-viewer` dataset-builder tool over shared `Core` and `Core.IO` seams, plus explicit CLI or viewer-editor or dataset-explorer surfaces over the same contracts.
+- `wow-viewer/src/core/WowViewer.Core/Datasets/TerrainTrainingSampleManifest.cs` now defines the first shared terrain-training sample contract and manifest shape for direct client-root ML workflow slices, including current trainer-facing metrics such as liquid/object/brush coverage and related signal availability flags.
+- `WowViewer.Tool.Converter` now also has a first direct-client `dataset-scan` entrypoint that discovers ADT tiles from a real client root or archive-backed root and emits that shared manifest shape (`terrain-training-scan.v2`) without requiring a harvested dataset tree first.
 - ML training or inference scripts remain downstream consumers; they are not the canonical owners of format decode, artifact packing, or dataset-manifest semantics.
 - The distributable product should stay Bring Your Own Data: do not plan around shipping copyrighted corpora, trained models, or model outputs derived from proprietary data.
 - Long-range training or inference orchestration should keep backend seams open for more than CUDA alone, with portability left available for runners such as Vulkan or OpenCL or MLX where practical.

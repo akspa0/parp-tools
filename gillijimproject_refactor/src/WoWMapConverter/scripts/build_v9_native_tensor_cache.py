@@ -38,9 +38,23 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def avg_gradient_magnitude(image: np.ndarray) -> float:
+    image_float = image.astype(np.float32)
+    if image_float.ndim == 3:
+        image_float = image_float.mean(axis=2)
+    dx = np.diff(image_float, axis=1)
+    dy = np.diff(image_float, axis=0)
+    dx = dx[:, :-1] if dx.shape[1] > 0 else dx
+    dy = dy[:-1, :] if dy.shape[0] > 0 else dy
+    if dx.size == 0 or dy.size == 0:
+        return 0.0
+    magnitude = np.sqrt(dx[: dy.shape[0], :] ** 2 + dy[:, : dx.shape[1]] ** 2)
+    return float(np.mean(magnitude))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build V9 native tensor shards from harvested terrain dataset roots."
+        description="Build V9 native tensor shards from harvested dataset roots or a curated manifest."
     )
     parser.add_argument(
         "dataset_roots",
@@ -52,6 +66,11 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=["datasets"],
         help="Search root used when dataset roots are omitted. Repeat to add more roots.",
+    )
+    parser.add_argument(
+        "--curated-manifest",
+        default=None,
+        help="Optional curated manifest path. When provided, the builder reads listed tile JSON paths directly instead of discovering dataset roots.",
     )
     parser.add_argument(
         "--output-dir",
@@ -124,6 +143,52 @@ def resolve_dataset_roots(args: argparse.Namespace) -> list[Path]:
         raise SystemExit("No dataset roots were found. Pass explicit dataset roots or use a valid --search-root.")
 
     return roots
+
+
+def infer_dataset_root_from_json_path(json_path: Path) -> Path:
+    if json_path.parent.name.lower() == "dataset":
+        return json_path.parent.parent
+    return json_path.parent
+
+
+def load_curated_manifest_entries(curated_manifest_path: Path) -> list[tuple[Path, Path]]:
+    with curated_manifest_path.open("r", encoding="utf-8") as handle:
+        manifest = json.load(handle)
+
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        raise SystemExit(f"Curated manifest does not contain an 'entries' list: {curated_manifest_path}")
+
+    resolved_entries: list[tuple[Path, Path]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        source_json_text = entry.get("source_json") or entry.get("tile_json_path") or entry.get("compatibility_tile_json_path")
+        if not source_json_text:
+            continue
+
+        source_json = Path(str(source_json_text))
+        if not source_json.is_absolute():
+            source_json = (curated_manifest_path.parent / source_json).resolve()
+
+        if not source_json.exists():
+            continue
+
+        dataset_root_text = entry.get("dataset_root") or entry.get("source_root")
+        if dataset_root_text:
+            dataset_root = Path(str(dataset_root_text))
+            if not dataset_root.is_absolute():
+                dataset_root = (curated_manifest_path.parent / dataset_root).resolve()
+        else:
+            dataset_root = infer_dataset_root_from_json_path(source_json)
+
+        resolved_entries.append((dataset_root, source_json))
+
+    if not resolved_entries:
+        raise SystemExit(f"Curated manifest did not resolve any usable tile JSON paths: {curated_manifest_path}")
+
+    return resolved_entries
 
 
 def dataset_root_key(dataset_root: Path) -> str:
@@ -438,6 +503,7 @@ def load_heightmap_16bit(path: Path | None, target_size: int) -> np.ndarray:
 def select_minimap_path(dataset_root: Path, tile_json: dict, terrain_data: dict) -> tuple[Path | None, str]:
     candidates = (
         (terrain_data.get("terrain_only_minimap"), "terrain_only_minimap"),
+        (terrain_data.get("no_liquid_minimap"), "no_liquid_minimap"),
         (terrain_data.get("no_object_minimap"), "no_object_minimap"),
         (terrain_data.get("no_mccv_minimap"), "no_mccv_minimap"),
         (tile_json.get("image"), "image"),
@@ -544,6 +610,13 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
     if minimap_rgb_256 is not None:
         payload["minimap_rgb_256"] = minimap_rgb_256
 
+    liquid_coverage = float(liquid_mask_257.mean())
+    object_coverage = float(object_mask_257.mean())
+    brush_coverage = float(brush_mask_257.mean())
+    hole_coverage = float(hole_mask_16.mean())
+    minimap_variance = float(np.var(minimap_rgb_256.astype(np.float32) / 255.0)) if minimap_rgb_256 is not None else 0.0
+    minimap_gradient = avg_gradient_magnitude(minimap_rgb_256) if minimap_rgb_256 is not None else 0.0
+
     metadata = {
         "tile_name": tile_name,
         "source_json": str(json_path),
@@ -553,6 +626,12 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
         "has_wdl_17": wdl_17 is not None,
         "has_minimap_rgb_256": minimap_rgb_256 is not None,
         "has_normal_rgb_256": has_normal_rgb_256,
+        "liquid_coverage": liquid_coverage,
+        "object_coverage": object_coverage,
+        "brush_coverage": brush_coverage,
+        "hole_coverage": hole_coverage,
+        "minimap_variance": minimap_variance,
+        "minimap_gradient": minimap_gradient,
         "minimap_source": minimap_source,
         "array_names": sorted(payload.keys()),
     }
@@ -572,18 +651,29 @@ def write_shard(output_dir: Path, dataset_key: str, tile_name: str, payload: dic
 
 def main() -> None:
     args = parse_args()
-    dataset_roots = resolve_dataset_roots(args)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    curated_manifest_path = Path(args.curated_manifest).resolve() if args.curated_manifest else None
+    curated_entries = load_curated_manifest_entries(curated_manifest_path) if curated_manifest_path else None
+    dataset_roots = [] if curated_entries is not None else resolve_dataset_roots(args)
 
     manifest_entries: list[dict[str, object]] = []
     processed = 0
     skipped = 0
 
-    for dataset_root in dataset_roots:
+    if curated_entries is not None:
+        grouped_entries: dict[Path, list[Path]] = {}
+        for dataset_root, json_path in curated_entries:
+            grouped_entries.setdefault(dataset_root, []).append(json_path)
+        entry_groups = list(grouped_entries.items())
+    else:
+        entry_groups = [(dataset_root, iter_tile_json_paths(dataset_root)) for dataset_root in dataset_roots]
+
+    for dataset_root, json_paths in entry_groups:
         dataset_key = dataset_root_key(dataset_root)
         processed_for_root = 0
-        for json_path in iter_tile_json_paths(dataset_root):
+        for json_path in json_paths:
             if args.limit is not None and processed >= args.limit:
                 break
             if args.limit_per_root is not None and processed_for_root >= args.limit_per_root:
@@ -617,6 +707,8 @@ def main() -> None:
         "schema_version": "v9-native-tensor-cache.v2",
         "created_at_utc": utc_now_iso(),
         "output_dir": str(output_dir),
+        "source_mode": "curated-manifest" if curated_manifest_path is not None else "dataset-roots",
+        "source_curated_manifest": str(curated_manifest_path) if curated_manifest_path is not None else None,
         "dataset_roots": [str(root) for root in dataset_roots],
         "processed": processed,
         "skipped": skipped,

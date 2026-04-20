@@ -1,5 +1,18 @@
 # wow-viewer Dataset Builder Tool Plan
 
+## Apr 19, 2026 - direct game-root-to-curated-cache ML pipeline directive
+
+- status: active ownership and workflow directive
+- user direction:
+  - the ML path should not require a separate harvested dataset tree as the normal starting point
+  - dataset and training prep should run as one direct pipeline from a real game root through shared `wow-viewer` loaders, with curation and final cache materialization happening inside that pipeline instead of ahead of it
+- immediate implication:
+  - treat pre-harvested dataset roots under `datasets/` as compatibility or inspection artifacts, not as the canonical long-range ML starting surface
+  - the canonical future shape is direct client-root or staged-client discovery, raw signal sampling, audit buckets, curation, and then final curated cache writing
+  - new dataset-builder and training-orchestration work should bias toward a direct shared-reader command surface such as `scan`, `audit`, `curate`, and `build-cache` instead of another export-first bridge script
+- continuity:
+  - use `gillijimproject_refactor/plans/wow_viewer_direct_ml_pipeline_plan_2026-04-19.md` as the focused plan for this direct pipeline cutover
+
 ## Apr 14, 2026 - Dataset-builder convergence directive
 
 - status: active ownership and workflow directive

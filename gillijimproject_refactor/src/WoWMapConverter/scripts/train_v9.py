@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset, Sampler, Subset
 
 from v7_losses import build_recovery_mask
 
@@ -26,6 +26,7 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_OUTPUT_DIR = WORKSPACE_ROOT / "output" / "ml-training" / "v9"
 DEFAULT_BATCH_SIZE = 8
 DEFAULT_EPOCHS = 8
+MAX_ALLOWED_EPOCHS = 500
 DEFAULT_LEARNING_RATE = 3e-4
 DEFAULT_VAL_FRACTION = 0.15
 DEFAULT_SEED = 1337
@@ -44,6 +45,11 @@ DEFAULT_VAL_WORKERS = 0
 DEFAULT_AMP_DTYPE = "auto"
 DEFAULT_TARGET_CURATED_SAMPLES = 27
 DEFAULT_PREVIEW_COUNT = 4
+DEFAULT_TRAIN_SAMPLER = "bucketed"
+DEFAULT_HARD_REPLAY_FRACTION = 0.20
+DEFAULT_HARD_REPLAY_WARMUP_EPOCHS = 1
+DEFAULT_HARD_REPLAY_EMA_DECAY = 0.70
+DEFAULT_PAUSE_EVERY_EPOCHS = 50
 DEFAULT_PREVIEW_EVERY_EPOCHS = 10
 DEFAULT_PREVIEW_ARCHIVE_EVERY_EPOCHS = 10
 DEFAULT_LR_PLATEAU_PATIENCE = 20
@@ -72,7 +78,7 @@ IMAGENET_RGB_MEAN = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).vie
 IMAGENET_RGB_STD = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(3, 1, 1)
 
 V9_ACTIVE_INPUT_SIGNALS = [
-    "terrain_only_or_no_object_or_no_mccv_or_image_minimap_rgb",
+    "terrain_only_or_no_liquid_or_no_object_or_no_mccv_or_image_minimap_rgb",
     "normal_rgb",
     "wdl_17_or_height_17_base_prior",
     "height_min_mask",
@@ -232,12 +238,28 @@ class V9SampleEntry:
     source_json: str
     height_min: float
     height_max: float
+    liquid_coverage: float
+    object_coverage: float
+    brush_coverage: float
+    hole_coverage: float
+    minimap_variance: float
+    minimap_gradient: float
     has_wdl_17: bool
     has_minimap_rgb_256: bool
 
     @property
     def height_range(self) -> float:
         return float(self.height_max - self.height_min)
+
+    @property
+    def sample_key(self) -> str:
+        return f"{self.dataset_key}:{self.tile_name}"
+
+    @property
+    def build_key(self) -> str:
+        if "__" in self.dataset_key:
+            return self.dataset_key.split("__", 1)[0]
+        return self.dataset_key
 
 
 @dataclass(frozen=True)
@@ -271,6 +293,41 @@ def load_cache_manifest(manifest_path: Path) -> list[V9SampleEntry]:
     for entry in manifest.get("entries", []):
         tile_name = str(entry.get("tile_name", ""))
         map_name, tile_x, tile_y = parse_tile_coordinates(tile_name)
+        shard_path = Path(str(entry.get("shard_path", "")))
+        liquid_coverage = entry.get("liquid_coverage")
+        object_coverage = entry.get("object_coverage")
+        brush_coverage = entry.get("brush_coverage")
+        hole_coverage = entry.get("hole_coverage")
+        minimap_variance = entry.get("minimap_variance")
+        minimap_gradient = entry.get("minimap_gradient")
+        if any(value is None for value in (liquid_coverage, object_coverage, brush_coverage, hole_coverage, minimap_variance, minimap_gradient)) and shard_path.exists():
+            arrays = load_npz_arrays(shard_path)
+            if liquid_coverage is None:
+                liquid_mask = arrays.get("liquid_mask_257")
+                liquid_coverage = float(liquid_mask.astype(np.float32).mean()) if liquid_mask is not None else 0.0
+            if object_coverage is None:
+                object_mask = arrays.get("object_mask_257")
+                object_coverage = float(object_mask.astype(np.float32).mean()) if object_mask is not None else 0.0
+            if brush_coverage is None:
+                brush_mask = arrays.get("brush_mask_257")
+                brush_coverage = float(brush_mask.astype(np.float32).mean()) if brush_mask is not None else 0.0
+            if hole_coverage is None:
+                hole_mask = arrays.get("hole_mask_16x16")
+                hole_coverage = float(hole_mask.astype(np.float32).mean()) if hole_mask is not None else 0.0
+            if minimap_variance is None or minimap_gradient is None:
+                minimap_rgb = arrays.get("minimap_rgb_256")
+                if minimap_rgb is not None:
+                    minimap_float = minimap_rgb.astype(np.float32) / 255.0
+                    if minimap_variance is None:
+                        minimap_variance = float(np.var(minimap_float))
+                    if minimap_gradient is None:
+                        minimap_gradient = avg_gradient_magnitude(minimap_rgb)
+                else:
+                    if minimap_variance is None:
+                        minimap_variance = 0.0
+                    if minimap_gradient is None:
+                        minimap_gradient = 0.0
+
         entries.append(
             V9SampleEntry(
                 dataset_root=str(entry.get("dataset_root", "")),
@@ -279,15 +336,157 @@ def load_cache_manifest(manifest_path: Path) -> list[V9SampleEntry]:
                 map_name=map_name,
                 tile_x=tile_x,
                 tile_y=tile_y,
-                shard_path=Path(str(entry.get("shard_path", ""))),
+                shard_path=shard_path,
                 source_json=str(entry.get("source_json", "")),
                 height_min=float(entry.get("height_min", 0.0)),
                 height_max=float(entry.get("height_max", 0.0)),
+                liquid_coverage=float(liquid_coverage or 0.0),
+                object_coverage=float(object_coverage or 0.0),
+                brush_coverage=float(brush_coverage or 0.0),
+                hole_coverage=float(hole_coverage or 0.0),
+                minimap_variance=float(minimap_variance or 0.0),
+                minimap_gradient=float(minimap_gradient or 0.0),
                 has_wdl_17=bool(entry.get("has_wdl_17", False)),
                 has_minimap_rgb_256=bool(entry.get("has_minimap_rgb_256", False)),
             )
         )
     return entries
+
+
+class OrderedIndexSampler(Sampler[int]):
+    def __init__(self, indices: Sequence[int]):
+        self.indices = list(indices)
+
+    def __iter__(self):
+        return iter(self.indices)
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+
+def _coverage_bucket(value: float, light_threshold: float, heavy_threshold: float) -> int:
+    if value >= heavy_threshold:
+        return 2
+    if value >= light_threshold:
+        return 1
+    return 0
+
+
+def build_sampling_bucket_key(entry: V9SampleEntry) -> tuple[str, int, int, int, int]:
+    if entry.height_range >= 192.0:
+        height_bucket = 3
+    elif entry.height_range >= 96.0:
+        height_bucket = 2
+    elif entry.height_range >= 32.0:
+        height_bucket = 1
+    else:
+        height_bucket = 0
+
+    liquid_bucket = _coverage_bucket(entry.liquid_coverage, 0.01, 0.15)
+    object_bucket = _coverage_bucket(entry.object_coverage, 0.01, 0.08)
+    hole_bucket = 1 if entry.hole_coverage >= 0.01 else 0
+    return (entry.build_key, height_bucket, liquid_bucket, object_bucket, hole_bucket)
+
+
+def build_epoch_training_order(
+    entries: Sequence[V9SampleEntry],
+    *,
+    epoch: int,
+    seed: int,
+    sampler_mode: str,
+    hard_replay_fraction: float,
+    hard_replay_warmup_epochs: int,
+    sample_loss_ema: dict[str, float],
+) -> list[int]:
+    indices = list(range(len(entries)))
+    rng = random.Random(seed + epoch)
+    if sampler_mode == "random":
+        rng.shuffle(indices)
+        return indices
+
+    grouped_indices: dict[tuple[str, int, int, int, int], list[int]] = defaultdict(list)
+    for index, entry in enumerate(entries):
+        grouped_indices[build_sampling_bucket_key(entry)].append(index)
+
+    replay_active = hard_replay_fraction > 0.0 and epoch > hard_replay_warmup_epochs and bool(sample_loss_ema)
+    working_groups: list[list[int]] = []
+    for group_indices in grouped_indices.values():
+        shuffled = list(group_indices)
+        rng.shuffle(shuffled)
+        if replay_active:
+            replay_count = min(len(shuffled), max(1, int(round(len(shuffled) * hard_replay_fraction))))
+            replay_head = sorted(
+                shuffled,
+                key=lambda index: sample_loss_ema.get(entries[index].sample_key, 0.0),
+                reverse=True,
+            )[:replay_count]
+            replay_set = set(replay_head)
+            replay_tail = [index for index in shuffled if index not in replay_set]
+            shuffled = replay_head + replay_tail
+        working_groups.append(shuffled)
+
+    rng.shuffle(working_groups)
+    ordered: list[int] = []
+    while working_groups:
+        next_groups: list[list[int]] = []
+        for group in working_groups:
+            if not group:
+                continue
+            ordered.append(group.pop(0))
+            if group:
+                next_groups.append(group)
+        working_groups = next_groups
+        rng.shuffle(working_groups)
+
+    return ordered
+
+
+def update_sample_loss_ema(
+    sample_loss_ema: dict[str, float],
+    observed_sample_losses: dict[str, float],
+    ema_decay: float,
+) -> None:
+    decay = float(np.clip(ema_decay, 0.0, 0.999))
+    retain = 1.0 - decay
+    for sample_key, sample_loss in observed_sample_losses.items():
+        previous = sample_loss_ema.get(sample_key)
+        if previous is None:
+            sample_loss_ema[sample_key] = float(sample_loss)
+        else:
+            sample_loss_ema[sample_key] = (decay * previous) + (retain * float(sample_loss))
+
+
+def build_train_loader(
+    dataset: Dataset,
+    entries: Sequence[V9SampleEntry],
+    args: argparse.Namespace,
+    device: torch.device,
+    epoch: int,
+    sample_loss_ema: dict[str, float],
+) -> DataLoader:
+    sampler = OrderedIndexSampler(
+        build_epoch_training_order(
+            entries,
+            epoch=epoch,
+            seed=args.seed,
+            sampler_mode=args.train_sampler,
+            hard_replay_fraction=args.hard_replay_fraction,
+            hard_replay_warmup_epochs=args.hard_replay_warmup_epochs,
+            sample_loss_ema=sample_loss_ema,
+        )
+    )
+    return DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        sampler=sampler,
+        num_workers=args.train_workers,
+        pin_memory=device.type == "cuda",
+    )
+
+
+def reduce_samplewise_mean(value: torch.Tensor) -> torch.Tensor:
+    return value.abs().reshape(value.shape[0], -1).mean(dim=1)
 
 
 def load_npz_arrays(shard_path: Path) -> dict[str, np.ndarray]:
@@ -610,6 +809,7 @@ class V9NativeDataset(Dataset):
         return {
             "inputs": inputs,
             "preview_minimap_rgb": preview_minimap_rgb,
+            "sample_key": entry.sample_key,
             "target_height_257": height_257_scaled,
             "target_height_65": height_65_scaled,
             "target_height_17": height_17 / self.height_scale,
@@ -752,7 +952,7 @@ def compute_v9_loss(
     residual_scale: float,
     height_scale: float,
     loss_weights: dict[str, float],
-) -> tuple[torch.Tensor, dict[str, float]]:
+) -> tuple[torch.Tensor, dict[str, float], torch.Tensor]:
     coarse_height_17, mid_height_65, full_height_257 = build_predictions(
         coarse_delta_17=coarse_delta_17,
         mid_delta_65=mid_delta_65,
@@ -764,26 +964,35 @@ def compute_v9_loss(
         height_scale=height_scale,
     )
 
-    full_l1 = F.l1_loss(full_height_257, batch["target_height_257"])
-    mid_l1 = F.l1_loss(mid_height_65, batch["target_height_65"])
-    coarse_l1 = F.l1_loss(coarse_height_17, batch["target_height_17"])
+    full_l1_per_sample = reduce_samplewise_mean(full_height_257 - batch["target_height_257"])
+    mid_l1_per_sample = reduce_samplewise_mean(mid_height_65 - batch["target_height_65"])
+    coarse_l1_per_sample = reduce_samplewise_mean(coarse_height_17 - batch["target_height_17"])
+    full_l1 = full_l1_per_sample.mean()
+    mid_l1 = mid_l1_per_sample.mean()
+    coarse_l1 = coarse_l1_per_sample.mean()
 
     pred_dx = full_height_257[:, :, :, 1:] - full_height_257[:, :, :, :-1]
     pred_dy = full_height_257[:, :, 1:, :] - full_height_257[:, :, :-1, :]
     target_dx = batch["target_height_257"][:, :, :, 1:] - batch["target_height_257"][:, :, :, :-1]
     target_dy = batch["target_height_257"][:, :, 1:, :] - batch["target_height_257"][:, :, :-1, :]
-    gradient_loss = F.l1_loss(pred_dx, target_dx) + F.l1_loss(pred_dy, target_dy)
+    gradient_loss_x_per_sample = reduce_samplewise_mean(pred_dx - target_dx)
+    gradient_loss_y_per_sample = reduce_samplewise_mean(pred_dy - target_dy)
+    gradient_loss_per_sample = gradient_loss_x_per_sample + gradient_loss_y_per_sample
+    gradient_loss = gradient_loss_per_sample.mean()
 
-    mid_residual_loss = F.l1_loss(mid_delta_65, batch["target_mid_residual_65"])
-    detail_residual_loss = F.l1_loss(detail_delta_257, batch["target_detail_residual_257"])
-    total = (
-        (loss_weights["full_l1"] * full_l1)
-        + (loss_weights["mid_l1"] * mid_l1)
-        + (loss_weights["coarse_l1"] * coarse_l1)
-        + (loss_weights["gradient"] * gradient_loss)
-        + (loss_weights["mid_residual"] * mid_residual_loss)
-        + (loss_weights["detail_residual"] * detail_residual_loss)
+    mid_residual_loss_per_sample = reduce_samplewise_mean(mid_delta_65 - batch["target_mid_residual_65"])
+    detail_residual_loss_per_sample = reduce_samplewise_mean(detail_delta_257 - batch["target_detail_residual_257"])
+    mid_residual_loss = mid_residual_loss_per_sample.mean()
+    detail_residual_loss = detail_residual_loss_per_sample.mean()
+    total_per_sample = (
+        (loss_weights["full_l1"] * full_l1_per_sample)
+        + (loss_weights["mid_l1"] * mid_l1_per_sample)
+        + (loss_weights["coarse_l1"] * coarse_l1_per_sample)
+        + (loss_weights["gradient"] * gradient_loss_per_sample)
+        + (loss_weights["mid_residual"] * mid_residual_loss_per_sample)
+        + (loss_weights["detail_residual"] * detail_residual_loss_per_sample)
     )
+    total = total_per_sample.mean()
     return total, {
         "full_l1": float(full_l1.item()),
         "mid_l1": float(mid_l1.item()),
@@ -791,12 +1000,15 @@ def compute_v9_loss(
         "gradient": float(gradient_loss.item()),
         "mid_residual": float(mid_residual_loss.item()),
         "detail_residual": float(detail_residual_loss.item()),
-    }
+    }, total_per_sample.detach()
 
 
-def move_batch_to_device(batch: dict[str, torch.Tensor], device: torch.device, channels_last: bool) -> dict[str, torch.Tensor]:
-    moved: dict[str, torch.Tensor] = {}
+def move_batch_to_device(batch: dict[str, Any], device: torch.device, channels_last: bool) -> dict[str, Any]:
+    moved: dict[str, Any] = {}
     for key, value in batch.items():
+        if not isinstance(value, torch.Tensor):
+            moved[key] = value
+            continue
         tensor = value.to(device, non_blocking=device.type == "cuda")
         if channels_last and tensor.ndim == 4:
             tensor = tensor.contiguous(memory_format=torch.channels_last)
@@ -815,13 +1027,15 @@ def run_epoch(
     channels_last: bool,
     current_epoch: int,
     args: argparse.Namespace,
-) -> tuple[float, dict[str, float], float]:
+) -> tuple[float, dict[str, float], float, dict[str, float]]:
     is_training = optimizer is not None
     model.train(is_training)
     total_loss = 0.0
     component_sums = {"full_l1": 0.0, "mid_l1": 0.0, "coarse_l1": 0.0, "gradient": 0.0, "mid_residual": 0.0, "detail_residual": 0.0}
     sample_count = 0
     start = time.perf_counter()
+    sample_loss_sums: dict[str, float] = {}
+    sample_loss_counts: dict[str, int] = {}
 
     autocast_enabled = device.type == "cuda" and amp_dtype in {torch.float16, torch.bfloat16}
     loss_weights = resolve_loss_weights(current_epoch, args)
@@ -833,7 +1047,7 @@ def run_epoch(
 
         with (torch.autocast(device_type="cuda", dtype=amp_dtype) if autocast_enabled else nullcontext()):
             coarse_delta_17, mid_delta_65, detail_delta_257 = model(batch["inputs"])
-            loss, components = compute_v9_loss(
+            loss, components, per_sample_losses = compute_v9_loss(
                 coarse_delta_17=coarse_delta_17,
                 mid_delta_65=mid_delta_65,
                 detail_delta_257=detail_delta_257,
@@ -848,6 +1062,12 @@ def run_epoch(
             optimizer.step()
 
         batch_size = int(batch["inputs"].shape[0])
+        sample_keys = batch.get("sample_key", [])
+        if sample_keys:
+            per_sample_values = per_sample_losses.cpu().tolist()
+            for sample_key, sample_loss in zip(sample_keys, per_sample_values):
+                sample_loss_sums[sample_key] = sample_loss_sums.get(sample_key, 0.0) + float(sample_loss)
+                sample_loss_counts[sample_key] = sample_loss_counts.get(sample_key, 0) + 1
         sample_count += batch_size
         total_loss += float(loss.item()) * batch_size
         for key, value in components.items():
@@ -857,7 +1077,11 @@ def run_epoch(
     mean_loss = total_loss / max(sample_count, 1)
     mean_components = {key: value / max(sample_count, 1) for key, value in component_sums.items()}
     samples_per_second = sample_count / elapsed
-    return mean_loss, mean_components, samples_per_second
+    sample_loss_means = {
+        sample_key: sample_loss_sums[sample_key] / max(sample_loss_counts[sample_key], 1)
+        for sample_key in sample_loss_sums
+    }
+    return mean_loss, mean_components, samples_per_second, sample_loss_means
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -1121,7 +1345,7 @@ def build_v9_feature_contract(args: argparse.Namespace | None = None) -> dict[st
 def describe_v9_input_stack(args: argparse.Namespace) -> str:
     brush_state = "disabled" if getattr(args, "disable_brush_mask", False) else "enabled"
     return (
-        "Active v9 inputs | cleaned/fallback minimap RGB + normal RGB + WDL/base prior + "
+        "Active v9 inputs | terrain-only/no-liquid/no-object/no-MCCV fallback minimap RGB + normal RGB + WDL/base prior + "
         f"height hints + liquid/object masks + brush mask {brush_state} + liquid height + hole mask"
     )
 
@@ -1236,7 +1460,13 @@ def export_preview_images(
     with torch.no_grad():
         for index in range(min(preview_count, len(dataset))):
             batch = dataset[index]
-            device_batch = move_batch_to_device({key: value.unsqueeze(0) for key, value in batch.items()}, device, channels_last)
+            preview_batch: dict[str, Any] = {}
+            for key, value in batch.items():
+                if isinstance(value, torch.Tensor):
+                    preview_batch[key] = value.unsqueeze(0)
+                else:
+                    preview_batch[key] = [value]
+            device_batch = move_batch_to_device(preview_batch, device, channels_last)
             with (torch.autocast(device_type="cuda", dtype=amp_dtype) if autocast_enabled else nullcontext()):
                 coarse_delta_17, mid_delta_65, detail_delta_257 = model(device_batch["inputs"])
                 coarse_height_17, mid_height_65, full_height_257 = build_predictions(
@@ -1315,9 +1545,7 @@ def train_single_run(
         include_brush_mask=not args.disable_brush_mask,
     )
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.train_workers, pin_memory=device.type == "cuda")
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.val_workers, pin_memory=device.type == "cuda")
-    train_batches = len(train_loader)
     val_batches = len(val_loader)
 
     model = V9TerrainModel(hidden_channels=args.hidden_channels, blocks_per_stage=args.blocks_per_stage).to(device)
@@ -1341,7 +1569,9 @@ def train_single_run(
     epochs_since_best = 0
     start_epoch = 0
     resumed_from: str | None = None
+    stop_reason = "completed_requested_epochs"
     last_checkpoint_path = run_output_dir / "last_checkpoint.pt"
+    sample_loss_ema: dict[str, float] = {}
 
     if args.resume_from:
         resume_path = Path(args.resume_from)
@@ -1368,10 +1598,12 @@ def train_single_run(
     print(
         f"Training V9 | epochs={args.epochs} | batch={args.batch_size} | lr={args.learning_rate:.2e} | "
         f"plateau_patience={args.lr_plateau_patience} | early_stop_patience={args.early_stop_patience} | "
-        f"preview_count={args.preview_count} | preview_every={args.preview_every_epochs} | preview_archive_every={args.preview_archive_every_epochs}"
+        f"preview_count={args.preview_count} | preview_every={args.preview_every_epochs} | preview_archive_every={args.preview_archive_every_epochs} | "
+        f"train_sampler={args.train_sampler} | hard_replay_fraction={args.hard_replay_fraction:.2f}"
     )
+    initial_train_loader = build_train_loader(train_dataset, train_entries, args, device, max(start_epoch + 1, 1), sample_loss_ema)
     print(
-        f"Dataset split | train_samples={len(train_entries)} ({train_batches} batch(es)) | "
+        f"Dataset split | train_samples={len(train_entries)} ({len(initial_train_loader)} batch(es)) | "
         f"val_samples={len(val_entries)} ({val_batches} batch(es))"
     )
     print(
@@ -1386,7 +1618,8 @@ def train_single_run(
         print(f"Resume checkpoint is already at epoch {start_epoch}, which meets or exceeds requested epochs={args.epochs}; skipping training.")
 
     for epoch in range(start_epoch + 1, args.epochs + 1):
-        train_loss, train_components, train_sps = run_epoch(
+        train_loader = build_train_loader(train_dataset, train_entries, args, device, epoch, sample_loss_ema)
+        train_loss, train_components, train_sps, train_sample_losses = run_epoch(
             model=model,
             loader=train_loader,
             optimizer=optimizer,
@@ -1398,7 +1631,8 @@ def train_single_run(
             current_epoch=epoch,
             args=args,
         )
-        val_loss, val_components, val_sps = run_epoch(
+        update_sample_loss_ema(sample_loss_ema, train_sample_losses, args.hard_replay_ema_decay)
+        val_loss, val_components, val_sps, _ = run_epoch(
             model=model,
             loader=val_loader,
             optimizer=None,
@@ -1452,6 +1686,9 @@ def train_single_run(
             f"  loss_w full {loss_weights['full_l1']:.2f} | mid {loss_weights['mid_l1']:.2f} | coarse {loss_weights['coarse_l1']:.2f} | "
             f"grad {loss_weights['gradient']:.2f} | mid_res {loss_weights['mid_residual']:.2f} | detail_res {loss_weights['detail_residual']:.2f}"
         )
+        if train_sample_losses:
+            hardest_sample_key, hardest_sample_loss = max(train_sample_losses.items(), key=lambda item: item[1])
+            print(f"  sampler {args.train_sampler} | hardest replay sample {hardest_sample_key} loss {hardest_sample_loss:.6f}")
 
         should_export_previews = is_best or (args.preview_every_epochs > 0 and epoch % args.preview_every_epochs == 0)
 
@@ -1517,9 +1754,18 @@ def train_single_run(
         )
 
         if epoch >= args.early_stop_min_epochs and epochs_since_best >= args.early_stop_patience:
+            stop_reason = "early_stop_patience"
             print(
                 f"  early stop: no new best for {epochs_since_best} epoch(s) after epoch {best_epoch}; "
                 f"best val remained {best_val_loss:.6f}"
+            )
+            break
+
+        if args.pause_every_epochs > 0 and epoch < args.epochs and epoch % args.pause_every_epochs == 0:
+            stop_reason = "paused_for_inspection"
+            print(
+                f"  pause checkpoint: reached epoch {epoch}; review previews and metrics, then resume with "
+                f"--resume-from {last_checkpoint_path} --epochs {args.epochs}"
             )
             break
 
@@ -1536,6 +1782,7 @@ def train_single_run(
         "final_epoch": history[-1]["epoch"] if history else start_epoch,
         "best_val_loss": best_val_loss,
         "best_epoch": best_epoch,
+        "stop_reason": stop_reason,
         "resumed_from": resumed_from,
         "config": vars(args),
         "preview_count": args.preview_count,
@@ -1577,6 +1824,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-curated-samples", type=int, default=DEFAULT_TARGET_CURATED_SAMPLES)
     parser.add_argument("--cohort-sizes", default=None, help="Comma-separated cohort sizes to train side by side from the ranked sane pool, for example '27,48,64'.")
     parser.add_argument("--preview-count", type=int, default=DEFAULT_PREVIEW_COUNT)
+    parser.add_argument("--train-sampler", choices=["random", "bucketed"], default=DEFAULT_TRAIN_SAMPLER,
+                        help="Training sample order. 'bucketed' interleaves terrain complexity and coverage buckets instead of using naive random shuffle.")
+    parser.add_argument("--hard-replay-fraction", type=float, default=DEFAULT_HARD_REPLAY_FRACTION,
+                        help="Fraction of each sampling bucket reserved near the front for prior hard samples once replay is active.")
+    parser.add_argument("--hard-replay-warmup-epochs", type=int, default=DEFAULT_HARD_REPLAY_WARMUP_EPOCHS,
+                        help="Number of initial epochs to run before epoch-to-epoch hard-example replay becomes eligible.")
+    parser.add_argument("--hard-replay-ema-decay", type=float, default=DEFAULT_HARD_REPLAY_EMA_DECAY,
+                        help="EMA decay used when tracking sample difficulty across epochs for replay ordering.")
+    parser.add_argument("--pause-every-epochs", type=int, default=DEFAULT_PAUSE_EVERY_EPOCHS,
+                        help="Write the normal checkpoint and stop cleanly every N epochs so the run can be inspected and resumed. Set 0 to disable periodic pauses.")
     parser.add_argument("--preview-every-epochs", type=int, default=DEFAULT_PREVIEW_EVERY_EPOCHS, help="Refresh the live validation preview set every N epochs. Set 0 to disable periodic refreshes and only update on best epochs.")
     parser.add_argument("--preview-archive-every-epochs", type=int, default=DEFAULT_PREVIEW_ARCHIVE_EVERY_EPOCHS, help="Keep archived preview snapshots every N epochs under previews/history. Set 0 to disable archiving.")
     parser.add_argument("--lr-plateau-patience", type=int, default=DEFAULT_LR_PLATEAU_PATIENCE)
@@ -1605,6 +1862,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_arg_parser().parse_args()
+    if args.epochs < 1:
+        raise SystemExit("--epochs must be at least 1.")
+    if args.pause_every_epochs < 0:
+        raise SystemExit("--pause-every-epochs must be 0 or greater.")
+    if args.epochs > MAX_ALLOWED_EPOCHS:
+        print(f"Requested epochs {args.epochs} exceed cap {MAX_ALLOWED_EPOCHS}; clamping to {MAX_ALLOWED_EPOCHS}.")
+        args.epochs = MAX_ALLOWED_EPOCHS
     seed_everything(args.seed)
 
     cache_manifest = Path(args.cache_manifest)

@@ -1,5 +1,82 @@
 # Progress
 
+### Apr 20, 2026 - capped long v9 runs at 500 epochs and added resumable inspection pauses every 50 epochs
+
+- what changed:
+	- updated `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9.py` so requested `--epochs` values are now clamped to a hard ceiling of `500`
+	- added `--pause-every-epochs` with a default of `50`, using the existing `last_checkpoint.pt` resume path instead of a separate pause-only checkpoint format
+	- run summaries now record `stop_reason`, which distinguishes normal completion, early-stop exits, and inspection pauses
+- validation:
+	- `python -m py_compile i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9.py` passed after the edit
+	- a bounded smoke run at `output/ml-training/v9_2_pause_smoke` stopped cleanly at epoch `2` with `--pause-every-epochs 2`
+	- that smoke run wrote `stop_reason = paused_for_inspection` in `run_summary.json` and printed a resumable command using `last_checkpoint.pt`
+- boundary:
+	- this changes long-run operating behavior only; it does not by itself improve validation quality
+	- future long v9.2 runs should now be launched expecting inspectable pause points and resumed intentionally after review instead of running unattended for hundreds of epochs past the last meaningful best
+
+### Apr 20, 2026 - completed the first bounded mixed-cache v9.2 run on the fresh metric-aware cache and kept the best checkpoint after patience-based early stop
+
+- what changed:
+	- trained `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9.py` on `output/ml-training/v9_native_cache_mixed_v92_pilot24/v9_tensor_cache_manifest.json` using the new `bucketed` sampler plus hard-example replay (`0.20` fraction, `1` epoch warmup, `0.70` EMA decay)
+	- used the fresh mixed `v92` manifest instead of the older pre-`normal_rgb_256` mixed cache so the run exercised the current-contract metric-aware input surface end to end
+	- kept brush masking disabled for this comparison run so the result isolates the new batching and replay path rather than mixing in a second training-axis change
+- validation:
+	- audit on the fresh mixed cache accepted `22` sane samples from `96` shards and split them into `19` train plus `3` validation samples
+	- bounded mixed run completed at `output/ml-training/v9_2_bucketed_replay_mixed96_run`
+	- `run_summary.json` recorded `best_val_loss = 0.0078935353` at `best_epoch = 243`
+	- the run then hit configured `early_stop_patience = 200` and stopped cleanly at `final_epoch = 443` with `final_learning_rate = 3.75e-05`
+	- best and last checkpoints were written under the run output directory, with previews archived every `10` epochs
+- boundary:
+	- this is the first bounded mixed-cache proof for the v9.2 batching lane on a fresh current-contract cache, not a large-cohort convergence claim
+	- the run plateaued well before the epoch cap, so further gain likely needs either a larger sane mixed cache or a changed objective or feature set rather than simply waiting longer at the lower learning rate
+
+### Apr 20, 2026 - aligned wow-viewer terrain-training metrics with v9.2 batching work and proved the new sampler path on the v77 smoke cache
+
+- what changed:
+	- extended `wow-viewer/src/core/WowViewer.Core/Datasets/TerrainTrainingSampleManifest.cs` with explicit brush-mask availability and `BrushCoverage` so the shared manifest contract now matches the current trainer-side sampling metrics
+	- updated `wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs` so `dataset-scan` now emits `terrain-training-scan.v2` and includes the new brush metric field in the shared output shape
+	- added focused shared-core coverage in `wow-viewer/tests/WowViewer.Core.Tests/TerrainTrainingSampleManifestTests.cs`
+	- updated `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9.py` so older cache manifests that predate the new metric fields now backfill liquid/object/brush/hole/minimap metrics directly from each `.npz` shard during manifest load
+	- fixed the preview-export path in `train_v9.py` so non-tensor batch metadata like `sample_key` no longer breaks preview refresh after the new hard-example replay plumbing
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter TerrainTrainingSampleManifestTests` passed
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
+	- `python -m py_compile .../train_v9.py` passed after the preview-export repair
+	- bounded smoke pilot completed at `output/ml-training/v9_2_bucketed_replay_v77_smoke` over `v9_native_cache_v77_smoke` with bucketed sampling plus hard-example replay enabled; best val loss improved from `0.2490` to `0.0831` over `4` epochs
+- boundary:
+	- this proves the new batching path end to end only on the bounded `v77` smoke cache and keeps the proof level explicit
+	- the older `v9_native_cache_mixed` compatibility cache was also re-audited and rejected all `224` entries for a real contract reason (`missing_normal_rgb_256`), so broader mixed-cache pilot proof still needs a refreshed `v77`-contract mixed cache rather than the older pre-normal cache
+
+### Apr 19, 2026 - landed the first direct wow-viewer terrain-training manifest contract and client-root scan bridge
+
+- what changed:
+	- added `wow-viewer/src/core/WowViewer.Core/Datasets/TerrainTrainingSampleManifest.cs` as the first shared terrain-training sample contract
+	- added `wow-viewer/tools/converter/WowViewer.Tool.Converter dataset-scan --client-root <path> --map <name> ...` as the first direct client-root ML discovery command over shared filesystem/archive tile discovery
+	- updated `gillijimproject_refactor/src/WoWMapConverter/scripts/build_v9_native_tensor_cache.py` so the legacy v9 cache builder can now consume `--curated-manifest <path>` instead of only discovering harvested dataset roots
+- validation:
+	- editor diagnostics reported no errors in the new wow-viewer contract or converter command
+	- editor diagnostics on the touched Python cache-builder file reported only existing unresolved-import environment issues, with no syntax errors from the new manifest support
+- boundary:
+	- this lands the first shared manifest contract, first direct scan command, and first transitional cache cutover seam only
+	- it does not yet add a wow-viewer `dataset audit`, `dataset curate`, or `dataset build-cache` command, and the active v9 trainer still consumes legacy cache artifacts
+
+### Apr 19, 2026 - redirected the long-range ML workflow toward a direct wow-viewer game-root-to-curated-cache pipeline
+
+- what changed:
+	- added `gillijimproject_refactor/plans/wow_viewer_direct_ml_pipeline_plan_2026-04-19.md`
+	- updated `gillijimproject_refactor/plans/wow_viewer_dataset_builder_tool_plan_2026-04-14.md` with a direct pipeline directive
+	- clarified the target shape for future training work:
+		- direct client-root or staged-root discovery through shared `wow-viewer` loaders
+		- bucketed audit pass over raw terrain/liquid/object/semantic signals
+		- explicit curation pass
+		- final curated cache materialization only after curation
+	- explicitly demoted permanent harvested dataset trees to compatibility or inspection artifacts instead of the canonical ML starting surface
+- validation:
+	- planning-only slice; no build or runtime validation required
+- boundary:
+	- this changes the planned ownership and workflow target only
+	- it does not yet add `wow-viewer` dataset scan/audit/curate/build-cache commands or cut the active `v9` trainer over to that path
+
 ### Apr 19, 2026 - planned the next ML lane as a separate v9 texture-and-alpha refiner over real exported layer data
 
 - what changed:

@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using WowViewer.Core.Datasets;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO;
 using WowViewer.Core.IO.Files;
@@ -24,6 +25,9 @@ string[] tail = args.Skip(1).ToArray();
 
 	switch (command)
 	{
+		case "dataset-scan":
+			RunDatasetScan(tail);
+			break;
 		case "detect":
 			RunDetect(tail);
 			break;
@@ -234,6 +238,295 @@ static void RunMlCorpus(string[] args)
 	}
 
 	Console.WriteLine($"ml-corpus complete: maps={mapsProcessed} tiles={tilesProcessed}");
+}
+
+static void RunDatasetScan(string[] args)
+{
+	string? clientRootOption = GetOption(args, "--client-root", "-c");
+	string? mapName = GetOption(args, "--map", "-m");
+	string? buildLabel = GetOption(args, "--build", "-b");
+	string? outputOption = GetOption(args, "--output", "-o");
+	int? limit = GetIntOption(args, "--limit", "-n");
+
+	if (string.IsNullOrWhiteSpace(clientRootOption) || string.IsNullOrWhiteSpace(mapName))
+	{
+		Console.Error.WriteLine("Error: dataset-scan requires --client-root <path> and --map <name>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string clientRoot = Path.GetFullPath(clientRootOption);
+	string normalizedMapName = mapName.Trim();
+	string normalizedBuildLabel = string.IsNullOrWhiteSpace(buildLabel)
+		? Path.GetFileName(clientRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+		: buildLabel.Trim();
+
+	string mapPath = Path.Combine(clientRoot, "Data", "World", "Maps", normalizedMapName);
+	List<TerrainTrainingSampleDescriptor> entries;
+	if (Directory.Exists(mapPath))
+	{
+		entries = BuildDatasetScanEntriesFromDirectory(clientRoot, normalizedBuildLabel, normalizedMapName, mapPath, limit);
+	}
+	else
+	{
+		using IArchiveCatalog archiveCatalog = CreateArchiveCatalog(clientRoot);
+		if (!ArchiveMapExists(archiveCatalog, clientRoot, normalizedMapName, mapPath))
+		{
+			Console.Error.WriteLine($"Error: map '{normalizedMapName}' was not found under filesystem or archive root '{clientRoot}'.");
+			Environment.ExitCode = 1;
+			return;
+		}
+
+		entries = BuildDatasetScanEntriesFromArchive(clientRoot, normalizedBuildLabel, normalizedMapName, mapPath, archiveCatalog, limit);
+	}
+
+	TerrainTrainingSampleManifest manifest = new(
+		schemaVersion: "terrain-training-scan.v2",
+		createdAtUtc: DateTimeOffset.UtcNow,
+		sourceManifestKind: "scan",
+		entries: entries);
+
+	Console.WriteLine("WowViewer.Tool.Converter dataset-scan report");
+	Console.WriteLine($"ClientRoot: {clientRoot}");
+	Console.WriteLine($"Build: {normalizedBuildLabel}");
+	Console.WriteLine($"Map: {normalizedMapName}");
+	Console.WriteLine($"Samples: {entries.Count}");
+
+	string json = JsonSerializer.Serialize(manifest, CreateJsonOptions());
+	if (!string.IsNullOrWhiteSpace(outputOption))
+	{
+		string outputPath = Path.GetFullPath(outputOption);
+		string? outputDirectory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(outputDirectory))
+			Directory.CreateDirectory(outputDirectory);
+
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine(json);
+}
+
+static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromDirectory(string clientRoot, string buildLabel, string mapName, string mapPath, int? limit)
+{
+	List<string> adtFiles = Directory
+		.EnumerateFiles(mapPath, $"{mapName}_*.adt", SearchOption.TopDirectoryOnly)
+		.Where(static path => !path.EndsWith("_tex0.adt", StringComparison.OrdinalIgnoreCase)
+			&& !path.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase)
+			&& !path.EndsWith("_lod.adt", StringComparison.OrdinalIgnoreCase))
+		.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+		.ToList();
+
+	if (limit is > 0)
+		adtFiles = adtFiles.Take(limit.Value).ToList();
+
+	string? wdlPath = ResolveOptionalFilesystemCompanion(Path.Combine(mapPath, $"{mapName}.wdl"));
+	List<TerrainTrainingSampleDescriptor> entries = new(adtFiles.Count);
+	foreach (string adtPath in adtFiles)
+	{
+		string tileStem = Path.GetFileNameWithoutExtension(adtPath);
+		if (!TryParseTileCoordinates(tileStem, out int tileX, out int tileY))
+			continue;
+
+		string? objAdtPath = ResolveOptionalFilesystemCompanion(Path.Combine(mapPath, $"{tileStem}_obj0.adt"));
+		string? texAdtPath = ResolveOptionalFilesystemCompanion(Path.Combine(mapPath, $"{tileStem}_tex0.adt"));
+		string? lodAdtPath = ResolveOptionalFilesystemCompanion(Path.Combine(mapPath, $"{tileStem}_lod.adt"));
+		AdtSummary summary = AdtSummaryReader.Read(adtPath);
+
+		entries.Add(CreateDatasetScanEntry(
+			sampleId: $"{buildLabel}:{tileStem}",
+			sourceKind: TerrainTrainingSampleSourceKind.ClientRoot,
+			buildLabel: buildLabel,
+			mapName: mapName,
+			tileX: tileX,
+			tileY: tileY,
+			sourceRoot: clientRoot,
+			rootAdtPath: adtPath,
+			objAdtPath: objAdtPath,
+			texAdtPath: texAdtPath,
+			lodAdtPath: lodAdtPath,
+			wdlPath: wdlPath,
+			summary: summary,
+			hasMinimap: false,
+			hasTerrainOnlyMinimap: false,
+			hasNoLiquidMinimap: false,
+			hasNoObjectMinimap: false,
+			hasNoMccvMinimap: false,
+			hasNormalMap: false,
+			hasLiquidMask: summary.HasWater,
+			hasLiquidHeight: summary.HasWater,
+			hasObjectMask: false,
+			hasPm4Mask: false,
+			hasHoleMask: false,
+			hasAreaIdMap: false,
+			hasChunkFlagsMap: false,
+			hasAlphaLayers: texAdtPath is not null,
+			hasTextureMetadata: texAdtPath is not null || summary.TextureNameCount > 0));
+	}
+
+	return entries;
+}
+
+static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(string clientRoot, string buildLabel, string mapName, string mapPath, IArchiveCatalog archiveCatalog, int? limit)
+{
+	string mapVirtualRoot = ResolveMapVirtualRoot(clientRoot, mapName, mapPath);
+	string wdtVirtualPath = BuildMapWdtVirtualPath(mapVirtualRoot, mapName);
+	byte[] wdtBytes = archiveCatalog.ReadFile(wdtVirtualPath)
+		?? throw new FileNotFoundException($"Could not read archive-backed WDT '{wdtVirtualPath}'.", wdtVirtualPath);
+
+	List<WdtTileCoordinate> tileCoordinates = ReadArchiveWdtTiles(wdtBytes, wdtVirtualPath)
+		.OrderBy(static tile => tile.TileY)
+		.ThenBy(static tile => tile.TileX)
+		.ToList();
+	if (limit is > 0)
+		tileCoordinates = tileCoordinates.Take(limit.Value).ToList();
+
+	string wdlVirtualPath = $"{mapVirtualRoot}\\{mapName}.wdl";
+	bool hasWdl = archiveCatalog.FileExists(wdlVirtualPath);
+	List<TerrainTrainingSampleDescriptor> entries = new(tileCoordinates.Count);
+	foreach (WdtTileCoordinate tileCoordinate in tileCoordinates)
+	{
+		string tileStem = $"{mapName}_{tileCoordinate.TileX}_{tileCoordinate.TileY}";
+		string rootVirtualPath = $"{mapVirtualRoot}\\{tileStem}.adt";
+		byte[] rootBytes = archiveCatalog.ReadFile(rootVirtualPath) ?? [];
+		if (rootBytes.Length == 0)
+			continue;
+
+		AdtSummary summary = ReadArchiveAdtSummary(rootBytes, rootVirtualPath);
+		string objVirtualPath = $"{mapVirtualRoot}\\{tileStem}_obj0.adt";
+		string texVirtualPath = $"{mapVirtualRoot}\\{tileStem}_tex0.adt";
+		string lodVirtualPath = $"{mapVirtualRoot}\\{tileStem}_lod.adt";
+
+		entries.Add(CreateDatasetScanEntry(
+			sampleId: $"{buildLabel}:{tileStem}",
+			sourceKind: TerrainTrainingSampleSourceKind.MountedArchive,
+			buildLabel: buildLabel,
+			mapName: mapName,
+			tileX: tileCoordinate.TileX,
+			tileY: tileCoordinate.TileY,
+			sourceRoot: clientRoot,
+			rootAdtPath: rootVirtualPath,
+			objAdtPath: archiveCatalog.FileExists(objVirtualPath) ? objVirtualPath : null,
+			texAdtPath: archiveCatalog.FileExists(texVirtualPath) ? texVirtualPath : null,
+			lodAdtPath: archiveCatalog.FileExists(lodVirtualPath) ? lodVirtualPath : null,
+			wdlPath: hasWdl ? wdlVirtualPath : null,
+			summary: summary,
+			hasMinimap: false,
+			hasTerrainOnlyMinimap: false,
+			hasNoLiquidMinimap: false,
+			hasNoObjectMinimap: false,
+			hasNoMccvMinimap: false,
+			hasNormalMap: false,
+			hasLiquidMask: summary.HasWater,
+			hasLiquidHeight: summary.HasWater,
+			hasObjectMask: false,
+			hasPm4Mask: false,
+			hasHoleMask: false,
+			hasAreaIdMap: false,
+			hasChunkFlagsMap: false,
+			hasAlphaLayers: archiveCatalog.FileExists(texVirtualPath),
+			hasTextureMetadata: archiveCatalog.FileExists(texVirtualPath) || summary.TextureNameCount > 0));
+	}
+
+	return entries;
+}
+
+static TerrainTrainingSampleDescriptor CreateDatasetScanEntry(
+	string sampleId,
+	TerrainTrainingSampleSourceKind sourceKind,
+	string buildLabel,
+	string mapName,
+	int tileX,
+	int tileY,
+	string sourceRoot,
+	string rootAdtPath,
+	string? objAdtPath,
+	string? texAdtPath,
+	string? lodAdtPath,
+	string? wdlPath,
+	AdtSummary summary,
+	bool hasMinimap,
+	bool hasTerrainOnlyMinimap,
+	bool hasNoLiquidMinimap,
+	bool hasNoObjectMinimap,
+	bool hasNoMccvMinimap,
+	bool hasNormalMap,
+	bool hasLiquidMask,
+	bool hasLiquidHeight,
+	bool hasObjectMask,
+	bool hasPm4Mask,
+	bool hasHoleMask,
+	bool hasAreaIdMap,
+	bool hasChunkFlagsMap,
+	bool hasAlphaLayers,
+	bool hasTextureMetadata)
+{
+	return new TerrainTrainingSampleDescriptor(
+		sampleId: sampleId,
+		sourceKind: sourceKind,
+		buildLabel: buildLabel,
+		mapName: mapName,
+		tileX: tileX,
+		tileY: tileY,
+		sourceRoot: sourceRoot,
+		rootAdtPath: rootAdtPath)
+	{
+		ObjAdtPath = objAdtPath,
+		TexAdtPath = texAdtPath,
+		LodAdtPath = lodAdtPath,
+		WdlPath = wdlPath,
+		Signals = new TerrainTrainingSignalAvailability
+		{
+			HasRootAdt = true,
+			HasObjAdt = objAdtPath is not null,
+			HasTexAdt = texAdtPath is not null,
+			HasWdl = wdlPath is not null,
+			HasMinimap = hasMinimap,
+			HasTerrainOnlyMinimap = hasTerrainOnlyMinimap,
+			HasNoLiquidMinimap = hasNoLiquidMinimap,
+			HasNoObjectMinimap = hasNoObjectMinimap,
+			HasNoMccvMinimap = hasNoMccvMinimap,
+			HasNormalMap = hasNormalMap,
+			HasLiquidMask = hasLiquidMask,
+			HasLiquidHeight = hasLiquidHeight,
+			HasObjectMask = hasObjectMask,
+			HasBrushMask = false,
+			HasPm4Mask = hasPm4Mask,
+			HasHoleMask = hasHoleMask,
+			HasAreaIdMap = hasAreaIdMap,
+			HasChunkFlagsMap = hasChunkFlagsMap,
+			HasAlphaLayers = hasAlphaLayers,
+			HasTextureMetadata = hasTextureMetadata,
+		},
+		Metrics = new TerrainTrainingSampleMetrics
+		{
+			LiquidCoverage = summary.HasWater ? 1.0f : 0.0f,
+			BrushCoverage = 0.0f,
+			TextureLayerCount = summary.TextureNameCount,
+		},
+	};
+}
+
+static bool TryParseTileCoordinates(string tileStem, out int tileX, out int tileY)
+{
+	tileX = 0;
+	tileY = 0;
+	int lastUnderscore = tileStem.LastIndexOf('_');
+	if (lastUnderscore <= 0 || lastUnderscore >= tileStem.Length - 1)
+		return false;
+
+	int secondLastUnderscore = tileStem.LastIndexOf('_', lastUnderscore - 1);
+	if (secondLastUnderscore <= 0 || secondLastUnderscore >= lastUnderscore - 1)
+		return false;
+
+	return int.TryParse(tileStem.AsSpan(secondLastUnderscore + 1, lastUnderscore - secondLastUnderscore - 1), out tileX)
+		&& int.TryParse(tileStem.AsSpan(lastUnderscore + 1), out tileY);
+}
+
+static string? ResolveOptionalFilesystemCompanion(string path)
+{
+	return File.Exists(path) ? path : null;
 }
 
 static MlCorpusMapReport BuildMapReport(string clientId, string mapName, string clientRoot, string mapPath, string mapOutputRoot, bool dryRun, IArchiveCatalog? archiveCatalog)
@@ -1285,6 +1578,7 @@ static void ShowUsage()
 {
 	Console.WriteLine("WowViewer.Tool.Converter");
 	Console.WriteLine("Usage:");
+	Console.WriteLine("  wowviewer-converter dataset-scan --client-root <path> --map <name> [--build <label>] [--output <manifest.json>] [--limit <count>]");
 	Console.WriteLine("  wowviewer-converter detect --input <file>");
 	Console.WriteLine("  wowviewer-converter export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-converter ml-corpus --config <ml-corpus.json> [--archive-root <path>] [--output-root <path>] [--dry-run]");
