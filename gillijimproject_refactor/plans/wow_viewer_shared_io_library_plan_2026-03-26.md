@@ -2,6 +2,27 @@
 
 # wow-viewer Shared I/O Library Plan
 
+## Apr 21, 2026 - Alpha-first audio restoration directive over later-era MCSE-first audio work
+
+- status: active workflow directive
+- user direction in this chat:
+  - restore the oldest audio data first, especially the `0.5.x` Alpha path that used MIDI plus DLS soundbanks for ambient audio before later codec-heavy clients
+- practical implication for shared-I/O continuation:
+  - do not treat the current `MCSE`-first audio plan as the universal next slice anymore
+  - first prove shared Alpha area-audio ownership in `wow-viewer` over the earliest recoverable data we already know exists in the workspace docs and schemas:
+    - `AreaTable` `MIDIAmbience` and `MIDIAmbienceUnderwater`
+    - `AreaMIDIAmbiences` day or night sequence and `DLSFile` ownership
+    - archive or local asset discovery for `.mid` and `.dls`
+  - treat Alpha `MCSE` as the next shared map-format slice after that area-audio proof, because it is still important for spatial emitters but is not the only or earliest audio seam
+  - only after those Alpha-specific seams are proven should later FMOD-era sound-entry or sound-kit resolution become the default audio continuation path
+- preferred narrow sequence from this state:
+  - shared Alpha area-audio record or resolver seam in `WowViewer.Core` or `WowViewer.Core.IO`
+  - thin inspect proof for area id -> MIDI sequence or DLS bank or volume on a fixed or staged Alpha client root
+  - shared Alpha-aware `MCSE` reader and inspect proof
+  - later cross-era audio resolver work once both Alpha area audio and Alpha `MCSE` are grounded
+- guardrail:
+  - do not flatten Alpha DirectMusic or MIDI or DLS assumptions into later FMOD-era sound-entry resolution just to keep one temporary implementation path
+
 ## Apr 17, 2026 - Alpha-first world-format directive over ADT-family completion
 
 - status: active workflow directive

@@ -169,6 +169,7 @@ That document covers:
 
 - [docs/validation/direct-v9-training-setup.md](docs/validation/direct-v9-training-setup.md): direct dataset and training setup
 - [docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md](docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md): current viewer ownership boundary
+- [docs/architecture/audio-engine-plan-2026-04-21.md](docs/architecture/audio-engine-plan-2026-04-21.md): first audio-engine and game-engine subsystem plan
 - [docs/architecture/m2/README.md](docs/architecture/m2/README.md): M2 architecture and implementation handoff
 - [docs/architecture/m2-native-client-research-2026-03-31.md](docs/architecture/m2-native-client-research-2026-03-31.md): native-client M2 research notes
 - [docs/architecture/wdt-format-notes-2026-04-17.md](docs/architecture/wdt-format-notes-2026-04-17.md): WDT notes and research context

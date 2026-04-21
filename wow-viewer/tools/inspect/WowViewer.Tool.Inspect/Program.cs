@@ -1,10 +1,13 @@
 using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
+using WowViewer.Core.Audio;
 using WowViewer.Core.Blp;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.Files;
+using WowViewer.Core.IO.Audio;
 using WowViewer.Core.IO.Blp;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Lit;
 using WowViewer.Core.IO.M2;
@@ -36,6 +39,9 @@ switch (area)
 {
 	case "archive":
 		RunArchive(tail);
+		break;
+	case "audio":
+		RunAudio(tail);
 		break;
 	case "blp":
 		RunBlp(tail);
@@ -85,6 +91,31 @@ static void RunArchive(string[] args)
 		default:
 			Console.Error.WriteLine($"Unknown archive command '{command}'.");
 			ShowArchiveUsage();
+			Environment.ExitCode = 1;
+			break;
+	}
+}
+
+static void RunAudio(string[] args)
+{
+	if (args.Length == 0)
+	{
+		ShowAudioUsage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string command = args[0].ToLowerInvariant();
+	string[] tail = args.Skip(1).ToArray();
+
+	switch (command)
+	{
+		case "alpha-area":
+			RunAudioAlphaArea(tail);
+			break;
+		default:
+			Console.Error.WriteLine($"Unknown audio command '{command}'.");
+			ShowAudioUsage();
 			Environment.ExitCode = 1;
 			break;
 	}
@@ -1273,6 +1304,96 @@ static void RunArchiveBuildListfileCache(string[] args)
 	Console.WriteLine($"Known file universe: {result.AllFiles.Count}");
 }
 
+static void RunAudioAlphaArea(string[] args)
+{
+	string? archiveRoot = GetOption(args, "--archive-root", "-r") ?? GetFirstPositionalArgument(args);
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	if (string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string buildVersion = GetOption(args, "--build", "-b") ?? AlphaAreaAudioCatalogReader.DefaultBuildVersion;
+	int? areaId = TryGetIntOption(args, "--area-id", "-a");
+	int limit = TryGetIntOption(args, "--limit", "-n") ?? (areaId.HasValue ? 1 : 20);
+	string? search = GetOption(args, "--search", "-s");
+
+	using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+	ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [archiveRoot], archiveBootstrapOptions);
+
+	AlphaAreaAudioCatalogReader reader = new();
+	AlphaAreaAudioCatalog? catalog = reader.Load([archiveRoot], archiveCatalog, buildVersion);
+	if (catalog is null)
+	{
+		Console.Error.WriteLine("Error: could not load AreaTable and AreaMIDIAmbiences from the configured archive root.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	IEnumerable<AlphaAreaAudioBinding> bindings = areaId.HasValue
+		? catalog.TryResolve(areaId.Value) is { } binding ? [binding] : Array.Empty<AlphaAreaAudioBinding>()
+		: catalog.EnumerateBindings();
+
+	if (!string.IsNullOrWhiteSpace(search))
+	{
+		bindings = bindings.Where(binding => MatchesSearch(binding, search));
+	}
+
+	AlphaAreaAudioAssetResolver assetResolver = new();
+	List<AlphaAreaAudioBindingAssetReport> allBindingReports = assetResolver.ResolveAll(catalog.EnumerateBindings(), [archiveRoot], archiveCatalog).ToList();
+	List<AlphaAreaAudioBindingAssetReport> selectedBindingReports = assetResolver
+		.ResolveAll(bindings.Take(Math.Max(limit, 0)), [archiveRoot], archiveCatalog)
+		.ToList();
+	int resolvedMidi = catalog.EnumerateBindings().Count(static binding => binding.MidiAmbience is not null);
+	int resolvedUnderwaterMidi = catalog.EnumerateBindings().Count(static binding => binding.UnderwaterMidiAmbience is not null);
+	int referencedAssets = allBindingReports.Sum(static report => report.EnumerateAssets().Count(static asset => asset.IsReferenced));
+	int resolvedAssets = allBindingReports.Sum(static report => report.EnumerateAssets().Count(static asset => asset.Exists));
+	int archiveAssets = allBindingReports.Sum(static report => report.EnumerateAssets().Count(static asset => asset.Source == AlphaAreaAudioAssetSource.Archive));
+	int diskAssets = allBindingReports.Sum(static report => report.EnumerateAssets().Count(static asset => asset.Source == AlphaAreaAudioAssetSource.Disk));
+
+	Console.WriteLine("Alpha area audio summary");
+	Console.WriteLine($"Archive root: {archiveRoot}");
+	Console.WriteLine($"Build: {buildVersion}");
+	Console.WriteLine($"Areas: {catalog.Areas.Count}");
+	Console.WriteLine($"AreaMIDIAmbiences: {catalog.MidiAmbiences.Count}");
+	Console.WriteLine($"Resolved MIDIAmbience refs: {resolvedMidi}");
+	Console.WriteLine($"Resolved underwater MIDIAmbience refs: {resolvedUnderwaterMidi}");
+	Console.WriteLine($"Referenced asset refs: {referencedAssets}");
+	Console.WriteLine($"Resolved asset refs: {resolvedAssets}");
+	Console.WriteLine($"Archive-backed asset refs: {archiveAssets}");
+	Console.WriteLine($"Disk-backed asset refs: {diskAssets}");
+	Console.WriteLine($"Displayed rows: {selectedBindingReports.Count}");
+
+	foreach (AlphaAreaAudioBindingAssetReport report in selectedBindingReports)
+	{
+		AlphaAreaAudioBinding binding = report.Binding;
+		Console.WriteLine($"area={binding.Area.Id} name='{binding.Area.AreaName}' continent={binding.Area.ContinentId} midi={binding.Area.MidiAmbienceId} underwaterMidi={binding.Area.MidiAmbienceUnderwaterId}");
+		if (binding.MidiAmbience is not null)
+		{
+			Console.WriteLine($"  day={FormatAudioAsset(report.DaySequence)} night={FormatAudioAsset(report.NightSequence)} dls={FormatAudioAsset(report.DlsFile)} volume={binding.MidiAmbience.Volume.ToString(CultureInfo.InvariantCulture)}");
+		}
+		else
+		{
+			Console.WriteLine("  day=- night=- dls=- volume=-");
+		}
+
+		if (binding.UnderwaterMidiAmbience is not null)
+		{
+			Console.WriteLine($"  underwaterDay={FormatAudioAsset(report.UnderwaterDaySequence)} underwaterNight={FormatAudioAsset(report.UnderwaterNightSequence)} underwaterDls={FormatAudioAsset(report.UnderwaterDlsFile)} underwaterVolume={binding.UnderwaterMidiAmbience.Volume.ToString(CultureInfo.InvariantCulture)}");
+		}
+	}
+
+	if (areaId.HasValue && selectedBindingReports.Count == 0)
+	{
+		Environment.ExitCode = 1;
+		Console.Error.WriteLine($"Error: area id {areaId.Value} was not found in the loaded Alpha AreaTable data.");
+	}
+}
+
 static void RunMap(string[] args)
 {
 	if (args.Length == 0)
@@ -2162,6 +2283,50 @@ static string? GetFirstPositionalArgument(string[] args)
 	return null;
 }
 
+static int? TryGetIntOption(string[] args, string longName, string shortName)
+{
+	string? value = GetOption(args, longName, shortName);
+	if (string.IsNullOrWhiteSpace(value))
+	{
+		return null;
+	}
+
+	if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+	{
+		return parsed;
+	}
+
+	Console.Error.WriteLine($"Error: option {longName} requires an integer value.");
+	Environment.ExitCode = 1;
+	return null;
+}
+
+static bool MatchesSearch(AlphaAreaAudioBinding binding, string search)
+{
+	return binding.Area.AreaName.Contains(search, StringComparison.OrdinalIgnoreCase)
+		|| (binding.MidiAmbience?.DaySequence?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+		|| (binding.MidiAmbience?.NightSequence?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+		|| (binding.MidiAmbience?.DlsFile?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+		|| (binding.UnderwaterMidiAmbience?.DaySequence?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+		|| (binding.UnderwaterMidiAmbience?.NightSequence?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+		|| (binding.UnderwaterMidiAmbience?.DlsFile?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false);
+}
+
+static string FormatAudioAsset(AlphaAreaAudioAssetProbe asset)
+{
+	if (!asset.IsReferenced)
+	{
+		return "-";
+	}
+
+	return asset.Source switch
+	{
+		AlphaAreaAudioAssetSource.Archive => $"{asset.RequestedPath} [archive]",
+		AlphaAreaAudioAssetSource.Disk => $"{asset.RequestedPath} [disk:{asset.ResolvedPath}]",
+		_ => $"{asset.RequestedPath} [missing]",
+	};
+}
+
 static IReadOnlyList<FourCC> ParseMdxChunkIds(string chunkText)
 {
 	string[] tokens = chunkText
@@ -2775,7 +2940,7 @@ static void PrintMapSummary(MapFileSummary summary, bool dumpTexChunks)
 		AdtSummary adtSummary = AdtSummaryReader.Read(stream, summary);
 		Console.WriteLine($"ADT semantics: kind={adtSummary.Kind} terrainChunks={adtSummary.TerrainChunkCount} textures={adtSummary.TextureNameCount} doodadNames={adtSummary.ModelNameCount} wmoNames={adtSummary.WorldModelNameCount} doodadPlacements={adtSummary.ModelPlacementCount} wmoPlacements={adtSummary.WorldModelPlacementCount} hasMfbo={adtSummary.HasFlightBounds} hasMh2o={adtSummary.HasWater} hasMamp={adtSummary.HasTextureParams} hasMtxf={adtSummary.HasTextureFlags}");
 		AdtMcnkSummary mcnkSummary = AdtMcnkSummaryReader.Read(stream, summary);
-		Console.WriteLine($"ADT MCNK semantics: mcnk={mcnkSummary.McnkCount} zero={mcnkSummary.ZeroLengthMcnkCount} headerLike={mcnkSummary.HeaderLikeMcnkCount} distinctIndex={mcnkSummary.DistinctIndexCount} duplicateIndex={mcnkSummary.DuplicateIndexCount} areaIds={mcnkSummary.DistinctAreaIdCount} holes={mcnkSummary.ChunksWithHoles} liquidFlags={mcnkSummary.ChunksWithLiquidFlags} mccvFlags={mcnkSummary.ChunksWithMccvFlag} mcvt={mcnkSummary.ChunksWithMcvt} mcnr={mcnkSummary.ChunksWithMcnr} mcly={mcnkSummary.ChunksWithMcly} mcal={mcnkSummary.ChunksWithMcal} mcsh={mcnkSummary.ChunksWithMcsh} mccv={mcnkSummary.ChunksWithMccv} mclq={mcnkSummary.ChunksWithMclq} mcrd={mcnkSummary.ChunksWithMcrd} mcrw={mcnkSummary.ChunksWithMcrw} totalLayers={mcnkSummary.TotalLayerCount} maxLayers={mcnkSummary.MaxLayerCount} multiLayerChunks={mcnkSummary.ChunksWithMultipleLayers}");
+		Console.WriteLine($"ADT MCNK semantics: mcnk={mcnkSummary.McnkCount} zero={mcnkSummary.ZeroLengthMcnkCount} headerLike={mcnkSummary.HeaderLikeMcnkCount} distinctIndex={mcnkSummary.DistinctIndexCount} duplicateIndex={mcnkSummary.DuplicateIndexCount} areaIds={mcnkSummary.DistinctAreaIdCount} holes={mcnkSummary.ChunksWithHoles} liquidFlags={mcnkSummary.ChunksWithLiquidFlags} mccvFlags={mcnkSummary.ChunksWithMccvFlag} mcvt={mcnkSummary.ChunksWithMcvt} mcnr={mcnkSummary.ChunksWithMcnr} mcly={mcnkSummary.ChunksWithMcly} mcal={mcnkSummary.ChunksWithMcal} mcsh={mcnkSummary.ChunksWithMcsh} mcse={mcnkSummary.ChunksWithMcse} mcseBytes={mcnkSummary.TotalMcsePayloadBytes} mccv={mcnkSummary.ChunksWithMccv} mclq={mcnkSummary.ChunksWithMclq} mcrd={mcnkSummary.ChunksWithMcrd} mcrw={mcnkSummary.ChunksWithMcrw} totalLayers={mcnkSummary.TotalLayerCount} maxLayers={mcnkSummary.MaxLayerCount} multiLayerChunks={mcnkSummary.ChunksWithMultipleLayers}");
 		if (summary.Kind is MapFileKind.Adt or MapFileKind.AdtTex)
 		{
 			AdtMcalSummary mcalSummary = AdtMcalSummaryReader.Read(stream, summary);
@@ -3537,6 +3702,7 @@ static void ShowUsage()
 {
 	Console.WriteLine("WowViewer.Tool.Inspect");
 	Console.WriteLine("Usage:");
+	Console.WriteLine("  wowviewer-inspect audio alpha-area --archive-root <game|data dir> [--build <version>] [--area-id <id>] [--search <text>] [--limit <n>] [--listfile <listfile.txt>]");
 	Console.WriteLine("  wowviewer-inspect archive build-listfile-cache --archive-root <game|data dir> --cache-key <client-build> [--listfile <listfile.txt>] [--cache-dir <directory>]");
 	Console.WriteLine("  wowviewer-inspect blp inspect --input <file.blp>");
 	Console.WriteLine("  wowviewer-inspect blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]");
@@ -3563,6 +3729,12 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
+}
+
+static void ShowAudioUsage()
+{
+	Console.WriteLine("Audio commands:");
+	Console.WriteLine("  audio alpha-area --archive-root <game|data dir> [--build <version>] [--area-id <id>] [--search <text>] [--limit <n>] [--listfile <listfile.txt>]");
 }
 
 static void ShowArchiveUsage()

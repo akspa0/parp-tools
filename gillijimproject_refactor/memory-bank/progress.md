@@ -1,5 +1,74 @@
 # Progress
 
+### Apr 21, 2026 - optimized v9 trainer now auto-resumes from run checkpoints and no longer hard-pauses at epoch 50 by default
+
+- what changed:
+	- updated `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9_optimized.py` to port the real resume path that already existed in `train_v9.py`
+	- the optimized trainer now:
+		- auto-loads `last_checkpoint.pt` from the active `--output-dir` when present
+		- still accepts explicit `--resume-from <checkpoint>`
+		- validates selected or train or val signatures plus key config fields before resuming
+		- continues from `start_epoch + 1` instead of restarting from epoch `1`
+	- changed the default pause policy:
+		- `--pause-every-epochs` now defaults to `0` instead of `50`
+		- new `--pause-on-stall-epochs` defaults to `50`, so the run now pauses only when the no-new-best stall counter first crosses that threshold
+	- updated `gillijimproject_refactor/docs/V9_Native_Terrain_Training_Guide.md` and `wow-viewer/docs/validation/direct-v9-training-setup.md` so the launch and resume guidance matches the code
+
+- validation:
+	- script-level logic inspection and parser-path verification in this chat
+	- focused runtime compilation/proof still pending; no full training rerun was executed in this chat
+
+- boundary:
+	- this fixes the misleading optimized-trainer resume surface and the unwanted fixed epoch-50 pause
+	- it does not yet prove an end-to-end resumed run on live training hardware in this chat
+
+### Apr 21, 2026 - reprioritized wow-viewer audio planning around Alpha 0.5.x MIDI/DLS restoration before later-era MCSE-first work
+
+- what changed:
+	- updated `wow-viewer/docs/architecture/audio-engine-plan-2026-04-21.md` so the first audio implementation lane is now Alpha-first instead of immediately treating later-era `MCSE` plus sound-entry resolution as the universal starting point
+	- the plan now records repo-local evidence that `0.5.3` audio needs its own first proof surface:
+		- `AreaTable` carries `MIDIAmbience` and `MIDIAmbienceUnderwater` in the early builds
+		- the checked-in `0.5.3` PDB dump exposes `AreaMIDIAmbiencesRec` with `DaySequence`, `NightSequence`, `DLSFile`, and `volume`
+		- existing reverse-engineering notes already document DirectMusic `.mid` plus `.dls` playback in `0.5.3`
+	- the new ordered lane is now:
+		- Alpha area MIDI/DLS discovery and inspect proof
+		- Alpha-aware `MCSE` reader and inspect proof
+		- later-era FMOD or sound-table resolution
+	- updated `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md` so the active shared-I/O continuation notes also call out Alpha audio restoration as a valid first proving lane beside Alpha world-format work
+
+- validation:
+	- planning-only slice; no build or runtime behavior changed
+	- continuity proof is that the audio plan and shared-I/O workflow note now reflect the same Alpha-first ordering the user requested
+
+- boundary:
+	- this still does not add Alpha DBC readers, `.mid` or `.dls` asset detection, `MCSE` payload parsing, or playback
+	- it changes the recommended next implementation slice so future work starts from the oldest recoverable audio path instead of later-era convenience seams
+
+### Apr 21, 2026 - added the first wow-viewer audio-engine planning note as a game-engine subsystem boundary
+
+- what changed:
+	- added `wow-viewer/docs/architecture/audio-engine-plan-2026-04-21.md` to define the first explicit audio-engine ownership lane for the game-engine side of `wow-viewer`
+	- the new plan anchors audio work to the existing runtime and shared-I/O seams instead of treating it as app-local glue:
+		- shared `MCSE` reader ownership in `WowViewer.Core` and `WowViewer.Core.IO`
+		- shared DBC or DB2 lookup ownership for world audio tables
+		- runtime audio scene, listener, and backend contracts in `WowViewer.Core.Runtime`
+		- `WowViewer.App` as the first diagnostics and bounded consumer host only
+	- the plan defines the recommended narrow sequence:
+		- `MCSE` reader plus inspect proof
+		- sound-table resolver layer
+		- runtime audio scene contracts
+		- null backend plus app diagnostics
+		- first desktop playback backend
+	- updated `wow-viewer/README.md` so the new architecture note is discoverable from the repo documentation map
+
+- validation:
+	- planning-only slice; no build or runtime behavior changed
+	- continuity proof is that the new audio-engine direction is now written down in repo-local architecture docs and linked from the wow-viewer README
+
+- boundary:
+	- this does not yet add `MCSE` parsing, DBC audio lookup readers, runtime audio state, or playback
+	- it sets the ownership and sequence for future game-engine audio work so later implementation slices can land directly in `wow-viewer`
+
 ### Apr 21, 2026 - moved the PM4-mixed v9 manifest split into wow-viewer converter ownership
 
 - what changed:

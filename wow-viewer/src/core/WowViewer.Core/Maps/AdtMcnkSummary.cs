@@ -19,10 +19,12 @@ public sealed class AdtMcnkSummary
         int chunksWithMcly,
         int chunksWithMcal,
         int chunksWithMcsh,
+        int chunksWithMcse,
         int chunksWithMccv,
         int chunksWithMclq,
         int chunksWithMcrd,
         int chunksWithMcrw,
+        int totalMcsePayloadBytes,
         int totalLayerCount,
         int maxLayerCount,
         int chunksWithMultipleLayers,
@@ -44,10 +46,12 @@ public sealed class AdtMcnkSummary
         ArgumentOutOfRangeException.ThrowIfNegative(chunksWithMcly);
         ArgumentOutOfRangeException.ThrowIfNegative(chunksWithMcal);
         ArgumentOutOfRangeException.ThrowIfNegative(chunksWithMcsh);
+        ArgumentOutOfRangeException.ThrowIfNegative(chunksWithMcse);
         ArgumentOutOfRangeException.ThrowIfNegative(chunksWithMccv);
         ArgumentOutOfRangeException.ThrowIfNegative(chunksWithMclq);
         ArgumentOutOfRangeException.ThrowIfNegative(chunksWithMcrd);
         ArgumentOutOfRangeException.ThrowIfNegative(chunksWithMcrw);
+        ArgumentOutOfRangeException.ThrowIfNegative(totalMcsePayloadBytes);
         ArgumentOutOfRangeException.ThrowIfNegative(totalLayerCount);
         ArgumentOutOfRangeException.ThrowIfNegative(maxLayerCount);
         ArgumentOutOfRangeException.ThrowIfNegative(chunksWithMultipleLayers);
@@ -70,10 +74,12 @@ public sealed class AdtMcnkSummary
         ChunksWithMcly = chunksWithMcly;
         ChunksWithMcal = chunksWithMcal;
         ChunksWithMcsh = chunksWithMcsh;
+        ChunksWithMcse = chunksWithMcse;
         ChunksWithMccv = chunksWithMccv;
         ChunksWithMclq = chunksWithMclq;
         ChunksWithMcrd = chunksWithMcrd;
         ChunksWithMcrw = chunksWithMcrw;
+        TotalMcsePayloadBytes = totalMcsePayloadBytes;
         TotalLayerCount = totalLayerCount;
         MaxLayerCount = maxLayerCount;
         ChunksWithMultipleLayers = chunksWithMultipleLayers;
@@ -113,6 +119,8 @@ public sealed class AdtMcnkSummary
 
     public int ChunksWithMcsh { get; }
 
+    public int ChunksWithMcse { get; }
+
     public int ChunksWithMccv { get; }
 
     public int ChunksWithMclq { get; }
@@ -120,6 +128,8 @@ public sealed class AdtMcnkSummary
     public int ChunksWithMcrd { get; }
 
     public int ChunksWithMcrw { get; }
+
+    public int TotalMcsePayloadBytes { get; }
 
     public int TotalLayerCount { get; }
 

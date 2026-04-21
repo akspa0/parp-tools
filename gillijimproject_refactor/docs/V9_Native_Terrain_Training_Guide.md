@@ -255,7 +255,7 @@ A normal optimized run writes these key outputs under its run directory:
 - `last_checkpoint.pt`
 - `previews/`
 
-`last_checkpoint.pt` carries the live training history and feature-contract metadata needed to inspect or resume the run.
+`last_checkpoint.pt` carries the live training history and feature-contract metadata needed to inspect or resume the run. The optimized trainer now auto-resumes from this file when you relaunch the same run with the same `--output-dir`.
 
 `best_model.pt` is the best checkpoint according to the active selection metric, which may be different from plain `val_loss`.
 
@@ -263,18 +263,33 @@ A normal optimized run writes these key outputs under its run directory:
 
 ## Resume Pattern
 
-Resume optimized training with the same cache manifest and output directory:
+Relaunch optimized training with the same cache manifest and output directory to auto-resume from `last_checkpoint.pt` when it exists:
 
 ```powershell
 & $PythonExe `
   (Join-Path $RepoRoot 'gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9_optimized.py') `
   $TrainingManifest `
   --output-dir $RunOutputDir `
-  --resume-from (Join-Path $RunOutputDir 'last_checkpoint.pt') `
   --epochs 120
 ```
 
+You can still override the checkpoint path explicitly with `--resume-from <path/to/last_checkpoint.pt>`.
+
 When resuming, keep the same selection metric and dev-eval manifest unless you are intentionally starting a different experiment.
+
+## Pause Behavior
+
+The optimized trainer no longer pauses every 50 epochs by default.
+
+Current defaults are:
+
+- `--pause-every-epochs 0`
+- `--pause-on-stall-epochs 50`
+
+That means the run keeps going through the requested epoch budget unless:
+
+- you enable periodic pauses explicitly, or
+- validation has failed to produce a new best checkpoint for `50` epochs and the trainer stops cleanly after writing `last_checkpoint.pt`
 
 ## Practical Success Criteria
 

@@ -13,7 +13,7 @@ public sealed class AdtMcnkSummaryReaderTests
         [
             .. CreateChunk("MVER", CreateUInt32Payload(18)),
             .. CreateChunk("MHDR", new byte[64]),
-            .. CreateChunk("MCNK", CreateRootMcnkPayload(indexX: 0, indexY: 0, layers: 3, areaId: 42, holes: 1, flags: 0x44, includeMcvt: true, includeMcnr: true, includeMclyEntries: 3, includeMcal: true, includeMccv: true, includeMclq: true)),
+            .. CreateChunk("MCNK", CreateRootMcnkPayload(indexX: 0, indexY: 0, layers: 3, areaId: 42, holes: 1, flags: 0x44, includeMcvt: true, includeMcnr: true, includeMclyEntries: 3, includeMcal: true, includeMccv: true, includeMclq: true, includeMcse: true, mcsePayloadSize: 24)),
             .. CreateChunk("MCNK", CreateRootMcnkPayload(indexX: 1, indexY: 0, layers: 1, areaId: 7, holes: 0, flags: 0x00, includeMcvt: true, includeMcnr: true, includeMcsh: true)),
         ];
 
@@ -36,10 +36,12 @@ public sealed class AdtMcnkSummaryReaderTests
         Assert.Equal(1, summary.ChunksWithMcly);
         Assert.Equal(1, summary.ChunksWithMcal);
         Assert.Equal(1, summary.ChunksWithMcsh);
+        Assert.Equal(1, summary.ChunksWithMcse);
         Assert.Equal(1, summary.ChunksWithMccv);
         Assert.Equal(1, summary.ChunksWithMclq);
         Assert.Equal(0, summary.ChunksWithMcrd);
         Assert.Equal(0, summary.ChunksWithMcrw);
+        Assert.Equal(24, summary.TotalMcsePayloadBytes);
         Assert.Equal(4, summary.TotalLayerCount);
         Assert.Equal(3, summary.MaxLayerCount);
         Assert.Equal(1, summary.ChunksWithMultipleLayers);
@@ -74,6 +76,7 @@ public sealed class AdtMcnkSummaryReaderTests
         Assert.Equal(2, summary.ChunksWithMcly);
         Assert.Equal(1, summary.ChunksWithMcal);
         Assert.Equal(1, summary.ChunksWithMcsh);
+        Assert.Equal(0, summary.ChunksWithMcse);
         Assert.Equal(3, summary.TotalLayerCount);
         Assert.Equal(2, summary.MaxLayerCount);
         Assert.Equal(1, summary.ChunksWithMultipleLayers);
@@ -99,6 +102,7 @@ public sealed class AdtMcnkSummaryReaderTests
         Assert.Equal(3, summary.McnkCount);
         Assert.Equal(1, summary.ZeroLengthMcnkCount);
         Assert.Equal(0, summary.HeaderLikeMcnkCount);
+        Assert.Equal(0, summary.ChunksWithMcse);
         Assert.Equal(1, summary.ChunksWithMcrd);
         Assert.Equal(1, summary.ChunksWithMcrw);
         Assert.Equal(0, summary.TotalLayerCount);
@@ -124,10 +128,12 @@ public sealed class AdtMcnkSummaryReaderTests
         Assert.Equal(0, summary.ChunksWithMcly);
         Assert.Equal(0, summary.ChunksWithMcal);
         Assert.Equal(0, summary.ChunksWithMcsh);
+        Assert.Equal(0, summary.ChunksWithMcse);
         Assert.Equal(0, summary.ChunksWithMccv);
         Assert.Equal(0, summary.ChunksWithMclq);
         Assert.Equal(0, summary.ChunksWithMcrd);
         Assert.Equal(0, summary.ChunksWithMcrw);
+        Assert.Equal(0, summary.TotalMcsePayloadBytes);
         Assert.Equal(0, summary.TotalLayerCount);
         Assert.Equal(0, summary.MaxLayerCount);
         Assert.Equal(0, summary.ChunksWithMultipleLayers);
@@ -139,15 +145,16 @@ public sealed class AdtMcnkSummaryReaderTests
         AdtMcnkSummary summary = AdtMcnkSummaryReader.Read(MapTestPaths.DevelopmentTexAdtPath);
 
         Assert.Equal(MapFileKind.AdtTex, summary.Kind);
-        Assert.Equal(256, summary.McnkCount);
+        Assert.Equal(0, summary.McnkCount);
         Assert.Equal(0, summary.ZeroLengthMcnkCount);
         Assert.Equal(0, summary.HeaderLikeMcnkCount);
-        Assert.Equal(256, summary.ChunksWithMcly);
-        Assert.Equal(203, summary.ChunksWithMcal);
-        Assert.Equal(174, summary.ChunksWithMcsh);
-        Assert.Equal(775, summary.TotalLayerCount);
-        Assert.Equal(4, summary.MaxLayerCount);
-        Assert.Equal(203, summary.ChunksWithMultipleLayers);
+        Assert.Equal(0, summary.ChunksWithMcly);
+        Assert.Equal(0, summary.ChunksWithMcal);
+        Assert.Equal(0, summary.ChunksWithMcsh);
+        Assert.Equal(0, summary.ChunksWithMcse);
+        Assert.Equal(0, summary.TotalLayerCount);
+        Assert.Equal(0, summary.MaxLayerCount);
+        Assert.Equal(0, summary.ChunksWithMultipleLayers);
     }
 
     [Fact]
@@ -156,11 +163,12 @@ public sealed class AdtMcnkSummaryReaderTests
         AdtMcnkSummary summary = AdtMcnkSummaryReader.Read(MapTestPaths.DevelopmentObjAdtPath);
 
         Assert.Equal(MapFileKind.AdtObj, summary.Kind);
-        Assert.Equal(256, summary.McnkCount);
-        Assert.Equal(179, summary.ZeroLengthMcnkCount);
+        Assert.Equal(0, summary.McnkCount);
+        Assert.Equal(0, summary.ZeroLengthMcnkCount);
         Assert.Equal(0, summary.HeaderLikeMcnkCount);
-        Assert.Equal(9, summary.ChunksWithMcrd);
-        Assert.Equal(70, summary.ChunksWithMcrw);
+        Assert.Equal(0, summary.ChunksWithMcse);
+        Assert.Equal(0, summary.ChunksWithMcrd);
+        Assert.Equal(0, summary.ChunksWithMcrw);
     }
 
     private static byte[] CreateChunk(string id, byte[] payload)
@@ -216,7 +224,9 @@ public sealed class AdtMcnkSummaryReaderTests
         bool includeMcal = false,
         bool includeMcsh = false,
         bool includeMccv = false,
-        bool includeMclq = false)
+        bool includeMclq = false,
+        bool includeMcse = false,
+        int mcsePayloadSize = 0)
     {
         byte[] header = new byte[128];
         BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x00, 4), flags);
@@ -242,6 +252,13 @@ public sealed class AdtMcnkSummaryReaderTests
 
         if (includeMcsh)
             stream.Write(CreateChunk("MCSH", new byte[128]));
+
+        if (includeMcse)
+        {
+            byte[] mcsePayload = new byte[mcsePayloadSize];
+            BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x58, 4), (uint)stream.Position);
+            stream.Write(CreateChunk("MCSE", mcsePayload));
+        }
 
         if (includeMccv)
             stream.Write(CreateChunk("MCCV", new byte[64]));

@@ -117,7 +117,8 @@ DEFAULT_DETAIL_FOCUS_STALL_THRESHOLD = 24
 DEFAULT_DETAIL_FOCUS_TOP_FRACTION = 0.35
 DEFAULT_DETAIL_FOCUS_GRADIENT_WEIGHT = 0.40
 DEFAULT_DETAIL_FOCUS_DETAIL_RESIDUAL_WEIGHT = 0.12
-DEFAULT_PAUSE_EVERY_EPOCHS = 50
+DEFAULT_PAUSE_EVERY_EPOCHS = 0
+DEFAULT_PAUSE_ON_STALL_EPOCHS = 50
 DEFAULT_PREVIEW_EVERY_EPOCHS = 10
 DEFAULT_PREVIEW_ARCHIVE_EVERY_EPOCHS = 10
 DEFAULT_LR_PLATEAU_PATIENCE = 20
@@ -1414,6 +1415,78 @@ def build_training_checkpoint(
     }
 
 
+def load_resume_state(
+    *,
+    checkpoint_path: Path,
+    args: argparse.Namespace,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
+    selected_entries: Sequence[V9SampleEntry],
+    train_entries: Sequence[V9SampleEntry],
+    val_entries: Sequence[V9SampleEntry],
+    device: torch.device,
+) -> dict[str, Any]:
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint["model"])
+    optimizer.load_state_dict(checkpoint["optimizer"])
+    scheduler.load_state_dict(checkpoint["scheduler"])
+
+    selected_signature = build_entry_signature(selected_entries)
+    train_signature = build_entry_signature(train_entries)
+    val_signature = build_entry_signature(val_entries)
+    if checkpoint.get("selected_signature") != selected_signature:
+        raise SystemExit("Resume checkpoint selected sample signature does not match the current run inputs.")
+    if checkpoint.get("train_signature") != train_signature:
+        raise SystemExit("Resume checkpoint train split does not match the current run inputs.")
+    if checkpoint.get("val_signature") != val_signature:
+        raise SystemExit("Resume checkpoint validation split does not match the current run inputs.")
+
+    saved_config = dict(checkpoint.get("config", {}))
+    for key in (
+        "batch_size",
+        "learning_rate",
+        "val_fraction",
+        "seed",
+        "height_scale",
+        "residual_scale",
+        "group_block_size",
+        "hidden_channels",
+        "blocks_per_stage",
+        "curation_mode",
+        "curation_diversity_block_size",
+        "curation_max_per_group",
+        "selection_metric",
+        "dev_eval_cache_manifest",
+        "dev_eval_limit",
+        "dev_eval_every",
+        "dev_eval_block_size",
+        "disable_brush_mask",
+        "detail_focus_every_epochs",
+        "detail_focus_min_epoch",
+        "detail_focus_stall_threshold",
+        "detail_focus_top_fraction",
+        "detail_focus_gradient_weight",
+        "detail_focus_detail_residual_weight",
+    ):
+        if key in saved_config and getattr(args, key) != saved_config[key]:
+            raise SystemExit(
+                f"Resume checkpoint config mismatch for '{key}': "
+                f"current={getattr(args, key)!r} saved={saved_config[key]!r}"
+            )
+
+    return {
+        "history": list(checkpoint.get("history", [])),
+        "start_epoch": int(checkpoint.get("epoch", 0)),
+        "best_val_loss": float(checkpoint.get("best_val_loss", math.inf)),
+        "best_val_epoch": int(checkpoint.get("best_val_epoch", 0)),
+        "best_selection_metric_name": str(checkpoint.get("best_selection_metric_name", "val_loss")),
+        "best_selection_metric_value": float(checkpoint.get("best_selection_metric_value", math.inf)),
+        "best_epoch": int(checkpoint.get("best_epoch", 0)),
+        "epochs_since_best": int(checkpoint.get("epochs_since_best", 0)),
+    }
+
+
 def resolve_selection_metric_name(args: argparse.Namespace) -> str:
     if getattr(args, "selection_metric", "auto") != "auto":
         return str(getattr(args, "selection_metric", "val_loss"))
@@ -1929,9 +2002,43 @@ def train_single_run(
     best_epoch = 0
     best_state: Optional[dict[str, Any]] = None
     epochs_since_best = 0
+    start_epoch = 0
+    resumed_from: str | None = None
+    stop_reason = "completed_requested_epochs"
     sample_loss_ema: dict[str, float] = {}
 
     run_output_dir = output_dir
+    last_checkpoint_path = run_output_dir / "last_checkpoint.pt"
+
+    resume_path: Path | None = None
+    if args.resume_from:
+        resume_path = Path(args.resume_from)
+        if not resume_path.exists():
+            raise SystemExit(f"Resume checkpoint does not exist: {resume_path}")
+    elif last_checkpoint_path.exists():
+        resume_path = last_checkpoint_path
+
+    if resume_path is not None:
+        resume_state = load_resume_state(
+            checkpoint_path=resume_path,
+            args=args,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            selected_entries=selected_entries,
+            train_entries=train_entries,
+            val_entries=val_entries,
+            device=device,
+        )
+        history = resume_state["history"]
+        start_epoch = int(resume_state["start_epoch"])
+        best_val_loss = float(resume_state["best_val_loss"])
+        selection_metric_name = str(resume_state["best_selection_metric_name"])
+        best_selection_metric_value = float(resume_state["best_selection_metric_value"])
+        best_epoch = int(resume_state["best_epoch"])
+        epochs_since_best = int(resume_state["epochs_since_best"])
+        has_ready_selection_metric = selection_metric_name == "val_loss" or math.isfinite(best_selection_metric_value)
+        resumed_from = str(resume_path)
 
     print(
         f"Training V9 (optimized) | epochs={args.epochs} | batch={args.batch_size} | lr={args.learning_rate:.2e} | "
@@ -1942,8 +2049,17 @@ def train_single_run(
         f"Dataset split | train_samples={len(train_entries)} | val_samples={len(val_entries)} ({len(val_loader)} val batch(es))"
     )
     print(describe_v9_input_stack(args))
+    if resumed_from is not None:
+        print(f"Resuming from checkpoint | path={resumed_from} | start_epoch={start_epoch + 1} | best {best_val_loss:.6f}@{best_epoch}")
 
-    for epoch in range(1, args.epochs + 1):
+    if start_epoch >= args.epochs:
+        print(
+            f"Resume checkpoint is already at epoch {start_epoch}, which meets or exceeds requested epochs={args.epochs}; "
+            "skipping training."
+        )
+        stop_reason = "resume_checkpoint_already_complete"
+
+    for epoch in range(start_epoch + 1, args.epochs + 1):
         args.current_stall = epochs_since_best
         train_loader, detail_focus_active = build_train_loader(train_dataset, train_entries, args, device, epoch, sample_loss_ema)
 
@@ -2027,6 +2143,7 @@ def train_single_run(
         history.append(epoch_record)
 
         previous_best = best_val_loss
+        previous_stall = epochs_since_best
         selection_metric_value, selection_metric_higher_is_better, selection_metric_ready = resolve_selection_metric(
             selection_metric_name=selection_metric_name,
             val_loss=val_loss,
@@ -2132,7 +2249,7 @@ def train_single_run(
                 train_entries=train_entries,
                 val_entries=val_entries,
             ),
-            run_output_dir / "last_checkpoint.pt",
+            last_checkpoint_path,
         )
 
         if epoch >= args.early_stop_min_epochs and epochs_since_best >= args.early_stop_patience:
@@ -2140,13 +2257,28 @@ def train_single_run(
                 f"  early stop: no new best for {epochs_since_best} epoch(s) after epoch {best_epoch}; "
                 f"best val remained {best_val_loss:.6f}"
             )
+            stop_reason = "early_stop_no_new_best"
             break
 
         if args.pause_every_epochs > 0 and epoch < args.epochs and epoch % args.pause_every_epochs == 0:
             print(
                 f"  pause checkpoint: reached epoch {epoch}; review previews and metrics, then resume with "
-                f"--resume-from {run_output_dir / 'last_checkpoint.pt'} --epochs {args.epochs}"
+                f"--resume-from {last_checkpoint_path} --epochs {args.epochs}"
             )
+            stop_reason = "pause_periodic_checkpoint"
+            break
+
+        if (
+            args.pause_on_stall_epochs > 0
+            and epoch < args.epochs
+            and previous_stall < args.pause_on_stall_epochs
+            and epochs_since_best >= args.pause_on_stall_epochs
+        ):
+            print(
+                f"  pause checkpoint: no new best for {epochs_since_best} epoch(s) since epoch {best_epoch}; "
+                f"review metrics, then resume with --resume-from {last_checkpoint_path} --epochs {args.epochs}"
+            )
+            stop_reason = "pause_stall_threshold"
             break
 
     run_summary = {
@@ -2161,11 +2293,12 @@ def train_single_run(
         "final_epoch": history[-1]["epoch"] if history else 1,
         "best_val_loss": best_val_loss,
         "best_epoch": best_epoch,
-        "stop_reason": "completed",
+        "stop_reason": stop_reason,
         "config": vars(args),
         "preview_count": args.preview_count,
         "final_learning_rate": float(optimizer.param_groups[0]["lr"]),
         "feature_contract": build_v9_feature_contract(args),
+        "resumed_from": resumed_from,
     }
     write_json(run_output_dir / "run_summary.json", run_summary)
     if best_state is not None:
@@ -2246,7 +2379,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-learning-rate", type=float, default=DEFAULT_MIN_LEARNING_RATE)
     parser.add_argument("--early-stop-patience", type=int, default=DEFAULT_EARLY_STOP_PATIENCE)
     parser.add_argument("--early-stop-min-epochs", type=int, default=DEFAULT_EARLY_STOP_MIN_EPOCHS)
-    parser.add_argument("--pause-every-epochs", type=int, default=DEFAULT_PAUSE_EVERY_EPOCHS)
+    parser.add_argument(
+        "--pause-every-epochs",
+        type=int,
+        default=DEFAULT_PAUSE_EVERY_EPOCHS,
+        help="Write a normal checkpoint and stop cleanly every N epochs. Default: disabled (0).",
+    )
+    parser.add_argument(
+        "--pause-on-stall-epochs",
+        type=int,
+        default=DEFAULT_PAUSE_ON_STALL_EPOCHS,
+        help="Write a normal checkpoint and stop cleanly when epochs-without-best first reaches this threshold. Set 0 to disable stall-triggered pauses.",
+    )
     parser.add_argument("--dev-eval-cache-manifest", type=str, default=None)
     parser.add_argument("--dev-eval-limit", type=int, default=None)
     parser.add_argument("--dev-eval-block-size", type=int, default=DEFAULT_DEV_EVAL_BLOCK_SIZE)
@@ -2283,6 +2427,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_arg_parser()
     args = parser.parse_args()
+
+    if args.epochs < 1:
+        raise SystemExit("--epochs must be at least 1.")
+    if args.pause_every_epochs < 0:
+        raise SystemExit("--pause-every-epochs must be 0 or greater.")
+    if args.pause_on_stall_epochs < 0:
+        raise SystemExit("--pause-on-stall-epochs must be 0 or greater.")
 
     # Handle --no-channels-last override
     if args.no_channels_last:

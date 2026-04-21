@@ -21,6 +21,7 @@ public static class AdtMcnkSummaryReader
         AdtChunkIds.Mcly,
         AdtChunkIds.Mcal,
         AdtChunkIds.Mcsh,
+        AdtChunkIds.Mcse,
         AdtChunkIds.Mccv,
         AdtChunkIds.Mclq,
         AdtChunkIds.Mcrd,
@@ -59,10 +60,12 @@ public static class AdtMcnkSummaryReader
         int chunksWithMcly = 0;
         int chunksWithMcal = 0;
         int chunksWithMcsh = 0;
+        int chunksWithMcse = 0;
         int chunksWithMccv = 0;
         int chunksWithMclq = 0;
         int chunksWithMcrd = 0;
         int chunksWithMcrw = 0;
+        int totalMcsePayloadBytes = 0;
         int totalLayerCount = 0;
         int maxLayerCount = 0;
         int chunksWithMultipleLayers = 0;
@@ -124,6 +127,12 @@ public static class AdtMcnkSummaryReader
             if (signals.HasMcsh)
                 chunksWithMcsh++;
 
+            if (signals.HasMcse)
+            {
+                chunksWithMcse++;
+                totalMcsePayloadBytes += signals.McsePayloadBytes;
+            }
+
             if (signals.HasMccv)
                 chunksWithMccv++;
 
@@ -166,10 +175,12 @@ public static class AdtMcnkSummaryReader
             chunksWithMcly,
             chunksWithMcal,
             chunksWithMcsh,
+            chunksWithMcse,
             chunksWithMccv,
             chunksWithMclq,
             chunksWithMcrd,
             chunksWithMcrw,
+            totalMcsePayloadBytes,
             totalLayerCount,
             maxLayerCount,
             chunksWithMultipleLayers,
@@ -210,6 +221,14 @@ public static class AdtMcnkSummaryReader
                 signals.HasMcal = true;
             else if (header.Id == AdtChunkIds.Mcsh)
                 signals.HasMcsh = true;
+            else if (header.Id == AdtChunkIds.Mcse)
+            {
+                if (consumedSize > 0)
+                {
+                    signals.HasMcse = true;
+                    signals.McsePayloadBytes += consumedSize;
+                }
+            }
             else if (header.Id == AdtChunkIds.Mccv)
                 signals.HasMccv = true;
             else if (header.Id == AdtChunkIds.Mclq)
@@ -232,10 +251,12 @@ public static class AdtMcnkSummaryReader
         public bool HasMcly;
         public bool HasMcal;
         public bool HasMcsh;
+        public bool HasMcse;
         public bool HasMccv;
         public bool HasMclq;
         public bool HasMcrd;
         public bool HasMcrw;
+        public int McsePayloadBytes;
         public int LayerCount;
     }
 }

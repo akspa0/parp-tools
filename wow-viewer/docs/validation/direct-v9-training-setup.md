@@ -189,14 +189,13 @@ Use the full sane pool when you want the PM4-bearing development tiles guarantee
 
 ## 6. Resume A Paused Or Interrupted Optimized Run
 
-If the optimized run stops after writing a normal checkpoint, resume from `last_checkpoint.pt`:
+If the optimized run stops after writing a normal checkpoint, rerun the same command with the same output directory. The optimized trainer now auto-resumes from `last_checkpoint.pt` when it finds one there:
 
 ```powershell
 & $PythonExe `
   (Join-Path $RepoRoot 'gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9_optimized.py') `
   (Join-Path $OutputRoot 'v9_direct_plus_devpm4_split/v9_direct_plus_development_pm4_training_manifest.json') `
   --output-dir (Join-Path $OutputRoot 'runs/v9_pm4mix_fullsane') `
-  --resume-from (Join-Path $OutputRoot 'runs/v9_pm4mix_fullsane/last_checkpoint.pt') `
   --epochs 120 `
   --batch-size 4 `
   --selection-metric dev_global_mae `
@@ -204,6 +203,17 @@ If the optimized run stops after writing a normal checkpoint, resume from `last_
   --no-require-minimap `
   --no-require-wdl
 ```
+
+If you want to point at a different checkpoint path explicitly, add:
+
+```powershell
+  --resume-from (Join-Path $OutputRoot 'runs/v9_pm4mix_fullsane/last_checkpoint.pt')
+```
+
+Current pause behavior:
+
+- the optimized trainer does not stop at epoch 50 by default anymore
+- it defaults to `--pause-on-stall-epochs 50`, which means it will checkpoint and stop cleanly only after crossing `50` epochs without a new best result
 
 ## What To Check In Logs
 
