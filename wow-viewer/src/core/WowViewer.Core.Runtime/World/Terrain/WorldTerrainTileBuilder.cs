@@ -12,22 +12,24 @@ public static class WorldTerrainTileBuilder
     private const int RootMcnkHeaderSize = 128;
     private const int RootMcnkSubchunkOffset = 0x80;
     private const int McnrConsumedSize = 0x1C0;
+    private const int McinEntrySize = 16;
+    private const int ExpectedChunkCount = 256;
     private const int TileHeightmapSize = 257;
     private const int HalfStepsPerChunk = 16;
     private const int McvtSampleCount = 145;
     private const uint LiquidFlagMask = 0x3Cu;
     private const uint VertexColorFlagMask = 0x40u;
 
-    public static WorldTerrainTileData Read(string path)
+    public static WorldTerrainTileData Read(string path, bool applyBaseHeightOffset = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         using FileStream stream = File.OpenRead(path);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, Path.GetFullPath(path));
-        return Read(stream, fileSummary);
+        return Read(stream, fileSummary, applyBaseHeightOffset);
     }
 
-    public static WorldTerrainTileData Read(Stream stream, MapFileSummary fileSummary)
+    public static WorldTerrainTileData Read(Stream stream, MapFileSummary fileSummary, bool applyBaseHeightOffset = true)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(fileSummary);
@@ -35,13 +37,11 @@ public static class WorldTerrainTileBuilder
         if (fileSummary.Kind != MapFileKind.Adt)
             throw new InvalidDataException($"World terrain tile builder requires a root ADT file, but found {fileSummary.Kind}.");
 
-        List<WorldTerrainChunkData> chunks = new(fileSummary.CountChunks(MapChunkIds.Mcnk));
+        IReadOnlyList<MapChunkLocation> terrainChunkLocations = ResolveTerrainChunkLocations(stream, fileSummary);
+        List<WorldTerrainChunkData> chunks = new(terrainChunkLocations.Count);
         int chunkOrdinal = 0;
-        foreach (MapChunkLocation chunk in fileSummary.Chunks)
+        foreach (MapChunkLocation chunk in terrainChunkLocations)
         {
-            if (chunk.Id != MapChunkIds.Mcnk)
-                continue;
-
             byte[] payload = ReadChunkPayload(stream, chunk);
             if (payload.Length < RootMcnkHeaderSize)
             {
@@ -55,8 +55,8 @@ public static class WorldTerrainTileBuilder
             int layerCount = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x0C, 4)));
             uint areaId = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x34, 4));
             ushort holes = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(0x3C, 2));
-            float baseHeight = BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan(0x68, 4));
-            float[]? heights = TryReadMcvtHeights(payload, baseHeight);
+            float baseHeight = BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan(0x70, 4));
+            float[]? heights = TryReadMcvtHeights(payload, baseHeight, applyBaseHeightOffset);
 
             chunks.Add(new WorldTerrainChunkData(
                 chunkOrdinal,
@@ -75,6 +75,67 @@ public static class WorldTerrainTileBuilder
         return new WorldTerrainTileData(fileSummary.SourcePath, fileSummary.Kind, chunks, BuildHeightmap(chunks));
     }
 
+    private static IReadOnlyList<MapChunkLocation> ResolveTerrainChunkLocations(Stream stream, MapFileSummary fileSummary)
+    {
+        List<MapChunkLocation> topLevelChunks = fileSummary.Chunks
+            .Where(static chunk => chunk.Id == MapChunkIds.Mcnk)
+            .ToList();
+
+        if (topLevelChunks.Count >= ExpectedChunkCount || !fileSummary.HasChunk(MapChunkIds.Mcin))
+            return topLevelChunks;
+
+        MapChunkLocation mcinChunk = fileSummary.Chunks.First(chunk => chunk.Id == MapChunkIds.Mcin);
+        byte[] mcinPayload = ReadChunkPayload(stream, mcinChunk);
+        if (mcinPayload.Length < McinEntrySize)
+            return topLevelChunks;
+
+        List<MapChunkLocation> resolvedChunks = new(ExpectedChunkCount);
+        for (int index = 0; index < ExpectedChunkCount && ((index + 1) * McinEntrySize) <= mcinPayload.Length; index++)
+        {
+            int entryOffset = index * McinEntrySize;
+            uint chunkOffset = BinaryPrimitives.ReadUInt32LittleEndian(mcinPayload.AsSpan(entryOffset, 4));
+            if (chunkOffset == 0)
+                continue;
+
+            long headerOffset = chunkOffset;
+            if (!TryReadChunkHeader(stream, headerOffset, out ChunkHeader header))
+                continue;
+
+            if (header.Id != MapChunkIds.Mcnk || header.Size < RootMcnkHeaderSize)
+                continue;
+
+            long dataOffset = headerOffset + ChunkHeader.SizeInBytes;
+            if (dataOffset > stream.Length || dataOffset + header.Size > stream.Length)
+                continue;
+
+            resolvedChunks.Add(new MapChunkLocation(MapChunkIds.Mcnk, header.Size, headerOffset, dataOffset));
+        }
+
+        return resolvedChunks.Count > topLevelChunks.Count ? resolvedChunks : topLevelChunks;
+    }
+
+    private static bool TryReadChunkHeader(Stream stream, long headerOffset, out ChunkHeader header)
+    {
+        long previousPosition = stream.Position;
+        try
+        {
+            if (headerOffset < 0 || headerOffset > stream.Length - ChunkHeader.SizeInBytes)
+            {
+                header = default;
+                return false;
+            }
+
+            Span<byte> headerBytes = stackalloc byte[ChunkHeader.SizeInBytes];
+            stream.Position = headerOffset;
+            stream.ReadExactly(headerBytes);
+            return ChunkHeaderReader.TryRead(headerBytes, out header);
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
     private static byte[] ReadChunkPayload(Stream stream, MapChunkLocation chunk)
     {
         long previousPosition = stream.Position;
@@ -91,7 +152,7 @@ public static class WorldTerrainTileBuilder
         }
     }
 
-    private static float[]? TryReadMcvtHeights(byte[] payload, float baseHeight)
+    private static float[]? TryReadMcvtHeights(byte[] payload, float baseHeight, bool applyBaseHeightOffset)
     {
         int position = RootMcnkSubchunkOffset;
         while (position <= payload.Length - ChunkHeader.SizeInBytes)
@@ -115,7 +176,10 @@ public static class WorldTerrainTileBuilder
                 int dataOffset = position + ChunkHeader.SizeInBytes;
                 float[] heights = new float[McvtSampleCount];
                 for (int index = 0; index < heights.Length; index++)
-                    heights[index] = baseHeight + BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan(dataOffset + (index * sizeof(float)), sizeof(float)));
+                {
+                    float rawHeight = BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan(dataOffset + (index * sizeof(float)), sizeof(float)));
+                    heights[index] = applyBaseHeightOffset ? baseHeight + rawHeight : rawHeight;
+                }
 
                 return heights;
             }
