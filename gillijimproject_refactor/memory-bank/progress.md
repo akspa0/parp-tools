@@ -1,5 +1,23 @@
 # Progress
 
+### Apr 21, 2026 - moved the PM4-mixed v9 manifest split into wow-viewer converter ownership
+
+- what changed:
+	- added `WowViewer.Tool.Converter dataset-split-pm4 --direct-manifest <cache.json> --development-manifest <cache.json> --output-dir <dir>` as the converter-owned command for splitting PM4-bearing development entries into a training subset and a non-overlapping holdout, then merging the PM4 subset into the direct training manifest
+	- removed the temporary Python helper so the documented PM4 split workflow no longer depends on a side script outside `wow-viewer`
+	- added `gillijimproject_refactor/docs/V9_Native_Terrain_Training_Guide.md` as the current architecture and user guide for the `v9` native terrain model, including input contract, output targets, loss stack, training workflow, and expected post-training behavior
+	- updated `wow-viewer/docs/validation/direct-v9-training-setup.md` to document the real current PM4-mixed path: build the direct cache with the wrapper, build the development compatibility cache separately, split PM4-bearing tiles into training with the converter command, and launch `train_v9_optimized.py` directly
+	- updated the root README surfaces so new contributors land on the `v9` docs before the older general VLM guide
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed after adding `dataset-split-pm4`
+	- bounded converter smoke against the current real manifests reproduced the known split counts: `97` PM4-bearing development entries, `177` non-PM4 development holdout entries, and `3978` merged training entries
+	- editor diagnostics reported no errors in the updated Markdown files
+
+- boundary:
+	- the PM4 split is now a first-class `wow-viewer` converter command, but the wrapper does not invoke it automatically yet
+	- `wow-viewer/scripts/run_v9_direct_pipeline.ps1` still launches `train_v9.py` in `train` mode, so the optimized PM4-mixed branch remains a documented hybrid path rather than a one-command wrapper flow
+
 ### Apr 21, 2026 - taught the uv training bootstrap to install triton-windows for Windows CUDA environments
 
 - what changed:

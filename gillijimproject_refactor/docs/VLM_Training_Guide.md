@@ -23,6 +23,15 @@ Practical rules:
 
 This repo currently has two different model stories that should be documented separately.
 
+### V9 Native Terrain Line
+
+- active native terrain reconstruction path
+- broad main corpus comes from the `wow-viewer` direct shared-reader cache flow
+- development-map compatibility cache still supplies the current PM4-rich and object-rich supervision seam
+- current best-understood branch uses `train_v9_optimized.py` with a separate non-overlapping development holdout for checkpoint selection
+- documented in `docs/V9_Native_Terrain_Training_Guide.md`
+- direct cache setup and wrapper boundaries documented in `../../wow-viewer/docs/validation/direct-v9-training-setup.md`
+
 ### V7.5.1 Terrain Line
 
 - active grounded terrain-regression path
@@ -43,6 +52,8 @@ This repo currently has two different model stories that should be documented se
 - **Windows**: (Linux works too but this guide focuses on Windows).
 - **CUDA**: Version 12.1 or higher (Unsloth supports up to 12.4/13.0).
 - **Python**: 3.10 or 3.11.
+
+For the current native `v9` line on Windows CUDA, prefer the dedicated bootstrap documented here and in `scripts/setup_training_env.ps1`. The current bootstrap also installs `triton-windows` so `torch.compile` remains available in the optimized trainer.
 
 ## 1. Environment Setup
 

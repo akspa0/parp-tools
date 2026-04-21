@@ -148,8 +148,9 @@ That document covers:
 
 - staging BYOD client roots locally for repeated scans
 - building the direct training cache from real game data with `run_v9_direct_pipeline.ps1`
-- building a separate development-map dev-eval cache
-- launching `train_v9.py` with the direct cache as the main corpus and the development cache as the holdout
+- building a separate development-map compatibility cache
+- splitting PM4-bearing development entries into a training subset and a non-overlapping holdout with `WowViewer.Tool.Converter dataset-split-pm4`
+- launching `train_v9_optimized.py` with the merged corpus and the non-PM4 development holdout
 
 ## Repository Layout
 

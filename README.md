@@ -155,11 +155,15 @@ If you need exact validation status for a recent viewer or terrain change, check
 
 Start with these files:
 
+- `gillijimproject_refactor/docs/V9_Native_Terrain_Training_Guide.md`
+- `wow-viewer/docs/validation/direct-v9-training-setup.md`
 - `gillijimproject_refactor/README.md`
 - `gillijimproject_refactor/src/MdxViewer/README.md`
 - `gillijimproject_refactor/memory-bank/activeContext.md`
 - `gillijimproject_refactor/memory-bank/progress.md`
 - `gillijimproject_refactor/memory-bank/data-paths.md`
+
+If you are coming here for terrain-model training or dataset generation, start with the two `v9` documents above before falling back to the older general VLM guide.
 
 Those files are more current and more precise than older scattered notes elsewhere in the repository.
 

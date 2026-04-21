@@ -8,8 +8,15 @@ The working shape today is:
 
 1. Stage archive-backed game clients locally.
 2. Build the main training cache from real game roots with `wow-viewer/scripts/run_v9_direct_pipeline.ps1`.
-3. Build a separate development-map dev-eval cache from `datasets/original_development/development`.
-4. Train `train_v9.py` with the direct cache as the main corpus and the development-map cache as the stable holdout used for checkpoint selection.
+3. Build a separate development-map compatibility cache from `datasets/original_development/development`.
+4. Split that development cache into PM4-bearing training additions and a non-overlapping development holdout.
+5. Train `train_v9_optimized.py` with the merged corpus and the non-PM4 development holdout.
+
+Important boundary:
+
+- the direct wrapper is still the canonical way to build the main direct cache
+- the wrapper still launches `train_v9.py` by default
+- the current recommended PM4-mixed branch uses the wrapper for cache generation, then launches `train_v9_optimized.py` directly for the actual training run
 
 This stays Bring Your Own Data. Do not ship client data, generated corpora, model weights, or model outputs derived from proprietary data.
 
@@ -76,7 +83,7 @@ foreach ($pair in $pairs) {
 
 If one build is not present under your archive mount, replace that `Source` with any equivalent local BYOD client copy. The important requirement is the build content, not the exact folder layout used above.
 
-## 2. Build The Development-Map Dev-Eval Cache
+## 2. Build The Development-Map Compatibility Cache
 
 The development map is still a compatibility-fed validation surface, so build its cache with the legacy compatibility builder rather than pretending it is already part of the direct client-root pipeline.
 
@@ -97,51 +104,103 @@ Expected output manifest:
 <output-root>/v9_dev_eval_original_development/v9_tensor_cache_manifest.json
 ```
 
-That cache is the recommended held-out validation dataset for direct `v9` runs until the development-map path itself has a first-class direct shared-reader training flow.
+That cache is the development-map compatibility source used for both of these roles:
 
-## 3. Launch Direct Training
+- extracting PM4-bearing development tiles that should enter active training
+- extracting a separate non-overlapping development holdout for checkpoint selection
 
-Use the direct `wow-viewer` wrapper for the main training cache so the corpus still comes from real game roots.
+## 3. Build The Main Direct Cache
+
+Use the direct `wow-viewer` wrapper for the main training cache so the broad corpus still comes from real game roots.
 
 ```powershell
 & (Join-Path $RepoRoot 'wow-viewer/scripts/run_v9_direct_pipeline.ps1') `
-  -Mode train `
+  -Mode audit `
   -WowArchiveOnly `
   -IncludeBuilds 0_5_3_3368,0_5_5_3494,0_7_0_3694,3_0_1_8303,3_3_5_12340,4_0_0_11927 `
   -NoRequireMinimap `
   -NoRequireWdl `
-  -OutputDir (Join-Path $OutputRoot 'v9_direct_archive_core') `
-  -TrainerArgs @(
-      '--epochs','120',
-      '--batch-size','8',
-      '--target-curated-samples','128',
-      '--selection-metric','dev_global_mae',
-      '--dev-eval-cache-manifest',(Join-Path $OutputRoot 'v9_dev_eval_original_development/v9_tensor_cache_manifest.json'),
-      '--pause-every-epochs','0'
-  )
+  -OutputDir (Join-Path $OutputRoot 'v9_direct_archive_core')
 ```
 
-Why this launch shape:
+Why this cache shape:
 
 - `3_0_1_8303` is explicit so `Northrend` is guaranteed to enter the corpus.
 - `4_0_0_11927` is explicit because it is from the same era as the development map and still carries map-family data the reconstruction model needs.
-- `--selection-metric dev_global_mae` makes the development-map holdout decide best-checkpoint selection instead of raw train or validation loss alone.
 - `-NoRequireMinimap -NoRequireWdl` keeps the current known early-build gating boundary explicit while the direct dataset path continues to mature.
+- `-Mode audit` is used here because the wrapper currently has only `audit` and `train` modes; `audit` still performs scan, merge, audit, curate, and cache build, then stops after a trainer audit pass instead of launching the long run.
 
-## 4. Resume A Paused Or Interrupted Run
+Expected direct output manifest:
 
-If you keep periodic pauses enabled, or if the run stops after writing a normal checkpoint, resume from `last_checkpoint.pt`:
+```text
+<output-root>/v9_direct_archive_core/cache/v9_tensor_cache_manifest.json
+```
+
+## 4. Compose The PM4-Mixed Training And Holdout Manifests
+
+The current recommended `v9` branch does not leave the full development cache entirely outside training.
+
+Instead it does this:
+
+- all development entries with non-zero `pm4_mask_257` enter the training corpus
+- the remaining non-PM4 development entries become the dev-eval holdout
+
+Use the converter-native split command:
+
+```powershell
+$DirectManifest = Join-Path $OutputRoot 'v9_direct_archive_core/cache/v9_tensor_cache_manifest.json'
+$DevManifest = Join-Path $OutputRoot 'v9_dev_eval_original_development/v9_tensor_cache_manifest.json'
+$SplitDir = Join-Path $OutputRoot 'v9_direct_plus_devpm4_split'
+
+dotnet run --project (Join-Path $RepoRoot 'wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj') -- `
+  dataset-split-pm4 `
+  --direct-manifest $DirectManifest `
+  --development-manifest $DevManifest `
+  --output-dir $SplitDir
+```
+
+This is the current practical answer to the data-shape mismatch between the broad direct corpus and the PM4-rich development tiles, and it now lives inside `wow-viewer` instead of a side Python helper.
+
+## 5. Launch The Recommended PM4-Mixed Training Branch
+
+Launch the optimized trainer directly against the merged manifest.
 
 ```powershell
 & $PythonExe `
-  (Join-Path $RepoRoot 'gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9.py') `
-  (Join-Path $OutputRoot 'v9_direct_archive_core/cache/v9_tensor_cache_manifest.json') `
-  --output-dir (Join-Path $OutputRoot 'v9_direct_archive_core/train') `
-  --resume-from (Join-Path $OutputRoot 'v9_direct_archive_core/train/last_checkpoint.pt') `
+  (Join-Path $RepoRoot 'gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9_optimized.py') `
+  (Join-Path $OutputRoot 'v9_direct_plus_devpm4_split/v9_direct_plus_development_pm4_training_manifest.json') `
+  --output-dir (Join-Path $OutputRoot 'runs/v9_pm4mix_fullsane') `
   --epochs 120 `
-  --batch-size 8 `
+  --batch-size 4 `
+  --train-workers 1 `
+  --val-workers 1 `
+  --use-compile true `
   --selection-metric dev_global_mae `
-  --dev-eval-cache-manifest (Join-Path $OutputRoot 'v9_dev_eval_original_development/v9_tensor_cache_manifest.json') `
+  --dev-eval-cache-manifest (Join-Path $OutputRoot 'v9_direct_plus_devpm4_split/v9_development_non_pm4_holdout_manifest.json')
+```
+
+Optional bounded run:
+
+```powershell
+  --target-curated-samples 1200
+```
+
+Use the full sane pool when you want the PM4-bearing development tiles guaranteed to stay in active training without extra curation pressure.
+
+## 6. Resume A Paused Or Interrupted Optimized Run
+
+If the optimized run stops after writing a normal checkpoint, resume from `last_checkpoint.pt`:
+
+```powershell
+& $PythonExe `
+  (Join-Path $RepoRoot 'gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9_optimized.py') `
+  (Join-Path $OutputRoot 'v9_direct_plus_devpm4_split/v9_direct_plus_development_pm4_training_manifest.json') `
+  --output-dir (Join-Path $OutputRoot 'runs/v9_pm4mix_fullsane') `
+  --resume-from (Join-Path $OutputRoot 'runs/v9_pm4mix_fullsane/last_checkpoint.pt') `
+  --epochs 120 `
+  --batch-size 4 `
+  --selection-metric dev_global_mae `
+  --dev-eval-cache-manifest (Join-Path $OutputRoot 'v9_direct_plus_devpm4_split/v9_development_non_pm4_holdout_manifest.json') `
   --no-require-minimap `
   --no-require-wdl
 ```
@@ -150,12 +209,16 @@ If you keep periodic pauses enabled, or if the run stops after writing a normal 
 
 - The direct wrapper should print `3_0_1_8303 => ...` during client-root resolution.
 - The scan phase should include `--map Northrend --build 3_0_1_8303`.
-- `train_v9.py` should print a `Dev-eval holdout` line that points at the development-map cache manifest.
-- Best-checkpoint selection should report `selection_metric=dev_global_mae` instead of falling back to plain `val_loss`.
+- the optimized trainer should print `Dev-eval holdout: <count> entries`
+- the run should report `dev_eval tiles ... | model_mae ... | wdl_gain ...` on dev-eval epochs
+- `BEST` should follow the configured selection metric, not plain validation loss alone
+- the run directory should contain `best_model.pt`, `last_checkpoint.pt`, and `previews/`
 
 ## Current Boundaries
 
-- The development map is still fed into `v9` as a separate compatibility-built dev-eval cache, not as a first-class direct scan target.
+- The development map is still fed into `v9` through a compatibility-built cache, not as a first-class direct scan target.
+- The PM4-mixed manifest composition step is currently a documented manual workflow, not yet a dedicated first-class command.
+- `wow-viewer/scripts/run_v9_direct_pipeline.ps1` still launches `train_v9.py` when used in full `train` mode, so the wrapper alone is not yet the full current recommended PM4-mixed path.
 - The remaining known early-build default-gate blocker is still `0_5_5_3494:EmeraldDream_24_25 -> missing_minimap_rgb_256`.
 - Some `3.0.1.8303` texture reads still hit older shared-reader compatibility gaps, so `3_0_1_8303/Northrend` is important but not yet the same thing as full `3.0.1` format closure.
 - `4_0_0_11927` should remain in the corpus even if you need to source it from a different local client copy than your other builds; the dataset requirement is build-era coverage, not one specific archive layout.

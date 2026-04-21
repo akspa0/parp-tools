@@ -50,6 +50,9 @@ string[] tail = args.Skip(1).ToArray();
 		case "dataset-merge":
 			RunDatasetMerge(tail);
 			break;
+		case "dataset-split-pm4":
+			RunDatasetSplitPm4(tail);
+			break;
 		case "dataset-audit":
 			RunDatasetAudit(tail);
 			break;
@@ -457,6 +460,147 @@ static void RunDatasetMerge(string[] args)
 	}
 
 	Console.WriteLine(json);
+}
+
+static void RunDatasetSplitPm4(string[] args)
+{
+	string? directManifestOption = GetOption(args, "--direct-manifest", "-d");
+	string? developmentManifestOption = GetOption(args, "--development-manifest", "-i");
+	string? outputDirOption = GetOption(args, "--output-dir", "-o");
+	string pm4Flag = GetOption(args, "--pm4-flag", "-p") ?? "has_pm4_mask_257";
+
+	if (string.IsNullOrWhiteSpace(directManifestOption)
+		|| string.IsNullOrWhiteSpace(developmentManifestOption)
+		|| string.IsNullOrWhiteSpace(outputDirOption))
+	{
+		Console.Error.WriteLine("Error: dataset-split-pm4 requires --direct-manifest <cache.json>, --development-manifest <cache.json>, and --output-dir <dir>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string directManifestPath = Path.GetFullPath(directManifestOption);
+	string developmentManifestPath = Path.GetFullPath(developmentManifestOption);
+	string outputDir = Path.GetFullPath(outputDirOption);
+
+	if (!File.Exists(directManifestPath))
+	{
+		Console.Error.WriteLine($"Error: direct manifest not found: {directManifestPath}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!File.Exists(developmentManifestPath))
+	{
+		Console.Error.WriteLine($"Error: development manifest not found: {developmentManifestPath}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	V9TensorCacheManifestData directManifest = ReadV9TensorCacheManifest(directManifestPath);
+	V9TensorCacheManifestData developmentManifest = ReadV9TensorCacheManifest(developmentManifestPath);
+
+	if (!string.Equals(directManifest.SchemaVersion, developmentManifest.SchemaVersion, StringComparison.OrdinalIgnoreCase))
+	{
+		Console.Error.WriteLine($"Error: dataset-split-pm4 requires matching schema versions. Found '{directManifest.SchemaVersion}' and '{developmentManifest.SchemaVersion}'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	List<JsonElement> pm4Entries = [];
+	List<JsonElement> nonPm4Entries = [];
+	foreach (JsonElement entry in developmentManifest.Entries)
+	{
+		if (TryGetBooleanProperty(entry, pm4Flag, out bool hasPm4) && hasPm4)
+			pm4Entries.Add(entry);
+		else
+			nonPm4Entries.Add(entry);
+	}
+
+	List<JsonElement> mergedEntries = new(directManifest.Entries.Count + pm4Entries.Count);
+	HashSet<string> seenKeys = new(StringComparer.Ordinal);
+	foreach (JsonElement entry in directManifest.Entries)
+	{
+		string entryKey = BuildV9ManifestEntryKey(entry);
+		if (!seenKeys.Add(entryKey))
+		{
+			Console.Error.WriteLine($"Error: duplicate direct manifest entry key encountered: {entryKey}");
+			Environment.ExitCode = 1;
+			return;
+		}
+
+		mergedEntries.Add(entry);
+	}
+
+	foreach (JsonElement entry in pm4Entries)
+	{
+		string entryKey = BuildV9ManifestEntryKey(entry);
+		if (!seenKeys.Add(entryKey))
+		{
+			Console.Error.WriteLine($"Error: dataset-split-pm4 found duplicate merged entry key: {entryKey}");
+			Environment.ExitCode = 1;
+			return;
+		}
+
+		mergedEntries.Add(entry);
+	}
+
+	Directory.CreateDirectory(outputDir);
+
+	string pm4SubsetPath = Path.Combine(outputDir, "v9_development_pm4_training_manifest.json");
+	string holdoutPath = Path.Combine(outputDir, "v9_development_non_pm4_holdout_manifest.json");
+	string mergedPath = Path.Combine(outputDir, "v9_direct_plus_development_pm4_training_manifest.json");
+
+	object pm4SubsetManifest = new
+	{
+		schema_version = developmentManifest.SchemaVersion,
+		created_at_utc = DateTimeOffset.UtcNow,
+		source_cache_manifest = developmentManifestPath.Replace('\\', '/'),
+		split_name = "development_pm4_training_subset",
+		processed = pm4Entries.Count,
+		skipped = 0,
+		entries = pm4Entries,
+	};
+
+	object holdoutManifest = new
+	{
+		schema_version = developmentManifest.SchemaVersion,
+		created_at_utc = DateTimeOffset.UtcNow,
+		source_cache_manifest = developmentManifestPath.Replace('\\', '/'),
+		split_name = "development_non_pm4_holdout",
+		processed = nonPm4Entries.Count,
+		skipped = 0,
+		entries = nonPm4Entries,
+	};
+
+	object mergedManifest = new
+	{
+		schema_version = directManifest.SchemaVersion,
+		created_at_utc = DateTimeOffset.UtcNow,
+		source_cache_manifests = new[]
+		{
+			directManifestPath.Replace('\\', '/'),
+			developmentManifestPath.Replace('\\', '/'),
+		},
+		split_name = "direct_archive_plus_development_pm4_training",
+		processed = mergedEntries.Count,
+		skipped = 0,
+		entries = mergedEntries,
+	};
+
+	File.WriteAllText(pm4SubsetPath, JsonSerializer.Serialize(pm4SubsetManifest, CreateJsonOptions()));
+	File.WriteAllText(holdoutPath, JsonSerializer.Serialize(holdoutManifest, CreateJsonOptions()));
+	File.WriteAllText(mergedPath, JsonSerializer.Serialize(mergedManifest, CreateJsonOptions()));
+
+	Console.WriteLine("WowViewer.Tool.Converter dataset-split-pm4 report");
+	Console.WriteLine($"DirectManifest: {directManifestPath}");
+	Console.WriteLine($"DevelopmentManifest: {developmentManifestPath}");
+	Console.WriteLine($"Pm4Flag: {pm4Flag}");
+	Console.WriteLine($"Pm4TrainingEntries: {pm4Entries.Count}");
+	Console.WriteLine($"NonPm4HoldoutEntries: {nonPm4Entries.Count}");
+	Console.WriteLine($"MergedTrainingEntries: {mergedEntries.Count}");
+	Console.WriteLine($"Wrote {pm4SubsetPath}");
+	Console.WriteLine($"Wrote {holdoutPath}");
+	Console.WriteLine($"Wrote {mergedPath}");
 }
 
 static void RunDatasetAudit(string[] args)
@@ -3610,6 +3754,65 @@ static string? GetOption(string[] args, string longName, string shortName)
 	return null;
 }
 
+static V9TensorCacheManifestData ReadV9TensorCacheManifest(string path)
+{
+	using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+	JsonElement root = document.RootElement;
+
+	if (!root.TryGetProperty("schema_version", out JsonElement schemaVersionElement)
+		|| schemaVersionElement.ValueKind != JsonValueKind.String)
+	{
+		throw new InvalidDataException($"Manifest '{path}' is missing string property 'schema_version'.");
+	}
+
+	if (!root.TryGetProperty("entries", out JsonElement entriesElement)
+		|| entriesElement.ValueKind != JsonValueKind.Array)
+	{
+		throw new InvalidDataException($"Manifest '{path}' is missing array property 'entries'.");
+	}
+
+	List<JsonElement> entries = new(entriesElement.GetArrayLength());
+	foreach (JsonElement entry in entriesElement.EnumerateArray())
+		entries.Add(entry.Clone());
+
+	return new V9TensorCacheManifestData(schemaVersionElement.GetString() ?? string.Empty, entries);
+}
+
+static bool TryGetBooleanProperty(JsonElement element, string propertyName, out bool value)
+{
+	if (element.TryGetProperty(propertyName, out JsonElement property))
+	{
+		if (property.ValueKind == JsonValueKind.True)
+		{
+			value = true;
+			return true;
+		}
+
+		if (property.ValueKind == JsonValueKind.False)
+		{
+			value = false;
+			return true;
+		}
+	}
+
+	value = false;
+	return false;
+}
+
+static string BuildV9ManifestEntryKey(JsonElement entry)
+{
+	string datasetKey = entry.TryGetProperty("dataset_key", out JsonElement datasetKeyElement) && datasetKeyElement.ValueKind == JsonValueKind.String
+		? datasetKeyElement.GetString() ?? string.Empty
+		: string.Empty;
+	string tileName = entry.TryGetProperty("tile_name", out JsonElement tileNameElement) && tileNameElement.ValueKind == JsonValueKind.String
+		? tileNameElement.GetString() ?? string.Empty
+		: string.Empty;
+	string shardPath = entry.TryGetProperty("shard_path", out JsonElement shardPathElement) && shardPathElement.ValueKind == JsonValueKind.String
+		? shardPathElement.GetString() ?? string.Empty
+		: string.Empty;
+	return string.Join("|", datasetKey, tileName, shardPath);
+}
+
 static JsonSerializerOptions CreateJsonOptions()
 {
 	JsonSerializerOptions options = new()
@@ -3626,6 +3829,7 @@ static void ShowUsage()
 	Console.WriteLine("Usage:");
 	Console.WriteLine("  wowviewer-converter dataset-scan --client-root <path> --map <name> [--build <label>] [--output <manifest.json>] [--limit <count>]");
 	Console.WriteLine("  wowviewer-converter dataset-merge --input <manifest.json> [--input <manifest.json> ...] [--output <merged.json>] [manifest.json ...]");
+	Console.WriteLine("  wowviewer-converter dataset-split-pm4 --direct-manifest <cache.json> --development-manifest <cache.json> --output-dir <dir> [--pm4-flag <field>]");
 	Console.WriteLine("  wowviewer-converter dataset-audit --input <scan.json> [--output <audit.json>] [--limit <count>]");
 	Console.WriteLine("  wowviewer-converter dataset-curate --input <audit.json> --output <curated.json> [--report <curation-report.json>] [--limit <count>] [--max-per-group <count>] [--require-wdl|--no-require-wdl] [--require-minimap|--no-require-minimap]");
 	Console.WriteLine("  wowviewer-converter dataset-build-cache --input <audit-or-curate.json> --output-dir <dir> [--limit <count>] [--overwrite] [--include-minimap|--no-include-minimap] [--write-debug-json|--no-write-debug-json]");
@@ -3654,6 +3858,10 @@ file sealed class MlCorpusConfig
 	[JsonPropertyName("maps")]
 	public List<MlCorpusMapConfig> Maps { get; set; } = [];
 }
+
+file sealed record V9TensorCacheManifestData(
+	string SchemaVersion,
+	List<JsonElement> Entries);
 
 file sealed class MlCorpusClientConfig
 {
