@@ -417,7 +417,7 @@ internal static class AlphaEmbeddedAdtReader
             }
         }
 
-        float baseHeight = BitConverter.Int32BitsToSingle(BitConverter.ToInt32(container, headerOffset + 0x68));
+        float baseHeight = ReadAlphaBaseHeight(container, headerOffset);
         if (!float.IsNaN(baseHeight) && MathF.Abs(baseHeight) <= 50000f && baseHeight != 0f)
         {
             for (int index = 0; index < heights.Length; index++)
@@ -472,7 +472,7 @@ internal static class AlphaEmbeddedAdtReader
         if (float.IsNaN(minHeight) || float.IsNaN(maxHeight))
             return false;
 
-        float baseHeight = BitConverter.Int32BitsToSingle(BitConverter.ToInt32(container, headerOffset + 0x68));
+        float baseHeight = ReadAlphaBaseHeight(container, headerOffset);
         if (!float.IsNaN(baseHeight) && MathF.Abs(baseHeight) <= 50000f)
         {
             minHeight += baseHeight;
@@ -552,6 +552,17 @@ internal static class AlphaEmbeddedAdtReader
         byte[] stripped = new byte[size];
         Buffer.BlockCopy(payload, 8, stripped, 0, (int)size);
         return stripped;
+    }
+
+    private static float ReadAlphaBaseHeight(byte[] container, int headerOffset)
+    {
+        if (headerOffset < 0 || headerOffset + 0x70 + sizeof(float) > container.Length)
+            return 0f;
+
+        // Alpha MCNK position is laid out as (X, Z, Y). The Z component used as the
+        // base height lives at 0x6C; 0x68 is a world-position component and produces
+        // chunk-scale striping if treated as terrain height.
+        return BitConverter.Int32BitsToSingle(BitConverter.ToInt32(container, headerOffset + 0x6C));
     }
 
     private static List<AdtModelPlacement> ReadAlphaModelPlacements(byte[] payload, IReadOnlyList<string> modelNames)
