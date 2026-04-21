@@ -611,3 +611,4 @@ wow-viewer/src/core/WowViewer.Core.PM4/obj/Release/net10.0/refint/WowViewer.Core
 datasets/*
 gillijimproject_refactor/datasets/*
 wow-viewer/libs/*
+gillijimproject_refactor/.venv-train/*
