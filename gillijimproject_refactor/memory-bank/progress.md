@@ -1,5 +1,16 @@
 # Progress
 
+### Apr 21, 2026 - taught the uv training bootstrap to install triton-windows for Windows CUDA environments
+
+- what changed:
+	- updated `gillijimproject_refactor/scripts/setup_training_env.ps1` so Windows CUDA bootstrap now installs `triton-windows` after the CUDA torch wheels and validates that the `triton` module is importable
+	- updated `gillijimproject_refactor/scripts/setup_training_env.sh` to mirror that behavior for Windows-like bash shells and to use the Windows venv interpreter path when applicable
+	- updated `gillijimproject_refactor/docs/VLM_Training_Guide.md` with the new Windows CUDA `triton-windows` note
+- validation:
+	- bounded script and documentation inspection only in this chat; no full venv recreate was rerun after the bootstrap change
+- boundary:
+	- existing `.venv-train` environments created before this change still need the bootstrap rerun or a manual `uv pip install --python <venv-python> triton-windows`
+
 ### Apr 20, 2026 - landed the first direct wow-viewer multimap or multibuild composition seam and validated the new wrapper on bounded real data
 
 - what changed:

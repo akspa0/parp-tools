@@ -68,6 +68,8 @@ if ([System.IO.Path]::IsPathRooted($VenvPath)) {
 
 $resolvedBackend = Resolve-TrainingBackend $Backend
 $venvPython = if ($IsWindows) { Join-Path $venvFullPath "Scripts\python.exe" } else { Join-Path $venvFullPath "bin/python" }
+$requiresWindowsTriton = $resolvedBackend -eq "cuda" -and $IsWindows
+$requiresWindowsTritonPy = if ($requiresWindowsTriton) { "True" } else { "False" }
 
 if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
     throw "uv is required but not found on PATH. Install uv first: https://docs.astral.sh/uv/getting-started/installation/"
@@ -95,6 +97,10 @@ Invoke-Step "uv" @("pip", "install", "--python", $venvPython, "-r", $requirement
 switch ($resolvedBackend) {
     "cuda" {
         Invoke-Step "uv" @("pip", "install", "--python", $venvPython, "--index-url", "https://download.pytorch.org/whl/cu128", "torch", "torchvision", "torchaudio")
+        if ($requiresWindowsTriton) {
+            Write-Info "Installing triton-windows for torch.compile support on Windows CUDA."
+            Invoke-Step "uv" @("pip", "install", "--python", $venvPython, "triton-windows")
+        }
     }
     "rocm" {
         Invoke-Step "uv" @("pip", "install", "--python", $venvPython, "--index-url", "https://download.pytorch.org/whl/rocm6.2.4", "torch", "torchvision", "torchaudio")
@@ -116,18 +122,24 @@ if ($DryRun) {
 } else {
     $validationScript = @"
 import sys
+import importlib.util
 import torch
 
 backend = "${resolvedBackend}"
+requires_windows_triton = ${requiresWindowsTritonPy}
+triton_available = importlib.util.find_spec("triton") is not None
 print(f"PYTHON={sys.executable}")
 print(f"TORCH={torch.__version__}")
 print(f"TORCH_CUDA={torch.version.cuda}")
 print(f"TORCH_HIP={getattr(torch.version, 'hip', None)}")
 print(f"CUDA_AVAILABLE={torch.cuda.is_available()}")
 print(f"MPS_AVAILABLE={getattr(torch.backends, 'mps', None).is_available() if hasattr(torch.backends, 'mps') else False}")
+print(f"TRITON_AVAILABLE={triton_available}")
 
 if backend == "cuda" and not torch.cuda.is_available():
     raise SystemExit("Expected CUDA backend, but torch.cuda.is_available() is False.")
+if requires_windows_triton and not triton_available:
+    raise SystemExit("Expected Windows CUDA backend to include triton-windows, but the 'triton' module is unavailable.")
 if backend == "rocm" and not bool(getattr(torch.version, "hip", None)):
     raise SystemExit("Expected ROCm backend, but torch.version.hip is not available.")
 if backend == "mps":

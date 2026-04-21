@@ -400,6 +400,10 @@ Bash:
 ./gillijimproject_refactor/scripts/setup_training_env.sh --backend auto --recreate
 ```
 
+On Windows CUDA environments, the bootstrap scripts now also install `triton-windows`
+so `torch.compile` can use the Triton-backed Inductor path instead of failing at
+runtime on a missing Triton module.
+
 Then run training through that dedicated interpreter:
 
 ```powershell

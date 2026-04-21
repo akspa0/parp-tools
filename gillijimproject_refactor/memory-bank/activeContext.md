@@ -2,6 +2,16 @@
 
 # Active Context
 
+## Apr 21, 2026 - uv training bootstrap now installs triton-windows on Windows CUDA environments
+
+- this extends the existing dedicated training bootstrap so optimized trainers can keep `torch.compile` enabled on Windows without failing on a missing Triton backend
+- active behavior after this slice:
+	- `gillijimproject_refactor/scripts/setup_training_env.ps1` now installs `triton-windows` after the CUDA torch wheels on Windows and validates that the `triton` module resolves
+	- `gillijimproject_refactor/scripts/setup_training_env.sh` now mirrors that Windows behavior for Windows-like bash shells and uses the correct Windows venv interpreter path
+	- `gillijimproject_refactor/docs/VLM_Training_Guide.md` now documents that Windows CUDA bootstrap includes `triton-windows`
+- current boundary:
+	- this updates bootstrap/runtime prerequisites only; existing already-created training venvs still need the bootstrap rerun or a manual `uv pip install --python <venv-python> triton-windows`
+
 ## Apr 18, 2026 - wow-viewer world session/runtime now supports external loose-overlay roots on top of base clients
 
 - this extends the previous saved-base + loose-overlay source work from standalone preview consumers into world session bootstrap/runtime flows
