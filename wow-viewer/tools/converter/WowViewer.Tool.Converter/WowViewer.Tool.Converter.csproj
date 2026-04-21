@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <Compile Include="..\..\..\src\viewer\WowViewer.App\AlphaEmbeddedAdtReader.cs" Link="AlphaEmbeddedAdtReader.cs" />
     <ProjectReference Include="..\..\..\src\core\WowViewer.Core\WowViewer.Core.csproj" />
     <ProjectReference Include="..\..\..\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
     <ProjectReference Include="..\..\..\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />

@@ -172,7 +172,7 @@ internal static class AlphaEmbeddedAdtReader
         }
 
         using MemoryStream stream = new(rawWdtData, writable: false);
-        MapFileSummary wdtSummary = MapFileSummaryReader.Read(stream, wdtSourcePath);
+        MapFileSummary wdtSummary = MapFileSummaryReader.Read(stream, wdtVirtualPath);
         if (wdtSummary.Kind != MapFileKind.Wdt)
         {
             wdtData = null;

@@ -32,12 +32,17 @@ public static class ChunkedFileReader
                 throw new InvalidDataException($"Could not decode chunk header at offset {headerOffset}.");
 
             long dataOffset = stream.Position;
-            long endOffset = checked(dataOffset + header.Size);
-            if (endOffset > stream.Length)
+            long payloadEndOffset = checked(dataOffset + header.Size);
+            if (payloadEndOffset > stream.Length)
                 throw new InvalidDataException($"Chunk {header.Id} at offset {headerOffset} overruns the stream length.");
 
             chunks.Add(new ChunkSpan(header, headerOffset, dataOffset));
-            stream.Position = endOffset;
+
+            long nextOffset = payloadEndOffset;
+            if ((header.Size & 1) != 0 && nextOffset < stream.Length)
+                nextOffset++;
+
+            stream.Position = nextOffset;
         }
 
         return chunks;

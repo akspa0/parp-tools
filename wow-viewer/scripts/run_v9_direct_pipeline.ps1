@@ -8,6 +8,7 @@ param(
         "0_5_3_3368",
         "0_5_5_3494",
         "0_7_0_3694",
+        "3_0_1_8303",
         "3_3_5_12340",
         "4_0_0_11927"
     ),
@@ -22,8 +23,10 @@ param(
     [string]$PythonExe = "",
     [string]$ConverterProject = "",
     [string]$TrainerScript = "",
+    [string[]]$TrainerArgs = @(),
 
     [switch]$AllowMissingRoots,
+    [switch]$WowArchiveOnly,
     [switch]$NoRequireMinimap,
     [switch]$NoRequireWdl,
     [switch]$DryRun,
@@ -91,6 +94,7 @@ function Get-BuildMapDefaults([string]$BuildLabel) {
         "0_5_3_3368" { return @("Azeroth", "Kalimdor") }
         "0_5_5_3494" { return @("Azeroth", "Kalimdor", "EmeraldDream") }
         "0_7_0_3694" { return @("Azeroth", "Kalimdor", "EmeraldDream") }
+        "3_0_1_8303" { return @("Northrend") }
         "3_3_5_12340" { return @("Azeroth", "Kalimdor", "EmeraldDream", "Northrend", "PVPZone01", "PVPZone02", "PVPZone03", "PVPZone04") }
         "4_0_0_11927" { return @("Azeroth", "Kalimdor", "EmeraldDream", "Deepholm", "LostIsles", "LostIslesPhase1", "LostIslesPhase2") }
         default { return @("Azeroth") }
@@ -111,7 +115,7 @@ function Resolve-ExistingPath([string[]]$Candidates) {
     return $null
 }
 
-function Resolve-ClientRoot([string]$BuildLabel, [string]$ParpToolsRoot) {
+function Resolve-ClientRoot([string]$BuildLabel, [string]$ParpToolsRoot, [bool]$WowArchiveOnly) {
     switch ($BuildLabel) {
         "0_5_3_3368" {
             return Resolve-ExistingPath @(
@@ -126,16 +130,48 @@ function Resolve-ClientRoot([string]$BuildLabel, [string]$ParpToolsRoot) {
             )
         }
         "0_7_0_3694" {
-            return Resolve-ExistingPath @(
+            $candidates = @(
                 (Join-Path $ParpToolsRoot "output\tmp\wowarchive-clients\0_7_0_3694\World of Warcraft"),
                 (Join-Path $ParpToolsRoot "output\tmp\wowarchive-clients\0_7_0_3694")
             )
+            if (-not $WowArchiveOnly) {
+                $candidates += "H:\CLIENTS\0.X_Pre-Release_Windows_enUS_0.7.0.3694\World of Warcraft"
+            }
+
+            return Resolve-ExistingPath $candidates
+        }
+        "3_0_1_8303" {
+            $candidates = @(
+                (Join-Path $ParpToolsRoot "output\tmp\wowarchive-clients\3_0_1_8303\World of Warcraft"),
+                (Join-Path $ParpToolsRoot "output\tmp\wowarchive-clients\3_0_1_8303")
+            )
+            if (-not $WowArchiveOnly) {
+                $candidates += "H:\CLIENTS\3.X_Pre-Release_Windows_enUS_3.0.1.8303\World of Warcraft"
+            }
+
+            return Resolve-ExistingPath $candidates
         }
         "3_3_5_12340" {
-            return Resolve-ExistingPath @("H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft")
+            $candidates = @(
+                (Join-Path $ParpToolsRoot "output\tmp\wowarchive-clients\3_3_5_12340\World of Warcraft"),
+                (Join-Path $ParpToolsRoot "output\tmp\wowarchive-clients\3_3_5_12340")
+            )
+            if (-not $WowArchiveOnly) {
+                $candidates += "H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft"
+            }
+
+            return Resolve-ExistingPath $candidates
         }
         "4_0_0_11927" {
-            return Resolve-ExistingPath @("H:\CLIENTS\World of Warcraft Cata beta 11927")
+            $candidates = @(
+                (Join-Path $ParpToolsRoot "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft"),
+                (Join-Path $ParpToolsRoot "output\tmp\wowarchive-clients\4_0_0_11927")
+            )
+            if (-not $WowArchiveOnly) {
+                $candidates += "H:\CLIENTS\World of Warcraft Cata beta 11927"
+            }
+
+            return Resolve-ExistingPath $candidates
         }
         default {
             return $null
@@ -185,9 +221,14 @@ if ($Mode -eq "train" -and !(Get-Command "nvidia-smi" -ErrorAction SilentlyConti
 Write-Step "Resolving client roots"
 $resolvedBuilds = @()
 foreach ($buildLabel in $IncludeBuilds) {
-    $clientRoot = Resolve-ClientRoot -BuildLabel $buildLabel -ParpToolsRoot $ParpToolsRoot
+    $clientRoot = Resolve-ClientRoot -BuildLabel $buildLabel -ParpToolsRoot $ParpToolsRoot -WowArchiveOnly:$WowArchiveOnly
     if (!$clientRoot) {
-        $message = "Client root for $buildLabel was not found. Expected fixed local root or staged copy under output/tmp/wowarchive-clients."
+        $message = if ($WowArchiveOnly) {
+            "Client root for $buildLabel was not found under output/tmp/wowarchive-clients while -WowArchiveOnly is enabled."
+        }
+        else {
+            "Client root for $buildLabel was not found. Expected fixed local root or staged copy under output/tmp/wowarchive-clients."
+        }
         if ($AllowMissingRoots) {
             Write-WarnLine $message
             continue
@@ -344,6 +385,9 @@ if ($NoRequireMinimap) {
 }
 if ($NoRequireWdl) {
     $trainArgs += "--no-require-wdl"
+}
+if ($TrainerArgs.Count -gt 0) {
+    $trainArgs += $TrainerArgs
 }
 
 $trainStepLabel = "Auditing trainer contract"

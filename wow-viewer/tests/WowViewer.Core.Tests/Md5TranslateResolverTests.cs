@@ -97,4 +97,40 @@ public sealed class Md5TranslateResolverTests
                 Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public void TryLoad_RootCandidateWithSpacedDirectory_PreservesAllHashVariants()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"wowviewer-md5translate-{Guid.NewGuid():N}");
+        try
+        {
+            string minimapDirectory = Path.Combine(root, "Data", "textures", "Minimap");
+            Directory.CreateDirectory(minimapDirectory);
+            string filePath = Path.Combine(minimapDirectory, "md5translate.txt");
+            File.WriteAllText(
+                filePath,
+                "dir:Emerald Dream\nEmerald Dream\\map24_25.blp\t875b7ac8e14d5601824624a357b340c1.blp\n",
+                Encoding.UTF8);
+
+            bool loaded = Md5TranslateResolver.TryLoad(
+                searchPaths: [root],
+                archiveFileExists: static _ => false,
+                archiveReadFile: static _ => null,
+                index: out Md5TranslateIndex? index);
+
+            Assert.True(loaded);
+            Assert.NotNull(index);
+
+            IReadOnlyList<string> candidates = index!.GetHashCandidates("textures/minimap/emerald dream/map24_25.blp");
+            Assert.Equal("textures/minimap/875b7ac8e14d5601824624a357b340c1.blp", index.PlainToHash["textures/minimap/emerald dream/map24_25.blp"]);
+            Assert.Contains("textures/minimap/875b7ac8e14d5601824624a357b340c1.blp", candidates);
+            Assert.Contains("world/textures/minimap/875b7ac8e14d5601824624a357b340c1.blp", candidates);
+            Assert.Contains("textures/minimaps/875b7ac8e14d5601824624a357b340c1.blp", candidates);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
 }

@@ -4,6 +4,8 @@ namespace WowViewer.Core.IO.Files;
 
 public sealed class Md5TranslateIndex
 {
+    private readonly Dictionary<string, List<string>> _plainToHashes = new(StringComparer.OrdinalIgnoreCase);
+
     public Dictionary<string, string> HashToPlain { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public Dictionary<string, string> PlainToHash { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -19,6 +21,8 @@ public sealed class Md5TranslateIndex
         string normalizedLeft = Normalize(left);
         string normalizedRight = Normalize(right);
 
+        AddPlainHashCandidate(normalizedLeft, normalizedRight);
+
         if (!HashToPlain.ContainsKey(normalizedLeft))
             HashToPlain[normalizedLeft] = normalizedRight;
 
@@ -30,6 +34,29 @@ public sealed class Md5TranslateIndex
 
         if (!PlainToHash.ContainsKey(normalizedLeft))
             PlainToHash[normalizedLeft] = normalizedRight;
+    }
+
+    public IReadOnlyList<string> GetHashCandidates(string plainPath)
+    {
+        string normalizedPlain = Normalize(plainPath);
+        if (_plainToHashes.TryGetValue(normalizedPlain, out List<string>? candidates))
+            return candidates;
+
+        return PlainToHash.TryGetValue(normalizedPlain, out string? hashPath)
+            ? [hashPath]
+            : Array.Empty<string>();
+    }
+
+    private void AddPlainHashCandidate(string normalizedPlain, string normalizedHash)
+    {
+        if (!_plainToHashes.TryGetValue(normalizedPlain, out List<string>? candidates))
+        {
+            candidates = [];
+            _plainToHashes[normalizedPlain] = candidates;
+        }
+
+        if (!candidates.Contains(normalizedHash, StringComparer.OrdinalIgnoreCase))
+            candidates.Add(normalizedHash);
     }
 }
 
@@ -177,16 +204,32 @@ public static class Md5TranslateResolver
                 continue;
             }
 
-            string[] parts = trimmed.Split((char[])null!, 2, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length == 2)
-            {
-                AddWithVariants(index, parts[0], parts[1], currentDirectory);
-                continue;
-            }
-
-            if (parts.Length > 2)
-                AddWithVariants(index, parts[0], parts[^1], currentDirectory);
+            if (TrySplitTranslateEntry(trimmed, out string? plainPath, out string? hashedPath))
+                AddWithVariants(index, plainPath, hashedPath, currentDirectory);
         }
+    }
+
+    private static bool TrySplitTranslateEntry(string trimmed, out string plainPath, out string hashedPath)
+    {
+        int tabIndex = trimmed.IndexOf('\t');
+        if (tabIndex >= 0)
+        {
+            plainPath = trimmed[..tabIndex].Trim();
+            hashedPath = trimmed[(tabIndex + 1)..].Trim();
+            return !string.IsNullOrWhiteSpace(plainPath) && !string.IsNullOrWhiteSpace(hashedPath);
+        }
+
+        int separatorIndex = trimmed.LastIndexOfAny([' ', '\t']);
+        if (separatorIndex <= 0 || separatorIndex >= trimmed.Length - 1)
+        {
+            plainPath = string.Empty;
+            hashedPath = string.Empty;
+            return false;
+        }
+
+        plainPath = trimmed[..separatorIndex].Trim();
+        hashedPath = trimmed[(separatorIndex + 1)..].Trim();
+        return !string.IsNullOrWhiteSpace(plainPath) && !string.IsNullOrWhiteSpace(hashedPath);
     }
 
     private static void AddWithVariants(Md5TranslateIndex index, string plainRaw, string hashedRaw, string? currentDirectory)

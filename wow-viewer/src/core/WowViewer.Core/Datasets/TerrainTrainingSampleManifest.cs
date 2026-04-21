@@ -134,6 +134,8 @@ public sealed class TerrainTrainingSampleDescriptor
 
     public string? WdlPath { get; init; }
 
+    public string? MapDirectory { get; init; }
+
     public string? LooseOverlayRoot { get; init; }
 
     public string? CompatibilityTileJsonPath { get; init; }

@@ -152,6 +152,51 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
         return foundWmos.ToList();
     }
 
+    public IReadOnlyList<string> ScanMapMpqArchives(string gamePath)
+    {
+        HashSet<string> foundFiles = new(StringComparer.OrdinalIgnoreCase);
+        string[] searchPaths =
+        [
+            Path.Combine(gamePath, "Data", "World", "Maps"),
+            Path.Combine(gamePath, "World", "Maps"),
+        ];
+
+        foreach (string searchPath in searchPaths)
+        {
+            if (!Directory.Exists(searchPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                List<string> mapMpqFiles = Directory.GetFiles(searchPath, "*.wdt.mpq", SearchOption.AllDirectories)
+                    .Concat(Directory.GetFiles(searchPath, "*.WDT.MPQ", SearchOption.AllDirectories))
+                    .Concat(Directory.GetFiles(searchPath, "*.wdl.mpq", SearchOption.AllDirectories))
+                    .Concat(Directory.GetFiles(searchPath, "*.WDL.MPQ", SearchOption.AllDirectories))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (string mpqPath in mapMpqFiles)
+                {
+                    string? virtualPath = TryBuildScannedMapVirtualPath(gamePath, mpqPath);
+                    if (string.IsNullOrWhiteSpace(virtualPath))
+                    {
+                        continue;
+                    }
+
+                    _scannedFiles.TryAdd(virtualPath, new ScannedFileEntry(mpqPath, 0));
+                    foundFiles.Add(virtualPath);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return foundFiles.ToList();
+    }
+
     public byte[]? ReadWmoMpqFile(string virtualPath)
     {
         if (!_scannedFiles.TryGetValue(virtualPath, out ScannedFileEntry mpqInfo) ||
@@ -321,9 +366,7 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
                 foreach (string mpqPath in Directory.EnumerateFiles(path, "*.mpq", SearchOption.AllDirectories))
                 {
                     string lowerName = Path.GetFileName(mpqPath).ToLowerInvariant();
-                    if (lowerName.EndsWith(".wmo.mpq", StringComparison.Ordinal) ||
-                        lowerName.EndsWith(".wdt.mpq", StringComparison.Ordinal) ||
-                        lowerName.EndsWith(".wdl.mpq", StringComparison.Ordinal))
+                    if (lowerName.EndsWith(".wmo.mpq", StringComparison.Ordinal))
                     {
                         continue;
                     }
@@ -361,6 +404,13 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
     public bool FileExists(string virtualPath)
     {
         string normalized = NormalizeVirtualPath(virtualPath);
+        if (_scannedFiles.TryGetValue(normalized, out ScannedFileEntry scannedInfo) &&
+            scannedInfo.BlockOffset == 0 &&
+            File.Exists(scannedInfo.ArchivePath))
+        {
+            return true;
+        }
+
         for (int i = _archives.Count - 1; i >= 0; i--)
         {
             if (FindFileInArchive(_archives[i], normalized) is not null)
@@ -379,6 +429,11 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
             scannedInfo.BlockOffset == 0 &&
             File.Exists(scannedInfo.ArchivePath))
         {
+            if (scannedInfo.ArchivePath.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+            {
+                return ReadFile0FromPath(scannedInfo.ArchivePath, normalized);
+            }
+
             return File.ReadAllBytes(scannedInfo.ArchivePath);
         }
 
@@ -456,6 +511,43 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
     private static string NormalizeVirtualPath(string path)
     {
         return path.Replace('/', '\\');
+    }
+
+    private static string? TryBuildScannedMapVirtualPath(string gamePath, string mpqPath)
+    {
+        string[] candidateRoots =
+        [
+            Path.Combine(gamePath, "Data"),
+            gamePath,
+        ];
+
+        foreach (string candidateRoot in candidateRoots)
+        {
+            if (!Directory.Exists(candidateRoot))
+            {
+                continue;
+            }
+
+            string relativePath = Path.GetRelativePath(candidateRoot, mpqPath);
+            if (relativePath.StartsWith("..", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (relativePath.StartsWith("Data\\", StringComparison.OrdinalIgnoreCase))
+            {
+                relativePath = relativePath[5..];
+            }
+
+            if (!relativePath.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return NormalizeVirtualPath(relativePath[..^4]);
+        }
+
+        return null;
     }
 
     private static IReadOnlyList<string> BuildPerAssetFilenameCandidates(string mpqDiskPath, IEnumerable<string> filenameHints)

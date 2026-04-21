@@ -101,6 +101,52 @@ public sealed class MapFileSummaryReaderTests
     }
 
     [Fact]
+    public void Read_AlphaWdtWithEmbeddedPayload_FallsBackToAlphaTopLevelSummary()
+    {
+        byte[] mainData = new byte[64 * 64 * 16];
+        BinaryPrimitives.WriteUInt32LittleEndian(mainData.AsSpan(0, 4), 128);
+
+        byte[] bytes =
+        [
+            .. CreateChunk("MVER", CreateUInt32Payload(18)),
+            .. CreatePaddedChunk("MPHD", new byte[31]),
+            .. CreateChunk("MAIN", mainData),
+            .. CreateInvalidEmbeddedChunk("MHDR", 64, trailingBytes: 12),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary summary = MapFileSummaryReader.Read(stream, "alpha-embedded.wdt");
+
+        Assert.Equal(MapFileKind.Wdt, summary.Kind);
+        Assert.Equal(18u, summary.Version);
+        Assert.Equal(3, summary.ChunkCount);
+        Assert.True(summary.HasChunk(MapChunkIds.Mphd));
+        Assert.True(summary.HasChunk(MapChunkIds.Main));
+    }
+
+    [Fact]
+    public void Read_AdtWithInvalidTrailingChunk_FallsBackToPartialAdtSummary()
+    {
+        byte[] bytes =
+        [
+            .. CreateChunk("MVER", CreateUInt32Payload(18)),
+            .. CreateChunk("MHDR", new byte[64]),
+            .. CreateChunk("MCIN", new byte[4096]),
+            .. CreateInvalidEmbeddedChunk("MMDX", 1024, trailingBytes: 32),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary summary = MapFileSummaryReader.Read(stream, "broken_0_0.adt");
+
+        Assert.Equal(MapFileKind.Adt, summary.Kind);
+        Assert.Equal(18u, summary.Version);
+        Assert.Equal(3, summary.ChunkCount);
+        Assert.True(summary.HasChunk(MapChunkIds.Mhdr));
+        Assert.True(summary.HasChunk(MapChunkIds.Mcin));
+        Assert.False(summary.HasChunk(MapChunkIds.Mcnk));
+    }
+
+    [Fact]
     public void Read_DevelopmentRootAdt_ProducesExpectedTopLevelSignals()
     {
         MapFileSummary summary = MapFileSummaryReader.Read(MapTestPaths.DevelopmentRootAdtPath);
@@ -119,6 +165,23 @@ public sealed class MapFileSummaryReaderTests
         Array.Copy(WowViewer.Core.Chunks.FourCC.FromString(id).ToFileBytes(), 0, bytes, 0, 4);
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), (uint)payload.Length);
         Array.Copy(payload, 0, bytes, 8, payload.Length);
+        return bytes;
+    }
+
+    private static byte[] CreatePaddedChunk(string id, byte[] payload)
+    {
+        byte[] bytes = new byte[8 + payload.Length + (payload.Length & 1)];
+        Array.Copy(WowViewer.Core.Chunks.FourCC.FromString(id).ToFileBytes(), 0, bytes, 0, 4);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), (uint)payload.Length);
+        Array.Copy(payload, 0, bytes, 8, payload.Length);
+        return bytes;
+    }
+
+    private static byte[] CreateInvalidEmbeddedChunk(string id, uint declaredSize, int trailingBytes)
+    {
+        byte[] bytes = new byte[8 + trailingBytes];
+        Array.Copy(WowViewer.Core.Chunks.FourCC.FromString(id).ToFileBytes(), 0, bytes, 0, 4);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), declaredSize);
         return bytes;
     }
 

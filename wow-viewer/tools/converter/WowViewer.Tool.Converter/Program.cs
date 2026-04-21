@@ -8,6 +8,7 @@ using SereniaBLPLib;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using WowViewer.App;
 using WowViewer.Core.Datasets;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO;
@@ -15,6 +16,7 @@ using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 using WowViewer.Core.PM4;
+using WowViewer.Core.Runtime.World.Liquid;
 using WowViewer.Core.Runtime.World.Terrain;
 using WowViewer.Core.Wmo;
 using WowViewer.Core.Runtime.World.Wdl;
@@ -291,8 +293,13 @@ static void RunDatasetScan(string[] args)
 		: buildLabel.Trim();
 
 	string mapPath = Path.Combine(clientRoot, "Data", "World", "Maps", normalizedMapName);
-	List<TerrainTrainingSampleDescriptor> entries;
-	if (Directory.Exists(mapPath))
+	List<TerrainTrainingSampleDescriptor> entries = [];
+	bool hasLooseFilesystemMap = Directory.Exists(mapPath)
+		&& Directory.EnumerateFiles(mapPath, $"{normalizedMapName}_*.adt", SearchOption.TopDirectoryOnly)
+			.Any(static path => !path.EndsWith("_tex0.adt", StringComparison.OrdinalIgnoreCase)
+				&& !path.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase)
+				&& !path.EndsWith("_lod.adt", StringComparison.OrdinalIgnoreCase));
+	if (hasLooseFilesystemMap)
 	{
 		entries = BuildDatasetScanEntriesFromDirectory(clientRoot, normalizedBuildLabel, normalizedMapName, mapPath, limit);
 	}
@@ -800,6 +807,7 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromDirector
 			sourceKind: TerrainTrainingSampleSourceKind.ClientRoot,
 			buildLabel: buildLabel,
 			mapName: mapName,
+			mapDirectory: mapName,
 			tileX: tileX,
 			tileY: tileY,
 			sourceRoot: clientRoot,
@@ -832,14 +840,17 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromDirector
 static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(string clientRoot, string buildLabel, string mapName, string mapPath, IArchiveCatalog archiveCatalog, int? limit)
 {
 	string mapVirtualRoot = ResolveMapVirtualRoot(clientRoot, mapName, mapPath);
+	string mapDirectory = GetMapDirectoryFromMapVirtualRoot(mapVirtualRoot, mapName);
 	string wdtVirtualPath = BuildMapWdtVirtualPath(mapVirtualRoot, mapName);
 	byte[] wdtBytes = archiveCatalog.ReadFile(wdtVirtualPath)
 		?? throw new FileNotFoundException($"Could not read archive-backed WDT '{wdtVirtualPath}'.", wdtVirtualPath);
 
-	List<WdtTileCoordinate> tileCoordinates = ReadArchiveWdtTiles(wdtBytes, wdtVirtualPath)
+	List<WdtTileCoordinate> allTileCoordinates = ReadArchiveWdtTiles(wdtBytes, wdtVirtualPath)
 		.OrderBy(static tile => tile.TileY)
 		.ThenBy(static tile => tile.TileX)
 		.ToList();
+
+	List<WdtTileCoordinate> tileCoordinates = allTileCoordinates;
 	if (limit is > 0)
 		tileCoordinates = tileCoordinates.Take(limit.Value).ToList();
 
@@ -851,26 +862,45 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(
 		string tileStem = $"{mapName}_{tileCoordinate.TileX}_{tileCoordinate.TileY}";
 		string rootVirtualPath = $"{mapVirtualRoot}\\{tileStem}.adt";
 		byte[] rootBytes = archiveCatalog.ReadFile(rootVirtualPath) ?? [];
-		if (rootBytes.Length == 0)
-			continue;
-
-		AdtSummary summary = ReadArchiveAdtSummary(rootBytes, rootVirtualPath);
 		string objVirtualPath = $"{mapVirtualRoot}\\{tileStem}_obj0.adt";
 		string texVirtualPath = $"{mapVirtualRoot}\\{tileStem}_tex0.adt";
 		string lodVirtualPath = $"{mapVirtualRoot}\\{tileStem}_lod.adt";
+		string rootPathForEntry = rootVirtualPath;
+		string? objPathForEntry = archiveCatalog.FileExists(objVirtualPath) ? objVirtualPath : null;
+		string? texPathForEntry = archiveCatalog.FileExists(texVirtualPath) ? texVirtualPath : null;
+		string? lodPathForEntry = archiveCatalog.FileExists(lodVirtualPath) ? lodVirtualPath : null;
+		AdtSummary summary;
+
+		if (rootBytes.Length > 0)
+		{
+			summary = ReadArchiveAdtSummary(rootBytes, rootVirtualPath);
+		}
+		else if (AlphaEmbeddedAdtReader.TryReadTile(clientRoot, mapDirectory, tileCoordinate.TileX, tileCoordinate.TileY, archiveCatalog, out AlphaEmbeddedAdtTileData? alphaTile))
+		{
+			summary = BuildAlphaEmbeddedAdtSummary(alphaTile!);
+			rootPathForEntry = alphaTile!.SourcePath;
+			objPathForEntry = null;
+			texPathForEntry = null;
+			lodPathForEntry = null;
+		}
+		else
+		{
+			continue;
+		}
 
 		entries.Add(CreateDatasetScanEntry(
 			sampleId: $"{buildLabel}:{tileStem}",
 			sourceKind: TerrainTrainingSampleSourceKind.MountedArchive,
 			buildLabel: buildLabel,
 			mapName: mapName,
+			mapDirectory: mapDirectory,
 			tileX: tileCoordinate.TileX,
 			tileY: tileCoordinate.TileY,
 			sourceRoot: clientRoot,
-			rootAdtPath: rootVirtualPath,
-			objAdtPath: archiveCatalog.FileExists(objVirtualPath) ? objVirtualPath : null,
-			texAdtPath: archiveCatalog.FileExists(texVirtualPath) ? texVirtualPath : null,
-			lodAdtPath: archiveCatalog.FileExists(lodVirtualPath) ? lodVirtualPath : null,
+			rootAdtPath: rootPathForEntry,
+			objAdtPath: objPathForEntry,
+			texAdtPath: texPathForEntry,
+			lodAdtPath: lodPathForEntry,
 			wdlPath: hasWdl ? wdlVirtualPath : null,
 			summary: summary,
 			hasMinimap: false,
@@ -886,8 +916,8 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(
 			hasHoleMask: false,
 			hasAreaIdMap: false,
 			hasChunkFlagsMap: false,
-			hasAlphaLayers: archiveCatalog.FileExists(texVirtualPath),
-			hasTextureMetadata: archiveCatalog.FileExists(texVirtualPath) || summary.TextureNameCount > 0));
+			hasAlphaLayers: texPathForEntry is not null,
+			hasTextureMetadata: texPathForEntry is not null || summary.TextureNameCount > 0));
 	}
 
 	return entries;
@@ -898,6 +928,7 @@ static TerrainTrainingSampleDescriptor CreateDatasetScanEntry(
 	TerrainTrainingSampleSourceKind sourceKind,
 	string buildLabel,
 	string mapName,
+	string? mapDirectory,
 	int tileX,
 	int tileY,
 	string sourceRoot,
@@ -937,6 +968,7 @@ static TerrainTrainingSampleDescriptor CreateDatasetScanEntry(
 		TexAdtPath = texAdtPath,
 		LodAdtPath = lodAdtPath,
 		WdlPath = wdlPath,
+		MapDirectory = string.IsNullOrWhiteSpace(mapDirectory) ? null : mapDirectory,
 		Signals = new TerrainTrainingSignalAvailability
 		{
 			HasRootAdt = true,
@@ -1000,6 +1032,7 @@ static TerrainTrainingSampleDescriptor AuditDatasetEntry(
 		TexAdtPath = entry.TexAdtPath,
 		LodAdtPath = entry.LodAdtPath,
 		WdlPath = entry.WdlPath,
+		MapDirectory = entry.MapDirectory,
 		LooseOverlayRoot = entry.LooseOverlayRoot,
 		CompatibilityTileJsonPath = entry.CompatibilityTileJsonPath,
 		Signals = new TerrainTrainingSignalAvailability
@@ -1052,6 +1085,15 @@ static (bool UseArchive, WorldTerrainTileData Terrain, AdtLiquidFile Liquid, Adt
 	if (useArchive)
 	{
 		IArchiveCatalog archiveCatalog = GetOrCreateArchiveCatalog(entry.SourceRoot, archiveCatalogs);
+		if (TryReadAlphaEmbeddedTile(entry, archiveCatalog, out AlphaEmbeddedAdtTileData? alphaTile))
+		{
+			return (
+				UseArchive: true,
+				Terrain: alphaTile!.TerrainTileData,
+				Liquid: BuildAlphaEmbeddedLiquidFile(alphaTile),
+				McnkSummary: BuildAlphaEmbeddedMcnkSummary(alphaTile));
+		}
+
 		byte[] rootBytes = archiveCatalog.ReadFile(entry.RootAdtPath)
 			?? throw new FileNotFoundException($"Could not read archive-backed root ADT '{entry.RootAdtPath}' for '{entry.SampleId}'.", entry.RootAdtPath);
 		using MemoryStream stream = new(rootBytes, writable: false);
@@ -1818,11 +1860,12 @@ static byte[]? TryLoadMinimapRgb(
 	Dictionary<string, Md5TranslateIndex?> minimapMd5Cache,
 	out string? sourceName)
 {
+	string mapDirectory = ResolveMinimapMapDirectory(entry);
 	IArchiveCatalog? archiveCatalog = null;
 	if (entry.SourceKind == TerrainTrainingSampleSourceKind.MountedArchive)
 		archiveCatalog = GetOrCreateArchiveCatalog(entry.SourceRoot, archiveCatalogs);
 
-	foreach (string candidate in EnumerateMinimapCandidates(entry.MapName, entry.TileX, entry.TileY))
+	foreach (string candidate in EnumerateMinimapCandidates(mapDirectory, entry.TileX, entry.TileY))
 	{
 		if (entry.SourceKind == TerrainTrainingSampleSourceKind.MountedArchive)
 		{
@@ -1849,19 +1892,22 @@ static byte[]? TryLoadMinimapRgb(
 		Md5TranslateIndex? translateIndex = TryGetCachedMinimapMd5Index(entry, archiveCatalogs, minimapMd5Cache);
 		if (translateIndex is not null)
 		{
-			foreach (string candidate in EnumerateMinimapCandidates(entry.MapName, entry.TileX, entry.TileY))
+			foreach (string candidate in EnumerateMinimapCandidates(mapDirectory, entry.TileX, entry.TileY))
 			{
 				string lookupKey = translateIndex.Normalize(candidate);
-				if (!translateIndex.PlainToHash.TryGetValue(lookupKey, out string? translatedPath) || string.IsNullOrWhiteSpace(translatedPath))
-					continue;
+				foreach (string translatedPath in translateIndex.GetHashCandidates(lookupKey))
+				{
+					if (string.IsNullOrWhiteSpace(translatedPath))
+						continue;
 
-				string archivePath = translatedPath.Replace('/', '\\');
-				byte[]? candidateBytes = archiveCatalog.ReadFile(archivePath);
-				if (candidateBytes is not { Length: > 0 })
-					continue;
+					string archivePath = translatedPath.Replace('/', '\\');
+					byte[]? candidateBytes = archiveCatalog.ReadFile(archivePath);
+					if (candidateBytes is not { Length: > 0 })
+						continue;
 
-				sourceName = archivePath;
-				return DecodeArchiveBackedMinimap(candidateBytes, archivePath);
+					sourceName = archivePath;
+					return DecodeArchiveBackedMinimap(candidateBytes, archivePath);
+				}
 			}
 		}
 	}
@@ -1878,25 +1924,26 @@ static Md5TranslateIndex? TryGetCachedMinimapMd5Index(
 	if (entry.SourceKind != TerrainTrainingSampleSourceKind.MountedArchive)
 		return null;
 
-	string cacheKey = $"{entry.SourceRoot}|{entry.MapName}";
+	string mapDirectory = ResolveMinimapMapDirectory(entry);
+	string cacheKey = $"{entry.SourceRoot}|{mapDirectory}";
 	if (minimapMd5Cache.TryGetValue(cacheKey, out Md5TranslateIndex? cachedIndex))
 		return cachedIndex;
 
 	IArchiveCatalog archiveCatalog = GetOrCreateArchiveCatalog(entry.SourceRoot, archiveCatalogs);
-	string spacedMap = InsertSpaceBeforeCapitals(entry.MapName);
+	string spacedMap = InsertSpaceBeforeCapitals(mapDirectory);
 	List<string> extraCandidates =
 	[
-		$"World\\Maps\\{entry.MapName}\\md5translate.trs",
-		$"World\\Maps\\{entry.MapName}\\md5translate.txt",
+		$"World\\Maps\\{mapDirectory}\\md5translate.trs",
+		$"World\\Maps\\{mapDirectory}\\md5translate.txt",
 	];
-	if (!string.Equals(spacedMap, entry.MapName, StringComparison.Ordinal))
+	if (!string.Equals(spacedMap, mapDirectory, StringComparison.Ordinal))
 	{
 		extraCandidates.Add($"World\\Maps\\{spacedMap}\\md5translate.trs");
 		extraCandidates.Add($"World\\Maps\\{spacedMap}\\md5translate.txt");
 	}
 
 	Md5TranslateResolver.TryLoad(
-		searchPaths: [entry.SourceRoot],
+		searchPaths: BuildLegacySearchRoots(entry.SourceRoot),
 		archiveFileExists: archiveCatalog.FileExists,
 		archiveReadFile: archiveCatalog.ReadFile,
 		index: out Md5TranslateIndex? resolvedIndex,
@@ -1904,6 +1951,13 @@ static Md5TranslateIndex? TryGetCachedMinimapMd5Index(
 
 	minimapMd5Cache[cacheKey] = resolvedIndex;
 	return resolvedIndex;
+}
+
+static string ResolveMinimapMapDirectory(TerrainTrainingSampleDescriptor entry)
+{
+	return string.IsNullOrWhiteSpace(entry.MapDirectory)
+		? entry.MapName
+		: entry.MapDirectory;
 }
 
 static IEnumerable<string> EnumerateMinimapCandidates(string mapName, int tileX, int tileY)
@@ -1920,8 +1974,10 @@ static IEnumerable<string> EnumerateMinimapCandidates(string mapName, int tileX,
 		yield return $"{folderName}\\{trsName}";
 		yield return $"{folderName}\\{paddedName}";
 		yield return $"textures\\minimap\\{folderName}\\{trsName}";
+		yield return $"textures\\minimap\\{folderName}\\{folderName}_{x2}_{y2}.blp";
 		yield return $"textures\\minimap\\{folderName}\\{paddedName}";
 		yield return $"World\\Minimaps\\{folderName}\\{trsName}";
+		yield return $"World\\Minimaps\\{folderName}\\map{tileX}_{tileY}.blp";
 		yield return $"World\\Minimaps\\{folderName}\\{paddedName}";
 	}
 
@@ -1999,8 +2055,16 @@ static string? ResolveFilesystemMinimapPath(string clientRoot, string relativePa
 	if (File.Exists(underData))
 		return underData;
 
+	string underDataMpq = underData + ".MPQ";
+	if (File.Exists(underDataMpq))
+		return underDataMpq;
+
 	string underRoot = Path.Combine(clientRoot, normalized);
-	return File.Exists(underRoot) ? underRoot : null;
+	if (File.Exists(underRoot))
+		return underRoot;
+
+	string underRootMpq = underRoot + ".MPQ";
+	return File.Exists(underRootMpq) ? underRootMpq : null;
 }
 
 static byte[]? DecodeArchiveBackedMinimap(byte[] bytes, string sourcePath)
@@ -2172,6 +2236,9 @@ static AdtPlacementCatalog? TryReadPlacementCatalogForBuildCache(TerrainTraining
 	if (entry.SourceKind == TerrainTrainingSampleSourceKind.MountedArchive)
 	{
 		IArchiveCatalog archiveCatalog = GetOrCreateArchiveCatalog(entry.SourceRoot, archiveCatalogs);
+		if (TryReadAlphaEmbeddedTile(entry, archiveCatalog, out AlphaEmbeddedAdtTileData? alphaTile))
+			return alphaTile!.PlacementCatalog;
+
 		byte[] bytes = archiveCatalog.ReadFile(placementPath) ?? [];
 		if (bytes.Length == 0)
 			return null;
@@ -2499,8 +2566,46 @@ static MlCorpusTileReport CreateTileReport(string tileStem, string adtPath, bool
 static IArchiveCatalog CreateArchiveCatalog(string clientRoot)
 {
 	IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-	ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [clientRoot], (ArchiveCatalogBootstrapOptions?)null);
+	ArchiveCatalogBootstrapper.Bootstrap(
+		archiveCatalog,
+		BuildLegacySearchRoots(clientRoot),
+		new ArchiveCatalogBootstrapOptions(ExternalListfilePath: ResolveLegacyListfilePath()));
+	if (archiveCatalog is MpqArchiveCatalog mpqArchiveCatalog)
+		mpqArchiveCatalog.ScanMapMpqArchives(clientRoot);
+
 	return archiveCatalog;
+}
+
+static IReadOnlyList<string> BuildLegacySearchRoots(string clientRoot)
+{
+	List<string> roots = [];
+	string dataRoot = Path.Combine(clientRoot, "Data");
+	if (Directory.Exists(dataRoot))
+		roots.Add(dataRoot);
+
+	if (!string.Equals(clientRoot, dataRoot, StringComparison.OrdinalIgnoreCase))
+		roots.Add(clientRoot);
+
+	return roots.Count > 0 ? roots : [clientRoot];
+}
+
+static string? ResolveLegacyListfilePath()
+{
+	string[] candidates =
+	[
+		Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdxViewer", "community-listfile-withcapitals.csv"),
+		Path.Combine(AppContext.BaseDirectory, "community-listfile-withcapitals.csv"),
+		"community-listfile-withcapitals.csv",
+		"listfile.csv",
+	];
+
+	foreach (string candidate in candidates)
+	{
+		if (File.Exists(candidate))
+			return candidate;
+	}
+
+	return null;
 }
 
 static bool ArchiveMapExists(IArchiveCatalog archiveCatalog, string clientRoot, string mapName, string mapPath)
@@ -2541,6 +2646,130 @@ static IReadOnlyList<WdtTileCoordinate> ReadArchiveWdtTiles(byte[] wdtBytes, str
 	using MemoryStream stream = new(wdtBytes, writable: false);
 	MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, wdtVirtualPath);
 	return WdtTileIndexReader.ReadOccupiedTiles(stream, fileSummary);
+}
+
+static string GetMapDirectoryFromMapVirtualRoot(string mapVirtualRoot, string mapName)
+{
+	string trimmed = mapVirtualRoot.TrimEnd('\\', '/');
+	if (trimmed.EndsWith(".wdt", StringComparison.OrdinalIgnoreCase))
+		return Path.GetFileNameWithoutExtension(trimmed) ?? mapName;
+
+	return Path.GetFileName(trimmed) ?? mapName;
+}
+
+static bool TryReadAlphaEmbeddedTile(TerrainTrainingSampleDescriptor entry, IArchiveCatalog archiveCatalog, out AlphaEmbeddedAdtTileData? alphaTile)
+{
+	alphaTile = null;
+	if (!TryParseAlphaEmbeddedTileSourcePath(entry.RootAdtPath, out string mapDirectory, out int tileX, out int tileY))
+		return false;
+
+	return AlphaEmbeddedAdtReader.TryReadTile(entry.SourceRoot, mapDirectory, tileX, tileY, archiveCatalog, out alphaTile);
+}
+
+static bool TryParseAlphaEmbeddedTileSourcePath(string sourcePath, out string mapDirectory, out int tileX, out int tileY)
+{
+	mapDirectory = string.Empty;
+	tileX = 0;
+	tileY = 0;
+
+	const string marker = "#alpha-tile(";
+	int markerIndex = sourcePath.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
+	if (markerIndex < 0 || !sourcePath.EndsWith(')'))
+		return false;
+
+	string prefix = sourcePath[..markerIndex].TrimEnd('\\', '/');
+	string coords = sourcePath[(markerIndex + marker.Length)..^1];
+	string[] parts = coords.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+	if (parts.Length != 2
+		|| !int.TryParse(parts[0], out tileX)
+		|| !int.TryParse(parts[1], out tileY))
+	{
+		return false;
+	}
+
+	string? directoryPath = Path.GetDirectoryName(prefix.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar));
+	mapDirectory = string.IsNullOrWhiteSpace(directoryPath) ? string.Empty : Path.GetFileName(directoryPath) ?? string.Empty;
+	return !string.IsNullOrWhiteSpace(mapDirectory);
+}
+
+static AdtSummary BuildAlphaEmbeddedAdtSummary(AlphaEmbeddedAdtTileData alphaTile)
+{
+	return new AdtSummary(
+		alphaTile.SourcePath,
+		MapFileKind.Adt,
+		terrainChunkCount: alphaTile.TerrainTileData.ChunkCount,
+		textureNameCount: 0,
+		modelNameCount: alphaTile.PlacementCatalog.ModelNames.Count,
+		worldModelNameCount: alphaTile.PlacementCatalog.WorldModelNames.Count,
+		modelPlacementCount: alphaTile.PlacementCatalog.ModelPlacements.Count,
+		worldModelPlacementCount: alphaTile.PlacementCatalog.WorldModelPlacements.Count,
+		hasFlightBounds: false,
+		hasWater: alphaTile.LiquidTileData.ActiveChunkCount > 0,
+		hasTextureParams: false,
+		hasTextureFlags: false);
+}
+
+static AdtLiquidFile BuildAlphaEmbeddedLiquidFile(AlphaEmbeddedAdtTileData alphaTile)
+{
+	IReadOnlyList<AdtLiquidChunk> chunks = alphaTile.LiquidTileData.Chunks
+		.Select(static chunk => new AdtLiquidChunk(
+			chunk.ChunkIndex,
+			chunk.FishableMask,
+			chunk.DeepMask,
+			chunk.Layers.Select(static layer => new AdtLiquidLayer(
+				layer.LiquidTypeId,
+				layer.BasicType,
+				layer.VertexFormat,
+				layer.MinHeight,
+				layer.MaxHeight,
+				layer.XOffset,
+				layer.YOffset,
+				layer.Width,
+				layer.Height,
+				existsBitmap: Array.Empty<byte>(),
+				heights: null,
+				depths: null,
+				uvs: null)).ToArray()))
+		.ToArray();
+
+	return new AdtLiquidFile(alphaTile.SourcePath, MapFileKind.Adt, chunks);
+}
+
+static AdtMcnkSummary BuildAlphaEmbeddedMcnkSummary(AlphaEmbeddedAdtTileData alphaTile)
+{
+	WorldTerrainTileData terrain = alphaTile.TerrainTileData;
+	int totalLayerCount = terrain.Chunks.Sum(static chunk => chunk.LayerCount);
+	int maxLayerCount = terrain.Chunks.Count > 0 ? terrain.Chunks.Max(static chunk => chunk.LayerCount) : 0;
+	int chunksWithMcly = terrain.Chunks.Count(static chunk => chunk.LayerCount > 0);
+	int chunksWithMultipleLayers = terrain.Chunks.Count(static chunk => chunk.LayerCount > 1);
+	int chunksWithMclq = alphaTile.LiquidTileData.ActiveChunkCount;
+
+	return new AdtMcnkSummary(
+		alphaTile.SourcePath,
+		MapFileKind.Adt,
+		mcnkCount: terrain.ChunkCount,
+		zeroLengthMcnkCount: 0,
+		headerLikeMcnkCount: terrain.ChunkCount,
+		distinctIndexCount: terrain.ChunkCount,
+		duplicateIndexCount: 0,
+		distinctAreaIdCount: terrain.DistinctAreaIdCount,
+		chunksWithHoles: terrain.HoleChunkCount,
+		chunksWithLiquidFlags: terrain.LiquidFlagChunkCount,
+		chunksWithMccvFlag: 0,
+		chunksWithMcvt: terrain.ChunksWithHeights,
+		chunksWithMcnr: 0,
+		chunksWithMcly: chunksWithMcly,
+		chunksWithMcal: 0,
+		chunksWithMcsh: 0,
+		chunksWithMccv: 0,
+		chunksWithMclq: chunksWithMclq,
+		chunksWithMcrd: 0,
+		chunksWithMcrw: 0,
+		totalLayerCount: totalLayerCount,
+		maxLayerCount: maxLayerCount,
+		chunksWithMultipleLayers: chunksWithMultipleLayers,
+		mccvFlagWithoutPayloadCount: 0,
+		liquidFlagWithoutPayloadCount: Math.Max(0, terrain.LiquidFlagChunkCount - chunksWithMclq));
 }
 
 static AdtSummary ReadArchiveAdtSummary(byte[] adtBytes, string adtVirtualPath)

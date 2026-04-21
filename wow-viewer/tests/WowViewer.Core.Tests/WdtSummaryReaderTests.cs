@@ -129,6 +129,32 @@ public sealed class WdtSummaryReaderTests
     }
 
     [Fact]
+    public void ReadOccupiedTiles_WdtWithOddSizedChunkPadding_ReturnsOccupiedCoordinates()
+    {
+        byte[] mainData = new byte[64 * 64 * 16];
+        WriteUInt32(mainData, 0, 128);
+        WriteUInt32(mainData, 16, 256);
+
+        byte[] bytes =
+        [
+            .. CreateChunk("MVER", CreateUInt32Payload(18)),
+            .. CreatePaddedChunk("MPHD", new byte[31]),
+            .. CreateChunk("MAIN", mainData),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, "alpha-padded.wdt");
+        IReadOnlyList<WdtTileCoordinate> tiles = WdtTileIndexReader.ReadOccupiedTiles(stream, fileSummary);
+
+        Assert.Equal(
+            [
+                new WdtTileCoordinate(0, 0),
+                new WdtTileCoordinate(1, 0),
+            ],
+            tiles);
+    }
+
+    [Fact]
     public void ReadOccupiedTiles_DevelopmentWdt_ReturnsExpectedCount()
     {
         IReadOnlyList<WdtTileCoordinate> tiles = WdtTileIndexReader.ReadOccupiedTiles(MapTestPaths.DevelopmentWdtPath);
@@ -169,6 +195,15 @@ public sealed class WdtSummaryReaderTests
     private static byte[] CreateChunk(string id, byte[] payload)
     {
         byte[] bytes = new byte[8 + payload.Length];
+        Array.Copy(WowViewer.Core.Chunks.FourCC.FromString(id).ToFileBytes(), 0, bytes, 0, 4);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), (uint)payload.Length);
+        Array.Copy(payload, 0, bytes, 8, payload.Length);
+        return bytes;
+    }
+
+    private static byte[] CreatePaddedChunk(string id, byte[] payload)
+    {
+        byte[] bytes = new byte[8 + payload.Length + (payload.Length & 1)];
         Array.Copy(WowViewer.Core.Chunks.FourCC.FromString(id).ToFileBytes(), 0, bytes, 0, 4);
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), (uint)payload.Length);
         Array.Copy(payload, 0, bytes, 8, payload.Length);
