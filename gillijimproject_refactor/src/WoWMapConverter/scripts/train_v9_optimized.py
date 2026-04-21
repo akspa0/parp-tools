@@ -164,12 +164,19 @@ IMAGENET_RGB_STD = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view
 V9_ACTIVE_INPUT_SIGNALS = [
     "terrain_only_or_no_liquid_or_no_object_or_no_mccv_or_image_minimap_rgb",
     "normal_rgb",
+    "minimap_luma",
+    "minimap_detail_gradient",
     "wdl_17_or_height_17_base_prior",
     "height_min_mask",
     "height_max_mask",
+    "height_range_context",
+    "detail_energy_context",
+    "minimap_variance_context",
     "liquid_mask",
     "liquid_height_prior",
     "object_footprint_mask",
+    "object_precise_mask",
+    "pm4_footprint_mask",
     "brush_imprint_mask",
     "hole_mask_16x16",
 ]
@@ -261,7 +268,25 @@ def _normalize_rgb_input(rgb_tensor: torch.Tensor, recovery_mask: torch.Tensor, 
     return attenuated, normalized
 
 
+def _rgb_to_luma(rgb_tensor: torch.Tensor) -> torch.Tensor:
+    weights = torch.tensor([0.299, 0.587, 0.114], dtype=rgb_tensor.dtype).view(3, 1, 1)
+    return (rgb_tensor * weights).sum(dim=0, keepdim=True)
+
+
+def _gradient_magnitude_map(channel_tensor: torch.Tensor) -> torch.Tensor:
+    dx = torch.zeros_like(channel_tensor)
+    dy = torch.zeros_like(channel_tensor)
+    dx[:, :, :-1] = channel_tensor[:, :, 1:] - channel_tensor[:, :, :-1]
+    dy[:, :-1, :] = channel_tensor[:, 1:, :] - channel_tensor[:, :-1, :]
+    return torch.sqrt(torch.clamp(dx.square() + dy.square(), min=0.0))
+
+
+def _context_mask(value: float) -> torch.Tensor:
+    return torch.full((1, 257, 257), float(np.clip(value, 0.0, 1.0)), dtype=torch.float32)
+
+
 def _build_v9_input_channels(
+    entry: "V9SampleEntry",
     arrays: dict[str, np.ndarray],
     base_257_scaled: torch.Tensor,
     *,
@@ -283,25 +308,40 @@ def _build_v9_input_channels(
     liquid_mask = _single_channel_array_to_tensor(arrays.get("liquid_mask_257"), resize_mode="nearest")
     liquid_height_prior = _single_channel_array_to_tensor(arrays.get("liquid_height_257"), resize_mode="bilinear") * liquid_mask
     object_mask = _single_channel_array_to_tensor(arrays.get("object_mask_257"), resize_mode="nearest")
+    precise_object_mask = _single_channel_array_to_tensor(arrays.get("object_mask_precise_257"), resize_mode="nearest")
+    pm4_mask = _single_channel_array_to_tensor(arrays.get("pm4_mask_257"), resize_mode="nearest")
     brush_mask = _single_channel_array_to_tensor(arrays.get("brush_mask_257"), resize_mode="nearest")
     if not include_brush_mask:
         brush_mask = torch.zeros_like(brush_mask)
     hole_mask_257 = _single_channel_array_to_tensor(arrays.get("hole_mask_16x16"), resize_mode="nearest")
 
-    recovery_mask = build_recovery_mask(object_mask=object_mask, liquid_mask=liquid_mask, brush_mask=brush_mask)
+    recovery_object_mask = torch.maximum(object_mask, torch.maximum(precise_object_mask, pm4_mask))
+    recovery_mask = build_recovery_mask(object_mask=recovery_object_mask, liquid_mask=liquid_mask, brush_mask=brush_mask)
     preview_minimap_rgb, minimap_input = _normalize_rgb_input(minimap_rgb, recovery_mask, MASKED_RGB_ATTENUATION)
     _, normal_input = _normalize_rgb_input(normal_rgb, recovery_mask, MASKED_NORMAL_ATTENUATION)
+    minimap_luma = _rgb_to_luma(preview_minimap_rgb)
+    minimap_gradient = torch.clamp(_gradient_magnitude_map(minimap_luma) * 4.0, 0.0, 1.0)
+    height_range_context = _context_mask((entry.height_range / max(1.0, DEFAULT_HEIGHT_SCALE)) if entry.height_range > 0.0 else 0.0)
+    detail_energy_context = _context_mask(entry.detail_energy / 2.0)
+    minimap_variance_context = _context_mask(entry.minimap_variance / 0.1)
 
     inputs = torch.cat(
         [
             minimap_input,
             normal_input,
+            minimap_luma,
+            minimap_gradient,
             base_257_scaled,
             height_min_mask,
             height_max_mask,
+            height_range_context,
+            detail_energy_context,
+            minimap_variance_context,
             liquid_mask,
             liquid_height_prior,
             object_mask,
+            precise_object_mask,
+            pm4_mask,
             brush_mask,
             hole_mask_257,
         ],
@@ -375,6 +415,7 @@ class V9NativeDatasetOptimized(Dataset):
 
         # Also precompute the full input tensor stack.
         inputs, preview_minimap_rgb = _build_v9_input_channels(
+            entry=entry,
             arrays=arrays,
             base_257_scaled=base_257_scaled,
             include_brush_mask=self.include_brush_mask,
@@ -391,6 +432,12 @@ class V9NativeDatasetOptimized(Dataset):
             ).unsqueeze(0) / self.height_scale,
             "preview_object_mask": torch.from_numpy(
                 arrays.get("object_mask_257", np.zeros((257, 257), dtype=np.uint8)).astype(np.float32)
+            ).unsqueeze(0),
+            "preview_object_precise_mask": torch.from_numpy(
+                arrays.get("object_mask_precise_257", np.zeros((257, 257), dtype=np.uint8)).astype(np.float32)
+            ).unsqueeze(0),
+            "preview_pm4_mask": torch.from_numpy(
+                arrays.get("pm4_mask_257", np.zeros((257, 257), dtype=np.uint8)).astype(np.float32)
             ).unsqueeze(0),
             "preview_hole_mask": torch.from_numpy(
                 arrays.get("hole_mask_16x16", np.zeros((16, 16), dtype=np.uint8)).astype(np.float32)
@@ -1006,7 +1053,7 @@ def _resolve_group_count(channels: int, preferred_groups: int) -> int:
 
 
 class V9TerrainModel(nn.Module):
-    def __init__(self, in_channels: int = 14, hidden_channels: int = DEFAULT_HIDDEN_CHANNELS, blocks_per_stage: int = DEFAULT_BLOCKS_PER_STAGE):
+    def __init__(self, in_channels: int = 21, hidden_channels: int = DEFAULT_HIDDEN_CHANNELS, blocks_per_stage: int = DEFAULT_BLOCKS_PER_STAGE):
         super().__init__()
         self.stem = nn.Sequential(
             nn.Conv2d(in_channels, hidden_channels, kernel_size=5, padding=2, padding_mode="reflect"),
@@ -1429,94 +1476,26 @@ def evaluate_model_on_entries(
                 continue
 
             gt = arrays["height_257"].astype(np.float64)
-            base_17_np = arrays["height_17"].astype(np.float64)
-            base_17_t = torch.from_numpy(base_17_np).unsqueeze(0).unsqueeze(0).to(device)
+            base_17_np = arrays["wdl_17"].astype(np.float64)
+            base_17_t = torch.from_numpy(base_17_np.astype(np.float32)).unsqueeze(0).unsqueeze(0).to(device)
 
-            wdl_17 = arrays["wdl_17"].astype(np.float32)
+            base_17_for_input = torch.from_numpy(base_17_np.astype(np.float32)).unsqueeze(0)
+            base_257_t = F.interpolate(base_17_for_input.unsqueeze(0), size=(257, 257), mode="bilinear", align_corners=True).squeeze(0)
+            base_257_np = base_257_t.squeeze(0).cpu().numpy().astype(np.float32)
+            base_257_scaled = base_257_t / height_scale
 
-            inputs_np = arrays.get("minimap_rgb_256")
-            if inputs_np is None:
-                minimap_rgb = np.full((256, 256, 3), (0, 0, 0), dtype=np.uint8)
-            else:
-                minimap_rgb = inputs_np
-
-            rgb_t = torch.from_numpy(minimap_rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0)
-            if rgb_t.shape[-2:] != (257, 257):
-                rgb_t = F.interpolate(rgb_t, size=(257, 257), mode="bilinear", align_corners=False)
-            rgb_t = rgb_t.to(device)
-
-            normal_rgb = arrays.get("normal_rgb_256")
-            if normal_rgb is None:
-                normal_rgb_arr = np.full((256, 256, 3), DEFAULT_NORMAL_RGB, dtype=np.uint8)
-            else:
-                normal_rgb_arr = normal_rgb
-            normal_t = torch.from_numpy(normal_rgb_arr.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0)
-            if normal_t.shape[-2:] != (257, 257):
-                normal_t = F.interpolate(normal_t, size=(257, 257), mode="bilinear", align_corners=False)
-            normal_t = normal_t.to(device)
-
-            base_257_np = base_17_np[::8, ::8].copy()
-            base_257_t = torch.from_numpy(base_257_np.astype(np.float32)).unsqueeze(0).unsqueeze(0).to(device)
-            base_257_t = F.interpolate(base_257_t, size=(257, 257), mode="bilinear", align_corners=True)
-            base_257_t = base_257_t / height_scale
-
-            height_min_v = float(np.min(arrays["height_257"]))
-            height_max_v = float(np.max(arrays["height_257"]))
-            height_hints = arrays.get("height_hints_v7")
-            if height_hints is not None and len(height_hints) >= 2:
-                height_min_v = float(height_hints[0])
-                height_max_v = float(height_hints[1])
-            height_min_mask = torch.full((1, 1, 257, 257), height_min_v, dtype=torch.float32, device=device)
-            height_max_mask = torch.full((1, 1, 257, 257), height_max_v, dtype=torch.float32, device=device)
-
-            liquid_mask_arr = arrays.get("liquid_mask_257")
-            if liquid_mask_arr is None:
-                liquid_mask_arr = np.zeros((257, 257), dtype=np.uint8)
-            liquid_mask_t = torch.from_numpy(liquid_mask_arr.astype(np.float32)).unsqueeze(0).unsqueeze(0).to(device)
-
-            object_mask_arr = arrays.get("object_mask_257")
-            if object_mask_arr is None:
-                object_mask_arr = np.zeros((257, 257), dtype=np.uint8)
-            object_mask_t = torch.from_numpy(object_mask_arr.astype(np.float32)).unsqueeze(0).unsqueeze(0).to(device)
-
-            recovery_mask_t = torch.clamp(object_mask_t + liquid_mask_t, 0.0, 1.0)
-            attenuated = torch.clamp(rgb_t * (1.0 - recovery_mask_t * MASKED_RGB_ATTENUATION), 0.0, 1.0)
-            normalized_rgb = (attenuated - IMAGENET_RGB_MEAN.to(device)) / IMAGENET_RGB_STD.to(device)
-            attenuated_n = torch.clamp(normal_t * (1.0 - recovery_mask_t * MASKED_NORMAL_ATTENUATION), 0.0, 1.0)
-            normalized_normal = (attenuated_n - IMAGENET_RGB_MEAN.to(device)) / IMAGENET_RGB_STD.to(device)
-
-            brush_mask_arr = arrays.get("brush_mask_257")
-            if brush_mask_arr is None or not include_brush_mask:
-                brush_mask_arr = np.zeros((257, 257), dtype=np.uint8)
-            brush_mask_t = torch.from_numpy(brush_mask_arr.astype(np.float32)).unsqueeze(0).unsqueeze(0).to(device)
-            recovery_mask_t = torch.clamp(object_mask_t + liquid_mask_t + brush_mask_t, 0.0, 1.0)
-
-            hole_mask_arr = arrays.get("hole_mask_16x16")
-            if hole_mask_arr is None:
-                hole_mask_arr = np.zeros((16, 16), dtype=np.uint8)
-            hole_mask_t = torch.from_numpy(hole_mask_arr.astype(np.float32)).unsqueeze(0).unsqueeze(0)
-            hole_mask_t = F.interpolate(hole_mask_t, size=(257, 257), mode="nearest").to(device)
-
-            inputs = torch.cat(
-                [
-                    normalized_rgb,
-                    normalized_normal,
-                    base_257_t,
-                    height_min_mask,
-                    height_max_mask,
-                    liquid_mask_t,
-                    liquid_mask_t * torch.from_numpy(arrays.get("liquid_height_257", np.zeros((257, 257), dtype=np.float32)).astype(np.float32)).unsqueeze(0).unsqueeze(0).to(device),
-                    object_mask_t,
-                    brush_mask_t,
-                    hole_mask_t,
-                ],
-                dim=1,
+            inputs, _ = _build_v9_input_channels(
+                entry=entry,
+                arrays=arrays,
+                base_257_scaled=base_257_scaled,
+                include_brush_mask=include_brush_mask,
             )
+            inputs = inputs.unsqueeze(0).to(device)
 
             if channels_last and inputs.ndim == 4:
                 inputs = inputs.contiguous(memory_format=torch.channels_last)
 
-            device_inputs = inputs.unsqueeze(0).to(device)
+            device_inputs = inputs
             device_base_17 = (base_17_t / height_scale)
 
             with (torch.autocast(device_type="cuda", dtype=amp_dtype) if autocast_enabled else nullcontext()):
@@ -1566,12 +1545,13 @@ def build_v9_feature_contract(args: argparse.Namespace | None = None) -> dict[st
         zeroed_input_signals.append("brush_imprint_mask")
 
     return {
-        "contract_version": "v9-native-inputs.v2",
+        "contract_version": "v9-native-inputs.v4",
         "active_input_signals": list(V9_ACTIVE_INPUT_SIGNALS),
         "native_target_signals": list(V9_NATIVE_TARGET_SIGNALS),
         "zeroed_input_signals": zeroed_input_signals,
         "summary": (
-            "V9 now consumes the V7.7 multichannel context stack plus the native hole mask, "
+            "V9 now consumes the V7.7 multichannel context stack plus minimap-derived detail priors, "
+            "tile-level detail context, explicit precise object/PM4 masks, and the native hole mask, "
             "while keeping raw native terrain targets instead of PNG heightmaps."
         ),
     }
@@ -1580,8 +1560,8 @@ def build_v9_feature_contract(args: argparse.Namespace | None = None) -> dict[st
 def describe_v9_input_stack(args: argparse.Namespace) -> str:
     brush_state = "disabled" if getattr(args, "disable_brush_mask", False) else "enabled"
     return (
-        "Active v9 inputs | terrain-only/no-liquid/no-object/no-MCCV fallback minimap RGB + normal RGB + WDL/base prior + "
-        f"height hints + liquid/object masks + brush mask {brush_state} + liquid height + hole mask"
+        "Active v9 inputs | terrain-only/no-liquid/no-object/no-MCCV fallback minimap RGB + normal RGB + minimap luma/edge detail priors + "
+        f"WDL/base prior + height hints/range/detail context + liquid/object/precise-object/PM4 masks + brush mask {brush_state} + liquid height + hole mask"
     )
 
 
@@ -1945,6 +1925,7 @@ def train_single_run(
     best_val_loss = math.inf
     selection_metric_name = resolve_selection_metric_name(args)
     best_selection_metric_value = -math.inf if selection_metric_name == "dev_wdl_mae_improvement" else math.inf
+    has_ready_selection_metric = selection_metric_name == "val_loss"
     best_epoch = 0
     best_state: Optional[dict[str, Any]] = None
     epochs_since_best = 0
@@ -2052,14 +2033,18 @@ def train_single_run(
             dev_eval=dev_eval_metrics,
         )
         if not selection_metric_ready:
-            is_best = False
+            is_best = val_loss < best_val_loss
+        elif not has_ready_selection_metric and selection_metric_name != "val_loss":
+            is_best = True
         elif selection_metric_higher_is_better:
             is_best = selection_metric_value > best_selection_metric_value
         else:
             is_best = selection_metric_value < best_selection_metric_value
         if is_best:
             best_val_loss = val_loss
-            best_selection_metric_value = selection_metric_value
+            if selection_metric_ready:
+                best_selection_metric_value = selection_metric_value
+                has_ready_selection_metric = True
             best_epoch = epoch
             epochs_since_best = 0
         else:

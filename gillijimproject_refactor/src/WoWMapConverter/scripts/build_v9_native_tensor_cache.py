@@ -30,6 +30,10 @@ HEIGHT_GLOBAL_MIN = -1000.0
 HEIGHT_GLOBAL_MAX = 3000.0
 DEFAULT_NORMAL_RGB = (128, 128, 255)
 BRUSH_MANIFEST_FILE = "brush_manifest.json"
+PM4_OBJECT_MASK_KEYS = (
+    "pm4_mask",
+    "pm4_object_mask",
+)
 
 _BRUSH_MANIFEST_CACHE: dict[Path, dict[str, object] | None] = {}
 
@@ -593,6 +597,25 @@ def build_object_mask_257(dataset_root: Path, terrain_data: dict, tile_name: str
     return object_mask.squeeze(0).numpy().astype(np.uint8)
 
 
+def load_named_binary_mask(dataset_root: Path, terrain_data: dict, keys: tuple[str, ...]) -> np.ndarray:
+    for key in keys:
+        candidate = resolve_dataset_path(dataset_root, terrain_data.get(key))
+        if candidate is None:
+            continue
+        mask = load_binary_mask(candidate, INPUT_SIZE)
+        if np.any(mask):
+            return mask.astype(np.uint8)
+    return np.zeros((INPUT_SIZE, INPUT_SIZE), dtype=np.uint8)
+
+
+def build_precise_object_mask_257(dataset_root: Path, terrain_data: dict) -> np.ndarray:
+    return load_named_binary_mask(dataset_root, terrain_data, PRECISE_OBJECT_MASK_KEYS)
+
+
+def build_pm4_mask_257(dataset_root: Path, terrain_data: dict) -> np.ndarray:
+    return load_named_binary_mask(dataset_root, terrain_data, PM4_OBJECT_MASK_KEYS)
+
+
 def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved: bool) -> tuple[dict[str, np.ndarray], dict[str, object]] | None:
     try:
         with json_path.open("r", encoding="utf-8") as handle:
@@ -620,6 +643,8 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
     liquid_height_257 = load_heightmap_16bit(resolve_dataset_path(dataset_root, terrain_data.get("liquid_height")), INPUT_SIZE)
     liquid_height_257 *= liquid_mask_257.astype(np.float32)
     object_mask_257 = build_object_mask_257(dataset_root, terrain_data, tile_name)
+    precise_object_mask_257 = build_precise_object_mask_257(dataset_root, terrain_data)
+    pm4_mask_257 = build_pm4_mask_257(dataset_root, terrain_data)
     brush_mask_257 = load_binary_mask(resolve_brush_mask_path(dataset_root, tile_name), INPUT_SIZE)
 
     payload: dict[str, np.ndarray] = {
@@ -635,6 +660,8 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
         "liquid_mask_257": liquid_mask_257,
         "liquid_height_257": liquid_height_257.astype(np.float32),
         "object_mask_257": object_mask_257,
+        "object_mask_precise_257": precise_object_mask_257,
+        "pm4_mask_257": pm4_mask_257,
         "brush_mask_257": brush_mask_257,
     }
     if wdl_17 is not None:
@@ -645,6 +672,8 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
 
     liquid_coverage = float(liquid_mask_257.mean())
     object_coverage = float(object_mask_257.mean())
+    precise_object_coverage = float(precise_object_mask_257.mean())
+    pm4_coverage = float(pm4_mask_257.mean())
     brush_coverage = float(brush_mask_257.mean())
     hole_coverage = float(hole_mask_16.mean())
     minimap_variance = float(np.var(minimap_rgb_256.astype(np.float32) / 255.0)) if minimap_rgb_256 is not None else 0.0
@@ -662,12 +691,16 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
         "has_normal_rgb_256": has_normal_rgb_256,
         "liquid_coverage": liquid_coverage,
         "object_coverage": object_coverage,
+        "precise_object_coverage": precise_object_coverage,
+        "pm4_coverage": pm4_coverage,
         "brush_coverage": brush_coverage,
         "hole_coverage": hole_coverage,
         "minimap_variance": minimap_variance,
         "minimap_gradient": minimap_gradient,
         "detail_energy": detail_energy,
         "minimap_source": minimap_source,
+        "has_object_mask_precise_257": bool(np.any(precise_object_mask_257)),
+        "has_pm4_mask_257": bool(np.any(pm4_mask_257)),
         "array_names": sorted(payload.keys()),
     }
     return payload, metadata
