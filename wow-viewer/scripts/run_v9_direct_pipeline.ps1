@@ -98,7 +98,7 @@ function Get-OptionalTrainerArgValue([string[]]$Args, [string]$FlagName) {
 
 function Write-PipelineMetadata {
     param(
-        [string]$Path,
+        [string]$FilePath,
         [string]$Mode,
         [string]$OutputDir,
         [string]$PythonExe,
@@ -141,17 +141,11 @@ function Write-PipelineMetadata {
         curated_manifest = $CuratePath
         curation_report = $CurateReportPath
         cache_dir = $CacheDir
-        resolved_builds = @($ResolvedBuilds | ForEach-Object {
-            [ordered]@{
-                build_label = $_.BuildLabel
-                client_root = $_.ClientRoot
-                maps = @($_.Maps)
-            }
-        })
+        resolved_builds = ConvertTo-SerializableObject @($ResolvedBuilds)
     }
 
     $json = ConvertTo-SerializableObject $metadata | ConvertTo-Json -Depth 8
-    Set-Content -Path $Path -Value $json -Encoding UTF8
+    Set-Content -Path $FilePath -Value $json -Encoding UTF8
 }
 
 function Invoke-Step {
@@ -504,26 +498,28 @@ if ($TrainerArgs.Count -gt 0) {
 }
 
 $pipelineMetadataPath = Join-Path $OutputDir "pipeline_run.json"
-Write-PipelineMetadata \
-    -Path $pipelineMetadataPath \
-    -Mode $Mode \
-    -OutputDir $OutputDir \
-    -PythonExe $PythonExe \
-    -ConverterProject $ConverterProject \
-    -TrainerScript $TrainerScript \
-    -TrainerArgs $TrainerArgs \
-    -CacheManifest $cacheManifest \
-    -TrainOutputDir $trainOutputDir \
-    -ResolvedBuilds $resolvedBuilds \
-    -ScanPaths $scanPaths \
-    -MergedScanPath $mergedScanPath \
-    -AuditPath $auditPath \
-    -CuratePath $curatePath \
-    -CurateReportPath $curateReportPath \
-    -CacheDir $cacheDir \
-    -NoRequireMinimap $NoRequireMinimap.IsPresent \
-    -NoRequireWdl $NoRequireWdl.IsPresent \
-    -WowArchiveOnly $WowArchiveOnly.IsPresent
+$pipelineMetadataArgs = @{
+    FilePath = $pipelineMetadataPath
+    Mode = $Mode
+    OutputDir = $OutputDir
+    PythonExe = $PythonExe
+    ConverterProject = $ConverterProject
+    TrainerScript = $TrainerScript
+    TrainerArgs = $TrainerArgs
+    CacheManifest = $cacheManifest
+    TrainOutputDir = $trainOutputDir
+    ResolvedBuilds = $resolvedBuilds
+    ScanPaths = $scanPaths
+    MergedScanPath = $mergedScanPath
+    AuditPath = $auditPath
+    CuratePath = $curatePath
+    CurateReportPath = $curateReportPath
+    CacheDir = $cacheDir
+    NoRequireMinimap = $NoRequireMinimap.IsPresent
+    NoRequireWdl = $NoRequireWdl.IsPresent
+    WowArchiveOnly = $WowArchiveOnly.IsPresent
+}
+Write-PipelineMetadata @pipelineMetadataArgs
 Write-Ok "Wrote pipeline metadata: $pipelineMetadataPath"
 
 $trainStepLabel = "Auditing trainer contract"
