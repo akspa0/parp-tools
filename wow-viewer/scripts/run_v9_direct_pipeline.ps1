@@ -41,6 +41,119 @@ function Write-Ok([string]$Message) { Write-Host "[OK]  $Message" -ForegroundCol
 function Write-WarnLine([string]$Message) { Write-Warning $Message }
 function Write-Err([string]$Message) { Write-Host "[ERR] $Message" -ForegroundColor Red }
 
+function ConvertTo-SerializableObject($Value) {
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    if ($Value -is [System.Array]) {
+        return @($Value | ForEach-Object { ConvertTo-SerializableObject $_ })
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = [ordered]@{}
+        foreach ($key in $Value.Keys) {
+            $result[[string]$key] = ConvertTo-SerializableObject $Value[$key]
+        }
+
+        return $result
+    }
+
+    if ($Value -is [System.Management.Automation.PSCustomObject] -or $Value -is [psobject]) {
+        $result = [ordered]@{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $result[$property.Name] = ConvertTo-SerializableObject $property.Value
+        }
+
+        return $result
+    }
+
+    return $Value
+}
+
+function Get-OptionalTrainerArgValue([string[]]$Args, [string]$FlagName) {
+    if (!$Args) {
+        return $null
+    }
+
+    for ($index = 0; $index -lt $Args.Count; $index++) {
+        if ($Args[$index] -ne $FlagName) {
+            continue
+        }
+
+        if ($index + 1 -ge $Args.Count) {
+            return $true
+        }
+
+        $candidate = $Args[$index + 1]
+        if ($candidate.StartsWith("--")) {
+            return $true
+        }
+
+        return $candidate
+    }
+
+    return $null
+}
+
+function Write-PipelineMetadata {
+    param(
+        [string]$Path,
+        [string]$Mode,
+        [string]$OutputDir,
+        [string]$PythonExe,
+        [string]$ConverterProject,
+        [string]$TrainerScript,
+        [string[]]$TrainerArgs,
+        [string]$CacheManifest,
+        [string]$TrainOutputDir,
+        [object[]]$ResolvedBuilds,
+        [string[]]$ScanPaths,
+        [string]$MergedScanPath,
+        [string]$AuditPath,
+        [string]$CuratePath,
+        [string]$CurateReportPath,
+        [string]$CacheDir,
+        [bool]$NoRequireMinimap,
+        [bool]$NoRequireWdl,
+        [bool]$WowArchiveOnly
+    )
+
+    $metadata = [ordered]@{
+        schema_version = "wow-viewer-direct-v9-pipeline.v1"
+        created_at_utc = [DateTime]::UtcNow.ToString("o")
+        mode = $Mode
+        output_dir = $OutputDir
+        python_exe = $PythonExe
+        converter_project = $ConverterProject
+        trainer_script = $TrainerScript
+        trainer_args = @($TrainerArgs)
+        cache_manifest = $CacheManifest
+        train_output_dir = $TrainOutputDir
+        dev_eval_cache_manifest = Get-OptionalTrainerArgValue -Args $TrainerArgs -FlagName "--dev-eval-cache-manifest"
+        selection_metric = Get-OptionalTrainerArgValue -Args $TrainerArgs -FlagName "--selection-metric"
+        no_require_minimap = $NoRequireMinimap
+        no_require_wdl = $NoRequireWdl
+        wowarchive_only = $WowArchiveOnly
+        scan_manifests = @($ScanPaths)
+        merged_scan_manifest = $MergedScanPath
+        audit_manifest = $AuditPath
+        curated_manifest = $CuratePath
+        curation_report = $CurateReportPath
+        cache_dir = $CacheDir
+        resolved_builds = @($ResolvedBuilds | ForEach-Object {
+            [ordered]@{
+                build_label = $_.BuildLabel
+                client_root = $_.ClientRoot
+                maps = @($_.Maps)
+            }
+        })
+    }
+
+    $json = ConvertTo-SerializableObject $metadata | ConvertTo-Json -Depth 8
+    Set-Content -Path $Path -Value $json -Encoding UTF8
+}
+
 function Invoke-Step {
     param(
         [string]$Exe,
@@ -389,6 +502,29 @@ if ($NoRequireWdl) {
 if ($TrainerArgs.Count -gt 0) {
     $trainArgs += $TrainerArgs
 }
+
+$pipelineMetadataPath = Join-Path $OutputDir "pipeline_run.json"
+Write-PipelineMetadata \
+    -Path $pipelineMetadataPath \
+    -Mode $Mode \
+    -OutputDir $OutputDir \
+    -PythonExe $PythonExe \
+    -ConverterProject $ConverterProject \
+    -TrainerScript $TrainerScript \
+    -TrainerArgs $TrainerArgs \
+    -CacheManifest $cacheManifest \
+    -TrainOutputDir $trainOutputDir \
+    -ResolvedBuilds $resolvedBuilds \
+    -ScanPaths $scanPaths \
+    -MergedScanPath $mergedScanPath \
+    -AuditPath $auditPath \
+    -CuratePath $curatePath \
+    -CurateReportPath $curateReportPath \
+    -CacheDir $cacheDir \
+    -NoRequireMinimap $NoRequireMinimap.IsPresent \
+    -NoRequireWdl $NoRequireWdl.IsPresent \
+    -WowArchiveOnly $WowArchiveOnly.IsPresent
+Write-Ok "Wrote pipeline metadata: $pipelineMetadataPath"
 
 $trainStepLabel = "Auditing trainer contract"
 if ($Mode -eq "train") {
