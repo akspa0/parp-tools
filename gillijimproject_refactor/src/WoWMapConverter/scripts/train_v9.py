@@ -19,6 +19,11 @@ import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Sampler, Subset
 
+try:
+    from tqdm.auto import tqdm
+except ImportError:
+    tqdm = None
+
 from v7_losses import build_recovery_mask
 
 
@@ -1098,8 +1103,19 @@ def run_epoch(
 
     autocast_enabled = device.type == "cuda" and amp_dtype in {torch.float16, torch.bfloat16}
     loss_weights = resolve_loss_weights(current_epoch, args)
+    phase_name = "train" if is_training else "val"
+    progress_bar = None
+    if tqdm is not None:
+        progress_bar = tqdm(
+            loader,
+            total=len(loader),
+            desc=f"epoch {current_epoch:03d}/{args.epochs} {phase_name}",
+            dynamic_ncols=True,
+            leave=False,
+        )
+    iterator = progress_bar if progress_bar is not None else loader
 
-    for batch in loader:
+    for batch_index, batch in enumerate(iterator, start=1):
         batch = move_batch_to_device(batch, device, channels_last)
         if is_training:
             optimizer.zero_grad(set_to_none=True)
@@ -1131,6 +1147,18 @@ def run_epoch(
         total_loss += float(loss.item()) * batch_size
         for key, value in components.items():
             component_sums[key] += float(value) * batch_size
+
+        if progress_bar is not None:
+            elapsed = max(time.perf_counter() - start, 1e-6)
+            progress_bar.set_postfix(
+                loss=f"{(total_loss / max(sample_count, 1)):.4f}",
+                sps=f"{(sample_count / elapsed):.1f}",
+                batch=f"{batch_index}/{len(loader)}",
+                refresh=False,
+            )
+
+    if progress_bar is not None:
+        progress_bar.close()
 
     elapsed = max(time.perf_counter() - start, 1e-6)
     mean_loss = total_loss / max(sample_count, 1)
