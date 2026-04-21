@@ -134,6 +134,7 @@ public sealed class WdtSummaryReaderTests
         byte[] mainData = new byte[64 * 64 * 16];
         WriteUInt32(mainData, 0, 128);
         WriteUInt32(mainData, 16, 256);
+        WriteUInt32(mainData, 64 * 16, 512);
 
         byte[] bytes =
         [
@@ -149,6 +150,7 @@ public sealed class WdtSummaryReaderTests
         Assert.Equal(
             [
                 new WdtTileCoordinate(0, 0),
+                new WdtTileCoordinate(0, 1),
                 new WdtTileCoordinate(1, 0),
             ],
             tiles);

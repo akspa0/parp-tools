@@ -43,7 +43,9 @@ public static class WdtTileIndexReader
             if (value == 0)
                 continue;
 
-            occupiedTiles.Add(new WdtTileCoordinate(index % WdtTilesPerAxis, index / WdtTilesPerAxis));
+            occupiedTiles.Add(mainCellSize == AlphaMainCellSize
+                ? new WdtTileCoordinate(index / WdtTilesPerAxis, index % WdtTilesPerAxis)
+                : new WdtTileCoordinate(index % WdtTilesPerAxis, index / WdtTilesPerAxis));
         }
 
         return occupiedTiles;
