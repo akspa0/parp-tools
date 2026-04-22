@@ -2,6 +2,31 @@
 
 # Active Context
 
+## Apr 22, 2026 - v9 now has the first repo-owned Runpod Pod lane with portable bundle packaging, GHCR image build assets, and a Pod launcher
+
+- this operationalizes the previously planned cloud training boundary for the active `v9` trainer without adding a local Docker requirement on this Windows workstation
+- active behavior after this slice:
+	- `gillijimproject_refactor/src/WoWMapConverter/scripts/package_v9_training_bundle.py` now packages train plus dev manifests into a portable bundle with manifest-relative Linux-friendly `shard_path` values under:
+		- `manifests/`
+		- `cache/<label>/shards/...`
+		- `metadata/`
+	- `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9.py` and `train_v9_optimized.py` now resolve relative manifest paths against the manifest file location, so bundled manifests no longer depend on the shell working directory
+	- `gillijimproject_refactor/docker/v9-trainer/Dockerfile`, `entrypoint.sh`, and `gillijimproject_refactor/.dockerignore` now define the first dedicated container image for `train_v9_optimized.py`
+	- `.github/workflows/build-v9-trainer-image.yml` now builds that image in GitHub Actions and publishes it to `ghcr.io`
+	- `gillijimproject_refactor/src/WoWMapConverter/scripts/runpod_launch_v9.py` now creates Runpod Pods through the Pods REST API and wires the container env contract for mounted or downloaded bundles
+	- `gillijimproject_refactor/docs/V9_Runpod_Training_Guide.md` now documents the end-to-end remote lane
+- bounded proof in this chat:
+	- `python -m py_compile` passed for:
+		- `train_v9.py`
+		- `train_v9_optimized.py`
+		- `package_v9_training_bundle.py`
+		- `runpod_launch_v9.py`
+	- a bounded real-data bundle smoke succeeded against the current PM4-mixed manifests with `--limit 2`, producing portable `train_manifest.json` plus `dev_holdout_manifest.json` under `output/tmp/v9_run_bundle_smoke`
+	- `runpod_launch_v9.py --dry-run` produced the expected Pod request payload for the new container env contract
+- current boundary:
+	- this proves the repo-owned packaging and launch surfaces only
+	- it does not yet prove a GitHub Actions image push, a real Runpod Pod pull, or an end-to-end remote checkpointed training run in this chat
+
 ## Apr 21, 2026 - uv training bootstrap now installs triton-windows on Windows CUDA environments
 
 - this extends the existing dedicated training bootstrap so optimized trainers can keep `torch.compile` enabled on Windows without failing on a missing Triton backend
@@ -6405,3 +6430,10 @@ MdxViewer is the **primary project** in the tooling suite. It is a high-performa
 | `MdxAnimator.cs` | Skeletal animation engine (hierarchy, interpolation, bone matrices) |
 | `MdxViewer.csproj` | Project file with WoWDBDefs bundling |
 | `.github/workflows/release-mdxviewer.yml` | CI/CD release workflow |
+
+## Apr 22, 2026 - `wow-viewer` model-output workspace now carries direct scene context and fly exploration
+
+- `wow-viewer/src/viewer/WowViewer.App/ModelOutputSceneLoader.cs` now lifts `source_json` context from inference summaries, parses `terrain_data.objects`, and carries object placeholder bounds into the `model-output` scene without any ADT conversion step.
+- `wow-viewer/src/viewer/WowViewer.App/ModelOutputGpuRenderer.cs` and `WowViewerDesktopApp.cs` now support object placeholder overlays plus an explicit `Orbit` / `Fly` camera split for the `Model Outputs` workspace, so large inference exports can be explored more like `MdxViewer`.
+- The current object proof level is placeholder geometry, not full MDX/WMO runtime ownership inside `model-output`. That remains a later seam.
+- `gillijimproject_refactor/src/WoWMapConverter/scripts/build_v9_native_tensor_cache.py` now exposes `--include-minimap-only-tiles` so compatibility cache builds can keep development tiles that have zero-valued source chunk heights but still carry usable minimap input.

@@ -530,6 +530,17 @@ def load_npz_arrays(shard_path: Path) -> dict[str, np.ndarray]:
         return {key: loaded[key].copy() for key in loaded.files}
 
 
+def resolve_manifest_entry_path(manifest_path: Path, raw_value: object) -> Path | None:
+    raw_text = str(raw_value or "").strip()
+    if not raw_text:
+        return None
+
+    resolved = Path(raw_text)
+    if resolved.is_absolute():
+        return resolved
+    return (manifest_path.parent / resolved).resolve()
+
+
 def load_cache_manifest(manifest_path: Path) -> list[V9SampleEntry]:
     with manifest_path.open("r", encoding="utf-8") as handle:
         manifest = json.load(handle)
@@ -538,7 +549,8 @@ def load_cache_manifest(manifest_path: Path) -> list[V9SampleEntry]:
     for entry in manifest.get("entries", []):
         tile_name = str(entry.get("tile_name", ""))
         map_name, tile_x, tile_y = parse_tile_coordinates(tile_name)
-        shard_path = Path(str(entry.get("shard_path", "")))
+        shard_path = resolve_manifest_entry_path(manifest_path, entry.get("shard_path", "")) or Path()
+        source_json_path = resolve_manifest_entry_path(manifest_path, entry.get("source_json", ""))
         liquid_coverage = entry.get("liquid_coverage")
         object_coverage = entry.get("object_coverage")
         brush_coverage = entry.get("brush_coverage")
@@ -593,7 +605,7 @@ def load_cache_manifest(manifest_path: Path) -> list[V9SampleEntry]:
                 tile_x=tile_x,
                 tile_y=tile_y,
                 shard_path=shard_path,
-                source_json=str(entry.get("source_json", "")),
+                source_json=str(source_json_path) if source_json_path is not None else "",
                 height_min=float(entry.get("height_min", 0.0)),
                 height_max=float(entry.get("height_max", 0.0)),
                 liquid_coverage=float(liquid_coverage or 0.0),

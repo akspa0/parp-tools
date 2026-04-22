@@ -1,0 +1,11 @@
+**
+!README.md
+!scripts/
+!scripts/requirements_train_v7.txt
+!src/
+!src/WoWMapConverter/
+!src/WoWMapConverter/scripts/
+!src/WoWMapConverter/scripts/**
+!docker/
+!docker/v9-trainer/
+!docker/v9-trainer/**

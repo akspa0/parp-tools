@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Linq;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using Silk.NET.OpenGL;
@@ -21,6 +22,7 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
     private int _uAmbientColor;
     private int _uHasTexture;
     private int _uTexture0;
+    private int _uTintColor;
 
     private uint _framebuffer;
     private uint _colorTexture;
@@ -47,6 +49,33 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
     public bool HasRenderableGeometry => _commands.Count > 0;
 
     public int CommandCount => _commands.Count;
+
+    public static ModelOutputCameraFrame BuildOrbitCameraFrame(
+        Vector3 boundsMin,
+        Vector3 boundsMax,
+        int width,
+        int height,
+        float azimuthDegrees,
+        float elevationDegrees,
+        float zoomFactor,
+        Vector3 targetOffset)
+    {
+        BuildOrbitCamera(boundsMin, boundsMax, width, height, azimuthDegrees, elevationDegrees, zoomFactor, targetOffset, out Matrix4x4 view, out Matrix4x4 projection, out Vector3 cameraPosition);
+        return new ModelOutputCameraFrame(view, projection, cameraPosition);
+    }
+
+    public static ModelOutputCameraFrame BuildFlyCameraFrame(
+        Vector3 boundsMin,
+        Vector3 boundsMax,
+        int width,
+        int height,
+        Vector3 position,
+        float azimuthDegrees,
+        float elevationDegrees)
+    {
+        BuildFlyCamera(boundsMin, boundsMax, width, height, position, azimuthDegrees, elevationDegrees, out Matrix4x4 view, out Matrix4x4 projection);
+        return new ModelOutputCameraFrame(view, projection, position);
+    }
 
     public void Dispose()
     {
@@ -87,7 +116,7 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
         _boundsMax = new Vector3(1.0f, 1.0f, 1.0f);
     }
 
-    public void LoadScene(ModelOutputScene scene)
+    public void LoadScene(ModelOutputScene scene, bool showObjects, bool showM2Objects, bool showWmoObjects)
     {
         ArgumentNullException.ThrowIfNull(scene);
 
@@ -119,40 +148,15 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
                 ? loadedTexture
                 : _fallbackWhiteTexture;
             bool hasTexture = textureId != _fallbackWhiteTexture;
-
-            uint vao = _gl.GenVertexArray();
-            uint vbo = _gl.GenBuffer();
-            uint ebo = _gl.GenBuffer();
-
-            _gl.BindVertexArray(vao);
-            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
-            unsafe
-            {
-                fixed (float* vertexPtr = vertexData)
-                {
-                    _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertexData.Length * sizeof(float)), vertexPtr, BufferUsageARB.StaticDraw);
-                }
-
-                _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
-                fixed (uint* indexPtr = tile.Indices)
-                {
-                    _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(tile.Indices.Length * sizeof(uint)), indexPtr, BufferUsageARB.StaticDraw);
-                }
-
-                _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 8u * sizeof(float), (void*)0);
-                _gl.EnableVertexAttribArray(0);
-                _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 8u * sizeof(float), (void*)(3 * sizeof(float)));
-                _gl.EnableVertexAttribArray(1);
-                _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, 8u * sizeof(float), (void*)(6 * sizeof(float)));
-                _gl.EnableVertexAttribArray(2);
-            }
-
-            _gl.BindVertexArray(0);
-            _commands.Add(new CommandBuffers(vao, vbo, ebo, (uint)tile.Indices.Length, textureId, hasTexture));
+            Vector3 boundsCenter = (scene.BoundsMin + scene.BoundsMax) * 0.5f;
+            _commands.Add(CreateCommand(vertexData, tile.Indices, textureId, hasTexture, new Vector4(1.0f), transparent: false, boundsCenter));
         }
+
+        if (showObjects)
+            LoadObjectPlaceholders(scene.Objects, showM2Objects, showWmoObjects);
     }
 
-    public void Render(int width, int height, float azimuthDegrees, float elevationDegrees, float zoomFactor, Vector3 targetOffset)
+    public void Render(int width, int height, ModelOutputCameraFrame cameraFrame)
     {
         EnsureFramebuffer(width, height);
 
@@ -162,10 +166,7 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
         _gl.Clear((uint)(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit));
 
         if (_commands.Count > 0)
-        {
-            BuildOrbitCamera(_boundsMin, _boundsMax, _frameWidth, _frameHeight, azimuthDegrees, elevationDegrees, zoomFactor, targetOffset, out Matrix4x4 view, out Matrix4x4 projection);
-            RenderPass(view, projection);
-        }
+            RenderPass(cameraFrame.View, cameraFrame.Projection);
 
         _gl.BindFramebuffer(GLEnum.Framebuffer, 0);
     }
@@ -174,9 +175,7 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
     {
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
-        _gl.Disable(EnableCap.Blend);
         _gl.Disable(EnableCap.CullFace);
-        _gl.DepthMask(true);
         _gl.UseProgram(_shaderProgram);
 
         unsafe
@@ -189,22 +188,36 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
         _gl.Uniform3(_uLightColor, _lightColor.X, _lightColor.Y, _lightColor.Z);
         _gl.Uniform3(_uAmbientColor, _ambientColor.X, _ambientColor.Y, _ambientColor.Z);
 
-        foreach (CommandBuffers command in _commands)
-        {
-            _gl.Uniform1(_uHasTexture, command.HasTexture ? 1 : 0);
-            _gl.ActiveTexture(TextureUnit.Texture0);
-            _gl.BindTexture(TextureTarget.Texture2D, command.TextureId);
-            _gl.Uniform1(_uTexture0, 0);
-            _gl.BindVertexArray(command.Vao);
-            unsafe
-            {
-                _gl.DrawElements(PrimitiveType.Triangles, command.IndexCount, DrawElementsType.UnsignedInt, (void*)0);
-            }
-        }
+        _gl.Disable(EnableCap.Blend);
+        _gl.DepthMask(true);
+        foreach (CommandBuffers command in _commands.Where(static command => !command.Transparent))
+            DrawCommand(command);
+
+        _gl.Enable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.DepthMask(false);
+        foreach (CommandBuffers command in _commands.Where(static command => command.Transparent))
+            DrawCommand(command);
 
         _gl.BindVertexArray(0);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
+        _gl.DepthMask(true);
+        _gl.Disable(EnableCap.Blend);
         _gl.UseProgram(0);
+    }
+
+    private void DrawCommand(CommandBuffers command)
+    {
+        _gl.Uniform1(_uHasTexture, command.HasTexture ? 1 : 0);
+        _gl.Uniform4(_uTintColor, command.TintColor.X, command.TintColor.Y, command.TintColor.Z, command.TintColor.W);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, command.TextureId);
+        _gl.Uniform1(_uTexture0, 0);
+        _gl.BindVertexArray(command.Vao);
+        unsafe
+        {
+            _gl.DrawElements(PrimitiveType.Triangles, command.IndexCount, DrawElementsType.UnsignedInt, (void*)0);
+        }
     }
 
     private bool TryGetOrLoadTexture(string texturePath, out uint textureId)
@@ -289,6 +302,7 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
             uniform vec3 uAmbientColor;
             uniform sampler2D uTexture0;
             uniform int uHasTexture;
+            uniform vec4 uTintColor;
 
             out vec4 FragColor;
 
@@ -297,8 +311,8 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
                 vec3 normal = normalize(vNormal);
                 float ndotl = max(dot(normal, normalize(uLightDir)), 0.0);
                 vec4 texel = uHasTexture == 1 ? texture(uTexture0, vTexCoord) : vec4(1.0, 1.0, 1.0, 1.0);
-                vec3 lit = texel.rgb * (uAmbientColor + (uLightColor * ndotl));
-                FragColor = vec4(lit, texel.a);
+                vec3 lit = texel.rgb * uTintColor.rgb * (uAmbientColor + (uLightColor * ndotl));
+                FragColor = vec4(lit, texel.a * uTintColor.a);
             }
             """;
 
@@ -330,6 +344,7 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
         _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
         _uTexture0 = _gl.GetUniformLocation(_shaderProgram, "uTexture0");
+        _uTintColor = _gl.GetUniformLocation(_shaderProgram, "uTintColor");
     }
 
     private uint CompileShader(ShaderType type, string source)
@@ -429,7 +444,140 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
         }
     }
 
-    private static void BuildOrbitCamera(Vector3 boundsMin, Vector3 boundsMax, int width, int height, float azimuthDegrees, float elevationDegrees, float zoomFactor, Vector3 targetOffset, out Matrix4x4 view, out Matrix4x4 projection)
+    private void LoadObjectPlaceholders(IReadOnlyList<ModelOutputObjectPlacement> objects, bool showM2Objects, bool showWmoObjects)
+    {
+        List<ModelOutputObjectPlacement> m2Objects = [];
+        List<ModelOutputObjectPlacement> wmoObjects = [];
+        List<ModelOutputObjectPlacement> otherObjects = [];
+
+        foreach (ModelOutputObjectPlacement obj in objects)
+        {
+            switch (obj.Category)
+            {
+                case "m2" when showM2Objects:
+                    m2Objects.Add(obj);
+                    break;
+                case "wmo" when showWmoObjects:
+                    wmoObjects.Add(obj);
+                    break;
+                case not ("m2" or "wmo"):
+                    otherObjects.Add(obj);
+                    break;
+            }
+        }
+
+        AddObjectPlaceholderCommand(m2Objects, new Vector4(0.42f, 0.92f, 0.48f, 0.32f));
+        AddObjectPlaceholderCommand(wmoObjects, new Vector4(0.95f, 0.68f, 0.30f, 0.34f));
+        AddObjectPlaceholderCommand(otherObjects, new Vector4(0.48f, 0.76f, 0.98f, 0.30f));
+    }
+
+    private void AddObjectPlaceholderCommand(IReadOnlyList<ModelOutputObjectPlacement> objects, Vector4 tintColor)
+    {
+        if (objects.Count == 0)
+            return;
+
+        List<float> vertexData = new(objects.Count * 24 * 8);
+        List<uint> indexData = new(objects.Count * 36);
+        Vector3 boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
+        Vector3 boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
+        foreach (ModelOutputObjectPlacement obj in objects)
+        {
+            AppendBoxGeometry(vertexData, indexData, obj.BoundsMin, obj.BoundsMax);
+            boundsMin = Vector3.Min(boundsMin, obj.BoundsMin);
+            boundsMax = Vector3.Max(boundsMax, obj.BoundsMax);
+        }
+
+        _commands.Add(CreateCommand([.. vertexData], [.. indexData], _fallbackWhiteTexture, hasTexture: false, tintColor, transparent: true, (boundsMin + boundsMax) * 0.5f));
+    }
+
+    private CommandBuffers CreateCommand(float[] vertexData, uint[] indexData, uint textureId, bool hasTexture, Vector4 tintColor, bool transparent, Vector3 boundsCenter)
+    {
+        uint vao = _gl.GenVertexArray();
+        uint vbo = _gl.GenBuffer();
+        uint ebo = _gl.GenBuffer();
+
+        _gl.BindVertexArray(vao);
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
+        unsafe
+        {
+            fixed (float* vertexPtr = vertexData)
+            {
+                _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertexData.Length * sizeof(float)), vertexPtr, BufferUsageARB.StaticDraw);
+            }
+
+            _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
+            fixed (uint* indexPtr = indexData)
+            {
+                _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indexData.Length * sizeof(uint)), indexPtr, BufferUsageARB.StaticDraw);
+            }
+
+            _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 8u * sizeof(float), (void*)0);
+            _gl.EnableVertexAttribArray(0);
+            _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 8u * sizeof(float), (void*)(3 * sizeof(float)));
+            _gl.EnableVertexAttribArray(1);
+            _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, 8u * sizeof(float), (void*)(6 * sizeof(float)));
+            _gl.EnableVertexAttribArray(2);
+        }
+
+        _gl.BindVertexArray(0);
+        return new CommandBuffers(vao, vbo, ebo, (uint)indexData.Length, textureId, hasTexture, tintColor, transparent, boundsCenter);
+    }
+
+    private static void AppendBoxGeometry(List<float> vertexData, List<uint> indexData, Vector3 boundsMin, Vector3 boundsMax)
+    {
+        if (boundsMax.X <= boundsMin.X)
+            boundsMax.X = boundsMin.X + 8.0f;
+        if (boundsMax.Y <= boundsMin.Y)
+            boundsMax.Y = boundsMin.Y + 16.0f;
+        if (boundsMax.Z <= boundsMin.Z)
+            boundsMax.Z = boundsMin.Z + 8.0f;
+
+        Vector3 p000 = new(boundsMin.X, boundsMin.Y, boundsMin.Z);
+        Vector3 p001 = new(boundsMin.X, boundsMin.Y, boundsMax.Z);
+        Vector3 p010 = new(boundsMin.X, boundsMax.Y, boundsMin.Z);
+        Vector3 p011 = new(boundsMin.X, boundsMax.Y, boundsMax.Z);
+        Vector3 p100 = new(boundsMax.X, boundsMin.Y, boundsMin.Z);
+        Vector3 p101 = new(boundsMax.X, boundsMin.Y, boundsMax.Z);
+        Vector3 p110 = new(boundsMax.X, boundsMax.Y, boundsMin.Z);
+        Vector3 p111 = new(boundsMax.X, boundsMax.Y, boundsMax.Z);
+
+        AppendFace(vertexData, indexData, p101, p001, p011, p111, Vector3.UnitZ);
+        AppendFace(vertexData, indexData, p100, p110, p010, p000, -Vector3.UnitZ);
+        AppendFace(vertexData, indexData, p000, p010, p011, p001, -Vector3.UnitX);
+        AppendFace(vertexData, indexData, p100, p101, p111, p110, Vector3.UnitX);
+        AppendFace(vertexData, indexData, p010, p110, p111, p011, Vector3.UnitY);
+        AppendFace(vertexData, indexData, p000, p001, p101, p100, -Vector3.UnitY);
+    }
+
+    private static void AppendFace(List<float> vertexData, List<uint> indexData, Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 normal)
+    {
+        uint baseIndex = (uint)(vertexData.Count / 8);
+        AppendVertex(vertexData, a, normal);
+        AppendVertex(vertexData, b, normal);
+        AppendVertex(vertexData, c, normal);
+        AppendVertex(vertexData, d, normal);
+
+        indexData.Add(baseIndex + 0);
+        indexData.Add(baseIndex + 1);
+        indexData.Add(baseIndex + 2);
+        indexData.Add(baseIndex + 0);
+        indexData.Add(baseIndex + 2);
+        indexData.Add(baseIndex + 3);
+    }
+
+    private static void AppendVertex(List<float> vertexData, Vector3 position, Vector3 normal)
+    {
+        vertexData.Add(position.X);
+        vertexData.Add(position.Y);
+        vertexData.Add(position.Z);
+        vertexData.Add(normal.X);
+        vertexData.Add(normal.Y);
+        vertexData.Add(normal.Z);
+        vertexData.Add(0.0f);
+        vertexData.Add(0.0f);
+    }
+
+    private static void BuildOrbitCamera(Vector3 boundsMin, Vector3 boundsMax, int width, int height, float azimuthDegrees, float elevationDegrees, float zoomFactor, Vector3 targetOffset, out Matrix4x4 view, out Matrix4x4 projection, out Vector3 cameraPosition)
     {
         Vector3 center = ((boundsMin + boundsMax) * 0.5f) + targetOffset;
         Vector3 extents = boundsMax - boundsMin;
@@ -442,7 +590,7 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
             MathF.Cos(elevation) * MathF.Cos(azimuth) * distance,
             MathF.Sin(elevation) * distance,
             MathF.Cos(elevation) * MathF.Sin(azimuth) * distance);
-        Vector3 cameraPosition = center + cameraOffset;
+        cameraPosition = center + cameraOffset;
 
         view = Matrix4x4.CreateLookAt(cameraPosition, center, Vector3.UnitY);
 
@@ -452,7 +600,25 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
         projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4.0f, aspect, near, far);
     }
 
-    private readonly record struct CommandBuffers(uint Vao, uint Vbo, uint Ebo, uint IndexCount, uint TextureId, bool HasTexture)
+    private static void BuildFlyCamera(Vector3 boundsMin, Vector3 boundsMax, int width, int height, Vector3 position, float azimuthDegrees, float elevationDegrees, out Matrix4x4 view, out Matrix4x4 projection)
+    {
+        float azimuth = MathF.PI / 180.0f * azimuthDegrees;
+        float elevation = MathF.PI / 180.0f * Math.Clamp(elevationDegrees, -85.0f, 85.0f);
+        Vector3 forward = Vector3.Normalize(new Vector3(
+            MathF.Cos(elevation) * MathF.Cos(azimuth),
+            MathF.Sin(elevation),
+            MathF.Cos(elevation) * MathF.Sin(azimuth)));
+        view = Matrix4x4.CreateLookAt(position, position + forward, Vector3.UnitY);
+
+        Vector3 extents = boundsMax - boundsMin;
+        float radius = MathF.Max(extents.Length() * 0.5f, 64.0f);
+        float aspect = Math.Max(width, 1) / (float)Math.Max(height, 1);
+        float near = 0.5f;
+        float far = MathF.Max(radius * 12.0f, 4096.0f);
+        projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3.0f, aspect, near, far);
+    }
+
+    private readonly record struct CommandBuffers(uint Vao, uint Vbo, uint Ebo, uint IndexCount, uint TextureId, bool HasTexture, Vector4 TintColor, bool Transparent, Vector3 BoundsCenter)
     {
         public void Dispose(GL gl)
         {
@@ -462,3 +628,5 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
         }
     }
 }
+
+internal readonly record struct ModelOutputCameraFrame(Matrix4x4 View, Matrix4x4 Projection, Vector3 Position);

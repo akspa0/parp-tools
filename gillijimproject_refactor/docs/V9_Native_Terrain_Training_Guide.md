@@ -2,6 +2,8 @@
 
 This guide documents the current grounded `v9` terrain training path that is active in this repository.
 
+For the first Runpod Pod plus GHCR container lane, see [V9_Runpod_Training_Guide.md](./V9_Runpod_Training_Guide.md).
+
 Use this document when you need to understand:
 
 - what the `v9` model is trying to learn

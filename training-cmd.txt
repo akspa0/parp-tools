@@ -1,1 +1,17 @@
-train_v9_optimized.py: i:/parp/parp-tools/gillijimproject_refactor/.venv-train/Scripts/python.exe i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9_optimized.py i:/parp/parp-tools/output/ml-training/v9_direct_archive_core_devholdout_plus11927_alphafix_companionfix_20260420/cache/v9_tensor_cache_manifest.json --output-dir i:/parp/parp-tools/output/ml-training/v9_subset_test --subset 32 --subset-seed 42 --epochs 20
+& 'i:/parp/parp-tools/gillijimproject_refactor/.venv-train/Scripts/python.exe' `
+  'i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9_optimized.py' `
+  'i:/parp/parp-tools/output/ml-training/cache/v9_direct_plus_devpm4_split_20260421/v9_direct_plus_development_pm4_training_manifest.json' `
+  --output-dir 'i:/parp/parp-tools/output/ml-training/runs/v9_pm4mix_fullsane_fresh_20260421' `
+  --epochs 300 `
+  --batch-size 8 `
+  --train-workers 4 `
+  --val-workers 2 `
+  --persistent-workers true `
+  --prefetch-factor 2 `
+  --use-compile true `
+  --selection-metric dev_global_mae `
+  --dev-eval-cache-manifest 'i:/parp/parp-tools/output/ml-training/cache/v9_direct_plus_devpm4_split_20260421/v9_development_non_pm4_holdout_manifest.json' `
+  --no-require-minimap `
+  --no-require-wdl `
+  --pause-every-epochs 0 `
+  --pause-on-stall-epochs 50

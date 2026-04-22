@@ -116,6 +116,11 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="Fallback chunk ordering when the harvested tile JSON omits terrain_data.is_interleaved.",
     )
+    parser.add_argument(
+        "--include-minimap-only-tiles",
+        action="store_true",
+        help="Keep compatibility tiles that have no non-zero source chunk heights when they still provide a minimap. This is useful for bounded inference coverage checks over development-map tiles that only have minimap-side supervision.",
+    )
     return parser.parse_args()
 
 
@@ -616,7 +621,12 @@ def build_pm4_mask_257(dataset_root: Path, terrain_data: dict) -> np.ndarray:
     return load_named_binary_mask(dataset_root, terrain_data, PM4_OBJECT_MASK_KEYS)
 
 
-def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved: bool) -> tuple[dict[str, np.ndarray], dict[str, object]] | None:
+def build_shard_payload(
+    dataset_root: Path,
+    json_path: Path,
+    default_interleaved: bool,
+    include_minimap_only_tiles: bool,
+) -> tuple[dict[str, np.ndarray], dict[str, object]] | None:
     try:
         with json_path.open("r", encoding="utf-8") as handle:
             tile_json = json.load(handle)
@@ -626,17 +636,20 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
 
     terrain_data = tile_json.get("terrain_data", tile_json)
     chunk_heights = extract_chunk_heights(terrain_data)
-    if not np.any(chunk_heights):
-        return None
+    has_nonzero_chunk_heights = bool(np.any(chunk_heights))
 
     tile_name = str(terrain_data.get("adt_tile") or json_path.stem)
     is_interleaved = bool(terrain_data.get("is_interleaved", default_interleaved))
 
+    minimap_rgb_256 = load_minimap(dataset_root, tile_json)
+    _, minimap_source = select_minimap_path(dataset_root, tile_json, terrain_data)
+    if not has_nonzero_chunk_heights:
+        if not include_minimap_only_tiles or minimap_rgb_256 is None:
+            return None
+
     height_257 = build_tile_heightmap_257(chunk_heights, is_interleaved=is_interleaved)
     hole_mask_16 = extract_hole_mask(terrain_data)
     wdl_17 = extract_wdl_17(terrain_data)
-    minimap_rgb_256 = load_minimap(dataset_root, tile_json)
-    _, minimap_source = select_minimap_path(dataset_root, tile_json, terrain_data)
     normal_rgb_256, has_normal_rgb_256 = load_normalmap(dataset_root, terrain_data)
     height_hints_v7 = build_height_hints_v7(terrain_data)
     liquid_mask_257 = load_binary_mask(resolve_dataset_path(dataset_root, terrain_data.get("liquid_mask")), INPUT_SIZE)
@@ -689,6 +702,8 @@ def build_shard_payload(dataset_root: Path, json_path: Path, default_interleaved
         "has_wdl_17": wdl_17 is not None,
         "has_minimap_rgb_256": minimap_rgb_256 is not None,
         "has_normal_rgb_256": has_normal_rgb_256,
+        "has_nonzero_source_chunk_heights": has_nonzero_chunk_heights,
+        "minimap_only_input": not has_nonzero_chunk_heights,
         "liquid_coverage": liquid_coverage,
         "object_coverage": object_coverage,
         "precise_object_coverage": precise_object_coverage,
@@ -750,7 +765,12 @@ def main() -> None:
             if args.limit_per_root is not None and processed_for_root >= args.limit_per_root:
                 break
 
-            built = build_shard_payload(dataset_root, json_path, args.default_interleaved)
+            built = build_shard_payload(
+                dataset_root,
+                json_path,
+                args.default_interleaved,
+                args.include_minimap_only_tiles,
+            )
             if built is None:
                 skipped += 1
                 continue

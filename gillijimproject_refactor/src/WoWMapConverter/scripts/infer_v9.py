@@ -5,13 +5,14 @@ import json
 import re
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 import torch
 from PIL import Image
 
-from train_v9 import (
+from train_v9_optimized import (
     V9TerrainModel,
     _build_v9_input_channels,
     build_predictions,
@@ -90,7 +91,7 @@ def export_heightmap_obj(
         half_v = 0.5 / max(height, 1)
         for row in range(height):
             for column in range(width):
-                u = half_u + (1.0 - (column / texture_width)) * (1.0 - 2.0 * half_u)
+                u = half_u + (column / texture_width) * (1.0 - 2.0 * half_u)
                 v = half_v + (1.0 - (row / texture_height)) * (1.0 - 2.0 * half_v)
                 handle.write(f"vt {u:.6f} {v:.6f}\n")
 
@@ -143,12 +144,34 @@ def load_manifest_entries(manifest_path: Path) -> list[dict[str, Any]]:
     return [entry for entry in entries if isinstance(entry, dict)]
 
 
+def normalize_state_dict_keys(state_dict: dict[str, Any]) -> dict[str, Any]:
+    compiled_prefix = "_orig_mod."
+    if "stem.0.weight" in state_dict:
+        return state_dict
+    if not any(key.startswith(compiled_prefix) for key in state_dict):
+        return state_dict
+    return {
+        (key[len(compiled_prefix):] if key.startswith(compiled_prefix) else key): value
+        for key, value in state_dict.items()
+    }
+
+
+def resolve_manifest_entry_path(manifest_path: Path, raw_value: object) -> Path:
+    raw_text = str(raw_value or "").strip()
+    if not raw_text:
+        return Path()
+    candidate = Path(raw_text)
+    if candidate.is_absolute():
+        return candidate
+    return (manifest_path.parent / candidate).resolve()
+
+
 def load_checkpoint_model(checkpoint_path: Path, device: torch.device) -> tuple[V9TerrainModel, dict[str, Any]]:
     checkpoint = torch.load(checkpoint_path, map_location=device)
     config = dict(checkpoint.get("config", {}))
     hidden_channels = int(config.get("hidden_channels", 32))
     blocks_per_stage = int(config.get("blocks_per_stage", 2))
-    state_dict = checkpoint["model"]
+    state_dict = normalize_state_dict_keys(checkpoint["model"])
     in_channels = int(state_dict["stem.0.weight"].shape[1])
     model = V9TerrainModel(in_channels=in_channels, hidden_channels=hidden_channels, blocks_per_stage=blocks_per_stage).to(device)
     model.load_state_dict(state_dict)
@@ -180,7 +203,39 @@ def build_input_batch(
     if "minimap_rgb_256" not in arrays:
         raise SystemExit("Shard does not contain minimap_rgb_256, so this checkpoint cannot run minimap-driven inference on it.")
 
+    height_257_array = arrays.get("height_257")
+    height_65_array = arrays.get("height_65")
+    if height_257_array is not None:
+        height_range = float(np.max(height_257_array) - np.min(height_257_array))
+    else:
+        height_range = float(torch.max(base_257).item() - torch.min(base_257).item())
+
+    if "minimap_rgb_256" in arrays:
+        minimap_variance = float(np.var(arrays["minimap_rgb_256"].astype(np.float32) / 255.0))
+    else:
+        minimap_variance = 0.0
+
+    if height_257_array is not None and height_65_array is not None:
+        height_257_tensor = torch.from_numpy(height_257_array.astype(np.float32)).unsqueeze(0)
+        height_65_tensor = torch.from_numpy(height_65_array.astype(np.float32)).unsqueeze(0)
+        upsampled_65 = torch.nn.functional.interpolate(
+            height_65_tensor.unsqueeze(0),
+            size=(257, 257),
+            mode="bilinear",
+            align_corners=True,
+        ).squeeze(0)
+        detail_energy = float(torch.mean(torch.abs(height_257_tensor - upsampled_65)).item())
+    else:
+        detail_energy = 0.0
+
+    synthetic_entry = SimpleNamespace(
+        height_range=height_range,
+        detail_energy=detail_energy,
+        minimap_variance=minimap_variance,
+    )
+
     inputs, _ = _build_v9_input_channels(
+        entry=synthetic_entry,
         arrays=arrays,
         base_257_scaled=base_257 / height_scale,
         include_brush_mask=include_brush_mask,
@@ -405,7 +460,7 @@ def main() -> None:
             tile_name = str(entry.get("tile_name") or f"tile_{index:04d}")
             if not shard_value:
                 continue
-            shard_path = Path(str(shard_value))
+            shard_path = resolve_manifest_entry_path(input_path, shard_value)
             tile_output_dir = output_dir / sanitize_output_name(tile_name)
             summary = run_single_inference(
                 model=model,

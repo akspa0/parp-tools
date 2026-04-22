@@ -2,6 +2,8 @@
 
 This is the current reproducible setup for training the direct `v9` terrain model from `wow-viewer` without routing the main corpus path back through harvested-dataset ownership.
 
+If you want the first remote Pod execution lane after those manifests are built, see `gillijimproject_refactor/docs/V9_Runpod_Training_Guide.md` for the portable bundle plus GHCR plus Runpod flow.
+
 All examples below assume a Bring Your Own Data workflow. Replace the placeholder paths with equivalents on your own machine.
 
 The working shape today is:

@@ -243,13 +243,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _mdxGpuPreviewRenderer.Render(_session.VisualSize, _session.VisualSize, deltaSeconds);
         }
         if (_currentModelOutputScene != null && _modelOutputGpuRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.ModelOutputs)
-            _modelOutputGpuRenderer.Render(
-                _session.VisualSize,
-                _session.VisualSize,
-                _modelOutputInteractiveCamera.CurrentAzimuthDegrees,
-                _modelOutputInteractiveCamera.CurrentElevationDegrees,
-                _modelOutputInteractiveCamera.CurrentZoomFactor,
-                _modelOutputInteractiveCamera.CurrentTargetOffset);
+            _modelOutputGpuRenderer.Render(_session.VisualSize, _session.VisualSize, BuildModelOutputCameraFrame());
 
         _gl.Viewport(_window.FramebufferSize);
         _gl.ClearColor(0.08f, 0.09f, 0.11f, 1.0f);
@@ -1123,7 +1117,10 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private void DrawModelOutputControlContents()
     {
         ImGui.TextWrapped("This workspace is the first GPU-backed wow-viewer consumer for model-output terrain tiles. It loads the flat OBJ + texture bundles from infer_v9.py and reconstructs them into tile-space for fast inspection.");
-        ImGui.TextDisabled("Mouse: left-drag orbit, right-drag pan, wheel zoom, double-click preview to reset camera.");
+        if (_session.ModelOutput.CameraMode == WowViewerModelOutputCameraMode.Orbit)
+            ImGui.TextDisabled("Orbit camera: left-drag orbit, right-drag pan, wheel zoom, double-click preview to reset.");
+        else
+            ImGui.TextDisabled("Fly camera: left-drag look, WASD move, Q/E move vertically, Shift accelerate, wheel changes move speed, double-click preview to reset.");
         ImGui.Separator();
         ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
         ImGui.TextDisabled($"Source: {_session.ModelOutput.Describe()}");
@@ -1137,9 +1134,47 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (ImGui.Combo("Mesh Variant", ref variantIndex, "Predicted\0WDL Baseline\0"))
             _session.ModelOutput.Variant = (WowViewerModelOutputVariant)variantIndex;
 
-        ImGui.TextDisabled($"Camera: azimuth {_session.ModelOutput.CameraAzimuthDegrees:F1} deg, elevation {_session.ModelOutput.CameraElevationDegrees:F1} deg, zoom {_session.ModelOutput.CameraZoomFactor:F2}");
-        Vector3 targetOffset = _session.ModelOutput.GetTargetOffset();
-        ImGui.TextDisabled($"Target Offset: {targetOffset.X:F1}, {targetOffset.Y:F1}, {targetOffset.Z:F1}");
+        int cameraModeIndex = (int)_session.ModelOutput.CameraMode;
+        if (ImGui.Combo("Camera Mode", ref cameraModeIndex, "Orbit\0Fly\0"))
+        {
+            _session.ModelOutput.CameraMode = (WowViewerModelOutputCameraMode)cameraModeIndex;
+            ResetModelOutputCamera();
+        }
+
+        bool showObjects = _session.ModelOutput.ShowObjects;
+        if (ImGui.Checkbox("Show Object Placeholders", ref showObjects))
+        {
+            _session.ModelOutput.ShowObjects = showObjects;
+            RefreshModelOutputGpuScene();
+        }
+
+        bool showM2Objects = _session.ModelOutput.ShowM2Objects;
+        if (ImGui.Checkbox("Show M2 Placeholders", ref showM2Objects))
+        {
+            _session.ModelOutput.ShowM2Objects = showM2Objects;
+            RefreshModelOutputGpuScene();
+        }
+
+        bool showWmoObjects = _session.ModelOutput.ShowWmoObjects;
+        if (ImGui.Checkbox("Show WMO Placeholders", ref showWmoObjects))
+        {
+            _session.ModelOutput.ShowWmoObjects = showWmoObjects;
+            RefreshModelOutputGpuScene();
+        }
+
+        ImGui.TextDisabled($"Camera: azimuth {_session.ModelOutput.CameraAzimuthDegrees:F1} deg, elevation {_session.ModelOutput.CameraElevationDegrees:F1} deg");
+        if (_session.ModelOutput.CameraMode == WowViewerModelOutputCameraMode.Orbit)
+        {
+            ImGui.TextDisabled($"Orbit Zoom: {_session.ModelOutput.CameraZoomFactor:F2}");
+            Vector3 targetOffset = _session.ModelOutput.GetTargetOffset();
+            ImGui.TextDisabled($"Target Offset: {targetOffset.X:F1}, {targetOffset.Y:F1}, {targetOffset.Z:F1}");
+        }
+        else
+        {
+            Vector3 flyPosition = _session.ModelOutput.GetFlyPosition();
+            ImGui.TextDisabled($"Fly Position: {flyPosition.X:F1}, {flyPosition.Y:F1}, {flyPosition.Z:F1}");
+            ImGui.TextDisabled($"Fly Speed: {_session.ModelOutput.FlyMoveSpeed:F2}x");
+        }
 
         if (ImGui.Button(_currentModelOutputScene == null ? "Load Model Output Scene" : "Reload Model Output Scene", new Vector2(-1, 0)))
             LoadActiveWorkspace();
@@ -1162,6 +1197,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"Tiles: {_currentModelOutputScene.Tiles.Count}");
             ImGui.Text($"Vertices: {_currentModelOutputScene.VertexCount}");
             ImGui.Text($"Triangles: {_currentModelOutputScene.TriangleCount}");
+            ImGui.Text($"Objects: {_currentModelOutputScene.ObjectCount}");
             ImGui.Text($"Tile Size: {_currentModelOutputScene.TileWorldSize:F3}");
             ImGui.Text($"Centered Meshes: {_currentModelOutputScene.CenterMesh}");
         }
@@ -1581,6 +1617,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"Tiles: {_currentModelOutputScene.Tiles.Count}");
             ImGui.Text($"Vertices: {_currentModelOutputScene.VertexCount}");
             ImGui.Text($"Triangles: {_currentModelOutputScene.TriangleCount}");
+            ImGui.Text($"Objects: {_currentModelOutputScene.ObjectCount}");
+            ImGui.Text($"Camera Mode: {_session.ModelOutput.CameraMode}");
             ImGui.Text($"GPU Preview Commands: {_modelOutputGpuRenderer?.CommandCount ?? 0}");
             ImGui.Text($"Bounds Min: {_currentModelOutputScene.BoundsMin}");
             ImGui.Text($"Bounds Max: {_currentModelOutputScene.BoundsMax}");
@@ -2322,8 +2360,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         {
             _session.ModelOutput.Normalize();
             ModelOutputScene scene = ModelOutputSceneLoader.Load(_session.ModelOutput.InputPath, _session.ModelOutput.Variant);
-            _modelOutputGpuRenderer?.LoadScene(scene);
             _currentModelOutputScene = scene;
+            RefreshModelOutputGpuScene();
             _currentPreview = null;
             _currentMdxPreview = null;
             _currentWorldSession = null;
@@ -2334,8 +2372,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
             DeletePreviewTexture();
             DeleteWorldTerrainPreviewTexture();
             _statusMessage = $"Loaded model-output scene from {scene.SourcePath} in {scene.LoadDuration.TotalMilliseconds:F1} ms.";
-            _lastLoadSummary = $"tiles {scene.Tiles.Count}, triangles {scene.TriangleCount}, tileSize {scene.TileWorldSize:F3}, variant {_session.ModelOutput.Variant}";
-            SyncModelOutputCameraTargetsFromSession(resetCurrent: true);
+            _lastLoadSummary = $"tiles {scene.Tiles.Count}, triangles {scene.TriangleCount}, objects {scene.ObjectCount}, tileSize {scene.TileWorldSize:F3}, variant {_session.ModelOutput.Variant}";
+            ResetModelOutputCamera();
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
         {
@@ -2347,16 +2385,46 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private void ResetModelOutputCamera()
     {
         _session.ModelOutput.CameraAzimuthDegrees = 45.0f;
-        _session.ModelOutput.CameraElevationDegrees = 50.0f;
-        _session.ModelOutput.CameraZoomFactor = 1.35f;
         _session.ModelOutput.SetTargetOffset(Vector3.Zero);
-        SyncModelOutputCameraTargetsFromSession(resetCurrent: true);
+        if (_session.ModelOutput.CameraMode == WowViewerModelOutputCameraMode.Orbit)
+        {
+            _session.ModelOutput.CameraElevationDegrees = 50.0f;
+            _session.ModelOutput.CameraZoomFactor = 1.35f;
+            SyncModelOutputCameraTargetsFromSession(resetCurrent: true);
+            return;
+        }
+
+        _session.ModelOutput.CameraElevationDegrees = -18.0f;
+        _session.ModelOutput.FlyMoveSpeed = 1.0f;
+        if (_currentModelOutputScene != null)
+        {
+            ModelOutputCameraFrame orbitFrame = ModelOutputGpuRenderer.BuildOrbitCameraFrame(
+                _currentModelOutputScene.BoundsMin,
+                _currentModelOutputScene.BoundsMax,
+                _session.VisualSize,
+                _session.VisualSize,
+                45.0f,
+                35.0f,
+                1.15f,
+                Vector3.Zero);
+            _session.ModelOutput.SetFlyPosition(orbitFrame.Position);
+        }
+        else
+        {
+            _session.ModelOutput.SetFlyPosition(new Vector3(0.0f, 256.0f, -256.0f));
+        }
     }
 
     private void HandleModelOutputPreviewMouseInput(Vector2 previewSize)
     {
         if (_currentModelOutputScene == null || !ImGui.IsItemHovered())
             return;
+
+        if (_session.ModelOutput.CameraMode == WowViewerModelOutputCameraMode.Fly)
+        {
+            HandleModelOutputFlyInput();
+            return;
+        }
 
         HandleInteractiveOrbitInput(
             previewSize,
@@ -2455,11 +2523,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
     {
         SyncM2CameraTargetsFromSession(resetCurrent: false);
         SyncMdxCameraTargetsFromSession(resetCurrent: false);
-        SyncModelOutputCameraTargetsFromSession(resetCurrent: false);
+        if (_session.ModelOutput.CameraMode == WowViewerModelOutputCameraMode.Orbit)
+            SyncModelOutputCameraTargetsFromSession(resetCurrent: false);
 
         _m2InteractiveCamera.Advance(deltaSeconds);
         _mdxInteractiveCamera.Advance(deltaSeconds);
-        _modelOutputInteractiveCamera.Advance(deltaSeconds);
+        if (_session.ModelOutput.CameraMode == WowViewerModelOutputCameraMode.Orbit)
+            _modelOutputInteractiveCamera.Advance(deltaSeconds);
     }
 
     private void SyncM2CameraTargetsFromSession(bool resetCurrent)
@@ -2475,6 +2545,112 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private void SyncModelOutputCameraTargetsFromSession(bool resetCurrent)
     {
         _modelOutputInteractiveCamera.SetTargets(_session.ModelOutput.CameraAzimuthDegrees, _session.ModelOutput.CameraElevationDegrees, _session.ModelOutput.CameraZoomFactor, _session.ModelOutput.GetTargetOffset(), resetCurrent);
+    }
+
+    private void RefreshModelOutputGpuScene()
+    {
+        if (_currentModelOutputScene == null)
+            return;
+
+        _modelOutputGpuRenderer?.LoadScene(
+            _currentModelOutputScene,
+            _session.ModelOutput.ShowObjects,
+            _session.ModelOutput.ShowM2Objects,
+            _session.ModelOutput.ShowWmoObjects);
+    }
+
+    private ModelOutputCameraFrame BuildModelOutputCameraFrame()
+    {
+        if (_currentModelOutputScene == null)
+            return default;
+
+        if (_session.ModelOutput.CameraMode == WowViewerModelOutputCameraMode.Fly)
+        {
+            return ModelOutputGpuRenderer.BuildFlyCameraFrame(
+                _currentModelOutputScene.BoundsMin,
+                _currentModelOutputScene.BoundsMax,
+                _session.VisualSize,
+                _session.VisualSize,
+                _session.ModelOutput.GetFlyPosition(),
+                _session.ModelOutput.CameraAzimuthDegrees,
+                _session.ModelOutput.CameraElevationDegrees);
+        }
+
+        return ModelOutputGpuRenderer.BuildOrbitCameraFrame(
+            _currentModelOutputScene.BoundsMin,
+            _currentModelOutputScene.BoundsMax,
+            _session.VisualSize,
+            _session.VisualSize,
+            _modelOutputInteractiveCamera.CurrentAzimuthDegrees,
+            _modelOutputInteractiveCamera.CurrentElevationDegrees,
+            _modelOutputInteractiveCamera.CurrentZoomFactor,
+            _modelOutputInteractiveCamera.CurrentTargetOffset);
+    }
+
+    private void HandleModelOutputFlyInput()
+    {
+        if (_currentModelOutputScene == null)
+            return;
+
+        ImGuiIOPtr io = ImGui.GetIO();
+        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+        {
+            ResetModelOutputCamera();
+            return;
+        }
+
+        Vector2 mouseDelta = io.MouseDelta;
+        float azimuth = _session.ModelOutput.CameraAzimuthDegrees;
+        float elevation = _session.ModelOutput.CameraElevationDegrees;
+        if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) && mouseDelta.LengthSquared() > 0.0f)
+        {
+            azimuth += mouseDelta.X * 0.25f;
+            elevation = Math.Clamp(elevation - (mouseDelta.Y * 0.18f), -85.0f, 85.0f);
+        }
+
+        float speed = _session.ModelOutput.FlyMoveSpeed;
+        if (MathF.Abs(io.MouseWheel) > float.Epsilon)
+            speed = Math.Clamp(speed * MathF.Pow(1.12f, io.MouseWheel), 0.1f, 8.0f);
+
+        Vector3 position = _session.ModelOutput.GetFlyPosition();
+        Vector3 sceneExtents = _currentModelOutputScene.BoundsMax - _currentModelOutputScene.BoundsMin;
+        float sceneScale = MathF.Max(sceneExtents.Length(), 128.0f);
+        float step = sceneScale * 0.0035f * speed;
+        if (ImGui.IsKeyDown(ImGuiKey.LeftShift) || ImGui.IsKeyDown(ImGuiKey.RightShift))
+            step *= 3.0f;
+
+        Vector3 forward = ComputeFlyForward(azimuth, elevation);
+        Vector3 right = Vector3.Normalize(Vector3.Cross(forward, Vector3.UnitY));
+        if (right.LengthSquared() < 1e-6f)
+            right = Vector3.UnitX;
+
+        if (ImGui.IsKeyDown(ImGuiKey.W))
+            position += forward * step;
+        if (ImGui.IsKeyDown(ImGuiKey.S))
+            position -= forward * step;
+        if (ImGui.IsKeyDown(ImGuiKey.A))
+            position -= right * step;
+        if (ImGui.IsKeyDown(ImGuiKey.D))
+            position += right * step;
+        if (ImGui.IsKeyDown(ImGuiKey.E))
+            position += Vector3.UnitY * step;
+        if (ImGui.IsKeyDown(ImGuiKey.Q))
+            position -= Vector3.UnitY * step;
+
+        _session.ModelOutput.CameraAzimuthDegrees = azimuth;
+        _session.ModelOutput.CameraElevationDegrees = elevation;
+        _session.ModelOutput.FlyMoveSpeed = speed;
+        _session.ModelOutput.SetFlyPosition(position);
+    }
+
+    private static Vector3 ComputeFlyForward(float azimuthDegrees, float elevationDegrees)
+    {
+        float azimuth = azimuthDegrees * MathF.PI / 180.0f;
+        float elevation = elevationDegrees * MathF.PI / 180.0f;
+        return Vector3.Normalize(new Vector3(
+            MathF.Cos(elevation) * MathF.Cos(azimuth),
+            MathF.Sin(elevation),
+            MathF.Cos(elevation) * MathF.Sin(azimuth)));
     }
 
     private void HandleInteractiveOrbitInput(
@@ -2659,10 +2835,16 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _session.World.TileY = session.World.TileY;
         _session.ModelOutput.InputPath = session.ModelOutput.InputPath ?? string.Empty;
         _session.ModelOutput.Variant = session.ModelOutput.Variant;
+        _session.ModelOutput.CameraMode = session.ModelOutput.CameraMode;
+        _session.ModelOutput.ShowObjects = session.ModelOutput.ShowObjects;
+        _session.ModelOutput.ShowM2Objects = session.ModelOutput.ShowM2Objects;
+        _session.ModelOutput.ShowWmoObjects = session.ModelOutput.ShowWmoObjects;
         _session.ModelOutput.CameraAzimuthDegrees = session.ModelOutput.CameraAzimuthDegrees;
         _session.ModelOutput.CameraElevationDegrees = session.ModelOutput.CameraElevationDegrees;
         _session.ModelOutput.CameraZoomFactor = session.ModelOutput.CameraZoomFactor;
         _session.ModelOutput.SetTargetOffset(session.ModelOutput.GetTargetOffset());
+        _session.ModelOutput.SetFlyPosition(session.ModelOutput.GetFlyPosition());
+        _session.ModelOutput.FlyMoveSpeed = session.ModelOutput.FlyMoveSpeed;
         _session.M2CameraAzimuthDegrees = session.M2CameraAzimuthDegrees;
         _session.M2CameraElevationDegrees = session.M2CameraElevationDegrees;
         _session.M2CameraZoomFactor = session.M2CameraZoomFactor;

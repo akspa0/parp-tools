@@ -1,5 +1,61 @@
 # Progress
 
+### Apr 22, 2026 - implemented the first Runpod Pod plus GHCR container lane for remote v9 training
+
+- what changed:
+	- added `gillijimproject_refactor/src/WoWMapConverter/scripts/package_v9_training_bundle.py`
+	- added `gillijimproject_refactor/src/WoWMapConverter/scripts/runpod_launch_v9.py`
+	- added `gillijimproject_refactor/docker/v9-trainer/Dockerfile`
+	- added `gillijimproject_refactor/docker/v9-trainer/entrypoint.sh`
+	- added `gillijimproject_refactor/.dockerignore`
+	- added `.github/workflows/build-v9-trainer-image.yml`
+	- added `gillijimproject_refactor/docs/V9_Runpod_Training_Guide.md`
+	- updated `gillijimproject_refactor/src/WoWMapConverter/scripts/train_v9.py` and `train_v9_optimized.py` so relative manifest paths resolve against the manifest file location
+	- the new bundle packager now:
+		- copies referenced `.npz` shards into a self-contained bundle root
+		- rewrites `shard_path` values to manifest-relative Linux-friendly paths
+		- optionally copies `source_json`
+		- can emit `zip` or `tar.gz` archives for upload or private download
+	- the new Runpod launcher now:
+		- creates GPU Pods through the Runpod Pods REST API
+		- supports GHCR image pulls with `containerRegistryAuthId`
+		- supports mounted-bundle or bundle-download flows
+		- passes the container env contract for `train_v9_optimized.py`
+
+- validation:
+	- `python -m py_compile` passed for the changed Python scripts
+	- bounded bundle smoke succeeded against the current PM4-mixed manifests:
+		- `package_v9_training_bundle.py --limit 2 --overwrite`
+		- output root: `output/tmp/v9_run_bundle_smoke`
+		- result: portable train plus dev manifests with `4` copied shards total
+	- `runpod_launch_v9.py --dry-run` emitted the expected Pod request payload for the new image and env contract
+
+- boundary:
+	- this lands the repo-owned cloud-training surfaces, but it does not yet prove:
+		- a GitHub Actions GHCR push
+		- a real Runpod Pod image pull
+		- a full remote training or resume cycle
+
+### Apr 22, 2026 - planned the first Runpod Pod plus container lane for remote v9 training without local Docker
+
+- what changed:
+	- added `gillijimproject_refactor/plans/v9_runpod_pod_container_training_plan_2026-04-22.md`
+	- the new plan records the next operational boundary for serious `v9` training:
+		- package the current manifest-plus-shard cache into a portable bundle with relative paths
+		- build the trainer container in GitHub Actions and publish it to `ghcr.io`
+		- run long checkpointed training on Runpod `Pods`, not `Serverless`
+		- keep multi-GPU as a later slice until `train_v9_optimized.py` gains real distributed-training support
+	- the plan also records the current portability blocker explicitly:
+		- existing split manifests still point at absolute Windows `shard_path` values, so a bundle-rewrite step is required before cloud training
+
+- validation:
+	- planning-only slice; no runtime behavior changed
+	- repo-local inspection plus current Runpod documentation check in this chat
+
+- boundary:
+	- this does not yet add the bundle packager, Dockerfile, GitHub Actions image build, or Runpod launcher
+	- it defines the preferred execution order so the next implementation chat can start with the bundle contract instead of re-deciding the whole cloud lane
+
 ### Apr 21, 2026 - optimized v9 trainer now auto-resumes from run checkpoints and no longer hard-pauses at epoch 50 by default
 
 - what changed:
@@ -7988,3 +8044,13 @@
 ### Replaceable Texture Resolution (Feb 10, 2026)
 - Try ALL CDI variants, validate each resolved texture exists in MPQ
 - If no DBC variant validates, fall through to model directory scan
+
+## Apr 22, 2026 - `wow-viewer` direct model-output exploration and minimap-only tile retention
+
+- Added source-object recovery to `wow-viewer` `model-output` loading so inference summaries can pull `terrain_data.objects` straight from their backing tile JSONs and render GPU placeholder volumes in-scene.
+- Added `Orbit` and `Fly` camera modes to the `Model Outputs` workspace, with runtime toggles for object, M2, and WMO placeholder categories.
+- Added `--include-minimap-only-tiles` to `build_v9_native_tensor_cache.py` so the compatibility cache path no longer has to drop development tiles just because their harvested chunk-height payload is all zeros.
+- Smoke proof:
+  - `dotnet build I:\parp\parp-tools\wow-viewer\src\viewer\WowViewer.App\WowViewer.App.csproj -c Debug --no-restore` succeeded.
+  - `python -m py_compile` passed for `build_v9_native_tensor_cache.py`.
+  - A curated zero-height development tile (`development_13_28.json`) still skips without the new flag, but processes successfully with `--include-minimap-only-tiles`, producing manifest metadata `has_nonzero_source_chunk_heights=false` and `minimap_only_input=true`.
