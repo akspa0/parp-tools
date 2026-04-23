@@ -13,6 +13,7 @@
     <PackageVersion Include="Silk.NET.Windowing" Version="2.21.0" />
     <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
     <PackageVersion Include="SharpZipLib" Version="1.4.2" />
+    <PackageVersion Include="SharpGLTF.Toolkit" Version="1.0.2" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
   </ItemGroup>

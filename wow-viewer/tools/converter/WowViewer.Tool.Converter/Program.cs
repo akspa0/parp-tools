@@ -21,6 +21,7 @@ using WowViewer.Core.Runtime.World.Terrain;
 using WowViewer.Core.Wmo;
 using WowViewer.Core.Runtime.World.Wdl;
 using WowViewer.Tools.Shared;
+using WowViewer.Tool.Converter;
 
 const int NativeTileSize = 257;
 const int NativeMinimapSize = 256;
@@ -82,6 +83,9 @@ string[] tail = args.Skip(1).ToArray();
 		break;
 	case "ml-synth-no-liquid":
 		RunMlSynthNoLiquid(tail);
+		break;
+	case "terrain-patch-adt":
+		TerrainPatchAdtCommand.Run(tail);
 		break;
 	case "export-tex-json":
 		RunExportTexJson(tail);
@@ -2928,10 +2932,12 @@ static AdtMcnkSummary BuildAlphaEmbeddedMcnkSummary(AlphaEmbeddedAdtTileData alp
 		chunksWithMcly: chunksWithMcly,
 		chunksWithMcal: 0,
 		chunksWithMcsh: 0,
+		chunksWithMcse: 0,
 		chunksWithMccv: 0,
 		chunksWithMclq: chunksWithMclq,
 		chunksWithMcrd: 0,
 		chunksWithMcrw: 0,
+		totalMcsePayloadBytes: 0,
 		totalLayerCount: totalLayerCount,
 		maxLayerCount: maxLayerCount,
 		chunksWithMultipleLayers: chunksWithMultipleLayers,
@@ -3835,6 +3841,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter dataset-build-cache --input <audit-or-curate.json> --output-dir <dir> [--limit <count>] [--overwrite] [--include-minimap|--no-include-minimap] [--write-debug-json|--no-write-debug-json]");
 	Console.WriteLine("  wowviewer-converter detect --input <file>");
 	Console.WriteLine("  wowviewer-converter export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]");
+	Console.WriteLine("  wowviewer-converter terrain-patch-adt --input-adt-dir <dir> --inference-dir <dir> --output-dir <dir> [--no-copy-family] [--no-export-guide-textures] [--no-export-texture-supervision] [--export-glb] [--center-mesh] [--tile-world-size <size>] [--height-offset <value>]");
 	Console.WriteLine("  wowviewer-converter ml-corpus --config <ml-corpus.json> [--archive-root <path>] [--output-root <path>] [--dry-run]");
 	Console.WriteLine("  wowviewer-converter ml-audit-signals --dataset-root <path> [--output <report.json>] [--limit <count>]");
 	Console.WriteLine("  wowviewer-converter ml-harvest-brushes --dataset-root <path> [--output-dir <dir>] [--limit <count>] [--write-previews]");

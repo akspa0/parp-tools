@@ -20,6 +20,7 @@ using WowViewer.Core.Runtime.World.Passes;
 using WowViewer.Core.Runtime.World.Terrain;
 using WowViewer.Core.Runtime.World.Visibility;
 using WowViewer.Core.Runtime.World.Wdl;
+using WowViewer.Core.Wmo;
 
 namespace WowViewer.App;
 
@@ -73,6 +74,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private string _lastLoadSummary = "No workspace loaded.";
     private string? _lastError;
     private M2PreviewLoadResult? _currentPreview;
+    private WmoPreviewLoadResult? _currentWmoPreview;
     private MdxPreviewLoadResult? _currentMdxPreview;
     private ModelOutputScene? _currentModelOutputScene;
     private WowViewerWorldSessionBootstrapResult? _currentWorldSession;
@@ -80,6 +82,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private uint _previewTextureHandle;
     private uint _worldTerrainPreviewTextureHandle;
     private M2GpuPreviewRenderer? _gpuPreviewRenderer;
+    private WmoGpuPreviewRenderer? _wmoGpuPreviewRenderer;
     private MdxGpuPreviewRenderer? _mdxGpuPreviewRenderer;
     private ModelOutputGpuRenderer? _modelOutputGpuRenderer;
     private bool _showAboutWindow = true;
@@ -118,6 +121,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private int _datasetBatchSize;
     private string _datasetLastCommand = "No dataset command run from the shell yet.";
     private InteractiveOrbitCameraState _m2InteractiveCamera = new();
+    private InteractiveOrbitCameraState _wmoInteractiveCamera = new();
     private InteractiveOrbitCameraState _mdxInteractiveCamera = new();
     private InteractiveOrbitCameraState _modelOutputInteractiveCamera = new();
 
@@ -157,6 +161,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _disposed = true;
         SaveSettings();
         _gpuPreviewRenderer?.Dispose();
+        _wmoGpuPreviewRenderer?.Dispose();
         _mdxGpuPreviewRenderer?.Dispose();
         _modelOutputGpuRenderer?.Dispose();
         DeletePreviewTexture();
@@ -190,6 +195,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.Disable(EnableCap.CullFace);
         _gpuPreviewRenderer = new M2GpuPreviewRenderer(_gl);
+        _wmoGpuPreviewRenderer = new WmoGpuPreviewRenderer(_gl);
         _mdxGpuPreviewRenderer = new MdxGpuPreviewRenderer(_gl);
         _modelOutputGpuRenderer = new ModelOutputGpuRenderer(_gl);
 
@@ -224,6 +230,22 @@ internal sealed class WowViewerDesktopApp : IDisposable
                 _m2InteractiveCamera.CurrentElevationDegrees,
                 _m2InteractiveCamera.CurrentZoomFactor,
                 _m2InteractiveCamera.CurrentTargetOffset);
+        if (_currentWmoPreview != null && _wmoGpuPreviewRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneWmo)
+        {
+            _wmoGpuPreviewRenderer.SetCameraSettings(new PreviewCameraSettings
+            {
+                Mode = PreviewCameraMode.Orbit,
+                PresetName = null,
+                AzimuthDegrees = _wmoInteractiveCamera.CurrentAzimuthDegrees,
+                ElevationDegrees = _wmoInteractiveCamera.CurrentElevationDegrees,
+                FieldOfViewDegrees = _session.WmoCameraFieldOfViewDegrees,
+                ZoomFactor = _wmoInteractiveCamera.CurrentZoomFactor,
+                TargetOffset = _wmoInteractiveCamera.CurrentTargetOffset,
+            });
+
+            _wmoGpuPreviewRenderer.Render(_session.VisualSize, _session.VisualSize);
+        }
+
         if (_currentMdxPreview != null && _mdxGpuPreviewRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneMdx)
         {
             if (_session.MdxCameraMode == PreviewCameraMode.Orbit)
@@ -343,6 +365,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         return _session.WorkspaceMode switch
         {
             WowViewerWorkspaceMode.StandaloneM2 => _gpuPreviewRenderer?.CommandCount ?? 0,
+            WowViewerWorkspaceMode.StandaloneWmo => _wmoGpuPreviewRenderer?.CommandCount ?? 0,
             WowViewerWorkspaceMode.StandaloneMdx => _mdxGpuPreviewRenderer?.CommandCount ?? 0,
             WowViewerWorkspaceMode.ModelOutputs => _modelOutputGpuRenderer?.CommandCount ?? 0,
             _ => 0,
@@ -400,7 +423,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             if (ImGui.MenuItem("Open Workspace", enabled: !string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot) || !string.IsNullOrWhiteSpace(_session.Source.InputPath) || _session.ModelOutput.HasInput()))
                 LoadActiveWorkspace();
 
-            if (ImGui.MenuItem("Clear Workspace", enabled: _currentPreview != null || _currentMdxPreview != null || _currentModelOutputScene != null || _currentWorldSession != null))
+            if (ImGui.MenuItem("Clear Workspace", enabled: _currentPreview != null || _currentWmoPreview != null || _currentMdxPreview != null || _currentModelOutputScene != null || _currentWorldSession != null))
                 ClearWorkspace();
 
             ImGui.Separator();
@@ -438,13 +461,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        ImGui.TextWrapped("The viewer shell now exposes explicit standalone workspaces. M2 and MDX now have bounded GPU preview consumers in this slice; WMO remains a placeholder until its own consumer lands.");
+        ImGui.TextWrapped("The viewer shell now exposes explicit standalone workspaces. M2, WMO, and MDX all have bounded GPU preview consumers in this slice, while world rendering remains a separate runtime track.");
         ImGui.Separator();
 
         if (ImGui.BeginChild("WorkspaceList", new Vector2(0, 0), false, ImGuiWindowFlags.AlwaysVerticalScrollbar))
         {
             DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneM2, "Runtime-backed standalone model preview over the shared wow-viewer M2 pipeline.");
-            DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneWmo, "Planned standalone WMO inspection workspace. Not implemented yet.");
+            DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneWmo, "Standalone WMO mesh preview over the shared wow-viewer render-document seam.");
             DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneMdx, "Static standalone MDX inspection workspace with a first GPU preview consumer.");
             DrawWorkspaceOption(WowViewerWorkspaceMode.WorldSession, "Bounded client-root attach and WDT-backed world session bootstrap. No world renderer yet.");
             DrawWorkspaceOption(WowViewerWorkspaceMode.DatasetTooling, "Dataset and training orchestration owned by wow-viewer, including mask generation pipelines.");
@@ -479,7 +502,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private static bool IsImplementedWorkspace(WowViewerWorkspaceMode mode)
     {
-        return mode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.StandaloneMdx or WowViewerWorkspaceMode.WorldSession or WowViewerWorkspaceMode.DatasetTooling or WowViewerWorkspaceMode.ModelOutputs;
+        return mode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.StandaloneWmo or WowViewerWorkspaceMode.StandaloneMdx or WowViewerWorkspaceMode.WorldSession or WowViewerWorkspaceMode.DatasetTooling or WowViewerWorkspaceMode.ModelOutputs;
     }
 
     private static string GetWorkspaceLabel(WowViewerWorkspaceMode mode)
@@ -509,6 +532,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         {
             case WowViewerWorkspaceMode.StandaloneM2:
                 DrawM2ControlContents();
+                break;
+            case WowViewerWorkspaceMode.StandaloneWmo:
+                DrawWmoControlContents();
                 break;
             case WowViewerWorkspaceMode.StandaloneMdx:
                 DrawMdxControlContents();
@@ -716,6 +742,72 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _showFileBrowserWindow = true;
             _mdxFileBrowserState ??= new MdxFileBrowserState();
         }
+    }
+
+    private void DrawWmoControlContents()
+    {
+        ImGui.TextWrapped("This first standalone WMO slice stays bounded and library-first: it uses wow-viewer-owned WMO material plus mesh readers to drive an untextured GPU group preview while exposing root portal and doodad ownership in diagnostics.");
+        ImGui.TextDisabled("Mouse: left-drag orbit, right/middle-drag pan, wheel zoom, double-click preview to reset camera.");
+        ImGui.Separator();
+        ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
+        ImGui.TextDisabled($"Source: {_session.Source.Describe()}");
+        ImGui.Separator();
+
+        bool useArchive = _session.Source.UsesArchiveSource;
+        if (ImGui.RadioButton("Archive-backed input", useArchive))
+            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Local file input", !_session.Source.UsesArchiveSource))
+            _session.Source.Kind = WowViewerAssetSourceKind.LocalFile;
+
+        ImGui.Separator();
+        if (_session.Source.UsesArchiveSource)
+        {
+            string archiveRoot = _session.Source.ArchiveRoot;
+            string virtualPath = _session.Source.VirtualPath;
+            string looseOverlayRoot = _session.Source.LooseOverlayRoot;
+            ImGui.InputText("Archive Root", ref archiveRoot, 1024);
+            ImGui.InputText("Virtual Path", ref virtualPath, 1024);
+            ImGui.InputText("Loose Overlay Root", ref looseOverlayRoot, 1024);
+            _session.Source.ArchiveRoot = archiveRoot;
+            _session.Source.VirtualPath = virtualPath;
+            _session.Source.LooseOverlayRoot = looseOverlayRoot;
+
+            if (ImGui.Button("Attach Loose Folder...", new Vector2(-1, 0)))
+                PromptAttachLooseFolder();
+        }
+        else
+        {
+            string inputPath = _session.Source.InputPath;
+            ImGui.InputText("Input File", ref inputPath, 1024);
+            _session.Source.InputPath = inputPath;
+        }
+
+        if (ImGui.Button("Browse..."))
+            PromptOpenGameFolder();
+
+        string buildLabel = _session.Source.BuildLabel;
+        ImGui.InputText("Build Label", ref buildLabel, 256);
+        _session.Source.BuildLabel = buildLabel;
+
+        int visualSize = _session.VisualSize;
+        ImGui.InputInt("Preview Size", ref visualSize);
+        _session.VisualSize = visualSize;
+
+        float cameraFov = _session.WmoCameraFieldOfViewDegrees;
+        if (ImGui.SliderFloat("Camera FOV", ref cameraFov, 20.0f, 90.0f, "%.0f deg"))
+            _session.WmoCameraFieldOfViewDegrees = cameraFov;
+
+        _session.Normalize();
+        ImGui.TextDisabled($"Orbit: azimuth {_session.WmoCameraAzimuthDegrees:F1} deg, elevation {_session.WmoCameraElevationDegrees:F1} deg, zoom {_session.WmoCameraZoomFactor:F2}");
+        Vector3 targetOffset = _session.GetWmoCameraTargetOffset();
+        ImGui.TextDisabled($"Target Offset: {targetOffset.X:F1}, {targetOffset.Y:F1}, {targetOffset.Z:F1}");
+
+        if (ImGui.Button(_currentWmoPreview == null ? "Load WMO Preview" : "Reload WMO Preview", new Vector2(-1, 0)))
+            LoadActiveWorkspace();
+
+        if (ImGui.Button("Reset Orbit Camera", new Vector2(-1, 0)))
+            ResetWmoOrbitCamera();
     }
 
     private void DrawMdxFileBrowserWindow()
@@ -1460,6 +1552,29 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
+        if (_session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneWmo)
+        {
+            bool hasWmoPreview = _wmoGpuPreviewRenderer?.HasRenderableGeometry == true && _wmoGpuPreviewRenderer.PreviewTextureHandle != 0;
+            if (_currentWmoPreview == null || !hasWmoPreview)
+            {
+                ImGui.TextWrapped("No WMO GPU preview texture uploaded yet.");
+                ImGui.End();
+                return;
+            }
+
+            ImGui.TextDisabled(_lastLoadSummary);
+            ImGui.Separator();
+
+            Vector2 wmoAvailable = ImGui.GetContentRegionAvail();
+            float wmoSize = MathF.Min(wmoAvailable.X, wmoAvailable.Y);
+            wmoSize = MathF.Max(wmoSize, 128f);
+            ImGui.Image((nint)_wmoGpuPreviewRenderer!.PreviewTextureHandle, new Vector2(wmoSize, wmoSize), new Vector2(0, 1), new Vector2(1, 0));
+            HandleWmoPreviewMouseInput(new Vector2(wmoSize, wmoSize));
+            ImGui.TextDisabled($"GPU Preview: {_session.VisualSize}x{_session.VisualSize} commands={_wmoGpuPreviewRenderer.CommandCount}");
+            ImGui.End();
+            return;
+        }
+
         if (_session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneMdx)
         {
             bool hasMdxPreview = _mdxGpuPreviewRenderer?.HasRenderableGeometry == true && _mdxGpuPreviewRenderer.PreviewTextureHandle != 0;
@@ -1562,7 +1677,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.TextDisabled("Terrain Preview");
             Vector2 previewAvailable = ImGui.GetContentRegionAvail();
             float previewSize = MathF.Max(180f, MathF.Min(previewAvailable.X, 320f));
-            ImGui.Image((nint)_worldTerrainPreviewTextureHandle, new Vector2(previewSize, previewSize), new Vector2(0, 1), new Vector2(1, 0));
+            ImGui.Image((nint)_worldTerrainPreviewTextureHandle, new Vector2(previewSize, previewSize));
             ImGui.TextDisabled($"{_currentWorldRuntimeFrame.TerrainVisualSnapshot.Width}x{_currentWorldRuntimeFrame.TerrainVisualSnapshot.Height} samples={_currentWorldRuntimeFrame.TerrainVisualSnapshot.SampledPixelCount}");
             ImGui.TextDisabled($"Range {FormatTerrainHeightRange(_currentWorldRuntimeFrame.TerrainTileData)} hash={_currentWorldRuntimeFrame.TerrainVisualSnapshot.VisualHash}");
         }
@@ -1622,6 +1737,61 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"GPU Preview Commands: {_modelOutputGpuRenderer?.CommandCount ?? 0}");
             ImGui.Text($"Bounds Min: {_currentModelOutputScene.BoundsMin}");
             ImGui.Text($"Bounds Max: {_currentModelOutputScene.BoundsMax}");
+            ImGui.End();
+            return;
+        }
+
+        if (_session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneWmo)
+        {
+            if (_currentWmoPreview == null)
+            {
+                ImGui.TextWrapped("Load a WMO preview to inspect geometry, portal ownership, and doodad placement data.");
+                ImGui.End();
+                return;
+            }
+
+            WmoRenderDocument document = _currentWmoPreview.Document;
+            ImGui.TextDisabled("Frame Summary");
+            ImGui.Text($"Source: {_session.Source.Describe()}");
+            ImGui.Text($"Load: {_currentWmoPreview.LoadDuration.TotalMilliseconds:F1} ms");
+            ImGui.Text($"Delta: {deltaSeconds * 1000f:F2} ms");
+            ImGui.Text($"GPU Preview Commands: {_wmoGpuPreviewRenderer?.CommandCount ?? 0}");
+            ImGui.Separator();
+
+            ImGui.TextDisabled("WMO Summary");
+            ImGui.Text($"Version: {(document.Version?.ToString() ?? "n/a")}");
+            ImGui.Text($"Materials: {document.Materials.Count}");
+            ImGui.Text($"Groups: {document.Groups.Count}");
+            ImGui.Text($"Portals: {document.Portals.Count}");
+            ImGui.Text($"Portal Refs: {document.PortalReferences.Count}");
+            ImGui.Text($"Doodad Sets: {document.DoodadSets.Count}");
+            ImGui.Text($"Doodad Placements: {document.DoodadPlacements.Count}");
+            ImGui.Text($"Bounds Min: {document.Summary.BoundsMin}");
+            ImGui.Text($"Bounds Max: {document.Summary.BoundsMax}");
+
+            ImGui.Separator();
+            ImGui.TextDisabled("Group Samples");
+            foreach (WmoEmbeddedGroupMeshDetail group in document.Groups.Take(12))
+                ImGui.BulletText($"#{group.GroupIndex} verts={group.Mesh.Vertices.Count} tris={group.Mesh.Indices.Count / 3} batches={group.Mesh.Batches.Count} doodads={group.DoodadRefs.Count} lights={group.LightRefs.Count}");
+            if (document.Groups.Count > 12)
+                ImGui.TextDisabled($"... {document.Groups.Count - 12} more groups");
+
+            if (document.DoodadSets.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled("Doodad Set Samples");
+                foreach (WmoDoodadSetDetail set in document.DoodadSets.Take(6))
+                    ImGui.BulletText($"#{set.SetIndex} {set.Name} start={set.StartIndex} count={set.Count} flags=0x{set.RawFlags:X}");
+            }
+
+            if (document.DoodadPlacements.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled("Doodad Placement Samples");
+                foreach (WmoDoodadPlacementDetail placement in document.DoodadPlacements.Take(6))
+                    ImGui.BulletText($"#{placement.PlacementIndex} {placement.ModelPath} scale={placement.Scale:F2} alpha={placement.Alpha} pos=({placement.Position.X:F1},{placement.Position.Y:F1},{placement.Position.Z:F1})");
+            }
+
             ImGui.End();
             return;
         }
@@ -2252,6 +2422,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             case WowViewerWorkspaceMode.StandaloneM2:
                 LoadPreview();
                 break;
+            case WowViewerWorkspaceMode.StandaloneWmo:
+                LoadWmoPreview();
+                break;
             case WowViewerWorkspaceMode.StandaloneMdx:
                 LoadMdxPreview();
                 break;
@@ -2295,6 +2468,36 @@ internal sealed class WowViewerDesktopApp : IDisposable
         {
             _lastError = ex.Message;
             _statusMessage = "Preview load failed.";
+        }
+    }
+
+    private void LoadWmoPreview()
+    {
+        _lastError = null;
+
+        try
+        {
+            WmoPreviewLoadRequest request = _session.BuildWmoPreviewRequest();
+            WmoPreviewLoadResult preview = WmoPreviewLoader.Load(request);
+            _wmoGpuPreviewRenderer?.LoadPreview(preview);
+            _currentWmoPreview = preview;
+            _currentPreview = null;
+            _currentMdxPreview = null;
+            _currentWorldSession = null;
+            _currentWorldRuntimeFrame = null;
+            _selectedWorldObject = null;
+            _gpuPreviewRenderer?.ClearPreview();
+            _mdxGpuPreviewRenderer?.ClearPreview();
+            DeletePreviewTexture();
+            DeleteWorldTerrainPreviewTexture();
+            _statusMessage = $"Loaded {preview.Document.SourcePath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
+            _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, groups {preview.Document.Groups.Count}, portals {preview.Document.Portals.Count}, doodads {preview.Document.DoodadPlacements.Count}";
+            SyncWmoCameraTargetsFromSession(resetCurrent: true);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            _lastError = ex.Message;
+            _statusMessage = "WMO preview load failed.";
         }
     }
 
@@ -2451,6 +2654,15 @@ internal sealed class WowViewerDesktopApp : IDisposable
         SyncM2CameraTargetsFromSession(resetCurrent: true);
     }
 
+    private void ResetWmoOrbitCamera()
+    {
+        _session.WmoCameraAzimuthDegrees = 35.0f;
+        _session.WmoCameraElevationDegrees = 25.0f;
+        _session.WmoCameraZoomFactor = 0.9f;
+        _session.SetWmoCameraTargetOffset(Vector3.Zero);
+        SyncWmoCameraTargetsFromSession(resetCurrent: true);
+    }
+
     private void ResetMdxOrbitCamera()
     {
         _session.MdxCameraMode = PreviewCameraMode.Orbit;
@@ -2481,6 +2693,27 @@ internal sealed class WowViewerDesktopApp : IDisposable
             value => _session.M2CameraZoomFactor = value,
             () => _session.GetM2CameraTargetOffset(),
             value => _session.SetM2CameraTargetOffset(value));
+    }
+
+    private void HandleWmoPreviewMouseInput(Vector2 previewSize)
+    {
+        if (_currentWmoPreview == null || _wmoGpuPreviewRenderer == null || !ImGui.IsItemHovered())
+            return;
+
+        HandleInteractiveOrbitInput(
+            previewSize,
+            _wmoGpuPreviewRenderer.BoundsMin,
+            _wmoGpuPreviewRenderer.BoundsMax,
+            ref _wmoInteractiveCamera,
+            ResetWmoOrbitCamera,
+            () => _session.WmoCameraAzimuthDegrees,
+            value => _session.WmoCameraAzimuthDegrees = value,
+            () => _session.WmoCameraElevationDegrees,
+            value => _session.WmoCameraElevationDegrees = value,
+            () => _session.WmoCameraZoomFactor,
+            value => _session.WmoCameraZoomFactor = value,
+            () => _session.GetWmoCameraTargetOffset(),
+            value => _session.SetWmoCameraTargetOffset(value));
     }
 
     private void HandleMdxPreviewMouseInput(Vector2 previewSize)
@@ -2522,11 +2755,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private void AdvanceInteractivePreviewCameras(float deltaSeconds)
     {
         SyncM2CameraTargetsFromSession(resetCurrent: false);
+        SyncWmoCameraTargetsFromSession(resetCurrent: false);
         SyncMdxCameraTargetsFromSession(resetCurrent: false);
         if (_session.ModelOutput.CameraMode == WowViewerModelOutputCameraMode.Orbit)
             SyncModelOutputCameraTargetsFromSession(resetCurrent: false);
 
         _m2InteractiveCamera.Advance(deltaSeconds);
+        _wmoInteractiveCamera.Advance(deltaSeconds);
         _mdxInteractiveCamera.Advance(deltaSeconds);
         if (_session.ModelOutput.CameraMode == WowViewerModelOutputCameraMode.Orbit)
             _modelOutputInteractiveCamera.Advance(deltaSeconds);
@@ -2535,6 +2770,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private void SyncM2CameraTargetsFromSession(bool resetCurrent)
     {
         _m2InteractiveCamera.SetTargets(_session.M2CameraAzimuthDegrees, _session.M2CameraElevationDegrees, _session.M2CameraZoomFactor, _session.GetM2CameraTargetOffset(), resetCurrent);
+    }
+
+    private void SyncWmoCameraTargetsFromSession(bool resetCurrent)
+    {
+        _wmoInteractiveCamera.SetTargets(_session.WmoCameraAzimuthDegrees, _session.WmoCameraElevationDegrees, _session.WmoCameraZoomFactor, _session.GetWmoCameraTargetOffset(), resetCurrent);
     }
 
     private void SyncMdxCameraTargetsFromSession(bool resetCurrent)
@@ -2733,6 +2973,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private void ClearWorkspace()
     {
         _currentPreview = null;
+        _currentWmoPreview = null;
         _currentMdxPreview = null;
         _currentModelOutputScene = null;
         _currentWorldSession = null;
@@ -2742,6 +2983,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _lastLoadSummary = "No workspace loaded.";
         _statusMessage = "Workspace cleared.";
         _gpuPreviewRenderer?.ClearPreview();
+        _wmoGpuPreviewRenderer?.ClearPreview();
         _mdxGpuPreviewRenderer?.ClearPreview();
         _modelOutputGpuRenderer?.ClearScene();
         DeletePreviewTexture();
@@ -2856,12 +3098,18 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _session.MdxCameraFieldOfViewDegrees = session.MdxCameraFieldOfViewDegrees;
         _session.MdxCameraZoomFactor = session.MdxCameraZoomFactor;
         _session.SetMdxCameraTargetOffset(session.GetMdxCameraTargetOffset());
+        _session.WmoCameraAzimuthDegrees = session.WmoCameraAzimuthDegrees;
+        _session.WmoCameraElevationDegrees = session.WmoCameraElevationDegrees;
+        _session.WmoCameraFieldOfViewDegrees = session.WmoCameraFieldOfViewDegrees;
+        _session.WmoCameraZoomFactor = session.WmoCameraZoomFactor;
+        _session.SetWmoCameraTargetOffset(session.GetWmoCameraTargetOffset());
         _session.ProfileIndex = session.ProfileIndex;
         _session.SequenceIndex = session.SequenceIndex;
         _session.TimeMs = session.TimeMs;
         _session.VisualSize = session.VisualSize;
         _session.Normalize();
         SyncM2CameraTargetsFromSession(resetCurrent: true);
+        SyncWmoCameraTargetsFromSession(resetCurrent: true);
         SyncMdxCameraTargetsFromSession(resetCurrent: true);
         SyncModelOutputCameraTargetsFromSession(resetCurrent: true);
     }
@@ -3024,9 +3272,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         Vector2 planarMax = result.PlanarMax;
         float width = MathF.Max(1f, planarMax.X - planarMin.X);
         float height = MathF.Max(1f, planarMax.Y - planarMin.Y);
-        float nx = (position.X - planarMin.X) / width;
-        float ny = (position.Y - planarMin.Y) / height;
-        return new Vector2(origin.X + (nx * size.X), origin.Y + ((1f - ny) * size.Y));
+        float nx = 1f - ((position.Y - planarMin.Y) / height);
+        float ny = 1f - ((position.X - planarMin.X) / width);
+        return new Vector2(origin.X + (nx * size.X), origin.Y + (ny * size.Y));
     }
 
     private void TrySelectWorldObjectAtCanvasPoint(WowViewerWorldRuntimeFrameResult result, Vector2 origin, Vector2 size, Vector2 mousePosition)

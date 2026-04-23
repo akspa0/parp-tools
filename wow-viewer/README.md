@@ -15,6 +15,7 @@ This repo is in active migration. It already contains usable tooling, but it is 
 
 - The desktop app is a real shell, not yet a finished replacement viewer.
 - PM4 is the most mature library area today; other format families are at mixed levels of summary, parse, and runtime ownership.
+- WMO shared I/O now includes version-aware material and embedded-group mesh document readers, but `WowViewer.App` still does not consume that seam as a real standalone or world 3D renderer yet.
 - Dataset and training flows are usable, but still documented as Bring Your Own Data workflows and still rely on some compatibility scripts downstream.
 
 ## Prerequisites
@@ -169,6 +170,7 @@ That document covers:
 
 - [docs/validation/direct-v9-training-setup.md](docs/validation/direct-v9-training-setup.md): direct dataset and training setup
 - [docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md](docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md): current viewer ownership boundary
+- [docs/architecture/low-resolution-world-image-alignment-plan-2026-04-22.md](docs/architecture/low-resolution-world-image-alignment-plan-2026-04-22.md): low-resolution world-image alignment and streamed viewer verification plan
 - [docs/architecture/audio-engine-plan-2026-04-21.md](docs/architecture/audio-engine-plan-2026-04-21.md): first audio-engine and game-engine subsystem plan
 - [docs/architecture/m2/README.md](docs/architecture/m2/README.md): M2 architecture and implementation handoff
 - [docs/architecture/m2-native-client-research-2026-03-31.md](docs/architecture/m2-native-client-research-2026-03-31.md): native-client M2 research notes

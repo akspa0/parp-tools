@@ -1335,7 +1335,7 @@ static void RunAudioAlphaArea(string[] args)
 	}
 
 	IEnumerable<AlphaAreaAudioBinding> bindings = areaId.HasValue
-		? catalog.TryResolve(areaId.Value) is { } binding ? [binding] : Array.Empty<AlphaAreaAudioBinding>()
+		? catalog.TryResolve(areaId.Value) is { } resolvedBinding ? [resolvedBinding] : Array.Empty<AlphaAreaAudioBinding>()
 		: catalog.EnumerateBindings();
 
 	if (!string.IsNullOrWhiteSpace(search))
@@ -1411,6 +1411,9 @@ static void RunMap(string[] args)
 		case "inspect":
 			RunMapInspect(tail);
 			break;
+		case "terrain-patch-report":
+			RunMapTerrainPatchReport(tail);
+			break;
 		case "uniqueid-report":
 			RunMapUniqueIdReport(tail);
 			break;
@@ -1460,6 +1463,46 @@ static void RunMapInspect(string[] args)
 
 	MapFileSummary summary = MapFileSummaryReader.Read(input);
 	PrintMapSummary(summary, dumpTexChunks);
+}
+
+static void RunMapTerrainPatchReport(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: terrain patch report input JSON is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string inputPath = Path.GetFullPath(input);
+	if (!File.Exists(inputPath))
+	{
+		Console.Error.WriteLine($"Error: terrain patch report not found: {inputPath}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	IReadOnlyList<TerrainPatchReportEntry> entries = JsonSerializer.Deserialize<List<TerrainPatchReportEntry>>(
+		File.ReadAllText(inputPath),
+		new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+		?? [];
+	TerrainPatchReportSummary summary = BuildTerrainPatchReportSummary(inputPath, entries);
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	PrintTerrainPatchReportSummary(summary);
 }
 
 static void RunLitInspect(string[] args)
@@ -3747,8 +3790,114 @@ static void ShowBlpUsage()
 {
 	Console.WriteLine("BLP commands:");
 	Console.WriteLine("  blp inspect --input <file.blp>");
+	Console.WriteLine("  map terrain-patch-report --input <terrain_patch_report.json> [--output <summary.json>]");
 	Console.WriteLine("  blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]");
 }
+
+static TerrainPatchReportSummary BuildTerrainPatchReportSummary(string inputPath, IReadOnlyList<TerrainPatchReportEntry> entries)
+{
+	int patchedCount = entries.Count(static entry => entry.Patched);
+	int copiedCount = entries.Count(static entry => entry.CopiedFromInput);
+	int failedCount = entries.Count(static entry => !string.IsNullOrWhiteSpace(entry.Error));
+	int mccvCount = entries.Count(static entry => !string.IsNullOrWhiteSpace(entry.OutputMccvPath));
+	int guideCount = entries.Count(static entry => !string.IsNullOrWhiteSpace(entry.OutputGuideTexturePath));
+	int textureMetadataCount = entries.Count(static entry => !string.IsNullOrWhiteSpace(entry.OutputTextureMetadataPath));
+	int tilesetIndexCount = entries.Count(static entry => !string.IsNullOrWhiteSpace(entry.OutputTilesetIndexPath));
+	int textureMaskFileCount = entries.Sum(static entry => entry.OutputTextureMaskPaths?.Count ?? 0);
+	int chunkAuditCount = entries.Count(static entry => entry.ChunkChangeAudit is not null);
+	int seamAuditCount = entries.Count(static entry => entry.SeamAudit is not null);
+
+	IReadOnlyList<TerrainPatchStatusCount> statusCounts = entries
+		.GroupBy(static entry => string.IsNullOrWhiteSpace(entry.TextureSupervisionStatus) ? "unspecified" : entry.TextureSupervisionStatus!, StringComparer.OrdinalIgnoreCase)
+		.OrderByDescending(static group => group.Count())
+		.ThenBy(static group => group.Key, StringComparer.OrdinalIgnoreCase)
+		.Select(static group => new TerrainPatchStatusCount(group.Key, group.Count()))
+		.ToArray();
+
+	IReadOnlyList<TerrainPatchMissingExample> missingTextureExamples = entries
+		.Where(static entry => !string.IsNullOrWhiteSpace(entry.TileName)
+			&& !string.IsNullOrWhiteSpace(entry.TextureSupervisionStatus)
+			&& !string.Equals(entry.TextureSupervisionStatus, "exported", StringComparison.OrdinalIgnoreCase)
+			&& !string.Equals(entry.TextureSupervisionStatus, "exported-partial", StringComparison.OrdinalIgnoreCase))
+		.Take(12)
+		.Select(static entry => new TerrainPatchMissingExample(entry.TileName!, entry.TextureSupervisionStatus!))
+		.ToArray();
+
+	return new TerrainPatchReportSummary(
+		inputPath,
+		entries.Count,
+		patchedCount,
+		copiedCount,
+		failedCount,
+		mccvCount,
+		guideCount,
+		textureMetadataCount,
+		tilesetIndexCount,
+		textureMaskFileCount,
+		chunkAuditCount,
+		seamAuditCount,
+		statusCounts,
+		missingTextureExamples);
+}
+
+static void PrintTerrainPatchReportSummary(TerrainPatchReportSummary summary)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect terrain patch report");
+	Console.WriteLine($"Input: {summary.InputPath}");
+	Console.WriteLine($"Entries: total={summary.EntryCount} patched={summary.PatchedCount} copied={summary.CopiedCount} failed={summary.FailedCount}");
+	Console.WriteLine($"Guidance artifacts: mccv={summary.MccvExportCount} guideTextures={summary.GuideTextureCount}");
+	Console.WriteLine($"Texture supervision: metadata={summary.TextureMetadataCount} tilesetIndex={summary.TilesetIndexCount} maskFiles={summary.TextureMaskFileCount}");
+	Console.WriteLine($"Proof artifacts: chunkAudits={summary.ChunkAuditCount} seamAudits={summary.SeamAuditCount}");
+	Console.WriteLine();
+	Console.WriteLine("Texture supervision status counts:");
+	foreach (TerrainPatchStatusCount status in summary.TextureSupervisionStatuses)
+		Console.WriteLine($"  {status.Status}: {status.Count}");
+
+	if (summary.MissingTextureExamples.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Texture supervision gaps:");
+		foreach (TerrainPatchMissingExample example in summary.MissingTextureExamples)
+			Console.WriteLine($"  {example.TileName}: {example.Status}");
+	}
+}
+
+sealed record TerrainPatchReportEntry(
+	string? SummaryPath,
+	string? TileName,
+	string? OutputAdtPath,
+	bool Patched,
+	string? OutputGlbPath,
+	string? OutputMccvPath,
+	string? OutputGuideTexturePath,
+	string? TextureSupervisionStatus,
+	string? OutputTextureMetadataPath,
+	string? OutputTilesetIndexPath,
+	IReadOnlyList<string>? OutputTextureMaskPaths,
+	string? Error,
+	bool CopiedFromInput,
+	object? ChunkChangeAudit,
+	object? SeamAudit);
+
+sealed record TerrainPatchReportSummary(
+	string InputPath,
+	int EntryCount,
+	int PatchedCount,
+	int CopiedCount,
+	int FailedCount,
+	int MccvExportCount,
+	int GuideTextureCount,
+	int TextureMetadataCount,
+	int TilesetIndexCount,
+	int TextureMaskFileCount,
+	int ChunkAuditCount,
+	int SeamAuditCount,
+	IReadOnlyList<TerrainPatchStatusCount> TextureSupervisionStatuses,
+	IReadOnlyList<TerrainPatchMissingExample> MissingTextureExamples);
+
+sealed record TerrainPatchStatusCount(string Status, int Count);
+
+sealed record TerrainPatchMissingExample(string TileName, string Status);
 
 static void ShowLitUsage()
 {

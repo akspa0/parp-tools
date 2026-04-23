@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="SixLabors.ImageSharp" />
+    <PackageReference Include="SharpGLTF.Toolkit" />
   </ItemGroup>
 
   <PropertyGroup>

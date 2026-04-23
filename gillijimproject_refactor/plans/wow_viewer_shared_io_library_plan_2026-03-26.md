@@ -2,6 +2,71 @@
 
 # wow-viewer Shared I/O Library Plan
 
+## Apr 23, 2026 - WMO shared I/O now carries the first render-document seam for materials and embedded-group meshes
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Wmo` now carries the first reusable WMO render-document contracts needed by future standalone and world viewers without routing back through the legacy `WmoV14ToV17Converter` path:
+    - `WmoMaterialDetail`
+    - `WmoGroupFaceMaterialDetail`
+    - `WmoGroupBatchDetail`
+    - `WmoGroupMeshDetail`
+    - `WmoEmbeddedGroupMeshDetail`
+    - `WmoRenderDocument`
+  - `WowViewer.Core.IO.Wmo` now owns the matching version-aware readers:
+    - `WmoMaterialDetailReader`
+    - `WmoGroupMeshDetailReader`
+    - `WmoEmbeddedGroupMeshDetailReader`
+    - `WmoRenderDocumentReader`
+  - the current shared proof explicitly covers both Alpha-style and later-era layout differences already handled by the existing WMO readers:
+    - legacy `MOMT` entry sizing
+    - standard `MOMT` entry sizing
+    - legacy `MOPY` entry sizing
+    - standard `MOPY` entry sizing
+    - `MOVI` or `MOIN` index chunk selection
+    - embedded-group root reads from real Alpha MPQ-backed samples
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoMaterialDetailReaderTests|WmoRenderDocumentReaderTests"`
+- notes:
+  - this is the first shared WMO seam that exposes actual geometry-bearing group payloads and resolved material texture names instead of only counts or bounds or summary flags
+  - this does not yet wire a standalone WMO preview or world renderer consumer in `WowViewer.App`
+  - the current render document is intentionally still narrow: it carries materials plus embedded-group mesh payloads, doodad refs, light refs, and liquid presence, but it does not yet claim full root portal or doodad-set runtime ownership
+
+## Apr 23, 2026 - ADT patch workflow now emits shared chunk-change and seam-audit proof data
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.IO.Maps.AdtTerrainMath` now owns the shared terrain normal computation used by both patch writing and seam auditing
+  - `WowViewer.Core.IO.Maps.AdtTerrainPatchAudit` now owns two reusable ADT patch proof surfaces:
+    - `AnalyzeChunkChanges(...)` for `MCIN` or resolved `MCNK` coverage counts over changed `MCVT` and changed `MCNR` payloads
+    - `CreateSeamAudit(...)` for pre or post neighboring-tile height deltas and normal-angle deltas
+  - `WowViewer.Tool.Converter terrain-patch-adt` now emits those shared results directly into `terrain_patch_report.json` per patched tile instead of leaving proof outside the tool in shell-only audits
+  - focused writer coverage now includes a synthetic multi-chunk proof that all resolved chunks change, not just a first encountered chunk
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "AdtTerrainWriterTests|AdtHeightmapSeamStitcherTests"`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- terrain-patch-adt --input-adt-dir i:/parp/parp-tools/gillijimproject_refactor/test_data/WoWMuseum/335-dev/World/Maps/development --inference-dir i:/parp/parp-tools/output/ml-inference/v9_pm4mix_fullsane_fresh_20260421/minimap_png_wdl_full_20260422 --output-dir i:/parp/parp-tools/output/ml-inference/v9_pm4mix_fullsane_fresh_20260421/minimap_png_wdl_full_20260422/patched_adts`
+- notes:
+  - the current representative real-data proof on `development_0_0` reports `PresentChunkCount=256`, `ChangedMcvtChunkCount=256`, and `ChangedMcnrChunkCount=256`, which closes the user’s concern that only the first `MCNK` might be changing in the current root-ADT writer path
+  - the same report now exposes border metrics that are directly useful to future `v10` supervision or parity probes, but post-stitch normal-angle deltas can still stay non-zero because edge-equal heights do not imply equal finite-difference normals across the whole adjacent neighborhood
+
+## Apr 22, 2026 - ADT patch workflow now stitches shared predicted tile borders and anchors patched edges to unchanged neighbors before write
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.IO.Maps.AdtHeightmapSeamStitcher` now owns the first shared border-reconciliation helper for predicted `257x257` tile heightmaps
+  - the same shared helper now also owns one-way anchoring from unchanged source-neighbor tile heightmaps into predicted tile borders and shared corners when the adjacent tile was not predicted in the current batch
+  - `WowViewer.Tool.Converter terrain-patch-adt` now batches predicted heightmaps, stitches shared predicted borders, loads unchanged neighbor heightmaps through `WorldTerrainTileBuilder`, anchors patched borders to those neighbors, and only then calls `AdtTerrainWriter`
+  - focused seam coverage now exists in `wow-viewer/tests/WowViewer.Core.Tests/AdtHeightmapSeamStitcherTests.cs`, and `WowViewer.Tool.Inspect` source build health was restored so ADT audit commands remain part of the active shared-I/O workflow
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter AdtHeightmapSeamStitcherTests`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- terrain-patch-adt --input-adt-dir i:/parp/parp-tools/gillijimproject_refactor/test_data/WoWMuseum/335-dev/World/Maps/development --inference-dir i:/parp/parp-tools/output/ml-inference/v9_pm4mix_fullsane_fresh_20260421/minimap_png_wdl_full_20260422 --output-dir i:/parp/parp-tools/output/ml-inference/v9_pm4mix_fullsane_fresh_20260421/minimap_png_wdl_full_20260422/patched_adts`
+- notes:
+  - this is now a predicted-to-predicted plus predicted-to-unchanged-neighbor seam pass, which makes the patch output more useful as a training-audit and parity probe for future `v10` work because it can surface where the model still fights real neighboring terrain instead of hiding that error behind isolated tile writes
+  - a follow-up real-data inspection with the currently built `WowViewer.Tool.Inspect` binary showed the same pre-existing blind spot on both original and patched WoWMuseum leak ADTs: `map inspect` only surfaced `MVER/MHDR/MCIN/MTEX`, so current inspect output is not yet a trustworthy terrain-chunk validity probe for that leak corpus
+
 ## Apr 21, 2026 - Alpha-first audio restoration directive over later-era MCSE-first audio work
 
 - status: active workflow directive

@@ -1,5 +1,47 @@
 # Progress
 
+### Apr 23, 2026 - emitted ADT patch chunk-coverage and seam-audit metrics from wow-viewer terrain-patch-adt
+
+- what changed:
+	- added `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtTerrainMath.cs`
+	- added `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtTerrainPatchAudit.cs`
+	- updated `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtTerrainWriter.cs` to reuse the shared normal helper
+	- updated `wow-viewer/tools/converter/WowViewer.Tool.Converter/TerrainPatchAdtCommand.cs` so each patched report entry now carries:
+		- `ChunkChangeAudit.PresentChunkCount`
+		- `ChunkChangeAudit.ChangedMcvtChunkCount`
+		- `ChunkChangeAudit.ChangedMcnrChunkCount`
+		- `SeamAudit.PreHeightDelta`
+		- `SeamAudit.PostHeightDelta`
+		- `SeamAudit.PreNormalAngleDegrees`
+		- `SeamAudit.PostNormalAngleDegrees`
+	- updated `wow-viewer/tests/WowViewer.Core.Tests/AdtTerrainWriterTests.cs` with a focused multi-`MCIN` regression that proves two resolved synthetic chunks both get `MCVT` and `MCNR` updates
+
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "AdtTerrainWriterTests|AdtHeightmapSeamStitcherTests"` passed with `8` tests
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` succeeded
+	- real-data rerun of `terrain-patch-adt` against the WoWMuseum leak still completed with `patched=2252 copied=51 skipped=0`
+	- representative report entry for `development_0_0` now shows `PresentChunkCount=256`, `ChangedMcvtChunkCount=256`, and `ChangedMcnrChunkCount=256`
+
+- boundary:
+	- this closes the first repo-owned proof surface for full chunk-change coverage and border metrics, but it does not yet make the current inspect blind spot or remaining Noggit rejection root cause go away
+	- seam metrics are now emitted for `v10`-adjacent training or audit work, but no downstream training consumer uses them yet in this chat
+
+### Apr 22, 2026 - stitched predicted shared tile borders and anchored patched edges to unchanged neighbors before ADT write in wow-viewer
+
+- what changed:
+	- added `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtHeightmapSeamStitcher.cs`
+	- `terrain-patch-adt` now loads predicted `257x257` heightmaps first, stitches shared vertical or horizontal edges plus four-tile corners, anchors predicted borders to unchanged source-neighbor ADTs when those neighbors were copied through, then writes patched ADTs
+	- added `wow-viewer/tests/WowViewer.Core.Tests/AdtHeightmapSeamStitcherTests.cs` for focused predicted-edge, predicted-corner, anchored-edge, and anchored-corner coverage
+	- fixed the current `WowViewer.Tool.Inspect` source build break in `Program.cs` by removing the local alpha-area-audio binding-name collision, so repo-local ADT inspection no longer depends on a stale built binary
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter AdtHeightmapSeamStitcherTests` passed with `4` tests
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` succeeded
+	- `dotnet build i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug` succeeded again
+	- real-data rerun of `terrain-patch-adt` against the WoWMuseum leak still completed with `patched=2252 copied=51 skipped=0`
+- boundary:
+	- this now reconciles borders among predicted tiles and against copied-through neighbors, but the policy is still local edge or corner anchoring rather than a larger seam metric or solver
+	- the current built `WowViewer.Tool.Inspect` binary still reports no top-level `MCNK` for both original and patched WoWMuseum leak root ADTs, so that inspect blind spot remains separate from the new seam pass
+
 ### Apr 22, 2026 - implemented the first Runpod Pod plus GHCR container lane for remote v9 training
 
 - what changed:

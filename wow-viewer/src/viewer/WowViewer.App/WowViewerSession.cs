@@ -204,6 +204,20 @@ internal sealed class WowViewerSession
 
     public float MdxCameraTargetOffsetZ { get; set; }
 
+    public float WmoCameraAzimuthDegrees { get; set; } = 35.0f;
+
+    public float WmoCameraElevationDegrees { get; set; } = 25.0f;
+
+    public float WmoCameraFieldOfViewDegrees { get; set; } = 60.0f;
+
+    public float WmoCameraZoomFactor { get; set; } = 0.9f;
+
+    public float WmoCameraTargetOffsetX { get; set; }
+
+    public float WmoCameraTargetOffsetY { get; set; }
+
+    public float WmoCameraTargetOffsetZ { get; set; }
+
     public static WowViewerSession CreateDefault() => new();
 
     public void Normalize()
@@ -228,6 +242,13 @@ internal sealed class WowViewerSession
         MdxCameraTargetOffsetX = float.IsFinite(MdxCameraTargetOffsetX) ? MdxCameraTargetOffsetX : 0.0f;
         MdxCameraTargetOffsetY = float.IsFinite(MdxCameraTargetOffsetY) ? MdxCameraTargetOffsetY : 0.0f;
         MdxCameraTargetOffsetZ = float.IsFinite(MdxCameraTargetOffsetZ) ? MdxCameraTargetOffsetZ : 0.0f;
+        WmoCameraAzimuthDegrees = float.IsFinite(WmoCameraAzimuthDegrees) ? WmoCameraAzimuthDegrees : 35.0f;
+        WmoCameraElevationDegrees = float.IsFinite(WmoCameraElevationDegrees) ? Math.Clamp(WmoCameraElevationDegrees, -89.0f, 89.0f) : 25.0f;
+        WmoCameraFieldOfViewDegrees = float.IsFinite(WmoCameraFieldOfViewDegrees) ? Math.Clamp(WmoCameraFieldOfViewDegrees, 1.0f, 170.0f) : 60.0f;
+        WmoCameraZoomFactor = float.IsFinite(WmoCameraZoomFactor) ? Math.Clamp(WmoCameraZoomFactor, 0.05f, 10.0f) : 0.9f;
+        WmoCameraTargetOffsetX = float.IsFinite(WmoCameraTargetOffsetX) ? WmoCameraTargetOffsetX : 0.0f;
+        WmoCameraTargetOffsetY = float.IsFinite(WmoCameraTargetOffsetY) ? WmoCameraTargetOffsetY : 0.0f;
+        WmoCameraTargetOffsetZ = float.IsFinite(WmoCameraTargetOffsetZ) ? WmoCameraTargetOffsetZ : 0.0f;
         Source ??= new WowViewerAssetSource();
         World ??= new WowViewerWorldSessionState();
         ModelOutput ??= new WowViewerModelOutputState();
@@ -285,6 +306,31 @@ internal sealed class WowViewerSession
         };
     }
 
+    public WmoPreviewLoadRequest BuildWmoPreviewRequest()
+    {
+        Normalize();
+        return new WmoPreviewLoadRequest
+        {
+            ArchiveRoot = Source.UsesArchiveSource ? Source.ArchiveRoot : null,
+            VirtualPath = Source.UsesArchiveSource ? Source.VirtualPath : null,
+            LooseOverlayRoot = Source.UsesArchiveSource ? Source.LooseOverlayRoot : null,
+            InputPath = Source.UsesArchiveSource ? null : Source.InputPath,
+            BuildLabel = Source.BuildLabel,
+            VisualWidth = VisualSize,
+            VisualHeight = VisualSize,
+            Camera = new PreviewCameraSettings
+            {
+                Mode = PreviewCameraMode.Orbit,
+                PresetName = null,
+                AzimuthDegrees = WmoCameraAzimuthDegrees,
+                ElevationDegrees = WmoCameraElevationDegrees,
+                FieldOfViewDegrees = WmoCameraFieldOfViewDegrees,
+                ZoomFactor = WmoCameraZoomFactor,
+                TargetOffset = GetWmoCameraTargetOffset(),
+            },
+        };
+    }
+
     public Vector3 GetM2CameraTargetOffset()
     {
         Normalize();
@@ -305,11 +351,25 @@ internal sealed class WowViewerSession
         return new Vector3(MdxCameraTargetOffsetX, MdxCameraTargetOffsetY, MdxCameraTargetOffsetZ);
     }
 
+    public Vector3 GetWmoCameraTargetOffset()
+    {
+        Normalize();
+        return new Vector3(WmoCameraTargetOffsetX, WmoCameraTargetOffsetY, WmoCameraTargetOffsetZ);
+    }
+
     public void SetMdxCameraTargetOffset(Vector3 value)
     {
         MdxCameraTargetOffsetX = value.X;
         MdxCameraTargetOffsetY = value.Y;
         MdxCameraTargetOffsetZ = value.Z;
+        Normalize();
+    }
+
+    public void SetWmoCameraTargetOffset(Vector3 value)
+    {
+        WmoCameraTargetOffsetX = value.X;
+        WmoCameraTargetOffsetY = value.Y;
+        WmoCameraTargetOffsetZ = value.Z;
         Normalize();
     }
 
@@ -347,7 +407,7 @@ internal sealed class WowViewerSession
 
     public bool IsImplementedWorkspace()
     {
-        return WorkspaceMode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.StandaloneMdx or WowViewerWorkspaceMode.WorldSession or WowViewerWorkspaceMode.DatasetTooling or WowViewerWorkspaceMode.ModelOutputs;
+        return WorkspaceMode is WowViewerWorkspaceMode.StandaloneM2 or WowViewerWorkspaceMode.StandaloneWmo or WowViewerWorkspaceMode.StandaloneMdx or WowViewerWorkspaceMode.WorldSession or WowViewerWorkspaceMode.DatasetTooling or WowViewerWorkspaceMode.ModelOutputs;
     }
 
     public bool HasBootstrapInput()
@@ -356,6 +416,9 @@ internal sealed class WowViewerSession
         return WorkspaceMode switch
         {
             WowViewerWorkspaceMode.StandaloneM2 => Source.UsesArchiveSource
+                ? !string.IsNullOrWhiteSpace(Source.ArchiveRoot) && !string.IsNullOrWhiteSpace(Source.VirtualPath)
+                : !string.IsNullOrWhiteSpace(Source.InputPath),
+            WowViewerWorkspaceMode.StandaloneWmo => Source.UsesArchiveSource
                 ? !string.IsNullOrWhiteSpace(Source.ArchiveRoot) && !string.IsNullOrWhiteSpace(Source.VirtualPath)
                 : !string.IsNullOrWhiteSpace(Source.InputPath),
             WowViewerWorkspaceMode.StandaloneMdx => Source.UsesArchiveSource
