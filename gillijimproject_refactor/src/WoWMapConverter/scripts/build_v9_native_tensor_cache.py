@@ -121,6 +121,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Keep compatibility tiles that have no non-zero source chunk heights when they still provide a minimap. This is useful for bounded inference coverage checks over development-map tiles that only have minimap-side supervision.",
     )
+    parser.add_argument(
+        "--fallback-minimap-root",
+        default=None,
+        help="Optional directory of <tile_name>.png minimaps used when the harvested dataset JSON does not provide a usable minimap path.",
+    )
     return parser.parse_args()
 
 
@@ -542,7 +547,13 @@ def load_heightmap_16bit(path: Path | None, target_size: int) -> np.ndarray:
     return array.astype(np.float32)
 
 
-def select_minimap_path(dataset_root: Path, tile_json: dict, terrain_data: dict) -> tuple[Path | None, str]:
+def select_minimap_path(
+    dataset_root: Path,
+    tile_json: dict,
+    terrain_data: dict,
+    *,
+    fallback_minimap_root: Path | None = None,
+) -> tuple[Path | None, str]:
     candidates = (
         (terrain_data.get("terrain_only_minimap"), "terrain_only_minimap"),
         (terrain_data.get("no_liquid_minimap"), "no_liquid_minimap"),
@@ -554,12 +565,25 @@ def select_minimap_path(dataset_root: Path, tile_json: dict, terrain_data: dict)
         candidate = resolve_dataset_path(dataset_root, relative_path)
         if candidate is not None:
             return candidate, source_name
+
+    if fallback_minimap_root is not None:
+        tile_name = str(terrain_data.get("adt_tile") or tile_json.get("adt_tile") or "").strip()
+        if tile_name:
+            fallback_candidate = fallback_minimap_root / f"{tile_name}.png"
+            if fallback_candidate.exists():
+                return fallback_candidate, "fallback_minimap_root"
+
     return None, "missing"
 
 
-def load_minimap(dataset_root: Path, tile_json: dict) -> np.ndarray | None:
+def load_minimap(dataset_root: Path, tile_json: dict, *, fallback_minimap_root: Path | None = None) -> np.ndarray | None:
     terrain_data = tile_json.get("terrain_data", tile_json)
-    minimap_path, _ = select_minimap_path(dataset_root, tile_json, terrain_data)
+    minimap_path, _ = select_minimap_path(
+        dataset_root,
+        tile_json,
+        terrain_data,
+        fallback_minimap_root=fallback_minimap_root,
+    )
     return load_rgb_image(minimap_path, size=256)
 
 
@@ -626,6 +650,7 @@ def build_shard_payload(
     json_path: Path,
     default_interleaved: bool,
     include_minimap_only_tiles: bool,
+    fallback_minimap_root: Path | None,
 ) -> tuple[dict[str, np.ndarray], dict[str, object]] | None:
     try:
         with json_path.open("r", encoding="utf-8") as handle:
@@ -641,8 +666,13 @@ def build_shard_payload(
     tile_name = str(terrain_data.get("adt_tile") or json_path.stem)
     is_interleaved = bool(terrain_data.get("is_interleaved", default_interleaved))
 
-    minimap_rgb_256 = load_minimap(dataset_root, tile_json)
-    _, minimap_source = select_minimap_path(dataset_root, tile_json, terrain_data)
+    minimap_rgb_256 = load_minimap(dataset_root, tile_json, fallback_minimap_root=fallback_minimap_root)
+    _, minimap_source = select_minimap_path(
+        dataset_root,
+        tile_json,
+        terrain_data,
+        fallback_minimap_root=fallback_minimap_root,
+    )
     if not has_nonzero_chunk_heights:
         if not include_minimap_only_tiles or minimap_rgb_256 is None:
             return None
@@ -736,6 +766,7 @@ def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    fallback_minimap_root = Path(args.fallback_minimap_root).resolve() if args.fallback_minimap_root else None
 
     curated_manifest_path = Path(args.curated_manifest).resolve() if args.curated_manifest else None
     curated_entries = load_curated_manifest_entries(
@@ -770,6 +801,7 @@ def main() -> None:
                 json_path,
                 args.default_interleaved,
                 args.include_minimap_only_tiles,
+                fallback_minimap_root,
             )
             if built is None:
                 skipped += 1
