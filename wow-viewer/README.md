@@ -15,7 +15,7 @@ This repo is in active migration. It already contains usable tooling, but it is 
 
 - The desktop app is a real shell, not yet a finished replacement viewer.
 - PM4 is the most mature library area today; other format families are at mixed levels of summary, parse, and runtime ownership.
-- WMO shared I/O now includes version-aware material and embedded-group mesh document readers, but `WowViewer.App` still does not consume that seam as a real standalone or world 3D renderer yet.
+- WMO shared I/O now includes version-aware material and embedded-group mesh document readers plus root portal and doodad ownership, and `WowViewer.App` now consumes that seam for a bounded standalone WMO batch preview that resolves material textures when available. This is still not the full world 3D renderer.
 - Dataset and training flows are usable, but still documented as Bring Your Own Data workflows and still rely on some compatibility scripts downstream.
 
 ## Prerequisites

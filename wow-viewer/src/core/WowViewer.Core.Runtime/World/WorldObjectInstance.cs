@@ -5,6 +5,7 @@ namespace WowViewer.Core.Runtime.World;
 public struct WorldObjectInstance
 {
     public string ModelKey;
+    public string AssetKind;
     public Matrix4x4 Transform;
     public Vector3 BoundsMin;
     public Vector3 BoundsMax;
@@ -23,4 +24,11 @@ public struct WorldObjectInstance
     public bool BoundsResolved;
     public bool HasOpaqueRenderContent;
     public bool HasTransparentRenderContent;
+    public uint? WmoVersion;
+    public int WmoGroupCount;
+    public int WmoPortalCount;
+    public int WmoDoodadSetCount;
+    public int WmoDoodadMdxCount;
+    public int WmoDoodadM2Count;
+    public int WmoDoodadUnknownCount;
 }

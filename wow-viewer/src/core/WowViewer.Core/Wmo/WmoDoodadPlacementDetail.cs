@@ -16,6 +16,7 @@ public sealed class WmoDoodadPlacementDetail
         Rotation = rotation;
         Scale = scale;
         ColorBgra = colorBgra;
+        ModelKind = ClassifyModelKind(modelPath);
     }
 
     public int PlacementIndex { get; }
@@ -33,4 +34,18 @@ public sealed class WmoDoodadPlacementDetail
     public uint ColorBgra { get; }
 
     public byte Alpha => (byte)((ColorBgra >> 24) & 0xFF);
+
+    public WmoDoodadModelKind ModelKind { get; }
+
+    private static WmoDoodadModelKind ClassifyModelKind(string modelPath)
+    {
+        string extension = Path.GetExtension(modelPath);
+        if (extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase))
+            return WmoDoodadModelKind.Mdx;
+
+        if (extension.Equals(".m2", StringComparison.OrdinalIgnoreCase))
+            return WmoDoodadModelKind.M2;
+
+        return WmoDoodadModelKind.Unknown;
+    }
 }

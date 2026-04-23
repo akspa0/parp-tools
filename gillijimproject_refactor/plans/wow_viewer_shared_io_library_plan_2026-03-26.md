@@ -2,6 +2,33 @@
 
 # wow-viewer Shared I/O Library Plan
 
+## Apr 23, 2026 - WMO render-document ownership now includes root portals and doodads, and WowViewer.App consumes it for a bounded standalone preview
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Wmo.WmoRenderDocument` now also owns reusable root-level portal and doodad detail contracts needed by later standalone and world consumers:
+    - `WmoPortalVertexDetail`
+    - `WmoPortalDetail`
+    - `WmoPortalReferenceDetail`
+    - `WmoDoodadSetDetail`
+    - `WmoDoodadPlacementDetail`
+  - `WowViewer.Core.IO.Wmo` now owns the matching root readers:
+    - `WmoPortalDetailReader`
+    - `WmoDoodadDetailReader`
+  - `WmoRenderDocumentReader` now populates those root-owned slices directly from the shared WMO root chunk surface instead of leaving later consumers to stitch them back together themselves
+  - `WowViewer.App` now consumes the shared WMO render document through:
+    - `WmoPreviewLoader`
+    - `WmoGpuPreviewRenderer`
+    - `WowViewerSession.BuildWmoPreviewRequest()`
+    - the `StandaloneWmo` control, preview, and diagnostics branches in `WowViewerDesktopApp`
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoMaterialDetailReaderTests|WmoRenderDocumentReaderTests|WmoRootDetailReaderTests"`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug`
+- notes:
+  - this closes the previous continuity note that said `WowViewer.App` still had no standalone WMO consumer
+  - the current WMO app consumer is intentionally bounded: it now renders shared batch geometry with primary-UV material textures when those textures resolve, and otherwise falls back to flat-color geometry while exposing portal plus doodad ownership in diagnostics
+  - this still does not claim full legacy or native material parity, doodad instancing, portal-driven runtime culling, or world-scene ownership
+
 ## Apr 23, 2026 - WMO shared I/O now carries the first render-document seam for materials and embedded-group meshes
 
 - status: landed

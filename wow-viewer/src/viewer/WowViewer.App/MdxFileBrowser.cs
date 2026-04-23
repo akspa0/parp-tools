@@ -44,17 +44,7 @@ internal sealed class MdxFileBrowserState
             {
                 var factory = new MpqArchiveCatalogFactory();
                 _catalog = factory.Create();
-                _catalog.LoadArchives([_currentArchiveRoot]);
-
-                var options = new ArchiveCatalogBootstrapOptions
-                {
-                    ExternalListfilePath = Path.Combine(AppContext.BaseDirectory, "test_data", "community-listfile-withcapitals.csv")
-                };
-
-                if (File.Exists(options.ExternalListfilePath))
-                    _catalog.LoadListfile(options.ExternalListfilePath);
-                else
-                    _catalog.LoadListfileEntries([]);
+                ArchiveCatalogBootstrapper.Bootstrap(_catalog, [_currentArchiveRoot], WowViewerArchiveBootstrap.CreateBootstrapOptions());
 
                 foreach (string file in _catalog.GetAllKnownFiles())
                     mergedFiles.Add(file.Replace('\\', '/'));

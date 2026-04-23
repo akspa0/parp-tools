@@ -56,6 +56,8 @@ public sealed class WmoRootDetailReaderTests
         Assert.Equal("Default", document.DoodadSets[0].Name);
         Assert.Equal("doodad_a.mdx", document.DoodadPlacements[0].ModelPath);
         Assert.Equal("doodad_b.m2", document.DoodadPlacements[1].ModelPath);
+        Assert.Equal(WmoDoodadModelKind.Mdx, document.DoodadPlacements[0].ModelKind);
+        Assert.Equal(WmoDoodadModelKind.M2, document.DoodadPlacements[1].ModelKind);
         Assert.Equal(Vector3.UnitZ, document.Portals[0].Normal);
         Assert.Equal(2.0f, document.Portals[0].PlaneDistance);
     }

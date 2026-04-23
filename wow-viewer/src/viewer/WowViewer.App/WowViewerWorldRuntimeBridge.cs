@@ -4,6 +4,7 @@ using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.IO.Wmo;
 using WowViewer.Core.M2;
 using WowViewer.Core.Maps;
 using WowViewer.Core.Mdx;
@@ -13,6 +14,7 @@ using WowViewer.Core.Runtime.World.Passes;
 using WowViewer.Core.Runtime.World.Terrain;
 using WowViewer.Core.Runtime.World.Visibility;
 using WowViewer.Core.Runtime.World.Wdl;
+using WowViewer.Core.Wmo;
 
 namespace WowViewer.App;
 
@@ -190,6 +192,18 @@ internal static class WowViewerWorldRuntimeBridge
 {
     private readonly record struct LocalBoundsResolution(bool AssetReady, Vector3 LocalMin, Vector3 LocalMax, bool HasOpaqueRenderContent, bool HasTransparentRenderContent);
 
+    private readonly record struct ResolvedWmoAsset(
+        bool AssetReady,
+        Vector3 LocalMin,
+        Vector3 LocalMax,
+        uint? Version,
+        int GroupCount,
+        int PortalCount,
+        int DoodadSetCount,
+        int MdxDoodadCount,
+        int M2DoodadCount,
+        int UnknownDoodadCount);
+
     public static WowViewerWorldPlacementAuditResult AuditPlacements(WowViewerWorldPlacementAuditRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -198,7 +212,7 @@ internal static class WowViewerWorldRuntimeBridge
             new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot));
 
         using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [session.ClientRoot], new ArchiveCatalogBootstrapOptions());
+        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [session.ClientRoot], WowViewerArchiveBootstrap.CreateBootstrapOptions());
 
         List<WowViewerWorldPlacementTileSummary> populatedTiles = [];
         foreach (WdtTileCoordinate tile in session.OccupiedTiles)
@@ -243,7 +257,7 @@ internal static class WowViewerWorldRuntimeBridge
             new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot));
 
         using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [session.ClientRoot], new ArchiveCatalogBootstrapOptions());
+        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [session.ClientRoot], WowViewerArchiveBootstrap.CreateBootstrapOptions());
 
         ((int tileX, int tileY) selectedTile, AdtPlacementCatalog placementCatalog, string placementSourcePath) =
             ResolveTileAndPlacements(session, request.TileX, request.TileY, archiveCatalog);
@@ -254,9 +268,10 @@ internal static class WowViewerWorldRuntimeBridge
         WorldLiquidTileData liquidTileData = ReadRootLiquidTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
 
         Dictionary<string, LocalBoundsResolution> boundsCache = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, ResolvedWmoAsset> wmoCache = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, bool> assetReadyLookup = new(StringComparer.OrdinalIgnoreCase);
 
-        List<WorldObjectInstance> wmoInstances = BuildWmoInstances(session.ClientRoot, session.LooseOverlayRoot, placementCatalog, selectedTile.tileX, selectedTile.tileY, archiveCatalog, assetReadyLookup);
+        List<WorldObjectInstance> wmoInstances = BuildWmoInstances(session.ClientRoot, session.LooseOverlayRoot, placementCatalog, selectedTile.tileX, selectedTile.tileY, archiveCatalog, wmoCache, assetReadyLookup);
         List<WorldObjectInstance> mdxInstances = BuildMdxInstances(session.ClientRoot, session.LooseOverlayRoot, placementCatalog, selectedTile.tileX, selectedTile.tileY, archiveCatalog, boundsCache, assetReadyLookup);
 
         int readyWmoCount = wmoInstances.Count(instance => assetReadyLookup.TryGetValue(instance.ModelKey, out bool ready) && ready);
@@ -647,6 +662,7 @@ internal static class WowViewerWorldRuntimeBridge
         int tileX,
         int tileY,
         IArchiveCatalog archiveCatalog,
+        Dictionary<string, ResolvedWmoAsset> wmoCache,
         Dictionary<string, bool> assetReadyLookup)
     {
         List<WorldObjectInstance> instances = new(placementCatalog.WorldModelPlacements.Count);
@@ -654,15 +670,16 @@ internal static class WowViewerWorldRuntimeBridge
         {
             AdtWorldModelPlacement placement = placementCatalog.WorldModelPlacements[index];
             string modelKey = NormalizeModelKey(placement.ModelPath);
-            bool assetReady = TryReadVirtualOrLooseFile(clientRoot, looseOverlayRoot, modelKey, archiveCatalog, out _, out _);
-            assetReadyLookup[modelKey] = assetReady;
+            ResolvedWmoAsset resolved = ResolveWmoAsset(clientRoot, looseOverlayRoot, modelKey, archiveCatalog, wmoCache, assetReadyLookup);
+            assetReadyLookup[modelKey] = resolved.AssetReady;
 
-            Vector3 localMin = placement.BoundsMin - placement.Position;
-            Vector3 localMax = placement.BoundsMax - placement.Position;
+            Vector3 localMin = resolved.AssetReady ? resolved.LocalMin : (placement.BoundsMin - placement.Position);
+            Vector3 localMax = resolved.AssetReady ? resolved.LocalMax : (placement.BoundsMax - placement.Position);
 
             instances.Add(new WorldObjectInstance
             {
                 ModelKey = modelKey,
+                AssetKind = "WMO",
                 ModelName = Path.GetFileName(modelKey),
                 ModelPath = modelKey,
                 UniqueId = placement.UniqueId,
@@ -681,6 +698,13 @@ internal static class WowViewerWorldRuntimeBridge
                 HasTileCoordinate = true,
                 HasOpaqueRenderContent = true,
                 HasTransparentRenderContent = false,
+                WmoVersion = resolved.Version,
+                WmoGroupCount = resolved.GroupCount,
+                WmoPortalCount = resolved.PortalCount,
+                WmoDoodadSetCount = resolved.DoodadSetCount,
+                WmoDoodadMdxCount = resolved.MdxDoodadCount,
+                WmoDoodadM2Count = resolved.M2DoodadCount,
+                WmoDoodadUnknownCount = resolved.UnknownDoodadCount,
             });
         }
 
@@ -711,6 +735,7 @@ internal static class WowViewerWorldRuntimeBridge
             instances.Add(new WorldObjectInstance
             {
                 ModelKey = modelKey,
+                AssetKind = Path.GetExtension(modelKey).Equals(".m2", StringComparison.OrdinalIgnoreCase) ? "M2" : "MDX",
                 ModelName = Path.GetFileName(modelKey),
                 ModelPath = modelKey,
                 UniqueId = placement.UniqueId,
@@ -733,6 +758,55 @@ internal static class WowViewerWorldRuntimeBridge
         }
 
         return instances;
+    }
+
+    private static ResolvedWmoAsset ResolveWmoAsset(
+        string clientRoot,
+        string looseOverlayRoot,
+        string modelKey,
+        IArchiveCatalog archiveCatalog,
+        Dictionary<string, ResolvedWmoAsset> wmoCache,
+        Dictionary<string, bool> assetReadyLookup)
+    {
+        if (wmoCache.TryGetValue(modelKey, out ResolvedWmoAsset cached))
+            return cached;
+
+        ResolvedWmoAsset resolved = TryResolveWmoAsset(clientRoot, looseOverlayRoot, modelKey, archiveCatalog, assetReadyLookup);
+        wmoCache[modelKey] = resolved;
+        return resolved;
+    }
+
+    private static ResolvedWmoAsset TryResolveWmoAsset(
+        string clientRoot,
+        string looseOverlayRoot,
+        string modelKey,
+        IArchiveCatalog archiveCatalog,
+        Dictionary<string, bool> assetReadyLookup)
+    {
+        if (!TryReadVirtualOrLooseFile(clientRoot, looseOverlayRoot, modelKey, archiveCatalog, out byte[]? data, out string sourcePath) || data is null)
+            return CreateFallbackWmoAsset(assetReady: false);
+
+        try
+        {
+            using MemoryStream stream = new(data, writable: false);
+            WmoRenderDocument document = WmoRenderDocumentReader.Read(stream, sourcePath);
+            RegisterEmbeddedDoodadAssetReadiness(document, clientRoot, looseOverlayRoot, archiveCatalog, assetReadyLookup);
+            return new ResolvedWmoAsset(
+                AssetReady: true,
+                LocalMin: document.Summary.BoundsMin,
+                LocalMax: document.Summary.BoundsMax,
+                Version: document.Version,
+                GroupCount: document.Groups.Count,
+                PortalCount: document.Portals.Count,
+                DoodadSetCount: document.DoodadSets.Count,
+                MdxDoodadCount: document.DoodadPlacements.Count(static placement => placement.ModelKind == WmoDoodadModelKind.Mdx),
+                M2DoodadCount: document.DoodadPlacements.Count(static placement => placement.ModelKind == WmoDoodadModelKind.M2),
+                UnknownDoodadCount: document.DoodadPlacements.Count(static placement => placement.ModelKind == WmoDoodadModelKind.Unknown));
+        }
+        catch
+        {
+            return CreateFallbackWmoAsset(assetReady: true);
+        }
     }
 
     private static LocalBoundsResolution ResolveLocalBounds(
@@ -795,6 +869,42 @@ internal static class WowViewerWorldRuntimeBridge
         float halfExtent = MathF.Max(2f, 4f * MathF.Max(1f, scale));
         Vector3 extent = new(halfExtent, halfExtent, halfExtent);
         return new LocalBoundsResolution(assetReady, -extent, extent, HasOpaqueRenderContent: true, HasTransparentRenderContent: true);
+    }
+
+    private static ResolvedWmoAsset CreateFallbackWmoAsset(bool assetReady)
+    {
+        Vector3 extent = new(8f, 8f, 8f);
+        return new ResolvedWmoAsset(
+            AssetReady: assetReady,
+            LocalMin: -extent,
+            LocalMax: extent,
+            Version: null,
+            GroupCount: 0,
+            PortalCount: 0,
+            DoodadSetCount: 0,
+            MdxDoodadCount: 0,
+            M2DoodadCount: 0,
+            UnknownDoodadCount: 0);
+    }
+
+    private static void RegisterEmbeddedDoodadAssetReadiness(
+        WmoRenderDocument document,
+        string clientRoot,
+        string looseOverlayRoot,
+        IArchiveCatalog archiveCatalog,
+        Dictionary<string, bool> assetReadyLookup)
+    {
+        foreach (string doodadKey in document.DoodadPlacements
+            .Select(static placement => placement.ModelPath)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(NormalizeModelKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (assetReadyLookup.ContainsKey(doodadKey))
+                continue;
+
+            assetReadyLookup[doodadKey] = TryReadVirtualOrLooseFile(clientRoot, looseOverlayRoot, doodadKey, archiveCatalog, out _, out _);
+        }
     }
 
     private static bool TryReadVirtualOrLooseFile(

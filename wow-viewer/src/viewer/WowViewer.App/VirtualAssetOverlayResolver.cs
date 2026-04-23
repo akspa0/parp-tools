@@ -9,7 +9,7 @@ internal static class VirtualAssetOverlayResolver
         if (TryReadLooseVirtualFile(virtualPath, looseOverlayRoot, out byte[]? looseBytes) && looseBytes is not null)
             return looseBytes;
 
-        return ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], new ArchiveCatalogBootstrapOptions());
+        return ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], WowViewerArchiveBootstrap.CreateBootstrapOptions());
     }
 
     public static bool TryReadLooseVirtualFile(string virtualPath, string? looseOverlayRoot, out byte[]? bytes)

@@ -92,7 +92,7 @@ internal static class WowViewerWorldSessionBootstrapper
 
         Stopwatch stopwatch = Stopwatch.StartNew();
         using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [clientRoot], new ArchiveCatalogBootstrapOptions());
+        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [clientRoot], WowViewerArchiveBootstrap.CreateBootstrapOptions());
 
         MapDirectoryLookup directoryLookup = new();
         directoryLookup.Load([clientRoot], archiveCatalog);

@@ -746,7 +746,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void DrawWmoControlContents()
     {
-        ImGui.TextWrapped("This first standalone WMO slice stays bounded and library-first: it uses wow-viewer-owned WMO material plus mesh readers to drive an untextured GPU group preview while exposing root portal and doodad ownership in diagnostics.");
+        ImGui.TextWrapped("This standalone WMO slice stays bounded and library-first: it now uses wow-viewer-owned WMO material plus mesh readers to drive a textured-when-resolved GPU batch preview while exposing root portal and doodad ownership in diagnostics.");
         ImGui.TextDisabled("Mouse: left-drag orbit, right/middle-drag pan, wheel zoom, double-click preview to reset camera.");
         ImGui.Separator();
         ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
@@ -1103,7 +1103,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.TextDisabled("Object Families");
         ImGui.Checkbox("WMO", ref showWmos);
         ImGui.SameLine();
-        ImGui.Checkbox("MDX", ref showDoodads);
+        ImGui.Checkbox("Doodads (MDX/M2)", ref showDoodads);
         _session.World.ShowWmos = showWmos;
         _session.World.ShowDoodads = showDoodads;
         _session.World.ShowSky = showSky;
@@ -1139,7 +1139,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"Terrain Areas: {_currentWorldRuntimeFrame.TerrainTileData.DistinctAreaIdCount}");
             ImGui.Text($"Liquid Chunks: {_currentWorldRuntimeFrame.Stats.Liquid.VisibleCount}/{_currentWorldRuntimeFrame.TileStageSummary.LiquidChunkCount}");
             ImGui.Text($"Liquid Types: {FormatLiquidTypeCounts(_currentWorldRuntimeFrame.LiquidTileData)}");
-            ImGui.Text($"Pass Options: WMO {_currentWorldRuntimeFrame.PassOptions.WmosVisible}, MDX {_currentWorldRuntimeFrame.PassOptions.DoodadsVisible}, WDL {_currentWorldRuntimeFrame.PassOptions.WdlVisible}, Terrain {_currentWorldRuntimeFrame.PassOptions.TerrainVisible}, Liquid {_currentWorldRuntimeFrame.PassOptions.LiquidVisible}, Overlay {_currentWorldRuntimeFrame.PassOptions.OverlayVisible}");
+            ImGui.Text($"Pass Options: WMO {_currentWorldRuntimeFrame.PassOptions.WmosVisible}, Doodads {_currentWorldRuntimeFrame.PassOptions.DoodadsVisible}, WDL {_currentWorldRuntimeFrame.PassOptions.WdlVisible}, Terrain {_currentWorldRuntimeFrame.PassOptions.TerrainVisible}, Liquid {_currentWorldRuntimeFrame.PassOptions.LiquidVisible}, Overlay {_currentWorldRuntimeFrame.PassOptions.OverlayVisible}");
         }
     }
 
@@ -1665,11 +1665,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Separator();
         ImGui.Text($"Selected Tile: ({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})");
         ImGui.Text($"Placement Source: {_currentWorldRuntimeFrame.PlacementSourcePath}");
-        ImGui.Text($"Placements: WMO {_currentWorldRuntimeFrame.WmoInstances.Count} / MDX {_currentWorldRuntimeFrame.MdxInstances.Count}");
-        ImGui.Text($"Visible: WMO {_currentWorldRuntimeFrame.Visibility.VisibleWmos.Count} / MDX {_currentWorldRuntimeFrame.Visibility.VisibleMdx.Count}");
+        ImGui.Text($"Placements: WMO {_currentWorldRuntimeFrame.WmoInstances.Count} / Doodads {_currentWorldRuntimeFrame.MdxInstances.Count}");
+        ImGui.Text($"Visible: WMO {_currentWorldRuntimeFrame.Visibility.VisibleWmos.Count} / Doodads {_currentWorldRuntimeFrame.Visibility.VisibleMdx.Count}");
         ImGui.Text($"Pending Assets: {_currentWorldRuntimeFrame.PendingAssetKeys.Count}");
         if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(_currentWorldRuntimeFrame, _selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
-            ImGui.Text($"Selection: {selectedEntry.Kind} {selectedEntry.Instance.ModelName} #{selectedEntry.Instance.UniqueId}");
+            ImGui.Text($"Selection: {(selectedEntry.Kind == WorldSelectionKind.Wmo ? "WMO" : $"{selectedEntry.Instance.AssetKind} Doodad")} {selectedEntry.Instance.ModelName} #{selectedEntry.Instance.UniqueId}");
 
         if (_worldTerrainPreviewTextureHandle != 0)
         {
@@ -1944,8 +1944,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.TextDisabled("World Runtime Staging");
         WorldRenderFrameStats worldStats = WorldRenderFrameStats.Empty;
         ImGui.Text($"Visible WMO: {worldStats.VisibleWmoCount}");
-        ImGui.Text($"Visible MDX: {worldStats.VisibleMdxCount}");
-        ImGui.Text($"Taxi MDX: {worldStats.VisibleTaxiMdxCount}");
+        ImGui.Text($"Visible Doodads: {worldStats.VisibleMdxCount}");
+        ImGui.Text($"Taxi Doodads: {worldStats.VisibleTaxiMdxCount}");
         ImGui.Text($"Pending Loads: {worldStats.PendingAssetLoadCount}");
         bool objectPhaseEnabled = WorldFramePassCoordinator.Execute(
             new WorldFramePassOptions(true, true, true),
@@ -2019,21 +2019,32 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void DrawWorldRuntimeDiagnostics(WowViewerWorldRuntimeFrameResult result)
     {
+        int embeddedWmoMdxCount = result.WmoInstances.Sum(static instance => instance.WmoDoodadMdxCount);
+        int embeddedWmoM2Count = result.WmoInstances.Sum(static instance => instance.WmoDoodadM2Count);
+        int embeddedWmoUnknownCount = result.WmoInstances.Sum(static instance => instance.WmoDoodadUnknownCount);
+        string wmoVersionSummary = string.Join(", ", result.WmoInstances
+            .Where(static instance => instance.WmoVersion.HasValue)
+            .Select(static instance => instance.WmoVersion!.Value)
+            .Distinct()
+            .OrderBy(static version => version));
+
         ImGui.TextDisabled("World Runtime Bridge");
         ImGui.Text($"Tile: ({result.SelectedTileX},{result.SelectedTileY})");
         ImGui.Text($"Placement Source: {result.PlacementSourcePath}");
         ImGui.Text($"Camera: {FormatVector3(result.CameraPosition)} -> {FormatVector3(result.CameraForward)}");
         ImGui.Text($"Object Phase Executed: {result.ObjectPhaseExecuted}");
         ImGui.Text($"Pass Options: sky={result.PassOptions.SkyVisible} wdl={result.PassOptions.WdlVisible} terrain={result.PassOptions.TerrainVisible} liquid={result.PassOptions.LiquidVisible} overlay={result.PassOptions.OverlayVisible}");
-        ImGui.Text($"Object Filters: wmo={result.PassOptions.WmosVisible} mdx={result.PassOptions.DoodadsVisible}");
+        ImGui.Text($"Object Filters: wmo={result.PassOptions.WmosVisible} doodads={result.PassOptions.DoodadsVisible}");
         ImGui.Text($"Total Cpu Ms: {result.Stats.TotalCpuMs:F2}");
         ImGui.Separator();
 
         ImGui.TextDisabled("Placement Inventory");
         ImGui.Text($"WMO Total: {result.WmoInstances.Count}");
         ImGui.Text($"WMO Ready: {result.ReadyWmoCount}");
-        ImGui.Text($"MDX Total: {result.MdxInstances.Count}");
-        ImGui.Text($"MDX Ready: {result.ReadyMdxCount}");
+        ImGui.Text($"WMO Versions: {(string.IsNullOrEmpty(wmoVersionSummary) ? "n/a" : wmoVersionSummary)}");
+        ImGui.Text($"Embedded WMO Doodads: MDX {embeddedWmoMdxCount} / M2 {embeddedWmoM2Count} / Unknown {embeddedWmoUnknownCount}");
+        ImGui.Text($"Doodad Total: {result.MdxInstances.Count}");
+        ImGui.Text($"Doodad Ready: {result.ReadyMdxCount}");
         ImGui.Text($"Pending Assets: {result.PendingAssetKeys.Count}");
         if (result.PendingAssetKeys.Count > 0)
             ImGui.TextWrapped($"Pending Sample: {string.Join(", ", result.PendingAssetKeys.Take(8))}");
@@ -2042,9 +2053,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.TextDisabled("Visibility");
         ImGui.Text($"Visible WMO: {result.Visibility.VisibleWmos.Count}");
         ImGui.Text($"Culled WMO: {result.CulledWmoCount}");
-        ImGui.Text($"Visible MDX: {result.Visibility.VisibleMdx.Count}");
-        ImGui.Text($"Culled MDX: {result.CulledMdxCount}");
-        ImGui.Text($"Taxi MDX: {result.Visibility.VisibleTaxiMdxCount}");
+        ImGui.Text($"Visible Doodads: {result.Visibility.VisibleMdx.Count}");
+        ImGui.Text($"Culled Doodads: {result.CulledMdxCount}");
+        ImGui.Text($"Taxi Doodads: {result.Visibility.VisibleTaxiMdxCount}");
 
         ImGui.Separator();
         ImGui.TextDisabled("Pass Coordination");
@@ -2246,7 +2257,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Separator();
         ImGui.TextDisabled("Runtime Summary");
         ImGui.Text($"WMO Visible/Total: {result.Visibility.VisibleWmos.Count}/{result.WmoInstances.Count}");
-        ImGui.Text($"MDX Visible/Total: {result.Visibility.VisibleMdx.Count}/{result.MdxInstances.Count}");
+        ImGui.Text($"Doodads Visible/Total: {result.Visibility.VisibleMdx.Count}/{result.MdxInstances.Count}");
         ImGui.Text($"Pending Assets: {result.PendingAssetKeys.Count}");
         ImGui.Text($"Object Phase: {result.ObjectPhaseExecuted}");
         ImGui.Text($"Total Cpu Ms: {result.Stats.TotalCpuMs:F2}");
@@ -2282,7 +2293,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (_currentWorldRuntimeFrame == null)
         {
-            ImGui.TextWrapped("Open a world session to browse WMO and MDX placements admitted through the runtime bridge.");
+            ImGui.TextWrapped("Open a world session to browse WMO and doodad placements admitted through the runtime bridge.");
             ImGui.End();
             return;
         }
@@ -2293,7 +2304,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.SameLine();
         ImGui.Checkbox("WMO", ref _worldNavigatorShowWmo);
         ImGui.SameLine();
-        ImGui.Checkbox("MDX", ref _worldNavigatorShowMdx);
+        ImGui.Checkbox("Doodads (MDX/M2)", ref _worldNavigatorShowMdx);
         ImGui.InputText("Model Filter", ref _worldNavigatorFilter, 256);
         ImGui.Separator();
 
@@ -2368,9 +2379,10 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
 
         ImGui.TextDisabled("Selection");
-        ImGui.Text($"Type: {entry.Kind}");
+        ImGui.Text($"Type: {(entry.Kind == WorldSelectionKind.Wmo ? "WMO" : $"{entry.Instance.AssetKind} Doodad")}");
         ImGui.Text($"Model: {entry.Instance.ModelName}");
         ImGui.Text($"Model Key: {entry.Instance.ModelKey}");
+        ImGui.Text($"Asset Kind: {entry.Instance.AssetKind}");
         ImGui.Text($"Unique Id: {entry.Instance.UniqueId}");
         ImGui.Text($"Placement Index: {entry.Instance.PlacementEntryIndex}");
         ImGui.Text($"Tile: ({entry.Instance.TileX},{entry.Instance.TileY})");
@@ -2395,6 +2407,15 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"Visible: {entry.IsVisible}");
         if (entry.CenterDistance.HasValue)
             ImGui.Text($"Distance: {MathF.Sqrt(entry.CenterDistance.Value):F1}");
+        if (entry.Kind == WorldSelectionKind.Wmo)
+        {
+            ImGui.Text($"WMO Version: {FormatOptionalUInt(entry.Instance.WmoVersion)}");
+            ImGui.Text($"WMO Groups: {entry.Instance.WmoGroupCount}");
+            ImGui.Text($"WMO Portals: {entry.Instance.WmoPortalCount}");
+            ImGui.Text($"WMO Doodad Sets: {entry.Instance.WmoDoodadSetCount}");
+            ImGui.Text($"Embedded Doodads: MDX {entry.Instance.WmoDoodadMdxCount} / M2 {entry.Instance.WmoDoodadM2Count} / Unknown {entry.Instance.WmoDoodadUnknownCount}");
+        }
+
         if (entry.Kind == WorldSelectionKind.Mdx)
         {
             ImGui.Text($"Taxi Actor: {entry.IsTaxiActor}");
@@ -2491,7 +2512,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             DeletePreviewTexture();
             DeleteWorldTerrainPreviewTexture();
             _statusMessage = $"Loaded {preview.Document.SourcePath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
-            _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, groups {preview.Document.Groups.Count}, portals {preview.Document.Portals.Count}, doodads {preview.Document.DoodadPlacements.Count}";
+            _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, materials {preview.Document.Materials.Count}, groups {preview.Document.Groups.Count}, portals {preview.Document.Portals.Count}, doodads {preview.Document.DoodadPlacements.Count}";
             SyncWmoCameraTargetsFromSession(resetCurrent: true);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
@@ -2546,7 +2567,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             DeletePreviewTexture();
             UploadWorldTerrainPreviewTexture(runtimeFrame.TerrainVisualSnapshot);
             _statusMessage = $"Opened world runtime frame for {runtimeFrame.Session.ResolvedMapDirectory} tile ({runtimeFrame.SelectedTileX},{runtimeFrame.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
-            _lastLoadSummary = $"WMO {runtimeFrame.Visibility.VisibleWmos.Count}/{runtimeFrame.WmoInstances.Count}, MDX {runtimeFrame.Visibility.VisibleMdx.Count}/{runtimeFrame.MdxInstances.Count}, terrain {runtimeFrame.TerrainVisualSnapshot.Width}x{runtimeFrame.TerrainVisualSnapshot.Height}, pending {runtimeFrame.PendingAssetKeys.Count}";
+            _lastLoadSummary = $"WMO {runtimeFrame.Visibility.VisibleWmos.Count}/{runtimeFrame.WmoInstances.Count}, doodads {runtimeFrame.Visibility.VisibleMdx.Count}/{runtimeFrame.MdxInstances.Count}, terrain {runtimeFrame.TerrainVisualSnapshot.Width}x{runtimeFrame.TerrainVisualSnapshot.Height}, pending {runtimeFrame.PendingAssetKeys.Count}";
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
         {
