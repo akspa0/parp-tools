@@ -2,6 +2,40 @@
 
 # Active Context
 
+## Apr 24, 2026 - wow-viewer World Session shell was trimmed toward the MdxViewer cut-away reset layout, but this is still a UI-surface cleanup slice
+
+- followed the user's screenshot feedback that the last compiling shell still felt unusable: the three-lane structure existed, but normal use was buried under raw diagnostics, long paths, explanatory copy, duplicate preview-adjacent surfaces, and always-open debug sections
+- active behavior after this slice:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` gives the fixed three-lane shell more room for the center preview by narrowing the default navigator and inspector lanes
+	- `World Session Preview` now opens directly on the GPU terrain tile view when a runtime frame exists, with only a compact one-line status below it
+	- the software terrain preview and marker canvas are still available, but only under a collapsed `Debug Views` section instead of occupying the normal preview path
+	- the left `Navigator` removes the reset-plan explanatory paragraph, collapses raw source path editing by default, shortens map controls, and removes noisy `[loose WDT/WDL]` badges from the visible map list
+	- the right lane is now titled `Inspector` for world sessions, prioritizes selected-object details and a compact runtime summary, and keeps minimap, deep diagnostics, runtime boundaries, and command/about copy collapsed by default
+- validation:
+	- isolated build succeeded with `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-app-ui-reset/`
+- current boundary:
+	- this improves the visible shell shape and reduces the screenshot-level clutter, but it is not yet the full `MdxViewer` interaction port
+	- object browsing still lives mainly in the right inspector lane, and the world map/spawn/minimap workflow still needs deeper interaction parity work from the reset plan
+	- no new real-data GUI screenshot signoff was captured in this slice; proof is compile-only plus code-level UI restructuring
+
+## Apr 24, 2026 - wow-viewer reset plan is now explicitly viewer-first, and WorldGpuPreviewRenderer has a first spherical sky backdrop pass
+
+- followed the user's product correction that the whole app needs to act as a viewer first, not a diagnostics dashboard, and that WoW-like worlds are layered compositions: spherical skies/backdrops around the camera plus a rigid Z-axis terrain quilt, with shader-driven behavior needed later for real engine feel
+- continuity and plan changes:
+	- `gillijimproject_refactor/plans/wow_viewer_mdxviewer_cutaway_reset_plan_2026-04-24.md` now records the viewer-first rule, the 0.5.3 aesthetic target, and a world-composition model where sky/backdrop/fog/WDL/ADT/liquid/WMO/doodad/overlay layers are distinct ordered concerns
+	- the plan also adds a dedicated `Slice 5b - Sky and backdrop composition foundation` so future work does not treat sky as a cosmetic clear color after terrain
+- active code behavior after this slice:
+	- `wow-viewer/src/viewer/WowViewer.App/WorldGpuPreviewRenderer.cs` now initializes a camera-centered sky backdrop shader and draws it before terrain in the world GPU preview
+	- the sky pass reconstructs a world ray from the inverse view-projection and shades it as a spherical backdrop gradient using a 0.5.3-leaning muted zenith, horizon, and fog palette
+	- the pass is controlled by the existing world `ShowSky` option through `frame.PassOptions.SkyVisible`
+	- terrain remains the current rigid ADT tile mesh path; this slice does not decode real client skybox assets yet
+- validation:
+	- isolated build succeeded with `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-app-sky-foundation/`
+- current boundary:
+	- this is the first architectural and visual footing for sky/backdrop layers in `wow-viewer`, not final native-client skybox parity
+	- real follow-up still needs decoded skybox/backdrop model selection, fog and lighting coupling, and shader/material behavior aligned with the 0.5.3 target
+	- no post-change GUI screenshot or canvas-pixel sky validation has been captured yet
+
 ## Apr 24, 2026 - wow-viewer World Session now reuses build-aware archive bootstrap for map discovery and falls back to the first readable auto tile instead of stalling on sparse maps
 
 - this closes the immediate regression the user reported after the first minimap parity slice: some real clients showed a permanently empty world-map list and world-session open could appear hung or effectively dead on maps where the previous auto-tile heuristic kept walking into bad placement candidates

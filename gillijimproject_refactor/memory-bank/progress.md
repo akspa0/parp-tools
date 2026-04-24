@@ -1,5 +1,42 @@
 # Progress
 
+### Apr 24, 2026 - trimmed the wow-viewer World Session UI toward the MdxViewer cut-away reset shell
+
+- what changed:
+	- updated `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` so the fixed three-lane shell gives more horizontal space to the center preview and less to always-visible side detail
+	- made `World Session Preview` prioritize the GPU terrain view instead of opening with reset-plan prose, path diagnostics, software preview, marker canvas, and selection details all in one scroll
+	- moved software terrain preview and marker canvas behind a collapsed `Debug Views` section
+	- collapsed raw source editing by default in the left navigator, shortened map actions, reduced map-list height, and removed noisy loose-file badges from normal map-row labels
+	- retitled the world right lane to `Inspector` and made it selection-first plus compact runtime-summary-first, with minimap, deep diagnostics, runtime boundaries, and command/about copy collapsed by default
+
+- validation:
+	- isolated build succeeded with `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-app-ui-reset/`
+
+- boundary:
+	- this is a visible shell cleanup slice, not a full old-`MdxViewer` interaction-port closure
+	- no GUI screenshot signoff was captured yet after the patch, so the next pass should still be judged against live app feel, not build success alone
+
+### Apr 24, 2026 - made the reset viewer-first and added the first world sky backdrop pass
+
+- what changed:
+	- updated `gillijimproject_refactor/plans/wow_viewer_mdxviewer_cutaway_reset_plan_2026-04-24.md` with the viewer-first rule, the 0.5.3 aesthetic target, and a layered world-composition model:
+		- spherical sky/backdrop layers
+		- fog and horizon haze
+		- WDL/far terrain
+		- ADT terrain as a rigid Z-axis quilt
+		- liquids, WMOs, doodads, and overlays
+	- added `Slice 5b - Sky and backdrop composition foundation` to keep sky/backdrop ownership explicit in the reset plan
+	- updated `wow-viewer/src/viewer/WowViewer.App/WorldGpuPreviewRenderer.cs` so world frames now render a camera-centered spherical sky gradient before terrain instead of using only a flat clear color
+	- the new pass is controlled by the existing `ShowSky` world option and uses a muted early-client-leaning palette until real skybox asset selection lands
+
+- validation:
+	- isolated build succeeded with `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-app-sky-foundation/`
+
+- boundary:
+	- this is a foundational backdrop layer, not final WoW engine skybox parity
+	- decoded client skybox/backdrop models, fog/lighting coupling, and shader-specific behavior remain future work
+	- no live GUI screenshot or pixel-level validation was captured yet
+
 ### Apr 24, 2026 - repaired wow-viewer world-map discovery and auto-tile open, then regrouped World Session into a more legacy-style navigator lane
 
 - what changed:

@@ -5,6 +5,8 @@
 - status: active reset plan
 - intent: stop iterating on the current fragmented [`WowViewer.App`](../../wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs) shell and instead port the working interaction model from [`MdxViewer`](../src/MdxViewer/ViewerApp_Sidebars.cs) into `wow-viewer`
 - design rule: treat [`MdxViewer`](../src/MdxViewer) as the UI and interaction reference, but keep `wow-viewer` as the long-term code owner for runtime, rendering, and shared file I/O
+- viewer-first rule: `wow-viewer` must act as a world viewer first and a diagnostics/tooling surface second; diagnostic panels are subordinate to the composed world image
+- aesthetic target: prioritize the 0.5.3 client feel for this project, because the long-term purpose is exploratory data tooling and low-resolution visual restoration over early-world data, not a generic modern asset inspector
 
 ## Why This Reset Exists
 
@@ -12,6 +14,8 @@
 - world discovery, spawn, minimap, and world-open paths became hard to reason about because each feature assembled its own partial workflow
 - the current viewer-side archive and loose-file access patterns are slower and less coherent than the proven dataset-tooling path in [`CreateArchiveCatalog()`](../../wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs:2729)
 - the user explicitly wants the feel and usability of [`MdxViewer`](../src/MdxViewer/ViewerApp_Sidebars.cs) preserved, not reinvented
+- `MdxViewer` failed to fully comprehend skyboxes and backdrop composition; the reset must not repeat that mistake by treating terrain as the whole world
+- WoW-like worlds should be modeled as layered backdrops around the camera plus a rigid Z-axis terrain quilt: sky spheres or domes, skybox/backdrop models, fog and haze, far WDL, detailed ADT terrain, liquid, WMOs, doodads, overlays, and diagnostics
 
 ## Source Of Truth
 
@@ -29,6 +33,20 @@
 - [`WowViewerWorldRuntimeBridge`](../../wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs)
 - [`WorldGpuPreviewRenderer`](../../wow-viewer/src/viewer/WowViewer.App/WorldGpuPreviewRenderer.cs)
 - existing `wow-viewer` M2, WMO, and MDX GPU preview paths under [`wow-viewer/src/viewer/WowViewer.App`](../../wow-viewer/src/viewer/WowViewer.App)
+- old [`WorldScene`](../src/MdxViewer/Terrain/WorldScene.cs) sky-dome and skybox handling is reference material only; new design ownership belongs in `wow-viewer`
+
+### World composition source of truth
+
+- the renderer should treat the world as ordered layers, not as one terrain mesh:
+  - camera-centered spherical sky or dome backdrop
+  - one or more skybox/backdrop model layers, selected by placement, zone, lighting, or explicit world metadata
+  - fog and horizon haze that bridge the sky/terrain seam
+  - WDL or other low-detail far terrain
+  - detailed ADT terrain as a rigid Z-axis quilt
+  - liquids
+  - WMO and doodad geometry
+  - editor/debug overlays
+- early slices may use procedural colors or simplified gradients, but the architecture should keep room for decoded client skybox assets and shader-specific behavior later
 
 ### Fast archive and loose-file source of truth
 
@@ -55,6 +73,7 @@ The new shell should default to three durable surfaces only:
    - center
    - one active viewer surface for the current workspace
    - no duplicate preview-adjacent status windows
+   - the world preview must compose sky/backdrop/terrain layers first, with technical proof text moved out of the normal view
 
 3. **Inspector and diagnostics lane**
    - right side
@@ -149,8 +168,23 @@ Create one reusable viewer I/O service in `wow-viewer`, consumed by:
 - scope:
   - leave existing GPU consumers in place
   - re-home status, selection, and runtime detail into the right-lane inspector and diagnostics surface
+  - make the world preview a viewer-first composed image instead of a diagnostic report: sky/backdrop before terrain, terrain as a Z-axis quilt, diagnostics collapsed unless requested
 - proof:
   - no duplicate preview-adjacent state windows remain necessary
+
+### Slice 5b - Sky and backdrop composition foundation
+
+- goal:
+  - establish sky/backdrop as first-class world-render layers, not a flat clear color behind terrain
+- scope:
+  - add a camera-centered spherical sky pass to the `wow-viewer` world preview
+  - keep it controlled by the existing world `ShowSky` option
+  - define a future seam for multiple skybox/backdrop layers, decoded client skybox assets, fog/haze coupling, and shader-specific material behavior
+  - target a 0.5.3-leaning color and atmosphere until real asset-backed sky selection lands
+- proof:
+  - opening a world frame renders sky before terrain in the center preview
+  - disabling `Sky` removes the backdrop layer
+  - this is documented as foundational atmosphere work, not final WoW skybox parity
 
 ### Slice 6 - Standalone consumer regrouping
 
@@ -198,3 +232,4 @@ The reset is successful when:
 - viewer I/O is routed through one fast shared service
 - map discovery, spawn, minimap, and world load behave consistently on fixed real roots
 - the number of normal-use windows is reduced to a stable and comprehensible minimum
+- the center world surface reads as a viewer scene with sky/backdrop/terrain composition, not as a diagnostics dump

@@ -11,6 +11,13 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private const float MapOrigin = 32.0f * TileSize;
 
     private readonly GL _gl;
+    private uint _skyProgram;
+    private uint _skyVao;
+    private int _skyInverseViewProjectionLocation;
+    private int _skyCameraPositionLocation;
+    private int _skyZenithColorLocation;
+    private int _skyHorizonColorLocation;
+    private int _skyFogColorLocation;
     private uint _terrainProgram;
     private int _terrainViewLocation;
     private int _terrainProjectionLocation;
@@ -41,11 +48,16 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private Vector3 _boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
     private Vector3 _boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
     private readonly WorldPreviewCameraState _camera = new();
+    private bool _showSky = true;
+    private Vector3 _skyZenithColor = new(0.16f, 0.30f, 0.54f);
+    private Vector3 _skyHorizonColor = new(0.58f, 0.58f, 0.50f);
+    private Vector3 _skyFogColor = new(0.34f, 0.38f, 0.42f);
     private bool _disposed;
 
     public WorldGpuPreviewRenderer(GL gl)
     {
         _gl = gl ?? throw new ArgumentNullException(nameof(gl));
+        InitializeSkyShader();
         InitializeTerrainShader();
         InitializeOverlayShader();
         InitializeMarkerShader();
@@ -68,6 +80,18 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
         _disposed = true;
         ClearPreview();
+
+        if (_skyProgram != 0)
+        {
+            _gl.DeleteProgram(_skyProgram);
+            _skyProgram = 0;
+        }
+
+        if (_skyVao != 0)
+        {
+            _gl.DeleteVertexArray(_skyVao);
+            _skyVao = 0;
+        }
 
         if (_terrainProgram != 0)
         {
@@ -105,6 +129,8 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         ArgumentNullException.ThrowIfNull(frame);
 
         ClearPreview();
+        _showSky = frame.PassOptions.SkyVisible;
+        ConfigureSkyColors(frame);
         BuildTerrainBuffers(frame, ignoreTerrainHoles);
         if (showHoleOverlay)
             BuildHoleOverlayBuffers(frame);
@@ -134,14 +160,30 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
         EnsureFramebuffer(width, height);
         BuildMatrices(width, height, out Matrix4x4 view, out Matrix4x4 projection);
+        Matrix4x4 viewProjection = view * projection;
+        Matrix4x4.Invert(viewProjection, out Matrix4x4 inverseViewProjection);
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _framebuffer);
         _gl.Viewport(0, 0, (uint)_frameWidth, (uint)_frameHeight);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.Disable(EnableCap.CullFace);
-        _gl.ClearColor(0.07f, 0.09f, 0.12f, 1.0f);
+        _gl.ClearColor(_skyFogColor.X, _skyFogColor.Y, _skyFogColor.Z, 1.0f);
         _gl.Clear((uint)(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit));
+
+        if (_showSky)
+        {
+            _gl.Disable(EnableCap.DepthTest);
+            _gl.UseProgram(_skyProgram);
+            _gl.UniformMatrix4(_skyInverseViewProjectionLocation, 1, false, (float*)&inverseViewProjection.M11);
+            _gl.Uniform3(_skyCameraPositionLocation, _camera.Position.X, _camera.Position.Y, _camera.Position.Z);
+            _gl.Uniform3(_skyZenithColorLocation, _skyZenithColor.X, _skyZenithColor.Y, _skyZenithColor.Z);
+            _gl.Uniform3(_skyHorizonColorLocation, _skyHorizonColor.X, _skyHorizonColor.Y, _skyHorizonColor.Z);
+            _gl.Uniform3(_skyFogColorLocation, _skyFogColor.X, _skyFogColor.Y, _skyFogColor.Z);
+            _gl.BindVertexArray(_skyVao);
+            _gl.DrawArrays(PrimitiveType.Triangles, 0, 3);
+            _gl.Enable(EnableCap.DepthTest);
+        }
 
         if (_terrainIndexCount > 0)
         {
@@ -411,6 +453,25 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _camera.SetPose(cameraPosition, cameraTarget, saveAsDefault: true);
     }
 
+    private void ConfigureSkyColors(WowViewerWorldRuntimeFrameResult frame)
+    {
+        float minHeight = frame.TerrainTileData.Heightmap?.MinHeight ?? 0f;
+        float maxHeight = frame.TerrainTileData.Heightmap?.MaxHeight ?? 0f;
+        float waterInfluence = frame.TileStageSummary.LiquidLayerCount > 0 ? 1.0f : 0.0f;
+        float highRelief = Math.Clamp((maxHeight - minHeight) / 900.0f, 0.0f, 1.0f);
+
+        Vector3 alphaZenith = new(0.13f, 0.27f, 0.50f);
+        Vector3 highZenith = new(0.10f, 0.20f, 0.42f);
+        Vector3 dryHorizon = new(0.64f, 0.58f, 0.44f);
+        Vector3 wetHorizon = new(0.48f, 0.56f, 0.57f);
+        Vector3 dryFog = new(0.38f, 0.36f, 0.31f);
+        Vector3 wetFog = new(0.31f, 0.38f, 0.41f);
+
+        _skyZenithColor = Vector3.Lerp(alphaZenith, highZenith, highRelief);
+        _skyHorizonColor = Vector3.Lerp(dryHorizon, wetHorizon, waterInfluence * 0.65f);
+        _skyFogColor = Vector3.Lerp(dryFog, wetFog, waterInfluence * 0.65f);
+    }
+
     private void BuildMatrices(int width, int height, out Matrix4x4 view, out Matrix4x4 projection)
     {
         Vector3 forward = _camera.GetForwardVector();
@@ -621,6 +682,59 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _terrainLightDirectionLocation = _gl.GetUniformLocation(_terrainProgram, "uLightDirection");
         _terrainLightColorLocation = _gl.GetUniformLocation(_terrainProgram, "uLightColor");
         _terrainAmbientColorLocation = _gl.GetUniformLocation(_terrainProgram, "uAmbientColor");
+    }
+
+    private void InitializeSkyShader()
+    {
+        const string vertexSource = """
+            #version 330 core
+            out vec2 vClip;
+
+            void main()
+            {
+                vec2 positions[3] = vec2[3](
+                    vec2(-1.0, -1.0),
+                    vec2( 3.0, -1.0),
+                    vec2(-1.0,  3.0)
+                );
+                vClip = positions[gl_VertexID];
+                gl_Position = vec4(vClip, 0.0, 1.0);
+            }
+            """;
+
+        const string fragmentSource = """
+            #version 330 core
+            in vec2 vClip;
+
+            uniform mat4 uInverseViewProjection;
+            uniform vec3 uCameraPosition;
+            uniform vec3 uZenithColor;
+            uniform vec3 uHorizonColor;
+            uniform vec3 uFogColor;
+
+            out vec4 FragColor;
+
+            void main()
+            {
+                vec4 farPoint = uInverseViewProjection * vec4(vClip, 1.0, 1.0);
+                vec3 worldPoint = farPoint.xyz / farPoint.w;
+                vec3 ray = normalize(worldPoint - uCameraPosition);
+                float up = clamp(ray.z * 0.5 + 0.5, 0.0, 1.0);
+                float dome = smoothstep(0.18, 0.96, up);
+                float horizonBand = exp(-abs(ray.z) * 5.5);
+                vec3 color = mix(uHorizonColor, uZenithColor, dome);
+                color = mix(color, uFogColor, horizonBand * 0.34);
+                FragColor = vec4(color, 1.0);
+            }
+            """;
+
+        _skyProgram = CreateProgram(vertexSource, fragmentSource, "world sky backdrop");
+        _skyVao = _gl.GenVertexArray();
+        _skyInverseViewProjectionLocation = _gl.GetUniformLocation(_skyProgram, "uInverseViewProjection");
+        _skyCameraPositionLocation = _gl.GetUniformLocation(_skyProgram, "uCameraPosition");
+        _skyZenithColorLocation = _gl.GetUniformLocation(_skyProgram, "uZenithColor");
+        _skyHorizonColorLocation = _gl.GetUniformLocation(_skyProgram, "uHorizonColor");
+        _skyFogColorLocation = _gl.GetUniformLocation(_skyProgram, "uFogColor");
     }
 
     private void InitializeOverlayShader()
