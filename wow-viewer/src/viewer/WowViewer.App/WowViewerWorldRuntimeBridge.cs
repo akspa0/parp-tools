@@ -93,6 +93,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         WorldMdxRenderPlan mdxRenderPlan,
         WorldFramePassOptions passOptions,
         WorldRenderFrameStats stats,
+        WorldRenderCompositionFrame composition,
         bool objectPhaseExecuted,
         string optimizationHint,
         IReadOnlyList<string> pendingAssetKeys,
@@ -123,6 +124,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         MdxRenderPlan = mdxRenderPlan;
         PassOptions = passOptions;
         Stats = stats;
+        Composition = composition;
         ObjectPhaseExecuted = objectPhaseExecuted;
         OptimizationHint = optimizationHint;
         PendingAssetKeys = pendingAssetKeys;
@@ -174,6 +176,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
     public WorldFramePassOptions PassOptions { get; }
 
     public WorldRenderFrameStats Stats { get; }
+
+    public WorldRenderCompositionFrame Composition { get; }
 
     public bool ObjectPhaseExecuted { get; }
 
@@ -479,6 +483,17 @@ internal static class WowViewerWorldRuntimeBridge
             Overlay: new WorldRenderStageStats(0));
 
         WorldMdxRenderPlan mdxRenderPlan = WorldMdxRenderPlanBuilder.Build(passFrame, visibility);
+        int skyboxBackdropSourceCount = mdxInstances.Count(static instance =>
+            WorldSkyboxBackdropClassifier.IsBackdropModelPath(instance.ModelPath));
+        WorldRenderCompositionFrame composition = WorldRenderCompositionBuilder.Build(
+            appliedPassOptions,
+            wdlTileData,
+            terrainTileData,
+            liquidTileData,
+            wmoInstances.Count,
+            mdxInstances.Count,
+            stats,
+            skyboxBackdropSourceCount);
 
         return new WowViewerWorldRuntimeFrameResult(
             session,
@@ -502,6 +517,7 @@ internal static class WowViewerWorldRuntimeBridge
             mdxRenderPlan,
             appliedPassOptions,
             stats,
+            composition,
             objectPhaseExecuted,
             WorldRenderOptimizationAdvisor.BuildHint(stats),
             pendingAssetKeys.OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ToArray(),

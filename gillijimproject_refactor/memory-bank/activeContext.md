@@ -36,6 +36,26 @@
 	- real follow-up still needs decoded skybox/backdrop model selection, fog and lighting coupling, and shader/material behavior aligned with the 0.5.3 target
 	- no post-change GUI screenshot or canvas-pixel sky validation has been captured yet
 
+## Apr 24, 2026 - wow-viewer world frames now carry an ordered composition contract for sky/backdrop/far-terrain/terrain/liquid/object layers
+
+- continued the viewer-first reset by moving world-layer composition out of ad hoc UI/runtime text and into a shared runtime contract
+- active behavior after this slice:
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/WorldRenderCompositionFrame.cs` defines ordered layer state for `Sky`, `SkyboxBackdrop`, `Wdl`, `Terrain`, `Liquid`, `Wmo`, `Doodad`, and `Overlay`
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/WorldRenderCompositionBuilder.cs` builds that composition frame from pass options, WDL/terrain/liquid data, object counts, and render stats
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/WorldSkyboxBackdropClassifier.cs` now classifies obvious backdrop model-path families such as `environments/stars`, `skybox`, and `skybowl`, while excluding `skylight`
+	- `WowViewerWorldRuntimeBridge` attaches the composition frame to every `WowViewerWorldRuntimeFrameResult`
+	- the bridge now feeds classified backdrop-placement counts into the `SkyboxBackdrop` slot, so real backdrop-like placements can be detected before GPU backdrop drawing exists
+	- `Program.cs world-frame` now prints a compact composition line, and the desktop `Inspector` exposes the same layers in the runtime summary and deep diagnostics
+	- the `SkyboxBackdrop` layer is intentionally present but `pending` until decoded or selected client skybox/backdrop assets are wired in
+- validation:
+	- focused tests passed: `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldRenderCompositionBuilderTests` (`9` tests)
+	- app build passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-world-composition/`
+	- real-data CLI proof on fixed local `H:\053-client`, map `Shadowfang`, tile `(32,28)` printed:
+		- `composition: Sky:1/1 > SkyboxBackdrop:pending > Wdl:pending > Terrain:256/256 > Liquid:pending > Wmo:off > Doodad:off > Overlay:0/0`
+- current boundary:
+	- this is a durable layer contract and proof output, not new decoded backdrop geometry yet
+	- next natural continuation is to populate `SkyboxBackdrop` from real client data or app-side placement classification instead of leaving it as a pending slot
+
 ## Apr 24, 2026 - wow-viewer World Session now reuses build-aware archive bootstrap for map discovery and falls back to the first readable auto tile instead of stalling on sparse maps
 
 - this closes the immediate regression the user reported after the first minimap parity slice: some real clients showed a permanently empty world-map list and world-session open could appear hung or effectively dead on maps where the previous auto-tile heuristic kept walking into bad placement candidates

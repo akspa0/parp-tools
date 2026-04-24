@@ -37,6 +37,34 @@
 	- decoded client skybox/backdrop models, fog/lighting coupling, and shader-specific behavior remain future work
 	- no live GUI screenshot or pixel-level validation was captured yet
 
+### Apr 24, 2026 - added an ordered world composition frame contract to wow-viewer runtime results
+
+- what changed:
+	- added `wow-viewer/src/core/WowViewer.Core.Runtime/World/WorldRenderCompositionFrame.cs`
+	- added `wow-viewer/src/core/WowViewer.Core.Runtime/World/WorldRenderCompositionBuilder.cs`
+	- added `wow-viewer/src/core/WowViewer.Core.Runtime/World/WorldSkyboxBackdropClassifier.cs` for obvious backdrop-like model path detection (`environments/stars`, `skybox`, `skybowl`) while rejecting `skylight`
+	- `WowViewerWorldRuntimeBridge` now attaches a composition frame to each runtime frame result with ordered layer states for:
+		- `Sky`
+		- `SkyboxBackdrop`
+		- `Wdl`
+		- `Terrain`
+		- `Liquid`
+		- `Wmo`
+		- `Doodad`
+		- `Overlay`
+	- classified backdrop-placement counts are now fed into the `SkyboxBackdrop` layer so the slot can become data-aware before GPU backdrop geometry exists
+	- `Program.cs world-frame` now prints the layer stack, and `WowViewerDesktopApp` shows the same composition in the right-lane runtime summary and deep diagnostics
+	- added `WorldRenderCompositionBuilderTests` to lock down layer order, sky submission, terrain source counts, the intentionally pending skybox-backdrop slot, classified backdrop readiness, and classifier accept/reject behavior
+
+- validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldRenderCompositionBuilderTests` passed with `9` tests
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-world-composition/` succeeded
+	- real-data CLI proof on `H:\053-client`, `Shadowfang`, tile `(32,28)` succeeded and printed `Sky:1/1 > SkyboxBackdrop:pending > Wdl:pending > Terrain:256/256 > Liquid:pending > Wmo:off > Doodad:off > Overlay:0/0`
+
+- boundary:
+	- the composition contract is now explicit, but `SkyboxBackdrop` still has no decoded client asset feed
+	- next rendering work should populate that slot rather than adding more one-off preview state
+
 ### Apr 24, 2026 - repaired wow-viewer world-map discovery and auto-tile open, then regrouped World Session into a more legacy-style navigator lane
 
 - what changed:

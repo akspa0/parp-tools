@@ -3258,6 +3258,24 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"Liquid Layers: {_currentWorldRuntimeFrame.TileStageSummary.LiquidLayerCount}");
         ImGui.Text($"CPU: {_currentWorldRuntimeFrame.Stats.TotalCpuMs:F2} ms");
         ImGui.Text($"GPU: {_worldGpuPreviewRenderer?.TerrainTriangleCount ?? 0} terrain tris / {_worldGpuPreviewRenderer?.MarkerCount ?? 0} markers");
+        ImGui.Separator();
+        ImGui.TextDisabled("Composition");
+        foreach (WorldRenderLayerState layer in _currentWorldRuntimeFrame.Composition.Layers)
+        {
+            Vector4 color = !layer.Enabled
+                ? new Vector4(0.45f, 0.45f, 0.45f, 1.0f)
+                : layer.Ready
+                    ? new Vector4(0.78f, 0.88f, 0.72f, 1.0f)
+                    : new Vector4(0.88f, 0.74f, 0.46f, 1.0f);
+            string state = !layer.Enabled
+                ? "off"
+                : layer.Ready
+                    ? $"{layer.SubmittedCount}/{layer.SourceCount}"
+                    : "pending";
+            ImGui.TextColored(color, $"{layer.DisplayName}: {state}");
+            if (ImGui.IsItemHovered() && !string.IsNullOrWhiteSpace(layer.Note))
+                ImGui.SetTooltip(layer.Note);
+        }
     }
 
     private void DrawWorldRuntimeDiagnostics(WowViewerWorldRuntimeFrameResult result)
@@ -3279,6 +3297,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"Pass Options: sky={result.PassOptions.SkyVisible} wdl={result.PassOptions.WdlVisible} terrain={result.PassOptions.TerrainVisible} liquid={result.PassOptions.LiquidVisible} overlay={result.PassOptions.OverlayVisible}");
         ImGui.Text($"Object Filters: wmo={result.PassOptions.WmosVisible} doodads={result.PassOptions.DoodadsVisible}");
         ImGui.Text($"Total Cpu Ms: {result.Stats.TotalCpuMs:F2}");
+        ImGui.Separator();
+
+        ImGui.TextDisabled("Composition Layers");
+        foreach (WorldRenderLayerState layer in result.Composition.Layers)
+            ImGui.TextWrapped($"{layer.DisplayName}: enabled={layer.Enabled} ready={layer.Ready} source={layer.SourceCount} submitted={layer.SubmittedCount} - {layer.Note}");
         ImGui.Separator();
 
         ImGui.TextDisabled("Placement Inventory");
