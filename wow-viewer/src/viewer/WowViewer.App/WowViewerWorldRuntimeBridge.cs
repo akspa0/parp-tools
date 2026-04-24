@@ -524,28 +524,43 @@ internal static class WowViewerWorldRuntimeBridge
             return ((requestedTileX, requestedTileY), requestedCatalog, requestedSourcePath);
         }
 
-        (int tileX, int tileY)? bestTile = null;
-        AdtPlacementCatalog? bestCatalog = null;
-        string? bestSourcePath = null;
-        int bestPlacementCount = -1;
-
-        foreach (WdtTileCoordinate tile in session.OccupiedTiles)
+        foreach (WdtTileCoordinate tile in OrderAutoTileCandidates(session.OccupiedTiles))
         {
-            AdtPlacementCatalog catalog = ReadPlacementCatalog(session, tile.TileX, tile.TileY, archiveCatalog, out string sourcePath);
-            int placementCount = catalog.ModelPlacements.Count + catalog.WorldModelPlacements.Count;
-            if (placementCount <= bestPlacementCount)
-                continue;
-
-            bestTile = (tile.TileX, tile.TileY);
-            bestCatalog = catalog;
-            bestSourcePath = sourcePath;
-            bestPlacementCount = placementCount;
+            try
+            {
+                AdtPlacementCatalog catalog = ReadPlacementCatalog(session, tile.TileX, tile.TileY, archiveCatalog, out string sourcePath);
+                return ((tile.TileX, tile.TileY), catalog, sourcePath);
+            }
+            catch (FileNotFoundException)
+            {
+            }
         }
 
-        if (bestTile.HasValue && bestCatalog is not null && bestSourcePath is not null)
-            return (bestTile.Value, bestCatalog, bestSourcePath);
+        throw new InvalidDataException($"Map '{session.ResolvedMapDirectory}' does not report any readable occupied WDT tiles.");
+    }
 
-        throw new InvalidDataException($"Map '{session.ResolvedMapDirectory}' does not report any occupied WDT tiles.");
+    private static IEnumerable<WdtTileCoordinate> OrderAutoTileCandidates(IReadOnlyList<WdtTileCoordinate> occupiedTiles)
+    {
+        if (occupiedTiles.Count == 0)
+            yield break;
+
+        float centerTileX = occupiedTiles.Average(static tile => tile.TileX + 0.5f);
+        float centerTileY = occupiedTiles.Average(static tile => tile.TileY + 0.5f);
+
+        foreach (WdtTileCoordinate tile in occupiedTiles
+                     .OrderBy(tile => ComputeTileDistanceSq(tile, centerTileX, centerTileY))
+                     .ThenBy(static tile => tile.TileY)
+                     .ThenBy(static tile => tile.TileX))
+        {
+            yield return tile;
+        }
+    }
+
+    private static float ComputeTileDistanceSq(WdtTileCoordinate tile, float centerTileX, float centerTileY)
+    {
+        float dx = (tile.TileX + 0.5f) - centerTileX;
+        float dy = (tile.TileY + 0.5f) - centerTileY;
+        return (dx * dx) + (dy * dy);
     }
 
     private static AdtPlacementCatalog ReadPlacementCatalog(

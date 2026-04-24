@@ -13,7 +13,8 @@ internal sealed class WorldMinimapRenderer : IDisposable
     private readonly string _clientRoot;
     private readonly string _buildLabel;
     private readonly string _looseOverlayRoot;
-    private readonly Md5TranslateIndex? _md5Index;
+    private Md5TranslateIndex? _md5Index;
+    private int _md5TranslateLoadAttempted;
     private readonly ConcurrentDictionary<string, uint> _textureCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string?> _resolvedTilePathCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _queuedCacheKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -35,7 +36,6 @@ internal sealed class WorldMinimapRenderer : IDisposable
         _clientRoot = clientRoot?.Trim() ?? string.Empty;
         _buildLabel = buildLabel?.Trim() ?? string.Empty;
         _looseOverlayRoot = looseOverlayRoot?.Trim() ?? string.Empty;
-        _md5Index = TryLoadMd5TranslateIndex();
         _loaderTasks = Enumerable.Range(0, BackgroundWorkerCount)
             .Select(_ => Task.Run(() => BackgroundLoadLoop(_disposeCts.Token), _disposeCts.Token))
             .ToArray();
@@ -187,7 +187,7 @@ internal sealed class WorldMinimapRenderer : IDisposable
             _resolvedTilePathCache.TryRemove(virtualPath, out _);
         }
 
-        foreach (string hashedCandidate in _md5Index?.GetHashCandidates(virtualPath) ?? Array.Empty<string>())
+        foreach (string hashedCandidate in GetMd5HashCandidates(virtualPath))
         {
             if (!TryReadVirtualFileRaw(hashedCandidate, out data) || data is not { Length: > 0 })
                 continue;
@@ -204,6 +204,24 @@ internal sealed class WorldMinimapRenderer : IDisposable
 
         _resolvedTilePathCache[virtualPath] = null;
         return false;
+    }
+
+    private IReadOnlyList<string> GetMd5HashCandidates(string virtualPath)
+    {
+        Md5TranslateIndex? index = EnsureMd5TranslateIndexLoaded();
+        return index?.GetHashCandidates(virtualPath) ?? Array.Empty<string>();
+    }
+
+    private Md5TranslateIndex? EnsureMd5TranslateIndexLoaded()
+    {
+        if (_md5Index is not null)
+            return _md5Index;
+
+        if (Interlocked.Exchange(ref _md5TranslateLoadAttempted, 1) != 0)
+            return _md5Index;
+
+        _md5Index = TryLoadMd5TranslateIndex();
+        return _md5Index;
     }
 
     private bool TryReadVirtualFileRaw(string virtualPath, out byte[]? data)
@@ -247,6 +265,7 @@ internal sealed class WorldMinimapRenderer : IDisposable
     private static IEnumerable<string> EnumerateTileCandidates(string mapName, int tileX, int tileY, string primaryCandidate)
     {
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        List<string> yieldReturnList = [];
 
         void AddCandidate(string candidate)
         {
@@ -254,7 +273,6 @@ internal sealed class WorldMinimapRenderer : IDisposable
                 yieldReturnList.Add(candidate.Replace('\\', '/'));
         }
 
-        List<string> yieldReturnList = [];
         string normalizedMapName = mapName.ToLowerInvariant();
         string x2 = tileX.ToString("D2");
         string y2 = tileY.ToString("D2");

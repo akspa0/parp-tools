@@ -115,6 +115,19 @@ public sealed class LooseWorldMapDiscoveryTests
             return offset;
         }
 
+        using MemoryStream recordsStream = new();
+        using BinaryWriter recordsWriter = new(recordsStream, Encoding.UTF8, leaveOpen: true);
+        foreach ((uint id, string directory, string name) in rows)
+        {
+            recordsWriter.Write(id);
+            recordsWriter.Write(GetOffset(directory));
+            recordsWriter.Write(0u);
+            recordsWriter.Write(0u);
+            recordsWriter.Write(GetOffset(name));
+        }
+
+        recordsWriter.Flush();
+
         using MemoryStream stream = new();
         using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
 
@@ -122,17 +135,10 @@ public sealed class LooseWorldMapDiscoveryTests
         writer.Write(checked((uint)rows.Count));
         writer.Write(5u);
         writer.Write(20u);
-
-        foreach ((uint id, string directory, string name) in rows)
-        {
-            writer.Write(id);
-            writer.Write(GetOffset(directory));
-            writer.Write(0u);
-            writer.Write(0u);
-            writer.Write(GetOffset(name));
-        }
-
         writer.Write(checked((uint)stringStream.Length));
+
+        recordsStream.Position = 0;
+        recordsStream.CopyTo(stream);
         stringStream.Position = 0;
         stringStream.CopyTo(stream);
         writer.Flush();

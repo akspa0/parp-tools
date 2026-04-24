@@ -2,6 +2,67 @@
 
 # Active Context
 
+## Apr 24, 2026 - wow-viewer World Session now reuses build-aware archive bootstrap for map discovery and falls back to the first readable auto tile instead of stalling on sparse maps
+
+- this closes the immediate regression the user reported after the first minimap parity slice: some real clients showed a permanently empty world-map list and world-session open could appear hung or effectively dead on maps where the previous auto-tile heuristic kept walking into bad placement candidates
+- active behavior after this slice:
+	- `wow-viewer/src/core/WowViewer.Core.IO/Maps/LooseWorldMapDiscovery.cs` now accepts build-aware bootstrap options instead of always creating a bare archive bootstrap with no listfile/cache context
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now passes `WowViewerArchiveBootstrap.CreateBootstrapOptions(...)` into both the inline world-map discovery path and the pop-out world-map browser path, so `Map.dbc` discovery uses the same build-aware archive setup as the working CLI proofs
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` no longer auto-selects the occupied tile with the largest placement count; it now walks occupied tiles by distance to the occupied-map centroid and takes the first tile with a readable placement ADT, skipping missing or bad candidates instead of stalling the whole open path
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` also reshapes `World Session` toward the old `MdxViewer` navigator pattern:
+		- when switching into `World Session`, the app now applies a compact single-lane world preset
+		- the main controls window is retitled `World Navigator`
+		- source, maps, spawn, minimap, runtime stats, object navigator, and selection are grouped into collapsible sections in one primary lane instead of being split across several floating windows by default
+- bounded proof in this chat:
+	- isolated build succeeded with `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-app-worldfix-ui/`
+	- `output/build-validation/wowviewer-app-worldfix-ui/WowViewer.App.exe world-bootstrap --client-root "H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft" --map Kalimdor --build-label 3.3.5.12340` now resolves `Kalimdor` successfully with `loadMs=43.2`
+	- `output/build-validation/wowviewer-app-worldfix-ui/WowViewer.App.exe world-frame --client-root "H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft" --map Kalimdor --build-label 3.3.5.12340` now completes and selects readable tile `(34,31)` instead of hanging on auto-tile selection
+- current boundary:
+	- this repairs world discovery/open correctness and moves the shell closer to the legacy navigator feel, but it is still not a full one-for-one `MdxViewer` UI clone yet
+	- broader left-lane navigator plus right-lane inspector parity, richer utility panel clustering, and deeper world/editor workflow grouping still remain future shell work
+
+## Apr 24, 2026 - wow-viewer shell is now collapsing the extra world-side windows into one universal diagnostics lane
+
+- the user explicitly called out that the growing number of floating windows and split world panels had become hostile to use; the next shell correction in this chat was therefore not another feature panel, but a cutback in panel count
+- active behavior after this slice:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now keeps `Diagnostics` as the one universal deep-information lane instead of expecting the user to bounce among `World Status`, `World Navigator`, `World Inspector`, `Runtime Boundaries`, and `About`
+	- the top-level `DrawUi(...)` path no longer opens those extra world-side windows during the normal shell pass
+	- the `View` menu no longer advertises those redundant world/detail windows as primary navigation choices
+	- `DrawDiagnosticsWindow(...)` now acts as the consolidated technical surface and, for `World Session`, groups:
+		- world-session summary/runtime details
+		- minimap diagnostics surface
+		- object navigator list
+		- current selection details
+		- runtime boundaries
+		- about/command help
+	- helper content previously trapped in `DrawBoundaryWindow()` and `DrawAboutWindow()` is now reusable inside the diagnostics lane through dedicated shared content helpers
+- bounded proof in this chat:
+	- isolated build succeeded with `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-app-diagnostics/`
+- current boundary:
+	- this reduces UI fragmentation and aligns with the user’s request for one universal diagnostics lane, but it does not yet finish every remaining shell simplification request
+	- if further consolidation is wanted, the next likely candidates are `Workspaces`, `Source Controls`, and the separate preview-area framing around `World Session`
+
+## Apr 24, 2026 - wow-viewer World Session now includes an interactive minimap tile picker and navigation surface
+
+- this closes one of the most obvious old-shell parity gaps still visible in the new app: `World Session` no longer relies only on typed tile coordinates, the spawn picker, or the bounded object canvas to choose where to open next
+- active behavior after this slice:
+	- `wow-viewer/src/viewer/WowViewer.App/WorldMinimapRenderer.cs` now owns an app-local async minimap tile loader for `World Session`, including loose-overlay-first reads, archive fallback, and `md5translate`-aware hashed minimap lookup for early clients
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now exposes a `World Minimap` panel and also embeds the same surface inside the compact world-session layout so the main lane stays coherent
+	- the new minimap surface supports:
+		- async per-tile minimap streaming with progress counters
+		- mouse-wheel zoom
+		- right-drag pan
+		- single-click tile selection
+		- double-click tile selection plus world-session reload
+		- overlays for occupied WDT tiles, the currently loaded tile, and the currently selected tile
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerAppSettings.cs` now persists `World Minimap` panel visibility with the rest of the app shell state
+- bounded proof in this chat:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded after the world-minimap slice landed
+- current boundary:
+	- this is a real app-owned minimap navigation surface for bounded world-session parity, not the full old `MdxViewer` minimap/tooling stack yet
+	- the current minimap opens one selected ADT tile at a time and does not yet claim streamed multi-tile runtime ownership, teleport-style live world camera movement, or broader editor-task parity
+	- follow-up in the same chat: the first implementation eagerly loaded `md5translate` during `WorldMinimapRenderer` construction, which could stall the UI during startup when a persisted world session and client root were already active; that lookup is now lazy and only happens on the first hashed-minimap fallback request instead of on app boot
+
 ## Apr 23, 2026 - wow-viewer world tile preview no longer parses every referenced WMO and doodad asset before showing the current marker-only frame
 
 - this closes the worst current world-session performance regression the user called out directly: the bounded world tile preview was still doing per-placement WMO summary reads and per-placement MDX or M2 bounds reads even though the active world consumer only renders terrain plus object markers, not real object geometry

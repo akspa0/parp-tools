@@ -16,7 +16,10 @@ public sealed record DiscoveredLooseWorldMap(
 
 public static class LooseWorldMapDiscovery
 {
-    public static IReadOnlyList<DiscoveredLooseWorldMap> Discover(string clientRoot, string? looseOverlayRoot = null)
+    public static IReadOnlyList<DiscoveredLooseWorldMap> Discover(
+        string clientRoot,
+        string? looseOverlayRoot = null,
+        ArchiveCatalogBootstrapOptions? bootstrapOptions = null)
     {
         string normalizedClientRoot = Path.GetFullPath(clientRoot);
         if (!Directory.Exists(normalizedClientRoot))
@@ -26,12 +29,52 @@ public static class LooseWorldMapDiscovery
             ? string.Empty
             : Path.GetFullPath(looseOverlayRoot);
 
+        MapDirectoryLookup mapLookup = new();
         string[] lookupSearchPaths = BuildLookupSearchPaths(normalizedClientRoot, normalizedLooseOverlayRoot);
-        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [normalizedClientRoot], new ArchiveCatalogBootstrapOptions());
+
+        // Prefer direct filesystem lookup first.
+        // Many staged or loose-backed clients already expose [`Map.dbc`](wow-viewer/src/core/WowViewer.Core.IO/Dbc/MapDirectoryLookup.cs:15)
+        // on disk, and paying full archive bootstrap here can make the world-map list feel hung.
+        mapLookup.Load(lookupSearchPaths, archiveReader: null);
+
+        if (!mapLookup.IsLoaded)
+        {
+            using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+            ArchiveCatalogBootstrapper.Bootstrap(
+                archiveCatalog,
+                [normalizedClientRoot],
+                bootstrapOptions ?? new ArchiveCatalogBootstrapOptions());
+
+            mapLookup.Load(lookupSearchPaths, archiveCatalog);
+        }
+
+        if (!mapLookup.IsLoaded)
+            return Array.Empty<DiscoveredLooseWorldMap>();
+
+        return mapLookup.Entries
+            .Select(entry => CreateDiscoveredMap(entry, lookupSearchPaths))
+            .OrderBy(static map => map.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static map => map.Directory, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public static IReadOnlyList<DiscoveredLooseWorldMap> DiscoverWithArchiveReader(
+        string clientRoot,
+        string? looseOverlayRoot,
+        IArchiveReader archiveReader)
+    {
+        string normalizedClientRoot = Path.GetFullPath(clientRoot);
+        if (!Directory.Exists(normalizedClientRoot))
+            return Array.Empty<DiscoveredLooseWorldMap>();
+
+        string normalizedLooseOverlayRoot = string.IsNullOrWhiteSpace(looseOverlayRoot)
+            ? string.Empty
+            : Path.GetFullPath(looseOverlayRoot);
 
         MapDirectoryLookup mapLookup = new();
-        mapLookup.Load(lookupSearchPaths, archiveCatalog);
+        string[] lookupSearchPaths = BuildLookupSearchPaths(normalizedClientRoot, normalizedLooseOverlayRoot);
+        mapLookup.Load(lookupSearchPaths, archiveReader);
+
         if (!mapLookup.IsLoaded)
             return Array.Empty<DiscoveredLooseWorldMap>();
 
