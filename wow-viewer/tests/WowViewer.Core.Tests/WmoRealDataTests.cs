@@ -252,6 +252,60 @@ public sealed class WmoRealDataTests
     }
 
     [Fact]
+    public void Read_StagedStormwindAlphaPerAssetMpq_ThroughCatalog_ProducesChunkedWmo()
+    {
+        string mpqPath = WmoTestPaths.StagedStormwindAlphaMpqPath;
+        if (!File.Exists(mpqPath))
+            return;
+
+        using MpqArchiveCatalog catalog = new();
+        byte[]? bytes = catalog.ReadFile0FromPath(
+            mpqPath,
+            "Stormwind.wmo",
+            "World\\wmo\\Azeroth\\Buildings\\Stormwind\\Stormwind.wmo");
+
+        Assert.NotNull(bytes);
+        string head = Convert.ToHexString(bytes.AsSpan(0, Math.Min(16, bytes.Length)));
+
+        using MemoryStream chunkStream = new(bytes!);
+        IReadOnlyList<ChunkSpan> chunks;
+        try
+        {
+            chunks = ChunkedFileReader.ReadTopLevelChunks(chunkStream, padOddChunkSizes: false);
+        }
+        catch (InvalidDataException exception)
+        {
+            throw new Xunit.Sdk.XunitException($"{exception.Message}; len={bytes.Length}; head={head}");
+        }
+
+        Assert.NotEmpty(chunks);
+
+        WowFileDetection detection = WowFileDetector.Detect(chunkStream, mpqPath);
+        Assert.True(
+            detection.Kind == WowFileKind.Wmo,
+            $"Detected {detection.Kind}; firstBytes={head}");
+    }
+
+    [Fact]
+    public void Read_StagedStormwindAlphaMpqVirtualPath_ThroughArchiveVirtualFileReader_ProducesChunkedWmo()
+    {
+        if (!Directory.Exists(WmoTestPaths.StagedStormwindAlphaClientRoot))
+            return;
+
+        byte[] bytes = ArchiveVirtualFileReader.ReadVirtualFile(
+            "World\\wmo\\Azeroth\\Buildings\\Stormwind\\Stormwind.wmo.MPQ",
+            [WmoTestPaths.StagedStormwindAlphaClientRoot],
+            (ArchiveCatalogBootstrapOptions?)null);
+
+        using MemoryStream chunkStream = new(bytes);
+        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(chunkStream, padOddChunkSizes: false);
+        Assert.NotEmpty(chunks);
+
+        WowFileDetection detection = WowFileDetector.Detect(chunkStream, "World\\wmo\\Azeroth\\Buildings\\Stormwind\\Stormwind.wmo.MPQ");
+        Assert.Equal(WowFileKind.Wmo, detection.Kind);
+    }
+
+    [Fact]
     public void Read_IronforgeStandard060_RootLightSummary_UsesStandardTailAttenuationOffsets()
     {
         if (!Directory.Exists(WmoTestPaths.Standard060DataPath) || !File.Exists(WmoTestPaths.ListfilePath))
@@ -398,6 +452,10 @@ internal static class WmoTestPaths
     public static string Castle01AlphaMpqPath => Path.Combine(GetWowViewerRoot(), "testdata", "0.5.3", "tree", "World", "wmo", "Azeroth", "Buildings", "Castle", "castle01.wmo.MPQ");
 
     public static string IronforgeAlphaMpqPath => Path.Combine(GetWowViewerRoot(), "testdata", "0.5.3", "tree", "World", "wmo", "KhazModan", "Cities", "Ironforge", "ironforge.wmo.MPQ");
+
+    public static string StagedStormwindAlphaMpqPath => Path.Combine(GetWowViewerRoot(), "..", "output", "tmp", "wowarchive-clients", "0_5_3_3368", "World of Warcraft", "Data", "World", "wmo", "Azeroth", "Buildings", "Stormwind", "Stormwind.wmo.MPQ");
+
+    public static string StagedStormwindAlphaClientRoot => Path.Combine(GetWowViewerRoot(), "..", "output", "tmp", "wowarchive-clients", "0_5_3_3368", "World of Warcraft");
 
     public static string Standard060DataPath => Path.Combine(GetWowViewerRoot(), "testdata", "0.6.0", "World of Warcraft", "Data");
 

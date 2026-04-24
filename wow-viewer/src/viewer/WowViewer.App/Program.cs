@@ -1,5 +1,7 @@
 using System.Text.Json;
+using System.Reflection;
 using WowViewer.Core;
+using WowViewer.Core.IO.Files;
 using WowViewer.Core.PM4;
 using WowViewer.Core.Runtime;
 using WowViewer.Core.Runtime.M2;
@@ -61,6 +63,9 @@ internal static class Program
 
                 case "world-placement-audit":
                     return RunWorldPlacementAudit(tail);
+
+                case "archive-probe":
+                    return RunArchiveProbe(tail);
 
                 case "m2-bounds":
                     return RunM2Bounds(tail);
@@ -297,6 +302,71 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    private static int RunArchiveProbe(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? virtualPath = GetOption(args, "--virtual-path", "-v");
+        string? buildLabel = GetOption(args, "--build-label", "-b");
+
+        if (string.IsNullOrWhiteSpace(clientRoot))
+            throw new ArgumentException("Provide --client-root <game dir> for archive-probe.");
+        if (string.IsNullOrWhiteSpace(virtualPath))
+            throw new ArgumentException("Provide --virtual-path <path> for archive-probe.");
+
+        string normalizedClientRoot = Path.GetFullPath(clientRoot);
+        string? resolvedListfilePath = WowViewerArchiveBootstrap.ResolveDefaultListfilePath();
+        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+        ArchiveCatalogBootstrapper.Bootstrap(
+            archiveCatalog,
+            [normalizedClientRoot],
+            WowViewerArchiveBootstrap.CreateBootstrapOptions(buildLabel, normalizedClientRoot));
+
+        string normalizedVirtualPath = virtualPath.Replace('/', '\\');
+        bool exists = archiveCatalog.FileExists(normalizedVirtualPath);
+        byte[]? data = archiveCatalog.ReadFile(normalizedVirtualPath);
+        string token = Path.GetFileNameWithoutExtension(normalizedVirtualPath);
+        string[] knownMatches = archiveCatalog.GetAllKnownFiles()
+            .Where(path => path.Contains(token, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToArray();
+
+        Console.WriteLine($"WowViewer.App archive-probe: root={normalizedClientRoot} build={FormatOptionalValue(buildLabel)} path={normalizedVirtualPath}");
+        Console.WriteLine($"WowViewer.App archive-probe bootstrap: listfile={FormatOptionalValue(resolvedListfilePath)}");
+        Console.WriteLine($"WowViewer.App archive-probe catalog: exists={exists} len={(data is null ? "null" : data.Length.ToString())}");
+        Console.WriteLine($"WowViewer.App archive-probe known-matches: count={knownMatches.Length} sample={(knownMatches.Length == 0 ? "none" : string.Join(", ", knownMatches))}");
+
+        if (archiveCatalog is MpqArchiveCatalog mpqArchiveCatalog)
+        {
+            IReadOnlyList<string>? loadedArchivePaths = InvokePrivate<IReadOnlyList<string>>(mpqArchiveCatalog, "GetLoadedArchivePaths");
+            Console.WriteLine($"WowViewer.App archive-probe archives: count={loadedArchivePaths?.Count ?? 0} sample={(loadedArchivePaths is null || loadedArchivePaths.Count == 0 ? "none" : string.Join(", ", loadedArchivePaths.Take(12).Select(Path.GetFileName)))}");
+            Type? helperType = typeof(MpqArchiveCatalog).Assembly.GetType("WowViewer.Core.IO.Files.StormLibPatchArchiveReader", throwOnError: false);
+            if (helperType is not null && loadedArchivePaths is not null)
+            {
+                bool? stormExists = helperType
+                    .GetMethod("TryFileExists", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                    ?.Invoke(null, new object[] { loadedArchivePaths, normalizedVirtualPath }) as bool?;
+                byte[]? stormData = helperType
+                    .GetMethod("TryReadFile", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                    ?.Invoke(null, new object[] { loadedArchivePaths, normalizedVirtualPath }) as byte[];
+
+                Console.WriteLine($"WowViewer.App archive-probe stormlib: exists={stormExists?.ToString() ?? "n/a"} len={(stormData is null ? "null" : stormData.Length.ToString())}");
+            }
+        }
+
+        return data is null ? 1 : 0;
+    }
+
+    private static T? InvokePrivate<T>(object instance, string methodName)
+    {
+        MethodInfo? method = instance.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        if (method is null)
+            return default;
+
+        object? result = method.Invoke(instance, null);
+        return result is T typed ? typed : default;
     }
 
     private static string FormatLiquidTypeCounts(WorldLiquidTileData liquidTileData)
@@ -766,6 +836,7 @@ internal static class Program
         Console.WriteLine("  wowviewer-app world-bootstrap --client-root <game dir> --map <directory|id|name> [--loose-overlay-root <dir>] [--build-label <label>]");
         Console.WriteLine("  wowviewer-app world-frame --client-root <game dir> --map <directory|id|name> [--loose-overlay-root <dir>] [--tile-x <0..63> --tile-y <0..63>] [--build-label <label>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--terrain-preview-output <file.bmp>]");
         Console.WriteLine("  wowviewer-app world-placement-audit --client-root <game dir> --map <directory|id|name> [--loose-overlay-root <dir>] [--build-label <label>] [--limit <count>]");
+        Console.WriteLine("  wowviewer-app archive-probe --client-root <game dir> --virtual-path <path/to/file> [--build-label <label>]");
         Console.WriteLine("  wowviewer-app m2-bounds --archive-root <game|data dir> --model-list <paths.txt> [--output <bounds.json>] [--build-label <label>]");
         Console.WriteLine("  wowviewer-app m2-bounds --archive-root <game|data dir> --virtual-path <path/to/file.m2> [--output <bounds.json>]");
     }

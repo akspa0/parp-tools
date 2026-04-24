@@ -6,8 +6,11 @@ public sealed class MapDirectoryLookup
 {
     private readonly Dictionary<string, string> _mapDirectoryLookup = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, string> _mapIdToDirectory = [];
+    private readonly List<MapDirectoryEntry> _entries = [];
 
     public bool IsLoaded => _mapDirectoryLookup.Count > 0;
+
+    public IReadOnlyList<MapDirectoryEntry> Entries => _entries;
 
     public void Load(IEnumerable<string> searchPaths, IArchiveReader? archiveReader = null)
     {
@@ -68,6 +71,7 @@ public sealed class MapDirectoryLookup
     private void LoadFromBytes(byte[] data)
     {
         DbcReader dbc = DbcReader.Load(data);
+        _entries.Clear();
 
         for (int rowIndex = 0; rowIndex < dbc.Rows.Count; rowIndex++)
         {
@@ -78,14 +82,17 @@ public sealed class MapDirectoryLookup
                 if (string.IsNullOrEmpty(directory))
                     continue;
 
+                string mapName = string.Empty;
+                if (dbc.Header.FieldCount > 4)
+                    mapName = dbc.GetString(rowIndex, 4);
+
                 _mapIdToDirectory[id] = directory;
                 _mapDirectoryLookup.TryAdd(directory, directory);
+                _entries.Add(new MapDirectoryEntry(id, directory, string.IsNullOrWhiteSpace(mapName) ? directory : mapName));
 
-                if (dbc.Header.FieldCount > 4)
+                if (!string.IsNullOrEmpty(mapName))
                 {
-                    string mapName = dbc.GetString(rowIndex, 4);
-                    if (!string.IsNullOrEmpty(mapName))
-                        _mapDirectoryLookup.TryAdd(mapName, directory);
+                    _mapDirectoryLookup.TryAdd(mapName, directory);
                 }
             }
             catch
@@ -94,3 +101,5 @@ public sealed class MapDirectoryLookup
         }
     }
 }
+
+public sealed record MapDirectoryEntry(int Id, string Directory, string Name);

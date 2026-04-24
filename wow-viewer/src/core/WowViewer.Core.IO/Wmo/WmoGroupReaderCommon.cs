@@ -32,7 +32,7 @@ internal static class WmoGroupReaderCommon
 
     public static (uint? Version, byte[] Mogp) ReadGroupPayload(Stream stream, string sourcePath)
     {
-        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
+        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream, padOddChunkSizes: false);
         uint? version = TryReadVersion(stream, chunks);
         WowFileDetection detection = WowFileDetector.Detect(sourcePath, chunks, version);
         if (detection.Kind != WowFileKind.WmoGroup)

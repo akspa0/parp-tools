@@ -1,28 +1,36 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using ImGuiNET;
 using WowViewer.Core.IO.Files;
 
 namespace WowViewer.App;
 
-internal sealed class MdxFileBrowserState
+internal enum AssetFileBrowserFilter
+{
+    SupportedAssets = 0,
+    M2 = 1,
+    Mdx = 2,
+    Wmo = 3,
+}
+
+internal sealed class AssetFileBrowserState
 {
     private IArchiveCatalog? _catalog;
     private List<string> _allFiles = [];
     private List<string> _filteredFiles = [];
     private string _searchFilter = string.Empty;
-    private string _extensionFilter = ".mdx";
+    private AssetFileBrowserFilter _filter = AssetFileBrowserFilter.Mdx;
     private int _selectedIndex = -1;
     private bool _catalogLoaded;
     private string _lastError = string.Empty;
     private string _currentArchiveRoot = string.Empty;
     private string _currentLooseOverlayRoot = string.Empty;
 
-    private static readonly (string Value, string Label)[] ExtensionFilters =
+    private static readonly (AssetFileBrowserFilter Value, string Label)[] Filters =
     [
-        (".mdx", ".mdx"),
-        (".m2", ".m2"),
-        (".wmo", ".wmo"),
+        (AssetFileBrowserFilter.SupportedAssets, "Supported Assets"),
+        (AssetFileBrowserFilter.M2, "M2 (.m2)"),
+        (AssetFileBrowserFilter.Mdx, "MDX (.mdx)"),
+        (AssetFileBrowserFilter.Wmo, "WMO (.wmo, .wmo.mpq)"),
     ];
 
     public string? SelectedFilePath => _selectedIndex >= 0 && _selectedIndex < _filteredFiles.Count
@@ -40,14 +48,33 @@ internal sealed class MdxFileBrowserState
 
             HashSet<string> mergedFiles = new(StringComparer.OrdinalIgnoreCase);
 
+            string? cacheKey = WowViewerArchiveBootstrap.ResolveArchiveListfileCacheKey(null, _currentArchiveRoot);
+            string? cacheDirectory = WowViewerArchiveBootstrap.ResolveDefaultArchiveListfileCacheDirectory();
+            ArchiveListfileCacheManifest? cacheManifest = !string.IsNullOrWhiteSpace(cacheKey) && !string.IsNullOrWhiteSpace(cacheDirectory)
+                ? ArchiveListfileCache.TryRead(cacheDirectory, cacheKey)
+                : null;
+
+            if (cacheManifest is not null)
+            {
+                foreach (string file in cacheManifest.AllEntries)
+                    mergedFiles.Add(file.Replace('\\', '/'));
+            }
+
             if (!string.IsNullOrWhiteSpace(_currentArchiveRoot))
             {
-                var factory = new MpqArchiveCatalogFactory();
-                _catalog = factory.Create();
-                ArchiveCatalogBootstrapper.Bootstrap(_catalog, [_currentArchiveRoot], WowViewerArchiveBootstrap.CreateBootstrapOptions());
+                bool needLiveCatalog = cacheManifest is null;
+                if (needLiveCatalog)
+                {
+                    var factory = new MpqArchiveCatalogFactory();
+                    _catalog = factory.Create();
+                    ArchiveCatalogBootstrapper.Bootstrap(
+                        _catalog,
+                        [_currentArchiveRoot],
+                        WowViewerArchiveBootstrap.CreateBootstrapOptions(null, _currentArchiveRoot));
 
-                foreach (string file in _catalog.GetAllKnownFiles())
-                    mergedFiles.Add(file.Replace('\\', '/'));
+                    foreach (string file in _catalog.GetAllKnownFiles())
+                        mergedFiles.Add(file.Replace('\\', '/'));
+                }
             }
 
             foreach (string file in VirtualAssetOverlayResolver.EnumerateLooseVirtualFiles(_currentLooseOverlayRoot))
@@ -77,11 +104,11 @@ internal sealed class MdxFileBrowserState
         _catalogLoaded = false;
     }
 
-    public void SetExtensionFilter(string ext)
+    public void SetFilter(AssetFileBrowserFilter filter)
     {
-        if (_extensionFilter != ext)
+        if (_filter != filter)
         {
-            _extensionFilter = ext;
+            _filter = filter;
             RefreshFilteredFiles();
         }
     }
@@ -103,17 +130,18 @@ internal sealed class MdxFileBrowserState
     private void RefreshFilteredFiles()
     {
         _filteredFiles = _allFiles
-            .Where(f => f.EndsWith(_extensionFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(f => MatchesFilter(f, _filter))
             .Where(f => string.IsNullOrWhiteSpace(_searchFilter) ||
+                        f.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase) ||
                         Path.GetFileName(f).Contains(_searchFilter, StringComparison.OrdinalIgnoreCase))
             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
             .ToList();
         _selectedIndex = -1;
     }
 
-    public void Draw(string archiveRoot, Action onFileSelected)
+    public void Draw(string clientRoot, Action onFileSelected)
     {
-        string normalizedArchiveRoot = archiveRoot?.Trim() ?? string.Empty;
+        string normalizedArchiveRoot = clientRoot?.Trim() ?? string.Empty;
         bool sourceChanged = !string.Equals(normalizedArchiveRoot, _currentArchiveRoot, StringComparison.OrdinalIgnoreCase);
 
         bool catalogLoaded = _catalogLoaded;
@@ -130,19 +158,18 @@ internal sealed class MdxFileBrowserState
 
         if (!_catalogLoaded)
         {
-            ImGui.TextWrapped("Load an archive catalog to browse files.");
+            ImGui.TextWrapped("Load a game client catalog to browse files.");
             return;
         }
 
         ImGui.Separator();
 
-        // Extension filter dropdown
-        if (ImGui.BeginCombo("Type Filter", _extensionFilter))
+        if (ImGui.BeginCombo("Type Filter", GetFilterLabel(_filter)))
         {
-            foreach (var (value, label) in ExtensionFilters)
+            foreach (var (value, label) in Filters)
             {
-                if (ImGui.Selectable(label, _extensionFilter == value))
-                    SetExtensionFilter(value);
+                if (ImGui.Selectable(label, _filter == value))
+                    SetFilter(value);
             }
             ImGui.EndCombo();
         }
@@ -195,6 +222,33 @@ internal sealed class MdxFileBrowserState
             ImGui.TextColored(new Vector4(1f, 0f, 0f, 1f), _lastError);
     }
 
+    private static bool MatchesFilter(string path, AssetFileBrowserFilter filter)
+    {
+        return filter switch
+        {
+            AssetFileBrowserFilter.SupportedAssets => path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".wmo.mpq", StringComparison.OrdinalIgnoreCase),
+            AssetFileBrowserFilter.M2 => path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase),
+            AssetFileBrowserFilter.Mdx => path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase),
+            AssetFileBrowserFilter.Wmo => path.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".wmo.mpq", StringComparison.OrdinalIgnoreCase),
+            _ => false,
+        };
+    }
+
+    private static string GetFilterLabel(AssetFileBrowserFilter filter)
+    {
+        foreach (var (value, label) in Filters)
+        {
+            if (value == filter)
+                return label;
+        }
+
+        return Filters[0].Label;
+    }
+
     public void SetLooseOverlayRoot(string? looseOverlayRoot)
     {
         string normalized = looseOverlayRoot?.Trim() ?? string.Empty;
@@ -221,12 +275,13 @@ internal sealed class MdxFileBrowserState
 
 internal static class FileBrowserEx
 {
-    public static bool DrawMdxFileBrowser(
+    public static bool DrawAssetFileBrowser(
         string label,
         ref bool browserOpen,
-        string archiveRoot,
+        string clientRoot,
         string? looseOverlayRoot,
-        MdxFileBrowserState state,
+        AssetFileBrowserState state,
+        AssetFileBrowserFilter filter,
         Action<string> onFileSelected)
     {
         bool result = false;
@@ -237,14 +292,15 @@ internal static class FileBrowserEx
             return result;
         }
 
-        ImGui.Text($"Archive Root: {archiveRoot}");
+        ImGui.Text($"Client Root: {clientRoot}");
         if (!string.IsNullOrWhiteSpace(looseOverlayRoot))
             ImGui.Text($"Loose Overlay: {Path.GetFullPath(looseOverlayRoot)}");
         ImGui.Separator();
 
+        state.SetFilter(filter);
         state.SetLooseOverlayRoot(looseOverlayRoot);
 
-        state.Draw(archiveRoot, () =>
+        state.Draw(clientRoot, () =>
         {
             if (state.SelectedFilePath != null)
             {

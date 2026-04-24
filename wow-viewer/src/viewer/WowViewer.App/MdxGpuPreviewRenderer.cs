@@ -1772,7 +1772,7 @@ internal sealed class MdxGpuPreviewRenderer : IDisposable
         {
             try
             {
-                bytes = VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(texturePath, request.ArchiveRoot!, request.LooseOverlayRoot);
+                bytes = VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(texturePath, request.ArchiveRoot!, request.LooseOverlayRoot, request.BuildLabel);
                 return bytes.Length > 0;
             }
             catch

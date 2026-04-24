@@ -13,6 +13,7 @@ public static class WowFileDetector
     private static readonly FourCC Mohd = FourCC.FromString("MOHD");
     private static readonly FourCC Mogp = FourCC.FromString("MOGP");
     private static readonly FourCC Mdid = FourCC.FromString("MDID");
+    private static readonly string[] WmoExtensions = [".wmo", ".wmo.mpq"];
 
     public static WowFileDetection Detect(string path)
     {
@@ -63,7 +64,7 @@ public static class WowFileDetector
 
             if (FourCC.FromFileBytes(signature) == Mogp)
             {
-                IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
+                IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream, padOddChunkSizes: false);
                 return Detect(sourcePath, chunks, version: null);
             }
 
@@ -76,7 +77,8 @@ public static class WowFileDetector
 
             if (FourCC.FromFileBytes(signature) == MapChunkIds.Mver)
             {
-                IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
+                bool useWmoChunkWalk = LooksLikeWmoPath(sourcePath);
+                IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream, padOddChunkSizes: !useWmoChunkWalk);
                 uint? version = TryReadVersion(stream, chunks);
                 return Detect(sourcePath, chunks, version);
             }
@@ -167,6 +169,17 @@ public static class WowFileDetector
 
         uint version = BinaryPrimitives.ReadUInt32LittleEndian(signature);
         return (version & 0x80000000u) != 0;
+    }
+
+    private static bool LooksLikeWmoPath(string sourcePath)
+    {
+        foreach (string extension in WmoExtensions)
+        {
+            if (sourcePath.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     private static bool MatchesAscii(ReadOnlySpan<byte> bytes, string text)

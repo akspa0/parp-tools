@@ -113,6 +113,31 @@ public sealed class MpqArchiveCatalogTests
         }
     }
 
+    [Fact]
+    public void ReadFile_ReadsVersion1ArchiveWithHiBlockTableExtension()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            CreateMpqArchive(
+                Path.Combine(tempDirectory, "Patch-Y.mpq"),
+                formatVersion: 1,
+                new MpqEntry("World\\Maps\\Azeroth\\Azeroth.wdt", Encoding.UTF8.GetBytes("extended")));
+
+            using MpqArchiveCatalog catalog = new();
+            catalog.LoadArchives([tempDirectory]);
+
+            byte[]? bytes = catalog.ReadFile("World\\Maps\\Azeroth\\Azeroth.wdt");
+
+            Assert.NotNull(bytes);
+            Assert.Equal("extended", Encoding.UTF8.GetString(bytes));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private static string CreateTempDirectory()
     {
         string directory = Path.Combine(Path.GetTempPath(), $"wowviewer-mpq-{Guid.NewGuid():N}");
@@ -121,6 +146,11 @@ public sealed class MpqArchiveCatalogTests
     }
 
     private static void CreateMpqArchive(string archivePath, params MpqEntry[] entries)
+    {
+        CreateMpqArchive(archivePath, formatVersion: 0, entries);
+    }
+
+    private static void CreateMpqArchive(string archivePath, ushort formatVersion, params MpqEntry[] entries)
     {
         const uint flagExists = 0x80000000;
         const uint flagSingleUnit = 0x01000000;
@@ -132,13 +162,15 @@ public sealed class MpqArchiveCatalogTests
 
         int hashTableEntries = NextPowerOfTwo(Math.Max(8, entries.Length * 2));
         int blockTableEntries = entries.Length;
-        int headerSize = 32;
+        int headerSize = formatVersion >= 1 ? 44 : 32;
         int hashTableSize = hashTableEntries * 16;
         int blockTableSize = blockTableEntries * 16;
-        int currentOffset = headerSize + hashTableSize + blockTableSize;
+        int hiBlockTableSize = formatVersion >= 1 ? blockTableEntries * sizeof(ushort) : 0;
+        int currentOffset = headerSize + hashTableSize + blockTableSize + hiBlockTableSize;
 
         List<byte[]> filePayloads = [];
         uint[] blockTable = new uint[blockTableEntries * 4];
+        ushort[] hiBlockTable = new ushort[blockTableEntries];
         for (int i = 0; i < entries.Length; i++)
         {
             MpqEntry entry = entries[i];
@@ -185,12 +217,19 @@ public sealed class MpqArchiveCatalogTests
         writer.Write(0x1A51504D);
         writer.Write((uint)headerSize);
         writer.Write((uint)currentOffset);
-        writer.Write((ushort)0);
+        writer.Write(formatVersion);
         writer.Write((ushort)3);
         writer.Write((uint)headerSize);
         writer.Write((uint)(headerSize + hashTableSize));
         writer.Write((uint)hashTableEntries);
         writer.Write((uint)blockTableEntries);
+
+        if (formatVersion >= 1)
+        {
+            writer.Write((ulong)(headerSize + hashTableSize + blockTableSize));
+            writer.Write((ushort)0);
+            writer.Write((ushort)0);
+        }
 
         foreach (uint value in hashTable)
         {
@@ -200,6 +239,14 @@ public sealed class MpqArchiveCatalogTests
         foreach (uint value in blockTable)
         {
             writer.Write(value);
+        }
+
+        if (formatVersion >= 1)
+        {
+            foreach (ushort value in hiBlockTable)
+            {
+                writer.Write(value);
+            }
         }
 
         foreach (byte[] payload in filePayloads)

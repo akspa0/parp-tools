@@ -45,8 +45,8 @@ internal sealed class WowViewerAssetSource
                 : $" + loose:{LooseOverlayRoot}";
 
             return string.IsNullOrWhiteSpace(BuildLabel)
-                ? $"archive:{ArchiveRoot}::{VirtualPath}{overlay}"
-                : $"archive:{ArchiveRoot}::{VirtualPath} [{BuildLabel}]{overlay}";
+                ? $"client:{ArchiveRoot}::{VirtualPath}{overlay}"
+                : $"client:{ArchiveRoot}::{VirtualPath} [{BuildLabel}]{overlay}";
         }
 
         if (string.IsNullOrWhiteSpace(InputPath))
@@ -83,6 +83,10 @@ internal sealed class WowViewerWorldSessionState
     public bool ShowLiquid { get; set; } = true;
 
     public bool ShowOverlay { get; set; } = true;
+
+    public bool IgnoreTerrainHoles { get; set; }
+
+    public bool ShowHoleOverlay { get; set; }
 
     public void Normalize()
     {
@@ -139,10 +143,10 @@ internal sealed class WowViewerWorldSessionState
             ? string.Empty
             : $" loose={Path.GetFullPath(LooseOverlayRoot)}";
 
-        bool usingDefaultLayers = ShowWmos && ShowDoodads && ShowSky && ShowWdl && ShowTerrain && ShowLiquid && ShowOverlay;
+        bool usingDefaultLayers = ShowWmos && ShowDoodads && ShowSky && ShowWdl && ShowTerrain && ShowLiquid && ShowOverlay && !IgnoreTerrainHoles && !ShowHoleOverlay;
         string layerSummary = usingDefaultLayers
             ? string.Empty
-            : $" layers[wmo={ShowWmos}, mdx={ShowDoodads}, sky={ShowSky}, wdl={ShowWdl}, terrain={ShowTerrain}, liquid={ShowLiquid}, overlay={ShowOverlay}]";
+            : $" layers[wmo={ShowWmos}, mdx={ShowDoodads}, sky={ShowSky}, wdl={ShowWdl}, terrain={ShowTerrain}, liquid={ShowLiquid}, overlay={ShowOverlay}, ignoreHoles={IgnoreTerrainHoles}, holeOverlay={ShowHoleOverlay}]";
 
         return string.IsNullOrWhiteSpace(BuildLabel)
             ? $"{source} :: {map}{tile}{loose}{layerSummary}"

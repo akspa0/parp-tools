@@ -136,7 +136,7 @@ internal static class M2PreviewLoader
     private static byte[] ReadBytes(M2PreviewLoadRequest request)
     {
         if (request.UsesArchiveSource)
-            return VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(request.VirtualPath!, request.ArchiveRoot!, request.LooseOverlayRoot);
+            return VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(request.VirtualPath!, request.ArchiveRoot!, request.LooseOverlayRoot, request.BuildLabel);
 
         if (!string.IsNullOrWhiteSpace(request.InputPath) && File.Exists(request.InputPath))
             return File.ReadAllBytes(request.InputPath);
@@ -147,7 +147,7 @@ internal static class M2PreviewLoader
     private static byte[] ReadCompanionBytes(M2PreviewLoadRequest request, string companionPath)
     {
         if (request.UsesArchiveSource)
-            return VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(companionPath, request.ArchiveRoot!, request.LooseOverlayRoot);
+            return VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(companionPath, request.ArchiveRoot!, request.LooseOverlayRoot, request.BuildLabel);
 
         string localPath = companionPath;
         if (!Path.IsPathRooted(localPath) && !string.IsNullOrWhiteSpace(request.InputPath))

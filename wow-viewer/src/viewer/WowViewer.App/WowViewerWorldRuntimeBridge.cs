@@ -97,6 +97,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         string optimizationHint,
         IReadOnlyList<string> pendingAssetKeys,
         Vector3 cameraPosition,
+        Vector3 cameraTarget,
         Vector3 cameraForward,
         Vector2 planarMin,
         Vector2 planarMax)
@@ -126,6 +127,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         OptimizationHint = optimizationHint;
         PendingAssetKeys = pendingAssetKeys;
         CameraPosition = cameraPosition;
+        CameraTarget = cameraTarget;
         CameraForward = cameraForward;
         PlanarMin = planarMin;
         PlanarMax = planarMax;
@@ -181,6 +183,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
 
     public Vector3 CameraPosition { get; }
 
+    public Vector3 CameraTarget { get; }
+
     public Vector3 CameraForward { get; }
 
     public Vector2 PlanarMin { get; }
@@ -190,6 +194,9 @@ internal sealed class WowViewerWorldRuntimeFrameResult
 
 internal static class WowViewerWorldRuntimeBridge
 {
+    internal const float TileSize = 533.33333f;
+    internal const float MapOrigin = 32.0f * TileSize;
+
     private readonly record struct LocalBoundsResolution(bool AssetReady, Vector3 LocalMin, Vector3 LocalMax, bool HasOpaqueRenderContent, bool HasTransparentRenderContent);
 
     private readonly record struct ResolvedWmoAsset(
@@ -212,7 +219,10 @@ internal static class WowViewerWorldRuntimeBridge
             new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot));
 
         using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [session.ClientRoot], WowViewerArchiveBootstrap.CreateBootstrapOptions());
+        ArchiveCatalogBootstrapper.Bootstrap(
+            archiveCatalog,
+            [session.ClientRoot],
+            WowViewerArchiveBootstrap.CreateBootstrapOptions(session.BuildLabel, session.ClientRoot));
 
         List<WowViewerWorldPlacementTileSummary> populatedTiles = [];
         foreach (WdtTileCoordinate tile in session.OccupiedTiles)
@@ -257,7 +267,10 @@ internal static class WowViewerWorldRuntimeBridge
             new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot));
 
         using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [session.ClientRoot], WowViewerArchiveBootstrap.CreateBootstrapOptions());
+        ArchiveCatalogBootstrapper.Bootstrap(
+            archiveCatalog,
+            [session.ClientRoot],
+            WowViewerArchiveBootstrap.CreateBootstrapOptions(session.BuildLabel, session.ClientRoot));
 
         ((int tileX, int tileY) selectedTile, AdtPlacementCatalog placementCatalog, string placementSourcePath) =
             ResolveTileAndPlacements(session, request.TileX, request.TileY, archiveCatalog);
@@ -267,19 +280,18 @@ internal static class WowViewerWorldRuntimeBridge
         WorldTerrainVisualSnapshot terrainVisualSnapshot = WorldTerrainVisualSnapshotBuilder.Build(terrainTileData);
         WorldLiquidTileData liquidTileData = ReadRootLiquidTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
 
-        Dictionary<string, LocalBoundsResolution> boundsCache = new(StringComparer.OrdinalIgnoreCase);
-        Dictionary<string, ResolvedWmoAsset> wmoCache = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, bool> assetReadyLookup = new(StringComparer.OrdinalIgnoreCase);
 
-        List<WorldObjectInstance> wmoInstances = BuildWmoInstances(session.ClientRoot, session.LooseOverlayRoot, placementCatalog, selectedTile.tileX, selectedTile.tileY, archiveCatalog, wmoCache, assetReadyLookup);
-        List<WorldObjectInstance> mdxInstances = BuildMdxInstances(session.ClientRoot, session.LooseOverlayRoot, placementCatalog, selectedTile.tileX, selectedTile.tileY, archiveCatalog, boundsCache, assetReadyLookup);
+        List<WorldObjectInstance> wmoInstances = BuildWmoInstances(placementCatalog, selectedTile.tileX, selectedTile.tileY, assetReadyLookup);
+        List<WorldObjectInstance> mdxInstances = BuildMdxInstances(placementCatalog, selectedTile.tileX, selectedTile.tileY, assetReadyLookup);
 
         int readyWmoCount = wmoInstances.Count(instance => assetReadyLookup.TryGetValue(instance.ModelKey, out bool ready) && ready);
         int readyMdxCount = mdxInstances.Count(instance => assetReadyLookup.TryGetValue(instance.ModelKey, out bool ready) && ready);
 
         (Vector3 focusCenter, Vector2 planarMin, Vector2 planarMax) = ComputeWorldViewBounds(wmoInstances, mdxInstances, selectedTile.tileX, selectedTile.tileY);
-        Vector3 cameraPosition = focusCenter + new Vector3(-700f, -700f, 260f);
-        Vector3 cameraForward = Vector3.Normalize(focusCenter - cameraPosition);
+        Vector3 cameraTarget = ComputeSpawnCameraTarget(selectedTile.tileX, selectedTile.tileY, terrainTileData, wdlTileData, focusCenter);
+        Vector3 cameraPosition = cameraTarget + new Vector3(-700f, -700f, 260f);
+        Vector3 cameraForward = Vector3.Normalize(cameraTarget - cameraPosition);
         WorldObjectVisibilityContext context = new(
             CameraPosition: cameraPosition,
             CameraForward: cameraForward,
@@ -490,6 +502,7 @@ internal static class WowViewerWorldRuntimeBridge
             WorldRenderOptimizationAdvisor.BuildHint(stats),
             pendingAssetKeys.OrderBy(static key => key, StringComparer.OrdinalIgnoreCase).ToArray(),
             cameraPosition,
+            cameraTarget,
             cameraForward,
             planarMin,
             planarMax);
@@ -656,13 +669,9 @@ internal static class WowViewerWorldRuntimeBridge
     }
 
     private static List<WorldObjectInstance> BuildWmoInstances(
-        string clientRoot,
-        string looseOverlayRoot,
         AdtPlacementCatalog placementCatalog,
         int tileX,
         int tileY,
-        IArchiveCatalog archiveCatalog,
-        Dictionary<string, ResolvedWmoAsset> wmoCache,
         Dictionary<string, bool> assetReadyLookup)
     {
         List<WorldObjectInstance> instances = new(placementCatalog.WorldModelPlacements.Count);
@@ -670,11 +679,12 @@ internal static class WowViewerWorldRuntimeBridge
         {
             AdtWorldModelPlacement placement = placementCatalog.WorldModelPlacements[index];
             string modelKey = NormalizeModelKey(placement.ModelPath);
-            ResolvedWmoAsset resolved = ResolveWmoAsset(clientRoot, looseOverlayRoot, modelKey, archiveCatalog, wmoCache, assetReadyLookup);
-            assetReadyLookup[modelKey] = resolved.AssetReady;
+            assetReadyLookup[modelKey] = true;
 
-            Vector3 localMin = resolved.AssetReady ? resolved.LocalMin : (placement.BoundsMin - placement.Position);
-            Vector3 localMax = resolved.AssetReady ? resolved.LocalMax : (placement.BoundsMax - placement.Position);
+            // The current world preview only renders terrain plus object markers, so use the
+            // placement bounds already carried by the ADT catalog instead of parsing each WMO.
+            Vector3 localMin = placement.BoundsMin - placement.Position;
+            Vector3 localMax = placement.BoundsMax - placement.Position;
 
             instances.Add(new WorldObjectInstance
             {
@@ -698,13 +708,13 @@ internal static class WowViewerWorldRuntimeBridge
                 HasTileCoordinate = true,
                 HasOpaqueRenderContent = true,
                 HasTransparentRenderContent = false,
-                WmoVersion = resolved.Version,
-                WmoGroupCount = resolved.GroupCount,
-                WmoPortalCount = resolved.PortalCount,
-                WmoDoodadSetCount = resolved.DoodadSetCount,
-                WmoDoodadMdxCount = resolved.MdxDoodadCount,
-                WmoDoodadM2Count = resolved.M2DoodadCount,
-                WmoDoodadUnknownCount = resolved.UnknownDoodadCount,
+                WmoVersion = null,
+                WmoGroupCount = 0,
+                WmoPortalCount = 0,
+                WmoDoodadSetCount = 0,
+                WmoDoodadMdxCount = 0,
+                WmoDoodadM2Count = 0,
+                WmoDoodadUnknownCount = 0,
             });
         }
 
@@ -712,13 +722,9 @@ internal static class WowViewerWorldRuntimeBridge
     }
 
     private static List<WorldObjectInstance> BuildMdxInstances(
-        string clientRoot,
-        string looseOverlayRoot,
         AdtPlacementCatalog placementCatalog,
         int tileX,
         int tileY,
-        IArchiveCatalog archiveCatalog,
-        Dictionary<string, LocalBoundsResolution> boundsCache,
         Dictionary<string, bool> assetReadyLookup)
     {
         List<WorldObjectInstance> instances = new(placementCatalog.ModelPlacements.Count);
@@ -726,8 +732,10 @@ internal static class WowViewerWorldRuntimeBridge
         {
             AdtModelPlacement placement = placementCatalog.ModelPlacements[index];
             string modelKey = NormalizeModelKey(placement.ModelPath);
-            LocalBoundsResolution resolution = ResolveLocalBounds(clientRoot, looseOverlayRoot, modelKey, archiveCatalog, boundsCache);
-            assetReadyLookup[modelKey] = resolution.AssetReady;
+            // Keep the current marker-only world preview fast by using a cheap placement-scaled
+            // fallback extent instead of parsing each MDX or M2 just to recover bounds.
+            LocalBoundsResolution resolution = CreateFallbackBounds(assetReady: true, scale: placement.Scale);
+            assetReadyLookup[modelKey] = true;
 
             Matrix4x4 transform = BuildLegacyMdxPlacementTransform(placement.Position, placement.Rotation, placement.Scale);
             (Vector3 worldMin, Vector3 worldMax) = TransformBounds(resolution.LocalMin, resolution.LocalMax, transform);
@@ -748,7 +756,7 @@ internal static class WowViewerWorldRuntimeBridge
                 BoundsMax = worldMax,
                 LocalBoundsMin = resolution.LocalMin,
                 LocalBoundsMax = resolution.LocalMax,
-                BoundsResolved = resolution.AssetReady,
+                BoundsResolved = false,
                 TileX = tileX,
                 TileY = tileY,
                 HasTileCoordinate = true,
@@ -980,9 +988,9 @@ internal static class WowViewerWorldRuntimeBridge
         List<WorldObjectInstance> instances = [.. wmoInstances, .. mdxInstances];
         if (instances.Count == 0)
         {
-            Vector3 fallbackCenter = Vector3.Zero;
-            Vector2 fallbackMin = new(tileX * 533.3333f, tileY * 533.3333f);
-            Vector2 fallbackMax = fallbackMin + new Vector2(533.3333f, 533.3333f);
+            Vector3 fallbackCenter = ComputeTileCenter(tileX, tileY, 0f);
+            Vector2 fallbackMin = ComputeTilePlanarMin(tileX, tileY);
+            Vector2 fallbackMax = ComputeTilePlanarMax(tileX, tileY);
             return (fallbackCenter, fallbackMin, fallbackMax);
         }
 
@@ -1004,5 +1012,43 @@ internal static class WowViewerWorldRuntimeBridge
         }
 
         return (focusCenter, planarMin, planarMax);
+    }
+
+    internal static Vector2 ComputeTilePlanarMin(int tileX, int tileY)
+    {
+        float minX = MapOrigin - ((tileY + 1) * TileSize);
+        float minY = MapOrigin - ((tileX + 1) * TileSize);
+        return new Vector2(minX, minY);
+    }
+
+    internal static Vector2 ComputeTilePlanarMax(int tileX, int tileY)
+    {
+        float maxX = MapOrigin - (tileY * TileSize);
+        float maxY = MapOrigin - (tileX * TileSize);
+        return new Vector2(maxX, maxY);
+    }
+
+    internal static Vector3 ComputeTileCenter(int tileX, int tileY, float height)
+    {
+        Vector2 min = ComputeTilePlanarMin(tileX, tileY);
+        Vector2 max = ComputeTilePlanarMax(tileX, tileY);
+        return new Vector3((min.X + max.X) * 0.5f, (min.Y + max.Y) * 0.5f, height);
+    }
+
+    private static Vector3 ComputeSpawnCameraTarget(
+        int tileX,
+        int tileY,
+        WorldTerrainTileData terrainTileData,
+        WorldWdlTileData wdlTileData,
+        Vector3 fallbackTarget)
+    {
+        float? height = terrainTileData.Heightmap?.CenterHeight;
+        if (!height.HasValue && wdlTileData.CenterHeight.HasValue)
+            height = wdlTileData.CenterHeight.Value;
+
+        if (!height.HasValue && wdlTileData.MinHeight.HasValue && wdlTileData.MaxHeight.HasValue)
+            height = (wdlTileData.MinHeight.Value + wdlTileData.MaxHeight.Value) * 0.5f;
+
+        return height.HasValue ? ComputeTileCenter(tileX, tileY, height.Value) : fallbackTarget;
     }
 }

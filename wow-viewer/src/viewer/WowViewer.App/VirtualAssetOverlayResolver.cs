@@ -4,12 +4,15 @@ namespace WowViewer.App;
 
 internal static class VirtualAssetOverlayResolver
 {
-    public static byte[] ReadVirtualFilePreferLoose(string virtualPath, string archiveRoot, string? looseOverlayRoot)
+    public static byte[] ReadVirtualFilePreferLoose(string virtualPath, string archiveRoot, string? looseOverlayRoot, string? buildLabel = null)
     {
         if (TryReadLooseVirtualFile(virtualPath, looseOverlayRoot, out byte[]? looseBytes) && looseBytes is not null)
             return looseBytes;
 
-        return ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], WowViewerArchiveBootstrap.CreateBootstrapOptions());
+        return ArchiveVirtualFileReader.ReadVirtualFile(
+            virtualPath,
+            [archiveRoot],
+            WowViewerArchiveBootstrap.CreateBootstrapOptions(buildLabel, archiveRoot));
     }
 
     public static bool TryReadLooseVirtualFile(string virtualPath, string? looseOverlayRoot, out byte[]? bytes)

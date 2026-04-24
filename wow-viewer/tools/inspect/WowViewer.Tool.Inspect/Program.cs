@@ -3862,43 +3862,6 @@ static void PrintTerrainPatchReportSummary(TerrainPatchReportSummary summary)
 	}
 }
 
-sealed record TerrainPatchReportEntry(
-	string? SummaryPath,
-	string? TileName,
-	string? OutputAdtPath,
-	bool Patched,
-	string? OutputGlbPath,
-	string? OutputMccvPath,
-	string? OutputGuideTexturePath,
-	string? TextureSupervisionStatus,
-	string? OutputTextureMetadataPath,
-	string? OutputTilesetIndexPath,
-	IReadOnlyList<string>? OutputTextureMaskPaths,
-	string? Error,
-	bool CopiedFromInput,
-	object? ChunkChangeAudit,
-	object? SeamAudit);
-
-sealed record TerrainPatchReportSummary(
-	string InputPath,
-	int EntryCount,
-	int PatchedCount,
-	int CopiedCount,
-	int FailedCount,
-	int MccvExportCount,
-	int GuideTextureCount,
-	int TextureMetadataCount,
-	int TilesetIndexCount,
-	int TextureMaskFileCount,
-	int ChunkAuditCount,
-	int SeamAuditCount,
-	IReadOnlyList<TerrainPatchStatusCount> TextureSupervisionStatuses,
-	IReadOnlyList<TerrainPatchMissingExample> MissingTextureExamples);
-
-sealed record TerrainPatchStatusCount(string Status, int Count);
-
-sealed record TerrainPatchMissingExample(string TileName, string Status);
-
 static void ShowLitUsage()
 {
 	Console.WriteLine("LIT commands:");
@@ -3954,3 +3917,40 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 audit-directory --input <directory>");
 	Console.WriteLine("  pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
 }
+
+sealed record TerrainPatchReportEntry(
+	string? SummaryPath,
+	string? TileName,
+	string? OutputAdtPath,
+	bool Patched,
+	string? OutputGlbPath,
+	string? OutputMccvPath,
+	string? OutputGuideTexturePath,
+	string? TextureSupervisionStatus,
+	string? OutputTextureMetadataPath,
+	string? OutputTilesetIndexPath,
+	IReadOnlyList<string>? OutputTextureMaskPaths,
+	string? Error,
+	bool CopiedFromInput,
+	object? ChunkChangeAudit,
+	object? SeamAudit);
+
+sealed record TerrainPatchReportSummary(
+	string InputPath,
+	int EntryCount,
+	int PatchedCount,
+	int CopiedCount,
+	int FailedCount,
+	int MccvExportCount,
+	int GuideTextureCount,
+	int TextureMetadataCount,
+	int TilesetIndexCount,
+	int TextureMaskFileCount,
+	int ChunkAuditCount,
+	int SeamAuditCount,
+	IReadOnlyList<TerrainPatchStatusCount> TextureSupervisionStatuses,
+	IReadOnlyList<TerrainPatchMissingExample> MissingTextureExamples);
+
+sealed record TerrainPatchStatusCount(string Status, int Count);
+
+sealed record TerrainPatchMissingExample(string TileName, string Status);

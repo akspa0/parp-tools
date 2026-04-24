@@ -121,8 +121,40 @@ public static class MapFileSummaryReader
                 return false;
 
             uint? version = ReadVersion(stream, mver);
-            summary = new MapFileSummary(sourcePath, MapFileKind.Wdt, version, [mver, mphd, main]);
+            List<MapChunkLocation> chunks = [mver, mphd, main];
+            if (TryReadAlphaReferencedChunkLocation(stream, mphd, 4, MapChunkIds.Mdnm, out MapChunkLocation mdnm))
+                chunks.Add(mdnm);
+
+            if (TryReadAlphaReferencedChunkLocation(stream, mphd, 12, MapChunkIds.Monm, out MapChunkLocation monm))
+                chunks.Add(monm);
+
+            summary = new MapFileSummary(sourcePath, MapFileKind.Wdt, version, chunks.ToArray());
             return true;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static bool TryReadAlphaReferencedChunkLocation(Stream stream, MapChunkLocation mphd, int mphdPayloadOffset, FourCC expectedId, out MapChunkLocation chunk)
+    {
+        chunk = default;
+
+        if (mphdPayloadOffset < 0 || mphd.Size < mphdPayloadOffset + sizeof(int))
+            return false;
+
+        long previousPosition = stream.Position;
+        try
+        {
+            stream.Position = mphd.DataOffset + mphdPayloadOffset;
+            Span<byte> offsetBytes = stackalloc byte[sizeof(int)];
+            stream.ReadExactly(offsetBytes);
+            int chunkOffset = BinaryPrimitives.ReadInt32LittleEndian(offsetBytes);
+            if (chunkOffset < 0 || chunkOffset > stream.Length - ChunkHeader.SizeInBytes)
+                return false;
+
+            return TryReadChunkLocation(stream, chunkOffset, expectedId, out chunk, out _);
         }
         finally
         {

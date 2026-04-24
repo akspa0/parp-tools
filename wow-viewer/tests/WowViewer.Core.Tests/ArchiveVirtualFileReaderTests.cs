@@ -80,6 +80,37 @@ public sealed class ArchiveVirtualFileReaderTests
         }
     }
 
+    [Fact]
+    public void ReadVirtualFile_FallsBackToAlphaPerAssetMpqPath_WhenCatalogMisses()
+    {
+        if (!File.Exists(WmoTestPaths.StagedStormwindAlphaMpqPath))
+            return;
+
+        FakeArchiveCatalog catalog = new();
+        FakeArchiveCatalogFactory factory = new(catalog);
+        string tempDirectory = Path.Combine(Path.GetTempPath(), $"wowviewer-archive-reader-{Guid.NewGuid():N}");
+        string mpqFilePath = Path.Combine(tempDirectory, "Data", "World", "wmo", "Azeroth", "Buildings", "Stormwind", "Stormwind.wmo.MPQ");
+        Directory.CreateDirectory(Path.GetDirectoryName(mpqFilePath)!);
+
+        try
+        {
+            File.Copy(WmoTestPaths.StagedStormwindAlphaMpqPath, mpqFilePath, overwrite: true);
+
+            byte[] bytes = ArchiveVirtualFileReader.ReadVirtualFile(
+                "World\\wmo\\Azeroth\\Buildings\\Stormwind\\Stormwind.wmo.MPQ",
+                [tempDirectory],
+                (string?)null,
+                factory);
+
+            Assert.NotEmpty(bytes);
+            Assert.Equal("REVM", System.Text.Encoding.ASCII.GetString(bytes, 0, 4));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private sealed class FakeArchiveCatalogFactory : IArchiveCatalogFactory
     {
         private readonly IArchiveCatalog _catalog;

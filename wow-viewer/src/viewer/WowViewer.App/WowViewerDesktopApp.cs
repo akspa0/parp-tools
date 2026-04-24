@@ -1,6 +1,8 @@
 using System.Numerics;
 using System.Reflection;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using ImGuiNET;
 using Silk.NET.Input;
 using Silk.NET.Maths;
@@ -8,6 +10,8 @@ using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using WowViewer.Core;
+using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 using WowViewer.Core.Mdx;
 using WowViewer.Core.PM4;
@@ -26,6 +30,53 @@ namespace WowViewer.App;
 
 internal sealed class WowViewerDesktopApp : IDisposable
 {
+    private sealed record PendingWorldLoadResult(int Generation, WowViewerWorldRuntimeFrameResult RuntimeFrame);
+
+    private sealed class WorldSpawnPickerState
+    {
+        public WorldSpawnPickerState(
+            string signature,
+            string summary,
+            WowViewerWorldSessionBootstrapResult? session,
+            WdlSummary? wdlSummary,
+            string wdlSourcePath)
+        {
+            Signature = signature;
+            Summary = summary;
+            Session = session;
+            WdlSummary = wdlSummary;
+            WdlSourcePath = wdlSourcePath;
+            OccupiedTileIndices = session is null
+                ? []
+                : session.OccupiedTiles.Select(static tile => (tile.TileY * 64) + tile.TileX).ToHashSet();
+
+            if (wdlSummary is not null && wdlSummary.Tiles.Count > 0)
+            {
+                MinHeight = wdlSummary.Tiles.Min(static tile => tile.MinHeight);
+                MaxHeight = wdlSummary.Tiles.Max(static tile => tile.MaxHeight);
+                HasHeightRange = true;
+            }
+        }
+
+        public string Signature { get; }
+
+        public string Summary { get; }
+
+        public WowViewerWorldSessionBootstrapResult? Session { get; }
+
+        public WdlSummary? WdlSummary { get; }
+
+        public string WdlSourcePath { get; }
+
+        public HashSet<int> OccupiedTileIndices { get; }
+
+        public short MinHeight { get; }
+
+        public short MaxHeight { get; }
+
+        public bool HasHeightRange { get; }
+    }
+
     private enum WorldSelectionKind
     {
         Wmo = 0,
@@ -70,7 +121,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private Vector2D<int> _lastSyncedImGuiFramebufferSize;
     private bool _disposed;
     private bool _requestInitialLoad;
-    private string _statusMessage = "Configure an archive-backed or local asset source, then load a preview.";
+    private string _statusMessage = "Configure a game-client or local asset source, then load a preview.";
     private string _lastLoadSummary = "No workspace loaded.";
     private string? _lastError;
     private M2PreviewLoadResult? _currentPreview;
@@ -85,6 +136,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private WmoGpuPreviewRenderer? _wmoGpuPreviewRenderer;
     private MdxGpuPreviewRenderer? _mdxGpuPreviewRenderer;
     private ModelOutputGpuRenderer? _modelOutputGpuRenderer;
+    private WorldGpuPreviewRenderer? _worldGpuPreviewRenderer;
     private bool _showAboutWindow = true;
     private bool _showWorkspaceWindow = true;
     private bool _showControlWindow = true;
@@ -94,12 +146,36 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private bool _showNavigatorWindow = true;
     private bool _showInspectorWindow = true;
     private bool _showFileBrowserWindow = true;
-    private MdxFileBrowserState? _mdxFileBrowserState;
+    private bool _showWorldMapBrowserWindow;
+    private AssetFileBrowserState? _assetFileBrowserState;
+    private string _fileBrowserClientRoot = string.Empty;
+    private string _fileBrowserLooseOverlayRoot = string.Empty;
+    private string _fileBrowserBuildLabel = string.Empty;
+    private AssetFileBrowserFilter _fileBrowserFilter = AssetFileBrowserFilter.SupportedAssets;
+    private string _fileBrowserTitle = "Asset File Browser";
+    private string _worldMapBrowserClientRoot = string.Empty;
+    private string _worldMapBrowserLooseOverlayRoot = string.Empty;
+    private string _worldMapBrowserBuildLabel = string.Empty;
+    private string _worldMapBrowserTitle = "World Map Browser";
+    private string _worldMapBrowserFilter = string.Empty;
+    private IReadOnlyList<DiscoveredLooseWorldMap> _worldMapBrowserMaps = Array.Empty<DiscoveredLooseWorldMap>();
+    private string _worldMapBrowserSignature = string.Empty;
+    private string _worldMapBrowserSummary = "No world maps discovered yet.";
     private bool _wantOpenGameFolder;
     private bool _wantAttachLooseFolder;
     private string? _pendingKnownGoodClientPath;
     private string? _pendingKnownGoodClientBuildLabel;
     private bool _pendingKnownGoodClientAttachLooseFolder;
+    private bool _pendingKnownGoodClientOpenBrowser;
+    private bool _pendingKnownGoodClientOpenWorldMapBrowser;
+    private IReadOnlyList<DiscoveredLooseWorldMap> _discoveredWorldMaps = Array.Empty<DiscoveredLooseWorldMap>();
+    private string _worldMapDiscoverySignature = string.Empty;
+    private string _worldMapDiscoverySummary = "No client maps discovered yet.";
+    private WorldSpawnPickerState? _worldSpawnPickerState;
+    private Task<PendingWorldLoadResult>? _pendingWorldLoadTask;
+    private Stopwatch? _pendingWorldLoadStopwatch;
+    private int _pendingWorldLoadGeneration;
+    private string _pendingWorldLoadMapInput = string.Empty;
     private bool _worldNavigatorVisibleOnly = true;
     private bool _worldNavigatorShowWmo = true;
     private bool _worldNavigatorShowMdx = true;
@@ -120,6 +196,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private int _datasetNumEpochs;
     private int _datasetBatchSize;
     private string _datasetLastCommand = "No dataset command run from the shell yet.";
+    private float _worldPreviewFlySpeed = 1.0f;
     private InteractiveOrbitCameraState _m2InteractiveCamera = new();
     private InteractiveOrbitCameraState _wmoInteractiveCamera = new();
     private InteractiveOrbitCameraState _mdxInteractiveCamera = new();
@@ -141,6 +218,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         WindowOptions options = WindowOptions.Default;
         options.Title = WindowTitle;
         options.Size = new Vector2D<int>(1600, 960);
+        options.IsVisible = true;
         options.VSync = false;
         options.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3));
 
@@ -160,12 +238,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         _disposed = true;
         SaveSettings();
-        _gpuPreviewRenderer?.Dispose();
-        _wmoGpuPreviewRenderer?.Dispose();
-        _mdxGpuPreviewRenderer?.Dispose();
-        _modelOutputGpuRenderer?.Dispose();
-        DeletePreviewTexture();
-        DeleteWorldTerrainPreviewTexture();
+        TryReleaseGraphicsResource(() => _gpuPreviewRenderer?.Dispose());
+        TryReleaseGraphicsResource(() => _wmoGpuPreviewRenderer?.Dispose());
+        TryReleaseGraphicsResource(() => _mdxGpuPreviewRenderer?.Dispose());
+        TryReleaseGraphicsResource(() => _modelOutputGpuRenderer?.Dispose());
+        TryReleaseGraphicsResource(() => _worldGpuPreviewRenderer?.Dispose());
+        TryReleaseGraphicsResource(DeletePreviewTexture);
+        TryReleaseGraphicsResource(DeleteWorldTerrainPreviewTexture);
         _imGui?.Dispose();
         _input?.Dispose();
         if (_window != null)
@@ -177,6 +256,31 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _window.FramebufferResize -= OnFramebufferResize;
         }
         _window?.Dispose();
+    }
+
+    private static void TryReleaseGraphicsResource(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex) when (IsMissingGraphicsContext(ex))
+        {
+        }
+    }
+
+    private static bool IsMissingGraphicsContext(Exception exception)
+    {
+        for (Exception? current = exception; current != null; current = current.InnerException)
+        {
+            if (current.GetType().FullName == "Silk.NET.GLFW.GlfwException"
+                && current.Message.Contains("current OpenGL or OpenGL ES context", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void OnLoad()
@@ -194,17 +298,59 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.Disable(EnableCap.CullFace);
-        _gpuPreviewRenderer = new M2GpuPreviewRenderer(_gl);
-        _wmoGpuPreviewRenderer = new WmoGpuPreviewRenderer(_gl);
-        _mdxGpuPreviewRenderer = new MdxGpuPreviewRenderer(_gl);
-        _modelOutputGpuRenderer = new ModelOutputGpuRenderer(_gl);
 
         _requestInitialLoad = _initialSession?.HasBootstrapInput() == true;
+    }
+
+    private M2GpuPreviewRenderer? EnsureM2GpuPreviewRenderer()
+    {
+        if (_gl == null)
+            return null;
+
+        _gpuPreviewRenderer ??= new M2GpuPreviewRenderer(_gl);
+        return _gpuPreviewRenderer;
+    }
+
+    private WmoGpuPreviewRenderer? EnsureWmoGpuPreviewRenderer()
+    {
+        if (_gl == null)
+            return null;
+
+        _wmoGpuPreviewRenderer ??= new WmoGpuPreviewRenderer(_gl);
+        return _wmoGpuPreviewRenderer;
+    }
+
+    private MdxGpuPreviewRenderer? EnsureMdxGpuPreviewRenderer()
+    {
+        if (_gl == null)
+            return null;
+
+        _mdxGpuPreviewRenderer ??= new MdxGpuPreviewRenderer(_gl);
+        return _mdxGpuPreviewRenderer;
+    }
+
+    private ModelOutputGpuRenderer? EnsureModelOutputGpuRenderer()
+    {
+        if (_gl == null)
+            return null;
+
+        _modelOutputGpuRenderer ??= new ModelOutputGpuRenderer(_gl);
+        return _modelOutputGpuRenderer;
+    }
+
+    private WorldGpuPreviewRenderer? EnsureWorldGpuPreviewRenderer()
+    {
+        if (_gl == null)
+            return null;
+
+        _worldGpuPreviewRenderer ??= new WorldGpuPreviewRenderer(_gl);
+        return _worldGpuPreviewRenderer;
     }
 
     private void OnUpdate(double deltaSeconds)
     {
         _imGui?.Update((float)deltaSeconds);
+        ProcessPendingWorldLoad();
 
         if (_requestInitialLoad)
         {
@@ -213,6 +359,57 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
 
         HandleOpenGameFolderDialog();
+    }
+
+    private bool IsWorldLoadPending()
+    {
+        return _pendingWorldLoadTask is { IsCompleted: false };
+    }
+
+    private void InvalidatePendingWorldLoadState()
+    {
+        _pendingWorldLoadGeneration++;
+        _pendingWorldLoadStopwatch = null;
+        _pendingWorldLoadMapInput = string.Empty;
+    }
+
+    private void ProcessPendingWorldLoad()
+    {
+        if (_pendingWorldLoadTask is not { IsCompleted: true } task)
+        {
+            if (IsWorldLoadPending() && _pendingWorldLoadStopwatch != null)
+            {
+                _statusMessage = $"Opening world session for {_pendingWorldLoadMapInput}... {_pendingWorldLoadStopwatch.Elapsed.TotalSeconds:F1}s elapsed. World data is still being assembled on the CPU; the loaded tile frame is rendered by the GPU preview once that stage completes.";
+            }
+
+            return;
+        }
+
+        _pendingWorldLoadTask = null;
+        _pendingWorldLoadStopwatch = null;
+        _pendingWorldLoadMapInput = string.Empty;
+
+        try
+        {
+            PendingWorldLoadResult completed = task.GetAwaiter().GetResult();
+            if (completed.Generation != _pendingWorldLoadGeneration)
+                return;
+
+            ApplyLoadedWorldSession(completed.RuntimeFrame);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            if (_pendingWorldLoadGeneration <= 0)
+                return;
+
+            _lastError = ex.Message;
+            _currentWorldSession = null;
+            _currentWorldRuntimeFrame = null;
+            _selectedWorldObject = null;
+            _worldGpuPreviewRenderer?.ClearPreview();
+            DeleteWorldTerrainPreviewTexture();
+            _statusMessage = "World runtime bridge failed.";
+        }
     }
 
     private unsafe void OnRender(double deltaSeconds)
@@ -266,6 +463,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
         if (_currentModelOutputScene != null && _modelOutputGpuRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.ModelOutputs)
             _modelOutputGpuRenderer.Render(_session.VisualSize, _session.VisualSize, BuildModelOutputCameraFrame());
+        if (_currentWorldRuntimeFrame != null && _worldGpuPreviewRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.WorldSession)
+            _worldGpuPreviewRenderer.Render(_session.VisualSize, _session.VisualSize);
 
         _gl.Viewport(_window.FramebufferSize);
         _gl.ClearColor(0.08f, 0.09f, 0.11f, 1.0f);
@@ -297,8 +496,10 @@ internal sealed class WowViewerDesktopApp : IDisposable
             DrawWorkspaceWindow();
         if (_showControlWindow)
             DrawControlWindow();
-        if (_showFileBrowserWindow && _session.WorkspaceMode == WowViewerWorkspaceMode.StandaloneMdx)
-            DrawMdxFileBrowserWindow();
+        if (_showFileBrowserWindow && IsStandaloneAssetWorkspace(_session.WorkspaceMode))
+            DrawAssetFileBrowserWindow();
+        if (_showWorldMapBrowserWindow)
+            DrawWorldMapBrowserWindow();
         DrawPreviewWindow();
         if (_showDiagnosticsWindow)
             DrawDiagnosticsWindow(deltaSeconds);
@@ -382,12 +583,38 @@ internal sealed class WowViewerDesktopApp : IDisposable
             if (ImGui.MenuItem("Open Game Folder (MPQ)..."))
                 PromptOpenGameFolder();
 
+            if (ImGui.MenuItem("Browse Current Client Files...", enabled: !string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot)))
+                OpenAssetFileBrowserForCurrentSource(AssetFileBrowserFilter.SupportedAssets);
+
+            if (ImGui.MenuItem("Browse Current Client Maps...", enabled: CanBrowseCurrentWorldMaps()))
+                OpenWorldMapBrowserForCurrentClient();
+
             if (ImGui.BeginMenu("Open Saved Game Folder", _settings.KnownGoodClients.Count > 0))
             {
                 foreach (var client in _settings.KnownGoodClients)
                 {
                     if (ImGui.MenuItem($"{client.Name}##open_saved_{client.Path}"))
                         OpenSavedGameFolder(client);
+                }
+                ImGui.EndMenu();
+            }
+
+            if (ImGui.BeginMenu("Browse Saved Client Files", _settings.KnownGoodClients.Count > 0))
+            {
+                foreach (var client in _settings.KnownGoodClients)
+                {
+                    if (ImGui.MenuItem($"{client.Name}##browse_saved_{client.Path}"))
+                        OpenAssetFileBrowserForClient(client.Path, client.BuildLabel, string.Empty, AssetFileBrowserFilter.SupportedAssets, $"Browse {client.Name}");
+                }
+                ImGui.EndMenu();
+            }
+
+            if (ImGui.BeginMenu("Browse Saved Client Maps", _settings.KnownGoodClients.Count > 0))
+            {
+                foreach (var client in _settings.KnownGoodClients)
+                {
+                    if (ImGui.MenuItem($"{client.Name}##browse_saved_maps_{client.Path}"))
+                        OpenWorldMapBrowserForClient(client.Path, client.BuildLabel, string.Empty, $"Browse {client.Name} Maps");
                 }
                 ImGui.EndMenu();
             }
@@ -403,7 +630,27 @@ internal sealed class WowViewerDesktopApp : IDisposable
                 foreach (var client in _settings.KnownGoodClients)
                 {
                     if (ImGui.MenuItem($"{client.Name}##attach_saved_{client.Path}"))
-                        QueueKnownGoodClientAction(client.Path, client.BuildLabel, attachLooseFolder: true);
+                        QueueKnownGoodClientAction(client.Path, client.BuildLabel, attachLooseFolder: true, openBrowser: false, openWorldMapBrowser: false);
+                }
+                ImGui.EndMenu();
+            }
+
+            if (ImGui.BeginMenu("Browse Loose Folder Against Saved Base", _settings.KnownGoodClients.Count > 0))
+            {
+                foreach (var client in _settings.KnownGoodClients)
+                {
+                    if (ImGui.MenuItem($"{client.Name}##browse_loose_saved_{client.Path}"))
+                        QueueKnownGoodClientAction(client.Path, client.BuildLabel, attachLooseFolder: true, openBrowser: true, openWorldMapBrowser: false);
+                }
+                ImGui.EndMenu();
+            }
+
+            if (ImGui.BeginMenu("Browse Loose World Maps Against Saved Base", _settings.KnownGoodClients.Count > 0))
+            {
+                foreach (var client in _settings.KnownGoodClients)
+                {
+                    if (ImGui.MenuItem($"{client.Name}##browse_loose_world_saved_{client.Path}"))
+                        QueueKnownGoodClientAction(client.Path, client.BuildLabel, attachLooseFolder: true, openBrowser: false, openWorldMapBrowser: true);
                 }
                 ImGui.EndMenu();
             }
@@ -420,7 +667,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
             ImGui.Separator();
 
-            if (ImGui.MenuItem("Open Workspace", enabled: !string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot) || !string.IsNullOrWhiteSpace(_session.Source.InputPath) || _session.ModelOutput.HasInput()))
+            if (ImGui.MenuItem("Open Workspace", enabled: !string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot) || !string.IsNullOrWhiteSpace(_session.Source.InputPath) || _session.ModelOutput.HasInput() || _session.World.HasBootstrapInput()))
                 LoadActiveWorkspace();
 
             if (ImGui.MenuItem("Clear Workspace", enabled: _currentPreview != null || _currentWmoPreview != null || _currentMdxPreview != null || _currentModelOutputScene != null || _currentWorldSession != null))
@@ -439,6 +686,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.MenuItem("Workspaces", string.Empty, ref _showWorkspaceWindow);
             ImGui.MenuItem("Source Controls", string.Empty, ref _showControlWindow);
             ImGui.MenuItem("File Browser", string.Empty, ref _showFileBrowserWindow);
+            ImGui.MenuItem("World Map Browser", string.Empty, ref _showWorldMapBrowserWindow);
             ImGui.MenuItem("Diagnostics", string.Empty, ref _showDiagnosticsWindow);
             ImGui.MenuItem("World Status", string.Empty, ref _showWorldStatusWindow);
             ImGui.MenuItem("World Navigator", string.Empty, ref _showNavigatorWindow);
@@ -469,7 +717,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneM2, "Runtime-backed standalone model preview over the shared wow-viewer M2 pipeline.");
             DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneWmo, "Standalone WMO mesh preview over the shared wow-viewer render-document seam.");
             DrawWorkspaceOption(WowViewerWorkspaceMode.StandaloneMdx, "Static standalone MDX inspection workspace with a first GPU preview consumer.");
-            DrawWorkspaceOption(WowViewerWorkspaceMode.WorldSession, "Bounded client-root attach and WDT-backed world session bootstrap. No world renderer yet.");
+            DrawWorkspaceOption(WowViewerWorkspaceMode.WorldSession, "Shared-client-root world session bootstrap with a first GPU terrain preview over the bounded runtime frame.");
             DrawWorkspaceOption(WowViewerWorkspaceMode.DatasetTooling, "Dataset and training orchestration owned by wow-viewer, including mask generation pipelines.");
             DrawWorkspaceOption(WowViewerWorkspaceMode.ModelOutputs, "GPU-backed viewer for flat OBJ + texture terrain tiles exported from model inference runs.");
         }
@@ -568,38 +816,46 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Separator();
 
         bool useArchive = _session.Source.UsesArchiveSource;
-        if (ImGui.RadioButton("Archive-backed input", useArchive))
+        if (ImGui.RadioButton("Game client input", useArchive))
             _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
         ImGui.SameLine();
         if (ImGui.RadioButton("Local file input", !_session.Source.UsesArchiveSource))
             _session.Source.Kind = WowViewerAssetSourceKind.LocalFile;
 
+        string sharedClientRoot = _session.Source.ArchiveRoot;
+        string sharedLooseOverlayRoot = _session.Source.LooseOverlayRoot;
+        string buildLabel = _session.Source.BuildLabel;
+
         ImGui.Separator();
         if (_session.Source.UsesArchiveSource)
         {
-            string archiveRoot = _session.Source.ArchiveRoot;
             string virtualPath = _session.Source.VirtualPath;
-            string looseOverlayRoot = _session.Source.LooseOverlayRoot;
-            ImGui.InputText("Archive Root", ref archiveRoot, 1024);
+            ImGui.InputText("Client Root", ref sharedClientRoot, 1024);
             ImGui.InputText("Virtual Path", ref virtualPath, 1024);
-            ImGui.InputText("Loose Overlay Root", ref looseOverlayRoot, 1024);
-            _session.Source.ArchiveRoot = archiveRoot;
+            ImGui.InputText("Loose Overlay Root", ref sharedLooseOverlayRoot, 1024);
             _session.Source.VirtualPath = virtualPath;
-            _session.Source.LooseOverlayRoot = looseOverlayRoot;
 
             if (ImGui.Button("Attach Loose Folder...", new Vector2(-1, 0)))
                 PromptAttachLooseFolder();
+
+            if (ImGui.Button("Browse Client Files...", new Vector2(-1, 0)))
+                OpenAssetFileBrowserForCurrentSource(AssetFileBrowserFilter.M2);
         }
         else
         {
             string inputPath = _session.Source.InputPath;
             ImGui.InputText("Input File", ref inputPath, 1024);
             _session.Source.InputPath = inputPath;
+
+            if (ImGui.Button("Browse File...", new Vector2(-1, 0)))
+                PromptOpenLocalSourceFile();
         }
 
-        string buildLabel = _session.Source.BuildLabel;
+        if (_session.Source.UsesArchiveSource && ImGui.Button("Open Game Client...", new Vector2(-1, 0)))
+            PromptOpenGameFolder();
+
         ImGui.InputText("Build Label", ref buildLabel, 256);
-        _session.Source.BuildLabel = buildLabel;
+        ApplySharedClientSelection(sharedClientRoot, buildLabel, sharedLooseOverlayRoot);
 
         int profileIndex = _session.ProfileIndex;
         int sequenceIndex = _session.SequenceIndex;
@@ -629,10 +885,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (ImGui.Button("Use Wolf Runtime Baseline", new Vector2(-1, 0)))
         {
             _session.WorkspaceMode = WowViewerWorkspaceMode.StandaloneM2;
-            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
-            _session.Source.ArchiveRoot = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
+            ApplySharedClientSelection(@"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft", "3.3.5.12340", string.Empty, preferArchiveSource: true);
             _session.Source.VirtualPath = @"Creature/Wolf/Wolf.m2";
-            _session.Source.BuildLabel = "3.3.5.12340";
             _session.ProfileIndex = 0;
             _session.SequenceIndex = 0;
             _session.TimeMs = 0;
@@ -642,10 +896,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (ImGui.Button("Use Camera Overlay Baseline", new Vector2(-1, 0)))
         {
             _session.WorkspaceMode = WowViewerWorkspaceMode.StandaloneM2;
-            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
-            _session.Source.ArchiveRoot = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
+            ApplySharedClientSelection(@"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft", "3.3.5.12340", string.Empty, preferArchiveSource: true);
             _session.Source.VirtualPath = @"Cameras/Scry_cam.m2";
-            _session.Source.BuildLabel = "3.3.5.12340";
             _session.ProfileIndex = 0;
             _session.SequenceIndex = 0;
             _session.TimeMs = 0;
@@ -663,43 +915,47 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Separator();
 
         bool useArchive = _session.Source.UsesArchiveSource;
-        if (ImGui.RadioButton("Archive-backed input", useArchive))
+        if (ImGui.RadioButton("Game client input", useArchive))
             _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
         ImGui.SameLine();
         if (ImGui.RadioButton("Local file input", !_session.Source.UsesArchiveSource))
             _session.Source.Kind = WowViewerAssetSourceKind.LocalFile;
 
+        string sharedClientRoot = _session.Source.ArchiveRoot;
+        string sharedLooseOverlayRoot = _session.Source.LooseOverlayRoot;
+        string buildLabel = _session.Source.BuildLabel;
+
         ImGui.Separator();
         if (_session.Source.UsesArchiveSource)
         {
-            string archiveRoot = _session.Source.ArchiveRoot;
-            string looseOverlayRoot = _session.Source.LooseOverlayRoot;
-            ImGui.InputText("Archive Root", ref archiveRoot, 1024);
-            _session.Source.ArchiveRoot = archiveRoot;
-
+            ImGui.InputText("Client Root", ref sharedClientRoot, 1024);
             string virtualPath = _session.Source.VirtualPath;
             ImGui.InputText("Virtual Path", ref virtualPath, 1024);
             _session.Source.VirtualPath = virtualPath;
 
-            ImGui.InputText("Loose Overlay Root", ref looseOverlayRoot, 1024);
-            _session.Source.LooseOverlayRoot = looseOverlayRoot;
+            ImGui.InputText("Loose Overlay Root", ref sharedLooseOverlayRoot, 1024);
 
             if (ImGui.Button("Attach Loose Folder...", new Vector2(-1, 0)))
                 PromptAttachLooseFolder();
+
+            if (ImGui.Button("Browse Client Files...", new Vector2(-1, 0)))
+                OpenAssetFileBrowserForCurrentSource(AssetFileBrowserFilter.Mdx);
         }
         else
         {
             string inputPath = _session.Source.InputPath;
             ImGui.InputText("Input File", ref inputPath, 1024);
             _session.Source.InputPath = inputPath;
+
+            if (ImGui.Button("Browse File...", new Vector2(-1, 0)))
+                PromptOpenLocalSourceFile();
         }
 
-        if (ImGui.Button("Browse..."))
+        if (_session.Source.UsesArchiveSource && ImGui.Button("Open Game Client...", new Vector2(-1, 0)))
             PromptOpenGameFolder();
 
-        string buildLabel = _session.Source.BuildLabel;
         ImGui.InputText("Build Label", ref buildLabel, 256);
-        _session.Source.BuildLabel = buildLabel;
+        ApplySharedClientSelection(sharedClientRoot, buildLabel, sharedLooseOverlayRoot);
 
         int visualSize = _session.VisualSize;
         ImGui.InputInt("Preview Size", ref visualSize);
@@ -737,11 +993,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         ImGui.Separator();
 
-        if (ImGui.Button("Browse Files...", new Vector2(-1, 0)))
-        {
-            _showFileBrowserWindow = true;
-            _mdxFileBrowserState ??= new MdxFileBrowserState();
-        }
+        if (_session.Source.UsesArchiveSource && ImGui.Button("Browse Client Files...", new Vector2(-1, 0)))
+            OpenAssetFileBrowserForCurrentSource(AssetFileBrowserFilter.Mdx);
     }
 
     private void DrawWmoControlContents()
@@ -754,41 +1007,46 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Separator();
 
         bool useArchive = _session.Source.UsesArchiveSource;
-        if (ImGui.RadioButton("Archive-backed input", useArchive))
+        if (ImGui.RadioButton("Game client input", useArchive))
             _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
         ImGui.SameLine();
         if (ImGui.RadioButton("Local file input", !_session.Source.UsesArchiveSource))
             _session.Source.Kind = WowViewerAssetSourceKind.LocalFile;
 
+        string sharedClientRoot = _session.Source.ArchiveRoot;
+        string sharedLooseOverlayRoot = _session.Source.LooseOverlayRoot;
+        string buildLabel = _session.Source.BuildLabel;
+
         ImGui.Separator();
         if (_session.Source.UsesArchiveSource)
         {
-            string archiveRoot = _session.Source.ArchiveRoot;
             string virtualPath = _session.Source.VirtualPath;
-            string looseOverlayRoot = _session.Source.LooseOverlayRoot;
-            ImGui.InputText("Archive Root", ref archiveRoot, 1024);
+            ImGui.InputText("Client Root", ref sharedClientRoot, 1024);
             ImGui.InputText("Virtual Path", ref virtualPath, 1024);
-            ImGui.InputText("Loose Overlay Root", ref looseOverlayRoot, 1024);
-            _session.Source.ArchiveRoot = archiveRoot;
+            ImGui.InputText("Loose Overlay Root", ref sharedLooseOverlayRoot, 1024);
             _session.Source.VirtualPath = virtualPath;
-            _session.Source.LooseOverlayRoot = looseOverlayRoot;
 
             if (ImGui.Button("Attach Loose Folder...", new Vector2(-1, 0)))
                 PromptAttachLooseFolder();
+
+            if (ImGui.Button("Browse Client Files...", new Vector2(-1, 0)))
+                OpenAssetFileBrowserForCurrentSource(AssetFileBrowserFilter.Wmo);
         }
         else
         {
             string inputPath = _session.Source.InputPath;
             ImGui.InputText("Input File", ref inputPath, 1024);
             _session.Source.InputPath = inputPath;
+
+            if (ImGui.Button("Browse File...", new Vector2(-1, 0)))
+                PromptOpenLocalSourceFile();
         }
 
-        if (ImGui.Button("Browse..."))
+        if (_session.Source.UsesArchiveSource && ImGui.Button("Open Game Client...", new Vector2(-1, 0)))
             PromptOpenGameFolder();
 
-        string buildLabel = _session.Source.BuildLabel;
         ImGui.InputText("Build Label", ref buildLabel, 256);
-        _session.Source.BuildLabel = buildLabel;
+        ApplySharedClientSelection(sharedClientRoot, buildLabel, sharedLooseOverlayRoot);
 
         int visualSize = _session.VisualSize;
         ImGui.InputInt("Preview Size", ref visualSize);
@@ -810,25 +1068,173 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ResetWmoOrbitCamera();
     }
 
-    private void DrawMdxFileBrowserWindow()
+    private void DrawAssetFileBrowserWindow()
     {
-        _mdxFileBrowserState ??= new MdxFileBrowserState();
+        _assetFileBrowserState ??= new AssetFileBrowserState();
 
-        string archiveRoot = _session.Source.ArchiveRoot;
-        string looseOverlayRoot = _session.Source.LooseOverlayRoot;
-        if (FileBrowserEx.DrawMdxFileBrowser("MDX File Browser", ref _showFileBrowserWindow, archiveRoot, looseOverlayRoot, _mdxFileBrowserState, OnMdxFileBrowserFileSelected))
+        if (FileBrowserEx.DrawAssetFileBrowser(_fileBrowserTitle, ref _showFileBrowserWindow, _fileBrowserClientRoot, _fileBrowserLooseOverlayRoot, _assetFileBrowserState, _fileBrowserFilter, OnAssetFileBrowserFileSelected))
         {
-            // File was selected - the control window state is already updated by OnMdxFileBrowserFileSelected
+            // Selection callback updates workspace and source state.
         }
     }
 
-    private void OnMdxFileBrowserFileSelected(string virtualPath)
+    private void OnAssetFileBrowserFileSelected(string virtualPath)
     {
-        _session.WorkspaceMode = WowViewerWorkspaceMode.StandaloneMdx;
-        _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
-        _session.Source.ArchiveRoot = _session.Source.ArchiveRoot;
+        WowViewerWorkspaceMode workspace = DetectWorkspaceModeFromVirtualPath(virtualPath);
+        _session.WorkspaceMode = workspace;
+        ApplySharedClientSelection(_fileBrowserClientRoot, _fileBrowserBuildLabel, _fileBrowserLooseOverlayRoot, preferArchiveSource: true);
         _session.Source.VirtualPath = virtualPath;
+        _settings.LastOpenedClientPath = _fileBrowserClientRoot;
+        if (!string.IsNullOrWhiteSpace(_fileBrowserLooseOverlayRoot))
+            _settings.LastOpenedLooseOverlayPath = _fileBrowserLooseOverlayRoot;
+        SaveSettings();
         LoadActiveWorkspace();
+    }
+
+    private void DrawWorldMapBrowserWindow()
+    {
+        RefreshWorldMapBrowser();
+
+        ImGui.SetNextWindowSize(new Vector2(720, 520), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin(_worldMapBrowserTitle, ref _showWorldMapBrowserWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.TextDisabled($"Client Root: {_worldMapBrowserClientRoot}");
+        if (!string.IsNullOrWhiteSpace(_worldMapBrowserBuildLabel))
+            ImGui.TextDisabled($"Build: {_worldMapBrowserBuildLabel}");
+        if (!string.IsNullOrWhiteSpace(_worldMapBrowserLooseOverlayRoot))
+            ImGui.TextDisabled($"Loose Overlay: {_worldMapBrowserLooseOverlayRoot}");
+
+        string filter = _worldMapBrowserFilter;
+        ImGui.InputText("Filter", ref filter, 256);
+        _worldMapBrowserFilter = filter;
+        ImGui.TextWrapped(_worldMapBrowserSummary);
+        ImGui.Separator();
+
+        if (ImGui.BeginChild("##WorldMapBrowserList", new Vector2(0, 0), true))
+        {
+            foreach (DiscoveredLooseWorldMap map in GetFilteredWorldMapBrowserMaps())
+            {
+                string label = BuildWorldMapLabel(map);
+
+                if (ImGui.Selectable(label, false))
+                {
+                    _session.WorkspaceMode = WowViewerWorkspaceMode.WorldSession;
+                    ApplySharedClientSelection(_worldMapBrowserClientRoot, _worldMapBrowserBuildLabel, _worldMapBrowserLooseOverlayRoot);
+                    _session.World.MapInput = map.Directory;
+                    _session.World.TileX = -1;
+                    _session.World.TileY = -1;
+                    _showWorldMapBrowserWindow = false;
+                    _worldSpawnPickerState = null;
+                    _statusMessage = $"Selected {map.Directory}. Choose a spawn tile in World Navigator, then open the world session.";
+                    break;
+                }
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(BuildWorldMapTooltip(map));
+            }
+        }
+
+        ImGui.EndChild();
+        ImGui.End();
+    }
+
+    private void OpenAssetFileBrowserForCurrentSource(AssetFileBrowserFilter filter)
+    {
+        if (string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot))
+        {
+            _statusMessage = "Load or open a game client before browsing files.";
+            return;
+        }
+
+        string title = _session.WorkspaceMode switch
+        {
+            WowViewerWorkspaceMode.StandaloneM2 => "M2 File Browser",
+            WowViewerWorkspaceMode.StandaloneWmo => "WMO File Browser",
+            WowViewerWorkspaceMode.StandaloneMdx => "MDX File Browser",
+            _ => "Asset File Browser",
+        };
+
+        OpenAssetFileBrowserForClient(_session.Source.ArchiveRoot, _session.Source.BuildLabel, _session.Source.LooseOverlayRoot, filter, title);
+    }
+
+    private void OpenAssetFileBrowserForClient(string clientRoot, string? buildLabel, string? looseOverlayRoot, AssetFileBrowserFilter filter, string title)
+    {
+        _fileBrowserClientRoot = clientRoot?.Trim() ?? string.Empty;
+        _fileBrowserBuildLabel = buildLabel?.Trim() ?? string.Empty;
+        _fileBrowserLooseOverlayRoot = looseOverlayRoot?.Trim() ?? string.Empty;
+        _fileBrowserFilter = filter;
+        _fileBrowserTitle = title;
+        _showFileBrowserWindow = true;
+        _assetFileBrowserState ??= new AssetFileBrowserState();
+    }
+
+    private static WowViewerWorkspaceMode DetectWorkspaceModeFromVirtualPath(string virtualPath)
+    {
+        if (virtualPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase)
+            || virtualPath.EndsWith(".wmo.mpq", StringComparison.OrdinalIgnoreCase))
+        {
+            return WowViewerWorkspaceMode.StandaloneWmo;
+        }
+
+        if (virtualPath.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+            return WowViewerWorkspaceMode.StandaloneMdx;
+
+        return WowViewerWorkspaceMode.StandaloneM2;
+    }
+
+    private static bool IsStandaloneAssetWorkspace(WowViewerWorkspaceMode mode)
+    {
+        return mode is WowViewerWorkspaceMode.StandaloneM2
+            or WowViewerWorkspaceMode.StandaloneWmo
+            or WowViewerWorkspaceMode.StandaloneMdx;
+    }
+
+    private void ApplySharedClientSelection(string? clientRoot, string? buildLabel, string? looseOverlayRoot, bool preferArchiveSource = false, bool clearArchiveVirtualPath = false)
+    {
+        string normalizedClientRoot = clientRoot?.Trim() ?? string.Empty;
+        string normalizedBuildLabel = buildLabel?.Trim() ?? string.Empty;
+        string normalizedLooseOverlayRoot = looseOverlayRoot?.Trim() ?? string.Empty;
+
+        bool changed = !string.Equals(_session.Source.ArchiveRoot, normalizedClientRoot, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(_session.Source.BuildLabel, normalizedBuildLabel, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(_session.Source.LooseOverlayRoot, normalizedLooseOverlayRoot, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(_session.World.ClientRoot, normalizedClientRoot, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(_session.World.BuildLabel, normalizedBuildLabel, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(_session.World.LooseOverlayRoot, normalizedLooseOverlayRoot, StringComparison.OrdinalIgnoreCase)
+            || (preferArchiveSource && _session.Source.Kind != WowViewerAssetSourceKind.ArchiveVirtualPath)
+            || (clearArchiveVirtualPath && !string.IsNullOrEmpty(_session.Source.VirtualPath));
+
+        if (preferArchiveSource)
+            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
+
+        _session.Source.ArchiveRoot = normalizedClientRoot;
+        _session.Source.BuildLabel = normalizedBuildLabel;
+        _session.Source.LooseOverlayRoot = normalizedLooseOverlayRoot;
+        if (clearArchiveVirtualPath)
+            _session.Source.VirtualPath = string.Empty;
+
+        _session.World.ClientRoot = normalizedClientRoot;
+        _session.World.BuildLabel = normalizedBuildLabel;
+        _session.World.LooseOverlayRoot = normalizedLooseOverlayRoot;
+
+        if (changed)
+            InvalidateSharedClientCaches();
+    }
+
+    private void InvalidateSharedClientCaches()
+    {
+        _assetFileBrowserState = null;
+        _worldMapDiscoverySignature = string.Empty;
+        _worldMapBrowserSignature = string.Empty;
+        _worldSpawnPickerState = null;
+        _discoveredWorldMaps = Array.Empty<DiscoveredLooseWorldMap>();
+        _worldMapBrowserMaps = Array.Empty<DiscoveredLooseWorldMap>();
+        _worldMapDiscoverySummary = "No client maps discovered yet.";
+        _worldMapBrowserSummary = "No world maps discovered yet.";
     }
 
     private void PromptOpenGameFolder()
@@ -841,20 +1247,31 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _wantAttachLooseFolder = true;
     }
 
-    private void QueueKnownGoodClientAction(string gamePath, string? buildLabel, bool attachLooseFolder)
+    private void PromptOpenLocalSourceFile()
+    {
+        (string title, WindowsNativeFileDialogs.FileDialogFilter[] filters) = GetLocalSourceFileDialogSpec();
+        string? initialDirectory = GetLocalSourceInitialDirectory();
+        string? selectedPath = TryShowOpenFileDialog(title, initialDirectory, filters);
+        if (string.IsNullOrWhiteSpace(selectedPath) || !File.Exists(selectedPath))
+            return;
+
+        _session.Source.Kind = WowViewerAssetSourceKind.LocalFile;
+        _session.Source.InputPath = selectedPath;
+        _statusMessage = $"Opened local file: {selectedPath}";
+    }
+
+    private void QueueKnownGoodClientAction(string gamePath, string? buildLabel, bool attachLooseFolder, bool openBrowser, bool openWorldMapBrowser)
     {
         _pendingKnownGoodClientPath = gamePath;
         _pendingKnownGoodClientBuildLabel = buildLabel;
         _pendingKnownGoodClientAttachLooseFolder = attachLooseFolder;
+        _pendingKnownGoodClientOpenBrowser = openBrowser;
+        _pendingKnownGoodClientOpenWorldMapBrowser = openWorldMapBrowser;
     }
 
     private void OpenSavedGameFolder(KnownGoodClientEntry client)
     {
-        _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
-        _session.Source.ArchiveRoot = client.Path;
-        _session.Source.BuildLabel = client.BuildLabel;
-        _session.Source.VirtualPath = string.Empty;
-        _session.Source.LooseOverlayRoot = string.Empty;
+        ApplySharedClientSelection(client.Path, client.BuildLabel, string.Empty, preferArchiveSource: true, clearArchiveVirtualPath: true);
         _settings.LastOpenedClientPath = client.Path;
         SaveSettings();
         _statusMessage = $"Loaded saved client: {client.Name}";
@@ -875,9 +1292,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        _session.Source.LooseOverlayRoot = normalizedRoot;
+        ApplySharedClientSelection(_session.Source.ArchiveRoot, _session.Source.BuildLabel, normalizedRoot);
         _settings.LastOpenedLooseOverlayPath = normalizedRoot;
-        _mdxFileBrowserState = null;
         SaveSettings();
         _statusMessage = $"Attached loose overlay: {normalizedRoot}";
     }
@@ -932,18 +1348,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
             if (!string.IsNullOrEmpty(selectedPath) && Directory.Exists(selectedPath))
             {
-                _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
-                _session.Source.ArchiveRoot = selectedPath;
-                _session.Source.BuildLabel = string.Empty;
-                _session.Source.VirtualPath = string.Empty;
-                _session.Source.LooseOverlayRoot = string.Empty;
+                ApplySharedClientSelection(selectedPath, string.Empty, string.Empty, preferArchiveSource: true, clearArchiveVirtualPath: true);
                 _settings.LastOpenedClientPath = selectedPath;
                 SaveSettings();
                 _statusMessage = $"Opened game folder: {selectedPath}";
             }
-            else
+            else if (!string.IsNullOrWhiteSpace(selectedPath))
             {
-                _statusMessage = "Folder picker unavailable on this platform/runtime. Enter the client path manually in Archive Root/Client Root.";
+                _statusMessage = $"Selected game folder does not exist: {selectedPath}";
             }
         }
 
@@ -965,9 +1377,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
             string savedBasePath = _pendingKnownGoodClientPath!;
             string? savedBuildLabel = _pendingKnownGoodClientBuildLabel;
             bool attachLooseFolder = _pendingKnownGoodClientAttachLooseFolder;
+            bool openBrowser = _pendingKnownGoodClientOpenBrowser;
+            bool openWorldMapBrowser = _pendingKnownGoodClientOpenWorldMapBrowser;
             _pendingKnownGoodClientPath = null;
             _pendingKnownGoodClientBuildLabel = null;
             _pendingKnownGoodClientAttachLooseFolder = false;
+            _pendingKnownGoodClientOpenBrowser = false;
+            _pendingKnownGoodClientOpenWorldMapBrowser = false;
 
             if (!Directory.Exists(savedBasePath))
             {
@@ -975,11 +1391,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
                 return;
             }
 
-            _session.Source.Kind = WowViewerAssetSourceKind.ArchiveVirtualPath;
-            _session.Source.ArchiveRoot = savedBasePath;
-            _session.Source.BuildLabel = savedBuildLabel ?? string.Empty;
-            _session.Source.VirtualPath = string.Empty;
-            _session.Source.LooseOverlayRoot = string.Empty;
+            ApplySharedClientSelection(savedBasePath, savedBuildLabel, string.Empty, preferArchiveSource: true, clearArchiveVirtualPath: true);
             _settings.LastOpenedClientPath = savedBasePath;
             SaveSettings();
 
@@ -991,137 +1403,174 @@ internal sealed class WowViewerDesktopApp : IDisposable
                     showNewFolderButton: false);
 
                 if (!string.IsNullOrWhiteSpace(overlayPath))
+                {
                     AttachLooseFolder(overlayPath);
+                    if (openBrowser)
+                        OpenAssetFileBrowserForClient(savedBasePath, savedBuildLabel, _session.Source.LooseOverlayRoot, AssetFileBrowserFilter.SupportedAssets, $"Browse {Path.GetFileName(savedBasePath)} + Loose Files");
+                    if (openWorldMapBrowser)
+                        OpenWorldMapBrowserForClient(savedBasePath, savedBuildLabel, _session.Source.LooseOverlayRoot, $"Browse {Path.GetFileName(savedBasePath)} + Loose World Maps");
+                }
             }
             else
             {
                 _statusMessage = $"Loaded saved client: {savedBasePath}";
+                if (openBrowser)
+                    OpenAssetFileBrowserForClient(savedBasePath, savedBuildLabel, string.Empty, AssetFileBrowserFilter.SupportedAssets, $"Browse {Path.GetFileName(savedBasePath)}");
+                if (openWorldMapBrowser)
+                    OpenWorldMapBrowserForClient(savedBasePath, savedBuildLabel, string.Empty, $"Browse {Path.GetFileName(savedBasePath)} Maps");
             }
         }
+    }
+
+    private bool CanBrowseCurrentWorldMaps()
+    {
+        return !string.IsNullOrWhiteSpace(_session.World.ClientRoot)
+            || !string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot);
+    }
+
+    private void OpenWorldMapBrowserForCurrentClient()
+    {
+        string clientRoot = !string.IsNullOrWhiteSpace(_session.World.ClientRoot)
+            ? _session.World.ClientRoot
+            : _session.Source.ArchiveRoot;
+        string buildLabel = !string.IsNullOrWhiteSpace(_session.World.BuildLabel)
+            ? _session.World.BuildLabel
+            : _session.Source.BuildLabel;
+        string looseOverlayRoot = !string.IsNullOrWhiteSpace(_session.World.LooseOverlayRoot)
+            ? _session.World.LooseOverlayRoot
+            : _session.Source.LooseOverlayRoot;
+
+        if (string.IsNullOrWhiteSpace(clientRoot))
+        {
+            _statusMessage = "Load a client root before browsing world maps.";
+            return;
+        }
+
+        OpenWorldMapBrowserForClient(clientRoot, buildLabel, looseOverlayRoot, "Browse Current Client Maps");
+    }
+
+    private void OpenWorldMapBrowserForClient(string clientRoot, string? buildLabel, string? looseOverlayRoot, string title)
+    {
+        _worldMapBrowserClientRoot = clientRoot?.Trim() ?? string.Empty;
+        _worldMapBrowserBuildLabel = buildLabel?.Trim() ?? string.Empty;
+        _worldMapBrowserLooseOverlayRoot = looseOverlayRoot?.Trim() ?? string.Empty;
+        _worldMapBrowserTitle = title;
+        _worldMapBrowserFilter = string.Empty;
+        _showWorldMapBrowserWindow = true;
+        RefreshWorldMapBrowser(force: true);
+    }
+
+    private void RefreshWorldMapBrowser(bool force = false)
+    {
+        string clientRoot = _worldMapBrowserClientRoot?.Trim() ?? string.Empty;
+        string looseOverlayRoot = _worldMapBrowserLooseOverlayRoot?.Trim() ?? string.Empty;
+        string signature = string.Join('|', clientRoot, looseOverlayRoot);
+
+        if (!force && string.Equals(_worldMapBrowserSignature, signature, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _worldMapBrowserSignature = signature;
+
+        if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
+        {
+            _worldMapBrowserMaps = Array.Empty<DiscoveredLooseWorldMap>();
+            _worldMapBrowserSummary = "Set a valid client root to browse world maps.";
+            return;
+        }
+
+        _worldMapBrowserMaps = LooseWorldMapDiscovery.Discover(clientRoot, looseOverlayRoot);
+        _worldMapBrowserSummary = _worldMapBrowserMaps.Count == 0
+            ? "No Map.dbc-backed world maps were found for this source."
+            : $"Loaded {_worldMapBrowserMaps.Count} maps from the effective Map.dbc for this source.";
+    }
+
+    private IEnumerable<DiscoveredLooseWorldMap> GetFilteredWorldMapBrowserMaps()
+    {
+        if (string.IsNullOrWhiteSpace(_worldMapBrowserFilter))
+            return _worldMapBrowserMaps;
+
+        string filter = _worldMapBrowserFilter.Trim();
+        return _worldMapBrowserMaps.Where(map =>
+            map.Directory.Contains(filter, StringComparison.OrdinalIgnoreCase)
+            || map.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)
+            || (map.LooseSourceDirectory?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false));
     }
 
     private static string? TryShowFolderDialog(string description, string? initialDir = null, bool showNewFolderButton = false)
     {
-        if (!OperatingSystem.IsWindows())
-            return null;
+        return WindowsNativeFileDialogs.PickFolder(description, initialDir);
+    }
 
-        string? result = null;
+    private static string? TryShowOpenFileDialog(string title, string? initialDir, IReadOnlyList<WindowsNativeFileDialogs.FileDialogFilter> filters)
+    {
+        return WindowsNativeFileDialogs.PickFile(title, initialDir, filters);
+    }
 
-        var thread = new System.Threading.Thread(() =>
+    private (string Title, WindowsNativeFileDialogs.FileDialogFilter[] Filters) GetLocalSourceFileDialogSpec()
+    {
+        return _session.WorkspaceMode switch
         {
-            try
-            {
-                const string folderDialogTypeName = "System.Windows.Forms.FolderBrowserDialog, System.Windows.Forms";
-                const string dialogResultTypeName = "System.Windows.Forms.DialogResult, System.Windows.Forms";
+            WowViewerWorkspaceMode.StandaloneWmo => (
+                "Open WMO File",
+                [
+                    new WindowsNativeFileDialogs.FileDialogFilter("WMO files", "*.wmo;*.wmo.mpq;*.mpq"),
+                    new WindowsNativeFileDialogs.FileDialogFilter("All files", "*.*"),
+                ]),
+            WowViewerWorkspaceMode.StandaloneMdx => (
+                "Open MDX File",
+                [
+                    new WindowsNativeFileDialogs.FileDialogFilter("MDX files", "*.mdx"),
+                    new WindowsNativeFileDialogs.FileDialogFilter("All files", "*.*"),
+                ]),
+            _ => (
+                "Open M2 File",
+                [
+                    new WindowsNativeFileDialogs.FileDialogFilter("M2 files", "*.m2"),
+                    new WindowsNativeFileDialogs.FileDialogFilter("All files", "*.*"),
+                ]),
+        };
+    }
 
-                Type? folderDialogType = Type.GetType(folderDialogTypeName, throwOnError: false);
-                Type? dialogResultType = Type.GetType(dialogResultTypeName, throwOnError: false);
-                if (folderDialogType == null || dialogResultType == null)
-                    return;
-
-                using IDisposable? dialog = Activator.CreateInstance(folderDialogType) as IDisposable;
-                if (dialog == null)
-                    return;
-
-                folderDialogType.GetProperty("Description")?.SetValue(dialog, description);
-                folderDialogType.GetProperty("ShowNewFolderButton")?.SetValue(dialog, showNewFolderButton);
-
-                if (!string.IsNullOrEmpty(initialDir) && Directory.Exists(initialDir))
-                    folderDialogType.GetProperty("SelectedPath")?.SetValue(dialog, initialDir);
-
-                object? okResult = Enum.Parse(dialogResultType, "OK");
-                object? dialogResult = folderDialogType.GetMethod("ShowDialog", Type.EmptyTypes)?.Invoke(dialog, null);
-
-                if (dialogResult != null && okResult != null && dialogResult.Equals(okResult))
-                    result = folderDialogType.GetProperty("SelectedPath")?.GetValue(dialog) as string;
-            }
-            catch
-            {
-                // Keep this bounded and non-fatal for cross-platform hosts.
-            }
-        });
-
-        try
+    private string? GetLocalSourceInitialDirectory()
+    {
+        string currentInputPath = _session.Source.InputPath;
+        if (!string.IsNullOrWhiteSpace(currentInputPath))
         {
-            thread.SetApartmentState(System.Threading.ApartmentState.STA);
-        }
-        catch
-        {
-            return null;
+            string? currentDirectory = Path.GetDirectoryName(currentInputPath);
+            if (!string.IsNullOrWhiteSpace(currentDirectory) && Directory.Exists(currentDirectory))
+                return currentDirectory;
         }
 
-        thread.Start();
-        thread.Join();
+        if (!string.IsNullOrWhiteSpace(_settings.LastOpenedClientPath) && Directory.Exists(_settings.LastOpenedClientPath))
+            return _settings.LastOpenedClientPath;
 
-        return result;
+        return null;
     }
 
     private void DrawWorldControlContents()
     {
-        ImGui.TextWrapped("This slice keeps the world path bounded: one selected ADT tile is opened through wow-viewer-owned bootstrap, placement, visibility, and pass-planning seams. The shell now adds navigator and inspector surfaces around that frame, but it still does not claim the final 3D world renderer.");
+        ImGui.TextWrapped("This slice keeps the world path bounded: one selected ADT tile is opened through wow-viewer-owned bootstrap, placement, visibility, and pass-planning seams. The shell now adds a first GPU terrain world preview plus navigator and inspector surfaces around that frame, but WMO and doodad rendering still remain later slices.");
         ImGui.Separator();
         ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
         ImGui.TextDisabled($"Source: {_session.World.Describe()}");
         ImGui.Separator();
 
-        string clientRoot = _session.World.ClientRoot;
-        string mapInput = _session.World.MapInput;
-        string buildLabel = _session.World.BuildLabel;
-        string looseOverlayRoot = _session.World.LooseOverlayRoot;
-        int tileX = _session.World.TileX;
-        int tileY = _session.World.TileY;
-        bool showWmos = _session.World.ShowWmos;
-        bool showDoodads = _session.World.ShowDoodads;
-        bool showSky = _session.World.ShowSky;
-        bool showWdl = _session.World.ShowWdl;
-        bool showTerrain = _session.World.ShowTerrain;
-        bool showLiquid = _session.World.ShowLiquid;
-        bool showOverlay = _session.World.ShowOverlay;
-        ImGui.InputText("Client Root", ref clientRoot, 1024);
-        ImGui.InputText("Map", ref mapInput, 256);
-        ImGui.InputText("Build Label", ref buildLabel, 256);
-        ImGui.InputText("Loose Overlay Root", ref looseOverlayRoot, 1024);
-        ImGui.InputInt("Tile X", ref tileX);
-        ImGui.InputInt("Tile Y", ref tileY);
-        _session.World.ClientRoot = clientRoot;
-        _session.World.MapInput = mapInput;
-        _session.World.BuildLabel = buildLabel;
-        _session.World.LooseOverlayRoot = looseOverlayRoot;
-        _session.World.TileX = tileX;
-        _session.World.TileY = tileY;
-        ImGui.Separator();
-        ImGui.TextDisabled("World Layers");
-        ImGui.Checkbox("Sky", ref showSky);
-        ImGui.SameLine();
-        ImGui.Checkbox("WDL", ref showWdl);
-        ImGui.SameLine();
-        ImGui.Checkbox("Terrain", ref showTerrain);
-        ImGui.Checkbox("Liquid", ref showLiquid);
-        ImGui.SameLine();
-        ImGui.Checkbox("Overlay", ref showOverlay);
-        ImGui.Separator();
-        ImGui.TextDisabled("Object Families");
-        ImGui.Checkbox("WMO", ref showWmos);
-        ImGui.SameLine();
-        ImGui.Checkbox("Doodads (MDX/M2)", ref showDoodads);
-        _session.World.ShowWmos = showWmos;
-        _session.World.ShowDoodads = showDoodads;
-        _session.World.ShowSky = showSky;
-        _session.World.ShowWdl = showWdl;
-        _session.World.ShowTerrain = showTerrain;
-        _session.World.ShowLiquid = showLiquid;
-        _session.World.ShowOverlay = showOverlay;
-        _session.Normalize();
-
-        if (ImGui.Button("Open World Session", new Vector2(-1, 0)))
-            LoadActiveWorkspace();
+        ImGui.TextWrapped("Use World Navigator as the primary source-and-map lane. File menu actions are shortcuts only; the navigator now owns client selection, discovered maps, and open or reload actions in one place.");
+        if (!_showNavigatorWindow)
+        {
+            if (ImGui.Button("Show World Navigator", new Vector2(-1, 0)))
+                _showNavigatorWindow = true;
+        }
+        else
+        {
+            ImGui.TextDisabled("World Navigator is open. Configure the client root, choose a map, and load or reload the session there.");
+        }
 
         if (ImGui.Button("Use WoW335 Azeroth Baseline", new Vector2(-1, 0)))
         {
             _session.WorkspaceMode = WowViewerWorkspaceMode.WorldSession;
-            _session.World.ClientRoot = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
+            ApplySharedClientSelection(@"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft", "3.3.5.12340", string.Empty);
             _session.World.MapInput = "Azeroth";
-            _session.World.BuildLabel = "3.3.5.12340";
             _session.World.TileX = -1;
             _session.World.TileY = -1;
         }
@@ -1141,6 +1590,281 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"Liquid Types: {FormatLiquidTypeCounts(_currentWorldRuntimeFrame.LiquidTileData)}");
             ImGui.Text($"Pass Options: WMO {_currentWorldRuntimeFrame.PassOptions.WmosVisible}, Doodads {_currentWorldRuntimeFrame.PassOptions.DoodadsVisible}, WDL {_currentWorldRuntimeFrame.PassOptions.WdlVisible}, Terrain {_currentWorldRuntimeFrame.PassOptions.TerrainVisible}, Liquid {_currentWorldRuntimeFrame.PassOptions.LiquidVisible}, Overlay {_currentWorldRuntimeFrame.PassOptions.OverlayVisible}");
         }
+    }
+
+    private void RefreshDiscoveredWorldMaps(bool force = false)
+    {
+        string clientRoot = _session.World.ClientRoot?.Trim() ?? string.Empty;
+        string looseOverlayRoot = _session.World.LooseOverlayRoot?.Trim() ?? string.Empty;
+        string signature = string.Join('|',
+            string.IsNullOrWhiteSpace(clientRoot) ? string.Empty : Path.GetFullPath(clientRoot),
+            string.IsNullOrWhiteSpace(looseOverlayRoot) ? string.Empty : Path.GetFullPath(looseOverlayRoot));
+
+        if (!force && string.Equals(_worldMapDiscoverySignature, signature, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _worldMapDiscoverySignature = signature;
+
+        if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
+        {
+            _discoveredWorldMaps = Array.Empty<DiscoveredLooseWorldMap>();
+            _worldMapDiscoverySummary = "Set a valid client root to discover maps from Map.dbc.";
+            return;
+        }
+
+        _discoveredWorldMaps = LooseWorldMapDiscovery.Discover(clientRoot, looseOverlayRoot);
+        _worldMapDiscoverySummary = _discoveredWorldMaps.Count == 0
+            ? "No Map.dbc-backed maps were found for the current client or loose overlay source."
+            : $"Loaded {_discoveredWorldMaps.Count} maps from the effective Map.dbc. Loose files, when present, patch the selected map data on top of archive data.";
+    }
+
+    private void DrawWorldSpawnPickerSection()
+    {
+        RefreshWorldSpawnPickerState();
+
+        ImGui.TextDisabled("Spawn Picker");
+        ImGui.TextWrapped(_worldSpawnPickerState?.Summary ?? "Select a map to load a WDL-backed spawn grid.");
+
+        if (_worldSpawnPickerState is null)
+            return;
+
+        if (_worldSpawnPickerState.Session is { } session)
+        {
+            ImGui.TextDisabled($"Resolved Map: {session.RequestedMapInput} -> {session.ResolvedMapDirectory}");
+            if (!string.IsNullOrWhiteSpace(_worldSpawnPickerState.WdlSourcePath))
+                ImGui.TextDisabled($"WDL Source: {_worldSpawnPickerState.WdlSourcePath}");
+        }
+
+        if (ImGui.Button("Refresh Spawn Grid", new Vector2(-1, 0)))
+            RefreshWorldSpawnPickerState(force: true);
+
+        if (_worldSpawnPickerState.Session is null)
+            return;
+
+        float pickerSize = Math.Clamp(ImGui.GetContentRegionAvail().X, 192f, 384f);
+        Vector2 origin = ImGui.GetCursorScreenPos();
+        Vector2 pickerExtent = new(pickerSize, pickerSize);
+        ImGui.InvisibleButton("##WorldSpawnPicker", pickerExtent);
+        DrawWorldSpawnPickerGrid(origin, pickerExtent, _worldSpawnPickerState);
+
+        if (ImGui.IsItemHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            Vector2 local = ImGui.GetMousePos() - origin;
+            int previewTileX = Math.Clamp((int)(local.X / (pickerSize / 64f)), 0, 63);
+            int previewTileY = Math.Clamp((int)(local.Y / (pickerSize / 64f)), 0, 63);
+            (int selectedTileX, int selectedTileY) = PreviewSpawnTileToSourceTile(previewTileX, previewTileY);
+            _session.World.TileX = selectedTileX;
+            _session.World.TileY = selectedTileY;
+            Vector3 spawn = BuildWorldSpawnPosition(selectedTileX, selectedTileY, _worldSpawnPickerState.WdlSummary);
+            _statusMessage = $"Selected world spawn tile ({selectedTileX},{selectedTileY}) from WDL cell ({previewTileX},{previewTileY}) at {FormatVector3(spawn)}. Reload the world session to move the initial camera spawn.";
+        }
+
+        if (_session.World.TileX >= 0 && _session.World.TileY >= 0)
+        {
+            Vector3 spawn = BuildWorldSpawnPosition(_session.World.TileX, _session.World.TileY, _worldSpawnPickerState.WdlSummary);
+            ImGui.Text($"Spawn Tile: ({_session.World.TileX},{_session.World.TileY})");
+            ImGui.Text($"Spawn World Position: {FormatVector3(spawn)}");
+        }
+        else
+        {
+            ImGui.TextDisabled("Spawn Tile: auto");
+        }
+
+        if (ImGui.Button("Use Auto Tile", new Vector2(-1, 0)))
+        {
+            _session.World.TileX = -1;
+            _session.World.TileY = -1;
+            _statusMessage = "World spawn tile reset to auto selection.";
+        }
+    }
+
+    private void RefreshWorldSpawnPickerState(bool force = false)
+    {
+        string clientRoot = _session.World.ClientRoot?.Trim() ?? string.Empty;
+        string buildLabel = _session.World.BuildLabel?.Trim() ?? string.Empty;
+        string looseOverlayRoot = _session.World.LooseOverlayRoot?.Trim() ?? string.Empty;
+        string mapInput = _session.World.MapInput?.Trim() ?? string.Empty;
+        string signature = string.Join('|', clientRoot, buildLabel, looseOverlayRoot, mapInput);
+
+        if (!force && string.Equals(_worldSpawnPickerState?.Signature, signature, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
+        {
+            _worldSpawnPickerState = new WorldSpawnPickerState(signature, "Set a valid client root to load a WDL-backed spawn grid.", null, null, string.Empty);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(mapInput))
+        {
+            _worldSpawnPickerState = new WorldSpawnPickerState(signature, "Choose a map above to load a WDL-backed spawn grid.", null, null, string.Empty);
+            return;
+        }
+
+        try
+        {
+            WowViewerWorldSessionBootstrapResult session = WowViewerWorldSessionBootstrapper.Open(_session.World.BuildRequest());
+            using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+            ArchiveCatalogBootstrapper.Bootstrap(
+                archiveCatalog,
+                [session.ClientRoot],
+                WowViewerArchiveBootstrap.CreateBootstrapOptions(session.BuildLabel, session.ClientRoot));
+
+            string wdlVirtualPath = $@"World\Maps\{session.ResolvedMapDirectory}\{session.ResolvedMapDirectory}.wdl";
+            WdlSummary? wdlSummary = null;
+            string wdlSourcePath = string.Empty;
+
+            if (TryReadWorldVirtualFile(session.ClientRoot, session.LooseOverlayRoot, wdlVirtualPath, archiveCatalog, out byte[]? wdlData, out string resolvedSourcePath)
+                && wdlData is { Length: > 0 })
+            {
+                using MemoryStream stream = new(wdlData, writable: false);
+                wdlSummary = WdlSummaryReader.Read(stream, resolvedSourcePath);
+                wdlSourcePath = resolvedSourcePath;
+            }
+
+            string summary = wdlSummary is null
+                ? $"Loaded {session.OccupiedTiles.Count} occupied tiles from WDT, but no WDL summary was found for this map. Manual tile selection still works."
+                : $"Loaded WDL-backed spawn grid for {session.ResolvedMapDirectory}: {wdlSummary.TileCount} tiles with WDL height data, {session.OccupiedTiles.Count} occupied tiles in the active map.";
+
+            _worldSpawnPickerState = new WorldSpawnPickerState(signature, summary, session, wdlSummary, wdlSourcePath);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            _worldSpawnPickerState = new WorldSpawnPickerState(signature, $"Could not load the world spawn grid: {ex.Message}", null, null, string.Empty);
+        }
+    }
+
+    private void DrawWorldSpawnPickerGrid(Vector2 origin, Vector2 extent, WorldSpawnPickerState state)
+    {
+        ImDrawListPtr drawList = ImGui.GetWindowDrawList();
+        float cellSize = extent.X / 64f;
+        uint noDataColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.13f, 0.14f, 0.16f, 1.0f));
+        uint occupiedBorder = ImGui.ColorConvertFloat4ToU32(new Vector4(0.58f, 0.62f, 0.68f, 0.85f));
+        uint selectedColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.34f, 0.22f, 1.0f));
+        uint loadedColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.95f, 0.36f, 1.0f));
+
+        drawList.AddRectFilled(origin, origin + extent, ImGui.ColorConvertFloat4ToU32(new Vector4(0.06f, 0.07f, 0.09f, 1.0f)), 4f);
+
+        for (int tileY = 0; tileY < 64; tileY++)
+        {
+            for (int tileX = 0; tileX < 64; tileX++)
+            {
+                Vector2 cellMin = origin + new Vector2(tileX * cellSize, tileY * cellSize);
+                Vector2 cellMax = cellMin + new Vector2(cellSize, cellSize);
+                (int sourceTileX, int sourceTileY) = PreviewSpawnTileToSourceTile(tileX, tileY);
+                int tileIndex = (sourceTileY * 64) + sourceTileX;
+                bool occupied = state.OccupiedTileIndices.Contains(tileIndex);
+                uint fill = noDataColor;
+
+                // Keep the click/spawn grid in world-tile orientation, but sample the WDL height field
+                // in its native preview order so the map-shaped height colors are not transposed.
+                if (state.WdlSummary is not null && state.WdlSummary.TryGetTile(tileX, tileY, out WdlTileSummary? tile) && tile is not null)
+                    fill = ImGui.ColorConvertFloat4ToU32(ComputeWorldSpawnTileColor(tile.GetOuterHeight(8, 8), state));
+                else if (occupied)
+                    fill = ImGui.ColorConvertFloat4ToU32(new Vector4(0.22f, 0.24f, 0.28f, 1.0f));
+
+                drawList.AddRectFilled(cellMin, cellMax, fill);
+                if (occupied)
+                    drawList.AddRect(cellMin, cellMax, occupiedBorder, 0f, ImDrawFlags.None, 0.6f);
+            }
+        }
+
+        if (_currentWorldRuntimeFrame != null)
+        {
+            (int previewTileX, int previewTileY) = SourceSpawnTileToPreviewTile(_currentWorldRuntimeFrame.SelectedTileX, _currentWorldRuntimeFrame.SelectedTileY);
+            Vector2 loadMin = origin + new Vector2(previewTileX * cellSize, previewTileY * cellSize);
+            Vector2 loadMax = loadMin + new Vector2(cellSize, cellSize);
+            drawList.AddRect(loadMin, loadMax, loadedColor, 0f, ImDrawFlags.None, 2.0f);
+        }
+
+        if (_session.World.TileX >= 0 && _session.World.TileY >= 0)
+        {
+            (int previewTileX, int previewTileY) = SourceSpawnTileToPreviewTile(_session.World.TileX, _session.World.TileY);
+            Vector2 selectedMin = origin + new Vector2(previewTileX * cellSize, previewTileY * cellSize);
+            Vector2 selectedMax = selectedMin + new Vector2(cellSize, cellSize);
+            drawList.AddRect(selectedMin, selectedMax, selectedColor, 0f, ImDrawFlags.None, 2.4f);
+        }
+
+        drawList.AddRect(origin, origin + extent, ImGui.ColorConvertFloat4ToU32(new Vector4(0.32f, 0.35f, 0.40f, 1.0f)), 4f, ImDrawFlags.None, 1.2f);
+    }
+
+    private static Vector4 ComputeWorldSpawnTileColor(short height, WorldSpawnPickerState state)
+    {
+        if (!state.HasHeightRange || state.MaxHeight <= state.MinHeight)
+            return new Vector4(0.24f, 0.28f, 0.32f, 1.0f);
+
+        float normalized = Math.Clamp((height - state.MinHeight) / (float)(state.MaxHeight - state.MinHeight), 0f, 1f);
+        Vector3 low = new(0.10f, 0.36f, 0.68f);
+        Vector3 mid = new(0.12f, 0.66f, 0.46f);
+        Vector3 high = new(0.70f, 0.54f, 0.24f);
+        Vector3 color = normalized < 0.5f
+            ? Vector3.Lerp(low, mid, normalized / 0.5f)
+            : Vector3.Lerp(mid, high, (normalized - 0.5f) / 0.5f);
+        return new Vector4(color, 1.0f);
+    }
+
+    private static bool TryReadWorldVirtualFile(
+        string clientRoot,
+        string looseOverlayRoot,
+        string virtualPath,
+        IArchiveCatalog archiveCatalog,
+        out byte[]? data,
+        out string sourcePath)
+    {
+        if (VirtualAssetOverlayResolver.TryReadLooseVirtualFile(virtualPath, looseOverlayRoot, out data, out sourcePath))
+            return true;
+
+        if (AlphaEmbeddedAdtReader.TryReadVirtualOrLooseFile(clientRoot, virtualPath, archiveCatalog, out data, out sourcePath))
+            return true;
+
+        data = null;
+        sourcePath = string.Empty;
+        return false;
+    }
+
+    private static Vector3 BuildWorldSpawnPosition(int tileX, int tileY, WdlSummary? wdlSummary)
+    {
+        float height = 0f;
+        if (wdlSummary is not null && wdlSummary.TryGetTile(tileX, tileY, out WdlTileSummary? tile) && tile is not null)
+            height = tile.GetOuterHeight(8, 8);
+
+        return WowViewerWorldRuntimeBridge.ComputeTileCenter(tileX, tileY, height);
+    }
+
+    private static (int sourceTileX, int sourceTileY) PreviewSpawnTileToSourceTile(int previewTileX, int previewTileY)
+    {
+        return (previewTileY, previewTileX);
+    }
+
+    private static (int previewTileX, int previewTileY) SourceSpawnTileToPreviewTile(int sourceTileX, int sourceTileY)
+    {
+        return (sourceTileY, sourceTileX);
+    }
+
+    private static string BuildWorldMapLabel(DiscoveredLooseWorldMap map)
+    {
+        string baseLabel = string.Equals(map.Name, map.Directory, StringComparison.OrdinalIgnoreCase)
+            ? map.Directory
+            : $"{map.Name} ({map.Directory})";
+
+        if (map.HasLooseWdt && map.HasLooseWdl)
+            return baseLabel + "  [loose WDT/WDL]";
+
+        if (map.HasLooseWdt)
+            return baseLabel + "  [loose WDT]";
+
+        if (map.HasLooseWdl)
+            return baseLabel + "  [loose WDL]";
+
+        return baseLabel;
+    }
+
+    private static string BuildWorldMapTooltip(DiscoveredLooseWorldMap map)
+    {
+        if (!string.IsNullOrWhiteSpace(map.LooseSourceDirectory))
+            return $"MapId={map.Id}\nDirectory={map.Directory}\nLoose source={map.LooseSourceDirectory}";
+
+        return $"MapId={map.Id}\nDirectory={map.Directory}\nNo loose override detected for this map.";
     }
 
     private void DrawDatasetToolingControlContents()
@@ -1632,8 +2356,141 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.End();
     }
 
+    private void DrawWorldNavigatorSourceSection()
+    {
+        string clientRoot = _session.World.ClientRoot;
+        string buildLabel = _session.World.BuildLabel;
+        string looseOverlayRoot = _session.World.LooseOverlayRoot;
+        string mapInput = _session.World.MapInput;
+        int tileX = _session.World.TileX;
+        int tileY = _session.World.TileY;
+
+        ImGui.TextDisabled("Client Source");
+        ImGui.InputText("Client Root", ref clientRoot, 1024);
+        ImGui.InputText("Build Label", ref buildLabel, 256);
+        ImGui.InputText("Loose Overlay Root", ref looseOverlayRoot, 1024);
+        ApplySharedClientSelection(clientRoot, buildLabel, looseOverlayRoot);
+
+        if (ImGui.Button("Open Game Client...", new Vector2(-1, 0)))
+            PromptOpenGameFolder();
+        if (ImGui.Button("Attach Loose Folder...", new Vector2(-1, 0)))
+            PromptAttachLooseFolder();
+
+        bool canBrowseCurrentClientFiles = !string.IsNullOrWhiteSpace(_session.Source.ArchiveRoot);
+        if (!canBrowseCurrentClientFiles)
+            ImGui.BeginDisabled();
+        if (ImGui.Button("Browse Current Client Files...", new Vector2(-1, 0)))
+            OpenAssetFileBrowserForClient(_session.World.ClientRoot, _session.World.BuildLabel, _session.World.LooseOverlayRoot, AssetFileBrowserFilter.SupportedAssets, "World Client Files");
+        if (!canBrowseCurrentClientFiles)
+            ImGui.EndDisabled();
+
+        ImGui.Separator();
+        ImGui.TextDisabled("World Session");
+        ImGui.InputText("Map", ref mapInput, 256);
+        ImGui.InputInt("Tile X", ref tileX);
+        ImGui.InputInt("Tile Y", ref tileY);
+        _session.World.MapInput = mapInput;
+        _session.World.TileX = tileX;
+        _session.World.TileY = tileY;
+
+        if (ImGui.Button("Refresh Map List", new Vector2(-1, 0)))
+            RefreshDiscoveredWorldMaps(force: true);
+
+        if (ImGui.Button("Open World Map Browser...", new Vector2(-1, 0)))
+            OpenWorldMapBrowserForCurrentClient();
+
+        RefreshDiscoveredWorldMaps();
+        ImGui.TextWrapped(_worldMapDiscoverySummary);
+        if (_discoveredWorldMaps.Count > 0)
+        {
+            float listHeight = MathF.Min(220.0f, 26.0f * _discoveredWorldMaps.Count + 8.0f);
+            if (ImGui.BeginChild("##WorldNavigatorMapDiscoveryList", new Vector2(0, listHeight), true))
+            {
+                foreach (DiscoveredLooseWorldMap map in _discoveredWorldMaps)
+                {
+                    string label = BuildWorldMapLabel(map);
+                    bool selected = string.Equals(_session.World.MapInput, map.Directory, StringComparison.OrdinalIgnoreCase);
+                    if (ImGui.Selectable(label, selected))
+                        _session.World.MapInput = map.Directory;
+
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip(BuildWorldMapTooltip(map));
+                }
+            }
+
+            ImGui.EndChild();
+        }
+
+        ImGui.Separator();
+        DrawWorldSpawnPickerSection();
+
+        bool worldLoadPending = IsWorldLoadPending();
+        if (worldLoadPending)
+            ImGui.TextDisabled($"World load in progress for {_pendingWorldLoadMapInput} ({_pendingWorldLoadStopwatch?.Elapsed.TotalSeconds ?? 0:F1}s)");
+
+        if (worldLoadPending)
+            ImGui.BeginDisabled();
+
+        if (ImGui.Button(_currentWorldRuntimeFrame == null ? "Open World Session" : "Reload World Session", new Vector2(-1, 0)))
+            LoadActiveWorkspace();
+
+        if (worldLoadPending)
+            ImGui.EndDisabled();
+
+        ImGui.Separator();
+        bool showWmos = _session.World.ShowWmos;
+        bool showDoodads = _session.World.ShowDoodads;
+        bool showSky = _session.World.ShowSky;
+        bool showWdl = _session.World.ShowWdl;
+        bool showTerrain = _session.World.ShowTerrain;
+        bool showLiquid = _session.World.ShowLiquid;
+        bool showOverlay = _session.World.ShowOverlay;
+        bool ignoreTerrainHoles = _session.World.IgnoreTerrainHoles;
+        bool showHoleOverlay = _session.World.ShowHoleOverlay;
+        ImGui.TextDisabled("World Layers");
+        ImGui.Checkbox("Sky", ref showSky);
+        ImGui.SameLine();
+        ImGui.Checkbox("WDL", ref showWdl);
+        ImGui.SameLine();
+        ImGui.Checkbox("Terrain", ref showTerrain);
+        ImGui.Checkbox("Liquid", ref showLiquid);
+        ImGui.SameLine();
+        ImGui.Checkbox("Overlay", ref showOverlay);
+        ImGui.TextDisabled("Object Families");
+        ImGui.Checkbox("WMO", ref showWmos);
+        ImGui.SameLine();
+        ImGui.Checkbox("Doodads (MDX/M2)", ref showDoodads);
+        ImGui.TextDisabled("Terrain Debug");
+        ImGui.Checkbox("Ignore Terrain Holes", ref ignoreTerrainHoles);
+        ImGui.SameLine();
+        ImGui.Checkbox("Show Hole Overlay", ref showHoleOverlay);
+        _session.World.ShowWmos = showWmos;
+        _session.World.ShowDoodads = showDoodads;
+        _session.World.ShowSky = showSky;
+        _session.World.ShowWdl = showWdl;
+        _session.World.ShowTerrain = showTerrain;
+        _session.World.ShowLiquid = showLiquid;
+        _session.World.ShowOverlay = showOverlay;
+        bool debugSettingsChanged = _session.World.IgnoreTerrainHoles != ignoreTerrainHoles
+            || _session.World.ShowHoleOverlay != showHoleOverlay;
+        _session.World.IgnoreTerrainHoles = ignoreTerrainHoles;
+        _session.World.ShowHoleOverlay = showHoleOverlay;
+        _session.Normalize();
+
+        if (debugSettingsChanged && _currentWorldRuntimeFrame != null)
+            EnsureWorldGpuPreviewRenderer()?.LoadPreview(_currentWorldRuntimeFrame, _session.World.IgnoreTerrainHoles, _session.World.ShowHoleOverlay);
+    }
+
     private void DrawWorldSessionPreview()
     {
+        if (IsWorldLoadPending())
+        {
+            ImGui.TextWrapped($"Loading world session for {_pendingWorldLoadMapInput} on a background worker. The UI should remain responsive while the shared world data and tile frame are assembled on the CPU before the GPU preview consumes them.");
+            if (_pendingWorldLoadStopwatch != null)
+                ImGui.TextDisabled($"Elapsed: {_pendingWorldLoadStopwatch.Elapsed.TotalSeconds:F1}s");
+            ImGui.Separator();
+        }
+
         if (_currentWorldSession == null)
         {
             ImGui.TextWrapped("No world session opened yet.");
@@ -1641,8 +2498,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
 
         ImGui.TextWrapped(_currentWorldRuntimeFrame == null
-            ? "World session bootstrap is active. This slice proves fixed-root attach plus shared WDT summary/tile discovery only; it does not render the world yet."
-            : "World runtime bridge is active over one selected ADT tile. This view now includes a bounded software terrain preview plus shared visibility and pass coordinators, not the final 3D world renderer.");
+            ? "World session bootstrap is active. This slice proves fixed-root attach plus shared WDT summary and tile discovery only; the GPU view appears after one tile-sized runtime frame loads."
+            : "The current world path still loads one selected ADT tile at a time. The runtime frame is built from shared CPU-side world data, then rendered by the GPU tile viewer below; multi-tile streaming and full WMO or doodad rendering remain later cut-over slices.");
         ImGui.Separator();
         ImGui.TextDisabled($"Client Root: {_currentWorldSession.ClientRoot}");
         if (!string.IsNullOrWhiteSpace(_currentWorldSession.BuildLabel))
@@ -1671,10 +2528,24 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(_currentWorldRuntimeFrame, _selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
             ImGui.Text($"Selection: {(selectedEntry.Kind == WorldSelectionKind.Wmo ? "WMO" : $"{selectedEntry.Instance.AssetKind} Doodad")} {selectedEntry.Instance.ModelName} #{selectedEntry.Instance.UniqueId}");
 
+        bool hasGpuWorldPreview = _worldGpuPreviewRenderer?.HasRenderableGeometry == true && _worldGpuPreviewRenderer.PreviewTextureHandle != 0;
+        if (hasGpuWorldPreview)
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled("GPU World Tile View");
+            Vector2 gpuPreviewAvailable = ImGui.GetContentRegionAvail();
+            float previewWidth = MathF.Max(240f, MathF.Min(gpuPreviewAvailable.X, 720f));
+            float previewHeight = MathF.Max(220f, MathF.Min(gpuPreviewAvailable.Y, previewWidth * 0.62f));
+            ImGui.Image((nint)_worldGpuPreviewRenderer!.PreviewTextureHandle, new Vector2(previewWidth, previewHeight), new Vector2(0, 1), new Vector2(1, 0));
+            HandleWorldPreviewInput(new Vector2(previewWidth, previewHeight));
+            ImGui.TextDisabled("Hover the tile view for camera input: left-drag look, wheel dolly, WASD move, Q/E vertical, Shift faster, double-click reset.");
+            ImGui.TextDisabled($"GPU terrain triangles={_worldGpuPreviewRenderer.TerrainTriangleCount} object markers={_worldGpuPreviewRenderer.MarkerCount}");
+        }
+
         if (_worldTerrainPreviewTextureHandle != 0)
         {
             ImGui.Separator();
-            ImGui.TextDisabled("Terrain Preview");
+            ImGui.TextDisabled("Software Terrain Preview");
             Vector2 previewAvailable = ImGui.GetContentRegionAvail();
             float previewSize = MathF.Max(180f, MathF.Min(previewAvailable.X, 320f));
             ImGui.Image((nint)_worldTerrainPreviewTextureHandle, new Vector2(previewSize, previewSize));
@@ -2291,9 +3162,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
+        ImGui.TextWrapped("This is the primary World Session lane: choose the client, pick the map, load or reload the session, then inspect the admitted runtime objects below.");
+        ImGui.Separator();
+        DrawWorldNavigatorSourceSection();
+        ImGui.Separator();
+
         if (_currentWorldRuntimeFrame == null)
         {
-            ImGui.TextWrapped("Open a world session to browse WMO and doodad placements admitted through the runtime bridge.");
+            ImGui.TextWrapped("Open a world session above to browse WMO and doodad placements admitted through the runtime bridge.");
             ImGui.End();
             return;
         }
@@ -2310,6 +3186,15 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         List<WorldNavigatorEntry> entries = BuildWorldNavigatorEntries(result);
         ImGui.TextDisabled($"Entries: {entries.Count}");
+        if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(result, _selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
+        {
+            string selectedAssetPath = GetNavigatorAssetPath(selectedEntry);
+            ImGui.TextDisabled("Selected Asset Path");
+            ImGui.PushTextWrapPos();
+            ImGui.TextUnformatted(selectedAssetPath);
+            ImGui.PopTextWrapPos();
+        }
+
         ImGui.Separator();
 
         if (!_worldNavigatorShowWmo && !_worldNavigatorShowMdx)
@@ -2335,6 +3220,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
                 ImGui.PushID($"{entry.Kind}:{entry.Instance.PlacementEntryIndex}:{entry.Instance.UniqueId}:{entry.Instance.ModelKey}");
                 if (ImGui.Selectable(BuildNavigatorLabel(entry), selected))
                     SelectWorldObject(selection, entry);
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(GetNavigatorAssetPath(entry));
 
                 if (selected)
                     ImGui.SetItemDefaultFocus();
@@ -2463,6 +3351,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void LoadPreview()
     {
+        InvalidatePendingWorldLoadState();
         _lastError = null;
 
         try
@@ -2470,12 +3359,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
             M2PreviewLoadRequest request = _session.BuildM2PreviewRequest();
             M2PreviewLoadResult preview = M2PreviewLoader.Load(request);
             UploadPreviewTexture(preview.FrameResult.VisualSnapshot);
-            _gpuPreviewRenderer?.LoadPreview(preview);
+            EnsureM2GpuPreviewRenderer()?.LoadPreview(preview);
             _currentPreview = preview;
             _currentMdxPreview = null;
             _currentWorldSession = null;
             _currentWorldRuntimeFrame = null;
             _selectedWorldObject = null;
+            _worldGpuPreviewRenderer?.ClearPreview();
             _mdxGpuPreviewRenderer?.ClearPreview();
             DeleteWorldTerrainPreviewTexture();
             _statusMessage = $"Loaded {preview.FrameResult.GoldenFrame.CanonicalModelPath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
@@ -2494,13 +3384,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void LoadWmoPreview()
     {
+        InvalidatePendingWorldLoadState();
         _lastError = null;
 
         try
         {
             WmoPreviewLoadRequest request = _session.BuildWmoPreviewRequest();
             WmoPreviewLoadResult preview = WmoPreviewLoader.Load(request);
-            _wmoGpuPreviewRenderer?.LoadPreview(preview);
+            EnsureWmoGpuPreviewRenderer()?.LoadPreview(preview);
             _currentWmoPreview = preview;
             _currentPreview = null;
             _currentMdxPreview = null;
@@ -2508,6 +3399,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _currentWorldRuntimeFrame = null;
             _selectedWorldObject = null;
             _gpuPreviewRenderer?.ClearPreview();
+            _worldGpuPreviewRenderer?.ClearPreview();
             _mdxGpuPreviewRenderer?.ClearPreview();
             DeletePreviewTexture();
             DeleteWorldTerrainPreviewTexture();
@@ -2524,19 +3416,21 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void LoadMdxPreview()
     {
+        InvalidatePendingWorldLoadState();
         _lastError = null;
 
         try
         {
             MdxPreviewLoadRequest request = _session.BuildMdxPreviewRequest();
             MdxPreviewLoadResult preview = MdxPreviewLoader.Load(request);
-            _mdxGpuPreviewRenderer?.LoadPreview(preview);
+            EnsureMdxGpuPreviewRenderer()?.LoadPreview(preview);
             _currentMdxPreview = preview;
             _currentPreview = null;
             _currentWorldSession = null;
             _currentWorldRuntimeFrame = null;
             _selectedWorldObject = null;
             _gpuPreviewRenderer?.ClearPreview();
+            _worldGpuPreviewRenderer?.ClearPreview();
             DeletePreviewTexture();
             DeleteWorldTerrainPreviewTexture();
             _statusMessage = $"Loaded {preview.Geometry.SourcePath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
@@ -2552,32 +3446,31 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void LoadWorldSession()
     {
-        _lastError = null;
+        if (IsWorldLoadPending())
+        {
+            _statusMessage = $"World session load already running for {_pendingWorldLoadMapInput}.";
+            return;
+        }
 
-        try
-        {
-            WowViewerWorldRuntimeFrameResult runtimeFrame = WowViewerWorldRuntimeBridge.Build(_session.World.BuildRuntimeFrameRequest());
-            _currentWorldRuntimeFrame = runtimeFrame;
-            _currentWorldSession = runtimeFrame.Session;
-            _currentPreview = null;
-            _currentMdxPreview = null;
-            _selectedWorldObject = SelectDefaultWorldObject(runtimeFrame);
-            _gpuPreviewRenderer?.ClearPreview();
-            _mdxGpuPreviewRenderer?.ClearPreview();
-            DeletePreviewTexture();
-            UploadWorldTerrainPreviewTexture(runtimeFrame.TerrainVisualSnapshot);
-            _statusMessage = $"Opened world runtime frame for {runtimeFrame.Session.ResolvedMapDirectory} tile ({runtimeFrame.SelectedTileX},{runtimeFrame.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
-            _lastLoadSummary = $"WMO {runtimeFrame.Visibility.VisibleWmos.Count}/{runtimeFrame.WmoInstances.Count}, doodads {runtimeFrame.Visibility.VisibleMdx.Count}/{runtimeFrame.MdxInstances.Count}, terrain {runtimeFrame.TerrainVisualSnapshot.Width}x{runtimeFrame.TerrainVisualSnapshot.Height}, pending {runtimeFrame.PendingAssetKeys.Count}";
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
-        {
-            _lastError = ex.Message;
-            _statusMessage = "World runtime bridge failed.";
-        }
+        _lastError = null;
+        _currentWorldSession = null;
+        _currentWorldRuntimeFrame = null;
+        _selectedWorldObject = null;
+        _worldGpuPreviewRenderer?.ClearPreview();
+        DeleteWorldTerrainPreviewTexture();
+
+        WowViewerWorldRuntimeFrameRequest request = _session.World.BuildRuntimeFrameRequest();
+        int generation = unchecked(++_pendingWorldLoadGeneration);
+        _pendingWorldLoadMapInput = request.MapInput;
+        _pendingWorldLoadStopwatch = Stopwatch.StartNew();
+        _pendingWorldLoadTask = Task.Run(() => new PendingWorldLoadResult(generation, WowViewerWorldRuntimeBridge.Build(request)));
+        _statusMessage = $"Opening world session for {request.MapInput}... Shared world data is being assembled on the CPU; the GPU tile view will populate when the runtime frame finishes.";
+        _lastLoadSummary = "World session load queued on a background worker.";
     }
 
     private void LoadModelOutputScene()
     {
+        InvalidatePendingWorldLoadState();
         _lastError = null;
 
         try
@@ -2592,6 +3485,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _currentWorldRuntimeFrame = null;
             _selectedWorldObject = null;
             _gpuPreviewRenderer?.ClearPreview();
+            _worldGpuPreviewRenderer?.ClearPreview();
             _mdxGpuPreviewRenderer?.ClearPreview();
             DeletePreviewTexture();
             DeleteWorldTerrainPreviewTexture();
@@ -2773,6 +3667,52 @@ internal sealed class WowViewerDesktopApp : IDisposable
             value => _session.SetMdxCameraTargetOffset(value));
     }
 
+    private void HandleWorldPreviewInput(Vector2 previewSize)
+    {
+        if (_currentWorldRuntimeFrame == null || _worldGpuPreviewRenderer == null || !ImGui.IsItemHovered())
+            return;
+
+        ImGuiIOPtr io = ImGui.GetIO();
+        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+        {
+            _worldGpuPreviewRenderer.ResetCamera();
+            _worldPreviewFlySpeed = 1.0f;
+            return;
+        }
+
+        Vector2 mouseDelta = io.MouseDelta;
+        if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) && mouseDelta.LengthSquared() > 0.0f)
+            _worldGpuPreviewRenderer.RotateCamera(mouseDelta.X * 0.25f, -mouseDelta.Y * 0.18f);
+
+        float deltaSeconds = Math.Clamp(io.DeltaTime, 1.0f / 240.0f, 0.05f);
+        float sceneScale = _worldGpuPreviewRenderer.SceneScale;
+        float step = sceneScale * 0.65f * _worldPreviewFlySpeed * deltaSeconds;
+        if (ImGui.IsKeyDown(ImGuiKey.LeftShift) || ImGui.IsKeyDown(ImGuiKey.RightShift))
+            step *= 3.0f;
+
+        float forwardStep = 0.0f;
+        float strafeStep = 0.0f;
+        float verticalStep = 0.0f;
+        if (ImGui.IsKeyDown(ImGuiKey.W))
+            forwardStep += step;
+        if (ImGui.IsKeyDown(ImGuiKey.S))
+            forwardStep -= step;
+        if (ImGui.IsKeyDown(ImGuiKey.D))
+            strafeStep += step;
+        if (ImGui.IsKeyDown(ImGuiKey.A))
+            strafeStep -= step;
+        if (ImGui.IsKeyDown(ImGuiKey.E))
+            verticalStep += step;
+        if (ImGui.IsKeyDown(ImGuiKey.Q))
+            verticalStep -= step;
+
+        if (forwardStep != 0.0f || strafeStep != 0.0f || verticalStep != 0.0f)
+            _worldGpuPreviewRenderer.TranslateCamera(forwardStep, strafeStep, verticalStep);
+
+        if (MathF.Abs(io.MouseWheel) > float.Epsilon)
+            _worldGpuPreviewRenderer.TranslateCamera(io.MouseWheel * step * 8.0f, 0.0f, 0.0f);
+    }
+
     private void AdvanceInteractivePreviewCameras(float deltaSeconds)
     {
         SyncM2CameraTargetsFromSession(resetCurrent: false);
@@ -2813,7 +3753,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_currentModelOutputScene == null)
             return;
 
-        _modelOutputGpuRenderer?.LoadScene(
+        EnsureModelOutputGpuRenderer()?.LoadScene(
             _currentModelOutputScene,
             _session.ModelOutput.ShowObjects,
             _session.ModelOutput.ShowM2Objects,
@@ -2993,6 +3933,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void ClearWorkspace()
     {
+        InvalidatePendingWorldLoadState();
         _currentPreview = null;
         _currentWmoPreview = null;
         _currentMdxPreview = null;
@@ -3007,8 +3948,29 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _wmoGpuPreviewRenderer?.ClearPreview();
         _mdxGpuPreviewRenderer?.ClearPreview();
         _modelOutputGpuRenderer?.ClearScene();
+        _worldGpuPreviewRenderer?.ClearPreview();
         DeletePreviewTexture();
         DeleteWorldTerrainPreviewTexture();
+    }
+
+    private void ApplyLoadedWorldSession(WowViewerWorldRuntimeFrameResult runtimeFrame)
+    {
+        _currentWorldRuntimeFrame = runtimeFrame;
+        _currentWorldSession = runtimeFrame.Session;
+        _currentPreview = null;
+        _currentMdxPreview = null;
+        _currentWmoPreview = null;
+        _currentModelOutputScene = null;
+        _selectedWorldObject = SelectDefaultWorldObject(runtimeFrame);
+        _gpuPreviewRenderer?.ClearPreview();
+        _wmoGpuPreviewRenderer?.ClearPreview();
+        _mdxGpuPreviewRenderer?.ClearPreview();
+        _modelOutputGpuRenderer?.ClearScene();
+        EnsureWorldGpuPreviewRenderer()?.LoadPreview(runtimeFrame, _session.World.IgnoreTerrainHoles, _session.World.ShowHoleOverlay);
+        DeletePreviewTexture();
+        UploadWorldTerrainPreviewTexture(runtimeFrame.TerrainVisualSnapshot);
+        _statusMessage = $"Opened world runtime frame for {runtimeFrame.Session.ResolvedMapDirectory} tile ({runtimeFrame.SelectedTileX},{runtimeFrame.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
+        _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, WMO {runtimeFrame.Visibility.VisibleWmos.Count}/{runtimeFrame.WmoInstances.Count}, doodads {runtimeFrame.Visibility.VisibleMdx.Count}/{runtimeFrame.MdxInstances.Count}, terrain {runtimeFrame.TerrainVisualSnapshot.Width}x{runtimeFrame.TerrainVisualSnapshot.Height}, pending {runtimeFrame.PendingAssetKeys.Count}";
     }
 
     private unsafe void UploadPreviewTexture(M2SoftwareVisualSnapshot snapshot)
@@ -3516,6 +4478,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
         string ready = entry.AssetReady ? "ready" : "pending";
         string distance = entry.CenterDistance.HasValue ? $" d={MathF.Sqrt(entry.CenterDistance.Value):F1}" : string.Empty;
         return $"[{entry.Kind}] {entry.Instance.ModelName} #{entry.Instance.UniqueId} {visibility} {ready}{distance}";
+    }
+
+    private static string GetNavigatorAssetPath(WorldNavigatorEntry entry)
+    {
+        return string.IsNullOrWhiteSpace(entry.Instance.ModelPath)
+            ? entry.Instance.ModelKey
+            : entry.Instance.ModelPath;
     }
 
     private static bool TryResolveWorldNavigatorEntry(WowViewerWorldRuntimeFrameResult result, WorldObjectSelection selection, out WorldNavigatorEntry entry)

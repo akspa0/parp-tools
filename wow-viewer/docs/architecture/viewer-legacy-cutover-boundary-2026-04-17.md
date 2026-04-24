@@ -15,7 +15,7 @@ Today that means:
   - workspace and session state
   - standalone shell panels and menu layout
   - bounded M2 preview flow
-  - bounded world-session bootstrap and one-tile runtime inspection flow
+  - bounded world-session bootstrap, one-tile runtime inspection flow, and first GPU terrain preview flow
   - viewer-facing CLI proof commands such as `viewer`, `m2-frame`, `m2-gpu-frame`, `world-bootstrap`, and `world-frame`
 - `wow-viewer/src/core/WowViewer.Core.Runtime`
   - canonical runtime contracts for extracted M2 and world seams
@@ -109,6 +109,6 @@ Use these proof rules:
 
 ## Next Direction
 
-After this boundary pass, the next viewer-facing implementation slice should be a real `wow-viewer` runtime or renderer ownership slice, not more shell expansion in `MdxViewer`.
+After this boundary pass, follow-up viewer-facing implementation should continue deepening `wow-viewer` runtime or renderer ownership, not drift back into shell expansion in `MdxViewer`.
 
 For world-runtime continuation, route planning through `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md` and keep `WowViewer.App` as the shell consumer.

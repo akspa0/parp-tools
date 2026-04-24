@@ -15,6 +15,11 @@ public static class ChunkedFileReader
 
     public static IReadOnlyList<ChunkSpan> ReadTopLevelChunks(Stream stream)
     {
+        return ReadTopLevelChunks(stream, padOddChunkSizes: true);
+    }
+
+    public static IReadOnlyList<ChunkSpan> ReadTopLevelChunks(Stream stream, bool padOddChunkSizes)
+    {
         ArgumentNullException.ThrowIfNull(stream);
         if (!stream.CanSeek)
             throw new ArgumentException("Chunked file reading requires a seekable stream.", nameof(stream));
@@ -39,7 +44,7 @@ public static class ChunkedFileReader
             chunks.Add(new ChunkSpan(header, headerOffset, dataOffset));
 
             long nextOffset = payloadEndOffset;
-            if ((header.Size & 1) != 0 && nextOffset < stream.Length)
+            if (padOddChunkSizes && (header.Size & 1) != 0 && nextOffset < stream.Length)
                 nextOffset++;
 
             stream.Position = nextOffset;

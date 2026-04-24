@@ -88,6 +88,11 @@ public static class AlphaArchiveReader
         {
             string basePath = filePath[..^4];
             List<string> candidates = BuildInternalNameCandidates(basePath).ToList();
+            using MpqArchiveCatalog catalog = new();
+            byte[]? file0Bytes = catalog.ReadFile0FromPath(filePath, candidates.ToArray());
+            if (file0Bytes is { Length: > 0 })
+                return file0Bytes;
+
             return ReadFromMpq(filePath, candidates) ?? ReadFromMpq(filePath);
         }
 
@@ -101,6 +106,11 @@ public static class AlphaArchiveReader
                 continue;
 
             List<string> candidates = BuildInternalNameCandidates(filePath).ToList();
+            using MpqArchiveCatalog catalog = new();
+            byte[]? file0Bytes = catalog.ReadFile0FromPath(mpqPath, candidates.ToArray());
+            if (file0Bytes is { Length: > 0 })
+                return file0Bytes;
+
             return ReadFromMpq(mpqPath, candidates);
         }
 
@@ -242,6 +252,7 @@ public static class AlphaArchiveReader
     {
         const uint hashEntryDeleted = 0xFFFFFFFE;
         const uint hashEntryEmpty = 0xFFFFFFFF;
+        const uint flagExists = 0x80000000;
 
         foreach (string candidate in internalNames)
         {
@@ -269,6 +280,19 @@ public static class AlphaArchiveReader
                         return block;
                 }
             }
+        }
+
+        foreach (HashEntry entry in hashTable)
+        {
+            if (entry.BlockIndex == hashEntryEmpty || entry.BlockIndex == hashEntryDeleted)
+                continue;
+
+            if (entry.BlockIndex >= blockTable.Length)
+                continue;
+
+            BlockEntry block = blockTable[entry.BlockIndex];
+            if ((block.Flags & flagExists) != 0 && block.FileSize > 0)
+                return block;
         }
 
         if (blockTable.Length > 1 && blockTable[1].FileSize > 0)

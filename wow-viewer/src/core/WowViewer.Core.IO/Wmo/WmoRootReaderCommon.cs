@@ -11,7 +11,7 @@ internal static class WmoRootReaderCommon
 {
     public static (uint? Version, IReadOnlyList<ChunkSpan> Chunks) ReadRootChunks(Stream stream, string sourcePath)
     {
-        IReadOnlyList<ChunkSpan> topLevelChunks = ChunkedFileReader.ReadTopLevelChunks(stream);
+        IReadOnlyList<ChunkSpan> topLevelChunks = ChunkedFileReader.ReadTopLevelChunks(stream, padOddChunkSizes: false);
         uint? version = TryReadVersion(stream, topLevelChunks);
         WowFileDetection detection = WowFileDetector.Detect(sourcePath, topLevelChunks, version);
         if (detection.Kind != WowFileKind.Wmo)

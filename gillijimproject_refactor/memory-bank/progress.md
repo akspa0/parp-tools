@@ -1,5 +1,108 @@
 # Progress
 
+### Apr 23, 2026 - removed per-asset WMO and doodad parsing from the current wow-viewer marker-only world preview path
+
+- what changed:
+	- updated `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` so the bounded world tile preview no longer parses every referenced WMO/MDX/M2 asset before building the current marker-only frame
+	- WMO instances now use placement-carried world bounds from the ADT placement catalog instead of reading `WmoRenderDocument` for each placement
+	- MDX and M2 doodad instances now use a cheap placement-scaled fallback extent instead of reading each source asset just to recover bounds and render characteristics
+	- the current tile preview therefore stays aligned with what it actually renders today: terrain plus marker placement context, not full object geometry ownership
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded after the runtime-bridge change
+	- `dotnet .\wow-viewer\src\viewer\WowViewer.App\bin\Debug\net10.0\WowViewer.App.dll world-frame --client-root "H:\053-client" --build-label "0.5.3.3389" --map "Shadowfang" --tile-x 32 --tile-y 28` now completes in `2.94 ms`
+	- that dense tile still reports `wmo=16`, `mdx=932`, and `pending=0`
+
+- boundary:
+	- this is a performance fix for the current marker-only world preview path, not a full object-rendering implementation
+	- bootstrap/open on the tested alpha root is still about `4.4 s`, so there is still a separate startup/open cost to attack after this slice
+
+### Apr 23, 2026 - deferred wow-viewer GPU preview renderer construction out of the pre-first-frame startup path
+
+- what changed:
+	- updated `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` so `OnLoad()` no longer eagerly constructs all GPU preview renderers
+	- added lazy `Ensure*GpuPreviewRenderer()` helpers for the `M2`, `WMO`, `MDX`, model-output, and world preview renderers
+	- rewired the existing preview-load and world-preview refresh paths so each renderer is created only when that workspace actually needs GPU content
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded
+	- `dotnet .\wow-viewer\src\viewer\WowViewer.App\bin\Debug\net10.0\WowViewer.App.dll viewer` launched and remained running with no immediate stderr output or startup exception
+
+- boundary:
+	- this trims the startup critical path only; it does not yet prove that every machine now presents the window correctly, and it does not change later workspace load costs
+
+### Apr 23, 2026 - fixed alpha world object name resolution in wow-viewer bootstrap and placement audit
+
+- what changed:
+	- updated `wow-viewer/src/core/WowViewer.Core.IO/Maps/MapFileSummaryReader.cs` so alpha `WDT` summaries recover `MDNM` and `MONM` chunk locations from `MPHD` absolute offsets
+	- downstream alpha placement consumers in `WowViewer.App` now receive real doodad and world-model name tables instead of zero-count tables that produced `unknown_*` placement keys
+
+- validation:
+	- `dotnet .\wow-viewer\src\viewer\WowViewer.App\bin\Debug\net10.0\WowViewer.App.dll world-bootstrap --client-root "H:\053-client" --build-label "0.5.3.3389" --map "Shadowfang"` now reports `doodadNames=149` and `wmoNames=14`
+	- `dotnet .\wow-viewer\src\viewer\WowViewer.App\bin\Debug\net10.0\WowViewer.App.dll world-placement-audit --client-root "H:\053-client" --build-label "0.5.3.3389" --map "Shadowfang" --limit 5` now reports real asset paths instead of `unknown_*`
+
+- boundary:
+	- this closes the alpha name-table regression only; bootstrap/open cost on the tested alpha client is still slow and needs a separate optimization slice
+
+### Apr 24, 2026 - moved World Session source and map flow into World Navigator in wow-viewer
+
+- what changed:
+	- updated `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` so `World Navigator` now owns the main world-session lane for:
+		- client root
+		- build label
+		- loose overlay root
+		- map selection
+		- tile selection
+		- open or reload actions
+		- world-layer toggles
+	- the navigator now also exposes `Open Game Client...`, `Attach Loose Folder...`, `Browse Current Client Files...`, and the discovered map list in the same surface
+	- trimmed `World Session Controls` so it stops duplicating the full source-and-map form and instead points the user at `World Navigator` as the primary lane
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded
+	- `dotnet run --project .\wow-viewer\src\viewer\WowViewer.App\WowViewer.App.csproj -- viewer` launched without an immediate startup exception before manual termination
+
+- boundary:
+	- this improves world-session shell coherence only; it does not yet unify the standalone asset workspaces into one broader `MdxViewer`-style navigator architecture
+	- interactive runtime parity and full old-shell grouping still need more `WowViewer.App` work
+
+### Apr 24, 2026 - unified shared client-root state between the file menu, archive panels, and World Session in wow-viewer
+
+- what changed:
+	- updated `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` to add one shared client-selection helper for:
+		- archive-root
+		- build label
+		- loose overlay root
+	- file-menu open or saved-client actions, loose-overlay attach, asset-file browser selection, and world-map browser selection now all route through that shared helper instead of mutating only `_session.Source`
+	- archive-backed M2 or MDX or WMO control panels and the World Session control panel now keep the same client selection in sync, so map bootstrap no longer silently drifts away from the currently opened game client
+	- file-menu `Open Workspace` now enables when a valid world bootstrap input exists, not only when standalone source fields are populated
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded
+
+- boundary:
+	- this fixes state wiring and reduces UI friction, but it does not yet recreate the full `MdxViewer` shell layout or panel grouping
+	- broader MdxViewer-style navigator and shell parity still needs dedicated follow-up slices in `WowViewer.App`
+
+### Apr 24, 2026 - added the first GPU world terrain preview to wow-viewer World Session
+
+- what changed:
+	- added `wow-viewer/src/viewer/WowViewer.App/WorldGpuPreviewRenderer.cs`
+	- updated `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` to:
+		- create and dispose the new renderer with the rest of the preview stack
+		- render the offscreen world preview texture during the `WorldSession` workspace
+		- load the renderer from `WowViewerWorldRuntimeFrameResult` when a bounded world frame completes
+		- clear stale world preview state when switching workspaces or starting another world load
+		- show the GPU world preview above the existing software terrain preview and update status or boundary copy accordingly
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded
+	- `dotnet run --project .\wow-viewer\src\viewer\WowViewer.App\WowViewer.App.csproj -- viewer` launched without an immediate startup exception before manual termination
+
+- boundary:
+	- this closes the first terrain-only GPU world preview slice in `WowViewer.App`
+	- it does not yet render full WMO or doodad geometry, add interactive world camera controls, or claim final world renderer closure
+
 ### Apr 23, 2026 - emitted ADT patch chunk-coverage and seam-audit metrics from wow-viewer terrain-patch-adt
 
 - what changed:

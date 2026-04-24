@@ -60,18 +60,18 @@ public sealed class AlphaArchiveReaderTests
     }
 
     [Fact]
-    public void ReadFromMpq_WithoutNames_PrefersSecondBlockForPerAssetArchives()
+    public void ReadFromMpq_WithoutNames_PrefersFirstValidHashEntryForPerAssetArchives()
     {
         string tempDirectory = CreateTempDirectory();
         string archivePath = Path.Combine(tempDirectory, "sample.blp.MPQ");
 
         try
         {
-            byte[] expected = "BLP0payload-data"u8.ToArray();
+            byte[] expected = BuildChunkBytes("MVER", [17, 0, 0, 0]);
             CreateMpqArchive(
                 archivePath,
-                new MpqEntry("checksum.md5", "abcd"u8.ToArray()),
-                new MpqEntry("texture.blp", expected));
+                new MpqEntry("sample.blp", expected),
+                new MpqEntry("checksum.md5", "abcd"u8.ToArray()));
 
             byte[]? actual = AlphaArchiveReader.ReadFromMpq(archivePath);
 

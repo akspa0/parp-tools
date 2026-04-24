@@ -224,11 +224,12 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
                 return null;
             }
 
-            fileStream.Position = headerOffset + header.HashTableOffset;
+            fileStream.Position = checked(headerOffset + (long)header.HashTablePosition);
             HashEntry[] hashTable = ReadHashTable(reader, header.HashTableEntries);
 
-            fileStream.Position = headerOffset + header.BlockTableOffset;
+            fileStream.Position = checked(headerOffset + (long)header.BlockTablePosition);
             BlockEntry[] blockTable = ReadBlockTable(reader, header.BlockTableEntries);
+            ApplyHighBlockTable(reader, headerOffset, header, blockTable);
 
             BlockEntry? file0Block = null;
             foreach (HashEntry entry in hashTable)
@@ -251,7 +252,7 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
                 return null;
             }
 
-            fileStream.Position = headerOffset + file0Block.BlockOffset;
+            fileStream.Position = checked(headerOffset + (long)file0Block.FileOffset);
             return ReadFileData(reader, file0Block, header.SectorSize, "file_0", fileStream.Position);
         }
         catch
@@ -280,11 +281,12 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
                 return null;
             }
 
-            fileStream.Position = headerOffset + header.HashTableOffset;
+            fileStream.Position = checked(headerOffset + (long)header.HashTablePosition);
             HashEntry[] hashTable = ReadHashTable(reader, header.HashTableEntries);
 
-            fileStream.Position = headerOffset + header.BlockTableOffset;
+            fileStream.Position = checked(headerOffset + (long)header.BlockTablePosition);
             BlockEntry[] blockTable = ReadBlockTable(reader, header.BlockTableEntries);
+            ApplyHighBlockTable(reader, headerOffset, header, blockTable);
 
             IReadOnlyList<string> candidateNames = BuildPerAssetFilenameCandidates(mpqDiskPath, filenameHints);
             BlockEntry? file0Block = TryGetPerAssetPrimaryBlock(blockTable, hashTable, candidateNames);
@@ -294,7 +296,7 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
                 return null;
             }
 
-            long fileBaseOffset = headerOffset + file0Block.BlockOffset;
+            long fileBaseOffset = checked(headerOffset + (long)file0Block.FileOffset);
             foreach (string candidateName in candidateNames)
             {
                 fileStream.Position = fileBaseOffset;
@@ -419,6 +421,12 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
             }
         }
 
+        if (StormLibPatchArchiveReader.TryFileExists(GetLoadedArchivePaths(), normalized))
+        {
+            MpqDiagnostics.Increment("MpqStormLibFallbackExistsHitCount");
+            return true;
+        }
+
         return false;
     }
 
@@ -459,7 +467,7 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
             }
         }
 
-        return null;
+        return StormLibPatchArchiveReader.TryReadFile(GetLoadedArchivePaths(), normalized);
     }
 
     public byte[]? ReadScannedFile(string placeholderPath)
@@ -511,6 +519,15 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
     private static string NormalizeVirtualPath(string path)
     {
         return path.Replace('/', '\\');
+    }
+
+    private IReadOnlyList<string> GetLoadedArchivePaths()
+    {
+        return _archives
+            .Select(static archive => archive.Path)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string? TryBuildScannedMapVirtualPath(string gamePath, string mpqPath)
@@ -747,11 +764,12 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
             return null;
         }
 
-        fileStream.Position = headerOffset + header.HashTableOffset;
+        fileStream.Position = checked(headerOffset + (long)header.HashTablePosition);
         HashEntry[] hashTable = ReadHashTable(reader, header.HashTableEntries);
 
-        fileStream.Position = headerOffset + header.BlockTableOffset;
+        fileStream.Position = checked(headerOffset + (long)header.BlockTablePosition);
         BlockEntry[] blockTable = ReadBlockTable(reader, header.BlockTableEntries);
+        ApplyHighBlockTable(reader, headerOffset, header, blockTable);
 
         return new MpqArchive
         {
@@ -881,8 +899,39 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
             BlockTableEntries = reader.ReadUInt32(),
         };
 
+        if (header.FormatVersion >= 1 && header.HeaderSize >= 44)
+        {
+            header = header with
+            {
+                HiBlockTablePosition = reader.ReadUInt64(),
+                HashTableOffsetHigh = reader.ReadUInt16(),
+                BlockTableOffsetHigh = reader.ReadUInt16(),
+            };
+        }
+
         header.SectorSize = 512u << header.SectorSizeShift;
         return header;
+    }
+
+    private static void ApplyHighBlockTable(BinaryReader reader, long headerOffset, MpqHeader header, BlockEntry[] blockTable)
+    {
+        if (header.FormatVersion < 1 || header.HiBlockTablePosition == 0 || blockTable.Length == 0)
+        {
+            return;
+        }
+
+        long tablePosition = checked(headerOffset + (long)header.HiBlockTablePosition);
+        long tableSize = checked(blockTable.Length * sizeof(ushort));
+        if (tablePosition < 0 || tablePosition > reader.BaseStream.Length || tablePosition + tableSize > reader.BaseStream.Length)
+        {
+            return;
+        }
+
+        reader.BaseStream.Position = tablePosition;
+        for (int index = 0; index < blockTable.Length; index++)
+        {
+            blockTable[index].HighBlockOffset = reader.ReadUInt16();
+        }
     }
 
     private static HashEntry[] ReadHashTable(BinaryReader reader, uint entryCount)
@@ -1228,7 +1277,7 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
         public BlockEntry[] BlockTable { get; init; } = [];
     }
 
-    private sealed class MpqHeader
+    private sealed record MpqHeader
     {
         public uint HeaderSize { get; init; }
 
@@ -1246,6 +1295,16 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
 
         public uint BlockTableEntries { get; init; }
 
+        public ulong HiBlockTablePosition { get; init; }
+
+        public ushort HashTableOffsetHigh { get; init; }
+
+        public ushort BlockTableOffsetHigh { get; init; }
+
+        public ulong HashTablePosition => HashTableOffset | ((ulong)HashTableOffsetHigh << 32);
+
+        public ulong BlockTablePosition => BlockTableOffset | ((ulong)BlockTableOffsetHigh << 32);
+
         public uint SectorSize { get; set; }
     }
 
@@ -1253,11 +1312,15 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
     {
         public uint BlockOffset { get; init; }
 
+        public ushort HighBlockOffset { get; set; }
+
         public uint BlockSize { get; init; }
 
         public uint FileSize { get; init; }
 
         public uint Flags { get; init; }
+
+        public ulong FileOffset => BlockOffset | ((ulong)HighBlockOffset << 32);
     }
 
     private sealed class HashEntry

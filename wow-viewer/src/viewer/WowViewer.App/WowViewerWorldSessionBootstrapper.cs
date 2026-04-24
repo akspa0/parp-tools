@@ -92,10 +92,18 @@ internal static class WowViewerWorldSessionBootstrapper
 
         Stopwatch stopwatch = Stopwatch.StartNew();
         using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [clientRoot], WowViewerArchiveBootstrap.CreateBootstrapOptions());
+        ArchiveCatalogBootstrapper.Bootstrap(
+            archiveCatalog,
+            [clientRoot],
+            WowViewerArchiveBootstrap.CreateBootstrapOptions(request.BuildLabel, clientRoot));
 
         MapDirectoryLookup directoryLookup = new();
-        directoryLookup.Load([clientRoot], archiveCatalog);
+        directoryLookup.Load(
+        new[]
+        {
+            looseOverlayRoot,
+            clientRoot,
+        }.Where(static path => !string.IsNullOrWhiteSpace(path)), archiveCatalog);
 
         string requestedMapInput = request.MapInput.Trim();
         string directDirectory = ExtractMapDirectory(requestedMapInput);
@@ -103,17 +111,76 @@ internal static class WowViewerWorldSessionBootstrapper
         if (string.IsNullOrWhiteSpace(resolvedFromDbc) && !string.Equals(directDirectory, requestedMapInput, StringComparison.OrdinalIgnoreCase))
             resolvedFromDbc = directoryLookup.ResolveDirectory(directDirectory);
 
-        string resolvedMapDirectory = string.IsNullOrWhiteSpace(resolvedFromDbc) ? directDirectory : resolvedFromDbc;
+        string? archiveAlias = TryResolveArchiveMapDirectoryAlias(requestedMapInput, archiveCatalog.GetAllKnownFiles());
+        if (string.IsNullOrWhiteSpace(archiveAlias) && !string.Equals(directDirectory, requestedMapInput, StringComparison.OrdinalIgnoreCase))
+            archiveAlias = TryResolveArchiveMapDirectoryAlias(directDirectory, archiveCatalog.GetAllKnownFiles());
+
+        string canonicalMapDirectory = !string.IsNullOrWhiteSpace(resolvedFromDbc)
+            ? resolvedFromDbc
+            : !string.IsNullOrWhiteSpace(archiveAlias)
+                ? archiveAlias
+                : directDirectory;
+
+        string resolvedMapDirectory = canonicalMapDirectory;
         string wdtVirtualPath = $@"World\Maps\{resolvedMapDirectory}\{resolvedMapDirectory}.wdt";
-        (byte[] data, string sourcePath, bool loadedFromArchive) = ReadWdt(clientRoot, looseOverlayRoot, resolvedMapDirectory, wdtVirtualPath, archiveCatalog);
+        string sourcePath = string.Empty;
+        bool loadedFromArchive = false;
+        MapFileSummary fileSummary;
+        WdtSummary wdtSummary;
+        IReadOnlyList<WdtTileCoordinate> occupiedTiles = Array.Empty<WdtTileCoordinate>();
+        FileNotFoundException? missingWdt = null;
 
-        using MemoryStream stream = new(data, writable: false);
-        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, loadedFromArchive ? wdtVirtualPath : sourcePath);
-        stream.Position = 0;
-        WdtSummary wdtSummary = WdtSummaryReader.Read(stream, fileSummary);
-        stream.Position = 0;
-        IReadOnlyList<WdtTileCoordinate> occupiedTiles = WdtTileIndexReader.ReadOccupiedTiles(stream, fileSummary);
+        foreach (string candidateMapDirectory in DistinctMapDirectories(directDirectory, canonicalMapDirectory))
+        {
+            string candidateWdtVirtualPath = $@"World\Maps\{candidateMapDirectory}\{candidateMapDirectory}.wdt";
 
+            try
+            {
+                (byte[] data, sourcePath, loadedFromArchive) = ReadWdt(clientRoot, looseOverlayRoot, candidateMapDirectory, candidateWdtVirtualPath, archiveCatalog);
+
+                using MemoryStream stream = new(data, writable: false);
+                fileSummary = MapFileSummaryReader.Read(stream, loadedFromArchive ? candidateWdtVirtualPath : sourcePath);
+                stream.Position = 0;
+                wdtSummary = WdtSummaryReader.Read(stream, fileSummary);
+                stream.Position = 0;
+                occupiedTiles = WdtTileIndexReader.ReadOccupiedTiles(stream, fileSummary);
+                resolvedMapDirectory = candidateMapDirectory;
+                wdtVirtualPath = candidateWdtVirtualPath;
+                goto Success;
+            }
+            catch (FileNotFoundException ex)
+            {
+                missingWdt = ex;
+            }
+        }
+
+        foreach (string candidateMapDirectory in DistinctMapDirectories(directDirectory, canonicalMapDirectory))
+        {
+            if (!TryProbeOccupiedAdtTiles(clientRoot, looseOverlayRoot, candidateMapDirectory, archiveCatalog, out occupiedTiles, out string adtProbeSourcePath, out loadedFromArchive))
+                continue;
+
+            resolvedMapDirectory = candidateMapDirectory;
+            wdtVirtualPath = $@"World\Maps\{candidateMapDirectory}\{candidateMapDirectory}.wdt";
+            sourcePath = adtProbeSourcePath;
+            string syntheticSourcePath = $@"{wdtVirtualPath} [synthesized from ADT probes]";
+            fileSummary = new MapFileSummary(syntheticSourcePath, MapFileKind.Unknown, null, Array.Empty<MapChunkLocation>());
+            wdtSummary = new WdtSummary(
+                syntheticSourcePath,
+                isWmoBased: false,
+                tilesWithData: occupiedTiles.Count,
+                totalTiles: 64 * 64,
+                mainCellSizeBytes: 0,
+                doodadNameCount: 0,
+                worldModelNameCount: 0,
+                doodadPlacementCount: 0,
+                worldModelPlacementCount: 0,
+                mainFlags: null);
+            goto Success;
+        }
+
+        throw missingWdt ?? new FileNotFoundException($"Could not find WDT for map '{canonicalMapDirectory}' under client root '{clientRoot}'.");
+
+    Success:
         stopwatch.Stop();
         return new WowViewerWorldSessionBootstrapResult(
             clientRoot,
@@ -183,6 +250,89 @@ internal static class WowViewerWorldSessionBootstrapper
         }
     }
 
+    private static bool TryProbeOccupiedAdtTiles(
+        string clientRoot,
+        string looseOverlayRoot,
+        string mapDirectory,
+        IArchiveCatalog archiveCatalog,
+        out IReadOnlyList<WdtTileCoordinate> occupiedTiles,
+        out string sourcePath,
+        out bool loadedFromArchive)
+    {
+        List<WdtTileCoordinate> discovered = [];
+        sourcePath = string.Empty;
+        loadedFromArchive = false;
+
+        for (int tileY = 0; tileY < 64; tileY++)
+        {
+            for (int tileX = 0; tileX < 64; tileX++)
+            {
+                string adtVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
+                if (!TryResolveAdtProbeSource(clientRoot, looseOverlayRoot, adtVirtualPath, mapDirectory, tileX, tileY, archiveCatalog, out string tileSourcePath, out bool tileLoadedFromArchive))
+                    continue;
+
+                discovered.Add(new WdtTileCoordinate(tileX, tileY));
+                if (string.IsNullOrWhiteSpace(sourcePath))
+                {
+                    sourcePath = tileSourcePath;
+                    loadedFromArchive = tileLoadedFromArchive;
+                }
+            }
+        }
+
+        occupiedTiles = discovered;
+        return discovered.Count > 0;
+    }
+
+    private static bool TryResolveAdtProbeSource(
+        string clientRoot,
+        string looseOverlayRoot,
+        string adtVirtualPath,
+        string mapDirectory,
+        int tileX,
+        int tileY,
+        IArchiveCatalog archiveCatalog,
+        out string sourcePath,
+        out bool loadedFromArchive)
+    {
+        loadedFromArchive = false;
+        if (VirtualAssetOverlayResolver.TryReadLooseVirtualFile(adtVirtualPath, looseOverlayRoot, out _, out sourcePath))
+            return true;
+
+        foreach (string path in EnumerateDiskAdtCandidates(clientRoot, mapDirectory, tileX, tileY))
+        {
+            if (!File.Exists(path))
+                continue;
+
+            sourcePath = Path.GetFullPath(path);
+            return true;
+        }
+
+        byte[]? archiveData = archiveCatalog.ReadFile(adtVirtualPath) ?? archiveCatalog.ReadFile(adtVirtualPath.Replace('\\', '/'));
+        if (archiveData is { Length: > 0 })
+        {
+            sourcePath = adtVirtualPath;
+            loadedFromArchive = true;
+            return true;
+        }
+
+        sourcePath = string.Empty;
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateDiskAdtCandidates(string clientRoot, string mapDirectory, int tileX, int tileY)
+    {
+        string fileName = $"{mapDirectory}_{tileX}_{tileY}.adt";
+        string[] baseDirectories =
+        [
+            Path.Combine(clientRoot, "World", "Maps", mapDirectory),
+            Path.Combine(clientRoot, "Data", "World", "Maps", mapDirectory),
+        ];
+
+        foreach (string baseDirectory in baseDirectories.Distinct(StringComparer.OrdinalIgnoreCase))
+            yield return Path.Combine(baseDirectory, fileName);
+    }
+
     private static string ExtractMapDirectory(string mapInput)
     {
         string normalized = mapInput.Trim().Replace('/', '\\');
@@ -194,5 +344,143 @@ internal static class WowViewerWorldSessionBootstrapper
             return Path.GetFileName(trimmed);
 
         return trimmed;
+    }
+
+    private static IEnumerable<string> DistinctMapDirectories(string requestedDirectory, string resolvedDirectory)
+    {
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(requestedDirectory) && seen.Add(requestedDirectory))
+            yield return requestedDirectory;
+
+        if (!string.IsNullOrWhiteSpace(resolvedDirectory) && seen.Add(resolvedDirectory))
+            yield return resolvedDirectory;
+    }
+
+    private static string? TryResolveArchiveMapDirectoryAlias(string mapName, IReadOnlyList<string> knownFiles)
+    {
+        if (string.IsNullOrWhiteSpace(mapName) || knownFiles.Count == 0)
+            return null;
+
+        string requestedToken = NormalizeMapToken(mapName);
+        if (requestedToken.Length == 0)
+            return null;
+
+        HashSet<string> candidates = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string knownFile in knownFiles)
+        {
+            if (string.IsNullOrWhiteSpace(knownFile))
+                continue;
+
+            string normalizedPath = knownFile.Replace('\\', '/');
+            if (!normalizedPath.StartsWith("World/Maps/", StringComparison.OrdinalIgnoreCase)
+                || !normalizedPath.EndsWith(".wdt", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string[] segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length < 4)
+                continue;
+
+            string directoryName = segments[2];
+            string fileName = Path.GetFileNameWithoutExtension(segments[^1]);
+            if (!string.Equals(directoryName, fileName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            candidates.Add(directoryName);
+        }
+
+        foreach (string candidate in candidates)
+        {
+            if (string.Equals(NormalizeMapToken(candidate), requestedToken, StringComparison.Ordinal))
+                return candidate;
+        }
+
+        string? bestCandidate = null;
+        int bestDistance = int.MaxValue;
+        bool isAmbiguous = false;
+
+        foreach (string candidate in candidates)
+        {
+            string candidateToken = NormalizeMapToken(candidate);
+            if (candidateToken.Length == 0 || candidateToken[0] != requestedToken[0])
+                continue;
+
+            if (Math.Abs(candidateToken.Length - requestedToken.Length) > 2)
+                continue;
+
+            int distance = ComputeLevenshteinDistance(requestedToken, candidateToken, 2);
+            if (distance > 2)
+                continue;
+
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestCandidate = candidate;
+                isAmbiguous = false;
+            }
+            else if (distance == bestDistance && !string.Equals(bestCandidate, candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                isAmbiguous = true;
+            }
+        }
+
+        return isAmbiguous ? null : bestCandidate;
+    }
+
+    private static string NormalizeMapToken(string value)
+    {
+        Span<char> buffer = stackalloc char[value.Length];
+        int length = 0;
+        foreach (char ch in value)
+        {
+            if (!char.IsLetterOrDigit(ch))
+                continue;
+
+            buffer[length++] = char.ToLowerInvariant(ch);
+        }
+
+        return length == 0 ? string.Empty : new string(buffer[..length]);
+    }
+
+    private static int ComputeLevenshteinDistance(string source, string target, int maxDistance)
+    {
+        int sourceLength = source.Length;
+        int targetLength = target.Length;
+
+        if (sourceLength == 0)
+            return targetLength;
+        if (targetLength == 0)
+            return sourceLength;
+        if (Math.Abs(sourceLength - targetLength) > maxDistance)
+            return maxDistance + 1;
+
+        int[] previous = new int[targetLength + 1];
+        int[] current = new int[targetLength + 1];
+
+        for (int j = 0; j <= targetLength; j++)
+            previous[j] = j;
+
+        for (int i = 1; i <= sourceLength; i++)
+        {
+            current[0] = i;
+            int rowMin = current[0];
+
+            for (int j = 1; j <= targetLength; j++)
+            {
+                int substitutionCost = source[i - 1] == target[j - 1] ? 0 : 1;
+                current[j] = Math.Min(
+                    Math.Min(previous[j] + 1, current[j - 1] + 1),
+                    previous[j - 1] + substitutionCost);
+                rowMin = Math.Min(rowMin, current[j]);
+            }
+
+            if (rowMin > maxDistance)
+                return maxDistance + 1;
+
+            (previous, current) = (current, previous);
+        }
+
+        return previous[targetLength];
     }
 }

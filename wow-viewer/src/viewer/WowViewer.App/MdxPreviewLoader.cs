@@ -176,7 +176,7 @@ internal static class MdxPreviewLoader
     private static byte[] ReadBytes(MdxPreviewLoadRequest request)
     {
         if (request.UsesArchiveSource)
-            return VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(request.VirtualPath!, request.ArchiveRoot!, request.LooseOverlayRoot);
+            return VirtualAssetOverlayResolver.ReadVirtualFilePreferLoose(request.VirtualPath!, request.ArchiveRoot!, request.LooseOverlayRoot, request.BuildLabel);
 
         if (!string.IsNullOrWhiteSpace(request.InputPath) && File.Exists(request.InputPath))
             return File.ReadAllBytes(request.InputPath);
