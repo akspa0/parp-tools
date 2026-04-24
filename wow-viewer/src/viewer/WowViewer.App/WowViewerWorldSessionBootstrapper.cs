@@ -81,6 +81,31 @@ internal static class WowViewerWorldSessionBootstrapper
         if (!Directory.Exists(clientRoot))
             throw new DirectoryNotFoundException($"Client root does not exist: {clientRoot}");
 
+        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+        ArchiveCatalogBootstrapper.Bootstrap(
+            archiveCatalog,
+            [clientRoot],
+            WowViewerArchiveBootstrap.CreateBootstrapOptions(request.BuildLabel, clientRoot));
+
+        return Open(request, archiveCatalog, clientRoot);
+    }
+
+    internal static WowViewerWorldSessionBootstrapResult Open(WowViewerWorldSessionOpenRequest request, IArchiveCatalog archiveCatalog)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(archiveCatalog);
+
+        string clientRoot = Path.GetFullPath(request.ClientRoot);
+        if (!Directory.Exists(clientRoot))
+            throw new DirectoryNotFoundException($"Client root does not exist: {clientRoot}");
+
+        return Open(request, archiveCatalog, clientRoot);
+    }
+
+    private static WowViewerWorldSessionBootstrapResult Open(WowViewerWorldSessionOpenRequest request, IArchiveCatalog archiveCatalog, string clientRoot)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
         string looseOverlayRoot = string.IsNullOrWhiteSpace(request.LooseOverlayRoot)
             ? string.Empty
             : Path.GetFullPath(request.LooseOverlayRoot);
@@ -91,11 +116,6 @@ internal static class WowViewerWorldSessionBootstrapper
             throw new ArgumentException("Provide a map directory, map id, or Map.dbc name via --map.", nameof(request.MapInput));
 
         Stopwatch stopwatch = Stopwatch.StartNew();
-        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-        ArchiveCatalogBootstrapper.Bootstrap(
-            archiveCatalog,
-            [clientRoot],
-            WowViewerArchiveBootstrap.CreateBootstrapOptions(request.BuildLabel, clientRoot));
 
         MapDirectoryLookup directoryLookup = new();
         directoryLookup.Load(

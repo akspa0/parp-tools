@@ -15,7 +15,22 @@
 
 - boundary:
 	- this is a performance fix for the current marker-only world preview path, not a full object-rendering implementation
-	- bootstrap/open on the tested alpha root is still about `4.4 s`, so there is still a separate startup/open cost to attack after this slice
+	- bootstrap/open was still the next separate latency target after this slice and is now improved by the following shared-bootstrap change
+
+### Apr 24, 2026 - removed duplicate archive bootstrap from wow-viewer world bootstrap, frame, and placement-audit paths
+
+- what changed:
+	- updated `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSessionBootstrapper.cs` to add an internal overload that resolves a world session over an already-bootstrapped `IArchiveCatalog`
+	- updated `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` so `Build(...)` and `AuditPlacements(...)` bootstrap archive access once, then reuse that same catalog for world-session resolution plus all later map reads
+	- this removes the previous double-bootstrap pattern where the runtime bridge paid archive bootstrap and then `WowViewerWorldSessionBootstrapper.Open(...)` immediately paid it again
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded after the shared-bootstrap refactor
+	- `dotnet .\wow-viewer\src\viewer\WowViewer.App\bin\Debug\net10.0\WowViewer.App.dll world-bootstrap --client-root "H:\053-client" --build-label "0.5.3.3389" --map "Shadowfang"` now reports `loadMs=40.8`
+	- `dotnet .\wow-viewer\src\viewer\WowViewer.App\bin\Debug\net10.0\WowViewer.App.dll world-frame --client-root "H:\053-client" --build-label "0.5.3.3389" --map "Shadowfang" --tile-x 32 --tile-y 28` now reports `totalMs=2.40`
+
+- boundary:
+	- this closes duplicated bootstrap cost in the current proof path, but it does not yet add a persistent desktop-app world-session cache or object-visibility tuning for the live preview camera
 
 ### Apr 23, 2026 - deferred wow-viewer GPU preview renderer construction out of the pre-first-frame startup path
 

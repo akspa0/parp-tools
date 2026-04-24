@@ -40,10 +40,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private uint _markerVertexCount;
     private Vector3 _boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
     private Vector3 _boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
-    private Vector3 _cameraPosition = new(0f, 0f, 1f);
-    private Vector3 _cameraTarget = Vector3.Zero;
-    private Vector3 _defaultCameraPosition = new(0f, 0f, 1f);
-    private Vector3 _defaultCameraTarget = Vector3.Zero;
+    private readonly WorldPreviewCameraState _camera = new();
     private bool _disposed;
 
     public WorldGpuPreviewRenderer(GL gl)
@@ -100,10 +97,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         DeleteMarkerBuffers();
         _boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
         _boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
-        _cameraPosition = new(0f, 0f, 1f);
-        _cameraTarget = Vector3.Zero;
-        _defaultCameraPosition = _cameraPosition;
-        _defaultCameraTarget = _cameraTarget;
+        _camera.ResetToIdentity();
     }
 
     public void LoadPreview(WowViewerWorldRuntimeFrameResult frame, bool ignoreTerrainHoles = false, bool showHoleOverlay = false)
@@ -120,27 +114,17 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
     public void ResetCamera()
     {
-        _cameraPosition = _defaultCameraPosition;
-        _cameraTarget = _defaultCameraTarget;
+        _camera.Reset();
     }
 
     public void RotateCamera(float azimuthDeltaDegrees, float elevationDeltaDegrees)
     {
-        Vector3 forward = GetForwardVector();
-        float distance = MathF.Max(Vector3.Distance(_cameraPosition, _cameraTarget), 1.0f);
-        GetCameraAngles(forward, out float azimuthDegrees, out float elevationDegrees);
-        azimuthDegrees += azimuthDeltaDegrees;
-        elevationDegrees = Math.Clamp(elevationDegrees + elevationDeltaDegrees, -89.0f, 89.0f);
-        Vector3 rotatedForward = ComputeForwardVector(azimuthDegrees, elevationDegrees);
-        _cameraTarget = _cameraPosition + (rotatedForward * distance);
+        _camera.RotateLook(azimuthDeltaDegrees, elevationDeltaDegrees);
     }
 
     public void TranslateCamera(float forwardDistance, float strafeDistance, float verticalDistance)
     {
-        BuildCameraBasis(out Vector3 forward, out Vector3 right, out _);
-        Vector3 delta = (forward * forwardDistance) + (right * strafeDistance) + (Vector3.UnitZ * verticalDistance);
-        _cameraPosition += delta;
-        _cameraTarget += delta;
+        _camera.Translate(forwardDistance, strafeDistance, verticalDistance);
     }
 
     public unsafe void Render(int width, int height)
@@ -405,39 +389,39 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             boundsCenter = (_boundsMin + _boundsMax) * 0.5f;
         }
 
-        _cameraTarget = frame.CameraTarget;
-        if (_cameraTarget.LengthSquared() <= 0.0001f)
-            _cameraTarget = boundsCenter;
+        Vector3 cameraTarget = frame.CameraTarget;
+        if (cameraTarget.LengthSquared() <= 0.0001f)
+            cameraTarget = boundsCenter;
 
+        Vector3 cameraPosition;
         if (frame.CameraForward.LengthSquared() > 0.0001f)
         {
-            Vector3 offset = frame.CameraPosition - _cameraTarget;
-            _cameraPosition = offset.LengthSquared() > 1f
+            Vector3 offset = frame.CameraPosition - cameraTarget;
+            cameraPosition = offset.LengthSquared() > 1f
                 ? frame.CameraPosition
-                : _cameraTarget - (frame.CameraForward * 900f) + new Vector3(0f, 0f, 220f);
+                : cameraTarget - (frame.CameraForward * 900f) + new Vector3(0f, 0f, 220f);
         }
         else
         {
             Vector3 extent = _boundsMax - _boundsMin;
             float radius = MathF.Max(extent.Length() * 0.5f, 128f);
-            _cameraPosition = _cameraTarget + new Vector3(-radius * 1.15f, -radius * 1.15f, radius * 0.60f);
+            cameraPosition = cameraTarget + new Vector3(-radius * 1.15f, -radius * 1.15f, radius * 0.60f);
         }
 
-        _defaultCameraPosition = _cameraPosition;
-        _defaultCameraTarget = _cameraTarget;
+        _camera.SetPose(cameraPosition, cameraTarget, saveAsDefault: true);
     }
 
     private void BuildMatrices(int width, int height, out Matrix4x4 view, out Matrix4x4 projection)
     {
-        Vector3 forward = Vector3.Normalize(_cameraTarget - _cameraPosition);
+        Vector3 forward = _camera.GetForwardVector();
         Vector3 worldUp = MathF.Abs(Vector3.Dot(forward, Vector3.UnitZ)) > 0.98f
             ? Vector3.UnitY
             : Vector3.UnitZ;
-        view = Matrix4x4.CreateLookAt(_cameraPosition, _cameraTarget, worldUp);
+        view = Matrix4x4.CreateLookAt(_camera.Position, _camera.Target, worldUp);
 
         Vector3 extent = _boundsMax - _boundsMin;
         float radius = MathF.Max(extent.Length() * 0.5f, 128f);
-        float distance = Vector3.Distance(_cameraPosition, _cameraTarget);
+        float distance = Vector3.Distance(_camera.Position, _camera.Target);
         float aspect = Math.Max(width, 1) / (float)Math.Max(height, 1);
         float farPlane = MathF.Max(2048f, distance + (radius * 4.0f));
         projection = Matrix4x4.CreatePerspectiveFieldOfView(50.0f * MathF.PI / 180.0f, aspect, 1.0f, farPlane);
@@ -457,35 +441,6 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         }
 
         return positions;
-    }
-
-    private Vector3 GetForwardVector()
-    {
-        Vector3 forward = _cameraTarget - _cameraPosition;
-        if (forward.LengthSquared() <= 1e-6f)
-            return Vector3.Normalize(new Vector3(1f, 1f, -0.3f));
-
-        return Vector3.Normalize(forward);
-    }
-
-    private void BuildCameraBasis(out Vector3 forward, out Vector3 right, out Vector3 up)
-    {
-        forward = GetForwardVector();
-        Vector3 worldUp = MathF.Abs(Vector3.Dot(forward, Vector3.UnitZ)) > 0.98f
-            ? Vector3.UnitY
-            : Vector3.UnitZ;
-
-        right = Vector3.Cross(forward, worldUp);
-        if (right.LengthSquared() <= 1e-6f)
-            right = Vector3.UnitX;
-        else
-            right = Vector3.Normalize(right);
-
-        up = Vector3.Cross(right, forward);
-        if (up.LengthSquared() <= 1e-6f)
-            up = worldUp;
-        else
-            up = Vector3.Normalize(up);
     }
 
     private static void GetCameraAngles(Vector3 forward, out float azimuthDegrees, out float elevationDegrees)
@@ -893,5 +848,92 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         }
 
         _markerVertexCount = 0;
+    }
+
+    private sealed class WorldPreviewCameraState
+    {
+        private static readonly Vector3 IdentityPosition = new(0f, 0f, 1f);
+        private static readonly Vector3 IdentityTarget = Vector3.Zero;
+
+        public Vector3 Position { get; private set; } = IdentityPosition;
+
+        public Vector3 Target { get; private set; } = IdentityTarget;
+
+        private Vector3 DefaultPosition { get; set; } = IdentityPosition;
+
+        private Vector3 DefaultTarget { get; set; } = IdentityTarget;
+
+        public void ResetToIdentity()
+        {
+            Position = IdentityPosition;
+            Target = IdentityTarget;
+            DefaultPosition = IdentityPosition;
+            DefaultTarget = IdentityTarget;
+        }
+
+        public void SetPose(Vector3 position, Vector3 target, bool saveAsDefault)
+        {
+            Position = position;
+            Target = target;
+            if (saveAsDefault)
+            {
+                DefaultPosition = position;
+                DefaultTarget = target;
+            }
+        }
+
+        public void Reset()
+        {
+            Position = DefaultPosition;
+            Target = DefaultTarget;
+        }
+
+        public Vector3 GetForwardVector()
+        {
+            Vector3 forward = Target - Position;
+            if (forward.LengthSquared() <= 1e-6f)
+                return Vector3.Normalize(new Vector3(1f, 1f, -0.3f));
+
+            return Vector3.Normalize(forward);
+        }
+
+        public void RotateLook(float azimuthDeltaDegrees, float elevationDeltaDegrees)
+        {
+            Vector3 forward = GetForwardVector();
+            float distance = MathF.Max(Vector3.Distance(Position, Target), 1.0f);
+            GetCameraAngles(forward, out float azimuthDegrees, out float elevationDegrees);
+            azimuthDegrees -= azimuthDeltaDegrees;
+            elevationDegrees = Math.Clamp(elevationDegrees + elevationDeltaDegrees, -89.0f, 89.0f);
+            Vector3 rotatedForward = ComputeForwardVector(azimuthDegrees, elevationDegrees);
+            Target = Position + (rotatedForward * distance);
+        }
+
+        public void Translate(float forwardDistance, float strafeDistance, float verticalDistance)
+        {
+            BuildBasis(out Vector3 forward, out Vector3 right, out _);
+            Vector3 delta = (forward * forwardDistance) + (right * strafeDistance) + (Vector3.UnitZ * verticalDistance);
+            Position += delta;
+            Target += delta;
+        }
+
+        private void BuildBasis(out Vector3 forward, out Vector3 right, out Vector3 up)
+        {
+            forward = GetForwardVector();
+            Vector3 worldUp = MathF.Abs(Vector3.Dot(forward, Vector3.UnitZ)) > 0.98f
+                ? Vector3.UnitY
+                : Vector3.UnitZ;
+
+            right = Vector3.Cross(worldUp, forward);
+            if (right.LengthSquared() <= 1e-6f)
+                right = Vector3.UnitX;
+            else
+                right = Vector3.Normalize(right);
+
+            up = Vector3.Cross(forward, right);
+            if (up.LengthSquared() <= 1e-6f)
+                up = worldUp;
+            else
+                up = Vector3.Normalize(up);
+        }
     }
 }

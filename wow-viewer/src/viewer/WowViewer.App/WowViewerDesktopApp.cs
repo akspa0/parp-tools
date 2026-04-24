@@ -30,7 +30,10 @@ namespace WowViewer.App;
 
 internal sealed class WowViewerDesktopApp : IDisposable
 {
+    private const float WorldMinimapTileCount = 64f;
+
     private sealed record PendingWorldLoadResult(int Generation, WowViewerWorldRuntimeFrameResult RuntimeFrame);
+    private sealed record PendingWorldMapDiscoveryResult(string Signature, IReadOnlyList<DiscoveredLooseWorldMap> Maps, string Summary);
 
     private sealed class WorldSpawnPickerState
     {
@@ -120,6 +123,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private Vector2D<int> _lastSyncedImGuiWindowSize;
     private Vector2D<int> _lastSyncedImGuiFramebufferSize;
     private bool _disposed;
+    private bool _graphicsResourcesReleased;
     private bool _requestInitialLoad;
     private string _statusMessage = "Configure a game-client or local asset source, then load a preview.";
     private string _lastLoadSummary = "No workspace loaded.";
@@ -137,6 +141,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private MdxGpuPreviewRenderer? _mdxGpuPreviewRenderer;
     private ModelOutputGpuRenderer? _modelOutputGpuRenderer;
     private WorldGpuPreviewRenderer? _worldGpuPreviewRenderer;
+    private WorldMinimapRenderer? _worldMinimapRenderer;
     private bool _showAboutWindow = true;
     private bool _showWorkspaceWindow = true;
     private bool _showControlWindow = true;
@@ -145,6 +150,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private bool _showWorldStatusWindow = true;
     private bool _showNavigatorWindow = true;
     private bool _showInspectorWindow = true;
+    private bool _showWorldMinimapWindow = true;
+    private bool _compactWorldSessionLayout = true;
     private bool _showFileBrowserWindow = true;
     private bool _showWorldMapBrowserWindow;
     private AssetFileBrowserState? _assetFileBrowserState;
@@ -171,7 +178,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private IReadOnlyList<DiscoveredLooseWorldMap> _discoveredWorldMaps = Array.Empty<DiscoveredLooseWorldMap>();
     private string _worldMapDiscoverySignature = string.Empty;
     private string _worldMapDiscoverySummary = "No client maps discovered yet.";
+    private Task<PendingWorldMapDiscoveryResult>? _pendingWorldMapDiscoveryTask;
     private WorldSpawnPickerState? _worldSpawnPickerState;
+    private Task<WorldSpawnPickerState>? _pendingWorldSpawnPickerTask;
     private Task<PendingWorldLoadResult>? _pendingWorldLoadTask;
     private Stopwatch? _pendingWorldLoadStopwatch;
     private int _pendingWorldLoadGeneration;
@@ -180,6 +189,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private bool _worldNavigatorShowWmo = true;
     private bool _worldNavigatorShowMdx = true;
     private string _worldNavigatorFilter = string.Empty;
+    private string _worldMinimapSourceSignature = string.Empty;
+    private float _worldMinimapZoom = 24.0f;
+    private Vector2 _worldMinimapPanOffset = Vector2.Zero;
+    private Vector2 _worldMinimapDragStart = Vector2.Zero;
+    private bool _worldMinimapDragging;
     private WorldObjectSelection? _selectedWorldObject;
     private string _datasetSearchRoot = "datasets";
     private string _datasetBuildFilter = string.Empty;
@@ -228,6 +242,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _window.Render += OnRender;
         _window.Resize += OnWindowResize;
         _window.FramebufferResize += OnFramebufferResize;
+        _window.Closing += OnWindowClosing;
         _window.Run();
     }
 
@@ -238,15 +253,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         _disposed = true;
         SaveSettings();
-        TryReleaseGraphicsResource(() => _gpuPreviewRenderer?.Dispose());
-        TryReleaseGraphicsResource(() => _wmoGpuPreviewRenderer?.Dispose());
-        TryReleaseGraphicsResource(() => _mdxGpuPreviewRenderer?.Dispose());
-        TryReleaseGraphicsResource(() => _modelOutputGpuRenderer?.Dispose());
-        TryReleaseGraphicsResource(() => _worldGpuPreviewRenderer?.Dispose());
-        TryReleaseGraphicsResource(DeletePreviewTexture);
-        TryReleaseGraphicsResource(DeleteWorldTerrainPreviewTexture);
-        _imGui?.Dispose();
+        ReleaseGraphicsResources();
         _input?.Dispose();
+        _input = null;
         if (_window != null)
         {
             _window.Load -= OnLoad;
@@ -254,8 +263,40 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _window.Render -= OnRender;
             _window.Resize -= OnWindowResize;
             _window.FramebufferResize -= OnFramebufferResize;
+            _window.Closing -= OnWindowClosing;
         }
         _window?.Dispose();
+        _window = null;
+    }
+
+    private void OnWindowClosing()
+    {
+        ReleaseGraphicsResources();
+    }
+
+    private void ReleaseGraphicsResources()
+    {
+        if (_graphicsResourcesReleased)
+            return;
+
+        _graphicsResourcesReleased = true;
+        TryReleaseGraphicsResource(() => _gpuPreviewRenderer?.Dispose());
+        TryReleaseGraphicsResource(() => _wmoGpuPreviewRenderer?.Dispose());
+        TryReleaseGraphicsResource(() => _mdxGpuPreviewRenderer?.Dispose());
+        TryReleaseGraphicsResource(() => _modelOutputGpuRenderer?.Dispose());
+        TryReleaseGraphicsResource(() => _worldGpuPreviewRenderer?.Dispose());
+        TryReleaseGraphicsResource(() => _worldMinimapRenderer?.Dispose());
+        TryReleaseGraphicsResource(DeletePreviewTexture);
+        TryReleaseGraphicsResource(DeleteWorldTerrainPreviewTexture);
+        TryReleaseGraphicsResource(() => _imGui?.Dispose());
+
+        _gpuPreviewRenderer = null;
+        _wmoGpuPreviewRenderer = null;
+        _mdxGpuPreviewRenderer = null;
+        _modelOutputGpuRenderer = null;
+        _worldGpuPreviewRenderer = null;
+        _worldMinimapRenderer = null;
+        _imGui = null;
     }
 
     private static void TryReleaseGraphicsResource(Action action)
@@ -347,9 +388,32 @@ internal sealed class WowViewerDesktopApp : IDisposable
         return _worldGpuPreviewRenderer;
     }
 
+    private WorldMinimapRenderer? EnsureWorldMinimapRenderer()
+    {
+        if (_gl == null)
+            return null;
+
+        string clientRoot = _session.World.ClientRoot?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
+            return null;
+
+        string sourceSignature = BuildWorldMinimapSourceSignature();
+        if (_worldMinimapRenderer != null && !string.Equals(sourceSignature, _worldMinimapSourceSignature, StringComparison.OrdinalIgnoreCase))
+        {
+            _worldMinimapRenderer.Dispose();
+            _worldMinimapRenderer = null;
+            _worldMinimapPanOffset = Vector2.Zero;
+        }
+
+        _worldMinimapSourceSignature = sourceSignature;
+        _worldMinimapRenderer ??= new WorldMinimapRenderer(_gl, clientRoot, _session.World.BuildLabel, _session.World.LooseOverlayRoot);
+        return _worldMinimapRenderer;
+    }
+
     private void OnUpdate(double deltaSeconds)
     {
         _imGui?.Update((float)deltaSeconds);
+        ProcessPendingBackgroundMetadataLoads();
         ProcessPendingWorldLoad();
 
         if (_requestInitialLoad)
@@ -359,6 +423,61 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
 
         HandleOpenGameFolderDialog();
+    }
+
+    private void ProcessPendingBackgroundMetadataLoads()
+    {
+        ProcessPendingWorldMapDiscovery();
+        ProcessPendingWorldSpawnPicker();
+    }
+
+    private void ProcessPendingWorldMapDiscovery()
+    {
+        if (_pendingWorldMapDiscoveryTask is not { IsCompleted: true } task)
+            return;
+
+        _pendingWorldMapDiscoveryTask = null;
+
+        try
+        {
+            PendingWorldMapDiscoveryResult completed = task.GetAwaiter().GetResult();
+            if (!string.Equals(completed.Signature, _worldMapDiscoverySignature, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            _discoveredWorldMaps = completed.Maps;
+            _worldMapDiscoverySummary = completed.Summary;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            _discoveredWorldMaps = Array.Empty<DiscoveredLooseWorldMap>();
+            _worldMapDiscoverySummary = $"Could not discover maps for the current client root: {ex.Message}";
+        }
+    }
+
+    private void ProcessPendingWorldSpawnPicker()
+    {
+        if (_pendingWorldSpawnPickerTask is not { IsCompleted: true } task)
+            return;
+
+        _pendingWorldSpawnPickerTask = null;
+
+        try
+        {
+            WorldSpawnPickerState completed = task.GetAwaiter().GetResult();
+            if (_worldSpawnPickerState is not null
+                && !string.Equals(completed.Signature, _worldSpawnPickerState.Signature, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(completed.Signature, BuildWorldSpawnPickerSignature(), StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _worldSpawnPickerState = completed;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            string signature = BuildWorldSpawnPickerSignature();
+            _worldSpawnPickerState = new WorldSpawnPickerState(signature, $"Could not load the world spawn grid: {ex.Message}", null, null, string.Empty);
+        }
     }
 
     private bool IsWorldLoadPending()
@@ -489,6 +608,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void DrawUi(float deltaSeconds)
     {
+        bool compactWorldSessionLayout = _compactWorldSessionLayout && _session.WorkspaceMode == WowViewerWorkspaceMode.WorldSession;
+
         DrawMainMenuBar();
         ImGui.DockSpaceOverViewport();
 
@@ -501,17 +622,19 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_showWorldMapBrowserWindow)
             DrawWorldMapBrowserWindow();
         DrawPreviewWindow();
-        if (_showDiagnosticsWindow)
+        if (_showDiagnosticsWindow && !compactWorldSessionLayout)
             DrawDiagnosticsWindow(deltaSeconds);
-        if (_showWorldStatusWindow)
+        if (_showWorldStatusWindow && !compactWorldSessionLayout)
             DrawWorldStatusWindow();
-        if (_showNavigatorWindow)
+        if (_showWorldMinimapWindow && !compactWorldSessionLayout)
+            DrawWorldMinimapWindow();
+        if (_showNavigatorWindow && !compactWorldSessionLayout)
             DrawWorldNavigatorWindow();
-        if (_showInspectorWindow)
+        if (_showInspectorWindow && !compactWorldSessionLayout)
             DrawWorldInspectorWindow();
-        if (_showBoundaryWindow)
+        if (_showBoundaryWindow && !compactWorldSessionLayout)
             DrawBoundaryWindow();
-        if (_showAboutWindow)
+        if (_showAboutWindow && !compactWorldSessionLayout)
             DrawAboutWindow();
 
         DrawGlobalStatusBar();
@@ -689,8 +812,10 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.MenuItem("World Map Browser", string.Empty, ref _showWorldMapBrowserWindow);
             ImGui.MenuItem("Diagnostics", string.Empty, ref _showDiagnosticsWindow);
             ImGui.MenuItem("World Status", string.Empty, ref _showWorldStatusWindow);
+            ImGui.MenuItem("World Minimap", string.Empty, ref _showWorldMinimapWindow);
             ImGui.MenuItem("World Navigator", string.Empty, ref _showNavigatorWindow);
             ImGui.MenuItem("World Inspector", string.Empty, ref _showInspectorWindow);
+            ImGui.MenuItem("Compact World Session Layout", string.Empty, ref _compactWorldSessionLayout);
             ImGui.MenuItem("Runtime Boundaries", string.Empty, ref _showBoundaryWindow);
             ImGui.MenuItem("About", string.Empty, ref _showAboutWindow);
             ImGui.EndMenu();
@@ -1549,21 +1674,18 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void DrawWorldControlContents()
     {
-        ImGui.TextWrapped("This slice keeps the world path bounded: one selected ADT tile is opened through wow-viewer-owned bootstrap, placement, visibility, and pass-planning seams. The shell now adds a first GPU terrain world preview plus navigator and inspector surfaces around that frame, but WMO and doodad rendering still remain later slices.");
+        ImGui.TextWrapped("This workspace is still a bounded world-session inspection path, not a streamed world viewer yet. In the compact layout, the source controls, load actions, layer toggles, and runtime object list all live here so the main world workflow stays in one place.");
         ImGui.Separator();
         ImGui.TextDisabled($"Workspace: {_session.GetWorkspaceLabel()}");
         ImGui.TextDisabled($"Source: {_session.World.Describe()}");
         ImGui.Separator();
 
-        ImGui.TextWrapped("Use World Navigator as the primary source-and-map lane. File menu actions are shortcuts only; the navigator now owns client selection, discovered maps, and open or reload actions in one place.");
-        if (!_showNavigatorWindow)
+        DrawWorldNavigatorSourceSection();
+
+        if (_compactWorldSessionLayout || !_showWorldMinimapWindow)
         {
-            if (ImGui.Button("Show World Navigator", new Vector2(-1, 0)))
-                _showNavigatorWindow = true;
-        }
-        else
-        {
-            ImGui.TextDisabled("World Navigator is open. Configure the client root, choose a map, and load or reload the session there.");
+            ImGui.Separator();
+            DrawWorldMinimapContents();
         }
 
         if (ImGui.Button("Use WoW335 Azeroth Baseline", new Vector2(-1, 0)))
@@ -1578,7 +1700,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_currentWorldRuntimeFrame != null)
         {
             ImGui.Separator();
-            ImGui.TextDisabled("Current Runtime Frame");
+            ImGui.TextDisabled("Current Selected Tile Frame");
             ImGui.Text($"Resolved Map: {_currentWorldRuntimeFrame.Session.ResolvedMapDirectory}");
             ImGui.Text($"Selected Tile: ({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})");
             ImGui.Text($"Visible Objects: {_currentWorldRuntimeFrame.Visibility.VisibleWmos.Count + _currentWorldRuntimeFrame.Visibility.VisibleMdx.Count}");
@@ -1600,22 +1722,24 @@ internal sealed class WowViewerDesktopApp : IDisposable
             string.IsNullOrWhiteSpace(clientRoot) ? string.Empty : Path.GetFullPath(clientRoot),
             string.IsNullOrWhiteSpace(looseOverlayRoot) ? string.Empty : Path.GetFullPath(looseOverlayRoot));
 
-        if (!force && string.Equals(_worldMapDiscoverySignature, signature, StringComparison.OrdinalIgnoreCase))
+        if (!force
+            && string.Equals(_worldMapDiscoverySignature, signature, StringComparison.OrdinalIgnoreCase)
+            && _pendingWorldMapDiscoveryTask == null)
             return;
 
         _worldMapDiscoverySignature = signature;
 
         if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
         {
+            _pendingWorldMapDiscoveryTask = null;
             _discoveredWorldMaps = Array.Empty<DiscoveredLooseWorldMap>();
             _worldMapDiscoverySummary = "Set a valid client root to discover maps from Map.dbc.";
             return;
         }
 
-        _discoveredWorldMaps = LooseWorldMapDiscovery.Discover(clientRoot, looseOverlayRoot);
-        _worldMapDiscoverySummary = _discoveredWorldMaps.Count == 0
-            ? "No Map.dbc-backed maps were found for the current client or loose overlay source."
-            : $"Loaded {_discoveredWorldMaps.Count} maps from the effective Map.dbc. Loose files, when present, patch the selected map data on top of archive data.";
+        _discoveredWorldMaps = Array.Empty<DiscoveredLooseWorldMap>();
+        _worldMapDiscoverySummary = "Discovering maps for the current client root...";
+        _pendingWorldMapDiscoveryTask = Task.Run(() => DiscoverWorldMaps(signature, clientRoot, looseOverlayRoot));
     }
 
     private void DrawWorldSpawnPickerSection()
@@ -1681,57 +1805,77 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private void RefreshWorldSpawnPickerState(bool force = false)
     {
         string clientRoot = _session.World.ClientRoot?.Trim() ?? string.Empty;
-        string buildLabel = _session.World.BuildLabel?.Trim() ?? string.Empty;
-        string looseOverlayRoot = _session.World.LooseOverlayRoot?.Trim() ?? string.Empty;
         string mapInput = _session.World.MapInput?.Trim() ?? string.Empty;
-        string signature = string.Join('|', clientRoot, buildLabel, looseOverlayRoot, mapInput);
+        string signature = BuildWorldSpawnPickerSignature();
 
-        if (!force && string.Equals(_worldSpawnPickerState?.Signature, signature, StringComparison.OrdinalIgnoreCase))
+        if (!force
+            && string.Equals(_worldSpawnPickerState?.Signature, signature, StringComparison.OrdinalIgnoreCase)
+            && _pendingWorldSpawnPickerTask == null)
             return;
 
         if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
         {
+            _pendingWorldSpawnPickerTask = null;
             _worldSpawnPickerState = new WorldSpawnPickerState(signature, "Set a valid client root to load a WDL-backed spawn grid.", null, null, string.Empty);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(mapInput))
         {
+            _pendingWorldSpawnPickerTask = null;
             _worldSpawnPickerState = new WorldSpawnPickerState(signature, "Choose a map above to load a WDL-backed spawn grid.", null, null, string.Empty);
             return;
         }
 
-        try
+        _worldSpawnPickerState = new WorldSpawnPickerState(signature, "Loading WDL-backed spawn grid for the current map...", null, null, string.Empty);
+        WowViewerWorldSessionOpenRequest request = _session.World.BuildRequest();
+        _pendingWorldSpawnPickerTask = Task.Run(() => LoadWorldSpawnPickerState(signature, request));
+    }
+
+    private string BuildWorldSpawnPickerSignature()
+    {
+        string clientRoot = _session.World.ClientRoot?.Trim() ?? string.Empty;
+        string buildLabel = _session.World.BuildLabel?.Trim() ?? string.Empty;
+        string looseOverlayRoot = _session.World.LooseOverlayRoot?.Trim() ?? string.Empty;
+        string mapInput = _session.World.MapInput?.Trim() ?? string.Empty;
+        return string.Join('|', clientRoot, buildLabel, looseOverlayRoot, mapInput);
+    }
+
+    private static PendingWorldMapDiscoveryResult DiscoverWorldMaps(string signature, string clientRoot, string looseOverlayRoot)
+    {
+        IReadOnlyList<DiscoveredLooseWorldMap> discoveredWorldMaps = LooseWorldMapDiscovery.Discover(clientRoot, looseOverlayRoot);
+        string summary = discoveredWorldMaps.Count == 0
+            ? "No Map.dbc-backed maps were found for the current client or loose overlay source."
+            : $"Loaded {discoveredWorldMaps.Count} maps from the effective Map.dbc. Loose files, when present, patch the selected map data on top of archive data.";
+        return new PendingWorldMapDiscoveryResult(signature, discoveredWorldMaps, summary);
+    }
+
+    private static WorldSpawnPickerState LoadWorldSpawnPickerState(string signature, WowViewerWorldSessionOpenRequest request)
+    {
+        WowViewerWorldSessionBootstrapResult session = WowViewerWorldSessionBootstrapper.Open(request);
+        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+        ArchiveCatalogBootstrapper.Bootstrap(
+            archiveCatalog,
+            [session.ClientRoot],
+            WowViewerArchiveBootstrap.CreateBootstrapOptions(session.BuildLabel, session.ClientRoot));
+
+        string wdlVirtualPath = $@"World\Maps\{session.ResolvedMapDirectory}\{session.ResolvedMapDirectory}.wdl";
+        WdlSummary? wdlSummary = null;
+        string wdlSourcePath = string.Empty;
+
+        if (TryReadWorldVirtualFile(session.ClientRoot, session.LooseOverlayRoot, wdlVirtualPath, archiveCatalog, out byte[]? wdlData, out string resolvedSourcePath)
+            && wdlData is { Length: > 0 })
         {
-            WowViewerWorldSessionBootstrapResult session = WowViewerWorldSessionBootstrapper.Open(_session.World.BuildRequest());
-            using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-            ArchiveCatalogBootstrapper.Bootstrap(
-                archiveCatalog,
-                [session.ClientRoot],
-                WowViewerArchiveBootstrap.CreateBootstrapOptions(session.BuildLabel, session.ClientRoot));
-
-            string wdlVirtualPath = $@"World\Maps\{session.ResolvedMapDirectory}\{session.ResolvedMapDirectory}.wdl";
-            WdlSummary? wdlSummary = null;
-            string wdlSourcePath = string.Empty;
-
-            if (TryReadWorldVirtualFile(session.ClientRoot, session.LooseOverlayRoot, wdlVirtualPath, archiveCatalog, out byte[]? wdlData, out string resolvedSourcePath)
-                && wdlData is { Length: > 0 })
-            {
-                using MemoryStream stream = new(wdlData, writable: false);
-                wdlSummary = WdlSummaryReader.Read(stream, resolvedSourcePath);
-                wdlSourcePath = resolvedSourcePath;
-            }
-
-            string summary = wdlSummary is null
-                ? $"Loaded {session.OccupiedTiles.Count} occupied tiles from WDT, but no WDL summary was found for this map. Manual tile selection still works."
-                : $"Loaded WDL-backed spawn grid for {session.ResolvedMapDirectory}: {wdlSummary.TileCount} tiles with WDL height data, {session.OccupiedTiles.Count} occupied tiles in the active map.";
-
-            _worldSpawnPickerState = new WorldSpawnPickerState(signature, summary, session, wdlSummary, wdlSourcePath);
+            using MemoryStream stream = new(wdlData, writable: false);
+            wdlSummary = WdlSummaryReader.Read(stream, resolvedSourcePath);
+            wdlSourcePath = resolvedSourcePath;
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
-        {
-            _worldSpawnPickerState = new WorldSpawnPickerState(signature, $"Could not load the world spawn grid: {ex.Message}", null, null, string.Empty);
-        }
+
+        string summary = wdlSummary is null
+            ? $"Loaded {session.OccupiedTiles.Count} occupied tiles from WDT, but no WDL summary was found for this map. Manual tile selection still works."
+            : $"Loaded WDL-backed spawn grid for {session.ResolvedMapDirectory}: {wdlSummary.TileCount} tiles with WDL height data, {session.OccupiedTiles.Count} occupied tiles in the active map.";
+
+        return new WorldSpawnPickerState(signature, summary, session, wdlSummary, wdlSourcePath);
     }
 
     private void DrawWorldSpawnPickerGrid(Vector2 origin, Vector2 extent, WorldSpawnPickerState state)
@@ -2532,13 +2676,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (hasGpuWorldPreview)
         {
             ImGui.Separator();
-            ImGui.TextDisabled("GPU World Tile View");
+            ImGui.TextDisabled("GPU Selected Tile View");
             Vector2 gpuPreviewAvailable = ImGui.GetContentRegionAvail();
             float previewWidth = MathF.Max(240f, MathF.Min(gpuPreviewAvailable.X, 720f));
             float previewHeight = MathF.Max(220f, MathF.Min(gpuPreviewAvailable.Y, previewWidth * 0.62f));
             ImGui.Image((nint)_worldGpuPreviewRenderer!.PreviewTextureHandle, new Vector2(previewWidth, previewHeight), new Vector2(0, 1), new Vector2(1, 0));
             HandleWorldPreviewInput(new Vector2(previewWidth, previewHeight));
-            ImGui.TextDisabled("Hover the tile view for camera input: left-drag look, wheel dolly, WASD move, Q/E vertical, Shift faster, double-click reset.");
+            ImGui.TextDisabled("Hover the selected tile view for camera input: left-drag look, wheel dolly, WASD move, Q/E vertical, Shift faster, double-click reset.");
             ImGui.TextDisabled($"GPU terrain triangles={_worldGpuPreviewRenderer.TerrainTriangleCount} object markers={_worldGpuPreviewRenderer.MarkerCount}");
         }
 
@@ -2563,6 +2707,33 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (ImGui.IsItemHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             TrySelectWorldObjectAtCanvasPoint(_currentWorldRuntimeFrame, origin, canvas, ImGui.GetIO().MousePos);
         DrawWorldRuntimeCanvas(origin, canvas, _currentWorldRuntimeFrame);
+
+        if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(_currentWorldRuntimeFrame, _selectedWorldObject.Value, out WorldNavigatorEntry selectedObjectEntry))
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled("Selection Details");
+            DrawWorldInspectorContents(selectedObjectEntry);
+        }
+    }
+
+    private void DrawWorldMinimapWindow()
+    {
+        ImGui.SetNextWindowSize(new Vector2(420, 520), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("World Minimap", ref _showWorldMinimapWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        if (_session.WorkspaceMode != WowViewerWorkspaceMode.WorldSession)
+        {
+            ImGui.TextWrapped("Switch to World Session to inspect or select world tiles from the minimap surface.");
+            ImGui.End();
+            return;
+        }
+
+        DrawWorldMinimapContents();
+        ImGui.End();
     }
 
     private void DrawDiagnosticsWindow(float deltaSeconds)
@@ -3146,6 +3317,72 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.End();
     }
 
+    private void DrawWorldMinimapContents()
+    {
+        string mapName = ResolveWorldMinimapMapName();
+        if (string.IsNullOrWhiteSpace(_session.World.ClientRoot) || !Directory.Exists(_session.World.ClientRoot))
+        {
+            ImGui.TextWrapped("Set a valid client root to render the world minimap.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(mapName))
+        {
+            ImGui.TextWrapped("Choose a map to load minimap tiles for the current world source.");
+            return;
+        }
+
+        WorldMinimapRenderer? minimapRenderer = EnsureWorldMinimapRenderer();
+        if (minimapRenderer == null)
+        {
+            ImGui.TextWrapped("The world minimap renderer is unavailable until a valid client-root source is attached.");
+            return;
+        }
+
+        minimapRenderer.ProcessPendingLoads();
+
+        ImGui.TextWrapped("This is the first minimap parity surface for wow-viewer World Session. Single-click selects a tile, double-click reloads it, wheel zooms, and right-drag pans.");
+        ImGui.TextDisabled($"Map: {mapName}");
+        ImGui.TextDisabled($"Minimap cache: ready={minimapRenderer.UploadedTileCount} pending={minimapRenderer.PendingTileCount} failed={minimapRenderer.FailedTileCount}");
+        if (minimapRenderer.IsBusy)
+            ImGui.ProgressBar(minimapRenderer.LoadingProgress, new Vector2(MathF.Min(220f, ImGui.GetContentRegionAvail().X), 0f), $"Minimap {minimapRenderer.LoadingProgress * 100f:F0}%");
+
+        if (ImGui.Button("Center On Loaded Tile"))
+            _worldMinimapPanOffset = Vector2.Zero;
+        ImGui.SameLine();
+        if (ImGui.Button("Reset Zoom"))
+            _worldMinimapZoom = 24.0f;
+
+        float availableWidth = ImGui.GetContentRegionAvail().X;
+        float availableHeight = MathF.Max(availableWidth, 280f);
+        float mapSize = Math.Clamp(MathF.Min(availableWidth, availableHeight), 240f, 640f);
+        Vector2 origin = ImGui.GetCursorScreenPos();
+        Vector2 extent = new(mapSize, mapSize);
+        ImGui.InvisibleButton("##WorldMinimapSurface", extent);
+        DrawWorldMinimapSurface(origin, extent, mapName, minimapRenderer);
+
+        float centerTileX = GetWorldMinimapCenterTileX();
+        float centerTileY = GetWorldMinimapCenterTileY();
+        float viewSpan = Math.Clamp(_worldMinimapZoom, 4f, WorldMinimapTileCount);
+        ClampWorldMinimapPanOffset(centerTileX, centerTileY, viewSpan);
+        float viewMinTileX = Math.Clamp(centerTileX - (viewSpan * 0.5f) + _worldMinimapPanOffset.X, 0f, WorldMinimapTileCount - viewSpan);
+        float viewMinTileY = Math.Clamp(centerTileY - (viewSpan * 0.5f) + _worldMinimapPanOffset.Y, 0f, WorldMinimapTileCount - viewSpan);
+
+        if (ImGui.IsItemHovered())
+        {
+            HandleWorldMinimapInput(origin, extent, viewMinTileX, viewMinTileY, viewSpan);
+            if (TryGetWorldMinimapHoveredTile(ImGui.GetMousePos(), origin, extent, viewMinTileX, viewMinTileY, viewSpan, out int hoveredTileX, out int hoveredTileY))
+                ImGui.SetTooltip($"tile ({hoveredTileX},{hoveredTileY})");
+        }
+
+        string selectedTileText = _session.World.TileX >= 0 && _session.World.TileY >= 0
+            ? $"Selected Tile: ({_session.World.TileX},{_session.World.TileY})"
+            : "Selected Tile: auto";
+        ImGui.TextDisabled(selectedTileText);
+        if (_currentWorldRuntimeFrame != null)
+            ImGui.TextDisabled($"Loaded Tile: ({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})");
+    }
+
     private void DrawWorldNavigatorWindow()
     {
         ImGui.SetNextWindowSize(new Vector2(460, 700), ImGuiCond.FirstUseEver);
@@ -3162,7 +3399,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        ImGui.TextWrapped("This is the primary World Session lane: choose the client, pick the map, load or reload the session, then inspect the admitted runtime objects below.");
+        ImGui.TextWrapped("This optional panel mirrors the compact world-session controls. Use it when you want a separate navigator window, otherwise keep Compact World Session Layout enabled.");
         ImGui.Separator();
         DrawWorldNavigatorSourceSection();
         ImGui.Separator();
@@ -3174,64 +3411,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        WowViewerWorldRuntimeFrameResult result = _currentWorldRuntimeFrame;
-        ImGui.TextDisabled("Filters");
-        ImGui.Checkbox("Visible Only", ref _worldNavigatorVisibleOnly);
-        ImGui.SameLine();
-        ImGui.Checkbox("WMO", ref _worldNavigatorShowWmo);
-        ImGui.SameLine();
-        ImGui.Checkbox("Doodads (MDX/M2)", ref _worldNavigatorShowMdx);
-        ImGui.InputText("Model Filter", ref _worldNavigatorFilter, 256);
-        ImGui.Separator();
-
-        List<WorldNavigatorEntry> entries = BuildWorldNavigatorEntries(result);
-        ImGui.TextDisabled($"Entries: {entries.Count}");
-        if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(result, _selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
-        {
-            string selectedAssetPath = GetNavigatorAssetPath(selectedEntry);
-            ImGui.TextDisabled("Selected Asset Path");
-            ImGui.PushTextWrapPos();
-            ImGui.TextUnformatted(selectedAssetPath);
-            ImGui.PopTextWrapPos();
-        }
-
-        ImGui.Separator();
-
-        if (!_worldNavigatorShowWmo && !_worldNavigatorShowMdx)
-        {
-            ImGui.TextWrapped("Enable at least one object family to populate the navigator.");
-            ImGui.End();
-            return;
-        }
-
-        if (entries.Count == 0)
-        {
-            ImGui.TextWrapped("No runtime objects match the current navigator filters.");
-            ImGui.End();
-            return;
-        }
-
-        if (ImGui.BeginChild("worldNavigatorList"))
-        {
-            foreach (WorldNavigatorEntry entry in entries)
-            {
-                WorldObjectSelection selection = CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
-                bool selected = _selectedWorldObject.HasValue && _selectedWorldObject.Value.Equals(selection);
-                ImGui.PushID($"{entry.Kind}:{entry.Instance.PlacementEntryIndex}:{entry.Instance.UniqueId}:{entry.Instance.ModelKey}");
-                if (ImGui.Selectable(BuildNavigatorLabel(entry), selected))
-                    SelectWorldObject(selection, entry);
-
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(GetNavigatorAssetPath(entry));
-
-                if (selected)
-                    ImGui.SetItemDefaultFocus();
-
-                ImGui.PopID();
-            }
-
-            ImGui.EndChild();
-        }
+        DrawWorldNavigatorEntriesSection(_currentWorldRuntimeFrame);
 
         ImGui.End();
     }
@@ -3266,6 +3446,72 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
+        DrawWorldInspectorContents(entry);
+
+        ImGui.End();
+    }
+
+    private void DrawWorldNavigatorEntriesSection(WowViewerWorldRuntimeFrameResult result)
+    {
+        ImGui.TextDisabled("Filters");
+        ImGui.Checkbox("Visible Only", ref _worldNavigatorVisibleOnly);
+        ImGui.SameLine();
+        ImGui.Checkbox("WMO", ref _worldNavigatorShowWmo);
+        ImGui.SameLine();
+        ImGui.Checkbox("Doodads (MDX/M2)", ref _worldNavigatorShowMdx);
+        ImGui.InputText("Model Filter", ref _worldNavigatorFilter, 256);
+        ImGui.Separator();
+
+        List<WorldNavigatorEntry> entries = BuildWorldNavigatorEntries(result);
+        ImGui.TextDisabled($"Entries: {entries.Count}");
+        if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(result, _selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
+        {
+            string selectedAssetPath = GetNavigatorAssetPath(selectedEntry);
+            ImGui.TextDisabled("Selected Asset Path");
+            ImGui.PushTextWrapPos();
+            ImGui.TextUnformatted(selectedAssetPath);
+            ImGui.PopTextWrapPos();
+        }
+
+        ImGui.Separator();
+
+        if (!_worldNavigatorShowWmo && !_worldNavigatorShowMdx)
+        {
+            ImGui.TextWrapped("Enable at least one object family to populate the navigator.");
+            return;
+        }
+
+        if (entries.Count == 0)
+        {
+            ImGui.TextWrapped("No runtime objects match the current navigator filters.");
+            return;
+        }
+
+        if (ImGui.BeginChild("worldNavigatorList"))
+        {
+            foreach (WorldNavigatorEntry entry in entries)
+            {
+                WorldObjectSelection selection = CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
+                bool selected = _selectedWorldObject.HasValue && _selectedWorldObject.Value.Equals(selection);
+                ImGui.PushID($"{entry.Kind}:{entry.Instance.PlacementEntryIndex}:{entry.Instance.UniqueId}:{entry.Instance.ModelKey}");
+                if (ImGui.Selectable(BuildNavigatorLabel(entry), selected))
+                    SelectWorldObject(selection, entry);
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(GetNavigatorAssetPath(entry));
+
+                if (selected)
+                    ImGui.SetItemDefaultFocus();
+
+                ImGui.PopID();
+            }
+
+            ImGui.EndChild();
+        }
+    }
+
+    private void DrawWorldInspectorContents(WorldNavigatorEntry entry)
+    {
         ImGui.TextDisabled("Selection");
         ImGui.Text($"Type: {(entry.Kind == WorldSelectionKind.Wmo ? "WMO" : $"{entry.Instance.AssetKind} Doodad")}");
         ImGui.Text($"Model: {entry.Instance.ModelName}");
@@ -3312,8 +3558,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.Text($"Transparent Route: {entry.HasTransparentRoute}");
             ImGui.Text($"Unbatched: {entry.RequiresUnbatchedRender}");
         }
-
-        ImGui.End();
     }
 
     private void LoadActiveWorkspace()
@@ -3969,7 +4213,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         EnsureWorldGpuPreviewRenderer()?.LoadPreview(runtimeFrame, _session.World.IgnoreTerrainHoles, _session.World.ShowHoleOverlay);
         DeletePreviewTexture();
         UploadWorldTerrainPreviewTexture(runtimeFrame.TerrainVisualSnapshot);
-        _statusMessage = $"Opened world runtime frame for {runtimeFrame.Session.ResolvedMapDirectory} tile ({runtimeFrame.SelectedTileX},{runtimeFrame.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
+        _statusMessage = $"Opened selected tile runtime frame for {runtimeFrame.Session.ResolvedMapDirectory} tile ({runtimeFrame.SelectedTileX},{runtimeFrame.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
         _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, WMO {runtimeFrame.Visibility.VisibleWmos.Count}/{runtimeFrame.WmoInstances.Count}, doodads {runtimeFrame.Visibility.VisibleMdx.Count}/{runtimeFrame.MdxInstances.Count}, terrain {runtimeFrame.TerrainVisualSnapshot.Width}x{runtimeFrame.TerrainVisualSnapshot.Height}, pending {runtimeFrame.PendingAssetKeys.Count}";
     }
 
@@ -4165,6 +4409,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _showWorldStatusWindow = settings.ShowWorldStatusWindow;
         _showNavigatorWindow = settings.ShowNavigatorWindow;
         _showInspectorWindow = settings.ShowInspectorWindow;
+        _showWorldMinimapWindow = settings.ShowWorldMinimapWindow;
+        _compactWorldSessionLayout = settings.CompactWorldSessionLayout;
     }
 
     private void SaveSettings()
@@ -4179,7 +4425,214 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _settings.ShowWorldStatusWindow = _showWorldStatusWindow;
         _settings.ShowNavigatorWindow = _showNavigatorWindow;
         _settings.ShowInspectorWindow = _showInspectorWindow;
+        _settings.ShowWorldMinimapWindow = _showWorldMinimapWindow;
+        _settings.CompactWorldSessionLayout = _compactWorldSessionLayout;
         WowViewerAppSettingsStore.Save(_settings);
+    }
+
+    private string BuildWorldMinimapSourceSignature()
+    {
+        string clientRoot = _session.World.ClientRoot?.Trim() ?? string.Empty;
+        string looseOverlayRoot = _session.World.LooseOverlayRoot?.Trim() ?? string.Empty;
+        string buildLabel = _session.World.BuildLabel?.Trim() ?? string.Empty;
+        return string.Join('|',
+            string.IsNullOrWhiteSpace(clientRoot) ? string.Empty : Path.GetFullPath(clientRoot),
+            string.IsNullOrWhiteSpace(looseOverlayRoot) ? string.Empty : Path.GetFullPath(looseOverlayRoot),
+            buildLabel);
+    }
+
+    private string ResolveWorldMinimapMapName()
+    {
+        if (!string.IsNullOrWhiteSpace(_currentWorldSession?.ResolvedMapDirectory))
+            return _currentWorldSession.ResolvedMapDirectory;
+
+        return _session.World.MapInput?.Trim() ?? string.Empty;
+    }
+
+    private IReadOnlyList<WdtTileCoordinate> GetWorldMinimapOccupiedTiles()
+    {
+        if (_currentWorldSession is not null)
+            return _currentWorldSession.OccupiedTiles;
+
+        if (_worldSpawnPickerState?.Session is not null)
+            return _worldSpawnPickerState.Session.OccupiedTiles;
+
+        return Array.Empty<WdtTileCoordinate>();
+    }
+
+    private float GetWorldMinimapCenterTileX()
+    {
+        if (_currentWorldRuntimeFrame != null)
+            return _currentWorldRuntimeFrame.SelectedTileX + 0.5f;
+        if (_session.World.TileX >= 0)
+            return _session.World.TileX + 0.5f;
+
+        IReadOnlyList<WdtTileCoordinate> occupiedTiles = GetWorldMinimapOccupiedTiles();
+        return occupiedTiles.Count > 0
+            ? occupiedTiles.Average(static tile => tile.TileX + 0.5f)
+            : 32f;
+    }
+
+    private float GetWorldMinimapCenterTileY()
+    {
+        if (_currentWorldRuntimeFrame != null)
+            return _currentWorldRuntimeFrame.SelectedTileY + 0.5f;
+        if (_session.World.TileY >= 0)
+            return _session.World.TileY + 0.5f;
+
+        IReadOnlyList<WdtTileCoordinate> occupiedTiles = GetWorldMinimapOccupiedTiles();
+        return occupiedTiles.Count > 0
+            ? occupiedTiles.Average(static tile => tile.TileY + 0.5f)
+            : 32f;
+    }
+
+    private void ClampWorldMinimapPanOffset(float centerTileX, float centerTileY, float viewSpan)
+    {
+        float baseViewMinTileX = centerTileX - (viewSpan * 0.5f);
+        float baseViewMinTileY = centerTileY - (viewSpan * 0.5f);
+        float maxViewMin = MathF.Max(0f, WorldMinimapTileCount - viewSpan);
+        _worldMinimapPanOffset = new Vector2(
+            Math.Clamp(_worldMinimapPanOffset.X, -baseViewMinTileX, maxViewMin - baseViewMinTileX),
+            Math.Clamp(_worldMinimapPanOffset.Y, -baseViewMinTileY, maxViewMin - baseViewMinTileY));
+    }
+
+    private void HandleWorldMinimapInput(Vector2 origin, Vector2 extent, float viewMinTileX, float viewMinTileY, float viewSpan)
+    {
+        ImGuiIOPtr io = ImGui.GetIO();
+        float cellSize = extent.X / MathF.Max(viewSpan, 1f);
+
+        if (MathF.Abs(io.MouseWheel) > float.Epsilon)
+        {
+            _worldMinimapZoom = Math.Clamp(_worldMinimapZoom * MathF.Pow(0.88f, io.MouseWheel), 4f, WorldMinimapTileCount);
+            return;
+        }
+
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+        {
+            _worldMinimapDragging = true;
+            _worldMinimapDragStart = ImGui.GetMousePos();
+        }
+
+        if (_worldMinimapDragging && ImGui.IsMouseDown(ImGuiMouseButton.Right))
+        {
+            Vector2 mouseDelta = ImGui.GetMousePos() - _worldMinimapDragStart;
+            if (mouseDelta.LengthSquared() > 0.01f)
+            {
+                _worldMinimapPanOffset -= new Vector2(mouseDelta.Y / cellSize, mouseDelta.X / cellSize);
+                _worldMinimapDragStart = ImGui.GetMousePos();
+            }
+        }
+        else if (_worldMinimapDragging)
+        {
+            _worldMinimapDragging = false;
+        }
+
+        if (!ImGui.IsMouseClicked(ImGuiMouseButton.Left)
+            && !ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+        {
+            return;
+        }
+
+        if (!TryGetWorldMinimapHoveredTile(ImGui.GetMousePos(), origin, extent, viewMinTileX, viewMinTileY, viewSpan, out int tileX, out int tileY))
+            return;
+
+        _session.World.TileX = tileX;
+        _session.World.TileY = tileY;
+        _statusMessage = $"Selected world minimap tile ({tileX},{tileY}).";
+
+        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left) && !IsWorldLoadPending())
+            LoadActiveWorkspace();
+    }
+
+    private static bool TryGetWorldMinimapHoveredTile(
+        Vector2 mousePosition,
+        Vector2 origin,
+        Vector2 extent,
+        float viewMinTileX,
+        float viewMinTileY,
+        float viewSpan,
+        out int tileX,
+        out int tileY)
+    {
+        tileX = -1;
+        tileY = -1;
+
+        if (mousePosition.X < origin.X || mousePosition.Y < origin.Y || mousePosition.X > origin.X + extent.X || mousePosition.Y > origin.Y + extent.Y)
+            return false;
+
+        float relativeTileY = (mousePosition.X - origin.X) / extent.X * viewSpan + viewMinTileY;
+        float relativeTileX = (mousePosition.Y - origin.Y) / extent.Y * viewSpan + viewMinTileX;
+        if (relativeTileX < 0f || relativeTileY < 0f || relativeTileX >= WorldMinimapTileCount || relativeTileY >= WorldMinimapTileCount)
+            return false;
+
+        tileX = Math.Clamp((int)MathF.Floor(relativeTileX), 0, 63);
+        tileY = Math.Clamp((int)MathF.Floor(relativeTileY), 0, 63);
+        return true;
+    }
+
+    private void DrawWorldMinimapSurface(Vector2 origin, Vector2 extent, string mapName, WorldMinimapRenderer minimapRenderer)
+    {
+        ImDrawListPtr drawList = ImGui.GetWindowDrawList();
+        float centerTileX = GetWorldMinimapCenterTileX();
+        float centerTileY = GetWorldMinimapCenterTileY();
+        float viewSpan = Math.Clamp(_worldMinimapZoom, 4f, WorldMinimapTileCount);
+        ClampWorldMinimapPanOffset(centerTileX, centerTileY, viewSpan);
+        float viewMinTileX = Math.Clamp(centerTileX - (viewSpan * 0.5f) + _worldMinimapPanOffset.X, 0f, WorldMinimapTileCount - viewSpan);
+        float viewMinTileY = Math.Clamp(centerTileY - (viewSpan * 0.5f) + _worldMinimapPanOffset.Y, 0f, WorldMinimapTileCount - viewSpan);
+        float cellSize = extent.X / viewSpan;
+
+        uint background = ImGui.ColorConvertFloat4ToU32(new Vector4(0.05f, 0.06f, 0.08f, 1.0f));
+        uint missingTile = ImGui.ColorConvertFloat4ToU32(new Vector4(0.12f, 0.13f, 0.15f, 1.0f));
+        uint occupiedBorder = ImGui.ColorConvertFloat4ToU32(new Vector4(0.56f, 0.60f, 0.66f, 0.9f));
+        uint gridLine = ImGui.ColorConvertFloat4ToU32(new Vector4(0.18f, 0.19f, 0.22f, 0.45f));
+        uint loadedColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.95f, 0.35f, 1.0f));
+        uint selectedColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.35f, 0.22f, 1.0f));
+
+        drawList.AddRectFilled(origin, origin + extent, background, 4f);
+
+        HashSet<int> occupiedTileIndices = GetWorldMinimapOccupiedTiles()
+            .Select(static tile => (tile.TileX * 64) + tile.TileY)
+            .ToHashSet();
+        int minTileX = Math.Max(0, (int)MathF.Floor(viewMinTileX));
+        int maxTileX = Math.Min(63, (int)MathF.Ceiling(viewMinTileX + viewSpan));
+        int minTileY = Math.Max(0, (int)MathF.Floor(viewMinTileY));
+        int maxTileY = Math.Min(63, (int)MathF.Ceiling(viewMinTileY + viewSpan));
+
+        for (int tileX = minTileX; tileX <= maxTileX; tileX++)
+        {
+            for (int tileY = minTileY; tileY <= maxTileY; tileY++)
+            {
+                float imageMinX = origin.X + ((tileY - viewMinTileY) * cellSize);
+                float imageMinY = origin.Y + ((tileX - viewMinTileX) * cellSize);
+                Vector2 tileMin = new(imageMinX, imageMinY);
+                Vector2 tileMax = tileMin + new Vector2(cellSize, cellSize);
+                bool occupied = occupiedTileIndices.Contains((tileX * 64) + tileY);
+
+                uint textureHandle = minimapRenderer.GetTileTexture(mapName, tileX, tileY);
+                if (textureHandle != 0)
+                    drawList.AddImage((nint)textureHandle, tileMin, tileMax, new Vector2(0, 0), new Vector2(1, 1));
+                else
+                    drawList.AddRectFilled(tileMin, tileMax, missingTile);
+
+                drawList.AddRect(tileMin, tileMax, gridLine, 0f, ImDrawFlags.None, 1f);
+                if (occupied)
+                    drawList.AddRect(tileMin, tileMax, occupiedBorder, 0f, ImDrawFlags.None, 1.3f);
+            }
+        }
+
+        if (_currentWorldRuntimeFrame != null)
+        {
+            Vector2 loadedMin = origin + new Vector2((_currentWorldRuntimeFrame.SelectedTileY - viewMinTileY) * cellSize, (_currentWorldRuntimeFrame.SelectedTileX - viewMinTileX) * cellSize);
+            Vector2 loadedMax = loadedMin + new Vector2(cellSize, cellSize);
+            drawList.AddRect(loadedMin, loadedMax, loadedColor, 0f, ImDrawFlags.None, 2.2f);
+        }
+
+        if (_session.World.TileX >= 0 && _session.World.TileY >= 0)
+        {
+            Vector2 selectedMin = origin + new Vector2((_session.World.TileY - viewMinTileY) * cellSize, (_session.World.TileX - viewMinTileX) * cellSize);
+            Vector2 selectedMax = selectedMin + new Vector2(cellSize, cellSize);
+            drawList.AddRect(selectedMin, selectedMax, selectedColor, 0f, ImDrawFlags.None, 2.4f);
+        }
     }
 
     private void SyncImGuiWindowMetrics(Vector2D<int> windowSize, Vector2D<int> framebufferSize)

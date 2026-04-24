@@ -15,7 +15,20 @@
 	- that same command still reports the expected placement inventory for the tile: `wmo=16`, `mdx=932`, `pending=0`
 - current boundary:
 	- this makes the current marker-only tile preview fast, but it intentionally gives up deep per-asset WMO metadata and exact doodad bounds on that path
-	- `world-bootstrap` on the tested alpha client still costs about `4.4 s`, so bootstrap/open remains the next performance target if further latency reduction is needed
+	- bootstrap/open was the next performance target after this slice and is now addressed separately below
+
+## Apr 24, 2026 - wow-viewer world bootstrap and frame paths now reuse one archive bootstrap instead of paying it twice
+
+- this closes the other major world-open latency regression in the current `WowViewer.App` path: `world-frame` and `world-placement-audit` were previously bootstrapping archive access in the runtime bridge and then paying a second archive bootstrap inside `WowViewerWorldSessionBootstrapper.Open(...)`
+- active behavior after this slice:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSessionBootstrapper.cs` now has an internal overload that accepts an already-bootstrapped `IArchiveCatalog`
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs` now bootstraps the archive catalog once for `Build(...)` and `AuditPlacements(...)`, then reuses that same catalog for world-session resolution and subsequent reads
+	- the public `world-bootstrap` proof command still works through the bootstrapper’s standalone public entrypoint, but no longer represents the duplicated cost that the frame path used to pay indirectly
+- bounded proof in this chat:
+	- `dotnet .\wow-viewer\src\viewer\WowViewer.App\bin\Debug\net10.0\WowViewer.App.dll world-bootstrap --client-root "H:\053-client" --build-label "0.5.3.3389" --map "Shadowfang"` now reports `loadMs=40.8` instead of about `4440.8`
+	- `dotnet .\wow-viewer\src\viewer\WowViewer.App\bin\Debug\net10.0\WowViewer.App.dll world-frame --client-root "H:\053-client" --build-label "0.5.3.3389" --map "Shadowfang" --tile-x 32 --tile-y 28` now reports `totalMs=2.40`
+- current boundary:
+	- this removes duplicated bootstrap/open work only; it does not yet add long-lived world-session caching inside the desktop app, and it does not yet change the current visibility/camera behavior that can still yield zero visible objects for a bounded proof tile
 
 ## Apr 23, 2026 - wow-viewer viewer startup now defers GPU preview renderer construction until a workspace actually needs it
 

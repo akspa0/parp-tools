@@ -22,6 +22,10 @@ internal sealed class WowViewerAppSettings
 
     public bool ShowInspectorWindow { get; set; } = true;
 
+    public bool ShowWorldMinimapWindow { get; set; } = true;
+
+    public bool CompactWorldSessionLayout { get; set; } = true;
+
     public List<KnownGoodClientEntry> KnownGoodClients { get; set; } = [];
 
     public string? LastOpenedClientPath { get; set; }

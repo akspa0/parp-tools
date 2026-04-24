@@ -215,14 +215,16 @@ internal static class WowViewerWorldRuntimeBridge
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        WowViewerWorldSessionBootstrapResult session = WowViewerWorldSessionBootstrapper.Open(
-            new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot));
-
         using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+        string clientRoot = Path.GetFullPath(request.ClientRoot);
         ArchiveCatalogBootstrapper.Bootstrap(
             archiveCatalog,
-            [session.ClientRoot],
-            WowViewerArchiveBootstrap.CreateBootstrapOptions(session.BuildLabel, session.ClientRoot));
+            [clientRoot],
+            WowViewerArchiveBootstrap.CreateBootstrapOptions(request.BuildLabel, clientRoot));
+
+        WowViewerWorldSessionBootstrapResult session = WowViewerWorldSessionBootstrapper.Open(
+            new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot),
+            archiveCatalog);
 
         List<WowViewerWorldPlacementTileSummary> populatedTiles = [];
         foreach (WdtTileCoordinate tile in session.OccupiedTiles)
@@ -263,14 +265,16 @@ internal static class WowViewerWorldRuntimeBridge
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        WowViewerWorldSessionBootstrapResult session = WowViewerWorldSessionBootstrapper.Open(
-            new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot));
-
         using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+        string clientRoot = Path.GetFullPath(request.ClientRoot);
         ArchiveCatalogBootstrapper.Bootstrap(
             archiveCatalog,
-            [session.ClientRoot],
-            WowViewerArchiveBootstrap.CreateBootstrapOptions(session.BuildLabel, session.ClientRoot));
+            [clientRoot],
+            WowViewerArchiveBootstrap.CreateBootstrapOptions(request.BuildLabel, clientRoot));
+
+        WowViewerWorldSessionBootstrapResult session = WowViewerWorldSessionBootstrapper.Open(
+            new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot),
+            archiveCatalog);
 
         ((int tileX, int tileY) selectedTile, AdtPlacementCatalog placementCatalog, string placementSourcePath) =
             ResolveTileAndPlacements(session, request.TileX, request.TileY, archiveCatalog);
