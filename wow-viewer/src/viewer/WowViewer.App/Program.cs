@@ -13,6 +13,15 @@ using WowViewer.Core.Runtime.World.Wdl;
 
 namespace WowViewer.App;
 
+internal sealed record WowViewerStartupCaptureRequest(
+    string OutputPath,
+    bool IncludeUi,
+    bool ExitAfterCapture,
+    int CaptureAfterFrames)
+{
+    public string ResolvedOutputPath { get; } = Path.GetFullPath(OutputPath);
+}
+
 internal static class Program
 {
     private static int Main(string[] args)
@@ -39,7 +48,7 @@ internal static class Program
             {
                 case "viewer":
                 case "app":
-                    using (WowViewerDesktopApp app = new(ParseViewerSession(tail)))
+                    using (WowViewerDesktopApp app = new(ParseViewerSession(tail), ParseStartupCaptureRequest(tail)))
                         app.Run();
                     return 0;
 
@@ -71,7 +80,7 @@ internal static class Program
                     return RunM2Bounds(tail);
 
                 default:
-                    using (WowViewerDesktopApp app = new(ParseViewerSession(args)))
+                    using (WowViewerDesktopApp app = new(ParseViewerSession(args), ParseStartupCaptureRequest(args)))
                         app.Run();
                     return 0;
             }
@@ -554,6 +563,31 @@ internal static class Program
         return session;
     }
 
+    private static WowViewerStartupCaptureRequest? ParseStartupCaptureRequest(string[] args)
+    {
+        string? captureOutput = GetOption(args, "--capture-output");
+        if (string.IsNullOrWhiteSpace(captureOutput))
+            return null;
+
+        string? captureAfterFramesText = GetOption(args, "--capture-after-frames");
+        int captureAfterFrames = 1;
+        if (!string.IsNullOrWhiteSpace(captureAfterFramesText)
+            && (!int.TryParse(captureAfterFramesText, out captureAfterFrames) || captureAfterFrames < 1))
+        {
+            throw new ArgumentOutOfRangeException(nameof(captureAfterFramesText), "--capture-after-frames must be an integer greater than or equal to 1.");
+        }
+
+        bool includeUi = HasFlag(args, "--capture-with-ui");
+        if (HasFlag(args, "--capture-no-ui"))
+            includeUi = false;
+
+        return new WowViewerStartupCaptureRequest(
+            captureOutput,
+            includeUi,
+            HasFlag(args, "--exit-after-capture"),
+            captureAfterFrames);
+    }
+
     private static WowViewerWorldSessionOpenRequest ParseRequiredWorldRequest(string[] args)
     {
         string? clientRoot = GetOption(args, "--client-root", "-c");
@@ -842,7 +876,7 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  wowviewer-app");
-        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world|dataset|model-output] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file|dir> | --client-root <game dir> --map <directory|id|name>] [--loose-overlay-root <dir>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--model-output-variant predicted|wdl] [--model-output-camera-azimuth <deg>] [--model-output-camera-elevation <deg>] [--model-output-camera-zoom <factor>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay]");
+        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world|dataset|model-output] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file|dir> | --client-root <game dir> --map <directory|id|name>] [--loose-overlay-root <dir>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--model-output-variant predicted|wdl] [--model-output-camera-azimuth <deg>] [--model-output-camera-elevation <deg>] [--model-output-camera-zoom <factor>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--capture-output <file.png|file.bmp>] [--capture-after-frames <n>] [--capture-with-ui|--capture-no-ui] [--exit-after-capture]");
         Console.WriteLine("  wowviewer-app m2-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp|file.png> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");

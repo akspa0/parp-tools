@@ -16,6 +16,7 @@
 	- added a real host-side asset queue consumer seam: `WowViewerWorldSceneHost.ProcessPendingAssetLoads(...)` now drives `WowViewerWorldAssetInventory.ProcessPendingLoads(...)` through `ViewerIoService.TryReadVirtualFile(...)` during background update ticks so queue ownership now performs bounded work instead of only storing pending keys
 	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSpatialSnapshot.cs` and rewired the object marker canvas plus canvas selection mapping to use host-owned planar bounds and host-owned navigator entries instead of raw-frame `PlanarMin` / `PlanarMax`, `WmoInstances`, `MdxInstances`, and visibility lists
 	- added host-owned terrain preview and preview-refresh seams in `WowViewerWorldSceneHost`, then moved shell-side world status text, selected-tile minimap highlights, inspector/debug gating, and the stale world staging metrics block onto host-owned scene, diagnostics, and asset state so `WowViewerDesktopApp` no longer reloads the GPU preview or reads those metrics directly from raw-frame fields
+	- fixed a live world-load crash in `WowViewerWorldNavigatorState`: duplicate `WorldObjectSelection` records from the current bridge/runtime path no longer blow up the navigator lookup during load, and the right-lane/status error text now wraps so runtime exceptions are visible instead of being clipped
 	- kept the current world path GPU-accelerated by continuing to render through `WorldGpuPreviewRenderer` from the new host rather than falling back to a CPU-side scene surface
 
 - validation:

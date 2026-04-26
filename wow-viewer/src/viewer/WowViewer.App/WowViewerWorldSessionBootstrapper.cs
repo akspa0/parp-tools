@@ -287,7 +287,7 @@ internal static class WowViewerWorldSessionBootstrapper
         {
             for (int tileX = 0; tileX < 64; tileX++)
             {
-                string adtVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
+                string adtVirtualPath = BuildStandardAdtVirtualPath(mapDirectory, tileX, tileY);
                 if (!TryResolveAdtProbeSource(clientRoot, looseOverlayRoot, adtVirtualPath, mapDirectory, tileX, tileY, archiveCatalog, out string tileSourcePath, out bool tileLoadedFromArchive))
                     continue;
 
@@ -342,7 +342,7 @@ internal static class WowViewerWorldSessionBootstrapper
 
     private static IEnumerable<string> EnumerateDiskAdtCandidates(string clientRoot, string mapDirectory, int tileX, int tileY)
     {
-        string fileName = $"{mapDirectory}_{tileX}_{tileY}.adt";
+        string fileName = $"{mapDirectory}_{tileY}_{tileX}.adt";
         string[] baseDirectories =
         [
             Path.Combine(clientRoot, "World", "Maps", mapDirectory),
@@ -351,6 +351,13 @@ internal static class WowViewerWorldSessionBootstrapper
 
         foreach (string baseDirectory in baseDirectories.Distinct(StringComparer.OrdinalIgnoreCase))
             yield return Path.Combine(baseDirectory, fileName);
+    }
+
+    private static string BuildStandardAdtVirtualPath(string mapDirectory, int tileX, int tileY)
+    {
+        // Match MdxViewer's row-major convention: tileX is row (y), tileY is column (x),
+        // while on-disk ADT families are named Map_x_y.
+        return $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileY}_{tileX}.adt";
     }
 
     private static string ExtractMapDirectory(string mapInput)

@@ -71,6 +71,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private readonly WowViewerSession _session;
     private readonly WowViewerSession? _initialSession;
+    private readonly WowViewerStartupCaptureRequest? _startupCaptureRequest;
     private readonly WowViewerAppSettings _settings;
     private readonly IViewerIoService _viewerIoService = new ViewerIoService();
 
@@ -176,6 +177,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private InteractiveOrbitCameraState _wmoInteractiveCamera = new();
     private InteractiveOrbitCameraState _mdxInteractiveCamera = new();
     private InteractiveOrbitCameraState _modelOutputInteractiveCamera = new();
+    private int _startupCaptureReadyFrames;
+    private bool _startupCaptureCompleted;
 
     private WowViewerWorldSessionBootstrapResult? _currentWorldSession => _worldSceneHost.CurrentSession;
 
@@ -185,12 +188,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private WorldViewCamera _worldViewCamera => _worldSceneHost.Camera;
 
-    public WowViewerDesktopApp(WowViewerSession? initialSession = null)
+    public WowViewerDesktopApp(WowViewerSession? initialSession = null, WowViewerStartupCaptureRequest? startupCaptureRequest = null)
     {
         _settings = WowViewerAppSettingsStore.Load();
         _session = _settings.Session ?? WowViewerSession.CreateDefault();
         _session.Normalize();
         _initialSession = initialSession;
+        _startupCaptureRequest = startupCaptureRequest;
         ApplySettingsToState(_settings);
         ApplyWorldSessionAdtFirstDefaults();
         if (_initialSession != null)
@@ -574,6 +578,182 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         DrawUi((float)deltaSeconds);
         _imGui.Render();
+        TryCompleteStartupCapture();
+    }
+
+    private void TryCompleteStartupCapture()
+    {
+        if (_startupCaptureCompleted
+            || _startupCaptureRequest is null
+            || _gl is null
+            || _window is null)
+        {
+            return;
+        }
+
+        bool readyToCapture = TryGetActivePreviewCaptureTarget(out uint previewTextureHandle, out int previewWidth, out int previewHeight);
+        if (!readyToCapture)
+        {
+            bool uiOnlyReady = _startupCaptureRequest.IncludeUi && !_requestInitialLoad && !IsWorldLoadPending();
+            if (!uiOnlyReady)
+            {
+                _startupCaptureReadyFrames = 0;
+                return;
+            }
+        }
+
+        _startupCaptureReadyFrames++;
+        if (_startupCaptureReadyFrames < _startupCaptureRequest.CaptureAfterFrames)
+            return;
+
+        bool captured = _startupCaptureRequest.IncludeUi
+            ? TryCaptureWindowFramebuffer(_startupCaptureRequest.ResolvedOutputPath)
+            : TryCapturePreviewTexture(previewTextureHandle, previewWidth, previewHeight, _startupCaptureRequest.ResolvedOutputPath);
+
+        _startupCaptureCompleted = true;
+        _statusMessage = captured
+            ? $"Captured startup frame: {_startupCaptureRequest.ResolvedOutputPath}"
+            : $"Startup capture failed: {_startupCaptureRequest.ResolvedOutputPath}";
+
+        if (captured && _startupCaptureRequest.ExitAfterCapture)
+            _window.Close();
+    }
+
+    private bool TryGetActivePreviewCaptureTarget(out uint textureHandle, out int width, out int height)
+    {
+        textureHandle = 0;
+        width = 0;
+        height = 0;
+
+        switch (_session.WorkspaceMode)
+        {
+            case WowViewerWorkspaceMode.WorldSession:
+                if (_currentWorldRuntimeFrame != null && _worldGpuPreviewRenderer is { HasRenderableGeometry: true, PreviewTextureHandle: not 0 } worldPreviewRenderer)
+                {
+                    textureHandle = worldPreviewRenderer.PreviewTextureHandle;
+                    width = _session.VisualSize;
+                    height = _session.VisualSize;
+                    return true;
+                }
+
+                return false;
+
+            case WowViewerWorkspaceMode.ModelOutputs:
+                if (_currentModelOutputScene != null && _modelOutputGpuRenderer is { HasRenderableGeometry: true, PreviewTextureHandle: not 0 } modelOutputRenderer)
+                {
+                    textureHandle = modelOutputRenderer.PreviewTextureHandle;
+                    width = _session.VisualSize;
+                    height = _session.VisualSize;
+                    return true;
+                }
+
+                return false;
+
+            case WowViewerWorkspaceMode.StandaloneWmo:
+                if (_currentWmoPreview != null && _wmoGpuPreviewRenderer is { HasRenderableGeometry: true, PreviewTextureHandle: not 0 } wmoPreviewRenderer)
+                {
+                    textureHandle = wmoPreviewRenderer.PreviewTextureHandle;
+                    width = _session.VisualSize;
+                    height = _session.VisualSize;
+                    return true;
+                }
+
+                return false;
+
+            case WowViewerWorkspaceMode.StandaloneMdx:
+                if (_currentMdxPreview != null && _mdxGpuPreviewRenderer is { HasRenderableGeometry: true, PreviewTextureHandle: not 0 } mdxPreviewRenderer)
+                {
+                    textureHandle = mdxPreviewRenderer.PreviewTextureHandle;
+                    width = _session.VisualSize;
+                    height = _session.VisualSize;
+                    return true;
+                }
+
+                return false;
+
+            case WowViewerWorkspaceMode.StandaloneM2:
+                if (_currentPreview != null && _gpuPreviewRenderer is { HasRenderableGeometry: true, PreviewTextureHandle: not 0 } m2PreviewRenderer)
+                {
+                    textureHandle = m2PreviewRenderer.PreviewTextureHandle;
+                    width = _session.VisualSize;
+                    height = _session.VisualSize;
+                    return true;
+                }
+
+                if (_currentPreview != null && _previewTextureHandle != 0)
+                {
+                    textureHandle = _previewTextureHandle;
+                    width = _currentPreview.FrameResult.VisualSnapshot.Width;
+                    height = _currentPreview.FrameResult.VisualSnapshot.Height;
+                    return true;
+                }
+
+                return false;
+
+            default:
+                return false;
+        }
+    }
+
+    private unsafe bool TryCapturePreviewTexture(uint textureHandle, int width, int height, string outputPath)
+    {
+        if (_gl == null || textureHandle == 0 || width <= 0 || height <= 0)
+            return false;
+
+        uint captureFramebuffer = _gl.GenFramebuffer();
+        try
+        {
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, captureFramebuffer);
+            _gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, textureHandle, 0);
+
+            byte[] rgbaPixels = new byte[checked(width * height * 4)];
+            fixed (byte* pixelPtr = rgbaPixels)
+            {
+                _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, pixelPtr);
+            }
+
+            ImageOutputWriter.WriteRgbaImage(outputPath, width, height, rgbaPixels, sourceOriginBottomLeft: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or NotSupportedException)
+        {
+            _lastError = ex.Message;
+            return false;
+        }
+        finally
+        {
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            _gl.DeleteFramebuffer(captureFramebuffer);
+        }
+    }
+
+    private unsafe bool TryCaptureWindowFramebuffer(string outputPath)
+    {
+        if (_gl == null || _window == null)
+            return false;
+
+        int width = _window.FramebufferSize.X;
+        int height = _window.FramebufferSize.Y;
+        if (width <= 0 || height <= 0)
+            return false;
+
+        try
+        {
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            byte[] rgbaPixels = new byte[checked(width * height * 4)];
+            fixed (byte* pixelPtr = rgbaPixels)
+            {
+                _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, pixelPtr);
+            }
+
+            ImageOutputWriter.WriteRgbaImage(outputPath, width, height, rgbaPixels, sourceOriginBottomLeft: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or NotSupportedException)
+        {
+            _lastError = ex.Message;
+            return false;
+        }
     }
 
     private void OnWindowResize(Vector2D<int> size)
@@ -2436,7 +2616,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (!string.IsNullOrWhiteSpace(_lastError))
         {
             ImGui.Separator();
+            ImGui.PushTextWrapPos();
             ImGui.TextColored(new Vector4(0.95f, 0.42f, 0.32f, 1.0f), _lastError);
+            ImGui.PopTextWrapPos();
         }
     }
 
@@ -2865,7 +3047,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         ImGui.TextDisabled(_session.GetWorkspaceLabel());
         if (!string.IsNullOrWhiteSpace(_lastError))
+        {
+            ImGui.PushTextWrapPos();
             ImGui.TextColored(new Vector4(0.95f, 0.42f, 0.32f, 1.0f), _lastError);
+            ImGui.PopTextWrapPos();
+        }
 
         if (!IsImplementedWorkspace(_session.WorkspaceMode))
         {

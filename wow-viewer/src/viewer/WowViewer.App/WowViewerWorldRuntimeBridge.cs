@@ -762,11 +762,11 @@ internal static class WowViewerWorldRuntimeBridge
         out string sourcePath)
     {
         string mapDirectory = session.ResolvedMapDirectory;
-        string objVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}_obj0.adt";
+        string objVirtualPath = BuildStandardAdtVirtualPath(mapDirectory, tileX, tileY, "_obj0.adt");
         if (TryReadVirtualOrLooseFile(session.ClientRoot, session.LooseOverlayRoot, objVirtualPath, archiveCatalog, out byte[]? objData, out sourcePath))
             return ReadPlacementCatalogFromBytes(objData!, sourcePath);
 
-        string rootVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
+        string rootVirtualPath = BuildStandardAdtVirtualPath(mapDirectory, tileX, tileY);
         if (TryReadVirtualOrLooseFile(session.ClientRoot, session.LooseOverlayRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out sourcePath))
             return ReadPlacementCatalogFromBytes(rootData!, sourcePath);
 
@@ -820,7 +820,7 @@ internal static class WowViewerWorldRuntimeBridge
         int wdlVisibleTileCount)
     {
         string mapDirectory = session.ResolvedMapDirectory;
-        string rootVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
+        string rootVirtualPath = BuildStandardAdtVirtualPath(mapDirectory, tileX, tileY);
         if (!TryReadVirtualOrLooseFile(session.ClientRoot, session.LooseOverlayRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out string sourcePath) || rootData is null)
         {
             if (AlphaEmbeddedAdtReader.TryReadTile(session.ClientRoot, mapDirectory, tileX, tileY, archiveCatalog, out AlphaEmbeddedAdtTileData? alphaTile))
@@ -851,7 +851,7 @@ internal static class WowViewerWorldRuntimeBridge
         IArchiveCatalog archiveCatalog)
     {
         string mapDirectory = session.ResolvedMapDirectory;
-        string rootVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
+        string rootVirtualPath = BuildStandardAdtVirtualPath(mapDirectory, tileX, tileY);
         if (!TryReadVirtualOrLooseFile(session.ClientRoot, session.LooseOverlayRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out string sourcePath) || rootData is null)
         {
             if (AlphaEmbeddedAdtReader.TryReadTile(session.ClientRoot, mapDirectory, tileX, tileY, archiveCatalog, out AlphaEmbeddedAdtTileData? alphaTile))
@@ -873,7 +873,7 @@ internal static class WowViewerWorldRuntimeBridge
         IArchiveCatalog archiveCatalog)
     {
         string mapDirectory = session.ResolvedMapDirectory;
-        string rootVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}.adt";
+        string rootVirtualPath = BuildStandardAdtVirtualPath(mapDirectory, tileX, tileY);
         if (!TryReadVirtualOrLooseFile(session.ClientRoot, session.LooseOverlayRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out string sourcePath) || rootData is null)
         {
             if (AlphaEmbeddedAdtReader.TryReadTile(session.ClientRoot, mapDirectory, tileX, tileY, archiveCatalog, out AlphaEmbeddedAdtTileData? alphaTile))
@@ -899,7 +899,7 @@ internal static class WowViewerWorldRuntimeBridge
         string rootSourcePath,
         MapFileSummary rootSummary)
     {
-        string texVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}_tex0.adt";
+        string texVirtualPath = BuildStandardAdtVirtualPath(mapDirectory, tileX, tileY, "_tex0.adt");
         if (TryReadVirtualOrLooseFile(session.ClientRoot, session.LooseOverlayRoot, texVirtualPath, archiveCatalog, out byte[]? texData, out string texSourcePath)
             && texData is { Length: > 0 })
         {
@@ -916,6 +916,13 @@ internal static class WowViewerWorldRuntimeBridge
         MapFileSummary inlineTextureSummary = MapFileSummaryReader.Read(rootStream, rootSourcePath);
         rootStream.Position = 0;
         return AdtTextureReader.Read(rootStream, inlineTextureSummary);
+    }
+
+    private static string BuildStandardAdtVirtualPath(string mapDirectory, int tileX, int tileY, string suffix = ".adt")
+    {
+        // Match MdxViewer's row-major convention: tileX is row (y), tileY is column (x),
+        // while on-disk ADT families are named Map_x_y.
+        return $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileY}_{tileX}{suffix}";
     }
 
     private static List<WorldObjectInstance> BuildWmoInstances(

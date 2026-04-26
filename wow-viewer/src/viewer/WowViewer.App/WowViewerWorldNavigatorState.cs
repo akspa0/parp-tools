@@ -45,9 +45,7 @@ internal sealed class WowViewerWorldNavigatorState
         SelectedTileY = selectedTileY;
         Entries = entries;
         DefaultSelection = defaultSelection;
-        _entriesBySelection = entries
-            .Select(entry => new KeyValuePair<WorldObjectSelection, WorldNavigatorEntry>(CreateSelection(entry, selectedTileX, selectedTileY), entry))
-            .ToDictionary(static pair => pair.Key, static pair => pair.Value);
+        _entriesBySelection = BuildSelectionLookup(entries, selectedTileX, selectedTileY);
     }
 
     public int SelectedTileX { get; }
@@ -87,8 +85,8 @@ internal sealed class WowViewerWorldNavigatorState
 
     private static List<WorldNavigatorEntry> BuildEntries(WowViewerWorldRuntimeFrameResult result)
     {
-        Dictionary<int, WorldVisibleWmoEntry> visibleWmoByIndex = result.Visibility.VisibleWmos.ToDictionary(static entry => entry.Instance.PlacementEntryIndex);
-        Dictionary<int, WorldVisibleMdxEntry> visibleMdxByIndex = result.Visibility.VisibleMdx.ToDictionary(static entry => entry.Instance.PlacementEntryIndex);
+        Dictionary<int, WorldVisibleWmoEntry> visibleWmoByIndex = BuildVisibleLookup(result.Visibility.VisibleWmos, static entry => entry.Instance.PlacementEntryIndex);
+        Dictionary<int, WorldVisibleMdxEntry> visibleMdxByIndex = BuildVisibleLookup(result.Visibility.VisibleMdx, static entry => entry.Instance.PlacementEntryIndex);
         HashSet<int> opaqueRoutes = result.PassFrame.OpaqueVisibleMdxRoutes.Select(static route => route.VisibleMdxIndex).ToHashSet();
         HashSet<int> transparentRoutes = result.PassFrame.TransparentVisibleMdxRoutes.Select(static route => route.VisibleMdxIndex).ToHashSet();
         HashSet<int> unbatchedRoutes = result.PassFrame.UnbatchedVisibleMdxIndices;
@@ -137,6 +135,47 @@ internal sealed class WowViewerWorldNavigatorState
         }
 
         return entries;
+    }
+
+    private static Dictionary<WorldObjectSelection, WorldNavigatorEntry> BuildSelectionLookup(
+        IReadOnlyList<WorldNavigatorEntry> entries,
+        int selectedTileX,
+        int selectedTileY)
+    {
+        Dictionary<WorldObjectSelection, WorldNavigatorEntry> lookup = new();
+        foreach (WorldNavigatorEntry entry in entries)
+        {
+            WorldObjectSelection selection = CreateSelection(entry, selectedTileX, selectedTileY);
+            if (!lookup.TryGetValue(selection, out WorldNavigatorEntry existing) || ShouldReplace(existing, entry))
+                lookup[selection] = entry;
+        }
+
+        return lookup;
+    }
+
+    private static Dictionary<int, TEntry> BuildVisibleLookup<TEntry>(
+        IEnumerable<TEntry> entries,
+        Func<TEntry, int> keySelector)
+    {
+        Dictionary<int, TEntry> lookup = [];
+        foreach (TEntry entry in entries)
+        {
+            int key = keySelector(entry);
+            lookup[key] = entry;
+        }
+
+        return lookup;
+    }
+
+    private static bool ShouldReplace(WorldNavigatorEntry existing, WorldNavigatorEntry candidate)
+    {
+        if (candidate.IsVisible != existing.IsVisible)
+            return candidate.IsVisible;
+
+        if (candidate.AssetReady != existing.AssetReady)
+            return candidate.AssetReady;
+
+        return (candidate.CenterDistance ?? float.MaxValue) < (existing.CenterDistance ?? float.MaxValue);
     }
 
     private static WorldNavigatorEntry CreateEntry(
