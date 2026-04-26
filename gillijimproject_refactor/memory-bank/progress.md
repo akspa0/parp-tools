@@ -1,5 +1,23 @@
 # Progress
 
+### Apr 25, 2026 - added a GPU-backed world scene host seam in wow-viewer
+
+- what changed:
+	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneHost.cs` as the first app-side world owner seam after the hard reset
+	- moved world GPU renderer construction, source-signature invalidation, runtime-frame application, and the ported `WorldViewCamera` behind that host instead of keeping them as direct `WowViewerDesktopApp` fields
+	- replaced the old `_currentWorldSession` and `_currentWorldRuntimeFrame` fields in `WowViewerDesktopApp` with host-backed accessors so remaining world-session UI reads now flow through the scene host rather than duplicated shell-owned state
+	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldAssetState.cs` and made the host own a first asset snapshot carrying pending keys plus ready or visible or culled WMO and doodad counts; world summary and diagnostics now read those asset counts from the host
+	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneSnapshot.cs` and made the host own copied world/session metadata such as resolved map path, occupied tiles, selected tile, active terrain tile count, placement source, and terrain snapshot size; the world overview, preview header, minimap center/occupied-tile helpers, world tile label, and load summary now read that host-owned scene snapshot
+	- removed the app's last direct `PendingAssetKeys` dependency on the raw runtime frame by switching the post-load summary to host-owned asset state
+	- kept the current world path GPU-accelerated by continuing to render through `WorldGpuPreviewRenderer` from the new host rather than falling back to a CPU-side scene surface
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded
+
+- boundary:
+	- this is a world-ownership extraction seam, not yet a full `MdxViewer.WorldScene` or `WorldAssetManager` port
+	- `WowViewerDesktopApp` still consumes the existing runtime-frame shape for detailed object and inspector surfaces, and `WowViewerWorldRuntimeBridge` still builds that current runtime frame
+
 ### Apr 25, 2026 - hard reset: current wow-viewer world preview branch is no longer the target implementation
 
 - what changed:

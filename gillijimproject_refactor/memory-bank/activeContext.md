@@ -1,5 +1,20 @@
 # Active Context
 
+## Apr 25, 2026 - wow-viewer now has an app-owned GPU world scene host seam
+
+- landed the first world-scene ownership extraction after the hard reset without deepening the synthetic frame architecture itself
+- active behavior after this slice:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneHost.cs` now owns the app-side world GPU renderer instance, the ported `WorldViewCamera`, runtime-frame application, and renderer source-signature invalidation
+	- `WowViewerDesktopApp` now routes world renderer creation and runtime-frame application through that host instead of owning `WorldGpuPreviewRenderer` construction and camera state directly
+	- Apr 25 follow-up: the old `_currentWorldSession` and `_currentWorldRuntimeFrame` fields in `WowViewerDesktopApp` are now host-backed accessors, so the remaining world UI reads no longer come from duplicated shell-owned state
+	- Apr 25 follow-up: `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldAssetState.cs` now gives the host a first `WorldAssetManager`-shaped ownership slice by snapshotting pending asset keys plus ready or visible or culled WMO and doodad counts from the runtime frame; world diagnostics now read those counts from the host instead of directly from the raw frame everywhere
+	- Apr 25 follow-up: `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneSnapshot.cs` now gives the host a copied scene/session snapshot with resolved map path, occupied tiles, selected tile, active terrain tile count, placement source, and terrain snapshot dimensions; the control-strip overview, world preview header, runtime summary header, minimap occupied-tile lookup, minimap center, world tile label, and post-load summary now read that host-owned scene state instead of raw bridge/session metadata
+	- the world path remains GPU-backed; the new host still renders through `WorldGpuPreviewRenderer`, so the terrain texture-array and alpha-array path stays hardware-accelerated while ownership moves out of the UI shell
+- current boundary:
+	- this is the first scene-owner seam only, not a full `MdxViewer.WorldScene` port yet
+	- `WowViewerDesktopApp` still uses the current runtime-frame shape for detailed object navigation, selection resolution, and deep diagnostics, and `WowViewerWorldRuntimeBridge` is still the producer of that frame
+	- build proof exists, but no live runtime signoff was captured for this slice
+
 ## Apr 25, 2026 - hard reset: stop deepening the current wow-viewer world preview branch
 
 - the user explicitly rejected the current `wow-viewer` world branch as the wrong direction, not just a buggy implementation

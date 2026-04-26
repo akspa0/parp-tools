@@ -55,7 +55,6 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private uint _markerVertexCount;
     private Vector3 _boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
     private Vector3 _boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
-    private readonly WorldPreviewCameraState _camera = new();
     private bool _showSky;
     private Vector3 _skyZenithColor = new(0.16f, 0.30f, 0.54f);
     private Vector3 _skyHorizonColor = new(0.58f, 0.58f, 0.50f);
@@ -137,12 +136,12 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
         _showSky = false;
         _skyBackdropStrength = 0.0f;
-        _camera.ResetToIdentity();
     }
 
-    public void LoadPreview(WowViewerWorldRuntimeFrameResult frame, bool ignoreTerrainHoles = false, bool showHoleOverlay = false)
+    public void LoadPreview(WowViewerWorldRuntimeFrameResult frame, WorldViewCamera camera, bool ignoreTerrainHoles = false, bool showHoleOverlay = false)
     {
         ArgumentNullException.ThrowIfNull(frame);
+        ArgumentNullException.ThrowIfNull(camera);
 
         ClearPreview();
         _showSky = frame.PassOptions.SkyVisible;
@@ -151,31 +150,18 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         if (showHoleOverlay)
             BuildHoleOverlayBuffers(frame);
         BuildMarkerBuffers(frame);
-        BuildCamera(frame);
+        BuildCamera(frame, camera);
     }
 
-    public void ResetCamera()
+    public unsafe void Render(int width, int height, WorldViewCamera camera)
     {
-        _camera.Reset();
-    }
+        ArgumentNullException.ThrowIfNull(camera);
 
-    public void RotateCamera(float azimuthDeltaDegrees, float elevationDeltaDegrees)
-    {
-        _camera.RotateLook(azimuthDeltaDegrees, elevationDeltaDegrees);
-    }
-
-    public void TranslateCamera(float forwardDistance, float strafeDistance, float verticalDistance)
-    {
-        _camera.Translate(forwardDistance, strafeDistance, verticalDistance);
-    }
-
-    public unsafe void Render(int width, int height)
-    {
         if (!HasRenderableGeometry)
             return;
 
         EnsureFramebuffer(width, height);
-        BuildMatrices(width, height, out Matrix4x4 view, out Matrix4x4 projection);
+        BuildMatrices(width, height, camera, out Matrix4x4 view, out Matrix4x4 projection);
         Matrix4x4 viewProjection = view * projection;
         Matrix4x4.Invert(viewProjection, out Matrix4x4 inverseViewProjection);
 
@@ -192,7 +178,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _gl.Disable(EnableCap.DepthTest);
             _gl.UseProgram(_skyProgram);
             _gl.UniformMatrix4(_skyInverseViewProjectionLocation, 1, false, (float*)&inverseViewProjection.M11);
-            _gl.Uniform3(_skyCameraPositionLocation, _camera.Position.X, _camera.Position.Y, _camera.Position.Z);
+            _gl.Uniform3(_skyCameraPositionLocation, camera.Position.X, camera.Position.Y, camera.Position.Z);
             _gl.Uniform3(_skyZenithColorLocation, _skyZenithColor.X, _skyZenithColor.Y, _skyZenithColor.Z);
             _gl.Uniform3(_skyHorizonColorLocation, _skyHorizonColor.X, _skyHorizonColor.Y, _skyHorizonColor.Z);
             _gl.Uniform3(_skyFogColorLocation, _skyFogColor.X, _skyFogColor.Y, _skyFogColor.Z);
@@ -533,7 +519,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         }
     }
 
-    private void BuildCamera(WowViewerWorldRuntimeFrameResult frame)
+    private void BuildCamera(WowViewerWorldRuntimeFrameResult frame, WorldViewCamera camera)
     {
         Vector3 boundsCenter;
         if (_boundsMin.X == float.MaxValue || _boundsMax.X == float.MinValue)
@@ -568,7 +554,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             cameraPosition = cameraTarget + new Vector3(-radius * 1.15f, -radius * 1.15f, radius * 0.60f);
         }
 
-        _camera.SetPose(cameraPosition, cameraTarget, saveAsDefault: true);
+        camera.SetPose(cameraPosition, cameraTarget, saveAsDefault: true);
     }
 
     private void ConfigureSkyColors(WowViewerWorldRuntimeFrameResult frame)
@@ -632,17 +618,17 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         return value - MathF.Floor(value);
     }
 
-    private void BuildMatrices(int width, int height, out Matrix4x4 view, out Matrix4x4 projection)
+    private void BuildMatrices(int width, int height, WorldViewCamera camera, out Matrix4x4 view, out Matrix4x4 projection)
     {
-        Vector3 forward = _camera.GetForwardVector();
+        Vector3 forward = camera.GetForwardVector();
         Vector3 worldUp = MathF.Abs(Vector3.Dot(forward, Vector3.UnitZ)) > 0.98f
             ? Vector3.UnitY
             : Vector3.UnitZ;
-        view = Matrix4x4.CreateLookAt(_camera.Position, _camera.Target, worldUp);
+        view = camera.GetViewMatrix(worldUp);
 
         Vector3 extent = _boundsMax - _boundsMin;
         float radius = MathF.Max(extent.Length() * 0.5f, 128f);
-        float distance = Vector3.Distance(_camera.Position, _camera.Target);
+        float distance = Vector3.Distance(camera.Position, camera.Target);
         float aspect = Math.Max(width, 1) / (float)Math.Max(height, 1);
         float farPlane = MathF.Max(2048f, distance + (radius * 4.0f));
         projection = Matrix4x4.CreatePerspectiveFieldOfView(WorldFieldOfViewDegrees * MathF.PI / 180.0f, aspect, 1.0f, farPlane);
@@ -1491,77 +1477,4 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _markerVertexCount = 0;
     }
 
-    private sealed class WorldPreviewCameraState
-    {
-        private static readonly Vector3 IdentityPosition = new(0f, 0f, 1f);
-        private const float IdentityYawDegrees = 180.0f;
-        private const float IdentityPitchDegrees = -10.0f;
-
-        public Vector3 Position { get; private set; } = IdentityPosition;
-
-        public Vector3 Target => Position + GetForwardVector();
-
-        public float YawDegrees { get; private set; } = IdentityYawDegrees;
-
-        public float PitchDegrees { get; private set; } = IdentityPitchDegrees;
-
-        private Vector3 DefaultPosition { get; set; } = IdentityPosition;
-
-        private float DefaultYawDegrees { get; set; } = IdentityYawDegrees;
-
-        private float DefaultPitchDegrees { get; set; } = IdentityPitchDegrees;
-
-        public void ResetToIdentity()
-        {
-            Position = IdentityPosition;
-            YawDegrees = IdentityYawDegrees;
-            PitchDegrees = IdentityPitchDegrees;
-            DefaultPosition = IdentityPosition;
-            DefaultYawDegrees = IdentityYawDegrees;
-            DefaultPitchDegrees = IdentityPitchDegrees;
-        }
-
-        public void SetPose(Vector3 position, Vector3 target, bool saveAsDefault)
-        {
-            Position = position;
-            Vector3 forward = target - position;
-            if (forward.LengthSquared() > 1e-6f)
-            {
-                forward = Vector3.Normalize(forward);
-                GetCameraAngles(forward, out float yawDegrees, out float pitchDegrees);
-                YawDegrees = yawDegrees;
-                PitchDegrees = Math.Clamp(pitchDegrees, -89.0f, 89.0f);
-            }
-
-            if (saveAsDefault)
-            {
-                DefaultPosition = position;
-                DefaultYawDegrees = YawDegrees;
-                DefaultPitchDegrees = PitchDegrees;
-            }
-        }
-
-        public void Reset()
-        {
-            Position = DefaultPosition;
-            YawDegrees = DefaultYawDegrees;
-            PitchDegrees = DefaultPitchDegrees;
-        }
-
-        public Vector3 GetForwardVector() => ComputeForwardVector(YawDegrees, PitchDegrees);
-
-        public void RotateLook(float yawDeltaDegrees, float pitchDeltaDegrees)
-        {
-            YawDegrees -= yawDeltaDegrees;
-            PitchDegrees = Math.Clamp(PitchDegrees + pitchDeltaDegrees, -89.0f, 89.0f);
-        }
-
-        public void Translate(float forwardDistance, float strafeDistance, float verticalDistance)
-        {
-            float yawRadians = YawDegrees * MathF.PI / 180.0f;
-            Vector3 forward = new(MathF.Cos(yawRadians), MathF.Sin(yawRadians), 0.0f);
-            Vector3 right = new(MathF.Sin(yawRadians), -MathF.Cos(yawRadians), 0.0f);
-            Position += (forward * forwardDistance) + (right * strafeDistance) + (Vector3.UnitZ * verticalDistance);
-        }
-    }
 }

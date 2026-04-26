@@ -116,15 +116,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private WmoPreviewLoadResult? _currentWmoPreview;
     private MdxPreviewLoadResult? _currentMdxPreview;
     private ModelOutputScene? _currentModelOutputScene;
-    private WowViewerWorldSessionBootstrapResult? _currentWorldSession;
-    private WowViewerWorldRuntimeFrameResult? _currentWorldRuntimeFrame;
     private uint _previewTextureHandle;
     private uint _worldTerrainPreviewTextureHandle;
     private M2GpuPreviewRenderer? _gpuPreviewRenderer;
     private WmoGpuPreviewRenderer? _wmoGpuPreviewRenderer;
     private MdxGpuPreviewRenderer? _mdxGpuPreviewRenderer;
     private ModelOutputGpuRenderer? _modelOutputGpuRenderer;
-    private WorldGpuPreviewRenderer? _worldGpuPreviewRenderer;
+    private readonly WowViewerWorldSceneHost _worldSceneHost = new();
     private WorldMinimapRenderer? _worldMinimapRenderer;
     private bool _showAboutWindow = true;
     private bool _showWorkspaceWindow = true;
@@ -178,7 +176,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private bool _worldNavigatorShowWmo = true;
     private bool _worldNavigatorShowMdx = true;
     private string _worldNavigatorFilter = string.Empty;
-    private string _worldGpuSourceSignature = string.Empty;
     private string _worldMinimapSourceSignature = string.Empty;
     private float _worldMinimapZoom = 24.0f;
     private Vector2 _worldMinimapPanOffset = Vector2.Zero;
@@ -205,6 +202,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private InteractiveOrbitCameraState _wmoInteractiveCamera = new();
     private InteractiveOrbitCameraState _mdxInteractiveCamera = new();
     private InteractiveOrbitCameraState _modelOutputInteractiveCamera = new();
+
+    private WowViewerWorldSessionBootstrapResult? _currentWorldSession => _worldSceneHost.CurrentSession;
+
+    private WowViewerWorldRuntimeFrameResult? _currentWorldRuntimeFrame => _worldSceneHost.CurrentFrame;
+
+    private WorldGpuPreviewRenderer? _worldGpuPreviewRenderer => _worldSceneHost.Renderer;
+
+    private WorldViewCamera _worldViewCamera => _worldSceneHost.Camera;
 
     public WowViewerDesktopApp(WowViewerSession? initialSession = null)
     {
@@ -276,7 +281,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         TryReleaseGraphicsResource(() => _wmoGpuPreviewRenderer?.Dispose());
         TryReleaseGraphicsResource(() => _mdxGpuPreviewRenderer?.Dispose());
         TryReleaseGraphicsResource(() => _modelOutputGpuRenderer?.Dispose());
-        TryReleaseGraphicsResource(() => _worldGpuPreviewRenderer?.Dispose());
+        TryReleaseGraphicsResource(_worldSceneHost.Dispose);
         TryReleaseGraphicsResource(() => _worldMinimapRenderer?.Dispose());
         TryReleaseGraphicsResource(DeletePreviewTexture);
         TryReleaseGraphicsResource(DeleteWorldTerrainPreviewTexture);
@@ -286,7 +291,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _wmoGpuPreviewRenderer = null;
         _mdxGpuPreviewRenderer = null;
         _modelOutputGpuRenderer = null;
-        _worldGpuPreviewRenderer = null;
         _worldMinimapRenderer = null;
         _imGui = null;
     }
@@ -382,15 +386,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         ViewerIoSourceKey sourceKey = ViewerIoSourceKey.Create(_session.World.ClientRoot, _session.World.BuildLabel, _session.World.LooseOverlayRoot);
         string sourceSignature = BuildWorldMinimapSourceSignature();
-        if (_worldGpuPreviewRenderer != null && !string.Equals(sourceSignature, _worldGpuSourceSignature, StringComparison.OrdinalIgnoreCase))
-        {
-            _worldGpuPreviewRenderer.Dispose();
-            _worldGpuPreviewRenderer = null;
-        }
-
-        _worldGpuSourceSignature = sourceSignature;
-        _worldGpuPreviewRenderer ??= new WorldGpuPreviewRenderer(_gl, _viewerIoService, sourceKey);
-        return _worldGpuPreviewRenderer;
+        return _worldSceneHost.EnsureRenderer(_gl, _viewerIoService, sourceKey, sourceSignature);
     }
 
     private WorldMinimapRenderer? EnsureWorldMinimapRenderer()
@@ -533,10 +529,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
                 return;
 
             _lastError = ex.Message;
-            _currentWorldSession = null;
-            _currentWorldRuntimeFrame = null;
             _selectedWorldObject = null;
-            _worldGpuPreviewRenderer?.ClearPreview();
+            _worldSceneHost.Clear();
+            _worldViewCamera.ResetToIdentity();
             DeleteWorldTerrainPreviewTexture();
             _statusMessage = "World runtime bridge failed.";
         }
@@ -594,7 +589,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_currentModelOutputScene != null && _modelOutputGpuRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.ModelOutputs)
             _modelOutputGpuRenderer.Render(_session.VisualSize, _session.VisualSize, BuildModelOutputCameraFrame());
         if (_currentWorldRuntimeFrame != null && _worldGpuPreviewRenderer?.HasRenderableGeometry == true && _session.WorkspaceMode == WowViewerWorkspaceMode.WorldSession)
-            _worldGpuPreviewRenderer.Render(_session.VisualSize, _session.VisualSize);
+            _worldGpuPreviewRenderer.Render(_session.VisualSize, _session.VisualSize, _worldViewCamera);
 
         _gl.Viewport(_window.FramebufferSize);
         _gl.ClearColor(0.08f, 0.09f, 0.11f, 1.0f);
@@ -1858,11 +1853,12 @@ internal sealed class WowViewerDesktopApp : IDisposable
     {
         if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
         {
+            WowViewerWorldSceneSnapshot sceneSnapshot = _worldSceneHost.SceneSnapshot;
             if (_currentWorldSession != null)
             {
-                ImGui.TextUnformatted(_currentWorldSession.ResolvedMapDirectory);
-                ImGui.TextDisabled($"Tile: {FormatWorldTileLabel()}  Load: {_currentWorldSession.LoadDuration.TotalMilliseconds:F1} ms");
-                ImGui.TextDisabled($"Occupied tiles: {_currentWorldSession.OccupiedTiles.Count}");
+                ImGui.TextUnformatted(sceneSnapshot.ResolvedMapDirectory);
+                ImGui.TextDisabled($"Tile: {FormatWorldTileLabel()}  Load: {sceneSnapshot.LoadDuration.TotalMilliseconds:F1} ms");
+                ImGui.TextDisabled($"Occupied tiles: {sceneSnapshot.OccupiedTiles.Count}");
             }
             else
             {
@@ -2709,7 +2705,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (ImGui.SliderFloat("##WorldCameraMoveSpeed", ref cameraSpeed, 10.0f, 1200.0f, "%.0f units/s", ImGuiSliderFlags.Logarithmic))
             _session.World.CameraMoveSpeed = cameraSpeed;
         if (ImGui.Button("Reset Camera", new Vector2(-1, 0)))
-            _worldGpuPreviewRenderer?.ResetCamera();
+            _worldViewCamera.Reset();
 
         ImGui.Separator();
 
@@ -2753,7 +2749,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _session.Normalize();
 
         if (debugSettingsChanged && _currentWorldRuntimeFrame != null)
-            EnsureWorldGpuPreviewRenderer()?.LoadPreview(_currentWorldRuntimeFrame, _session.World.IgnoreTerrainHoles, _session.World.ShowHoleOverlay);
+            EnsureWorldGpuPreviewRenderer()?.LoadPreview(_currentWorldRuntimeFrame, _worldViewCamera, _session.World.IgnoreTerrainHoles, _session.World.ShowHoleOverlay);
         }
     }
 
@@ -2785,11 +2781,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
+        WowViewerWorldSceneSnapshot sceneSnapshot = _worldSceneHost.SceneSnapshot;
+
         if (_currentWorldRuntimeFrame == null)
         {
-            ImGui.TextUnformatted(worldSession.ResolvedMapDirectory);
+            ImGui.TextUnformatted(sceneSnapshot.ResolvedMapDirectory);
             ImGui.TextDisabled($"Tiles with data: {worldSession.WdtSummary.TilesWithData}/{worldSession.WdtSummary.TotalTiles}");
-            ImGui.TextDisabled($"Occupied sample: {FormatTileSample(worldSession.OccupiedTiles, 12)}");
+            ImGui.TextDisabled($"Occupied sample: {FormatTileSample(sceneSnapshot.OccupiedTiles, 12)}");
             return;
         }
 
@@ -2818,7 +2816,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.PopStyleVar();
             if (consumedViewportWheel)
                 ImGui.SetScrollY(parentScrollY);
-            ImGui.TextDisabled($"{worldSession.ResolvedMapDirectory}  tile ({runtimeFrame.SelectedTileX},{runtimeFrame.SelectedTileY})  terrain tris {worldPreviewRenderer.TerrainTriangleCount}  markers {worldPreviewRenderer.MarkerCount}  speed {_session.World.CameraMoveSpeed:F0}");
+            ImGui.TextDisabled($"{sceneSnapshot.ResolvedMapDirectory}  tile ({sceneSnapshot.SelectedTileX},{sceneSnapshot.SelectedTileY})  terrain tris {worldPreviewRenderer.TerrainTriangleCount}  markers {worldPreviewRenderer.MarkerCount}  speed {_session.World.CameraMoveSpeed:F0}");
             ImGui.TextDisabled("Click viewport, right-drag look, wheel dolly, WASD move, Q/E vertical, Shift faster, double-click reset.");
         }
         else
@@ -3256,21 +3254,23 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        ImGui.TextUnformatted(_currentWorldSession.ResolvedMapDirectory);
-        ImGui.TextDisabled($"Root: {Path.GetFileName(_currentWorldSession.ClientRoot)}");
-        ImGui.TextDisabled($"Load: {_currentWorldSession.LoadDuration.TotalMilliseconds:F1} ms");
-        ImGui.TextDisabled($"Occupied tiles: {_currentWorldSession.OccupiedTiles.Count}");
+        WowViewerWorldSceneSnapshot sceneSnapshot = _worldSceneHost.SceneSnapshot;
+        ImGui.TextUnformatted(sceneSnapshot.ResolvedMapDirectory);
+        ImGui.TextDisabled($"Root: {Path.GetFileName(sceneSnapshot.ClientRoot)}");
+        ImGui.TextDisabled($"Load: {sceneSnapshot.LoadDuration.TotalMilliseconds:F1} ms");
+        ImGui.TextDisabled($"Occupied tiles: {sceneSnapshot.OccupiedTiles.Count}");
 
         if (_currentWorldRuntimeFrame == null)
             return;
 
-        int visibleObjects = _currentWorldRuntimeFrame.Visibility.VisibleWmos.Count + _currentWorldRuntimeFrame.Visibility.VisibleMdx.Count;
+        WowViewerWorldAssetState assetState = _worldSceneHost.AssetState;
+        int visibleObjects = assetState.VisibleObjectCount;
         ImGui.Separator();
-        ImGui.Text($"Tile: ({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})");
-        ImGui.Text($"Active ADT Tiles: {_currentWorldRuntimeFrame.ActiveTerrainTiles.Count}");
-        ImGui.Text($"Placements: WMO {_currentWorldRuntimeFrame.WmoInstances.Count} / Doodads {_currentWorldRuntimeFrame.MdxInstances.Count}");
-        if (_currentWorldRuntimeFrame.SkyboxBackdropInstances.Count > 0)
-            ImGui.Text($"Backdrop: {_currentWorldRuntimeFrame.SkyboxBackdropInstances.Count} classified placement(s)");
+        ImGui.Text($"Tile: ({sceneSnapshot.SelectedTileX},{sceneSnapshot.SelectedTileY})");
+        ImGui.Text($"Active ADT Tiles: {sceneSnapshot.ActiveTerrainTileCount}");
+        ImGui.Text($"Placements: WMO {assetState.WmoInstanceCount} / Doodads {assetState.MdxInstanceCount}");
+        if (assetState.SkyboxBackdropCount > 0)
+            ImGui.Text($"Backdrop: {assetState.SkyboxBackdropCount} classified placement(s)");
         ImGui.Text($"Visible Objects: {visibleObjects}");
         ImGui.Text($"Terrain: {FormatTerrainHeightRange(_currentWorldRuntimeFrame.TerrainTileData)}");
         ImGui.Text($"Liquid Layers: {_currentWorldRuntimeFrame.TileStageSummary.LiquidLayerCount}");
@@ -3298,6 +3298,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void DrawWorldRuntimeDiagnostics(WowViewerWorldRuntimeFrameResult result)
     {
+        WowViewerWorldAssetState assetState = _worldSceneHost.AssetState;
         int embeddedWmoMdxCount = result.WmoInstances.Sum(static instance => instance.WmoDoodadMdxCount);
         int embeddedWmoM2Count = result.WmoInstances.Sum(static instance => instance.WmoDoodadM2Count);
         int embeddedWmoUnknownCount = result.WmoInstances.Sum(static instance => instance.WmoDoodadUnknownCount);
@@ -3326,25 +3327,25 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Separator();
 
         ImGui.TextDisabled("Placement Inventory");
-        ImGui.Text($"WMO Total: {result.WmoInstances.Count}");
-        ImGui.Text($"WMO Ready: {result.ReadyWmoCount}");
+        ImGui.Text($"WMO Total: {assetState.WmoInstanceCount}");
+        ImGui.Text($"WMO Ready: {assetState.ReadyWmoCount}");
         ImGui.Text($"WMO Versions: {(string.IsNullOrEmpty(wmoVersionSummary) ? "n/a" : wmoVersionSummary)}");
         ImGui.Text($"Embedded WMO Doodads: MDX {embeddedWmoMdxCount} / M2 {embeddedWmoM2Count} / Unknown {embeddedWmoUnknownCount}");
-        ImGui.Text($"Doodad Total: {result.MdxInstances.Count}");
-        ImGui.Text($"Doodad Ready: {result.ReadyMdxCount}");
-        ImGui.Text($"Skybox Backdrop Candidates: {result.SkyboxBackdropInstances.Count}");
+        ImGui.Text($"Doodad Total: {assetState.MdxInstanceCount}");
+        ImGui.Text($"Doodad Ready: {assetState.ReadyMdxCount}");
+        ImGui.Text($"Skybox Backdrop Candidates: {assetState.SkyboxBackdropCount}");
         if (result.SkyboxBackdropInstances.Count > 0)
             ImGui.TextWrapped($"Backdrop Sample: {string.Join(", ", result.SkyboxBackdropInstances.Take(6).Select(static instance => instance.ModelPath))}");
-        ImGui.Text($"Pending Assets: {result.PendingAssetKeys.Count}");
-        if (result.PendingAssetKeys.Count > 0)
-            ImGui.TextWrapped($"Pending Sample: {string.Join(", ", result.PendingAssetKeys.Take(8))}");
+        ImGui.Text($"Pending Assets: {assetState.PendingAssetLoadCount}");
+        if (assetState.PendingAssetLoadCount > 0)
+            ImGui.TextWrapped($"Pending Sample: {string.Join(", ", assetState.PendingAssetKeys.Take(8))}");
 
         ImGui.Separator();
         ImGui.TextDisabled("Visibility");
-        ImGui.Text($"Visible WMO: {result.Visibility.VisibleWmos.Count}");
-        ImGui.Text($"Culled WMO: {result.CulledWmoCount}");
-        ImGui.Text($"Visible Doodads: {result.Visibility.VisibleMdx.Count}");
-        ImGui.Text($"Culled Doodads: {result.CulledMdxCount}");
+        ImGui.Text($"Visible WMO: {assetState.VisibleWmoCount}");
+        ImGui.Text($"Culled WMO: {assetState.CulledWmoCount}");
+        ImGui.Text($"Visible Doodads: {assetState.VisibleMdxCount}");
+        ImGui.Text($"Culled Doodads: {assetState.CulledMdxCount}");
         ImGui.Text($"Taxi Doodads: {result.Visibility.VisibleTaxiMdxCount}");
 
         ImGui.Separator();
@@ -3555,9 +3556,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"Load Source: {(result.Session.LoadedFromArchive ? "archive catalog" : "loose file")}");
         ImGui.Separator();
         ImGui.TextDisabled("Runtime Summary");
-        ImGui.Text($"WMO Visible/Total: {result.Visibility.VisibleWmos.Count}/{result.WmoInstances.Count}");
-        ImGui.Text($"Doodads Visible/Total: {result.Visibility.VisibleMdx.Count}/{result.MdxInstances.Count}");
-        ImGui.Text($"Pending Assets: {result.PendingAssetKeys.Count}");
+        ImGui.Text($"WMO Visible/Total: {_worldSceneHost.AssetState.VisibleWmoCount}/{_worldSceneHost.AssetState.WmoInstanceCount}");
+        ImGui.Text($"Doodads Visible/Total: {_worldSceneHost.AssetState.VisibleMdxCount}/{_worldSceneHost.AssetState.MdxInstanceCount}");
+        ImGui.Text($"Pending Assets: {_worldSceneHost.AssetState.PendingAssetLoadCount}");
         ImGui.Text($"Object Phase: {result.ObjectPhaseExecuted}");
         ImGui.Text($"Total Cpu Ms: {result.Stats.TotalCpuMs:F2}");
 
@@ -3861,10 +3862,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
             EnsureM2GpuPreviewRenderer()?.LoadPreview(preview);
             _currentPreview = preview;
             _currentMdxPreview = null;
-            _currentWorldSession = null;
-            _currentWorldRuntimeFrame = null;
             _selectedWorldObject = null;
-            _worldGpuPreviewRenderer?.ClearPreview();
+            _worldSceneHost.Clear();
             _mdxGpuPreviewRenderer?.ClearPreview();
             DeleteWorldTerrainPreviewTexture();
             _statusMessage = $"Loaded {preview.FrameResult.GoldenFrame.CanonicalModelPath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
@@ -3894,11 +3893,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _currentWmoPreview = preview;
             _currentPreview = null;
             _currentMdxPreview = null;
-            _currentWorldSession = null;
-            _currentWorldRuntimeFrame = null;
             _selectedWorldObject = null;
             _gpuPreviewRenderer?.ClearPreview();
-            _worldGpuPreviewRenderer?.ClearPreview();
+            _worldSceneHost.Clear();
             _mdxGpuPreviewRenderer?.ClearPreview();
             DeletePreviewTexture();
             DeleteWorldTerrainPreviewTexture();
@@ -3925,11 +3922,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             EnsureMdxGpuPreviewRenderer()?.LoadPreview(preview);
             _currentMdxPreview = preview;
             _currentPreview = null;
-            _currentWorldSession = null;
-            _currentWorldRuntimeFrame = null;
             _selectedWorldObject = null;
             _gpuPreviewRenderer?.ClearPreview();
-            _worldGpuPreviewRenderer?.ClearPreview();
+            _worldSceneHost.Clear();
             DeletePreviewTexture();
             DeleteWorldTerrainPreviewTexture();
             _statusMessage = $"Loaded {preview.Geometry.SourcePath} in {preview.LoadDuration.TotalMilliseconds:F1} ms.";
@@ -3952,12 +3947,10 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
 
         _lastError = null;
-        _currentWorldSession = null;
-        _currentWorldRuntimeFrame = null;
         _selectedWorldObject = null;
         _session.World.ShowTerrain = true;
         _session.World.ShowWdl = false;
-        _worldGpuPreviewRenderer?.ClearPreview();
+        _worldSceneHost.Clear();
         DeleteWorldTerrainPreviewTexture();
 
         WowViewerWorldRuntimeFrameRequest request = _session.World.BuildRuntimeFrameRequest();
@@ -3984,11 +3977,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             RefreshModelOutputGpuScene();
             _currentPreview = null;
             _currentMdxPreview = null;
-            _currentWorldSession = null;
-            _currentWorldRuntimeFrame = null;
             _selectedWorldObject = null;
             _gpuPreviewRenderer?.ClearPreview();
-            _worldGpuPreviewRenderer?.ClearPreview();
+            _worldSceneHost.Clear();
             _mdxGpuPreviewRenderer?.ClearPreview();
             DeletePreviewTexture();
             DeleteWorldTerrainPreviewTexture();
@@ -4191,13 +4182,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (hovered && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
         {
-            _worldGpuPreviewRenderer.ResetCamera();
+            _worldViewCamera.Reset();
             return false;
         }
 
         Vector2 mouseDelta = io.MouseDelta;
         if (acceptsMouseMotion && ImGui.IsMouseDragging(ImGuiMouseButton.Right) && mouseDelta.LengthSquared() > 0.0f)
-            _worldGpuPreviewRenderer.RotateCamera(mouseDelta.X * 0.5f, -mouseDelta.Y * 0.5f);
+            _worldViewCamera.RotateLook(mouseDelta.X * 0.5f, -mouseDelta.Y * 0.5f);
 
         float deltaSeconds = Math.Clamp(io.DeltaTime, 1.0f / 240.0f, 0.05f);
         float step = _session.World.CameraMoveSpeed * deltaSeconds;
@@ -4221,11 +4212,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
             verticalStep -= step;
 
         if (forwardStep != 0.0f || strafeStep != 0.0f || verticalStep != 0.0f)
-            _worldGpuPreviewRenderer.TranslateCamera(forwardStep, strafeStep, verticalStep);
+            _worldViewCamera.Translate(forwardStep, strafeStep, verticalStep);
 
         bool consumedWheel = acceptsWheel && MathF.Abs(io.MouseWheel) > float.Epsilon;
         if (consumedWheel)
-            _worldGpuPreviewRenderer.TranslateCamera(io.MouseWheel * _session.World.CameraMoveSpeed * 0.35f, 0.0f, 0.0f);
+            _worldViewCamera.Translate(io.MouseWheel * _session.World.CameraMoveSpeed * 0.35f, 0.0f, 0.0f);
 
         return consumedWheel;
     }
@@ -4472,8 +4463,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _currentWmoPreview = null;
         _currentMdxPreview = null;
         _currentModelOutputScene = null;
-        _currentWorldSession = null;
-        _currentWorldRuntimeFrame = null;
         _selectedWorldObject = null;
         _lastError = null;
         _lastLoadSummary = "No workspace loaded.";
@@ -4482,15 +4471,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _wmoGpuPreviewRenderer?.ClearPreview();
         _mdxGpuPreviewRenderer?.ClearPreview();
         _modelOutputGpuRenderer?.ClearScene();
-        _worldGpuPreviewRenderer?.ClearPreview();
+        _worldSceneHost.Clear();
         DeletePreviewTexture();
         DeleteWorldTerrainPreviewTexture();
     }
 
     private void ApplyLoadedWorldSession(WowViewerWorldRuntimeFrameResult runtimeFrame)
     {
-        _currentWorldRuntimeFrame = runtimeFrame;
-        _currentWorldSession = runtimeFrame.Session;
         _currentPreview = null;
         _currentMdxPreview = null;
         _currentWmoPreview = null;
@@ -4500,11 +4487,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _wmoGpuPreviewRenderer?.ClearPreview();
         _mdxGpuPreviewRenderer?.ClearPreview();
         _modelOutputGpuRenderer?.ClearScene();
-        EnsureWorldGpuPreviewRenderer()?.LoadPreview(runtimeFrame, _session.World.IgnoreTerrainHoles, _session.World.ShowHoleOverlay);
+        ViewerIoSourceKey sourceKey = ViewerIoSourceKey.Create(_session.World.ClientRoot, _session.World.BuildLabel, _session.World.LooseOverlayRoot);
+        _worldSceneHost.ApplyRuntimeFrame(_gl, _viewerIoService, sourceKey, BuildWorldMinimapSourceSignature(), runtimeFrame, _session.World.IgnoreTerrainHoles, _session.World.ShowHoleOverlay);
+        WowViewerWorldSceneSnapshot sceneSnapshot = _worldSceneHost.SceneSnapshot;
+        WowViewerWorldAssetState assetState = _worldSceneHost.AssetState;
         DeletePreviewTexture();
         UploadWorldTerrainPreviewTexture(runtimeFrame.TerrainVisualSnapshot);
-        _statusMessage = $"Opened selected tile runtime frame for {runtimeFrame.Session.ResolvedMapDirectory} tile ({runtimeFrame.SelectedTileX},{runtimeFrame.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
-        _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, WMO {runtimeFrame.Visibility.VisibleWmos.Count}/{runtimeFrame.WmoInstances.Count}, doodads {runtimeFrame.Visibility.VisibleMdx.Count}/{runtimeFrame.MdxInstances.Count}, terrain {runtimeFrame.TerrainVisualSnapshot.Width}x{runtimeFrame.TerrainVisualSnapshot.Height}, pending {runtimeFrame.PendingAssetKeys.Count}";
+        _statusMessage = $"Opened selected tile runtime frame for {sceneSnapshot.ResolvedMapDirectory} tile ({sceneSnapshot.SelectedTileX},{sceneSnapshot.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
+        _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, WMO {assetState.VisibleWmoCount}/{assetState.WmoInstanceCount}, doodads {assetState.VisibleMdxCount}/{assetState.MdxInstanceCount}, terrain {sceneSnapshot.TerrainVisualWidth}x{sceneSnapshot.TerrainVisualHeight}, pending {assetState.PendingAssetLoadCount}";
     }
 
     private unsafe void UploadPreviewTexture(M2SoftwareVisualSnapshot snapshot)
@@ -4745,7 +4735,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private IReadOnlyList<WdtTileCoordinate> GetWorldMinimapOccupiedTiles()
     {
         if (_currentWorldSession is not null)
-            return _currentWorldSession.OccupiedTiles;
+            return _worldSceneHost.SceneSnapshot.OccupiedTiles;
 
         if (_worldSpawnPickerState?.Session is not null)
             return _worldSpawnPickerState.Session.OccupiedTiles;
@@ -4755,8 +4745,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private float GetWorldMinimapCenterTileX()
     {
-        if (_currentWorldRuntimeFrame != null)
-            return _currentWorldRuntimeFrame.SelectedTileX + 0.5f;
+        if (_worldSceneHost.SceneSnapshot.HasSelectedTile)
+            return _worldSceneHost.SceneSnapshot.SelectedTileX + 0.5f;
         if (_session.World.TileX >= 0)
             return _session.World.TileX + 0.5f;
 
@@ -4768,8 +4758,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private float GetWorldMinimapCenterTileY()
     {
-        if (_currentWorldRuntimeFrame != null)
-            return _currentWorldRuntimeFrame.SelectedTileY + 0.5f;
+        if (_worldSceneHost.SceneSnapshot.HasSelectedTile)
+            return _worldSceneHost.SceneSnapshot.SelectedTileY + 0.5f;
         if (_session.World.TileY >= 0)
             return _session.World.TileY + 0.5f;
 
@@ -5315,8 +5305,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private string FormatWorldTileLabel()
     {
-        if (_currentWorldRuntimeFrame != null)
-            return $"({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})";
+        if (_worldSceneHost.SceneSnapshot.HasSelectedTile)
+            return $"({_worldSceneHost.SceneSnapshot.SelectedTileX},{_worldSceneHost.SceneSnapshot.SelectedTileY})";
 
         return _session.World.TileX >= 0 && _session.World.TileY >= 0
             ? $"({_session.World.TileX},{_session.World.TileY})"

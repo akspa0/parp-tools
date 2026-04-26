@@ -241,6 +241,13 @@ The original slices below remain historical context, but the active route is now
   - introduce a `wow-viewer` world-scene owner shaped from `MdxViewer.Terrain.WorldScene`
   - introduce a `wow-viewer` world asset manager shaped from `MdxViewer.Terrain.WorldAssetManager`
   - make the app host that ported world-scene owner instead of building synthetic runtime frames ad hoc in the UI layer
+- Apr 25 status update:
+  - landed the first ownership seam in `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneHost.cs`
+  - `WowViewerDesktopApp` now routes world GPU renderer creation, source invalidation, runtime-frame application, and the ported `WorldViewCamera` through that host
+  - Apr 25 follow-up: the old desktop-app world/session fields are now host-backed accessors, so world-session UI reads no longer depend on duplicated shell-owned copies of the runtime state
+  - Apr 25 follow-up: the host now owns a first `WorldAssetManager`-shaped asset snapshot via `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldAssetState.cs`, and world diagnostics read pending or ready or visible asset counts from that host-owned state
+  - Apr 25 follow-up: the host now also owns a copied scene/session snapshot via `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneSnapshot.cs`, and the main world overview, preview header, minimap centering, world tile label, and load summary now read that host-owned scene state instead of raw bridge/session metadata
+  - the port remains GPU-backed by keeping `WorldGpuPreviewRenderer` as the active renderer behind the new host while the larger `WorldScene` and `WorldAssetManager` ownership is still being ported
 - proof:
   - the new world path has the same core ownership shape as `MdxViewer` and the old app-side synthetic frame path is no longer the active design center
 
