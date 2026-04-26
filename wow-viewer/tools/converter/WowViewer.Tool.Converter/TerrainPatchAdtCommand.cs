@@ -74,7 +74,7 @@ internal static class TerrainPatchAdtCommand
             if (copyFamily)
                 CopyTileFamily(inputAdtPath, outputAdtPath);
 
-            results.Add(new TerrainPatchResult(null, tileName, outputAdtPath, false, null, null, null, null, null, [], null, true, null, null));
+            results.Add(new TerrainPatchResult(null, tileName, outputAdtPath, false, null, null, null, null, null, null, [], null, true, null, null));
             copiedCount++;
         }
 
@@ -87,14 +87,14 @@ internal static class TerrainPatchAdtCommand
             }
             catch (Exception ex)
             {
-                results.Add(new TerrainPatchResult(summaryPath, null, null, false, null, null, null, null, null, [], $"Failed to parse inference summary: {ex.Message}", false, null, null));
+                results.Add(new TerrainPatchResult(summaryPath, null, null, false, null, null, null, null, null, null, [], $"Failed to parse inference summary: {ex.Message}", false, null, null));
                 skippedCount++;
                 continue;
             }
 
             if (summary is null || string.IsNullOrWhiteSpace(summary.PredictedHeight257Path))
             {
-                results.Add(new TerrainPatchResult(summaryPath, null, null, false, null, null, null, null, null, [], "Summary is missing predicted_height_257_path.", false, null, null));
+                results.Add(new TerrainPatchResult(summaryPath, null, null, false, null, null, null, null, null, null, [], "Summary is missing predicted_height_257_path.", false, null, null));
                 skippedCount++;
                 continue;
             }
@@ -102,14 +102,14 @@ internal static class TerrainPatchAdtCommand
             string? tileName = ResolveTileName(summary, summaryPath);
             if (string.IsNullOrWhiteSpace(tileName))
             {
-                results.Add(new TerrainPatchResult(summaryPath, null, null, false, null, null, null, null, null, [], "Could not derive a tile name from the inference summary.", false, null, null));
+                results.Add(new TerrainPatchResult(summaryPath, null, null, false, null, null, null, null, null, null, [], "Could not derive a tile name from the inference summary.", false, null, null));
                 skippedCount++;
                 continue;
             }
 
             if (!rootAdts.TryGetValue(tileName, out string? inputAdtPath))
             {
-                results.Add(new TerrainPatchResult(summaryPath, tileName, null, false, null, null, null, null, null, [], "Matching root ADT was not found in the input directory.", false, null, null));
+                results.Add(new TerrainPatchResult(summaryPath, tileName, null, false, null, null, null, null, null, null, [], "Matching root ADT was not found in the input directory.", false, null, null));
                 skippedCount++;
                 continue;
             }
@@ -117,7 +117,7 @@ internal static class TerrainPatchAdtCommand
             string predictedHeightPath = ResolveReferencedPath(summaryPath, summary.PredictedHeight257Path);
             if (!File.Exists(predictedHeightPath))
             {
-                results.Add(new TerrainPatchResult(summaryPath, tileName, inputAdtPath, false, null, null, null, null, null, [], $"Predicted heightmap not found: {predictedHeightPath}", false, null, null));
+                results.Add(new TerrainPatchResult(summaryPath, tileName, inputAdtPath, false, null, null, null, null, null, null, [], $"Predicted heightmap not found: {predictedHeightPath}", false, null, null));
                 skippedCount++;
                 continue;
             }
@@ -149,7 +149,7 @@ internal static class TerrainPatchAdtCommand
             }
             catch (Exception ex)
             {
-                results.Add(new TerrainPatchResult(summaryPath, tileName, inputAdtPath, false, null, null, null, null, null, [], ex.Message, false, null, null));
+                results.Add(new TerrainPatchResult(summaryPath, tileName, inputAdtPath, false, null, null, null, null, null, null, [], ex.Message, false, null, null));
                 skippedCount++;
             }
         }
@@ -236,7 +236,7 @@ internal static class TerrainPatchAdtCommand
             }
             catch (Exception ex)
             {
-                results.Add(new TerrainPatchResult(patch.SummaryPath, patch.TileName, patch.InputAdtPath, false, null, null, null, null, null, [], ex.Message, false, null, null));
+                results.Add(new TerrainPatchResult(patch.SummaryPath, patch.TileName, patch.InputAdtPath, false, null, null, null, null, null, null, [], ex.Message, false, null, null));
                 skippedCount++;
             }
         }

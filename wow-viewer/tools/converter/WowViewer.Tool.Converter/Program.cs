@@ -90,6 +90,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "export-tex-json":
 		RunExportTexJson(tail);
 		break;
+	case "extract-v10-tensors":
+		RunExtractV10Tensors(tail);
+		break;
 	default:
 		Console.Error.WriteLine($"Unknown converter command '{command}'.");
 		ShowUsage();
@@ -160,6 +163,45 @@ static void RunExportTexJson(string[] args)
 	}
 
 	Console.WriteLine(json);
+}
+
+static void RunExtractV10Tensors(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: --input <root.adt> is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string? textureSource = GetOption(args, "--texture-source", "-t");
+	if (string.IsNullOrWhiteSpace(textureSource))
+	{
+		// Auto-resolve _tex0.adt sibling
+		string basePath = Path.Combine(Path.GetDirectoryName(input)!, Path.GetFileNameWithoutExtension(input));
+		textureSource = basePath + "_tex0.adt";
+		if (!File.Exists(textureSource))
+			textureSource = null;
+	}
+
+	string outputPath = !string.IsNullOrWhiteSpace(output)
+		? output
+		: Path.Combine(Path.GetDirectoryName(input)!, Path.GetFileNameWithoutExtension(input) + "_v10.npz");
+
+	try
+	{
+		TerrainTileTensorPack pack = AdtTensorPackBuilder.Build(input, textureSource);
+		NpzTileSerializer.Serialize(pack, outputPath);
+		Console.WriteLine($"Extracted v10 tensors: {outputPath}");
+		Console.WriteLine($"  Signals: {string.Join(", ", pack.AvailableSignals)}");
+	}
+	catch (Exception ex)
+	{
+		Console.Error.WriteLine($"Error extracting v10 tensors from {input}: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
 }
 
 static void RunMlCorpus(string[] args)
@@ -3839,6 +3881,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter dataset-audit --input <scan.json> [--output <audit.json>] [--limit <count>]");
 	Console.WriteLine("  wowviewer-converter dataset-curate --input <audit.json> --output <curated.json> [--report <curation-report.json>] [--limit <count>] [--max-per-group <count>] [--require-wdl|--no-require-wdl] [--require-minimap|--no-require-minimap]");
 	Console.WriteLine("  wowviewer-converter dataset-build-cache --input <audit-or-curate.json> --output-dir <dir> [--limit <count>] [--overwrite] [--include-minimap|--no-include-minimap] [--write-debug-json|--no-write-debug-json]");
+	Console.WriteLine("  wowviewer-converter extract-v10-tensors --input <root.adt> [--output <npz>] [--texture-source <tex0.adt>]");
 	Console.WriteLine("  wowviewer-converter detect --input <file>");
 	Console.WriteLine("  wowviewer-converter export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-converter terrain-patch-adt --input-adt-dir <dir> --inference-dir <dir> --output-dir <dir> [--no-copy-family] [--no-export-guide-textures] [--no-export-texture-supervision] [--export-glb] [--center-mesh] [--tile-world-size <size>] [--height-offset <value>]");

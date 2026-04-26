@@ -71,6 +71,10 @@ public static class AdtTensorPackBuilder
         (float[,]? wlMask, float[,]? wlHeight) =
             ReadWlFiles(adtPath, availableSignals);
 
+        // ── Build object footprint masks from MDDF/MODF ──────────────────────
+        (float[,]? objectMask257, float[,]? objectPreciseMask257) =
+            BuildObjectMasks(stream, fileSummary, availableSignals);
+
         // ── Compute downsampled heights ──────────────────────────────────────
         float[,]? height65 = DownsampleHeightmap(height257, 65);
         float[,]? height17 = DownsampleHeightmap(height257, 17);
@@ -99,6 +103,8 @@ public static class AdtTensorPackBuilder
             HoleMask16 = holeMask,
             WlLiquidMask = wlMask,
             WlLiquidHeight = wlHeight,
+            ObjectMask257 = objectMask257,
+            ObjectPreciseMask257 = objectPreciseMask257,
             AvailableSignals = availableSignals,
         };
     }
@@ -643,6 +649,241 @@ public static class AdtTensorPackBuilder
         signals.Add("wl_liquid_mask");
         signals.Add("wl_liquid_height");
         return (mask, heights);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Object footprint masks (MDDF/MODF → 257×257)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private const float ObjectWorldTileSize = 533.33333f;
+    private const float ObjectMapOrigin = 17066.666f;
+
+    private static (float[,]? mask, float[,]? preciseMask)
+        BuildObjectMasks(Stream stream, MapFileSummary fileSummary, HashSet<string> signals)
+    {
+        if (!TryParseAdtTileCoords(fileSummary.SourcePath, out int tileX, out int tileY))
+            return (null, null);
+
+        AdtPlacementCatalog placements;
+        try
+        {
+            placements = AdtPlacementReader.Read(stream, fileSummary);
+        }
+        catch
+        {
+            return (null, null);
+        }
+
+        if (placements.ModelPlacements.Count == 0 && placements.WorldModelPlacements.Count == 0)
+            return (null, null);
+
+        float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
+        float[,] preciseMask = new float[TileHeightmapSize, TileHeightmapSize];
+
+        foreach (AdtModelPlacement placement in placements.ModelPlacements)
+        {
+            if (!TryProjectPlacementToTilePixel(placement.Position, tileX, tileY, out int px, out int py))
+                continue;
+
+            float radiusBinary = 2f;
+            float radiusPrecise = MathF.Max(1.5f, placement.Scale * 2f);
+
+            PaintCircle(mask, px, py, radiusBinary, value: 1.0f);
+            PaintSoftCircle(preciseMask, px, py, radiusPrecise);
+        }
+
+        foreach (AdtWorldModelPlacement placement in placements.WorldModelPlacements)
+        {
+            if (!TryProjectPlacementToTilePixel(placement.Position, tileX, tileY, out int px, out int py))
+                continue;
+
+            Vector3 min = placement.BoundsMin;
+            Vector3 max = placement.BoundsMax;
+            bool hasValidBounds =
+                min.X < max.X && min.Y < max.Y &&
+                !float.IsNaN(min.X) && !float.IsNaN(max.X);
+
+            if (hasValidBounds)
+            {
+                ProjectBoundsToTilePixels(min, max, tileX, tileY,
+                    out int minPx, out int minPy, out int maxPx, out int maxPy);
+
+                PaintRect(mask, minPx, minPy, maxPx, maxPy, value: 1.0f);
+                PaintSoftRect(preciseMask, minPx, minPy, maxPx, maxPy);
+            }
+            else
+            {
+                // Fallback to centroid circle when bounds are missing
+                PaintCircle(mask, px, py, radius: 3f, value: 1.0f);
+                PaintSoftCircle(preciseMask, px, py, radius: 3f);
+            }
+        }
+
+        signals.Add("object_mask_257");
+        signals.Add("object_precise_mask_257");
+        return (mask, preciseMask);
+    }
+
+    private static bool TryProjectPlacementToTilePixel(Vector3 position, int tileX, int tileY, out int pixelX, out int pixelY)
+    {
+        pixelX = 0;
+        pixelY = 0;
+
+        (float U, float V)[] candidates =
+        [
+            ((position.X / ObjectWorldTileSize) - tileX, (position.Z / ObjectWorldTileSize) - tileY),
+            (((ObjectMapOrigin - position.Z) / ObjectWorldTileSize) - tileX, ((ObjectMapOrigin - position.X) / ObjectWorldTileSize) - tileY),
+            ((position.X / ObjectWorldTileSize) - tileX, (position.Y / ObjectWorldTileSize) - tileY),
+            (((ObjectMapOrigin - position.Y) / ObjectWorldTileSize) - tileX, ((ObjectMapOrigin - position.X) / ObjectWorldTileSize) - tileY),
+        ];
+
+        float bestScore = float.MinValue;
+        (float U, float V) best = default;
+        bool found = false;
+        foreach ((float U, float V) candidate in candidates)
+        {
+            if (candidate.U < -0.25f || candidate.U > 1.25f || candidate.V < -0.25f || candidate.V > 1.25f)
+                continue;
+
+            float distanceToCenter = MathF.Abs(candidate.U - 0.5f) + MathF.Abs(candidate.V - 0.5f);
+            float score = -distanceToCenter;
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = candidate;
+                found = true;
+            }
+        }
+
+        if (!found)
+            return false;
+
+        pixelX = Math.Clamp((int)MathF.Round(best.U * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
+        pixelY = Math.Clamp((int)MathF.Round(best.V * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
+        return true;
+    }
+
+    private static void ProjectBoundsToTilePixels(Vector3 min, Vector3 max, int tileX, int tileY,
+        out int minPx, out int minPy, out int maxPx, out int maxPy)
+    {
+        minPx = int.MaxValue;
+        minPy = int.MaxValue;
+        maxPx = int.MinValue;
+        maxPy = int.MinValue;
+
+        // Project all 4 corners of the bounds rectangle to find the pixel AABB
+        ReadOnlySpan<Vector3> corners =
+        [
+            new Vector3(min.X, min.Y, min.Z),
+            new Vector3(min.X, max.Y, min.Z),
+            new Vector3(max.X, min.Y, min.Z),
+            new Vector3(max.X, max.Y, min.Z),
+            new Vector3(min.X, min.Y, max.Z),
+            new Vector3(min.X, max.Y, max.Z),
+            new Vector3(max.X, min.Y, max.Z),
+            new Vector3(max.X, max.Y, max.Z),
+        ];
+
+        foreach (Vector3 corner in corners)
+        {
+            if (TryProjectPlacementToTilePixel(corner, tileX, tileY, out int px, out int py))
+            {
+                minPx = Math.Min(minPx, px);
+                minPy = Math.Min(minPy, py);
+                maxPx = Math.Max(maxPx, px);
+                maxPy = Math.Max(maxPy, py);
+            }
+        }
+
+        if (minPx == int.MaxValue)
+        {
+            minPx = 0; minPy = 0; maxPx = 0; maxPy = 0;
+        }
+    }
+
+    private static void PaintCircle(float[,] buffer, int cx, int cy, float radius, float value)
+    {
+        int r = (int)MathF.Ceiling(radius);
+        int rSq = r * r;
+        for (int dy = -r; dy <= r; dy++)
+        {
+            for (int dx = -r; dx <= r; dx++)
+            {
+                if ((dx * dx) + (dy * dy) > rSq)
+                    continue;
+
+                int x = cx + dx;
+                int y = cy + dy;
+                if ((uint)x >= TileHeightmapSize || (uint)y >= TileHeightmapSize)
+                    continue;
+
+                buffer[y, x] = value;
+            }
+        }
+    }
+
+    private static void PaintSoftCircle(float[,] buffer, int cx, int cy, float radius)
+    {
+        int r = (int)MathF.Ceiling(radius * 1.5f);
+        for (int dy = -r; dy <= r; dy++)
+        {
+            for (int dx = -r; dx <= r; dx++)
+            {
+                float dist = MathF.Sqrt((dx * dx) + (dy * dy));
+                if (dist > radius * 1.5f)
+                    continue;
+
+                float alpha = 1f - MathF.Min(1f, dist / radius);
+                if (alpha <= 0f)
+                    continue;
+
+                int x = cx + dx;
+                int y = cy + dy;
+                if ((uint)x >= TileHeightmapSize || (uint)y >= TileHeightmapSize)
+                    continue;
+
+                buffer[y, x] = Math.Max(buffer[y, x], alpha);
+            }
+        }
+    }
+
+    private static void PaintRect(float[,] buffer, int minX, int minY, int maxX, int maxY, float value)
+    {
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+            {
+                if ((uint)x >= TileHeightmapSize || (uint)y >= TileHeightmapSize)
+                    continue;
+                buffer[y, x] = value;
+            }
+        }
+    }
+
+    private static void PaintSoftRect(float[,] buffer, int minX, int minY, int maxX, int maxY)
+    {
+        int pad = 2;
+        for (int y = minY - pad; y <= maxY + pad; y++)
+        {
+            for (int x = minX - pad; x <= maxX + pad; x++)
+            {
+                if ((uint)x >= TileHeightmapSize || (uint)y >= TileHeightmapSize)
+                    continue;
+
+                float dx = 0f;
+                if (x < minX) dx = minX - x;
+                else if (x > maxX) dx = x - maxX;
+
+                float dy = 0f;
+                if (y < minY) dy = minY - y;
+                else if (y > maxY) dy = y - maxY;
+
+                float dist = MathF.Sqrt((dx * dx) + (dy * dy));
+                float alpha = 1f - MathF.Min(1f, dist / pad);
+
+                buffer[y, x] = Math.Max(buffer[y, x], alpha);
+            }
+        }
     }
 
     private static bool TryParseAdtTileCoords(string adtPath, out int tileX, out int tileY)
