@@ -617,6 +617,9 @@ internal static class WowViewerWorldRuntimeBridge
         int selectedTileY,
         IArchiveCatalog archiveCatalog)
     {
+        if (UsesEmbeddedAlphaWdt(session))
+            return [BuildTerrainTileFrame(session, selectedTileX, selectedTileY, archiveCatalog)];
+
         HashSet<(int TileX, int TileY)> occupiedTiles = session.OccupiedTiles
             .Select(static tile => (tile.TileX, tile.TileY))
             .ToHashSet();
@@ -635,24 +638,7 @@ internal static class WowViewerWorldRuntimeBridge
 
                 try
                 {
-                    WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, tileX, tileY, archiveCatalog, wdlVisibleTileCount: 0);
-                    WorldTerrainTileData terrainTileData = ReadRootTerrainTileData(session, tileX, tileY, archiveCatalog);
-                    WorldLiquidTileData liquidTileData = ReadRootLiquidTileData(session, tileX, tileY, archiveCatalog);
-                    AdtPlacementCatalog placementCatalog = ReadPlacementCatalogOrEmpty(
-                        session,
-                        tileX,
-                        tileY,
-                        archiveCatalog,
-                        tileStageSummary.SourcePath,
-                        out string placementSourcePath);
-                    activeTiles.Add(new WowViewerWorldRuntimeTileFrame(
-                        tileX,
-                        tileY,
-                        placementSourcePath,
-                        tileStageSummary,
-                        terrainTileData,
-                        liquidTileData,
-                        placementCatalog));
+                    activeTiles.Add(BuildTerrainTileFrame(session, tileX, tileY, archiveCatalog));
                 }
                 catch (FileNotFoundException) when (!isSelectedTile)
                 {
@@ -667,6 +653,37 @@ internal static class WowViewerWorldRuntimeBridge
             .OrderBy(static tile => tile.TileY)
             .ThenBy(static tile => tile.TileX)
             .ToArray();
+    }
+
+    private static WowViewerWorldRuntimeTileFrame BuildTerrainTileFrame(
+        WowViewerWorldSessionBootstrapResult session,
+        int tileX,
+        int tileY,
+        IArchiveCatalog archiveCatalog)
+    {
+        WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, tileX, tileY, archiveCatalog, wdlVisibleTileCount: 0);
+        WorldTerrainTileData terrainTileData = ReadRootTerrainTileData(session, tileX, tileY, archiveCatalog);
+        WorldLiquidTileData liquidTileData = ReadRootLiquidTileData(session, tileX, tileY, archiveCatalog);
+        AdtPlacementCatalog placementCatalog = ReadPlacementCatalogOrEmpty(
+            session,
+            tileX,
+            tileY,
+            archiveCatalog,
+            tileStageSummary.SourcePath,
+            out string placementSourcePath);
+        return new WowViewerWorldRuntimeTileFrame(
+            tileX,
+            tileY,
+            placementSourcePath,
+            tileStageSummary,
+            terrainTileData,
+            liquidTileData,
+            placementCatalog);
+    }
+
+    private static bool UsesEmbeddedAlphaWdt(WowViewerWorldSessionBootstrapResult session)
+    {
+        return session.WdtSummary.MainCellSizeBytes == 16;
     }
 
     private static WorldTileStageSummary BuildAggregateTileStageSummary(

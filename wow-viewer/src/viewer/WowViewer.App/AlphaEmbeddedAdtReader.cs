@@ -131,7 +131,8 @@ internal static class AlphaEmbeddedAdtReader
         }
 
         string sourcePath = $"{wdtData.SourcePath}#alpha-tile({tileX},{tileY})";
-        List<WorldTerrainChunkData> terrainChunks = ReadAlphaTerrainChunks(wdtData.WdtData, adtOffset);
+        IReadOnlyList<string> textureNames = ReadStringEntries(ReadEmbeddedSubchunkPayload(wdtData.WdtData, adtOffset, 0x04));
+        List<WorldTerrainChunkData> terrainChunks = ReadAlphaTerrainChunks(wdtData.WdtData, adtOffset, textureNames);
         WorldTerrainTileData terrainTileData = new(sourcePath, MapFileKind.Adt, terrainChunks, BuildHeightmap(terrainChunks));
         WorldLiquidTileData liquidTileData = new(sourcePath, MapFileKind.Adt, ReadAlphaLiquidChunks(wdtData.WdtData, adtOffset));
         AdtPlacementCatalog placementCatalog = BuildPlacementCatalog(wdtData, adtOffset, sourcePath);
@@ -339,12 +340,12 @@ internal static class AlphaEmbeddedAdtReader
         return offsets;
     }
 
-    private static List<WorldTerrainChunkData> ReadAlphaTerrainChunks(byte[] container, int adtOffset)
+    private static List<WorldTerrainChunkData> ReadAlphaTerrainChunks(byte[] container, int adtOffset, IReadOnlyList<string> textureNames)
     {
         List<WorldTerrainChunkData> chunks = [];
         foreach (int mcnkOffset in ReadMcnkOffsets(container, adtOffset))
         {
-            if (!TryReadAlphaTerrainChunk(container, mcnkOffset, out WorldTerrainChunkData? chunkData))
+            if (!TryReadAlphaTerrainChunk(container, mcnkOffset, textureNames, out WorldTerrainChunkData? chunkData))
                 continue;
 
             chunks.Add(chunkData);
@@ -353,7 +354,7 @@ internal static class AlphaEmbeddedAdtReader
         return chunks;
     }
 
-    private static bool TryReadAlphaTerrainChunk(byte[] container, int mcnkOffset, out WorldTerrainChunkData? chunkData)
+    private static bool TryReadAlphaTerrainChunk(byte[] container, int mcnkOffset, IReadOnlyList<string> textureNames, out WorldTerrainChunkData? chunkData)
     {
         chunkData = null;
         if (!TryReadChunkSize(container, mcnkOffset, out _) || mcnkOffset + AlphaChunkHeaderSize + AlphaMcnkHeaderSize > container.Length)
@@ -368,6 +369,7 @@ internal static class AlphaEmbeddedAdtReader
         ushort holeMask = (ushort)BitConverter.ToUInt32(container, headerOffset + 0x40);
         int chunkIndex = (indexY * 16) + indexX;
         float[]? heights = ReadAlphaInterleavedHeights(container, mcnkOffset, headerOffset);
+        IReadOnlyList<AdtTextureChunkLayer> textureLayers = ReadAlphaTextureLayers(container, mcnkOffset, headerOffset, layerCount, textureNames);
 
         chunkData = new WorldTerrainChunkData(
             chunkIndex,
@@ -379,8 +381,165 @@ internal static class AlphaEmbeddedAdtReader
             holeMask,
             (flags & AlphaLiquidFlagMask) != 0,
             false,
-            heights);
+            heights,
+            textureLayers);
         return true;
+    }
+
+    private static IReadOnlyList<AdtTextureChunkLayer> ReadAlphaTextureLayers(
+        byte[] container,
+        int mcnkOffset,
+        int headerOffset,
+        int layerCount,
+        IReadOnlyList<string> textureNames)
+    {
+        if (layerCount <= 0)
+            return [];
+
+        int layerLimit = Math.Min(layerCount, 4);
+        int mclyRelativeOffset = BitConverter.ToInt32(container, headerOffset + 0x20);
+        if (mclyRelativeOffset < 0)
+            return [];
+
+        int mclyDataOffset = mcnkOffset + AlphaChunkHeaderSize + AlphaMcnkHeaderSize + mclyRelativeOffset;
+        int mclyByteCount = Math.Min(layerLimit * 16, container.Length - mclyDataOffset);
+        if (mclyDataOffset < 0 || mclyByteCount < 16)
+            return [];
+
+        int availableLayers = Math.Min(layerLimit, mclyByteCount / 16);
+        if (availableLayers <= 0)
+            return [];
+
+        byte[] mclyData = new byte[availableLayers * 16];
+        Buffer.BlockCopy(container, mclyDataOffset, mclyData, 0, mclyData.Length);
+
+        int mcalRelativeOffset = BitConverter.ToInt32(container, headerOffset + 0x28);
+        int mcalSize = BitConverter.ToInt32(container, headerOffset + 0x2C);
+        byte[] mcalData = Array.Empty<byte>();
+        if (mcalRelativeOffset >= 0 && mcalSize > 0)
+        {
+            int mcalDataOffset = mcnkOffset + AlphaChunkHeaderSize + AlphaMcnkHeaderSize + mcalRelativeOffset;
+            int availableMcalBytes = Math.Min(mcalSize, container.Length - mcalDataOffset);
+            if (mcalDataOffset >= 0 && availableMcalBytes > 0)
+            {
+                mcalData = new byte[availableMcalBytes];
+                Buffer.BlockCopy(container, mcalDataOffset, mcalData, 0, availableMcalBytes);
+            }
+        }
+
+        return BuildAlphaTextureLayers(mclyData, mcalData, availableLayers, textureNames);
+    }
+
+    private static IReadOnlyList<AdtTextureChunkLayer> BuildAlphaTextureLayers(
+        byte[] mclyData,
+        byte[] mcalData,
+        int layerCount,
+        IReadOnlyList<string> textureNames)
+    {
+        if (layerCount <= 0 || mclyData.Length < 16)
+            return [];
+
+        List<AdtTextureChunkLayer> layers = new(layerCount);
+        int alphaOffset = 0;
+        for (int layerIndex = 0; layerIndex < layerCount; layerIndex++)
+        {
+            int entryOffset = layerIndex * 16;
+            if (entryOffset + 16 > mclyData.Length)
+                break;
+
+            uint textureId = BitConverter.ToUInt32(mclyData, entryOffset + 0x00);
+            uint flags = BitConverter.ToUInt32(mclyData, entryOffset + 0x04);
+            uint layerAlphaOffset = BitConverter.ToUInt32(mclyData, entryOffset + 0x08);
+            uint effectId = BitConverter.ToUInt32(mclyData, entryOffset + 0x0C);
+
+            string? texturePath = textureId < textureNames.Count ? textureNames[(int)textureId] : null;
+            AdtMcalDecodedLayer? decodedAlpha = null;
+            if (layerIndex > 0 && alphaOffset < mcalData.Length)
+            {
+                decodedAlpha = DecodeAlphaLayer(layerIndex, textureId, flags, layerAlphaOffset, mcalData, ref alphaOffset);
+            }
+
+            layers.Add(new AdtTextureChunkLayer(
+                layerIndex,
+                textureId,
+                texturePath,
+                flags,
+                layerAlphaOffset,
+                effectId,
+                decodedAlpha));
+        }
+
+        return layers;
+    }
+
+    private static AdtMcalDecodedLayer? DecodeAlphaLayer(
+        int layerIndex,
+        uint textureId,
+        uint flags,
+        uint alphaOffset,
+        byte[] mcalData,
+        ref int sourceOffset)
+    {
+        int remaining = mcalData.Length - sourceOffset;
+        if (remaining <= 0)
+            return null;
+
+        bool useBigAlpha = (flags & 0x200) != 0;
+        int expectedBytes = useBigAlpha ? 4096 : 2048;
+        int consumedBytes = Math.Min(expectedBytes, remaining);
+        if (consumedBytes <= 0)
+            return null;
+
+        byte[] alphaMap;
+        AdtMcalAlphaEncoding encoding;
+        bool appliedFixup = false;
+        if (!useBigAlpha)
+        {
+            int packedBytes = Math.Min(2048, consumedBytes);
+            alphaMap = new byte[4096];
+            for (int index = 0; index < packedBytes; index++)
+            {
+                byte packed = mcalData[sourceOffset + index];
+                alphaMap[index * 2] = (byte)((packed & 0x0F) * 17);
+                alphaMap[(index * 2) + 1] = (byte)((packed >> 4) * 17);
+            }
+
+            ApplyLegacyEdgeFix(alphaMap);
+            encoding = AdtMcalAlphaEncoding.Packed4Bit;
+            appliedFixup = true;
+            consumedBytes = packedBytes;
+        }
+        else
+        {
+            alphaMap = new byte[4096];
+            Buffer.BlockCopy(mcalData, sourceOffset, alphaMap, 0, Math.Min(4096, consumedBytes));
+            encoding = AdtMcalAlphaEncoding.BigAlpha;
+        }
+
+        AdtMcalDecodedLayer decoded = new(
+            layerIndex,
+            textureId,
+            flags,
+            checked((int)alphaOffset),
+            consumedBytes,
+            encoding,
+            appliedFixup,
+            alphaMap);
+
+        sourceOffset += consumedBytes;
+        return decoded;
+    }
+
+    private static void ApplyLegacyEdgeFix(byte[] alphaMap)
+    {
+        const int alphaSize = 64;
+        if (alphaMap.Length < alphaSize * alphaSize)
+            return;
+
+        for (int row = 0; row < alphaSize; row++)
+            alphaMap[(row * alphaSize) + (alphaSize - 1)] = alphaMap[(row * alphaSize) + (alphaSize - 2)];
+
+        Buffer.BlockCopy(alphaMap, (alphaSize - 2) * alphaSize, alphaMap, (alphaSize - 1) * alphaSize, alphaSize);
     }
 
     private static float[]? ReadAlphaInterleavedHeights(byte[] container, int mcnkOffset, int headerOffset)
