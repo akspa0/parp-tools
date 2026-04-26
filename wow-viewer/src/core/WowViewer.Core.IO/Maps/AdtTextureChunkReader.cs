@@ -72,16 +72,8 @@ public static class AdtTextureChunkReader
         int? headerMcalPayloadSize = null;
         int? chunkX = null;
         int? chunkY = null;
-        if (kind == MapFileKind.Adt && payload.Length >= RootMcnkHeaderSize)
+        if (TryReadEmbeddedMcnkHeader(payload, kind, out flags, out headerMcalPayloadSize, out chunkX, out chunkY))
         {
-            flags = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0, 4));
-            chunkX = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x04, 4)));
-            chunkY = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x08, 4)));
-
-            uint sizeMcal = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(RootMcnkMcalSizeOffset, 4));
-            if (sizeMcal >= ChunkHeader.SizeInBytes)
-                headerMcalPayloadSize = checked((int)(sizeMcal - ChunkHeader.SizeInBytes));
-
             startOffset = RootMcnkHeaderSize;
         }
 
@@ -125,6 +117,63 @@ public static class AdtTextureChunkReader
         }
 
         return new ParsedTextureChunkData(layers, mcalData, (flags & 0x8000u) != 0, chunkX, chunkY);
+    }
+
+    private static bool TryReadEmbeddedMcnkHeader(
+        byte[] payload,
+        MapFileKind kind,
+        out uint flags,
+        out int? headerMcalPayloadSize,
+        out int? chunkX,
+        out int? chunkY)
+    {
+        flags = 0;
+        headerMcalPayloadSize = null;
+        chunkX = null;
+        chunkY = null;
+
+        if (payload.Length < RootMcnkHeaderSize + ChunkHeader.SizeInBytes)
+            return false;
+
+        if (!ChunkHeaderReader.TryRead(payload.AsSpan(RootMcnkHeaderSize, ChunkHeader.SizeInBytes), out ChunkHeader firstSubchunk))
+            return false;
+
+        if (!IsKnownTextureSubchunk(firstSubchunk.Id))
+            return false;
+
+        int declaredSize = checked((int)firstSubchunk.Size);
+        int consumedSize = firstSubchunk.Id == AdtChunkIds.Mcnr
+            ? Math.Max(declaredSize, McnrConsumedSize)
+            : declaredSize;
+        long firstSubchunkEnd = (long)RootMcnkHeaderSize + ChunkHeader.SizeInBytes + consumedSize;
+        if (firstSubchunkEnd > payload.Length)
+            return false;
+
+        flags = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0, 4));
+        if (kind == MapFileKind.Adt || kind == MapFileKind.AdtTex)
+        {
+            chunkX = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x04, 4)));
+            chunkY = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x08, 4)));
+
+            uint sizeMcal = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(RootMcnkMcalSizeOffset, 4));
+            if (sizeMcal >= ChunkHeader.SizeInBytes)
+                headerMcalPayloadSize = checked((int)(sizeMcal - ChunkHeader.SizeInBytes));
+        }
+
+        return true;
+    }
+
+    private static bool IsKnownTextureSubchunk(FourCC id)
+    {
+        return id == AdtChunkIds.Mcvt
+            || id == AdtChunkIds.Mcnr
+            || id == AdtChunkIds.Mcly
+            || id == AdtChunkIds.Mcal
+            || id == AdtChunkIds.Mcsh
+            || id == AdtChunkIds.Mccv
+            || id == AdtChunkIds.Mclq
+            || id == AdtChunkIds.Mcrd
+            || id == AdtChunkIds.Mcrw;
     }
 
     private sealed class ParsedTextureChunkData

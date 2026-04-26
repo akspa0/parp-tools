@@ -5,6 +5,7 @@
 - status: active reset plan
 - intent: stop iterating on the current fragmented [`WowViewer.App`](../../wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs) shell and instead port the working interaction model from [`MdxViewer`](../src/MdxViewer/ViewerApp_Sidebars.cs) into `wow-viewer`
 - design rule: treat [`MdxViewer`](../src/MdxViewer) as the UI and interaction reference, but keep `wow-viewer` as the long-term code owner for runtime, rendering, and shared file I/O
+- porting rule: when `MdxViewer` already has working world behavior, use that exact code path as the functional reference and port it into `wow-viewer`; do not replace it with new guessed behavior just because the target renderer is newer or more GPU-oriented
 - viewer-first rule: `wow-viewer` must act as a world viewer first and a diagnostics/tooling surface second; diagnostic panels are subordinate to the composed world image
 - aesthetic target: prioritize the 0.5.3 client feel for this project, because the long-term purpose is exploratory data tooling and low-resolution visual restoration over early-world data, not a generic modern asset inspector
 - Apr 24 correction: a one-tile diagnostic terrain preview is no longer an acceptable definition of "World Session"; the reset must produce a navigable multi-tile world viewport with minimap, layer controls, terrain texturing, and object rendering on the critical path
@@ -67,6 +68,10 @@ A `wow-viewer` world-viewer slice is not complete unless all relevant proof is t
 - [`WowViewerWorldRuntimeBridge`](../../wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs)
 - [`WorldGpuPreviewRenderer`](../../wow-viewer/src/viewer/WowViewer.App/WorldGpuPreviewRenderer.cs)
 - existing `wow-viewer` M2, WMO, and MDX GPU preview paths under [`wow-viewer/src/viewer/WowViewer.App`](../../wow-viewer/src/viewer/WowViewer.App)
+- for terrain-family behavior, use the working `MdxViewer` path as the behavior reference before changing `wow-viewer`:
+  - split-ADT sourcing and chunk ownership in [`StandardTerrainAdapter`](../src/MdxViewer/Terrain/StandardTerrainAdapter.cs)
+  - GPU terrain-layer and alpha-array binding in [`TerrainTileMeshBuilder`](../src/MdxViewer/Terrain/TerrainTileMeshBuilder.cs)
+  - terrain layer blend/material behavior in [`TerrainRenderer`](../src/MdxViewer/Terrain/TerrainRenderer.cs)
 - old [`WorldScene`](../src/MdxViewer/Terrain/WorldScene.cs) sky-dome and skybox handling is reference material only; new design ownership belongs in `wow-viewer`
 
 ### World composition source of truth

@@ -19,8 +19,8 @@ public sealed class WorldTerrainTileBuilderTests
         Assert.Equal(10, terrainTile.HoleChunkCount);
         Assert.Equal(0, terrainTile.LiquidFlagChunkCount);
         Assert.Equal(0, terrainTile.VertexColorChunkCount);
-        Assert.Equal(0, terrainTile.TextureLayerChunkCount);
-        Assert.Equal(0, terrainTile.TotalTextureLayerCount);
+        Assert.Equal(256, terrainTile.TextureLayerChunkCount);
+        Assert.Equal(775, terrainTile.TotalTextureLayerCount);
         Assert.Equal(1, terrainTile.DistinctAreaIdCount);
         Assert.NotNull(terrainTile.Heightmap);
         Assert.Equal(257, terrainTile.Heightmap!.Width);

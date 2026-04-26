@@ -5,11 +5,13 @@
 - what changed:
 	- added reusable `AdtTextureChunkReader` chunk parsing in `wow-viewer/src/core/WowViewer.Core.IO/Maps` so shared `MTEX` / `MCLY` / `MCAL` decoding can be reused outside the file-summary reader
 	- changed `WorldTerrainTileBuilder` and `WorldTerrainChunkData` so world-runtime terrain chunks can carry resolved `TextureLayers`, including external `_tex0.adt` texture files for split ADT families
+	- ported the working `MdxViewer` split-file read rule into `AdtTextureReader`: `_tex0.adt` can be an unpadded top-level `XETM` + `KNCM` stream without `MHDR`, so the shared reader now falls back to a raw top-level scan instead of assuming the generic summary reader will always enumerate texture chunks correctly
 	- changed `WowViewerWorldRuntimeBridge.ReadRootTerrainTileData(...)` to resolve `..._tex0.adt` when available and feed that shared texture payload into the world terrain runtime
 	- changed `WorldGpuPreviewRenderer` to load terrain BLP textures through the shared app-side `ViewerIoService` and blend per-layer color from decoded alpha maps instead of always using the old height-derived fallback color
 	- changed `WowViewerDesktopApp` to recreate the world GPU renderer when the active world-source signature changes so terrain texture caches stay aligned with the current world session source
 
 - validation:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter AdtTextureReaderTests.Read_DevelopmentTexAdt_ProducesStableRealDataChunkSignals` succeeded
 	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldTerrainTileBuilderTests` succeeded
 	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-world-textures/` succeeded
 
