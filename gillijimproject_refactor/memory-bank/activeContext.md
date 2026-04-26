@@ -1,5 +1,35 @@
 # Active Context
 
+## Apr 25, 2026 - WowViewer World Session terrain now carries shared texture layers and the GPU preview samples real BLP terrain color
+
+- followed the user's correction that minimaps are not the priority; the next meaningful world-renderer slice is terrain texturing, then in-world WMO and MDX or M2 geometry
+- active behavior after this slice:
+	- `WowViewer.Core.IO.Maps.AdtTextureChunkReader` now exposes a reusable chunk-level `MTEX` / `MCLY` / `MCAL` parser so terrain texture-layer ownership is no longer trapped inside the file-level reader only
+	- `WorldTerrainTileBuilder` now carries `AdtTextureChunkLayer` payloads on `WorldTerrainChunkData.TextureLayers`, including split-family handoff from `_tex0.adt` when the world-runtime bridge can resolve it
+	- `WowViewerWorldRuntimeBridge.ReadRootTerrainTileData(...)` now attempts `..._tex0.adt` beside the selected root ADT and passes the parsed shared texture file into the world terrain runtime builder
+	- `WorldGpuPreviewRenderer` now samples resolved terrain layer textures through the shared `ViewerIoService` source key and blends them with decoded per-layer alpha maps instead of always using the old height-debug color ramp
+	- `WowViewerDesktopApp` now recreates the world GPU renderer when the active client-root or loose-overlay source signature changes so terrain texture reads stay aligned with the current world session source
+- validation:
+	- focused runtime tests passed: `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldTerrainTileBuilderTests`
+	- app build passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-world-textures/`
+- current boundary:
+	- this is build plus focused runtime-test proof only; no live GUI screenshot or runtime signoff has been captured yet for textured terrain on a real world-session map
+	- terrain now has a real texture-layer path, but liquids still are not visible geometry and WMO or MDX or M2 objects still are not rendered as in-world scene geometry
+
+## Apr 25, 2026 - WowViewer.App world runtime loads and minimap reads now reuse the shared viewer I/O seam
+
+- continued the viewer reset by removing more app-side archive bootstrap duplication from the live World Session path
+- active behavior after this slice:
+	- `ViewerIoService` is now the thread-safe app-owned archive-catalog cache keyed by client root, build label, and loose overlay signature
+	- `WowViewerDesktopApp.LoadWorldSession()` now acquires the active source catalog from `ViewerIoService` and calls a shared-catalog `WowViewerWorldRuntimeBridge.Build(...)` overload instead of bootstrapping a second world-session catalog per load
+	- `WorldMinimapRenderer` now reads minimap tiles and `md5translate` candidates through the same `ViewerIoService` source key instead of maintaining its own separate raw archive bootstrap path
+	- world map discovery and spawn-picker flows were already on the shared viewer I/O seam; after this slice the active world-load and minimap-read paths now follow that same app-owned source model
+- validation:
+	- app build passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-viewerio-worldpath/`
+- current boundary:
+	- this is app-architecture and compile proof only; no new live GUI signoff was captured yet for minimap behavior or world-load feel
+	- this reduces duplicate archive bootstrap and source divergence, but it does not yet close textured terrain, visible liquids, or in-world WMO/MDX/M2 rendering
+
 ## Apr 25, 2026 - World Session now loads and renders a 3x3 ADT terrain window
 
 - followed the user's correction that the World Session was still effectively a one-tile diagnostic frame and not the planned world viewer path

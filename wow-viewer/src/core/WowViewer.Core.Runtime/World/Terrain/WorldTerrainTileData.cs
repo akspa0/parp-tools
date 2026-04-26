@@ -33,6 +33,10 @@ public sealed class WorldTerrainTileData
 
     public int VertexColorChunkCount => Chunks.Count(static chunk => chunk.HasVertexColors);
 
+    public int TextureLayerChunkCount => Chunks.Count(static chunk => chunk.HasTextureLayers);
+
+    public int TotalTextureLayerCount => Chunks.Sum(static chunk => chunk.TextureLayers.Count);
+
     public int DistinctAreaIdCount => Chunks.Select(static chunk => chunk.AreaId).Distinct().Count();
 
     public bool HasHeightmap => Heightmap is not null;

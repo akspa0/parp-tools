@@ -326,6 +326,14 @@ internal static class WowViewerWorldRuntimeBridge
             [clientRoot],
             WowViewerArchiveBootstrap.CreateBootstrapOptions(request.BuildLabel, clientRoot));
 
+        return Build(request, archiveCatalog);
+    }
+
+    internal static WowViewerWorldRuntimeFrameResult Build(WowViewerWorldRuntimeFrameRequest request, IArchiveCatalog archiveCatalog)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(archiveCatalog);
+
         WowViewerWorldSessionBootstrapResult session = WowViewerWorldSessionBootstrapper.Open(
             new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot),
             archiveCatalog);
@@ -876,8 +884,38 @@ internal static class WowViewerWorldRuntimeBridge
 
         using MemoryStream stream = new(rootData, writable: false);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
+        AdtTextureFile? textureFile = TryReadTerrainTextureFile(session, tileX, tileY, archiveCatalog, mapDirectory, rootData, sourcePath, fileSummary);
         stream.Position = 0;
-        return WorldTerrainTileBuilder.Read(stream, fileSummary);
+        return WorldTerrainTileBuilder.Read(stream, fileSummary, textureFile);
+    }
+
+    private static AdtTextureFile? TryReadTerrainTextureFile(
+        WowViewerWorldSessionBootstrapResult session,
+        int tileX,
+        int tileY,
+        IArchiveCatalog archiveCatalog,
+        string mapDirectory,
+        byte[] rootData,
+        string rootSourcePath,
+        MapFileSummary rootSummary)
+    {
+        string texVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}_tex0.adt";
+        if (TryReadVirtualOrLooseFile(session.ClientRoot, session.LooseOverlayRoot, texVirtualPath, archiveCatalog, out byte[]? texData, out string texSourcePath)
+            && texData is { Length: > 0 })
+        {
+            using MemoryStream texStream = new(texData, writable: false);
+            MapFileSummary texSummary = MapFileSummaryReader.Read(texStream, texSourcePath);
+            texStream.Position = 0;
+            return AdtTextureReader.Read(texStream, texSummary);
+        }
+
+        if (!rootSummary.HasChunk(MapChunkIds.Mtex))
+            return null;
+
+        using MemoryStream rootStream = new(rootData, writable: false);
+        MapFileSummary inlineTextureSummary = MapFileSummaryReader.Read(rootStream, rootSourcePath);
+        rootStream.Position = 0;
+        return AdtTextureReader.Read(rootStream, inlineTextureSummary);
     }
 
     private static List<WorldObjectInstance> BuildWmoInstances(

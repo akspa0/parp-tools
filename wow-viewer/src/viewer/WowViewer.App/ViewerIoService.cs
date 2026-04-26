@@ -78,46 +78,61 @@ internal sealed class ViewerIoService : IViewerIoService
         public void Dispose() => Catalog.Dispose();
     }
 
+    private readonly object _syncRoot = new();
     private readonly Dictionary<string, CatalogEntry> _catalogsBySignature = new(StringComparer.OrdinalIgnoreCase);
     private int _bootstrapCount;
     private bool _disposed;
 
     public ViewerIoCatalogLease GetCatalog(ViewerIoSourceKey sourceKey)
     {
-        ThrowIfDisposed();
-        if (!sourceKey.HasClientRoot)
-            throw new DirectoryNotFoundException($"Viewer I/O source does not have a valid client root: {sourceKey.ClientRoot}");
+        lock (_syncRoot)
+        {
+            ThrowIfDisposed();
+            if (!sourceKey.HasClientRoot)
+                throw new DirectoryNotFoundException($"Viewer I/O source does not have a valid client root: {sourceKey.ClientRoot}");
 
-        if (_catalogsBySignature.TryGetValue(sourceKey.Signature, out CatalogEntry? existing))
-            return new ViewerIoCatalogLease(sourceKey, existing.Catalog, existing.BootstrapCount);
+            if (_catalogsBySignature.TryGetValue(sourceKey.Signature, out CatalogEntry? existing))
+                return new ViewerIoCatalogLease(sourceKey, existing.Catalog, existing.BootstrapCount);
 
-        IArchiveCatalog catalog = new MpqArchiveCatalogFactory().Create();
-        ArchiveCatalogBootstrapper.Bootstrap(
-            catalog,
-            BuildLegacySearchRoots(sourceKey.ClientRoot),
-            WowViewerArchiveBootstrap.CreateBootstrapOptions(sourceKey.BuildLabel, sourceKey.ClientRoot));
+            IArchiveCatalog catalog = new MpqArchiveCatalogFactory().Create();
+            ArchiveCatalogBootstrapper.Bootstrap(
+                catalog,
+                BuildLegacySearchRoots(sourceKey.ClientRoot),
+                WowViewerArchiveBootstrap.CreateBootstrapOptions(sourceKey.BuildLabel, sourceKey.ClientRoot));
 
-        if (catalog is MpqArchiveCatalog mpqArchiveCatalog)
-            mpqArchiveCatalog.ScanMapMpqArchives(sourceKey.ClientRoot);
+            if (catalog is MpqArchiveCatalog mpqArchiveCatalog)
+                mpqArchiveCatalog.ScanMapMpqArchives(sourceKey.ClientRoot);
 
-        int bootstrapCount = ++_bootstrapCount;
-        CatalogEntry entry = new(catalog, bootstrapCount);
-        _catalogsBySignature[sourceKey.Signature] = entry;
-        return new ViewerIoCatalogLease(sourceKey, catalog, bootstrapCount);
+            int bootstrapCount = ++_bootstrapCount;
+            CatalogEntry entry = new(catalog, bootstrapCount);
+            _catalogsBySignature[sourceKey.Signature] = entry;
+            return new ViewerIoCatalogLease(sourceKey, catalog, bootstrapCount);
+        }
     }
 
     public void Invalidate(ViewerIoSourceKey sourceKey)
     {
-        if (_catalogsBySignature.Remove(sourceKey.Signature, out CatalogEntry? entry))
-            entry.Dispose();
+        CatalogEntry? entry = null;
+        lock (_syncRoot)
+        {
+            if (_catalogsBySignature.Remove(sourceKey.Signature, out CatalogEntry? existing))
+                entry = existing;
+        }
+
+        entry?.Dispose();
     }
 
     public void InvalidateAll()
     {
-        foreach (CatalogEntry entry in _catalogsBySignature.Values)
-            entry.Dispose();
+        List<CatalogEntry> entries;
+        lock (_syncRoot)
+        {
+            entries = _catalogsBySignature.Values.ToList();
+            _catalogsBySignature.Clear();
+        }
 
-        _catalogsBySignature.Clear();
+        foreach (CatalogEntry entry in entries)
+            entry.Dispose();
     }
 
     public bool TryReadVirtualFile(ViewerIoSourceKey sourceKey, string virtualPath, out byte[]? data, out string sourcePath)
@@ -136,10 +151,14 @@ internal sealed class ViewerIoService : IViewerIoService
 
     public void Dispose()
     {
-        if (_disposed)
-            return;
+        lock (_syncRoot)
+        {
+            if (_disposed)
+                return;
 
-        _disposed = true;
+            _disposed = true;
+        }
+
         InvalidateAll();
     }
 

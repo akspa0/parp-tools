@@ -1,3 +1,5 @@
+using WowViewer.Core.Maps;
+
 namespace WowViewer.Core.Runtime.World.Terrain;
 
 public sealed class WorldTerrainChunkData
@@ -12,7 +14,8 @@ public sealed class WorldTerrainChunkData
         ushort holeMask,
         bool hasLiquidFlags,
         bool hasVertexColors,
-        float[]? heights)
+        float[]? heights,
+        IReadOnlyList<AdtTextureChunkLayer>? textureLayers = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(chunkIndex);
         ArgumentOutOfRangeException.ThrowIfNegative(indexX);
@@ -26,11 +29,12 @@ public sealed class WorldTerrainChunkData
         IndexY = indexY;
         AreaId = areaId;
         Flags = flags;
-        LayerCount = layerCount;
+        DeclaredLayerCount = layerCount;
         HoleMask = holeMask;
         HasLiquidFlags = hasLiquidFlags;
         HasVertexColors = hasVertexColors;
         Heights = heights;
+        TextureLayers = textureLayers ?? [];
     }
 
     public int ChunkIndex { get; }
@@ -43,7 +47,9 @@ public sealed class WorldTerrainChunkData
 
     public uint Flags { get; }
 
-    public int LayerCount { get; }
+    public int DeclaredLayerCount { get; }
+
+    public int LayerCount => TextureLayers.Count > 0 ? TextureLayers.Count : DeclaredLayerCount;
 
     public ushort HoleMask { get; }
 
@@ -56,4 +62,8 @@ public sealed class WorldTerrainChunkData
     public float[]? Heights { get; }
 
     public bool HasHeights => Heights is { Length: 145 };
+
+    public IReadOnlyList<AdtTextureChunkLayer> TextureLayers { get; }
+
+    public bool HasTextureLayers => TextureLayers.Count > 0;
 }

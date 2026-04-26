@@ -178,6 +178,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
     private bool _worldNavigatorShowWmo = true;
     private bool _worldNavigatorShowMdx = true;
     private string _worldNavigatorFilter = string.Empty;
+    private string _worldGpuSourceSignature = string.Empty;
     private string _worldMinimapSourceSignature = string.Empty;
     private float _worldMinimapZoom = 24.0f;
     private Vector2 _worldMinimapPanOffset = Vector2.Zero;
@@ -375,7 +376,20 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_gl == null)
             return null;
 
-        _worldGpuPreviewRenderer ??= new WorldGpuPreviewRenderer(_gl);
+        string clientRoot = _session.World.ClientRoot?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
+            return null;
+
+        ViewerIoSourceKey sourceKey = ViewerIoSourceKey.Create(_session.World.ClientRoot, _session.World.BuildLabel, _session.World.LooseOverlayRoot);
+        string sourceSignature = BuildWorldMinimapSourceSignature();
+        if (_worldGpuPreviewRenderer != null && !string.Equals(sourceSignature, _worldGpuSourceSignature, StringComparison.OrdinalIgnoreCase))
+        {
+            _worldGpuPreviewRenderer.Dispose();
+            _worldGpuPreviewRenderer = null;
+        }
+
+        _worldGpuSourceSignature = sourceSignature;
+        _worldGpuPreviewRenderer ??= new WorldGpuPreviewRenderer(_gl, _viewerIoService, sourceKey);
         return _worldGpuPreviewRenderer;
     }
 
@@ -388,6 +402,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
             return null;
 
+        ViewerIoSourceKey sourceKey = ViewerIoSourceKey.Create(_session.World.ClientRoot, _session.World.BuildLabel, _session.World.LooseOverlayRoot);
+
         string sourceSignature = BuildWorldMinimapSourceSignature();
         if (_worldMinimapRenderer != null && !string.Equals(sourceSignature, _worldMinimapSourceSignature, StringComparison.OrdinalIgnoreCase))
         {
@@ -397,7 +413,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
 
         _worldMinimapSourceSignature = sourceSignature;
-        _worldMinimapRenderer ??= new WorldMinimapRenderer(_gl, clientRoot, _session.World.BuildLabel, _session.World.LooseOverlayRoot);
+        _worldMinimapRenderer ??= new WorldMinimapRenderer(_gl, _viewerIoService, sourceKey);
         return _worldMinimapRenderer;
     }
 
@@ -3946,10 +3962,12 @@ internal sealed class WowViewerDesktopApp : IDisposable
         DeleteWorldTerrainPreviewTexture();
 
         WowViewerWorldRuntimeFrameRequest request = _session.World.BuildRuntimeFrameRequest();
+        ViewerIoSourceKey sourceKey = ViewerIoSourceKey.Create(request.ClientRoot, request.BuildLabel, request.LooseOverlayRoot);
+        ViewerIoCatalogLease catalogLease = _viewerIoService.GetCatalog(sourceKey);
         int generation = unchecked(++_pendingWorldLoadGeneration);
         _pendingWorldLoadMapInput = request.MapInput;
         _pendingWorldLoadStopwatch = Stopwatch.StartNew();
-        _pendingWorldLoadTask = Task.Run(() => new PendingWorldLoadResult(generation, WowViewerWorldRuntimeBridge.Build(request)));
+        _pendingWorldLoadTask = Task.Run(() => new PendingWorldLoadResult(generation, WowViewerWorldRuntimeBridge.Build(request, catalogLease.ArchiveCatalog)));
         _statusMessage = $"Opening world session for {request.MapInput}... Shared world data is being assembled on the CPU; the GPU tile view will populate when the runtime frame finishes.";
         _lastLoadSummary = "World session load queued on a background worker.";
     }

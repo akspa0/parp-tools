@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Chunked;
@@ -26,10 +27,21 @@ public static class WorldTerrainTileBuilder
 
         using FileStream stream = File.OpenRead(path);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, Path.GetFullPath(path));
-        return Read(stream, fileSummary, applyBaseHeightOffset);
+
+        AdtTextureFile? textureFile = null;
+        AdtTileFamily family = AdtTileFamilyResolver.Resolve(path);
+        if (family.HasTex0 && fileSummary.Kind == MapFileKind.Adt)
+            textureFile = AdtTextureReader.Read(family.Tex0Path);
+
+        return Read(stream, fileSummary, textureFile, applyBaseHeightOffset);
     }
 
     public static WorldTerrainTileData Read(Stream stream, MapFileSummary fileSummary, bool applyBaseHeightOffset = true)
+    {
+        return Read(stream, fileSummary, textureFile: null, applyBaseHeightOffset);
+    }
+
+    public static WorldTerrainTileData Read(Stream stream, MapFileSummary fileSummary, AdtTextureFile? textureFile, bool applyBaseHeightOffset = true)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(fileSummary);
@@ -38,6 +50,8 @@ public static class WorldTerrainTileBuilder
             throw new InvalidDataException($"World terrain tile builder requires a root ADT file, but found {fileSummary.Kind}.");
 
         IReadOnlyList<MapChunkLocation> terrainChunkLocations = ResolveTerrainChunkLocations(stream, fileSummary);
+    IReadOnlyList<string> inlineTextureNames = ReadTextureNames(stream, fileSummary);
+    Dictionary<int, AdtTextureChunk>? externalTextureChunks = textureFile?.Chunks.ToDictionary(static chunk => chunk.ChunkIndex);
         List<WorldTerrainChunkData> chunks = new(terrainChunkLocations.Count);
         int chunkOrdinal = 0;
         foreach (MapChunkLocation chunk in terrainChunkLocations)
@@ -57,6 +71,7 @@ public static class WorldTerrainTileBuilder
             ushort holes = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(0x3C, 2));
             float baseHeight = BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan(0x70, 4));
             float[]? heights = TryReadMcvtHeights(payload, baseHeight, applyBaseHeightOffset);
+            AdtTextureChunk? textureChunk = ResolveTextureChunk(chunkOrdinal, payload, fileSummary.Kind, inlineTextureNames, externalTextureChunks);
 
             chunks.Add(new WorldTerrainChunkData(
                 chunkOrdinal,
@@ -68,11 +83,61 @@ public static class WorldTerrainTileBuilder
                 holes,
                 (flags & LiquidFlagMask) != 0,
                 (flags & VertexColorFlagMask) != 0,
-                heights));
+                heights,
+                textureChunk?.Layers));
             chunkOrdinal++;
         }
 
         return new WorldTerrainTileData(fileSummary.SourcePath, fileSummary.Kind, chunks, BuildHeightmap(chunks));
+    }
+
+    private static IReadOnlyList<string> ReadTextureNames(Stream stream, MapFileSummary fileSummary)
+    {
+        if (!fileSummary.HasChunk(MapChunkIds.Mtex))
+            return [];
+
+        MapChunkLocation mtexChunk = fileSummary.Chunks.First(chunk => chunk.Id == MapChunkIds.Mtex);
+        byte[] payload = ReadChunkPayload(stream, mtexChunk);
+        return ParseStringEntries(payload);
+    }
+
+    private static AdtTextureChunk? ResolveTextureChunk(
+        int chunkIndex,
+        byte[] payload,
+        MapFileKind terrainKind,
+        IReadOnlyList<string> inlineTextureNames,
+        Dictionary<int, AdtTextureChunk>? externalTextureChunks)
+    {
+        if (externalTextureChunks is not null && externalTextureChunks.TryGetValue(chunkIndex, out AdtTextureChunk? externalChunk))
+            return externalChunk;
+
+        if (inlineTextureNames.Count == 0)
+            return null;
+
+        AdtTextureChunk inlineChunk = AdtTextureChunkReader.Read(chunkIndex, payload, terrainKind, inlineTextureNames);
+        return inlineChunk.Layers.Count > 0 ? inlineChunk : null;
+    }
+
+    private static IReadOnlyList<string> ParseStringEntries(byte[] payload)
+    {
+        if (payload.Length == 0)
+            return [];
+
+        List<string> entries = [];
+        int start = 0;
+        for (int index = 0; index <= payload.Length; index++)
+        {
+            if (index < payload.Length && payload[index] != 0)
+                continue;
+
+            int length = index - start;
+            if (length > 0)
+                entries.Add(Encoding.UTF8.GetString(payload, start, length));
+
+            start = index + 1;
+        }
+
+        return entries;
     }
 
     private static IReadOnlyList<MapChunkLocation> ResolveTerrainChunkLocations(Stream stream, MapFileSummary fileSummary)

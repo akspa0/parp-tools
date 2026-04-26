@@ -10,9 +10,8 @@ internal sealed class WorldMinimapRenderer : IDisposable
     private const int BackgroundWorkerCount = 2;
 
     private readonly GL _gl;
-    private readonly string _clientRoot;
-    private readonly string _buildLabel;
-    private readonly string _looseOverlayRoot;
+    private readonly IViewerIoService _viewerIoService;
+    private readonly ViewerIoSourceKey _sourceKey;
     private Md5TranslateIndex? _md5Index;
     private int _md5TranslateLoadAttempted;
     private readonly ConcurrentDictionary<string, uint> _textureCache = new(StringComparer.OrdinalIgnoreCase);
@@ -30,12 +29,11 @@ internal sealed class WorldMinimapRenderer : IDisposable
     private int _uploadedTileCount;
     private int _failedTileCount;
 
-    public WorldMinimapRenderer(GL gl, string clientRoot, string? buildLabel, string? looseOverlayRoot)
+    public WorldMinimapRenderer(GL gl, IViewerIoService viewerIoService, ViewerIoSourceKey sourceKey)
     {
         _gl = gl;
-        _clientRoot = clientRoot?.Trim() ?? string.Empty;
-        _buildLabel = buildLabel?.Trim() ?? string.Empty;
-        _looseOverlayRoot = looseOverlayRoot?.Trim() ?? string.Empty;
+        _viewerIoService = viewerIoService ?? throw new ArgumentNullException(nameof(viewerIoService));
+        _sourceKey = sourceKey;
         _loaderTasks = Enumerable.Range(0, BackgroundWorkerCount)
             .Select(_ => Task.Run(() => BackgroundLoadLoop(_disposeCts.Token), _disposeCts.Token))
             .ToArray();
@@ -228,19 +226,13 @@ internal sealed class WorldMinimapRenderer : IDisposable
     {
         data = null;
 
-        if (VirtualAssetOverlayResolver.TryReadLooseVirtualFile(virtualPath, _looseOverlayRoot, out data) && data is { Length: > 0 })
-            return true;
-
-        if (string.IsNullOrWhiteSpace(_clientRoot) || !Directory.Exists(_clientRoot))
+        if (!_sourceKey.HasClientRoot)
             return false;
 
         try
         {
-            data = ArchiveVirtualFileReader.ReadVirtualFile(
-                virtualPath,
-                [_clientRoot],
-                WowViewerArchiveBootstrap.CreateBootstrapOptions(_buildLabel, _clientRoot));
-            return data.Length > 0;
+            return _viewerIoService.TryReadVirtualFile(_sourceKey, virtualPath, out data, out _)
+                && data is { Length: > 0 };
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or IOException or InvalidDataException or InvalidOperationException or NotSupportedException or UnauthorizedAccessException)
         {
@@ -250,11 +242,11 @@ internal sealed class WorldMinimapRenderer : IDisposable
 
     private Md5TranslateIndex? TryLoadMd5TranslateIndex()
     {
-        if (string.IsNullOrWhiteSpace(_clientRoot) || !Directory.Exists(_clientRoot))
+        if (!_sourceKey.HasClientRoot)
             return null;
 
         return Md5TranslateResolver.TryLoad(
-            [_clientRoot],
+            [_sourceKey.ClientRoot],
             archiveFileExists: candidate => TryReadVirtualFileRaw(candidate, out byte[]? bytes) && bytes is { Length: > 0 },
             archiveReadFile: candidate => TryReadVirtualFileRaw(candidate, out byte[]? bytes) ? bytes : null,
             out Md5TranslateIndex? index)

@@ -1,4 +1,6 @@
+using System.IO;
 using System.Numerics;
+using SereniaBLPLib;
 using Silk.NET.OpenGL;
 
 namespace WowViewer.App;
@@ -9,9 +11,13 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private const float TileSize = 533.33333f;
     private const float ChunkSize = TileSize / 16.0f;
     private const float ChunkSubCellSize = ChunkSize / 8.0f;
+    private const int ChunkAlphaSize = 64;
     private const float MapOrigin = 32.0f * TileSize;
+    private const float TerrainTextureWorldScale = 8.0f / ChunkSize;
 
     private readonly GL _gl;
+    private readonly IViewerIoService _viewerIoService;
+    private readonly ViewerIoSourceKey _sourceKey;
     private uint _skyProgram;
     private uint _skyVao;
     private int _skyInverseViewProjectionLocation;
@@ -59,11 +65,14 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private Vector3 _skyBackdropTint = new(0.46f, 0.52f, 0.64f);
     private float _skyBackdropStrength;
     private float _skyBackdropSeed;
+    private readonly Dictionary<string, TerrainTextureSample?> _terrainTextureCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
 
-    public WorldGpuPreviewRenderer(GL gl)
+    public WorldGpuPreviewRenderer(GL gl, IViewerIoService viewerIoService, ViewerIoSourceKey sourceKey)
     {
         _gl = gl ?? throw new ArgumentNullException(nameof(gl));
+        _viewerIoService = viewerIoService ?? throw new ArgumentNullException(nameof(viewerIoService));
+        _sourceKey = sourceKey;
         InitializeSkyShader();
         InitializeTerrainShader();
         InitializeOverlayShader();
@@ -271,7 +280,9 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
                 {
                     Vector3 position = positions[index];
                     Vector3 normal = normals[index];
-                    Vector3 color = ComputeTerrainColor((position.Z - minHeight) / heightRange, Math.Clamp(1.0f - normal.Z, 0.0f, 1.0f));
+                    float normalizedHeight = (position.Z - minHeight) / heightRange;
+                    float slopeFactor = Math.Clamp(1.0f - normal.Z, 0.0f, 1.0f);
+                    Vector3 color = ComputeTerrainVertexColor(chunk, index, position, normalizedHeight, slopeFactor);
 
                     vertexData.Add(position.X);
                     vertexData.Add(position.Y);
@@ -650,10 +661,145 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         return Vector3.Lerp(baseColor, high, slopeFactor * 0.35f);
     }
 
+    private Vector3 ComputeTerrainVertexColor(WowViewer.Core.Runtime.World.Terrain.WorldTerrainChunkData chunk, int vertexIndex, Vector3 position, float normalizedHeight, float slopeFactor)
+    {
+        Vector3 fallback = ComputeTerrainColor(normalizedHeight, slopeFactor);
+        if (!chunk.HasTextureLayers)
+            return fallback;
+
+        Vector2 worldUv = new(position.X * TerrainTextureWorldScale, position.Y * TerrainTextureWorldScale);
+        Vector2 alphaUv = GetChunkAlphaUv(vertexIndex);
+        Vector3 blended = Vector3.Zero;
+        int remaining = 255;
+        bool sampledAnyTexture = false;
+
+        for (int layerIndex = chunk.TextureLayers.Count - 1; layerIndex >= 1; layerIndex--)
+        {
+            var layer = chunk.TextureLayers[layerIndex];
+            int alpha = SampleAlpha(layer.DecodedAlpha?.AlphaMap, alphaUv);
+            if (alpha <= 0)
+                continue;
+
+            int contribution = ((alpha * remaining) + 127) / 255;
+            if (contribution > 0 && TrySampleTerrainTextureColor(layer.TexturePath, worldUv, out Vector3 layerColor))
+            {
+                blended += layerColor * (contribution / 255.0f);
+                sampledAnyTexture = true;
+            }
+
+            remaining = ((remaining * (255 - alpha)) + 127) / 255;
+            if (remaining <= 0)
+                break;
+        }
+
+        var baseLayer = chunk.TextureLayers[0];
+        if (remaining > 0 && TrySampleTerrainTextureColor(baseLayer.TexturePath, worldUv, out Vector3 baseColor))
+        {
+            blended += baseColor * (remaining / 255.0f);
+            sampledAnyTexture = true;
+        }
+
+        return sampledAnyTexture ? blended : fallback;
+    }
+
+    private bool TrySampleTerrainTextureColor(string? texturePath, Vector2 worldUv, out Vector3 color)
+    {
+        color = default;
+        if (string.IsNullOrWhiteSpace(texturePath))
+            return false;
+
+        string normalizedPath = EnsureBlpExtension(texturePath)
+            .Replace('/', '\\')
+            .TrimStart('\\');
+
+        if (!_terrainTextureCache.TryGetValue(normalizedPath, out TerrainTextureSample? sample))
+        {
+            sample = LoadTerrainTexture(normalizedPath);
+            _terrainTextureCache[normalizedPath] = sample;
+        }
+
+        if (sample is null || sample.Width <= 0 || sample.Height <= 0)
+            return false;
+
+        float u = Fract(worldUv.X);
+        float v = Fract(worldUv.Y);
+        int sampleX = Math.Clamp((int)(u * sample.Width), 0, sample.Width - 1);
+        int sampleY = Math.Clamp((int)(v * sample.Height), 0, sample.Height - 1);
+        int pixelOffset = ((sampleY * sample.Width) + sampleX) * 4;
+        if (pixelOffset + 2 >= sample.RgbaPixels.Length)
+            return false;
+
+        color = new Vector3(
+            sample.RgbaPixels[pixelOffset + 0] / 255.0f,
+            sample.RgbaPixels[pixelOffset + 1] / 255.0f,
+            sample.RgbaPixels[pixelOffset + 2] / 255.0f);
+        return true;
+    }
+
+    private TerrainTextureSample? LoadTerrainTexture(string texturePath)
+    {
+        if (!_viewerIoService.TryReadVirtualFile(_sourceKey, texturePath, out byte[]? data, out _)
+            || data is not { Length: > 0 })
+            return null;
+
+        try
+        {
+            using MemoryStream stream = new(data, writable: false);
+            using BlpFile blp = new(stream);
+            byte[] rgbaPixels = blp.GetPixels(0, out int width, out int height, bgra: false);
+            return new TerrainTextureSample(width, height, rgbaPixels);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string EnsureBlpExtension(string texturePath)
+    {
+        return texturePath.EndsWith(".blp", StringComparison.OrdinalIgnoreCase)
+            ? texturePath
+            : $"{texturePath}.blp";
+    }
+
+    private static Vector2 GetChunkAlphaUv(int vertexIndex)
+    {
+        GetChunkVertexLayout(vertexIndex, out int row, out int col, out bool isInner);
+        float localX = isInner ? (col + 0.5f) * ChunkSubCellSize : col * ChunkSubCellSize;
+        float localY = isInner ? ((row / 2) + 0.5f) * ChunkSubCellSize : (row / 2) * ChunkSubCellSize;
+        return new Vector2(localX / ChunkSize, localY / ChunkSize);
+    }
+
+    private static int SampleAlpha(byte[]? alphaMap, Vector2 uv)
+    {
+        if (alphaMap is not { Length: ChunkAlphaSize * ChunkAlphaSize })
+            return 0;
+
+        int sampleX = Math.Clamp((int)(Math.Clamp(uv.X, 0.0f, 1.0f) * (ChunkAlphaSize - 1)), 0, ChunkAlphaSize - 1);
+        int sampleY = Math.Clamp((int)(Math.Clamp(uv.Y, 0.0f, 1.0f) * (ChunkAlphaSize - 1)), 0, ChunkAlphaSize - 1);
+        return alphaMap[(sampleY * ChunkAlphaSize) + sampleX];
+    }
+
     private void ExpandBounds(Vector3 position)
     {
         _boundsMin = Vector3.Min(_boundsMin, position);
         _boundsMax = Vector3.Max(_boundsMax, position);
+    }
+
+    private sealed class TerrainTextureSample
+    {
+        public TerrainTextureSample(int width, int height, byte[] rgbaPixels)
+        {
+            Width = width;
+            Height = height;
+            RgbaPixels = rgbaPixels;
+        }
+
+        public int Width { get; }
+
+        public int Height { get; }
+
+        public byte[] RgbaPixels { get; }
     }
 
     private static void GetChunkVertexLayout(int index, out int row, out int col, out bool isInner)

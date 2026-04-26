@@ -151,6 +151,18 @@ The new shell should default to one dominant viewport plus supporting surfaces. 
 
 Before more shell work, introduce a single viewer-facing I/O seam in `wow-viewer`.
 
+### Apr 25, 2026 implementation status update
+
+- landed app-side convergence in `wow-viewer/src/viewer/WowViewer.App/`:
+  - `ViewerIoService` is now the thread-safe app-owned archive-catalog cache for viewer source signatures
+  - world map discovery and spawn-picker flows were already using that seam; `LoadWorldSession()` now also acquires the active catalog from `ViewerIoService` and calls a shared-catalog `WowViewerWorldRuntimeBridge.Build(...)` overload
+  - `WorldMinimapRenderer` now reads minimap tiles and `md5translate` candidates through the same `ViewerIoService` source key instead of a separate raw archive bootstrap path
+- proof so far:
+  - app build passed with `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-viewerio-worldpath/`
+- still required:
+  - live GUI proof that minimap loading/reload behavior is improved on the active world-session surface
+  - this seam convergence does not replace the remaining Recovery Slice 2 minimap UX/error-state work or the later textured-terrain and object-rendering slices
+
 ### New seam
 
 Create one reusable viewer I/O service in `wow-viewer`, consumed by:

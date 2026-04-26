@@ -19,6 +19,8 @@ public sealed class WorldTerrainTileBuilderTests
         Assert.Equal(10, terrainTile.HoleChunkCount);
         Assert.Equal(0, terrainTile.LiquidFlagChunkCount);
         Assert.Equal(0, terrainTile.VertexColorChunkCount);
+        Assert.Equal(0, terrainTile.TextureLayerChunkCount);
+        Assert.Equal(0, terrainTile.TotalTextureLayerCount);
         Assert.Equal(1, terrainTile.DistinctAreaIdCount);
         Assert.NotNull(terrainTile.Heightmap);
         Assert.Equal(257, terrainTile.Heightmap!.Width);
@@ -95,6 +97,47 @@ public sealed class WorldTerrainTileBuilderTests
         WorldTerrainHeightmapData heightmap = Assert.IsType<WorldTerrainHeightmapData>(terrainTile.Heightmap);
         Assert.Equal(100f, heightmap.MinHeight);
         Assert.Equal(244f, heightmap.MaxHeight);
+    }
+
+    [Fact]
+    public void Read_SyntheticRootAdt_WithExternalTexSource_UsesResolvedTextureLayers()
+    {
+        float[] heights = Enumerable.Range(0, 145).Select(static value => (float)value).ToArray();
+        byte[] rootBytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MHDR", new byte[64]),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", CreateRootMcnkPayload(flags: 0, indexX: 0, indexY: 0, areaId: 123, holes: 0, layerCount: 1, heights)),
+        ];
+
+        byte[] packedAlpha = Enumerable.Repeat((byte)0x10, 2048).ToArray();
+        byte[] texBytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MTEX", CreateStringBlock("base.blp", "snow.blp")),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", CreateTexChunkPayload(
+                CreateMclyPayload([0u, 0u], [0u, 0u]),
+                packedAlpha)),
+        ];
+
+        using MemoryStream rootStream = new(rootBytes, writable: false);
+        MapFileSummary rootSummary = MapFileSummaryReader.Read(rootStream, "synthetic_0_0.adt");
+        rootStream.Position = 0;
+
+        using MemoryStream texStream = new(texBytes, writable: false);
+        MapFileSummary texSummary = MapFileSummaryReader.Read(texStream, "synthetic_0_0_tex0.adt");
+        texStream.Position = 0;
+
+        AdtTextureFile textureFile = AdtTextureReader.Read(texStream, texSummary);
+        WorldTerrainTileData terrainTile = WorldTerrainTileBuilder.Read(rootStream, rootSummary, textureFile);
+
+        WorldTerrainChunkData chunk = Assert.Single(terrainTile.Chunks);
+        Assert.Equal(1, chunk.DeclaredLayerCount);
+        Assert.Equal(2, chunk.LayerCount);
+        Assert.True(chunk.HasTextureLayers);
+        Assert.Equal("base.blp", chunk.TextureLayers[0].TexturePath);
+        Assert.Equal("snow.blp", chunk.TextureLayers[1].TexturePath);
+        Assert.NotNull(chunk.TextureLayers[1].DecodedAlpha);
     }
 
     [Fact]
@@ -196,5 +239,41 @@ public sealed class WorldTerrainTileBuilderTests
         byte[] bytes = new byte[4];
         BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
         return bytes;
+    }
+
+    private static byte[] CreateTexChunkPayload(byte[] mclyPayload, byte[] mcalPayload)
+    {
+        using MemoryStream stream = new();
+        stream.Write(MapFileSummaryReaderTestsAccessor.CreateChunk("MCLY", mclyPayload));
+        stream.Write(MapFileSummaryReaderTestsAccessor.CreateChunk("MCAL", mcalPayload));
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateMclyPayload(uint[] layerFlags, uint[] layerOffsets)
+    {
+        byte[] payload = new byte[layerFlags.Length * 16];
+        for (int index = 0; index < layerFlags.Length; index++)
+        {
+            int offset = index * 16;
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(offset, 4), (uint)index);
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(offset + 4, 4), layerFlags[index]);
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(offset + 8, 4), layerOffsets[index]);
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(offset + 12, 4), 0u);
+        }
+
+        return payload;
+    }
+
+    private static byte[] CreateStringBlock(params string[] entries)
+    {
+        using MemoryStream stream = new();
+        foreach (string entry in entries)
+        {
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(entry);
+            stream.Write(bytes);
+            stream.WriteByte(0);
+        }
+
+        return stream.ToArray();
     }
 }
