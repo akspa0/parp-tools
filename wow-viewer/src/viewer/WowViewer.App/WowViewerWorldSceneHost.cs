@@ -22,6 +22,8 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
 
     public WowViewerWorldDiagnosticsSnapshot DiagnosticsSnapshot { get; private set; } = WowViewerWorldDiagnosticsSnapshot.Empty;
 
+    public WowViewerWorldNavigatorState NavigatorState { get; private set; } = WowViewerWorldNavigatorState.Empty;
+
     public void Dispose()
     {
         _renderer?.Dispose();
@@ -37,6 +39,7 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
         AssetState = WowViewerWorldAssetState.Empty;
         SceneSnapshot = WowViewerWorldSceneSnapshot.Empty;
         DiagnosticsSnapshot = WowViewerWorldDiagnosticsSnapshot.Empty;
+        NavigatorState = WowViewerWorldNavigatorState.Empty;
         _renderer?.ClearPreview();
         Camera.ResetToIdentity();
     }
@@ -72,6 +75,7 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
         AssetState = _assetInventory.CreateState();
         SceneSnapshot = WowViewerWorldSceneSnapshot.FromRuntimeFrame(runtimeFrame);
         DiagnosticsSnapshot = WowViewerWorldDiagnosticsSnapshot.FromRuntimeFrame(runtimeFrame);
+        NavigatorState = WowViewerWorldNavigatorState.FromRuntimeFrame(runtimeFrame);
         EnsureRenderer(gl, viewerIoService, sourceKey, sourceSignature)?.LoadPreview(runtimeFrame, Camera, ignoreTerrainHoles, showHoleOverlay);
     }
 }

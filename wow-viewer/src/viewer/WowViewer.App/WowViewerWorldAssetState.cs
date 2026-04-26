@@ -5,6 +5,11 @@ internal sealed class WowViewerWorldAssetState
     public static readonly WowViewerWorldAssetState Empty = new(
         referencedWmoAssetCount: 0,
         referencedMdxAssetCount: 0,
+        readyWmoAssetCount: 0,
+        readyMdxAssetCount: 0,
+        pendingWmoAssetCount: 0,
+        pendingMdxAssetCount: 0,
+        priorityPendingAssetCount: 0,
         wmoInstanceCount: 0,
         mdxInstanceCount: 0,
         readyWmoCount: 0,
@@ -19,6 +24,11 @@ internal sealed class WowViewerWorldAssetState
     public WowViewerWorldAssetState(
         int referencedWmoAssetCount,
         int referencedMdxAssetCount,
+        int readyWmoAssetCount,
+        int readyMdxAssetCount,
+        int pendingWmoAssetCount,
+        int pendingMdxAssetCount,
+        int priorityPendingAssetCount,
         int wmoInstanceCount,
         int mdxInstanceCount,
         int readyWmoCount,
@@ -32,6 +42,11 @@ internal sealed class WowViewerWorldAssetState
     {
         ReferencedWmoAssetCount = referencedWmoAssetCount;
         ReferencedMdxAssetCount = referencedMdxAssetCount;
+        ReadyWmoAssetCount = readyWmoAssetCount;
+        ReadyMdxAssetCount = readyMdxAssetCount;
+        PendingWmoAssetCount = pendingWmoAssetCount;
+        PendingMdxAssetCount = pendingMdxAssetCount;
+        PriorityPendingAssetCount = priorityPendingAssetCount;
         WmoInstanceCount = wmoInstanceCount;
         MdxInstanceCount = mdxInstanceCount;
         ReadyWmoCount = readyWmoCount;
@@ -47,6 +62,16 @@ internal sealed class WowViewerWorldAssetState
     public int ReferencedWmoAssetCount { get; }
 
     public int ReferencedMdxAssetCount { get; }
+
+    public int ReadyWmoAssetCount { get; }
+
+    public int ReadyMdxAssetCount { get; }
+
+    public int PendingWmoAssetCount { get; }
+
+    public int PendingMdxAssetCount { get; }
+
+    public int PriorityPendingAssetCount { get; }
 
     public int WmoInstanceCount { get; }
 
@@ -75,9 +100,17 @@ internal sealed class WowViewerWorldAssetState
     public static WowViewerWorldAssetState FromRuntimeFrame(WowViewerWorldRuntimeFrameResult runtimeFrame)
     {
         ArgumentNullException.ThrowIfNull(runtimeFrame);
+        HashSet<string> pendingKeys = runtimeFrame.PendingAssetKeys.Where(static key => !string.IsNullOrWhiteSpace(key)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> referencedWmoKeys = runtimeFrame.WmoInstances.Select(static instance => instance.ModelKey).Where(static key => !string.IsNullOrWhiteSpace(key)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> referencedMdxKeys = runtimeFrame.MdxInstances.Select(static instance => instance.ModelKey).Where(static key => !string.IsNullOrWhiteSpace(key)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return new WowViewerWorldAssetState(
-            runtimeFrame.WmoInstances.Select(static instance => instance.ModelKey).Where(static key => !string.IsNullOrWhiteSpace(key)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
-            runtimeFrame.MdxInstances.Select(static instance => instance.ModelKey).Where(static key => !string.IsNullOrWhiteSpace(key)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            referencedWmoKeys.Count,
+            referencedMdxKeys.Count,
+            referencedWmoKeys.Count(key => !pendingKeys.Contains(key)),
+            referencedMdxKeys.Count(key => !pendingKeys.Contains(key)),
+            referencedWmoKeys.Count(key => pendingKeys.Contains(key)),
+            referencedMdxKeys.Count(key => pendingKeys.Contains(key)),
+            0,
             runtimeFrame.WmoInstances.Count,
             runtimeFrame.MdxInstances.Count,
             runtimeFrame.ReadyWmoCount,

@@ -63,32 +63,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
         public HashSet<int> OccupiedTileIndices { get; }
     }
 
-    private enum WorldSelectionKind
-    {
-        Wmo = 0,
-        Mdx = 1,
-    }
-
-    private readonly record struct WorldObjectSelection(
-        WorldSelectionKind Kind,
-        int TileX,
-        int TileY,
-        int PlacementEntryIndex,
-        int UniqueId,
-        string ModelKey);
-
-    private readonly record struct WorldNavigatorEntry(
-        WorldSelectionKind Kind,
-        WorldObjectInstance Instance,
-        bool IsVisible,
-        bool AssetReady,
-        float? CenterDistance,
-        bool IsTaxiActor,
-        bool HasOpaqueRoute,
-        bool HasTransparentRoute,
-        bool RequiresUnbatchedRender,
-        bool WasAnimated);
-
     private const string WindowTitle = "WowViewer.App";
     private static readonly string[] MdxCameraPresetLabels = ["Custom", "Front", "Back", "Left", "Right", "Top", "Three Quarter"];
     private static readonly string?[] MdxCameraPresetValues = [null, "front", "back", "left", "right", "top", PreviewCameraSettings.DefaultPresetName];
@@ -2895,7 +2869,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         {
             if (_currentWorldRuntimeFrame != null
                 && _selectedWorldObject.HasValue
-                && TryResolveWorldNavigatorEntry(_currentWorldRuntimeFrame, _selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
+                && _worldSceneHost.NavigatorState.TryResolveEntry(_selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
             {
                 if (ImGui.CollapsingHeader("Selection", ImGuiTreeNodeFlags.DefaultOpen))
                     DrawWorldInspectorContents(selectedEntry);
@@ -2916,7 +2890,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
                     ? ImGuiTreeNodeFlags.None
                     : ImGuiTreeNodeFlags.DefaultOpen;
                 if (ImGui.CollapsingHeader("Object Navigator", objectNavigatorFlags))
-                    DrawWorldNavigatorEntriesSection(_currentWorldRuntimeFrame);
+                    DrawWorldNavigatorEntriesSection(_worldSceneHost.NavigatorState);
             }
 
             ImGui.Separator();
@@ -3574,13 +3548,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"WMO Visible/Total: {assetState.VisibleWmoCount}/{assetState.WmoInstanceCount}");
         ImGui.Text($"Doodads Visible/Total: {assetState.VisibleMdxCount}/{assetState.MdxInstanceCount}");
         ImGui.Text($"Referenced Assets: WMO {assetState.ReferencedWmoAssetCount} / Doodads {assetState.ReferencedMdxAssetCount}");
+        ImGui.Text($"Ready Assets: WMO {assetState.ReadyWmoAssetCount} / Doodads {assetState.ReadyMdxAssetCount}");
         ImGui.Text($"Pending Assets: {assetState.PendingAssetLoadCount}");
+        ImGui.Text($"Pending Families: WMO {assetState.PendingWmoAssetCount} / Doodads {assetState.PendingMdxAssetCount} (priority {assetState.PriorityPendingAssetCount})");
         ImGui.Text($"Object Phase: {diagnosticsSnapshot.ObjectPhaseExecuted}");
         ImGui.Text($"Total Cpu Ms: {diagnosticsSnapshot.TotalCpuMs:F2}");
 
         if (_selectedWorldObject.HasValue
-            && _currentWorldRuntimeFrame is { } currentFrame
-            && TryResolveWorldNavigatorEntry(currentFrame, _selectedWorldObject.Value, out WorldNavigatorEntry entry))
+            && _worldSceneHost.NavigatorState.TryResolveEntry(_selectedWorldObject.Value, out WorldNavigatorEntry entry))
         {
             ImGui.Separator();
             ImGui.TextDisabled("Selection Summary");
@@ -3685,7 +3660,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        DrawWorldNavigatorEntriesSection(_currentWorldRuntimeFrame);
+        DrawWorldNavigatorEntriesSection(_worldSceneHost.NavigatorState);
 
         ImGui.End();
     }
@@ -3713,7 +3688,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        if (!_selectedWorldObject.HasValue || !TryResolveWorldNavigatorEntry(_currentWorldRuntimeFrame, _selectedWorldObject.Value, out WorldNavigatorEntry entry))
+        if (!_selectedWorldObject.HasValue || !_worldSceneHost.NavigatorState.TryResolveEntry(_selectedWorldObject.Value, out WorldNavigatorEntry entry))
         {
             ImGui.TextWrapped("Select an object from the world canvas or navigator to inspect it.");
             ImGui.End();
@@ -3725,7 +3700,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.End();
     }
 
-    private void DrawWorldNavigatorEntriesSection(WowViewerWorldRuntimeFrameResult result)
+    private void DrawWorldNavigatorEntriesSection(WowViewerWorldNavigatorState navigatorState)
     {
         ImGui.TextDisabled("Filters");
         ImGui.Checkbox("Visible Only", ref _worldNavigatorVisibleOnly);
@@ -3736,9 +3711,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.InputText("Model Filter", ref _worldNavigatorFilter, 256);
         ImGui.Separator();
 
-        List<WorldNavigatorEntry> entries = BuildWorldNavigatorEntries(result);
+        List<WorldNavigatorEntry> entries = BuildWorldNavigatorEntries(navigatorState);
         ImGui.TextDisabled($"Entries: {entries.Count}");
-        if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(result, _selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
+        if (_selectedWorldObject.HasValue && navigatorState.TryResolveEntry(_selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
         {
             string selectedAssetPath = GetNavigatorAssetPath(selectedEntry);
             ImGui.TextDisabled("Selected Asset Path");
@@ -3765,7 +3740,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         {
             foreach (WorldNavigatorEntry entry in entries)
             {
-                WorldObjectSelection selection = CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
+                WorldObjectSelection selection = navigatorState.CreateSelection(entry);
                 bool selected = _selectedWorldObject.HasValue && _selectedWorldObject.Value.Equals(selection);
                 ImGui.PushID($"{entry.Kind}:{entry.Instance.PlacementEntryIndex}:{entry.Instance.UniqueId}:{entry.Instance.ModelKey}");
                 if (ImGui.Selectable(BuildNavigatorLabel(entry), selected))
@@ -4500,13 +4475,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _currentMdxPreview = null;
         _currentWmoPreview = null;
         _currentModelOutputScene = null;
-        _selectedWorldObject = SelectDefaultWorldObject(runtimeFrame);
+        _selectedWorldObject = null;
         _gpuPreviewRenderer?.ClearPreview();
         _wmoGpuPreviewRenderer?.ClearPreview();
         _mdxGpuPreviewRenderer?.ClearPreview();
         _modelOutputGpuRenderer?.ClearScene();
         ViewerIoSourceKey sourceKey = ViewerIoSourceKey.Create(_session.World.ClientRoot, _session.World.BuildLabel, _session.World.LooseOverlayRoot);
         _worldSceneHost.ApplyRuntimeFrame(_gl, _viewerIoService, sourceKey, BuildWorldMinimapSourceSignature(), runtimeFrame, _session.World.IgnoreTerrainHoles, _session.World.ShowHoleOverlay);
+        _selectedWorldObject = _worldSceneHost.NavigatorState.DefaultSelection;
         WowViewerWorldSceneSnapshot sceneSnapshot = _worldSceneHost.SceneSnapshot;
         WowViewerWorldAssetState assetState = _worldSceneHost.AssetState;
         DeletePreviewTexture();
@@ -4990,7 +4966,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         foreach (var visible in result.Visibility.VisibleMdx)
             drawList.AddCircleFilled(MapWorldPositionToCanvas(visible.Instance.PlacementPosition, origin, size, result), 3.0f, mdxVisibleColor);
 
-        if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(result, _selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
+        if (_selectedWorldObject.HasValue && _worldSceneHost.NavigatorState.TryResolveEntry(_selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
         {
             Vector2 center = MapWorldPositionToCanvas(selectedEntry.Instance.PlacementPosition, origin, size, result);
             uint selectedColor = selectedEntry.Kind == WorldSelectionKind.Wmo
@@ -5022,8 +4998,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
         float nearestAnyDistanceSq = float.MaxValue;
         const float pickRadius = 14f;
         float pickRadiusSq = pickRadius * pickRadius;
+        WowViewerWorldNavigatorState navigatorState = _worldSceneHost.NavigatorState;
 
-        foreach (WorldNavigatorEntry entry in EnumerateWorldNavigatorEntries(result))
+        foreach (WorldNavigatorEntry entry in navigatorState.Entries)
         {
             Vector2 center = MapWorldPositionToCanvas(entry.Instance.PlacementPosition, origin, size, result);
             float distanceSq = Vector2.DistanceSquared(center, mousePosition);
@@ -5046,14 +5023,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (nearestVisible.HasValue)
         {
             WorldNavigatorEntry pickedVisible = nearestVisible.Value;
-            SelectWorldObject(CreateSelection(pickedVisible, result.SelectedTileX, result.SelectedTileY), pickedVisible);
+            SelectWorldObject(navigatorState.CreateSelection(pickedVisible), pickedVisible);
             return;
         }
 
         if (nearestAny.HasValue)
         {
             WorldNavigatorEntry picked = nearestAny.Value;
-            SelectWorldObject(CreateSelection(picked, result.SelectedTileX, result.SelectedTileY), picked);
+            SelectWorldObject(navigatorState.CreateSelection(picked), picked);
         }
     }
 
@@ -5063,44 +5040,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _statusMessage = $"Selected {entry.Kind} {entry.Instance.ModelName} #{entry.Instance.UniqueId} on tile ({selection.TileX},{selection.TileY}).";
     }
 
-    private static WorldObjectSelection? SelectDefaultWorldObject(WowViewerWorldRuntimeFrameResult result)
-    {
-        if (result.Visibility.VisibleWmos.Count > 0)
-        {
-            WorldVisibleWmoEntry visibleWmo = result.Visibility.VisibleWmos.OrderBy(static entry => entry.CenterDistanceSq).First();
-            WorldNavigatorEntry entry = CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, visibleWmo.Instance, visibleWmo.CenterDistanceSq, isVisible: true, isTaxiActor: false);
-            return CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
-        }
-
-        if (result.Visibility.VisibleMdx.Count > 0)
-        {
-            WorldVisibleMdxEntry visibleMdx = result.Visibility.VisibleMdx.OrderBy(static entry => entry.CenterDistanceSq).First();
-            WorldNavigatorEntry entry = CreateWorldNavigatorEntry(result, WorldSelectionKind.Mdx, visibleMdx.Instance, visibleMdx.CenterDistanceSq, isVisible: true, visibleMdx.IsTaxiActor);
-            return CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
-        }
-
-        if (result.WmoInstances.Count > 0)
-        {
-            WorldObjectInstance firstWmo = result.WmoInstances[0];
-            WorldNavigatorEntry entry = CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, firstWmo, centerDistanceSq: null, isVisible: false, isTaxiActor: false);
-            return CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
-        }
-
-        if (result.MdxInstances.Count > 0)
-        {
-            WorldObjectInstance firstMdx = result.MdxInstances[0];
-            WorldNavigatorEntry entry = CreateWorldNavigatorEntry(result, WorldSelectionKind.Mdx, firstMdx, centerDistanceSq: null, isVisible: false, isTaxiActor: false);
-            return CreateSelection(entry, result.SelectedTileX, result.SelectedTileY);
-        }
-
-        return null;
-    }
-
-    private List<WorldNavigatorEntry> BuildWorldNavigatorEntries(WowViewerWorldRuntimeFrameResult result)
+    private List<WorldNavigatorEntry> BuildWorldNavigatorEntries(WowViewerWorldNavigatorState navigatorState)
     {
         string filter = _worldNavigatorFilter.Trim();
         List<WorldNavigatorEntry> entries = new();
-        foreach (WorldNavigatorEntry entry in EnumerateWorldNavigatorEntries(result))
+        foreach (WorldNavigatorEntry entry in navigatorState.Entries)
         {
             if (entry.Kind == WorldSelectionKind.Wmo && !_worldNavigatorShowWmo)
                 continue;
@@ -5141,91 +5085,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
         return entries;
     }
 
-    private IEnumerable<WorldNavigatorEntry> EnumerateWorldNavigatorEntries(WowViewerWorldRuntimeFrameResult result)
-    {
-        Dictionary<int, WorldVisibleWmoEntry> visibleWmoByIndex = result.Visibility.VisibleWmos.ToDictionary(static entry => entry.Instance.PlacementEntryIndex);
-        Dictionary<int, WorldVisibleMdxEntry> visibleMdxByIndex = result.Visibility.VisibleMdx.ToDictionary(static entry => entry.Instance.PlacementEntryIndex);
-        HashSet<int> opaqueRoutes = result.PassFrame.OpaqueVisibleMdxRoutes.Select(static route => route.VisibleMdxIndex).ToHashSet();
-        HashSet<int> transparentRoutes = result.PassFrame.TransparentVisibleMdxRoutes.Select(static route => route.VisibleMdxIndex).ToHashSet();
-        HashSet<int> unbatchedRoutes = result.PassFrame.UnbatchedVisibleMdxIndices;
-        HashSet<string> animatedModels = result.PassFrame.UpdatedMdxModelKeys;
-
-        foreach (WorldObjectInstance instance in result.WmoInstances)
-        {
-            if (visibleWmoByIndex.TryGetValue(instance.PlacementEntryIndex, out WorldVisibleWmoEntry visibleWmo))
-                yield return CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, visibleWmo.Instance, visibleWmo.CenterDistanceSq, isVisible: true, isTaxiActor: false);
-            else
-                yield return CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, instance, centerDistanceSq: null, isVisible: false, isTaxiActor: false);
-        }
-
-        for (int index = 0; index < result.MdxInstances.Count; index++)
-        {
-            WorldObjectInstance instance = result.MdxInstances[index];
-            if (visibleMdxByIndex.TryGetValue(instance.PlacementEntryIndex, out WorldVisibleMdxEntry visibleMdx))
-            {
-                yield return CreateWorldNavigatorEntry(
-                    result,
-                    WorldSelectionKind.Mdx,
-                    visibleMdx.Instance,
-                    visibleMdx.CenterDistanceSq,
-                    isVisible: true,
-                    visibleMdx.IsTaxiActor,
-                    opaqueRoutes.Contains(index),
-                    transparentRoutes.Contains(index),
-                    unbatchedRoutes.Contains(index),
-                    animatedModels.Contains(visibleMdx.Instance.ModelKey));
-            }
-            else
-            {
-                yield return CreateWorldNavigatorEntry(
-                    result,
-                    WorldSelectionKind.Mdx,
-                    instance,
-                    centerDistanceSq: null,
-                    isVisible: false,
-                    isTaxiActor: false,
-                    hasOpaqueRoute: false,
-                    hasTransparentRoute: false,
-                    requiresUnbatchedRender: false,
-                    wasAnimated: animatedModels.Contains(instance.ModelKey));
-            }
-        }
-    }
-
-    private static WorldNavigatorEntry CreateWorldNavigatorEntry(
-        WowViewerWorldRuntimeFrameResult result,
-        WorldSelectionKind kind,
-        WorldObjectInstance instance,
-        float? centerDistanceSq,
-        bool isVisible,
-        bool isTaxiActor,
-        bool hasOpaqueRoute = false,
-        bool hasTransparentRoute = false,
-        bool requiresUnbatchedRender = false,
-        bool wasAnimated = false)
-    {
-        bool assetReady = kind == WorldSelectionKind.Wmo
-            ? result.WmoInstances.Any(candidate => candidate.PlacementEntryIndex == instance.PlacementEntryIndex && candidate.BoundsResolved)
-            : result.MdxInstances.Any(candidate => candidate.PlacementEntryIndex == instance.PlacementEntryIndex && candidate.BoundsResolved);
-
-        return new WorldNavigatorEntry(
-            kind,
-            instance,
-            isVisible,
-            assetReady,
-            centerDistanceSq,
-            isTaxiActor,
-            hasOpaqueRoute,
-            hasTransparentRoute,
-            requiresUnbatchedRender,
-            wasAnimated);
-    }
-
-    private static WorldObjectSelection CreateSelection(WorldNavigatorEntry entry, int tileX, int tileY)
-    {
-        return new WorldObjectSelection(entry.Kind, tileX, tileY, entry.Instance.PlacementEntryIndex, entry.Instance.UniqueId, entry.Instance.ModelKey);
-    }
-
     private static string BuildNavigatorLabel(WorldNavigatorEntry entry)
     {
         string visibility = entry.IsVisible ? "visible" : "hidden";
@@ -5239,81 +5098,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
         return string.IsNullOrWhiteSpace(entry.Instance.ModelPath)
             ? entry.Instance.ModelKey
             : entry.Instance.ModelPath;
-    }
-
-    private static bool TryResolveWorldNavigatorEntry(WowViewerWorldRuntimeFrameResult result, WorldObjectSelection selection, out WorldNavigatorEntry entry)
-    {
-        if (selection.TileX != result.SelectedTileX || selection.TileY != result.SelectedTileY)
-        {
-            entry = default;
-            return false;
-        }
-
-        foreach (WorldNavigatorEntry candidate in EnumerateWorldNavigatorEntriesStatic(result))
-        {
-            if (candidate.Kind == selection.Kind
-                && candidate.Instance.PlacementEntryIndex == selection.PlacementEntryIndex
-                && candidate.Instance.UniqueId == selection.UniqueId
-                && string.Equals(candidate.Instance.ModelKey, selection.ModelKey, StringComparison.OrdinalIgnoreCase))
-            {
-                entry = candidate;
-                return true;
-            }
-        }
-
-        entry = default;
-        return false;
-    }
-
-    private static IEnumerable<WorldNavigatorEntry> EnumerateWorldNavigatorEntriesStatic(WowViewerWorldRuntimeFrameResult result)
-    {
-        Dictionary<int, WorldVisibleWmoEntry> visibleWmoByIndex = result.Visibility.VisibleWmos.ToDictionary(static entry => entry.Instance.PlacementEntryIndex);
-        Dictionary<int, WorldVisibleMdxEntry> visibleMdxByIndex = result.Visibility.VisibleMdx.ToDictionary(static entry => entry.Instance.PlacementEntryIndex);
-        HashSet<int> opaqueRoutes = result.PassFrame.OpaqueVisibleMdxRoutes.Select(static route => route.VisibleMdxIndex).ToHashSet();
-        HashSet<int> transparentRoutes = result.PassFrame.TransparentVisibleMdxRoutes.Select(static route => route.VisibleMdxIndex).ToHashSet();
-        HashSet<int> unbatchedRoutes = result.PassFrame.UnbatchedVisibleMdxIndices;
-        HashSet<string> animatedModels = result.PassFrame.UpdatedMdxModelKeys;
-
-        foreach (WorldObjectInstance instance in result.WmoInstances)
-        {
-            if (visibleWmoByIndex.TryGetValue(instance.PlacementEntryIndex, out WorldVisibleWmoEntry visibleWmo))
-                yield return CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, visibleWmo.Instance, visibleWmo.CenterDistanceSq, isVisible: true, isTaxiActor: false);
-            else
-                yield return CreateWorldNavigatorEntry(result, WorldSelectionKind.Wmo, instance, centerDistanceSq: null, isVisible: false, isTaxiActor: false);
-        }
-
-        for (int index = 0; index < result.MdxInstances.Count; index++)
-        {
-            WorldObjectInstance instance = result.MdxInstances[index];
-            if (visibleMdxByIndex.TryGetValue(instance.PlacementEntryIndex, out WorldVisibleMdxEntry visibleMdx))
-            {
-                yield return CreateWorldNavigatorEntry(
-                    result,
-                    WorldSelectionKind.Mdx,
-                    visibleMdx.Instance,
-                    visibleMdx.CenterDistanceSq,
-                    isVisible: true,
-                    visibleMdx.IsTaxiActor,
-                    opaqueRoutes.Contains(index),
-                    transparentRoutes.Contains(index),
-                    unbatchedRoutes.Contains(index),
-                    animatedModels.Contains(visibleMdx.Instance.ModelKey));
-            }
-            else
-            {
-                yield return CreateWorldNavigatorEntry(
-                    result,
-                    WorldSelectionKind.Mdx,
-                    instance,
-                    centerDistanceSq: null,
-                    isVisible: false,
-                    isTaxiActor: false,
-                    hasOpaqueRoute: false,
-                    hasTransparentRoute: false,
-                    requiresUnbatchedRender: false,
-                    wasAnimated: animatedModels.Contains(instance.ModelKey));
-            }
-        }
     }
 
     private static string FormatVector3(Vector3 value)
