@@ -170,7 +170,7 @@ uint32_t CameraCreate(CCameraType type) {
     // Initialize to defaults
     camera->nearClip = 0.1f;
     camera->farClip = 1000.0f;
-    camera->fov = 60.0f * PI / 180.0f;  // 60 degrees
+    camera->fov = 45.0f * PI / 180.0f;  // 45 degrees
     camera->aspectRatio = 4.0f / 3.0f;
     camera->isActive = false;
     camera->isLocked = false;

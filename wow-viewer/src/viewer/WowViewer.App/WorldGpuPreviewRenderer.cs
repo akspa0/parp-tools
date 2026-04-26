@@ -5,6 +5,7 @@ namespace WowViewer.App;
 
 internal sealed class WorldGpuPreviewRenderer : IDisposable
 {
+    private const float WorldFieldOfViewDegrees = 45.0f;
     private const float TileSize = 533.33333f;
     private const float ChunkSize = TileSize / 16.0f;
     private const float ChunkSubCellSize = ChunkSize / 8.0f;
@@ -18,6 +19,9 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private int _skyZenithColorLocation;
     private int _skyHorizonColorLocation;
     private int _skyFogColorLocation;
+    private int _skyBackdropStrengthLocation;
+    private int _skyBackdropTintLocation;
+    private int _skyBackdropSeedLocation;
     private uint _terrainProgram;
     private int _terrainViewLocation;
     private int _terrainProjectionLocation;
@@ -48,10 +52,13 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private Vector3 _boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
     private Vector3 _boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
     private readonly WorldPreviewCameraState _camera = new();
-    private bool _showSky = true;
+    private bool _showSky;
     private Vector3 _skyZenithColor = new(0.16f, 0.30f, 0.54f);
     private Vector3 _skyHorizonColor = new(0.58f, 0.58f, 0.50f);
     private Vector3 _skyFogColor = new(0.34f, 0.38f, 0.42f);
+    private Vector3 _skyBackdropTint = new(0.46f, 0.52f, 0.64f);
+    private float _skyBackdropStrength;
+    private float _skyBackdropSeed;
     private bool _disposed;
 
     public WorldGpuPreviewRenderer(GL gl)
@@ -65,7 +72,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
     public uint PreviewTextureHandle => _colorTexture;
 
-    public bool HasRenderableGeometry => _terrainIndexCount > 0 || _overlayVertexCount > 0 || _markerVertexCount > 0;
+    public bool HasRenderableGeometry => _showSky || _terrainIndexCount > 0 || _overlayVertexCount > 0 || _markerVertexCount > 0;
 
     public int TerrainTriangleCount => checked((int)(_terrainIndexCount / 3));
 
@@ -121,6 +128,8 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         DeleteMarkerBuffers();
         _boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
         _boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
+        _showSky = false;
+        _skyBackdropStrength = 0.0f;
         _camera.ResetToIdentity();
     }
 
@@ -180,6 +189,9 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _gl.Uniform3(_skyZenithColorLocation, _skyZenithColor.X, _skyZenithColor.Y, _skyZenithColor.Z);
             _gl.Uniform3(_skyHorizonColorLocation, _skyHorizonColor.X, _skyHorizonColor.Y, _skyHorizonColor.Z);
             _gl.Uniform3(_skyFogColorLocation, _skyFogColor.X, _skyFogColor.Y, _skyFogColor.Z);
+            _gl.Uniform1(_skyBackdropStrengthLocation, _skyBackdropStrength);
+            _gl.Uniform3(_skyBackdropTintLocation, _skyBackdropTint.X, _skyBackdropTint.Y, _skyBackdropTint.Z);
+            _gl.Uniform1(_skyBackdropSeedLocation, _skyBackdropSeed);
             _gl.BindVertexArray(_skyVao);
             _gl.DrawArrays(PrimitiveType.Triangles, 0, 3);
             _gl.Enable(EnableCap.DepthTest);
@@ -470,6 +482,48 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _skyZenithColor = Vector3.Lerp(alphaZenith, highZenith, highRelief);
         _skyHorizonColor = Vector3.Lerp(dryHorizon, wetHorizon, waterInfluence * 0.65f);
         _skyFogColor = Vector3.Lerp(dryFog, wetFog, waterInfluence * 0.65f);
+
+        ConfigureBackdropLayer(frame);
+    }
+
+    private void ConfigureBackdropLayer(WowViewerWorldRuntimeFrameResult frame)
+    {
+        if (frame.SkyboxBackdropInstances.Count == 0)
+        {
+            _skyBackdropStrength = 0.0f;
+            _skyBackdropSeed = 0.0f;
+            return;
+        }
+
+        _skyBackdropSeed = ComputeBackdropSeed(frame.SkyboxBackdropInstances);
+        float countInfluence = Math.Clamp(MathF.Log2(frame.SkyboxBackdropInstances.Count + 1) / 6.0f, 0.0f, 1.0f);
+        _skyBackdropStrength = Math.Clamp(0.16f + (countInfluence * 0.18f), 0.12f, 0.34f);
+
+        float warmShift = Fract(_skyBackdropSeed * 1.731f);
+        Vector3 moonlit = new(0.38f, 0.45f, 0.60f);
+        Vector3 dusty = new(0.62f, 0.54f, 0.43f);
+        _skyBackdropTint = Vector3.Lerp(moonlit, dusty, warmShift * 0.45f);
+    }
+
+    private static float ComputeBackdropSeed(IReadOnlyList<WowViewer.Core.Runtime.World.WorldObjectInstance> instances)
+    {
+        uint hash = 2166136261u;
+        foreach (var instance in instances.Take(8))
+        {
+            string path = instance.ModelPath ?? string.Empty;
+            for (int index = 0; index < path.Length; index++)
+            {
+                hash ^= (uint)char.ToUpperInvariant(path[index]);
+                hash *= 16777619u;
+            }
+        }
+
+        return (hash & 0x00FFFFFFu) / 16777215.0f;
+    }
+
+    private static float Fract(float value)
+    {
+        return value - MathF.Floor(value);
     }
 
     private void BuildMatrices(int width, int height, out Matrix4x4 view, out Matrix4x4 projection)
@@ -485,7 +539,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         float distance = Vector3.Distance(_camera.Position, _camera.Target);
         float aspect = Math.Max(width, 1) / (float)Math.Max(height, 1);
         float farPlane = MathF.Max(2048f, distance + (radius * 4.0f));
-        projection = Matrix4x4.CreatePerspectiveFieldOfView(50.0f * MathF.PI / 180.0f, aspect, 1.0f, farPlane);
+        projection = Matrix4x4.CreatePerspectiveFieldOfView(WorldFieldOfViewDegrees * MathF.PI / 180.0f, aspect, 1.0f, farPlane);
     }
 
     private static Vector3[] BuildChunkPositions(int tileX, int tileY, WowViewer.Core.Runtime.World.Terrain.WorldTerrainChunkData chunk)
@@ -711,8 +765,18 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             uniform vec3 uZenithColor;
             uniform vec3 uHorizonColor;
             uniform vec3 uFogColor;
+            uniform float uBackdropStrength;
+            uniform vec3 uBackdropTint;
+            uniform float uBackdropSeed;
 
             out vec4 FragColor;
+
+            float hash21(vec2 p)
+            {
+                p = fract(p * vec2(123.34, 456.21));
+                p += dot(p, p + 45.32);
+                return fract(p.x * p.y);
+            }
 
             void main()
             {
@@ -724,6 +788,17 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
                 float horizonBand = exp(-abs(ray.z) * 5.5);
                 vec3 color = mix(uHorizonColor, uZenithColor, dome);
                 color = mix(color, uFogColor, horizonBand * 0.34);
+                if (uBackdropStrength > 0.0)
+                {
+                    float azimuth = atan(ray.y, ray.x) / 6.2831853 + 0.5 + (uBackdropSeed * 0.37);
+                    float latitude = acos(clamp(ray.z, -1.0, 1.0)) / 3.1415926;
+                    vec2 shellCell = floor(vec2(azimuth * 96.0, latitude * 42.0));
+                    float star = step(0.988, hash21(shellCell + uBackdropSeed));
+                    float zenithMask = smoothstep(0.30, 0.88, up);
+                    float shellBand = smoothstep(0.04, 0.42, abs(ray.z)) * (1.0 - smoothstep(0.78, 1.0, abs(ray.z)));
+                    vec3 shell = mix(uBackdropTint, vec3(0.86, 0.82, 0.66), star * zenithMask);
+                    color = mix(color, shell, uBackdropStrength * (0.22 + shellBand * 0.38 + star * 0.65));
+                }
                 FragColor = vec4(color, 1.0);
             }
             """;
@@ -735,6 +810,9 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _skyZenithColorLocation = _gl.GetUniformLocation(_skyProgram, "uZenithColor");
         _skyHorizonColorLocation = _gl.GetUniformLocation(_skyProgram, "uHorizonColor");
         _skyFogColorLocation = _gl.GetUniformLocation(_skyProgram, "uFogColor");
+        _skyBackdropStrengthLocation = _gl.GetUniformLocation(_skyProgram, "uBackdropStrength");
+        _skyBackdropTintLocation = _gl.GetUniformLocation(_skyProgram, "uBackdropTint");
+        _skyBackdropSeedLocation = _gl.GetUniformLocation(_skyProgram, "uBackdropSeed");
     }
 
     private void InitializeOverlayShader()
@@ -1011,13 +1089,13 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             return Vector3.Normalize(forward);
         }
 
-        public void RotateLook(float azimuthDeltaDegrees, float elevationDeltaDegrees)
+        public void RotateLook(float yawDeltaDegrees, float pitchDeltaDegrees)
         {
             Vector3 forward = GetForwardVector();
             float distance = MathF.Max(Vector3.Distance(Position, Target), 1.0f);
             GetCameraAngles(forward, out float azimuthDegrees, out float elevationDegrees);
-            azimuthDegrees -= azimuthDeltaDegrees;
-            elevationDegrees = Math.Clamp(elevationDegrees + elevationDeltaDegrees, -89.0f, 89.0f);
+            azimuthDegrees -= yawDeltaDegrees;
+            elevationDegrees = Math.Clamp(elevationDegrees + pitchDeltaDegrees, -89.0f, 89.0f);
             Vector3 rotatedForward = ComputeForwardVector(azimuthDegrees, elevationDegrees);
             Target = Position + (rotatedForward * distance);
         }
@@ -1033,17 +1111,18 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         private void BuildBasis(out Vector3 forward, out Vector3 right, out Vector3 up)
         {
             forward = GetForwardVector();
-            Vector3 worldUp = MathF.Abs(Vector3.Dot(forward, Vector3.UnitZ)) > 0.98f
-                ? Vector3.UnitY
-                : Vector3.UnitZ;
+            Vector3 levelForward = new(forward.X, forward.Y, 0.0f);
+            if (levelForward.LengthSquared() > 1e-6f)
+                forward = Vector3.Normalize(levelForward);
 
-            right = Vector3.Cross(worldUp, forward);
+            Vector3 worldUp = Vector3.UnitZ;
+            right = Vector3.Cross(forward, worldUp);
             if (right.LengthSquared() <= 1e-6f)
                 right = Vector3.UnitX;
             else
                 right = Vector3.Normalize(right);
 
-            up = Vector3.Cross(forward, right);
+            up = Vector3.Cross(right, forward);
             if (up.LengthSquared() <= 1e-6f)
                 up = worldUp;
             else

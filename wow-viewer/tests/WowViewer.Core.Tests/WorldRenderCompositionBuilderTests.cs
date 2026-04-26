@@ -75,9 +75,36 @@ public sealed class WorldRenderCompositionBuilderTests
         Assert.True(skybox.Ready);
         Assert.Equal(2, skybox.SourceCount);
         Assert.Equal(0, skybox.SubmittedCount);
+        Assert.Contains("classified", skybox.Note);
+    }
+
+    [Fact]
+    public void Build_CountsProceduralBackdropSubmission_WhenFrameStatsSubmitClassifiedBackdrop()
+    {
+        WorldRenderFrameStats stats = WorldRenderFrameStats.Empty with
+        {
+            SkyboxBackdrop = new WorldRenderStageStats(0, VisibleCount: 2, SubmittedCount: 2),
+        };
+
+        WorldRenderCompositionFrame composition = WorldRenderCompositionBuilder.Build(
+            new WorldFramePassOptions(objectsVisible: false, wmosVisible: false, doodadsVisible: false, skyVisible: true),
+            CreateWdl(hasData: false),
+            CreateTerrain(chunkCount: 0),
+            CreateLiquid(),
+            wmoSourceCount: 0,
+            mdxSourceCount: 2,
+            stats,
+            skyboxBackdropSourceCount: 2);
+
+        WorldRenderLayerState skybox = composition.Layers.Single(static layer => layer.Kind == WorldRenderLayerKind.SkyboxBackdrop);
+        Assert.True(skybox.Ready);
+        Assert.Equal(2, skybox.SourceCount);
+        Assert.Equal(2, skybox.SubmittedCount);
+        Assert.Contains("procedural spherical backdrop", skybox.Note);
     }
 
     [Theory]
+    [InlineData(@"Environments\Stars\stars.mdl")]
     [InlineData(@"World\Environments\Stars\AzerothStars.mdx")]
     [InlineData(@"World\Generic\Skybox\BlueSkyBox.m2")]
     [InlineData(@"World\Expansion01\SkyBowl\OutlandSkyBowl.mdx")]

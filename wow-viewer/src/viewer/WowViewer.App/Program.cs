@@ -269,7 +269,9 @@ internal static class Program
         Console.WriteLine($"WowViewer.App world-frame terrain-service: sourceChunks={result.TerrainTileData.ChunkCount} holeChunks={result.TerrainTileData.HoleChunkCount} liquidFlagChunks={result.TerrainTileData.LiquidFlagChunkCount} areas={result.TerrainTileData.DistinctAreaIdCount} sample={FormatTerrainChunkSample(result.TerrainTileData)}");
         Console.WriteLine($"WowViewer.App world-frame terrain-visual: size={result.TerrainVisualSnapshot.Width}x{result.TerrainVisualSnapshot.Height} sampled={result.TerrainVisualSnapshot.SampledPixelCount} range={FormatTerrainHeightRange(result.TerrainTileData)} center={FormatTerrainCenter(result.TerrainTileData)} corners={FormatTerrainCorners(result.TerrainTileData)} hash={result.TerrainVisualSnapshot.VisualHash}");
         Console.WriteLine($"WowViewer.App world-frame liquid-service: sourceChunks={result.LiquidTileData.ActiveChunkCount} sourceLayers={result.LiquidTileData.LayerCount} sourceVisibleTiles={result.LiquidTileData.VisibleTileCount} types={FormatLiquidTypeCounts(result.LiquidTileData)} sample={FormatLiquidChunkSample(result.LiquidTileData)}");
-        Console.WriteLine($"WowViewer.App world-frame placements: wmo={result.WmoInstances.Count} readyWmo={result.ReadyWmoCount} mdx={result.MdxInstances.Count} readyMdx={result.ReadyMdxCount} pending={result.PendingAssetKeys.Count}");
+        Console.WriteLine($"WowViewer.App world-frame placements: wmo={result.WmoInstances.Count} readyWmo={result.ReadyWmoCount} mdx={result.MdxInstances.Count} readyMdx={result.ReadyMdxCount} skyboxBackdrop={result.SkyboxBackdropInstances.Count} pending={result.PendingAssetKeys.Count}");
+        if (result.SkyboxBackdropInstances.Count > 0)
+            Console.WriteLine($"WowViewer.App world-frame skybox-backdrop-sample: {string.Join(", ", result.SkyboxBackdropInstances.Take(4).Select(static instance => instance.ModelPath))}");
         Console.WriteLine($"WowViewer.App world-frame visibility: visibleWmo={result.Visibility.VisibleWmos.Count} culledWmo={result.CulledWmoCount} visibleMdx={result.Visibility.VisibleMdx.Count} culledMdx={result.CulledMdxCount} taxi={result.Visibility.VisibleTaxiMdxCount}");
         Console.WriteLine($"WowViewer.App world-frame passes: updatedMdx={result.Stats.MdxAnimation.SubmittedCount} wmoOpaque={result.Stats.WmoSubmission.SubmittedCount} mdxOpaque={result.Stats.MdxOpaqueSubmission.SubmittedCount} mdxTransparent={result.Stats.MdxTransparentSubmission.SubmittedCount} opaqueRoutes={result.PassFrame.OpaqueVisibleMdxRoutes.Count} transparentRoutes={result.PassFrame.TransparentVisibleMdxRoutes.Count}");
         Console.WriteLine($"WowViewer.App world-frame gpu-plan: opaqueBatches={result.MdxRenderPlan.OpaqueBatchCount} transparentBatches={result.MdxRenderPlan.TransparentBatchCount} opaqueInstances={result.MdxRenderPlan.OpaqueInstanceCount} transparentInstances={result.MdxRenderPlan.TransparentInstanceCount}");
@@ -515,7 +517,7 @@ internal static class Program
             session.World.ShowWmos = !HasFlag(args, "--hide-wmos");
             session.World.ShowDoodads = !HasFlag(args, "--hide-doodads");
             session.World.ShowSky = !HasFlag(args, "--hide-sky");
-            session.World.ShowWdl = !HasFlag(args, "--hide-wdl");
+            session.World.ShowWdl = HasFlag(args, "--show-wdl") && !HasFlag(args, "--hide-wdl");
             session.World.ShowTerrain = !HasFlag(args, "--hide-terrain");
             session.World.ShowLiquid = !HasFlag(args, "--hide-liquid");
             session.World.ShowOverlay = !HasFlag(args, "--hide-overlay");
@@ -586,7 +588,7 @@ internal static class Program
             wmosVisible: !HasFlag(args, "--hide-wmos"),
             doodadsVisible: !HasFlag(args, "--hide-doodads"),
             skyVisible: !HasFlag(args, "--hide-sky"),
-            wdlVisible: !HasFlag(args, "--hide-wdl"),
+            wdlVisible: HasFlag(args, "--show-wdl") && !HasFlag(args, "--hide-wdl"),
             terrainVisible: !HasFlag(args, "--hide-terrain"),
             liquidVisible: !HasFlag(args, "--hide-liquid"),
             overlayVisible: !HasFlag(args, "--hide-overlay"));
@@ -737,7 +739,7 @@ internal static class Program
             && (!float.TryParse(cameraElevationText, out cameraElevation) || !float.IsFinite(cameraElevation)))
             throw new ArgumentOutOfRangeException(nameof(cameraElevationText), "--camera-elevation must be a finite number of degrees.");
 
-        float cameraFov = 60.0f;
+        float cameraFov = 45.0f;
         if (!string.IsNullOrWhiteSpace(cameraFovText)
             && (!float.TryParse(cameraFovText, out cameraFov) || !float.IsFinite(cameraFov)))
             throw new ArgumentOutOfRangeException(nameof(cameraFovText), "--camera-fov must be a finite number of degrees.");

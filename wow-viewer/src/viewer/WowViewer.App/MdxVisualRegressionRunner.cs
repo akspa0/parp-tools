@@ -41,7 +41,7 @@ internal sealed class MdxVisualRegressionCase
 
     public float CameraElevationDegrees { get; init; } = 25.0f;
 
-    public float CameraFovDegrees { get; init; } = 60.0f;
+    public float CameraFovDegrees { get; init; } = 45.0f;
 
     public float CameraZoomFactor { get; init; } = 0.72f;
 

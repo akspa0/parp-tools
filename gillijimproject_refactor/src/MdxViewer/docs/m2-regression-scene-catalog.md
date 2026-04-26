@@ -6,7 +6,7 @@ This file records concrete live-viewer scenes that should be reused for before/a
 
 - Map: `development`
 - Build: `3.3.5.12340`
-- Scene bookmark: `Scene: map=development build=3.3.5.12340 WoW=(16731.0, 12516.0, 374.0) Facing=170.0° S Local=(4550.7, 335.7, 374.0) Yaw=80.0 Pitch=-1.0 FOV=60.0`
+- Scene bookmark: `Scene: map=development build=3.3.5.12340 WoW=(16731.0, 12516.0, 374.0) Facing=170.0° S Local=(4550.7, 335.7, 374.0) Yaw=80.0 Pitch=-1.0 FOV=45.0`
 - Shot-point template entry: `development_grizzlyhills_tree05_cluster`
 
 Selected object captured in the scene:

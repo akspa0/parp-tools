@@ -22,7 +22,7 @@ internal sealed class PreviewCameraSettings
 
     public float ElevationDegrees { get; init; } = 25.0f;
 
-    public float FieldOfViewDegrees { get; init; } = 60.0f;
+    public float FieldOfViewDegrees { get; init; } = 45.0f;
 
     public float PaddingScale { get; init; } = 1.04f;
 

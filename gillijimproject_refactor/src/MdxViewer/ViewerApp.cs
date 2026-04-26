@@ -717,7 +717,7 @@ public partial class ViewerApp : IDisposable
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
     // Field of view in degrees (adjustable via UI)
-    private float _fovDegrees = 60f;
+    private float _fovDegrees = 45f;
     private int _savedDetailedAdtTileCountOverride;
 
     private bool _autoFrameModelOnLoad = true;

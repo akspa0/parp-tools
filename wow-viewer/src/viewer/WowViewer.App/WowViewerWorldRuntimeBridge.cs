@@ -84,6 +84,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         AdtPlacementCatalog placementCatalog,
         IReadOnlyList<WorldObjectInstance> wmoInstances,
         IReadOnlyList<WorldObjectInstance> mdxInstances,
+        IReadOnlyList<WorldObjectInstance> skyboxBackdropInstances,
         int readyWmoCount,
         int readyMdxCount,
         int culledWmoCount,
@@ -115,6 +116,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         PlacementCatalog = placementCatalog;
         WmoInstances = wmoInstances;
         MdxInstances = mdxInstances;
+        SkyboxBackdropInstances = skyboxBackdropInstances;
         ReadyWmoCount = readyWmoCount;
         ReadyMdxCount = readyMdxCount;
         CulledWmoCount = culledWmoCount;
@@ -158,6 +160,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
     public IReadOnlyList<WorldObjectInstance> WmoInstances { get; }
 
     public IReadOnlyList<WorldObjectInstance> MdxInstances { get; }
+
+    public IReadOnlyList<WorldObjectInstance> SkyboxBackdropInstances { get; }
 
     public int ReadyWmoCount { get; }
 
@@ -282,7 +286,9 @@ internal static class WowViewerWorldRuntimeBridge
 
         ((int tileX, int tileY) selectedTile, AdtPlacementCatalog placementCatalog, string placementSourcePath) =
             ResolveTileAndPlacements(session, request.TileX, request.TileY, archiveCatalog);
-        WorldWdlTileData wdlTileData = ReadMapWdlTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
+        WorldWdlTileData wdlTileData = request.PassOptions.WdlVisible
+            ? ReadMapWdlTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog)
+            : WorldWdlTileData.Missing($@"World\Maps\{session.ResolvedMapDirectory}\{session.ResolvedMapDirectory}.wdl", selectedTile.tileX, selectedTile.tileY);
         WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog, wdlTileData.HasData ? 1 : 0);
         WorldTerrainTileData terrainTileData = ReadRootTerrainTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
         WorldTerrainVisualSnapshot terrainVisualSnapshot = WorldTerrainVisualSnapshotBuilder.Build(terrainTileData);
@@ -292,6 +298,9 @@ internal static class WowViewerWorldRuntimeBridge
 
         List<WorldObjectInstance> wmoInstances = BuildWmoInstances(placementCatalog, selectedTile.tileX, selectedTile.tileY, assetReadyLookup);
         List<WorldObjectInstance> mdxInstances = BuildMdxInstances(placementCatalog, selectedTile.tileX, selectedTile.tileY, assetReadyLookup);
+        IReadOnlyList<WorldObjectInstance> skyboxBackdropInstances = mdxInstances
+            .Where(static instance => WorldSkyboxBackdropClassifier.IsBackdropModelPath(instance.ModelPath))
+            .ToArray();
 
         int readyWmoCount = wmoInstances.Count(instance => assetReadyLookup.TryGetValue(instance.ModelKey, out bool ready) && ready);
         int readyMdxCount = mdxInstances.Count(instance => assetReadyLookup.TryGetValue(instance.ModelKey, out bool ready) && ready);
@@ -307,7 +316,7 @@ internal static class WowViewerWorldRuntimeBridge
             ObjectStreamingRangeMultiplier: 1.0f,
             CullSmallDoodadsOnly: false,
             CountAsTaxiActor: false,
-            VerticalFieldOfViewRadians: MathF.PI / 3f,
+            VerticalFieldOfViewRadians: MathF.PI / 4f,
             VisibilityProfile: WorldObjectVisibilityProfile.Quality);
 
         WorldVisibilityFrame visibility = new();
@@ -469,7 +478,7 @@ internal static class WowViewerWorldRuntimeBridge
             TaxiActorUpdate: new WorldRenderStageStats(0, visibility.VisibleTaxiMdxCount, visibility.VisibleTaxiMdxCount),
             Lighting: new WorldRenderStageStats(0),
             Sky: new WorldRenderStageStats(0),
-            SkyboxBackdrop: new WorldRenderStageStats(0),
+            SkyboxBackdrop: new WorldRenderStageStats(0, skyboxBackdropInstances.Count, request.PassOptions.SkyVisible ? skyboxBackdropInstances.Count : 0),
             Wdl: new WorldRenderStageStats(wdlMs, activeWdlTileCount, activeWdlTileCount),
             Terrain: new WorldRenderStageStats(terrainMs, activeTerrainChunkCount, activeTerrainChunkCount),
             WmoVisibility: new WorldRenderStageStats(wmoVisibilityStopwatch.Elapsed.TotalMilliseconds, wmoInstances.Count, visibility.VisibleWmos.Count),
@@ -483,8 +492,6 @@ internal static class WowViewerWorldRuntimeBridge
             Overlay: new WorldRenderStageStats(0));
 
         WorldMdxRenderPlan mdxRenderPlan = WorldMdxRenderPlanBuilder.Build(passFrame, visibility);
-        int skyboxBackdropSourceCount = mdxInstances.Count(static instance =>
-            WorldSkyboxBackdropClassifier.IsBackdropModelPath(instance.ModelPath));
         WorldRenderCompositionFrame composition = WorldRenderCompositionBuilder.Build(
             appliedPassOptions,
             wdlTileData,
@@ -493,7 +500,7 @@ internal static class WowViewerWorldRuntimeBridge
             wmoInstances.Count,
             mdxInstances.Count,
             stats,
-            skyboxBackdropSourceCount);
+            skyboxBackdropInstances.Count);
 
         return new WowViewerWorldRuntimeFrameResult(
             session,
@@ -508,6 +515,7 @@ internal static class WowViewerWorldRuntimeBridge
             placementCatalog,
             wmoInstances,
             mdxInstances,
+            skyboxBackdropInstances,
             readyWmoCount,
             readyMdxCount,
             culledWmoCount,

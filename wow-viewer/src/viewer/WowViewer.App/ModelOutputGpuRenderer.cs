@@ -615,7 +615,7 @@ internal sealed class ModelOutputGpuRenderer : IDisposable
         float aspect = Math.Max(width, 1) / (float)Math.Max(height, 1);
         float near = 0.5f;
         float far = MathF.Max(radius * 12.0f, 4096.0f);
-        projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3.0f, aspect, near, far);
+        projection = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4.0f, aspect, near, far);
     }
 
     private readonly record struct CommandBuffers(uint Vao, uint Vbo, uint Ebo, uint IndexCount, uint TextureId, bool HasTexture, Vector4 TintColor, bool Transparent, Vector3 BoundsCenter)

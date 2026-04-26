@@ -9,7 +9,7 @@
       "PositionZ": 0.0,
       "Yaw": 0.0,
       "Pitch": 0.0,
-      "FovDegrees": 60.0
+      "FovDegrees": 45.0
     },
     {
       "Name": "winterspring_tree02_mid_silhouette",
@@ -20,7 +20,7 @@
       "PositionZ": 0.0,
       "Yaw": 0.0,
       "Pitch": 0.0,
-      "FovDegrees": 60.0
+      "FovDegrees": 45.0
     },
     {
       "Name": "creature_clothing_front",
@@ -31,7 +31,7 @@
       "PositionZ": 0.0,
       "Yaw": 0.0,
       "Pitch": 0.0,
-      "FovDegrees": 60.0
+      "FovDegrees": 45.0
     },
     {
       "Name": "development_grizzlyhills_tree05_cluster",
@@ -42,7 +42,7 @@
       "PositionZ": 374.0,
       "Yaw": 80.0,
       "Pitch": -1.0,
-      "FovDegrees": 60.0
+      "FovDegrees": 45.0
     }
   ]
 }

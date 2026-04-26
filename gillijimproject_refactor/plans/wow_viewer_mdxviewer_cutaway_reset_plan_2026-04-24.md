@@ -7,6 +7,38 @@
 - design rule: treat [`MdxViewer`](../src/MdxViewer) as the UI and interaction reference, but keep `wow-viewer` as the long-term code owner for runtime, rendering, and shared file I/O
 - viewer-first rule: `wow-viewer` must act as a world viewer first and a diagnostics/tooling surface second; diagnostic panels are subordinate to the composed world image
 - aesthetic target: prioritize the 0.5.3 client feel for this project, because the long-term purpose is exploratory data tooling and low-resolution visual restoration over early-world data, not a generic modern asset inspector
+- Apr 24 correction: a one-tile diagnostic terrain preview is no longer an acceptable definition of "World Session"; the reset must produce a navigable multi-tile world viewport with minimap, layer controls, terrain texturing, and object rendering on the critical path
+- Apr 24 camera/source correction: world viewport vertical FOV is `45` degrees, and ADT terrain is the primary loaded world-view source; WDL is only far-terrain/reference data and must not be described or treated as the loaded world surface
+- Apr 25 live-path correction: the World Session now forces terrain on and WDL off for live loads, the spawn/tile picker no longer reads WDL as its source surface, and keyboard movement polls Silk.NET input in addition to ImGui key state; this is still not a multi-tile/textured/object-rendering viewer
+- Apr 25 FOV correction: all viewer defaults should be `45` degrees, not `60`; remaining `60` values in viewer paths must be non-camera layout constants or explicit historical capture data, not projection defaults
+
+## Apr 24, 2026 Course Correction - Stop Treating The Preview As The Viewer
+
+The current `wow-viewer` World Session still fails the user's live-use test:
+
+- minimaps do not reliably load in the active shell
+- `WASD` and `Q/E` are not functioning as dependable viewport movement
+- mouse wheel input can scroll the containing panel instead of belonging to the 3D viewport
+- the app still loads and renders one selected ADT tile at a time
+- terrain is height-shaded only; it does not render `MCLY`/`MCAL` texture layers
+- UI copy and defaults still over-emphasize WDL-backed spawn/reference data even though the viewer needs to be ADT-first
+- WMO, MDX, and M2 placements are markers and inspector rows, not rendered in-world objects
+- world-layer controls live in the navigator/sidebar rather than as a viewer/editor options bar
+- debug views still compete with viewer space instead of being strictly secondary diagnostics
+- fixed side lanes make the app feel cramped and unlike either `MdxViewer` or the original `WoWEdit` working surface
+
+This plan therefore changes priority. The next work should not be more explanatory UI around the same bounded frame. The next work must turn the center area into an owned viewport with editor-style controls.
+
+### New Proof Rule
+
+A `wow-viewer` world-viewer slice is not complete unless all relevant proof is true:
+
+- the viewport owns mouse-wheel, drag, and keyboard focus while hovered or focused
+- `WASD` movement and `Q/E` vertical movement work in the live app, with visible camera-speed control
+- the containing panel does not scroll when the user is trying to fly or zoom the world camera
+- minimap tiles load for the active client root and the user can choose or reload world tiles from the map
+- the center view is free of debug/software-preview clutter by default
+- the proof says whether it is still single-tile, multi-tile, textured terrain, or object-rendering capable
 
 ## Why This Reset Exists
 
@@ -47,6 +79,7 @@
   - WMO and doodad geometry
   - editor/debug overlays
 - early slices may use procedural colors or simplified gradients, but the architecture should keep room for decoded client skybox assets and shader-specific behavior later
+- ADT terrain is the authoritative near-world surface for the viewer. WDL can support far terrain, coarse spawn/reference hints, or diagnostics, but it is not a substitute for loaded ADT data.
 
 ### Fast archive and loose-file source of truth
 
@@ -59,7 +92,27 @@
 
 ## Reset Target Shape
 
-The new shell should default to three durable surfaces only:
+The new shell should default to one dominant viewport plus supporting surfaces. The old three-lane idea is still useful, but the center viewport must behave more like `WoWEdit` or a game/editor viewport than an ImGui report window.
+
+### Viewport and tool frame
+
+- center viewport takes priority over panels
+- default world camera vertical FOV is `45` degrees
+- top or bottom tool strip owns common viewer controls:
+  - camera mode and speed
+  - sky/WDL/terrain/liquid/WMO/doodad/grid/overlay toggles
+  - terrain texture visibility/debug modes
+  - minimap and object-pick modes
+  - reset camera and reload actions
+- the viewport owns input:
+  - click or hover to focus
+  - right-drag free-look or left-drag orbit depending on active camera mode
+  - wheel dolly/speed/zoom without scrolling the parent panel
+  - `WASD` movement
+  - `Q/E` vertical movement
+  - `Shift` acceleration
+
+### Supporting surfaces
 
 1. **Navigator lane**
    - left side
@@ -81,6 +134,7 @@ The new shell should default to three durable surfaces only:
    - object and runtime details
    - category-based diagnostics
    - no extra floating world detail windows by default
+   - debug views live here or behind explicit debug tabs, never in the main viewport by default
 
 ## Non-Goals
 
@@ -88,6 +142,8 @@ The new shell should default to three durable surfaces only:
 - do not port `MdxViewer` code wholesale into `wow-viewer` without refactoring ownership boundaries
 - do not move new design ownership back into [`MdxViewer`](../src/MdxViewer)
 - do not claim world-scene parity or editor parity before the shell and I/O cutover are stable
+- do not call the current one-tile marker-only terrain frame a world viewer
+- do not add more diagnostics as a substitute for rendered terrain textures, minimaps, objects, and working camera controls
 
 ## Required Architecture Change
 
@@ -116,6 +172,179 @@ Create one reusable viewer I/O service in `wow-viewer`, consumed by:
 - explicit invalidation on client root, build label, or loose overlay change
 
 ## Ordered Implementation Slices
+
+The original slices below remain historical context, but the active route is now the recovery track here. Do these in order unless the user explicitly redirects.
+
+### Recovery Slice 0 - Plan and checkpoint hygiene
+
+- goal:
+  - stop mixing shell polish, renderer work, and long-range world-runtime work in one vague thread
+- scope:
+  - record current failures as active plan blockers
+  - keep any already-started input/UI patches clearly labeled until built and live-tested
+  - avoid claiming visual or runtime closure from build-only proof
+- proof:
+  - plan names the real blockers and the next slice can be chosen without guessing
+
+### Recovery Slice 1 - Viewport-owned input and WoWEdit-style tool strip
+
+- goal:
+  - make the center world surface behave like a real viewer viewport
+- scope:
+  - wrap the GPU world image in a no-scroll viewport child or equivalent owned surface
+  - set the world viewport projection and visibility cone to a `45` degree vertical FOV
+  - ensure wheel input does not scroll the parent panel when the viewport is hovered/focused
+  - make `WASD` and `Q/E` movement work reliably in the live app
+  - add a visible camera speed control and reset-camera command to a compact tool/options strip near the viewport, not buried in diagnostics
+  - move software terrain preview and marker-canvas debug views out of the world viewport and into Inspector/Diagnostics
+  - make side lanes resizable or move to a dockable/splitter layout
+- proof:
+  - live app run with the user's current world session proves `W`, `A`, `S`, `D`, `Q`, `E`, right-drag look, wheel dolly, camera speed, and parent-scroll isolation
+  - screenshot shows the world viewport is not competing with debug views
+
+#### Apr 25, 2026 camera-control correction
+
+- the free-camera control reference is now explicitly the old `MdxViewer` contract:
+  - right mouse button adjusts the free camera
+  - yaw follows `yaw -= dx`
+  - pitch follows `pitch -= dy`
+  - planar strafe-right follows the same camera basis as `MdxViewer.Rendering.Camera.Move(...)`
+- landed code changes in `wow-viewer`:
+  - world GPU viewport now uses right-drag look instead of left-drag look
+  - world `A/D` now map to negative/positive right over the corrected camera basis
+  - model-output fly mode now also uses right-drag free-look with corrected vertical look sign
+- proof so far:
+  - app build passed with `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-mdxviewer-camera-controls/`
+- still required:
+  - live GUI confirmation that right-drag look, `WASD`, `Q/E`, wheel dolly, camera speed, and parent-scroll isolation feel correct in the active world session
+
+#### Apr 25, 2026 ADT/input recovery correction
+
+- landed code changes in `wow-viewer`:
+  - app startup and shared client-root changes normalize World Session layers to terrain on and WDL off
+  - `LoadWorldSession()` forces `ShowTerrain=true` and `ShowWdl=false` before building the runtime frame request, so saved `ShowWdl=true` settings do not keep the main viewer on a WDL/far-reference path
+  - the World Layers UI no longer exposes WDL as a normal live surface toggle and instead shows `Far WDL off`
+  - the spawn/tile picker no longer opens, samples, or colorizes from WDL; it now reports and selects occupied ADT/WDT tiles
+  - viewport movement now checks Silk.NET keyboard state as well as ImGui key state for `WASD`, `Q/E`, and `Shift`
+- proof so far:
+  - app build passed with `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-adt-input-recovery/`
+  - fixed local `H:\053-client`, `Kalidar`, tile `(27,34)` CLI proof from that build reports `wdl=False`, `Wdl:off`, `Terrain:256/256`, and terrain source `H:\053-client\Data\World\Maps\Kalidar\Kalidar.wdt#alpha-tile(27,34)`
+- still required:
+  - live GUI confirmation that `WASD`, `Q/E`, right-drag look, wheel dolly, and parent-scroll isolation work in the active app
+  - Recovery Slice 3 remains open for the actual multi-tile terrain quilt; this patch only prevents WDL from masquerading as the live World Session surface
+
+### Recovery Slice 2 - Minimap loading recovery
+
+- goal:
+  - make the minimap a dependable navigation surface again
+- scope:
+  - trace why minimap tiles do not load in the current shell
+  - use the shared viewer I/O/cache path for loose and archive minimap reads
+  - show explicit loading/error state per minimap source instead of an empty panel
+  - allow click/double-click tile selection and reload from the minimap
+- proof:
+  - fixed local `H:\053-client` with `Kalidar` and `Azeroth` shows minimap tiles in the live shell
+  - the selected tile changes from the minimap without touching raw tile inputs
+
+### Recovery Slice 3 - Multi-tile world frame
+
+- goal:
+  - stop treating one selected ADT tile as a world viewer
+- scope:
+  - keep ADT root terrain data as the primary loaded surface; WDL remains optional far/reference data only
+  - build a small active tile window around the camera or selected spawn, starting with `3x3`
+  - load adjacent terrain tiles through the same runtime frame contract or a new `WorldSceneFrame` contract
+  - keep per-tile stage summaries and diagnostics available, but do not make them the user-facing model
+  - avoid full infinite streaming until the bounded multi-tile path is stable
+- proof:
+  - center viewport renders at least a `3x3` terrain quilt on `H:\053-client` `Kalidar`
+  - camera movement can cross a tile boundary without the terrain ending at a hard square
+
+### Recovery Slice 4 - Terrain texture layers
+
+- goal:
+  - render ADT terrain as terrain, not height-colored clay
+- scope:
+  - decode and bind `MCLY` texture layers and `MCAL` alpha data through `wow-viewer` shared I/O/runtime ownership
+  - support alpha-era and later-client texture lookup differences explicitly
+  - add viewer tool-strip toggles for textured terrain, layer debug, alpha debug, and grid/wire overlays
+  - keep height-shaded terrain as a debug mode only
+- proof:
+  - `H:\053-client` `Kalidar` renders textured ground layers in the live viewport
+  - a debug mode can isolate layer/alpha coverage without replacing the default viewer presentation
+
+### Recovery Slice 5 - Liquids as visible world layers
+
+- goal:
+  - promote liquid data from stats to visible geometry
+- scope:
+  - render alpha and later-client liquid surfaces where the tile data reports water/liquid chunks
+  - expose liquid visibility in the tool strip
+  - keep liquid debug metrics in Inspector/Diagnostics
+- proof:
+  - a known watery fixed-root map shows liquid in the world viewport with the layer toggle on
+
+### Recovery Slice 6 - In-world WMO rendering
+
+- goal:
+  - stop representing WMO placements only as markers
+- scope:
+  - reuse or extract existing WMO GPU preview rendering into placed world instances
+  - apply placement transforms and rough culling first
+  - keep portal/interior correctness as later parity work, but render visible exterior geometry now
+- proof:
+  - fixed root world session shows at least one placed WMO in-world at the correct terrain-relative location
+  - marker-only fallback is no longer the default WMO presentation
+
+### Recovery Slice 7 - In-world MDX/M2 rendering
+
+- goal:
+  - stop representing doodads only as markers
+- scope:
+  - reuse existing M2/MDX GPU preview paths for placed world doodads
+  - apply placement transforms, scale, and basic material state
+  - keep animation/material parity as follow-up, but render static placed objects now
+- proof:
+  - fixed root world session shows placed doodads in-world at correct positions
+  - object navigator selection highlights or focuses an actual object, not just a marker
+
+### Recovery Slice 7b - Model-output asset and PM4 overlay parity
+
+- goal:
+  - make model-output scenes useful for reconstruction review, not just terrain-preview islands
+- scope:
+  - place real M2/MDX and WMO assets into model-output scenes when the source data contains valid placements
+  - layer PM4 overlay geometry or markers into the same camera space so missing or reconstructed world pieces are visible beside the client data
+  - share the same placement transform, culling, and selection contracts used by the world viewer where possible
+  - keep PM4 overlay rendering clearly labeled as overlay or reconstruction aid, not as decoded ADT/WMO ground truth
+- proof:
+  - a fixed-root model-output scene displays terrain plus at least one placed WMO or doodad asset
+  - PM4 overlay data can be toggled independently and aligns with the same scene coordinates
+  - object selection can distinguish client placements from PM4 overlay items
+
+### Recovery Slice 8 - Skybox and light-selected backdrops
+
+- goal:
+  - replace procedural sky placeholders with real source selection where possible
+- scope:
+  - source 0.5.3 sky/backdrop selection from the appropriate sky/light metadata and known alpha assets
+  - support later-client `LightSkybox.dbc` and WMO `MOSB` as separate source families
+  - keep layered sphere/dome/backdrop ordering explicit
+- proof:
+  - at least one fixed-root map activates a real decoded or selected backdrop layer instead of only the procedural gradient
+
+### Recovery Slice 9 - WoWEdit-style workspace finish
+
+- goal:
+  - make the app feel like a useful world viewer/editor surface rather than a diagnostics app
+- scope:
+  - top tool strip for high-frequency actions
+  - optional vertical tool palette for mode selection
+  - resizable/dockable navigator and inspector lanes
+  - status bar for coordinates, tile, fps, selection, and load state
+  - diagnostics as an opt-in secondary surface
+- proof:
+  - screenshot-level review against the original `WoWEdit` reference shows the viewport dominates, tools are discoverable, and the sidebars no longer choke the scene
 
 ### Slice 1 - Shared viewer I/O service
 
@@ -186,6 +415,22 @@ Create one reusable viewer I/O service in `wow-viewer`, consumed by:
   - disabling `Sky` removes the backdrop layer
   - this is documented as foundational atmosphere work, not final WoW skybox parity
 
+#### Apr 24, 2026 implementation status update
+
+- landed in `wow-viewer`:
+  - `WorldGpuPreviewRenderer` now has a camera-centered spherical sky pass
+  - `WorldRenderCompositionFrame` and `WorldRenderCompositionBuilder` now expose ordered sky/backdrop/far-terrain/terrain/liquid/object/overlay layer state
+  - `WowViewerWorldRuntimeFrameResult` now carries classified `SkyboxBackdropInstances`
+  - `WorldSkyboxBackdropClassifier` covers obvious later-client M2/MDX backdrop paths and the alpha-era `.mdl` case such as `Environments\Stars\stars.mdl`
+  - classified backdrop placements now feed a procedural second spherical shell in the GPU sky shader, with deterministic tint/seed/strength derived from the source paths
+- current proof:
+  - focused composition tests pass
+  - app build passes
+  - fixed local `H:\053-client` proofs on `Shadowfang` and `Kalidar` report no classified backdrop placements on the tested tiles, so live visual activation of the procedural shell still needs a source tile or DBC/light-driven skybox record
+- remaining work:
+  - real 0.5.3 sky selection should come from Light/Skybox-era metadata, WMO `MOSB`, or decoded backdrop model assets rather than only ADT placement-path classification
+  - procedural shell shading is a foundation placeholder, not native-client skybox parity
+
 ### Slice 6 - Standalone consumer regrouping
 
 - goal:
@@ -221,15 +466,28 @@ Validation should distinguish:
 - spawn preview works
 - world bootstrap works
 - world frame works
+- minimap tiles visibly load in the live shell
+- viewport input works in the live shell
+- the world frame is single-tile or multi-tile
+- terrain is height-debug-only or texture-layered
+- WMO and doodads are markers-only or rendered geometry
 - UI is understandable without panel hunting
+- the parent panel does not scroll when the user is flying or zooming the viewport
+- the proof used build/test only, CLI real-data proof, or live GUI proof
 
 ## Acceptance Criteria For The Reset
 
 The reset is successful when:
 
 - the shell feels recognizably like `MdxViewer`
+- the center world viewport feels closer to `WoWEdit`: dominant, navigable, and tool-driven
 - `wow-viewer` remains the code owner
 - viewer I/O is routed through one fast shared service
 - map discovery, spawn, minimap, and world load behave consistently on fixed real roots
+- `WASD`, `Q/E`, mouse look, wheel dolly, and camera speed controls work reliably
+- the active world is not limited to a visible single-tile island
+- terrain renders `MCLY`/`MCAL` texture layers by default, with height shading demoted to debug mode
+- WMO, MDX, and M2 placements render in-world instead of only as markers
+- sky/backdrop remains layered and can graduate from procedural placeholders to real sky/light-selected sources
 - the number of normal-use windows is reduced to a stable and comprehensible minimum
 - the center world surface reads as a viewer scene with sky/backdrop/terrain composition, not as a diagnostics dump

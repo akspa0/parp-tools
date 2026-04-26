@@ -9,7 +9,8 @@ public static class WorldSkyboxBackdropClassifier
 
         string normalized = modelPath.Replace('\\', '/').ToLowerInvariant();
         if (!normalized.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)
-            && !normalized.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+            && !normalized.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase)
+            && !normalized.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }

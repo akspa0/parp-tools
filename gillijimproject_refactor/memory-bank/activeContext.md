@@ -1,6 +1,129 @@
 # Active Context
 
-# Active Context
+## Apr 25, 2026 - viewer FOV defaults are now 45 degrees instead of 60
+
+- followed the user's correction that every viewer version should use a 45-degree FOV, not 60
+- active behavior after this slice:
+	- legacy `MdxViewer` default `_fovDegrees` is now `45`
+	- `wow-viewer` standalone MDX and WMO camera FOV defaults are now `45`
+	- `wow-viewer` session normalization migrates exactly-`60` MDX/WMO viewer FOV values to `45` so old saved default settings do not keep reopening at 60
+	- `wow-viewer` MDX GPU-frame CLI, preview camera planner, visual regression defaults, and model-output projection path now use 45-degree defaults
+	- screenshot/regression templates were updated from `FOV=60.0` / `FovDegrees: 60.0` to `45.0`
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-fov-45/` passed
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
+	- `rg` for viewer-path `60` FOV patterns now only finds `ViewerApp_MinimapAndStatus.cs` footer height, not a camera FOV
+
+## Apr 25, 2026 - wow-viewer World Session no longer exposes WDL as the live map surface and keyboard movement now bypasses ImGui-only key state
+
+- followed the user's live report that the app still looked WDL-driven and `WASD` / `Q/E` still did not move the World Session camera reliably
+- active behavior after this slice:
+	- `WowViewerDesktopApp` applies ADT-first World Session defaults on startup and when the shared client selection changes: terrain on, WDL off
+	- `LoadWorldSession()` forces `ShowTerrain=true` and `ShowWdl=false` before building the live runtime frame request, so saved settings that had `ShowWdl=true` no longer keep the main World Session on the far/reference path
+	- the World Layers UI no longer offers WDL as a normal live map-surface toggle; it now shows `Far WDL off` beside the terrain/layer controls
+	- the spawn/tile picker no longer opens or samples WDL data and now reports an `ADT/WDT tile grid` based on occupied terrain tiles only
+	- world viewport movement now checks Silk.NET keyboard state as well as ImGui key state while the viewport is hovered or input-captured, so `W`, `A`, `S`, `D`, `Q`, `E`, and `Shift` are no longer dependent on ImGui focus alone
+- validation:
+	- app build passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-adt-input-recovery/`
+	- real-data CLI proof on fixed local `H:\053-client`, map `Kalidar`, tile `(27,34)` from that build reports:
+		- `options: ... wdl=False terrain=True ...`
+		- `composition: ... Wdl:off > Terrain:256/256 ...`
+		- `terrain: source=H:\053-client\Data\World\Maps\Kalidar\Kalidar.wdt#alpha-tile(27,34)`
+- current boundary:
+	- this is code/build/CLI proof that the live World Session request path is now ADT-first and that keyboard polling no longer depends solely on ImGui
+	- live GUI signoff is still required for the user's exact input path: `WASD`, `Q/E`, right-drag look, wheel dolly, and parent-scroll isolation
+	- this still does not implement multi-tile world loading, terrain `MCLY`/`MCAL` texture layers, or in-world WMO/MDX/M2 rendering
+
+## Apr 25, 2026 - wow-viewer world and model-output free cameras now use MdxViewer-style right-drag and camera basis signs
+
+- followed the user's correction that the remaining inversion was a camera-control bug, not a mouse problem:
+	- old `MdxViewer` uses right mouse button for free-look, applies `yaw -= dx` and `pitch -= dy`, and computes camera-right as `(sinYaw, -cosYaw, 0)` for movement
+	- the new `wow-viewer` world viewport had been using left-drag free-look with both signs effectively reversed through the `RotateLook(...)` path, and `A/D` was being compensated in UI mapping instead of fixing the camera basis
+- active behavior after this slice:
+	- `WowViewerDesktopApp` world viewport copy and input now use right-drag for free-look
+	- world viewport yaw/pitch deltas now follow the legacy `MdxViewer` signs
+	- world `A/D` mapping is back to `A = negative right`, `D = positive right`
+	- `WorldGpuPreviewRenderer.WorldPreviewCameraState.BuildBasis(...)` now computes the right vector from the forward vector and `Vector3.UnitZ` in the same orientation as `MdxViewer.Rendering.Camera.Move(...)`
+	- model-output fly mode now also uses right-drag free-look and the corrected vertical look sign
+- validation:
+	- app build passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-mdxviewer-camera-controls/`
+- current boundary:
+	- this is code-level parity with the legacy camera contract plus build proof
+	- live GUI confirmation is still needed for right-drag look feel, `WASD`, `Q/E`, wheel dolly, and parent-scroll isolation in the user's current world session
+
+## Apr 24, 2026 - viewport input signs and model-output camera signs were corrected, but live GUI proof is still needed
+
+- followed the user's report that model-output mouse look is inverted, world left-drag/dolly feel inverted, `A` moves the world camera the wrong direction, and `WASD`/`Q/E` are still not reliable in the map loader
+- active behavior after this slice:
+	- `WowViewerDesktopApp` now draws the world GPU preview under an invisible viewport input target instead of relying on a plain ImGui image item
+	- world viewport wheel use is treated as consumed by the viewport and restores the parent scroll position for that frame
+	- world left-drag look signs were flipped, and `A/D` strafe mapping was inverted to match the observed runtime direction
+	- model-output fly and shared orbit left-drag signs were flipped so model-output mouse control no longer uses the previous mirrored convention
+	- the reset plan now has `Recovery Slice 7b` for model-output real M2/MDX/WMO placement plus PM4 overlay parity
+- validation:
+	- app build passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-camera-input-plan/`
+- current boundary:
+	- this is build proof and code-level input correction only
+	- the user still needs live GUI confirmation for `W`, `A`, `S`, `D`, `Q`, `E`, wheel scroll isolation, and whether the flipped model-output drag signs match expected feel
+	- multi-tile loading, minimaps, terrain `MCLY`/`MCAL` texturing, in-world WMO/MDX/M2 rendering, and model-output PM4 overlay rendering remain planned but not implemented by this slice
+
+## Apr 24, 2026 - world viewport FOV is now 45 degrees and the World Session path is ADT-first by default
+
+- followed the user's correction that the viewer should use a 45-degree field of view and load real ADT data rather than treating WDL as the world surface
+- active behavior after this slice:
+	- `WorldGpuPreviewRenderer` now uses a `45.0` degree vertical FOV for the world projection
+	- `WowViewerWorldRuntimeBridge` now uses the same 45-degree vertical FOV for world object visibility context
+	- `WowViewerWorldRuntimeBridge` only reads WDL tile data when the WDL/far-terrain pass is explicitly enabled; the default world frame is ADT terrain first
+	- `WowViewerSession.World.ShowWdl` now defaults to `false`
+	- `Program.cs world-frame` also defaults WDL off unless `--show-wdl` is passed
+	- the spawn picker copy now describes an ADT/WDT tile grid, with WDL labeled only as an optional height reference
+	- the reset plan now states that ADT terrain is the authoritative near-world surface and that WDL is only far/reference data
+- validation:
+	- app build passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-adt-fov-plan/`
+	- real-data CLI proof on fixed local `H:\053-client`, map `Kalidar`, tile `(27,34)` now reports:
+		- `options: ... wdl=False terrain=True ...`
+		- `composition: ... Wdl:off > Terrain:256/256 ...`
+		- `terrain: source=H:\053-client\Data\World\Maps\Kalidar\Kalidar.wdt#alpha-tile(27,34)`
+		- `wdl-service: found=False hasData=False`
+- current boundary:
+	- this is build and CLI proof that the world frame is ADT-first by default and uses the corrected FOV constants
+	- it is not yet live GUI proof that minimaps, `WASD`, `Q/E`, panel-scroll isolation, multi-tile loading, terrain texturing, or object rendering are fixed
+
+## Apr 24, 2026 - wow-viewer reset plan now treats the current one-tile world preview as a blocker, not a viewer milestone
+
+- followed the user's live UI feedback that the current World Session still does not work as a viewer:
+	- minimaps do not load reliably
+	- `WASD` and `Q/E` camera movement are not dependable in the live viewport
+	- mouse-wheel input can still fight parent-panel scrolling
+	- only one selected ADT tile is loaded and rendered
+	- terrain is height-shaded only, with no `MCLY`/`MCAL` texture-layer rendering
+	- WMO and MDX/M2 placements are markers/inspector rows instead of rendered world geometry
+	- layer controls need to live in a viewer/options bar, closer to `MdxViewer` or original `WoWEdit`, not buried in side panels
+- plan change:
+	- `gillijimproject_refactor/plans/wow_viewer_mdxviewer_cutaway_reset_plan_2026-04-24.md` now has an explicit Apr 24 course correction and recovery track
+	- the new recovery order is: viewport input/tool strip, minimap recovery, multi-tile world frame, terrain texture layers, visible liquids, in-world WMO rendering, in-world MDX/M2 rendering, real skybox/light-selected backdrops, then WoWEdit-style workspace finish
+	- validation now distinguishes build-only proof, CLI real-data proof, and live GUI proof, and no longer accepts a single-tile marker-only frame as "world viewer" closure
+- current boundary:
+	- some input/layout code edits were already started in `WowViewerDesktopApp.cs`, `WorldGpuPreviewRenderer.cs`, and `WowViewerSession.cs`, but the user's latest request was to regroup the plan; do not treat those edits as validated until a focused build and live GUI pass are completed
+
+## Apr 24, 2026 - wow-viewer backdrop candidates now flow through runtime results and the GPU sky shader has a data-aware procedural shell layer
+
+- continued the viewer-first world-composition reset by moving skybox/backdrop candidates beyond diagnostics-only state
+- active behavior after this slice:
+	- `WowViewerWorldRuntimeFrameResult` now exposes `SkyboxBackdropInstances`, populated from classified MDX/M2/legacy MDL placement paths
+	- `WorldSkyboxBackdropClassifier` now accepts alpha-era `.mdl` backdrop paths such as `Environments\Stars\stars.mdl`, while still rejecting `skylight` false positives and non-model files
+	- `WorldRenderCompositionBuilder` now uses `stats.SkyboxBackdrop.SubmittedCount` for the `SkyboxBackdrop` layer, so procedural backdrop submissions can be counted distinctly from mere source detection
+	- `WorldGpuPreviewRenderer` now derives a deterministic backdrop seed/tint/strength from classified backdrop placements and blends a subtle second spherical shell/star layer into the sky shader when candidates exist
+	- `Program.cs world-frame` and the desktop Inspector now report the classified backdrop count and a sample path when present
+- validation:
+	- focused tests passed: `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldRenderCompositionBuilderTests` (`11` tests)
+	- app build passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-backdrop-foundation/`
+	- real-data CLI proof on fixed local `H:\053-client`, `Shadowfang`, tile `(32,28)` still reports `skyboxBackdrop=0` and `SkyboxBackdrop:pending`, confirming the selected alpha tile has no classified backdrop placement
+	- real-data CLI proof on fixed local `H:\053-client`, `Kalidar`, auto tile `(26,33)` also reports `skyboxBackdrop=0`
+- current boundary:
+	- this creates a data-aware procedural backdrop response in the renderer, not decoded client skybox geometry/material parity
+	- the first real visual activation still needs a map/tile or DBC/light-driven source that produces a classified skybox/backdrop candidate
+	- `LightSkybox.dbc`, WMO `MOSB`, and real sky/backdrop asset decoding remain future work before this matches the 0.5.3 client sky pipeline
 
 ## Apr 24, 2026 - wow-viewer World Session shell was trimmed toward the MdxViewer cut-away reset layout, but this is still a UI-surface cleanup slice
 

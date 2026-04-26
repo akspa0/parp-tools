@@ -40,9 +40,13 @@ public static class WorldRenderCompositionBuilder
                 passOptions.SkyVisible,
                 passOptions.SkyVisible && skyboxBackdropSourceCount > 0,
                 skyboxBackdropSourceCount,
-                0,
-                skyboxBackdropSourceCount > 0
-                    ? "Backdrop-like model placements were classified; GPU backdrop rendering is still pending."
+                stats.SkyboxBackdrop.SubmittedCount,
+                stats.SkyboxBackdrop.SubmittedCount > 0
+                    ? "Backdrop-like model placements feed the current procedural spherical backdrop layer; decoded client skybox geometry is still future work."
+                    : !passOptions.SkyVisible
+                    ? "Backdrop-like model placements were classified but sky rendering is disabled for this frame."
+                    : skyboxBackdropSourceCount > 0
+                    ? "Backdrop-like model placements were classified; procedural backdrop submission is still pending for this frame."
                     : "Reserved for placed or zone-selected backdrop models."),
             new(
                 WorldRenderLayerKind.Wdl,

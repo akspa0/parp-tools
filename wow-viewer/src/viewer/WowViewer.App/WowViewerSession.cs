@@ -76,7 +76,7 @@ internal sealed class WowViewerWorldSessionState
 
     public bool ShowSky { get; set; } = true;
 
-    public bool ShowWdl { get; set; } = true;
+    public bool ShowWdl { get; set; }
 
     public bool ShowTerrain { get; set; } = true;
 
@@ -88,6 +88,8 @@ internal sealed class WowViewerWorldSessionState
 
     public bool ShowHoleOverlay { get; set; }
 
+    public float CameraMoveSpeed { get; set; } = 180.0f;
+
     public void Normalize()
     {
         ClientRoot = ClientRoot?.Trim() ?? string.Empty;
@@ -96,6 +98,7 @@ internal sealed class WowViewerWorldSessionState
         LooseOverlayRoot = LooseOverlayRoot?.Trim() ?? string.Empty;
         TileX = TileX < 0 ? -1 : Math.Clamp(TileX, 0, 63);
         TileY = TileY < 0 ? -1 : Math.Clamp(TileY, 0, 63);
+        CameraMoveSpeed = float.IsFinite(CameraMoveSpeed) ? Math.Clamp(CameraMoveSpeed, 10.0f, 2000.0f) : 180.0f;
     }
 
     public WowViewerWorldSessionOpenRequest BuildRequest()
@@ -143,10 +146,10 @@ internal sealed class WowViewerWorldSessionState
             ? string.Empty
             : $" loose={Path.GetFullPath(LooseOverlayRoot)}";
 
-        bool usingDefaultLayers = ShowWmos && ShowDoodads && ShowSky && ShowWdl && ShowTerrain && ShowLiquid && ShowOverlay && !IgnoreTerrainHoles && !ShowHoleOverlay;
+        bool usingDefaultLayers = ShowWmos && ShowDoodads && ShowSky && !ShowWdl && ShowTerrain && ShowLiquid && ShowOverlay && !IgnoreTerrainHoles && !ShowHoleOverlay && Math.Abs(CameraMoveSpeed - 180.0f) < 0.001f;
         string layerSummary = usingDefaultLayers
             ? string.Empty
-            : $" layers[wmo={ShowWmos}, mdx={ShowDoodads}, sky={ShowSky}, wdl={ShowWdl}, terrain={ShowTerrain}, liquid={ShowLiquid}, overlay={ShowOverlay}, ignoreHoles={IgnoreTerrainHoles}, holeOverlay={ShowHoleOverlay}]";
+            : $" layers[wmo={ShowWmos}, mdx={ShowDoodads}, sky={ShowSky}, wdl={ShowWdl}, terrain={ShowTerrain}, liquid={ShowLiquid}, overlay={ShowOverlay}, ignoreHoles={IgnoreTerrainHoles}, holeOverlay={ShowHoleOverlay}, cameraSpeed={CameraMoveSpeed:F0}]";
 
         return string.IsNullOrWhiteSpace(BuildLabel)
             ? $"{source} :: {map}{tile}{loose}{layerSummary}"
@@ -198,7 +201,7 @@ internal sealed class WowViewerSession
 
     public float MdxCameraElevationDegrees { get; set; } = 25.0f;
 
-    public float MdxCameraFieldOfViewDegrees { get; set; } = 60.0f;
+    public float MdxCameraFieldOfViewDegrees { get; set; } = 45.0f;
 
     public float MdxCameraZoomFactor { get; set; } = 0.72f;
 
@@ -212,7 +215,7 @@ internal sealed class WowViewerSession
 
     public float WmoCameraElevationDegrees { get; set; } = 25.0f;
 
-    public float WmoCameraFieldOfViewDegrees { get; set; } = 60.0f;
+    public float WmoCameraFieldOfViewDegrees { get; set; } = 45.0f;
 
     public float WmoCameraZoomFactor { get; set; } = 0.9f;
 
@@ -241,14 +244,14 @@ internal sealed class WowViewerSession
         MdxCameraPreset = MdxCameraPreset?.Trim() ?? string.Empty;
         MdxCameraAzimuthDegrees = float.IsFinite(MdxCameraAzimuthDegrees) ? MdxCameraAzimuthDegrees : 35.0f;
         MdxCameraElevationDegrees = float.IsFinite(MdxCameraElevationDegrees) ? Math.Clamp(MdxCameraElevationDegrees, -89.0f, 89.0f) : 25.0f;
-        MdxCameraFieldOfViewDegrees = float.IsFinite(MdxCameraFieldOfViewDegrees) ? Math.Clamp(MdxCameraFieldOfViewDegrees, 1.0f, 170.0f) : 60.0f;
+        MdxCameraFieldOfViewDegrees = NormalizeViewerFieldOfViewDegrees(MdxCameraFieldOfViewDegrees);
         MdxCameraZoomFactor = float.IsFinite(MdxCameraZoomFactor) ? Math.Clamp(MdxCameraZoomFactor, 0.05f, 10.0f) : 0.72f;
         MdxCameraTargetOffsetX = float.IsFinite(MdxCameraTargetOffsetX) ? MdxCameraTargetOffsetX : 0.0f;
         MdxCameraTargetOffsetY = float.IsFinite(MdxCameraTargetOffsetY) ? MdxCameraTargetOffsetY : 0.0f;
         MdxCameraTargetOffsetZ = float.IsFinite(MdxCameraTargetOffsetZ) ? MdxCameraTargetOffsetZ : 0.0f;
         WmoCameraAzimuthDegrees = float.IsFinite(WmoCameraAzimuthDegrees) ? WmoCameraAzimuthDegrees : 35.0f;
         WmoCameraElevationDegrees = float.IsFinite(WmoCameraElevationDegrees) ? Math.Clamp(WmoCameraElevationDegrees, -89.0f, 89.0f) : 25.0f;
-        WmoCameraFieldOfViewDegrees = float.IsFinite(WmoCameraFieldOfViewDegrees) ? Math.Clamp(WmoCameraFieldOfViewDegrees, 1.0f, 170.0f) : 60.0f;
+        WmoCameraFieldOfViewDegrees = NormalizeViewerFieldOfViewDegrees(WmoCameraFieldOfViewDegrees);
         WmoCameraZoomFactor = float.IsFinite(WmoCameraZoomFactor) ? Math.Clamp(WmoCameraZoomFactor, 0.05f, 10.0f) : 0.9f;
         WmoCameraTargetOffsetX = float.IsFinite(WmoCameraTargetOffsetX) ? WmoCameraTargetOffsetX : 0.0f;
         WmoCameraTargetOffsetY = float.IsFinite(WmoCameraTargetOffsetY) ? WmoCameraTargetOffsetY : 0.0f;
@@ -393,6 +396,15 @@ internal sealed class WowViewerSession
         TimeMs = request.TimeMs;
         VisualSize = Math.Clamp(Math.Max(request.VisualWidth, request.VisualHeight), 128, 1024);
         Normalize();
+    }
+
+    private static float NormalizeViewerFieldOfViewDegrees(float value)
+    {
+        if (!float.IsFinite(value))
+            return 45.0f;
+
+        float normalized = Math.Clamp(value, 1.0f, 170.0f);
+        return Math.Abs(normalized - 60.0f) < 0.001f ? 45.0f : normalized;
     }
 
     public string GetWorkspaceLabel()
