@@ -240,43 +240,55 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
     private unsafe void BuildTerrainBuffers(WowViewerWorldRuntimeFrameResult frame, bool ignoreTerrainHoles)
     {
-        float minHeight = frame.TerrainTileData.Heightmap?.MinHeight ?? 0f;
-        float maxHeight = frame.TerrainTileData.Heightmap?.MaxHeight ?? 0f;
+        IReadOnlyList<WowViewerWorldRuntimeTileFrame> activeTiles = GetActiveTerrainTiles(frame);
+        float minHeight = activeTiles
+            .Where(static tile => tile.TerrainTileData.Heightmap is not null)
+            .Select(static tile => tile.TerrainTileData.Heightmap!.MinHeight)
+            .DefaultIfEmpty(0f)
+            .Min();
+        float maxHeight = activeTiles
+            .Where(static tile => tile.TerrainTileData.Heightmap is not null)
+            .Select(static tile => tile.TerrainTileData.Heightmap!.MaxHeight)
+            .DefaultIfEmpty(0f)
+            .Max();
         float heightRange = MathF.Max(maxHeight - minHeight, 1.0f);
 
         List<float> vertexData = [];
         List<uint> indexData = [];
 
-        foreach (var chunk in frame.TerrainTileData.Chunks)
+        foreach (WowViewerWorldRuntimeTileFrame tile in activeTiles)
         {
-            if (!chunk.HasHeights || chunk.Heights is null)
-                continue;
-
-            Vector3[] positions = BuildChunkPositions(frame.SelectedTileX, frame.SelectedTileY, chunk);
-            int[] chunkIndices = BuildChunkIndices(chunk.HoleMask, ignoreTerrainHoles);
-            Vector3[] normals = BuildChunkNormals(chunkIndices, positions);
-            int baseVertex = vertexData.Count / 9;
-            for (int index = 0; index < positions.Length; index++)
+            foreach (var chunk in tile.TerrainTileData.Chunks)
             {
-                Vector3 position = positions[index];
-                Vector3 normal = normals[index];
-                Vector3 color = ComputeTerrainColor((position.Z - minHeight) / heightRange, Math.Clamp(1.0f - normal.Z, 0.0f, 1.0f));
+                if (!chunk.HasHeights || chunk.Heights is null)
+                    continue;
 
-                vertexData.Add(position.X);
-                vertexData.Add(position.Y);
-                vertexData.Add(position.Z);
-                vertexData.Add(normal.X);
-                vertexData.Add(normal.Y);
-                vertexData.Add(normal.Z);
-                vertexData.Add(color.X);
-                vertexData.Add(color.Y);
-                vertexData.Add(color.Z);
+                Vector3[] positions = BuildChunkPositions(tile.TileX, tile.TileY, chunk);
+                int[] chunkIndices = BuildChunkIndices(chunk.HoleMask, ignoreTerrainHoles);
+                Vector3[] normals = BuildChunkNormals(chunkIndices, positions);
+                int baseVertex = vertexData.Count / 9;
+                for (int index = 0; index < positions.Length; index++)
+                {
+                    Vector3 position = positions[index];
+                    Vector3 normal = normals[index];
+                    Vector3 color = ComputeTerrainColor((position.Z - minHeight) / heightRange, Math.Clamp(1.0f - normal.Z, 0.0f, 1.0f));
 
-                ExpandBounds(position);
+                    vertexData.Add(position.X);
+                    vertexData.Add(position.Y);
+                    vertexData.Add(position.Z);
+                    vertexData.Add(normal.X);
+                    vertexData.Add(normal.Y);
+                    vertexData.Add(normal.Z);
+                    vertexData.Add(color.X);
+                    vertexData.Add(color.Y);
+                    vertexData.Add(color.Z);
+
+                    ExpandBounds(position);
+                }
+
+                foreach (int localIndex in chunkIndices)
+                    indexData.Add((uint)(baseVertex + localIndex));
             }
-
-            foreach (int localIndex in chunkIndices)
-                indexData.Add((uint)(baseVertex + localIndex));
         }
 
         if (indexData.Count == 0)
@@ -316,28 +328,31 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     {
         List<float> overlayData = [];
 
-        foreach (var chunk in frame.TerrainTileData.Chunks)
+        foreach (WowViewerWorldRuntimeTileFrame tile in GetActiveTerrainTiles(frame))
         {
-            if (!chunk.HasHeights || chunk.Heights is null || !chunk.HasHoles)
-                continue;
-
-            Vector3[] positions = BuildChunkPositions(frame.SelectedTileX, frame.SelectedTileY, chunk);
-            for (int holeY = 0; holeY < 4; holeY++)
+            foreach (var chunk in tile.TerrainTileData.Chunks)
             {
-                for (int holeX = 0; holeX < 4; holeX++)
-                {
-                    int holeBit = 1 << ((holeY * 4) + holeX);
-                    if ((chunk.HoleMask & holeBit) == 0)
-                        continue;
+                if (!chunk.HasHeights || chunk.Heights is null || !chunk.HasHoles)
+                    continue;
 
-                    int startRow = holeY * 2;
-                    int startCol = holeX * 2;
-                    Vector3 topLeft = positions[OuterVertexIndex(startRow, startCol)] + new Vector3(0f, 0f, 1.25f);
-                    Vector3 topRight = positions[OuterVertexIndex(startRow, startCol + 2)] + new Vector3(0f, 0f, 1.25f);
-                    Vector3 bottomLeft = positions[OuterVertexIndex(startRow + 2, startCol)] + new Vector3(0f, 0f, 1.25f);
-                    Vector3 bottomRight = positions[OuterVertexIndex(startRow + 2, startCol + 2)] + new Vector3(0f, 0f, 1.25f);
-                    AppendOverlayTriangle(overlayData, topLeft, topRight, bottomRight, new Vector4(0.92f, 0.20f, 0.18f, 0.34f));
-                    AppendOverlayTriangle(overlayData, topLeft, bottomRight, bottomLeft, new Vector4(0.92f, 0.20f, 0.18f, 0.34f));
+                Vector3[] positions = BuildChunkPositions(tile.TileX, tile.TileY, chunk);
+                for (int holeY = 0; holeY < 4; holeY++)
+                {
+                    for (int holeX = 0; holeX < 4; holeX++)
+                    {
+                        int holeBit = 1 << ((holeY * 4) + holeX);
+                        if ((chunk.HoleMask & holeBit) == 0)
+                            continue;
+
+                        int startRow = holeY * 2;
+                        int startCol = holeX * 2;
+                        Vector3 topLeft = positions[OuterVertexIndex(startRow, startCol)] + new Vector3(0f, 0f, 1.25f);
+                        Vector3 topRight = positions[OuterVertexIndex(startRow, startCol + 2)] + new Vector3(0f, 0f, 1.25f);
+                        Vector3 bottomLeft = positions[OuterVertexIndex(startRow + 2, startCol)] + new Vector3(0f, 0f, 1.25f);
+                        Vector3 bottomRight = positions[OuterVertexIndex(startRow + 2, startCol + 2)] + new Vector3(0f, 0f, 1.25f);
+                        AppendOverlayTriangle(overlayData, topLeft, topRight, bottomRight, new Vector4(0.92f, 0.20f, 0.18f, 0.34f));
+                        AppendOverlayTriangle(overlayData, topLeft, bottomRight, bottomLeft, new Vector4(0.92f, 0.20f, 0.18f, 0.34f));
+                    }
                 }
             }
         }
@@ -380,6 +395,24 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         overlayData.Add(color.Y);
         overlayData.Add(color.Z);
         overlayData.Add(color.W);
+    }
+
+    private static IReadOnlyList<WowViewerWorldRuntimeTileFrame> GetActiveTerrainTiles(WowViewerWorldRuntimeFrameResult frame)
+    {
+        if (frame.ActiveTerrainTiles.Count > 0)
+            return frame.ActiveTerrainTiles;
+
+        return
+        [
+            new WowViewerWorldRuntimeTileFrame(
+                frame.SelectedTileX,
+                frame.SelectedTileY,
+                frame.PlacementSourcePath,
+                frame.TileStageSummary,
+                frame.TerrainTileData,
+                frame.LiquidTileData,
+                frame.PlacementCatalog),
+        ];
     }
 
     private unsafe void BuildMarkerBuffers(WowViewerWorldRuntimeFrameResult frame)

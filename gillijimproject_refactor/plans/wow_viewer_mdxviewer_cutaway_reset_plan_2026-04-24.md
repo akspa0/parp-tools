@@ -12,6 +12,7 @@
 - Apr 25 live-path correction: the World Session now forces terrain on and WDL off for live loads, the spawn/tile picker no longer reads WDL as its source surface, and keyboard movement polls Silk.NET input in addition to ImGui key state; this is still not a multi-tile/textured/object-rendering viewer
 - Apr 25 FOV correction: all viewer defaults should be `45` degrees, not `60`; remaining `60` values in viewer paths must be non-camera layout constants or explicit historical capture data, not projection defaults
 - Apr 25 hardening correction: WDL is now disabled in `WowViewerWorldRuntimeBridge` itself, not only in the UI/session layer, and the world preview camera now uses position/yaw/pitch state like `MdxViewer` instead of a persistent look-at target
+- Apr 25 multi-tile correction: the World Session runtime now builds a bounded `3x3` active ADT terrain window around the selected tile and the GPU preview renders that ADT quilt; terrain existence, not placement-catalog existence, is the authority for loading a tile
 
 ## Apr 24, 2026 Course Correction - Stop Treating The Preview As The Viewer
 
@@ -275,6 +276,24 @@ The original slices below remain historical context, but the active route is now
 - proof:
   - center viewport renders at least a `3x3` terrain quilt on `H:\053-client` `Kalidar`
   - camera movement can cross a tile boundary without the terrain ending at a hard square
+
+#### Apr 25, 2026 implementation status update
+
+- landed code changes in `wow-viewer`:
+  - `WowViewerWorldRuntimeFrameResult` now carries `ActiveTerrainTiles`, each with tile coordinates, ADT stage summary, terrain, liquid, and placement catalog data
+  - `WowViewerWorldRuntimeBridge.Build(...)` now loads a bounded `3x3` ADT window around the selected tile instead of only the selected tile
+  - tile-window loading is ADT-root driven; missing placement data produces an empty placement catalog instead of preventing terrain from loading
+  - object placement inventory now aggregates WMO and MDX/M2 placements across the active tile window
+  - terrain, liquid, and composition source counts now report the aggregate active window rather than only the selected tile
+  - `WorldGpuPreviewRenderer` now builds terrain and hole-overlay buffers across all active ADT tiles
+  - `Program.cs world-frame` and the desktop Inspector now report active ADT tile count and sample coordinates
+- proof so far:
+  - app build passed with `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-multitile-adt-quilt/`
+  - fixed local `H:\053-client`, `Kalidar`, tile `(27,34)`, even with `--show-wdl`, reports `wdl=False`, `Wdl:off`, `active-adt-tiles: count=9`, `Terrain:2304/2304`, and terrain source `3x3 ADT window centered on (27,34); loaded 9 terrain tiles`
+- still required:
+  - live GUI confirmation that the camera can cross tile boundaries without hitting a terrain edge
+  - terrain is still height-shaded debug geometry, not `MCLY`/`MCAL` textured terrain
+  - WMO and MDX/M2 placements are still marker/runtime inventory, not rendered in-world geometry
 
 ### Recovery Slice 4 - Terrain texture layers
 

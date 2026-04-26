@@ -46,6 +46,47 @@ internal sealed record WowViewerWorldPlacementTileSummary(
     public int PlacementCount => MdxCount + WmoCount;
 }
 
+internal sealed class WowViewerWorldRuntimeTileFrame
+{
+    public WowViewerWorldRuntimeTileFrame(
+        int tileX,
+        int tileY,
+        string placementSourcePath,
+        WorldTileStageSummary tileStageSummary,
+        WorldTerrainTileData terrainTileData,
+        WorldLiquidTileData liquidTileData,
+        AdtPlacementCatalog placementCatalog)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(placementSourcePath);
+        ArgumentNullException.ThrowIfNull(tileStageSummary);
+        ArgumentNullException.ThrowIfNull(terrainTileData);
+        ArgumentNullException.ThrowIfNull(liquidTileData);
+        ArgumentNullException.ThrowIfNull(placementCatalog);
+
+        TileX = tileX;
+        TileY = tileY;
+        PlacementSourcePath = placementSourcePath;
+        TileStageSummary = tileStageSummary;
+        TerrainTileData = terrainTileData;
+        LiquidTileData = liquidTileData;
+        PlacementCatalog = placementCatalog;
+    }
+
+    public int TileX { get; }
+
+    public int TileY { get; }
+
+    public string PlacementSourcePath { get; }
+
+    public WorldTileStageSummary TileStageSummary { get; }
+
+    public WorldTerrainTileData TerrainTileData { get; }
+
+    public WorldLiquidTileData LiquidTileData { get; }
+
+    public AdtPlacementCatalog PlacementCatalog { get; }
+}
+
 internal sealed class WowViewerWorldPlacementAuditResult
 {
     public WowViewerWorldPlacementAuditResult(
@@ -81,6 +122,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         WorldTerrainTileData terrainTileData,
         WorldTerrainVisualSnapshot terrainVisualSnapshot,
         WorldLiquidTileData liquidTileData,
+        IReadOnlyList<WowViewerWorldRuntimeTileFrame> activeTerrainTiles,
         AdtPlacementCatalog placementCatalog,
         IReadOnlyList<WorldObjectInstance> wmoInstances,
         IReadOnlyList<WorldObjectInstance> mdxInstances,
@@ -113,6 +155,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         TerrainTileData = terrainTileData;
         TerrainVisualSnapshot = terrainVisualSnapshot;
         LiquidTileData = liquidTileData;
+        ArgumentNullException.ThrowIfNull(activeTerrainTiles);
+        ActiveTerrainTiles = activeTerrainTiles;
         PlacementCatalog = placementCatalog;
         WmoInstances = wmoInstances;
         MdxInstances = mdxInstances;
@@ -154,6 +198,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
     public WorldTerrainVisualSnapshot TerrainVisualSnapshot { get; }
 
     public WorldLiquidTileData LiquidTileData { get; }
+
+    public IReadOnlyList<WowViewerWorldRuntimeTileFrame> ActiveTerrainTiles { get; }
 
     public AdtPlacementCatalog PlacementCatalog { get; }
 
@@ -297,15 +343,25 @@ internal static class WowViewerWorldRuntimeBridge
         ((int tileX, int tileY) selectedTile, AdtPlacementCatalog placementCatalog, string placementSourcePath) =
             ResolveTileAndPlacements(session, request.TileX, request.TileY, archiveCatalog);
         WorldWdlTileData wdlTileData = WorldWdlTileData.Missing("WDL disabled for World Session; ADT terrain is the authoritative surface.", selectedTile.tileX, selectedTile.tileY);
-        WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog, wdlVisibleTileCount: 0);
-        WorldTerrainTileData terrainTileData = ReadRootTerrainTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
+        IReadOnlyList<WowViewerWorldRuntimeTileFrame> activeTerrainTiles = BuildActiveTerrainTiles(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
+        WowViewerWorldRuntimeTileFrame selectedTerrainTile = activeTerrainTiles.FirstOrDefault(tile => tile.TileX == selectedTile.tileX && tile.TileY == selectedTile.tileY)
+            ?? throw new InvalidDataException($"Selected tile ({selectedTile.tileX},{selectedTile.tileY}) was not loaded into the active terrain window.");
+        WorldTileStageSummary tileStageSummary = BuildAggregateTileStageSummary(activeTerrainTiles, selectedTile.tileX, selectedTile.tileY);
+        WorldTerrainTileData terrainTileData = selectedTerrainTile.TerrainTileData;
         WorldTerrainVisualSnapshot terrainVisualSnapshot = WorldTerrainVisualSnapshotBuilder.Build(terrainTileData);
-        WorldLiquidTileData liquidTileData = ReadRootLiquidTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
+        WorldLiquidTileData liquidTileData = selectedTerrainTile.LiquidTileData;
+        placementCatalog = selectedTerrainTile.PlacementCatalog;
+        placementSourcePath = selectedTerrainTile.PlacementSourcePath;
 
         Dictionary<string, bool> assetReadyLookup = new(StringComparer.OrdinalIgnoreCase);
 
-        List<WorldObjectInstance> wmoInstances = BuildWmoInstances(placementCatalog, selectedTile.tileX, selectedTile.tileY, assetReadyLookup);
-        List<WorldObjectInstance> mdxInstances = BuildMdxInstances(placementCatalog, selectedTile.tileX, selectedTile.tileY, assetReadyLookup);
+        List<WorldObjectInstance> wmoInstances = [];
+        List<WorldObjectInstance> mdxInstances = [];
+        foreach (WowViewerWorldRuntimeTileFrame activeTile in activeTerrainTiles)
+        {
+            wmoInstances.AddRange(BuildWmoInstances(activeTile.PlacementCatalog, activeTile.TileX, activeTile.TileY, assetReadyLookup));
+            mdxInstances.AddRange(BuildMdxInstances(activeTile.PlacementCatalog, activeTile.TileX, activeTile.TileY, assetReadyLookup));
+        }
         IReadOnlyList<WorldObjectInstance> skyboxBackdropInstances = mdxInstances
             .Where(static instance => WorldSkyboxBackdropClassifier.IsBackdropModelPath(instance.ModelPath))
             .ToArray();
@@ -404,7 +460,7 @@ internal static class WowViewerWorldRuntimeBridge
                 () =>
                 {
                     Stopwatch terrainStopwatch = Stopwatch.StartNew();
-                    activeTerrainChunkCount = terrainTileData.ChunkCount;
+                    activeTerrainChunkCount = activeTerrainTiles.Sum(static tile => tile.TerrainTileData.ChunkCount);
                     terrainStopwatch.Stop();
                     terrainMs = terrainStopwatch.Elapsed.TotalMilliseconds;
                 },
@@ -450,8 +506,8 @@ internal static class WowViewerWorldRuntimeBridge
                 () =>
                 {
                     Stopwatch liquidStopwatch = Stopwatch.StartNew();
-                    activeLiquidChunkCount = liquidTileData.ActiveChunkCount;
-                    activeLiquidVisibleTileCount = liquidTileData.VisibleTileCount;
+                    activeLiquidChunkCount = activeTerrainTiles.Sum(static tile => tile.LiquidTileData.ActiveChunkCount);
+                    activeLiquidVisibleTileCount = activeTerrainTiles.Sum(static tile => tile.LiquidTileData.VisibleTileCount);
                     liquidStopwatch.Stop();
                     liquidMs = liquidStopwatch.Elapsed.TotalMilliseconds;
                 },
@@ -508,7 +564,9 @@ internal static class WowViewerWorldRuntimeBridge
             wmoInstances.Count,
             mdxInstances.Count,
             stats,
-            skyboxBackdropInstances.Count);
+            skyboxBackdropInstances.Count,
+            tileStageSummary.TerrainChunkCount,
+            tileStageSummary.LiquidChunkCount);
 
         return new WowViewerWorldRuntimeFrameResult(
             session,
@@ -520,6 +578,7 @@ internal static class WowViewerWorldRuntimeBridge
             terrainTileData,
             terrainVisualSnapshot,
             liquidTileData,
+            activeTerrainTiles,
             placementCatalog,
             wmoInstances,
             mdxInstances,
@@ -544,6 +603,84 @@ internal static class WowViewerWorldRuntimeBridge
             planarMax);
     }
 
+    private static IReadOnlyList<WowViewerWorldRuntimeTileFrame> BuildActiveTerrainTiles(
+        WowViewerWorldSessionBootstrapResult session,
+        int selectedTileX,
+        int selectedTileY,
+        IArchiveCatalog archiveCatalog)
+    {
+        HashSet<(int TileX, int TileY)> occupiedTiles = session.OccupiedTiles
+            .Select(static tile => (tile.TileX, tile.TileY))
+            .ToHashSet();
+
+        List<WowViewerWorldRuntimeTileFrame> activeTiles = [];
+        for (int tileY = selectedTileY - 1; tileY <= selectedTileY + 1; tileY++)
+        {
+            for (int tileX = selectedTileX - 1; tileX <= selectedTileX + 1; tileX++)
+            {
+                if (tileX < 0 || tileX > 63 || tileY < 0 || tileY > 63)
+                    continue;
+
+                bool isSelectedTile = tileX == selectedTileX && tileY == selectedTileY;
+                if (!isSelectedTile && occupiedTiles.Count > 0 && !occupiedTiles.Contains((tileX, tileY)))
+                    continue;
+
+                try
+                {
+                    WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, tileX, tileY, archiveCatalog, wdlVisibleTileCount: 0);
+                    WorldTerrainTileData terrainTileData = ReadRootTerrainTileData(session, tileX, tileY, archiveCatalog);
+                    WorldLiquidTileData liquidTileData = ReadRootLiquidTileData(session, tileX, tileY, archiveCatalog);
+                    AdtPlacementCatalog placementCatalog = ReadPlacementCatalogOrEmpty(
+                        session,
+                        tileX,
+                        tileY,
+                        archiveCatalog,
+                        tileStageSummary.SourcePath,
+                        out string placementSourcePath);
+                    activeTiles.Add(new WowViewerWorldRuntimeTileFrame(
+                        tileX,
+                        tileY,
+                        placementSourcePath,
+                        tileStageSummary,
+                        terrainTileData,
+                        liquidTileData,
+                        placementCatalog));
+                }
+                catch (FileNotFoundException) when (!isSelectedTile)
+                {
+                }
+            }
+        }
+
+        if (activeTiles.Count == 0)
+            throw new InvalidDataException($"Selected tile ({selectedTileX},{selectedTileY}) did not produce any readable ADT terrain.");
+
+        return activeTiles
+            .OrderBy(static tile => tile.TileY)
+            .ThenBy(static tile => tile.TileX)
+            .ToArray();
+    }
+
+    private static WorldTileStageSummary BuildAggregateTileStageSummary(
+        IReadOnlyList<WowViewerWorldRuntimeTileFrame> activeTerrainTiles,
+        int selectedTileX,
+        int selectedTileY)
+    {
+        if (activeTerrainTiles.Count == 1)
+            return activeTerrainTiles[0].TileStageSummary;
+
+        return new WorldTileStageSummary(
+            $"3x3 ADT window centered on ({selectedTileX},{selectedTileY}); loaded {activeTerrainTiles.Count} terrain tiles",
+            activeTerrainTiles[0].TileStageSummary.Kind,
+            wdlVisibleTileCount: 0,
+            activeTerrainTiles.Sum(static tile => tile.TileStageSummary.TerrainChunkCount),
+            activeTerrainTiles.Sum(static tile => tile.TileStageSummary.TerrainHoleChunkCount),
+            activeTerrainTiles.Sum(static tile => tile.TileStageSummary.LiquidChunkCount),
+            activeTerrainTiles.Sum(static tile => tile.TileStageSummary.LiquidLayerCount),
+            activeTerrainTiles.Sum(static tile => tile.TileStageSummary.VisibleLiquidTileCount),
+            activeTerrainTiles.Any(static tile => tile.TileStageSummary.HasWater));
+    }
+
     private static ((int tileX, int tileY) selectedTile, AdtPlacementCatalog placementCatalog, string placementSourcePath) ResolveTileAndPlacements(
         WowViewerWorldSessionBootstrapResult session,
         int requestedTileX,
@@ -552,7 +689,14 @@ internal static class WowViewerWorldRuntimeBridge
     {
         if (requestedTileX >= 0 && requestedTileY >= 0)
         {
-            AdtPlacementCatalog requestedCatalog = ReadPlacementCatalog(session, requestedTileX, requestedTileY, archiveCatalog, out string requestedSourcePath);
+            WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, requestedTileX, requestedTileY, archiveCatalog, wdlVisibleTileCount: 0);
+            AdtPlacementCatalog requestedCatalog = ReadPlacementCatalogOrEmpty(
+                session,
+                requestedTileX,
+                requestedTileY,
+                archiveCatalog,
+                tileStageSummary.SourcePath,
+                out string requestedSourcePath);
             return ((requestedTileX, requestedTileY), requestedCatalog, requestedSourcePath);
         }
 
@@ -560,7 +704,14 @@ internal static class WowViewerWorldRuntimeBridge
         {
             try
             {
-                AdtPlacementCatalog catalog = ReadPlacementCatalog(session, tile.TileX, tile.TileY, archiveCatalog, out string sourcePath);
+                WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, tile.TileX, tile.TileY, archiveCatalog, wdlVisibleTileCount: 0);
+                AdtPlacementCatalog catalog = ReadPlacementCatalogOrEmpty(
+                    session,
+                    tile.TileX,
+                    tile.TileY,
+                    archiveCatalog,
+                    tileStageSummary.SourcePath,
+                    out string sourcePath);
                 return ((tile.TileX, tile.TileY), catalog, sourcePath);
             }
             catch (FileNotFoundException)
@@ -618,6 +769,31 @@ internal static class WowViewerWorldRuntimeBridge
         }
 
         throw new FileNotFoundException($"Could not locate placement ADT for map '{mapDirectory}' tile ({tileX},{tileY}).", rootVirtualPath);
+    }
+
+    private static AdtPlacementCatalog ReadPlacementCatalogOrEmpty(
+        WowViewerWorldSessionBootstrapResult session,
+        int tileX,
+        int tileY,
+        IArchiveCatalog archiveCatalog,
+        string fallbackSourcePath,
+        out string sourcePath)
+    {
+        try
+        {
+            return ReadPlacementCatalog(session, tileX, tileY, archiveCatalog, out sourcePath);
+        }
+        catch (FileNotFoundException)
+        {
+            sourcePath = fallbackSourcePath;
+            return new AdtPlacementCatalog(
+                fallbackSourcePath,
+                MapFileKind.Adt,
+                [],
+                [],
+                [],
+                []);
+        }
     }
 
     private static AdtPlacementCatalog ReadPlacementCatalogFromBytes(byte[] data, string sourcePath)

@@ -1,5 +1,24 @@
 # Progress
 
+### Apr 25, 2026 - added a bounded 3x3 ADT terrain quilt to wow-viewer World Session frames
+
+- what changed:
+	- added `ActiveTerrainTiles` to `WowViewerWorldRuntimeFrameResult` so a frame can carry more than one ADT tile
+	- changed `WowViewerWorldRuntimeBridge.Build(...)` to load a bounded `3x3` ADT window around the selected tile
+	- made terrain tile loading ADT-root authoritative; missing object-placement data now falls back to an empty placement catalog instead of blocking the terrain tile
+	- aggregated WMO and MDX/M2 placement inventory, terrain chunk counts, liquid counts, and composition counts across the active tile window
+	- changed `WorldGpuPreviewRenderer` terrain and hole-overlay buffer creation to render all active ADT tiles
+	- added active ADT tile count and coordinate samples to `world-frame` CLI output and desktop diagnostics
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-multitile-adt-quilt/` succeeded
+	- `output/build-validation/wowviewer-multitile-adt-quilt/WowViewer.App.exe world-frame --client-root "H:\053-client" --build-label "0.5.3.3389" --map Kalidar --tile-x 27 --tile-y 34 --show-wdl` reports `wdl=False`, `Wdl:off`, `active-adt-tiles: count=9`, `Terrain:2304/2304`, and terrain source `3x3 ADT window centered on (27,34); loaded 9 terrain tiles`
+
+- boundary:
+	- this closes the single-tile ADT runtime-frame blocker for the bounded `3x3` case, with real-data CLI proof
+	- live GUI signoff is still required for camera traversal across tile boundaries
+	- terrain is still height-debug shaded, liquids are not visible geometry yet, and WMO/MDX/M2 objects still are not rendered as in-world geometry
+
 ### Apr 25, 2026 - hard-disabled WDL in wow-viewer World Session runtime and changed the world camera to position/yaw/pitch
 
 - what changed:

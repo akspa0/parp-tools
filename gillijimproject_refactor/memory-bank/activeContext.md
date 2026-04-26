@@ -1,5 +1,24 @@
 # Active Context
 
+## Apr 25, 2026 - World Session now loads and renders a 3x3 ADT terrain window
+
+- followed the user's correction that the World Session was still effectively a one-tile diagnostic frame and not the planned world viewer path
+- active behavior after this slice:
+	- `WowViewerWorldRuntimeFrameResult` carries `ActiveTerrainTiles` with per-tile stage summary, terrain, liquid, and placement catalog data
+	- `WowViewerWorldRuntimeBridge.Build(...)` now loads a bounded `3x3` ADT root terrain window around the selected tile
+	- tile loading is ADT-root driven; missing placement data no longer prevents a terrain tile from participating in the active window
+	- WMO and MDX/M2 placement inventory now aggregates across the active tile window
+	- `WorldGpuPreviewRenderer` builds the terrain mesh and hole overlay from all active ADT tiles, not only the selected tile
+	- CLI and desktop diagnostics now show active ADT tile count and sample tile coordinates
+	- WDL remains hard-disabled for World Session frames
+- validation:
+	- app build passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-multitile-adt-quilt/`
+	- fixed local `H:\053-client`, `Kalidar`, tile `(27,34)` with `--show-wdl` reports `wdl=False`, `Wdl:off`, `active-adt-tiles: count=9`, `Terrain:2304/2304`, and terrain source `3x3 ADT window centered on (27,34); loaded 9 terrain tiles`
+- current boundary:
+	- this is build plus real-data CLI proof for Recovery Slice 3's bounded multi-tile ADT frame
+	- live GUI signoff is still needed to prove camera traversal across tile boundaries
+	- terrain is still height-shaded; `MCLY`/`MCAL` texture layers, visible liquid geometry, and in-world WMO/MDX/M2 rendering remain open plan slices
+
 ## Apr 25, 2026 - World Session runtime now hard-disables WDL and uses a MdxViewer-style free camera state
 
 - followed the user's live report that the viewer still looked WDL-driven and that the camera still felt wrong, even though `WASD` and `Q/E` now move

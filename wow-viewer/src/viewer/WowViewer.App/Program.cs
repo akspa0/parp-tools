@@ -264,6 +264,7 @@ internal static class Program
             Console.WriteLine($"WowViewer.App world-frame loose-overlay: {result.Session.LooseOverlayRoot}");
         Console.WriteLine($"WowViewer.App world-frame options: wmo={result.PassOptions.WmosVisible} mdx={result.PassOptions.DoodadsVisible} sky={result.PassOptions.SkyVisible} wdl={result.PassOptions.WdlVisible} terrain={result.PassOptions.TerrainVisible} liquid={result.PassOptions.LiquidVisible} overlay={result.PassOptions.OverlayVisible}");
         Console.WriteLine($"WowViewer.App world-frame composition: {FormatCompositionLayers(result.Composition)}");
+        Console.WriteLine($"WowViewer.App world-frame active-adt-tiles: count={result.ActiveTerrainTiles.Count} sample={FormatActiveTerrainTiles(result.ActiveTerrainTiles)}");
         Console.WriteLine($"WowViewer.App world-frame terrain: source={result.TileStageSummary.SourcePath} wdlTiles={result.Stats.WdlVisibleTileCount}/{result.TileStageSummary.WdlVisibleTileCount} terrainChunks={result.Stats.TerrainChunksRendered}/{result.TileStageSummary.TerrainChunkCount} holes={result.TileStageSummary.TerrainHoleChunkCount} liquidChunks={result.Stats.Liquid.VisibleCount}/{result.TileStageSummary.LiquidChunkCount} liquidLayers={result.TileStageSummary.LiquidLayerCount} liquidVisibleTiles={result.Stats.Liquid.SubmittedCount}/{result.TileStageSummary.VisibleLiquidTileCount} hasWater={result.TileStageSummary.HasWater}");
         Console.WriteLine($"WowViewer.App world-frame wdl-service: found={result.WdlTileData.SourceFound} hasData={result.WdlTileData.HasData} source={result.WdlTileData.SourcePath} version={FormatOptionalUInt(result.WdlTileData.Version)} range={FormatHeightRange(result.WdlTileData)} center={FormatOptionalHeight(result.WdlTileData.CenterHeight)} corners={FormatWdlCorners(result.WdlTileData)} samples={result.WdlTileData.OuterHeightCount}+{result.WdlTileData.InnerHeightCount}");
         Console.WriteLine($"WowViewer.App world-frame terrain-service: sourceChunks={result.TerrainTileData.ChunkCount} holeChunks={result.TerrainTileData.HoleChunkCount} liquidFlagChunks={result.TerrainTileData.LiquidFlagChunkCount} areas={result.TerrainTileData.DistinctAreaIdCount} sample={FormatTerrainChunkSample(result.TerrainTileData)}");
@@ -884,6 +885,14 @@ internal static class Program
     private static string FormatOptionalValue(string value)
     {
         return string.IsNullOrWhiteSpace(value) ? "n/a" : value;
+    }
+
+    private static string FormatActiveTerrainTiles(IReadOnlyList<WowViewerWorldRuntimeTileFrame> tiles)
+    {
+        if (tiles.Count == 0)
+            return "none";
+
+        return string.Join(", ", tiles.Take(12).Select(static tile => $"({tile.TileX},{tile.TileY})"));
     }
 
     private static string FormatWdtMainFlags(WowViewer.Core.Maps.WdtMainFlagsSummary summary)

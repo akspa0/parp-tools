@@ -15,7 +15,9 @@ public static class WorldRenderCompositionBuilder
         int wmoSourceCount,
         int mdxSourceCount,
         WorldRenderFrameStats stats,
-        int skyboxBackdropSourceCount = 0)
+        int skyboxBackdropSourceCount = 0,
+        int? terrainSourceChunkCount = null,
+        int? liquidSourceChunkCount = null)
     {
         ArgumentNullException.ThrowIfNull(wdlTileData);
         ArgumentNullException.ThrowIfNull(terrainTileData);
@@ -23,6 +25,10 @@ public static class WorldRenderCompositionBuilder
         ArgumentOutOfRangeException.ThrowIfNegative(wmoSourceCount);
         ArgumentOutOfRangeException.ThrowIfNegative(mdxSourceCount);
         ArgumentOutOfRangeException.ThrowIfNegative(skyboxBackdropSourceCount);
+        int terrainChunkSourceCount = terrainSourceChunkCount ?? terrainTileData.ChunkCount;
+        int liquidChunkSourceCount = liquidSourceChunkCount ?? liquidTileData.ActiveChunkCount;
+        ArgumentOutOfRangeException.ThrowIfNegative(terrainChunkSourceCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(liquidChunkSourceCount);
 
         WorldRenderLayerState[] layers =
         [
@@ -60,18 +66,18 @@ public static class WorldRenderCompositionBuilder
                 WorldRenderLayerKind.Terrain,
                 "ADT Terrain Quilt",
                 passOptions.TerrainVisible,
-                terrainTileData.ChunkCount > 0,
-                terrainTileData.ChunkCount,
+                terrainChunkSourceCount > 0,
+                terrainChunkSourceCount,
                 stats.Terrain.SubmittedCount,
                 "Rigid Z-axis ADT chunk mesh."),
             new(
                 WorldRenderLayerKind.Liquid,
                 "Liquid",
                 passOptions.LiquidVisible,
-                liquidTileData.ActiveChunkCount > 0,
-                liquidTileData.ActiveChunkCount,
+                liquidChunkSourceCount > 0,
+                liquidChunkSourceCount,
                 stats.Liquid.SubmittedCount,
-                liquidTileData.ActiveChunkCount > 0 ? "Tile carries liquid chunks." : "No active liquid chunks for this tile."),
+                liquidChunkSourceCount > 0 ? "Active terrain window carries liquid chunks." : "No active liquid chunks for this terrain window."),
             new(
                 WorldRenderLayerKind.Wmo,
                 "World Models",

@@ -3252,6 +3252,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         int visibleObjects = _currentWorldRuntimeFrame.Visibility.VisibleWmos.Count + _currentWorldRuntimeFrame.Visibility.VisibleMdx.Count;
         ImGui.Separator();
         ImGui.Text($"Tile: ({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})");
+        ImGui.Text($"Active ADT Tiles: {_currentWorldRuntimeFrame.ActiveTerrainTiles.Count}");
         ImGui.Text($"Placements: WMO {_currentWorldRuntimeFrame.WmoInstances.Count} / Doodads {_currentWorldRuntimeFrame.MdxInstances.Count}");
         if (_currentWorldRuntimeFrame.SkyboxBackdropInstances.Count > 0)
             ImGui.Text($"Backdrop: {_currentWorldRuntimeFrame.SkyboxBackdropInstances.Count} classified placement(s)");
@@ -3293,6 +3294,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         ImGui.TextDisabled("World Runtime Bridge");
         ImGui.Text($"Tile: ({result.SelectedTileX},{result.SelectedTileY})");
+        ImGui.Text($"Active ADT Tiles: {result.ActiveTerrainTiles.Count}");
+        if (result.ActiveTerrainTiles.Count > 0)
+            ImGui.TextWrapped($"Active Tile Sample: {string.Join(", ", result.ActiveTerrainTiles.Take(12).Select(static tile => $"({tile.TileX},{tile.TileY})"))}");
         ImGui.Text($"Placement Source: {result.PlacementSourcePath}");
         ImGui.Text($"Camera: {FormatVector3(result.CameraPosition)} -> {FormatVector3(result.CameraForward)}");
         ImGui.Text($"Object Phase Executed: {result.ObjectPhaseExecuted}");
