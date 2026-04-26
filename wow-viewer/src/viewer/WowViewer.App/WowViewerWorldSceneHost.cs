@@ -4,6 +4,7 @@ namespace WowViewer.App;
 
 internal sealed class WowViewerWorldSceneHost : IDisposable
 {
+    private readonly WowViewerWorldAssetInventory _assetInventory = new();
     private WorldGpuPreviewRenderer? _renderer;
     private string _rendererSourceSignature = string.Empty;
 
@@ -19,6 +20,8 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
 
     public WowViewerWorldSceneSnapshot SceneSnapshot { get; private set; } = WowViewerWorldSceneSnapshot.Empty;
 
+    public WowViewerWorldDiagnosticsSnapshot DiagnosticsSnapshot { get; private set; } = WowViewerWorldDiagnosticsSnapshot.Empty;
+
     public void Dispose()
     {
         _renderer?.Dispose();
@@ -30,8 +33,10 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
     {
         CurrentSession = null;
         CurrentFrame = null;
+        _assetInventory.Reset();
         AssetState = WowViewerWorldAssetState.Empty;
         SceneSnapshot = WowViewerWorldSceneSnapshot.Empty;
+        DiagnosticsSnapshot = WowViewerWorldDiagnosticsSnapshot.Empty;
         _renderer?.ClearPreview();
         Camera.ResetToIdentity();
     }
@@ -63,8 +68,10 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
     {
         CurrentSession = runtimeFrame.Session;
         CurrentFrame = runtimeFrame;
-        AssetState = WowViewerWorldAssetState.FromRuntimeFrame(runtimeFrame);
+        _assetInventory.ObserveRuntimeFrame(runtimeFrame);
+        AssetState = _assetInventory.CreateState();
         SceneSnapshot = WowViewerWorldSceneSnapshot.FromRuntimeFrame(runtimeFrame);
+        DiagnosticsSnapshot = WowViewerWorldDiagnosticsSnapshot.FromRuntimeFrame(runtimeFrame);
         EnsureRenderer(gl, viewerIoService, sourceKey, sourceSignature)?.LoadPreview(runtimeFrame, Camera, ignoreTerrainHoles, showHoleOverlay);
     }
 }

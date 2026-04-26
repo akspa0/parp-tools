@@ -3,6 +3,8 @@ namespace WowViewer.App;
 internal sealed class WowViewerWorldAssetState
 {
     public static readonly WowViewerWorldAssetState Empty = new(
+        referencedWmoAssetCount: 0,
+        referencedMdxAssetCount: 0,
         wmoInstanceCount: 0,
         mdxInstanceCount: 0,
         readyWmoCount: 0,
@@ -15,6 +17,8 @@ internal sealed class WowViewerWorldAssetState
         pendingAssetKeys: Array.Empty<string>());
 
     public WowViewerWorldAssetState(
+        int referencedWmoAssetCount,
+        int referencedMdxAssetCount,
         int wmoInstanceCount,
         int mdxInstanceCount,
         int readyWmoCount,
@@ -26,6 +30,8 @@ internal sealed class WowViewerWorldAssetState
         int skyboxBackdropCount,
         IReadOnlyList<string> pendingAssetKeys)
     {
+        ReferencedWmoAssetCount = referencedWmoAssetCount;
+        ReferencedMdxAssetCount = referencedMdxAssetCount;
         WmoInstanceCount = wmoInstanceCount;
         MdxInstanceCount = mdxInstanceCount;
         ReadyWmoCount = readyWmoCount;
@@ -37,6 +43,10 @@ internal sealed class WowViewerWorldAssetState
         SkyboxBackdropCount = skyboxBackdropCount;
         PendingAssetKeys = pendingAssetKeys;
     }
+
+    public int ReferencedWmoAssetCount { get; }
+
+    public int ReferencedMdxAssetCount { get; }
 
     public int WmoInstanceCount { get; }
 
@@ -66,6 +76,8 @@ internal sealed class WowViewerWorldAssetState
     {
         ArgumentNullException.ThrowIfNull(runtimeFrame);
         return new WowViewerWorldAssetState(
+            runtimeFrame.WmoInstances.Select(static instance => instance.ModelKey).Where(static key => !string.IsNullOrWhiteSpace(key)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            runtimeFrame.MdxInstances.Select(static instance => instance.ModelKey).Where(static key => !string.IsNullOrWhiteSpace(key)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
             runtimeFrame.WmoInstances.Count,
             runtimeFrame.MdxInstances.Count,
             runtimeFrame.ReadyWmoCount,

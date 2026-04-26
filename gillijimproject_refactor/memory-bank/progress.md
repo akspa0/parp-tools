@@ -9,6 +9,8 @@
 	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldAssetState.cs` and made the host own a first asset snapshot carrying pending keys plus ready or visible or culled WMO and doodad counts; world summary and diagnostics now read those asset counts from the host
 	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneSnapshot.cs` and made the host own copied world/session metadata such as resolved map path, occupied tiles, selected tile, active terrain tile count, placement source, and terrain snapshot size; the world overview, preview header, minimap center/occupied-tile helpers, world tile label, and load summary now read that host-owned scene snapshot
 	- removed the app's last direct `PendingAssetKeys` dependency on the raw runtime frame by switching the post-load summary to host-owned asset state
+	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldDiagnosticsSnapshot.cs` and moved the diagnostics panel, runtime summary, world status window, and minimap loaded-tile indicator onto host-owned diagnostics/session data instead of direct raw-frame or raw-session reads
+	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldAssetInventory.cs` as the first host-managed asset inventory seam; the host now derives `WowViewerWorldAssetState` from an inventory pass that tracks referenced model keys and pending-load samples rather than snapshotting asset state directly from the frame in one static call
 	- kept the current world path GPU-accelerated by continuing to render through `WorldGpuPreviewRenderer` from the new host rather than falling back to a CPU-side scene surface
 
 - validation:
@@ -16,7 +18,7 @@
 
 - boundary:
 	- this is a world-ownership extraction seam, not yet a full `MdxViewer.WorldScene` or `WorldAssetManager` port
-	- `WowViewerDesktopApp` still consumes the existing runtime-frame shape for detailed object and inspector surfaces, and `WowViewerWorldRuntimeBridge` still builds that current runtime frame
+	- `WowViewerDesktopApp` still consumes the existing runtime-frame shape for object navigator, selection resolution, and canvas picking surfaces, and `WowViewerWorldRuntimeBridge` still builds that current runtime frame
 
 ### Apr 25, 2026 - hard reset: current wow-viewer world preview branch is no longer the target implementation
 

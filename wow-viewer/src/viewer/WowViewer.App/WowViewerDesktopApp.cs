@@ -3197,28 +3197,32 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void DrawWorldDiagnostics()
     {
-        if (_currentWorldSession == null)
+        WowViewerWorldDiagnosticsSnapshot diagnosticsSnapshot = _worldSceneHost.DiagnosticsSnapshot;
+        if (!diagnosticsSnapshot.HasSession)
         {
             ImGui.TextWrapped("Open a world session to inspect WDT summary, MAIN flags, and occupied tile samples.");
             return;
         }
 
-        if (_currentWorldRuntimeFrame != null)
+        if (diagnosticsSnapshot.HasRuntime)
         {
-            DrawWorldRuntimeDiagnostics(_currentWorldRuntimeFrame);
+            DrawWorldRuntimeDiagnostics(diagnosticsSnapshot);
             return;
         }
 
         ImGui.TextDisabled("World Session Summary");
-        ImGui.Text($"Root: {_currentWorldSession.ClientRoot}");
-        ImGui.Text($"Map: {_currentWorldSession.RequestedMapInput} -> {_currentWorldSession.ResolvedMapDirectory}");
-        ImGui.Text($"Load: {_currentWorldSession.LoadDuration.TotalMilliseconds:F1} ms");
-        ImGui.Text($"WDT Kind: {_currentWorldSession.FileSummary.Kind}");
-        ImGui.Text($"WDT Version: {_currentWorldSession.FileSummary.Version?.ToString() ?? "n/a"}");
-        ImGui.Text($"WDT Chunks: {_currentWorldSession.FileSummary.ChunkCount}");
+        ImGui.Text($"Root: {diagnosticsSnapshot.ClientRoot}");
+        ImGui.Text($"Map: {diagnosticsSnapshot.RequestedMapInput} -> {diagnosticsSnapshot.ResolvedMapDirectory}");
+        ImGui.Text($"Load: {diagnosticsSnapshot.LoadDuration.TotalMilliseconds:F1} ms");
+        ImGui.Text($"WDT Kind: {diagnosticsSnapshot.WdtKindText}");
+        ImGui.Text($"WDT Version: {diagnosticsSnapshot.WdtVersionText}");
+        ImGui.Text($"WDT Chunks: {diagnosticsSnapshot.WdtChunkCount}");
         ImGui.Separator();
 
-        WdtSummary summary = _currentWorldSession.WdtSummary;
+        WdtSummary? summary = diagnosticsSnapshot.WdtSummary;
+        if (summary == null)
+            return;
+
         ImGui.TextDisabled("WDT Semantics");
         ImGui.Text($"Tiles With Data: {summary.TilesWithData}/{summary.TotalTiles}");
         ImGui.Text($"Main Cell Bytes: {summary.MainCellSizeBytes}");
@@ -3243,7 +3247,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         ImGui.Separator();
         ImGui.TextDisabled("Occupied Tile Sample");
-        ImGui.TextWrapped(FormatTileSample(_currentWorldSession.OccupiedTiles, 24));
+        ImGui.TextWrapped(FormatTileSample(diagnosticsSnapshot.OccupiedTiles, 24));
     }
 
     private void DrawWorldRuntimeSummary()
@@ -3260,10 +3264,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.TextDisabled($"Load: {sceneSnapshot.LoadDuration.TotalMilliseconds:F1} ms");
         ImGui.TextDisabled($"Occupied tiles: {sceneSnapshot.OccupiedTiles.Count}");
 
-        if (_currentWorldRuntimeFrame == null)
+        WowViewerWorldDiagnosticsSnapshot diagnosticsSnapshot = _worldSceneHost.DiagnosticsSnapshot;
+        if (!diagnosticsSnapshot.HasRuntime)
             return;
 
         WowViewerWorldAssetState assetState = _worldSceneHost.AssetState;
+        string terrainRange = diagnosticsSnapshot.TerrainTileData is null
+            ? "n/a"
+            : FormatTerrainHeightRange(diagnosticsSnapshot.TerrainTileData);
         int visibleObjects = assetState.VisibleObjectCount;
         ImGui.Separator();
         ImGui.Text($"Tile: ({sceneSnapshot.SelectedTileX},{sceneSnapshot.SelectedTileY})");
@@ -3272,13 +3280,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (assetState.SkyboxBackdropCount > 0)
             ImGui.Text($"Backdrop: {assetState.SkyboxBackdropCount} classified placement(s)");
         ImGui.Text($"Visible Objects: {visibleObjects}");
-        ImGui.Text($"Terrain: {FormatTerrainHeightRange(_currentWorldRuntimeFrame.TerrainTileData)}");
-        ImGui.Text($"Liquid Layers: {_currentWorldRuntimeFrame.TileStageSummary.LiquidLayerCount}");
-        ImGui.Text($"CPU: {_currentWorldRuntimeFrame.Stats.TotalCpuMs:F2} ms");
+        ImGui.Text($"Terrain: {terrainRange}");
+        ImGui.Text($"Liquid Layers: {diagnosticsSnapshot.TileStageSummary?.LiquidLayerCount ?? 0}");
+        ImGui.Text($"CPU: {diagnosticsSnapshot.TotalCpuMs:F2} ms");
         ImGui.Text($"GPU: {_worldGpuPreviewRenderer?.TerrainTriangleCount ?? 0} terrain tris / {_worldGpuPreviewRenderer?.MarkerCount ?? 0} markers");
         ImGui.Separator();
         ImGui.TextDisabled("Composition");
-        foreach (WorldRenderLayerState layer in _currentWorldRuntimeFrame.Composition.Layers)
+        foreach (WowViewerWorldCompositionLayerSnapshot layer in diagnosticsSnapshot.CompositionLayers)
         {
             Vector4 color = !layer.Enabled
                 ? new Vector4(0.45f, 0.45f, 0.45f, 1.0f)
@@ -3296,46 +3304,42 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
     }
 
-    private void DrawWorldRuntimeDiagnostics(WowViewerWorldRuntimeFrameResult result)
+    private void DrawWorldRuntimeDiagnostics(WowViewerWorldDiagnosticsSnapshot diagnosticsSnapshot)
     {
-        WowViewerWorldAssetState assetState = _worldSceneHost.AssetState;
-        int embeddedWmoMdxCount = result.WmoInstances.Sum(static instance => instance.WmoDoodadMdxCount);
-        int embeddedWmoM2Count = result.WmoInstances.Sum(static instance => instance.WmoDoodadM2Count);
-        int embeddedWmoUnknownCount = result.WmoInstances.Sum(static instance => instance.WmoDoodadUnknownCount);
-        string wmoVersionSummary = string.Join(", ", result.WmoInstances
-            .Where(static instance => instance.WmoVersion.HasValue)
-            .Select(static instance => instance.WmoVersion!.Value)
-            .Distinct()
-            .OrderBy(static version => version));
+        if (!diagnosticsSnapshot.HasRuntime)
+            return;
 
+        WowViewerWorldAssetState assetState = _worldSceneHost.AssetState;
         ImGui.TextDisabled("World Runtime Bridge");
-        ImGui.Text($"Tile: ({result.SelectedTileX},{result.SelectedTileY})");
-        ImGui.Text($"Active ADT Tiles: {result.ActiveTerrainTiles.Count}");
-        if (result.ActiveTerrainTiles.Count > 0)
-            ImGui.TextWrapped($"Active Tile Sample: {string.Join(", ", result.ActiveTerrainTiles.Take(12).Select(static tile => $"({tile.TileX},{tile.TileY})"))}");
-        ImGui.Text($"Placement Source: {result.PlacementSourcePath}");
-        ImGui.Text($"Camera: {FormatVector3(result.CameraPosition)} -> {FormatVector3(result.CameraForward)}");
-        ImGui.Text($"Object Phase Executed: {result.ObjectPhaseExecuted}");
-        ImGui.Text($"Pass Options: sky={result.PassOptions.SkyVisible} wdl={result.PassOptions.WdlVisible} terrain={result.PassOptions.TerrainVisible} liquid={result.PassOptions.LiquidVisible} overlay={result.PassOptions.OverlayVisible}");
-        ImGui.Text($"Object Filters: wmo={result.PassOptions.WmosVisible} doodads={result.PassOptions.DoodadsVisible}");
-        ImGui.Text($"Total Cpu Ms: {result.Stats.TotalCpuMs:F2}");
+        ImGui.Text($"Tile: ({diagnosticsSnapshot.SelectedTileX},{diagnosticsSnapshot.SelectedTileY})");
+        ImGui.Text($"Active ADT Tiles: {diagnosticsSnapshot.ActiveTerrainTileCount}");
+        if (diagnosticsSnapshot.ActiveTerrainTileSample.Count > 0)
+            ImGui.TextWrapped($"Active Tile Sample: {string.Join(", ", diagnosticsSnapshot.ActiveTerrainTileSample)}");
+        ImGui.Text($"Placement Source: {diagnosticsSnapshot.PlacementSourcePath}");
+        ImGui.Text($"Camera: {FormatVector3(diagnosticsSnapshot.CameraPosition)} -> {FormatVector3(diagnosticsSnapshot.CameraForward)}");
+        ImGui.Text($"Object Phase Executed: {diagnosticsSnapshot.ObjectPhaseExecuted}");
+        ImGui.Text($"Pass Options: sky={diagnosticsSnapshot.PassOptions.SkyVisible} wdl={diagnosticsSnapshot.PassOptions.WdlVisible} terrain={diagnosticsSnapshot.PassOptions.TerrainVisible} liquid={diagnosticsSnapshot.PassOptions.LiquidVisible} overlay={diagnosticsSnapshot.PassOptions.OverlayVisible}");
+        ImGui.Text($"Object Filters: wmo={diagnosticsSnapshot.PassOptions.WmosVisible} doodads={diagnosticsSnapshot.PassOptions.DoodadsVisible}");
+        ImGui.Text($"Total Cpu Ms: {diagnosticsSnapshot.TotalCpuMs:F2}");
         ImGui.Separator();
 
         ImGui.TextDisabled("Composition Layers");
-        foreach (WorldRenderLayerState layer in result.Composition.Layers)
+        foreach (WowViewerWorldCompositionLayerSnapshot layer in diagnosticsSnapshot.CompositionLayers)
             ImGui.TextWrapped($"{layer.DisplayName}: enabled={layer.Enabled} ready={layer.Ready} source={layer.SourceCount} submitted={layer.SubmittedCount} - {layer.Note}");
         ImGui.Separator();
 
         ImGui.TextDisabled("Placement Inventory");
+        ImGui.Text($"WMO Assets Referenced: {assetState.ReferencedWmoAssetCount}");
         ImGui.Text($"WMO Total: {assetState.WmoInstanceCount}");
         ImGui.Text($"WMO Ready: {assetState.ReadyWmoCount}");
-        ImGui.Text($"WMO Versions: {(string.IsNullOrEmpty(wmoVersionSummary) ? "n/a" : wmoVersionSummary)}");
-        ImGui.Text($"Embedded WMO Doodads: MDX {embeddedWmoMdxCount} / M2 {embeddedWmoM2Count} / Unknown {embeddedWmoUnknownCount}");
+        ImGui.Text($"WMO Versions: {(string.IsNullOrEmpty(diagnosticsSnapshot.WmoVersionSummary) ? "n/a" : diagnosticsSnapshot.WmoVersionSummary)}");
+        ImGui.Text($"Embedded WMO Doodads: MDX {diagnosticsSnapshot.EmbeddedWmoMdxCount} / M2 {diagnosticsSnapshot.EmbeddedWmoM2Count} / Unknown {diagnosticsSnapshot.EmbeddedWmoUnknownCount}");
+        ImGui.Text($"Doodad Assets Referenced: {assetState.ReferencedMdxAssetCount}");
         ImGui.Text($"Doodad Total: {assetState.MdxInstanceCount}");
         ImGui.Text($"Doodad Ready: {assetState.ReadyMdxCount}");
         ImGui.Text($"Skybox Backdrop Candidates: {assetState.SkyboxBackdropCount}");
-        if (result.SkyboxBackdropInstances.Count > 0)
-            ImGui.TextWrapped($"Backdrop Sample: {string.Join(", ", result.SkyboxBackdropInstances.Take(6).Select(static instance => instance.ModelPath))}");
+        if (diagnosticsSnapshot.SkyboxBackdropSamplePaths.Count > 0)
+            ImGui.TextWrapped($"Backdrop Sample: {string.Join(", ", diagnosticsSnapshot.SkyboxBackdropSamplePaths)}");
         ImGui.Text($"Pending Assets: {assetState.PendingAssetLoadCount}");
         if (assetState.PendingAssetLoadCount > 0)
             ImGui.TextWrapped($"Pending Sample: {string.Join(", ", assetState.PendingAssetKeys.Take(8))}");
@@ -3346,41 +3350,50 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"Culled WMO: {assetState.CulledWmoCount}");
         ImGui.Text($"Visible Doodads: {assetState.VisibleMdxCount}");
         ImGui.Text($"Culled Doodads: {assetState.CulledMdxCount}");
-        ImGui.Text($"Taxi Doodads: {result.Visibility.VisibleTaxiMdxCount}");
+        ImGui.Text($"Taxi Doodads: {diagnosticsSnapshot.VisibleTaxiDoodadCount}");
 
         ImGui.Separator();
         ImGui.TextDisabled("Pass Coordination");
-        ImGui.Text($"WDL Tiles: {result.Stats.WdlVisibleTileCount}/{result.TileStageSummary.WdlVisibleTileCount}");
-        ImGui.Text($"WDL Found: {result.WdlTileData.SourceFound}");
-        ImGui.Text($"WDL Version: {FormatOptionalUInt(result.WdlTileData.Version)}");
-        ImGui.Text($"WDL Range: {FormatHeightRange(result.WdlTileData)}");
-        ImGui.TextWrapped($"WDL Sample: center={FormatOptionalHeight(result.WdlTileData.CenterHeight)} {FormatWdlCorners(result.WdlTileData)}");
-        ImGui.Text($"Terrain Chunks: {result.Stats.TerrainChunksRendered}/{result.TileStageSummary.TerrainChunkCount}");
-        ImGui.Text($"Terrain Hole Chunks: {result.TileStageSummary.TerrainHoleChunkCount}");
-        ImGui.Text($"Terrain Areas: {result.TerrainTileData.DistinctAreaIdCount}");
-        ImGui.Text($"Terrain Range: {FormatTerrainHeightRange(result.TerrainTileData)}");
-        ImGui.TextWrapped($"Terrain Heights: center={FormatTerrainCenter(result.TerrainTileData)} {FormatTerrainCorners(result.TerrainTileData)}");
-        ImGui.Text($"Terrain Preview: {result.TerrainVisualSnapshot.Width}x{result.TerrainVisualSnapshot.Height} samples={result.TerrainVisualSnapshot.SampledPixelCount}");
-        ImGui.TextWrapped($"Terrain Visual Hash: {result.TerrainVisualSnapshot.VisualHash}");
-        ImGui.TextWrapped($"Terrain Sample: {FormatTerrainChunkSample(result.TerrainTileData)}");
-        ImGui.Text($"Liquid Chunks: {result.Stats.Liquid.VisibleCount}/{result.TileStageSummary.LiquidChunkCount}");
-        ImGui.Text($"Liquid Layers: {result.TileStageSummary.LiquidLayerCount}");
-        ImGui.Text($"Liquid Visible Tiles: {result.Stats.Liquid.SubmittedCount}/{result.TileStageSummary.VisibleLiquidTileCount}");
-        if (result.LiquidTileData.Chunks.Count > 0)
+        WorldWdlTileData? wdlTileData = diagnosticsSnapshot.WdlTileData;
+        WorldTileStageSummary? tileStageSummary = diagnosticsSnapshot.TileStageSummary;
+        WorldTerrainTileData? terrainTileData = diagnosticsSnapshot.TerrainTileData;
+        WorldLiquidTileData? liquidTileData = diagnosticsSnapshot.LiquidTileData;
+        string wdlRange = wdlTileData is null ? "n/a" : FormatHeightRange(wdlTileData);
+        string wdlCorners = wdlTileData is null ? "n/a" : FormatWdlCorners(wdlTileData);
+        string terrainRange = terrainTileData is null ? "n/a" : FormatTerrainHeightRange(terrainTileData);
+        string terrainHeights = terrainTileData is null ? "center=n/a n/a" : $"center={FormatTerrainCenter(terrainTileData)} {FormatTerrainCorners(terrainTileData)}";
+        string terrainSample = terrainTileData is null ? "none" : FormatTerrainChunkSample(terrainTileData);
+        ImGui.Text($"WDL Tiles: {diagnosticsSnapshot.WdlVisibleTileCount}/{tileStageSummary?.WdlVisibleTileCount ?? 0}");
+        ImGui.Text($"WDL Found: {wdlTileData?.SourceFound ?? false}");
+        ImGui.Text($"WDL Version: {FormatOptionalUInt(wdlTileData?.Version)}");
+        ImGui.Text($"WDL Range: {wdlRange}");
+        ImGui.TextWrapped($"WDL Sample: center={FormatOptionalHeight(wdlTileData?.CenterHeight)} {wdlCorners}");
+        ImGui.Text($"Terrain Chunks: {diagnosticsSnapshot.TerrainChunksRendered}/{tileStageSummary?.TerrainChunkCount ?? 0}");
+        ImGui.Text($"Terrain Hole Chunks: {tileStageSummary?.TerrainHoleChunkCount ?? 0}");
+        ImGui.Text($"Terrain Areas: {terrainTileData?.DistinctAreaIdCount ?? 0}");
+        ImGui.Text($"Terrain Range: {terrainRange}");
+        ImGui.TextWrapped($"Terrain Heights: {terrainHeights}");
+        ImGui.Text($"Terrain Preview: {diagnosticsSnapshot.TerrainPreviewWidth}x{diagnosticsSnapshot.TerrainPreviewHeight} samples={diagnosticsSnapshot.TerrainPreviewSampledPixelCount}");
+        ImGui.TextWrapped($"Terrain Visual Hash: {diagnosticsSnapshot.TerrainVisualHash}");
+        ImGui.TextWrapped($"Terrain Sample: {terrainSample}");
+        ImGui.Text($"Liquid Chunks: {liquidTileData?.ActiveChunkCount ?? 0}/{tileStageSummary?.LiquidChunkCount ?? 0}");
+        ImGui.Text($"Liquid Layers: {tileStageSummary?.LiquidLayerCount ?? 0}");
+        ImGui.Text($"Liquid Visible Tiles: {liquidTileData?.VisibleTileCount ?? 0}/{tileStageSummary?.VisibleLiquidTileCount ?? 0}");
+        if (liquidTileData?.Chunks.Count > 0)
         {
-            ImGui.TextWrapped($"Liquid Types: {FormatLiquidTypeCounts(result.LiquidTileData)}");
-            ImGui.TextWrapped($"Liquid Sample: {FormatLiquidChunkSample(result.LiquidTileData)}");
+            ImGui.TextWrapped($"Liquid Types: {FormatLiquidTypeCounts(liquidTileData)}");
+            ImGui.TextWrapped($"Liquid Sample: {FormatLiquidChunkSample(liquidTileData)}");
         }
-        ImGui.Text($"WMO Submitted: {result.Stats.WmoSubmission.SubmittedCount}");
-        ImGui.Text($"MDX Animated: {result.Stats.MdxAnimation.SubmittedCount}");
-        ImGui.Text($"MDX Opaque Submitted: {result.Stats.MdxOpaqueSubmission.SubmittedCount}");
-        ImGui.Text($"MDX Transparent Submitted: {result.Stats.MdxTransparentSubmission.SubmittedCount}");
-        ImGui.Text($"Opaque Routes: {result.PassFrame.OpaqueVisibleMdxRoutes.Count}");
-        ImGui.Text($"Transparent Routes: {result.PassFrame.TransparentVisibleMdxRoutes.Count}");
+        ImGui.Text($"WMO Submitted: {diagnosticsSnapshot.WmoSubmittedCount}");
+        ImGui.Text($"MDX Animated: {diagnosticsSnapshot.MdxAnimatedSubmittedCount}");
+        ImGui.Text($"MDX Opaque Submitted: {diagnosticsSnapshot.MdxOpaqueSubmittedCount}");
+        ImGui.Text($"MDX Transparent Submitted: {diagnosticsSnapshot.MdxTransparentSubmittedCount}");
+        ImGui.Text($"Opaque Routes: {diagnosticsSnapshot.OpaqueRouteCount}");
+        ImGui.Text($"Transparent Routes: {diagnosticsSnapshot.TransparentRouteCount}");
 
         ImGui.Separator();
         ImGui.TextDisabled("Timing Hint");
-        ImGui.TextWrapped(result.OptimizationHint);
+        ImGui.TextWrapped(diagnosticsSnapshot.OptimizationHint);
         ImGui.TextWrapped("Boundary: these timings are for the bounded app-side runtime bridge over the software terrain preview plus visibility/pass coordination, not the final 3D world renderer.");
     }
 
@@ -3541,28 +3554,33 @@ internal sealed class WowViewerDesktopApp : IDisposable
             return;
         }
 
-        if (_currentWorldRuntimeFrame == null)
+        WowViewerWorldDiagnosticsSnapshot diagnosticsSnapshot = _worldSceneHost.DiagnosticsSnapshot;
+        if (!diagnosticsSnapshot.HasRuntime)
         {
             ImGui.TextWrapped("Open a world session to populate runtime status for the current tile.");
             ImGui.End();
             return;
         }
 
-        WowViewerWorldRuntimeFrameResult result = _currentWorldRuntimeFrame;
+        WowViewerWorldSceneSnapshot sceneSnapshot = _worldSceneHost.SceneSnapshot;
+        WowViewerWorldAssetState assetState = _worldSceneHost.AssetState;
         ImGui.TextDisabled("Current World Frame");
-        ImGui.Text($"Map: {result.Session.RequestedMapInput} -> {result.Session.ResolvedMapDirectory}");
-        ImGui.Text($"Tile: ({result.SelectedTileX},{result.SelectedTileY})");
-        ImGui.Text($"Placement Source: {result.PlacementSourcePath}");
-        ImGui.Text($"Load Source: {(result.Session.LoadedFromArchive ? "archive catalog" : "loose file")}");
+        ImGui.Text($"Map: {sceneSnapshot.RequestedMapInput} -> {sceneSnapshot.ResolvedMapDirectory}");
+        ImGui.Text($"Tile: ({sceneSnapshot.SelectedTileX},{sceneSnapshot.SelectedTileY})");
+        ImGui.Text($"Placement Source: {sceneSnapshot.PlacementSourcePath}");
+        ImGui.Text($"Load Source: {(diagnosticsSnapshot.LoadedFromArchive ? "archive catalog" : "loose file")}");
         ImGui.Separator();
         ImGui.TextDisabled("Runtime Summary");
-        ImGui.Text($"WMO Visible/Total: {_worldSceneHost.AssetState.VisibleWmoCount}/{_worldSceneHost.AssetState.WmoInstanceCount}");
-        ImGui.Text($"Doodads Visible/Total: {_worldSceneHost.AssetState.VisibleMdxCount}/{_worldSceneHost.AssetState.MdxInstanceCount}");
-        ImGui.Text($"Pending Assets: {_worldSceneHost.AssetState.PendingAssetLoadCount}");
-        ImGui.Text($"Object Phase: {result.ObjectPhaseExecuted}");
-        ImGui.Text($"Total Cpu Ms: {result.Stats.TotalCpuMs:F2}");
+        ImGui.Text($"WMO Visible/Total: {assetState.VisibleWmoCount}/{assetState.WmoInstanceCount}");
+        ImGui.Text($"Doodads Visible/Total: {assetState.VisibleMdxCount}/{assetState.MdxInstanceCount}");
+        ImGui.Text($"Referenced Assets: WMO {assetState.ReferencedWmoAssetCount} / Doodads {assetState.ReferencedMdxAssetCount}");
+        ImGui.Text($"Pending Assets: {assetState.PendingAssetLoadCount}");
+        ImGui.Text($"Object Phase: {diagnosticsSnapshot.ObjectPhaseExecuted}");
+        ImGui.Text($"Total Cpu Ms: {diagnosticsSnapshot.TotalCpuMs:F2}");
 
-        if (_selectedWorldObject.HasValue && TryResolveWorldNavigatorEntry(result, _selectedWorldObject.Value, out WorldNavigatorEntry entry))
+        if (_selectedWorldObject.HasValue
+            && _currentWorldRuntimeFrame is { } currentFrame
+            && TryResolveWorldNavigatorEntry(currentFrame, _selectedWorldObject.Value, out WorldNavigatorEntry entry))
         {
             ImGui.Separator();
             ImGui.TextDisabled("Selection Summary");
@@ -3635,8 +3653,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ? $"Selected Tile: ({_session.World.TileX},{_session.World.TileY})"
             : "Selected Tile: auto";
         ImGui.TextDisabled(selectedTileText);
-        if (_currentWorldRuntimeFrame != null)
-            ImGui.TextDisabled($"Loaded Tile: ({_currentWorldRuntimeFrame.SelectedTileX},{_currentWorldRuntimeFrame.SelectedTileY})");
+        if (_worldSceneHost.SceneSnapshot.HasSelectedTile)
+            ImGui.TextDisabled($"Loaded Tile: ({_worldSceneHost.SceneSnapshot.SelectedTileX},{_worldSceneHost.SceneSnapshot.SelectedTileY})");
     }
 
     private void DrawWorldNavigatorWindow()
