@@ -1,5 +1,19 @@
 # Active Context
 
+## Apr 26, 2026 - wow-viewer world scene host now owns bootstrap-only world session state before the runtime frame lands
+
+- landed a small world-session ownership follow-up in the viewer shell without deepening the temporary runtime architecture
+- active behavior after this slice:
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneHost.cs` now accepts a session-only bootstrap state through `ApplyBootstrapSession(...)`, so the host can hold copied world map/session metadata even when no `WowViewerWorldRuntimeFrameResult` has completed yet
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneSnapshot.cs` now carries `TilesWithData` / `TotalTiles` plus a `HasSession` check and can be built from either a bootstrap session or a full runtime frame
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldDiagnosticsSnapshot.cs` now has a session-only construction path, so host-owned diagnostics/session metadata no longer require a completed runtime frame to exist
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now seeds the host from the existing async spawn-picker bootstrap session when `LoadWorldSession()` queues the full runtime build, and the world preview fallback now reads tile-count and occupied-tile summary text from the host-owned scene snapshot instead of `WdtSummary` directly off the raw bootstrap result
+- current boundary:
+	- this is still not a two-stage world loader; the full runtime frame still comes from `WowViewerWorldRuntimeBridge.Build(...)`
+	- when no spawn-picker bootstrap state exists yet, the shell still has no pre-runtime world snapshot to show
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed
+
 ## Apr 25, 2026 - wow-viewer now has an app-owned GPU world scene host seam
 
 - landed the first world-scene ownership extraction after the hard reset without deepening the synthetic frame architecture itself

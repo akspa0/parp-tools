@@ -9,6 +9,8 @@ internal sealed class WowViewerWorldSceneSnapshot
         requestedMapInput: string.Empty,
         resolvedMapDirectory: string.Empty,
         loadDuration: TimeSpan.Zero,
+        tilesWithData: 0,
+        totalTiles: 0,
         occupiedTiles: Array.Empty<WdtTileCoordinate>(),
         hasSelectedTile: false,
         selectedTileX: -1,
@@ -23,6 +25,8 @@ internal sealed class WowViewerWorldSceneSnapshot
         string requestedMapInput,
         string resolvedMapDirectory,
         TimeSpan loadDuration,
+        int tilesWithData,
+        int totalTiles,
         IReadOnlyList<WdtTileCoordinate> occupiedTiles,
         bool hasSelectedTile,
         int selectedTileX,
@@ -36,6 +40,8 @@ internal sealed class WowViewerWorldSceneSnapshot
         RequestedMapInput = requestedMapInput;
         ResolvedMapDirectory = resolvedMapDirectory;
         LoadDuration = loadDuration;
+        TilesWithData = tilesWithData;
+        TotalTiles = totalTiles;
         OccupiedTiles = occupiedTiles;
         HasSelectedTile = hasSelectedTile;
         SelectedTileX = selectedTileX;
@@ -54,6 +60,10 @@ internal sealed class WowViewerWorldSceneSnapshot
 
     public TimeSpan LoadDuration { get; }
 
+    public int TilesWithData { get; }
+
+    public int TotalTiles { get; }
+
     public IReadOnlyList<WdtTileCoordinate> OccupiedTiles { get; }
 
     public bool HasSelectedTile { get; }
@@ -70,6 +80,28 @@ internal sealed class WowViewerWorldSceneSnapshot
 
     public int TerrainVisualHeight { get; }
 
+    public bool HasSession => !string.IsNullOrWhiteSpace(ClientRoot) || !string.IsNullOrWhiteSpace(ResolvedMapDirectory);
+
+    public static WowViewerWorldSceneSnapshot FromSession(WowViewerWorldSessionBootstrapResult session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        return new WowViewerWorldSceneSnapshot(
+            session.ClientRoot,
+            session.RequestedMapInput,
+            session.ResolvedMapDirectory,
+            session.LoadDuration,
+            session.WdtSummary.TilesWithData,
+            session.WdtSummary.TotalTiles,
+            session.OccupiedTiles.ToArray(),
+            hasSelectedTile: false,
+            selectedTileX: -1,
+            selectedTileY: -1,
+            activeTerrainTileCount: 0,
+            placementSourcePath: string.Empty,
+            terrainVisualWidth: 0,
+            terrainVisualHeight: 0);
+    }
+
     public static WowViewerWorldSceneSnapshot FromRuntimeFrame(WowViewerWorldRuntimeFrameResult runtimeFrame)
     {
         ArgumentNullException.ThrowIfNull(runtimeFrame);
@@ -79,6 +111,8 @@ internal sealed class WowViewerWorldSceneSnapshot
             session.RequestedMapInput,
             session.ResolvedMapDirectory,
             session.LoadDuration,
+            session.WdtSummary.TilesWithData,
+            session.WdtSummary.TotalTiles,
             session.OccupiedTiles.ToArray(),
             hasSelectedTile: true,
             runtimeFrame.SelectedTileX,

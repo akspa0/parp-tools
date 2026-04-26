@@ -114,6 +114,26 @@ internal sealed class WowViewerWorldDiagnosticsSnapshot
 
     public bool HasSession => !string.IsNullOrWhiteSpace(ClientRoot) || !string.IsNullOrWhiteSpace(ResolvedMapDirectory);
 
+    public static WowViewerWorldDiagnosticsSnapshot FromSession(WowViewerWorldSessionBootstrapResult session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        return new WowViewerWorldDiagnosticsSnapshot
+        {
+            ClientRoot = session.ClientRoot,
+            RequestedMapInput = session.RequestedMapInput,
+            ResolvedMapDirectory = session.ResolvedMapDirectory,
+            LoadDuration = session.LoadDuration,
+            LoadedFromArchive = session.LoadedFromArchive,
+            WdtKindText = session.FileSummary.Kind.ToString(),
+            WdtVersionText = session.FileSummary.Version?.ToString() ?? "n/a",
+            WdtChunkCount = session.FileSummary.ChunkCount,
+            WdtSummary = session.WdtSummary,
+            OccupiedTiles = session.OccupiedTiles.ToArray(),
+            HasRuntime = false,
+        };
+    }
+
     public static WowViewerWorldDiagnosticsSnapshot FromRuntimeFrame(WowViewerWorldRuntimeFrameResult runtimeFrame)
     {
         ArgumentNullException.ThrowIfNull(runtimeFrame);

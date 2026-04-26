@@ -2943,19 +2943,17 @@ internal sealed class WowViewerDesktopApp : IDisposable
             ImGui.TextDisabled($"Opening {_pendingWorldLoadMapInput}{elapsed}...");
         }
 
-        WowViewerWorldSessionBootstrapResult? worldSession = _currentWorldSession;
-        if (worldSession == null)
+        WowViewerWorldSceneSnapshot sceneSnapshot = _worldSceneHost.SceneSnapshot;
+        if (!sceneSnapshot.HasSession)
         {
             ImGui.TextDisabled("No world session opened yet.");
             return;
         }
 
-        WowViewerWorldSceneSnapshot sceneSnapshot = _worldSceneHost.SceneSnapshot;
-
         if (_currentWorldRuntimeFrame == null)
         {
             ImGui.TextUnformatted(sceneSnapshot.ResolvedMapDirectory);
-            ImGui.TextDisabled($"Tiles with data: {worldSession.WdtSummary.TilesWithData}/{worldSession.WdtSummary.TotalTiles}");
+            ImGui.TextDisabled($"Tiles with data: {sceneSnapshot.TilesWithData}/{sceneSnapshot.TotalTiles}");
             ImGui.TextDisabled($"Occupied sample: {FormatTileSample(sceneSnapshot.OccupiedTiles, 12)}");
             return;
         }
@@ -4166,12 +4164,24 @@ internal sealed class WowViewerDesktopApp : IDisposable
         WowViewerWorldRuntimeFrameRequest request = _session.World.BuildRuntimeFrameRequest();
         ViewerIoSourceKey sourceKey = ViewerIoSourceKey.Create(request.ClientRoot, request.BuildLabel, request.LooseOverlayRoot);
         ViewerIoCatalogLease catalogLease = _viewerIoService.GetCatalog(sourceKey);
+        SeedWorldBootstrapSessionFromSpawnPicker();
         int generation = unchecked(++_pendingWorldLoadGeneration);
         _pendingWorldLoadMapInput = request.MapInput;
         _pendingWorldLoadStopwatch = Stopwatch.StartNew();
         _pendingWorldLoadTask = Task.Run(() => new PendingWorldLoadResult(generation, WowViewerWorldRuntimeBridge.Build(request, catalogLease.ArchiveCatalog)));
         _statusMessage = $"Opening world session for {request.MapInput}... Shared world data is being assembled on the CPU; the GPU tile view will populate when the runtime frame finishes.";
         _lastLoadSummary = "World session load queued on a background worker.";
+    }
+
+    private void SeedWorldBootstrapSessionFromSpawnPicker()
+    {
+        if (_worldSpawnPickerState?.Session is not { } session)
+            return;
+
+        if (!string.Equals(_worldSpawnPickerState.Signature, BuildWorldSpawnPickerSignature(), StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _worldSceneHost.ApplyBootstrapSession(session);
     }
 
     private void LoadModelOutputScene()

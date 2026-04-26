@@ -142,6 +142,26 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
         return _renderer;
     }
 
+    public void ApplyBootstrapSession(WowViewerWorldSessionBootstrapResult session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        CurrentSession = session;
+        CurrentFrame = null;
+        _viewerIoService = null;
+        _sourceKey = default;
+        _assetInventory.Reset();
+        AssetState = WowViewerWorldAssetState.Empty;
+        SceneSnapshot = WowViewerWorldSceneSnapshot.FromSession(session);
+        DiagnosticsSnapshot = WowViewerWorldDiagnosticsSnapshot.FromSession(session);
+        NavigatorState = WowViewerWorldNavigatorState.Empty;
+        SpatialSnapshot = WowViewerWorldSpatialSnapshot.Empty;
+        TerrainPreviewSnapshot = null;
+        _scenePlan = WowViewerWorldScenePlan.Identity;
+        _renderer?.ClearPreview();
+        ResetCameraToIdentity();
+    }
+
     public void ApplyRuntimeFrame(
         GL? gl,
         IViewerIoService viewerIoService,

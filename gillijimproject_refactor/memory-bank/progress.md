@@ -1,5 +1,19 @@
 # Progress
 
+### Apr 26, 2026 - seeded the wow-viewer world scene host with bootstrap-only session state
+
+- what changed:
+	- added a session-only host update path in `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneHost.cs` so the host can own bootstrap map/session metadata before a full runtime frame exists
+	- extended `WowViewerWorldSceneSnapshot` with bootstrap-safe tile-count fields plus a `FromSession(...)` constructor path
+	- extended `WowViewerWorldDiagnosticsSnapshot` with a `FromSession(...)` path for host-owned pre-runtime session metadata
+	- changed `WowViewerDesktopApp.LoadWorldSession()` to seed the host from the already-loaded world spawn-picker session when the current picker signature matches the active world request, then changed the world preview fallback to use host-owned scene data instead of direct `WdtSummary` reads from the raw bootstrap result
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded
+
+- boundary:
+	- this closes a small host-ownership gap in the world-session shell only; it does not replace the current runtime bridge or prove new live GUI behavior by itself
+
 ### Apr 25, 2026 - added a GPU-backed world scene host seam in wow-viewer
 
 - what changed:
