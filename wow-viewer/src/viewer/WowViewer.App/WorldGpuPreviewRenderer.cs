@@ -45,10 +45,8 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private uint _depthRenderbuffer;
     private int _frameWidth;
     private int _frameHeight;
-    private uint _terrainVao;
-    private uint _terrainVbo;
-    private uint _terrainEbo;
-    private uint _terrainIndexCount;
+    private int _terrainDiffuseLayerCountLocation;
+    private readonly List<TerrainTileMesh> _terrainTiles = [];
     private uint _overlayVao;
     private uint _overlayVbo;
     private uint _overlayVertexCount;
@@ -81,9 +79,9 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
     public uint PreviewTextureHandle => _colorTexture;
 
-    public bool HasRenderableGeometry => _showSky || _terrainIndexCount > 0 || _overlayVertexCount > 0 || _markerVertexCount > 0;
+    public bool HasRenderableGeometry => _showSky || _terrainTiles.Count > 0 || _overlayVertexCount > 0 || _markerVertexCount > 0;
 
-    public int TerrainTriangleCount => checked((int)(_terrainIndexCount / 3));
+    public int TerrainTriangleCount => _terrainTiles.Sum(static tile => checked((int)(tile.IndexCount / 3)));
 
     public int MarkerCount => checked((int)_markerVertexCount);
 
@@ -206,7 +204,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _gl.Enable(EnableCap.DepthTest);
         }
 
-        if (_terrainIndexCount > 0)
+        if (_terrainTiles.Count > 0)
         {
             _gl.UseProgram(_terrainProgram);
             _gl.UniformMatrix4(_terrainViewLocation, 1, false, (float*)&view.M11);
@@ -214,8 +212,21 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _gl.Uniform3(_terrainLightDirectionLocation, -0.45f, -0.55f, 0.70f);
             _gl.Uniform3(_terrainLightColorLocation, 0.80f, 0.82f, 0.78f);
             _gl.Uniform3(_terrainAmbientColorLocation, 0.28f, 0.30f, 0.34f);
-            _gl.BindVertexArray(_terrainVao);
-            _gl.DrawElements(PrimitiveType.Triangles, _terrainIndexCount, DrawElementsType.UnsignedInt, null);
+            foreach (TerrainTileMesh tileMesh in _terrainTiles)
+            {
+                _gl.ActiveTexture(TextureUnit.Texture0);
+                _gl.BindTexture(TextureTarget.Texture2DArray, tileMesh.DiffuseArrayTexture);
+                _gl.ActiveTexture(TextureUnit.Texture1);
+                _gl.BindTexture(TextureTarget.Texture2DArray, tileMesh.AlphaShadowArrayTexture);
+                _gl.Uniform1(_terrainDiffuseLayerCountLocation, tileMesh.DiffuseLayerCount);
+                _gl.BindVertexArray(tileMesh.Vao);
+                _gl.DrawElements(PrimitiveType.Triangles, tileMesh.IndexCount, DrawElementsType.UnsignedInt, null);
+            }
+
+            _gl.ActiveTexture(TextureUnit.Texture1);
+            _gl.BindTexture(TextureTarget.Texture2DArray, 0);
+            _gl.ActiveTexture(TextureUnit.Texture0);
+            _gl.BindTexture(TextureTarget.Texture2DArray, 0);
         }
 
         if (_overlayVertexCount > 0)
@@ -262,77 +273,128 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             .Max();
         float heightRange = MathF.Max(maxHeight - minHeight, 1.0f);
 
-        List<float> vertexData = [];
-        List<uint> indexData = [];
-
         foreach (WowViewerWorldRuntimeTileFrame tile in activeTiles)
         {
-            foreach (var chunk in tile.TerrainTileData.Chunks)
+            TerrainTileMesh? terrainTile = BuildTerrainTileMesh(tile, minHeight, heightRange, ignoreTerrainHoles);
+            if (terrainTile is not null)
+                _terrainTiles.Add(terrainTile);
+        }
+    }
+
+    private unsafe TerrainTileMesh? BuildTerrainTileMesh(WowViewerWorldRuntimeTileFrame tile, float minHeight, float heightRange, bool ignoreTerrainHoles)
+    {
+        List<string> tileTextureNames = CollectTileTextureNames(tile.TerrainTileData);
+        Dictionary<string, int> textureIndices = BuildTextureIndexMap(tileTextureNames);
+        const int chunkAlphaSliceCount = 256;
+        byte[] alphaShadow = new byte[ChunkAlphaSize * ChunkAlphaSize * 4 * chunkAlphaSliceCount];
+        List<float> vertexData = [];
+        List<byte> chunkSliceData = [];
+        List<ushort> texIndexData = [];
+        List<uint> indexData = [];
+
+        foreach (var chunk in tile.TerrainTileData.Chunks)
+        {
+            if (!chunk.HasHeights || chunk.Heights is null)
+                continue;
+
+            Vector3[] positions = BuildChunkPositions(tile.TileX, tile.TileY, chunk);
+            int[] chunkIndices = BuildChunkIndices(chunk.HoleMask, ignoreTerrainHoles);
+            if (chunkIndices.Length == 0)
+                continue;
+
+            Vector3[] normals = BuildChunkNormals(chunkIndices, positions);
+            int baseVertex = vertexData.Count / 11;
+            byte chunkSlice = GetChunkSlice(chunk);
+            ushort[] chunkTextureIndices = BuildChunkTextureIndices(chunk, textureIndices);
+
+            for (int index = 0; index < positions.Length; index++)
             {
-                if (!chunk.HasHeights || chunk.Heights is null)
-                    continue;
+                Vector3 position = positions[index];
+                Vector3 normal = normals[index];
+                float normalizedHeight = (position.Z - minHeight) / heightRange;
+                float slopeFactor = Math.Clamp(1.0f - normal.Z, 0.0f, 1.0f);
+                Vector3 fallbackColor = ComputeTerrainColor(normalizedHeight, slopeFactor);
+                Vector2 alphaUv = GetChunkAlphaUv(index);
 
-                Vector3[] positions = BuildChunkPositions(tile.TileX, tile.TileY, chunk);
-                int[] chunkIndices = BuildChunkIndices(chunk.HoleMask, ignoreTerrainHoles);
-                Vector3[] normals = BuildChunkNormals(chunkIndices, positions);
-                int baseVertex = vertexData.Count / 9;
-                for (int index = 0; index < positions.Length; index++)
-                {
-                    Vector3 position = positions[index];
-                    Vector3 normal = normals[index];
-                    float normalizedHeight = (position.Z - minHeight) / heightRange;
-                    float slopeFactor = Math.Clamp(1.0f - normal.Z, 0.0f, 1.0f);
-                    Vector3 color = ComputeTerrainVertexColor(chunk, index, position, normalizedHeight, slopeFactor);
+                vertexData.Add(position.X);
+                vertexData.Add(position.Y);
+                vertexData.Add(position.Z);
+                vertexData.Add(normal.X);
+                vertexData.Add(normal.Y);
+                vertexData.Add(normal.Z);
+                vertexData.Add(alphaUv.X);
+                vertexData.Add(alphaUv.Y);
+                vertexData.Add(fallbackColor.X);
+                vertexData.Add(fallbackColor.Y);
+                vertexData.Add(fallbackColor.Z);
 
-                    vertexData.Add(position.X);
-                    vertexData.Add(position.Y);
-                    vertexData.Add(position.Z);
-                    vertexData.Add(normal.X);
-                    vertexData.Add(normal.Y);
-                    vertexData.Add(normal.Z);
-                    vertexData.Add(color.X);
-                    vertexData.Add(color.Y);
-                    vertexData.Add(color.Z);
-
-                    ExpandBounds(position);
-                }
-
-                foreach (int localIndex in chunkIndices)
-                    indexData.Add((uint)(baseVertex + localIndex));
+                chunkSliceData.Add(chunkSlice);
+                texIndexData.Add(chunkTextureIndices[0]);
+                texIndexData.Add(chunkTextureIndices[1]);
+                texIndexData.Add(chunkTextureIndices[2]);
+                texIndexData.Add(chunkTextureIndices[3]);
+                ExpandBounds(position);
             }
+
+            foreach (int localIndex in chunkIndices)
+                indexData.Add((uint)(baseVertex + localIndex));
+
+            FillAlphaShadowSlice(alphaShadow, chunkSlice, chunk);
         }
 
         if (indexData.Count == 0)
-            return;
+            return null;
 
-        _terrainIndexCount = (uint)indexData.Count;
-        _terrainVao = _gl.GenVertexArray();
-        _terrainVbo = _gl.GenBuffer();
-        _terrainEbo = _gl.GenBuffer();
+        TerrainTileMesh terrainTile = new(tile.TileX, tile.TileY);
+        terrainTile.Vao = _gl.GenVertexArray();
+        terrainTile.VboVertices = _gl.GenBuffer();
+        terrainTile.VboChunkSlice = _gl.GenBuffer();
+        terrainTile.VboTexIndices = _gl.GenBuffer();
+        terrainTile.Ebo = _gl.GenBuffer();
+        terrainTile.IndexCount = (uint)indexData.Count;
+        terrainTile.ChunkCount = tile.TerrainTileData.ChunkCount;
 
-        _gl.BindVertexArray(_terrainVao);
-        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _terrainVbo);
+        _gl.BindVertexArray(terrainTile.Vao);
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, terrainTile.VboVertices);
         float[] vertexArray = vertexData.ToArray();
         fixed (float* vertexPtr = vertexArray)
-        {
             _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertexArray.Length * sizeof(float)), vertexPtr, BufferUsageARB.StaticDraw);
-        }
 
-        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _terrainEbo);
+        const uint vertexStride = 11u * sizeof(float);
+        _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, vertexStride, (void*)0);
+        _gl.EnableVertexAttribArray(0);
+        _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, vertexStride, (void*)(3 * sizeof(float)));
+        _gl.EnableVertexAttribArray(1);
+        _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, vertexStride, (void*)(6 * sizeof(float)));
+        _gl.EnableVertexAttribArray(2);
+        _gl.VertexAttribPointer(5, 3, VertexAttribPointerType.Float, false, vertexStride, (void*)(8 * sizeof(float)));
+        _gl.EnableVertexAttribArray(5);
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, terrainTile.VboChunkSlice);
+        byte[] chunkSliceArray = chunkSliceData.ToArray();
+        fixed (byte* chunkSlicePtr = chunkSliceArray)
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)chunkSliceArray.Length, chunkSlicePtr, BufferUsageARB.StaticDraw);
+        _gl.EnableVertexAttribArray(3);
+        _gl.VertexAttribIPointer(3, 1, VertexAttribIType.UnsignedByte, 1, (void*)0);
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, terrainTile.VboTexIndices);
+        ushort[] texIndexArray = texIndexData.ToArray();
+        fixed (ushort* texIndexPtr = texIndexArray)
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(texIndexArray.Length * sizeof(ushort)), texIndexPtr, BufferUsageARB.StaticDraw);
+        _gl.EnableVertexAttribArray(4);
+        _gl.VertexAttribIPointer(4, 4, VertexAttribIType.UnsignedShort, (uint)(4 * sizeof(ushort)), (void*)0);
+
+        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, terrainTile.Ebo);
         uint[] indexArray = indexData.ToArray();
         fixed (uint* indexPtr = indexArray)
-        {
             _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indexArray.Length * sizeof(uint)), indexPtr, BufferUsageARB.StaticDraw);
-        }
 
-        const uint stride = 9u * sizeof(float);
-        _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, (void*)0);
-        _gl.EnableVertexAttribArray(0);
-        _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, stride, (void*)(3 * sizeof(float)));
-        _gl.EnableVertexAttribArray(1);
-        _gl.VertexAttribPointer(2, 3, VertexAttribPointerType.Float, false, stride, (void*)(6 * sizeof(float)));
-        _gl.EnableVertexAttribArray(2);
         _gl.BindVertexArray(0);
+
+        CreateDiffuseArrayTexture(terrainTile, tileTextureNames);
+        CreateAlphaShadowArrayTexture(terrainTile, alphaShadow);
+        return terrainTile;
     }
 
     private unsafe void BuildHoleOverlayBuffers(WowViewerWorldRuntimeFrameResult frame)
@@ -661,84 +723,10 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         return Vector3.Lerp(baseColor, high, slopeFactor * 0.35f);
     }
 
-    private Vector3 ComputeTerrainVertexColor(WowViewer.Core.Runtime.World.Terrain.WorldTerrainChunkData chunk, int vertexIndex, Vector3 position, float normalizedHeight, float slopeFactor)
-    {
-        Vector3 fallback = ComputeTerrainColor(normalizedHeight, slopeFactor);
-        if (!chunk.HasTextureLayers)
-            return fallback;
-
-        Vector2 worldUv = new(position.X * TerrainTextureWorldScale, position.Y * TerrainTextureWorldScale);
-        Vector2 alphaUv = GetChunkAlphaUv(vertexIndex);
-        Vector3 blended = Vector3.Zero;
-        int remaining = 255;
-        bool sampledAnyTexture = false;
-
-        for (int layerIndex = chunk.TextureLayers.Count - 1; layerIndex >= 1; layerIndex--)
-        {
-            var layer = chunk.TextureLayers[layerIndex];
-            int alpha = SampleAlpha(layer.DecodedAlpha?.AlphaMap, alphaUv);
-            if (alpha <= 0)
-                continue;
-
-            int contribution = ((alpha * remaining) + 127) / 255;
-            if (contribution > 0 && TrySampleTerrainTextureColor(layer.TexturePath, worldUv, out Vector3 layerColor))
-            {
-                blended += layerColor * (contribution / 255.0f);
-                sampledAnyTexture = true;
-            }
-
-            remaining = ((remaining * (255 - alpha)) + 127) / 255;
-            if (remaining <= 0)
-                break;
-        }
-
-        var baseLayer = chunk.TextureLayers[0];
-        if (remaining > 0 && TrySampleTerrainTextureColor(baseLayer.TexturePath, worldUv, out Vector3 baseColor))
-        {
-            blended += baseColor * (remaining / 255.0f);
-            sampledAnyTexture = true;
-        }
-
-        return sampledAnyTexture ? blended : fallback;
-    }
-
-    private bool TrySampleTerrainTextureColor(string? texturePath, Vector2 worldUv, out Vector3 color)
-    {
-        color = default;
-        if (string.IsNullOrWhiteSpace(texturePath))
-            return false;
-
-        string normalizedPath = EnsureBlpExtension(texturePath)
-            .Replace('/', '\\')
-            .TrimStart('\\');
-
-        if (!_terrainTextureCache.TryGetValue(normalizedPath, out TerrainTextureSample? sample))
-        {
-            sample = LoadTerrainTexture(normalizedPath);
-            _terrainTextureCache[normalizedPath] = sample;
-        }
-
-        if (sample is null || sample.Width <= 0 || sample.Height <= 0)
-            return false;
-
-        float u = Fract(worldUv.X);
-        float v = Fract(worldUv.Y);
-        int sampleX = Math.Clamp((int)(u * sample.Width), 0, sample.Width - 1);
-        int sampleY = Math.Clamp((int)(v * sample.Height), 0, sample.Height - 1);
-        int pixelOffset = ((sampleY * sample.Width) + sampleX) * 4;
-        if (pixelOffset + 2 >= sample.RgbaPixels.Length)
-            return false;
-
-        color = new Vector3(
-            sample.RgbaPixels[pixelOffset + 0] / 255.0f,
-            sample.RgbaPixels[pixelOffset + 1] / 255.0f,
-            sample.RgbaPixels[pixelOffset + 2] / 255.0f);
-        return true;
-    }
-
     private TerrainTextureSample? LoadTerrainTexture(string texturePath)
     {
-        if (!_viewerIoService.TryReadVirtualFile(_sourceKey, texturePath, out byte[]? data, out _)
+        string normalizedPath = NormalizeTerrainTexturePath(texturePath);
+        if (!_viewerIoService.TryReadVirtualFile(_sourceKey, normalizedPath, out byte[]? data, out _)
             || data is not { Length: > 0 })
             return null;
 
@@ -762,6 +750,13 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             : $"{texturePath}.blp";
     }
 
+    private static string NormalizeTerrainTexturePath(string texturePath)
+    {
+        return EnsureBlpExtension(texturePath)
+            .Replace('/', '\\')
+            .TrimStart('\\');
+    }
+
     private static Vector2 GetChunkAlphaUv(int vertexIndex)
     {
         GetChunkVertexLayout(vertexIndex, out int row, out int col, out bool isInner);
@@ -778,6 +773,198 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         int sampleX = Math.Clamp((int)(Math.Clamp(uv.X, 0.0f, 1.0f) * (ChunkAlphaSize - 1)), 0, ChunkAlphaSize - 1);
         int sampleY = Math.Clamp((int)(Math.Clamp(uv.Y, 0.0f, 1.0f) * (ChunkAlphaSize - 1)), 0, ChunkAlphaSize - 1);
         return alphaMap[(sampleY * ChunkAlphaSize) + sampleX];
+    }
+
+    private static List<string> CollectTileTextureNames(WowViewer.Core.Runtime.World.Terrain.WorldTerrainTileData terrainTileData)
+    {
+        List<string> textureNames = [];
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var chunk in terrainTileData.Chunks)
+        {
+            if (!chunk.HasTextureLayers)
+                continue;
+
+            int layerLimit = Math.Min(chunk.TextureLayers.Count, 4);
+            for (int layerIndex = 0; layerIndex < layerLimit; layerIndex++)
+            {
+                string? texturePath = chunk.TextureLayers[layerIndex].TexturePath;
+                if (string.IsNullOrWhiteSpace(texturePath))
+                    continue;
+
+                string normalizedPath = NormalizeTerrainTexturePath(texturePath);
+                if (seen.Add(normalizedPath))
+                    textureNames.Add(normalizedPath);
+            }
+        }
+
+        return textureNames;
+    }
+
+    private static Dictionary<string, int> BuildTextureIndexMap(IReadOnlyList<string> textureNames)
+    {
+        Dictionary<string, int> textureIndices = new(StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < textureNames.Count; index++)
+            textureIndices[textureNames[index]] = index;
+
+        return textureIndices;
+    }
+
+    private static ushort[] BuildChunkTextureIndices(WowViewer.Core.Runtime.World.Terrain.WorldTerrainChunkData chunk, IReadOnlyDictionary<string, int> textureIndices)
+    {
+        ushort[] indices = [0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF];
+        int layerLimit = Math.Min(chunk.TextureLayers.Count, 4);
+        for (int layerIndex = 0; layerIndex < layerLimit; layerIndex++)
+        {
+            string? texturePath = chunk.TextureLayers[layerIndex].TexturePath;
+            if (string.IsNullOrWhiteSpace(texturePath))
+                continue;
+
+            string normalizedPath = NormalizeTerrainTexturePath(texturePath);
+            if (textureIndices.TryGetValue(normalizedPath, out int textureIndex))
+                indices[layerIndex] = (ushort)Math.Clamp(textureIndex, 0, ushort.MaxValue - 1);
+        }
+
+        return indices;
+    }
+
+    private static byte GetChunkSlice(WowViewer.Core.Runtime.World.Terrain.WorldTerrainChunkData chunk)
+    {
+        int slice = (chunk.IndexY * 16) + chunk.IndexX;
+        if ((uint)slice >= 256u)
+            slice = chunk.ChunkIndex & 0xFF;
+
+        return (byte)slice;
+    }
+
+    private static void FillAlphaShadowSlice(byte[] alphaShadow, byte slice, WowViewer.Core.Runtime.World.Terrain.WorldTerrainChunkData chunk)
+    {
+        int sliceBase = slice * ChunkAlphaSize * ChunkAlphaSize * 4;
+        for (int layerIndex = 1; layerIndex <= 3; layerIndex++)
+        {
+            byte[]? alphaMap = layerIndex < chunk.TextureLayers.Count
+                ? chunk.TextureLayers[layerIndex].DecodedAlpha?.AlphaMap
+                : null;
+            if (alphaMap is not { Length: ChunkAlphaSize * ChunkAlphaSize })
+                continue;
+
+            int channel = layerIndex - 1;
+            for (int sampleIndex = 0; sampleIndex < alphaMap.Length; sampleIndex++)
+                alphaShadow[sliceBase + (sampleIndex * 4) + channel] = alphaMap[sampleIndex];
+        }
+    }
+
+    private unsafe void CreateAlphaShadowArrayTexture(TerrainTileMesh tileMesh, byte[] alphaShadow)
+    {
+        tileMesh.AlphaShadowArrayTexture = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2DArray, tileMesh.AlphaShadowArrayTexture);
+        fixed (byte* alphaShadowPtr = alphaShadow)
+        {
+            _gl.TexImage3D(TextureTarget.Texture2DArray, 0, InternalFormat.Rgba8, ChunkAlphaSize, ChunkAlphaSize, 256, 0, PixelFormat.Rgba, PixelType.UnsignedByte, alphaShadowPtr);
+        }
+
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        _gl.BindTexture(TextureTarget.Texture2DArray, 0);
+    }
+
+    private unsafe void CreateDiffuseArrayTexture(TerrainTileMesh tileMesh, IReadOnlyList<string> textureNames)
+    {
+        int maxLayers = 256;
+        try
+        {
+            maxLayers = _gl.GetInteger(GetPName.MaxArrayTextureLayers);
+        }
+        catch
+        {
+        }
+
+        int layerCount = Math.Max(1, Math.Min(textureNames.Count, maxLayers));
+        int maxDimension = 0;
+        for (int index = 0; index < Math.Min(textureNames.Count, layerCount); index++)
+        {
+            TerrainTextureSample? sample = LoadTerrainTexture(textureNames[index]);
+            if (sample is null)
+                continue;
+
+            maxDimension = Math.Max(maxDimension, Math.Max(sample.Width, sample.Height));
+        }
+
+        int targetDimension = maxDimension switch
+        {
+            <= 0 => 256,
+            <= 64 => 64,
+            <= 128 => 128,
+            _ => 256,
+        };
+
+        tileMesh.DiffuseArrayTexture = _gl.GenTexture();
+        tileMesh.DiffuseLayerCount = layerCount;
+        _gl.BindTexture(TextureTarget.Texture2DArray, tileMesh.DiffuseArrayTexture);
+        _gl.TexImage3D(TextureTarget.Texture2DArray, 0, InternalFormat.Rgba8, (uint)targetDimension, (uint)targetDimension, (uint)layerCount, 0, PixelFormat.Rgba, PixelType.UnsignedByte, null);
+
+        for (int layer = 0; layer < layerCount; layer++)
+        {
+            byte[] pixels;
+            if (layer < textureNames.Count && LoadTerrainTexture(textureNames[layer]) is TerrainTextureSample sample)
+            {
+                pixels = sample.Width == targetDimension && sample.Height == targetDimension
+                    ? sample.RgbaPixels
+                    : ResampleRgbaNearest(sample.RgbaPixels, sample.Width, sample.Height, targetDimension, targetDimension);
+            }
+            else
+            {
+                pixels = CreateSolidRgba(targetDimension, targetDimension, 255, 255, 255, 255);
+            }
+
+            fixed (byte* pixelPtr = pixels)
+            {
+                _gl.TexSubImage3D(TextureTarget.Texture2DArray, 0, 0, 0, layer, (uint)targetDimension, (uint)targetDimension, 1, PixelFormat.Rgba, PixelType.UnsignedByte, pixelPtr);
+            }
+        }
+
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+        _gl.GenerateMipmap(TextureTarget.Texture2DArray);
+        _gl.BindTexture(TextureTarget.Texture2DArray, 0);
+    }
+
+    private static byte[] CreateSolidRgba(int width, int height, byte red, byte green, byte blue, byte alpha)
+    {
+        byte[] data = new byte[width * height * 4];
+        for (int index = 0; index < data.Length; index += 4)
+        {
+            data[index + 0] = red;
+            data[index + 1] = green;
+            data[index + 2] = blue;
+            data[index + 3] = alpha;
+        }
+
+        return data;
+    }
+
+    private static byte[] ResampleRgbaNearest(byte[] source, int sourceWidth, int sourceHeight, int destinationWidth, int destinationHeight)
+    {
+        byte[] destination = new byte[destinationWidth * destinationHeight * 4];
+        for (int y = 0; y < destinationHeight; y++)
+        {
+            int sourceY = (int)((long)y * sourceHeight / destinationHeight);
+            for (int x = 0; x < destinationWidth; x++)
+            {
+                int sourceX = (int)((long)x * sourceWidth / destinationWidth);
+                int sourceIndex = (sourceY * sourceWidth + sourceX) * 4;
+                int destinationIndex = (y * destinationWidth + x) * 4;
+                destination[destinationIndex + 0] = source[sourceIndex + 0];
+                destination[destinationIndex + 1] = source[sourceIndex + 1];
+                destination[destinationIndex + 2] = source[sourceIndex + 2];
+                destination[destinationIndex + 3] = source[sourceIndex + 3];
+            }
+        }
+
+        return destination;
     }
 
     private void ExpandBounds(Vector3 position)
@@ -800,6 +987,57 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         public int Height { get; }
 
         public byte[] RgbaPixels { get; }
+    }
+
+    private sealed class TerrainTileMesh
+    {
+        public TerrainTileMesh(int tileX, int tileY)
+        {
+            TileX = tileX;
+            TileY = tileY;
+        }
+
+        public int TileX { get; }
+
+        public int TileY { get; }
+
+        public uint Vao { get; set; }
+
+        public uint VboVertices { get; set; }
+
+        public uint VboChunkSlice { get; set; }
+
+        public uint VboTexIndices { get; set; }
+
+        public uint Ebo { get; set; }
+
+        public uint IndexCount { get; set; }
+
+        public int ChunkCount { get; set; }
+
+        public uint AlphaShadowArrayTexture { get; set; }
+
+        public uint DiffuseArrayTexture { get; set; }
+
+        public int DiffuseLayerCount { get; set; }
+
+        public void Dispose(GL gl)
+        {
+            if (Vao != 0)
+                gl.DeleteVertexArray(Vao);
+            if (VboVertices != 0)
+                gl.DeleteBuffer(VboVertices);
+            if (VboChunkSlice != 0)
+                gl.DeleteBuffer(VboChunkSlice);
+            if (VboTexIndices != 0)
+                gl.DeleteBuffer(VboTexIndices);
+            if (Ebo != 0)
+                gl.DeleteBuffer(Ebo);
+            if (AlphaShadowArrayTexture != 0)
+                gl.DeleteTexture(AlphaShadowArrayTexture);
+            if (DiffuseArrayTexture != 0)
+                gl.DeleteTexture(DiffuseArrayTexture);
+        }
     }
 
     private static void GetChunkVertexLayout(int index, out int row, out int col, out bool isInner)
@@ -873,39 +1111,81 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             #version 330 core
             layout (location = 0) in vec3 aPosition;
             layout (location = 1) in vec3 aNormal;
-            layout (location = 2) in vec3 aColor;
+            layout (location = 2) in vec2 aTexCoord;
+            layout (location = 3) in uint aChunkSlice;
+            layout (location = 4) in uvec4 aTexIndices;
+            layout (location = 5) in vec3 aFallbackColor;
 
             uniform mat4 uView;
             uniform mat4 uProjection;
 
+            out vec3 vWorldPosition;
             out vec3 vNormal;
-            out vec3 vColor;
+            out vec2 vTexCoord;
+            flat out uint vChunkSlice;
+            flat out uvec4 vTexIndices;
+            out vec3 vFallbackColor;
 
             void main()
             {
+                vWorldPosition = aPosition;
                 vNormal = aNormal;
-                vColor = aColor;
+                vTexCoord = aTexCoord;
+                vChunkSlice = aChunkSlice;
+                vTexIndices = aTexIndices;
+                vFallbackColor = aFallbackColor;
                 gl_Position = uProjection * uView * vec4(aPosition, 1.0);
             }
             """;
 
         const string fragmentSource = """
             #version 330 core
+            in vec3 vWorldPosition;
             in vec3 vNormal;
-            in vec3 vColor;
+            in vec2 vTexCoord;
+            flat in uint vChunkSlice;
+            flat in uvec4 vTexIndices;
+            in vec3 vFallbackColor;
 
+            uniform sampler2DArray uDiffuseArray;
+            uniform sampler2DArray uAlphaShadowArray;
+            uniform int uDiffuseLayerCount;
             uniform vec3 uLightDirection;
             uniform vec3 uLightColor;
             uniform vec3 uAmbientColor;
 
             out vec4 FragColor;
 
+            bool HasLayer(uint textureIndex)
+            {
+                return textureIndex != 65535u && int(textureIndex) < uDiffuseLayerCount;
+            }
+
             void main()
             {
                 vec3 normal = normalize(vNormal);
                 float ndotl = max(dot(normal, normalize(uLightDirection)), 0.0);
-                vec3 litColor = vColor * (uAmbientColor + (uLightColor * ndotl));
-                FragColor = vec4(litColor, 1.0);
+                vec3 lighting = uAmbientColor + (uLightColor * ndotl);
+                float texScale = 8.0 / 33.333;
+                vec2 diffuseUv = vec2(-vWorldPosition.y, -vWorldPosition.x) * texScale;
+                vec4 alphaShadow = texture(uAlphaShadowArray, vec3(vTexCoord, float(vChunkSlice)));
+
+                bool has0 = HasLayer(vTexIndices.x);
+                bool has1 = HasLayer(vTexIndices.y);
+                bool has2 = HasLayer(vTexIndices.z);
+                bool has3 = HasLayer(vTexIndices.w);
+
+                vec3 result = vFallbackColor * lighting;
+                if (has0)
+                    result = texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.x))).rgb * lighting;
+                if (has1)
+                    result = mix(result, texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.y))).rgb * lighting, alphaShadow.r);
+                if (has2)
+                    result = mix(result, texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.z))).rgb * lighting, alphaShadow.g);
+                if (has3)
+                    result = mix(result, texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.w))).rgb * lighting, alphaShadow.b);
+
+                FragColor = vec4(result, 1.0);
             }
             """;
 
@@ -915,6 +1195,11 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _terrainLightDirectionLocation = _gl.GetUniformLocation(_terrainProgram, "uLightDirection");
         _terrainLightColorLocation = _gl.GetUniformLocation(_terrainProgram, "uLightColor");
         _terrainAmbientColorLocation = _gl.GetUniformLocation(_terrainProgram, "uAmbientColor");
+        _terrainDiffuseLayerCountLocation = _gl.GetUniformLocation(_terrainProgram, "uDiffuseLayerCount");
+        _gl.UseProgram(_terrainProgram);
+        _gl.Uniform1(_gl.GetUniformLocation(_terrainProgram, "uDiffuseArray"), 0);
+        _gl.Uniform1(_gl.GetUniformLocation(_terrainProgram, "uAlphaShadowArray"), 1);
+        _gl.UseProgram(0);
     }
 
     private void InitializeSkyShader()
@@ -1166,25 +1451,10 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
     private void DeleteTerrainBuffers()
     {
-        if (_terrainEbo != 0)
-        {
-            _gl.DeleteBuffer(_terrainEbo);
-            _terrainEbo = 0;
-        }
+        foreach (TerrainTileMesh tileMesh in _terrainTiles)
+            tileMesh.Dispose(_gl);
 
-        if (_terrainVbo != 0)
-        {
-            _gl.DeleteBuffer(_terrainVbo);
-            _terrainVbo = 0;
-        }
-
-        if (_terrainVao != 0)
-        {
-            _gl.DeleteVertexArray(_terrainVao);
-            _terrainVao = 0;
-        }
-
-        _terrainIndexCount = 0;
+        _terrainTiles.Clear();
     }
 
     private void DeleteOverlayBuffers()

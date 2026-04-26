@@ -8,14 +8,14 @@
 	- `WorldTerrainTileBuilder` now carries `AdtTextureChunkLayer` payloads on `WorldTerrainChunkData.TextureLayers`, including split-family handoff from `_tex0.adt` when the world-runtime bridge can resolve it
 	- Apr 25 follow-up: `WowViewer.Core.IO.Maps.AdtTextureReader` now ports the working legacy split-file discovery rule from `MdxViewer` instead of trusting the generic top-level summary reader for every `_tex0.adt`; Cataclysm split texture files like `development_0_0_tex0.adt` can be unpadded top-level `XETM` + `KNCM` streams with no `MHDR`, and the shared reader now handles that real layout directly
 	- `WowViewerWorldRuntimeBridge.ReadRootTerrainTileData(...)` now attempts `..._tex0.adt` beside the selected root ADT and passes the parsed shared texture file into the world terrain runtime builder
-	- `WorldGpuPreviewRenderer` now samples resolved terrain layer textures through the shared `ViewerIoService` source key and blends them with decoded per-layer alpha maps instead of always using the old height-debug color ramp
+	- Apr 25 renderer port follow-up: `WorldGpuPreviewRenderer` no longer bakes one CPU-sampled terrain color per vertex; it now ports the working `MdxViewer` terrain GPU contract more directly by building one terrain mesh per active ADT tile with per-vertex chunk slice plus layer indices, a per-tile diffuse texture array, and a per-tile `64x64x256` alpha array that the terrain shader blends on the GPU
 	- `WowViewerDesktopApp` now recreates the world GPU renderer when the active client-root or loose-overlay source signature changes so terrain texture reads stay aligned with the current world session source
 - validation:
 	- focused runtime tests passed: `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldTerrainTileBuilderTests`
 	- focused real-data split-reader proof passed: `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter AdtTextureReaderTests.Read_DevelopmentTexAdt_ProducesStableRealDataChunkSignals`
-	- app build passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-world-textures/`
+	- app builds passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-world-textures/` and `.../wowviewer-terrain-gpu-port/`
 - current boundary:
-	- this is build plus focused runtime-test proof only; no live GUI screenshot or runtime signoff has been captured yet for textured terrain on a real world-session map
+	- this is build plus focused runtime-test proof only; no live GUI screenshot or runtime signoff has been captured yet for the new GPU terrain blend path on a real world-session map
 	- terrain now has a real texture-layer path, but liquids still are not visible geometry and WMO or MDX or M2 objects still are not rendered as in-world scene geometry
 
 ## Apr 25, 2026 - WowViewer.App world runtime loads and minimap reads now reuse the shared viewer I/O seam

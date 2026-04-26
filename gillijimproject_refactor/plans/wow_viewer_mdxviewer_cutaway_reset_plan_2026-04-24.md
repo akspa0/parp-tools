@@ -14,6 +14,7 @@
 - Apr 25 FOV correction: all viewer defaults should be `45` degrees, not `60`; remaining `60` values in viewer paths must be non-camera layout constants or explicit historical capture data, not projection defaults
 - Apr 25 hardening correction: WDL is now disabled in `WowViewerWorldRuntimeBridge` itself, not only in the UI/session layer, and the world preview camera now uses position/yaw/pitch state like `MdxViewer` instead of a persistent look-at target
 - Apr 25 multi-tile correction: the World Session runtime now builds a bounded `3x3` active ADT terrain window around the selected tile and the GPU preview renders that ADT quilt; terrain existence, not placement-catalog existence, is the authority for loading a tile
+- Apr 25 terrain renderer correction: the world GPU preview no longer uses the CPU-sampled one-color-per-vertex terrain shortcut as the active texturing path; it now ports the working `MdxViewer` terrain GPU contract more directly with per-tile diffuse arrays, per-tile `64x64x256` alpha arrays, per-vertex layer indices, and shader-side terrain blending. Live GUI proof is still required.
 
 ## Apr 24, 2026 Course Correction - Stop Treating The Preview As The Viewer
 
