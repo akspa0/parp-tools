@@ -1,5 +1,17 @@
 # Active Context
 
+## Apr 26, 2026 - registered the wow-viewer GPU viewer plan-set workflow and routing surfaces
+
+- landed the workflow assets requested for the viewer reset: an in-repo GPU-first plan-set prompt plus ordered implementation prompts under `.github/prompts/wow-viewer-gpu-viewer/`
+- active workflow behavior after this slice:
+	- `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md` is now the route entrypoint for library-first, GPU-first world-viewer migration work
+	- ordered prompts `01` through `09` now define the staged cutover path for fast source bootstrap, rendering-library ownership, terrain/object renderer migration, runtime service split, and thin host cutover
+	- `.github/copilot-instructions.md` now includes the GPU viewer plan-set in both the wow-viewer workflow read-first list and the prompt registry routing rules
+	- `AGENTS.md` now mirrors that same GPU viewer plan-set routing in the Codex workflow read-first and prompt-registry sections
+- current boundary:
+	- this slice is workflow and continuity infrastructure only; it does not by itself prove runtime parity or renderer performance recovery
+	- implementation proof still depends on executing the ordered prompt slices against real wow-viewer code and validation paths
+
 ## Apr 26, 2026 - wow-viewer world scene host now owns bootstrap-only world session state before the runtime frame lands
 
 - landed a small world-session ownership follow-up in the viewer shell without deepening the temporary runtime architecture
@@ -7,12 +19,15 @@
 	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneHost.cs` now accepts a session-only bootstrap state through `ApplyBootstrapSession(...)`, so the host can hold copied world map/session metadata even when no `WowViewerWorldRuntimeFrameResult` has completed yet
 	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneSnapshot.cs` now carries `TilesWithData` / `TotalTiles` plus a `HasSession` check and can be built from either a bootstrap session or a full runtime frame
 	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldDiagnosticsSnapshot.cs` now has a session-only construction path, so host-owned diagnostics/session metadata no longer require a completed runtime frame to exist
-	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now seeds the host from the existing async spawn-picker bootstrap session when `LoadWorldSession()` queues the full runtime build, and the world preview fallback now reads tile-count and occupied-tile summary text from the host-owned scene snapshot instead of `WdtSummary` directly off the raw bootstrap result
+	- `wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs` now seeds the host from the existing async spawn-picker bootstrap session when `LoadWorldSession()` queues the full runtime build, and falls back to `WowViewerWorldSessionBootstrapper.OpenWithTelemetry(...)` over the shared viewer-I/O catalog when no matching spawn-picker session exists, so the no-spawn-picker path now gets the same host-owned pre-runtime world state
+	- the world preview fallback now reads tile-count and occupied-tile summary text from the host-owned scene snapshot instead of `WdtSummary` directly off the raw bootstrap result
+	- `wow-viewer/src/viewer/WowViewer.App/Program.cs` now supports `--capture-during-world-load` for `viewer`, and `WowViewerDesktopApp.TryCompleteStartupCapture()` can now capture the UI while a world runtime load is still pending as long as the host already has bootstrap session state
 - current boundary:
 	- this is still not a two-stage world loader; the full runtime frame still comes from `WowViewerWorldRuntimeBridge.Build(...)`
-	- when no spawn-picker bootstrap state exists yet, the shell still has no pre-runtime world snapshot to show
+	- this still uses the current synchronous bootstrapper to seed shell state before queueing the runtime frame; it does not yet split bootstrap and runtime into separate staged jobs with independent progress surfaces
 - validation:
 	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` passed
+	- real app proof now exists at `output/build-validation/wowviewer-world-bootstrap-capture/kalimdor_26_33_bootstrap_pending_ui.png`, captured with `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -- viewer --workspace world --client-root "H:/053-client" --build-label "0.5.3.3389" --map Kalimdor --tile-x 26 --tile-y 33 --capture-output ".\\output\\build-validation\\wowviewer-world-bootstrap-capture\\kalimdor_26_33_bootstrap_pending_ui.png" --capture-after-frames 1 --capture-with-ui --capture-during-world-load --exit-after-capture`; the image shows `Opening Kalimdor ...`, `Tiles with data: 951/4096`, and the occupied-tile sample before the runtime frame populates
 
 ## Apr 25, 2026 - wow-viewer now has an app-owned GPU world scene host seam
 

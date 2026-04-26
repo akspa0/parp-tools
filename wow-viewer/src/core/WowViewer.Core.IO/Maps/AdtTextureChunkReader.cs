@@ -62,6 +62,7 @@ public static class AdtTextureChunkReader
             parsed.ChunkY ?? chunkIndex / 16,
             parsed.DoNotFixAlphaMap,
             parsed.McalData?.Length ?? 0,
+            parsed.ShadowMap,
             layers);
     }
 
@@ -79,6 +80,7 @@ public static class AdtTextureChunkReader
 
         List<AdtTextureLayerDescriptor> layers = [];
         byte[]? mcalData = null;
+        byte[]? shadowMap = null;
         int position = startOffset;
         while (position <= payload.Length - ChunkHeader.SizeInBytes)
         {
@@ -112,11 +114,38 @@ public static class AdtTextureChunkReader
                 mcalData = new byte[mcalPayloadSize];
                 Buffer.BlockCopy(payload, dataOffset, mcalData, 0, mcalPayloadSize);
             }
+            else if (header.Id == AdtChunkIds.Mcsh)
+            {
+                shadowMap = ReadShadowMap(payload, dataOffset, declaredSize);
+            }
 
             position = checked((int)nextOffset);
         }
 
-        return new ParsedTextureChunkData(layers, mcalData, (flags & 0x8000u) != 0, chunkX, chunkY);
+        return new ParsedTextureChunkData(layers, mcalData, shadowMap, (flags & 0x8000u) != 0, chunkX, chunkY);
+    }
+
+    private static byte[]? ReadShadowMap(byte[] payload, int dataOffset, int declaredSize)
+    {
+        if (declaredSize < 8 || dataOffset < 0 || dataOffset + declaredSize > payload.Length)
+            return null;
+
+        byte[] shadow = new byte[64 * 64];
+        for (int y = 0; y < 64; y++)
+        {
+            for (int x = 0; x < 64; x++)
+            {
+                int sourceByteIndex = dataOffset + (y * 8) + (x / 8);
+                if (sourceByteIndex >= dataOffset + declaredSize)
+                    break;
+
+                int bitIndex = x % 8;
+                bool isShadowed = (payload[sourceByteIndex] & (1 << bitIndex)) != 0;
+                shadow[(y * 64) + x] = isShadowed ? (byte)255 : (byte)0;
+            }
+        }
+
+        return shadow;
     }
 
     private static bool TryReadEmbeddedMcnkHeader(
@@ -181,12 +210,14 @@ public static class AdtTextureChunkReader
         public ParsedTextureChunkData(
             IReadOnlyList<AdtTextureLayerDescriptor> layers,
             byte[]? mcalData,
+            byte[]? shadowMap,
             bool doNotFixAlphaMap,
             int? chunkX,
             int? chunkY)
         {
             Layers = layers;
             McalData = mcalData;
+            ShadowMap = shadowMap;
             DoNotFixAlphaMap = doNotFixAlphaMap;
             ChunkX = chunkX;
             ChunkY = chunkY;
@@ -195,6 +226,8 @@ public static class AdtTextureChunkReader
         public IReadOnlyList<AdtTextureLayerDescriptor> Layers { get; }
 
         public byte[]? McalData { get; }
+
+        public byte[]? ShadowMap { get; }
 
         public bool DoNotFixAlphaMap { get; }
 

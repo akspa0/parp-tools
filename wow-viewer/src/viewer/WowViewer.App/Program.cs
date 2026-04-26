@@ -17,7 +17,8 @@ internal sealed record WowViewerStartupCaptureRequest(
     string OutputPath,
     bool IncludeUi,
     bool ExitAfterCapture,
-    int CaptureAfterFrames)
+    int CaptureAfterFrames,
+    bool CaptureDuringWorldLoad)
 {
     public string ResolvedOutputPath { get; } = Path.GetFullPath(OutputPath);
 }
@@ -585,7 +586,8 @@ internal static class Program
             captureOutput,
             includeUi,
             HasFlag(args, "--exit-after-capture"),
-            captureAfterFrames);
+            captureAfterFrames,
+            HasFlag(args, "--capture-during-world-load"));
     }
 
     private static WowViewerWorldSessionOpenRequest ParseRequiredWorldRequest(string[] args)
@@ -876,7 +878,7 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  wowviewer-app");
-        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world|dataset|model-output] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file|dir> | --client-root <game dir> --map <directory|id|name>] [--loose-overlay-root <dir>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--model-output-variant predicted|wdl] [--model-output-camera-azimuth <deg>] [--model-output-camera-elevation <deg>] [--model-output-camera-zoom <factor>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--capture-output <file.png|file.bmp>] [--capture-after-frames <n>] [--capture-with-ui|--capture-no-ui] [--exit-after-capture]");
+        Console.WriteLine("  wowviewer-app viewer [--workspace m2|wmo|mdx|world|dataset|model-output] [--archive-root <game|data dir> --virtual-path <path/to/file> | --input <file|dir> | --client-root <game dir> --map <directory|id|name>] [--loose-overlay-root <dir>] [--build-label <label>] [--profile-index <n>] [--sequence-index <n>] [--time-ms <ms>] [--visual-size <px>] [--model-output-variant predicted|wdl] [--model-output-camera-azimuth <deg>] [--model-output-camera-elevation <deg>] [--model-output-camera-zoom <factor>] [--hide-wmos] [--hide-doodads] [--hide-sky] [--hide-wdl] [--hide-terrain] [--hide-liquid] [--hide-overlay] [--capture-output <file.png|file.bmp>] [--capture-after-frames <n>] [--capture-with-ui|--capture-no-ui] [--capture-during-world-load] [--exit-after-capture]");
         Console.WriteLine("  wowviewer-app m2-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-frame --input <file.m2> --sequence-index <n> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--golden-output <json>] [--render-frame-output <json>] [--visual-output <bmp>]");
         Console.WriteLine("  wowviewer-app m2-gpu-frame --archive-root <game|data dir> --virtual-path <path/to/file.m2> --sequence-index <n> --output <file.bmp|file.png> [--build-label <label>] [--time-ms <ms>] [--profile-index <n>] [--visual-size <px>]");

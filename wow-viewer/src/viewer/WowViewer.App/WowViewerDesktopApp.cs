@@ -602,7 +602,12 @@ internal sealed class WowViewerDesktopApp : IDisposable
         bool readyToCapture = TryGetActivePreviewCaptureTarget(out uint previewTextureHandle, out int previewWidth, out int previewHeight);
         if (!readyToCapture)
         {
-            bool uiOnlyReady = _startupCaptureRequest.IncludeUi && !_requestInitialLoad && !IsWorldLoadPending();
+            bool worldLoadBootstrapReady = _startupCaptureRequest.CaptureDuringWorldLoad
+                && _startupCaptureRequest.IncludeUi
+                && _session.WorkspaceMode == WowViewerWorkspaceMode.WorldSession
+                && _worldSceneHost.SceneSnapshot.HasSession
+                && _currentWorldRuntimeFrame == null;
+            bool uiOnlyReady = _startupCaptureRequest.IncludeUi && !_requestInitialLoad && (!IsWorldLoadPending() || worldLoadBootstrapReady);
             if (!uiOnlyReady)
             {
                 _startupCaptureReadyFrames = 0;
@@ -4164,7 +4169,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         WowViewerWorldRuntimeFrameRequest request = _session.World.BuildRuntimeFrameRequest();
         ViewerIoSourceKey sourceKey = ViewerIoSourceKey.Create(request.ClientRoot, request.BuildLabel, request.LooseOverlayRoot);
         ViewerIoCatalogLease catalogLease = _viewerIoService.GetCatalog(sourceKey);
-        SeedWorldBootstrapSessionFromSpawnPicker();
+        SeedWorldBootstrapSession(catalogLease, request);
         int generation = unchecked(++_pendingWorldLoadGeneration);
         _pendingWorldLoadMapInput = request.MapInput;
         _pendingWorldLoadStopwatch = Stopwatch.StartNew();
@@ -4173,15 +4178,35 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _lastLoadSummary = "World session load queued on a background worker.";
     }
 
-    private void SeedWorldBootstrapSessionFromSpawnPicker()
+    private void SeedWorldBootstrapSession(ViewerIoCatalogLease catalogLease, WowViewerWorldRuntimeFrameRequest request)
     {
         if (_worldSpawnPickerState?.Session is not { } session)
+        {
+            TrySeedWorldBootstrapSessionFromCatalog(catalogLease, request);
             return;
+        }
 
-        if (!string.Equals(_worldSpawnPickerState.Signature, BuildWorldSpawnPickerSignature(), StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(_worldSpawnPickerState.Signature, BuildWorldSpawnPickerSignature(), StringComparison.OrdinalIgnoreCase))
+        {
+            _worldSceneHost.ApplyBootstrapSession(session);
             return;
+        }
 
-        _worldSceneHost.ApplyBootstrapSession(session);
+        TrySeedWorldBootstrapSessionFromCatalog(catalogLease, request);
+    }
+
+    private void TrySeedWorldBootstrapSessionFromCatalog(ViewerIoCatalogLease catalogLease, WowViewerWorldRuntimeFrameRequest request)
+    {
+        try
+        {
+            WowViewerWorldSessionBootstrapTelemetry telemetry = WowViewerWorldSessionBootstrapper.OpenWithTelemetry(
+                new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot),
+                catalogLease.ArchiveCatalog);
+            _worldSceneHost.ApplyBootstrapSession(telemetry.Session);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+        }
     }
 
     private void LoadModelOutputScene()

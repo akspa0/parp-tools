@@ -1,18 +1,37 @@
 # Progress
 
+### Apr 26, 2026 - added and registered the wow-viewer GPU viewer plan-set prompt workflow
+
+- what changed:
+	- added `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md` as the new router prompt for library-first, GPU-first wow-viewer world-viewer migration work
+	- added ordered staged prompts under `.github/prompts/wow-viewer-gpu-viewer/` (`01-fast-source-path` through `09-thin-viewer-host-cutover`) so migration execution can run as narrow slices instead of one large rewrite
+	- updated `.github/copilot-instructions.md` to include the new GPU viewer plan-set in the wow-viewer workflow read-first list and prompt registry
+	- updated `AGENTS.md` to mirror that registration in the Codex-facing read-first and prompt-registry sections
+
+- validation:
+	- project prompt files are present under `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md` and `.github/prompts/wow-viewer-gpu-viewer/*.prompt.md`
+	- both instruction registries now include explicit references to `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md`
+
+- boundary:
+	- this is workflow-asset and routing-surface completion only; no viewer runtime/library implementation slice was executed in this update
+	- runtime or performance claims still require completing and validating the ordered prompt slices against real-data paths
+
 ### Apr 26, 2026 - seeded the wow-viewer world scene host with bootstrap-only session state
 
 - what changed:
 	- added a session-only host update path in `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneHost.cs` so the host can own bootstrap map/session metadata before a full runtime frame exists
 	- extended `WowViewerWorldSceneSnapshot` with bootstrap-safe tile-count fields plus a `FromSession(...)` constructor path
 	- extended `WowViewerWorldDiagnosticsSnapshot` with a `FromSession(...)` path for host-owned pre-runtime session metadata
-	- changed `WowViewerDesktopApp.LoadWorldSession()` to seed the host from the already-loaded world spawn-picker session when the current picker signature matches the active world request, then changed the world preview fallback to use host-owned scene data instead of direct `WdtSummary` reads from the raw bootstrap result
+	- changed `WowViewerDesktopApp.LoadWorldSession()` to seed the host from the already-loaded world spawn-picker session when the current picker signature matches the active world request, and to fall back to `WowViewerWorldSessionBootstrapper.OpenWithTelemetry(...)` over the shared viewer-I/O catalog when no matching spawn-picker session exists
+	- changed the world preview fallback to use host-owned scene data instead of direct `WdtSummary` reads from the raw bootstrap result
+	- added `--capture-during-world-load` to `WowViewer.App viewer`, allowing startup UI capture while a world runtime load is still pending as long as bootstrap session state already exists in the host
 
 - validation:
 	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded
+	- real UI proof captured at `output/build-validation/wowviewer-world-bootstrap-capture/kalimdor_26_33_bootstrap_pending_ui.png`
 
 - boundary:
-	- this closes a small host-ownership gap in the world-session shell only; it does not replace the current runtime bridge or prove new live GUI behavior by itself
+	- this closes the host-ownership gap plus the pending-load capture proof path for the world-session shell only; it does not replace the current runtime bridge with a staged bootstrap/runtime architecture
 
 ### Apr 25, 2026 - added a GPU-backed world scene host seam in wow-viewer
 
