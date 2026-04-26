@@ -651,10 +651,12 @@ internal sealed class WowViewerDesktopApp : IDisposable
             int gpuCommands = GetActiveGpuCommandCount();
 
             string summary = $"FPS {fps:F1} | Frame {frameMs:F2} ms | Heap {heapMb:F1} MB | GPU Cmds {gpuCommands}";
-            if (_currentWorldRuntimeFrame is not null)
+            WowViewerWorldDiagnosticsSnapshot worldDiagnostics = _worldSceneHost.DiagnosticsSnapshot;
+            WowViewerWorldAssetState worldAssetState = _worldSceneHost.AssetState;
+            if (worldDiagnostics.HasRuntime)
             {
-                int visibleObjects = _currentWorldRuntimeFrame.Visibility.VisibleWmos.Count + _currentWorldRuntimeFrame.Visibility.VisibleMdx.Count;
-                summary += $" | World CPU {_currentWorldRuntimeFrame.Stats.TotalCpuMs:F2} ms | Visible {visibleObjects}";
+                int visibleObjects = worldAssetState.VisibleWmoCount + worldAssetState.VisibleMdxCount;
+                summary += $" | World CPU {worldDiagnostics.TotalCpuMs:F2} ms | Visible {visibleObjects}";
             }
 
             summary += $" | {_session.GetWorkspaceLabel()}";
@@ -2039,9 +2041,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             }
         }
 
-        if (_currentWorldRuntimeFrame != null)
+        if (_worldSceneHost.SceneSnapshot.HasSelectedTile)
         {
-            (int previewTileX, int previewTileY) = SourceSpawnTileToPreviewTile(_currentWorldRuntimeFrame.SelectedTileX, _currentWorldRuntimeFrame.SelectedTileY);
+            (int previewTileX, int previewTileY) = SourceSpawnTileToPreviewTile(_worldSceneHost.SceneSnapshot.SelectedTileX, _worldSceneHost.SceneSnapshot.SelectedTileY);
             Vector2 loadMin = origin + new Vector2(previewTileX * cellSize, previewTileY * cellSize);
             Vector2 loadMax = loadMin + new Vector2(cellSize, cellSize);
             drawList.AddRect(loadMin, loadMax, loadedColor, 0f, ImDrawFlags.None, 2.0f);
@@ -2725,8 +2727,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _session.World.ShowHoleOverlay = showHoleOverlay;
         _session.Normalize();
 
-        if (debugSettingsChanged && _currentWorldRuntimeFrame != null)
-            EnsureWorldGpuPreviewRenderer()?.LoadPreview(_currentWorldRuntimeFrame, _worldViewCamera, _session.World.IgnoreTerrainHoles, _session.World.ShowHoleOverlay);
+        if (debugSettingsChanged)
+            _worldSceneHost.RefreshRendererPreview(_session.World.IgnoreTerrainHoles, _session.World.ShowHoleOverlay);
         }
     }
 
@@ -2874,7 +2876,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (_session.WorkspaceMode == WowViewerWorkspaceMode.WorldSession)
         {
-            if (_currentWorldRuntimeFrame != null
+            if (_worldSceneHost.SceneSnapshot.HasSelectedTile
                 && _selectedWorldObject.HasValue
                 && _worldSceneHost.NavigatorState.TryResolveEntry(_selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
             {
@@ -2890,7 +2892,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             if (ImGui.CollapsingHeader("Runtime Summary", ImGuiTreeNodeFlags.DefaultOpen))
                 DrawWorldRuntimeSummary();
 
-            if (_currentWorldRuntimeFrame != null)
+            if (_worldSceneHost.SceneSnapshot.HasSelectedTile)
             {
                 ImGui.Separator();
                 ImGuiTreeNodeFlags objectNavigatorFlags = _selectedWorldObject.HasValue
@@ -2907,7 +2909,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             if (ImGui.CollapsingHeader("Deep Diagnostics", ImGuiTreeNodeFlags.None))
                 DrawWorldDiagnostics();
 
-            if (_currentWorldRuntimeFrame != null && ImGui.CollapsingHeader("Debug Views", ImGuiTreeNodeFlags.None))
+            if (_worldSceneHost.SceneSnapshot.HasSelectedTile && ImGui.CollapsingHeader("Debug Views", ImGuiTreeNodeFlags.None))
                 DrawWorldDebugViews();
 
             if (ImGui.CollapsingHeader("Runtime Boundaries", ImGuiTreeNodeFlags.None))
@@ -3145,26 +3147,20 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         ImGui.Separator();
         ImGui.TextDisabled("World Runtime Staging");
-        WorldRenderFrameStats worldStats = WorldRenderFrameStats.Empty;
-        ImGui.Text($"Visible WMO: {worldStats.VisibleWmoCount}");
-        ImGui.Text($"Visible Doodads: {worldStats.VisibleMdxCount}");
-        ImGui.Text($"Taxi Doodads: {worldStats.VisibleTaxiMdxCount}");
-        ImGui.Text($"Pending Loads: {worldStats.PendingAssetLoadCount}");
-        bool objectPhaseEnabled = WorldFramePassCoordinator.Execute(
-            new WorldFramePassOptions(true, true, true),
-            new WorldFramePasses(
-                static () => { },
-                static () => { },
-                static () => { },
-                static () => { },
-                static () => { },
-                static () => { },
-                static () => { },
-                static () => { },
-                static () => { },
-                static () => { },
-                static () => { }));
-        ImGui.Text($"Object pass coordinator reachable: {objectPhaseEnabled}");
+        WowViewerWorldAssetState worldAssetState = _worldSceneHost.AssetState;
+        WowViewerWorldDiagnosticsSnapshot worldDiagnostics = _worldSceneHost.DiagnosticsSnapshot;
+        if (worldDiagnostics.HasRuntime)
+        {
+            ImGui.Text($"Visible WMO: {worldAssetState.VisibleWmoCount}");
+            ImGui.Text($"Visible Doodads: {worldAssetState.VisibleMdxCount}");
+            ImGui.Text($"Taxi Doodads: {worldDiagnostics.VisibleTaxiDoodadCount}");
+            ImGui.Text($"Pending Loads: {worldAssetState.PendingAssetLoadCount}");
+            ImGui.Text($"Object phase executed: {worldDiagnostics.ObjectPhaseExecuted}");
+        }
+        else
+        {
+            ImGui.TextDisabled("No world runtime loaded.");
+        }
 
         ImGui.Separator();
         if (ImGui.CollapsingHeader("Runtime Boundaries", ImGuiTreeNodeFlags.None))
@@ -4492,9 +4488,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
         _selectedWorldObject = _worldSceneHost.NavigatorState.DefaultSelection;
         WowViewerWorldSceneSnapshot sceneSnapshot = _worldSceneHost.SceneSnapshot;
         WowViewerWorldAssetState assetState = _worldSceneHost.AssetState;
+        WowViewerWorldDiagnosticsSnapshot diagnosticsSnapshot = _worldSceneHost.DiagnosticsSnapshot;
         DeletePreviewTexture();
-        UploadWorldTerrainPreviewTexture(runtimeFrame.TerrainVisualSnapshot);
-        _statusMessage = $"Opened selected tile runtime frame for {sceneSnapshot.ResolvedMapDirectory} tile ({sceneSnapshot.SelectedTileX},{sceneSnapshot.SelectedTileY}) in {runtimeFrame.Stats.TotalCpuMs:F1} ms.";
+        if (_worldSceneHost.TerrainPreviewSnapshot is { } terrainPreviewSnapshot)
+            UploadWorldTerrainPreviewTexture(terrainPreviewSnapshot);
+        _statusMessage = $"Opened selected tile runtime frame for {sceneSnapshot.ResolvedMapDirectory} tile ({sceneSnapshot.SelectedTileX},{sceneSnapshot.SelectedTileY}) in {diagnosticsSnapshot.TotalCpuMs:F1} ms.";
         _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, WMO {assetState.VisibleWmoCount}/{assetState.WmoInstanceCount}, doodads {assetState.VisibleMdxCount}/{assetState.MdxInstanceCount}, terrain {sceneSnapshot.TerrainVisualWidth}x{sceneSnapshot.TerrainVisualHeight}, pending {assetState.PendingAssetLoadCount}";
     }
 
@@ -4904,9 +4902,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             }
         }
 
-        if (_currentWorldRuntimeFrame != null)
+        if (_worldSceneHost.SceneSnapshot.HasSelectedTile)
         {
-            Vector2 loadedMin = origin + new Vector2((_currentWorldRuntimeFrame.SelectedTileY - viewMinTileY) * cellSize, (_currentWorldRuntimeFrame.SelectedTileX - viewMinTileX) * cellSize);
+            Vector2 loadedMin = origin + new Vector2((_worldSceneHost.SceneSnapshot.SelectedTileY - viewMinTileY) * cellSize, (_worldSceneHost.SceneSnapshot.SelectedTileX - viewMinTileX) * cellSize);
             Vector2 loadedMax = loadedMin + new Vector2(cellSize, cellSize);
             drawList.AddRect(loadedMin, loadedMax, loadedColor, 0f, ImDrawFlags.None, 2.2f);
         }

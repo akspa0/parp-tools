@@ -15,10 +15,11 @@
 	- Apr 26 follow-up: `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldNavigatorState.cs` now gives the host a first object-navigator ownership seam by snapshotting runtime object entries, default selection, and selection resolution; the compact world-session navigator, selection inspector sections, world status selection summary, and object list windows now read that host-owned navigator state instead of rebuilding entries directly from the raw frame in the UI layer
 	- Apr 26 follow-up: `WowViewerWorldAssetInventory` now has a real host-side pending-load processor seam; `WowViewerWorldSceneHost.ProcessPendingAssetLoads(...)` consumes queued WMO/MDX model keys through `ViewerIoService.TryReadVirtualFile(...)` during the app update loop so queue ownership is no longer bookkeeping-only
 	- Apr 26 follow-up: `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSpatialSnapshot.cs` now gives the host planar world bounds; the object marker canvas and canvas-pick path in `WowViewerDesktopApp` now map navigator entries through that host-owned spatial snapshot instead of reading `PlanarMin` / `PlanarMax` and raw object arrays from the runtime frame directly
+	- Apr 26 follow-up: `WowViewerWorldSceneHost` now owns the terrain preview snapshot and a `RefreshRendererPreview(...)` seam, so the shell no longer uploads the software terrain preview or reloads the GPU world preview from direct raw-frame fields; world status-bar CPU/visible text, selected-tile minimap highlights, inspector gating, and the old staging placeholder now read host diagnostics/scene/asset state instead
 	- the world path remains GPU-backed; the new host still renders through `WorldGpuPreviewRenderer`, so the terrain texture-array and alpha-array path stays hardware-accelerated while ownership moves out of the UI shell
 - current boundary:
 	- this is the first scene-owner seam only, not a full `MdxViewer.WorldScene` port yet
-	- `WowViewerDesktopApp` still uses the current runtime-frame shape for non-canvas debug metrics and the active renderer still consumes the bridge frame; `WowViewerWorldRuntimeBridge` is still the producer of that frame
+	- `WowViewerDesktopApp` still keeps the current runtime frame around for world-load lifecycle checks and the active GPU renderer still consumes the bridge frame; `WowViewerWorldRuntimeBridge` is still the producer of that frame
 	- build proof exists, but no live runtime signoff was captured for this slice
 
 ## Apr 25, 2026 - hard reset: stop deepening the current wow-viewer world preview branch

@@ -1,4 +1,5 @@
 using Silk.NET.OpenGL;
+using WowViewer.Core.Runtime.World.Terrain;
 
 namespace WowViewer.App;
 
@@ -28,6 +29,8 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
 
     public WowViewerWorldSpatialSnapshot SpatialSnapshot { get; private set; } = WowViewerWorldSpatialSnapshot.Empty;
 
+    public WorldTerrainVisualSnapshot? TerrainPreviewSnapshot { get; private set; }
+
     public void Dispose()
     {
         _renderer?.Dispose();
@@ -47,6 +50,7 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
         DiagnosticsSnapshot = WowViewerWorldDiagnosticsSnapshot.Empty;
         NavigatorState = WowViewerWorldNavigatorState.Empty;
         SpatialSnapshot = WowViewerWorldSpatialSnapshot.Empty;
+        TerrainPreviewSnapshot = null;
         _renderer?.ClearPreview();
         Camera.ResetToIdentity();
     }
@@ -86,7 +90,17 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
         DiagnosticsSnapshot = WowViewerWorldDiagnosticsSnapshot.FromRuntimeFrame(runtimeFrame);
         NavigatorState = WowViewerWorldNavigatorState.FromRuntimeFrame(runtimeFrame);
         SpatialSnapshot = WowViewerWorldSpatialSnapshot.FromRuntimeFrame(runtimeFrame);
+        TerrainPreviewSnapshot = runtimeFrame.TerrainVisualSnapshot;
         EnsureRenderer(gl, viewerIoService, sourceKey, sourceSignature)?.LoadPreview(runtimeFrame, Camera, ignoreTerrainHoles, showHoleOverlay);
+    }
+
+    public bool RefreshRendererPreview(bool ignoreTerrainHoles, bool showHoleOverlay)
+    {
+        if (CurrentFrame is null || _renderer is null)
+            return false;
+
+        _renderer.LoadPreview(CurrentFrame, Camera, ignoreTerrainHoles, showHoleOverlay);
+        return true;
     }
 
     public int ProcessPendingAssetLoads(int maxLoads = 2, double maxBudgetMs = 4.0)
