@@ -1045,88 +1045,74 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private sealed class WorldPreviewCameraState
     {
         private static readonly Vector3 IdentityPosition = new(0f, 0f, 1f);
-        private static readonly Vector3 IdentityTarget = Vector3.Zero;
+        private const float IdentityYawDegrees = 180.0f;
+        private const float IdentityPitchDegrees = -10.0f;
 
         public Vector3 Position { get; private set; } = IdentityPosition;
 
-        public Vector3 Target { get; private set; } = IdentityTarget;
+        public Vector3 Target => Position + GetForwardVector();
+
+        public float YawDegrees { get; private set; } = IdentityYawDegrees;
+
+        public float PitchDegrees { get; private set; } = IdentityPitchDegrees;
 
         private Vector3 DefaultPosition { get; set; } = IdentityPosition;
 
-        private Vector3 DefaultTarget { get; set; } = IdentityTarget;
+        private float DefaultYawDegrees { get; set; } = IdentityYawDegrees;
+
+        private float DefaultPitchDegrees { get; set; } = IdentityPitchDegrees;
 
         public void ResetToIdentity()
         {
             Position = IdentityPosition;
-            Target = IdentityTarget;
+            YawDegrees = IdentityYawDegrees;
+            PitchDegrees = IdentityPitchDegrees;
             DefaultPosition = IdentityPosition;
-            DefaultTarget = IdentityTarget;
+            DefaultYawDegrees = IdentityYawDegrees;
+            DefaultPitchDegrees = IdentityPitchDegrees;
         }
 
         public void SetPose(Vector3 position, Vector3 target, bool saveAsDefault)
         {
             Position = position;
-            Target = target;
+            Vector3 forward = target - position;
+            if (forward.LengthSquared() > 1e-6f)
+            {
+                forward = Vector3.Normalize(forward);
+                GetCameraAngles(forward, out float yawDegrees, out float pitchDegrees);
+                YawDegrees = yawDegrees;
+                PitchDegrees = Math.Clamp(pitchDegrees, -89.0f, 89.0f);
+            }
+
             if (saveAsDefault)
             {
                 DefaultPosition = position;
-                DefaultTarget = target;
+                DefaultYawDegrees = YawDegrees;
+                DefaultPitchDegrees = PitchDegrees;
             }
         }
 
         public void Reset()
         {
             Position = DefaultPosition;
-            Target = DefaultTarget;
+            YawDegrees = DefaultYawDegrees;
+            PitchDegrees = DefaultPitchDegrees;
         }
 
-        public Vector3 GetForwardVector()
-        {
-            Vector3 forward = Target - Position;
-            if (forward.LengthSquared() <= 1e-6f)
-                return Vector3.Normalize(new Vector3(1f, 1f, -0.3f));
-
-            return Vector3.Normalize(forward);
-        }
+        public Vector3 GetForwardVector() => ComputeForwardVector(YawDegrees, PitchDegrees);
 
         public void RotateLook(float yawDeltaDegrees, float pitchDeltaDegrees)
         {
-            Vector3 forward = GetForwardVector();
-            float distance = MathF.Max(Vector3.Distance(Position, Target), 1.0f);
-            GetCameraAngles(forward, out float azimuthDegrees, out float elevationDegrees);
-            azimuthDegrees -= yawDeltaDegrees;
-            elevationDegrees = Math.Clamp(elevationDegrees + pitchDeltaDegrees, -89.0f, 89.0f);
-            Vector3 rotatedForward = ComputeForwardVector(azimuthDegrees, elevationDegrees);
-            Target = Position + (rotatedForward * distance);
+            YawDegrees -= yawDeltaDegrees;
+            PitchDegrees = Math.Clamp(PitchDegrees + pitchDeltaDegrees, -89.0f, 89.0f);
         }
 
         public void Translate(float forwardDistance, float strafeDistance, float verticalDistance)
         {
-            BuildBasis(out Vector3 forward, out Vector3 right, out _);
-            Vector3 delta = (forward * forwardDistance) + (right * strafeDistance) + (Vector3.UnitZ * verticalDistance);
-            Position += delta;
-            Target += delta;
-        }
-
-        private void BuildBasis(out Vector3 forward, out Vector3 right, out Vector3 up)
-        {
-            forward = GetForwardVector();
-            Vector3 levelForward = new(forward.X, forward.Y, 0.0f);
-            if (levelForward.LengthSquared() > 1e-6f)
-                forward = Vector3.Normalize(levelForward);
-
-            Vector3 worldUp = Vector3.UnitZ;
-            right = Vector3.Cross(forward, worldUp);
-            if (right.LengthSquared() <= 1e-6f)
-                right = Vector3.UnitX;
-            else
-                right = Vector3.Normalize(right);
-
-            up = Vector3.Cross(right, forward);
-            if (up.LengthSquared() <= 1e-6f)
-                up = worldUp;
-            else
-                up = Vector3.Normalize(up);
+            float yawRadians = YawDegrees * MathF.PI / 180.0f;
+            Vector3 forward = new(MathF.Cos(yawRadians), MathF.Sin(yawRadians), 0.0f);
+            Vector3 right = new(MathF.Sin(yawRadians), -MathF.Cos(yawRadians), 0.0f);
+            Position += (forward * forwardDistance) + (right * strafeDistance) + (Vector3.UnitZ * verticalDistance);
         }
     }
 }

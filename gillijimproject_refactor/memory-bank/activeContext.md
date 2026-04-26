@@ -1,5 +1,22 @@
 # Active Context
 
+## Apr 25, 2026 - World Session runtime now hard-disables WDL and uses a MdxViewer-style free camera state
+
+- followed the user's live report that the viewer still looked WDL-driven and that the camera still felt wrong, even though `WASD` and `Q/E` now move
+- active behavior after this slice:
+	- `WowViewerWorldRuntimeBridge.Build(...)` now constructs the frame pass options with `wdlVisible: false` regardless of incoming request flags, so stale settings or `--show-wdl` cannot make the World Session read or submit WDL terrain
+	- the bridge no longer contains its private `ReadMapWdlTileData(...)` call path; the frame result uses an explicit disabled WDL payload and reports ADT as the authoritative surface
+	- `WorldFramePassOptions` now defaults `wdlVisible` to `false`
+	- `WorldGpuPreviewRenderer.WorldPreviewCameraState` now stores `Position`, `YawDegrees`, and `PitchDegrees` like `MdxViewer.Rendering.Camera` and derives `Target` from `Position + Forward`; it no longer rotates a persistent look-at target around the camera
+	- world preview movement now uses the same planar forward/right math as the legacy `MdxViewer` free camera
+- validation:
+	- app build passed: `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-adt-camera-hardening/`
+	- fixed local `H:\053-client`, `Kalidar`, tile `(27,34)` with `--show-wdl` still reports `wdl=False`, `Wdl:off`, `wdlTiles=0/0`, `source=WDL disabled for World Session; ADT terrain is the authoritative surface.`, and `Terrain:256/256` from `Kalidar.wdt#alpha-tile(27,34)`
+- current boundary:
+	- this proves the runtime frame cannot load WDL for the World Session path anymore
+	- it does not yet prove the live GUI camera feel is correct on the user's machine
+	- the viewer is still single-tile and height-shaded; multi-tile ADT loading and textured terrain remain open work
+
 ## Apr 25, 2026 - viewer FOV defaults are now 45 degrees instead of 60
 
 - followed the user's correction that every viewer version should use a 45-degree FOV, not 60

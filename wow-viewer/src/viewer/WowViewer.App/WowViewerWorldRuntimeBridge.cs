@@ -284,12 +284,20 @@ internal static class WowViewerWorldRuntimeBridge
             new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot),
             archiveCatalog);
 
+        WorldFramePassOptions framePassOptions = new(
+            objectsVisible: request.PassOptions.ObjectsVisible,
+            wmosVisible: request.PassOptions.WmosVisible,
+            doodadsVisible: request.PassOptions.DoodadsVisible,
+            skyVisible: request.PassOptions.SkyVisible,
+            wdlVisible: false,
+            terrainVisible: request.PassOptions.TerrainVisible,
+            liquidVisible: request.PassOptions.LiquidVisible,
+            overlayVisible: request.PassOptions.OverlayVisible);
+
         ((int tileX, int tileY) selectedTile, AdtPlacementCatalog placementCatalog, string placementSourcePath) =
             ResolveTileAndPlacements(session, request.TileX, request.TileY, archiveCatalog);
-        WorldWdlTileData wdlTileData = request.PassOptions.WdlVisible
-            ? ReadMapWdlTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog)
-            : WorldWdlTileData.Missing($@"World\Maps\{session.ResolvedMapDirectory}\{session.ResolvedMapDirectory}.wdl", selectedTile.tileX, selectedTile.tileY);
-        WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog, wdlTileData.HasData ? 1 : 0);
+        WorldWdlTileData wdlTileData = WorldWdlTileData.Missing("WDL disabled for World Session; ADT terrain is the authoritative surface.", selectedTile.tileX, selectedTile.tileY);
+        WorldTileStageSummary tileStageSummary = ReadRootTileStageSummary(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog, wdlVisibleTileCount: 0);
         WorldTerrainTileData terrainTileData = ReadRootTerrainTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
         WorldTerrainVisualSnapshot terrainVisualSnapshot = WorldTerrainVisualSnapshotBuilder.Build(terrainTileData);
         WorldLiquidTileData liquidTileData = ReadRootLiquidTileData(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
@@ -306,7 +314,7 @@ internal static class WowViewerWorldRuntimeBridge
         int readyMdxCount = mdxInstances.Count(instance => assetReadyLookup.TryGetValue(instance.ModelKey, out bool ready) && ready);
 
         (Vector3 focusCenter, Vector2 planarMin, Vector2 planarMax) = ComputeWorldViewBounds(wmoInstances, mdxInstances, selectedTile.tileX, selectedTile.tileY);
-        Vector3 cameraTarget = ComputeSpawnCameraTarget(selectedTile.tileX, selectedTile.tileY, terrainTileData, wdlTileData, focusCenter);
+        Vector3 cameraTarget = ComputeSpawnCameraTarget(selectedTile.tileX, selectedTile.tileY, terrainTileData, focusCenter);
         Vector3 cameraPosition = cameraTarget + new Vector3(-700f, -700f, 260f);
         Vector3 cameraForward = Vector3.Normalize(cameraTarget - cameraPosition);
         WorldObjectVisibilityContext context = new(
@@ -371,14 +379,14 @@ internal static class WowViewerWorldRuntimeBridge
         int activeLiquidVisibleTileCount = 0;
 
         WorldFramePassOptions appliedPassOptions = new(
-            objectsVisible: request.PassOptions.ObjectsVisible && (visibility.VisibleWmos.Count > 0 || visibility.VisibleMdx.Count > 0),
-            wmosVisible: request.PassOptions.WmosVisible && visibility.VisibleWmos.Count > 0,
-            doodadsVisible: request.PassOptions.DoodadsVisible && visibility.VisibleMdx.Count > 0,
-            skyVisible: request.PassOptions.SkyVisible,
-            wdlVisible: request.PassOptions.WdlVisible,
-            terrainVisible: request.PassOptions.TerrainVisible,
-            liquidVisible: request.PassOptions.LiquidVisible,
-            overlayVisible: request.PassOptions.OverlayVisible);
+            objectsVisible: framePassOptions.ObjectsVisible && (visibility.VisibleWmos.Count > 0 || visibility.VisibleMdx.Count > 0),
+            wmosVisible: framePassOptions.WmosVisible && visibility.VisibleWmos.Count > 0,
+            doodadsVisible: framePassOptions.DoodadsVisible && visibility.VisibleMdx.Count > 0,
+            skyVisible: framePassOptions.SkyVisible,
+            wdlVisible: false,
+            terrainVisible: framePassOptions.TerrainVisible,
+            liquidVisible: framePassOptions.LiquidVisible,
+            overlayVisible: framePassOptions.OverlayVisible);
 
         bool objectPhaseExecuted = WorldFramePassCoordinator.Execute(
             appliedPassOptions,
@@ -478,7 +486,7 @@ internal static class WowViewerWorldRuntimeBridge
             TaxiActorUpdate: new WorldRenderStageStats(0, visibility.VisibleTaxiMdxCount, visibility.VisibleTaxiMdxCount),
             Lighting: new WorldRenderStageStats(0),
             Sky: new WorldRenderStageStats(0),
-            SkyboxBackdrop: new WorldRenderStageStats(0, skyboxBackdropInstances.Count, request.PassOptions.SkyVisible ? skyboxBackdropInstances.Count : 0),
+            SkyboxBackdrop: new WorldRenderStageStats(0, skyboxBackdropInstances.Count, framePassOptions.SkyVisible ? skyboxBackdropInstances.Count : 0),
             Wdl: new WorldRenderStageStats(wdlMs, activeWdlTileCount, activeWdlTileCount),
             Terrain: new WorldRenderStageStats(terrainMs, activeTerrainChunkCount, activeTerrainChunkCount),
             WmoVisibility: new WorldRenderStageStats(wmoVisibilityStopwatch.Elapsed.TotalMilliseconds, wmoInstances.Count, visibility.VisibleWmos.Count),
@@ -650,21 +658,6 @@ internal static class WowViewerWorldRuntimeBridge
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourcePath);
         stream.Position = 0;
         return WorldTileStageSummaryBuilder.Read(stream, fileSummary, wdlVisibleTileCount);
-    }
-
-    private static WorldWdlTileData ReadMapWdlTileData(
-        WowViewerWorldSessionBootstrapResult session,
-        int tileX,
-        int tileY,
-        IArchiveCatalog archiveCatalog)
-    {
-        string mapDirectory = session.ResolvedMapDirectory;
-        string wdlVirtualPath = $@"World\Maps\{mapDirectory}\{mapDirectory}.wdl";
-        if (!TryReadVirtualOrLooseFile(session.ClientRoot, session.LooseOverlayRoot, wdlVirtualPath, archiveCatalog, out byte[]? wdlData, out string sourcePath) || wdlData is null)
-            return WorldWdlTileData.Missing(wdlVirtualPath, tileX, tileY);
-
-        using MemoryStream stream = new(wdlData, writable: false);
-        return WorldWdlTileBuilder.Read(stream, sourcePath, tileX, tileY);
     }
 
     private static WorldLiquidTileData ReadRootLiquidTileData(
@@ -1082,16 +1075,9 @@ internal static class WowViewerWorldRuntimeBridge
         int tileX,
         int tileY,
         WorldTerrainTileData terrainTileData,
-        WorldWdlTileData wdlTileData,
         Vector3 fallbackTarget)
     {
         float? height = terrainTileData.Heightmap?.CenterHeight;
-        if (!height.HasValue && wdlTileData.CenterHeight.HasValue)
-            height = wdlTileData.CenterHeight.Value;
-
-        if (!height.HasValue && wdlTileData.MinHeight.HasValue && wdlTileData.MaxHeight.HasValue)
-            height = (wdlTileData.MinHeight.Value + wdlTileData.MaxHeight.Value) * 0.5f;
-
         return height.HasValue ? ComputeTileCenter(tileX, tileY, height.Value) : fallbackTarget;
     }
 }

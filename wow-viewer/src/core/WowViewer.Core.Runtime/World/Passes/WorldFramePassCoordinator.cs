@@ -7,7 +7,7 @@ public readonly struct WorldFramePassOptions
         bool wmosVisible,
         bool doodadsVisible,
         bool skyVisible = true,
-        bool wdlVisible = true,
+        bool wdlVisible = false,
         bool terrainVisible = true,
         bool liquidVisible = true,
         bool overlayVisible = true)

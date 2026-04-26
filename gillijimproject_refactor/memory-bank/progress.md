@@ -1,5 +1,22 @@
 # Progress
 
+### Apr 25, 2026 - hard-disabled WDL in wow-viewer World Session runtime and changed the world camera to position/yaw/pitch
+
+- what changed:
+	- `WowViewerWorldRuntimeBridge.Build(...)` now forces WDL off at the runtime frame layer, not just in UI/session defaults
+	- removed the bridge's private WDL read path so World Session frames no longer call `WorldWdlTileBuilder.Read(...)`
+	- frame output now carries an explicit disabled WDL source string instead of a `.wdl` path
+	- `WorldFramePassOptions` defaults WDL visibility to false
+	- replaced the world preview camera's persistent look-at target model with a `MdxViewer`-style free camera state: position plus yaw/pitch, with target derived from the forward vector
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-adt-camera-hardening/` succeeded
+	- `output/build-validation/wowviewer-adt-camera-hardening/WowViewer.App.exe world-frame --client-root "H:\053-client" --build-label "0.5.3.3389" --map Kalidar --tile-x 27 --tile-y 34 --show-wdl` still reports `wdl=False`, `Wdl:off`, `wdlTiles=0/0`, WDL source `WDL disabled for World Session; ADT terrain is the authoritative surface.`, and `Terrain:256/256` from `Kalidar.wdt#alpha-tile(27,34)`
+
+- boundary:
+	- this is runtime/build/CLI proof, not live GUI signoff for camera feel
+	- it still leaves the larger viewer work open: multi-tile ADT quilt, texture layers, and in-world WMO/MDX/M2 rendering
+
 ### Apr 25, 2026 - changed remaining viewer FOV defaults from 60 degrees to 45 degrees
 
 - what changed:

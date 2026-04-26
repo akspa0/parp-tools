@@ -11,6 +11,7 @@
 - Apr 24 camera/source correction: world viewport vertical FOV is `45` degrees, and ADT terrain is the primary loaded world-view source; WDL is only far-terrain/reference data and must not be described or treated as the loaded world surface
 - Apr 25 live-path correction: the World Session now forces terrain on and WDL off for live loads, the spawn/tile picker no longer reads WDL as its source surface, and keyboard movement polls Silk.NET input in addition to ImGui key state; this is still not a multi-tile/textured/object-rendering viewer
 - Apr 25 FOV correction: all viewer defaults should be `45` degrees, not `60`; remaining `60` values in viewer paths must be non-camera layout constants or explicit historical capture data, not projection defaults
+- Apr 25 hardening correction: WDL is now disabled in `WowViewerWorldRuntimeBridge` itself, not only in the UI/session layer, and the world preview camera now uses position/yaw/pitch state like `MdxViewer` instead of a persistent look-at target
 
 ## Apr 24, 2026 Course Correction - Stop Treating The Preview As The Viewer
 
@@ -232,6 +233,21 @@ The original slices below remain historical context, but the active route is now
 - still required:
   - live GUI confirmation that `WASD`, `Q/E`, right-drag look, wheel dolly, and parent-scroll isolation work in the active app
   - Recovery Slice 3 remains open for the actual multi-tile terrain quilt; this patch only prevents WDL from masquerading as the live World Session surface
+
+#### Apr 25, 2026 WDL/runtime hardening and free-camera correction
+
+- landed code changes in `wow-viewer`:
+  - `WowViewerWorldRuntimeBridge.Build(...)` forces `wdlVisible: false` regardless of incoming request flags
+  - the bridge no longer has a private `ReadMapWdlTileData(...)` path for World Session frames
+  - frame output now reports `WDL disabled for World Session; ADT terrain is the authoritative surface.` instead of a `.wdl` source path
+  - `WorldFramePassOptions` defaults WDL visibility to false
+  - `WorldGpuPreviewRenderer.WorldPreviewCameraState` now mirrors the legacy free-camera model: position plus yaw/pitch, with the target derived from `Position + Forward`
+- proof so far:
+  - app build passed with `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/build-validation/wowviewer-adt-camera-hardening/`
+  - fixed local `H:\053-client`, `Kalidar`, tile `(27,34)`, even with `--show-wdl`, reports `wdl=False`, `Wdl:off`, `wdlTiles=0/0`, disabled WDL source text, and `Terrain:256/256` from `Kalidar.wdt#alpha-tile(27,34)`
+- still required:
+  - live GUI confirmation of camera feel
+  - multi-tile ADT terrain loading remains unimplemented; single-tile ADT proof is not enough to close the World Session reset
 
 ### Recovery Slice 2 - Minimap loading recovery
 
