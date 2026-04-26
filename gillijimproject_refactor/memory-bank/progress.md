@@ -1,5 +1,25 @@
 # Progress
 
+### Apr 26, 2026 - completed Wave 1 of v10 terrain AI training infrastructure in wow-viewer
+
+- what changed:
+	- created `wow-viewer/src/core/WowViewer.Core/Maps/TerrainTileTensorPack.cs` — canonical data contract for all extractable ADT training signals (height 257/65/17, MCLY texture IDs + layer mask, MCAL alpha pack 256×256×4, MCCV RGB, MCNR normals, MH2O/MCLQ/WL liquid data, object/PM4 masks, hole mask, MTXF flags)
+	- created `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtTensorPackBuilder.cs` — builds `TerrainTileTensorPack` from an ADT root file by assembling MCVT→257×257 heightmap, MCNR→257×257×3 normals, MCCV→257×257×3 colors, MCLY+MCAL→texture layers + alpha pack, MH2O→liquid height/depth/type, MCLQ→legacy liquid height/type, MTXF→per-chunk animation flags, MCRF→object presence + hole mask, and WLW/WLM/WLQ/WLL→editor liquid mask/height
+	- created `wow-viewer/src/core/WowViewer.Core.IO/Maps/NpzTileSerializer.cs` — serializes any `TerrainTileTensorPack` to NumPy-compatible `.npz` with per-signal `.npy` entries and a `metadata.json` manifest
+	- created `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtMclqReader.cs` + `AdtMtxfReader.cs` + `AdtMcrfReader.cs` — new deep chunk readers for legacy MCLQ liquid, MTXF texture flags, and MCRF object references
+	- created `wow-viewer/src/core/WowViewer.Core/Maps/WlFile.cs` + `WowViewer.Core.IO/Maps/WlFileReader.cs` — ported unified WL* file model and reader from WoWMapConverter
+	- added `Mcrf` to `AdtChunkIds`
+
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/core/WowViewer.Core/WowViewer.Core.csproj -c Debug` succeeded
+	- `dotnet build i:/parp/parp-tools/wow-viewer/src/core/WowViewer.Core.IO/WowViewer.Core.IO.csproj -c Debug` succeeded (0 errors)
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` succeeded for all core library projects; 8 pre-existing errors remain only in `WowViewer.Tool.Converter` (`TerrainPatchAdtCommand.cs` missing `SeamAudit` parameter)
+
+- boundary:
+	- Wave 1 is library infrastructure only — no Python training code, no brush-pattern mining, no model weights yet
+	- `ObjectMask257` and `ObjectPreciseMask257` are not yet populated from MDDF/MODF positions; only a coarse 16×16 MCRF presence count is extracted
+	- `Pm4PathMask` and `Pm4BuildingFootprintMask` remain unpopulated pending PM4 integration
+
 ### Apr 26, 2026 - added and registered the wow-viewer GPU viewer plan-set prompt workflow
 
 - what changed:

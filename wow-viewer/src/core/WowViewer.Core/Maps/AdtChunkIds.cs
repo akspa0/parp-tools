@@ -12,6 +12,7 @@ public static class AdtChunkIds
     public static readonly FourCC Mcse = FourCC.FromString("MCSE");
     public static readonly FourCC Mccv = FourCC.FromString("MCCV");
     public static readonly FourCC Mclq = FourCC.FromString("MCLQ");
+    public static readonly FourCC Mcrf = FourCC.FromString("MCRF");
     public static readonly FourCC Mcrd = FourCC.FromString("MCRD");
     public static readonly FourCC Mcrw = FourCC.FromString("MCRW");
 }

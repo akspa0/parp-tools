@@ -1,5 +1,24 @@
 # Active Context
 
+## Apr 26, 2026 - v10 terrain AI training: Wave 1 library infrastructure complete in wow-viewer
+
+- landed the canonical data contract + extraction + serialization layer for v10 multi-model terrain training
+- active behavior after this slice:
+	- `TerrainTileTensorPack` is the single source of truth for all per-tile training signals; every field is nullable so partial tiles (minimap-only, no WDL) are valid inputs
+	- `AdtTensorPackBuilder.Build(adtPath)` assembles the full tensor pack from a root ADT and its associated texture source, populating 20+ signals when present
+	- `NpzTileSerializer.Serialize(pack, outputPath)` writes a ZIP archive of `.npy` files plus `metadata.json` for direct Python consumption
+	- `AdtMclqReader` parses pre-WotLK MCLQ liquid subchunks (9×9 vertex grid + 8×8 tile flags)
+	- `AdtMtxfReader` parses root-level MTXF texture flags (animated bit + optional transform IDs)
+	- `AdtMcrfReader` parses MCNK-subchunk MCRF doodad/WMO reference indices
+	- `WlFileReader` parses WLW/WLM/WLQ/WLL loose editor liquid files with world-positioned 4×4 vertex blocks
+- current boundary:
+	- Wave 1 is complete; the next slice is Wave 2 (brush-pattern mining from real MCAL alpha data)
+	- `ObjectMask257` / `ObjectPreciseMask257` are not yet projected from MDDF/MODF positions; only coarse MCRF presence is captured
+	- `Pm4PathMask` / `Pm4BuildingFootprintMask` remain empty pending PM4 tile integration
+	- no Python training code or model stubs exist yet
+- validation:
+	- `dotnet build wow-viewer/src/core/WowViewer.Core.IO/WowViewer.Core.IO.csproj -c Debug` passed with 0 errors
+
 ## Apr 26, 2026 - registered the wow-viewer GPU viewer plan-set workflow and routing surfaces
 
 - landed the workflow assets requested for the viewer reset: an in-repo GPU-first plan-set prompt plus ordered implementation prompts under `.github/prompts/wow-viewer-gpu-viewer/`
