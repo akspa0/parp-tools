@@ -620,11 +620,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
     private void BuildMatrices(int width, int height, WorldViewCamera camera, out Matrix4x4 view, out Matrix4x4 projection)
     {
-        Vector3 forward = camera.GetForwardVector();
-        Vector3 worldUp = MathF.Abs(Vector3.Dot(forward, Vector3.UnitZ)) > 0.98f
-            ? Vector3.UnitY
-            : Vector3.UnitZ;
-        view = camera.GetViewMatrix(worldUp);
+        view = camera.GetViewMatrix();
 
         Vector3 extent = _boundsMax - _boundsMin;
         float radius = MathF.Max(extent.Length() * 0.5f, 128f);

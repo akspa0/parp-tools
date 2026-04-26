@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
@@ -7,6 +8,11 @@ using WowViewer.Core.Maps;
 namespace WowViewer.App;
 
 internal sealed record WowViewerWorldSessionOpenRequest(string ClientRoot, string MapInput, string BuildLabel, string LooseOverlayRoot);
+
+internal readonly record struct WowViewerWorldSessionBootstrapTelemetry(
+    WowViewerWorldSessionBootstrapResult Session,
+    bool CacheHit,
+    TimeSpan ResolveDuration);
 
 internal sealed class WowViewerWorldSessionBootstrapResult
 {
@@ -73,6 +79,8 @@ internal sealed class WowViewerWorldSessionBootstrapResult
 
 internal static class WowViewerWorldSessionBootstrapper
 {
+    private static readonly ConcurrentDictionary<string, WowViewerWorldSessionBootstrapResult> SessionCache = new(StringComparer.OrdinalIgnoreCase);
+
     public static WowViewerWorldSessionBootstrapResult Open(WowViewerWorldSessionOpenRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -92,14 +100,27 @@ internal static class WowViewerWorldSessionBootstrapper
 
     internal static WowViewerWorldSessionBootstrapResult Open(WowViewerWorldSessionOpenRequest request, IArchiveCatalog archiveCatalog)
     {
+        return OpenWithTelemetry(request, archiveCatalog).Session;
+    }
+
+    internal static WowViewerWorldSessionBootstrapTelemetry OpenWithTelemetry(WowViewerWorldSessionOpenRequest request, IArchiveCatalog archiveCatalog)
+    {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(archiveCatalog);
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+
+        string cacheKey = BuildCacheKey(request);
+        if (SessionCache.TryGetValue(cacheKey, out WowViewerWorldSessionBootstrapResult? cached))
+            return new WowViewerWorldSessionBootstrapTelemetry(cached, CacheHit: true, stopwatch.Elapsed);
 
         string clientRoot = Path.GetFullPath(request.ClientRoot);
         if (!Directory.Exists(clientRoot))
             throw new DirectoryNotFoundException($"Client root does not exist: {clientRoot}");
 
-        return Open(request, archiveCatalog, clientRoot);
+        WowViewerWorldSessionBootstrapResult result = Open(request, archiveCatalog, clientRoot);
+        SessionCache[cacheKey] = result;
+        return new WowViewerWorldSessionBootstrapTelemetry(result, CacheHit: false, stopwatch.Elapsed);
     }
 
     private static WowViewerWorldSessionBootstrapResult Open(WowViewerWorldSessionOpenRequest request, IArchiveCatalog archiveCatalog, string clientRoot)
@@ -217,6 +238,12 @@ internal static class WowViewerWorldSessionBootstrapper
             wdtSummary,
             occupiedTiles,
             stopwatch.Elapsed);
+    }
+
+    private static string BuildCacheKey(WowViewerWorldSessionOpenRequest request)
+    {
+        ViewerIoSourceKey sourceKey = ViewerIoSourceKey.Create(request.ClientRoot, request.BuildLabel, request.LooseOverlayRoot);
+        return string.Join('|', sourceKey.Signature, request.MapInput.Trim());
     }
 
     private static (byte[] Data, string SourcePath, bool LoadedFromArchive) ReadWdt(string clientRoot, string looseOverlayRoot, string mapDirectory, string wdtVirtualPath, IArchiveCatalog archiveCatalog)

@@ -8,13 +8,39 @@ internal sealed class WorldViewCamera
     private const float IdentityYawDegrees = 180.0f;
     private const float IdentityPitchDegrees = -10.0f;
 
-    public Vector3 Position { get; private set; } = IdentityPosition;
+    public Vector3 Position { get; set; } = IdentityPosition;
 
-    public float YawDegrees { get; private set; } = IdentityYawDegrees;
+    public float YawDegrees { get; set; } = IdentityYawDegrees;
 
-    public float PitchDegrees { get; private set; } = IdentityPitchDegrees;
+    public float Yaw
+    {
+        get => YawDegrees;
+        set => YawDegrees = value;
+    }
 
-    public Vector3 Target => Position + GetForwardVector();
+    public float PitchDegrees { get; set; } = IdentityPitchDegrees;
+
+    public float Pitch
+    {
+        get => PitchDegrees;
+        set => PitchDegrees = value;
+    }
+
+    public Vector3 Forward
+    {
+        get
+        {
+            float yawRadians = MathF.PI / 180f * YawDegrees;
+            float pitchRadians = MathF.PI / 180f * PitchDegrees;
+            float cosPitch = MathF.Cos(pitchRadians);
+            return Vector3.Normalize(new Vector3(
+                cosPitch * MathF.Cos(yawRadians),
+                cosPitch * MathF.Sin(yawRadians),
+                MathF.Sin(pitchRadians)));
+        }
+    }
+
+    public Vector3 Target => Position + Forward;
 
     private Vector3 DefaultPosition { get; set; } = IdentityPosition;
 
@@ -61,18 +87,17 @@ internal sealed class WorldViewCamera
 
     public Vector3 GetForwardVector()
     {
-        float yawRadians = YawDegrees * MathF.PI / 180.0f;
-        float pitchRadians = PitchDegrees * MathF.PI / 180.0f;
-        float cosPitch = MathF.Cos(pitchRadians);
-        return Vector3.Normalize(new Vector3(
-            cosPitch * MathF.Cos(yawRadians),
-            cosPitch * MathF.Sin(yawRadians),
-            MathF.Sin(pitchRadians)));
+        return Forward;
+    }
+
+    public Matrix4x4 GetViewMatrix()
+    {
+        return Matrix4x4.CreateLookAt(Position, Target, Vector3.UnitZ);
     }
 
     public Matrix4x4 GetViewMatrix(Vector3 up)
     {
-        return Matrix4x4.CreateLookAt(Position, Target, up);
+        return GetViewMatrix();
     }
 
     public void RotateLook(float yawDeltaDegrees, float pitchDeltaDegrees)
@@ -81,16 +106,21 @@ internal sealed class WorldViewCamera
         PitchDegrees = Math.Clamp(PitchDegrees + pitchDeltaDegrees, -89.0f, 89.0f);
     }
 
-    public void Translate(float forwardDistance, float strafeDistance, float verticalDistance)
+    public void Move(float forward, float right, float up, float speed)
     {
-        float yawRadians = YawDegrees * MathF.PI / 180.0f;
+        float yawRadians = MathF.PI / 180f * YawDegrees;
         float cosYaw = MathF.Cos(yawRadians);
         float sinYaw = MathF.Sin(yawRadians);
-        Vector3 forward = new(cosYaw, sinYaw, 0.0f);
-        Vector3 right = new(sinYaw, -cosYaw, 0.0f);
-        Position += forward * forwardDistance;
-        Position += right * strafeDistance;
-        Position += Vector3.UnitZ * verticalDistance;
+
+        Vector3 forwardVector = new(cosYaw, sinYaw, 0f);
+        Vector3 rightVector = new(sinYaw, -cosYaw, 0f);
+
+        Position += (forwardVector * forward + rightVector * right + (Vector3.UnitZ * up)) * speed;
+    }
+
+    public void Translate(float forwardDistance, float strafeDistance, float verticalDistance)
+    {
+        Move(forwardDistance, strafeDistance, verticalDistance, 1.0f);
     }
 
     private static void GetCameraAngles(Vector3 forward, out float yawDegrees, out float pitchDegrees)

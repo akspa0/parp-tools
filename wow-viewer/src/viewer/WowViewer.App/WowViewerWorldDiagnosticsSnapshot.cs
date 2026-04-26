@@ -62,6 +62,8 @@ internal sealed class WowViewerWorldDiagnosticsSnapshot
 
     public double TotalCpuMs { get; private init; }
 
+    public WowViewerWorldLoadPipelineDiagnostics? LoadPipeline { get; private init; }
+
     public IReadOnlyList<WowViewerWorldCompositionLayerSnapshot> CompositionLayers { get; private init; } = Array.Empty<WowViewerWorldCompositionLayerSnapshot>();
 
     public string WmoVersionSummary { get; private init; } = string.Empty;
@@ -151,6 +153,7 @@ internal sealed class WowViewerWorldDiagnosticsSnapshot
             ObjectPhaseExecuted = runtimeFrame.ObjectPhaseExecuted,
             PassOptions = runtimeFrame.PassOptions,
             TotalCpuMs = runtimeFrame.Stats.TotalCpuMs,
+            LoadPipeline = runtimeFrame.LoadPipeline,
             CompositionLayers = runtimeFrame.Composition.Layers
                 .Select(static layer => new WowViewerWorldCompositionLayerSnapshot(
                     layer.DisplayName,

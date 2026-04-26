@@ -3455,6 +3455,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"Terrain: {terrainRange}");
         ImGui.Text($"Liquid Layers: {diagnosticsSnapshot.TileStageSummary?.LiquidLayerCount ?? 0}");
         ImGui.Text($"CPU: {diagnosticsSnapshot.TotalCpuMs:F2} ms");
+        if (diagnosticsSnapshot.LoadPipeline is { } loadPipeline)
+        {
+            ImGui.Text($"Load: {loadPipeline.TotalBuildMs:F2} ms total");
+            ImGui.Text($"Cache: bootstrap {(loadPipeline.SessionBootstrapCacheHit ? "hit" : "miss")}, alpha {loadPipeline.AlphaTileFrameCacheHitCount}/{loadPipeline.AlphaTileFrameRequestCount}");
+        }
         ImGui.Text($"GPU: {_worldGpuPreviewRenderer?.TerrainTriangleCount ?? 0} terrain tris / {_worldGpuPreviewRenderer?.MarkerCount ?? 0} markers");
         ImGui.Separator();
         ImGui.TextDisabled("Composition");
@@ -3494,6 +3499,21 @@ internal sealed class WowViewerDesktopApp : IDisposable
         ImGui.Text($"Object Filters: wmo={diagnosticsSnapshot.PassOptions.WmosVisible} doodads={diagnosticsSnapshot.PassOptions.DoodadsVisible}");
         ImGui.Text($"Total Cpu Ms: {diagnosticsSnapshot.TotalCpuMs:F2}");
         ImGui.Separator();
+
+        if (diagnosticsSnapshot.LoadPipeline is { } loadPipeline)
+        {
+            ImGui.TextDisabled("Load Pipeline");
+            ImGui.Text($"Total Build Ms: {loadPipeline.TotalBuildMs:F2}");
+            ImGui.Text($"Session Bootstrap: {loadPipeline.SessionBootstrapMs:F2} ms ({(loadPipeline.SessionBootstrapCacheHit ? "cache hit" : "cache miss")})");
+            ImGui.Text($"Selected Tile Resolve: {loadPipeline.SelectedTileResolveMs:F2} ms");
+            ImGui.Text($"Active Terrain Build: {loadPipeline.ActiveTerrainBuildMs:F2} ms");
+            ImGui.Text($"Alpha Tile Cache: {loadPipeline.AlphaTileFrameCacheHitCount}/{loadPipeline.AlphaTileFrameRequestCount}");
+            ImGui.Text($"Terrain Snapshot Build: {loadPipeline.TerrainSnapshotBuildMs:F2} ms");
+            ImGui.Text($"Instance Build: {loadPipeline.InstanceBuildMs:F2} ms");
+            ImGui.Text($"Visibility + Pass: {loadPipeline.VisibilityPassMs:F2} ms");
+            ImGui.Text($"Embedded Alpha Path: {loadPipeline.UsesEmbeddedAlphaPath}");
+            ImGui.Separator();
+        }
 
         ImGui.TextDisabled("Composition Layers");
         foreach (WowViewerWorldCompositionLayerSnapshot layer in diagnosticsSnapshot.CompositionLayers)
@@ -4684,11 +4704,16 @@ internal sealed class WowViewerDesktopApp : IDisposable
         WowViewerWorldSceneSnapshot sceneSnapshot = _worldSceneHost.SceneSnapshot;
         WowViewerWorldAssetState assetState = _worldSceneHost.AssetState;
         WowViewerWorldDiagnosticsSnapshot diagnosticsSnapshot = _worldSceneHost.DiagnosticsSnapshot;
+        WowViewerWorldLoadPipelineDiagnostics? loadPipeline = diagnosticsSnapshot.LoadPipeline;
         DeletePreviewTexture();
         if (_worldSceneHost.TerrainPreviewSnapshot is { } terrainPreviewSnapshot)
             UploadWorldTerrainPreviewTexture(terrainPreviewSnapshot);
-        _statusMessage = $"Opened selected tile runtime frame for {sceneSnapshot.ResolvedMapDirectory} tile ({sceneSnapshot.SelectedTileX},{sceneSnapshot.SelectedTileY}) in {diagnosticsSnapshot.TotalCpuMs:F1} ms.";
-        _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, WMO {assetState.VisibleWmoCount}/{assetState.WmoInstanceCount}, doodads {assetState.VisibleMdxCount}/{assetState.MdxInstanceCount}, terrain {sceneSnapshot.TerrainVisualWidth}x{sceneSnapshot.TerrainVisualHeight}, pending {assetState.PendingAssetLoadCount}";
+        string cacheSummary = loadPipeline is null
+            ? string.Empty
+            : $" bootstrap {(loadPipeline.SessionBootstrapCacheHit ? "hit" : "miss")}, alpha tiles {loadPipeline.AlphaTileFrameCacheHitCount}/{loadPipeline.AlphaTileFrameRequestCount}";
+        double statusLoadMs = loadPipeline?.TotalBuildMs ?? diagnosticsSnapshot.TotalCpuMs;
+        _statusMessage = $"Opened selected tile runtime frame for {sceneSnapshot.ResolvedMapDirectory} tile ({sceneSnapshot.SelectedTileX},{sceneSnapshot.SelectedTileY}) in {statusLoadMs:F1} ms.{cacheSummary}";
+        _lastLoadSummary = $"GPU {_session.VisualSize}x{_session.VisualSize}, WMO {assetState.VisibleWmoCount}/{assetState.WmoInstanceCount}, doodads {assetState.VisibleMdxCount}/{assetState.MdxInstanceCount}, terrain {sceneSnapshot.TerrainVisualWidth}x{sceneSnapshot.TerrainVisualHeight}, pending {assetState.PendingAssetLoadCount}, load {(loadPipeline?.SessionBootstrapCacheHit == true ? "bootstrap-hit" : "bootstrap-miss")}, alpha-cache {loadPipeline?.AlphaTileFrameCacheHitCount ?? 0}/{loadPipeline?.AlphaTileFrameRequestCount ?? 0}";
     }
 
     private unsafe void UploadPreviewTexture(M2SoftwareVisualSnapshot snapshot)

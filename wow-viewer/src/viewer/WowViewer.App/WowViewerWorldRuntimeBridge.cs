@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using System.Collections.Concurrent;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Maps;
@@ -110,6 +111,57 @@ internal sealed class WowViewerWorldPlacementAuditResult
     public IReadOnlyList<WowViewerWorldPlacementTileSummary> TopTiles { get; }
 }
 
+internal sealed class WowViewerWorldLoadPipelineDiagnostics
+{
+    public WowViewerWorldLoadPipelineDiagnostics(
+        double totalBuildMs,
+        double sessionBootstrapMs,
+        bool sessionBootstrapCacheHit,
+        double selectedTileResolveMs,
+        double activeTerrainBuildMs,
+        int alphaTileFrameRequestCount,
+        int alphaTileFrameCacheHitCount,
+        double terrainSnapshotBuildMs,
+        double instanceBuildMs,
+        double visibilityPassMs,
+        bool usesEmbeddedAlphaPath)
+    {
+        TotalBuildMs = totalBuildMs;
+        SessionBootstrapMs = sessionBootstrapMs;
+        SessionBootstrapCacheHit = sessionBootstrapCacheHit;
+        SelectedTileResolveMs = selectedTileResolveMs;
+        ActiveTerrainBuildMs = activeTerrainBuildMs;
+        AlphaTileFrameRequestCount = alphaTileFrameRequestCount;
+        AlphaTileFrameCacheHitCount = alphaTileFrameCacheHitCount;
+        TerrainSnapshotBuildMs = terrainSnapshotBuildMs;
+        InstanceBuildMs = instanceBuildMs;
+        VisibilityPassMs = visibilityPassMs;
+        UsesEmbeddedAlphaPath = usesEmbeddedAlphaPath;
+    }
+
+    public double TotalBuildMs { get; }
+
+    public double SessionBootstrapMs { get; }
+
+    public bool SessionBootstrapCacheHit { get; }
+
+    public double SelectedTileResolveMs { get; }
+
+    public double ActiveTerrainBuildMs { get; }
+
+    public int AlphaTileFrameRequestCount { get; }
+
+    public int AlphaTileFrameCacheHitCount { get; }
+
+    public double TerrainSnapshotBuildMs { get; }
+
+    public double InstanceBuildMs { get; }
+
+    public double VisibilityPassMs { get; }
+
+    public bool UsesEmbeddedAlphaPath { get; }
+}
+
 internal sealed class WowViewerWorldRuntimeFrameResult
 {
     public WowViewerWorldRuntimeFrameResult(
@@ -136,6 +188,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         WorldMdxRenderPlan mdxRenderPlan,
         WorldFramePassOptions passOptions,
         WorldRenderFrameStats stats,
+        WowViewerWorldLoadPipelineDiagnostics loadPipeline,
         WorldRenderCompositionFrame composition,
         bool objectPhaseExecuted,
         string optimizationHint,
@@ -170,6 +223,7 @@ internal sealed class WowViewerWorldRuntimeFrameResult
         MdxRenderPlan = mdxRenderPlan;
         PassOptions = passOptions;
         Stats = stats;
+        LoadPipeline = loadPipeline;
         Composition = composition;
         ObjectPhaseExecuted = objectPhaseExecuted;
         OptimizationHint = optimizationHint;
@@ -227,6 +281,8 @@ internal sealed class WowViewerWorldRuntimeFrameResult
 
     public WorldRenderFrameStats Stats { get; }
 
+    public WowViewerWorldLoadPipelineDiagnostics LoadPipeline { get; }
+
     public WorldRenderCompositionFrame Composition { get; }
 
     public bool ObjectPhaseExecuted { get; }
@@ -250,6 +306,15 @@ internal static class WowViewerWorldRuntimeBridge
 {
     internal const float TileSize = 533.33333f;
     internal const float MapOrigin = 32.0f * TileSize;
+
+    private static readonly ConcurrentDictionary<string, WowViewerWorldRuntimeTileFrame> AlphaTileFrameCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed class WorldLoadBuildCollector
+    {
+        public int AlphaTileFrameRequestCount { get; set; }
+
+        public int AlphaTileFrameCacheHitCount { get; set; }
+    }
 
     private readonly record struct LocalBoundsResolution(bool AssetReady, Vector3 LocalMin, Vector3 LocalMax, bool HasOpaqueRenderContent, bool HasTransparentRenderContent);
 
@@ -334,9 +399,13 @@ internal static class WowViewerWorldRuntimeBridge
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(archiveCatalog);
 
-        WowViewerWorldSessionBootstrapResult session = WowViewerWorldSessionBootstrapper.Open(
+        Stopwatch buildStopwatch = Stopwatch.StartNew();
+
+        WowViewerWorldSessionBootstrapTelemetry bootstrapTelemetry = WowViewerWorldSessionBootstrapper.OpenWithTelemetry(
             new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot),
             archiveCatalog);
+        WowViewerWorldSessionBootstrapResult session = bootstrapTelemetry.Session;
+        bool usesEmbeddedAlphaPath = UsesEmbeddedAlphaWdt(session);
 
         WorldFramePassOptions framePassOptions = new(
             objectsVisible: request.PassOptions.ObjectsVisible,
@@ -348,21 +417,30 @@ internal static class WowViewerWorldRuntimeBridge
             liquidVisible: request.PassOptions.LiquidVisible,
             overlayVisible: request.PassOptions.OverlayVisible);
 
+        Stopwatch selectedTileResolveStopwatch = Stopwatch.StartNew();
         ((int tileX, int tileY) selectedTile, AdtPlacementCatalog placementCatalog, string placementSourcePath) =
             ResolveTileAndPlacements(session, request.TileX, request.TileY, archiveCatalog);
+        selectedTileResolveStopwatch.Stop();
+
         WorldWdlTileData wdlTileData = WorldWdlTileData.Missing("WDL disabled for World Session; ADT terrain is the authoritative surface.", selectedTile.tileX, selectedTile.tileY);
-        IReadOnlyList<WowViewerWorldRuntimeTileFrame> activeTerrainTiles = BuildActiveTerrainTiles(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog);
+        WorldLoadBuildCollector loadCollector = new();
+        Stopwatch activeTerrainBuildStopwatch = Stopwatch.StartNew();
+        IReadOnlyList<WowViewerWorldRuntimeTileFrame> activeTerrainTiles = BuildActiveTerrainTiles(session, selectedTile.tileX, selectedTile.tileY, archiveCatalog, loadCollector);
+        activeTerrainBuildStopwatch.Stop();
         WowViewerWorldRuntimeTileFrame selectedTerrainTile = activeTerrainTiles.FirstOrDefault(tile => tile.TileX == selectedTile.tileX && tile.TileY == selectedTile.tileY)
             ?? throw new InvalidDataException($"Selected tile ({selectedTile.tileX},{selectedTile.tileY}) was not loaded into the active terrain window.");
         WorldTileStageSummary tileStageSummary = BuildAggregateTileStageSummary(activeTerrainTiles, selectedTile.tileX, selectedTile.tileY);
         WorldTerrainTileData terrainTileData = selectedTerrainTile.TerrainTileData;
+        Stopwatch terrainSnapshotStopwatch = Stopwatch.StartNew();
         WorldTerrainVisualSnapshot terrainVisualSnapshot = WorldTerrainVisualSnapshotBuilder.Build(terrainTileData);
+        terrainSnapshotStopwatch.Stop();
         WorldLiquidTileData liquidTileData = selectedTerrainTile.LiquidTileData;
         placementCatalog = selectedTerrainTile.PlacementCatalog;
         placementSourcePath = selectedTerrainTile.PlacementSourcePath;
 
         Dictionary<string, bool> assetReadyLookup = new(StringComparer.OrdinalIgnoreCase);
 
+        Stopwatch instanceBuildStopwatch = Stopwatch.StartNew();
         List<WorldObjectInstance> wmoInstances = [];
         List<WorldObjectInstance> mdxInstances = [];
         foreach (WowViewerWorldRuntimeTileFrame activeTile in activeTerrainTiles)
@@ -373,6 +451,7 @@ internal static class WowViewerWorldRuntimeBridge
         IReadOnlyList<WorldObjectInstance> skyboxBackdropInstances = mdxInstances
             .Where(static instance => WorldSkyboxBackdropClassifier.IsBackdropModelPath(instance.ModelPath))
             .ToArray();
+        instanceBuildStopwatch.Stop();
 
         int readyWmoCount = wmoInstances.Count(instance => assetReadyLookup.TryGetValue(instance.ModelKey, out bool ready) && ready);
         int readyMdxCount = mdxInstances.Count(instance => assetReadyLookup.TryGetValue(instance.ModelKey, out bool ready) && ready);
@@ -534,6 +613,8 @@ internal static class WowViewerWorldRuntimeBridge
 
         totalStopwatch.Stop();
 
+        buildStopwatch.Stop();
+
         WorldRenderFrameStats stats = new(
             TotalCpuMs: totalStopwatch.Elapsed.TotalMilliseconds,
             PendingAssetLoadCount: pendingAssetKeys.Count,
@@ -562,6 +643,19 @@ internal static class WowViewerWorldRuntimeBridge
             MdxTransparentSort: new WorldRenderStageStats(mdxTransparentSortMs, visibility.VisibleMdx.Count, passFrame.TransparentVisibleMdxRoutes.Count),
             MdxTransparentSubmission: new WorldRenderStageStats(mdxTransparentSubmissionMs, passFrame.TransparentVisibleMdxRoutes.Count, transparentBatchedMdxCount + transparentUnbatchedMdxCount),
             Overlay: new WorldRenderStageStats(0));
+
+        WowViewerWorldLoadPipelineDiagnostics loadPipeline = new(
+            totalBuildMs: buildStopwatch.Elapsed.TotalMilliseconds,
+            sessionBootstrapMs: bootstrapTelemetry.ResolveDuration.TotalMilliseconds,
+            sessionBootstrapCacheHit: bootstrapTelemetry.CacheHit,
+            selectedTileResolveMs: selectedTileResolveStopwatch.Elapsed.TotalMilliseconds,
+            activeTerrainBuildMs: activeTerrainBuildStopwatch.Elapsed.TotalMilliseconds,
+            alphaTileFrameRequestCount: loadCollector.AlphaTileFrameRequestCount,
+            alphaTileFrameCacheHitCount: loadCollector.AlphaTileFrameCacheHitCount,
+            terrainSnapshotBuildMs: terrainSnapshotStopwatch.Elapsed.TotalMilliseconds,
+            instanceBuildMs: instanceBuildStopwatch.Elapsed.TotalMilliseconds,
+            visibilityPassMs: totalStopwatch.Elapsed.TotalMilliseconds,
+            usesEmbeddedAlphaPath: usesEmbeddedAlphaPath);
 
         WorldMdxRenderPlan mdxRenderPlan = WorldMdxRenderPlanBuilder.Build(passFrame, visibility);
         WorldRenderCompositionFrame composition = WorldRenderCompositionBuilder.Build(
@@ -600,6 +694,7 @@ internal static class WowViewerWorldRuntimeBridge
             mdxRenderPlan,
             appliedPassOptions,
             stats,
+            loadPipeline,
             composition,
             objectPhaseExecuted,
             WorldRenderOptimizationAdvisor.BuildHint(stats),
@@ -615,10 +710,11 @@ internal static class WowViewerWorldRuntimeBridge
         WowViewerWorldSessionBootstrapResult session,
         int selectedTileX,
         int selectedTileY,
-        IArchiveCatalog archiveCatalog)
+        IArchiveCatalog archiveCatalog,
+        WorldLoadBuildCollector loadCollector)
     {
         if (UsesEmbeddedAlphaWdt(session))
-            return [BuildTerrainTileFrame(session, selectedTileX, selectedTileY, archiveCatalog)];
+            return [BuildTerrainTileFrame(session, selectedTileX, selectedTileY, archiveCatalog, loadCollector)];
 
         HashSet<(int TileX, int TileY)> occupiedTiles = session.OccupiedTiles
             .Select(static tile => (tile.TileX, tile.TileY))
@@ -638,7 +734,7 @@ internal static class WowViewerWorldRuntimeBridge
 
                 try
                 {
-                    activeTiles.Add(BuildTerrainTileFrame(session, tileX, tileY, archiveCatalog));
+                    activeTiles.Add(BuildTerrainTileFrame(session, tileX, tileY, archiveCatalog, loadCollector));
                 }
                 catch (FileNotFoundException) when (!isSelectedTile)
                 {
@@ -656,6 +752,31 @@ internal static class WowViewerWorldRuntimeBridge
     }
 
     private static WowViewerWorldRuntimeTileFrame BuildTerrainTileFrame(
+        WowViewerWorldSessionBootstrapResult session,
+        int tileX,
+        int tileY,
+        IArchiveCatalog archiveCatalog,
+        WorldLoadBuildCollector loadCollector)
+    {
+        if (UsesEmbeddedAlphaWdt(session))
+        {
+            loadCollector.AlphaTileFrameRequestCount++;
+            string cacheKey = BuildAlphaTileFrameCacheKey(session, tileX, tileY);
+            if (AlphaTileFrameCache.TryGetValue(cacheKey, out WowViewerWorldRuntimeTileFrame? cached))
+            {
+                loadCollector.AlphaTileFrameCacheHitCount++;
+                return cached;
+            }
+
+            WowViewerWorldRuntimeTileFrame alphaFrame = BuildTerrainTileFrameCore(session, tileX, tileY, archiveCatalog);
+            AlphaTileFrameCache[cacheKey] = alphaFrame;
+            return alphaFrame;
+        }
+
+        return BuildTerrainTileFrameCore(session, tileX, tileY, archiveCatalog);
+    }
+
+    private static WowViewerWorldRuntimeTileFrame BuildTerrainTileFrameCore(
         WowViewerWorldSessionBootstrapResult session,
         int tileX,
         int tileY,
@@ -684,6 +805,12 @@ internal static class WowViewerWorldRuntimeBridge
     private static bool UsesEmbeddedAlphaWdt(WowViewerWorldSessionBootstrapResult session)
     {
         return session.WdtSummary.MainCellSizeBytes == 16;
+    }
+
+    private static string BuildAlphaTileFrameCacheKey(WowViewerWorldSessionBootstrapResult session, int tileX, int tileY)
+    {
+        ViewerIoSourceKey sourceKey = ViewerIoSourceKey.Create(session.ClientRoot, session.BuildLabel, session.LooseOverlayRoot);
+        return string.Join('|', sourceKey.Signature, session.ResolvedMapDirectory, tileX, tileY);
     }
 
     private static WorldTileStageSummary BuildAggregateTileStageSummary(
