@@ -13,6 +13,8 @@
 	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldAssetInventory.cs` as the first host-managed asset inventory seam; the host now derives `WowViewerWorldAssetState` from an inventory pass that tracks referenced model keys and pending-load samples rather than snapshotting asset state directly from the frame in one static call
 	- extended `WowViewerWorldAssetInventory` with queue-shaped WMO/MDX ownership closer to `MdxViewer.WorldAssetManager`: distinct pending families, priority-pending sets, ready asset-family counts, and ordered pending-key samples are now host-derived state instead of a direct runtime-frame copy
 	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldNavigatorState.cs` and moved world object navigator entry building, default-selection selection, and selection resolution behind the host so compact world-session object navigation and inspector UI no longer rebuild that data directly from the raw frame in `WowViewerDesktopApp`
+	- added a real host-side asset queue consumer seam: `WowViewerWorldSceneHost.ProcessPendingAssetLoads(...)` now drives `WowViewerWorldAssetInventory.ProcessPendingLoads(...)` through `ViewerIoService.TryReadVirtualFile(...)` during background update ticks so queue ownership now performs bounded work instead of only storing pending keys
+	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSpatialSnapshot.cs` and rewired the object marker canvas plus canvas selection mapping to use host-owned planar bounds and host-owned navigator entries instead of raw-frame `PlanarMin` / `PlanarMax`, `WmoInstances`, `MdxInstances`, and visibility lists
 	- kept the current world path GPU-accelerated by continuing to render through `WorldGpuPreviewRenderer` from the new host rather than falling back to a CPU-side scene surface
 
 - validation:
@@ -20,7 +22,7 @@
 
 - boundary:
 	- this is a world-ownership extraction seam, not yet a full `MdxViewer.WorldScene` or `WorldAssetManager` port
-	- `WowViewerDesktopApp` still consumes the existing runtime-frame shape for object-canvas spatial mapping, debug views, and other remaining bridge-backed world metrics, and `WowViewerWorldRuntimeBridge` still builds that current runtime frame
+	- `WowViewerDesktopApp` still consumes the existing runtime-frame shape for non-canvas debug metrics and the active GPU renderer still consumes the bridge-built runtime frame; `WowViewerWorldRuntimeBridge` still builds that current runtime frame
 
 ### Apr 25, 2026 - hard reset: current wow-viewer world preview branch is no longer the target implementation
 

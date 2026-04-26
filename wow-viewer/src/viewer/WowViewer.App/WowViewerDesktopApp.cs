@@ -406,6 +406,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
     {
         ProcessPendingWorldMapDiscovery();
         ProcessPendingWorldSpawnPicker();
+
+        if (_session.WorkspaceMode == WowViewerWorkspaceMode.WorldSession && _currentWorldRuntimeFrame != null)
+            _worldSceneHost.ProcessPendingAssetLoads(maxLoads: 4, maxBudgetMs: 2.0);
     }
 
     private void ProcessPendingWorldMapDiscovery()
@@ -2799,16 +2802,20 @@ internal sealed class WowViewerDesktopApp : IDisposable
         }
     }
 
-    private void DrawWorldDebugViews(WowViewerWorldRuntimeFrameResult result)
+    private void DrawWorldDebugViews()
     {
+        WowViewerWorldDiagnosticsSnapshot diagnosticsSnapshot = _worldSceneHost.DiagnosticsSnapshot;
+        WowViewerWorldSpatialSnapshot spatialSnapshot = _worldSceneHost.SpatialSnapshot;
+
         if (_worldTerrainPreviewTextureHandle != 0)
         {
             ImGui.TextDisabled("Software Terrain Preview");
             Vector2 previewAvailable = ImGui.GetContentRegionAvail();
             float previewSize = MathF.Max(180f, MathF.Min(previewAvailable.X, 320f));
             ImGui.Image((nint)_worldTerrainPreviewTextureHandle, new Vector2(previewSize, previewSize));
-            ImGui.TextDisabled($"{result.TerrainVisualSnapshot.Width}x{result.TerrainVisualSnapshot.Height} samples={result.TerrainVisualSnapshot.SampledPixelCount}");
-            ImGui.TextDisabled($"Range {FormatTerrainHeightRange(result.TerrainTileData)} hash={result.TerrainVisualSnapshot.VisualHash}");
+            string terrainRange = diagnosticsSnapshot.TerrainTileData is null ? "n/a" : FormatTerrainHeightRange(diagnosticsSnapshot.TerrainTileData);
+            ImGui.TextDisabled($"{diagnosticsSnapshot.TerrainPreviewWidth}x{diagnosticsSnapshot.TerrainPreviewHeight} samples={diagnosticsSnapshot.TerrainPreviewSampledPixelCount}");
+            ImGui.TextDisabled($"Range {terrainRange} hash={diagnosticsSnapshot.TerrainVisualHash}");
         }
 
         ImGui.Separator();
@@ -2819,8 +2826,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         Vector2 origin = ImGui.GetCursorScreenPos();
         ImGui.InvisibleButton("worldRuntimeCanvas", canvas);
         if (ImGui.IsItemHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-            TrySelectWorldObjectAtCanvasPoint(result, origin, canvas, ImGui.GetIO().MousePos);
-        DrawWorldRuntimeCanvas(origin, canvas, result);
+            TrySelectWorldObjectAtCanvasPoint(spatialSnapshot, origin, canvas, ImGui.GetIO().MousePos);
+        DrawWorldRuntimeCanvas(origin, canvas, spatialSnapshot);
     }
 
     private void DrawWorldMinimapWindow()
@@ -2901,7 +2908,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
                 DrawWorldDiagnostics();
 
             if (_currentWorldRuntimeFrame != null && ImGui.CollapsingHeader("Debug Views", ImGuiTreeNodeFlags.None))
-                DrawWorldDebugViews(_currentWorldRuntimeFrame);
+                DrawWorldDebugViews();
 
             if (ImGui.CollapsingHeader("Runtime Boundaries", ImGuiTreeNodeFlags.None))
                 DrawBoundaryContents();
@@ -4941,7 +4948,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             : string.Join(",", summary.DistinctNonZeroValues.Select(static value => $"0x{value.Value:x}:{value.TileCount}"));
     }
 
-    private void DrawWorldRuntimeCanvas(Vector2 origin, Vector2 size, WowViewerWorldRuntimeFrameResult result)
+    private void DrawWorldRuntimeCanvas(Vector2 origin, Vector2 size, WowViewerWorldSpatialSnapshot spatialSnapshot)
     {
         ImDrawListPtr drawList = ImGui.GetWindowDrawList();
         uint background = ImGui.ColorConvertFloat4ToU32(new Vector4(0.08f, 0.09f, 0.11f, 1.0f));
@@ -4950,25 +4957,26 @@ internal sealed class WowViewerDesktopApp : IDisposable
         uint wmoVisibleColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.98f, 0.76f, 0.36f, 1.0f));
         uint mdxColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.30f, 0.66f, 0.94f, 0.28f));
         uint mdxVisibleColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.40f, 0.82f, 1.0f, 1.0f));
+        WowViewerWorldNavigatorState navigatorState = _worldSceneHost.NavigatorState;
+        WowViewerWorldSceneSnapshot sceneSnapshot = _worldSceneHost.SceneSnapshot;
 
         drawList.AddRectFilled(origin, origin + size, background, 6f);
         drawList.AddRect(origin, origin + size, border, 6f, ImDrawFlags.None, 1.5f);
 
-        foreach (WorldObjectInstance instance in result.WmoInstances)
-            drawList.AddCircleFilled(MapWorldPositionToCanvas(instance.PlacementPosition, origin, size, result), 2.5f, wmoColor);
-
-        foreach (WorldObjectInstance instance in result.MdxInstances)
-            drawList.AddCircleFilled(MapWorldPositionToCanvas(instance.PlacementPosition, origin, size, result), 2.0f, mdxColor);
-
-        foreach (var visible in result.Visibility.VisibleWmos)
-            drawList.AddCircleFilled(MapWorldPositionToCanvas(visible.Instance.PlacementPosition, origin, size, result), 3.5f, wmoVisibleColor);
-
-        foreach (var visible in result.Visibility.VisibleMdx)
-            drawList.AddCircleFilled(MapWorldPositionToCanvas(visible.Instance.PlacementPosition, origin, size, result), 3.0f, mdxVisibleColor);
+        foreach (WorldNavigatorEntry entry in navigatorState.Entries)
+        {
+            uint color = entry.Kind == WorldSelectionKind.Wmo
+                ? entry.IsVisible ? wmoVisibleColor : wmoColor
+                : entry.IsVisible ? mdxVisibleColor : mdxColor;
+            float radius = entry.Kind == WorldSelectionKind.Wmo
+                ? entry.IsVisible ? 3.5f : 2.5f
+                : entry.IsVisible ? 3.0f : 2.0f;
+            drawList.AddCircleFilled(MapWorldPositionToCanvas(entry.Instance.PlacementPosition, origin, size, spatialSnapshot), radius, color);
+        }
 
         if (_selectedWorldObject.HasValue && _worldSceneHost.NavigatorState.TryResolveEntry(_selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
         {
-            Vector2 center = MapWorldPositionToCanvas(selectedEntry.Instance.PlacementPosition, origin, size, result);
+            Vector2 center = MapWorldPositionToCanvas(selectedEntry.Instance.PlacementPosition, origin, size, spatialSnapshot);
             uint selectedColor = selectedEntry.Kind == WorldSelectionKind.Wmo
                 ? ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.96f, 0.56f, 1.0f))
                 : ImGui.ColorConvertFloat4ToU32(new Vector4(0.72f, 0.96f, 1.0f, 1.0f));
@@ -4976,13 +4984,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
             drawList.AddCircle(center, selectedEntry.Kind == WorldSelectionKind.Wmo ? 10f : 9f, selectedColor, 0, 1f);
         }
 
-        drawList.AddText(origin + new Vector2(8f, 8f), border, $"tile ({result.SelectedTileX},{result.SelectedTileY})");
+        drawList.AddText(origin + new Vector2(8f, 8f), border, $"tile ({sceneSnapshot.SelectedTileX},{sceneSnapshot.SelectedTileY})");
     }
 
-    private static Vector2 MapWorldPositionToCanvas(Vector3 position, Vector2 origin, Vector2 size, WowViewerWorldRuntimeFrameResult result)
+    private static Vector2 MapWorldPositionToCanvas(Vector3 position, Vector2 origin, Vector2 size, WowViewerWorldSpatialSnapshot spatialSnapshot)
     {
-        Vector2 planarMin = result.PlanarMin;
-        Vector2 planarMax = result.PlanarMax;
+        Vector2 planarMin = spatialSnapshot.PlanarMin;
+        Vector2 planarMax = spatialSnapshot.PlanarMax;
         float width = MathF.Max(1f, planarMax.X - planarMin.X);
         float height = MathF.Max(1f, planarMax.Y - planarMin.Y);
         float nx = 1f - ((position.Y - planarMin.Y) / height);
@@ -4990,7 +4998,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         return new Vector2(origin.X + (nx * size.X), origin.Y + (ny * size.Y));
     }
 
-    private void TrySelectWorldObjectAtCanvasPoint(WowViewerWorldRuntimeFrameResult result, Vector2 origin, Vector2 size, Vector2 mousePosition)
+    private void TrySelectWorldObjectAtCanvasPoint(WowViewerWorldSpatialSnapshot spatialSnapshot, Vector2 origin, Vector2 size, Vector2 mousePosition)
     {
         WorldNavigatorEntry? nearestVisible = null;
         float nearestVisibleDistanceSq = float.MaxValue;
@@ -5002,7 +5010,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         foreach (WorldNavigatorEntry entry in navigatorState.Entries)
         {
-            Vector2 center = MapWorldPositionToCanvas(entry.Instance.PlacementPosition, origin, size, result);
+            Vector2 center = MapWorldPositionToCanvas(entry.Instance.PlacementPosition, origin, size, spatialSnapshot);
             float distanceSq = Vector2.DistanceSquared(center, mousePosition);
             if (distanceSq > pickRadiusSq)
                 continue;

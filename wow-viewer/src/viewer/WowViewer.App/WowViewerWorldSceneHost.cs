@@ -5,6 +5,8 @@ namespace WowViewer.App;
 internal sealed class WowViewerWorldSceneHost : IDisposable
 {
     private readonly WowViewerWorldAssetInventory _assetInventory = new();
+    private IViewerIoService? _viewerIoService;
+    private ViewerIoSourceKey _sourceKey;
     private WorldGpuPreviewRenderer? _renderer;
     private string _rendererSourceSignature = string.Empty;
 
@@ -24,6 +26,8 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
 
     public WowViewerWorldNavigatorState NavigatorState { get; private set; } = WowViewerWorldNavigatorState.Empty;
 
+    public WowViewerWorldSpatialSnapshot SpatialSnapshot { get; private set; } = WowViewerWorldSpatialSnapshot.Empty;
+
     public void Dispose()
     {
         _renderer?.Dispose();
@@ -35,11 +39,14 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
     {
         CurrentSession = null;
         CurrentFrame = null;
+        _viewerIoService = null;
+        _sourceKey = default;
         _assetInventory.Reset();
         AssetState = WowViewerWorldAssetState.Empty;
         SceneSnapshot = WowViewerWorldSceneSnapshot.Empty;
         DiagnosticsSnapshot = WowViewerWorldDiagnosticsSnapshot.Empty;
         NavigatorState = WowViewerWorldNavigatorState.Empty;
+        SpatialSnapshot = WowViewerWorldSpatialSnapshot.Empty;
         _renderer?.ClearPreview();
         Camera.ResetToIdentity();
     }
@@ -71,11 +78,30 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
     {
         CurrentSession = runtimeFrame.Session;
         CurrentFrame = runtimeFrame;
+        _viewerIoService = viewerIoService;
+        _sourceKey = sourceKey;
         _assetInventory.ObserveRuntimeFrame(runtimeFrame);
         AssetState = _assetInventory.CreateState();
         SceneSnapshot = WowViewerWorldSceneSnapshot.FromRuntimeFrame(runtimeFrame);
         DiagnosticsSnapshot = WowViewerWorldDiagnosticsSnapshot.FromRuntimeFrame(runtimeFrame);
         NavigatorState = WowViewerWorldNavigatorState.FromRuntimeFrame(runtimeFrame);
+        SpatialSnapshot = WowViewerWorldSpatialSnapshot.FromRuntimeFrame(runtimeFrame);
         EnsureRenderer(gl, viewerIoService, sourceKey, sourceSignature)?.LoadPreview(runtimeFrame, Camera, ignoreTerrainHoles, showHoleOverlay);
+    }
+
+    public int ProcessPendingAssetLoads(int maxLoads = 2, double maxBudgetMs = 4.0)
+    {
+        if (_viewerIoService == null || !_sourceKey.HasClientRoot)
+            return 0;
+
+        int processed = _assetInventory.ProcessPendingLoads(
+            request => _viewerIoService.TryReadVirtualFile(_sourceKey, request.ModelKey, out _, out _),
+            maxLoads,
+            maxBudgetMs);
+
+        if (processed > 0)
+            AssetState = _assetInventory.CreateState();
+
+        return processed;
     }
 }

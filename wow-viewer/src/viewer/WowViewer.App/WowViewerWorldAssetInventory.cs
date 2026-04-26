@@ -2,6 +2,8 @@ using WowViewer.Core.Runtime.World;
 
 namespace WowViewer.App;
 
+internal readonly record struct WowViewerWorldPendingAssetLoad(string ModelKey, WorldSelectionKind Kind, bool Priority);
+
 internal sealed class WowViewerWorldAssetInventory
 {
     private readonly HashSet<string> _referencedWmoAssetKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -160,6 +162,33 @@ internal sealed class WowViewerWorldAssetInventory
             _priorityWmoLoads.Enqueue(modelKey);
     }
 
+    public int ProcessPendingLoads(Func<WowViewerWorldPendingAssetLoad, bool> processor, int maxLoads = 2, double maxBudgetMs = 4.0)
+    {
+        ArgumentNullException.ThrowIfNull(processor);
+        if (maxLoads <= 0 || maxBudgetMs <= 0)
+            return 0;
+
+        int processed = 0;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        while (processed < maxLoads && stopwatch.Elapsed.TotalMilliseconds < maxBudgetMs)
+        {
+            if (!TryDequeuePendingLoad(out WowViewerWorldPendingAssetLoad request))
+                break;
+
+            if (processor(request))
+            {
+                if (request.Kind == WorldSelectionKind.Wmo)
+                    MarkWmoReady(request.ModelKey);
+                else
+                    MarkMdxReady(request.ModelKey);
+            }
+
+            processed++;
+        }
+
+        return processed;
+    }
+
     private void MarkMdxReady(string modelKey)
     {
         if (string.IsNullOrWhiteSpace(modelKey))
@@ -178,6 +207,50 @@ internal sealed class WowViewerWorldAssetInventory
         _readyWmoAssetKeys.Add(modelKey);
         _queuedWmoLoads.Remove(modelKey);
         _priorityQueuedWmoLoads.Remove(modelKey);
+    }
+
+    private bool TryDequeuePendingLoad(out WowViewerWorldPendingAssetLoad request)
+    {
+        while (_priorityWmoLoads.TryDequeue(out string? wmoKey))
+        {
+            if (string.IsNullOrWhiteSpace(wmoKey) || !_queuedWmoLoads.Contains(wmoKey))
+                continue;
+
+            _priorityQueuedWmoLoads.Remove(wmoKey);
+            request = new WowViewerWorldPendingAssetLoad(wmoKey, WorldSelectionKind.Wmo, Priority: true);
+            return true;
+        }
+
+        while (_priorityMdxLoads.TryDequeue(out string? mdxKey))
+        {
+            if (string.IsNullOrWhiteSpace(mdxKey) || !_queuedMdxLoads.Contains(mdxKey))
+                continue;
+
+            _priorityQueuedMdxLoads.Remove(mdxKey);
+            request = new WowViewerWorldPendingAssetLoad(mdxKey, WorldSelectionKind.Mdx, Priority: true);
+            return true;
+        }
+
+        while (_pendingWmoLoads.TryDequeue(out string? queuedWmoKey))
+        {
+            if (string.IsNullOrWhiteSpace(queuedWmoKey) || !_queuedWmoLoads.Contains(queuedWmoKey))
+                continue;
+
+            request = new WowViewerWorldPendingAssetLoad(queuedWmoKey, WorldSelectionKind.Wmo, Priority: false);
+            return true;
+        }
+
+        while (_pendingMdxLoads.TryDequeue(out string? queuedMdxKey))
+        {
+            if (string.IsNullOrWhiteSpace(queuedMdxKey) || !_queuedMdxLoads.Contains(queuedMdxKey))
+                continue;
+
+            request = new WowViewerWorldPendingAssetLoad(queuedMdxKey, WorldSelectionKind.Mdx, Priority: false);
+            return true;
+        }
+
+        request = default;
+        return false;
     }
 
     private string[] BuildPendingAssetKeys()
