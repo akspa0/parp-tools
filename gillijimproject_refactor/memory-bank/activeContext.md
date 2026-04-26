@@ -1,5 +1,17 @@
 # Active Context
 
+## Apr 25, 2026 - hard reset: stop deepening the current wow-viewer world preview branch
+
+- the user explicitly rejected the current `wow-viewer` world branch as the wrong direction, not just a buggy implementation
+- concrete reason from the current code path:
+	- `WowViewerDesktopApp.LoadWorldSession()` still queues a custom app-side world build through `WowViewerWorldRuntimeBridge.Build(...)`
+	- `WowViewerWorldRuntimeBridge.Build(...)` still reopens the world session with `WowViewerWorldSessionBootstrapper.Open(...)` and assembles a synthetic CPU-side frame before the viewport can render anything
+	- the live world viewport is still controlled by `WorldGpuPreviewRenderer` and its custom camera/state contract instead of a direct port of `MdxViewer.Rendering.Camera` plus `WorldScene`
+- active direction after this reset:
+	- treat `MdxViewer.Rendering.Camera`, `MdxViewer.Terrain.WorldScene`, `MdxViewer.Terrain.WorldAssetManager`, `MdxViewer.Terrain.StandardTerrainAdapter`, `MdxViewer.Terrain.TerrainTileMeshBuilder`, `MdxViewer.Terrain.TerrainRenderer`, and `MdxViewer.MinimapHelpers` as the direct world-port source of truth
+	- treat the current `WowViewerWorldRuntimeBridge` plus `WorldGpuPreviewRenderer` world path as temporary bridge code only, not the target architecture to keep repairing
+	- do not spend more slices inventing a diagnostics-first world viewer or a WDL viewer; the target is a proper cut-away port of the working `MdxViewer` world path into `wow-viewer`
+
 ## Apr 25, 2026 - WowViewer World Session terrain now carries shared texture layers and the GPU preview samples real BLP terrain color
 
 - followed the user's correction that minimaps are not the priority; the next meaningful world-renderer slice is terrain texturing, then in-world WMO and MDX or M2 geometry

@@ -1,5 +1,16 @@
 # Progress
 
+### Apr 25, 2026 - hard reset: current wow-viewer world preview branch is no longer the target implementation
+
+- what changed:
+	- reset the active cut-away plan so the next world-viewer slices start from the working `MdxViewer` world ownership surfaces instead of continuing the current `WowViewerWorldRuntimeBridge` plus `WorldGpuPreviewRenderer` branch
+	- recorded the concrete failure mode in continuity: the current app still queues a custom CPU-built world frame and drives it through a custom preview renderer/camera contract rather than a direct port of `MdxViewer`'s world path
+	- promoted `MdxViewer.Rendering.Camera`, `WorldScene`, `WorldAssetManager`, `StandardTerrainAdapter`, `TerrainTileMeshBuilder`, `TerrainRenderer`, and `MinimapHelpers` to the explicit world-port source of truth for the restart
+
+- boundary:
+	- this is a direction reset and continuity correction, not yet the first code slice of the replacement port
+	- the current `wow-viewer` world session remains an invalid intermediate and should not be treated as the base architecture for future world-viewer work
+
 ### Apr 25, 2026 - moved wow-viewer World Session terrain from height-debug shading onto shared texture-layer ownership
 
 - what changed:

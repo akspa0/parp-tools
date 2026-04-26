@@ -49,7 +49,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             Version = version;
             OccupiedTileIndices = session is null
                 ? []
-                : session.OccupiedTiles.Select(static tile => (tile.TileY * 64) + tile.TileX).ToHashSet();
+                : session.OccupiedTiles.Select(static tile => (tile.TileX * 64) + tile.TileY).ToHashSet();
         }
 
         public string Signature { get; }
@@ -2053,8 +2053,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             {
                 Vector2 cellMin = origin + new Vector2(tileX * cellSize, tileY * cellSize);
                 Vector2 cellMax = cellMin + new Vector2(cellSize, cellSize);
-                (int sourceTileX, int sourceTileY) = PreviewSpawnTileToSourceTile(tileX, tileY);
-                int tileIndex = (sourceTileY * 64) + sourceTileX;
+                int tileIndex = (tileX * 64) + tileY;
                 bool occupied = state.OccupiedTileIndices.Contains(tileIndex);
                 uint fill = noDataColor;
 
@@ -2090,12 +2089,12 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private static (int sourceTileX, int sourceTileY) PreviewSpawnTileToSourceTile(int previewTileX, int previewTileY)
     {
-        return (previewTileY, previewTileX);
+        return (previewTileX, previewTileY);
     }
 
     private static (int previewTileX, int previewTileY) SourceSpawnTileToPreviewTile(int sourceTileX, int sourceTileY)
     {
-        return (sourceTileY, sourceTileX);
+        return (sourceTileX, sourceTileY);
     }
 
     private static string BuildWorldMapLabel(DiscoveredLooseWorldMap map)
@@ -4216,9 +4215,9 @@ internal sealed class WowViewerDesktopApp : IDisposable
             strafeStep += step;
         if (acceptsKeyboard && IsWorldCameraKeyDown(ImGuiKey.A, Key.A))
             strafeStep -= step;
-        if (acceptsKeyboard && IsWorldCameraKeyDown(ImGuiKey.E, Key.E))
-            verticalStep += step;
         if (acceptsKeyboard && IsWorldCameraKeyDown(ImGuiKey.Q, Key.Q))
+            verticalStep += step;
+        if (acceptsKeyboard && IsWorldCameraKeyDown(ImGuiKey.E, Key.E))
             verticalStep -= step;
 
         if (forwardStep != 0.0f || strafeStep != 0.0f || verticalStep != 0.0f)

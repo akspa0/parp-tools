@@ -3,9 +3,11 @@
 ## Status
 
 - status: active reset plan
-- intent: stop iterating on the current fragmented [`WowViewer.App`](../../wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs) shell and instead port the working interaction model from [`MdxViewer`](../src/MdxViewer/ViewerApp_Sidebars.cs) into `wow-viewer`
+- intent: hard-reset the current world-viewer direction; stop iterating on the current fragmented [`WowViewer.App`](../../wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs) world implementation and instead port the working world-viewer behavior from [`MdxViewer`](../src/MdxViewer) into `wow-viewer`
 - design rule: treat [`MdxViewer`](../src/MdxViewer) as the UI and interaction reference, but keep `wow-viewer` as the long-term code owner for runtime, rendering, and shared file I/O
 - porting rule: when `MdxViewer` already has working world behavior, use that exact code path as the functional reference and port it into `wow-viewer`; do not replace it with new guessed behavior just because the target renderer is newer or more GPU-oriented
+- reset rule: the current `WowViewerWorldRuntimeBridge` plus `WorldGpuPreviewRenderer` world path is no longer the target architecture for the viewer cut-away. It is temporary diagnostic code only. Do not keep deepening it as if it were the new world renderer.
+- no-WDL-viewer rule: the target is not a WDL viewer, not a synthetic object-marker preview, and not a diagnostics-first shell. The target is a direct port of the working `MdxViewer` world viewer behavior into clean `wow-viewer` ownership.
 - viewer-first rule: `wow-viewer` must act as a world viewer first and a diagnostics/tooling surface second; diagnostic panels are subordinate to the composed world image
 - aesthetic target: prioritize the 0.5.3 client feel for this project, because the long-term purpose is exploratory data tooling and low-resolution visual restoration over early-world data, not a generic modern asset inspector
 - Apr 24 correction: a one-tile diagnostic terrain preview is no longer an acceptable definition of "World Session"; the reset must produce a navigable multi-tile world viewport with minimap, layer controls, terrain texturing, and object rendering on the critical path
@@ -15,6 +17,28 @@
 - Apr 25 hardening correction: WDL is now disabled in `WowViewerWorldRuntimeBridge` itself, not only in the UI/session layer, and the world preview camera now uses position/yaw/pitch state like `MdxViewer` instead of a persistent look-at target
 - Apr 25 multi-tile correction: the World Session runtime now builds a bounded `3x3` active ADT terrain window around the selected tile and the GPU preview renders that ADT quilt; terrain existence, not placement-catalog existence, is the authority for loading a tile
 - Apr 25 terrain renderer correction: the world GPU preview no longer uses the CPU-sampled one-color-per-vertex terrain shortcut as the active texturing path; it now ports the working `MdxViewer` terrain GPU contract more directly with per-tile diffuse arrays, per-tile `64x64x256` alpha arrays, per-vertex layer indices, and shader-side terrain blending. Live GUI proof is still required.
+- Apr 25 hard reset: the user rejected the current world-viewer branch entirely. Treat the current app-side world path as a failed intermediate, not the base to keep fixing. The next work must start from `MdxViewer` world ownership surfaces and port them into `wow-viewer` cleanly.
+
+## Apr 25, 2026 Hard Reset - Start Over From The Working MdxViewer World Path
+
+The current `wow-viewer` world branch is wrong in kind, not just wrong in details.
+
+- `WowViewerDesktopApp.LoadWorldSession()` still queues a custom app-side runtime build through [`WowViewerWorldRuntimeBridge.Build(...)`](../../wow-viewer/src/viewer/WowViewer.App/WowViewerDesktopApp.cs), not a direct port of the working `MdxViewer` world load path
+- [`WowViewerWorldRuntimeBridge.Build(...)`](../../wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs) still reopens the world session with [`WowViewerWorldSessionBootstrapper.Open(...)`](../../wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs) and assembles a synthetic CPU frame before any world image appears
+- the live viewport is still driven by the custom [`WorldGpuPreviewRenderer`](../../wow-viewer/src/viewer/WowViewer.App/WorldGpuPreviewRenderer.cs) camera and scene contract rather than the working `MdxViewer` world camera and scene ownership
+- this is why terrain feels like disconnected tiles or objects and why camera behavior keeps drifting out of parity: the branch is still an invented preview architecture instead of a proper cut-away port
+
+From this point on, treat the following as the world-port source of truth, in this order:
+
+1. [`MdxViewer.Rendering.Camera`](../src/MdxViewer/Rendering/Camera.cs)
+2. [`MdxViewer.Terrain.WorldScene`](../src/MdxViewer/Terrain/WorldScene.cs)
+3. [`MdxViewer.Terrain.WorldAssetManager`](../src/MdxViewer/Terrain/WorldAssetManager.cs)
+4. [`MdxViewer.Terrain.StandardTerrainAdapter`](../src/MdxViewer/Terrain/StandardTerrainAdapter.cs)
+5. [`MdxViewer.Terrain.TerrainTileMeshBuilder`](../src/MdxViewer/Terrain/TerrainTileMeshBuilder.cs)
+6. [`MdxViewer.Terrain.TerrainRenderer`](../src/MdxViewer/Terrain/TerrainRenderer.cs)
+7. [`MdxViewer.MinimapHelpers`](../src/MdxViewer/MinimapHelpers.cs)
+
+The current `wow-viewer` world path should only survive where it cleanly hosts extracted ownership from those surfaces. Anything else is churn and must be cut away.
 
 ## Apr 24, 2026 Course Correction - Stop Treating The Preview As The Viewer
 
@@ -66,14 +90,16 @@ A `wow-viewer` world-viewer slice is not complete unless all relevant proof is t
 
 ### Runtime and rendering source of truth
 
-- [`WowViewerWorldRuntimeBridge`](../../wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs)
-- [`WorldGpuPreviewRenderer`](../../wow-viewer/src/viewer/WowViewer.App/WorldGpuPreviewRenderer.cs)
-- existing `wow-viewer` M2, WMO, and MDX GPU preview paths under [`wow-viewer/src/viewer/WowViewer.App`](../../wow-viewer/src/viewer/WowViewer.App)
-- for terrain-family behavior, use the working `MdxViewer` path as the behavior reference before changing `wow-viewer`:
+- for world-viewer behavior, the working `MdxViewer` path is now the direct runtime/rendering source of truth to port:
+  - scene ownership in [`WorldScene`](../src/MdxViewer/Terrain/WorldScene.cs)
+  - world asset streaming/ownership in [`WorldAssetManager`](../src/MdxViewer/Terrain/WorldAssetManager.cs)
+  - free-camera behavior in [`MdxViewer.Rendering.Camera`](../src/MdxViewer/Rendering/Camera.cs)
   - split-ADT sourcing and chunk ownership in [`StandardTerrainAdapter`](../src/MdxViewer/Terrain/StandardTerrainAdapter.cs)
   - GPU terrain-layer and alpha-array binding in [`TerrainTileMeshBuilder`](../src/MdxViewer/Terrain/TerrainTileMeshBuilder.cs)
   - terrain layer blend/material behavior in [`TerrainRenderer`](../src/MdxViewer/Terrain/TerrainRenderer.cs)
-- old [`WorldScene`](../src/MdxViewer/Terrain/WorldScene.cs) sky-dome and skybox handling is reference material only; new design ownership belongs in `wow-viewer`
+  - minimap screen/tile/world mapping in [`MinimapHelpers`](../src/MdxViewer/MinimapHelpers.cs)
+- existing `wow-viewer` M2, WMO, and MDX GPU preview paths remain useful reference inputs for standalone consumers only
+- [`WowViewerWorldRuntimeBridge`](../../wow-viewer/src/viewer/WowViewer.App/WowViewerWorldRuntimeBridge.cs) and [`WorldGpuPreviewRenderer`](../../wow-viewer/src/viewer/WowViewer.App/WorldGpuPreviewRenderer.cs) are no longer the design reference for the world cut-away and should not accumulate more bespoke world behavior
 
 ### World composition source of truth
 
@@ -194,6 +220,29 @@ Create one reusable viewer I/O service in `wow-viewer`, consumed by:
 ## Ordered Implementation Slices
 
 The original slices below remain historical context, but the active route is now the recovery track here. Do these in order unless the user explicitly redirects.
+
+### Recovery Slice Reset-A - Cut away from the current world preview branch
+
+- goal:
+  - stop treating the current app-side world preview stack as the new renderer to keep repairing
+- scope:
+  - mark `WowViewerWorldRuntimeBridge` and `WorldGpuPreviewRenderer` as temporary bridge code only
+  - stop adding new camera, terrain, or world-composition behavior there unless the change is a bounded extraction aid for the real port
+  - use `MdxViewer` world surfaces as the direct implementation checklist
+- proof:
+  - continuity files and next-slice selection no longer route world-viewer work back into the current synthetic preview architecture
+
+### Recovery Slice Reset-B - Port the MdxViewer camera and world ownership skeleton first
+
+- goal:
+  - re-establish world ownership around the working `MdxViewer` seams before touching more rendering details
+- scope:
+  - port `MdxViewer.Rendering.Camera` behavior directly into `wow-viewer`
+  - introduce a `wow-viewer` world-scene owner shaped from `MdxViewer.Terrain.WorldScene`
+  - introduce a `wow-viewer` world asset manager shaped from `MdxViewer.Terrain.WorldAssetManager`
+  - make the app host that ported world-scene owner instead of building synthetic runtime frames ad hoc in the UI layer
+- proof:
+  - the new world path has the same core ownership shape as `MdxViewer` and the old app-side synthetic frame path is no longer the active design center
 
 ### Recovery Slice 0 - Plan and checkpoint hygiene
 
