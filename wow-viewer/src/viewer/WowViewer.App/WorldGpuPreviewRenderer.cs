@@ -138,10 +138,9 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _skyBackdropStrength = 0.0f;
     }
 
-    public void LoadPreview(WowViewerWorldRuntimeFrameResult frame, WorldViewCamera camera, bool ignoreTerrainHoles = false, bool showHoleOverlay = false)
+    public void LoadPreview(WowViewerWorldRuntimeFrameResult frame, bool ignoreTerrainHoles = false, bool showHoleOverlay = false)
     {
         ArgumentNullException.ThrowIfNull(frame);
-        ArgumentNullException.ThrowIfNull(camera);
 
         ClearPreview();
         _showSky = frame.PassOptions.SkyVisible;
@@ -150,7 +149,6 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         if (showHoleOverlay)
             BuildHoleOverlayBuffers(frame);
         BuildMarkerBuffers(frame);
-        BuildCamera(frame, camera);
     }
 
     public unsafe void Render(int width, int height, WorldViewCamera camera)
@@ -517,44 +515,6 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             markerData.Add(color.Z);
             markerData.Add(color.W);
         }
-    }
-
-    private void BuildCamera(WowViewerWorldRuntimeFrameResult frame, WorldViewCamera camera)
-    {
-        Vector3 boundsCenter;
-        if (_boundsMin.X == float.MaxValue || _boundsMax.X == float.MinValue)
-        {
-            Vector2 planarCenter = (frame.PlanarMin + frame.PlanarMax) * 0.5f;
-            float centerHeight = frame.TerrainTileData.Heightmap?.CenterHeight ?? 0f;
-            boundsCenter = new Vector3(planarCenter.X, planarCenter.Y, centerHeight);
-            _boundsMin = new Vector3(frame.PlanarMin.X, frame.PlanarMin.Y, centerHeight - 32f);
-            _boundsMax = new Vector3(frame.PlanarMax.X, frame.PlanarMax.Y, centerHeight + 32f);
-        }
-        else
-        {
-            boundsCenter = (_boundsMin + _boundsMax) * 0.5f;
-        }
-
-        Vector3 cameraTarget = frame.CameraTarget;
-        if (cameraTarget.LengthSquared() <= 0.0001f)
-            cameraTarget = boundsCenter;
-
-        Vector3 cameraPosition;
-        if (frame.CameraForward.LengthSquared() > 0.0001f)
-        {
-            Vector3 offset = frame.CameraPosition - cameraTarget;
-            cameraPosition = offset.LengthSquared() > 1f
-                ? frame.CameraPosition
-                : cameraTarget - (frame.CameraForward * 900f) + new Vector3(0f, 0f, 220f);
-        }
-        else
-        {
-            Vector3 extent = _boundsMax - _boundsMin;
-            float radius = MathF.Max(extent.Length() * 0.5f, 128f);
-            cameraPosition = cameraTarget + new Vector3(-radius * 1.15f, -radius * 1.15f, radius * 0.60f);
-        }
-
-        camera.SetPose(cameraPosition, cameraTarget, saveAsDefault: true);
     }
 
     private void ConfigureSkyColors(WowViewerWorldRuntimeFrameResult frame)

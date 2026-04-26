@@ -713,9 +713,6 @@ internal static class WowViewerWorldRuntimeBridge
         IArchiveCatalog archiveCatalog,
         WorldLoadBuildCollector loadCollector)
     {
-        if (UsesEmbeddedAlphaWdt(session))
-            return [BuildTerrainTileFrame(session, selectedTileX, selectedTileY, archiveCatalog, loadCollector)];
-
         HashSet<(int TileX, int TileY)> occupiedTiles = session.OccupiedTiles
             .Select(static tile => (tile.TileX, tile.TileY))
             .ToHashSet();

@@ -1,7 +1,51 @@
+using System.Numerics;
 using Silk.NET.OpenGL;
 using WowViewer.Core.Runtime.World.Terrain;
 
 namespace WowViewer.App;
+
+internal readonly record struct WowViewerWorldScenePlan(Vector3 CameraPosition, Vector3 CameraTarget)
+{
+    public static WowViewerWorldScenePlan Identity { get; } = new(new Vector3(0f, 0f, 1f), Vector3.Zero);
+}
+
+internal static class WowViewerWorldScenePlanner
+{
+    public static WowViewerWorldScenePlan Build(WowViewerWorldRuntimeFrameResult runtimeFrame)
+    {
+        ArgumentNullException.ThrowIfNull(runtimeFrame);
+
+        float minHeight = runtimeFrame.TerrainTileData.Heightmap?.MinHeight ?? 0f;
+        float maxHeight = runtimeFrame.TerrainTileData.Heightmap?.MaxHeight ?? 0f;
+        float centerHeight = runtimeFrame.TerrainTileData.Heightmap?.CenterHeight ?? ((minHeight + maxHeight) * 0.5f);
+        Vector3 boundsMin = new(runtimeFrame.PlanarMin.X, runtimeFrame.PlanarMin.Y, minHeight - 32f);
+        Vector3 boundsMax = new(runtimeFrame.PlanarMax.X, runtimeFrame.PlanarMax.Y, maxHeight + 32f);
+
+        Vector3 cameraTarget = runtimeFrame.CameraTarget;
+        if (cameraTarget.LengthSquared() <= 0.0001f)
+        {
+            Vector2 planarCenter = (runtimeFrame.PlanarMin + runtimeFrame.PlanarMax) * 0.5f;
+            cameraTarget = new Vector3(planarCenter.X, planarCenter.Y, centerHeight);
+        }
+
+        Vector3 cameraPosition;
+        if (runtimeFrame.CameraForward.LengthSquared() > 0.0001f)
+        {
+            Vector3 offset = runtimeFrame.CameraPosition - cameraTarget;
+            cameraPosition = offset.LengthSquared() > 1f
+                ? runtimeFrame.CameraPosition
+                : cameraTarget - (runtimeFrame.CameraForward * 900f) + new Vector3(0f, 0f, 220f);
+        }
+        else
+        {
+            Vector3 extent = boundsMax - boundsMin;
+            float radius = MathF.Max(extent.Length() * 0.5f, 128f);
+            cameraPosition = cameraTarget + new Vector3(-radius * 1.15f, -radius * 1.15f, radius * 0.60f);
+        }
+
+        return new WowViewerWorldScenePlan(cameraPosition, cameraTarget);
+    }
+}
 
 internal sealed class WowViewerWorldSceneHost : IDisposable
 {
@@ -10,6 +54,7 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
     private ViewerIoSourceKey _sourceKey;
     private WorldGpuPreviewRenderer? _renderer;
     private string _rendererSourceSignature = string.Empty;
+    private WowViewerWorldScenePlan _scenePlan = WowViewerWorldScenePlan.Identity;
 
     public WowViewerWorldSessionBootstrapResult? CurrentSession { get; private set; }
 
@@ -51,8 +96,34 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
         NavigatorState = WowViewerWorldNavigatorState.Empty;
         SpatialSnapshot = WowViewerWorldSpatialSnapshot.Empty;
         TerrainPreviewSnapshot = null;
+        _scenePlan = WowViewerWorldScenePlan.Identity;
         _renderer?.ClearPreview();
+        ResetCameraToIdentity();
+    }
+
+    public void ResetCameraToIdentity()
+    {
         Camera.ResetToIdentity();
+    }
+
+    public void ResetCamera()
+    {
+        Camera.Reset();
+    }
+
+    public void RotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees)
+    {
+        Camera.RotateLook(yawDeltaDegrees, pitchDeltaDegrees);
+    }
+
+    public void TranslateCamera(float forwardDistance, float strafeDistance, float verticalDistance)
+    {
+        Camera.Translate(forwardDistance, strafeDistance, verticalDistance);
+    }
+
+    private void ApplySceneDefaultCamera()
+    {
+        Camera.SetPose(_scenePlan.CameraPosition, _scenePlan.CameraTarget, saveAsDefault: true);
     }
 
     public WorldGpuPreviewRenderer? EnsureRenderer(GL? gl, IViewerIoService viewerIoService, ViewerIoSourceKey sourceKey, string sourceSignature)
@@ -91,7 +162,9 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
         NavigatorState = WowViewerWorldNavigatorState.FromRuntimeFrame(runtimeFrame);
         SpatialSnapshot = WowViewerWorldSpatialSnapshot.FromRuntimeFrame(runtimeFrame);
         TerrainPreviewSnapshot = runtimeFrame.TerrainVisualSnapshot;
-        EnsureRenderer(gl, viewerIoService, sourceKey, sourceSignature)?.LoadPreview(runtimeFrame, Camera, ignoreTerrainHoles, showHoleOverlay);
+        _scenePlan = WowViewerWorldScenePlanner.Build(runtimeFrame);
+        ApplySceneDefaultCamera();
+        EnsureRenderer(gl, viewerIoService, sourceKey, sourceSignature)?.LoadPreview(runtimeFrame, ignoreTerrainHoles, showHoleOverlay);
     }
 
     public bool RefreshRendererPreview(bool ignoreTerrainHoles, bool showHoleOverlay)
@@ -99,7 +172,7 @@ internal sealed class WowViewerWorldSceneHost : IDisposable
         if (CurrentFrame is null || _renderer is null)
             return false;
 
-        _renderer.LoadPreview(CurrentFrame, Camera, ignoreTerrainHoles, showHoleOverlay);
+        _renderer.LoadPreview(CurrentFrame, ignoreTerrainHoles, showHoleOverlay);
         return true;
     }
 

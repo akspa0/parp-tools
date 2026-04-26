@@ -5,6 +5,9 @@
 - what changed:
 	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneHost.cs` as the first app-side world owner seam after the hard reset
 	- moved world GPU renderer construction, source-signature invalidation, runtime-frame application, and the ported `WorldViewCamera` behind that host instead of keeping them as direct `WowViewerDesktopApp` fields
+	- Apr 26 follow-up: added `WowViewerWorldScenePlanner` and moved default world camera pose planning plus viewport reset or rotate or translate actions behind `WowViewerWorldSceneHost`, so the renderer no longer resets or mutates the camera during `LoadPreview(...)`
+	- Apr 26 follow-up: ported the world minimap in `WowViewerDesktopApp` back to the legacy `MdxViewer` tile-axis convention, including camera-centered tile calculation from `MapOrigin - camera.Position`, swapped hover/click axis mapping, swapped tile draw placement, and swapped right-drag pan direction
+	- Apr 26 follow-up: removed the embedded-Alpha single-tile clamp in `WowViewerWorldRuntimeBridge.BuildActiveTerrainTiles(...)`, so Alpha sessions again use the bounded `3x3` active ADT window while reusing the in-memory Alpha tile-frame cache
 	- replaced the old `_currentWorldSession` and `_currentWorldRuntimeFrame` fields in `WowViewerDesktopApp` with host-backed accessors so remaining world-session UI reads now flow through the scene host rather than duplicated shell-owned state
 	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldAssetState.cs` and made the host own a first asset snapshot carrying pending keys plus ready or visible or culled WMO and doodad counts; world summary and diagnostics now read those asset counts from the host
 	- added `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneSnapshot.cs` and made the host own copied world/session metadata such as resolved map path, occupied tiles, selected tile, active terrain tile count, placement source, and terrain snapshot size; the world overview, preview header, minimap center/occupied-tile helpers, world tile label, and load summary now read that host-owned scene snapshot
@@ -21,9 +24,11 @@
 
 - validation:
 	- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug` succeeded
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -- world-frame --client-root "H:/053-client" --build-label "0.5.3.3389" --map Kalimdor --tile-x 26 --tile-y 33` now reports `active-adt-tiles: count=9`, `Terrain:2304/2304`, and `WMO 12 / Doodads 6051` for the rebuilt Alpha world window
+	- UI-inclusive capture proof now exists at `output/build-validation/wowviewer-startup-capture/kalimdor_26_33_ui_scene_owner_multitile.png`, showing the rebuilt Alpha 3x3 terrain window in the desktop app
 
 - boundary:
-	- this is a world-ownership extraction seam, not yet a full `MdxViewer.WorldScene` or `WorldAssetManager` port
+	- this is a stronger world-ownership extraction seam, not yet a full `MdxViewer.WorldScene` or `WorldAssetManager` port
 	- `WowViewerDesktopApp` still keeps the existing runtime frame for world-load lifecycle checks and the active GPU renderer still consumes the bridge-built runtime frame; `WowViewerWorldRuntimeBridge` still builds that current runtime frame
 
 ### Apr 25, 2026 - hard reset: current wow-viewer world preview branch is no longer the target implementation

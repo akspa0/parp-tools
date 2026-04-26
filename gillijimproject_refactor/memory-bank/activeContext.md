@@ -5,6 +5,9 @@
 - landed the first world-scene ownership extraction after the hard reset without deepening the synthetic frame architecture itself
 - active behavior after this slice:
 	- `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldSceneHost.cs` now owns the app-side world GPU renderer instance, the ported `WorldViewCamera`, runtime-frame application, and renderer source-signature invalidation
+	- Apr 26 follow-up: `WowViewerWorldSceneHost` now owns default world camera planning through `WowViewerWorldScenePlanner` plus the reset or rotate or translate actions that the world viewport uses; `WorldGpuPreviewRenderer.LoadPreview(...)` no longer mutates camera state during preview loads or preview refreshes
+	- Apr 26 follow-up: the world minimap in `WowViewerDesktopApp` now uses the legacy `MdxViewer` tile-axis convention for camera centering, hover selection, draw placement, and right-drag panning instead of mixing direct screen axes with WoW tile axes
+	- Apr 26 follow-up: embedded Alpha WDT sessions no longer clamp the live world viewport to one selected tile; `WowViewerWorldRuntimeBridge.BuildActiveTerrainTiles(...)` now restores the bounded `3x3` active ADT window for Alpha sessions while still using the existing in-memory Alpha tile-frame cache
 	- `WowViewerDesktopApp` now routes world renderer creation and runtime-frame application through that host instead of owning `WorldGpuPreviewRenderer` construction and camera state directly
 	- Apr 25 follow-up: the old `_currentWorldSession` and `_currentWorldRuntimeFrame` fields in `WowViewerDesktopApp` are now host-backed accessors, so the remaining world UI reads no longer come from duplicated shell-owned state
 	- Apr 25 follow-up: `wow-viewer/src/viewer/WowViewer.App/WowViewerWorldAssetState.cs` now gives the host a first `WorldAssetManager`-shaped ownership slice by snapshotting pending asset keys plus ready or visible or culled WMO and doodad counts from the runtime frame; world diagnostics now read those counts from the host instead of directly from the raw frame everywhere
@@ -21,7 +24,7 @@
 - current boundary:
 	- this is the first scene-owner seam only, not a full `MdxViewer.WorldScene` port yet
 	- `WowViewerDesktopApp` still keeps the current runtime frame around for world-load lifecycle checks and the active GPU renderer still consumes the bridge frame; `WowViewerWorldRuntimeBridge` is still the producer of that frame
-	- build proof exists, but no live runtime signoff was captured for this slice
+	- current proof is stronger than build-only now: `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -- world-frame --client-root "H:/053-client" --build-label "0.5.3.3389" --map Kalimdor --tile-x 26 --tile-y 33` reports `active-adt-tiles: count=9` and `Terrain:2304/2304`, and a UI-inclusive viewer capture now shows the rebuilt Alpha 3x3 terrain window rather than the old single-tile surface
 
 ## Apr 25, 2026 - hard reset: stop deepening the current wow-viewer world preview branch
 

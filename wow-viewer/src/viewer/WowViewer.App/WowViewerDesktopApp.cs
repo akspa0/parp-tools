@@ -521,7 +521,6 @@ internal sealed class WowViewerDesktopApp : IDisposable
             _lastError = ex.Message;
             _selectedWorldObject = null;
             _worldSceneHost.Clear();
-            _worldViewCamera.ResetToIdentity();
             DeleteWorldTerrainPreviewTexture();
             _statusMessage = "World runtime bridge failed.";
         }
@@ -2875,7 +2874,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (ImGui.SliderFloat("##WorldCameraMoveSpeed", ref cameraSpeed, 10.0f, 1200.0f, "%.0f units/s", ImGuiSliderFlags.Logarithmic))
             _session.World.CameraMoveSpeed = cameraSpeed;
         if (ImGui.Button("Reset Camera", new Vector2(-1, 0)))
-            _worldViewCamera.Reset();
+            _worldSceneHost.ResetCamera();
 
         ImGui.Separator();
 
@@ -4393,13 +4392,13 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (hovered && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
         {
-            _worldViewCamera.Reset();
+            _worldSceneHost.ResetCamera();
             return false;
         }
 
         Vector2 mouseDelta = io.MouseDelta;
         if (acceptsMouseMotion && ImGui.IsMouseDragging(ImGuiMouseButton.Right) && mouseDelta.LengthSquared() > 0.0f)
-            _worldViewCamera.RotateLook(mouseDelta.X * 0.5f, -mouseDelta.Y * 0.5f);
+            _worldSceneHost.RotateCamera(mouseDelta.X * 0.5f, -mouseDelta.Y * 0.5f);
 
         float deltaSeconds = Math.Clamp(io.DeltaTime, 1.0f / 240.0f, 0.05f);
         float step = _session.World.CameraMoveSpeed * deltaSeconds;
@@ -4423,11 +4422,11 @@ internal sealed class WowViewerDesktopApp : IDisposable
             verticalStep -= step;
 
         if (forwardStep != 0.0f || strafeStep != 0.0f || verticalStep != 0.0f)
-            _worldViewCamera.Translate(forwardStep, strafeStep, verticalStep);
+            _worldSceneHost.TranslateCamera(forwardStep, strafeStep, verticalStep);
 
         bool consumedWheel = acceptsWheel && MathF.Abs(io.MouseWheel) > float.Epsilon;
         if (consumedWheel)
-            _worldViewCamera.Translate(io.MouseWheel * _session.World.CameraMoveSpeed * 0.35f, 0.0f, 0.0f);
+            _worldSceneHost.TranslateCamera(io.MouseWheel * _session.World.CameraMoveSpeed * 0.35f, 0.0f, 0.0f);
 
         return consumedWheel;
     }
@@ -4964,6 +4963,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private float GetWorldMinimapCenterTileX()
     {
+        if (_worldSceneHost.DiagnosticsSnapshot.HasRuntime)
+            return Math.Clamp((WowViewerWorldRuntimeBridge.MapOrigin - _worldViewCamera.Position.X) / WowViewerWorldRuntimeBridge.TileSize, 0f, WorldMinimapTileCount);
         if (_worldSceneHost.SceneSnapshot.HasSelectedTile)
             return _worldSceneHost.SceneSnapshot.SelectedTileX + 0.5f;
         if (_session.World.TileX >= 0)
@@ -4977,6 +4978,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private float GetWorldMinimapCenterTileY()
     {
+        if (_worldSceneHost.DiagnosticsSnapshot.HasRuntime)
+            return Math.Clamp((WowViewerWorldRuntimeBridge.MapOrigin - _worldViewCamera.Position.Y) / WowViewerWorldRuntimeBridge.TileSize, 0f, WorldMinimapTileCount);
         if (_worldSceneHost.SceneSnapshot.HasSelectedTile)
             return _worldSceneHost.SceneSnapshot.SelectedTileY + 0.5f;
         if (_session.World.TileY >= 0)
@@ -5020,7 +5023,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
             Vector2 mouseDelta = ImGui.GetMousePos() - _worldMinimapDragStart;
             if (mouseDelta.LengthSquared() > 0.01f)
             {
-                _worldMinimapPanOffset -= new Vector2(mouseDelta.X / cellSize, mouseDelta.Y / cellSize);
+                _worldMinimapPanOffset -= new Vector2(mouseDelta.Y / cellSize, mouseDelta.X / cellSize);
                 _worldMinimapDragStart = ImGui.GetMousePos();
             }
         }
@@ -5062,8 +5065,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (mousePosition.X < origin.X || mousePosition.Y < origin.Y || mousePosition.X > origin.X + extent.X || mousePosition.Y > origin.Y + extent.Y)
             return false;
 
-        float relativeTileX = (mousePosition.X - origin.X) / extent.X * viewSpan + viewMinTileX;
-        float relativeTileY = (mousePosition.Y - origin.Y) / extent.Y * viewSpan + viewMinTileY;
+        float relativeTileY = (mousePosition.X - origin.X) / extent.X * viewSpan + viewMinTileY;
+        float relativeTileX = (mousePosition.Y - origin.Y) / extent.Y * viewSpan + viewMinTileX;
         if (relativeTileX < 0f || relativeTileY < 0f || relativeTileX >= WorldMinimapTileCount || relativeTileY >= WorldMinimapTileCount)
             return false;
 
@@ -5104,8 +5107,8 @@ internal sealed class WowViewerDesktopApp : IDisposable
         {
             for (int tileY = minTileY; tileY <= maxTileY; tileY++)
             {
-                float imageMinX = origin.X + ((tileX - viewMinTileX) * cellSize);
-                float imageMinY = origin.Y + ((tileY - viewMinTileY) * cellSize);
+                float imageMinX = origin.X + ((tileY - viewMinTileY) * cellSize);
+                float imageMinY = origin.Y + ((tileX - viewMinTileX) * cellSize);
                 Vector2 tileMin = new(imageMinX, imageMinY);
                 Vector2 tileMax = tileMin + new Vector2(cellSize, cellSize);
                 bool occupied = occupiedTileIndices.Contains((tileY * 64) + tileX);
@@ -5124,14 +5127,14 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
         if (_worldSceneHost.SceneSnapshot.HasSelectedTile)
         {
-            Vector2 loadedMin = origin + new Vector2((_worldSceneHost.SceneSnapshot.SelectedTileX - viewMinTileX) * cellSize, (_worldSceneHost.SceneSnapshot.SelectedTileY - viewMinTileY) * cellSize);
+            Vector2 loadedMin = origin + new Vector2((_worldSceneHost.SceneSnapshot.SelectedTileY - viewMinTileY) * cellSize, (_worldSceneHost.SceneSnapshot.SelectedTileX - viewMinTileX) * cellSize);
             Vector2 loadedMax = loadedMin + new Vector2(cellSize, cellSize);
             drawList.AddRect(loadedMin, loadedMax, loadedColor, 0f, ImDrawFlags.None, 2.2f);
         }
 
         if (_session.World.TileX >= 0 && _session.World.TileY >= 0)
         {
-            Vector2 selectedMin = origin + new Vector2((_session.World.TileX - viewMinTileX) * cellSize, (_session.World.TileY - viewMinTileY) * cellSize);
+            Vector2 selectedMin = origin + new Vector2((_session.World.TileY - viewMinTileY) * cellSize, (_session.World.TileX - viewMinTileX) * cellSize);
             Vector2 selectedMax = selectedMin + new Vector2(cellSize, cellSize);
             drawList.AddRect(selectedMin, selectedMax, selectedColor, 0f, ImDrawFlags.None, 2.4f);
         }
