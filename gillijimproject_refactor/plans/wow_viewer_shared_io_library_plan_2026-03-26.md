@@ -45,6 +45,21 @@
   - the fix is the separation itself: those `540` files are still indexed for reading, but they are no longer treated as base archives
   - this slice fixes a shared bootstrap-boundary defect; it does not yet solve the separate issue that `ArchiveVirtualFileReader.ReadVirtualFile(...)` still boots a fresh catalog per call and should eventually move to a reused session or cached archive-reader seam for heavy asset streaming
 
+## Apr 26, 2026 - Shared archive session cache replaced the last per-read MPQ bootstrap hot path
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.IO.Files` now owns `ArchiveCatalogSession` plus `ArchiveCatalogSessionCache` as the canonical reusable MPQ archive lifetime seam for shared virtual asset reads
+  - `ArchiveVirtualFileReader.ReadVirtualFile(...)` now resolves through the shared cache instead of creating a new `IArchiveCatalog`, bootstrapping it, and throwing it away on every read
+  - `LooseWorldMapDiscovery`, `WowViewerWorldSessionBootstrapper.Open(...)`, `WowViewerWorldRuntimeBridge` default world entrypoints, and `WowViewer.App archive-probe` now reuse the same cached session surface
+  - the only remaining direct `ArchiveCatalogBootstrapper.Bootstrap(...)` call sites in `wow-viewer` are the deliberate long-lived catalog owners in `ViewerIoService` and `MdxFileBrowser`
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter ArchiveVirtualFileReaderTests`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -- world-bootstrap --client-root 'i:/parp/parp-tools/output/tmp/wowarchive-clients/0_5_3_3368/World of Warcraft' --build-label '0.5.3.3368' --map Azeroth`
+- notes:
+  - this is the `wow-viewer` extraction of the already-proven fast virtual asset lifetime model used by the legacy dataset/export path and the current `wow-viewer` dataset cache commands
+  - the change is about archive-session reuse, not about adding another archive format reader or changing the archive trust boundary
+
 ## Apr 23, 2026 - WMO shared I/O now carries the first render-document seam for materials and embedded-group meshes
 
 - status: landed

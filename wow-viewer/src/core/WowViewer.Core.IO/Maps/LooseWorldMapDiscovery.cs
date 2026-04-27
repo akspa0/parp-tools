@@ -39,13 +39,11 @@ public static class LooseWorldMapDiscovery
 
         if (!mapLookup.IsLoaded)
         {
-            using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-            ArchiveCatalogBootstrapper.Bootstrap(
-                archiveCatalog,
+            ArchiveCatalogSession session = ArchiveCatalogSessionCache.GetOrCreate(
                 [normalizedClientRoot],
                 bootstrapOptions ?? new ArchiveCatalogBootstrapOptions());
 
-            mapLookup.Load(lookupSearchPaths, archiveCatalog);
+            mapLookup.Load(lookupSearchPaths, session.ArchiveCatalog);
         }
 
         if (!mapLookup.IsLoaded)

@@ -10,6 +10,7 @@ public sealed class ArchiveVirtualFileReaderTests
         FakeArchiveCatalog catalog = new();
         FakeArchiveCatalogFactory factory = new(catalog);
         string tempListfile = Path.GetTempFileName();
+        string expectedRoot = Path.GetFullPath("I:/fake/game");
 
         try
         {
@@ -21,7 +22,7 @@ public sealed class ArchiveVirtualFileReaderTests
                 tempListfile,
                 factory);
 
-            Assert.Equal("I:/fake/game", Assert.Single(catalog.LoadedRoots));
+            Assert.Equal(expectedRoot, Assert.Single(catalog.LoadedRoots));
             Assert.Equal(tempListfile, catalog.LoadedListfilePath);
             Assert.Equal("world/wmo/khazmodan/cities/ironforge/ironforge.wmo", catalog.ReadRequests.Single());
             Assert.Equal([1, 2, 3], bytes);
@@ -50,6 +51,7 @@ public sealed class ArchiveVirtualFileReaderTests
         FakeArchiveCatalog catalog = new();
         FakeArchiveCatalogFactory factory = new(catalog);
         string tempDirectory = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        string expectedRoot = Path.GetFullPath("I:/fake/game");
         Directory.CreateDirectory(tempDirectory);
 
         try
@@ -69,7 +71,7 @@ public sealed class ArchiveVirtualFileReaderTests
                     ListfileCacheDirectoryPath: tempDirectory),
                 factory);
 
-            Assert.Equal("I:/fake/game", Assert.Single(catalog.LoadedRoots));
+            Assert.Equal(expectedRoot, Assert.Single(catalog.LoadedRoots));
             Assert.Contains(catalog.LoadedListfileEntries, static entry => string.Equals(entry.Replace('\\', '/'), "world/wmo/khazmodan/cities/ironforge/ironforge.wmo", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(catalog.LoadedListfileEntries, static entry => string.Equals(entry.Replace('\\', '/'), "creature/azjolnerub/giant/azjolroofgiant.m2", StringComparison.OrdinalIgnoreCase));
             Assert.Equal([1, 2, 3], bytes);
@@ -111,6 +113,40 @@ public sealed class ArchiveVirtualFileReaderTests
         }
     }
 
+    [Fact]
+    public void ReadVirtualFile_ReusesBootstrappedCatalogAcrossRepeatedReads()
+    {
+        ArchiveCatalogSessionCache.InvalidateAll();
+        CountingArchiveCatalogFactory factory = new();
+        string virtualPath = "world/wmo/khazmodan/cities/ironforge/ironforge.wmo";
+
+        try
+        {
+            byte[] first = ArchiveVirtualFileReader.ReadVirtualFile(
+                virtualPath,
+                ["I:/fake/game"],
+                (string?)null,
+                factory);
+
+            byte[] second = ArchiveVirtualFileReader.ReadVirtualFile(
+                virtualPath,
+                ["I:/fake/game"],
+                (string?)null,
+                factory);
+
+            Assert.Equal([1, 2, 3], first);
+            Assert.Equal([1, 2, 3], second);
+            Assert.Equal(1, factory.CreateCount);
+            Assert.Single(factory.CreatedCatalogs);
+            Assert.Equal(1, factory.CreatedCatalogs[0].LoadArchivesCallCount);
+            Assert.Equal(2, factory.CreatedCatalogs[0].ReadRequests.Count);
+        }
+        finally
+        {
+            ArchiveCatalogSessionCache.InvalidateAll();
+        }
+    }
+
     private sealed class FakeArchiveCatalogFactory : IArchiveCatalogFactory
     {
         private readonly IArchiveCatalog _catalog;
@@ -121,6 +157,21 @@ public sealed class ArchiveVirtualFileReaderTests
         }
 
         public IArchiveCatalog Create() => _catalog;
+    }
+
+    private sealed class CountingArchiveCatalogFactory : IArchiveCatalogFactory
+    {
+        public int CreateCount { get; private set; }
+
+        public List<CountingArchiveCatalog> CreatedCatalogs { get; } = [];
+
+        public IArchiveCatalog Create()
+        {
+            CreateCount++;
+            CountingArchiveCatalog catalog = new();
+            CreatedCatalogs.Add(catalog);
+            return catalog;
+        }
     }
 
     private sealed class FakeArchiveCatalog : IArchiveCatalog
@@ -146,6 +197,44 @@ public sealed class ArchiveVirtualFileReaderTests
         public void LoadListfileEntries(IEnumerable<string> entries)
         {
 			LoadedListfileEntries.AddRange(entries);
+        }
+
+        public IReadOnlyList<string> ExtractInternalListfiles() => Array.Empty<string>();
+
+        public IReadOnlyList<string> GetAllKnownFiles() => Array.Empty<string>();
+
+        public bool FileExists(string virtualPath) => false;
+
+        public byte[]? ReadFile(string virtualPath)
+        {
+            ReadRequests.Add(virtualPath);
+            return string.Equals(virtualPath, "world/wmo/khazmodan/cities/ironforge/ironforge.wmo", StringComparison.OrdinalIgnoreCase)
+                ? [1, 2, 3]
+                : null;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class CountingArchiveCatalog : IArchiveCatalog
+    {
+        public int LoadArchivesCallCount { get; private set; }
+
+        public List<string> ReadRequests { get; } = [];
+
+        public void LoadArchives(IEnumerable<string> searchPaths)
+        {
+            LoadArchivesCallCount++;
+        }
+
+        public void LoadListfile(string path)
+        {
+        }
+
+        public void LoadListfileEntries(IEnumerable<string> entries)
+        {
         }
 
         public IReadOnlyList<string> ExtractInternalListfiles() => Array.Empty<string>();

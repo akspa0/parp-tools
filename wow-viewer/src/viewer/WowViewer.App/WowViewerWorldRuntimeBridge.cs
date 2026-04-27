@@ -334,21 +334,20 @@ internal static class WowViewerWorldRuntimeBridge
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
         string clientRoot = Path.GetFullPath(request.ClientRoot);
-        ArchiveCatalogBootstrapper.Bootstrap(
-            archiveCatalog,
+        ArchiveCatalogSession archiveSession = ArchiveCatalogSessionCache.GetOrCreate(
             [clientRoot],
             WowViewerArchiveBootstrap.CreateBootstrapOptions(request.BuildLabel, clientRoot));
+        IArchiveCatalog archiveCatalog = archiveSession.ArchiveCatalog;
 
-        WowViewerWorldSessionBootstrapResult session = WowViewerWorldSessionBootstrapper.Open(
+        WowViewerWorldSessionBootstrapResult worldSession = WowViewerWorldSessionBootstrapper.Open(
             new WowViewerWorldSessionOpenRequest(request.ClientRoot, request.MapInput, request.BuildLabel, request.LooseOverlayRoot),
             archiveCatalog);
 
         List<WowViewerWorldPlacementTileSummary> populatedTiles = [];
-        foreach (WdtTileCoordinate tile in session.OccupiedTiles)
+        foreach (WdtTileCoordinate tile in worldSession.OccupiedTiles)
         {
-            AdtPlacementCatalog catalog = ReadPlacementCatalog(session, tile.TileX, tile.TileY, archiveCatalog, out string sourcePath);
+            AdtPlacementCatalog catalog = ReadPlacementCatalog(worldSession, tile.TileX, tile.TileY, archiveCatalog, out string sourcePath);
             int mdxCount = catalog.ModelPlacements.Count;
             int wmoCount = catalog.WorldModelPlacements.Count;
             if (mdxCount == 0 && wmoCount == 0)
@@ -374,8 +373,8 @@ internal static class WowViewerWorldRuntimeBridge
             .ToArray();
 
         return new WowViewerWorldPlacementAuditResult(
-            session,
-            session.OccupiedTiles.Count,
+            worldSession,
+            worldSession.OccupiedTiles.Count,
             populatedTiles.Count,
             topTiles);
     }
@@ -384,14 +383,12 @@ internal static class WowViewerWorldRuntimeBridge
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
         string clientRoot = Path.GetFullPath(request.ClientRoot);
-        ArchiveCatalogBootstrapper.Bootstrap(
-            archiveCatalog,
+        ArchiveCatalogSession archiveSession = ArchiveCatalogSessionCache.GetOrCreate(
             [clientRoot],
             WowViewerArchiveBootstrap.CreateBootstrapOptions(request.BuildLabel, clientRoot));
 
-        return Build(request, archiveCatalog);
+        return Build(request, archiveSession.ArchiveCatalog);
     }
 
     internal static WowViewerWorldRuntimeFrameResult Build(WowViewerWorldRuntimeFrameRequest request, IArchiveCatalog archiveCatalog)

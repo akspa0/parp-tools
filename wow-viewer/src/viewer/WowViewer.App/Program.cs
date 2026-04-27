@@ -343,11 +343,10 @@ internal static class Program
 
         string normalizedClientRoot = Path.GetFullPath(clientRoot);
         string? resolvedListfilePath = WowViewerArchiveBootstrap.ResolveDefaultListfilePath();
-        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-        ArchiveCatalogBootstrapper.Bootstrap(
-            archiveCatalog,
+        ArchiveCatalogSession session = ArchiveCatalogSessionCache.GetOrCreate(
             [normalizedClientRoot],
             WowViewerArchiveBootstrap.CreateBootstrapOptions(buildLabel, normalizedClientRoot));
+        IArchiveCatalog archiveCatalog = session.ArchiveCatalog;
 
         string normalizedVirtualPath = virtualPath.Replace('/', '\\');
         bool exists = archiveCatalog.FileExists(normalizedVirtualPath);

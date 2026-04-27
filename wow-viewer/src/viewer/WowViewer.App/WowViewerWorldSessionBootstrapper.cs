@@ -89,13 +89,11 @@ internal static class WowViewerWorldSessionBootstrapper
         if (!Directory.Exists(clientRoot))
             throw new DirectoryNotFoundException($"Client root does not exist: {clientRoot}");
 
-        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-        ArchiveCatalogBootstrapper.Bootstrap(
-            archiveCatalog,
+        ArchiveCatalogSession session = ArchiveCatalogSessionCache.GetOrCreate(
             [clientRoot],
             WowViewerArchiveBootstrap.CreateBootstrapOptions(request.BuildLabel, clientRoot));
 
-        return Open(request, archiveCatalog, clientRoot);
+        return Open(request, session.ArchiveCatalog, clientRoot);
     }
 
     internal static WowViewerWorldSessionBootstrapResult Open(WowViewerWorldSessionOpenRequest request, IArchiveCatalog archiveCatalog)

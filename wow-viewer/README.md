@@ -10,6 +10,7 @@ This repo is in active migration. It already contains usable tooling, but it is 
 - `WowViewer.Tool.Inspect`: read-only inspection CLI for archive, BLP, M2, MDX, map, LIT, PM4, and WMO data.
 - `WowViewer.Tool.Converter`: conversion and dataset CLI for file detection, direct dataset manifests, cache building, and ML helper workflows.
 - Shared libraries under `src/core`: the canonical implementation target for new format and runtime work in this repo.
+- Shared archive-backed virtual reads now reuse a persistent `WowViewer.Core.IO.Files` session cache instead of bootstrapping a fresh MPQ catalog per file read.
 
 ## Current Limits
 
