@@ -47,6 +47,7 @@ public static class NpzTileSerializer
         WriteArray(zip, "object_precise_mask_257", pack.ObjectPreciseMask257, "<f4");
         WriteArray(zip, "pm4_path_mask", pack.Pm4PathMask, "<f4");
         WriteArray(zip, "pm4_building_footprint_mask", pack.Pm4BuildingFootprintMask, "<f4");
+        WriteArray(zip, "minimap_rgb_256", pack.MinimapRgb256, "|u1");
         WriteArray(zip, "hole_mask_16", pack.HoleMask16, "|b1");
         WriteArray(zip, "mtxf_animated_mask", pack.MtxfAnimatedMask, "<i4");
         WriteArray(zip, "mtxf_transform_id", pack.MtxfTransformId, "<i4");
@@ -136,6 +137,8 @@ public static class NpzTileSerializer
             return FlattenIntArray((Array)array);
         if (elementType == typeof(bool))
             return FlattenBoolArray((Array)array);
+        if (elementType == typeof(byte))
+            return FlattenByteArray((Array)array);
 
         throw new NotSupportedException($"NPZ serialization does not yet support element type {elementType.Name}");
     }
@@ -222,6 +225,34 @@ public static class NpzTileSerializer
                 break;
             default:
                 throw new NotSupportedException($"Cannot flatten bool array with rank {array.Rank}");
+        }
+
+        return result;
+    }
+
+    private static byte[] FlattenByteArray(Array array)
+    {
+        int totalElements = Enumerable.Range(0, array.Rank).Aggregate(1, (acc, r) => acc * array.GetLength(r));
+        byte[] result = new byte[totalElements];
+        int index = 0;
+
+        switch (array.Rank)
+        {
+            case 2:
+                var b2 = (byte[,])array;
+                for (int y = 0; y < b2.GetLength(0); y++)
+                    for (int x = 0; x < b2.GetLength(1); x++)
+                        result[index++] = b2[y, x];
+                break;
+            case 3:
+                var b3 = (byte[,,])array;
+                for (int z = 0; z < b3.GetLength(0); z++)
+                    for (int y = 0; y < b3.GetLength(1); y++)
+                        for (int x = 0; x < b3.GetLength(2); x++)
+                            result[index++] = b3[z, y, x];
+                break;
+            default:
+                throw new NotSupportedException($"Cannot flatten byte array with rank {array.Rank}");
         }
 
         return result;

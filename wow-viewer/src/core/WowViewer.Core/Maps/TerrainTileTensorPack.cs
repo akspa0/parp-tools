@@ -91,6 +91,11 @@ public sealed class TerrainTileTensorPack
     /// <summary>257×257 PM4 building footprint mask.</summary>
     public float[,]? Pm4BuildingFootprintMask { get; init; }
 
+    // ── Minimap inputs ─────────────────────────────────────────────────────
+
+    /// <summary>256×256 × 3 RGB minimap image used as the primary Stage 1 visual input.</summary>
+    public byte[,,]? MinimapRgb256 { get; set; }
+
     // ── Hole and flag data ─────────────────────────────────────────────────
 
     /// <summary>16×16 chunk grid: does this chunk have holes?</summary>
@@ -105,8 +110,8 @@ public sealed class TerrainTileTensorPack
     // ── Metadata ───────────────────────────────────────────────────────────
 
     /// <summary>Which signals were present in the source tile.</summary>
-    public IReadOnlySet<string> AvailableSignals { get; init; } = new HashSet<string>();
+    public IReadOnlySet<string> AvailableSignals { get; set; } = new HashSet<string>();
 
     /// <summary>Minimap source tag (terrain_only, no_liquid, no_object, raw, etc.).</summary>
-    public string MinimapSourceTag { get; init; } = string.Empty;
+    public string MinimapSourceTag { get; set; } = string.Empty;
 }

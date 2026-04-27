@@ -172,6 +172,7 @@ static void RunExtractV10Tensors(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
 	string? output = GetOption(args, "--output", "-o");
+	string? minimapRoot = GetOption(args, "--minimap-root", "-m");
 	if (string.IsNullOrWhiteSpace(input))
 	{
 		Console.Error.WriteLine("Error: --input <root.adt> is required.");
@@ -199,6 +200,17 @@ static void RunExtractV10Tensors(string[] args)
 	try
 	{
 		TerrainTileTensorPack pack = AdtTensorPackBuilder.Build(input, textureSource);
+		if (!string.IsNullOrWhiteSpace(minimapRoot) && TryLoadV10MinimapRgb(input, minimapRoot, out byte[,,]? minimapRgb, out string? minimapSourcePath))
+		{
+			pack.MinimapRgb256 = minimapRgb;
+			pack.MinimapSourceTag = "raw";
+			HashSet<string> availableSignals = new(pack.AvailableSignals, StringComparer.OrdinalIgnoreCase)
+			{
+				"minimap_rgb_256"
+			};
+			pack.AvailableSignals = availableSignals;
+			Console.WriteLine($"  Minimap source: {minimapSourcePath}");
+		}
 		NpzTileSerializer.Serialize(pack, outputPath);
 		WriteV10PlacementSidecar(input, placementOutputPath);
 		Console.WriteLine($"Extracted v10 tensors: {outputPath}");
@@ -210,6 +222,92 @@ static void RunExtractV10Tensors(string[] args)
 		Console.Error.WriteLine($"Error extracting v10 tensors from {input}: {ex.Message}");
 		Environment.ExitCode = 1;
 	}
+}
+
+static bool TryLoadV10MinimapRgb(string inputAdtPath, string minimapRoot, out byte[,,]? minimapRgb, out string? sourcePath)
+{
+	minimapRgb = null;
+	sourcePath = null;
+
+	string tileStem = Path.GetFileNameWithoutExtension(inputAdtPath);
+	if (!TryParseTileCoordinates(tileStem, out int tileX, out int tileY))
+		return false;
+
+	string mapName = ExtractMapNameFromTileStem(tileStem);
+	if (string.IsNullOrWhiteSpace(mapName))
+		return false;
+
+	foreach (string directCandidate in EnumerateLooseMinimapCandidates(tileStem))
+	{
+		string directPath = Path.Combine(minimapRoot, directCandidate);
+		if (!File.Exists(directPath))
+			continue;
+
+		byte[]? directRgb = DecodeFilesystemMinimap(directPath);
+		if (directRgb is not { Length: > 0 })
+			continue;
+
+		minimapRgb = ReshapeRgb256(directRgb);
+		sourcePath = directPath;
+		return true;
+	}
+
+	foreach (string candidate in EnumerateMinimapCandidates(mapName, tileX, tileY))
+	{
+		string? resolvedPath = ResolveFilesystemMinimapPath(minimapRoot, candidate);
+		if (resolvedPath is null)
+			continue;
+
+		byte[]? rgb = DecodeFilesystemMinimap(resolvedPath);
+		if (rgb is not { Length: > 0 })
+			continue;
+
+		minimapRgb = ReshapeRgb256(rgb);
+		sourcePath = resolvedPath;
+		return true;
+	}
+
+	return false;
+}
+
+static IEnumerable<string> EnumerateLooseMinimapCandidates(string tileStem)
+{
+	yield return $"{tileStem}.png";
+	yield return Path.Combine("images", $"{tileStem}.png");
+	yield return Path.Combine("reference_minimaps", $"{tileStem}_reference_minimap.png");
+}
+
+static string ExtractMapNameFromTileStem(string tileStem)
+{
+	int lastUnderscore = tileStem.LastIndexOf('_');
+	if (lastUnderscore <= 0)
+		return tileStem;
+
+	int secondLastUnderscore = tileStem.LastIndexOf('_', lastUnderscore - 1);
+	if (secondLastUnderscore <= 0)
+		return tileStem;
+
+	return tileStem[..secondLastUnderscore];
+}
+
+static byte[,,] ReshapeRgb256(byte[] rgb)
+{
+	if (rgb.Length != NativeMinimapSize * NativeMinimapSize * 3)
+		throw new InvalidDataException($"Expected {NativeMinimapSize}x{NativeMinimapSize} RGB minimap bytes but found {rgb.Length} bytes.");
+
+	byte[,,] result = new byte[NativeMinimapSize, NativeMinimapSize, 3];
+	int index = 0;
+	for (int y = 0; y < NativeMinimapSize; y++)
+	{
+		for (int x = 0; x < NativeMinimapSize; x++)
+		{
+			result[y, x, 0] = rgb[index++];
+			result[y, x, 1] = rgb[index++];
+			result[y, x, 2] = rgb[index++];
+		}
+	}
+
+	return result;
 }
 
 static void WriteV10PlacementSidecar(string inputAdtPath, string outputPath)
