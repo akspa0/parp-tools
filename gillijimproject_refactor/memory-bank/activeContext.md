@@ -10,7 +10,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
 
 ## v10 Terrain AI Status
 
-- Current position: Wave 1 is complete and Wave 2 is underway.
+- Current position: Wave 1 is complete. Wave 2 pattern-mining infrastructure is complete. Stage 2 refinement is now underway.
 - Wave 1 validated outputs in `wow-viewer` shared libraries:
   - `TerrainTileTensorPack`
   - `AdtTensorPackBuilder`
@@ -33,7 +33,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `wow-viewer/scripts/train_v10_minimap_to_mclay.py` now exists as the first bounded Wave 2 classifier trainer for `minimap_rgb_256 -> retained MCLY palette label`
   - `wow-viewer/scripts/train_v10_minimap_to_mclay_grid.py` now exists as the first bounded Wave 2 chunk-grid classifier trainer for `minimap_rgb_256 -> 16x16 retained MCLY palette labels`, and can consume the reusable native MCLY label manifest directly
   - the native miner supports `objects`, `terrain`, and `hybrid` anchor modes
-  - the older Python miner under `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/mine_mcal_brush_patterns.py` remains a reference surface, not the canonical command path
+  - the older Python reference miner has been retired to `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/archived/mine_mcal_brush_patterns.py`; the canonical path is `wowviewer-converter mine-v10-brushes`
 - Current proof level:
   - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
   - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with warnings only
@@ -84,7 +84,6 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - broader-corpus validation for the native MCAL brush dictionary beyond the bounded development Stage 1 corpus
   - broader-corpus minimap-to-MCLY classifier training beyond the `11` currently labelable development shards
   - richer biome tagging beyond current texture-name token heuristics
-  - whether to retain or retire the older Python reference miner
   - Stage 2 refinement and longer-running Stage 1 training orchestration
 
 ## Open v10 Boundaries

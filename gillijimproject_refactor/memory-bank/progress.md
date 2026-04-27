@@ -4,9 +4,11 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 ## Current Position
 
-- The v10 terrain-AI lane is in early Wave 2.
+- The v10 terrain-AI lane is in Stage 2 refinement.
 - Wave 1 is complete.
-- The current local continuation has moved beyond the original script-only slice: the canonical anchor-aware brush miner is native, native MCLY/MCAL composition/MCAL brush/height-profile dictionary commands exist, the first bounded Stage 1 corpus command exists, the first bounded Stage 1 trainer baseline has passed on CUDA, and both tile-level and 16x16 chunk-grid minimap-to-MCLY classifier trainers have bounded CPU smokes.
+- Wave 2 pattern-mining infrastructure is complete and native: all dictionary commands, label manifests, and bounded classifier trainers are in place.
+- The older Python reference miner has been retired; the canonical path is native.
+- Stage 2 refinement is now the active slice.
 
 ## Recent Validated Milestones
 
@@ -172,18 +174,32 @@ This file is intentionally compressed. Keep only recent validated milestones, op
   - workflow registration only
   - no new runtime parity claim
 
+### Apr 27, 2026 - Wave 2 continuation: retired Python reference miner and landed first bounded Stage 2 trainer
+
+- Moved the legacy Python reference miner from `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/mine_mcal_brush_patterns.py` to `.../v10/archived/mine_mcal_brush_patterns.py`
+- The canonical anchor-aware brush path is now exclusively `wowviewer-converter mine-v10-brushes`
+- `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` now exists as the first bounded Stage 2 trainer
+- The trainer consumes the existing v10 NPZ shard contract directly (no new dataset builder needed)
+- It predicts multi-resolution height at 17×17, 65×65, and 257×257 using all available ground-truth signals
+- It supports signal-dropout augmentation (default 15%) so the model is robust to missing channels at inference time
+- Loss stack: full L1 + 0.5×mid L1 + 0.25×coarse L1 + 0.3×gradient + 0.3×mid_residual + 0.3×detail_res
+- Proof:
+  - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\train_v10_stage2_terrain_synth.py` passed
+  - `.venv\Scripts\python.exe wow-viewer\scripts\train_v10_stage2_terrain_synth.py output\build-validation\v10-stage1-development-corpus\v10_stage1_manifest.json --output-dir output\ml-training\v10_stage2_smoke --epochs 2 --batch-size 2 --num-workers 0 --device cpu --no-channels-last --signal-dropout 0.1 --max-samples 8` passed
+  - smoke output: `output/ml-training/v10_stage2_smoke/checkpoints/last.pt`
+  - bounded smoke metrics after 2 epochs: train loss `0.8890`, val loss `2.2534`, val MAE `2.90m`, val RMSE `8.24m`
+
 ## Open Boundaries
 
 - No validated broad-corpus MCAL brush-stroke vocabulary run exists yet beyond the bounded development Stage 1 proof.
 - No validated broad-corpus minimap-to-MCLY classifier or chunk-grid run exists yet beyond the `11` currently labelable development shards.
 - MCLY dictionary biome tags are heuristic and should be replaced or validated by the planned minimap-to-biome/palette classifier.
-- The next blocking decision is whether to retain or retire the older Python reference miner now that the canonical command is native.
-- Stage 1 exists only as a bounded trainer baseline today; Stage 2 refinement and broader experiment orchestration still remain open.
+- Stage 2 trainer exists only as a bounded baseline; longer-running CUDA training, broader corpora, and production-grade experiment management remain open.
 - The world-viewer path is still mid-migration and should not be described as final runtime parity.
 
 ## Recommended Next Slice
 
 1. Keep the minimap-backed Wave 1 NPZ output plus `dataset-build-v10-stage1` manifest as the canonical Stage 1 input surface.
-2. Widen the current 64-shard development proof into a larger curated or map-wide Stage 1 corpus and run longer CUDA training.
-3. Widen the minimap-to-MCLY classifier and native MCAL brush dictionary proof to a broader corpus.
-4. Decide whether the older Python reference miner should stay or be retired, then move into Stage 2 refinement.
+2. Run longer Stage 2 CUDA training over the existing 64-shard development corpus and measure convergence.
+3. Widen the current 64-shard development proof into a larger curated or map-wide Stage 1 corpus.
+4. Widen the minimap-to-MCLY classifier and native MCAL brush dictionary proof to a broader corpus.
