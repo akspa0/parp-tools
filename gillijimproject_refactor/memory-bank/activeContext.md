@@ -30,6 +30,8 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `wowviewer-converter mine-v10-mcal-brushes` now owns native non-object-anchored MCAL brush-stroke vocabulary mining and writes `mcal_brush_dictionary.json` plus `mcal_brush_dictionary.npz`
   - `wowviewer-converter mine-v10-height-profiles` now owns native height archetype clustering and writes `height_profile_dictionary.json` plus `height_profile_dictionary.npz`
   - `wowviewer-converter mine-v10-prefab-cells` now owns native rectangular prefab-cell clone detection, finds repeating chunk sets via strict SHA256 fingerprints, and writes `prefab_cell_dictionary.json` plus `prefab_cell_dictionary.npz`
+  - `wow-viewer/scripts/curate_v10_training_shards.py` now curates mixed native v10 and legacy v9 NPZ shards into a balanced v10 training manifest
+  - `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` now consumes native PM4 masks and legacy v9 cache aliases for hole, precise-object, PM4, and liquid signals
   - `wow-viewer/scripts/train_v10_stage1_minimap2height.py` now exists as the first bounded Stage 1 trainer for `minimap_rgb_256 -> height_17`
   - `wow-viewer/scripts/train_v10_minimap_to_mclay.py` now exists as the first bounded Wave 2 classifier trainer for `minimap_rgb_256 -> retained MCLY palette label`
   - `wow-viewer/scripts/train_v10_minimap_to_mclay_grid.py` now exists as the first bounded Wave 2 chunk-grid classifier trainer for `minimap_rgb_256 -> 16x16 retained MCLY palette labels`, and can consume the reusable native MCLY label manifest directly
@@ -51,6 +53,8 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - per-layer alpha coverage signatures now captured in relaxed hash and JSON output (schema v2)
   - bounded Stage 1 corpus build passed at `output/build-validation/v10-stage1-development-corpus` with `64` written shards and a matching `v10_stage1_manifest.json`
   - bounded Stage 1 CUDA smoke passed at `output/ml-training/v10_stage1_gpu_smoke` using `gillijimproject_refactor/.venv-train` on the local RTX 4070 Ti SUPER
+  - v10 mixed-corpus curation passed at `output/ml-training/v10_curated/v10_v9all_plus_native_dev_balanced_manifest.json` with `1,262` selected shards across `22` dataset buckets from the all-version v9 direct cache plus native v10 development shards
+  - v10 Stage 2 CUDA run 1 passed at `output/ml-training/v10_stage2_balanced_cuda_run1/checkpoints/best.pt` for `3` epochs over the `1,262` selected shards after repairing `gillijimproject_refactor/.venv-train`
   - bounded minimap-to-MCLY CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_smoke/minimap_to_mclay_classifier.pt` using the workspace `.venv` over the current `64` Stage 1 shards and `mclay_dictionary.json`
   - bounded minimap-to-MCLY chunk-grid CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_grid_smoke/minimap_to_mclay_grid_classifier.pt`, with `1,973` retained chunk labels across `35` active palette classes
   - bounded manifest-driven minimap-to-MCLY chunk-grid CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_grid_manifest_smoke/minimap_to_mclay_grid_classifier.pt`
@@ -91,6 +95,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
 - What is still open:
   - broader-corpus validation for the native MCAL brush dictionary beyond the bounded development Stage 1 corpus
   - broader-corpus minimap-to-MCLY classifier training beyond the `11` currently labelable development shards
+  - native v10 regeneration for every v9-era client root; current broad training uses the legacy v9 NPZ cache for all-version coverage and native v10 shards only for the development-map richer-signal slice
   - richer biome tagging beyond current texture-name token heuristics
   - Stage 2 refinement and longer-running Stage 1 training orchestration
 

@@ -75,6 +75,10 @@ public static class AdtTensorPackBuilder
         (float[,]? objectMask257, float[,]? objectPreciseMask257) =
             BuildObjectMasks(stream, fileSummary, availableSignals);
 
+        // ── Build PM4 path and building footprint masks ──────────────────────
+        (float[,]? pm4PathMask, float[,]? pm4BuildingFootprintMask) =
+            BuildPm4Masks(adtPath, availableSignals);
+
         // ── Compute downsampled heights ──────────────────────────────────────
         float[,]? height65 = DownsampleHeightmap(height257, 65);
         float[,]? height17 = DownsampleHeightmap(height257, 17);
@@ -106,6 +110,8 @@ public static class AdtTensorPackBuilder
             WlLiquidHeight = wlHeight,
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
+            Pm4PathMask = pm4PathMask,
+            Pm4BuildingFootprintMask = pm4BuildingFootprintMask,
             AvailableSignals = availableSignals,
         };
     }
@@ -589,60 +595,76 @@ public static class AdtTensorPackBuilder
     private static (float[,]? mask, float[,]? height)
         ReadWlFiles(string adtPath, HashSet<string> signals)
     {
-        string basePath = Path.Combine(Path.GetDirectoryName(adtPath)!, Path.GetFileNameWithoutExtension(adtPath));
-        string[] extensions = [".wlw", ".wlm", ".wlq", ".wll"];
+        string? mapDir = Path.GetDirectoryName(adtPath);
+        if (string.IsNullOrEmpty(mapDir))
+            return (null, null);
 
-        // Parse tile coordinates from filename: MapName_x_y.adt
         if (!TryParseAdtTileCoords(adtPath, out int targetTileX, out int targetTileY))
+            return (null, null);
+
+        // Scan ALL WL files in the map directory (MdxViewer pattern)
+        string[] wlFiles;
+        try
+        {
+            wlFiles = Directory.GetFiles(mapDir, "*.wlw", SearchOption.TopDirectoryOnly)
+                .Concat(Directory.GetFiles(mapDir, "*.wlm", SearchOption.TopDirectoryOnly))
+                .Concat(Directory.GetFiles(mapDir, "*.wlq", SearchOption.TopDirectoryOnly))
+                .Concat(Directory.GetFiles(mapDir, "*.wll", SearchOption.TopDirectoryOnly))
+                .ToArray();
+        }
+        catch
+        {
+            return (null, null);
+        }
+
+        if (wlFiles.Length == 0)
             return (null, null);
 
         float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
         float[,] heights = new float[TileHeightmapSize, TileHeightmapSize];
         bool any = false;
 
-        foreach (string ext in extensions)
+        foreach (string wlPath in wlFiles)
         {
-            string wlPath = basePath + ext;
-            if (!File.Exists(wlPath))
-                continue;
-
+            WlFile wl;
             try
             {
-                WlFile wl = WlFileReader.Read(wlPath);
-                foreach (WlBlock block in wl.Blocks)
-                {
-                    Vector3 pos = block.WorldPosition;
-                    int tileX = Math.Clamp((int)Math.Floor((WlMapSize - pos.Y) / WlTileSize), 0, 63);
-                    int tileY = Math.Clamp((int)Math.Floor((WlMapSize - pos.X) / WlTileSize), 0, 63);
-
-                    if (tileX != targetTileX || tileY != targetTileY)
-                        continue;
-
-                    float avgHeight = block.Vertices.Average(v => v.Z);
-
-                    // Map block center to 257x257 grid
-                    float localX = (WlMapSize - pos.Y) - (tileX * WlTileSize);
-                    float localY = (WlMapSize - pos.X) - (tileY * WlTileSize);
-                    int gx = Math.Clamp((int)(localX / WlTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
-                    int gy = Math.Clamp((int)(localY / WlTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
-
-                    // Write to a small neighborhood
-                    for (int dy = -1; dy <= 1; dy++)
-                    {
-                        for (int dx = -1; dx <= 1; dx++)
-                        {
-                            int px = Math.Clamp(gx + dx, 0, TileHeightmapSize - 1);
-                            int py = Math.Clamp(gy + dy, 0, TileHeightmapSize - 1);
-                            mask[py, px] = 1.0f;
-                            heights[py, px] = avgHeight;
-                        }
-                    }
-                    any = true;
-                }
+                wl = WlFileReader.Read(wlPath);
             }
             catch
             {
-                // ignore unreadable WL files
+                continue;
+            }
+
+            foreach (WlBlock block in wl.Blocks)
+            {
+                Vector3 pos = block.WorldPosition;
+                int tileX = Math.Clamp((int)Math.Floor((WlMapSize - pos.Y) / WlTileSize), 0, 63);
+                int tileY = Math.Clamp((int)Math.Floor((WlMapSize - pos.X) / WlTileSize), 0, 63);
+
+                if (tileX != targetTileX || tileY != targetTileY)
+                    continue;
+
+                float avgHeight = block.Vertices.Average(v => v.Z);
+
+                // Map block center to 257x257 grid
+                float localX = (WlMapSize - pos.Y) - (tileX * WlTileSize);
+                float localY = (WlMapSize - pos.X) - (tileY * WlTileSize);
+                int gx = Math.Clamp((int)(localX / WlTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
+                int gy = Math.Clamp((int)(localY / WlTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
+
+                // Write to a small neighborhood
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        int px = Math.Clamp(gx + dx, 0, TileHeightmapSize - 1);
+                        int py = Math.Clamp(gy + dy, 0, TileHeightmapSize - 1);
+                        mask[py, px] = 1.0f;
+                        heights[py, px] = avgHeight;
+                    }
+                }
+                any = true;
             }
         }
 
@@ -1164,6 +1186,24 @@ public static class AdtTensorPackBuilder
         }
 
         return -1;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // PM4 path and building footprint masks
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private static (float[,]? pathMask, float[,]? buildingFootprintMask)
+        BuildPm4Masks(string adtPath, HashSet<string> signals)
+    {
+        if (!AdtPm4MaskBuilder.TryBuild(adtPath, out float[,]? pathMask, out float[,]? buildingMask))
+            return (null, null);
+
+        if (pathMask is not null)
+            signals.Add("pm4_path_mask");
+        if (buildingMask is not null)
+            signals.Add("pm4_building_footprint_mask");
+
+        return (pathMask, buildingMask);
     }
 
     private static string ExtractMapName(string adtPath)

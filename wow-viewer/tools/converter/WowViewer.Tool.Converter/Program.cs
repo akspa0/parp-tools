@@ -63,6 +63,9 @@ string[] tail = args.Skip(1).ToArray();
 		case "dataset-build-cache":
 			RunDatasetBuildCache(tail);
 			break;
+		case "extract-map":
+			RunExtractMap(tail);
+			break;
 		case "detect":
 			RunDetect(tail);
 			break;
@@ -1425,6 +1428,91 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(
 	}
 
 	return entries;
+}
+
+static void RunExtractMap(string[] args)
+{
+	string? clientRootOption = GetOption(args, "--client-root", "-c") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? mapName = GetOption(args, "--map", "-m");
+	string? outputDirOption = GetOption(args, "--output-dir", "-o");
+	int? limit = GetIntOption(args, "--limit", "-n");
+
+	if (string.IsNullOrWhiteSpace(clientRootOption) || string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(outputDirOption))
+	{
+		Console.Error.WriteLine("Error: extract-map requires --client-root <path>, --map <name>, and --output-dir <dir>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string clientRoot = Path.GetFullPath(clientRootOption);
+	string normalizedMapName = mapName.Trim();
+	string outputDir = Path.GetFullPath(outputDirOption);
+	Directory.CreateDirectory(outputDir);
+
+	using IArchiveCatalog archiveCatalog = CreateArchiveCatalog(clientRoot);
+	string mapPath = Path.Combine(clientRoot, "Data", "World", "Maps", normalizedMapName);
+	if (!ArchiveMapExists(archiveCatalog, clientRoot, normalizedMapName, mapPath))
+	{
+		Console.Error.WriteLine($"Error: map '{normalizedMapName}' not found in client '{clientRoot}'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string mapVirtualRoot = ResolveMapVirtualRoot(clientRoot, normalizedMapName, mapPath);
+	string wdtVirtualPath = BuildMapWdtVirtualPath(mapVirtualRoot, normalizedMapName);
+	byte[] wdtBytes = archiveCatalog.ReadFile(wdtVirtualPath)
+		?? throw new FileNotFoundException($"Could not read WDT '{wdtVirtualPath}'.", wdtVirtualPath);
+
+	List<WdtTileCoordinate> tileCoordinates = ReadArchiveWdtTiles(wdtBytes, wdtVirtualPath)
+		.OrderBy(static tile => tile.TileY)
+		.ThenBy(static tile => tile.TileX)
+		.ToList();
+
+	if (limit is > 0)
+		tileCoordinates = tileCoordinates.Take(limit.Value).ToList();
+
+	int extracted = 0;
+	int skipped = 0;
+
+	foreach (WdtTileCoordinate tileCoordinate in tileCoordinates)
+	{
+		string tileStem = $"{normalizedMapName}_{tileCoordinate.TileX}_{tileCoordinate.TileY}";
+		string rootVirtualPath = $"{mapVirtualRoot}\\{tileStem}.adt";
+		string objVirtualPath = $"{mapVirtualRoot}\\{tileStem}_obj0.adt";
+		string texVirtualPath = $"{mapVirtualRoot}\\{tileStem}_tex0.adt";
+
+		byte[] rootBytes = archiveCatalog.ReadFile(rootVirtualPath) ?? [];
+		if (rootBytes.Length == 0)
+		{
+			skipped++;
+			continue;
+		}
+
+		string rootOutputPath = Path.Combine(outputDir, $"{tileStem}.adt");
+		File.WriteAllBytes(rootOutputPath, rootBytes);
+		extracted++;
+
+		byte[] objBytes = archiveCatalog.ReadFile(objVirtualPath) ?? [];
+		if (objBytes.Length > 0)
+		{
+			File.WriteAllBytes(Path.Combine(outputDir, $"{tileStem}_obj0.adt"), objBytes);
+		}
+
+		byte[] texBytes = archiveCatalog.ReadFile(texVirtualPath) ?? [];
+		if (texBytes.Length > 0)
+		{
+			File.WriteAllBytes(Path.Combine(outputDir, $"{tileStem}_tex0.adt"), texBytes);
+		}
+
+		Console.WriteLine($"Extracted: {tileStem}");
+	}
+
+	Console.WriteLine("WowViewer.Tool.Converter extract-map report");
+	Console.WriteLine($"ClientRoot: {clientRoot}");
+	Console.WriteLine($"Map: {normalizedMapName}");
+	Console.WriteLine($"OutputDir: {outputDir}");
+	Console.WriteLine($"Extracted: {extracted}");
+	Console.WriteLine($"Skipped: {skipped}");
 }
 
 static TerrainTrainingSampleDescriptor CreateDatasetScanEntry(

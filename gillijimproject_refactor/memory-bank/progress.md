@@ -207,12 +207,37 @@ This file is intentionally compressed. Keep only recent validated milestones, op
   - smoke output: `output/ml-training/v10_stage2_smoke/checkpoints/last.pt`
   - bounded smoke metrics after 2 epochs: train loss `0.8890`, val loss `2.2534`, val MAE `2.90m`, val RMSE `8.24m`
 
+### Apr 27, 2026 - v10 mixed-corpus curation and first CUDA Stage 2 run started
+
+- Added `wow-viewer/scripts/curate_v10_training_shards.py`
+- The curation utility accepts native v10 manifests, legacy v9 tensor-cache manifests, NPZ files, and NPZ directories
+- It verifies required training arrays (`minimap_rgb_256`, `height_257`, `height_17`), rejects flat or blank shards by default, ranks by quality, and can cap per dataset bucket for balanced first-pass training
+- Updated `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` to consume:
+  - native `pm4_path_mask` and `pm4_building_footprint_mask`
+  - legacy v9 aliases for `hole_mask_16x16`, `object_mask_precise_257`, `pm4_mask_257`, `liquid_mask_257`, and `liquid_height_257`
+- Repaired the UV-managed CUDA training environment with `gillijimproject_refactor/scripts/setup_training_env.ps1 -Backend auto -Recreate`
+- Proof:
+  - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\curate_v10_training_shards.py wow-viewer\scripts\train_v10_stage2_terrain_synth.py` passed
+  - curation over `output/ml-training/cache/v9_direct_archive_core_devholdout_plus11927_alphafix_companionfix_20260420/cache/v9_tensor_cache_manifest.json` plus `output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json` passed
+  - curation output: `output/ml-training/v10_curated/v10_v9all_plus_native_dev_balanced_manifest.json`
+  - curation report: `3,945` candidates, `3,240` valid preselection shards, `1,262` selected shards, `705` rejected, `22` dataset buckets
+  - rejection reasons: `467` missing required arrays, `238` height range below threshold
+  - CUDA training output: `output/ml-training/v10_stage2_balanced_cuda_run1`
+  - CUDA run 1 trained for `3` epochs over `1,262` selected shards with `1,072` train and `190` validation samples
+  - CUDA run 1 best checkpoint: `output/ml-training/v10_stage2_balanced_cuda_run1/checkpoints/best.pt`
+  - CUDA run 1 best metrics after epoch 3: val loss `0.3865`, val MAE `73.88m`, val RMSE `104.48m`
+- Boundary:
+  - broad all-version coverage currently comes from the legacy v9 cache, not native v10 extraction for every client root
+  - native richer v10 signals in this first mixed manifest are limited to the development-map Stage 1 corpus (`41` selected native v10 shards, `11` with MCAL/MCLY texture signals, `41` with PM4 masks)
+  - this is a first started training run, not a converged model
+
 ## Open Boundaries
 
 - No validated broad-corpus MCAL brush-stroke vocabulary run exists yet beyond the bounded development Stage 1 proof.
 - No validated broad-corpus minimap-to-MCLY classifier or chunk-grid run exists yet beyond the `11` currently labelable development shards.
 - MCLY dictionary biome tags are heuristic and should be replaced or validated by the planned minimap-to-biome/palette classifier.
-- Stage 2 trainer exists only as a bounded baseline; longer-running CUDA training, broader corpora, and production-grade experiment management remain open.
+- Stage 2 trainer now has a first mixed-corpus CUDA run; longer-running CUDA training, broader native v10 corpora, and production-grade experiment management remain open.
+- All-version broad training still depends on legacy v9 cache shards until native v10 archive/client-root extraction is widened beyond the development-map proof.
 - The world-viewer path is still mid-migration and should not be described as final runtime parity.
 
 ## Recommended Next Slice

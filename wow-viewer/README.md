@@ -112,10 +112,19 @@ Python trainers live in `scripts/` and consume the v10 NPZ shard contract direct
 
 | Trainer | Input | Output | Purpose |
 |---------|-------|--------|---------|
+| `curate_v10_training_shards.py` | v10/v9 manifests or NPZ dirs | curated manifest + report | Balance and filter shards before training |
 | `train_v10_stage1_minimap2height.py` | Stage 1 manifest | `minimap2height.pt` | Baseline minimap → `height_17` regression |
 | `train_v10_minimap_to_mclay.py` | Stage 1 manifest + `mclay_dictionary.json` | `minimap_to_mclay_classifier.pt` | Tile-level minimap → retained MCLY palette |
 | `train_v10_minimap_to_mclay_grid.py` | Stage 1 manifest or label manifest | `minimap_to_mclay_grid_classifier.pt` | Chunk-grid minimap → 16×16 retained MCLY labels |
 | `train_v10_stage2_terrain_synth.py` | Stage 1 manifest | `last.pt` | Multi-resolution height synthesis (17×17, 65×65, 257×257) with signal-dropout augmentation |
+
+Example mixed-corpus curation from the all-version v9 cache plus native v10 shards:
+```powershell
+.venv\Scripts\python scripts\curate_v10_training_shards.py `
+  <v9_tensor_cache_manifest.json> <v10_stage1_manifest.json> `
+  --output output\ml-training\v10_curated\curated_manifest.json `
+  --max-per-dataset 128
+```
 
 Example Stage 2 smoke test:
 ```powershell

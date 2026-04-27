@@ -110,6 +110,9 @@ def load_metadata(npz_file: np.lib.npyio.NpzFile) -> dict[str, Any]:
 
 def load_optional_array(npz_file: np.lib.npyio.NpzFile, key: str) -> np.ndarray | None:
     if key not in npz_file.files:
+        for alias in SIGNAL_ALIASES.get(key, ()):
+            if alias in npz_file.files:
+                return np.asarray(npz_file[alias])
         return None
     return np.asarray(npz_file[key])
 
@@ -131,12 +134,25 @@ OPTIONAL_SIGNALS: list[SignalSpec] = [
     SignalSpec("mh2o_depth", 1, 257, np.float32),
     SignalSpec("object_mask_257", 1, 257, np.float32),
     SignalSpec("object_precise_mask_257", 1, 257, np.float32),
+    SignalSpec("pm4_path_mask", 1, 257, np.float32),
+    SignalSpec("pm4_building_footprint_mask", 1, 257, np.float32),
     SignalSpec("hole_mask_16", 1, 16, np.uint8),
     SignalSpec("wl_liquid_mask", 1, 257, np.float32),
     SignalSpec("wl_liquid_height", 1, 257, np.float32),
     SignalSpec("mclq_surface_height", 1, 129, np.float32),
     SignalSpec("mtxf_animated_mask", 1, 16, np.int32),
 ]
+
+
+SIGNAL_ALIASES: dict[str, tuple[str, ...]] = {
+    # Legacy v9 cache names. These keep the v10 trainer usable before every
+    # archive-backed client has been regenerated through native v10 extraction.
+    "hole_mask_16": ("hole_mask_16x16",),
+    "object_precise_mask_257": ("object_mask_precise_257",),
+    "pm4_path_mask": ("pm4_mask_257",),
+    "wl_liquid_mask": ("liquid_mask_257",),
+    "wl_liquid_height": ("liquid_height_257",),
+}
 
 
 @dataclass(slots=True)
@@ -283,6 +299,8 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
             ("mh2o_depth", 1),
             ("object_mask_257", 1),
             ("object_precise_mask_257", 1),
+            ("pm4_path_mask", 1),
+            ("pm4_building_footprint_mask", 1),
             ("wl_liquid_mask", 1),
             ("wl_liquid_height", 1),
             ("mclq_surface_height", 1),
