@@ -90,6 +90,20 @@ This file is intentionally compressed. Keep only recent validated milestones, op
   - proof output: `output/build-validation/v10-wave2-mcal-compositions/mcal_composition_dictionary.json`
   - bounded corpus result: `64` shards discovered, `11` tiles read, `2816` chunks read, `545` candidate compositions, `446` raw composition groups, `32` retained compositions
 
+### Apr 27, 2026 - Native height profile clustering landed in `wow-viewer`
+
+- `wowviewer-converter mine-v10-height-profiles` now scans v10 NPZ shards for `height_257`
+- The command clusters normalized downsampled height profiles and records terrain archetype labels, summary stats, per-tile labels, and representative examples
+- It writes JSON metadata plus NumPy centroid payloads:
+  - `height_profile_dictionary.json`
+  - `height_profile_dictionary.npz`
+- The reader accepts both standards-compliant NumPy magic and the older `?NUMPY` compatibility form already tolerated by the brush miner
+- Proof:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed with existing warnings only
+  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- mine-v10-height-profiles --input-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --output-dir i:/parp/parp-tools/output/build-validation/v10-wave2-height-profiles --dictionary-size 8 --min-occurrences 1 --profile-size 17 --example-limit 8 --seed 1337` passed
+  - proof output: `output/build-validation/v10-wave2-height-profiles/height_profile_dictionary.json`
+  - bounded corpus result: `64` shards discovered, `64` tiles read, `8` retained profiles
+
 ### Apr 26, 2026 - GPU viewer plan-set workflow was registered
 
 - Added `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md` and updated workflow routing files
@@ -110,4 +124,4 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 1. Keep the minimap-backed Wave 1 NPZ output plus `dataset-build-v10-stage1` manifest as the canonical Stage 1 input surface.
 2. Widen the current 64-shard development proof into a larger curated or map-wide Stage 1 corpus and run longer CUDA training.
 3. Decide whether the older Python reference script should stay or be retired.
-4. Move from chunk-level MCAL composition mining into broader brush-stroke vocabulary and height-profile clustering, then Stage 2 refinement.
+4. Move from chunk-level MCAL composition and height-profile mining into broader brush-stroke vocabulary, then Stage 2 refinement.
