@@ -24,7 +24,7 @@ public static class MapFileSummaryReader
 
         try
         {
-            IReadOnlyList<ChunkSpan> chunkSpans = ChunkedFileReader.ReadTopLevelChunks(stream);
+            IReadOnlyList<ChunkSpan> chunkSpans = ReadTopLevelChunks(stream, sourcePath);
             MapChunkLocation[] chunks = chunkSpans
                 .Select(static chunk => new MapChunkLocation(chunk.Header.Id, chunk.Header.Size, chunk.HeaderOffset, chunk.DataOffset))
                 .ToArray();
@@ -41,6 +41,21 @@ public static class MapFileSummaryReader
         catch (InvalidDataException) when (TryReadAdtPrefixSummary(stream, sourcePath, out MapFileSummary? adtSummary))
         {
             return adtSummary!;
+        }
+    }
+
+    private static IReadOnlyList<ChunkSpan> ReadTopLevelChunks(Stream stream, string sourcePath)
+    {
+        if (!sourcePath.EndsWith(".adt", StringComparison.OrdinalIgnoreCase))
+            return ChunkedFileReader.ReadTopLevelChunks(stream);
+
+        try
+        {
+            return ChunkedFileReader.ReadTopLevelChunks(stream, padOddChunkSizes: false);
+        }
+        catch (InvalidDataException)
+        {
+            return ChunkedFileReader.ReadTopLevelChunks(stream, padOddChunkSizes: true);
         }
     }
 
@@ -72,11 +87,7 @@ public static class MapFileSummaryReader
 
                 chunks.Add(new ChunkSpan(header, headerOffset, dataOffset));
 
-                long nextOffset = payloadEndOffset;
-                if ((header.Size & 1) != 0 && nextOffset < stream.Length)
-                    nextOffset++;
-
-                stream.Position = nextOffset;
+                stream.Position = payloadEndOffset;
             }
 
             if (chunks.Count < 2)

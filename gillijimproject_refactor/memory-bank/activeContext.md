@@ -20,34 +20,36 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `AdtMcrfReader`
   - `WlFile` and `WlFileReader`
 - Latest committed Wave 2 slice is `f125fa5` (`feat: Add extraction of object-anchored 3D brush patterns and related functionality`).
-- That commit moved the lane past pure Wave 1 extraction:
-  - added `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/mine_mcal_brush_patterns.py` for object-anchored 3D brush-pattern mining from Wave 1 NPZ outputs plus placement catalogs
-  - extended `AdtTensorPackBuilder` so `ObjectMask257` and `ObjectPreciseMask257` are now populated from `MDDF` and `MODF` placements via `AdtPlacementReader`
-  - kept the `wowviewer-converter extract-v10-tensors` entrypoint available as the canonical NPZ extraction surface
-  - cleared the earlier converter build blocker in `TerrainPatchAdtCommand`
-- Current build proof level:
-  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed.
-  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with warnings only.
+- Current local continuation moved beyond that commit:
+  - `wowviewer-converter extract-v10-tensors` remains the canonical Wave 1 NPZ extraction surface and now writes matching `*_placements.json` sidecars when placement data exists
+  - `wowviewer-converter mine-v10-brushes` now owns the anchor-aware miner natively in `WowViewer.Tool.Converter`
+  - the native miner supports `objects`, `terrain`, and `hybrid` anchor modes
+  - the older Python miner under `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/mine_mcal_brush_patterns.py` remains a reference surface, not the canonical command path
+- Current proof level:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with warnings only
+  - native widened hybrid proof passed at `output/build-validation/v10-wave2-wider-corpus/native-cli-hybrid-proof`
 
 ## Wave 2 Status
 
-- Wave 2 is in progress, but only its first committed slice is landed.
 - What is landed:
-  - object-anchored MCAL brush mining exists as a concrete script surface
   - Wave 1 NPZ extraction is available through `wowviewer-converter extract-v10-tensors`
-  - object placement supervision is no longer empty because `ObjectMask257` and `ObjectPreciseMask257` now derive from real ADT placements
-- What is still missing:
-  - no committed `wow-viewer` command yet runs the new object-anchored mining end-to-end
-  - the new mining script still expects external per-tile placement JSON under `--placement-dir`; no committed placement-JSON export handoff was found in this slice
-  - no recorded real-data dictionary artifact or bounded validation run exists yet for `object_anchored_brush_dictionary.npz`
-  - MCLY combination mining and non-object-anchored MCAL brush or composition dictionary work are still open
-- Practical handoff:
-  - Wave 2 left off after landing the first object-anchored mining slice and placement-derived object masks
-  - the next slice is to wire or export the placement handoff and run the first bounded real-data dictionary build
+  - placement-derived `ObjectMask257` and `ObjectPreciseMask257` are populated from real ADT placements
+  - anchor-aware MCAL brush mining exists as a concrete native `wowviewer-converter mine-v10-brushes` command
+  - terrain-only prefab structure can now be mined from alpha plus terrain mesh shape, even with no nearby objects
+- Validated bounded artifacts:
+  - widened corpus root: `output/build-validation/v10-wave2-wider-corpus/corpus`
+  - terrain-only proof: `output/build-validation/v10-wave2-wider-corpus/terrain-proof/brush_dictionary.json`
+  - hybrid proof: `output/build-validation/v10-wave2-wider-corpus/hybrid-proof/brush_dictionary.json`
+  - native CLI proof: `output/build-validation/v10-wave2-wider-corpus/native-cli-hybrid-proof/brush_dictionary.json`
+- What is still open:
+  - MCLY combination mining
+  - broader non-object-anchored MCAL composition vocabulary work
+  - whether to retain or retire the older Python reference miner
 
 ## Open v10 Boundaries
 
-- `ObjectMask257` and `ObjectPreciseMask257` are now populated, but only as placement-derived proxy masks: circles for model placements and bound or rectangle projection for WMOs. They are not yet true rendered silhouettes.
+- `ObjectMask257` and `ObjectPreciseMask257` are still placement-derived proxy masks, not true rendered silhouettes.
 - `Pm4PathMask` and `Pm4BuildingFootprintMask` remain empty pending PM4 integration.
 - No v10 trainer or model code is in place yet.
 
@@ -56,14 +58,6 @@ This file is intentionally compressed. Keep only the current route, the latest v
 - Recent app-shell progress is real, but still transitional.
 - `WowViewerWorldSceneHost` now owns more bootstrap and host-state seams, including bootstrap-only world session state before a full runtime frame exists.
 - That does not change the main boundary: `WowViewerWorldRuntimeBridge` plus `WorldGpuPreviewRenderer` are still temporary bridge code, not the target world architecture.
-- Keep the canonical extraction order anchored to:
-  - `MdxViewer.Rendering.Camera`
-  - `MdxViewer.Terrain.WorldScene`
-  - `MdxViewer.Terrain.WorldAssetManager`
-  - `MdxViewer.Terrain.StandardTerrainAdapter`
-  - `MdxViewer.Terrain.TerrainTileMeshBuilder`
-  - `MdxViewer.Terrain.TerrainRenderer`
-  - `MdxViewer.MinimapHelpers`
 
 ## Read-First Reminder
 

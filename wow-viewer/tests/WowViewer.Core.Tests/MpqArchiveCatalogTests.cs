@@ -138,6 +138,33 @@ public sealed class MpqArchiveCatalogTests
         }
     }
 
+    [Fact]
+    public void LoadArchives_IndexesNestedPerAssetMapMpqsWithoutLoadingThemAsBaseArchives()
+    {
+        string tempDirectory = CreateTempDirectory();
+        string nestedDirectory = Path.Combine(tempDirectory, "Data", "World", "Maps", "Azeroth");
+        Directory.CreateDirectory(nestedDirectory);
+
+        try
+        {
+            CreateMpqArchive(
+                Path.Combine(nestedDirectory, "Azeroth.wdt.MPQ"),
+                new MpqEntry("World\\Maps\\Azeroth\\Azeroth.wdt", Encoding.UTF8.GetBytes("nested")));
+
+            using MpqArchiveCatalog catalog = new();
+            catalog.LoadArchives([tempDirectory]);
+
+            byte[]? bytes = catalog.ReadFile("World\\Maps\\Azeroth\\Azeroth.wdt");
+
+            Assert.NotNull(bytes);
+            Assert.Equal("nested", Encoding.UTF8.GetString(bytes));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private static string CreateTempDirectory()
     {
         string directory = Path.Combine(Path.GetTempPath(), $"wowviewer-mpq-{Guid.NewGuid():N}");

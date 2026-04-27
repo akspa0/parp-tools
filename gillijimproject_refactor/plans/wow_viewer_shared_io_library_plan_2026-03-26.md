@@ -29,6 +29,22 @@
   - the current WMO app consumer is intentionally bounded: it now renders shared batch geometry with primary-UV material textures when those textures resolve, and otherwise falls back to flat-color geometry while exposing portal plus doodad ownership in diagnostics
   - this still does not claim full legacy or native material parity, doodad instancing, portal-driven runtime culling, or world-scene ownership
 
+## Apr 26, 2026 - Shared MPQ bootstrap now separates top-level archives from Alpha per-asset MPQs
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.IO.Files.MpqArchiveCatalog.LoadArchives(...)` no longer recursively loads every `Data/**.mpq` into the main archive chain
+  - the shared catalog now only loads top-level base or patch-chain archives from the chosen roots and locale folders, matching the older converter `NativeMpqService` boundary more closely
+  - the same bootstrap now also recursively scans nested Alpha per-asset `.wmo/.wdt/.wdl.MPQ` files into `_scannedFiles`, so those assets remain readable through `ReadFile(...)` and `GetAllKnownFiles()` without being misclassified as ordinary base archives
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MpqArchiveCatalogTests`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -- world-bootstrap --client-root 'i:/parp/parp-tools/output/tmp/wowarchive-clients/0_5_3_3368/World of Warcraft' --build-label '0.5.3.3368' --map Azeroth`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --archive-root 'i:/parp/parp-tools/output/tmp/wowarchive-clients/0_5_3_3368/World of Warcraft' --virtual-path 'World/wmo/Azeroth/Buildings/AltarOfStorms/AltarOfStorms.wmo'`
+- notes:
+  - on the staged `0.5.3.3368` client, the nested Alpha per-asset corpus under `Data` is `540` `.mpq` files while the correct top-level archive set is `8`
+  - the fix is the separation itself: those `540` files are still indexed for reading, but they are no longer treated as base archives
+  - this slice fixes a shared bootstrap-boundary defect; it does not yet solve the separate issue that `ArchiveVirtualFileReader.ReadVirtualFile(...)` still boots a fresh catalog per call and should eventually move to a reused session or cached archive-reader seam for heavy asset streaming
+
 ## Apr 23, 2026 - WMO shared I/O now carries the first render-document seam for materials and embedded-group meshes
 
 - status: landed

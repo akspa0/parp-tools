@@ -84,6 +84,8 @@ The app also exposes bounded CLI commands for deterministic proofs and inspectio
 - `world-placement-audit`
 - `m2-bounds`
 
+`world-placement-audit` is also the current bounded CLI proof for shared asset-path taxonomy in the app: it now reports sampled asset kind, coarse object type, and directory hierarchy for the returned placement samples.
+
 Show usage:
 
 ```powershell
@@ -127,6 +129,8 @@ Key commands include:
 - `dataset-audit`
 - `dataset-curate`
 - `dataset-build-cache`
+- `extract-v10-tensors`
+- `mine-v10-brushes`
 - `ml-corpus`
 - `ml-audit-signals`
 - `ml-harvest-brushes`
@@ -134,6 +138,8 @@ Key commands include:
 - `ml-repair-normalmaps`
 - `ml-synth-no-liquid`
 - `export-tex-json`
+
+`mine-v10-brushes` is the current canonical Wave 2 command for anchor-aware MCAL brush mining. It accepts object-only, terrain-only, or hybrid anchor modes, runs natively inside `WowViewer.Tool.Converter`, and now preserves `top_asset_categories` alongside raw `top_assets` in its JSON output so later viewer and editor tooling can browse the same path-derived asset families.
 
 Show usage:
 

@@ -154,6 +154,21 @@ public sealed class AdtSummaryReaderTests
         Assert.False(summary.HasTextureFlags);
     }
 
+    [Fact]
+    public void Read_OriginalDevelopment3223ObjAdt_ProducesExpectedSemanticSummary()
+    {
+        AdtSummary summary = AdtSummaryReader.Read(MapTestPaths.OriginalDevelopment3223ObjAdtPath);
+
+        Assert.Equal(MapFileKind.AdtObj, summary.Kind);
+        Assert.Equal(256, summary.TerrainChunkCount);
+        Assert.Equal(21, summary.ModelNameCount);
+        Assert.Equal(7, summary.WorldModelNameCount);
+        Assert.Equal(2292, summary.ModelPlacementCount);
+        Assert.Equal(12, summary.WorldModelPlacementCount);
+        Assert.False(summary.HasTextureParams);
+        Assert.False(summary.HasTextureFlags);
+    }
+
     private static byte[] CreateChunk(string id, byte[] payload)
     {
         byte[] bytes = new byte[8 + payload.Length];

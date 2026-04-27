@@ -11,7 +11,7 @@ namespace WowViewer.Core.IO.Maps;
 /// </summary>
 public static class NpzTileSerializer
 {
-    private const string NumpyMagic = "\x93NUMPY";
+    private static ReadOnlySpan<byte> NumpyMagic => [0x93, (byte)'N', (byte)'U', (byte)'M', (byte)'P', (byte)'Y'];
     private const ushort NumpyVersion = 0x0001; // version 1.0
 
     public static void Serialize(TerrainTileTensorPack pack, string outputPath)
@@ -100,18 +100,19 @@ public static class NpzTileSerializer
         string shapeStr = string.Join(", ", Enumerable.Range(0, array.Rank).Select(r => array.GetLength(r).ToString()));
         string header = $"{{'descr': '{dtype}', 'fortran_order': False, 'shape': ({shapeStr},)}}";
 
-        // The total header size must be a multiple of 64 bytes
-        int headerLen = header.Length;
+        // NumPy v1 headers must end with a newline, and the full preamble plus
+        // header must align to a 64-byte boundary.
         int prefixSize = NumpyMagic.Length + 2 + 2; // magic + version + header_len
-        int totalSize = prefixSize + headerLen;
+        int totalSize = prefixSize + header.Length + 1;
         int paddingNeeded = (64 - (totalSize % 64)) % 64;
-        header += new string(' ', paddingNeeded);
-        headerLen = header.Length;
+        header += new string(' ', paddingNeeded) + '\n';
+
+        int headerLen = header.Length;
 
         byte[] result = new byte[prefixSize + headerLen];
         int offset = 0;
 
-        Encoding.ASCII.GetBytes(NumpyMagic).CopyTo(result, offset);
+        NumpyMagic.CopyTo(result.AsSpan(offset, NumpyMagic.Length));
         offset += NumpyMagic.Length;
 
         BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(offset, 2), NumpyVersion);

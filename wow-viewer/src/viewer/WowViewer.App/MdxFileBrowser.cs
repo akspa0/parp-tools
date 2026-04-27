@@ -1,5 +1,6 @@
 using System.Numerics;
 using ImGuiNET;
+using WowViewer.Core.Files;
 using WowViewer.Core.IO.Files;
 
 namespace WowViewer.App;
@@ -212,6 +213,25 @@ internal sealed class AssetFileBrowserState
                 ImGui.Dummy(new Vector2(0, (_filteredFiles.Count - endIndex) * rowHeight));
 
             ImGui.EndChild();
+        }
+
+        if (SelectedFilePath is { } selectedFilePath)
+        {
+            AssetPathDescriptor descriptor = AssetPathTaxonomy.Describe(selectedFilePath);
+            ImGui.Separator();
+            ImGui.TextDisabled("Selected Asset");
+            ImGui.PushTextWrapPos();
+            ImGui.TextUnformatted(selectedFilePath.Replace('/', '\\'));
+            ImGui.PopTextWrapPos();
+            ImGui.Text($"Kind: {descriptor.AssetKind}");
+            ImGui.Text($"Object Type: {descriptor.ObjectType}");
+            ImGui.Text($"Category: {descriptor.CategoryKey}");
+            if (!string.IsNullOrWhiteSpace(descriptor.HierarchyLabel))
+            {
+                ImGui.PushTextWrapPos();
+                ImGui.TextUnformatted($"Hierarchy: {descriptor.HierarchyLabel}");
+                ImGui.PopTextWrapPos();
+            }
         }
 
         // Selection info and load button

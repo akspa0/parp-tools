@@ -66,6 +66,17 @@ public sealed class AdtPlacementReaderTests
         Assert.Contains(catalog.WorldModelPlacements, static placement => !placement.ModelPath.StartsWith("unknown_", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Read_OriginalDevelopment3223ObjAdt_ProducesApplePlacements()
+    {
+        AdtPlacementCatalog catalog = AdtPlacementReader.Read(MapTestPaths.OriginalDevelopment3223ObjAdtPath);
+
+        Assert.Equal(MapFileKind.AdtObj, catalog.Kind);
+        Assert.Equal(2292, catalog.ModelPlacements.Count);
+        Assert.Equal(12, catalog.WorldModelPlacements.Count);
+        Assert.Contains(catalog.ModelPlacements, static placement => placement.ModelPath.EndsWith("FRUIT_APPLE.M2", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static byte[] CreateChunk(string id, byte[] payload)
     {
         byte[] bytes = new byte[8 + payload.Length];

@@ -93,6 +93,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "extract-v10-tensors":
 		RunExtractV10Tensors(tail);
 		break;
+	case "mine-v10-brushes":
+		V10BrushMiningCommand.Run(tail);
+		break;
 	default:
 		Console.Error.WriteLine($"Unknown converter command '{command}'.");
 		ShowUsage();
@@ -189,12 +192,17 @@ static void RunExtractV10Tensors(string[] args)
 	string outputPath = !string.IsNullOrWhiteSpace(output)
 		? output
 		: Path.Combine(Path.GetDirectoryName(input)!, Path.GetFileNameWithoutExtension(input) + "_v10.npz");
+	string placementOutputPath = Path.Combine(
+		Path.GetDirectoryName(outputPath) ?? Path.GetDirectoryName(input)!,
+		Path.GetFileNameWithoutExtension(outputPath) + "_placements.json");
 
 	try
 	{
 		TerrainTileTensorPack pack = AdtTensorPackBuilder.Build(input, textureSource);
 		NpzTileSerializer.Serialize(pack, outputPath);
+		WriteV10PlacementSidecar(input, placementOutputPath);
 		Console.WriteLine($"Extracted v10 tensors: {outputPath}");
+		Console.WriteLine($"  Placement sidecar: {placementOutputPath}");
 		Console.WriteLine($"  Signals: {string.Join(", ", pack.AvailableSignals)}");
 	}
 	catch (Exception ex)
@@ -202,6 +210,45 @@ static void RunExtractV10Tensors(string[] args)
 		Console.Error.WriteLine($"Error extracting v10 tensors from {input}: {ex.Message}");
 		Environment.ExitCode = 1;
 	}
+}
+
+static void WriteV10PlacementSidecar(string inputAdtPath, string outputPath)
+{
+	AdtTileFamily family = AdtTileFamilyResolver.Resolve(inputAdtPath);
+	string? placementSourcePath = family.PlacementSourcePath;
+	if (string.IsNullOrWhiteSpace(placementSourcePath) || !File.Exists(placementSourcePath))
+		return;
+
+	AdtPlacementCatalog placements = AdtPlacementReader.Read(placementSourcePath);
+	string? directory = Path.GetDirectoryName(outputPath);
+	if (!string.IsNullOrWhiteSpace(directory))
+		Directory.CreateDirectory(directory);
+
+	var payload = new
+	{
+		source_adt_path = Path.GetFullPath(inputAdtPath),
+		placement_source_path = Path.GetFullPath(placementSourcePath),
+		mddf = placements.ModelPlacements.Select(static placement => new
+		{
+			model_path = placement.ModelPath,
+			unique_id = placement.UniqueId,
+			position = new { x = placement.Position.X, y = placement.Position.Y, z = placement.Position.Z },
+			rotation = new { x = placement.Rotation.X, y = placement.Rotation.Y, z = placement.Rotation.Z },
+			scale = placement.Scale,
+		}).ToArray(),
+		modf = placements.WorldModelPlacements.Select(static placement => new
+		{
+			model_path = placement.ModelPath,
+			unique_id = placement.UniqueId,
+			position = new { x = placement.Position.X, y = placement.Position.Y, z = placement.Position.Z },
+			rotation = new { x = placement.Rotation.X, y = placement.Rotation.Y, z = placement.Rotation.Z },
+			bounds_min = new { x = placement.BoundsMin.X, y = placement.BoundsMin.Y, z = placement.BoundsMin.Z },
+			bounds_max = new { x = placement.BoundsMax.X, y = placement.BoundsMax.Y, z = placement.BoundsMax.Z },
+			flags = placement.Flags,
+		}).ToArray(),
+	};
+
+	File.WriteAllText(outputPath, JsonSerializer.Serialize(payload, CreateJsonOptions()));
 }
 
 static void RunMlCorpus(string[] args)
@@ -3881,7 +3928,8 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter dataset-audit --input <scan.json> [--output <audit.json>] [--limit <count>]");
 	Console.WriteLine("  wowviewer-converter dataset-curate --input <audit.json> --output <curated.json> [--report <curation-report.json>] [--limit <count>] [--max-per-group <count>] [--require-wdl|--no-require-wdl] [--require-minimap|--no-require-minimap]");
 	Console.WriteLine("  wowviewer-converter dataset-build-cache --input <audit-or-curate.json> --output-dir <dir> [--limit <count>] [--overwrite] [--include-minimap|--no-include-minimap] [--write-debug-json|--no-write-debug-json]");
-	Console.WriteLine("  wowviewer-converter extract-v10-tensors --input <root.adt> [--output <npz>] [--texture-source <tex0.adt>]");
+	Console.WriteLine("  wowviewer-converter extract-v10-tensors --input <root.adt> [--output <npz>] [--texture-source <tex0.adt>]  (also writes matching *_placements.json when placement data exists)");
+	Console.WriteLine("  wowviewer-converter mine-v10-brushes --input-dir <npz-dir> --output-dir <dir> [--placement-dir <dir>] [--anchor-mode objects|terrain|hybrid] [--context-radius <n>] [--dictionary-size <n>] [--min-occurrences <n>] [--terrain-samples-per-tile <n>] [--seed <n>]");
 	Console.WriteLine("  wowviewer-converter detect --input <file>");
 	Console.WriteLine("  wowviewer-converter export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-converter terrain-patch-adt --input-adt-dir <dir> --inference-dir <dir> --output-dir <dir> [--no-copy-family] [--no-export-guide-textures] [--no-export-texture-supervision] [--export-glb] [--center-mesh] [--tile-world-size <size>] [--height-offset <value>]");

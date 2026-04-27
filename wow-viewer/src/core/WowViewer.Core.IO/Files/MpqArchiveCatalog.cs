@@ -331,8 +331,13 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
 
     public void LoadArchives(IEnumerable<string> searchPaths)
     {
+        string[] requestedRoots = searchPaths
+            .Where(static path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
         HashSet<string> pathsToSearch = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string path in searchPaths)
+        foreach (string path in requestedRoots)
         {
             if (Directory.Exists(path))
             {
@@ -360,15 +365,34 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
             }
         }
 
+        foreach (string root in requestedRoots)
+        {
+            try
+            {
+                ScanMapMpqArchives(root);
+                ScanWmoMpqArchives(root);
+            }
+            catch
+            {
+            }
+        }
+
         HashSet<string> allMpqFiles = new(StringComparer.OrdinalIgnoreCase);
         foreach (string path in pathsToSearch)
         {
             try
             {
-                foreach (string mpqPath in Directory.EnumerateFiles(path, "*.mpq", SearchOption.AllDirectories))
+                foreach (string mpqPath in Directory.EnumerateFiles(path, "*", SearchOption.TopDirectoryOnly))
                 {
+                    if (!string.Equals(Path.GetExtension(mpqPath), ".mpq", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     string lowerName = Path.GetFileName(mpqPath).ToLowerInvariant();
-                    if (lowerName.EndsWith(".wmo.mpq", StringComparison.Ordinal))
+                    if (lowerName.EndsWith(".wmo.mpq", StringComparison.Ordinal) ||
+                        lowerName.EndsWith(".wdt.mpq", StringComparison.Ordinal) ||
+                        lowerName.EndsWith(".wdl.mpq", StringComparison.Ordinal))
                     {
                         continue;
                     }

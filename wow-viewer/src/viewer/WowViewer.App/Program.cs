@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Reflection;
 using WowViewer.Core;
+using WowViewer.Core.Files;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.PM4;
 using WowViewer.Core.Runtime;
@@ -313,6 +314,17 @@ internal static class Program
         foreach (WowViewerWorldPlacementTileSummary tile in result.TopTiles)
         {
             Console.WriteLine($"WowViewer.App world-placement-audit tile=({tile.TileX},{tile.TileY}) total={tile.PlacementCount} wmo={tile.WmoCount} mdx={tile.MdxCount} source={tile.SourcePath} sampleWmo={FormatOptionalValue(tile.SampleWmoPath)} sampleMdx={FormatOptionalValue(tile.SampleMdxPath)}");
+            if (!string.IsNullOrWhiteSpace(tile.SampleMdxPath))
+            {
+                AssetPathDescriptor mdxDescriptor = AssetPathTaxonomy.Describe(tile.SampleMdxPath);
+                Console.WriteLine($"  sample-mdx-taxonomy kind={mdxDescriptor.AssetKind} type={mdxDescriptor.ObjectType} category={mdxDescriptor.CategoryKey} hierarchy={FormatOptionalValue(mdxDescriptor.HierarchyLabel)}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(tile.SampleWmoPath))
+            {
+                AssetPathDescriptor wmoDescriptor = AssetPathTaxonomy.Describe(tile.SampleWmoPath);
+                Console.WriteLine($"  sample-wmo-taxonomy kind={wmoDescriptor.AssetKind} type={wmoDescriptor.ObjectType} category={wmoDescriptor.CategoryKey} hierarchy={FormatOptionalValue(wmoDescriptor.HierarchyLabel)}");
+            }
         }
 
         return 0;
@@ -918,7 +930,7 @@ internal static class Program
         };
     }
 
-    private static string FormatOptionalValue(string value)
+    private static string FormatOptionalValue(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? "n/a" : value;
     }

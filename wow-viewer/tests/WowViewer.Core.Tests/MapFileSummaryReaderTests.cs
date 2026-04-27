@@ -159,6 +159,20 @@ public sealed class MapFileSummaryReaderTests
         Assert.Equal(256, summary.CountChunks(MapChunkIds.Mcnk));
     }
 
+    [Fact]
+    public void Read_OriginalDevelopment3223ObjAdt_PreservesChunksAfterOddSizedMmdx()
+    {
+        MapFileSummary summary = MapFileSummaryReader.Read(MapTestPaths.OriginalDevelopment3223ObjAdtPath);
+
+        Assert.Equal(MapFileKind.AdtObj, summary.Kind);
+        Assert.Equal(18u, summary.Version);
+        Assert.True(summary.HasChunk(MapChunkIds.Mmid));
+        Assert.True(summary.HasChunk(MapChunkIds.Mwid));
+        Assert.True(summary.HasChunk(MapChunkIds.Mddf));
+        Assert.True(summary.HasChunk(MapChunkIds.Modf));
+        Assert.Equal(256, summary.CountChunks(MapChunkIds.Mcnk));
+    }
+
     private static byte[] CreateChunk(string id, byte[] payload)
     {
         byte[] bytes = new byte[8 + payload.Length];
@@ -208,6 +222,8 @@ internal static class MapTestPaths
 {
     public static string DevelopmentDirectoryPath => Path.Combine(GetWowViewerRoot(), "..", "gillijimproject_refactor", "test_data", "development", "World", "Maps", "development");
 
+    public static string OriginalDevelopmentDirectoryPath => Path.Combine(GetWowViewerRoot(), "..", "gillijimproject_refactor", "test_data", "original_development", "World", "Maps", "development");
+
     public static string DevelopmentWdlPath => Path.Combine(DevelopmentDirectoryPath, "development.wdl");
 
     public static string DevelopmentWdtPath => Path.Combine(DevelopmentDirectoryPath, "development.wdt");
@@ -217,6 +233,8 @@ internal static class MapTestPaths
     public static string DevelopmentTexAdtPath => Path.Combine(DevelopmentDirectoryPath, "development_0_0_tex0.adt");
 
     public static string DevelopmentObjAdtPath => Path.Combine(DevelopmentDirectoryPath, "development_0_0_obj0.adt");
+
+    public static string OriginalDevelopment3223ObjAdtPath => Path.Combine(OriginalDevelopmentDirectoryPath, "development_32_23_obj0.adt");
 
     private static string GetWowViewerRoot()
     {

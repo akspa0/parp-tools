@@ -10,6 +10,7 @@ using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using WowViewer.Core;
+using WowViewer.Core.Files;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
@@ -3936,10 +3937,20 @@ internal sealed class WowViewerDesktopApp : IDisposable
         if (_selectedWorldObject.HasValue && navigatorState.TryResolveEntry(_selectedWorldObject.Value, out WorldNavigatorEntry selectedEntry))
         {
             string selectedAssetPath = GetNavigatorAssetPath(selectedEntry);
+            AssetPathDescriptor selectedAssetDescriptor = AssetPathTaxonomy.Describe(selectedAssetPath);
             ImGui.TextDisabled("Selected Asset Path");
             ImGui.PushTextWrapPos();
             ImGui.TextUnformatted(selectedAssetPath);
             ImGui.PopTextWrapPos();
+            ImGui.TextDisabled("Selected Category");
+            ImGui.TextUnformatted(selectedAssetDescriptor.CategoryKey);
+            if (!string.IsNullOrWhiteSpace(selectedAssetDescriptor.HierarchyLabel))
+            {
+                ImGui.TextDisabled("Selected Hierarchy");
+                ImGui.PushTextWrapPos();
+                ImGui.TextUnformatted(selectedAssetDescriptor.HierarchyLabel);
+                ImGui.PopTextWrapPos();
+            }
         }
 
         ImGui.Separator();
@@ -3981,11 +3992,21 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void DrawWorldInspectorContents(WorldNavigatorEntry entry)
     {
+        AssetPathDescriptor assetDescriptor = AssetPathTaxonomy.Describe(GetNavigatorAssetPath(entry));
+
         ImGui.TextDisabled("Selection");
         ImGui.Text($"Type: {(entry.Kind == WorldSelectionKind.Wmo ? "WMO" : $"{entry.Instance.AssetKind} Doodad")}");
         ImGui.Text($"Model: {entry.Instance.ModelName}");
         ImGui.Text($"Model Key: {entry.Instance.ModelKey}");
         ImGui.Text($"Asset Kind: {entry.Instance.AssetKind}");
+        ImGui.Text($"Object Type: {assetDescriptor.ObjectType}");
+        ImGui.Text($"Category: {assetDescriptor.CategoryKey}");
+        if (!string.IsNullOrWhiteSpace(assetDescriptor.HierarchyLabel))
+        {
+            ImGui.PushTextWrapPos();
+            ImGui.TextUnformatted($"Hierarchy: {assetDescriptor.HierarchyLabel}");
+            ImGui.PopTextWrapPos();
+        }
         ImGui.Text($"Unique Id: {entry.Instance.UniqueId}");
         ImGui.Text($"Placement Index: {entry.Instance.PlacementEntryIndex}");
         ImGui.Text($"Tile: ({entry.Instance.TileX},{entry.Instance.TileY})");
