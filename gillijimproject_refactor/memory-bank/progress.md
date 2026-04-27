@@ -6,7 +6,7 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 - The v10 terrain-AI lane is in early Wave 2.
 - Wave 1 is complete.
-- The current local continuation has moved beyond the original script-only slice: the canonical miner is native, the first bounded Stage 1 corpus command exists, and the first bounded Stage 1 trainer baseline has passed on CUDA.
+- The current local continuation has moved beyond the original script-only slice: the canonical brush miner is native, the first native MCLY dictionary command exists, the first bounded Stage 1 corpus command exists, and the first bounded Stage 1 trainer baseline has passed on CUDA.
 
 ## Recent Validated Milestones
 
@@ -60,6 +60,20 @@ This file is intentionally compressed. Keep only recent validated milestones, op
   - `i:/parp/parp-tools/gillijimproject_refactor/.venv-train/Scripts/python.exe i:/parp/parp-tools/wow-viewer/scripts/train_v10_stage1_minimap2height.py i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json --output-dir i:/parp/parp-tools/output/ml-training/v10_stage1_gpu_smoke --epochs 3 --batch-size 8 --num-workers 0 --device cuda --no-use-compile` passed on the local RTX 4070 Ti SUPER
   - bounded CUDA smoke metrics after 3 epochs: train loss `0.2355`, val loss `0.1217`, val MAE `2.91m`, val RMSE `23.80m`
 
+### Apr 27, 2026 - Native MCLY combination dictionary mining landed in `wow-viewer`
+
+- `wowviewer-converter mine-v10-mcly` now scans v10 NPZ shards for `mcly_texture_ids`
+- The command counts per-chunk four-layer texture-id tuples, preserves example tile/chunk coordinates, and writes both the plan-named `mclay_dictionary.json` and chunk-accurate `mcly_dictionary.json`
+- Current biome tags are intentionally `unknown` because the v10 NPZ contract carries texture IDs but not texture-name lookup data yet
+- Proof:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with warnings only
+  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- mine-v10-mcly --input-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --output-dir i:/parp/parp-tools/output/build-validation/v10-wave2-mcly-dictionary --min-occurrences 2 --example-limit 12` passed
+  - proof output: `output/build-validation/v10-wave2-mcly-dictionary/mclay_dictionary.json`
+  - bounded corpus result: `64` shards discovered, `11` tiles read with `mcly_texture_ids`, `1979` chunks counted, `35` raw combinations, `31` retained combinations, `53` shards skipped as `missing_mcly_texture_ids`
+- Test caveat:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --no-build` currently fails in this checkout, mostly because tests expect missing `gillijimproject_refactor/test_data/development/World/Maps/development/...` fixtures; one unrelated synthetic M2 footprint assertion also fails.
+
 ### Apr 26, 2026 - GPU viewer plan-set workflow was registered
 
 - Added `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md` and updated workflow routing files
@@ -69,8 +83,8 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 ## Open Boundaries
 
-- No validated MCLY combination dictionary run exists yet for the v10 corpus.
 - No validated broad-corpus non-object-anchored MCAL composition vocabulary run exists yet for the v10 corpus.
+- MCLY dictionary biome tags remain placeholder `unknown` until texture-name lookup is added to the v10 shard or dictionary command.
 - The next blocking decision is whether to retain or retire the older Python reference miner now that the canonical command is native.
 - Stage 1 exists only as a bounded trainer baseline today; Stage 2 refinement and broader experiment orchestration still remain open.
 - The world-viewer path is still mid-migration and should not be described as final runtime parity.
@@ -78,6 +92,6 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 ## Recommended Next Slice
 
 1. Keep the minimap-backed Wave 1 NPZ output plus `dataset-build-v10-stage1` manifest as the canonical Stage 1 input surface.
-2. Widen the current 64-shard development proof into a larger curated or map-wide Stage 1 corpus and run longer CUDA training.
-3. Decide whether the older Python reference script should stay or be retired now that `mine-v10-brushes` is native.
-4. After that, move to MCLY combination mining, broader MCAL composition mining, and then Stage 2 refinement.
+2. Add texture-name enrichment to the MCLY dictionary path so biome tags can be inferred instead of left as `unknown`.
+3. Widen the current 64-shard development proof into a larger curated or map-wide Stage 1 corpus and run longer CUDA training.
+4. Decide whether the older Python reference script should stay or be retired, then move to broader MCAL composition mining and Stage 2 refinement.

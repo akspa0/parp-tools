@@ -99,6 +99,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "mine-v10-brushes":
 		V10BrushMiningCommand.Run(tail);
 		break;
+	case "mine-v10-mcly":
+		V10MclyDictionaryCommand.Run(tail);
+		break;
 	default:
 		Console.Error.WriteLine($"Unknown converter command '{command}'.");
 		ShowUsage();
@@ -4168,6 +4171,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter extract-v10-tensors --input <root.adt> [--output <npz>] [--texture-source <tex0.adt>] [--minimap-root <dir>]  (also writes matching *_placements.json when placement data exists)");
 	Console.WriteLine("  wowviewer-converter dataset-build-v10-stage1 --input-dir <adt-dir> --output-dir <dir> --minimap-root <dir> [--manifest <manifest.json>] [--limit <count>] [--overwrite]");
 	Console.WriteLine("  wowviewer-converter mine-v10-brushes --input-dir <npz-dir> --output-dir <dir> [--placement-dir <dir>] [--anchor-mode objects|terrain|hybrid] [--context-radius <n>] [--dictionary-size <n>] [--min-occurrences <n>] [--terrain-samples-per-tile <n>] [--seed <n>]");
+	Console.WriteLine("  wowviewer-converter mine-v10-mcly --input-dir <npz-dir> --output-dir <dir> [--min-occurrences <n>] [--example-limit <n>] [--include-empty]");
 	Console.WriteLine("  wowviewer-converter detect --input <file>");
 	Console.WriteLine("  wowviewer-converter export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-converter terrain-patch-adt --input-adt-dir <dir> --inference-dir <dir> --output-dir <dir> [--no-copy-family] [--no-export-guide-textures] [--no-export-texture-supervision] [--export-glb] [--center-mesh] [--tile-world-size <size>] [--height-offset <value>]");

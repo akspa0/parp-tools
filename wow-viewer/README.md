@@ -133,6 +133,7 @@ Key commands include:
 - `dataset-build-v10-stage1`
 - `extract-v10-tensors`
 - `mine-v10-brushes`
+- `mine-v10-mcly`
 - `ml-corpus`
 - `ml-audit-signals`
 - `ml-harvest-brushes`
@@ -144,6 +145,8 @@ Key commands include:
 `dataset-build-v10-stage1` is the first bounded bulk Stage 1 corpus command for v10 terrain work. It builds minimap-backed NPZ shards from root ADTs plus a loose minimap root and writes a manifest that `train_v10_stage1_minimap2height.py` can consume directly.
 
 `mine-v10-brushes` is the current canonical Wave 2 command for anchor-aware MCAL brush mining. It accepts object-only, terrain-only, or hybrid anchor modes, runs natively inside `WowViewer.Tool.Converter`, and now preserves `top_asset_categories` alongside raw `top_assets` in its JSON output so later viewer and editor tooling can browse the same path-derived asset families.
+
+`mine-v10-mcly` is the current canonical Wave 2 command for MCLY texture-layer combination mining. It scans v10 NPZ shards for `mcly_texture_ids`, counts per-chunk four-layer texture-id tuples, and writes both `mclay_dictionary.json` and `mcly_dictionary.json` for downstream palette and biome-classifier work.
 
 Show usage:
 
