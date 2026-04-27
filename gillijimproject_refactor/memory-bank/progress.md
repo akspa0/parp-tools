@@ -12,6 +12,24 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 ## Recent Validated Milestones
 
+### Apr 27, 2026 - Native rectangular prefab-cell clone detection landed in `wow-viewer`
+
+- `wowviewer-converter mine-v10-prefab-cells` now detects repeating square/rectangular chunk sets (cells) that were copy-pasted across maps
+- The command enumerates all cell positions for configurable widths/heights via `--cell-sizes` (e.g. `8x8,12x12,16x16`), computes a strict SHA256 fingerprint from per-chunk MCLY tuples, hole bits, quantized height stats, and per-layer alpha coverage signatures, and groups exact matches across tiles
+- Relaxed hash now captures per-layer quantized coverage (`L0q0.25,L1q0.50,...`) so cells with similar alpha layer patterns group together even when dominant layer differs
+- It retains only cells with frequency >= `--min-occurrences`, averages their height/alpha/hole data into centroids, and writes per-size subdirectories:
+  - `prefab_cell_dictionary.json` (schema v2 with `alpha_layer_signatures`)
+  - `prefab_cell_dictionary.npz`
+- Proof:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
+  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with warnings only
+  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- mine-v10-prefab-cells --input-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --output-dir i:/parp/parp-tools/output/build-validation/v10-wave2-prefab-cells-large --cell-sizes 8x8,12x12,16x16 --dictionary-size 128 --min-occurrences 2 --example-limit 8` passed
+  - proof output: `output/build-validation/v10-wave2-prefab-cells-large/`
+  - bounded corpus result: `64` shards discovered, `11` tiles read, large-cell retained cells:
+    - `8x8`: `2` retained cells
+    - `12x12`: `1` retained cell
+    - `16x16`: `0` retained cells
+
 ### Apr 26, 2026 - v10 Wave 1 library infrastructure landed in `wow-viewer`
 
 - Added the canonical tensor-pack extraction stack in shared libraries:
@@ -199,7 +217,7 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 ## Recommended Next Slice
 
-1. Keep the minimap-backed Wave 1 NPZ output plus `dataset-build-v10-stage1` manifest as the canonical Stage 1 input surface.
-2. Run longer Stage 2 CUDA training over the existing 64-shard development corpus and measure convergence.
-3. Widen the current 64-shard development proof into a larger curated or map-wide Stage 1 corpus.
-4. Widen the minimap-to-MCLY classifier and native MCAL brush dictionary proof to a broader corpus.
+1. Begin Stage 2 CUDA training over the full 64-shard corpus with 50+ epochs.
+2. Build broad-corpus MCLY classifier evaluation harness.
+3. Integrate PM4 path/building masks into v10 tensor pipeline.
+4. Run prefab-cell clone detection on broader corpora beyond the bounded development proof.

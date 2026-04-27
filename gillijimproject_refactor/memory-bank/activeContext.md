@@ -29,6 +29,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `wowviewer-converter mine-v10-mcal-compositions` now owns native chunk-level MCAL composition vocabulary mining and writes `mcal_composition_dictionary.json` plus `mcal_composition_dictionary.npz`
   - `wowviewer-converter mine-v10-mcal-brushes` now owns native non-object-anchored MCAL brush-stroke vocabulary mining and writes `mcal_brush_dictionary.json` plus `mcal_brush_dictionary.npz`
   - `wowviewer-converter mine-v10-height-profiles` now owns native height archetype clustering and writes `height_profile_dictionary.json` plus `height_profile_dictionary.npz`
+  - `wowviewer-converter mine-v10-prefab-cells` now owns native rectangular prefab-cell clone detection, finds repeating chunk sets via strict SHA256 fingerprints, and writes `prefab_cell_dictionary.json` plus `prefab_cell_dictionary.npz`
   - `wow-viewer/scripts/train_v10_stage1_minimap2height.py` now exists as the first bounded Stage 1 trainer for `minimap_rgb_256 -> height_17`
   - `wow-viewer/scripts/train_v10_minimap_to_mclay.py` now exists as the first bounded Wave 2 classifier trainer for `minimap_rgb_256 -> retained MCLY palette label`
   - `wow-viewer/scripts/train_v10_minimap_to_mclay_grid.py` now exists as the first bounded Wave 2 chunk-grid classifier trainer for `minimap_rgb_256 -> 16x16 retained MCLY palette labels`, and can consume the reusable native MCLY label manifest directly
@@ -43,6 +44,11 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - native MCAL composition proof passed at `output/build-validation/v10-wave2-mcal-compositions/mcal_composition_dictionary.json` over the current Stage 1 corpus
   - native MCAL brush dictionary proof passed at `output/build-validation/v10-wave2-mcal-brushes/mcal_brush_dictionary.json` over the current Stage 1 corpus
   - native height profile proof passed at `output/build-validation/v10-wave2-height-profiles/height_profile_dictionary.json` over all `64` Stage 1 shards
+  - native prefab-cell clone detection proof passed at `output/build-validation/v10-wave2-prefab-cells-large/` with large-cell retained cells from `11` readable tiles:
+    - `8x8`: `2` retained cells
+    - `12x12`: `1` retained cell
+    - `16x16`: `0` retained cells
+  - per-layer alpha coverage signatures now captured in relaxed hash and JSON output (schema v2)
   - bounded Stage 1 corpus build passed at `output/build-validation/v10-stage1-development-corpus` with `64` written shards and a matching `v10_stage1_manifest.json`
   - bounded Stage 1 CUDA smoke passed at `output/ml-training/v10_stage1_gpu_smoke` using `gillijimproject_refactor/.venv-train` on the local RTX 4070 Ti SUPER
   - bounded minimap-to-MCLY CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_smoke/minimap_to_mclay_classifier.pt` using the workspace `.venv` over the current `64` Stage 1 shards and `mclay_dictionary.json`
@@ -61,6 +67,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - MCAL chunk-level composition mining exists as a concrete native `wowviewer-converter mine-v10-mcal-compositions` command with averaged 64x64x4 composition centroids
   - non-object-anchored MCAL brush-stroke vocabulary mining exists as a concrete native `wowviewer-converter mine-v10-mcal-brushes` command with per-layer 64x64 stamps and coarse shape-family labels
   - height profile clustering exists as a concrete native `wowviewer-converter mine-v10-height-profiles` command with normalized and absolute height centroids
+  - rectangular prefab-cell clone detection exists as a concrete native `wowviewer-converter mine-v10-prefab-cells` command with strict fingerprint grouping and averaged cell centroid output
   - terrain-only prefab structure can now be mined from alpha plus terrain mesh shape, even with no nearby objects
   - the first bounded Stage 1 trainer exists in `wow-viewer/scripts/train_v10_stage1_minimap2height.py`
   - the first bounded minimap-to-MCLY palette classifier trainer exists in `wow-viewer/scripts/train_v10_minimap_to_mclay.py`
@@ -75,6 +82,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - MCAL composition proof: `output/build-validation/v10-wave2-mcal-compositions/mcal_composition_dictionary.json`
   - MCAL brush dictionary proof: `output/build-validation/v10-wave2-mcal-brushes/mcal_brush_dictionary.json`
   - height profile proof: `output/build-validation/v10-wave2-height-profiles/height_profile_dictionary.json`
+  - prefab-cell clone detection proof: `output/build-validation/v10-wave2-prefab-cells/prefab_cell_dictionary.json`
   - Stage 1 development corpus: `output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json`
   - Stage 1 CUDA smoke output: `output/ml-training/v10_stage1_gpu_smoke`
   - minimap-to-MCLY classifier smoke output: `output/ml-training/v10_minimap_to_mclay_smoke`

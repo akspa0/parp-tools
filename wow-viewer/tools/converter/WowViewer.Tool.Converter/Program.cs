@@ -114,6 +114,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "mine-v10-height-profiles":
 		V10HeightProfileCommand.Run(tail);
 		break;
+	case "mine-v10-prefab-cells":
+		V10PrefabCellCommand.Run(tail);
+		break;
 	default:
 		Console.Error.WriteLine($"Unknown converter command '{command}'.");
 		ShowUsage();
@@ -4188,6 +4191,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter mine-v10-mcal-compositions --input-dir <npz-dir> --output-dir <dir> [--dictionary-size <n>] [--min-occurrences <n>] [--min-active-layers <n>] [--min-layer-std <v>] [--min-gradient <v>] [--example-limit <n>]");
 	Console.WriteLine("  wowviewer-converter mine-v10-mcal-brushes --input-dir <npz-dir> --output-dir <dir> [--dictionary-size <n>] [--min-occurrences <n>] [--min-layer-std <v>] [--min-gradient <v>] [--min-range <v>] [--max-samples <n>] [--seed <n>]");
 	Console.WriteLine("  wowviewer-converter mine-v10-height-profiles --input-dir <npz-dir> --output-dir <dir> [--dictionary-size <n>] [--min-occurrences <n>] [--profile-size <n>] [--max-iterations <n>] [--example-limit <n>] [--seed <n>]");
+	Console.WriteLine("  wowviewer-converter mine-v10-prefab-cells --input-dir <npz-dir> --output-dir <dir> [--cell-width <n>] [--cell-height <n>] [--dictionary-size <n>] [--min-occurrences <n>] [--example-limit <n>] [--height-quant <v>] [--no-mcly]");
 	Console.WriteLine("  wowviewer-converter detect --input <file>");
 	Console.WriteLine("  wowviewer-converter export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-converter terrain-patch-adt --input-adt-dir <dir> --inference-dir <dir> --output-dir <dir> [--no-copy-family] [--no-export-guide-textures] [--no-export-texture-supervision] [--export-glb] [--center-mesh] [--tile-world-size <size>] [--height-offset <value>]");
