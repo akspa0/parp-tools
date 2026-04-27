@@ -231,6 +231,7 @@ dotnet test .\WowViewer.slnx -c Debug
 ## Documentation Map
 
 - [docs/validation/direct-v9-training-setup.md](docs/validation/direct-v9-training-setup.md) — legacy v9 direct dataset and training setup
+- [docs/architecture/v10-stage2-terrain-synth-architecture-2026-04-27.md](docs/architecture/v10-stage2-terrain-synth-architecture-2026-04-27.md) — Stage 2 terrain model architecture, signal matrix, dataset composition, and validation-impact reference
 - [docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md](docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md) — viewer ownership boundary (viewer restart planned post-v10)
 - [docs/architecture/m2-native-client-research-2026-03-31.md](docs/architecture/m2-native-client-research-2026-03-31.md) — native-client M2 research
 - [docs/architecture/m2/README.md](docs/architecture/m2/README.md) — M2 architecture and implementation handoff

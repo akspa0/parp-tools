@@ -96,6 +96,12 @@ public sealed class TerrainTileTensorPack
     /// <summary>257×257 PM4 building footprint mask.</summary>
     public float[,]? Pm4BuildingFootprintMask { get; init; }
 
+    /// <summary>256×256 decoded MCSH shadow occupancy aligned to minimap space.</summary>
+    public float[,]? McshShadowMask256 { get; init; }
+
+    /// <summary>256×256 shadow occupancy not currently explained by the object explanation mask.</summary>
+    public float[,]? ShadowResidualMask256 { get; init; }
+
     // ── Minimap inputs ─────────────────────────────────────────────────────
 
     /// <summary>256×256 × 3 RGB minimap image used as the primary Stage 1 visual input.</summary>

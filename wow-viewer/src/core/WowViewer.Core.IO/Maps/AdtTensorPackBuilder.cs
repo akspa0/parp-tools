@@ -22,6 +22,7 @@ public static class AdtTensorPackBuilder
     private const int TileChunks = 16;
     private const int ChunkAlphaSize = 64;
     private const int TileAlphaSize = ChunkAlphaSize * TileChunks;
+    private const int TileMinimapSize = 256;
 
     public static TerrainTileTensorPack Build(string adtPath, string? textureSourcePath = null)
     {
@@ -48,7 +49,7 @@ public static class AdtTensorPackBuilder
         float[,,]? mccvRgb = AssembleMccv(stream, terrainChunks, availableSignals);
 
         // ── Read texture data (MCLY + MCAL) ──────────────────────────────────
-        (int[,,]? mclyTextureIds, IReadOnlyList<string> mclyTextureNames, bool[,,]? mclyLayerMask, float[,,]? mcalAlphaPack) =
+        (int[,,]? mclyTextureIds, IReadOnlyList<string> mclyTextureNames, bool[,,]? mclyLayerMask, float[,,]? mcalAlphaPack, float[,]? mcshShadowMask256) =
             ReadTextureData(adtPath, textureSourcePath, availableSignals);
 
         // ── Read MH2O liquid ─────────────────────────────────────────────────
@@ -73,7 +74,9 @@ public static class AdtTensorPackBuilder
 
         // ── Build object footprint masks from MDDF/MODF ──────────────────────
         (float[,]? objectMask257, float[,]? objectPreciseMask257) =
-            BuildObjectMasks(stream, fileSummary, availableSignals);
+            BuildObjectMasks(adtPath, stream, fileSummary, availableSignals);
+
+        float[,]? shadowResidualMask256 = BuildShadowResidualMask256(mcshShadowMask256, objectPreciseMask257, availableSignals);
 
         // ── Build PM4 path and building footprint masks ──────────────────────
         (float[,]? pm4PathMask, float[,]? pm4BuildingFootprintMask) =
@@ -112,6 +115,8 @@ public static class AdtTensorPackBuilder
             ObjectPreciseMask257 = objectPreciseMask257,
             Pm4PathMask = pm4PathMask,
             Pm4BuildingFootprintMask = pm4BuildingFootprintMask,
+            McshShadowMask256 = mcshShadowMask256,
+            ShadowResidualMask256 = shadowResidualMask256,
             AvailableSignals = availableSignals,
         };
     }
@@ -270,7 +275,7 @@ public static class AdtTensorPackBuilder
     // Texture data (MCLY + MCAL)
     // ═══════════════════════════════════════════════════════════════════════
 
-    private static (int[,,]? textureIds, IReadOnlyList<string> textureNames, bool[,,]? layerMask, float[,,]? alphaPack)
+    private static (int[,,]? textureIds, IReadOnlyList<string> textureNames, bool[,,]? layerMask, float[,,]? alphaPack, float[,]? mcshShadowMask256)
         ReadTextureData(string adtPath, string? textureSourcePath, HashSet<string> signals)
     {
         string? effectiveTexturePath = textureSourcePath;
@@ -281,17 +286,19 @@ public static class AdtTensorPackBuilder
         }
 
         if (string.IsNullOrWhiteSpace(effectiveTexturePath) || !File.Exists(effectiveTexturePath))
-            return (null, Array.Empty<string>(), null, null);
+            return (null, Array.Empty<string>(), null, null, null);
 
         try
         {
             AdtTextureFile textureFile = AdtTextureReader.Read(effectiveTexturePath);
             if (textureFile.Chunks.Count == 0)
-                return (null, textureFile.TextureNames, null, null);
+                return (null, textureFile.TextureNames, null, null, null);
 
             int[,,] textureIds = new int[TileChunks, TileChunks, 4];
             bool[,,] layerMask = new bool[TileChunks, TileChunks, 4];
             float[,,] alphaPack = new float[TileAlphaSize, TileAlphaSize, 4];
+            float[,] shadowAccum256 = new float[TileMinimapSize, TileMinimapSize];
+            int[,] shadowCount256 = new int[TileMinimapSize, TileMinimapSize];
 
             // Initialize texture IDs to -1 (missing)
             for (int y = 0; y < TileChunks; y++)
@@ -332,22 +339,84 @@ public static class AdtTensorPackBuilder
                         }
                     }
                 }
+
+                byte[]? shadowMap = chunk.ShadowMap;
+                if (shadowMap is { Length: ChunkAlphaSize * ChunkAlphaSize })
+                {
+                    for (int localY = 0; localY < ChunkAlphaSize; localY++)
+                    {
+                        for (int localX = 0; localX < ChunkAlphaSize; localX++)
+                        {
+                            int globalX = (chunkX * ChunkAlphaSize) + localX;
+                            int globalY = (chunkY * ChunkAlphaSize) + localY;
+                            int minimapX = Math.Clamp(globalX / 4, 0, TileMinimapSize - 1);
+                            int minimapY = Math.Clamp(globalY / 4, 0, TileMinimapSize - 1);
+                            shadowAccum256[minimapY, minimapX] += shadowMap[(localY * ChunkAlphaSize) + localX] / 255f;
+                            shadowCount256[minimapY, minimapX]++;
+                        }
+                    }
+                }
             }
 
             if (!any)
-                return (null, textureFile.TextureNames, null, null);
+                return (null, textureFile.TextureNames, null, null, null);
+
+            float[,]? mcshShadowMask256 = null;
+            bool anyShadow = false;
+            for (int y = 0; y < TileMinimapSize; y++)
+            {
+                for (int x = 0; x < TileMinimapSize; x++)
+                {
+                    int count = shadowCount256[y, x];
+                    if (count <= 0)
+                        continue;
+
+                    mcshShadowMask256 ??= new float[TileMinimapSize, TileMinimapSize];
+                    float value = shadowAccum256[y, x] / count;
+                    mcshShadowMask256[y, x] = value;
+                    anyShadow |= value > 0f;
+                }
+            }
 
             signals.Add("mcly_texture_ids");
             signals.Add("mcly_layer_mask");
             signals.Add("mcal_alpha_pack_256");
             if (textureFile.TextureNames.Count > 0)
                 signals.Add("mcly_texture_names");
-            return (textureIds, textureFile.TextureNames, layerMask, alphaPack);
+            if (anyShadow)
+                signals.Add("mcsh_shadow_mask_256");
+            return (textureIds, textureFile.TextureNames, layerMask, alphaPack, anyShadow ? mcshShadowMask256 : null);
         }
         catch
         {
-            return (null, Array.Empty<string>(), null, null);
+            return (null, Array.Empty<string>(), null, null, null);
         }
+    }
+
+    private static float[,]? BuildShadowResidualMask256(float[,]? shadowMask256, float[,]? objectPreciseMask257, HashSet<string> signals)
+    {
+        if (shadowMask256 is null || objectPreciseMask257 is null)
+            return null;
+
+        float[,] objectMask256 = ResizeScalarGrid(objectPreciseMask257, TileMinimapSize);
+        float[,] residual = new float[TileMinimapSize, TileMinimapSize];
+        bool any = false;
+
+        for (int y = 0; y < TileMinimapSize; y++)
+        {
+            for (int x = 0; x < TileMinimapSize; x++)
+            {
+                float value = MathF.Max(0f, shadowMask256[y, x] - Math.Clamp(objectMask256[y, x], 0f, 1f));
+                residual[y, x] = value;
+                any |= value > 0f;
+            }
+        }
+
+        if (!any)
+            return null;
+
+        signals.Add("shadow_residual_mask_256");
+        return residual;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -684,7 +753,7 @@ public static class AdtTensorPackBuilder
     private const float ObjectMapOrigin = 17066.666f;
 
     private static (float[,]? mask, float[,]? preciseMask)
-        BuildObjectMasks(Stream stream, MapFileSummary fileSummary, HashSet<string> signals)
+        BuildObjectMasks(string adtPath, Stream stream, MapFileSummary fileSummary, HashSet<string> signals)
     {
         if (!TryParseAdtTileCoords(fileSummary.SourcePath, out int tileX, out int tileY))
             return (null, null);
@@ -692,7 +761,11 @@ public static class AdtTensorPackBuilder
         AdtPlacementCatalog placements;
         try
         {
-            placements = AdtPlacementReader.Read(stream, fileSummary);
+            AdtTileFamily family = AdtTileFamilyResolver.Resolve(adtPath);
+            string? placementSourcePath = family.PlacementSourcePath;
+            placements = !string.IsNullOrWhiteSpace(placementSourcePath) && File.Exists(placementSourcePath)
+                ? AdtPlacementReader.Read(placementSourcePath)
+                : AdtPlacementReader.Read(stream, fileSummary);
         }
         catch
         {
@@ -946,6 +1019,37 @@ public static class AdtTensorPackBuilder
                 float sourceY = y * scale;
                 int ix = Math.Clamp((int)sourceX, 0, sourceSize - 2);
                 int iy = Math.Clamp((int)sourceY, 0, sourceSize - 2);
+                float fx = sourceX - ix;
+                float fy = sourceY - iy;
+
+                float v00 = source[iy, ix];
+                float v10 = source[iy, ix + 1];
+                float v01 = source[iy + 1, ix];
+                float v11 = source[iy + 1, ix + 1];
+
+                result[y, x] = BilinearInterpolate(v00, v10, v01, v11, fx, fy);
+            }
+        }
+
+        return result;
+    }
+
+    private static float[,] ResizeScalarGrid(float[,] source, int targetSize)
+    {
+        float[,] result = new float[targetSize, targetSize];
+        int sourceHeight = source.GetLength(0);
+        int sourceWidth = source.GetLength(1);
+        float scaleX = (float)(sourceWidth - 1) / Math.Max(1, targetSize - 1);
+        float scaleY = (float)(sourceHeight - 1) / Math.Max(1, targetSize - 1);
+
+        for (int y = 0; y < targetSize; y++)
+        {
+            for (int x = 0; x < targetSize; x++)
+            {
+                float sourceX = x * scaleX;
+                float sourceY = y * scaleY;
+                int ix = Math.Clamp((int)sourceX, 0, sourceWidth - 2);
+                int iy = Math.Clamp((int)sourceY, 0, sourceHeight - 2);
                 float fx = sourceX - ix;
                 float fy = sourceY - iy;
 

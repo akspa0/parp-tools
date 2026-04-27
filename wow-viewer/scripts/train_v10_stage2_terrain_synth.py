@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image, ImageDraw, ImageFont
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +26,9 @@ DEFAULT_SEED = 1337
 DEFAULT_NUM_WORKERS = 4
 DEFAULT_PREVIEW_COUNT = 4
 DEFAULT_SIGNAL_DROOUT = 0.15
+DEFAULT_MODEL_VARIANT = "structured_fusion_v2"
+DEFAULT_NATIVE_V10_BOOST = 1.0
+DEFAULT_RARE_SIGNAL_BOOST = 3.0
 PREVIEW_ROW_TITLE_HEIGHT = 18
 PREVIEW_PANE_LABEL_HEIGHT = 18
 PREVIEW_LABEL_PADDING = 4
@@ -108,6 +111,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--signal-dropout", type=float, default=DEFAULT_SIGNAL_DROOUT,
                         help="Probability of zeroing out an optional signal channel during training.")
     parser.add_argument(
+        "--native-v10-boost",
+        type=float,
+        default=DEFAULT_NATIVE_V10_BOOST,
+        help="Additional weighted-sampler emphasis for native v10 training rows.",
+    )
+    parser.add_argument(
+        "--rare-signal-boost",
+        type=float,
+        default=DEFAULT_RARE_SIGNAL_BOOST,
+        help="Additional weighted-sampler emphasis for PM4, MCAL, MCCV, and normal-bearing training rows.",
+    )
+    parser.add_argument(
+        "--model-variant",
+        choices=MODEL_VARIANTS,
+        default="",
+        help=(
+            "Model architecture variant. Defaults to structured_fusion_v2 for new training runs. "
+            "Checkpoint-only evaluation reuses the checkpoint variant when available, otherwise falls back to early_fusion_v1."
+        ),
+    )
+    parser.add_argument(
         "--validation-ablation-groups",
         default="pm4,mcal,objects,liquids",
         help="Comma-separated validation ablation groups to zero during post-train analysis. Use 'none' to disable.",
@@ -115,6 +139,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--evaluate-checkpoint",
         help="Optional checkpoint path. When provided, skip training and only run validation analysis against the checkpoint.",
+    )
+    parser.add_argument(
+        "--force-validation-tiles",
+        default="",
+        help="Comma-separated tile names that must be placed in the validation split when present in the selected input corpus.",
     )
     parser.add_argument("--stage1-checkpoint", help="Optional Stage 1 checkpoint to use for coarse prior at inference time.")
     return parser.parse_args()
@@ -130,6 +159,33 @@ def build_input_channel_ranges() -> dict[str, tuple[int, int]]:
 
 
 INPUT_CHANNEL_RANGES = build_input_channel_ranges()
+
+MODEL_VARIANTS = ("early_fusion_v1", "structured_fusion_v2")
+
+MODEL_BRANCH_SIGNAL_GROUPS: dict[str, tuple[str, ...]] = {
+    "surface": (
+        "minimap_rgb_256",
+        "mcal_alpha_pack_256",
+        "mccv_rgb",
+        "mcnr_normal_xyz",
+        "coarse_height_17_prior",
+    ),
+    "structure": (
+        "object_mask_257",
+        "object_precise_mask_257",
+        "pm4_path_mask",
+        "pm4_building_footprint_mask",
+        "hole_mask_16",
+        "mtxf_animated_mask",
+    ),
+    "liquids": (
+        "mh2o_surface_height",
+        "mh2o_depth",
+        "wl_liquid_mask",
+        "wl_liquid_height",
+        "mclq_surface_height",
+    ),
+}
 
 
 def parse_validation_ablation_groups(raw_value: str) -> list[str]:
@@ -150,6 +206,25 @@ def parse_validation_ablation_groups(raw_value: str) -> list[str]:
             groups.append(group)
 
     return groups
+
+
+def parse_tile_name_list(raw_value: str) -> list[str]:
+    if not raw_value.strip():
+        return []
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for part in raw_value.split(","):
+        tile_name = part.strip()
+        if not tile_name:
+            continue
+        normalized = tile_name.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(tile_name)
+
+    return result
 
 
 def seed_everything(seed: int) -> None:
@@ -274,13 +349,22 @@ def load_metadata(npz_file: np.lib.npyio.NpzFile) -> dict[str, Any]:
     raise TypeError("Unsupported metadata payload in NPZ shard")
 
 
-def load_optional_array(npz_file: np.lib.npyio.NpzFile, key: str) -> np.ndarray | None:
+def decode_signal_array(key: str, array: np.ndarray, source_key: str) -> np.ndarray:
+    if key == "mcnr_normal_xyz" and source_key == "normal_rgb_256":
+        decoded = (array.astype(np.float32) / 127.5) - 1.0
+        return np.clip(decoded, -1.0, 1.0)
+    return array
+
+
+def load_optional_array(npz_file: np.lib.npyio.NpzFile, key: str) -> tuple[np.ndarray, str] | None:
     if key not in npz_file.files:
         for alias in SIGNAL_ALIASES.get(key, ()):
             if alias in npz_file.files:
-                return np.asarray(npz_file[alias])
+                array = np.asarray(npz_file[alias])
+                return decode_signal_array(key, array, alias), alias
         return None
-    return np.asarray(npz_file[key])
+    array = np.asarray(npz_file[key])
+    return decode_signal_array(key, array, key), key
 
 
 @dataclass(slots=True)
@@ -314,6 +398,7 @@ SIGNAL_ALIASES: dict[str, tuple[str, ...]] = {
     # Legacy v9 cache names. These keep the v10 trainer usable before every
     # archive-backed client has been regenerated through native v10 extraction.
     "hole_mask_16": ("hole_mask_16x16",),
+    "mcnr_normal_xyz": ("normal_rgb_256",),
     "object_precise_mask_257": ("object_mask_precise_257",),
     "pm4_path_mask": ("pm4_mask_257",),
     "wl_liquid_mask": ("liquid_mask_257",),
@@ -414,9 +499,10 @@ def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> l
             signals: dict[str, np.ndarray] = {}
             available: set[str] = set()
             for spec in OPTIONAL_SIGNALS:
-                arr = load_optional_array(shard, spec.key)
-                if arr is None:
+                loaded = load_optional_array(shard, spec.key)
+                if loaded is None:
                     continue
+                arr, source_key = loaded
                 # Normalize shape expectations
                 if spec.key == "hole_mask_16" and arr.ndim == 2:
                     arr = arr.astype(np.float32)
@@ -428,6 +514,8 @@ def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> l
                     arr = np.transpose(arr, (2, 0, 1)).astype(np.float32)
                 signals[spec.key] = arr
                 available.add(spec.key)
+                if source_key != spec.key:
+                    available.add(source_key)
 
             if height_65 is None:
                 height_65 = downsample_heightmap(height_257, 65)
@@ -698,7 +786,7 @@ def delta_report(current: dict[str, float | int | None], baseline: dict[str, flo
 
 
 def evaluate_validation_analysis(
-    model: Stage2TerrainSynthModel,
+    model: nn.Module,
     loader: DataLoader,
     device: torch.device,
     height_mean: float,
@@ -812,7 +900,7 @@ class ConvBlock(nn.Module):
         return F.gelu(self.conv(x) + self.skip(x))
 
 
-class Stage2TerrainSynthModel(nn.Module):
+class EarlyFusionStage2TerrainSynthModel(nn.Module):
     def __init__(self, input_channels: int) -> None:
         super().__init__()
         self.stem = nn.Sequential(
@@ -886,12 +974,140 @@ class Stage2TerrainSynthModel(nn.Module):
         return coarse, mid, fine
 
 
+class SignalBranchStem(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int) -> None:
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.GELU(),
+            ConvBlock(out_channels, out_channels),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.layers(x)
+
+
+class StructuredFusionStage2TerrainSynthModel(nn.Module):
+    def __init__(self, input_channels: int) -> None:
+        super().__init__()
+        expected_channels = INPUT_CHANNEL_RANGES["coarse_height_17_prior"][1]
+        if input_channels != expected_channels:
+            raise ValueError(f"structured_fusion_v2 expects {expected_channels} input channels, got {input_channels}.")
+
+        self.branch_ranges = {
+            branch_name: [INPUT_CHANNEL_RANGES[signal_name] for signal_name in signal_names]
+            for branch_name, signal_names in MODEL_BRANCH_SIGNAL_GROUPS.items()
+        }
+        branch_widths = {
+            "surface": 24,
+            "structure": 16,
+            "liquids": 16,
+        }
+
+        self.surface_stem = SignalBranchStem(sum(end - start for start, end in self.branch_ranges["surface"]), branch_widths["surface"])
+        self.structure_stem = SignalBranchStem(sum(end - start for start, end in self.branch_ranges["structure"]), branch_widths["structure"])
+        self.liquid_stem = SignalBranchStem(sum(end - start for start, end in self.branch_ranges["liquids"]), branch_widths["liquids"])
+
+        fused_channels = sum(branch_widths.values())
+        self.fusion = nn.Sequential(
+            nn.Conv2d(fused_channels, 32, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.GELU(),
+        )
+        self.enc1 = ConvBlock(32, 32)             # 256
+        self.enc2 = ConvBlock(32, 64, stride=2)   # 128
+        self.enc3 = ConvBlock(64, 96, stride=2)   # 64
+        self.enc4 = ConvBlock(96, 128, stride=2)  # 32
+        self.enc5 = ConvBlock(128, 160, stride=2) # 16
+
+        self.coarse_head = nn.Sequential(
+            nn.AdaptiveAvgPool2d((17, 17)),
+            nn.Conv2d(160, 64, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(64, 1, kernel_size=1),
+        )
+
+        self.mid_up = nn.Upsample(size=(65, 65), mode="bilinear", align_corners=False)
+        self.mid_head = nn.Sequential(
+            nn.Conv2d(160, 96, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(96, 1, kernel_size=1),
+        )
+
+        self.fine_up1 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(160, 128),
+        )
+        self.fine_up2 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(128, 96),
+        )
+        self.fine_up3 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(96, 64),
+        )
+        self.fine_up4 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(64, 32),
+        )
+        self.fine_head = nn.Sequential(
+            nn.Conv2d(32, 16, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(16, 1, kernel_size=1),
+        )
+
+    def _slice_branch(self, x: torch.Tensor, branch_name: str) -> torch.Tensor:
+        return torch.cat([x[:, start:end, :, :] for start, end in self.branch_ranges[branch_name]], dim=1)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        surface = self.surface_stem(self._slice_branch(x, "surface"))
+        structure = self.structure_stem(self._slice_branch(x, "structure"))
+        liquids = self.liquid_stem(self._slice_branch(x, "liquids"))
+
+        x0 = self.fusion(torch.cat([surface, structure, liquids], dim=1))
+        x1 = self.enc1(x0)  # 256
+        x2 = self.enc2(x1)  # 128
+        x3 = self.enc3(x2)  # 64
+        x4 = self.enc4(x3)  # 32
+        x5 = self.enc5(x4)  # 16
+
+        coarse = self.coarse_head(x5)
+        mid = self.mid_head(self.mid_up(x5))
+
+        f = self.fine_up1(x5)   # 32
+        f = self.fine_up2(f)    # 64
+        f = self.fine_up3(f)    # 128
+        f = self.fine_up4(f)    # 256
+        fine = self.fine_head(f)
+        fine = F.interpolate(fine, size=(257, 257), mode="bilinear", align_corners=False)
+
+        return coarse, mid, fine
+
+
+def build_model(model_variant: str, input_channels: int) -> nn.Module:
+    if model_variant == "early_fusion_v1":
+        return EarlyFusionStage2TerrainSynthModel(input_channels=input_channels)
+    if model_variant == "structured_fusion_v2":
+        return StructuredFusionStage2TerrainSynthModel(input_channels=input_channels)
+    raise ValueError(f"Unsupported model variant '{model_variant}'.")
+
+
+def resolve_model_variant(args: argparse.Namespace, checkpoint_payload: dict[str, Any] | None = None) -> str:
+    if args.model_variant:
+        return args.model_variant
+    if checkpoint_payload is not None:
+        return str(checkpoint_payload.get("model_variant") or "early_fusion_v1")
+    return DEFAULT_MODEL_VARIANT
+
+
 def build_split_report(
     samples: list[Stage2Sample],
     train_samples: list[Stage2Sample],
     val_samples: list[Stage2Sample],
     target_val_count: int,
     priority_quotas: dict[str, int],
+    forced_validation_tiles: list[str],
 ) -> dict[str, Any]:
     def count_matches(group_name: str, source: list[Stage2Sample]) -> int:
         return sum(1 for sample in source if sample_matches_subset(sample, group_name))
@@ -900,6 +1116,7 @@ def build_split_report(
         "strategy": "quota-aware-stratified-signal-holdout.v1",
         "target_val_count": target_val_count,
         "actual_val_count": len(val_samples),
+        "forced_validation_tiles": forced_validation_tiles,
         "val_dataset_counts": build_dataset_counts(val_samples),
         "priority_groups": {
             group_name: {
@@ -933,8 +1150,13 @@ def sample_priority_score(sample: Stage2Sample) -> tuple[int, int, int, int, int
     )
 
 
-def order_validation_samples(samples: list[Stage2Sample]) -> list[Stage2Sample]:
-    return sorted(samples, key=sample_priority_score, reverse=True)
+def order_validation_samples(samples: list[Stage2Sample], forced_validation_tiles: set[str] | None = None) -> list[Stage2Sample]:
+    forced_validation_tiles = forced_validation_tiles or set()
+    return sorted(
+        samples,
+        key=lambda sample: (1 if sample.tile_name.lower() in forced_validation_tiles else 0, *sample_priority_score(sample)),
+        reverse=True,
+    )
 
 
 def sample_catalog_entry(sample: Stage2Sample) -> dict[str, Any]:
@@ -970,19 +1192,44 @@ def write_validation_catalog(output_dir: Path, train_samples: list[Stage2Sample]
     return catalog_path
 
 
-def split_samples(samples: list[Stage2Sample], val_fraction: float, seed: int) -> tuple[list[Stage2Sample], list[Stage2Sample], dict[str, Any]]:
+def split_samples(
+    samples: list[Stage2Sample],
+    val_fraction: float,
+    seed: int,
+    forced_validation_tiles: list[str],
+) -> tuple[list[Stage2Sample], list[Stage2Sample], dict[str, Any]]:
     shuffled = list(samples)
     rng = random.Random(seed)
     rng.shuffle(shuffled)
     if len(shuffled) < 2:
         raise ValueError("Need at least two valid NPZ shards to create train and validation splits.")
 
+    forced_validation_lookup = {tile_name.lower() for tile_name in forced_validation_tiles}
+    available_tile_names = {sample.tile_name.lower() for sample in shuffled}
+    missing_forced_tiles = sorted(tile_name for tile_name in forced_validation_lookup if tile_name not in available_tile_names)
+    if missing_forced_tiles:
+        raise ValueError(
+            "Forced validation tiles were not found in the selected input corpus: " + ", ".join(missing_forced_tiles)
+        )
+
     val_count = max(1, min(len(shuffled) - 1, int(math.ceil(len(shuffled) * val_fraction))))
+    if forced_validation_lookup:
+        val_count = max(val_count, len(forced_validation_lookup))
+        if val_count >= len(shuffled):
+            raise ValueError("Forced validation tiles leave no training samples. Reduce the forced set or increase the input corpus.")
 
     indexed_samples = list(enumerate(shuffled))
     selected_indices: set[int] = set()
     priority_quotas: dict[str, int] = {}
     current_counts = {group_name: 0 for group_name in VALIDATION_SPLIT_PRIORITY_GROUPS}
+
+    for idx, sample in indexed_samples:
+        if sample.tile_name.lower() not in forced_validation_lookup:
+            continue
+        selected_indices.add(idx)
+        for group_name in VALIDATION_SPLIT_PRIORITY_GROUPS:
+            if sample_matches_subset(sample, group_name):
+                current_counts[group_name] += 1
 
     for group_name in VALIDATION_SPLIT_PRIORITY_GROUPS:
         group_total = sum(1 for _, sample in indexed_samples if sample_matches_subset(sample, group_name))
@@ -1037,20 +1284,58 @@ def split_samples(samples: list[Stage2Sample], val_fraction: float, seed: int) -
     val_samples = [sample for idx, sample in indexed_samples if idx in selected_indices]
     train_samples = [sample for idx, sample in indexed_samples if idx not in selected_indices]
 
-    val_samples = order_validation_samples(val_samples)
+    val_samples = order_validation_samples(val_samples, forced_validation_lookup)
 
     if not train_samples or not val_samples:
         raise RuntimeError("Split logic produced an empty train or validation set.")
 
-    split_report = build_split_report(shuffled, train_samples, val_samples, val_count, priority_quotas)
+    split_report = build_split_report(shuffled, train_samples, val_samples, val_count, priority_quotas, forced_validation_tiles)
     return train_samples, val_samples, split_report
 
 
-def make_loader(dataset: Stage2Dataset, batch_size: int, shuffle: bool, num_workers: int) -> DataLoader:
+def compute_training_sample_weights(
+    samples: list[Stage2Sample],
+    native_v10_boost: float,
+    rare_signal_boost: float,
+) -> list[float]:
+    weights: list[float] = []
+    for sample in samples:
+        weight = 1.0
+        if native_v10_boost > 0 and is_native_v10_source(sample):
+            weight += native_v10_boost
+        if rare_signal_boost > 0:
+            if sample_has_pm4_signal(sample):
+                weight += rare_signal_boost
+            if sample_has_mcal_signal(sample):
+                weight += rare_signal_boost
+            if sample_has_mccv_signal(sample):
+                weight += rare_signal_boost
+            if sample_has_normal_signal(sample):
+                weight += rare_signal_boost
+        weights.append(weight)
+    return weights
+
+
+def make_loader(
+    dataset: Stage2Dataset,
+    batch_size: int,
+    shuffle: bool,
+    num_workers: int,
+    sample_weights: list[float] | None = None,
+) -> DataLoader:
+    sampler = None
+    if sample_weights is not None:
+        sampler = WeightedRandomSampler(
+            weights=torch.tensor(sample_weights, dtype=torch.double),
+            num_samples=len(sample_weights),
+            replacement=True,
+        )
+
     return DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
+        shuffle=shuffle and sampler is None,
+        sampler=sampler,
         num_workers=max(0, num_workers),
         pin_memory=torch.cuda.is_available(),
         persistent_workers=num_workers > 0,
@@ -1064,7 +1349,7 @@ def maybe_channels_last(tensor: torch.Tensor, enabled: bool) -> torch.Tensor:
 
 
 def run_epoch(
-    model: Stage2TerrainSynthModel,
+    model: nn.Module,
     loader: DataLoader,
     optimizer: torch.optim.Optimizer | None,
     scaler: torch.amp.GradScaler | None,
@@ -1107,7 +1392,7 @@ def run_epoch(
 
 
 def save_preview(
-    model: Stage2TerrainSynthModel,
+    model: nn.Module,
     dataset: Stage2Dataset,
     device: torch.device,
     output_path: Path,
@@ -1266,6 +1551,7 @@ def main() -> None:
     args = parse_args()
     seed_everything(args.seed)
     ablation_groups = parse_validation_ablation_groups(args.validation_ablation_groups)
+    forced_validation_tiles = parse_tile_name_list(args.force_validation_tiles)
 
     input_path = Path(args.input).resolve()
     output_dir = Path(args.output_dir).resolve()
@@ -1279,7 +1565,7 @@ def main() -> None:
     if len(samples) < 2:
         raise RuntimeError("Need at least two v10 NPZ shards containing minimap_rgb_256, height_257, and height_17.")
 
-    train_samples, val_samples, split_report = split_samples(samples, args.val_fraction, args.seed)
+    train_samples, val_samples, split_report = split_samples(samples, args.val_fraction, args.seed, forced_validation_tiles)
     height_values = np.concatenate([sample.height_257.reshape(-1) for sample in train_samples], axis=0)
     height_mean = float(np.mean(height_values))
     height_std = float(np.std(height_values))
@@ -1288,7 +1574,14 @@ def main() -> None:
 
     train_dataset = Stage2Dataset(train_samples, height_mean, height_std, args.signal_dropout)
     val_dataset = Stage2Dataset(val_samples, height_mean, height_std, signal_dropout=0.0)
-    train_loader = make_loader(train_dataset, args.batch_size, shuffle=True, num_workers=args.num_workers)
+    train_sample_weights = compute_training_sample_weights(train_samples, args.native_v10_boost, args.rare_signal_boost)
+    train_loader = make_loader(
+        train_dataset,
+        args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        sample_weights=train_sample_weights,
+    )
     val_loader = make_loader(val_dataset, args.batch_size, shuffle=False, num_workers=args.num_workers)
     total_signal_coverage = summarize_signal_coverage(samples)
     train_signal_coverage = summarize_signal_coverage(train_samples)
@@ -1306,8 +1599,9 @@ def main() -> None:
         checkpoint_height_mean = float(checkpoint_payload.get("height_mean", height_mean))
         checkpoint_height_std = float(checkpoint_payload.get("height_std", height_std))
         checkpoint_input_channels = int(checkpoint_payload.get("input_channels", sample_channels))
+        checkpoint_model_variant = resolve_model_variant(args, checkpoint_payload)
 
-        model = Stage2TerrainSynthModel(input_channels=checkpoint_input_channels).to(device)
+        model = build_model(checkpoint_model_variant, checkpoint_input_channels).to(device)
         if args.channels_last and device.type == "cuda":
             model = model.to(memory_format=torch.channels_last)
         load_model_state(model, checkpoint_payload["model_state"])
@@ -1338,8 +1632,15 @@ def main() -> None:
             "train_count": len(train_samples),
             "val_count": len(val_samples),
             "input_channels": checkpoint_input_channels,
+            "model_variant": checkpoint_model_variant,
             "height_mean": checkpoint_height_mean,
             "height_std": checkpoint_height_std,
+            "train_sampler": {
+                "native_v10_boost": args.native_v10_boost,
+                "rare_signal_boost": args.rare_signal_boost,
+                "min_weight": min(train_sample_weights),
+                "max_weight": max(train_sample_weights),
+            },
             "preview_count": min(max(args.preview_count, 1), len(val_dataset)),
             "signal_coverage": {
                 "all_samples": total_signal_coverage,
@@ -1356,7 +1657,8 @@ def main() -> None:
         (output_dir / "metrics.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return
 
-    model = Stage2TerrainSynthModel(input_channels=sample_channels).to(device)
+    model_variant = resolve_model_variant(args)
+    model = build_model(model_variant, sample_channels).to(device)
     if args.channels_last and device.type == "cuda":
         model = model.to(memory_format=torch.channels_last)
 
@@ -1403,6 +1705,7 @@ def main() -> None:
                 "height_mean": height_mean,
                 "height_std": height_std,
                 "input_channels": sample_channels,
+                "model_variant": model_variant,
                 "history": history,
             },
             last_checkpoint,
@@ -1418,6 +1721,7 @@ def main() -> None:
                     "height_mean": height_mean,
                     "height_std": height_std,
                     "input_channels": sample_channels,
+                    "model_variant": model_variant,
                     "history": history,
                 },
                 checkpoints_dir / "best.pt",
@@ -1435,7 +1739,8 @@ def main() -> None:
 
     best_checkpoint_path = checkpoints_dir / "best.pt"
     best_checkpoint = load_checkpoint_payload(best_checkpoint_path, device)
-    analysis_model = Stage2TerrainSynthModel(input_channels=sample_channels).to(device)
+    best_model_variant = str(best_checkpoint.get("model_variant") or model_variant)
+    analysis_model = build_model(best_model_variant, sample_channels).to(device)
     if args.channels_last and device.type == "cuda":
         analysis_model = analysis_model.to(memory_format=torch.channels_last)
     load_model_state(analysis_model, best_checkpoint["model_state"])
@@ -1455,8 +1760,15 @@ def main() -> None:
         "train_count": len(train_samples),
         "val_count": len(val_samples),
         "input_channels": sample_channels,
+        "model_variant": best_model_variant,
         "height_mean": height_mean,
         "height_std": height_std,
+        "train_sampler": {
+            "native_v10_boost": args.native_v10_boost,
+            "rare_signal_boost": args.rare_signal_boost,
+            "min_weight": min(train_sample_weights),
+            "max_weight": max(train_sample_weights),
+        },
         "preview_count": min(max(args.preview_count, 1), len(val_dataset)),
         "signal_coverage": {
             "all_samples": total_signal_coverage,
