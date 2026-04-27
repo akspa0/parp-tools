@@ -1,215 +1,231 @@
 # wow-viewer
 
-`wow-viewer` is the new home for shared World of Warcraft file readers, runtime code, viewer tooling, and dataset-generation workflows that are being extracted from the larger `parp-tools` workspace.
+`wow-viewer` is the canonical home for shared World of Warcraft file I/O, dataset generation, and the **v10 Terrain AI** training pipeline. It is also the long-term target for runtime and viewer code extracted from the larger `parp-tools` workspace.
 
-This repo is in active migration. It already contains usable tooling, but it is not yet a drop-in replacement for every legacy viewer or exporter path.
+> **Viewer Status — On Hold**
+> The desktop viewer shell (`WowViewer.App`) is paused while the v10 terrain model is brought to full training maturity. Once the model is trained and validated, viewer development will restart from a clean slate using the proven library stack below. Do not invest in the current viewer shell; it is transitional.
+
+---
 
 ## What You Can Use Today
 
-- `WowViewer.App`: desktop shell plus bounded CLI proof commands for M2, MDX, and world-session inspection.
-- `WowViewer.Tool.Inspect`: read-only inspection CLI for archive, BLP, M2, MDX, map, LIT, PM4, and WMO data.
-- `WowViewer.Tool.Converter`: conversion and dataset CLI for file detection, direct dataset manifests, cache building, and ML helper workflows.
-- Shared libraries under `src/core`: the canonical implementation target for new format and runtime work in this repo.
-- Shared archive-backed virtual reads now reuse a persistent `WowViewer.Core.IO.Files` session cache instead of bootstrapping a fresh MPQ catalog per file read.
+- **v10 Terrain AI pipeline** — end-to-end NPZ extraction, corpus building, dictionary mining, label generation, and PyTorch trainers.
+- **Shared libraries** under `src/core` — canonical implementation target for new format and runtime work.
+- **`WowViewer.Tool.Converter`** — conversion and dataset CLI; the primary surface for v10 workflows.
+- **`WowViewer.Tool.Inspect`** — read-only inspection CLI for archive, BLP, M2, MDX, map, LIT, PM4, and WMO data.
+- **Shared archive-backed virtual reads** with a persistent `WowViewer.Core.IO.Files` session cache.
 
-## Current Limits
+---
 
-- The desktop app is a real shell, not yet a finished replacement viewer.
-- PM4 is the most mature library area today; other format families are at mixed levels of summary, parse, and runtime ownership.
-- WMO shared I/O now includes version-aware material and embedded-group mesh document readers plus root portal and doodad ownership, and `WowViewer.App` now consumes that seam for a bounded standalone WMO batch preview that resolves material textures when available. This is still not the full world 3D renderer.
-- Dataset and training flows are usable, but still documented as Bring Your Own Data workflows and still rely on some compatibility scripts downstream.
+## v10 Terrain AI
 
-## Prerequisites
+The v10 lane is the active development focus. It is organised in waves:
 
-- .NET 10 SDK
-- PowerShell on Windows or a compatible shell environment for bootstrap scripts
-- Python only if you plan to use the training and dataset scripts documented under `docs/validation/`
-- Your own lawful game data, archives, or extracted client roots
+- **Wave 1** — Tensor-pack extraction and Stage 1 corpus building.
+- **Wave 2** — Pattern mining (brush dictionaries, MCLY palettes, MCAL compositions, height profiles) and bounded classifier trainers.
+- **Stage 2** — Multi-resolution terrain synthesis trainer.
 
-## Bootstrap
+### Wave 1 — Extraction & Stage 1 Corpus
 
-Clone the baseline dependencies into `libs/`:
+Build minimap-backed NPZ shards from root ADTs:
 
 ```powershell
-./scripts/bootstrap.ps1
+# Single-tile extraction
+wowviewer-converter extract-v10-tensors --minimap-root <dir> <adt_path>
+
+# Bulk Stage 1 corpus + manifest
+wowviewer-converter dataset-build-v10-stage1 `
+  --input-dir <root_adt_dir> `
+  --output-dir <corpus_dir> `
+  --minimap-root <minimap_dir> `
+  --manifest <corpus_dir>/v10_stage1_manifest.json
 ```
 
-Optional evaluation repos:
+Wave 1 writes shards containing:
 
+| Signal | Shape | Description |
+|--------|-------|-------------|
+| `minimap_rgb_256` | 256×256×3 | Minimap texture |
+| `height_257` | 257×257 | Full-resolution height |
+| `height_65` | 65×65 | Mid-resolution height |
+| `height_17` | 17×17 | Coarse height |
+| `mcal_alpha_pack_256` | 256×256×4 | Chunk-level alpha layers |
+| `mcly_texture_ids` | 16×16×4 | Per-chunk texture-layer IDs |
+| `mcly_texture_names` | variable | MTEX path table |
+| `ObjectMask257` | 257×257 | Placement-derived object mask |
+| `ObjectPreciseMask257` | 257×257 | Precise object mask |
+| `normal_257` | 257×257×3 | Normals |
+| `hole_mask_16` | 16×16 | Hole bitmask |
+| `mclq_liquid_mask_16` | 16×16 | Liquid presence |
+
+### Wave 2 — Pattern Mining
+
+All dictionary commands run natively inside `WowViewer.Tool.Converter` and consume the Stage 1 NPZ shard contract.
+
+#### Anchor-aware brush mining
 ```powershell
-./scripts/bootstrap.ps1 -IncludeOptional
+wowviewer-converter mine-v10-brushes `
+  --input-dir <corpus_dir> --placement-dir <corpus_dir> `
+  --output-dir <out_dir> --anchor-mode hybrid
 ```
+Emits `brush_dictionary.json` with object, terrain, and hybrid anchors.
 
-Bash is also supported:
-
-```bash
-./scripts/bootstrap.sh
-./scripts/bootstrap.sh --include-optional
-```
-
-## Build And Test
-
-Build the full solution:
-
+#### MCLY texture-layer combination mining
 ```powershell
-dotnet build .\WowViewer.slnx -c Debug
+wowviewer-converter mine-v10-mcly `
+  --input-dir <corpus_dir> --output-dir <out_dir>
 ```
+Emits `mclay_dictionary.json` and `mcly_dictionary.json` with texture-path keyed palettes and conservative biome tags.
 
-Run the current test suites:
-
+#### Reusable MCLY label manifest
 ```powershell
-dotnet test .\WowViewer.slnx -c Debug
+wowviewer-converter label-v10-mcly `
+  --input <manifest.json> --dictionary <mclay_dictionary.json> `
+  --output <label_manifest.json>
 ```
+Emits `v10-mcly-label-manifest.v1` with per-tile 16×16 chunk label grids (`ignore_index = -100` for unretained combinations).
 
-## Main Entry Points
-
-### Desktop App
-
-Project: `src/viewer/WowViewer.App`
-
-Open the desktop shell:
-
+#### MCAL chunk composition mining
 ```powershell
-dotnet run --project .\src\viewer\WowViewer.App\WowViewer.App.csproj --
+wowviewer-converter mine-v10-mcal-compositions `
+  --input-dir <corpus_dir> --output-dir <out_dir>
 ```
+Emits `mcal_composition_dictionary.json` + `.npz` with averaged 64×64×4 centroids.
 
-The app also exposes bounded CLI commands for deterministic proofs and inspection-oriented captures, including:
-
-- `viewer`
-- `m2-frame`
-- `m2-gpu-frame`
-- `mdx-gpu-frame`
-- `mdx-visual-regression`
-- `world-bootstrap`
-- `world-frame`
-- `world-placement-audit`
-- `m2-bounds`
-
-`world-placement-audit` is also the current bounded CLI proof for shared asset-path taxonomy in the app: it now reports sampled asset kind, coarse object type, and directory hierarchy for the returned placement samples.
-
-Show usage:
-
+#### MCAL brush-stroke vocabulary mining
 ```powershell
-dotnet run --project .\src\viewer\WowViewer.App\WowViewer.App.csproj -- --help
+wowviewer-converter mine-v10-mcal-brushes `
+  --input-dir <corpus_dir> --output-dir <out_dir>
 ```
+Emits `mcal_brush_dictionary.json` + `.npz` with per-layer 64×64 stamps and coarse shape-family labels.
 
-### Inspect CLI
-
-Project: `tools/inspect/WowViewer.Tool.Inspect`
-
-The inspect tool is the read-only surface for probing supported formats and archives.
-
-Top-level areas currently include:
-
-- `archive`
-- `blp`
-- `m2`
-- `mdx`
-- `map`
-- `lit`
-- `pm4`
-- `wmo`
-
-Show usage:
-
+#### Height-profile clustering
 ```powershell
-dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- --help
+wowviewer-converter mine-v10-height-profiles `
+  --input-dir <corpus_dir> --output-dir <out_dir>
+```
+Emits `height_profile_dictionary.json` + `.npz` with normalised and absolute height archetypes.
+
+### Trainers
+
+Python trainers live in `scripts/` and consume the v10 NPZ shard contract directly.
+
+| Trainer | Input | Output | Purpose |
+|---------|-------|--------|---------|
+| `train_v10_stage1_minimap2height.py` | Stage 1 manifest | `minimap2height.pt` | Baseline minimap → `height_17` regression |
+| `train_v10_minimap_to_mclay.py` | Stage 1 manifest + `mclay_dictionary.json` | `minimap_to_mclay_classifier.pt` | Tile-level minimap → retained MCLY palette |
+| `train_v10_minimap_to_mclay_grid.py` | Stage 1 manifest or label manifest | `minimap_to_mclay_grid_classifier.pt` | Chunk-grid minimap → 16×16 retained MCLY labels |
+| `train_v10_stage2_terrain_synth.py` | Stage 1 manifest | `last.pt` | Multi-resolution height synthesis (17×17, 65×65, 257×257) with signal-dropout augmentation |
+
+Example Stage 2 smoke test:
+```powershell
+.venv\Scripts\python scripts\train_v10_stage2_terrain_synth.py `
+  <corpus_dir>\v10_stage1_manifest.json `
+  --output-dir output\ml-training\v10_stage2 `
+  --epochs 50 --device cuda --signal-dropout 0.15
 ```
 
-### Converter And Dataset CLI
+---
+
+## Shared Libraries
+
+| Library | Contents |
+|---------|----------|
+| `WowViewer.Core` | Core contracts, maths primitives, dataset manifests, tensor-pack models |
+| `WowViewer.Core.IO` | File readers, chunk parsers, archive virtualisation, ADT/WDT/WMO/BLP/DBC loaders |
+| `WowViewer.Core.Runtime` | Runtime consumers and scene-building seams (world-session state, bridge code) |
+| `WowViewer.Core.PM4` | PM4 parser, services, and research-facing contracts — the most mature format library today |
+
+New format work and dataset contracts should land in `Core` / `Core.IO` first, then surface through `WowViewer.Tool.Converter` or `WowViewer.Tool.Inspect`.
+
+---
+
+## Tools
+
+### Converter & Dataset CLI
 
 Project: `tools/converter/WowViewer.Tool.Converter`
 
-The converter tool handles file detection plus the direct dataset and ML helper workflows currently owned by `wow-viewer`.
+The primary surface for v10 workflows and general file detection / conversion.
 
-Key commands include:
+```powershell
+dotnet run --project .\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -- --help
+```
 
-- `detect`
-- `dataset-scan`
-- `dataset-merge`
-- `dataset-audit`
-- `dataset-curate`
-- `dataset-build-cache`
-- `dataset-build-v10-stage1`
+V10 commands:
 - `extract-v10-tensors`
+- `dataset-build-v10-stage1`
 - `mine-v10-brushes`
 - `mine-v10-mcly`
 - `label-v10-mcly`
 - `mine-v10-mcal-compositions`
 - `mine-v10-mcal-brushes`
 - `mine-v10-height-profiles`
-- `scripts/train_v10_minimap_to_mclay.py`
-- `scripts/train_v10_minimap_to_mclay_grid.py`
-- `ml-corpus`
-- `ml-audit-signals`
-- `ml-harvest-brushes`
-- `ml-generate-controls`
-- `ml-repair-normalmaps`
-- `ml-synth-no-liquid`
+
+Legacy / general commands still available:
+- `detect`, `dataset-scan`, `dataset-merge`, `dataset-audit`, `dataset-curate`, `dataset-build-cache`
+- `ml-corpus`, `ml-audit-signals`, `ml-harvest-brushes`, `ml-generate-controls`, `ml-repair-normalmaps`, `ml-synth-no-liquid`
 - `export-tex-json`
 
-`dataset-build-v10-stage1` is the first bounded bulk Stage 1 corpus command for v10 terrain work. It builds minimap-backed NPZ shards from root ADTs plus a loose minimap root and writes a manifest that `train_v10_stage1_minimap2height.py` can consume directly.
+### Inspect CLI
 
-`mine-v10-brushes` is the current canonical Wave 2 command for anchor-aware MCAL brush mining. It accepts object-only, terrain-only, or hybrid anchor modes, runs natively inside `WowViewer.Tool.Converter`, and now preserves `top_asset_categories` alongside raw `top_assets` in its JSON output so later viewer and editor tooling can browse the same path-derived asset families.
+Project: `tools/inspect/WowViewer.Tool.Inspect`
 
-`mine-v10-mcly` is the current canonical Wave 2 command for MCLY texture-layer combination mining. It scans v10 NPZ shards for `mcly_texture_ids` plus `mcly_texture_names`, counts per-chunk four-layer texture palettes, emits texture-path keyed combinations with local ID tuple distributions, and writes both `mclay_dictionary.json` and `mcly_dictionary.json` for downstream palette and biome-classifier work.
-
-`label-v10-mcly` materializes the retained MCLY dictionary labels back onto Stage 1 shards as a reusable supervised manifest. It writes `v10-mcly-label-manifest.v1` with per-tile dominant palette metadata and a 16x16 chunk label grid using `-100` for chunks whose texture combination was not retained.
-
-`mine-v10-mcal-brushes` is the current canonical Wave 2 command for non-object-anchored MCAL brush-stroke vocabulary mining. It scans real `mcal_alpha_pack_256` layers, filters near-uniform fills, clusters per-layer 64x64 alpha stamps, classifies coarse shape families, and writes `mcal_brush_dictionary.json` plus `mcal_brush_dictionary.npz`.
-
-`scripts/train_v10_minimap_to_mclay.py` is the current bounded Wave 2 classifier trainer for minimap RGB to retained MCLY palette label. It consumes the existing v10 NPZ shard contract plus `mclay_dictionary.json` or `mcly_dictionary.json` from `mine-v10-mcly`, writes `minimap_to_mclay_classifier.pt`, and keeps label provenance in `label_index.json`.
-
-`scripts/train_v10_minimap_to_mclay_grid.py` is the chunk-level companion trainer. It predicts a 16x16 retained MCLY palette grid from minimap RGB, ignores chunks whose texture combination is not retained in the mined dictionary, and writes `minimap_to_mclay_grid_classifier.pt` with the same dictionary-backed label provenance. It can consume either raw v10 Stage 1 shards plus `mclay_dictionary.json`, or the reusable `v10-mcly-label-manifest.v1` output from `label-v10-mcly`.
-
-Show usage:
+Read-only format probing:
 
 ```powershell
-dotnet run --project .\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -- --help
+dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- --help
 ```
 
-## Training And Dataset Workflows
+Top-level areas: `archive`, `blp`, `m2`, `mdx`, `map`, `lit`, `pm4`, `wmo`.
 
-The current direct `v9` training workflow is documented separately in [docs/validation/direct-v9-training-setup.md](docs/validation/direct-v9-training-setup.md).
+### Desktop App (Paused)
 
-For the current bounded `v10` Stage 1 path, the repo now also includes:
+Project: `src/viewer/WowViewer.App`
 
-- `wowviewer-converter extract-v10-tensors --minimap-root <dir>` for one-tile minimap-backed Wave 1 shards
-- `wowviewer-converter dataset-build-v10-stage1` for bulk Stage 1 shard plus manifest generation
-- `scripts/train_v10_stage1_minimap2height.py` for the first minimap-to-`height_17` trainer baseline
-- `scripts/train_v10_minimap_to_mclay.py` for the first minimap-to-retained-MCLY-palette classifier baseline
-- `scripts/train_v10_minimap_to_mclay_grid.py` for the first minimap-to-16x16-MCLY-palette-grid classifier baseline
+The desktop shell is **not the current focus**. It will be rebuilt from scratch once the v10 terrain model is fully trained. The existing shell exposes bounded CLI proofs (`m2-frame`, `mdx-gpu-frame`, `world-bootstrap`, etc.) but these are for transitional validation only.
 
-That document covers:
+---
 
-- staging BYOD client roots locally for repeated scans
-- building the direct training cache from real game data with `run_v9_direct_pipeline.ps1`
-- building a separate development-map compatibility cache
-- splitting PM4-bearing development entries into a training subset and a non-overlapping holdout with `WowViewer.Tool.Converter dataset-split-pm4`
-- launching `train_v9_optimized.py` with the merged corpus and the non-PM4 development holdout
+## Prerequisites
 
-## Repository Layout
+- .NET 10 SDK
+- PowerShell on Windows (or compatible shell)
+- Python 3.11+ with PyTorch (for trainers only)
+- Your own lawful game data, archives, or extracted client roots
 
-- `src/viewer/WowViewer.App`: desktop shell and bounded viewer-facing CLI proofs
-- `src/core/WowViewer.Core`: shared core contracts and format-independent primitives
-- `src/core/WowViewer.Core.IO`: shared file readers and format loaders
-- `src/core/WowViewer.Core.Runtime`: runtime consumers and scene-building seams
-- `src/core/WowViewer.Core.PM4`: PM4 parser, services, and research-facing contracts
-- `src/tools-shared/WowViewer.Tools.Shared`: shared tooling support code
-- `tools/inspect/WowViewer.Tool.Inspect`: inspection CLI
-- `tools/converter/WowViewer.Tool.Converter`: conversion and dataset CLI
-- `tests/`: current automated tests
-- `docs/`: user-facing and architecture-facing documentation
+## Bootstrap
+
+```powershell
+.\scripts\bootstrap.ps1
+```
+
+Optional evaluation repos:
+```powershell
+.\scripts\bootstrap.ps1 -IncludeOptional
+```
+
+## Build And Test
+
+```powershell
+# Full solution
+dotnet build .\WowViewer.slnx -c Debug
+
+# Tests (some fixtures may be missing in this checkout)
+dotnet test .\WowViewer.slnx -c Debug
+```
+
+---
 
 ## Documentation Map
 
-- [docs/validation/direct-v9-training-setup.md](docs/validation/direct-v9-training-setup.md): direct dataset and training setup
-- [docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md](docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md): current viewer ownership boundary
-- [docs/architecture/low-resolution-world-image-alignment-plan-2026-04-22.md](docs/architecture/low-resolution-world-image-alignment-plan-2026-04-22.md): low-resolution world-image alignment and streamed viewer verification plan
-- [docs/architecture/audio-engine-plan-2026-04-21.md](docs/architecture/audio-engine-plan-2026-04-21.md): first audio-engine and game-engine subsystem plan
-- [docs/architecture/m2/README.md](docs/architecture/m2/README.md): M2 architecture and implementation handoff
-- [docs/architecture/m2-native-client-research-2026-03-31.md](docs/architecture/m2-native-client-research-2026-03-31.md): native-client M2 research notes
-- [docs/architecture/wdt-format-notes-2026-04-17.md](docs/architecture/wdt-format-notes-2026-04-17.md): WDT notes and research context
+- [docs/validation/direct-v9-training-setup.md](docs/validation/direct-v9-training-setup.md) — legacy v9 direct dataset and training setup
+- [docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md](docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md) — viewer ownership boundary (viewer restart planned post-v10)
+- [docs/architecture/m2-native-client-research-2026-03-31.md](docs/architecture/m2-native-client-research-2026-03-31.md) — native-client M2 research
+- [docs/architecture/m2/README.md](docs/architecture/m2/README.md) — M2 architecture and implementation handoff
+- [docs/architecture/wdt-format-notes-2026-04-17.md](docs/architecture/wdt-format-notes-2026-04-17.md) — WDT format notes
+
+---
 
 ## Data Policy
 
