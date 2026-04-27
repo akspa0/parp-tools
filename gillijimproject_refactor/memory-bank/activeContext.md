@@ -25,6 +25,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `wowviewer-converter dataset-build-v10-stage1` now owns the first bounded bulk Stage 1 corpus build over root ADTs plus a loose minimap root and writes a manifest that downstream trainers can consume directly
   - `wowviewer-converter mine-v10-brushes` now owns the anchor-aware miner natively in `WowViewer.Tool.Converter`
   - `wowviewer-converter mine-v10-mcly` now owns the native Wave 2 MCLY combination dictionary command, consumes texture-name metadata when present, and writes texture-path keyed `mclay_dictionary.json` plus `mcly_dictionary.json`
+  - `wowviewer-converter mine-v10-mcal-compositions` now owns native chunk-level MCAL composition vocabulary mining and writes `mcal_composition_dictionary.json` plus `mcal_composition_dictionary.npz`
   - `wow-viewer/scripts/train_v10_stage1_minimap2height.py` now exists as the first bounded Stage 1 trainer for `minimap_rgb_256 -> height_17`
   - the native miner supports `objects`, `terrain`, and `hybrid` anchor modes
   - the older Python miner under `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/mine_mcal_brush_patterns.py` remains a reference surface, not the canonical command path
@@ -33,6 +34,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with warnings only
   - native widened hybrid proof passed at `output/build-validation/v10-wave2-wider-corpus/native-cli-hybrid-proof`
   - enriched native MCLY dictionary proof passed at `output/build-validation/v10-wave2-mcly-dictionary/mclay_dictionary.json` after regenerating the 64-shard Stage 1 corpus with `mcly_texture_names`
+  - native MCAL composition proof passed at `output/build-validation/v10-wave2-mcal-compositions/mcal_composition_dictionary.json` over the current Stage 1 corpus
   - bounded Stage 1 corpus build passed at `output/build-validation/v10-stage1-development-corpus` with `64` written shards and a matching `v10_stage1_manifest.json`
   - bounded Stage 1 CUDA smoke passed at `output/ml-training/v10_stage1_gpu_smoke` using `gillijimproject_refactor/.venv-train` on the local RTX 4070 Ti SUPER
 
@@ -44,6 +46,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - placement-derived `ObjectMask257` and `ObjectPreciseMask257` are populated from real ADT placements
   - anchor-aware MCAL brush mining exists as a concrete native `wowviewer-converter mine-v10-brushes` command
   - MCLY texture-layer combination mining exists as a concrete native `wowviewer-converter mine-v10-mcly` command with texture-name keyed palettes and conservative biome tags
+  - MCAL chunk-level composition mining exists as a concrete native `wowviewer-converter mine-v10-mcal-compositions` command with averaged 64x64x4 composition centroids
   - terrain-only prefab structure can now be mined from alpha plus terrain mesh shape, even with no nearby objects
   - the first bounded Stage 1 trainer exists in `wow-viewer/scripts/train_v10_stage1_minimap2height.py`
 - Validated bounded artifacts:
@@ -52,10 +55,11 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - hybrid proof: `output/build-validation/v10-wave2-wider-corpus/hybrid-proof/brush_dictionary.json`
   - native CLI proof: `output/build-validation/v10-wave2-wider-corpus/native-cli-hybrid-proof/brush_dictionary.json`
   - MCLY dictionary proof: `output/build-validation/v10-wave2-mcly-dictionary/mclay_dictionary.json`
+  - MCAL composition proof: `output/build-validation/v10-wave2-mcal-compositions/mcal_composition_dictionary.json`
   - Stage 1 development corpus: `output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json`
   - Stage 1 CUDA smoke output: `output/ml-training/v10_stage1_gpu_smoke`
 - What is still open:
-  - broader non-object-anchored MCAL composition vocabulary work
+- broader non-object-anchored MCAL brush-stroke vocabulary work beyond chunk-level composition grouping
   - richer biome tagging beyond current texture-name token heuristics
   - whether to retain or retire the older Python reference miner
   - Stage 2 refinement and longer-running Stage 1 training orchestration

@@ -77,6 +77,19 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 - Test caveat:
   - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --no-build` currently fails in this checkout, mostly because tests expect missing `gillijimproject_refactor/test_data/development/World/Maps/development/...` fixtures; one unrelated synthetic M2 footprint assertion also fails.
 
+### Apr 27, 2026 - Native MCAL chunk composition dictionary mining landed in `wow-viewer`
+
+- `wowviewer-converter mine-v10-mcal-compositions` now scans v10 NPZ shards for `mcal_alpha_pack_256`
+- The command groups real 64x64x4 chunk-level alpha compositions by active-layer, coverage, gradient, quadrant-balance, and optional height-shape bins
+- It writes JSON metadata plus NumPy centroids:
+  - `mcal_composition_dictionary.json`
+  - `mcal_composition_dictionary.npz`
+- Proof:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed with existing warnings only
+  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- mine-v10-mcal-compositions --input-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --output-dir i:/parp/parp-tools/output/build-validation/v10-wave2-mcal-compositions --dictionary-size 32 --min-occurrences 2 --example-limit 12` passed
+  - proof output: `output/build-validation/v10-wave2-mcal-compositions/mcal_composition_dictionary.json`
+  - bounded corpus result: `64` shards discovered, `11` tiles read, `2816` chunks read, `545` candidate compositions, `446` raw composition groups, `32` retained compositions
+
 ### Apr 26, 2026 - GPU viewer plan-set workflow was registered
 
 - Added `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md` and updated workflow routing files
@@ -86,7 +99,7 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 ## Open Boundaries
 
-- No validated broad-corpus non-object-anchored MCAL composition vocabulary run exists yet for the v10 corpus.
+- No validated broad-corpus non-object-anchored MCAL brush-stroke vocabulary run exists yet for the v10 corpus; chunk-level MCAL composition vocabulary now has a bounded development proof.
 - MCLY dictionary biome tags are heuristic and should be replaced or validated by the planned minimap-to-biome/palette classifier.
 - The next blocking decision is whether to retain or retire the older Python reference miner now that the canonical command is native.
 - Stage 1 exists only as a bounded trainer baseline today; Stage 2 refinement and broader experiment orchestration still remain open.
@@ -97,4 +110,4 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 1. Keep the minimap-backed Wave 1 NPZ output plus `dataset-build-v10-stage1` manifest as the canonical Stage 1 input surface.
 2. Widen the current 64-shard development proof into a larger curated or map-wide Stage 1 corpus and run longer CUDA training.
 3. Decide whether the older Python reference script should stay or be retired.
-4. Move to broader MCAL composition mining, then Stage 2 refinement.
+4. Move from chunk-level MCAL composition mining into broader brush-stroke vocabulary and height-profile clustering, then Stage 2 refinement.
