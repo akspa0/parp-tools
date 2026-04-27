@@ -93,6 +93,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "extract-v10-tensors":
 		RunExtractV10Tensors(tail);
 		break;
+		case "dataset-build-v10-stage1":
+			RunDatasetBuildV10Stage1(tail);
+			break;
 	case "mine-v10-brushes":
 		V10BrushMiningCommand.Run(tail);
 		break;
@@ -199,29 +202,165 @@ static void RunExtractV10Tensors(string[] args)
 
 	try
 	{
-		TerrainTileTensorPack pack = AdtTensorPackBuilder.Build(input, textureSource);
-		if (!string.IsNullOrWhiteSpace(minimapRoot) && TryLoadV10MinimapRgb(input, minimapRoot, out byte[,,]? minimapRgb, out string? minimapSourcePath))
-		{
-			pack.MinimapRgb256 = minimapRgb;
-			pack.MinimapSourceTag = "raw";
-			HashSet<string> availableSignals = new(pack.AvailableSignals, StringComparer.OrdinalIgnoreCase)
-			{
-				"minimap_rgb_256"
-			};
-			pack.AvailableSignals = availableSignals;
-			Console.WriteLine($"  Minimap source: {minimapSourcePath}");
-		}
-		NpzTileSerializer.Serialize(pack, outputPath);
-		WriteV10PlacementSidecar(input, placementOutputPath);
+		V10TensorExtractionResult result = ExtractAndWriteV10TensorPack(input, textureSource, minimapRoot, outputPath, placementOutputPath, requireMinimap: false);
+		if (!string.IsNullOrWhiteSpace(result.MinimapSourcePath))
+			Console.WriteLine($"  Minimap source: {result.MinimapSourcePath}");
 		Console.WriteLine($"Extracted v10 tensors: {outputPath}");
 		Console.WriteLine($"  Placement sidecar: {placementOutputPath}");
-		Console.WriteLine($"  Signals: {string.Join(", ", pack.AvailableSignals)}");
+		Console.WriteLine($"  Signals: {string.Join(", ", result.Pack.AvailableSignals)}");
 	}
 	catch (Exception ex)
 	{
 		Console.Error.WriteLine($"Error extracting v10 tensors from {input}: {ex.Message}");
 		Environment.ExitCode = 1;
 	}
+}
+
+static void RunDatasetBuildV10Stage1(string[] args)
+{
+	string? inputDirOption = GetOption(args, "--input-dir", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? outputDirOption = GetOption(args, "--output-dir", "-o");
+	string? minimapRootOption = GetOption(args, "--minimap-root", "-m");
+	string? manifestOption = GetOption(args, "--manifest", "-f");
+	int limit = GetIntOption(args, "--limit", "-n") ?? int.MaxValue;
+	bool overwrite = HasFlag(args, "--overwrite");
+
+	if (string.IsNullOrWhiteSpace(inputDirOption) || string.IsNullOrWhiteSpace(outputDirOption) || string.IsNullOrWhiteSpace(minimapRootOption))
+	{
+		Console.Error.WriteLine("Error: dataset-build-v10-stage1 requires --input-dir <adt-dir>, --output-dir <dir>, and --minimap-root <dir>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string inputDir = Path.GetFullPath(inputDirOption);
+	string outputDir = Path.GetFullPath(outputDirOption);
+	string minimapRoot = Path.GetFullPath(minimapRootOption);
+	string manifestPath = Path.GetFullPath(string.IsNullOrWhiteSpace(manifestOption)
+		? Path.Combine(outputDir, "v10_stage1_manifest.json")
+		: manifestOption);
+
+	if (!Directory.Exists(inputDir))
+	{
+		Console.Error.WriteLine($"Error: input directory not found: {inputDir}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!Directory.Exists(minimapRoot))
+	{
+		Console.Error.WriteLine($"Error: minimap root not found: {minimapRoot}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Directory.CreateDirectory(outputDir);
+	string? manifestDirectory = Path.GetDirectoryName(manifestPath);
+	if (!string.IsNullOrWhiteSpace(manifestDirectory))
+		Directory.CreateDirectory(manifestDirectory);
+
+	List<V10Stage1ManifestEntry> entries = [];
+	List<V10Stage1ManifestSkip> skipped = [];
+	int scanned = 0;
+
+	foreach (string adtPath in EnumerateRootAdtFiles(inputDir))
+	{
+		if (entries.Count >= limit)
+			break;
+
+		scanned++;
+		string tileStem = Path.GetFileNameWithoutExtension(adtPath);
+		string outputPath = Path.Combine(outputDir, tileStem + "_v10.npz");
+		string placementOutputPath = Path.Combine(outputDir, tileStem + "_v10_placements.json");
+
+		if (!overwrite && File.Exists(outputPath))
+		{
+			skipped.Add(new V10Stage1ManifestSkip(tileStem, adtPath, "output_exists"));
+			continue;
+		}
+
+		string basePath = Path.Combine(Path.GetDirectoryName(adtPath)!, tileStem);
+		string textureSource = basePath + "_tex0.adt";
+		string? resolvedTextureSource = File.Exists(textureSource) ? textureSource : null;
+
+		try
+		{
+			V10TensorExtractionResult result = ExtractAndWriteV10TensorPack(adtPath, resolvedTextureSource, minimapRoot, outputPath, placementOutputPath, requireMinimap: true);
+			entries.Add(new V10Stage1ManifestEntry(
+				tileStem,
+				adtPath,
+				outputPath,
+				File.Exists(placementOutputPath) ? placementOutputPath : null,
+				result.MinimapSourcePath ?? string.Empty,
+				result.Pack.MinimapSourceTag,
+				result.Pack.AvailableSignals.OrderBy(static signal => signal, StringComparer.OrdinalIgnoreCase).ToArray()));
+			Console.WriteLine($"Stage1 shard: {tileStem} -> {outputPath}");
+		}
+		catch (Exception ex)
+		{
+			skipped.Add(new V10Stage1ManifestSkip(tileStem, adtPath, ex.Message));
+			Console.Error.WriteLine($"Skipping {tileStem}: {ex.Message}");
+		}
+	}
+
+	V10Stage1Manifest manifest = new(
+		SchemaVersion: "v10-stage1-manifest.v1",
+		CreatedAtUtc: DateTimeOffset.UtcNow,
+		InputRoot: inputDir,
+		OutputRoot: outputDir,
+		MinimapRoot: minimapRoot,
+		ScannedTileCount: scanned,
+		WrittenTileCount: entries.Count,
+		Entries: entries,
+		Skipped: skipped);
+
+	File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, CreateJsonOptions()));
+
+	Console.WriteLine("WowViewer.Tool.Converter dataset-build-v10-stage1 report");
+	Console.WriteLine($"InputDir: {inputDir}");
+	Console.WriteLine($"OutputDir: {outputDir}");
+	Console.WriteLine($"Manifest: {manifestPath}");
+	Console.WriteLine($"Scanned: {scanned}");
+	Console.WriteLine($"Written: {entries.Count}");
+	Console.WriteLine($"Skipped: {skipped.Count}");
+}
+
+static V10TensorExtractionResult ExtractAndWriteV10TensorPack(
+	string inputAdtPath,
+	string? textureSource,
+	string? minimapRoot,
+	string outputPath,
+	string placementOutputPath,
+	bool requireMinimap)
+{
+	TerrainTileTensorPack pack = AdtTensorPackBuilder.Build(inputAdtPath, textureSource);
+	string? minimapSourcePath = null;
+	if (!string.IsNullOrWhiteSpace(minimapRoot) && TryLoadV10MinimapRgb(inputAdtPath, minimapRoot, out byte[,,]? minimapRgb, out string? resolvedMinimapPath))
+	{
+		pack.MinimapRgb256 = minimapRgb;
+		pack.MinimapSourceTag = "raw";
+		HashSet<string> availableSignals = new(pack.AvailableSignals, StringComparer.OrdinalIgnoreCase)
+		{
+			"minimap_rgb_256"
+		};
+		pack.AvailableSignals = availableSignals;
+		minimapSourcePath = resolvedMinimapPath;
+	}
+
+	if (requireMinimap && pack.MinimapRgb256 is null)
+		throw new InvalidOperationException("missing minimap_rgb_256 for this tile under the provided minimap root");
+
+	NpzTileSerializer.Serialize(pack, outputPath);
+	WriteV10PlacementSidecar(inputAdtPath, placementOutputPath);
+	return new V10TensorExtractionResult(pack, minimapSourcePath);
+}
+
+static IEnumerable<string> EnumerateRootAdtFiles(string inputDir)
+{
+	return Directory.EnumerateFiles(inputDir, "*.adt", SearchOption.TopDirectoryOnly)
+		.Where(static path => !path.EndsWith("_tex0.adt", StringComparison.OrdinalIgnoreCase)
+			&& !path.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase)
+			&& !path.EndsWith("_lod.adt", StringComparison.OrdinalIgnoreCase))
+		.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase);
 }
 
 static bool TryLoadV10MinimapRgb(string inputAdtPath, string minimapRoot, out byte[,,]? minimapRgb, out string? sourcePath)
@@ -4026,7 +4165,8 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter dataset-audit --input <scan.json> [--output <audit.json>] [--limit <count>]");
 	Console.WriteLine("  wowviewer-converter dataset-curate --input <audit.json> --output <curated.json> [--report <curation-report.json>] [--limit <count>] [--max-per-group <count>] [--require-wdl|--no-require-wdl] [--require-minimap|--no-require-minimap]");
 	Console.WriteLine("  wowviewer-converter dataset-build-cache --input <audit-or-curate.json> --output-dir <dir> [--limit <count>] [--overwrite] [--include-minimap|--no-include-minimap] [--write-debug-json|--no-write-debug-json]");
-	Console.WriteLine("  wowviewer-converter extract-v10-tensors --input <root.adt> [--output <npz>] [--texture-source <tex0.adt>]  (also writes matching *_placements.json when placement data exists)");
+	Console.WriteLine("  wowviewer-converter extract-v10-tensors --input <root.adt> [--output <npz>] [--texture-source <tex0.adt>] [--minimap-root <dir>]  (also writes matching *_placements.json when placement data exists)");
+	Console.WriteLine("  wowviewer-converter dataset-build-v10-stage1 --input-dir <adt-dir> --output-dir <dir> --minimap-root <dir> [--manifest <manifest.json>] [--limit <count>] [--overwrite]");
 	Console.WriteLine("  wowviewer-converter mine-v10-brushes --input-dir <npz-dir> --output-dir <dir> [--placement-dir <dir>] [--anchor-mode objects|terrain|hybrid] [--context-radius <n>] [--dictionary-size <n>] [--min-occurrences <n>] [--terrain-samples-per-tile <n>] [--seed <n>]");
 	Console.WriteLine("  wowviewer-converter detect --input <file>");
 	Console.WriteLine("  wowviewer-converter export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]");
@@ -4039,6 +4179,35 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input <minimap.png> --mask <liquid-mask.png> --output <no-liquid.png>");
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input-dir <images> --mask-dir <masks> --output-dir <images>");
 }
+
+file sealed record V10TensorExtractionResult(
+	TerrainTileTensorPack Pack,
+	string? MinimapSourcePath);
+
+file sealed record V10Stage1Manifest(
+	string SchemaVersion,
+	DateTimeOffset CreatedAtUtc,
+	string InputRoot,
+	string OutputRoot,
+	string MinimapRoot,
+	int ScannedTileCount,
+	int WrittenTileCount,
+	IReadOnlyList<V10Stage1ManifestEntry> Entries,
+	IReadOnlyList<V10Stage1ManifestSkip> Skipped);
+
+file sealed record V10Stage1ManifestEntry(
+	string TileName,
+	string SourceAdtPath,
+	string ShardPath,
+	string? PlacementPath,
+	string MinimapSourcePath,
+	string MinimapSourceTag,
+	IReadOnlyList<string> AvailableSignals);
+
+file sealed record V10Stage1ManifestSkip(
+	string TileName,
+	string SourceAdtPath,
+	string Reason);
 
 file sealed class MlCorpusConfig
 {

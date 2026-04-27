@@ -130,6 +130,7 @@ Key commands include:
 - `dataset-audit`
 - `dataset-curate`
 - `dataset-build-cache`
+- `dataset-build-v10-stage1`
 - `extract-v10-tensors`
 - `mine-v10-brushes`
 - `ml-corpus`
@@ -139,6 +140,8 @@ Key commands include:
 - `ml-repair-normalmaps`
 - `ml-synth-no-liquid`
 - `export-tex-json`
+
+`dataset-build-v10-stage1` is the first bounded bulk Stage 1 corpus command for v10 terrain work. It builds minimap-backed NPZ shards from root ADTs plus a loose minimap root and writes a manifest that `train_v10_stage1_minimap2height.py` can consume directly.
 
 `mine-v10-brushes` is the current canonical Wave 2 command for anchor-aware MCAL brush mining. It accepts object-only, terrain-only, or hybrid anchor modes, runs natively inside `WowViewer.Tool.Converter`, and now preserves `top_asset_categories` alongside raw `top_assets` in its JSON output so later viewer and editor tooling can browse the same path-derived asset families.
 
@@ -151,6 +154,12 @@ dotnet run --project .\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.C
 ## Training And Dataset Workflows
 
 The current direct `v9` training workflow is documented separately in [docs/validation/direct-v9-training-setup.md](docs/validation/direct-v9-training-setup.md).
+
+For the current bounded `v10` Stage 1 path, the repo now also includes:
+
+- `wowviewer-converter extract-v10-tensors --minimap-root <dir>` for one-tile minimap-backed Wave 1 shards
+- `wowviewer-converter dataset-build-v10-stage1` for bulk Stage 1 shard plus manifest generation
+- `scripts/train_v10_stage1_minimap2height.py` for the first minimap-to-`height_17` trainer baseline
 
 That document covers:
 

@@ -6,7 +6,7 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 - The v10 terrain-AI lane is in early Wave 2.
 - Wave 1 is complete.
-- The current local continuation has moved Wave 2 beyond the original script-only slice: the canonical miner is now native in `wowviewer-converter mine-v10-brushes`, and bounded terrain-only plus hybrid proofs exist.
+- The current local continuation has moved beyond the original script-only slice: the canonical miner is native, the first bounded Stage 1 corpus command exists, and the first bounded Stage 1 trainer baseline has passed on CUDA.
 
 ## Recent Validated Milestones
 
@@ -48,6 +48,18 @@ This file is intentionally compressed. Keep only recent validated milestones, op
   - terrain-only proof: `output/build-validation/v10-wave2-wider-corpus/terrain-proof/brush_dictionary.json`
   - hybrid proof: `output/build-validation/v10-wave2-wider-corpus/hybrid-proof/brush_dictionary.json`
 
+### Apr 27, 2026 - Stage 1 minimap-backed v10 training baseline landed in `wow-viewer`
+
+- `extract-v10-tensors` now accepts `--minimap-root` and writes `minimap_rgb_256.npy` when a loose minimap is available
+- `NpzTileSerializer` metadata now writes valid JSON through `JsonSerializer`, so Windows source paths and signal lists are safe for downstream consumers
+- `wowviewer-converter dataset-build-v10-stage1` now bulk-builds minimap-backed Stage 1 NPZ shards plus a JSON manifest from root ADTs and a minimap root
+- `wow-viewer/scripts/train_v10_stage1_minimap2height.py` now exists as the first bounded Stage 1 trainer consuming the v10 NPZ shard contract directly
+- Proof:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed after the new command and metadata fix
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- dataset-build-v10-stage1 --input-dir i:/parp/parp-tools/gillijimproject_refactor/test_data/original_development/World/Maps/development --output-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --minimap-root i:/parp/parp-tools/datasets/original_development/development --manifest i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json --limit 64` completed with `Written = 64` and `Skipped = 34`
+  - `i:/parp/parp-tools/gillijimproject_refactor/.venv-train/Scripts/python.exe i:/parp/parp-tools/wow-viewer/scripts/train_v10_stage1_minimap2height.py i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json --output-dir i:/parp/parp-tools/output/ml-training/v10_stage1_gpu_smoke --epochs 3 --batch-size 8 --num-workers 0 --device cuda --no-use-compile` passed on the local RTX 4070 Ti SUPER
+  - bounded CUDA smoke metrics after 3 epochs: train loss `0.2355`, val loss `0.1217`, val MAE `2.91m`, val RMSE `23.80m`
+
 ### Apr 26, 2026 - GPU viewer plan-set workflow was registered
 
 - Added `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md` and updated workflow routing files
@@ -60,11 +72,12 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 - No validated MCLY combination dictionary run exists yet for the v10 corpus.
 - No validated broad-corpus non-object-anchored MCAL composition vocabulary run exists yet for the v10 corpus.
 - The next blocking decision is whether to retain or retire the older Python reference miner now that the canonical command is native.
+- Stage 1 exists only as a bounded trainer baseline today; Stage 2 refinement and broader experiment orchestration still remain open.
 - The world-viewer path is still mid-migration and should not be described as final runtime parity.
 
 ## Recommended Next Slice
 
-1. Keep Wave 1 NPZ output as the canonical input surface for Wave 2.
-2. Widen the current 6-tile proof into a larger curated or map-wide corpus while keeping terrain-only and hybrid validations separate.
+1. Keep the minimap-backed Wave 1 NPZ output plus `dataset-build-v10-stage1` manifest as the canonical Stage 1 input surface.
+2. Widen the current 64-shard development proof into a larger curated or map-wide Stage 1 corpus and run longer CUDA training.
 3. Decide whether the older Python reference script should stay or be retired now that `mine-v10-brushes` is native.
-4. After that, move to MCLY combination mining and then broader MCAL composition mining.
+4. After that, move to MCLY combination mining, broader MCAL composition mining, and then Stage 2 refinement.

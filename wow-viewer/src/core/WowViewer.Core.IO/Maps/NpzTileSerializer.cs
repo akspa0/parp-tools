@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using System.Text.Json;
 using ICSharpCode.SharpZipLib.Zip;
 using WowViewer.Core.Maps;
 
@@ -78,16 +79,18 @@ public static class NpzTileSerializer
 
     private static void WriteMetadata(ZipOutputStream zip, TerrainTileTensorPack pack)
     {
-        string json = $$"""
-            {
-              "tile_name": "{{pack.TileName}}",
-              "map_name": "{{pack.MapName}}",
-              "build_key": "{{pack.BuildKey}}",
-              "source_adt_path": "{{pack.SourceAdtPath}}",
-              "available_signals": [{{string.Join(", ", pack.AvailableSignals.Select(s => $"\"{s}\""))}}],
-              "minimap_source_tag": "{{pack.MinimapSourceTag}}"
-            }
-            """;
+        string json = JsonSerializer.Serialize(new
+        {
+            tile_name = pack.TileName,
+            map_name = pack.MapName,
+            build_key = pack.BuildKey,
+            source_adt_path = pack.SourceAdtPath,
+            available_signals = pack.AvailableSignals.OrderBy(static signal => signal, StringComparer.OrdinalIgnoreCase),
+            minimap_source_tag = pack.MinimapSourceTag,
+        }, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+        });
 
         ZipEntry entry = new("metadata.json");
         zip.PutNextEntry(entry);
