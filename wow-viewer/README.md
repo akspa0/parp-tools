@@ -146,7 +146,7 @@ Key commands include:
 
 `mine-v10-brushes` is the current canonical Wave 2 command for anchor-aware MCAL brush mining. It accepts object-only, terrain-only, or hybrid anchor modes, runs natively inside `WowViewer.Tool.Converter`, and now preserves `top_asset_categories` alongside raw `top_assets` in its JSON output so later viewer and editor tooling can browse the same path-derived asset families.
 
-`mine-v10-mcly` is the current canonical Wave 2 command for MCLY texture-layer combination mining. It scans v10 NPZ shards for `mcly_texture_ids`, counts per-chunk four-layer texture-id tuples, and writes both `mclay_dictionary.json` and `mcly_dictionary.json` for downstream palette and biome-classifier work.
+`mine-v10-mcly` is the current canonical Wave 2 command for MCLY texture-layer combination mining. It scans v10 NPZ shards for `mcly_texture_ids` plus `mcly_texture_names`, counts per-chunk four-layer texture palettes, emits texture-path keyed combinations with local ID tuple distributions, and writes both `mclay_dictionary.json` and `mcly_dictionary.json` for downstream palette and biome-classifier work.
 
 Show usage:
 

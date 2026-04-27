@@ -48,7 +48,7 @@ public static class AdtTensorPackBuilder
         float[,,]? mccvRgb = AssembleMccv(stream, terrainChunks, availableSignals);
 
         // ── Read texture data (MCLY + MCAL) ──────────────────────────────────
-        (int[,,]? mclyTextureIds, bool[,,]? mclyLayerMask, float[,,]? mcalAlphaPack) =
+        (int[,,]? mclyTextureIds, IReadOnlyList<string> mclyTextureNames, bool[,,]? mclyLayerMask, float[,,]? mcalAlphaPack) =
             ReadTextureData(adtPath, textureSourcePath, availableSignals);
 
         // ── Read MH2O liquid ─────────────────────────────────────────────────
@@ -89,6 +89,7 @@ public static class AdtTensorPackBuilder
             Height65 = height65,
             Height17 = height17,
             MclyTextureIds = mclyTextureIds,
+            MclyTextureNames = mclyTextureNames,
             MclyLayerMask = mclyLayerMask,
             McalAlphaPack256 = mcalAlphaPack,
             MccvRgb = mccvRgb,
@@ -263,7 +264,7 @@ public static class AdtTensorPackBuilder
     // Texture data (MCLY + MCAL)
     // ═══════════════════════════════════════════════════════════════════════
 
-    private static (int[,,]? textureIds, bool[,,]? layerMask, float[,,]? alphaPack)
+    private static (int[,,]? textureIds, IReadOnlyList<string> textureNames, bool[,,]? layerMask, float[,,]? alphaPack)
         ReadTextureData(string adtPath, string? textureSourcePath, HashSet<string> signals)
     {
         string? effectiveTexturePath = textureSourcePath;
@@ -274,13 +275,13 @@ public static class AdtTensorPackBuilder
         }
 
         if (string.IsNullOrWhiteSpace(effectiveTexturePath) || !File.Exists(effectiveTexturePath))
-            return (null, null, null);
+            return (null, Array.Empty<string>(), null, null);
 
         try
         {
             AdtTextureFile textureFile = AdtTextureReader.Read(effectiveTexturePath);
             if (textureFile.Chunks.Count == 0)
-                return (null, null, null);
+                return (null, textureFile.TextureNames, null, null);
 
             int[,,] textureIds = new int[TileChunks, TileChunks, 4];
             bool[,,] layerMask = new bool[TileChunks, TileChunks, 4];
@@ -328,16 +329,18 @@ public static class AdtTensorPackBuilder
             }
 
             if (!any)
-                return (null, null, null);
+                return (null, textureFile.TextureNames, null, null);
 
             signals.Add("mcly_texture_ids");
             signals.Add("mcly_layer_mask");
             signals.Add("mcal_alpha_pack_256");
-            return (textureIds, layerMask, alphaPack);
+            if (textureFile.TextureNames.Count > 0)
+                signals.Add("mcly_texture_names");
+            return (textureIds, textureFile.TextureNames, layerMask, alphaPack);
         }
         catch
         {
-            return (null, null, null);
+            return (null, Array.Empty<string>(), null, null);
         }
     }
 

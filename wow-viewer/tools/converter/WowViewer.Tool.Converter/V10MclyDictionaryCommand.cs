@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
@@ -35,7 +36,7 @@ internal static class V10MclyDictionaryCommand
 			foreach (string npzPath in npzFiles)
 			{
 				string tileName = NormalizeTileName(Path.GetFileNameWithoutExtension(npzPath));
-				if (!TryLoadMclyTextureIds(npzPath, out IntTensor3 textureIds, out string? skipReason))
+				if (!TryLoadMclyTextureIds(npzPath, out IntTensor3 textureIds, out IReadOnlyList<string> textureNames, out string? skipReason))
 				{
 					skipped.Add(new MclySkippedTile(tileName, npzPath, skipReason ?? "missing_mcly_texture_ids"));
 					continue;
@@ -58,14 +59,15 @@ internal static class V10MclyDictionaryCommand
 							continue;
 
 						chunksRead++;
-						MclyCombinationKey key = new(ids[0], ids[1], ids[2], ids[3]);
+						string[] resolvedTextureNames = ResolveTextureNames(ids, textureNames);
+						MclyCombinationKey key = MclyCombinationKey.Create(ids, resolvedTextureNames);
 						if (!combinations.TryGetValue(key, out MclyCombinationAccumulator? accumulator))
 						{
 							accumulator = new MclyCombinationAccumulator(key);
 							combinations[key] = accumulator;
 						}
 
-						accumulator.Add(tileName, chunkX, chunkY, options.ExampleLimit);
+						accumulator.Add(tileName, chunkX, chunkY, ids, resolvedTextureNames, options.ExampleLimit);
 					}
 				}
 			}
@@ -106,12 +108,14 @@ internal static class V10MclyDictionaryCommand
 			IncludeEmpty: HasFlag(args, "--include-empty"));
 	}
 
-	private static bool TryLoadMclyTextureIds(string npzPath, out IntTensor3 tensor, out string? skipReason)
+	private static bool TryLoadMclyTextureIds(string npzPath, out IntTensor3 tensor, out IReadOnlyList<string> textureNames, out string? skipReason)
 	{
 		tensor = default;
+		textureNames = Array.Empty<string>();
 		skipReason = null;
 		using FileStream stream = File.OpenRead(npzPath);
 		using ZipArchive archive = new(stream, ZipArchiveMode.Read, leaveOpen: false);
+		textureNames = ReadMetadataTextureNames(archive);
 
 		if (!TryReadNpyEntry(archive, "mcly_texture_ids", out NpyPayload payload))
 		{
@@ -134,6 +138,30 @@ internal static class V10MclyDictionaryCommand
 
 		tensor = new IntTensor3(payload.Shape[0], payload.Shape[1], payload.Shape[2], values);
 		return true;
+	}
+
+	private static IReadOnlyList<string> ReadMetadataTextureNames(ZipArchive archive)
+	{
+		ZipArchiveEntry? entry = archive.GetEntry("metadata.json");
+		if (entry is null)
+			return Array.Empty<string>();
+
+		using Stream stream = entry.Open();
+		using JsonDocument document = JsonDocument.Parse(stream);
+		if (!document.RootElement.TryGetProperty("mcly_texture_names", out JsonElement namesElement)
+			|| namesElement.ValueKind != JsonValueKind.Array)
+		{
+			return Array.Empty<string>();
+		}
+
+		List<string> names = new(namesElement.GetArrayLength());
+		foreach (JsonElement nameElement in namesElement.EnumerateArray())
+		{
+			if (nameElement.ValueKind == JsonValueKind.String)
+				names.Add(nameElement.GetString() ?? string.Empty);
+		}
+
+		return names;
 	}
 
 	private static bool TryReadNpyEntry(ZipArchive archive, string entryBaseName, out NpyPayload payload)
@@ -243,20 +271,31 @@ internal static class V10MclyDictionaryCommand
 			raw_combination_count = rawCombinationCount,
 			retained_combination_count = retained.Count,
 			min_occurrences = options.MinOccurrences,
-			dictionary = retained.Select(static accumulator => new
+			dictionary = retained.Select(static accumulator =>
 			{
-				combination_hash = accumulator.Key.ToStableText(),
-				texture_ids = accumulator.Key.ToArray(),
-				frequency = accumulator.Frequency,
-				tile_count = accumulator.TileNames.Count,
-				example_chunks = accumulator.Examples.Select(static example => new
+				BiomeInference biome = InferBiomeTag(accumulator.Key.TextureNames);
+				return new
 				{
-					tile_name = example.TileName,
-					chunk_x = example.ChunkX,
-					chunk_y = example.ChunkY,
-				}),
-				inferred_biome_tag = "unknown",
-				inference_reason = "texture-name lookup is not present in the current v10 NPZ contract",
+					combination_hash = accumulator.Key.Hash,
+					combination_key = accumulator.Key.ToStableText(),
+					texture_ids = accumulator.MostCommonTextureIds,
+					texture_names = accumulator.Key.TextureNames,
+					frequency = accumulator.Frequency,
+					tile_count = accumulator.TileNames.Count,
+					id_tuple_distribution = accumulator.IdTupleDistribution
+						.OrderByDescending(static entry => entry.Value)
+						.ThenBy(static entry => entry.Key, StringComparer.Ordinal)
+						.Select(static entry => new object[] { entry.Key, entry.Value }),
+					example_chunks = accumulator.Examples.Select(static example => new
+					{
+						tile_name = example.TileName,
+						chunk_x = example.ChunkX,
+						chunk_y = example.ChunkY,
+						texture_ids = example.TextureIds,
+					}),
+					inferred_biome_tag = biome.Tag,
+					inference_reason = biome.Reason,
+				};
 			}),
 			skipped_tiles = skipped.Select(static tile => new
 			{
@@ -288,6 +327,66 @@ internal static class V10MclyDictionaryCommand
 		return fileStem.EndsWith("_v10", StringComparison.OrdinalIgnoreCase)
 			? fileStem[..^4]
 			: fileStem;
+	}
+
+	private static string[] ResolveTextureNames(int[] textureIds, IReadOnlyList<string> textureNames)
+	{
+		string[] resolved = new string[4];
+		for (int index = 0; index < resolved.Length; index++)
+		{
+			int textureId = index < textureIds.Length ? textureIds[index] : -1;
+			resolved[index] = textureId >= 0 && textureId < textureNames.Count
+				? NormalizeTexturePath(textureNames[textureId])
+				: string.Empty;
+		}
+
+		return resolved;
+	}
+
+	private static string NormalizeTexturePath(string texturePath)
+	{
+		return texturePath.Replace('\\', '/').Trim();
+	}
+
+	private static BiomeInference InferBiomeTag(IReadOnlyList<string> textureNames)
+	{
+		Dictionary<string, int> scores = new(StringComparer.OrdinalIgnoreCase);
+		foreach (string textureName in textureNames)
+		{
+			if (string.IsNullOrWhiteSpace(textureName))
+				continue;
+
+			string normalized = textureName.Replace('\\', '/').ToLowerInvariant();
+			AddScore(scores, normalized, "snow", ["snow", "ice", "frost", "glacier", "winter"]);
+			AddScore(scores, normalized, "desert", ["sand", "desert", "tanaris", "uldum", "dune"]);
+			AddScore(scores, normalized, "volcanic", ["lava", "magma", "volcan", "fire"]);
+			AddScore(scores, normalized, "swamp", ["swamp", "marsh", "bog"]);
+			AddScore(scores, normalized, "built", ["brick", "cobble", "city", "wood", "roadstone", "wall"]);
+			AddScore(scores, normalized, "dirt_path", ["dirt", "mud", "path", "road", "soil"]);
+			AddScore(scores, normalized, "grassland", ["grass", "forest", "jungle", "moss", "leaf", "leaves"]);
+			AddScore(scores, normalized, "rocky", ["rock", "stone", "cliff", "mountain", "boulder"]);
+		}
+
+		if (scores.Count == 0)
+			return new BiomeInference("unknown", "no recognized texture-name biome tokens");
+
+		KeyValuePair<string, int> best = scores
+			.OrderByDescending(static entry => entry.Value)
+			.ThenBy(static entry => entry.Key, StringComparer.Ordinal)
+			.First();
+		return new BiomeInference(best.Key, $"matched {best.Value} texture-name token(s)");
+	}
+
+	private static void AddScore(Dictionary<string, int> scores, string normalizedTextureName, string tag, string[] tokens)
+	{
+		foreach (string token in tokens)
+		{
+			if (!normalizedTextureName.Contains(token, StringComparison.Ordinal))
+				continue;
+
+			scores.TryGetValue(tag, out int score);
+			scores[tag] = score + 1;
+		}
 	}
 
 	private static string? GetOption(string[] args, string longName, string shortName)
@@ -329,19 +428,37 @@ internal static class V10MclyDictionaryCommand
 		public int this[int y, int x, int channel] => Values[((y * Width) + x) * Channels + channel];
 	}
 
-	private readonly record struct MclyCombinationKey(int Layer0, int Layer1, int Layer2, int Layer3)
+	private sealed record MclyCombinationKey(string Layer0, string Layer1, string Layer2, string Layer3)
 	{
-		public int[] ToArray() => [Layer0, Layer1, Layer2, Layer3];
+		public static MclyCombinationKey Create(int[] textureIds, string[] textureNames)
+		{
+			string[] tokens = new string[4];
+			for (int index = 0; index < tokens.Length; index++)
+			{
+				string textureName = index < textureNames.Length ? textureNames[index] : string.Empty;
+				int textureId = index < textureIds.Length ? textureIds[index] : -1;
+				tokens[index] = !string.IsNullOrWhiteSpace(textureName)
+					? textureName
+					: textureId >= 0 ? "#" + textureId.ToString(CultureInfo.InvariantCulture) : string.Empty;
+			}
+
+			return new MclyCombinationKey(tokens[0], tokens[1], tokens[2], tokens[3]);
+		}
+
+		public string[] TextureNames => [Layer0, Layer1, Layer2, Layer3];
+
+		public string Hash => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(ToStableText())))[..16].ToLowerInvariant();
 
 		public string ToStableText()
 		{
-			return string.Join("_", ToArray().Select(static value => value.ToString(CultureInfo.InvariantCulture)));
+			return string.Join("|", TextureNames);
 		}
 	}
 
 	private sealed class MclyCombinationAccumulator(MclyCombinationKey key)
 	{
 		private readonly HashSet<string> _tileNames = new(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, int> _idTupleDistribution = new(StringComparer.Ordinal);
 
 		public MclyCombinationKey Key { get; } = key;
 
@@ -351,16 +468,38 @@ internal static class V10MclyDictionaryCommand
 
 		public List<MclyExampleChunk> Examples { get; } = [];
 
-		public void Add(string tileName, int chunkX, int chunkY, int exampleLimit)
+		public IReadOnlyDictionary<string, int> IdTupleDistribution => _idTupleDistribution;
+
+		public int[] MostCommonTextureIds
+		{
+			get
+			{
+				string idTuple = _idTupleDistribution
+					.OrderByDescending(static entry => entry.Value)
+					.ThenBy(static entry => entry.Key, StringComparer.Ordinal)
+					.FirstOrDefault().Key ?? "-1|-1|-1|-1";
+				return idTuple
+					.Split('|', StringSplitOptions.TrimEntries)
+					.Select(static value => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : -1)
+					.ToArray();
+			}
+		}
+
+		public void Add(string tileName, int chunkX, int chunkY, int[] textureIds, string[] textureNames, int exampleLimit)
 		{
 			Frequency++;
 			_tileNames.Add(tileName);
+			string idTuple = string.Join("|", textureIds.Select(static id => id.ToString(CultureInfo.InvariantCulture)));
+			_idTupleDistribution.TryGetValue(idTuple, out int idCount);
+			_idTupleDistribution[idTuple] = idCount + 1;
 			if (Examples.Count < exampleLimit)
-				Examples.Add(new MclyExampleChunk(tileName, chunkX, chunkY));
+				Examples.Add(new MclyExampleChunk(tileName, chunkX, chunkY, [.. textureIds]));
 		}
 	}
 
-	private sealed record MclyExampleChunk(string TileName, int ChunkX, int ChunkY);
+	private readonly record struct BiomeInference(string Tag, string Reason);
+
+	private sealed record MclyExampleChunk(string TileName, int ChunkX, int ChunkY, int[] TextureIds);
 
 	private sealed record MclySkippedTile(string TileName, string Path, string Reason);
 }

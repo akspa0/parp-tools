@@ -86,6 +86,7 @@ public static class NpzTileSerializer
             build_key = pack.BuildKey,
             source_adt_path = pack.SourceAdtPath,
             available_signals = pack.AvailableSignals.OrderBy(static signal => signal, StringComparer.OrdinalIgnoreCase),
+            mcly_texture_names = pack.MclyTextureNames,
             minimap_source_tag = pack.MinimapSourceTag,
         }, new JsonSerializerOptions
         {

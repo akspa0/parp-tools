@@ -33,6 +33,11 @@ public sealed class TerrainTileTensorPack
     public int[,,]? MclyTextureIds { get; init; }
 
     /// <summary>
+    /// Tile-level MTEX texture table used by MCLY texture IDs.
+    /// </summary>
+    public IReadOnlyList<string> MclyTextureNames { get; init; } = Array.Empty<string>();
+
+    /// <summary>
     /// 16×16 chunk grid × 4 layers.
     /// Boolean flags: is this layer active in this chunk?
     /// </summary>
