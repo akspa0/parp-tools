@@ -134,6 +134,7 @@ Key commands include:
 - `extract-v10-tensors`
 - `mine-v10-brushes`
 - `mine-v10-mcly`
+- `label-v10-mcly`
 - `mine-v10-mcal-compositions`
 - `mine-v10-mcal-brushes`
 - `mine-v10-height-profiles`
@@ -153,11 +154,13 @@ Key commands include:
 
 `mine-v10-mcly` is the current canonical Wave 2 command for MCLY texture-layer combination mining. It scans v10 NPZ shards for `mcly_texture_ids` plus `mcly_texture_names`, counts per-chunk four-layer texture palettes, emits texture-path keyed combinations with local ID tuple distributions, and writes both `mclay_dictionary.json` and `mcly_dictionary.json` for downstream palette and biome-classifier work.
 
+`label-v10-mcly` materializes the retained MCLY dictionary labels back onto Stage 1 shards as a reusable supervised manifest. It writes `v10-mcly-label-manifest.v1` with per-tile dominant palette metadata and a 16x16 chunk label grid using `-100` for chunks whose texture combination was not retained.
+
 `mine-v10-mcal-brushes` is the current canonical Wave 2 command for non-object-anchored MCAL brush-stroke vocabulary mining. It scans real `mcal_alpha_pack_256` layers, filters near-uniform fills, clusters per-layer 64x64 alpha stamps, classifies coarse shape families, and writes `mcal_brush_dictionary.json` plus `mcal_brush_dictionary.npz`.
 
 `scripts/train_v10_minimap_to_mclay.py` is the current bounded Wave 2 classifier trainer for minimap RGB to retained MCLY palette label. It consumes the existing v10 NPZ shard contract plus `mclay_dictionary.json` or `mcly_dictionary.json` from `mine-v10-mcly`, writes `minimap_to_mclay_classifier.pt`, and keeps label provenance in `label_index.json`.
 
-`scripts/train_v10_minimap_to_mclay_grid.py` is the chunk-level companion trainer. It predicts a 16x16 retained MCLY palette grid from minimap RGB, ignores chunks whose texture combination is not retained in the mined dictionary, and writes `minimap_to_mclay_grid_classifier.pt` with the same dictionary-backed label provenance.
+`scripts/train_v10_minimap_to_mclay_grid.py` is the chunk-level companion trainer. It predicts a 16x16 retained MCLY palette grid from minimap RGB, ignores chunks whose texture combination is not retained in the mined dictionary, and writes `minimap_to_mclay_grid_classifier.pt` with the same dictionary-backed label provenance. It can consume either raw v10 Stage 1 shards plus `mclay_dictionary.json`, or the reusable `v10-mcly-label-manifest.v1` output from `label-v10-mcly`.
 
 Show usage:
 

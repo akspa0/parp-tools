@@ -30,9 +30,9 @@ IGNORE_INDEX = -100
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train a v10 minimap-to-MCLY 16x16 chunk palette classifier from NPZ shards and a mined MCLY dictionary.")
-    parser.add_argument("input", help="NPZ shard, directory of NPZ shards, or JSON manifest containing shard paths.")
-    parser.add_argument("--dictionary", required=True, help="mclay_dictionary.json or mcly_dictionary.json from mine-v10-mcly.")
+        description="Train a v10 minimap-to-MCLY 16x16 chunk palette classifier from NPZ shards or a v10 MCLY label manifest.")
+    parser.add_argument("input", help="NPZ shard, directory of NPZ shards, Stage 1 manifest, or v10 MCLY label manifest.")
+    parser.add_argument("--dictionary", help="mclay_dictionary.json or mcly_dictionary.json from mine-v10-mcly. Required unless input is a v10 MCLY label manifest.")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
@@ -69,6 +69,18 @@ def find_npz_paths(input_path: Path) -> list[Path]:
         return sorted({path.resolve() for path in collected if path.exists()})
 
     raise FileNotFoundError(f"Could not resolve NPZ input from {input_path}")
+
+
+def is_mcly_label_manifest(input_path: Path) -> bool:
+    if not input_path.is_file() or input_path.suffix.lower() != ".json":
+        return False
+
+    try:
+        payload = json.loads(input_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+
+    return str(payload.get("schema_version") or payload.get("SchemaVersion") or "") == "v10-mcly-label-manifest.v1"
 
 
 def collect_json_npz_paths(value: Any, base_dir: Path, collected: list[Path]) -> None:
@@ -166,6 +178,31 @@ class MclyGridSample:
     dominant_chunk_count: int
 
 
+def get_json_value(payload: dict[str, Any], *names: str) -> Any:
+    for name in names:
+        if name in payload:
+            return payload[name]
+    lowered = {key.lower(): value for key, value in payload.items()}
+    for name in names:
+        value = lowered.get(name.lower())
+        if value is not None:
+            return value
+    return None
+
+
+def get_json_string(payload: dict[str, Any], *names: str) -> str:
+    value = get_json_value(payload, *names)
+    return str(value) if value is not None else ""
+
+
+def get_json_int(payload: dict[str, Any], *names: str, default: int = 0) -> int:
+    value = get_json_value(payload, *names)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def resolve_texture_names(texture_ids: np.ndarray, texture_names: list[str], y: int, x: int) -> tuple[str, str, str, str]:
     resolved: list[str] = []
     for layer in range(4):
@@ -236,6 +273,79 @@ def discover_samples(npz_paths: Iterable[Path], dictionary: dict[str, Dictionary
             return samples[:max_samples]
 
     return samples
+
+
+def discover_manifest_samples(manifest_path: Path, max_samples: int) -> tuple[list[MclyGridSample], dict[int, DictionaryEntry], int, str]:
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    ignore_index = int(payload.get("ignore_index", IGNORE_INDEX))
+    dictionary_path = str(payload.get("dictionary") or "")
+
+    index_to_entry: dict[int, DictionaryEntry] = {}
+    for label in payload.get("labels", []):
+        if not isinstance(label, dict):
+            continue
+
+        label_index = get_json_int(label, "dictionary_label_index", "DictionaryLabelIndex", "label_index")
+        texture_names_value = get_json_value(label, "texture_names", "TextureNames") or []
+        texture_names = tuple(normalize_texture_path(str(value)) for value in texture_names_value[:4]) if isinstance(texture_names_value, list) else ()
+        index_to_entry[label_index] = DictionaryEntry(
+            label_index=label_index,
+            combination_hash=get_json_string(label, "combination_hash", "CombinationHash"),
+            combination_key=get_json_string(label, "combination_key", "CombinationKey"),
+            texture_names=texture_names,
+            frequency=get_json_int(label, "dictionary_frequency", "DictionaryFrequency"),
+            inferred_biome_tag=get_json_string(label, "inferred_biome_tag", "InferredBiomeTag") or "unknown",
+        )
+
+    if not index_to_entry:
+        raise ValueError(f"No label definitions found in {manifest_path}")
+
+    samples: list[MclyGridSample] = []
+    base_dir = manifest_path.parent
+    for entry in payload.get("entries", []):
+        if not isinstance(entry, dict):
+            continue
+
+        shard_path = Path(get_json_string(entry, "shard_path", "ShardPath"))
+        if not shard_path.is_absolute():
+            shard_path = (base_dir / shard_path).resolve()
+        if not shard_path.exists():
+            continue
+
+        label_grid_value = get_json_value(entry, "label_grid_16", "LabelGrid16")
+        label_grid = np.asarray(label_grid_value, dtype=np.int32)
+        if label_grid.shape != (16, 16):
+            continue
+        if ignore_index != IGNORE_INDEX:
+            label_grid[label_grid == ignore_index] = IGNORE_INDEX
+
+        with np.load(shard_path, allow_pickle=False) as shard:
+            if "minimap_rgb_256" not in shard.files:
+                continue
+            minimap_rgb = np.asarray(shard["minimap_rgb_256"], dtype=np.uint8)
+            if minimap_rgb.shape != (256, 256, 3):
+                continue
+
+        retained_count = int(np.count_nonzero(label_grid != IGNORE_INDEX))
+        if retained_count <= 0:
+            continue
+
+        samples.append(
+            MclyGridSample(
+                path=shard_path,
+                tile_name=get_json_string(entry, "tile_name", "TileName") or shard_path.stem,
+                minimap_rgb=minimap_rgb,
+                label_grid=label_grid,
+                retained_chunk_count=retained_count,
+                dominant_label_index=get_json_int(entry, "dominant_dictionary_label_index", "DominantDictionaryLabelIndex", default=IGNORE_INDEX),
+                dominant_chunk_count=get_json_int(entry, "dominant_chunk_count", "DominantChunkCount"),
+            )
+        )
+
+        if max_samples > 0 and len(samples) >= max_samples:
+            break
+
+    return samples, index_to_entry, ignore_index, dictionary_path
 
 
 class MclyGridDataset(Dataset[dict[str, Any]]):
@@ -417,15 +527,27 @@ def main() -> None:
     seed_everything(args.seed)
 
     input_path = Path(args.input).resolve()
-    dictionary_path = Path(args.dictionary).resolve()
     output_dir = Path(args.output_dir).resolve()
     checkpoints_dir = output_dir / "checkpoints"
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
-    dictionary = load_dictionary(dictionary_path)
-    index_to_entry = {entry.label_index: entry for entry in dictionary.values()}
-    npz_paths = find_npz_paths(input_path)
-    samples = discover_samples(npz_paths, dictionary, args.min_retained_chunks, args.max_samples)
+    source_label_manifest = is_mcly_label_manifest(input_path)
+    if source_label_manifest:
+        samples, index_to_entry, source_ignore_index, dictionary_path_text = discover_manifest_samples(input_path, args.max_samples)
+        npz_paths = [sample.path for sample in samples]
+        dictionary_path_for_checkpoint = dictionary_path_text
+        if source_ignore_index != IGNORE_INDEX:
+            print(f"normalized manifest ignore_index {source_ignore_index} to trainer ignore_index {IGNORE_INDEX}")
+    else:
+        if not args.dictionary:
+            raise RuntimeError("--dictionary is required unless input is a v10 MCLY label manifest.")
+        dictionary_path = Path(args.dictionary).resolve()
+        dictionary = load_dictionary(dictionary_path)
+        index_to_entry = {entry.label_index: entry for entry in dictionary.values()}
+        npz_paths = find_npz_paths(input_path)
+        samples = discover_samples(npz_paths, dictionary, args.min_retained_chunks, args.max_samples)
+        dictionary_path_for_checkpoint = str(dictionary_path)
+
     if len(samples) < 2:
         raise RuntimeError("Need at least two v10 NPZ shards with minimap_rgb_256 and retained mcly_texture_ids chunk labels.")
 
@@ -468,7 +590,7 @@ def main() -> None:
             "optimizer_state": optimizer.state_dict(),
             "active_dictionary_label_indexes": active_label_indexes,
             "remapped_labels": remapped_labels,
-            "dictionary_path": str(dictionary_path),
+            "dictionary_path": dictionary_path_for_checkpoint,
             "ignore_index": IGNORE_INDEX,
             "history": history,
         }
@@ -495,7 +617,8 @@ def main() -> None:
 
     summary = {
         "input": str(input_path),
-        "dictionary": str(dictionary_path),
+        "input_schema": "v10-mcly-label-manifest.v1" if source_label_manifest else "npz-or-stage1-manifest",
+        "dictionary": dictionary_path_for_checkpoint,
         "discovered_npz_count": len(npz_paths),
         "labeled_sample_count": len(samples),
         "train_count": len(train_samples),

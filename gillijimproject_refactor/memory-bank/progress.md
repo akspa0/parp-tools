@@ -142,11 +142,28 @@ This file is intentionally compressed. Keep only recent validated milestones, op
   - `label_index.json`
   - `metrics.json`
 - It preserves dictionary-backed label provenance and uses `ignore_index=-100` for chunks whose texture combination is not retained in the mined dictionary
+- It can now consume the reusable native `v10-mcly-label-manifest.v1` output directly, instead of recomputing labels from NPZ plus dictionary on every training run
 - Proof:
   - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\train_v10_minimap_to_mclay_grid.py` passed
   - `.venv\Scripts\python.exe wow-viewer\scripts\train_v10_minimap_to_mclay_grid.py output\build-validation\v10-stage1-development-corpus\v10_stage1_manifest.json --dictionary output\build-validation\v10-wave2-mcly-dictionary\mclay_dictionary.json --output-dir output\ml-training\v10_minimap_to_mclay_grid_smoke --epochs 2 --batch-size 4 --num-workers 0 --device cpu --no-channels-last` passed
+  - `.venv\Scripts\python.exe wow-viewer\scripts\train_v10_minimap_to_mclay_grid.py output\build-validation\v10-wave2-mcly-labels\v10_mcly_label_manifest.json --output-dir output\ml-training\v10_minimap_to_mclay_grid_manifest_smoke --epochs 2 --batch-size 4 --num-workers 0 --device cpu --no-channels-last` passed
   - smoke output: `output/ml-training/v10_minimap_to_mclay_grid_smoke/minimap_to_mclay_grid_classifier.pt`
+  - manifest-driven smoke output: `output/ml-training/v10_minimap_to_mclay_grid_manifest_smoke/minimap_to_mclay_grid_classifier.pt`
   - bounded corpus result: `64` shards discovered, `11` labeled samples, `1,973` retained chunk labels, `35` active retained MCLY labels, `8` train samples, `3` validation samples
+
+### Apr 27, 2026 - Native reusable MCLY label manifest generation landed in `wow-viewer`
+
+- `wowviewer-converter label-v10-mcly` now materializes retained MCLY dictionary labels from Stage 1 NPZ shards plus `mclay_dictionary.json`
+- It writes `v10-mcly-label-manifest.v1` with:
+  - per-label dictionary provenance and usage counts
+  - per-tile dominant retained palette metadata
+  - per-tile 16x16 chunk label grids
+  - `ignore_index = -100` for chunks whose texture combination was not retained in the mined dictionary
+- Proof:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug --no-restore` passed with existing warnings only after escalation for dotnet first-run sandbox denial
+  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- label-v10-mcly --input i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json --dictionary i:/parp/parp-tools/output/build-validation/v10-wave2-mcly-dictionary/mclay_dictionary.json --output i:/parp/parp-tools/output/build-validation/v10-wave2-mcly-labels/v10_mcly_label_manifest.json --min-retained-chunks 8` passed after escalation for the same dotnet first-run sandbox denial
+  - proof output: `output/build-validation/v10-wave2-mcly-labels/v10_mcly_label_manifest.json`
+  - bounded corpus result: `64` shards discovered, `11` shards with `mcly_texture_ids`, `11` labeled samples, `1,973` retained chunks, `35` active retained labels, `53` skipped shards
 
 ### Apr 26, 2026 - GPU viewer plan-set workflow was registered
 

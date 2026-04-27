@@ -25,12 +25,13 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `wowviewer-converter dataset-build-v10-stage1` now owns the first bounded bulk Stage 1 corpus build over root ADTs plus a loose minimap root and writes a manifest that downstream trainers can consume directly
   - `wowviewer-converter mine-v10-brushes` now owns the anchor-aware miner natively in `WowViewer.Tool.Converter`
   - `wowviewer-converter mine-v10-mcly` now owns the native Wave 2 MCLY combination dictionary command, consumes texture-name metadata when present, and writes texture-path keyed `mclay_dictionary.json` plus `mcly_dictionary.json`
+  - `wowviewer-converter label-v10-mcly` now owns reusable supervised MCLY label-manifest materialization from Stage 1 shards plus the mined MCLY dictionary
   - `wowviewer-converter mine-v10-mcal-compositions` now owns native chunk-level MCAL composition vocabulary mining and writes `mcal_composition_dictionary.json` plus `mcal_composition_dictionary.npz`
   - `wowviewer-converter mine-v10-mcal-brushes` now owns native non-object-anchored MCAL brush-stroke vocabulary mining and writes `mcal_brush_dictionary.json` plus `mcal_brush_dictionary.npz`
   - `wowviewer-converter mine-v10-height-profiles` now owns native height archetype clustering and writes `height_profile_dictionary.json` plus `height_profile_dictionary.npz`
   - `wow-viewer/scripts/train_v10_stage1_minimap2height.py` now exists as the first bounded Stage 1 trainer for `minimap_rgb_256 -> height_17`
   - `wow-viewer/scripts/train_v10_minimap_to_mclay.py` now exists as the first bounded Wave 2 classifier trainer for `minimap_rgb_256 -> retained MCLY palette label`
-  - `wow-viewer/scripts/train_v10_minimap_to_mclay_grid.py` now exists as the first bounded Wave 2 chunk-grid classifier trainer for `minimap_rgb_256 -> 16x16 retained MCLY palette labels`
+  - `wow-viewer/scripts/train_v10_minimap_to_mclay_grid.py` now exists as the first bounded Wave 2 chunk-grid classifier trainer for `minimap_rgb_256 -> 16x16 retained MCLY palette labels`, and can consume the reusable native MCLY label manifest directly
   - the native miner supports `objects`, `terrain`, and `hybrid` anchor modes
   - the older Python miner under `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/mine_mcal_brush_patterns.py` remains a reference surface, not the canonical command path
 - Current proof level:
@@ -38,6 +39,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with warnings only
   - native widened hybrid proof passed at `output/build-validation/v10-wave2-wider-corpus/native-cli-hybrid-proof`
   - enriched native MCLY dictionary proof passed at `output/build-validation/v10-wave2-mcly-dictionary/mclay_dictionary.json` after regenerating the 64-shard Stage 1 corpus with `mcly_texture_names`
+  - native MCLY label-manifest proof passed at `output/build-validation/v10-wave2-mcly-labels/v10_mcly_label_manifest.json`
   - native MCAL composition proof passed at `output/build-validation/v10-wave2-mcal-compositions/mcal_composition_dictionary.json` over the current Stage 1 corpus
   - native MCAL brush dictionary proof passed at `output/build-validation/v10-wave2-mcal-brushes/mcal_brush_dictionary.json` over the current Stage 1 corpus
   - native height profile proof passed at `output/build-validation/v10-wave2-height-profiles/height_profile_dictionary.json` over all `64` Stage 1 shards
@@ -45,6 +47,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - bounded Stage 1 CUDA smoke passed at `output/ml-training/v10_stage1_gpu_smoke` using `gillijimproject_refactor/.venv-train` on the local RTX 4070 Ti SUPER
   - bounded minimap-to-MCLY CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_smoke/minimap_to_mclay_classifier.pt` using the workspace `.venv` over the current `64` Stage 1 shards and `mclay_dictionary.json`
   - bounded minimap-to-MCLY chunk-grid CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_grid_smoke/minimap_to_mclay_grid_classifier.pt`, with `1,973` retained chunk labels across `35` active palette classes
+  - bounded manifest-driven minimap-to-MCLY chunk-grid CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_grid_manifest_smoke/minimap_to_mclay_grid_classifier.pt`
 
 ## Wave 2 Status
 
@@ -54,6 +57,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - placement-derived `ObjectMask257` and `ObjectPreciseMask257` are populated from real ADT placements
   - anchor-aware MCAL brush mining exists as a concrete native `wowviewer-converter mine-v10-brushes` command
   - MCLY texture-layer combination mining exists as a concrete native `wowviewer-converter mine-v10-mcly` command with texture-name keyed palettes and conservative biome tags
+  - retained MCLY label-grid materialization exists as a concrete native `wowviewer-converter label-v10-mcly` command
   - MCAL chunk-level composition mining exists as a concrete native `wowviewer-converter mine-v10-mcal-compositions` command with averaged 64x64x4 composition centroids
   - non-object-anchored MCAL brush-stroke vocabulary mining exists as a concrete native `wowviewer-converter mine-v10-mcal-brushes` command with per-layer 64x64 stamps and coarse shape-family labels
   - height profile clustering exists as a concrete native `wowviewer-converter mine-v10-height-profiles` command with normalized and absolute height centroids
@@ -67,6 +71,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - hybrid proof: `output/build-validation/v10-wave2-wider-corpus/hybrid-proof/brush_dictionary.json`
   - native CLI proof: `output/build-validation/v10-wave2-wider-corpus/native-cli-hybrid-proof/brush_dictionary.json`
   - MCLY dictionary proof: `output/build-validation/v10-wave2-mcly-dictionary/mclay_dictionary.json`
+  - MCLY label-manifest proof: `output/build-validation/v10-wave2-mcly-labels/v10_mcly_label_manifest.json`
   - MCAL composition proof: `output/build-validation/v10-wave2-mcal-compositions/mcal_composition_dictionary.json`
   - MCAL brush dictionary proof: `output/build-validation/v10-wave2-mcal-brushes/mcal_brush_dictionary.json`
   - height profile proof: `output/build-validation/v10-wave2-height-profiles/height_profile_dictionary.json`
@@ -74,6 +79,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - Stage 1 CUDA smoke output: `output/ml-training/v10_stage1_gpu_smoke`
   - minimap-to-MCLY classifier smoke output: `output/ml-training/v10_minimap_to_mclay_smoke`
   - minimap-to-MCLY grid classifier smoke output: `output/ml-training/v10_minimap_to_mclay_grid_smoke`
+  - manifest-driven minimap-to-MCLY grid classifier smoke output: `output/ml-training/v10_minimap_to_mclay_grid_manifest_smoke`
 - What is still open:
   - broader-corpus validation for the native MCAL brush dictionary beyond the bounded development Stage 1 corpus
   - broader-corpus minimap-to-MCLY classifier training beyond the `11` currently labelable development shards
