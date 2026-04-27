@@ -59,6 +59,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - bounded minimap-to-MCLY CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_smoke/minimap_to_mclay_classifier.pt` using the workspace `.venv` over the current `64` Stage 1 shards and `mclay_dictionary.json`
   - bounded minimap-to-MCLY chunk-grid CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_grid_smoke/minimap_to_mclay_grid_classifier.pt`, with `1,973` retained chunk labels across `35` active palette classes
   - bounded manifest-driven minimap-to-MCLY chunk-grid CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_grid_manifest_smoke/minimap_to_mclay_grid_classifier.pt`
+  - full mixed-corpus Stage 2 CUDA run 3 is active at `output/ml-training/v10_stage2_v9cache_native_dev_cuda_full_run3_20260427` using `gillijimproject_refactor/.venv-train`; startup validation confirmed Torch `2.11.0+cu128`, CUDA visibility, the proven `1,262`-entry curated manifest, and live GPU-backed Python activity
 
 ## Wave 2 Status
 
@@ -105,6 +106,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
 - `ObjectMask257` and `ObjectPreciseMask257` are still placement-derived proxy masks, not true rendered silhouettes.
 - `Pm4PathMask` and `Pm4BuildingFootprintMask` remain empty pending PM4 integration.
 - The current Stage 1 trainer is only a bounded baseline; Stage 2 refinement, broader non-development corpora, and production-grade experiment management remain open.
+- The active full mixed-corpus Stage 2 CUDA run launched on Apr 27, 2026 but has not finished yet; do not describe it as a trained or converged model until checkpoints and metrics are written.
 - `dataset-build-v10-stage1` currently skipped `34` development tiles because `AdtTensorPackBuilder` did not recognize them as usable root ADTs.
 - The current enriched MCLY dictionary proof read `mcly_texture_ids` plus texture-name metadata from `11` of the `64` existing Stage 1 shards; `53` shards were explicitly skipped as `missing_mcly_texture_ids`.
 

@@ -12,6 +12,20 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 ## Recent Validated Milestones
 
+### Apr 27, 2026 - Full mixed-corpus v10 Stage 2 CUDA run 3 launched
+
+- The canonical long-running Stage 2 trainer was launched from `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` using the proven curated manifest `output/ml-training/v10_curated/v10_v9all_plus_native_dev_balanced_manifest.json`
+- The run uses `gillijimproject_refactor/.venv-train` with Torch `2.11.0+cu128` on CUDA and writes to `output/ml-training/v10_stage2_v9cache_native_dev_cuda_full_run3_20260427`
+- Launch command:
+  - `i:/parp/parp-tools/gillijimproject_refactor/.venv-train/Scripts/python.exe i:/parp/parp-tools/wow-viewer/scripts/train_v10_stage2_terrain_synth.py i:/parp/parp-tools/output/ml-training/v10_curated/v10_v9all_plus_native_dev_balanced_manifest.json --output-dir i:/parp/parp-tools/output/ml-training/v10_stage2_v9cache_native_dev_cuda_full_run3_20260427 --epochs 60 --batch-size 4 --num-workers 4 --device cuda`
+- Startup proof:
+  - curated manifest exists with `1,262` entries
+  - `torch.cuda.is_available()` returned `True`
+  - `nvidia-smi` showed a live Python process from the UV-managed interpreter on the RTX 4070 Ti SUPER during launch
+  - terminal output reached Torch Inductor startup (`Not enough SMs to use max_autotune_gemm mode`), which is expected startup noise rather than a fatal error
+- Boundary:
+  - this is a launched full run, not a completed training result yet
+
 ### Apr 27, 2026 - Native rectangular prefab-cell clone detection landed in `wow-viewer`
 
 - `wowviewer-converter mine-v10-prefab-cells` now detects repeating square/rectangular chunk sets (cells) that were copy-pasted across maps

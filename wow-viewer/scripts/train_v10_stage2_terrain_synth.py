@@ -4,7 +4,7 @@ import argparse
 import json
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -26,6 +26,67 @@ DEFAULT_SEED = 1337
 DEFAULT_NUM_WORKERS = 4
 DEFAULT_PREVIEW_COUNT = 4
 DEFAULT_SIGNAL_DROOUT = 0.15
+PREVIEW_ROW_TITLE_HEIGHT = 18
+PREVIEW_PANE_LABEL_HEIGHT = 18
+PREVIEW_LABEL_PADDING = 4
+
+INPUT_SIGNAL_LAYOUT: list[tuple[str, int]] = [
+    ("minimap_rgb_256", 3),
+    ("mcal_alpha_pack_256", 4),
+    ("mccv_rgb", 3),
+    ("mcnr_normal_xyz", 3),
+    ("mh2o_surface_height", 1),
+    ("mh2o_depth", 1),
+    ("object_mask_257", 1),
+    ("object_precise_mask_257", 1),
+    ("pm4_path_mask", 1),
+    ("pm4_building_footprint_mask", 1),
+    ("wl_liquid_mask", 1),
+    ("wl_liquid_height", 1),
+    ("mclq_surface_height", 1),
+    ("hole_mask_16", 1),
+    ("mtxf_animated_mask", 1),
+    ("coarse_height_17_prior", 1),
+]
+
+VALIDATION_SUBSET_FIELDS: dict[str, str] = {
+    "is_native_v10": "native_v10",
+    "is_legacy_only": "legacy_only",
+    "has_pm4_signal": "pm4_present",
+    "has_mcal_signal": "mcal_present",
+    "has_liquid_signal": "liquid_present",
+    "has_object_signal": "object_present",
+    "has_mccv_signal": "mccv_present",
+    "has_normal_signal": "normal_present",
+}
+
+VALIDATION_ABLATION_GROUPS: dict[str, tuple[str, ...]] = {
+    "pm4": ("pm4_path_mask", "pm4_building_footprint_mask"),
+    "mcal": ("mcal_alpha_pack_256",),
+    "objects": ("object_mask_257", "object_precise_mask_257"),
+    "liquids": ("mh2o_surface_height", "mh2o_depth", "wl_liquid_mask", "wl_liquid_height", "mclq_surface_height"),
+    "mccv": ("mccv_rgb",),
+    "normals": ("mcnr_normal_xyz",),
+}
+
+VALIDATION_ABLATION_SUBSETS: dict[str, str] = {
+    "pm4": "pm4_present",
+    "mcal": "mcal_present",
+    "objects": "object_present",
+    "liquids": "liquid_present",
+    "mccv": "mccv_present",
+    "normals": "normal_present",
+}
+
+VALIDATION_SPLIT_PRIORITY_GROUPS: tuple[str, ...] = (
+    "native_v10",
+    "pm4_present",
+    "mcal_present",
+    "mccv_present",
+    "normal_present",
+)
+
+METRIC_KEYS = ("loss", "full_l1", "mid_l1", "coarse_l1", "gradient", "mae_m", "rmse_m")
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,8 +107,49 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--channels-last", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--signal-dropout", type=float, default=DEFAULT_SIGNAL_DROOUT,
                         help="Probability of zeroing out an optional signal channel during training.")
+    parser.add_argument(
+        "--validation-ablation-groups",
+        default="pm4,mcal,objects,liquids",
+        help="Comma-separated validation ablation groups to zero during post-train analysis. Use 'none' to disable.",
+    )
+    parser.add_argument(
+        "--evaluate-checkpoint",
+        help="Optional checkpoint path. When provided, skip training and only run validation analysis against the checkpoint.",
+    )
     parser.add_argument("--stage1-checkpoint", help="Optional Stage 1 checkpoint to use for coarse prior at inference time.")
     return parser.parse_args()
+
+
+def build_input_channel_ranges() -> dict[str, tuple[int, int]]:
+    ranges: dict[str, tuple[int, int]] = {}
+    start = 0
+    for key, width in INPUT_SIGNAL_LAYOUT:
+        ranges[key] = (start, start + width)
+        start += width
+    return ranges
+
+
+INPUT_CHANNEL_RANGES = build_input_channel_ranges()
+
+
+def parse_validation_ablation_groups(raw_value: str) -> list[str]:
+    value = raw_value.strip().lower()
+    if value in {"", "none", "off"}:
+        return []
+
+    groups: list[str] = []
+    for part in raw_value.split(","):
+        group = part.strip().lower()
+        if not group:
+            continue
+        if group not in VALIDATION_ABLATION_GROUPS:
+            raise ValueError(
+                f"Unknown validation ablation group '{group}'. Supported groups: {', '.join(sorted(VALIDATION_ABLATION_GROUPS))}"
+            )
+        if group not in groups:
+            groups.append(group)
+
+    return groups
 
 
 def seed_everything(seed: int) -> None:
@@ -58,18 +160,82 @@ def seed_everything(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def find_npz_paths(input_path: Path) -> list[Path]:
+@dataclass(slots=True)
+class ShardReference:
+    path: Path
+    dataset_key: str
+    source_schema: str
+    source_manifest: str
+
+
+def infer_dataset_key(path: Path) -> str:
+    parts = list(path.parts)
+    lower_parts = [part.lower() for part in parts]
+    if "shards" in lower_parts:
+        index = lower_parts.index("shards")
+        if index + 1 < len(parts):
+            return parts[index + 1]
+    return path.parent.name or path.stem
+
+
+def infer_source_schema(path: Path) -> str:
+    normalized = str(path).replace("\\", "/").lower()
+    if "/output/build-validation/v10-stage1-development-corpus/" in normalized:
+        return "v10-stage1-manifest.v1"
+    if "/output/ml-training/cache/" in normalized and "/cache/shards/" in normalized:
+        return "v9-native-tensor-cache.v2"
+    return "unknown"
+
+
+def resolve_shard_reference(path: Path, dataset_key: str = "", source_schema: str = "", source_manifest: str = "") -> ShardReference:
+    return ShardReference(
+        path=path,
+        dataset_key=dataset_key or infer_dataset_key(path),
+        source_schema=source_schema or infer_source_schema(path),
+        source_manifest=source_manifest,
+    )
+
+
+def find_npz_paths(input_path: Path) -> list[ShardReference]:
     if input_path.is_file() and input_path.suffix.lower() == ".npz":
-        return [input_path]
+        return [resolve_shard_reference(input_path)]
 
     if input_path.is_dir():
-        return sorted(path for path in input_path.rglob("*.npz") if path.is_file())
+        return sorted(
+            (resolve_shard_reference(path) for path in input_path.rglob("*.npz") if path.is_file()),
+            key=lambda item: str(item.path),
+        )
 
     if input_path.is_file() and input_path.suffix.lower() == ".json":
         payload = json.loads(input_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict) and isinstance(payload.get("entries"), list):
+            references: list[ShardReference] = []
+            for entry in payload["entries"]:
+                if not isinstance(entry, dict):
+                    continue
+                shard_value = entry.get("shard_path") or entry.get("npz_path") or entry.get("ShardPath") or entry.get("NpzPath")
+                if not isinstance(shard_value, str) or not shard_value.lower().endswith(".npz"):
+                    continue
+                candidate = Path(shard_value)
+                if not candidate.is_absolute():
+                    candidate = (input_path.parent / candidate).resolve()
+                references.append(
+                    resolve_shard_reference(
+                        candidate,
+                        dataset_key=str(entry.get("dataset_key") or entry.get("DatasetKey") or ""),
+                        source_schema=str(entry.get("source_schema") or entry.get("SourceSchema") or ""),
+                        source_manifest=str(entry.get("source_manifest") or entry.get("SourceManifest") or ""),
+                    )
+                )
+            if references:
+                return sorted(references, key=lambda item: str(item.path))
+
         collected: list[Path] = []
         collect_json_npz_paths(payload, input_path.parent, collected)
-        return sorted({path.resolve() for path in collected if path.exists()})
+        return sorted(
+            {resolve_shard_reference(path.resolve()) for path in collected if path.exists()},
+            key=lambda item: str(item.path),
+        )
 
     raise FileNotFoundError(f"Could not resolve NPZ input from {input_path}")
 
@@ -159,6 +325,9 @@ SIGNAL_ALIASES: dict[str, tuple[str, ...]] = {
 class Stage2Sample:
     path: Path
     tile_name: str
+    dataset_key: str
+    source_schema: str
+    source_manifest: str
     minimap_rgb: np.ndarray
     height_257: np.ndarray
     height_65: np.ndarray
@@ -169,10 +338,65 @@ class Stage2Sample:
     max_height: float
 
 
-def discover_samples(npz_paths: Iterable[Path], max_samples: int) -> list[Stage2Sample]:
+def is_native_v10_source(sample: Stage2Sample) -> bool:
+    if sample.source_schema == "v10-stage1-manifest.v1":
+        return True
+    normalized_dataset = sample.dataset_key.lower()
+    normalized_path = str(sample.path).replace("\\", "/").lower()
+    return normalized_dataset.startswith("v10-") or "/v10-stage1-development-corpus/" in normalized_path
+
+
+def sample_has_pm4_signal(sample: Stage2Sample) -> bool:
+    return "pm4_path_mask" in sample.available_signal_keys or "pm4_building_footprint_mask" in sample.available_signal_keys
+
+
+def sample_has_mcal_signal(sample: Stage2Sample) -> bool:
+    return "mcal_alpha_pack_256" in sample.available_signal_keys
+
+
+def sample_has_mccv_signal(sample: Stage2Sample) -> bool:
+    return "mccv_rgb" in sample.available_signal_keys
+
+
+def sample_has_normal_signal(sample: Stage2Sample) -> bool:
+    return "mcnr_normal_xyz" in sample.available_signal_keys
+
+
+def sample_has_liquid_signal(sample: Stage2Sample) -> bool:
+    return any(
+        key in sample.available_signal_keys
+        for key in ("mh2o_surface_height", "mh2o_depth", "wl_liquid_mask", "wl_liquid_height", "mclq_surface_height")
+    )
+
+
+def sample_has_object_signal(sample: Stage2Sample) -> bool:
+    return any(key in sample.available_signal_keys for key in ("object_mask_257", "object_precise_mask_257"))
+
+
+def sample_matches_subset(sample: Stage2Sample, subset_name: str) -> bool:
+    if subset_name == "native_v10":
+        return is_native_v10_source(sample)
+    if subset_name == "legacy_only":
+        return not is_native_v10_source(sample)
+    if subset_name == "pm4_present":
+        return sample_has_pm4_signal(sample)
+    if subset_name == "mcal_present":
+        return sample_has_mcal_signal(sample)
+    if subset_name == "liquid_present":
+        return sample_has_liquid_signal(sample)
+    if subset_name == "object_present":
+        return sample_has_object_signal(sample)
+    if subset_name == "mccv_present":
+        return sample_has_mccv_signal(sample)
+    if subset_name == "normal_present":
+        return sample_has_normal_signal(sample)
+    raise ValueError(f"Unknown subset name '{subset_name}'.")
+
+
+def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> list[Stage2Sample]:
     samples: list[Stage2Sample] = []
-    for path in npz_paths:
-        with np.load(path, allow_pickle=False) as shard:
+    for shard_ref in npz_paths:
+        with np.load(shard_ref.path, allow_pickle=False) as shard:
             if "minimap_rgb_256" not in shard.files or "height_257" not in shard.files or "height_17" not in shard.files:
                 continue
 
@@ -185,7 +409,7 @@ def discover_samples(npz_paths: Iterable[Path], max_samples: int) -> list[Stage2
                 continue
 
             metadata = load_metadata(shard)
-            tile_name = str(metadata.get("tile_name") or path.stem)
+            tile_name = str(metadata.get("tile_name") or shard_ref.path.stem)
 
             signals: dict[str, np.ndarray] = {}
             available: set[str] = set()
@@ -210,8 +434,11 @@ def discover_samples(npz_paths: Iterable[Path], max_samples: int) -> list[Stage2
 
             samples.append(
                 Stage2Sample(
-                    path=path,
+                    path=shard_ref.path,
                     tile_name=tile_name,
+                    dataset_key=shard_ref.dataset_key,
+                    source_schema=shard_ref.source_schema,
+                    source_manifest=shard_ref.source_manifest,
                     minimap_rgb=minimap_rgb,
                     height_257=height_257,
                     height_65=height_65,
@@ -358,7 +585,209 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
             "height_17": height_17,
             "minimap": minimap,
             "tile_name": sample.tile_name,
+            "dataset_key": sample.dataset_key,
+            "source_schema": sample.source_schema,
+            "is_native_v10": torch.tensor(is_native_v10_source(sample), dtype=torch.bool),
+            "is_legacy_only": torch.tensor(not is_native_v10_source(sample), dtype=torch.bool),
+            "has_pm4_signal": torch.tensor(sample_has_pm4_signal(sample), dtype=torch.bool),
+            "has_mcal_signal": torch.tensor(sample_has_mcal_signal(sample), dtype=torch.bool),
+            "has_liquid_signal": torch.tensor(sample_has_liquid_signal(sample), dtype=torch.bool),
+            "has_object_signal": torch.tensor(sample_has_object_signal(sample), dtype=torch.bool),
+            "has_mccv_signal": torch.tensor(sample_has_mccv_signal(sample), dtype=torch.bool),
+            "has_normal_signal": torch.tensor(sample_has_normal_signal(sample), dtype=torch.bool),
         }
+
+
+@dataclass(slots=True)
+class MetricAccumulator:
+    totals: dict[str, float] = field(default_factory=lambda: {key: 0.0 for key in METRIC_KEYS})
+    count: int = 0
+
+    def add(self, metric_tensors: dict[str, torch.Tensor], mask: torch.Tensor | None = None) -> None:
+        selected: dict[str, torch.Tensor] = metric_tensors
+        if mask is not None:
+            if mask.ndim > 1:
+                mask = mask.reshape(-1)
+            selected = {key: value[mask] for key, value in metric_tensors.items()}
+
+        if not selected:
+            return
+
+        sample_count = int(next(iter(selected.values())).numel())
+        if sample_count == 0:
+            return
+
+        for key, value in selected.items():
+            self.totals[key] += float(value.detach().sum().cpu())
+        self.count += sample_count
+
+    def to_report(self) -> dict[str, float | int | None]:
+        if self.count == 0:
+            return {"count": 0, **{key: None for key in METRIC_KEYS}}
+        return {
+            "count": self.count,
+            **{key: self.totals[key] / self.count for key in METRIC_KEYS},
+        }
+
+
+def compute_metric_tensors(
+    pred_17: torch.Tensor,
+    pred_65: torch.Tensor,
+    pred_257: torch.Tensor,
+    target_17: torch.Tensor,
+    target_65: torch.Tensor,
+    target_257: torch.Tensor,
+    height_mean: float,
+    height_std: float,
+) -> dict[str, torch.Tensor]:
+    full_l1 = torch.abs(pred_257 - target_257).mean(dim=(1, 2, 3))
+    mid_l1 = torch.abs(pred_65 - target_65).mean(dim=(1, 2, 3))
+    coarse_l1 = torch.abs(pred_17 - target_17).mean(dim=(1, 2, 3))
+
+    grad_pred_x = pred_257[:, :, :, 1:] - pred_257[:, :, :, :-1]
+    grad_pred_y = pred_257[:, :, 1:, :] - pred_257[:, :, :-1, :]
+    grad_target_x = target_257[:, :, :, 1:] - target_257[:, :, :, :-1]
+    grad_target_y = target_257[:, :, 1:, :] - target_257[:, :, :-1, :]
+    gradient = torch.abs(grad_pred_x - grad_target_x).mean(dim=(1, 2, 3)) + torch.abs(grad_pred_y - grad_target_y).mean(dim=(1, 2, 3))
+
+    pred_65_up = F.interpolate(pred_17, size=(65, 65), mode="bilinear", align_corners=False)
+    target_65_up = F.interpolate(target_17, size=(65, 65), mode="bilinear", align_corners=False)
+    mid_residual = torch.abs((pred_65 - pred_65_up) - (target_65 - target_65_up)).mean(dim=(1, 2, 3))
+
+    pred_257_up = F.interpolate(pred_65, size=(257, 257), mode="bilinear", align_corners=False)
+    target_257_up = F.interpolate(target_65, size=(257, 257), mode="bilinear", align_corners=False)
+    detail_res = torch.abs((pred_257 - pred_257_up) - (target_257 - target_257_up)).mean(dim=(1, 2, 3))
+
+    loss = full_l1 + 0.5 * mid_l1 + 0.25 * coarse_l1 + 0.3 * gradient + 0.3 * mid_residual + 0.3 * detail_res
+
+    pred_height_m = pred_257 * height_std + height_mean
+    target_height_m = target_257 * height_std + height_mean
+    diff_m = pred_height_m - target_height_m
+    mae_m = diff_m.abs().mean(dim=(1, 2, 3))
+    rmse_m = torch.sqrt(diff_m.square().mean(dim=(1, 2, 3)))
+
+    return {
+        "loss": loss,
+        "full_l1": full_l1,
+        "mid_l1": mid_l1,
+        "coarse_l1": coarse_l1,
+        "gradient": gradient,
+        "mae_m": mae_m,
+        "rmse_m": rmse_m,
+    }
+
+
+def apply_input_ablation(inputs: torch.Tensor, group_name: str) -> torch.Tensor:
+    masked = inputs.clone()
+    for signal_name in VALIDATION_ABLATION_GROUPS[group_name]:
+        start, end = INPUT_CHANNEL_RANGES[signal_name]
+        masked[:, start:end, :, :] = 0
+    return masked
+
+
+def delta_report(current: dict[str, float | int | None], baseline: dict[str, float | int | None]) -> dict[str, float | None]:
+    delta: dict[str, float | None] = {}
+    for key in METRIC_KEYS:
+        current_value = current.get(key)
+        baseline_value = baseline.get(key)
+        if current_value is None or baseline_value is None:
+            delta[key] = None
+        else:
+            delta[key] = float(current_value) - float(baseline_value)
+    return delta
+
+
+def evaluate_validation_analysis(
+    model: Stage2TerrainSynthModel,
+    loader: DataLoader,
+    device: torch.device,
+    height_mean: float,
+    height_std: float,
+    channels_last: bool,
+    ablation_groups: list[str],
+) -> dict[str, Any]:
+    model.eval()
+    autocast_enabled = device.type == "cuda"
+    baseline_accumulator = MetricAccumulator()
+    subset_accumulators = {label: MetricAccumulator() for label in VALIDATION_SUBSET_FIELDS.values()}
+    ablation_accumulators = {
+        group: {
+            "overall": MetricAccumulator(),
+            "applicable_subset": MetricAccumulator(),
+        }
+        for group in ablation_groups
+    }
+
+    for batch in loader:
+        inputs = maybe_channels_last(batch["inputs"].to(device, non_blocking=True), channels_last)
+        target_257 = batch["height_257"].to(device, non_blocking=True)
+        target_65 = batch["height_65"].to(device, non_blocking=True)
+        target_17 = batch["height_17"].to(device, non_blocking=True)
+
+        with torch.no_grad():
+            context = torch.autocast(device_type=device.type, dtype=torch.float16, enabled=autocast_enabled) if autocast_enabled else torch.no_grad()
+            with context:
+                pred_17, pred_65, pred_257 = model(inputs)
+                metric_tensors = compute_metric_tensors(pred_17, pred_65, pred_257, target_17, target_65, target_257, height_mean, height_std)
+
+        baseline_accumulator.add(metric_tensors)
+        for field_name, label in VALIDATION_SUBSET_FIELDS.items():
+            subset_accumulators[label].add(metric_tensors, batch[field_name].to(torch.bool))
+
+        for group in ablation_groups:
+            ablated_inputs = apply_input_ablation(inputs, group)
+            with torch.no_grad():
+                context = torch.autocast(device_type=device.type, dtype=torch.float16, enabled=autocast_enabled) if autocast_enabled else torch.no_grad()
+                with context:
+                    pred_17, pred_65, pred_257 = model(ablated_inputs)
+                    ablated_metrics = compute_metric_tensors(pred_17, pred_65, pred_257, target_17, target_65, target_257, height_mean, height_std)
+
+            ablation_accumulators[group]["overall"].add(ablated_metrics)
+            applicable_field_name = next(
+                field_name for field_name, label in VALIDATION_SUBSET_FIELDS.items() if label == VALIDATION_ABLATION_SUBSETS[group]
+            )
+            ablation_accumulators[group]["applicable_subset"].add(ablated_metrics, batch[applicable_field_name].to(torch.bool))
+
+    baseline_report = baseline_accumulator.to_report()
+    subsets_report = {label: accumulator.to_report() for label, accumulator in subset_accumulators.items()}
+    ablation_report: dict[str, Any] = {}
+    for group, accumulators in ablation_accumulators.items():
+        overall_report = accumulators["overall"].to_report()
+        applicable_report = accumulators["applicable_subset"].to_report()
+        ablation_report[group] = {
+            "zeroed_signals": list(VALIDATION_ABLATION_GROUPS[group]),
+            "channel_ranges": [
+                {
+                    "signal": signal_name,
+                    "start": INPUT_CHANNEL_RANGES[signal_name][0],
+                    "end_exclusive": INPUT_CHANNEL_RANGES[signal_name][1],
+                }
+                for signal_name in VALIDATION_ABLATION_GROUPS[group]
+            ],
+            "overall": overall_report,
+            "overall_delta_vs_baseline": delta_report(overall_report, baseline_report),
+            "applicable_subset": VALIDATION_ABLATION_SUBSETS[group],
+            "applicable_subset_metrics": applicable_report,
+            "applicable_subset_delta_vs_baseline": delta_report(applicable_report, subsets_report[VALIDATION_ABLATION_SUBSETS[group]]),
+        }
+
+    return {
+        "baseline": baseline_report,
+        "subsets": subsets_report,
+        "ablations": ablation_report,
+    }
+
+
+def load_checkpoint_payload(checkpoint_path: Path, device: torch.device) -> dict[str, Any]:
+    return torch.load(checkpoint_path, map_location=device)
+
+
+def load_model_state(model: nn.Module, state_dict: dict[str, Any]) -> None:
+    cleaned_state = {
+        key[len("_orig_mod."):] if key.startswith("_orig_mod.") else key: value
+        for key, value in state_dict.items()
+    }
+    model.load_state_dict(cleaned_state)
 
 
 class ConvBlock(nn.Module):
@@ -457,14 +886,164 @@ class Stage2TerrainSynthModel(nn.Module):
         return coarse, mid, fine
 
 
-def split_samples(samples: list[Stage2Sample], val_fraction: float, seed: int) -> tuple[list[Stage2Sample], list[Stage2Sample]]:
+def build_split_report(
+    samples: list[Stage2Sample],
+    train_samples: list[Stage2Sample],
+    val_samples: list[Stage2Sample],
+    target_val_count: int,
+    priority_quotas: dict[str, int],
+) -> dict[str, Any]:
+    def count_matches(group_name: str, source: list[Stage2Sample]) -> int:
+        return sum(1 for sample in source if sample_matches_subset(sample, group_name))
+
+    return {
+        "strategy": "quota-aware-stratified-signal-holdout.v1",
+        "target_val_count": target_val_count,
+        "actual_val_count": len(val_samples),
+        "val_dataset_counts": build_dataset_counts(val_samples),
+        "priority_groups": {
+            group_name: {
+                "desired_val_count": priority_quotas[group_name],
+                "all_samples": count_matches(group_name, samples),
+                "train_samples": count_matches(group_name, train_samples),
+                "val_samples": count_matches(group_name, val_samples),
+            }
+            for group_name in VALIDATION_SPLIT_PRIORITY_GROUPS
+        },
+    }
+
+
+def build_dataset_counts(samples: list[Stage2Sample]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for sample in samples:
+        counts[sample.dataset_key] = counts.get(sample.dataset_key, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: item[0]))
+
+
+def sample_priority_score(sample: Stage2Sample) -> tuple[int, int, int, int, int, int, int, str]:
+    return (
+        1 if is_native_v10_source(sample) else 0,
+        1 if sample_has_pm4_signal(sample) else 0,
+        1 if sample_has_mcal_signal(sample) else 0,
+        1 if sample_has_mccv_signal(sample) else 0,
+        1 if sample_has_normal_signal(sample) else 0,
+        1 if sample_has_liquid_signal(sample) else 0,
+        1 if sample_has_object_signal(sample) else 0,
+        sample.tile_name,
+    )
+
+
+def order_validation_samples(samples: list[Stage2Sample]) -> list[Stage2Sample]:
+    return sorted(samples, key=sample_priority_score, reverse=True)
+
+
+def sample_catalog_entry(sample: Stage2Sample) -> dict[str, Any]:
+    return {
+        "tile_name": sample.tile_name,
+        "dataset_key": sample.dataset_key,
+        "source_schema": sample.source_schema,
+        "source_manifest": sample.source_manifest,
+        "shard_path": str(sample.path),
+        "groups": {
+            "native_v10": is_native_v10_source(sample),
+            "legacy_only": not is_native_v10_source(sample),
+            "pm4_present": sample_has_pm4_signal(sample),
+            "mcal_present": sample_has_mcal_signal(sample),
+            "mccv_present": sample_has_mccv_signal(sample),
+            "normal_present": sample_has_normal_signal(sample),
+            "liquid_present": sample_has_liquid_signal(sample),
+            "object_present": sample_has_object_signal(sample),
+        },
+    }
+
+
+def write_validation_catalog(output_dir: Path, train_samples: list[Stage2Sample], val_samples: list[Stage2Sample]) -> Path:
+    catalog_path = output_dir / "validation_samples.json"
+    payload = {
+        "schema_version": "v10-stage2-validation-samples.v1",
+        "train_count": len(train_samples),
+        "val_count": len(val_samples),
+        "val_dataset_counts": build_dataset_counts(val_samples),
+        "val_samples": [sample_catalog_entry(sample) for sample in val_samples],
+    }
+    catalog_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return catalog_path
+
+
+def split_samples(samples: list[Stage2Sample], val_fraction: float, seed: int) -> tuple[list[Stage2Sample], list[Stage2Sample], dict[str, Any]]:
     shuffled = list(samples)
-    random.Random(seed).shuffle(shuffled)
+    rng = random.Random(seed)
+    rng.shuffle(shuffled)
     if len(shuffled) < 2:
         raise ValueError("Need at least two valid NPZ shards to create train and validation splits.")
 
     val_count = max(1, min(len(shuffled) - 1, int(math.ceil(len(shuffled) * val_fraction))))
-    return shuffled[val_count:], shuffled[:val_count]
+
+    indexed_samples = list(enumerate(shuffled))
+    selected_indices: set[int] = set()
+    priority_quotas: dict[str, int] = {}
+    current_counts = {group_name: 0 for group_name in VALIDATION_SPLIT_PRIORITY_GROUPS}
+
+    for group_name in VALIDATION_SPLIT_PRIORITY_GROUPS:
+        group_total = sum(1 for _, sample in indexed_samples if sample_matches_subset(sample, group_name))
+        if group_total <= 0:
+            priority_quotas[group_name] = 0
+            continue
+
+        quota = max(1, int(math.ceil(group_total * val_fraction)))
+        if group_total > 1:
+            quota = min(quota, group_total - 1)
+        priority_quotas[group_name] = min(quota, val_count - 1 if val_count > 1 else 1)
+
+    unmet_groups = lambda idx: [
+        group_name
+        for group_name in VALIDATION_SPLIT_PRIORITY_GROUPS
+        if current_counts[group_name] < priority_quotas[group_name] and sample_matches_subset(indexed_samples[idx][1], group_name)
+    ]
+
+    while len(selected_indices) < val_count:
+        best_index: int | None = None
+        best_score: tuple[int, int, int] | None = None
+        for idx, sample in indexed_samples:
+            if idx in selected_indices:
+                continue
+            covers = unmet_groups(idx)
+            if not covers:
+                continue
+
+            score = (
+                len(covers),
+                sum(priority_quotas[group_name] - current_counts[group_name] for group_name in covers),
+                -idx,
+            )
+            if best_score is None or score > best_score:
+                best_index = idx
+                best_score = score
+
+        if best_index is None:
+            break
+
+        selected_indices.add(best_index)
+        for group_name in VALIDATION_SPLIT_PRIORITY_GROUPS:
+            if sample_matches_subset(indexed_samples[best_index][1], group_name):
+                current_counts[group_name] += 1
+
+    for idx, _ in indexed_samples:
+        if len(selected_indices) >= val_count:
+            break
+        if idx not in selected_indices:
+            selected_indices.add(idx)
+
+    val_samples = [sample for idx, sample in indexed_samples if idx in selected_indices]
+    train_samples = [sample for idx, sample in indexed_samples if idx not in selected_indices]
+
+    val_samples = order_validation_samples(val_samples)
+
+    if not train_samples or not val_samples:
+        raise RuntimeError("Split logic produced an empty train or validation set.")
+
+    split_report = build_split_report(shuffled, train_samples, val_samples, val_count, priority_quotas)
+    return train_samples, val_samples, split_report
 
 
 def make_loader(dataset: Stage2Dataset, batch_size: int, shuffle: bool, num_workers: int) -> DataLoader:
@@ -496,14 +1075,7 @@ def run_epoch(
 ) -> dict[str, float]:
     training = optimizer is not None
     model.train(training)
-    total_loss = 0.0
-    total_full_l1 = 0.0
-    total_mid_l1 = 0.0
-    total_coarse_l1 = 0.0
-    total_gradient = 0.0
-    total_mae = 0.0
-    total_rmse = 0.0
-    total_batches = 0
+    accumulator = MetricAccumulator()
     autocast_enabled = device.type == "cuda"
 
     for batch in loader:
@@ -515,35 +1087,8 @@ def run_epoch(
         context = torch.autocast(device_type=device.type, dtype=torch.float16, enabled=autocast_enabled) if autocast_enabled else torch.enable_grad() if training else torch.no_grad()
         with context:
             pred_17, pred_65, pred_257 = model(inputs)
-
-            full_l1 = F.l1_loss(pred_257, target_257)
-            mid_l1 = F.l1_loss(pred_65, target_65)
-            coarse_l1 = F.l1_loss(pred_17, target_17)
-
-            # Gradient loss on 257
-            grad_pred_x = pred_257[:, :, :, 1:] - pred_257[:, :, :, :-1]
-            grad_pred_y = pred_257[:, :, 1:, :] - pred_257[:, :, :-1, :]
-            grad_target_x = target_257[:, :, :, 1:] - target_257[:, :, :, :-1]
-            grad_target_y = target_257[:, :, 1:, :] - target_257[:, :, :-1, :]
-            gradient = F.l1_loss(grad_pred_x, grad_target_x) + F.l1_loss(grad_pred_y, grad_target_y)
-
-            # Residual losses
-            pred_65_up = F.interpolate(pred_17, size=(65, 65), mode="bilinear", align_corners=False)
-            target_65_up = F.interpolate(target_17, size=(65, 65), mode="bilinear", align_corners=False)
-            mid_residual = F.l1_loss(pred_65 - pred_65_up, target_65 - target_65_up)
-
-            pred_257_up = F.interpolate(pred_65, size=(257, 257), mode="bilinear", align_corners=False)
-            target_257_up = F.interpolate(target_65, size=(257, 257), mode="bilinear", align_corners=False)
-            detail_res = F.l1_loss(pred_257 - pred_257_up, target_257 - target_257_up)
-
-            loss = (
-                full_l1
-                + 0.5 * mid_l1
-                + 0.25 * coarse_l1
-                + 0.3 * gradient
-                + 0.3 * mid_residual
-                + 0.3 * detail_res
-            )
+            metric_tensors = compute_metric_tensors(pred_17, pred_65, pred_257, target_17, target_65, target_257, height_mean, height_std)
+            loss = metric_tensors["loss"].mean()
 
         if training:
             optimizer.zero_grad(set_to_none=True)
@@ -555,28 +1100,10 @@ def run_epoch(
                 loss.backward()
                 optimizer.step()
 
-        pred_height_m = pred_257.detach() * height_std + height_mean
-        target_height_m = target_257.detach() * height_std + height_mean
-        diff = pred_height_m - target_height_m
+        accumulator.add(metric_tensors)
 
-        total_loss += float(loss.detach().cpu())
-        total_full_l1 += float(full_l1.detach().cpu())
-        total_mid_l1 += float(mid_l1.detach().cpu())
-        total_coarse_l1 += float(coarse_l1.detach().cpu())
-        total_gradient += float(gradient.detach().cpu())
-        total_mae += float(diff.abs().mean().cpu())
-        total_rmse += float(torch.sqrt(torch.mean(diff.square())).cpu())
-        total_batches += 1
-
-    return {
-        "loss": total_loss / max(1, total_batches),
-        "full_l1": total_full_l1 / max(1, total_batches),
-        "mid_l1": total_mid_l1 / max(1, total_batches),
-        "coarse_l1": total_coarse_l1 / max(1, total_batches),
-        "gradient": total_gradient / max(1, total_batches),
-        "mae_m": total_mae / max(1, total_batches),
-        "rmse_m": total_rmse / max(1, total_batches),
-    }
+    report = accumulator.to_report()
+    return {key: float(report[key]) for key in METRIC_KEYS if report[key] is not None}
 
 
 def save_preview(
@@ -587,32 +1114,125 @@ def save_preview(
     height_mean: float,
     height_std: float,
     channels_last: bool,
+    preview_count: int,
 ) -> None:
     if len(dataset) == 0:
         return
 
-    sample = dataset[0]
-    with torch.no_grad():
-        inputs = maybe_channels_last(sample["inputs"].unsqueeze(0).to(device), channels_last)
-        pred_17, pred_65, pred_257 = model(inputs)
+    row_count = min(max(preview_count, 1), len(dataset))
+    rows: list[np.ndarray] = []
+    preview_rows: list[dict[str, Any]] = []
 
-    minimap = (sample["minimap"].permute(1, 2, 0).numpy() * 255.0).clip(0, 255).astype(np.uint8)
-    target_257 = (sample["height_257"].squeeze(0).numpy() * height_std) + height_mean
-    pred_257 = (pred_257.squeeze(0).squeeze(0).cpu().numpy() * height_std) + height_mean
-    diff = pred_257 - target_257
+    for index in range(row_count):
+        sample = dataset[index]
+        with torch.no_grad():
+            inputs = maybe_channels_last(sample["inputs"].unsqueeze(0).to(device), channels_last)
+            pred_17, pred_65, pred_257 = model(inputs)
 
-    target_img = height_to_rgb(target_257)
-    pred_img = height_to_rgb(pred_257)
-    diff_img = difference_to_rgb(diff)
+        minimap = (sample["minimap"].permute(1, 2, 0).numpy() * 255.0).clip(0, 255).astype(np.uint8)
+        target_257 = (sample["height_257"].squeeze(0).numpy() * height_std) + height_mean
+        pred_257 = (pred_257.squeeze(0).squeeze(0).cpu().numpy() * height_std) + height_mean
+        diff = pred_257 - target_257
 
-    # Resize all to minimap size for composite
-    h, w = minimap.shape[:2]
-    target_img = resize_preview_image(target_img, w, h)
-    pred_img = resize_preview_image(pred_img, w, h)
-    diff_img = resize_preview_image(diff_img, w, h)
+        target_img = height_to_rgb(target_257)
+        pred_img = height_to_rgb(pred_257)
+        diff_img = difference_to_rgb(diff)
 
-    composite = np.concatenate([minimap, target_img, pred_img, diff_img], axis=1)
+        h, w = minimap.shape[:2]
+        target_img = resize_preview_image(target_img, w, h)
+        pred_img = resize_preview_image(pred_img, w, h)
+        diff_img = resize_preview_image(diff_img, w, h)
+
+        row_title = f"Row {index + 1} | {sample['tile_name']} | {sample['dataset_key']}"
+        labeled_row = build_labeled_preview_row(
+            row_title,
+            [minimap, target_img, pred_img, diff_img],
+            ["Minimap", "Target Height", "Prediction", "Difference"],
+        )
+
+        rows.append(labeled_row)
+        preview_rows.append(
+            {
+                "row": index,
+                "tile_name": str(sample["tile_name"]),
+                "dataset_key": str(sample["dataset_key"]),
+                "source_schema": str(sample["source_schema"]),
+                "row_title": row_title,
+                "panes": ["minimap", "target_height", "predicted_height", "difference"],
+                "difference_legend": {
+                    "green": "close match",
+                    "red": "prediction higher than target",
+                    "blue": "prediction lower than target",
+                },
+            }
+        )
+
+    composite = rows[0] if len(rows) == 1 else np.concatenate(rows, axis=0)
     Image.fromarray(composite).save(output_path)
+    output_path.with_suffix(".json").write_text(
+        json.dumps(
+            {
+                "schema_version": "v10-stage2-preview.v1",
+                "row_count": row_count,
+                "rows": preview_rows,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def summarize_signal_coverage(samples: Iterable[Stage2Sample]) -> dict[str, dict[str, float | int]]:
+    sample_list = list(samples)
+    total = len(sample_list)
+    counts: dict[str, int] = {}
+    for sample in sample_list:
+        for key in sorted(sample.available_signal_keys):
+            counts[key] = counts.get(key, 0) + 1
+
+    summary: dict[str, dict[str, float | int]] = {}
+    for key, count in sorted(counts.items()):
+        summary[key] = {
+            "count": count,
+            "fraction": (count / total) if total > 0 else 0.0,
+        }
+
+    return summary
+
+
+def build_labeled_preview_row(row_title: str, pane_images: list[np.ndarray], pane_labels: list[str]) -> np.ndarray:
+    if not pane_images:
+        raise ValueError("Expected at least one pane image when building preview rows.")
+
+    pane_height = pane_images[0].shape[0]
+    pane_widths = [image.shape[1] for image in pane_images]
+    row_width = sum(pane_widths)
+    row_height = PREVIEW_ROW_TITLE_HEIGHT + PREVIEW_PANE_LABEL_HEIGHT + pane_height
+
+    row_image = Image.new("RGB", (row_width, row_height), color=(24, 24, 24))
+    draw = ImageDraw.Draw(row_image)
+    font = ImageFont.load_default()
+
+    draw.rectangle((0, 0, row_width, PREVIEW_ROW_TITLE_HEIGHT), fill=(32, 32, 32))
+    draw.text((PREVIEW_LABEL_PADDING, 2), row_title, fill=(255, 255, 255), font=font)
+
+    x_offset = 0
+    for pane_image, pane_label in zip(pane_images, pane_labels, strict=False):
+        pane_width = pane_image.shape[1]
+        label_box = (x_offset, PREVIEW_ROW_TITLE_HEIGHT, x_offset + pane_width, PREVIEW_ROW_TITLE_HEIGHT + PREVIEW_PANE_LABEL_HEIGHT)
+        draw.rectangle(label_box, fill=(48, 48, 48))
+
+        text_bbox = draw.textbbox((0, 0), pane_label, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+        text_x = x_offset + max(PREVIEW_LABEL_PADDING, (pane_width - text_width) // 2)
+        text_y = PREVIEW_ROW_TITLE_HEIGHT + max(1, (PREVIEW_PANE_LABEL_HEIGHT - text_height) // 2)
+        draw.text((text_x, text_y), pane_label, fill=(255, 255, 255), font=font)
+
+        row_image.paste(Image.fromarray(pane_image), (x_offset, PREVIEW_ROW_TITLE_HEIGHT + PREVIEW_PANE_LABEL_HEIGHT))
+        x_offset += pane_width
+
+    return np.asarray(row_image)
 
 
 def height_to_rgb(height: np.ndarray) -> np.ndarray:
@@ -645,6 +1265,7 @@ def resize_preview_image(image: np.ndarray, width: int, height: int) -> np.ndarr
 def main() -> None:
     args = parse_args()
     seed_everything(args.seed)
+    ablation_groups = parse_validation_ablation_groups(args.validation_ablation_groups)
 
     input_path = Path(args.input).resolve()
     output_dir = Path(args.output_dir).resolve()
@@ -658,7 +1279,7 @@ def main() -> None:
     if len(samples) < 2:
         raise RuntimeError("Need at least two v10 NPZ shards containing minimap_rgb_256, height_257, and height_17.")
 
-    train_samples, val_samples = split_samples(samples, args.val_fraction, args.seed)
+    train_samples, val_samples, split_report = split_samples(samples, args.val_fraction, args.seed)
     height_values = np.concatenate([sample.height_257.reshape(-1) for sample in train_samples], axis=0)
     height_mean = float(np.mean(height_values))
     height_std = float(np.std(height_values))
@@ -669,11 +1290,72 @@ def main() -> None:
     val_dataset = Stage2Dataset(val_samples, height_mean, height_std, signal_dropout=0.0)
     train_loader = make_loader(train_dataset, args.batch_size, shuffle=True, num_workers=args.num_workers)
     val_loader = make_loader(val_dataset, args.batch_size, shuffle=False, num_workers=args.num_workers)
+    total_signal_coverage = summarize_signal_coverage(samples)
+    train_signal_coverage = summarize_signal_coverage(train_samples)
+    val_signal_coverage = summarize_signal_coverage(val_samples)
+    validation_catalog_path = write_validation_catalog(output_dir, train_samples, val_samples)
 
     # Compute input channels from a sample
     sample_channels = train_dataset[0]["inputs"].shape[0]
 
     device = torch.device(args.device)
+
+    if args.evaluate_checkpoint:
+        checkpoint_path = Path(args.evaluate_checkpoint).resolve()
+        checkpoint_payload = load_checkpoint_payload(checkpoint_path, device)
+        checkpoint_height_mean = float(checkpoint_payload.get("height_mean", height_mean))
+        checkpoint_height_std = float(checkpoint_payload.get("height_std", height_std))
+        checkpoint_input_channels = int(checkpoint_payload.get("input_channels", sample_channels))
+
+        model = Stage2TerrainSynthModel(input_channels=checkpoint_input_channels).to(device)
+        if args.channels_last and device.type == "cuda":
+            model = model.to(memory_format=torch.channels_last)
+        load_model_state(model, checkpoint_payload["model_state"])
+
+        validation_analysis = evaluate_validation_analysis(
+            model,
+            val_loader,
+            device,
+            checkpoint_height_mean,
+            checkpoint_height_std,
+            args.channels_last,
+            ablation_groups,
+        )
+        save_preview(
+            model,
+            val_dataset,
+            device,
+            previews_dir / "checkpoint_eval.png",
+            checkpoint_height_mean,
+            checkpoint_height_std,
+            args.channels_last,
+            args.preview_count,
+        )
+
+        summary = {
+            "input": str(input_path),
+            "sample_count": len(samples),
+            "train_count": len(train_samples),
+            "val_count": len(val_samples),
+            "input_channels": checkpoint_input_channels,
+            "height_mean": checkpoint_height_mean,
+            "height_std": checkpoint_height_std,
+            "preview_count": min(max(args.preview_count, 1), len(val_dataset)),
+            "signal_coverage": {
+                "all_samples": total_signal_coverage,
+                "train_samples": train_signal_coverage,
+                "val_samples": val_signal_coverage,
+            },
+            "split_report": split_report,
+            "validation_catalog": str(validation_catalog_path),
+            "evaluated_checkpoint": str(checkpoint_path),
+            "checkpoint_epoch": int(checkpoint_payload.get("epoch", 0)),
+            "validation_analysis": validation_analysis,
+            "history": checkpoint_payload.get("history", []),
+        }
+        (output_dir / "metrics.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        return
+
     model = Stage2TerrainSynthModel(input_channels=sample_channels).to(device)
     if args.channels_last and device.type == "cuda":
         model = model.to(memory_format=torch.channels_last)
@@ -748,7 +1430,24 @@ def main() -> None:
                 height_mean,
                 height_std,
                 args.channels_last,
+                args.preview_count,
             )
+
+    best_checkpoint_path = checkpoints_dir / "best.pt"
+    best_checkpoint = load_checkpoint_payload(best_checkpoint_path, device)
+    analysis_model = Stage2TerrainSynthModel(input_channels=sample_channels).to(device)
+    if args.channels_last and device.type == "cuda":
+        analysis_model = analysis_model.to(memory_format=torch.channels_last)
+    load_model_state(analysis_model, best_checkpoint["model_state"])
+    validation_analysis = evaluate_validation_analysis(
+        analysis_model,
+        val_loader,
+        device,
+        height_mean,
+        height_std,
+        args.channels_last,
+        ablation_groups,
+    )
 
     summary = {
         "input": str(input_path),
@@ -758,6 +1457,15 @@ def main() -> None:
         "input_channels": sample_channels,
         "height_mean": height_mean,
         "height_std": height_std,
+        "preview_count": min(max(args.preview_count, 1), len(val_dataset)),
+        "signal_coverage": {
+            "all_samples": total_signal_coverage,
+            "train_samples": train_signal_coverage,
+            "val_samples": val_signal_coverage,
+        },
+        "split_report": split_report,
+        "validation_catalog": str(validation_catalog_path),
+        "validation_analysis": validation_analysis,
         "best_val_loss": best_val_loss,
         "history": history,
     }
