@@ -105,6 +105,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "mine-v10-mcal-compositions":
 		V10McalCompositionCommand.Run(tail);
 		break;
+	case "mine-v10-mcal-brushes":
+		V10McalBrushDictionaryCommand.Run(tail);
+		break;
 	case "mine-v10-height-profiles":
 		V10HeightProfileCommand.Run(tail);
 		break;
@@ -4179,6 +4182,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter mine-v10-brushes --input-dir <npz-dir> --output-dir <dir> [--placement-dir <dir>] [--anchor-mode objects|terrain|hybrid] [--context-radius <n>] [--dictionary-size <n>] [--min-occurrences <n>] [--terrain-samples-per-tile <n>] [--seed <n>]");
 	Console.WriteLine("  wowviewer-converter mine-v10-mcly --input-dir <npz-dir> --output-dir <dir> [--min-occurrences <n>] [--example-limit <n>] [--include-empty]");
 	Console.WriteLine("  wowviewer-converter mine-v10-mcal-compositions --input-dir <npz-dir> --output-dir <dir> [--dictionary-size <n>] [--min-occurrences <n>] [--min-active-layers <n>] [--min-layer-std <v>] [--min-gradient <v>] [--example-limit <n>]");
+	Console.WriteLine("  wowviewer-converter mine-v10-mcal-brushes --input-dir <npz-dir> --output-dir <dir> [--dictionary-size <n>] [--min-occurrences <n>] [--min-layer-std <v>] [--min-gradient <v>] [--min-range <v>] [--max-samples <n>] [--seed <n>]");
 	Console.WriteLine("  wowviewer-converter mine-v10-height-profiles --input-dir <npz-dir> --output-dir <dir> [--dictionary-size <n>] [--min-occurrences <n>] [--profile-size <n>] [--max-iterations <n>] [--example-limit <n>] [--seed <n>]");
 	Console.WriteLine("  wowviewer-converter detect --input <file>");
 	Console.WriteLine("  wowviewer-converter export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]");
