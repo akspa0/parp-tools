@@ -137,6 +137,7 @@ Key commands include:
 - `mine-v10-mcal-compositions`
 - `mine-v10-mcal-brushes`
 - `mine-v10-height-profiles`
+- `scripts/train_v10_minimap_to_mclay.py`
 - `ml-corpus`
 - `ml-audit-signals`
 - `ml-harvest-brushes`
@@ -153,6 +154,8 @@ Key commands include:
 
 `mine-v10-mcal-brushes` is the current canonical Wave 2 command for non-object-anchored MCAL brush-stroke vocabulary mining. It scans real `mcal_alpha_pack_256` layers, filters near-uniform fills, clusters per-layer 64x64 alpha stamps, classifies coarse shape families, and writes `mcal_brush_dictionary.json` plus `mcal_brush_dictionary.npz`.
 
+`scripts/train_v10_minimap_to_mclay.py` is the current bounded Wave 2 classifier trainer for minimap RGB to retained MCLY palette label. It consumes the existing v10 NPZ shard contract plus `mclay_dictionary.json` or `mcly_dictionary.json` from `mine-v10-mcly`, writes `minimap_to_mclay_classifier.pt`, and keeps label provenance in `label_index.json`.
+
 Show usage:
 
 ```powershell
@@ -168,6 +171,7 @@ For the current bounded `v10` Stage 1 path, the repo now also includes:
 - `wowviewer-converter extract-v10-tensors --minimap-root <dir>` for one-tile minimap-backed Wave 1 shards
 - `wowviewer-converter dataset-build-v10-stage1` for bulk Stage 1 shard plus manifest generation
 - `scripts/train_v10_stage1_minimap2height.py` for the first minimap-to-`height_17` trainer baseline
+- `scripts/train_v10_minimap_to_mclay.py` for the first minimap-to-retained-MCLY-palette classifier baseline
 
 That document covers:
 

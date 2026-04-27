@@ -6,7 +6,7 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 - The v10 terrain-AI lane is in early Wave 2.
 - Wave 1 is complete.
-- The current local continuation has moved beyond the original script-only slice: the canonical anchor-aware brush miner is native, native MCLY/MCAL composition/MCAL brush/height-profile dictionary commands exist, the first bounded Stage 1 corpus command exists, and the first bounded Stage 1 trainer baseline has passed on CUDA.
+- The current local continuation has moved beyond the original script-only slice: the canonical anchor-aware brush miner is native, native MCLY/MCAL composition/MCAL brush/height-profile dictionary commands exist, the first bounded Stage 1 corpus command exists, the first bounded Stage 1 trainer baseline has passed on CUDA, and the first minimap-to-MCLY classifier trainer has a bounded CPU smoke.
 
 ## Recent Validated Milestones
 
@@ -117,6 +117,22 @@ This file is intentionally compressed. Keep only recent validated milestones, op
   - proof output: `output/build-validation/v10-wave2-height-profiles/height_profile_dictionary.json`
   - bounded corpus result: `64` shards discovered, `64` tiles read, `8` retained profiles
 
+### Apr 27, 2026 - Bounded minimap-to-MCLY classifier trainer landed in `wow-viewer`
+
+- `wow-viewer/scripts/train_v10_minimap_to_mclay.py` now trains the first Wave 2 classifier for `minimap_rgb_256 -> retained MCLY palette label`
+- The trainer consumes the existing v10 NPZ shard contract plus `mclay_dictionary.json` or `mcly_dictionary.json` from `mine-v10-mcly`
+- It writes:
+  - `minimap_to_mclay_classifier.pt`
+  - `label_index.json`
+  - `metrics.json`
+- Proof:
+  - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\train_v10_minimap_to_mclay.py` passed
+  - `.venv\Scripts\python.exe wow-viewer\scripts\train_v10_minimap_to_mclay.py output\build-validation\v10-stage1-development-corpus\v10_stage1_manifest.json --dictionary output\build-validation\v10-wave2-mcly-dictionary\mclay_dictionary.json --output-dir output\ml-training\v10_minimap_to_mclay_smoke --epochs 2 --batch-size 4 --num-workers 0 --device cpu --no-channels-last` passed
+  - smoke output: `output/ml-training/v10_minimap_to_mclay_smoke/minimap_to_mclay_classifier.pt`
+  - bounded corpus result: `64` shards discovered, `11` labeled samples, `6` active retained MCLY labels, `8` train samples, `3` validation samples
+- Environment note:
+  - `gillijimproject_refactor\.venv-train\Scripts\python.exe` currently points at a missing UV-managed Python path in this checkout; the smoke used the workspace `.venv`, which has CPU Torch.
+
 ### Apr 26, 2026 - GPU viewer plan-set workflow was registered
 
 - Added `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md` and updated workflow routing files
@@ -127,6 +143,7 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 ## Open Boundaries
 
 - No validated broad-corpus MCAL brush-stroke vocabulary run exists yet beyond the bounded development Stage 1 proof.
+- No validated broad-corpus minimap-to-MCLY classifier run exists yet beyond the `11` currently labelable development shards.
 - MCLY dictionary biome tags are heuristic and should be replaced or validated by the planned minimap-to-biome/palette classifier.
 - The next blocking decision is whether to retain or retire the older Python reference miner now that the canonical command is native.
 - Stage 1 exists only as a bounded trainer baseline today; Stage 2 refinement and broader experiment orchestration still remain open.
@@ -136,5 +153,5 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 1. Keep the minimap-backed Wave 1 NPZ output plus `dataset-build-v10-stage1` manifest as the canonical Stage 1 input surface.
 2. Widen the current 64-shard development proof into a larger curated or map-wide Stage 1 corpus and run longer CUDA training.
-3. Decide whether the older Python reference script should stay or be retired.
-4. Widen the native MCAL brush dictionary proof to a broader corpus, then move into Stage 2 refinement.
+3. Widen the minimap-to-MCLY classifier and native MCAL brush dictionary proof to a broader corpus.
+4. Decide whether the older Python reference miner should stay or be retired, then move into Stage 2 refinement.

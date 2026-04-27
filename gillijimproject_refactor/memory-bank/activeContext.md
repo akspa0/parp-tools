@@ -29,6 +29,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `wowviewer-converter mine-v10-mcal-brushes` now owns native non-object-anchored MCAL brush-stroke vocabulary mining and writes `mcal_brush_dictionary.json` plus `mcal_brush_dictionary.npz`
   - `wowviewer-converter mine-v10-height-profiles` now owns native height archetype clustering and writes `height_profile_dictionary.json` plus `height_profile_dictionary.npz`
   - `wow-viewer/scripts/train_v10_stage1_minimap2height.py` now exists as the first bounded Stage 1 trainer for `minimap_rgb_256 -> height_17`
+  - `wow-viewer/scripts/train_v10_minimap_to_mclay.py` now exists as the first bounded Wave 2 classifier trainer for `minimap_rgb_256 -> retained MCLY palette label`
   - the native miner supports `objects`, `terrain`, and `hybrid` anchor modes
   - the older Python miner under `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/mine_mcal_brush_patterns.py` remains a reference surface, not the canonical command path
 - Current proof level:
@@ -41,6 +42,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - native height profile proof passed at `output/build-validation/v10-wave2-height-profiles/height_profile_dictionary.json` over all `64` Stage 1 shards
   - bounded Stage 1 corpus build passed at `output/build-validation/v10-stage1-development-corpus` with `64` written shards and a matching `v10_stage1_manifest.json`
   - bounded Stage 1 CUDA smoke passed at `output/ml-training/v10_stage1_gpu_smoke` using `gillijimproject_refactor/.venv-train` on the local RTX 4070 Ti SUPER
+  - bounded minimap-to-MCLY CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_smoke/minimap_to_mclay_classifier.pt` using the workspace `.venv` over the current `64` Stage 1 shards and `mclay_dictionary.json`
 
 ## Wave 2 Status
 
@@ -55,6 +57,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - height profile clustering exists as a concrete native `wowviewer-converter mine-v10-height-profiles` command with normalized and absolute height centroids
   - terrain-only prefab structure can now be mined from alpha plus terrain mesh shape, even with no nearby objects
   - the first bounded Stage 1 trainer exists in `wow-viewer/scripts/train_v10_stage1_minimap2height.py`
+  - the first bounded minimap-to-MCLY palette classifier trainer exists in `wow-viewer/scripts/train_v10_minimap_to_mclay.py`
 - Validated bounded artifacts:
   - widened Wave 2 corpus root: `output/build-validation/v10-wave2-wider-corpus/corpus`
   - terrain-only proof: `output/build-validation/v10-wave2-wider-corpus/terrain-proof/brush_dictionary.json`
@@ -66,8 +69,10 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - height profile proof: `output/build-validation/v10-wave2-height-profiles/height_profile_dictionary.json`
   - Stage 1 development corpus: `output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json`
   - Stage 1 CUDA smoke output: `output/ml-training/v10_stage1_gpu_smoke`
+  - minimap-to-MCLY classifier smoke output: `output/ml-training/v10_minimap_to_mclay_smoke`
 - What is still open:
   - broader-corpus validation for the native MCAL brush dictionary beyond the bounded development Stage 1 corpus
+  - broader-corpus minimap-to-MCLY classifier training beyond the `11` currently labelable development shards
   - richer biome tagging beyond current texture-name token heuristics
   - whether to retain or retire the older Python reference miner
   - Stage 2 refinement and longer-running Stage 1 training orchestration
