@@ -126,6 +126,8 @@ Example mixed-corpus curation from the all-version v9 cache plus native v10 shar
   --max-per-dataset 128
 ```
 
+Current all-version Stage 2 training uses the proven v9 direct-cache shards for broad client coverage plus native v10 development shards for richer signals. Latest local CUDA output: `output/ml-training/v10_stage2_v9cache_native_dev_cuda_run2/checkpoints/best.pt`.
+
 Example Stage 2 smoke test:
 ```powershell
 .venv\Scripts\python scripts\train_v10_stage2_terrain_synth.py `

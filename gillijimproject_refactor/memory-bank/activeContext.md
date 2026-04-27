@@ -55,6 +55,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - bounded Stage 1 CUDA smoke passed at `output/ml-training/v10_stage1_gpu_smoke` using `gillijimproject_refactor/.venv-train` on the local RTX 4070 Ti SUPER
   - v10 mixed-corpus curation passed at `output/ml-training/v10_curated/v10_v9all_plus_native_dev_balanced_manifest.json` with `1,262` selected shards across `22` dataset buckets from the all-version v9 direct cache plus native v10 development shards
   - v10 Stage 2 CUDA run 1 passed at `output/ml-training/v10_stage2_balanced_cuda_run1/checkpoints/best.pt` for `3` epochs over the `1,262` selected shards after repairing `gillijimproject_refactor/.venv-train`
+  - v10 Stage 2 CUDA run 2 passed at `output/ml-training/v10_stage2_v9cache_native_dev_cuda_run2/checkpoints/best.pt` for `10` epochs over the same proven v9-cache plus native-development curation; best validation was epoch `6` with val loss `0.3438`, MAE `70.38m`, and RMSE `100.47m`
   - bounded minimap-to-MCLY CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_smoke/minimap_to_mclay_classifier.pt` using the workspace `.venv` over the current `64` Stage 1 shards and `mclay_dictionary.json`
   - bounded minimap-to-MCLY chunk-grid CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_grid_smoke/minimap_to_mclay_grid_classifier.pt`, with `1,973` retained chunk labels across `35` active palette classes
   - bounded manifest-driven minimap-to-MCLY chunk-grid CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_grid_manifest_smoke/minimap_to_mclay_grid_classifier.pt`
@@ -95,7 +96,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
 - What is still open:
   - broader-corpus validation for the native MCAL brush dictionary beyond the bounded development Stage 1 corpus
   - broader-corpus minimap-to-MCLY classifier training beyond the `11` currently labelable development shards
-  - native v10 regeneration for every v9-era client root; current broad training uses the legacy v9 NPZ cache for all-version coverage and native v10 shards only for the development-map richer-signal slice
+  - native v10 regeneration for every v9-era client root; current broad training intentionally uses the already-proven legacy v9 NPZ cache for all-version coverage and native v10 shards only for the development-map richer-signal slice
   - richer biome tagging beyond current texture-name token heuristics
   - Stage 2 refinement and longer-running Stage 1 training orchestration
 

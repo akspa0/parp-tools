@@ -226,6 +226,10 @@ This file is intentionally compressed. Keep only recent validated milestones, op
   - CUDA run 1 trained for `3` epochs over `1,262` selected shards with `1,072` train and `190` validation samples
   - CUDA run 1 best checkpoint: `output/ml-training/v10_stage2_balanced_cuda_run1/checkpoints/best.pt`
   - CUDA run 1 best metrics after epoch 3: val loss `0.3865`, val MAE `73.88m`, val RMSE `104.48m`
+  - CUDA run 2 output: `output/ml-training/v10_stage2_v9cache_native_dev_cuda_run2`
+  - CUDA run 2 trained for `10` epochs over the same `1,262` selected shards with `1,072` train and `190` validation samples
+  - CUDA run 2 best checkpoint: `output/ml-training/v10_stage2_v9cache_native_dev_cuda_run2/checkpoints/best.pt`
+  - CUDA run 2 best metrics at epoch `6`: val loss `0.3438`, val MAE `70.38m`, val RMSE `100.47m`
 - Boundary:
   - broad all-version coverage currently comes from the legacy v9 cache, not native v10 extraction for every client root
   - native richer v10 signals in this first mixed manifest are limited to the development-map Stage 1 corpus (`41` selected native v10 shards, `11` with MCAL/MCLY texture signals, `41` with PM4 masks)
@@ -236,8 +240,8 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 - No validated broad-corpus MCAL brush-stroke vocabulary run exists yet beyond the bounded development Stage 1 proof.
 - No validated broad-corpus minimap-to-MCLY classifier or chunk-grid run exists yet beyond the `11` currently labelable development shards.
 - MCLY dictionary biome tags are heuristic and should be replaced or validated by the planned minimap-to-biome/palette classifier.
-- Stage 2 trainer now has a first mixed-corpus CUDA run; longer-running CUDA training, broader native v10 corpora, and production-grade experiment management remain open.
-- All-version broad training still depends on legacy v9 cache shards until native v10 archive/client-root extraction is widened beyond the development-map proof.
+- Stage 2 trainer now has mixed-corpus CUDA runs from the proven all-version v9 cache plus native v10 development shards; longer-running CUDA training, broader native v10 corpora, and production-grade experiment management remain open.
+- All-version broad training intentionally depends on legacy v9 cache shards for now because that path already harvested the staged archive/client roots correctly; native v10 archive/client-root extraction remains open beyond the development-map proof.
 - The world-viewer path is still mid-migration and should not be described as final runtime parity.
 
 ## Recommended Next Slice
