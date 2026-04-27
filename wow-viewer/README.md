@@ -138,6 +138,7 @@ Key commands include:
 - `mine-v10-mcal-brushes`
 - `mine-v10-height-profiles`
 - `scripts/train_v10_minimap_to_mclay.py`
+- `scripts/train_v10_minimap_to_mclay_grid.py`
 - `ml-corpus`
 - `ml-audit-signals`
 - `ml-harvest-brushes`
@@ -156,6 +157,8 @@ Key commands include:
 
 `scripts/train_v10_minimap_to_mclay.py` is the current bounded Wave 2 classifier trainer for minimap RGB to retained MCLY palette label. It consumes the existing v10 NPZ shard contract plus `mclay_dictionary.json` or `mcly_dictionary.json` from `mine-v10-mcly`, writes `minimap_to_mclay_classifier.pt`, and keeps label provenance in `label_index.json`.
 
+`scripts/train_v10_minimap_to_mclay_grid.py` is the chunk-level companion trainer. It predicts a 16x16 retained MCLY palette grid from minimap RGB, ignores chunks whose texture combination is not retained in the mined dictionary, and writes `minimap_to_mclay_grid_classifier.pt` with the same dictionary-backed label provenance.
+
 Show usage:
 
 ```powershell
@@ -172,6 +175,7 @@ For the current bounded `v10` Stage 1 path, the repo now also includes:
 - `wowviewer-converter dataset-build-v10-stage1` for bulk Stage 1 shard plus manifest generation
 - `scripts/train_v10_stage1_minimap2height.py` for the first minimap-to-`height_17` trainer baseline
 - `scripts/train_v10_minimap_to_mclay.py` for the first minimap-to-retained-MCLY-palette classifier baseline
+- `scripts/train_v10_minimap_to_mclay_grid.py` for the first minimap-to-16x16-MCLY-palette-grid classifier baseline
 
 That document covers:
 

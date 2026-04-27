@@ -6,7 +6,7 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 - The v10 terrain-AI lane is in early Wave 2.
 - Wave 1 is complete.
-- The current local continuation has moved beyond the original script-only slice: the canonical anchor-aware brush miner is native, native MCLY/MCAL composition/MCAL brush/height-profile dictionary commands exist, the first bounded Stage 1 corpus command exists, the first bounded Stage 1 trainer baseline has passed on CUDA, and the first minimap-to-MCLY classifier trainer has a bounded CPU smoke.
+- The current local continuation has moved beyond the original script-only slice: the canonical anchor-aware brush miner is native, native MCLY/MCAL composition/MCAL brush/height-profile dictionary commands exist, the first bounded Stage 1 corpus command exists, the first bounded Stage 1 trainer baseline has passed on CUDA, and both tile-level and 16x16 chunk-grid minimap-to-MCLY classifier trainers have bounded CPU smokes.
 
 ## Recent Validated Milestones
 
@@ -133,6 +133,21 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 - Environment note:
   - `gillijimproject_refactor\.venv-train\Scripts\python.exe` currently points at a missing UV-managed Python path in this checkout; the smoke used the workspace `.venv`, which has CPU Torch.
 
+### Apr 27, 2026 - Bounded minimap-to-MCLY chunk-grid classifier trainer landed in `wow-viewer`
+
+- `wow-viewer/scripts/train_v10_minimap_to_mclay_grid.py` now trains the first Wave 2 classifier for `minimap_rgb_256 -> 16x16 retained MCLY palette labels`
+- The trainer consumes the existing v10 NPZ shard contract plus `mclay_dictionary.json` or `mcly_dictionary.json` from `mine-v10-mcly`
+- It writes:
+  - `minimap_to_mclay_grid_classifier.pt`
+  - `label_index.json`
+  - `metrics.json`
+- It preserves dictionary-backed label provenance and uses `ignore_index=-100` for chunks whose texture combination is not retained in the mined dictionary
+- Proof:
+  - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\train_v10_minimap_to_mclay_grid.py` passed
+  - `.venv\Scripts\python.exe wow-viewer\scripts\train_v10_minimap_to_mclay_grid.py output\build-validation\v10-stage1-development-corpus\v10_stage1_manifest.json --dictionary output\build-validation\v10-wave2-mcly-dictionary\mclay_dictionary.json --output-dir output\ml-training\v10_minimap_to_mclay_grid_smoke --epochs 2 --batch-size 4 --num-workers 0 --device cpu --no-channels-last` passed
+  - smoke output: `output/ml-training/v10_minimap_to_mclay_grid_smoke/minimap_to_mclay_grid_classifier.pt`
+  - bounded corpus result: `64` shards discovered, `11` labeled samples, `1,973` retained chunk labels, `35` active retained MCLY labels, `8` train samples, `3` validation samples
+
 ### Apr 26, 2026 - GPU viewer plan-set workflow was registered
 
 - Added `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md` and updated workflow routing files
@@ -143,7 +158,7 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 ## Open Boundaries
 
 - No validated broad-corpus MCAL brush-stroke vocabulary run exists yet beyond the bounded development Stage 1 proof.
-- No validated broad-corpus minimap-to-MCLY classifier run exists yet beyond the `11` currently labelable development shards.
+- No validated broad-corpus minimap-to-MCLY classifier or chunk-grid run exists yet beyond the `11` currently labelable development shards.
 - MCLY dictionary biome tags are heuristic and should be replaced or validated by the planned minimap-to-biome/palette classifier.
 - The next blocking decision is whether to retain or retire the older Python reference miner now that the canonical command is native.
 - Stage 1 exists only as a bounded trainer baseline today; Stage 2 refinement and broader experiment orchestration still remain open.

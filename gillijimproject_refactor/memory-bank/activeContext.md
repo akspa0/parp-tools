@@ -30,6 +30,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `wowviewer-converter mine-v10-height-profiles` now owns native height archetype clustering and writes `height_profile_dictionary.json` plus `height_profile_dictionary.npz`
   - `wow-viewer/scripts/train_v10_stage1_minimap2height.py` now exists as the first bounded Stage 1 trainer for `minimap_rgb_256 -> height_17`
   - `wow-viewer/scripts/train_v10_minimap_to_mclay.py` now exists as the first bounded Wave 2 classifier trainer for `minimap_rgb_256 -> retained MCLY palette label`
+  - `wow-viewer/scripts/train_v10_minimap_to_mclay_grid.py` now exists as the first bounded Wave 2 chunk-grid classifier trainer for `minimap_rgb_256 -> 16x16 retained MCLY palette labels`
   - the native miner supports `objects`, `terrain`, and `hybrid` anchor modes
   - the older Python miner under `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/mine_mcal_brush_patterns.py` remains a reference surface, not the canonical command path
 - Current proof level:
@@ -43,6 +44,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - bounded Stage 1 corpus build passed at `output/build-validation/v10-stage1-development-corpus` with `64` written shards and a matching `v10_stage1_manifest.json`
   - bounded Stage 1 CUDA smoke passed at `output/ml-training/v10_stage1_gpu_smoke` using `gillijimproject_refactor/.venv-train` on the local RTX 4070 Ti SUPER
   - bounded minimap-to-MCLY CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_smoke/minimap_to_mclay_classifier.pt` using the workspace `.venv` over the current `64` Stage 1 shards and `mclay_dictionary.json`
+  - bounded minimap-to-MCLY chunk-grid CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_grid_smoke/minimap_to_mclay_grid_classifier.pt`, with `1,973` retained chunk labels across `35` active palette classes
 
 ## Wave 2 Status
 
@@ -58,6 +60,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - terrain-only prefab structure can now be mined from alpha plus terrain mesh shape, even with no nearby objects
   - the first bounded Stage 1 trainer exists in `wow-viewer/scripts/train_v10_stage1_minimap2height.py`
   - the first bounded minimap-to-MCLY palette classifier trainer exists in `wow-viewer/scripts/train_v10_minimap_to_mclay.py`
+  - the first bounded minimap-to-MCLY 16x16 palette-grid classifier trainer exists in `wow-viewer/scripts/train_v10_minimap_to_mclay_grid.py`
 - Validated bounded artifacts:
   - widened Wave 2 corpus root: `output/build-validation/v10-wave2-wider-corpus/corpus`
   - terrain-only proof: `output/build-validation/v10-wave2-wider-corpus/terrain-proof/brush_dictionary.json`
@@ -70,6 +73,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - Stage 1 development corpus: `output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json`
   - Stage 1 CUDA smoke output: `output/ml-training/v10_stage1_gpu_smoke`
   - minimap-to-MCLY classifier smoke output: `output/ml-training/v10_minimap_to_mclay_smoke`
+  - minimap-to-MCLY grid classifier smoke output: `output/ml-training/v10_minimap_to_mclay_grid_smoke`
 - What is still open:
   - broader-corpus validation for the native MCAL brush dictionary beyond the bounded development Stage 1 corpus
   - broader-corpus minimap-to-MCLY classifier training beyond the `11` currently labelable development shards
