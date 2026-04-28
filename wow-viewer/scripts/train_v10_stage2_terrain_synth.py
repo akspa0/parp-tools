@@ -246,6 +246,9 @@ class ShardReference:
     source_schema: str
     source_manifest: str
 
+    def __hash__(self) -> int:
+        return hash((str(self.path), self.dataset_key, self.source_schema, self.source_manifest))
+
 
 def infer_dataset_key(path: Path) -> str:
     parts = list(path.parts)
@@ -534,6 +537,12 @@ def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> l
                     mcal_alpha = np.transpose(mcal_arr, (2, 0, 1))
                 elif mcal_arr.ndim == 3 and mcal_arr.shape[0] == 4:
                     mcal_alpha = mcal_arr
+                # MCAL is stored at 1024×1024 (64×64 per chunk × 16 chunks).
+                # Downsample to 256×256 for the multi-task head via block averaging.
+                if mcal_alpha is not None and mcal_alpha.shape[1] != 256:
+                    c, h, w = mcal_alpha.shape
+                    block = h // 256
+                    mcal_alpha = mcal_alpha.reshape(c, 256, block, 256, block).mean(axis=(2, 4))
 
             mcly_ids = None
             if "mcly_texture_ids" in shard.files:
