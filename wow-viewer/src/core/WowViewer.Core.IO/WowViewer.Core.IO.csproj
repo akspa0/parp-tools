@@ -4,6 +4,7 @@
     <ProjectReference Include="..\WowViewer.Core\WowViewer.Core.csproj" />
     <ProjectReference Include="..\WowViewer.Core.PM4\WowViewer.Core.PM4.csproj" />
     <ProjectReference Include="..\..\..\..\gillijimproject_refactor\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
+    <ProjectReference Include="..\..\..\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
   </ItemGroup>
 
   <ItemGroup>
