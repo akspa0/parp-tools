@@ -87,6 +87,12 @@ string[] tail = args.Skip(1).ToArray();
 	case "ml-synth-no-liquid":
 		RunMlSynthNoLiquid(tail);
 		break;
+	case "index-tilesets":
+		V10TilesetIndexCommand.Run(tail);
+		break;
+	case "analyze-tileset-taxonomy":
+		V10TilesetTaxonomyCommand.Run(tail);
+		break;
 	case "terrain-patch-adt":
 		TerrainPatchAdtCommand.Run(tail);
 		break;
@@ -4408,6 +4414,8 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter ml-repair-normalmaps --dataset-root <path> [--report <report.json>] [--limit <count>] [--rewrite-existing] [--rewrite-when-local-differs <mae>] [--only-liquid-tiles] [--dry-run]");
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input <minimap.png> --mask <liquid-mask.png> --output <no-liquid.png>");
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input-dir <images> --mask-dir <masks> --output-dir <images>");
+	Console.WriteLine("  wowviewer-converter index-tilesets --client-root <path> [--era <tag>] [--output-dir <dir>] [--limit <count>] [--no-mpq] [--blp-sample <n>]");
+	Console.WriteLine("  wowviewer-converter analyze-tileset-taxonomy --input <merged_tileset_index.json> [--output-dir <dir>]");
 }
 
 file sealed record V10TensorExtractionResult(
