@@ -152,6 +152,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mcal-loss-weight", type=float, default=DEFAULT_MCAL_LOSS_WEIGHT)
     parser.add_argument("--mcly-loss-weight", type=float, default=DEFAULT_MCLY_LOSS_WEIGHT)
     parser.add_argument("--hole-loss-weight", type=float, default=DEFAULT_HOLE_LOSS_WEIGHT)
+    parser.add_argument("--resume-from", help="Resume training from a checkpoint file path.")
+    parser.add_argument("--weight-decay", type=float, default=0.01, help="AdamW weight decay.")
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=1, help="Accumulate gradients over N steps for effective larger batch.")
+    parser.add_argument("--warmup-epochs", type=int, default=5, help="Linear LR warmup epochs.")
+    parser.add_argument("--save-every", type=int, default=10, help="Save a checkpoint every N epochs.")
+    parser.add_argument("--gradient-clip", type=float, default=1.0, help="Max gradient norm for clipping (0 to disable).")
+    parser.add_argument("--no-cosine-scheduler", action="store_true", help="Disable cosine annealing LR scheduler.")
     return parser.parse_args()
 
 
@@ -165,6 +172,7 @@ def build_input_channel_ranges() -> dict[str, tuple[int, int]]:
 
 
 INPUT_CHANNEL_RANGES = build_input_channel_ranges()
+TOTAL_INPUT_CHANNELS = sum(width for _, width in INPUT_SIGNAL_LAYOUT)
 
 MODEL_VARIANTS = ("early_fusion_v1", "structured_fusion_v2", "multi_task_v3")
 
@@ -1032,6 +1040,22 @@ class ConvBlock(nn.Module):
         return F.gelu(self.conv(x) + self.skip(x))
 
 
+class DecoderBlock(nn.Module):
+    """U-Net decoder block: upsample, concat skip, conv."""
+
+    def __init__(self, in_channels: int, skip_channels: int, out_channels: int) -> None:
+        super().__init__()
+        self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
+        self.conv = ConvBlock(in_channels + skip_channels, out_channels)
+
+    def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
+        x = self.up(x)
+        if x.shape[-2:] != skip.shape[-2:]:
+            x = F.interpolate(x, size=skip.shape[-2:], mode="bilinear", align_corners=False)
+        x = torch.cat([x, skip], dim=1)
+        return self.conv(x)
+
+
 class EarlyFusionStage2TerrainSynthModel(nn.Module):
     def __init__(self, input_channels: int) -> None:
         super().__init__()
@@ -1060,22 +1084,11 @@ class EarlyFusionStage2TerrainSynthModel(nn.Module):
             nn.Conv2d(96, 1, kernel_size=1),
         )
 
-        self.fine_up1 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(160, 128),
-        )
-        self.fine_up2 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(128, 96),
-        )
-        self.fine_up3 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(96, 64),
-        )
-        self.fine_up4 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(64, 32),
-        )
+        # U-Net decoder with skip connections from encoder
+        self.dec1 = DecoderBlock(160, 128, 128)   # 16->32, skip x4(128@32)
+        self.dec2 = DecoderBlock(128, 96, 96)      # 32->64, skip x3(96@64)
+        self.dec3 = DecoderBlock(96, 64, 64)       # 64->128, skip x2(64@128)
+        self.dec4 = DecoderBlock(64, 32, 32)       # 128->256, skip x1(32@256)
         self.fine_head = nn.Sequential(
             nn.Conv2d(32, 16, kernel_size=3, padding=1),
             nn.GELU(),
@@ -1093,11 +1106,11 @@ class EarlyFusionStage2TerrainSynthModel(nn.Module):
         coarse = self.coarse_head(x5)
         mid = self.mid_head(self.mid_up(x5))
 
-        f = self.fine_up1(x5)
-        f = self.fine_up2(f)
-        f = self.fine_up3(f)
-        f = self.fine_up4(f)
-        fine = self.fine_head(f)
+        d = self.dec1(x5, x4)
+        d = self.dec2(d, x3)
+        d = self.dec3(d, x2)
+        d = self.dec4(d, x1)
+        fine = self.fine_head(d)
         fine = F.interpolate(fine, size=(257, 257), mode="bilinear", align_corners=False)
 
         return coarse, mid, fine
@@ -1120,7 +1133,7 @@ class SignalBranchStem(nn.Module):
 class StructuredFusionStage2TerrainSynthModel(nn.Module):
     def __init__(self, input_channels: int) -> None:
         super().__init__()
-        expected_channels = INPUT_CHANNEL_RANGES["coarse_height_17_prior"][1]
+        expected_channels = TOTAL_INPUT_CHANNELS
         if input_channels != expected_channels:
             raise ValueError(f"structured_fusion_v2 expects {expected_channels} input channels, got {input_channels}.")
 
@@ -1164,22 +1177,10 @@ class StructuredFusionStage2TerrainSynthModel(nn.Module):
             nn.Conv2d(96, 1, kernel_size=1),
         )
 
-        self.fine_up1 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(160, 128),
-        )
-        self.fine_up2 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(128, 96),
-        )
-        self.fine_up3 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(96, 64),
-        )
-        self.fine_up4 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(64, 32),
-        )
+        self.dec1 = DecoderBlock(160, 128, 128)
+        self.dec2 = DecoderBlock(128, 96, 96)
+        self.dec3 = DecoderBlock(96, 64, 64)
+        self.dec4 = DecoderBlock(64, 32, 32)
         self.fine_head = nn.Sequential(
             nn.Conv2d(32, 16, kernel_size=3, padding=1),
             nn.GELU(),
@@ -1204,11 +1205,11 @@ class StructuredFusionStage2TerrainSynthModel(nn.Module):
         coarse = self.coarse_head(x5)
         mid = self.mid_head(self.mid_up(x5))
 
-        f = self.fine_up1(x5)
-        f = self.fine_up2(f)
-        f = self.fine_up3(f)
-        f = self.fine_up4(f)
-        fine = self.fine_head(f)
+        d = self.dec1(x5, x4)
+        d = self.dec2(d, x3)
+        d = self.dec3(d, x2)
+        d = self.dec4(d, x1)
+        fine = self.fine_head(d)
         fine = F.interpolate(fine, size=(257, 257), mode="bilinear", align_corners=False)
 
         return coarse, mid, fine
@@ -1219,7 +1220,7 @@ class MultiTaskStructuredFusionModel(nn.Module):
 
     def __init__(self, input_channels: int, mcly_num_classes: int) -> None:
         super().__init__()
-        expected_channels = INPUT_CHANNEL_RANGES["coarse_height_17_prior"][1]
+        expected_channels = TOTAL_INPUT_CHANNELS
         if input_channels != expected_channels:
             raise ValueError(f"multi_task_v3 expects {expected_channels} input channels, got {input_channels}.")
 
@@ -1249,7 +1250,7 @@ class MultiTaskStructuredFusionModel(nn.Module):
         self.enc4 = ConvBlock(96, 128, stride=2)
         self.enc5 = ConvBlock(128, 160, stride=2)
 
-        # ── Height heads (same as structured_fusion_v2) ──────────────────
+        # ── Height heads (U-Net with skip connections) ──────────────────
         self.coarse_head = nn.Sequential(
             nn.AdaptiveAvgPool2d((17, 17)),
             nn.Conv2d(160, 64, kernel_size=3, padding=1),
@@ -1262,22 +1263,10 @@ class MultiTaskStructuredFusionModel(nn.Module):
             nn.GELU(),
             nn.Conv2d(96, 1, kernel_size=1),
         )
-        self.fine_up1 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(160, 128),
-        )
-        self.fine_up2 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(128, 96),
-        )
-        self.fine_up3 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(96, 64),
-        )
-        self.fine_up4 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
-            ConvBlock(64, 32),
-        )
+        self.dec1 = DecoderBlock(160, 128, 128)
+        self.dec2 = DecoderBlock(128, 96, 96)
+        self.dec3 = DecoderBlock(96, 64, 64)
+        self.dec4 = DecoderBlock(64, 32, 32)
         self.fine_head = nn.Sequential(
             nn.Conv2d(32, 16, kernel_size=3, padding=1),
             nn.GELU(),
@@ -1335,14 +1324,14 @@ class MultiTaskStructuredFusionModel(nn.Module):
         x4 = self.enc4(x3)
         x5 = self.enc5(x4)  # [B, 160, 16, 16]
 
-        # Height
+        # Height (with skip connections)
         coarse = self.coarse_head(x5)
         mid = self.mid_head(self.mid_up(x5))
-        f = self.fine_up1(x5)
-        f = self.fine_up2(f)
-        f = self.fine_up3(f)
-        f = self.fine_up4(f)
-        fine = self.fine_head(f)
+        d = self.dec1(x5, x4)
+        d = self.dec2(d, x3)
+        d = self.dec3(d, x2)
+        d = self.dec4(d, x1)
+        fine = self.fine_head(d)
         fine = F.interpolate(fine, size=(257, 257), mode="bilinear", align_corners=False)
 
         # MCAL
@@ -1659,11 +1648,15 @@ def run_epoch(
     mcal_weight: float = 0.5,
     mcly_weight: float = 0.3,
     hole_weight: float = 0.5,
+    grad_accum_steps: int = 1,
+    grad_clip: float = 0.0,
+    scheduler: Any = None,
 ) -> dict[str, float]:
     training = optimizer is not None
     model.train(training)
     accumulator = MetricAccumulator()
     autocast_enabled = device.type == "cuda"
+    step = 0
 
     for batch in loader:
         inputs = maybe_channels_last(batch["inputs"].to(device, non_blocking=True), channels_last)
@@ -1689,17 +1682,28 @@ def run_epoch(
             else:
                 pred_17, pred_65, pred_257 = model(inputs)
                 metric_tensors = compute_metric_tensors(pred_17, pred_65, pred_257, target_17, target_65, target_257, height_mean, height_std)
-            loss = metric_tensors["loss"].mean()
+            loss = metric_tensors["loss"].mean() / grad_accum_steps
 
         if training:
-            optimizer.zero_grad(set_to_none=True)
             if scaler is not None and autocast_enabled:
                 scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
             else:
                 loss.backward()
-                optimizer.step()
+
+            step += 1
+            if step % grad_accum_steps == 0:
+                if grad_clip > 0:
+                    if scaler is not None and autocast_enabled:
+                        scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                if scaler is not None and autocast_enabled:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                if scheduler is not None:
+                    scheduler.step()
 
         accumulator.add(metric_tensors)
 
@@ -1721,9 +1725,11 @@ def save_preview(
     if len(dataset) == 0:
         return
 
+    model.eval()
     row_count = min(max(preview_count, 1), len(dataset))
     rows: list[np.ndarray] = []
     preview_rows: list[dict[str, Any]] = []
+    all_preds: list[np.ndarray] = []
 
     for index in range(row_count):
         sample = dataset[index]
@@ -1734,13 +1740,15 @@ def save_preview(
             else:
                 pred_17, pred_65, pred_257 = model(inputs)
 
+        pred_257_np = (pred_257.squeeze(0).squeeze(0).cpu().numpy() * height_std) + height_mean
+        all_preds.append(pred_257_np)
+
         minimap = (sample["minimap"].permute(1, 2, 0).numpy() * 255.0).clip(0, 255).astype(np.uint8)
         target_257 = (sample["height_257"].squeeze(0).numpy() * height_std) + height_mean
-        pred_257 = (pred_257.squeeze(0).squeeze(0).cpu().numpy() * height_std) + height_mean
-        diff = pred_257 - target_257
+        diff = pred_257_np - target_257
 
         target_img = height_to_rgb(target_257)
-        pred_img = height_to_rgb(pred_257)
+        pred_img = height_to_rgb(pred_257_np)
         diff_img = difference_to_rgb(diff)
 
         h, w = minimap.shape[:2]
@@ -1771,6 +1779,14 @@ def save_preview(
                 },
             }
         )
+
+    # Diagnostic: verify predictions are not all identical
+    if len(all_preds) > 1:
+        pred_variance = max(np.var(pred) for pred in all_preds)
+        pred_diff_max = max(np.max(np.abs(all_preds[i] - all_preds[j])) for i in range(len(all_preds)) for j in range(i + 1, len(all_preds)))
+        print(f"  [preview] pred_variance={pred_variance:.2f} max_inter_pred_diff={pred_diff_max:.2f}m")
+        if pred_diff_max < 1.0:
+            print("  WARNING: Preview predictions are nearly identical across tiles! Model may be collapsed.")
 
     composite = rows[0] if len(rows) == 1 else np.concatenate(rows, axis=0)
     Image.fromarray(composite).save(output_path)
@@ -2003,13 +2019,51 @@ def main() -> None:
     if use_compile:
         model = torch.compile(model)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
 
+    # ── Resume support ───────────────────────────────────────────────
+    start_epoch = 1
     history: list[dict[str, Any]] = []
     best_val_loss = float("inf")
+    if args.resume_from:
+        resume_path = Path(args.resume_from).resolve()
+        print(f"Resuming from {resume_path}")
+        payload = load_checkpoint_payload(resume_path, device)
+        load_model_state(model, payload["model_state"])
+        if "optimizer_state" in payload and payload["optimizer_state"]:
+            optimizer.load_state_dict(payload["optimizer_state"])
+        start_epoch = int(payload.get("epoch", 0)) + 1
+        history = list(payload.get("history", []))
+        best_val_loss = float(payload.get("best_val_loss", float("inf")))
+        print(f"  Resuming at epoch {start_epoch}, best_val_loss={best_val_loss:.4f}, history_len={len(history)}")
 
-    for epoch in range(1, args.epochs + 1):
+    # ── LR scheduler: linear warmup then cosine annealing ────────────
+    total_steps = (len(train_loader) // args.gradient_accumulation_steps) * args.epochs
+    warmup_steps = (len(train_loader) // args.gradient_accumulation_steps) * args.warmup_epochs
+    if args.no_cosine_scheduler:
+        scheduler = None
+    else:
+        def lr_lambda(step: int) -> float:
+            if step < warmup_steps:
+                return float(step) / float(max(1, warmup_steps))
+            progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+    print(f"Model: {model_variant} | Params: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"Train samples: {len(train_samples)} | Val samples: {len(val_samples)} | Input channels: {sample_channels}")
+    print(f"Batch size: {args.batch_size} | Grad accum: {args.gradient_accumulation_steps} | Effective batch: {args.batch_size * args.gradient_accumulation_steps}")
+    print(f"LR: {args.learning_rate} | Weight decay: {args.weight_decay} | Warmup epochs: {args.warmup_epochs}")
+    if device.type == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(0)} | VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB")
+
+    import time
+
+    for epoch in range(start_epoch, args.epochs + 1):
+        epoch_start = time.time()
+
         train_metrics = run_epoch(
             model, train_loader, optimizer, scaler, device,
             height_mean, height_std, args.channels_last,
@@ -2017,6 +2071,9 @@ def main() -> None:
             mcal_weight=args.mcal_loss_weight,
             mcly_weight=args.mcly_loss_weight,
             hole_weight=args.hole_loss_weight,
+            grad_accum_steps=args.gradient_accumulation_steps,
+            grad_clip=args.gradient_clip,
+            scheduler=scheduler,
         )
         with torch.no_grad():
             val_metrics = run_epoch(
@@ -2028,18 +2085,34 @@ def main() -> None:
                 hole_weight=args.hole_loss_weight,
             )
 
+        epoch_time = time.time() - epoch_start
         epoch_metrics = {
             "epoch": epoch,
             "train": train_metrics,
             "val": val_metrics,
         }
         history.append(epoch_metrics)
+
+        new_best = val_metrics["loss"] < best_val_loss
+        best_marker = " >>> NEW BEST <<<" if new_best else ""
+
+        lr_str = ""
+        if scheduler is not None:
+            lr_str = f" | lr {scheduler.get_last_lr()[0]:.2e}"
+
+        gpu_mem = ""
+        if device.type == "cuda":
+            alloc = torch.cuda.memory_allocated(device) / 1e9
+            reserved = torch.cuda.memory_reserved(device) / 1e9
+            gpu_mem = f" | gpu {alloc:.1f}GB/{reserved:.1f}GB"
+
         print(
             f"epoch {epoch:03d} | "
             f"train loss {train_metrics['loss']:.4f} | "
             f"val loss {val_metrics['loss']:.4f} | "
             f"val mae {val_metrics['mae_m']:.2f}m | "
             f"val rmse {val_metrics['rmse_m']:.2f}m"
+            f"{best_marker}{lr_str}{gpu_mem} | {epoch_time:.1f}s"
         )
         if is_multi_task:
             print(
@@ -2077,11 +2150,12 @@ def main() -> None:
                 "model_variant": model_variant,
                 "mcly_num_classes": mcly_num_classes,
                 "history": history,
+                "best_val_loss": best_val_loss,
             },
             last_checkpoint,
         )
 
-        if val_metrics["loss"] < best_val_loss:
+        if new_best:
             best_val_loss = val_metrics["loss"]
             torch.save(
                 {
@@ -2094,6 +2168,7 @@ def main() -> None:
                     "model_variant": model_variant,
                     "mcly_num_classes": mcly_num_classes,
                     "history": history,
+                    "best_val_loss": best_val_loss,
                 },
                 checkpoints_dir / "best.pt",
             )
@@ -2103,6 +2178,23 @@ def main() -> None:
                 height_mean, height_std,
                 args.channels_last, args.preview_count,
                 is_multi_task=is_multi_task,
+            )
+
+        if args.save_every > 0 and epoch % args.save_every == 0:
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state": model.state_dict(),
+                    "optimizer_state": optimizer.state_dict(),
+                    "height_mean": height_mean,
+                    "height_std": height_std,
+                    "input_channels": sample_channels,
+                    "model_variant": model_variant,
+                    "mcly_num_classes": mcly_num_classes,
+                    "history": history,
+                    "best_val_loss": best_val_loss,
+                },
+                checkpoints_dir / f"epoch_{epoch:03d}.pt",
             )
 
     del train_loader
