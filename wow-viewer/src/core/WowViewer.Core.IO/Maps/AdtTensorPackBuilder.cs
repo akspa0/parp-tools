@@ -128,6 +128,84 @@ public static class AdtTensorPackBuilder
         };
     }
 
+    /// <summary>
+    /// Builds a placeholder <see cref="TerrainTileTensorPack"/> for a tile that has PM4 data
+    /// and a minimap but no root ADT. Height, MCAL, and MCLY fields are left null.
+    /// This supports Tier 2 tiles in the development-map corpus.
+    /// </summary>
+    /// <param name="mapDirectory">Path to the map directory containing PM4 files.</param>
+    /// <param name="mapName">Map name (e.g. "development").</param>
+    /// <param name="tileX">ADT tile X coordinate.</param>
+    /// <param name="tileY">ADT tile Y coordinate.</param>
+    /// <param name="minimapRgb256">Pre-loaded 256×256×3 minimap RGB data, or null.</param>
+    /// <param name="buildKey">Build provenance tag (e.g. "4.0.0.11927").</param>
+    public static TerrainTileTensorPack BuildPlaceholder(
+        string mapDirectory,
+        string mapName,
+        int tileX,
+        int tileY,
+        byte[,,]? minimapRgb256,
+        string buildKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mapDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(mapName);
+
+        string tileName = $"{mapName}_{tileX}_{tileY}";
+        HashSet<string> availableSignals = [];
+
+        // ── Build PM4 masks from the map directory ──────────────────────────
+        // We construct a synthetic ADT path so the PM4 mask builder can parse
+        // tile coordinates from the filename.
+        string syntheticAdtPath = Path.Combine(mapDirectory, $"{tileName}.adt");
+        (float[,]? pm4PathMask, float[,]? pm4BuildingFootprintMask, float[,]? pm4MprlMask) =
+            BuildPm4Masks(syntheticAdtPath, availableSignals);
+
+        // ── Attach minimap if provided ──────────────────────────────────────
+        if (minimapRgb256 is not null)
+        {
+            availableSignals.Add("minimap_rgb_256");
+        }
+
+        return new TerrainTileTensorPack
+        {
+            TileName = tileName,
+            MapName = mapName,
+            BuildKey = buildKey,
+            SourceAdtPath = string.Empty, // no ADT source
+            Height257 = null,
+            Height65 = null,
+            Height17 = null,
+            MclyTextureIds = null,
+            MclyTextureNames = Array.Empty<string>(),
+            MclyLayerMask = null,
+            McalAlphaPack256 = null,
+            MccvRgb = null,
+            McnrNormalXyz = null,
+            Mh2oSurfaceHeight = null,
+            Mh2oDepth = null,
+            Mh2oTypeMask = null,
+            MclqSurfaceHeight = null,
+            MclqTypeMask = null,
+            MtxfAnimatedMask = null,
+            MtxfTransformId = null,
+            HoleMask16 = null,
+            WlLiquidMask = null,
+            WlLiquidHeight = null,
+            UnifiedLiquidMask = null,
+            UnifiedLiquidHeight = null,
+            ObjectMask257 = null,
+            ObjectPreciseMask257 = null,
+            Pm4PathMask = pm4PathMask,
+            Pm4BuildingFootprintMask = pm4BuildingFootprintMask,
+            Pm4MprlMask = pm4MprlMask,
+            McshShadowMask256 = null,
+            ShadowResidualMask256 = null,
+            MinimapRgb256 = minimapRgb256,
+            MinimapSourceTag = minimapRgb256 is not null ? "raw" : string.Empty,
+            AvailableSignals = availableSignals,
+        };
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Heightmap assembly (MCVT)
     // ═══════════════════════════════════════════════════════════════════════

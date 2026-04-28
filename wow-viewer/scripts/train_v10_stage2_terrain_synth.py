@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import random
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -29,6 +30,9 @@ DEFAULT_SIGNAL_DROOUT = 0.15
 DEFAULT_MODEL_VARIANT = "structured_fusion_v2"
 DEFAULT_NATIVE_V10_BOOST = 1.0
 DEFAULT_RARE_SIGNAL_BOOST = 3.0
+DEFAULT_MCAL_LOSS_WEIGHT = 0.5
+DEFAULT_MCLY_LOSS_WEIGHT = 0.3
+DEFAULT_HOLE_LOSS_WEIGHT = 0.5
 PREVIEW_ROW_TITLE_HEIGHT = 18
 PREVIEW_PANE_LABEL_HEIGHT = 18
 PREVIEW_LABEL_PADDING = 4
@@ -88,6 +92,7 @@ VALIDATION_SPLIT_PRIORITY_GROUPS: tuple[str, ...] = (
 )
 
 METRIC_KEYS = ("loss", "full_l1", "mid_l1", "coarse_l1", "gradient", "mae_m", "rmse_m")
+MULTI_TASK_METRIC_KEYS = ("loss", "height_loss", "mcal_loss", "mcly_loss", "hole_loss", "full_l1", "mid_l1", "coarse_l1", "gradient", "mae_m", "rmse_m")
 
 
 def parse_args() -> argparse.Namespace:
@@ -144,6 +149,9 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated tile names that must be placed in the validation split when present in the selected input corpus.",
     )
     parser.add_argument("--stage1-checkpoint", help="Optional Stage 1 checkpoint to use for coarse prior at inference time.")
+    parser.add_argument("--mcal-loss-weight", type=float, default=DEFAULT_MCAL_LOSS_WEIGHT)
+    parser.add_argument("--mcly-loss-weight", type=float, default=DEFAULT_MCLY_LOSS_WEIGHT)
+    parser.add_argument("--hole-loss-weight", type=float, default=DEFAULT_HOLE_LOSS_WEIGHT)
     return parser.parse_args()
 
 
@@ -158,7 +166,7 @@ def build_input_channel_ranges() -> dict[str, tuple[int, int]]:
 
 INPUT_CHANNEL_RANGES = build_input_channel_ranges()
 
-MODEL_VARIANTS = ("early_fusion_v1", "structured_fusion_v2")
+MODEL_VARIANTS = ("early_fusion_v1", "structured_fusion_v2", "multi_task_v3")
 
 MODEL_BRANCH_SIGNAL_GROUPS: dict[str, tuple[str, ...]] = {
     "surface": (
@@ -349,7 +357,6 @@ def decode_signal_array(key: str, array: np.ndarray, source_key: str) -> np.ndar
     if key == "mcnr_normal_xyz" and source_key == "normal_rgb_256":
         decoded = (array.astype(np.float32) / 127.5) - 1.0
         return np.clip(decoded, -1.0, 1.0)
-    # When an MH2O height field is used as a liquid mask, threshold non-zero → 1.0.
     if key == "unified_liquid_mask" and source_key == "mh2o_surface_height":
         return (array != 0).astype(np.float32)
     return array
@@ -374,7 +381,6 @@ class SignalSpec:
     dtype: np.dtype
 
 
-# Ordered list of optional signals that augment the mandatory minimap + coarse prior
 OPTIONAL_SIGNALS: list[SignalSpec] = [
     SignalSpec("mcal_alpha_pack_256", 4, 256, np.float32),
     SignalSpec("mccv_rgb", 3, 257, np.float32),
@@ -392,8 +398,6 @@ OPTIONAL_SIGNALS: list[SignalSpec] = [
 
 
 SIGNAL_ALIASES: dict[str, tuple[str, ...]] = {
-    # Legacy v9 cache names. These keep the v10 trainer usable before every
-    # archive-backed client has been regenerated through native v10 extraction.
     "hole_mask_16": ("hole_mask_16x16",),
     "mcnr_normal_xyz": ("normal_rgb_256",),
     "object_precise_mask_257": ("object_mask_precise_257",),
@@ -418,6 +422,9 @@ class Stage2Sample:
     available_signal_keys: set[str]
     min_height: float
     max_height: float
+    mcal_alpha: np.ndarray | None = None
+    mcly_texture_ids: np.ndarray | None = None
+    hole_mask: np.ndarray | None = None
 
 
 def is_native_v10_source(sample: Stage2Sample) -> bool:
@@ -503,7 +510,6 @@ def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> l
                 if loaded is None:
                     continue
                 arr, source_key = loaded
-                # Normalize shape expectations
                 if spec.key == "hole_mask_16" and arr.ndim == 2:
                     arr = arr.astype(np.float32)
                 elif spec.key == "mtxf_animated_mask" and arr.ndim == 2:
@@ -520,6 +526,27 @@ def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> l
             if height_65 is None:
                 height_65 = downsample_heightmap(height_257, 65)
 
+            # ── Multi-task targets (optional) ────────────────────────────
+            mcal_alpha = None
+            if "mcal_alpha_pack_256" in shard.files:
+                mcal_arr = np.asarray(shard["mcal_alpha_pack_256"], dtype=np.float32)
+                if mcal_arr.ndim == 3 and mcal_arr.shape[2] == 4:
+                    mcal_alpha = np.transpose(mcal_arr, (2, 0, 1))
+                elif mcal_arr.ndim == 3 and mcal_arr.shape[0] == 4:
+                    mcal_alpha = mcal_arr
+
+            mcly_ids = None
+            if "mcly_texture_ids" in shard.files:
+                mcly_arr = np.asarray(shard["mcly_texture_ids"], dtype=np.int32)
+                if mcly_arr.shape == (16, 16, 4):
+                    mcly_ids = mcly_arr
+
+            hole_mask = None
+            if "hole_mask_16" in shard.files:
+                hole_arr = np.asarray(shard["hole_mask_16"], dtype=np.float32)
+                if hole_arr.shape == (16, 16):
+                    hole_mask = hole_arr
+
             samples.append(
                 Stage2Sample(
                     path=shard_ref.path,
@@ -535,6 +562,9 @@ def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> l
                     available_signal_keys=available,
                     min_height=float(np.min(height_257)),
                     max_height=float(np.max(height_257)),
+                    mcal_alpha=mcal_alpha,
+                    mcly_texture_ids=mcly_ids,
+                    hole_mask=hole_mask,
                 )
             )
 
@@ -574,11 +604,15 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
         height_mean: float,
         height_std: float,
         signal_dropout: float,
+        mcly_label_index: dict[int, int] | None = None,
+        mcly_num_classes: int = 0,
     ):
         self.samples = samples
         self.height_mean = float(height_mean)
         self.height_std = float(height_std)
         self.signal_dropout = signal_dropout
+        self.mcly_label_index = mcly_label_index or {}
+        self.mcly_num_classes = mcly_num_classes
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -594,7 +628,6 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
         sample = self.samples[index]
         minimap = torch.from_numpy(sample.minimap_rgb.astype(np.float32) / 255.0).permute(2, 0, 1)
 
-        # Build optional signal planes at 256x256
         signal_planes: list[torch.Tensor] = []
 
         # MCAL alpha pack (4 channels, 256)
@@ -623,7 +656,6 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
                 t = torch.from_numpy(arr.astype(np.float32))
                 if t.ndim == 2:
                     t = t.unsqueeze(0)
-                # Interpolate 257 → 256 or 129 → 256
                 if t.shape[-1] != 256 or t.shape[-2] != 256:
                     t = F.interpolate(t.unsqueeze(0), size=(256, 256), mode="bilinear", align_corners=False).squeeze(0)
                 signal_planes.append(self._maybe_dropout(t, key, sample.available_signal_keys))
@@ -659,16 +691,47 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
 
         inputs = torch.cat([minimap] + signal_planes, dim=0)
 
-        # Targets
+        # Height targets
         height_257 = torch.from_numpy(((sample.height_257 - self.height_mean) / self.height_std).astype(np.float32)).unsqueeze(0)
         height_65 = torch.from_numpy(((sample.height_65 - self.height_mean) / self.height_std).astype(np.float32)).unsqueeze(0)
         height_17 = torch.from_numpy(((sample.height_17 - self.height_mean) / self.height_std).astype(np.float32)).unsqueeze(0)
+
+        # Multi-task targets
+        mcal_target = torch.zeros((4, 256, 256), dtype=torch.float32)
+        has_mcal = False
+        if sample.mcal_alpha is not None:
+            mcal_target = torch.from_numpy(sample.mcal_alpha.astype(np.float32))
+            has_mcal = True
+
+        mcly_target = torch.zeros((16, 16), dtype=torch.long)
+        has_mcly = False
+        if sample.mcly_texture_ids is not None and self.mcly_label_index:
+            label_grid = np.full((16, 16), -100, dtype=np.int64)  # -100 = ignore_index
+            for cy in range(16):
+                for cx in range(16):
+                    tex_id = int(sample.mcly_texture_ids[cy, cx, 0])
+                    if tex_id >= 0 and tex_id in self.mcly_label_index:
+                        label_grid[cy, cx] = self.mcly_label_index[tex_id]
+            mcly_target = torch.from_numpy(label_grid)
+            has_mcly = True
+
+        hole_target = torch.zeros((1, 16, 16), dtype=torch.float32)
+        has_hole = False
+        if sample.hole_mask is not None:
+            hole_target = torch.from_numpy(sample.hole_mask.astype(np.float32)).unsqueeze(0)
+            has_hole = True
 
         return {
             "inputs": inputs,
             "height_257": height_257,
             "height_65": height_65,
             "height_17": height_17,
+            "mcal_target": mcal_target,
+            "has_mcal": torch.tensor(has_mcal, dtype=torch.bool),
+            "mcly_target": mcly_target,
+            "has_mcly": torch.tensor(has_mcly, dtype=torch.bool),
+            "hole_target": hole_target,
+            "has_hole": torch.tensor(has_hole, dtype=torch.bool),
             "minimap": minimap,
             "tile_name": sample.tile_name,
             "dataset_key": sample.dataset_key,
@@ -686,7 +749,7 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
 
 @dataclass(slots=True)
 class MetricAccumulator:
-    totals: dict[str, float] = field(default_factory=lambda: {key: 0.0 for key in METRIC_KEYS})
+    totals: dict[str, float] = field(default_factory=lambda: {key: 0.0 for key in MULTI_TASK_METRIC_KEYS})
     count: int = 0
 
     def add(self, metric_tensors: dict[str, torch.Tensor], mask: torch.Tensor | None = None) -> None:
@@ -709,10 +772,10 @@ class MetricAccumulator:
 
     def to_report(self) -> dict[str, float | int | None]:
         if self.count == 0:
-            return {"count": 0, **{key: None for key in METRIC_KEYS}}
+            return {"count": 0, **{key: None for key in MULTI_TASK_METRIC_KEYS}}
         return {
             "count": self.count,
-            **{key: self.totals[key] / self.count for key in METRIC_KEYS},
+            **{key: self.totals[key] / self.count for key in MULTI_TASK_METRIC_KEYS},
         }
 
 
@@ -725,6 +788,18 @@ def compute_metric_tensors(
     target_257: torch.Tensor,
     height_mean: float,
     height_std: float,
+    pred_mcal: torch.Tensor | None = None,
+    target_mcal: torch.Tensor | None = None,
+    has_mcal: torch.Tensor | None = None,
+    pred_mcly: torch.Tensor | None = None,
+    target_mcly: torch.Tensor | None = None,
+    has_mcly: torch.Tensor | None = None,
+    pred_hole: torch.Tensor | None = None,
+    target_hole: torch.Tensor | None = None,
+    has_hole: torch.Tensor | None = None,
+    mcal_weight: float = 0.5,
+    mcly_weight: float = 0.3,
+    hole_weight: float = 0.5,
 ) -> dict[str, torch.Tensor]:
     full_l1 = torch.abs(pred_257 - target_257).mean(dim=(1, 2, 3))
     mid_l1 = torch.abs(pred_65 - target_65).mean(dim=(1, 2, 3))
@@ -744,7 +819,25 @@ def compute_metric_tensors(
     target_257_up = F.interpolate(target_65, size=(257, 257), mode="bilinear", align_corners=False)
     detail_res = torch.abs((pred_257 - pred_257_up) - (target_257 - target_257_up)).mean(dim=(1, 2, 3))
 
-    loss = full_l1 + 0.5 * mid_l1 + 0.25 * coarse_l1 + 0.3 * gradient + 0.3 * mid_residual + 0.3 * detail_res
+    height_loss = full_l1 + 0.5 * mid_l1 + 0.25 * coarse_l1 + 0.3 * gradient + 0.3 * mid_residual + 0.3 * detail_res
+
+    # Multi-task losses (masked per sample)
+    mcal_loss = torch.zeros_like(height_loss)
+    if pred_mcal is not None and target_mcal is not None and has_mcal is not None:
+        mcal_l1 = torch.abs(pred_mcal - target_mcal).mean(dim=(1, 2, 3))
+        mcal_loss = mcal_l1 * has_mcal.float() * mcal_weight
+
+    mcly_loss = torch.zeros_like(height_loss)
+    if pred_mcly is not None and target_mcly is not None and has_mcly is not None:
+        ce = F.cross_entropy(pred_mcly, target_mcly, ignore_index=-100, reduction="none")
+        mcly_loss = ce.mean(dim=(1, 2)) * has_mcly.float() * mcly_weight
+
+    hole_loss = torch.zeros_like(height_loss)
+    if pred_hole is not None and target_hole is not None and has_hole is not None:
+        bce = F.binary_cross_entropy_with_logits(pred_hole, target_hole, reduction="none")
+        hole_loss = bce.mean(dim=(1, 2, 3)) * has_hole.float() * hole_weight
+
+    loss = height_loss + mcal_loss + mcly_loss + hole_loss
 
     pred_height_m = pred_257 * height_std + height_mean
     target_height_m = target_257 * height_std + height_mean
@@ -754,6 +847,10 @@ def compute_metric_tensors(
 
     return {
         "loss": loss,
+        "height_loss": height_loss,
+        "mcal_loss": mcal_loss,
+        "mcly_loss": mcly_loss,
+        "hole_loss": hole_loss,
         "full_l1": full_l1,
         "mid_l1": mid_l1,
         "coarse_l1": coarse_l1,
@@ -773,7 +870,7 @@ def apply_input_ablation(inputs: torch.Tensor, group_name: str) -> torch.Tensor:
 
 def delta_report(current: dict[str, float | int | None], baseline: dict[str, float | int | None]) -> dict[str, float | None]:
     delta: dict[str, float | None] = {}
-    for key in METRIC_KEYS:
+    for key in MULTI_TASK_METRIC_KEYS:
         current_value = current.get(key)
         baseline_value = baseline.get(key)
         if current_value is None or baseline_value is None:
@@ -791,6 +888,10 @@ def evaluate_validation_analysis(
     height_std: float,
     channels_last: bool,
     ablation_groups: list[str],
+    is_multi_task: bool = False,
+    mcal_weight: float = 0.5,
+    mcly_weight: float = 0.3,
+    hole_weight: float = 0.5,
 ) -> dict[str, Any]:
     model.eval()
     autocast_enabled = device.type == "cuda"
@@ -813,8 +914,22 @@ def evaluate_validation_analysis(
         with torch.no_grad():
             context = torch.autocast(device_type=device.type, dtype=torch.float16, enabled=autocast_enabled) if autocast_enabled else torch.no_grad()
             with context:
-                pred_17, pred_65, pred_257 = model(inputs)
-                metric_tensors = compute_metric_tensors(pred_17, pred_65, pred_257, target_17, target_65, target_257, height_mean, height_std)
+                if is_multi_task:
+                    pred_17, pred_65, pred_257, pred_mcal, pred_mcly, pred_hole = model(inputs)
+                    metric_tensors = compute_metric_tensors(
+                        pred_17, pred_65, pred_257, target_17, target_65, target_257,
+                        height_mean, height_std,
+                        pred_mcal=pred_mcal, target_mcal=batch["mcal_target"].to(device, non_blocking=True),
+                        has_mcal=batch["has_mcal"].to(device, non_blocking=True),
+                        pred_mcly=pred_mcly, target_mcly=batch["mcly_target"].to(device, non_blocking=True),
+                        has_mcly=batch["has_mcly"].to(device, non_blocking=True),
+                        pred_hole=pred_hole, target_hole=batch["hole_target"].to(device, non_blocking=True),
+                        has_hole=batch["has_hole"].to(device, non_blocking=True),
+                        mcal_weight=mcal_weight, mcly_weight=mcly_weight, hole_weight=hole_weight,
+                    )
+                else:
+                    pred_17, pred_65, pred_257 = model(inputs)
+                    metric_tensors = compute_metric_tensors(pred_17, pred_65, pred_257, target_17, target_65, target_257, height_mean, height_std)
 
         baseline_accumulator.add(metric_tensors)
         for field_name, label in VALIDATION_SUBSET_FIELDS.items():
@@ -825,8 +940,22 @@ def evaluate_validation_analysis(
             with torch.no_grad():
                 context = torch.autocast(device_type=device.type, dtype=torch.float16, enabled=autocast_enabled) if autocast_enabled else torch.no_grad()
                 with context:
-                    pred_17, pred_65, pred_257 = model(ablated_inputs)
-                    ablated_metrics = compute_metric_tensors(pred_17, pred_65, pred_257, target_17, target_65, target_257, height_mean, height_std)
+                    if is_multi_task:
+                        pred_17, pred_65, pred_257, pred_mcal, pred_mcly, pred_hole = model(ablated_inputs)
+                        ablated_metrics = compute_metric_tensors(
+                            pred_17, pred_65, pred_257, target_17, target_65, target_257,
+                            height_mean, height_std,
+                            pred_mcal=pred_mcal, target_mcal=batch["mcal_target"].to(device, non_blocking=True),
+                            has_mcal=batch["has_mcal"].to(device, non_blocking=True),
+                            pred_mcly=pred_mcly, target_mcly=batch["mcly_target"].to(device, non_blocking=True),
+                            has_mcly=batch["has_mcly"].to(device, non_blocking=True),
+                            pred_hole=pred_hole, target_hole=batch["hole_target"].to(device, non_blocking=True),
+                            has_hole=batch["has_hole"].to(device, non_blocking=True),
+                            mcal_weight=mcal_weight, mcly_weight=mcly_weight, hole_weight=hole_weight,
+                        )
+                    else:
+                        pred_17, pred_65, pred_257 = model(ablated_inputs)
+                        ablated_metrics = compute_metric_tensors(pred_17, pred_65, pred_257, target_17, target_65, target_257, height_mean, height_std)
 
             ablation_accumulators[group]["overall"].add(ablated_metrics)
             applicable_field_name = next(
@@ -906,13 +1035,12 @@ class EarlyFusionStage2TerrainSynthModel(nn.Module):
             nn.BatchNorm2d(32),
             nn.GELU(),
         )
-        self.enc1 = ConvBlock(32, 32)             # 256
-        self.enc2 = ConvBlock(32, 64, stride=2)   # 128
-        self.enc3 = ConvBlock(64, 96, stride=2)   # 64
-        self.enc4 = ConvBlock(96, 128, stride=2)  # 32
-        self.enc5 = ConvBlock(128, 160, stride=2) # 16
+        self.enc1 = ConvBlock(32, 32)
+        self.enc2 = ConvBlock(32, 64, stride=2)
+        self.enc3 = ConvBlock(64, 96, stride=2)
+        self.enc4 = ConvBlock(96, 128, stride=2)
+        self.enc5 = ConvBlock(128, 160, stride=2)
 
-        # Coarse head: 17x17
         self.coarse_head = nn.Sequential(
             nn.AdaptiveAvgPool2d((17, 17)),
             nn.Conv2d(160, 64, kernel_size=3, padding=1),
@@ -920,7 +1048,6 @@ class EarlyFusionStage2TerrainSynthModel(nn.Module):
             nn.Conv2d(64, 1, kernel_size=1),
         )
 
-        # Mid head: 65x65
         self.mid_up = nn.Upsample(size=(65, 65), mode="bilinear", align_corners=False)
         self.mid_head = nn.Sequential(
             nn.Conv2d(160, 96, kernel_size=3, padding=1),
@@ -928,7 +1055,6 @@ class EarlyFusionStage2TerrainSynthModel(nn.Module):
             nn.Conv2d(96, 1, kernel_size=1),
         )
 
-        # Fine head: 257x257 via progressive upsampling
         self.fine_up1 = nn.Sequential(
             nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
             ConvBlock(160, 128),
@@ -953,19 +1079,19 @@ class EarlyFusionStage2TerrainSynthModel(nn.Module):
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x0 = self.stem(x)
-        x1 = self.enc1(x0)  # 256
-        x2 = self.enc2(x1)  # 128
-        x3 = self.enc3(x2)  # 64
-        x4 = self.enc4(x3)  # 32
-        x5 = self.enc5(x4)  # 16
+        x1 = self.enc1(x0)
+        x2 = self.enc2(x1)
+        x3 = self.enc3(x2)
+        x4 = self.enc4(x3)
+        x5 = self.enc5(x4)
 
         coarse = self.coarse_head(x5)
         mid = self.mid_head(self.mid_up(x5))
 
-        f = self.fine_up1(x5)   # 32
-        f = self.fine_up2(f)    # 64
-        f = self.fine_up3(f)    # 128
-        f = self.fine_up4(f)    # 256
+        f = self.fine_up1(x5)
+        f = self.fine_up2(f)
+        f = self.fine_up3(f)
+        f = self.fine_up4(f)
         fine = self.fine_head(f)
         fine = F.interpolate(fine, size=(257, 257), mode="bilinear", align_corners=False)
 
@@ -1013,11 +1139,11 @@ class StructuredFusionStage2TerrainSynthModel(nn.Module):
             nn.BatchNorm2d(32),
             nn.GELU(),
         )
-        self.enc1 = ConvBlock(32, 32)             # 256
-        self.enc2 = ConvBlock(32, 64, stride=2)   # 128
-        self.enc3 = ConvBlock(64, 96, stride=2)   # 64
-        self.enc4 = ConvBlock(96, 128, stride=2)  # 32
-        self.enc5 = ConvBlock(128, 160, stride=2) # 16
+        self.enc1 = ConvBlock(32, 32)
+        self.enc2 = ConvBlock(32, 64, stride=2)
+        self.enc3 = ConvBlock(64, 96, stride=2)
+        self.enc4 = ConvBlock(96, 128, stride=2)
+        self.enc5 = ConvBlock(128, 160, stride=2)
 
         self.coarse_head = nn.Sequential(
             nn.AdaptiveAvgPool2d((17, 17)),
@@ -1064,30 +1190,181 @@ class StructuredFusionStage2TerrainSynthModel(nn.Module):
         liquids = self.liquid_stem(self._slice_branch(x, "liquids"))
 
         x0 = self.fusion(torch.cat([surface, structure, liquids], dim=1))
-        x1 = self.enc1(x0)  # 256
-        x2 = self.enc2(x1)  # 128
-        x3 = self.enc3(x2)  # 64
-        x4 = self.enc4(x3)  # 32
-        x5 = self.enc5(x4)  # 16
+        x1 = self.enc1(x0)
+        x2 = self.enc2(x1)
+        x3 = self.enc3(x2)
+        x4 = self.enc4(x3)
+        x5 = self.enc5(x4)
 
         coarse = self.coarse_head(x5)
         mid = self.mid_head(self.mid_up(x5))
 
-        f = self.fine_up1(x5)   # 32
-        f = self.fine_up2(f)    # 64
-        f = self.fine_up3(f)    # 128
-        f = self.fine_up4(f)    # 256
+        f = self.fine_up1(x5)
+        f = self.fine_up2(f)
+        f = self.fine_up3(f)
+        f = self.fine_up4(f)
         fine = self.fine_head(f)
         fine = F.interpolate(fine, size=(257, 257), mode="bilinear", align_corners=False)
 
         return coarse, mid, fine
 
 
-def build_model(model_variant: str, input_channels: int) -> nn.Module:
+class MultiTaskStructuredFusionModel(nn.Module):
+    """Multi-task variant: predicts height + MCAL alpha + MCLY palette + hole mask."""
+
+    def __init__(self, input_channels: int, mcly_num_classes: int) -> None:
+        super().__init__()
+        expected_channels = INPUT_CHANNEL_RANGES["coarse_height_17_prior"][1]
+        if input_channels != expected_channels:
+            raise ValueError(f"multi_task_v3 expects {expected_channels} input channels, got {input_channels}.")
+
+        self.branch_ranges = {
+            branch_name: [INPUT_CHANNEL_RANGES[signal_name] for signal_name in signal_names]
+            for branch_name, signal_names in MODEL_BRANCH_SIGNAL_GROUPS.items()
+        }
+        branch_widths = {
+            "surface": 24,
+            "structure": 16,
+            "liquids": 16,
+        }
+
+        self.surface_stem = SignalBranchStem(sum(end - start for start, end in self.branch_ranges["surface"]), branch_widths["surface"])
+        self.structure_stem = SignalBranchStem(sum(end - start for start, end in self.branch_ranges["structure"]), branch_widths["structure"])
+        self.liquid_stem = SignalBranchStem(sum(end - start for start, end in self.branch_ranges["liquids"]), branch_widths["liquids"])
+
+        fused_channels = sum(branch_widths.values())
+        self.fusion = nn.Sequential(
+            nn.Conv2d(fused_channels, 32, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.GELU(),
+        )
+        self.enc1 = ConvBlock(32, 32)
+        self.enc2 = ConvBlock(32, 64, stride=2)
+        self.enc3 = ConvBlock(64, 96, stride=2)
+        self.enc4 = ConvBlock(96, 128, stride=2)
+        self.enc5 = ConvBlock(128, 160, stride=2)
+
+        # ── Height heads (same as structured_fusion_v2) ──────────────────
+        self.coarse_head = nn.Sequential(
+            nn.AdaptiveAvgPool2d((17, 17)),
+            nn.Conv2d(160, 64, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(64, 1, kernel_size=1),
+        )
+        self.mid_up = nn.Upsample(size=(65, 65), mode="bilinear", align_corners=False)
+        self.mid_head = nn.Sequential(
+            nn.Conv2d(160, 96, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(96, 1, kernel_size=1),
+        )
+        self.fine_up1 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(160, 128),
+        )
+        self.fine_up2 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(128, 96),
+        )
+        self.fine_up3 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(96, 64),
+        )
+        self.fine_up4 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(64, 32),
+        )
+        self.fine_head = nn.Sequential(
+            nn.Conv2d(32, 16, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(16, 1, kernel_size=1),
+        )
+
+        # ── MCAL head: 160@16 → upsample → 4@256 with sigmoid ────────────
+        self.mcal_up1 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(160, 96),
+        )
+        self.mcal_up2 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(96, 64),
+        )
+        self.mcal_up3 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(64, 32),
+        )
+        self.mcal_up4 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+            ConvBlock(32, 16),
+        )
+        self.mcal_head = nn.Sequential(
+            nn.Conv2d(16, 4, kernel_size=3, padding=1),
+            nn.Sigmoid(),
+        )
+
+        # ── MCLY head: 160@16 → 16×16 × num_classes ──────────────────────
+        self.mcly_head = nn.Sequential(
+            nn.Conv2d(160, 128, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(128, mcly_num_classes, kernel_size=1),
+        )
+
+        # ── Hole head: 160@16 → 1×16×16 with logits ──────────────────────
+        self.hole_head = nn.Sequential(
+            nn.Conv2d(160, 64, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(64, 1, kernel_size=1),
+        )
+
+    def _slice_branch(self, x: torch.Tensor, branch_name: str) -> torch.Tensor:
+        return torch.cat([x[:, start:end, :, :] for start, end in self.branch_ranges[branch_name]], dim=1)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        surface = self.surface_stem(self._slice_branch(x, "surface"))
+        structure = self.structure_stem(self._slice_branch(x, "structure"))
+        liquids = self.liquid_stem(self._slice_branch(x, "liquids"))
+
+        x0 = self.fusion(torch.cat([surface, structure, liquids], dim=1))
+        x1 = self.enc1(x0)
+        x2 = self.enc2(x1)
+        x3 = self.enc3(x2)
+        x4 = self.enc4(x3)
+        x5 = self.enc5(x4)  # [B, 160, 16, 16]
+
+        # Height
+        coarse = self.coarse_head(x5)
+        mid = self.mid_head(self.mid_up(x5))
+        f = self.fine_up1(x5)
+        f = self.fine_up2(f)
+        f = self.fine_up3(f)
+        f = self.fine_up4(f)
+        fine = self.fine_head(f)
+        fine = F.interpolate(fine, size=(257, 257), mode="bilinear", align_corners=False)
+
+        # MCAL
+        m = self.mcal_up1(x5)
+        m = self.mcal_up2(m)
+        m = self.mcal_up3(m)
+        m = self.mcal_up4(m)
+        mcal = self.mcal_head(m)  # [B, 4, 256, 256]
+
+        # MCLY
+        mcly = self.mcly_head(x5)  # [B, num_classes, 16, 16]
+
+        # Hole
+        hole = self.hole_head(x5)  # [B, 1, 16, 16] (logits)
+
+        return coarse, mid, fine, mcal, mcly, hole
+
+
+def build_model(model_variant: str, input_channels: int, mcly_num_classes: int = 0) -> nn.Module:
     if model_variant == "early_fusion_v1":
         return EarlyFusionStage2TerrainSynthModel(input_channels=input_channels)
     if model_variant == "structured_fusion_v2":
         return StructuredFusionStage2TerrainSynthModel(input_channels=input_channels)
+    if model_variant == "multi_task_v3":
+        if mcly_num_classes <= 0:
+            raise ValueError("multi_task_v3 requires mcly_num_classes > 0.")
+        return MultiTaskStructuredFusionModel(input_channels=input_channels, mcly_num_classes=mcly_num_classes)
     raise ValueError(f"Unsupported model variant '{model_variant}'.")
 
 
@@ -1097,6 +1374,24 @@ def resolve_model_variant(args: argparse.Namespace, checkpoint_payload: dict[str
     if checkpoint_payload is not None:
         return str(checkpoint_payload.get("model_variant") or "early_fusion_v1")
     return DEFAULT_MODEL_VARIANT
+
+
+def build_mcly_label_index(samples: list[Stage2Sample]) -> tuple[dict[int, int], int]:
+    """Build a mapping from MCLY texture ID → contiguous class index."""
+    all_ids: set[int] = set()
+    for sample in samples:
+        if sample.mcly_texture_ids is None:
+            continue
+        ids = sample.mcly_texture_ids
+        for cy in range(ids.shape[0]):
+            for cx in range(ids.shape[1]):
+                tex_id = int(ids[cy, cx, 0])
+                if tex_id >= 0:
+                    all_ids.add(tex_id)
+
+    sorted_ids = sorted(all_ids)
+    label_index = {tex_id: idx for idx, tex_id in enumerate(sorted_ids)}
+    return label_index, len(sorted_ids)
 
 
 def build_split_report(
@@ -1355,6 +1650,10 @@ def run_epoch(
     height_mean: float,
     height_std: float,
     channels_last: bool,
+    is_multi_task: bool = False,
+    mcal_weight: float = 0.5,
+    mcly_weight: float = 0.3,
+    hole_weight: float = 0.5,
 ) -> dict[str, float]:
     training = optimizer is not None
     model.train(training)
@@ -1369,8 +1668,22 @@ def run_epoch(
 
         context = torch.autocast(device_type=device.type, dtype=torch.float16, enabled=autocast_enabled) if autocast_enabled else torch.enable_grad() if training else torch.no_grad()
         with context:
-            pred_17, pred_65, pred_257 = model(inputs)
-            metric_tensors = compute_metric_tensors(pred_17, pred_65, pred_257, target_17, target_65, target_257, height_mean, height_std)
+            if is_multi_task:
+                pred_17, pred_65, pred_257, pred_mcal, pred_mcly, pred_hole = model(inputs)
+                metric_tensors = compute_metric_tensors(
+                    pred_17, pred_65, pred_257, target_17, target_65, target_257,
+                    height_mean, height_std,
+                    pred_mcal=pred_mcal, target_mcal=batch["mcal_target"].to(device, non_blocking=True),
+                    has_mcal=batch["has_mcal"].to(device, non_blocking=True),
+                    pred_mcly=pred_mcly, target_mcly=batch["mcly_target"].to(device, non_blocking=True),
+                    has_mcly=batch["has_mcly"].to(device, non_blocking=True),
+                    pred_hole=pred_hole, target_hole=batch["hole_target"].to(device, non_blocking=True),
+                    has_hole=batch["has_hole"].to(device, non_blocking=True),
+                    mcal_weight=mcal_weight, mcly_weight=mcly_weight, hole_weight=hole_weight,
+                )
+            else:
+                pred_17, pred_65, pred_257 = model(inputs)
+                metric_tensors = compute_metric_tensors(pred_17, pred_65, pred_257, target_17, target_65, target_257, height_mean, height_std)
             loss = metric_tensors["loss"].mean()
 
         if training:
@@ -1386,7 +1699,7 @@ def run_epoch(
         accumulator.add(metric_tensors)
 
     report = accumulator.to_report()
-    return {key: float(report[key]) for key in METRIC_KEYS if report[key] is not None}
+    return {key: float(report[key]) for key in MULTI_TASK_METRIC_KEYS if report[key] is not None}
 
 
 def save_preview(
@@ -1398,6 +1711,7 @@ def save_preview(
     height_std: float,
     channels_last: bool,
     preview_count: int,
+    is_multi_task: bool = False,
 ) -> None:
     if len(dataset) == 0:
         return
@@ -1410,7 +1724,10 @@ def save_preview(
         sample = dataset[index]
         with torch.no_grad():
             inputs = maybe_channels_last(sample["inputs"].unsqueeze(0).to(device), channels_last)
-            pred_17, pred_65, pred_257 = model(inputs)
+            if is_multi_task:
+                pred_17, pred_65, pred_257, _pred_mcal, _pred_mcly, _pred_hole = model(inputs)
+            else:
+                pred_17, pred_65, pred_257 = model(inputs)
 
         minimap = (sample["minimap"].permute(1, 2, 0).numpy() * 255.0).clip(0, 255).astype(np.uint8)
         target_257 = (sample["height_257"].squeeze(0).numpy() * height_std) + height_mean
@@ -1570,8 +1887,24 @@ def main() -> None:
     if height_std < 1e-5:
         height_std = 1.0
 
-    train_dataset = Stage2Dataset(train_samples, height_mean, height_std, args.signal_dropout)
-    val_dataset = Stage2Dataset(val_samples, height_mean, height_std, signal_dropout=0.0)
+    model_variant = resolve_model_variant(args)
+    is_multi_task = model_variant == "multi_task_v3"
+
+    # Build MCLY label index for multi-task training
+    mcly_label_index: dict[int, int] = {}
+    mcly_num_classes = 0
+    if is_multi_task:
+        mcly_label_index, mcly_num_classes = build_mcly_label_index(train_samples)
+        print(f"MCLY label index: {mcly_num_classes} classes from training set")
+
+    train_dataset = Stage2Dataset(
+        train_samples, height_mean, height_std, args.signal_dropout,
+        mcly_label_index=mcly_label_index, mcly_num_classes=mcly_num_classes,
+    )
+    val_dataset = Stage2Dataset(
+        val_samples, height_mean, height_std, signal_dropout=0.0,
+        mcly_label_index=mcly_label_index, mcly_num_classes=mcly_num_classes,
+    )
     train_sample_weights = compute_training_sample_weights(train_samples, args.native_v10_boost, args.rare_signal_boost)
     train_loader = make_loader(
         train_dataset,
@@ -1586,7 +1919,6 @@ def main() -> None:
     val_signal_coverage = summarize_signal_coverage(val_samples)
     validation_catalog_path = write_validation_catalog(output_dir, train_samples, val_samples)
 
-    # Compute input channels from a sample
     sample_channels = train_dataset[0]["inputs"].shape[0]
 
     device = torch.device(args.device)
@@ -1598,30 +1930,29 @@ def main() -> None:
         checkpoint_height_std = float(checkpoint_payload.get("height_std", height_std))
         checkpoint_input_channels = int(checkpoint_payload.get("input_channels", sample_channels))
         checkpoint_model_variant = resolve_model_variant(args, checkpoint_payload)
+        checkpoint_is_multi_task = checkpoint_model_variant == "multi_task_v3"
+        checkpoint_mcly_classes = int(checkpoint_payload.get("mcly_num_classes", mcly_num_classes))
 
-        model = build_model(checkpoint_model_variant, checkpoint_input_channels).to(device)
+        model = build_model(checkpoint_model_variant, checkpoint_input_channels, checkpoint_mcly_classes).to(device)
         if args.channels_last and device.type == "cuda":
             model = model.to(memory_format=torch.channels_last)
         load_model_state(model, checkpoint_payload["model_state"])
 
         validation_analysis = evaluate_validation_analysis(
-            model,
-            val_loader,
-            device,
-            checkpoint_height_mean,
-            checkpoint_height_std,
-            args.channels_last,
-            ablation_groups,
+            model, val_loader, device,
+            checkpoint_height_mean, checkpoint_height_std,
+            args.channels_last, ablation_groups,
+            is_multi_task=checkpoint_is_multi_task,
+            mcal_weight=args.mcal_loss_weight,
+            mcly_weight=args.mcly_loss_weight,
+            hole_weight=args.hole_loss_weight,
         )
         save_preview(
-            model,
-            val_dataset,
-            device,
+            model, val_dataset, device,
             previews_dir / "checkpoint_eval.png",
-            checkpoint_height_mean,
-            checkpoint_height_std,
-            args.channels_last,
-            args.preview_count,
+            checkpoint_height_mean, checkpoint_height_std,
+            args.channels_last, args.preview_count,
+            is_multi_task=checkpoint_is_multi_task,
         )
 
         summary = {
@@ -1633,6 +1964,7 @@ def main() -> None:
             "model_variant": checkpoint_model_variant,
             "height_mean": checkpoint_height_mean,
             "height_std": checkpoint_height_std,
+            "mcly_num_classes": checkpoint_mcly_classes,
             "train_sampler": {
                 "native_v10_boost": args.native_v10_boost,
                 "rare_signal_boost": args.rare_signal_boost,
@@ -1655,8 +1987,7 @@ def main() -> None:
         (output_dir / "metrics.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return
 
-    model_variant = resolve_model_variant(args)
-    model = build_model(model_variant, sample_channels).to(device)
+    model = build_model(model_variant, sample_channels, mcly_num_classes).to(device)
     if args.channels_last and device.type == "cuda":
         model = model.to(memory_format=torch.channels_last)
 
@@ -1674,9 +2005,23 @@ def main() -> None:
     best_val_loss = float("inf")
 
     for epoch in range(1, args.epochs + 1):
-        train_metrics = run_epoch(model, train_loader, optimizer, scaler, device, height_mean, height_std, args.channels_last)
+        train_metrics = run_epoch(
+            model, train_loader, optimizer, scaler, device,
+            height_mean, height_std, args.channels_last,
+            is_multi_task=is_multi_task,
+            mcal_weight=args.mcal_loss_weight,
+            mcly_weight=args.mcly_loss_weight,
+            hole_weight=args.hole_loss_weight,
+        )
         with torch.no_grad():
-            val_metrics = run_epoch(model, val_loader, None, None, device, height_mean, height_std, args.channels_last)
+            val_metrics = run_epoch(
+                model, val_loader, None, None, device,
+                height_mean, height_std, args.channels_last,
+                is_multi_task=is_multi_task,
+                mcal_weight=args.mcal_loss_weight,
+                mcly_weight=args.mcly_loss_weight,
+                hole_weight=args.hole_loss_weight,
+            )
 
         epoch_metrics = {
             "epoch": epoch,
@@ -1689,10 +2034,16 @@ def main() -> None:
             f"train loss {train_metrics['loss']:.4f} | "
             f"val loss {val_metrics['loss']:.4f} | "
             f"val mae {val_metrics['mae_m']:.2f}m | "
-            f"val rmse {val_metrics['rmse_m']:.2f}m | "
-            f"val full_l1 {val_metrics['full_l1']:.4f} | "
-            f"val gradient {val_metrics['gradient']:.4f}"
+            f"val rmse {val_metrics['rmse_m']:.2f}m"
         )
+        if is_multi_task:
+            print(
+                f"         | "
+                f"height {val_metrics['height_loss']:.4f} | "
+                f"mcal {val_metrics['mcal_loss']:.4f} | "
+                f"mcly {val_metrics['mcly_loss']:.4f} | "
+                f"hole {val_metrics['hole_loss']:.4f}"
+            )
 
         last_checkpoint = checkpoints_dir / "last.pt"
         torch.save(
@@ -1704,6 +2055,7 @@ def main() -> None:
                 "height_std": height_std,
                 "input_channels": sample_channels,
                 "model_variant": model_variant,
+                "mcly_num_classes": mcly_num_classes,
                 "history": history,
             },
             last_checkpoint,
@@ -1720,36 +2072,36 @@ def main() -> None:
                     "height_std": height_std,
                     "input_channels": sample_channels,
                     "model_variant": model_variant,
+                    "mcly_num_classes": mcly_num_classes,
                     "history": history,
                 },
                 checkpoints_dir / "best.pt",
             )
             save_preview(
-                model,
-                val_dataset,
-                device,
+                model, val_dataset, device,
                 previews_dir / f"epoch_{epoch:03d}_best.png",
-                height_mean,
-                height_std,
-                args.channels_last,
-                args.preview_count,
+                height_mean, height_std,
+                args.channels_last, args.preview_count,
+                is_multi_task=is_multi_task,
             )
 
     best_checkpoint_path = checkpoints_dir / "best.pt"
     best_checkpoint = load_checkpoint_payload(best_checkpoint_path, device)
     best_model_variant = str(best_checkpoint.get("model_variant") or model_variant)
-    analysis_model = build_model(best_model_variant, sample_channels).to(device)
+    best_is_multi_task = best_model_variant == "multi_task_v3"
+    best_mcly_classes = int(best_checkpoint.get("mcly_num_classes", mcly_num_classes))
+    analysis_model = build_model(best_model_variant, sample_channels, best_mcly_classes).to(device)
     if args.channels_last and device.type == "cuda":
         analysis_model = analysis_model.to(memory_format=torch.channels_last)
     load_model_state(analysis_model, best_checkpoint["model_state"])
     validation_analysis = evaluate_validation_analysis(
-        analysis_model,
-        val_loader,
-        device,
-        height_mean,
-        height_std,
-        args.channels_last,
-        ablation_groups,
+        analysis_model, val_loader, device,
+        height_mean, height_std,
+        args.channels_last, ablation_groups,
+        is_multi_task=best_is_multi_task,
+        mcal_weight=args.mcal_loss_weight,
+        mcly_weight=args.mcly_loss_weight,
+        hole_weight=args.hole_loss_weight,
     )
 
     summary = {
@@ -1761,6 +2113,7 @@ def main() -> None:
         "model_variant": best_model_variant,
         "height_mean": height_mean,
         "height_std": height_std,
+        "mcly_num_classes": best_mcly_classes,
         "train_sampler": {
             "native_v10_boost": args.native_v10_boost,
             "rare_signal_boost": args.rare_signal_boost,

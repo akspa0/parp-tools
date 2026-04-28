@@ -323,6 +323,57 @@ static void RunDatasetBuildV10Stage1(string[] args)
 		}
 	}
 
+	// ── Second pass: PM4-only placeholder tiles ───────────────────────────
+	HashSet<string> coveredTileNames = entries
+		.Select(static entry => entry.TileName.ToLowerInvariant())
+		.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+	int placeholderWritten = 0;
+	int placeholderSkipped = 0;
+	const string buildKey = "4.0.0.11927";
+
+	foreach ((int tileX, int tileY) in DiscoverPm4TileCoords(inputDir))
+	{
+		if (entries.Count + placeholderWritten >= limit)
+			break;
+
+		string tileName = $"development_{tileX}_{tileY}";
+		if (coveredTileNames.Contains(tileName))
+			continue;
+
+		string outputPath = Path.Combine(outputDir, $"{tileName}_v10.npz");
+		if (!overwrite && File.Exists(outputPath))
+		{
+			placeholderSkipped++;
+			continue;
+		}
+
+		byte[,,]? minimapRgb = null;
+		string? minimapSourcePath = null;
+		if (TryLoadMinimapForTile(minimapRoot, "development", tileX, tileY, out byte[,,]? loadedMinimap, out string? loadedPath))
+		{
+			minimapRgb = loadedMinimap;
+			minimapSourcePath = loadedPath;
+		}
+
+		TerrainTileTensorPack pack = AdtTensorPackBuilder.BuildPlaceholder(
+			inputDir, "development", tileX, tileY, minimapRgb, buildKey);
+
+		NpzTileSerializer.Serialize(pack, outputPath);
+
+		entries.Add(new V10Stage1ManifestEntry(
+			tileName,
+			string.Empty, // no ADT source
+			outputPath,
+			null, // no placement sidecar
+			minimapSourcePath ?? string.Empty,
+			pack.MinimapSourceTag,
+			pack.AvailableSignals.OrderBy(static signal => signal, StringComparer.OrdinalIgnoreCase).ToArray()));
+
+		placeholderWritten++;
+		Console.WriteLine($"Stage1 placeholder: {tileName} -> {outputPath}");
+	}
+
 	V10Stage1Manifest manifest = new(
 		SchemaVersion: "v10-stage1-manifest.v1",
 		CreatedAtUtc: DateTimeOffset.UtcNow,
@@ -331,6 +382,7 @@ static void RunDatasetBuildV10Stage1(string[] args)
 		MinimapRoot: minimapRoot,
 		ScannedTileCount: scanned,
 		WrittenTileCount: entries.Count,
+		PlaceholderTileCount: placeholderWritten,
 		Entries: entries,
 		Skipped: skipped);
 
@@ -342,7 +394,9 @@ static void RunDatasetBuildV10Stage1(string[] args)
 	Console.WriteLine($"Manifest: {manifestPath}");
 	Console.WriteLine($"Scanned: {scanned}");
 	Console.WriteLine($"Written: {entries.Count}");
-	Console.WriteLine($"Skipped: {skipped.Count}");
+	Console.WriteLine($"  ADT-backed: {entries.Count - placeholderWritten}");
+	Console.WriteLine($"  Placeholder: {placeholderWritten}");
+	Console.WriteLine($"Skipped: {skipped.Count + placeholderSkipped}");
 }
 
 static V10TensorExtractionResult ExtractAndWriteV10TensorPack(
@@ -382,6 +436,70 @@ static IEnumerable<string> EnumerateRootAdtFiles(string inputDir)
 			&& !path.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase)
 			&& !path.EndsWith("_lod.adt", StringComparison.OrdinalIgnoreCase))
 		.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase);
+}
+
+static IEnumerable<(int TileX, int TileY)> DiscoverPm4TileCoords(string mapDirectory)
+{
+	HashSet<(int, int)> seen = [];
+	string[] pm4Files;
+	try
+	{
+		pm4Files = Directory.GetFiles(mapDirectory, "*.pm4", SearchOption.TopDirectoryOnly);
+	}
+	catch
+	{
+		yield break;
+	}
+
+	foreach (string pm4Path in pm4Files)
+	{
+		string fileName = Path.GetFileNameWithoutExtension(pm4Path);
+		if (!TryParseTileCoordinates(fileName, out int tileX, out int tileY))
+			continue;
+
+		if (seen.Add((tileX, tileY)))
+			yield return (tileX, tileY);
+	}
+}
+
+static bool TryLoadMinimapForTile(string minimapRoot, string mapName, int tileX, int tileY, out byte[,,]? minimapRgb, out string? sourcePath)
+{
+	minimapRgb = null;
+	sourcePath = null;
+
+	string tileStem = $"{mapName}_{tileX}_{tileY}";
+
+	foreach (string directCandidate in EnumerateLooseMinimapCandidates(tileStem))
+	{
+		string directPath = Path.Combine(minimapRoot, directCandidate);
+		if (!File.Exists(directPath))
+			continue;
+
+		byte[]? directRgb = DecodeFilesystemMinimap(directPath);
+		if (directRgb is not { Length: > 0 })
+			continue;
+
+		minimapRgb = ReshapeRgb256(directRgb);
+		sourcePath = directPath;
+		return true;
+	}
+
+	foreach (string candidate in EnumerateMinimapCandidates(mapName, tileX, tileY))
+	{
+		string? resolvedPath = ResolveFilesystemMinimapPath(minimapRoot, candidate);
+		if (resolvedPath is null)
+			continue;
+
+		byte[]? rgb = DecodeFilesystemMinimap(resolvedPath);
+		if (rgb is not { Length: > 0 })
+			continue;
+
+		minimapRgb = ReshapeRgb256(rgb);
+		sourcePath = resolvedPath;
+		return true;
+	}
+
+	return false;
 }
 
 static bool TryLoadV10MinimapRgb(string inputAdtPath, string minimapRoot, out byte[,,]? minimapRgb, out string? sourcePath)
@@ -4304,6 +4422,7 @@ file sealed record V10Stage1Manifest(
 	string MinimapRoot,
 	int ScannedTileCount,
 	int WrittenTileCount,
+	int PlaceholderTileCount,
 	IReadOnlyList<V10Stage1ManifestEntry> Entries,
 	IReadOnlyList<V10Stage1ManifestSkip> Skipped);
 
