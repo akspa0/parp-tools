@@ -78,9 +78,13 @@ public static class AdtTensorPackBuilder
 
         float[,]? shadowResidualMask256 = BuildShadowResidualMask256(mcshShadowMask256, objectPreciseMask257, availableSignals);
 
-        // ── Build PM4 path and building footprint masks ──────────────────────
-        (float[,]? pm4PathMask, float[,]? pm4BuildingFootprintMask) =
+        // ── Build PM4 path, building footprint, and MPRL portal masks ────────
+        (float[,]? pm4PathMask, float[,]? pm4BuildingFootprintMask, float[,]? pm4MprlMask) =
             BuildPm4Masks(adtPath, availableSignals);
+
+        // ── Build unified liquid mask and height ─────────────────────────────
+        (float[,]? unifiedLiquidMask, float[,]? unifiedLiquidHeight) =
+            BuildUnifiedLiquid(mh2oHeight, mclqHeight, wlMask, wlHeight, availableSignals);
 
         // ── Compute downsampled heights ──────────────────────────────────────
         float[,]? height65 = DownsampleHeightmap(height257, 65);
@@ -111,10 +115,13 @@ public static class AdtTensorPackBuilder
             HoleMask16 = holeMask,
             WlLiquidMask = wlMask,
             WlLiquidHeight = wlHeight,
+            UnifiedLiquidMask = unifiedLiquidMask,
+            UnifiedLiquidHeight = unifiedLiquidHeight,
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
             Pm4PathMask = pm4PathMask,
             Pm4BuildingFootprintMask = pm4BuildingFootprintMask,
+            Pm4MprlMask = pm4MprlMask,
             McshShadowMask256 = mcshShadowMask256,
             ShadowResidualMask256 = shadowResidualMask256,
             AvailableSignals = availableSignals,
@@ -1296,18 +1303,131 @@ public static class AdtTensorPackBuilder
     // PM4 path and building footprint masks
     // ═══════════════════════════════════════════════════════════════════════
 
-    private static (float[,]? pathMask, float[,]? buildingFootprintMask)
+    private static (float[,]? pathMask, float[,]? buildingFootprintMask, float[,]? mprlMask)
         BuildPm4Masks(string adtPath, HashSet<string> signals)
     {
-        if (!AdtPm4MaskBuilder.TryBuild(adtPath, out float[,]? pathMask, out float[,]? buildingMask))
-            return (null, null);
+        if (!AdtPm4MaskBuilder.TryBuild(adtPath, out float[,]? pathMask, out float[,]? buildingMask, out float[,]? mprlMask))
+            return (null, null, null);
 
         if (pathMask is not null)
             signals.Add("pm4_path_mask");
         if (buildingMask is not null)
             signals.Add("pm4_building_footprint_mask");
+        if (mprlMask is not null)
+            signals.Add("pm4_mprl_mask");
 
-        return (pathMask, buildingMask);
+        return (pathMask, buildingMask, mprlMask);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Unified liquid mask and height
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private static (float[,]? mask, float[,]? height)
+        BuildUnifiedLiquid(float[,]? mh2oHeight, float[,]? mclqHeight, float[,]? wlMask, float[,]? wlHeight, HashSet<string> signals)
+    {
+        // Priority: MH2O > MCLQ > WL*
+        // MH2O is the richest source (WotLK+) with per-vertex heights at 257×257.
+        if (mh2oHeight is not null)
+        {
+            float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
+            float[,] height = new float[TileHeightmapSize, TileHeightmapSize];
+            bool any = false;
+
+            for (int y = 0; y < TileHeightmapSize; y++)
+            {
+                for (int x = 0; x < TileHeightmapSize; x++)
+                {
+                    float h = mh2oHeight[y, x];
+                    if (h == 0f)
+                        continue;
+
+                    mask[y, x] = 1.0f;
+                    height[y, x] = h;
+                    any = true;
+                }
+            }
+
+            if (any)
+            {
+                signals.Add("unified_liquid_mask");
+                signals.Add("unified_liquid_height");
+                return (mask, height);
+            }
+        }
+
+        // MCLQ is pre-WotLK, stored at 129×129 resolution.
+        if (mclqHeight is not null)
+        {
+            int mclqSize = mclqHeight.GetLength(0);
+            float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
+            float[,] height = new float[TileHeightmapSize, TileHeightmapSize];
+            bool any = false;
+
+            // Upsample 129×129 → 257×257 via bilinear
+            float scale = (float)(mclqSize - 1) / (TileHeightmapSize - 1);
+            for (int y = 0; y < TileHeightmapSize; y++)
+            {
+                for (int x = 0; x < TileHeightmapSize; x++)
+                {
+                    float sourceX = x * scale;
+                    float sourceY = y * scale;
+                    int ix = Math.Clamp((int)sourceX, 0, mclqSize - 2);
+                    int iy = Math.Clamp((int)sourceY, 0, mclqSize - 2);
+                    float fx = sourceX - ix;
+                    float fy = sourceY - iy;
+
+                    float h = BilinearInterpolate(
+                        mclqHeight[iy, ix], mclqHeight[iy, ix + 1],
+                        mclqHeight[iy + 1, ix], mclqHeight[iy + 1, ix + 1],
+                        fx, fy);
+
+                    if (h == 0f)
+                        continue;
+
+                    mask[y, x] = 1.0f;
+                    height[y, x] = h;
+                    any = true;
+                }
+            }
+
+            if (any)
+            {
+                signals.Add("unified_liquid_mask");
+                signals.Add("unified_liquid_height");
+                return (mask, height);
+            }
+        }
+
+        // WL* loose files are the last resort.
+        if (wlMask is not null)
+        {
+            float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
+            float[,] height = new float[TileHeightmapSize, TileHeightmapSize];
+            bool any = false;
+
+            for (int y = 0; y < TileHeightmapSize; y++)
+            {
+                for (int x = 0; x < TileHeightmapSize; x++)
+                {
+                    if (wlMask[y, x] == 0f)
+                        continue;
+
+                    mask[y, x] = 1.0f;
+                    height[y, x] = wlHeight?[y, x] ?? 0f;
+                    any = true;
+                }
+            }
+
+            if (any)
+            {
+                signals.Add("unified_liquid_mask");
+                signals.Add("unified_liquid_height");
+                return (mask, height);
+            }
+        }
+
+        return (null, null);
     }
 
     private static string ExtractMapName(string adtPath)

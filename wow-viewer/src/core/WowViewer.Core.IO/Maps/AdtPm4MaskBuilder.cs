@@ -16,16 +16,18 @@ public static class AdtPm4MaskBuilder
     private const float TileSize = 533.33333f;
 
     /// <summary>
-    /// Reads all PM4 files in the map directory and produces path + building masks for the given ADT tile.
+    /// Reads all PM4 files in the map directory and produces path, building, and MPRL portal masks for the given ADT tile.
     /// </summary>
     /// <param name="adtPath">Full path to the root ADT file.</param>
     /// <param name="pathMask">Output 257×257 path mask (1.0 = path, 0.0 = no path).</param>
     /// <param name="buildingFootprintMask">Output 257×257 building footprint mask (0.0–1.0).</param>
+    /// <param name="mprlMask">Output 257×257 MPRL portal mask (1.0 = portal region, 0.0 = none).</param>
     /// <returns>True if any PM4 data was found and rasterized.</returns>
-    public static bool TryBuild(string adtPath, out float[,]? pathMask, out float[,]? buildingFootprintMask)
+    public static bool TryBuild(string adtPath, out float[,]? pathMask, out float[,]? buildingFootprintMask, out float[,]? mprlMask)
     {
         pathMask = null;
         buildingFootprintMask = null;
+        mprlMask = null;
 
         if (!TryParseAdtTileCoords(adtPath, out int tileX, out int tileY))
             return false;
@@ -50,8 +52,10 @@ public static class AdtPm4MaskBuilder
 
         float[,] path = new float[TileHeightmapSize, TileHeightmapSize];
         float[,] building = new float[TileHeightmapSize, TileHeightmapSize];
+        float[,] mprl = new float[TileHeightmapSize, TileHeightmapSize];
         bool anyPath = false;
         bool anyBuilding = false;
+        bool anyMprl = false;
 
         foreach (string pm4Path in pm4Files)
         {
@@ -148,14 +152,38 @@ public static class AdtPm4MaskBuilder
                     }
                 }
             }
+
+            // ── Rasterize MPRL portal positions ────────────────────────────
+            if (known.Mprl.Count > 0)
+            {
+                foreach (var mprlEntry in known.Mprl)
+                {
+                    // Unk16 == 0 indicates a normal portal entry (non-terminator).
+                    if (mprlEntry.Unk16 != 0)
+                        continue;
+
+                    Vector3 worldPos = Pm4CoordinateService.MprlToAdtPlacement(mprlEntry.Position);
+                    if (!IsWithinTile(worldPos, tileX, tileY))
+                        continue;
+
+                    int px = WorldToPixelX(worldPos.X, tileX);
+                    int py = WorldToPixelY(worldPos.Z, tileY);
+                    // Paint a small disk — MPRL portals are point-like indicators,
+                    // similar in spirit to ADT hole regions.
+                    PaintCircle(mprl, px, py, radius: 3f, value: 1.0f);
+                    anyMprl = true;
+                }
+            }
         }
 
         if (anyPath)
             pathMask = path;
         if (anyBuilding)
             buildingFootprintMask = building;
+        if (anyMprl)
+            mprlMask = mprl;
 
-        return anyPath || anyBuilding;
+        return anyPath || anyBuilding || anyMprl;
     }
 
     private static bool IsWithinTile(Vector3 adtPosition, int tileX, int tileY)

@@ -82,6 +82,18 @@ public sealed class TerrainTileTensorPack
     /// <summary>257×257 liquid height from WLW/WLM/WLQ/WLL loose files.</summary>
     public float[,]? WlLiquidHeight { get; init; }
 
+    /// <summary>
+    /// 257×257 unified liquid mask combining MH2O, MCLQ, and WL* sources.
+    /// Priority: MH2O > MCLQ > WL*. 1.0 where any liquid source indicates water.
+    /// </summary>
+    public float[,]? UnifiedLiquidMask { get; init; }
+
+    /// <summary>
+    /// 257×257 unified liquid surface height combining MH2O, MCLQ, and WL* sources.
+    /// Priority: MH2O > MCLQ > WL*.
+    /// </summary>
+    public float[,]? UnifiedLiquidHeight { get; init; }
+
     // ── Object and footprint masks ─────────────────────────────────────────
 
     /// <summary>257×257 binary mask: any object footprint present.</summary>
@@ -95,6 +107,13 @@ public sealed class TerrainTileTensorPack
 
     /// <summary>257×257 PM4 building footprint mask.</summary>
     public float[,]? Pm4BuildingFootprintMask { get; init; }
+
+    /// <summary>
+    /// 257×257 PM4 MPRL portal mask. MPRL entries mark transitions between
+    /// PM4 zones and correlate with ADT hole regions — the hole will exist
+    /// within the same footprint as MPRL portal areas.
+    /// </summary>
+    public float[,]? Pm4MprlMask { get; init; }
 
     /// <summary>256×256 decoded MCSH shadow occupancy aligned to minimap space.</summary>
     public float[,]? McshShadowMask256 { get; init; }

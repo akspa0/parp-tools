@@ -38,15 +38,13 @@ INPUT_SIGNAL_LAYOUT: list[tuple[str, int]] = [
     ("mcal_alpha_pack_256", 4),
     ("mccv_rgb", 3),
     ("mcnr_normal_xyz", 3),
-    ("mh2o_surface_height", 1),
-    ("mh2o_depth", 1),
+    ("unified_liquid_mask", 1),
+    ("unified_liquid_height", 1),
     ("object_mask_257", 1),
     ("object_precise_mask_257", 1),
     ("pm4_path_mask", 1),
     ("pm4_building_footprint_mask", 1),
-    ("wl_liquid_mask", 1),
-    ("wl_liquid_height", 1),
-    ("mclq_surface_height", 1),
+    ("pm4_mprl_mask", 1),
     ("hole_mask_16", 1),
     ("mtxf_animated_mask", 1),
     ("coarse_height_17_prior", 1),
@@ -64,10 +62,10 @@ VALIDATION_SUBSET_FIELDS: dict[str, str] = {
 }
 
 VALIDATION_ABLATION_GROUPS: dict[str, tuple[str, ...]] = {
-    "pm4": ("pm4_path_mask", "pm4_building_footprint_mask"),
+    "pm4": ("pm4_path_mask", "pm4_building_footprint_mask", "pm4_mprl_mask"),
     "mcal": ("mcal_alpha_pack_256",),
     "objects": ("object_mask_257", "object_precise_mask_257"),
-    "liquids": ("mh2o_surface_height", "mh2o_depth", "wl_liquid_mask", "wl_liquid_height", "mclq_surface_height"),
+    "liquids": ("unified_liquid_mask", "unified_liquid_height"),
     "mccv": ("mccv_rgb",),
     "normals": ("mcnr_normal_xyz",),
 }
@@ -175,15 +173,13 @@ MODEL_BRANCH_SIGNAL_GROUPS: dict[str, tuple[str, ...]] = {
         "object_precise_mask_257",
         "pm4_path_mask",
         "pm4_building_footprint_mask",
+        "pm4_mprl_mask",
         "hole_mask_16",
         "mtxf_animated_mask",
     ),
     "liquids": (
-        "mh2o_surface_height",
-        "mh2o_depth",
-        "wl_liquid_mask",
-        "wl_liquid_height",
-        "mclq_surface_height",
+        "unified_liquid_mask",
+        "unified_liquid_height",
     ),
 }
 
@@ -353,6 +349,9 @@ def decode_signal_array(key: str, array: np.ndarray, source_key: str) -> np.ndar
     if key == "mcnr_normal_xyz" and source_key == "normal_rgb_256":
         decoded = (array.astype(np.float32) / 127.5) - 1.0
         return np.clip(decoded, -1.0, 1.0)
+    # When an MH2O height field is used as a liquid mask, threshold non-zero → 1.0.
+    if key == "unified_liquid_mask" and source_key == "mh2o_surface_height":
+        return (array != 0).astype(np.float32)
     return array
 
 
@@ -380,16 +379,14 @@ OPTIONAL_SIGNALS: list[SignalSpec] = [
     SignalSpec("mcal_alpha_pack_256", 4, 256, np.float32),
     SignalSpec("mccv_rgb", 3, 257, np.float32),
     SignalSpec("mcnr_normal_xyz", 3, 257, np.float32),
-    SignalSpec("mh2o_surface_height", 1, 257, np.float32),
-    SignalSpec("mh2o_depth", 1, 257, np.float32),
+    SignalSpec("unified_liquid_mask", 1, 257, np.float32),
+    SignalSpec("unified_liquid_height", 1, 257, np.float32),
     SignalSpec("object_mask_257", 1, 257, np.float32),
     SignalSpec("object_precise_mask_257", 1, 257, np.float32),
     SignalSpec("pm4_path_mask", 1, 257, np.float32),
     SignalSpec("pm4_building_footprint_mask", 1, 257, np.float32),
+    SignalSpec("pm4_mprl_mask", 1, 257, np.float32),
     SignalSpec("hole_mask_16", 1, 16, np.uint8),
-    SignalSpec("wl_liquid_mask", 1, 257, np.float32),
-    SignalSpec("wl_liquid_height", 1, 257, np.float32),
-    SignalSpec("mclq_surface_height", 1, 129, np.float32),
     SignalSpec("mtxf_animated_mask", 1, 16, np.int32),
 ]
 
@@ -401,8 +398,8 @@ SIGNAL_ALIASES: dict[str, tuple[str, ...]] = {
     "mcnr_normal_xyz": ("normal_rgb_256",),
     "object_precise_mask_257": ("object_mask_precise_257",),
     "pm4_path_mask": ("pm4_mask_257",),
-    "wl_liquid_mask": ("liquid_mask_257",),
-    "wl_liquid_height": ("liquid_height_257",),
+    "unified_liquid_mask": ("liquid_mask_257", "wl_liquid_mask", "mh2o_surface_height"),
+    "unified_liquid_height": ("liquid_height_257", "wl_liquid_height", "mh2o_surface_height", "mclq_surface_height"),
 }
 
 
@@ -432,7 +429,10 @@ def is_native_v10_source(sample: Stage2Sample) -> bool:
 
 
 def sample_has_pm4_signal(sample: Stage2Sample) -> bool:
-    return "pm4_path_mask" in sample.available_signal_keys or "pm4_building_footprint_mask" in sample.available_signal_keys
+    return any(
+        key in sample.available_signal_keys
+        for key in ("pm4_path_mask", "pm4_building_footprint_mask", "pm4_mprl_mask")
+    )
 
 
 def sample_has_mcal_signal(sample: Stage2Sample) -> bool:
@@ -450,7 +450,7 @@ def sample_has_normal_signal(sample: Stage2Sample) -> bool:
 def sample_has_liquid_signal(sample: Stage2Sample) -> bool:
     return any(
         key in sample.available_signal_keys
-        for key in ("mh2o_surface_height", "mh2o_depth", "wl_liquid_mask", "wl_liquid_height", "mclq_surface_height")
+        for key in ("unified_liquid_mask", "unified_liquid_height")
     )
 
 
@@ -610,15 +610,13 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
         for key, channels in [
             ("mccv_rgb", 3),
             ("mcnr_normal_xyz", 3),
-            ("mh2o_surface_height", 1),
-            ("mh2o_depth", 1),
+            ("unified_liquid_mask", 1),
+            ("unified_liquid_height", 1),
             ("object_mask_257", 1),
             ("object_precise_mask_257", 1),
             ("pm4_path_mask", 1),
             ("pm4_building_footprint_mask", 1),
-            ("wl_liquid_mask", 1),
-            ("wl_liquid_height", 1),
-            ("mclq_surface_height", 1),
+            ("pm4_mprl_mask", 1),
         ]:
             if key in sample.signals:
                 arr = sample.signals[key]
