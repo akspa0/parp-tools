@@ -584,25 +584,21 @@ def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> l
 
 
 def downsample_heightmap(source: np.ndarray, target_size: int) -> np.ndarray:
-    """Bilinear downsample a 2D heightmap."""
+    """Bilinear downsample a 2D heightmap using vectorized numpy."""
     source_size = source.shape[0]
-    result = np.empty((target_size, target_size), dtype=np.float32)
     scale = (source_size - 1) / (target_size - 1)
-    for y in range(target_size):
-        for x in range(target_size):
-            sx = x * scale
-            sy = y * scale
-            ix = min(int(sx), source_size - 2)
-            iy = min(int(sy), source_size - 2)
-            fx = sx - ix
-            fy = sy - iy
-            v00 = source[iy, ix]
-            v10 = source[iy, ix + 1]
-            v01 = source[iy + 1, ix]
-            v11 = source[iy + 1, ix + 1]
-            top = v00 + (v10 - v00) * fx
-            bottom = v01 + (v11 - v01) * fx
-            result[y, x] = top + (bottom - top) * fy
+    target_coords = np.arange(target_size, dtype=np.float64) * scale
+    ix = np.clip(np.floor(target_coords).astype(np.intp), 0, source_size - 2)
+    fx = target_coords - ix
+
+    source_rows = source[np.ix_(ix, ix)]
+    source_cols = source[np.ix_(ix + 1, ix + 1)]
+    source_row_next = source[np.ix_(ix + 1, ix)]
+    source_col_next = source[np.ix_(ix, ix + 1)]
+
+    top = source_rows + (source_col_next - source_rows) * fx[np.newaxis, :]
+    bottom = source_row_next + (source_cols - source_row_next) * fx[np.newaxis, :]
+    result = (top + (bottom - top) * fx[:, np.newaxis]).astype(np.float32)
     return result
 
 
@@ -2054,6 +2050,21 @@ def main() -> None:
                 f"hole {val_metrics['hole_loss']:.4f}"
             )
 
+        incremental_summary = {
+            "input": str(input_path),
+            "sample_count": len(samples),
+            "train_count": len(train_samples),
+            "val_count": len(val_samples),
+            "input_channels": sample_channels,
+            "model_variant": model_variant,
+            "height_mean": height_mean,
+            "height_std": height_std,
+            "mcly_num_classes": mcly_num_classes,
+            "best_val_loss_so_far": best_val_loss,
+            "history": history,
+        }
+        (output_dir / "metrics.json").write_text(json.dumps(incremental_summary, indent=2), encoding="utf-8")
+
         last_checkpoint = checkpoints_dir / "last.pt"
         torch.save(
             {
@@ -2094,6 +2105,13 @@ def main() -> None:
                 is_multi_task=is_multi_task,
             )
 
+    del train_loader
+    del val_loader
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    analysis_loader = make_loader(val_dataset, args.batch_size, shuffle=False, num_workers=0)
+
     best_checkpoint_path = checkpoints_dir / "best.pt"
     best_checkpoint = load_checkpoint_payload(best_checkpoint_path, device)
     best_model_variant = str(best_checkpoint.get("model_variant") or model_variant)
@@ -2104,7 +2122,7 @@ def main() -> None:
         analysis_model = analysis_model.to(memory_format=torch.channels_last)
     load_model_state(analysis_model, best_checkpoint["model_state"])
     validation_analysis = evaluate_validation_analysis(
-        analysis_model, val_loader, device,
+        analysis_model, analysis_loader, device,
         height_mean, height_std,
         args.channels_last, ablation_groups,
         is_multi_task=best_is_multi_task,
