@@ -33,6 +33,12 @@ DEFAULT_RARE_SIGNAL_BOOST = 3.0
 DEFAULT_MCAL_LOSS_WEIGHT = 0.5
 DEFAULT_MCLY_LOSS_WEIGHT = 0.3
 DEFAULT_HOLE_LOSS_WEIGHT = 0.5
+DEFAULT_MIN_HEIGHT_RANGE = 4.0
+DEFAULT_MIN_MINIMAP_VARIANCE = 1.0e-5
+DEFAULT_MIN_MINIMAP_GRADIENT = 2.0e-3
+DEFAULT_QUALITY_REWARD = 0.35
+DEFAULT_LOW_SIGNAL_PENALTY = 0.25
+DEFAULT_BLANK_TILE_PENALTY = 0.45
 PREVIEW_ROW_TITLE_HEIGHT = 18
 PREVIEW_PANE_LABEL_HEIGHT = 18
 PREVIEW_LABEL_PADDING = 4
@@ -124,6 +130,42 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=DEFAULT_RARE_SIGNAL_BOOST,
         help="Additional weighted-sampler emphasis for PM4, MCAL, MCCV, and normal-bearing training rows.",
+    )
+    parser.add_argument(
+        "--quality-reward",
+        type=float,
+        default=DEFAULT_QUALITY_REWARD,
+        help="Additional reward multiplier for high-information tiles during sampling and loss weighting.",
+    )
+    parser.add_argument(
+        "--low-signal-penalty",
+        type=float,
+        default=DEFAULT_LOW_SIGNAL_PENALTY,
+        help="Penalty multiplier for low-information tiles during sampling and loss weighting.",
+    )
+    parser.add_argument(
+        "--blank-tile-penalty",
+        type=float,
+        default=DEFAULT_BLANK_TILE_PENALTY,
+        help="Extra penalty for tiles that are flat and visually blank at the same time.",
+    )
+    parser.add_argument(
+        "--min-height-range-for-reward",
+        type=float,
+        default=DEFAULT_MIN_HEIGHT_RANGE,
+        help="Minimum terrain height range treated as informative for reward/penalty scoring.",
+    )
+    parser.add_argument(
+        "--min-minimap-variance-for-reward",
+        type=float,
+        default=DEFAULT_MIN_MINIMAP_VARIANCE,
+        help="Minimum minimap variance treated as informative for reward/penalty scoring.",
+    )
+    parser.add_argument(
+        "--min-minimap-gradient-for-reward",
+        type=float,
+        default=DEFAULT_MIN_MINIMAP_GRADIENT,
+        help="Minimum minimap gradient treated as informative for reward/penalty scoring.",
     )
     parser.add_argument(
         "--model-variant",
@@ -245,6 +287,53 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def finite_float(value: Any) -> float:
+    result = float(value)
+    return result if math.isfinite(result) else 0.0
+
+
+def compute_minimap_gradient(minimap: np.ndarray) -> float:
+    rgb = minimap.astype(np.float32) / 255.0
+    dx = np.abs(rgb[:, 1:, :] - rgb[:, :-1, :]).mean()
+    dy = np.abs(rgb[1:, :, :] - rgb[:-1, :, :]).mean()
+    return finite_float(dx + dy)
+
+
+@dataclass(frozen=True, slots=True)
+class RewardConfig:
+    quality_reward: float
+    low_signal_penalty: float
+    blank_tile_penalty: float
+    min_height_range: float
+    min_minimap_variance: float
+    min_minimap_gradient: float
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "quality_reward": self.quality_reward,
+            "low_signal_penalty": self.low_signal_penalty,
+            "blank_tile_penalty": self.blank_tile_penalty,
+            "min_height_range": self.min_height_range,
+            "min_minimap_variance": self.min_minimap_variance,
+            "min_minimap_gradient": self.min_minimap_gradient,
+        }
+
+
+def build_reward_config(args: argparse.Namespace) -> RewardConfig:
+    return RewardConfig(
+        quality_reward=max(0.0, float(args.quality_reward)),
+        low_signal_penalty=max(0.0, float(args.low_signal_penalty)),
+        blank_tile_penalty=max(0.0, float(args.blank_tile_penalty)),
+        min_height_range=max(0.0, float(args.min_height_range_for_reward)),
+        min_minimap_variance=max(0.0, float(args.min_minimap_variance_for_reward)),
+        min_minimap_gradient=max(0.0, float(args.min_minimap_gradient_for_reward)),
+    )
 
 
 @dataclass(slots=True)
@@ -433,9 +522,106 @@ class Stage2Sample:
     available_signal_keys: set[str]
     min_height: float
     max_height: float
+    minimap_variance: float
+    minimap_gradient: float
+    hole_coverage: float
+    quality_score: float
     mcal_alpha: np.ndarray | None = None
     mcly_texture_ids: np.ndarray | None = None
     hole_mask: np.ndarray | None = None
+
+    @property
+    def height_range(self) -> float:
+        return float(self.max_height - self.min_height)
+
+
+def compute_sample_quality_score(
+    height_range: float,
+    minimap_variance: float,
+    minimap_gradient: float,
+    hole_coverage: float,
+) -> float:
+    height_score = min(max(0.0, height_range) / 64.0, 4.0)
+    minimap_score = min(max(0.0, minimap_gradient) / 0.02, 3.0) + min(max(0.0, minimap_variance) / 0.01, 3.0)
+    hole_penalty = min(max(0.0, hole_coverage) * 2.0, 1.0)
+    return float(height_score + minimap_score - hole_penalty)
+
+
+def compute_sample_signal_strength(sample: Stage2Sample, reward_config: RewardConfig) -> float:
+    height_strength = clamp01(sample.height_range / max(reward_config.min_height_range * 8.0, 1.0))
+    variance_strength = clamp01(sample.minimap_variance / max(reward_config.min_minimap_variance * 8.0, 1.0e-8))
+    gradient_strength = clamp01(sample.minimap_gradient / max(reward_config.min_minimap_gradient * 4.0, 1.0e-8))
+    return float((height_strength * 0.45) + (variance_strength * 0.25) + (gradient_strength * 0.30))
+
+
+def sample_is_blank_like(sample: Stage2Sample, reward_config: RewardConfig) -> bool:
+    return (
+        sample.height_range < reward_config.min_height_range
+        and sample.minimap_variance < reward_config.min_minimap_variance
+        and sample.minimap_gradient < reward_config.min_minimap_gradient
+    )
+
+
+def sample_is_low_signal(sample: Stage2Sample, reward_config: RewardConfig) -> bool:
+    return compute_sample_signal_strength(sample, reward_config) < 0.5
+
+
+def compute_sample_reward_multiplier(sample: Stage2Sample, reward_config: RewardConfig) -> float:
+    signal_strength = compute_sample_signal_strength(sample, reward_config)
+    reward = reward_config.quality_reward * signal_strength
+    low_signal_penalty = 0.0
+    if signal_strength < 0.5:
+        low_signal_penalty = reward_config.low_signal_penalty * ((0.5 - signal_strength) / 0.5)
+    blank_penalty = reward_config.blank_tile_penalty if sample_is_blank_like(sample, reward_config) else 0.0
+    multiplier = 1.0 + reward - low_signal_penalty - blank_penalty
+    return float(max(0.1, min(2.0, multiplier)))
+
+
+def compute_sample_loss_weight(sample: Stage2Sample, reward_config: RewardConfig) -> float:
+    reward_multiplier = compute_sample_reward_multiplier(sample, reward_config)
+    adjusted = 1.0 + ((reward_multiplier - 1.0) * 0.5)
+    return float(max(0.5, min(1.5, adjusted)))
+
+
+def build_reward_summary(
+    samples: list[Stage2Sample],
+    reward_config: RewardConfig,
+    sample_weights: list[float],
+    loss_weights: list[float],
+) -> dict[str, Any]:
+    signal_strengths = [compute_sample_signal_strength(sample, reward_config) for sample in samples]
+    blank_like_count = sum(1 for sample in samples if sample_is_blank_like(sample, reward_config))
+    low_signal_count = sum(1 for sample in samples if sample_is_low_signal(sample, reward_config))
+    if not samples:
+        return {
+            "config": reward_config.to_dict(),
+            "blank_like_count": 0,
+            "low_signal_count": 0,
+            "mean_signal_strength": 0.0,
+            "mean_quality_score": 0.0,
+            "sampler_weight": {"min": 0.0, "mean": 0.0, "max": 0.0},
+            "loss_weight": {"min": 0.0, "mean": 0.0, "max": 0.0},
+        }
+
+    return {
+        "config": reward_config.to_dict(),
+        "blank_like_count": blank_like_count,
+        "blank_like_fraction": blank_like_count / len(samples),
+        "low_signal_count": low_signal_count,
+        "low_signal_fraction": low_signal_count / len(samples),
+        "mean_signal_strength": float(sum(signal_strengths) / len(signal_strengths)),
+        "mean_quality_score": float(sum(sample.quality_score for sample in samples) / len(samples)),
+        "sampler_weight": {
+            "min": float(min(sample_weights)),
+            "mean": float(sum(sample_weights) / len(sample_weights)),
+            "max": float(max(sample_weights)),
+        },
+        "loss_weight": {
+            "min": float(min(loss_weights)),
+            "mean": float(sum(loss_weights) / len(loss_weights)),
+            "max": float(max(loss_weights)),
+        },
+    }
 
 
 def is_native_v10_source(sample: Stage2Sample) -> bool:
@@ -559,10 +745,21 @@ def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> l
                     mcly_ids = mcly_arr
 
             hole_mask = None
+            hole_coverage = 0.0
             if "hole_mask_16" in shard.files:
                 hole_arr = np.asarray(shard["hole_mask_16"], dtype=np.float32)
                 if hole_arr.shape == (16, 16):
                     hole_mask = hole_arr
+                    hole_coverage = finite_float(hole_arr.mean())
+
+            minimap_variance = finite_float(np.var(minimap_rgb.astype(np.float32) / 255.0))
+            minimap_gradient = compute_minimap_gradient(minimap_rgb)
+            quality_score = compute_sample_quality_score(
+                float(np.max(height_257) - np.min(height_257)),
+                minimap_variance,
+                minimap_gradient,
+                hole_coverage,
+            )
 
             samples.append(
                 Stage2Sample(
@@ -579,6 +776,10 @@ def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> l
                     available_signal_keys=available,
                     min_height=float(np.min(height_257)),
                     max_height=float(np.max(height_257)),
+                    minimap_variance=minimap_variance,
+                    minimap_gradient=minimap_gradient,
+                    hole_coverage=hole_coverage,
+                    quality_score=quality_score,
                     mcal_alpha=mcal_alpha,
                     mcly_texture_ids=mcly_ids,
                     hole_mask=hole_mask,
@@ -617,6 +818,7 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
         height_mean: float,
         height_std: float,
         signal_dropout: float,
+        sample_loss_weights: list[float] | None = None,
         mcly_label_index: dict[int, int] | None = None,
         mcly_num_classes: int = 0,
     ):
@@ -624,6 +826,9 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
         self.height_mean = float(height_mean)
         self.height_std = float(height_std)
         self.signal_dropout = signal_dropout
+        if sample_loss_weights is not None and len(sample_loss_weights) != len(samples):
+            raise ValueError("sample_loss_weights must match the sample list length.")
+        self.sample_loss_weights = sample_loss_weights or [1.0 for _ in samples]
         self.mcly_label_index = mcly_label_index or {}
         self.mcly_num_classes = mcly_num_classes
 
@@ -749,6 +954,7 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
             "tile_name": sample.tile_name,
             "dataset_key": sample.dataset_key,
             "source_schema": sample.source_schema,
+            "loss_weight": torch.tensor(self.sample_loss_weights[index], dtype=torch.float32),
             "is_native_v10": torch.tensor(is_native_v10_source(sample), dtype=torch.bool),
             "is_legacy_only": torch.tensor(not is_native_v10_source(sample), dtype=torch.bool),
             "has_pm4_signal": torch.tensor(sample_has_pm4_signal(sample), dtype=torch.bool),
@@ -1584,10 +1790,11 @@ def compute_training_sample_weights(
     samples: list[Stage2Sample],
     native_v10_boost: float,
     rare_signal_boost: float,
+    reward_config: RewardConfig,
 ) -> list[float]:
     weights: list[float] = []
     for sample in samples:
-        weight = 1.0
+        weight = compute_sample_reward_multiplier(sample, reward_config)
         if native_v10_boost > 0 and is_native_v10_source(sample):
             weight += native_v10_boost
         if rare_signal_boost > 0:
@@ -1599,7 +1806,7 @@ def compute_training_sample_weights(
                 weight += rare_signal_boost
             if sample_has_normal_signal(sample):
                 weight += rare_signal_boost
-        weights.append(weight)
+        weights.append(float(max(0.1, weight)))
     return weights
 
 
@@ -1682,7 +1889,11 @@ def run_epoch(
             else:
                 pred_17, pred_65, pred_257 = model(inputs)
                 metric_tensors = compute_metric_tensors(pred_17, pred_65, pred_257, target_17, target_65, target_257, height_mean, height_std)
-            loss = metric_tensors["loss"].mean() / grad_accum_steps
+            if training and "loss_weight" in batch:
+                loss_weight = batch["loss_weight"].to(device, non_blocking=True)
+                loss = (metric_tensors["loss"] * loss_weight).mean() / grad_accum_steps
+            else:
+                loss = metric_tensors["loss"].mean() / grad_accum_steps
 
         if training:
             if scaler is not None and autocast_enabled:
@@ -1888,6 +2099,7 @@ def main() -> None:
     seed_everything(args.seed)
     ablation_groups = parse_validation_ablation_groups(args.validation_ablation_groups)
     forced_validation_tiles = parse_tile_name_list(args.force_validation_tiles)
+    reward_config = build_reward_config(args)
 
     input_path = Path(args.input).resolve()
     output_dir = Path(args.output_dir).resolve()
@@ -1920,13 +2132,17 @@ def main() -> None:
 
     train_dataset = Stage2Dataset(
         train_samples, height_mean, height_std, args.signal_dropout,
+        sample_loss_weights=[compute_sample_loss_weight(sample, reward_config) for sample in train_samples],
         mcly_label_index=mcly_label_index, mcly_num_classes=mcly_num_classes,
     )
     val_dataset = Stage2Dataset(
         val_samples, height_mean, height_std, signal_dropout=0.0,
+        sample_loss_weights=[1.0 for _ in val_samples],
         mcly_label_index=mcly_label_index, mcly_num_classes=mcly_num_classes,
     )
-    train_sample_weights = compute_training_sample_weights(train_samples, args.native_v10_boost, args.rare_signal_boost)
+    train_loss_weights = [compute_sample_loss_weight(sample, reward_config) for sample in train_samples]
+    train_sample_weights = compute_training_sample_weights(train_samples, args.native_v10_boost, args.rare_signal_boost, reward_config)
+    train_reward_summary = build_reward_summary(train_samples, reward_config, train_sample_weights, train_loss_weights)
     train_loader = make_loader(
         train_dataset,
         args.batch_size,
@@ -1989,6 +2205,7 @@ def main() -> None:
             "train_sampler": {
                 "native_v10_boost": args.native_v10_boost,
                 "rare_signal_boost": args.rare_signal_boost,
+                "quality_rewarding": train_reward_summary,
                 "min_weight": min(train_sample_weights),
                 "max_weight": max(train_sample_weights),
             },
@@ -2133,6 +2350,13 @@ def main() -> None:
             "height_mean": height_mean,
             "height_std": height_std,
             "mcly_num_classes": mcly_num_classes,
+            "train_sampler": {
+                "native_v10_boost": args.native_v10_boost,
+                "rare_signal_boost": args.rare_signal_boost,
+                "quality_rewarding": train_reward_summary,
+                "min_weight": min(train_sample_weights),
+                "max_weight": max(train_sample_weights),
+            },
             "best_val_loss_so_far": best_val_loss,
             "history": history,
         }
@@ -2149,6 +2373,7 @@ def main() -> None:
                 "input_channels": sample_channels,
                 "model_variant": model_variant,
                 "mcly_num_classes": mcly_num_classes,
+                "train_sampler": train_reward_summary,
                 "history": history,
                 "best_val_loss": best_val_loss,
             },
@@ -2167,6 +2392,7 @@ def main() -> None:
                     "input_channels": sample_channels,
                     "model_variant": model_variant,
                     "mcly_num_classes": mcly_num_classes,
+                    "train_sampler": train_reward_summary,
                     "history": history,
                     "best_val_loss": best_val_loss,
                 },
@@ -2191,6 +2417,7 @@ def main() -> None:
                     "input_channels": sample_channels,
                     "model_variant": model_variant,
                     "mcly_num_classes": mcly_num_classes,
+                    "train_sampler": train_reward_summary,
                     "history": history,
                     "best_val_loss": best_val_loss,
                 },
@@ -2236,6 +2463,7 @@ def main() -> None:
         "train_sampler": {
             "native_v10_boost": args.native_v10_boost,
             "rare_signal_boost": args.rare_signal_boost,
+            "quality_rewarding": train_reward_summary,
             "min_weight": min(train_sample_weights),
             "max_weight": max(train_sample_weights),
         },

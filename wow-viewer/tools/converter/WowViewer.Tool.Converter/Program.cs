@@ -93,6 +93,12 @@ string[] tail = args.Skip(1).ToArray();
 	case "analyze-tileset-taxonomy":
 		V10TilesetTaxonomyCommand.Run(tail);
 		break;
+	case "mine-tileset-patterns":
+		V10TilesetPatternMineCommand.Run(tail);
+		break;
+	case "harvest-tileset-blps":
+		V10TilesetHarvestCommand.Run(tail);
+		break;
 	case "terrain-patch-adt":
 		TerrainPatchAdtCommand.Run(tail);
 		break;
@@ -4416,6 +4422,8 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input-dir <images> --mask-dir <masks> --output-dir <images>");
 	Console.WriteLine("  wowviewer-converter index-tilesets --client-root <path> [--era <tag>] [--output-dir <dir>] [--limit <count>] [--no-mpq] [--blp-sample <n>]");
 	Console.WriteLine("  wowviewer-converter analyze-tileset-taxonomy --input <merged_tileset_index.json> [--output-dir <dir>]");
+	Console.WriteLine("  wowviewer-converter mine-tileset-patterns --input <merged_tileset_index.json> [--output-dir <dir>] [--limit <n>] [--mip <level>] [--write-previews]");
+	Console.WriteLine("  wowviewer-converter harvest-tileset-blps --input <merged_tileset_index.json> [--output-dir <dir>] [--limit <n>]");
 }
 
 file sealed record V10TensorExtractionResult(
