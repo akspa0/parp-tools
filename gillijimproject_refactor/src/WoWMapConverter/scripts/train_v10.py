@@ -32,6 +32,9 @@ DEFAULT_DETAIL_RESIDUAL_WEIGHT = 0.08
 DEFAULT_GRADIENT_WEIGHT = 0.35
 DEFAULT_MID_L1_WEIGHT = 0.55
 DEFAULT_COARSE_L1_WEIGHT = 0.35
+DEFAULT_QUALITY_REWARD = 0.35
+DEFAULT_LOW_SIGNAL_PENALTY = 0.25
+DEFAULT_BLANK_TILE_PENALTY = 0.45
 
 VISUAL_PREFIX_CHANNELS = 8
 OPTIONAL_PRIOR_CHANNELS = 3
@@ -161,6 +164,64 @@ def corrupt_prior_17(prior_17: torch.Tensor, rng: random.Random, shift_max: floa
     return corrupted
 
 
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def compute_entry_signal_strength(entry: v9.V9SampleEntry, args: argparse.Namespace) -> float:
+    height_strength = _clamp01(entry.height_range / max(float(args.min_height_range) * 8.0, 1.0))
+    variance_strength = _clamp01(entry.minimap_variance / max(float(args.min_minimap_variance) * 8.0, 1.0e-8))
+    gradient_strength = _clamp01(entry.minimap_gradient / max(float(args.min_minimap_gradient) * 4.0, 1.0e-8))
+    return float((height_strength * 0.45) + (variance_strength * 0.25) + (gradient_strength * 0.30))
+
+
+def is_blank_like_entry(entry: v9.V9SampleEntry, args: argparse.Namespace) -> bool:
+    return (
+        entry.height_range < float(args.min_height_range)
+        and entry.minimap_variance < float(args.min_minimap_variance)
+        and entry.minimap_gradient < float(args.min_minimap_gradient)
+    )
+
+
+def compute_entry_sample_weight(entry: v9.V9SampleEntry, args: argparse.Namespace) -> float:
+    signal_strength = compute_entry_signal_strength(entry, args)
+    reward = float(args.quality_reward) * signal_strength
+    low_signal_penalty = 0.0
+    if signal_strength < 0.5:
+        low_signal_penalty = float(args.low_signal_penalty) * ((0.5 - signal_strength) / 0.5)
+    blank_penalty = float(args.blank_tile_penalty) if is_blank_like_entry(entry, args) else 0.0
+    return float(max(0.1, min(2.0, 1.0 + reward - low_signal_penalty - blank_penalty)))
+
+
+def summarize_entry_weighting(entries: Sequence[v9.V9SampleEntry], args: argparse.Namespace) -> dict[str, float | int]:
+    if not entries:
+        return {
+            "count": 0,
+            "blank_like_count": 0,
+            "blank_like_fraction": 0.0,
+            "low_signal_count": 0,
+            "low_signal_fraction": 0.0,
+            "min_sample_weight": 0.0,
+            "mean_sample_weight": 0.0,
+            "max_sample_weight": 0.0,
+        }
+
+    weights = [compute_entry_sample_weight(entry, args) for entry in entries]
+    signal_strengths = [compute_entry_signal_strength(entry, args) for entry in entries]
+    blank_like_count = sum(1 for entry in entries if is_blank_like_entry(entry, args))
+    low_signal_count = sum(1 for strength in signal_strengths if strength < 0.5)
+    return {
+        "count": len(entries),
+        "blank_like_count": blank_like_count,
+        "blank_like_fraction": blank_like_count / len(entries),
+        "low_signal_count": low_signal_count,
+        "low_signal_fraction": low_signal_count / len(entries),
+        "min_sample_weight": float(min(weights)),
+        "mean_sample_weight": float(sum(weights) / len(weights)),
+        "max_sample_weight": float(max(weights)),
+    }
+
+
 @dataclass(frozen=True)
 class V10SampleState:
     sample_key: str
@@ -174,6 +235,7 @@ class V10SampleState:
     target_detail_residual_257: torch.Tensor
     wdl_17: torch.Tensor | None
     has_wdl: bool
+    sample_weight: float
 
 
 class V10NativeDataset(Dataset):
@@ -193,6 +255,7 @@ class V10NativeDataset(Dataset):
         prior_corrupt_wdl_prob: float,
         corrupt_shift_max: float,
         corrupt_noise_std: float,
+        sample_weight_args: argparse.Namespace,
     ):
         self.entries = list(entries)
         self.arrays_cache = arrays_cache
@@ -207,6 +270,7 @@ class V10NativeDataset(Dataset):
         self.prior_corrupt_wdl_prob = float(prior_corrupt_wdl_prob)
         self.corrupt_shift_max = float(corrupt_shift_max)
         self.corrupt_noise_std = float(corrupt_noise_std)
+        self.sample_weight_args = sample_weight_args
         self.current_epoch = 0
 
         self._precomputed: list[V10SampleState] = [self._precompute(entry) for entry in self.entries]
@@ -248,6 +312,7 @@ class V10NativeDataset(Dataset):
             target_detail_residual_257=target_detail_residual_257,
             wdl_17=wdl_17,
             has_wdl=wdl_17 is not None,
+            sample_weight=compute_entry_sample_weight(entry, self.sample_weight_args),
         )
 
     def __len__(self) -> int:
@@ -317,6 +382,7 @@ class V10NativeDataset(Dataset):
             "prior_present_257": prior_present_257,
             "prior_quality_257": prior_quality_257,
             "prior_mode": prior_mode,
+            "sample_weight": torch.tensor(state.sample_weight, dtype=torch.float32),
         }
 
 
@@ -504,7 +570,11 @@ def compute_v10_loss(
         + (detail_residual_weight * detail_residual_per_sample)
         + (gate_suppression_weight * gate_penalty_per_sample)
     )
-    total_loss = total_loss_per_sample.mean()
+    sample_weight = batch.get("sample_weight")
+    if sample_weight is not None:
+        total_loss = (total_loss_per_sample * sample_weight.reshape(-1)).mean()
+    else:
+        total_loss = total_loss_per_sample.mean()
 
     components = {
         "full_l1": float(full_l1_per_sample.mean().item()),
@@ -883,6 +953,13 @@ def train_single_run(
     print("\n=== V10 Training ===")
     print(f"  train_workers={args.train_workers} | val_workers={args.val_workers} | channels_last={args.channels_last} | compile={args.use_compile}")
     print(f"  prior mix: no_wdl={args.prior_no_wdl_prob:.2f} real={args.prior_real_wdl_prob:.2f} corrupt={args.prior_corrupt_wdl_prob:.2f}")
+    train_weighting_summary = summarize_entry_weighting(train_entries, args)
+    print(
+        "  reward weighting: "
+        f"blank_like={train_weighting_summary['blank_like_count']}/{train_weighting_summary['count']} "
+        f"low_signal={train_weighting_summary['low_signal_count']}/{train_weighting_summary['count']} "
+        f"weight_range={train_weighting_summary['min_sample_weight']:.2f}-{train_weighting_summary['max_sample_weight']:.2f}"
+    )
 
     preload_entries = list(selected_entries)
     preload_ids = {entry.sample_key for entry in preload_entries}
@@ -907,6 +984,7 @@ def train_single_run(
         prior_corrupt_wdl_prob=args.prior_corrupt_wdl_prob,
         corrupt_shift_max=args.corrupt_shift_max,
         corrupt_noise_std=args.corrupt_noise_std,
+        sample_weight_args=args,
     )
     val_dataset_no_wdl = V10NativeDataset(
         val_entries,
@@ -922,6 +1000,7 @@ def train_single_run(
         prior_corrupt_wdl_prob=args.prior_corrupt_wdl_prob,
         corrupt_shift_max=args.corrupt_shift_max,
         corrupt_noise_std=args.corrupt_noise_std,
+        sample_weight_args=args,
     )
     val_dataset_real_wdl = V10NativeDataset(
         val_entries,
@@ -937,6 +1016,7 @@ def train_single_run(
         prior_corrupt_wdl_prob=args.prior_corrupt_wdl_prob,
         corrupt_shift_max=args.corrupt_shift_max,
         corrupt_noise_std=args.corrupt_noise_std,
+        sample_weight_args=args,
     )
     dev_dataset_no_wdl = V10NativeDataset(
         dev_eval_entries,
@@ -952,6 +1032,7 @@ def train_single_run(
         prior_corrupt_wdl_prob=args.prior_corrupt_wdl_prob,
         corrupt_shift_max=args.corrupt_shift_max,
         corrupt_noise_std=args.corrupt_noise_std,
+        sample_weight_args=args,
     )
     dev_dataset_real_wdl = V10NativeDataset(
         dev_eval_entries,
@@ -967,6 +1048,7 @@ def train_single_run(
         prior_corrupt_wdl_prob=args.prior_corrupt_wdl_prob,
         corrupt_shift_max=args.corrupt_shift_max,
         corrupt_noise_std=args.corrupt_noise_std,
+        sample_weight_args=args,
     )
     dev_dataset_corrupt_wdl = V10NativeDataset(
         dev_eval_entries,
@@ -982,6 +1064,7 @@ def train_single_run(
         prior_corrupt_wdl_prob=args.prior_corrupt_wdl_prob,
         corrupt_shift_max=args.corrupt_shift_max,
         corrupt_noise_std=args.corrupt_noise_std,
+        sample_weight_args=args,
     )
 
     val_loader_no_wdl = build_eval_loader(val_dataset_no_wdl, args, device)
@@ -1260,6 +1343,7 @@ def train_single_run(
         "best_epoch": best_epoch,
         "stop_reason": stop_reason,
         "config": vars(args),
+        "reward_weighting": train_weighting_summary,
         "preview_count": args.preview_count,
         "final_learning_rate": float(optimizer.param_groups[0]["lr"]),
         "feature_contract": build_v10_feature_contract(args),
@@ -1336,6 +1420,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gradient-weight", type=float, default=DEFAULT_GRADIENT_WEIGHT)
     parser.add_argument("--detail-residual-weight", type=float, default=DEFAULT_DETAIL_RESIDUAL_WEIGHT)
     parser.add_argument("--gate-suppression-weight", type=float, default=DEFAULT_GATE_SUPPRESSION_WEIGHT)
+    parser.add_argument("--quality-reward", type=float, default=DEFAULT_QUALITY_REWARD)
+    parser.add_argument("--low-signal-penalty", type=float, default=DEFAULT_LOW_SIGNAL_PENALTY)
+    parser.add_argument("--blank-tile-penalty", type=float, default=DEFAULT_BLANK_TILE_PENALTY)
 
     return parser
 
