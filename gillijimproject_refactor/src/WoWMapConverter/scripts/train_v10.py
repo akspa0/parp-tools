@@ -532,6 +532,7 @@ def compute_v10_loss(
     gradient_weight: float,
     detail_residual_weight: float,
     gate_suppression_weight: float,
+    apply_sample_weight: bool,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor, dict[str, torch.Tensor]]:
     coarse_pred_17, mid_pred_65, fused_mid_257, full_pred_257, effective_gate = build_v10_predictions(
         coarse_height_17=coarse_height_17,
@@ -570,7 +571,7 @@ def compute_v10_loss(
         + (detail_residual_weight * detail_residual_per_sample)
         + (gate_suppression_weight * gate_penalty_per_sample)
     )
-    sample_weight = batch.get("sample_weight")
+    sample_weight = batch.get("sample_weight") if apply_sample_weight else None
     if sample_weight is not None:
         total_loss = (total_loss_per_sample * sample_weight.reshape(-1)).mean()
     else:
@@ -644,6 +645,7 @@ def run_epoch(
                 gradient_weight=args.gradient_weight,
                 detail_residual_weight=args.detail_residual_weight,
                 gate_suppression_weight=args.gate_suppression_weight,
+                apply_sample_weight=is_training,
             )
 
         if is_training:
