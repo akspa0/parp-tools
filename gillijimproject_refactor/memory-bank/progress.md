@@ -12,6 +12,24 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 ## Recent Validated Milestones
 
+### Apr 29, 2026 - Compact pattern-aware v10 curation landed
+
+- `wow-viewer/scripts/curate_v10_training_shards.py` now writes `era_tag` into curated rows and defaults to `--max-selected-fraction 0.5`, keeping selected shards at or below half of the valid preselection pool unless explicitly disabled with `--max-selected-fraction 0`
+- The curation script now loads the known local Wave 2 pattern dictionaries by default and attaches per-tile `pattern_detection` hints for matching examples from MCAL brushes, MCAL compositions, height profiles, prefab cells, and anchor-aware brush dictionaries
+- `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` now carries those pattern hints through discovery, validation catalogs, signal coverage, and weighted sampling via `--pattern-signal-boost`
+- Proof:
+  - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\curate_v10_training_shards.py wow-viewer\scripts\train_v10_stage2_terrain_synth.py` passed
+  - full-corpus compact curation passed against `output/ml-training/v10_curated/v10_full_corpus_manifest.json`
+  - full-corpus output: `output/ml-training/v10_curated/v10_full_corpus_compact_pattern_manifest.json`
+  - full-corpus result: `3,945` candidates, `3,240` valid preselection shards, `1,620` selected shards, `705` rejected, with era-balanced counts and `41` pattern-annotated native v10 rows retained
+  - native-dev compact curation passed against `output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json`
+  - native-dev output: `output/ml-training/v10_curated/v10_dev_compact_pattern_manifest.json`
+  - native-dev result: `64` candidates, `41` valid preselection shards, `20` selected shards, `23` rejected, all selected rows carrying pattern hints
+  - bounded CPU trainer smoke passed at `output/ml-training/v10_stage2_pattern_compact_smoke/checkpoints/best.pt` with `--max-samples 8 --epochs 1 --device cpu`
+- Boundary:
+  - Pattern hints affect Stage 2 sample weighting and validation/reporting, not model input channels, so existing checkpoints are not invalidated by the new metadata.
+  - Native development shards still report `era_tag = unknown` until upstream Stage 1 manifest metadata records a concrete source build or era.
+
 ### Apr 29, 2026 - Era-routed v10 tileset harvest landed
 
 - `wowviewer-converter harvest-tileset-blps` now uses each merged tileset entry's `era_tag` to pick the matching staged-local client session before falling back to the remaining client roots

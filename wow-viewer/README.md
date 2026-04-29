@@ -112,7 +112,7 @@ Python trainers live in `scripts/` and consume the v10 NPZ shard contract direct
 
 | Trainer | Input | Output | Purpose |
 |---------|-------|--------|---------|
-| `curate_v10_training_shards.py` | v10/v9 manifests or NPZ dirs | curated manifest + report | Balance and filter shards before training |
+| `curate_v10_training_shards.py` | v10/v9 manifests or NPZ dirs | curated manifest + report | Era-aware compact shard selection plus optional Wave 2 pattern hints |
 | `train_v10_stage1_minimap2height.py` | Stage 1 manifest | `minimap2height.pt` | Baseline minimap → `height_17` regression |
 | `train_v10_minimap_to_mclay.py` | Stage 1 manifest + `mclay_dictionary.json` | `minimap_to_mclay_classifier.pt` | Tile-level minimap → retained MCLY palette |
 | `train_v10_minimap_to_mclay_grid.py` | Stage 1 manifest or label manifest | `minimap_to_mclay_grid_classifier.pt` | Chunk-grid minimap → 16×16 retained MCLY labels |
@@ -126,6 +126,8 @@ Example mixed-corpus curation from the all-version v9 cache plus native v10 shar
   --max-per-dataset 128
 ```
 
+By default, curation keeps the selected set at or below half of the valid pool (`--max-selected-fraction 0.5`) and writes `era_tag` plus `pattern_detection` metadata when local Wave 2 pattern dictionaries contain matching tile examples. Use `--max-selected-fraction 0` to disable the compact cap.
+
 Current all-version Stage 2 training uses the proven v9 direct-cache shards for broad client coverage plus native v10 development shards for richer signals. Latest local CUDA output: `output/ml-training/v10_stage2_v9cache_native_dev_cuda_run2/checkpoints/best.pt`.
 
 Example Stage 2 smoke test:
@@ -135,6 +137,8 @@ Example Stage 2 smoke test:
   --output-dir output\ml-training\v10_stage2 `
   --epochs 50 --device cuda --signal-dropout 0.15
 ```
+
+When the input manifest contains `pattern_detection` rows from curation, Stage 2 uses them as sampler and validation signals through `--pattern-signal-boost` without changing the model input channel contract.
 
 ---
 

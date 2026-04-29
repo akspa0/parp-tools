@@ -30,6 +30,7 @@ DEFAULT_SIGNAL_DROOUT = 0.15
 DEFAULT_MODEL_VARIANT = "structured_fusion_v2"
 DEFAULT_NATIVE_V10_BOOST = 1.0
 DEFAULT_RARE_SIGNAL_BOOST = 3.0
+DEFAULT_PATTERN_SIGNAL_BOOST = 1.5
 DEFAULT_MCAL_LOSS_WEIGHT = 0.5
 DEFAULT_MCLY_LOSS_WEIGHT = 0.3
 DEFAULT_HOLE_LOSS_WEIGHT = 0.5
@@ -69,6 +70,7 @@ VALIDATION_SUBSET_FIELDS: dict[str, str] = {
     "has_object_signal": "object_present",
     "has_mccv_signal": "mccv_present",
     "has_normal_signal": "normal_present",
+    "has_pattern_signal": "pattern_present",
 }
 
 VALIDATION_ABLATION_GROUPS: dict[str, tuple[str, ...]] = {
@@ -130,6 +132,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=DEFAULT_RARE_SIGNAL_BOOST,
         help="Additional weighted-sampler emphasis for PM4, MCAL, MCCV, and normal-bearing training rows.",
+    )
+    parser.add_argument(
+        "--pattern-signal-boost",
+        type=float,
+        default=DEFAULT_PATTERN_SIGNAL_BOOST,
+        help="Additional weighted-sampler emphasis for rows annotated with Wave 2 pattern-detection hints.",
     )
     parser.add_argument(
         "--quality-reward",
@@ -342,9 +350,11 @@ class ShardReference:
     dataset_key: str
     source_schema: str
     source_manifest: str
+    era_tag: str = ""
+    pattern_detection: dict[str, Any] | None = None
 
     def __hash__(self) -> int:
-        return hash((str(self.path), self.dataset_key, self.source_schema, self.source_manifest))
+        return hash((str(self.path), self.dataset_key, self.source_schema, self.source_manifest, self.era_tag))
 
 
 def infer_dataset_key(path: Path) -> str:
@@ -366,12 +376,21 @@ def infer_source_schema(path: Path) -> str:
     return "unknown"
 
 
-def resolve_shard_reference(path: Path, dataset_key: str = "", source_schema: str = "", source_manifest: str = "") -> ShardReference:
+def resolve_shard_reference(
+    path: Path,
+    dataset_key: str = "",
+    source_schema: str = "",
+    source_manifest: str = "",
+    era_tag: str = "",
+    pattern_detection: dict[str, Any] | None = None,
+) -> ShardReference:
     return ShardReference(
         path=path,
         dataset_key=dataset_key or infer_dataset_key(path),
         source_schema=source_schema or infer_source_schema(path),
         source_manifest=source_manifest,
+        era_tag=era_tag,
+        pattern_detection=pattern_detection,
     )
 
 
@@ -404,6 +423,8 @@ def find_npz_paths(input_path: Path) -> list[ShardReference]:
                         dataset_key=str(entry.get("dataset_key") or entry.get("DatasetKey") or ""),
                         source_schema=str(entry.get("source_schema") or entry.get("SourceSchema") or ""),
                         source_manifest=str(entry.get("source_manifest") or entry.get("SourceManifest") or ""),
+                        era_tag=str(entry.get("era_tag") or entry.get("EraTag") or ""),
+                        pattern_detection=entry.get("pattern_detection") if isinstance(entry.get("pattern_detection"), dict) else None,
                     )
                 )
             if references:
@@ -512,8 +533,10 @@ class Stage2Sample:
     path: Path
     tile_name: str
     dataset_key: str
+    era_tag: str
     source_schema: str
     source_manifest: str
+    pattern_detection: dict[str, Any]
     minimap_rgb: np.ndarray
     height_257: np.ndarray
     height_65: np.ndarray
@@ -651,6 +674,10 @@ def sample_has_normal_signal(sample: Stage2Sample) -> bool:
     return "mcnr_normal_xyz" in sample.available_signal_keys
 
 
+def sample_has_pattern_signal(sample: Stage2Sample) -> bool:
+    return bool(sample.pattern_detection)
+
+
 def sample_has_liquid_signal(sample: Stage2Sample) -> bool:
     return any(
         key in sample.available_signal_keys
@@ -679,6 +706,8 @@ def sample_matches_subset(sample: Stage2Sample, subset_name: str) -> bool:
         return sample_has_mccv_signal(sample)
     if subset_name == "normal_present":
         return sample_has_normal_signal(sample)
+    if subset_name == "pattern_present":
+        return sample_has_pattern_signal(sample)
     raise ValueError(f"Unknown subset name '{subset_name}'.")
 
 
@@ -744,6 +773,10 @@ def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> l
                 if mcly_arr.shape == (16, 16, 4):
                     mcly_ids = mcly_arr
 
+            pattern_detection = shard_ref.pattern_detection or {}
+            if pattern_detection:
+                available.add("pattern_detection")
+
             hole_mask = None
             hole_coverage = 0.0
             if "hole_mask_16" in shard.files:
@@ -766,8 +799,10 @@ def discover_samples(npz_paths: Iterable[ShardReference], max_samples: int) -> l
                     path=shard_ref.path,
                     tile_name=tile_name,
                     dataset_key=shard_ref.dataset_key,
+                    era_tag=shard_ref.era_tag,
                     source_schema=shard_ref.source_schema,
                     source_manifest=shard_ref.source_manifest,
+                    pattern_detection=pattern_detection,
                     minimap_rgb=minimap_rgb,
                     height_257=height_257,
                     height_65=height_65,
@@ -963,6 +998,7 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
             "has_object_signal": torch.tensor(sample_has_object_signal(sample), dtype=torch.bool),
             "has_mccv_signal": torch.tensor(sample_has_mccv_signal(sample), dtype=torch.bool),
             "has_normal_signal": torch.tensor(sample_has_normal_signal(sample), dtype=torch.bool),
+            "has_pattern_signal": torch.tensor(sample_has_pattern_signal(sample), dtype=torch.bool),
         }
 
 
@@ -1656,8 +1692,10 @@ def sample_catalog_entry(sample: Stage2Sample) -> dict[str, Any]:
     return {
         "tile_name": sample.tile_name,
         "dataset_key": sample.dataset_key,
+        "era_tag": sample.era_tag,
         "source_schema": sample.source_schema,
         "source_manifest": sample.source_manifest,
+        "pattern_detection": sample.pattern_detection,
         "shard_path": str(sample.path),
         "groups": {
             "native_v10": is_native_v10_source(sample),
@@ -1668,6 +1706,7 @@ def sample_catalog_entry(sample: Stage2Sample) -> dict[str, Any]:
             "normal_present": sample_has_normal_signal(sample),
             "liquid_present": sample_has_liquid_signal(sample),
             "object_present": sample_has_object_signal(sample),
+            "pattern_present": sample_has_pattern_signal(sample),
         },
     }
 
@@ -1790,6 +1829,7 @@ def compute_training_sample_weights(
     samples: list[Stage2Sample],
     native_v10_boost: float,
     rare_signal_boost: float,
+    pattern_signal_boost: float,
     reward_config: RewardConfig,
 ) -> list[float]:
     weights: list[float] = []
@@ -1806,6 +1846,8 @@ def compute_training_sample_weights(
                 weight += rare_signal_boost
             if sample_has_normal_signal(sample):
                 weight += rare_signal_boost
+        if pattern_signal_boost > 0 and sample_has_pattern_signal(sample):
+            weight += pattern_signal_boost * min(2.0, 1.0 + (float(sample.pattern_detection.get("category_count", 0)) * 0.25))
         weights.append(float(max(0.1, weight)))
     return weights
 
@@ -2141,7 +2183,13 @@ def main() -> None:
         mcly_label_index=mcly_label_index, mcly_num_classes=mcly_num_classes,
     )
     train_loss_weights = [compute_sample_loss_weight(sample, reward_config) for sample in train_samples]
-    train_sample_weights = compute_training_sample_weights(train_samples, args.native_v10_boost, args.rare_signal_boost, reward_config)
+    train_sample_weights = compute_training_sample_weights(
+        train_samples,
+        args.native_v10_boost,
+        args.rare_signal_boost,
+        args.pattern_signal_boost,
+        reward_config,
+    )
     train_reward_summary = build_reward_summary(train_samples, reward_config, train_sample_weights, train_loss_weights)
     train_loader = make_loader(
         train_dataset,
@@ -2205,6 +2253,7 @@ def main() -> None:
             "train_sampler": {
                 "native_v10_boost": args.native_v10_boost,
                 "rare_signal_boost": args.rare_signal_boost,
+                "pattern_signal_boost": args.pattern_signal_boost,
                 "quality_rewarding": train_reward_summary,
                 "min_weight": min(train_sample_weights),
                 "max_weight": max(train_sample_weights),
@@ -2353,6 +2402,7 @@ def main() -> None:
             "train_sampler": {
                 "native_v10_boost": args.native_v10_boost,
                 "rare_signal_boost": args.rare_signal_boost,
+                "pattern_signal_boost": args.pattern_signal_boost,
                 "quality_rewarding": train_reward_summary,
                 "min_weight": min(train_sample_weights),
                 "max_weight": max(train_sample_weights),
@@ -2463,6 +2513,7 @@ def main() -> None:
         "train_sampler": {
             "native_v10_boost": args.native_v10_boost,
             "rare_signal_boost": args.rare_signal_boost,
+            "pattern_signal_boost": args.pattern_signal_boost,
             "quality_rewarding": train_reward_summary,
             "min_weight": min(train_sample_weights),
             "max_weight": max(train_sample_weights),

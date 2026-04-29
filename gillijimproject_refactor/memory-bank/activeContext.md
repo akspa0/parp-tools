@@ -31,7 +31,9 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `wowviewer-converter mine-v10-height-profiles` now owns native height archetype clustering and writes `height_profile_dictionary.json` plus `height_profile_dictionary.npz`
   - `wowviewer-converter mine-v10-prefab-cells` now owns native rectangular prefab-cell clone detection, finds repeating chunk sets via strict SHA256 fingerprints, and writes `prefab_cell_dictionary.json` plus `prefab_cell_dictionary.npz`
   - `wow-viewer/scripts/curate_v10_training_shards.py` now curates mixed native v10 and legacy v9 NPZ shards into a balanced v10 training manifest
+  - `wow-viewer/scripts/curate_v10_training_shards.py` now infers `era_tag` into curated entries, defaults to a `--max-selected-fraction 0.5` compact selection cap, and attaches `pattern_detection` hints from the existing Wave 2 dictionaries when tile examples match
   - `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` now consumes native PM4 masks and legacy v9 cache aliases for hole, precise-object, PM4, and liquid signals
+  - `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` now consumes curated `pattern_detection` hints as a sampler/validation signal through `--pattern-signal-boost`, so Wave 2 pattern-mining data influences Stage 2 training without changing checkpoint channel shape
   - `wow-viewer/scripts/train_v10_stage1_minimap2height.py` now exists as the first bounded Stage 1 trainer for `minimap_rgb_256 -> height_17`
   - `wow-viewer/scripts/train_v10_minimap_to_mclay.py` now exists as the first bounded Wave 2 classifier trainer for `minimap_rgb_256 -> retained MCLY palette label`
   - `wow-viewer/scripts/train_v10_minimap_to_mclay_grid.py` now exists as the first bounded Wave 2 chunk-grid classifier trainer for `minimap_rgb_256 -> 16x16 retained MCLY palette labels`, and can consume the reusable native MCLY label manifest directly
@@ -55,6 +57,9 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - bounded Stage 1 corpus build passed at `output/build-validation/v10-stage1-development-corpus` with `64` written shards and a matching `v10_stage1_manifest.json`
   - bounded Stage 1 CUDA smoke passed at `output/ml-training/v10_stage1_gpu_smoke` using `gillijimproject_refactor/.venv-train` on the local RTX 4070 Ti SUPER
   - v10 mixed-corpus curation passed at `output/ml-training/v10_curated/v10_v9all_plus_native_dev_balanced_manifest.json` with `1,262` selected shards across `22` dataset buckets from the all-version v9 direct cache plus native v10 development shards
+  - compact pattern-aware v10 curation passed at `output/ml-training/v10_curated/v10_full_corpus_compact_pattern_manifest.json` with `3,240` valid preselection shards capped to `1,620` selected shards, `era_tag` preserved, and `41` pattern-annotated native v10 rows retained
+  - compact native-dev pattern curation passed at `output/ml-training/v10_curated/v10_dev_compact_pattern_manifest.json` with `41` valid shards capped to `20`, all selected rows carrying pattern-detection hints
+  - bounded Stage 2 pattern-hint CPU smoke passed at `output/ml-training/v10_stage2_pattern_compact_smoke/checkpoints/best.pt` over `8` compact native-dev samples
   - v10 Stage 2 CUDA run 1 passed at `output/ml-training/v10_stage2_balanced_cuda_run1/checkpoints/best.pt` for `3` epochs over the `1,262` selected shards after repairing `gillijimproject_refactor/.venv-train`
   - v10 Stage 2 CUDA run 2 passed at `output/ml-training/v10_stage2_v9cache_native_dev_cuda_run2/checkpoints/best.pt` for `10` epochs over the same proven v9-cache plus native-development curation; best validation was epoch `6` with val loss `0.3438`, MAE `70.38m`, and RMSE `100.47m`
   - bounded minimap-to-MCLY CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_smoke/minimap_to_mclay_classifier.pt` using the workspace `.venv` over the current `64` Stage 1 shards and `mclay_dictionary.json`
@@ -111,6 +116,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
 - The active full mixed-corpus Stage 2 CUDA run launched on Apr 27, 2026 but has not finished yet; do not describe it as a trained or converged model until checkpoints and metrics are written.
 - `dataset-build-v10-stage1` currently skipped `34` development tiles because `AdtTensorPackBuilder` did not recognize them as usable root ADTs.
 - The current enriched MCLY dictionary proof read `mcly_texture_ids` plus texture-name metadata from `11` of the `64` existing Stage 1 shards; `53` shards were explicitly skipped as `missing_mcly_texture_ids`.
+- The current compact curation cap is conservative and quality/era-balanced, but `era_tag` remains `unknown` for native development shards unless the upstream Stage 1 manifest starts writing a real build or era tag.
 
 ## wow-viewer Viewer Boundary
 
