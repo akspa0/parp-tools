@@ -11,6 +11,25 @@ namespace WowViewer.Tool.Converter;
 
 public static class V10TilesetIndexCommand
 {
+	private static readonly Dictionary<string, string> ZoneAbbreviations = new(StringComparer.OrdinalIgnoreCase)
+	{
+		["BT"] = "BlackTemple", ["IC"] = "Icecrown", ["ND"] = "Northrend",
+		["GH"] = "Ghostlands", ["DH"] = "Dragonblight", ["ZD"] = "Zul'Drak",
+		["ITK"] = "Icecrown", ["SR"] = "StonetalonRidge", ["SM"] = "ScarletMonastery",
+		["HM"] = "HillsbradFoothills", ["NG"] = "Nagrand", ["SA"] = "SilithusArea",
+		["UDM"] = "Undermine", ["DUR"] = "Durotar", ["ELW"] = "Elwynn",
+		["ESW"] = "EasternWeald", ["VS"] = "VioletStand", ["OG"] = "Orgrimmar",
+		["CAN"] = "Caverns", ["CAV"] = "Caverns", ["DG"] = "Dagger",
+		["ED"] = "ElwynnDirt", ["GSL"] = "GrizzlyHills", ["HGL"] = "HowlingFjord",
+		["TI"] = "Tirisfal", ["AR"] = "Arathi", ["NR"] = "Northrend",
+		["RIV"] = "Rivendare", ["WAR"] = "Warfront", ["NAJ"] = "Naj'entu",
+		["SWA"] = "Swamp", ["UND"] = "Undercity", ["JF"] = "Jintha'Alor",
+		["7SR"] = "StormwindRock", ["8SWA"] = "Swamp", ["8RIV"] = "Rivendare",
+		["8UND"] = "Undercity", ["8WAR"] = "Warfront", ["8NAJ"] = "Naj'entu",
+		["SP"] = "StormPeaks", ["SB"] = "SholazarBasin",
+		["HFjords"] = "HowlingFjord", ["HF"] = "HowlingFjord", ["ZM"] = "Zangarmarsh",
+	};
+
 	private static readonly string[] TilesetPathPrefixes =
 	[
 		"World\\Art\\Tileset\\",
@@ -400,7 +419,7 @@ public static class V10TilesetIndexCommand
 		}
 		if (scanRootIndex < 0 || scanRootIndex >= parts.Length)
 			return string.Empty;
-		return parts[scanRootIndex];
+		return ExpandZoneAbbreviation(StripCopyOfPrefix(parts[scanRootIndex]));
 	}
 
 	private static string ExtractDesignKitFromMpqPath(string normalizedPath)
@@ -413,7 +432,7 @@ public static class V10TilesetIndexCommand
 			{
 				int kitIndex = string.Equals(parts[i], "Tileset", StringComparison.OrdinalIgnoreCase) ? i + 1 : i + 2;
 				if (kitIndex < parts.Length - 1)
-					return parts[kitIndex];
+					return ExpandZoneAbbreviation(StripCopyOfPrefix(parts[kitIndex]));
 			}
 		}
 		return string.Empty;
@@ -425,7 +444,7 @@ public static class V10TilesetIndexCommand
 		string[] parts = normalized.Split('\\', StringSplitOptions.RemoveEmptyEntries);
 		if (parts.Length < 2)
 			return string.Empty;
-		return parts[^1];
+		return ExpandZoneAbbreviation(StripCopyOfPrefix(parts[^1]));
 	}
 
 	private static string ExtractZoneNameFromMpqPath(string normalizedPath)
@@ -433,7 +452,23 @@ public static class V10TilesetIndexCommand
 		string[] parts = normalizedPath.Split('\\', StringSplitOptions.RemoveEmptyEntries);
 		if (parts.Length < 2)
 			return string.Empty;
-		return parts[^2];
+		return ExpandZoneAbbreviation(StripCopyOfPrefix(parts[^2]));
+	}
+
+	private static string ExpandZoneAbbreviation(string raw)
+	{
+		if (ZoneAbbreviations.TryGetValue(raw, out string? expanded))
+			return expanded;
+		return raw;
+	}
+
+	private static string StripCopyOfPrefix(string name)
+	{
+		if (name.StartsWith("Copy of ", StringComparison.OrdinalIgnoreCase))
+			return name.Substring(8);
+		if (name.StartsWith("Copyof", StringComparison.OrdinalIgnoreCase))
+			return name.Substring(6);
+		return name;
 	}
 
 	private static (string Prefix, string BaseName, string Suffix) ParseTextureName(string fileName)
@@ -486,12 +521,13 @@ public static class V10TilesetIndexCommand
 
 	private static string NormalizeLegacyZone(string zoneName)
 	{
+		string result = ExpandZoneAbbreviation(StripCopyOfPrefix(zoneName));
 		foreach ((string oldName, string newName) in LegacyNameAliases)
 		{
-			if (zoneName.Contains(oldName.TrimEnd('_'), StringComparison.OrdinalIgnoreCase))
-				return zoneName.Replace(oldName.TrimEnd('_'), newName.TrimEnd('_'), StringComparison.OrdinalIgnoreCase);
+			if (result.Contains(oldName.TrimEnd('_'), StringComparison.OrdinalIgnoreCase))
+				result = result.Replace(oldName.TrimEnd('_'), newName.TrimEnd('_'), StringComparison.OrdinalIgnoreCase);
 		}
-		return zoneName;
+		return result;
 	}
 
 	private static string ComputeFileSha256(string path)

@@ -14,6 +14,7 @@
   <ItemGroup>
     <PackageReference Include="SixLabors.ImageSharp" />
     <PackageReference Include="SharpZipLib" />
+    <PackageReference Include="System.Drawing.Common" />
   </ItemGroup>
 
   <ItemGroup>

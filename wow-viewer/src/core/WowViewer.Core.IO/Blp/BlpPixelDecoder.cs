@@ -1,6 +1,7 @@
 using SereniaBLPLib;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using System.Drawing;
 
 namespace WowViewer.Core.IO.Blp;
 
@@ -64,7 +65,7 @@ public static class BlpPixelDecoder
 	public static void SaveAsPng(string blpPath, string outputPath, int mipLevel = 0)
 	{
 		(byte[] rgba, int width, int height) = DecodeRgbaWithDimensions(blpPath, mipLevel);
-		Image<Rgba32> image = Image.LoadPixelData<Rgba32>(rgba, width, height);
+		SixLabors.ImageSharp.Image<Rgba32> image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(rgba, width, height);
 		image.SaveAsPng(outputPath);
 	}
 

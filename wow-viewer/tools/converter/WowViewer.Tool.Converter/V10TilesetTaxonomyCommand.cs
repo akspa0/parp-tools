@@ -5,6 +5,35 @@ namespace WowViewer.Tool.Converter;
 
 public static class V10TilesetTaxonomyCommand
 {
+	private static readonly Dictionary<string, string> ZoneAbbreviations = new(StringComparer.OrdinalIgnoreCase)
+	{
+		["BT"] = "BoreanTundra",
+		["DB"] = "Dragonblight",
+		["DH"] = "Deepholm",
+		["GH"] = "GrizzlyHills",
+		["GN"] = "Gilneas",
+		["HF"] = "HowlingFjord",
+		["HFJORDS"] = "HowlingFjord",
+		["HFjords"] = "HowlingFjord",
+		["IC"] = "Icecrown",
+		["IG"] = "Icecrown",
+		["IceC"] = "Icecrown",
+		["LI"] = "LostIsles",
+		["LW"] = "LakeWintergrasp",
+		["Org"] = "Orgrimmar",
+		["Orgrim"] = "Orgrimmar",
+		["SB"] = "SholazarBasin",
+		["SH"] = "SholazarBasin",
+		["SP"] = "StormPeaks",
+		["SW"] = "StormwindCity",
+		["SWC"] = "StormwindCity",
+		["TH"] = "TwilightHighlands",
+		["UL"] = "Uldum",
+		["VJ"] = "Vashjir",
+		["WG"] = "LakeWintergrasp",
+		["ZD"] = "ZulDrak",
+	};
+
 	private static readonly string[] LayerRoleKeywords =
 	[
 		"Base", "Highlight", "Shadow", "Light", "Dark", "Darker", "Lighter",
@@ -149,9 +178,11 @@ public static class V10TilesetTaxonomyCommand
 		string name = entry.FileName;
 		string nameLower = entry.FileNameLower;
 
-		string namingStyle = DetermineNamingStyle(name);
-		string zonePrefix = ExtractZonePrefix(name, namingStyle);
-		string coreName = ExtractCoreName(name, namingStyle, zonePrefix);
+		string cleanName = StripCopyOfPrefix(name);
+		string namingStyle = DetermineNamingStyle(cleanName);
+		string rawPrefix = ExtractRawPrefix(cleanName, namingStyle);
+		string zonePrefix = ExpandZoneAbbreviation(rawPrefix);
+		string coreName = ExtractCoreName(cleanName, namingStyle, rawPrefix);
 
 		string textureType = TypeKeywords.FirstOrDefault(kw => name.IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0) ?? "unknown";
 		string layerRole = DetermineLayerRole(name);
@@ -182,27 +213,32 @@ public static class V10TilesetTaxonomyCommand
 
 	private static string DetermineNamingStyle(string name)
 	{
-		if (name.StartsWith("BT_") || name.StartsWith("DB_") || name.StartsWith("GH_") ||
-			name.StartsWith("DH_") || name.StartsWith("ZD_") || name.StartsWith("ITK_") ||
-			name.StartsWith("SR_") || name.StartsWith("SM_") || name.StartsWith("HM_") ||
-			name.StartsWith("NG_") || name.StartsWith("SA_") || name.StartsWith("UDM_") ||
-			name.StartsWith("DUR_") || name.StartsWith("ELW_") || name.StartsWith("ESW_") ||
-			name.StartsWith("VS_") || name.StartsWith("OG_") || name.StartsWith("CAN_") ||
-			name.StartsWith("CAV_") || name.StartsWith("DG_") || name.StartsWith("ED_") ||
-			name.StartsWith("GSL_") || name.StartsWith("HGL_") || name.StartsWith("TI_") ||
-			name.StartsWith("AR_") || name.StartsWith("NR_") || name.StartsWith("RIV_") ||
-			name.StartsWith("WAR_") || name.StartsWith("NAJ_") || name.StartsWith("SWA_") ||
-			name.StartsWith("UND_") || name.StartsWith("JF_") || name.StartsWith("7SR_") ||
-			name.StartsWith("8SWA_") || name.StartsWith("8RIV_") || name.StartsWith("8UND_") ||
-			name.StartsWith("8WAR_") || name.StartsWith("8NAJ_"))
+		string cleanName = StripCopyOfPrefix(name);
+
+		if (cleanName.StartsWith("BT_") || cleanName.StartsWith("DB_") || cleanName.StartsWith("GH_") ||
+			cleanName.StartsWith("DH_") || cleanName.StartsWith("ZD_") || cleanName.StartsWith("ITK_") ||
+			cleanName.StartsWith("SR_") || cleanName.StartsWith("SM_") || cleanName.StartsWith("HM_") ||
+			cleanName.StartsWith("NG_") || cleanName.StartsWith("SA_") || cleanName.StartsWith("UDM_") ||
+			cleanName.StartsWith("DUR_") || cleanName.StartsWith("ELW_") || cleanName.StartsWith("ESW_") ||
+			cleanName.StartsWith("VS_") || cleanName.StartsWith("OG_") || cleanName.StartsWith("CAN_") ||
+			cleanName.StartsWith("CAV_") || cleanName.StartsWith("DG_") || cleanName.StartsWith("ED_") ||
+			cleanName.StartsWith("GSL_") || cleanName.StartsWith("HGL_") || cleanName.StartsWith("TI_") ||
+			cleanName.StartsWith("AR_") || cleanName.StartsWith("NR_") || cleanName.StartsWith("RIV_") ||
+			cleanName.StartsWith("WAR_") || cleanName.StartsWith("NAJ_") || cleanName.StartsWith("SWA_") ||
+			cleanName.StartsWith("UND_") || cleanName.StartsWith("JF_") || cleanName.StartsWith("7SR_") ||
+			cleanName.StartsWith("8SWA_") || cleanName.StartsWith("8RIV_") || cleanName.StartsWith("8UND_") ||
+			cleanName.StartsWith("8WAR_") || cleanName.StartsWith("8NAJ_") ||
+			cleanName.StartsWith("IC_") || cleanName.StartsWith("ND_") || cleanName.StartsWith("SP_") ||
+			cleanName.StartsWith("SB_") || cleanName.StartsWith("HFjords_") || cleanName.StartsWith("HF_") ||
+			cleanName.StartsWith("ZM_"))
 			return "abbreviated";
 
-		if (name.Any(char.IsDigit) && name.IndexOf('_') > 0 && name[0] >= '0' && name[0] <= '9')
+		if (cleanName.Any(char.IsDigit) && cleanName.IndexOf('_') > 0 && cleanName[0] >= '0' && cleanName[0] <= '9')
 			return "numeric";
 
-		if (name.Contains('_') && char.IsUpper(name[0]))
+		if (cleanName.Contains('_') && char.IsUpper(cleanName[0]))
 		{
-			int firstUnderscore = name.IndexOf('_');
+			int firstUnderscore = cleanName.IndexOf('_');
 			if (firstUnderscore > 2 && firstUnderscore < 20)
 				return "underscore_zone";
 		}
@@ -210,9 +246,18 @@ public static class V10TilesetTaxonomyCommand
 		return "camelcase";
 	}
 
+	private static string StripCopyOfPrefix(string name)
+	{
+		if (name.StartsWith("Copy of ", StringComparison.OrdinalIgnoreCase))
+			return name.Substring(8);
+		if (name.StartsWith("Copyof", StringComparison.OrdinalIgnoreCase))
+			return name.Substring(6);
+		return name;
+	}
+
 	private static string ExtractZonePrefix(string name, string namingStyle)
 	{
-		return namingStyle switch
+		string raw = namingStyle switch
 		{
 			"abbreviated" => name.Split('_')[0],
 			"underscore_zone" => name.Split('_')[0],
@@ -220,6 +265,11 @@ public static class V10TilesetTaxonomyCommand
 			"numeric" => name.Split('_')[0],
 			_ => ""
 		};
+
+		if (ZoneAbbreviations.TryGetValue(raw, out string? expanded))
+			return expanded;
+
+		return raw;
 	}
 
 	private static string ExtractCamelCasePrefix(string name)
@@ -234,14 +284,33 @@ public static class V10TilesetTaxonomyCommand
 		return name[..pos];
 	}
 
-	private static string ExtractCoreName(string name, string namingStyle, string zonePrefix)
+	private static string ExtractRawPrefix(string name, string namingStyle)
+	{
+		return namingStyle switch
+		{
+			"abbreviated" => name.Split('_')[0],
+			"underscore_zone" => name.Split('_')[0],
+			"camelcase" => ExtractCamelCasePrefix(name),
+			"numeric" => name.Split('_')[0],
+			_ => ""
+		};
+	}
+
+	private static string ExpandZoneAbbreviation(string raw)
+	{
+		if (ZoneAbbreviations.TryGetValue(raw, out string? expanded))
+			return expanded;
+		return raw;
+	}
+
+	private static string ExtractCoreName(string name, string namingStyle, string rawPrefix)
 	{
 		string core = namingStyle switch
 		{
-			"abbreviated" => name[(zonePrefix.Length + 1)..],
-			"underscore_zone" => name[(zonePrefix.Length + 1)..],
-			"numeric" => name[(zonePrefix.Length + 1)..],
-			_ => name[zonePrefix.Length..]
+			"abbreviated" => name[(rawPrefix.Length + 1)..],
+			"underscore_zone" => name[(rawPrefix.Length + 1)..],
+			"numeric" => name[(rawPrefix.Length + 1)..],
+			_ => name[rawPrefix.Length..]
 		};
 
 		foreach (string kw in LayerRoleKeywords.OrderByDescending(k => k.Length))
@@ -283,9 +352,9 @@ public static class V10TilesetTaxonomyCommand
 	{
 		string nameLower = name.ToLowerInvariant();
 
-		if (nameLower.Contains("highlight"))
+		if (nameLower.Contains("highlight") || nameLower.Contains("highlig"))
 			return "highlight";
-		if (nameLower.Contains("shadow"))
+		if (nameLower.Contains("shadow") || nameLower.Contains("shad"))
 			return "shadow";
 		if (nameLower.Contains("base"))
 			return "base";
