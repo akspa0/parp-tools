@@ -106,6 +106,23 @@ wowviewer-converter mine-v10-height-profiles `
 ```
 Emits `height_profile_dictionary.json` + `.npz` with normalised and absolute height archetypes.
 
+#### Color/detail-aware tileset pattern mining
+```powershell
+wowviewer-converter mine-tileset-patterns `
+  --input output/ml-training/v10_tileset_database/merged_tileset_index.json `
+  --output-dir <out_dir> --mip 3
+```
+Emits `pattern_library.json` with `schema_version = v10-tileset-patterns.v3`. Each texture stamp carries grayscale pattern identity plus RGB/chroma identity and baked color-detail identity: `PatternSignatureHash`, `ColorSignatureHash`, `ChromaSignatureHash`, `ChromaDetailSignatureHash`, `MeanColorHex`, `DominantColorsHex`, hue/saturation/colorfulness stats, 8x8 RGB/chroma signatures, and a 16x16 chroma-detail residual with `ChromaDetailEnergy`. This is the preferred preprocessing surface for future minimap decomposition into likely era-specific tileset variants and alpha layers, including native-resolution or Warcraft-3-era detail tiles; do not add broad Stage 2 channels until this decomposition signal has a bounded artifact and proof.
+
+#### Minimap tileset decomposition
+```powershell
+wowviewer-converter decompose-minimap-tilesets `
+  --pattern-library output/build-validation/v10-tileset-pattern-v3-limit64/pattern_library.json `
+  --minimap <minimap-or-terrain-rgb.png> `
+  --output-dir <out_dir> --grid-size 16 --max-candidates 3
+```
+Emits `minimap_tileset_decomposition.json` with `schema_version = v10-minimap-tileset-decomposition.v1`, plus `best_match_mean.png`, `residual_to_best_mean.png`, and `confidence.png`. The first pass ranks tileset candidates per minimap grid cell using mean RGB, chroma signature, baked chroma-detail residual, dominant palette, and detail-energy distance. Treat this as a preprocessing artifact for inspection and future compact conditioning channels; it is not yet an alpha-layer solver or iterative texture subtraction pass.
+
 ### Trainers
 
 Python trainers live in `scripts/` and consume the v10 NPZ shard contract directly.
@@ -126,19 +143,19 @@ Example mixed-corpus curation from the all-version v9 cache plus native v10 shar
   --max-per-dataset 128
 ```
 
-By default, curation keeps the selected set at or below half of the valid pool (`--max-selected-fraction 0.5`) and writes `era_tag` plus `pattern_detection` metadata when local Wave 2 pattern dictionaries contain matching tile examples. Use `--max-selected-fraction 0` to disable the compact cap.
+By default, curation is now deliberately slim: `--max-selected-fraction 0.25` plus `--max-per-era 128`. It writes `era_tag` plus `pattern_detection` metadata when local Wave 2 pattern dictionaries contain matching tile examples. Use `--max-selected-fraction 0` or `--max-per-era 0` only when intentionally disabling those caps.
 
-Current all-version Stage 2 training uses the proven v9 direct-cache shards for broad client coverage plus native v10 development shards for richer signals. Latest local CUDA output: `output/ml-training/v10_stage2_v9cache_native_dev_cuda_run2/checkpoints/best.pt`.
+Current all-version Stage 2 training should use the slim pattern-aware manifest at `output/ml-training/v10_curated/v10_full_corpus_slim_pattern_manifest.json` unless a compact run clearly underfits. It keeps the proven v9 direct-cache shards for broad client coverage plus native v10 development shards for richer signals.
 
 Example Stage 2 smoke test:
 ```powershell
 .venv\Scripts\python scripts\train_v10_stage2_terrain_synth.py `
   <corpus_dir>\v10_stage1_manifest.json `
   --output-dir output\ml-training\v10_stage2 `
-  --epochs 50 --device cuda --signal-dropout 0.15
+  --epochs 120 --device cuda --signal-dropout 0.15
 ```
 
-When the input manifest contains `pattern_detection` rows from curation, Stage 2 uses them as sampler and validation signals through `--pattern-signal-boost` without changing the model input channel contract.
+New Stage 2 runs default to `slim_structured_v1`, `23` input channels, and `--coarse-prior-mode zero`. The old target-fed coarse prior is available only through `--coarse-prior-mode target` for deliberate refinement-only comparisons. When the input manifest contains `pattern_detection` rows from curation, Stage 2 uses them as sampler and validation signals through `--pattern-signal-boost` without changing the model input channel contract.
 
 ---
 

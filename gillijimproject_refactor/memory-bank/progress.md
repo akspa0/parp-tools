@@ -12,23 +12,53 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 ## Recent Validated Milestones
 
-### Apr 29, 2026 - Compact pattern-aware v10 curation landed
+### Apr 29, 2026 - Minimap tileset decomposition preprocessor landed
 
-- `wow-viewer/scripts/curate_v10_training_shards.py` now writes `era_tag` into curated rows and defaults to `--max-selected-fraction 0.5`, keeping selected shards at or below half of the valid preselection pool unless explicitly disabled with `--max-selected-fraction 0`
-- The curation script now loads the known local Wave 2 pattern dictionaries by default and attaches per-tile `pattern_detection` hints for matching examples from MCAL brushes, MCAL compositions, height profiles, prefab cells, and anchor-aware brush dictionaries
-- `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` now carries those pattern hints through discovery, validation catalogs, signal coverage, and weighted sampling via `--pattern-signal-boost`
+- `MinimapTilesetPatternMatcher` now ranks v3 tileset pattern candidates for each minimap grid cell using mean RGB, chroma signature, baked chroma-detail residual, dominant palette, and detail-energy distance
+- `wowviewer-converter decompose-minimap-tilesets` now consumes `v10-tileset-patterns.v3` and writes `v10-minimap-tileset-decomposition.v1`
+- The command writes `minimap_tileset_decomposition.json`, `best_match_mean.png`, `residual_to_best_mean.png`, and `confidence.png` for inspection before any Stage 2 channel contract changes
+- Proof:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter PatternMinerTests` passed with `4` focused tests
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug --no-restore` passed with existing warnings only
+  - bounded `64`-pattern v3 tileset library mining passed at `output/build-validation/v10-tileset-pattern-v3-limit64/pattern_library.json`
+  - bounded decomposition smoke passed at `output/build-validation/v10-minimap-tileset-decompose-kalimdor-smoke/minimap_tileset_decomposition.json` over an existing Kalimdor minimap capture with `64` cells, `64` pattern candidates, `3` candidates per cell, `9` distinct top candidates, average top score `0.9402`, and preview PNGs
+- Boundary:
+  - This is a candidate-ranking preprocessor, not a solved alpha-mask or iterative subtraction pipeline.
+  - The smoke used an existing app minimap capture rather than a fresh raw client minimap export; use raw/source minimap tiles for the next quality pass.
+
+### Apr 29, 2026 - Color/detail-aware tileset pattern signatures landed
+
+- `PatternMiner` now separates grayscale pattern identity from RGB, luminance-normalized chroma identity, and baked chroma-detail residual identity
+- `PatternStamp` now records `MeanRgb`, `RgbStdDev`, `MeanHueDegrees`, `MeanSaturation`, `Colorfulness`, `MeanColorHex`, `DominantColorsHex`, `ColorMipSignature`, `ChromaMipSignature`, `ChromaDetailSignature`, `ChromaDetailEnergy`, `PatternSignatureHash`, `ColorSignatureHash`, `ChromaSignatureHash`, and `ChromaDetailSignatureHash`
+- `wowviewer-converter mine-tileset-patterns` now writes `schema_version = v10-tileset-patterns.v3` and prints tint/chroma/detail evidence in the top-pattern summary
+- Proof:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter PatternMinerTests` passed with `3` focused tests
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug --no-restore` passed with existing warnings only
+  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- mine-tileset-patterns --input i:/parp/parp-tools/output/ml-training/v10_tileset_database/merged_tileset_index.json --output-dir i:/parp/parp-tools/output/build-validation/v10-tileset-pattern-color-smoke --limit 5 --mip 3` passed
+  - smoke output: `output/build-validation/v10-tileset-pattern-color-smoke/pattern_library.json`
+  - smoke result: `5` processed, `0` errors, `5` pattern clusters, with `MeanColorHex`, `DominantColorsHex`, `ColorSignatureHash`, `ChromaSignatureHash`, `ChromaDetailSignatureHash`, and `ChromaDetailEnergy` in the JSON
+- Boundary:
+  - This lands the texture-pattern evidence layer only. The minimap-decomposition pass that uses this library to identify era-specific tileset variants, baked detail layers, and alpha-mask candidates is still open.
+  - Do not widen the Stage 2 model channel contract for texture decomposition until that preprocessor has a bounded artifact and proof.
+
+### Apr 29, 2026 - Slim Stage 2 architecture and curation defaults landed
+
+- `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` now defaults to `slim_structured_v1`, `120` epochs, and `--coarse-prior-mode zero`
+- The slim model keeps the split-stem surface/structure/liquid routing but reduces width to `679,051` parameters over the current `23` input channels
+- The old target-fed `height_17` coarse prior is no longer the default because it leaks the training target into the input; use `--coarse-prior-mode target` only for deliberate refinement-only comparisons
+- `--stage1-checkpoint` now fails loud because Stage 1 predicted coarse-prior wiring is not implemented yet
+- `wow-viewer/scripts/curate_v10_training_shards.py` now defaults to `--max-selected-fraction 0.25` plus `--max-per-era 128`
 - Proof:
   - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\curate_v10_training_shards.py wow-viewer\scripts\train_v10_stage2_terrain_synth.py` passed
-  - full-corpus compact curation passed against `output/ml-training/v10_curated/v10_full_corpus_manifest.json`
-  - full-corpus output: `output/ml-training/v10_curated/v10_full_corpus_compact_pattern_manifest.json`
-  - full-corpus result: `3,945` candidates, `3,240` valid preselection shards, `1,620` selected shards, `705` rejected, with era-balanced counts and `41` pattern-annotated native v10 rows retained
-  - native-dev compact curation passed against `output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json`
-  - native-dev output: `output/ml-training/v10_curated/v10_dev_compact_pattern_manifest.json`
-  - native-dev result: `64` candidates, `41` valid preselection shards, `20` selected shards, `23` rejected, all selected rows carrying pattern hints
-  - bounded CPU trainer smoke passed at `output/ml-training/v10_stage2_pattern_compact_smoke/checkpoints/best.pt` with `--max-samples 8 --epochs 1 --device cpu`
+  - model instantiation reported `slim_structured_v1`, `zero`, `23`, and `679,051` parameters
+  - full-corpus slim curation passed at `output/ml-training/v10_curated/v10_full_corpus_slim_pattern_manifest.json`
+  - full-corpus result: `3,945` candidates, `3,240` valid preselection shards, `717` selected shards, `705` rejected, and all `41` pattern-annotated native v10 rows retained
+  - native-dev slim curation passed at `output/ml-training/v10_curated/v10_dev_slim_pattern_manifest.json`
+  - native-dev result: `64` candidates, `41` valid preselection shards, `10` selected shards, all selected rows carrying pattern hints
+  - bounded CPU trainer smoke passed at `output/ml-training/v10_stage2_slim_arch_smoke/checkpoints/best.pt` with `--max-samples 8 --epochs 1 --device cpu`
 - Boundary:
-  - Pattern hints affect Stage 2 sample weighting and validation/reporting, not model input channels, so existing checkpoints are not invalidated by the new metadata.
-  - Native development shards still report `era_tag = unknown` until upstream Stage 1 manifest metadata records a concrete source build or era.
+  - The one-epoch CPU smoke emitted a low prediction-variance warning, which is expected for that tiny proof and is not a quality verdict.
+  - Relax curation only after a longer slim CUDA run shows real underfitting.
 
 ### Apr 29, 2026 - Era-routed v10 tileset harvest landed
 
@@ -288,7 +318,6 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 ## Recommended Next Slice
 
-1. Begin Stage 2 CUDA training over the full 64-shard corpus with 50+ epochs.
-2. Build broad-corpus MCLY classifier evaluation harness.
-3. Integrate PM4 path/building masks into v10 tensor pipeline.
-4. Run prefab-cell clone detection on broader corpora beyond the bounded development proof.
+1. Run `decompose-minimap-tilesets` against raw/source minimap tiles with a broader v3 pattern library, then inspect residual/confidence previews for obvious false positives.
+2. Add the first iterative subtraction/alpha-candidate pass only after the per-cell candidate ranking is visually plausible on raw minimaps.
+3. Evaluate whether decomposition outputs should become compact Stage 2 conditioning channels before relaxing dataset caps or widening the model.

@@ -1,5 +1,6 @@
 using MathNet.Numerics;
 using MathNet.Numerics.IntegralTransforms;
+using System.Security.Cryptography;
 using System.Numerics;
 
 namespace WowViewer.Core.Datasets;
@@ -18,7 +19,22 @@ public sealed record PatternStamp(
 	string EdgeBehavior,
 	byte[] MipSignature,
 	double MeanLuminance,
-	double LuminanceStdDev);
+	double LuminanceStdDev,
+	double[] MeanRgb,
+	double[] RgbStdDev,
+	double MeanHueDegrees,
+	double MeanSaturation,
+	double Colorfulness,
+	string MeanColorHex,
+	byte[] ColorMipSignature,
+	byte[] ChromaMipSignature,
+	byte[] ChromaDetailSignature,
+	double ChromaDetailEnergy,
+	string[] DominantColorsHex,
+	string PatternSignatureHash,
+	string ColorSignatureHash,
+	string ChromaSignatureHash,
+	string ChromaDetailSignatureHash);
 
 public sealed record DominantFrequency(
 	double FrequencyX,
@@ -43,6 +59,21 @@ public static class PatternMiner
 		ComputeLuminanceStats(gray, out mean, out std);
 
 		byte[] mipSig = ComputeMipSignature(gray, width, height, 8);
+		byte[] colorMipSig = ComputeColorMipSignature(rgba, width, height, 8);
+		byte[] chromaMipSig = ComputeChromaMipSignature(rgba, width, height, 8);
+		byte[] chromaDetailSig = ComputeChromaDetailSignature(rgba, width, height, 16);
+		double chromaDetailEnergy = ComputeDetailEnergy(chromaDetailSig);
+		string[] dominantColors = ExtractDominantColors(rgba, width, height, 6);
+		ComputeColorStats(
+			rgba,
+			width,
+			height,
+			out double[] meanRgb,
+			out double[] rgbStdDev,
+			out double meanHueDegrees,
+			out double meanSaturation,
+			out double colorfulness,
+			out string meanColorHex);
 
 		return new PatternStamp(
 			TextureName: textureName,
@@ -58,7 +89,22 @@ public static class PatternMiner
 			EdgeBehavior: edgeBehavior,
 			MipSignature: mipSig,
 			MeanLuminance: mean,
-			LuminanceStdDev: std);
+			LuminanceStdDev: std,
+			MeanRgb: meanRgb,
+			RgbStdDev: rgbStdDev,
+			MeanHueDegrees: meanHueDegrees,
+			MeanSaturation: meanSaturation,
+			Colorfulness: colorfulness,
+			MeanColorHex: meanColorHex,
+			ColorMipSignature: colorMipSig,
+			ChromaMipSignature: chromaMipSig,
+			ChromaDetailSignature: chromaDetailSig,
+			ChromaDetailEnergy: chromaDetailEnergy,
+			DominantColorsHex: dominantColors,
+			PatternSignatureHash: HashBytes(mipSig),
+			ColorSignatureHash: HashBytes(colorMipSig),
+			ChromaSignatureHash: HashBytes(chromaMipSig),
+			ChromaDetailSignatureHash: HashBytes(chromaDetailSig));
 	}
 
 	private static double[][] ToJaggedArray(double[,] array)
@@ -122,6 +168,275 @@ public static class PatternMiner
 		}
 
 		return sig;
+	}
+
+	public static byte[] ComputeColorMipSignature(byte[] rgba, int width, int height, int targetSize)
+	{
+		return ComputeRgbCellSignature(rgba, width, height, targetSize, normalizeChroma: false);
+	}
+
+	public static byte[] ComputeChromaMipSignature(byte[] rgba, int width, int height, int targetSize)
+	{
+		return ComputeRgbCellSignature(rgba, width, height, targetSize, normalizeChroma: true);
+	}
+
+	public static byte[] ComputeChromaDetailSignature(byte[] rgba, int width, int height, int targetSize)
+	{
+		byte[] chroma = ComputeChromaMipSignature(rgba, width, height, targetSize);
+		byte[] detail = new byte[chroma.Length];
+
+		for (int y = 0; y < targetSize; y++)
+		{
+			for (int x = 0; x < targetSize; x++)
+			{
+				double[] localMean = [0.0, 0.0, 0.0];
+				int count = 0;
+				for (int ky = -1; ky <= 1; ky++)
+				{
+					int sy = Math.Clamp(y + ky, 0, targetSize - 1);
+					for (int kx = -1; kx <= 1; kx++)
+					{
+						int sx = Math.Clamp(x + kx, 0, targetSize - 1);
+						int sourceIdx = ((sy * targetSize) + sx) * 3;
+						localMean[0] += chroma[sourceIdx + 0];
+						localMean[1] += chroma[sourceIdx + 1];
+						localMean[2] += chroma[sourceIdx + 2];
+						count++;
+					}
+				}
+
+				localMean[0] /= count;
+				localMean[1] /= count;
+				localMean[2] /= count;
+
+				int idx = ((y * targetSize) + x) * 3;
+				for (int channel = 0; channel < 3; channel++)
+				{
+					double residual = chroma[idx + channel] - localMean[channel];
+					detail[idx + channel] = ToByte(128.0 + (residual * 2.0));
+				}
+			}
+		}
+
+		return detail;
+	}
+
+	private static byte[] ComputeRgbCellSignature(byte[] rgba, int width, int height, int targetSize, bool normalizeChroma)
+	{
+		byte[] sig = new byte[targetSize * targetSize * 3];
+		double scaleX = (double)width / targetSize;
+		double scaleY = (double)height / targetSize;
+
+		for (int sy = 0; sy < targetSize; sy++)
+		{
+			int y0 = Math.Clamp((int)Math.Floor(sy * scaleY), 0, height - 1);
+			int y1 = Math.Min(height, Math.Max(y0 + 1, (int)Math.Ceiling((sy + 1) * scaleY)));
+			for (int sx = 0; sx < targetSize; sx++)
+			{
+				int x0 = Math.Clamp((int)Math.Floor(sx * scaleX), 0, width - 1);
+				int x1 = Math.Min(width, Math.Max(x0 + 1, (int)Math.Ceiling((sx + 1) * scaleX)));
+				long rSum = 0;
+				long gSum = 0;
+				long bSum = 0;
+				long count = 0;
+
+				for (int y = y0; y < y1; y++)
+				{
+					for (int x = x0; x < x1; x++)
+					{
+						int idx = ((y * width) + x) * 4;
+						rSum += rgba[idx + 0];
+						gSum += rgba[idx + 1];
+						bSum += rgba[idx + 2];
+						count++;
+					}
+				}
+
+				double r = count > 0 ? rSum / (double)count : 0.0;
+				double g = count > 0 ? gSum / (double)count : 0.0;
+				double b = count > 0 ? bSum / (double)count : 0.0;
+				if (normalizeChroma)
+				{
+					double total = r + g + b;
+					if (total > 1.0e-6)
+					{
+						r = 255.0 * r / total;
+						g = 255.0 * g / total;
+						b = 255.0 * b / total;
+					}
+					else
+					{
+						r = 85.0;
+						g = 85.0;
+						b = 85.0;
+					}
+				}
+
+				int outIdx = ((sy * targetSize) + sx) * 3;
+				sig[outIdx + 0] = ToByte(r);
+				sig[outIdx + 1] = ToByte(g);
+				sig[outIdx + 2] = ToByte(b);
+			}
+		}
+
+		return sig;
+	}
+
+	public static void ComputeColorStats(
+		byte[] rgba,
+		int width,
+		int height,
+		out double[] meanRgb,
+		out double[] rgbStdDev,
+		out double meanHueDegrees,
+		out double meanSaturation,
+		out double colorfulness,
+		out string meanColorHex)
+	{
+		int pixelCount = Math.Max(1, width * height);
+		double rSum = 0;
+		double gSum = 0;
+		double bSum = 0;
+		double rgSum = 0;
+		double ybSum = 0;
+		double rgSqSum = 0;
+		double ybSqSum = 0;
+		double hueSinSum = 0;
+		double hueCosSum = 0;
+		double saturationSum = 0;
+
+		for (int i = 0; i < pixelCount; i++)
+		{
+			int idx = i * 4;
+			double r = rgba[idx + 0];
+			double g = rgba[idx + 1];
+			double b = rgba[idx + 2];
+			rSum += r;
+			gSum += g;
+			bSum += b;
+
+			double rg = r - g;
+			double yb = 0.5 * (r + g) - b;
+			rgSum += rg;
+			ybSum += yb;
+			rgSqSum += rg * rg;
+			ybSqSum += yb * yb;
+
+			(double hueDegrees, double saturation) = RgbToHueSaturation(r, g, b);
+			double radians = hueDegrees * Math.PI / 180.0;
+			hueSinSum += Math.Sin(radians) * saturation;
+			hueCosSum += Math.Cos(radians) * saturation;
+			saturationSum += saturation;
+		}
+
+		double rMean = rSum / pixelCount;
+		double gMean = gSum / pixelCount;
+		double bMean = bSum / pixelCount;
+		meanRgb = [rMean, gMean, bMean];
+		meanColorHex = $"#{ToByte(rMean):X2}{ToByte(gMean):X2}{ToByte(bMean):X2}";
+
+		double rVar = 0;
+		double gVar = 0;
+		double bVar = 0;
+		for (int i = 0; i < pixelCount; i++)
+		{
+			int idx = i * 4;
+			rVar += Math.Pow(rgba[idx + 0] - rMean, 2);
+			gVar += Math.Pow(rgba[idx + 1] - gMean, 2);
+			bVar += Math.Pow(rgba[idx + 2] - bMean, 2);
+		}
+		rgbStdDev = [Math.Sqrt(rVar / pixelCount), Math.Sqrt(gVar / pixelCount), Math.Sqrt(bVar / pixelCount)];
+
+		double hueRadians = Math.Atan2(hueSinSum, hueCosSum);
+		meanHueDegrees = hueRadians * 180.0 / Math.PI;
+		if (meanHueDegrees < 0)
+			meanHueDegrees += 360.0;
+		meanSaturation = saturationSum / pixelCount;
+
+		double rgMean = rgSum / pixelCount;
+		double ybMean = ybSum / pixelCount;
+		double rgStd = Math.Sqrt(Math.Max(0.0, (rgSqSum / pixelCount) - (rgMean * rgMean)));
+		double ybStd = Math.Sqrt(Math.Max(0.0, (ybSqSum / pixelCount) - (ybMean * ybMean)));
+		colorfulness = Math.Sqrt((rgStd * rgStd) + (ybStd * ybStd)) + (0.3 * Math.Sqrt((rgMean * rgMean) + (ybMean * ybMean)));
+	}
+
+	public static string[] ExtractDominantColors(byte[] rgba, int width, int height, int maxColors)
+	{
+		Dictionary<int, (long R, long G, long B, int Count)> buckets = [];
+		int pixelCount = Math.Max(1, width * height);
+		for (int i = 0; i < pixelCount; i++)
+		{
+			int idx = i * 4;
+			byte r = rgba[idx + 0];
+			byte g = rgba[idx + 1];
+			byte b = rgba[idx + 2];
+			int key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+			buckets.TryGetValue(key, out (long R, long G, long B, int Count) bucket);
+			buckets[key] = (bucket.R + r, bucket.G + g, bucket.B + b, bucket.Count + 1);
+		}
+
+		return buckets.Values
+			.OrderByDescending(bucket => bucket.Count)
+			.ThenByDescending(bucket => bucket.R + bucket.G + bucket.B)
+			.Take(Math.Max(0, maxColors))
+			.Select(bucket =>
+			{
+				double count = Math.Max(1, bucket.Count);
+				return $"#{ToByte(bucket.R / count):X2}{ToByte(bucket.G / count):X2}{ToByte(bucket.B / count):X2}";
+			})
+			.ToArray();
+	}
+
+	private static double ComputeDetailEnergy(byte[] detailSignature)
+	{
+		if (detailSignature.Length == 0)
+			return 0.0;
+
+		double sum = 0.0;
+		for (int i = 0; i < detailSignature.Length; i++)
+		{
+			double centered = detailSignature[i] - 128.0;
+			sum += Math.Abs(centered);
+		}
+
+		return sum / detailSignature.Length;
+	}
+
+	private static (double HueDegrees, double Saturation) RgbToHueSaturation(double rByte, double gByte, double bByte)
+	{
+		double r = rByte / 255.0;
+		double g = gByte / 255.0;
+		double b = bByte / 255.0;
+		double max = Math.Max(r, Math.Max(g, b));
+		double min = Math.Min(r, Math.Min(g, b));
+		double delta = max - min;
+		double hue = 0.0;
+
+		if (delta > 1.0e-9)
+		{
+			if (Math.Abs(max - r) < 1.0e-9)
+				hue = 60.0 * (((g - b) / delta) % 6.0);
+			else if (Math.Abs(max - g) < 1.0e-9)
+				hue = 60.0 * (((b - r) / delta) + 2.0);
+			else
+				hue = 60.0 * (((r - g) / delta) + 4.0);
+		}
+
+		if (hue < 0.0)
+			hue += 360.0;
+
+		double saturation = max <= 1.0e-9 ? 0.0 : delta / max;
+		return (hue, saturation);
+	}
+
+	private static string HashBytes(byte[] bytes)
+	{
+		return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+	}
+
+	private static byte ToByte(double value)
+	{
+		return (byte)Math.Clamp((int)Math.Round(value), 0, 255);
 	}
 
 	public static string ClassifyPatternScale(int tileX, int tileY, double periodicity, DominantFrequency[] freqs)

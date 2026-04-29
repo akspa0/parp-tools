@@ -96,6 +96,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "mine-tileset-patterns":
 		V10TilesetPatternMineCommand.Run(tail);
 		break;
+	case "decompose-minimap-tilesets":
+		V10MinimapTilesetDecomposeCommand.Run(tail);
+		break;
 	case "harvest-tileset-blps":
 		V10TilesetHarvestCommand.Run(tail);
 		break;
@@ -4423,6 +4426,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter index-tilesets --client-root <path> [--era <tag>] [--output-dir <dir>] [--limit <count>] [--no-mpq] [--blp-sample <n>]");
 	Console.WriteLine("  wowviewer-converter analyze-tileset-taxonomy --input <merged_tileset_index.json> [--output-dir <dir>]");
 	Console.WriteLine("  wowviewer-converter mine-tileset-patterns --input <merged_tileset_index.json> [--output-dir <dir>] [--limit <n>] [--mip <level>] [--write-previews]");
+	Console.WriteLine("  wowviewer-converter decompose-minimap-tilesets --pattern-library <pattern_library.json> --minimap <minimap.png> [--output-dir <dir>] [--grid-size <n>] [--max-candidates <n>] [--limit-patterns <n>]");
 	Console.WriteLine("  wowviewer-converter harvest-tileset-blps --input <merged_tileset_index.json> [--output-dir <dir>] [--limit <n>]");
 }
 

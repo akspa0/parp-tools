@@ -14,7 +14,8 @@ import numpy as np
 
 REQUIRED_ARRAYS = ("minimap_rgb_256", "height_257", "height_17")
 DEFAULT_OUTPUT = Path("output/ml-training/v10_curated/curated_v10_training_manifest.json")
-DEFAULT_MAX_SELECTED_FRACTION = 0.5
+DEFAULT_MAX_SELECTED_FRACTION = 0.25
+DEFAULT_MAX_PER_ERA = 128
 DEFAULT_PATTERN_DICTIONARIES = (
     Path("output/build-validation/v10-wave2-hybrid-proof/brush_dictionary.json"),
     Path("output/build-validation/v10-wave2-mcal-brushes/mcal_brush_dictionary.json"),
@@ -51,8 +52,14 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_MAX_SELECTED_FRACTION,
         help=(
             "Maximum fraction of accepted shards to keep after quality filtering. "
-            "Default 0.5 keeps the curated set at or below half of the valid pool; use 0 to disable."
+            "Default 0.25 keeps the curated set aggressively compact; use 0 to disable."
         ),
+    )
+    parser.add_argument(
+        "--max-per-era",
+        type=int,
+        default=DEFAULT_MAX_PER_ERA,
+        help="Maximum selected shards per inferred era_tag after filtering. Use 0 to disable.",
     )
     parser.add_argument("--min-height-range", type=float, default=1.0)
     parser.add_argument("--min-minimap-variance", type=float, default=1.0e-6)
@@ -99,7 +106,7 @@ def main() -> None:
             rejected.append(status["rejection"])
 
     preselection_accepted_count = len(accepted)
-    accepted = select_balanced(accepted, args.max_per_dataset, args.max_total, args.max_selected_fraction, rng)
+    accepted = select_balanced(accepted, args.max_per_dataset, args.max_total, args.max_selected_fraction, args.max_per_era, rng)
     accepted.sort(key=lambda item: (item["dataset_key"], item["tile_name"], item["shard_path"].lower()))
     selected_signal_counts = Counter()
     selected_array_counts = Counter()
@@ -121,6 +128,7 @@ def main() -> None:
             "max_per_dataset": args.max_per_dataset,
             "max_total": args.max_total,
             "max_selected_fraction": args.max_selected_fraction,
+            "max_per_era": args.max_per_era,
             "seed": args.seed,
         },
         "pattern_dictionary_sources": [str(path) for path in pattern_sources],
@@ -283,6 +291,7 @@ def select_balanced(
     max_per_dataset: int,
     max_total: int,
     max_selected_fraction: float,
+    max_per_era: int,
     rng: random.Random,
 ) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -295,6 +304,25 @@ def select_balanced(
         if max_per_dataset > 0:
             dataset_entries = dataset_entries[:max_per_dataset]
         selected.extend(dataset_entries)
+
+    if max_per_era > 0:
+        era_grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for entry in selected:
+            era_grouped[str(entry.get("era_tag") or "unknown")].append(entry)
+
+        era_capped: list[dict[str, Any]] = []
+        for era_entries in era_grouped.values():
+            era_entries.sort(
+                key=lambda item: (
+                    1 if item.get("pattern_detection") else 0,
+                    float(item["quality_score"]),
+                    item["dataset_key"],
+                    item["tile_name"],
+                ),
+                reverse=True,
+            )
+            era_capped.extend(era_entries[:max_per_era])
+        selected = era_capped
 
     target_count = len(selected)
     if 0.0 < max_selected_fraction < 1.0:

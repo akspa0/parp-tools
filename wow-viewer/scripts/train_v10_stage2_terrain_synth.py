@@ -20,14 +20,15 @@ from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = WORKSPACE_ROOT / "output" / "ml-training" / "v10_stage2"
 DEFAULT_BATCH_SIZE = 4
-DEFAULT_EPOCHS = 60
+DEFAULT_EPOCHS = 120
 DEFAULT_LEARNING_RATE = 2e-4
 DEFAULT_VAL_FRACTION = 0.15
 DEFAULT_SEED = 1337
 DEFAULT_NUM_WORKERS = 4
 DEFAULT_PREVIEW_COUNT = 4
 DEFAULT_SIGNAL_DROOUT = 0.15
-DEFAULT_MODEL_VARIANT = "structured_fusion_v2"
+DEFAULT_MODEL_VARIANT = "slim_structured_v1"
+DEFAULT_COARSE_PRIOR_MODE = "zero"
 DEFAULT_NATIVE_V10_BOOST = 1.0
 DEFAULT_RARE_SIGNAL_BOOST = 3.0
 DEFAULT_PATTERN_SIGNAL_BOOST = 1.5
@@ -180,8 +181,17 @@ def parse_args() -> argparse.Namespace:
         choices=MODEL_VARIANTS,
         default="",
         help=(
-            "Model architecture variant. Defaults to structured_fusion_v2 for new training runs. "
+            "Model architecture variant. Defaults to slim_structured_v1 for new training runs. "
             "Checkpoint-only evaluation reuses the checkpoint variant when available, otherwise falls back to early_fusion_v1."
+        ),
+    )
+    parser.add_argument(
+        "--coarse-prior-mode",
+        choices=("zero", "target"),
+        default=DEFAULT_COARSE_PRIOR_MODE,
+        help=(
+            "How to fill the coarse_height_17_prior input plane. 'zero' avoids target leakage and is the default for new runs; "
+            "'target' preserves the older refinement-only behavior that fed ground-truth height_17."
         ),
     )
     parser.add_argument(
@@ -198,7 +208,10 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Comma-separated tile names that must be placed in the validation split when present in the selected input corpus.",
     )
-    parser.add_argument("--stage1-checkpoint", help="Optional Stage 1 checkpoint to use for coarse prior at inference time.")
+    parser.add_argument(
+        "--stage1-checkpoint",
+        help="Reserved for future Stage 1 predicted coarse-prior wiring; current coarse-prior modes are zero and target.",
+    )
     parser.add_argument("--mcal-loss-weight", type=float, default=DEFAULT_MCAL_LOSS_WEIGHT)
     parser.add_argument("--mcly-loss-weight", type=float, default=DEFAULT_MCLY_LOSS_WEIGHT)
     parser.add_argument("--hole-loss-weight", type=float, default=DEFAULT_HOLE_LOSS_WEIGHT)
@@ -224,7 +237,7 @@ def build_input_channel_ranges() -> dict[str, tuple[int, int]]:
 INPUT_CHANNEL_RANGES = build_input_channel_ranges()
 TOTAL_INPUT_CHANNELS = sum(width for _, width in INPUT_SIGNAL_LAYOUT)
 
-MODEL_VARIANTS = ("early_fusion_v1", "structured_fusion_v2", "multi_task_v3")
+MODEL_VARIANTS = ("early_fusion_v1", "structured_fusion_v2", "slim_structured_v1", "multi_task_v3")
 
 MODEL_BRANCH_SIGNAL_GROUPS: dict[str, tuple[str, ...]] = {
     "surface": (
@@ -853,6 +866,7 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
         height_mean: float,
         height_std: float,
         signal_dropout: float,
+        coarse_prior_mode: str,
         sample_loss_weights: list[float] | None = None,
         mcly_label_index: dict[int, int] | None = None,
         mcly_num_classes: int = 0,
@@ -861,6 +875,9 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
         self.height_mean = float(height_mean)
         self.height_std = float(height_std)
         self.signal_dropout = signal_dropout
+        if coarse_prior_mode not in {"zero", "target"}:
+            raise ValueError("coarse_prior_mode must be 'zero' or 'target'.")
+        self.coarse_prior_mode = coarse_prior_mode
         if sample_loss_weights is not None and len(sample_loss_weights) != len(samples):
             raise ValueError("sample_loss_weights must match the sample list length.")
         self.sample_loss_weights = sample_loss_weights or [1.0 for _ in samples]
@@ -937,10 +954,14 @@ class Stage2Dataset(Dataset[dict[str, torch.Tensor]]):
         else:
             signal_planes.append(torch.zeros((1, 256, 256), dtype=torch.float32))
 
-        # Coarse prior: height_17 upsampled to 256
-        coarse_prior = torch.from_numpy(((sample.height_17 - self.height_mean) / self.height_std).astype(np.float32))
-        coarse_prior = F.interpolate(coarse_prior.unsqueeze(0).unsqueeze(0), size=(256, 256), mode="bilinear", align_corners=False).squeeze(0).squeeze(0)
-        signal_planes.append(coarse_prior.unsqueeze(0))
+        # Coarse prior: zero by default so new runs learn from observable inputs.
+        # Use --coarse-prior-mode target only for older refinement-only comparisons.
+        if self.coarse_prior_mode == "target":
+            coarse_prior = torch.from_numpy(((sample.height_17 - self.height_mean) / self.height_std).astype(np.float32))
+            coarse_prior = F.interpolate(coarse_prior.unsqueeze(0).unsqueeze(0), size=(256, 256), mode="bilinear", align_corners=False).squeeze(0).squeeze(0)
+            signal_planes.append(coarse_prior.unsqueeze(0))
+        else:
+            signal_planes.append(torch.zeros((1, 256, 256), dtype=torch.float32))
 
         inputs = torch.cat([minimap] + signal_planes, dim=0)
 
@@ -1373,17 +1394,23 @@ class SignalBranchStem(nn.Module):
 
 
 class StructuredFusionStage2TerrainSynthModel(nn.Module):
-    def __init__(self, input_channels: int) -> None:
+    def __init__(
+        self,
+        input_channels: int,
+        branch_widths: dict[str, int] | None = None,
+        encoder_widths: tuple[int, int, int, int, int] = (32, 64, 96, 128, 160),
+    ) -> None:
         super().__init__()
         expected_channels = TOTAL_INPUT_CHANNELS
         if input_channels != expected_channels:
             raise ValueError(f"structured_fusion_v2 expects {expected_channels} input channels, got {input_channels}.")
+        c1, c2, c3, c4, c5 = encoder_widths
 
         self.branch_ranges = {
             branch_name: [INPUT_CHANNEL_RANGES[signal_name] for signal_name in signal_names]
             for branch_name, signal_names in MODEL_BRANCH_SIGNAL_GROUPS.items()
         }
-        branch_widths = {
+        branch_widths = branch_widths or {
             "surface": 24,
             "structure": 16,
             "liquids": 16,
@@ -1395,38 +1422,42 @@ class StructuredFusionStage2TerrainSynthModel(nn.Module):
 
         fused_channels = sum(branch_widths.values())
         self.fusion = nn.Sequential(
-            nn.Conv2d(fused_channels, 32, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(fused_channels, c1, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(c1),
             nn.GELU(),
         )
-        self.enc1 = ConvBlock(32, 32)
-        self.enc2 = ConvBlock(32, 64, stride=2)
-        self.enc3 = ConvBlock(64, 96, stride=2)
-        self.enc4 = ConvBlock(96, 128, stride=2)
-        self.enc5 = ConvBlock(128, 160, stride=2)
+        self.enc1 = ConvBlock(c1, c1)
+        self.enc2 = ConvBlock(c1, c2, stride=2)
+        self.enc3 = ConvBlock(c2, c3, stride=2)
+        self.enc4 = ConvBlock(c3, c4, stride=2)
+        self.enc5 = ConvBlock(c4, c5, stride=2)
+
+        coarse_hidden = max(32, min(64, c5))
+        mid_hidden = max(32, min(96, c5))
+        fine_hidden = max(8, c1 // 2)
 
         self.coarse_head = nn.Sequential(
             nn.AdaptiveAvgPool2d((17, 17)),
-            nn.Conv2d(160, 64, kernel_size=3, padding=1),
+            nn.Conv2d(c5, coarse_hidden, kernel_size=3, padding=1),
             nn.GELU(),
-            nn.Conv2d(64, 1, kernel_size=1),
+            nn.Conv2d(coarse_hidden, 1, kernel_size=1),
         )
 
         self.mid_up = nn.Upsample(size=(65, 65), mode="bilinear", align_corners=False)
         self.mid_head = nn.Sequential(
-            nn.Conv2d(160, 96, kernel_size=3, padding=1),
+            nn.Conv2d(c5, mid_hidden, kernel_size=3, padding=1),
             nn.GELU(),
-            nn.Conv2d(96, 1, kernel_size=1),
+            nn.Conv2d(mid_hidden, 1, kernel_size=1),
         )
 
-        self.dec1 = DecoderBlock(160, 128, 128)
-        self.dec2 = DecoderBlock(128, 96, 96)
-        self.dec3 = DecoderBlock(96, 64, 64)
-        self.dec4 = DecoderBlock(64, 32, 32)
+        self.dec1 = DecoderBlock(c5, c4, c4)
+        self.dec2 = DecoderBlock(c4, c3, c3)
+        self.dec3 = DecoderBlock(c3, c2, c2)
+        self.dec4 = DecoderBlock(c2, c1, c1)
         self.fine_head = nn.Sequential(
-            nn.Conv2d(32, 16, kernel_size=3, padding=1),
+            nn.Conv2d(c1, fine_hidden, kernel_size=3, padding=1),
             nn.GELU(),
-            nn.Conv2d(16, 1, kernel_size=1),
+            nn.Conv2d(fine_hidden, 1, kernel_size=1),
         )
 
     def _slice_branch(self, x: torch.Tensor, branch_name: str) -> torch.Tensor:
@@ -1597,6 +1628,16 @@ def build_model(model_variant: str, input_channels: int, mcly_num_classes: int =
         return EarlyFusionStage2TerrainSynthModel(input_channels=input_channels)
     if model_variant == "structured_fusion_v2":
         return StructuredFusionStage2TerrainSynthModel(input_channels=input_channels)
+    if model_variant == "slim_structured_v1":
+        return StructuredFusionStage2TerrainSynthModel(
+            input_channels=input_channels,
+            branch_widths={
+                "surface": 12,
+                "structure": 8,
+                "liquids": 8,
+            },
+            encoder_widths=(16, 32, 48, 64, 96),
+        )
     if model_variant == "multi_task_v3":
         if mcly_num_classes <= 0:
             raise ValueError("multi_task_v3 requires mcly_num_classes > 0.")
@@ -2138,6 +2179,11 @@ def resize_preview_image(image: np.ndarray, width: int, height: int) -> np.ndarr
 
 def main() -> None:
     args = parse_args()
+    if args.stage1_checkpoint:
+        raise SystemExit(
+            "--stage1-checkpoint is not wired into Stage 2 inputs yet. "
+            "Use --coarse-prior-mode zero for honest new runs, or target for old refinement-only comparisons."
+        )
     seed_everything(args.seed)
     ablation_groups = parse_validation_ablation_groups(args.validation_ablation_groups)
     forced_validation_tiles = parse_tile_name_list(args.force_validation_tiles)
@@ -2173,12 +2219,12 @@ def main() -> None:
         print(f"MCLY label index: {mcly_num_classes} classes from training set")
 
     train_dataset = Stage2Dataset(
-        train_samples, height_mean, height_std, args.signal_dropout,
+        train_samples, height_mean, height_std, args.signal_dropout, args.coarse_prior_mode,
         sample_loss_weights=[compute_sample_loss_weight(sample, reward_config) for sample in train_samples],
         mcly_label_index=mcly_label_index, mcly_num_classes=mcly_num_classes,
     )
     val_dataset = Stage2Dataset(
-        val_samples, height_mean, height_std, signal_dropout=0.0,
+        val_samples, height_mean, height_std, signal_dropout=0.0, coarse_prior_mode=args.coarse_prior_mode,
         sample_loss_weights=[1.0 for _ in val_samples],
         mcly_label_index=mcly_label_index, mcly_num_classes=mcly_num_classes,
     )
@@ -2247,6 +2293,7 @@ def main() -> None:
             "val_count": len(val_samples),
             "input_channels": checkpoint_input_channels,
             "model_variant": checkpoint_model_variant,
+            "coarse_prior_mode": args.coarse_prior_mode,
             "height_mean": checkpoint_height_mean,
             "height_std": checkpoint_height_std,
             "mcly_num_classes": checkpoint_mcly_classes,
@@ -2396,6 +2443,7 @@ def main() -> None:
             "val_count": len(val_samples),
             "input_channels": sample_channels,
             "model_variant": model_variant,
+            "coarse_prior_mode": args.coarse_prior_mode,
             "height_mean": height_mean,
             "height_std": height_std,
             "mcly_num_classes": mcly_num_classes,
@@ -2422,6 +2470,7 @@ def main() -> None:
                 "height_std": height_std,
                 "input_channels": sample_channels,
                 "model_variant": model_variant,
+                "coarse_prior_mode": args.coarse_prior_mode,
                 "mcly_num_classes": mcly_num_classes,
                 "train_sampler": train_reward_summary,
                 "history": history,
@@ -2441,6 +2490,7 @@ def main() -> None:
                     "height_std": height_std,
                     "input_channels": sample_channels,
                     "model_variant": model_variant,
+                    "coarse_prior_mode": args.coarse_prior_mode,
                     "mcly_num_classes": mcly_num_classes,
                     "train_sampler": train_reward_summary,
                     "history": history,
@@ -2466,6 +2516,7 @@ def main() -> None:
                     "height_std": height_std,
                     "input_channels": sample_channels,
                     "model_variant": model_variant,
+                    "coarse_prior_mode": args.coarse_prior_mode,
                     "mcly_num_classes": mcly_num_classes,
                     "train_sampler": train_reward_summary,
                     "history": history,
@@ -2507,6 +2558,7 @@ def main() -> None:
         "val_count": len(val_samples),
         "input_channels": sample_channels,
         "model_variant": best_model_variant,
+        "coarse_prior_mode": args.coarse_prior_mode,
         "height_mean": height_mean,
         "height_std": height_std,
         "mcly_num_classes": best_mcly_classes,

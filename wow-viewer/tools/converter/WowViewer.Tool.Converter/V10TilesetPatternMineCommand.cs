@@ -126,7 +126,7 @@ public static class V10TilesetPatternMineCommand
 
 			string reportPath = Path.Combine(outputRoot, "pattern_library.json");
 			File.WriteAllText(reportPath, JsonSerializer.Serialize(new PatternLibraryReport(
-				SchemaVersion: "v10-tileset-patterns.v1",
+				SchemaVersion: "v10-tileset-patterns.v3",
 				GeneratedAtUtc: DateTimeOffset.UtcNow,
 				TotalProcessed: processed,
 				TotalErrors: errors,
@@ -146,7 +146,7 @@ public static class V10TilesetPatternMineCommand
 			Console.WriteLine("=== Top Patterns (by periodicity score) ===");
 			foreach (PatternResult p in patterns.Values.OrderByDescending(p => p.Stamp.PeriodicityScore).Take(20))
 			{
-				Console.WriteLine($"  {p.DesignKit}/{p.Stamp.TextureName}: tile={p.Stamp.TileSizeX}x{p.Stamp.TileSizeY} scale={p.Stamp.PatternScaleHint} score={p.Stamp.PeriodicityScore:F4}");
+				Console.WriteLine($"  {p.DesignKit}/{p.Stamp.TextureName}: tile={p.Stamp.TileSizeX}x{p.Stamp.TileSizeY} scale={p.Stamp.PatternScaleHint} tint={p.Stamp.MeanColorHex} hue={p.Stamp.MeanHueDegrees:F1} chroma={ShortHash(p.Stamp.ChromaSignatureHash)} detail={ShortHash(p.Stamp.ChromaDetailSignatureHash)} detailEnergy={p.Stamp.ChromaDetailEnergy:F2} score={p.Stamp.PeriodicityScore:F4}");
 			}
 		}
 		finally
@@ -226,6 +226,13 @@ public static class V10TilesetPatternMineCommand
 	private static bool HasFlag(string[] args, string name)
 	{
 		return args.Any(a => string.Equals(a, name, StringComparison.OrdinalIgnoreCase));
+	}
+
+	private static string ShortHash(string value)
+	{
+		if (string.IsNullOrWhiteSpace(value))
+			return "";
+		return value.Length <= 12 ? value : value[..12];
 	}
 
 	private static JsonSerializerOptions CreateJsonOptions()
