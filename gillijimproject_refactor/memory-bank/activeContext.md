@@ -35,6 +35,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `wow-viewer/scripts/train_v10_stage1_minimap2height.py` now exists as the first bounded Stage 1 trainer for `minimap_rgb_256 -> height_17`
   - `wow-viewer/scripts/train_v10_minimap_to_mclay.py` now exists as the first bounded Wave 2 classifier trainer for `minimap_rgb_256 -> retained MCLY palette label`
   - `wow-viewer/scripts/train_v10_minimap_to_mclay_grid.py` now exists as the first bounded Wave 2 chunk-grid classifier trainer for `minimap_rgb_256 -> 16x16 retained MCLY palette labels`, and can consume the reusable native MCLY label manifest directly
+  - `wowviewer-converter harvest-tileset-blps` now routes each merged tileset entry to the staged-local client session implied by its `era_tag` before falling back to other client roots, avoiding the old every-root probe for every texture
   - the native miner supports `objects`, `terrain`, and `hybrid` anchor modes
   - the older Python reference miner has been retired to `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/archived/mine_mcal_brush_patterns.py`; the canonical path is `wowviewer-converter mine-v10-brushes`
 - Current proof level:
@@ -59,6 +60,7 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - bounded minimap-to-MCLY CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_smoke/minimap_to_mclay_classifier.pt` using the workspace `.venv` over the current `64` Stage 1 shards and `mclay_dictionary.json`
   - bounded minimap-to-MCLY chunk-grid CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_grid_smoke/minimap_to_mclay_grid_classifier.pt`, with `1,973` retained chunk labels across `35` active palette classes
   - bounded manifest-driven minimap-to-MCLY chunk-grid CPU smoke passed at `output/ml-training/v10_minimap_to_mclay_grid_manifest_smoke/minimap_to_mclay_grid_classifier.pt`
+  - bounded era-routed tileset harvest smoke passed at `output/build-validation/v10-tileset-harvest-era-routing-smoke-counters/harvest_manifest.json` with `5` staged-local texture exports, `5` preferred era-session hits, `0` fallback hits, and `0` errors
   - full mixed-corpus Stage 2 CUDA run 3 is active at `output/ml-training/v10_stage2_v9cache_native_dev_cuda_full_run3_20260427` using `gillijimproject_refactor/.venv-train`; startup validation confirmed Torch `2.11.0+cu128`, CUDA visibility, the proven `1,262`-entry curated manifest, and live GPU-backed Python activity
 
 ## Wave 2 Status

@@ -197,7 +197,8 @@ public static class V10TilesetIndexCommand
 		scanned = 0;
 		errors = 0;
 
-		IArchiveCatalog archiveCatalog = CreateArchiveCatalog(clientRoot);
+		ArchiveCatalogSession session = V10TilesetArchiveReader.GetOrCreateSession(clientRoot);
+		IArchiveCatalog archiveCatalog = session.ArchiveCatalog;
 		try
 		{
 			IReadOnlyList<string> allFiles = archiveCatalog.GetAllKnownFiles();
@@ -306,50 +307,9 @@ public static class V10TilesetIndexCommand
 		}
 		finally
 		{
-			archiveCatalog.Dispose();
 		}
 
 		return entries;
-	}
-
-	private static IArchiveCatalog CreateArchiveCatalog(string clientRoot)
-	{
-		IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-		ArchiveCatalogBootstrapper.Bootstrap(
-			archiveCatalog,
-			BuildLegacySearchRoots(clientRoot),
-			new ArchiveCatalogBootstrapOptions(ExternalListfilePath: ResolveLegacyListfilePath()));
-		if (archiveCatalog is MpqArchiveCatalog mpqCatalog)
-			mpqCatalog.ScanMapMpqArchives(clientRoot);
-		return archiveCatalog;
-	}
-
-	private static IReadOnlyList<string> BuildLegacySearchRoots(string clientRoot)
-	{
-		List<string> roots = [];
-		string dataRoot = Path.Combine(clientRoot, "Data");
-		if (Directory.Exists(dataRoot))
-			roots.Add(dataRoot);
-		if (!string.Equals(clientRoot, dataRoot, StringComparison.OrdinalIgnoreCase))
-			roots.Add(clientRoot);
-		return roots.Count > 0 ? roots : [clientRoot];
-	}
-
-	private static string? ResolveLegacyListfilePath()
-	{
-		string[] candidates =
-		[
-			Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdxViewer", "community-listfile-withcapitals.csv"),
-			Path.Combine(AppContext.BaseDirectory, "community-listfile-withcapitals.csv"),
-			"community-listfile-withcapitals.csv",
-			"listfile.csv",
-		];
-		foreach (string candidate in candidates)
-		{
-			if (File.Exists(candidate))
-				return candidate;
-		}
-		return null;
 	}
 
 	private static TilesetEntry BuildTilesetEntryFromSummary(string relativePath, string absolutePath, BlpSummary summary, string eraTag, string scanRoot)

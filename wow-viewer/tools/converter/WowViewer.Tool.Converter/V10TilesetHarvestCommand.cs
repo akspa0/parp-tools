@@ -63,14 +63,24 @@ public static class V10TilesetHarvestCommand
 
 		Console.WriteLine($"Unique non-specular textures to harvest: {toHarvest.Count}");
 
-		List<IArchiveCatalog> catalogs = [];
+		List<ArchiveCatalogSession> sessions = [];
+		Dictionary<string, ArchiveCatalogSession> sessionsByEraTag = new(StringComparer.OrdinalIgnoreCase);
 		try
 		{
 			foreach (string cr in clientRoots)
-				catalogs.Add(CreateArchiveCatalog(cr));
+			{
+				ArchiveCatalogSession session = V10TilesetArchiveReader.GetOrCreateSession(cr);
+				sessions.Add(session);
+				foreach (string eraTagKey in GetEraTagKeysForClientRoot(cr))
+				{
+					sessionsByEraTag.TryAdd(eraTagKey, session);
+				}
+			}
 
 			int harvested = 0;
 			int errors = 0;
+			int preferredSessionHits = 0;
+			int fallbackSessionHits = 0;
 			List<HarvestEntry> manifest = [];
 
 			foreach ((string name, string relPath, string designKit, string eraTag) in toHarvest)
@@ -88,9 +98,14 @@ public static class V10TilesetHarvestCommand
 					continue;
 				}
 
-				bool decoded = TryDecodeBlpToPng(relPath, clientRoots, catalogs, pngPath);
-				if (decoded)
+				DecodeResult decodeResult = TryDecodeBlpToPng(relPath, eraTag, sessionsByEraTag, sessions, pngPath);
+				if (decodeResult != DecodeResult.NotFound)
 				{
+					if (decodeResult == DecodeResult.PreferredSession)
+						preferredSessionHits++;
+					else
+						fallbackSessionHits++;
+
 					manifest.Add(new HarvestEntry(Name: name, PngPath: pngPath, DesignKit: designKit, RelativePath: relPath, EraTag: eraTag));
 					harvested++;
 				}
@@ -113,55 +128,71 @@ public static class V10TilesetHarvestCommand
 
 			Console.WriteLine("");
 			Console.WriteLine($"Harvest complete: {harvested} exported, {errors} errors");
+			Console.WriteLine($"Preferred era-session hits: {preferredSessionHits}");
+			Console.WriteLine($"Fallback session hits: {fallbackSessionHits}");
 			Console.WriteLine($"Manifest: {manifestPath}");
 		}
 		finally
 		{
-			foreach (IArchiveCatalog catalog in catalogs)
-				catalog.Dispose();
 		}
 	}
 
-	private static bool TryDecodeBlpToPng(string relPath, List<string> clientRoots, List<IArchiveCatalog> catalogs, string outputPath)
+	private static DecodeResult TryDecodeBlpToPng(
+		string relPath,
+		string eraTag,
+		IReadOnlyDictionary<string, ArchiveCatalogSession> sessionsByEraTag,
+		List<ArchiveCatalogSession> sessions,
+		string outputPath)
 	{
-		string normalizedRel = relPath.Replace('\\', '/');
-
-		for (int i = 0; i < clientRoots.Count; i++)
+		ArchiveCatalogSession? preferredSession = null;
+		if (!string.IsNullOrWhiteSpace(eraTag) && sessionsByEraTag.TryGetValue(eraTag.Trim(), out preferredSession))
 		{
-			string loosePath = Path.Combine(clientRoots[i], relPath.Replace('\\', Path.DirectorySeparatorChar));
-			if (File.Exists(loosePath))
-			{
-				using FileStream fs = File.OpenRead(loosePath);
-				using BlpFile blp = new(fs);
-				using System.Drawing.Bitmap bmp = blp.GetBitmap(0);
-				bmp.Save(outputPath, System.Drawing.Imaging.ImageFormat.Png);
-				return true;
-			}
-
-			if (i < catalogs.Count && catalogs[i].FileExists(normalizedRel))
-			{
-				byte[]? blpBytes = catalogs[i].ReadFile(normalizedRel);
-				if (blpBytes is { Length: > 0 })
-				{
-					using MemoryStream ms = new(blpBytes, writable: false);
-					using BlpFile blp = new(ms);
-					using System.Drawing.Bitmap bmp = blp.GetBitmap(0);
-					bmp.Save(outputPath, System.Drawing.Imaging.ImageFormat.Png);
-					return true;
-				}
-			}
+			if (TryDecodeBlpToPngFromSession(preferredSession, relPath, outputPath))
+				return DecodeResult.PreferredSession;
 		}
 
-		return false;
+		foreach (ArchiveCatalogSession session in sessions)
+		{
+			if (ReferenceEquals(session, preferredSession))
+				continue;
+
+			if (TryDecodeBlpToPngFromSession(session, relPath, outputPath))
+				return DecodeResult.FallbackSession;
+		}
+
+		return DecodeResult.NotFound;
 	}
 
-	private static IArchiveCatalog CreateArchiveCatalog(string clientRoot)
+	private static bool TryDecodeBlpToPngFromSession(ArchiveCatalogSession session, string relPath, string outputPath)
 	{
-		IArchiveCatalog catalog = new MpqArchiveCatalogFactory().Create();
-		ArchiveCatalogBootstrapper.Bootstrap(catalog, [clientRoot, Path.Combine(clientRoot, "Data")], new ArchiveCatalogBootstrapOptions(ExternalListfilePath: null));
-		if (catalog is MpqArchiveCatalog mpqCatalog)
-			mpqCatalog.ScanMapMpqArchives(clientRoot);
-		return catalog;
+		byte[]? blpBytes = V10TilesetArchiveReader.TryReadVirtualFile(session, relPath);
+		if (blpBytes is not { Length: > 0 })
+			return false;
+
+		using MemoryStream ms = new(blpBytes, writable: false);
+		using BlpFile blp = new(ms);
+		using System.Drawing.Bitmap bmp = blp.GetBitmap(0);
+		bmp.Save(outputPath, System.Drawing.Imaging.ImageFormat.Png);
+		return true;
+	}
+
+	private static IEnumerable<string> GetEraTagKeysForClientRoot(string clientRoot)
+	{
+		if (string.IsNullOrWhiteSpace(clientRoot))
+			yield break;
+
+		string? current = Path.GetFullPath(clientRoot);
+		for (int depth = 0; depth < 3 && !string.IsNullOrWhiteSpace(current); depth++)
+		{
+			string candidate = Path.GetFileName(current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+			if (!string.IsNullOrWhiteSpace(candidate))
+			{
+				yield return candidate;
+				yield return candidate.Replace('_', '.');
+			}
+
+			current = Path.GetDirectoryName(current);
+		}
 	}
 
 	private static string SanitizeFileName(string value)
@@ -187,6 +218,13 @@ public static class V10TilesetHarvestCommand
 	{
 		string? value = GetOption(args, longName, shortName);
 		return int.TryParse(value, out int parsed) ? parsed : null;
+	}
+
+	private enum DecodeResult
+	{
+		NotFound,
+		PreferredSession,
+		FallbackSession,
 	}
 }
 

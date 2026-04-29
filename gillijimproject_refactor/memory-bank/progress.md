@@ -12,6 +12,16 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 ## Recent Validated Milestones
 
+### Apr 29, 2026 - Era-routed v10 tileset harvest landed
+
+- `wowviewer-converter harvest-tileset-blps` now uses each merged tileset entry's `era_tag` to pick the matching staged-local client session before falling back to the remaining client roots
+- The shared `V10TilesetArchiveReader` centralizes archive session setup and loose-file fallback for the v10 tileset index and harvest commands
+- Proof:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed with existing warnings only
+  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- harvest-tileset-blps --input i:/parp/parp-tools/output/ml-training/v10_tileset_database/merged_tileset_index.json --output-dir i:/parp/parp-tools/output/build-validation/v10-tileset-harvest-era-routing-smoke-counters --limit 5` passed
+  - smoke output: `output/build-validation/v10-tileset-harvest-era-routing-smoke-counters/harvest_manifest.json`
+  - result: `5` exports, `5` preferred era-session hits, `0` fallback hits, and `0` errors from staged-local `output/tmp/wowarchive-clients` roots
+
 ### Apr 27, 2026 - Full mixed-corpus v10 Stage 2 CUDA run 3 launched
 
 - The canonical long-running Stage 2 trainer was launched from `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` using the proven curated manifest `output/ml-training/v10_curated/v10_v9all_plus_native_dev_balanced_manifest.json`

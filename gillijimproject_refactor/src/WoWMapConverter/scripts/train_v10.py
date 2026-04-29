@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import math
 import os
 import random
@@ -32,6 +33,7 @@ DEFAULT_DETAIL_RESIDUAL_WEIGHT = 0.08
 DEFAULT_GRADIENT_WEIGHT = 0.35
 DEFAULT_MID_L1_WEIGHT = 0.55
 DEFAULT_COARSE_L1_WEIGHT = 0.35
+DEFAULT_TARGET_CURATED_SAMPLES = 800
 DEFAULT_QUALITY_REWARD = 0.35
 DEFAULT_LOW_SIGNAL_PENALTY = 0.25
 DEFAULT_BLANK_TILE_PENALTY = 0.45
@@ -220,6 +222,175 @@ def summarize_entry_weighting(entries: Sequence[v9.V9SampleEntry], args: argpars
         "mean_sample_weight": float(sum(weights) / len(weights)),
         "max_sample_weight": float(max(weights)),
     }
+
+
+def format_duration(seconds: float) -> str:
+    total_seconds = max(0, int(round(seconds)))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def build_epoch_row(record: dict[str, Any], best_val_loss: float, best_epoch: int) -> dict[str, Any]:
+    train_components = record.get("train_components", {})
+    val_components = record.get("val_components", {})
+    val_real_components = record.get("val_real_wdl_components", {})
+    dev_eval = record.get("dev_eval", {})
+    prior_lift = dev_eval.get("prior_lift", {}) if isinstance(dev_eval, dict) else {}
+    return {
+        "epoch": record.get("epoch"),
+        "is_best": bool(record.get("is_best", False)),
+        "stall": int(record.get("stall", 0)),
+        "best_epoch": int(best_epoch),
+        "best_val_loss": float(best_val_loss),
+        "train_loss": record.get("train_loss"),
+        "val_no_wdl_loss": record.get("val_loss"),
+        "val_real_wdl_loss": record.get("val_real_wdl_loss"),
+        "learning_rate": record.get("learning_rate"),
+        "epoch_seconds": record.get("epoch_seconds"),
+        "avg_epoch_seconds": record.get("avg_epoch_seconds"),
+        "eta_seconds": record.get("eta_seconds"),
+        "train_samples_per_second": record.get("train_samples_per_second"),
+        "val_samples_per_second": record.get("val_samples_per_second"),
+        "val_real_wdl_samples_per_second": record.get("val_real_wdl_samples_per_second"),
+        "train_full_l1": train_components.get("full_l1"),
+        "train_mid_l1": train_components.get("mid_l1"),
+        "train_coarse_l1": train_components.get("coarse_l1"),
+        "train_gradient": train_components.get("gradient"),
+        "train_detail_residual": train_components.get("detail_residual"),
+        "train_gate_penalty": train_components.get("gate_penalty"),
+        "val_full_l1": val_components.get("full_l1"),
+        "val_mid_l1": val_components.get("mid_l1"),
+        "val_coarse_l1": val_components.get("coarse_l1"),
+        "val_gradient": val_components.get("gradient"),
+        "val_detail_residual": val_components.get("detail_residual"),
+        "val_gate_penalty": val_components.get("gate_penalty"),
+        "val_real_full_l1": val_real_components.get("full_l1"),
+        "val_real_mid_l1": val_real_components.get("mid_l1"),
+        "val_real_coarse_l1": val_real_components.get("coarse_l1"),
+        "val_real_gradient": val_real_components.get("gradient"),
+        "dev_eval_no_wdl_mae": dev_eval.get("no_wdl", {}).get("global_mae") if isinstance(dev_eval, dict) and "no_wdl" in dev_eval else None,
+        "dev_eval_real_wdl_mae": dev_eval.get("real_wdl", {}).get("global_mae") if isinstance(dev_eval, dict) and "real_wdl" in dev_eval else None,
+        "dev_eval_corrupt_wdl_mae": dev_eval.get("corrupt_wdl", {}).get("global_mae") if isinstance(dev_eval, dict) and "corrupt_wdl" in dev_eval else None,
+        "dev_eval_real_minus_no_wdl_mae": prior_lift.get("real_minus_no_wdl_mae"),
+        "dev_eval_corrupt_minus_no_wdl_mae": prior_lift.get("corrupt_minus_no_wdl_mae"),
+    }
+
+
+def write_epoch_history_csv(path: Path, history: Sequence[dict[str, Any]], best_val_loss: float, best_epoch: int) -> None:
+    rows = [build_epoch_row(record, best_val_loss, best_epoch) for record in history]
+    fieldnames = list(rows[0].keys()) if rows else [
+        "epoch",
+        "is_best",
+        "stall",
+        "best_epoch",
+        "best_val_loss",
+        "train_loss",
+        "val_no_wdl_loss",
+        "val_real_wdl_loss",
+        "learning_rate",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def build_cohort_summary(entries: Sequence[v9.V9SampleEntry], args: argparse.Namespace) -> dict[str, Any]:
+    by_dataset: dict[str, int] = {}
+    by_build: dict[str, int] = {}
+    by_map: dict[str, int] = {}
+    sample_rows: list[dict[str, Any]] = []
+    for entry in entries:
+        by_dataset[entry.dataset_key] = by_dataset.get(entry.dataset_key, 0) + 1
+        by_build[entry.build_key] = by_build.get(entry.build_key, 0) + 1
+        by_map[entry.map_name] = by_map.get(entry.map_name, 0) + 1
+        sample_rows.append(
+            {
+                "sample_key": entry.sample_key,
+                "dataset_key": entry.dataset_key,
+                "build_key": entry.build_key,
+                "tile_name": entry.tile_name,
+                "map_name": entry.map_name,
+                "tile_x": entry.tile_x,
+                "tile_y": entry.tile_y,
+                "height_range": entry.height_range,
+                "minimap_variance": entry.minimap_variance,
+                "minimap_gradient": entry.minimap_gradient,
+                "detail_energy": entry.detail_energy,
+                "sample_weight": compute_entry_sample_weight(entry, args),
+            }
+        )
+    return {
+        "schema_version": "v10-training-cohort.v1",
+        "created_at_utc": v9.utc_now_iso(),
+        "target_curated_samples": args.target_curated_samples,
+        "selected_sample_count": len(entries),
+        "by_dataset": dict(sorted(by_dataset.items())),
+        "by_build": dict(sorted(by_build.items())),
+        "by_map": dict(sorted(by_map.items())),
+        "samples": sample_rows,
+    }
+
+
+def write_live_status(
+    output_dir: Path,
+    *,
+    history: Sequence[dict[str, Any]],
+    best_val_loss: float,
+    best_epoch: int,
+    stop_reason: str,
+    selected_sample_count: int,
+    train_sample_count: int,
+    val_sample_count: int,
+    reward_weighting: dict[str, Any],
+) -> None:
+    latest = history[-1] if history else {}
+    status_payload = {
+        "schema_version": "v10-training-status.v1",
+        "created_at_utc": v9.utc_now_iso(),
+        "latest_epoch": latest.get("epoch", 0),
+        "latest_train_loss": latest.get("train_loss"),
+        "latest_val_no_wdl_loss": latest.get("val_loss"),
+        "latest_val_real_wdl_loss": latest.get("val_real_wdl_loss"),
+        "best_val_loss": best_val_loss,
+        "best_epoch": best_epoch,
+        "stall": latest.get("stall", 0),
+        "learning_rate": latest.get("learning_rate"),
+        "epoch_seconds": latest.get("epoch_seconds"),
+        "avg_epoch_seconds": latest.get("avg_epoch_seconds"),
+        "eta_seconds": latest.get("eta_seconds"),
+        "selected_samples": selected_sample_count,
+        "train_samples": train_sample_count,
+        "val_samples": val_sample_count,
+        "reward_weighting": reward_weighting,
+        "stop_reason": stop_reason,
+    }
+    v9.write_json(output_dir / "latest_status.json", status_payload)
+    status_lines = [
+        "# V10 Training Status",
+        f"- Latest epoch: {status_payload['latest_epoch']}",
+        f"- Best no-WDL val: {best_val_loss:.6f} @ epoch {best_epoch}",
+        f"- Latest no-WDL val: {status_payload['latest_val_no_wdl_loss']:.6f}" if status_payload["latest_val_no_wdl_loss"] is not None else "- Latest no-WDL val: n/a",
+        f"- Latest real-WDL val: {status_payload['latest_val_real_wdl_loss']:.6f}" if status_payload["latest_val_real_wdl_loss"] is not None else "- Latest real-WDL val: n/a",
+        f"- Stall: {status_payload['stall']}",
+        f"- Learning rate: {status_payload['learning_rate']:.2e}" if status_payload["learning_rate"] is not None else "- Learning rate: n/a",
+        f"- Last epoch time: {format_duration(status_payload['epoch_seconds'])}" if status_payload["epoch_seconds"] is not None else "- Last epoch time: n/a",
+        f"- ETA: {format_duration(status_payload['eta_seconds'])}" if status_payload["eta_seconds"] is not None else "- ETA: n/a",
+        f"- Selected/train/val samples: {selected_sample_count}/{train_sample_count}/{val_sample_count}",
+        f"- Reward weighting: blank-like {reward_weighting['blank_like_count']}/{reward_weighting['count']}, low-signal {reward_weighting['low_signal_count']}/{reward_weighting['count']}, weight range {reward_weighting['min_sample_weight']:.2f}-{reward_weighting['max_sample_weight']:.2f}",
+        "- Trend files:",
+        f"  - {output_dir / 'epoch_history.csv'}",
+        f"  - {output_dir / 'epoch_history.json'}",
+        f"  - {output_dir / 'run_summary.json'}",
+        f"  - {output_dir / 'training_cohort.json'}",
+        f"  - {output_dir / 'previews'}",
+    ]
+    v9.write_text(output_dir / "latest_status.md", "\n".join(status_lines) + "\n")
 
 
 @dataclass(frozen=True)
@@ -951,6 +1122,8 @@ def train_single_run(
     train_indices, val_indices = v9.split_grouped_indices(selected_entries, args.val_fraction, args.seed, args.group_block_size)
     train_entries = [selected_entries[index] for index in train_indices]
     val_entries = [selected_entries[index] for index in val_indices]
+    cohort_summary = build_cohort_summary(selected_entries, args)
+    v9.write_json(output_dir / "training_cohort.json", cohort_summary)
 
     print("\n=== V10 Training ===")
     print(f"  train_workers={args.train_workers} | val_workers={args.val_workers} | channels_last={args.channels_last} | compile={args.use_compile}")
@@ -1149,7 +1322,22 @@ def train_single_run(
         )
         stop_reason = "resume_checkpoint_already_complete"
 
+    write_epoch_history_csv(output_dir / "epoch_history.csv", history, best_val_loss, best_epoch)
+    v9.write_json(output_dir / "epoch_history.json", {"schema_version": "v10-epoch-history.v1", "history": history})
+    write_live_status(
+        output_dir,
+        history=history,
+        best_val_loss=best_val_loss,
+        best_epoch=best_epoch,
+        stop_reason=stop_reason,
+        selected_sample_count=len(selected_entries),
+        train_sample_count=len(train_entries),
+        val_sample_count=len(val_entries),
+        reward_weighting=train_weighting_summary,
+    )
+
     for epoch in range(start_epoch + 1, args.epochs + 1):
+        epoch_started = time.perf_counter()
         args.current_stall = epochs_since_best
         train_loader = build_train_loader(train_dataset, train_entries, args, device, epoch, sample_loss_ema)
 
@@ -1257,6 +1445,17 @@ def train_single_run(
         else:
             epochs_since_best += 1
 
+        epoch_seconds = time.perf_counter() - epoch_started
+        prior_timed_epochs = [float(item["epoch_seconds"]) for item in history if item.get("epoch_seconds") is not None]
+        average_epoch_seconds = (sum(prior_timed_epochs) + epoch_seconds) / (len(prior_timed_epochs) + 1)
+        remaining_epochs = max(args.epochs - epoch, 0)
+        eta_seconds = average_epoch_seconds * remaining_epochs
+        history_record["is_best"] = is_best
+        history_record["stall"] = epochs_since_best
+        history_record["epoch_seconds"] = epoch_seconds
+        history_record["avg_epoch_seconds"] = average_epoch_seconds
+        history_record["eta_seconds"] = eta_seconds
+
         current_lr = float(optimizer.param_groups[0]["lr"])
         status = "BEST" if is_best else f"stall={epochs_since_best}"
         print(
@@ -1266,6 +1465,10 @@ def train_single_run(
         print(
             f"  full {val_no_wdl_components['full_l1']:.6f} | mid {val_no_wdl_components['mid_l1']:.6f} | coarse {val_no_wdl_components['coarse_l1']:.6f} | "
             f"grad {val_no_wdl_components['gradient']:.6f} | gate_penalty {val_no_wdl_components['gate_penalty']:.6f} | train_sps {train_sps:.1f}"
+        )
+        print(
+            f"  epoch_time {format_duration(epoch_seconds)} | avg_epoch {format_duration(average_epoch_seconds)} | eta {format_duration(eta_seconds)} | "
+            f"selected/train/val {len(selected_entries)}/{len(train_entries)}/{len(val_entries)}"
         )
         if dev_eval_metrics is not None:
             print(
@@ -1324,6 +1527,20 @@ def train_single_run(
             last_checkpoint_path,
         )
 
+        write_epoch_history_csv(output_dir / "epoch_history.csv", history, best_val_loss, best_epoch)
+        v9.write_json(output_dir / "epoch_history.json", {"schema_version": "v10-epoch-history.v1", "history": history})
+        write_live_status(
+            output_dir,
+            history=history,
+            best_val_loss=best_val_loss,
+            best_epoch=best_epoch,
+            stop_reason=stop_reason,
+            selected_sample_count=len(selected_entries),
+            train_sample_count=len(train_entries),
+            val_sample_count=len(val_entries),
+            reward_weighting=train_weighting_summary,
+        )
+
         if epoch >= args.early_stop_min_epochs and epochs_since_best >= args.early_stop_patience:
             print(
                 f"  early stop: no new best no-WDL val loss for {epochs_since_best} epoch(s) after epoch {best_epoch}; best val remained {best_val_loss:.6f}"
@@ -1352,6 +1569,19 @@ def train_single_run(
         "resumed_from": resumed_from,
     }
     v9.write_json(output_dir / "run_summary.json", run_summary)
+    write_epoch_history_csv(output_dir / "epoch_history.csv", history, best_val_loss, best_epoch)
+    v9.write_json(output_dir / "epoch_history.json", {"schema_version": "v10-epoch-history.v1", "history": history})
+    write_live_status(
+        output_dir,
+        history=history,
+        best_val_loss=best_val_loss,
+        best_epoch=best_epoch,
+        stop_reason=stop_reason,
+        selected_sample_count=len(selected_entries),
+        train_sample_count=len(train_entries),
+        val_sample_count=len(val_entries),
+        reward_weighting=train_weighting_summary,
+    )
     return run_summary
 
 
@@ -1402,7 +1632,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--curation-mode", type=str, default=v9.DEFAULT_CURATION_MODE)
     parser.add_argument("--curation-diversity-block-size", type=int, default=v9.DEFAULT_CURATION_DIVERSITY_BLOCK_SIZE)
     parser.add_argument("--curation-max-per-group", type=int, default=v9.DEFAULT_CURATION_MAX_PER_GROUP)
-    parser.add_argument("--target-curated-samples", type=int, default=None)
+    parser.add_argument(
+        "--target-curated-samples",
+        type=int,
+        default=DEFAULT_TARGET_CURATED_SAMPLES,
+        help="Default curated training budget. Set to 0 to fall back to --limit or uncapped selection.",
+    )
     parser.add_argument("--require-minimap", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--require-wdl", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--min-height-range", type=float, default=v9.DEFAULT_MIN_HEIGHT_RANGE)
@@ -1459,9 +1694,13 @@ def curate_entries(args: argparse.Namespace, cache_manifest: Path) -> tuple[list
         accepted = [accepted[index] for index in sorted(rng.sample(range(len(accepted)), args.subset))]
         print(f"  Applied random subset: {len(accepted)} audited samples")
 
+    curated_limit = args.target_curated_samples if args.target_curated_samples and args.target_curated_samples > 0 else args.limit
+    if curated_limit is not None:
+        print(f"  Curated training budget: {curated_limit} sample(s)")
+
     selected_entries = v9.select_curated_entries(
         accepted,
-        limit=args.target_curated_samples or args.limit,
+        limit=curated_limit,
         curation_mode=args.curation_mode,
         diversity_block_size=args.curation_diversity_block_size,
         max_per_group=args.curation_max_per_group,
@@ -1495,6 +1734,9 @@ def main() -> None:
     amp_dtype = resolve_amp_dtype(args.amp_dtype, device)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.target_curated_samples is not None and args.target_curated_samples > 1000:
+        print(f"Warning: target_curated_samples={args.target_curated_samples} exceeds the recommended maximum of 1000.")
 
     selected_entries, dev_eval_entries = curate_entries(args, cache_manifest)
     run_summary = train_single_run(
