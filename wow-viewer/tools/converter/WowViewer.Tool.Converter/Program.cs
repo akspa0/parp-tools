@@ -203,11 +203,28 @@ static void RunListMaps(string[] args)
 	if (mapCandidates.Count == 0)
 		mapCandidates = DiscoverArchiveMapNames(archiveCatalog.GetAllKnownFiles()).ToList();
 
+	HashSet<string> knownFiles = archiveCatalog
+		.GetAllKnownFiles()
+		.Select(static path => NormalizeArchiveLookupPath(path))
+		.ToHashSet(StringComparer.OrdinalIgnoreCase);
+	List<string> distinctCandidates = mapCandidates
+		.Distinct(StringComparer.OrdinalIgnoreCase)
+		.ToList();
+
 	List<(string MapName, int TilesWithData, int MwmoNameCount)> eligibleMaps = [];
 	int skippedMissingWdt = 0;
 	int skippedWmoOnly = 0;
-	foreach (string mapName in mapCandidates.Distinct(StringComparer.OrdinalIgnoreCase))
+	for (int candidateIndex = 0; candidateIndex < distinctCandidates.Count; candidateIndex++)
 	{
+		string mapName = distinctCandidates[candidateIndex];
+		string mapVirtualRoot = Path.Combine("World", "Maps", mapName).Replace('/', '\\');
+		string wdtVirtualPath = BuildMapWdtVirtualPath(mapVirtualRoot, mapName);
+		if (!knownFiles.Contains(NormalizeArchiveLookupPath(wdtVirtualPath)))
+		{
+			skippedMissingWdt++;
+			continue;
+		}
+
 		if (!TryReadArchiveWdtSummary(archiveCatalog, mapName, out int tilesWithData, out int mwmoNameCount))
 		{
 			skippedMissingWdt++;
@@ -221,6 +238,9 @@ static void RunListMaps(string[] args)
 		}
 
 		eligibleMaps.Add((mapName, tilesWithData, mwmoNameCount));
+
+		if ((candidateIndex + 1) % 64 == 0)
+			Console.WriteLine($"list-maps progress: {candidateIndex + 1}/{distinctCandidates.Count} candidates");
 	}
 
 	List<string> maps = eligibleMaps
@@ -4147,6 +4167,13 @@ static string BuildMapWdtVirtualPath(string mapVirtualRoot, string mapName)
 		return mapVirtualRoot;
 
 	return $"{mapVirtualRoot}\\{mapName}.wdt";
+}
+
+static string NormalizeArchiveLookupPath(string path)
+{
+	return path
+		.Replace('/', '\\')
+		.TrimStart('\\');
 }
 
 static IReadOnlyList<WdtTileCoordinate> ReadArchiveWdtTiles(byte[] wdtBytes, string wdtVirtualPath)
