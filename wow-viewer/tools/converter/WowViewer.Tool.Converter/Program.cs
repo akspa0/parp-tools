@@ -616,9 +616,40 @@ static V10TensorExtractionResult ExtractAndWriteV10TensorPack(
 	string? clientRoot,
 	IArchiveCatalog? archiveCatalog)
 {
-	TerrainTileTensorPack pack = AdtTensorPackBuilder.Build(inputAdtPath, textureSource, buildKey, mapNameOverride);
+	AlphaEmbeddedAdtTileData? alphaTile = null;
+	TerrainTileTensorPack pack;
+	if (TryParseAlphaEmbeddedTileSourcePath(inputAdtPath, out string alphaMapDirectory, out int alphaTileX, out int alphaTileY))
+	{
+		if (string.IsNullOrWhiteSpace(clientRoot) || archiveCatalog is null)
+			throw new InvalidOperationException("alpha embedded tile extraction requires --client-root so the shared archive catalog can resolve tile payloads");
+
+		if (!AlphaEmbeddedAdtReader.TryReadTile(clientRoot, alphaMapDirectory, alphaTileX, alphaTileY, archiveCatalog, out alphaTile)
+			|| alphaTile is null)
+		{
+			throw new InvalidOperationException($"could not resolve alpha embedded tile for '{inputAdtPath}'");
+		}
+
+		string resolvedMapName = string.IsNullOrWhiteSpace(mapNameOverride) ? alphaMapDirectory : mapNameOverride;
+		pack = BuildV10TensorPackFromAlphaEmbedded(alphaTile, inputAdtPath, buildKey, resolvedMapName, alphaTileX, alphaTileY);
+	}
+	else
+	{
+		if (File.Exists(inputAdtPath))
+		{
+			pack = AdtTensorPackBuilder.Build(inputAdtPath, textureSource, buildKey, mapNameOverride);
+		}
+		else if (!string.IsNullOrWhiteSpace(clientRoot) && archiveCatalog is not null)
+		{
+			pack = BuildV10TensorPackFromArchivePath(inputAdtPath, textureSource, buildKey, mapNameOverride, archiveCatalog);
+		}
+		else
+		{
+			throw new FileNotFoundException($"could not read ADT source '{inputAdtPath}' from filesystem or archive context");
+		}
+	}
+
 	string? minimapSourcePath = null;
-	if (!string.IsNullOrWhiteSpace(minimapRoot) && TryLoadV10MinimapRgb(inputAdtPath, minimapRoot, out byte[,,]? minimapRgb, out string? resolvedMinimapPath))
+	if (!string.IsNullOrWhiteSpace(minimapRoot) && TryLoadV10MinimapRgb(inputAdtPath, mapNameOverride, minimapRoot, out byte[,,]? minimapRgb, out string? resolvedMinimapPath))
 	{
 		pack.MinimapRgb256 = minimapRgb;
 		pack.MinimapSourceTag = "raw";
@@ -649,8 +680,254 @@ static V10TensorExtractionResult ExtractAndWriteV10TensorPack(
 		throw new InvalidOperationException("missing minimap_rgb_256 for this tile under the provided minimap or client root");
 
 	NpzTileSerializer.Serialize(pack, outputPath);
-	WriteV10PlacementSidecar(inputAdtPath, placementOutputPath);
+	if (alphaTile is not null)
+		WriteV10PlacementSidecarFromCatalog(inputAdtPath, placementOutputPath, alphaTile.PlacementCatalog);
+	else
+		WriteV10PlacementSidecar(inputAdtPath, placementOutputPath);
 	return new V10TensorExtractionResult(pack, minimapSourcePath);
+}
+
+static TerrainTileTensorPack BuildV10TensorPackFromArchivePath(
+	string rootVirtualPath,
+	string? textureSource,
+	string buildKey,
+	string? mapNameOverride,
+	IArchiveCatalog archiveCatalog)
+{
+	string normalizedRoot = rootVirtualPath.Replace('/', '\\').TrimStart('\\');
+	byte[] rootBytes = archiveCatalog.ReadFile(normalizedRoot)
+		?? archiveCatalog.ReadFile(normalizedRoot.Replace('\\', '/'))
+		?? [];
+	if (rootBytes.Length == 0)
+		throw new InvalidOperationException($"archive root ADT not found: {rootVirtualPath}");
+
+	string tileStem = Path.GetFileNameWithoutExtension(normalizedRoot);
+	if (string.IsNullOrWhiteSpace(tileStem))
+		tileStem = "tile";
+
+	string temporaryRoot = Path.Combine(Path.GetTempPath(), "wowviewer-v10-extract", Guid.NewGuid().ToString("N"));
+	Directory.CreateDirectory(temporaryRoot);
+	try
+	{
+		string tempRootAdtPath = Path.Combine(temporaryRoot, tileStem + ".adt");
+		File.WriteAllBytes(tempRootAdtPath, rootBytes);
+
+		string? resolvedTextureSource = null;
+		string textureVirtualPath = string.IsNullOrWhiteSpace(textureSource)
+			? normalizedRoot[..^4] + "_tex0.adt"
+			: textureSource.Replace('/', '\\').TrimStart('\\');
+
+		byte[] textureBytes = archiveCatalog.ReadFile(textureVirtualPath)
+			?? archiveCatalog.ReadFile(textureVirtualPath.Replace('\\', '/'))
+			?? [];
+		if (textureBytes.Length > 0)
+		{
+			resolvedTextureSource = Path.Combine(temporaryRoot, tileStem + "_tex0.adt");
+			File.WriteAllBytes(resolvedTextureSource, textureBytes);
+		}
+
+		return AdtTensorPackBuilder.Build(tempRootAdtPath, resolvedTextureSource, buildKey, mapNameOverride);
+	}
+	finally
+	{
+		if (Directory.Exists(temporaryRoot))
+		{
+			try
+			{
+				Directory.Delete(temporaryRoot, recursive: true);
+			}
+			catch
+			{
+				// best effort cleanup only
+			}
+		}
+	}
+}
+
+static TerrainTileTensorPack BuildV10TensorPackFromAlphaEmbedded(
+	AlphaEmbeddedAdtTileData alphaTile,
+	string sourceAdtPath,
+	string buildKey,
+	string mapName,
+	int tileX,
+	int tileY)
+{
+	HashSet<string> availableSignals = new(StringComparer.OrdinalIgnoreCase);
+
+	float[,]? height257 = ConvertHeightmap(alphaTile.TerrainTileData.Heightmap);
+	float[,]? height65 = height257 is null ? null : DownsampleHeightGridNearest(height257, 65);
+	float[,]? height17 = height257 is null ? null : DownsampleHeightGridNearest(height257, 17);
+	if (height257 is not null)
+		availableSignals.Add("height_257");
+	if (height65 is not null)
+		availableSignals.Add("height_65");
+	if (height17 is not null)
+		availableSignals.Add("height_17");
+
+	bool[,] holeMask16 = BuildHoleMask16(alphaTile.TerrainTileData, out bool hasHoles);
+	if (hasHoles)
+		availableSignals.Add("hole_mask_16");
+
+	(float[,] objectMask257, float[,] objectPreciseMask257, bool hasObjects) = BuildObjectMasksFromPlacementCatalog(alphaTile.PlacementCatalog, tileX, tileY);
+	if (hasObjects)
+	{
+		availableSignals.Add("object_mask_257");
+		availableSignals.Add("object_precise_mask_257");
+	}
+
+	(float[,]? mclqSurfaceHeight, int[,]? mclqTypeMask, float[,]? unifiedLiquidMask, float[,]? unifiedLiquidHeight) = BuildAlphaLiquidSignals(alphaTile.LiquidTileData);
+	if (mclqSurfaceHeight is not null)
+	{
+		availableSignals.Add("mclq_surface_height");
+		availableSignals.Add("mclq_type_mask");
+		availableSignals.Add("unified_liquid_mask");
+		availableSignals.Add("unified_liquid_height");
+	}
+
+	return new TerrainTileTensorPack
+	{
+		TileName = $"{mapName}_{tileX}_{tileY}",
+		MapName = mapName,
+		BuildKey = buildKey,
+		SourceAdtPath = sourceAdtPath,
+		Height257 = height257,
+		Height65 = height65,
+		Height17 = height17,
+		MclqSurfaceHeight = mclqSurfaceHeight,
+		MclqTypeMask = mclqTypeMask,
+		UnifiedLiquidMask = unifiedLiquidMask,
+		UnifiedLiquidHeight = unifiedLiquidHeight,
+		ObjectMask257 = objectMask257,
+		ObjectPreciseMask257 = objectPreciseMask257,
+		HoleMask16 = holeMask16,
+		AvailableSignals = availableSignals,
+		MinimapSourceTag = string.Empty,
+	};
+}
+
+static float[,]? ConvertHeightmap(WorldTerrainHeightmapData? heightmap)
+{
+	if (heightmap is null || heightmap.Width <= 0 || heightmap.Height <= 0)
+		return null;
+
+	float[,] result = new float[heightmap.Height, heightmap.Width];
+	for (int y = 0; y < heightmap.Height; y++)
+	{
+		int rowOffset = y * heightmap.Width;
+		for (int x = 0; x < heightmap.Width; x++)
+			result[y, x] = heightmap.Heights[rowOffset + x];
+	}
+
+	return result;
+}
+
+static float[,] DownsampleHeightGridNearest(float[,] source, int targetSize)
+{
+	int sourceHeight = source.GetLength(0);
+	int sourceWidth = source.GetLength(1);
+	float[,] result = new float[targetSize, targetSize];
+
+	for (int y = 0; y < targetSize; y++)
+	{
+		int sourceY = targetSize == 1 ? 0 : (int)MathF.Round((float)y * (sourceHeight - 1) / (targetSize - 1));
+		sourceY = Math.Clamp(sourceY, 0, sourceHeight - 1);
+		for (int x = 0; x < targetSize; x++)
+		{
+			int sourceX = targetSize == 1 ? 0 : (int)MathF.Round((float)x * (sourceWidth - 1) / (targetSize - 1));
+			sourceX = Math.Clamp(sourceX, 0, sourceWidth - 1);
+			result[y, x] = source[sourceY, sourceX];
+		}
+	}
+
+	return result;
+}
+
+static bool[,] BuildHoleMask16(WorldTerrainTileData terrainTile, out bool hasHoles)
+{
+	bool[,] result = new bool[16, 16];
+	hasHoles = false;
+	foreach (WorldTerrainChunkData chunk in terrainTile.Chunks)
+	{
+		if ((uint)chunk.IndexX >= 16 || (uint)chunk.IndexY >= 16 || !chunk.HasHoles)
+			continue;
+
+		result[chunk.IndexY, chunk.IndexX] = true;
+		hasHoles = true;
+	}
+
+	return result;
+}
+
+static (float[,] ObjectMask257, float[,] ObjectPreciseMask257, bool HasObjects) BuildObjectMasksFromPlacementCatalog(AdtPlacementCatalog placements, int tileX, int tileY)
+{
+	byte[] coarseMask = new byte[NativeTileSize * NativeTileSize];
+	byte[] preciseMask = new byte[NativeTileSize * NativeTileSize];
+
+	foreach (AdtModelPlacement placement in placements.ModelPlacements)
+	{
+		PaintPlacementCentroid(coarseMask, placement.Position, tileX, tileY, radiusPixels: 2);
+		PaintPlacementCentroid(preciseMask, placement.Position, tileX, tileY, radiusPixels: 3);
+	}
+
+	foreach (AdtWorldModelPlacement placement in placements.WorldModelPlacements)
+	{
+		PaintPlacementCentroid(coarseMask, placement.Position, tileX, tileY, radiusPixels: 3);
+		PaintPlacementCentroid(preciseMask, placement.Position, tileX, tileY, radiusPixels: 4);
+	}
+
+	bool hasObjects = coarseMask.Any(static value => value != 0);
+	return (ToFloatMask(coarseMask), ToFloatMask(preciseMask), hasObjects);
+}
+
+static float[,] ToFloatMask(byte[] binaryMask)
+{
+	float[,] result = new float[NativeTileSize, NativeTileSize];
+	for (int y = 0; y < NativeTileSize; y++)
+	{
+		int rowOffset = y * NativeTileSize;
+		for (int x = 0; x < NativeTileSize; x++)
+			result[y, x] = binaryMask[rowOffset + x] == 0 ? 0f : 1f;
+	}
+
+	return result;
+}
+
+static (float[,]? MclqSurfaceHeight, int[,]? MclqTypeMask, float[,]? UnifiedLiquidMask, float[,]? UnifiedLiquidHeight) BuildAlphaLiquidSignals(WorldLiquidTileData liquidTile)
+{
+	if (liquidTile.ActiveChunkCount <= 0)
+		return (null, null, null, null);
+
+	float[,] surface = new float[NativeTileSize, NativeTileSize];
+	int[,] typeMask = new int[NativeTileSize, NativeTileSize];
+	float[,] unifiedMask = new float[NativeTileSize, NativeTileSize];
+	float[,] unifiedHeight = new float[NativeTileSize, NativeTileSize];
+	bool any = false;
+
+	foreach (WorldLiquidChunkData chunk in liquidTile.Chunks)
+	{
+		if (chunk.Layers.Count == 0)
+			continue;
+
+		WorldLiquidLayerData layer = chunk.Layers[0];
+		int liquidType = layer.LiquidTypeId > 0 ? layer.LiquidTypeId : (int)layer.BasicType;
+		float liquidHeight = layer.MaxHeight;
+		int startX = Math.Clamp(chunk.ChunkX * 16, 0, NativeTileSize - 1);
+		int startY = Math.Clamp(chunk.ChunkY * 16, 0, NativeTileSize - 1);
+
+		for (int y = startY; y <= Math.Min(startY + 16, NativeTileSize - 1); y++)
+		{
+			for (int x = startX; x <= Math.Min(startX + 16, NativeTileSize - 1); x++)
+			{
+				surface[y, x] = liquidHeight;
+				typeMask[y, x] = liquidType;
+				unifiedMask[y, x] = 1f;
+				unifiedHeight[y, x] = liquidHeight;
+				any = true;
+			}
+		}
+	}
+
+	return any ? (surface, typeMask, unifiedMask, unifiedHeight) : (null, null, null, null);
 }
 
 static bool TryLoadV10MinimapRgbFromArchive(
@@ -665,14 +942,7 @@ static bool TryLoadV10MinimapRgbFromArchive(
 	minimapRgb = null;
 	sourcePath = null;
 
-	string tileStem = Path.GetFileNameWithoutExtension(inputAdtPath);
-	if (!TryParseTileCoordinates(tileStem, out int tileX, out int tileY))
-		return false;
-
-	string mapName = string.IsNullOrWhiteSpace(mapNameOverride)
-		? ExtractMapNameFromTileStem(tileStem)
-		: mapNameOverride;
-	if (string.IsNullOrWhiteSpace(mapName))
+	if (!TryResolveV10TileIdentity(inputAdtPath, mapNameOverride, out string mapName, out int tileX, out int tileY, out _))
 		return false;
 
 	Dictionary<string, IArchiveCatalog> archiveCatalogs = new(StringComparer.OrdinalIgnoreCase)
@@ -776,17 +1046,12 @@ static bool TryLoadMinimapForTile(string minimapRoot, string mapName, int tileX,
 	return false;
 }
 
-static bool TryLoadV10MinimapRgb(string inputAdtPath, string minimapRoot, out byte[,,]? minimapRgb, out string? sourcePath)
+static bool TryLoadV10MinimapRgb(string inputAdtPath, string? mapNameOverride, string minimapRoot, out byte[,,]? minimapRgb, out string? sourcePath)
 {
 	minimapRgb = null;
 	sourcePath = null;
 
-	string tileStem = Path.GetFileNameWithoutExtension(inputAdtPath);
-	if (!TryParseTileCoordinates(tileStem, out int tileX, out int tileY))
-		return false;
-
-	string mapName = ExtractMapNameFromTileStem(tileStem);
-	if (string.IsNullOrWhiteSpace(mapName))
+	if (!TryResolveV10TileIdentity(inputAdtPath, mapNameOverride, out string mapName, out int tileX, out int tileY, out string tileStem))
 		return false;
 
 	foreach (string directCandidate in EnumerateLooseMinimapCandidates(tileStem))
@@ -820,6 +1085,32 @@ static bool TryLoadV10MinimapRgb(string inputAdtPath, string minimapRoot, out by
 	}
 
 	return false;
+}
+
+static bool TryResolveV10TileIdentity(string inputAdtPath, string? mapNameOverride, out string mapName, out int tileX, out int tileY, out string tileStem)
+{
+	mapName = string.Empty;
+	tileX = 0;
+	tileY = 0;
+	tileStem = string.Empty;
+
+	if (TryParseAlphaEmbeddedTileSourcePath(inputAdtPath, out string alphaMapDirectory, out int alphaTileX, out int alphaTileY))
+	{
+		tileX = alphaTileX;
+		tileY = alphaTileY;
+		mapName = string.IsNullOrWhiteSpace(mapNameOverride) ? alphaMapDirectory : mapNameOverride;
+		tileStem = $"{mapName}_{tileX}_{tileY}";
+		return !string.IsNullOrWhiteSpace(mapName);
+	}
+
+	tileStem = Path.GetFileNameWithoutExtension(inputAdtPath);
+	if (!TryParseTileCoordinates(tileStem, out tileX, out tileY))
+		return false;
+
+	mapName = string.IsNullOrWhiteSpace(mapNameOverride)
+		? ExtractMapNameFromTileStem(tileStem)
+		: mapNameOverride;
+	return !string.IsNullOrWhiteSpace(mapName);
 }
 
 static IEnumerable<string> EnumerateLooseMinimapCandidates(string tileStem)
@@ -870,14 +1161,19 @@ static void WriteV10PlacementSidecar(string inputAdtPath, string outputPath)
 		return;
 
 	AdtPlacementCatalog placements = AdtPlacementReader.Read(placementSourcePath);
+	WriteV10PlacementSidecarFromCatalog(inputAdtPath, outputPath, placements, placementSourcePath);
+}
+
+static void WriteV10PlacementSidecarFromCatalog(string sourceAdtPath, string outputPath, AdtPlacementCatalog placements, string? placementSourcePath = null)
+{
 	string? directory = Path.GetDirectoryName(outputPath);
 	if (!string.IsNullOrWhiteSpace(directory))
 		Directory.CreateDirectory(directory);
 
 	var payload = new
 	{
-		source_adt_path = Path.GetFullPath(inputAdtPath),
-		placement_source_path = Path.GetFullPath(placementSourcePath),
+		source_adt_path = sourceAdtPath,
+		placement_source_path = string.IsNullOrWhiteSpace(placementSourcePath) ? placements.SourcePath : placementSourcePath,
 		mddf = placements.ModelPlacements.Select(static placement => new
 		{
 			model_path = placement.ModelPath,

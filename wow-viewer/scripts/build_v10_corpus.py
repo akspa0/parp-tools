@@ -2,12 +2,12 @@
 """
 v10.1 Corpus Builder Orchestrator
 
-Farms ADT data from all staged WoW clients, fingerprints for deduplication,
+Scans source tiles from all staged WoW clients, fingerprints for deduplication,
 selects a curated set of ~750-1500 unique tiles, and builds v10 NPZ shards.
 
 Usage:
     python build_v10_corpus.py [--config <config.json>] [--dry-run]
-    python build_v10_corpus.py --extract-only  # stop after extraction
+    python build_v10_corpus.py --extract-only  # stop after source discovery
     python build_v10_corpus.py --fingerprint-only  # stop after fingerprinting
     python build_v10_corpus.py --deduplicate-only  # stop after dedup
 """
@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -49,6 +50,16 @@ CONVERTER_EXE = (
 )
 STAGED_CLIENTS_ROOT = REPO_ROOT / "output" / "tmp" / "wowarchive-clients"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output" / "v10_1_corpus"
+ORIGINAL_DEVELOPMENT_ADT_DIR = (
+    REPO_ROOT
+    / "gillijimproject_refactor"
+    / "test_data"
+    / "original_development"
+    / "World"
+    / "Maps"
+    / "development"
+)
+ORIGINAL_DEVELOPMENT_MINIMAP_ROOT = REPO_ROOT / "datasets" / "original_development" / "development"
 
 # ── Default map list ─────────────────────────────────────────────────────────
 # Maps that exist across most WoW client versions (0.5.3 through 4.0.0).
@@ -109,36 +120,51 @@ CLIENTS: list[dict[str, Any]] = [
         "version": "0.5.3.3368",
         "client_path": str(STAGED_CLIENTS_ROOT / "0_5_3_3368" / "World of Warcraft"),
         "era": "alpha",
+        "terrain_source_kind": "embedded_wdt_alpha",
     },
     {
         "client_id": "0.5.5.3494",
         "version": "0.5.5.3494",
         "client_path": str(STAGED_CLIENTS_ROOT / "0_5_5_3494" / "World of Warcraft"),
         "era": "alpha",
+        "terrain_source_kind": "embedded_wdt_alpha",
     },
     {
         "client_id": "0.7.0.3694",
         "version": "0.7.0.3694",
         "client_path": str(STAGED_CLIENTS_ROOT / "0_7_0_3694" / "World of Warcraft"),
         "era": "alpha",
+        "terrain_source_kind": "embedded_wdt_alpha",
     },
     {
         "client_id": "3.0.1.8303",
         "version": "3.0.1.8303",
         "client_path": str(STAGED_CLIENTS_ROOT / "3_0_1_8303" / "World of Warcraft"),
         "era": "wotlk",
+        "terrain_source_kind": "loose_adt",
     },
     {
         "client_id": "3.3.5.12340",
         "version": "3.3.5.12340",
         "client_path": str(STAGED_CLIENTS_ROOT / "3_3_5_12340" / "World of Warcraft"),
         "era": "wotlk",
+        "terrain_source_kind": "loose_adt",
     },
     {
         "client_id": "4.0.0.11927",
         "version": "4.0.0.11927",
         "client_path": str(STAGED_CLIENTS_ROOT / "4_0_0_11927" / "World of Warcraft"),
         "era": "cata",
+        "terrain_source_kind": "loose_adt",
+    },
+    {
+        "client_id": "original_development",
+        "version": "original_development",
+        "client_path": str(ORIGINAL_DEVELOPMENT_ADT_DIR),
+        "era": "development",
+        "terrain_source_kind": "filesystem_adt_dir",
+        "maps": ["development"],
+        "minimap_root": str(ORIGINAL_DEVELOPMENT_MINIMAP_ROOT),
     },
 ]
 
@@ -158,6 +184,7 @@ class CorpusConfig:
     curation_max_selected_fraction: float = 0.0
     curation_max_per_era: int = 0
     shard_batch_size: int = 32
+    shard_batch_timeout_seconds: int = 300
     maps: list[str] = field(default_factory=lambda: DEFAULT_MAPS[:])
     clients: list[dict[str, Any]] = field(default_factory=lambda: CLIENTS[:])
     skip_clients: list[str] = field(default_factory=list)
@@ -228,6 +255,25 @@ def check_client_exists(client: dict[str, Any]) -> bool:
     return Path(client["client_path"]).exists()
 
 
+def client_source_kind(client: dict[str, Any]) -> str:
+    return str(client.get("terrain_source_kind") or "loose_adt").lower()
+
+
+def client_uses_loose_adts(client: dict[str, Any]) -> bool:
+    return client_source_kind(client) == "loose_adt"
+
+
+def client_uses_embedded_alpha(client: dict[str, Any]) -> bool:
+    return client_source_kind(client) == "embedded_wdt_alpha"
+
+
+def describe_unsupported_client_source(client: dict[str, Any]) -> str:
+    source_kind = client_source_kind(client)
+    if source_kind == "embedded_wdt_alpha":
+        return "embedded alpha WDT terrain requires archive scan extraction"
+    return f"unsupported terrain_source_kind={source_kind}"
+
+
 def sanitize_segment(value: str) -> str:
     keep: list[str] = []
     for char in value:
@@ -241,6 +287,20 @@ def sanitize_segment(value: str) -> str:
 
 def normalize_era_tag(value: str) -> str:
     return sanitize_segment(value.replace(".", "_").replace("-", "_").lower())
+
+
+def try_parse_tile_coordinates(tile_name: str) -> tuple[int, int] | None:
+    parts = tile_name.rsplit("_", 2)
+    if len(parts) < 3:
+        return None
+
+    try:
+        tile_x = int(parts[-2])
+        tile_y = int(parts[-1])
+    except ValueError:
+        return None
+
+    return tile_x, tile_y
 
 
 def get_field(entry: dict[str, Any], snake: str, pascal: str, default: Any = None) -> Any:
@@ -269,6 +329,82 @@ def normalize_fingerprint_entry(entry: dict[str, Any], client_id: str, map_name:
     }
 
 
+def normalize_scan_fingerprint_entry(entry: dict[str, Any], client_id: str, map_name: str, era: str) -> dict[str, Any]:
+    metrics = get_field(entry, "metrics", "Metrics", {}) or {}
+    signals = get_field(entry, "signals", "Signals", {}) or {}
+    tile_name = str(get_field(entry, "tile_name", "TileName", "") or "")
+    source_path = str(get_field(entry, "root_adt_path", "RootAdtPath", "") or "")
+    tile_x = int(get_field(entry, "tile_x", "TileX", 0) or 0)
+    tile_y = int(get_field(entry, "tile_y", "TileY", 0) or 0)
+    texture_layers = int(get_field(metrics, "texture_layer_count", "TextureLayerCount", 0) or 0)
+    hole_coverage = float(get_field(metrics, "hole_coverage", "HoleCoverage", 0.0) or 0.0)
+    liquid_coverage = float(get_field(metrics, "liquid_coverage", "LiquidCoverage", 0.0) or 0.0)
+    has_root = bool(get_field(signals, "has_root_adt", "HasRootAdt", False))
+    fingerprint_base = f"scan|{client_id}|{map_name}|{tile_x}|{tile_y}|{source_path}"
+    fingerprint = hashlib.sha256(fingerprint_base.encode("utf-8")).hexdigest()
+
+    return {
+        "tile_name": tile_name,
+        "source_path": source_path,
+        "file_size": 0,
+        "fingerprint": fingerprint,
+        "mcnk_count": 256 if has_root else 0,
+        "total_layer_count": texture_layers,
+        "max_layer_count": texture_layers,
+        "chunks_with_mcvt": 256 if has_root else 0,
+        "chunks_with_holes": int(max(0.0, min(1.0, hole_coverage)) * 256),
+        "chunks_with_liquid_flags": int(max(0.0, min(1.0, liquid_coverage)) * 256),
+        "unique_texture_ids": [],
+        "global_min_height": float(get_field(metrics, "height_min", "HeightMin", 0.0) or 0.0),
+        "global_max_height": float(get_field(metrics, "height_max", "HeightMax", 0.0) or 0.0),
+        "client_id": client_id,
+        "map_name": map_name,
+        "era": era,
+        "era_tag": normalize_era_tag(client_id),
+    }
+
+
+def write_filesystem_scan_manifest(client: dict[str, Any], client_id: str, map_name: str, scan_manifest_path: Path) -> int:
+    adt_dir = Path(str(client.get("client_path") or ""))
+    entries: list[dict[str, Any]] = []
+    for adt_path in sorted(adt_dir.glob(f"{map_name}_*.adt")):
+        if any(adt_path.name.endswith(suffix) for suffix in ["_tex0.adt", "_obj0.adt", "_lod.adt"]):
+            continue
+
+        tile_name = adt_path.stem
+        tile_x = 0
+        tile_y = 0
+        parsed_coords = try_parse_tile_coordinates(tile_name)
+        if parsed_coords is not None:
+            tile_x, tile_y = parsed_coords
+
+        entries.append({
+            "SampleId": f"{client_id}:{tile_name}",
+            "SourceKind": "ClientRoot",
+            "BuildLabel": client_id,
+            "MapName": map_name,
+            "TileX": tile_x,
+            "TileY": tile_y,
+            "SourceRoot": str(adt_dir),
+            "RootAdtPath": str(adt_path),
+            "ObjAdtPath": str(adt_path.with_name(tile_name + "_obj0.adt")) if adt_path.with_name(tile_name + "_obj0.adt").exists() else None,
+            "TexAdtPath": str(adt_path.with_name(tile_name + "_tex0.adt")) if adt_path.with_name(tile_name + "_tex0.adt").exists() else None,
+            "LodAdtPath": str(adt_path.with_name(tile_name + "_lod.adt")) if adt_path.with_name(tile_name + "_lod.adt").exists() else None,
+            "TileName": tile_name,
+        })
+
+    payload = {
+        "schema_version": "v10-filesystem-scan-manifest.v1",
+        "client_id": client_id,
+        "map_name": map_name,
+        "source_kind": "filesystem_adt_dir",
+        "filesystem_input_dir": str(adt_dir),
+        "entries": entries,
+    }
+    save_json(scan_manifest_path, payload)
+    return len(entries)
+
+
 def client_by_id(config: CorpusConfig, client_id: str) -> dict[str, Any] | None:
     for client in config.clients:
         if client.get("client_id") == client_id:
@@ -278,6 +414,11 @@ def client_by_id(config: CorpusConfig, client_id: str) -> dict[str, Any] | None:
 
 def maps_for_client(config: CorpusConfig, client: dict[str, Any], output_root: Path) -> list[str]:
     client_maps = client.get("maps")
+    if client_source_kind(client) == "filesystem_adt_dir":
+        if isinstance(client_maps, list) and client_maps:
+            return [str(value) for value in client_maps if str(value).strip()]
+        return config.maps[:]
+
     if isinstance(client_maps, list) and client_maps and not config.discover_maps:
         return [str(value) for value in client_maps if str(value).strip()]
 
@@ -314,15 +455,15 @@ def maps_for_client(config: CorpusConfig, client: dict[str, Any], output_root: P
 
 def stage_extract(config: CorpusConfig) -> dict[str, Path]:
     """
-    Stage 1: Extract ADTs from all clients for all maps.
-    Returns a dict mapping "{client_id}/{map_name}" to the extraction output directory.
+    Stage 1: Materialize source tile-scan manifests for all clients/maps.
+    Returns a dict mapping "{client_id}/{map_name}" to scan manifest path.
     """
     print("=" * 72)
-    print("Stage 1: ADT Extraction")
+    print("Stage 1: Source Tile Discovery")
     print("=" * 72)
 
     output_root = Path(config.output_root)
-    raw_adt_root = ensure_dir(output_root / "raw_adts")
+    source_catalog_root = ensure_dir(output_root / "source_catalog")
     extract_dirs: dict[str, Path] = {}
 
     for client in config.clients:
@@ -338,6 +479,8 @@ def stage_extract(config: CorpusConfig) -> dict[str, Path]:
         client_root = client["client_path"]
         print(f"\n  Client: {client_id} ({client['era']})")
         print(f"    Root: {client_root}")
+        source_kind = client_source_kind(client)
+        print(f"    Source kind: {source_kind}")
         client_maps = maps_for_client(config, client, output_root)
         print(f"    Maps: {len(client_maps)}")
 
@@ -346,26 +489,51 @@ def stage_extract(config: CorpusConfig) -> dict[str, Path]:
                 continue
 
             map_key = f"{client_id}/{map_name}"
-            map_output_dir = ensure_dir(raw_adt_root / client_id / map_name)
+            scan_manifest_path = source_catalog_root / f"{sanitize_segment(client_id)}__{sanitize_segment(map_name)}.scan.json"
+            extract_marker_path = source_catalog_root / f"{sanitize_segment(client_id)}__{sanitize_segment(map_name)}.meta.json"
 
-            # Check if already extracted
-            existing_adts = list(map_output_dir.glob("*.adt"))
-            root_adts = [p for p in existing_adts if not any(
-                p.name.endswith(s) for s in ["_tex0.adt", "_obj0.adt", "_lod.adt"]
-            )]
-            if len(root_adts) > 0:
-                print(f"    {map_name}: already extracted ({len(root_adts)} tiles), skipping")
-                extract_dirs[map_key] = map_output_dir
+            if client_source_kind(client) == "filesystem_adt_dir":
+                if not Path(client_root).exists():
+                    print(f"    {map_name}: filesystem source missing ({client_root})")
+                    continue
+
+                entry_count = write_filesystem_scan_manifest(client, client_id, map_name, scan_manifest_path)
+                print(f"    {map_name}: filesystem scan ({entry_count} tiles)")
+                save_json(extract_marker_path, {
+                    "client_id": client_id,
+                    "map_name": map_name,
+                    "source_kind": "filesystem_adt_dir",
+                    "scan_entry_count": entry_count,
+                    "completed_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                })
+                if entry_count > 0:
+                    extract_dirs[map_key] = scan_manifest_path
                 continue
 
-            print(f"    {map_name}: extracting...", end=" ", flush=True)
+            if scan_manifest_path.exists():
+                report = load_json(scan_manifest_path)
+                existing_entries = report.get("Entries") or report.get("entries") or []
+                if len(existing_entries) > 0:
+                    if not report.get("client_id"):
+                        report["client_id"] = client_id
+                    if not report.get("map_name"):
+                        report["map_name"] = map_name
+                    if not report.get("source_kind"):
+                        report["source_kind"] = client_source_kind(client)
+                    save_json(scan_manifest_path, report)
+                    print(f"    {map_name}: scan exists ({len(existing_entries)} tiles), skipping")
+                    extract_dirs[map_key] = scan_manifest_path
+                    continue
+
+            print(f"    {map_name}: scanning source tiles...", end=" ", flush=True)
             try:
                 result = run_dotnet([
-                    "extract-map",
+                    "dataset-scan",
                     "--client-root", client_root,
                     "--map", map_name,
-                    "--output-dir", str(map_output_dir),
-                ])
+                    "--build", client_id,
+                    "--output", str(scan_manifest_path),
+                ], timeout=900)
                 if result.returncode != 0:
                     print(f"FAILED (exit {result.returncode})")
                     if result.stderr:
@@ -373,37 +541,46 @@ def stage_extract(config: CorpusConfig) -> dict[str, Path]:
                             print(f"      {line}")
                     continue
 
-                # Count extracted tiles
-                extracted = list(map_output_dir.glob("*.adt"))
-                root_count = len([p for p in extracted if not any(
-                    p.name.endswith(s) for s in ["_tex0.adt", "_obj0.adt", "_lod.adt"]
-                )])
-                print(f"{root_count} tiles")
-                extract_dirs[map_key] = map_output_dir
+                report = load_json(scan_manifest_path)
+                report["client_id"] = client_id
+                report["map_name"] = map_name
+                report["source_kind"] = client_source_kind(client)
+                save_json(scan_manifest_path, report)
+                entry_count = len(report.get("Entries") or report.get("entries") or [])
+                print(f"{entry_count} tiles")
+                save_json(extract_marker_path, {
+                    "client_id": client_id,
+                    "map_name": map_name,
+                    "source_kind": client_source_kind(client),
+                    "scan_entry_count": entry_count,
+                    "completed_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                })
+                if entry_count > 0:
+                    extract_dirs[map_key] = scan_manifest_path
 
             except subprocess.TimeoutExpired:
                 print("TIMEOUT")
             except Exception as e:
                 print(f"ERROR: {e}")
 
-    print(f"\nExtraction complete: {len(extract_dirs)} client/map combinations")
+    print(f"\nSource discovery complete: {len(extract_dirs)} client/map combinations")
     return extract_dirs
 
 
 def stage_fingerprint(config: CorpusConfig, extract_dirs: dict[str, Path]) -> Path:
     """
-    Stage 2: Fingerprint all extracted ADTs.
+    Stage 2: Build dedup fingerprints from scan manifests.
     Returns the path to the merged fingerprint report.
     """
     print("\n" + "=" * 72)
-    print("Stage 2: ADT Fingerprinting")
+    print("Stage 2: Tile Fingerprinting")
     print("=" * 72)
 
     output_root = Path(config.output_root)
     fingerprint_dir = ensure_dir(output_root / "fingerprints")
     all_entries: list[dict[str, Any]] = []
 
-    for map_key, adt_dir in sorted(extract_dirs.items()):
+    for map_key, source_path in sorted(extract_dirs.items()):
         client_id, map_name = map_key.split("/", 1)
 
         # Find the era for this client
@@ -415,6 +592,47 @@ def stage_fingerprint(config: CorpusConfig, extract_dirs: dict[str, Path]) -> Pa
 
         fingerprint_path = fingerprint_dir / f"{client_id}__{map_name}.json"
 
+        if source_path.is_file() and source_path.suffix.lower() == ".json":
+            scan_report = load_json(source_path)
+            filesystem_input_dir = str(scan_report.get("filesystem_input_dir") or "").strip()
+            if filesystem_input_dir:
+                if fingerprint_path.exists():
+                    print(f"  {map_key}: fingerprint exists, loading")
+                    report = load_json(fingerprint_path)
+                else:
+                    print(f"  {map_key}: fingerprinting filesystem tiles...", end=" ", flush=True)
+                    result = run_dotnet([
+                        "adt-fingerprint",
+                        "--input-dir", filesystem_input_dir,
+                        "--output", str(fingerprint_path),
+                    ])
+                    if result.returncode != 0:
+                        print(f"FAILED (exit {result.returncode})")
+                        continue
+                    print("done")
+                    report = load_json(fingerprint_path)
+
+                for entry in report.get("entries") or report.get("Entries", []):
+                    if isinstance(entry, dict):
+                        all_entries.append(normalize_fingerprint_entry(entry, client_id, map_name, era))
+                continue
+
+            print(f"  {map_key}: adapting archive scan metrics")
+            scan_entries = scan_report.get("Entries") or scan_report.get("entries") or []
+            normalized_entries: list[dict[str, Any]] = []
+            for entry in scan_entries:
+                if isinstance(entry, dict):
+                    normalized_entries.append(normalize_scan_fingerprint_entry(entry, client_id, map_name, era))
+
+            scan_fingerprint_report = {
+                "schema_version": "adt-fingerprint.v1.scan-adapter",
+                "source": str(source_path),
+                "entries": normalized_entries,
+            }
+            save_json(fingerprint_path, scan_fingerprint_report)
+            all_entries.extend(normalized_entries)
+            continue
+
         if fingerprint_path.exists():
             print(f"  {map_key}: fingerprint exists, loading")
             report = load_json(fingerprint_path)
@@ -423,7 +641,7 @@ def stage_fingerprint(config: CorpusConfig, extract_dirs: dict[str, Path]) -> Pa
             try:
                 result = run_dotnet([
                     "adt-fingerprint",
-                    "--input-dir", str(adt_dir),
+                    "--input-dir", str(source_path),
                     "--output", str(fingerprint_path),
                 ])
                 if result.returncode != 0:
@@ -524,7 +742,9 @@ def stage_deduplicate(config: CorpusConfig, merged_fingerprint_path: Path) -> Pa
 
         # Era bonus: prefer later clients (more data signals)
         era = entry.get("era", "")
-        if era == "cata":
+        if era == "development":
+            score += 8.0
+        elif era == "cata":
             score += 5.0
         elif era == "wotlk":
             score += 3.0
@@ -549,6 +769,21 @@ def stage_deduplicate(config: CorpusConfig, merged_fingerprint_path: Path) -> Pa
 
     # Sort by score descending
     selected.sort(key=score_entry, reverse=True)
+
+    # Guarantee at least one representative per client before global trimming.
+    guaranteed_by_client: list[dict[str, Any]] = []
+    seen_clients: set[str] = set()
+    for entry in selected:
+        client_id = str(entry.get("client_id") or "")
+        if not client_id or client_id in seen_clients:
+            continue
+        seen_clients.add(client_id)
+        guaranteed_by_client.append(entry)
+
+    if guaranteed_by_client:
+        guaranteed_keys = {entry.get("fingerprint") for entry in guaranteed_by_client}
+        remainder = [entry for entry in selected if entry.get("fingerprint") not in guaranteed_keys]
+        selected = guaranteed_by_client + remainder
 
     # Apply tile budget
     max_tiles = config.max_tiles
@@ -603,103 +838,28 @@ def stage_build_shards(config: CorpusConfig, dedup_path: Path) -> Path:
 
     output_root = Path(config.output_root)
     shard_output_root = ensure_dir(output_root / "v10_shards")
+    manifest_path = output_root / "v10_full_native_stage1_manifest.json"
     manifest_entries: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
 
-    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
-    for entry in entries:
-        client_id = str(entry.get("client_id") or "")
-        map_name = str(entry.get("map_name") or "")
-        source_path = Path(str(entry.get("source_path") or ""))
-        groups[(client_id, map_name, str(source_path.parent))].append(entry)
+    def write_progress_manifest() -> None:
+        manifest = {
+            "schema_version": "v10-full-native-stage1-manifest.v1",
+            "created_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "deduplicated_manifest": str(dedup_path),
+            "output_root": str(shard_output_root),
+            "max_tiles_budget": config.max_tiles,
+            "require_minimap": config.require_minimap,
+            "shard_batch_size": config.shard_batch_size,
+            "shard_batch_timeout_seconds": config.shard_batch_timeout_seconds,
+            "written_or_existing": len(manifest_entries),
+            "skipped_count": len(skipped),
+            "entries": manifest_entries,
+            "skipped": skipped,
+        }
+        save_json(manifest_path, manifest)
 
-    tile_list_dir = ensure_dir(output_root / "tile-lists")
-    work_items: list[tuple[str, str, str, int, list[dict[str, Any]]]] = []
-    for (client_id, map_name, adt_dir), group_entries in sorted(groups.items()):
-        batch_size = max(1, int(config.shard_batch_size))
-        for batch_index, start in enumerate(range(0, len(group_entries), batch_size), start=1):
-            work_items.append((client_id, map_name, adt_dir, batch_index, group_entries[start:start + batch_size]))
-
-    print(f"  Selected tiles: {len(entries)}")
-    print(f"  Selected groups: {len(groups)}")
-    print(f"  Selected batches: {len(work_items)}")
-    print(f"  Shard output root: {shard_output_root}")
-
-    for index, (client_id, map_name, adt_dir, batch_index, group_entries) in enumerate(work_items, start=1):
-        client = client_by_id(config, client_id)
-        dataset_key = f"{sanitize_segment(client_id)}__{sanitize_segment(map_name)}"
-        shard_dir = ensure_dir(shard_output_root / dataset_key)
-        group_manifest_path = shard_dir / f"v10_stage1_manifest_batch_{batch_index:04d}.json"
-        tile_list_path = tile_list_dir / f"{dataset_key}_batch_{batch_index:04d}.json"
-
-        tile_names: list[str] = []
-        for entry in group_entries:
-            source_path = Path(str(entry.get("source_path") or ""))
-            tile_name = str(entry.get("tile_name") or source_path.stem)
-            if not source_path.exists():
-                skipped.append({
-                    "tile_name": tile_name,
-                    "reason": "missing_source_adt",
-                    "client_id": client_id,
-                    "map_name": map_name,
-                    "source_path": str(source_path),
-                })
-                continue
-            tile_names.append(tile_name)
-
-        if client is None:
-            for tile_name in tile_names:
-                skipped.append({"tile_name": tile_name, "reason": "missing_client_config", "client_id": client_id, "map_name": map_name})
-            continue
-        if not tile_names:
-            continue
-
-        save_json(tile_list_path, {"tiles": sorted(set(tile_names))})
-        args = [
-            "dataset-build-v10-stage1",
-            "--input-dir", adt_dir,
-            "--output-dir", str(shard_dir),
-            "--client-root", str(client["client_path"]),
-            "--build-key", client_id,
-            "--map-name", map_name,
-            "--tile-list", str(tile_list_path),
-            "--manifest", str(group_manifest_path),
-        ]
-        if config.overwrite_shards:
-            args.append("--overwrite")
-        if not config.require_minimap:
-            args.append("--allow-missing-minimap")
-
-        print(f"  [{index}/{len(work_items)}] {client_id}/{map_name} batch {batch_index}: {len(tile_names)} selected tiles", end=" ", flush=True)
-        try:
-            result = run_dotnet(args, timeout=1800)
-        except subprocess.TimeoutExpired:
-            print("TIMEOUT")
-            for tile_name in tile_names:
-                skipped.append({"tile_name": tile_name, "reason": "group_timeout", "client_id": client_id, "map_name": map_name})
-            continue
-
-        if result.returncode != 0:
-            print(f"FAILED (exit {result.returncode})")
-            if result.stderr:
-                for line in result.stderr.strip().split("\n")[-3:]:
-                    print(f"      {line}")
-            for tile_name in tile_names:
-                skipped.append({
-                    "tile_name": tile_name,
-                    "reason": "group_extract_failed",
-                    "client_id": client_id,
-                    "map_name": map_name,
-                    "stderr_tail": result.stderr.strip().split("\n")[-6:],
-                })
-            continue
-
-        print("ok")
-        if not group_manifest_path.exists():
-            for tile_name in tile_names:
-                skipped.append({"tile_name": tile_name, "reason": "missing_group_manifest", "client_id": client_id, "map_name": map_name})
-            continue
-
+    def append_group_manifest(group_manifest_path: Path, dataset_key: str, client_id: str, map_name: str) -> None:
         group_manifest = load_json(group_manifest_path)
         for shard_entry in group_manifest.get("entries") or group_manifest.get("Entries", []):
             if not isinstance(shard_entry, dict):
@@ -732,20 +892,117 @@ def stage_build_shards(config: CorpusConfig, dedup_path: Path) -> Path:
                     "source_path": str(get_field(skip_entry, "source_adt_path", "SourceAdtPath", "")),
                 })
 
-    manifest_path = output_root / "v10_full_native_stage1_manifest.json"
-    manifest = {
-        "schema_version": "v10-full-native-stage1-manifest.v1",
-        "created_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "deduplicated_manifest": str(dedup_path),
-        "output_root": str(shard_output_root),
-        "max_tiles_budget": config.max_tiles,
-        "require_minimap": config.require_minimap,
-        "written_or_existing": len(manifest_entries),
-        "skipped_count": len(skipped),
-        "entries": manifest_entries,
-        "skipped": skipped,
-    }
-    save_json(manifest_path, manifest)
+    print(f"  Selected tiles: {len(entries)}")
+    print(f"  Direct extraction mode: enabled")
+    print(f"  Shard output root: {shard_output_root}")
+
+    total_entries = len(entries)
+    for index, entry in enumerate(entries, start=1):
+        client_id = str(entry.get("client_id") or "")
+        map_name = str(entry.get("map_name") or "")
+        source_path = str(entry.get("source_path") or "")
+        tile_name = str(entry.get("tile_name") or "")
+        if not tile_name:
+            tile_name = Path(source_path.split("#", 1)[0]).stem
+
+        client = client_by_id(config, client_id)
+        if client is None:
+            skipped.append({
+                "tile_name": tile_name,
+                "reason": "missing_client_config",
+                "client_id": client_id,
+                "map_name": map_name,
+                "source_path": source_path,
+            })
+            continue
+
+        dataset_key = f"{sanitize_segment(client_id)}__{sanitize_segment(map_name)}"
+        shard_dir = ensure_dir(shard_output_root / dataset_key)
+        output_npz = shard_dir / f"{tile_name}_v10.npz"
+        output_placements = shard_dir / f"{tile_name}_v10_placements.json"
+
+        if output_npz.exists() and not config.overwrite_shards:
+            manifest_entries.append({
+                "dataset_key": dataset_key,
+                "era_tag": normalize_era_tag(client_id),
+                "client_id": client_id,
+                "map_name": map_name,
+                "tile_name": tile_name,
+                "source_adt_path": source_path,
+                "shard_path": str(output_npz),
+                "placement_path": str(output_placements) if output_placements.exists() else "",
+                "build_key": client_id,
+                "available_signals": [],
+                "status": "existing",
+            })
+            continue
+
+        args = [
+            "extract-v10-tensors",
+            "--input", source_path,
+            "--output", str(output_npz),
+            "--build-key", client_id,
+            "--map-name", map_name,
+        ]
+
+        if client_source_kind(client) == "filesystem_adt_dir":
+            minimap_root = str(client.get("minimap_root") or "")
+            if minimap_root:
+                args.extend(["--minimap-root", minimap_root])
+        else:
+            args.extend(["--client-root", str(client["client_path"])])
+
+        if config.require_minimap:
+            args.append("--require-minimap")
+
+        print(f"  [{index}/{total_entries}] {client_id}/{map_name} {tile_name}", end=" ", flush=True)
+        try:
+            result = run_dotnet(args, timeout=max(1, int(config.shard_batch_timeout_seconds)))
+        except subprocess.TimeoutExpired:
+            print("TIMEOUT")
+            skipped.append({
+                "tile_name": tile_name,
+                "reason": "extract_timeout",
+                "client_id": client_id,
+                "map_name": map_name,
+                "source_path": source_path,
+            })
+            write_progress_manifest()
+            continue
+
+        if result.returncode != 0:
+            print(f"FAILED (exit {result.returncode})")
+            if result.stderr:
+                for line in result.stderr.strip().split("\n")[-3:]:
+                    print(f"      {line}")
+            skipped.append({
+                "tile_name": tile_name,
+                "reason": "extract_failed",
+                "client_id": client_id,
+                "map_name": map_name,
+                "source_path": source_path,
+                "stderr_tail": result.stderr.strip().split("\n")[-6:] if result.stderr else [],
+            })
+            write_progress_manifest()
+            continue
+
+        print("ok")
+        manifest_entries.append({
+            "dataset_key": dataset_key,
+            "era_tag": normalize_era_tag(client_id),
+            "client_id": client_id,
+            "map_name": map_name,
+            "tile_name": tile_name,
+            "source_adt_path": source_path,
+            "shard_path": str(output_npz),
+            "placement_path": str(output_placements) if output_placements.exists() else "",
+            "build_key": client_id,
+            "available_signals": [],
+            "status": "written",
+        })
+        write_progress_manifest()
+
+    write_progress_manifest()
 
     print(f"\nShard building complete: {len(manifest_entries)} usable, {len(skipped)} skipped")
     print(f"  Manifest: {manifest_path}")
@@ -832,6 +1089,12 @@ def parse_args() -> argparse.Namespace:
         help="Selected tiles per dataset-build-v10-stage1 batch. Default comes from config.",
     )
     parser.add_argument(
+        "--shard-batch-timeout-seconds",
+        type=int,
+        default=0,
+        help="Timeout for each dataset-build-v10-stage1 batch before splitting or skipping. Default comes from config.",
+    )
+    parser.add_argument(
         "--no-curate",
         action="store_true",
         help="Stop after building the merged native Stage 1 manifest.",
@@ -839,7 +1102,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--extract-only",
         action="store_true",
-        help="Stop after ADT extraction",
+        help="Stop after source tile discovery",
     )
     parser.add_argument(
         "--fingerprint-only",
@@ -864,7 +1127,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--resume",
         type=str,
-        help="Resume from a specific stage: extract, fingerprint, deduplicate, shards",
+        help="Resume from a specific stage: extract, fingerprint, deduplicate, shards (extract = source discovery)",
     )
     return parser.parse_args()
 
@@ -895,6 +1158,8 @@ def main() -> None:
         config.overwrite_shards = True
     if args.shard_batch_size > 0:
         config.shard_batch_size = args.shard_batch_size
+    if args.shard_batch_timeout_seconds > 0:
+        config.shard_batch_timeout_seconds = args.shard_batch_timeout_seconds
     if args.no_curate:
         config.run_curation = False
 
@@ -908,6 +1173,7 @@ def main() -> None:
     print(f"Require minimap: {config.require_minimap}")
     print(f"Trainer curation cap: {config.max_tiles}")
     print(f"Shard batch size: {config.shard_batch_size}")
+    print(f"Shard batch timeout: {config.shard_batch_timeout_seconds}s")
     print()
 
     if args.dry_run:
@@ -917,13 +1183,18 @@ def main() -> None:
             exists = check_client_exists(client)
             print(f"  Client {client_id}: {'EXISTS' if exists else 'MISSING'}")
             if exists:
+                source_kind = client_source_kind(client)
+                print(f"    Source kind: {source_kind}")
                 map_list_path = Path(config.output_root) / "map-lists" / f"{sanitize_segment(client_id)}_maps.json"
                 if config.discover_maps and not map_list_path.exists():
                     print("    Would discover maps from client archive/catalog")
                     continue
                 client_maps = maps_for_client(config, client, Path(config.output_root))
                 for map_name in client_maps[:5]:  # show first 5
-                    print(f"    Would extract: {map_name}")
+                    if client_source_kind(client) == "filesystem_adt_dir":
+                        print(f"    Would use filesystem ADT dir: {map_name}")
+                    else:
+                        print(f"    Would scan (client-root): {map_name}")
                 if len(client_maps) > 5:
                     print(f"    ... and {len(client_maps) - 5} more maps")
         return
@@ -937,42 +1208,58 @@ def main() -> None:
         stage_curate(config, stage1_manifest)
         return
 
-    # ── Stage 1: Extract ─────────────────────────────────────────────────
+    # ── Stage 1: Source Discovery ────────────────────────────────────────
     resume_from = "shards" if args.shards_only else (args.resume or "extract")
     extract_dirs: dict[str, Path] = {}
 
     if resume_from in ("extract", "all"):
         extract_dirs = stage_extract(config)
         if args.extract_only:
-            print("\n--extract-only: stopping after extraction")
+            print("\n--extract-only: stopping after source discovery")
             return
     else:
         # Load from previous run
-        raw_adt_root = Path(config.output_root) / "raw_adts"
-        if raw_adt_root.exists():
-            for client_dir in sorted(raw_adt_root.iterdir()):
-                if client_dir.is_dir():
-                    for map_dir in sorted(client_dir.iterdir()):
-                        if map_dir.is_dir():
-                            key = f"{client_dir.name}/{map_dir.name}"
-                            extract_dirs[key] = map_dir
-            print(f"Resumed: {len(extract_dirs)} extraction directories")
+        source_catalog_root = Path(config.output_root) / "source_catalog"
+        if source_catalog_root.exists():
+            for scan_file in sorted(source_catalog_root.glob("*.scan.json")):
+                payload = load_json(scan_file)
+                client_id = str(payload.get("client_id") or "").strip()
+                map_name = str(payload.get("map_name") or "").strip()
+                if not client_id or not map_name:
+                    entries = payload.get("Entries") or payload.get("entries") or []
+                    if entries and isinstance(entries[0], dict):
+                        first = entries[0]
+                        client_id = str(first.get("BuildLabel") or first.get("build_label") or "").strip()
+                        map_name = str(first.get("MapName") or first.get("map_name") or "").strip()
+                if not client_id or not map_name:
+                    continue
+                key = f"{client_id}/{map_name}"
+                extract_dirs[key] = scan_file
+            print(f"Resumed: {len(extract_dirs)} source manifests")
 
     # ── Stage 2: Fingerprint ─────────────────────────────────────────────
     merged_fingerprint_path: Path | None = None
 
     if resume_from in ("extract", "fingerprint", "all"):
         if not extract_dirs:
-            # Try to load from previous extraction
-            raw_adt_root = Path(config.output_root) / "raw_adts"
-            if raw_adt_root.exists():
-                for client_dir in sorted(raw_adt_root.iterdir()):
-                    if client_dir.is_dir():
-                        for map_dir in sorted(client_dir.iterdir()):
-                            if map_dir.is_dir():
-                                key = f"{client_dir.name}/{map_dir.name}"
-                                extract_dirs[key] = map_dir
-                print(f"Loaded {len(extract_dirs)} extraction directories from disk")
+            # Try to load from previous source discovery output
+            source_catalog_root = Path(config.output_root) / "source_catalog"
+            if source_catalog_root.exists():
+                for scan_file in sorted(source_catalog_root.glob("*.scan.json")):
+                    payload = load_json(scan_file)
+                    client_id = str(payload.get("client_id") or "").strip()
+                    map_name = str(payload.get("map_name") or "").strip()
+                    if not client_id or not map_name:
+                        entries = payload.get("Entries") or payload.get("entries") or []
+                        if entries and isinstance(entries[0], dict):
+                            first = entries[0]
+                            client_id = str(first.get("BuildLabel") or first.get("build_label") or "").strip()
+                            map_name = str(first.get("MapName") or first.get("map_name") or "").strip()
+                    if not client_id or not map_name:
+                        continue
+                    key = f"{client_id}/{map_name}"
+                    extract_dirs[key] = scan_file
+                print(f"Loaded {len(extract_dirs)} source manifests from disk")
 
         merged_fingerprint_path = stage_fingerprint(config, extract_dirs)
         if args.fingerprint_only:
