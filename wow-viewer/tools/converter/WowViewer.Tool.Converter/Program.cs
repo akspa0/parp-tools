@@ -135,6 +135,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "mine-v10-prefab-cells":
 		V10PrefabCellCommand.Run(tail);
 		break;
+	case "adt-fingerprint":
+		AdtFingerprintCommand.Run(tail);
+		break;
 	default:
 		Console.Error.WriteLine($"Unknown converter command '{command}'.");
 		ShowUsage();
@@ -4428,6 +4431,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter mine-tileset-patterns --input <merged_tileset_index.json> [--output-dir <dir>] [--limit <n>] [--mip <level>] [--write-previews]");
 	Console.WriteLine("  wowviewer-converter decompose-minimap-tilesets --pattern-library <pattern_library.json> --minimap <minimap.png> [--output-dir <dir>] [--grid-size <n>] [--max-candidates <n>] [--limit-patterns <n>]");
 	Console.WriteLine("  wowviewer-converter harvest-tileset-blps --input <merged_tileset_index.json> [--output-dir <dir>] [--limit <n>]");
+	Console.WriteLine("  wowviewer-converter adt-fingerprint --input-dir <dir> [--output <fingerprint.json>]");
 }
 
 file sealed record V10TensorExtractionResult(
