@@ -121,6 +121,7 @@ CLIENTS: list[dict[str, Any]] = [
         "client_path": str(STAGED_CLIENTS_ROOT / "0_5_3_3368" / "World of Warcraft"),
         "era": "alpha",
         "terrain_source_kind": "embedded_wdt_alpha",
+        "maps": ["Azeroth", "Kalimdor"],
     },
     {
         "client_id": "0.5.5.3494",
@@ -128,6 +129,7 @@ CLIENTS: list[dict[str, Any]] = [
         "client_path": str(STAGED_CLIENTS_ROOT / "0_5_5_3494" / "World of Warcraft"),
         "era": "alpha",
         "terrain_source_kind": "embedded_wdt_alpha",
+        "maps": ["Azeroth", "Kalimdor", "EmeraldDream"],
     },
     {
         "client_id": "0.7.0.3694",
@@ -135,6 +137,7 @@ CLIENTS: list[dict[str, Any]] = [
         "client_path": str(STAGED_CLIENTS_ROOT / "0_7_0_3694" / "World of Warcraft"),
         "era": "alpha",
         "terrain_source_kind": "embedded_wdt_alpha",
+        "maps": ["Azeroth", "Kalimdor", "EmeraldDream"],
     },
     {
         "client_id": "3.0.1.8303",
@@ -142,6 +145,7 @@ CLIENTS: list[dict[str, Any]] = [
         "client_path": str(STAGED_CLIENTS_ROOT / "3_0_1_8303" / "World of Warcraft"),
         "era": "wotlk",
         "terrain_source_kind": "loose_adt",
+        "maps": ["Northrend"],
     },
     {
         "client_id": "3.3.5.12340",
@@ -149,6 +153,7 @@ CLIENTS: list[dict[str, Any]] = [
         "client_path": str(STAGED_CLIENTS_ROOT / "3_3_5_12340" / "World of Warcraft"),
         "era": "wotlk",
         "terrain_source_kind": "loose_adt",
+        "maps": ["Azeroth", "Kalimdor", "EmeraldDream", "Northrend", "PVPZone01", "PVPZone02", "PVPZone03", "PVPZone04"],
     },
     {
         "client_id": "4.0.0.11927",
@@ -156,6 +161,7 @@ CLIENTS: list[dict[str, Any]] = [
         "client_path": str(STAGED_CLIENTS_ROOT / "4_0_0_11927" / "World of Warcraft"),
         "era": "cata",
         "terrain_source_kind": "loose_adt",
+        "maps": ["Azeroth", "Kalimdor", "EmeraldDream", "Deepholm", "LostIsles", "LostIslesPhase1", "LostIslesPhase2"],
     },
     {
         "client_id": "original_development",
@@ -177,7 +183,7 @@ class CorpusConfig:
     output_root: str = str(DEFAULT_OUTPUT_ROOT)
     max_tiles: int = 1500
     min_tiles: int = 750
-    discover_maps: bool = True
+    discover_maps: bool = False
     require_minimap: bool = True
     overwrite_shards: bool = False
     run_curation: bool = True
@@ -215,8 +221,23 @@ class FingerprintEntry:
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
+DISALLOWED_CONVERTER_COMMANDS: set[str] = {
+    "extract-map",
+    "dataset-build-v10-stage1",
+}
+
+
 def run_dotnet(args: list[str], cwd: str | None = None, timeout: int = 600) -> subprocess.CompletedProcess:
-    """Run the converter tool with the given arguments."""
+    """Run the converter tool with the given arguments (NPZ-only mode)."""
+    if not args:
+        raise ValueError("run_dotnet requires at least one converter command argument")
+
+    command_name = str(args[0]).strip().lower()
+    if command_name in DISALLOWED_CONVERTER_COMMANDS:
+        raise RuntimeError(
+            f"Blocked converter command '{command_name}'. This pipeline is NPZ-only and must not dump ADT files to disk."
+        )
+
     if CONVERTER_EXE.exists():
         cmd = [str(CONVERTER_EXE)] + args
     else:
@@ -893,7 +914,7 @@ def stage_build_shards(config: CorpusConfig, dedup_path: Path) -> Path:
                 })
 
     print(f"  Selected tiles: {len(entries)}")
-    print(f"  Direct extraction mode: enabled")
+    print("  NPZ-only mode: enabled (no ADT dump stage)")
     print(f"  Shard output root: {shard_output_root}")
 
     total_entries = len(entries)
@@ -1086,13 +1107,13 @@ def parse_args() -> argparse.Namespace:
         "--shard-batch-size",
         type=int,
         default=0,
-        help="Selected tiles per dataset-build-v10-stage1 batch. Default comes from config.",
+        help="Selected tiles per extract-v10-tensors batch. Default comes from config.",
     )
     parser.add_argument(
         "--shard-batch-timeout-seconds",
         type=int,
         default=0,
-        help="Timeout for each dataset-build-v10-stage1 batch before splitting or skipping. Default comes from config.",
+        help="Timeout for each extract-v10-tensors batch before skipping. Default comes from config.",
     )
     parser.add_argument(
         "--no-curate",

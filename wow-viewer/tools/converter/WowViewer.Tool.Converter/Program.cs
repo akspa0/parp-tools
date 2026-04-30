@@ -10,8 +10,10 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using WowViewer.App;
 using WowViewer.Core.Datasets;
+using WowViewer.Core.Chunks;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO;
+using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
@@ -1320,6 +1322,8 @@ static void RunDatasetScan(string[] args)
 	string? buildLabel = GetOption(args, "--build", "-b");
 	string? outputOption = GetOption(args, "--output", "-o");
 	int? limit = GetIntOption(args, "--limit", "-n");
+	bool auditAlpha = HasFlag(args, "--audit-alpha");
+	bool scanDeep = HasFlag(args, "--scan-deep");
 
 	if (string.IsNullOrWhiteSpace(clientRootOption) || string.IsNullOrWhiteSpace(mapName))
 	{
@@ -1343,11 +1347,14 @@ static void RunDatasetScan(string[] args)
 				&& !path.EndsWith("_lod.adt", StringComparison.OrdinalIgnoreCase));
 	if (hasLooseFilesystemMap)
 	{
+		Console.WriteLine($"dataset-scan: using loose filesystem map path for {normalizedMapName}");
 		entries = BuildDatasetScanEntriesFromDirectory(clientRoot, normalizedBuildLabel, normalizedMapName, mapPath, limit);
 	}
 	else
 	{
+		Console.WriteLine($"dataset-scan: bootstrapping archive catalog for {normalizedMapName}...");
 		using IArchiveCatalog archiveCatalog = CreateArchiveCatalog(clientRoot);
+		Console.WriteLine($"dataset-scan: archive catalog ready for {normalizedMapName}");
 		if (!ArchiveMapExists(archiveCatalog, clientRoot, normalizedMapName, mapPath))
 		{
 			Console.Error.WriteLine($"Error: map '{normalizedMapName}' was not found under filesystem or archive root '{clientRoot}'.");
@@ -1355,7 +1362,8 @@ static void RunDatasetScan(string[] args)
 			return;
 		}
 
-		entries = BuildDatasetScanEntriesFromArchive(clientRoot, normalizedBuildLabel, normalizedMapName, mapPath, archiveCatalog, limit);
+		Console.WriteLine($"dataset-scan: reading WDT/tile index for {normalizedMapName}...");
+		entries = BuildDatasetScanEntriesFromArchive(clientRoot, normalizedBuildLabel, normalizedMapName, mapPath, archiveCatalog, limit, auditAlpha, scanDeep);
 	}
 
 	TerrainTrainingSampleManifest manifest = new(
@@ -1368,6 +1376,10 @@ static void RunDatasetScan(string[] args)
 	Console.WriteLine($"ClientRoot: {clientRoot}");
 	Console.WriteLine($"Build: {normalizedBuildLabel}");
 	Console.WriteLine($"Map: {normalizedMapName}");
+	if (!hasLooseFilesystemMap)
+		Console.WriteLine($"ADT scan mode: {(scanDeep ? "deep" : "inventory")}");
+	if (!hasLooseFilesystemMap)
+		Console.WriteLine($"Alpha audit: {(auditAlpha ? "enabled" : "disabled (fast mode)")}");
 	Console.WriteLine($"Samples: {entries.Count}");
 
 	string json = JsonSerializer.Serialize(manifest, CreateJsonOptions());
@@ -2020,7 +2032,16 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromDirector
 	return entries;
 }
 
-static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(string clientRoot, string buildLabel, string mapName, string mapPath, IArchiveCatalog archiveCatalog, int? limit)
+static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(
+	string clientRoot,
+	string buildLabel,
+	string mapName,
+	string mapPath,
+	IArchiveCatalog archiveCatalog,
+	int? limit,
+	bool auditAlphaEntries = false,
+	bool scanDeepAdtSummaries = false,
+	int progressEvery = 64)
 {
 	string mapVirtualRoot = ResolveMapVirtualRoot(clientRoot, mapName, mapPath);
 	string mapDirectory = GetMapDirectoryFromMapVirtualRoot(mapVirtualRoot, mapName);
@@ -2030,9 +2051,11 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(
 	};
 	Dictionary<string, WdlSummary?> wdlCache = new(StringComparer.OrdinalIgnoreCase);
 	Dictionary<string, Md5TranslateIndex?> minimapMd5Cache = new(StringComparer.OrdinalIgnoreCase);
+	bool likelyAlphaEmbeddedBuild = IsLikelyAlphaEmbeddedBuildLabel(buildLabel);
 	string wdtVirtualPath = BuildMapWdtVirtualPath(mapVirtualRoot, mapName);
-	byte[] wdtBytes = archiveCatalog.ReadFile(wdtVirtualPath)
-		?? throw new FileNotFoundException($"Could not read archive-backed WDT '{wdtVirtualPath}'.", wdtVirtualPath);
+	byte[]? wdtBytes = archiveCatalog.ReadFile(wdtVirtualPath);
+	if (wdtBytes is null || wdtBytes.Length == 0)
+		throw new FileNotFoundException($"Could not read archive-backed WDT '{wdtVirtualPath}'.", wdtVirtualPath);
 
 	List<WdtTileCoordinate> allTileCoordinates = ReadArchiveWdtTiles(wdtBytes, wdtVirtualPath)
 		.OrderBy(static tile => tile.TileY)
@@ -2042,30 +2065,102 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(
 	List<WdtTileCoordinate> tileCoordinates = allTileCoordinates;
 	if (limit is > 0)
 		tileCoordinates = tileCoordinates.Take(limit.Value).ToList();
+	Console.WriteLine($"dataset-scan: parsed tile index for {mapName}: total={allTileCoordinates.Count}, selected={tileCoordinates.Count}");
+
+	if (progressEvery <= 0)
+		progressEvery = int.MaxValue;
 
 	string wdlVirtualPath = $"{mapVirtualRoot}\\{mapName}.wdl";
 	bool hasWdl = archiveCatalog.FileExists(wdlVirtualPath);
 	List<TerrainTrainingSampleDescriptor> entries = new(tileCoordinates.Count);
+	int processed = 0;
+	int skippedMissingRoot = 0;
 	foreach (WdtTileCoordinate tileCoordinate in tileCoordinates)
 	{
+		processed++;
 		string tileStem = $"{mapName}_{tileCoordinate.TileX}_{tileCoordinate.TileY}";
+		if (!auditAlphaEntries && likelyAlphaEmbeddedBuild)
+		{
+			string alphaSourcePath = $"{wdtVirtualPath}#alpha-tile({tileCoordinate.TileX},{tileCoordinate.TileY})";
+			AdtSummary alphaScanSummary = CreateFastScanSummary(alphaSourcePath);
+			entries.Add(CreateDatasetScanEntry(
+				sampleId: $"{buildLabel}:{tileStem}",
+				sourceKind: TerrainTrainingSampleSourceKind.MountedArchive,
+				buildLabel: buildLabel,
+				mapName: mapName,
+				mapDirectory: mapDirectory,
+				tileX: tileCoordinate.TileX,
+				tileY: tileCoordinate.TileY,
+				sourceRoot: clientRoot,
+				rootAdtPath: alphaSourcePath,
+				objAdtPath: null,
+				texAdtPath: null,
+				lodAdtPath: null,
+				wdlPath: hasWdl ? wdlVirtualPath : null,
+				summary: alphaScanSummary,
+				hasMinimap: false,
+				hasTerrainOnlyMinimap: false,
+				hasNoLiquidMinimap: false,
+				hasNoObjectMinimap: false,
+				hasNoMccvMinimap: false,
+				hasNormalMap: false,
+				hasLiquidMask: false,
+				hasLiquidHeight: false,
+				hasObjectMask: false,
+				hasPm4Mask: false,
+				hasHoleMask: false,
+				hasAreaIdMap: false,
+				hasChunkFlagsMap: false,
+				hasAlphaLayers: false,
+				hasTextureMetadata: false));
+
+			if ((processed % progressEvery) == 0 || processed == tileCoordinates.Count)
+				Console.WriteLine($"  dataset-scan progress {mapName}: {processed}/{tileCoordinates.Count} tiles, {entries.Count} entries");
+			continue;
+		}
+
 		string rootVirtualPath = $"{mapVirtualRoot}\\{tileStem}.adt";
-		byte[] rootBytes = archiveCatalog.ReadFile(rootVirtualPath) ?? [];
-		string objVirtualPath = $"{mapVirtualRoot}\\{tileStem}_obj0.adt";
-		string texVirtualPath = $"{mapVirtualRoot}\\{tileStem}_tex0.adt";
-		string lodVirtualPath = $"{mapVirtualRoot}\\{tileStem}_lod.adt";
+		byte[] rootBytes = [];
 		string rootPathForEntry = rootVirtualPath;
-		string? objPathForEntry = archiveCatalog.FileExists(objVirtualPath) ? objVirtualPath : null;
-		string? texPathForEntry = archiveCatalog.FileExists(texVirtualPath) ? texVirtualPath : null;
-		string? lodPathForEntry = archiveCatalog.FileExists(lodVirtualPath) ? lodVirtualPath : null;
+		string? objPathForEntry = null;
+		string? texPathForEntry = null;
+		string? lodPathForEntry = null;
 		AdtSummary summary;
 		AlphaEmbeddedAdtTileData? alphaTile = null;
 
-		if (rootBytes.Length > 0)
+		if (!scanDeepAdtSummaries)
 		{
+			rootBytes = archiveCatalog.ReadFile(rootVirtualPath) ?? [];
+			if (rootBytes.Length > 0)
+			{
+				summary = CreateFastScanSummary(rootVirtualPath);
+			}
+			else if (likelyAlphaEmbeddedBuild
+				&& AlphaEmbeddedAdtReader.TryReadTile(clientRoot, mapDirectory, tileCoordinate.TileX, tileCoordinate.TileY, archiveCatalog, out alphaTile))
+			{
+				summary = BuildAlphaEmbeddedAdtSummary(alphaTile!);
+				rootPathForEntry = alphaTile!.SourcePath;
+			}
+			else
+			{
+				skippedMissingRoot++;
+				if ((processed % progressEvery) == 0 || processed == tileCoordinates.Count)
+					Console.WriteLine($"  dataset-scan progress {mapName}: {processed}/{tileCoordinates.Count} tiles, {entries.Count} entries, skipped={skippedMissingRoot}");
+				continue;
+			}
+		}
+		else if ((rootBytes = archiveCatalog.ReadFile(rootVirtualPath) ?? []).Length > 0)
+		{
+			string objVirtualPath = $"{mapVirtualRoot}\\{tileStem}_obj0.adt";
+			string texVirtualPath = $"{mapVirtualRoot}\\{tileStem}_tex0.adt";
+			string lodVirtualPath = $"{mapVirtualRoot}\\{tileStem}_lod.adt";
+			objPathForEntry = archiveCatalog.FileExists(objVirtualPath) ? objVirtualPath : null;
+			texPathForEntry = archiveCatalog.FileExists(texVirtualPath) ? texVirtualPath : null;
+			lodPathForEntry = archiveCatalog.FileExists(lodVirtualPath) ? lodVirtualPath : null;
 			summary = ReadArchiveAdtSummary(rootBytes, rootVirtualPath);
 		}
-		else if (AlphaEmbeddedAdtReader.TryReadTile(clientRoot, mapDirectory, tileCoordinate.TileX, tileCoordinate.TileY, archiveCatalog, out alphaTile))
+		else if (likelyAlphaEmbeddedBuild
+			&& AlphaEmbeddedAdtReader.TryReadTile(clientRoot, mapDirectory, tileCoordinate.TileX, tileCoordinate.TileY, archiveCatalog, out alphaTile))
 		{
 			summary = BuildAlphaEmbeddedAdtSummary(alphaTile!);
 			rootPathForEntry = alphaTile!.SourcePath;
@@ -2075,6 +2170,9 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(
 		}
 		else
 		{
+			skippedMissingRoot++;
+			if ((processed % progressEvery) == 0 || processed == tileCoordinates.Count)
+				Console.WriteLine($"  dataset-scan progress {mapName}: {processed}/{tileCoordinates.Count} tiles, {entries.Count} entries, skipped={skippedMissingRoot}");
 			continue;
 		}
 
@@ -2109,13 +2207,25 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(
 			hasAlphaLayers: texPathForEntry is not null,
 			hasTextureMetadata: texPathForEntry is not null || summary.TextureNameCount > 0);
 
-		if (alphaTile is not null)
+		if (alphaTile is not null && auditAlphaEntries)
 			entry = AuditDatasetEntry(entry, archiveCatalogs, wdlCache, minimapMd5Cache);
 
 		entries.Add(entry);
+		if ((processed % progressEvery) == 0 || processed == tileCoordinates.Count)
+			Console.WriteLine($"  dataset-scan progress {mapName}: {processed}/{tileCoordinates.Count} tiles, {entries.Count} entries, skipped={skippedMissingRoot}");
 	}
 
 	return entries;
+}
+
+static bool IsLikelyAlphaEmbeddedBuildLabel(string buildLabel)
+{
+	if (string.IsNullOrWhiteSpace(buildLabel))
+		return false;
+
+	string normalized = buildLabel.Trim();
+	return normalized.StartsWith("0.", StringComparison.OrdinalIgnoreCase)
+		|| normalized.StartsWith("0_", StringComparison.OrdinalIgnoreCase);
 }
 
 static void RunExtractMap(string[] args)
@@ -3926,9 +4036,73 @@ static string BuildMapWdtVirtualPath(string mapVirtualRoot, string mapName)
 
 static IReadOnlyList<WdtTileCoordinate> ReadArchiveWdtTiles(byte[] wdtBytes, string wdtVirtualPath)
 {
-	using MemoryStream stream = new(wdtBytes, writable: false);
-	MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, wdtVirtualPath);
-	return WdtTileIndexReader.ReadOccupiedTiles(stream, fileSummary);
+	const int wdtTilesPerAxis = 64;
+	const int wdtTileCount = wdtTilesPerAxis * wdtTilesPerAxis;
+	const int standardMainCellSize = 8;
+	const int alphaMainCellSize = 16;
+
+	int offset = 0;
+	while (offset <= wdtBytes.Length - ChunkHeader.SizeInBytes)
+	{
+		ReadOnlySpan<byte> headerBytes = wdtBytes.AsSpan(offset, ChunkHeader.SizeInBytes);
+		if (!ChunkHeaderReader.TryRead(headerBytes, out ChunkHeader header))
+			break;
+
+		int dataOffset = checked(offset + ChunkHeader.SizeInBytes);
+		long payloadEndLong = checked((long)dataOffset + header.Size);
+		if (payloadEndLong > wdtBytes.Length)
+			break;
+
+		if (header.Id == MapChunkIds.Main)
+		{
+			ReadOnlySpan<byte> mainData = wdtBytes.AsSpan(dataOffset, (int)header.Size);
+			int mainCellSize = InferWdtMainCellSize(mainData.Length, wdtTileCount, standardMainCellSize, alphaMainCellSize);
+			if (mainCellSize < sizeof(uint))
+				return Array.Empty<WdtTileCoordinate>();
+
+			List<WdtTileCoordinate> occupiedTiles = new();
+			for (int index = 0; index < wdtTileCount; index++)
+			{
+				int cellOffset = index * mainCellSize;
+				if (cellOffset + sizeof(uint) > mainData.Length)
+					break;
+
+				uint value = BitConverter.ToUInt32(mainData.Slice(cellOffset, sizeof(uint)));
+				if (value == 0)
+					continue;
+
+				occupiedTiles.Add(mainCellSize == alphaMainCellSize
+					? new WdtTileCoordinate(index / wdtTilesPerAxis, index % wdtTilesPerAxis)
+					: new WdtTileCoordinate(index % wdtTilesPerAxis, index / wdtTilesPerAxis));
+			}
+
+			return occupiedTiles;
+		}
+
+		int nextOffset = (int)payloadEndLong;
+		if ((header.Size & 1) != 0 && nextOffset < wdtBytes.Length)
+			nextOffset++;
+		if (nextOffset <= offset)
+			break;
+
+		offset = nextOffset;
+	}
+
+	throw new InvalidDataException($"Could not locate MAIN chunk in WDT '{wdtVirtualPath}'.");
+}
+
+static int InferWdtMainCellSize(int mainDataLength, int tileCount, int standardMainCellSize, int alphaMainCellSize)
+{
+	if (mainDataLength == tileCount * alphaMainCellSize)
+		return alphaMainCellSize;
+
+	if (mainDataLength == tileCount * standardMainCellSize)
+		return standardMainCellSize;
+
+	if (mainDataLength > 0 && mainDataLength % tileCount == 0)
+		return mainDataLength / tileCount;
+
+	return 0;
 }
 
 static string GetMapDirectoryFromMapVirtualRoot(string mapVirtualRoot, string mapName)
@@ -3981,6 +4155,23 @@ static (int TileX, int TileY) ResolveCompanionTileCoordinates(TerrainTrainingSam
 		return (entry.TileY, entry.TileX);
 
 	return (entry.TileX, entry.TileY);
+}
+
+static AdtSummary CreateFastScanSummary(string sourcePath)
+{
+	return new AdtSummary(
+		sourcePath,
+		MapFileKind.Adt,
+		terrainChunkCount: 256,
+		textureNameCount: 0,
+		modelNameCount: 0,
+		worldModelNameCount: 0,
+		modelPlacementCount: 0,
+		worldModelPlacementCount: 0,
+		hasFlightBounds: false,
+		hasWater: false,
+		hasTextureParams: false,
+		hasTextureFlags: false);
 }
 
 static AdtSummary BuildAlphaEmbeddedAdtSummary(AlphaEmbeddedAdtTileData alphaTile)
@@ -4953,7 +5144,7 @@ static void ShowUsage()
 {
 	Console.WriteLine("WowViewer.Tool.Converter");
 	Console.WriteLine("Usage:");
-	Console.WriteLine("  wowviewer-converter dataset-scan --client-root <path> --map <name> [--build <label>] [--output <manifest.json>] [--limit <count>]");
+	Console.WriteLine("  wowviewer-converter dataset-scan --client-root <path> --map <name> [--build <label>] [--output <manifest.json>] [--limit <count>] [--audit-alpha] [--scan-deep]");
 	Console.WriteLine("  wowviewer-converter dataset-merge --input <manifest.json> [--input <manifest.json> ...] [--output <merged.json>] [manifest.json ...]");
 	Console.WriteLine("  wowviewer-converter dataset-split-pm4 --direct-manifest <cache.json> --development-manifest <cache.json> --output-dir <dir> [--pm4-flag <field>]");
 	Console.WriteLine("  wowviewer-converter dataset-audit --input <scan.json> [--output <audit.json>] [--limit <count>]");
