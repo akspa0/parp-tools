@@ -14,6 +14,7 @@ using WowViewer.Core.Chunks;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO;
 using WowViewer.Core.IO.Chunked;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
@@ -198,7 +199,35 @@ static void RunListMaps(string[] args)
 	}
 
 	using IArchiveCatalog archiveCatalog = CreateArchiveCatalog(clientRoot);
-	List<string> maps = DiscoverArchiveMapNames(archiveCatalog.GetAllKnownFiles()).ToList();
+	List<string> mapCandidates = DiscoverArchiveMapNamesFromMapDbc(clientRoot, archiveCatalog).ToList();
+	if (mapCandidates.Count == 0)
+		mapCandidates = DiscoverArchiveMapNames(archiveCatalog.GetAllKnownFiles()).ToList();
+
+	List<(string MapName, int TilesWithData, int MwmoNameCount)> eligibleMaps = [];
+	int skippedMissingWdt = 0;
+	int skippedWmoOnly = 0;
+	foreach (string mapName in mapCandidates.Distinct(StringComparer.OrdinalIgnoreCase))
+	{
+		if (!TryReadArchiveWdtSummary(archiveCatalog, mapName, out int tilesWithData, out int mwmoNameCount))
+		{
+			skippedMissingWdt++;
+			continue;
+		}
+
+		if (mwmoNameCount > 0)
+		{
+			skippedWmoOnly++;
+			continue;
+		}
+
+		eligibleMaps.Add((mapName, tilesWithData, mwmoNameCount));
+	}
+
+	List<string> maps = eligibleMaps
+		.OrderByDescending(static candidate => candidate.TilesWithData)
+		.ThenBy(static candidate => candidate.MapName, StringComparer.OrdinalIgnoreCase)
+		.Select(static candidate => candidate.MapName)
+		.ToList();
 	if (limit is > 0)
 		maps = maps.Take(limit.Value).ToList();
 
@@ -206,6 +235,10 @@ static void RunListMaps(string[] args)
 	{
 		schema_version = "v10-client-map-list.v1",
 		client_root = clientRoot,
+		map_source = "map_dbc_wdt_filtered",
+		candidate_map_count = mapCandidates.Count,
+		skipped_missing_wdt = skippedMissingWdt,
+		skipped_wmo_only = skippedWmoOnly,
 		map_count = maps.Count,
 		maps,
 	};
@@ -224,6 +257,88 @@ static void RunListMaps(string[] args)
 	}
 
 	Console.WriteLine(json);
+}
+
+static IEnumerable<string> DiscoverArchiveMapNamesFromMapDbc(string clientRoot, IArchiveCatalog archiveCatalog)
+{
+	MapDirectoryLookup lookup = new();
+	lookup.Load([clientRoot], archiveCatalog);
+
+	if (!lookup.IsLoaded || lookup.Entries.Count == 0)
+		return [];
+
+	SortedSet<string> maps = new(StringComparer.OrdinalIgnoreCase);
+	foreach (MapDirectoryEntry entry in lookup.Entries)
+	{
+		if (!string.IsNullOrWhiteSpace(entry.Directory))
+			maps.Add(entry.Directory.Trim());
+	}
+
+	return maps;
+}
+
+static bool TryReadArchiveWdtSummary(IArchiveCatalog archiveCatalog, string mapName, out int tilesWithData, out int mwmoNameCount)
+{
+	tilesWithData = 0;
+	mwmoNameCount = 0;
+
+	string mapVirtualRoot = Path.Combine("World", "Maps", mapName).Replace('/', '\\');
+	string wdtVirtualPath = BuildMapWdtVirtualPath(mapVirtualRoot, mapName);
+	byte[]? wdtBytes = archiveCatalog.ReadFile(wdtVirtualPath);
+	if (wdtBytes is null || wdtBytes.Length == 0)
+		return false;
+
+	tilesWithData = ReadArchiveWdtTiles(wdtBytes, wdtVirtualPath).Count;
+	mwmoNameCount = CountMwmoStringEntriesFromWdt(wdtBytes);
+	return true;
+}
+
+static int CountMwmoStringEntriesFromWdt(byte[] wdtBytes)
+{
+	int offset = 0;
+	while (offset <= wdtBytes.Length - ChunkHeader.SizeInBytes)
+	{
+		ReadOnlySpan<byte> headerBytes = wdtBytes.AsSpan(offset, ChunkHeader.SizeInBytes);
+		if (!ChunkHeaderReader.TryRead(headerBytes, out ChunkHeader header))
+			break;
+
+		int dataOffset = checked(offset + ChunkHeader.SizeInBytes);
+		long payloadEndLong = checked((long)dataOffset + header.Size);
+		if (payloadEndLong > wdtBytes.Length)
+			break;
+
+		if (header.Id == MapChunkIds.Mwmo)
+		{
+			ReadOnlySpan<byte> payload = wdtBytes.AsSpan(dataOffset, (int)header.Size);
+			int count = 0;
+			int entryStart = 0;
+			for (int index = 0; index < payload.Length; index++)
+			{
+				if (payload[index] != 0)
+					continue;
+
+				if (index > entryStart)
+					count++;
+
+				entryStart = index + 1;
+			}
+
+			if (entryStart < payload.Length)
+				count++;
+
+			return count;
+		}
+
+		int nextOffset = (int)payloadEndLong;
+		if ((header.Size & 1) != 0 && nextOffset < wdtBytes.Length)
+			nextOffset++;
+		if (nextOffset <= offset)
+			break;
+
+		offset = nextOffset;
+	}
+
+	return 0;
 }
 
 static IEnumerable<string> DiscoverArchiveMapNames(IEnumerable<string> knownFiles)

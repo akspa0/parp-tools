@@ -534,16 +534,20 @@ def stage_extract(config: CorpusConfig) -> dict[str, Path]:
             if scan_manifest_path.exists():
                 report = load_json(scan_manifest_path)
                 existing_entries = report.get("Entries") or report.get("entries") or []
-                if len(existing_entries) > 0:
-                    if not report.get("client_id"):
-                        report["client_id"] = client_id
-                    if not report.get("map_name"):
-                        report["map_name"] = map_name
-                    if not report.get("source_kind"):
-                        report["source_kind"] = client_source_kind(client)
-                    save_json(scan_manifest_path, report)
+                if not report.get("client_id"):
+                    report["client_id"] = client_id
+                if not report.get("map_name"):
+                    report["map_name"] = map_name
+                if not report.get("source_kind"):
+                    report["source_kind"] = client_source_kind(client)
+                save_json(scan_manifest_path, report)
+
+                # If an extract marker exists, this map was already scanned to completion
+                # (including legitimate 0-tile maps). Reuse it on resume.
+                if extract_marker_path.exists() or len(existing_entries) > 0:
                     print(f"    {map_name}: scan exists ({len(existing_entries)} tiles), skipping")
-                    extract_dirs[map_key] = scan_manifest_path
+                    if len(existing_entries) > 0:
+                        extract_dirs[map_key] = scan_manifest_path
                     continue
 
             print(f"    {map_name}: scanning source tiles...", end=" ", flush=True)
