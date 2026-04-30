@@ -21,6 +21,11 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - `WlFile` and `WlFileReader`
 - Latest committed Wave 2 slice is `f125fa5` (`feat: Add extraction of object-anchored 3D brush patterns and related functionality`).
 - Current local continuation moved beyond that commit:
+  - full native v10 corpus orchestration is now the active extraction route for the next broad training attempt:
+    - `wowviewer-converter list-maps` discovers map names from each staged client archive/catalog instead of relying on the old fixed map list
+    - `wow-viewer/scripts/build_v10_corpus.py` now defaults to per-client map discovery, normalizes C# fingerprint JSON into the snake_case scorer contract, deduplicates to the configured budget, builds only the selected native v10 shards via batched per-group tile lists, and runs trainer-facing curation with `--max-total` capped by `max_tiles` (default `1500`)
+    - `wowviewer-converter dataset-build-v10-stage1` now accepts `--client-root`, `--build-key`, `--map-name`, and `--tile-list`, so a selected client/map group reuses one archive catalog and loads archive-backed minimaps without rebuilding the catalog per tile
+    - `wowviewer-converter extract-v10-tensors` also accepts archive-backed minimap metadata for narrow one-off shard extraction, but the broad corpus runner should use grouped `dataset-build-v10-stage1`
   - `wowviewer-converter extract-v10-tensors` remains the canonical Wave 1 NPZ extraction surface, now accepts `--minimap-root`, and writes matching `*_placements.json` sidecars when placement data exists
   - `wowviewer-converter dataset-build-v10-stage1` now owns the first bounded bulk Stage 1 corpus build over root ADTs plus a loose minimap root and writes a manifest that downstream trainers can consume directly
   - `wowviewer-converter mine-v10-brushes` now owns the anchor-aware miner natively in `WowViewer.Tool.Converter`
@@ -71,6 +76,12 @@ This file is intentionally compressed. Keep only the current route, the latest v
   - bounded era-routed tileset harvest smoke passed at `output/build-validation/v10-tileset-harvest-era-routing-smoke-counters/harvest_manifest.json` with `5` staged-local texture exports, `5` preferred era-session hits, `0` fallback hits, and `0` errors
   - bounded color/detail-aware tileset pattern smoke passed at `output/build-validation/v10-tileset-pattern-color-smoke/pattern_library.json` over `5` decoded staged-client BLPs with `schema_version = v10-tileset-patterns.v3`, `MeanColorHex`, `DominantColorsHex`, `ColorSignatureHash`, `ChromaSignatureHash`, `ChromaDetailSignatureHash`, and `ChromaDetailEnergy`
   - bounded minimap tileset decomposition smoke passed at `output/build-validation/v10-minimap-tileset-decompose-kalimdor-smoke/minimap_tileset_decomposition.json` using a `64`-pattern v3 library and an existing Kalimdor minimap capture, producing `64` grid cells, `3` candidates per cell, `9` distinct top candidates, `best_match_mean.png`, `residual_to_best_mean.png`, and `confidence.png`
+  - full-native-corpus orchestration smoke passed for the grouped tile-list path over `development_0_0`:
+    - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug --no-restore` passed
+    - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\build_v10_corpus.py wow-viewer\scripts\curate_v10_training_shards.py` passed
+    - `wowviewer-converter list-maps` smoke passed against staged `3_3_5_12340`
+    - `dataset-build-v10-stage1 --tile-list` wrote one native v10 shard and manifest from the proven development fixture
+    - `curate_v10_training_shards.py` accepted that one-shard manifest with `--max-total 1500 --max-selected-fraction 0 --max-per-era 0`
   - full mixed-corpus Stage 2 CUDA run 3 is active at `output/ml-training/v10_stage2_v9cache_native_dev_cuda_full_run3_20260427` using `gillijimproject_refactor/.venv-train`; startup validation confirmed Torch `2.11.0+cu128`, CUDA visibility, the proven `1,262`-entry curated manifest, and live GPU-backed Python activity
 
 ## Wave 2 Status
@@ -119,6 +130,8 @@ This file is intentionally compressed. Keep only the current route, the latest v
 - `Pm4PathMask` and `Pm4BuildingFootprintMask` remain empty pending PM4 integration.
 - The current Stage 1 trainer is only a bounded baseline; Stage 2 refinement, broader non-development corpora, and production-grade experiment management remain open.
 - The active full mixed-corpus Stage 2 CUDA run launched on Apr 27, 2026 but has not finished yet; do not describe it as a trained or converged model until checkpoints and metrics are written.
+- The new full-native v10 corpus path is implemented and smoke-tested, but the full all-client/all-map extraction has not been run yet.
+- One archive-backed `AhnQiraj_26_46` native extraction smoke timed out during tensor extraction; treat broad corpus execution as timeout/skip-gated until unsupported or slow ADT families are isolated.
 - `dataset-build-v10-stage1` currently skipped `34` development tiles because `AdtTensorPackBuilder` did not recognize them as usable root ADTs.
 - The current enriched MCLY dictionary proof read `mcly_texture_ids` plus texture-name metadata from `11` of the `64` existing Stage 1 shards; `53` shards were explicitly skipped as `missing_mcly_texture_ids`.
 - The current slim curation cap is conservative and quality/era-balanced, but `era_tag` remains `unknown` for native development shards unless the upstream Stage 1 manifest starts writing a real build or era tag.

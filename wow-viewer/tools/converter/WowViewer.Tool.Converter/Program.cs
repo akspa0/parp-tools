@@ -102,6 +102,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "harvest-tileset-blps":
 		V10TilesetHarvestCommand.Run(tail);
 		break;
+	case "list-maps":
+		RunListMaps(tail);
+		break;
 	case "terrain-patch-adt":
 		TerrainPatchAdtCommand.Run(tail);
 		break;
@@ -172,6 +175,87 @@ static void RunDetect(string[] args)
 	Console.WriteLine($"Planned hosts: {ToolHosts.Planned.Length}");
 }
 
+static void RunListMaps(string[] args)
+{
+	string? clientRootOption = GetOption(args, "--client-root", "-c") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	int? limit = GetIntOption(args, "--limit", "-n");
+	if (string.IsNullOrWhiteSpace(clientRootOption))
+	{
+		Console.Error.WriteLine("Error: list-maps requires --client-root <path>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string clientRoot = Path.GetFullPath(clientRootOption);
+	if (!Directory.Exists(clientRoot))
+	{
+		Console.Error.WriteLine($"Error: client root not found: {clientRoot}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	using IArchiveCatalog archiveCatalog = CreateArchiveCatalog(clientRoot);
+	List<string> maps = DiscoverArchiveMapNames(archiveCatalog.GetAllKnownFiles()).ToList();
+	if (limit is > 0)
+		maps = maps.Take(limit.Value).ToList();
+
+	var payload = new
+	{
+		schema_version = "v10-client-map-list.v1",
+		client_root = clientRoot,
+		map_count = maps.Count,
+		maps,
+	};
+
+	string json = JsonSerializer.Serialize(payload, CreateJsonOptions());
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"Wrote map list: {outputPath}");
+		Console.WriteLine($"Maps: {maps.Count}");
+		return;
+	}
+
+	Console.WriteLine(json);
+}
+
+static IEnumerable<string> DiscoverArchiveMapNames(IEnumerable<string> knownFiles)
+{
+	SortedSet<string> maps = new(StringComparer.OrdinalIgnoreCase);
+	foreach (string rawPath in knownFiles)
+	{
+		string normalized = rawPath.Replace('/', '\\').TrimStart('\\');
+		int mapsIndex = normalized.IndexOf("World\\Maps\\", StringComparison.OrdinalIgnoreCase);
+		if (mapsIndex < 0)
+			continue;
+
+		string tail = normalized[(mapsIndex + "World\\Maps\\".Length)..];
+		string[] parts = tail.Split('\\', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		if (parts.Length < 2)
+			continue;
+
+		string fileName = parts[^1];
+		if (fileName.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+			fileName = Path.GetFileNameWithoutExtension(fileName);
+		if (!fileName.EndsWith(".wdt", StringComparison.OrdinalIgnoreCase))
+			continue;
+
+		string mapDirectory = parts[0];
+		string mapName = Path.GetFileNameWithoutExtension(fileName);
+		if (string.IsNullOrWhiteSpace(mapName))
+			mapName = mapDirectory;
+
+		maps.Add(mapName);
+	}
+
+	return maps;
+}
+
 static void RunExportTexJson(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
@@ -215,9 +299,20 @@ static void RunExtractV10Tensors(string[] args)
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
 	string? output = GetOption(args, "--output", "-o");
 	string? minimapRoot = GetOption(args, "--minimap-root", "-m");
+	string? clientRoot = GetOption(args, "--client-root", "-c");
+	string buildKey = GetOption(args, "--build-key", "-b") ?? string.Empty;
+	string? mapName = GetOption(args, "--map-name", "--map-name");
+	bool requireMinimap = HasFlag(args, "--require-minimap");
 	if (string.IsNullOrWhiteSpace(input))
 	{
 		Console.Error.WriteLine("Error: --input <root.adt> is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!string.IsNullOrWhiteSpace(clientRoot) && !Directory.Exists(clientRoot))
+	{
+		Console.Error.WriteLine($"Error: client root not found: {Path.GetFullPath(clientRoot)}");
 		Environment.ExitCode = 1;
 		return;
 	}
@@ -241,7 +336,18 @@ static void RunExtractV10Tensors(string[] args)
 
 	try
 	{
-		V10TensorExtractionResult result = ExtractAndWriteV10TensorPack(input, textureSource, minimapRoot, outputPath, placementOutputPath, requireMinimap: false);
+		using IArchiveCatalog? archiveCatalog = string.IsNullOrWhiteSpace(clientRoot) ? null : CreateArchiveCatalog(Path.GetFullPath(clientRoot));
+		V10TensorExtractionResult result = ExtractAndWriteV10TensorPack(
+			input,
+			textureSource,
+			minimapRoot,
+			outputPath,
+			placementOutputPath,
+			requireMinimap,
+			buildKey,
+			mapName,
+			string.IsNullOrWhiteSpace(clientRoot) ? null : Path.GetFullPath(clientRoot),
+			archiveCatalog);
 		if (!string.IsNullOrWhiteSpace(result.MinimapSourcePath))
 			Console.WriteLine($"  Minimap source: {result.MinimapSourcePath}");
 		Console.WriteLine($"Extracted v10 tensors: {outputPath}");
@@ -261,19 +367,25 @@ static void RunDatasetBuildV10Stage1(string[] args)
 	string? outputDirOption = GetOption(args, "--output-dir", "-o");
 	string? minimapRootOption = GetOption(args, "--minimap-root", "-m");
 	string? manifestOption = GetOption(args, "--manifest", "-f");
+	string? clientRootOption = GetOption(args, "--client-root", "-c");
+	string buildKey = GetOption(args, "--build-key", "-b") ?? string.Empty;
+	string? mapNameOverride = GetOption(args, "--map-name", "--map-name");
+	string? tileListOption = GetOption(args, "--tile-list", "--tile-list");
 	int limit = GetIntOption(args, "--limit", "-n") ?? int.MaxValue;
 	bool overwrite = HasFlag(args, "--overwrite");
+	bool requireMinimap = !HasFlag(args, "--allow-missing-minimap");
 
-	if (string.IsNullOrWhiteSpace(inputDirOption) || string.IsNullOrWhiteSpace(outputDirOption) || string.IsNullOrWhiteSpace(minimapRootOption))
+	if (string.IsNullOrWhiteSpace(inputDirOption) || string.IsNullOrWhiteSpace(outputDirOption) || (string.IsNullOrWhiteSpace(minimapRootOption) && string.IsNullOrWhiteSpace(clientRootOption)))
 	{
-		Console.Error.WriteLine("Error: dataset-build-v10-stage1 requires --input-dir <adt-dir>, --output-dir <dir>, and --minimap-root <dir>.");
+		Console.Error.WriteLine("Error: dataset-build-v10-stage1 requires --input-dir <adt-dir>, --output-dir <dir>, and --minimap-root <dir> or --client-root <path>.");
 		Environment.ExitCode = 1;
 		return;
 	}
 
 	string inputDir = Path.GetFullPath(inputDirOption);
 	string outputDir = Path.GetFullPath(outputDirOption);
-	string minimapRoot = Path.GetFullPath(minimapRootOption);
+	string minimapRoot = string.IsNullOrWhiteSpace(minimapRootOption) ? string.Empty : Path.GetFullPath(minimapRootOption);
+	string? clientRoot = string.IsNullOrWhiteSpace(clientRootOption) ? null : Path.GetFullPath(clientRootOption);
 	string manifestPath = Path.GetFullPath(string.IsNullOrWhiteSpace(manifestOption)
 		? Path.Combine(outputDir, "v10_stage1_manifest.json")
 		: manifestOption);
@@ -285,9 +397,16 @@ static void RunDatasetBuildV10Stage1(string[] args)
 		return;
 	}
 
-	if (!Directory.Exists(minimapRoot))
+	if (!string.IsNullOrWhiteSpace(minimapRoot) && !Directory.Exists(minimapRoot))
 	{
 		Console.Error.WriteLine($"Error: minimap root not found: {minimapRoot}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!string.IsNullOrWhiteSpace(clientRoot) && !Directory.Exists(clientRoot))
+	{
+		Console.Error.WriteLine($"Error: client root not found: {clientRoot}");
 		Environment.ExitCode = 1;
 		return;
 	}
@@ -300,14 +419,19 @@ static void RunDatasetBuildV10Stage1(string[] args)
 	List<V10Stage1ManifestEntry> entries = [];
 	List<V10Stage1ManifestSkip> skipped = [];
 	int scanned = 0;
+	using IArchiveCatalog? archiveCatalog = string.IsNullOrWhiteSpace(clientRoot) ? null : CreateArchiveCatalog(clientRoot);
+	HashSet<string>? tileList = LoadTileList(tileListOption);
 
 	foreach (string adtPath in EnumerateRootAdtFiles(inputDir))
 	{
 		if (entries.Count >= limit)
 			break;
 
-		scanned++;
 		string tileStem = Path.GetFileNameWithoutExtension(adtPath);
+		if (tileList is not null && !tileList.Contains(tileStem))
+			continue;
+
+		scanned++;
 		string outputPath = Path.Combine(outputDir, tileStem + "_v10.npz");
 		string placementOutputPath = Path.Combine(outputDir, tileStem + "_v10_placements.json");
 
@@ -323,7 +447,17 @@ static void RunDatasetBuildV10Stage1(string[] args)
 
 		try
 		{
-			V10TensorExtractionResult result = ExtractAndWriteV10TensorPack(adtPath, resolvedTextureSource, minimapRoot, outputPath, placementOutputPath, requireMinimap: true);
+			V10TensorExtractionResult result = ExtractAndWriteV10TensorPack(
+				adtPath,
+				resolvedTextureSource,
+				minimapRoot,
+				outputPath,
+				placementOutputPath,
+				requireMinimap,
+				buildKey,
+				mapNameOverride,
+				clientRoot,
+				archiveCatalog);
 			entries.Add(new V10Stage1ManifestEntry(
 				tileStem,
 				adtPath,
@@ -348,7 +482,7 @@ static void RunDatasetBuildV10Stage1(string[] args)
 
 	int placeholderWritten = 0;
 	int placeholderSkipped = 0;
-	const string buildKey = "4.0.0.11927";
+	string placeholderBuildKey = string.IsNullOrWhiteSpace(buildKey) ? "4.0.0.11927" : buildKey;
 
 	foreach ((int tileX, int tileY) in DiscoverPm4TileCoords(inputDir))
 	{
@@ -356,6 +490,9 @@ static void RunDatasetBuildV10Stage1(string[] args)
 			break;
 
 		string tileName = $"development_{tileX}_{tileY}";
+		if (tileList is not null && !tileList.Contains(tileName))
+			continue;
+
 		if (coveredTileNames.Contains(tileName))
 			continue;
 
@@ -368,14 +505,14 @@ static void RunDatasetBuildV10Stage1(string[] args)
 
 		byte[,,]? minimapRgb = null;
 		string? minimapSourcePath = null;
-		if (TryLoadMinimapForTile(minimapRoot, "development", tileX, tileY, out byte[,,]? loadedMinimap, out string? loadedPath))
+		if (!string.IsNullOrWhiteSpace(minimapRoot) && TryLoadMinimapForTile(minimapRoot, "development", tileX, tileY, out byte[,,]? loadedMinimap, out string? loadedPath))
 		{
 			minimapRgb = loadedMinimap;
 			minimapSourcePath = loadedPath;
 		}
 
 		TerrainTileTensorPack pack = AdtTensorPackBuilder.BuildPlaceholder(
-			inputDir, "development", tileX, tileY, minimapRgb, buildKey);
+			inputDir, "development", tileX, tileY, minimapRgb, placeholderBuildKey);
 
 		NpzTileSerializer.Serialize(pack, outputPath);
 
@@ -417,15 +554,69 @@ static void RunDatasetBuildV10Stage1(string[] args)
 	Console.WriteLine($"Skipped: {skipped.Count + placeholderSkipped}");
 }
 
+static HashSet<string>? LoadTileList(string? tileListPath)
+{
+	if (string.IsNullOrWhiteSpace(tileListPath))
+		return null;
+
+	string resolvedPath = Path.GetFullPath(tileListPath);
+	if (!File.Exists(resolvedPath))
+		throw new FileNotFoundException($"Tile list not found: {resolvedPath}", resolvedPath);
+
+	HashSet<string> result = new(StringComparer.OrdinalIgnoreCase);
+	if (resolvedPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+	{
+		using JsonDocument document = JsonDocument.Parse(File.ReadAllText(resolvedPath));
+		JsonElement root = document.RootElement;
+		JsonElement values = root;
+		if (root.ValueKind == JsonValueKind.Object)
+		{
+			if (root.TryGetProperty("tiles", out JsonElement tilesElement))
+				values = tilesElement;
+			else if (root.TryGetProperty("tile_names", out JsonElement tileNamesElement))
+				values = tileNamesElement;
+		}
+
+		if (values.ValueKind != JsonValueKind.Array)
+			throw new InvalidDataException($"Tile list JSON must be an array or contain a 'tiles' array: {resolvedPath}");
+
+		foreach (JsonElement value in values.EnumerateArray())
+		{
+			if (value.ValueKind == JsonValueKind.String)
+			{
+				string? text = value.GetString();
+				if (!string.IsNullOrWhiteSpace(text))
+					result.Add(text.Trim());
+			}
+		}
+	}
+	else
+	{
+		foreach (string line in File.ReadLines(resolvedPath))
+		{
+			string trimmed = line.Trim();
+			if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith('#'))
+				continue;
+			result.Add(trimmed);
+		}
+	}
+
+	return result;
+}
+
 static V10TensorExtractionResult ExtractAndWriteV10TensorPack(
 	string inputAdtPath,
 	string? textureSource,
 	string? minimapRoot,
 	string outputPath,
 	string placementOutputPath,
-	bool requireMinimap)
+	bool requireMinimap,
+	string buildKey,
+	string? mapNameOverride,
+	string? clientRoot,
+	IArchiveCatalog? archiveCatalog)
 {
-	TerrainTileTensorPack pack = AdtTensorPackBuilder.Build(inputAdtPath, textureSource);
+	TerrainTileTensorPack pack = AdtTensorPackBuilder.Build(inputAdtPath, textureSource, buildKey, mapNameOverride);
 	string? minimapSourcePath = null;
 	if (!string.IsNullOrWhiteSpace(minimapRoot) && TryLoadV10MinimapRgb(inputAdtPath, minimapRoot, out byte[,,]? minimapRgb, out string? resolvedMinimapPath))
 	{
@@ -439,12 +630,77 @@ static V10TensorExtractionResult ExtractAndWriteV10TensorPack(
 		minimapSourcePath = resolvedMinimapPath;
 	}
 
+	if (pack.MinimapRgb256 is null
+		&& !string.IsNullOrWhiteSpace(clientRoot)
+		&& archiveCatalog is not null
+		&& TryLoadV10MinimapRgbFromArchive(inputAdtPath, clientRoot, buildKey, mapNameOverride, archiveCatalog, out byte[,,]? archiveMinimapRgb, out string? archiveMinimapSource))
+	{
+		pack.MinimapRgb256 = archiveMinimapRgb;
+		pack.MinimapSourceTag = "archive";
+		HashSet<string> availableSignals = new(pack.AvailableSignals, StringComparer.OrdinalIgnoreCase)
+		{
+			"minimap_rgb_256"
+		};
+		pack.AvailableSignals = availableSignals;
+		minimapSourcePath = archiveMinimapSource;
+	}
+
 	if (requireMinimap && pack.MinimapRgb256 is null)
-		throw new InvalidOperationException("missing minimap_rgb_256 for this tile under the provided minimap root");
+		throw new InvalidOperationException("missing minimap_rgb_256 for this tile under the provided minimap or client root");
 
 	NpzTileSerializer.Serialize(pack, outputPath);
 	WriteV10PlacementSidecar(inputAdtPath, placementOutputPath);
 	return new V10TensorExtractionResult(pack, minimapSourcePath);
+}
+
+static bool TryLoadV10MinimapRgbFromArchive(
+	string inputAdtPath,
+	string clientRoot,
+	string buildKey,
+	string? mapNameOverride,
+	IArchiveCatalog archiveCatalog,
+	out byte[,,]? minimapRgb,
+	out string? sourcePath)
+{
+	minimapRgb = null;
+	sourcePath = null;
+
+	string tileStem = Path.GetFileNameWithoutExtension(inputAdtPath);
+	if (!TryParseTileCoordinates(tileStem, out int tileX, out int tileY))
+		return false;
+
+	string mapName = string.IsNullOrWhiteSpace(mapNameOverride)
+		? ExtractMapNameFromTileStem(tileStem)
+		: mapNameOverride;
+	if (string.IsNullOrWhiteSpace(mapName))
+		return false;
+
+	Dictionary<string, IArchiveCatalog> archiveCatalogs = new(StringComparer.OrdinalIgnoreCase)
+	{
+		[clientRoot] = archiveCatalog
+	};
+	Dictionary<string, Md5TranslateIndex?> minimapMd5Cache = new(StringComparer.OrdinalIgnoreCase);
+	TerrainTrainingSampleDescriptor descriptor = new(
+		sampleId: $"{buildKey}:{mapName}:{tileX}:{tileY}",
+		sourceKind: TerrainTrainingSampleSourceKind.MountedArchive,
+		buildLabel: string.IsNullOrWhiteSpace(buildKey) ? "unknown" : buildKey,
+		mapName: mapName,
+		tileX: tileX,
+		tileY: tileY,
+		sourceRoot: clientRoot,
+		rootAdtPath: inputAdtPath)
+	{
+		MapDirectory = mapName,
+		Signals = new TerrainTrainingSignalAvailability { HasRootAdt = true },
+	};
+
+	byte[]? rgb = TryLoadMinimapRgb(descriptor, archiveCatalogs, minimapMd5Cache, out string? resolvedSource);
+	if (rgb is not { Length: > 0 })
+		return false;
+
+	minimapRgb = ReshapeRgb256(rgb);
+	sourcePath = resolvedSource;
+	return true;
 }
 
 static IEnumerable<string> EnumerateRootAdtFiles(string inputDir)
@@ -4407,8 +4663,8 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter dataset-audit --input <scan.json> [--output <audit.json>] [--limit <count>]");
 	Console.WriteLine("  wowviewer-converter dataset-curate --input <audit.json> --output <curated.json> [--report <curation-report.json>] [--limit <count>] [--max-per-group <count>] [--require-wdl|--no-require-wdl] [--require-minimap|--no-require-minimap]");
 	Console.WriteLine("  wowviewer-converter dataset-build-cache --input <audit-or-curate.json> --output-dir <dir> [--limit <count>] [--overwrite] [--include-minimap|--no-include-minimap] [--write-debug-json|--no-write-debug-json]");
-	Console.WriteLine("  wowviewer-converter extract-v10-tensors --input <root.adt> [--output <npz>] [--texture-source <tex0.adt>] [--minimap-root <dir>]  (also writes matching *_placements.json when placement data exists)");
-	Console.WriteLine("  wowviewer-converter dataset-build-v10-stage1 --input-dir <adt-dir> --output-dir <dir> --minimap-root <dir> [--manifest <manifest.json>] [--limit <count>] [--overwrite]");
+	Console.WriteLine("  wowviewer-converter extract-v10-tensors --input <root.adt> [--output <npz>] [--texture-source <tex0.adt>] [--minimap-root <dir>] [--client-root <path> --build-key <tag> --map-name <map> --require-minimap]  (also writes matching *_placements.json when placement data exists)");
+	Console.WriteLine("  wowviewer-converter dataset-build-v10-stage1 --input-dir <adt-dir> --output-dir <dir> (--minimap-root <dir> | --client-root <path>) [--build-key <tag>] [--map-name <map>] [--tile-list <tiles.txt|tiles.json>] [--manifest <manifest.json>] [--limit <count>] [--overwrite] [--allow-missing-minimap]");
 	Console.WriteLine("  wowviewer-converter mine-v10-brushes --input-dir <npz-dir> --output-dir <dir> [--placement-dir <dir>] [--anchor-mode objects|terrain|hybrid] [--context-radius <n>] [--dictionary-size <n>] [--min-occurrences <n>] [--terrain-samples-per-tile <n>] [--seed <n>]");
 	Console.WriteLine("  wowviewer-converter mine-v10-mcly --input-dir <npz-dir> --output-dir <dir> [--min-occurrences <n>] [--example-limit <n>] [--include-empty]");
 	Console.WriteLine("  wowviewer-converter label-v10-mcly --input <stage1-manifest|npz-dir|npz> --dictionary <mclay_dictionary.json> --output <label-manifest.json> [--min-retained-chunks <n>]");
@@ -4431,6 +4687,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter mine-tileset-patterns --input <merged_tileset_index.json> [--output-dir <dir>] [--limit <n>] [--mip <level>] [--write-previews]");
 	Console.WriteLine("  wowviewer-converter decompose-minimap-tilesets --pattern-library <pattern_library.json> --minimap <minimap.png> [--output-dir <dir>] [--grid-size <n>] [--max-candidates <n>] [--limit-patterns <n>]");
 	Console.WriteLine("  wowviewer-converter harvest-tileset-blps --input <merged_tileset_index.json> [--output-dir <dir>] [--limit <n>]");
+	Console.WriteLine("  wowviewer-converter list-maps --client-root <path> [--output <maps.json>] [--limit <n>]");
 	Console.WriteLine("  wowviewer-converter adt-fingerprint --input-dir <dir> [--output <fingerprint.json>]");
 }
 

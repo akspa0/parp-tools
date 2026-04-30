@@ -24,7 +24,7 @@ public static class AdtTensorPackBuilder
     private const int TileAlphaSize = ChunkAlphaSize * TileChunks;
     private const int TileMinimapSize = 256;
 
-    public static TerrainTileTensorPack Build(string adtPath, string? textureSourcePath = null)
+    public static TerrainTileTensorPack Build(string adtPath, string? textureSourcePath = null, string buildKey = "", string? mapNameOverride = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(adtPath);
 
@@ -93,8 +93,8 @@ public static class AdtTensorPackBuilder
         return new TerrainTileTensorPack
         {
             TileName = tileName,
-            MapName = ExtractMapName(adtPath),
-            BuildKey = string.Empty, // populated by caller if known
+            MapName = string.IsNullOrWhiteSpace(mapNameOverride) ? ExtractMapName(adtPath) : mapNameOverride,
+            BuildKey = buildKey,
             SourceAdtPath = adtPath,
             Height257 = height257,
             Height65 = height65,

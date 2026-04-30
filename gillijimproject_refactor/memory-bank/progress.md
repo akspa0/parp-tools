@@ -12,6 +12,28 @@ This file is intentionally compressed. Keep only recent validated milestones, op
 
 ## Recent Validated Milestones
 
+### Apr 30, 2026 - Full native v10 corpus orchestration path landed
+
+- `wowviewer-converter list-maps` now discovers map names from a staged client archive/catalog and writes a JSON map list for corpus runs
+- `wowviewer-converter dataset-build-v10-stage1` now accepts `--client-root`, `--build-key`, `--map-name`, and `--tile-list`, allowing selected native v10 shards to be built per client/map group while reusing one archive catalog and loading archive-backed minimaps
+- `wowviewer-converter extract-v10-tensors` also accepts archive-backed minimap metadata for one-off shard extraction, but grouped `dataset-build-v10-stage1` is the broad-corpus path
+- `wow-viewer/scripts/build_v10_corpus.py` now:
+  - defaults to per-client map discovery instead of the old fixed map list
+  - normalizes C# fingerprint JSON before dedup scoring
+  - deduplicates to the configured native shard budget
+  - builds only selected tiles through batched per-group tile lists, defaulting to `32` selected tiles per Stage 1 batch
+  - emits `v10_full_native_stage1_manifest.json`
+  - runs trainer-facing curation with `--max-total` capped by `max_tiles` (default `1500`) and no hidden `0.25` shrink unless configured
+- Proof:
+  - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\build_v10_corpus.py wow-viewer\scripts\curate_v10_training_shards.py` passed
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug --no-restore` passed
+  - `list-maps` smoke passed against staged `3_3_5_12340` and wrote a limited JSON map list
+  - grouped `dataset-build-v10-stage1 --tile-list` smoke wrote a one-shard native v10 manifest for `development_0_0`
+  - `curate_v10_training_shards.py` accepted that smoke manifest with `--max-total 1500 --max-selected-fraction 0 --max-per-era 0`
+- Boundary:
+  - The full all-client/all-map corpus has not been executed yet.
+  - One archive-backed `AhnQiraj_26_46` extraction smoke timed out during tensor extraction. Broad corpus runs must remain timeout/skip-gated until that slow or unsupported ADT family is isolated.
+
 ### Apr 29, 2026 - Minimap tileset decomposition preprocessor landed
 
 - `MinimapTilesetPatternMatcher` now ranks v3 tileset pattern candidates for each minimap grid cell using mean RGB, chroma signature, baked chroma-detail residual, dominant palette, and detail-energy distance
