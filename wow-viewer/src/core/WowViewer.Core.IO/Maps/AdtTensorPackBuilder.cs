@@ -1278,6 +1278,8 @@ public static class AdtTensorPackBuilder
     {
         uint headerMcalSize = payload.Length >= 0x2C ? BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x28, 4)) : 0;
         uint headerMcshSize = payload.Length >= 0x34 ? BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x30, 4)) : 0;
+        int headerMcalConsumedSize = ResolveHeaderBackedPayloadSize(headerMcalSize);
+        int headerMcshConsumedSize = ResolveHeaderBackedPayloadSize(headerMcshSize);
 
         int position = RootMcnkSubchunkOffset;
         while (position <= payload.Length - ChunkHeader.SizeInBytes)
@@ -1285,17 +1287,19 @@ public static class AdtTensorPackBuilder
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
-            int consumedSize = declaredSize;
+            if (!TryConvertChunkPayloadSize(header.Size, out int declaredSize))
+                break;
+
+            long consumedSize = declaredSize;
             if (header.Id == AdtChunkIds.Mcnr)
-                consumedSize = Math.Max(consumedSize, McnrConsumedSize);
-            else if (header.Id == AdtChunkIds.Mcal && headerMcalSize >= ChunkHeader.SizeInBytes)
-                consumedSize = Math.Max(consumedSize, checked((int)headerMcalSize - ChunkHeader.SizeInBytes));
-            else if (header.Id == AdtChunkIds.Mcsh && headerMcshSize >= ChunkHeader.SizeInBytes)
-                consumedSize = Math.Max(consumedSize, checked((int)headerMcshSize - ChunkHeader.SizeInBytes));
+                consumedSize = Math.Max(consumedSize, (long)McnrConsumedSize);
+            else if (header.Id == AdtChunkIds.Mcal && headerMcalConsumedSize >= 0)
+                consumedSize = Math.Max(consumedSize, (long)headerMcalConsumedSize);
+            else if (header.Id == AdtChunkIds.Mcsh && headerMcshConsumedSize >= 0)
+                consumedSize = Math.Max(consumedSize, (long)headerMcshConsumedSize);
 
             long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
-            if (nextOffset > payload.Length)
+            if (nextOffset > payload.Length || nextOffset <= position)
                 break;
 
             if (header.Id == AdtChunkIds.Mcvt)
@@ -1319,13 +1323,15 @@ public static class AdtTensorPackBuilder
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
-            int consumedSize = declaredSize;
+            if (!TryConvertChunkPayloadSize(header.Size, out int declaredSize))
+                break;
+
+            long consumedSize = declaredSize;
             if (header.Id == AdtChunkIds.Mcnr)
-                consumedSize = Math.Max(consumedSize, McnrConsumedSize);
+                consumedSize = Math.Max(consumedSize, (long)McnrConsumedSize);
 
             long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
-            if (nextOffset > payload.Length)
+            if (nextOffset > payload.Length || nextOffset <= position)
                 break;
 
             if (header.Id == AdtChunkIds.Mcnr)
@@ -1345,6 +1351,8 @@ public static class AdtTensorPackBuilder
     {
         uint headerMcalSize = payload.Length >= 0x2C ? BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x28, 4)) : 0;
         uint headerMcshSize = payload.Length >= 0x34 ? BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x30, 4)) : 0;
+        int headerMcalConsumedSize = ResolveHeaderBackedPayloadSize(headerMcalSize);
+        int headerMcshConsumedSize = ResolveHeaderBackedPayloadSize(headerMcshSize);
 
         int position = RootMcnkSubchunkOffset;
         while (position <= payload.Length - ChunkHeader.SizeInBytes)
@@ -1352,16 +1360,19 @@ public static class AdtTensorPackBuilder
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int consumedSize = checked((int)header.Size);
+            if (!TryConvertChunkPayloadSize(header.Size, out int consumedSizeInt))
+                break;
+
+            long consumedSize = consumedSizeInt;
             if (header.Id == AdtChunkIds.Mcnr)
-                consumedSize = Math.Max(consumedSize, McnrConsumedSize);
-            else if (header.Id == AdtChunkIds.Mcal && headerMcalSize >= ChunkHeader.SizeInBytes)
-                consumedSize = Math.Max(consumedSize, checked((int)headerMcalSize - ChunkHeader.SizeInBytes));
-            else if (header.Id == AdtChunkIds.Mcsh && headerMcshSize >= ChunkHeader.SizeInBytes)
-                consumedSize = Math.Max(consumedSize, checked((int)headerMcshSize - ChunkHeader.SizeInBytes));
+                consumedSize = Math.Max(consumedSize, (long)McnrConsumedSize);
+            else if (header.Id == AdtChunkIds.Mcal && headerMcalConsumedSize >= 0)
+                consumedSize = Math.Max(consumedSize, (long)headerMcalConsumedSize);
+            else if (header.Id == AdtChunkIds.Mcsh && headerMcshConsumedSize >= 0)
+                consumedSize = Math.Max(consumedSize, (long)headerMcshConsumedSize);
 
             long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
-            if (nextOffset > payload.Length)
+            if (nextOffset > payload.Length || nextOffset <= position)
                 break;
 
             if (header.Id == AdtChunkIds.Mccv)
@@ -1375,6 +1386,30 @@ public static class AdtTensorPackBuilder
         }
 
         return -1;
+    }
+
+    private static bool TryConvertChunkPayloadSize(uint rawSize, out int size)
+    {
+        if (rawSize > int.MaxValue)
+        {
+            size = 0;
+            return false;
+        }
+
+        size = (int)rawSize;
+        return true;
+    }
+
+    private static int ResolveHeaderBackedPayloadSize(uint rawSize)
+    {
+        if (rawSize < ChunkHeader.SizeInBytes)
+            return -1;
+
+        uint payloadSize = rawSize - ChunkHeader.SizeInBytes;
+        if (payloadSize > int.MaxValue)
+            return -1;
+
+        return (int)payloadSize;
     }
 
     // ═══════════════════════════════════════════════════════════════════════

@@ -59,9 +59,11 @@ public static class AdtMcrfReader
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
+            if (!TryConvertChunkPayloadSize(header.Size, out int declaredSize))
+                break;
+
             long nextOffset = (long)position + ChunkHeader.SizeInBytes + declaredSize;
-            if (nextOffset > payload.Length)
+            if (nextOffset > payload.Length || nextOffset <= position)
                 break;
 
             if (header.Id == AdtChunkIds.Mcrf)
@@ -75,6 +77,18 @@ public static class AdtMcrfReader
         }
 
         return -1;
+    }
+
+    private static bool TryConvertChunkPayloadSize(uint rawSize, out int size)
+    {
+        if (rawSize > int.MaxValue)
+        {
+            size = 0;
+            return false;
+        }
+
+        size = (int)rawSize;
+        return true;
     }
 }
 

@@ -87,12 +87,14 @@ public static class AdtTextureChunkReader
             if (!ChunkHeaderReader.TryRead(payload.AsSpan(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
-            int consumedSize = header.Id == AdtChunkIds.Mcnr
-                ? Math.Max(declaredSize, McnrConsumedSize)
+            if (!TryConvertChunkPayloadSize(header.Size, out int declaredSize))
+                break;
+
+            long consumedSize = header.Id == AdtChunkIds.Mcnr
+                ? Math.Max((long)declaredSize, McnrConsumedSize)
                 : declaredSize;
             long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
-            if (nextOffset > payload.Length)
+            if (nextOffset > payload.Length || nextOffset <= position)
                 break;
 
             int dataOffset = position + ChunkHeader.SizeInBytes;
@@ -105,7 +107,9 @@ public static class AdtTextureChunkReader
             else if (header.Id == AdtChunkIds.Mcal)
             {
                 int mcalPayloadSize = declaredSize;
-                if (headerMcalPayloadSize.HasValue && headerMcalPayloadSize.Value > mcalPayloadSize && dataOffset + headerMcalPayloadSize.Value <= payload.Length)
+                if (headerMcalPayloadSize.HasValue
+                    && headerMcalPayloadSize.Value > mcalPayloadSize
+                    && headerMcalPayloadSize.Value <= payload.Length - dataOffset)
                 {
                     mcalPayloadSize = headerMcalPayloadSize.Value;
                     nextOffset = (long)position + ChunkHeader.SizeInBytes + mcalPayloadSize;
@@ -170,9 +174,11 @@ public static class AdtTextureChunkReader
         if (!IsKnownTextureSubchunk(firstSubchunk.Id))
             return false;
 
-        int declaredSize = checked((int)firstSubchunk.Size);
-        int consumedSize = firstSubchunk.Id == AdtChunkIds.Mcnr
-            ? Math.Max(declaredSize, McnrConsumedSize)
+        if (!TryConvertChunkPayloadSize(firstSubchunk.Size, out int declaredSize))
+            return false;
+
+        long consumedSize = firstSubchunk.Id == AdtChunkIds.Mcnr
+            ? Math.Max((long)declaredSize, McnrConsumedSize)
             : declaredSize;
         long firstSubchunkEnd = (long)RootMcnkHeaderSize + ChunkHeader.SizeInBytes + consumedSize;
         if (firstSubchunkEnd > payload.Length)
@@ -181,14 +187,35 @@ public static class AdtTextureChunkReader
         flags = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0, 4));
         if (kind == MapFileKind.Adt || kind == MapFileKind.AdtTex)
         {
-            chunkX = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x04, 4)));
-            chunkY = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x08, 4)));
+            uint rawChunkX = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x04, 4));
+            uint rawChunkY = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x08, 4));
+            if (rawChunkX > int.MaxValue || rawChunkY > int.MaxValue)
+                return false;
+
+            chunkX = (int)rawChunkX;
+            chunkY = (int)rawChunkY;
 
             uint sizeMcal = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(RootMcnkMcalSizeOffset, 4));
             if (sizeMcal >= ChunkHeader.SizeInBytes)
-                headerMcalPayloadSize = checked((int)(sizeMcal - ChunkHeader.SizeInBytes));
+            {
+                uint payloadSize = sizeMcal - ChunkHeader.SizeInBytes;
+                if (payloadSize <= int.MaxValue)
+                    headerMcalPayloadSize = (int)payloadSize;
+            }
         }
 
+        return true;
+    }
+
+    private static bool TryConvertChunkPayloadSize(uint rawSize, out int size)
+    {
+        if (rawSize > int.MaxValue)
+        {
+            size = 0;
+            return false;
+        }
+
+        size = (int)rawSize;
         return true;
     }
 

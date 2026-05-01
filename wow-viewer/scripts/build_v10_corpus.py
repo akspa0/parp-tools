@@ -18,9 +18,11 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -187,10 +189,11 @@ class CorpusConfig:
     require_minimap: bool = True
     overwrite_shards: bool = False
     run_curation: bool = True
-    curation_max_selected_fraction: float = 0.0
-    curation_max_per_era: int = 0
+    curation_max_selected_fraction: float = 0.25
+    curation_max_per_era: int = 128
     shard_batch_size: int = 32
     shard_batch_timeout_seconds: int = 300
+    scan_timeout_seconds: int = 3600
     maps: list[str] = field(default_factory=lambda: DEFAULT_MAPS[:])
     clients: list[dict[str, Any]] = field(default_factory=lambda: CLIENTS[:])
     skip_clients: list[str] = field(default_factory=list)
@@ -351,6 +354,12 @@ def normalize_fingerprint_entry(entry: dict[str, Any], client_id: str, map_name:
 
 
 def normalize_scan_fingerprint_entry(entry: dict[str, Any], client_id: str, map_name: str, era: str) -> dict[str, Any]:
+    def coverage_to_chunk_count(value: float) -> int:
+        clamped = max(0.0, min(1.0, float(value)))
+        if clamped <= 0.0:
+            return 0
+        return max(1, min(256, int(round(clamped * 256.0))))
+
     metrics = get_field(entry, "metrics", "Metrics", {}) or {}
     signals = get_field(entry, "signals", "Signals", {}) or {}
     tile_name = str(get_field(entry, "tile_name", "TileName", "") or "")
@@ -373,8 +382,8 @@ def normalize_scan_fingerprint_entry(entry: dict[str, Any], client_id: str, map_
         "total_layer_count": texture_layers,
         "max_layer_count": texture_layers,
         "chunks_with_mcvt": 256 if has_root else 0,
-        "chunks_with_holes": int(max(0.0, min(1.0, hole_coverage)) * 256),
-        "chunks_with_liquid_flags": int(max(0.0, min(1.0, liquid_coverage)) * 256),
+        "chunks_with_holes": coverage_to_chunk_count(hole_coverage),
+        "chunks_with_liquid_flags": coverage_to_chunk_count(liquid_coverage),
         "unique_texture_ids": [],
         "global_min_height": float(get_field(metrics, "height_min", "HeightMin", 0.0) or 0.0),
         "global_max_height": float(get_field(metrics, "height_max", "HeightMax", 0.0) or 0.0),
@@ -431,6 +440,54 @@ def client_by_id(config: CorpusConfig, client_id: str) -> dict[str, Any] | None:
         if client.get("client_id") == client_id:
             return client
     return None
+
+
+def scan_manifest_needs_refresh(scan_report: dict[str, Any], source_kind: str) -> tuple[bool, str]:
+    """Detect stale scan manifests that were produced without deep/audited metrics."""
+    if source_kind == "filesystem_adt_dir":
+        return False, ""
+
+    entries = scan_report.get("Entries") or scan_report.get("entries") or []
+    if not entries:
+        return False, ""
+
+    stale_entries = 0
+    alpha_style_sources = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        signals = get_field(entry, "signals", "Signals", {}) or {}
+        metrics = get_field(entry, "metrics", "Metrics", {}) or {}
+        source_path = str(get_field(entry, "root_adt_path", "RootAdtPath", "") or "")
+        if "#alpha-tile(" in source_path.lower():
+            alpha_style_sources += 1
+
+        has_chunk_flags = bool(get_field(signals, "has_chunk_flags_map", "HasChunkFlagsMap", False))
+        has_area_ids = bool(get_field(signals, "has_area_id_map", "HasAreaIdMap", False))
+        height_range = float(get_field(metrics, "height_range", "HeightRange", 0.0) or 0.0)
+        texture_layers = int(get_field(metrics, "texture_layer_count", "TextureLayerCount", 0) or 0)
+
+        # Old fast scan manifests had no deep terrain metrics:
+        # HasChunkFlagsMap=false, HasAreaIdMap=false, HeightRange=0, TextureLayerCount=0.
+        if (not has_chunk_flags) and (not has_area_ids) and abs(height_range) < 1e-6 and texture_layers == 0:
+            stale_entries += 1
+
+    if stale_entries == 0:
+        return False, ""
+
+    total_entries = len(entries)
+    if source_kind == "embedded_wdt_alpha":
+        if stale_entries == total_entries:
+            return True, f"alpha scan missing deep metrics ({stale_entries}/{total_entries})"
+        if alpha_style_sources > 0 and stale_entries > 0:
+            return True, f"alpha scan partially stale ({stale_entries}/{total_entries})"
+        return False, ""
+
+    if stale_entries == total_entries:
+        return True, f"scan missing deep metrics ({stale_entries}/{total_entries})"
+
+    return False, ""
 
 
 def maps_for_client(config: CorpusConfig, client: dict[str, Any], output_root: Path) -> list[str]:
@@ -542,13 +599,17 @@ def stage_extract(config: CorpusConfig) -> dict[str, Path]:
                     report["source_kind"] = client_source_kind(client)
                 save_json(scan_manifest_path, report)
 
-                # If an extract marker exists, this map was already scanned to completion
-                # (including legitimate 0-tile maps). Reuse it on resume.
-                if extract_marker_path.exists() or len(existing_entries) > 0:
-                    print(f"    {map_name}: scan exists ({len(existing_entries)} tiles), skipping")
-                    if len(existing_entries) > 0:
-                        extract_dirs[map_key] = scan_manifest_path
-                    continue
+                needs_refresh, refresh_reason = scan_manifest_needs_refresh(report, source_kind)
+                if needs_refresh:
+                    print(f"    {map_name}: scan exists but stale ({refresh_reason}), rescanning")
+                else:
+                    # If an extract marker exists, this map was already scanned to completion
+                    # (including legitimate 0-tile maps). Reuse it on resume.
+                    if extract_marker_path.exists() or len(existing_entries) > 0:
+                        print(f"    {map_name}: scan exists ({len(existing_entries)} tiles), skipping")
+                        if len(existing_entries) > 0:
+                            extract_dirs[map_key] = scan_manifest_path
+                        continue
 
             print(f"    {map_name}: scanning source tiles...", end=" ", flush=True)
             try:
@@ -558,7 +619,9 @@ def stage_extract(config: CorpusConfig) -> dict[str, Path]:
                     "--map", map_name,
                     "--build", client_id,
                     "--output", str(scan_manifest_path),
-                ], timeout=900)
+                    "--scan-deep",
+                    "--audit-alpha",
+                ], timeout=config.scan_timeout_seconds)
                 if result.returncode != 0:
                     print(f"FAILED (exit {result.returncode})")
                     if result.stderr:
@@ -867,6 +930,97 @@ def stage_build_shards(config: CorpusConfig, dedup_path: Path) -> Path:
     manifest_entries: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
 
+    def parse_signals_from_stdout(stdout: str) -> list[str]:
+        for raw_line in reversed(stdout.splitlines()):
+            line = raw_line.strip()
+            if not line.lower().startswith("signals:"):
+                continue
+            payload = line.split(":", 1)[1].strip()
+            if not payload:
+                return []
+            return sorted({segment.strip() for segment in payload.split(",") if segment.strip()})
+        return []
+
+    def read_signals_from_npz(npz_path: Path) -> list[str]:
+        if not npz_path.exists():
+            return []
+        try:
+            with zipfile.ZipFile(npz_path, "r") as archive:
+                metadata_bytes = archive.read("metadata.json")
+            metadata = json.loads(metadata_bytes.decode("utf-8"))
+            raw = metadata.get("available_signals") or metadata.get("AvailableSignals") or []
+            if isinstance(raw, list):
+                return sorted({str(value).strip() for value in raw if str(value).strip()})
+        except Exception:
+            return []
+        return []
+
+    def parse_tile_coords(tile_name: str) -> tuple[int | None, int | None]:
+        parts = tile_name.rsplit("_", 2)
+        if len(parts) < 3:
+            return (None, None)
+        try:
+            return (int(parts[-2]), int(parts[-1]))
+        except Exception:
+            return (None, None)
+
+    def read_placement_counts(placement_path: Path) -> tuple[int, int]:
+        if not placement_path.exists():
+            return (0, 0)
+        try:
+            payload = load_json(placement_path)
+            mddf = payload.get("mddf") if isinstance(payload, dict) else []
+            modf = payload.get("modf") if isinstance(payload, dict) else []
+            return (len(mddf) if isinstance(mddf, list) else 0, len(modf) if isinstance(modf, list) else 0)
+        except Exception:
+            return (0, 0)
+
+    def try_repair_placement_sidecar(
+        *,
+        client: dict[str, Any],
+        client_id: str,
+        map_name: str,
+        source_path: str,
+        tile_name: str,
+        shard_dir: Path,
+        output_placements: Path,
+    ) -> bool:
+        temp_npz = shard_dir / f"{tile_name}__placement_repair_tmp_v10.npz"
+        temp_sidecar = shard_dir / f"{tile_name}__placement_repair_tmp_v10_placements.json"
+
+        args = [
+            "extract-v10-tensors",
+            "--input", source_path,
+            "--output", str(temp_npz),
+            "--build-key", client_id,
+            "--map-name", map_name,
+        ]
+        if client_source_kind(client) == "filesystem_adt_dir":
+            minimap_root = str(client.get("minimap_root") or "")
+            if minimap_root:
+                args.extend(["--minimap-root", minimap_root])
+        else:
+            args.extend(["--client-root", str(client["client_path"])])
+
+        try:
+            result = run_dotnet(args, timeout=max(1, int(config.shard_batch_timeout_seconds)))
+        except subprocess.TimeoutExpired:
+            return False
+
+        repaired = result.returncode == 0 and temp_sidecar.exists()
+        if repaired:
+            ensure_dir(output_placements.parent)
+            shutil.move(str(temp_sidecar), str(output_placements))
+
+        for cleanup_path in (temp_npz, temp_sidecar):
+            if cleanup_path.exists():
+                try:
+                    cleanup_path.unlink()
+                except Exception:
+                    pass
+
+        return repaired
+
     def write_progress_manifest() -> None:
         manifest = {
             "schema_version": "v10-full-native-stage1-manifest.v1",
@@ -947,19 +1101,52 @@ def stage_build_shards(config: CorpusConfig, dedup_path: Path) -> Path:
         output_placements = shard_dir / f"{tile_name}_v10_placements.json"
 
         if output_npz.exists() and not config.overwrite_shards:
+            available_signals = read_signals_from_npz(output_npz)
+            object_signals = {"object_mask_257", "object_precise_mask_257"}
+            has_object_signal = any(signal in object_signals for signal in available_signals)
+            placement_repaired = False
+            if has_object_signal and not output_placements.exists():
+                placement_repaired = try_repair_placement_sidecar(
+                    client=client,
+                    client_id=client_id,
+                    map_name=map_name,
+                    source_path=source_path,
+                    tile_name=tile_name,
+                    shard_dir=shard_dir,
+                    output_placements=output_placements,
+                )
+            tile_x, tile_y = parse_tile_coords(tile_name)
+            mddf_count, modf_count = read_placement_counts(output_placements)
             manifest_entries.append({
                 "dataset_key": dataset_key,
                 "era_tag": normalize_era_tag(client_id),
                 "client_id": client_id,
                 "map_name": map_name,
                 "tile_name": tile_name,
+                "tile_x": tile_x,
+                "tile_y": tile_y,
                 "source_adt_path": source_path,
                 "shard_path": str(output_npz),
                 "placement_path": str(output_placements) if output_placements.exists() else "",
+                "placement_model_count": mddf_count,
+                "placement_world_model_count": modf_count,
                 "build_key": client_id,
-                "available_signals": [],
-                "status": "existing",
+                "available_signals": available_signals,
+                "source_kind": client_source_kind(client),
+                "fingerprint": str(entry.get("fingerprint") or ""),
+                "mcnk_count": int(entry.get("mcnk_count") or 0),
+                "total_layer_count": int(entry.get("total_layer_count") or 0),
+                "max_layer_count": int(entry.get("max_layer_count") or 0),
+                "chunks_with_mcvt": int(entry.get("chunks_with_mcvt") or 0),
+                "chunks_with_holes": int(entry.get("chunks_with_holes") or 0),
+                "chunks_with_liquid_flags": int(entry.get("chunks_with_liquid_flags") or 0),
+                "global_min_height": float(entry.get("global_min_height") or 0.0),
+                "global_max_height": float(entry.get("global_max_height") or 0.0),
+                "unique_texture_ids": entry.get("unique_texture_ids") or [],
+                "status": "existing_repaired_placement" if placement_repaired else "existing",
             })
+            if index % 25 == 0:
+                write_progress_manifest()
             continue
 
         args = [
@@ -1012,17 +1199,37 @@ def stage_build_shards(config: CorpusConfig, dedup_path: Path) -> Path:
             continue
 
         print("ok")
+        available_signals = parse_signals_from_stdout(result.stdout)
+        if not available_signals:
+            available_signals = read_signals_from_npz(output_npz)
+        tile_x, tile_y = parse_tile_coords(tile_name)
+        mddf_count, modf_count = read_placement_counts(output_placements)
         manifest_entries.append({
             "dataset_key": dataset_key,
             "era_tag": normalize_era_tag(client_id),
             "client_id": client_id,
             "map_name": map_name,
             "tile_name": tile_name,
+            "tile_x": tile_x,
+            "tile_y": tile_y,
             "source_adt_path": source_path,
             "shard_path": str(output_npz),
             "placement_path": str(output_placements) if output_placements.exists() else "",
+            "placement_model_count": mddf_count,
+            "placement_world_model_count": modf_count,
             "build_key": client_id,
-            "available_signals": [],
+            "available_signals": available_signals,
+            "source_kind": client_source_kind(client),
+            "fingerprint": str(entry.get("fingerprint") or ""),
+            "mcnk_count": int(entry.get("mcnk_count") or 0),
+            "total_layer_count": int(entry.get("total_layer_count") or 0),
+            "max_layer_count": int(entry.get("max_layer_count") or 0),
+            "chunks_with_mcvt": int(entry.get("chunks_with_mcvt") or 0),
+            "chunks_with_holes": int(entry.get("chunks_with_holes") or 0),
+            "chunks_with_liquid_flags": int(entry.get("chunks_with_liquid_flags") or 0),
+            "global_min_height": float(entry.get("global_min_height") or 0.0),
+            "global_max_height": float(entry.get("global_max_height") or 0.0),
+            "unique_texture_ids": entry.get("unique_texture_ids") or [],
             "status": "written",
         })
         write_progress_manifest()
@@ -1120,6 +1327,12 @@ def parse_args() -> argparse.Namespace:
         help="Timeout for each extract-v10-tensors batch before skipping. Default comes from config.",
     )
     parser.add_argument(
+        "--scan-timeout-seconds",
+        type=int,
+        default=0,
+        help="Timeout for each dataset-scan command before skipping. Default comes from config.",
+    )
+    parser.add_argument(
         "--no-curate",
         action="store_true",
         help="Stop after building the merged native Stage 1 manifest.",
@@ -1185,6 +1398,8 @@ def main() -> None:
         config.shard_batch_size = args.shard_batch_size
     if args.shard_batch_timeout_seconds > 0:
         config.shard_batch_timeout_seconds = args.shard_batch_timeout_seconds
+    if args.scan_timeout_seconds > 0:
+        config.scan_timeout_seconds = args.scan_timeout_seconds
     if args.no_curate:
         config.run_curation = False
 
@@ -1199,12 +1414,16 @@ def main() -> None:
     print(f"Trainer curation cap: {config.max_tiles}")
     print(f"Shard batch size: {config.shard_batch_size}")
     print(f"Shard batch timeout: {config.shard_batch_timeout_seconds}s")
+    print(f"Scan timeout: {config.scan_timeout_seconds}s")
     print()
 
     if args.dry_run:
         print("DRY RUN - no commands will be executed")
         for client in config.clients:
             client_id = client["client_id"]
+            if client_id in config.skip_clients:
+                print(f"  Client {client_id}: SKIPPED (skip list)")
+                continue
             exists = check_client_exists(client)
             print(f"  Client {client_id}: {'EXISTS' if exists else 'MISSING'}")
             if exists:

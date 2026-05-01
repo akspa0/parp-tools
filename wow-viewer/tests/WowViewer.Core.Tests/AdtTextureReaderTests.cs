@@ -102,6 +102,26 @@ public sealed class AdtTextureReaderTests
         Assert.Equal(0, textureFile.Chunks.Sum(chunk => chunk.Layers.Count(layer => layer.DecodedAlpha?.Encoding == AdtMcalAlphaEncoding.Packed4Bit)));
     }
 
+    [Fact]
+    public void Read_SyntheticRootAdt_WithOversizedEmbeddedTextureChunk_DoesNotOverflow()
+    {
+        byte[] bytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MHDR", new byte[64]),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MTEX", CreateStringBlock("base.blp")),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", CreateRootMcnkPayloadWithOversizedEmbeddedChunk(indexX: 0, indexY: 0)),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary summary = MapFileSummaryReader.Read(stream, "synthetic_overflow_guard.adt");
+        AdtTextureFile textureFile = AdtTextureReader.Read(stream, summary);
+
+        Assert.Single(textureFile.Chunks);
+        Assert.Empty(textureFile.Chunks[0].Layers);
+        Assert.Equal(0, textureFile.Chunks[0].AlphaPayloadBytes);
+    }
+
     private static byte[] CreateTexChunkPayload(byte[] mclyPayload, byte[] mcalPayload)
     {
         using MemoryStream stream = new();
@@ -123,6 +143,21 @@ public sealed class AdtTextureReaderTests
         stream.Write(header);
         stream.Write(MapFileSummaryReaderTestsAccessor.CreateChunk("MCLY", mclyPayload));
         stream.Write(MapFileSummaryReaderTestsAccessor.CreateChunk("MCAL", mcalPayload));
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateRootMcnkPayloadWithOversizedEmbeddedChunk(uint indexX, uint indexY)
+    {
+        byte[] header = new byte[128];
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x04, 4), indexX);
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x08, 4), indexY);
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x28, 4), uint.MaxValue);
+
+        using MemoryStream stream = new();
+        stream.Write(header);
+        byte[] bogusSubchunk = MapFileSummaryReaderTestsAccessor.CreateChunk("MCLY", Array.Empty<byte>());
+        BinaryPrimitives.WriteUInt32LittleEndian(bogusSubchunk.AsSpan(4, 4), uint.MaxValue);
+        stream.Write(bogusSubchunk);
         return stream.ToArray();
     }
 

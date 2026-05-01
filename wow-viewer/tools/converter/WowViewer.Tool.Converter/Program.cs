@@ -754,6 +754,8 @@ static V10TensorExtractionResult ExtractAndWriteV10TensorPack(
 	IArchiveCatalog? archiveCatalog)
 {
 	AlphaEmbeddedAdtTileData? alphaTile = null;
+	AdtPlacementCatalog? archivePlacementCatalog = null;
+	string? archivePlacementSourcePath = null;
 	TerrainTileTensorPack pack;
 	if (TryParseAlphaEmbeddedTileSourcePath(inputAdtPath, out string alphaMapDirectory, out int alphaTileX, out int alphaTileY))
 	{
@@ -777,7 +779,10 @@ static V10TensorExtractionResult ExtractAndWriteV10TensorPack(
 		}
 		else if (!string.IsNullOrWhiteSpace(clientRoot) && archiveCatalog is not null)
 		{
-			pack = BuildV10TensorPackFromArchivePath(inputAdtPath, textureSource, buildKey, mapNameOverride, archiveCatalog);
+			ArchiveV10TensorBuildResult archiveBuild = BuildV10TensorPackFromArchivePath(inputAdtPath, textureSource, buildKey, mapNameOverride, archiveCatalog);
+			pack = archiveBuild.Pack;
+			archivePlacementCatalog = archiveBuild.PlacementCatalog;
+			archivePlacementSourcePath = archiveBuild.PlacementSourcePath;
 		}
 		else
 		{
@@ -798,7 +803,8 @@ static V10TensorExtractionResult ExtractAndWriteV10TensorPack(
 		minimapSourcePath = resolvedMinimapPath;
 	}
 
-	if (pack.MinimapRgb256 is null
+	if (requireMinimap
+		&& pack.MinimapRgb256 is null
 		&& !string.IsNullOrWhiteSpace(clientRoot)
 		&& archiveCatalog is not null
 		&& TryLoadV10MinimapRgbFromArchive(inputAdtPath, clientRoot, buildKey, mapNameOverride, archiveCatalog, out byte[,,]? archiveMinimapRgb, out string? archiveMinimapSource))
@@ -819,12 +825,14 @@ static V10TensorExtractionResult ExtractAndWriteV10TensorPack(
 	NpzTileSerializer.Serialize(pack, outputPath);
 	if (alphaTile is not null)
 		WriteV10PlacementSidecarFromCatalog(inputAdtPath, placementOutputPath, alphaTile.PlacementCatalog);
+	else if (archivePlacementCatalog is not null)
+		WriteV10PlacementSidecarFromCatalog(inputAdtPath, placementOutputPath, archivePlacementCatalog, archivePlacementSourcePath);
 	else
 		WriteV10PlacementSidecar(inputAdtPath, placementOutputPath);
 	return new V10TensorExtractionResult(pack, minimapSourcePath);
 }
 
-static TerrainTileTensorPack BuildV10TensorPackFromArchivePath(
+static ArchiveV10TensorBuildResult BuildV10TensorPackFromArchivePath(
 	string rootVirtualPath,
 	string? textureSource,
 	string buildKey,
@@ -863,7 +871,43 @@ static TerrainTileTensorPack BuildV10TensorPackFromArchivePath(
 			File.WriteAllBytes(resolvedTextureSource, textureBytes);
 		}
 
-		return AdtTensorPackBuilder.Build(tempRootAdtPath, resolvedTextureSource, buildKey, mapNameOverride);
+		string objectVirtualPath = normalizedRoot[..^4] + "_obj0.adt";
+		byte[] objectBytes = archiveCatalog.ReadFile(objectVirtualPath)
+			?? archiveCatalog.ReadFile(objectVirtualPath.Replace('\\', '/'))
+			?? [];
+
+		AdtPlacementCatalog? placementCatalog = null;
+		string? placementSourcePath = null;
+		if (objectBytes.Length > 0)
+		{
+			string tempObjectAdtPath = Path.Combine(temporaryRoot, tileStem + "_obj0.adt");
+			File.WriteAllBytes(tempObjectAdtPath, objectBytes);
+			placementSourcePath = objectVirtualPath;
+			try
+			{
+				placementCatalog = AdtPlacementReader.Read(tempObjectAdtPath);
+			}
+			catch
+			{
+				// best effort: keep tensor extraction alive even when placement decode fails
+			}
+		}
+
+		if (placementCatalog is null)
+		{
+			try
+			{
+				placementCatalog = AdtPlacementReader.Read(tempRootAdtPath);
+				placementSourcePath ??= normalizedRoot;
+			}
+			catch
+			{
+				// best effort: some roots keep placement data split-only
+			}
+		}
+
+		TerrainTileTensorPack pack = AdtTensorPackBuilder.Build(tempRootAdtPath, resolvedTextureSource, buildKey, mapNameOverride);
+		return new ArchiveV10TensorBuildResult(pack, placementCatalog, placementSourcePath);
 	}
 	finally
 	{
@@ -2214,7 +2258,7 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(
 	{
 		processed++;
 		string tileStem = $"{mapName}_{tileCoordinate.TileX}_{tileCoordinate.TileY}";
-		if (!auditAlphaEntries && likelyAlphaEmbeddedBuild)
+		if (!auditAlphaEntries && likelyAlphaEmbeddedBuild && !scanDeepAdtSummaries)
 		{
 			string alphaSourcePath = $"{wdtVirtualPath}#alpha-tile({tileCoordinate.TileX},{tileCoordinate.TileY})";
 			AdtSummary alphaScanSummary = CreateFastScanSummary(alphaSourcePath);
@@ -2342,7 +2386,7 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(
 			hasAlphaLayers: texPathForEntry is not null,
 			hasTextureMetadata: texPathForEntry is not null || summary.TextureNameCount > 0);
 
-		if (alphaTile is not null && auditAlphaEntries)
+		if (scanDeepAdtSummaries || (alphaTile is not null && auditAlphaEntries))
 			entry = AuditDatasetEntry(entry, archiveCatalogs, wdlCache, minimapMd5Cache);
 
 		entries.Add(entry);
@@ -5323,6 +5367,11 @@ static void ShowUsage()
 file sealed record V10TensorExtractionResult(
 	TerrainTileTensorPack Pack,
 	string? MinimapSourcePath);
+
+file sealed record ArchiveV10TensorBuildResult(
+	TerrainTileTensorPack Pack,
+	AdtPlacementCatalog? PlacementCatalog,
+	string? PlacementSourcePath);
 
 file sealed record V10Stage1Manifest(
 	string SchemaVersion,
