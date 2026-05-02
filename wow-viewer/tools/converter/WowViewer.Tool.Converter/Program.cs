@@ -2122,6 +2122,10 @@ static DirectCacheBuildResult? BuildDirectCacheEntry(
 	float minimapGradient = minimapRgb256 is not null ? ComputeAverageGradientMagnitude(minimapRgb256, NativeMinimapSize, NativeMinimapSize) : 0f;
 	float detailEnergy = ComputeDetailEnergy(height257, height65);
 
+	// MCAL/MCLY: extract per-chunk texture layers and assemble alpha compositing
+	(float[] mcalAlphaPack256, byte[] mclyLayerMask, int[] mclyTextureIds) = BuildMcalMclySignals(terrain);
+	bool hasMcly = mclyTextureIds.Any(static id => id >= 0);
+
 	List<(string Name, NpyArray Array)> payload =
 	[
 		("chunk_heights_256x145", NpyArray.FromFloat32(chunkHeights, 256, 145)),
@@ -2138,6 +2142,12 @@ static DirectCacheBuildResult? BuildDirectCacheEntry(
 		("object_mask_257", NpyArray.FromUInt8(objectMask257, NativeTileSize, NativeTileSize)),
 		("brush_mask_257", NpyArray.FromUInt8(brushMask257, NativeTileSize, NativeTileSize)),
 	];
+	if (hasMcly)
+	{
+		payload.Add(("mcal_alpha_pack_256", NpyArray.FromFloat32(mcalAlphaPack256, 256, 256, 4)));
+		payload.Add(("mcly_layer_mask", NpyArray.FromUInt8(mclyLayerMask, 16, 16, 4)));
+		payload.Add(("mcly_texture_ids", NpyArray.FromInt32(mclyTextureIds, 16, 16, 4)));
+	}
 	if (wdl17 is not null)
 	{
 		payload.Add(("wdl_17", NpyArray.FromFloat32(wdl17, 17, 17)));
@@ -2242,6 +2252,73 @@ static DirectCacheBuildResult? BuildDirectCacheEntry(
 		HasNativeNormalMap: false,
 		MinimapSource: minimapSource,
 		ArrayNames: payload.Select(static item => item.Name).OrderBy(static name => name, StringComparer.Ordinal).ToArray());
+}
+
+static (float[] McalAlphaPack256, byte[] MclyLayerMask, int[] MclyTextureIds) BuildMcalMclySignals(
+	WorldTerrainTileData terrain)
+{
+	const int TileChunks = 16;
+	const int ChunkAlphaSize = 64;
+	const int OutputAlphaSize = 256;
+	const int MaxLayers = 4;
+	const int DownsampleFactor = ChunkAlphaSize / (OutputAlphaSize / TileChunks);
+
+	float[] alphaPack = new float[OutputAlphaSize * OutputAlphaSize * MaxLayers];
+	int[] textureIds = new int[TileChunks * TileChunks * MaxLayers];
+	byte[] layerMask = new byte[TileChunks * TileChunks * MaxLayers];
+
+	for (int i = 0; i < textureIds.Length; i++)
+		textureIds[i] = -1;
+
+	foreach (WorldTerrainChunkData chunk in terrain.Chunks)
+	{
+		int cx = chunk.IndexX;
+		int cy = chunk.IndexY;
+		if ((uint)cx >= TileChunks || (uint)cy >= TileChunks)
+			continue;
+
+		int chunkBaseIdx = (cy * TileChunks + cx) * MaxLayers;
+
+		for (int layerIdx = 0; layerIdx < chunk.TextureLayers.Count && layerIdx < MaxLayers; layerIdx++)
+		{
+			AdtTextureChunkLayer layer = chunk.TextureLayers[layerIdx];
+			textureIds[chunkBaseIdx + layerIdx] = (int)layer.TextureId;
+			layerMask[chunkBaseIdx + layerIdx] = 1;
+
+			if (layer.DecodedAlpha?.AlphaMap is not { Length: ChunkAlphaSize * ChunkAlphaSize })
+				continue;
+
+			byte[] alphaMap = layer.DecodedAlpha.AlphaMap;
+
+			int outOriginX = cx * (OutputAlphaSize / TileChunks);
+			int outOriginY = cy * (OutputAlphaSize / TileChunks);
+
+			for (int ly = 0; ly < OutputAlphaSize / TileChunks; ly++)
+			{
+				for (int lx = 0; lx < OutputAlphaSize / TileChunks; lx++)
+				{
+					float sum = 0;
+					for (int sy = 0; sy < DownsampleFactor; sy++)
+					{
+						int srcY = ly * DownsampleFactor + sy;
+						for (int sx = 0; sx < DownsampleFactor; sx++)
+						{
+							int srcX = lx * DownsampleFactor + sx;
+							sum += alphaMap[srcY * ChunkAlphaSize + srcX];
+						}
+					}
+					float avg = sum / (DownsampleFactor * DownsampleFactor);
+
+					int outX = outOriginX + lx;
+					int outY = outOriginY + ly;
+					int flatIdx = (outY * OutputAlphaSize + outX) * MaxLayers + layerIdx;
+					alphaPack[flatIdx] = avg / 255f;
+				}
+			}
+		}
+	}
+
+	return (alphaPack, layerMask, textureIds);
 }
 
 static string BuildDirectDatasetKey(TerrainTrainingSampleDescriptor entry)
@@ -4512,6 +4589,13 @@ file sealed record NpyArray(string Descriptor, int[] Shape, byte[] Data)
 		byte[] bytes = new byte[values.Length * sizeof(float)];
 		Buffer.BlockCopy(values, 0, bytes, 0, bytes.Length);
 		return new NpyArray("<f4", shape, bytes);
+	}
+
+	public static NpyArray FromInt32(int[] values, params int[] shape)
+	{
+		byte[] bytes = new byte[values.Length * sizeof(int)];
+		Buffer.BlockCopy(values, 0, bytes, 0, bytes.Length);
+		return new NpyArray("<i4", shape, bytes);
 	}
 
 	public static NpyArray FromUInt8(byte[] values, params int[] shape)

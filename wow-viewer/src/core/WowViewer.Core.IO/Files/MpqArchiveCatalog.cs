@@ -646,11 +646,16 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
         uint nameA = HashString(normalized, HashNameA);
         uint nameB = HashString(normalized, HashNameB);
 
-        for (uint i = 0; i < hashTable.Length; i++)
+        uint probeLimit = Math.Min((uint)hashTable.Length, 256u);
+        uint probes = 0;
+        for (uint i = 0; i < hashTable.Length && probes < probeLimit; i++)
         {
             HashEntry entry = hashTable[(hashIndex + i) % hashTable.Length];
             if (entry.BlockIndex == HashEntryEmpty)
-                break;
+            {
+                probes++;
+                continue;
+            }
 
             if (entry.BlockIndex == HashEntryDeleted || entry.BlockIndex >= blockTable.Length)
                 continue;
@@ -812,12 +817,15 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
         uint nameA = HashString(normalized, HashNameA);
         uint nameB = HashString(normalized, HashNameB);
 
-        for (uint i = 0; i < archive.HashTable.Length; i++)
+        uint probeLimit = Math.Min((uint)archive.HashTable.Length, 256u);
+        uint probes = 0;
+        for (uint i = 0; i < archive.HashTable.Length && probes < probeLimit; i++)
         {
             HashEntry entry = archive.HashTable[(hashIndex + i) % archive.HashTable.Length];
             if (entry.BlockIndex == HashEntryEmpty)
             {
-                break;
+                probes++;
+                continue;
             }
 
             if (entry.BlockIndex == HashEntryDeleted)

@@ -1,63 +1,32 @@
-# Active Context — Clean Restart at v0.4.9
+# ACTIVE CONTEXT — V11 CLEAN SLATE
 
-## Current Branch & Base
+## BRANCH
+`v0.4.9` at `ced5899`. V10 pipeline deceased. V11 is the real deal.
 
-- Branch: `v0.4.9`
-- Base commit: `ced5899` — "fix: add new training arguments and U-Net decoder implementation in terrain synthesis script"
-- Last working commit reference: `bd585dd` — "feat: Add NPZ serialization for TerrainTileTensorPack"
-- 25 commits between bd585dd and ced5899: all Wave 1 + Wave 2 infrastructure (dataset-build-v10-stage1, MCAL/MCLY readers, miners, trainers)
+## WHAT FIXED
+- **MpqArchiveCatalog probe bug** — `FindFileInArchive` + `TryFindBlockByName` now skip past empty hash slots with 256-probe limit. Was `break` on empty. This was THE hang.
+- **MCAL/MCLY in v9 `dataset-build-cache`** — v9 pipeline now produces NPZ shards with `mcal_alpha_pack_256`, `mcly_layer_mask`, `mcly_texture_ids`. No temp files. Zero disk writes.
 
-## What Works (filesystem mode)
+## V11 TRAINER (`train_v11.py`)
+- **Backbone:** ConvNeXt V2 Tiny (28.6M) from `timm`. LayerNorm, batch-size agnostic.
+- **Total:** 35.5M params, fits batch 32 in 8GB, batch 64+ in 17GB.
+- **Inputs:** 26 channels — minimap, MCAL alpha, normals, MCCV (3x dropout), coarse height, liquid, objects, PM4, hole, luma, gradient, range.
+- **Outputs:** height_17/65/257 + MCAL alpha (4ch) + MCLY class + hole binary.
+- **Loss:** Uncertainty-weighted sigmas per task. Automatic balancing.
+- **Extras:** EMA, cosine+warmup, gradient clip, signal dropout, LRU cache (2GB cap).
 
-- `wowviewer-converter dataset-build-v10-stage1 --input-dir <adt_dir> --minimap-root <minimap_dir>` — proven to extract NPZ shards with minimap_rgb_256
-- `wowviewer-converter extract-v10-tensors` — single-tile extraction
-- `wowviewer-converter mine-v10-brushes` — anchor-aware brush mining
-- `wowviewer-converter mine-v10-mcly` — MCLY combination dictionary
-- `wowviewer-converter mine-v10-mcal-compositions` — MCAL composition mining
-- `wowviewer-converter mine-v10-mcal-brushes` — MCAL brush-stroke mining
-- `wowviewer-converter mine-v10-height-profiles` — height clustering
-- `wowviewer-converter mine-v10-prefab-cells` — prefab detection
-- `wowviewer-converter label-v10-mcly` — MCLY label manifest
-- `train_v10_stage1_minimap2height.py` — Stage 1 trainer
-- `train_v10_stage2_terrain_synth.py` — Stage 2 multi-resolution synthesis trainer (proven CUDA runs)
-- `train_v10_minimap_to_mclay.py` — Wave 2 classifier
-- `train_v10_minimap_to_mclay_grid.py` — Wave 2 chunk-grid classifier
-- `curate_v10_training_shards.py` — shard curation
+## WHAT WORKS
+- `dataset-build-v10-stage1 --input-dir <dir> --minimap-root <dir>` — filesystem mode, no archives
+- `dataset-build-cache --input <curated> --output-dir <dir>` — v9 pipeline, now with MCAL/MCLY
+- `train_v11.py <shards> --epochs N` — full training with all signals
+- `infer_v11.py <checkpoint> <shards>` — predict heights + MCAL + MCLY + holes, export OBJ
 
-## What BROKE (added after ced5899, DO NOT USE)
+## WHAT BROKE (archive path, DONT USE)
+- `--client-root` mode (was already broken, probe bug now fixed but untested)
+- `build_v10_2_dataset.py`, `train_v10_2_terrain_synth.py` — dead code
+- Shadow masks — never exist on minimap tiles, removed from channel list
 
-- build_v10_2_dataset.py — calls list-maps + dataset-build-v10-stage1 --client-root; hangs on archive-backed extraction
-- train_v10_2_terrain_synth.py — separate v10.2 trainer; unproven, no shards with minimap_rgb_256 extracted
-- --client-root mode on dataset-build-v10-stage1 — archive-backed minimap loading has MpqArchiveCatalog probe-chain bugs and hangs
-- Archive catalog session cache for minimap loading — unproven at scale
-- list-maps command for archive tile discovery — hash table probing broke tile enumeration
-
-## Root Cause Of Breakage
-
-Archive-backed minimap BLP loading from MPQ archives was added to dataset-build-v10-stage1 without end-to-end validation. The custom MPQ reader (MpqArchiveCatalog) has hash table probing bugs:
-- FindFileInArchive stops probing on HashEntryEmpty — files behind empty probe slots are invisible
-- No probe limit when skipping empty slots — caused hangs on large MPQs
-- StormLibPatchArchiveReader fallback is a dead codepath (StormLib.dll not present)
-
-The fix (not yet applied to this branch):
-- Continue past empty slots with 256-entry probe limit
-- Diagnostic counter MpqProbePastEmptyHitCount tracks recoveries
-
-## Filesystem Extraction (the working approach)
-
-Development minimap PNGs: `I:\parp\parp-tools\datasets\original_development\development\images\`
-Development ADTs: `I:\parp\parp-tools\gillijimproject_refactor\test_data\original_development\World\Maps\development`
-
-Extraction command:
-```
-wowviewer-converter dataset-build-v10-stage1 --input-dir <adt_dir> --minimap-root <minimap_dir> --output-dir <out_dir> --limit 64
-```
-
-This produces NPZ shards with: minimap_rgb_256, height_257, height_65, height_17, mcal_alpha_pack_256, mccv_rgb, mcnr_normal_xyz, mcly_layer_mask, mcly_texture_ids, hole_mask_16, metadata.json
-
-## Next Steps
-
-1. Build converter: `dotnet build wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug`
-2. Extract development shards with minimaps (64 tiles)
-3. Train Stage 2 model with those shards
-4. For broader client coverage: pre-extract minimap PNGs to disk first, then use filesystem mode
+## NEXT
+1. Extract 800-1500 shards via filesystem mode on staged clients
+2. `train_v11.py <shards> --output-dir runs/v11_prod --epochs 300 --batch-size 32`
+3. `infer_v11.py runs/v11_prod/best_ema.pt <shards> --export-obj`

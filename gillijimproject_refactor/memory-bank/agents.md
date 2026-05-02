@@ -1,101 +1,51 @@
-# AI Assistant Guidelines for GillijimProject
+# AI Assistant Guidelines for GillijimProject — v0.4.9 Branch
 
-## General Approach
+## Branch Status
 
-1. **Always understand before coding** - Read relevant source files first
-2. **Preserve existing functionality** - Don't break working features
-3. **Add debugging output** - Useful for troubleshooting file discovery
-4. **Use consistent patterns** - Follow existing code style
+- Current branch: `v0.4.9`, based at commit `ced5899`
+- Last working commit reference: `bd585dd`
+- v0.4.9 is a CLEAN RESTART from before the broken archive-backed extraction work
 
-## Common Issues & Solutions
+## What Works (filesystem mode only)
 
-### MPQ File Discovery
-- **Symptom**: Only BLP/WMO files show, no MDX/M2
-- **Cause**: MPQ internal files not added to `_fileSet`
-- **Fix**: Call `_mpq.GetAllKnownFiles()` and add to set
-- **Debug**: Check "[MpqDataSource] Added X MPQ internal files"
+- dataset-build-v10-stage1 --input-dir <adt_dir> --minimap-root <minimap_dir> --output-dir <out_dir>
+- extract-v10-tensors --input <root.adt> --minimap-root <dir> --output <npz>
+- mine-v10-brushes, mine-v10-mcly, mine-v10-mcal-compositions, mine-v10-mcal-brushes, mine-v10-height-profiles, mine-v10-prefab-cells
+- label-v10-mcly
+- All training scripts: train_v10_stage1_minimap2height, train_v10_stage2_terrain_synth, train_v10_minimap_to_mclay, train_v10_minimap_to_mclay_grid
+- curate_v10_training_shards.py
 
-### Case Sensitivity
-- **Symptom**: Files not found despite existing
-- **Cause**: Alpha uses uppercase extensions (.MPQ)
-- **Fix**: Use `StringComparer.OrdinalIgnoreCase`
-- **Debug**: Check file extension handling
+## What Does NOT Work (archive-backed mode, DO NOT USE)
 
-### WMO Nested Archives
-- **Symptom**: WMO files won't load
-- **Cause**: WMO data stored in `.wmo.MPQ` archives
-- **Fix**: Use `ScanWmoMpqArchives()` for nested scanning
-- **Debug**: Check "[MpqDataSource] Added WMO MPQ:" messages
+- dataset-build-v10-stage1 --client-root <path> (hangs, MpqArchiveCatalog probe bug)
+- build_v10_2_dataset.py (calls the broken archive extraction)
+- train_v10_2_terrain_synth.py (unproven, depends on archive-backed extraction)
+- list-maps command for archive tile discovery (hash table probing inconsistent with ReadFile)
 
-## Development Workflow
+## Known Bug In MpqArchiveCatalog (needs fix before archive-backed can work)
 
-1. **Read relevant code** - Understand current implementation
-2. **Make minimal changes** - Fix only what's broken
-3. **Build and test** - Run `dotnet build --no-restore`
-4. **Verify with debug output** - Check file counts by extension
+FindFileInArchive and TryFindBlockByName in MpqArchiveCatalog.cs stop probing on HashEntryEmpty.
+Blizzard's MPQ tools sometimes leave empty slots mid-chain — files behind them are invisible to ReadFile().
 
-## Key Files to Understand
+Fix: continue past empty slots with 256-entry probe limit.
+Diagnostic: MpqProbePastEmptyHitCount counter in MpqDiagnostics.
 
-| File | Purpose |
-|------|---------|
-| `MpqDataSource.cs` | MPQ file access and file list building |
-| `NativeMpqService.cs` | Low-level MPQ archive reading |
-| `ViewerApp.cs` | Main application entry point |
-| `ModelRenderer.cs` | 3D model rendering |
+## Working Data Paths
 
-## Code Patterns
+- Development ADTs: `test_data/original_development/World/Maps/development`
+- Development minimap PNGs: `datasets/original_development/development/images/`
+- Staged clients (for reference, NOT for archive-backed extraction): `output/tmp/wowarchive-clients/`
+- Fixed local clients: `H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft`
 
-### File Extension Check
-```csharp
-var ext = Path.GetExtension(file).ToLowerInvariant();
-if (ext is ".mdx" or ".wmo" or ".m2" or ".blp")
+## Build
+
+```powershell
+dotnet build .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug
 ```
 
-### Case-Insensitive Comparison
-```csharp
-var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-```
+## Priority
 
-### Path Normalization
-```csharp
-var virtualPath = file.Replace('/', '\\');
-```
-
-## Debug Output Examples
-
-### File Discovery
-```
-[MpqDataSource] Ready. 4554 known files:
-  .blp: 3554 files
-  .wmo: 1000 files
-  .mdx: 500 files
-  .m2: 200 files
-```
-
-### WMO Archive Scanning
-```
-[MpqDataSource] Added WMO MPQ: World\wmo\Dungeon\test.wmo
-```
-
-### Scanning Progress
-```
-[MpqDataSource] Scanning root: H:\053-client\Data
-[MpqDataSource] Added 1234 MPQ internal files.
-```
-
-## Testing Checklist
-
-- [ ] Build succeeds (`dotnet build --no-restore`)
-- [ ] MDX files appear in file browser
-- [ ] M2 files appear in file browser
-- [ ] WMO files load correctly
-- [ ] BLP textures display properly
-- [ ] Animation playback works (if applicable)
-
-## When Stuck
-
-1. Check debug output for file counts
-2. Verify MPQ archives are loaded
-3. Confirm `_fileSet` contains expected files
-4. Test with known good files
-5. Check path normalization
+1. Get a trained model checkpoint — use filesystem development shards (64 tiles)
+2. Fix MpqArchiveCatalog probe bug so archive-backed extraction works
+3. Pre-extract minimap PNGs from client MPQs for broader corpus
+4. Run extraction against 3.3.5, 3.0.1, 0.7.0, 0.5.3 clients
