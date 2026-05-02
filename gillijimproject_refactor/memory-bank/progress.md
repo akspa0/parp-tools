@@ -1,266 +1,50 @@
-# Progress
-
-This file is intentionally compressed. Keep only recent validated milestones, open boundaries, and the next recommended slice.
+# Progress — v0.4.9 Clean Branch
 
 ## Current Position
 
-- The v10 terrain-AI lane is in Stage 2 refinement.
-- Wave 1 is complete.
-- Wave 2 pattern-mining infrastructure is complete and native: all dictionary commands, label manifests, and bounded classifier trainers are in place.
-- The older Python reference miner has been retired; the canonical path is native.
-- Stage 2 refinement is now the active slice.
+- Branch `v0.4.9` created from `ced5899` — clean restart after archive-backed extraction broke everything
+- v10 terrain AI pipeline works in filesystem mode only
+- All MCAL/MCLY/Wave 2 infrastructure is present and validated on development tiles
+- v10.2 pipeline (build_v10_2_dataset.py, train_v10_2_terrain_synth.py, archive-backed minimap loading) was added after ced5899 and is BAD STATE — do NOT use
 
-## Recent Validated Milestones
+## Validated Milestones (at bd585dd through ced5899 commit range)
 
-### Apr 27, 2026 - Full mixed-corpus v10 Stage 2 CUDA run 3 launched
+- NPZ serialization for TerrainTileTensorPack (bd585dd)
+- Object-anchored 3D brush pattern extraction (f125fa5)
+- ArchiveCatalogSession for reusable archive reads (02c4ff4)
+- Minimap RGB extraction and Stage 1 trainer (e05cd46)
+- dataset-build-v10-stage1 command (2c423ae) — filesystem mode ONLY
+- MCLY texture-layer combination mining with texture names (b191030)
+- MCAL composition mining (fcc60a8)
+- MCAL brush-stroke mining (44d3688)
+- Height profile clustering (c49ea8c)
+- Prefab-cell clone detection (50509dc)
+- MCLY label manifest generation (919f0a6)
+- Stage 2 terrain synthesis trainer (4cc347c)
+- PM4 placeholder tile support (e667775)
+- U-Net decoder training arguments (ced5899)
 
-- The canonical long-running Stage 2 trainer was launched from `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` using the proven curated manifest `output/ml-training/v10_curated/v10_v9all_plus_native_dev_balanced_manifest.json`
-- The run uses `gillijimproject_refactor/.venv-train` with Torch `2.11.0+cu128` on CUDA and writes to `output/ml-training/v10_stage2_v9cache_native_dev_cuda_full_run3_20260427`
-- Launch command:
-  - `i:/parp/parp-tools/gillijimproject_refactor/.venv-train/Scripts/python.exe i:/parp/parp-tools/wow-viewer/scripts/train_v10_stage2_terrain_synth.py i:/parp/parp-tools/output/ml-training/v10_curated/v10_v9all_plus_native_dev_balanced_manifest.json --output-dir i:/parp/parp-tools/output/ml-training/v10_stage2_v9cache_native_dev_cuda_full_run3_20260427 --epochs 60 --batch-size 4 --num-workers 4 --device cuda`
-- Startup proof:
-  - curated manifest exists with `1,262` entries
-  - `torch.cuda.is_available()` returned `True`
-  - `nvidia-smi` showed a live Python process from the UV-managed interpreter on the RTX 4070 Ti SUPER during launch
-  - terminal output reached Torch Inductor startup (`Not enough SMs to use max_autotune_gemm mode`), which is expected startup noise rather than a fatal error
-- Boundary:
-  - this is a launched full run, not a completed training result yet
+## Known Working Extraction Command
 
-### Apr 27, 2026 - Native rectangular prefab-cell clone detection landed in `wow-viewer`
+```
+wowviewer-converter dataset-build-v10-stage1 --input-dir <adt_dir> --minimap-root <minimap_dir> --output-dir <out_dir> --limit 64
+```
 
-- `wowviewer-converter mine-v10-prefab-cells` now detects repeating square/rectangular chunk sets (cells) that were copy-pasted across maps
-- The command enumerates all cell positions for configurable widths/heights via `--cell-sizes` (e.g. `8x8,12x12,16x16`), computes a strict SHA256 fingerprint from per-chunk MCLY tuples, hole bits, quantized height stats, and per-layer alpha coverage signatures, and groups exact matches across tiles
-- Relaxed hash now captures per-layer quantized coverage (`L0q0.25,L1q0.50,...`) so cells with similar alpha layer patterns group together even when dominant layer differs
-- It retains only cells with frequency >= `--min-occurrences`, averages their height/alpha/hole data into centroids, and writes per-size subdirectories:
-  - `prefab_cell_dictionary.json` (schema v2 with `alpha_layer_signatures`)
-  - `prefab_cell_dictionary.npz`
-- Proof:
-  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
-  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with warnings only
-  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- mine-v10-prefab-cells --input-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --output-dir i:/parp/parp-tools/output/build-validation/v10-wave2-prefab-cells-large --cell-sizes 8x8,12x12,16x16 --dictionary-size 128 --min-occurrences 2 --example-limit 8` passed
-  - proof output: `output/build-validation/v10-wave2-prefab-cells-large/`
-  - bounded corpus result: `64` shards discovered, `11` tiles read, large-cell retained cells:
-    - `8x8`: `2` retained cells
-    - `12x12`: `1` retained cell
-    - `16x16`: `0` retained cells
 
-### Apr 26, 2026 - v10 Wave 1 library infrastructure landed in `wow-viewer`
 
-- Added the canonical tensor-pack extraction stack in shared libraries:
-  - `TerrainTileTensorPack`
-  - `AdtTensorPackBuilder`
-  - `NpzTileSerializer`
-  - `AdtMclqReader`
-  - `AdtMtxfReader`
-  - `AdtMcrfReader`
-  - `WlFile` and `WlFileReader`
-- Proof:
-  - `dotnet build i:/parp/parp-tools/wow-viewer/src/core/WowViewer.Core/WowViewer.Core.csproj -c Debug` passed
-  - `dotnet build i:/parp/parp-tools/wow-viewer/src/core/WowViewer.Core.IO/WowViewer.Core.IO.csproj -c Debug` passed
+## What Broke (Post-ced5899, NOT inherited by v0.4.9)
 
-### Apr 26, 2026 - Wave 2 started with object-anchored 3D brush-pattern extraction
-
-- Commit: `f125fa5` (`feat: Add extraction of object-anchored 3D brush patterns and related functionality`)
-- What landed:
-  - `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/mine_mcal_brush_patterns.py`
-  - placement-derived `ObjectMask257` and `ObjectPreciseMask257` via `AdtPlacementReader`
-  - `wowviewer-converter extract-v10-tensors` as the canonical Wave 1 to Wave 2 extraction surface
-
-### Apr 27, 2026 - Wave 2 widened and moved into native `wow-viewer` converter ownership
-
-- `wowviewer-converter extract-v10-tensors` now writes matching `*_placements.json` sidecars when placement data exists
-- `wowviewer-converter mine-v10-brushes` now owns the anchor-aware miner natively in `WowViewer.Tool.Converter`
-- Native miner coverage includes `objects`, `terrain`, and `hybrid`
-- `NpzTileSerializer` was fixed to emit standards-compliant NumPy payloads for direct NPZ consumption
-- Proof:
-  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
-  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- mine-v10-brushes --input-dir i:/parp/parp-tools/output/build-validation/v10-wave2-wider-corpus/corpus --placement-dir i:/parp/parp-tools/output/build-validation/v10-wave2-wider-corpus/corpus --output-dir i:/parp/parp-tools/output/build-validation/v10-wave2-wider-corpus/native-cli-hybrid-proof --anchor-mode hybrid --terrain-samples-per-tile 32 --dictionary-size 16 --min-occurrences 3 --context-radius 16 --seed 1337` passed
-  - native CLI proof wrote `output/build-validation/v10-wave2-wider-corpus/native-cli-hybrid-proof/brush_dictionary.json`
-- Wider bounded artifacts:
-  - widened corpus: `output/build-validation/v10-wave2-wider-corpus/corpus`
-  - widened corpus size: 6 usable root ADT tensor packs and 11,746 placement records
-  - terrain-only proof: `output/build-validation/v10-wave2-wider-corpus/terrain-proof/brush_dictionary.json`
-  - hybrid proof: `output/build-validation/v10-wave2-wider-corpus/hybrid-proof/brush_dictionary.json`
-
-### Apr 27, 2026 - Stage 1 minimap-backed v10 training baseline landed in `wow-viewer`
-
-- `extract-v10-tensors` now accepts `--minimap-root` and writes `minimap_rgb_256.npy` when a loose minimap is available
-- `NpzTileSerializer` metadata now writes valid JSON through `JsonSerializer`, so Windows source paths and signal lists are safe for downstream consumers
-- `wowviewer-converter dataset-build-v10-stage1` now bulk-builds minimap-backed Stage 1 NPZ shards plus a JSON manifest from root ADTs and a minimap root
-- `wow-viewer/scripts/train_v10_stage1_minimap2height.py` now exists as the first bounded Stage 1 trainer consuming the v10 NPZ shard contract directly
-- Proof:
-  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed after the new command and metadata fix
-  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- dataset-build-v10-stage1 --input-dir i:/parp/parp-tools/gillijimproject_refactor/test_data/original_development/World/Maps/development --output-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --minimap-root i:/parp/parp-tools/datasets/original_development/development --manifest i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json --limit 64` completed with `Written = 64` and `Skipped = 34`
-  - `i:/parp/parp-tools/gillijimproject_refactor/.venv-train/Scripts/python.exe i:/parp/parp-tools/wow-viewer/scripts/train_v10_stage1_minimap2height.py i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json --output-dir i:/parp/parp-tools/output/ml-training/v10_stage1_gpu_smoke --epochs 3 --batch-size 8 --num-workers 0 --device cuda --no-use-compile` passed on the local RTX 4070 Ti SUPER
-  - bounded CUDA smoke metrics after 3 epochs: train loss `0.2355`, val loss `0.1217`, val MAE `2.91m`, val RMSE `23.80m`
-
-### Apr 27, 2026 - Native enriched MCLY combination dictionary mining landed in `wow-viewer`
-
-- `wowviewer-converter mine-v10-mcly` now scans v10 NPZ shards for `mcly_texture_ids`
-- `TerrainTileTensorPack` metadata now preserves the tile-level `mcly_texture_names` MTEX table
-- The command consumes `mcly_texture_names` when present, keys combinations by texture paths instead of local-only texture IDs, preserves local ID tuple distributions plus example tile/chunk coordinates, and writes both the plan-named `mclay_dictionary.json` and chunk-accurate `mcly_dictionary.json`
-- Current biome tags are conservative texture-name token heuristics, not a trained biome classifier
-- Proof:
-  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed
-  - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with warnings only
-  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- dataset-build-v10-stage1 --input-dir i:/parp/parp-tools/gillijimproject_refactor/test_data/original_development/World/Maps/development --output-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --minimap-root i:/parp/parp-tools/datasets/original_development/development --manifest i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json --limit 64 --overwrite` passed and regenerated shards with `mcly_texture_names`
-  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- mine-v10-mcly --input-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --output-dir i:/parp/parp-tools/output/build-validation/v10-wave2-mcly-dictionary --min-occurrences 2 --example-limit 12` passed
-  - proof output: `output/build-validation/v10-wave2-mcly-dictionary/mclay_dictionary.json`
-  - bounded corpus result: `64` shards discovered, `11` tiles read with `mcly_texture_ids`, `1979` chunks counted, `41` raw texture-path keyed combinations, `35` retained combinations, `53` shards skipped as `missing_mcly_texture_ids`
-  - retained biome-tag distribution: `grassland=16`, `built=8`, `dirt_path=7`, `desert=2`, `rocky=1`, `unknown=1`
-- Test caveat:
-  - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --no-build` currently fails in this checkout, mostly because tests expect missing `gillijimproject_refactor/test_data/development/World/Maps/development/...` fixtures; one unrelated synthetic M2 footprint assertion also fails.
-
-### Apr 27, 2026 - Native MCAL chunk composition dictionary mining landed in `wow-viewer`
-
-- `wowviewer-converter mine-v10-mcal-compositions` now scans v10 NPZ shards for `mcal_alpha_pack_256`
-- The command groups real 64x64x4 chunk-level alpha compositions by active-layer, coverage, gradient, quadrant-balance, and optional height-shape bins
-- It writes JSON metadata plus NumPy centroids:
-  - `mcal_composition_dictionary.json`
-  - `mcal_composition_dictionary.npz`
-- Proof:
-  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed with existing warnings only
-  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- mine-v10-mcal-compositions --input-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --output-dir i:/parp/parp-tools/output/build-validation/v10-wave2-mcal-compositions --dictionary-size 32 --min-occurrences 2 --example-limit 12` passed
-  - proof output: `output/build-validation/v10-wave2-mcal-compositions/mcal_composition_dictionary.json`
-  - bounded corpus result: `64` shards discovered, `11` tiles read, `2816` chunks read, `545` candidate compositions, `446` raw composition groups, `32` retained compositions
-
-### Apr 27, 2026 - Native MCAL brush-stroke dictionary mining landed in `wow-viewer`
-
-- `wowviewer-converter mine-v10-mcal-brushes` now scans v10 NPZ shards for `mcal_alpha_pack_256`
-- The command filters near-uniform fills, clusters real per-layer 64x64 alpha stamps, records coarse shape-family labels, and writes:
-  - `mcal_brush_dictionary.json`
-  - `mcal_brush_dictionary.npz`
-- Proof:
-  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed with existing warnings only
-  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- mine-v10-mcal-brushes --input-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --output-dir i:/parp/parp-tools/output/build-validation/v10-wave2-mcal-brushes --dictionary-size 32 --min-occurrences 2 --example-limit 12 --seed 1337` passed
-  - proof output: `output/build-validation/v10-wave2-mcal-brushes/mcal_brush_dictionary.json`
-  - bounded corpus result: `64` shards discovered, `11` tiles read, `11264` layer patches read, `9681` near-uniform patches rejected, `1583` candidate brushes, `32` retained brushes
-  - NPZ shape check found `stamps=(32,64,64)`, `brush_ids=(32)`, `frequencies=(32)`, `shape_features=(32,7)`, and feature normalization arrays
-
-### Apr 27, 2026 - Native height profile clustering landed in `wow-viewer`
-
-- `wowviewer-converter mine-v10-height-profiles` now scans v10 NPZ shards for `height_257`
-- The command clusters normalized downsampled height profiles and records terrain archetype labels, summary stats, per-tile labels, and representative examples
-- It writes JSON metadata plus NumPy centroid payloads:
-  - `height_profile_dictionary.json`
-  - `height_profile_dictionary.npz`
-- The reader accepts both standards-compliant NumPy magic and the older `?NUMPY` compatibility form already tolerated by the brush miner
-- Proof:
-  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug` passed with existing warnings only
-  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- mine-v10-height-profiles --input-dir i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus --output-dir i:/parp/parp-tools/output/build-validation/v10-wave2-height-profiles --dictionary-size 8 --min-occurrences 1 --profile-size 17 --example-limit 8 --seed 1337` passed
-  - proof output: `output/build-validation/v10-wave2-height-profiles/height_profile_dictionary.json`
-  - bounded corpus result: `64` shards discovered, `64` tiles read, `8` retained profiles
-
-### Apr 27, 2026 - Bounded minimap-to-MCLY classifier trainer landed in `wow-viewer`
-
-- `wow-viewer/scripts/train_v10_minimap_to_mclay.py` now trains the first Wave 2 classifier for `minimap_rgb_256 -> retained MCLY palette label`
-- The trainer consumes the existing v10 NPZ shard contract plus `mclay_dictionary.json` or `mcly_dictionary.json` from `mine-v10-mcly`
-- It writes:
-  - `minimap_to_mclay_classifier.pt`
-  - `label_index.json`
-  - `metrics.json`
-- Proof:
-  - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\train_v10_minimap_to_mclay.py` passed
-  - `.venv\Scripts\python.exe wow-viewer\scripts\train_v10_minimap_to_mclay.py output\build-validation\v10-stage1-development-corpus\v10_stage1_manifest.json --dictionary output\build-validation\v10-wave2-mcly-dictionary\mclay_dictionary.json --output-dir output\ml-training\v10_minimap_to_mclay_smoke --epochs 2 --batch-size 4 --num-workers 0 --device cpu --no-channels-last` passed
-  - smoke output: `output/ml-training/v10_minimap_to_mclay_smoke/minimap_to_mclay_classifier.pt`
-  - bounded corpus result: `64` shards discovered, `11` labeled samples, `6` active retained MCLY labels, `8` train samples, `3` validation samples
-- Environment note:
-  - `gillijimproject_refactor\.venv-train\Scripts\python.exe` currently points at a missing UV-managed Python path in this checkout; the smoke used the workspace `.venv`, which has CPU Torch.
-
-### Apr 27, 2026 - Bounded minimap-to-MCLY chunk-grid classifier trainer landed in `wow-viewer`
-
-- `wow-viewer/scripts/train_v10_minimap_to_mclay_grid.py` now trains the first Wave 2 classifier for `minimap_rgb_256 -> 16x16 retained MCLY palette labels`
-- The trainer consumes the existing v10 NPZ shard contract plus `mclay_dictionary.json` or `mcly_dictionary.json` from `mine-v10-mcly`
-- It writes:
-  - `minimap_to_mclay_grid_classifier.pt`
-  - `label_index.json`
-  - `metrics.json`
-- It preserves dictionary-backed label provenance and uses `ignore_index=-100` for chunks whose texture combination is not retained in the mined dictionary
-- It can now consume the reusable native `v10-mcly-label-manifest.v1` output directly, instead of recomputing labels from NPZ plus dictionary on every training run
-- Proof:
-  - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\train_v10_minimap_to_mclay_grid.py` passed
-  - `.venv\Scripts\python.exe wow-viewer\scripts\train_v10_minimap_to_mclay_grid.py output\build-validation\v10-stage1-development-corpus\v10_stage1_manifest.json --dictionary output\build-validation\v10-wave2-mcly-dictionary\mclay_dictionary.json --output-dir output\ml-training\v10_minimap_to_mclay_grid_smoke --epochs 2 --batch-size 4 --num-workers 0 --device cpu --no-channels-last` passed
-  - `.venv\Scripts\python.exe wow-viewer\scripts\train_v10_minimap_to_mclay_grid.py output\build-validation\v10-wave2-mcly-labels\v10_mcly_label_manifest.json --output-dir output\ml-training\v10_minimap_to_mclay_grid_manifest_smoke --epochs 2 --batch-size 4 --num-workers 0 --device cpu --no-channels-last` passed
-  - smoke output: `output/ml-training/v10_minimap_to_mclay_grid_smoke/minimap_to_mclay_grid_classifier.pt`
-  - manifest-driven smoke output: `output/ml-training/v10_minimap_to_mclay_grid_manifest_smoke/minimap_to_mclay_grid_classifier.pt`
-  - bounded corpus result: `64` shards discovered, `11` labeled samples, `1,973` retained chunk labels, `35` active retained MCLY labels, `8` train samples, `3` validation samples
-
-### Apr 27, 2026 - Native reusable MCLY label manifest generation landed in `wow-viewer`
-
-- `wowviewer-converter label-v10-mcly` now materializes retained MCLY dictionary labels from Stage 1 NPZ shards plus `mclay_dictionary.json`
-- It writes `v10-mcly-label-manifest.v1` with:
-  - per-label dictionary provenance and usage counts
-  - per-tile dominant retained palette metadata
-  - per-tile 16x16 chunk label grids
-  - `ignore_index = -100` for chunks whose texture combination was not retained in the mined dictionary
-- Proof:
-  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -c Debug --no-restore` passed with existing warnings only after escalation for dotnet first-run sandbox denial
-  - `dotnet run --no-build --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- label-v10-mcly --input i:/parp/parp-tools/output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json --dictionary i:/parp/parp-tools/output/build-validation/v10-wave2-mcly-dictionary/mclay_dictionary.json --output i:/parp/parp-tools/output/build-validation/v10-wave2-mcly-labels/v10_mcly_label_manifest.json --min-retained-chunks 8` passed after escalation for the same dotnet first-run sandbox denial
-  - proof output: `output/build-validation/v10-wave2-mcly-labels/v10_mcly_label_manifest.json`
-  - bounded corpus result: `64` shards discovered, `11` shards with `mcly_texture_ids`, `11` labeled samples, `1,973` retained chunks, `35` active retained labels, `53` skipped shards
-
-### Apr 26, 2026 - GPU viewer plan-set workflow was registered
-
-- Added `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md` and updated workflow routing files
-- Boundary:
-  - workflow registration only
-  - no new runtime parity claim
-
-### Apr 27, 2026 - Wave 2 continuation: retired Python reference miner and landed first bounded Stage 2 trainer
-
-- Moved the legacy Python reference miner from `gillijimproject_refactor/src/WoWMapConverter/scripts/v10/mine_mcal_brush_patterns.py` to `.../v10/archived/mine_mcal_brush_patterns.py`
-- The canonical anchor-aware brush path is now exclusively `wowviewer-converter mine-v10-brushes`
-- `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` now exists as the first bounded Stage 2 trainer
-- The trainer consumes the existing v10 NPZ shard contract directly (no new dataset builder needed)
-- It predicts multi-resolution height at 17×17, 65×65, and 257×257 using all available ground-truth signals
-- It supports signal-dropout augmentation (default 15%) so the model is robust to missing channels at inference time
-- Loss stack: full L1 + 0.5×mid L1 + 0.25×coarse L1 + 0.3×gradient + 0.3×mid_residual + 0.3×detail_res
-- Proof:
-  - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\train_v10_stage2_terrain_synth.py` passed
-  - `.venv\Scripts\python.exe wow-viewer\scripts\train_v10_stage2_terrain_synth.py output\build-validation\v10-stage1-development-corpus\v10_stage1_manifest.json --output-dir output\ml-training\v10_stage2_smoke --epochs 2 --batch-size 2 --num-workers 0 --device cpu --no-channels-last --signal-dropout 0.1 --max-samples 8` passed
-  - smoke output: `output/ml-training/v10_stage2_smoke/checkpoints/last.pt`
-  - bounded smoke metrics after 2 epochs: train loss `0.8890`, val loss `2.2534`, val MAE `2.90m`, val RMSE `8.24m`
-
-### Apr 27, 2026 - v10 mixed-corpus curation and first CUDA Stage 2 run started
-
-- Added `wow-viewer/scripts/curate_v10_training_shards.py`
-- The curation utility accepts native v10 manifests, legacy v9 tensor-cache manifests, NPZ files, and NPZ directories
-- It verifies required training arrays (`minimap_rgb_256`, `height_257`, `height_17`), rejects flat or blank shards by default, ranks by quality, and can cap per dataset bucket for balanced first-pass training
-- Updated `wow-viewer/scripts/train_v10_stage2_terrain_synth.py` to consume:
-  - native `pm4_path_mask` and `pm4_building_footprint_mask`
-  - legacy v9 aliases for `hole_mask_16x16`, `object_mask_precise_257`, `pm4_mask_257`, `liquid_mask_257`, and `liquid_height_257`
-- Repaired the UV-managed CUDA training environment with `gillijimproject_refactor/scripts/setup_training_env.ps1 -Backend auto -Recreate`
-- Proof:
-  - `.venv\Scripts\python.exe -m py_compile wow-viewer\scripts\curate_v10_training_shards.py wow-viewer\scripts\train_v10_stage2_terrain_synth.py` passed
-  - curation over `output/ml-training/cache/v9_direct_archive_core_devholdout_plus11927_alphafix_companionfix_20260420/cache/v9_tensor_cache_manifest.json` plus `output/build-validation/v10-stage1-development-corpus/v10_stage1_manifest.json` passed
-  - curation output: `output/ml-training/v10_curated/v10_v9all_plus_native_dev_balanced_manifest.json`
-  - curation report: `3,945` candidates, `3,240` valid preselection shards, `1,262` selected shards, `705` rejected, `22` dataset buckets
-  - rejection reasons: `467` missing required arrays, `238` height range below threshold
-  - CUDA training output: `output/ml-training/v10_stage2_balanced_cuda_run1`
-  - CUDA run 1 trained for `3` epochs over `1,262` selected shards with `1,072` train and `190` validation samples
-  - CUDA run 1 best checkpoint: `output/ml-training/v10_stage2_balanced_cuda_run1/checkpoints/best.pt`
-  - CUDA run 1 best metrics after epoch 3: val loss `0.3865`, val MAE `73.88m`, val RMSE `104.48m`
-  - CUDA run 2 output: `output/ml-training/v10_stage2_v9cache_native_dev_cuda_run2`
-  - CUDA run 2 trained for `10` epochs over the same `1,262` selected shards with `1,072` train and `190` validation samples
-  - CUDA run 2 best checkpoint: `output/ml-training/v10_stage2_v9cache_native_dev_cuda_run2/checkpoints/best.pt`
-  - CUDA run 2 best metrics at epoch `6`: val loss `0.3438`, val MAE `70.38m`, val RMSE `100.47m`
-- Boundary:
-  - broad all-version coverage currently comes from the legacy v9 cache, not native v10 extraction for every client root
-  - native richer v10 signals in this first mixed manifest are limited to the development-map Stage 1 corpus (`41` selected native v10 shards, `11` with MCAL/MCLY texture signals, `41` with PM4 masks)
-  - this is a first started training run, not a converged model
+- Archive-backed tile enumeration (EnumerateArchiveTileSources) returns 0 tiles for --client-root mode
+- MpqArchiveCatalog.FindFileInArchive stops probing on empty hash slots — files behind empty slots invisible
+- StormLibPatchArchiveReader fallback is dead code (DllNotFoundException)
+- build_v10_2_dataset.py orchestrates broken archive extraction
+- train_v10_2_terrain_synth.py cannot train without minimap shards
 
 ## Open Boundaries
 
-- No validated broad-corpus MCAL brush-stroke vocabulary run exists yet beyond the bounded development Stage 1 proof.
-- No validated broad-corpus minimap-to-MCLY classifier or chunk-grid run exists yet beyond the `11` currently labelable development shards.
-- MCLY dictionary biome tags are heuristic and should be replaced or validated by the planned minimap-to-biome/palette classifier.
-- Stage 2 trainer now has mixed-corpus CUDA runs from the proven all-version v9 cache plus native v10 development shards; longer-running CUDA training, broader native v10 corpora, and production-grade experiment management remain open.
-- All-version broad training intentionally depends on legacy v9 cache shards for now because that path already harvested the staged archive/client roots correctly; native v10 archive/client-root extraction remains open beyond the development-map proof.
-- The world-viewer path is still mid-migration and should not be described as final runtime parity.
-
-## Recommended Next Slice
-
-1. Begin Stage 2 CUDA training over the full 64-shard corpus with 50+ epochs.
-2. Build broad-corpus MCLY classifier evaluation harness.
-3. Integrate PM4 path/building masks into v10 tensor pipeline.
-4. Run prefab-cell clone detection on broader corpora beyond the bounded development proof.
+- No all-client/all-map corpus exists yet
+- Only development-map extraction (64 tiles) is currently proven
+- Alpha-era client (0.5.3) list-maps returns 0 maps — monolithic WDT format not handled
+- Cata 4.0.0.11927 has known MPQ format issues (pre-beta build with few minimaps)
+- Wrath 3.3.5 archive-backed extraction hangs — needs MpqArchiveCatalog probe fix
+- Only filesystem minimap mode works reliably — needs pre-extracted PNGs

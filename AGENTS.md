@@ -1,4 +1,9 @@
-# Codex Workspace Instructions
+# Codex Workspace Instructions — v0.4.9 Branch (Clean Restart)
+
+**IMPORTANT**: This workspace was RESET to commit `ced5899` and branched as `v0.4.9` on 2026-05-02.
+All archive-backed minimap loading and v10.2 pipeline code added after this commit is BROKEN.
+Read `gillijimproject_refactor/memory-bank/activeContext.md` and `progress.md` before anything else.
+The working extraction path is filesystem-only: `dataset-build-v10-stage1 --input-dir <adt_dir> --minimap-root <minimap_dir>`.
 
 This file is the Codex-facing conversion of the workspace memory-bank rules, `.github/copilot-instructions.md`, and the active `wow-viewer` workflow assets.
 
