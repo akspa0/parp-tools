@@ -18,6 +18,7 @@ using WowViewer.Core.Maps;
 using WowViewer.Core.PM4;
 using WowViewer.Core.Runtime.World.Liquid;
 using WowViewer.Core.Runtime.World.Terrain;
+using WoWMapConverter.Core.Services;
 using WowViewer.Core.Wmo;
 using WowViewer.Core.Runtime.World.Wdl;
 using WowViewer.Tools.Shared;
@@ -3355,15 +3356,12 @@ static MlCorpusTileReport CreateTileReport(string tileStem, string adtPath, bool
 
 static IArchiveCatalog CreateArchiveCatalog(string clientRoot)
 {
-	IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-	ArchiveCatalogBootstrapper.Bootstrap(
-		archiveCatalog,
-		BuildLegacySearchRoots(clientRoot),
-		new ArchiveCatalogBootstrapOptions(ExternalListfilePath: ResolveLegacyListfilePath()));
-	if (archiveCatalog is MpqArchiveCatalog mpqArchiveCatalog)
-		mpqArchiveCatalog.ScanMapMpqArchives(clientRoot);
-
-	return archiveCatalog;
+	var native = new NativeMpqService();
+	native.LoadArchives(BuildLegacySearchRoots(clientRoot));
+	string? listfile = ResolveLegacyListfilePath();
+	if (listfile is not null)
+		native.LoadListfile(listfile);
+	return native;
 }
 
 static IReadOnlyList<string> BuildLegacySearchRoots(string clientRoot)
