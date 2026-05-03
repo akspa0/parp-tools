@@ -95,18 +95,20 @@ class V11TerrainModel(nn.Module):
         self.encoder_stages = nn.ModuleList(backbone.stages)
         self.encoder_channels = [96, 192, 384, 768]
 
-        stem = backbone.stem
-        old_conv = stem[0]
+        # Overlapping conv stem replaces the non-overlapping patch stem.
+        # Two stride-2 convs preserve high-frequency detail better than a
+        # single stride-4 conv, reducing grid artifacts in the decoder.
         self.stem = nn.Sequential(
-            nn.Conv2d(in_channels, old_conv.out_channels,
-                      kernel_size=old_conv.kernel_size,
-                      stride=old_conv.stride,
-                      padding=old_conv.padding),
-            stem[1],
+            nn.Conv2d(in_channels, 96, kernel_size=7, stride=2, padding=3),
+            LayerNorm2d(96),
+            nn.GELU(),
+            nn.Conv2d(96, 96, kernel_size=3, stride=2, padding=1),
+            LayerNorm2d(96),
+            nn.GELU(),
+            nn.Conv2d(96, 96, kernel_size=3, stride=1, padding=1),
+            LayerNorm2d(96),
+            nn.GELU(),
         )
-        with torch.no_grad():
-            self.stem[0].weight[:, :3] = old_conv.weight
-            self.stem[0].weight[:, 3:] = 0
 
         skips = self.encoder_channels
         dec_dim = decoder_dim
@@ -476,22 +478,48 @@ class V11Dataset(Dataset):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class UncertaintyWeightedLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer('_hf_weight', torch.tensor(1.0))
+        self.register_buffer('_lf_weight', torch.tensor(1.0))
+
+    def set_frequency_weights(self, epoch, ramp_epochs=60):
+        """Ramp from detail-first (high-freq) to shape-first (low-freq)."""
+        t = min(epoch / max(ramp_epochs, 1), 1.0)
+        self._hf_weight = torch.tensor(1.0 - t * 0.9)
+        self._lf_weight = torch.tensor(0.1 + t * 0.9)
+
     def forward(self, pred, target, model, prefix=''):
         losses = {}
         total = 0.0
         B = pred['height_17'].shape[0]
 
-        for key in ['height_17', 'height_65', 'height_257']:
-            t = target[key]
-            p = pred[key]
-            if p.shape != t.shape:
-                p = F.interpolate(p, size=t.shape[-2:], mode='bilinear', align_corners=False)
-            l1 = F.l1_loss(p, t)
-            grad_x = torch.abs(p[..., 1:] - p[..., :-1]).mean()
-            grad_y = torch.abs(p[..., 1:, :] - p[..., :-1, :]).mean()
-            losses[f'{prefix}{key}_l1'] = l1.item()
-            losses[f'{prefix}{key}_grad'] = (grad_x + grad_y).item()
-            total = total + l1 + 0.3 * (grad_x + grad_y)
+        # Frequency-banded height loss with ramp weights
+        t17 = target['height_17']
+        p17 = F.interpolate(pred['height_17'], size=17, mode='bilinear', align_corners=False)
+        t65 = target['height_65']
+        p65 = F.interpolate(pred['height_65'], size=65, mode='bilinear', align_corners=False)
+        t257 = target['height_257']
+        p257 = F.interpolate(pred['height_257'], size=257, mode='bilinear', align_corners=False)
+
+        # Low frequency: coarse 17x17
+        lf_l1 = F.l1_loss(p17, t17)
+        # Mid frequency: detail in 65 - up(17)
+        mid_t = t65 - F.interpolate(t17, size=65, mode='bilinear', align_corners=False)
+        mid_p = p65 - F.interpolate(p17, size=65, mode='bilinear', align_corners=False)
+        mid_l1 = F.l1_loss(mid_p, mid_t)
+        # High frequency: detail in 257 - up(65)
+        hf_t = t257 - F.interpolate(t65, size=257, mode='bilinear', align_corners=False)
+        hf_p = p257 - F.interpolate(p65, size=257, mode='bilinear', align_corners=False)
+        hf_l1 = F.l1_loss(hf_p, hf_t)
+
+        hf_w = self._hf_weight.item()
+        lf_w = self._lf_weight.item()
+        total = total + lf_w * lf_l1 + 0.5 * mid_l1 + hf_w * hf_l1
+
+        losses[f'{prefix}lf_l1'] = lf_l1.item()
+        losses[f'{prefix}mid_l1'] = mid_l1.item()
+        losses[f'{prefix}hf_l1'] = hf_l1.item()
 
         sigma = torch.exp(model.log_height_sigma)
         total = total / (2 * sigma * sigma) + model.log_height_sigma
@@ -760,15 +788,11 @@ def train_v11(args):
 
     ema = EMA(model, decay=args.ema_decay)
 
-    loss_fn = UncertaintyWeightedLoss()
-
     optimizer = create_optimizer(model, args.optimizer, args.learning_rate, args.weight_decay)
     scheduler = create_scheduler(optimizer, args.epochs, args.warmup_epochs)
 
     scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
 
-    best_val_loss = float('inf')
-    best_epoch = -1
     history = []
     start_epoch = 0
 
@@ -780,8 +804,6 @@ def train_v11(args):
         optimizer.load_state_dict(ckpt['optimizer'])
         scheduler.load_state_dict(ckpt['scheduler'])
         start_epoch = ckpt['epoch'] + 1
-        best_val_loss = ckpt.get('best_val_loss', float('inf'))
-        best_epoch = ckpt.get('best_epoch', -1)
         history = ckpt.get('history', [])
         if 'ema' in ckpt:
             ema.shadows = ckpt['ema']
@@ -791,7 +813,10 @@ def train_v11(args):
             model.log_hole_sigma.data = torch.tensor(ckpt['log_sigmas'][2])
         print(f"Resumed from epoch {start_epoch}")
 
+    loss_fn = UncertaintyWeightedLoss()
+
     for epoch in range(start_epoch, args.epochs):
+        loss_fn.set_frequency_weights(epoch, args.freq_ramp_epochs)
         model.train()
         train_ds._is_training = True
         train_ds.signal_dropout = args.signal_dropout
@@ -836,39 +861,14 @@ def train_v11(args):
         avg = {k: v / n_batches for k, v in epoch_losses.items()}
         lr = optimizer.param_groups[0]['lr']
         print(f"E{epoch:3d} train: loss={avg.get('loss', 0):.4f} lr={lr:.2e} "
-              f"h17={avg.get('height_17_l1', 0):.4f} h257={avg.get('height_257_l1', 0):.4f} "
+              f"lf={avg.get('lf_l1', 0):.4f} mid={avg.get('mid_l1', 0):.4f} hf={avg.get('hf_l1', 0):.4f} "
               f"mcal={avg.get('mcal_l1', 0):.4f} mcly={avg.get('mcly_ce', 0):.4f}")
-
-        model.eval()
-        val_losses = defaultdict(float)
-        val_batches = 0
-        with torch.no_grad():
-            for inp, targets in val_loader:
-                inp = inp.to(device, non_blocking=True)
-                targets = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
-                           for k, v in targets.items()}
-                pred = model(inp)
-                loss, losses = loss_fn(pred, targets, model, prefix='val_')
-                for k, v in losses.items():
-                    val_losses[k] += v
-                val_batches += 1
-
-        val_avg = {k: v / val_batches for k, v in val_losses.items()}
-        val_loss_val = val_avg.get('val_loss', float('inf'))
-        print(f"E{epoch:3d} val:  loss={val_loss_val:.4f} "
-              f"h17={val_avg.get('val_height_17_l1', 0):.4f} h257={val_avg.get('val_height_257_l1', 0):.4f}")
 
         history.append({
             'epoch': epoch,
             'lr': lr,
             **avg,
-            **val_avg,
         })
-
-        is_best = val_loss_val < best_val_loss
-        if is_best:
-            best_val_loss = val_loss_val
-            best_epoch = epoch
 
         raw_model = model._orig_mod if hasattr(model, '_orig_mod') else model
         ckpt = {
@@ -876,10 +876,7 @@ def train_v11(args):
             'model': {k.removeprefix('_orig_mod.'): v for k, v in raw_model.state_dict().items()},
             'optimizer': optimizer.state_dict(),
             'scheduler': scheduler.state_dict(),
-            'best_val_loss': best_val_loss,
-            'best_epoch': best_epoch,
             'history': history,
-            'ema': ema.shadows,
             'height_mean': height_mean,
             'height_std': height_std,
             'mcly_vocab': mcly_vocab,
@@ -889,34 +886,8 @@ def train_v11(args):
         }
         torch.save(ckpt, output_dir / 'last.pt')
 
-        if is_best:
-            torch.save(ckpt, output_dir / 'best.pt')
-            ema.store()
-            ema.apply()
-            ema_ckpt = {**ckpt, 'model': ema.shadows}
-            torch.save(ema_ckpt, output_dir / 'best_ema.pt')
-            ema.restore()
-            print(f"  -> NEW BEST (val_loss={val_loss_val:.4f})")
-
         if epoch % args.save_every == 0:
             shutil.copy(output_dir / 'last.pt', checkpoint_dir / f'epoch_{epoch:04d}.pt')
-
-        if len(val_loader) > 0:
-            try:
-                preview_batch = next(iter(val_loader))
-                save_preview_from_batch(model, preview_batch[0], preview_batch[1],
-                                        device, height_mean, height_std,
-                                        preview_dir / f'epoch_{epoch:04d}.png', num_rows=4)
-                all_prevs = sorted(preview_dir.glob('epoch_*.png'))
-                for old_p in all_prevs[:-5]:
-                    old_p.unlink(missing_ok=True)
-                gc.collect()
-                if device.type == 'cuda':
-                    torch.cuda.empty_cache()
-            except Exception as e:
-                print(f"  Preview failed: {e}")
-                import traceback
-                traceback.print_exc()
 
     print(f"\nTraining complete. Best epoch: {best_epoch}, val_loss: {best_val_loss:.4f}")
     print(f"Output: {output_dir}")
@@ -963,6 +934,7 @@ def main():
     g.add_argument('--weight-decay', type=float, default=0.05)
     g.add_argument('--optimizer', choices=['adamw', 'lion'], default='adamw')
     g.add_argument('--warmup-epochs', type=int, default=5)
+    g.add_argument('--freq-ramp-epochs', type=int, default=60, help='Epochs over which to ramp from detail-first to shape-first loss')
     g.add_argument('--gradient-clip', type=float, default=1.0)
     g.add_argument('--gradient-accumulation', type=int, default=2)
     g.add_argument('--ema-decay', type=float, default=0.999)
