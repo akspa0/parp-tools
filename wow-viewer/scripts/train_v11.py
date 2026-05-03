@@ -744,6 +744,7 @@ def train_v11(args):
 
     model = model.to(device)
 
+    torch.set_float32_matmul_precision('high')
     torch.backends.cudnn.benchmark = True
 
     if args.use_compile and device.type == 'cuda':
