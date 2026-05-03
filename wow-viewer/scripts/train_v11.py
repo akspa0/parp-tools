@@ -1,4 +1,4 @@
-import argparse, json, gc, sys, math, random, shutil, traceback
+import argparse, json, gc, sys, math, random, shutil, traceback, time
 import os
 from pathlib import Path
 from datetime import datetime
@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, Sampler, WeightedRandomSampler
-from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
+# LR is manual — no scheduler objects needed
 import numpy as np
 
 try:
@@ -522,30 +522,26 @@ class UncertaintyWeightedLoss(nn.Module):
         self.register_buffer('_lf_weight', torch.tensor(1.0))
         self._detail_pulse_epochs = 0
 
-    def set_frequency_weights(self, epoch, detail_pulse=False):
-        """Base schedule: detail-first ramp then shape-default.
+    def set_frequency_weights(self, epoch):
+        """Two-phase schedule with detail pulses every 20 epochs after phase 1.
         
-        Epochs 0-60:   detail (hf=1→0.1, lf=0.1→1)
-        Epochs 60+:    shape (hf=0.1, lf=1)
-        
-        When detail_pulse=True: spike hf to 0.6 for 8 epochs then decay back.
+        Phase 1 (0-60): detail-first ramp (hf=1→0.1, lf=0.1→1)
+        Phase 2 (60+): detail pulse every 20 epochs, 8 epochs each:
+          hf spikes to ~0.55 on pulse start, decays to 0.1
         """
         if epoch < 60:
             t = min(epoch / 60, 1.0)
             hf = max(1.0 - t * 0.9, 0.01)
             lf = min(0.1 + t * 0.9, 1.0)
         else:
-            hf = 0.1
-            lf = 1.0
-
-        if detail_pulse and epoch >= 60:
-            self._detail_pulse_epochs = 8  # detail refocus window
-
-        if self._detail_pulse_epochs > 0:
-            t = 1.0 - (self._detail_pulse_epochs / 8)  # 1→0 over 8 epochs
-            hf = max(0.1, 0.6 * t) + 0.1
-            lf = 1.0 - hf
-            self._detail_pulse_epochs -= 1
+            pulse_cycle = (epoch - 60) % 20
+            if pulse_cycle < 8:  # detail pulse active
+                t = 1.0 - pulse_cycle / 8  # 1→0 over 8 epochs
+                hf = 0.1 + 0.45 * t
+                lf = 1.0 - hf
+            else:  # between pulses — shape only
+                hf = 0.1
+                lf = 1.0
 
         self._hf_weight = torch.tensor(max(hf, 0.01))
         self._lf_weight = torch.tensor(min(lf, 1.0))
@@ -583,13 +579,9 @@ class UncertaintyWeightedLoss(nn.Module):
         losses[f'{prefix}hf_l1'] = hf_l1.item()
 
         def apply_uncertainty(loss_val, log_sigma, weight=1.0):
-            ls = log_sigma.clamp(-4, 4)
+            ls = log_sigma.clamp(-3, 3)
             s = torch.exp(ls)
-            return loss_val * weight / (2 * s * s) + ls * weight * 0.5
-
-        log_h = model.log_height_sigma.clamp(-4, 4)
-        sigma_h = torch.exp(log_h)
-        total = total / (2 * sigma_h * sigma_h) + log_h * 0.5
+            return loss_val * weight / (s * s + 0.01) + ls * weight * 0.1
 
         mcal_mask = target.get('has_mcal', torch.zeros(B, device=pred['height_17'].device))
         if mcal_mask.sum() > 0:
@@ -672,11 +664,6 @@ def create_optimizer(model, opt_name='adamw', lr=2e-4, weight_decay=0.05):
         ], lr=lr, betas=(0.9, 0.95))
 
 
-def create_scheduler(optimizer, epochs, warmup_epochs=5):
-    warmup = LinearLR(optimizer, start_factor=0.01, end_factor=1.0, total_iters=warmup_epochs)
-    cosine_epochs = max(1, epochs - warmup_epochs)
-    cosine = CosineAnnealingLR(optimizer, T_max=cosine_epochs)
-    return SequentialLR(optimizer, [warmup, cosine], milestones=[warmup_epochs])
 
 
 def save_preview_from_batch(model, inp, targets, device, height_mean, height_std, save_path, num_rows=4):
@@ -865,8 +852,14 @@ def train_v11(args):
     torch.set_float32_matmul_precision('high')
     torch.backends.cudnn.benchmark = True
 
+    # Monitoring trackers
+    loss_ema = None
+    grad_norm_ema = None
+    stall_epochs = 0
+    best_val_l1 = float('inf')
+    last_val_l1 = -1
+
     optimizer = create_optimizer(model, args.optimizer, args.learning_rate, args.weight_decay)
-    scheduler = create_scheduler(optimizer, args.epochs, args.warmup_epochs)
 
     history = []
     start_epoch = 0
@@ -923,10 +916,10 @@ def train_v11(args):
         print(f"Resumed from epoch {start_epoch} (model+EMA weights, optimizer fresh)")
 
     loss_fn = UncertaintyWeightedLoss()
+    _t0 = time.time()
 
     for epoch in range(start_epoch, args.epochs):
-        detail_pulse = epoch >= 60 and epoch % 25 == 0
-        loss_fn.set_frequency_weights(epoch, detail_pulse=detail_pulse)
+        loss_fn.set_frequency_weights(epoch)
         model.train()
         train_ds._is_training = True
         train_ds.signal_dropout = args.signal_dropout
@@ -947,9 +940,25 @@ def train_v11(args):
                 optimizer.zero_grad()
                 continue
 
+            # Loss spike guard: skip if >5x running EMA
+            lv = loss.item()
+            if loss_ema is None:
+                loss_ema = lv
+            else:
+                loss_ema = 0.99 * loss_ema + 0.01 * lv
+            if lv > 5 * loss_ema + 0.5 and n_batches > 10:
+                print(f"  WARN: loss spike {lv:.3f} vs EMA {loss_ema:.3f}, skipping")
+                optimizer.zero_grad()
+                continue
+
             loss.backward()
             if (batch_idx + 1) % args.gradient_accumulation == 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.gradient_clip)
+                gn = torch.nn.utils.clip_grad_norm_(model.parameters(), args.gradient_clip)
+                if gn > 0:
+                    if grad_norm_ema is None:
+                        grad_norm_ema = gn
+                    else:
+                        grad_norm_ema = 0.99 * grad_norm_ema + 0.01 * gn
                 optimizer.step()
                 optimizer.zero_grad()
             ema.update()
@@ -963,13 +972,55 @@ def train_v11(args):
                 if not (math.isnan(ls) or math.isinf(ls)):
                     print(f"  E{epoch:3d} B{batch_idx:4d}/{len(train_loader)} loss={ls:.4f}")
 
-        scheduler.step()
+        # Manual LR schedule (SequentialLR breaks with torch.compile)
+        if epoch < args.warmup_epochs:
+            lr_val = args.learning_rate * (0.01 + 0.99 * epoch / max(args.warmup_epochs, 1))
+        else:
+            frac = (epoch - args.warmup_epochs) / max(args.epochs - args.warmup_epochs, 1)
+            lr_val = args.learning_rate * 0.5 * (1 + math.cos(math.pi * frac))
+        for pg in optimizer.param_groups:
+            pg['lr'] = lr_val
 
         avg = {k: v / n_batches for k, v in epoch_losses.items()}
-        lr = optimizer.param_groups[0]['lr']
-        print(f"E{epoch:3d} train: loss={avg.get('loss', 0):.4f} lr={lr:.2e} "
-              f"lf={avg.get('lf_l1', 0):.4f} mid={avg.get('mid_l1', 0):.4f} hf={avg.get('hf_l1', 0):.4f} "
-              f"mcal={avg.get('mcal_l1', 0):.4f} mcly={avg.get('mcly_ce', 0):.4f}")
+        lr = lr_val
+
+        _t0 = time.time()  # noqa: F841
+
+        # Lightweight validation every 5 epochs
+        if epoch % 5 == 0 and len(val_loader) > 0:
+            model.eval()
+            val_l1 = 0.0
+            v_count = 0
+            with torch.no_grad():
+                for inp_v, targets_v in val_loader:
+                    inp_v = inp_v[:4].to(device)
+                    tv = {k: (v[:4].to(device) if isinstance(v, torch.Tensor) else v)
+                          for k, v in targets_v.items()}
+                    pv = model(inp_v)
+                    val_l1 = val_l1 + F.l1_loss(pv['height_257'], tv['height_257']).item()
+                    v_count += 1
+                    if v_count >= 2:
+                        break
+            val_l1 /= v_count
+            last_val_l1 = val_l1
+            stall_epochs = stall_epochs + 1 if epoch > 60 and val_l1 > best_val_l1 else 0
+            if epoch == 0 or val_l1 < best_val_l1:
+                best_val_l1 = val_l1
+            # Preview on val epochs
+            try:
+                save_preview_from_batch(model, inp_v, targets_v, device,
+                    0, 1, preview_dir / f'epoch_{epoch:04d}.png', num_rows=4)
+                for old_p in sorted(preview_dir.glob('epoch_*.png'))[:-5]:
+                    old_p.unlink(missing_ok=True)
+            except Exception:
+                pass
+            model.train()
+            train_ds._is_training = True
+        gn_str = f" g={grad_norm_ema:.1f}" if grad_norm_ema is not None else ""
+        vl_str = f" val={last_val_l1:.4f}" if epoch % 5 == 0 and last_val_l1 >= 0 else ""
+        print(f"E{epoch:3d} loss={avg.get('loss', 0):.4f} lr={lr:.2e}"
+              f" lf={avg.get('lf_l1', 0):.4f} mid={avg.get('mid_l1', 0):.4f} hf={avg.get('hf_l1', 0):.4f}"
+              f" mc={avg.get('mcal_l1', 0):.3f} ml={avg.get('mcly_ce', 0):.2f}{gn_str}{vl_str}")
 
         history.append({
             'epoch': epoch,
@@ -982,7 +1033,7 @@ def train_v11(args):
             'epoch': epoch,
             'model': {k.removeprefix('_orig_mod.'): v for k, v in raw_model.state_dict().items()},
             'optimizer': optimizer.state_dict(),
-            'scheduler': scheduler.state_dict(),
+            'scheduler': {},  # removed — manual LR schedule
             'history': history,
             'height_mean': height_mean,
             'height_std': height_std,
@@ -996,8 +1047,8 @@ def train_v11(args):
         try:
             torch.save(ckpt, ckpt_path)
         except PermissionError:
-            import time
-            time.sleep(1)
+            import time as _time
+            _time.sleep(1)
             torch.save(ckpt, ckpt_path)
 
         if epoch % args.save_every == 0:
