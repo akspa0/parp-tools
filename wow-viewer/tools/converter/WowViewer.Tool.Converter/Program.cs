@@ -1111,14 +1111,21 @@ static void RunDatasetAudit(string[] args)
 	{
 		foreach (TerrainTrainingSampleDescriptor entry in sourceEntries)
 		{
-			TerrainTrainingSampleDescriptor auditedEntry = AuditDatasetEntry(entry, archiveCatalogs, wdlCache, minimapMd5Cache);
-			auditedEntries.Add(auditedEntry);
-			if (auditedEntry.Metrics.LiquidCoverage > 0f)
-				liquidSampleCount++;
-			if (auditedEntry.Metrics.HoleCoverage > 0f)
-				holeSampleCount++;
-			if (auditedEntry.Metrics.MaxAbsWdlDelta > 0f)
-				wdlDeltaSampleCount++;
+			try
+			{
+				TerrainTrainingSampleDescriptor auditedEntry = AuditDatasetEntry(entry, archiveCatalogs, wdlCache, minimapMd5Cache);
+				auditedEntries.Add(auditedEntry);
+				if (auditedEntry.Metrics.LiquidCoverage > 0f)
+					liquidSampleCount++;
+				if (auditedEntry.Metrics.HoleCoverage > 0f)
+					holeSampleCount++;
+				if (auditedEntry.Metrics.MaxAbsWdlDelta > 0f)
+					wdlDeltaSampleCount++;
+			}
+			catch (Exception ex)
+			{
+				Console.Error.WriteLine($"Skipping audit for {entry.SampleId}: {ex.Message}");
+			}
 		}
 	}
 	finally
@@ -1320,16 +1327,26 @@ static void RunDatasetBuildCache(string[] args)
 
 		foreach (TerrainTrainingSampleDescriptor entry in sourceEntries)
 		{
-			DirectCacheBuildResult? built = BuildDirectCacheEntry(
-				entry,
-				archiveCatalogs,
-				wdlCache,
-				minimapMd5Cache,
-				outputDir,
-				inputPath,
-				includeMinimap,
-				writeDebugJson,
-				overwrite);
+			DirectCacheBuildResult? built;
+			try
+			{
+				built = BuildDirectCacheEntry(
+					entry,
+					archiveCatalogs,
+					wdlCache,
+					minimapMd5Cache,
+					outputDir,
+					inputPath,
+					includeMinimap,
+					writeDebugJson,
+					overwrite);
+			}
+			catch (Exception ex)
+			{
+				Console.Error.WriteLine($"Skipping cache build for {entry.SampleId}: {ex.Message}");
+				skipped++;
+				continue;
+			}
 			if (built is null)
 			{
 				skipped++;
@@ -3358,10 +3375,37 @@ static IArchiveCatalog CreateArchiveCatalog(string clientRoot)
 {
 	var native = new NativeMpqService();
 	native.LoadArchives(BuildLegacySearchRoots(clientRoot));
+	RegisterAlphaPerMapMpqs(native, clientRoot);
 	string? listfile = ResolveLegacyListfilePath();
 	if (listfile is not null)
 		native.LoadListfile(listfile);
 	return native;
+}
+
+static void RegisterAlphaPerMapMpqs(NativeMpqService native, string clientRoot)
+{
+	// Alpha-era clients (0.5.3, 0.5.5) store WDT in per-map .wdt.mpq files
+	// as unnamed file_0. Read file_0 and register it at the virtual path
+	// so ReadFile finds it like any other archive-backed file.
+	string mapsDir = Path.Combine(clientRoot, "Data", "World", "Maps");
+	if (!Directory.Exists(mapsDir)) return;
+	foreach (string mapDir in Directory.EnumerateDirectories(mapsDir))
+	{
+		string mapName = Path.GetFileName(mapDir);
+		string wdtMpq = Path.Combine(mapDir, $"{mapName}.wdt.mpq");
+		if (!File.Exists(wdtMpq)) continue;
+		byte[]? wdtData = native.ReadFile0FromPathPublic(wdtMpq);
+		if (wdtData is { Length: > 0 })
+			native.RegisterScannedFile($"World\\Maps\\{mapName}\\{mapName}.wdt", wdtData);
+		string[] wdlCandidates = [Path.Combine(mapDir, $"{mapName}.wdl.mpq")];
+		foreach (string wdlMpq in wdlCandidates)
+		{
+			if (!File.Exists(wdlMpq)) continue;
+			byte[]? wdlData = native.ReadFile0FromPathPublic(wdlMpq);
+			if (wdlData is { Length: > 0 })
+				native.RegisterScannedFile($"World\\Maps\\{mapName}\\{mapName}.wdl", wdlData);
+		}
+	}
 }
 
 static IReadOnlyList<string> BuildLegacySearchRoots(string clientRoot)
@@ -3373,6 +3417,15 @@ static IReadOnlyList<string> BuildLegacySearchRoots(string clientRoot)
 
 	if (!string.Equals(clientRoot, dataRoot, StringComparison.OrdinalIgnoreCase))
 		roots.Add(clientRoot);
+
+	// Alpha-era clients (0.5.3, 0.5.5) store per-map data as .wdt.mpq / .wdl.mpq
+	// files under Data/World/Maps/<map>/. Add those directories as search roots.
+	string mapsRoot = Path.Combine(dataRoot, "World", "Maps");
+	if (Directory.Exists(mapsRoot))
+	{
+		foreach (string mapDir in Directory.EnumerateDirectories(mapsRoot))
+			roots.Add(mapDir);
+	}
 
 	return roots.Count > 0 ? roots : [clientRoot];
 }

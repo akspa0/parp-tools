@@ -21,6 +21,7 @@ public class NativeMpqService : IArchiveCatalog
     // Listfile support
     private readonly HashSet<ulong> _knownFileHashes = new();
     private readonly Dictionary<ulong, string> _hashToName = new();
+    private readonly Dictionary<string, byte[]> _scannedFiles = new(StringComparer.OrdinalIgnoreCase);
 
     public void LoadListfile(string path)
     {
@@ -66,6 +67,13 @@ public class NativeMpqService : IArchiveCatalog
              if (FindFileInArchive(archive, normalized) != null) return true;
          }
          return false;
+    }
+
+    /// <summary>Registers a raw byte payload for a virtual path. Used by alpha-era per-map MPQ
+    /// readers to pre-load WDT/WDL data from file_0 of per-asset MPQ archives.</summary>
+    public void RegisterScannedFile(string virtualPath, byte[] data)
+    {
+        _scannedFiles[virtualPath.Replace('/', '\\')] = data;
     }
 
     public void LoadListfileEntries(IEnumerable<string> entries)
@@ -115,8 +123,6 @@ public class NativeMpqService : IArchiveCatalog
     public IReadOnlyList<string> ScanMapMpqArchives(string gamePath) => Array.Empty<string>();
 
     public byte[]? ReadWmoMpqFile(string virtualPath) => ReadFile(virtualPath);
-
-    public byte[]? ReadFile0FromPath(string mpqDiskPath) => null;
 
     public byte[]? ReadScannedFile(string placeholderPath) => null;
 
@@ -243,26 +249,26 @@ public class NativeMpqService : IArchiveCatalog
     {
         var normalized = virtualPath.Replace('/', '\\');
         
+        if (_scannedFiles.ContainsKey(normalized))
+            return true;
+        
         // Search archives in reverse order (patches first)
         for (int i = _archives.Count - 1; i >= 0; i--)
         {
             if (FindFileInArchive(_archives[i], normalized) != null)
-            {
-                if (normalized.Contains("md5translate", StringComparison.OrdinalIgnoreCase))
-                    Console.WriteLine($"[DEBUG] Found md5translate: {normalized} in {Path.GetFileName(_archives[i].Path)}");
                 return true;
-            }
         }
         
-        if (normalized.Contains("md5translate", StringComparison.OrdinalIgnoreCase))
-            Console.WriteLine($"[DEBUG] md5translate NOT found: {normalized}");
-            
         return false;
     }
     
     public byte[]? ReadFile(string virtualPath)
     {
         var normalized = virtualPath.Replace('/', '\\');
+        
+        // Check pre-scanned files first (alpha per-asset MPQs, WMO MPQs)
+        if (_scannedFiles.TryGetValue(normalized, out var scanned))
+            return scanned;
         
         // Search archives in reverse order (patches first)
         for (int i = _archives.Count - 1; i >= 0; i--)
@@ -283,6 +289,41 @@ public class NativeMpqService : IArchiveCatalog
         }
         
         return null;
+    }
+
+    /// <summary>Reads file_0 from a per-asset MPQ (alpha .wdt.mpq / .wmo.mpq).
+    /// Selects the largest block (the actual data, not the MD5 checksum).</summary>
+    public byte[]? ReadFile0FromPathPublic(string mpqDiskPath) => ReadFile0FromPath(mpqDiskPath);
+    private static byte[]? ReadFile0FromPath(string mpqDiskPath)
+    {
+        try
+        {
+            using var fs = new FileStream(mpqDiskPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var reader = new BinaryReader(fs);
+            long headerOffset = FindMpqHeader(reader);
+            if (headerOffset < 0) return null;
+            fs.Position = headerOffset;
+            var header = ReadMpqHeader(reader);
+            if (header == null) return null;
+            fs.Position = headerOffset + header.HashTableOffset;
+            var hashTable = ReadHashTable(reader, header.HashTableEntries);
+            fs.Position = headerOffset + header.BlockTableOffset;
+            var blockTable = ReadBlockTable(reader, header.BlockTableEntries);
+            BlockEntry? largest = null;
+            foreach (var entry in hashTable)
+            {
+                if (entry.BlockIndex == HASH_ENTRY_EMPTY || entry.BlockIndex == HASH_ENTRY_DELETED || entry.BlockIndex >= (uint)blockTable.Length)
+                    continue;
+                var block = blockTable[entry.BlockIndex];
+                if ((block.Flags & FLAG_EXISTS) == 0 || block.FileSize == 0) continue;
+                if (largest == null || block.FileSize > largest.FileSize)
+                    largest = block;
+            }
+            if (largest == null) return null;
+            fs.Position = headerOffset + largest.BlockOffset;
+            return ReadFileData(reader, largest, header.SectorSize, "file_0", fs.Position);
+        }
+        catch { return null; }
     }
     
     private MpqArchive? LoadArchive(string mpqPath)

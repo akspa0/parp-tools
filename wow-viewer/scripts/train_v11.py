@@ -612,6 +612,9 @@ def compute_preview(pred, target, inp, height_mean, height_std):
             panels[i] = p.unsqueeze(0)
         elif p.dim() == 3 and p.shape[0] != 3:
             panels[i] = p.expand(3, -1, -1) if p.shape[0] == 1 else p[:3]
+    for i, p in enumerate(panels):
+        if p.numel() > 0 and p.max() == p.min():
+            panels[i] = p + torch.randn_like(p) * 1e-6
     grid = vutils.make_grid(panels, nrow=4, normalize=True, scale_each=True)
     return grid
 

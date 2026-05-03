@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using ICSharpCode.SharpZipLib.BZip2;
+using WoWMapConverter.Core.Services;
 
 namespace WowViewer.Core.IO.Files;
 
@@ -1373,6 +1374,6 @@ public sealed class MpqArchiveCatalogFactory : IArchiveCatalogFactory
 {
     public IArchiveCatalog Create()
     {
-        return new MpqArchiveCatalog();
+        return new NativeMpqService();
     }
 }
