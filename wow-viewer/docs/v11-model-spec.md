@@ -144,15 +144,15 @@ total = hf_weight * HF_L1 + 0.5 * mid_L1 + lf_weight * LF_L1
 - **Decay:** Cosine annealing from epoch 5 to epoch 300
 - **Peak LR:** 2e-4 (AdamW) or 1e-4 (Lion)
 
-### Frequency Ramp
+### Detail Refocus Pulses
 
-| Epochs | hf_weight | lf_weight | Behavior |
-|--------|-----------|-----------|----------|
-| 0-15 | 1.0→0.78 | 0.1→0.33 | Detail dominates. Model learns texture/edges. |
-| 15-30 | 0.78→0.55 | 0.33→0.56 | Balance. Mid structure fills in. |
-| 30-45 | 0.55→0.33 | 0.56→0.78 | Shape catching up. Coarse structure refines. |
-| 45-60 | 0.33→0.10 | 0.78→1.0 | Shape dominates. Final coarse refinement. |
-| 60+ | 0.10 | 1.0 | Plateau. Detail preserved from early learning. |
+After the initial 60-epoch ramp, detail pulses fire every **25 epochs** (75, 100, 125, 150, 175, 200, 225, 250, 275). Each pulse spikes high-frequency weight back to ~0.6 and decays over 8 epochs, forcing a detail-refinement phase while the model is in shape-focused mode.
+
+| Phase | Epochs | hf_weight | lf_weight | Behavior |
+|-------|--------|-----------|-----------|----------|
+| Initial ramp | 0-60 | 1.0→0.1 | 0.1→1.0 | Detail first, shape catches up |
+| Shape base | 60-300 | 0.1 | 1.0 | Default state (between pulses) |
+| Detail pulse | every +25 | 0.6→0.1 | 0.4→0.9 | 8-epoch detail refocus, then back to shape | |
 
 ### Data Augmentation
 
@@ -164,16 +164,18 @@ total = hf_weight * HF_L1 + 0.5 * mid_L1 + lf_weight * LF_L1
 
 | Parameter | Value |
 |-----------|-------|
-| Optimizer | AdamW or Lion |
-| Peak LR | 2e-4 (AdamW) |
+| Optimizer | AdamW (Lion optional) |
+| Peak LR | 2e-4 |
 | Weight decay | 0.05 |
-| Beta1/Beta2 | 0.9 / 0.95 (AdamW) |
+| Beta1/Beta2 | 0.9 / 0.95 |
 | Gradient clip | 1.0 |
 | Gradient accumulation | 1 |
 | EMA decay | 0.999 |
-| Batch size | 8 (16GB VRAM: 16) |
-| Precision | bf16 AMP with GradScaler |
-| torch.compile | Optional, dynamic=False |
+| Batch size | 8 (16 at more VRAM) |
+| Precision | fp32 (AMP not needed at this scale) |
+| torch.compile | Recommended, dynamic=False |
+| NaN guard | Batch skipped if loss NaN/Inf |
+| Atomic save | Checkpoint written to .tmp then os.replace |
 
 ---
 

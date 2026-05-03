@@ -328,6 +328,30 @@ class V11Dataset(Dataset):
         def get(k):
             return data.get(k)
 
+        # Per-tile z-score normalization for height
+        # Each tile normalized to its own mean/std, not global dataset stats.
+        # This removes absolute elevation bias — model learns shape only.
+        h257_in = get('height_257')
+        if h257_in is not None:
+            h_t = torch.from_numpy(h257_in.astype(np.float32)).squeeze()
+            if h_t.dim() == 2:
+                tile_mean = h_t.mean()
+                tile_std = max(h_t.std(), 0.01)
+                height_17_raw = get('height_17')
+                if height_17_raw is not None:
+                    h17_t = torch.from_numpy(height_17_raw.astype(np.float32)).squeeze()
+                    h17_norm = (h17_t - tile_mean) / tile_std
+                else:
+                    h17_norm = torch.zeros(17, 17)
+            else:
+                tile_mean = torch.tensor(0.0)
+                tile_std = torch.tensor(1.0)
+                h17_norm = torch.zeros(17, 17)
+        else:
+            tile_mean = torch.tensor(0.0)
+            tile_std = torch.tensor(1.0)
+            h17_norm = torch.zeros(17, 17)
+
         def safe_float(arr, shape, default=0.0):
             if arr is None or arr.size == 0:
                 return torch.full(shape, default, dtype=torch.float32)
@@ -359,7 +383,8 @@ class V11Dataset(Dataset):
         place(4, 'mcal_alpha_pack_256')
         place(3, 'mcnr_normal_xyz', 'normal_rgb_256')
         place(3, 'mccv_rgb')
-        place(1, 'height_17')
+        # Skip global height_17 — replaced with per-tile normalized version below
+        ci += 1
         place(1, 'unified_liquid_mask', 'liquid_mask_257')
         place(1, 'unified_liquid_height', 'liquid_height_257')
         place(1, 'object_mask_257')
@@ -381,6 +406,10 @@ class V11Dataset(Dataset):
                 hole_t = torch.zeros(1, 256, 256)
         inp[ci] = hole_t.squeeze(0)
         ci += 1
+
+        # Per-tile normalized height prior replaces global height_17
+        inp[13] = F.interpolate(h17_norm.unsqueeze(0).unsqueeze(0), size=256,
+                                mode='bilinear', align_corners=False).squeeze(0).squeeze(0)
 
         luma = inp[0:3].mean(dim=0, keepdim=True)
         inp[22] = luma.squeeze(0)
@@ -405,17 +434,19 @@ class V11Dataset(Dataset):
             inp *= mask.unsqueeze(1).unsqueeze(2).float()
 
         targets = {}
-        for key, shape, dtype in [
-            ('height_17', (1, 17, 17), torch.float32),
-            ('height_65', (1, 65, 65), torch.float32),
-            ('height_257', (1, 257, 257), torch.float32),
-        ]:
+        for key, shape in [('height_17', (1, 17, 17)), ('height_65', (1, 65, 65)), ('height_257', (1, 257, 257))]:
             arr = get(key)
             if arr is not None:
                 t = torch.from_numpy(arr.astype(np.float32)).squeeze()
                 if t.dim() == 2:
                     t = t.unsqueeze(0)
-                targets[key] = (t - self.height_mean) / max(self.height_std, 1e-8)
+                # Per-tile normalization: each tile zero-mean, unit-variance
+                t_mean = tile_mean
+                t_std = tile_std
+                if isinstance(t_mean, torch.Tensor):
+                    t_mean = t_mean.item()
+                    t_std = max(t_std.item(), 0.01)
+                targets[key] = (t - t_mean) / t_std
             else:
                 targets[key] = torch.zeros(shape)
 
@@ -461,6 +492,9 @@ class V11Dataset(Dataset):
 
         stem = Path(self.paths[idx]).stem.replace('_v10', '').replace('_v11', '')
         targets['tile_name'] = stem
+        # Save per-tile normalization stats for validation denormalization
+        targets['tile_mean'] = torch.tensor(float(tile_mean.item() if isinstance(tile_mean, torch.Tensor) else tile_mean))
+        targets['tile_std'] = torch.tensor(float(tile_std.item() if isinstance(tile_std, torch.Tensor) else tile_std))
 
         if self.augment:
             if random.random() > 0.5:
@@ -486,12 +520,35 @@ class UncertaintyWeightedLoss(nn.Module):
         super().__init__()
         self.register_buffer('_hf_weight', torch.tensor(1.0))
         self.register_buffer('_lf_weight', torch.tensor(1.0))
+        self._detail_pulse_epochs = 0
 
-    def set_frequency_weights(self, epoch, ramp_epochs=60):
-        """Ramp from detail-first (high-freq) to shape-first (low-freq)."""
-        t = min(epoch / max(ramp_epochs, 1), 1.0)
-        self._hf_weight = torch.tensor(max(1.0 - t * 0.9, 0.01))
-        self._lf_weight = torch.tensor(min(0.1 + t * 0.9, 1.0))
+    def set_frequency_weights(self, epoch, detail_pulse=False):
+        """Base schedule: detail-first ramp then shape-default.
+        
+        Epochs 0-60:   detail (hf=1→0.1, lf=0.1→1)
+        Epochs 60+:    shape (hf=0.1, lf=1)
+        
+        When detail_pulse=True: spike hf to 0.6 for 8 epochs then decay back.
+        """
+        if epoch < 60:
+            t = min(epoch / 60, 1.0)
+            hf = max(1.0 - t * 0.9, 0.01)
+            lf = min(0.1 + t * 0.9, 1.0)
+        else:
+            hf = 0.1
+            lf = 1.0
+
+        if detail_pulse and epoch >= 60:
+            self._detail_pulse_epochs = 8  # detail refocus window
+
+        if self._detail_pulse_epochs > 0:
+            t = 1.0 - (self._detail_pulse_epochs / 8)  # 1→0 over 8 epochs
+            hf = max(0.1, 0.6 * t) + 0.1
+            lf = 1.0 - hf
+            self._detail_pulse_epochs -= 1
+
+        self._hf_weight = torch.tensor(max(hf, 0.01))
+        self._lf_weight = torch.tensor(min(lf, 1.0))
 
     def forward(self, pred, target, model, prefix=''):
         losses = {}
@@ -645,9 +702,11 @@ def save_preview_from_batch(model, inp, targets, device, height_mean, height_std
         mm = mm.clip(0, 255).astype(np.uint8)
         h, w = mm.shape[:2]
 
-        # Height panels: denormalize
-        pred_h = out['height_257'][b, 0].float().cpu().numpy() * height_std + height_mean
-        targ_h = targets['height_257'][b, 0].float().cpu().numpy() * height_std + height_mean
+        # Height panels: denormalize per-tile
+        t_mean = targets.get('tile_mean', torch.tensor(height_mean))[b].item()
+        t_std = max(targets.get('tile_std', torch.tensor(height_std))[b].item(), 0.01)
+        pred_h = out['height_257'][b, 0].float().cpu().numpy() * t_std + t_mean
+        targ_h = targets['height_257'][b, 0].float().cpu().numpy() * t_std + t_mean
         diff = pred_h - targ_h
 
         # Resize all to minimap dimensions via PIL
@@ -693,6 +752,30 @@ def save_preview_from_batch(model, inp, targets, device, height_mean, height_std
         comp = rows_list[0] if len(rows_list) == 1 else np.concatenate(rows_list, axis=0)
         Image.fromarray(comp).save(save_path)
 
+
+def _checkpoint_mcly_classes(resume_path, output_dir):
+    """Read MCLY head output channels from checkpoint, or None."""
+    candidates = []
+    if resume_path:
+        candidates.append(resume_path)
+    auto = output_dir / 'last.pt'
+    if auto.exists():
+        candidates.append(str(auto))
+    for path in candidates:
+        if not path:
+            continue
+        try:
+            ckpt = torch.load(path, map_location='cpu', weights_only=False)
+            sd = ckpt.get('model', {})
+            w = sd.get('head_mcly.3.weight')
+            if w is None:
+                w = sd.get('_orig_mod.head_mcly.3.weight')
+            if w is not None:
+                return w.shape[0]
+        except Exception as e:
+            print(f"  (checkpoint MCLY read failed: {e})")
+            continue
+    return None
 
 def train_v11(args):
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
@@ -782,6 +865,20 @@ def train_v11(args):
     torch.set_float32_matmul_precision('high')
     torch.backends.cudnn.benchmark = True
 
+    optimizer = create_optimizer(model, args.optimizer, args.learning_rate, args.weight_decay)
+    scheduler = create_scheduler(optimizer, args.epochs, args.warmup_epochs)
+
+    history = []
+    start_epoch = 0
+
+    resume_path = args.resume
+    if not resume_path:
+        auto = output_dir / 'last.pt'
+        if auto.exists():
+            resume_path = str(auto)
+            print(f"Auto-resuming from {resume_path}")
+
+    # Compile AFTER loading
     if args.use_compile and device.type == 'cuda':
         try:
             model = torch.compile(model, dynamic=False)
@@ -795,35 +892,41 @@ def train_v11(args):
 
     ema = EMA(model, decay=args.ema_decay)
 
-    optimizer = create_optimizer(model, args.optimizer, args.learning_rate, args.weight_decay)
-    scheduler = create_scheduler(optimizer, args.epochs, args.warmup_epochs)
-
-    scaler = torch.amp.GradScaler('cuda') if device.type == 'cuda' else None
-
-    history = []
-    start_epoch = 0
-
-    if args.resume:
-        ckpt = torch.load(args.resume, map_location=device, weights_only=False)
+    if resume_path:
+        ckpt = torch.load(resume_path, map_location=device, weights_only=False)
         raw_sd = ckpt['model']
         raw_sd = {k.removeprefix('_orig_mod.'): v for k, v in raw_sd.items()}
-        model.load_state_dict(raw_sd)
-        optimizer.load_state_dict(ckpt['optimizer'])
-        scheduler.load_state_dict(ckpt['scheduler'])
+        for key in list(raw_sd.keys()):
+            if 'head_mcly' in key:
+                cur = model.state_dict().get(key)
+                if cur is not None and cur.shape != raw_sd[key].shape:
+                    print(f"  Skipping {key}: ckpt={raw_sd[key].shape} model={cur.shape}")
+                    del raw_sd[key]
+        model.load_state_dict(raw_sd, strict=False)
         start_epoch = ckpt['epoch'] + 1
         history = ckpt.get('history', [])
         if 'ema' in ckpt:
-            ema.shadows = ckpt['ema']
+            try:
+                ema_raw = ckpt['ema']
+                for k in list(ema_raw.keys()):
+                    if 'head_mcly' in k:
+                        cur = ema.shadows.get(k)
+                        if cur is not None and cur.shape != ema_raw[k].shape:
+                            del ema_raw[k]
+                ema.shadows = ema_raw
+            except Exception:
+                pass
         if 'log_sigmas' in ckpt:
             model.log_height_sigma.data = torch.tensor(ckpt['log_sigmas'][0])
             model.log_mcal_sigma.data = torch.tensor(ckpt['log_sigmas'][1])
             model.log_hole_sigma.data = torch.tensor(ckpt['log_sigmas'][2])
-        print(f"Resumed from epoch {start_epoch}")
+        print(f"Resumed from epoch {start_epoch} (model+EMA weights, optimizer fresh)")
 
     loss_fn = UncertaintyWeightedLoss()
 
     for epoch in range(start_epoch, args.epochs):
-        loss_fn.set_frequency_weights(epoch, max(args.freq_ramp_epochs, 1))
+        detail_pulse = epoch >= 60 and epoch % 25 == 0
+        loss_fn.set_frequency_weights(epoch, detail_pulse=detail_pulse)
         model.train()
         train_ds._is_training = True
         train_ds.signal_dropout = args.signal_dropout
@@ -835,37 +938,21 @@ def train_v11(args):
             targets = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                        for k, v in targets.items()}
 
-            if scaler:
-                with torch.amp.autocast('cuda'):
-                    pred = model(inp)
-                    loss, losses = loss_fn(pred, targets, model)
-            else:
-                pred = model(inp)
-                loss, losses = loss_fn(pred, targets, model)
+            pred = model(inp)
+            loss, losses = loss_fn(pred, targets, model)
 
             # NaN guard: skip batch if loss or any gradient is NaN
             if torch.isnan(loss) or torch.isinf(loss):
                 print(f"  WARN: NaN/Inf loss at E{epoch} B{batch_idx}, skipping")
                 optimizer.zero_grad()
-                if scaler:
-                    scaler.update()
                 continue
 
-            if scaler:
-                scaler.scale(loss).backward()
-                if (batch_idx + 1) % args.gradient_accumulation == 0:
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.gradient_clip)
-                    scaler.step(optimizer)
-                    scaler.update()
-                    optimizer.zero_grad()
-                ema.update()
-            else:
-                loss.backward()
-                if (batch_idx + 1) % args.gradient_accumulation == 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.gradient_clip)
-                    optimizer.step()
-                    optimizer.zero_grad()
+            loss.backward()
+            if (batch_idx + 1) % args.gradient_accumulation == 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.gradient_clip)
+                optimizer.step()
+                optimizer.zero_grad()
+            ema.update()
 
             for k, v in losses.items():
                 epoch_losses[k] += v
@@ -904,10 +991,14 @@ def train_v11(args):
             'log_sigmas': [model.log_height_sigma.item(), model.log_mcal_sigma.item(), model.log_hole_sigma.item()],
             'args': vars(args),
         }
-        # Atomic save: write to tmp then overwrite to prevent partial writes
-        tmp_ckpt = str(output_dir / 'last.tmp')
-        torch.save(ckpt, tmp_ckpt)
-        os.replace(tmp_ckpt, str(output_dir / 'last.pt'))
+        # Save checkpoint
+        ckpt_path = str(output_dir / 'last.pt')
+        try:
+            torch.save(ckpt, ckpt_path)
+        except PermissionError:
+            import time
+            time.sleep(1)
+            torch.save(ckpt, ckpt_path)
 
         if epoch % args.save_every == 0:
             shutil.copy(output_dir / 'last.pt', checkpoint_dir / f'epoch_{epoch:04d}.pt')

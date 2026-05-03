@@ -1,62 +1,58 @@
-# V11 / V11.1 Terrain Model Training Guide
+# V11.1 Terrain Model Training Guide
 
 ## Overview
 
-Single-stage ConvNeXt V2-based terrain reconstruction model.
-Predicts height (3 scales) + MCAL alpha + MCLY class + hole mask from 26 input signals.
+Single-stage ConvNeXt V2-based terrain reconstruction model with frequency-banded loss.
+Predicts height (3 scales, frequency-decomposed) + MCAL alpha + MCLY class + hole mask from 26 input signals.
+
+Detail pulses fire every 25 epochs from epoch 60 onwards, each spiking high-frequency loss
+weight for 8 epochs to sharpen fine detail.
 
 ## Prerequisites
 
 - .NET 10 SDK
 - Python 3.11+ with PyTorch 2.11+
 - Staged game clients under `output/tmp/wowarchive-clients/`
-- ~17GB VRAM recommended (8GB minimum at batch 8)
+- ~8GB VRAM minimum (batch 8), 16GB recommended (batch 16)
 
 ## Step 1 — Install Python Dependencies
 
 ```powershell
-& '.venv-train/Scripts/python.exe' -m pip install timm accelerate lion-pytorch
+& '.venv-train/Scripts/python.exe' -m pip install timm lion-pytorch
 ```
 
 ## Step 2 — Extract Dataset
 
 ### Scan all clients
 ```powershell
-# 3.3.5 Wrath
 dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -- dataset-scan `
   --client-root "output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft" `
   --map Azeroth --build 3.3.5.12340 --output output/tmp/v11_scan/scan_335_Azeroth.json
+# All maps: Azeroth, Kalimdor, Northrend, PVPZone01-04, EmeraldDream
 
-# Repeat for: Kalimdor, Northrend, PVPZone01-04, EmeraldDream
-
-# 4.0.0 Cata beta
 dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -- dataset-scan `
   --client-root "output/tmp/wowarchive-clients/4_0_0_11927/World of Warcraft" `
   --map Azeroth --build 4.0.0.11927 --output output/tmp/v11_scan/scan_400_Azeroth.json
+# All maps: Azeroth, Kalimdor, EmeraldDream, LostIsles, LostIslesPhase1-2, MountHyjalPhase1
 
-# Repeat for: Kalimdor, EmeraldDream, LostIsles, LostIslesPhase1, LostIslesPhase2, MountHyjalPhase1
-
-# 3.0.1 pre-Wrath
 dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -- dataset-scan `
   --client-root "output/tmp/wowarchive-clients/3_0_1_8303/World of Warcraft" `
   --map Northrend --build 3.0.1.8303 --output output/tmp/v11_scan/scan_301_Northrend.json
 
-# 0.7.0 pre-BC
 dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -- dataset-scan `
   --client-root "output/tmp/wowarchive-clients/0_7_0_3694/World of Warcraft" `
   --map Azeroth --build 0.7.0.3694 --output output/tmp/v11_scan/scan_070_Azeroth.json
-# Repeat for: Kalimdor
+# Maps: Azeroth, Kalimdor
 
-# 0.5.5 / 0.5.3 Alpha
 dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -- dataset-scan `
   --client-root "output/tmp/wowarchive-clients/0_5_5_3494/World of Warcraft" `
   --map Azeroth --build 0.5.5.3494 --output output/tmp/v11_scan/scan_055_Azeroth.json
-# Repeat for: Kalimdor, EmeraldDream
+# Maps: Azeroth, Kalimdor, EmeraldDream
 
 dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -- dataset-scan `
   --client-root "output/tmp/wowarchive-clients/0_5_3_3368/World of Warcraft" `
   --map Azeroth --build 0.5.3.3368 --output output/tmp/v11_scan/scan_053_Azeroth.json
-# Repeat for: Kalimdor
+# Maps: Azeroth, Kalimdor
 ```
 
 ### Merge, audit, curate, build cache
@@ -93,8 +89,7 @@ dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -- `
   'output/tmp/v11_cache/v9_tensor_cache_manifest.json' `
   --output-dir 'output/ml-training/runs/v11.1_prod' `
   --epochs 300 --batch-size 8 --num-workers 0 --max-samples 2000 `
-  --decoder-dim 96 --gradient-accumulation 1 --use-compile `
-  --freq-ramp-epochs 60
+  --decoder-dim 96 --gradient-accumulation 1 --use-compile
 ```
 
 ### Key Parameters
@@ -102,41 +97,50 @@ dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter -- `
 | Arg | Default | Notes |
 |-----|---------|-------|
 | `--batch-size` | 16 | 8 for 8GB VRAM, 16 for 16GB |
-| `--max-samples` | 1200 | Total training tiles. 2000+ recommended. |
-| `--decoder-dim` | 256 | 96 enough for decoder, saves VRAM |
-| `--use-compile` | off | torch.compile, first epoch slow |
-| `--freq-ramp-epochs` | 60 | Detail-first loss schedule length |
+| `--max-samples` | 1200 | Training tiles sampled from curated pool |
+| `--decoder-dim` | 256 | 96 is enough, saves ~50MB VRAM |
+| `--use-compile` | off | torch.compile, first epoch slow then 20-40% faster |
 | `--optimizer` | adamw | adamw or lion |
 
 ### Monitoring
 
-Loss components: `hf_l1` (high-freq detail), `mid_l1`, `lf_l1` (coarse shape).
+Loss prints: `lf` (coarse 17x17), `mid` (mid 65-up(17)), `hf` (detail 257-up(65)).
 
-Early epochs (0-30): hf_l1 should drop fast (model learns detail first).
-Mid epochs (30-60): lf_l1 catches up (shape refines).
-Late epochs (60+): all losses plateau.
+Detail pulses fire at epochs 75, 100, 125, 150, 175, 200, 225, 250, 275 — `hf` value
+will spike to ~0.6+ then decay over 8 epochs, sharpening details.
 
-Expected loss trajectory (heights z-scored, ~1.0 = good):
-- lf_l1: starts ~0.5, ends ~0.05
-- mid_l1: starts ~0.3, ends ~0.03
-- hf_l1: starts ~0.2, ends ~0.02
-- mcal_l1: stays ~0.1 (alpha is easy)
-- mcly_ce: starts ~3.5, ends ~1.5
+Expected trajectory at batch 10 with 1600 samples:
+- Epoch 0-20: lf≈0.6→0.3, mid≈0.2→0.04, hf≈0.06→0.02
+- Epoch 20-60: lf≈0.3→0.08, mid≈0.03, hf≈0.01 — shape catching up
+- Epoch 60+: lf≈0.08→0.04, mid≈0.02, hf≈0.01 — detail pulses fire
+- mcal_l1: settles ~0.1 (easy signal)
+- mcly_ce: starts ~3.5, ends ~1.8
 
 ## Step 4 — Validate
 
-Run inference on the latest checkpoint separately (doesn't slow training):
+```powershell
+# The validate script copies last.pt automatically to avoid file locks
+python scripts/validate_v11.py output/ml-training/runs/v11.1_prod/last.pt `
+  output/tmp/v11_cache --output-dir output/ml-training/runs/v11.1_prod/val
+```
+
+Or manually with copy to avoid conflicts:
 
 ```powershell
-python scripts/infer_v11.py output/ml-training/runs/v11.1_prod/last.pt `
-  output/tmp/v11_cache --output-dir output/ml-training/runs/v11.1_prod/validation --limit 4 --export-obj
+Copy-Item output/ml-training/runs/v11.1_prod/last.pt output/ml-training/runs/v11.1_prod/_val.pt -Force
+python scripts/validate_v11.py output/ml-training/runs/v11.1_prod/_val.pt `
+  output/tmp/v11_cache --output-dir output/ml-training/runs/v11.1_prod/val
+Remove-Item output/ml-training/runs/v11.1_prod/_val.pt
 ```
+
+Validation preview saved to `val/previews/validation.png`. 4-panel: Minimap | Target | Prediction | Error.
 
 ## Architecture (V11.1)
 
-- **Encoder:** ConvNeXt V2 Tiny stages with overlapping conv stem (7×7 stride 2 ×2)
-- **Decoder:** U-Net with ConvNeXt refinement blocks
-- **Input:** 26 channels (minimap, MCAL, normals, MCCV, coarse height, liquid, objects, PM4, hole, derived)
-- **Outputs:** height_17/65/257 + MCAL alpha (4ch) + MCLY class + hole mask
-- **Loss:** Frequency-banded L1 with detail-first ramp over 60 epochs + uncertainty-weighted auxiliary tasks
-- **Vocab size:** 35.5M params (29.6M with decoder_dim=96)
+- **Encoder:** ConvNeXt V2 Tiny stages with overlapping conv stem (7×7+3×3 stride 2×2)
+- **Decoder:** U-Net with ConvNeXt refinement blocks at 256×256
+- **Input:** 26 channels (minimap, MCAL, normals, MCCV at 3× dropout, coarse height, liquid, objects, PM4, hole, derived)
+- **Outputs:** height_17/65/257 + MCAL alpha (4ch sigmoid) + MCLY class + hole mask
+- **Loss:** Frequency-banded L1 (lf/mid/hf) with detail-first ramp + detail pulses every 25 epochs + uncertainty-weighted auxiliary tasks
+- **Size:** 29.6M params with decoder_dim=96, ~60MB in bf16
+- **VRAM:** 5.8GB at batch 8 with compile, 10.9GB at batch 16
