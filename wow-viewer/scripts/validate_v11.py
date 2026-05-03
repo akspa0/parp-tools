@@ -1,8 +1,8 @@
 """Run validation + preview on latest checkpoint without training."""
-import argparse, json, sys, gc
+import argparse, json, os, shutil
 from pathlib import Path
 import torch
-import numpy as np
+import torch.nn.functional as F
 
 from train_v11 import (V11TerrainModel, V11Dataset, discover_npz_paths,
                         build_mcly_vocab, N_CHANNELS, save_preview_from_batch)
@@ -11,7 +11,16 @@ from train_v11 import (V11TerrainModel, V11Dataset, discover_npz_paths,
 @torch.no_grad()
 def validate(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    ckpt = torch.load(args.checkpoint, map_location='cpu', weights_only=False)
+
+    # Copy checkpoint to avoid file-lock conflicts with running trainer
+    ckpt_path = Path(args.checkpoint)
+    if ckpt_path.exists() and ckpt_path.suffix == '.pt':
+        tmp = ckpt_path.with_name(f'_val_{ckpt_path.stem}.pt')
+        shutil.copy2(ckpt_path, tmp)
+        ckpt = torch.load(tmp, map_location='cpu', weights_only=False)
+        tmp.unlink(missing_ok=True)
+    else:
+        ckpt = torch.load(args.checkpoint, map_location='cpu', weights_only=False)
     sd = {k.removeprefix('_orig_mod.'): v for k, v in ckpt['model'].items()}
     height_mean = ckpt.get('height_mean', 0.0)
     height_std = max(ckpt.get('height_std', 1.0), 0.01)

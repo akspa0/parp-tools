@@ -1,4 +1,5 @@
-import argparse, json, os, gc, sys, math, random, shutil, traceback
+import argparse, json, gc, sys, math, random, shutil, traceback
+import os
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
@@ -150,7 +151,7 @@ class V11TerrainModel(nn.Module):
             nn.Conv2d(self.refine_dim, 32, 1), nn.GELU(),
             nn.Conv2d(32, 1, 1))
 
-        self.register_parameter('log_height_sigma', nn.Parameter(torch.tensor(0.0)))
+        self.register_parameter('log_height_sigma', nn.Parameter(torch.tensor(2.0)))
         self.register_parameter('log_mcal_sigma', nn.Parameter(torch.tensor(2.0)))
         self.register_parameter('log_mcly_sigma', nn.Parameter(torch.tensor(2.0)))
         self.register_parameter('log_hole_sigma', nn.Parameter(torch.tensor(2.0)))
@@ -398,6 +399,9 @@ class V11Dataset(Dataset):
         if self.signal_dropout > 0 and getattr(self, '_is_training', False):
             p = torch.clamp(self.signal_dropout * self._dropout_mult, 0, 0.95)
             mask = torch.rand(N_CHANNELS) >= p
+            # Always keep at least minimap (0-2) and coarse height (13)
+            mask[0:3] = True
+            mask[13] = True
             inp *= mask.unsqueeze(1).unsqueeze(2).float()
 
         targets = {}
@@ -486,8 +490,8 @@ class UncertaintyWeightedLoss(nn.Module):
     def set_frequency_weights(self, epoch, ramp_epochs=60):
         """Ramp from detail-first (high-freq) to shape-first (low-freq)."""
         t = min(epoch / max(ramp_epochs, 1), 1.0)
-        self._hf_weight = torch.tensor(1.0 - t * 0.9)
-        self._lf_weight = torch.tensor(0.1 + t * 0.9)
+        self._hf_weight = torch.tensor(max(1.0 - t * 0.9, 0.01))
+        self._lf_weight = torch.tensor(min(0.1 + t * 0.9, 1.0))
 
     def forward(self, pred, target, model, prefix=''):
         losses = {}
@@ -521,16 +525,21 @@ class UncertaintyWeightedLoss(nn.Module):
         losses[f'{prefix}mid_l1'] = mid_l1.item()
         losses[f'{prefix}hf_l1'] = hf_l1.item()
 
-        sigma = torch.exp(model.log_height_sigma)
-        total = total / (2 * sigma * sigma) + model.log_height_sigma
+        def apply_uncertainty(loss_val, log_sigma, weight=1.0):
+            ls = log_sigma.clamp(-4, 4)
+            s = torch.exp(ls)
+            return loss_val * weight / (2 * s * s) + ls * weight * 0.5
+
+        log_h = model.log_height_sigma.clamp(-4, 4)
+        sigma_h = torch.exp(log_h)
+        total = total / (2 * sigma_h * sigma_h) + log_h * 0.5
 
         mcal_mask = target.get('has_mcal', torch.zeros(B, device=pred['height_17'].device))
         if mcal_mask.sum() > 0:
             mcal = F.l1_loss(pred['mcal_alpha'], target['mcal_alpha'], reduction='none')
             mcal = (mcal.mean(dim=(1, 2, 3)) * mcal_mask).sum() / mcal_mask.sum()
             losses[f'{prefix}mcal_l1'] = mcal.item()
-            sigma = torch.exp(model.log_mcal_sigma)
-            total = total + mcal / (2 * sigma * sigma) + model.log_mcal_sigma * (mcal_mask.mean())
+            total = total + apply_uncertainty(mcal, model.log_mcal_sigma, mcal_mask.mean())
 
         mcly_mask = target.get('has_mcly', torch.zeros(B, device=pred['height_17'].device))
         if mcly_mask.sum() > 0:
@@ -539,8 +548,7 @@ class UncertaintyWeightedLoss(nn.Module):
                                    ignore_index=model.mcly_unk_idx, reduction='none')
             mcly = (mcly.view(B, -1).mean(dim=1) * mcly_mask).sum() / mcly_mask.sum()
             losses[f'{prefix}mcly_ce'] = mcly.item()
-            sigma = torch.exp(model.log_mcly_sigma)
-            total = total + mcly / (2 * sigma * sigma) + model.log_mcly_sigma * (mcly_mask.mean())
+            total = total + apply_uncertainty(mcly, model.log_mcly_sigma, mcly_mask.mean())
 
         hole_mask_flag = target.get('has_hole', torch.zeros(B, device=pred['height_17'].device))
         if hole_mask_flag.sum() > 0:
@@ -548,8 +556,7 @@ class UncertaintyWeightedLoss(nn.Module):
                                                        reduction='none')
             hole = (hole.view(B, -1).mean(dim=1) * hole_mask_flag).sum() / hole_mask_flag.sum()
             losses[f'{prefix}hole_bce'] = hole.item()
-            sigma = torch.exp(model.log_hole_sigma)
-            total = total + hole / (2 * sigma * sigma) + model.log_hole_sigma * (hole_mask_flag.mean())
+            total = total + apply_uncertainty(hole, model.log_hole_sigma, hole_mask_flag.mean())
 
         losses[f'{prefix}loss'] = total.item()
         return total, losses
@@ -816,7 +823,7 @@ def train_v11(args):
     loss_fn = UncertaintyWeightedLoss()
 
     for epoch in range(start_epoch, args.epochs):
-        loss_fn.set_frequency_weights(epoch, args.freq_ramp_epochs)
+        loss_fn.set_frequency_weights(epoch, max(args.freq_ramp_epochs, 1))
         model.train()
         train_ds._is_training = True
         train_ds.signal_dropout = args.signal_dropout
@@ -832,6 +839,19 @@ def train_v11(args):
                 with torch.amp.autocast('cuda'):
                     pred = model(inp)
                     loss, losses = loss_fn(pred, targets, model)
+            else:
+                pred = model(inp)
+                loss, losses = loss_fn(pred, targets, model)
+
+            # NaN guard: skip batch if loss or any gradient is NaN
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"  WARN: NaN/Inf loss at E{epoch} B{batch_idx}, skipping")
+                optimizer.zero_grad()
+                if scaler:
+                    scaler.update()
+                continue
+
+            if scaler:
                 scaler.scale(loss).backward()
                 if (batch_idx + 1) % args.gradient_accumulation == 0:
                     scaler.unscale_(optimizer)
@@ -841,8 +861,6 @@ def train_v11(args):
                     optimizer.zero_grad()
                 ema.update()
             else:
-                pred = model(inp)
-                loss, losses = loss_fn(pred, targets, model)
                 loss.backward()
                 if (batch_idx + 1) % args.gradient_accumulation == 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.gradient_clip)
@@ -854,7 +872,9 @@ def train_v11(args):
             n_batches += 1
 
             if batch_idx % max(1, len(train_loader) // 5) == 0:
-                print(f"  E{epoch:3d} B{batch_idx:4d}/{len(train_loader)} loss={losses.get('loss', 0):.4f}")
+                ls = losses.get('loss', 0)
+                if not (math.isnan(ls) or math.isinf(ls)):
+                    print(f"  E{epoch:3d} B{batch_idx:4d}/{len(train_loader)} loss={ls:.4f}")
 
         scheduler.step()
 
@@ -884,17 +904,17 @@ def train_v11(args):
             'log_sigmas': [model.log_height_sigma.item(), model.log_mcal_sigma.item(), model.log_hole_sigma.item()],
             'args': vars(args),
         }
-        torch.save(ckpt, output_dir / 'last.pt')
+        # Atomic save: write to tmp then overwrite to prevent partial writes
+        tmp_ckpt = str(output_dir / 'last.tmp')
+        torch.save(ckpt, tmp_ckpt)
+        os.replace(tmp_ckpt, str(output_dir / 'last.pt'))
 
         if epoch % args.save_every == 0:
             shutil.copy(output_dir / 'last.pt', checkpoint_dir / f'epoch_{epoch:04d}.pt')
 
-    print(f"\nTraining complete. Best epoch: {best_epoch}, val_loss: {best_val_loss:.4f}")
-    print(f"Output: {output_dir}")
+    print(f"\nTraining complete — {epoch} epochs, output: {output_dir}")
 
     metrics = {
-        'best_epoch': best_epoch,
-        'best_val_loss': best_val_loss,
         'total_params': total_params,
         'train_samples': len(train_paths),
         'val_samples': len(val_paths),
