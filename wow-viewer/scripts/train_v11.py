@@ -342,8 +342,9 @@ class V11Dataset(Dataset):
                 a = torch.from_numpy(arr.astype(np.float32)).squeeze()
                 if a.dim() == 2:
                     a = a.unsqueeze(0)
-                if a.shape[-1] == 256 and a.shape[-2] == 256 and a.shape[-3] != ch:
-                    a = a.permute(2, 0, 1) if a.dim() == 3 else a
+                # Detect HWC layout: last dim is small (≤ch), first two are large spatial
+                if a.dim() == 3 and a.shape[-1] <= ch and a.shape[-2] > 64 and a.shape[-3] > 64:
+                    a = a.permute(2, 0, 1)
                 if a.shape[-1] != 256 or a.shape[-2] != 256:
                     a = F.interpolate(a.unsqueeze(0), size=256, mode='bilinear', align_corners=False).squeeze(0)
                 if a.shape[0] != ch:
@@ -451,6 +452,9 @@ class V11Dataset(Dataset):
         else:
             targets['hole_mask'] = torch.zeros(1, 16, 16)
             targets['has_hole'] = torch.tensor(0.0)
+
+        stem = Path(self.paths[idx]).stem.replace('_v10', '').replace('_v11', '')
+        targets['tile_name'] = stem
 
         if self.augment:
             if random.random() > 0.5:
@@ -583,40 +587,76 @@ def create_scheduler(optimizer, epochs, warmup_epochs=5):
     return SequentialLR(optimizer, [warmup, cosine], milestones=[warmup_epochs])
 
 
-def compute_preview(pred, target, inp, height_mean, height_std):
-    import torchvision.utils as vutils
-    panels = []
-    target_size = 256
+def save_preview_from_batch(model, inp, targets, device, height_mean, height_std, save_path, num_rows=4):
+    from PIL import Image, ImageDraw, ImageFont
+    import numpy as np
 
-    def to_img(t, mean=height_mean, std=height_std):
-        t = t.detach().float().cpu()
-        if t.dim() == 4:
-            t = t[0]
-        if t.dim() == 3 and t.shape[0] in (1, 3):
-            pass
-        elif t.dim() == 2:
-            t = t.unsqueeze(0)
-        if t.shape[-1] != target_size or t.shape[-2] != target_size:
-            t = F.interpolate(t.unsqueeze(0).float(), size=target_size, mode='bilinear', align_corners=False).squeeze(0)
-        if std > 0:
-            t = t * std + mean
-        return t
+    ROW_TITLE_H = 18
+    LABEL_H = 18
+    PAD = 4
+    FONT = ImageFont.load_default()
 
-    panels.append(to_img(inp[0:3]))
-    panels.append(to_img(pred['height_257']))
-    panels.append(to_img(target['height_257']))
-    error = (pred['height_257'].detach().float().cpu() - target['height_257'].detach().float().cpu()).abs()
-    panels.append(to_img(error))
-    for i, p in enumerate(panels):
-        if p.dim() == 2:
-            panels[i] = p.unsqueeze(0)
-        elif p.dim() == 3 and p.shape[0] != 3:
-            panels[i] = p.expand(3, -1, -1) if p.shape[0] == 1 else p[:3]
-    for i, p in enumerate(panels):
-        if p.numel() > 0 and p.max() == p.min():
-            panels[i] = p + torch.randn_like(p) * 1e-6
-    grid = vutils.make_grid(panels, nrow=4, normalize=True, scale_each=True)
-    return grid
+    model.eval()
+    B = min(num_rows, inp.shape[0])
+    inp_b = inp[:B].to(device)
+    with torch.no_grad():
+        out = model(inp_b)
+    inp_cpu = inp.cpu()
+
+    rows_list = []
+    for b in range(B):
+        # Minimap: first 3 channels, uint8 [0,255]
+        mm = inp_cpu[b, 0:3].float().numpy().transpose(1, 2, 0)
+        mm = mm.clip(0, 255).astype(np.uint8)
+        h, w = mm.shape[:2]
+
+        # Height panels: denormalize
+        pred_h = out['height_257'][b, 0].float().cpu().numpy() * height_std + height_mean
+        targ_h = targets['height_257'][b, 0].float().cpu().numpy() * height_std + height_mean
+        diff = pred_h - targ_h
+
+        # Resize all to minimap dimensions via PIL
+        def to_pil(arr):
+            arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8) * 255
+            return Image.fromarray(arr.clip(0, 255).astype(np.uint8), mode='L').resize((w, h), Image.NEAREST)
+
+        def diff_pil(arr):
+            mx = max(abs(arr.min()), abs(arr.max()), 1e-5)
+            norm = (arr / mx).clip(-1, 1)
+            r = np.where(norm > 0, norm * 255, 0).astype(np.uint8)
+            b = np.where(norm < 0, -norm * 255, 0).astype(np.uint8)
+            g = (255 - abs(norm) * 255).clip(0, 255).astype(np.uint8)
+            return Image.fromarray(np.stack([r, g, b], axis=-1)).resize((w, h), Image.NEAREST)
+
+        panels = [
+            (Image.fromarray(mm), "Minimap"),
+            (to_pil(targ_h), "Target"),
+            (to_pil(pred_h), "Prediction"),
+            (diff_pil(diff), "Error (R+/B-)"),
+        ]
+
+        pane_w, pane_h = w, h
+        row_w = pane_w * len(panels)
+        row_h = ROW_TITLE_H + LABEL_H + pane_h
+        row_img = Image.new("RGB", (row_w, row_h), (24, 24, 24))
+        draw = ImageDraw.Draw(row_img)
+        draw.rectangle((0, 0, row_w, ROW_TITLE_H), fill=(32, 32, 32))
+        tname = targets.get('tile_name', [f'tile_{b}'] * B)
+        draw.text((PAD, 2), str(tname[b] if isinstance(tname, list) else tname), fill=(200, 200, 200), font=FONT)
+
+        x = 0
+        for pil_img, label in panels:
+            draw.rectangle((x, ROW_TITLE_H, x + pane_w, ROW_TITLE_H + LABEL_H), fill=(48, 48, 48))
+            tw = draw.textbbox((0, 0), label, font=FONT)
+            draw.text((x + max(PAD, (pane_w - (tw[2] - tw[0])) // 2), ROW_TITLE_H + 2), label, fill=(255, 255, 255), font=FONT)
+            row_img.paste(pil_img, (x, ROW_TITLE_H + LABEL_H))
+            x += pane_w
+
+        rows_list.append(np.asarray(row_img))
+
+    if rows_list:
+        comp = rows_list[0] if len(rows_list) == 1 else np.concatenate(rows_list, axis=0)
+        Image.fromarray(comp).save(save_path)
 
 
 def train_v11(args):
@@ -704,6 +744,19 @@ def train_v11(args):
 
     model = model.to(device)
 
+    torch.backends.cudnn.benchmark = True
+
+    if args.use_compile and device.type == 'cuda':
+        try:
+            model = torch.compile(model, dynamic=False)
+            print("  torch.compile enabled")
+        except Exception as e:
+            print(f"  torch.compile failed: {e}")
+
+    if args.channels_last and device.type == 'cuda':
+        model = model.to(memory_format=torch.channels_last)
+        print("  channels_last memory format enabled")
+
     ema = EMA(model, decay=args.ema_decay)
 
     loss_fn = UncertaintyWeightedLoss()
@@ -720,7 +773,9 @@ def train_v11(args):
 
     if args.resume:
         ckpt = torch.load(args.resume, map_location=device, weights_only=False)
-        model.load_state_dict(ckpt['model'])
+        raw_sd = ckpt['model']
+        raw_sd = {k.removeprefix('_orig_mod.'): v for k, v in raw_sd.items()}
+        model.load_state_dict(raw_sd)
         optimizer.load_state_dict(ckpt['optimizer'])
         scheduler.load_state_dict(ckpt['scheduler'])
         start_epoch = ckpt['epoch'] + 1
@@ -814,9 +869,10 @@ def train_v11(args):
             best_val_loss = val_loss_val
             best_epoch = epoch
 
+        raw_model = model._orig_mod if hasattr(model, '_orig_mod') else model
         ckpt = {
             'epoch': epoch,
-            'model': model.state_dict(),
+            'model': {k.removeprefix('_orig_mod.'): v for k, v in raw_model.state_dict().items()},
             'optimizer': optimizer.state_dict(),
             'scheduler': scheduler.state_dict(),
             'best_val_loss': best_val_loss,
@@ -836,7 +892,7 @@ def train_v11(args):
             torch.save(ckpt, output_dir / 'best.pt')
             ema.store()
             ema.apply()
-            ema_ckpt = {**ckpt, 'model': model.state_dict()}
+            ema_ckpt = {**ckpt, 'model': ema.shadows}
             torch.save(ema_ckpt, output_dir / 'best_ema.pt')
             ema.restore()
             print(f"  -> NEW BEST (val_loss={val_loss_val:.4f})")
@@ -844,23 +900,22 @@ def train_v11(args):
         if epoch % args.save_every == 0:
             shutil.copy(output_dir / 'last.pt', checkpoint_dir / f'epoch_{epoch:04d}.pt')
 
-        if epoch % args.preview_every == 0 and len(val_loader) > 0:
+        if len(val_loader) > 0:
             try:
-                with torch.no_grad():
-                    inp, targets = next(iter(val_loader))
-                    inp = inp[:4].to(device)
-                    targets = {k: v[:4].to(device) if isinstance(v, torch.Tensor) and v.dim() > 0 else v
-                               for k, v in targets.items()}
-                    pred = model(inp)
-                    grid = compute_preview(pred, targets, inp.cpu(), height_mean, height_std)
-                    import torchvision.utils as vutils
-                    vutils.save_image(grid, preview_dir / f'epoch_{epoch:04d}.png')
-                    del inp, targets, pred, grid
-                    gc.collect()
-                    if device.type == 'cuda':
-                        torch.cuda.empty_cache()
+                preview_batch = next(iter(val_loader))
+                save_preview_from_batch(model, preview_batch[0], preview_batch[1],
+                                        device, height_mean, height_std,
+                                        preview_dir / f'epoch_{epoch:04d}.png', num_rows=4)
+                all_prevs = sorted(preview_dir.glob('epoch_*.png'))
+                for old_p in all_prevs[:-5]:
+                    old_p.unlink(missing_ok=True)
+                gc.collect()
+                if device.type == 'cuda':
+                    torch.cuda.empty_cache()
             except Exception as e:
                 print(f"  Preview failed: {e}")
+                import traceback
+                traceback.print_exc()
 
     print(f"\nTraining complete. Best epoch: {best_epoch}, val_loss: {best_val_loss:.4f}")
     print(f"Output: {output_dir}")
@@ -911,6 +966,8 @@ def main():
     g.add_argument('--gradient-accumulation', type=int, default=2)
     g.add_argument('--ema-decay', type=float, default=0.999)
     g.add_argument('--seed', type=int, default=1337)
+    g.add_argument('--use-compile', action='store_true', help='Enable torch.compile')
+    g.add_argument('--channels-last', action='store_true', help='Use channels_last memory format')
 
     g = p.add_argument_group('I/O')
     g.add_argument('--num-workers', type=int, default=4)
