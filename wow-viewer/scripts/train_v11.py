@@ -281,10 +281,10 @@ class V11Dataset(Dataset):
         self._cache_bytes = 0
         # Per-channel dropout multipliers — higher = more likely to drop.
         # MCCV vertex colors (ch 10-12) are artist-painted, no geometric link
-        # to height. Shadow masks (ch 22-23) mix lighting + geometry, unreliable.
+        # to height. At 70% base dropout, these drop ~95% of the time.
         self._dropout_mult = torch.ones(N_CHANNELS)
         if N_CHANNELS > 12:
-            self._dropout_mult[10:13] = 3.0
+            self._dropout_mult[10:13] = 2.0  # MCCV: 2x base dropout
         self._cache_order = []
         self._max_cache_bytes = max_cache_mb * 1024 * 1024
         self._cache_bytes = 0
@@ -428,9 +428,8 @@ class V11Dataset(Dataset):
         if self.signal_dropout > 0 and getattr(self, '_is_training', False):
             p = torch.clamp(self.signal_dropout * self._dropout_mult, 0, 0.95)
             mask = torch.rand(N_CHANNELS) >= p
-            # Always keep at least minimap (0-2) and coarse height (13)
+            # Always keep minimap (ch 0-2) — the model's only guaranteed input at inference
             mask[0:3] = True
-            mask[13] = True
             inp *= mask.unsqueeze(1).unsqueeze(2).float()
 
         targets = {}
@@ -445,7 +444,9 @@ class V11Dataset(Dataset):
                 t_std = tile_std
                 if isinstance(t_mean, torch.Tensor):
                     t_mean = t_mean.item()
-                    t_std = max(t_std.item(), 0.01)
+                if isinstance(t_std, torch.Tensor):
+                    t_std = t_std.item()
+                t_std = max(t_std, 0.01)
                 targets[key] = (t - t_mean) / t_std
             else:
                 targets[key] = torch.zeros(shape)
@@ -1087,7 +1088,7 @@ def main():
 
     g = p.add_argument_group('Model')
     g.add_argument('--decoder-dim', type=int, default=256)
-    g.add_argument('--signal-dropout', type=float, default=0.15)
+    g.add_argument('--signal-dropout', type=float, default=0.70, help='Dropout rate for non-essential input channels — forces model to learn from minimap alone')
 
     g = p.add_argument_group('Training')
     g.add_argument('--epochs', type=int, default=200)

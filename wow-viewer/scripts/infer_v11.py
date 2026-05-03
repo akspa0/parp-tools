@@ -28,6 +28,42 @@ def parse_tile_name(name):
     return None
 
 
+def stitch_heightmaps(heightmaps):
+    """Average shared edges and corners between adjacent 257x257 heightmaps."""
+    stitched = {}
+    for (tx, ty), h in heightmaps.items():
+        if h.shape == (257, 257):
+            stitched[(tx, ty)] = h.copy().astype(np.float32)
+        else:
+            return None  # wrong shape, abort
+
+    for (tx, ty) in list(stitched.keys()):
+        h = stitched[(tx, ty)]
+        # Right edge: average with (tx+1, ty) left edge
+        if (tx + 1, ty) in stitched:
+            avg = (h[:, -1] + stitched[(tx + 1, ty)][:, 0]) * 0.5
+            h[:, -1] = avg
+            stitched[(tx + 1, ty)][:, 0] = avg
+        # Bottom edge: average with (tx, ty+1) top edge
+        if (tx, ty + 1) in stitched:
+            avg = (h[-1, :] + stitched[(tx, ty + 1)][0, :]) * 0.5
+            h[-1, :] = avg
+            stitched[(tx, ty + 1)][0, :] = avg
+
+    # Corners: average the 4-tile intersection
+    for (tx, ty) in list(stitched.keys()):
+        for corner_x, corner_y in [(tx + 1, ty), (tx, ty + 1), (tx + 1, ty + 1)]:
+            if (tx, ty) in stitched and (tx + 1, ty) in stitched and (tx, ty + 1) in stitched and (tx + 1, ty + 1) in stitched:
+                avg = (stitched[(tx, ty)][-1, -1] + stitched[(tx + 1, ty)][0, -1] +
+                       stitched[(tx, ty + 1)][-1, 0] + stitched[(tx + 1, ty + 1)][0, 0]) * 0.25
+                stitched[(tx, ty)][-1, -1] = avg
+                stitched[(tx + 1, ty)][0, -1] = avg
+                stitched[(tx, ty + 1)][-1, 0] = avg
+                stitched[(tx + 1, ty + 1)][0, 0] = avg
+
+    return stitched
+
+
 def export_obj(heightmap, obj_path, texture_name, tile_world_size=533.333, center_mesh=False, height_offset=0):
     h, w = heightmap.shape
     spacing_x = tile_world_size / max(w - 1, 1)
@@ -81,9 +117,12 @@ def infer(args):
     mcly_unk_idx = ckpt.get('mcly_unk_idx', len(mcly_vocab))
 
     in_channels = sd['stem.0.weight'].shape[1]
+    # Detect decoder_dim from dec3.up.weight shape: (enc_ch, dec_ch, 2, 2)
+    decoder_w = sd.get('dec3.up.weight')
+    decoder_dim = decoder_w.shape[1] if decoder_w is not None else 256
     mcly_weight = sd.get('head_mcly.3.weight')
     num_tex_classes = mcly_weight.shape[0] if mcly_weight is not None else len(mcly_vocab) + 1
-    model = V11TerrainModel(in_channels=in_channels, decoder_dim=256, num_texture_classes=num_tex_classes)
+    model = V11TerrainModel(in_channels=in_channels, decoder_dim=decoder_dim, num_texture_classes=num_tex_classes)
     model.mcly_unk_idx = mcly_unk_idx
     model.load_state_dict(sd)
     model = model.to(device)
@@ -97,6 +136,7 @@ def infer(args):
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     results = []
+    heightmaps = {}  # (x, y) -> 257x257 numpy array
 
     for shard_idx, shard_path_str in enumerate(shard_paths[:args.limit] if args.limit > 0 else shard_paths):
         shard_path = Path(shard_path_str)
@@ -112,22 +152,29 @@ def infer(args):
 
         pred = model(inp_tensor)
 
+        # Per-tile denormalization: model predicts z-scored height
+        # Use tile_mean/tile_std from dataset (computed from actual height_257)
+        t_mean = targets.get('tile_mean', torch.tensor(height_mean)).item()
+        t_std = max(targets.get('tile_std', torch.tensor(height_std)).item(), 0.01)
+
         tile_name = str(shard_path.stem)
         if tile_name.endswith('_v10'):
             tile_name = tile_name[:-4]
         parsed = parse_tile_name(tile_name)
         map_name = parsed[0] if parsed else 'map'
         tile_stem = f'{map_name}_{parsed[1]}_{parsed[2]}' if parsed else tile_name
+        tile_x = parsed[1] if parsed else 0
+        tile_y = parsed[2] if parsed else 0
 
         tile_dir = output_dir / tile_stem
         tile_dir.mkdir(parents=True, exist_ok=True)
 
-        height_257 = pred['height_257'].squeeze().float().cpu().numpy()
-        height_257 = height_257 * height_std + height_mean
-        height_65 = pred['height_65'].squeeze().float().cpu().numpy()
-        height_65 = height_65 * height_std + height_mean
-        height_17 = pred['height_17'].squeeze().float().cpu().numpy()
-        height_17 = height_17 * height_std + height_mean
+        height_257 = pred['height_257'].squeeze().float().cpu().numpy() * t_std + t_mean
+        height_65 = pred['height_65'].squeeze().float().cpu().numpy() * t_std + t_mean
+        height_17 = pred['height_17'].squeeze().float().cpu().numpy() * t_std + t_mean
+
+        if parsed:
+            heightmaps[(tile_x, tile_y)] = height_257
 
         mcal = pred['mcal_alpha'].squeeze().float().cpu().numpy()
         mcal_rgb = (mcal.transpose(1, 2, 0) * 255).astype(np.uint8) if mcal.ndim == 3 else None
@@ -141,9 +188,12 @@ def infer(args):
         export_items = {}
 
         if args.export_obj:
-            tex_rgb = mcal_rgb if mcal_rgb is not None else np.zeros((256, 256, 3), dtype=np.uint8)
+            # Use minimap as texture, not MCAL alpha
+            mm = raw.get('minimap_rgb_256', np.zeros((256, 256, 3), dtype=np.uint8))
+            if mm.ndim == 3 and mm.shape[0] == 3:
+                mm = mm.transpose(1, 2, 0)
             tex_path = tile_dir / f'{tile_stem}_texture.png'
-            write_png(tex_path, tex_rgb)
+            write_png(tex_path, mm.clip(0, 255).astype(np.uint8))
             obj, mtl = export_obj(
                 height_257, tile_dir / f'{tile_stem}.obj', tex_path.name,
                 tile_world_size=args.tile_world_size, center_mesh=args.center_mesh,
@@ -162,7 +212,7 @@ def infer(args):
         export_items['npz'] = str(npz_path)
 
         gt_height = targets.get('height_257')
-        mae = float(np.abs(height_257 - (gt_height.squeeze().numpy() * height_std + height_mean)).mean()) if gt_height is not None else -1
+        mae = float(np.abs(height_257 - (gt_height.squeeze().numpy() * t_std + t_mean)).mean()) if gt_height is not None else -1
 
         result = {
             'tile': tile_stem,
@@ -177,10 +227,45 @@ def infer(args):
         print(f'  height: {height_257.shape} [{height_257.min():.1f}, {height_257.max():.1f}] '
               f'mae={mae:.2f} mcal={mcal_rgb.shape if mcal_rgb is not None else "none"}')
 
+    # Edge stitching: average shared edges/corners between adjacent tiles
+    if args.stitch_edges and len(heightmaps) >= 2:
+        stitched = stitch_heightmaps(heightmaps)
+        if stitched:
+            # Rewrite the saved NPZ files with stitched heights
+            for (tx, ty), stitched_h in stitched.items():
+                for r in results:
+                    if r['tile'].endswith(f'{tx}_{ty}'):
+                        npz_path = r['exports'].get('npz', '')
+                        if npz_path:
+                            with np.load(npz_path) as z:
+                                data = dict(z)
+                            data['height_257'] = stitched_h
+                            if 'height_65' in data: del data['height_65']
+                            if 'height_17' in data: del data['height_17']
+                            np.savez_compressed(npz_path, **data)
+                        break
+            print(f'Edge stitching applied to {len(stitched)} tiles')
+        # Re-export OBJs with stitched heights
+        if args.export_obj:
+            for (tx, ty), stitched_h in stitched.items():
+                for r in results:
+                    if r['tile'].endswith(f'{tx}_{ty}'):
+                        td = output_dir / r['tile']
+                        mm = np.load(r['exports'].get('npz', '')).get('minimap_rgb_256', np.zeros((256, 256, 3), dtype=np.uint8))
+                        if mm is not None and mm.ndim == 3 and mm.shape[0] == 3:
+                            mm = mm.transpose(1, 2, 0)
+                        tex_path = td / f'{r["tile"]}_texture_stitched.png'
+                        write_png(tex_path, mm.clip(0, 255).astype(np.uint8))
+                        export_obj(stitched_h, td / f'{r["tile"]}_stitched.obj', tex_path.name,
+                                   tile_world_size=args.tile_world_size, center_mesh=args.center_mesh,
+                                   height_offset=args.height_offset)
+            print(f'Re-exported stitched OBJs')
+
     write_json(output_dir / 'inference_report.json', {
         'checkpoint': str(args.checkpoint),
         'shards_processed': len(results),
         'output_dir': str(output_dir),
+        'stitched': bool(args.stitch_edges and len(heightmaps) >= 2),
         'results': results,
     })
     print(f'\nDone. Processed {len(results)} shards. Report: {output_dir / "inference_report.json"}')
@@ -196,6 +281,7 @@ def main():
     p.add_argument('--tile-world-size', type=float, default=533.333)
     p.add_argument('--center-mesh', action='store_true')
     p.add_argument('--height-offset', type=float, default=0.0)
+    p.add_argument('--stitch-edges', action='store_true', help='Average shared edges/corners between adjacent tiles')
     args = p.parse_args()
     infer(args)
 
