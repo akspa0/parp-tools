@@ -91,6 +91,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "terrain-patch-adt":
 		TerrainPatchAdtCommand.Run(tail);
 		break;
+	case "harvest-tilesets":
+		V11TilesetHarvestCommand.Run(tail);
+		break;
 	case "export-tex-json":
 		RunExportTexJson(tail);
 		break;
@@ -2144,6 +2147,19 @@ static DirectCacheBuildResult? BuildDirectCacheEntry(
 	(float[] mcalAlphaPack256, byte[] mclyLayerMask, int[] mclyTextureIds) = BuildMcalMclySignals(terrain);
 	bool hasMcly = mclyTextureIds.Any(static id => id >= 0);
 
+	// Collect unique texture names from MTEX (used for tileset harvesting)
+	List<string> textureNames = new();
+	var uniqueNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	foreach (WorldTerrainChunkData chunk in terrain.Chunks)
+	{
+		foreach (var layer in chunk.TextureLayers)
+		{
+			if (!string.IsNullOrWhiteSpace(layer.TexturePath))
+				uniqueNames.Add(layer.TexturePath);
+		}
+	}
+	textureNames = uniqueNames.OrderBy(static n => n, StringComparer.OrdinalIgnoreCase).ToList();
+
 	List<(string Name, NpyArray Array)> payload =
 	[
 		("chunk_heights_256x145", NpyArray.FromFloat32(chunkHeights, 256, 145)),
@@ -2175,6 +2191,13 @@ static DirectCacheBuildResult? BuildDirectCacheEntry(
 		payload.Add(("minimap_rgb_256", NpyArray.FromUInt8(minimapRgb256, NativeMinimapSize, NativeMinimapSize, 3)));
 
 	WriteNpz(shardPath, payload);
+
+	// Sidecar metadata.json for tileset harvesting
+	if (hasMcly && textureNames.Count > 0)
+	{
+		string sidecarPath = Path.ChangeExtension(shardPath, null) + "_metadata.json";
+		File.WriteAllText(sidecarPath, JsonSerializer.Serialize(new { mcly_texture_names = textureNames }, CreateJsonOptions()));
+	}
 
 	string debugJsonPath = sourceManifestPath;
 	if (writeDebugJson)
