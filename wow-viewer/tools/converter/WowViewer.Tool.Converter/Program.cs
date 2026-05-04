@@ -789,7 +789,8 @@ static void RunDatasetScan(string[] args)
 			return;
 		}
 
-		entries = BuildDatasetScanEntriesFromArchive(clientRoot, normalizedBuildLabel, normalizedMapName, mapPath, archiveCatalog, limit);
+		bool forceAll = HasFlag(args, "--force-all-tiles");
+		entries = BuildDatasetScanEntriesFromArchive(clientRoot, normalizedBuildLabel, normalizedMapName, mapPath, archiveCatalog, limit, forceAll);
 	}
 
 	TerrainTrainingSampleManifest manifest = new(
@@ -1471,7 +1472,7 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromDirector
 	return entries;
 }
 
-static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(string clientRoot, string buildLabel, string mapName, string mapPath, IArchiveCatalog archiveCatalog, int? limit)
+static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(string clientRoot, string buildLabel, string mapName, string mapPath, IArchiveCatalog archiveCatalog, int? limit, bool forceAllTiles = false)
 {
 	string mapVirtualRoot = ResolveMapVirtualRoot(clientRoot, mapName, mapPath);
 	string mapDirectory = GetMapDirectoryFromMapVirtualRoot(mapVirtualRoot, mapName);
@@ -1489,6 +1490,17 @@ static List<TerrainTrainingSampleDescriptor> BuildDatasetScanEntriesFromArchive(
 		.OrderBy(static tile => tile.TileY)
 		.ThenBy(static tile => tile.TileX)
 		.ToList();
+
+	// --force-all-tiles: for alpha builds, also include tiles with MAIN=0
+	// that might contain squished/erased terrain data
+	if (forceAllTiles)
+	{
+		var existingSet = allTileCoordinates.Select(t => (t.TileX, t.TileY)).ToHashSet();
+		for (int y = 0; y < 64; y++)
+			for (int x = 0; x < 64; x++)
+				if (!existingSet.Contains((x, y)))
+					allTileCoordinates.Add(new WdtTileCoordinate(x, y));
+	}
 
 	List<WdtTileCoordinate> tileCoordinates = allTileCoordinates;
 	if (limit is > 0)

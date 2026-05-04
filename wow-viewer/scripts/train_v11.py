@@ -85,6 +85,26 @@ class DecoderBlock(nn.Module):
         x = torch.cat([x, skip], dim=1)
         return self.fuse(x)
 
+class MinimapEncoder(nn.Module):
+    """Lightweight encoder for minimap-only input (5ch → 96ch @ 64×64).
+    Matches the output of the full ConvNeXt stem so both paths feed the same stages."""
+    def __init__(self, in_ch=5, out_ch=96):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_ch, 32, 7, stride=2, padding=3),
+            LayerNorm2d(32), nn.GELU(),
+            ConvNeXtBlock(32),
+            nn.Conv2d(32, 64, 3, stride=2, padding=1),
+            LayerNorm2d(64), nn.GELU(),
+            ConvNeXtBlock(64),
+            ConvNeXtBlock(64),
+            nn.Conv2d(64, out_ch, 3, stride=1, padding=1),
+            LayerNorm2d(out_ch), nn.GELU(),
+        )
+    def forward(self, x):
+        return self.net(x)
+
+
 class V11TerrainModel(nn.Module):
     def __init__(self, in_channels=28, decoder_dim=256, num_texture_classes=128):
         super().__init__()
@@ -96,9 +116,11 @@ class V11TerrainModel(nn.Module):
         self.encoder_stages = nn.ModuleList(backbone.stages)
         self.encoder_channels = [96, 192, 384, 768]
 
-        # Overlapping conv stem replaces the non-overlapping patch stem.
-        # Two stride-2 convs preserve high-frequency detail better than a
-        # single stride-4 conv, reducing grid artifacts in the decoder.
+        # Minimap-only encoder: 5ch → 96ch @ 64×64, feeds into shared stages
+        self.minimap_encoder = MinimapEncoder(5, 96)
+        self.training_minimap_ratio = 0.60  # 60% of training batches use minimap-only path
+
+        # Overlapping conv stem for full 26-channel input
         self.stem = nn.Sequential(
             nn.Conv2d(in_channels, 96, kernel_size=7, stride=2, padding=3),
             LayerNorm2d(96),
@@ -137,8 +159,11 @@ class V11TerrainModel(nn.Module):
             nn.Conv2d(self.refine_dim, 64, 1), nn.GELU(), nn.Conv2d(64, 1, 1))
         self.head_height_257 = nn.Sequential(
             nn.Conv2d(self.refine_dim, 64, 3, padding=1), nn.GELU(),
-            nn.Conv2d(64, 64, 3, padding=1), nn.GELU(),
-            nn.Conv2d(64, 1, 3, padding=1))
+            ConvNeXtBlock(64),
+            ConvNeXtBlock(64),
+            ConvNeXtBlock(64),
+            nn.Conv2d(64, 32, 3, padding=1), nn.GELU(),
+            nn.Conv2d(32, 1, 3, padding=1))
         self.head_mcal = nn.Sequential(
             nn.Conv2d(self.refine_dim, 64, 3, padding=1), nn.GELU(),
             nn.Conv2d(64, 4, 3, padding=1))
@@ -157,7 +182,20 @@ class V11TerrainModel(nn.Module):
         self.register_parameter('log_hole_sigma', nn.Parameter(torch.tensor(2.0)))
 
     def forward(self, x):
-        x = self.stem(x)
+        """Dual-path: during training, 80% of batches use minimap-only encoder
+        so the model learns minimap→height. The other 20% use all 26 channels.
+        At inference (eval mode), always uses minimap-only path."""
+        if self.training and torch.rand(1).item() < self.training_minimap_ratio:
+            # Training: minimap-only path
+            mm_input = torch.cat([x[:, 0:3], x[:, 22:24]], dim=1)
+            x = self.minimap_encoder(mm_input)
+        elif not self.training:
+            # Inference: always minimap-only
+            mm_input = torch.cat([x[:, 0:3], x[:, 22:24]], dim=1)
+            x = self.minimap_encoder(mm_input)
+        else:
+            # Training: full 26-channel path (40% of time)
+            x = self.stem(x)
 
         feats = []
         for stage in self.encoder_stages:
@@ -165,7 +203,6 @@ class V11TerrainModel(nn.Module):
             feats.append(x)
 
         assert len(feats) == 4, f"Expected 4 encoder features, got {len(feats)}"
-
         f0, f1, f2, f3 = feats
 
         d = self.dec3(f3, f2)
@@ -263,11 +300,60 @@ def build_mcly_vocab(shard_paths, min_occurrences=3):
     return vocab, unk_idx
 
 
+def _ablated_minimap(mcal, mcly_ids, tileset_cache, texture_names):
+    """Composite a minimap with 1-3 random texture layers ablated."""
+    if tileset_cache is None or not texture_names:
+        return None
+    mcal = mcal.astype(np.float32)
+    if mcal.ndim == 3 and mcal.shape[0] in (1, 4):
+        mcal = mcal.transpose(1, 2, 0)
+    if mcly_ids.ndim == 3 and mcly_ids.shape[0] == 4:
+        mcly_ids = mcly_ids.transpose(1, 2, 0)
+
+    keep_count = random.randint(1, 3)
+    keep_layers = sorted(random.sample([0, 1, 2, 3], keep_count))
+
+    tile_chunks, chunk_alpha = 16, 64
+    out_size = chunk_alpha * tile_chunks
+    synthetic = np.zeros((out_size, out_size, 3), dtype=np.float32)
+    any_tex = False
+
+    for cy in range(tile_chunks):
+        for cx in range(tile_chunks):
+            for layer in keep_layers:
+                if layer >= mcly_ids.shape[-1]:
+                    continue
+                tid = mcly_ids[cy, cx, layer]
+                if tid < 0:
+                    continue
+                # MCLY id maps to MTEX index — texture_names[tid] is the BLP path
+                tex_name = texture_names[int(tid)] if int(tid) < len(texture_names) else ""
+                if not tex_name:
+                    continue
+                tex = tileset_cache.get(tex_name)
+                if tex is None:
+                    continue
+                any_tex = True
+                tex_h, tex_w = tex.shape[:2]
+                for ly in range(chunk_alpha):
+                    ty = int(ly * tex_h / chunk_alpha) % tex_h
+                    for lx in range(chunk_alpha):
+                        tx = int(lx * tex_w / chunk_alpha) % tex_w
+                        a = mcal[cy * chunk_alpha + ly, cx * chunk_alpha + lx, layer]
+                        if a <= 0.005: continue
+                        py, px = cy * chunk_alpha + ly, cx * chunk_alpha + lx
+                        synthetic[py, px] += tex[ty, tx].astype(np.float32) * a
+
+    if not any_tex:
+        return None
+    return synthetic.clip(0, 255).astype(np.uint8)
+
+
 class V11Dataset(Dataset):
     def __init__(self, shard_paths, mcly_vocab=None, mcly_unk_idx=0,
                  signal_dropout=0.15, augment=False,
                  height_mean=0.0, height_std=1.0,
-                 max_cache_mb=2048):
+                 max_cache_mb=2048, tileset_cache=None, layer_ablate_prob=0.4):
         self.paths = shard_paths
         self.mcly_vocab = mcly_vocab or {}
         self.mcly_unk_idx = mcly_unk_idx
@@ -279,6 +365,8 @@ class V11Dataset(Dataset):
         self._cache_order = []
         self._max_cache_bytes = max_cache_mb * 1024 * 1024
         self._cache_bytes = 0
+        self._tileset_cache = tileset_cache
+        self._layer_ablate_prob = layer_ablate_prob
         # Per-channel dropout multipliers — higher = more likely to drop.
         # MCCV vertex colors (ch 10-12) are artist-painted, no geometric link
         # to height. At 70% base dropout, these drop ~95% of the time.
@@ -299,6 +387,18 @@ class V11Dataset(Dataset):
 
         with np.load(path) as npz:
             raw = {k: v.copy() for k, v in npz.items() if isinstance(v, np.ndarray)}
+
+        # Load texture names from sidecar for layer ablation
+        sidecar = Path(path).with_name(Path(path).stem + '_metadata.json')
+        if sidecar.exists():
+            try:
+                with open(sidecar) as f:
+                    meta = json.loads(f.read())
+                raw['_texture_names'] = meta.get('mcly_texture_names', [])
+            except:
+                raw['_texture_names'] = []
+        else:
+            raw['_texture_names'] = []
 
         if 'mcal_alpha_pack_256' in raw:
             a = raw['mcal_alpha_pack_256']
@@ -378,9 +478,7 @@ class V11Dataset(Dataset):
                     a = a[:ch] if a.shape[0] > ch else a.repeat(ch // max(a.shape[0], 1) + 1, 1, 1)[:ch]
                 inp[ci:ci + ch] = a
             ci += ch
-
         place(3, 'minimap_rgb_256')
-        place(4, 'mcal_alpha_pack_256')
         place(3, 'mcnr_normal_xyz', 'normal_rgb_256')
         place(3, 'mccv_rgb')
         # Skip global height_17 — replaced with per-tile normalized version below
@@ -428,8 +526,7 @@ class V11Dataset(Dataset):
         if self.signal_dropout > 0 and getattr(self, '_is_training', False):
             p = torch.clamp(self.signal_dropout * self._dropout_mult, 0, 0.95)
             mask = torch.rand(N_CHANNELS) >= p
-            # Always keep minimap (ch 0-2) — the model's only guaranteed input at inference
-            mask[0:3] = True
+            mask[0:3] = True  # always keep minimap
             inp *= mask.unsqueeze(1).unsqueeze(2).float()
 
         targets = {}
@@ -493,6 +590,20 @@ class V11Dataset(Dataset):
 
         stem = Path(self.paths[idx]).stem.replace('_v10', '').replace('_v11', '')
         targets['tile_name'] = stem
+
+        # Layer ablation: replace minimap with a stripped version (fewer texture layers visible)
+        if self._tileset_cache is not None and random.random() < self._layer_ablate_prob \
+                and 'mcal_alpha_pack_256' in data and 'mcly_texture_ids' in data:
+            try:
+                ablated = _ablated_minimap(
+                    data['mcal_alpha_pack_256'], data['mcly_texture_ids'],
+                    self._tileset_cache, data.get('_texture_names', []))
+                if ablated is not None:
+                    ablated_t = torch.from_numpy(ablated.astype(np.float32)).permute(2, 0, 1)
+                    inp[0:3] = ablated_t / 255.0
+            except Exception:
+                pass
+
         # Save per-tile normalization stats for validation denormalization
         targets['tile_mean'] = torch.tensor(float(tile_mean.item() if isinstance(tile_mean, torch.Tensor) else tile_mean))
         targets['tile_std'] = torch.tensor(float(tile_std.item() if isinstance(tile_std, torch.Tensor) else tile_std))
@@ -571,13 +682,23 @@ class UncertaintyWeightedLoss(nn.Module):
         hf_p = p257 - F.interpolate(p65, size=257, mode='bilinear', align_corners=False)
         hf_l1 = F.l1_loss(hf_p, hf_t)
 
+        # Sobel edge loss on full-resolution height — forces sharp edges
+        sx = torch.tensor([[[[-1,0,1],[-2,0,2],[-1,0,1]]]], device=p257.device, dtype=p257.dtype)
+        sy = torch.tensor([[[[-1,-2,-1],[0,0,0],[1,2,1]]]], device=p257.device, dtype=p257.dtype)
+        edge_p = (F.conv2d(p257, sx.repeat(p257.shape[1],1,1,1), padding=1).abs() +
+                  F.conv2d(p257, sy.repeat(p257.shape[1],1,1,1), padding=1).abs())
+        edge_t = (F.conv2d(t257, sx.repeat(t257.shape[1],1,1,1), padding=1).abs() +
+                  F.conv2d(t257, sy.repeat(t257.shape[1],1,1,1), padding=1).abs())
+        edge_l1 = F.l1_loss(edge_p, edge_t)
+
         hf_w = self._hf_weight.item()
         lf_w = self._lf_weight.item()
-        total = total + lf_w * lf_l1 + 0.5 * mid_l1 + hf_w * hf_l1
+        total = total + lf_w * lf_l1 + 0.5 * mid_l1 + hf_w * hf_l1 + 3.0 * edge_l1
 
         losses[f'{prefix}lf_l1'] = lf_l1.item()
         losses[f'{prefix}mid_l1'] = mid_l1.item()
         losses[f'{prefix}hf_l1'] = hf_l1.item()
+        losses[f'{prefix}edge'] = edge_l1.item()
 
         def apply_uncertainty(loss_val, log_sigma, weight=1.0):
             ls = log_sigma.clamp(-3, 3)
@@ -610,6 +731,46 @@ class UncertaintyWeightedLoss(nn.Module):
 
         losses[f'{prefix}loss'] = total.item()
         return total, losses
+
+
+def compute_seam_loss(pred, targets, batch_size):
+    """Penalize height mismatch at tile boundaries for adjacent tiles in a batch."""
+    if batch_size < 2:
+        return 0.0
+    
+    # Parse tile coordinates from tile_name
+    coords = []
+    for i in range(batch_size):
+        tn = targets.get('tile_name', [f'tile_{j}' for j in range(batch_size)])
+        name = tn[i] if isinstance(tn, (list, tuple)) else str(tn)
+        parts = name.rsplit('_', 2)
+        if len(parts) == 3:
+            coords.append((int(parts[-1]), int(parts[-2])))  # (X, Y) from Map_X_Y
+        else:
+            coords.append((i, i))
+    
+    seam = 0.0
+    count = 0
+    h257 = pred['height_257']  # [B, 1, 257, 257]
+    
+    for i in range(batch_size):
+        xi, yi = coords[i]
+        for j in range(i + 1, batch_size):
+            xj, yj = coords[j]
+            if xi == xj and abs(yi - yj) == 1:
+                # Vertical neighbors: tile i's right edge vs tile j's left edge
+                edge_i = h257[i, :, :, -1]  # rightmost column
+                edge_j = h257[j, :, :, 0]   # leftmost column
+                seam = seam + F.l1_loss(edge_i, edge_j)
+                count += 1
+            elif yi == yj and abs(xi - xj) == 1:
+                # Horizontal neighbors: tile i's bottom edge vs tile j's top edge
+                edge_i = h257[i, :, -1, :]  # bottom row
+                edge_j = h257[j, :, 0, :]   # top row
+                seam = seam + F.l1_loss(edge_i, edge_j)
+                count += 1
+    
+    return seam / max(count, 1)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -797,6 +958,14 @@ def train_v11(args):
 
     random.seed(args.seed)
     random.shuffle(sample_paths)
+    # Sort by map + coordinates so adjacent tiles cluster together
+    def _sort_key(p):
+        stem = Path(p).stem.replace('_v10','').replace('_v11','')
+        parts = stem.rsplit('_', 2)
+        if len(parts) == 3:
+            return (parts[0], int(parts[2]), int(parts[1]))  # map, X, Y
+        return (stem, 0, 0)
+    sample_paths.sort(key=_sort_key)
 
     val_count = max(1, min(int(len(sample_paths) * args.val_fraction), len(sample_paths) // 2))
     train_paths = sample_paths[val_count:]
@@ -831,12 +1000,24 @@ def train_v11(args):
         signal_dropout=0, augment=False,
         height_mean=height_mean, height_std=height_std)
 
+    # Load tileset cache for layer ablation if available
+    tileset_cache = None
+    tileset_dir = Path(r'I:\parp\parp-tools\output\tmp\tilesets')
+    if tileset_dir.exists() and (tileset_dir / 'tileset_index.json').exists():
+        try:
+            from synthesize_minimap import TilesetCache
+            tileset_cache = TilesetCache(str(tileset_dir))
+            train_ds._tileset_cache = tileset_cache
+            print(f"  Layer ablation: enabled (tileset cache ready)")
+        except Exception as e:
+            print(f"  Layer ablation: failed to load tilesets — {e}")
+
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True,
         num_workers=args.num_workers, pin_memory=True,
         persistent_workers=args.num_workers > 0)
     val_loader = DataLoader(
-        val_ds, batch_size=args.batch_size, shuffle=False,
+        val_ds, batch_size=args.batch_size, shuffle=True,
         num_workers=args.num_workers, pin_memory=True,
         persistent_workers=args.num_workers > 0)
 
@@ -934,6 +1115,9 @@ def train_v11(args):
 
             pred = model(inp)
             loss, losses = loss_fn(pred, targets, model)
+            # Seam loss: penalize edge mismatches between adjacent tiles in batch
+            seam_l = compute_seam_loss(pred, targets, inp.shape[0])
+            loss = loss + 0.3 * seam_l
 
             # NaN guard: skip batch if loss or any gradient is NaN
             if torch.isnan(loss) or torch.isinf(loss):
@@ -973,12 +1157,13 @@ def train_v11(args):
                 if not (math.isnan(ls) or math.isinf(ls)):
                     print(f"  E{epoch:3d} B{batch_idx:4d}/{len(train_loader)} loss={ls:.4f}")
 
-        # Manual LR schedule (SequentialLR breaks with torch.compile)
+        # Manual LR schedule with floor
         if epoch < args.warmup_epochs:
             lr_val = args.learning_rate * (0.01 + 0.99 * epoch / max(args.warmup_epochs, 1))
         else:
             frac = (epoch - args.warmup_epochs) / max(args.epochs - args.warmup_epochs, 1)
-            lr_val = args.learning_rate * 0.5 * (1 + math.cos(math.pi * frac))
+            lr_val = args.learning_rate * 0.5 * (1 + math.cos(math.pi * min(frac, 1.0)))
+            lr_val = max(lr_val, args.learning_rate * 0.01)  # floor at 1% of peak
         for pg in optimizer.param_groups:
             pg['lr'] = lr_val
 
@@ -1007,6 +1192,18 @@ def train_v11(args):
             stall_epochs = stall_epochs + 1 if epoch > 60 and val_l1 > best_val_l1 else 0
             if epoch == 0 or val_l1 < best_val_l1:
                 best_val_l1 = val_l1
+                ema.store()
+                ema.apply()
+                raw = model._orig_mod if hasattr(model, '_orig_mod') else model
+                torch.save({
+                    'model': {k.removeprefix('_orig_mod.'): v for k, v in raw.state_dict().items()},
+                    'epoch': epoch, 'val_l1': val_l1,
+                    'height_mean': height_mean, 'height_std': height_std,
+                    'mcly_vocab': mcly_vocab, 'mcly_unk_idx': mcly_unk_idx,
+                    'log_sigmas': [model.log_height_sigma.item(), model.log_mcal_sigma.item(), model.log_hole_sigma.item()],
+                }, output_dir / 'best.pt')
+                ema.restore()
+                print(f"  -> NEW BEST (val={val_l1:.4f})")
             # Preview on val epochs
             try:
                 save_preview_from_batch(model, inp_v, targets_v, device,
@@ -1021,7 +1218,7 @@ def train_v11(args):
         vl_str = f" val={last_val_l1:.4f}" if epoch % 5 == 0 and last_val_l1 >= 0 else ""
         print(f"E{epoch:3d} loss={avg.get('loss', 0):.4f} lr={lr:.2e}"
               f" lf={avg.get('lf_l1', 0):.4f} mid={avg.get('mid_l1', 0):.4f} hf={avg.get('hf_l1', 0):.4f}"
-              f" mc={avg.get('mcal_l1', 0):.3f} ml={avg.get('mcly_ce', 0):.2f}{gn_str}{vl_str}")
+              f" eg={avg.get('edge', 0):.4f} mc={avg.get('mcal_l1', 0):.3f} ml={avg.get('mcly_ce', 0):.2f}{gn_str}{vl_str}")
 
         history.append({
             'epoch': epoch,

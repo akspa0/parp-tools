@@ -35,9 +35,11 @@ class TilesetCache:
         if key in self._cache:
             return self._cache[key]
 
-        stem = Path(key).stem
-        for ext in ('.png', '.blp', '.PNG', '.BLP'):
-            for candidate in self._harvest_dir.rglob(f'{stem}{ext}'):
+        stem = Path(key).stem  # e.g. "BurningSteppsAsh01"
+        for candidate in self._harvest_dir.rglob('*.png'):
+            cname = candidate.stem  # e.g. "Tileset_BurningStepps_BurningSteppsAsh01_blp" or "BurningSteppsAsh01"
+            # Match if the harvest filename contains the texture stem
+            if stem.lower() in cname.lower() or cname.lower() == stem.lower():
                 try:
                     img = Image.open(candidate).convert('RGB')
                     arr = np.asarray(img)
@@ -133,8 +135,10 @@ def downsample_1024_to_256(arr: np.ndarray) -> np.ndarray:
     """Average-pool 1024x1024 → 256x256."""
     if arr.shape[0] != 1024:
         return arr
-    from skimage.measure import block_reduce
-    return block_reduce(arr, (4, 4, 1), np.mean).astype(arr.dtype)
+    from PIL import Image
+    img = Image.fromarray(arr)
+    img = img.resize((256, 256), Image.Resampling.BILINEAR)
+    return np.asarray(img)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -155,21 +159,19 @@ def process_shard(shard_path: str, harvest_dir: str, output_dir: str, cache: Til
     if 'mcal_alpha_pack_256' not in raw or 'mcly_texture_ids' not in raw:
         return f"SKIP {shard_path}: no MCAL/MCLY"
 
-    # Read metadata for texture names
-    meta_path = Path(shard_path).with_name('metadata.json')
-    if not meta_path.exists():
-        # Try inside NPZ
-        zf = np.load(shard_path)
-        if 'metadata.json' not in zf.files and hasattr(zf, 'files'):
-            pass
-        texture_names = []
-    else:
+    # Try sidecar _metadata.json (v9 pipeline) — sits next to the NPZ
+    sidecar = Path(shard_path).with_name(Path(shard_path).stem + '_metadata.json')
+    if sidecar.exists():
+        with open(sidecar) as f:
+            texture_names = json.load(f).get('mcly_texture_names', [])
+    # Fallback: inside NPZ (v10 pipeline)
+    if not texture_names:
         try:
-            with open(meta_path) as f:
-                meta = json.load(f)
-            texture_names = meta.get('mcly_texture_names', [])
-        except Exception:
-            texture_names = []
+            zf = np.load(shard_path)
+            if hasattr(zf, 'files'):
+                pass
+        except:
+            pass
 
     # Also try from a sidecar _metadata.json
     if not texture_names:
