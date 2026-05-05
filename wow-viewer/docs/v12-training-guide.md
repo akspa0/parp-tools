@@ -63,6 +63,50 @@ MCLY vocabulary maps texture IDs to class indices. Saved with checkpoint.
 - **MCLY CE < 1.5**: Texture classification is working. Random baseline for 27 classes is ln(27) ≈ 3.3
 - **Residual L1 < 0.04**: Residual captures shading well
 
+## Visual Validation
+
+Run inference on a single tile and save side-by-side PNGs of predictions vs ground truth:
+
+```powershell
+& 'gillijimproject_refactor/.venv-train/Scripts/python.exe' `
+  wow-viewer/scripts/train_v12.py `
+  --checkpoint runs/v12_stage1/best.pt `
+  --tile output/tmp/v11_cache/shards/3_3_5_12340__azeroth/Azeroth_33_43.npz `
+  --output-dir viz_output --residual-dir output/tmp/maptextures
+```
+
+This saves to `viz_output/`:
+| File | Shows |
+|------|-------|
+| `Azeroth_33_43_minimap.png` | Input minimap (reference) |
+| `Azeroth_33_43_mcal_pred_l{0-3}.png` | Predicted MCAL per layer (grayscale, white = high alpha) |
+| `Azeroth_33_43_mcal_gt_l{0-3}.png` | Ground-truth MCAL per layer |
+| `Azeroth_33_43_mcly_pred.png` | Predicted chunk texture labels (color-coded 16×16 upscaled) |
+| `Azeroth_33_43_mcly_gt.png` | Ground-truth chunk texture labels |
+| `Azeroth_33_43_residual_pred.png` | Predicted residual (shading + objects, [-1,1] mapped to [0,1]) |
+| `Azeroth_33_43_residual_gt.png` | Ground-truth residual |
+
+Also prints per-layer MCAL stats and MCLY accuracy:
+
+```
+Layer 0: pred_max=0.823 pred_nz=0.341  gt_max=1.000 gt_nz=0.324
+Layer 1: pred_max=0.451 pred_nz=0.123  gt_max=0.832 gt_nz=0.118
+...
+MCLY accuracy: 0.712 (182/256)
+```
+
+**Good signs:**
+- MCAL pred_max and pred_nz roughly match gt_max and gt_nz
+- MCAL is not all-zeros (pred_nz > 0.05 for at least layer 0)
+- MCLY accuracy > 0.5 (better than random)
+- Residual pred shows structure (shading, objects) not flat gray
+
+**Bad signs:**
+- MCAL pred_nz = 0.0 (all zeros — model is cheating)
+- MCAL pred_max very low (< 0.1) even for layer 0
+- MCLY accuracy = 1/N_classes (random guessing)
+- Residual pred is uniform gray
+
 ## What Comes After
 
 ```

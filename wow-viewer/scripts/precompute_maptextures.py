@@ -1,21 +1,20 @@
 """Pre-composite MapTextures from ground-truth MCAL/MCLY + tilesets.
-Run before training V12 — writes sidecar NPZ files with composited textures."""
+Uses WoW's normalized weighted sum formula: w[0]=1-clamp(Σα[1..3],0,1), w[i]=α[i].
+Run before training — writes sidecar NPZ files with composited textures + residual."""
 import argparse, json, os, sys, numpy as np
 from pathlib import Path
 from PIL import Image
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-TILE_CHUNKS, CHUNK_ALPHA = 16, 64
-OUT_SIZE = TILE_CHUNKS * CHUNK_ALPHA
+TILE_CHUNKS = 16
 
 
 def load_tileset_cache(harvest_dir):
-    """Build dict: texture_name_stem -> numpy array."""
     cache = {}
     harvest = Path(harvest_dir)
     if not harvest.exists(): return cache
     for f in harvest.rglob('*.png'):
-        cache[f.stem.lower()] = f  # just store paths
+        cache[f.stem.lower()] = f
     return cache
 
 
@@ -50,37 +49,58 @@ def composite_one(shard_path, tileset_cache, out_dir):
         if mcal.ndim == 3 and mcal.shape[0] in (1, 4): mcal = mcal.transpose(1, 2, 0)
         if mcly.ndim == 3 and mcly.shape[0] == 4: mcly = mcly.transpose(1, 2, 0)
 
-        # Auto-detect MCAL resolution: 256→16 per chunk, 1024→64 per chunk
-        tile_chunks = 16
-        out_size = mcal.shape[0]  # 256 or 1024
-        chunk_alpha = out_size // tile_chunks  # 16 or 64
+        out_size = mcal.shape[0]
+        chunk_alpha = out_size // TILE_CHUNKS
 
         synthetic = np.zeros((out_size, out_size, 3), dtype=np.float32)
         any_tex = False
 
-        for cy in range(tile_chunks):
-            for cx in range(tile_chunks):
+        for cy in range(TILE_CHUNKS):
+            for cx in range(TILE_CHUNKS):
+                # Get textures for each layer in this chunk
+                texs = []
                 for layer in range(4):
-                    if layer >= mcly.shape[-1]: continue
+                    if layer >= mcly.shape[-1]: texs.append(None); continue
                     tid = int(mcly[cy, cx, layer])
-                    if tid < 0 or tid >= len(texture_names): continue
+                    if tid < 0 or tid >= len(texture_names):
+                        texs.append(None); continue
                     tex = get_texture(tileset_cache, texture_names[tid])
-                    if tex is None: continue
-                    any_tex = True
-                    th, tw = tex.shape[:2]
-                    for ly in range(chunk_alpha):
-                        ty = int(ly * th / chunk_alpha) % th
-                        for lx in range(chunk_alpha):
-                            tx = int(lx * tw / chunk_alpha) % tw
-                            a = mcal[cy * chunk_alpha + ly, cx * chunk_alpha + lx, layer]
-                            if a <= 0.005: continue
-                            py, px = cy * chunk_alpha + ly, cx * chunk_alpha + lx
-                            synthetic[py, px] += tex[ty, tx].astype(np.float32) * a
+                    texs.append(tex)
+                    if tex is not None: any_tex = True
 
-        if not any_tex: return None
+                for ly in range(chunk_alpha):
+                    py = cy * chunk_alpha + ly
+                    for lx in range(chunk_alpha):
+                        px = cx * chunk_alpha + lx
+
+                        al = mcal[py, px, :]  # (4,) — α[0]=unused, α[1..3]=layer overlays
+
+                        # Sample the texture colors at this pixel
+                        def sample_tex(tex):
+                            if tex is None: return None
+                            th, tw = tex.shape[:2]
+                            tx = int(lx * tw / chunk_alpha) % tw
+                            ty = int(ly * th / chunk_alpha) % th
+                            return tex[ty, tx].astype(np.float32)
+
+                        cols = [sample_tex(t) for t in texs]
+
+                        # Sequential mix() chain — matches MdxViewer terrain shader & WoW client
+                        # result = tex0                                          (base)
+                        # result = mix(result, tex1, α1)   → result*(1-α1) + tex1*α1
+                        # result = mix(result, tex2, α2)
+                        # result = mix(result, tex3, α3)
+                        color = cols[0].copy() if cols[0] is not None else np.zeros(3)
+                        for li in range(1, 4):
+                            if cols[li] is not None and al[li] > 0.005:
+                                color = color * (1.0 - al[li]) + cols[li] * al[li]
+
+                        synthetic[py, px] = color
+
+        if not any_tex:
+            return None
 
         synthetic = synthetic.clip(0, 255).astype(np.uint8)
-        from PIL import Image
         synth_256 = np.asarray(Image.fromarray(synthetic).resize((256, 256), Image.BILINEAR))
 
         mm_256 = np.asarray(Image.fromarray(mm).resize((256, 256), Image.BILINEAR))
@@ -100,7 +120,7 @@ def composite_one(shard_path, tileset_cache, out_dir):
 
 
 def main():
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(description='Pre-composite MapTextures (normalized weighted sum blending)')
     p.add_argument('input', nargs='+', help='NPZ shard dir or manifest')
     p.add_argument('--harvest-dir', required=True, help='Tileset PNG directory')
     p.add_argument('--output-dir', '-o', default='composited_maptextures')
@@ -140,6 +160,7 @@ def main():
             else: skip += 1
 
     print(f'Done: {ok} composited, {skip} skipped')
+
 
 if __name__ == '__main__':
     main()

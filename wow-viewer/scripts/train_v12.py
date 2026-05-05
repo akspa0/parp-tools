@@ -291,6 +291,12 @@ def train_v12(args):
     val_ld = DataLoader(val_ds, args.batch_size, shuffle=True, num_workers=nw, pin_memory=True)
 
     model = V12Model(ntex).to(dev)
+    if args.compile and dev.type == 'cuda':
+        try:
+            model = torch.compile(model, mode='reduce-overhead')
+            print('torch.compile: ON (reduce-overhead)')
+        except Exception as e:
+            print(f'torch.compile: SKIPPED ({e})')
     npar = sum(p.numel() for p in model.parameters())
     print(f'Params: {npar:,} ({npar*4/1e6:.1f}MB)')
 
@@ -307,7 +313,12 @@ def train_v12(args):
             lrv = max(args.lr * 0.5 * (1 + math.cos(math.pi * f)), args.lr * 0.01)
         for pg in opt.param_groups: pg['lr'] = lrv
 
-        model.train(); tl = 0.0; nb = 0
+        model.train()
+        tl = 0.0; nb = 0
+        # Per-component accumulators (raw, unweighted)
+        lm_acc = 0.0; lc_acc = 0.0; lr_acc = 0.0
+        lm_n = 0; lc_n = 0; lr_n = 0
+        pmax_acc = 0.0; pnz_acc = 0.0; gtz_acc = 0.0; gtnz_acc = 0.0; stat_n = 0
         for inp, tgt in train_ld:
             inp = inp.to(dev, non_blocking=True)
             tm = tgt['mcal'].to(dev, non_blocking=True)
@@ -327,14 +338,27 @@ def train_v12(args):
             if hm.sum() > 0:
                 m = F.l1_loss(p['mcal'], tm, reduction='none').mean(dim=(1,2,3))
                 loss = loss + 5.0 * ((m * hm).sum() / hm.sum())
+                lm_acc = lm_acc + (m * hm).sum().item(); lm_n += hm.sum().item()
             # MCLY CE (-100 = ignore)
             if hl.sum() > 0:
                 c = F.cross_entropy(p['mcly'], tlbl, ignore_index=-100, reduction='none')
                 loss = loss + 0.2 * ((c.view(B,-1).mean(1) * hl).sum() / hl.sum())
+                lc_acc = lc_acc + (c.view(B,-1).mean(1) * hl).sum().item(); lc_n += hl.sum().item()
             # Residual L1
             if hr.sum() > 0:
                 r = F.l1_loss(p['residual'], tr, reduction='none').mean(dim=(1,2,3))
                 loss = loss + 0.5 * ((r * hr).sum() / hr.sum())
+                lr_acc = lr_acc + (r * hr).sum().item(); lr_n += hr.sum().item()
+
+            # MCAL prediction stats (detect all-zeros shortcut)
+            if hm.sum() > 0:
+                pm = p['mcal'].detach()
+                gm = tm.detach()
+                pmax_acc += pm.amax(dim=(1,2,3)).mean().item()
+                pnz_acc += (pm > 0.01).float().mean().item()
+                gtz_acc += gm.amax(dim=(1,2,3)).mean().item()
+                gtnz_acc += (gm > 0.01).float().mean().item()
+                stat_n += 1
 
             if scaler: scaler.scale(loss).backward(); scaler.unscale_(opt)
             else: loss.backward()
@@ -345,31 +369,54 @@ def train_v12(args):
             tl += loss.item(); nb += 1
 
         avg = tl / nb
+        lm_avg = lm_acc / max(lm_n, 1)
+        lc_avg = lc_acc / max(lc_n, 1)
+        lr_avg = lr_acc / max(lr_n, 1)
+        pm_avg = pmax_acc / max(stat_n, 1)
+        pnz_avg = pnz_acc / max(stat_n, 1)
+        gtz_avg = gtz_acc / max(stat_n, 1)
+        gtnz_avg = gtnz_acc / max(stat_n, 1)
         if ep % 10 == 0:
             vl = ' —'
             if val_ld:
                 model.eval(); vloss = 0.0; vc = 0
+                vm_avg = 0.0; vp_avg = 0.0; vnz_avg = 0.0; vstat_n = 0
                 with torch.no_grad():
                     for iv, tv in val_ld:
                         iv = iv[:4].to(dev)
                         pv = model(iv)
                         if tv['has_mcal'].sum() > 0:
-                            vloss += F.l1_loss(pv['mcal'][:4], tv['mcal'][:4].to(dev)).item(); vc += 1
+                            tmv = tv['mcal'][:4].to(dev)
+                            l1v = F.l1_loss(pv['mcal'][:4], tmv).item()
+                            vloss += l1v; vc += 1
+                            vm_avg += pv['mcal'][:4].amax(dim=(1,2,3)).mean().item()
+                            vnz_avg += (pv['mcal'][:4] > 0.01).float().mean().item()
+                            vstat_n += 1
                             if vc >= 2: break
-                vl = f' val={vloss/max(vc,1):.4f}'
-                if vc and vloss/vc < best_val:
-                    best_val = vloss/vc; torch.save({'model': model.state_dict(), 'epoch': ep, 'vocab': vocab}, out / 'best.pt')
-            print(f'E{ep:4d} loss={avg:.4f} lr={lrv:.2e}{vl}')
+                vloss /= max(vc, 1)
+                vm_avg /= max(vstat_n, 1); vnz_avg /= max(vstat_n, 1)
+                vl = f' v_mcal={vloss:.4f} v_max={vm_avg:.3f} v_nz={vnz_avg:.3f}'
+                if vc and vloss < best_val:
+                    best_val = vloss
+                    sd = model.state_dict()
+                    if any(k.startswith('_orig_mod.') for k in sd):
+                        sd = {k.replace('_orig_mod.', ''): v for k, v in sd.items()}
+                    torch.save({'model': sd, 'epoch': ep, 'vocab': vocab}, out / 'best.pt')
+            print(f'E{ep:4d} L={avg:.4f} mc={lm_avg:.4f} my={lc_avg:.3f} rs={lr_avg:.4f} '
+                  f'pm={pm_avg:.3f} pnz={pnz_avg:.3f} gt={gtz_avg:.3f} gnz={gtnz_avg:.3f}{vl}')
             model.train()
 
-        torch.save({'model': model.state_dict(), 'epoch': ep, 'optimizer': opt.state_dict(), 'vocab': vocab}, out / 'last.pt')
+        sd = model.state_dict()
+        if any(k.startswith('_orig_mod.') for k in sd):
+            sd = {k.replace('_orig_mod.', ''): v for k, v in sd.items()}
+        torch.save({'model': sd, 'epoch': ep, 'optimizer': opt.state_dict(), 'vocab': vocab}, out / 'last.pt')
 
     print(f'\nDone. Best val: {best_val:.4f}. {out}')
 
 
 def main():
     p = argparse.ArgumentParser(description='V12 Texture Decomposer (Stage 1) — SegFormer backbone, 3ch RGB input')
-    p.add_argument('input', nargs='+')
+    p.add_argument('input', nargs='*')
     p.add_argument('--output-dir', '-o', default='runs/v12_stage1')
     p.add_argument('--epochs', type=int, default=200)
     p.add_argument('--batch-size', type=int, default=16)
@@ -379,8 +426,166 @@ def main():
                    help='DataLoader workers for parallel data loading (default: 2)')
     p.add_argument('--residual-dir', type=str, default=None,
                    help='Directory with pre-computed _composited.npz files (e.g. output/tmp/maptextures)')
+    p.add_argument('--checkpoint', type=str, default=None,
+                   help='Checkpoint .pt file for visualization mode')
+    p.add_argument('--tile', type=str, default=None,
+                   help='Single .npz tile path for visualization mode')
+    p.add_argument('--compile', action='store_true',
+                   help='Use torch.compile on the model (CUDA only, first epoch is slow)')
     args = p.parse_args()
-    train_v12(args)
+    if args.checkpoint:
+        visualize(args)
+    else:
+        if not args.input:
+            p.error('input manifest(s) required for training mode')
+        train_v12(args)
+
+
+def visualize(args):
+    """Run inference on a single tile and save PNG visualization."""
+    try:
+        from PIL import Image
+    except ImportError:
+        print('pip install Pillow'); return
+
+    dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    ckpt = torch.load(args.checkpoint, map_location='cpu')
+    # Strip _orig_mod. prefix from compiled checkpoints
+    sd = ckpt['model']
+    if any(k.startswith('_orig_mod.') for k in sd):
+        sd = {k.replace('_orig_mod.', ''): v for k, v in sd.items()}
+    model = V12Model(len(ckpt['vocab'])).to(dev)
+    model.load_state_dict(sd)
+    model.eval()
+    print(f'Loaded checkpoint: epoch={ckpt.get("epoch", "?")}')
+
+    tile_path = args.tile
+    if not tile_path:
+        print('--tile required for visualization')
+        return
+    if not os.path.exists(tile_path):
+        print(f'Tile not found: {tile_path}')
+        return
+
+    data = np.load(tile_path)
+    # Input
+    mm = torch.from_numpy(data['minimap_rgb_256'].astype(np.float32))
+    if mm.dim() == 3 and mm.shape[-1] == 3: mm = mm.permute(2, 0, 1)
+    inp = (mm / 255.0 - IMAGENET_MEAN.squeeze(0)) / IMAGENET_STD.squeeze(0)
+
+    with torch.no_grad():
+        out = model(inp.unsqueeze(0).to(dev))
+
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(tile_path).stem
+    base = out_dir / stem
+    print(f'Saving visualizations to {out_dir}/')
+
+    # Minimap (denormalize)
+    mm_vis = (mm / 255.0).clamp(0, 1).permute(1, 2, 0).numpy()
+    Image.fromarray((mm_vis * 255).astype(np.uint8)).save(f'{base}_minimap.png')
+
+    # MCAL predicted vs ground truth
+    mc = out['mcal'][0].cpu()
+    gt_mc = torch.from_numpy(data['mcal_alpha_pack_256'].astype(np.float32))
+    if gt_mc.dim() == 3 and gt_mc.shape[-1] == 4: gt_mc = gt_mc.permute(2, 0, 1)
+
+    for li in range(4):
+        pred = mc[li].numpy()
+        gt = gt_mc[li].numpy()
+        Image.fromarray((pred * 255).clip(0, 255).astype(np.uint8)).save(f'{base}_mcal_pred_l{li}.png')
+        Image.fromarray((gt * 255).clip(0, 255).astype(np.uint8)).save(f'{base}_mcal_gt_l{li}.png')
+
+    # MCAL stats
+    mc_max = mc.amax(dim=(1,2)).numpy()
+    mc_nz = (mc > 0.01).float().mean(dim=(1,2)).numpy()
+    gt_max = gt_mc.amax(dim=(1,2)).numpy()
+    gt_nz = (gt_mc > 0.01).float().mean(dim=(1,2)).numpy()
+    for li in range(4):
+        print(f'  Layer {li}: pred_max={mc_max[li]:.3f} pred_nz={mc_nz[li]:.3f}  gt_max={gt_max[li]:.3f} gt_nz={gt_nz[li]:.3f}')
+
+    # MCLY predicted vs ground truth
+    mcly_logits = out['mcly'][0].cpu()
+    mcly_pred = mcly_logits.argmax(dim=0).numpy().astype(np.int32)  # (16, 16)
+
+    # Need reverse vocab to map class → texture name for display
+    rev_vocab = {v: k for k, v in ckpt['vocab'].items()}
+
+    # Load metadata for texture names
+    sidecar_path = Path(tile_path).with_name(Path(tile_path).stem + '_metadata.json')
+    texture_names = []
+    if sidecar_path.exists():
+        with open(sidecar_path) as f:
+            texture_names = json.load(f).get('mcly_texture_names', [])
+
+    if 'mcly_texture_ids' in data:
+        mcly_gt = torch.from_numpy(data['mcly_texture_ids'].astype(np.int64))
+        if mcly_gt.dim() == 3 and mcly_gt.shape[-1] == 4: mcly_gt = mcly_gt[..., 0]
+        mcly_gt = mcly_gt.numpy()
+
+        # Visualize MCLY as color-coded 16×16
+        # Use a color map
+        colors = np.array([
+            [255,0,0],[0,255,0],[0,0,255],[255,255,0],[255,0,255],[0,255,255],
+            [128,0,0],[0,128,0],[0,0,128],[128,128,0],[128,0,128],[0,128,128],
+            [192,192,192],[128,128,128],[64,0,0],[0,64,0],[0,0,64],[64,64,0],
+            [64,0,64],[0,64,64],[255,128,0],[128,255,0],[0,255,128],[128,0,255],
+            [0,128,255],[255,0,128],[255,128,128],[128,255,128],[128,128,255],
+            [255,255,128]], dtype=np.uint8)
+
+        pred_vis = np.zeros((16, 16, 3), dtype=np.uint8)
+        gt_vis = np.zeros((16, 16, 3), dtype=np.uint8)
+        for y in range(16):
+            for x in range(16):
+                pid = mcly_pred[y, x]
+                gid = mcly_gt[y, x]
+                if gid >= 0 and gid < len(texture_names):
+                    cidx = hash(texture_names[gid]) % len(colors)
+                    gt_vis[y, x] = colors[cidx]
+                if pid < len(ckpt['vocab']):
+                    tid = rev_vocab.get(int(pid), -1)
+                    if tid >= 0 and tid < len(texture_names):
+                        cidx = hash(texture_names[tid]) % len(colors)
+                        pred_vis[y, x] = colors[cidx]
+        # Scale up 16×16 to 256×256 for visibility
+        pred_vis = np.repeat(np.repeat(pred_vis, 16, axis=0), 16, axis=1)
+        gt_vis = np.repeat(np.repeat(gt_vis, 16, axis=0), 16, axis=1)
+        Image.fromarray(pred_vis).save(f'{base}_mcly_pred.png')
+        Image.fromarray(gt_vis).save(f'{base}_mcly_gt.png')
+
+        # Accuracy
+        valid = mcly_gt >= 0
+        correct = (mcly_pred == mcly_gt) & valid
+        acc = correct.sum() / max(valid.sum(), 1)
+        print(f'  MCLY accuracy: {acc:.3f} ({correct.sum()}/{valid.sum()})')
+
+    # Residual predicted vs ground truth
+    rs = out['residual'][0].cpu()
+    # Load from composited if available
+    cp_paths = [Path(tile_path).with_name(f'{stem}_composited.npz')]
+    if args.residual_dir:
+        cp_paths.append(Path(args.residual_dir) / f'{stem}_composited.npz')
+    cp = next((p for p in cp_paths if p.exists()), None)
+    if cp:
+        cz = np.load(cp)
+        gt_rs = torch.from_numpy(cz['texture_residual_256'].astype(np.float32)) / 255.0
+        cz.close()
+        if gt_rs.dim() == 3 and gt_rs.shape[-1] == 3: gt_rs = gt_rs.permute(2, 0, 1)
+    else:
+        gt_rs = torch.zeros(3, 256, 256)
+
+    # Save residual as image (shift from [-1,1] to [0,1] for display)
+    def save_residual(t, path):
+        t = t.clamp(-1, 1)
+        t = (t + 1) / 2
+        Image.fromarray((t.permute(1,2,0).numpy() * 255).astype(np.uint8)).save(path)
+
+    save_residual(rs, f'{base}_residual_pred.png')
+    save_residual(gt_rs, f'{base}_residual_gt.png')
+
+    print(f'Done. Visualizations in {out_dir}/')
+
 
 if __name__ == '__main__':
     main()

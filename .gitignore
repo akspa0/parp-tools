@@ -614,3 +614,5 @@ wow-viewer/libs/*
 gillijimproject_refactor/.venv-train/*
 runs/*
 wow-viewer/outputs/*
+viz_output/*
+.symdex/*

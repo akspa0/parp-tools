@@ -1,0 +1,36 @@
+# Data and output directories
+output/
+node_modules/
+.vite/
+build/
+dist/
+
+# Archived/non-primary projects
+archived_projects/
+WoWRollback/
+WMOv14/
+gillijimproject_refactor/next/
+old_projects/
+
+# Virtual environments
+.venv*/
+venv*/
+
+# Large binary/ML files
+*.npz
+*.pt
+*.pth
+*.onnx
+*.blp
+*.dds
+*.blob
+*.bin
+*.exe
+*.dll
+*.pdb
+
+# git
+.git/
+
+# SymDex state
+.symdex/
