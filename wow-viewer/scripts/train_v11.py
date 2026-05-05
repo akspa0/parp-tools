@@ -1,5 +1,6 @@
 import argparse, json, gc, sys, math, random, shutil, traceback, time
 import os
+os.environ.setdefault('TORCHINDUCTOR_CPP_WRAPPER', '0')
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
@@ -85,28 +86,9 @@ class DecoderBlock(nn.Module):
         x = torch.cat([x, skip], dim=1)
         return self.fuse(x)
 
-class MinimapEncoder(nn.Module):
-    """Lightweight encoder for minimap-only input (5ch → 96ch @ 64×64).
-    Matches the output of the full ConvNeXt stem so both paths feed the same stages."""
-    def __init__(self, in_ch=5, out_ch=96):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(in_ch, 32, 7, stride=2, padding=3),
-            LayerNorm2d(32), nn.GELU(),
-            ConvNeXtBlock(32),
-            nn.Conv2d(32, 64, 3, stride=2, padding=1),
-            LayerNorm2d(64), nn.GELU(),
-            ConvNeXtBlock(64),
-            ConvNeXtBlock(64),
-            nn.Conv2d(64, out_ch, 3, stride=1, padding=1),
-            LayerNorm2d(out_ch), nn.GELU(),
-        )
-    def forward(self, x):
-        return self.net(x)
-
 
 class V11TerrainModel(nn.Module):
-    def __init__(self, in_channels=28, decoder_dim=256, num_texture_classes=128):
+    def __init__(self, in_channels=5, decoder_dim=256, num_texture_classes=128):
         super().__init__()
 
         if timm is None:
@@ -115,10 +97,6 @@ class V11TerrainModel(nn.Module):
         backbone = timm.create_model('convnextv2_tiny', pretrained=False)
         self.encoder_stages = nn.ModuleList(backbone.stages)
         self.encoder_channels = [96, 192, 384, 768]
-
-        # Minimap-only encoder: 5ch → 96ch @ 64×64, feeds into shared stages
-        self.minimap_encoder = MinimapEncoder(5, 96)
-        self.training_minimap_ratio = 0.60  # 60% of training batches use minimap-only path
 
         # Overlapping conv stem for full 26-channel input
         self.stem = nn.Sequential(
@@ -182,20 +160,9 @@ class V11TerrainModel(nn.Module):
         self.register_parameter('log_hole_sigma', nn.Parameter(torch.tensor(2.0)))
 
     def forward(self, x):
-        """Dual-path: during training, 80% of batches use minimap-only encoder
-        so the model learns minimap→height. The other 20% use all 26 channels.
-        At inference (eval mode), always uses minimap-only path."""
-        if self.training and torch.rand(1).item() < self.training_minimap_ratio:
-            # Training: minimap-only path
-            mm_input = torch.cat([x[:, 0:3], x[:, 22:24]], dim=1)
-            x = self.minimap_encoder(mm_input)
-        elif not self.training:
-            # Inference: always minimap-only
-            mm_input = torch.cat([x[:, 0:3], x[:, 22:24]], dim=1)
-            x = self.minimap_encoder(mm_input)
-        else:
-            # Training: full 26-channel path (40% of time)
-            x = self.stem(x)
+        """Single path — the stem handles all inputs. Training masks aux channels
+        before calling forward (set by training loop via _input_mask)."""
+        x = self.stem(x)
 
         feats = []
         for stage in self.encoder_stages:
@@ -1000,18 +967,6 @@ def train_v11(args):
         signal_dropout=0, augment=False,
         height_mean=height_mean, height_std=height_std)
 
-    # Load tileset cache for layer ablation if available
-    tileset_cache = None
-    tileset_dir = Path(r'I:\parp\parp-tools\output\tmp\tilesets')
-    if tileset_dir.exists() and (tileset_dir / 'tileset_index.json').exists():
-        try:
-            from synthesize_minimap import TilesetCache
-            tileset_cache = TilesetCache(str(tileset_dir))
-            train_ds._tileset_cache = tileset_cache
-            print(f"  Layer ablation: enabled (tileset cache ready)")
-        except Exception as e:
-            print(f"  Layer ablation: failed to load tilesets — {e}")
-
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True,
         num_workers=args.num_workers, pin_memory=True,
@@ -1113,11 +1068,13 @@ def train_v11(args):
             targets = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                        for k, v in targets.items()}
 
+            # Minimap-only pass: 60% of batches zero aux channels
+            if random.random() < 0.6:
+                inp[:, 3:22] = 0
+                inp[:, 24:26] = 0
+
             pred = model(inp)
             loss, losses = loss_fn(pred, targets, model)
-            # Seam loss: penalize edge mismatches between adjacent tiles in batch
-            seam_l = compute_seam_loss(pred, targets, inp.shape[0])
-            loss = loss + 0.3 * seam_l
 
             # NaN guard: skip batch if loss or any gradient is NaN
             if torch.isnan(loss) or torch.isinf(loss):
