@@ -84,7 +84,7 @@ internal static class PreviewCameraPresets
             ["back"] = new("back", 180.0f, 15.0f),
             ["left"] = new("left", 90.0f, 15.0f),
             ["right"] = new("right", 270.0f, 15.0f),
-            ["top"] = new("top", 0.0f, 80.0f),
+            ["top"] = new("top", 0.0f, 90.0f),
             [PreviewCameraSettings.DefaultPresetName] = new(PreviewCameraSettings.DefaultPresetName, 35.0f, 25.0f),
         };
 

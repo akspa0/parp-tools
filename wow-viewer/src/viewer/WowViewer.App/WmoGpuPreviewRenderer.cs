@@ -121,6 +121,26 @@ internal sealed class WmoGpuPreviewRenderer : IDisposable
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
     }
 
+    public void CaptureBmp(string outputPath, int width, int height)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
+
+        Render(width, height);
+
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _framebuffer);
+        byte[] rgbaPixels = new byte[_frameWidth * _frameHeight * 4];
+        unsafe
+        {
+            fixed (byte* pixelPtr = rgbaPixels)
+            {
+                _gl.ReadPixels(0, 0, (uint)_frameWidth, (uint)_frameHeight, PixelFormat.Rgba, PixelType.UnsignedByte, pixelPtr);
+            }
+        }
+
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        ImageOutputWriter.WriteRgbaImage(outputPath, _frameWidth, _frameHeight, rgbaPixels, sourceOriginBottomLeft: true);
+    }
+
     private unsafe void RenderPass(bool transparentPass, Vector3 cameraPosition)
     {
         if (transparentPass)

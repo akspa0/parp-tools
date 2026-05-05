@@ -75,6 +75,9 @@ internal static class Program
                 case "world-placement-audit":
                     return RunWorldPlacementAudit(tail);
 
+                case "object-harvest":
+                    return RunObjectHarvest(tail);
+
                 case "archive-probe":
                     return RunArchiveProbe(tail);
 
@@ -382,6 +385,41 @@ internal static class Program
         }
 
         return data is null ? 1 : 0;
+    }
+
+    private static int RunObjectHarvest(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? clientVersion = GetOption(args, "--client-version", "-b");
+        string? outputDir = GetOption(args, "--output-dir", "-o");
+        string? modelList = GetOption(args, "--model-list");
+        string? renderSizeText = GetOption(args, "--render-size");
+        string? workersText = GetOption(args, "--workers");
+
+        if (string.IsNullOrWhiteSpace(clientRoot))
+            throw new ArgumentException("Provide --client-root <game dir> for object-harvest.");
+        if (string.IsNullOrWhiteSpace(outputDir))
+            throw new ArgumentException("Provide --output-dir <dir> for object-harvest.");
+
+        int renderSize = 256;
+        if (!string.IsNullOrWhiteSpace(renderSizeText) && !int.TryParse(renderSizeText, out renderSize))
+            throw new ArgumentOutOfRangeException(nameof(renderSizeText), "--render-size must be an integer.");
+
+        int workers = 1;
+        if (!string.IsNullOrWhiteSpace(workersText) && !int.TryParse(workersText, out workers))
+            throw new ArgumentOutOfRangeException(nameof(workersText), "--workers must be an integer.");
+
+        ObjectHarvestOptions options = new()
+        {
+            ClientRoot = clientRoot,
+            ClientVersion = clientVersion ?? string.Empty,
+            OutputDir = outputDir,
+            ModelList = modelList,
+            RenderSize = renderSize,
+            Workers = workers,
+        };
+
+        return ObjectHarvestRunner.Run(options);
     }
 
     private static T? InvokePrivate<T>(object instance, string methodName)
@@ -903,6 +941,7 @@ internal static class Program
         Console.WriteLine("  wowviewer-app archive-probe --client-root <game dir> --virtual-path <path/to/file> [--build-label <label>]");
         Console.WriteLine("  wowviewer-app m2-bounds --archive-root <game|data dir> --model-list <paths.txt> [--output <bounds.json>] [--build-label <label>]");
         Console.WriteLine("  wowviewer-app m2-bounds --archive-root <game|data dir> --virtual-path <path/to/file.m2> [--output <bounds.json>]");
+        Console.WriteLine("  wowviewer-app object-harvest --client-root <game dir> --output-dir <dir> --client-version <version> [--model-list <paths.txt>] [--render-size <px>] [--workers <n>]");
     }
 
     private static WowViewerWorkspaceMode ParseWorkspaceMode(string? workspaceText)

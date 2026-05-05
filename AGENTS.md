@@ -49,6 +49,49 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 
 - Use the `Explore` subagent for broad read-only repo discovery, especially when tracing client-root usage, archive-access seams, or prompt or skill coverage before editing multiple workflow assets.
 
+## SymDex Symbol Search (Cross-Agent)
+
+This workspace has a **SymDex** symbolic index at `.symdex/parp-tools.db` (29,872 files, 36,418 symbols). Before broad Read/Grep/Glob discovery, use symdex to retrieve exact symbols, file outlines, callers, callees, and text matches.
+
+### Setup
+
+```powershell
+# Installed via uv tool — symdex.exe is at ~\.local\bin\symdex.exe
+uvx symdex --help
+```
+
+### MCP Config (opencode.json in repo root)
+```json
+{
+  "mcpServers": {
+    "symdex": {
+      "command": "uvx",
+      "args": ["symdex", "serve"],
+      "env": { "SYMDEX_STATE_DIR": "I:\\parp\\parp-tools\\.symdex" }
+    }
+  }
+}
+```
+
+### CLI Commands (use these when MCP is not available)
+
+| Command | Purpose |
+|---------|---------|
+| `symdex search "validate_email" --repo parp-tools --state-dir .symdex` | Find symbols by name |
+| `symdex text "JWT" --repo parp-tools --state-dir .symdex` | Find literal text |
+| `symdex outline foo.py --repo parp-tools --state-dir .symdex` | List symbols in a file |
+| `symdex callers func_name --repo parp-tools --state-dir .symdex` | Find callers |
+| `symdex callees func_name --repo parp-tools --state-dir .symdex` | Find callees |
+| `symdex routes parp-tools --state-dir .symdex` | Extract HTTP routes |
+
+### Workflow
+
+1. **Always search with symdex first** before reading full files. Each successful search reports token savings.
+2. When symdex returns a result with byte offsets, use Read with the identified file + offset rather than grepping blindly.
+3. When `--state-dir .symdex` is omitted, symdex auto-discovers it from the workspace.
+4. Embedded dirs: `wow-viewer/`, `gillijimproject_refactor/src/`, `memory-bank/`, `plans/`.
+5. **Indexing**: `& "$env:USERPROFILE\.local\bin\symdex.exe" index <new_dir> --repo parp-tools --state-dir .symdex --no-embed` to add more directories.
+
 ## Game Client Access And Staging
 
 - Canonical WoWArchive docs live at `G:\WoW\WoWArchive-0.X-3.X\Readme.txt`, and the current mount entrypoint is `G:\WoW\WoWArchive-0.X-3.X\MountAll.bat`.

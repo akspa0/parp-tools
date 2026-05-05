@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "symdex": {
+      "command": "uvx",
+      "args": ["symdex", "serve"],
+      "env": {
+        "SYMDEX_STATE_DIR": "I:\\parp\\parp-tools\\.symdex"
+      }
+    }
+  }
+}

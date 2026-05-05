@@ -17,6 +17,33 @@ except ImportError:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Tileset Cache (for reconstruction loss texture grid)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TilesetCache:
+    """Load tileset PNGs from harvested tileset directory, hold 16×16 thumbnails for reconstruction loss."""
+    def __init__(self, tileset_dir):
+        self.thumbnails = {}  # normalized texture path → (16,16,3) float32 [0,1]
+        idx_path = os.path.join(tileset_dir, 'tileset_index.json')
+        if not os.path.exists(idx_path): return
+        with open(idx_path) as f:
+            idx = json.load(f)
+        from PIL import Image
+        for tex_path, file_path in idx.get('textures', {}).items():
+            if os.path.exists(file_path):
+                try:
+                    img = Image.open(file_path).convert('RGB')
+                    thumb = np.asarray(img.resize((16, 16), Image.BILINEAR), dtype=np.float32) / 255.0
+                    self.thumbnails[tex_path.lower()] = thumb
+                except Exception:
+                    pass
+        print(f'TilesetCache: {len(self.thumbnails)} textures')
+
+    def get_thumbnail(self, texture_path):
+        return self.thumbnails.get(texture_path.lower())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Dataset
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -43,12 +70,13 @@ IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
 
 class V12Dataset(Dataset):
-    """3ch minimap in, MCAL/MCLY/residual out. No tileset channels."""
-    def __init__(self, paths, mcly_vocab, augment=False, residual_dir=None):
+    """3ch minimap in, MCAL/MCLY/residual + texture grid out."""
+    def __init__(self, paths, mcly_vocab, augment=False, residual_dir=None, tileset_cache=None):
         self.paths = paths
         self.vocab = mcly_vocab
         self.augment = augment
         self.residual_dir = Path(residual_dir) if residual_dir else None
+        self.tileset_cache = tileset_cache
 
     def __len__(self): return len(self.paths)
 
@@ -62,15 +90,19 @@ class V12Dataset(Dataset):
                 'mcal': torch.zeros(4, 256, 256),
                 'mcly': torch.full((16, 16), -100, dtype=torch.long),
                 'residual': torch.zeros(3, 256, 256),
+                'mm_orig': torch.zeros(3, 256, 256),
+                'tex_grid': torch.zeros(4, 3, 256, 256),
                 'has_mcal': torch.tensor(0.0),
                 'has_mcly': torch.tensor(0.0),
                 'has_residual': torch.tensor(0.0),
+                'has_tex_grid': torch.tensor(0.0),
             }
 
-        # Input: minimap RGB (3, 256, 256) with ImageNet normalization
-        mm = torch.from_numpy(data['minimap_rgb_256'].astype(np.float32))
-        if mm.dim() == 3 and mm.shape[-1] == 3: mm = mm.permute(2, 0, 1)
-        mm = (mm / 255.0 - IMAGENET_MEAN.squeeze(0)) / IMAGENET_STD.squeeze(0)
+        # Input and original minimap for reconstruction loss
+        mm_raw = torch.from_numpy(data['minimap_rgb_256'].astype(np.float32))
+        if mm_raw.dim() == 3 and mm_raw.shape[-1] == 3: mm_raw = mm_raw.permute(2, 0, 1)
+        mm = (mm_raw / 255.0 - IMAGENET_MEAN.squeeze(0)) / IMAGENET_STD.squeeze(0)
+        mm_orig = mm_raw / 255.0  # (3, 256, 256) in [0, 1] for reconstruction loss
 
         # MCAL target (4, 256, 256)  in [0, 1]
         has_mcal = 'mcal_alpha_pack_256' in data
@@ -91,6 +123,32 @@ class V12Dataset(Dataset):
                 mapped[mcly == old_id] = new_id
         else:
             mapped = torch.full((16, 16), -100, dtype=torch.long)
+
+        # Texture grid (4, 256, 256, 3) — per-layer RGB for reconstruction loss
+        has_tex_grid = self.tileset_cache is not None and 'mcly_texture_ids' in data
+        if has_tex_grid:
+            mcly_raw = data['mcly_texture_ids']
+            if mcly_raw.ndim == 3 and mcly_raw.shape[0] == 4:
+                mcly_raw = mcly_raw.transpose(1, 2, 0)
+
+            sidecar = Path(path).with_name(Path(path).stem + '_metadata.json')
+            texture_names = []
+            if sidecar.exists():
+                with open(sidecar) as f:
+                    texture_names = json.load(f).get('mcly_texture_names', [])
+
+            tex_grid = np.zeros((4, 256, 256, 3), dtype=np.float32)
+            for cy in range(16):
+                for cx in range(16):
+                    for layer in range(min(4, mcly_raw.shape[-1])):
+                        tid = int(mcly_raw[cy, cx, layer])
+                        if tid < 0 or tid >= len(texture_names): continue
+                        thumb = self.tileset_cache.get_thumbnail(texture_names[tid])
+                        if thumb is None: continue
+                        tex_grid[layer, cy*16:(cy+1)*16, cx*16:(cx+1)*16] = thumb
+            tex_grid = torch.from_numpy(tex_grid).permute(0, 3, 1, 2)  # (4,3,256,256)
+        else:
+            tex_grid = torch.zeros(4, 3, 256, 256)
 
         # Residual target (3, 256, 256) in [-1, 1] from pre-computed MapTexture
         stem = Path(path).stem
@@ -117,17 +175,22 @@ class V12Dataset(Dataset):
             if random.random() > 0.5:
                 mm = torch.flip(mm, [-1]); mcal = torch.flip(mcal, [-1])
                 mapped = torch.flip(mapped, [0]); residual = torch.flip(residual, [-1])
+                mm_orig = torch.flip(mm_orig, [-1]); tex_grid = torch.flip(tex_grid, [-1])
             if random.random() > 0.5:
                 mm = torch.flip(mm, [-2]); mcal = torch.flip(mcal, [-2])
                 mapped = torch.flip(mapped, [1]); residual = torch.flip(residual, [-2])
+                mm_orig = torch.flip(mm_orig, [-2]); tex_grid = torch.flip(tex_grid, [-2])
 
         return mm, {
             'mcal': mcal,
             'mcly': mapped,
             'residual': residual,
+            'mm_orig': mm_orig,
+            'tex_grid': tex_grid,
             'has_mcal': torch.tensor(1.0 if has_mcal else 0.0),
             'has_mcly': torch.tensor(1.0 if has_mcly else 0.0),
             'has_residual': torch.tensor(1.0 if has_residual else 0.0),
+            'has_tex_grid': torch.tensor(1.0 if has_tex_grid else 0.0),
         }
 
 
@@ -167,7 +230,12 @@ class UpBlock(nn.Module):
 
 
 class V12Model(nn.Module):
-    """SegFormer B2 backbone → MCLY head (16×16) + MCAL + residual (256×256)."""
+    """SegFormer B2 backbone → MCLY head (16×16) + hierarchical MCAL + residual (256×256).
+
+    MCAL is predicted sequentially: L0 (base) first, then L1 conditioned on L0,
+    then L2 conditioned on L0+L1, then L3 (detail) conditioned on L0+L1+L2.
+    This encodes the terrain blending hierarchy directly into the architecture.
+    """
     def __init__(self, num_tex_classes, backbone_name='nvidia/segformer-b2-finetuned-ade-512-512'):
         super().__init__()
         if SegformerModel is None: raise RuntimeError("pip install transformers")
@@ -200,14 +268,21 @@ class V12Model(nn.Module):
             nn.GELU(),
         )
 
-        # MCAL head: 4 channels, sigmoid for [0,1] alpha
-        self.mcal_head = nn.Sequential(
-            nn.Conv2d(64 + decoder_dim, 64, 3, 1, 1),
+        # Hierarchical MCAL heads: predict α0→α1→α2→α3 sequentially.
+        # Each head sees shared features + all previous layer predictions.
+        feat_dim = 64 + decoder_dim  # 320 channels: d_full (64) + p0_up (256)
+        head_ch = 32
+        mcal_conv = lambda in_ch: nn.Sequential(
+            nn.Conv2d(in_ch, head_ch * 2, 3, 1, 1),
             nn.GELU(),
-            nn.Conv2d(64, 32, 3, 1, 1),
+            nn.Conv2d(head_ch * 2, head_ch, 3, 1, 1),
             nn.GELU(),
-            nn.Conv2d(32, 4, 3, 1, 1),
+            nn.Conv2d(head_ch, 1, 3, 1, 1),
         )
+        self.mcal_head_l0 = mcal_conv(feat_dim)        # features → α0
+        self.mcal_head_l1 = mcal_conv(feat_dim + 1)    # features + α0 → α1
+        self.mcal_head_l2 = mcal_conv(feat_dim + 2)    # features + α0+α1 → α2
+        self.mcal_head_l3 = mcal_conv(feat_dim + 3)    # features + α0+α1+α2 → α3
 
         # Residual head: 3 channels, linear (residual can be negative)
         self.residual_head = nn.Sequential(
@@ -243,7 +318,11 @@ class V12Model(nn.Module):
         p0_up = F.interpolate(p[0], size=(256, 256), mode='bilinear', align_corners=False)
         f = torch.cat([d_full, p0_up], dim=1)
 
-        mcal = torch.sigmoid(self.mcal_head(f))
+        a0 = torch.sigmoid(self.mcal_head_l0(f))                          # L0 base
+        a1 = torch.sigmoid(self.mcal_head_l1(torch.cat([f, a0], dim=1)))   # L1 overlay on L0
+        a2 = torch.sigmoid(self.mcal_head_l2(torch.cat([f, a0, a1], dim=1)))  # L2 features
+        a3 = torch.sigmoid(self.mcal_head_l3(torch.cat([f, a0, a1, a2], dim=1)))  # L3 detail
+        mcal = torch.cat([a0, a1, a2, a3], dim=1)
         residual = self.residual_head(f)
 
         return {
@@ -284,8 +363,11 @@ def train_v12(args):
     ntex = len(vocab)
     print(f'MCLY vocab: {ntex} classes')
 
-    train_ds = V12Dataset(train_p, vocab, augment=True, residual_dir=args.residual_dir)
-    val_ds = V12Dataset(val_p, vocab, augment=False, residual_dir=args.residual_dir)
+    tileset_cache = None
+    if args.tileset_dir:
+        tileset_cache = TilesetCache(args.tileset_dir)
+    train_ds = V12Dataset(train_p, vocab, augment=True, residual_dir=args.residual_dir, tileset_cache=tileset_cache)
+    val_ds = V12Dataset(val_p, vocab, augment=False, residual_dir=args.residual_dir, tileset_cache=tileset_cache)
     nw = args.num_workers
     train_ld = DataLoader(train_ds, args.batch_size, shuffle=True, num_workers=nw, pin_memory=True)
     val_ld = DataLoader(val_ds, args.batch_size, shuffle=True, num_workers=nw, pin_memory=True)
@@ -327,6 +409,9 @@ def train_v12(args):
             hm = tgt['has_mcal'].to(dev)
             hl = tgt['has_mcly'].to(dev)
             hr = tgt['has_residual'].to(dev)
+            hm_orig = tgt.get('mm_orig', torch.zeros_like(inp[:,:3])).to(dev)
+            htg = tgt.get('tex_grid', torch.zeros(B, 4, 3, 256, 256)).to(dev)
+            htg_flag = tgt.get('has_tex_grid', torch.zeros(B)).to(dev)
 
             if scaler:
                 with torch.amp.autocast('cuda'): p = model(inp)
@@ -349,6 +434,13 @@ def train_v12(args):
                 r = F.l1_loss(p['residual'], tr, reduction='none').mean(dim=(1,2,3))
                 loss = loss + 0.5 * ((r * hr).sum() / hr.sum())
                 lr_acc = lr_acc + (r * hr).sum().item(); lr_n += hr.sum().item()
+            # Reconstruction loss: composite MCAL × textures + residual → match minimap
+            if htg_flag.sum() > 0:
+                # composite = Σ_l α_l × Texture_l  at each pixel
+                composite = (p['mcal'].unsqueeze(2) * htg).sum(dim=1)  # (B,3,256,256)
+                reconstructed = composite + p['residual']
+                recon = F.l1_loss(reconstructed, hm_orig, reduction='none').mean(dim=(1,2,3))
+                loss = loss + 1.0 * ((recon * htg_flag).sum() / htg_flag.sum())
 
             # MCAL prediction stats (detect all-zeros shortcut)
             if hm.sum() > 0:
@@ -426,6 +518,8 @@ def main():
                    help='DataLoader workers for parallel data loading (default: 2)')
     p.add_argument('--residual-dir', type=str, default=None,
                    help='Directory with pre-computed _composited.npz files (e.g. output/tmp/maptextures)')
+    p.add_argument('--tileset-dir', type=str, default=None,
+                   help='Harvested tileset PNG directory for reconstruction loss texture grid (e.g. output/tmp/tilesets)')
     p.add_argument('--checkpoint', type=str, default=None,
                    help='Checkpoint .pt file for visualization mode')
     p.add_argument('--tile', type=str, default=None,
