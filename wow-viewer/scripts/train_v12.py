@@ -1,57 +1,19 @@
-"""V12 Texture Decomposer — minimap → MCAL + MCLY + residual.
-Train on minimap + tileset references (17ch) with ground-truth MCAL/MCLY + pre-computed MapTexture residual."""
+"""V12 Texture Decomposer (Stage 1) — minimap → MCAL + MCLY + residual.
+SegFormer B2 backbone, 3-channel RGB input (no tileset channels).
+Stage 1 output (residual) becomes the clean input for Stage 2 height model."""
 import argparse, json, math, os, random, sys, time, gc
 from pathlib import Path
 from collections import defaultdict
 import numpy as np
-from PIL import Image
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 try:
-    import timm
+    from transformers import SegformerModel, SegformerConfig
 except ImportError:
-    timm = None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tileset Cache
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TilesetCache:
-    """Load tileset PNGs from harvested tileset directory, hold thumbnails for model input."""
-    def __init__(self, tileset_dir, max_cache_mb=500):
-        self.thumbnails = {}  # normalized texture path → (16,16,3) uint8
-        idx_path = os.path.join(tileset_dir, 'tileset_index.json')
-        if not os.path.exists(idx_path):
-            print(f'WARNING: tileset index not found at {idx_path}')
-            return
-        with open(idx_path) as f:
-            idx = json.load(f)
-        limit = max_cache_mb * 1024 * 1024
-        total = 0
-        n = 0
-        for tex_path, file_path in idx.get('textures', {}).items():
-            if total >= limit:
-                break
-            if os.path.exists(file_path):
-                try:
-                    img = Image.open(file_path).convert('RGB')
-                    thumb = np.asarray(img.resize((16, 16), Image.BILINEAR))
-                    self.thumbnails[tex_path.lower()] = thumb
-                    total += thumb.nbytes
-                    n += 1
-                except Exception:
-                    pass
-        print(f'TilesetCache: {n} textures loaded ({total/1e6:.0f}MB)')
-
-    def get_thumbnail(self, texture_path):
-        return self.thumbnails.get(texture_path.lower())
-
-    def __len__(self):
-        return len(self.thumbnails)
+    SegformerModel = None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -75,109 +37,92 @@ def find_paths(inputs):
     return list(set(paths))
 
 
+# ImageNet normalization (SegFormer was pretrained with these)
+IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+
+
 class V12Dataset(Dataset):
-    def __init__(self, paths, mcly_vocab, mcly_unk, augment=False, tileset_cache=None):
+    """3ch minimap in, MCAL/MCLY/residual out. No tileset channels."""
+    def __init__(self, paths, mcly_vocab, augment=False, residual_dir=None):
         self.paths = paths
         self.vocab = mcly_vocab
-        self.unk = mcly_unk
         self.augment = augment
-        self.tileset_cache = tileset_cache
+        self.residual_dir = Path(residual_dir) if residual_dir else None
 
     def __len__(self): return len(self.paths)
 
     def __getitem__(self, idx):
         path = self.paths[idx]
-        data = np.load(path)
+        try:
+            data = np.load(path)
+        except Exception:
+            # Corrupted NPZ — return zeros, loss masks will skip it
+            return torch.zeros(3, 256, 256), {
+                'mcal': torch.zeros(4, 256, 256),
+                'mcly': torch.full((16, 16), -100, dtype=torch.long),
+                'residual': torch.zeros(3, 256, 256),
+                'has_mcal': torch.tensor(0.0),
+                'has_mcly': torch.tensor(0.0),
+                'has_residual': torch.tensor(0.0),
+            }
 
-        # Minimap input (5ch)
+        # Input: minimap RGB (3, 256, 256) with ImageNet normalization
         mm = torch.from_numpy(data['minimap_rgb_256'].astype(np.float32))
         if mm.dim() == 3 and mm.shape[-1] == 3: mm = mm.permute(2, 0, 1)
-        mm = mm / 255.0
-        luma = mm.mean(dim=0, keepdim=True)
-        gy = torch.tensor([[[-1,-2,-1],[0,0,0],[1,2,1]]], dtype=torch.float32)
-        gx = torch.tensor([[[-1,0,1],[-2,0,2],[-1,0,1]]], dtype=torch.float32)
-        grad = (F.conv2d(luma.unsqueeze(0), gx.unsqueeze(0), padding=1).abs() +
-                F.conv2d(luma.unsqueeze(0), gy.unsqueeze(0), padding=1).abs()).squeeze(0)
-        inp = torch.cat([mm, luma, grad], dim=0)
+        mm = (mm / 255.0 - IMAGENET_MEAN.squeeze(0)) / IMAGENET_STD.squeeze(0)
 
-        # Tileset reference channels (12ch: RGB × 4 layers)
-        has_tileset = self.tileset_cache is not None
-        if has_tileset and 'mcly_texture_ids' in data:
-            mcly_raw = data['mcly_texture_ids']
-            mcly_t = torch.from_numpy(mcly_raw.astype(np.int64))
-            if mcly_t.dim() == 3 and mcly_t.shape[0] == 4:
-                mcly_t = mcly_t.permute(1, 2, 0)
-
-            sidecar = Path(path).with_name(Path(path).stem + '_metadata.json')
-            texture_names = []
-            if sidecar.exists():
-                with open(sidecar) as f:
-                    texture_names = json.load(f).get('mcly_texture_names', [])
-
-            tileset_ch = torch.zeros(12, 256, 256, dtype=torch.float32)
-            for cy in range(16):
-                for cx in range(16):
-                    for layer in range(min(4, mcly_t.shape[-1])):
-                        tid = int(mcly_t[cy, cx, layer])
-                        if tid < 0 or tid >= len(texture_names):
-                            continue
-                        thumb = self.tileset_cache.get_thumbnail(texture_names[tid])
-                        if thumb is None:
-                            continue
-                        thumb_t = torch.from_numpy(thumb.astype(np.float32)) / 255.0
-                        ch_base = layer * 3
-                        tileset_ch[ch_base:ch_base+3,
-                                   cy*16:(cy+1)*16,
-                                   cx*16:(cx+1)*16] = thumb_t.permute(2, 0, 1)
-            inp = torch.cat([inp, tileset_ch], dim=0)
-        elif has_tileset:
-            inp = torch.cat([inp, torch.zeros(12, 256, 256)], dim=0)
-
-        # MCAL target
+        # MCAL target (4, 256, 256)  in [0, 1]
         has_mcal = 'mcal_alpha_pack_256' in data
         if has_mcal:
             mcal = torch.from_numpy(data['mcal_alpha_pack_256'].astype(np.float32))
-            if mcal.dim() == 3 and mcal.shape[0] == 4: mcal = mcal.permute(1, 2, 0)
+            if mcal.dim() == 3 and mcal.shape[-1] == 4: mcal = mcal.permute(2, 0, 1)
         else:
-            mcal = torch.zeros(256, 256, 4)
+            mcal = torch.zeros(4, 256, 256)
 
-        # MCLY target
+        # MCLY target (16, 16) — vocab-mapped texture class per chunk, -100 = ignore
         has_mcly = 'mcly_texture_ids' in data
         if has_mcly:
             mcly = torch.from_numpy(data['mcly_texture_ids'].astype(np.int64))
             if mcly.dim() == 3 and mcly.shape[-1] == 4: mcly = mcly[..., 0]
             if mcly.dim() == 3 and mcly.shape[0] == 4: mcly = mcly[0]
-            mapped = mcly.clone()
+            mapped = torch.full((16, 16), -100, dtype=torch.long)
             for old_id, new_id in self.vocab.items():
                 mapped[mcly == old_id] = new_id
-            mapped[mcly < 0] = self.unk
         else:
-            mapped = torch.full((16, 16), self.unk, dtype=torch.long)
+            mapped = torch.full((16, 16), -100, dtype=torch.long)
 
-        # Residual target (from pre-computed MapTexture)
-        composited_path = Path(path).with_name(Path(path).stem + '_composited.npz')
-        has_residual = composited_path.exists()
-        if has_residual:
-            cz = np.load(composited_path)
-            residual = torch.from_numpy(cz['texture_residual_256'].astype(np.float32)) / 255.0
-            cz.close()
-            if residual.dim() == 3 and residual.shape[0] == 3: residual = residual.permute(1, 2, 0)
-        else:
+        # Residual target (3, 256, 256) in [-1, 1] from pre-computed MapTexture
+        stem = Path(path).stem
+        cp_paths = [Path(path).with_name(stem + '_composited.npz')]
+        if self.residual_dir:
+            cp_paths.append(self.residual_dir / (stem + '_composited.npz'))
+        composited_path = next((p for p in cp_paths if p.exists()), None)
+        has_residual = False
+        if composited_path:
+            try:
+                cz = np.load(composited_path)
+                residual = torch.from_numpy(cz['texture_residual_256'].astype(np.float32)) / 255.0
+                cz.close()
+                has_residual = True
+                if residual.dim() == 3 and residual.shape[-1] == 3: residual = residual.permute(2, 0, 1)
+            except Exception:
+                has_residual = False
+        if not has_residual:
             residual = torch.zeros(3, 256, 256)
 
         data.close()
 
         if self.augment:
             if random.random() > 0.5:
-                inp = torch.flip(inp, [-1]); mcal = torch.flip(mcal, [0]); mapped = torch.flip(mapped, [0])
-                has_mcly = has_mcly and torch.flip(torch.ones(1), [0]).item() > 0
-                residual = torch.flip(residual, [-1])
+                mm = torch.flip(mm, [-1]); mcal = torch.flip(mcal, [-1])
+                mapped = torch.flip(mapped, [0]); residual = torch.flip(residual, [-1])
             if random.random() > 0.5:
-                inp = torch.flip(inp, [-2]); mcal = torch.flip(mcal, [1]); mapped = torch.flip(mapped, [1])
-                residual = torch.flip(residual, [-2])
+                mm = torch.flip(mm, [-2]); mcal = torch.flip(mcal, [-2])
+                mapped = torch.flip(mapped, [1]); residual = torch.flip(residual, [-2])
 
-        return inp, {
-            'mcal': mcal.permute(2, 0, 1),
+        return mm, {
+            'mcal': mcal,
             'mcly': mapped,
             'residual': residual,
             'has_mcal': torch.tensor(1.0 if has_mcal else 0.0),
@@ -197,60 +142,115 @@ def build_vocab(paths, min_n=3):
                     if int(i) >= 0: cnt[int(i)] += 1
             z.close()
         except: pass
-    return {tid: idx for idx, (tid, c) in enumerate(cnt.items()) if c >= min_n}, len(cnt)
+    return {tid: idx for idx, (tid, c) in enumerate(cnt.items()) if c >= min_n}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Model — ConvNeXt V2 Nano → 3 task heads
+# Model — SegFormer B2 → U-Net decoder → 3 heads
 # ═══════════════════════════════════════════════════════════════════════════
 
-class LN2d(nn.Module):
-    def __init__(self, d): super().__init__(); self.n = nn.LayerNorm(d, 1e-6)
-    def forward(self, x): return self.n(x.permute(0,2,3,1)).permute(0,3,1,2)
-
-class DecBlock(nn.Module):
-    def __init__(self, i, s, o):
+class UpBlock(nn.Module):
+    """Upsample 2× → concat skip → Conv → GELU."""
+    def __init__(self, in_ch, skip_ch, out_ch):
         super().__init__()
-        self.up = nn.ConvTranspose2d(i, o, 2, 2)
-        self.f = nn.Sequential(nn.Conv2d(o+s, o, 3, 1), LN2d(o), nn.GELU(), nn.Conv2d(o, o, 3, 1), LN2d(o), nn.GELU())
-    def forward(self, x, s):
+        self.up = nn.ConvTranspose2d(in_ch, out_ch, 2, 2)
+        self.conv = nn.Sequential(
+            nn.Conv2d(out_ch + skip_ch, out_ch, 3, 1, 1),
+            nn.GELU(),
+        )
+
+    def forward(self, x, skip):
         x = self.up(x)
-        if x.shape[-1] != s.shape[-1]: x = F.interpolate(x, s.shape[-2:], mode='bilinear', align_corners=False)
-        return self.f(torch.cat([x, s], 1))
+        if x.shape[-1] != skip.shape[-1] or x.shape[-2] != skip.shape[-2]:
+            x = F.interpolate(x, size=skip.shape[-2:], mode='bilinear', align_corners=False)
+        return self.conv(torch.cat([x, skip], 1))
+
 
 class V12Model(nn.Module):
-    def __init__(self, num_tex):
+    """SegFormer B2 backbone → MCLY head (16×16) + MCAL + residual (256×256)."""
+    def __init__(self, num_tex_classes, backbone_name='nvidia/segformer-b2-finetuned-ade-512-512'):
         super().__init__()
-        if timm is None: raise RuntimeError("pip install timm")
-        bb = timm.create_model('convnextv2_nano', pretrained=False)
-        self.stages = nn.ModuleList(bb.stages)
-        sc = bb.stem[0]
-        self.stem = nn.Sequential(nn.Conv2d(17, sc.out_channels, kernel_size=sc.kernel_size, stride=sc.stride, padding=sc.padding), bb.stem[1])
-        with torch.no_grad():
-            self.stem[0].weight[:, :3] = sc.weight; self.stem[0].weight[:, 3:] = 0
+        if SegformerModel is None: raise RuntimeError("pip install transformers")
+        self.backbone = SegformerModel.from_pretrained(backbone_name)
 
-        ch = [80, 160, 320, 640]
-        self.d3 = DecBlock(ch[3], ch[2], 128)
-        self.d2 = DecBlock(128, ch[1], 128)
-        self.d1 = DecBlock(128, ch[0], 128)
-        self.d0 = nn.Sequential(nn.Conv2d(128, 64, 3, 1), LN2d(64), nn.GELU())
+        # SegFormer B2 channel dims at each stage
+        self.stage_dims = [64, 128, 320, 512]
+        decoder_dim = 256
 
-        self.mcal = nn.Sequential(nn.Conv2d(64, 32, 3, 1), nn.GELU(), nn.Conv2d(32, 4, 3, 1))
-        self.mcly = nn.Sequential(nn.Conv2d(64, 64, 1), nn.GELU(), nn.Conv2d(64, num_tex, 3, 1))
-        self.resid = nn.Sequential(nn.Conv2d(64, 32, 3, 1), nn.GELU(), nn.Conv2d(32, 3, 3, 1))
+        # Project each stage to decoder_dim (1×1 conv)
+        self.stage_proj = nn.ModuleList([
+            nn.Conv2d(d, decoder_dim, 1) for d in self.stage_dims
+        ])
+
+        # MCLY head on Stage 2 features (1/16 scale, 16×16)
+        self.mcly_head = nn.Sequential(
+            nn.Conv2d(decoder_dim, 128, 1),
+            nn.GELU(),
+            nn.Conv2d(128, num_tex_classes, 1),
+        )
+
+        # Decoder: 8×8 → 16×16 → 32×32 → 64×64 → 256×256
+        self.up3 = UpBlock(decoder_dim, decoder_dim, decoder_dim)
+        self.up2 = UpBlock(decoder_dim, decoder_dim, decoder_dim)
+        self.up1 = UpBlock(decoder_dim, decoder_dim, decoder_dim)
+        self.to_full = nn.Sequential(
+            nn.ConvTranspose2d(decoder_dim, decoder_dim, 2, 2),  # 64→128
+            nn.GELU(),
+            nn.ConvTranspose2d(decoder_dim, 64, 2, 2),           # 128→256
+            nn.GELU(),
+        )
+
+        # MCAL head: 4 channels, sigmoid for [0,1] alpha
+        self.mcal_head = nn.Sequential(
+            nn.Conv2d(64 + decoder_dim, 64, 3, 1, 1),
+            nn.GELU(),
+            nn.Conv2d(64, 32, 3, 1, 1),
+            nn.GELU(),
+            nn.Conv2d(32, 4, 3, 1, 1),
+        )
+
+        # Residual head: 3 channels, linear (residual can be negative)
+        self.residual_head = nn.Sequential(
+            nn.Conv2d(64 + decoder_dim, 64, 3, 1, 1),
+            nn.GELU(),
+            nn.Conv2d(64, 32, 3, 1, 1),
+            nn.GELU(),
+            nn.Conv2d(32, 3, 3, 1, 1),
+        )
 
     def forward(self, x):
-        x = self.stem(x)
-        fs = []; y = x
-        for s in self.stages: y = s(y); fs.append(y)
-        f0, f1, f2, f3 = fs
-        d = self.d3(f3, f2); d = self.d2(d, f1); d = self.d1(d, f0)
-        d = self.d0(d)
-        d = F.interpolate(d, size=(256,256), mode='bilinear', align_corners=False)
-        return {'mcal': torch.sigmoid(F.interpolate(self.mcal(d), size=(256,256), mode='bilinear', align_corners=False)),
-                'mcly': F.interpolate(self.mcly(d), size=16, mode='bilinear', align_corners=False),
-                'residual': torch.sigmoid(F.interpolate(self.resid(d), size=(256,256), mode='bilinear', align_corners=False)),
-                }
+        # x: (B, 3, 256, 256)
+        hs = self.backbone(x, output_hidden_states=True).hidden_states
+        # hs: 4 tensors at (B, C, H/4, W/4) ... (B, C, H/32, W/32)
+
+        # Project each stage to decoder_dim
+        p = [proj(h) for proj, h in zip(self.stage_proj, hs)]
+        # p[0]: (B, 256, 64, 64)  @ 1/4
+        # p[1]: (B, 256, 32, 32)  @ 1/8
+        # p[2]: (B, 256, 16, 16)  @ 1/16
+        # p[3]: (B, 256, 8, 8)    @ 1/32
+
+        # MCLY from Stage 2 (1/16 scale)
+        mcly = self.mcly_head(p[2])  # (B, num_classes, 16, 16)
+
+        # Decoder with skip connections
+        d = self.up3(p[3], p[2])   # 8→16
+        d = self.up2(d, p[1])      # 16→32
+        d = self.up1(d, p[0])      # 32→64
+        d_full = self.to_full(d)   # 64→128→256
+
+        # Merge decoder features with projected stage 0 for fine detail
+        p0_up = F.interpolate(p[0], size=(256, 256), mode='bilinear', align_corners=False)
+        f = torch.cat([d_full, p0_up], dim=1)
+
+        mcal = torch.sigmoid(self.mcal_head(f))
+        residual = self.residual_head(f)
+
+        return {
+            'mcal': mcal,        # (B, 4, 256, 256) in [0, 1]
+            'mcly': mcly,        # (B, num_classes, 16, 16) logits
+            'residual': residual, # (B, 3, 256, 256) unconstrained
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -280,17 +280,15 @@ def train_v12(args):
     train_p, val_p = paths[nv:], paths[:nv]
     print(f'Train: {len(train_p)}, Val: {len(val_p)}')
 
-    vocab, unk = build_vocab(train_p)
-    ntex = len(vocab) + 1
+    vocab = build_vocab(train_p)
+    ntex = len(vocab)
     print(f'MCLY vocab: {ntex} classes')
 
-    tileset_cache = None
-    if args.tileset_dir:
-        tileset_cache = TilesetCache(args.tileset_dir)
-    train_ds = V12Dataset(train_p, vocab, unk, augment=True, tileset_cache=tileset_cache)
-    val_ds = V12Dataset(val_p, vocab, unk, augment=False, tileset_cache=tileset_cache)
-    train_ld = DataLoader(train_ds, args.batch_size, shuffle=True, num_workers=0, pin_memory=True)
-    val_ld = DataLoader(val_ds, args.batch_size, shuffle=True, num_workers=0, pin_memory=True)
+    train_ds = V12Dataset(train_p, vocab, augment=True, residual_dir=args.residual_dir)
+    val_ds = V12Dataset(val_p, vocab, augment=False, residual_dir=args.residual_dir)
+    nw = args.num_workers
+    train_ld = DataLoader(train_ds, args.batch_size, shuffle=True, num_workers=nw, pin_memory=True)
+    val_ld = DataLoader(val_ds, args.batch_size, shuffle=True, num_workers=nw, pin_memory=True)
 
     model = V12Model(ntex).to(dev)
     npar = sum(p.numel() for p in model.parameters())
@@ -325,13 +323,13 @@ def train_v12(args):
 
             B = inp.shape[0]
             loss = 0.0
-            # MCAL L1 (5x weight — alpha is sparse)
+            # MCAL L1 (5× weight — alpha is sparse)
             if hm.sum() > 0:
                 m = F.l1_loss(p['mcal'], tm, reduction='none').mean(dim=(1,2,3))
                 loss = loss + 5.0 * ((m * hm).sum() / hm.sum())
-            # MCLY CE
+            # MCLY CE (-100 = ignore)
             if hl.sum() > 0:
-                c = F.cross_entropy(p['mcly'], tlbl, ignore_index=unk, reduction='none')
+                c = F.cross_entropy(p['mcly'], tlbl, ignore_index=-100, reduction='none')
                 loss = loss + 0.2 * ((c.view(B,-1).mean(1) * hl).sum() / hl.sum())
             # Residual L1
             if hr.sum() > 0:
@@ -360,25 +358,27 @@ def train_v12(args):
                             if vc >= 2: break
                 vl = f' val={vloss/max(vc,1):.4f}'
                 if vc and vloss/vc < best_val:
-                    best_val = vloss/vc; torch.save({'model': model.state_dict(), 'epoch': ep, 'vocab': vocab, 'unk': unk}, out / 'best.pt')
+                    best_val = vloss/vc; torch.save({'model': model.state_dict(), 'epoch': ep, 'vocab': vocab}, out / 'best.pt')
             print(f'E{ep:4d} loss={avg:.4f} lr={lrv:.2e}{vl}')
             model.train()
 
-        torch.save({'model': model.state_dict(), 'epoch': ep, 'optimizer': opt.state_dict(), 'vocab': vocab, 'unk': unk}, out / 'last.pt')
+        torch.save({'model': model.state_dict(), 'epoch': ep, 'optimizer': opt.state_dict(), 'vocab': vocab}, out / 'last.pt')
 
     print(f'\nDone. Best val: {best_val:.4f}. {out}')
 
 
 def main():
-    p = argparse.ArgumentParser(description='V12 Texture Decomposer')
+    p = argparse.ArgumentParser(description='V12 Texture Decomposer (Stage 1) — SegFormer backbone, 3ch RGB input')
     p.add_argument('input', nargs='+')
-    p.add_argument('--output-dir', '-o', default='runs/v12')
+    p.add_argument('--output-dir', '-o', default='runs/v12_stage1')
     p.add_argument('--epochs', type=int, default=200)
     p.add_argument('--batch-size', type=int, default=16)
     p.add_argument('--lr', type=float, default=2e-4)
     p.add_argument('--max-samples', type=int, default=2000)
-    p.add_argument('--tileset-dir', type=str, default=None,
-                   help='Harvested tileset PNG directory (with tileset_index.json)')
+    p.add_argument('--num-workers', type=int, default=2,
+                   help='DataLoader workers for parallel data loading (default: 2)')
+    p.add_argument('--residual-dir', type=str, default=None,
+                   help='Directory with pre-computed _composited.npz files (e.g. output/tmp/maptextures)')
     args = p.parse_args()
     train_v12(args)
 
