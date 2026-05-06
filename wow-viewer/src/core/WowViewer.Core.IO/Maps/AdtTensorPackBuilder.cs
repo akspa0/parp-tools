@@ -24,9 +24,11 @@ public static class AdtTensorPackBuilder
     private const int TileAlphaSize = ChunkAlphaSize * TileChunks;
     private const int TileMinimapSize = 256;
 
-    public static TerrainTileTensorPack Build(string adtPath, string? textureSourcePath = null)
+    public static TerrainTileTensorPack Build(string adtPath, string? textureSourcePath = null, string? buildVersion = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(adtPath);
+
+        AdtFormatProfile profile = AdtFormatProfiles.Resolve(buildVersion);
 
         using FileStream stream = File.OpenRead(adtPath);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, Path.GetFullPath(adtPath));
@@ -50,7 +52,7 @@ public static class AdtTensorPackBuilder
 
         // ── Read texture data (MCLY + MCAL) ──────────────────────────────────
         (int[,,]? mclyTextureIds, IReadOnlyList<string> mclyTextureNames, bool[,,]? mclyLayerMask, float[,,]? mcalAlphaPack, float[,]? mcshShadowMask256) =
-            ReadTextureData(adtPath, textureSourcePath, availableSignals);
+            ReadTextureData(adtPath, textureSourcePath, profile, availableSignals);
 
         // ── Read MH2O liquid ─────────────────────────────────────────────────
         (float[,]? mh2oHeight, float[,]? mh2oDepth, int[,]? mh2oType) =
@@ -361,7 +363,7 @@ public static class AdtTensorPackBuilder
     // ═══════════════════════════════════════════════════════════════════════
 
     private static (int[,,]? textureIds, IReadOnlyList<string> textureNames, bool[,,]? layerMask, float[,,]? alphaPack, float[,]? mcshShadowMask256)
-        ReadTextureData(string adtPath, string? textureSourcePath, HashSet<string> signals)
+        ReadTextureData(string adtPath, string? textureSourcePath, AdtFormatProfile profile, HashSet<string> signals)
     {
         string? effectiveTexturePath = textureSourcePath;
         if (string.IsNullOrWhiteSpace(effectiveTexturePath))
@@ -375,7 +377,7 @@ public static class AdtTensorPackBuilder
 
         try
         {
-            AdtTextureFile textureFile = AdtTextureReader.Read(effectiveTexturePath);
+            AdtTextureFile textureFile = AdtTextureReader.Read(effectiveTexturePath, profile.DecodeProfile);
             if (textureFile.Chunks.Count == 0)
                 return (null, textureFile.TextureNames, null, null, null);
 

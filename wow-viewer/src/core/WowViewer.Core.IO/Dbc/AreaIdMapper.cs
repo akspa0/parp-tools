@@ -9,22 +9,18 @@ public sealed class AreaIdMapper
     private const string EmbeddedCrosswalkResourceName = "WowViewer.Core.IO.Resources.area_crosswalk.csv";
     private static readonly string[] AlphaTestDataAreaPaths =
     [
-        Path.Combine("gillijimproject_refactor", "test_data", "0.5.3", "tree", "DBFilesClient", "AreaTable.dbc"),
         Path.Combine("test_data", "0.5.3", "tree", "DBFilesClient", "AreaTable.dbc"),
     ];
     private static readonly string[] LkTestDataAreaPaths =
     [
-        Path.Combine("gillijimproject_refactor", "test_data", "3.3.5", "tree", "DBFilesClient", "AreaTable.dbc"),
         Path.Combine("test_data", "3.3.5", "tree", "DBFilesClient", "AreaTable.dbc"),
     ];
     private static readonly string[] AlphaTestDataMapPaths =
     [
-        Path.Combine("gillijimproject_refactor", "test_data", "0.5.3", "tree", "DBFilesClient", "Map.dbc"),
         Path.Combine("test_data", "0.5.3", "tree", "DBFilesClient", "Map.dbc"),
     ];
     private static readonly string[] LkTestDataMapPaths =
     [
-        Path.Combine("gillijimproject_refactor", "test_data", "3.3.5", "tree", "DBFilesClient", "Map.dbc"),
         Path.Combine("test_data", "3.3.5", "tree", "DBFilesClient", "Map.dbc"),
     ];
     private const string AlphaBuildVersion053 = "0.5.3.3368";
@@ -722,8 +718,6 @@ public sealed class AreaIdMapper
                 string[] candidates =
                 [
                     Path.Combine(current.FullName, "definitions"),
-                    Path.Combine(current.FullName, "gillijimproject_refactor", "lib", "WoWDBDefs", "definitions"),
-                    Path.Combine(current.FullName, "gillijimproject_refactor", "src", "MdxViewer", "bin", "Debug", "net10.0-windows", "definitions"),
                     Path.Combine(current.FullName, "wow-viewer", "libs", "wowdev", "WoWDBDefs", "definitions"),
                     Path.Combine(current.FullName, "libs", "wowdev", "WoWDBDefs", "definitions"),
                     Path.Combine(current.FullName, "lib", "WoWDBDefs", "definitions"),

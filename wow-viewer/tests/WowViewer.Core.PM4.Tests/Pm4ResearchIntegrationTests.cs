@@ -1005,7 +1005,7 @@ public sealed class Pm4ResearchIntegrationTests
 
 internal static class Pm4TestPaths
 {
-    public static string DevelopmentDirectoryPath => Path.Combine(GetWowViewerRoot(), "..", "gillijimproject_refactor", "test_data", "development", "World", "Maps", "development");
+    public static string DevelopmentDirectoryPath => Path.Combine(GetWowViewerRoot(), "test_data", "development", "World", "Maps", "development");
 
     public static string DevelopmentTilePath => Path.Combine(DevelopmentDirectoryPath, "development_00_00.pm4");
 

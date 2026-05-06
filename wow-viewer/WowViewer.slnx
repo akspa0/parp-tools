@@ -23,4 +23,7 @@
   <Folder Name="/tools/inspect/">
     <Project Path="tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj" />
   </Folder>
+  <Folder Name="/tools/harvest/">
+    <Project Path="tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj" />
+  </Folder>
 </Solution>

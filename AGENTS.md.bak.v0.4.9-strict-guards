@@ -1,8 +1,6 @@
-# Codex Workspace Instructions — v0.4.9 Branch (V14 Reset)
+# Codex Workspace Instructions — v0.4.9 Branch (Strict Guards)
 
 **THIS BRANCH WAS FORKED FROM COMMIT `971fff2` ON 2026-05-06.**
-**Previous AGENTS.md backed up to `AGENTS.md.bak.v0.4.9-strict-guards`.**
-**Full plan: `wow-viewer/docs/architecture/v14-model-and-refactor-plan-2026-05-06.md`.**
 
 ---
 
@@ -12,7 +10,7 @@
 
 **DO NOT WRITE NEW CODE IN `gillijimproject_refactor`. EVER.**
 
-The code in `gillijimproject_refactor` is COMPLETE and FUNCTIONAL. It is a reference codebase, not a development target.
+The code in `gillijimproject_refactor` is COMPLETE and FUNCTIONAL. It is a reference codebase, not a development target. Every time you add code there instead of `wow-viewer`, you are creating technical debt and risking regressions in working tooling.
 
 - DO NOT add new files to `gillijimproject_refactor`.
 - DO NOT add new features to `gillijimproject_refactor`.
@@ -34,8 +32,7 @@ The ONLY valid reasons to touch `gillijimproject_refactor` are:
 - New shared I/O code → `wow-viewer/src/core/WowViewer.Core` or `wow-viewer/src/core/WowViewer.Core.IO`
 - New M2 runtime code → `wow-viewer/src/core/WowViewer.Core.Runtime`
 - New viewer app code → `wow-viewer/src/viewer/WowViewer.App`
-- New tools → `wow-viewer/src/tools/`
-- New Python/data-harvester code → `wow-viewer/data-harvester/`
+- New tools → `wow-viewer/tools/`
 - New tests → `wow-viewer/tests/`
 
 If you are unsure where code belongs, it belongs in `wow-viewer`.
@@ -45,11 +42,10 @@ If you are unsure where code belongs, it belongs in `wow-viewer`.
 **The tooling for reading game client files is COMPLETE. DO NOT REWRITE IT.**
 
 This includes but is not limited to:
-- ADT readers (`_tex0.adt`, `_obj0.adt`, `_lod.adt`, `_root.adt`)
+- ADT readers (`_tex0.adt`, `_obj0.adt`, `_lod.adt`)
 - WDT, WMO, M2, MDX, BLP, DBC, DB2 parsers
 - MCAL, MCLY, MCNK terrain chunk decoders
 - PM4 format readers and analyzers
-- MPQ archive readers and catalog systems
 - Any existing chunk reader, file detector, or format summary code
 
 This work is DONE. It works. If you need to use it from `wow-viewer`, you may:
@@ -61,64 +57,6 @@ You may NOT:
 - Rewrite a parser that already exists and works.
 - "Improve" a reader by restructuring it without a concrete, user-requested reason.
 - Create duplicate readers in `wow-viewer` when a shared-I/O slice already exists.
-
-### RULE 4: `wow-viewer` MUST BE REPO-INDEPENDENT
-
-**`wow-viewer` must be extractable as its own standalone repository.**
-
-- No source file in `wow-viewer/` may reference a path outside `wow-viewer/` (except game client paths on disk).
-- No project file in `wow-viewer/` may reference a `.csproj` outside `wow-viewer/`.
-- No Python script in `wow-viewer/data-harvester/` may import code outside `wow-viewer/`.
-- All shared code must live inside `wow-viewer/src/core/` or `wow-viewer/data-harvester/src/`.
-
-### RULE 5: ONE PYTHON ENVIRONMENT
-
-**All Python work lives under `wow-viewer/data-harvester/`.**
-
-- No `.venv` directories outside `wow-viewer/data-harvester/`.
-- No `requirements.txt` files outside `wow-viewer/data-harvester/`.
-- All Python scripts (training, inference, validation, preprocessing) go in `wow-viewer/data-harvester/scripts/`.
-- All Python library code goes in `wow-viewer/data-harvester/src/harvester/`.
-- Environment is managed with `uv`. The project file is `wow-viewer/data-harvester/pyproject.toml`.
-
-### RULE 6: DO NOT MUTATE TRAINING SCRIPTS WITHOUT A PLAN
-
-**Every change to a training script must have a documented reason and a validation path.**
-
-- Do not change input channel counts without updating the model spec document.
-- Do not add new loss terms without documenting their weight and purpose.
-- Do not change normalization strategy without verifying it doesn't break existing checkpoints.
-- Do not merge multiple training script changes into one commit.
-- Each training script change should be a separate, testable commit.
-
-### RULE 7: MODELS ARE SMALL, MODULAR, AND PREDICT RESIDUALS
-
-**No monolithic models. No multi-task training. No "predict everything at once."**
-
-Every V14 model is a tiny, independent network that predicts ONE residual signal. Models chain together — each model's output becomes an input to downstream models.
-
-- Each model has one input set and one output. No shared weights between models.
-- Each model trains independently. If H3 improves, you replace H3's checkpoint. You do NOT retrain H1, H2, H4-H8.
-- Each model predicts a RESIDUAL (the difference between ground truth and prior model outputs), not the full signal.
-- Each model has its own training script, its own validation, its own checkpoint file.
-- DO NOT combine models into a single training script.
-- DO NOT add new heads to existing models.
-- DO NOT make models depend on each other's weights — only on each other's outputs.
-- The full V14 plan is in `wow-viewer/docs/architecture/v14-model-and-refactor-plan-2026-05-06.md`.
-
-### RULE 8: ONE PHASE AT A TIME — NO SCOPE CREEP
-
-**You cannot work on Phase N+1 until Phase N is done. Done means validated, not coded.**
-
-This rule exists because the pattern has been: see the whole mountain → try to climb it in one leap → break everything → despair. The guardrails prevent this cycle.
-
-- DO NOT add features to a phase that aren't in the phase checklist.
-- DO NOT start the next phase early "because it's easy" or "while waiting."
-- DO NOT change architecture mid-phase "because I had a better idea."
-- DO NOT skip validation and call something done.
-- If you have a better idea, write it down. Implement it later. Not now.
-- Every phase ends with validation against ground truth (MdxViewer renders, raw game file data). If validation fails, the phase is not done. Fix it. Do not move on.
-- The full execution guardrails are in `wow-viewer/docs/architecture/v14-model-and-refactor-plan-2026-05-06.md` Section 9.
 
 ---
 
@@ -135,8 +73,8 @@ This rule exists because the pattern has been: see the whole mountain → try to
 - Before changing `wow-viewer` PM4, shared I/O, dataset-builder ownership, or migration workflow, also read `gillijimproject_refactor/plans/wow_viewer_pm4_library_plan_2026-03-25.md`, `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md`, `gillijimproject_refactor/plans/wow_viewer_dataset_builder_tool_plan_2026-04-14.md`, and `wow-viewer/README.md`.
 - Before changing `wow-viewer` viewer-app shell work, workspace or session surfaces, navigator or inspector or status panels, world-session UI, or legacy viewer cutover guidance, also read `gillijimproject_refactor/plans/wow_viewer_viewer_app_cutover_plan_2026-04-17.md` and `wow-viewer/docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md`.
 - Before changing `wow-viewer` M2 runtime ownership, model rendering, skin handling, model lighting, shader or effect routing, or M2 performance work, also read `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`.
-- Before working on V14 model, data harvester, or repo independence, read `wow-viewer/docs/architecture/v14-model-and-refactor-plan-2026-05-06.md`.
 - Before working from archive-backed game clients, WoWArchive-mounted builds, or broad multi-client real-data validation, read `gillijimproject_refactor/memory-bank/data-paths.md`, `.codex/skills/wowarchive-client-staging/SKILL.md`, `G:\WoW\WoWArchive-0.X-3.X\Readme.txt`, and `G:\WoW\WoWArchive-0.X-3.X\MountAll.bat`.
+- Before changing workflow assets, read `.codex/README.md`, `.codex/prompts/wow-viewer-tool-suite-plan-set.md`, `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md`, `.codex/prompts/wow-viewer-dataset-builder-plan.md`, `.codex/prompts/wow-viewer-editor-plan-set.md`, `.codex/prompts/wow-viewer-map-editing-foundation-plan.md`, `.codex/prompts/wow-viewer-editor-ui-surface-plan.md`, `.codex/prompts/wow-viewer-pm4-library-implementation.md`, `.codex/prompts/wow-viewer-shared-io-implementation.md`, `.codex/prompts/wow-viewer-world-runtime-plan-set.md`, `.codex/prompts/wow-viewer-m2-runtime-plan-set.md`, and `.codex/prompts/m2-cross-build-native-investigation.md`.
 - If the task touches 3.3.5 terrain texturing or alpha blending, also read `gillijimproject_refactor/src/MdxViewer/memory-bank/terrain_editing_plan_2026-02-14.md`.
 
 ## Memory Bank Rule
@@ -173,16 +111,21 @@ This rule exists because the pattern has been: see the whole mountain → try to
 - Delete staged client copies that are no longer needed so the temp area does not silently grow without bound.
 - When reporting validation, say whether the proof used a fixed local root, a direct mounted archive path, or a staged local copy.
 
-## Build And Validation
+## Prompt Registry
 
-- For new `wow-viewer` library or tool work, prefer `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` and `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`.
-- For legacy parser and format-library work that still explicitly targets `gillijimproject_refactor`, prefer `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`.
-- For viewer work, use `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
-- For `wow-viewer` PM4 inspect or report slices, validate against `gillijimproject_refactor/test_data/development/World/Maps/development` with `WowViewer.Tool.Inspect` commands when the slice changes analyzer or report output.
-- Only build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` for `wow-viewer` work when the task explicitly changes consumer compatibility or the user asks for that compatibility check.
-- Do not describe a `wow-viewer` build, test pass, or optional active-viewer compile as real viewer runtime signoff.
-- Prefer real-data validation using the fixed paths in `gillijimproject_refactor/memory-bank/data-paths.md`. Do not ask the user for alternate paths unless those fixed paths are missing.
-- For Python work, use `cd wow-viewer/data-harvester && uv run <script>` — never `python script.py` directly.
+- Use `.codex/prompts/wow-viewer-tool-suite-plan-set.md` to route broader `wow-viewer` planning asks to the right focused prompt.
+- Use `.github/prompts/wow-viewer-gpu-viewer-plan-set.prompt.md` for library-first, GPU-first viewer migration routing when the ask is world-open performance recovery, moving renderer ownership out of `WowViewer.App`, extracting terrain/object/runtime seams into `wow-viewer` libraries, and sequencing thin-host cutover.
+- Use `.codex/prompts/wow-viewer-dataset-builder-plan.md` for planning the new `wow-viewer` dataset-builder tool, dataset explorer surface, supervised training-tooling cutover, ML corpus export ownership, terrain-supervision artifact ownership, manifest or harvest cutover, BYOD distribution constraints, or deciding what shared data seams must move out of `WoWMapConverter` before legacy exporter replacement.
+- Use `.codex/prompts/wow-viewer-training-plan-set.md` for routing `v7.5.1` grounded training recovery, `v7.6` paired training alignment, shared dataset-truth gates, or the fastest path to a first trustworthy retrain.
+- Use `.codex/prompts/wow-viewer-editor-plan-set.md` for broader editor-transition planning, including PM4 `MPRL`-assisted terrain conform, object-save ownership, map persistence, and viewer-vs-editor workspace routing.
+- Use `.codex/prompts/wow-viewer-map-editing-foundation-plan.md` for planning the first true terrain or object editing or dirty-map or save pipeline slice.
+- Use `.codex/prompts/wow-viewer-editor-ui-surface-plan.md` for planning viewer and editor workspace presets, editor task clustering, and panel reorganization.
+- Use `.codex/prompts/wow-viewer-pm4-library-implementation.md` for the next narrow `Core.PM4` implementation slice.
+- Use `.codex/prompts/wow-viewer-shared-io-implementation.md` for the next narrow shared `Core` or `Core.IO` format slice.
+- Use `.codex/prompts/wow-viewer-world-runtime-plan-set.md` for staged `WorldScene` split work, negative asset lookup suppression such as repeated `.skin` miss churn, explicit terrain/WMO/MDX/overlay runtime service extraction, or WorldScene-to-wow-viewer world-runtime cutover planning.
+- Use `.codex/prompts/wow-viewer-m2-runtime-plan-set.md` for staged M2 runtime ownership, exact `%02d.skin` handling, active section classification, material/effect routing, animation/lighting state, scene batching, or M2 consumer-cutover planning.
+- Use `.github/prompts/m2-rendering-investigation.prompt.md` for diagnosing invisible M2 models, Ghidra-based native-client M2 render investigation on a live 3.3.5.12340 sandbox, adapter vertex/index validation against native ground truth, or renderer parity fixes for M2-family assets in `MdxViewer`.
+- Use `.codex/prompts/m2-cross-build-native-investigation.md` for cross-build native M2 behavior recovery across multiple client branches (for example 3.3.5 through 6.x), including per-build anchor mapping, runtime breakpoint validation, and compatibility-matrix output before implementation.
 
 ## wow-viewer M2 And Runtime Guardrails
 
@@ -198,6 +141,16 @@ This rule exists because the pattern has been: see the whole mountain → try to
 - Treat `gillijimproject_refactor/src/MdxViewer/ViewerApp*.cs` as compatibility-only or legacy editor or archaeology work unless the user explicitly asks for a bounded hotfix in the active old viewer.
 - Do not add new long-range shell architecture, panel design, or session-state ownership to `MdxViewer` when the seam belongs in `WowViewer.App`.
 - Keep `wow-viewer/docs/architecture/viewer-legacy-cutover-boundary-2026-04-17.md` aligned with future viewer ownership shifts so later sessions do not route new app work back into `ViewerApp` by default.
+
+## Build And Validation
+
+- For new `wow-viewer` library or tool work, prefer `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` and `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`.
+- For legacy parser and format-library work that still explicitly targets `gillijimproject_refactor`, prefer `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`.
+- For viewer work, use `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
+- For `wow-viewer` PM4 inspect or report slices, validate against `gillijimproject_refactor/test_data/development/World/Maps/development` with `WowViewer.Tool.Inspect` commands when the slice changes analyzer or report output.
+- Only build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` for `wow-viewer` work when the task explicitly changes consumer compatibility or the user asks for that compatibility check.
+- Do not describe a `wow-viewer` build, test pass, or optional active-viewer compile as real viewer runtime signoff.
+- Prefer real-data validation using the fixed paths in `gillijimproject_refactor/memory-bank/data-paths.md`. Do not ask the user for alternate paths unless those fixed paths are missing.
 
 ## wow-viewer PM4 Guardrails
 
@@ -215,20 +168,10 @@ This rule exists because the pattern has been: see the whole mountain → try to
 - Be explicit about proof level: classification, top-level summary, deep payload parsing, and writing are different milestones.
 - Each shared-I/O slice should land with concrete validation in `wow-viewer/tests/WowViewer.Core.Tests`, `WowViewer.Tool.Inspect`, `WowViewer.Tool.Converter`, or an appropriate combination.
 
-## wow-viewer Data Harvester Guardrails
-
-- All Python code for dataset processing, training, inference, and validation lives under `wow-viewer/data-harvester/`.
-- The C# harvester tool (`WowViewer.Tool.Harvest`) reads game files and writes NPZ shards. It does NOT train models.
-- The Python training scripts read NPZ shards and train models. They do NOT read game files directly.
-- NPZ shard format is the contract between C# and Python. Both sides must agree on array names, shapes, and dtypes.
-- Compositing logic (tileset textures + MCAL alpha → synthetic minimap) must produce identical output in both C# and Python implementations.
-- Do not create Python scripts outside `wow-viewer/data-harvester/scripts/`.
-- Do not create Python virtual environments outside `wow-viewer/data-harvester/`.
-
 ## wow-viewer Dataset Builder Guardrails
 
 - Treat dataset corpus export, terrain-supervision artifact generation, manifest or harvest ownership, minimap cleanup, and shared mask or stitch or atlas semantics as canonical `wow-viewer` work when the user is asking for new behavior, refactor, or long-range cleanup.
-- Put shared dataset contracts and artifact builders in `wow-viewer/src/core/WowViewer.Core` and `wow-viewer/src/core/WowViewer.Core.IO`, then expose them through the harvester tool instead of deepening `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM` as the design owner.
+- Put shared dataset contracts and artifact builders in `wow-viewer/src/core/WowViewer.Core` and `wow-viewer/src/core/WowViewer.Core.IO`, then expose them through a new dedicated `wow-viewer` dataset tool instead of deepening `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM` as the design owner.
 - Use `WoWMapConverter` and `MdxViewer` dataset or export code as extraction or compatibility references only unless the user explicitly asks for a bounded legacy hotfix.
 - Do not create or preserve a second permanent dataset-builder pipeline in the legacy repo when the task is really about convergence.
 - Keep ML training and inference scripts as downstream consumers; they should not become the canonical owners of format decode, artifact packing, or dataset-manifest semantics.
@@ -249,5 +192,3 @@ This rule exists because the pattern has been: see the whole mountain → try to
 - Favor minimal fixes over broad refactors in the terrain pipeline.
 - For `wow-viewer` planning or continuity work, prefer `.codex/prompts/` and `.codex/skills/` as the Codex-facing workflow surface, and keep `gillijimproject_refactor/plans` or the memory bank in sync when the migration state materially changes.
 - If behavior, commands, or known risks materially change, update the relevant memory-bank file instead of leaving the old guidance stale.
-- Commit messages should be concise and describe the "why" not the "what".
-- Training script changes must be accompanied by a validation run (even if small) before committing.

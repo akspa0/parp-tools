@@ -16,14 +16,19 @@ public static class AdtTextureReader
 
     public static AdtTextureFile Read(string path)
     {
+        return Read(path, decodeProfile: null);
+    }
+
+    public static AdtTextureFile Read(string path, AdtMcalDecodeProfile? decodeProfile)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         using FileStream stream = File.OpenRead(path);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, Path.GetFullPath(path));
-        return Read(stream, fileSummary);
+        return Read(stream, fileSummary, decodeProfile);
     }
 
-    public static AdtTextureFile Read(Stream stream, MapFileSummary fileSummary)
+    public static AdtTextureFile Read(Stream stream, MapFileSummary fileSummary, AdtMcalDecodeProfile? decodeProfile = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(fileSummary);
@@ -31,18 +36,18 @@ public static class AdtTextureReader
         if (fileSummary.Kind is not (MapFileKind.Adt or MapFileKind.AdtTex))
             throw new InvalidDataException($"ADT texture reader requires a root ADT or _tex0.adt file, but found {fileSummary.Kind}.");
 
-        AdtMcalDecodeProfile decodeProfile = fileSummary.Kind == MapFileKind.AdtTex
+        AdtMcalDecodeProfile effectiveProfile = decodeProfile ?? (fileSummary.Kind == MapFileKind.AdtTex
             ? AdtMcalDecodeProfile.Cataclysm400
-            : AdtMcalDecodeProfile.LichKingStrict;
+            : AdtMcalDecodeProfile.LichKingStrict);
 
         if (fileSummary.Kind == MapFileKind.AdtTex
             && TryReadSplitTextureFile(stream, out IReadOnlyList<string> splitTextureNames, out IReadOnlyList<byte[]> splitChunkPayloads))
         {
             List<AdtTextureChunk> splitChunks = new(splitChunkPayloads.Count);
             for (int chunkIndex = 0; chunkIndex < splitChunkPayloads.Count; chunkIndex++)
-                splitChunks.Add(AdtTextureChunkReader.Read(chunkIndex, splitChunkPayloads[chunkIndex], fileSummary.Kind, splitTextureNames));
+                splitChunks.Add(AdtTextureChunkReader.Read(chunkIndex, splitChunkPayloads[chunkIndex], fileSummary.Kind, splitTextureNames, effectiveProfile, defaultBigAlpha: true));
 
-            return new AdtTextureFile(fileSummary.SourcePath, fileSummary.Kind, decodeProfile, splitTextureNames, splitChunks);
+            return new AdtTextureFile(fileSummary.SourcePath, fileSummary.Kind, effectiveProfile, splitTextureNames, splitChunks);
         }
 
         IReadOnlyList<string> textureNames = MapSummaryReaderCommon.ReadStringEntries(
@@ -53,11 +58,11 @@ public static class AdtTextureReader
         foreach (MapChunkLocation mcnkChunk in ResolveTextureChunkLocations(stream, fileSummary))
         {
             byte[] payload = MapSummaryReaderCommon.ReadChunkPayload(stream, mcnkChunk);
-            chunks.Add(AdtTextureChunkReader.Read(resolvedChunkIndex, payload, fileSummary.Kind, textureNames));
+            chunks.Add(AdtTextureChunkReader.Read(resolvedChunkIndex, payload, fileSummary.Kind, textureNames, effectiveProfile, defaultBigAlpha: false));
             resolvedChunkIndex++;
         }
 
-        return new AdtTextureFile(fileSummary.SourcePath, fileSummary.Kind, decodeProfile, textureNames, chunks);
+        return new AdtTextureFile(fileSummary.SourcePath, fileSummary.Kind, effectiveProfile, textureNames, chunks);
     }
 
     private static bool TryReadSplitTextureFile(Stream stream, out IReadOnlyList<string> textureNames, out IReadOnlyList<byte[]> chunkPayloads)

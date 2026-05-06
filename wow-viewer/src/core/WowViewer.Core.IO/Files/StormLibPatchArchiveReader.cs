@@ -221,7 +221,6 @@ internal static class StormLibPatchArchiveReader
                 continue;
 
             yield return Path.Combine(current.FullName, "libs", "Marlamin", "WoWTools.Minimaps", "StormLibWrapper", StormLib);
-            yield return Path.Combine(current.FullName, "gillijimproject_refactor", "lib", "WoWTools.Minimaps", "StormLibWrapper", StormLib);
         }
     }
 

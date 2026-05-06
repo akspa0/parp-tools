@@ -291,7 +291,6 @@ public sealed class AlphaAreaAudioCatalogReader
                     Path.Combine(current.FullName, "definitions"),
                     Path.Combine(current.FullName, "wow-viewer", "libs", "wowdev", "WoWDBDefs", "definitions"),
                     Path.Combine(current.FullName, "libs", "wowdev", "WoWDBDefs", "definitions"),
-                    Path.Combine(current.FullName, "gillijimproject_refactor", "lib", "WoWDBDefs", "definitions"),
                     Path.Combine(current.FullName, "lib", "WoWDBDefs", "definitions"),
                 ];
 

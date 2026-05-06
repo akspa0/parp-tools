@@ -13,6 +13,11 @@ public static class AdtTextureChunkReader
 
     public static AdtTextureChunk Read(int chunkIndex, byte[] payload, MapFileKind kind, IReadOnlyList<string> textureNames)
     {
+        return Read(chunkIndex, payload, kind, textureNames, decodeProfile: null, defaultBigAlpha: kind == MapFileKind.AdtTex);
+    }
+
+    public static AdtTextureChunk Read(int chunkIndex, byte[] payload, MapFileKind kind, IReadOnlyList<string> textureNames, AdtMcalDecodeProfile? decodeProfile, bool defaultBigAlpha)
+    {
         ArgumentOutOfRangeException.ThrowIfNegative(chunkIndex);
         ArgumentNullException.ThrowIfNull(payload);
         ArgumentNullException.ThrowIfNull(textureNames);
@@ -20,10 +25,9 @@ public static class AdtTextureChunkReader
         if (kind is not (MapFileKind.Adt or MapFileKind.AdtTex))
             throw new InvalidDataException($"ADT texture chunk reader requires a root ADT or _tex0.adt payload, but found {kind}.");
 
-        AdtMcalDecodeProfile decodeProfile = kind == MapFileKind.AdtTex
+        AdtMcalDecodeProfile effectiveProfile = decodeProfile ?? (kind == MapFileKind.AdtTex
             ? AdtMcalDecodeProfile.Cataclysm400
-            : AdtMcalDecodeProfile.LichKingStrict;
-        bool defaultBigAlpha = kind == MapFileKind.AdtTex;
+            : AdtMcalDecodeProfile.LichKingStrict);
 
         ParsedTextureChunkData parsed = ParseMcnkTextureData(payload, kind);
         List<AdtTextureChunkLayer> layers = [];
@@ -40,7 +44,7 @@ public static class AdtTextureChunkReader
                     nextLayer,
                     defaultBigAlpha,
                     parsed.DoNotFixAlphaMap,
-                    decodeProfile);
+                    effectiveProfile);
             }
 
             string? texturePath = layer.TextureId < textureNames.Count

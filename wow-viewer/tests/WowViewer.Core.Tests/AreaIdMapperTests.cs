@@ -106,17 +106,17 @@ public sealed class AreaIdMapperTests
         string tempDirectory = CreateTempDirectory();
         try
         {
-            string definitionsDirectory = Path.Combine(tempDirectory, "gillijimproject_refactor", "lib", "WoWDBDefs", "definitions");
+            string definitionsDirectory = Path.Combine(tempDirectory, "libs", "wowdev", "WoWDBDefs", "definitions");
             Directory.CreateDirectory(definitionsDirectory);
             File.Copy(
-                Path.Combine(WorkspaceRoot(), "gillijimproject_refactor", "lib", "WoWDBDefs", "definitions", "AreaTable.dbd"),
+                Path.Combine(WorkspaceRoot(), "wow-viewer", "libs", "wowdev", "WoWDBDefs", "definitions", "AreaTable.dbd"),
                 Path.Combine(definitionsDirectory, "AreaTable.dbd"));
             File.Copy(
-                Path.Combine(WorkspaceRoot(), "gillijimproject_refactor", "lib", "WoWDBDefs", "definitions", "Map.dbd"),
+                Path.Combine(WorkspaceRoot(), "wow-viewer", "libs", "wowdev", "WoWDBDefs", "definitions", "Map.dbd"),
                 Path.Combine(definitionsDirectory, "Map.dbd"));
 
-            string alphaDbcDir = Path.Combine(tempDirectory, "gillijimproject_refactor", "test_data", "0.5.3", "tree", "DBFilesClient");
-            string lkDbcDir = Path.Combine(tempDirectory, "gillijimproject_refactor", "test_data", "3.3.5", "tree", "DBFilesClient");
+            string alphaDbcDir = Path.Combine(tempDirectory, "test_data", "0.5.3", "tree", "DBFilesClient");
+            string lkDbcDir = Path.Combine(tempDirectory, "test_data", "3.3.5", "tree", "DBFilesClient");
             Directory.CreateDirectory(alphaDbcDir);
             Directory.CreateDirectory(lkDbcDir);
 

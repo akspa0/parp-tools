@@ -56,13 +56,9 @@ public static partial class Pm4CoordinateService
             string? current = Path.GetFullPath(root);
             while (!string.IsNullOrEmpty(current))
             {
-                string directCandidate = Path.Combine(current, requestedPath);
-                if (Directory.Exists(directCandidate))
-                    return directCandidate;
-
-                string workspaceCandidate = Path.Combine(current, "gillijimproject_refactor", requestedPath);
-                if (Directory.Exists(workspaceCandidate))
-                    return workspaceCandidate;
+                string candidate = Path.Combine(current, requestedPath);
+                if (Directory.Exists(candidate))
+                    return candidate;
 
                 DirectoryInfo? parent = Directory.GetParent(current);
                 current = parent?.FullName;

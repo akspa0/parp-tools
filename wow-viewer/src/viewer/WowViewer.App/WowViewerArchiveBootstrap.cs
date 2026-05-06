@@ -45,7 +45,6 @@ internal static class WowViewerArchiveBootstrap
                 string[] rootedCandidates =
                 [
                     Path.Combine(current.FullName, "libs", "wowdev", "wow-listfile", "listfile.txt"),
-                    Path.Combine(current.FullName, "gillijimproject_refactor", "test_data", "community-listfile-withcapitals.csv"),
                     Path.Combine(current.FullName, "test_data", "community-listfile-withcapitals.csv"),
                 ];
 

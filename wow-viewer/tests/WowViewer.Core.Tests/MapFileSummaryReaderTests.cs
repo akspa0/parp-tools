@@ -220,9 +220,9 @@ public sealed class MapFileSummaryReaderTests
 
 internal static class MapTestPaths
 {
-    public static string DevelopmentDirectoryPath => Path.Combine(GetWowViewerRoot(), "..", "gillijimproject_refactor", "test_data", "development", "World", "Maps", "development");
+    public static string DevelopmentDirectoryPath => Path.Combine(GetWowViewerRoot(), "test_data", "development", "World", "Maps", "development");
 
-    public static string OriginalDevelopmentDirectoryPath => Path.Combine(GetWowViewerRoot(), "..", "gillijimproject_refactor", "test_data", "original_development", "World", "Maps", "development");
+    public static string OriginalDevelopmentDirectoryPath => Path.Combine(GetWowViewerRoot(), "test_data", "original_development", "World", "Maps", "development");
 
     public static string DevelopmentWdlPath => Path.Combine(DevelopmentDirectoryPath, "development.wdl");
 
