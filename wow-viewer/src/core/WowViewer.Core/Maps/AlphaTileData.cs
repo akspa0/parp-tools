@@ -29,6 +29,14 @@ public sealed record AlphaLiquidChunk(
     byte[]? TileFlags,
     uint McnkFlags);
 
+public sealed record AlphaTileDiagnostics(
+    bool HasResidualData,
+    bool HasSparseChunks,
+    int ResidualDataBytes,
+    int ActiveChunkCount,
+    bool McshSunOrientationUpperRight,
+    int McshDataSize);
+
 public sealed class AlphaTileData
 {
     public AlphaTileData(
@@ -41,7 +49,8 @@ public sealed class AlphaTileData
         IReadOnlyList<string> textureNames,
         IReadOnlyList<AlphaModelPlacement> modelPlacements,
         IReadOnlyList<AlphaWorldModelPlacement> worldModelPlacements,
-        IReadOnlyList<AlphaLiquidChunk> liquidChunks)
+        IReadOnlyList<AlphaLiquidChunk> liquidChunks,
+        AlphaTileDiagnostics? diagnostics = null)
     {
         SourcePath = sourcePath;
         Heightmap = heightmap;
@@ -53,6 +62,7 @@ public sealed class AlphaTileData
         ModelPlacements = modelPlacements;
         WorldModelPlacements = worldModelPlacements;
         LiquidChunks = liquidChunks;
+        Diagnostics = diagnostics;
     }
 
     public string SourcePath { get; }
@@ -65,6 +75,7 @@ public sealed class AlphaTileData
     public IReadOnlyList<AlphaModelPlacement> ModelPlacements { get; }
     public IReadOnlyList<AlphaWorldModelPlacement> WorldModelPlacements { get; }
     public IReadOnlyList<AlphaLiquidChunk> LiquidChunks { get; }
+    public AlphaTileDiagnostics? Diagnostics { get; }
 
     public AdtPlacementCatalog ToPlacementCatalog()
     {

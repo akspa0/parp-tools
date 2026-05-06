@@ -1,6 +1,6 @@
 # wow-viewer Library Completeness Plan
 
-**Status**: Draft
+**Status**: Active — Phase A started 2026-05-06
 **Based on**: `gillijimproject_refactor/src/MdxViewer` vs `wow-viewer/src/`
 **Purpose**: Identify all gaps between the legacy viewer and the new library, and define a phased porting strategy.
 
@@ -28,14 +28,14 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 | **Alpha 0.6.0 split ADT** | `StandardTerrainAdapter` + `AdtAlpha` | Not tested — `AdtTensorPackBuilder` with `AdtProfile060070Baseline` should handle |
 | **LK/WotLK ADT (split)** | `StandardTerrainAdapter` + `AdtLk` | Mostly done — `AdtTensorPackBuilder` + `AdtMcalDecoder` + `AdtLiquidReader` |
 | **Cata 4.x split ADT** | `AdtV18` + `SplitAdt` | Partial — `AdtV23SummaryReader` exists, full decode not tested |
-| **WDT (Retail)** | `Wdt` | Partial — `WdtSummaryReader` (summary only), no deep parse |
+| **WDT (Retail)** | `Wdt` | Partial — `WdtSummaryReader` (summary only), no deep parse. **Missing: all MPHD flags beyond `isWmoBased`; all MAIN/WDT flags beyond HasAdt/AllWater/Loaded; no WDT flag data in tensor packs.** |
 | **WDL (terrain LOD)** | `WdlParser` | Summary only — `WdlSummaryReader` exists, deep parse not ported |
 | **WMO (all versions)** | `WmoRenderer` + `WmoV14Reader` | Partial — `WowViewer.Core.IO.Wmo.*` readers exist, no renderer |
 | **M2 (new format)** | `M2Renderer` | Partial — `WowViewer.Core.Runtime.M2.*` exists, no viewer-side renderer |
-| **MDX (old format)** | `MdxRenderer` | **Not ported** — 2866-line renderer, no library equivalent |
+| **MDX (old format)** | `MdxRenderer` | **Not ported** — 2866-line renderer. **MDX is NOT optional: used until 2.0.0 (2006), MdxViewer reads it. A `WowViewer.Core.Mdx` library equivalent is required.** |
 | **BLP (texture)** | `BlpService` + `SereniaBLPLib` | Partial — `BlpSummaryReader` exists, pixel decoding not complete |
-| **MPQ archive** | `MpqDBCProvider` + `ArchiveService` | Partial — `MpqArchiveCatalog` + `AlphaArchiveReader` exist |
-| **DBC/DB2** | `MpqDBCProvider` | Partial — `DbClientFileReader` exists, provider pattern not ported |
+| **MPQ archive** | `MpqDBCProvider` + `ArchiveService` | Partial — `MpqArchiveCatalog` + `AlphaArchiveReader` exist. **CRITICAL: Use `NativeMpqService` from `gillijimproject_refactor/src/MDX-L_Tool/Services/NativeMpqService.cs` — do NOT replace with StormLib or other backends. It is the fastest MPQ reader available and is already battle-tested.** |
+| **DBC/DB2** | `MpqDBCProvider` | Done — `DBCD` + `WoWDBDefs` read/write DBC/DB2 natively |
 | **WL liquid files** | `WlFile` | Summary only — `WlFileReader` detection exists, deep parse not ported |
 | **PM4** | `Pm4Research` | Done — `WowViewer.Core.PM4` |
 | **MH2O liquid** | `Mh2oChunk` | Partial — `AdtLiquidReader` exists |
@@ -51,6 +51,9 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 | `TerrainChunkData` | ✓ | **Missing** | CRITICAL |
 | `TerrainManager` (AOI streaming) | ✓ | **Missing** | HIGH |
 | `TerrainTileMeshBuilder` | ✓ | **Missing** | HIGH |
+| `MddfPlacement` / `ModfPlacement` name resolution (MDDF→MMID, MODF→MWID) | Partial | **Missing** — placements must resolve `NameId` → asset path via MMDX/MMID/MWMO/MWID name tables. **All fields must be captured: `NameId`, `UniqueId`, `Position`, `Rotation` (degrees), `Scale`, `BoundsMin`, `BoundsMax`, `Flags` — nothing dropped. These are all required downstream by viewer ingestion pipelines.** | CRITICAL |
+| `TerrainLayer` texture ID resolution (MTEX) | ✓ | **Missing** — `TerrainLayer.TextureIndex` must resolve to a tileset asset path via MTEX string table | CRITICAL |
+| Listfile builder (per-client MPQ archive + loose file harvest) | ✓ | **Missing** — build a complete listfile from every opened MPQ (archive internal listfiles + all discovered loose files) for each client version. Used for: (1) name-lookup cache for asset resolution, (2) identifying missing assets that cause green smoke / render errors | CRITICAL |
 
 ### 2.3 Rendering System
 
@@ -88,10 +91,11 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 ### Phase A: Foundation — Terrain Type System
 **Goal**: Establish shared terrain types in `wow-viewer.Core` that both the harvest pipeline and future renderer can use.
 
-- [ ] Define `ITerrainAdapter` interface in `wow-viewer.Core.Maps`
-- [ ] Define `TerrainChunkData` in `wow-viewer.Core.Maps`
-- [ ] Define `MddfPlacement`, `ModfPlacement` structs in `wow-viewer.Core.Maps`
-- [ ] Define `TileLoadResult` in `wow-viewer.Core.Maps`
+- [x] Define `ITerrainAdapter` interface in `wow-viewer.Core.Maps`
+- [x] Define `TerrainChunkData` in `wow-viewer.Core.Maps`
+- [x] Define `MddfPlacement`, `ModfPlacement` structs in `wow-viewer.Core.Maps`
+- [x] Define `TileLoadResult` in `wow-viewer.Core.Maps`
+- [x] Define `TerrainLayer` and `LiquidChunkData` in `wow-viewer.Core.Maps`
 - [ ] Wire `AlphaWdtReader` behind `IAlphaTerrainAdapter` (internal interface)
 - [ ] Wire `AdtTensorPackBuilder` to produce the same `TerrainChunkData` shape
 
@@ -144,11 +148,15 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 **Goal**: Fill remaining library gaps for complete format coverage.
 
 - [ ] Deep WDT reader (not just summary)
+  - Parse ALL MPHD flags (not just `isWmoBased`); flags at offset 0, 4, 8 in MPHD data
+  - Parse ALL MAIN/WDT tile flags (beyond HasAdt/AllWater/Loaded); there are ~16 known flag bits
+  - Include WDT flags as minimal scalar fields in `TerrainTileTensorPack` (e.g. `WdtTileHasAdt: bool`, `WdtTileAllWater: bool`, `WdtTileAsyncId: int`) — tiny, no proprietary blob decode at runtime
 - [ ] Deep WDL reader
-- [ ] MTEX string extraction
-- [ ] MMDX/MMID/MWMO/MWID name table resolution
+- [ ] MTEX string extraction — expose as `TerrainTileTensorPack.MtexNames: IReadOnlyList<string>`, resolved from name tables
+- [ ] MMDX/MMID/MWMO/MWID name table resolution — populate `AdtPlacementCatalog` with resolved asset paths, all placement fields preserved
 - [ ] MHDR offset resolution service
 - [ ] Format auto-detection (`FormatDetector`)
+- [ ] **MPQ: Port `NativeMpqService` from `gillijimproject_refactor/src/MDX-L_Tool/Services/NativeMpqService.cs` — do NOT use StormLib or StormLib-based wrappers. Pure C# implementation, battle-tested, fastest available.**
 
 **Dependency**: Phase A
 
@@ -245,7 +253,12 @@ The `AlphaWdtReader` in `wow-viewer.Core.IO` is partially implemented. Below is 
 | MCLQ | ✓ Done | Flat plane (minH, maxH) + base height |
 | MCCV | N/A | Not present in Alpha |
 
-Missing: `MCNR` normals extraction, `MCSH` shadow map extraction.
+**Known Alpha WDT data quirks (must be tracked):**
+- MCSH shadow orientation: pre-0.6.0 MCSH has sun in upper-**right** corner; later versions use upper-**left**. This affects minimap decomposition — some early tiles have shading baked into MCSH instead of minimap, or a single object accidentally had shadows on during minimap gen (e.g. Arathi Highlands 0.5.3 has a solid terrain shadow in both MCSH and minimap — likely a bug in the old shadow generator or direct file write). Track `McshSunOrientation: bool` (true=upperRight) in `AlphaTileData` or `TerrainTileTensorPack`.
+- **Residual tile data**: Tiles marked as `adtOffset <= 0` in MAIN (non-existent) may still contain embedded tile data. We should detect and flag this as `TileHasResidualData: bool` in `AlphaTileData`, count leftover bytes, and attempt restructuring — later game versions hide files by marking them 0 in WDT; we want to recover every artifact.
+- **Sparse embedded tile detection**: Tiles with `adtOffset > 0` but where MCIN shows fewer than 256 chunk offsets, or chunk offsets point to empty subchunks, should be flagged as `TileHasSparseChunks: bool`.
+
+Missing: `MCNR` normals extraction, `MCSH` shadow map extraction, residual/sparse tile diagnostic fields.
 
 ---
 
