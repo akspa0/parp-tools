@@ -612,3 +612,9 @@ datasets/*
 gillijimproject_refactor/datasets/*
 wow-viewer/libs/*
 gillijimproject_refactor/.venv-train/*
+runs/*
+.symdex/*
+*.symdex/*
+viz_output/*
+viz_outputs/*
+wow-viewer/test_data/*
