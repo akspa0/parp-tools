@@ -318,6 +318,7 @@ public static class AlphaWdtReader
         int mcshSize = BitConverter.ToInt32(container, headerOffset + 0x34);
         int mclqRel = BitConverter.ToInt32(container, headerOffset + 0x64);
         int mcnkChunksSize = BitConverter.ToInt32(container, headerOffset + 0x5C);
+        int mccvRel = BitConverter.ToInt32(container, headerOffset + 0x74);
 
         if ((uint)indexX >= 16 || (uint)indexY >= 16) return true;
 
@@ -418,6 +419,10 @@ public static class AlphaWdtReader
         if (layerCount > 0 && mclyRel >= 0)
         {
             int mclyOffset = chunkDataBase + mclyRel;
+            // MCLY subchunk in Alpha format has an 8-byte chunk header (FourCC + size).
+            // Skip past it to reach the layer entries array.
+            if (mclyOffset + 8 <= container.Length)
+                mclyOffset += 8;
             int maxLayers = Math.Min(layerCount, 4);
 
             byte[] mcalData = [];

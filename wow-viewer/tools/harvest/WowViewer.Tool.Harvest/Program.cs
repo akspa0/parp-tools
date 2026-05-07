@@ -396,12 +396,26 @@ static class Program
             }
         }
 
+        if (pack.MinimapRgb256 is null)
+        {
+            byte[,,]? minimapRgb = TryLoadMinimapFromMpq(catalog, mapName, tileX, tileY);
+            if (minimapRgb is not null)
+            {
+                pack.MinimapRgb256 = minimapRgb;
+                pack.MinimapSourceTag = "mpq_blp";
+                pack.AvailableSignals = new HashSet<string>(pack.AvailableSignals) { "minimap_rgb" };
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(outputPath))
             outputPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), $"{mapName}_{tileX}_{tileY}_v14.npz");
 
         NpzTileSerializer.Serialize(pack, outputPath);
         Console.WriteLine($"Harvested: {outputPath}");
         Console.WriteLine($"Signals: {string.Join(", ", pack.AvailableSignals)}");
+
+        if (pack.MinimapRgb256 != null)
+            Console.WriteLine($"  minimap: 256x256 RGB from MPQ");
 
         if (exportPlacements && placementCatalog is not null)
         {
@@ -454,6 +468,69 @@ static class Program
         }
 
         return false;
+    }
+
+    static byte[,,]? TryLoadMinimapFromMpq(NativeMpqService catalog, string mapName, int tileX, int tileY)
+    {
+        string x2 = tileX.ToString("00");
+        string y2 = tileY.ToString("00");
+        string mapLower = mapName.ToLowerInvariant();
+
+        string[] candidates =
+        [
+            $"World\\Minimaps\\{mapName}\\map{tileX}_{tileY}.blp",
+            $"textures\\Minimap\\{mapLower}\\map{tileX}_{tileY}.blp",
+            $"textures\\minimap\\{mapLower}\\map{tileX}_{tileY}.blp",
+            $"{mapName}_{tileX}_{tileY}.blp",
+            $"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}.blp",
+            $"World\\Minimaps\\{mapName}\\{mapName}_{x2}_{y2}.blp",
+        ];
+
+        foreach (string candidate in candidates)
+        {
+            byte[]? blpBytes = catalog.ReadFile(candidate);
+            if (blpBytes is null || blpBytes.Length < 8) continue;
+
+            try
+            {
+                byte[,,]? rgb = DecodeBlpToRgb(blpBytes);
+                if (rgb is not null) return rgb;
+            }
+            catch { }
+        }
+
+        return null;
+    }
+
+    static byte[,,]? DecodeBlpToRgb(byte[] blpBytes)
+    {
+        using var ms = new MemoryStream(blpBytes, writable: false);
+        using var blp = new SereniaBLPLib.BlpFile(ms);
+        var bitmap = blp.GetBitmap(0);
+        if (bitmap == null) return null;
+
+        int w = bitmap.Width;
+        int h = bitmap.Height;
+        if (w < 1 || h < 1) return null;
+
+        var rgb = new byte[256, 256, 3];
+        float scaleX = (float)(w - 1) / 255f;
+        float scaleY = (float)(h - 1) / 255f;
+
+        for (int y = 0; y < 256; y++)
+        {
+            for (int x = 0; x < 256; x++)
+            {
+                int sx = Math.Clamp((int)(x * scaleX + 0.5f), 0, w - 1);
+                int sy = Math.Clamp((int)(y * scaleY + 0.5f), 0, h - 1);
+                var px = bitmap.GetPixel(sx, sy);
+                rgb[y, x, 0] = px.R;
+                rgb[y, x, 1] = px.G;
+                rgb[y, x, 2] = px.B;
+            }
+        }
+
+        return rgb;
     }
 
     static string? GetOption(string[] args, string name, string shortName)

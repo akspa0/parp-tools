@@ -6,6 +6,7 @@
     <ProjectReference Include="..\..\..\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />
     <ProjectReference Include="..\..\..\src\core\WowViewer.Core.PM4\WowViewer.Core.PM4.csproj" />
     <ProjectReference Include="..\..\..\src\tools-shared\WowViewer.Tools.Shared\WowViewer.Tools.Shared.csproj" />
+    <ProjectReference Include="..\..\..\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" />
   </ItemGroup>
 
   <ItemGroup>
