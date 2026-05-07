@@ -21,14 +21,28 @@ public static class AlphaTensorPackBuilder
         if (height257 is not null)
             signals.Add("height_257");
 
+        if (tileData.McnrNormalXyz is not null)
+            signals.Add("mcnr_normal_xyz");
+
+        if (tileData.McshShadowMask256 is not null)
+            signals.Add("mcsh_shadow_mask_256");
+
         float[,]? height65 = DownsampleHeightmap(height257, 65);
         float[,]? height17 = DownsampleHeightmap(height257, 17);
 
         float[,,]? mcalAlphaPack256 = tileData.McalAlphaPack;
 
-        float[,]? mclqSurfaceHeight257 = null;
-        int[,]? mclqTypeMask257 = null;
-        BuildAlphaLiquid(tileData, ref mclqSurfaceHeight257, ref mclqTypeMask257, signals);
+        float[,]? mclqSurfaceHeight257 = tileData.MclqSurfaceHeight;
+        int[,]? mclqTypeMask257 = tileData.MclqTypeMask;
+        if (mclqSurfaceHeight257 != null)
+        {
+            signals.Add("mclq_surface_height");
+            signals.Add("mclq_type_mask");
+        }
+        else
+        {
+            BuildAlphaLiquid(tileData, ref mclqSurfaceHeight257, ref mclqTypeMask257, signals);
+        }
 
         bool[,]? holeMask16 = tileData.HoleMask;
         if (holeMask16 is not null)
@@ -47,7 +61,8 @@ public static class AlphaTensorPackBuilder
             MclyTextureNames = tileData.TextureNames,
             MclyLayerMask = tileData.MclyLayerMask,
             McalAlphaPack256 = mcalAlphaPack256,
-            McnrNormalXyz = null,
+            McnrNormalXyz = tileData.McnrNormalXyz,
+            McshShadowMask256 = tileData.McshShadowMask256,
             MccvRgb = null,
             Mh2oSurfaceHeight = null,
             Mh2oDepth = null,

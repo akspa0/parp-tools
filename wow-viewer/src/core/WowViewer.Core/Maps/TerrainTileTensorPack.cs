@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace WowViewer.Core.Maps;
 
 /// <summary>
@@ -144,4 +146,265 @@ public sealed class TerrainTileTensorPack
 
     /// <summary>Minimap source tag (terrain_only, no_liquid, no_object, raw, etc.).</summary>
     public string MinimapSourceTag { get; set; } = string.Empty;
+
+    public TileLoadResult ToTileLoadResult(int tileX, int tileY)
+    {
+        const int chunksPerTile = 16;
+        const int tileSize = 257;
+        const int alphaSize = 64;
+        const float mapOrigin = 17066f;
+        const float chunkSize = 533.33333f;
+        const float chunkSmall = chunkSize / chunksPerTile;
+
+        float tileWorldX = mapOrigin - tileX * chunkSize;
+        float tileWorldY = mapOrigin - tileY * chunkSize;
+
+        var chunks = new List<TerrainChunkData>(256);
+
+        for (int cy = 0; cy < chunksPerTile; cy++)
+        {
+            for (int cx = 0; cx < chunksPerTile; cx++)
+            {
+                float[] heights = SliceChunkHeights(tileX, tileY, cx, cy, tileSize);
+                if (heights == null) continue;
+
+                var layers = new List<TerrainLayer>();
+                var alphaMaps = new Dictionary<int, byte[]>();
+
+                if (MclyLayerMask != null && MclyTextureIds != null)
+                {
+                    for (int l = 0; l < 4; l++)
+                    {
+                        if (!MclyLayerMask[cx, cy, l])
+                            break;
+
+                        layers.Add(new TerrainLayer
+                        {
+                            TextureIndex = MclyTextureIds[cx, cy, l],
+                            Flags = 0,
+                            AlphaOffset = 0,
+                            EffectId = 0
+                        });
+
+                        if (l > 0 && McalAlphaPack256 != null)
+                        {
+                            var alpha = SliceChunkAlpha256(McalAlphaPack256, cx, cy, l, alphaSize);
+                            if (alpha != null)
+                                alphaMaps[l] = alpha;
+                        }
+                    }
+                }
+
+                int holeMask = 0;
+                if (HoleMask16 != null && cx < HoleMask16.GetLength(0) && cy < HoleMask16.GetLength(1))
+                    holeMask = HoleMask16[cx, cy] ? 1 : 0;
+
+                int mcnkFlags = 0;
+                var liquid = FindLiquid(cx, cy);
+                if (liquid != null)
+                    mcnkFlags |= 0x3C;
+
+                float chunkWorldX = tileWorldX - cy * chunkSmall;
+                float chunkWorldY = tileWorldY - cx * chunkSmall;
+
+                chunks.Add(new TerrainChunkData
+                {
+                    TileX = tileX,
+                    TileY = tileY,
+                    ChunkX = cx,
+                    ChunkY = cy,
+                    Heights = heights,
+                    Normals = SliceChunkNormals(cx, cy),
+                    HoleMask = holeMask,
+                    Layers = layers.ToArray(),
+                    AlphaMaps = alphaMaps,
+                    ShadowMap = SliceChunkShadow(cx, cy),
+                    Liquid = liquid,
+                    WorldPosition = new Vector3(chunkWorldX, chunkWorldY, 0f),
+                    AreaId = 0,
+                    McnkFlags = mcnkFlags
+                });
+            }
+        }
+
+        return new TileLoadResult
+        {
+            Chunks = chunks,
+            MddfPlacements = [],
+            ModfPlacements = []
+        };
+    }
+
+    private float[]? SliceChunkHeights(int tileX, int tileY, int cx, int cy, int tileSize)
+    {
+        if (Height257 == null) return null;
+
+        var heights = new float[145];
+        int baseX = cy * 16;
+        int baseY = cx * 16;
+        int idx = 0;
+
+        for (int row = 0; row < 17; row++)
+        {
+            bool isInner = (row & 1) != 0;
+            int cols = isInner ? 8 : 9;
+            for (int col = 0; col < cols; col++)
+            {
+                int sampleX = isInner ? (col * 2) + 1 : col * 2;
+                int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+                int px = baseX + sampleX;
+                int py = baseY + sampleY;
+
+                if ((uint)px < tileSize && (uint)py < tileSize)
+                    heights[idx] = Height257[py, px];
+
+                idx++;
+            }
+        }
+
+        return heights;
+    }
+
+    private Vector3[] SliceChunkNormals(int cx, int cy)
+    {
+        if (McnrNormalXyz == null) return [];
+
+        const int n = 145;
+        var normals = new Vector3[n];
+        int baseX = cy * 16;
+        int baseY = cx * 16;
+        int idx = 0;
+
+        for (int row = 0; row < 17; row++)
+        {
+            bool isInner = (row & 1) != 0;
+            int cols = isInner ? 8 : 9;
+            for (int col = 0; col < cols; col++)
+            {
+                int sampleX = isInner ? (col * 2) + 1 : col * 2;
+                int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+                int px = baseX + sampleX;
+                int py = baseY + sampleY;
+
+                if ((uint)px < 257 && (uint)py < 257)
+                    normals[idx] = new Vector3(McnrNormalXyz[py, px, 0], McnrNormalXyz[py, px, 1], McnrNormalXyz[py, px, 2]);
+
+                idx++;
+            }
+        }
+
+        return normals;
+    }
+
+    private byte[]? SliceChunkShadow(int cx, int cy)
+    {
+        if (McshShadowMask256 == null) return null;
+
+        const int srcSize = 256;
+        const int dstSize = 64;
+        var shadow = new byte[dstSize * dstSize];
+        int srcBaseX = cy * dstSize;
+        int srcBaseY = cx * dstSize;
+
+        for (int y = 0; y < dstSize; y++)
+        {
+            for (int x = 0; x < dstSize; x++)
+            {
+                int sy = srcBaseY + y;
+                int sx = srcBaseX + x;
+                if (sy < srcSize && sx < srcSize)
+                    shadow[y * dstSize + x] = (byte)(McshShadowMask256[sy, sx] * 255f);
+            }
+        }
+
+        return shadow;
+    }
+
+    private byte[]? SliceChunkAlpha256(float[,,] alphaPack, int cx, int cy, int layer, int alphaSize)
+    {
+        var alpha = new byte[alphaSize * alphaSize];
+        int srcBaseY = cx * alphaSize;
+        int srcBaseX = cy * alphaSize;
+
+        for (int y = 0; y < alphaSize; y++)
+        {
+            for (int x = 0; x < alphaSize; x++)
+            {
+                int sy = srcBaseY + y;
+                int sx = srcBaseX + x;
+                if (sy < alphaPack.GetLength(0) && sx < alphaPack.GetLength(1))
+                {
+                    float f = alphaPack[sy, sx, layer];
+                    alpha[y * alphaSize + x] = (byte)Math.Clamp((int)(f * 255f), 0, 255);
+                }
+            }
+        }
+
+        return alpha;
+    }
+
+    private LiquidChunkData? FindLiquid(int cx, int cy)
+    {
+        bool hasLiquid = false;
+        float minH = float.MaxValue, maxH = float.MinValue;
+        int liquidType = 0;
+
+        if (MclqSurfaceHeight != null)
+        {
+            int baseX = cy * 16;
+            int baseY = cx * 16;
+            bool found = false;
+            for (int y = 0; y < 16 && baseY + y < 257; y++)
+            {
+                for (int x = 0; x < 16 && baseX + x < 257; x++)
+                {
+                    float h = MclqSurfaceHeight[baseY + y, baseX + x];
+                    if (h != 0f)
+                    {
+                        found = true;
+                        minH = Math.Min(minH, h);
+                        maxH = Math.Max(maxH, h);
+                    }
+                }
+            }
+
+            if (found)
+            {
+                hasLiquid = true;
+                if (MclqTypeMask != null && cx < 16 && cy < 16)
+                    liquidType = MclqTypeMask[cx, cy];
+            }
+        }
+
+        if (!hasLiquid && Mh2oSurfaceHeight != null)
+        {
+            int baseX = cy * 16;
+            int baseY = cx * 16;
+            bool found = false;
+            for (int y = 0; y < 16 && baseY + y < 257; y++)
+            {
+                for (int x = 0; x < 16 && baseX + x < 257; x++)
+                {
+                    float h = Mh2oSurfaceHeight[baseY + y, baseX + x];
+                    if (h != 0f)
+                    {
+                        found = true;
+                        minH = Math.Min(minH, h);
+                        maxH = Math.Max(maxH, h);
+                    }
+                }
+            }
+
+            if (found)
+            {
+                hasLiquid = true;
+                if (Mh2oTypeMask != null && cx < 16 && cy < 16)
+                    liquidType = Mh2oTypeMask[cx, cy];
+            }
+        }
+
+        return hasLiquid
+            ? new LiquidChunkData { LiquidType = liquidType, MinHeight = minH, MaxHeight = maxH }
+            : null;
+    }
 }

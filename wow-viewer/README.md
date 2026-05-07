@@ -1,10 +1,25 @@
 # wow-viewer
 
-Shared WoW file I/O, dataset generation, and **V11 Terrain AI** training pipeline.
+Shared WoW file I/O, dataset generation, and terrain AI training pipeline.
 
 ---
 
-## V11 Terrain AI (Current)
+## Terrain Adapter System (Phase A Complete)
+
+The terrain adapter system provides a unified interface for loading terrain tiles from any WoW format:
+
+- **`ITerrainAdapter`** — interface for tile loading, placement resolution, and name tables
+- **`AlphaTerrainAdapter`** — bridges `AlphaWdtReader` → per-chunk `TerrainChunkData` (Alpha 0.5.3)
+- **`TerrainTileTensorPack.ToTileLoadResult()`** — converts LK flat-array format → `TerrainChunkData` 
+- **`AlphaTileData.ToTileLoadResult()`** — converts Alpha flat arrays → `TerrainChunkData`
+
+**Key types:** `TerrainChunkData`, `TerrainLayer`, `LiquidChunkData`, `MddfPlacement`, `ModfPlacement`, `TileLoadResult`
+
+See `docs/architecture/wow-viewer-library-completeness-plan-2026-05-06.md` for the full phased plan.
+
+---
+
+## V11 Terrain AI
 
 V11 is a single-stage multi-task ConvNeXt-based terrain model. Replaces the broken v10 two-stage pipeline.
 
@@ -103,6 +118,13 @@ dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect
 ```
 
 Read-only probing: `archive`, `blp`, `m2`, `mdx`, `map`, `lit`, `pm4`, `wmo`.
+
+### Harvest CLI
+```
+dotnet run --project .\tools\harvest\WowViewer.Tool.Harvest
+```
+
+MPQ-backed extraction: `extract-unified` — reads WDT/ADT from MPQ archives via `NativeMpqService`, routes through `AlphaWdtReader` or `AdtTensorPackBuilder`, outputs NPZ shards.
 
 ### Desktop App (Paused)
 `WowViewer.App` is on hold until the V11 terrain model is trained and validated.

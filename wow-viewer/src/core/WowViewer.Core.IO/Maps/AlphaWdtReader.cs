@@ -36,16 +36,49 @@ public static class AlphaWdtReader
     public static bool IsAlphaWdt(byte[] wdtData)
     {
         using var ms = new MemoryStream(wdtData, writable: false);
-        return TryReadAlphaTopLevelChunks(ms, out _, out _, out _, out bool hasMdnm, out bool hasMonm);
+        return TryReadAlphaTopLevelChunks(ms, out _, out _, out _, out bool hasMdnm);
     }
 
     private static bool ReadMainPayload(byte[] wdtData, out byte[] mainData)
     {
         mainData = [];
         using var ms = new MemoryStream(wdtData, writable: false);
-        return TryReadAlphaTopLevelChunks(ms, out _, out _, out MapChunkLocation main, out _, out _)
+        return TryReadAlphaTopLevelChunks(ms, out _, out _, out MapChunkLocation main, out _)
             && main.Size > 0
             && TryReadPayloadAt(ms, main, out mainData);
+    }
+
+    private static (IReadOnlyList<string> mdxNames, IReadOnlyList<string> wmoNames) ReadModelNameTables(byte[] wdtData)
+    {
+        using var ms = new MemoryStream(wdtData, writable: false);
+        if (!TryReadAlphaTopLevelChunks(ms, out _, out MapChunkLocation mphd, out _, out _))
+            return ([], []);
+
+        if (mphd.Size < 16)
+            return ([], []);
+
+        byte[] mphdData = new byte[16];
+        ms.Position = mphd.DataOffset;
+        ms.ReadExactly(mphdData);
+
+        IReadOnlyList<string> mdxNames = [];
+        IReadOnlyList<string> wmoNames = [];
+
+        int mdnmOff = BitConverter.ToInt32(mphdData, 4);
+        if (mdnmOff > 0)
+        {
+            if (TryReadChunk(ms, mdnmOff, out MapChunkLocation c) && c.Id == MapChunkIds.Mdnm && TryReadPayloadAt(ms, c, out byte[] mdnmPayload))
+                mdxNames = ReadStringEntries(mdnmPayload);
+        }
+
+        int monmOff = BitConverter.ToInt32(mphdData, 12);
+        if (monmOff > 0)
+        {
+            if (TryReadChunk(ms, monmOff, out MapChunkLocation c) && c.Id == MapChunkIds.Monm && TryReadPayloadAt(ms, c, out byte[] monmPayload))
+                wmoNames = ReadStringEntries(monmPayload);
+        }
+
+        return (mdxNames, wmoNames);
     }
 
     private static bool TryReadAlphaTopLevelChunks(
@@ -53,10 +86,9 @@ public static class AlphaWdtReader
         out MapChunkLocation mver,
         out MapChunkLocation mphd,
         out MapChunkLocation main,
-        out bool hasMdnm,
-        out bool hasMonm)
+        out bool hasMdnm)
     {
-        mver = default; mphd = default; main = default; hasMdnm = false; hasMonm = false;
+        mver = default; mphd = default; main = default; hasMdnm = false;
 
         if (!TryReadChunk(ms, 0, out mver) || mver.Id != MapChunkIds.Mver) return false;
         long nextOff = mver.DataOffset + mver.Size;
@@ -74,19 +106,8 @@ public static class AlphaWdtReader
             ms.Position = mphd.DataOffset;
             ms.ReadExactly(mphdData);
             int mdnmOff = BitConverter.ToInt32(mphdData, 4);
-            int monmOff = BitConverter.ToInt32(mphdData, 12);
-            if (mdnmOff > 0)
-            {
-                int mdnmAbs = (int)(mphd.DataOffset - ChunkHeaderSize) + mdnmOff;
-                if (TryReadChunk(ms, mdnmAbs, out MapChunkLocation c) && c.Id == MapChunkIds.Mdnm)
-                    hasMdnm = true;
-            }
-            if (monmOff > 0)
-            {
-                int monmAbs = (int)(mphd.DataOffset - ChunkHeaderSize) + monmOff;
-                if (TryReadChunk(ms, monmAbs, out MapChunkLocation c) && c.Id == MapChunkIds.Monm)
-                    hasMonm = true;
-            }
+            if (mdnmOff > 0 && TryReadChunk(ms, mdnmOff, out MapChunkLocation c) && c.Id == MapChunkIds.Mdnm)
+                hasMdnm = true;
         }
 
         return true;
@@ -132,10 +153,13 @@ public static class AlphaWdtReader
         if (adtOffset <= 0)
             return false;
 
-        return ReadAlphaTile(wdtData, adtOffset, tileX, tileY, sourcePath, out data);
+        var (mdxNames, wmoNames) = ReadModelNameTables(wdtData);
+
+        return ReadAlphaTile(wdtData, adtOffset, tileX, tileY, sourcePath, out data, mdxNames, wmoNames);
     }
 
-    private static bool ReadAlphaTile(byte[] container, int adtOffset, int tileX, int tileY, string sourcePath, out AlphaTileData? data)
+    private static bool ReadAlphaTile(byte[] container, int adtOffset, int tileX, int tileY, string sourcePath, out AlphaTileData? data,
+        IReadOnlyList<string> mdxNames, IReadOnlyList<string> wmoNames)
     {
         data = null;
 
@@ -154,6 +178,8 @@ public static class AlphaWdtReader
 
         float[,] heightmap = new float[TileHeightmapSize, TileHeightmapSize];
         float[,,] alphaPack = new float[1024, 1024, 4];
+        float[,,] normalXyz = new float[TileHeightmapSize, TileHeightmapSize, 3];
+        float[,] alphaPackShadow = new float[1024, 1024];
         int[,,] texIds = new int[16, 16, 4];
         bool[,,] layerMask = new bool[16, 16, 4];
         bool[,] holes = new bool[16, 16];
@@ -161,13 +187,18 @@ public static class AlphaWdtReader
         List<AlphaModelPlacement> modelPlacements = [];
         List<AlphaWorldModelPlacement> worldModelPlacements = [];
 
-        bool hasHeight = false, hasAlpha = false;
+        bool hasHeight = false, hasAlpha = false, hasNormals = false, hasShadow = false;
+        int totalMcshBytes = 0;
+        int activeChunkCount = 0;
 
         foreach (int mcnkOffset in mcnkOffsets)
         {
+            if (mcnkOffset <= 0) continue;
+            activeChunkCount++;
+
             if (!TryParseMcnk(container, mcnkOffset, textureNameList,
-                    heightmap, alphaPack, texIds, layerMask, holes, liquidChunks,
-                    ref hasHeight, ref hasAlpha))
+                    heightmap, alphaPack, normalXyz, alphaPackShadow, texIds, layerMask, holes, liquidChunks,
+                    ref hasHeight, ref hasAlpha, ref hasNormals, ref hasShadow, ref totalMcshBytes))
                 continue;
         }
 
@@ -175,20 +206,52 @@ public static class AlphaWdtReader
         byte[]? modfData = ReadSubchunkPayload(container, mhdrDataOffset, modfRelativeOffset);
 
         if (mddfData is { Length: > 0 })
-            ReadMddfPlacements(mddfData, textureNameList, modelPlacements);
+            ReadMddfPlacements(mddfData, mdxNames, modelPlacements);
         if (modfData is { Length: > 0 })
-            ReadModfPlacements(modfData, textureNameList, worldModelPlacements);
+            ReadModfPlacements(modfData, wmoNames, worldModelPlacements);
 
         FillHeightmapGaps(heightmap);
         if (!hasHeight) return false;
 
         float[,,]? alphaPack256 = hasAlpha ? DownsampleAlphaPack(alphaPack) : null;
+        float[,]? mcshShadowMask256 = hasShadow ? DownsampleShadowMask(alphaPackShadow) : null;
+
+        float[,] mclqSurface = new float[TileHeightmapSize, TileHeightmapSize];
+        int[,] mclqTypes = new int[16, 16];
+        bool hasLiquid = false;
+        foreach (var lc in liquidChunks)
+        {
+            if ((uint)lc.IndexX < 16 && (uint)lc.IndexY < 16)
+            {
+                float avgHeight = (lc.MinHeight + lc.MaxHeight) * 0.5f;
+                int baseX = lc.IndexY * 16;
+                int baseY = lc.IndexX * 16;
+                int endX = Math.Min(baseX + 17, TileHeightmapSize);
+                int endY = Math.Min(baseY + 17, TileHeightmapSize);
+                for (int y = baseY; y < endY; y++)
+                    for (int x = baseX; x < endX; x++)
+                        mclqSurface[y, x] = avgHeight;
+                mclqTypes[lc.IndexX, lc.IndexY] = ClassifyLiquid(lc.McnkFlags);
+                hasLiquid = true;
+            }
+        }
+
+        bool hasSparseChunks = activeChunkCount < 256;
+        bool mcshSunUpperRight = DetectMcshUpperRight(alphaPackShadow);
+
+        var diagnostics = new AlphaTileDiagnostics(false, hasSparseChunks, 0, activeChunkCount, mcshSunUpperRight, totalMcshBytes);
 
         data = new AlphaTileData(
             tilePath, heightmap,
             alphaPack256,
             texIds, layerMask, holes,
-            textureNameList, modelPlacements, worldModelPlacements, liquidChunks);
+            textureNameList, modelPlacements, worldModelPlacements, liquidChunks,
+            diagnostics: diagnostics,
+            mcnrNormalXyz: hasNormals ? normalXyz : null,
+            mcshShadowMask256: mcshShadowMask256,
+            mclqSurfaceHeight: hasLiquid ? mclqSurface : null,
+            mclqTypeMask: hasLiquid ? mclqTypes : null,
+            mcshShadowMask1024: hasShadow ? alphaPackShadow : null);
 
         return true;
     }
@@ -231,8 +294,10 @@ public static class AlphaWdtReader
 
     private static bool TryParseMcnk(byte[] container, int mcnkOffset,
         IReadOnlyList<string> textureNames,
-        float[,] heightmap, float[,,] alphaPack, int[,,] texIds, bool[,,] layerMask, bool[,] holes,
-        List<AlphaLiquidChunk> liquidChunks, ref bool hasHeight, ref bool hasAlpha)
+        float[,] heightmap, float[,,] alphaPack, float[,,] normalXyz, float[,] alphaPackShadow,
+        int[,,] texIds, bool[,,] layerMask, bool[,] holes,
+        List<AlphaLiquidChunk> liquidChunks, ref bool hasHeight, ref bool hasAlpha,
+        ref bool hasNormals, ref bool hasShadow, ref int totalMcshBytes)
     {
         if (mcnkOffset + ChunkHeaderSize + McnkHeaderSize > container.Length) return false;
         int chunkSize = BitConverter.ToInt32(container, mcnkOffset + 4);
@@ -245,9 +310,12 @@ public static class AlphaWdtReader
         int layerCount = BitConverter.ToInt32(container, headerOffset + 0x10);
         ushort holeMask = (ushort)BitConverter.ToUInt32(container, headerOffset + 0x40);
         int mcvtRel = BitConverter.ToInt32(container, headerOffset + 0x18);
+        int mcnrRel = BitConverter.ToInt32(container, headerOffset + 0x1C);
         int mclyRel = BitConverter.ToInt32(container, headerOffset + 0x20);
         int mcalRel = BitConverter.ToInt32(container, headerOffset + 0x28);
         int mcalSize = BitConverter.ToInt32(container, headerOffset + 0x2C);
+        int mcshRel = BitConverter.ToInt32(container, headerOffset + 0x30);
+        int mcshSize = BitConverter.ToInt32(container, headerOffset + 0x34);
         int mclqRel = BitConverter.ToInt32(container, headerOffset + 0x64);
         int mcnkChunksSize = BitConverter.ToInt32(container, headerOffset + 0x5C);
 
@@ -301,6 +369,50 @@ public static class AlphaWdtReader
                     heightmap[py, px] = heights[i];
             }
             hasHeight = true;
+        }
+
+        if (mcnrRel >= 0 && chunkDataBase + mcnrRel + 435 <= container.Length)
+        {
+            int mcnrOffset = chunkDataBase + mcnrRel;
+            int normBaseX = cy * HalfStepsPerChunk;
+            int normBaseY = cx * HalfStepsPerChunk;
+            int idx = 0;
+            for (int row = 0; row < 17; row++)
+            {
+                bool isInner = (row & 1) != 0;
+                int cols = isInner ? 8 : 9;
+                for (int col = 0; col < cols; col++)
+                {
+                    int srcIdx;
+                    if (isInner)
+                        srcIdx = (81 + (row / 2) * 8 + col) * 3;
+                    else
+                        srcIdx = ((row / 2) * 9 + col) * 3;
+
+                    if (srcIdx + 2 < 435 && mcnrOffset + srcIdx + 2 < container.Length)
+                    {
+                        float nx = (sbyte)container[mcnrOffset + srcIdx] / 127f;
+                        float nz = (sbyte)container[mcnrOffset + srcIdx + 1] / 127f;
+                        float ny = (sbyte)container[mcnrOffset + srcIdx + 2] / 127f;
+                        float len = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
+                        if (len > 0.001f) { nx /= len; ny /= len; nz /= len; }
+                        else { nx = 0f; ny = 0f; nz = 1f; }
+
+                        int sampleX = isInner ? (col * 2) + 1 : col * 2;
+                        int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+                        int px = normBaseX + sampleX;
+                        int py = normBaseY + sampleY;
+                        if ((uint)px < TileHeightmapSize && (uint)py < TileHeightmapSize)
+                        {
+                            normalXyz[py, px, 0] = nx;
+                            normalXyz[py, px, 1] = ny;
+                            normalXyz[py, px, 2] = nz;
+                        }
+                    }
+                    idx++;
+                }
+            }
+            hasNormals = true;
         }
 
         if (layerCount > 0 && mclyRel >= 0)
@@ -365,6 +477,37 @@ public static class AlphaWdtReader
         }
 
         holes[cx, cy] = holeMask != 0;
+
+        if (mcshRel >= 0 && mcshSize > 0 && chunkDataBase + mcshRel + mcshSize <= container.Length)
+        {
+            const int shadowChunkSize = 64;
+            int mcshOffset = chunkDataBase + mcshRel;
+            int mcshBytes = Math.Min(mcshSize, 512);
+            if (mcshOffset + mcshBytes <= container.Length)
+            {
+                int shadowBaseX = cy * shadowChunkSize;
+                int shadowBaseY = cx * shadowChunkSize;
+                int rows = Math.Min(shadowChunkSize, mcshBytes / 8);
+                for (int y = 0; y < rows; y++)
+                {
+                    for (int intIdx = 0; intIdx < 8; intIdx++)
+                    {
+                        int srcIdx = y * 8 + intIdx;
+                        if (srcIdx >= mcshBytes || mcshOffset + srcIdx >= container.Length) break;
+                        byte bits = container[mcshOffset + srcIdx];
+                        for (int bit = 0; bit < 8; bit++)
+                        {
+                            int sx = shadowBaseX + intIdx * 8 + bit;
+                            int sy = shadowBaseY + y;
+                            if (sx < 1024 && sy < 1024)
+                                alphaPackShadow[sy, sx] = ((bits >> bit) & 1) == 1 ? 1.0f : 0.0f;
+                        }
+                    }
+                }
+                hasShadow = true;
+                totalMcshBytes += mcshSize;
+            }
+        }
 
         if ((flags & 0x3Cu) != 0 && mclqRel > 0 && mcnkChunksSize > mclqRel)
         {
@@ -468,7 +611,7 @@ public static class AlphaWdtReader
         }
     }
 
-    private static void ReadMddfPlacements(byte[] payload, IReadOnlyList<string> textureNames, List<AlphaModelPlacement> placements)
+    private static void ReadMddfPlacements(byte[] payload, IReadOnlyList<string> modelNames, List<AlphaModelPlacement> placements)
     {
         for (int offset = 0; offset + MddfEntrySize <= payload.Length; offset += MddfEntrySize)
         {
@@ -484,7 +627,7 @@ public static class AlphaWdtReader
 
             placements.Add(new AlphaModelPlacement(
                 nameId,
-                ResolveName(textureNames, nameId),
+                ResolveName(modelNames, nameId),
                 uniqueId,
                 new Vector3(MapOrigin - rawY, MapOrigin - rawX, rawZ),
                 new Vector3(rotX, rotY, rotZ),
@@ -492,7 +635,7 @@ public static class AlphaWdtReader
         }
     }
 
-    private static void ReadModfPlacements(byte[] payload, IReadOnlyList<string> textureNames, List<AlphaWorldModelPlacement> placements)
+    private static void ReadModfPlacements(byte[] payload, IReadOnlyList<string> modelNames, List<AlphaWorldModelPlacement> placements)
     {
         for (int offset = 0; offset + ModfEntrySize <= payload.Length; offset += ModfEntrySize)
         {
@@ -514,7 +657,7 @@ public static class AlphaWdtReader
 
             placements.Add(new AlphaWorldModelPlacement(
                 nameId,
-                ResolveName(textureNames, nameId),
+                ResolveName(modelNames, nameId),
                 uniqueId,
                 new Vector3(MapOrigin - rawY, MapOrigin - rawX, rawZ),
                 new Vector3(rotX, rotY, rotZ),
@@ -574,6 +717,70 @@ public static class AlphaWdtReader
         return dst;
     }
 
+    private static float[,] DownsampleShadowMask(float[,] src)
+    {
+        const int srcSize = 1024;
+        const int dstSize = 256;
+        const int ratio = srcSize / dstSize;
+        const int samples = ratio * ratio;
+        var dst = new float[dstSize, dstSize];
+
+        for (int y = 0; y < dstSize; y++)
+        {
+            for (int x = 0; x < dstSize; x++)
+            {
+                float sum = 0f;
+                for (int dy = 0; dy < ratio; dy++)
+                {
+                    for (int dx = 0; dx < ratio; dx++)
+                    {
+                        sum += src[y * ratio + dy, x * ratio + dx];
+                    }
+                }
+                dst[y, x] = sum / samples;
+            }
+        }
+        return dst;
+    }
+
+    private static bool DetectMcshUpperRight(float[,] shadowMask1024)
+    {
+        const int srcSize = 1024;
+        const int chunkSize = 64;
+        int topLeftCount = 0, topRightCount = 0;
+        int scanned = 0;
+
+        for (int cy = 0; cy < 16; cy++)
+        {
+            for (int cx = 0; cx < 16; cx++)
+            {
+                int baseY = cx * chunkSize;
+                int baseX = cy * chunkSize;
+                if (baseY + chunkSize > srcSize || baseX + chunkSize > srcSize) continue;
+                scanned++;
+
+                int leftHalf = 0, rightHalf = 0;
+                int halfSize = chunkSize / 2;
+                for (int y = 0; y < halfSize; y++)
+                {
+                    for (int x = 0; x < halfSize; x++)
+                    {
+                        if (shadowMask1024[baseY + y, baseX + x] > 0.5f)
+                            leftHalf++;
+                        if (shadowMask1024[baseY + y, baseX + halfSize + x] > 0.5f)
+                            rightHalf++;
+                    }
+                }
+
+                if (rightHalf > leftHalf) topRightCount++;
+                else if (leftHalf > rightHalf) topLeftCount++;
+            }
+        }
+
+        if (scanned == 0) return false;
+        return topRightCount > topLeftCount;
+    }
+
     public static float[,,] SynthesizeNormals(float[,] heights)
     {
         int h = heights.GetLength(0);
@@ -617,4 +824,17 @@ public static class AlphaWdtReader
     }
 
     private const float WorldTileSize = 533.33333f;
+
+    private static int ClassifyLiquid(uint mcnkFlags)
+    {
+        if ((mcnkFlags & 0x08) != 0) return 1;
+        int bits = (int)((mcnkFlags >> 4) & 3);
+        return bits switch
+        {
+            1 => 1,
+            2 => 2,
+            3 => 3,
+            _ => 0
+        };
+    }
 }

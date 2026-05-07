@@ -367,18 +367,6 @@ internal static class Program
         {
             IReadOnlyList<string>? loadedArchivePaths = InvokePrivate<IReadOnlyList<string>>(mpqArchiveCatalog, "GetLoadedArchivePaths");
             Console.WriteLine($"WowViewer.App archive-probe archives: count={loadedArchivePaths?.Count ?? 0} sample={(loadedArchivePaths is null || loadedArchivePaths.Count == 0 ? "none" : string.Join(", ", loadedArchivePaths.Take(12).Select(Path.GetFileName)))}");
-            Type? helperType = typeof(MpqArchiveCatalog).Assembly.GetType("WowViewer.Core.IO.Files.StormLibPatchArchiveReader", throwOnError: false);
-            if (helperType is not null && loadedArchivePaths is not null)
-            {
-                bool? stormExists = helperType
-                    .GetMethod("TryFileExists", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                    ?.Invoke(null, new object[] { loadedArchivePaths, normalizedVirtualPath }) as bool?;
-                byte[]? stormData = helperType
-                    .GetMethod("TryReadFile", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                    ?.Invoke(null, new object[] { loadedArchivePaths, normalizedVirtualPath }) as byte[];
-
-                Console.WriteLine($"WowViewer.App archive-probe stormlib: exists={stormExists?.ToString() ?? "n/a"} len={(stormData is null ? "null" : stormData.Length.ToString())}");
-            }
         }
 
         return data is null ? 1 : 0;

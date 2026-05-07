@@ -1,4 +1,5 @@
 using SixLabors.ImageSharp.PixelFormats;
+using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 
@@ -28,6 +29,9 @@ static class Program
             case "synthetic-minimap":
                 RunSyntheticMinimap(tail);
                 break;
+            case "extract-unified":
+                RunExtractUnified(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown command '{command}'.");
                 ShowUsage();
@@ -45,14 +49,18 @@ static class Program
             Usage: WowViewer.Tool.Harvest <command> [options]
 
             Commands:
-              harvest-tile      Extract NPZ shard from a single ADT tile
-              harvest-map       Batch-extract all tiles from a map directory
+              harvest-tile      Extract NPZ shard from a single ADT tile (disk path)
+              harvest-map       Batch-extract all tiles from a map directory (disk path)
+              extract-unified   Extract NPZ shard from a tile inside MPQ archives
+                                (reads tileset BLP + ADT + WDL from MPQ, outputs NPZ shard)
               synthetic-minimap Composite tilesets + alpha → synthetic minimap
 
             Global options:
               --build, -b       Client build version (e.g. "4.3.4.15595") for
                                version-aware ADT profile selection. Auto-detected
                                from input path if not specified.
+              --client-root     WoW client root directory (for extract-unified)
+              --map, -m         Map name (e.g. "Azeroth") for extract-unified
 
             See --help on each command for options.
             """);
@@ -278,6 +286,132 @@ static class Program
         }
 
         Console.WriteLine("Synthetic minimap compositor ready — texture pixel lookup not yet wired.");
+    }
+
+    static void RunExtractUnified(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? mapName = GetOption(args, "--map", "-m");
+        string? output = GetOption(args, "--output", "-o");
+        int? tileX = GetIntOption(args, "--tile-x", "-x");
+        int? tileY = GetIntOption(args, "--tile-y", "-y");
+        bool exportPlacements = HasFlag(args, "--export-placements");
+
+        if (string.IsNullOrWhiteSpace(clientRoot))
+        {
+            Console.Error.WriteLine("Error: --client-root <dir> is required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (!Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine($"Error: client root not found: {clientRoot}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(mapName))
+        {
+            Console.Error.WriteLine("Error: --map <name> is required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        using var catalog = new NativeMpqService();
+        catalog.LoadArchives([clientRoot]);
+
+        string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+        byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
+        if (wdtBytes is null)
+        {
+            Console.Error.WriteLine($"Error: Could not read WDT '{wdtVirtual}' from client.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (tileX.HasValue && tileY.HasValue)
+        {
+            if (!RunExtractTileFromMpq(catalog, mapName, wdtBytes, tileX.Value, tileY.Value, output, exportPlacements))
+                Environment.ExitCode = 1;
+        }
+        else
+        {
+            using var ms = new MemoryStream(wdtBytes);
+            MapFileSummary fileSummary = MapFileSummaryReader.Read(ms, wdtVirtual);
+            var wdt = WdtSummaryReader.Read(ms, fileSummary);
+            Console.WriteLine($"WDT: {mapName}");
+            Console.WriteLine($"  IsWmoBased: {wdt.IsWmoBased}");
+            Console.WriteLine($"  Tiles with data: {wdt.TilesWithData}/{wdt.TotalTiles}");
+            Console.WriteLine();
+            Console.WriteLine("Use --tile-x <0-63> --tile-y <0-63> to harvest a specific tile.");
+        }
+    }
+
+    static bool RunExtractTileFromMpq(NativeMpqService catalog, string mapName, byte[] wdtBytes, int tileX, int tileY, string? outputPath, bool exportPlacements)
+    {
+        TerrainTileTensorPack pack;
+        AdtPlacementCatalog? placementCatalog = null;
+
+        if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
+        {
+            if (!AlphaWdtReader.TryReadTile(wdtBytes, tileX, tileY, out AlphaTileData? tileData) || tileData is null)
+            {
+                Console.Error.WriteLine($"Error: Alpha tile ({tileX},{tileY}) not present in WDT.");
+                return false;
+            }
+            pack = AlphaTensorPackBuilder.Build(tileData);
+            if (exportPlacements)
+                placementCatalog = tileData.ToPlacementCatalog();
+        }
+        else
+        {
+            string adtVirtual = $"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}.adt";
+            byte[]? adtBytes = catalog.ReadFile(adtVirtual);
+            if (adtBytes is null)
+            {
+                Console.Error.WriteLine($"Error: Could not read ADT '{adtVirtual}' from client.");
+                return false;
+            }
+
+            string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_harvest_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(tempDir);
+            string adtDiskPath = Path.Combine(tempDir, Path.GetFileName(adtVirtual));
+            string tex0DiskPath = Path.Combine(tempDir, $"{mapName}_{tileX}_{tileY}_tex0.adt");
+
+            File.WriteAllBytes(adtDiskPath, adtBytes);
+
+            string? tex0Virtual = $"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}_tex0.adt";
+            byte[]? tex0Bytes = catalog.ReadFile(tex0Virtual);
+            if (tex0Bytes != null)
+                File.WriteAllBytes(tex0DiskPath, tex0Bytes);
+
+            try
+            {
+                pack = AdtTensorPackBuilder.Build(adtDiskPath, tex0Bytes != null ? tex0DiskPath : null, null);
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(outputPath))
+            outputPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), $"{mapName}_{tileX}_{tileY}_v14.npz");
+
+        NpzTileSerializer.Serialize(pack, outputPath);
+        Console.WriteLine($"Harvested: {outputPath}");
+        Console.WriteLine($"Signals: {string.Join(", ", pack.AvailableSignals)}");
+
+        if (exportPlacements && placementCatalog is not null)
+        {
+            string placementPath = Path.ChangeExtension(outputPath, ".placement.json");
+            string json = System.Text.Json.JsonSerializer.Serialize(placementCatalog, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(placementPath, json);
+            Console.WriteLine($"Placements: {placementPath}");
+        }
+
+        return true;
     }
 
     static bool TryLoadMinimap(string adtPath, string minimapRoot, out byte[,,]? minimap)

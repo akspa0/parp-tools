@@ -445,12 +445,6 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
             }
         }
 
-        if (StormLibPatchArchiveReader.TryFileExists(GetLoadedArchivePaths(), normalized))
-        {
-            MpqDiagnostics.Increment("MpqStormLibFallbackExistsHitCount");
-            return true;
-        }
-
         return false;
     }
 
@@ -491,7 +485,7 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
             }
         }
 
-        return StormLibPatchArchiveReader.TryReadFile(GetLoadedArchivePaths(), normalized);
+        return null;
     }
 
     public byte[]? ReadScannedFile(string placeholderPath)

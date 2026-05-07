@@ -1,11 +1,24 @@
-# ACTIVE CONTEXT — V11 CLEAN SLATE
+# ACTIVE CONTEXT — V14 Branch (V11 Reset)
 
 ## BRANCH
-`v0.4.9` at `ced5899`. V10 pipeline deceased. V11 is the real deal.
+`v0.4.9-strict-guards` forked from `971fff2` on 2026-05-06.
 
-## WHAT FIXED
-- **MpqArchiveCatalog probe bug** — `FindFileInArchive` + `TryFindBlockByName` now skip past empty hash slots with 256-probe limit. Was `break` on empty. This was THE hang.
-- **MCAL/MCLY in v9 `dataset-build-cache`** — v9 pipeline now produces NPZ shards with `mcal_alpha_pack_256`, `mcly_layer_mask`, `mcly_texture_ids`. No temp files. Zero disk writes.
+## wow-viewer Library Completeness — Phase A DONE
+
+Phase A (terrain type system) is complete. All domain types and adapters are wired:
+
+- `ITerrainAdapter` interface in `WowViewer.Core.Maps`
+- `TerrainChunkData`, `TerrainLayer`, `LiquidChunkData` in `WowViewer.Core.Maps`
+- `MddfPlacement`, `ModfPlacement` structs in `WowViewer.Core.Maps`
+- `TileLoadResult` in `WowViewer.Core.Maps`
+- `AlphaTerrainAdapter` in `WowViewer.Core.IO.Maps` — implements `ITerrainAdapter`, bridges `AlphaWdtReader` → per-chunk `TerrainChunkData`
+- `AlphaTileData.ToTileLoadResult()` — converts flat 257×257 arrays → per-chunk `TerrainChunkData[]`
+- `TerrainTileTensorPack.ToTileLoadResult()` — slices LK flat arrays → per-chunk `TerrainChunkData[]`
+- `NativeMpqService` ported as gold-standard MPQ reader (pure C#, no StormLib)
+- StormLib completely removed from wow-viewer
+- Harvest tool `extract-unified` command added
+
+**Next**: Phase B — validate AlphaWdtReader against known-good tiles, add MCNR/MCSH extraction, MCLQ upscaling.
 
 ## V11 TRAINER (`train_v11.py`)
 - **Backbone:** ConvNeXt V2 Tiny (28.6M) from `timm`. LayerNorm, batch-size agnostic.
@@ -20,13 +33,23 @@
 - `dataset-build-cache --input <curated> --output-dir <dir>` — v9 pipeline, now with MCAL/MCLY
 - `train_v11.py <shards> --epochs N` — full training with all signals
 - `infer_v11.py <checkpoint> <shards>` — predict heights + MCAL + MCLY + holes, export OBJ
+- `WowViewer.Tool.Harvest extract-unified` — MPQ-backed WDT/ADT → NPZ shard pipeline
 
 ## WHAT BROKE (archive path, DONT USE)
-- `--client-root` mode (was already broken, probe bug now fixed but untested)
+- `--client-root` mode for old dataset-build (pre-harvest tool)
 - `build_v10_2_dataset.py`, `train_v10_2_terrain_synth.py` — dead code
 - Shadow masks — never exist on minimap tiles, removed from channel list
 
+## KEY FILES — wow-viewer Library
+- Domain types: `wow-viewer/src/core/WowViewer.Core/Maps/`
+- IO readers: `wow-viewer/src/core/WowViewer.Core.IO/Maps/`
+- AlphaTerrainAdapter: `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaTerrainAdapter.cs`
+- NativeMpqService: `wow-viewer/src/core/WowViewer.Core.IO/Files/NativeMpqService.cs`
+- Harvest tool: `wow-viewer/tools/harvest/WowViewer.Tool.Harvest/Program.cs`
+- Library completeness plan: `wow-viewer/docs/architecture/wow-viewer-library-completeness-plan-2026-05-06.md`
+
 ## NEXT
-1. Extract 800-1500 shards via filesystem mode on staged clients
-2. `train_v11.py <shards> --output-dir runs/v11_prod --epochs 300 --batch-size 32`
-3. `infer_v11.py runs/v11_prod/best_ema.pt <shards> --export-obj`
+1. Phase B: validate AlphaWdtReader, add MCNR/MCSH extraction, MCLQ upscaling
+2. Phase B: wire AlphaTileData.ToPlacementCatalog into harvest output
+3. Phase B: test Alpha 0.6.0 split ADT through AdtTensorPackBuilder
+4. Extract training shards via harvest tool on staged clients

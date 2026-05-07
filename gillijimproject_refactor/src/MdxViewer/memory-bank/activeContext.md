@@ -28,6 +28,13 @@ This file is intentionally compressed. Keep only the current compatibility role,
 - Remaining M2 gaps still include broader character-family coverage, projected or additive material behavior, particles, ribbons, and fuller native-material parity.
 - Do not treat terrain-restore heuristics as broadly proven until real-data runtime validation exists.
 
+## wow-viewer Terrain Adapter Status
+
+- `AlphaTerrainAdapter` (in `wow-viewer/src/core/WowViewer.Core.IO/Maps/`) now implements `ITerrainAdapter` and bridges `AlphaWdtReader` output → per-chunk `TerrainChunkData`.
+- `AlphaTileData.ToTileLoadResult()` converts flat 257×257 heightmaps and alpha packs to `TileLoadResult` with `MddfPlacement`/`ModfPlacement`.
+- `TerrainTileTensorPack.ToTileLoadResult()` converts LK flat-array format to the same `TileLoadResult` shape.
+- MdxViewer's `AlphaTerrainAdapter` remains the reference for per-chunk MCNR, MCSH, and MCLQ extraction that haven't been ported yet (Phase B).
+
 ## Routing Reminder
 
 - If the task is new renderer or runtime ownership, move it into `wow-viewer` libraries.

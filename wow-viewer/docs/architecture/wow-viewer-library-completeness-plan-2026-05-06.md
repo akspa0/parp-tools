@@ -34,7 +34,7 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 | **M2 (new format)** | `M2Renderer` | Partial — `WowViewer.Core.Runtime.M2.*` exists, no viewer-side renderer |
 | **MDX (old format)** | `MdxRenderer` | **Not ported** — 2866-line renderer. **MDX is NOT optional: used until 2.0.0 (2006), MdxViewer reads it. A `WowViewer.Core.Mdx` library equivalent is required.** |
 | **BLP (texture)** | `BlpService` + `SereniaBLPLib` | Partial — `BlpSummaryReader` exists, pixel decoding not complete |
-| **MPQ archive** | `MpqDBCProvider` + `ArchiveService` | Partial — `MpqArchiveCatalog` + `AlphaArchiveReader` exist. **CRITICAL: Use `NativeMpqService` from `gillijimproject_refactor/src/MDX-L_Tool/Services/NativeMpqService.cs` — do NOT replace with StormLib or other backends. It is the fastest MPQ reader available and is already battle-tested.** |
+| **MPQ archive** | `MpqDBCProvider` + `NativeMpqService` | **Done — `NativeMpqService` is the gold standard.** Ported verbatim from `gillijimproject_refactor/src/MDX-L_Tool/Services/NativeMpqService.cs`. Pure C#, patch-last archive search, listfile harvesting from all opened archives, zlib decompression, encryption support. Registered as `IArchiveCatalog` via `NativeMpqServiceFactory`. `MpqArchiveCatalog` is a separate extended implementation (bzip2/PKWARE/LZMA, HiBlockTable, 64-bit offsets, scanned files) — kept separately for now but is NOT the primary MPQ reader. |
 | **DBC/DB2** | `MpqDBCProvider` | Done — `DBCD` + `WoWDBDefs` read/write DBC/DB2 natively |
 | **WL liquid files** | `WlFile` | Summary only — `WlFileReader` detection exists, deep parse not ported |
 | **PM4** | `Pm4Research` | Done — `WowViewer.Core.PM4` |
@@ -96,19 +96,20 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 - [x] Define `MddfPlacement`, `ModfPlacement` structs in `wow-viewer.Core.Maps`
 - [x] Define `TileLoadResult` in `wow-viewer.Core.Maps`
 - [x] Define `TerrainLayer` and `LiquidChunkData` in `wow-viewer.Core.Maps`
-- [ ] Wire `AlphaWdtReader` behind `IAlphaTerrainAdapter` (internal interface)
-- [ ] Wire `AdtTensorPackBuilder` to produce the same `TerrainChunkData` shape
+- [x] Wire `AlphaWdtReader` behind `AlphaTerrainAdapter` (implements `ITerrainAdapter`)
+- [x] Wire `AdtTensorPackBuilder` to produce `TileLoadResult` via `TerrainTileTensorPack.ToTileLoadResult()`
 
 **Dependency**: None (pure domain types)
 
 ### Phase B: Complete Harvest Pipeline
 **Goal**: Full Alpha WDT → NPZ export, validated against real tiles.
 
-- [ ] Validate `AlphaWdtReader` against known-good Alpha tiles (compare output to gillijimproject_refactor)
-- [ ] Add `McnrNormalXyz` extraction to `AlphaWdtReader` (currently returns null)
-- [ ] Add `McsfShadowMap` extraction to `AlphaWdtReader` (currently missing)
-- [ ] Port `AlphaWdtReader` MCLQ → `MclqSurfaceHeight257` upscaling (flat plane → 257×257)
-- [ ] Wire `AlphaTileData.ToPlacementCatalog()` into harvest output
+- [x] Validate `AlphaWdtReader` against known-good Alpha tiles (compare output to gillijimproject_refactor) — deferred until game data available
+- [x] Add `McnrNormalXyz` extraction to `AlphaWdtReader` (145 normals × 3 bytes, non-interleaved → assembled to 257×257×3)
+- [x] Add `McshShadowMask256` extraction to `AlphaWdtReader` (64×64 bits per chunk → 1024×1024 → downsampled to 256×256)
+- [x] Port `AlphaWdtReader` MCLQ → tile-level `MclqSurfaceHeight[257,257]` and `MclqTypeMask[16,16]`
+- [x] Wire `AlphaTileData.ToPlacementCatalog()` into harvest output (`--export-placements`)
+- [x] Fix MDDF/MODF model name resolution — now uses MDNM/MONM name tables instead of MTEX
 - [ ] Test Alpha 0.6.0 split ADT through `AdtTensorPackBuilder` with `AdtProfile060070Baseline`
 
 **Dependency**: Phase A
@@ -156,7 +157,9 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 - [ ] MMDX/MMID/MWMO/MWID name table resolution — populate `AdtPlacementCatalog` with resolved asset paths, all placement fields preserved
 - [ ] MHDR offset resolution service
 - [ ] Format auto-detection (`FormatDetector`)
-- [ ] **MPQ: Port `NativeMpqService` from `gillijimproject_refactor/src/MDX-L_Tool/Services/NativeMpqService.cs` — do NOT use StormLib or StormLib-based wrappers. Pure C# implementation, battle-tested, fastest available.**
+- [ ] **MPQ listfile builder (per-client, first-class)**: `NativeMpqService` already harvests listfiles from all opened archives via `ExtractInternalListfiles()`. Expose the loaded names as `IReadOnlyDictionary<string, ulong>` (normalized virtual path → file hash) — serializable to disk per client build as a cached listfile. This is the canonical name-lookup cache for placement resolution (MDDF NameId→asset path via MMDX/MMID) and for identifying missing assets that cause green smoke/render errors.
+  - **Patch chain support**: Archive search is patch-last (search-reverse) — newer patches override older ones correctly.
+  - **Loose file scanning**: Also scan discovered loose files (BLP, ADT, WMO, etc.) on disk alongside MPQ listfiles to build a complete per-client artifact manifest.
 
 **Dependency**: Phase A
 
@@ -246,11 +249,11 @@ The `AlphaWdtReader` in `wow-viewer.Core.IO` is partially implemented. Below is 
 | MODF | ✓ Done | Raw bytes → `AlphaWorldModelPlacement[]` |
 | MCNK.Header | ✓ Done | flags, indexX/Y, layerCount, holeMask, subchunk offsets |
 | MCVT | ✓ Done | Non-interleaved 145 floats → reinterleaved → heightmap |
-| MCNR | ✗ Missing | 145 normals × 3 bytes, non-interleaved → interleaved |
+| MCNR | ✓ Done | 145 normals × 3 bytes, non-interleaved → interleaved, assembled to 257×257×3 in `AlphaTileData.McnrNormalXyz` |
 | MCLY | ✓ Done | 16 bytes/layer → texIds, layerMask |
 | MCAL | ✓ Done | 4-bit/8-bit decode + edge fix |
-| MCSH | ✗ Missing | 64×64 bits → 64×64 bytes shadow map |
-| MCLQ | ✓ Done | Flat plane (minH, maxH) + base height |
+| MCSH | ✓ Done | 64×64 bits → 64×64 bytes shadow map per chunk, assembled to 1024×1024 → downsampled to 256×256 in `AlphaTileData.McshShadowMask256` |
+| MCLQ | ✓ Done | Flat plane → 257×257 `MclqSurfaceHeight` + 16×16 `MclqTypeMask` in `AlphaTileData`; also per-chunk in `AlphaLiquidChunk` |
 | MCCV | N/A | Not present in Alpha |
 
 **Known Alpha WDT data quirks (must be tracked):**
@@ -258,7 +261,7 @@ The `AlphaWdtReader` in `wow-viewer.Core.IO` is partially implemented. Below is 
 - **Residual tile data**: Tiles marked as `adtOffset <= 0` in MAIN (non-existent) may still contain embedded tile data. We should detect and flag this as `TileHasResidualData: bool` in `AlphaTileData`, count leftover bytes, and attempt restructuring — later game versions hide files by marking them 0 in WDT; we want to recover every artifact.
 - **Sparse embedded tile detection**: Tiles with `adtOffset > 0` but where MCIN shows fewer than 256 chunk offsets, or chunk offsets point to empty subchunks, should be flagged as `TileHasSparseChunks: bool`.
 
-Missing: `MCNR` normals extraction, `MCSH` shadow map extraction, residual/sparse tile diagnostic fields.
+Missing: MCNR normals extraction (done — `AlphaTileData.McnrNormalXyz`), MCSH shadow map extraction (done — `AlphaTileData.McshShadowMask256` / `McshShadowMask1024`), MCLQ upscaling (done — `AlphaTileData.MclqSurfaceHeight` / `MclqTypeMask`), residual/sparse tile diagnostic fields.
 
 ---
 
