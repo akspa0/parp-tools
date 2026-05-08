@@ -24,9 +24,6 @@ public static class AlphaTensorPackBuilder
         if (tileData.McnrNormalXyz is not null)
             signals.Add("mcnr_normal_xyz");
 
-        if (tileData.McshShadowMask256 is not null)
-            signals.Add("mcsh_shadow_mask_256");
-
         float[,]? height65 = DownsampleHeightmap(height257, 65);
         float[,]? height17 = DownsampleHeightmap(height257, 17);
 
@@ -47,6 +44,15 @@ public static class AlphaTensorPackBuilder
         bool[,]? holeMask16 = tileData.HoleMask;
         if (holeMask16 is not null)
             signals.Add("hole_mask_16");
+
+        if (tileData.MclyTextureIds is not null)
+            signals.Add("mcly_texture_ids");
+        if (tileData.MclyLayerMask is not null)
+            signals.Add("mcly_layer_mask");
+        if (tileData.McalAlphaPack is not null)
+            signals.Add("mcal_alpha_pack_256");
+        if (tileData.McshShadowMask256 is not null)
+            signals.Add("mcsh_shadow_mask_256");
 
         return new TerrainTileTensorPack
         {

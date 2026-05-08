@@ -231,7 +231,7 @@ public static class AdtTensorPackBuilder
             if ((uint)chunkX >= TileChunks || (uint)chunkY >= TileChunks)
                 continue;
 
-            float baseHeight = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x14, 4)));
+            float baseHeight = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x70, 4)));
 
             int mcvtOffset = LocateMcvtDataOffset(payload);
             if (mcvtOffset < 0)
@@ -251,8 +251,25 @@ public static class AdtTensorPackBuilder
         if (!any)
             return null;
 
+        FillHeightmapGaps(heightmap);
         signals.Add("height_257");
         return heightmap;
+    }
+
+    private static void FillHeightmapGaps(float[,] hm)
+    {
+        int size = hm.GetLength(0);
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                if (hm[y, x] != 0f) continue;
+                if (x > 0 && hm[y, x - 1] != 0f) hm[y, x] = hm[y, x - 1];
+                else if (y > 0 && hm[y - 1, x] != 0f) hm[y, x] = hm[y - 1, x];
+                else if (x < size - 1 && hm[y, x + 1] != 0f) hm[y, x] = hm[y, x + 1];
+                else if (y < size - 1 && hm[y + 1, x] != 0f) hm[y, x] = hm[y + 1, x];
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1287,7 +1304,7 @@ public static class AdtTensorPackBuilder
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
+            int declaredSize = unchecked((int)header.Size);
             int consumedSize = declaredSize;
             if (header.Id == AdtChunkIds.Mcnr)
                 consumedSize = Math.Max(consumedSize, McnrConsumedSize);
@@ -1321,7 +1338,7 @@ public static class AdtTensorPackBuilder
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
+            int declaredSize = unchecked((int)header.Size);
             int consumedSize = declaredSize;
             if (header.Id == AdtChunkIds.Mcnr)
                 consumedSize = Math.Max(consumedSize, McnrConsumedSize);
@@ -1354,7 +1371,7 @@ public static class AdtTensorPackBuilder
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int consumedSize = checked((int)header.Size);
+            int consumedSize = unchecked((int)header.Size);
             if (header.Id == AdtChunkIds.Mcnr)
                 consumedSize = Math.Max(consumedSize, McnrConsumedSize);
             else if (header.Id == AdtChunkIds.Mcal && headerMcalSize >= ChunkHeader.SizeInBytes)

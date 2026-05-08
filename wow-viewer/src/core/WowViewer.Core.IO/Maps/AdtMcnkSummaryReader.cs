@@ -200,7 +200,7 @@ public static class AdtMcnkSummaryReader
             if (!KnownSubchunks.Contains(header.Id))
                 break;
 
-            int consumedSize = checked((int)header.Size);
+            int consumedSize = unchecked((int)header.Size);
             if (header.Id == AdtChunkIds.Mcnr)
                 consumedSize = Math.Max(consumedSize, McnrConsumedSize);
 

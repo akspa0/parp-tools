@@ -80,7 +80,9 @@ public static class AdtMclqReader
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
+            int declaredSize = unchecked((int)header.Size);
+            if (declaredSize < 0 || declaredSize > payload.Length)
+                break;
             long nextOffset = (long)position + ChunkHeader.SizeInBytes + declaredSize;
             if (nextOffset > payload.Length)
                 break;
@@ -92,7 +94,8 @@ public static class AdtMclqReader
                 return position + ChunkHeader.SizeInBytes;
             }
 
-            position = checked((int)nextOffset);
+            position = unchecked((int)nextOffset);
+            if (position < 0) break;
         }
 
         return -1;

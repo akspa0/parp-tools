@@ -618,3 +618,6 @@ runs/*
 viz_output/*
 viz_outputs/*
 wow-viewer/test_data/*
+wow-viewer/data-harvester/*.png
+wow-viewer/data-harvester/*.npz
+wow-viewer/data-harvester/*.lock

@@ -111,7 +111,7 @@ public static class AdtTerrainWriter
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
+            int declaredSize = unchecked((int)header.Size);
             int consumedSize = declaredSize;
             if (header.Id == AdtChunkIds.Mcnr)
                 consumedSize = Math.Max(consumedSize, McnrConsumedSize);
@@ -146,7 +146,7 @@ public static class AdtTerrainWriter
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
+            int declaredSize = unchecked((int)header.Size);
             int consumedSize = declaredSize;
             if (header.Id == AdtChunkIds.Mcnr)
                 consumedSize = Math.Max(consumedSize, McnrConsumedSize);

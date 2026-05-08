@@ -36,7 +36,9 @@ public static class AlphaWdtReader
     public static bool IsAlphaWdt(byte[] wdtData)
     {
         using var ms = new MemoryStream(wdtData, writable: false);
-        return TryReadAlphaTopLevelChunks(ms, out _, out _, out _, out bool hasMdnm);
+        if (!TryReadAlphaTopLevelChunks(ms, out _, out _, out MapChunkLocation main, out _))
+            return false;
+        return main.Size == 65536; // Alpha: 4096 entries × 16 bytes = 65536
     }
 
     private static bool ReadMainPayload(byte[] wdtData, out byte[] mainData)
@@ -353,12 +355,9 @@ public static class AlphaWdtReader
                     heights[i] += baseHeight;
             }
 
-            // Coordinate mapping matches AlphaTerrainAdapter exactly:
-            // worldX = MapOrigin - tileX*ChunkSize - chunkY*chunkSmall
-            // worldY = MapOrigin - tileY*ChunkSize - chunkX*chunkSmall
-            // chunkY drives horizontal (X), chunkX drives vertical (Y)
-            int baseX = cy * HalfStepsPerChunk;
-            int baseY = cx * HalfStepsPerChunk;
+            // chunkY (=indexY) drives row (Y), chunkX (=indexX) drives column (X)
+            int baseX = cx * HalfStepsPerChunk;
+            int baseY = cy * HalfStepsPerChunk;
             for (int i = 0; i < heights.Length; i++)
             {
                 GetVertexPosition(i, out int row, out int col, out bool isInner);
@@ -375,8 +374,8 @@ public static class AlphaWdtReader
         if (mcnrRel >= 0 && chunkDataBase + mcnrRel + 435 <= container.Length)
         {
             int mcnrOffset = chunkDataBase + mcnrRel;
-            int normBaseX = cy * HalfStepsPerChunk;
-            int normBaseY = cx * HalfStepsPerChunk;
+            int normBaseX = cx * HalfStepsPerChunk;
+            int normBaseY = cy * HalfStepsPerChunk;
             int idx = 0;
             for (int row = 0; row < 17; row++)
             {
@@ -419,8 +418,6 @@ public static class AlphaWdtReader
         if (layerCount > 0 && mclyRel >= 0)
         {
             int mclyOffset = chunkDataBase + mclyRel;
-            // MCLY subchunk in Alpha format has an 8-byte chunk header (FourCC + size).
-            // Skip past it to reach the layer entries array.
             if (mclyOffset + 8 <= container.Length)
                 mclyOffset += 8;
             int maxLayers = Math.Min(layerCount, 4);
@@ -442,8 +439,8 @@ public static class AlphaWdtReader
                 uint mclyFlags = BitConverter.ToUInt32(container, entryOff + 4);
                 uint layerAlphaOff = BitConverter.ToUInt32(container, entryOff + 8);
 
-                texIds[cx, cy, l] = (int)texId;
-                layerMask[cx, cy, l] = true;
+                texIds[cy, cx, l] = (int)texId;
+                layerMask[cy, cx, l] = true;
 
                 if (l > 0 && alphaSrcOffset < mcalData.Length)
                 {
@@ -459,11 +456,11 @@ public static class AlphaWdtReader
                             byte b = mcalData[alphaSrcOffset + i];
                             int ax = (i * 2) % 64;
                             int ay = (i * 2) / 64;
-                            alphaPack[cx * 64 + ay, cy * 64 + ax, l] = ((b & 0x0F) * 17) / 255f;
+                            alphaPack[cy * 64 + ay, cx * 64 + ax, l] = ((b & 0x0F) * 17) / 255f;
                             if (ax + 1 < 64)
-                                alphaPack[cx * 64 + ay, cy * 64 + ax + 1, l] = ((b >> 4) * 17) / 255f;
+                                alphaPack[cy * 64 + ay, cx * 64 + ax + 1, l] = ((b >> 4) * 17) / 255f;
                         }
-                        ApplyEdgeFix(alphaPack, cx, cy, l);
+                        ApplyEdgeFix(alphaPack, cy, cx, l);
                         alphaSrcOffset += packed;
                     }
                     else
@@ -472,7 +469,7 @@ public static class AlphaWdtReader
                         {
                             int ax = i % 64;
                             int ay = i / 64;
-                            alphaPack[cx * 64 + ay, cy * 64 + ax, l] = mcalData[alphaSrcOffset + i] / 255f;
+                            alphaPack[cy * 64 + ay, cx * 64 + ax, l] = mcalData[alphaSrcOffset + i] / 255f;
                         }
                         alphaSrcOffset += Math.Min(4096, consume);
                     }
@@ -481,7 +478,7 @@ public static class AlphaWdtReader
             }
         }
 
-        holes[cx, cy] = holeMask != 0;
+        holes[cy, cx] = holeMask != 0;
 
         if (mcshRel >= 0 && mcshSize > 0 && chunkDataBase + mcshRel + mcshSize <= container.Length)
         {
@@ -490,8 +487,8 @@ public static class AlphaWdtReader
             int mcshBytes = Math.Min(mcshSize, 512);
             if (mcshOffset + mcshBytes <= container.Length)
             {
-                int shadowBaseX = cy * shadowChunkSize;
-                int shadowBaseY = cx * shadowChunkSize;
+                int shadowBaseX = cx * shadowChunkSize;
+                int shadowBaseY = cy * shadowChunkSize;
                 int rows = Math.Min(shadowChunkSize, mcshBytes / 8);
                 for (int y = 0; y < rows; y++)
                 {

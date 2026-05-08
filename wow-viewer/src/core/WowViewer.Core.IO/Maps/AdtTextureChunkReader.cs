@@ -91,7 +91,7 @@ public static class AdtTextureChunkReader
             if (!ChunkHeaderReader.TryRead(payload.AsSpan(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
+            int declaredSize = unchecked((int)header.Size);
             int consumedSize = header.Id == AdtChunkIds.Mcnr
                 ? Math.Max(declaredSize, McnrConsumedSize)
                 : declaredSize;

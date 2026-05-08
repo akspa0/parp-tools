@@ -7,6 +7,8 @@ namespace WowViewer.Tools.Harvest;
 
 static class Program
 {
+    private static Dictionary<string, string>? _md5Lookup;
+
     static int Main(string[] args)
     {
         if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
@@ -296,6 +298,8 @@ static class Program
         int? tileX = GetIntOption(args, "--tile-x", "-x");
         int? tileY = GetIntOption(args, "--tile-y", "-y");
         bool exportPlacements = HasFlag(args, "--export-placements");
+        string? syntheticMinimap = GetOption(args, "--synthetic-minimap", "-s");
+        bool dumpHex = HasFlag(args, "--dump-hex");
 
         if (string.IsNullOrWhiteSpace(clientRoot))
         {
@@ -320,6 +324,7 @@ static class Program
 
         using var catalog = new NativeMpqService();
         catalog.LoadArchives([clientRoot]);
+        LoadMd5Translate(clientRoot, catalog);
 
         string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
         byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
@@ -332,7 +337,7 @@ static class Program
 
         if (tileX.HasValue && tileY.HasValue)
         {
-            if (!RunExtractTileFromMpq(catalog, mapName, wdtBytes, tileX.Value, tileY.Value, output, exportPlacements))
+            if (!RunExtractTileFromMpq(catalog, mapName, wdtBytes, tileX.Value, tileY.Value, output, exportPlacements, syntheticMinimap))
                 Environment.ExitCode = 1;
         }
         else
@@ -348,7 +353,7 @@ static class Program
         }
     }
 
-    static bool RunExtractTileFromMpq(NativeMpqService catalog, string mapName, byte[] wdtBytes, int tileX, int tileY, string? outputPath, bool exportPlacements)
+    static bool RunExtractTileFromMpq(NativeMpqService catalog, string mapName, byte[] wdtBytes, int tileX, int tileY, string? outputPath, bool exportPlacements, string? syntheticMinimapPath = null)
     {
         TerrainTileTensorPack pack;
         AdtPlacementCatalog? placementCatalog = null;
@@ -425,7 +430,134 @@ static class Program
             Console.WriteLine($"Placements: {placementPath}");
         }
 
+        if (!string.IsNullOrWhiteSpace(syntheticMinimapPath))
+            GenerateSyntheticMinimap(catalog, pack, tileX, tileY, syntheticMinimapPath);
+
         return true;
+    }
+
+    static void GenerateSyntheticMinimap(NativeMpqService catalog, TerrainTileTensorPack pack, int tileX, int tileY, string outputPath)
+    {
+        if (pack.McalAlphaPack256 is null || pack.MclyTextureIds is null)
+        {
+            Console.Error.WriteLine("Error: tile has no MCAL/MCLY data, cannot generate synthetic minimap.");
+            return;
+        }
+
+        var textureNames = pack.MclyTextureNames;
+        if (textureNames.Count == 0)
+        {
+            Console.Error.WriteLine("Error: no texture names in tile metadata.");
+            return;
+        }
+
+        var usedIds = new HashSet<int>();
+        for (int cy = 0; cy < 16; cy++)
+            for (int cx = 0; cx < 16; cx++)
+                for (int l = 0; l < 4; l++)
+                    if (pack.MclyTextureIds[cy, cx, l] >= 0)
+                        usedIds.Add(pack.MclyTextureIds[cy, cx, l]);
+
+        Console.WriteLine($"  Loading {usedIds.Count} unique textures for synthetic minimap...");
+
+        var textures = new Dictionary<int, byte[,,]>();
+        int maxId = usedIds.Max();
+        for (int id = 0; id <= maxId && id < textureNames.Count; id++)
+        {
+            if (!usedIds.Contains(id)) continue;
+            string texPath = textureNames[id];
+            byte[,,]? rgb = LoadTextureFromMpq(catalog, texPath);
+            if (rgb is not null)
+                textures[id] = rgb;
+            else
+                Console.Error.WriteLine($"    Warning: Could not load texture [{id}] {texPath}");
+        }
+
+        if (textures.Count == 0)
+        {
+            Console.Error.WriteLine("Error: no textures could be loaded.");
+            return;
+        }
+
+        Console.WriteLine($"  Loaded {textures.Count}/{usedIds.Count} textures, compositing...");
+
+        const int size = 256;
+        const float tileSize = 533.33333f;
+        const float mapOrigin = 17066.666f;
+        const float textureScale = 20f;
+
+        using var image = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(size, size);
+
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                int chunkY = y / 16;
+                int chunkX = x / 16;
+
+                // World position for proper texture UV tiling
+                float worldX = mapOrigin - tileX * tileSize + (x / (float)(size - 1)) * tileSize;
+                float worldY = mapOrigin - tileY * tileSize + (y / (float)(size - 1)) * tileSize;
+
+                float r = 0f, g = 0f, b = 0f;
+                float implicitAlpha = 1f;
+
+                for (int l = 1; l < 4; l++)
+                {
+                    float a = pack.McalAlphaPack256[y, x, l];
+                    implicitAlpha -= a;
+                    if (a <= 0.001f) continue;
+
+                    int texId = pack.MclyTextureIds[chunkY, chunkX, l];
+                    if (texId < 0 || !textures.TryGetValue(texId, out var tex)) continue;
+
+                    int texH = tex.GetLength(0);
+                    int texW = tex.GetLength(1);
+                    float tu = (worldX / textureScale) % 1f;
+                    float tv = (worldY / textureScale) % 1f;
+                    if (tu < 0) tu += 1f;
+                    if (tv < 0) tv += 1f;
+                    int tx = (int)(tu * texW) % texW;
+                    int ty = (int)(tv * texH) % texH;
+                    r += tex[ty, tx, 0] * a;
+                    g += tex[ty, tx, 1] * a;
+                    b += tex[ty, tx, 2] * a;
+                }
+
+                if (implicitAlpha > 0.001f)
+                {
+                    int baseTexId = pack.MclyTextureIds[chunkY, chunkX, 0];
+                    if (baseTexId >= 0 && textures.TryGetValue(baseTexId, out var baseTex))
+                    {
+                        int texH = baseTex.GetLength(0);
+                        int texW = baseTex.GetLength(1);
+                        float tu = (worldX / textureScale) % 1f;
+                        float tv = (worldY / textureScale) % 1f;
+                        if (tu < 0) tu += 1f;
+                        if (tv < 0) tv += 1f;
+                        int tx = (int)(tu * texW) % texW;
+                        int ty = (int)(tv * texH) % texH;
+                        r += baseTex[ty, tx, 0] * implicitAlpha;
+                        g += baseTex[ty, tx, 1] * implicitAlpha;
+                        b += baseTex[ty, tx, 2] * implicitAlpha;
+                    }
+                }
+
+                image[x, y] = new SixLabors.ImageSharp.PixelFormats.Rgba32(
+                    (byte)Math.Clamp((int)r, 0, 255),
+                    (byte)Math.Clamp((int)g, 0, 255),
+                    (byte)Math.Clamp((int)b, 0, 255),
+                    255);
+            }
+        }
+
+        string? dir = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+
+        using var fs = File.Create(outputPath);
+        image.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+        Console.WriteLine($"Synthetic minimap: {outputPath}");
     }
 
     static bool TryLoadMinimap(string adtPath, string minimapRoot, out byte[,,]? minimap)
@@ -470,20 +602,52 @@ static class Program
         return false;
     }
 
+    static void LoadMd5Translate(string clientRoot, NativeMpqService catalog)
+    {
+        if (Md5TranslateResolver.TryLoad(
+            new[] { clientRoot },
+            path => catalog.FileExists(path),
+            path => catalog.ReadFile(path),
+            out var md5Index))
+        {
+            _md5Lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in md5Index.PlainToHash)
+                _md5Lookup[kv.Key] = kv.Value;
+            Console.WriteLine($"  Loaded {_md5Lookup.Count} md5translate entries");
+        }
+    }
+
     static byte[,,]? TryLoadMinimapFromMpq(NativeMpqService catalog, string mapName, int tileX, int tileY)
     {
+        string mapLower = mapName.ToLowerInvariant();
         string x2 = tileX.ToString("00");
         string y2 = tileY.ToString("00");
-        string mapLower = mapName.ToLowerInvariant();
+        string canonicalPath = $"textures/minimap/{mapLower}/map{x2}_{y2}.blp";
 
+        // MD5 translate lookup
+        if (_md5Lookup is not null && _md5Lookup.TryGetValue(canonicalPath, out string? md5Name))
+        {
+            byte[]? blpBytes = catalog.ReadFile(md5Name);
+            if (blpBytes is not null && blpBytes.Length >= 8)
+            {
+                try
+                {
+                    byte[,,]? rgb = DecodeBlpToRgb(blpBytes);
+                    if (rgb is not null) return rgb;
+                }
+                catch { }
+            }
+        }
+
+        // Fallback candidates matching MdxViewer EnumerateTileCandidates
         string[] candidates =
         [
-            $"World\\Minimaps\\{mapName}\\map{tileX}_{tileY}.blp",
-            $"textures\\Minimap\\{mapLower}\\map{tileX}_{tileY}.blp",
-            $"textures\\minimap\\{mapLower}\\map{tileX}_{tileY}.blp",
-            $"{mapName}_{tileX}_{tileY}.blp",
-            $"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}.blp",
-            $"World\\Minimaps\\{mapName}\\{mapName}_{x2}_{y2}.blp",
+            canonicalPath.Replace('/', '\\'),                                        // textures\minimap\azeroth\map32_32.blp
+            $"textures\\minimap\\{mapLower}\\map{x2}_{y2}.blp",                    // textures\minimap\azeroth\map32_32.blp
+            $"textures\\Minimap\\{mapLower}\\map{x2}_{y2}.blp",                    // textures\Minimap\azeroth\map32_32.blp
+            $"world\\minimaps\\{mapLower}\\map{x2}_{y2}.blp",                      // world\minimaps\azeroth\map32_32.blp
+            $"world\\Minimaps\\{mapName}\\map{x2}_{y2}.blp",                       // world\Minimaps\Azeroth\map32_32.blp
+            $"{mapLower}\\map{x2}_{y2}.blp",                                        // azeroth\map32_32.blp
         ];
 
         foreach (string candidate in candidates)
@@ -500,6 +664,15 @@ static class Program
         }
 
         return null;
+    }
+
+    static byte[,,]? LoadTextureFromMpq(NativeMpqService catalog, string virtualPath)
+    {
+        byte[]? blpBytes = catalog.ReadFile(virtualPath);
+        if (blpBytes is null || blpBytes.Length < 8)
+            return null;
+        try { return DecodeBlpToRgb(blpBytes); }
+        catch { return null; }
     }
 
     static byte[,,]? DecodeBlpToRgb(byte[] blpBytes)

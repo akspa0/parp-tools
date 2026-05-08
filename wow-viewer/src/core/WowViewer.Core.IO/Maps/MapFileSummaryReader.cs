@@ -81,7 +81,7 @@ public static class MapFileSummaryReader
                     break;
 
                 long dataOffset = stream.Position;
-                long payloadEndOffset = checked(dataOffset + header.Size);
+                long payloadEndOffset = unchecked(dataOffset + (long)header.Size);
                 if (payloadEndOffset > stream.Length)
                     break;
 
@@ -192,7 +192,7 @@ public static class MapFileSummaryReader
                 return false;
 
             long dataOffset = stream.Position;
-            long payloadEndOffset = checked(dataOffset + header.Size);
+            long payloadEndOffset = unchecked(dataOffset + (long)header.Size);
             if (payloadEndOffset > stream.Length)
                 return false;
 

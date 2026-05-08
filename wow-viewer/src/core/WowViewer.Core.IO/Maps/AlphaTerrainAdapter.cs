@@ -204,8 +204,8 @@ public sealed class AlphaTerrainAdapter : ITerrainAdapter
     private static float[] ExtractChunkHeights(float[,] heightmap, int cx, int cy)
     {
         var heights = new float[145];
-        int baseX = cy * 16;
-        int baseY = cx * 16;
+        int baseX = cx * 16;
+        int baseY = cy * 16;
         int idx = 0;
 
         for (int row = 0; row < 17; row++)
@@ -238,8 +238,8 @@ public sealed class AlphaTerrainAdapter : ITerrainAdapter
         {
             for (int x = 0; x < size; x++)
             {
-                int srcY = cx * size + y;
-                int srcX = cy * size + x;
+                int srcY = cy * size + y;
+                int srcX = cx * size + x;
                 if (srcY < alphaPack.GetLength(0) && srcX < alphaPack.GetLength(1))
                 {
                     float f = alphaPack[srcY, srcX, layer];
@@ -331,8 +331,8 @@ public sealed class AlphaTerrainAdapter : ITerrainAdapter
     {
         const int tileSize = 257;
         var normals = new Vector3[145];
-        int baseX = cy * 16;
-        int baseY = cx * 16;
+        int baseX = cx * 16;
+        int baseY = cy * 16;
         int idx = 0;
 
         for (int row = 0; row < 17; row++)
@@ -360,8 +360,8 @@ public sealed class AlphaTerrainAdapter : ITerrainAdapter
         const int srcSize = 1024;
         const int chunkSize = 64;
         var shadow = new byte[chunkSize * chunkSize];
-        int baseX = cy * chunkSize;
-        int baseY = cx * chunkSize;
+        int baseX = cx * chunkSize;
+        int baseY = cy * chunkSize;
 
         for (int y = 0; y < chunkSize; y++)
         {

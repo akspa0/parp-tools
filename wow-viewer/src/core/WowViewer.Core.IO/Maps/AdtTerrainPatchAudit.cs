@@ -255,7 +255,7 @@ public static class AdtTerrainPatchAudit
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int consumedSize = checked((int)header.Size);
+            int consumedSize = unchecked((int)header.Size);
             if (header.Id == AdtChunkIds.Mcnr)
                 consumedSize = Math.Max(consumedSize, McnrConsumedSize);
 
@@ -285,7 +285,7 @@ public static class AdtTerrainPatchAudit
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int consumedSize = checked((int)header.Size);
+            int consumedSize = unchecked((int)header.Size);
             if (header.Id == AdtChunkIds.Mcnr)
                 consumedSize = Math.Max(consumedSize, McnrConsumedSize);
 

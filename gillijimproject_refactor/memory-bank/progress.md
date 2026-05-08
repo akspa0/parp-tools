@@ -23,9 +23,14 @@
 | wow-viewer: Harvest tool extract-unified | DONE — WDT from MemoryStream, ADT via NativeMpqService |
 | wow-viewer: MDDF/MODF model name resolution fixed | DONE — uses MDNM/MONM instead of MTEX |
 | wow-viewer: Harvest --export-placements | DONE — placement catalog JSON export |
+| **AlphaWdtReader MCLY chunk header fix** | **DONE** — 8-byte header skip added, matching reference McnkAlpha.cs |
+| **AlphaTensorPackBuilder metadata signals fix** | **DONE** — mcly/mcal signals now reported in AvailableSignals |
+| **Alpha 0.5.3 extract-unified validation** | **DONE** — Azeroth (32,32) NPZ verified with all 8 signals, real blend weights confirmed |
 
 ## NOT YET
 - Phase B: Alpha 0.6.0 split ADT through AdtTensorPackBuilder test
+- Phase B: AlphaTileData.ToPlacementCatalog wiring in extract-unified
+- Alpha 0.5.5 prototype ADT (8-byte padding after MCNK header)
 - Full extraction run on 6 game clients (800-1500 shards)
 - Production training run (300 epochs)
 - Model evaluation on held-out tiles
@@ -34,7 +39,7 @@
 ## KNOWN BOUNDARIES
 - v9 `dataset-scan` expects `Data/World/Maps/<map>` directory structure for filesystem mode
 - Alpha clients (0.5.3) need monolithic WDT handling in scan
-- No MCAL/MCLY on alpha-era ADTs (pre-3.x format lacks split texture files)
+- No MCAL/MCLY on alpha-era ADTs (pre-3.x format lacks split texture files) — **retracted: 0.5.3 monolithic WDT HAS MCAL/MCLY, confirmed working**
 - AdtTensorPackBuilder.Build only accepts file paths, not streams (needs refactor for full in-memory pipeline)
 - NativeMpqService only supports zlib compression (type 0x02) — bzip2, PKWARE, LZMA, Huffman not supported
 - AlphaTensorPackBuilder uses TileLiquidSize=272 instead of 257 (pre-existing)

@@ -225,8 +225,8 @@ var heights = SliceChunkHeights(Heightmap, cx, cy, tileSize);
     private static float[] SliceChunkHeights(float[,] heightmap, int cx, int cy, int tileSize)
     {
         var heights = new float[145];
-        int baseX = cy * 16;
-        int baseY = cx * 16;
+        int baseX = cx * 16;
+        int baseY = cy * 16;
         int idx = 0;
 
         for (int row = 0; row < 17; row++)
@@ -258,8 +258,8 @@ var heights = SliceChunkHeights(Heightmap, cx, cy, tileSize);
         {
             for (int x = 0; x < alphaSize; x++)
             {
-                int srcY = cx * alphaSize + y;
-                int srcX = cy * alphaSize + x;
+                int srcY = cy * alphaSize + y;
+                int srcX = cx * alphaSize + x;
                 if (srcY < alphaPack.GetLength(0) && srcX < alphaPack.GetLength(1))
                 {
                     float f = alphaPack[srcY, srcX, layer];
@@ -274,8 +274,8 @@ var heights = SliceChunkHeights(Heightmap, cx, cy, tileSize);
     private static Vector3[] SliceChunkNormals(float[,,] normalXyz, int cx, int cy)
     {
         var normals = new Vector3[145];
-        int baseX = cy * 16;
-        int baseY = cx * 16;
+        int baseX = cx * 16;
+        int baseY = cy * 16;
         const int tileSize = 257;
         int idx = 0;
 
@@ -309,8 +309,8 @@ var heights = SliceChunkHeights(Heightmap, cx, cy, tileSize);
         const int srcSize = 1024;
         const int chunkSize = 64;
         var shadow = new byte[chunkSize * chunkSize];
-        int baseX = cy * chunkSize;
-        int baseY = cx * chunkSize;
+        int baseX = cx * chunkSize;
+        int baseY = cy * chunkSize;
 
         for (int y = 0; y < chunkSize; y++)
         {
