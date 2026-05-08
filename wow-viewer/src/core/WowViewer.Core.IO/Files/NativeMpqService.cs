@@ -474,7 +474,9 @@ public sealed class NativeMpqService : IArchiveCatalog
             if ((block.Flags & FlagFixKey) != 0) key = (key + block.BlockOffset) ^ block.FileSize;
         }
 
-        if ((block.Flags & FlagSingleUnit) != 0 || block.FileSize <= sectorSize)
+        // Small files can still use the normal sector-offset table layout.
+        // Only bypass the sector table when the archive marks the block as single-unit.
+        if ((block.Flags & FlagSingleUnit) != 0)
         {
             var data = reader.ReadBytes((int)block.BlockSize);
             if ((block.Flags & FlagEncrypted) != 0) DecryptData(data, key);

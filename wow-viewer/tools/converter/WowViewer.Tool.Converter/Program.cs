@@ -12,6 +12,7 @@ using WowViewer.App;
 using WowViewer.Core.Datasets;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
@@ -45,6 +46,9 @@ string[] tail = args.Skip(1).ToArray();
 
 	switch (command)
 	{
+		case "dataset-list-maps":
+			RunDatasetListMaps(tail);
+			break;
 		case "dataset-scan":
 			RunDatasetScan(tail);
 			break;
@@ -769,11 +773,7 @@ static void RunDatasetScan(string[] args)
 
 	string mapPath = Path.Combine(clientRoot, "Data", "World", "Maps", normalizedMapName);
 	List<TerrainTrainingSampleDescriptor> entries = [];
-	bool hasLooseFilesystemMap = Directory.Exists(mapPath)
-		&& Directory.EnumerateFiles(mapPath, $"{normalizedMapName}_*.adt", SearchOption.TopDirectoryOnly)
-			.Any(static path => !path.EndsWith("_tex0.adt", StringComparison.OrdinalIgnoreCase)
-				&& !path.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase)
-				&& !path.EndsWith("_lod.adt", StringComparison.OrdinalIgnoreCase));
+	bool hasLooseFilesystemMap = FilesystemMapExists(mapPath, normalizedMapName);
 	if (hasLooseFilesystemMap)
 	{
 		entries = BuildDatasetScanEntriesFromDirectory(clientRoot, normalizedBuildLabel, normalizedMapName, mapPath, limit);
@@ -817,6 +817,42 @@ static void RunDatasetScan(string[] args)
 	}
 
 	Console.WriteLine(json);
+}
+
+static void RunDatasetListMaps(string[] args)
+{
+	string? clientRootOption = GetOption(args, "--client-root", "-c");
+	string? outputOption = GetOption(args, "--output", "-o");
+
+	if (string.IsNullOrWhiteSpace(clientRootOption))
+	{
+		Console.Error.WriteLine("Error: dataset-list-maps requires --client-root <path>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string clientRoot = Path.GetFullPath(clientRootOption);
+	List<MapDirectoryEntry> maps = DiscoverDatasetMaps(clientRoot);
+
+	Console.WriteLine("WowViewer.Tool.Converter dataset-list-maps report");
+	Console.WriteLine($"ClientRoot: {clientRoot}");
+	Console.WriteLine($"Maps: {maps.Count}");
+
+	string json = JsonSerializer.Serialize(maps, CreateJsonOptions());
+	if (!string.IsNullOrWhiteSpace(outputOption))
+	{
+		string outputPath = Path.GetFullPath(outputOption);
+		string? outputDirectory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(outputDirectory))
+			Directory.CreateDirectory(outputDirectory);
+
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	foreach (MapDirectoryEntry map in maps)
+		Console.WriteLine(map.Directory);
 }
 
 static void RunDatasetMerge(string[] args)
@@ -3332,6 +3368,32 @@ static MlCorpusMapReport BuildMapReportFromArchive(string clientId, string mapNa
 	return report;
 }
 
+static bool FilesystemMapExists(string mapPath, string mapName)
+{
+	return Directory.Exists(mapPath)
+		&& Directory.EnumerateFiles(mapPath, $"{mapName}_*.adt", SearchOption.TopDirectoryOnly)
+			.Any(static path => !path.EndsWith("_tex0.adt", StringComparison.OrdinalIgnoreCase)
+				&& !path.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase)
+				&& !path.EndsWith("_lod.adt", StringComparison.OrdinalIgnoreCase));
+}
+
+static List<MapDirectoryEntry> DiscoverDatasetMaps(string clientRoot)
+{
+	using IArchiveCatalog archiveCatalog = CreateArchiveCatalog(clientRoot);
+	MapDirectoryLookup lookup = new();
+	lookup.Load(BuildLegacySearchRoots(clientRoot), archiveCatalog);
+
+	List<MapDirectoryEntry> discovered = [];
+	foreach (MapDirectoryEntry entry in lookup.Entries.OrderBy(static entry => entry.Directory, StringComparer.OrdinalIgnoreCase))
+	{
+		string mapPath = Path.Combine(clientRoot, "Data", "World", "Maps", entry.Directory);
+		if (FilesystemMapExists(mapPath, entry.Directory) || ArchiveMapExists(archiveCatalog, clientRoot, entry.Directory, mapPath))
+			discovered.Add(entry);
+	}
+
+	return discovered;
+}
+
 static MlCorpusTileReport CreateTileReport(string tileStem, string adtPath, bool hasObj0, AdtSummary summary, AdtTextureFile textureFile, AdtPlacementCatalog? placements)
 {
 	HashSet<string> textures = new(StringComparer.OrdinalIgnoreCase);
@@ -3358,13 +3420,11 @@ static MlCorpusTileReport CreateTileReport(string tileStem, string adtPath, bool
 
 static IArchiveCatalog CreateArchiveCatalog(string clientRoot)
 {
-	IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+	IArchiveCatalog archiveCatalog = new NativeMpqServiceFactory().Create();
 	ArchiveCatalogBootstrapper.Bootstrap(
 		archiveCatalog,
 		BuildLegacySearchRoots(clientRoot),
 		new ArchiveCatalogBootstrapOptions(ExternalListfilePath: ResolveLegacyListfilePath()));
-	if (archiveCatalog is MpqArchiveCatalog mpqArchiveCatalog)
-		mpqArchiveCatalog.ScanMapMpqArchives(clientRoot);
 
 	return archiveCatalog;
 }
@@ -4463,6 +4523,7 @@ static void ShowUsage()
 {
 	Console.WriteLine("WowViewer.Tool.Converter");
 	Console.WriteLine("Usage:");
+	Console.WriteLine("  wowviewer-converter dataset-list-maps --client-root <path> [--output <maps.json>]");
 	Console.WriteLine("  wowviewer-converter dataset-scan --client-root <path> --map <name> [--build <label>] [--output <manifest.json>] [--limit <count>]");
 	Console.WriteLine("  wowviewer-converter dataset-merge --input <manifest.json> [--input <manifest.json> ...] [--output <merged.json>] [manifest.json ...]");
 	Console.WriteLine("  wowviewer-converter dataset-split-pm4 --direct-manifest <cache.json> --development-manifest <cache.json> --output-dir <dir> [--pm4-flag <field>]");
