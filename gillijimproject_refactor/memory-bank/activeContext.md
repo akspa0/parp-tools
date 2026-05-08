@@ -50,6 +50,12 @@ Phase A is complete. The current truth at HEAD is no longer just "Alpha WDT vali
 - Format spec: `gillijimproject_refactor/docs/ADT_WDT_Format_Specification.md`
 
 ## NEXT
-1. Explicitly validate `0.6.0` split ADT through `AdtProfile060070Baseline`.
-2. Decide whether the next slice is deeper format ownership (`WDT`/`WDL`/converters) or broader training-corpus extraction on the now-working harvest path.
-3. Keep the library completeness plan and README aligned with the current harvest/tensor-pack truth so future chats do not route back to stale "Phase B pending" assumptions.
+1. Phase C: Port bidirectional converters (LkToAlpha, AlphaToLk, MdxToM2, M2ToMdx, Wmo v14↔v17)
+2. Phase D: Deep format readers (WDT retail flags, WDL, WMO full version range, MDX, BLP pixel decode)
+3. Phase E: DBC/DB2 metadata enrichment (AreaTable, WorldSafeLocs, LiquidType, GroundEffects)
+4. Phase F: Placement provenance (MCRF per-chunk arrays, PM4 SQLite, prefab detection)
+5. Batch harvest full 6-client corpus to `wow-viewer/output/datasets/<version>/`
+6. Shard validation at every stage (data sanity, decode verification, round-trip testing)
+
+**Full roadmap**: `wow-viewer/docs/architecture/wow-viewer-full-porting-roadmap.md`
+**Current architecture**: library → dataset → trainer → CLI → viewer (bottom-up)
