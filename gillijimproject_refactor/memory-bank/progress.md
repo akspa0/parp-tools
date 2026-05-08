@@ -44,6 +44,7 @@
 ## IN PROGRESS
 | What | Status |
 |------|--------|
+| Multi-client full shard dataset prep | SWITCHED TO HARVEST PATH — use `WowViewer.Tool.Harvest harvest-map-mpq` on staged clients, not converter `dataset-scan` manifests |
 | Phase C: AlphaToLk AreaID crosswalk | NOT YET — `AreaIdMapper` exists in `WowViewer.Core.IO/Dbc/`, not yet wired to converter |
 | Phase C: LkToAlpha converter | NOT PORTED |
 | Phase C: Mdx↔M2 converters | NOT PORTED |
@@ -51,7 +52,7 @@
 
 ## NOT YET
 - Explicit Alpha 0.6.0 split ADT validation via `AdtProfile060070Baseline`
-- Full extraction run on 6 game clients (800-1500 shards)
+- Full extraction run on 6 staged game clients (800-1500+ shards) via `harvest-map-mpq` into `wow-viewer/output/datasets/`
 - Production training run (300 epochs)
 - Model evaluation on held-out tiles
 - DBC/DB2 metadata enrichment (WorldSafeLocs, AreaTable, GroundEffects, LiquidType)
@@ -65,3 +66,9 @@
 2. **MHDR/MCIN empty payload** — wrote declared-size chunk headers with 0 data bytes; fixed by writing pre-allocated zero arrays
 3. **MPHD size mismatch** — wrote 9 uint32s (36 bytes) but declared 32 bytes; fixed by removing extra `Write(0u)`
 4. **MAIN index formula** — `tileX * 64 + tileY` was wrong; fixed to `tileY * 64 + tileX` (row-major with y as row). This caused 420/755 Azeroth tiles to fail before the fix.
+
+## WORKFLOW CORRECTION (2026-05-08)
+- Do not route full multi-client dataset generation through `WowViewer.Tool.Converter dataset-scan` / `dataset-audit` / `dataset-curate` / `dataset-build-cache`.
+- Those commands remain useful as legacy manifest/audit helpers, but they are not the canonical full-signal shard builder and can miss newer harvest/tensor-pack coverage and metrics.
+- Use `WowViewer.Tool.Harvest harvest-map-mpq` for staged archive-backed clients and `harvest-map` for loose on-disk maps.
+- Default real dataset outputs belong under `wow-viewer/output/datasets/`, not repo-root `output/tmp/`.

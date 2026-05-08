@@ -219,6 +219,9 @@ This rule exists because the pattern has been: see the whole mountain → try to
 
 - All Python code for dataset processing, training, inference, and validation lives under `wow-viewer/data-harvester/`.
 - The C# harvester tool (`WowViewer.Tool.Harvest`) reads game files and writes NPZ shards. It does NOT train models.
+- The canonical full-shard dataset generation path is `WowViewer.Tool.Harvest`, especially `harvest-map-mpq` for staged archive-backed clients and `harvest-map` for loose on-disk maps.
+- Do NOT use `WowViewer.Tool.Converter dataset-scan`, `dataset-audit`, `dataset-curate`, or `dataset-build-cache` as the primary full dataset builder for V14 work. Those commands are legacy manifest/audit helpers and do not represent the full modern tensor-pack extraction path we validated in recent sessions.
+- When preparing multi-client training corpora, build shards from the harvest/tensor-pack path first, then run validation or visualization against the harvested NPZ outputs.
 - The Python training scripts read NPZ shards and train models. They do NOT read game files directly.
 - NPZ shard format is the contract between C# and Python. Both sides must agree on array names, shapes, and dtypes.
 - Compositing logic (tileset textures + MCAL alpha → synthetic minimap) must produce identical output in both C# and Python implementations.
@@ -229,6 +232,7 @@ This rule exists because the pattern has been: see the whole mountain → try to
 
 - Treat dataset corpus export, terrain-supervision artifact generation, manifest or harvest ownership, minimap cleanup, and shared mask or stitch or atlas semantics as canonical `wow-viewer` work when the user is asking for new behavior, refactor, or long-range cleanup.
 - Put shared dataset contracts and artifact builders in `wow-viewer/src/core/WowViewer.Core` and `wow-viewer/src/core/WowViewer.Core.IO`, then expose them through the harvester tool instead of deepening `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM` as the design owner.
+- Default output roots for new dataset prep runs should live under `wow-viewer/output/datasets/`, not the repo-root `output/` temp area, unless the user explicitly asks for a throwaway temp run.
 - Use `WoWMapConverter` and `MdxViewer` dataset or export code as extraction or compatibility references only unless the user explicitly asks for a bounded legacy hotfix.
 - Do not create or preserve a second permanent dataset-builder pipeline in the legacy repo when the task is really about convergence.
 - Keep ML training and inference scripts as downstream consumers; they should not become the canonical owners of format decode, artifact packing, or dataset-manifest semantics.

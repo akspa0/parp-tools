@@ -52,6 +52,7 @@ Note: The 0.5.5.3494 Azeroth has 755 tiles (vs 685 in 0.5.3.3368) because 0.5.5 
 - Alpha placement export through `--export-placements`
 - Alpha and retail object footprint mask generation in the current tensor-pack contract
 - Metadata JSON with current `AvailableSignals` coverage for the active harvest path
+- `WowViewer.Tool.Harvest harvest-map-mpq` is the canonical multi-client shard builder for staged archive-backed clients
 - **AlphaToLk full conversion pipeline: 100% tile conversion across 4 maps, 5 terrain types**
 - WDT/WDL/ADT output validates via `map inspect` (correct chunk structure, MCAL big-alpha decoding)
 - `convert-alpha-to-lk` CLI command in `WowViewer.Tool.Converter`
@@ -68,6 +69,8 @@ Note: The 0.5.5.3494 Azeroth has 755 tiles (vs 685 in 0.5.3.3368) because 0.5.5 
 ## WHAT BROKE / DO NOT ROUTE BACK TO
 - `--client-root` mode for the older pre-harvest dataset-build path
 - `build_v10_2_dataset.py` and `train_v10_2_terrain_synth.py` as active architecture owners
+- `WowViewer.Tool.Converter dataset-scan` → `dataset-audit` → `dataset-curate` → `dataset-build-cache` as the primary shard-generation path. That is legacy manifest/audit tooling and does not surface the full modern harvest/tensor-pack signals/metrics.
+- Repo-root `output\tmp\...` as the default home for real dataset prep runs. Canonical outputs should land under `wow-viewer\output\datasets\`.
 
 ## KEY FILES — wow-viewer Library
 - Domain types: `wow-viewer/src/core/WowViewer.Core/Maps/`
@@ -84,10 +87,11 @@ Note: The 0.5.5.3494 Azeroth has 755 tiles (vs 685 in 0.5.3.3368) because 0.5.5 
 - CLI: `wow-viewer/tools/converter/WowViewer.Tool.Converter/AlphaToLkCommand.cs`
 
 ## NEXT
-1. Phase C (continued): AreaID crosswalk, LkToAlpha, Mdx↔M2, Wmo v14↔v17
-2. Phase D: Deep format readers (WDT retail flags, WDL, WMO full version range, MDX, BLP pixel decode)
-3. Phase E: DBC/DB2 metadata enrichment (AreaTable, WorldSafeLocs, LiquidType, GroundEffects)
-4. Phase F: Placement provenance (MCRF per-chunk arrays, PM4 SQLite, prefab detection)
+1. Dataset prep lane: use staged clients + `dataset-list-maps` for discovery + `WowViewer.Tool.Harvest harvest-map-mpq` for shard generation into `wow-viewer\output\datasets\`, then NPZ-based validation/visualization from the harvested shards
+2. Phase C (continued): AreaID crosswalk, LkToAlpha, Mdx↔M2, Wmo v14↔v17
+3. Phase D: Deep format readers (WDT retail flags, WDL, WMO full version range, MDX, BLP pixel decode)
+4. Phase E: DBC/DB2 metadata enrichment (AreaTable, WorldSafeLocs, LiquidType, GroundEffects)
+5. Phase F: Placement provenance (MCRF per-chunk arrays, PM4 SQLite, prefab detection)
 
 **Full roadmap**: `wow-viewer/docs/architecture/wow-viewer-full-porting-roadmap.md`
 **Current architecture**: library → dataset → trainer → CLI → viewer (bottom-up)
