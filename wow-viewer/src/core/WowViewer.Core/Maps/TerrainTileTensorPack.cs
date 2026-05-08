@@ -79,10 +79,10 @@ public sealed class TerrainTileTensorPack
     public int[,]? MclqTypeMask { get; init; }
 
     /// <summary>257×257 liquid mask from WLW/WLM/WLQ/WLL loose files.</summary>
-    public float[,]? WlLiquidMask { get; init; }
+    public float[,]? WlLiquidMask { get; set; }
 
     /// <summary>257×257 liquid height from WLW/WLM/WLQ/WLL loose files.</summary>
-    public float[,]? WlLiquidHeight { get; init; }
+    public float[,]? WlLiquidHeight { get; set; }
 
     /// <summary>
     /// 257×257 unified liquid mask combining MH2O, MCLQ, and WL* sources.

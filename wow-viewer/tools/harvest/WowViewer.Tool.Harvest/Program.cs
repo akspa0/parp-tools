@@ -1,3 +1,4 @@
+using System.Numerics;
 using SixLabors.ImageSharp.PixelFormats;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
@@ -139,7 +140,7 @@ static class Program
                     return;
                 }
 
-                pack = AlphaTensorPackBuilder.Build(tileData);
+                pack = AlphaTensorPackBuilder.Build(tileData, tileX, tileY);
             }
             else
             {
@@ -365,7 +366,9 @@ static class Program
                 Console.Error.WriteLine($"Error: Alpha tile ({tileX},{tileY}) not present in WDT.");
                 return false;
             }
-            pack = AlphaTensorPackBuilder.Build(tileData);
+            pack = AlphaTensorPackBuilder.Build(tileData, tileX, tileY);
+            if (pack.MclqSurfaceHeight is null)
+                TryAddWlLiquidFromMpq(catalog, mapName, tileX, tileY, pack);
             if (exportPlacements)
                 placementCatalog = tileData.ToPlacementCatalog();
         }
@@ -558,6 +561,69 @@ static class Program
         using var fs = File.Create(outputPath);
         image.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
         Console.WriteLine($"Synthetic minimap: {outputPath}");
+    }
+
+    static void TryAddWlLiquidFromMpq(NativeMpqService catalog, string mapName, int tileX, int tileY, TerrainTileTensorPack pack)
+    {
+        string[] wlExtensions = [".wlw", ".wlm", ".wlq", ".wll"];
+        string basePath = $"World\\Maps\\{mapName}\\{mapName}";
+
+        bool any = false;
+        float[,]? mask = null;
+        float[,]? heights = null;
+
+        const int size = 257;
+        const float tileWorldSize = 533.33333f;
+        const float mapOrigin = 17066.666f;
+
+        foreach (string ext in wlExtensions)
+        {
+            byte[]? data = catalog.ReadFile(basePath + ext);
+            if (data is null || data.Length == 0) continue;
+
+            try
+            {
+                using var ms = new MemoryStream(data);
+                var wl = WlFileReader.Read(ms);
+                foreach (var block in wl.Blocks)
+                {
+                    Vector3 pos = block.WorldPosition;
+                    // Project block world position to tile-local coordinates
+                    int blockTileX = Math.Clamp((int)Math.Floor((mapOrigin - pos.Y) / tileWorldSize), 0, 63);
+                    int blockTileY = Math.Clamp((int)Math.Floor((mapOrigin - pos.X) / tileWorldSize), 0, 63);
+                    if (blockTileX != tileX || blockTileY != tileY) continue;
+
+                    float avgH = block.Vertices.Average(v => v.Z);
+                    float localX = (mapOrigin - pos.Y) - (tileX * tileWorldSize);
+                    float localY = (mapOrigin - pos.X) - (tileY * tileWorldSize);
+                    int cx = Math.Clamp((int)(localX / tileWorldSize * (size - 1)), 0, size - 1);
+                    int cy = Math.Clamp((int)(localY / tileWorldSize * (size - 1)), 0, size - 1);
+
+                    mask ??= new float[size, size];
+                    heights ??= new float[size, size];
+
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            int px = Math.Clamp(cx + dx, 0, size - 1);
+                            int py = Math.Clamp(cy + dy, 0, size - 1);
+                            mask[py, px] = 1.0f;
+                            heights[py, px] = avgH;
+                        }
+                    }
+                    any = true;
+                }
+            }
+            catch { }
+        }
+
+        if (any)
+        {
+            pack.WlLiquidMask = mask;
+            pack.WlLiquidHeight = heights;
+            pack.AvailableSignals = new HashSet<string>(pack.AvailableSignals) { "wl_liquid_mask", "wl_liquid_height" };
+        }
     }
 
     static bool TryLoadMinimap(string adtPath, string minimapRoot, out byte[,,]? minimap)

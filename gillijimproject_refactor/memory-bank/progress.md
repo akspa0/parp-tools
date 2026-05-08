@@ -16,30 +16,26 @@
 | Channel layout audit | DONE — 26ch, shadow removed, MCCV at 3x dropout |
 | Cache memory (LRU 2GB cap) | DONE |
 | Zero-samples / empty vocab guards | DONE |
-| wow-viewer Phase A: Terrain type system | DONE — ITerrainAdapter, TerrainChunkData, MddfPlacement, ModfPlacement, TileLoadResult, AlphaTerrainAdapter |
+| wow-viewer Phase A: Terrain type system | DONE |
 | wow-viewer: NativeMpqService port | DONE — pure C#, no StormLib |
 | wow-viewer: AlphaTileData.ToTileLoadResult | DONE |
 | wow-viewer: TerrainTileTensorPack.ToTileLoadResult | DONE |
-| wow-viewer: Harvest tool extract-unified | DONE — WDT from MemoryStream, ADT via NativeMpqService |
-| wow-viewer: MDDF/MODF model name resolution fixed | DONE — uses MDNM/MONM instead of MTEX |
-| wow-viewer: Harvest --export-placements | DONE — placement catalog JSON export |
-| **AlphaWdtReader MCLY chunk header fix** | **DONE** — 8-byte header skip added, matching reference McnkAlpha.cs |
-| **AlphaTensorPackBuilder metadata signals fix** | **DONE** — mcly/mcal signals now reported in AvailableSignals |
-| **Alpha 0.5.3 extract-unified validation** | **DONE** — Azeroth (32,32) NPZ verified with all 8 signals, real blend weights confirmed |
+| wow-viewer: Harvest tool extract-unified | DONE |
+| wow-viewer: MDDF/MODF model name resolution | DONE |
+| wow-viewer: Harvest --export-placements | DONE |
+| **Alpha 0.5.3/0.5.5: all 11 signals** | **DONE** — height, normals, MCAL/MCLY, MCSH, holes, objects, shadow_residual, minimap, WL liquid (when MCLQ missing) |
+| **Retail 3.x: all 11 signals** | **DONE** — + object/precise masks, texture_names, shadow_residual |
+| **Cata 4.0.0: 12 signals** | **DONE** — + MCCV vertex colors |
+| **0.7.0 extraction** | **DONE** — AdtProfile0703694 |
+| **Alpha object mask projection** | **DONE** — tile-relative, rendererX→col, rendererY→row |
+| **Minimap via Md5TranslateResolver** | **DONE** — .trs for retail, .txt for Alpha |
+| **All staged clients pass** | **DONE** — 0.5.3, 0.5.5, 0.7.0, 3.0.1, 3.3.5, 4.0.0 |
 
 ## NOT YET
-- Phase B: Alpha 0.6.0 split ADT through AdtTensorPackBuilder test
 - Phase B: AlphaTileData.ToPlacementCatalog wiring in extract-unified
-- Alpha 0.5.5 prototype ADT (8-byte padding after MCNK header)
 - Full extraction run on 6 game clients (800-1500 shards)
 - Production training run (300 epochs)
 - Model evaluation on held-out tiles
 - OBJ reconstruction quality check
-
-## KNOWN BOUNDARIES
-- v9 `dataset-scan` expects `Data/World/Maps/<map>` directory structure for filesystem mode
-- Alpha clients (0.5.3) need monolithic WDT handling in scan
-- No MCAL/MCLY on alpha-era ADTs (pre-3.x format lacks split texture files) — **retracted: 0.5.3 monolithic WDT HAS MCAL/MCLY, confirmed working**
-- AdtTensorPackBuilder.Build only accepts file paths, not streams (needs refactor for full in-memory pipeline)
-- NativeMpqService only supports zlib compression (type 0x02) — bzip2, PKWARE, LZMA, Huffman not supported
-- AlphaTensorPackBuilder uses TileLiquidSize=272 instead of 257 (pre-existing)
+- WL file support for retail path (already in Alpha, retail already has via disk)
+- PM4 masks for development map build (4.0.0.12304 loose files)
