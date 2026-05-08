@@ -37,6 +37,7 @@ public sealed class LkMcnkData
     public IReadOnlyList<LkMclyEntry> Layers { get; init; } = [];
     public IReadOnlyList<int> DoodadRefs { get; init; } = [];
     public IReadOnlyList<int> WorldModelRefs { get; init; } = [];
+    public AdtLiquidChunk? LiquidData { get; init; }
     public float PosX { get; init; }
     public float PosY { get; init; }
     public float PosZ { get; init; }

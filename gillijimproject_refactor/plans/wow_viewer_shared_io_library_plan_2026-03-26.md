@@ -2,6 +2,23 @@
 
 # wow-viewer Shared I/O Library Plan
 
+## May 8, 2026 - Shared terrain converter path now includes reverse LK→Alpha writer repair and `MH2O <-> MCLQ` parity
+
+- status: landed with focused regression proof
+- implementation surface:
+  - `WowViewer.Core/Maps/LkAdtData.cs` now carries structured chunk liquid through `LkMcnkData.LiquidData`
+  - `WowViewer.Core/Maps/AlphaTileData.cs` now carries per-chunk `MCLQ` 81-sample surface heights through `AlphaLiquidChunk.Heights`
+  - `WowViewer.Core.IO/Maps/LkToAlphaConverter.cs` now preserves structured liquid on the LK -> Alpha path instead of collapsing to flags
+  - `WowViewer.Core.IO/Maps/AlphaWdtWriter.cs` now writes structurally valid Alpha WDT output, including declared placeholder payloads, chunk-relative `MCVT`, resampled chunk-local `MCAL`, and `MCLQ` payloads with preserved surface heights
+  - `WowViewer.Core.IO/Maps/AlphaWdtReader.cs`, `AlphaToLkConverter.cs`, and `LkAdtWriter.cs` now preserve `MCLQ` surface data through the Alpha -> LK return path and emit `MH2O` again on the LK writer side
+  - `WowViewer.Tool.Converter/LkToAlphaCommand.cs` now parses input `MH2O` instead of dropping liquid before conversion
+  - `wow-viewer/tests/WowViewer.Core.Tests/LkToAlphaRoundTripTests.cs` now covers both Alpha writer structural validity and `MH2O <-> MCLQ -> MH2O` round-trip parity
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter LkToAlphaRoundTripTests`
+- notes:
+  - proof is focused shared-library regression only, not broad real-data LK corpus signoff yet
+  - the broader `WowViewer.Core.Tests` suite still has unrelated blocking noise from missing `wow-viewer/test_data/development` fixtures and one pre-existing invalid-data test, so keep proof claims scoped to the focused converter regressions
+
 ## Apr 23, 2026 - WMO render-document ownership now includes root portals and doodads, and WowViewer.App consumes it for a bounded standalone preview
 
 - status: landed

@@ -178,6 +178,8 @@ public static class AlphaToLkConverter
             ? SliceChunkShadow1024(tile.McshShadowMask1024, cx, cy)
             : null;
 
+        AdtLiquidChunk? liquidData = BuildLiquidData(tile, cx, cy);
+
         uint mcnkFlags = 0;
         int liquid = FindLiquidType(tile, cx, cy);
         if (liquid > 0)
@@ -252,6 +254,7 @@ public static class AlphaToLkConverter
             Layers = layers,
             DoodadRefs = doodadRefs,
             WorldModelRefs = worldModelRefs,
+            LiquidData = liquidData,
             PosX = posX,
             PosY = posY,
             PosZ = worldZ
@@ -404,12 +407,97 @@ public static class AlphaToLkConverter
         {
             if (lc.IndexX == cx && lc.IndexY == cy)
             {
+                if ((lc.McnkFlags & 0x04) != 0) return 1;
                 if ((lc.McnkFlags & 0x08) != 0) return 1;
                 int bits = (int)((lc.McnkFlags >> 4) & 3);
                 return bits switch { 1 => 1, 2 => 2, 3 => 3, _ => 0 };
             }
         }
         return 0;
+    }
+
+    private static AdtLiquidChunk? BuildLiquidData(AlphaTileData tile, int cx, int cy)
+    {
+        if (tile.LiquidChunks == null)
+            return null;
+
+        foreach (AlphaLiquidChunk liquidChunk in tile.LiquidChunks)
+        {
+            if (liquidChunk.IndexX != cx || liquidChunk.IndexY != cy)
+                continue;
+
+            AdtLiquidBasicType basicType = ResolveLiquidBasicType(liquidChunk.McnkFlags);
+            float[] heights = liquidChunk.Heights is { Length: >= 81 }
+                ? [.. liquidChunk.Heights]
+                : CreateFlatLiquidHeights((liquidChunk.MinHeight + liquidChunk.MaxHeight) * 0.5f);
+
+            byte[]? existsBitmap = BuildExistsBitmap(liquidChunk.TileFlags);
+            var layer = new AdtLiquidLayer(
+                MapLiquidTypeId(basicType),
+                basicType,
+                AdtLiquidVertexFormat.HeightDepth,
+                liquidChunk.MinHeight,
+                liquidChunk.MaxHeight,
+                0,
+                0,
+                8,
+                8,
+                existsBitmap,
+                heights,
+                new byte[81],
+                null);
+
+            return new AdtLiquidChunk(liquidChunk.ChunkIndex, null, null, [layer]);
+        }
+
+        return null;
+    }
+
+    private static AdtLiquidBasicType ResolveLiquidBasicType(uint mcnkFlags)
+    {
+        if ((mcnkFlags & 0x08) != 0)
+            return AdtLiquidBasicType.Ocean;
+
+        return ((mcnkFlags >> 4) & 0x3) switch
+        {
+            2 => AdtLiquidBasicType.Magma,
+            3 => AdtLiquidBasicType.Slime,
+            _ => AdtLiquidBasicType.Water,
+        };
+    }
+
+    private static ushort MapLiquidTypeId(AdtLiquidBasicType basicType)
+    {
+        return basicType switch
+        {
+            AdtLiquidBasicType.Ocean => 17,
+            AdtLiquidBasicType.Magma => 19,
+            AdtLiquidBasicType.Slime => 20,
+            _ => 0,
+        };
+    }
+
+    private static float[] CreateFlatLiquidHeights(float height)
+    {
+        float[] heights = new float[81];
+        Array.Fill(heights, height);
+        return heights;
+    }
+
+    private static byte[]? BuildExistsBitmap(byte[]? tileFlags)
+    {
+        if (tileFlags is not { Length: >= 64 })
+            return null;
+
+        byte[] exists = new byte[8];
+        for (int index = 0; index < 64; index++)
+        {
+            bool visible = (tileFlags[index] & 0x0F) != 0x0F;
+            if (visible)
+                exists[index / 8] |= (byte)(1 << (index % 8));
+        }
+
+        return exists;
     }
 
     private static List<int> FindDoodadRefs(List<LkMddfEntry> placements, int cx, int cy, int tileX, int tileY)

@@ -127,6 +127,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "convert-alpha-to-lk":
 		AlphaToLkCommand.Run(tail);
 		break;
+	case "convert-lk-to-alpha":
+		LkToAlphaCommand.Run(tail);
+		break;
 	default:
 		Console.Error.WriteLine($"Unknown converter command '{command}'.");
 		ShowUsage();

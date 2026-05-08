@@ -95,8 +95,8 @@ public static class LkAdtWriter
         long modfOffset = (int)(currentOffset - mhdrPosition - ChunkHeaderSize);
         currentOffset = ms.Position;
 
+        byte[] mh2oData = BuildMh2oPayload(adt.Chunks);
         int mh2oRelativeOffset = 0;
-        byte[]? mh2oData = null;
 
         int[] mcnkOffsets = new int[McinEntryCount];
         int[] mcnkSizes = new int[McinEntryCount];
@@ -109,6 +109,12 @@ public static class LkAdtWriter
                 bw.Write(mcnkChunks[i]);
             else
                 mcnkOffsets[i] = 0;
+        }
+
+        if (mh2oData.Length > 0)
+        {
+            mh2oRelativeOffset = (int)(ms.Position - mhdrPosition);
+            WriteDataChunk(bw, "MH2O", mh2oData);
         }
 
         byte[] result = ms.ToArray();
@@ -359,6 +365,162 @@ public static class LkAdtWriter
             BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(off + 12), layer.EffectId);
         }
         return data;
+    }
+
+    private static byte[] BuildMh2oPayload(IReadOnlyList<LkMcnkData> chunks)
+    {
+        const int HeaderCount = 256;
+        const int HeaderSize = 12;
+        const int LayerInfoSize = 24;
+        const int AttributeSize = 16;
+
+        using var ms = new MemoryStream();
+        ms.Write(new byte[HeaderCount * HeaderSize]);
+        bool hasAnyLayers = false;
+
+        for (int chunkIndex = 0; chunkIndex < HeaderCount; chunkIndex++)
+        {
+            AdtLiquidChunk? liquidChunk = chunkIndex < chunks.Count ? chunks[chunkIndex].LiquidData : null;
+            if (liquidChunk is null || liquidChunk.Layers.Count == 0)
+                continue;
+
+            hasAnyLayers = true;
+            int infoOffset = (int)ms.Position;
+            ms.Write(new byte[liquidChunk.Layers.Count * LayerInfoSize]);
+
+            int attributesOffset = 0;
+            if (liquidChunk.FishableMask.HasValue || liquidChunk.DeepMask.HasValue)
+            {
+                attributesOffset = (int)ms.Position;
+                byte[] attributes = new byte[AttributeSize];
+                BinaryPrimitives.WriteUInt64LittleEndian(attributes.AsSpan(0, 8), liquidChunk.FishableMask ?? 0);
+                BinaryPrimitives.WriteUInt64LittleEndian(attributes.AsSpan(8, 8), liquidChunk.DeepMask ?? 0);
+                ms.Write(attributes, 0, attributes.Length);
+            }
+
+            for (int layerIndex = 0; layerIndex < liquidChunk.Layers.Count; layerIndex++)
+            {
+                AdtLiquidLayer layer = liquidChunk.Layers[layerIndex];
+                int layerInfoOffset = infoOffset + (layerIndex * LayerInfoSize);
+
+                int existsBitmapOffset = 0;
+                if (layer.ExistsBitmap is { Length: > 0 })
+                {
+                    existsBitmapOffset = (int)ms.Position;
+                    ms.Write(layer.ExistsBitmap, 0, layer.ExistsBitmap.Length);
+                }
+
+                int vertexCount = Math.Max(0, (layer.Width + 1) * (layer.Height + 1));
+                int vertexDataOffset = 0;
+                if (vertexCount > 0)
+                {
+                    vertexDataOffset = (int)ms.Position;
+                    WriteLiquidVertexData(ms, layer, vertexCount);
+                }
+
+                long resume = ms.Position;
+                ms.Position = layerInfoOffset;
+
+                Span<byte> layerInfo = stackalloc byte[LayerInfoSize];
+                BinaryPrimitives.WriteUInt16LittleEndian(layerInfo.Slice(0, 2), layer.LiquidTypeId);
+                BinaryPrimitives.WriteUInt16LittleEndian(layerInfo.Slice(2, 2), (ushort)layer.VertexFormat);
+                BinaryPrimitives.WriteSingleLittleEndian(layerInfo.Slice(4, 4), layer.MinHeight);
+                BinaryPrimitives.WriteSingleLittleEndian(layerInfo.Slice(8, 4), layer.MaxHeight);
+                layerInfo[12] = (byte)layer.XOffset;
+                layerInfo[13] = (byte)layer.YOffset;
+                layerInfo[14] = (byte)layer.Width;
+                layerInfo[15] = (byte)layer.Height;
+                BinaryPrimitives.WriteUInt32LittleEndian(layerInfo.Slice(16, 4), (uint)existsBitmapOffset);
+                BinaryPrimitives.WriteUInt32LittleEndian(layerInfo.Slice(20, 4), (uint)vertexDataOffset);
+                ms.Write(layerInfo);
+
+                ms.Position = resume;
+            }
+
+            long resumeHeader = ms.Position;
+            ms.Position = chunkIndex * HeaderSize;
+
+            Span<byte> header = stackalloc byte[HeaderSize];
+            BinaryPrimitives.WriteUInt32LittleEndian(header.Slice(0, 4), (uint)infoOffset);
+            BinaryPrimitives.WriteUInt32LittleEndian(header.Slice(4, 4), (uint)liquidChunk.Layers.Count);
+            BinaryPrimitives.WriteUInt32LittleEndian(header.Slice(8, 4), (uint)attributesOffset);
+            ms.Write(header);
+
+            ms.Position = resumeHeader;
+        }
+
+        return hasAnyLayers ? ms.ToArray() : [];
+    }
+
+    private static void WriteLiquidVertexData(Stream stream, AdtLiquidLayer layer, int vertexCount)
+    {
+        float[] heights = layer.Heights is { Length: > 0 }
+            ? layer.Heights
+            : CreateDefaultLiquidHeights(vertexCount, (layer.MinHeight + layer.MaxHeight) * 0.5f);
+        byte[] depths = layer.Depths ?? new byte[vertexCount];
+        ushort[] uvs = layer.Uvs ?? new ushort[vertexCount * 2];
+
+        switch (layer.VertexFormat)
+        {
+            case AdtLiquidVertexFormat.HeightDepth:
+                WriteSingles(stream, heights, vertexCount);
+                stream.Write(depths, 0, Math.Min(depths.Length, vertexCount));
+                if (depths.Length < vertexCount)
+                    stream.Write(new byte[vertexCount - depths.Length], 0, vertexCount - depths.Length);
+                break;
+
+            case AdtLiquidVertexFormat.HeightUv:
+                WriteSingles(stream, heights, vertexCount);
+                WriteUInt16s(stream, uvs, vertexCount * 2);
+                break;
+
+            case AdtLiquidVertexFormat.DepthOnly:
+                stream.Write(depths, 0, Math.Min(depths.Length, vertexCount));
+                if (depths.Length < vertexCount)
+                    stream.Write(new byte[vertexCount - depths.Length], 0, vertexCount - depths.Length);
+                break;
+
+            case AdtLiquidVertexFormat.HeightUvDepth:
+                WriteSingles(stream, heights, vertexCount);
+                WriteUInt16s(stream, uvs, vertexCount * 2);
+                stream.Write(depths, 0, Math.Min(depths.Length, vertexCount));
+                if (depths.Length < vertexCount)
+                    stream.Write(new byte[vertexCount - depths.Length], 0, vertexCount - depths.Length);
+                break;
+        }
+    }
+
+    private static void WriteSingles(Stream stream, float[] values, int count)
+    {
+        for (int index = 0; index < count; index++)
+            WriteSingle(stream, values, index);
+    }
+
+    private static void WriteUInt16s(Stream stream, ushort[] values, int count)
+    {
+        for (int index = 0; index < count; index++)
+            WriteUInt16(stream, values, index);
+    }
+
+    private static void WriteSingle(Stream stream, float[] values, int index)
+    {
+        Span<byte> bytes = stackalloc byte[4];
+        BinaryPrimitives.WriteSingleLittleEndian(bytes, index < values.Length ? values[index] : 0f);
+        stream.Write(bytes);
+    }
+
+    private static void WriteUInt16(Stream stream, ushort[] values, int index)
+    {
+        Span<byte> bytes = stackalloc byte[2];
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes, index < values.Length ? values[index] : (ushort)0);
+        stream.Write(bytes);
+    }
+
+    private static float[] CreateDefaultLiquidHeights(int vertexCount, float height)
+    {
+        float[] values = new float[vertexCount];
+        Array.Fill(values, height);
+        return values;
     }
 
     private static void PatchMhdr(byte[] result, int mhdrStart, uint flags,

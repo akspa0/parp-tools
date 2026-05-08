@@ -21,7 +21,7 @@ The project currently has four practical jobs:
 3. **Inspection and validation**
    Probe client files and generated outputs without opening the old legacy tools.
 4. **Format conversion**
-   Convert Alpha monolithic WDT terrain to LK ADT/WDT/WDL output.
+  Convert Alpha monolithic WDT terrain to LK ADT/WDT/WDL output, and convert LK ADT terrain back into Alpha-compatible monolithic WDT output.
 
 ## Current Status
 
@@ -35,6 +35,7 @@ The project currently has four practical jobs:
 - WL liquid fallback
 - Minimap lookup via `md5translate`
 - AlphaToLk conversion pipeline
+- LkToAlpha conversion pipeline (focused round-trip proof)
 
 ### Validated
 
@@ -218,7 +219,7 @@ Depending on build and map contents, harvested shards can include:
 
 This is the real training contract. The point is to preserve decoded game signals, not render pretty screenshots and pretend they are ground truth.
 
-## AlphaToLk Conversion
+## Alpha/LK Conversion
 
 The Alpha-to-LK terrain converter is validated.
 
@@ -232,7 +233,9 @@ Still open:
 
 - AreaID crosswalk wiring
 - split ADT output for later clients
-- reverse `LkToAlpha` port
+- broad real-data LK→Alpha validation beyond the focused round-trip tests
+
+The reverse LK-to-Alpha converter now exists in `wow-viewer` and is covered by focused `LkToAlphaRoundTripTests`, including `MH2O <-> MCLQ` liquid preservation through the shared conversion path.
 
 ## Repository Layout
 

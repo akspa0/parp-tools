@@ -1,0 +1,517 @@
+using System.Numerics;
+using WowViewer.Core.Chunks;
+using WowViewer.Core.Maps;
+
+namespace WowViewer.Core.IO.Maps;
+
+public sealed class LkToAlphaConversionResult
+{
+    public bool Success { get; init; }
+    public string? Error { get; init; }
+    public string? MapName { get; init; }
+    public string? OutputPath { get; init; }
+    public int TilesConverted { get; init; }
+    public int TotalTiles { get; init; }
+    public long ElapsedMs { get; init; }
+    public List<string> Warnings { get; init; } = [];
+}
+
+public sealed class LkToAlphaOptions
+{
+    public bool Verbose { get; init; }
+}
+
+public static class LkToAlphaConverter
+{
+    private const float MapOrigin = 17066.666f;
+    private const float ChunkSize = 533.33333f;
+    private const float ChunkSubSize = ChunkSize / 16f;
+    private const int TileHeightmapSize = 257;
+    private const int ChunksPerTile = 16;
+
+    public static AlphaTileData ConvertTile(LkAdtData adt, int tileX, int tileY)
+    {
+        ArgumentNullException.ThrowIfNull(adt);
+
+        float[,] heightmap = new float[TileHeightmapSize, TileHeightmapSize];
+        float[,,] normalXyz = new float[TileHeightmapSize, TileHeightmapSize, 3];
+        float[,,] alphaPack = new float[1024, 1024, 4];
+        float[,] shadowMask1024 = new float[1024, 1024];
+        int[,,] texIds = new int[16, 16, 4];
+        bool[,,] layerMask = new bool[16, 16, 4];
+        bool[,] holes = new bool[16, 16];
+        List<AlphaLiquidChunk> liquidChunks = [];
+
+        float tileBaseHeight = ComputeTileBaseHeight(adt);
+
+        for (int cy = 0; cy < ChunksPerTile; cy++)
+        {
+            for (int cx = 0; cx < ChunksPerTile; cx++)
+            {
+                int chunkIdx = cy * ChunksPerTile + cx;
+                if (chunkIdx >= adt.Chunks.Count) continue;
+
+                LkMcnkData chunk = adt.Chunks[chunkIdx];
+                InjectChunkHeights(heightmap, chunk, tileBaseHeight, cx, cy);
+                InjectChunkNormals(normalXyz, chunk, cx, cy);
+                InjectChunkAlpha(alphaPack, chunk, adt.TextureNames, texIds, layerMask, cx, cy);
+                InjectChunkShadow(shadowMask1024, chunk, cx, cy);
+                holes[cx, cy] = chunk.HoleMask != 0;
+
+                if (chunk.LiquidData is { Layers.Count: > 0 })
+                {
+                    AlphaLiquidChunk? alphaLiquidChunk = BuildAlphaLiquidChunk(chunk, cx, cy);
+                    if (alphaLiquidChunk is not null)
+                        liquidChunks.Add(alphaLiquidChunk);
+                }
+                else if ((chunk.Flags & 0x3C) != 0)
+                {
+                    liquidChunks.Add(new AlphaLiquidChunk(
+                        cy * ChunksPerTile + cx, cx, cy,
+                        chunk.BaseHeight, chunk.BaseHeight,
+                        null, (uint)chunk.Flags, null));
+                }
+            }
+        }
+
+        var modelPlacements = adt.ModelPlacements.Select(p => new AlphaModelPlacement(
+            p.NameId,
+            adt.ModelNames.Count > p.NameId ? adt.ModelNames[p.NameId] : $"unknown_{p.NameId}",
+            p.UniqueId,
+            p.Position,
+            p.Rotation,
+            p.Scale)).ToList();
+
+        var worldModelPlacements = adt.WorldModelPlacements.Select(p => new AlphaWorldModelPlacement(
+            p.NameId,
+            adt.WorldModelNames.Count > p.NameId ? adt.WorldModelNames[p.NameId] : $"unknown_{p.NameId}",
+            p.UniqueId,
+            p.Position,
+            p.Rotation,
+            p.BoundsMin,
+            p.BoundsMax,
+            p.Flags)).ToList();
+
+        bool hasAlpha = false;
+        bool hasShadow = false;
+        for (int cy = 0; cy < ChunksPerTile; cy++)
+        {
+            for (int cx = 0; cx < ChunksPerTile; cx++)
+            {
+                for (int l = 1; l < 4; l++)
+                {
+                    if (layerMask[cx, cy, l]) hasAlpha = true;
+                }
+                for (int y = 0; y < 64; y++)
+                {
+                    for (int x = 0; x < 64; x++)
+                    {
+                        if (shadowMask1024[cy * 64 + y, cx * 64 + x] > 0.5f) hasShadow = true;
+                    }
+                }
+            }
+        }
+
+        float[,,]? alphaPack256 = hasAlpha ? DownsampleAlphaPack(alphaPack) : null;
+        float[,]? shadowMask256 = hasShadow ? DownsampleShadowMask(shadowMask1024) : null;
+
+        return new AlphaTileData(
+            $"lk-to-alpha({tileX},{tileY})",
+            heightmap,
+            alphaPack256,
+            texIds,
+            layerMask,
+            holes,
+            adt.TextureNames.ToList(),
+            modelPlacements,
+            worldModelPlacements,
+            liquidChunks,
+            mcnrNormalXyz: normalXyz,
+            mcshShadowMask256: shadowMask256,
+            mcshShadowMask1024: hasShadow ? shadowMask1024 : null);
+    }
+
+    private static float ComputeTileBaseHeight(LkAdtData adt)
+    {
+        float min = float.MaxValue;
+        foreach (var chunk in adt.Chunks)
+        {
+            if (chunk.Heights != null)
+            {
+                foreach (float h in chunk.Heights)
+                {
+                    float abs = h + chunk.BaseHeight;
+                    if (abs < min) min = abs;
+                }
+            }
+        }
+        return min == float.MaxValue ? 0f : min;
+    }
+
+    private static void InjectChunkHeights(float[,] heightmap, LkMcnkData chunk, float tileBaseHeight, int cx, int cy)
+    {
+        if (chunk.Heights == null || chunk.Heights.Length == 0) return;
+
+        int baseX = cx * 16;
+        int baseY = cy * 16;
+        int idx = 0;
+
+        for (int row = 0; row < 17; row++)
+        {
+            bool isInner = (row & 1) != 0;
+            int cols = isInner ? 8 : 9;
+            for (int col = 0; col < cols; col++)
+            {
+                int sampleX = isInner ? (col * 2) + 1 : col * 2;
+                int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+                int px = baseX + sampleX;
+                int py = baseY + sampleY;
+
+                if (px < TileHeightmapSize && py < TileHeightmapSize && idx < chunk.Heights.Length)
+                    heightmap[py, px] = chunk.Heights[idx] + chunk.BaseHeight;
+
+                idx++;
+            }
+        }
+    }
+
+    private static void InjectChunkNormals(float[,,] normalXyz, LkMcnkData chunk, int cx, int cy)
+    {
+        if (chunk.Normals == null || chunk.Normals.Length == 0) return;
+
+        int baseX = cx * 16;
+        int baseY = cy * 16;
+        int idx = 0;
+
+        for (int row = 0; row < 17; row++)
+        {
+            bool isInner = (row & 1) != 0;
+            int cols = isInner ? 8 : 9;
+            for (int col = 0; col < cols; col++)
+            {
+                int sampleX = isInner ? (col * 2) + 1 : col * 2;
+                int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+                int px = baseX + sampleX;
+                int py = baseY + sampleY;
+
+                if (px < TileHeightmapSize && py < TileHeightmapSize && idx + 2 < chunk.Normals.Length)
+                {
+                    float nx = DecodeNormal(chunk.Normals[idx]);
+                    float ny = DecodeNormal(chunk.Normals[idx + 2]);
+                    float nz = DecodeNormal(chunk.Normals[idx + 1]);
+                    float len = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
+                    if (len > 0.001f) { nx /= len; ny /= len; nz /= len; }
+                    else { nx = 0f; ny = 1f; nz = 0f; }
+
+                    normalXyz[py, px, 0] = nx;
+                    normalXyz[py, px, 1] = ny;
+                    normalXyz[py, px, 2] = nz;
+                }
+                idx += 3;
+            }
+        }
+    }
+
+    private static void InjectChunkAlpha(float[,,] alphaPack, LkMcnkData chunk,
+        IReadOnlyList<string> textureNames, int[,,] texIds, bool[,,] layerMask, int cx, int cy)
+    {
+        if (chunk.Layers == null || chunk.Layers.Count == 0) return;
+
+        for (int l = 0; l < chunk.Layers.Count && l < 4; l++)
+        {
+            var layer = chunk.Layers[l];
+            uint texId = layer.TextureId;
+            texIds[cx, cy, l] = (int)texId;
+            layerMask[cx, cy, l] = true;
+        }
+
+        if (chunk.AlphaMapData != null && chunk.AlphaMapData.Length > 0)
+        {
+            int alphaIdx = 0;
+            for (int l = 1; l < chunk.Layers.Count && l < 4; l++)
+            {
+                bool bigAlpha = (chunk.Layers[l].Flags & 0x200) != 0;
+                bool compressed = (chunk.Layers[l].Flags & 0x10000) != 0;
+                int expectedBytes = bigAlpha ? 4096 : 2048;
+
+                if (compressed)
+                {
+                    byte[]? decoded = DecodeCompressedAlpha(chunk.AlphaMapData, alphaIdx, chunk.AlphaMapData.Length - alphaIdx);
+                    if (decoded != null)
+                    {
+                        InjectAlphaLayer(alphaPack, decoded, cx, cy, l, 64);
+                        alphaIdx += chunk.AlphaMapData.Length - alphaIdx;
+                    }
+                    continue;
+                }
+
+                if (alphaIdx + expectedBytes > chunk.AlphaMapData.Length)
+                    break;
+
+                if (bigAlpha)
+                {
+                    for (int y = 0; y < 64; y++)
+                    {
+                        for (int x = 0; x < 64; x++)
+                        {
+                            int src = alphaIdx + y * 64 + x;
+                            alphaPack[cy * 64 + y, cx * 64 + x, l] = chunk.AlphaMapData[src] / 255f;
+                        }
+                    }
+                    alphaIdx += 4096;
+                }
+                else
+                {
+                    for (int i = 0; i < 2048; i++)
+                    {
+                        byte b = chunk.AlphaMapData[alphaIdx + i];
+                        int ax = (i * 2) % 64;
+                        int ay = (i * 2) / 64;
+                        float lo = ((b & 0x0F) * 17) / 255f;
+                        float hi = (((b >> 4) & 0x0F) * 17) / 255f;
+                        alphaPack[cy * 64 + ay, cx * 64 + ax, l] = lo;
+                        if (ax + 1 < 64)
+                            alphaPack[cy * 64 + ay, cx * 64 + ax + 1, l] = hi;
+                    }
+                    alphaIdx += 2048;
+                }
+            }
+        }
+    }
+
+    private static void InjectAlphaLayer(float[,,] alphaPack, byte[] decoded, int cx, int cy, int layer, int size)
+    {
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                int src = y * size + x;
+                int dstY = cy * 64 + y;
+                int dstX = cx * 64 + x;
+                if (dstY < 1024 && dstX < 1024 && src < decoded.Length)
+                    alphaPack[dstY, dstX, layer] = decoded[src] / 255f;
+            }
+        }
+    }
+
+    private static byte[]? DecodeCompressedAlpha(byte[] data, int offset, int available)
+    {
+        var result = new byte[4096];
+        int produced = 0;
+        int p = offset;
+        int limit = Math.Min(data.Length, offset + available);
+
+        for (int row = 0; row < 64 && produced < 4096; row++)
+        {
+            int rowPos = 0;
+            while (rowPos < 64 && produced < 4096)
+            {
+                if (p >= limit) return null;
+                byte control = data[p++];
+                bool fill = (control & 0x80) != 0;
+                int count = control & 0x7F;
+                if (count == 0) count = 64;
+                int room = 64 - rowPos;
+                int take = Math.Min(count, room);
+                if (fill)
+                {
+                    if (p >= limit) return null;
+                    byte v = data[p++];
+                    for (int i = 0; i < take; i++) result[produced + i] = v;
+                }
+                else
+                {
+                    if (p + take > limit) return null;
+                    Buffer.BlockCopy(data, p, result, produced, take);
+                    p += take;
+                }
+                produced += take;
+                rowPos += take;
+            }
+        }
+
+        return produced == 4096 ? result : null;
+    }
+
+    private static void InjectChunkShadow(float[,] shadowMask, LkMcnkData chunk, int cx, int cy)
+    {
+        if (chunk.ShadowMap == null || chunk.ShadowMap.Length == 0) return;
+
+        const int chunkSize = 64;
+        int shadowSize = (int)Math.Sqrt(chunk.ShadowMap.Length);
+        if (shadowSize != 64) return;
+
+        for (int y = 0; y < chunkSize; y++)
+        {
+            for (int x = 0; x < chunkSize; x++)
+            {
+                int src = y * chunkSize + x;
+                if (src < chunk.ShadowMap.Length)
+                {
+                    int dstY = cy * chunkSize + y;
+                    int dstX = cx * chunkSize + x;
+                    if (dstY < 1024 && dstX < 1024)
+                        shadowMask[dstY, dstX] = chunk.ShadowMap[src] > 0x7F ? 1.0f : 0.0f;
+                }
+            }
+        }
+    }
+
+    private static float DecodeNormal(byte b) => (sbyte)b / 127f;
+
+    private static byte ClassifyLkLiquid(int flags)
+    {
+        if ((flags & 0x04) != 0) return 1;
+        if ((flags & 0x08) != 0) return 1;
+        int bits = (flags >> 4) & 3;
+        return bits switch { 1 => 1, 2 => 2, 3 => 3, _ => 0 };
+    }
+
+    private static AlphaLiquidChunk? BuildAlphaLiquidChunk(LkMcnkData chunk, int cx, int cy)
+    {
+        AdtLiquidLayer? layer = chunk.LiquidData?.Layers.FirstOrDefault();
+        if (layer is null)
+            return null;
+
+        uint mcnkFlags = (uint)(chunk.Flags & 0x3C);
+        if (mcnkFlags == 0)
+            mcnkFlags = MapAlphaLiquidFlags(layer.BasicType);
+
+        byte[]? tileFlags = BuildAlphaTileFlags(layer);
+        float[] heights = BuildAlphaLiquidHeights(layer);
+
+        return new AlphaLiquidChunk(
+            cy * ChunksPerTile + cx,
+            cx,
+            cy,
+            heights.Min(),
+            heights.Max(),
+            tileFlags,
+            mcnkFlags,
+            heights);
+    }
+
+    private static uint MapAlphaLiquidFlags(AdtLiquidBasicType basicType)
+    {
+        return basicType switch
+        {
+            AdtLiquidBasicType.Ocean => 0x08u,
+            AdtLiquidBasicType.Magma => 0x20u,
+            AdtLiquidBasicType.Slime => 0x30u,
+            _ => 0x04u,
+        };
+    }
+
+    private static byte[]? BuildAlphaTileFlags(AdtLiquidLayer layer)
+    {
+        if (layer.Width <= 0 || layer.Height <= 0)
+            return null;
+
+        byte[] tileFlags = new byte[64];
+        Array.Fill(tileFlags, (byte)0x0F);
+
+        for (int y = 0; y < layer.Height; y++)
+        {
+            for (int x = 0; x < layer.Width; x++)
+            {
+                int globalX = layer.XOffset + x;
+                int globalY = layer.YOffset + y;
+                if ((uint)globalX >= 8 || (uint)globalY >= 8)
+                    continue;
+
+                if (layer.TileExists(x, y))
+                    tileFlags[(globalY * 8) + globalX] = 0;
+            }
+        }
+
+        return tileFlags;
+    }
+
+    private static float[] BuildAlphaLiquidHeights(AdtLiquidLayer layer)
+    {
+        float[] heights = new float[81];
+        float fallbackHeight = layer.Heights is { Length: > 0 }
+            ? layer.Heights[0]
+            : (layer.MinHeight + layer.MaxHeight) * 0.5f;
+        Array.Fill(heights, fallbackHeight);
+
+        if (layer.Heights is not { Length: > 0 })
+            return heights;
+
+        int srcWidth = layer.Width + 1;
+        int srcHeight = layer.Height + 1;
+        for (int y = 0; y < srcHeight; y++)
+        {
+            for (int x = 0; x < srcWidth; x++)
+            {
+                int globalX = layer.XOffset + x;
+                int globalY = layer.YOffset + y;
+                if ((uint)globalX >= 9 || (uint)globalY >= 9)
+                    continue;
+
+                int srcIndex = (y * srcWidth) + x;
+                if ((uint)srcIndex >= (uint)layer.Heights.Length)
+                    continue;
+
+                heights[(globalY * 9) + globalX] = layer.Heights[srcIndex];
+            }
+        }
+
+        return heights;
+    }
+
+    private static float[,,] DownsampleAlphaPack(float[,,] src)
+    {
+        const int srcSize = 1024;
+        const int dstSize = 256;
+        const int ratio = srcSize / dstSize;
+        const int samples = ratio * ratio;
+        var dst = new float[dstSize, dstSize, 4];
+
+        for (int y = 0; y < dstSize; y++)
+        {
+            for (int x = 0; x < dstSize; x++)
+            {
+                for (int l = 0; l < 4; l++)
+                {
+                    float sum = 0f;
+                    for (int dy = 0; dy < ratio; dy++)
+                    {
+                        for (int dx = 0; dx < ratio; dx++)
+                        {
+                            sum += src[y * ratio + dy, x * ratio + dx, l];
+                        }
+                    }
+                    dst[y, x, l] = sum / samples;
+                }
+            }
+        }
+        return dst;
+    }
+
+    private static float[,] DownsampleShadowMask(float[,] src)
+    {
+        const int srcSize = 1024;
+        const int dstSize = 256;
+        const int ratio = srcSize / dstSize;
+        const int samples = ratio * ratio;
+        var dst = new float[dstSize, dstSize];
+
+        for (int y = 0; y < dstSize; y++)
+        {
+            for (int x = 0; x < dstSize; x++)
+            {
+                float sum = 0f;
+                for (int dy = 0; dy < ratio; dy++)
+                {
+                    for (int dx = 0; dx < ratio; dx++)
+                    {
+                        sum += src[y * ratio + dy, x * ratio + dx];
+                    }
+                }
+                dst[y, x] = sum / samples;
+            }
+        }
+        return dst;
+    }
+}

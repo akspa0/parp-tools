@@ -27,7 +27,8 @@ public sealed record AlphaLiquidChunk(
     float MinHeight,
     float MaxHeight,
     byte[]? TileFlags,
-    uint McnkFlags);
+    uint McnkFlags,
+    float[]? Heights);
 
 public sealed record AlphaTileDiagnostics(
     bool HasResidualData,
@@ -211,6 +212,7 @@ var heights = SliceChunkHeights(Heightmap, cx, cy, tileSize);
 
     private static int ClassifyLiquid(uint mcnkFlags)
     {
+        if ((mcnkFlags & 0x04) != 0) return 1;
         if ((mcnkFlags & 0x08) != 0) return 1;
         int bits = (int)((mcnkFlags >> 4) & 3);
         return bits switch

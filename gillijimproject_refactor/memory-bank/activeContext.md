@@ -6,7 +6,7 @@
 ## wow-viewer Library Completeness / Harvest Status — Resynced 2026-05-08
 
 Phase A (terrain type system) and Phase B (harvest pipeline) are COMPLETE.
-Phase C (Converters): AlphaToLk VALIDATED at 100% tile conversion across 4 maps.
+Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion across 4 maps, and LkToAlpha is now landed with focused Alpha/LK round-trip coverage including `MH2O <-> MCLQ` liquid parity.
 
 ### Landed In The May 8 Session (Phase C AlphaToLk)
 
@@ -36,6 +36,27 @@ Phase C (Converters): AlphaToLk VALIDATED at 100% tile conversion across 4 maps.
 
 Note: The 0.5.5.3494 Azeroth has 755 tiles (vs 685 in 0.5.3.3368) because 0.5.5 added ~70 more tiles to the continent.
 
+### Landed In The May 8 Follow-Up Session (Phase C LkToAlpha)
+
+**Implementation surface:**
+- `WowViewer.Core.IO/Maps/AlphaWdtWriter.cs` — reverse Alpha writer now emits structurally valid monolithic WDT tiles, correct chunk-relative `MCVT`, chunk-local `MCAL`, and `MCLQ` payloads
+- `WowViewer.Core.IO/Maps/LkToAlphaConverter.cs` — LK ADT -> AlphaTileData conversion now carries structured liquid instead of collapsing to flags only
+- `WowViewer.Core.IO/Maps/AlphaWdtReader.cs` — preserves `MCLQ` 81-sample surface heights as absolute world Z during round-trip reads
+- `WowViewer.Core.IO/Maps/AlphaToLkConverter.cs` + `LkAdtWriter.cs` — Alpha back-conversion now rebuilds `MH2O` payloads instead of dropping liquid after Alpha ingest
+- `WowViewer.Tool.Converter/LkToAlphaCommand.cs` — CLI path now parses input `MH2O` instead of silently discarding LK liquid before conversion
+- `wow-viewer/tests/WowViewer.Core.Tests/LkToAlphaRoundTripTests.cs` — focused regression coverage for Alpha writer structure and `MH2O <-> MCLQ -> MH2O` liquid round-trip
+
+**Bugs fixed during validation:**
+1. **Alpha placeholder chunk corruption** — `AlphaWdtWriter` declared `MPHD` and `MHDR` sizes without reserving payload bytes, shifting every later chunk offset. Fixed by writing zero-filled payloads for declared placeholder chunks.
+2. **Chunk-relative terrain heights** — reverse Alpha `MCVT` was being written relative to tile base instead of chunk base. Fixed to match Alpha reader expectations.
+3. **MCNK offset frame mismatch** — Alpha MCNK subchunk offsets were not aligned to the frame expected by `AlphaWdtReader`. Fixed so emitted tiles parse as real Alpha WDT content.
+4. **MCAL contract mismatch** — the repo's tile-level `256x256` alpha pack was being treated like per-chunk `64x64` payloads. Fixed by resampling tile alpha into chunk-local MCAL payloads during write.
+5. **Liquid loss on both directions** — reverse conversion dropped `MH2O` on LK input and failed to emit `MCLQ`; return conversion only restored flags. Fixed by carrying structured liquid through `LkMcnkData`, preserving `MCLQ` 81-sample surfaces, and emitting real `MH2O` payloads on the LK writer path.
+
+**Focused validation:**
+- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter LkToAlphaRoundTripTests`
+- Current proof level is focused library regression only. Broad `WowViewer.Core.Tests` closure is still blocked by missing real-data fixtures and one unrelated pre-existing invalid-data test.
+
 ### Architecture Notes for AlphaToLk
 - Consumes existing `AlphaWdtReader` and `AlphaTileData` — no duplication of read logic
 - Writer uses `FourCC` from `WowViewer.Core.Chunks` for correct on-disk byte order
@@ -54,13 +75,15 @@ Note: The 0.5.5.3494 Azeroth has 755 tiles (vs 685 in 0.5.3.3368) because 0.5.5 
 - Metadata JSON with current `AvailableSignals` coverage for the active harvest path
 - `WowViewer.Tool.Harvest harvest-map-mpq` is the canonical multi-client shard builder for staged archive-backed clients
 - **AlphaToLk full conversion pipeline: 100% tile conversion across 4 maps, 5 terrain types**
+- **LkToAlpha conversion pipeline exists in the shared library and CLI, with focused round-trip regression proof including `MH2O <-> MCLQ` parity**
 - WDT/WDL/ADT output validates via `map inspect` (correct chunk structure, MCAL big-alpha decoding)
 - `convert-alpha-to-lk` CLI command in `WowViewer.Tool.Converter`
+- `convert-lk-to-alpha` CLI command in `WowViewer.Tool.Converter`
 
 ## WHAT IS STILL OPEN
 - AreaID crosswalk support (currently all chunks default to AreaID 0)
 - Split ADT output (_tex0, _obj0) for Cataclysm+ clients
-- LkToAlpha converter (reverse direction)
+- LkToAlpha real-data batch validation beyond the new focused round-trip regressions
 - M2/MDX converters and WMO v14↔v17 converters
 - Deep format readers Phase D
 - DBC/DB2 metadata enrichment Phase E
@@ -76,19 +99,21 @@ Note: The 0.5.5.3494 Azeroth has 755 tiles (vs 685 in 0.5.3.3368) because 0.5.5 
 - Domain types: `wow-viewer/src/core/WowViewer.Core/Maps/`
 - IO readers/writers: `wow-viewer/src/core/WowViewer.Core.IO/Maps/`
   - `AlphaWdtReader.cs` — Alpha WDT parser for the harvest path
+  - `AlphaWdtWriter.cs` — Alpha WDT writer used by the reverse LK→Alpha converter path
   - `AlphaTerrainAdapter.cs` — AlphaTileData → TerrainChunkData bridge
   - `AlphaToLkConverter.cs` — Alpha WDT → LK ADT/WDT/WDL conversion orchestration
+  - `LkToAlphaConverter.cs` — LK ADT → Alpha WDT conversion orchestration
   - `LkAdtWriter.cs` — LK 3.3.5 monolithic ADT binary writer
   - `LkWdtWriter.cs` — LK WDT binary writer
   - `WdlWriter.cs` — WDL binary writer with height extraction
   - `AdtTerrainWriter.cs` — existing ADT heightmap/normal patcher
   - `AdtPlacementWriter.cs` — existing ADT placement patcher
 - DBC crosswalk: `wow-viewer/src/core/WowViewer.Core.IO/Dbc/AreaIdMapper.cs` + `Resources/area_crosswalk.csv`
-- CLI: `wow-viewer/tools/converter/WowViewer.Tool.Converter/AlphaToLkCommand.cs`
+- CLI: `wow-viewer/tools/converter/WowViewer.Tool.Converter/{AlphaToLkCommand,LkToAlphaCommand}.cs`
 
 ## NEXT
 1. Dataset prep lane: use staged clients + `dataset-list-maps` for discovery + `WowViewer.Tool.Harvest harvest-map-mpq` for shard generation into `wow-viewer\output\datasets\`, then NPZ-based validation/visualization from the harvested shards
-2. Phase C (continued): AreaID crosswalk, LkToAlpha, Mdx↔M2, Wmo v14↔v17
+2. Phase C (continued): AreaID crosswalk, LkToAlpha real-data validation, Mdx↔M2, Wmo v14↔v17
 3. Phase D: Deep format readers (WDT retail flags, WDL, WMO full version range, MDX, BLP pixel decode)
 4. Phase E: DBC/DB2 metadata enrichment (AreaTable, WorldSafeLocs, LiquidType, GroundEffects)
 5. Phase F: Placement provenance (MCRF per-chunk arrays, PM4 SQLite, prefab detection)

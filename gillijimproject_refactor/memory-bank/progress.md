@@ -40,13 +40,15 @@
 | **Phase C: AlphaToLk writer infrastructure** | **DONE** — WdlWriter, LkWdtWriter, LkAdtWriter, AlphaToLkConverter |
 | **Phase C: AlphaToLk CLI command** | **DONE** — convert-alpha-to-lk in WowViewer.Tool.Converter |
 | **Phase C: AlphaToLk real-data validation** | **DONE** — 755/755 Azeroth (0.5.5), 972/972 Kalimdor, 256/256 EmeraldDream, 25/25 PVPZone01, 25/25 Shadowfang |
+| **Phase C: LkToAlpha reverse converter + writer path** | **DONE** — `LkToAlphaConverter`, `AlphaWdtWriter`, `convert-lk-to-alpha` |
+| **Phase C: LkToAlpha focused round-trip validation** | **DONE** — `LkToAlphaRoundTripTests` prove Alpha writer structure and `MH2O <-> MCLQ -> MH2O` parity |
 
 ## IN PROGRESS
 | What | Status |
 |------|--------|
 | Multi-client full shard dataset prep | SWITCHED TO HARVEST PATH — use `WowViewer.Tool.Harvest harvest-map-mpq` on staged clients, not converter `dataset-scan` manifests |
 | Phase C: AlphaToLk AreaID crosswalk | NOT YET — `AreaIdMapper` exists in `WowViewer.Core.IO/Dbc/`, not yet wired to converter |
-| Phase C: LkToAlpha converter | NOT PORTED |
+| Phase C: LkToAlpha real-data validation | OPEN — focused library regressions pass, but broad batch proof on LK client data is still not recorded |
 | Phase C: Mdx↔M2 converters | NOT PORTED |
 | Phase C: Wmo v14↔v17 converters | NOT PORTED |
 
@@ -66,6 +68,17 @@
 2. **MHDR/MCIN empty payload** — wrote declared-size chunk headers with 0 data bytes; fixed by writing pre-allocated zero arrays
 3. **MPHD size mismatch** — wrote 9 uint32s (36 bytes) but declared 32 bytes; fixed by removing extra `Write(0u)`
 4. **MAIN index formula** — `tileX * 64 + tileY` was wrong; fixed to `tileY * 64 + tileX` (row-major with y as row). This caused 420/755 Azeroth tiles to fail before the fix.
+
+## BUGS FIXED IN LKTOALPHA ROUND-TRIP VALIDATION (2026-05-08)
+1. **Alpha placeholder chunk payloads** — `AlphaWdtWriter` declared `MPHD`/`MHDR` payload sizes but wrote zero bytes, corrupting all later offsets. Fixed by writing explicit zero-filled payload buffers.
+2. **Reverse Alpha terrain heights** — `MCVT` heights were written relative to tile base instead of chunk base. Fixed to match Alpha chunk semantics.
+3. **Alpha MCNK offset frame mismatch** — emitted subchunk offsets did not line up with `AlphaWdtReader`. Fixed so written tiles parse as structurally valid Alpha WDTs.
+4. **Tile alpha vs chunk alpha mismatch** — the shared `256x256` alpha contract was being reused as if it were already chunk-local `MCAL`. Fixed by resampling during write.
+5. **Liquid parity gap** — LK input `MH2O` was dropped before conversion and Alpha return conversion rebuilt only flags. Fixed by carrying structured liquid through the shared models, preserving `MCLQ` 81-sample heights, and emitting real `MH2O` again on the LK writer path.
+
+## FOCUSED VALIDATION NOTE (2026-05-08)
+- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter LkToAlphaRoundTripTests` passes with `2/2` tests.
+- Do not describe this as full suite closure: the broader `WowViewer.Core.Tests` run still hits missing `wow-viewer/test_data/development` fixtures and one unrelated pre-existing invalid-data test.
 
 ## WORKFLOW CORRECTION (2026-05-08)
 - Do not route full multi-client dataset generation through `WowViewer.Tool.Converter dataset-scan` / `dataset-audit` / `dataset-curate` / `dataset-build-cache`.

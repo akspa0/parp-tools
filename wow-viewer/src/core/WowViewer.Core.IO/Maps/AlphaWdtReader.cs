@@ -561,8 +561,16 @@ public static class AlphaWdtReader
                         Buffer.BlockCopy(mclqPayload, 0x290, tileFlags, 0, 64);
                     }
 
+                        float[]? heights = null;
+                    if (mclqPayload.Length >= 8 + (81 * 8))
+                    {
+                        heights = new float[81];
+                        for (int index = 0; index < heights.Length; index++)
+                            heights[index] = BitConverter.ToSingle(mclqPayload, 8 + (index * 8) + 4) + baseH;
+                    }
+
                     liquidChunks.Add(new AlphaLiquidChunk(
-                        cy * 16 + cx, cx, cy, minH, maxH, tileFlags, flags));
+                        cy * 16 + cx, cx, cy, minH, maxH, tileFlags, flags, heights));
                 }
             }
         }
@@ -852,6 +860,7 @@ public static class AlphaWdtReader
 
     private static int ClassifyLiquid(uint mcnkFlags)
     {
+        if ((mcnkFlags & 0x04) != 0) return 1;
         if ((mcnkFlags & 0x08) != 0) return 1;
         int bits = (int)((mcnkFlags >> 4) & 3);
         return bits switch

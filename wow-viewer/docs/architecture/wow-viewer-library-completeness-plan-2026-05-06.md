@@ -1,6 +1,6 @@
 # wow-viewer Library Completeness Plan
 
-**Status**: Active — Phase A complete; Phase B harvest/tensor-pack lane substantially complete as of 2026-05-07
+**Status**: Active — Phase A complete; Phase B harvest/tensor-pack lane substantially complete as of 2026-05-07; Phase C terrain converters now landed in shared form as of 2026-05-08, with AlphaToLk real-data proof and LkToAlpha focused round-trip proof
 **Based on**: `gillijimproject_refactor/src/MdxViewer` vs `wow-viewer/src/`
 **Purpose**: Identify all gaps between the legacy viewer and the new library, and define a phased porting strategy.
 
@@ -10,6 +10,8 @@
 - Phase B is no longer just "Alpha WDT validation pending". The current `WowViewer.Tool.Harvest extract-unified` plus `AlphaTensorPackBuilder` path now works on staged `0_5_3_3368` and `0_5_5_3494`, and the broader tensor-pack path is proven on staged `0_7_0_3694`, `3_0_1_8303`, `3_3_5_12340`, and `4_0_0_11927`.
 - Recent May 6-7 commits fixed the Alpha `MCLY` header handling bug, restored missing Alpha `AvailableSignals` metadata, added Alpha placement export via `AlphaTileData.ToPlacementCatalog()`, and added Alpha object-mask plus shadow-residual generation.
 - The remaining near-term gap is explicit `0.6.0` split-ADT validation via `AdtProfile060070Baseline`, not basic Alpha/retail harvest plumbing.
+- Follow-up on May 8 landed the reverse `LkToAlphaConverter` path in `wow-viewer`, repaired the Alpha WDT writer so emitted tiles parse correctly, and added focused `LkToAlphaRoundTripTests` covering structural round-trip plus `MH2O <-> MCLQ -> MH2O` liquid parity.
+- Proof boundary matters: AlphaToLk has real-data batch validation, while LkToAlpha is currently proven at focused library-regression scope rather than broad LK corpus runs.
 
 ---
 
@@ -45,8 +47,8 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 | **DBC/DB2** | `MpqDBCProvider` | Done — `DBCD` + `WoWDBDefs` read/write DBC/DB2 natively |
 | **WL liquid files** | `WlFile` | Summary only — `WlFileReader` detection exists, deep parse not ported |
 | **PM4** | `Pm4Research` | Done — `WowViewer.Core.PM4` |
-| **MH2O liquid** | `Mh2oChunk` | Partial — `AdtLiquidReader` exists |
-| **MCLQ liquid** | `MclqChunk` | Partial — `AdtMclqReader` exists |
+| **MH2O liquid** | `Mh2oChunk` | Partial — `AdtLiquidReader` plus `LkAdtWriter`/converter round-trip emission now exist, but broader consumer and real-data validation are still incomplete |
+| **MCLQ liquid** | `MclqChunk` | Partial — `AdtMclqReader` plus `AlphaWdtReader`/`AlphaWdtWriter` round-trip preservation now exist, but broader consumer and real-data validation are still incomplete |
 
 ### 2.2 Terrain System
 
@@ -151,21 +153,21 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 ### Phase C: Port Converters
 **Goal**: Bidirectional Alpha↔LK ADT conversion in `wow-viewer/src/tools/convert/`.
 
-- [ ] Port `LkToAlphaConverter` from `WoWMapConverter.Core.Converters`
+- [x] Port `LkToAlphaConverter` from `WoWMapConverter.Core.Converters`
   - Parse LK split ADT (heights, normals, MCLY, MCAL, MCLQ, MDDF, MODF, MTEX)
   - Convert coordinates (XZY→XZY with MapOrigin adjustment)
   - Build monolithic WDT structure (MHDR, embedded ADTs, MAIN grid)
-  - Convert liquid (LK MCLQ 804-byte → Alpha flat plane)
+  - Convert liquid (`MH2O` or LK `MCLQ` → Alpha `MCLQ`, preserving 81-sample surface heights in the shared round-trip path)
   - Write MCNK with non-interleaved MCVT/MCNR
   - Write MDDF/MODF with coordinate swap
-- [ ] Port `AlphaToLkConverter` from `WoWMapConverter.Core.Converters`
+- [x] Port `AlphaToLkConverter` from `WoWMapConverter.Core.Converters`
   - Parse Alpha monolithic WDT
   - Convert to split ADT format
   - Interleave MCVT/MCNR (Alpha non-interleaved → LK interleaved)
   - Convert coordinates
-  - Convert liquid (Alpha flat plane → LK MCLQ 804-byte)
-- [ ] Add `WowViewer.Tool.Convert` CLI with `alpha-to-lk` and `lk-to-alpha` commands
-- [ ] Cross-validate: round-trip Alpha→LK→Alpha and LK→Alpha→LK should preserve data
+  - Convert liquid (Alpha `MCLQ` → LK `MH2O` payloads in the current shared writer path)
+- [x] Add converter CLI commands in `WowViewer.Tool.Converter` with `convert-alpha-to-lk` and `convert-lk-to-alpha`
+- [ ] Cross-validate: round-trip Alpha→LK→Alpha and LK→Alpha→LK should preserve data on broader real-data corpora, not just focused library regressions
 
 **Dependency**: Phase A (uses `ITerrainAdapter` types)
 
@@ -299,4 +301,4 @@ Remaining Alpha-reader follow-up: residual/sparse tile diagnostic fields and any
 
 ---
 
-*Last updated: 2026-05-07*
+*Last updated: 2026-05-08*
