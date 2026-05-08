@@ -1,7 +1,7 @@
 # wow-viewer Complete Porting Roadmap
 
-**Version**: 1.0 — 2026-05-07
-**Status**: Active — Phase B (Harvest Pipeline) COMPLETE, Phase C (Converters) next
+**Version**: 1.1 — 2026-05-07
+**Status**: Active — Phase C (Converters) IN PROGRESS — AlphaToLk first pass complete
 **Parent**: `gillijimproject_refactor` → `wow-viewer` full refactor
 
 ---
@@ -64,14 +64,23 @@ Full Alpha WDT + Retail ADT → NPZ export, validated against real tiles across 
 
 Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/`:
 
-| Converter | Source | Purpose |
-|-----------|--------|---------|
-| `LkToAlphaConverter` | `WoWMapConverter.Core.Converters` | LK split ADT → Alpha 0.5.3 monolithic WDT |
-| `AlphaToLkConverter` | `WoWMapConverter.Core.Converters` | Alpha 0.5.3 WDT → LK 3.3.5 split ADT |
-| `MdxToM2Converter` | `WoWMapConverter.Core.Converters` | MDX → M2 model format |
-| `M2ToMdxConverter` | `WoWMapConverter.Core.Converters` | M2 → MDX model format |
-| `WmoV14ToV17Converter` | `WoWMapConverter.Core.Converters` | WMO v14 → v17 (Cata) |
-| `WmoV17ToV14Converter` | `WoWMapConverter.Core.Converters` | WMO v17 → v14 |
+| Converter | Source | Purpose | Status |
+|-----------|--------|---------|--------|
+| `AlphaToLkConverter` | `WoWMapConverter.Core.Converters` | Alpha 0.5.3 WDT → LK 3.3.5 split ADT | DONE (first pass) |
+| `LkToAlphaConverter` | `WoWMapConverter.Core.Converters` | LK split ADT → Alpha 0.5.3 monolithic WDT | NOT PORTED |
+| `MdxToM2Converter` | `WoWMapConverter.Core.Converters` | MDX → M2 model format | NOT PORTED |
+| `M2ToMdxConverter` | `WoWMapConverter.Core.Converters` | M2 → MDX model format | NOT PORTED |
+| `WmoV14ToV17Converter` | `WoWMapConverter.Core.Converters` | WMO v14 → v17 (Cata) | NOT PORTED |
+| `WmoV17ToV14Converter` | `WoWMapConverter.Core.Converters` | WMO v17 → v14 | NOT PORTED |
+
+**New wow-viewer files for AlphaToLk**:
+- `WowViewer.Core/Maps/LkAdtData.cs` — domain types for LK ADT output
+- `WowViewer.Core.IO/Maps/WdlWriter.cs` — WDL binary writer
+- `WowViewer.Core.IO/Maps/LkWdtWriter.cs` — LK WDT binary writer
+- `WowViewer.Core.IO/Maps/LkAdtWriter.cs` — LK ADT binary writer
+- `WowViewer.Core.IO/Maps/AlphaToLkConverter.cs` — conversion orchestration
+
+**Remaining AlphaToLk work**: CLI command, real-data validation, AreaID crosswalk, split ADT support
 
 **Validation**: Bidirectional round-trip preserves data. User has already proven `2.0.0→0.5.3` and `3.3.5→Alpha WDT` conversions work from prior screenshots.
 
