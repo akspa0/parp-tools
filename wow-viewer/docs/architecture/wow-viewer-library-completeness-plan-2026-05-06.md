@@ -121,9 +121,32 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 - [x] Restore missing Alpha `AvailableSignals` metadata for `mcly_texture_ids`, `mcly_layer_mask`, and `mcal_alpha_pack_256`
 - [x] Generate `object_mask_257`, `object_precise_mask_257`, and `shadow_residual_mask_256` for Alpha tensor packs
 - [x] Prove signal-complete staged extraction across `0.5.3`, `0.5.5`, `0.7.0`, `3.0.1`, `3.3.5`, and `4.0.0`
+- [x] Add placement flat arrays (`placement_mddf_data`, `placement_modf_data`) to NPZ with resolved model paths
+- [x] Port `WlFileReader` for WLW/WLM/WLQ/WLL liquid files (fallback when MCLQ missing)
+- [x] Fix Alpha/Retail coordinate conventions (cx/cy swap, base height offsets, FillHeightmapGaps)
 - [ ] Test Alpha 0.6.0 split ADT through `AdtTensorPackBuilder` with `AdtProfile060070Baseline`
 
-**Dependency**: Phase A
+**Dependency**: Phase A — **Phase B IS COMPLETE**
+
+### Phase B2: DBC/DB2 Metadata Enrichment (NEW)
+**Goal**: Attach rich database-driven metadata to every NPZ shard so downstream models have full provenance.
+
+- [ ] **WorldSafeLocs resolution**: Read `WorldSafeLocs.dbc` from client, resolve graveyard coordinates per map. Expose as per-tile mask or JSON array in metadata.
+- [ ] **AreaTable resolution**: Read `AreaTable.dbc` from client, resolve AreaID → area/zone/subzone names. Attach per-chunk AreaID → name mapping in metadata JSON. (MdxViewer has it!)
+- [ ] **GroundEffects layer**: Read `GroundEffectTexture.dbc` + related DBCs. Per-chunk ground effect IDs are already in MCNK header (`GroundEffectsMap1-4`). Resolve to texture paths.(MdxViewer has parts of it!)
+- [ ] **Light/LightParams/Sky**: Read light-related DBCs for per-zone lighting data (useful for reconstruction rendering). (MdxViewer has it!)
+- [ ] **LiquidType resolution**: Read `LiquidType.dbc` to resolve MCLQ/MH2O type IDs to liquid names (water, ocean, magma, slime). (MdxViewer has it!)
+- [ ] **Map.dbc / MapDifficulty.dbc**: Resolve map instance names, difficulties, loading screen associations. (MdxViewer has it!)
+- [ ] **DBC provider threading**: Ensure `IDBCProvider` is accessible from the harvest tool for all staged client versions.
+- [ ] **Per-client DBC cache**: Build a per-client-build DBC lookup cache key database so the harvest tool resolves DBC data once per client, not per tile.
+
+**Dependency**: Phase B, DBCD/WoWDBDefs libraries (already in wow-viewer)
+
+### Phase B3: Placement & Object Provenance (NEW)
+- [ ] **M2/MDX model metadata**: Resolve model FileDataID → asset path using listfile or DBC. Expose in `placement_mddf_names`.
+- [ ] **WMO metadata**: Resolve WMO FileDataID → asset path. Expose in `placement_modf_names`. **(DONE — names already resolved)**
+- [ ] **MODF doodadSet/nameSet resolution**: Per-MODF `doodadSet` and `nameSet` fields for WMO variant selection.
+- [ ] **MCRF per-chunk reference arrays**: Per-chunk M2/WMO reference indices (which objects touch this chunk). Currently only counts (`object_mask_16`), not the actual reference lists.
 
 ### Phase C: Port Converters
 **Goal**: Bidirectional Alpha↔LK ADT conversion in `wow-viewer/src/tools/convert/`.

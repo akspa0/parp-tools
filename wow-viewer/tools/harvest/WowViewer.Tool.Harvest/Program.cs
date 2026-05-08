@@ -35,6 +35,9 @@ static class Program
             case "extract-unified":
                 RunExtractUnified(tail);
                 break;
+            case "harvest-map-mpq":
+                RunHarvestMapMpq(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown command '{command}'.");
                 ShowUsage();
@@ -289,6 +292,74 @@ static class Program
         }
 
         Console.WriteLine("Synthetic minimap compositor ready — texture pixel lookup not yet wired.");
+    }
+
+    static void RunHarvestMapMpq(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? mapName = GetOption(args, "--map", "-m");
+        string? outputDir = GetOption(args, "--output-dir", "-o");
+        int? limit = GetIntOption(args, "--limit", "-n");
+        int maxTiles = limit ?? int.MaxValue;
+
+        if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(outputDir))
+        {
+            Console.Error.WriteLine("Error: --client-root, --map, and --output-dir are required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (!Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine($"Error: client root not found: {clientRoot}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        Directory.CreateDirectory(outputDir);
+
+        using var catalog = new NativeMpqService();
+        catalog.LoadArchives([clientRoot]);
+        LoadMd5Translate(clientRoot, catalog);
+
+        string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+        byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
+        if (wdtBytes is null)
+        {
+            Console.Error.WriteLine($"Error: Could not read WDT '{wdtVirtual}' from client.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        int extracted = 0, skipped = 0, errors = 0;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        for (int tx = 0; tx < 64; tx++)
+        {
+            for (int ty = 0; ty < 64; ty++)
+            {
+                if (extracted >= maxTiles) break;
+
+                string outputPath = Path.Combine(outputDir, $"{mapName}_{tx}_{ty}_harvest.npz");
+                if (File.Exists(outputPath)) { skipped++; continue; }
+
+                try
+                {
+                    var oldErr = Console.Error;
+                    Console.SetError(TextWriter.Null);
+                    try
+                    {
+                        if (RunExtractTileFromMpq(catalog, mapName, wdtBytes, tx, ty, outputPath, exportPlacements: false))
+                            extracted++;
+                    }
+                    finally { Console.SetError(oldErr); }
+                }
+                catch { }
+            }
+        }
+
+        sw.Stop();
+        Console.WriteLine($"Done. Extracted={extracted} Skipped={skipped} Errors={errors} in {sw.Elapsed.TotalSeconds:F0}s ({sw.Elapsed.TotalSeconds / Math.Max(1, extracted):F1}s/tile)");
     }
 
     static void RunExtractUnified(string[] args)

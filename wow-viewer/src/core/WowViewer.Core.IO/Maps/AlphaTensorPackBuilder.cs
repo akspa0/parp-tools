@@ -100,6 +100,8 @@ public static class AlphaTensorPackBuilder
             PlacementModfCount = tileData.WorldModelPlacements.Count,
             PlacementMddfData = BuildPlacementMddfData(tileData.ModelPlacements),
             PlacementModfData = BuildPlacementModfData(tileData.WorldModelPlacements),
+            PlacementMddfNames = tileData.ModelPlacements.Select(p => p.ModelPath).ToList(),
+            PlacementModfNames = tileData.WorldModelPlacements.Select(p => p.ModelPath).ToList(),
             AvailableSignals = signals,
         };
     }

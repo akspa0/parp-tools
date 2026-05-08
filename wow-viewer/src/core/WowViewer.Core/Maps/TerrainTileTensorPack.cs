@@ -166,6 +166,12 @@ public sealed class TerrainTileTensorPack
     /// </summary>
     public float[,]? PlacementModfData { get; init; }
 
+    /// <summary>MDDF model paths (index maps to nameId in placement_mddf_data).</summary>
+    public IReadOnlyList<string> PlacementMddfNames { get; init; } = Array.Empty<string>();
+
+    /// <summary>MODF model paths (index maps to nameId in placement_modf_data).</summary>
+    public IReadOnlyList<string> PlacementModfNames { get; init; } = Array.Empty<string>();
+
     public TileLoadResult ToTileLoadResult(int tileX, int tileY)
     {
         const int chunksPerTile = 16;

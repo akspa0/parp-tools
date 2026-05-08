@@ -94,6 +94,10 @@ public static class NpzTileSerializer
             source_adt_path = pack.SourceAdtPath,
             available_signals = pack.AvailableSignals.OrderBy(static signal => signal, StringComparer.OrdinalIgnoreCase),
             mcly_texture_names = pack.MclyTextureNames,
+            placement_mddf_names = pack.PlacementMddfNames,
+            placement_modf_names = pack.PlacementModfNames,
+            placement_mddf_count = pack.PlacementMddfCount,
+            placement_modf_count = pack.PlacementModfCount,
             minimap_source_tag = pack.MinimapSourceTag,
         }, new JsonSerializerOptions
         {

@@ -92,7 +92,7 @@ public static class AdtTensorPackBuilder
         float[,]? height65 = DownsampleHeightmap(height257, 65);
         float[,]? height17 = DownsampleHeightmap(height257, 17);
 
-        (int mddfCount, int modfCount, float[,]? mddfData, float[,]? modfData) =
+        (int mddfCount, int modfCount, float[,]? mddfData, float[,]? modfData, IReadOnlyList<string> mddfNames, IReadOnlyList<string> modfNames) =
             ExtractPlacementArrays(adtPath, stream, fileSummary);
 
         return new TerrainTileTensorPack
@@ -133,6 +133,8 @@ public static class AdtTensorPackBuilder
             PlacementModfCount = modfCount,
             PlacementMddfData = mddfData,
             PlacementModfData = modfData,
+            PlacementMddfNames = mddfNames,
+            PlacementModfNames = modfNames,
             AvailableSignals = availableSignals,
         };
     }
@@ -1545,7 +1547,7 @@ public static class AdtTensorPackBuilder
         return mapName ?? string.Empty;
     }
 
-    private static (int mddfCount, int modfCount, float[,]? mddfData, float[,]? modfData)
+    private static (int mddfCount, int modfCount, float[,]? mddfData, float[,]? modfData, IReadOnlyList<string> mddfNames, IReadOnlyList<string> modfNames)
         ExtractPlacementArrays(string adtPath, Stream stream, MapFileSummary fileSummary)
     {
         try
@@ -1557,6 +1559,7 @@ public static class AdtTensorPackBuilder
                 : AdtPlacementReader.Read(stream, fileSummary);
 
             float[,]? mddfData = null;
+            List<string> mddfNames = [];
             if (placements.ModelPlacements.Count > 0)
             {
                 mddfData = new float[placements.ModelPlacements.Count, 9];
@@ -1567,10 +1570,12 @@ public static class AdtTensorPackBuilder
                     mddfData[i, 2] = p.Position.X; mddfData[i, 3] = p.Position.Y; mddfData[i, 4] = p.Position.Z;
                     mddfData[i, 5] = p.Rotation.X; mddfData[i, 6] = p.Rotation.Y; mddfData[i, 7] = p.Rotation.Z;
                     mddfData[i, 8] = p.Scale;
+                    mddfNames.Add(p.ModelPath);
                 }
             }
 
             float[,]? modfData = null;
+            List<string> modfNames = [];
             if (placements.WorldModelPlacements.Count > 0)
             {
                 modfData = new float[placements.WorldModelPlacements.Count, 14];
@@ -1582,14 +1587,15 @@ public static class AdtTensorPackBuilder
                     modfData[i, 5] = p.Rotation.X; modfData[i, 6] = p.Rotation.Y; modfData[i, 7] = p.Rotation.Z;
                     modfData[i, 8] = p.BoundsMin.X; modfData[i, 9] = p.BoundsMin.Y; modfData[i, 10] = p.BoundsMin.Z;
                     modfData[i, 11] = p.BoundsMax.X; modfData[i, 12] = p.BoundsMax.Y; modfData[i, 13] = p.BoundsMax.Z;
+                    modfNames.Add(p.ModelPath);
                 }
             }
 
-            return (placements.ModelPlacements.Count, placements.WorldModelPlacements.Count, mddfData, modfData);
+            return (placements.ModelPlacements.Count, placements.WorldModelPlacements.Count, mddfData, modfData, mddfNames, modfNames);
         }
         catch
         {
-            return (0, 0, null, null);
+            return (0, 0, null, null, Array.Empty<string>(), Array.Empty<string>());
         }
     }
 }

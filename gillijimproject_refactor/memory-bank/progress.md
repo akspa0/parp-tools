@@ -25,19 +25,26 @@
 | wow-viewer: Harvest --export-placements | DONE |
 | wow-viewer: Alpha object/precise masks | DONE |
 | wow-viewer: Alpha shadow residual mask | DONE |
-| **Alpha 0.5.3/0.5.5: all 11 signals** | **DONE** — height, normals, MCAL/MCLY, MCSH, holes, objects, shadow_residual, minimap, WL liquid (when MCLQ missing) |
+| **Alpha 0.5.3/0.5.5: all 11 signals** | **DONE** — height, normals, MCAL/MCLY, MCSH, holes, objects, shadow_residual, minimap, WL liquid |
 | **Retail 3.x: all 11 signals** | **DONE** — + object/precise masks, texture_names, shadow_residual |
 | **Cata 4.0.0: 12 signals** | **DONE** — + MCCV vertex colors |
 | **0.7.0 extraction** | **DONE** — AdtProfile0703694 |
 | **Alpha object mask projection** | **DONE** — tile-relative, rendererX→col, rendererY→row |
 | **Minimap via Md5TranslateResolver** | **DONE** — .trs for retail, .txt for Alpha |
 | **All staged clients pass** | **DONE** — 0.5.3, 0.5.5, 0.7.0, 3.0.1, 3.3.5, 4.0.0 |
+| **Placement flat arrays in NPZ** | **DONE** — placement_mddf_data [N,9], placement_modf_data [N,14] |
+| **Placement model names resolved** | **DONE** — placement_mddf_names / placement_modf_names in metadata JSON |
+| **BuildKey provenance** | **DONE** — "alpha" tag or build version populated |
+| **WL liquid for Alpha** | **DONE** — WLW/WLM/WLQ/WLL fallback when MCLQ missing |
+| **Coordinate fixes** | **DONE** — cx/cy swap (Alpha), base height 0x70 (LK), FillHeightmapGaps, MCLY +8 skip |
 
 ## NOT YET
 - Explicit Alpha 0.6.0 split ADT validation via `AdtProfile060070Baseline`
 - Full extraction run on 6 game clients (800-1500 shards)
 - Production training run (300 epochs)
 - Model evaluation on held-out tiles
-- OBJ reconstruction quality check
-- WL file support for retail path (already in Alpha, retail already has via disk)
+- DBC/DB2 metadata enrichment (WorldSafeLocs, AreaTable, GroundEffects, LiquidType)
+- MCRF per-chunk reference arrays
+- MODF doodadSet/nameSet resolution
 - PM4 masks for development map build (4.0.0.12304 loose files)
+- Development map extraction pipeline (wow-viewer/test_data/original_development)
