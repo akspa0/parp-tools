@@ -17,6 +17,13 @@ The terrain adapter system provides a unified interface for loading terrain tile
 
 See `docs/architecture/wow-viewer-library-completeness-plan-2026-05-06.md` for the full phased plan.
 
+### Current Harvest Status
+
+- `WowViewer.Tool.Harvest extract-unified` is working for staged Alpha monolithic WDT tiles on `0.5.3` and `0.5.5`.
+- `AdtTensorPackBuilder` / harvest tensor-pack extraction is working on staged `0.7.0`, `3.0.1`, `3.3.5`, and `4.0.0.11927`.
+- `TerrainTileTensorPack` now carries object masks, precise object masks, shadow residual, placement arrays, and the later-build PM4/liquid signals used by the current training/export path.
+- Explicit `0.6.0` split-ADT validation is still open.
+
 ---
 
 ## V11 Terrain AI
@@ -124,7 +131,7 @@ Read-only probing: `archive`, `blp`, `m2`, `mdx`, `map`, `lit`, `pm4`, `wmo`.
 dotnet run --project .\tools\harvest\WowViewer.Tool.Harvest
 ```
 
-MPQ-backed extraction: `extract-unified` — reads WDT/ADT from MPQ archives via `NativeMpqService`, routes through `AlphaWdtReader` or `AdtTensorPackBuilder`, outputs NPZ shards.
+MPQ-backed extraction: `extract-unified` — reads WDT/ADT from MPQ archives via `NativeMpqService`, routes through `AlphaWdtReader` or `AdtTensorPackBuilder`, outputs NPZ shards, and can emit placement catalogs with `--export-placements`.
 
 ### Desktop App (Paused)
 `WowViewer.App` is on hold until the V11 terrain model is trained and validated.

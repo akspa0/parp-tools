@@ -92,11 +92,14 @@ public static class AdtTensorPackBuilder
         float[,]? height65 = DownsampleHeightmap(height257, 65);
         float[,]? height17 = DownsampleHeightmap(height257, 17);
 
+        (int mddfCount, int modfCount, float[,]? mddfData, float[,]? modfData) =
+            ExtractPlacementArrays(adtPath, stream, fileSummary);
+
         return new TerrainTileTensorPack
         {
             TileName = tileName,
             MapName = ExtractMapName(adtPath),
-            BuildKey = string.Empty, // populated by caller if known
+            BuildKey = buildVersion ?? string.Empty,
             SourceAdtPath = adtPath,
             Height257 = height257,
             Height65 = height65,
@@ -126,6 +129,10 @@ public static class AdtTensorPackBuilder
             Pm4MprlMask = pm4MprlMask,
             McshShadowMask256 = mcshShadowMask256,
             ShadowResidualMask256 = shadowResidualMask256,
+            PlacementMddfCount = mddfCount,
+            PlacementModfCount = modfCount,
+            PlacementMddfData = mddfData,
+            PlacementModfData = modfData,
             AvailableSignals = availableSignals,
         };
     }
@@ -1536,5 +1543,53 @@ public static class AdtTensorPackBuilder
 
         string? mapName = Path.GetFileName(mapsDir);
         return mapName ?? string.Empty;
+    }
+
+    private static (int mddfCount, int modfCount, float[,]? mddfData, float[,]? modfData)
+        ExtractPlacementArrays(string adtPath, Stream stream, MapFileSummary fileSummary)
+    {
+        try
+        {
+            AdtTileFamily family = AdtTileFamilyResolver.Resolve(adtPath);
+            string? sourcePath = family.PlacementSourcePath;
+            var placements = !string.IsNullOrWhiteSpace(sourcePath) && File.Exists(sourcePath)
+                ? AdtPlacementReader.Read(sourcePath)
+                : AdtPlacementReader.Read(stream, fileSummary);
+
+            float[,]? mddfData = null;
+            if (placements.ModelPlacements.Count > 0)
+            {
+                mddfData = new float[placements.ModelPlacements.Count, 9];
+                for (int i = 0; i < placements.ModelPlacements.Count; i++)
+                {
+                    var p = placements.ModelPlacements[i];
+                    mddfData[i, 0] = p.NameId; mddfData[i, 1] = p.UniqueId;
+                    mddfData[i, 2] = p.Position.X; mddfData[i, 3] = p.Position.Y; mddfData[i, 4] = p.Position.Z;
+                    mddfData[i, 5] = p.Rotation.X; mddfData[i, 6] = p.Rotation.Y; mddfData[i, 7] = p.Rotation.Z;
+                    mddfData[i, 8] = p.Scale;
+                }
+            }
+
+            float[,]? modfData = null;
+            if (placements.WorldModelPlacements.Count > 0)
+            {
+                modfData = new float[placements.WorldModelPlacements.Count, 14];
+                for (int i = 0; i < placements.WorldModelPlacements.Count; i++)
+                {
+                    var p = placements.WorldModelPlacements[i];
+                    modfData[i, 0] = p.NameId; modfData[i, 1] = p.UniqueId;
+                    modfData[i, 2] = p.Position.X; modfData[i, 3] = p.Position.Y; modfData[i, 4] = p.Position.Z;
+                    modfData[i, 5] = p.Rotation.X; modfData[i, 6] = p.Rotation.Y; modfData[i, 7] = p.Rotation.Z;
+                    modfData[i, 8] = p.BoundsMin.X; modfData[i, 9] = p.BoundsMin.Y; modfData[i, 10] = p.BoundsMin.Z;
+                    modfData[i, 11] = p.BoundsMax.X; modfData[i, 12] = p.BoundsMax.Y; modfData[i, 13] = p.BoundsMax.Z;
+                }
+            }
+
+            return (placements.ModelPlacements.Count, placements.WorldModelPlacements.Count, mddfData, modfData);
+        }
+        catch
+        {
+            return (0, 0, null, null);
+        }
     }
 }

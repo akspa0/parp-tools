@@ -96,6 +96,10 @@ public static class AlphaTensorPackBuilder
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
             ShadowResidualMask256 = shadowResidual256,
+            PlacementMddfCount = tileData.ModelPlacements.Count,
+            PlacementModfCount = tileData.WorldModelPlacements.Count,
+            PlacementMddfData = BuildPlacementMddfData(tileData.ModelPlacements),
+            PlacementModfData = BuildPlacementModfData(tileData.WorldModelPlacements),
             AvailableSignals = signals,
         };
     }
@@ -308,6 +312,51 @@ public static class AlphaTensorPackBuilder
             }
         }
         return any ? result : null;
+    }
+
+    private static float[,]? BuildPlacementMddfData(IReadOnlyList<AlphaModelPlacement> placements)
+    {
+        if (placements.Count == 0) return null;
+        var data = new float[placements.Count, 9];
+        for (int i = 0; i < placements.Count; i++)
+        {
+            var p = placements[i];
+            data[i, 0] = p.NameId;
+            data[i, 1] = p.UniqueId;
+            data[i, 2] = p.Position.X;
+            data[i, 3] = p.Position.Y;
+            data[i, 4] = p.Position.Z;
+            data[i, 5] = p.Rotation.X;
+            data[i, 6] = p.Rotation.Y;
+            data[i, 7] = p.Rotation.Z;
+            data[i, 8] = p.Scale;
+        }
+        return data;
+    }
+
+    private static float[,]? BuildPlacementModfData(IReadOnlyList<AlphaWorldModelPlacement> placements)
+    {
+        if (placements.Count == 0) return null;
+        var data = new float[placements.Count, 14];
+        for (int i = 0; i < placements.Count; i++)
+        {
+            var p = placements[i];
+            data[i, 0] = p.NameId;
+            data[i, 1] = p.UniqueId;
+            data[i, 2] = p.Position.X;
+            data[i, 3] = p.Position.Y;
+            data[i, 4] = p.Position.Z;
+            data[i, 5] = p.Rotation.X;
+            data[i, 6] = p.Rotation.Y;
+            data[i, 7] = p.Rotation.Z;
+            data[i, 8] = p.BoundsMin.X;
+            data[i, 9] = p.BoundsMin.Y;
+            data[i, 10] = p.BoundsMin.Z;
+            data[i, 11] = p.BoundsMax.X;
+            data[i, 12] = p.BoundsMax.Y;
+            data[i, 13] = p.BoundsMax.Z;
+        }
+        return data;
     }
 
     private const float ObjectWorldTileSize = 533.33333f;

@@ -3,69 +3,53 @@
 ## BRANCH
 `v0.4.9-strict-guards` forked from `971fff2` on 2026-05-06.
 
-## wow-viewer Alpha WDT Reading — Phase B Validation DONE
+## wow-viewer Library Completeness / Harvest Status — Resynced 2026-05-07
 
-Phase B (Alpha WDT validation) is effectively complete. Key fixes landed 2026-05-07:
+Phase A is complete. The current truth at HEAD is no longer just "Alpha WDT validation done"; the current `wow-viewer` harvest/tensor-pack lane is working across staged clients from Alpha `0.5.x` through Cataclysm `4.0.0`, with Alpha-specific fixes, placement export, and object-mask generation all landed.
 
-### CRITICAL BUG FIXED: MCLY Chunk Header Not Stripped
-**File**: `AlphaWdtReader.cs:421-425`
-The MCLY subchunk in Alpha format stores an 8-byte chunk header (FourCC + size) before the layer entry array. The reader was not skipping this header, causing:
-- `texIds[0]` = bytes of "MCLY" FourCC → garbage texture ID
-- `mclyFlags` = chunk size field → wrong alpha format detection
-- `layerAlphaOff` = wrong MCAL offset → all alpha data read from wrong positions → "scrambled TV signal" noise
+### Landed In The Recent May 6-7 Commits
+- `NativeMpqService` is the active MPQ-backed reader for `WowViewer.Tool.Harvest extract-unified`.
+- `ITerrainAdapter`, `TerrainChunkData`, `TerrainLayer`, `TileLoadResult`, and `AlphaTerrainAdapter` landed in `wow-viewer`.
+- `AlphaWdtReader` now correctly skips the embedded `MCLY` chunk header and extracts `MCVT`, `MCNR`, `MCLY`, `MCAL`, `MCSH`, and `MCLQ` for the harvest path.
+- `AlphaTensorPackBuilder` now emits the missing Alpha signal metadata and also generates `object_mask_257`, `object_precise_mask_257`, and `shadow_residual_mask_256`.
+- `extract-unified --export-placements` now writes Alpha placement catalogs from `AlphaTileData.ToPlacementCatalog()`.
+- Broad staged NPZ/tensor-pack support is proven on `0_5_3_3368`, `0_5_5_3494`, `0_7_0_3694`, `3_0_1_8303`, `3_3_5_12340`, and `4_0_0_11927`.
 
-**Fix**: Skip 8 bytes (`mclyOffset += 8`) before reading layer entries, matching the reference implementation (`McnkAlpha.cs` uses `new Chunk()` which auto-strips the header).
-
-### METADATA FIX: Missing AvailableSignals
-**File**: `AlphaTensorPackBuilder.cs:51-58`
-`mcly_texture_ids`, `mcly_layer_mask`, `mcal_alpha_pack_256` signals were not being added to `AvailableSignals` even though the arrays were correctly serialized into the NPZ.
-
-### VERIFIED: NPZ Pipeline Produces Correct Data
-Tested against `0_5_3_3368` staged client, map `Azeroth`, tile (32,32):
-- `extract-unified` reads WDT from per-map MPQ (`Azeroth.wdt.MPQ`)
-- NPZ contains all 8 signals: height_257, height_65, height_17, mcly_texture_ids, mcly_layer_mask, mcal_alpha_pack_256, mcnr_normal_xyz, mcsh_shadow_mask_256, minimap_rgb_256, hole_mask_16
-- Alpha data shows real blend weights (layers 1-3 with varying means)
-- 10 unique texture IDs, all 256 chunks have 4 layers
-- Minimap orientation matches expected Alpha 0.5.3 coordinate convention
-
-### FIXED: Tile Assembly Coordinate Convention (cx/cy Swap)
-The flat tile-level arrays (heightmap 257×257, alpha 1024×1024→256×256, shadow 1024×1024, etc.) in the NPZ pipeline use:
-- `cx` (= IndexX from MCNK header offset 0x04) → **column** / X direction / horizontal
-- `cy` (= IndexY from MCNK header offset 0x08) → **row** / Y direction / vertical
-
-Storage: `heightmap[cy * 16 + sampleY, cx * 16 + sampleX]` (note: row first, col second).
-Slice: same convention for reading back chunks.
-Alpha: `alphaPack[cy * 64 + ay, cx * 64 + ax, l]` (row first, col second).
-Texture IDs: `texIds[cy, cx, l]` (IndexY→row first, IndexX→col second).
-
-The MCNK header field naming is misleading: `IndexX` is the column (X) index in the tile's 16×16 chunk grid, and `IndexY` is the row (Y) index. The reference MdxViewer uses `chunkX = IndexX` and `chunkY = IndexY` in its local variables, but the world position formula (`worldX` depends on `chunkY`, `worldY` depends on `chunkX`) applies a coordinate swizzle for the WoW world system — this swizzle happens at render time, NOT at data storage time. For flat NPZ arrays, the natural storage convention (IndexX→col, IndexY→row) produces correct orientation, matching the game minimap.
+### Important Details Worth Preserving
+- The Alpha `MCLY` subchunk includes an 8-byte chunk header before the layer-entry array. Not skipping that header corrupts texture ids, layer flags, and MCAL offsets.
+- Tile-level flat arrays use natural row-major storage: `IndexX` is the chunk column and `IndexY` is the chunk row. World-space swizzle happens later in consumer code, not in the tensor-pack storage layout.
+- Shadow residual is now defined as MCSH occupancy not explained by the precise object mask. It is a derived diagnostic signal, not a native client payload.
 
 ## WHAT WORKS
-- `extract-unified` for Alpha 0.5.3 monolithic WDT: full MCVT, MCNR, MCLY, MCAL, MCSH, MCLQ extraction
-- NPZ shard generation with all terrain signals
-- Metadata JSON with correct AvailableSignals set
-- Per-map MPQ archive loading (0.5.3 `*.wdt.MPQ` files in `World/Maps/`)
+- `extract-unified` for Alpha monolithic WDT tiles on staged `0.5.3` and `0.5.5`
+- `AdtTensorPackBuilder` / harvest tensor-pack generation on staged `0.7.0`, `3.0.1`, `3.3.5`, and `4.0.0`
+- Alpha placement export through `--export-placements`
+- Alpha and retail object footprint mask generation in the current tensor-pack contract
+- Metadata JSON with current `AvailableSignals` coverage for the active harvest path
 
-## WHAT BROKE (archive path, DONT USE)
-- `--client-root` mode for old dataset-build (pre-harvest tool)
-- `build_v10_2_dataset.py`, `train_v10_2_terrain_synth.py` — dead code
-- Shadow masks — never exist on minimap tiles, removed from channel list
+## WHAT IS STILL OPEN
+- Explicit Alpha `0.6.0` split-ADT validation through `AdtProfile060070Baseline`
+- Broader deep-reader/library closure beyond the current harvest/tensor-pack path
+- Full multibuild corpus extraction and real training runs beyond the bounded staged-client proofs
+
+## WHAT BROKE / DO NOT ROUTE BACK TO
+- `--client-root` mode for the older pre-harvest dataset-build path
+- `build_v10_2_dataset.py` and `train_v10_2_terrain_synth.py` as active architecture owners
 
 ## KEY FILES — wow-viewer Library
 - Domain types: `wow-viewer/src/core/WowViewer.Core/Maps/`
 - IO readers: `wow-viewer/src/core/WowViewer.Core.IO/Maps/`
-  - `AlphaWdtReader.cs` — main Alpha WDT parser (MCVT/MCNR/MCLY/MCAL/MCSH/MCLQ)
+  - `AlphaWdtReader.cs` — Alpha WDT parser for the harvest path
   - `AlphaTensorPackBuilder.cs` — AlphaTileData → TerrainTileTensorPack bridge
   - `AlphaTerrainAdapter.cs` — AlphaTileData → TerrainChunkData bridge
+  - `AdtTensorPackBuilder.cs` — split-ADT tensor-pack builder across later builds
   - `NpzTileSerializer.cs` — TerrainTileTensorPack → NPZ serialization
-- NativeMpqService: `wow-viewer/src/core/WowViewer.Core.IO/Files/NativeMpqService.cs`
+- Native MPQ reader: `wow-viewer/src/core/WowViewer.Core.IO/Files/NativeMpqService.cs`
 - Harvest tool: `wow-viewer/tools/harvest/WowViewer.Tool.Harvest/Program.cs`
 - Library completeness plan: `wow-viewer/docs/architecture/wow-viewer-library-completeness-plan-2026-05-06.md`
 - Format spec: `gillijimproject_refactor/docs/ADT_WDT_Format_Specification.md`
 
 ## NEXT
-1. Wire AlphaTileData.ToPlacementCatalog into harvest output (`--export-placements`)
-2. Test Alpha 0.5.5 prototype ADT (8-byte padding after MCNK header)
-3. Test Alpha 0.6.0 split ADT through AdtTensorPackBuilder
-4. Extract training shards via harvest tool on staged clients (0.5.3 Azeroth confirmed working)
-5. Consider adding tileset tile BLP → synthetic minimap for data-harvester pipeline
+1. Explicitly validate `0.6.0` split ADT through `AdtProfile060070Baseline`.
+2. Decide whether the next slice is deeper format ownership (`WDT`/`WDL`/converters) or broader training-corpus extraction on the now-working harvest path.
+3. Keep the library completeness plan and README aligned with the current harvest/tensor-pack truth so future chats do not route back to stale "Phase B pending" assumptions.

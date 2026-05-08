@@ -147,6 +147,25 @@ public sealed class TerrainTileTensorPack
     /// <summary>Minimap source tag (terrain_only, no_liquid, no_object, raw, etc.).</summary>
     public string MinimapSourceTag { get; set; } = string.Empty;
 
+    // ── Placement data ──────────────────────────────────────────────────────
+
+    /// <summary>Number of MDDF (M2 model) placements on this tile.</summary>
+    public int PlacementMddfCount { get; init; }
+
+    /// <summary>Number of MODF (WMO model) placements on this tile.</summary>
+    public int PlacementModfCount { get; init; }
+
+    /// <summary>
+    /// MDDF placement flat array [N, 9]: nameId, uniqueId, posX, posY, posZ, rotX, rotY, rotZ, scale.
+    /// </summary>
+    public float[,]? PlacementMddfData { get; init; }
+
+    /// <summary>
+    /// MODF placement flat array [N, 14]: nameId, uniqueId, posX, posY, posZ, rotX, rotY, rotZ,
+    /// bbMinX, bbMinY, bbMinZ, bbMaxX, bbMaxY, bbMaxZ, flags.
+    /// </summary>
+    public float[,]? PlacementModfData { get; init; }
+
     public TileLoadResult ToTileLoadResult(int tileX, int tileY)
     {
         const int chunksPerTile = 16;

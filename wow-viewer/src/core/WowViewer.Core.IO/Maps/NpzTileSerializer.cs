@@ -57,6 +57,8 @@ public static class NpzTileSerializer
         WriteArray(zip, "hole_mask_16", pack.HoleMask16, "|b1");
         WriteArray(zip, "mtxf_animated_mask", pack.MtxfAnimatedMask, "<i4");
         WriteArray(zip, "mtxf_transform_id", pack.MtxfTransformId, "<i4");
+        WriteArray(zip, "placement_mddf_data", pack.PlacementMddfData, "<f4");
+        WriteArray(zip, "placement_modf_data", pack.PlacementModfData, "<f4");
 
         // Write metadata JSON
         WriteMetadata(zip, pack);

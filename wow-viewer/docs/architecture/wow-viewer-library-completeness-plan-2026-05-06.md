@@ -1,8 +1,15 @@
 # wow-viewer Library Completeness Plan
 
-**Status**: Active — Phase A started 2026-05-06
+**Status**: Active — Phase A complete; Phase B harvest/tensor-pack lane substantially complete as of 2026-05-07
 **Based on**: `gillijimproject_refactor/src/MdxViewer` vs `wow-viewer/src/`
 **Purpose**: Identify all gaps between the legacy viewer and the new library, and define a phased porting strategy.
+
+## 0. Execution Update — 2026-05-07
+
+- Phase A is complete in `wow-viewer`: `ITerrainAdapter`, `TerrainChunkData`, `TerrainLayer`, `TileLoadResult`, `AlphaTerrainAdapter`, and the `TerrainTileTensorPack.ToTileLoadResult()` bridge all landed.
+- Phase B is no longer just "Alpha WDT validation pending". The current `WowViewer.Tool.Harvest extract-unified` plus `AlphaTensorPackBuilder` path now works on staged `0_5_3_3368` and `0_5_5_3494`, and the broader tensor-pack path is proven on staged `0_7_0_3694`, `3_0_1_8303`, `3_3_5_12340`, and `4_0_0_11927`.
+- Recent May 6-7 commits fixed the Alpha `MCLY` header handling bug, restored missing Alpha `AvailableSignals` metadata, added Alpha placement export via `AlphaTileData.ToPlacementCatalog()`, and added Alpha object-mask plus shadow-residual generation.
+- The remaining near-term gap is explicit `0.6.0` split-ADT validation via `AdtProfile060070Baseline`, not basic Alpha/retail harvest plumbing.
 
 ---
 
@@ -24,10 +31,10 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 
 | Format | MdxViewer Location | wow-viewer Status |
 |--------|-------------------|-------------------|
-| **Alpha WDT (monolithic)** | `AlphaWdtReader` + `AlphaTerrainAdapter` | Partial — `AlphaWdtReader` exists, MCVT/MCNR/MCLY/MCAL/MCLQ parsing done, needs validation |
-| **Alpha 0.6.0 split ADT** | `StandardTerrainAdapter` + `AdtAlpha` | Not tested — `AdtTensorPackBuilder` with `AdtProfile060070Baseline` should handle |
-| **LK/WotLK ADT (split)** | `StandardTerrainAdapter` + `AdtLk` | Mostly done — `AdtTensorPackBuilder` + `AdtMcalDecoder` + `AdtLiquidReader` |
-| **Cata 4.x split ADT** | `AdtV18` + `SplitAdt` | Partial — `AdtV23SummaryReader` exists, full decode not tested |
+| **Alpha WDT (monolithic)** | `AlphaWdtReader` + `AlphaTerrainAdapter` | Substantially done for the harvest/tensor-pack path — validated on staged `0.5.3`/`0.5.5`, with placements, object masks, and shadow residual now emitted. Remaining work is broader consumer/runtime ownership and residual-data diagnostics. |
+| **Alpha 0.6.0 split ADT** | `StandardTerrainAdapter` + `AdtAlpha` | Partial — `AdtTensorPackBuilder` with `AdtProfile060070Baseline` exists, but explicit `0.6.0` validation is still open |
+| **LK/WotLK ADT (split)** | `StandardTerrainAdapter` + `AdtLk` | Broad tensor-pack support proven on staged `3.0.1` and `3.3.5`; deeper reader/converter closure is still incomplete |
+| **Cata 4.x split ADT** | `AdtV18` + `SplitAdt` | Broad tensor-pack support proven on staged `4.0.0.11927` including MCCV; full deep-reader ownership is still incomplete |
 | **WDT (Retail)** | `Wdt` | Partial — `WdtSummaryReader` (summary only), no deep parse. **Missing: all MPHD flags beyond `isWmoBased`; all MAIN/WDT flags beyond HasAdt/AllWater/Loaded; no WDT flag data in tensor packs.** |
 | **WDL (terrain LOD)** | `WdlParser` | Summary only — `WdlSummaryReader` exists, deep parse not ported |
 | **WMO (all versions)** | `WmoRenderer` + `WmoV14Reader` | Partial — `WowViewer.Core.IO.Wmo.*` readers exist, no renderer |
@@ -45,15 +52,15 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 
 | Component | MdxViewer | wow-viewer | Gap Severity |
 |-----------|-----------|------------|-------------|
-| `ITerrainAdapter` | ✓ | **Missing** | CRITICAL |
-| `AlphaTerrainAdapter` | ✓ | **Missing** (AlphaWdtReader is partial) | CRITICAL |
+| `ITerrainAdapter` | ✓ | Done | CLOSED |
+| `AlphaTerrainAdapter` | ✓ | Done | CLOSED |
 | `StandardTerrainAdapter` | ✓ | **Missing** | CRITICAL |
-| `TerrainChunkData` | ✓ | **Missing** | CRITICAL |
+| `TerrainChunkData` | ✓ | Done | CLOSED |
 | `TerrainManager` (AOI streaming) | ✓ | **Missing** | HIGH |
 | `TerrainTileMeshBuilder` | ✓ | **Missing** | HIGH |
-| `MddfPlacement` / `ModfPlacement` name resolution (MDDF→MMID, MODF→MWID) | Partial | **Missing** — placements must resolve `NameId` → asset path via MMDX/MMID/MWMO/MWID name tables. **All fields must be captured: `NameId`, `UniqueId`, `Position`, `Rotation` (degrees), `Scale`, `BoundsMin`, `BoundsMax`, `Flags` — nothing dropped. These are all required downstream by viewer ingestion pipelines.** | CRITICAL |
-| `TerrainLayer` texture ID resolution (MTEX) | ✓ | **Missing** — `TerrainLayer.TextureIndex` must resolve to a tileset asset path via MTEX string table | CRITICAL |
-| Listfile builder (per-client MPQ archive + loose file harvest) | ✓ | **Missing** — build a complete listfile from every opened MPQ (archive internal listfiles + all discovered loose files) for each client version. Used for: (1) name-lookup cache for asset resolution, (2) identifying missing assets that cause green smoke / render errors | CRITICAL |
+| `MddfPlacement` / `ModfPlacement` name resolution (MDDF→MMID, MODF→MWID) | Partial | Partial — `AdtPlacementReader` and `AlphaTileData.ToPlacementCatalog()` now resolve names and preserve placement fields for export/runtime consumers, but the tensor-pack contract still stores flattened numeric arrays rather than a first-class shared placement object model | MEDIUM |
+| `TerrainLayer` texture ID resolution (MTEX) | ✓ | Partial — tensor packs now carry `MclyTextureNames`, but `TerrainLayer` still only stores texture indices in the tile-load bridge | MEDIUM |
+| Listfile builder (per-client MPQ archive + loose file harvest) | ✓ | Partial — shared archive-listfile cache/bootstrap work already exists, and `NativeMpqService` harvests internal listfiles, but a single first-class per-client manifest surface across all consumers is still not complete | MEDIUM |
 
 ### 2.3 Rendering System
 
@@ -110,6 +117,10 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 - [x] Port `AlphaWdtReader` MCLQ → tile-level `MclqSurfaceHeight[257,257]` and `MclqTypeMask[16,16]`
 - [x] Wire `AlphaTileData.ToPlacementCatalog()` into harvest output (`--export-placements`)
 - [x] Fix MDDF/MODF model name resolution — now uses MDNM/MONM name tables instead of MTEX
+- [x] Fix Alpha `MCLY` parsing to skip the embedded subchunk header before reading layer entries
+- [x] Restore missing Alpha `AvailableSignals` metadata for `mcly_texture_ids`, `mcly_layer_mask`, and `mcal_alpha_pack_256`
+- [x] Generate `object_mask_257`, `object_precise_mask_257`, and `shadow_residual_mask_256` for Alpha tensor packs
+- [x] Prove signal-complete staged extraction across `0.5.3`, `0.5.5`, `0.7.0`, `3.0.1`, `3.3.5`, and `4.0.0`
 - [ ] Test Alpha 0.6.0 split ADT through `AdtTensorPackBuilder` with `AdtProfile060070Baseline`
 
 **Dependency**: Phase A
@@ -236,7 +247,7 @@ Converters are read→write pipelines. They use the same deep readers and domain
 
 ## 6. Alpha WDT Deep Reader Status
 
-The `AlphaWdtReader` in `wow-viewer.Core.IO` is partially implemented. Below is the implementation status for each chunk:
+The `AlphaWdtReader` in `wow-viewer.Core.IO` is implemented for the current harvest/tensor-pack path. Below is the implementation status for each chunk:
 
 | Chunk | Reader Status | Notes |
 |-------|--------------|-------|
@@ -261,8 +272,8 @@ The `AlphaWdtReader` in `wow-viewer.Core.IO` is partially implemented. Below is 
 - **Residual tile data**: Tiles marked as `adtOffset <= 0` in MAIN (non-existent) may still contain embedded tile data. We should detect and flag this as `TileHasResidualData: bool` in `AlphaTileData`, count leftover bytes, and attempt restructuring — later game versions hide files by marking them 0 in WDT; we want to recover every artifact.
 - **Sparse embedded tile detection**: Tiles with `adtOffset > 0` but where MCIN shows fewer than 256 chunk offsets, or chunk offsets point to empty subchunks, should be flagged as `TileHasSparseChunks: bool`.
 
-Missing: MCNR normals extraction (done — `AlphaTileData.McnrNormalXyz`), MCSH shadow map extraction (done — `AlphaTileData.McshShadowMask256` / `McshShadowMask1024`), MCLQ upscaling (done — `AlphaTileData.MclqSurfaceHeight` / `MclqTypeMask`), residual/sparse tile diagnostic fields.
+Remaining Alpha-reader follow-up: residual/sparse tile diagnostic fields and any broader consumer/runtime ownership that still sits outside the current harvest/tensor-pack lane.
 
 ---
 
-*Last updated: 2026-05-06*
+*Last updated: 2026-05-07*
