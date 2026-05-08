@@ -38,7 +38,30 @@ public static class AlphaWdtReader
         using var ms = new MemoryStream(wdtData, writable: false);
         if (!TryReadAlphaTopLevelChunks(ms, out _, out _, out MapChunkLocation main, out _))
             return false;
-        return main.Size == 65536; // Alpha: 4096 entries × 16 bytes = 65536
+        return main.Size == 65536;
+    }
+
+    public static HashSet<(int X, int Y)> ReadExistingTiles(byte[] wdtData)
+    {
+        var tiles = new HashSet<(int, int)>();
+        if (!ReadMainPayload(wdtData, out byte[] mainData) || mainData.Length == 0)
+            return tiles;
+
+        int cellSize = 16;
+        for (int i = 0; i < 64 * 64; i++)
+        {
+            int off = i * cellSize;
+            if (off + 4 > mainData.Length) break;
+            uint val = BitConverter.ToUInt32(mainData.AsSpan(off, 4));
+            if (val != 0)
+            {
+                int x = i % 64;
+                int y = i / 64;
+                tiles.Add((x, y));
+            }
+        }
+
+        return tiles;
     }
 
     private static bool ReadMainPayload(byte[] wdtData, out byte[] mainData)
@@ -146,7 +169,7 @@ public static class AlphaWdtReader
         if (!ReadMainPayload(wdtData, out byte[] mainData))
             return false;
 
-        int mainEntryIndex = tileX * 64 + tileY;
+        int mainEntryIndex = tileY * 64 + tileX;
         int entryOffset = mainEntryIndex * MainEntrySize;
         if (entryOffset < 0 || entryOffset + sizeof(int) > mainData.Length)
             return false;

@@ -1,7 +1,7 @@
 # wow-viewer Complete Porting Roadmap
 
-**Version**: 1.1 — 2026-05-07
-**Status**: Active — Phase C (Converters) IN PROGRESS — AlphaToLk first pass complete
+**Version**: 1.3 — 2026-05-08
+**Status**: Active — Phase C (Converters) IN PROGRESS — AlphaToLk VALIDATED
 **Parent**: `gillijimproject_refactor` → `wow-viewer` full refactor
 
 ---
@@ -22,7 +22,7 @@
                     └──────────┬───────────┘
                                │
                     ┌──────────▼───────────┐
-                    │   WOW Library (2nd)   │  ADT/WDT/WMO/M2/PM4/BLP/DBC readers
+                    │   WOW Library (2nd)   │  ADT/WDT/WMO/M2/PM4/BLP/DBC readers + writers
                     └──────────┬───────────┘
                                │
                     ┌──────────▼───────────┐
@@ -60,27 +60,58 @@ Full Alpha WDT + Retail ADT → NPZ export, validated against real tiles across 
 | FillHeightmapGaps | DONE |
 | 0.6.0 AdtProfile060070Baseline test | NOT YET |
 
-### Phase C: Converters
+### Phase C: Converters ← IN PROGRESS
 
 Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/`:
 
 | Converter | Source | Purpose | Status |
 |-----------|--------|---------|--------|
-| `AlphaToLkConverter` | `WoWMapConverter.Core.Converters` | Alpha 0.5.3 WDT → LK 3.3.5 split ADT | DONE (first pass) |
+| `AlphaToLkConverter` | `WoWMapConverter.Core.Converters` | Alpha 0.5.3 WDT → LK 3.3.5 split ADT | VALIDATED |
 | `LkToAlphaConverter` | `WoWMapConverter.Core.Converters` | LK split ADT → Alpha 0.5.3 monolithic WDT | NOT PORTED |
 | `MdxToM2Converter` | `WoWMapConverter.Core.Converters` | MDX → M2 model format | NOT PORTED |
 | `M2ToMdxConverter` | `WoWMapConverter.Core.Converters` | M2 → MDX model format | NOT PORTED |
 | `WmoV14ToV17Converter` | `WoWMapConverter.Core.Converters` | WMO v14 → v17 (Cata) | NOT PORTED |
 | `WmoV17ToV14Converter` | `WoWMapConverter.Core.Converters` | WMO v17 → v14 | NOT PORTED |
 
-**New wow-viewer files for AlphaToLk**:
-- `WowViewer.Core/Maps/LkAdtData.cs` — domain types for LK ADT output
-- `WowViewer.Core.IO/Maps/WdlWriter.cs` — WDL binary writer
-- `WowViewer.Core.IO/Maps/LkWdtWriter.cs` — LK WDT binary writer
-- `WowViewer.Core.IO/Maps/LkAdtWriter.cs` — LK ADT binary writer
-- `WowViewer.Core.IO/Maps/AlphaToLkConverter.cs` — conversion orchestration
+**New wow-viewer files for AlphaToLk (May 8, 2026)**:
+- `WowViewer.Core/Maps/LkAdtData.cs` — domain types for LK ADT output (`LkAdtData`, `LkMcnkData`, `LkMclyEntry`, `LkMddfEntry`, `LkModfEntry`)
+- `WowViewer.Core.IO/Maps/WdlWriter.cs` — WDL binary writer with `ExtractTileHeightsFromAlpha()` helper
+- `WowViewer.Core.IO/Maps/LkWdtWriter.cs` — LK 3.3.5 WDT binary writer (MVER+MPHD+MAIN+MWMO+MODF)
+- `WowViewer.Core.IO/Maps/LkAdtWriter.cs` — LK 3.3.5 monolithic ADT binary writer (MVER, MHDR with offset patching, MCIN, MTEX, MMDX/MMID, MWMO/MWID, MDDF, MODF, 256 MCNK chunks)
+- `WowViewer.Core.IO/Maps/AlphaToLkConverter.cs` — Conversion orchestration: reads Alpha WDT via `AlphaWdtReader`, converts `AlphaTileData` → `LkAdtData`, writes .wdt + .wdl + .adt files
+- `WowViewer.Tool.Converter/AlphaToLkCommand.cs` — CLI command `convert-alpha-to-lk --input <wdt> --output <dir> [--verbose|-v]`
 
-**Remaining AlphaToLk work**: CLI command, real-data validation, AreaID crosswalk, split ADT support
+**AlphaToLk architecture notes for a fresh chat**:
+- Writer consumes existing `AlphaWdtReader` and `AlphaTileData` — no duplication of read logic
+- Uses `FourCC` from `WowViewer.Core.Chunks` for correct on-disk byte order (reversed for WoW files)
+- MHDR offsets computed via two-pass build: first pass writes chunks and tracks offsets, then patches MHDR and MCIN
+- MCNK position: `posX = -((ChunkSubSize * cx) + ChunkSize * tileX - ChunkSize * 32))`, `posY = -((ChunkSubSize * cy) + ChunkSize * tileY - ChunkSize * 32))`
+- `AlphaWorldModelPlacement` has no `Scale` field; MODF scale defaults to 1.0 (encoded as 1024 in binary)
+- AreaID currently defaults to 0 for all chunks (crosswalk not yet implemented)
+- Split ADT (`_tex0.adt`, `_obj0.adt`) not yet implemented; output is monolithic ADT only
+- WDL writer produces MVER+MWMO+MWID+MODF+MAOF+MARE/MAHO chunks per tile with 17×17 outer + 16×16 inner heights
+
+**AlphaToLk validation results (May 8, 2026)**:
+- PVPZone01 (0.5.5, 25 tiles): 25/25 converted, 0 failed
+- Azeroth (0.5.5, 755 tiles): 755/755 converted, 0 failed (42s)
+- Kalimdor (0.5.5, 972 tiles): 972/972 converted, 0 failed (61s)
+- EmeraldDream (0.5.5, 256 tiles): 256/256 converted, 0 failed
+- Shadowfang (0.5.5, 25 tiles): 25/25 converted, 0 failed
+- WDT output validates with `map inspect` (correct MVER+MPHD+MAIN+MWMO+MODF structure)
+- ADT output validates with `map inspect` (correct MVER+MHDR+MCIN+MTEX+MMDX/MMID+MWMO/MWID+MDDF+MODF+256 MCNK structure)
+- Alpha layer encoding: big-alpha (LK profile), all overlay layers decoded successfully
+- MDDF/MODF placement data preserved with coordinate transform (Azeroth tile 28,28: 410 doodads, 5 WMOs)
+- Bugs fixed during validation: ChunkedFileReader misuse on monolithic WDTs, MHDR/MCIN empty payload, MPHD size mismatch, MAIN index formula (tileX×64+tileY → tileY×64+tileX)
+- Note: 0.5.5.3494 Azeroth has 755 tiles vs 0.5.3.3368's 685; the extra ~70 tiles were added in the 0.5.5 patch
+
+**AlphaToLk remaining work for next chat**:
+1. **AreaID crosswalk** — `AreaIdMapper` already exists in `WowViewer.Core.IO/Dbc/AreaIdMapper.cs` (995 lines) with embedded `area_crosswalk.csv`. Needs wiring into `AlphaToLkConverter` and CLI `--area-crosswalk-path` option
+2. **Split ADT support** — AlphaToLk currently writes monolithic ADTs. Cataclysm+ uses `_tex0.adt` and `_obj0.adt` splits
+
+**LkToAlpha remaining work** (for when we get to it):
+- Reference: `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/LkToAlphaConverter.cs` (~965 lines) + `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Builders/AlphaMainBuilder.cs`, `AlphaMcnkBuilder.cs`, `AlphaMhdrBuilder.cs`
+- Needs: Alpha WDT/ADT **writer** infrastructure (new), Alpha MCNK writer with 15KB limit, Alpha MHDR builder
+- LkToAlpha reads LK ADT, extracts per-chunk data, writes Alpha monolithic WDT with embedded ADTs
 
 **Validation**: Bidirectional round-trip preserves data. User has already proven `2.0.0→0.5.3` and `3.3.5→Alpha WDT` conversions work from prior screenshots.
 
@@ -182,11 +213,12 @@ Each model trains independently. If H3 improves, only H3's checkpoint changes. F
 | `extract-unified` | New | DONE |
 | `harvest-map-mpq` | New | DONE |
 | `harvest-tile / harvest-map` | New | DONE (disk paths) |
+| `convert-alpha-to-lk` | New (May 8) | VALIDATED
 | `ml-list-maps` | `WoWMapConverter.Cli.RunMlListMapsAsync` | NOT PORTED |
 | `ml-export` | `VlmDatasetExporter.ExportMapAsync` | NOT PORTED (replaced by direct NPZ) |
 | `ml-harvest` | `MkDatasetHarvester.HarvestAsync` | NOT PORTED |
 | `ml-bake / ml-bake-heightmap` | `MinimapBakeService` / `HeightmapBakeService` | NOT PORTED |
-| `convert` (alpha→lk, lk→alpha) | `WoWMapConverter.Cli` converters | NOT PORTED |
+| `convert` (lk→alpha) | `WoWMapConverter.Cli` converters | NOT PORTED |
 | `inspect` (PM4, ADT, WDT) | Existing `WowViewer.Tool.Inspect` | PARTIAL |
 | `synthetic-minimap` | `MinimapBakeService` | STUB (not wired) |
 | `ml-corpus / ml-batch` | `export_ml_corpus.ps1` | NOT PORTED |
@@ -197,13 +229,13 @@ Each model trains independently. If H3 improves, only H3's checkpoint changes. F
 
 | wow-viewer project | Owns |
 |--------------------|------|
-| `WowViewer.Core` | Domain types, `ITerrainAdapter`, `TileLoadResult`, `TerrainTileTensorPack` |
-| `WowViewer.Core.IO` | All file readers: ADT, WDT, WMO, M2, BLP, DBC, MPQ, PM4, WDL, WL |
-| `WowViewer.Core.IO.Maps` | `AlphaWdtReader`, `AdtTensorPackBuilder`, `AlphaTensorPackBuilder`, `AlphaTerrainAdapter`, `NpzTileSerializer`, `WlFileReader`, `Md5TranslateResolver` |
+| `WowViewer.Core` | Domain types, `ITerrainAdapter`, `TileLoadResult`, `TerrainTileTensorPack`, `LkAdtData`, `LkMcnkData` |
+| `WowViewer.Core.IO` | All file readers + writers: ADT, WDT, WMO, M2, BLP, DBC, MPQ, PM4, WDL, WL |
+| `WowViewer.Core.IO.Maps` | `AlphaWdtReader`, `AdtTensorPackBuilder`, `AlphaTensorPackBuilder`, `AlphaTerrainAdapter`, `AdtTerrainWriter`, `AdtPlacementWriter`, `NpzTileSerializer`, `WlFileReader`, `Md5TranslateResolver`, `AlphaToLkConverter`, `LkAdtWriter`, `LkWdtWriter`, `WdlWriter` |
 | `WowViewer.Core.PM4` | PM4 format reader, linkage, MPRL, MSCN |
 | `WowViewer.Core.Runtime` | M2 runtime, skin profiles, render passes |
 | `WowViewer.Tool.Harvest` | `extract-unified`, `harvest-map-mpq`, `harvest-tile`, `harvest-map`, `synthetic-minimap` |
-| `WowViewer.Tool.Convert` | Bidirectional format converters |
+| `WowViewer.Tool.Convert` | `convert-alpha-to-lk`, dataset/ML utilities |
 | `WowViewer.Tool.Inspect` | PM4/ADT/WDT format inspection |
 | `WowViewer.App` | Viewer shell, terrain rendering, minimap overlay |
 | `data-harvester/` | Python: training, inference, quilt visualization, NPZ analysis |
@@ -237,7 +269,13 @@ User has demonstrated: terrain data recovery from MCAL/MCLY correlations in spar
 | `gillijimproject_refactor/src/MdxViewer/Terrain/AlphaTerrainAdapter.cs` | Alpha WDT per-chunk extraction |
 | `gillijimproject_refactor/src/MdxViewer/Terrain/StandardTerrainAdapter.cs` | Retail ADT per-chunk extraction (2,289 lines) |
 | `gillijimproject_refactor/src/gillijimproject-csharp/WowFiles/Alpha/` | Alpha WDT/ADT/MCNK low-level parsers |
+| `gillijimproject_refactor/src/gillijimproject-csharp/WowFiles/LichKing/` | LK ADT/MCNK binary format (AdtLk.cs, McnkLk.cs, Mhdr.cs) |
+| `gillijimproject_refactor/src/gillijimproject-csharp/WowFiles/ChunkHeaders.cs` | McnkHeader struct (0x80 bytes), McnkAlphaHeader struct |
 | `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/` | Converters, VLM pipeline, minimap services |
+| `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/AlphaToLkConverter.cs` | Reference AlphaToLk implementation (930 lines, WDL generation, AreaID crosswalk) |
+| `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/LkToAlphaConverter.cs` | Reference LkToAlpha implementation (~965 lines, Alpha MCNK builder) |
+| `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Builders/` | AlphaMainBuilder, AlphaMcnkBuilder, AlphaMhdrBuilder |
+| `gillijimproject_refactor/src/WoWRollback/Core/Services/PM4/Wdt335Writer.cs` | Reference LK WDT writer |
 | `gillijimproject_refactor/src/MdxViewer/Rendering/` | OpenGL renderer (M2, WMO, terrain) |
 | `gillijimproject_refactor/scripts/` | Python: export orchestrator, curation, training |
 
@@ -249,7 +287,7 @@ Priorities flow from foundation upward. Library + dataset tooling first, renderi
 
 ### Priority 1: Library + Dataset ← CURRENT FOCUS
 - **Phase B** (Harvest Pipeline) — DONE
-- **Phase C** (Converters) — bidirectional format conversion
+- **Phase C** (Converters) — AlphaToLk writer+CLI done, validation and remaining converters pending
 - **Phase D** (Deep Format Readers) — complete every file reader port
 - **Phase E** (DBC Metadata) — enrich shards with database-driven metadata
 - **Phase F** (Placement Provenance) — MCRF arrays, PM4, prefab library

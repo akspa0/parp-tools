@@ -1,5 +1,4 @@
 using System.Numerics;
-using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -53,24 +52,9 @@ public static class AlphaToLkConverter
             if (!AlphaWdtReader.IsAlphaWdt(wdtData))
                 return new AlphaToLkConversionResult { Success = false, Error = "Not an Alpha WDT file." };
 
-            byte[] mainData = ReadMainData(wdtData);
-            if (mainData.Length == 0)
-                return new AlphaToLkConversionResult { Success = false, Error = "Could not read MAIN data from WDT." };
-
-            var existingTiles = new HashSet<(int, int)>();
-            int cellSize = 16;
-            for (int i = 0; i < 64 * 64; i++)
-            {
-                int off = i * cellSize;
-                if (off + 4 > mainData.Length) break;
-                uint val = BitConverter.ToUInt32(mainData.AsSpan(off, 4));
-                if (val != 0)
-                {
-                    int x = i % 64;
-                    int y = i / 64;
-                    existingTiles.Add((x, y));
-                }
-            }
+            var existingTiles = AlphaWdtReader.ReadExistingTiles(wdtData);
+            if (existingTiles.Count == 0)
+                return new AlphaToLkConversionResult { Success = false, Error = "No existing tiles found in WDT." };
 
             byte[] wdtLk = LkWdtWriter.Build(existingTiles);
             File.WriteAllBytes(Path.Combine(outputDir, $"{mapName}.wdt"), wdtLk);
@@ -503,27 +487,6 @@ public static class AlphaToLkConverter
     {
         bool hasShadow = tile.McshShadowMask256 != null || tile.McshShadowMask1024 != null;
         return hasShadow ? 0x01u : 0x00u;
-    }
-
-    private static byte[] ReadMainData(byte[] wdtData)
-    {
-        using var ms = new MemoryStream(wdtData, writable: false);
-        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(ms);
-        if (chunks.Count == 0)
-            return [];
-
-        foreach (var chunk in chunks)
-        {
-            if (chunk.Header.Id == MapChunkIds.Main)
-            {
-                ms.Position = chunk.DataOffset;
-                byte[] data = new byte[chunk.Header.Size];
-                ms.ReadExactly(data);
-                return data;
-            }
-        }
-
-        return [];
     }
 
     private const int McvtFloatCount = 145;

@@ -63,7 +63,6 @@ public static class LkWdtWriter
         WriteChunk(bw, "MPHD", 32, w =>
         {
             w.Write((uint)mphdFlags);
-            w.Write(0u);
             for (int i = 0; i < 7; i++)
                 w.Write(0u);
         });

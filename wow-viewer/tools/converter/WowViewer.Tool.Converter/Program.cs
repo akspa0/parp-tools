@@ -120,6 +120,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "mine-v10-prefab-cells":
 		V10PrefabCellCommand.Run(tail);
 		break;
+	case "convert-alpha-to-lk":
+		AlphaToLkCommand.Run(tail);
+		break;
 	default:
 		Console.Error.WriteLine($"Unknown converter command '{command}'.");
 		ShowUsage();
@@ -4485,6 +4488,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter ml-repair-normalmaps --dataset-root <path> [--report <report.json>] [--limit <count>] [--rewrite-existing] [--rewrite-when-local-differs <mae>] [--only-liquid-tiles] [--dry-run]");
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input <minimap.png> --mask <liquid-mask.png> --output <no-liquid.png>");
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input-dir <images> --mask-dir <masks> --output-dir <images>");
+	Console.WriteLine("  wowviewer-converter convert-alpha-to-lk --input <Azeroth.wdt> --output <output-dir> [--verbose|-v]");
 }
 
 file sealed record V10TensorExtractionResult(

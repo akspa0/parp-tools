@@ -60,10 +60,10 @@ public static class LkAdtWriter
 
         WriteChunk(bw, "MVER", mverData.Length, w => w.Write(mverData));
         long mhdrPosition = ms.Position;
-        WriteChunk(bw, "MHDR", MhdrDataSize, w => { });
+        WriteChunk(bw, "MHDR", MhdrDataSize, w => w.Write(new byte[MhdrDataSize]));
 
         long mcinStart = ms.Position + ChunkHeaderSize;
-        WriteChunk(bw, "MCIN", McinDataSize, w => { });
+        WriteChunk(bw, "MCIN", McinDataSize, w => w.Write(new byte[McinDataSize]));
 
         long currentOffset = ms.Position;
 

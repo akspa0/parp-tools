@@ -25,18 +25,29 @@
 | wow-viewer: Harvest --export-placements | DONE |
 | wow-viewer: Alpha object/precise masks | DONE |
 | wow-viewer: Alpha shadow residual mask | DONE |
-| **Alpha 0.5.3/0.5.5: all 11 signals** | **DONE** — height, normals, MCAL/MCLY, MCSH, holes, objects, shadow_residual, minimap, WL liquid |
-| **Retail 3.x: all 11 signals** | **DONE** — + object/precise masks, texture_names, shadow_residual |
+| **Alpha 0.5.3/0.5.5: all 11 signals** | **DONE** |
+| **Retail 3.x: all 11 signals** | **DONE** |
 | **Cata 4.0.0: 12 signals** | **DONE** — + MCCV vertex colors |
 | **0.7.0 extraction** | **DONE** — AdtProfile0703694 |
-| **Alpha object mask projection** | **DONE** — tile-relative, rendererX→col, rendererY→row |
-| **Minimap via Md5TranslateResolver** | **DONE** — .trs for retail, .txt for Alpha |
+| **Alpha object mask projection** | **DONE** |
+| **Minimap via Md5TranslateResolver** | **DONE** |
 | **All staged clients pass** | **DONE** — 0.5.3, 0.5.5, 0.7.0, 3.0.1, 3.3.5, 4.0.0 |
-| **Placement flat arrays in NPZ** | **DONE** — placement_mddf_data [N,9], placement_modf_data [N,14] |
-| **Placement model names resolved** | **DONE** — placement_mddf_names / placement_modf_names in metadata JSON |
-| **BuildKey provenance** | **DONE** — "alpha" tag or build version populated |
-| **WL liquid for Alpha** | **DONE** — WLW/WLM/WLQ/WLL fallback when MCLQ missing |
-| **Coordinate fixes** | **DONE** — cx/cy swap (Alpha), base height 0x70 (LK), FillHeightmapGaps, MCLY +8 skip |
+| **Placement flat arrays in NPZ** | **DONE** |
+| **Placement model names resolved** | **DONE** |
+| **BuildKey provenance** | **DONE** |
+| **WL* loose-file liquid fallback** | **DONE** |
+| **Coordinate fixes** | **DONE** |
+| **Phase C: AlphaToLk writer infrastructure** | **DONE** — WdlWriter, LkWdtWriter, LkAdtWriter, AlphaToLkConverter |
+| **Phase C: AlphaToLk CLI command** | **DONE** — convert-alpha-to-lk in WowViewer.Tool.Converter |
+| **Phase C: AlphaToLk real-data validation** | **DONE** — 755/755 Azeroth (0.5.5), 972/972 Kalimdor, 256/256 EmeraldDream, 25/25 PVPZone01, 25/25 Shadowfang |
+
+## IN PROGRESS
+| What | Status |
+|------|--------|
+| Phase C: AlphaToLk AreaID crosswalk | NOT YET — `AreaIdMapper` exists in `WowViewer.Core.IO/Dbc/`, not yet wired to converter |
+| Phase C: LkToAlpha converter | NOT PORTED |
+| Phase C: Mdx↔M2 converters | NOT PORTED |
+| Phase C: Wmo v14↔v17 converters | NOT PORTED |
 
 ## NOT YET
 - Explicit Alpha 0.6.0 split ADT validation via `AdtProfile060070Baseline`
@@ -48,3 +59,9 @@
 - MODF doodadSet/nameSet resolution
 - PM4 masks for development map build (4.0.0.12304 loose files)
 - Development map extraction pipeline (wow-viewer/test_data/original_development)
+
+## BUGS FIXED IN ALPHAtoLK VALIDATION (2026-05-08)
+1. **ChunkedFileReader crash on monolithic WDTs** — replaced with `AlphaWdtReader.ReadExistingTiles()`
+2. **MHDR/MCIN empty payload** — wrote declared-size chunk headers with 0 data bytes; fixed by writing pre-allocated zero arrays
+3. **MPHD size mismatch** — wrote 9 uint32s (36 bytes) but declared 32 bytes; fixed by removing extra `Write(0u)`
+4. **MAIN index formula** — `tileX * 64 + tileY` was wrong; fixed to `tileY * 64 + tileX` (row-major with y as row). This caused 420/755 Azeroth tiles to fail before the fix.
