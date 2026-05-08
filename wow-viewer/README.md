@@ -1,157 +1,280 @@
 # wow-viewer
 
-Shared WoW file I/O, dataset generation, and terrain AI training pipeline.
+`wow-viewer` is the active standalone codebase for:
 
----
+- reading World of Warcraft terrain and client data across multiple eras
+- exporting model-ready NPZ terrain shards from real game clients
+- inspecting formats like ADT, WDT, PM4, BLP, WMO, MDX, and M2
+- converting Alpha-era maps to later formats
+- serving as the foundation for the V14 terrain-model pipeline
 
-## Terrain Adapter System (Phase A Complete)
+It is not a toy viewer prototype anymore. The important part today is the data and format pipeline.
 
-The terrain adapter system provides a unified interface for loading terrain tiles from any WoW format:
+## What It Does
 
-- **`ITerrainAdapter`** — interface for tile loading, placement resolution, and name tables
-- **`AlphaTerrainAdapter`** — bridges `AlphaWdtReader` → per-chunk `TerrainChunkData` (Alpha 0.5.3)
-- **`TerrainTileTensorPack.ToTileLoadResult()`** — converts LK flat-array format → `TerrainChunkData` 
-- **`AlphaTileData.ToTileLoadResult()`** — converts Alpha flat arrays → `TerrainChunkData`
+The project currently has four practical jobs:
 
-**Key types:** `TerrainChunkData`, `TerrainLayer`, `LiquidChunkData`, `MddfPlacement`, `ModfPlacement`, `TileLoadResult`
+1. **Shared WoW file I/O**
+   Read Alpha, pre-release, Wrath, and Cataclysm terrain formats from staged clients.
+2. **Dataset generation**
+   Export NPZ shards with height, normals, alpha layers, liquid, masks, minimap, and placement-derived signals.
+3. **Inspection and validation**
+   Probe client files and generated outputs without opening the old legacy tools.
+4. **Format conversion**
+   Convert Alpha monolithic WDT terrain to LK ADT/WDT/WDL output.
 
-See `docs/architecture/wow-viewer-library-completeness-plan-2026-05-06.md` for the full phased plan.
+## Current Status
 
-### Current Harvest Status
+### Done
 
-- `WowViewer.Tool.Harvest extract-unified` is working for staged Alpha monolithic WDT tiles on `0.5.3` and `0.5.5`.
-- `AdtTensorPackBuilder` / harvest tensor-pack extraction is working on staged `0.7.0`, `3.0.1`, `3.3.5`, and `4.0.0.11927`.
-- `TerrainTileTensorPack` now carries object masks, precise object masks, shadow residual, placement arrays, and the later-build PM4/liquid signals used by the current training/export path.
-- Explicit `0.6.0` split-ADT validation is still open.
+- Unified terrain type system
+- Native MPQ archive reader (`NativeMpqService`)
+- Harvest/tensor-pack extraction for staged clients
+- NPZ shard serialization
+- Alpha placement export and resolved model names
+- WL liquid fallback
+- Minimap lookup via `md5translate`
+- AlphaToLk conversion pipeline
 
----
+### Validated
 
-## V11 Terrain AI
+- `0.5.3.3368`
+- `0.5.5.3494`
+- `0.7.0.3694`
+- `3.0.1.8303`
+- `3.3.5.12340`
+- `4.0.0.11927`
 
-V11 is a single-stage multi-task ConvNeXt-based terrain model. Replaces the broken v10 two-stage pipeline.
+### Important Workflow Rule
 
-### Extraction
+For full dataset preparation, use the **harvest-first** path.
 
-Two working paths — both filesystem-only, no archive headaches:
+Use:
 
-**V9 pipeline** (MCAL/MCLY now included via `dataset-build-cache`):
-```
-wowviewer-converter dataset-scan --client-root <staged_client> --map <map> --build <label>
-wowviewer-converter dataset-audit --input scan.json --output audit.json
-wowviewer-converter dataset-curate --input audit.json --output curated.json
-wowviewer-converter dataset-build-cache --input curated.json --output-dir <cache_dir>
-```
+- `WowViewer.Tool.Harvest`
+- `harvest-map-mpq`
+- staged clients under `output\tmp\wowarchive-clients\...`
 
-**V10-native single-pass** (filesystem, no temp ADTs):
-```
-wowviewer-converter dataset-build-v10-stage1 --input-dir <adt_dir> --minimap-root <minimap_dir> --output-dir <out_dir>
-```
+Do **not** use the older converter-side `dataset-scan` / `dataset-audit` / `dataset-build-cache` chain as the primary shard builder for V14 work. Those commands are legacy manifest/audit helpers, not the canonical full-signal extraction path.
 
-Both produce NPZ shards with these signals:
+## Supported Client Eras
 
-| Signal | Shape | Notes |
-|--------|-------|-------|
-| `minimap_rgb_256` | 256×256×3 | uint8 |
-| `height_257` | 257×257 | Full height |
-| `height_65` | 65×65 | Mid height |
-| `height_17` | 17×17 | Coarse height |
-| `mcal_alpha_pack_256` | 1024×1024×4 → 256×256×4 at load | Alpha blend weights |
-| `mcly_texture_ids` | 16×16×4 | Texture file IDs per layer |
-| `mcly_layer_mask` | 16×16×4 | Active layer flags |
-| `mcnr_normal_xyz` | 257×257×3 | Normals |
-| `object_mask_257` | 257×257 | Placement footprints |
-| `object_precise_mask_257` | 257×257 | Precise footprints |
-| `pm4_path_mask` | 257×257 | Pathfinding lines |
-| `pm4_building_footprint_mask` | 257×257 | Building shapes |
-| `hole_mask_16` | 16×16 | Mesh holes |
+`wow-viewer` is built around real client data, not mock assets.
 
-### Training
+| Era | Example build | Notes |
+|---|---|---|
+| Alpha | `0.5.3.3368`, `0.5.5.3494` | Monolithic WDT terrain |
+| Pre-release | `0.7.0.3694` | Early retail-style terrain |
+| Wrath pre-release | `3.0.1.8303` | Archive-backed validation target |
+| Wrath retail | `3.3.5.12340` | Main LK validation target |
+| Cataclysm beta | `4.0.0.11927` | Split ADT / MCCV-era target |
 
-```
-pip install timm accelerate lion-pytorch
-python scripts/train_v11.py <shard_dir_or_manifest> --output-dir runs/v11 --epochs 300 --batch-size 32
-```
+## Quick Start
 
-**Architecture:** ConvNeXt V2 Tiny encoder (28.6M) + U-Net decoder + multi-task heads. 35.5M params total.
-
-| Head | Output | Loss |
-|------|--------|------|
-| height_17 | 17×17×1 | L1 + gradient |
-| height_65 | 65×65×1 | L1 + gradient |
-| height_257 | 257×257×1 | L1 + gradient |
-| mcal_alpha | 256×256×4 | L1 (sigmoid) |
-| mcly_class | 16×16×N | CE |
-| hole_mask | 16×16×1 | BCE |
-
-**26 input channels:** minimap(3) + mcal(4) + normals(3) + mccv(3, 3x dropout) + coarse_height(1) + liquid(2) + objects(2) + pm4(3) + hole(1) + derived(4).
-
-**Key features:** EMA, uncertainty-weighted loss, cosine+warmup schedule, signal dropout (15%), gradient clipping, LRU cache (2GB).
-
-### Inference
-
-```
-python scripts/infer_v11.py <checkpoint/best_ema.pt> <shard_dir> --export-obj --output-dir out
-```
-
-Outputs per tile: NPZ with predicted arrays, OBJ+MTL+texture mesh, JSON report with MAE.
-
----
-
-## Shared Libraries
-
-| Library | Contents |
-|---------|----------|
-| `WowViewer.Core` | Core contracts, maths, dataset manifests, tensor-pack models |
-| `WowViewer.Core.IO` | File readers, chunk parsers, archive virtualization, ADT/WDT/WMO/BLP/DBC |
-| `WowViewer.Core.Runtime` | Runtime consumers, world-session state, bridge code |
-| `WowViewer.Core.PM4` | PM4 parser — the most mature format library |
-
-New format work lands in `Core` / `Core.IO` first, surfaces through `WowViewer.Tool.Converter` or `WowViewer.Tool.Inspect`.
-
----
-
-## Tools
-
-### Converter CLI
-```
-dotnet run --project .\tools\converter\WowViewer.Tool.Converter
-```
-
-Commands: `dataset-scan`, `dataset-merge`, `dataset-audit`, `dataset-curate`, `dataset-build-cache`, `dataset-build-v10-stage1`, `extract-v10-tensors`, `detect`, `export-tex-json`, `mine-v10-*`, `label-v10-mcly`.
-
-### Inspect CLI
-```
-dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect
-```
-
-Read-only probing: `archive`, `blp`, `m2`, `mdx`, `map`, `lit`, `pm4`, `wmo`.
-
-### Harvest CLI
-```
-dotnet run --project .\tools\harvest\WowViewer.Tool.Harvest
-```
-
-MPQ-backed extraction: `extract-unified` — reads WDT/ADT from MPQ archives via `NativeMpqService`, routes through `AlphaWdtReader` or `AdtTensorPackBuilder`, outputs NPZ shards, and can emit placement catalogs with `--export-placements`.
-
-### Desktop App (Paused)
-`WowViewer.App` is on hold until the V11 terrain model is trained and validated.
-
----
-
-## Prerequisites
-
-- .NET 10 SDK
-- PowerShell on Windows
-- Python 3.11+ with PyTorch, timm, accelerate
-- Your own lawful game data
-
-## Build
+### 1. Build
 
 ```powershell
-.\scripts\bootstrap.ps1
-dotnet build .\WowViewer.slnx -c Debug
+dotnet build .\wow-viewer\WowViewer.slnx -c Debug
 ```
+
+### 2. Prepare a Full Multi-Client Dataset
+
+This is the canonical batch command.
+
+```powershell
+pwsh -File ".\wow-viewer\scripts\run_full_shard_batch.ps1" `
+  -OutputDir "I:\parp\parp-tools\wow-viewer\output\datasets\full_shard_batch_staged_native"
+```
+
+This script:
+
+- discovers maps from `Map.dbc`
+- reads only staged clients from `output\tmp\wowarchive-clients\...`
+- harvests NPZ shards with `harvest-map-mpq`
+- writes a harvest manifest
+- optionally selects validation samples from the harvested NPZ files
+- optionally renders visualization PNGs from the sampled shards
+
+### 3. Watch Progress
+
+```powershell
+Get-Content "I:\parp\parp-tools\wow-viewer\output\datasets\full_shard_batch_staged_native.log" -Wait -Tail 50
+```
+
+### 4. Visualize Harvested NPZ Shards
+
+```powershell
+cd .\wow-viewer\data-harvester
+uv run python scripts\visualize_npz.py "I:\parp\parp-tools\wow-viewer\output\datasets\full_shard_batch_staged_native\validation_samples" --output-dir "I:\parp\parp-tools\wow-viewer\output\datasets\full_shard_batch_staged_native\visualizations"
+```
+
+## Output Layout
+
+The modern dataset workflow writes under `wow-viewer\output\datasets\...`.
+
+Typical structure:
+
+```text
+wow-viewer/output/datasets/full_shard_batch_staged_native/
+  map_lists/
+  manifests/
+  shards/
+    0_5_3_3368/
+      Azeroth/
+      Kalimdor/
+    3_3_5_12340/
+      Azeroth/
+      Northrend/
+      ...
+  validation_samples/
+  visualizations/
+```
+
+## Main Tools
+
+### Harvest CLI
+
+```powershell
+dotnet run --project .\wow-viewer\tools\harvest\WowViewer.Tool.Harvest\WowViewer.Tool.Harvest.csproj -c Debug -- <command>
+```
+
+Key commands:
+
+- `harvest-map-mpq`
+- `harvest-map`
+- `harvest-tile`
+- `extract-unified`
+- `synthetic-minimap`
+
+Examples:
+
+```powershell
+dotnet run --project .\wow-viewer\tools\harvest\WowViewer.Tool.Harvest\WowViewer.Tool.Harvest.csproj -c Debug -- harvest-map-mpq --client-root "I:\parp\parp-tools\output\tmp\wowarchive-clients\0_5_5_3494\World of Warcraft" --map Azeroth --output-dir "I:\parp\parp-tools\wow-viewer\output\datasets\demo\0_5_5_3494\Azeroth"
+```
+
+```powershell
+dotnet run --project .\wow-viewer\tools\harvest\WowViewer.Tool.Harvest\WowViewer.Tool.Harvest.csproj -c Debug -- extract-unified --client-root "I:\parp\parp-tools\output\tmp\wowarchive-clients\3_3_5_12340\World of Warcraft" --map Azeroth --tile-x 32 --tile-y 32 --output "I:\parp\parp-tools\wow-viewer\output\datasets\single_tile\Azeroth_32_32.npz"
+```
+
+### Inspect CLI
+
+```powershell
+dotnet run --project .\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -c Debug -- <command>
+```
+
+Useful commands:
+
+- `map inspect`
+- `pm4 inspect`
+- `pm4 audit`
+- `blp inspect`
+- `wmo inspect`
+- `m2 inspect`
+- `mdx inspect`
+
+Example:
+
+```powershell
+dotnet run --project .\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -c Debug -- map inspect --input "I:\parp\parp-tools\wow-viewer\output\datasets\alpha_to_lk\Azeroth\Azeroth_32_32.adt"
+```
+
+### Converter CLI
+
+```powershell
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- <command>
+```
+
+Current important commands:
+
+- `convert-alpha-to-lk`
+- `dataset-list-maps`
+- `detect`
+
+Example:
+
+```powershell
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-alpha-to-lk --input "I:\parp\parp-tools\datasets\0_5_5_3494\Azeroth\Azeroth.wdt" --output "I:\parp\parp-tools\wow-viewer\output\datasets\alpha_to_lk\Azeroth"
+```
+
+## Data Signals in NPZ Shards
+
+Depending on build and map contents, harvested shards can include:
+
+- `height_257`
+- `height_129`
+- `height_65`
+- `height_33`
+- `height_17`
+- `mcnr_normal_xyz`
+- `mcal_alpha_pack_256`
+- `mcly_texture_ids`
+- `mcly_layer_mask`
+- `hole_mask_16`
+- `minimap_rgb_256`
+- `mclq_surface_height`
+- `mclq_type_mask`
+- object and placement-derived masks
+- metadata and provenance fields
+
+This is the real training contract. The point is to preserve decoded game signals, not render pretty screenshots and pretend they are ground truth.
+
+## AlphaToLk Conversion
+
+The Alpha-to-LK terrain converter is validated.
+
+Examples already proven:
+
+- `0.5.5` Azeroth: `755/755` tiles
+- `0.5.5` Kalimdor: `972/972` tiles
+- `0.5.5` EmeraldDream: `256/256` tiles
+
+Still open:
+
+- AreaID crosswalk wiring
+- split ADT output for later clients
+- reverse `LkToAlpha` port
+
+## Repository Layout
+
+| Path | Purpose |
+|---|---|
+| `src/core/WowViewer.Core` | shared contracts, terrain models, dataset manifests |
+| `src/core/WowViewer.Core.IO` | file readers, writers, archive access, DBC helpers |
+| `src/core/WowViewer.Core.PM4` | PM4 library |
+| `src/core/WowViewer.Core.Runtime` | runtime-side consumers |
+| `tools/harvest` | canonical NPZ shard builder |
+| `tools/inspect` | format inspection and validation |
+| `tools/converter` | converters and some legacy helper commands |
+| `data-harvester/scripts` | Python visualization and validation helpers |
+| `output/datasets` | canonical dataset output root |
+
+## What To Show People
+
+If you want a short demo flow:
+
+1. Run `harvest-map-mpq` on a staged client map.
+2. Open one generated `.npz` with `visualize_npz.py`.
+3. Show that the shard contains real decoded terrain signals, not screenshots.
+4. Show `convert-alpha-to-lk` on an Alpha WDT.
+5. Show `map inspect` validating the produced files.
+
+That tells the actual story of the project much better than waving around stale one-off tools.
+
+## Development Notes
+
+- staged clients under `output\tmp\wowarchive-clients\...` are the canonical archive-backed inputs
+- real dataset outputs belong under `wow-viewer\output\datasets\...`
+- use `uv` for Python under `wow-viewer\data-harvester`
+- bring your own lawful game data
+
+## See Also
+
+- `docs/architecture/wow-viewer-full-porting-roadmap.md`
+- `docs/architecture/v14-model-and-refactor-plan-2026-05-06.md`
+- workspace `AGENTS.md`
 
 ## Data Policy
 
-Bring Your Own Data. Do not distribute proprietary game data, generated corpora, or model outputs derived from copyrighted sources.
+Bring Your Own Data.
+
+Do not distribute proprietary client data, harvested corpora, or derived outputs from copyrighted game assets.
