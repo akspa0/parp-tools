@@ -322,7 +322,7 @@ internal static class LkToAlphaCommand
             Console.WriteLine($"  Elapsed:   {sw.ElapsedMilliseconds}ms");
 
             if (targetFileSet != null)
-                Console.WriteLine($"  Assets:   {missingModelNames} MDX + {missingWmoNames} WMO placements filtered (missing in target)");
+                Console.WriteLine($"  Assets:   {missingModelNames} MDX + {missingWmoNames} WMO placements mapped to placeholders ({PlaceholderMdx}, {PlaceholderWmo})");
 
             if (warnings.Count > 0)
             {
@@ -374,12 +374,15 @@ internal static class LkToAlphaCommand
     }
 
 
-    private static (Dictionary<string, LkMddfEntry> models, Dictionary<string, LkModfEntry> wmos, int skippedModels, int skippedWmos)
+    private const string PlaceholderMdx = "World\\ArtTest\\Boxtest\\xyz.mdx";
+    private const string PlaceholderWmo = "World\\wmo\\Dungeon\\test\\missingwmo.wmo";
+
+    private static (Dictionary<string, LkMddfEntry> models, Dictionary<string, LkModfEntry> wmos, int mappedModels, int mappedWmos)
         FilterPlacements(LkAdtData adtData, HashSet<string> targetFileSet)
     {
         var filteredModelPaths = new Dictionary<string, LkMddfEntry>(StringComparer.OrdinalIgnoreCase);
         var filteredWmoPaths = new Dictionary<string, LkModfEntry>(StringComparer.OrdinalIgnoreCase);
-        int skippedModels = 0, skippedWmos = 0;
+        int mappedModels = 0, mappedWmos = 0;
 
         for (int i = 0; i < adtData.ModelPlacements.Count; i++)
         {
@@ -388,10 +391,19 @@ internal static class LkToAlphaCommand
                 ? adtData.ModelNames[p.NameId] : $"unknown_{p.NameId}";
 
             if (targetFileSet.Contains(path) || targetFileSet.Contains(path.Replace('\\', '/')))
+            {
                 filteredModelPaths.TryAdd(path, p);
+            }
             else
-                skippedModels++;
+            {
+                filteredModelPaths.TryAdd(PlaceholderMdx, new LkMddfEntry(
+                    0, p.UniqueId, p.Position, p.Rotation, p.Scale));
+                mappedModels++;
+            }
         }
+
+        if (!filteredModelPaths.ContainsKey(PlaceholderMdx) && filteredModelPaths.Count > 0)
+            filteredModelPaths[PlaceholderMdx] = filteredModelPaths.Values.First();
 
         for (int i = 0; i < adtData.WorldModelPlacements.Count; i++)
         {
@@ -400,12 +412,22 @@ internal static class LkToAlphaCommand
                 ? adtData.WorldModelNames[p.NameId] : $"unknown_{p.NameId}";
 
             if (targetFileSet.Contains(path) || targetFileSet.Contains(path.Replace('\\', '/')))
+            {
                 filteredWmoPaths.TryAdd(path, p);
+            }
             else
-                skippedWmos++;
+            {
+                filteredWmoPaths.TryAdd(PlaceholderWmo, new LkModfEntry(
+                    0, p.UniqueId, p.Position, p.Rotation,
+                    p.BoundsMin, p.BoundsMax, p.Flags, p.DoodadSet, p.NameSet, p.Scale));
+                mappedWmos++;
+            }
         }
 
-        return (filteredModelPaths, filteredWmoPaths, skippedModels, skippedWmos);
+        if (!filteredWmoPaths.ContainsKey(PlaceholderWmo) && filteredWmoPaths.Count > 0)
+            filteredWmoPaths[PlaceholderWmo] = filteredWmoPaths.Values.First();
+
+        return (filteredModelPaths, filteredWmoPaths, mappedModels, mappedWmos);
     }
 
     private static HashSet<string> ScanAlphaClientFiles(string clientRoot)
@@ -420,6 +442,7 @@ internal static class LkToAlphaCommand
 
         try
         {
+            // Scan Alpha per-asset wrapper files
             foreach (string mpqFile in Directory.EnumerateFiles(dataDir, "*.mpq", SearchOption.AllDirectories)
                 .Concat(Directory.EnumerateFiles(dataDir, "*.MPQ", SearchOption.AllDirectories)))
             {
@@ -435,15 +458,25 @@ internal static class LkToAlphaCommand
                 }
                 if (matchedSuffix == "") continue;
 
-                // Strip .MPQ suffix to get virtual path
                 string relative = Path.GetRelativePath(dataDir, mpqFile);
-                string virtualPath = relative[..^4]; // remove .MPQ
-
-                // Also strip the extension variant to get the base path
-                // e.g., World/wmo/Azeroth/Building/test.wmo.MPQ → World/wmo/Azeroth/Building/test.wmo
+                string virtualPath = relative[..^4];
                 set.Add(virtualPath);
                 set.Add(virtualPath.Replace('\\', '/'));
             }
+
+            // Load main MPQ archives to find MDX/M2 files stored inside them
+            try
+            {
+                using var catalog = new NativeMpqService();
+                catalog.LoadArchives([clientRoot]);
+                var mainFiles = catalog.GetAllKnownFiles();
+                foreach (string f in mainFiles)
+                {
+                    set.Add(f);
+                    set.Add(f.Replace('/', '\\'));
+                }
+            }
+            catch { }
         }
         catch { }
 
