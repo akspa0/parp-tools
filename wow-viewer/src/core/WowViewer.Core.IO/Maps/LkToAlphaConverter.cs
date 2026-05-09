@@ -138,7 +138,7 @@ public static class LkToAlphaConverter
         return new AlphaTileData(
             $"lk-to-alpha({tileX},{tileY})",
             heightmap,
-            alphaPack256,
+            alphaPack,
             texIds,
             layerMask,
             holes,
@@ -266,44 +266,38 @@ public static class LkToAlphaConverter
 
         if (chunk.AlphaMapData != null && chunk.AlphaMapData.Length > 0)
         {
-            int alphaIdx = 0;
             for (int l = 1; l < chunk.Layers.Count && l < 4; l++)
             {
+                uint alphaOff = chunk.Layers[l].AlphaOffset;
                 bool bigAlpha = (chunk.Layers[l].Flags & 0x200) != 0;
                 bool compressed = (chunk.Layers[l].Flags & 0x10000) != 0;
                 int expectedBytes = bigAlpha ? 4096 : 2048;
 
                 if (compressed)
                 {
-                    byte[]? decoded = DecodeCompressedAlpha(chunk.AlphaMapData, alphaIdx, chunk.AlphaMapData.Length - alphaIdx);
+                    byte[]? decoded = DecodeCompressedAlpha(chunk.AlphaMapData, (int)alphaOff, chunk.AlphaMapData.Length - (int)alphaOff);
                     if (decoded != null)
-                    {
                         InjectAlphaLayer(alphaPack, decoded, cx, cy, l, 64);
-                        alphaIdx += chunk.AlphaMapData.Length - alphaIdx;
-                    }
                     continue;
                 }
 
-                if (alphaIdx + expectedBytes > chunk.AlphaMapData.Length)
-                    break;
+                if (alphaOff + expectedBytes > chunk.AlphaMapData.Length)
+                    continue;
 
                 if (bigAlpha)
                 {
                     for (int y = 0; y < 64; y++)
-                    {
                         for (int x = 0; x < 64; x++)
                         {
-                            int src = alphaIdx + y * 64 + x;
+                            int src = (int)alphaOff + y * 64 + x;
                             alphaPack[cy * 64 + y, cx * 64 + x, l] = chunk.AlphaMapData[src] / 255f;
                         }
-                    }
-                    alphaIdx += 4096;
                 }
                 else
                 {
                     for (int i = 0; i < 2048; i++)
                     {
-                        byte b = chunk.AlphaMapData[alphaIdx + i];
+                        byte b = chunk.AlphaMapData[(int)alphaOff + i];
                         int ax = (i * 2) % 64;
                         int ay = (i * 2) / 64;
                         float lo = ((b & 0x0F) * 17) / 255f;
@@ -312,8 +306,36 @@ public static class LkToAlphaConverter
                         if (ax + 1 < 64)
                             alphaPack[cy * 64 + ay, cx * 64 + ax + 1, l] = hi;
                     }
-                    alphaIdx += 2048;
                 }
+            }
+        }
+
+        // Synthesize residual alpha for overlay layers without direct data
+        // In 4.0.0, the last active overlay layer gets residual coverage:
+        // alpha_last = 1.0 - sum(alpha_prev_overlays)
+        int lastActiveLayer = -1;
+        for (int l = 3; l >= 1; l--)
+        {
+            if (layerMask[cx, cy, l]) { lastActiveLayer = l; break; }
+        }
+        if (lastActiveLayer > 0)
+        {
+            bool hasAlpha = false;
+            for (int y = 0; y < 64 && !hasAlpha; y++)
+                for (int x = 0; x < 64 && !hasAlpha; x++)
+                    if (alphaPack[cy * 64 + y, cx * 64 + x, lastActiveLayer] > 0.01f)
+                        hasAlpha = true;
+
+            if (!hasAlpha)
+            {
+                for (int y = 0; y < 64; y++)
+                    for (int x = 0; x < 64; x++)
+                    {
+                        float sum = 0f;
+                        for (int prev = 1; prev < lastActiveLayer; prev++)
+                            sum += alphaPack[cy * 64 + y, cx * 64 + x, prev];
+                        alphaPack[cy * 64 + y, cx * 64 + x, lastActiveLayer] = Math.Clamp(1f - sum, 0f, 1f);
+                    }
             }
         }
     }

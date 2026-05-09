@@ -34,12 +34,12 @@ public sealed class LkToAlphaRoundTripTests
         Assert.DoesNotContain((5, 3), AlphaWdtReader.ReadExistingTiles(wdt));
 
         int mainPayloadOffset = 36 + 8;
-        int legacyMainIndex = (3 * 64) + 5;
-        int transposedMainIndex = (5 * 64) + 3;
-        int adtOffset = BitConverter.ToInt32(wdt, mainPayloadOffset + legacyMainIndex * 16);
+        int rowMajorIndex = (5 * 64) + 3;
+        int transposedIndex = (3 * 64) + 5;
+        int adtOffset = BitConverter.ToInt32(wdt, mainPayloadOffset + rowMajorIndex * 16);
 
         Assert.True(adtOffset > 0);
-        Assert.Equal(0, BitConverter.ToInt32(wdt, mainPayloadOffset + transposedMainIndex * 16));
+        Assert.Equal(0, BitConverter.ToInt32(wdt, mainPayloadOffset + transposedIndex * 16));
 
         int mhdrDataOffset = adtOffset + 8;
         int mcinRelativeOffset = BitConverter.ToInt32(wdt, mhdrDataOffset + 0x00);

@@ -57,13 +57,13 @@ public static class AlphaWdtWriter
         var mdxNameIndex = BuildNameIndex(allMdxNames);
         var wmoNameIndex = BuildNameIndex(allWmoNames);
 
-        foreach (var kvp in tiles.OrderBy(t => t.Key.Item1 * TilesPerAxis + t.Key.Item2))
+        foreach (var kvp in tiles.OrderBy(t => t.Key.Item2 * TilesPerAxis + t.Key.Item1))
         {
             var (tileX, tileY) = kvp.Key;
             var tile = kvp.Value;
 
             int tileOffset = (int)ms.Position;
-            PatchMainEntry(mainData, tileX * TilesPerAxis + tileY, tileOffset);
+            PatchMainEntry(mainData, tileY * TilesPerAxis + tileX, tileOffset);
             WriteTileData(bw, tile, tileX, tileY, allMdxNames, allWmoNames, mdxNameIndex, wmoNameIndex);
         }
 
@@ -208,7 +208,8 @@ public static class AlphaWdtWriter
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x34), mcshRaw.Length);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x38), 0);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x3C), nMapObjRefs);
-        BinaryPrimitives.WriteUInt16LittleEndian(header.AsSpan(0x40), (ushort)(cx < tile.HoleMask.GetLength(0) && cy < tile.HoleMask.GetLength(1) && tile.HoleMask[cx, cy] ? 1 : 0));
+        bool hasHole = cx < tile.HoleMask.GetLength(0) && cy < tile.HoleMask.GetLength(1) && tile.HoleMask[cx, cy];
+        BinaryPrimitives.WriteUInt16LittleEndian(header.AsSpan(0x40), (ushort)(hasHole ? 0xFFFF : 0));
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x5C), chunkDataSize);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x64), offsLiquid);
 

@@ -55,8 +55,8 @@ public static class AlphaWdtReader
             uint val = BitConverter.ToUInt32(mainData.AsSpan(off, 4));
             if (val != 0)
             {
-                int x = i / 64;
-                int y = i % 64;
+                int x = i % 64;
+                int y = i / 64;
                 tiles.Add((x, y));
             }
         }
@@ -169,7 +169,7 @@ public static class AlphaWdtReader
         if (!ReadMainPayload(wdtData, out byte[] mainData))
             return false;
 
-        int mainEntryIndex = tileX * 64 + tileY;
+        int mainEntryIndex = tileY * 64 + tileX;
         int entryOffset = mainEntryIndex * MainEntrySize;
         if (entryOffset < 0 || entryOffset + sizeof(int) > mainData.Length)
             return false;
@@ -572,8 +572,8 @@ public static class AlphaWdtReader
                 uint mclyFlags = BitConverter.ToUInt32(container, entryOff + 4);
                 uint layerAlphaOff = BitConverter.ToUInt32(container, entryOff + 8);
 
-                texIds[cy, cx, l] = (int)texId;
-                layerMask[cy, cx, l] = true;
+                texIds[cx, cy, l] = (int)texId;
+                layerMask[cx, cy, l] = true;
 
                 if (l > 0 && alphaSrcOffset < mcalData.Length)
                 {
@@ -611,7 +611,7 @@ public static class AlphaWdtReader
             }
         }
 
-        holes[cy, cx] = holeMask != 0;
+        holes[cx, cy] = holeMask != 0;
 
         if (mcshRel >= 0 && mcshSize > 0 && chunkDataBase + mcshRel + mcshSize <= container.Length)
         {
