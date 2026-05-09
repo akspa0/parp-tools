@@ -1,7 +1,7 @@
 # wow-viewer Complete Porting Roadmap
 
-**Version**: 1.3 — 2026-05-08
-**Status**: Active — Phase C (Converters) IN PROGRESS — AlphaToLk VALIDATED
+**Version**: 1.4 — 2026-05-09
+**Status**: Active — Phase C (Converters) IN PROGRESS — AlphaToLk validated, LkToAlpha landed with focused regression proof; NPZ interchange promoted, archival-grade ADT regeneration from shards not yet complete
 **Parent**: `gillijimproject_refactor` → `wow-viewer` full refactor
 
 ---
@@ -40,25 +40,33 @@ Built bottom-up: **library** → **dataset** → **trainer** → **CLI** → **v
 Shared domain types (`TerrainChunkData`, `TerrainLayer`, `LiquidChunkData`, `MddfPlacement`, `ModfPlacement`, `TileLoadResult`, `ITerrainAdapter`, `AlphaTerrainAdapter`, `AlphaTileData`). Both Alpha and retail terrains surface through the same interface.
 
 ### Phase B: Complete Harvest Pipeline ← DONE
-Full Alpha WDT + Retail ADT → NPZ export, validated against real tiles across 6 game clients:
+Full Alpha WDT + Retail ADT → NPZ export, validated against real tiles across 6 game clients. The current shard contract is strong for analysis/training and already preserves undecoded ADT-family chunks as raw blobs, but it is not yet archival-complete for arbitrary ADT regeneration.
 
 | Component | Status |
 |-----------|--------|
 | Alpha WDT (0.5.3/0.5.5): MCVT/MCNR/MCLY/MCAL/MCSH/MCLQ | DONE |
-| Retail ADT (0.7.0/3.x/4.x): MCVT/MCNR/MCLY/MCAL/MCSH/MH2O/MCLQ/MCCV | DONE |
+| Retail ADT (0.7.0/3.x/4.x): MCVT/MCNR/MCLY/MCAL/MCSH/MH2O/MCLQ/MCCV/MCLV/MCMT/MAMP | DONE |
 | MDDF/MODF placement extraction with resolved model names | DONE |
 | Object footprint masks (binary + anti-aliased) | DONE |
 | Shadow residual masks | DONE |
 | Minimap BLP resolution (md5translate) | DONE |
 | WL* loose-file liquid fallback | DONE |
 | NPZ shard serialization with metadata | DONE |
+| Raw fallback blobs for undecoded ADT-family chunks (`raw_chunks/...`) | DONE |
+| Promoted typed preservation signals (`MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, `MCRW`) | DONE |
 | Batch harvest command (`harvest-map-mpq`) | DONE |
 | IsAlphaWdt detection (MAIN size check) | DONE |
 | Coordinate convention fix (IndexX→col, IndexY→row) | DONE |
 | Base height offset (0x68 Alpha, 0x70 LK) | DONE |
-| Subchunk reader overflow guards | DONE |
 | FillHeightmapGaps | DONE |
 | 0.6.0 AdtProfile060070Baseline test | NOT YET |
+| Archival-grade shard contract for full ADT regeneration without reharvest | NOT YET |
+
+**Current NPZ truth boundary:**
+- Today’s shards preserve typed signals plus raw fallback blobs for chunks we do not yet decode.
+- That is good enough for fast downstream analysis, training, and later decoder work on unknown chunks without immediately rereading client files.
+- It is **not** yet enough to guarantee regeneration of arbitrary ADT versions from shard data alone, because some consumed surfaces are stored only in typed/derived form and `MCNK` headers are not preserved raw.
+- To make NPZ the full archival interchange, we still need raw preservation for every non-structural top-level ADT-family chunk, every `MCNK` header, and every `MCNK` subchunk, even when a typed decoder also exists.
 
 ### Phase C: Converters ← IN PROGRESS
 
@@ -66,8 +74,8 @@ Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMap
 
 | Converter | Source | Purpose | Status |
 |-----------|--------|---------|--------|
-| `AlphaToLkConverter` | `WoWMapConverter.Core.Converters` | Alpha 0.5.3 WDT → LK 3.3.5 split ADT | VALIDATED |
-| `LkToAlphaConverter` | `WoWMapConverter.Core.Converters` | LK split ADT → Alpha 0.5.3 monolithic WDT | NOT PORTED |
+| `AlphaToLkConverter` | `WoWMapConverter.Core.Converters` | Alpha 0.5.3 WDT → LK 3.3.5 ADT/WDT/WDL | VALIDATED |
+| `LkToAlphaConverter` | `WoWMapConverter.Core.Converters` | LK split ADT → Alpha 0.5.3 monolithic WDT | LANDED — focused round-trip validated |
 | `MdxToM2Converter` | `WoWMapConverter.Core.Converters` | MDX → M2 model format | NOT PORTED |
 | `M2ToMdxConverter` | `WoWMapConverter.Core.Converters` | M2 → MDX model format | NOT PORTED |
 | `WmoV14ToV17Converter` | `WoWMapConverter.Core.Converters` | WMO v14 → v17 (Cata) | NOT PORTED |
@@ -88,7 +96,7 @@ Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMap
 - MCNK position: `posX = -((ChunkSubSize * cx) + ChunkSize * tileX - ChunkSize * 32))`, `posY = -((ChunkSubSize * cy) + ChunkSize * tileY - ChunkSize * 32))`
 - `AlphaWorldModelPlacement` has no `Scale` field; MODF scale defaults to 1.0 (encoded as 1024 in binary)
 - AreaID currently defaults to 0 for all chunks (crosswalk not yet implemented)
-- Split ADT (`_tex0.adt`, `_obj0.adt`) not yet implemented; output is monolithic ADT only
+- Output target is LK 3.3.5 semantics. Cataclysm-era split `_tex0.adt` / `_obj0.adt` output is out of scope for wow-viewer because existing tooling already covers that lane.
 - WDL writer produces MVER+MWMO+MWID+MODF+MAOF+MARE/MAHO chunks per tile with 17×17 outer + 16×16 inner heights
 
 **AlphaToLk validation results (May 8, 2026)**:
@@ -104,16 +112,18 @@ Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMap
 - Bugs fixed during validation: ChunkedFileReader misuse on monolithic WDTs, MHDR/MCIN empty payload, MPHD size mismatch, MAIN index formula (tileX×64+tileY → tileY×64+tileX)
 - Note: 0.5.5.3494 Azeroth has 755 tiles vs 0.5.3.3368's 685; the extra ~70 tiles were added in the 0.5.5 patch
 
-**AlphaToLk remaining work for next chat**:
-1. **AreaID crosswalk** — `AreaIdMapper` already exists in `WowViewer.Core.IO/Dbc/AreaIdMapper.cs` (995 lines) with embedded `area_crosswalk.csv`. Needs wiring into `AlphaToLkConverter` and CLI `--area-crosswalk-path` option
-2. **Split ADT support** — AlphaToLk currently writes monolithic ADTs. Cataclysm+ uses `_tex0.adt` and `_obj0.adt` splits
+**Remaining Phase C work**:
+1. **AreaID crosswalk** — `AreaIdMapper` already exists in `WowViewer.Core.IO/Dbc/AreaIdMapper.cs`; still needs wiring into `AlphaToLkConverter`
+2. **Round-trip chunk-family validation** — prove that every expected input surface either maps to the correct output chunk family (`MH2O` for LK output, `MCLQ` for Alpha output) or is explicitly accounted for as out-of-band preserved/raw data
+3. **Broad LK corpus validation for `LkToAlpha`** — current proof is focused library regression plus `MH2O <-> MCLQ -> MH2O` parity, not broad staged-client batch coverage
+4. **Full chunk-preserving conversion** — current converter lane is still a reduced terrain-domain reconstruction, not chunk-for-chunk spec closure
+5. **ADTv18 ingest boundary** — input support should tolerate full ADT v18-family chunk inventories, with undecoded or future-version chunks preserved through the NPZ/raw-blob path for later reinterpretation
 
-**LkToAlpha remaining work** (for when we get to it):
-- Reference: `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/LkToAlphaConverter.cs` (~965 lines) + `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Builders/AlphaMainBuilder.cs`, `AlphaMcnkBuilder.cs`, `AlphaMhdrBuilder.cs`
-- Needs: Alpha WDT/ADT **writer** infrastructure (new), Alpha MCNK writer with 15KB limit, Alpha MHDR builder
-- LkToAlpha reads LK ADT, extracts per-chunk data, writes Alpha monolithic WDT with embedded ADTs
-
-**Validation**: Bidirectional round-trip preserves data. User has already proven `2.0.0→0.5.3` and `3.3.5→Alpha WDT` conversions work from prior screenshots.
+**Validation truth boundary**:
+- `AlphaToLk` has real-data batch proof.
+- `LkToAlpha` is landed and structurally exercised, but broad staged-client validation is still open.
+- Neither direction should currently be described as full ADT-family chunk preservation.
+- Native output chunk types remain the target: use `MH2O` for LK output and `MCLQ` for Alpha output. A temporary `MCLQ`-in-LK diagnostic path is acceptable only as a stopgap proof tool, not as the desired end state.
 
 ### Phase D: Deep Format Readers
 
@@ -213,12 +223,13 @@ Each model trains independently. If H3 improves, only H3's checkpoint changes. F
 | `extract-unified` | New | DONE |
 | `harvest-map-mpq` | New | DONE |
 | `harvest-tile / harvest-map` | New | DONE (disk paths) |
-| `convert-alpha-to-lk` | New (May 8) | VALIDATED
+| `convert-alpha-to-lk` | New (May 8) | VALIDATED |
+| `convert-lk-to-alpha` | New (May 8) | LANDED — focused regression validated |
 | `ml-list-maps` | `WoWMapConverter.Cli.RunMlListMapsAsync` | NOT PORTED |
 | `ml-export` | `VlmDatasetExporter.ExportMapAsync` | NOT PORTED (replaced by direct NPZ) |
 | `ml-harvest` | `MkDatasetHarvester.HarvestAsync` | NOT PORTED |
 | `ml-bake / ml-bake-heightmap` | `MinimapBakeService` / `HeightmapBakeService` | NOT PORTED |
-| `convert` (lk→alpha) | `WoWMapConverter.Cli` converters | NOT PORTED |
+| `convert` (lk→alpha) | `WoWMapConverter.Cli` converters | REPLACED by `convert-lk-to-alpha` |
 | `inspect` (PM4, ADT, WDT) | Existing `WowViewer.Tool.Inspect` | PARTIAL |
 | `synthetic-minimap` | `MinimapBakeService` | STUB (not wired) |
 | `ml-corpus / ml-batch` | `export_ml_corpus.ps1` | NOT PORTED |
@@ -231,7 +242,7 @@ Each model trains independently. If H3 improves, only H3's checkpoint changes. F
 |--------------------|------|
 | `WowViewer.Core` | Domain types, `ITerrainAdapter`, `TileLoadResult`, `TerrainTileTensorPack`, `LkAdtData`, `LkMcnkData` |
 | `WowViewer.Core.IO` | All file readers + writers: ADT, WDT, WMO, M2, BLP, DBC, MPQ, PM4, WDL, WL |
-| `WowViewer.Core.IO.Maps` | `AlphaWdtReader`, `AdtTensorPackBuilder`, `AlphaTensorPackBuilder`, `AlphaTerrainAdapter`, `AdtTerrainWriter`, `AdtPlacementWriter`, `NpzTileSerializer`, `WlFileReader`, `Md5TranslateResolver`, `AlphaToLkConverter`, `LkAdtWriter`, `LkWdtWriter`, `WdlWriter` |
+| `WowViewer.Core.IO.Maps` | `AlphaWdtReader`, `AdtTensorPackBuilder`, `AlphaTensorPackBuilder`, `AlphaTerrainAdapter`, `AdtTerrainWriter`, `AdtPlacementWriter`, `NpzTileSerializer`, `WlFileReader`, `Md5TranslateResolver`, `AlphaToLkConverter`, `LkToAlphaConverter`, `AlphaWdtWriter`, `LkAdtWriter`, `LkWdtWriter`, `WdlWriter` |
 | `WowViewer.Core.PM4` | PM4 format reader, linkage, MPRL, MSCN |
 | `WowViewer.Core.Runtime` | M2 runtime, skin profiles, render passes |
 | `WowViewer.Tool.Harvest` | `extract-unified`, `harvest-map-mpq`, `harvest-tile`, `harvest-map`, `synthetic-minimap` |
@@ -286,8 +297,8 @@ User has demonstrated: terrain data recovery from MCAL/MCLY correlations in spar
 Priorities flow from foundation upward. Library + dataset tooling first, rendering last.
 
 ### Priority 1: Library + Dataset ← CURRENT FOCUS
-- **Phase B** (Harvest Pipeline) — DONE
-- **Phase C** (Converters) — AlphaToLk writer+CLI done, validation and remaining converters pending
+- **Phase B** (Harvest Pipeline) — DONE for typed signals plus raw fallback on undecoded chunks; archival-grade shard completeness still open
+- **Phase C** (Converters) — `AlphaToLk` validated, `LkToAlpha` landed with focused proof; remaining work is AreaID crosswalk, round-trip chunk-family validation, broad validation, and model/WMO converters
 - **Phase D** (Deep Format Readers) — complete every file reader port
 - **Phase E** (DBC Metadata) — enrich shards with database-driven metadata
 - **Phase F** (Placement Provenance) — MCRF arrays, PM4, prefab library
@@ -308,14 +319,18 @@ Priorities flow from foundation upward. Library + dataset tooling first, renderi
 - **Phase I** — OpenGL renderer, UI panels, map editor
 
 ### NPZ as Interchange Format
-The NPZ tensor shard format serves as a **long-term, future-proof interchange** for ADT terrain data:
+The NPZ tensor shard format is the **strategic interchange target** for downstream tooling:
 - Open format (NumPy .npz = ZIP + .npy), readable by any language
 - Self-describing (metadata JSON with signal inventory, build provenance, coordinate conventions)
-- Lossless (stores raw decoded values, not rendered images)
-- Decoupled from proprietary WoW binary formats
-- Single shard = all extractable signals from one tile → perfect for ML pipelines
+- Fast to load for analysis, visualization, training, and transformation tooling
+- Already carries typed terrain signals plus raw fallback blobs for undecoded ADT-family chunks
 
-This eliminates dependency on proprietary `.adt`/`.wdt` formats for downstream consumers. The library handles the decode-once → NPZ path; models and tools consume only NPZ.
+**Current truth boundary:**
+- Today’s shard contract is excellent for ML and analysis workflows.
+- It is **not yet archival-complete** for regenerating arbitrary ADT versions from shards alone.
+- To make NPZ the full interchange for reconstruction/conversion, the shard contract still needs raw preservation for all non-structural top-level ADT-family chunks, every `MCNK` header, and every `MCNK` subchunk, even when typed decoders exist.
+
+The decode-once → NPZ path is still the right direction. The remaining work is to make that NPZ contract archival-grade rather than only analysis-grade.
 
 --- 
 *Built from: `gillijimproject_refactor/plans/` (30+ architectural plans), `AGENTS.md` guardrails, and 2 months of active refactoring across 6 game clients.*

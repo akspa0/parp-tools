@@ -1,10 +1,10 @@
 # wow-viewer Library Completeness Plan
 
-**Status**: Active — Phase A complete; Phase B harvest/tensor-pack lane substantially complete as of 2026-05-07; Phase C terrain converters now landed in shared form as of 2026-05-08, with AlphaToLk real-data proof and LkToAlpha focused round-trip proof
+**Status**: Active — Phase A complete; Phase B harvest/tensor-pack lane complete for typed signals plus raw fallback on undecoded ADT-family chunks; Phase C terrain converters landed in shared form as of 2026-05-08, with AlphaToLk real-data proof and LkToAlpha focused round-trip proof; archival-grade NPZ/ADT interchange remains unfinished
 **Based on**: `gillijimproject_refactor/src/MdxViewer` vs `wow-viewer/src/`
 **Purpose**: Identify all gaps between the legacy viewer and the new library, and define a phased porting strategy.
 
-## 0. Execution Update — 2026-05-07
+## 0. Execution Update — 2026-05-09
 
 - Phase A is complete in `wow-viewer`: `ITerrainAdapter`, `TerrainChunkData`, `TerrainLayer`, `TileLoadResult`, `AlphaTerrainAdapter`, and the `TerrainTileTensorPack.ToTileLoadResult()` bridge all landed.
 - Phase B is no longer just "Alpha WDT validation pending". The current `WowViewer.Tool.Harvest extract-unified` plus `AlphaTensorPackBuilder` path now works on staged `0_5_3_3368` and `0_5_5_3494`, and the broader tensor-pack path is proven on staged `0_7_0_3694`, `3_0_1_8303`, `3_3_5_12340`, and `4_0_0_11927`.
@@ -12,6 +12,9 @@
 - The remaining near-term gap is explicit `0.6.0` split-ADT validation via `AdtProfile060070Baseline`, not basic Alpha/retail harvest plumbing.
 - Follow-up on May 8 landed the reverse `LkToAlphaConverter` path in `wow-viewer`, repaired the Alpha WDT writer so emitted tiles parse correctly, and added focused `LkToAlphaRoundTripTests` covering structural round-trip plus `MH2O <-> MCLQ -> MH2O` liquid parity.
 - Proof boundary matters: AlphaToLk has real-data batch validation, while LkToAlpha is currently proven at focused library-regression scope rather than broad LK corpus runs.
+- ADT-family raw fallback preservation is now real: undecoded top-level chunks and undecoded `MCNK` subchunks persist into NPZ shards under `raw_chunks/...` with metadata (`source_kind`, `source_path`, `scope`, `chunk_id`, `chunk_index`, `chunk_x`, `chunk_y`, `byte_length`).
+- Several formerly raw-only chunks are now also promoted into typed shard signals (`MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, `MCRW`).
+- The proof boundary still matters here too: current shards are good analysis/training interchange, but they are **not yet archival-complete** for rebuilding arbitrary ADT versions from NPZ alone because `MCNK` headers and some consumed chunks are not preserved as exact raw bytes.
 
 ---
 
@@ -36,7 +39,7 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 | **Alpha WDT (monolithic)** | `AlphaWdtReader` + `AlphaTerrainAdapter` | Substantially done for the harvest/tensor-pack path — validated on staged `0.5.3`/`0.5.5`, with placements, object masks, and shadow residual now emitted. Remaining work is broader consumer/runtime ownership and residual-data diagnostics. |
 | **Alpha 0.6.0 split ADT** | `StandardTerrainAdapter` + `AdtAlpha` | Partial — `AdtTensorPackBuilder` with `AdtProfile060070Baseline` exists, but explicit `0.6.0` validation is still open |
 | **LK/WotLK ADT (split)** | `StandardTerrainAdapter` + `AdtLk` | Broad tensor-pack support proven on staged `3.0.1` and `3.3.5`; deeper reader/converter closure is still incomplete |
-| **Cata 4.x split ADT** | `AdtV18` + `SplitAdt` | Broad tensor-pack support proven on staged `4.0.0.11927` including MCCV; full deep-reader ownership is still incomplete |
+| **Cata 4.x split ADT** | `AdtV18` + `SplitAdt` | Broad tensor-pack support proven on staged `4.0.0.11927` including MCCV/MCLV/MCMT/MAMP plus raw fallback preservation for undecoded ADT-family chunks; full deep-reader and archival-grade shard ownership are still incomplete |
 | **WDT (Retail)** | `Wdt` | Partial — `WdtSummaryReader` (summary only), no deep parse. **Missing: all MPHD flags beyond `isWmoBased`; all MAIN/WDT flags beyond HasAdt/AllWater/Loaded; no WDT flag data in tensor packs.** |
 | **WDL (terrain LOD)** | `WdlParser` | Summary only — `WdlSummaryReader` exists, deep parse not ported |
 | **WMO (all versions)** | `WmoRenderer` + `WmoV14Reader` | Partial — `WowViewer.Core.IO.Wmo.*` readers exist, no renderer |
@@ -56,7 +59,7 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 |-----------|-----------|------------|-------------|
 | `ITerrainAdapter` | ✓ | Done | CLOSED |
 | `AlphaTerrainAdapter` | ✓ | Done | CLOSED |
-| `StandardTerrainAdapter` | ✓ | **Missing** | CRITICAL |
+| `StandardTerrainAdapter` | ✓ | Partial — tensor-pack/decode coverage exists through `AdtTensorPackBuilder`, but a first-class wow-viewer runtime adapter equivalent is still missing | HIGH |
 | `TerrainChunkData` | ✓ | Done | CLOSED |
 | `TerrainManager` (AOI streaming) | ✓ | **Missing** | HIGH |
 | `TerrainTileMeshBuilder` | ✓ | **Missing** | HIGH |
@@ -82,16 +85,16 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 | `Material` | ~100 | **Missing** | MEDIUM |
 | `FrustumCuller` | ~150 | **Missing** | MEDIUM |
 
-### 2.4 Converters (All Missing from wow-viewer)
+### 2.4 Converters
 
-| Converter | File | Description |
-|-----------|------|-------------|
-| `LkToAlphaConverter` | `WoWMapConverter.Core` | LK split ADT → Alpha 0.5.3 monolithic WDT |
-| `AlphaToLkConverter` | `WoWMapConverter.Core` | Alpha 0.5.3 WDT → LK 3.3.5 split ADT |
-| `MdxToM2Converter` | `WoWMapConverter.Core` | MDX → M2 format |
-| `M2ToMdxConverter` | `WoWMapConverter.Core` | M2 → MDX format |
-| `WmoV14ToV17Converter` | `WoWMapConverter.Core` | WMO v14 → v17 (Cata) |
-| `WmoV17ToV14Converter` | `WoWMapConverter.Core` | WMO v17 → v14 (reverse) |
+| Converter | File | Status | Notes |
+|-----------|------|--------|-------|
+| `LkToAlphaConverter` | `WoWMapConverter.Core` | LANDED | Focused round-trip proof only; broad LK corpus validation still open |
+| `AlphaToLkConverter` | `WoWMapConverter.Core` | VALIDATED | Real-data batch proof landed; output target is LK 3.3.5, not Cataclysm split ADT emission |
+| `MdxToM2Converter` | `WoWMapConverter.Core` | NOT PORTED | — |
+| `M2ToMdxConverter` | `WoWMapConverter.Core` | NOT PORTED | — |
+| `WmoV14ToV17Converter` | `WoWMapConverter.Core` | NOT PORTED | — |
+| `WmoV17ToV14Converter` | `WoWMapConverter.Core` | NOT PORTED | — |
 
 ---
 
@@ -111,7 +114,7 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 **Dependency**: None (pure domain types)
 
 ### Phase B: Complete Harvest Pipeline
-**Goal**: Full Alpha WDT → NPZ export, validated against real tiles.
+**Goal**: Full Alpha WDT + retail ADT → NPZ export with typed signals and raw fallback preservation for undecoded ADT-family chunks.
 
 - [x] Validate `AlphaWdtReader` against known-good Alpha tiles (compare output to gillijimproject_refactor) — deferred until game data available
 - [x] Add `McnrNormalXyz` extraction to `AlphaWdtReader` (145 normals × 3 bytes, non-interleaved → assembled to 257×257×3)
@@ -126,7 +129,10 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 - [x] Add placement flat arrays (`placement_mddf_data`, `placement_modf_data`) to NPZ with resolved model paths
 - [x] Port `WlFileReader` for WLW/WLM/WLQ/WLL liquid files (fallback when MCLQ missing)
 - [x] Fix Alpha/Retail coordinate conventions (cx/cy swap, base height offsets, FillHeightmapGaps)
+- [x] Persist undecoded ADT-family top-level chunks and `MCNK` subchunks into shard raw blobs with metadata
+- [x] Promote preservation-focused typed signals for `MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, `MCRW`
 - [ ] Test Alpha 0.6.0 split ADT through `AdtTensorPackBuilder` with `AdtProfile060070Baseline`
+- [ ] Upgrade shard contract from analysis-grade to archival-grade by preserving raw `MCNK` headers and raw bytes for consumed-but-currently-lossy chunks so ADTs can be regenerated from NPZ alone
 
 **Dependency**: Phase A — **Phase B IS COMPLETE**
 
@@ -150,6 +156,16 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 - [ ] **MODF doodadSet/nameSet resolution**: Per-MODF `doodadSet` and `nameSet` fields for WMO variant selection.
 - [ ] **MCRF per-chunk reference arrays**: Per-chunk M2/WMO reference indices (which objects touch this chunk). Currently only counts (`object_mask_16`), not the actual reference lists.
 
+### Phase B4: NPZ Interchange / ADT Preservation (NEW)
+**Goal**: Make NPZ the long-term interchange for fast tooling **and** eventual ADT regeneration without rereading client files.
+
+- [x] Keep typed terrain signals for fast analysis/training workflows
+- [x] Preserve undecoded ADT-family chunks as raw blobs with metadata
+- [x] Treat ADT v18-family input support as an ingest/preservation requirement even when output targets stop at LK 3.3.5
+- [ ] Preserve raw `MCNK` headers in the shard contract
+- [ ] Preserve raw bytes for consumed-but-not-archived chunks when exact file regeneration matters (especially `MH2O`, `MCAL`, `MCLY`, `MCSH`, `MTXF`, placement/name-table chunks, and any other chunk currently reduced to typed or flattened data)
+- [ ] Define shard-side decoders/loaders for raw chunk blobs so later tools can parse wiki-documented chunks directly from NPZ without going back to client archives
+
 ### Phase C: Port Converters
 **Goal**: Bidirectional Alpha↔LK ADT conversion in `wow-viewer/src/tools/convert/`.
 
@@ -162,22 +178,26 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
   - Write MDDF/MODF with coordinate swap
 - [x] Port `AlphaToLkConverter` from `WoWMapConverter.Core.Converters`
   - Parse Alpha monolithic WDT
-  - Convert to split ADT format
+  - Convert to LK 3.3.5 output format
   - Interleave MCVT/MCNR (Alpha non-interleaved → LK interleaved)
   - Convert coordinates
   - Convert liquid (Alpha `MCLQ` → LK `MH2O` payloads in the current shared writer path)
 - [x] Add converter CLI commands in `WowViewer.Tool.Converter` with `convert-alpha-to-lk` and `convert-lk-to-alpha`
+- [ ] Wire `AreaIdMapper` into `AlphaToLkConverter`
 - [ ] Cross-validate: round-trip Alpha→LK→Alpha and LK→Alpha→LK should preserve data on broader real-data corpora, not just focused library regressions
+- [ ] Validate chunk-family mapping: every expected input chunk surface must either become the correct native output chunk family (`MH2O` in LK, `MCLQ` in Alpha) or be explicitly accounted for through preserved/raw interchange data
+- [ ] Promote converter proof from reduced terrain-domain reconstruction to chunk-preserving conversion where required
+- [ ] Keep Cataclysm split-output generation explicitly out of scope for wow-viewer converter work; existing external tooling already covers that output lane
 
 **Dependency**: Phase A (uses `ITerrainAdapter` types)
 
 ### Phase D: Port Mdx/M2/WMO Converters
 **Goal**: Complete format conversion library.
 
-- [ ] Port `MdxToM2Converter`
-- [ ] Port `M2ToMdxConverter`
-- [ ] Port `WmoV14ToV17Converter`
-- [ ] Port `WmoV17ToV14Converter`
+- [ ] Port `MdxToM2Converter` — expected to be a relatively bounded port because wow-viewer already has partial M2/runtime ownership and MDX-related groundwork
+- [ ] Port `M2ToMdxConverter` — same boundary as above
+- [ ] Port `WmoV14ToV17Converter` — treat as a planned bounded port, not a new architecture problem
+- [ ] Port `WmoV17ToV14Converter` — same boundary as above
 
 **Dependency**: Phase A, understanding of M2/MDX/WMO format libraries
 
@@ -236,14 +256,20 @@ Input format → [Deep Reader] → [Domain Model] → [Converter] → [Domain Mo
 
 Converters are read→write pipelines. They use the same deep readers and domain models as the library. No duplicate parsing logic.
 
-### 4.4 Domain Model Ownership
+### 4.4 NPZ Interchange Truth Boundary
+- The current NPZ contract is the correct direction for fast downstream tooling.
+- Today’s shards are strong analysis/training interchange: typed signals + metadata + raw fallback for undecoded chunks.
+- They are **not yet** archival-complete for regenerating arbitrary ADT versions from NPZ alone.
+- To close that gap, shard preservation must extend beyond undecoded chunks to raw `MCNK` headers and any consumed chunk whose current typed representation is lossy or version-specific.
+
+### 4.5 Domain Model Ownership
 - `wow-viewer.Core.Maps` owns: terrain domain types, ADT types, WDL types, WDT types
 - `wow-viewer.Core.Wmo` owns: WMO domain types
 - `wow-viewer.Core.M2` owns: M2/MDX domain types
 - `wow-viewer.Core.Blp` owns: BLP domain types
 - `wow-viewer.Core.PM4` owns: PM4 domain types
 
-### 4.5 Repo Independence
+### 4.6 Repo Independence
 - No source file in `wow-viewer/` may reference paths outside `wow-viewer/`
 - No `.csproj` in `wow-viewer/` may reference a `.csproj` outside `wow-viewer/`
 - All Python code lives under `wow-viewer/data-harvester/`
