@@ -269,33 +269,42 @@ public static class LkToAlphaConverter
             for (int l = 1; l < chunk.Layers.Count && l < 4; l++)
             {
                 uint alphaOff = chunk.Layers[l].AlphaOffset;
-                bool bigAlpha = (chunk.Layers[l].Flags & 0x200) != 0;
-                bool compressed = (chunk.Layers[l].Flags & 0x10000) != 0;
-                int expectedBytes = bigAlpha ? 4096 : 2048;
+                // 4.0.0 uses the ALPHA-era flag convention:
+                //   0x200 = RLE compressed (not big alpha!)
+                //   0x10000 = big alpha (8-bit uncompressed, 4096 bytes)
+                // Ref: gillijimproject-csharp Mcal.cs MclyFlags.CompressedAlpha = 0x200
+                // Ref: WoW_400_ADT_Analysis.md: "MCLY 0x200 is still the per-layer compressed-alpha flag"
+                bool compressed = (chunk.Layers[l].Flags & 0x200) != 0;
+                bool bigAlpha = (chunk.Layers[l].Flags & 0x10000) != 0;
+
+                int remaining = chunk.AlphaMapData.Length - (int)alphaOff;
 
                 if (compressed)
                 {
-                    byte[]? decoded = DecodeCompressedAlpha(chunk.AlphaMapData, (int)alphaOff, chunk.AlphaMapData.Length - (int)alphaOff);
+                    byte[]? decoded = DecodeCompressedAlpha(chunk.AlphaMapData, (int)alphaOff, remaining);
                     if (decoded != null)
                         InjectAlphaLayer(alphaPack, decoded, cx, cy, l, 64);
                     continue;
                 }
 
-                if (alphaOff + expectedBytes > chunk.AlphaMapData.Length)
+                if (remaining <= 0)
                     continue;
 
-                if (bigAlpha)
+                if (bigAlpha || remaining >= 4096)
                 {
+                    int take = Math.Min(4096, remaining);
                     for (int y = 0; y < 64; y++)
                         for (int x = 0; x < 64; x++)
                         {
                             int src = (int)alphaOff + y * 64 + x;
-                            alphaPack[cy * 64 + y, cx * 64 + x, l] = chunk.AlphaMapData[src] / 255f;
+                            if (src < chunk.AlphaMapData.Length)
+                                alphaPack[cy * 64 + y, cx * 64 + x, l] = chunk.AlphaMapData[src] / 255f;
                         }
                 }
-                else
+                else if (remaining >= 2048)
                 {
-                    for (int i = 0; i < 2048; i++)
+                    int take = Math.Min(2048, remaining);
+                    for (int i = 0; i < take; i++)
                     {
                         byte b = chunk.AlphaMapData[(int)alphaOff + i];
                         int ax = (i * 2) % 64;
