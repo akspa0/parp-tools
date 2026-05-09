@@ -57,13 +57,13 @@ public static class AlphaWdtWriter
         var mdxNameIndex = BuildNameIndex(allMdxNames);
         var wmoNameIndex = BuildNameIndex(allWmoNames);
 
-        foreach (var kvp in tiles.OrderBy(t => t.Key.Item2 * 64 + t.Key.Item1))
+        foreach (var kvp in tiles.OrderBy(t => t.Key.Item1 * TilesPerAxis + t.Key.Item2))
         {
             var (tileX, tileY) = kvp.Key;
             var tile = kvp.Value;
 
             int tileOffset = (int)ms.Position;
-            PatchMainEntry(mainData, tileY * TilesPerAxis + tileX, tileOffset);
+            PatchMainEntry(mainData, tileX * TilesPerAxis + tileY, tileOffset);
             WriteTileData(bw, tile, tileX, tileY, allMdxNames, allWmoNames, mdxNameIndex, wmoNameIndex);
         }
 
@@ -135,10 +135,6 @@ public static class AlphaWdtWriter
     private static byte[] BuildMcnkData(AlphaTileData tile, int cx, int cy, int tileX, int tileY, float tileBaseHeight)
     {
         float[] heights = ExtractChunkHeights(tile.Heightmap, cx, cy);
-        bool hasData = false;
-        foreach (float h in heights) { if (h != 0f) { hasData = true; break; } }
-        if (!hasData) return BuildEmptyMcnk(cx, cy);
-
         float chunkBaseHeight = heights[0];
 
         byte[] mcvtAlpha = BuildAlphaMcvt(heights, chunkBaseHeight);
@@ -163,20 +159,20 @@ public static class AlphaWdtWriter
         int nMapObjRefs = 0;
 
         byte[] mclyWhole = WrapChunk("MCLY", mclyRaw);
-        byte[] mcrfWhole = mcrfRaw.Length > 0 ? WrapChunk("MCRF", mcrfRaw) : [];
+        byte[] mcrfWhole = WrapChunk("MCRF", mcrfRaw);
 
         int cursor = 0;
         int offsHeight = cursor;
         cursor += mcvtAlpha.Length;
         int offsNormal = cursor;
         cursor += mcnrAlpha.Length;
-        int offsLayer = mclyWhole.Length > 0 ? cursor : 0;
+        int offsLayer = cursor;
         cursor += mclyWhole.Length;
-        int offsRefs = mcrfWhole.Length > 0 ? cursor : 0;
+        int offsRefs = cursor;
         cursor += mcrfWhole.Length;
         int offsShadow = mcshRaw.Length > 0 ? cursor : 0;
         cursor += mcshRaw.Length;
-        int offsAlpha = mcalRaw.Length > 0 ? cursor : 0;
+        int offsAlpha = cursor;
         cursor += mcalRaw.Length;
         int offsLiquid = mclqRaw.Length > 0 ? cursor : 0;
         cursor += mclqRaw.Length;
@@ -229,23 +225,6 @@ public static class AlphaWdtWriter
         if (mcshRaw.Length > 0) msw.Write(mcshRaw);
         if (mcalRaw.Length > 0) msw.Write(mcalRaw);
         if (mclqRaw.Length > 0) msw.Write(mclqRaw);
-
-        return ms.ToArray();
-    }
-
-    private static byte[] BuildEmptyMcnk(int cx, int cy)
-    {
-        int totalDataSize = McnkHeaderSize;
-        using var ms = new MemoryStream();
-        using var bw = new BinaryWriter(ms, Encoding.ASCII, leaveOpen: true);
-
-        bw.Write(FourCC.FromString("MCNK").ToFileBytes());
-        bw.Write(totalDataSize);
-
-        byte[] header = new byte[McnkHeaderSize];
-        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x04), cx);
-        BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x08), cy);
-        bw.Write(header);
 
         return ms.ToArray();
     }

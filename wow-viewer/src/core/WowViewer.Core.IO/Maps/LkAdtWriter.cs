@@ -248,7 +248,7 @@ public static class LkAdtWriter
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms, Encoding.ASCII, leaveOpen: true);
 
-        bw.Write(System.Text.Encoding.ASCII.GetBytes("MCNK"));
+        bw.Write(FourCC.FromString("MCNK").ToFileBytes());
         long sizePosition = ms.Position;
         bw.Write(0);
 
@@ -258,7 +258,7 @@ public static class LkAdtWriter
 
         long afterHeader = ms.Position;
         int mcvtOffset = (int)ms.Position;
-        bw.Write(System.Text.Encoding.ASCII.GetBytes("MCVT"));
+        bw.Write(FourCC.FromString("MCVT").ToFileBytes());
         bw.Write(McvtFloatCount * 4);
         for (int i = 0; i < McvtFloatCount; i++)
         {
@@ -267,7 +267,7 @@ public static class LkAdtWriter
         }
 
         int mcnrOffset = (int)ms.Position;
-        bw.Write(System.Text.Encoding.ASCII.GetBytes("MCNR"));
+        bw.Write(FourCC.FromString("MCNR").ToFileBytes());
         bw.Write(McnrByteCount);
         byte[] normals = chunk.Normals;
         int normalBytes = Math.Min(normals.Length, McnrByteCount);
@@ -281,7 +281,7 @@ public static class LkAdtWriter
             mclyOffset = (int)ms.Position;
 
             byte[] mclyPayload = BuildMclyPayload(chunk.Layers);
-            bw.Write(System.Text.Encoding.ASCII.GetBytes("MCLY"));
+            bw.Write(FourCC.FromString("MCLY").ToFileBytes());
             bw.Write(mclyPayload.Length);
             bw.Write(mclyPayload);
 
@@ -290,7 +290,7 @@ public static class LkAdtWriter
                 mcalOffset = (int)ms.Position;
                 mcalSize = chunk.AlphaMapData.Length + ChunkHeaderSize;
 
-                bw.Write(System.Text.Encoding.ASCII.GetBytes("MCAL"));
+                bw.Write(FourCC.FromString("MCAL").ToFileBytes());
                 bw.Write(chunk.AlphaMapData.Length);
                 bw.Write(chunk.AlphaMapData);
             }
@@ -301,7 +301,7 @@ public static class LkAdtWriter
         {
             mcrfOffset = (int)ms.Position;
             int mcrfSize = 4 + chunk.DoodadRefs.Count * 4 + chunk.WorldModelRefs.Count * 4;
-            bw.Write(System.Text.Encoding.ASCII.GetBytes("MCRF"));
+            bw.Write(FourCC.FromString("MCRF").ToFileBytes());
             bw.Write(mcrfSize);
             bw.Write(chunk.DoodadRefs.Count);
             bw.Write(chunk.WorldModelRefs.Count);
@@ -317,7 +317,7 @@ public static class LkAdtWriter
             mcshOffset = (int)ms.Position;
             mcshSize = chunk.ShadowMap.Length + ChunkHeaderSize;
 
-            bw.Write(System.Text.Encoding.ASCII.GetBytes("MCSH"));
+            bw.Write(FourCC.FromString("MCSH").ToFileBytes());
             bw.Write(chunk.ShadowMap.Length);
             bw.Write(chunk.ShadowMap);
         }
@@ -326,7 +326,7 @@ public static class LkAdtWriter
         if (chunk.MccvColors is { Length: >= 580 })
         {
             mccvOffset = (int)ms.Position;
-            bw.Write(System.Text.Encoding.ASCII.GetBytes("MCCV"));
+            bw.Write(FourCC.FromString("MCCV").ToFileBytes());
             bw.Write(chunk.MccvColors.Length);
             bw.Write(chunk.MccvColors);
         }
@@ -335,7 +335,7 @@ public static class LkAdtWriter
         if (chunk.MclvLighting is { Length: >= 580 })
         {
             mclvOffset = (int)ms.Position;
-            bw.Write(System.Text.Encoding.ASCII.GetBytes("MCLV"));
+            bw.Write(FourCC.FromString("MCLV").ToFileBytes());
             bw.Write(chunk.MclvLighting.Length);
             bw.Write(chunk.MclvLighting);
         }
@@ -604,14 +604,14 @@ public static class LkAdtWriter
 
     private static void WriteChunk(BinaryWriter bw, string tag, int dataSize, Action<BinaryWriter> writePayload)
     {
-        bw.Write(System.Text.Encoding.ASCII.GetBytes(tag));
+        bw.Write(FourCC.FromString(tag).ToFileBytes());
         bw.Write(dataSize);
         writePayload(bw);
     }
 
     private static void WriteDataChunk(BinaryWriter bw, string tag, byte[] payload)
     {
-        bw.Write(System.Text.Encoding.ASCII.GetBytes(tag));
+        bw.Write(FourCC.FromString(tag).ToFileBytes());
         bw.Write(payload.Length);
         bw.Write(payload);
         if ((payload.Length & 1) != 0)

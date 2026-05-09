@@ -152,7 +152,7 @@ public partial class ViewerApp : IDisposable
     private DBCD.Providers.IDBCProvider? _dbcProvider;
     private string? _dbdDir;
     private string? _dbcBuild;
-    private static readonly ClientBuildOption[] FallbackClientBuildOptions =
+    private static readonly MdxViewer.Terrain.ClientBuildOption[] FallbackClientBuildOptions =
     {
         new("Alpha (0.x) - 0.5.3.3368", "0.5.3.3368"),
         new("Alpha (0.x) - 0.7.0.3694", "0.7.0.3694"),
@@ -171,7 +171,7 @@ public partial class ViewerApp : IDisposable
     private const float TerrainFarPlanePadding = 1024f;
     private const float MaxTerrainFarPlane = MaxTerrainFogDistance + TerrainFarPlanePadding;
 
-    private readonly List<ClientBuildOption> _clientBuildOptions = new();
+    private readonly List<MdxViewer.Terrain.ClientBuildOption> _clientBuildOptions = new();
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder (MPQ) first, then Open File for standalone assets.";
     private AreaTableService? _areaTableService;
@@ -553,12 +553,12 @@ public partial class ViewerApp : IDisposable
         public float[] Heights { get; }
         public Vector3[] Normals { get; }
         public int HoleMask { get; }
-        public TerrainLayer[] Layers { get; }
+        public MdxViewer.Terrain.TerrainLayer[] Layers { get; }
         public Dictionary<int, byte[]> AlphaMaps { get; }
         public byte[]? ShadowMap { get; }
         public byte[]? MccvColors { get; }
 
-        public ChunkClipboard(TerrainChunkData chunk)
+        public ChunkClipboard(MdxViewer.Terrain.TerrainChunkData chunk)
         {
             Heights = (float[])chunk.Heights.Clone();
             Normals = (Vector3[])chunk.Normals.Clone();
@@ -2563,7 +2563,7 @@ void main() {
         return new List<(int, int)>();
     }
 
-    private IReadOnlyList<TerrainChunkData>? LoadTileChunksForExport(int tileX, int tileY)
+    private IReadOnlyList<MdxViewer.Terrain.TerrainChunkData>? LoadTileChunksForExport(int tileX, int tileY)
     {
         if (_terrainManager != null)
         {
@@ -3807,7 +3807,7 @@ void main() {
         float[]? heights = null,
         Vector3[]? normals = null,
         int? holeMask = null,
-        TerrainLayer[]? layers = null,
+        MdxViewer.Terrain.TerrainLayer[]? layers = null,
         Dictionary<int, byte[]>? alphaMaps = null,
         byte[]? shadowMap = null,
         byte[]? mccvColors = null)
@@ -4067,7 +4067,7 @@ void main() {
         _terrainWeakSignalApplyingTiles.Clear();
     }
 
-    private void OnTerrainWeakSignalTileLoaded(int tileX, int tileY, TileLoadResult result)
+    private void OnTerrainWeakSignalTileLoaded(int tileX, int tileY, MdxViewer.Terrain.TileLoadResult result)
     {
         if (!_terrainWeakSignalRestoreEnabled || result.Chunks.Count == 0)
             return;

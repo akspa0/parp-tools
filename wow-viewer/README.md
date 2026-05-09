@@ -5,8 +5,9 @@
 - reading World of Warcraft terrain and client data across multiple eras
 - exporting model-ready NPZ terrain shards from real game clients
 - inspecting formats like ADT, WDT, PM4, BLP, WMO, MDX, and M2
-- converting Alpha-era maps to later formats
+- converting Alpha-era maps to later formats and reverse (Cataclysm back to Alpha)
 - serving as the foundation for the V14 terrain-model pipeline
+- **future: standalone viewer** — porting MdxViewer's rendering and world-session logic into `wow-viewer` is a long-range goal
 
 It is not a toy viewer prototype anymore. The important part today is the data and format pipeline.
 
@@ -21,7 +22,7 @@ The project currently has four practical jobs:
 3. **Inspection and validation**
    Probe client files and generated outputs without opening the old legacy tools.
 4. **Format conversion**
-  Convert Alpha monolithic WDT terrain to LK ADT/WDT/WDL output, and convert LK ADT terrain back into Alpha-compatible monolithic WDT output.
+   Convert Alpha monolithic WDT terrain to LK ADT/WDT/WDL output, and convert LK/Cataclysm ADT terrain back into Alpha-compatible monolithic WDT output.
 
 ## Current Status
 
@@ -35,19 +36,25 @@ The project currently has four practical jobs:
 - WL liquid fallback
 - Minimap lookup via `md5translate`
 - AlphaToLk terrain-domain conversion pipeline
-- LkToAlpha terrain-domain conversion pipeline (focused round-trip proof)
+- LkToAlpha terrain-domain conversion pipeline (focused round-trip proof, extended with real-data MdxViewer validation)
 - ADT NPZ shard preservation of unconsumed raw ADT-family chunks as uint8 blobs
 - ADT NPZ promotion of spec-backed preservation signals for `MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, and `MCRW`
 - Alpha tile NPZ preservation of raw embedded tile chunks alongside decoded signals
+- **AlphaWdtWriter structural fixup**: MAIN grid order corrected to column-major (matching legacy readers), all 256 MCNKs always emitted with full subchunk structure, MCRF always emitted even when empty
+- **LkAdtWriter FourCC fix**: all chunk IDs use `FourCC.FromString().ToFileBytes()` instead of `Encoding.ASCII.GetBytes()` for I/O boundary consistency
+- **Asset name fixup** (`--target-client-root`): filters placements referencing assets missing in target client (scans Alpha per-asset `.wmo.MPQ`/`.mdx.MPQ` wrappers)
+- **Tileset bundling** (`--bundle-tilesets`): extracts unique BLP textures from source client, writes to `tilesets/{map_name}/`, fixes up WDT MTEX references to local paths
+- **End-to-end validation**: `convert-lk-to-alpha` output loads and renders successfully in legacy MdxViewer with staged 0.5.3 client (terrain-only and filtered-placements modes)
 
 ### Validated
 
-- `0.5.3.3368`
+- `0.5.3.3368` (Alpha, used as target for reverse-converted maps)
 - `0.5.5.3494`
 - `0.7.0.3694`
 - `3.0.1.8303`
 - `3.3.5.12340`
-- `4.0.0.11927`
+- `4.0.0.11927` (Cataclysm split ADT source for LkToAlpha conversion)
+- **LK→Alpha 4.0.0 Azeroth**: 839/839 tiles converted, validated in MdxViewer against staged 0.5.3 client
 
 ### Important Workflow Rule
 
@@ -71,7 +78,7 @@ Do **not** use the older converter-side `dataset-scan` / `dataset-audit` / `data
 | Pre-release | `0.7.0.3694` | Early retail-style terrain |
 | Wrath pre-release | `3.0.1.8303` | Archive-backed validation target |
 | Wrath retail | `3.3.5.12340` | Main LK validation target |
-| Cataclysm beta | `4.0.0.11927` | Split ADT / MCCV-era target |
+| Cataclysm beta | `4.0.0.11927` | Split ADT / MCCV-era target, reverse-convert to Alpha |
 
 ## Quick Start
 
@@ -81,29 +88,15 @@ Do **not** use the older converter-side `dataset-scan` / `dataset-audit` / `data
 dotnet build .\wow-viewer\WowViewer.slnx -c Debug
 ```
 
-### 2. Prepare a Full Multi-Client Dataset
-
-This is the canonical batch command.
+### 2. Convert Cataclysm Map to Alpha WDT
 
 ```powershell
-pwsh -File ".\wow-viewer\scripts\run_full_shard_batch.ps1" `
-  -OutputDir "I:\parp\parp-tools\wow-viewer\output\datasets\full_shard_batch_staged_native"
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "output\roundtrip-validation\Azeroth.alpha.wdt"
 ```
 
-This script:
+### 3. Validate with MdxViewer
 
-- discovers maps from `Map.dbc`
-- reads only staged clients from `output\tmp\wowarchive-clients\...`
-- harvests NPZ shards with `harvest-map-mpq`
-- writes a harvest manifest
-- optionally selects validation samples from the harvested NPZ files
-- optionally renders visualization PNGs from the sampled shards
-
-### 3. Watch Progress
-
-```powershell
-Get-Content "I:\parp\parp-tools\wow-viewer\output\datasets\full_shard_batch_staged_native.log" -Wait -Tail 50
-```
+See the **Manual Validation with MdxViewer** section below for the complete workflow.
 
 ### 4. Visualize Harvested NPZ Shards
 
@@ -132,6 +125,22 @@ wow-viewer/output/datasets/full_shard_batch_staged_native/
       ...
   validation_samples/
   visualizations/
+```
+
+Round-trip validation output layout:
+
+```text
+wow-viewer/output/roundtrip-validation/4_0_0_11927/
+  Azeroth.alpha.wdt          # Converted Alpha WDT
+  Azeroth.alpha.wdl          # Converted WDL
+  loose-alpha-overlay/       # Ready-to-use overlay for MdxViewer
+    World/Maps/Azeroth/
+      Azeroth.wdt
+      Azeroth.wdl
+    tilesets/Azeroth/        # Extracted BLP textures (if --bundle-tilesets)
+      Tileset/...
+  captures-0_5_3/            # MdxViewer capture output
+    Azeroth/0.5.3.3368/*.png
 ```
 
 ## Main Tools
@@ -190,15 +199,133 @@ dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowVi
 
 Current important commands:
 
-- `convert-alpha-to-lk`
+- `convert-alpha-to-lk` — Alpha monolithic WDT → LK ADT/WDT/WDL
+- `convert-lk-to-alpha` — LK/Cataclysm split ADT → Alpha monolithic WDT/WDL
 - `dataset-list-maps`
 - `detect`
 
-Example:
+**`convert-lk-to-alpha` flags:**
+
+| Flag | Description |
+|---|---|
+| `--client-root <dir>` / `-c` | Source client root (e.g. 4.0.0) |
+| `--map <name>` / `-m` | Map name from Map.dbc |
+| `--output <path>` / `-o` | Output Alpha WDT path |
+| `--output-wdl <path>` / `--wdl` | Output WDL path (default: `output.wdl`) |
+| `--target-client-root <dir>` / `-tcr` | Target client root for asset filtering (e.g. 0.5.3) |
+| `--terrain-only` / `-to` | Strip all placements (for crash-free validation) |
+| `--bundle-tilesets` / `-bt` | Extract textures alongside output |
+| `--limit <N>` / `-n` | Limit tile count (for testing) |
+| `--verbose` / `-v` | Verbose logging |
+
+Examples:
 
 ```powershell
-dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-alpha-to-lk --input "I:\parp\parp-tools\datasets\0_5_5_3494\Azeroth\Azeroth.wdt" --output "I:\parp\parp-tools\wow-viewer\output\datasets\alpha_to_lk\Azeroth"
+# Basic conversion (839 tiles, ~95s)
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt"
+
+# With asset filtering against target client
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt" --target-client-root "output\tmp\wowarchive-clients\0_5_3_3368\World of Warcraft"
+
+# Terrain-only (no assets, crash-proof)
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt" --terrain-only
+
+# With tileset bundling and asset filtering
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt" --target-client-root "output\tmp\wowarchive-clients\0_5_3_3368\World of Warcraft" --bundle-tilesets
+
+# Quick test (5 tiles)
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "test.alpha.wdt" --limit 5
 ```
+
+## Manual Validation with MdxViewer
+
+The legacy `MdxViewer` (in `gillijimproject_refactor`) is the canonical runtime validation tool for converted Alpha WDT maps. Here is the complete workflow:
+
+### 1. Build the converter
+
+```powershell
+dotnet build .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug
+```
+
+### 2. Convert a map
+
+```powershell
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "output\Azeroth.alpha.wdt"
+```
+
+### 3. Prepare the loose overlay
+
+The MdxViewer expects the WDT/WDL in a `World\Maps\{mapname}\{mapname}.wdt` structure under a loose overlay root:
+
+```powershell
+$overlayDir = "output\overlay"
+$mapDir = "$overlayDir\World\Maps\Azeroth"
+mkdir -Force $mapDir
+Copy-Item "output\Azeroth.alpha.wdt" "$mapDir\Azeroth.wdt"
+Copy-Item "output\Azeroth.alpha.wdl" "$mapDir\Azeroth.wdl"
+```
+
+If bundling tilesets with `--bundle-tilesets`:
+
+```powershell
+Copy-Item -Recurse "output\tilesets\Azeroth" "$overlayDir\tilesets\Azeroth"
+```
+
+### 4. Build MdxViewer
+
+```powershell
+dotnet build .\gillijimproject_refactor\src\MdxViewer\MdxViewer.CrossPlatform.csproj -c Debug
+```
+
+The executable is at `gillijimproject_refactor\src\MdxViewer\bin\Debug\net10.0\ParpToolsWoWViewer.exe`.
+
+### 5. Run MdxViewer with startup automation
+
+**Terrain-only validation (no placements, lowest risk of crash):**
+
+```powershell
+& "gillijimproject_refactor\src\MdxViewer\bin\Debug\net10.0\ParpToolsWoWViewer.exe" --verbose --partial-load --game-path "output\tmp\wowarchive-clients\0_5_3_3368\World of Warcraft" --build "0.5.3.3368" --loose-map-overlay "$PWD\output\overlay" --world "World\Maps\Azeroth\Azeroth.wdt" --capture-shot current --capture-output "$PWD\output\captures" --capture-after-frames 30 --capture-with-ui --exit-after-capture
+```
+
+**With asset filtering (placements reference only existing 0.5.3 assets):**
+
+Same command as above, but generate the WDT with `--target-client-root` pointing to 0.5.3:
+
+```powershell
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "output\Azeroth_filtered.alpha.wdt" --target-client-root "output\tmp\wowarchive-clients\0_5_3_3368\World of Warcraft"
+```
+
+Then repeat the overlay + MdxViewer steps above.
+
+### 6. What to check in the output
+
+In the MdxViewer log output (console or saved to `opencode\tool-output\`):
+
+- `[TerrainAdapter] Error reading chunk` — should be zero. Any occurrence means the WDT is structurally malformed.
+- `[TerrainAdapter] Tile (N,N): 256 chunks` — every loaded tile should have 256 chunks.
+- `[TerrainRenderer] Now rendering N batched tiles` — confirms GPU-side rendering is active.
+- `[MCLQ]` — liquid data is being parsed.
+- `[WMO] Parse complete: v14, N groups, M materials` — WMO assets are loading.
+- `[Export] [Capture] Saved with-ui frame:` — capture was saved.
+- `ExitCode=0` — clean exit.
+
+### 7. MdxViewer startup flags reference
+
+| Flag | Description |
+|---|---|
+| `--verbose` | Enable verbose diagnostic logging |
+| `--partial-load` | AOI streaming (default) — only loads tiles as camera moves |
+| `--full-load` | Load all tiles at startup |
+| `--game-path <dir>` | Base MPQ client root |
+| `--build <version>` | Client build version label |
+| `--loose-map-overlay <dir>` | Loose map overlay directory (contains `World\Maps\...`) |
+| `--world <path>` | WDT path (virtual or absolute) to load at startup |
+| `--capture-shot <name>` | Camera shot name (`"current"` for current camera) |
+| `--capture-output <dir>` | Output directory for captures |
+| `--capture-after-frames <N>` | Wait N frames before capturing |
+| `--capture-with-ui` | Include UI in capture |
+| `--capture-no-ui` | Scene-only capture |
+| `--exit-after-capture` | Close after capture |
 
 ## Data Signals in NPZ Shards
 
@@ -231,21 +358,32 @@ Examples already proven:
 - `0.5.5` Azeroth: `755/755` tiles
 - `0.5.5` Kalimdor: `972/972` tiles
 - `0.5.5` EmeraldDream: `256/256` tiles
+- `4.0.0` Azeroth → Alpha: `839/839` tiles (MdxViewer real-data validated)
 
 Still open:
 
 - full chunk-for-chunk ADT/WDT preservation across Alpha and LK; current converters rebuild a reduced terrain-domain model and do not preserve every source chunk family
 - AreaID crosswalk wiring
 - split ADT output for later clients
-- broad real-data LK→Alpha validation beyond the focused round-trip tests
+- Mdx↔M2 converters and WMO v14↔v17 converters
 
-The reverse LK-to-Alpha converter now exists in `wow-viewer` and is covered by focused `LkToAlphaRoundTripTests`, including `MH2O <-> MCLQ` liquid preservation through the shared conversion path.
+The reverse LK-to-Alpha converter now exists in `wow-viewer` and is covered by focused `LkToAlphaRoundTripTests`, including `MH2O <-> MCLQ` liquid preservation through the shared conversion path. Extended features include `--target-client-root` asset filtering and `--bundle-tilesets` texture extraction.
 
 For harvested ADT tiles, the NPZ shard contract now also preserves unconsumed ADT-family chunks as raw uint8 blobs under `raw_chunks/...` inside the `.npz`, with metadata entries describing source file kind, chunk id, and MCNK location when applicable. That closes the previous hard drop of format data the current tensor pack does not yet decode.
 
 For pre-Cataclysm root ADTs, the tensor-pack path now also promotes `MCRF` into first-class NPZ entries as per-chunk doodad and WMO count grids plus flattened reference-index arrays. `MCSE` is now promoted as per-chunk emitter counts, decoded entry ids and positions when the standard `0x1C` layout is present, and exact per-entry byte matrices; raw `MCSE` fallback is intentionally still retained until broader real-data stride coverage is proven. For Cataclysm+ split object tiles, the same reference shape is used for `MCRD` and `MCRW`. Earlier promoted preservation signals already include `MAMP`, `MFBO`, `MCMT`, and `MCLV`. Staged real-data smoke coverage for both `MCSE` and `MCRF` now scans multiple staged client roots and common map families, but those checks remain availability-based smoke rather than hard-pinned positive regressions in this environment.
 
 For Alpha WDT tiles, harvested tensor packs now also carry raw embedded tile chunks under `raw_chunks/alpha/...`, so Alpha harvesting has the same preservation backstop as the ADT-family path even when only a subset of tile semantics is currently decoded.
+
+## Future: MdxViewer Port to wow-viewer
+
+A long-range goal is to port the rendering and world-session logic from the legacy `gillijimproject_refactor/src/MdxViewer` into `wow-viewer/src/viewer/WowViewer.App`. This will:
+
+- Eliminate the dependency on the legacy reference codebase for runtime validation
+- Allow the viewer to benefit from `wow-viewer`'s shared I/O and format libraries directly without going through adapter layers
+- Enable standalone viewer builds that don't reference external projects
+
+The current `WowViewer.App` shell exists but needs significant expansion to match MdxViewer's world-session rendering, terrain management, WMO rendering, M2/skin rendering, and UI surfaces.
 
 ## Repository Layout
 
@@ -255,11 +393,13 @@ For Alpha WDT tiles, harvested tensor packs now also carry raw embedded tile chu
 | `src/core/WowViewer.Core.IO` | file readers, writers, archive access, DBC helpers |
 | `src/core/WowViewer.Core.PM4` | PM4 library |
 | `src/core/WowViewer.Core.Runtime` | runtime-side consumers |
+| `src/viewer/WowViewer.App` | future standalone viewer (in progress) |
 | `tools/harvest` | canonical NPZ shard builder |
 | `tools/inspect` | format inspection and validation |
 | `tools/converter` | converters and some legacy helper commands |
 | `data-harvester/scripts` | Python visualization and validation helpers |
 | `output/datasets` | canonical dataset output root |
+| `output/roundtrip-validation` | converter output + captures |
 
 ## What To Show People
 
@@ -269,7 +409,9 @@ If you want a short demo flow:
 2. Open one generated `.npz` with `visualize_npz.py`.
 3. Show that the shard contains real decoded terrain signals, not screenshots.
 4. Show `convert-alpha-to-lk` on an Alpha WDT.
-5. Show `map inspect` validating the produced files.
+5. Show `convert-lk-to-alpha` reading Cataclysm split ADTs.
+6. Show `map inspect` validating the produced files.
+7. Show MdxViewer loading the converted Alpha WDT and rendering it against the staged 0.5.3 client.
 
 That tells the actual story of the project much better than waving around stale one-off tools.
 
@@ -277,6 +419,7 @@ That tells the actual story of the project much better than waving around stale 
 
 - staged clients under `output\tmp\wowarchive-clients\...` are the canonical archive-backed inputs
 - real dataset outputs belong under `wow-viewer\output\datasets\...`
+- round-trip validation outputs belong under `wow-viewer\output\roundtrip-validation\...`
 - use `uv` for Python under `wow-viewer\data-harvester`
 - bring your own lawful game data
 
@@ -285,6 +428,7 @@ That tells the actual story of the project much better than waving around stale 
 - `docs/architecture/wow-viewer-full-porting-roadmap.md`
 - `docs/architecture/v14-model-and-refactor-plan-2026-05-06.md`
 - workspace `AGENTS.md`
+- `gillijimproject_refactor/memory-bank/activeContext.md` and `progress.md`
 
 ## Data Policy
 

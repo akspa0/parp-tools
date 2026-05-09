@@ -6,6 +6,79 @@ namespace WowViewer.Core.Tests;
 public sealed class LkToAlphaRoundTripTests
 {
     [Fact]
+    public void WriteAlphaWdt_UsesLegacyMainOrderAndMcnkSubchunkContract()
+    {
+        List<LkMcnkData> chunks = [];
+        for (int index = 0; index < 256; index++)
+        {
+            int chunkX = index % 16;
+            int chunkY = index / 16;
+            chunks.Add(CreateChunk(chunkX, chunkY, 25f + index, 0.01f, flags: 0, withAlpha: false));
+        }
+
+        LkAdtData adt = new()
+        {
+            TileX = 3,
+            TileY = 5,
+            TextureNames = ["terrain_a.blp"],
+            Chunks = chunks
+        };
+
+        AlphaTileData tile = LkToAlphaConverter.ConvertTile(adt, 3, 5);
+        byte[] wdt = AlphaWdtWriter.Build("legacy_contract", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(3, 5)] = tile
+        });
+
+        Assert.Contains((3, 5), AlphaWdtReader.ReadExistingTiles(wdt));
+        Assert.DoesNotContain((5, 3), AlphaWdtReader.ReadExistingTiles(wdt));
+
+        int mainPayloadOffset = 36 + 8;
+        int legacyMainIndex = (3 * 64) + 5;
+        int transposedMainIndex = (5 * 64) + 3;
+        int adtOffset = BitConverter.ToInt32(wdt, mainPayloadOffset + legacyMainIndex * 16);
+
+        Assert.True(adtOffset > 0);
+        Assert.Equal(0, BitConverter.ToInt32(wdt, mainPayloadOffset + transposedMainIndex * 16));
+
+        int mhdrDataOffset = adtOffset + 8;
+        int mcinRelativeOffset = BitConverter.ToInt32(wdt, mhdrDataOffset + 0x00);
+        int mcinOffset = mhdrDataOffset + mcinRelativeOffset;
+        Assert.Equal("MCIN", ReadChunkId(wdt, mcinOffset));
+
+        for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+        {
+            int entryOffset = mcinOffset + 8 + chunkIndex * 16;
+            int mcnkOffset = BitConverter.ToInt32(wdt, entryOffset);
+            int mcinSize = BitConverter.ToInt32(wdt, entryOffset + 4);
+
+            Assert.True(mcnkOffset > 0, $"Missing MCNK offset for chunk {chunkIndex}");
+            Assert.Equal("MCNK", ReadChunkId(wdt, mcnkOffset));
+
+            int mcnkSize = BitConverter.ToInt32(wdt, mcnkOffset + 4);
+            Assert.Equal(mcnkSize + 8, mcinSize);
+
+            int headerOffset = mcnkOffset + 8;
+            int dataBase = headerOffset + 128;
+            int dataEnd = mcnkOffset + 8 + mcnkSize;
+
+            int mcvtOffset = BitConverter.ToInt32(wdt, headerOffset + 0x18);
+            int mcnrOffset = BitConverter.ToInt32(wdt, headerOffset + 0x1C);
+            int mclyOffset = BitConverter.ToInt32(wdt, headerOffset + 0x20);
+            int mcrfOffset = BitConverter.ToInt32(wdt, headerOffset + 0x24);
+            int mcalOffset = BitConverter.ToInt32(wdt, headerOffset + 0x28);
+            int mcalSize = BitConverter.ToInt32(wdt, headerOffset + 0x2C);
+            int mcnkChunksSize = BitConverter.ToInt32(wdt, headerOffset + 0x5C);
+
+            Assert.True(dataBase + mcvtOffset + 580 <= dataEnd, $"MCVT overrun in chunk {chunkIndex}");
+            Assert.True(dataBase + mcnrOffset + 448 <= dataEnd, $"MCNR overrun in chunk {chunkIndex}");
+            Assert.Equal("MCLY", ReadChunkId(wdt, dataBase + mclyOffset));
+            Assert.Equal("MCRF", ReadChunkId(wdt, dataBase + mcrfOffset));
+            Assert.True(mcalOffset >= 0 && mcalOffset + mcalSize <= mcnkChunksSize, $"MCAL overrun in chunk {chunkIndex}");
+        }
+    }
+
+    [Fact]
     public void ConvertTile_AndWriteAlphaWdt_RoundTripsChunkHeightsAlphaAndLiquid()
     {
         List<LkMcnkData> chunks = [];
@@ -200,5 +273,16 @@ public sealed class LkToAlphaRoundTripTests
             AlphaMapSize = alphaMapData?.Length ?? 0,
             LiquidData = liquidData
         };
+    }
+
+    private static string ReadChunkId(byte[] data, int offset)
+    {
+        return new string(new[]
+        {
+            (char)data[offset + 3],
+            (char)data[offset + 2],
+            (char)data[offset + 1],
+            (char)data[offset]
+        });
     }
 }

@@ -146,8 +146,8 @@ public static class WdlWriter
         {
             for (int col = 0; col < OuterDimension; col++)
             {
-                int srcY = tileY * 16 + row * 16;
-                int srcX = tileX * 16 + col * 16;
+                int srcY = row * 16;
+                int srcX = col * 16;
                 srcY = Math.Min(srcY, SrcSize - 1);
                 srcX = Math.Min(srcX, SrcSize - 1);
                 outerHeights[row * OuterDimension + col] = (short)Math.Clamp(Math.Round(heightmap[srcY, srcX]), short.MinValue, short.MaxValue);
@@ -158,8 +158,8 @@ public static class WdlWriter
         {
             for (int col = 0; col < InnerDimension; col++)
             {
-                int srcY = tileY * 16 + row * 16 + 8;
-                int srcX = tileX * 16 + col * 16 + 8;
+                int srcY = row * 16 + 8;
+                int srcX = col * 16 + 8;
                 srcY = Math.Min(srcY, SrcSize - 1);
                 srcX = Math.Min(srcX, SrcSize - 1);
                 innerHeights[row * InnerDimension + col] = (short)Math.Clamp(Math.Round(heightmap[srcY, srcX]), short.MinValue, short.MaxValue);

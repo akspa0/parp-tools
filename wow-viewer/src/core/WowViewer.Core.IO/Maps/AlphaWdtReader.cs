@@ -55,8 +55,8 @@ public static class AlphaWdtReader
             uint val = BitConverter.ToUInt32(mainData.AsSpan(off, 4));
             if (val != 0)
             {
-                int x = i % 64;
-                int y = i / 64;
+                int x = i / 64;
+                int y = i % 64;
                 tiles.Add((x, y));
             }
         }
@@ -169,7 +169,7 @@ public static class AlphaWdtReader
         if (!ReadMainPayload(wdtData, out byte[] mainData))
             return false;
 
-        int mainEntryIndex = tileY * 64 + tileX;
+        int mainEntryIndex = tileX * 64 + tileY;
         int entryOffset = mainEntryIndex * MainEntrySize;
         if (entryOffset < 0 || entryOffset + sizeof(int) > mainData.Length)
             return false;

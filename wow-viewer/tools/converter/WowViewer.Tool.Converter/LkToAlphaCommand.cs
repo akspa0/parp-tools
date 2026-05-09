@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
@@ -30,9 +31,42 @@ internal static class LkToAlphaCommand
             }
 
             string outputPath = Path.GetFullPath(options.OutputPath);
+            string outputWdlPath = Path.GetFullPath(options.OutputWdlPath ?? Path.ChangeExtension(outputPath, ".wdl"));
             string mapName = useMpq ? options.MapName! : Path.GetFileNameWithoutExtension(outputPath);
 
             Console.WriteLine("WowViewer.Tool.Converter convert-lk-to-alpha report");
+
+            // Load target client for asset existence checks (filtering missing placements)
+            HashSet<string>? targetFileSet = null;
+            string? targetRoot = !string.IsNullOrEmpty(options.TargetClientRoot)
+                ? Path.GetFullPath(options.TargetClientRoot)
+                : null;
+            if (targetRoot != null)
+            {
+                if (!Directory.Exists(targetRoot))
+                {
+                    Console.Error.WriteLine($"Error: Target client root not found: {targetRoot}");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+
+                // Try standard MPQ catalog first
+                using var targetCatalog = new NativeMpqService();
+                targetCatalog.LoadArchives([targetRoot]);
+                var knownFiles = targetCatalog.GetAllKnownFiles();
+
+                if (knownFiles.Count > 0)
+                {
+                    targetFileSet = new HashSet<string>(knownFiles, StringComparer.OrdinalIgnoreCase);
+                }
+                else
+                {
+                    // Alpha clients use per-asset .ext.MPQ wrappers — scan for those
+                    targetFileSet = ScanAlphaClientFiles(targetRoot);
+                }
+
+                Console.WriteLine($"  Target:   {targetRoot} ({targetFileSet.Count} files)");
+            }
 
             var sw = Stopwatch.StartNew();
             var tiles = new Dictionary<(int, int), AlphaTileData>();
@@ -40,6 +74,8 @@ internal static class LkToAlphaCommand
             int failed = 0;
             int totalTiles = 0;
             var warnings = new List<string>();
+            int missingModelNames = 0;
+            int missingWmoNames = 0;
 
             if (useMpq)
             {
@@ -54,7 +90,10 @@ internal static class LkToAlphaCommand
                 Console.WriteLine($"  Client:   {clientRoot}");
                 Console.WriteLine($"  Map:      {mapName}");
                 Console.WriteLine($"  Output:   {outputPath}");
+                Console.WriteLine($"  WDL:      {outputWdlPath}");
                 Console.WriteLine($"  Verbose:  {options.Verbose}");
+                if (options.TerrainOnly)
+                    Console.WriteLine($"  Mode:     terrain-only (no placements)");
 
                 using var catalog = new NativeMpqService();
                 catalog.LoadArchives([clientRoot]);
@@ -78,15 +117,45 @@ internal static class LkToAlphaCommand
                     {
 
                         string adtVirtual = $"World\\Maps\\{mapName}\\{mapName}_{tx}_{ty}.adt";
+                        string tex0Virtual = $"World\\Maps\\{mapName}\\{mapName}_{tx}_{ty}_tex0.adt";
+                        string obj0Virtual = $"World\\Maps\\{mapName}\\{mapName}_{tx}_{ty}_obj0.adt";
+
                         byte[]? adtBytes = catalog.ReadFile(adtVirtual);
                         if (adtBytes is null)
                             continue;
+
+                        byte[]? tex0Bytes = catalog.ReadFile(tex0Virtual);
+                        byte[]? obj0Bytes = catalog.ReadFile(obj0Virtual);
 
                         totalTiles++;
 
                         try
                         {
-                            LkAdtData adtData = ReadLkAdt(adtBytes, tx, ty);
+                            LkAdtData adtData = LkAdtReader.Read(adtBytes, tex0Bytes, obj0Bytes, tx, ty);
+
+                            // Filter placements against target client if provided
+                            if (targetFileSet != null)
+                            {
+                                var (filteredModels, filteredWmos, skippedModels, skippedWmos) =
+                                    FilterPlacements(adtData, targetFileSet);
+                                adtData = new LkAdtData
+                                {
+                                    MapName = adtData.MapName,
+                                    TileX = adtData.TileX,
+                                    TileY = adtData.TileY,
+                                    TextureNames = adtData.TextureNames,
+                                    ModelNames = filteredModels.Keys.ToList(),
+                                    WorldModelNames = filteredWmos.Keys.ToList(),
+                                    ModelPlacements = filteredModels.Values.ToList(),
+                                    WorldModelPlacements = filteredWmos.Values.ToList(),
+                                    Chunks = adtData.Chunks,
+                                    MhdrFlags = adtData.MhdrFlags,
+                                    MfboFlightBounds = adtData.MfboFlightBounds
+                                };
+                                missingModelNames += skippedModels;
+                                missingWmoNames += skippedWmos;
+                            }
+
                             AlphaTileData tileData = LkToAlphaConverter.ConvertTile(adtData, tx, ty);
                             tiles[(tx, ty)] = tileData;
                             converted++;
@@ -123,6 +192,7 @@ internal static class LkToAlphaCommand
 
                 Console.WriteLine($"  Input:    {inputDir}");
                 Console.WriteLine($"  Output:   {outputPath}");
+                Console.WriteLine($"  WDL:      {outputWdlPath}");
                 Console.WriteLine($"  Verbose:  {options.Verbose}");
 
                 var adtFiles = Directory.GetFiles(inputDir, "*_*.adt", SearchOption.TopDirectoryOnly)
@@ -152,7 +222,37 @@ internal static class LkToAlphaCommand
                     try
                     {
                         byte[] adtBytes = File.ReadAllBytes(adtFile);
-                        LkAdtData adtData = ReadLkAdt(adtBytes, tileX, tileY);
+                        
+                        string tex0File = Path.ChangeExtension(adtFile, "_tex0.adt");
+                        byte[]? tex0Bytes = File.Exists(tex0File) ? File.ReadAllBytes(tex0File) : null;
+                        
+                        string obj0File = Path.ChangeExtension(adtFile, "_obj0.adt");
+                        byte[]? obj0Bytes = File.Exists(obj0File) ? File.ReadAllBytes(obj0File) : null;
+
+                        LkAdtData adtData = LkAdtReader.Read(adtBytes, tex0Bytes, obj0Bytes, tileX, tileY);
+
+                        if (targetFileSet != null)
+                        {
+                            var (filteredModels, filteredWmos, skippedModels, skippedWmos) =
+                                FilterPlacements(adtData, targetFileSet);
+                            adtData = new LkAdtData
+                            {
+                                MapName = adtData.MapName,
+                                TileX = adtData.TileX,
+                                TileY = adtData.TileY,
+                                TextureNames = adtData.TextureNames,
+                                ModelNames = filteredModels.Keys.ToList(),
+                                WorldModelNames = filteredWmos.Keys.ToList(),
+                                ModelPlacements = filteredModels.Values.ToList(),
+                                WorldModelPlacements = filteredWmos.Values.ToList(),
+                                Chunks = adtData.Chunks,
+                                MhdrFlags = adtData.MhdrFlags,
+                                MfboFlightBounds = adtData.MfboFlightBounds
+                            };
+                            missingModelNames += skippedModels;
+                            missingWmoNames += skippedWmos;
+                        }
+
                         AlphaTileData tileData = LkToAlphaConverter.ConvertTile(adtData, tileX, tileY);
                         tiles[(tileX, tileY)] = tileData;
                         converted++;
@@ -179,15 +279,50 @@ internal static class LkToAlphaCommand
 
             string outputDir = Path.GetDirectoryName(outputPath) ?? ".";
             Directory.CreateDirectory(outputDir);
+            string wdlOutputDir = Path.GetDirectoryName(outputWdlPath) ?? ".";
+            Directory.CreateDirectory(wdlOutputDir);
+
+            if (options.TerrainOnly)
+            {
+                tiles = tiles.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => new AlphaTileData(
+                        kvp.Value.SourcePath,
+                        kvp.Value.Heightmap,
+                        kvp.Value.McalAlphaPack,
+                        kvp.Value.MclyTextureIds,
+                        kvp.Value.MclyLayerMask,
+                        kvp.Value.HoleMask,
+                        kvp.Value.TextureNames,
+                        modelPlacements: [],
+                        worldModelPlacements: [],
+                        liquidChunks: kvp.Value.LiquidChunks,
+                        mcnrNormalXyz: kvp.Value.McnrNormalXyz,
+                        mcshShadowMask256: kvp.Value.McshShadowMask256,
+                        mcshShadowMask1024: kvp.Value.McshShadowMask1024,
+                        areaIds: kvp.Value.AreaIds,
+                        mccvRgb: kvp.Value.MccvRgb,
+                        mclvLightingBytes: kvp.Value.MclvLightingBytes));
+            }
 
             byte[] wdtData = AlphaWdtWriter.Build(mapName, tiles);
             File.WriteAllBytes(outputPath, wdtData);
+            var wdlTiles = tiles
+                .OrderBy(t => t.Key.Item2 * 64 + t.Key.Item1)
+                .Select(t => WdlWriter.ExtractTileHeightsFromAlpha(t.Value.Heightmap, t.Key.Item1, t.Key.Item2))
+                .ToList();
+            byte[] wdlData = WdlWriter.Build(wdlTiles);
+            File.WriteAllBytes(outputWdlPath, wdlData);
 
             sw.Stop();
             Console.WriteLine($"  Converted: {converted}/{totalTiles} tiles");
             Console.WriteLine($"  Failed:    {failed} tiles");
             Console.WriteLine($"  Output:    {outputPath} ({wdtData.Length:N0} bytes)");
+            Console.WriteLine($"  WDL:       {outputWdlPath} ({wdlData.Length:N0} bytes, {wdlTiles.Count} tiles)");
             Console.WriteLine($"  Elapsed:   {sw.ElapsedMilliseconds}ms");
+
+            if (targetFileSet != null)
+                Console.WriteLine($"  Assets:   {missingModelNames} MDX + {missingWmoNames} WMO placements filtered (missing in target)");
 
             if (warnings.Count > 0)
             {
@@ -196,6 +331,37 @@ internal static class LkToAlphaCommand
                     Console.WriteLine($"    {w}");
                 if (warnings.Count > 10)
                     Console.WriteLine($"    ... and {warnings.Count - 10} more");
+            }
+
+            if (options.BundleTilesets)
+            {
+                string tilesetRoot = Path.Combine(outputDir, "tilesets", mapName);
+                string sourceForTextures = options.ClientRoot ?? options.InputDir ?? ".";
+                BundleTilesets(tiles, sourceForTextures, mapName, tilesetRoot);
+
+                // Fix up texture names to point to local tilesets directory
+                string tilesetPrefix = $"tilesets\\{mapName}\\";
+                tiles = tiles.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp =>
+                    {
+                        var fixedTextures = kvp.Value.TextureNames
+                            .Select(t => tilesetPrefix + t.TrimStart('\\'))
+                            .ToList();
+                        return new AlphaTileData(
+                            kvp.Value.SourcePath, kvp.Value.Heightmap,
+                            kvp.Value.McalAlphaPack, kvp.Value.MclyTextureIds,
+                            kvp.Value.MclyLayerMask, kvp.Value.HoleMask,
+                            fixedTextures, kvp.Value.ModelPlacements,
+                            kvp.Value.WorldModelPlacements, kvp.Value.LiquidChunks,
+                            mcnrNormalXyz: kvp.Value.McnrNormalXyz,
+                            mcshShadowMask256: kvp.Value.McshShadowMask256,
+                            mcshShadowMask1024: kvp.Value.McshShadowMask1024,
+                            areaIds: kvp.Value.AreaIds,
+                            mccvRgb: kvp.Value.MccvRgb,
+                            mclvLightingBytes: kvp.Value.MclvLightingBytes);
+                    });
+                Console.WriteLine($"  Tilesets: extracted and fixed up paths in {tilesetRoot}");
             }
         }
         catch (Exception ex)
@@ -207,468 +373,159 @@ internal static class LkToAlphaCommand
         }
     }
 
-    public static LkAdtData ReadLkAdtPublic(byte[] adtBytes, int tileX, int tileY)
-        => ReadLkAdt(adtBytes, tileX, tileY);
 
-private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
+    private static (Dictionary<string, LkMddfEntry> models, Dictionary<string, LkModfEntry> wmos, int skippedModels, int skippedWmos)
+        FilterPlacements(LkAdtData adtData, HashSet<string> targetFileSet)
     {
-        using var ms = new MemoryStream(adtBytes, writable: false);
-        using var br = new BinaryReader(ms, System.Text.Encoding.ASCII, leaveOpen: true);
+        var filteredModelPaths = new Dictionary<string, LkMddfEntry>(StringComparer.OrdinalIgnoreCase);
+        var filteredWmoPaths = new Dictionary<string, LkModfEntry>(StringComparer.OrdinalIgnoreCase);
+        int skippedModels = 0, skippedWmos = 0;
 
-        var textureNames = new List<string>();
-        var modelNames = new List<string>();
-        var worldModelNames = new List<string>();
-        var modelPlacements = new List<LkMddfEntry>();
-        var worldModelPlacements = new List<LkModfEntry>();
-        var chunks = new List<LkMcnkData>(256);
-        uint mhdrFlags = 0;
-        int[,,]? mfboFlightBounds = null;
-
-        while (ms.Position + 8 <= ms.Length)
+        for (int i = 0; i < adtData.ModelPlacements.Count; i++)
         {
-            byte[] tagBytes = br.ReadBytes(4);
-            uint size = br.ReadUInt32();
-            long chunkEnd = Math.Min(ms.Position + size, ms.Length);
-            string tag = System.Text.Encoding.ASCII.GetString(tagBytes);
+            var p = adtData.ModelPlacements[i];
+            string path = p.NameId >= 0 && p.NameId < adtData.ModelNames.Count
+                ? adtData.ModelNames[p.NameId] : $"unknown_{p.NameId}";
 
-            if (tag == "MVER")
-            {
-                br.ReadInt32();
-            }
-            else if (tag == "MHDR")
-            {
-                mhdrFlags = br.ReadUInt32();
-                ms.Position = chunkEnd;
-            }
-            else if (tag == "MTEX")
-            {
-                textureNames = ReadStringBlock(br, (int)size);
-            }
-            else if (tag == "MMDX")
-            {
-                modelNames = ReadStringBlock(br, (int)size);
-            }
-            else if (tag == "MWMO")
-            {
-                worldModelNames = ReadStringBlock(br, (int)size);
-            }
-            else if (tag == "MDDF")
-            {
-                modelPlacements = ReadMddfEntries(br, (int)size);
-            }
-            else if (tag == "MODF")
-            {
-                worldModelPlacements = ReadModfEntries(br, (int)size);
-            }
-            else if (tag == "MCNK")
-            {
-                chunks.Add(ReadMcnkChunk(br, adtBytes, (int)size));
-            }
-            else if (tag == "MFBO")
-            {
-                if (size >= 36)
-                {
-                    mfboFlightBounds = new int[2, 3, 3];
-                    for (int plane = 0; plane < 2; plane++)
-                    {
-                        for (int row = 0; row < 3; row++)
-                        {
-                            for (int col = 0; col < 3; col++)
-                            {
-                                short val = br.ReadInt16();
-                                mfboFlightBounds[plane, row, col] = val;
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    ms.Position = chunkEnd;
-                }
-            }
+            if (targetFileSet.Contains(path) || targetFileSet.Contains(path.Replace('\\', '/')))
+                filteredModelPaths.TryAdd(path, p);
             else
-            {
-                ms.Position = chunkEnd;
-            }
-
-            if ((size & 1) != 0 && chunkEnd < ms.Length)
-                ms.Position = chunkEnd + 1;
-            else if (chunkEnd <= ms.Length)
-                ms.Position = chunkEnd;
-            else
-                break;
+                skippedModels++;
         }
 
-        return new LkAdtData
+        for (int i = 0; i < adtData.WorldModelPlacements.Count; i++)
         {
-            MapName = "",
-            TileX = tileX,
-            TileY = tileY,
-            TextureNames = textureNames,
-            ModelNames = modelNames,
-            WorldModelNames = worldModelNames,
-            ModelPlacements = modelPlacements,
-            WorldModelPlacements = worldModelPlacements,
-            Chunks = AttachLiquidData(adtBytes, chunks, tileX, tileY),
-            MhdrFlags = mhdrFlags,
-            MfboFlightBounds = mfboFlightBounds
-        };
+            var p = adtData.WorldModelPlacements[i];
+            string path = p.NameId >= 0 && p.NameId < adtData.WorldModelNames.Count
+                ? adtData.WorldModelNames[p.NameId] : $"unknown_{p.NameId}";
+
+            if (targetFileSet.Contains(path) || targetFileSet.Contains(path.Replace('\\', '/')))
+                filteredWmoPaths.TryAdd(path, p);
+            else
+                skippedWmos++;
+        }
+
+        return (filteredModelPaths, filteredWmoPaths, skippedModels, skippedWmos);
     }
 
-    private static IReadOnlyList<LkMcnkData> AttachLiquidData(byte[] adtBytes, List<LkMcnkData> chunks, int tileX, int tileY)
+    private static HashSet<string> ScanAlphaClientFiles(string clientRoot)
     {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string dataDir = Path.Combine(clientRoot, "Data");
+        if (!Directory.Exists(dataDir)) return set;
+
+        string[] alphaSuffixes = [".wmo.mpq", ".wmo.MPQ", ".mdx.mpq", ".mdx.MPQ",
+                                   ".mdl.mpq", ".mdl.MPQ", ".m2.mpq", ".m2.MPQ",
+                                   ".wdt.mpq", ".wdt.MPQ", ".wdl.mpq", ".wdl.MPQ"];
+
         try
         {
-            using var stream = new MemoryStream(adtBytes, writable: false);
-            MapFileSummary summary = MapFileSummaryReader.Read(stream, $"tile_{tileX}_{tileY}.adt");
-            AdtLiquidFile liquidFile = AdtLiquidReader.Read(stream, summary);
-            if (liquidFile.Chunks.Count == 0)
-                return chunks;
-
-            var liquidByChunkIndex = liquidFile.Chunks
-                .Where(static chunk => chunk.Layers.Count > 0)
-                .ToDictionary(static chunk => chunk.ChunkIndex);
-
-            var result = new List<LkMcnkData>(chunks.Count);
-            for (int index = 0; index < chunks.Count; index++)
+            foreach (string mpqFile in Directory.EnumerateFiles(dataDir, "*.mpq", SearchOption.AllDirectories)
+                .Concat(Directory.EnumerateFiles(dataDir, "*.MPQ", SearchOption.AllDirectories)))
             {
-                LkMcnkData chunk = chunks[index];
-                liquidByChunkIndex.TryGetValue(index, out AdtLiquidChunk? liquidData);
-                result.Add(new LkMcnkData
+                string fileName = Path.GetFileName(mpqFile);
+                string matchedSuffix = "";
+                foreach (var suffix in alphaSuffixes)
                 {
-                    IndexX = chunk.IndexX,
-                    IndexY = chunk.IndexY,
-                    Flags = chunk.Flags,
-                    AreaId = chunk.AreaId,
-                    NLayers = chunk.NLayers,
-                    HoleMask = chunk.HoleMask,
-                    BaseHeight = chunk.BaseHeight,
-                    Heights = chunk.Heights,
-                    Normals = chunk.Normals,
-                    ShadowMap = chunk.ShadowMap,
-                    AlphaMapData = chunk.AlphaMapData,
-                    AlphaMapSize = chunk.AlphaMapSize,
-                    Layers = chunk.Layers,
-                    DoodadRefs = chunk.DoodadRefs,
-                    WorldModelRefs = chunk.WorldModelRefs,
-                    LiquidData = liquidData,
-                    MccvColors = chunk.MccvColors,
-                    MclvLighting = chunk.MclvLighting,
-                    PosX = chunk.PosX,
-                    PosY = chunk.PosY,
-                    PosZ = chunk.PosZ
-                });
-            }
-
-            return result;
-        }
-        catch
-        {
-            return chunks;
-        }
-    }
-
-    private static List<string> ReadStringBlock(BinaryReader br, int size)
-    {
-        var names = new List<string>();
-        byte[] data = br.ReadBytes(size);
-        int start = 0;
-        for (int i = 0; i < data.Length; i++)
-        {
-            if (data[i] == 0)
-            {
-                if (i > start)
-                    names.Add(System.Text.Encoding.UTF8.GetString(data, start, i - start));
-                start = i + 1;
-            }
-        }
-        if (start < data.Length)
-            names.Add(System.Text.Encoding.UTF8.GetString(data, start, data.Length - start));
-        return names;
-    }
-
-    private const int LkMddfEntrySize = 36;
-    private const int LkModfEntrySize = 64;
-    private const float MapOrigin = 17066.666f;
-
-    private static List<LkMddfEntry> ReadMddfEntries(BinaryReader br, int size)
-    {
-        var entries = new List<LkMddfEntry>();
-        int count = size / LkMddfEntrySize;
-        for (int i = 0; i < count; i++)
-        {
-            int nameId = br.ReadInt32();
-            int uniqueId = br.ReadInt32();
-            float rawX = br.ReadSingle();
-            float rawZ = br.ReadSingle();
-            float rawY = br.ReadSingle();
-            float rotX = br.ReadSingle();
-            float rotZ = br.ReadSingle();
-            float rotY = br.ReadSingle();
-            ushort scale = br.ReadUInt16();
-            br.ReadUInt16();
-            entries.Add(new LkMddfEntry(nameId, uniqueId,
-                new System.Numerics.Vector3(MapOrigin - rawY, MapOrigin - rawX, rawZ),
-                new System.Numerics.Vector3(rotX, rotY, rotZ),
-                scale / 1024f));
-        }
-        return entries;
-    }
-
-    private static List<LkModfEntry> ReadModfEntries(BinaryReader br, int size)
-    {
-        var entries = new List<LkModfEntry>();
-        int count = size / LkModfEntrySize;
-        for (int i = 0; i < count; i++)
-        {
-            int nameId = br.ReadInt32();
-            int uniqueId = br.ReadInt32();
-            float rawX = br.ReadSingle();
-            float rawZ = br.ReadSingle();
-            float rawY = br.ReadSingle();
-            float rotX = br.ReadSingle();
-            float rotZ = br.ReadSingle();
-            float rotY = br.ReadSingle();
-            float bbMinX = br.ReadSingle();
-            float bbMinZ = br.ReadSingle();
-            float bbMinY = br.ReadSingle();
-            float bbMaxX = br.ReadSingle();
-            float bbMaxZ = br.ReadSingle();
-            float bbMaxY = br.ReadSingle();
-            ushort modfFlags = br.ReadUInt16();
-            ushort doodadSet = br.ReadUInt16();
-            ushort nameSet = br.ReadUInt16();
-            ushort modfScale = br.ReadUInt16();
-            entries.Add(new LkModfEntry(nameId, uniqueId,
-                new System.Numerics.Vector3(MapOrigin - rawY, MapOrigin - rawX, rawZ),
-                new System.Numerics.Vector3(rotX, rotY, rotZ),
-                new System.Numerics.Vector3(MapOrigin - bbMaxY, MapOrigin - bbMaxX, bbMinZ),
-                new System.Numerics.Vector3(MapOrigin - bbMinY, MapOrigin - bbMinX, bbMaxZ),
-                modfFlags, doodadSet, nameSet, modfScale / 1024f));
-        }
-        return entries;
-    }
-
-    private static LkMcnkData ReadMcnkChunk(BinaryReader br, byte[] adtBytes, int declaredSize)
-    {
-        long mcnkStart = br.BaseStream.Position - 8;
-        int headerSize = 128;
-        if (declaredSize < headerSize)
-        {
-            br.BaseStream.Position = mcnkStart + 8 + declaredSize;
-            return new LkMcnkData { IndexX = 0, IndexY = 0, Heights = [], Normals = [], Layers = [] };
-        }
-
-        byte[] header = br.ReadBytes(headerSize);
-
-        int mcnkFlags = BitConverter.ToInt32(header, 0x00);
-        int indexX = BitConverter.ToInt32(header, 0x04);
-        int indexY = BitConverter.ToInt32(header, 0x08);
-        int nLayers = BitConverter.ToInt32(header, 0x0C);
-        int ofsMcvt = BitConverter.ToInt32(header, 0x14);
-        int ofsMcnr = BitConverter.ToInt32(header, 0x18);
-        int ofsMcly = BitConverter.ToInt32(header, 0x1C);
-        int ofsMcrf = BitConverter.ToInt32(header, 0x20);
-        int ofsMcal = BitConverter.ToInt32(header, 0x24);
-        int sizeMcal = BitConverter.ToInt32(header, 0x28);
-        int ofsMcsh = BitConverter.ToInt32(header, 0x2C);
-        int sizeMcsh = BitConverter.ToInt32(header, 0x30);
-        int areaId = BitConverter.ToInt32(header, 0x34);
-        int nDoodadRefs = BitConverter.ToInt32(header, 0x38);
-        int holeMask = BitConverter.ToInt32(header, 0x3C);
-        int nMapObjRefs = BitConverter.ToInt32(header, 0x3C + 0x14);
-        int sizeMclq = BitConverter.ToInt32(header, 0x64);
-        int ofsLiquid = BitConverter.ToInt32(header, 0x68);
-        float baseHeight = BitConverter.ToSingle(header, 0x70);
-        float posX = BitConverter.ToSingle(header, 0x68);
-        float posY = BitConverter.ToSingle(header, 0x6C);
-
-        int mcnkPayloadOffset = (int)mcnkStart + 8;
-        int mcnkPayloadEnd = mcnkPayloadOffset + declaredSize;
-        if (mcnkPayloadEnd > adtBytes.Length)
-            mcnkPayloadEnd = adtBytes.Length;
-
-        byte[] heightData = [];
-        byte[] normalData = [];
-        byte[]? shadowData = null;
-        var layers = new List<LkMclyEntry>();
-        byte[]? alphaData = null;
-        int alphaTotalSize = 0;
-        var doodadRefs = new List<int>();
-        var worldModelRefs = new List<int>();
-
-        // MCVT — use header offset
-        if (ofsMcvt >= headerSize && ofsMcvt + 145 * 4 <= declaredSize)
-        {
-            int srcOffset = mcnkPayloadOffset + ofsMcvt;
-            if (srcOffset + 145 * 4 <= adtBytes.Length)
-            {
-                heightData = new byte[145 * 4];
-                Buffer.BlockCopy(adtBytes, srcOffset, heightData, 0, 145 * 4);
-            }
-        }
-
-        // MCNR — use header offset, always 448 bytes
-        if (ofsMcnr >= headerSize && ofsMcnr + 448 <= declaredSize)
-        {
-            int srcOffset = mcnkPayloadOffset + ofsMcnr;
-            if (srcOffset + 448 <= adtBytes.Length)
-            {
-                normalData = new byte[448];
-                Buffer.BlockCopy(adtBytes, srcOffset, normalData, 0, 448);
-            }
-        }
-
-        // MCLY — use header offset
-        if (ofsMcly >= headerSize)
-        {
-            int srcOffset = mcnkPayloadOffset + ofsMcly;
-            if (srcOffset + 8 <= adtBytes.Length)
-            {
-                int mclyReadEnd = Math.Min(srcOffset + declaredSize - ofsMcly, adtBytes.Length) - srcOffset;
-                int mclyAvail = Math.Max(0, mclyReadEnd);
-                int layerCount = mclyAvail / 16;
-                for (int i = 0; i < layerCount; i++)
-                {
-                    int off = srcOffset + i * 16;
-                    if (off + 16 > adtBytes.Length) break;
-                    uint texId = BitConverter.ToUInt32(adtBytes, off);
-                    uint layerMclyFlags = BitConverter.ToUInt32(adtBytes, off + 4);
-                    uint alphaOff = BitConverter.ToUInt32(adtBytes, off + 8);
-                    uint effectId = BitConverter.ToUInt32(adtBytes, off + 12);
-                    layers.Add(new LkMclyEntry(texId, layerMclyFlags, alphaOff, effectId));
-                }
-            }
-        }
-
-        // MCRF — use header offset
-        if (ofsMcrf >= headerSize)
-        {
-            int srcOffset = mcnkPayloadOffset + ofsMcrf;
-            int available = Math.Min(declaredSize - ofsMcrf, adtBytes.Length - srcOffset);
-            if (available > 8)
-            {
-                using var mcrfMs = new MemoryStream(adtBytes, srcOffset, available, writable: false);
-                using var mcrfBr = new BinaryReader(mcrfMs, System.Text.Encoding.ASCII, leaveOpen: true);
-                int nRefs = mcrfBr.ReadInt32();
-                for (int i = 0; i < nRefs && mcrfMs.Position + 4 <= mcrfMs.Length; i++)
-                    doodadRefs.Add(mcrfBr.ReadInt32());
-                if (mcrfMs.Position + 4 <= mcrfMs.Length)
-                {
-                    int nWmoRefs = mcrfBr.ReadInt32();
-                    for (int i = 0; i < nWmoRefs && mcrfMs.Position + 4 <= mcrfMs.Length; i++)
-                        worldModelRefs.Add(mcrfBr.ReadInt32());
-                }
-            }
-        }
-
-        // MCAL — use header offset and size
-        if (ofsMcal >= headerSize && sizeMcal > 0)
-        {
-            int srcOffset = mcnkPayloadOffset + ofsMcal;
-            if (srcOffset + sizeMcal <= adtBytes.Length)
-            {
-                alphaData = new byte[sizeMcal];
-                Buffer.BlockCopy(adtBytes, srcOffset, alphaData, 0, sizeMcal);
-                alphaTotalSize = sizeMcal;
-            }
-        }
-
-        // MCSH — use header offset and size
-        if (ofsMcsh >= headerSize && sizeMcsh > 0)
-        {
-            int srcOffset = mcnkPayloadOffset + ofsMcsh;
-            if (srcOffset + sizeMcsh <= adtBytes.Length)
-            {
-                shadowData = new byte[sizeMcsh];
-                Buffer.BlockCopy(adtBytes, srcOffset, shadowData, 0, sizeMcsh);
-            }
-        }
-
-        // Scan for MCCV and MCLV sub-chunks in MCNK payload
-        byte[]? mccvData = null;
-        byte[]? mclvData = null;
-        int scanStart = mcnkPayloadOffset + headerSize;
-        int scanEnd = mcnkPayloadEnd;
-        int pos = scanStart;
-        while (pos + 8 <= scanEnd)
-        {
-            if (pos + 4 <= adtBytes.Length)
-            {
-                string subTag = System.Text.Encoding.ASCII.GetString(adtBytes, pos, 4);
-                if (pos + 8 <= adtBytes.Length)
-                {
-                    int subSize = BitConverter.ToInt32(adtBytes, pos + 4);
-                    if (subSize < 0 || pos + 8 + subSize > scanEnd)
+                    if (fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchedSuffix = suffix;
                         break;
-
-                    if (subTag == "MCCV" && subSize >= 580)
-                    {
-                        int dataOffset = pos + 8;
-                        if (dataOffset + 580 <= adtBytes.Length)
-                        {
-                            mccvData = new byte[580];
-                            Buffer.BlockCopy(adtBytes, dataOffset, mccvData, 0, 580);
-                        }
                     }
-                    else if (subTag == "MCLV" && subSize >= 580)
-                    {
-                        int dataOffset = pos + 8;
-                        if (dataOffset + 580 <= adtBytes.Length)
-                        {
-                            mclvData = new byte[580];
-                            Buffer.BlockCopy(adtBytes, dataOffset, mclvData, 0, 580);
-                        }
-                    }
-
-                    int skip = 8 + subSize;
-                    pos += (skip + 3) & ~3;
                 }
-                else break;
+                if (matchedSuffix == "") continue;
+
+                // Strip .MPQ suffix to get virtual path
+                string relative = Path.GetRelativePath(dataDir, mpqFile);
+                string virtualPath = relative[..^4]; // remove .MPQ
+
+                // Also strip the extension variant to get the base path
+                // e.g., World/wmo/Azeroth/Building/test.wmo.MPQ → World/wmo/Azeroth/Building/test.wmo
+                set.Add(virtualPath);
+                set.Add(virtualPath.Replace('\\', '/'));
             }
-            else break;
+        }
+        catch { }
+
+        return set;
+    }
+
+    private static void BundleTilesets(
+        Dictionary<(int, int), AlphaTileData> tiles,
+        string sourceRoot, string mapName, string tilesetRoot)
+    {
+        var texturePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tile in tiles.Values)
+        {
+            foreach (string tex in tile.TextureNames)
+                texturePaths.Add(tex);
         }
 
-        // Advance stream past MCNK
-        br.BaseStream.Position = mcnkStart + 8 + declaredSize;
+        if (texturePaths.Count == 0) return;
 
-        float[] heights = new float[145];
-        for (int i = 0; i < 145 && i * 4 + 4 <= heightData.Length; i++)
-            heights[i] = BitConverter.ToSingle(heightData, i * 4);
+        bool isMpq = Directory.Exists(sourceRoot) &&
+            (Directory.Exists(Path.Combine(sourceRoot, "Data")) ||
+             Directory.GetFiles(sourceRoot, "*.mpq", SearchOption.TopDirectoryOnly).Length > 0);
 
-        return new LkMcnkData
+        byte[]? ReadTexture(string path)
         {
-            IndexX = indexX,
-            IndexY = indexY,
-            Flags = mcnkFlags,
-            AreaId = areaId,
-            NLayers = nLayers,
-            HoleMask = holeMask,
-            BaseHeight = baseHeight,
-            Heights = heights,
-            Normals = normalData,
-            ShadowMap = shadowData,
-            AlphaMapData = alphaData,
-            AlphaMapSize = alphaTotalSize,
-            Layers = layers,
-            DoodadRefs = doodadRefs,
-            WorldModelRefs = worldModelRefs,
-            MccvColors = mccvData,
-            MclvLighting = mclvData,
-            PosX = posX,
-            PosY = posY,
-            PosZ = baseHeight
-        };
+            if (isMpq)
+            {
+                using var cat = new NativeMpqService();
+                cat.LoadArchives([sourceRoot]);
+                return cat.ReadFile(path) ?? cat.ReadFile(path.Replace('\\', '/'));
+            }
+            else
+            {
+                foreach (string candidate in new[] {
+                    Path.Combine(sourceRoot, path),
+                    Path.Combine(sourceRoot, path.Replace('\\', '/'))})
+                {
+                    if (File.Exists(candidate))
+                        return File.ReadAllBytes(candidate);
+                }
+                return null;
+            }
+        }
+
+        Directory.CreateDirectory(tilesetRoot);
+
+        int extracted = 0, failed = 0;
+        foreach (string texPath in texturePaths)
+        {
+            string normPath = texPath.Replace('/', '\\').TrimStart('\\');
+            string localPath = Path.Combine(tilesetRoot, normPath);
+            string? localDir = Path.GetDirectoryName(localPath);
+            if (localDir != null) Directory.CreateDirectory(localDir);
+
+            byte[]? data = ReadTexture(normPath);
+            if (data != null)
+            {
+                File.WriteAllBytes(localPath, data);
+                extracted++;
+            }
+            else
+            {
+                failed++;
+            }
+        }
+
+        Console.WriteLine($"    Extracted: {extracted}/{texturePaths.Count} textures to {tilesetRoot}" +
+            (failed > 0 ? $" ({failed} missing)" : ""));
     }
 
     private static LkToAlphaOptions ParseOptions(string[] args)
     {
-        return new LkToAlphaOptions(
-            InputDir: GetOption(args, "--input", "-i"),
-            OutputPath: GetOption(args, "--output", "-o"),
-            ClientRoot: GetOption(args, "--client-root", "-c"),
-            MapName: GetOption(args, "--map", "-m"),
-            Verbose: HasFlag(args, "--verbose") || HasFlag(args, "-v"));
+            return new LkToAlphaOptions(
+                InputDir: GetOption(args, "--input", "-i"),
+                OutputPath: GetOption(args, "--output", "-o"),
+                OutputWdlPath: GetOption(args, "--output-wdl", "--wdl"),
+                ClientRoot: GetOption(args, "--client-root", "-c"),
+                TargetClientRoot: GetOption(args, "--target-client-root", "-tcr"),
+                MapName: GetOption(args, "--map", "-m"),
+                Verbose: HasFlag(args, "--verbose") || HasFlag(args, "-v"),
+                TerrainOnly: HasFlag(args, "--terrain-only") || HasFlag(args, "-to"),
+                BundleTilesets: HasFlag(args, "--bundle-tilesets") || HasFlag(args, "-bt"));
     }
 
     private static string? GetOption(string[] args, string longName, string shortName)
@@ -703,7 +560,11 @@ private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
     private readonly record struct LkToAlphaOptions(
         string? InputDir,
         string? OutputPath,
+        string? OutputWdlPath,
         string? ClientRoot,
+        string? TargetClientRoot,
         string? MapName,
-        bool Verbose);
+        bool Verbose,
+        bool TerrainOnly,
+        bool BundleTilesets);
 }

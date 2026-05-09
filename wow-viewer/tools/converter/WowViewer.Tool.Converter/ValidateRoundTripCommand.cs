@@ -69,8 +69,8 @@ internal static class ValidateRoundTripCommand
                 // Alpha → LK
                 var lk = AlphaToLkConverter.ConvertTile(orig, tx, ty);
                 byte[] lkBytes = LkAdtWriter.Build(lk);
-                // LK → Alpha: use the PROVEN reader from LkToAlphaCommand
-                var lkRead = LkToAlphaCommand.ReadLkAdtPublic(lkBytes, tx, ty);
+                // LK → Alpha: use the PROVEN reader from LkAdtReader
+                var lkRead = LkAdtReader.Read(lkBytes, null, null, tx, ty);
                 var rt = LkToAlphaConverter.ConvertTile(lkRead, tx, ty);
 
                 if (lkRead.Chunks.Count == 0)
@@ -107,7 +107,7 @@ internal static class ValidateRoundTripCommand
 
                 try
                 {
-                    var origLk = LkToAlphaCommand.ReadLkAdtPublic(adtBytes, tx, ty);
+                    var origLk = LkAdtReader.Read(adtBytes, null, null, tx, ty);
                     // LK → Alpha
                     var alpha = LkToAlphaConverter.ConvertTile(origLk, tx, ty);
                     // Alpha → LK

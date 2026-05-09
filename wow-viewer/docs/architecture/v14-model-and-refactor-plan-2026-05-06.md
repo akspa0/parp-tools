@@ -312,3 +312,64 @@ When raw game file data conflicts with derived signals (residuals, composites, s
 - Do NOT train R1 before D1 produces valid decomposition
 - Do NOT trust a residual computed from broken decomposition
 - Do NOT proceed to model training if visual inspection of residuals shows compositing artifacts instead of actual terrain features
+
+## 10. LkToAlpha Conversion Validation
+
+The `convert-lk-to-alpha` pipeline converts Cataclysm 4.0.0 split ADTs into Alpha-compatible monolithic WDT/WDL files. Validation is through legacy MdxViewer rendering.
+
+### 10.1 Pipeline stages
+
+1. **Read source**: `LkAdtReader` parses Cataclysm split ADTs (`_tex0.adt` + `_obj0.adt`) into domain models
+2. **Convert**: `LkToAlphaConverter` builds `AlphaTileData` with heightmap, normals, texture layers, liquid, placements
+3. **Write**: `AlphaWdtWriter` emits monolithic Alpha WDT binary matching legacy reader expectations
+4. **Bundle** (optional): `--bundle-tilesets` extracts textures, `--target-client-root` filters placements
+
+### 10.2 Critical structural constraints (2026-05-09 fixes)
+
+- **MAIN grid**: Legacy readers use column-major (`tileX * 64 + tileY`), not row-major.
+- **MCNK emission**: All 256 MCNKs must be emitted with valid MCVT/MCNR/MCLY/MCRF data, even for empty tiles.
+- **MCRF**: Always emit the MCRF chunk (even with 0 entries). Legacy `McnkAlpha` reads it unconditionally.
+- **Chunk IDs**: Use `FourCC.FromString().ToFileBytes()` for writing; readers expect reversed FourCC on disk.
+
+### 10.3 MdxViewer validation workflow
+
+See `wow-viewer/README.md` "Manual Validation with MdxViewer" section for the complete step-by-step.
+
+### 10.4 Known limitations
+
+- MCRF per-chunk reference indices are not written to Alpha MCNK (only placement names are preserved at WDT level)
+- Ame to D current converter rebuilds a reduced terrain-domain model; non-decoded chunk families are dropped
+- WMO v14↔v17 converters are not yet ported
+- M2/MDX converters are not yet ported
+- AreaID crosswalk is not wired
+
+## 11. Future: MdxViewer Port to wow-viewer
+
+The legacy `gillijimproject_refactor/src/MdxViewer` contains the runtime rendering and world-session logic used for validation. A long-range goal is to port this into `wow-viewer/src/viewer/WowViewer.App`.
+
+### 11.1 Why port
+
+- Eliminate dependency on legacy reference codebase for runtime validation
+- Allow wow-viewer's shared I/O libraries to be consumed directly without adapter layers
+- Enable standalone viewer builds
+
+### 11.2 What needs porting
+
+- WorldScene (terrain + WMO + doodad rendering pipeline)
+- TerrainManager (AOI streaming, tile loading)
+- AlphaTerrainAdapter and StandardTerrainAdapter
+- WMO v14/v17 renderer (MomoWmoRenderer etc.)
+- M2/skin runtime rendering (WowViewerM2RuntimeBridge)
+- UI surfaces (ImGui panels, file browser, settings, inspector)
+- Minimap renderer
+- Capture automation (startup flags, queue, framebuffer save)
+
+### 11.3 Current state
+
+`WowViewer.App` exists in `wow-viewer/src/viewer/` with:
+- Shell application framework
+- World session bootstrapper
+- Some M2 preview functionality
+- WMO preview via `WmoPreviewLoader`/`WmoGpuPreviewRenderer`
+
+The viewer is not yet a replacement for MdxViewer.

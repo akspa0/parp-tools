@@ -121,7 +121,7 @@ Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMap
 
 **Validation truth boundary**:
 - `AlphaToLk` has real-data batch proof.
-- `LkToAlpha` is landed and fully validated for 100% terrain and alpha roundtrip parity against real Alpha 0.5.5 data, but broad batch conversion of native LK maps is still open.
+- `LkToAlpha` is landed and fully validated for 100% terrain and alpha roundtrip parity against real Alpha 0.5.5 data, and has been verified to successfully round-trip Cataclysm 4.0.0 split ADTs (`_tex0.adt`, `_obj0.adt`). Broad batch conversion of native LK/Cata maps is still open.
 - Neither direction should currently be described as full ADT-family chunk preservation.
 - Native output chunk types remain the target: use `MH2O` for LK output and `MCLQ` for Alpha output. A temporary `MCLQ`-in-LK diagnostic path is acceptable only as a stopgap proof tool, not as the desired end state.
 

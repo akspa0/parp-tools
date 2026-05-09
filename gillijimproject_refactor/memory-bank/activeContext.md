@@ -3,69 +3,64 @@
 ## BRANCH
 `v0.4.9-strict-guards` forked from `971fff2` on 2026-05-06.
 
-## wow-viewer Library Completeness / Harvest Status — Resynced 2026-05-08
+## wow-viewer Library Completeness / Harvest Status — Resynced 2026-05-09
 
 Phase A (terrain type system) and Phase B (harvest pipeline) are COMPLETE.
-Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion across 4 maps, and LkToAlpha is now landed with focused Alpha/LK round-trip coverage including `MH2O <-> MCLQ` liquid parity.
+Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion across 4 maps. LkToAlpha now has **real-data MdxViewer validation** of 4.0.0 Azeroth (839/839 tiles) against staged 0.5.3 client, with asset filtering and tileset bundling.
 
-### Landed In The May 8 Session (Phase C AlphaToLk)
+### Landed In The May 9 Session (Phase C Alpha WDT Writer Fixup + MdxViewer Validation)
 
-**New files:**
-- `WowViewer.Core/Maps/LkAdtData.cs` — domain types for LK ADT output (LkAdtData, LkMcnkData, LkMclyEntry, LkMddfEntry, LkModfEntry)
-- `WowViewer.Core.IO/Maps/WdlWriter.cs` — WDL binary writer with `ExtractTileHeightsFromAlpha` helper
-- `WowViewer.Core.IO/Maps/LkWdtWriter.cs` — LK WDT binary writer (MVER+MPHD+MAIN+MWMO+MODF)
-- `WowViewer.Core.IO/Maps/LkAdtWriter.cs` — full LK 3.3.5 monolithic ADT binary writer (MVER, MHDR with offset patching, MCIN, MTEX, MMDX/MMID, MWMO/MWID, MDDF, MODF, 256 MCNK with MCVT/MCNR/MCLY/MCAL/MCRF/MCSH)
-- `WowViewer.Core.IO/Maps/AlphaToLkConverter.cs` — orchestration: AlphaTileData → LkAdtData, reads Alpha WDT via AlphaWdtReader, writes .wdt + .wdl + .adt files
-- `WowViewer.Tool.Converter/AlphaToLkCommand.cs` — CLI command `convert-alpha-to-lk --input <wdt> --output <dir> [--verbose|-v]`
+**AlphaWdtWriter structural fixes (critical):**
+- MAIN grid order corrected to legacy column-major (`tileX * 64 + tileY`). Previous row-major (`tileY * 64 + tileX`) caused wrong tiles to be mapped to positions.
+- Empty MCNK removal eliminated: removed `BuildEmptyMcnk`. Legacy `McnkAlpha` always reads 256 MCNK per tile; all 256 MCNKs are now emitted with full subchunk payloads.
+- MCRF always emitted: legacy `McnkAlpha` unconditionally reads MCRF data. Previously omitted when empty.
+- MCLY/MCAL offsets always populated (not conditionally zeroed).
+- `chunkBaseHeight` mirrored at both MCNK header offsets `0x68` and `0x6C` for compatibility across reader code paths.
 
-**Bugs fixed during validation:**
-1. **ChunkedFileReader crash on monolithic WDTs** — replaced `ChunkedFileReader.ReadTopLevelChunks()` calls in `AlphaToLkConverter` and `AlphaToLkCommand` with `AlphaWdtReader.ReadExistingTiles()` which correctly parses monolithic Alpha WDTs without hitting embedded ADT sub-chunks
-2. **MHDR/MCIN empty payload** — `LkAdtWriter.Build()` wrote chunk headers declaring 64/4096 bytes but wrote 0 data bytes, corrupting all subsequent offsets. Fixed by writing pre-allocated zero arrays.
-3. **MPHD size mismatch** — `LkWdtWriter` wrote 9 uint32s (36 bytes) but declared MPHD size as 32 bytes. Fixed by removing extra `Write(0u)`.
-4. **MAIN index formula** — `AlphaWdtReader.TryReadTile` used `tileX * 64 + tileY` (wrong) for MAIN table lookup. Fixed to `tileY * 64 + tileX` (correct row-major with y as row). This bug caused 420/755 Azeroth tiles to fail before the fix; all maps now convert at 100%.
+**AlphaWdtReader fixes:**
+- `ReadExistingTiles`: MAIN index `x = i / 64, y = i % 64` (was `x = i % 64, y = i / 64`).
+- `TryReadTile`: `mainEntryIndex = tileX * 64 + tileY` (was `tileY * 64 + tileX`).
 
-**Validation results (0.5.5.3494 dataset):**
+**LkAdtWriter FourCC fix:**
+- All chunk IDs (`MCNK`, `MCVT`, `MCNR`, `MCLY`, `MCAL`, `MCRF`, `MCSH`, `MCCV`, `MCLV`, top-level `MVER`/`MHDR`/`MCIN`) switched from `Encoding.ASCII.GetBytes()` to `FourCC.FromString().ToFileBytes()` to match repository-wide I/O boundary convention. This fixed the return-path test where `MapFileSummaryReader` could not detect ADT files.
 
-| Map | Tiles | Result |
-|-----|-------|--------|
-| Azeroth | 755 | 755/755 converted |
-| Kalimdor | 972 | 972/972 converted |
-| EmeraldDream | 256 | 256/256 converted |
-| PVPZone01 | 25 | 25/25 converted |
-| Shadowfang | 25 | 25/25 converted |
+**Added `WriteAlphaWdt_UsesLegacyMainOrderAndMcnkSubchunkContract` test:**
+- Validates MAIN ordering uses legacy column-major (`tileX * 64 + tileY`).
+- Validates all 256 MCNKs have valid MCLY, MCRF subchunk headers.
+- Validates MCNK subchunk data does not overrun bounds.
+- 3/3 `LkToAlphaRoundTripTests` pass.
 
-Note: The 0.5.5.3494 Azeroth has 755 tiles (vs 685 in 0.5.3.3368) because 0.5.5 added ~70 more tiles to the continent.
+**Asset name fixup (`--target-client-root`):**
+- Accepts target client root, loads its MPQ catalog (or scans Alpha per-asset `.wmo.MPQ`/`.mdx.MPQ` wrappers).
+- Builds `HashSet<string>` of available asset paths.
+- Filters each tile's MDDF/MODF placements against the set.
+- Result: 243,585 MDX + 1,287 WMO placements filtered from 839-tile Azeroth conversion (4.0.0 → 0.5.3).
 
-### Landed In The May 8 Follow-Up Session (Phase C LkToAlpha)
+**Tileset bundling (`--bundle-tilesets`):**
+- Collects unique texture paths from all converted tiles.
+- Reads each BLP from source client (4.0.0) via `NativeMpqService`.
+- Writes to `tilesets/{map_name}/` preserving directory structure.
+- Fixes up WDT MTEX references to point to local tilesets path (`tilesets/{map_name}/...`).
+- Result: 327/327 textures extracted from Azeroth 4.0.0.
 
-**Implementation surface:**
-- `WowViewer.Core.IO/Maps/AlphaWdtWriter.cs` — reverse Alpha writer now emits structurally valid monolithic WDT tiles, correct chunk-relative `MCVT`, chunk-local `MCAL`, and `MCLQ` payloads
-- `WowViewer.Core.IO/Maps/LkToAlphaConverter.cs` — LK ADT -> AlphaTileData conversion now carries structured liquid instead of collapsing to flags only
-- `WowViewer.Core.IO/Maps/AlphaWdtReader.cs` — preserves `MCLQ` 81-sample surface heights as absolute world Z during round-trip reads
-- `WowViewer.Core.IO/Maps/AlphaToLkConverter.cs` + `LkAdtWriter.cs` — Alpha back-conversion now rebuilds `MH2O` payloads instead of dropping liquid after Alpha ingest
-- `WowViewer.Tool.Converter/LkToAlphaCommand.cs` — CLI path now parses input `MH2O` instead of silently discarding LK liquid before conversion
-- `wow-viewer/tests/WowViewer.Core.Tests/LkToAlphaRoundTripTests.cs` — focused regression coverage for Alpha writer structure and `MH2O <-> MCLQ -> MH2O` liquid round-trip
+**MdxViewer validation results:**
+- **Terrain-only mode**: loads and renders successfully. No TerrainAdapter errors. 11 tiles (2816 chunks) rendering. `ExitCode=0`. Capture saved.
+- **Filtered-placements mode**: loads with v14 WMOs through Alpha `.wmo.MPQ` resolution. No crash (filtering prevents missing-asset fallback). `ExitCode=0`. Capture saved.
+- See `wow-viewer/README.md` for complete validation workflow.
 
-**Bugs fixed during validation:**
-1. **Alpha placeholder chunk corruption** — `AlphaWdtWriter` declared `MPHD` and `MHDR` sizes without reserving payload bytes, shifting every later chunk offset. Fixed by writing zero-filled payloads for declared placeholder chunks.
-2. **Chunk-relative terrain heights** — reverse Alpha `MCVT` was being written relative to tile base instead of chunk base. Fixed to match Alpha reader expectations.
-3. **MCNK offset frame mismatch** — Alpha MCNK subchunk offsets were not aligned to the frame expected by `AlphaWdtReader`. Fixed so emitted tiles parse as real Alpha WDT content.
-4. **MCAL contract mismatch** — the repo's tile-level `256x256` alpha pack was being treated like per-chunk `64x64` payloads. Fixed by resampling tile alpha into chunk-local MCAL payloads during write.
-5. **Liquid loss on both directions** — reverse conversion dropped `MH2O` on LK input and failed to emit `MCLQ`; return conversion only restored flags. Fixed by carrying structured liquid through `LkMcnkData`, preserving `MCLQ` 81-sample surfaces, and emitting real `MH2O` payloads on the LK writer path.
+**New CLI flags for `convert-lk-to-alpha`:**
+- `--target-client-root <dir>` / `-tcr` — filter placements against target client
+- `--terrain-only` / `-to` — strip all placements (crash-proof validation)
+- `--bundle-tilesets` / `-bt` — extract textures alongside output
+- `--limit <N>` / `-n` — limit tile count for testing
 
-**Focused validation:**
-- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter LkToAlphaRoundTripTests`
-- Current proof level is focused library regression only. Broad `WowViewer.Core.Tests` closure is still blocked by missing real-data fixtures and one unrelated pre-existing invalid-data test.
-
-### Architecture Notes for AlphaToLk
-- Consumes existing `AlphaWdtReader` and `AlphaTileData` — no duplication of read logic
-- Writer uses `FourCC` from `WowViewer.Core.Chunks` for correct on-disk byte order
-- MHDR offsets computed via two-pass build: first pass writes chunks and tracks offsets, second pass patches MHDR and MCIN
-- MCNK position computation matches LK convention: `posX = -((ChunkSubSize * cx) + ChunkSize * tileX - ChunkSize * 32))`
-- `AlphaWorldModelPlacement` has no `Scale` field; MODF scale defaults to 1.0 for WMO placements
-- AreaID currently defaults to 0 for all chunks (crosswalk not yet implemented)
-- Split ADT support (_tex0, _obj0) not yet implemented; current output is monolithic ADT only
-- `AreaIdMapper` exists in `WowViewer.Core.IO/Dbc/AreaIdMapper.cs` (995 lines) with embedded crosswalk CSV at `WowViewer.Core.IO/Resources/area_crosswalk.csv` — not yet wired to AlphaToLkConverter
+### Architecture Notes for LkToAlpha
+- Legacy reference readers: `gillijimproject-csharp/WowFiles/Alpha/{WdtAlpha,AdtAlpha,McnkAlpha}.cs`
+- `McnkAlphaHeader` struct has specific subchunk offset fields that must point into the MCNK data area (after 8-byte chunk header + 128-byte MCNK header)
+- MCVT/MCNR are raw (no chunk headers); MCLY/MCRF/MCSH/MCAL/MCLQ are chunked (FourCC + size + data)
+- When `McnkAlpha` reads a subchunk with `new Chunk(file, offset)`, the offset must point to the chunk's FourCC, not its data
+- Column-major MAIN indexing: mainEntryIndex = tileX * 64 + tileY
+- Always emit MCRF (even with 0 refs), MCLY (even with 0 layers), MCAL (even with 0 nonzero alphas), MCSH (if data exists)
 
 ## WHAT WORKS
 - `extract-unified` for Alpha monolithic WDT tiles on staged `0.5.3` and `0.5.5`
@@ -91,7 +86,6 @@ Note: The 0.5.5.3494 Azeroth has 755 tiles (vs 685 in 0.5.3.3368) because 0.5.5 
 
 ## WHAT IS STILL OPEN
 - AreaID crosswalk support (currently all chunks default to AreaID 0)
-- Split ADT output (_tex0, _obj0) for Cataclysm+ clients
 - LkToAlpha real-data batch validation beyond the new focused round-trip regressions
 - Full Alpha/LK chunk-for-chunk preservation instead of reduced terrain-domain reconstruction
 - M2/MDX converters and WMO v14↔v17 converters
