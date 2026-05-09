@@ -26,7 +26,7 @@ output/tmp/wowarchive-clients/
 - When the required client only exists in WoWArchive or when wider client coverage is needed, copy the required client folder here first and process the staged copy instead of streaming directly from the mount.
 - Earlier user-provided performance notes say staged copies were roughly `5x` faster than direct mounted reads even before moving onto SSD; treat local staging as the default for repeated or wide reads.
 - Delete staged client copies that are no longer needed after the task.
-- In validation notes, say whether a result used an `H:\CLIENTS\...` root, a direct mounted archive path, or a staged local copy.
+- In validation notes, say whether a result used a staged `output/tmp/wowarchive-clients/` path.
 
 ## Development Roots
 
@@ -45,11 +45,7 @@ output/tmp/original_development_client_4_0_0_11927
 ```
 
 - This is the current composite client root for running `original_development` against a real Cataclysm data surface.
-- It is built from:
-	- base client `H:\CLIENTS\World of Warcraft Cata beta 11927\Data`
-	- loose map overlay `test_data/original_development/World/Maps/development`
-	- development minimaps `test_data/development/World/Textures/Minimap`
-- Rebuild it with `gillijimproject_refactor/scripts/stage_original_development_overlay.ps1 -Force` when the source loose data changes.
+- It is built from staged archive data, not `H:\CLIENTS`.
 - If a real `4.0.1.12304` client is found later, rebuild this staged root against that client and prefer it over `11927` for PM4-era development-map work.
 
 ### V7 Development Minimap-Only Root
@@ -77,9 +73,9 @@ This folder contains:
 | **Source ADTs + PM4** | `test_data/development/World/Maps/development` |
 | **WoWMuseum 3.3.5 ADTs** | `test_data/WoWMuseum/335-dev/World/Maps/development` |
 | **Minimap tiles** | `test_data/minimaps/development` |
-| **Pre-release 3.0.1.8303 client** | `H:\CLIENTS\3.X_Pre-Release_Windows_enUS_3.0.1.8303\World of Warcraft` |
-| **Cata 4.0.0.11927 client** | `H:\CLIENTS\World of Warcraft Cata beta 11927` |
-| **Wrath 3.3.5.12340 client** | `H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft` |
+| **Pre-release 3.0.1.8303 client** | Stage from WoWArchive into `output/tmp/wowarchive-clients/` |
+| **Cata 4.0.0.11927 client** | Stage from WoWArchive into `output/tmp/wowarchive-clients/` |
+| **Wrath 3.3.5.12340 client** | Stage from WoWArchive into `output/tmp/wowarchive-clients/` |
 | **WMO Library** | `pm4-adt-test12/wmo_library.json` |
 | **MODF Reconstruction** | `pm4-adt-test12/modf_reconstruction/` |
 | **Merged ADTs** | `PM4ADTs/clean/` |
@@ -93,8 +89,15 @@ This folder contains:
 ## NEVER ASK THE USER FOR PATHS
 These paths are fixed. They never change. Use them directly.
 
-## Fixed Local Client Roots
-- Use `H:\CLIENTS\3.X_Pre-Release_Windows_enUS_3.0.1.8303\World of Warcraft` as the machine-local 3.0.1.8303 client root for harvesting and viewer exploration.
-- Use `H:\CLIENTS\World of Warcraft Cata beta 11927` as the machine-local 4.0.0.11927 client root for harvesting and viewer exploration.
-- Use `H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft` as the machine-local 3.3.5.12340 client root for harvesting and viewer exploration.
-- If a wider client set is needed beyond these fixed local roots, source it from WoWArchive and stage the needed build into `output/tmp/wowarchive-clients/` before heavy processing.
+## Fixed Staged Client Roots (TRUSTED — use ONLY these)
+
+- Use `I:\parp\parp-tools\output\tmp\wowarchive-clients\` as the trusted client staging area.
+- If a needed client build is not yet staged, copy it from WoWArchive into that directory first.
+- NEVER use `H:\CLIENTS\...` — those paths are untrusted and stale.
+- When reporting validation, say which staged client path was used.
+
+## Fixed Local Client Roots (DEPRECATED — DO NOT USE)
+
+- ~~`H:\CLIENTS\3.X_Pre-Release_Windows_enUS_3.0.1.8303\World of Warcraft`~~ — UNTRUSTED, DO NOT USE
+- ~~`H:\CLIENTS\World of Warcraft Cata beta 11927`~~ — UNTRUSTED, DO NOT USE
+- ~~`H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft`~~ — UNTRUSTED, DO NOT USE

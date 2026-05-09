@@ -46,11 +46,14 @@ public static class AdtMcrfReader
     }
 
     /// <summary>
-    /// Locates MCRF subchunk data offset within an MCNK payload.
-    /// Returns the offset to the MCRF payload (after FourCC+size), or -1 if not found.
+    /// Locates the MCRF subchunk payload range within an MCNK payload.
+    /// Returns true when the exact payload range was found.
     /// </summary>
-    public static int LocateMcrfOffset(ReadOnlySpan<byte> payload)
+    public static bool TryLocateMcrfPayload(ReadOnlySpan<byte> payload, out int payloadOffset, out int payloadSize)
     {
+        payloadOffset = -1;
+        payloadSize = 0;
+
         const int subchunkOffset = 0x80;
         int position = subchunkOffset;
 
@@ -69,15 +72,18 @@ public static class AdtMcrfReader
             if (header.Id == AdtChunkIds.Mcrf)
             {
                 if (header.Size < 4)
-                    return -1;
-                return position + ChunkHeader.SizeInBytes;
+                    return false;
+
+                payloadOffset = position + ChunkHeader.SizeInBytes;
+                payloadSize = declaredSize;
+                return true;
             }
 
             position = unchecked((int)nextOffset);
             if (position < 0) break;
         }
 
-        return -1;
+        return false;
     }
 }
 

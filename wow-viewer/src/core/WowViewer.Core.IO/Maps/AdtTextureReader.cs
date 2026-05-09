@@ -47,7 +47,8 @@ public static class AdtTextureReader
             for (int chunkIndex = 0; chunkIndex < splitChunkPayloads.Count; chunkIndex++)
                 splitChunks.Add(AdtTextureChunkReader.Read(chunkIndex, splitChunkPayloads[chunkIndex], fileSummary.Kind, splitTextureNames, effectiveProfile, defaultBigAlpha: true));
 
-            return new AdtTextureFile(fileSummary.SourcePath, fileSummary.Kind, effectiveProfile, splitTextureNames, splitChunks);
+            byte? splitMampValue = TryReadTopLevelByteChunk(stream, fileSummary, MapChunkIds.Mamp);
+            return new AdtTextureFile(fileSummary.SourcePath, fileSummary.Kind, effectiveProfile, splitTextureNames, splitChunks, splitMampValue);
         }
 
         IReadOnlyList<string> textureNames = MapSummaryReaderCommon.ReadStringEntries(
@@ -62,7 +63,14 @@ public static class AdtTextureReader
             resolvedChunkIndex++;
         }
 
-        return new AdtTextureFile(fileSummary.SourcePath, fileSummary.Kind, effectiveProfile, textureNames, chunks);
+        byte? mampValue = TryReadTopLevelByteChunk(stream, fileSummary, MapChunkIds.Mamp);
+        return new AdtTextureFile(fileSummary.SourcePath, fileSummary.Kind, effectiveProfile, textureNames, chunks, mampValue);
+    }
+
+    private static byte? TryReadTopLevelByteChunk(Stream stream, MapFileSummary fileSummary, FourCC chunkId)
+    {
+        byte[]? payload = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, chunkId);
+        return payload is { Length: > 0 } ? payload[0] : null;
     }
 
     private static bool TryReadSplitTextureFile(Stream stream, out IReadOnlyList<string> textureNames, out IReadOnlyList<byte[]> chunkPayloads)

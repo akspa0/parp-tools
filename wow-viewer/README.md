@@ -34,8 +34,11 @@ The project currently has four practical jobs:
 - Alpha placement export and resolved model names
 - WL liquid fallback
 - Minimap lookup via `md5translate`
-- AlphaToLk conversion pipeline
-- LkToAlpha conversion pipeline (focused round-trip proof)
+- AlphaToLk terrain-domain conversion pipeline
+- LkToAlpha terrain-domain conversion pipeline (focused round-trip proof)
+- ADT NPZ shard preservation of unconsumed raw ADT-family chunks as uint8 blobs
+- ADT NPZ promotion of spec-backed preservation signals for `MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, and `MCRW`
+- Alpha tile NPZ preservation of raw embedded tile chunks alongside decoded signals
 
 ### Validated
 
@@ -221,7 +224,7 @@ This is the real training contract. The point is to preserve decoded game signal
 
 ## Alpha/LK Conversion
 
-The Alpha-to-LK terrain converter is validated.
+The Alpha/LK converter lane is validated as a terrain-domain conversion path, not as full file-spec preservation.
 
 Examples already proven:
 
@@ -231,11 +234,18 @@ Examples already proven:
 
 Still open:
 
+- full chunk-for-chunk ADT/WDT preservation across Alpha and LK; current converters rebuild a reduced terrain-domain model and do not preserve every source chunk family
 - AreaID crosswalk wiring
 - split ADT output for later clients
 - broad real-data LK→Alpha validation beyond the focused round-trip tests
 
 The reverse LK-to-Alpha converter now exists in `wow-viewer` and is covered by focused `LkToAlphaRoundTripTests`, including `MH2O <-> MCLQ` liquid preservation through the shared conversion path.
+
+For harvested ADT tiles, the NPZ shard contract now also preserves unconsumed ADT-family chunks as raw uint8 blobs under `raw_chunks/...` inside the `.npz`, with metadata entries describing source file kind, chunk id, and MCNK location when applicable. That closes the previous hard drop of format data the current tensor pack does not yet decode.
+
+For pre-Cataclysm root ADTs, the tensor-pack path now also promotes `MCRF` into first-class NPZ entries as per-chunk doodad and WMO count grids plus flattened reference-index arrays. `MCSE` is now promoted as per-chunk emitter counts, decoded entry ids and positions when the standard `0x1C` layout is present, and exact per-entry byte matrices; raw `MCSE` fallback is intentionally still retained until broader real-data stride coverage is proven. For Cataclysm+ split object tiles, the same reference shape is used for `MCRD` and `MCRW`. Earlier promoted preservation signals already include `MAMP`, `MFBO`, `MCMT`, and `MCLV`. Staged real-data smoke coverage for both `MCSE` and `MCRF` now scans multiple staged client roots and common map families, but those checks remain availability-based smoke rather than hard-pinned positive regressions in this environment.
+
+For Alpha WDT tiles, harvested tensor packs now also carry raw embedded tile chunks under `raw_chunks/alpha/...`, so Alpha harvesting has the same preservation backstop as the ADT-family path even when only a subset of tile semantics is currently decoded.
 
 ## Repository Layout
 

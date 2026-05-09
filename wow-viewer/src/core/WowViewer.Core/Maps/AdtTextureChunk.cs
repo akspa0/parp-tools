@@ -9,6 +9,7 @@ public sealed class AdtTextureChunk
         bool doNotFixAlphaMap,
         int alphaPayloadBytes,
         byte[]? shadowMap,
+        byte[]? materialIds,
         IReadOnlyList<AdtTextureChunkLayer> layers)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(chunkIndex);
@@ -23,6 +24,7 @@ public sealed class AdtTextureChunk
         DoNotFixAlphaMap = doNotFixAlphaMap;
         AlphaPayloadBytes = alphaPayloadBytes;
         ShadowMap = shadowMap;
+        MaterialIds = materialIds;
         Layers = layers;
     }
 
@@ -37,6 +39,8 @@ public sealed class AdtTextureChunk
     public int AlphaPayloadBytes { get; }
 
     public byte[]? ShadowMap { get; }
+
+    public byte[]? MaterialIds { get; }
 
     public IReadOnlyList<AdtTextureChunkLayer> Layers { get; }
 

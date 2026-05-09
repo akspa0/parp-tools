@@ -7,7 +7,8 @@ public sealed class AdtTextureFile
         MapFileKind kind,
         AdtMcalDecodeProfile decodeProfile,
         IReadOnlyList<string> textureNames,
-        IReadOnlyList<AdtTextureChunk> chunks)
+        IReadOnlyList<AdtTextureChunk> chunks,
+        byte? mampValue)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentNullException.ThrowIfNull(textureNames);
@@ -18,6 +19,7 @@ public sealed class AdtTextureFile
         DecodeProfile = decodeProfile;
         TextureNames = textureNames;
         Chunks = chunks;
+        MampValue = mampValue;
     }
 
     public string SourcePath { get; }
@@ -29,4 +31,6 @@ public sealed class AdtTextureFile
     public IReadOnlyList<string> TextureNames { get; }
 
     public IReadOnlyList<AdtTextureChunk> Chunks { get; }
+
+    public byte? MampValue { get; }
 }

@@ -200,6 +200,7 @@ public static class AlphaWdtReader
         IReadOnlyList<int> mcnkOffsets = ReadMcinOffsets(container, mhdrDataOffset, mcinRelativeOffset);
 
         string tilePath = $"{sourcePath}#alpha-tile({tileX},{tileY})";
+        IReadOnlyList<TerrainRawChunkBlob> rawChunks = CollectRawTileChunks(container, adtOffset, mhdrDataOffset, mcinRelativeOffset, mtexRelativeOffset, mddfRelativeOffset, modfRelativeOffset, mcnkOffsets, tilePath);
 
         float[,] heightmap = new float[TileHeightmapSize, TileHeightmapSize];
         float[,,] alphaPack = new float[1024, 1024, 4];
@@ -276,7 +277,8 @@ public static class AlphaWdtReader
             mcshShadowMask256: mcshShadowMask256,
             mclqSurfaceHeight: hasLiquid ? mclqSurface : null,
             mclqTypeMask: hasLiquid ? mclqTypes : null,
-            mcshShadowMask1024: hasShadow ? alphaPackShadow : null);
+            mcshShadowMask1024: hasShadow ? alphaPackShadow : null,
+            rawChunks: rawChunks);
 
         return true;
     }
@@ -315,6 +317,114 @@ public static class AlphaWdtReader
         for (int i = 0; i < 256 && (i * McinEntrySize) + sizeof(int) <= mcinData.Length; i++)
             offsets.Add(BitConverter.ToInt32(mcinData, i * McinEntrySize));
         return offsets;
+    }
+
+    private static IReadOnlyList<TerrainRawChunkBlob> CollectRawTileChunks(
+        byte[] container,
+        int adtOffset,
+        int mhdrDataOffset,
+        int mcinRelativeOffset,
+        int mtexRelativeOffset,
+        int mddfRelativeOffset,
+        int modfRelativeOffset,
+        IReadOnlyList<int> mcnkOffsets,
+        string sourcePath)
+    {
+        List<TerrainRawChunkBlob> rawChunks = [];
+        Dictionary<string, int> topCounts = new(StringComparer.OrdinalIgnoreCase);
+
+        AddRawChunkAtAbsoluteOffset(rawChunks, topCounts, container, adtOffset, sourcePath, "alpha", "top-level");
+        AddRawChunkAtRelativeOffset(rawChunks, topCounts, container, mhdrDataOffset, mcinRelativeOffset, sourcePath, "alpha", "top-level");
+        AddRawChunkAtRelativeOffset(rawChunks, topCounts, container, mhdrDataOffset, mtexRelativeOffset, sourcePath, "alpha", "top-level");
+        AddRawChunkAtRelativeOffset(rawChunks, topCounts, container, mhdrDataOffset, mddfRelativeOffset, sourcePath, "alpha", "top-level");
+        AddRawChunkAtRelativeOffset(rawChunks, topCounts, container, mhdrDataOffset, modfRelativeOffset, sourcePath, "alpha", "top-level");
+
+        for (int chunkIndex = 0; chunkIndex < mcnkOffsets.Count; chunkIndex++)
+        {
+            int offset = mcnkOffsets[chunkIndex];
+            if (offset <= 0)
+                continue;
+
+            int chunkX = chunkIndex % 16;
+            int chunkY = chunkIndex / 16;
+            if (!TryReadEmbeddedChunkPayload(container, offset, out FourCC chunkId, out byte[] payload) || payload.Length == 0)
+                continue;
+
+            rawChunks.Add(new TerrainRawChunkBlob
+            {
+                EntryName = $"raw_chunks/alpha/mcnk_{chunkX:D2}_{chunkY:D2}/{chunkId}_000",
+                SourceKind = "alpha",
+                SourcePath = sourcePath,
+                Scope = "mcnk",
+                ChunkId = chunkId.ToString(),
+                ChunkIndex = chunkIndex,
+                ChunkX = chunkX,
+                ChunkY = chunkY,
+                Data = payload,
+            });
+        }
+
+        return rawChunks;
+    }
+
+    private static void AddRawChunkAtRelativeOffset(
+        List<TerrainRawChunkBlob> rawChunks,
+        Dictionary<string, int> counts,
+        byte[] container,
+        int mhdrDataOffset,
+        int relativeOffset,
+        string sourcePath,
+        string sourceKind,
+        string scope)
+    {
+        if (relativeOffset <= 0)
+            return;
+
+        AddRawChunkAtAbsoluteOffset(rawChunks, counts, container, mhdrDataOffset + relativeOffset, sourcePath, sourceKind, scope);
+    }
+
+    private static void AddRawChunkAtAbsoluteOffset(
+        List<TerrainRawChunkBlob> rawChunks,
+        Dictionary<string, int> counts,
+        byte[] container,
+        int chunkOffset,
+        string sourcePath,
+        string sourceKind,
+        string scope)
+    {
+        if (!TryReadEmbeddedChunkPayload(container, chunkOffset, out FourCC chunkId, out byte[] payload) || payload.Length == 0)
+            return;
+
+        string chunkName = chunkId.ToString();
+        int occurrence = counts.TryGetValue(chunkName, out int count) ? count : 0;
+        counts[chunkName] = occurrence + 1;
+
+        rawChunks.Add(new TerrainRawChunkBlob
+        {
+            EntryName = $"raw_chunks/{sourceKind}/top/{chunkName}_{occurrence:D3}",
+            SourceKind = sourceKind,
+            SourcePath = sourcePath,
+            Scope = scope,
+            ChunkId = chunkName,
+            Data = payload,
+        });
+    }
+
+    private static bool TryReadEmbeddedChunkPayload(byte[] container, int chunkOffset, out FourCC id, out byte[] payload)
+    {
+        id = default;
+        payload = [];
+        if (chunkOffset < 0 || chunkOffset + ChunkHeaderSize > container.Length)
+            return false;
+
+        id = FourCC.FromFileBytes(container.AsSpan(chunkOffset, 4));
+        int chunkSize = BitConverter.ToInt32(container, chunkOffset + 4);
+        if (chunkSize <= 0 || chunkOffset + ChunkHeaderSize + chunkSize > container.Length)
+            return false;
+
+        payload = new byte[chunkSize];
+        Buffer.BlockCopy(container, chunkOffset + ChunkHeaderSize, payload, 0, chunkSize);
+        return true;
     }
 
     private static bool TryParseMcnk(byte[] container, int mcnkOffset,

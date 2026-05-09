@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 
@@ -12,9 +13,11 @@ internal static class LkToAlphaCommand
         {
             LkToAlphaOptions options = ParseOptions(args);
 
-            if (string.IsNullOrEmpty(options.InputDir))
+            bool useMpq = !string.IsNullOrEmpty(options.ClientRoot) && !string.IsNullOrEmpty(options.MapName);
+
+            if (!useMpq && string.IsNullOrEmpty(options.InputDir))
             {
-                Console.Error.WriteLine("Error: --input <dir> is required (directory containing LK ADT files).");
+                Console.Error.WriteLine("Error: Provide either --input <dir> (loose ADT files) or --client-root <dir> --map <name> (MPQ archives).");
                 Environment.ExitCode = 1;
                 return;
             }
@@ -26,70 +29,144 @@ internal static class LkToAlphaCommand
                 return;
             }
 
-            string inputDir = Path.GetFullPath(options.InputDir);
             string outputPath = Path.GetFullPath(options.OutputPath);
-
-            if (!Directory.Exists(inputDir))
-            {
-                Console.Error.WriteLine($"Error: Directory not found: {inputDir}");
-                Environment.ExitCode = 1;
-                return;
-            }
+            string mapName = useMpq ? options.MapName! : Path.GetFileNameWithoutExtension(outputPath);
 
             Console.WriteLine("WowViewer.Tool.Converter convert-lk-to-alpha report");
-            Console.WriteLine($"  Input:    {inputDir}");
-            Console.WriteLine($"  Output:   {outputPath}");
-            Console.WriteLine($"  Verbose:  {options.Verbose}");
 
             var sw = Stopwatch.StartNew();
-
-            string mapName = Path.GetFileNameWithoutExtension(outputPath);
-
-            var adtFiles = Directory.GetFiles(inputDir, "*_*.adt", SearchOption.TopDirectoryOnly)
-                .Where(f => !f.Contains("_obj", StringComparison.OrdinalIgnoreCase) && !f.Contains("_tex", StringComparison.OrdinalIgnoreCase) && !f.Contains("_lod", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            if (adtFiles.Count == 0)
-            {
-                Console.Error.WriteLine("Error: No ADT files found in directory.");
-                Environment.ExitCode = 1;
-                return;
-            }
-
-            Console.WriteLine($"  Found {adtFiles.Count} ADT files.");
-
             var tiles = new Dictionary<(int, int), AlphaTileData>();
             int converted = 0;
             int failed = 0;
+            int totalTiles = 0;
             var warnings = new List<string>();
 
-            foreach (var adtFile in adtFiles)
+            if (useMpq)
             {
-                string fileName = Path.GetFileNameWithoutExtension(adtFile);
-                string[] parts = fileName.Split('_');
-                if (parts.Length < 3 || !int.TryParse(parts[^2], out int tileX) || !int.TryParse(parts[^1], out int tileY))
+                string clientRoot = Path.GetFullPath(options.ClientRoot!);
+                if (!Directory.Exists(clientRoot))
                 {
-                    warnings.Add($"Cannot parse tile coords from: {fileName}");
-                    continue;
+                    Console.Error.WriteLine($"Error: Client root not found: {clientRoot}");
+                    Environment.ExitCode = 1;
+                    return;
                 }
 
-                try
-                {
-                    byte[] adtBytes = File.ReadAllBytes(adtFile);
-                    LkAdtData adtData = ReadLkAdt(adtBytes, tileX, tileY);
-                    AlphaTileData tileData = LkToAlphaConverter.ConvertTile(adtData, tileX, tileY);
-                    tiles[(tileX, tileY)] = tileData;
-                    converted++;
+                Console.WriteLine($"  Client:   {clientRoot}");
+                Console.WriteLine($"  Map:      {mapName}");
+                Console.WriteLine($"  Output:   {outputPath}");
+                Console.WriteLine($"  Verbose:  {options.Verbose}");
 
-                    if (options.Verbose)
-                        Console.WriteLine($"  Converted: {fileName} ({adtBytes.Length:N0} bytes)");
-                }
-                catch (Exception ex)
+                using var catalog = new NativeMpqService();
+                catalog.LoadArchives([clientRoot]);
+
+                string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+                byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
+                if (wdtBytes is null)
                 {
-                    failed++;
-                    warnings.Add($"{fileName}: {ex.Message}");
-                    if (options.Verbose)
-                        Console.Error.WriteLine($"  Error converting {fileName}: {ex}");
+                    Console.Error.WriteLine($"Error: Could not read WDT '{wdtVirtual}' from client.");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+
+                using var wdtStream = new MemoryStream(wdtBytes, writable: false);
+
+                int? limit = GetIntOption(args, "--limit", "-n");
+
+                for (int ty = 0; ty < 64; ty++)
+                {
+                    for (int tx = 0; tx < 64; tx++)
+                    {
+
+                        string adtVirtual = $"World\\Maps\\{mapName}\\{mapName}_{tx}_{ty}.adt";
+                        byte[]? adtBytes = catalog.ReadFile(adtVirtual);
+                        if (adtBytes is null)
+                            continue;
+
+                        totalTiles++;
+
+                        try
+                        {
+                            LkAdtData adtData = ReadLkAdt(adtBytes, tx, ty);
+                            AlphaTileData tileData = LkToAlphaConverter.ConvertTile(adtData, tx, ty);
+                            tiles[(tx, ty)] = tileData;
+                            converted++;
+
+                            if (options.Verbose)
+                                Console.WriteLine($"  Converted: {mapName}_{tx}_{ty} ({adtBytes.Length:N0} bytes)");
+
+                            if (limit.HasValue && converted >= limit.Value)
+                                break;
+                        }
+                        catch (Exception ex)
+                        {
+                            failed++;
+                            warnings.Add($"{mapName}_{tx}_{ty}: {ex.Message}");
+                            if (options.Verbose)
+                                Console.Error.WriteLine($"  Error converting {mapName}_{tx}_{ty}: {ex}");
+                        }
+                    }
+
+                    if (limit.HasValue && converted >= limit.Value)
+                        break;
+                }
+            }
+            else
+            {
+                string inputDir = Path.GetFullPath(options.InputDir!);
+
+                if (!Directory.Exists(inputDir))
+                {
+                    Console.Error.WriteLine($"Error: Directory not found: {inputDir}");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+
+                Console.WriteLine($"  Input:    {inputDir}");
+                Console.WriteLine($"  Output:   {outputPath}");
+                Console.WriteLine($"  Verbose:  {options.Verbose}");
+
+                var adtFiles = Directory.GetFiles(inputDir, "*_*.adt", SearchOption.TopDirectoryOnly)
+                    .Where(f => !f.Contains("_obj", StringComparison.OrdinalIgnoreCase) && !f.Contains("_tex", StringComparison.OrdinalIgnoreCase) && !f.Contains("_lod", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (adtFiles.Count == 0)
+                {
+                    Console.Error.WriteLine("Error: No ADT files found in directory.");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+
+                Console.WriteLine($"  Found {adtFiles.Count} ADT files.");
+                totalTiles = adtFiles.Count;
+
+                foreach (var adtFile in adtFiles)
+                {
+                    string fileName = Path.GetFileNameWithoutExtension(adtFile);
+                    string[] parts = fileName.Split('_');
+                    if (parts.Length < 3 || !int.TryParse(parts[^2], out int tileX) || !int.TryParse(parts[^1], out int tileY))
+                    {
+                        warnings.Add($"Cannot parse tile coords from: {fileName}");
+                        continue;
+                    }
+
+                    try
+                    {
+                        byte[] adtBytes = File.ReadAllBytes(adtFile);
+                        LkAdtData adtData = ReadLkAdt(adtBytes, tileX, tileY);
+                        AlphaTileData tileData = LkToAlphaConverter.ConvertTile(adtData, tileX, tileY);
+                        tiles[(tileX, tileY)] = tileData;
+                        converted++;
+
+                        if (options.Verbose)
+                            Console.WriteLine($"  Converted: {fileName} ({adtBytes.Length:N0} bytes)");
+                    }
+                    catch (Exception ex)
+                    {
+                        failed++;
+                        warnings.Add($"{fileName}: {ex.Message}");
+                        if (options.Verbose)
+                            Console.Error.WriteLine($"  Error converting {fileName}: {ex}");
+                    }
                 }
             }
 
@@ -107,7 +184,7 @@ internal static class LkToAlphaCommand
             File.WriteAllBytes(outputPath, wdtData);
 
             sw.Stop();
-            Console.WriteLine($"  Converted: {converted}/{adtFiles.Count} tiles");
+            Console.WriteLine($"  Converted: {converted}/{totalTiles} tiles");
             Console.WriteLine($"  Failed:    {failed} tiles");
             Console.WriteLine($"  Output:    {outputPath} ({wdtData.Length:N0} bytes)");
             Console.WriteLine($"  Elapsed:   {sw.ElapsedMilliseconds}ms");
@@ -130,10 +207,10 @@ internal static class LkToAlphaCommand
         }
     }
 
-    private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
+private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
     {
         using var ms = new MemoryStream(adtBytes, writable: false);
-        using var br = new BinaryReader(ms);
+        using var br = new BinaryReader(ms, System.Text.Encoding.ASCII, leaveOpen: true);
 
         var textureNames = new List<string>();
         var modelNames = new List<string>();
@@ -147,7 +224,7 @@ internal static class LkToAlphaCommand
         {
             byte[] tagBytes = br.ReadBytes(4);
             uint size = br.ReadUInt32();
-            long chunkEnd = ms.Position + size;
+            long chunkEnd = Math.Min(ms.Position + size, ms.Length);
             string tag = System.Text.Encoding.ASCII.GetString(tagBytes);
 
             if (tag == "MVER")
@@ -181,7 +258,7 @@ internal static class LkToAlphaCommand
             }
             else if (tag == "MCNK")
             {
-                chunks.Add(ReadMcnkChunk(br, (int)size));
+                chunks.Add(ReadMcnkChunk(br, adtBytes, (int)size));
             }
             else
             {
@@ -190,8 +267,10 @@ internal static class LkToAlphaCommand
 
             if ((size & 1) != 0 && chunkEnd < ms.Length)
                 ms.Position = chunkEnd + 1;
-            else
+            else if (chunkEnd <= ms.Length)
                 ms.Position = chunkEnd;
+            else
+                break;
         }
 
         return new LkAdtData
@@ -340,20 +419,44 @@ internal static class LkToAlphaCommand
         return entries;
     }
 
-    private static LkMcnkData ReadMcnkChunk(BinaryReader br, int size)
+    private static LkMcnkData ReadMcnkChunk(BinaryReader br, byte[] adtBytes, int declaredSize)
     {
-        long chunkStart = br.BaseStream.Position - 8;
-        byte[] header = br.ReadBytes(128);
+        long mcnkStart = br.BaseStream.Position - 8;
+        int headerSize = 128;
+        if (declaredSize < headerSize)
+        {
+            br.BaseStream.Position = mcnkStart + 8 + declaredSize;
+            return new LkMcnkData { IndexX = 0, IndexY = 0, Heights = [], Normals = [], Layers = [] };
+        }
+
+        byte[] header = br.ReadBytes(headerSize);
 
         int mcnkFlags = BitConverter.ToInt32(header, 0x00);
         int indexX = BitConverter.ToInt32(header, 0x04);
         int indexY = BitConverter.ToInt32(header, 0x08);
         int nLayers = BitConverter.ToInt32(header, 0x0C);
+        int ofsMcvt = BitConverter.ToInt32(header, 0x14);
+        int ofsMcnr = BitConverter.ToInt32(header, 0x18);
+        int ofsMcly = BitConverter.ToInt32(header, 0x1C);
+        int ofsMcrf = BitConverter.ToInt32(header, 0x20);
+        int ofsMcal = BitConverter.ToInt32(header, 0x24);
+        int sizeMcal = BitConverter.ToInt32(header, 0x28);
+        int ofsMcsh = BitConverter.ToInt32(header, 0x2C);
+        int sizeMcsh = BitConverter.ToInt32(header, 0x30);
+        int areaId = BitConverter.ToInt32(header, 0x34);
+        int nDoodadRefs = BitConverter.ToInt32(header, 0x38);
+        int holeMask = BitConverter.ToInt32(header, 0x3C);
+        int nMapObjRefs = BitConverter.ToInt32(header, 0x3C + 0x14);
+        int sizeMclq = BitConverter.ToInt32(header, 0x64);
+        int ofsLiquid = BitConverter.ToInt32(header, 0x68);
         float baseHeight = BitConverter.ToSingle(header, 0x70);
         float posX = BitConverter.ToSingle(header, 0x68);
         float posY = BitConverter.ToSingle(header, 0x6C);
-        int areaId = BitConverter.ToInt32(header, 0x34);
-        int holeMask = BitConverter.ToInt32(header, 0x3C);
+
+        int mcnkPayloadOffset = (int)mcnkStart + 8;
+        int mcnkPayloadEnd = mcnkPayloadOffset + declaredSize;
+        if (mcnkPayloadEnd > adtBytes.Length)
+            mcnkPayloadEnd = adtBytes.Length;
 
         byte[] heightData = [];
         byte[] normalData = [];
@@ -364,82 +467,96 @@ internal static class LkToAlphaCommand
         var doodadRefs = new List<int>();
         var worldModelRefs = new List<int>();
 
-        while (br.BaseStream.Position + 8 <= chunkStart + 8 + size)
+        // MCVT — use header offset
+        if (ofsMcvt >= headerSize && ofsMcvt + 145 * 4 <= declaredSize)
         {
-            if (br.BaseStream.Position + 8 > br.BaseStream.Length) break;
-            byte[] subTag = br.ReadBytes(4);
-            int subSize = br.ReadInt32();
-            long subEnd = br.BaseStream.Position + subSize;
-            string subTagStr = System.Text.Encoding.ASCII.GetString(subTag);
+            int srcOffset = mcnkPayloadOffset + ofsMcvt;
+            if (srcOffset + 145 * 4 <= adtBytes.Length)
+            {
+                heightData = new byte[145 * 4];
+                Buffer.BlockCopy(adtBytes, srcOffset, heightData, 0, 145 * 4);
+            }
+        }
 
-            if (subTagStr == "MCVT")
+        // MCNR — use header offset, always 448 bytes
+        if (ofsMcnr >= headerSize && ofsMcnr + 448 <= declaredSize)
+        {
+            int srcOffset = mcnkPayloadOffset + ofsMcnr;
+            if (srcOffset + 448 <= adtBytes.Length)
             {
-                heightData = br.ReadBytes(Math.Min(subSize, 145 * 4));
-                if (heightData.Length < 145 * 4)
-                {
-                    var padded = new byte[145 * 4];
-                    Buffer.BlockCopy(heightData, 0, padded, 0, heightData.Length);
-                    heightData = padded;
-                }
+                normalData = new byte[448];
+                Buffer.BlockCopy(adtBytes, srcOffset, normalData, 0, 448);
             }
-            else if (subTagStr == "MCNR")
+        }
+
+        // MCLY — use header offset
+        if (ofsMcly >= headerSize)
+        {
+            int srcOffset = mcnkPayloadOffset + ofsMcly;
+            if (srcOffset + 8 <= adtBytes.Length)
             {
-                normalData = br.ReadBytes(Math.Min(subSize, 448));
-                if (normalData.Length < 448)
-                {
-                    var padded = new byte[448];
-                    Buffer.BlockCopy(normalData, 0, padded, 0, normalData.Length);
-                    normalData = padded;
-                }
-            }
-            else if (subTagStr == "MCLY")
-            {
-                int layerCount = subSize / 16;
+                int mclyReadEnd = Math.Min(srcOffset + declaredSize - ofsMcly, adtBytes.Length) - srcOffset;
+                int mclyAvail = Math.Max(0, mclyReadEnd);
+                int layerCount = mclyAvail / 16;
                 for (int i = 0; i < layerCount; i++)
                 {
-                    uint texId = br.ReadUInt32();
-                    uint layerMclyFlags = br.ReadUInt32();
-                    uint alphaOff = br.ReadUInt32();
-                    uint effectId = br.ReadUInt32();
+                    int off = srcOffset + i * 16;
+                    if (off + 16 > adtBytes.Length) break;
+                    uint texId = BitConverter.ToUInt32(adtBytes, off);
+                    uint layerMclyFlags = BitConverter.ToUInt32(adtBytes, off + 4);
+                    uint alphaOff = BitConverter.ToUInt32(adtBytes, off + 8);
+                    uint effectId = BitConverter.ToUInt32(adtBytes, off + 12);
                     layers.Add(new LkMclyEntry(texId, layerMclyFlags, alphaOff, effectId));
                 }
             }
-            else if (subTagStr == "MCAL")
-            {
-                alphaData = br.ReadBytes(subSize);
-                alphaTotalSize = subSize;
-            }
-            else if (subTagStr == "MCSH")
-            {
-                shadowData = br.ReadBytes(subSize);
-            }
-            else if (subTagStr == "MCRF")
-            {
-                if (subSize >= 8)
-                {
-                    int nRefs = br.ReadInt32();
-                    for (int i = 0; i < nRefs && br.BaseStream.Position < subEnd; i++)
-                        doodadRefs.Add(br.ReadInt32());
-                    int nWmoRefs = br.ReadInt32();
-                    for (int i = 0; i < nWmoRefs && br.BaseStream.Position < subEnd; i++)
-                        worldModelRefs.Add(br.ReadInt32());
-                }
-            }
-            else
-            {
-                br.BaseStream.Position = subEnd;
-            }
-
-            if ((subSize & 1) != 0 && subEnd < br.BaseStream.Length)
-                br.BaseStream.Position = subEnd + 1;
-            else
-                br.BaseStream.Position = subEnd;
         }
 
-        // Skip to end of MCNK if we haven't reached it yet
-        long mcnkEnd = chunkStart + 8 + size;
-        if (br.BaseStream.Position < mcnkEnd)
-            br.BaseStream.Position = mcnkEnd;
+        // MCRF — use header offset
+        if (ofsMcrf >= headerSize)
+        {
+            int srcOffset = mcnkPayloadOffset + ofsMcrf;
+            int available = Math.Min(declaredSize - ofsMcrf, adtBytes.Length - srcOffset);
+            if (available > 8)
+            {
+                using var mcrfMs = new MemoryStream(adtBytes, srcOffset, available, writable: false);
+                using var mcrfBr = new BinaryReader(mcrfMs, System.Text.Encoding.ASCII, leaveOpen: true);
+                int nRefs = mcrfBr.ReadInt32();
+                for (int i = 0; i < nRefs && mcrfMs.Position + 4 <= mcrfMs.Length; i++)
+                    doodadRefs.Add(mcrfBr.ReadInt32());
+                if (mcrfMs.Position + 4 <= mcrfMs.Length)
+                {
+                    int nWmoRefs = mcrfBr.ReadInt32();
+                    for (int i = 0; i < nWmoRefs && mcrfMs.Position + 4 <= mcrfMs.Length; i++)
+                        worldModelRefs.Add(mcrfBr.ReadInt32());
+                }
+            }
+        }
+
+        // MCAL — use header offset and size
+        if (ofsMcal >= headerSize && sizeMcal > 0)
+        {
+            int srcOffset = mcnkPayloadOffset + ofsMcal;
+            if (srcOffset + sizeMcal <= adtBytes.Length)
+            {
+                alphaData = new byte[sizeMcal];
+                Buffer.BlockCopy(adtBytes, srcOffset, alphaData, 0, sizeMcal);
+                alphaTotalSize = sizeMcal;
+            }
+        }
+
+        // MCSH — use header offset and size
+        if (ofsMcsh >= headerSize && sizeMcsh > 0)
+        {
+            int srcOffset = mcnkPayloadOffset + ofsMcsh;
+            if (srcOffset + sizeMcsh <= adtBytes.Length)
+            {
+                shadowData = new byte[sizeMcsh];
+                Buffer.BlockCopy(adtBytes, srcOffset, shadowData, 0, sizeMcsh);
+            }
+        }
+
+        // Advance stream past MCNK
+        br.BaseStream.Position = mcnkStart + 8 + declaredSize;
 
         float[] heights = new float[145];
         for (int i = 0; i < 145 && i * 4 + 4 <= heightData.Length; i++)
@@ -473,6 +590,8 @@ internal static class LkToAlphaCommand
         return new LkToAlphaOptions(
             InputDir: GetOption(args, "--input", "-i"),
             OutputPath: GetOption(args, "--output", "-o"),
+            ClientRoot: GetOption(args, "--client-root", "-c"),
+            MapName: GetOption(args, "--map", "-m"),
             Verbose: HasFlag(args, "--verbose") || HasFlag(args, "-v"));
     }
 
@@ -489,6 +608,12 @@ internal static class LkToAlphaCommand
         return null;
     }
 
+    private static int? GetIntOption(string[] args, string longName, string shortName)
+    {
+        string? value = GetOption(args, longName, shortName);
+        return int.TryParse(value, out int result) ? result : null;
+    }
+
     private static bool HasFlag(string[] args, string name)
     {
         foreach (var arg in args)
@@ -502,5 +627,7 @@ internal static class LkToAlphaCommand
     private readonly record struct LkToAlphaOptions(
         string? InputDir,
         string? OutputPath,
+        string? ClientRoot,
+        string? MapName,
         bool Verbose);
 }

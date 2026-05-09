@@ -46,6 +46,17 @@ public sealed class TerrainTileTensorPack
     public bool[,,]? MclyLayerMask { get; init; }
 
     /// <summary>
+    /// 16×16 chunk grid × up to 4 layers.
+    /// Texture material ids from MCMT in on-disk uint8 form.
+    /// </summary>
+    public byte[,,]? McmtMaterialIds { get; init; }
+
+    /// <summary>
+    /// Single-byte Cataclysm+ texture sizing parameter from MAMP.
+    /// </summary>
+    public byte[]? MampValue { get; init; }
+
+    /// <summary>
     /// 256×256 tile-level alpha pack (4 channels, 0-1 float).
     /// Assembled from per-chunk MCAL decode.
     /// Channel 0 = base layer (always implied, may be all-ones).
@@ -57,6 +68,17 @@ public sealed class TerrainTileTensorPack
 
     /// <summary>257×257 × 3 RGB vertex ambient colors (MCCV).</summary>
     public float[,,]? MccvRgb { get; init; }
+
+    /// <summary>
+    /// 257×257 × 4 per-vertex baked lighting bytes from MCLV in on-disk channel order.
+    /// </summary>
+    public byte[,,]? MclvLightingBytes { get; init; }
+
+    /// <summary>
+    /// 2 × 3 × 3 flight-bound planes from MFBO stored as signed heights widened to int32.
+    /// Plane 0 = maximum, plane 1 = minimum.
+    /// </summary>
+    public int[,,]? MfboFlightBounds { get; init; }
 
     /// <summary>257×257 × 3 XYZ per-vertex normals (MCNR).</summary>
     public float[,,]? McnrNormalXyz { get; init; }
@@ -139,6 +161,42 @@ public sealed class TerrainTileTensorPack
     /// <summary>16×16 chunk grid: texture transform IDs (MTXF).</summary>
     public int[,]? MtxfTransformId { get; init; }
 
+    /// <summary>16×16 chunk grid: per-chunk MCSE sound-emitter counts.</summary>
+    public int[,]? McseEmitterCounts16 { get; init; }
+
+    /// <summary>Flattened decoded MCSE entry ids for standard 0x1C-byte emitters.</summary>
+    public int[]? McseEntryIds { get; init; }
+
+    /// <summary>Flattened decoded MCSE positions as an N×3 matrix for standard 0x1C-byte emitters.</summary>
+    public float[,]? McsePositionXyz { get; init; }
+
+    /// <summary>Exact MCSE emitter entry bytes as an N×stride matrix.</summary>
+    public byte[,]? McseEntryBytes { get; init; }
+
+    /// <summary>16×16 chunk grid: per-chunk pre-Cata doodad reference counts from MCRF.</summary>
+    public int[,]? McrfDoodadRefCounts16 { get; init; }
+
+    /// <summary>Flattened pre-Cata doodad reference indices from MCRF.</summary>
+    public int[]? McrfDoodadRefIndices { get; init; }
+
+    /// <summary>16×16 chunk grid: per-chunk pre-Cata world-model reference counts from MCRF.</summary>
+    public int[,]? McrfWmoRefCounts16 { get; init; }
+
+    /// <summary>Flattened pre-Cata world-model reference indices from MCRF.</summary>
+    public int[]? McrfWmoRefIndices { get; init; }
+
+    /// <summary>16×16 chunk grid: per-chunk Cataclysm+ doodad reference counts from MCRD.</summary>
+    public int[,]? McrdRefCounts16 { get; init; }
+
+    /// <summary>Flattened Cataclysm+ doodad reference indices from MCRD.</summary>
+    public int[]? McrdRefIndices { get; init; }
+
+    /// <summary>16×16 chunk grid: per-chunk Cataclysm+ world-model reference counts from MCRW.</summary>
+    public int[,]? McrwRefCounts16 { get; init; }
+
+    /// <summary>Flattened Cataclysm+ world-model reference indices from MCRW.</summary>
+    public int[]? McrwRefIndices { get; init; }
+
     // ── Metadata ───────────────────────────────────────────────────────────
 
     /// <summary>Which signals were present in the source tile.</summary>
@@ -146,6 +204,13 @@ public sealed class TerrainTileTensorPack
 
     /// <summary>Minimap source tag (terrain_only, no_liquid, no_object, raw, etc.).</summary>
     public string MinimapSourceTag { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Raw ADT-family chunks that the current tensor-pack builder does not yet decode into
+    /// first-class signals. These are persisted into the NPZ shard as uint8 blobs so later
+    /// passes can recover full-fidelity data without rereading the original client files.
+    /// </summary>
+    public IReadOnlyList<TerrainRawChunkBlob> RawChunks { get; init; } = Array.Empty<TerrainRawChunkBlob>();
 
     // ── Placement data ──────────────────────────────────────────────────────
 

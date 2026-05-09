@@ -56,6 +56,8 @@ public static class AlphaTensorPackBuilder
             signals.Add("mcal_alpha_pack_256");
         if (tileData.McshShadowMask256 is not null)
             signals.Add("mcsh_shadow_mask_256");
+        if (tileData.RawChunks.Count > 0)
+            signals.Add("raw_alpha_chunks");
 
         // Generate object footprint masks from MDDF/MODF placements
         float[,]? objectMask257 = null;
@@ -102,6 +104,7 @@ public static class AlphaTensorPackBuilder
             PlacementModfData = BuildPlacementModfData(tileData.WorldModelPlacements),
             PlacementMddfNames = tileData.ModelPlacements.Select(p => p.ModelPath).ToList(),
             PlacementModfNames = tileData.WorldModelPlacements.Select(p => p.ModelPath).ToList(),
+            RawChunks = tileData.RawChunks,
             AvailableSignals = signals,
         };
     }

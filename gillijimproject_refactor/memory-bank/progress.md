@@ -39,9 +39,12 @@
 | **Coordinate fixes** | **DONE** |
 | **Phase C: AlphaToLk writer infrastructure** | **DONE** — WdlWriter, LkWdtWriter, LkAdtWriter, AlphaToLkConverter |
 | **Phase C: AlphaToLk CLI command** | **DONE** — convert-alpha-to-lk in WowViewer.Tool.Converter |
-| **Phase C: AlphaToLk real-data validation** | **DONE** — 755/755 Azeroth (0.5.5), 972/972 Kalimdor, 256/256 EmeraldDream, 25/25 PVPZone01, 25/25 Shadowfang |
+| **Phase C: AlphaToLk real-data tile conversion validation** | **DONE** — 755/755 Azeroth (0.5.5), 972/972 Kalimdor, 256/256 EmeraldDream, 25/25 PVPZone01, 25/25 Shadowfang |
 | **Phase C: LkToAlpha reverse converter + writer path** | **DONE** — `LkToAlphaConverter`, `AlphaWdtWriter`, `convert-lk-to-alpha` |
 | **Phase C: LkToAlpha focused round-trip validation** | **DONE** — `LkToAlphaRoundTripTests` prove Alpha writer structure and `MH2O <-> MCLQ -> MH2O` parity |
+| **Phase C: ADT shard raw-chunk preservation** | **DONE** — unconsumed ADT-family chunks now persist into NPZ shards as raw uint8 blobs with metadata instead of being dropped outright |
+| **Phase C: ADT preservation signal promotion** | **DONE** — `MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, and `MCRW` now persist as first-class NPZ entries rather than raw-only fallback blobs; `MCSE` currently retains raw fallback beside the typed signals, and staged real-data `MCSE`/`MCRF` coverage is broadened smoke rather than a pinned positive regression |
+| **Phase C: Alpha shard raw-chunk preservation** | **DONE** — Alpha tile tensor packs now preserve raw embedded tile chunks under `raw_chunks/alpha/...` alongside decoded signals |
 
 ## IN PROGRESS
 | What | Status |
@@ -49,6 +52,7 @@
 | Multi-client full shard dataset prep | SWITCHED TO HARVEST PATH — use `WowViewer.Tool.Harvest harvest-map-mpq` on staged clients, not converter `dataset-scan` manifests |
 | Phase C: AlphaToLk AreaID crosswalk | NOT YET — `AreaIdMapper` exists in `WowViewer.Core.IO/Dbc/`, not yet wired to converter |
 | Phase C: LkToAlpha real-data validation | OPEN — focused library regressions pass, but broad batch proof on LK client data is still not recorded |
+| Phase C: Alpha/LK full chunk preservation | OPEN — current converter lane is still a reduced terrain-domain reconstruction, not chunk-for-chunk spec closure |
 | Phase C: Mdx↔M2 converters | NOT PORTED |
 | Phase C: Wmo v14↔v17 converters | NOT PORTED |
 

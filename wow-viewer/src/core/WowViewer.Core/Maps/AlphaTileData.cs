@@ -56,7 +56,8 @@ public sealed class AlphaTileData
         float[,]? mcshShadowMask256 = null,
         float[,]? mclqSurfaceHeight = null,
         int[,]? mclqTypeMask = null,
-        float[,]? mcshShadowMask1024 = null)
+        float[,]? mcshShadowMask1024 = null,
+        IReadOnlyList<TerrainRawChunkBlob>? rawChunks = null)
     {
         SourcePath = sourcePath;
         Heightmap = heightmap;
@@ -74,6 +75,7 @@ public sealed class AlphaTileData
         MclqSurfaceHeight = mclqSurfaceHeight;
         MclqTypeMask = mclqTypeMask;
         McshShadowMask1024 = mcshShadowMask1024;
+        RawChunks = rawChunks ?? Array.Empty<TerrainRawChunkBlob>();
     }
 
     public string SourcePath { get; }
@@ -92,6 +94,7 @@ public sealed class AlphaTileData
     public float[,]? MclqSurfaceHeight { get; }
     public int[,]? MclqTypeMask { get; }
     public float[,]? McshShadowMask1024 { get; }
+    public IReadOnlyList<TerrainRawChunkBlob> RawChunks { get; }
 
     public AdtPlacementCatalog ToPlacementCatalog()
     {

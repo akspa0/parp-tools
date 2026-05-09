@@ -74,8 +74,13 @@ Note: The 0.5.5.3494 Azeroth has 755 tiles (vs 685 in 0.5.3.3368) because 0.5.5 
 - Alpha and retail object footprint mask generation in the current tensor-pack contract
 - Metadata JSON with current `AvailableSignals` coverage for the active harvest path
 - `WowViewer.Tool.Harvest harvest-map-mpq` is the canonical multi-client shard builder for staged archive-backed clients
-- **AlphaToLk full conversion pipeline: 100% tile conversion across 4 maps, 5 terrain types**
-- **LkToAlpha conversion pipeline exists in the shared library and CLI, with focused round-trip regression proof including `MH2O <-> MCLQ` parity**
+- **AlphaToLk terrain-domain conversion pipeline: 100% tile conversion across 4 maps, 5 terrain types**
+- **LkToAlpha terrain-domain conversion pipeline exists in the shared library and CLI, with focused round-trip regression proof including `MH2O <-> MCLQ` parity**
+- **Important proof boundary:** tile conversion counts and focused round-trip tests do **not** mean full ADT/WDT chunk preservation. The current converter lane rebuilds a reduced terrain-domain model and still drops chunk families it does not yet decode.
+- **ADT harvest continuity update:** `TerrainTileTensorPack` / NPZ shards now preserve unconsumed ADT-family chunks as raw uint8 blobs under `raw_chunks/...` so current harvesting no longer silently discards every non-decoded chunk family.
+- **ADT preservation promotion update:** `MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, and `MCRW` now exist as first-class NPZ signals rather than staying raw-only fallback chunks. `MCSE` currently keeps raw fallback alongside the typed NPZ signals because only the standard `0x1C` emitter layout is decoded.
+- **ADT staged-proof boundary update:** staged real-data `MCSE` and `MCRF` coverage now scans multiple staged client roots and common map families, but both checks are still availability-based smoke in this environment rather than hard-pinned positive regressions; synthetic tests still carry the exact `MCSE`/`MCRF` preservation proof, including the trailing-subchunk proof for the `MCRF` payload-range fix.
+- **Alpha harvest continuity update:** Alpha tile tensor packs now also carry raw embedded tile chunks under `raw_chunks/alpha/...`, so Alpha harvesting keeps exact source payloads beside decoded signals.
 - WDT/WDL/ADT output validates via `map inspect` (correct chunk structure, MCAL big-alpha decoding)
 - `convert-alpha-to-lk` CLI command in `WowViewer.Tool.Converter`
 - `convert-lk-to-alpha` CLI command in `WowViewer.Tool.Converter`
@@ -84,6 +89,7 @@ Note: The 0.5.5.3494 Azeroth has 755 tiles (vs 685 in 0.5.3.3368) because 0.5.5 
 - AreaID crosswalk support (currently all chunks default to AreaID 0)
 - Split ADT output (_tex0, _obj0) for Cataclysm+ clients
 - LkToAlpha real-data batch validation beyond the new focused round-trip regressions
+- Full Alpha/LK chunk-for-chunk preservation instead of reduced terrain-domain reconstruction
 - M2/MDX converters and WMO v14↔v17 converters
 - Deep format readers Phase D
 - DBC/DB2 metadata enrichment Phase E

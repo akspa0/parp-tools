@@ -106,6 +106,18 @@ Every V14 model is a tiny, independent network that predicts ONE residual signal
 - DO NOT make models depend on each other's weights — only on each other's outputs.
 - The full V14 plan is in `wow-viewer/docs/architecture/v14-model-and-refactor-plan-2026-05-06.md`.
 
+### RULE 9: NEVER USE H:\CLIENTS — USE STAGED CLIENTS ONLY
+
+**DO NOT use any path under `H:\CLIENTS` for ANY purpose. EVER.**
+
+The data in `H:\CLIENTS` is NOT trusted. It must not be used for validation, extraction, inspection, harvesting, or any other workflow — not even as a fallback.
+
+The ONLY trusted client data lives in the project-local staging area:
+- `I:\parp\parp-tools\output\tmp\wowarchive-clients\` — use this for ALL client-root needs.
+- If a needed client build is not yet staged there, copy it from WoWArchive first, then work from the staged copy.
+- NEVER reference `H:\CLIENTS` in code, scripts, commands, validation notes, or documentation.
+- ALL references to `H:\CLIENTS` paths in existing docs (including `data-paths.md` and `AGENTS.md`) are stale and must be treated as incorrect. Only `output/tmp/wowarchive-clients/` paths are valid.
+
 ### RULE 8: ONE PHASE AT A TIME — NO SCOPE CREEP
 
 **You cannot work on Phase N+1 until Phase N is done. Done means validated, not coded.**
@@ -166,12 +178,13 @@ This rule exists because the pattern has been: see the whole mountain → try to
 
 ## Game Client Access And Staging
 
+- **NEVER use `H:\CLIENTS` for anything. Those paths are untrusted and stale. See RULE 9.**
+- The ONLY trusted client data lives under `I:\parp\parp-tools\output\tmp\wowarchive-clients\`.
 - Canonical WoWArchive docs live at `G:\WoW\WoWArchive-0.X-3.X\Readme.txt`, and the current mount entrypoint is `G:\WoW\WoWArchive-0.X-3.X\MountAll.bat`.
 - The current batch mounts the deduplicated bundle read-only into `G:\WoW\WoWArchive-0.X-3.X\Mount`; treat that mount as a source surface, not a high-throughput working root.
-- Existing fixed local client roots under `H:\CLIENTS\...` remain valid when they already exist locally.
-- For repeated or wide export or audit or inspect or corpus or training-prep work against archive-backed clients, first copy the required client root into `i:/parp/parp-tools/output/tmp/wowarchive-clients` and process the staged copy instead of streaming directly from the mount.
+- For all client work, first copy the required client root from WoWArchive into `i:/parp/parp-tools/output/tmp/wowarchive-clients` and process the staged copy.
 - Delete staged client copies that are no longer needed so the temp area does not silently grow without bound.
-- When reporting validation, say whether the proof used a fixed local root, a direct mounted archive path, or a staged local copy.
+- When reporting validation, always say the staged client path used.
 
 ## Build And Validation
 

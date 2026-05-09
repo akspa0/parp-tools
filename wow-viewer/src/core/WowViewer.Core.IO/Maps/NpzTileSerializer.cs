@@ -34,9 +34,13 @@ public static class NpzTileSerializer
         WriteArray(zip, "height_17", pack.Height17, "<f4");
         WriteArray(zip, "mcly_texture_ids", pack.MclyTextureIds, "<i4");
         WriteArray(zip, "mcly_layer_mask", pack.MclyLayerMask, "|b1");
+        WriteArray(zip, "mcmt_material_ids", pack.McmtMaterialIds, "|u1");
+        WriteArray(zip, "mamp_value", pack.MampValue, "|u1");
         WriteArray(zip, "mcal_alpha_pack_256", pack.McalAlphaPack256, "<f4");
         WriteArray(zip, "mccv_rgb", pack.MccvRgb, "<f4");
+        WriteArray(zip, "mclv_lighting_bytes", pack.MclvLightingBytes, "|u1");
         WriteArray(zip, "mcnr_normal_xyz", pack.McnrNormalXyz, "<f4");
+        WriteArray(zip, "mfbo_flight_bounds", pack.MfboFlightBounds, "<i4");
         WriteArray(zip, "mh2o_surface_height", pack.Mh2oSurfaceHeight, "<f4");
         WriteArray(zip, "mh2o_depth", pack.Mh2oDepth, "<f4");
         WriteArray(zip, "mh2o_type_mask", pack.Mh2oTypeMask, "<i4");
@@ -57,13 +61,37 @@ public static class NpzTileSerializer
         WriteArray(zip, "hole_mask_16", pack.HoleMask16, "|b1");
         WriteArray(zip, "mtxf_animated_mask", pack.MtxfAnimatedMask, "<i4");
         WriteArray(zip, "mtxf_transform_id", pack.MtxfTransformId, "<i4");
+        WriteArray(zip, "mcse_emitter_counts_16", pack.McseEmitterCounts16, "<i4");
+        WriteArray(zip, "mcse_entry_ids", pack.McseEntryIds, "<i4");
+        WriteArray(zip, "mcse_position_xyz", pack.McsePositionXyz, "<f4");
+        WriteArray(zip, "mcse_entry_bytes", pack.McseEntryBytes, "|u1");
+        WriteArray(zip, "mcrf_doodad_ref_counts_16", pack.McrfDoodadRefCounts16, "<i4");
+        WriteArray(zip, "mcrf_doodad_ref_indices", pack.McrfDoodadRefIndices, "<i4");
+        WriteArray(zip, "mcrf_wmo_ref_counts_16", pack.McrfWmoRefCounts16, "<i4");
+        WriteArray(zip, "mcrf_wmo_ref_indices", pack.McrfWmoRefIndices, "<i4");
+        WriteArray(zip, "mcrd_ref_counts_16", pack.McrdRefCounts16, "<i4");
+        WriteArray(zip, "mcrd_ref_indices", pack.McrdRefIndices, "<i4");
+        WriteArray(zip, "mcrw_ref_counts_16", pack.McrwRefCounts16, "<i4");
+        WriteArray(zip, "mcrw_ref_indices", pack.McrwRefIndices, "<i4");
         WriteArray(zip, "placement_mddf_data", pack.PlacementMddfData, "<f4");
         WriteArray(zip, "placement_modf_data", pack.PlacementModfData, "<f4");
+        WriteRawChunks(zip, pack.RawChunks);
 
         // Write metadata JSON
         WriteMetadata(zip, pack);
 
         zip.Finish();
+    }
+
+    private static void WriteRawChunks(ZipOutputStream zip, IReadOnlyList<TerrainRawChunkBlob> rawChunks)
+    {
+        foreach (TerrainRawChunkBlob rawChunk in rawChunks)
+        {
+            if (rawChunk.Data.Length == 0 || string.IsNullOrWhiteSpace(rawChunk.EntryName))
+                continue;
+
+            WriteArray(zip, rawChunk.EntryName, rawChunk.Data, "|u1");
+        }
     }
 
     private static void WriteArray(ZipOutputStream zip, string name, Array? array, string dtype)
@@ -99,6 +127,18 @@ public static class NpzTileSerializer
             placement_mddf_count = pack.PlacementMddfCount,
             placement_modf_count = pack.PlacementModfCount,
             minimap_source_tag = pack.MinimapSourceTag,
+            raw_chunks = pack.RawChunks.Select(static rawChunk => new
+            {
+                entry_name = rawChunk.EntryName,
+                source_kind = rawChunk.SourceKind,
+                source_path = rawChunk.SourcePath,
+                scope = rawChunk.Scope,
+                chunk_id = rawChunk.ChunkId,
+                chunk_index = rawChunk.ChunkIndex,
+                chunk_x = rawChunk.ChunkX,
+                chunk_y = rawChunk.ChunkY,
+                byte_length = rawChunk.Data.Length,
+            }),
         }, new JsonSerializerOptions
         {
             WriteIndented = true,
@@ -197,6 +237,11 @@ public static class NpzTileSerializer
 
         switch (array.Rank)
         {
+            case 1:
+                var i1 = (int[])array;
+                for (int valueIndex = 0; valueIndex < i1.Length; valueIndex++)
+                    BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(valueIndex * sizeof(int), sizeof(int)), i1[valueIndex]);
+                break;
             case 2:
                 var i2 = (int[,])array;
                 for (int y = 0; y < i2.GetLength(0); y++)
@@ -253,6 +298,10 @@ public static class NpzTileSerializer
 
         switch (array.Rank)
         {
+            case 1:
+                var b1 = (byte[])array;
+                Buffer.BlockCopy(b1, 0, result, 0, b1.Length);
+                break;
             case 2:
                 var b2 = (byte[,])array;
                 for (int y = 0; y < b2.GetLength(0); y++)
