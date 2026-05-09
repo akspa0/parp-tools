@@ -75,10 +75,6 @@ public static class WdlWriter
 
         WriteChunk(bw, "MVER", 4, static w => w.Write(18));
 
-        WriteChunk(bw, "MWMO", 0, static _ => { });
-        WriteChunk(bw, "MWID", 0, static _ => { });
-        WriteChunk(bw, "MODF", 0, static _ => { });
-
         int mareaStartOffset = CalculateMareaStartOffset();
         uint currentTileOffset = (uint)mareaStartOffset;
 
@@ -173,9 +169,6 @@ public static class WdlWriter
     {
         int offset = 0;
         offset += 8 + 4;   // MVER: header(8) + data(4)
-        offset += 8;       // MWMO: header(8) + data(0)
-        offset += 8;       // MWID: header(8) + data(0)
-        offset += 8;       // MODF: header(8) + data(0)
         offset += 8 + TilesPerAxis * TilesPerAxis * 4; // MAOF: header(8) + data(16384)
         return offset;
     }

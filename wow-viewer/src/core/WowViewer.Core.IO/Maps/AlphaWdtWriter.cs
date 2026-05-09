@@ -208,8 +208,12 @@ public static class AlphaWdtWriter
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x34), mcshRaw.Length);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x38), 0);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x3C), nMapObjRefs);
-        bool hasHole = cx < tile.HoleMask.GetLength(0) && cy < tile.HoleMask.GetLength(1) && tile.HoleMask[cx, cy];
-        BinaryPrimitives.WriteUInt16LittleEndian(header.AsSpan(0x40), (ushort)(hasHole ? 0xFFFF : 0));
+        ushort holeMaskValue = 0;
+        if (tile.HoleFullMasks != null && cx < tile.HoleFullMasks.GetLength(0) && cy < tile.HoleFullMasks.GetLength(1))
+            holeMaskValue = tile.HoleFullMasks[cx, cy];
+        else if (cx < tile.HoleMask.GetLength(0) && cy < tile.HoleMask.GetLength(1) && tile.HoleMask[cx, cy])
+            holeMaskValue = 0xFFFF;
+        BinaryPrimitives.WriteUInt16LittleEndian(header.AsSpan(0x40), holeMaskValue);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x5C), chunkDataSize);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x64), offsLiquid);
 

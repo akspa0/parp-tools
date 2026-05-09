@@ -287,6 +287,7 @@ public partial class ViewerApp : IDisposable
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantAttachLooseMapFolder = false;
+    private bool _wantOpenWdtFile = false;
     private bool _wantExportGlb = false;
     private bool _wantExportGlbCollision = false;
     private bool _wantExportMapGlbTiles = false;
@@ -1632,6 +1633,9 @@ void main() {
                 if (ImGui.MenuItem("Open File..."))
                     _wantOpenFile = true;
 
+                if (ImGui.MenuItem("Open Alpha WDT (loose map)..."))
+                    _wantOpenWdtFile = true;
+
                 if (ImGui.MenuItem("Open Game Folder (MPQ)..."))
                 {
                     _showFolderInput = true;
@@ -2095,6 +2099,20 @@ void main() {
 
             if (!string.IsNullOrEmpty(vlmPath) && Directory.Exists(vlmPath))
                 LoadVlmProject(vlmPath);
+        }
+
+        if (_wantOpenWdtFile)
+        {
+            _wantOpenWdtFile = false;
+            string? wdtPath = ShowFileDialogSTA(
+                "Select Alpha WDT file (loose map)",
+                "WoW map files (*.wdt;*.wdt.MPQ)|*.wdt;*.wdt.MPQ|All files (*.*)|*.*",
+                _lastLooseOverlayPath);
+            if (!string.IsNullOrEmpty(wdtPath) && File.Exists(wdtPath))
+            {
+                LoadFileFromDisk(wdtPath);
+                _statusMessage = $"Loaded alpha WDT: {wdtPath}";
+            }
         }
 
         if (_wantAttachLooseMapFolder)

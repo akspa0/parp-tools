@@ -61,7 +61,8 @@ public sealed class AlphaTileData
         int[,]? areaIds = null,
         int[,,]? mfboFlightBounds = null,
         float[,,]? mccvRgb = null,
-        byte[,,]? mclvLightingBytes = null)
+        byte[,,]? mclvLightingBytes = null,
+        ushort[,]? holeFullMasks = null)
     {
         SourcePath = sourcePath;
         Heightmap = heightmap;
@@ -69,6 +70,7 @@ public sealed class AlphaTileData
         MclyTextureIds = mclyTextureIds;
         MclyLayerMask = mclyLayerMask;
         HoleMask = holeMask;
+        HoleFullMasks = holeFullMasks;
         TextureNames = textureNames;
         ModelPlacements = modelPlacements;
         WorldModelPlacements = worldModelPlacements;
@@ -92,6 +94,7 @@ public sealed class AlphaTileData
     public int[,,] MclyTextureIds { get; }
     public bool[,,] MclyLayerMask { get; }
     public bool[,] HoleMask { get; }
+    public ushort[,]? HoleFullMasks { get; }
     public IReadOnlyList<string> TextureNames { get; }
     public IReadOnlyList<AlphaModelPlacement> ModelPlacements { get; }
     public IReadOnlyList<AlphaWorldModelPlacement> WorldModelPlacements { get; }
