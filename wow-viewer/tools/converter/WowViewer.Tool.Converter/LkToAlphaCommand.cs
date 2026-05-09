@@ -207,6 +207,9 @@ internal static class LkToAlphaCommand
         }
     }
 
+    public static LkAdtData ReadLkAdtPublic(byte[] adtBytes, int tileX, int tileY)
+        => ReadLkAdt(adtBytes, tileX, tileY);
+
 private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
     {
         using var ms = new MemoryStream(adtBytes, writable: false);
@@ -219,6 +222,7 @@ private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
         var worldModelPlacements = new List<LkModfEntry>();
         var chunks = new List<LkMcnkData>(256);
         uint mhdrFlags = 0;
+        int[,,]? mfboFlightBounds = null;
 
         while (ms.Position + 8 <= ms.Length)
         {
@@ -260,6 +264,28 @@ private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
             {
                 chunks.Add(ReadMcnkChunk(br, adtBytes, (int)size));
             }
+            else if (tag == "MFBO")
+            {
+                if (size >= 36)
+                {
+                    mfboFlightBounds = new int[2, 3, 3];
+                    for (int plane = 0; plane < 2; plane++)
+                    {
+                        for (int row = 0; row < 3; row++)
+                        {
+                            for (int col = 0; col < 3; col++)
+                            {
+                                short val = br.ReadInt16();
+                                mfboFlightBounds[plane, row, col] = val;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    ms.Position = chunkEnd;
+                }
+            }
             else
             {
                 ms.Position = chunkEnd;
@@ -284,7 +310,8 @@ private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
             ModelPlacements = modelPlacements,
             WorldModelPlacements = worldModelPlacements,
             Chunks = AttachLiquidData(adtBytes, chunks, tileX, tileY),
-            MhdrFlags = mhdrFlags
+            MhdrFlags = mhdrFlags,
+            MfboFlightBounds = mfboFlightBounds
         };
     }
 
@@ -325,6 +352,8 @@ private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
                     DoodadRefs = chunk.DoodadRefs,
                     WorldModelRefs = chunk.WorldModelRefs,
                     LiquidData = liquidData,
+                    MccvColors = chunk.MccvColors,
+                    MclvLighting = chunk.MclvLighting,
                     PosX = chunk.PosX,
                     PosY = chunk.PosY,
                     PosZ = chunk.PosZ
@@ -360,6 +389,7 @@ private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
 
     private const int LkMddfEntrySize = 36;
     private const int LkModfEntrySize = 64;
+    private const float MapOrigin = 17066.666f;
 
     private static List<LkMddfEntry> ReadMddfEntries(BinaryReader br, int size)
     {
@@ -369,16 +399,16 @@ private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
         {
             int nameId = br.ReadInt32();
             int uniqueId = br.ReadInt32();
-            float posX = br.ReadSingle();
-            float posY = br.ReadSingle();
-            float posZ = br.ReadSingle();
+            float rawX = br.ReadSingle();
+            float rawZ = br.ReadSingle();
+            float rawY = br.ReadSingle();
             float rotX = br.ReadSingle();
-            float rotY = br.ReadSingle();
             float rotZ = br.ReadSingle();
+            float rotY = br.ReadSingle();
             ushort scale = br.ReadUInt16();
             br.ReadUInt16();
             entries.Add(new LkMddfEntry(nameId, uniqueId,
-                new System.Numerics.Vector3(posX, posY, posZ),
+                new System.Numerics.Vector3(MapOrigin - rawY, MapOrigin - rawX, rawZ),
                 new System.Numerics.Vector3(rotX, rotY, rotZ),
                 scale / 1024f));
         }
@@ -393,27 +423,27 @@ private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
         {
             int nameId = br.ReadInt32();
             int uniqueId = br.ReadInt32();
-            float posX = br.ReadSingle();
-            float posY = br.ReadSingle();
-            float posZ = br.ReadSingle();
+            float rawX = br.ReadSingle();
+            float rawZ = br.ReadSingle();
+            float rawY = br.ReadSingle();
             float rotX = br.ReadSingle();
-            float rotY = br.ReadSingle();
             float rotZ = br.ReadSingle();
+            float rotY = br.ReadSingle();
             float bbMinX = br.ReadSingle();
-            float bbMinY = br.ReadSingle();
             float bbMinZ = br.ReadSingle();
+            float bbMinY = br.ReadSingle();
             float bbMaxX = br.ReadSingle();
-            float bbMaxY = br.ReadSingle();
             float bbMaxZ = br.ReadSingle();
+            float bbMaxY = br.ReadSingle();
             ushort modfFlags = br.ReadUInt16();
             ushort doodadSet = br.ReadUInt16();
             ushort nameSet = br.ReadUInt16();
             ushort modfScale = br.ReadUInt16();
             entries.Add(new LkModfEntry(nameId, uniqueId,
-                new System.Numerics.Vector3(posX, posY, posZ),
+                new System.Numerics.Vector3(MapOrigin - rawY, MapOrigin - rawX, rawZ),
                 new System.Numerics.Vector3(rotX, rotY, rotZ),
-                new System.Numerics.Vector3(bbMinX, bbMinY, bbMinZ),
-                new System.Numerics.Vector3(bbMaxX, bbMaxY, bbMaxZ),
+                new System.Numerics.Vector3(MapOrigin - bbMaxY, MapOrigin - bbMaxX, bbMinZ),
+                new System.Numerics.Vector3(MapOrigin - bbMinY, MapOrigin - bbMinX, bbMaxZ),
                 modfFlags, doodadSet, nameSet, modfScale / 1024f));
         }
         return entries;
@@ -555,6 +585,50 @@ private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
             }
         }
 
+        // Scan for MCCV and MCLV sub-chunks in MCNK payload
+        byte[]? mccvData = null;
+        byte[]? mclvData = null;
+        int scanStart = mcnkPayloadOffset + headerSize;
+        int scanEnd = mcnkPayloadEnd;
+        int pos = scanStart;
+        while (pos + 8 <= scanEnd)
+        {
+            if (pos + 4 <= adtBytes.Length)
+            {
+                string subTag = System.Text.Encoding.ASCII.GetString(adtBytes, pos, 4);
+                if (pos + 8 <= adtBytes.Length)
+                {
+                    int subSize = BitConverter.ToInt32(adtBytes, pos + 4);
+                    if (subSize < 0 || pos + 8 + subSize > scanEnd)
+                        break;
+
+                    if (subTag == "MCCV" && subSize >= 580)
+                    {
+                        int dataOffset = pos + 8;
+                        if (dataOffset + 580 <= adtBytes.Length)
+                        {
+                            mccvData = new byte[580];
+                            Buffer.BlockCopy(adtBytes, dataOffset, mccvData, 0, 580);
+                        }
+                    }
+                    else if (subTag == "MCLV" && subSize >= 580)
+                    {
+                        int dataOffset = pos + 8;
+                        if (dataOffset + 580 <= adtBytes.Length)
+                        {
+                            mclvData = new byte[580];
+                            Buffer.BlockCopy(adtBytes, dataOffset, mclvData, 0, 580);
+                        }
+                    }
+
+                    int skip = 8 + subSize;
+                    pos += (skip + 3) & ~3;
+                }
+                else break;
+            }
+            else break;
+        }
+
         // Advance stream past MCNK
         br.BaseStream.Position = mcnkStart + 8 + declaredSize;
 
@@ -579,6 +653,8 @@ private static LkAdtData ReadLkAdt(byte[] adtBytes, int tileX, int tileY)
             Layers = layers,
             DoodadRefs = doodadRefs,
             WorldModelRefs = worldModelRefs,
+            MccvColors = mccvData,
+            MclvLighting = mclvData,
             PosX = posX,
             PosY = posY,
             PosZ = baseHeight

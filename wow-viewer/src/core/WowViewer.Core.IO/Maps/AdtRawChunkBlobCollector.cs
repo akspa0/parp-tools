@@ -205,6 +205,17 @@ public static class AdtRawChunkBlobCollector
         }
     }
 
+    private static bool IsValidAdtFourCC(FourCC id)
+    {
+        string s = id.ToString();
+        foreach (char c in s)
+        {
+            if (c < 0x20 || c > 0x7E)
+                return false;
+        }
+        return true;
+    }
+
     private static void CollectRawMcnkSubchunks(
         RawChunkSourceContext context,
         byte[] payload,
@@ -215,6 +226,10 @@ public static class AdtRawChunkBlobCollector
         List<TerrainRawChunkBlob> rawChunks)
     {
         Dictionary<string, int> subchunkCounts = new(StringComparer.OrdinalIgnoreCase);
+
+        uint headerMcalSize = payload.Length >= 0x2C ? BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x28, 4)) : 0;
+        uint headerMcshSize = payload.Length >= 0x34 ? BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x30, 4)) : 0;
+
         int position = scanOffset;
 
         while (position <= payload.Length - ChunkHeader.SizeInBytes)
@@ -222,21 +237,28 @@ public static class AdtRawChunkBlobCollector
             if (!ChunkHeaderReader.TryRead(payload.AsSpan(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int payloadSize = unchecked((int)header.Size);
-            if (payloadSize < 0)
+            if (!IsValidAdtFourCC(header.Id))
                 break;
 
-            long nextOffset = (long)position + ChunkHeader.SizeInBytes + payloadSize;
+            long consumedSize = (long)header.Size;
+            if (header.Id == AdtChunkIds.Mcal && headerMcalSize >= ChunkHeader.SizeInBytes)
+                consumedSize = Math.Max(consumedSize, (long)headerMcalSize - ChunkHeader.SizeInBytes);
+            else if (header.Id == AdtChunkIds.Mcsh && headerMcshSize >= ChunkHeader.SizeInBytes)
+                consumedSize = Math.Max(consumedSize, (long)headerMcshSize - ChunkHeader.SizeInBytes);
+
+            long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
             if (nextOffset > payload.Length)
                 break;
 
-            string chunkId = header.Id.ToString();
-            if (!context.ProcessedMcnkChunkIds.Contains(header.Id) && payloadSize > 0)
+            long payloadSizeLong = consumedSize;
+            if (!context.ProcessedMcnkChunkIds.Contains(header.Id) && payloadSizeLong > 0)
             {
+                int chunkSize = (int)Math.Min(payloadSizeLong, int.MaxValue);
+                string chunkId = header.Id.ToString();
                 int occurrence = subchunkCounts.TryGetValue(chunkId, out int count) ? count : 0;
                 subchunkCounts[chunkId] = occurrence + 1;
 
-                byte[] chunkPayload = payload.AsSpan(position + ChunkHeader.SizeInBytes, payloadSize).ToArray();
+                byte[] chunkPayload = payload.AsSpan(position + ChunkHeader.SizeInBytes, chunkSize).ToArray();
                 string chunkLabel = chunkX.HasValue && chunkY.HasValue
                     ? $"mcnk_{chunkX.Value:D2}_{chunkY.Value:D2}"
                     : $"mcnk_{mcnkIndex:D3}";
@@ -255,7 +277,7 @@ public static class AdtRawChunkBlobCollector
                 });
             }
 
-            position = checked((int)nextOffset);
+            position = (int)nextOffset;
         }
     }
 

@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
@@ -129,6 +129,9 @@ string[] tail = args.Skip(1).ToArray();
 		break;
 	case "convert-lk-to-alpha":
 		LkToAlphaCommand.Run(tail);
+		break;
+	case "validate-roundtrip":
+		ValidateRoundTripCommand.Run(tail);
 		break;
 	default:
 		Console.Error.WriteLine($"Unknown converter command '{command}'.");
@@ -3729,7 +3732,7 @@ static AdtTextureFile CreateEmptyTextureFile(string sourcePath, MapFileKind kind
 	AdtMcalDecodeProfile decodeProfile = kind == MapFileKind.AdtTex
 		? AdtMcalDecodeProfile.Cataclysm400
 		: AdtMcalDecodeProfile.LichKingStrict;
-	return new AdtTextureFile(sourcePath, kind, decodeProfile, Array.Empty<string>(), Array.Empty<AdtTextureChunk>());
+	return new AdtTextureFile(sourcePath, kind, decodeProfile, Array.Empty<string>(), Array.Empty<AdtTextureChunk>(), null);
 }
 
 static void RunMlAuditSignals(string[] args)

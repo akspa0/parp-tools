@@ -36,6 +36,7 @@ public static class NpzTileSerializer
         WriteArray(zip, "mcly_layer_mask", pack.MclyLayerMask, "|b1");
         WriteArray(zip, "mcmt_material_ids", pack.McmtMaterialIds, "|u1");
         WriteArray(zip, "mamp_value", pack.MampValue, "|u1");
+        WriteArray(zip, "mcal_alpha_pack", pack.McalAlphaPack, "<f4");
         WriteArray(zip, "mcal_alpha_pack_256", pack.McalAlphaPack256, "<f4");
         WriteArray(zip, "mccv_rgb", pack.MccvRgb, "<f4");
         WriteArray(zip, "mclv_lighting_bytes", pack.MclvLightingBytes, "|u1");

@@ -149,7 +149,8 @@ public static class AlphaToLkConverter
             ModelPlacements = RemapPlacements(tile.ModelPlacements, tile.ModelPlacements.Select(p => p.ModelPath).Distinct().ToList()),
             WorldModelPlacements = RemapWorldPlacements(tile.WorldModelPlacements, tile.WorldModelPlacements.Select(p => p.ModelPath).Distinct().ToList()),
             Chunks = chunks,
-            MhdrFlags = ComputeMhdrFlags(tile)
+            MhdrFlags = ComputeMhdrFlags(tile),
+            MfboFlightBounds = tile.MfboFlightBounds
         };
     }
 
@@ -159,7 +160,9 @@ public static class AlphaToLkConverter
         List<LkMddfEntry> modelPlacements,
         List<LkModfEntry> worldModelPlacements)
     {
-        const int ChunkAltSize = 64;
+        int chunkAlphaSourceSize = tile.McalAlphaPack != null
+            ? tile.McalAlphaPack.GetLength(0) / 16
+            : 64;
 
         bool hasData = false;
         float baseHeight = 0f;
@@ -188,12 +191,14 @@ public static class AlphaToLkConverter
         if (shadowMap != null)
             mcnkFlags |= 0x01u;
 
-        int areaId = 0;
+        int areaId = tile.AreaIds != null && cy < tile.AreaIds.GetLength(0) && cx < tile.AreaIds.GetLength(1)
+            ? tile.AreaIds[cy, cx]
+            : 0;
 
         int nLayers = 0;
         for (int l = 0; l < 4; l++)
         {
-            if (cx < tile.MclyLayerMask.GetLength(0) && cy < tile.MclyLayerMask.GetLength(1) && tile.MclyLayerMask[cx, cy, l])
+            if (cy < tile.MclyLayerMask.GetLength(0) && cx < tile.MclyLayerMask.GetLength(1) && tile.MclyLayerMask[cy, cx, l])
                 nLayers = l + 1;
         }
 
@@ -203,20 +208,20 @@ public static class AlphaToLkConverter
 
         for (int l = 0; l < nLayers; l++)
         {
-            int texIdx = (cx < tile.MclyTextureIds.GetLength(0) && cy < tile.MclyTextureIds.GetLength(1))
-                ? tile.MclyTextureIds[cx, cy, l] : 0;
+            int texIdx = (cy < tile.MclyTextureIds.GetLength(0) && cx < tile.MclyTextureIds.GetLength(1))
+                ? tile.MclyTextureIds[cy, cx, l] : 0;
 
             uint flags = 0u;
             if (l > 0 && tile.McalAlphaPack != null)
             {
-                flags |= 0x100u;
+                flags |= 0x200u; // big alpha (64×64, 4096 bytes per layer)
             }
 
             layers.Add(new LkMclyEntry((uint)texIdx, flags, (uint)alphaOffset, 0));
 
             if (l > 0 && tile.McalAlphaPack != null)
             {
-                var chunkAlpha = SliceChunkAlphaBytes(tile.McalAlphaPack, cx, cy, l, ChunkAltSize);
+                var chunkAlpha = SliceChunkAlphaBytes(tile.McalAlphaPack, cx, cy, l, chunkAlphaSourceSize);
                 alphaOffset += chunkAlpha.Length;
                 alphaMapData = alphaMapData != null
                     ? [.. alphaMapData, .. chunkAlpha]
@@ -224,11 +229,11 @@ public static class AlphaToLkConverter
             }
         }
 
-        int holeMask = (cx < tile.HoleMask.GetLength(0) && cy < tile.HoleMask.GetLength(1))
-            ? (tile.HoleMask[cx, cy] ? 1 : 0) : 0;
+        int holeMask = (cy < tile.HoleMask.GetLength(0) && cx < tile.HoleMask.GetLength(1))
+            ? (tile.HoleMask[cy, cx] ? 1 : 0) : 0;
 
-        float posX = -((ChunkSubSize * cx) + ChunkSize * tileX - ChunkSize * 32f);
-        float posY = -((ChunkSubSize * cy) + ChunkSize * tileY - ChunkSize * 32f);
+        float posX = -((ChunkSubSize * cy) + ChunkSize * tileY - ChunkSize * 32f);
+        float posY = -((ChunkSubSize * cx) + ChunkSize * tileX - ChunkSize * 32f);
 
         float worldZ = 0f;
         if (heights.Length >= 1)
@@ -236,6 +241,9 @@ public static class AlphaToLkConverter
 
         var doodadRefs = FindDoodadRefs(modelPlacements, cx, cy, tileX, tileY);
         var worldModelRefs = FindWorldModelRefs(worldModelPlacements, cx, cy, tileX, tileY);
+
+        byte[]? mccvColors = tile.MccvRgb != null ? SliceChunkMccv(tile.MccvRgb, cx, cy) : null;
+        byte[]? mclvLighting = tile.MclvLightingBytes != null ? SliceChunkMclv(tile.MclvLightingBytes, cx, cy) : null;
 
         return new LkMcnkData
         {
@@ -255,6 +263,8 @@ public static class AlphaToLkConverter
             DoodadRefs = doodadRefs,
             WorldModelRefs = worldModelRefs,
             LiquidData = liquidData,
+            MccvColors = mccvColors,
+            MclvLighting = mclvLighting,
             PosX = posX,
             PosY = posY,
             PosZ = worldZ
@@ -263,8 +273,8 @@ public static class AlphaToLkConverter
 
     private static LkMcnkData CreateEmptyChunk(int cx, int cy, int tileX, int tileY)
     {
-        float posX = -((ChunkSubSize * cx) + ChunkSize * tileX - ChunkSize * 32f);
-        float posY = -((ChunkSubSize * cy) + ChunkSize * tileY - ChunkSize * 32f);
+        float posX = -((ChunkSubSize * cy) + ChunkSize * tileY - ChunkSize * 32f);
+        float posY = -((ChunkSubSize * cx) + ChunkSize * tileX - ChunkSize * 32f);
 
         return new LkMcnkData
         {
@@ -381,23 +391,104 @@ public static class AlphaToLkConverter
         return shadow;
     }
 
-    private static byte[] SliceChunkAlphaBytes(float[,,] alphaPack, int cx, int cy, int layer, int alphaSize)
+    private static byte[] SliceChunkAlphaBytes(float[,,] alphaPack, int cx, int cy, int layer, int sourceChunkSize)
     {
-        var alpha = new byte[alphaSize * alphaSize];
-        for (int y = 0; y < alphaSize; y++)
+        const int OutputSize = 64; // LK big-alpha is always 64x64
+        var alpha = new byte[OutputSize * OutputSize];
+        int srcBaseY = cy * sourceChunkSize;
+        int srcBaseX = cx * sourceChunkSize;
+
+        for (int y = 0; y < OutputSize; y++)
         {
-            for (int x = 0; x < alphaSize; x++)
+            for (int x = 0; x < OutputSize; x++)
             {
-                int srcY = cy * alphaSize + y;
-                int srcX = cx * alphaSize + x;
+                int srcY = srcBaseY + (y * sourceChunkSize / OutputSize);
+                int srcX = srcBaseX + (x * sourceChunkSize / OutputSize);
                 if (srcY < alphaPack.GetLength(0) && srcX < alphaPack.GetLength(1))
                 {
                     float f = alphaPack[srcY, srcX, layer];
-                    alpha[y * alphaSize + x] = (byte)Math.Clamp((int)(f * 255f), 0, 255);
+                    alpha[y * OutputSize + x] = (byte)Math.Clamp((int)(f * 255f), 0, 255);
                 }
             }
         }
         return alpha;
+    }
+
+    private static byte[]? SliceChunkMccv(float[,,] mccvRgb, int cx, int cy)
+    {
+        var colors = new byte[145 * 4];
+        int baseX = cx * 16;
+        int baseY = cy * 16;
+        int idx = 0;
+        bool hasData = false;
+
+        for (int row = 0; row < 17; row++)
+        {
+            bool isInner = (row & 1) != 0;
+            int cols = isInner ? 8 : 9;
+            for (int col = 0; col < cols; col++)
+            {
+                int sampleX = isInner ? (col * 2) + 1 : col * 2;
+                int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+                int px = baseX + sampleX;
+                int py = baseY + sampleY;
+
+                if (px < 257 && py < 257)
+                {
+                    float r = mccvRgb[py, px, 0];
+                    float g = mccvRgb[py, px, 1];
+                    float b = mccvRgb[py, px, 2];
+                    if (r > 0.001f || g > 0.001f || b > 0.001f)
+                        hasData = true;
+                    colors[idx] = (byte)Math.Clamp((int)(b * 255f), 0, 255);
+                    colors[idx + 1] = (byte)Math.Clamp((int)(g * 255f), 0, 255);
+                    colors[idx + 2] = (byte)Math.Clamp((int)(r * 255f), 0, 255);
+                    colors[idx + 3] = 0xFF;
+                }
+                idx += 4;
+            }
+        }
+
+        return hasData ? colors : null;
+    }
+
+    private static byte[]? SliceChunkMclv(byte[,,] mclvLighting, int cx, int cy)
+    {
+        var lighting = new byte[145 * 4];
+        int baseX = cx * 16;
+        int baseY = cy * 16;
+        int idx = 0;
+        bool hasData = false;
+
+        for (int row = 0; row < 17; row++)
+        {
+            bool isInner = (row & 1) != 0;
+            int cols = isInner ? 8 : 9;
+            for (int col = 0; col < cols; col++)
+            {
+                int sampleX = isInner ? (col * 2) + 1 : col * 2;
+                int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+                int px = baseX + sampleX;
+                int py = baseY + sampleY;
+
+                if (px < 257 && py < 257)
+                {
+                    byte b0 = mclvLighting[py, px, 0];
+                    byte b1 = mclvLighting[py, px, 1];
+                    byte b2 = mclvLighting[py, px, 2];
+                    byte b3 = mclvLighting[py, px, 3];
+                    if (b0 != 0 || b1 != 0 || b2 != 0 || b3 != 0)
+                        hasData = true;
+                    lighting[idx] = b0;
+                    lighting[idx + 1] = b1;
+                    lighting[idx + 2] = b2;
+                    lighting[idx + 3] = b3;
+                }
+                idx += 4;
+            }
+        }
+
+        return hasData ? lighting : null;
     }
 
     private static int FindLiquidType(AlphaTileData tile, int cx, int cy)
@@ -503,13 +594,13 @@ public static class AlphaToLkConverter
     private static List<int> FindDoodadRefs(List<LkMddfEntry> placements, int cx, int cy, int tileX, int tileY)
     {
         var refs = new List<int>();
-        float chunkWorldX = MapOrigin - tileX * ChunkSize - cy * ChunkSubSize;
-        float chunkWorldY = MapOrigin - tileY * ChunkSize - cx * ChunkSubSize;
+        float chunkCenterX = cx * ChunkSubSize + tileX * ChunkSize;
+        float chunkCenterY = cy * ChunkSubSize + tileY * ChunkSize;
 
         for (int i = 0; i < placements.Count; i++)
         {
-            float dx = MathF.Abs(placements[i].Position.X - chunkWorldX);
-            float dy = MathF.Abs(placements[i].Position.Y - chunkWorldY);
+            float dx = MathF.Abs(placements[i].Position.X - chunkCenterX);
+            float dy = MathF.Abs(placements[i].Position.Y - chunkCenterY);
             if (dx < ChunkSize && dy < ChunkSize)
                 refs.Add(i);
         }
@@ -520,13 +611,13 @@ public static class AlphaToLkConverter
     private static List<int> FindWorldModelRefs(List<LkModfEntry> placements, int cx, int cy, int tileX, int tileY)
     {
         var refs = new List<int>();
-        float chunkWorldX = MapOrigin - tileX * ChunkSize - cy * ChunkSubSize;
-        float chunkWorldY = MapOrigin - tileY * ChunkSize - cx * ChunkSubSize;
+        float chunkCenterX = cx * ChunkSubSize + tileX * ChunkSize;
+        float chunkCenterY = cy * ChunkSubSize + tileY * ChunkSize;
 
         for (int i = 0; i < placements.Count; i++)
         {
-            float dx = MathF.Abs(placements[i].Position.X - chunkWorldX);
-            float dy = MathF.Abs(placements[i].Position.Y - chunkWorldY);
+            float dx = MathF.Abs(placements[i].Position.X - chunkCenterX);
+            float dy = MathF.Abs(placements[i].Position.Y - chunkCenterY);
             if (dx < ChunkSize && dy < ChunkSize)
                 refs.Add(i);
         }
@@ -573,8 +664,11 @@ public static class AlphaToLkConverter
 
     private static uint ComputeMhdrFlags(AlphaTileData tile)
     {
+        uint flags = 0;
         bool hasShadow = tile.McshShadowMask256 != null || tile.McshShadowMask1024 != null;
-        return hasShadow ? 0x01u : 0x00u;
+        if (hasShadow) flags |= 0x01u;
+        if (tile.MfboFlightBounds != null) flags |= 0x01u;
+        return flags;
     }
 
     private const int McvtFloatCount = 145;

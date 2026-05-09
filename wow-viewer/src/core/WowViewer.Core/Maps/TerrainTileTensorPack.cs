@@ -57,10 +57,17 @@ public sealed class TerrainTileTensorPack
     public byte[]? MampValue { get; init; }
 
     /// <summary>
-    /// 256×256 tile-level alpha pack (4 channels, 0-1 float).
-    /// Assembled from per-chunk MCAL decode.
+    /// Full-resolution tile-level alpha pack at 1024×1024 (4 channels, 0-1 float).
+    /// Assembled from per-chunk MCAL decode at 64×64 pixels per chunk.
     /// Channel 0 = base layer (always implied, may be all-ones).
     /// Channels 1-3 = blend weights for additional layers.
+    /// </summary>
+    public float[,,]? McalAlphaPack { get; init; }
+
+    /// <summary>
+    /// 256×256 downsampled alpha pack (4 channels, 0-1 float), derived from
+    /// <see cref="McalAlphaPack"/> by averaging 4×4 blocks. Suitable for
+    /// minimap-resolution compositing. Channel layout matches <see cref="McalAlphaPack"/>.
     /// </summary>
     public float[,,]? McalAlphaPack256 { get; init; }
 
@@ -276,9 +283,9 @@ public sealed class TerrainTileTensorPack
                             EffectId = 0
                         });
 
-                        if (l > 0 && McalAlphaPack256 != null)
+                        if (l > 0 && McalAlphaPack != null)
                         {
-                            var alpha = SliceChunkAlpha256(McalAlphaPack256, cx, cy, l, alphaSize);
+                            var alpha = SliceChunkAlpha256(McalAlphaPack, cx, cy, l, alphaSize);
                             if (alpha != null)
                                 alphaMaps[l] = alpha;
                         }

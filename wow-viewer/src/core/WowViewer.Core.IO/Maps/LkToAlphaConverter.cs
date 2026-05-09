@@ -40,6 +40,11 @@ public static class LkToAlphaConverter
         int[,,] texIds = new int[16, 16, 4];
         bool[,,] layerMask = new bool[16, 16, 4];
         bool[,] holes = new bool[16, 16];
+        int[,] areaIds = new int[16, 16];
+        float[,,]? mccvRgb = new float[257, 257, 3];
+        byte[,,]? mclvLighting = new byte[257, 257, 4];
+        bool hasMccv = false;
+        bool hasMclv = false;
         List<AlphaLiquidChunk> liquidChunks = [];
 
         float tileBaseHeight = ComputeTileBaseHeight(adt);
@@ -57,6 +62,19 @@ public static class LkToAlphaConverter
                 InjectChunkAlpha(alphaPack, chunk, adt.TextureNames, texIds, layerMask, cx, cy);
                 InjectChunkShadow(shadowMask1024, chunk, cx, cy);
                 holes[cx, cy] = chunk.HoleMask != 0;
+                areaIds[cx, cy] = chunk.AreaId;
+
+                if (chunk.MccvColors is { Length: >= 580 })
+                {
+                    hasMccv = true;
+                    InjectChunkMccv(mccvRgb!, chunk.MccvColors, cx, cy);
+                }
+
+                if (chunk.MclvLighting is { Length: >= 580 })
+                {
+                    hasMclv = true;
+                    InjectChunkMclv(mclvLighting!, chunk.MclvLighting, cx, cy);
+                }
 
                 if (chunk.LiquidData is { Layers.Count: > 0 })
                 {
@@ -115,6 +133,8 @@ public static class LkToAlphaConverter
         float[,,]? alphaPack256 = hasAlpha ? DownsampleAlphaPack(alphaPack) : null;
         float[,]? shadowMask256 = hasShadow ? DownsampleShadowMask(shadowMask1024) : null;
 
+        FillHeightmapGaps(heightmap);
+
         return new AlphaTileData(
             $"lk-to-alpha({tileX},{tileY})",
             heightmap,
@@ -128,7 +148,26 @@ public static class LkToAlphaConverter
             liquidChunks,
             mcnrNormalXyz: normalXyz,
             mcshShadowMask256: shadowMask256,
-            mcshShadowMask1024: hasShadow ? shadowMask1024 : null);
+            mcshShadowMask1024: hasShadow ? shadowMask1024 : null,
+            areaIds: areaIds,
+            mfboFlightBounds: adt.MfboFlightBounds,
+            mccvRgb: hasMccv ? mccvRgb : null,
+            mclvLightingBytes: hasMclv ? mclvLighting : null);
+    }
+
+    private static void FillHeightmapGaps(float[,] hm)
+    {
+        for (int y = 0; y < TileHeightmapSize; y++)
+        {
+            for (int x = 0; x < TileHeightmapSize; x++)
+            {
+                if (hm[y, x] != 0f) continue;
+                if (x > 0 && hm[y, x - 1] != 0f) hm[y, x] = hm[y, x - 1];
+                else if (y > 0 && hm[y - 1, x] != 0f) hm[y, x] = hm[y - 1, x];
+                else if (x < TileHeightmapSize - 1 && hm[y, x + 1] != 0f) hm[y, x] = hm[y, x + 1];
+                else if (y < TileHeightmapSize - 1 && hm[y + 1, x] != 0f) hm[y, x] = hm[y + 1, x];
+            }
+        }
     }
 
     private static float ComputeTileBaseHeight(LkAdtData adt)
@@ -358,6 +397,63 @@ public static class LkToAlphaConverter
     }
 
     private static float DecodeNormal(byte b) => (sbyte)b / 127f;
+
+    private static void InjectChunkMccv(float[,,] mccvRgb, byte[] chunkColors, int cx, int cy)
+    {
+        int baseX = cx * 16;
+        int baseY = cy * 16;
+        int idx = 0;
+
+        for (int row = 0; row < 17; row++)
+        {
+            bool isInner = (row & 1) != 0;
+            int cols = isInner ? 8 : 9;
+            for (int col = 0; col < cols; col++)
+            {
+                int sampleX = isInner ? (col * 2) + 1 : col * 2;
+                int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+                int px = baseX + sampleX;
+                int py = baseY + sampleY;
+
+                if (px < 257 && py < 257 && idx + 3 < chunkColors.Length)
+                {
+                    mccvRgb[py, px, 0] = chunkColors[idx] / 255f;
+                    mccvRgb[py, px, 1] = chunkColors[idx + 1] / 255f;
+                    mccvRgb[py, px, 2] = chunkColors[idx + 2] / 255f;
+                }
+                idx += 4;
+            }
+        }
+    }
+
+    private static void InjectChunkMclv(byte[,,] mclvLighting, byte[] chunkLighting, int cx, int cy)
+    {
+        int baseX = cx * 16;
+        int baseY = cy * 16;
+        int idx = 0;
+
+        for (int row = 0; row < 17; row++)
+        {
+            bool isInner = (row & 1) != 0;
+            int cols = isInner ? 8 : 9;
+            for (int col = 0; col < cols; col++)
+            {
+                int sampleX = isInner ? (col * 2) + 1 : col * 2;
+                int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+                int px = baseX + sampleX;
+                int py = baseY + sampleY;
+
+                if (px < 257 && py < 257 && idx + 3 < chunkLighting.Length)
+                {
+                    mclvLighting[py, px, 0] = chunkLighting[idx];
+                    mclvLighting[py, px, 1] = chunkLighting[idx + 1];
+                    mclvLighting[py, px, 2] = chunkLighting[idx + 2];
+                    mclvLighting[py, px, 3] = chunkLighting[idx + 3];
+                }
+                idx += 4;
+            }
+        }
+    }
 
     private static byte ClassifyLkLiquid(int flags)
     {

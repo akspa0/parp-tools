@@ -117,6 +117,12 @@ public static class LkAdtWriter
             WriteDataChunk(bw, "MH2O", mh2oData);
         }
 
+        byte[] mfboData = BuildMfboPayload(adt.MfboFlightBounds);
+        if (mfboData.Length > 0)
+        {
+            WriteDataChunk(bw, "MFBO", mfboData);
+        }
+
         byte[] result = ms.ToArray();
 
         PatchMhdr(result, (int)mhdrPosition, adt.MhdrFlags,
@@ -242,7 +248,7 @@ public static class LkAdtWriter
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms, Encoding.ASCII, leaveOpen: true);
 
-        bw.Write(FourCC.FromString("MCNK").ToFileBytes());
+        bw.Write(System.Text.Encoding.ASCII.GetBytes("MCNK"));
         long sizePosition = ms.Position;
         bw.Write(0);
 
@@ -251,19 +257,17 @@ public static class LkAdtWriter
         bw.Write(header);
 
         long afterHeader = ms.Position;
-        int subOffset = (int)(McnkHeaderSize + ChunkHeaderSize);
-
-        int mcvtOffset = subOffset;
-        bw.Write(FourCC.FromString("MCVT").ToFileBytes());
+        int mcvtOffset = (int)ms.Position;
+        bw.Write(System.Text.Encoding.ASCII.GetBytes("MCVT"));
         bw.Write(McvtFloatCount * 4);
         for (int i = 0; i < McvtFloatCount; i++)
         {
-            float raw = i < chunk.Heights.Length ? chunk.Heights[i] - chunk.BaseHeight : 0f;
+            float raw = i < chunk.Heights.Length ? chunk.Heights[i] : 0f;
             bw.Write(raw);
         }
 
-        int mcnrOffset = (int)(ms.Position - afterHeader + McnkHeaderSize);
-        bw.Write(FourCC.FromString("MCNR").ToFileBytes());
+        int mcnrOffset = (int)ms.Position;
+        bw.Write(System.Text.Encoding.ASCII.GetBytes("MCNR"));
         bw.Write(McnrByteCount);
         byte[] normals = chunk.Normals;
         int normalBytes = Math.Min(normals.Length, McnrByteCount);
@@ -274,19 +278,19 @@ public static class LkAdtWriter
         int mclyOffset = 0, mcalOffset = 0, mcalSize = 0;
         if (chunk.Layers.Count > 0)
         {
-            mclyOffset = (int)(ms.Position - afterHeader + McnkHeaderSize);
+            mclyOffset = (int)ms.Position;
 
             byte[] mclyPayload = BuildMclyPayload(chunk.Layers);
-            bw.Write(FourCC.FromString("MCLY").ToFileBytes());
+            bw.Write(System.Text.Encoding.ASCII.GetBytes("MCLY"));
             bw.Write(mclyPayload.Length);
             bw.Write(mclyPayload);
 
             if (chunk.AlphaMapData is { Length: > 0 })
             {
-                mcalOffset = (int)(ms.Position - afterHeader + McnkHeaderSize);
+                mcalOffset = (int)ms.Position;
                 mcalSize = chunk.AlphaMapData.Length + ChunkHeaderSize;
 
-                bw.Write(FourCC.FromString("MCAL").ToFileBytes());
+                bw.Write(System.Text.Encoding.ASCII.GetBytes("MCAL"));
                 bw.Write(chunk.AlphaMapData.Length);
                 bw.Write(chunk.AlphaMapData);
             }
@@ -295,9 +299,9 @@ public static class LkAdtWriter
         int mcrfOffset = 0;
         if (chunk.DoodadRefs.Count > 0 || chunk.WorldModelRefs.Count > 0)
         {
-            mcrfOffset = (int)(ms.Position - afterHeader + McnkHeaderSize);
+            mcrfOffset = (int)ms.Position;
             int mcrfSize = 4 + chunk.DoodadRefs.Count * 4 + chunk.WorldModelRefs.Count * 4;
-            bw.Write(FourCC.FromString("MCRF").ToFileBytes());
+            bw.Write(System.Text.Encoding.ASCII.GetBytes("MCRF"));
             bw.Write(mcrfSize);
             bw.Write(chunk.DoodadRefs.Count);
             bw.Write(chunk.WorldModelRefs.Count);
@@ -310,12 +314,30 @@ public static class LkAdtWriter
         int mcshOffset = 0, mcshSize = 0;
         if (chunk.ShadowMap is { Length: > 0 })
         {
-            mcshOffset = (int)(ms.Position - afterHeader + McnkHeaderSize);
+            mcshOffset = (int)ms.Position;
             mcshSize = chunk.ShadowMap.Length + ChunkHeaderSize;
 
-            bw.Write(FourCC.FromString("MCSH").ToFileBytes());
+            bw.Write(System.Text.Encoding.ASCII.GetBytes("MCSH"));
             bw.Write(chunk.ShadowMap.Length);
             bw.Write(chunk.ShadowMap);
+        }
+
+        int mccvOffset = 0;
+        if (chunk.MccvColors is { Length: >= 580 })
+        {
+            mccvOffset = (int)ms.Position;
+            bw.Write(System.Text.Encoding.ASCII.GetBytes("MCCV"));
+            bw.Write(chunk.MccvColors.Length);
+            bw.Write(chunk.MccvColors);
+        }
+
+        int mclvOffset = 0;
+        if (chunk.MclvLighting is { Length: >= 580 })
+        {
+            mclvOffset = (int)ms.Position;
+            bw.Write(System.Text.Encoding.ASCII.GetBytes("MCLV"));
+            bw.Write(chunk.MclvLighting.Length);
+            bw.Write(chunk.MclvLighting);
         }
 
         int totalSize = (int)ms.Position - 8;
@@ -523,6 +545,28 @@ public static class LkAdtWriter
         return values;
     }
 
+    private static byte[] BuildMfboPayload(int[,,]? flightBounds)
+    {
+        if (flightBounds is null)
+            return [];
+
+        byte[] data = new byte[36];
+        for (int plane = 0; plane < 2; plane++)
+        {
+            for (int row = 0; row < 3; row++)
+            {
+                for (int col = 0; col < 3; col++)
+                {
+                    int offset = (((plane * 3) + row) * 3 + col) * 2;
+                    short value = (short)Math.Clamp(flightBounds[plane, row, col], short.MinValue, short.MaxValue);
+                    BinaryPrimitives.WriteInt16LittleEndian(data.AsSpan(offset), value);
+                }
+            }
+        }
+
+        return data;
+    }
+
     private static void PatchMhdr(byte[] result, int mhdrStart, uint flags,
         int ofsMcin, int ofsMtex, int ofsMmdx, int ofsMmid,
         int ofsMwmo, int ofsMwid, int ofsMddf, int ofsModf,
@@ -560,14 +604,14 @@ public static class LkAdtWriter
 
     private static void WriteChunk(BinaryWriter bw, string tag, int dataSize, Action<BinaryWriter> writePayload)
     {
-        bw.Write(FourCC.FromString(tag).ToFileBytes());
+        bw.Write(System.Text.Encoding.ASCII.GetBytes(tag));
         bw.Write(dataSize);
         writePayload(bw);
     }
 
     private static void WriteDataChunk(BinaryWriter bw, string tag, byte[] payload)
     {
-        bw.Write(FourCC.FromString(tag).ToFileBytes());
+        bw.Write(System.Text.Encoding.ASCII.GetBytes(tag));
         bw.Write(payload.Length);
         bw.Write(payload);
         if ((payload.Length & 1) != 0)

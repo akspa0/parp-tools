@@ -30,7 +30,7 @@ public static class AlphaTensorPackBuilder
         float[,]? height65 = DownsampleHeightmap(height257, 65);
         float[,]? height17 = DownsampleHeightmap(height257, 17);
 
-        float[,,]? mcalAlphaPack256 = tileData.McalAlphaPack;
+        float[,,]? mcalAlphaPack = tileData.McalAlphaPack;
 
         float[,]? mclqSurfaceHeight257 = tileData.MclqSurfaceHeight;
         int[,]? mclqTypeMask257 = tileData.MclqTypeMask;
@@ -85,7 +85,8 @@ public static class AlphaTensorPackBuilder
             MclyTextureIds = tileData.MclyTextureIds,
             MclyTextureNames = tileData.TextureNames,
             MclyLayerMask = tileData.MclyLayerMask,
-            McalAlphaPack256 = mcalAlphaPack256,
+            McalAlphaPack = mcalAlphaPack,
+            McalAlphaPack256 = DownsampleAlpha256(mcalAlphaPack),
             McnrNormalXyz = tileData.McnrNormalXyz,
             McshShadowMask256 = tileData.McshShadowMask256,
             MccvRgb = null,
@@ -225,6 +226,43 @@ public static class AlphaTensorPackBuilder
         float top = v00 + (v10 - v00) * fx;
         float bottom = v01 + (v11 - v01) * fx;
         return top + (bottom - top) * fy;
+    }
+
+    private static float[,,]? DownsampleAlpha256(float[,,]? alpha)
+    {
+        if (alpha is null)
+            return null;
+
+        int srcSize = alpha.GetLength(0);
+        int channels = alpha.GetLength(2);
+        const int DstSize = 256;
+
+        float scale = (float)srcSize / DstSize;
+        float[,,] result = new float[DstSize, DstSize, channels];
+
+        for (int y = 0; y < DstSize; y++)
+        {
+            for (int x = 0; x < DstSize; x++)
+            {
+                int srcX0 = (int)(x * scale);
+                int srcY0 = (int)(y * scale);
+                int srcX1 = Math.Min(srcX0 + 1, srcSize - 1);
+                int srcY1 = Math.Min(srcY0 + 1, srcSize - 1);
+                float fx = (x * scale) - srcX0;
+                float fy = (y * scale) - srcY0;
+
+                for (int c = 0; c < channels; c++)
+                {
+                    float v00 = alpha[srcY0, srcX0, c];
+                    float v10 = alpha[srcY0, srcX1, c];
+                    float v01 = alpha[srcY1, srcX0, c];
+                    float v11 = alpha[srcY1, srcX1, c];
+                    result[y, x, c] = v00 + (v10 - v00) * fx + (v01 - v00) * fy + (v00 - v10 - v01 + v11) * fx * fy;
+                }
+            }
+        }
+
+        return result;
     }
 
     private static void BuildObjectMasks(

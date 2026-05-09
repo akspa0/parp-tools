@@ -57,7 +57,11 @@ public sealed class AlphaTileData
         float[,]? mclqSurfaceHeight = null,
         int[,]? mclqTypeMask = null,
         float[,]? mcshShadowMask1024 = null,
-        IReadOnlyList<TerrainRawChunkBlob>? rawChunks = null)
+        IReadOnlyList<TerrainRawChunkBlob>? rawChunks = null,
+        int[,]? areaIds = null,
+        int[,,]? mfboFlightBounds = null,
+        float[,,]? mccvRgb = null,
+        byte[,,]? mclvLightingBytes = null)
     {
         SourcePath = sourcePath;
         Heightmap = heightmap;
@@ -76,6 +80,10 @@ public sealed class AlphaTileData
         MclqTypeMask = mclqTypeMask;
         McshShadowMask1024 = mcshShadowMask1024;
         RawChunks = rawChunks ?? Array.Empty<TerrainRawChunkBlob>();
+        AreaIds = areaIds;
+        MfboFlightBounds = mfboFlightBounds;
+        MccvRgb = mccvRgb;
+        MclvLightingBytes = mclvLightingBytes;
     }
 
     public string SourcePath { get; }
@@ -95,6 +103,10 @@ public sealed class AlphaTileData
     public int[,]? MclqTypeMask { get; }
     public float[,]? McshShadowMask1024 { get; }
     public IReadOnlyList<TerrainRawChunkBlob> RawChunks { get; }
+    public int[,]? AreaIds { get; }
+    public int[,,]? MfboFlightBounds { get; }
+    public float[,,]? MccvRgb { get; }
+    public byte[,,]? MclvLightingBytes { get; }
 
     public AdtPlacementCatalog ToPlacementCatalog()
     {
@@ -174,7 +186,7 @@ var heights = SliceChunkHeights(Heightmap, cx, cy, tileSize);
                     AlphaMaps = alphaMaps,
                     Liquid = liquid,
                     WorldPosition = new Vector3(chunkWorldX, chunkWorldY, 0f),
-                    AreaId = 0,
+                    AreaId = AreaIds != null && cx < AreaIds.GetLength(0) && cy < AreaIds.GetLength(1) ? AreaIds[cx, cy] : 0,
                     McnkFlags = liquid != null ? 0x3C : 0
                 });
             }

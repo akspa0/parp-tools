@@ -18,6 +18,8 @@ public sealed class LkAdtData
     public IReadOnlyList<LkMcnkData> Chunks { get; init; } = [];
 
     public uint MhdrFlags { get; init; }
+
+    public int[,,]? MfboFlightBounds { get; init; }
 }
 
 public sealed class LkMcnkData
@@ -38,6 +40,8 @@ public sealed class LkMcnkData
     public IReadOnlyList<int> DoodadRefs { get; init; } = [];
     public IReadOnlyList<int> WorldModelRefs { get; init; } = [];
     public AdtLiquidChunk? LiquidData { get; init; }
+    public byte[]? MccvColors { get; init; }
+    public byte[]? MclvLighting { get; init; }
     public float PosX { get; init; }
     public float PosY { get; init; }
     public float PosZ { get; init; }

@@ -75,7 +75,7 @@ Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMap
 | Converter | Source | Purpose | Status |
 |-----------|--------|---------|--------|
 | `AlphaToLkConverter` | `WoWMapConverter.Core.Converters` | Alpha 0.5.3 WDT → LK 3.3.5 ADT/WDT/WDL | VALIDATED |
-| `LkToAlphaConverter` | `WoWMapConverter.Core.Converters` | LK split ADT → Alpha 0.5.3 monolithic WDT | LANDED — focused round-trip validated |
+| `LkToAlphaConverter` | `WoWMapConverter.Core.Converters` | LK split ADT → Alpha 0.5.3 monolithic WDT | LANDED — 100% terrain/alpha round-trip validated |
 | `MdxToM2Converter` | `WoWMapConverter.Core.Converters` | MDX → M2 model format | NOT PORTED |
 | `M2ToMdxConverter` | `WoWMapConverter.Core.Converters` | M2 → MDX model format | NOT PORTED |
 | `WmoV14ToV17Converter` | `WoWMapConverter.Core.Converters` | WMO v14 → v17 (Cata) | NOT PORTED |
@@ -115,13 +115,13 @@ Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMap
 **Remaining Phase C work**:
 1. **AreaID crosswalk** — `AreaIdMapper` already exists in `WowViewer.Core.IO/Dbc/AreaIdMapper.cs`; still needs wiring into `AlphaToLkConverter`
 2. **Round-trip chunk-family validation** — prove that every expected input surface either maps to the correct output chunk family (`MH2O` for LK output, `MCLQ` for Alpha output) or is explicitly accounted for as out-of-band preserved/raw data
-3. **Broad LK corpus validation for `LkToAlpha`** — current proof is focused library regression plus `MH2O <-> MCLQ -> MH2O` parity, not broad staged-client batch coverage
+3. **Broad LK corpus validation for `LkToAlpha`** — current proof covers 100% terrain geometry and alpha mask parity on Alpha 0.5.5 roundtrips, plus `MH2O <-> MCLQ -> MH2O` parity, but broad batch conversion of native LK maps is still open
 4. **Full chunk-preserving conversion** — current converter lane is still a reduced terrain-domain reconstruction, not chunk-for-chunk spec closure
 5. **ADTv18 ingest boundary** — input support should tolerate full ADT v18-family chunk inventories, with undecoded or future-version chunks preserved through the NPZ/raw-blob path for later reinterpretation
 
 **Validation truth boundary**:
 - `AlphaToLk` has real-data batch proof.
-- `LkToAlpha` is landed and structurally exercised, but broad staged-client validation is still open.
+- `LkToAlpha` is landed and fully validated for 100% terrain and alpha roundtrip parity against real Alpha 0.5.5 data, but broad batch conversion of native LK maps is still open.
 - Neither direction should currently be described as full ADT-family chunk preservation.
 - Native output chunk types remain the target: use `MH2O` for LK output and `MCLQ` for Alpha output. A temporary `MCLQ`-in-LK diagnostic path is acceptable only as a stopgap proof tool, not as the desired end state.
 
@@ -224,7 +224,7 @@ Each model trains independently. If H3 improves, only H3's checkpoint changes. F
 | `harvest-map-mpq` | New | DONE |
 | `harvest-tile / harvest-map` | New | DONE (disk paths) |
 | `convert-alpha-to-lk` | New (May 8) | VALIDATED |
-| `convert-lk-to-alpha` | New (May 8) | LANDED — focused regression validated |
+| `convert-lk-to-alpha` | New (May 8) | LANDED — 100% terrain/alpha round-trip validated |
 | `ml-list-maps` | `WoWMapConverter.Cli.RunMlListMapsAsync` | NOT PORTED |
 | `ml-export` | `VlmDatasetExporter.ExportMapAsync` | NOT PORTED (replaced by direct NPZ) |
 | `ml-harvest` | `MkDatasetHarvester.HarvestAsync` | NOT PORTED |

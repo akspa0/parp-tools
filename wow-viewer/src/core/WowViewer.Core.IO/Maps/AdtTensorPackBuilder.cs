@@ -128,7 +128,8 @@ public static class AdtTensorPackBuilder
             MclyLayerMask = mclyLayerMask,
             McmtMaterialIds = mcmtMaterialIds,
             MampValue = mampValue,
-            McalAlphaPack256 = mcalAlphaPack,
+            McalAlphaPack = mcalAlphaPack,
+            McalAlphaPack256 = DownsampleAlpha256(mcalAlphaPack),
             MccvRgb = mccvRgb,
             MclvLightingBytes = mclvLightingBytes,
             McnrNormalXyz = mcnrNormalXyz,
@@ -1501,6 +1502,43 @@ public static class AdtTensorPackBuilder
         return top + (bottom - top) * fy;
     }
 
+    private static float[,,]? DownsampleAlpha256(float[,,]? alpha)
+    {
+        if (alpha is null)
+            return null;
+
+        int srcSize = alpha.GetLength(0);
+        int channels = alpha.GetLength(2);
+        const int DstSize = 256;
+
+        float scale = (float)srcSize / DstSize;
+        float[,,] result = new float[DstSize, DstSize, channels];
+
+        for (int y = 0; y < DstSize; y++)
+        {
+            for (int x = 0; x < DstSize; x++)
+            {
+                int srcX0 = (int)(x * scale);
+                int srcY0 = (int)(y * scale);
+                int srcX1 = Math.Min(srcX0 + 1, srcSize - 1);
+                int srcY1 = Math.Min(srcY0 + 1, srcSize - 1);
+                float fx = (x * scale) - srcX0;
+                float fy = (y * scale) - srcY0;
+
+                for (int c = 0; c < channels; c++)
+                {
+                    float v00 = alpha[srcY0, srcX0, c];
+                    float v10 = alpha[srcY0, srcX1, c];
+                    float v01 = alpha[srcY1, srcX0, c];
+                    float v11 = alpha[srcY1, srcX1, c];
+                    result[y, x, c] = v00 + (v10 - v00) * fx + (v01 - v00) * fy + (v00 - v10 - v01 + v11) * fx * fy;
+                }
+            }
+        }
+
+        return result;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Coordinate mapping (copied from AdtTerrainWriter)
     // ═══════════════════════════════════════════════════════════════════════
@@ -1618,7 +1656,7 @@ public static class AdtTensorPackBuilder
         }
     }
 
-    private static int LocateMcvtDataOffset(ReadOnlySpan<byte> payload)
+private static int LocateMcvtDataOffset(ReadOnlySpan<byte> payload)
     {
         uint headerMcalSize = payload.Length >= 0x2C ? BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x28, 4)) : 0;
         uint headerMcshSize = payload.Length >= 0x34 ? BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x30, 4)) : 0;
@@ -1629,14 +1667,13 @@ public static class AdtTensorPackBuilder
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = unchecked((int)header.Size);
-            int consumedSize = declaredSize;
+            long consumedSize = (long)header.Size;
             if (header.Id == AdtChunkIds.Mcnr)
                 consumedSize = Math.Max(consumedSize, McnrConsumedSize);
             else if (header.Id == AdtChunkIds.Mcal && headerMcalSize >= ChunkHeader.SizeInBytes)
-                consumedSize = Math.Max(consumedSize, checked((int)headerMcalSize - ChunkHeader.SizeInBytes));
+                consumedSize = Math.Max(consumedSize, (long)headerMcalSize - ChunkHeader.SizeInBytes);
             else if (header.Id == AdtChunkIds.Mcsh && headerMcshSize >= ChunkHeader.SizeInBytes)
-                consumedSize = Math.Max(consumedSize, checked((int)headerMcshSize - ChunkHeader.SizeInBytes));
+                consumedSize = Math.Max(consumedSize, (long)headerMcshSize - ChunkHeader.SizeInBytes);
 
             long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
             if (nextOffset > payload.Length)
@@ -1649,13 +1686,13 @@ public static class AdtTensorPackBuilder
                 return position + ChunkHeader.SizeInBytes;
             }
 
-            position = checked((int)nextOffset);
+            position = (int)nextOffset;
         }
 
         return -1;
     }
 
-    private static int LocateMcnrDataOffset(ReadOnlySpan<byte> payload)
+private static int LocateMcnrDataOffset(ReadOnlySpan<byte> payload)
     {
         int position = RootMcnkSubchunkOffset;
         while (position <= payload.Length - ChunkHeader.SizeInBytes)
@@ -1663,8 +1700,7 @@ public static class AdtTensorPackBuilder
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = unchecked((int)header.Size);
-            int consumedSize = declaredSize;
+            long consumedSize = (long)header.Size;
             if (header.Id == AdtChunkIds.Mcnr)
                 consumedSize = Math.Max(consumedSize, McnrConsumedSize);
 
@@ -1679,13 +1715,13 @@ public static class AdtTensorPackBuilder
                 return position + ChunkHeader.SizeInBytes;
             }
 
-            position = checked((int)nextOffset);
+            position = (int)nextOffset;
         }
 
         return -1;
     }
 
-    private static int LocateMccvDataOffset(ReadOnlySpan<byte> payload)
+private static int LocateMccvDataOffset(ReadOnlySpan<byte> payload)
     {
         uint headerMcalSize = payload.Length >= 0x2C ? BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x28, 4)) : 0;
         uint headerMcshSize = payload.Length >= 0x34 ? BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x30, 4)) : 0;
@@ -1696,13 +1732,13 @@ public static class AdtTensorPackBuilder
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int consumedSize = unchecked((int)header.Size);
+            long consumedSize = (long)header.Size;
             if (header.Id == AdtChunkIds.Mcnr)
                 consumedSize = Math.Max(consumedSize, McnrConsumedSize);
             else if (header.Id == AdtChunkIds.Mcal && headerMcalSize >= ChunkHeader.SizeInBytes)
-                consumedSize = Math.Max(consumedSize, checked((int)headerMcalSize - ChunkHeader.SizeInBytes));
+                consumedSize = Math.Max(consumedSize, (long)headerMcalSize - ChunkHeader.SizeInBytes);
             else if (header.Id == AdtChunkIds.Mcsh && headerMcshSize >= ChunkHeader.SizeInBytes)
-                consumedSize = Math.Max(consumedSize, checked((int)headerMcshSize - ChunkHeader.SizeInBytes));
+                consumedSize = Math.Max(consumedSize, (long)headerMcshSize - ChunkHeader.SizeInBytes);
 
             long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
             if (nextOffset > payload.Length)
@@ -1715,13 +1751,13 @@ public static class AdtTensorPackBuilder
                 return position + ChunkHeader.SizeInBytes;
             }
 
-            position = checked((int)nextOffset);
+            position = (int)nextOffset;
         }
 
         return -1;
     }
 
-    private static int LocateMcnkSubchunkDataOffset(ReadOnlySpan<byte> payload, FourCC chunkId, int minimumPayloadSize)
+private static int LocateMcnkSubchunkDataOffset(ReadOnlySpan<byte> payload, FourCC chunkId, int minimumPayloadSize)
     {
         uint headerMcshSize = payload.Length >= 0x34 ? BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x30, 4)) : 0;
         int position = RootMcnkSubchunkOffset;
@@ -1731,25 +1767,25 @@ public static class AdtTensorPackBuilder
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
-            int consumedSize = declaredSize;
+            long declaredSize = (long)header.Size;
+            long consumedSize = declaredSize;
             if (header.Id == AdtChunkIds.Mcsh && headerMcshSize >= ChunkHeader.SizeInBytes)
-                consumedSize = Math.Max(consumedSize, checked((int)headerMcshSize - ChunkHeader.SizeInBytes));
+                consumedSize = Math.Max(consumedSize, (long)headerMcshSize - ChunkHeader.SizeInBytes);
 
             long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
-            if (nextOffset > payload.Length)
+            if (declaredSize < 0 || nextOffset > payload.Length)
                 break;
 
             if (header.Id == chunkId && declaredSize >= minimumPayloadSize)
                 return position + ChunkHeader.SizeInBytes;
 
-            position = checked((int)nextOffset);
+            position = (int)nextOffset;
         }
 
         return -1;
     }
 
-    private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payload, FourCC chunkId)
+private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payload, FourCC chunkId)
     {
         int position = 0;
         while (position <= payload.Length - ChunkHeader.SizeInBytes)
@@ -1757,15 +1793,15 @@ public static class AdtTensorPackBuilder
             if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = checked((int)header.Size);
+            long declaredSize = (long)header.Size;
             long nextOffset = (long)position + ChunkHeader.SizeInBytes + declaredSize;
             if (declaredSize < 0 || nextOffset > payload.Length)
                 break;
 
-            if (header.Id == chunkId)
-                return payload.Slice(position + ChunkHeader.SizeInBytes, declaredSize).ToArray();
+            if (header.Id == chunkId && declaredSize <= int.MaxValue)
+                return payload.Slice(position + ChunkHeader.SizeInBytes, (int)declaredSize).ToArray();
 
-            position = checked((int)nextOffset);
+            position = (int)nextOffset;
         }
 
         return null;
