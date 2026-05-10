@@ -25,6 +25,8 @@ public static class AlphaWdtWriter
     private const int AlphaChunkAlphaSize = 64;
     private const int AlphaMclqTileFlagsOffset = 0x290;
     private const float MapOrigin = 17066.666f;
+    private const float TileWorldSize = 533.3333f;
+    private const float ChunkWorldSize = TileWorldSize / 16f;
 
     public static byte[] Build(string mapName, Dictionary<(int tileX, int tileY), AlphaTileData> tiles)
     {
@@ -78,18 +80,73 @@ public static class AlphaWdtWriter
         IReadOnlyList<string> mdxNames, IReadOnlyList<string> wmoNames,
         Dictionary<string, int> mdxIndex, Dictionary<string, int> wmoIndex)
     {
+        byte[] mddfData = BuildMddfData(tile, mdxIndex);
+        byte[] modfData = BuildModfData(tile, wmoIndex);
+
+        int mddfCount = mddfData.Length / MddfEntrySize;
+        int modfCount = modfData.Length / ModfEntrySize;
+        float tileOriginX = MapOrigin - tileX * TileWorldSize;
+        float tileOriginY = MapOrigin - tileY * TileWorldSize;
+
+        var mcrfDoodadRefs = new List<int>[256];
+        var mcrfMapObjRefs = new List<int>[256];
+        for (int i = 0; i < 256; i++)
+        {
+            mcrfDoodadRefs[i] = [];
+            mcrfMapObjRefs[i] = [];
+        }
+
+        for (int di = 0; di < mddfCount; di++)
+        {
+            int off = di * MddfEntrySize;
+            float filePosX = BitConverter.ToSingle(mddfData, off + 0x08);
+            float filePosZ = BitConverter.ToSingle(mddfData, off + 0x10);
+            float rendererX = MapOrigin - filePosZ;
+            float rendererY = MapOrigin - filePosX;
+            int cx = (int)Math.Floor((tileOriginY - rendererY) / ChunkWorldSize);
+            int cy = (int)Math.Floor((tileOriginX - rendererX) / ChunkWorldSize);
+            if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
+                mcrfDoodadRefs[cx * 16 + cy].Add(di);
+        }
+
+        for (int wi = 0; wi < modfCount; wi++)
+        {
+            int off = wi * ModfEntrySize;
+            float filePosX = BitConverter.ToSingle(modfData, off + 0x08);
+            float filePosZ = BitConverter.ToSingle(modfData, off + 0x10);
+            float extentsTopX = BitConverter.ToSingle(modfData, off + 0x20);
+            float extentsTopZ = BitConverter.ToSingle(modfData, off + 0x28);
+            float extentsBotX = BitConverter.ToSingle(modfData, off + 0x2C);
+            float extentsBotZ = BitConverter.ToSingle(modfData, off + 0x34);
+            float wmoMinRendererX = MapOrigin - extentsTopZ;
+            float wmoMaxRendererX = MapOrigin - extentsBotZ;
+            float wmoMinRendererY = MapOrigin - extentsTopX;
+            float wmoMaxRendererY = MapOrigin - extentsBotX;
+            float wmoMinCX = MathF.Floor((tileOriginY - wmoMaxRendererY) / ChunkWorldSize);
+            float wmoMaxCX = MathF.Floor((tileOriginY - wmoMinRendererY) / ChunkWorldSize);
+            float wmoMinCY = MathF.Floor((tileOriginX - wmoMaxRendererX) / ChunkWorldSize);
+            float wmoMaxCY = MathF.Floor((tileOriginX - wmoMinRendererX) / ChunkWorldSize);
+            int cxMin = Math.Max(0, (int)wmoMinCX);
+            int cxMax = Math.Min(15, (int)wmoMaxCX);
+            int cyMin = Math.Max(0, (int)wmoMinCY);
+            int cyMax = Math.Min(15, (int)wmoMaxCY);
+            for (int cx = cxMin; cx <= cxMax; cx++)
+                for (int cy = cyMin; cy <= cyMax; cy++)
+                    mcrfMapObjRefs[cx * 16 + cy].Add(wi);
+        }
+
         var mcnkDataList = new List<byte[]>(256);
         for (int cy = 0; cy < 16; cy++)
         {
             for (int cx = 0; cx < 16; cx++)
             {
-                mcnkDataList.Add(BuildMcnkData(tile, cx, cy, tileX, tileY));
+                int chunkIdx = cx * 16 + cy;
+                mcnkDataList.Add(BuildMcnkData(tile, cx, cy, tileX, tileY,
+                    mcrfDoodadRefs[chunkIdx], mcrfMapObjRefs[chunkIdx]));
             }
         }
 
         byte[] mtexData = BuildStringTable(tile.TextureNames);
-        byte[] mddfData = BuildMddfData(tile, mdxIndex);
-        byte[] modfData = BuildModfData(tile, wmoIndex);
 
         long mhdrStart = bw.Seek(0, SeekOrigin.Current);
         WriteChunk(bw, "MHDR", 64, static w => w.Write(new byte[64]));
@@ -133,7 +190,8 @@ public static class AlphaWdtWriter
         return tileHeaderSize;
     }
 
-    private static byte[] BuildMcnkData(AlphaTileData tile, int cx, int cy, int tileX, int tileY)
+    private static byte[] BuildMcnkData(AlphaTileData tile, int cx, int cy, int tileX, int tileY,
+        List<int> doodadRefs, List<int> mapObjRefs)
     {
         float[] heights = ExtractChunkHeights(tile.Heightmap, cx, cy);
         float chunkBaseHeight = heights[0];
@@ -155,9 +213,13 @@ public static class AlphaWdtWriter
         byte[] mcalRaw = BuildAlphaMcal(tile, cx, cy, nLayers);
         byte[] mclqRaw = BuildAlphaMclq(liquidChunk);
 
-        byte[] mcrfRaw = [];
-        int nDoodadRefs = 0;
-        int nMapObjRefs = 0;
+        int nDoodadRefs = doodadRefs.Count;
+        int nMapObjRefs = mapObjRefs.Count;
+        byte[] mcrfRaw = new byte[(nDoodadRefs + nMapObjRefs) * 4];
+        for (int i = 0; i < nDoodadRefs; i++)
+            BinaryPrimitives.WriteInt32LittleEndian(mcrfRaw.AsSpan(i * 4), doodadRefs[i]);
+        for (int i = 0; i < nMapObjRefs; i++)
+            BinaryPrimitives.WriteInt32LittleEndian(mcrfRaw.AsSpan((nDoodadRefs + i) * 4), mapObjRefs[i]);
 
         byte[] mclyWhole = WrapChunk("MCLY", mclyRaw);
         byte[] mcrfWhole = WrapChunk("MCRF", mcrfRaw);
@@ -556,16 +618,23 @@ public static class AlphaWdtWriter
         {
             var p = tile.ModelPlacements[i];
             int off = i * MddfEntrySize;
-            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(off), nameIndex.TryGetValue(p.ModelPath, out int idx) ? idx : 0);
-            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(off + 4), p.UniqueId);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 8), MapOrigin - p.Position.Y);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 12), p.Position.Z);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 16), MapOrigin - p.Position.X);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 20), p.Rotation.X);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 24), p.Rotation.Z);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 28), p.Rotation.Y);
-            BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 32), (ushort)MathF.Round(p.Scale * 1024f));
-            BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 34), 0);
+            int nameId = nameIndex.TryGetValue(p.ModelPath, out int idx) ? idx : 0;
+            float filePosX = MapOrigin - p.Position.Y;
+            float filePosY = p.Position.Z;
+            float filePosZ = MapOrigin - p.Position.X;
+            float fileRotX = p.Rotation.Y;
+            float fileRotY = p.Rotation.Z - 180.0f;
+            float fileRotZ = p.Rotation.X;
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(off + 0x00), nameId);
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(off + 0x04), p.UniqueId);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x08), filePosX);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x0C), filePosY);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x10), filePosZ);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x14), fileRotX);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x18), fileRotY);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x1C), fileRotZ);
+            BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 0x20), (ushort)MathF.Round(p.Scale * 1024f));
+            BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 0x22), 0);
         }
 
         return data;
@@ -580,22 +649,36 @@ public static class AlphaWdtWriter
         {
             var p = tile.WorldModelPlacements[i];
             int off = i * ModfEntrySize;
-            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(off), nameIndex.TryGetValue(p.ModelPath, out int idx) ? idx : 0);
-            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(off + 4), p.UniqueId);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 8), MapOrigin - p.Position.Y);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 12), p.Position.Z);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 16), MapOrigin - p.Position.X);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 20), p.Rotation.X);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 24), p.Rotation.Z);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 28), p.Rotation.Y);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 32), MapOrigin - p.BoundsMax.Y);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 36), p.BoundsMin.Z);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 40), MapOrigin - p.BoundsMax.X);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 44), MapOrigin - p.BoundsMin.Y);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 48), p.BoundsMax.Z);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 52), MapOrigin - p.BoundsMin.X);
-            BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 56), p.Flags);
-            BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 58), 0);
+            int nameId = nameIndex.TryGetValue(p.ModelPath, out int idx) ? idx : 0;
+            float filePosX = MapOrigin - p.Position.Y;
+            float filePosY = p.Position.Z;
+            float filePosZ = MapOrigin - p.Position.X;
+            float fileRotX = p.Rotation.Y;
+            float fileRotY = p.Rotation.Z - 180.0f;
+            float fileRotZ = p.Rotation.X;
+            float extentsTopX = MapOrigin - p.BoundsMin.Y;
+            float extentsTopY = p.BoundsMax.Z;
+            float extentsTopZ = MapOrigin - p.BoundsMin.X;
+            float extentsBotX = MapOrigin - p.BoundsMax.Y;
+            float extentsBotY = p.BoundsMin.Z;
+            float extentsBotZ = MapOrigin - p.BoundsMax.X;
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(off + 0x00), nameId);
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(off + 0x04), p.UniqueId);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x08), filePosX);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x0C), filePosY);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x10), filePosZ);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x14), fileRotX);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x18), fileRotY);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x1C), fileRotZ);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x20), extentsTopX);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x24), extentsTopY);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x28), extentsTopZ);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x2C), extentsBotX);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x30), extentsBotY);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x34), extentsBotZ);
+            BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 0x38), p.Flags);
+            BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 0x3A), 0);
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(off + 0x3C), 0);
         }
 
         return data;

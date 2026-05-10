@@ -745,21 +745,27 @@ public static class AlphaWdtReader
         for (int offset = 0; offset + MddfEntrySize <= payload.Length; offset += MddfEntrySize)
         {
             int nameId = BitConverter.ToInt32(payload, offset);
-            int uniqueId = BitConverter.ToInt32(payload, offset + 4);
-            float rawX = BitConverter.ToSingle(payload, offset + 8);
-            float rawZ = BitConverter.ToSingle(payload, offset + 12);
-            float rawY = BitConverter.ToSingle(payload, offset + 16);
-            float rotX = BitConverter.ToSingle(payload, offset + 20);
-            float rotZ = BitConverter.ToSingle(payload, offset + 24);
-            float rotY = BitConverter.ToSingle(payload, offset + 28);
-            ushort scale = BitConverter.ToUInt16(payload, offset + 32);
+            int uniqueId = BitConverter.ToInt32(payload, offset + 0x04);
+            float filePosX = BitConverter.ToSingle(payload, offset + 0x08);
+            float filePosY = BitConverter.ToSingle(payload, offset + 0x0C);
+            float filePosZ = BitConverter.ToSingle(payload, offset + 0x10);
+            float fileRotX = BitConverter.ToSingle(payload, offset + 0x14);
+            float fileRotY = BitConverter.ToSingle(payload, offset + 0x18);
+            float fileRotZ = BitConverter.ToSingle(payload, offset + 0x1C);
+            ushort scale = BitConverter.ToUInt16(payload, offset + 0x20);
 
+            float rendererX = MapOrigin - filePosZ;
+            float rendererY = MapOrigin - filePosX;
+            float rendererZ = filePosY;
+            float rendererRollDeg = fileRotZ;
+            float rendererPitchDeg = fileRotX;
+            float rendererYawDeg = fileRotY + 180.0f;
             placements.Add(new AlphaModelPlacement(
                 nameId,
                 ResolveName(modelNames, nameId),
                 uniqueId,
-                new Vector3(MapOrigin - rawY, MapOrigin - rawX, rawZ),
-                new Vector3(rotX, rotY, rotZ),
+                new Vector3(rendererX, rendererY, rendererZ),
+                new Vector3(rendererRollDeg, rendererPitchDeg, rendererYawDeg),
                 scale / 1024f));
         }
     }
@@ -769,29 +775,41 @@ public static class AlphaWdtReader
         for (int offset = 0; offset + ModfEntrySize <= payload.Length; offset += ModfEntrySize)
         {
             int nameId = BitConverter.ToInt32(payload, offset);
-            int uniqueId = BitConverter.ToInt32(payload, offset + 4);
-            float rawX = BitConverter.ToSingle(payload, offset + 8);
-            float rawZ = BitConverter.ToSingle(payload, offset + 12);
-            float rawY = BitConverter.ToSingle(payload, offset + 16);
-            float rotX = BitConverter.ToSingle(payload, offset + 20);
-            float rotZ = BitConverter.ToSingle(payload, offset + 24);
-            float rotY = BitConverter.ToSingle(payload, offset + 28);
-            float bbMinX = BitConverter.ToSingle(payload, offset + 32);
-            float bbMinZ = BitConverter.ToSingle(payload, offset + 36);
-            float bbMinY = BitConverter.ToSingle(payload, offset + 40);
-            float bbMaxX = BitConverter.ToSingle(payload, offset + 44);
-            float bbMaxZ = BitConverter.ToSingle(payload, offset + 48);
-            float bbMaxY = BitConverter.ToSingle(payload, offset + 52);
-            ushort flags = BitConverter.ToUInt16(payload, offset + 56);
+            int uniqueId = BitConverter.ToInt32(payload, offset + 0x04);
+            float filePosX = BitConverter.ToSingle(payload, offset + 0x08);
+            float filePosY = BitConverter.ToSingle(payload, offset + 0x0C);
+            float filePosZ = BitConverter.ToSingle(payload, offset + 0x10);
+            float fileRotX = BitConverter.ToSingle(payload, offset + 0x14);
+            float fileRotY = BitConverter.ToSingle(payload, offset + 0x18);
+            float fileRotZ = BitConverter.ToSingle(payload, offset + 0x1C);
+            float extentsTopX = BitConverter.ToSingle(payload, offset + 0x20);
+            float extentsTopY = BitConverter.ToSingle(payload, offset + 0x24);
+            float extentsTopZ = BitConverter.ToSingle(payload, offset + 0x28);
+            float extentsBotX = BitConverter.ToSingle(payload, offset + 0x2C);
+            float extentsBotY = BitConverter.ToSingle(payload, offset + 0x30);
+            float extentsBotZ = BitConverter.ToSingle(payload, offset + 0x34);
+            ushort flags = BitConverter.ToUInt16(payload, offset + 0x38);
 
+            float rendererX = MapOrigin - filePosZ;
+            float rendererY = MapOrigin - filePosX;
+            float rendererZ = filePosY;
+            float rendererRollDeg = fileRotZ;
+            float rendererPitchDeg = fileRotX;
+            float rendererYawDeg = fileRotY + 180.0f;
+            float boundsMinX = MapOrigin - extentsTopZ;
+            float boundsMinY = MapOrigin - extentsTopX;
+            float boundsMinZ = extentsBotY;
+            float boundsMaxX = MapOrigin - extentsBotZ;
+            float boundsMaxY = MapOrigin - extentsBotX;
+            float boundsMaxZ = extentsTopY;
             placements.Add(new AlphaWorldModelPlacement(
                 nameId,
                 ResolveName(modelNames, nameId),
                 uniqueId,
-                new Vector3(MapOrigin - rawY, MapOrigin - rawX, rawZ),
-                new Vector3(rotX, rotY, rotZ),
-                new Vector3(MapOrigin - bbMaxY, MapOrigin - bbMaxX, bbMinZ),
-                new Vector3(MapOrigin - bbMinY, MapOrigin - bbMinX, bbMaxZ),
+                new Vector3(rendererX, rendererY, rendererZ),
+                new Vector3(rendererRollDeg, rendererPitchDeg, rendererYawDeg),
+                new Vector3(boundsMinX, boundsMinY, boundsMinZ),
+                new Vector3(boundsMaxX, boundsMaxY, boundsMaxZ),
                 flags));
         }
     }

@@ -263,3 +263,137 @@ Actually wait — looking again. `*(undefined4*)this->predTex` is an array index
 Since `predTex` stores uint4 entries (4 bits each), `predTex[0]` = one uint32, `predTex[2]` = 8 bytes later. So `param_1 + 0x4c` through `param_1 + 0x58` = MCNK data offsets 0x44 through 0x50 are contiguous (16 bytes for PredTex), which matches 4 × uint(4 bytes each) = 16 bytes at data offset 0x44.
 
 So our doc's PredTex1 should be at data offset 0x44, not 0x4C. The Unknown5 and Unknown6 fields at 0x44 and 0x48 in our plan doc ARE PredTex1 and PredTex2.
+
+## Key Finding: SMDoodadDef Struct Layout (0x24 = 36 bytes)
+
+From `CreateDoodadDef(SMDoodadDef*, C3Vector*)` at 0x6805e0 and `CMapArea::Create` at 0x6aae00:
+
+| Offset | Type | Field | Notes |
+|--------|------|-------|-------|
+| 0x00 | uint32 | nameId | Index into WDT-level doodadNamesIndex → byte offset into MDNM |
+| 0x04 | uint32 | uniqueId | Unique doodad ID |
+| 0x08 | float | pos.x | File X = MapOrigin - renderer.Y |
+| 0x0C | float | pos.y | File Y = renderer.Z |
+| 0x10 | float | pos.z | File Z = MapOrigin - renderer.X |
+| 0x14 | float | rot.x | Degrees, maps to renderer pitch (Y rotation) |
+| 0x18 | float | rot.y | Degrees, maps to renderer yaw (Z rotation) + 180° |
+| 0x1C | float | rot.z | Degrees, maps to renderer roll (X rotation) |
+| 0x20 | uint16 | scale | Scale value = rendering_scale * 1024 |
+| 0x22 | uint16 | padding | Always 0 |
+
+Struct layout verified by initialization in `CMapArea::Create`:
+```c
+NTempest::C3Vector::C3Vector((C3Vector*)(iVar8 + 8), 0.0);    // pos at offset 0x08
+NTempest::C3Vector::C3Vector((C3Vector*)(iVar8 + 0x14), 0.0);  // rot at offset 0x14
+```
+
+And size confirmed: `uVar6 = *(uint*)(param_1 + iVar2 + 0xc) / 0x24` (total MDDF size ÷ 36).
+
+## Key Finding: SMMapObjDef Struct Layout (0x40 = 64 bytes)
+
+From `CreateMapObjDef(SMMapObjDef*, C3Vector*)` at 0x681250 and `CMapArea::Create`:
+
+| Offset | Type | Field | Notes |
+|--------|------|-------|-------|
+| 0x00 | uint32 | nameId | Index into WDT-level mapObjNamesIndex → byte offset into MONM |
+| 0x04 | uint32 | uniqueId | Unique map object ID |
+| 0x08 | float | pos.x | File X = MapOrigin - renderer.Y |
+| 0x0C | float | pos.y | File Y = renderer.Z |
+| 0x10 | float | pos.z | File Z = MapOrigin - renderer.X |
+| 0x14 | float | rot.x | Degrees, maps to renderer pitch |
+| 0x18 | float | rot.y | Degrees, maps to renderer yaw + 180° |
+| 0x1C | float | rot.z | Degrees, maps to renderer roll |
+| 0x20 | float | extents.t.x | File bounds = MapOrigin - renderer_min_Y (LARGE file.x value) |
+| 0x24 | float | extents.t.y | File bounds = renderer_max_Z |
+| 0x28 | float | extents.t.z | File bounds = MapOrigin - renderer_min_X (LARGE file.z value) |
+| 0x2C | float | extents.b.x | File bounds = MapOrigin - renderer_max_Y (SMALL file.x value) |
+| 0x30 | float | extents.b.y | File bounds = renderer_min_Z |
+| 0x34 | float | extents.b.z | File bounds = MapOrigin - renderer_max_X (SMALL file.z value) |
+| 0x38 | uint16 | doodadSet | Doodad set index |
+| 0x3A | uint16 | nameSet | Name set index |
+| 0x3C | 4 bytes | padding | Always 0 |
+
+Struct layout verified by initialization in `CMapArea::Create`:
+```c
+NTempest::C3Vector::C3Vector((C3Vector*)(iVar8 + 8), 0.0);    // pos at offset 0x08
+NTempest::C3Vector::C3Vector((C3Vector*)(iVar8 + 0x14), 0.0);  // rot at offset 0x14
+NTempest::CAaBox::CAaBox((CAaBox*)(iVar8 + 0x20), 0.0);        // extents at offset 0x20
+```
+
+And size confirmed: `uVar6 = *(uint*)(param_1 + iVar2 + 0xc) >> 6` (total MODF size ÷ 64).
+
+## Key Finding: Full Coordinate Transform (Writing Direction)
+
+**Position transform (renderer → file):**
+```
+file.pos.x = MapOrigin - renderer.Y
+file.pos.y = renderer.Z
+file.pos.z = MapOrigin - renderer.X
+```
+
+Where MapOrigin = (17066.666, 17066.666, 0.0).
+
+**Rotation transform (renderer → file, input in degrees):**
+```
+file.rot.x = renderer_rot.Y    (pitch — renderer Y rotation)
+file.rot.y = renderer_rot.Z - 180.0   (yaw minus π, renderer Z rotation)
+file.rot.z = renderer_rot.X    (roll — renderer X rotation)
+```
+
+Applied by client as: `RotateZ(file_rot_y * π/180 + π) → RotateY(file_rot_x * π/180) → RotateX(file_rot_z * π/180)`.
+
+**Bounds transform (renderer → file):**
+```
+extents.t.x = MapOrigin - renderer_bounds_min.Y    (large file.x = "top")
+extents.t.y = renderer_bounds_max.Z                  (large file.y = "top")
+extents.t.z = MapOrigin - renderer_bounds_min.X    (large file.z = "top")
+extents.b.x = MapOrigin - renderer_bounds_max.Y    (small file.x = "bottom")
+extents.b.y = renderer_bounds_min.Z                  (small file.y = "bottom")
+extents.b.z = MapOrigin - renderer_bounds_max.X    (small file.z = "bottom")
+```
+
+Note: "t" and "b" in the struct refer to top/bottom in **file coordinates**, where X and Z are inverted relative to renderer coordinates. This means `extents.t` has the larger values for inverted axes (X, Z) and `extents.b` has the smaller ones.
+
+**Scale (MDDF only):**
+```
+file.scale = (uint16)Math.Round(renderer_scale * 1024)
+```
+
+## Key Finding: WDT-Level Name Tables (MDNM/MONM)
+
+`LoadDoodadNames` (0x680040) and `LoadMapObjNames` (0x6801a0):
+
+1. Read MDNM/MONM chunk from WDT file
+2. Build an offset index (doodadNamesIndex/mapObjNamesIndex) by scanning null-terminated strings
+3. `nDoodadNames` from MPHD pre-allocates the index array size
+4. `doodadNamesIndex[i]` stores the byte offset of the i-th string in the blob
+5. `nameId` in MDDF/MODF is an INDEX into `doodadNamesIndex`/`mapObjNamesIndex`, NOT a direct byte offset
+
+Name resolution: `modelName = names_blob[names_index[nameId]]`
+
+The per-tile MDDF/MODF entries use WDT-level name IDs. Each tile's MDDF nameId indexes into the global doodadNamesIndex built from the WDT-level MDNM chunk.
+
+## Key Finding: CMapArea::Create Per-Tile Data Layout
+
+`CMapArea::Create` (0x6aae00) reads per-tile embedded data with:
+
+1. **MHDR** at blob offset 0: 8-byte chunk header (MHDR + size) then 64 bytes of data
+2. MHDR data contains offsets (relative to MHDR data start) to sub-chunks:
+   - Data byte 0x00: MCIN offset → MCIN chunk at `blob + MHDR_data_start + offset`
+   - Data byte 0x04: MTEX offset → MTEX chunk at `blob + MHDR_data_start + offset`
+   - Data byte 0x0C: MDDF offset → MDDF chunk at `blob + MHDR_data_start + offset`
+   - Data byte 0x14: MODF offset → MODF chunk at `blob + MHDR_data_start + offset`
+3. Each sub-chunk token validated at `blob + offset + 8`, size at `blob + offset + 0xC`, data at `blob + offset + 0x10`
+4. MDDF data bulk-copied into `doodadDefList` array
+5. MODF data bulk-copied into `mapObjDefList` array
+6. MCIN entries contain offsets to individual MCNK chunks
+
+The current writer's MHDR layout (WriteMhdrData) is consistent with this:
+```csharp
+data[0x00] = 64;           // MHDR data size or MCIN offset
+data[0x04] = mtexRelative; // MTEX offset relative to MHDR data start
+data[0x08] = 0;            // unused
+data[0x0C] = mddfRelative; // MDDF offset relative to MHDR data start
+data[0x10] = 0;            // unused
+data[0x14] = modfRelative; // MODF offset relative to MHDR data start
+```
