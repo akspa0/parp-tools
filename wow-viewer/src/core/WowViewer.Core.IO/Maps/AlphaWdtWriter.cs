@@ -222,7 +222,6 @@ public static class AlphaWdtWriter
             BinaryPrimitives.WriteInt32LittleEndian(mcrfRaw.AsSpan((nDoodadRefs + i) * 4), mapObjRefs[i]);
 
         byte[] mclyWhole = WrapChunk("MCLY", mclyRaw);
-        byte[] mcrfWhole = WrapChunk("MCRF", mcrfRaw);
 
         int cursor = 0;
         int offsHeight = cursor;
@@ -232,7 +231,7 @@ public static class AlphaWdtWriter
         int offsLayer = cursor;
         cursor += mclyWhole.Length;
         int offsRefs = cursor;
-        cursor += mcrfWhole.Length;
+        cursor += mcrfRaw.Length;
         int offsShadow = mcshRaw.Length > 0 ? cursor : 0;
         cursor += mcshRaw.Length;
         int offsAlpha = cursor;
@@ -291,7 +290,7 @@ public static class AlphaWdtWriter
         msw.Write(mcvtAlpha);
         msw.Write(mcnrAlpha);
         msw.Write(mclyWhole);
-        msw.Write(mcrfWhole);
+        msw.Write(mcrfRaw);
         if (mcshRaw.Length > 0) msw.Write(mcshRaw);
         if (mcalRaw.Length > 0) msw.Write(mcalRaw);
         if (mclqRaw.Length > 0) msw.Write(mclqRaw);

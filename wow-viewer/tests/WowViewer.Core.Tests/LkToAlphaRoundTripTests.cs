@@ -86,7 +86,16 @@ public sealed class LkToAlphaRoundTripTests
             Assert.True(dataBase + mcvtOffset + 580 <= dataEnd, $"MCVT overrun in chunk {chunkIndex}");
             Assert.True(dataBase + mcnrOffset + 448 <= dataEnd, $"MCNR overrun in chunk {chunkIndex}");
             Assert.Equal("MCLY", ReadChunkId(wdt, dataBase + mclyOffset));
-            Assert.Equal("MCRF", ReadChunkId(wdt, dataBase + mcrfOffset));
+            if (mcrfOffset > 0)
+            {
+                int nDoodadRefs = BitConverter.ToInt32(wdt, headerOffset + 0x14);
+                int nMapObjRefs = BitConverter.ToInt32(wdt, headerOffset + 0x3C);
+                int expectedMcrfBytes = (nDoodadRefs + nMapObjRefs) * 4;
+                if (expectedMcrfBytes > 0)
+                {
+                    Assert.True(dataBase + mcrfOffset + expectedMcrfBytes <= dataEnd, $"MCRF overrun in chunk {chunkIndex}");
+                }
+            }
             Assert.True(mcalOffset >= 0 && mcalOffset + mcalSize <= mcnkChunksSize, $"MCAL overrun in chunk {chunkIndex}");
         }
     }
