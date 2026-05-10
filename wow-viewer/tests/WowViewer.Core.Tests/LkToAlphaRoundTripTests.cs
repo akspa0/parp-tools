@@ -289,6 +289,79 @@ public sealed class LkToAlphaRoundTripTests
         Assert.Equal(placement.Flags, roundTrip.Flags);
     }
 
+    [Fact]
+    public void AlphaWdt_RoundTripsMddfAndModfPlacements()
+    {
+        var modelPlacement = new AlphaModelPlacement(
+            0, "world\\azeroth\\tree.mdx", 42,
+            new Vector3(17000f, 16900f, 45.5f),
+            new Vector3(15f, 90f, 270f),
+            1.0f);
+
+        var worldModelPlacement = new AlphaWorldModelPlacement(
+            0, "world\\azeroth\\barracks.wmo", 100,
+            new Vector3(16950f, 16900f, 40.2f),
+            new Vector3(30f, 45f, 180f),
+            new Vector3(16800f, 16700f, 35f),
+            new Vector3(17100f, 17100f, 50f),
+            0x0001);
+
+        float[,] heightmap = new float[257, 257];
+        int[,,] texIds = new int[16, 16, 4];
+        bool[,,] layerMask = new bool[16, 16, 4];
+        for (int cy = 0; cy < 16; cy++)
+            for (int cx = 0; cx < 16; cx++)
+                layerMask[cx, cy, 0] = true;
+
+        AlphaTileData tile = new(
+            sourcePath: "placement_roundtrip",
+            heightmap: heightmap,
+            mcalAlphaPack: null,
+            mclyTextureIds: texIds,
+            mclyLayerMask: layerMask,
+            holeMask: new bool[16, 16],
+            modelPlacements: [modelPlacement],
+            worldModelPlacements: [worldModelPlacement],
+            liquidChunks: [],
+            textureNames: ["terrain_a.blp"]);
+
+        byte[] wdt = AlphaWdtWriter.Build("placement_roundtrip", new Dictionary<(int, int), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        Assert.True(AlphaWdtReader.TryReadTile(wdt, 0, 0, out AlphaTileData? roundTrip));
+        Assert.NotNull(roundTrip);
+
+        AlphaModelPlacement mddfResult = Assert.Single(roundTrip.ModelPlacements);
+        Assert.Equal(modelPlacement.NameId, mddfResult.NameId);
+        Assert.Equal(modelPlacement.UniqueId, mddfResult.UniqueId);
+        Assert.Equal(modelPlacement.Position.X, mddfResult.Position.X, 2);
+        Assert.Equal(modelPlacement.Position.Y, mddfResult.Position.Y, 2);
+        Assert.Equal(modelPlacement.Position.Z, mddfResult.Position.Z, 2);
+        Assert.Equal(modelPlacement.Rotation.X, mddfResult.Rotation.X, 2);
+        Assert.Equal(modelPlacement.Rotation.Y, mddfResult.Rotation.Y, 2);
+        Assert.Equal(modelPlacement.Rotation.Z, mddfResult.Rotation.Z, 2);
+        Assert.Equal(modelPlacement.Scale, mddfResult.Scale, 3);
+
+        AlphaWorldModelPlacement modfResult = Assert.Single(roundTrip.WorldModelPlacements);
+        Assert.Equal(worldModelPlacement.NameId, modfResult.NameId);
+        Assert.Equal(worldModelPlacement.UniqueId, modfResult.UniqueId);
+        Assert.Equal(worldModelPlacement.Position.X, modfResult.Position.X, 2);
+        Assert.Equal(worldModelPlacement.Position.Y, modfResult.Position.Y, 2);
+        Assert.Equal(worldModelPlacement.Position.Z, modfResult.Position.Z, 2);
+        Assert.Equal(worldModelPlacement.Rotation.X, modfResult.Rotation.X, 2);
+        Assert.Equal(worldModelPlacement.Rotation.Y, modfResult.Rotation.Y, 2);
+        Assert.Equal(worldModelPlacement.Rotation.Z, modfResult.Rotation.Z, 2);
+        Assert.Equal(worldModelPlacement.BoundsMin.X, modfResult.BoundsMin.X, 2);
+        Assert.Equal(worldModelPlacement.BoundsMin.Y, modfResult.BoundsMin.Y, 2);
+        Assert.Equal(worldModelPlacement.BoundsMin.Z, modfResult.BoundsMin.Z, 2);
+        Assert.Equal(worldModelPlacement.BoundsMax.X, modfResult.BoundsMax.X, 2);
+        Assert.Equal(worldModelPlacement.BoundsMax.Y, modfResult.BoundsMax.Y, 2);
+        Assert.Equal(worldModelPlacement.BoundsMax.Z, modfResult.BoundsMax.Z, 2);
+        Assert.Equal(worldModelPlacement.Flags, modfResult.Flags);
+    }
+
     private static LkMcnkData CreateChunk(int chunkX, int chunkY, float baseHeight, float slope, int flags, bool withAlpha, AdtLiquidChunk? liquidData = null)
     {
         float[] heights = new float[145];

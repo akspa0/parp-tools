@@ -154,3 +154,60 @@ The following contract is Ghidra-verified and MUST be maintained across all data
 | NPZ → Python training | N/A | All height_257 arrays are absolute Z | Absolute Z |
 
 **Key rule**: `AlphaWdtWriter.BuildAlphaMcvt` writes absolute heights (no base-height subtraction). `AlphaWdtWriter.BuildAlphaMclq` writes absolute liquid heights (no base-height subtraction). MCNK offsets 0x68/0x6C store Position.Z (heights[0]) for client vertex relativization, NOT as a height delta to add to MCVT.
+
+## MDDF/MODF Coordinate Transform Contract (Ghidra-Verified 2026-05-09)
+
+The following coordinate transforms are Ghidra-verified from `CMapChunk::CreateRefs` (0x69a0c0), `CMap::CreateDoodadDef(SMDoodadDef&, C3Vector&)` (0x6805e0), and `CMap::CreateMapObjDef(SMMapObjDef&, C3Vector&)` (0x681250). The area offset `(17066.666, 17066.666, 0.0)` is hardcoded in `CreateRefs` and applied uniformly to ALL tile references.
+
+### Position Transform (identical for MDDF and MODF)
+
+```
+renderer_x = -file_pos.z + MapOrigin
+renderer_y = -file_pos.x + MapOrigin
+renderer_z = file_pos.y
+```
+
+Where MapOrigin = 17066.666... (32/3 * TILE_SIZE).
+
+### Rotation Transform (identical for MDDF and MODF)
+
+```
+renderer_rot.x = file_rot.z * π/180      (Roll, applied around X axis)
+renderer_rot.y = file_rot.x * π/180      (Pitch, applied around Y axis)
+renderer_rot.z = file_rot.y * π/180 + π  (Yaw, applied around Z axis, with 180° offset)
+```
+
+Applied in order: Translate → RotateZ(yaw) → RotateY(pitch) → RotateX(roll) → Scale.
+
+### Bounds Transform (MODF only)
+
+```
+renderer_min.x = -file_extents_max.z + MapOrigin
+renderer_min.y = -file_extents_max.x + MapOrigin
+renderer_min.z = file_extents_min.y
+renderer_max.x = -file_extents_min.z + MapOrigin
+renderer_max.y = -file_extents_min.x + MapOrigin
+renderer_max.z = file_extents_max.y
+```
+
+Negation of Z/X axes swaps min/max for those components.
+
+### Round-Trip Convention
+
+All read/write paths store the position in renderer coordinates:
+- `Position = (MapOrigin - file_z, MapOrigin - file_x, file_y)`
+
+All read/write paths store the rotation with axis-swap convention:
+- `Rotation = (file_rot.x, file_rot.z, file_rot.y)`
+
+This IS NOT the true renderer rotation (which would be `(file_rot.z, file_rot.x, file_rot.y)`), but the round-trip is correct because the writer reverses the same mapping. The `BuildLegacyMdxPlacementTransform` function in the viewer compensates for this by applying negated X/Y rotations and a separate Rz(π) prefix.
+
+**Important**: The +π yaw offset (`renderer_rot.z = file_rot.y * π/180 + π`) is not captured in the `Rotation` vector. The viewer's `BuildLegacyMdxPlacementTransform` applies `Matrix4x4.CreateRotationZ(MathF.PI)` separately to account for this.
+
+### Scale Transform (MDDF only)
+
+```
+scale = uint16_scale / 1024.0
+```
+
+Ghidra-verified at `0x6805e0`: scale field at file offset 0x20 is read as `uint16`, multiplied by `1.0/1024.0`.
