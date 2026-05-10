@@ -17,7 +17,7 @@ public static class AlphaWdtReader
     private const int MclyEntrySize = 16;
     private const int HalfStepsPerChunk = 16;
     private const int TileHeightmapSize = 257;
-    private const int MapOrigin = 17066;
+    private const float MapOrigin = 17066.66666f;
 
     public static bool TryReadTile(string wdtFilePath, int tileX, int tileY, out AlphaTileData? data)
     {
@@ -481,12 +481,12 @@ public static class AlphaWdtReader
                 }
             }
 
-            float baseHeight = ReadAlphaBaseHeight(container, headerOffset);
-            if (!float.IsNaN(baseHeight) && MathF.Abs(baseHeight) <= 50000f && baseHeight != 0f)
-            {
-                for (int i = 0; i < heights.Length; i++)
-                    heights[i] += baseHeight;
-            }
+            // Ghidra-verified (CMapChunk::CreateVertices, 0.5.3.3368):
+            // Alpha MCVT heights are ABSOLUTE world-space Z values — no base height addition.
+            // The MCNK header field at offset 0x80 stores the chunk's Position.Z
+            // which the client uses for bounding-box math and vertex relativization, NOT as
+            // an additive base for the heights. Adding it to absolute heights was the bug
+            // that caused each chunk to float at a disconnected elevation.
 
             // chunkY (=indexY) drives row (Y), chunkX (=indexX) drives column (X)
             int baseX = cx * HalfStepsPerChunk;
@@ -657,12 +657,6 @@ public static class AlphaWdtReader
                 {
                     float minH = BitConverter.ToSingle(mclqPayload, 0);
                     float maxH = BitConverter.ToSingle(mclqPayload, 4);
-                    float baseH = ReadAlphaBaseHeight(container, headerOffset);
-                    if (!float.IsNaN(baseH) && MathF.Abs(baseH) <= 50000f)
-                    {
-                        minH += baseH;
-                        maxH += baseH;
-                    }
 
                     byte[]? tileFlags = null;
                     if (mclqPayload.Length >= 0x290 + 64)
@@ -671,12 +665,12 @@ public static class AlphaWdtReader
                         Buffer.BlockCopy(mclqPayload, 0x290, tileFlags, 0, 64);
                     }
 
-                        float[]? heights = null;
+                    float[]? heights = null;
                     if (mclqPayload.Length >= 8 + (81 * 8))
                     {
                         heights = new float[81];
                         for (int index = 0; index < heights.Length; index++)
-                            heights[index] = BitConverter.ToSingle(mclqPayload, 8 + (index * 8) + 4) + baseH;
+                            heights[index] = BitConverter.ToSingle(mclqPayload, 8 + (index * 8) + 4);
                     }
 
                     liquidChunks.Add(new AlphaLiquidChunk(
@@ -696,14 +690,6 @@ public static class AlphaWdtReader
             alpha[baseY + row, baseX + 63, layer] = alpha[baseY + row, baseX + 62, layer];
         for (int col = 0; col < 64; col++)
             alpha[baseY + 63, baseX + col, layer] = alpha[baseY + 62, baseX + col, layer];
-    }
-
-    private static float ReadAlphaBaseHeight(byte[] container, int headerOffset)
-    {
-        if (headerOffset < 0 || headerOffset + 0x68 + sizeof(float) > container.Length)
-            return 0f;
-        // Matches AlphaTerrainAdapter: Unused1 at offset 0x68 holds the base height float
-        return BitConverter.Int32BitsToSingle(BitConverter.ToInt32(container, headerOffset + 0x68));
     }
 
     private static byte[] StripMclqHeader(byte[] payload)

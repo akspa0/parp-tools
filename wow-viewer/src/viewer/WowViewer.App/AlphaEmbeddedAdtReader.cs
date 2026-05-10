@@ -576,12 +576,11 @@ internal static class AlphaEmbeddedAdtReader
             }
         }
 
-        float baseHeight = ReadAlphaBaseHeight(container, headerOffset);
-        if (!float.IsNaN(baseHeight) && MathF.Abs(baseHeight) <= 50000f && baseHeight != 0f)
-        {
-            for (int index = 0; index < heights.Length; index++)
-                heights[index] += baseHeight;
-        }
+        // Ghidra-verified (CMapChunk::CreateVertices, 0.5.3.3368):
+        // Alpha MCVT heights are ABSOLUTE world-space Z values — no base height addition.
+        // The MCNK header field at offset 0x80 stores the chunk's world Position.Z,
+        // which the client uses for bounding-box math and vertex relativization, NOT as
+        // an additive base for the heights.
 
         return heights;
     }
@@ -631,12 +630,7 @@ internal static class AlphaEmbeddedAdtReader
         if (float.IsNaN(minHeight) || float.IsNaN(maxHeight))
             return false;
 
-        float baseHeight = ReadAlphaBaseHeight(container, headerOffset);
-        if (!float.IsNaN(baseHeight) && MathF.Abs(baseHeight) <= 50000f)
-        {
-            minHeight += baseHeight;
-            maxHeight += baseHeight;
-        }
+        // Alpha MCLQ heights are absolute — no base height addition needed.
 
         byte[]? tileFlags = null;
         if (payload.Length >= AlphaMclqTileFlagsOffset + 64)
@@ -711,17 +705,6 @@ internal static class AlphaEmbeddedAdtReader
         byte[] stripped = new byte[size];
         Buffer.BlockCopy(payload, 8, stripped, 0, (int)size);
         return stripped;
-    }
-
-    private static float ReadAlphaBaseHeight(byte[] container, int headerOffset)
-    {
-        if (headerOffset < 0 || headerOffset + 0x70 + sizeof(float) > container.Length)
-            return 0f;
-
-        // Alpha MCNK position is laid out as (X, Z, Y). The Z component used as the
-        // base height lives at 0x6C; 0x68 is a world-position component and produces
-        // chunk-scale striping if treated as terrain height.
-        return BitConverter.Int32BitsToSingle(BitConverter.ToInt32(container, headerOffset + 0x6C));
     }
 
     private static List<AdtModelPlacement> ReadAlphaModelPlacements(byte[] payload, IReadOnlyList<string> modelNames)
