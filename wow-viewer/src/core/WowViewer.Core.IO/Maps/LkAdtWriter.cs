@@ -229,11 +229,11 @@ public static class LkAdtWriter
             BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 24), p.Rotation.Z);
             BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 28), p.Rotation.Y);
             BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 32), MapOrigin - p.BoundsMax.Y);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 36), p.BoundsMax.Z);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 40), MapOrigin - p.BoundsMin.X);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 36), p.BoundsMin.Z);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 40), MapOrigin - p.BoundsMax.X);
             BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 44), MapOrigin - p.BoundsMin.Y);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 48), p.BoundsMin.Z);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 52), MapOrigin - p.BoundsMax.X);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 48), p.BoundsMax.Z);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 52), MapOrigin - p.BoundsMin.X);
             BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 56), p.Flags);
             BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 58), p.DoodadSet);
             BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 60), p.NameSet);

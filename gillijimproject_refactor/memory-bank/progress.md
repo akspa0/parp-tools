@@ -45,7 +45,8 @@
 | **Phase C: LkToAlpha real-data MdxViewer render** | **DONE** — 839/839 tiles, terrain + WMOs + MCLQ render, ExitCode=0 |
 | **Phase C: LkToAlpha asset name fixup** | **DONE** — `--target-client-root` filters 244k+ missing placements |
 | **Phase C: LkToAlpha tileset bundling** | **DONE** — `--bundle-tilesets` extracts 327 textures, fixes up paths |
-| **Phase C: LkToAlpha AlphaWdtWriter structural parity** | **DONE** — MAIN column-major, always emit MCNK+MCRF, FourCC I/O convention |
+| **Phase C: LkToAlpha AlphaWdtWriter structural parity** | **DONE** — MAIN row-major per 0.5.3 client, always emit MCNK+MCRF, FourCC I/O convention |
+| **Phase C: Placement orientation proof** | **DONE** — Ghidra-confirmed Alpha MDDF/MODF position and rotation transforms; LK writer MODF bounds now round-trip through the shared reader |
 | **Phase C: ADT shard raw-chunk preservation** | **DONE** — unconsumed ADT-family chunks now persist into NPZ shards as raw uint8 blobs with metadata instead of being dropped outright |
 | **Phase C: ADT preservation signal promotion** | **DONE** — `MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, and `MCRW` now persist as first-class NPZ entries rather than raw-only fallback blobs; `MCSE` currently retains raw fallback beside the typed signals, and staged real-data `MCSE`/`MCRF` coverage is broadened smoke rather than a pinned positive regression |
 | **Phase C: Alpha shard raw-chunk preservation** | **DONE** — Alpha tile tensor packs now preserve raw embedded tile chunks under `raw_chunks/alpha/...` alongside decoded signals |
@@ -129,11 +130,13 @@
 - ExitCode=0, capture saved
 
 ## BUGS FIXED IN LKTOALPHA ALPHAWDTWRITER STRUCTURAL REPAIR (2026-05-09)
-1. **MAIN grid order wrong** — Writer used `tileY * 64 + tileX` (row-major), but legacy `WdtAlpha` uses column-major (`tileX * 64 + tileY`). Fixed by swapping to `OrderBy(t => t.Key.Item1 * 64 + t.Key.Item2)` and `PatchMainEntry(mainData, tileX * 64 + tileY, tileOffset)`.
+1. **MAIN grid order confirmed** — Ghidra shows 0.5.3 `CMap::PrepareArea(x,y)` indexes `areaInfo` as `tileY * 64 + tileX` after `CMap::LoadWdt` reads raw `MAIN`; `AlphaWdtWriter`, `AlphaWdtReader`, and focused tests use that row-major contract.
 2. **Empty MCNK omission** — Writer skipped MCNKs with all-zero heights via `BuildEmptyMcnk`, but legacy `McnkAlpha` always reads 256 MCNK entries. Removed `BuildEmptyMcnk` — all 256 MCNKs are now emitted with full subchunk structure.
 3. **MCRF conditionally emitted** — Writer only emitted MCRF when `mcrfRaw.Length > 0`. Legacy `McnkAlpha` unconditionally reads MCRF at offset 0x24. Fixed by always wrapping MCRF (even with 0-byte payload).
-4. **MCLY/MCAL offsets conditionally zeroed** — When `mclyWhole.Length > 0` was false, offset was set to 0, but legacy reader expects non-zero offsets. Fixed by always populating cursor-based offsets.
-5. **LkAdtWriter chunk ID byte order** — Used `Encoding.ASCII.GetBytes()` which writes forward-order FourCC. Changed to `FourCC.FromString().ToFileBytes()` which writes the reversed FourCC expected by `wow-viewer`'s I/O boundary convention. This caused `MapFileSummaryReader` to fail detecting ADT family.
+4. **MDDF/MODF conditionally emitted** — 0.5.3 `CMapArea::Create` unconditionally asserts both embedded tile placement chunks. Fixed `AlphaWdtWriter` to emit empty `MDDF` and `MODF` chunk headers when a tile has no placements of that type.
+5. **Placement orientation and MODF bounds** — Ghidra confirms Alpha file positions are `(origin - worldY, worldZ, origin - worldX)` and file rotations are consumed as `(fileZ, fileX, fileY + 180deg)` in client axes. `AlphaWdtWriter` matched this contract; `LkAdtWriter` bounds axes were corrected and covered by `LkAdtWriter_RoundTripsModfBoundsWithReaderOrientation`.
+6. **MCLY/MCAL offsets conditionally zeroed** — When `mclyWhole.Length > 0` was false, offset was set to 0, but legacy reader expects non-zero offsets. Fixed by always populating cursor-based offsets.
+7. **LkAdtWriter chunk ID byte order** — Used `Encoding.ASCII.GetBytes()` which writes forward-order FourCC. Changed to `FourCC.FromString().ToFileBytes()` which writes the reversed FourCC expected by `wow-viewer`'s I/O boundary convention. This caused `MapFileSummaryReader` to fail detecting ADT family.
 
 ## BUGS FIXED IN LKTOALPHA ROUND-TRIP VALIDATION (2026-05-08)
 1. **Alpha placeholder chunk payloads** — `AlphaWdtWriter` declared `MPHD`/`MHDR` payload sizes but wrote zero bytes, corrupting all later offsets. Fixed by writing explicit zero-filled payload buffers.

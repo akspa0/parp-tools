@@ -1972,7 +1972,7 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
                     mddfData[i, 2] = p.Position.X; mddfData[i, 3] = p.Position.Y; mddfData[i, 4] = p.Position.Z;
                     mddfData[i, 5] = p.Rotation.X; mddfData[i, 6] = p.Rotation.Y; mddfData[i, 7] = p.Rotation.Z;
                     mddfData[i, 8] = p.Scale;
-                    mddfNames.Add(p.ModelPath);
+                    SetIndexedName(mddfNames, p.NameId, p.ModelPath);
                 }
             }
 
@@ -1989,7 +1989,7 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
                     modfData[i, 5] = p.Rotation.X; modfData[i, 6] = p.Rotation.Y; modfData[i, 7] = p.Rotation.Z;
                     modfData[i, 8] = p.BoundsMin.X; modfData[i, 9] = p.BoundsMin.Y; modfData[i, 10] = p.BoundsMin.Z;
                     modfData[i, 11] = p.BoundsMax.X; modfData[i, 12] = p.BoundsMax.Y; modfData[i, 13] = p.BoundsMax.Z;
-                    modfNames.Add(p.ModelPath);
+                    SetIndexedName(modfNames, p.NameId, p.ModelPath);
                 }
             }
 
@@ -1999,5 +1999,17 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
         {
             return (0, 0, null, null, Array.Empty<string>(), Array.Empty<string>());
         }
+    }
+
+    private static void SetIndexedName(List<string> names, int index, string path)
+    {
+        if (index < 0)
+            return;
+
+        while (names.Count <= index)
+            names.Add(string.Empty);
+
+        if (names[index].Length == 0)
+            names[index] = path;
     }
 }

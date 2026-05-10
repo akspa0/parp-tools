@@ -103,8 +103,8 @@ public static class AlphaTensorPackBuilder
             PlacementModfCount = tileData.WorldModelPlacements.Count,
             PlacementMddfData = BuildPlacementMddfData(tileData.ModelPlacements),
             PlacementModfData = BuildPlacementModfData(tileData.WorldModelPlacements),
-            PlacementMddfNames = tileData.ModelPlacements.Select(p => p.ModelPath).ToList(),
-            PlacementModfNames = tileData.WorldModelPlacements.Select(p => p.ModelPath).ToList(),
+            PlacementMddfNames = BuildIndexedModelNames(tileData.ModelPlacements),
+            PlacementModfNames = BuildIndexedWorldModelNames(tileData.WorldModelPlacements),
             RawChunks = tileData.RawChunks,
             AvailableSignals = signals,
         };
@@ -377,6 +377,22 @@ public static class AlphaTensorPackBuilder
         return data;
     }
 
+    private static IReadOnlyList<string> BuildIndexedModelNames(IReadOnlyList<AlphaModelPlacement> placements)
+    {
+        int maxNameId = placements.Count == 0 ? -1 : placements.Max(static p => p.NameId);
+        if (maxNameId < 0) return Array.Empty<string>();
+
+        string[] names = new string[maxNameId + 1];
+        Array.Fill(names, string.Empty);
+        foreach (var placement in placements)
+        {
+            if (placement.NameId >= 0 && placement.NameId < names.Length && names[placement.NameId].Length == 0)
+                names[placement.NameId] = placement.ModelPath;
+        }
+
+        return names;
+    }
+
     private static float[,]? BuildPlacementModfData(IReadOnlyList<AlphaWorldModelPlacement> placements)
     {
         if (placements.Count == 0) return null;
@@ -400,6 +416,22 @@ public static class AlphaTensorPackBuilder
             data[i, 13] = p.BoundsMax.Z;
         }
         return data;
+    }
+
+    private static IReadOnlyList<string> BuildIndexedWorldModelNames(IReadOnlyList<AlphaWorldModelPlacement> placements)
+    {
+        int maxNameId = placements.Count == 0 ? -1 : placements.Max(static p => p.NameId);
+        if (maxNameId < 0) return Array.Empty<string>();
+
+        string[] names = new string[maxNameId + 1];
+        Array.Fill(names, string.Empty);
+        foreach (var placement in placements)
+        {
+            if (placement.NameId >= 0 && placement.NameId < names.Length && names[placement.NameId].Length == 0)
+                names[placement.NameId] = placement.ModelPath;
+        }
+
+        return names;
     }
 
     private const float ObjectWorldTileSize = 533.33333f;

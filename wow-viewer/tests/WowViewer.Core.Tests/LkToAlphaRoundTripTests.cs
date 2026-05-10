@@ -1,3 +1,4 @@
+using System.Numerics;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 
@@ -6,7 +7,7 @@ namespace WowViewer.Core.Tests;
 public sealed class LkToAlphaRoundTripTests
 {
     [Fact]
-    public void WriteAlphaWdt_UsesLegacyMainOrderAndMcnkSubchunkContract()
+    public void WriteAlphaWdt_UsesClientMainOrderAndMcnkSubchunkContract()
     {
         List<LkMcnkData> chunks = [];
         for (int index = 0; index < 256; index++)
@@ -33,18 +34,30 @@ public sealed class LkToAlphaRoundTripTests
         Assert.Contains((3, 5), AlphaWdtReader.ReadExistingTiles(wdt));
         Assert.DoesNotContain((5, 3), AlphaWdtReader.ReadExistingTiles(wdt));
 
-        int mainPayloadOffset = 36 + 8;
+        int mphdOffset = 12;
+        Assert.Equal("MPHD", ReadChunkId(wdt, mphdOffset));
+        Assert.Equal(128, BitConverter.ToInt32(wdt, mphdOffset + 4));
+
+        int mainPayloadOffset = mphdOffset + 8 + 128 + 8;
         int rowMajorIndex = (5 * 64) + 3;
         int transposedIndex = (3 * 64) + 5;
         int adtOffset = BitConverter.ToInt32(wdt, mainPayloadOffset + rowMajorIndex * 16);
+        int adtHeaderSize = BitConverter.ToInt32(wdt, mainPayloadOffset + rowMajorIndex * 16 + 4);
 
         Assert.True(adtOffset > 0);
+        Assert.True(adtHeaderSize > 0 && adtHeaderSize < 0x28000);
         Assert.Equal(0, BitConverter.ToInt32(wdt, mainPayloadOffset + transposedIndex * 16));
 
         int mhdrDataOffset = adtOffset + 8;
         int mcinRelativeOffset = BitConverter.ToInt32(wdt, mhdrDataOffset + 0x00);
+        int mddfRelativeOffset = BitConverter.ToInt32(wdt, mhdrDataOffset + 0x0C);
+        int modfRelativeOffset = BitConverter.ToInt32(wdt, mhdrDataOffset + 0x14);
         int mcinOffset = mhdrDataOffset + mcinRelativeOffset;
         Assert.Equal("MCIN", ReadChunkId(wdt, mcinOffset));
+        Assert.Equal("MDDF", ReadChunkId(wdt, mhdrDataOffset + mddfRelativeOffset));
+        Assert.Equal(0, BitConverter.ToInt32(wdt, mhdrDataOffset + mddfRelativeOffset + 4));
+        Assert.Equal("MODF", ReadChunkId(wdt, mhdrDataOffset + modfRelativeOffset));
+        Assert.Equal(0, BitConverter.ToInt32(wdt, mhdrDataOffset + modfRelativeOffset + 4));
 
         for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
         {
@@ -120,7 +133,7 @@ public sealed class LkToAlphaRoundTripTests
         Assert.True(AlphaWdtReader.IsAlphaWdt(wdt));
         Assert.Contains((0, 0), AlphaWdtReader.ReadExistingTiles(wdt));
 
-        int mainChunkOffset = 36;
+        int mainChunkOffset = 12 + 8 + 128;
         int adtOffset = BitConverter.ToInt32(wdt, mainChunkOffset + 8);
         int mcinRelativeOffset = BitConverter.ToInt32(wdt, adtOffset + 8 + 0x00);
         int mtexRelativeOffset = BitConverter.ToInt32(wdt, adtOffset + 8 + 0x04);
@@ -239,6 +252,41 @@ public sealed class LkToAlphaRoundTripTests
         Assert.Equal(81, mh2oLayer.Heights!.Length);
         Assert.Equal(liquidHeights[0], mh2oLayer.Heights[0], 3);
         Assert.Equal(liquidHeights[80], mh2oLayer.Heights[80], 3);
+    }
+
+    [Fact]
+    public void LkAdtWriter_RoundTripsModfBoundsWithReaderOrientation()
+    {
+        LkModfEntry placement = new(
+            0,
+            88,
+            new Vector3(100f, 200f, 30f),
+            new Vector3(1f, 2f, 3f),
+            new Vector3(90f, 180f, 10f),
+            new Vector3(110f, 220f, 50f),
+            0x1234,
+            7,
+            8,
+            1.5f);
+
+        LkAdtData adt = new()
+        {
+            TextureNames = ["terrain_a.blp"],
+            WorldModelNames = ["world.wmo"],
+            WorldModelPlacements = [placement]
+        };
+
+        byte[] adtBytes = LkAdtWriter.Build(adt);
+        using MemoryStream stream = new(adtBytes, writable: false);
+        MapFileSummary summary = MapFileSummaryReader.Read(stream, "roundtrip_modf_0_0.adt");
+        AdtPlacementCatalog catalog = AdtPlacementReader.Read(stream, summary);
+
+        AdtWorldModelPlacement roundTrip = Assert.Single(catalog.WorldModelPlacements);
+        Assert.Equal(placement.Position, roundTrip.Position);
+        Assert.Equal(placement.Rotation, roundTrip.Rotation);
+        Assert.Equal(placement.BoundsMin, roundTrip.BoundsMin);
+        Assert.Equal(placement.BoundsMax, roundTrip.BoundsMax);
+        Assert.Equal(placement.Flags, roundTrip.Flags);
     }
 
     private static LkMcnkData CreateChunk(int chunkX, int chunkY, float baseHeight, float slope, int flags, bool withAlpha, AdtLiquidChunk? liquidData = null)

@@ -304,7 +304,7 @@ The `AlphaWdtReader` in `wow-viewer.Core.IO` is implemented for the current harv
 |-------|--------------|-------|
 | MHDR | ✓ Done | Reads mcin, mtex, mddf, modf offsets |
 | MPHD | ✓ Done | WMO-based detection, name table offsets |
-| MAIN | ✓ Done | 64×64 grid, column-major, 16-byte entries |
+| MAIN | ✓ Done | 64×64 grid, row-major, 16-byte entries |
 | MCIN | ✓ Done | 256 × 4-byte MCNK offsets |
 | MTEX | ✓ Done | Null-separated string list |
 | MDDF | ✓ Done | Raw bytes → `AlphaModelPlacement[]` |

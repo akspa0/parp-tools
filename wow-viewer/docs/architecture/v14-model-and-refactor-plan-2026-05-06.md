@@ -326,7 +326,7 @@ The `convert-lk-to-alpha` pipeline converts Cataclysm 4.0.0 split ADTs into Alph
 
 ### 10.2 Critical structural constraints (2026-05-09 fixes)
 
-- **MAIN grid**: Legacy readers use column-major (`tileX * 64 + tileY`), not row-major.
+- **MAIN grid**: The 0.5.3 client uses row-major (`tileY * 64 + tileX`) after reading raw `MAIN` entries into `areaInfo`.
 - **MCNK emission**: All 256 MCNKs must be emitted with valid MCVT/MCNR/MCLY/MCRF data, even for empty tiles.
 - **MCRF**: Always emit the MCRF chunk (even with 0 entries). Legacy `McnkAlpha` reads it unconditionally.
 - **Chunk IDs**: Use `FourCC.FromString().ToFileBytes()` for writing; readers expect reversed FourCC on disk.

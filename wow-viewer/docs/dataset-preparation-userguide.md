@@ -213,7 +213,7 @@ Each `.npz` file contains NumPy arrays (`.npy` format inside ZIP) and a `metadat
 
 ### 4.1 Tile Positioning
 
-- MAIN grid: `tileIndex = tileX * 64 + tileY` (column-major)
+- MAIN grid: `tileIndex = tileY * 64 + tileX` (row-major, matching the 0.5.3 client)
 - Alpha WDT uses absolute MHDR offsets in 16-byte MAIN entries
 - Retail WDT uses flag bytes in 8-byte MAIN entries
 

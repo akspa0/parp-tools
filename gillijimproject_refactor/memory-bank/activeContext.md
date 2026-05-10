@@ -11,21 +11,27 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 ### Landed In The May 9 Session (Phase C Alpha WDT Writer Fixup + MdxViewer Validation)
 
 **AlphaWdtWriter structural fixes (critical):**
-- MAIN grid order corrected to legacy column-major (`tileX * 64 + tileY`). Previous row-major (`tileY * 64 + tileX`) caused wrong tiles to be mapped to positions.
+- MAIN grid order confirmed as Alpha client row-major (`tileY * 64 + tileX`). Ghidra `CMap::PrepareArea(x,y)` computes `index = y * 64 + x` after `CMap::LoadWdt` reads raw `MAIN` into `areaInfo`.
 - Empty MCNK removal eliminated: removed `BuildEmptyMcnk`. Legacy `McnkAlpha` always reads 256 MCNK per tile; all 256 MCNKs are now emitted with full subchunk payloads.
 - MCRF always emitted: legacy `McnkAlpha` unconditionally reads MCRF data. Previously omitted when empty.
+- MDDF/MODF always emitted per embedded tile, even with empty payloads: 0.5.3 `CMapArea::Create` unconditionally asserts both chunk headers.
 - MCLY/MCAL offsets always populated (not conditionally zeroed).
 - `chunkBaseHeight` mirrored at both MCNK header offsets `0x68` and `0x6C` for compatibility across reader code paths.
 
 **AlphaWdtReader fixes:**
-- `ReadExistingTiles`: MAIN index `x = i / 64, y = i % 64` (was `x = i % 64, y = i / 64`).
-- `TryReadTile`: `mainEntryIndex = tileX * 64 + tileY` (was `tileY * 64 + tileX`).
+- `ReadExistingTiles`: MAIN index `x = i % 64, y = i / 64`.
+- `TryReadTile`: `mainEntryIndex = tileY * 64 + tileX`.
+
+**Placement orientation confirmed in Ghidra:**
+- 0.5.3 `CMap::CreateDoodadDef(SMDoodadDef&, C3Vector&)` and `CMap::CreateMapObjDef(SMMapObjDef&, C3Vector&)` convert file position `(x,y,z)` to world/internal `(origin - z, origin - x, y)`.
+- The same functions convert file rotation `(x,y,z)` to applied Euler axes `(z, x, y + 180deg)` before rotating Z, then Y, then X.
+- `AlphaWdtWriter` position/rotation and MODF bounds encoding matches the reader/client inverse. `LkAdtWriter` MODF bounds had the same axis inversion risk and is now covered by a round-trip regression.
 
 **LkAdtWriter FourCC fix:**
 - All chunk IDs (`MCNK`, `MCVT`, `MCNR`, `MCLY`, `MCAL`, `MCRF`, `MCSH`, `MCCV`, `MCLV`, top-level `MVER`/`MHDR`/`MCIN`) switched from `Encoding.ASCII.GetBytes()` to `FourCC.FromString().ToFileBytes()` to match repository-wide I/O boundary convention. This fixed the return-path test where `MapFileSummaryReader` could not detect ADT files.
 
-**Added `WriteAlphaWdt_UsesLegacyMainOrderAndMcnkSubchunkContract` test:**
-- Validates MAIN ordering uses legacy column-major (`tileX * 64 + tileY`).
+**Added `WriteAlphaWdt_UsesClientMainOrderAndMcnkSubchunkContract` test:**
+- Validates MAIN ordering uses Alpha client row-major (`tileY * 64 + tileX`).
 - Validates all 256 MCNKs have valid MCLY, MCRF subchunk headers.
 - Validates MCNK subchunk data does not overrun bounds.
 - 3/3 `LkToAlphaRoundTripTests` pass.
@@ -59,7 +65,7 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 - `McnkAlphaHeader` struct has specific subchunk offset fields that must point into the MCNK data area (after 8-byte chunk header + 128-byte MCNK header)
 - MCVT/MCNR are raw (no chunk headers); MCLY/MCRF/MCSH/MCAL/MCLQ are chunked (FourCC + size + data)
 - When `McnkAlpha` reads a subchunk with `new Chunk(file, offset)`, the offset must point to the chunk's FourCC, not its data
-- Column-major MAIN indexing: mainEntryIndex = tileX * 64 + tileY
+- Row-major MAIN indexing: mainEntryIndex = tileY * 64 + tileX
 - Always emit MCRF (even with 0 refs), MCLY (even with 0 layers), MCAL (even with 0 nonzero alphas), MCSH (if data exists)
 
 ## WHAT WORKS

@@ -306,6 +306,38 @@ internal static class LkToAlphaCommand
                         holeFullMasks: kvp.Value.HoleFullMasks));
             }
 
+            string? tilesetRoot = null;
+            if (options.BundleTilesets)
+            {
+                tilesetRoot = Path.Combine(outputDir, "tilesets", mapName);
+                string sourceForTextures = options.ClientRoot ?? options.InputDir ?? ".";
+                BundleTilesets(tiles, sourceForTextures, mapName, tilesetRoot);
+
+                // The Alpha WDT MTEX table must point at the bundled files before it is written.
+                string tilesetPrefix = $"tilesets\\{mapName}\\";
+                tiles = tiles.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp =>
+                    {
+                        var fixedTextures = kvp.Value.TextureNames
+                            .Select(t => tilesetPrefix + t.TrimStart('\\'))
+                            .ToList();
+                        return new AlphaTileData(
+                            kvp.Value.SourcePath, kvp.Value.Heightmap,
+                            kvp.Value.McalAlphaPack, kvp.Value.MclyTextureIds,
+                            kvp.Value.MclyLayerMask, kvp.Value.HoleMask,
+                            fixedTextures, kvp.Value.ModelPlacements,
+                            kvp.Value.WorldModelPlacements, kvp.Value.LiquidChunks,
+                            mcnrNormalXyz: kvp.Value.McnrNormalXyz,
+                            mcshShadowMask256: kvp.Value.McshShadowMask256,
+                            mcshShadowMask1024: kvp.Value.McshShadowMask1024,
+                            areaIds: kvp.Value.AreaIds,
+                            mccvRgb: kvp.Value.MccvRgb,
+                            mclvLightingBytes: kvp.Value.MclvLightingBytes,
+                            holeFullMasks: kvp.Value.HoleFullMasks);
+                    });
+            }
+
             byte[] wdtData = AlphaWdtWriter.Build(mapName, tiles);
             File.WriteAllBytes(outputPath, wdtData);
             var wdlTiles = tiles
@@ -334,37 +366,8 @@ internal static class LkToAlphaCommand
                     Console.WriteLine($"    ... and {warnings.Count - 10} more");
             }
 
-            if (options.BundleTilesets)
-            {
-                string tilesetRoot = Path.Combine(outputDir, "tilesets", mapName);
-                string sourceForTextures = options.ClientRoot ?? options.InputDir ?? ".";
-                BundleTilesets(tiles, sourceForTextures, mapName, tilesetRoot);
-
-                // Fix up texture names to point to local tilesets directory
-                string tilesetPrefix = $"tilesets\\{mapName}\\";
-                tiles = tiles.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp =>
-                    {
-                        var fixedTextures = kvp.Value.TextureNames
-                            .Select(t => tilesetPrefix + t.TrimStart('\\'))
-                            .ToList();
-                        return new AlphaTileData(
-                            kvp.Value.SourcePath, kvp.Value.Heightmap,
-                            kvp.Value.McalAlphaPack, kvp.Value.MclyTextureIds,
-                            kvp.Value.MclyLayerMask, kvp.Value.HoleMask,
-                            fixedTextures, kvp.Value.ModelPlacements,
-                            kvp.Value.WorldModelPlacements, kvp.Value.LiquidChunks,
-                            mcnrNormalXyz: kvp.Value.McnrNormalXyz,
-                            mcshShadowMask256: kvp.Value.McshShadowMask256,
-                            mcshShadowMask1024: kvp.Value.McshShadowMask1024,
-                            areaIds: kvp.Value.AreaIds,
-                            mccvRgb: kvp.Value.MccvRgb,
-                            mclvLightingBytes: kvp.Value.MclvLightingBytes,
-                            holeFullMasks: kvp.Value.HoleFullMasks);
-                    });
+            if (tilesetRoot != null)
                 Console.WriteLine($"  Tilesets: extracted and fixed up paths in {tilesetRoot}");
-            }
         }
         catch (Exception ex)
         {
@@ -382,11 +385,26 @@ internal static class LkToAlphaCommand
     private static (List<string> names, List<LkMddfEntry> placements, List<string> wmoNames, List<LkModfEntry> wmoPlacements, int mappedModels, int mappedWmos)
         FilterPlacements(LkAdtData adtData, HashSet<string> targetFileSet)
     {
-        var nameSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new List<string>();
+        var nameIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var placementList = new List<LkMddfEntry>();
-        var wmoNameSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenModelUniqueIds = new HashSet<int>();
+        var wmoNames = new List<string>();
+        var wmoNameIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var wmoPlacementList = new List<LkModfEntry>();
+        var seenWmoUniqueIds = new HashSet<int>();
         int mappedModels = 0, mappedWmos = 0;
+
+        static int GetOrAddNameIndex(string path, List<string> names, Dictionary<string, int> index)
+        {
+            if (index.TryGetValue(path, out int existing))
+                return existing;
+
+            int next = names.Count;
+            names.Add(path);
+            index[path] = next;
+            return next;
+        }
 
         string ResolveName(int nameId, IReadOnlyList<string> nameTable)
         {
@@ -400,43 +418,39 @@ internal static class LkToAlphaCommand
         for (int i = 0; i < adtData.ModelPlacements.Count; i++)
         {
             var p = adtData.ModelPlacements[i];
-            string path = ResolveName(p.NameId, adtData.ModelNames);
+            if (!seenModelUniqueIds.Add(p.UniqueId))
+                continue;
 
-            if (PathExists(path))
-            {
-                nameSet.Add(path);
-                placementList.Add(p);
-            }
-            else
-            {
-                nameSet.Add(PlaceholderMdx);
-                placementList.Add(new LkMddfEntry(
-                    0, p.UniqueId, p.Position, p.Rotation, p.Scale));
+            string path = ResolveName(p.NameId, adtData.ModelNames);
+            string mappedPath = PathExists(path) ? path : PlaceholderMdx;
+            int mappedNameId = GetOrAddNameIndex(mappedPath, names, nameIndex);
+
+            if (!ReferenceEquals(mappedPath, path) && !string.Equals(mappedPath, path, StringComparison.OrdinalIgnoreCase))
                 mappedModels++;
-            }
+
+            placementList.Add(new LkMddfEntry(
+                mappedNameId, p.UniqueId, p.Position, p.Rotation, p.Scale));
         }
 
         for (int i = 0; i < adtData.WorldModelPlacements.Count; i++)
         {
             var p = adtData.WorldModelPlacements[i];
-            string path = ResolveName(p.NameId, adtData.WorldModelNames);
+            if (!seenWmoUniqueIds.Add(p.UniqueId))
+                continue;
 
-            if (PathExists(path))
-            {
-                wmoNameSet.Add(path);
-                wmoPlacementList.Add(p);
-            }
-            else
-            {
-                wmoNameSet.Add(PlaceholderWmo);
-                wmoPlacementList.Add(new LkModfEntry(
-                    0, p.UniqueId, p.Position, p.Rotation,
-                    p.BoundsMin, p.BoundsMax, p.Flags, p.DoodadSet, p.NameSet, p.Scale));
+            string path = ResolveName(p.NameId, adtData.WorldModelNames);
+            string mappedPath = PathExists(path) ? path : PlaceholderWmo;
+            int mappedNameId = GetOrAddNameIndex(mappedPath, wmoNames, wmoNameIndex);
+
+            if (!ReferenceEquals(mappedPath, path) && !string.Equals(mappedPath, path, StringComparison.OrdinalIgnoreCase))
                 mappedWmos++;
-            }
+
+            wmoPlacementList.Add(new LkModfEntry(
+                mappedNameId, p.UniqueId, p.Position, p.Rotation,
+                p.BoundsMin, p.BoundsMax, p.Flags, p.DoodadSet, p.NameSet, p.Scale));
         }
 
-        return (nameSet.ToList(), placementList, wmoNameSet.ToList(), wmoPlacementList, mappedModels, mappedWmos);
+        return (names, placementList, wmoNames, wmoPlacementList, mappedModels, mappedWmos);
     }
 
     private static HashSet<string> ScanAlphaClientFiles(string clientRoot)

@@ -40,7 +40,7 @@ The project currently has four practical jobs:
 - ADT NPZ shard preservation of unconsumed raw ADT-family chunks as uint8 blobs
 - ADT NPZ promotion of spec-backed preservation signals for `MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, and `MCRW`
 - Alpha tile NPZ preservation of raw embedded tile chunks alongside decoded signals
-- **AlphaWdtWriter structural fixup**: MAIN grid order corrected to column-major (matching legacy readers), all 256 MCNKs always emitted with full subchunk structure, MCRF always emitted even when empty
+- **AlphaWdtWriter structural fixup**: MAIN grid order corrected to row-major (matching the 0.5.3 client), all 256 MCNKs always emitted with full subchunk structure, and client-required empty MDDF/MODF/MCRF chunks emitted when needed
 - **LkAdtWriter FourCC fix**: all chunk IDs use `FourCC.FromString().ToFileBytes()` instead of `Encoding.ASCII.GetBytes()` for I/O boundary consistency
 - **Asset name fixup** (`--target-client-root`): filters placements referencing assets missing in target client (scans Alpha per-asset `.wmo.MPQ`/`.mdx.MPQ` wrappers)
 - **Tileset bundling** (`--bundle-tilesets`): extracts unique BLP textures from source client, writes to `tilesets/{map_name}/`, fixes up WDT MTEX references to local paths

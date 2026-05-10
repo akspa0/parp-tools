@@ -123,8 +123,11 @@ public static class NpzTileSerializer
             source_adt_path = pack.SourceAdtPath,
             available_signals = pack.AvailableSignals.OrderBy(static signal => signal, StringComparer.OrdinalIgnoreCase),
             mcly_texture_names = pack.MclyTextureNames,
+            mcly_texture_name_table = BuildNameTable(pack.MclyTextureNames),
             placement_mddf_names = pack.PlacementMddfNames,
+            placement_mddf_name_table = BuildNameTable(pack.PlacementMddfNames),
             placement_modf_names = pack.PlacementModfNames,
+            placement_modf_name_table = BuildNameTable(pack.PlacementModfNames),
             placement_mddf_count = pack.PlacementMddfCount,
             placement_modf_count = pack.PlacementModfCount,
             minimap_source_tag = pack.MinimapSourceTag,
@@ -150,6 +153,15 @@ public static class NpzTileSerializer
         byte[] bytes = Encoding.UTF8.GetBytes(json);
         zip.Write(bytes, 0, bytes.Length);
         zip.CloseEntry();
+    }
+
+    private static object[] BuildNameTable(IReadOnlyList<string> names)
+    {
+        return names
+            .Select(static (path, index) => new { index, path })
+            .Where(static entry => !string.IsNullOrEmpty(entry.path))
+            .Cast<object>()
+            .ToArray();
     }
 
     private static byte[] BuildNpyHeader(string dtype, Array array)

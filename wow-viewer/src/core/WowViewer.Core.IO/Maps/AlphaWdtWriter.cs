@@ -8,6 +8,7 @@ namespace WowViewer.Core.IO.Maps;
 public static class AlphaWdtWriter
 {
     private const int ChunkHeaderSize = 8;
+    private const int MphdAlphaSize = 128;
     private const int McnkHeaderSize = 128;
     private const int McinEntryCount = 256;
     private const int McinEntrySize = 16;
@@ -35,7 +36,7 @@ public static class AlphaWdtWriter
         WriteChunk(bw, "MVER", 4, w => w.Write(18));
 
         long mphdPosition = ms.Position;
-        WriteChunk(bw, "MPHD", 16, static w => w.Write(new byte[16]));
+        WriteChunk(bw, "MPHD", MphdAlphaSize, static w => w.Write(new byte[MphdAlphaSize]));
 
         long mainPosition = ms.Position;
         byte[] mainData = BuildMainPayload(tiles);
@@ -63,8 +64,8 @@ public static class AlphaWdtWriter
             var tile = kvp.Value;
 
             int tileOffset = (int)ms.Position;
-            PatchMainEntry(mainData, tileY * TilesPerAxis + tileX, tileOffset);
-            WriteTileData(bw, tile, tileX, tileY, allMdxNames, allWmoNames, mdxNameIndex, wmoNameIndex);
+            int tileHeaderSize = WriteTileData(bw, tile, tileX, tileY, allMdxNames, allWmoNames, mdxNameIndex, wmoNameIndex);
+            PatchMainEntry(mainData, tileY * TilesPerAxis + tileX, tileOffset, tileHeaderSize);
         }
 
         PatchMainPayload(ms, mainPosition, mainData);
@@ -73,7 +74,7 @@ public static class AlphaWdtWriter
         return ms.ToArray();
     }
 
-    private static void WriteTileData(BinaryWriter bw, AlphaTileData tile, int tileX, int tileY,
+    private static int WriteTileData(BinaryWriter bw, AlphaTileData tile, int tileX, int tileY,
         IReadOnlyList<string> mdxNames, IReadOnlyList<string> wmoNames,
         Dictionary<string, int> mdxIndex, Dictionary<string, int> wmoIndex)
     {
@@ -106,13 +107,13 @@ public static class AlphaWdtWriter
         int mtexRelative = (int)(bw.Seek(0, SeekOrigin.Current) - mhdrDataStart);
         WriteDataChunk(bw, "MTEX", mtexData);
 
-        int mddfRelative = mddfData.Length > 0 ? (int)(bw.Seek(0, SeekOrigin.Current) - mhdrDataStart) : 0;
-        if (mddfData.Length > 0)
-            WriteDataChunk(bw, "MDDF", mddfData);
+        int mddfRelative = (int)(bw.Seek(0, SeekOrigin.Current) - mhdrDataStart);
+        WriteDataChunk(bw, "MDDF", mddfData);
 
-        int modfRelative = modfData.Length > 0 ? (int)(bw.Seek(0, SeekOrigin.Current) - mhdrDataStart) : 0;
-        if (modfData.Length > 0)
-            WriteDataChunk(bw, "MODF", modfData);
+        int modfRelative = (int)(bw.Seek(0, SeekOrigin.Current) - mhdrDataStart);
+        WriteDataChunk(bw, "MODF", modfData);
+
+        int tileHeaderSize = checked((int)(bw.Seek(0, SeekOrigin.Current) - mhdrStart));
 
         int[] mcnkOffsets = new int[McinEntryCount];
         for (int i = 0; i < McinEntryCount; i++)
@@ -130,6 +131,8 @@ public static class AlphaWdtWriter
 
         WriteMcinOffsets(bw, mcnkOffsets, mcnkDataList, mcinStart);
         WriteMhdrData(bw, mhdrStart, mtexRelative, mddfRelative, modfRelative);
+
+        return tileHeaderSize;
     }
 
     private static byte[] BuildMcnkData(AlphaTileData tile, int cx, int cy, int tileX, int tileY, float tileBaseHeight)
@@ -592,11 +595,11 @@ public static class AlphaWdtWriter
             BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 24), p.Rotation.Z);
             BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 28), p.Rotation.Y);
             BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 32), MapOrigin - p.BoundsMax.Y);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 36), p.BoundsMax.Z);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 40), MapOrigin - p.BoundsMin.X);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 36), p.BoundsMin.Z);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 40), MapOrigin - p.BoundsMax.X);
             BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 44), MapOrigin - p.BoundsMin.Y);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 48), p.BoundsMin.Z);
-            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 52), MapOrigin - p.BoundsMax.X);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 48), p.BoundsMax.Z);
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 52), MapOrigin - p.BoundsMin.X);
             BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 56), p.Flags);
             BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(off + 58), 0);
         }
@@ -625,10 +628,11 @@ public static class AlphaWdtWriter
         return data;
     }
 
-    private static void PatchMainEntry(byte[] mainData, int index, int offset)
+    private static void PatchMainEntry(byte[] mainData, int index, int offset, int size)
     {
         int entryOffset = index * MainEntrySize;
         BinaryPrimitives.WriteInt32LittleEndian(mainData.AsSpan(entryOffset), offset);
+        BinaryPrimitives.WriteInt32LittleEndian(mainData.AsSpan(entryOffset + 4), size);
     }
 
     private static void PatchMainPayload(MemoryStream ms, long mainPosition, byte[] mainData)
@@ -646,12 +650,12 @@ public static class AlphaWdtWriter
         long pos = ms.Position;
         ms.Position = mphdPosition + ChunkHeaderSize;
 
-        byte[] mphdData = new byte[16];
+        byte[] mphdData = new byte[MphdAlphaSize];
         BinaryPrimitives.WriteInt32LittleEndian(mphdData.AsSpan(0), mdxNames.Count > 0 ? mdxNames.Count + 1 : 0);
         BinaryPrimitives.WriteInt32LittleEndian(mphdData.AsSpan(4), (int)mdnmStart);
         BinaryPrimitives.WriteInt32LittleEndian(mphdData.AsSpan(8), wmoNames.Count > 0 ? wmoNames.Count + 1 : 0);
         BinaryPrimitives.WriteInt32LittleEndian(mphdData.AsSpan(12), (int)monmStart);
-        ms.Write(mphdData, 0, 16);
+        ms.Write(mphdData, 0, mphdData.Length);
 
         ms.Position = pos;
     }

@@ -19,12 +19,12 @@ MdxViewer's `AlphaTerrainAdapter` renders 0.5.3 Azeroth correctly — tile posit
 Existing code to reference (read-only, do not add references):
 - `gillijimproject_refactor/src/MdxViewer/Terrain/AlphaTerrainAdapter.cs` — `LoadTileWithPlacements()`, coordinate system, chunk assembly
 - `gillijimproject_refactor/src/gillijimproject-csharp/WowFiles/Alpha/` — `WdtAlpha`, `AdtAlpha`, `McnkAlpha` byte-level parsing
-- `wow-viewer/src/viewer/WowViewer.App/AlphaEmbeddedAdtReader.cs` — already-linked reference implementation (currently used by converter but has the coordinate bug)
+- `wow-viewer/src/viewer/WowViewer.App/AlphaEmbeddedAdtReader.cs` — viewer-side Alpha embedded tile reader
 
 Create `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaWdtReader.cs`:
 - `public static bool TryReadTile(string wdtFilePath, int tileX, int tileY, out AlphaTileData? data)`
 - Returns per-tile: 257×257 heights, 256×256×4 MCAL alpha, 16×16×4 MCLY texture IDs, MDDF/MODF placements with model paths and bounds, liquid data, hole mask, texture name table
-- Coordinate system: match `AlphaTerrainAdapter` exactly — tileX maps to column in MAIN table (index = tileX * 64 + tileY), world coord projection verified against viewer rendering
+- Coordinate system: match the 0.5.3 client `MAIN` table (`index = tileY * 64 + tileX`), with world coord projection verified against viewer rendering
 - No archive dependency — takes a filesystem WDT path (caller extracts from MPQ if needed)
 
 ### 2. Fix coordinate verification

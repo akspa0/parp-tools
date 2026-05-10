@@ -272,12 +272,12 @@ internal static class AlphaEmbeddedAdtReader
         if (mainData is not { Length: >= AlphaMainEntrySize })
             return false;
 
-        int columnMajorIndex = (tileX * 64) + tileY;
-        if (TryReadMainOffset(mainData, columnMajorIndex, out offset))
+        int rowMajorIndex = (tileY * 64) + tileX;
+        if (TryReadMainOffset(mainData, rowMajorIndex, out offset))
             return true;
 
-        int rowMajorIndex = (tileY * 64) + tileX;
-        return TryReadMainOffset(mainData, rowMajorIndex, out offset);
+        int columnMajorIndex = (tileX * 64) + tileY;
+        return TryReadMainOffset(mainData, columnMajorIndex, out offset);
     }
 
     private static bool TryReadMainOffset(byte[] mainData, int index, out int offset)
