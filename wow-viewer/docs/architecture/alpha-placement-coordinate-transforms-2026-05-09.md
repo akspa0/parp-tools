@@ -25,6 +25,39 @@ All transforms were verified against these Ghidra-decompiled functions:
 
 **Key implication**: MDDF and MODF positions are stored in a global coordinate space relative to MapOrigin. They are NOT tile-relative. The `pos` parameter in `CreateDoodadDef` and `CreateMapObjDef` is always `(MapOrigin, MapOrigin, 0)` regardless of which tile is being processed.
 
+## Placement Instantiation: MCRF Is Required
+
+MDDF and MODF are only global placement definition tables. The client does **not** instantiate every entry in these tables automatically. Objects are created from each chunk's `MCRF` reference list in `CMapChunk::CreateRefs`.
+
+Ghidra evidence from `CMapChunk::Create` (`0x699000`):
+
+```
+CreateRefs(this, area, mcrfPtr, *(uint *)(mcnk + 0x1c), *(uint *)(mcnk + 0x44));
+```
+
+Because `mcnk` points at the MCNK chunk header including the 8-byte FourCC+size prefix, these are data-relative MCNK header offsets:
+
+| Data Offset | Field | Meaning |
+|-------------|-------|---------|
+| `0x14` | `nDoodadRefs` | Count of MDDF indices at the start of MCRF |
+| `0x24` | `mcrfOffset` | Offset from MCNK data start to wrapped `MCRF` subchunk |
+| `0x3C` | `nMapObjRefs` | Count of MODF indices after doodad refs in MCRF |
+
+`CreateRefs` consumes one contiguous `uint32[]` list:
+
+```
+MCRF[0 .. nDoodadRefs-1]                         -> indices into MDDF
+MCRF[nDoodadRefs .. nDoodadRefs+nMapObjRefs-1]    -> indices into MODF
+```
+
+If `MDDF`/`MODF` are populated but each MCNK has `MCRF` empty and both counts set to zero, terrain loads correctly but no doodads or WMOs appear. This was the root cause of the "terrain works, objects missing" alpha writer bug fixed on 2026-05-09.
+
+Current writer policy:
+
+- MDDF references are assigned to the chunk containing the doodad `Position`.
+- MODF references are assigned to every chunk whose planar bounds overlap the WMO `BoundsMin`/`BoundsMax`; if bounds do not overlap any chunk, the writer falls back to the chunk containing `Position`.
+- Within each MCRF payload, all MDDF indices are written first, then all MODF indices, matching `CreateRefs`.
+
 ## Raw File Layout
 
 ### MDDF Entry (0x24 bytes = 36 bytes)

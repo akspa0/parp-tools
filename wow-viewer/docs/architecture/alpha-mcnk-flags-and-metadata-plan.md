@@ -43,11 +43,11 @@ Based on Ghidra decompilation of `CMapChunk::Create` (0x5.3.3.3368) and cross-re
 | 0x2C | 4 | McalSize | Size of MCAL data in bytes |
 | 0x30 | 4 | McshOffset | Offset from MCNK data start to MCSH shadow sub-chunk |
 | 0x34 | 4 | McshSize | Size of MCSH shadow data in bytes |
-| 0x38 | 4 | Unknown3 | Low 16 bits = AreaId (Ghidra: `zoneId = *(uint*)(param_1 + 0x40)`) |
-| 0x3C | 4 | Unknown4 | Other bits; purpose unknown |
-| 0x40 | 4 | WMOGroup | Count of WMO/map object references in MCRF |
-| 0x44 | 4 | Holes | 16-bit hole mask (low 16 bits); flags in high bits |
-| 0x48 | 4 | Unknown5 | Purpose unknown |
+| 0x38 | 4 | AreaId | Ghidra: `zoneId = *(uint*)(param_1 + 0x40)` where `param_1` includes the 8-byte MCNK chunk header |
+| 0x3C | 4 | WMOGroup | Count of WMO/map object references in MCRF; passed to `CreateRefs` from `*(uint*)(param_1 + 0x44)` |
+| 0x40 | 4 | Holes | 16-bit hole mask (low 16 bits); Ghidra: `holes = *(ushort*)(param_1 + 0x48)` |
+| 0x44 | 4 | Unknown5 | Purpose unknown |
+| 0x48 | 4 | Unknown6 | Purpose unknown |
 | 0x4C | 4 | PredTex1 | Predetermined texture data (4 × uint) |
 | 0x50 | 4 | PredTex2 | |
 | 0x54 | 4 | PredTex3 | |

@@ -330,6 +330,10 @@ public sealed class LkToAlphaRoundTripTests
             [(0, 0)] = tile
         });
 
+        var refs = CountAlphaPlacementReferences(wdt, 0, 0);
+        Assert.Equal(1, refs.DoodadRefs);
+        Assert.True(refs.MapObjRefs > 0);
+
         Assert.True(AlphaWdtReader.TryReadTile(wdt, 0, 0, out AlphaTileData? roundTrip));
         Assert.NotNull(roundTrip);
 
@@ -360,6 +364,32 @@ public sealed class LkToAlphaRoundTripTests
         Assert.Equal(worldModelPlacement.BoundsMax.Y, modfResult.BoundsMax.Y, 2);
         Assert.Equal(worldModelPlacement.BoundsMax.Z, modfResult.BoundsMax.Z, 2);
         Assert.Equal(worldModelPlacement.Flags, modfResult.Flags);
+    }
+
+    private static (int DoodadRefs, int MapObjRefs) CountAlphaPlacementReferences(byte[] wdt, int tileX, int tileY)
+    {
+        int mainPayloadOffset = 12 + 8 + 128 + 8;
+        int mainIndex = tileY * 64 + tileX;
+        int adtOffset = BitConverter.ToInt32(wdt, mainPayloadOffset + mainIndex * 16);
+        int mhdrDataOffset = adtOffset + 8;
+        int mcinRelativeOffset = BitConverter.ToInt32(wdt, mhdrDataOffset + 0x00);
+        int mcinOffset = mhdrDataOffset + mcinRelativeOffset;
+
+        int doodadRefs = 0;
+        int mapObjRefs = 0;
+        for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+        {
+            int entryOffset = mcinOffset + 8 + chunkIndex * 16;
+            int mcnkOffset = BitConverter.ToInt32(wdt, entryOffset);
+            if (mcnkOffset <= 0)
+                continue;
+
+            int headerOffset = mcnkOffset + 8;
+            doodadRefs += BitConverter.ToInt32(wdt, headerOffset + 0x14);
+            mapObjRefs += BitConverter.ToInt32(wdt, headerOffset + 0x3C);
+        }
+
+        return (doodadRefs, mapObjRefs);
     }
 
     private static LkMcnkData CreateChunk(int chunkX, int chunkY, float baseHeight, float slope, int flags, bool withAlpha, AdtLiquidChunk? liquidData = null)
