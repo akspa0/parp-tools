@@ -330,6 +330,9 @@ The `convert-lk-to-alpha` pipeline converts Cataclysm 4.0.0 split ADTs into Alph
 - **MCNK emission**: All 256 MCNKs must be emitted with valid MCVT/MCNR/MCLY/MCRF data, even for empty tiles.
 - **MCRF**: Always emit the MCRF chunk (even with 0 entries). Legacy `McnkAlpha` reads it unconditionally.
 - **Chunk IDs**: Use `FourCC.FromString().ToFileBytes()` for writing; readers expect reversed FourCC on disk.
+- **MCVT heights are absolute**: Alpha-format MCVT heights are stored as absolute world-space Z values. The client's `CMapChunk::CreateVertices` reads them directly (`v->z = *he`) then subtracts the chunk's Position for rendering precision only. The writer must NOT subtract base height from MCVT, and readers must NOT add base height. MCNK offsets 0x68/0x6C store Position.Z (heights[0]) for bounding-box and vertex-precision relativization, NOT as a height delta. See `alpha-mcnk-flags-and-metadata-plan.md` "Height Convention Contract" for the full cross-format table.
+- **MCLQ liquid heights are absolute**: Same convention as MCVT — no base-height addition/subtraction.
+- **Dataset tensor-pack contract**: The `height_257` array in NPZ shards is ALWAYS absolute world-space Z, regardless of whether the source is Alpha WDT or LK/retail ADT. For Alpha, heights are read directly. For LK/retail, `AdtTensorPackBuilder` adds `BaseHeight` (from MCNK offset 0x70) to convert relative MCVT heights to absolute Z.
 
 ### 10.3 MdxViewer validation workflow
 

@@ -158,6 +158,10 @@ public static class LkToAlphaConverter
             holeFullMasks: holeFullMasks);
     }
 
+    // Fill heightmap gaps for sparse tiles where some chunks had no height data.
+    // Known limitation: uses 0.0f as sentinel, which could overwrite a legitimate
+    // height of exactly 0.0f (sea level). In practice alpha terrain heights are
+    // rarely exactly 0.0f at grid vertices, so this is acceptable.
     private static void FillHeightmapGaps(float[,] hm)
     {
         for (int y = 0; y < TileHeightmapSize; y++)

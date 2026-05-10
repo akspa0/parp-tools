@@ -11,7 +11,7 @@ public sealed class AlphaTerrainAdapter : ITerrainAdapter
     private const int ChunksPerTile = 16;
     private const int TileHeightmapSize = 257;
     private const int ChunkAlphaSize = 64;
-    private const float MapOrigin = 17066f;
+    private const float MapOrigin = 17066.66666f;
     private const float ChunkSize = 533.33333f;
     private const float ChunkSmall = ChunkSize / ChunksPerTile;
 

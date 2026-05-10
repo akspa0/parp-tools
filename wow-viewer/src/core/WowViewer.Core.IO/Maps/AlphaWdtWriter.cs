@@ -78,14 +78,12 @@ public static class AlphaWdtWriter
         IReadOnlyList<string> mdxNames, IReadOnlyList<string> wmoNames,
         Dictionary<string, int> mdxIndex, Dictionary<string, int> wmoIndex)
     {
-        float tileBaseHeight = ComputeTileBaseHeight(tile);
-
         var mcnkDataList = new List<byte[]>(256);
         for (int cy = 0; cy < 16; cy++)
         {
             for (int cx = 0; cx < 16; cx++)
             {
-                mcnkDataList.Add(BuildMcnkData(tile, cx, cy, tileX, tileY, tileBaseHeight));
+                mcnkDataList.Add(BuildMcnkData(tile, cx, cy, tileX, tileY));
             }
         }
 
@@ -135,12 +133,12 @@ public static class AlphaWdtWriter
         return tileHeaderSize;
     }
 
-    private static byte[] BuildMcnkData(AlphaTileData tile, int cx, int cy, int tileX, int tileY, float tileBaseHeight)
+    private static byte[] BuildMcnkData(AlphaTileData tile, int cx, int cy, int tileX, int tileY)
     {
         float[] heights = ExtractChunkHeights(tile.Heightmap, cx, cy);
         float chunkBaseHeight = heights[0];
 
-        byte[] mcvtAlpha = BuildAlphaMcvt(heights, chunkBaseHeight);
+        byte[] mcvtAlpha = BuildAlphaMcvt(heights);
         byte[] mcnrAlpha = BuildAlphaMcnr(tile.McnrNormalXyz, cx, cy);
 
         byte[] mcshRaw = tile.McshShadowMask1024 != null ? SliceChunkShadowAlpha(tile.McshShadowMask1024, cx, cy) : [];
@@ -155,7 +153,7 @@ public static class AlphaWdtWriter
 
         byte[] mclyRaw = BuildAlphaMcly(tile, cx, cy, nLayers);
         byte[] mcalRaw = BuildAlphaMcal(tile, cx, cy, nLayers);
-        byte[] mclqRaw = BuildAlphaMclq(liquidChunk, chunkBaseHeight);
+        byte[] mclqRaw = BuildAlphaMclq(liquidChunk);
 
         byte[] mcrfRaw = [];
         int nDoodadRefs = 0;
@@ -183,7 +181,7 @@ public static class AlphaWdtWriter
         uint flags = liquidChunk is not null ? (liquidChunk.McnkFlags & 0x3Cu) : 0u;
         if (mcshRaw.Length > 0) flags |= 0x01;
 
-        float radius = CalculateRadius(heights, tileBaseHeight);
+        float radius = CalculateRadius(heights);
 
         int chunkDataSize = cursor;
         int totalDataSize = McnkHeaderSize + chunkDataSize;
@@ -220,8 +218,10 @@ public static class AlphaWdtWriter
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x5C), chunkDataSize);
         BinaryPrimitives.WriteInt32LittleEndian(header.AsSpan(0x64), offsLiquid);
 
-        // wow-viewer currently has two Alpha readers using different offsets for the chunk base
-        // height. Mirror the value into both fields so produced Alpha WDTs work across both paths.
+        // MCNK offsets 0x68/0x6C: chunk Position.Z for rendering-precision relativization.
+        // The client (CMapChunk::CreateVertices) reads these as Position, then subtracts
+        // Position from each vertex to maintain floating-point precision at large world coords.
+        // MCVT heights are stored as absolute world-space Z; Position.Z = heights[0].
         BinaryPrimitives.WriteSingleLittleEndian(header.AsSpan(0x68), chunkBaseHeight);
         BinaryPrimitives.WriteSingleLittleEndian(header.AsSpan(0x6C), chunkBaseHeight);
         msw.Write(header);
@@ -235,20 +235,6 @@ public static class AlphaWdtWriter
         if (mclqRaw.Length > 0) msw.Write(mclqRaw);
 
         return ms.ToArray();
-    }
-
-    private static float ComputeTileBaseHeight(AlphaTileData tile)
-    {
-        float min = float.MaxValue;
-        for (int y = 0; y < TileSize; y++)
-        {
-            for (int x = 0; x < TileSize; x++)
-            {
-                if (tile.Heightmap[y, x] < min && tile.Heightmap[y, x] != 0f)
-                    min = tile.Heightmap[y, x];
-            }
-        }
-        return min == float.MaxValue ? 0f : min;
     }
 
     private static float[] ExtractChunkHeights(float[,] heightmap, int cx, int cy)
@@ -279,33 +265,27 @@ public static class AlphaWdtWriter
         return heights;
     }
 
-    private static byte[] BuildAlphaMcvt(float[] heights, float chunkBaseHeight)
+    private static byte[] BuildAlphaMcvt(float[] heights)
     {
         byte[] data = new byte[AlphaMcvtSize];
 
-        // heights[] is in LK interleaved order: row 0 outer(9), row 0 inner(8), row 1 outer(9), ...
-        // Alpha MCVT stores outer block first (81 floats), then inner block (64 floats).
-        // Layout: 9 outer rows × 9 cols, then 8 inner rows × 8 cols.
-        // The heights index mapping follows the same pattern.
+        // Ghidra-verified (CMapChunk::CreateVertices, client 0.5.3.3368):
+        // Alpha MCVT heights are stored as ABSOLUTE world-space Z values.
+        // The client reads them directly with v->z = *he, then subtracts the
+        // chunk's Position (stored at MCNK 0x68/0x6C) only for rendering precision.
+        // No base-height adjustment is applied during encoding or decoding.
+        //
+        // Layout: 81 outer vertices (9 rows × 9 cols) then 64 inner (8 rows × 8 cols).
+        // heights[] is in interleaved LK order: row 0 outer(9), row 0 inner(8), ...
+        // Outer row R, col C maps to heights index R*17 + C.
+        // Inner row I, col C maps to heights index I*17 + 9 + C.
         int dst = 0;
         for (int outerRow = 0; outerRow < 9; outerRow++)
         {
             for (int col = 0; col < 9; col++)
             {
-                // Outer row N comes from LK heights index: N*17 + col  (9 outer entries for even rows)
-                // Actually, LK heights layout: row 0 outer (9 entries at indices 0..8),
-                //   row 0 inner (8 entries at indices 9..16), row 1 outer (9 entries at indices 17..25), ...
-                // Outer row R is at heights index: R*17 (for the first entry of that outer row)
-                // But wait, this is interleaved so:
-                //   Even rows (0,2,...,16): 9 entries starting at index row*9 - (row/2)*8
-                // That's complex. Instead, just map directly.
-                // Alpha outer[R][C] = heights at grid position (C*2, R*2)
-                // In LK heights[]: row r (0..16), col count 9 or 8 depending on r parity
-                // For outer row R (R=0..8): LK heights position = sum of row sizes up to R*2
-                // Each even row has 9 entries, each odd row has 8 entries.
-                // Heights index for outer row R, col C = R*17 + C
                 int srcIdx = outerRow * 17 + col;
-                float v = srcIdx < heights.Length ? heights[srcIdx] - chunkBaseHeight : 0f;
+                float v = srcIdx < heights.Length ? heights[srcIdx] : 0f;
                 BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(dst), v);
                 dst += 4;
             }
@@ -315,10 +295,8 @@ public static class AlphaWdtWriter
         {
             for (int col = 0; col < 8; col++)
             {
-                // Inner row I (I=0..7) maps to LK heights row I*2+1
-                // Heights index for inner row I, col C = I*17 + 9 + C
                 int srcIdx = innerRow * 17 + 9 + col;
-                float v = srcIdx < heights.Length ? heights[srcIdx] - chunkBaseHeight : 0f;
+                float v = srcIdx < heights.Length ? heights[srcIdx] : 0f;
                 BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(dst), v);
                 dst += 4;
             }
@@ -521,14 +499,16 @@ public static class AlphaWdtWriter
         return null;
     }
 
-    private static byte[] BuildAlphaMclq(AlphaLiquidChunk? liquidChunk, float chunkBaseHeight)
+    private static byte[] BuildAlphaMclq(AlphaLiquidChunk? liquidChunk)
     {
         if (liquidChunk is null)
             return [];
 
-        float relativeMinHeight = liquidChunk.MinHeight - chunkBaseHeight;
-        float relativeMaxHeight = liquidChunk.MaxHeight - chunkBaseHeight;
-        if (float.IsNaN(relativeMinHeight) || float.IsNaN(relativeMaxHeight))
+        // Ghidra-verified: Alpha MCLQ heights are stored as absolute world-space Z values,
+        // consistent with the MCVT convention. No base-height subtraction.
+        float minHeight = liquidChunk.MinHeight;
+        float maxHeight = liquidChunk.MaxHeight;
+        if (float.IsNaN(minHeight) || float.IsNaN(maxHeight))
             return [];
 
         bool hasVertexHeights = liquidChunk.Heights is { Length: >= 81 };
@@ -538,13 +518,13 @@ public static class AlphaWdtWriter
             : 8;
 
         byte[] payload = new byte[payloadSize];
-        BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(0), relativeMinHeight);
-        BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(4), relativeMaxHeight);
+        BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(0), minHeight);
+        BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(4), maxHeight);
 
         if (hasVertexHeights)
         {
             for (int index = 0; index < 81; index++)
-                BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(8 + (index * 8) + 4), liquidChunk.Heights![index] - chunkBaseHeight);
+                BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(8 + (index * 8) + 4), liquidChunk.Heights![index]);
         }
 
         if (hasTileFlags)
@@ -607,15 +587,15 @@ public static class AlphaWdtWriter
         return data;
     }
 
-    private static float CalculateRadius(float[] heights, float tileBaseHeight)
+    private static float CalculateRadius(float[] heights)
     {
         float minH = float.MaxValue;
         float maxH = float.MinValue;
         for (int i = 0; i < heights.Length; i++)
         {
-            float abs = heights[i];
-            if (abs < minH) minH = abs;
-            if (abs > maxH) maxH = abs;
+            float h = heights[i];
+            if (h < minH) minH = h;
+            if (h > maxH) maxH = h;
         }
         float heightRange = maxH - minH;
         float horizontalRadius = 23.57f;
