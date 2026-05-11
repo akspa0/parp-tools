@@ -24,6 +24,8 @@ public static class AlphaWdtWriter
     private const int AlphaLegacyTileAlphaSize = 1024;
     private const int AlphaChunkAlphaSize = 64;
     private const int AlphaMclqTileFlagsOffset = 0x290;
+    private const int AlphaMclqFlowCountOffset = 0x2D0;
+    private const int AlphaMclqPayloadSize = 0x324;
     private const float MapOrigin = 17066.666f;
     private const float TileWorldSize = 533.3333f;
     private const float ChunkWorldSize = TileWorldSize / 16f;
@@ -96,43 +98,70 @@ public static class AlphaWdtWriter
             mcrfMapObjRefs[i] = [];
         }
 
-        for (int di = 0; di < mddfCount; di++)
+        IReadOnlyList<int>[]? preservedDoodadRefsByChunk = tile.McrfDoodadRefsByChunk;
+        IReadOnlyList<int>[]? preservedWorldModelRefsByChunk = tile.McrfWorldModelRefsByChunk;
+        bool usePreservedDoodadRefs = HasAnyChunkRefs(preservedDoodadRefsByChunk);
+        bool usePreservedWorldModelRefs = HasAnyChunkRefs(preservedWorldModelRefsByChunk);
+
+        if (usePreservedDoodadRefs)
         {
-            int off = di * MddfEntrySize;
-            float filePosX = BitConverter.ToSingle(mddfData, off + 0x08);
-            float filePosZ = BitConverter.ToSingle(mddfData, off + 0x10);
-            float rendererX = MapOrigin - filePosZ;
-            float rendererY = MapOrigin - filePosX;
-            int cx = (int)Math.Floor((tileOriginY - rendererY) / ChunkWorldSize);
-            int cy = (int)Math.Floor((tileOriginX - rendererX) / ChunkWorldSize);
-            if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
-                mcrfDoodadRefs[cx * 16 + cy].Add(di);
+            for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+            {
+                if (preservedDoodadRefsByChunk![chunkIndex] is { Count: > 0 } refs)
+                    mcrfDoodadRefs[chunkIndex].AddRange(refs);
+            }
+        }
+        else
+        {
+            for (int di = 0; di < mddfCount; di++)
+            {
+                int off = di * MddfEntrySize;
+                float filePosX = BitConverter.ToSingle(mddfData, off + 0x08);
+                float filePosZ = BitConverter.ToSingle(mddfData, off + 0x10);
+                float rendererX = MapOrigin - filePosZ;
+                float rendererY = MapOrigin - filePosX;
+                int cx = (int)Math.Floor((tileOriginY - rendererY) / ChunkWorldSize);
+                int cy = (int)Math.Floor((tileOriginX - rendererX) / ChunkWorldSize);
+                if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
+                    mcrfDoodadRefs[(cy * 16) + cx].Add(di);
+            }
         }
 
-        for (int wi = 0; wi < modfCount; wi++)
+        if (usePreservedWorldModelRefs)
         {
-            int off = wi * ModfEntrySize;
-            float filePosX = BitConverter.ToSingle(modfData, off + 0x08);
-            float filePosZ = BitConverter.ToSingle(modfData, off + 0x10);
-            float extentsTopX = BitConverter.ToSingle(modfData, off + 0x20);
-            float extentsTopZ = BitConverter.ToSingle(modfData, off + 0x28);
-            float extentsBotX = BitConverter.ToSingle(modfData, off + 0x2C);
-            float extentsBotZ = BitConverter.ToSingle(modfData, off + 0x34);
-            float wmoMinRendererX = MapOrigin - extentsTopZ;
-            float wmoMaxRendererX = MapOrigin - extentsBotZ;
-            float wmoMinRendererY = MapOrigin - extentsTopX;
-            float wmoMaxRendererY = MapOrigin - extentsBotX;
-            float wmoMinCX = MathF.Floor((tileOriginY - wmoMaxRendererY) / ChunkWorldSize);
-            float wmoMaxCX = MathF.Floor((tileOriginY - wmoMinRendererY) / ChunkWorldSize);
-            float wmoMinCY = MathF.Floor((tileOriginX - wmoMaxRendererX) / ChunkWorldSize);
-            float wmoMaxCY = MathF.Floor((tileOriginX - wmoMinRendererX) / ChunkWorldSize);
-            int cxMin = Math.Max(0, (int)wmoMinCX);
-            int cxMax = Math.Min(15, (int)wmoMaxCX);
-            int cyMin = Math.Max(0, (int)wmoMinCY);
-            int cyMax = Math.Min(15, (int)wmoMaxCY);
-            for (int cx = cxMin; cx <= cxMax; cx++)
-                for (int cy = cyMin; cy <= cyMax; cy++)
-                    mcrfMapObjRefs[cx * 16 + cy].Add(wi);
+            for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+            {
+                if (preservedWorldModelRefsByChunk![chunkIndex] is { Count: > 0 } refs)
+                    mcrfMapObjRefs[chunkIndex].AddRange(refs);
+            }
+        }
+        else
+        {
+            for (int wi = 0; wi < modfCount; wi++)
+            {
+                int off = wi * ModfEntrySize;
+                float filePosX = BitConverter.ToSingle(modfData, off + 0x08);
+                float filePosZ = BitConverter.ToSingle(modfData, off + 0x10);
+                float extentsTopX = BitConverter.ToSingle(modfData, off + 0x20);
+                float extentsTopZ = BitConverter.ToSingle(modfData, off + 0x28);
+                float extentsBotX = BitConverter.ToSingle(modfData, off + 0x2C);
+                float extentsBotZ = BitConverter.ToSingle(modfData, off + 0x34);
+                float wmoMinRendererX = MapOrigin - extentsTopZ;
+                float wmoMaxRendererX = MapOrigin - extentsBotZ;
+                float wmoMinRendererY = MapOrigin - extentsTopX;
+                float wmoMaxRendererY = MapOrigin - extentsBotX;
+                float wmoMinCX = MathF.Floor((tileOriginY - wmoMaxRendererY) / ChunkWorldSize);
+                float wmoMaxCX = MathF.Floor((tileOriginY - wmoMinRendererY) / ChunkWorldSize);
+                float wmoMinCY = MathF.Floor((tileOriginX - wmoMaxRendererX) / ChunkWorldSize);
+                float wmoMaxCY = MathF.Floor((tileOriginX - wmoMinRendererX) / ChunkWorldSize);
+                int cxMin = Math.Max(0, (int)wmoMinCX);
+                int cxMax = Math.Min(15, (int)wmoMaxCX);
+                int cyMin = Math.Max(0, (int)wmoMinCY);
+                int cyMax = Math.Min(15, (int)wmoMaxCY);
+                for (int cx = cxMin; cx <= cxMax; cx++)
+                    for (int cy = cyMin; cy <= cyMax; cy++)
+                        mcrfMapObjRefs[(cy * 16) + cx].Add(wi);
+            }
         }
 
         var mcnkDataList = new List<byte[]>(256);
@@ -140,7 +169,7 @@ public static class AlphaWdtWriter
         {
             for (int cx = 0; cx < 16; cx++)
             {
-                int chunkIdx = cx * 16 + cy;
+                int chunkIdx = (cy * 16) + cx;
                 mcnkDataList.Add(BuildMcnkData(tile, cx, cy, tileX, tileY,
                     mcrfDoodadRefs[chunkIdx], mcrfMapObjRefs[chunkIdx]));
             }
@@ -240,7 +269,7 @@ public static class AlphaWdtWriter
         int offsLiquid = mclqRaw.Length > 0 ? cursor : 0;
         cursor += mclqRaw.Length;
 
-        uint flags = liquidChunk is not null ? (liquidChunk.McnkFlags & 0x3Cu) : 0u;
+        uint flags = liquidChunk is not null ? NormalizeAlphaLiquidFlags(liquidChunk.McnkFlags) : 0u;
         if (mcshRaw.Length > 0) flags |= 0x01;
 
         float radius = CalculateRadius(heights);
@@ -589,11 +618,16 @@ public static class AlphaWdtWriter
 
         bool hasVertexHeights = liquidChunk.Heights is { Length: >= 81 };
         bool hasTileFlags = liquidChunk.TileFlags is { Length: >= 64 };
-        int payloadSize = hasVertexHeights || hasTileFlags
-            ? AlphaMclqTileFlagsOffset + 64
-            : 8;
 
-        byte[] payload = new byte[payloadSize];
+        // Ghidra-verified (CMapChunk::Create, 0.5.3.3368): each active liquid bit
+        // consumes one fixed-size 0x324-byte block. The client copies:
+        // - min/max height at 0x000
+        // - 81 * 8-byte vertex records at 0x008
+        // - 64 tile flags at 0x290
+        // - flow count at 0x2D0
+        // - 20 dwords of flow data at 0x2D4
+        // Even when flow data is absent, the block still needs the full size.
+        byte[] payload = new byte[AlphaMclqPayloadSize];
         BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(0), minHeight);
         BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(4), maxHeight);
 
@@ -606,7 +640,34 @@ public static class AlphaWdtWriter
         if (hasTileFlags)
             Buffer.BlockCopy(liquidChunk.TileFlags, 0, payload, AlphaMclqTileFlagsOffset, 64);
 
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(AlphaMclqFlowCountOffset), 0);
+
         return payload;
+    }
+
+    private static uint NormalizeAlphaLiquidFlags(uint flags)
+    {
+        uint liquidBits = flags & 0x3Cu;
+        return liquidBits switch
+        {
+            0x04u or 0x08u or 0x10u or 0x20u => liquidBits,
+            _ when liquidBits != 0 => 0x04u,
+            _ => 0u,
+        };
+    }
+
+    private static bool HasAnyChunkRefs(IReadOnlyList<int>[]? refsByChunk)
+    {
+        if (refsByChunk is not { Length: 256 })
+            return false;
+
+        for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
+        {
+            if (refsByChunk[chunkIndex] is { Count: > 0 })
+                return true;
+        }
+
+        return false;
     }
 
     private static byte[] BuildMddfData(AlphaTileData tile, Dictionary<string, int> nameIndex)

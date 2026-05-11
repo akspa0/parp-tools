@@ -62,7 +62,9 @@ public sealed class AlphaTileData
         int[,,]? mfboFlightBounds = null,
         float[,,]? mccvRgb = null,
         byte[,,]? mclvLightingBytes = null,
-        ushort[,]? holeFullMasks = null)
+        ushort[,]? holeFullMasks = null,
+        IReadOnlyList<int>[]? mcrfDoodadRefsByChunk = null,
+        IReadOnlyList<int>[]? mcrfWorldModelRefsByChunk = null)
     {
         SourcePath = sourcePath;
         Heightmap = heightmap;
@@ -86,6 +88,8 @@ public sealed class AlphaTileData
         MfboFlightBounds = mfboFlightBounds;
         MccvRgb = mccvRgb;
         MclvLightingBytes = mclvLightingBytes;
+        McrfDoodadRefsByChunk = mcrfDoodadRefsByChunk;
+        McrfWorldModelRefsByChunk = mcrfWorldModelRefsByChunk;
     }
 
     public string SourcePath { get; }
@@ -110,6 +114,8 @@ public sealed class AlphaTileData
     public int[,,]? MfboFlightBounds { get; }
     public float[,,]? MccvRgb { get; }
     public byte[,,]? MclvLightingBytes { get; }
+    public IReadOnlyList<int>[]? McrfDoodadRefsByChunk { get; }
+    public IReadOnlyList<int>[]? McrfWorldModelRefsByChunk { get; }
 
     public AdtPlacementCatalog ToPlacementCatalog()
     {

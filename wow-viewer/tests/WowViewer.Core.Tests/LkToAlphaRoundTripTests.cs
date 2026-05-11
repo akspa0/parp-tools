@@ -158,6 +158,173 @@ public sealed class LkToAlphaRoundTripTests
     }
 
     [Fact]
+    public void ConvertTile_PreservesSourceChunkMcrfRefsWhenWritingAlphaWdt()
+    {
+        List<LkMcnkData> chunks = [];
+        for (int index = 0; index < 256; index++)
+        {
+            int chunkX = index % 16;
+            int chunkY = index / 16;
+            IReadOnlyList<int> doodadRefs = index == 37 ? [0] : [];
+            IReadOnlyList<int> worldModelRefs = index == 115 ? [0] : [];
+            chunks.Add(CreateChunk(chunkX, chunkY, 25f + index, 0.01f, flags: 0, withAlpha: false, doodadRefs: doodadRefs, worldModelRefs: worldModelRefs));
+        }
+
+        const float mapOrigin = 17066.666f;
+        const float chunkWorldSize = 533.3333f / 16f;
+        Vector3 placementPosition = new(mapOrigin - (0.5f * chunkWorldSize), mapOrigin - (0.5f * chunkWorldSize), 50f);
+
+        LkAdtData adt = new()
+        {
+            TileX = 0,
+            TileY = 0,
+            TextureNames = ["terrain_a.blp"],
+            ModelNames = ["test.mdx"],
+            WorldModelNames = ["test.wmo"],
+            ModelPlacements = [new LkMddfEntry(0, 111, placementPosition, Vector3.Zero, 1f)],
+            WorldModelPlacements = [new LkModfEntry(0, 222, placementPosition, Vector3.Zero, placementPosition - Vector3.One, placementPosition + Vector3.One, 0, 0, 0, 1f)],
+            Chunks = chunks
+        };
+
+        AlphaTileData tile = LkToAlphaConverter.ConvertTile(adt, 0, 0);
+        byte[] wdt = AlphaWdtWriter.Build("preserve_mcrf", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        var chunk37Refs = ReadMcrfRefs(wdt, 0, 0, 37);
+        Assert.Equal([0], chunk37Refs.DoodadRefs);
+        Assert.Empty(chunk37Refs.WorldModelRefs);
+
+        var chunk115Refs = ReadMcrfRefs(wdt, 0, 0, 115);
+        Assert.Empty(chunk115Refs.DoodadRefs);
+        Assert.Equal([0], chunk115Refs.WorldModelRefs);
+
+        var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
+        Assert.Empty(chunk0Refs.DoodadRefs);
+        Assert.Empty(chunk0Refs.WorldModelRefs);
+    }
+
+    [Fact]
+    public void ConvertTile_WithEmptyPreservedChunkRefs_FallsBackToHeuristicMcrfPopulation()
+    {
+        List<LkMcnkData> chunks = [];
+        for (int index = 0; index < 256; index++)
+        {
+            int chunkX = index % 16;
+            int chunkY = index / 16;
+            chunks.Add(CreateChunk(chunkX, chunkY, 25f + index, 0.01f, flags: 0, withAlpha: false));
+        }
+
+        const float mapOrigin = 17066.666f;
+        const float chunkWorldSize = 533.3333f / 16f;
+        Vector3 placementPosition = new(mapOrigin - (0.5f * chunkWorldSize), mapOrigin - (0.5f * chunkWorldSize), 50f);
+
+        LkAdtData adt = new()
+        {
+            TileX = 0,
+            TileY = 0,
+            TextureNames = ["terrain_a.blp"],
+            ModelNames = ["test.mdx"],
+            ModelPlacements = [new LkMddfEntry(0, 111, placementPosition, Vector3.Zero, 1f)],
+            Chunks = chunks
+        };
+
+        AlphaTileData tile = LkToAlphaConverter.ConvertTile(adt, 0, 0);
+        byte[] wdt = AlphaWdtWriter.Build("heuristic_mcrf_fallback", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        int chunksWithRefs = 0;
+        for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+        {
+            var refs = ReadMcrfRefs(wdt, 0, 0, chunkIndex);
+            if (refs.DoodadRefs.Length > 0 || refs.WorldModelRefs.Length > 0)
+                chunksWithRefs++;
+        }
+
+        Assert.True(chunksWithRefs > 0);
+    }
+
+    [Fact]
+    public void ConvertTile_AndWriteAlphaWdt_UsesSingleFixedSizeLiquidBlock()
+    {
+        List<LkMcnkData> chunks = [];
+        for (int index = 0; index < 256; index++)
+        {
+            int chunkX = index % 16;
+            int chunkY = index / 16;
+            chunks.Add(new LkMcnkData
+            {
+                IndexX = chunkX,
+                IndexY = chunkY,
+                Flags = 0,
+                BaseHeight = 0f,
+                Heights = [],
+                Normals = [],
+                Layers = []
+            });
+        }
+
+        float[] liquidHeights = new float[81];
+        Array.Fill(liquidHeights, 40f);
+        chunks[(4 * 16) + 3] = CreateChunk(
+            3,
+            4,
+            33f,
+            0f,
+            flags: 0x3C,
+            withAlpha: false,
+            liquidData: new AdtLiquidChunk(
+                (4 * 16) + 3,
+                null,
+                null,
+                [new AdtLiquidLayer(
+                    0,
+                    AdtLiquidBasicType.Water,
+                    AdtLiquidVertexFormat.HeightDepth,
+                    40f,
+                    40f,
+                    0,
+                    0,
+                    8,
+                    8,
+                    null,
+                    liquidHeights,
+                    new byte[81],
+                    null)]));
+
+        LkAdtData adt = new()
+        {
+            TileX = 0,
+            TileY = 0,
+            TextureNames = ["terrain_a.blp"],
+            Chunks = chunks
+        };
+
+        AlphaTileData tile = LkToAlphaConverter.ConvertTile(adt, 0, 0);
+        byte[] wdt = AlphaWdtWriter.Build("liquid_contract", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        int mainChunkOffset = 12 + 8 + 128;
+        int adtOffset = BitConverter.ToInt32(wdt, mainChunkOffset + 8);
+        int mcinRelativeOffset = BitConverter.ToInt32(wdt, adtOffset + 8 + 0x00);
+        int mcinOffset = adtOffset + 8 + mcinRelativeOffset;
+        int chunkIndex = (4 * 16) + 3;
+        int mcnkOffset = BitConverter.ToInt32(wdt, mcinOffset + 8 + (chunkIndex * 16));
+        int headerOffset = mcnkOffset + 8;
+        int chunkDataSize = BitConverter.ToInt32(wdt, headerOffset + 0x5C);
+        int mclqOffset = BitConverter.ToInt32(wdt, headerOffset + 0x64);
+        uint flags = BitConverter.ToUInt32(wdt, headerOffset + 0x00) & 0x3Cu;
+
+        Assert.Equal(0x04u, flags);
+        Assert.Equal(0x324, chunkDataSize - mclqOffset);
+    }
+
+    [Fact]
     public void ConvertTile_ThroughAlphaWdt_BackToLkAdt_RoundTripsLiquidIntoMh2o()
     {
         List<LkMcnkData> chunks = [];
@@ -289,7 +456,7 @@ public sealed class LkToAlphaRoundTripTests
         Assert.Equal(placement.Flags, roundTrip.Flags);
     }
 
-    private static LkMcnkData CreateChunk(int chunkX, int chunkY, float baseHeight, float slope, int flags, bool withAlpha, AdtLiquidChunk? liquidData = null)
+    private static LkMcnkData CreateChunk(int chunkX, int chunkY, float baseHeight, float slope, int flags, bool withAlpha, AdtLiquidChunk? liquidData = null, IReadOnlyList<int>? doodadRefs = null, IReadOnlyList<int>? worldModelRefs = null)
     {
         float[] heights = new float[145];
         for (int index = 0; index < heights.Length; index++)
@@ -319,8 +486,40 @@ public sealed class LkToAlphaRoundTripTests
             Layers = layers,
             AlphaMapData = alphaMapData,
             AlphaMapSize = alphaMapData?.Length ?? 0,
-            LiquidData = liquidData
+            LiquidData = liquidData,
+            DoodadRefs = doodadRefs ?? [],
+            WorldModelRefs = worldModelRefs ?? []
         };
+    }
+
+    private static (int[] DoodadRefs, int[] WorldModelRefs) ReadMcrfRefs(byte[] wdt, int tileX, int tileY, int chunkIndex)
+    {
+        int mainPayloadOffset = 12 + 8 + 128 + 8;
+        int tileOffset = BitConverter.ToInt32(wdt, mainPayloadOffset + (((tileY * 64) + tileX) * 16));
+        int mhdrDataOffset = tileOffset + 8;
+        int mcinRelativeOffset = BitConverter.ToInt32(wdt, mhdrDataOffset + 0x00);
+        int mcinOffset = mhdrDataOffset + mcinRelativeOffset;
+        int mcnkOffset = BitConverter.ToInt32(wdt, mcinOffset + 8 + (chunkIndex * 16));
+        int headerOffset = mcnkOffset + 8;
+        int dataBase = headerOffset + 128;
+
+        int nDoodadRefs = BitConverter.ToInt32(wdt, headerOffset + 0x14);
+        int nWorldModelRefs = BitConverter.ToInt32(wdt, headerOffset + 0x3C);
+        int mcrfOffset = BitConverter.ToInt32(wdt, headerOffset + 0x24);
+        int mcrfChunkOffset = dataBase + mcrfOffset;
+        Assert.Equal("MCRF", ReadChunkId(wdt, mcrfChunkOffset));
+        Assert.Equal((nDoodadRefs + nWorldModelRefs) * 4, BitConverter.ToInt32(wdt, mcrfChunkOffset + 4));
+
+        int payloadOffset = mcrfChunkOffset + 8;
+        int[] doodadRefs = new int[nDoodadRefs];
+        for (int i = 0; i < nDoodadRefs; i++)
+            doodadRefs[i] = BitConverter.ToInt32(wdt, payloadOffset + (i * 4));
+
+        int[] worldModelRefs = new int[nWorldModelRefs];
+        for (int i = 0; i < nWorldModelRefs; i++)
+            worldModelRefs[i] = BitConverter.ToInt32(wdt, payloadOffset + ((nDoodadRefs + i) * 4));
+
+        return (doodadRefs, worldModelRefs);
     }
 
     private static string ReadChunkId(byte[] data, int offset)

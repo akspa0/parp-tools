@@ -44,6 +44,8 @@ public static class LkToAlphaConverter
         ushort[,] holeFullMasks = new ushort[16, 16];
         float[,,]? mccvRgb = new float[257, 257, 3];
         byte[,,]? mclvLighting = new byte[257, 257, 4];
+        IReadOnlyList<int>[] mcrfDoodadRefsByChunk = new IReadOnlyList<int>[ChunksPerTile * ChunksPerTile];
+        IReadOnlyList<int>[] mcrfWorldModelRefsByChunk = new IReadOnlyList<int>[ChunksPerTile * ChunksPerTile];
         bool hasMccv = false;
         bool hasMclv = false;
         List<AlphaLiquidChunk> liquidChunks = [];
@@ -58,6 +60,8 @@ public static class LkToAlphaConverter
                 if (chunkIdx >= adt.Chunks.Count) continue;
 
                 LkMcnkData chunk = adt.Chunks[chunkIdx];
+                mcrfDoodadRefsByChunk[chunkIdx] = chunk.DoodadRefs.Count > 0 ? [.. chunk.DoodadRefs] : Array.Empty<int>();
+                mcrfWorldModelRefsByChunk[chunkIdx] = chunk.WorldModelRefs.Count > 0 ? [.. chunk.WorldModelRefs] : Array.Empty<int>();
                 InjectChunkHeights(heightmap, chunk, tileBaseHeight, cx, cy);
                 InjectChunkNormals(normalXyz, chunk, cx, cy);
                 InjectChunkAlpha(alphaPack, chunk, adt.TextureNames, texIds, layerMask, cx, cy);
@@ -155,7 +159,9 @@ public static class LkToAlphaConverter
             mfboFlightBounds: adt.MfboFlightBounds,
             mccvRgb: hasMccv ? mccvRgb : null,
             mclvLightingBytes: hasMclv ? mclvLighting : null,
-            holeFullMasks: holeFullMasks);
+            holeFullMasks: holeFullMasks,
+            mcrfDoodadRefsByChunk: mcrfDoodadRefsByChunk,
+            mcrfWorldModelRefsByChunk: mcrfWorldModelRefsByChunk);
     }
 
     private static void FillHeightmapGaps(float[,] hm)
@@ -503,9 +509,7 @@ public static class LkToAlphaConverter
         if (layer is null)
             return null;
 
-        uint mcnkFlags = (uint)(chunk.Flags & 0x3C);
-        if (mcnkFlags == 0)
-            mcnkFlags = MapAlphaLiquidFlags(layer.BasicType);
+        uint mcnkFlags = MapAlphaLiquidFlags(layer.BasicType);
 
         byte[]? tileFlags = BuildAlphaTileFlags(layer);
         float[] heights = BuildAlphaLiquidHeights(layer);
@@ -526,8 +530,8 @@ public static class LkToAlphaConverter
         return basicType switch
         {
             AdtLiquidBasicType.Ocean => 0x08u,
-            AdtLiquidBasicType.Magma => 0x20u,
-            AdtLiquidBasicType.Slime => 0x30u,
+            AdtLiquidBasicType.Magma => 0x10u,
+            AdtLiquidBasicType.Slime => 0x20u,
             _ => 0x04u,
         };
     }
