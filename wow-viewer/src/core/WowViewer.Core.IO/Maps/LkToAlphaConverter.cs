@@ -1,5 +1,6 @@
 using System.Numerics;
 using WowViewer.Core.Chunks;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -29,7 +30,7 @@ public static class LkToAlphaConverter
     private const int TileHeightmapSize = 257;
     private const int ChunksPerTile = 16;
 
-    public static AlphaTileData ConvertTile(LkAdtData adt, int tileX, int tileY)
+    public static AlphaTileData ConvertTile(LkAdtData adt, int tileX, int tileY, AreaIdMapper? areaIdMapper = null, string? sourceMapDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(adt);
 
@@ -72,7 +73,9 @@ public static class LkToAlphaConverter
                 InjectChunkShadow(shadowMask1024, chunk, cx, cy);
                 holes[cx, cy] = chunk.HoleMask != 0;
                 holeFullMasks[cx, cy] = (ushort)(chunk.HoleMask & 0xFFFF);
-                areaIds[cx, cy] = chunk.AreaId;
+                areaIds[cx, cy] = areaIdMapper is null
+                    ? chunk.AreaId
+                    : areaIdMapper.MapAreaIdToAlpha(chunk.AreaId, sourceMapDirectory);
 
                 if (chunk.MccvColors is { Length: >= 580 })
                 {

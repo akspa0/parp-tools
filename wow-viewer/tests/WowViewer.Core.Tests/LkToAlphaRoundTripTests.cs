@@ -1,4 +1,5 @@
 using System.Numerics;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 
@@ -203,6 +204,12 @@ public sealed class LkToAlphaRoundTripTests
         var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
         Assert.Empty(chunk0Refs.DoodadRefs);
         Assert.Empty(chunk0Refs.WorldModelRefs);
+
+        int totalDoodadRefs = 0;
+        for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+            totalDoodadRefs += ReadMcrfRefs(wdt, 0, 0, chunkIndex).DoodadRefs.Length;
+
+        Assert.Equal(1, totalDoodadRefs);
     }
 
     [Fact]
@@ -245,6 +252,41 @@ public sealed class LkToAlphaRoundTripTests
         }
 
         Assert.True(chunksWithRefs > 0);
+    }
+
+    [Fact]
+    public void ConvertTile_MapsPostAlphaAreaIdsBackToAlphaUsingCrosswalk()
+    {
+        string tempDirectory = Path.Combine(Path.GetTempPath(), $"wowviewer-area-crosswalk-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDirectory, "crosswalk.csv"),
+                "src_mapId,src_areaId,src_parentId,src_isZone,src_name,match_count,matches\n" +
+                "0,500,0,1,Dun Morogh,1,0:77:1:map_name:active:Anvilmar\n");
+
+            AreaIdMapper mapper = new();
+            mapper.LoadCrosswalkCsv(tempDirectory);
+
+            LkAdtData adt = new()
+            {
+                TileX = 0,
+                TileY = 0,
+                TextureNames = ["terrain_a.blp"],
+                Chunks = [CreateChunk(0, 0, 10f, 0f, flags: 0, withAlpha: false, areaId: 77)]
+            };
+
+            AlphaTileData tile = LkToAlphaConverter.ConvertTile(adt, 0, 0, mapper, "Azeroth");
+
+            Assert.NotNull(tile.AreaIds);
+            Assert.Equal(500, tile.AreaIds![0, 0]);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
     }
 
     [Fact]
@@ -300,6 +342,65 @@ public sealed class LkToAlphaRoundTripTests
         var chunk115Refs = ReadMcrfRefs(wdt, 0, 0, 115);
         Assert.Empty(chunk115Refs.DoodadRefs);
         Assert.Equal([0], chunk115Refs.WorldModelRefs);
+
+        int totalDoodadRefs = 0;
+        for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+            totalDoodadRefs += ReadMcrfRefs(wdt, 0, 0, chunkIndex).DoodadRefs.Length;
+
+        Assert.Equal(1, totalDoodadRefs);
+    }
+
+    [Fact]
+    public void WriteAlphaWdt_CollapsesDoodadRefsToSinglePreservedChunk()
+    {
+        float[,] heightmap = new float[257, 257];
+        int[,,] texIds = new int[16, 16, 4];
+        bool[,,] layerMask = new bool[16, 16, 4];
+        for (int cy = 0; cy < 16; cy++)
+            for (int cx = 0; cx < 16; cx++)
+                layerMask[cx, cy, 0] = true;
+
+        IReadOnlyList<int>[] doodadUniqueIdsByChunk = CreateEmptyChunkRefSet();
+        IReadOnlyList<int>[] doodadRefsByChunk = CreateEmptyChunkRefSet();
+        doodadUniqueIdsByChunk[37] = [222];
+        doodadUniqueIdsByChunk[115] = [222];
+        doodadRefsByChunk[37] = [0, 0];
+        doodadRefsByChunk[115] = [0];
+
+        const float mapOrigin = 17066.666f;
+        const float chunkWorldSize = 533.3333f / 16f;
+        Vector3 placementPosition = new(mapOrigin - (0.5f * chunkWorldSize), mapOrigin - (0.5f * chunkWorldSize), 50f);
+
+        AlphaTileData tile = new(
+            sourcePath: "single_doodad_owner",
+            heightmap: heightmap,
+            mcalAlphaPack: null,
+            mclyTextureIds: texIds,
+            mclyLayerMask: layerMask,
+            holeMask: new bool[16, 16],
+            textureNames: ["terrain_a.blp"],
+            modelPlacements:
+            [
+                new AlphaModelPlacement(0, "world\\azeroth\\tree.mdx", 222, placementPosition, Vector3.Zero, 1.0f)
+            ],
+            worldModelPlacements: [],
+            liquidChunks: [],
+            mcrfDoodadRefsByChunk: doodadRefsByChunk,
+            mcrfDoodadUniqueIdsByChunk: doodadUniqueIdsByChunk);
+
+        byte[] wdt = AlphaWdtWriter.Build("single_doodad_owner", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
+        Assert.Empty(chunk0Refs.DoodadRefs);
+
+        var chunk37Refs = ReadMcrfRefs(wdt, 0, 0, 37);
+        Assert.Equal([0], chunk37Refs.DoodadRefs);
+
+        var chunk115Refs = ReadMcrfRefs(wdt, 0, 0, 115);
+        Assert.Empty(chunk115Refs.DoodadRefs);
     }
 
     [Fact]
@@ -588,6 +689,51 @@ public sealed class LkToAlphaRoundTripTests
         Assert.Equal(worldModelPlacement.Flags, modfResult.Flags);
     }
 
+    [Fact]
+    public void AlphaWdt_WithOddSizedNameTable_WritesContiguousMonmHeader()
+    {
+        float[,] heightmap = new float[257, 257];
+        int[,,] texIds = new int[16, 16, 4];
+        bool[,,] layerMask = new bool[16, 16, 4];
+        for (int cy = 0; cy < 16; cy++)
+            for (int cx = 0; cx < 16; cx++)
+                layerMask[cx, cy, 0] = true;
+
+        AlphaTileData tile = new(
+            sourcePath: "odd_name_table",
+            heightmap: heightmap,
+            mcalAlphaPack: null,
+            mclyTextureIds: texIds,
+            mclyLayerMask: layerMask,
+            holeMask: new bool[16, 16],
+            textureNames: ["terrain_a.blp"],
+            modelPlacements:
+            [
+                new AlphaModelPlacement(0, "a.mdx", 1, new Vector3(17000f, 17000f, 10f), Vector3.Zero, 1f)
+            ],
+            worldModelPlacements:
+            [
+                new AlphaWorldModelPlacement(0, "b.wmo", 2, new Vector3(17000f, 17000f, 10f), Vector3.Zero, new Vector3(16999f, 16999f, 9f), new Vector3(17001f, 17001f, 11f), 0)
+            ],
+            liquidChunks: []);
+
+        byte[] wdt = AlphaWdtWriter.Build("odd_name_table", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        int offset = 0;
+        Assert.Equal("MVER", ReadChunkId(wdt, offset));
+        offset += 8 + BitConverter.ToInt32(wdt, offset + 4);
+        Assert.Equal("MPHD", ReadChunkId(wdt, offset));
+        offset += 8 + BitConverter.ToInt32(wdt, offset + 4);
+        Assert.Equal("MAIN", ReadChunkId(wdt, offset));
+        offset += 8 + BitConverter.ToInt32(wdt, offset + 4);
+        Assert.Equal("MDNM", ReadChunkId(wdt, offset));
+        offset += 8 + BitConverter.ToInt32(wdt, offset + 4);
+        Assert.Equal("MONM", ReadChunkId(wdt, offset));
+    }
+
     private static (int DoodadRefs, int MapObjRefs) CountAlphaPlacementReferences(byte[] wdt, int tileX, int tileY)
     {
         int mainPayloadOffset = 12 + 8 + 128 + 8;
@@ -614,7 +760,7 @@ public sealed class LkToAlphaRoundTripTests
         return (doodadRefs, mapObjRefs);
     }
 
-    private static LkMcnkData CreateChunk(int chunkX, int chunkY, float baseHeight, float slope, int flags, bool withAlpha, AdtLiquidChunk? liquidData = null, IReadOnlyList<int>? doodadRefs = null, IReadOnlyList<int>? worldModelRefs = null)
+    private static LkMcnkData CreateChunk(int chunkX, int chunkY, float baseHeight, float slope, int flags, bool withAlpha, AdtLiquidChunk? liquidData = null, IReadOnlyList<int>? doodadRefs = null, IReadOnlyList<int>? worldModelRefs = null, int areaId = 0)
     {
         float[] heights = new float[145];
         for (int index = 0; index < heights.Length; index++)
@@ -638,6 +784,7 @@ public sealed class LkToAlphaRoundTripTests
             IndexX = chunkX,
             IndexY = chunkY,
             Flags = flags,
+            AreaId = areaId,
             BaseHeight = baseHeight,
             Heights = heights,
             Normals = [],

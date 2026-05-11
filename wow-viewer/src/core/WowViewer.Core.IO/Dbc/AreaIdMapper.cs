@@ -29,9 +29,14 @@ public sealed class AreaIdMapper
     private readonly Dictionary<int, AreaEntry> _alphaAreas = new();
     private readonly Dictionary<int, AreaEntry> _lkAreas = new();
     private readonly Dictionary<int, int> _directAreaCrosswalk = new();
+    private readonly Dictionary<int, int> _reverseAreaCrosswalk = new();
+    private readonly Dictionary<(int alphaMapId, int lkAreaId), int> _reverseAreaCrosswalkByAlphaMap = new();
     private readonly Dictionary<int, int> _mapIdCrosswalk = new();
+    private readonly Dictionary<int, int> _reverseMapIdCrosswalk = new();
     private readonly Dictionary<string, int> _lkByName = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(int map, string name), int> _lkByMapAndName = new();
+    private readonly Dictionary<string, int> _alphaMapDirectoryIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _lkMapDirectoryIds = new(StringComparer.OrdinalIgnoreCase);
 
     public AreaIdMapper()
     {
@@ -253,6 +258,17 @@ public sealed class AreaIdMapper
         return FuzzyMatch(normalizedName, continentHint.HasValue ? MapContinent(continentHint.Value) : null);
     }
 
+    public int MapAreaIdToAlpha(int lkAreaId, string? mapDirectory = null, int? continentHint = null)
+    {
+        if (TryResolveAlphaMapId(mapDirectory, continentHint, out int alphaMapId) &&
+            _reverseAreaCrosswalkByAlphaMap.TryGetValue((alphaMapId, lkAreaId), out int alphaAreaId))
+        {
+            return alphaAreaId;
+        }
+
+        return _reverseAreaCrosswalk.TryGetValue(lkAreaId, out alphaAreaId) ? alphaAreaId : 0;
+    }
+
     public int MapContinent(int alphaContinentId)
     {
         if (_mapIdCrosswalk.TryGetValue(alphaContinentId, out int lkMapId))
@@ -285,7 +301,12 @@ public sealed class AreaIdMapper
         _lkAreas.Clear();
         _lkByName.Clear();
         _lkByMapAndName.Clear();
+        _reverseAreaCrosswalk.Clear();
+        _reverseAreaCrosswalkByAlphaMap.Clear();
         _mapIdCrosswalk.Clear();
+        _reverseMapIdCrosswalk.Clear();
+        _alphaMapDirectoryIds.Clear();
+        _lkMapDirectoryIds.Clear();
 
         LastLoadMessage = null;
         LastLoadUsedSchemaDefinitions = false;
@@ -358,8 +379,19 @@ public sealed class AreaIdMapper
 
     private void BuildMapCrosswalk(DbcReader alphaMap, DbcReader lkMap)
     {
-
+        Dictionary<string, int> alphaByDirectory = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, int> lkByDirectory = new(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < alphaMap.Rows.Count; i++)
+        {
+            string directory = NormalizeName(alphaMap.GetString(i, 1));
+            int id = alphaMap.GetInt(i, 0);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                alphaByDirectory.TryAdd(directory, id);
+                _alphaMapDirectoryIds[directory] = id;
+            }
+        }
+
         for (int i = 0; i < lkMap.Rows.Count; i++)
         {
             string directory = NormalizeName(lkMap.GetString(i, 1));
@@ -367,16 +399,16 @@ public sealed class AreaIdMapper
             if (!string.IsNullOrEmpty(directory))
             {
                 lkByDirectory.TryAdd(directory, id);
+                _lkMapDirectoryIds[directory] = id;
             }
         }
 
-        for (int i = 0; i < alphaMap.Rows.Count; i++)
+        foreach ((string directory, int alphaId) in alphaByDirectory)
         {
-            string directory = NormalizeName(alphaMap.GetString(i, 1));
-            int alphaId = alphaMap.GetInt(i, 0);
             if (!string.IsNullOrEmpty(directory) && lkByDirectory.TryGetValue(directory, out int lkId))
             {
                 _mapIdCrosswalk[alphaId] = lkId;
+                _reverseMapIdCrosswalk[lkId] = alphaId;
             }
         }
     }
@@ -495,8 +527,19 @@ public sealed class AreaIdMapper
 
     private void BuildMapCrosswalk(IDBCDStorage alphaMap, IDBCDStorage lkMap)
     {
-
+        Dictionary<string, int> alphaByDirectory = new(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, int> lkByDirectory = new(StringComparer.OrdinalIgnoreCase);
+        foreach (DBCDRow row in alphaMap.Values)
+        {
+            string directory = NormalizeName(GetStringField(row, "Directory", "Folder", "FolderName") ?? string.Empty);
+            int id = GetIntField(row, "ID") ?? 0;
+            if (!string.IsNullOrEmpty(directory) && id > 0)
+            {
+                alphaByDirectory.TryAdd(directory, id);
+                _alphaMapDirectoryIds[directory] = id;
+            }
+        }
+
         foreach (DBCDRow row in lkMap.Values)
         {
             string directory = NormalizeName(GetStringField(row, "Directory", "Folder", "FolderName") ?? string.Empty);
@@ -504,16 +547,16 @@ public sealed class AreaIdMapper
             if (!string.IsNullOrEmpty(directory) && id > 0)
             {
                 lkByDirectory.TryAdd(directory, id);
+                _lkMapDirectoryIds[directory] = id;
             }
         }
 
-        foreach (DBCDRow row in alphaMap.Values)
+        foreach ((string directory, int alphaId) in alphaByDirectory)
         {
-            string directory = NormalizeName(GetStringField(row, "Directory", "Folder", "FolderName") ?? string.Empty);
-            int alphaId = GetIntField(row, "ID") ?? 0;
-            if (!string.IsNullOrEmpty(directory) && alphaId > 0 && lkByDirectory.TryGetValue(directory, out int lkId))
+            if (!string.IsNullOrEmpty(directory) && lkByDirectory.TryGetValue(directory, out int lkId))
             {
                 _mapIdCrosswalk[alphaId] = lkId;
+                _reverseMapIdCrosswalk[lkId] = alphaId;
             }
         }
     }
@@ -853,6 +896,7 @@ public sealed class AreaIdMapper
         }
 
         string[] headers = headerLine.Split(',');
+    int mapColumn = FindColumn(headers, "src_mapId");
         int sourceColumn = FindColumn(headers, "src_areaId", "src_areaNumber");
         int targetColumn = FindColumn(headers, "tgt_id_335", "tgt_areaID");
         int matchesColumn = FindColumn(headers, "matches");
@@ -870,12 +914,67 @@ public sealed class AreaIdMapper
                 continue;
             }
 
+            int alphaMapId = 0;
+            bool hasAlphaMapId = mapColumn >= 0 && mapColumn < parts.Length && int.TryParse(parts[mapColumn].Trim(), out alphaMapId);
+
             int targetId = ReadTargetId(parts, targetColumn, matchesColumn);
             if (targetId > 0)
             {
                 _directAreaCrosswalk[sourceId] = targetId;
+                _reverseAreaCrosswalk.TryAdd(targetId, sourceId);
+                if (hasAlphaMapId)
+                {
+                    _reverseAreaCrosswalkByAlphaMap[(alphaMapId, targetId)] = sourceId;
+                }
             }
         }
+    }
+
+    private bool TryResolveAlphaMapId(string? mapDirectory, int? continentHint, out int alphaMapId)
+    {
+        string normalizedMapDirectory = NormalizeName(mapDirectory ?? string.Empty);
+        if (!string.IsNullOrEmpty(normalizedMapDirectory))
+        {
+            if (_alphaMapDirectoryIds.TryGetValue(normalizedMapDirectory, out alphaMapId))
+            {
+                return true;
+            }
+
+            if (normalizedMapDirectory == "azeroth")
+            {
+                alphaMapId = 0;
+                return true;
+            }
+
+            if (normalizedMapDirectory == "kalimdor")
+            {
+                alphaMapId = 1;
+                return true;
+            }
+
+            if (_lkMapDirectoryIds.TryGetValue(normalizedMapDirectory, out int lkMapId) &&
+                _reverseMapIdCrosswalk.TryGetValue(lkMapId, out alphaMapId))
+            {
+                return true;
+            }
+        }
+
+        if (continentHint.HasValue)
+        {
+            if (_reverseMapIdCrosswalk.TryGetValue(continentHint.Value, out alphaMapId))
+            {
+                return true;
+            }
+
+            if (continentHint.Value is 0 or 1)
+            {
+                alphaMapId = continentHint.Value;
+                return true;
+            }
+        }
+
+        alphaMapId = 0;
+        return false;
     }
 
     private static bool TryReadSourceId(string[] parts, int sourceColumn, out int sourceId)

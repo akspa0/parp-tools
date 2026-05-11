@@ -38,6 +38,30 @@ public sealed class AreaIdMapperTests
     }
 
     [Fact]
+    public void LoadCrosswalkCsv_LoadsReverseMappingsForAlphaTargetsByMap()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDirectory, "crosswalk.csv"),
+                "src_mapId,src_areaId,src_parentId,src_isZone,src_name,match_count,matches\n" +
+                "0,500,0,1,Dun Morogh,1,0:77:1:map_name:active:Anvilmar\n" +
+                "1,600,0,1,The Barrens,1,1:77:1:map_name:active:The Barrens\n");
+
+            AreaIdMapper mapper = new();
+            mapper.LoadCrosswalkCsv(tempDirectory);
+
+            Assert.Equal(500, mapper.MapAreaIdToAlpha(77, "Azeroth"));
+            Assert.Equal(600, mapper.MapAreaIdToAlpha(77, "Kalimdor"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void LoadDbcs_PrefersContinentSpecificNameMatchWhenHintProvided()
     {
         string tempDirectory = CreateTempDirectory();

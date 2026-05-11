@@ -266,31 +266,20 @@ public static class AlphaWdtWriter
         IReadOnlyList<int>[]? preservedWorldUniqueIdsByChunk = tile.McrfWorldModelUniqueIdsByChunk;
         IReadOnlyList<int>[]? preservedDoodadRefsByChunk = tile.McrfDoodadRefsByChunk;
         IReadOnlyList<int>[]? preservedWorldModelRefsByChunk = tile.McrfWorldModelRefsByChunk;
-        bool usePreservedDoodadUniqueIds = HasAnyChunkRefs(preservedDoodadUniqueIdsByChunk);
         bool usePreservedWorldUniqueIds = HasAnyChunkRefs(preservedWorldUniqueIdsByChunk);
-        bool usePreservedDoodadRefs = HasAnyChunkRefs(preservedDoodadRefsByChunk);
         bool usePreservedWorldModelRefs = HasAnyChunkRefs(preservedWorldModelRefsByChunk);
 
-        if (usePreservedDoodadUniqueIds)
-        {
-            AddMappedUniqueIdRefs(refsByChunk, preservedDoodadUniqueIdsByChunk!, doodadIndexByUniqueId, static (placementRefs, placementIndex) => placementRefs.DoodadIndices.Add(placementIndex));
-        }
-        else if (usePreservedDoodadRefs)
-        {
-            for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
-            {
-                if (preservedDoodadRefsByChunk![chunkIndex] is { Count: > 0 } refs)
-                    refsByChunk[chunkIndex].DoodadIndices.AddRange(refs);
-            }
-        }
-        else
-        {
-            for (int index = 0; index < tile.ModelPlacements.Count; index++)
-            {
-                int chunkIndex = FindContainingChunk(tile.ModelPlacements[index].Position, tileX, tileY);
-                refsByChunk[chunkIndex].DoodadIndices.Add(index);
-            }
-        }
+        // Alpha doodads must have a single owning chunk. Preserve one source-backed
+        // chunk owner when possible so client culling stays close to original behavior,
+        // but collapse multi-parent source refs to avoid purge asserts.
+        AssignSingleChunkDoodadRefs(
+            refsByChunk,
+            tile,
+            tileX,
+            tileY,
+            preservedDoodadUniqueIdsByChunk,
+            preservedDoodadRefsByChunk,
+            doodadIndexByUniqueId);
 
         if (usePreservedWorldUniqueIds)
         {
@@ -313,6 +302,128 @@ public static class AlphaWdtWriter
         }
 
         return refsByChunk;
+    }
+
+    private static void AssignSingleChunkDoodadRefs(
+        AlphaPlacementRefs[] refsByChunk,
+        AlphaTileData tile,
+        int tileX,
+        int tileY,
+        IReadOnlyList<int>[]? preservedDoodadUniqueIdsByChunk,
+        IReadOnlyList<int>[]? preservedDoodadRefsByChunk,
+        Dictionary<int, int> doodadIndexByUniqueId)
+    {
+        for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
+            refsByChunk[chunkIndex].DoodadIndices.Clear();
+
+        Dictionary<int, List<int>> candidateChunksByPlacementIndex = BuildDoodadCandidateChunksByPlacementIndex(
+            tile,
+            preservedDoodadUniqueIdsByChunk,
+            preservedDoodadRefsByChunk,
+            doodadIndexByUniqueId);
+
+        for (int index = 0; index < tile.ModelPlacements.Count; index++)
+        {
+            int chunkIndex = ResolveSingleDoodadChunk(
+                tile.ModelPlacements[index],
+                index,
+                candidateChunksByPlacementIndex,
+                tileX,
+                tileY);
+            refsByChunk[chunkIndex].DoodadIndices.Add(index);
+        }
+    }
+
+    private static Dictionary<int, List<int>> BuildDoodadCandidateChunksByPlacementIndex(
+        AlphaTileData tile,
+        IReadOnlyList<int>[]? preservedDoodadUniqueIdsByChunk,
+        IReadOnlyList<int>[]? preservedDoodadRefsByChunk,
+        Dictionary<int, int> doodadIndexByUniqueId)
+    {
+        Dictionary<int, List<int>> candidateChunksByPlacementIndex = [];
+
+        if (HasAnyChunkRefs(preservedDoodadUniqueIdsByChunk))
+        {
+            for (int chunkIndex = 0; chunkIndex < preservedDoodadUniqueIdsByChunk!.Length; chunkIndex++)
+            {
+                if (preservedDoodadUniqueIdsByChunk[chunkIndex] is not { Count: > 0 } refs)
+                    continue;
+
+                foreach (int uniqueId in refs)
+                {
+                    if (!doodadIndexByUniqueId.TryGetValue(uniqueId, out int placementIndex))
+                        continue;
+
+                    AddCandidateChunk(candidateChunksByPlacementIndex, placementIndex, chunkIndex);
+                }
+            }
+        }
+
+        if (HasAnyChunkRefs(preservedDoodadRefsByChunk))
+        {
+            for (int chunkIndex = 0; chunkIndex < preservedDoodadRefsByChunk!.Length; chunkIndex++)
+            {
+                if (preservedDoodadRefsByChunk[chunkIndex] is not { Count: > 0 } refs)
+                    continue;
+
+                foreach (int placementIndex in refs)
+                {
+                    if ((uint)placementIndex >= (uint)tile.ModelPlacements.Count)
+                        continue;
+
+                    AddCandidateChunk(candidateChunksByPlacementIndex, placementIndex, chunkIndex);
+                }
+            }
+        }
+
+        return candidateChunksByPlacementIndex;
+    }
+
+    private static void AddCandidateChunk(Dictionary<int, List<int>> candidateChunksByPlacementIndex, int placementIndex, int chunkIndex)
+    {
+        if (!candidateChunksByPlacementIndex.TryGetValue(placementIndex, out List<int>? candidateChunks))
+        {
+            candidateChunks = [];
+            candidateChunksByPlacementIndex[placementIndex] = candidateChunks;
+        }
+
+        if (!candidateChunks.Contains(chunkIndex))
+            candidateChunks.Add(chunkIndex);
+    }
+
+    private static int ResolveSingleDoodadChunk(
+        AlphaModelPlacement placement,
+        int placementIndex,
+        Dictionary<int, List<int>> candidateChunksByPlacementIndex,
+        int tileX,
+        int tileY)
+    {
+        int containingChunk = FindContainingChunk(placement.Position, tileX, tileY);
+        if (!candidateChunksByPlacementIndex.TryGetValue(placementIndex, out List<int>? candidateChunks) || candidateChunks.Count == 0)
+            return containingChunk;
+
+        if (candidateChunks.Count == 1)
+            return candidateChunks[0];
+
+        if (candidateChunks.Contains(containingChunk))
+            return containingChunk;
+
+        int bestChunk = candidateChunks[0];
+        float bestDistanceSquared = float.MaxValue;
+        foreach (int candidateChunk in candidateChunks)
+        {
+            GetChunkCenter(tileX, tileY, candidateChunk % 16, candidateChunk / 16, out float centerX, out float centerY);
+            float dx = placement.Position.X - centerX;
+            float dy = placement.Position.Y - centerY;
+            float distanceSquared = (dx * dx) + (dy * dy);
+            if (distanceSquared < bestDistanceSquared)
+            {
+                bestDistanceSquared = distanceSquared;
+                bestChunk = candidateChunk;
+            }
+        }
+
+        return bestChunk;
     }
 
     private static void AddMappedUniqueIdRefs(AlphaPlacementRefs[] refsByChunk, IReadOnlyList<int>[] refsByUniqueIdChunk,
@@ -394,6 +505,13 @@ public static class AlphaWdtWriter
         minX = maxX - ChunkWorldSize;
         maxY = tileOriginY - cx * ChunkWorldSize;
         minY = maxY - ChunkWorldSize;
+    }
+
+    private static void GetChunkCenter(int tileX, int tileY, int cx, int cy, out float centerX, out float centerY)
+    {
+        GetChunkPlanarBounds(tileX, tileY, cx, cy, out float minX, out float maxX, out float minY, out float maxY);
+        centerX = (minX + maxX) * 0.5f;
+        centerY = (minY + maxY) * 0.5f;
     }
 
     private static byte[] BuildMcrfData(AlphaPlacementRefs placementRefs)
@@ -979,8 +1097,6 @@ public static class AlphaWdtWriter
         bw.Write(FourCC.FromString(tag).ToFileBytes());
         bw.Write(payload.Length);
         bw.Write(payload);
-        if ((payload.Length & 1) != 0)
-            bw.Write((byte)0);
     }
 
     private sealed class AlphaPlacementRefs

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.IO;
+using WowViewer.Core.IO.Blp;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
@@ -33,6 +35,7 @@ internal static class LkToAlphaCommand
             string outputPath = Path.GetFullPath(options.OutputPath);
             string outputWdlPath = Path.GetFullPath(options.OutputWdlPath ?? Path.ChangeExtension(outputPath, ".wdl"));
             string mapName = useMpq ? options.MapName! : Path.GetFileNameWithoutExtension(outputPath);
+            AreaIdMapper areaIdMapper = new();
 
             Console.WriteLine("WowViewer.Tool.Converter convert-lk-to-alpha report");
 
@@ -50,22 +53,8 @@ internal static class LkToAlphaCommand
                     return;
                 }
 
-                // Try standard MPQ catalog first
-                using var targetCatalog = new NativeMpqService();
-                targetCatalog.LoadArchives([targetRoot]);
-                var knownFiles = targetCatalog.GetAllKnownFiles();
-
-                if (knownFiles.Count > 0)
-                {
-                    targetFileSet = new HashSet<string>(knownFiles, StringComparer.OrdinalIgnoreCase);
-                }
-                else
-                {
-                    // Alpha clients use per-asset .ext.MPQ wrappers — scan for those
-                    targetFileSet = ScanAlphaClientFiles(targetRoot);
-                }
-
-                Console.WriteLine($"  Target:   {targetRoot} ({targetFileSet.Count} files)");
+                targetFileSet = BuildTargetClientFileSet(targetRoot);
+                Console.WriteLine($"  Target:   {targetRoot} ({targetFileSet.Count} files from target archives + wrapper scan)");
             }
 
             var sw = Stopwatch.StartNew();
@@ -156,7 +145,7 @@ internal static class LkToAlphaCommand
                                 missingWmoNames += skippedWmos;
                             }
 
-                            AlphaTileData tileData = LkToAlphaConverter.ConvertTile(adtData, tx, ty);
+                            AlphaTileData tileData = LkToAlphaConverter.ConvertTile(adtData, tx, ty, areaIdMapper, mapName);
                             tiles[(tx, ty)] = tileData;
                             converted++;
 
@@ -253,7 +242,7 @@ internal static class LkToAlphaCommand
                             missingWmoNames += skippedWmos;
                         }
 
-                        AlphaTileData tileData = LkToAlphaConverter.ConvertTile(adtData, tileX, tileY);
+                        AlphaTileData tileData = LkToAlphaConverter.ConvertTile(adtData, tileX, tileY, areaIdMapper, mapName);
                         tiles[(tileX, tileY)] = tileData;
                         converted++;
 
@@ -421,6 +410,32 @@ internal static class LkToAlphaCommand
         bool PathExists(string path) =>
             targetFileSet.Contains(path) || targetFileSet.Contains(path.Replace('\\', '/'));
 
+        string ResolveModelPath(string path)
+        {
+            string normalized = NormalizeVirtualPath(path);
+            if (PathExists(normalized))
+                return normalized;
+
+            string extension = Path.GetExtension(normalized);
+            if (!extension.Equals(".m2", StringComparison.OrdinalIgnoreCase)
+                && !extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
+                && !extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase))
+            {
+                return PlaceholderMdx;
+            }
+
+            string pathWithoutExtension = normalized[..^extension.Length];
+            string[] candidateExtensions = [".mdx", ".mdl", ".m2"];
+            foreach (string candidateExtension in candidateExtensions)
+            {
+                string candidatePath = pathWithoutExtension + candidateExtension;
+                if (PathExists(candidatePath))
+                    return candidatePath;
+            }
+
+            return PlaceholderMdx;
+        }
+
         for (int i = 0; i < adtData.ModelPlacements.Count; i++)
         {
             var p = adtData.ModelPlacements[i];
@@ -428,7 +443,7 @@ internal static class LkToAlphaCommand
                 continue;
 
             string path = ResolveName(p.NameId, adtData.ModelNames);
-            string mappedPath = PathExists(path) ? path : PlaceholderMdx;
+            string mappedPath = ResolveModelPath(path);
             int mappedNameId = GetOrAddNameIndex(mappedPath, names, nameIndex);
 
             if (!ReferenceEquals(mappedPath, path) && !string.Equals(mappedPath, path, StringComparison.OrdinalIgnoreCase))
@@ -507,11 +522,72 @@ internal static class LkToAlphaCommand
         return remapped.Count > 0 ? remapped : [];
     }
 
-    private static HashSet<string> ScanAlphaClientFiles(string clientRoot)
+    private static HashSet<string> BuildTargetClientFileSet(string clientRoot)
     {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> files = new(StringComparer.OrdinalIgnoreCase);
+
+        AddLooseTargetFiles(files, clientRoot);
+        AddAlphaWrapperTargetFiles(files, clientRoot);
+        AddArchivedTargetFiles(files, clientRoot);
+
+        return files;
+    }
+
+    private static void AddArchivedTargetFiles(HashSet<string> files, string clientRoot)
+    {
+        List<string> searchRoots = BuildArchiveSearchRoots(clientRoot);
+
+        try
+        {
+            using IArchiveCatalog archiveCatalog = new NativeMpqServiceFactory().Create();
+            ArchiveCatalogBootstrapResult bootstrap = ArchiveCatalogBootstrapper.Bootstrap(
+                archiveCatalog,
+                searchRoots,
+                new ArchiveCatalogBootstrapOptions(LoadCachedEntries: false, PersistListfileCache: false));
+
+            foreach (string file in bootstrap.AllFiles)
+            {
+                if (string.IsNullOrWhiteSpace(file))
+                    continue;
+
+                AddVirtualPath(files, file);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void AddLooseTargetFiles(HashSet<string> files, string clientRoot)
+    {
         string dataDir = Path.Combine(clientRoot, "Data");
-        if (!Directory.Exists(dataDir)) return set;
+        if (!Directory.Exists(clientRoot))
+            return;
+
+        try
+        {
+            foreach (string filePath in Directory.EnumerateFiles(clientRoot, "*", SearchOption.AllDirectories))
+            {
+                if (filePath.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string relativePath = Directory.Exists(dataDir) && filePath.StartsWith(dataDir, StringComparison.OrdinalIgnoreCase)
+                    ? Path.GetRelativePath(dataDir, filePath)
+                    : Path.GetRelativePath(clientRoot, filePath);
+
+                AddVirtualPath(files, relativePath);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void AddAlphaWrapperTargetFiles(HashSet<string> files, string clientRoot)
+    {
+        string dataDir = Path.Combine(clientRoot, "Data");
+        if (!Directory.Exists(dataDir))
+            return;
 
         string[] alphaSuffixes = [".wmo.mpq", ".wmo.MPQ", ".mdx.mpq", ".mdx.MPQ",
                                    ".mdl.mpq", ".mdl.MPQ", ".m2.mpq", ".m2.MPQ",
@@ -519,45 +595,78 @@ internal static class LkToAlphaCommand
 
         try
         {
-            // Scan Alpha per-asset wrapper files
             foreach (string mpqFile in Directory.EnumerateFiles(dataDir, "*.mpq", SearchOption.AllDirectories)
                 .Concat(Directory.EnumerateFiles(dataDir, "*.MPQ", SearchOption.AllDirectories)))
             {
                 string fileName = Path.GetFileName(mpqFile);
-                string matchedSuffix = "";
-                foreach (var suffix in alphaSuffixes)
-                {
-                    if (fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        matchedSuffix = suffix;
-                        break;
-                    }
-                }
-                if (matchedSuffix == "") continue;
+                bool isWrapper = alphaSuffixes.Any(suffix => fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+                if (!isWrapper)
+                    continue;
 
-                string relative = Path.GetRelativePath(dataDir, mpqFile);
-                string virtualPath = relative[..^4];
-                set.Add(virtualPath);
-                set.Add(virtualPath.Replace('\\', '/'));
+                string relativePath = Path.GetRelativePath(dataDir, mpqFile);
+                string virtualPath = relativePath[..^4];
+                AddVirtualPath(files, virtualPath);
             }
-
-            // Load main MPQ archives to find MDX/M2 files stored inside them
-            try
-            {
-                using var catalog = new NativeMpqService();
-                catalog.LoadArchives([clientRoot]);
-                var mainFiles = catalog.GetAllKnownFiles();
-                foreach (string f in mainFiles)
-                {
-                    set.Add(f);
-                    set.Add(f.Replace('/', '\\'));
-                }
-            }
-            catch { }
         }
-        catch { }
+        catch
+        {
+        }
+    }
 
-        return set;
+    private static List<string> BuildArchiveSearchRoots(string clientRoot)
+    {
+        List<string> roots = [];
+        string dataRoot = Path.Combine(clientRoot, "Data");
+        if (Directory.Exists(dataRoot))
+            roots.Add(dataRoot);
+
+        if (!string.Equals(clientRoot, dataRoot, StringComparison.OrdinalIgnoreCase))
+            roots.Add(clientRoot);
+
+        return roots.Count > 0 ? roots : [clientRoot];
+    }
+
+    private static string? ResolveTargetListfilePath()
+    {
+        List<string> candidates =
+        [
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdxViewer", "community-listfile-withcapitals.csv"),
+            Path.Combine(AppContext.BaseDirectory, "community-listfile-withcapitals.csv"),
+            Path.Combine(AppContext.BaseDirectory, "listfile.csv"),
+        ];
+
+        string? current = AppContext.BaseDirectory;
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            candidates.Add(Path.Combine(current, "wow-viewer", "libs", "wowdev", "wow-listfile", "listfile.txt"));
+            candidates.Add(Path.Combine(current, "libs", "wowdev", "wow-listfile", "listfile.txt"));
+            candidates.Add(Path.Combine(current, "community-listfile-withcapitals.csv"));
+            candidates.Add(Path.Combine(current, "listfile.csv"));
+            current = Directory.GetParent(current)?.FullName;
+        }
+
+        foreach (string candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static string NormalizeVirtualPath(string path)
+    {
+        return path.Replace('/', '\\').Trim().TrimStart('\\');
+    }
+
+    private static void AddVirtualPath(HashSet<string> files, string path)
+    {
+        string normalized = NormalizeVirtualPath(path);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        files.Add(normalized);
+        files.Add(normalized.Replace('\\', '/'));
     }
 
     private static void BundleTilesets(
@@ -600,7 +709,7 @@ internal static class LkToAlphaCommand
 
         Directory.CreateDirectory(tilesetRoot);
 
-        int extracted = 0, failed = 0;
+        int extracted = 0, failed = 0, normalized = 0, resized = 0, specularReencoded = 0;
         foreach (string texPath in texturePaths)
         {
             string normPath = texPath.Replace('/', '\\').TrimStart('\\');
@@ -611,8 +720,17 @@ internal static class LkToAlphaCommand
             byte[]? data = ReadTexture(normPath);
             if (data != null)
             {
-                File.WriteAllBytes(localPath, data);
+                AlphaBlpCompatibilityResult compatibility = AlphaBlpCompatibilityService.NormalizeForAlphaClient(normPath, data);
+                File.WriteAllBytes(localPath, compatibility.Data);
                 extracted++;
+                if (compatibility.Rewritten)
+                {
+                    normalized++;
+                    if (compatibility.Resized)
+                        resized++;
+                    if (compatibility.SpecularReencoded)
+                        specularReencoded++;
+                }
             }
             else
             {
@@ -622,6 +740,8 @@ internal static class LkToAlphaCommand
 
         Console.WriteLine($"    Extracted: {extracted}/{texturePaths.Count} textures to {tilesetRoot}" +
             (failed > 0 ? $" ({failed} missing)" : ""));
+        if (normalized > 0)
+            Console.WriteLine($"    Re-encoded: {normalized} textures for 0.5.x compatibility ({specularReencoded} specular, {resized} resized)");
     }
 
     private static LkToAlphaOptions ParseOptions(string[] args)
