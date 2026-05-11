@@ -264,6 +264,52 @@ Since `predTex` stores uint4 entries (4 bits each), `predTex[0]` = one uint32, `
 
 So our doc's PredTex1 should be at data offset 0x44, not 0x4C. The Unknown5 and Unknown6 fields at 0x44 and 0x48 in our plan doc ARE PredTex1 and PredTex2.
 
+## Key Finding: Alpha MCNR Normal Encoding (Ghidra-Verified)
+
+`CMapChunk::CreateNormals` at `0x699b60`:
+
+```c
+pCVar1->y = (float)(int)*pcVar3 * -1/127;      // byte[0] → Y component, negated
+pCVar1->z = (float)(int)pcVar3[1] * 1/127;       // byte[1] → Z component, positive
+pCVar1->x = (float)(int)pcVar3[2] * -1/127;      // byte[2] → X component, negated
+```
+
+Each normal is 3 bytes in the order `(-Y_signed, Z_signed, -X_signed)` where signed means `clamp(round(value * 127), -128, 127)`.
+
+**This is different from LK format** which typically uses `(X, Z, Y)` or `(X, Y, Z)`. The alpha format negates X and Y, and the component order is `Y, Z, X`.
+
+## Key Finding: Alpha MCNK Liquid Flags (Ghidra-Verified)
+
+`CMapChunk::Create` at the liquid loop (disassembly around `0x698f70-0x699007`):
+
+The loop starts with mask=4 and shifts left each iteration, testing MCNK flag bits 2, 3, 4, 5 against the chunk's flags field:
+- **Bit 2 (0x04)**: Has water surface — liquid type 1 (river/lake)
+- **Bit 3 (0x08)**: Has ocean/coast water — liquid type 2
+- **Bit 4 (0x10)**: Has lava — liquid type 3 sub-type 0
+- **Bit 5 (0x20)**: Has slime — liquid type 3 sub-type 1
+
+For each set bit, the client allocates a `CChunkLiquid` and copies the corresponding MCLQ data entry.
+
+Additionally, at `0x69919a`:
+```c
+TEST byte ptr [EDI], 0x2    ; test MCNK flags bit 1
+JZ skip
+MOV word ptr [ESI + 0x74], 0x100   ; set field_0x74 |= 0x100 if bit 1 set
+```
+
+And at `0x6992bc-0x6992da`:
+```c
+TEST byte ptr [EBX], 0x1   ; test MCNK flags bit 0
+JZ skip_shadow
+; if bit 0 set AND cvar check, create shadow texture from MCSH data
+```
+
+**Summary of MCNK flag bits for alpha client:**
+- Bit 0 (0x01): Has shadow map (MCSH data present)
+- Bit 1 (0x02): Unknown flag (sets chunk field_0x74 |= 0x100)
+- Bits 2-5 (0x04, 0x08, 0x10, 0x20): Liquid type flags (each bit = one liquid entry)
+- No other bits are used by the alpha client
+
 ## Key Finding: SMDoodadDef Struct Layout (0x24 = 36 bytes)
 
 From `CreateDoodadDef(SMDoodadDef*, C3Vector*)` at 0x6805e0 and `CMapArea::Create` at 0x6aae00:
