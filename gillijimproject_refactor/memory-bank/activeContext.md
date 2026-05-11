@@ -18,6 +18,24 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 - MCLY/MCAL offsets always populated (not conditionally zeroed).
 - `chunkBaseHeight` mirrored at both MCNK header offsets `0x68` and `0x6C` for compatibility across reader code paths.
 
+### Reverted May 10 — MCNR/MCRF/Liquid Commits
+
+**Commits `8bcb7045` and `d52bda9b` were reverted** (back to `47cbb435`). Both broke 0.5.3 client rendering:
+1. `8bcb7045` — Removed MCRF FourCC wrapper (raw uint32). Ghidra confirms raw uint32 is what the client reads, but FourCC-wrapped currently works; raw-uint32 broke the client.
+2. `d52bda9b` — Changed MCNR from `(X,Z,Y)` to Ghidra-verified `(-Y,Z,-X)` format and liquid flags from `0x3C` mask to `ClassifyAlphaLiquidType` switch. Both changes broke rendering.
+
+**Current working format (matches `47cbb435`):**
+- MCNR: `(X, Z, Y)` per byte — `byte[0]=X, byte[1]=Z, byte[2]=Y`
+- MCRF: FourCC-wrapped chunk (`MCRF` + size + data)
+- Liquid flags: `McnkFlags & 0x3C`
+
+**Ghidra-verified MDDF/MODF transforms** (these are correct and were NOT reverted):
+- Position: `file = (MapOrigin - world.Y, world.Z, MapOrigin - world.X)`
+- Rotation: `file = (world.pitch, world.yaw - 180°, world.roll)`, yaw offset = π (confirmed `_DAT_00810e04 = 3.14159274`)
+- Bounds: `file.t = (MapOrigin - world.min.Y, world.max.Z, MapOrigin - world.min.X)`, `file.b = (MapOrigin - world.max.Y, world.min.Z, MapOrigin - world.max.X)`
+
+**Open issue: Object placements (MDDF/MODF) are still wrong.** The Ghidra-verified coordinate transforms are correct in the writer, but source 4.x placement data may use different axis conventions than what the adapter pipeline assumes. MCRF population logic may also need fixing. Maps load without crashing but objects appear misplaced.
+
 **AlphaWdtReader fixes:**
 - `ReadExistingTiles`: MAIN index `x = i % 64, y = i / 64`.
 - `TryReadTile`: `mainEntryIndex = tileY * 64 + tileX`.

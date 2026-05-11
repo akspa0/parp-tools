@@ -104,6 +104,38 @@
 6. **MTXF** — small chunk, straightforward carry (small scope)
 7. **MAMP** — irrelevant for Alpha conversion but matters for split-ADT LK output (small scope)
 
+## ALPHA WDT FORMAT — REVERTED COMMITS AND OPEN ISSUES (2026-05-10)
+
+### Reverted commits (maps crashing 0.5.3 client)
+Both commits after `47cbb435` were reverted because they broke 0.5.3 client map rendering:
+- **`8bcb7045`** "fix: write MCRF as raw uint32 data (not FourCC-wrapped)" — REVERTED. Ghidra confirms MCRF is raw uint32 in the 0.5.3 client, but writing it as raw broke the client. The MCRF FourCC-wrapper path currently works; the raw-uint32 Ghidra finding may apply to a different version or need more investigation.
+- **`d52bda9b`** "fix: alpha MCNR normal encoding and liquid flag regeneration" — REVERTED. Two changes in one commit:
+  1. **MCNR encoding changed from `(X, Z, Y)` to `(-Y, Z, -X)`**: Ghidra confirms the client decodes MCNR as `(-Y, Z, -X)`, but changing the writer to this format broke rendering. The `(X, Z, Y)` format (which matches the LK convention) currently produces working output. This may indicate the alpha client also reads MCNR in `(X, Z, Y)` order from some code path, or there is a coordinate system mismatch elsewhere that the old format happened to mask.
+  2. **Liquid flags changed from `McnkFlags & 0x3C` to `ClassifyAlphaLiquidType` switch**: The new logic produced flags like `0x04` (water only) instead of `0x3C` (all liquid bits), which may have changed liquid rendering behavior.
+
+### Current working state (commit `47cbb435`)
+- MCNR: written as `(X, Z, Y)` per byte — `byte[0]=X, byte[1]=Z, byte[2]=Y`
+- MCRF: wrapped in FourCC chunk (`MCRF` + size + data)
+- Liquid flags: `McnkFlags & 0x3C` (preserves original 4.x flags with only liquid bits)
+- MDDF/MODF position: `file = (MapOrigin - world.Y, world.Z, MapOrigin - world.X)` — Ghidra-verified
+- MDDF/MODF rotation: `file = (world.pitch_deg, world.yaw_deg - 180, world.roll_deg)` — Ghidra-verified, yaw offset = π
+- MODF bounds: `file.t = (MapOrigin - world.min.Y, world.max.Z, MapOrigin - world.min.X)`, `file.b = (MapOrigin - world.max.Y, world.min.Z, MapOrigin - world.max.X)` — Ghidra-verified
+- Maps load and render in 0.5.3 client without crashes
+
+### Open issues — OBJECTS AND PLACEMENTS STILL BROKEN
+- **Object placement coordinates may be in the wrong coordinate space.** The Ghidra-verified transforms are applied to `(world.X, world.Y, world.Z)` where X=north, Y=west, Z=up, and the conversion to file placement space uses `MapOrigin` subtraction. But the source 4.x MODF/MDDF data might use a different axis convention than what our code assumes for `Position.X/Y/Z`.
+- **MCRF population logic** (from `47cbb435`) tests containment and bounds overlap but may not correctly map 4.x placement indices to alpha tile indices.
+- **MCNR format needs definitive resolution.** Ghidra says `(-Y, Z, -X)` but `(X, Z, Y)` works. Need to determine why — possibly the alpha client has a different code path, or the wow-viewer's coordinate conventions make `(X, Z, Y)` produce identical results for the common case of mostly-upward-facing normals.
+
+### Ghidra-verified MDDF/MODF details (still correct, not dependent on reverted changes)
+- SMDoodadDef size = 0x24 (36 bytes): nameId(0x00), uniqueId(0x04), pos(0x08), rot(0x14), scale(0x20), flags(0x22)
+- SMMapObjDef size = 0x40 (64 bytes): nameId(0x00), uniqueId(0x04), pos(0x08), rot(0x14), extents.t(0x20), extents.b(0x2C), flags(0x38), doodadSet(0x3A), nameSet(0x3C), scale(0x3E)
+- Client position transform: `world = (MapOrigin - file.Z, MapOrigin - file.X, file.Y)`
+- Client rotation transform: `world_rot = (file_rot.Z × π/180, file_rot.X × π/180, file_rot.Y × π/180 + π)`
+- Client bounds transform: `world_min = (-extents.t.Z + MapOrigin, -extents.t.X + MapOrigin, extents.b.Y)`, `world_max = (-extents.b.Z + MapOrigin, -extents.b.X + MapOrigin, extents.t.Y)`
+- Scale: MDDF scale = uint16 × (1/1024), MODF scale = uint16 × (1/1024) at offset 0x3E (alpha padding, not scaling)
+- MCRF in `CreateRefs` passed `(17066.666, 17066.666, 0.0)` as position offset to `CreateDoodadDef`/`CreateMapObjDef`
+
 ## NOT YET
 - Explicit Alpha 0.6.0 split ADT validation via `AdtProfile060070Baseline`
 - Full extraction run on 6 staged game clients (800-1500+ shards) via `harvest-map-mpq` into `wow-viewer/output/datasets/`
