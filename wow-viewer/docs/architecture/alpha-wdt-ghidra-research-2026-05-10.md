@@ -4,6 +4,14 @@
 **Client**: WoWClient.exe 0.5.3.3368
 **Status**: Research-only. No code changes in this session.
 
+## Ownership Implication
+
+This research is the ground-truth source for alphaWDT behavior, but the implementation owner is `wow-viewer` shared I/O, not `MdxViewer`.
+
+- Canonical alphaWDT surfaces: `AlphaWdtReader`, `AlphaWdtWriter`, `AlphaTerrainAdapter`, `AlphaToLkConverter`, `LkToAlphaConverter`
+- `MdxViewer` should consume those shared contracts for future alphaWDT compatibility work
+- Do not create another app-local alpha parser or writer when the behavior belongs in the shared library
+
 ## Key Finding: Alpha MCNK Subchunk Offsets Are Fixed-Position, Not Offset-Field-Based
 
 The 0.5.3 client (`CMapChunk::Create` at 0x699000) does **NOT** use MCNK header offset fields (0x18 MCVTOffset, 0x1C MCNROffset, etc.) to locate subchunks. Instead, it uses **hardcoded positions** within the MCNK block:

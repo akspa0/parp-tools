@@ -154,7 +154,7 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
 - [ ] **M2/MDX model metadata**: Resolve model FileDataID → asset path using listfile or DBC. Expose in `placement_mddf_names`.
 - [ ] **WMO metadata**: Resolve WMO FileDataID → asset path. Expose in `placement_modf_names`. **(DONE — names already resolved)**
 - [ ] **MODF doodadSet/nameSet resolution**: Per-MODF `doodadSet` and `nameSet` fields for WMO variant selection.
-- [ ] **MCRF per-chunk reference arrays**: Per-chunk M2/WMO reference indices (which objects touch this chunk). Currently only counts (`object_mask_16`), not the actual reference lists.
+- [ ] **Shared MCRF provenance surfaces**: `AlphaWdtWriter` now emits per-chunk Alpha `MCRF` arrays, but shard/runtime consumers still need first-class access to the exact per-chunk reference lists and any future extent-aware doodad-owner metadata.
 
 ### Phase B4: NPZ Interchange / ADT Preservation (NEW)
 **Goal**: Make NPZ the long-term interchange for fast tooling **and** eventual ADT regeneration without rereading client files.
@@ -300,6 +300,8 @@ Converters are read→write pipelines. They use the same deep readers and domain
 
 The `AlphaWdtReader` in `wow-viewer.Core.IO` is implemented for the current harvest/tensor-pack path. Below is the implementation status for each chunk:
 
+`AlphaWdtReader` and `AlphaWdtWriter` are also the canonical alphaWDT format owners. Future `MdxViewer` alphaWDT read/write work should consume these shared contracts instead of extending app-side readers or adding a second writer.
+
 | Chunk | Reader Status | Notes |
 |-------|--------------|-------|
 | MHDR | ✓ Done | Reads mcin, mtex, mddf, modf offsets |
@@ -323,7 +325,7 @@ The `AlphaWdtReader` in `wow-viewer.Core.IO` is implemented for the current harv
 - **Residual tile data**: Tiles marked as `adtOffset <= 0` in MAIN (non-existent) may still contain embedded tile data. We should detect and flag this as `TileHasResidualData: bool` in `AlphaTileData`, count leftover bytes, and attempt restructuring — later game versions hide files by marking them 0 in WDT; we want to recover every artifact.
 - **Sparse embedded tile detection**: Tiles with `adtOffset > 0` but where MCIN shows fewer than 256 chunk offsets, or chunk offsets point to empty subchunks, should be flagged as `TileHasSparseChunks: bool`.
 
-Remaining Alpha-reader follow-up: residual/sparse tile diagnostic fields and any broader consumer/runtime ownership that still sits outside the current harvest/tensor-pack lane.
+Remaining alphaWDT follow-up: residual/sparse tile diagnostic fields, broader consumer/runtime ownership that still sits outside the current harvest/tensor-pack lane, and retiring duplicate app-side readers after their consumers move to the shared APIs.
 
 ---
 

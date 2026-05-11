@@ -269,9 +269,9 @@ public static class AlphaWdtWriter
         bool usePreservedWorldUniqueIds = HasAnyChunkRefs(preservedWorldUniqueIdsByChunk);
         bool usePreservedWorldModelRefs = HasAnyChunkRefs(preservedWorldModelRefsByChunk);
 
-        // Alpha doodads must have a single owning chunk. Preserve one source-backed
-        // chunk owner when possible so client culling stays close to original behavior,
-        // but collapse multi-parent source refs to avoid purge asserts.
+        // Alpha doodads must have a single owning chunk. Prefer the chunk containing
+        // the placement anchor so visibility stays stable, then only consult preserved
+        // source refs when they still point at the same local neighborhood.
         AssignSingleChunkDoodadRefs(
             refsByChunk,
             tile,
@@ -402,28 +402,36 @@ public static class AlphaWdtWriter
         if (!candidateChunksByPlacementIndex.TryGetValue(placementIndex, out List<int>? candidateChunks) || candidateChunks.Count == 0)
             return containingChunk;
 
-        if (candidateChunks.Count == 1)
-            return candidateChunks[0];
-
         if (candidateChunks.Contains(containingChunk))
             return containingChunk;
 
-        int bestChunk = candidateChunks[0];
+        int containingChunkX = containingChunk % 16;
+        int containingChunkY = containingChunk / 16;
+
+        int bestLocalChunk = -1;
         float bestDistanceSquared = float.MaxValue;
         foreach (int candidateChunk in candidateChunks)
         {
-            GetChunkCenter(tileX, tileY, candidateChunk % 16, candidateChunk / 16, out float centerX, out float centerY);
+            int candidateChunkX = candidateChunk % 16;
+            int candidateChunkY = candidateChunk / 16;
+            if (Math.Abs(candidateChunkX - containingChunkX) > 1 || Math.Abs(candidateChunkY - containingChunkY) > 1)
+                continue;
+
+            GetChunkCenter(tileX, tileY, candidateChunkX, candidateChunkY, out float centerX, out float centerY);
             float dx = placement.Position.X - centerX;
             float dy = placement.Position.Y - centerY;
             float distanceSquared = (dx * dx) + (dy * dy);
             if (distanceSquared < bestDistanceSquared)
             {
                 bestDistanceSquared = distanceSquared;
-                bestChunk = candidateChunk;
+                bestLocalChunk = candidateChunk;
             }
         }
 
-        return bestChunk;
+        if (bestLocalChunk >= 0)
+            return bestLocalChunk;
+
+        return containingChunk;
     }
 
     private static void AddMappedUniqueIdRefs(AlphaPlacementRefs[] refsByChunk, IReadOnlyList<int>[] refsByUniqueIdChunk,

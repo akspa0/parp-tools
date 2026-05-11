@@ -75,7 +75,7 @@ Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMap
 | Converter | Source | Purpose | Status |
 |-----------|--------|---------|--------|
 | `AlphaToLkConverter` | `WoWMapConverter.Core.Converters` | Alpha 0.5.3 WDT → LK 3.3.5 ADT/WDT/WDL | VALIDATED |
-| `LkToAlphaConverter` | `WoWMapConverter.Core.Converters` | LK split ADT → Alpha 0.5.3 monolithic WDT | LANDED — 100% terrain/alpha round-trip validated |
+| `LkToAlphaConverter` | `WoWMapConverter.Core.Converters` | LK split ADT → Alpha 0.5.3 monolithic WDT | LANDED — shared alphaWDT write path plus focused round-trip proof and staged Azeroth validation |
 | `MdxToM2Converter` | `WoWMapConverter.Core.Converters` | MDX → M2 model format | NOT PORTED |
 | `M2ToMdxConverter` | `WoWMapConverter.Core.Converters` | M2 → MDX model format | NOT PORTED |
 | `WmoV14ToV17Converter` | `WoWMapConverter.Core.Converters` | WMO v14 → v17 (Cata) | NOT PORTED |
@@ -118,6 +118,8 @@ Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMap
 3. **Broad LK corpus validation for `LkToAlpha`** — current proof covers 100% terrain geometry and alpha mask parity on Alpha 0.5.5 roundtrips, plus `MH2O <-> MCLQ -> MH2O` parity, but broad batch conversion of native LK maps is still open
 4. **Full chunk-preserving conversion** — current converter lane is still a reduced terrain-domain reconstruction, not chunk-for-chunk spec closure
 5. **ADTv18 ingest boundary** — input support should tolerate full ADT v18-family chunk inventories, with undecoded or future-version chunks preserved through the NPZ/raw-blob path for later reinterpretation
+
+**alphaWDT ownership rule:** `AlphaWdtReader`, `AlphaWdtWriter`, `AlphaTerrainAdapter`, `AlphaToLkConverter`, and `LkToAlphaConverter` are the canonical alphaWDT format surfaces. `MdxViewer` is a compatibility/runtime consumer and should not gain another alphaWDT parser or writer.
 
 **Validation truth boundary**:
 - `AlphaToLk` has real-data batch proof.

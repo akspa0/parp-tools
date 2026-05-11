@@ -24,66 +24,43 @@ byte[] mainData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, M
 int mainCellSize = InferMainCellSize(mainData);
 ```
 
-`InferMainCellSize(...)` currently treats these sizes as canonical:
-
 - `8` bytes per tile for standard WDT `MAIN`
 - `16` bytes per tile for Alpha WDT `MAIN`
 
-It does **not** currently read a field like `MPHD.someValue == 8` or `MPHD.someValue == 16`.
-
 ## What `MAIN` Means In This Repo
 
-### Standard-era WDT (`8` bytes per tile)
-
-Current proven interpretation in `WdtSummaryReader`:
 
 - first `uint32`: tile flags
 - second `uint32`: async/load-related id or secondary per-tile value
 
 The current reader names these flag bits:
-
-- `0x1`: `HasAdt`
-- `0x2`: `AllWater`
 - `0x4`: `Loaded`
 
 Anything else in the first `uint32` is currently treated as unknown flag bits.
 
 This is why `WdtSummaryReader` can produce `WdtMainFlagsSummary` only when `mainCellSize == 8`.
 
-### Alpha WDT (`16` bytes per tile)
-
-Current proven interpretation in `AlphaEmbeddedAdtReader`:
-
 - the first `int32` of each `16`-byte `MAIN` entry is used as an embedded ADT offset into the monolithic Alpha WDT container
 - the remaining `12` bytes are **not yet semantically decoded** in this repo
-
-Current Alpha tile resolution logic:
 
 ```csharp
 int entryOffset = index * AlphaMainEntrySize;
 offset = BitConverter.ToInt32(mainData, entryOffset);
 return offset > 0;
-```
-
 That means the current Alpha path proves:
 
 - `MAIN` is being used as a tile lookup table
 - the first field of each Alpha entry is meaningful as an ADT offset
-
-It does **not** prove:
 
 - that the remaining `12` bytes are padding
 - that they are terrain-resolution controls
 - that they are chunk-subdivision metadata
 
 ## Why This Is Probably Not Terrain Mesh Resolution
-
 The user hypothesis was:
 
-- Alpha `16x16` might mean finer chunk or terrain subdivision
 - later clients `8x8` might mean coarser subdivision
 - modern clients might use an even smaller value to push mesh resolution higher
-
 That is **not supported by the current code evidence**.
 
 Why:
@@ -91,26 +68,11 @@ Why:
 - WDT is a world-level map descriptor and tile index surface.
 - In this repo, the `MAIN` cell width only changes how each **tile record** is decoded.
 - Terrain mesh granularity is owned lower down by the ADT/MCNK/MCVT family, not by the WDT `MAIN` record width.
-- The Alpha `16`-byte path is currently useful because it carries embedded tile-offset data, not because it tells the client how many terrain vertices a chunk should have.
-
-So the safest current statement is:
-
 - `8` vs `16` is a WDT `MAIN` record-layout distinction.
 - It is **not** a proven terrain subdivision knob.
 
-## What `MPHD` Currently Means Here
-
-`WdtSummaryReader.IsWmoBased(...)` currently uses two signals:
-
 - if `MPHD[8..12] == 2`, treat the WDT as WMO-based
 - otherwise, if `MPHD[0..4] & 0x1 != 0`, also treat it as WMO-based
-
-This is pragmatic behavior recovery for the formats currently seen in the repo.
-
-Important constraint:
-
-- the current code does **not** use `MPHD` to derive `MAIN` cell size
-- the current code does **not** have a proven `MPHD` field that says "tile resolution = 8" or "tile resolution = 16"
 
 ## What Is Actually Proven By Tests
 
@@ -146,7 +108,10 @@ The following points are still open research questions:
 
 - `wow-viewer/src/core/WowViewer.Core.IO/Maps/WdtTileIndexReader.cs`
 - `wow-viewer/src/core/WowViewer.Core.IO/Maps/WdtSummaryReader.cs`
+- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaWdtReader.cs`
+- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaWdtWriter.cs`
 - `wow-viewer/src/core/WowViewer.Core/Maps/WdtSummary.cs`
 - `wow-viewer/src/core/WowViewer.Core/Maps/WdtMainFlagsSummary.cs`
-- `wow-viewer/src/viewer/WowViewer.App/AlphaEmbeddedAdtReader.cs`
 - `wow-viewer/tests/WowViewer.Core.Tests/WdtSummaryReaderTests.cs`
+
+Future `MdxViewer` alphaWDT work should reuse the shared `AlphaWdtReader` / `AlphaWdtWriter` interpretation above instead of defining another Alpha-only `MAIN` decoder.

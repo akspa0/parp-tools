@@ -33,7 +33,9 @@ This file is intentionally compressed. Keep only the current compatibility role,
 - `AlphaTerrainAdapter` (in `wow-viewer/src/core/WowViewer.Core.IO/Maps/`) now implements `ITerrainAdapter` and bridges `AlphaWdtReader` output → per-chunk `TerrainChunkData`.
 - `AlphaTileData.ToTileLoadResult()` converts flat 257×257 heightmaps and alpha packs to `TileLoadResult` with `MddfPlacement`/`ModfPlacement`.
 - `TerrainTileTensorPack.ToTileLoadResult()` converts LK flat-array format to the same `TileLoadResult` shape.
-- MdxViewer's `AlphaTerrainAdapter` remains the reference for per-chunk MCNR, MCSH, and MCLQ extraction that haven't been ported yet (Phase B).
+- `AlphaWdtReader` and `AlphaWdtWriter` in `wow-viewer` are now the canonical alphaWDT read/write owners. Future MdxViewer alphaWDT work should consume those shared contracts, not add another parser or writer.
+- `AlphaEmbeddedAdtReader` is compatibility-only. Keep it aligned with the shared reader until consumers move off it, but do not deepen it as the design owner for alphaWDT semantics.
+- If MdxViewer needs new alphaWDT behavior later, land it in `wow-viewer` shared I/O first and then bridge it into the viewer.
 
 ## Routing Reminder
 

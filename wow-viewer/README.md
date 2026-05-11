@@ -41,6 +41,7 @@ The project currently has four practical jobs:
 - ADT NPZ promotion of spec-backed preservation signals for `MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, and `MCRW`
 - Alpha tile NPZ preservation of raw embedded tile chunks alongside decoded signals
 - **AlphaWdtWriter structural fixup**: MAIN grid order corrected to row-major (matching the 0.5.3 client), all 256 MCNKs always emitted with full subchunk structure, and client-required empty MDDF/MODF/MCRF chunks emitted when needed
+- **Canonical alphaWDT read/write stack**: `AlphaWdtReader`, `AlphaWdtWriter`, `AlphaTerrainAdapter`, `AlphaToLkConverter`, and `LkToAlphaConverter` now carry the shared alphaWDT contract; `MdxViewer` is a compatibility consumer, not the format owner
 - **LkAdtWriter FourCC fix**: all chunk IDs use `FourCC.FromString().ToFileBytes()` instead of `Encoding.ASCII.GetBytes()` for I/O boundary consistency
 - **Asset name fixup** (`--target-client-root`): filters placements referencing assets missing in target client (scans Alpha per-asset `.wmo.MPQ`/`.mdx.MPQ` wrappers)
 - **Tileset bundling** (`--bundle-tilesets`): extracts unique BLP textures from source client, writes to `tilesets/{map_name}/`, fixes up WDT MTEX references to local paths
@@ -67,6 +68,24 @@ Use:
 - staged clients under `output\tmp\wowarchive-clients\...`
 
 Do **not** use the older converter-side `dataset-scan` / `dataset-audit` / `dataset-build-cache` chain as the primary shard builder for V14 work. Those commands are legacy manifest/audit helpers, not the canonical full-signal extraction path.
+
+## AlphaWDT Ownership
+
+alphaWDT file semantics live in `wow-viewer`, not in `MdxViewer`.
+
+- Canonical shared surfaces: `AlphaWdtReader`, `AlphaWdtWriter`, `AlphaTerrainAdapter`, `AlphaToLkConverter`, `LkToAlphaConverter`
+- `MdxViewer` is the compatibility/runtime host for validation and consumption only
+- Future `MdxViewer` alphaWDT read/write work should reuse the shared reader/writer and domain models rather than growing another legacy parser such as `AlphaEmbeddedAdtReader`
+
+Current validated alphaWDT rules:
+
+- `MAIN` is row-major (`tileY * 64 + tileX`)
+- all `256` MCNKs are always emitted for embedded tiles
+- `MCRF` stays FourCC-wrapped and contiguous inside MCNK payloads
+- odd-sized top-level chunks are contiguous; do not pad between them
+- placements use the shared raw-file rotation convention and the writer does not subtract `180` degrees on yaw
+- doodads stay single-owner in `MCRF` with containing-chunk-first selection; WMOs keep overlap-based multi-chunk refs
+- target-client asset presence must come from target archives, wrapper scan, and loose files, not external listfiles
 
 ## Supported Client Eras
 

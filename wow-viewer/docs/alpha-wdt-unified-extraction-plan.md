@@ -1,76 +1,49 @@
-# Alpha WDT Unified Tensor Extraction — Plan
+# Alpha WDT Unified Ownership And Extraction Status
 
-## Problem
+## Status
 
-`extract-unified` produces 1051 tiles from 0.5.3 Azeroth but tile coordinates are incorrect — the stitched heightmap shows the continent rotated 90° CCW and duplicated onto itself. The V11 cache has 518 tiles with known-good coordinates but was built from VLM JSONs (indirect pipeline), not from the game client directly.
+This migration slice is no longer a plan to create a shared Alpha reader. The shared alphaWDT stack already exists in `wow-viewer` and is the canonical owner of alphaWDT file semantics.
 
-## Goal
+Implemented shared surfaces:
 
-One command that reads any game client's map files directly and produces a complete NPZ shard per tile: `extract-unified --client-root <dir> --map <name> --output-dir <dir>`. Works for both Alpha monolithic WDT (0.5.3-0.7.x) and retail split ADT (3.x+). No intermediate datasets, no VLM JSONs, no old caches.
+- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaWdtReader.cs`
+- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaWdtWriter.cs`
+- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaTerrainAdapter.cs`
+- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaToLkConverter.cs`
+- `wow-viewer/src/core/WowViewer.Core.IO/Maps/LkToAlphaConverter.cs`
+- `wow-viewer/src/core/WowViewer.Core/Maps/AlphaTileData.cs`
 
-## Source of Truth
+Current proof anchors:
 
-MdxViewer's `AlphaTerrainAdapter` renders 0.5.3 Azeroth correctly — tile positions, heightmaps, normals, placements all match the game. Port the reading logic from there into `WowViewer.Core.IO`, which is the canonical home for format readers.
+- staged `0.5.3` / `0.5.5` harvest and tensor-pack extraction through `AlphaWdtReader`
+- focused `LkToAlphaRoundTripTests` for structural alphaWDT write parity, placements, and liquid round-trip
+- staged `4.0.0 -> 0.5.3` Azeroth conversion validated in `MdxViewer`
+- Ghidra-backed format notes in `docs/architecture/alpha-wdt-ghidra-research-2026-05-10.md` and `docs/architecture/alpha-placement-coordinate-transforms-2026-05-09.md`
 
-## Implementation
+## Canonical Ownership
 
-### 1. Port Alpha WDT tile reading to `WowViewer.Core.IO`
+alphaWDT read and write behavior belongs in `wow-viewer` shared I/O.
 
-Existing code to reference (read-only, do not add references):
-- `gillijimproject_refactor/src/MdxViewer/Terrain/AlphaTerrainAdapter.cs` — `LoadTileWithPlacements()`, coordinate system, chunk assembly
-- `gillijimproject_refactor/src/gillijimproject-csharp/WowFiles/Alpha/` — `WdtAlpha`, `AdtAlpha`, `McnkAlpha` byte-level parsing
-- `wow-viewer/src/viewer/WowViewer.App/AlphaEmbeddedAdtReader.cs` — viewer-side Alpha embedded tile reader
+- `MdxViewer` is a compatibility/runtime host, not the design owner for alphaWDT parsing or writing.
+- Future alphaWDT fixes must land in `AlphaWdtReader`, `AlphaWdtWriter`, or the shared converters first.
+- If `MdxViewer` needs alphaWDT behavior later, it should consume the shared domain models and bridges instead of creating another byte-level parser or writer.
 
-Create `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaWdtReader.cs`:
-- `public static bool TryReadTile(string wdtFilePath, int tileX, int tileY, out AlphaTileData? data)`
-- Returns per-tile: 257×257 heights, 256×256×4 MCAL alpha, 16×16×4 MCLY texture IDs, MDDF/MODF placements with model paths and bounds, liquid data, hole mask, texture name table
-- Coordinate system: match the 0.5.3 client `MAIN` table (`index = tileY * 64 + tileX`), with world coord projection verified against viewer rendering
-- No archive dependency — takes a filesystem WDT path (caller extracts from MPQ if needed)
+This means `AlphaEmbeddedAdtReader` is compatibility-only. Keep it aligned until all consumers move to the shared reader, but do not deepen it as a second alphaWDT implementation.
 
-### 2. Fix coordinate verification
+## Current Shared Contract
 
-After porting:
-- Extract 3 known tiles from Elwynn, Stormwind, and Westfall regions
-- Compare against MdxViewer's rendered view of the same tiles
-- Confirm height values, object placement positions match pixel-for-pixel
-- Stitch 64×64 heightmap quilt and verify continent shape is correct (no rotation or duplication)
+- `MAIN` tile indexing is row-major: `tileY * 64 + tileX`
+- Alpha embedded tiles always emit all `256` MCNKs
+- `MCRF` stays FourCC-wrapped and contiguous inside MCNK payloads
+- odd-sized top-level chunks are contiguous; do not insert pad bytes between top-level chunks
+- placements use the shared round-trip-safe raw rotation convention `Rotation = (fileRotX, fileRotZ, fileRotY)`
+- alpha doodads are single-owner in `MCRF`; containing chunk wins unless a preserved LK source ref stays in the same local `3x3` neighborhood
+- WMOs still use overlap-based multi-chunk references
+- target-client asset presence is determined from target archives, wrapper scan, and loose files only
 
-### 3. Update `extract-unified` command
+## What Still Remains
 
-- For Alpha: use `AlphaWdtReader.TryReadTile` (local to `WowViewer.Core.IO`)
-- For retail: delegate to `dataset-build-v10-stage1` (already works)
-- Auto-detect client type from WDT chunk signatures (MDNM/MONM present = Alpha)
-- Extract WDT from MPQ using `StormLibPatchArchiveReader` (already in `WowViewer.Core.IO`) for staged clients
-- Same output format for both: `{tile}_v10.npz` + `{tile}_v10_placements.json`
-- Include `weak_signal_audit.txt` richness classification per tile
-
-### 4. Add MCNR normal synthesis
-
-Alpha 0.5.3 has MCNR data at known offset in MCNK header, but `AlphaEmbeddedAdtReader` doesn't read it. Synthesize from MCVT heights using central differences — more reliable and works for all clients.
-
-### 5. Remove legacy references
-
-- Remove `AlphaEmbeddedAdtReader` link from converter csproj after `AlphaWdtReader` is operational
-- Remove `generate_alpha_placements.py` and `prepare_object_detection_data.py` references to VLM JSONs
-- All Python scripts use unified NPZ format only
-
-## Files to Create
-
-| File | Purpose |
-|------|---------|
-| `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaWdtReader.cs` | Alpha monolithic WDT tile reader |
-| `wow-viewer/src/core/WowViewer.Core/Maps/AlphaTileData.cs` | Per-tile data model |
-
-## Files to Modify
-
-| File | Change |
-|------|--------|
-| `wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs` | `RunExtractUnified` → use `AlphaWdtReader` instead of `AlphaEmbeddedAdtReader` |
-| `wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj` | Remove `AlphaEmbeddedAdtReader` link after migration verified |
-
-## Validation Criteria
-
-- Stitched 64×64 heightmap quilt matches Azeroth continent shape exactly (no rotation/mirroring/duplication)
-- Tile `Azeroth_30_32` has same heights, MCAL, MCLY as V11 cache `Azeroth_30_32` (V11 is the known-good reference)
-- Unified shard for a retail 3.3.5 tile matches `dataset-build-v10-stage1` output byte-for-byte
-- 0.5.3 Azeroth produces 518+ tiles (matching V11 count) plus additional weak-signal ocean tiles
+- move remaining `MdxViewer` alpha consumers off `AlphaEmbeddedAdtReader` onto shared `AlphaWdtReader` / `AlphaTerrainAdapter` surfaces
+- keep any future alphaWDT writer needs in `AlphaWdtWriter` rather than adding app-side write logic
+- continue broad real-data LK/Cata corpus validation for `LkToAlpha`
+- keep the shared alphaWDT docs current when format discoveries or consumer boundaries change

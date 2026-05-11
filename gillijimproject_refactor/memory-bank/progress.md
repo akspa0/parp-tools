@@ -47,6 +47,7 @@
 | **Phase C: LkToAlpha tileset bundling** | **DONE** — `--bundle-tilesets` extracts 327 textures, fixes up paths |
 | **Phase C: LkToAlpha AlphaWdtWriter structural parity** | **DONE** — MAIN row-major per 0.5.3 client, always emit MCNK+MCRF, FourCC I/O convention |
 | **Phase C: Placement orientation proof** | **DONE** — Ghidra-confirmed Alpha MDDF/MODF position and rotation transforms; LK writer MODF bounds now round-trip through the shared reader |
+| **Phase C: AlphaWDT placement and MCRF stabilization** | **DONE** — reverse AreaID mapping, target-backed asset filtering, top-level chunk contiguity, raw-file rotation convention, and single-owner doodad chunk assignment are all landed in the shared wow-viewer alphaWDT path |
 | **Phase C: ADT shard raw-chunk preservation** | **DONE** — unconsumed ADT-family chunks now persist into NPZ shards as raw uint8 blobs with metadata instead of being dropped outright |
 | **Phase C: ADT preservation signal promotion** | **DONE** — `MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, and `MCRW` now persist as first-class NPZ entries rather than raw-only fallback blobs; `MCSE` currently retains raw fallback beside the typed signals, and staged real-data `MCSE`/`MCRF` coverage is broadened smoke rather than a pinned positive regression |
 | **Phase C: Alpha shard raw-chunk preservation** | **DONE** — Alpha tile tensor packs now preserve raw embedded tile chunks under `raw_chunks/alpha/...` alongside decoded signals |
@@ -81,7 +82,7 @@
 
 | Source Chunk | Where | Data Survives? | Notes |
 |---|---|---|---|
-| **MCRF** | MCNK sub-chunk | NO | Per-chunk doodad/WMO reference indices are read from LK but never written to Alpha MCNK |
+| **MCRF** | MCNK sub-chunk | PARTIAL | Per-chunk refs are now written into Alpha MCNK. Exact LK multi-parent doodad provenance is intentionally collapsed to one owner chunk for Alpha stability, while WMOs still keep overlap-based multi-chunk refs. |
 | **MH2O fidelity** | ADT root top-level | PARTIAL | Only min/max height, 9x9 vertex heights, and 8x8 tile flags survive. Lost: fishableMask, deepMask, liquidTypeId beyond basic type, vertexFormat, depth data, UV coords |
 | **MTXF** | tex0 top-level | NO | Texture animation/transformation flags are never carried |
 | **MAMP** | tex0 top-level | NO | Terrain texture sizing parameter (never needed for Alpha conversion which doesn't produce split ADTs) |
@@ -97,35 +98,40 @@
 ### Priority order for fixes:
 
 1. **AreaId** — already have AreaIdMapper, just needs wiring (medium scope, high value)
-2. **MCRF** — per-chunk doodad/WMO refs matter for placement fidelity (medium scope)
+2. **Exact doodad owner provenance** — the shared alphaWDT path already writes MCRF, but remaining edge work is extent-aware owner choice for large doodads near chunk borders (medium scope)
 3. **MFBO** — read by harvest already, just needs pass-through in converters (small scope)
 4. **MCCV/MCLV** — read by harvest already, need writer support in both converters (medium scope)
 5. **MH2O full fidelity** — significant rewrite of liquid path, carry more fields (large scope)
 6. **MTXF** — small chunk, straightforward carry (small scope)
 7. **MAMP** — irrelevant for Alpha conversion but matters for split-ADT LK output (small scope)
 
-## ALPHA WDT FORMAT — REVERTED COMMITS AND OPEN ISSUES (2026-05-10)
+## ALPHA WDT FORMAT — CURRENT OWNERSHIP AND LIVE RULES (2026-05-11)
 
-### Reverted commits (maps crashing 0.5.3 client)
+### Keep these reverted lessons
 Both commits after `47cbb435` were reverted because they broke 0.5.3 client map rendering:
 - **`8bcb7045`** "fix: write MCRF as raw uint32 data (not FourCC-wrapped)" — REVERTED. Ghidra confirms MCRF is raw uint32 in the 0.5.3 client, but writing it as raw broke the client. The MCRF FourCC-wrapper path currently works; the raw-uint32 Ghidra finding may apply to a different version or need more investigation.
 - **`d52bda9b`** "fix: alpha MCNR normal encoding and liquid flag regeneration" — REVERTED. Two changes in one commit:
   1. **MCNR encoding changed from `(X, Z, Y)` to `(-Y, Z, -X)`**: Ghidra confirms the client decodes MCNR as `(-Y, Z, -X)`, but changing the writer to this format broke rendering. The `(X, Z, Y)` format (which matches the LK convention) currently produces working output. This may indicate the alpha client also reads MCNR in `(X, Z, Y)` order from some code path, or there is a coordinate system mismatch elsewhere that the old format happened to mask.
   2. **Liquid flags changed from `McnkFlags & 0x3C` to `ClassifyAlphaLiquidType` switch**: The new logic produced flags like `0x04` (water only) instead of `0x3C` (all liquid bits), which may have changed liquid rendering behavior.
 
-### Current working state (commit `47cbb435`)
+### Current working state
 - MCNR: written as `(X, Z, Y)` per byte — `byte[0]=X, byte[1]=Z, byte[2]=Y`
 - MCRF: wrapped in FourCC chunk (`MCRF` + size + data)
 - Liquid flags: `McnkFlags & 0x3C` (preserves original 4.x flags with only liquid bits)
 - MDDF/MODF position: `file = (MapOrigin - world.Y, world.Z, MapOrigin - world.X)` — Ghidra-verified
-- MDDF/MODF rotation: `file = (world.pitch_deg, world.yaw_deg - 180, world.roll_deg)` — Ghidra-verified, yaw offset = π
+- Shared rotation convention in wow-viewer domain models is raw-file-space `Rotation = (fileRotX, fileRotZ, fileRotY)`. `AlphaWdtReader`, `AlphaWdtWriter`, and `LkAdtWriter` all use that convention, and the writer no longer subtracts 180 degrees from yaw.
 - MODF bounds: `file.t = (MapOrigin - world.min.Y, world.max.Z, MapOrigin - world.min.X)`, `file.b = (MapOrigin - world.max.Y, world.min.Z, MapOrigin - world.max.X)` — Ghidra-verified
-- Maps load and render in 0.5.3 client without crashes
+- Top-level alphaWDT chunks are contiguous; odd-byte padding between chunks is invalid.
+- Doodad chunk ownership is single-owner only: containing chunk first, preserved LK refs only when they stay in the containing chunk's local `3x3` neighborhood.
+- WMO chunk refs still use bounds overlap and can remain multi-chunk.
+- Target-client presence checks must be built from target archives, Alpha wrapper scan, and loose files only; external listfiles are not proof of asset existence.
+- alphaWDT read/write ownership lives in `wow-viewer` shared I/O. `MdxViewer` is a compatibility consumer, not the format owner.
 
-### Open issues — OBJECTS AND PLACEMENTS STILL BROKEN
-- **Object placement coordinates may be in the wrong coordinate space.** The Ghidra-verified transforms are applied to `(world.X, world.Y, world.Z)` where X=north, Y=west, Z=up, and the conversion to file placement space uses `MapOrigin` subtraction. But the source 4.x MODF/MDDF data might use a different axis convention than what our code assumes for `Position.X/Y/Z`.
-- **MCRF population logic** (from `47cbb435`) tests containment and bounds overlap but may not correctly map 4.x placement indices to alpha tile indices.
-- **MCNR format needs definitive resolution.** Ghidra says `(-Y, Z, -X)` but `(X, Z, Y)` works. Need to determine why — possibly the alpha client has a different code path, or the wow-viewer's coordinate conventions make `(X, Z, Y)` produce identical results for the common case of mostly-upward-facing normals.
+### Still open
+- **Broader LK/Cata corpus validation**: the shared alphaWDT path has focused tests and the staged Azeroth proof, but not broad native LK/Cata batch signoff yet.
+- **Exact doodad-border ownership**: the current containing-chunk rule fixed the worst culling failure, but remaining edge cases may still need extent-aware owner choice for large doodads near chunk borders.
+- **MCNR explanation gap**: Ghidra still points to `(-Y, Z, -X)` while the working writer uses `(X, Z, Y)`. Keep the current working bytes until the mismatch is explained, not guessed.
+- **Forward AlphaToLk AreaID wiring**: reverse LkToAlpha mapping is done; the forward converter still needs its own crosswalk hookup.
 
 ### Ghidra-verified MDDF/MODF details (still correct, not dependent on reverted changes)
 - SMDoodadDef size = 0x24 (36 bytes): nameId(0x00), uniqueId(0x04), pos(0x08), rot(0x14), scale(0x20), flags(0x22)
@@ -135,6 +141,7 @@ Both commits after `47cbb435` were reverted because they broke 0.5.3 client map 
 - Client bounds transform: `world_min = (-extents.t.Z + MapOrigin, -extents.t.X + MapOrigin, extents.b.Y)`, `world_max = (-extents.b.Z + MapOrigin, -extents.b.X + MapOrigin, extents.t.Y)`
 - Scale: MDDF scale = uint16 × (1/1024), MODF scale = uint16 × (1/1024) at offset 0x3E (alpha padding, not scaling)
 - MCRF in `CreateRefs` passed `(17066.666, 17066.666, 0.0)` as position offset to `CreateDoodadDef`/`CreateMapObjDef`
+- `wow-viewer` shared alpha placements intentionally store raw file rotation in the round-trip-safe convention `(fileRotX, fileRotZ, fileRotY)`; renderer-space conversion belongs in compatibility/runtime bridges, not in another parser.
 
 ## NOT YET
 - Explicit Alpha 0.6.0 split ADT validation via `AdtProfile060070Baseline`
@@ -142,7 +149,7 @@ Both commits after `47cbb435` were reverted because they broke 0.5.3 client map 
 - Production training run (300 epochs)
 - Model evaluation on held-out tiles
 - DBC/DB2 metadata enrichment (WorldSafeLocs, AreaTable, GroundEffects, LiquidType)
-- MCRF per-chunk reference arrays
+- Exact MCRF doodad provenance for large cross-chunk placements
 - MODF doodadSet/nameSet resolution
 - PM4 masks for development map build (4.0.0.12304 loose files)
 - Development map extraction pipeline (wow-viewer/test_data/original_development)
@@ -180,8 +187,8 @@ Both commits after `47cbb435` were reverted because they broke 0.5.3 client map 
 7. **Complete Alpha Mask Loss** — `LkAdtWriter` was dropping alpha chunks entirely because `AlphaToLkConverter` extracted data from transposed X/Y indices `[cx, cy, l]` instead of `AlphaWdtReader`'s populated `[cy, cx, l]`. Fixed by correcting array accesses in `AlphaToLkConverter` to perfectly align with `AlphaTileData` layout.
 8. **Binary Chunk Tag Corruption** — `LkAdtWriter` used endian-swapping `FourCC.ToFileBytes()` for `MCNK` subchunks (`MCVT`, etc.), breaking binary validation. Fixed to use `ASCII.GetBytes`.
 
-## FOCUSED VALIDATION NOTE (2026-05-08)
-- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter LkToAlphaRoundTripTests` passes with `2/2` tests.
+## FOCUSED VALIDATION NOTE (2026-05-11)
+- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter LkToAlphaRoundTripTests` currently passes with `12/12` tests.
 - Do not describe this as full suite closure: the broader `WowViewer.Core.Tests` run still hits missing `wow-viewer/test_data/development` fixtures and one unrelated pre-existing invalid-data test.
 
 ## BUGS FIXED IN NPZ SHARD VALIDATION (2026-05-08)

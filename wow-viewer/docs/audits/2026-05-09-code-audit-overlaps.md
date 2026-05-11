@@ -34,14 +34,16 @@ Both classes implement nearly identical ADT parsing functionality:
 ### 2. AlphaEmbeddedAdtReader
 
 - **Location**: `WowViewer.App.AlphaEmbeddedAdtReader`
-- **Purpose**: Parse Alpha-era ADT files from embedded WDT archives
-- **Overlap**: Implements nearly identical ADT parsing logic as the other two components, with minor variations for Alpha-specific formats
+- **Purpose**: Compatibility-only Alpha-era embedded tile reader for app-side consumers
+- **Overlap**: Implements nearly identical Alpha WDT parsing logic that now also exists in the canonical shared stack (`AlphaWdtReader` / `AlphaTerrainAdapter`)
 - **Duplicated functionality**: 
   - MCVT height extraction
   - Texture layer parsing
   - Liquid chunk extraction
   - Heightmap building
   - Vertex position mapping
+
+This is no longer just a duplication concern. For alphaWDT work, `AlphaEmbeddedAdtReader` must not become a second design owner. Future file-semantic fixes belong in `wow-viewer/src/core/WowViewer.Core.IO/Maps/{AlphaWdtReader,AlphaWdtWriter}.cs`, with app-side compatibility shims consuming those shared contracts.
 
 ### 3. Converter Tool Dependency
 
@@ -58,12 +60,12 @@ Both classes implement nearly identical ADT parsing functionality:
 - Create a new `AdtTerrainData` class that encapsulates the parsed terrain data structure
 - `WorldTerrainTileBuilder` should consume `AdtTerrainData` objects rather than parsing files directly
 
-### 2. Replace AlphaEmbeddedAdtReader
+### 2. Replace AlphaEmbeddedAdtReader As Design Owner
 
-- Remove `AlphaEmbeddedAdtReader` entirely
-- Extend `AdtTensorPackBuilder` to handle both Alpha and LK-era ADT formats
-- Add format detection and appropriate parsing logic within the consolidated parser
-- Maintain backward compatibility through format-specific parsing branches
+- Keep `AlphaEmbeddedAdtReader` compatibility-only until all app consumers move to the shared Alpha reader
+- Route future alphaWDT file-semantic fixes into `AlphaWdtReader` / `AlphaWdtWriter`, not the app reader
+- Replace app-side byte parsing with shared `AlphaWdtReader` / `AlphaTerrainAdapter` consumption where practical
+- If MdxViewer needs future alphaWDT write support, make it call the shared writer/converter path instead of adding a second writer
 
 ### 3. Refactor Converter Tool
 
@@ -93,7 +95,7 @@ Both classes implement nearly identical ADT parsing functionality:
 2. Refactor `AdtTensorPackBuilder` to return `AdtTerrainData` objects
 3. Refactor `WorldTerrainTileBuilder` to consume `AdtTerrainData`
 4. Extend `AdtTensorPackBuilder` to handle Alpha-era formats
-5. Remove `AlphaEmbeddedAdtReader`
+5. Remove or reduce `AlphaEmbeddedAdtReader` after all consumers move to the shared alphaWDT path
 6. Update `WowViewer.Tool.Converter` to use new API
 7. Create `IAdtReader` interface and dependency injection setup
 8. Update all tests to use new architecture

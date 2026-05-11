@@ -159,7 +159,7 @@ public sealed class LkToAlphaRoundTripTests
     }
 
     [Fact]
-    public void ConvertTile_PreservesSourceChunkMcrfRefsWhenWritingAlphaWdt()
+    public void ConvertTile_CollapsesPreservedDoodadRefsToContainingChunkWhileKeepingWorldRefs()
     {
         List<LkMcnkData> chunks = [];
         for (int index = 0; index < 256; index++)
@@ -194,7 +194,7 @@ public sealed class LkToAlphaRoundTripTests
         });
 
         var chunk37Refs = ReadMcrfRefs(wdt, 0, 0, 37);
-        Assert.Equal([0], chunk37Refs.DoodadRefs);
+        Assert.Empty(chunk37Refs.DoodadRefs);
         Assert.Empty(chunk37Refs.WorldModelRefs);
 
         var chunk115Refs = ReadMcrfRefs(wdt, 0, 0, 115);
@@ -202,7 +202,7 @@ public sealed class LkToAlphaRoundTripTests
         Assert.Equal([0], chunk115Refs.WorldModelRefs);
 
         var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
-        Assert.Empty(chunk0Refs.DoodadRefs);
+        Assert.Equal([0], chunk0Refs.DoodadRefs);
         Assert.Empty(chunk0Refs.WorldModelRefs);
 
         int totalDoodadRefs = 0;
@@ -351,7 +351,7 @@ public sealed class LkToAlphaRoundTripTests
     }
 
     [Fact]
-    public void WriteAlphaWdt_CollapsesDoodadRefsToSinglePreservedChunk()
+    public void WriteAlphaWdt_CollapsesDoodadRefsToSingleContainingChunkWhenPreservedChunksAreRemote()
     {
         float[,] heightmap = new float[257, 257];
         int[,,] texIds = new int[16, 16, 4];
@@ -394,10 +394,10 @@ public sealed class LkToAlphaRoundTripTests
         });
 
         var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
-        Assert.Empty(chunk0Refs.DoodadRefs);
+        Assert.Equal([0], chunk0Refs.DoodadRefs);
 
         var chunk37Refs = ReadMcrfRefs(wdt, 0, 0, 37);
-        Assert.Equal([0], chunk37Refs.DoodadRefs);
+        Assert.Empty(chunk37Refs.DoodadRefs);
 
         var chunk115Refs = ReadMcrfRefs(wdt, 0, 0, 115);
         Assert.Empty(chunk115Refs.DoodadRefs);

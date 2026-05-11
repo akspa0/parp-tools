@@ -6,16 +6,16 @@
 
 ## Problem
 
-Alpha terrain parsing in both `AlphaWdtReader` and `AlphaTerrainAdapter` reads a fraction of the MCNK header fields. Most flags, offsets, and metadata are silently ignored. This causes:
+Shared alphaWDT parsing in `AlphaWdtReader` and downstream consumers still reads only a fraction of the MCNK header fields. Most flags, offsets, and metadata are silently ignored. This causes:
 
-1. **Incorrect height handling** (FIXED 2026-05-09): MCVT heights in alpha are absolute world-space Z values. The writer (`AlphaWdtWriter`) was incorrectly subtracting `chunkBaseHeight` from MCVT and MCLQ heights; the readers (`AlphaWdtReader`, `AlphaEmbeddedAdtReader`) were incorrectly adding a base height. Both have been corrected — heights are now absolute end-to-end. MCNK offsets 0x68/0x6C store the chunk's Position.Z (used by the client for vertex relativization, not as a height delta). The round-trip tests (`LkToAlphaRoundTripTests`) now pass.
+1. **Incorrect height handling** (FIXED 2026-05-09): MCVT heights in alpha are absolute world-space Z values. The writer (`AlphaWdtWriter`) was incorrectly subtracting `chunkBaseHeight` from MCVT and MCLQ heights; the shared reader path and older compatibility readers were incorrectly adding a base height. Both have been corrected — heights are now absolute end-to-end. MCNK offsets 0x68/0x6C store the chunk's Position.Z (used by the client for vertex relativization, not as a height delta). The round-trip tests (`LkToAlphaRoundTripTests`) now pass.
 2. **Missing flags**: MCNK flags control liquid type, shadow presence, vertex coloring, holes, and more — but most are not tracked through the pipeline.
 3. **Lost metadata**: Fields like Position (X, Y, Z), AreaId, M2/WMO reference counts, and effect maps are parsed in isolation or not at all, making it impossible to faithfully reconstruct alpha data or use it as an interchange format.
 4. **Shard metadata gaps**: When building tensor-pack shards, we discard MCNK metadata that could be essential for downstream model training and format roundtripping.
 
 ## Goals
 
-1. **Parse every MCNK header field** in both `AlphaWdtReader` and `AlphaTerrainAdapter`, storing them in a structured record.
+1. **Parse every MCNK header field** in the shared alphaWDT stack, storing them in a structured record that readers, writers, and compatibility consumers can all reuse.
 2. **Track all flags bits** explicitly with named constants and documentation of their alpha-specific semantics.
 3. **Propagate MCNK metadata through the shard pipeline** so that tensor-pack outputs include per-chunk metadata alongside height/alpha/normal data.
 4. **Use the MCNK Position (X, Z, Y) fields correctly** — they store the chunk's world position for bounding box math, NOT an additive base height for MCVT.
@@ -116,14 +116,15 @@ Type classification: `(flags >> 4) & 3` gives: 0=water, 1=ocean, 2=magma, 3=slim
 - Expose via `TerrainChunkData` so the shard builder can write them
 - Include position and flags in NPZ metadata
 
-### Phase 4: Legacy AlphaTerrainAdapter Alignment
+### Phase 4: MdxViewer Compatibility Alignment
 
-**Deliverable**: `gillijimproject_refactor` reads the same full header and uses Position correctly.
+**Deliverable**: `MdxViewer` consumes the same shared header contract without becoming a second alphaWDT parser owner.
 
-- Update `McnkAlphaHeader` struct to match Phase 1 layout
+- Update compatibility structs and bridges to match Phase 1 layout
 - Replace `Unused1/2/3` with named `PositionX/Z/Y`
 - Use the position fields for bounding-box computation (not height base)
 - Verify MdxViewer renders alpha terrain correctly with absolute heights
+- Do not add another app-side alphaWDT parser or writer; future file-semantic fixes belong in `wow-viewer` shared I/O first
 
 ## Validation
 
@@ -136,7 +137,7 @@ Type classification: `(flags >> 4) & 3` gives: 0=water, 1=ocean, 2=magma, 3=slim
 ## Known Issues to Address Separately
 
 1. **WDT MAIN column-major indexing**: `ReadExistingTiles` and `TryReadTile` may use row-major indexing (needs verification against the spec's `tileIndex = tileX * 64 + tileY`)
-2. **FillHeightmapGaps assumes 0.0f means unfilled**: With absolute heights, 0.0f could be a legitimate sea-level value. The fix would require tracking which heightmap positions were written by a chunk (e.g., using a bool array or NaN sentinel). Low priority because sea-level vertices are rarely exactly 0.0f in alpha data. `AlphaEmbeddedAdtReader` already uses NaN-based gap filling; the shared path in `AlphaWdtReader` and `LkToAlphaConverter` still uses 0.0f.
+2. **FillHeightmapGaps assumes 0.0f means unfilled**: With absolute heights, 0.0f could be a legitimate sea-level value. The fix would require tracking which heightmap positions were written by a chunk (e.g., using a bool array or NaN sentinel). Low priority because sea-level vertices are rarely exactly 0.0f in alpha data. Some compatibility readers already use NaN-based gap filling; the shared path in `AlphaWdtReader` and `LkToAlphaConverter` still uses 0.0f.
 
 ## Height Convention Contract (Verified 2026-05-09)
 
@@ -145,7 +146,7 @@ The following contract is Ghidra-verified and MUST be maintained across all data
 | Path | MCVT Storage | Reading Convention | Tensor-Pack (height_257) |
 |------|-------------|-------------------|--------------------------|
 | Alpha WDT → AlphaWdtReader | **Absolute** world-space Z | Read directly, no addition | Absolute Z |
-| Alpha WDT → AlphaEmbeddedAdtReader | **Absolute** world-space Z | Read directly, no addition | Absolute Z |
+| Alpha WDT → `MdxViewer` compatibility readers | **Absolute** world-space Z | Must match `AlphaWdtReader` exactly | Absolute Z |
 | Alpha WDT → AlphaWdtWriter | **Absolute** world-space Z | Write directly, no subtraction | N/A (write path) |
 | LK ADT → AdtTensorPackBuilder | **Relative** to BaseHeight | Read BaseHeight at 0x70, add to MCVT | Absolute Z |
 | LK ADT → WorldTerrainTileBuilder | **Relative** to BaseHeight | Read BaseHeight at 0x70, add to MCVT | Absolute Z |

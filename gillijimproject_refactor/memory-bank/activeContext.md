@@ -3,10 +3,10 @@
 ## BRANCH
 `v0.4.9-strict-guards` forked from `971fff2` on 2026-05-06.
 
-## wow-viewer Library Completeness / Harvest Status — Resynced 2026-05-09
+## wow-viewer Library Completeness / Harvest Status — Resynced 2026-05-11
 
 Phase A (terrain type system) and Phase B (harvest pipeline) are COMPLETE.
-Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion across 4 maps. LkToAlpha now has **real-data MdxViewer validation** of 4.0.0 Azeroth (839/839 tiles) against staged 0.5.3 client, with asset filtering and tileset bundling.
+Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion across 4 maps. LkToAlpha now has **real-data MdxViewer validation** of 4.0.0 Azeroth (839/839 tiles) against staged 0.5.3 client, with asset filtering, tileset bundling, and the current alphaWDT placement/culling contract documented below.
 
 ### Landed In The May 9 Session (Phase C Alpha WDT Writer Fixup + MdxViewer Validation)
 
@@ -34,7 +34,14 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 - Rotation: `file = (world.pitch, world.yaw - 180°, world.roll)`, yaw offset = π (confirmed `_DAT_00810e04 = 3.14159274`)
 - Bounds: `file.t = (MapOrigin - world.min.Y, world.max.Z, MapOrigin - world.min.X)`, `file.b = (MapOrigin - world.max.Y, world.min.Z, MapOrigin - world.max.X)`
 
-**Open issue: Object placements (MDDF/MODF) are still wrong.** The Ghidra-verified coordinate transforms are correct in the writer, but source 4.x placement data may use different axis conventions than what the adapter pipeline assumes. MCRF population logic may also need fixing. Maps load without crashing but objects appear misplaced.
+**Current alphaWDT placement contract (2026-05-11):**
+- `AlphaWdtReader`, `AlphaWdtWriter`, and `LkAdtWriter` now share the same round-trip-safe raw rotation convention: `Rotation = (fileRotX, fileRotZ, fileRotY)`. Do not subtract 180 degrees on write; the client applies the yaw `+π` at load time.
+- Alpha doodads stay single-owner in `MCRF` to avoid the native purge assert. The writer now chooses the chunk containing the doodad anchor by default; preserved LK source refs only win when they stay inside that chunk's local `3x3` neighborhood.
+- Alpha WMOs keep overlap-based multi-chunk refs derived from bounds, with containing-chunk fallback only when no bounds overlap exists.
+- Target-client asset matching must be built from the actual target archives, Alpha wrapper scan, and loose files only. Do not treat external listfiles as proof that a 0.5.3 asset exists.
+- Top-level alphaWDT chunks are contiguous. Do not odd-byte pad `MDNM`, `MONM`, or other top-level chunks between headers.
+
+**Ownership rule:** alphaWDT file semantics now live in `wow-viewer` shared I/O (`AlphaWdtReader`, `AlphaWdtWriter`, `AlphaTerrainAdapter`, `AlphaToLkConverter`, `LkToAlphaConverter`). Future `MdxViewer` compatibility work must consume those shared contracts instead of adding another legacy alpha parser or writer.
 
 **AlphaWdtReader fixes:**
 - `ReadExistingTiles`: MAIN index `x = i % 64, y = i / 64`.
@@ -109,7 +116,7 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 - **Grid lines in normal/height visualizations are expected:** MCVT/MCNR store 145 vertices per chunk with shared boundary vertices. Rendering them as a flat 257×257 image produces visible seams at chunk edges. This is not a bug — it's inherent to the WoW ADT vertex layout.
 
 ## WHAT IS STILL OPEN
-- AreaID crosswalk support (currently all chunks default to AreaID 0)
+- Forward `AlphaToLk` AreaID crosswalk wiring (reverse `LkToAlpha` mapping landed; the forward lane is still open)
 - LkToAlpha real-data batch validation beyond the new focused round-trip regressions
 - Full Alpha/LK chunk-for-chunk preservation instead of reduced terrain-domain reconstruction
 - M2/MDX converters and WMO v14↔v17 converters

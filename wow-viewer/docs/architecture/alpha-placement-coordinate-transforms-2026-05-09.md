@@ -54,9 +54,14 @@ If `MDDF`/`MODF` are populated but each MCNK has `MCRF` empty and both counts se
 
 Current writer policy:
 
-- MDDF references are assigned to the chunk containing the doodad `Position`.
+- MDDF references are single-owner only. The writer assigns a doodad to the chunk containing the doodad `Position`, and only allows preserved LK source refs to override that when they remain inside the containing chunk's local `3x3` neighborhood.
 - MODF references are assigned to every chunk whose planar bounds overlap the WMO `BoundsMin`/`BoundsMax`; if bounds do not overlap any chunk, the writer falls back to the chunk containing `Position`.
 - Within each MCRF payload, all MDDF indices are written first, then all MODF indices, matching `CreateRefs`.
+
+Ownership rule:
+
+- `wow-viewer` shared I/O owns these placement semantics.
+- Future `MdxViewer` alphaWDT compatibility work should consume `AlphaWdtReader`, `AlphaWdtWriter`, and the shared converter/domain types instead of introducing another placement parser or writer.
 
 ## Raw File Layout
 
@@ -125,16 +130,34 @@ file_pos_at_offset_0x10 = MapOrigin - renderer.X    (rawY in our code)
 Our internal `Position` vector uses renderer coordinates:
 - `Position = (MapOrigin - rawY, MapOrigin - rawX, rawZ)`
 
-Reader (AlphaWdtReader.cs:755,799):
+Current shared reader and writer contract:
 ```csharp
 Position = new Vector3(MapOrigin - rawY, MapOrigin - rawX, rawZ)
 ```
 
-Writer (AlphaWdtWriter.cs:547-549,571-573):
 ```csharp
-Write(MapOrigin - Position.Y)   // offset+8
-Write(Position.Z)                // offset+12
-Write(MapOrigin - Position.X)    // offset+16
+filePosX = MapOrigin - Position.Y
+filePosY = Position.Z
+filePosZ = MapOrigin - Position.X
+```
+
+This same convention is used by the shared Alpha and LK writer paths. Renderer-space conversion belongs in compatibility/runtime bridges, not in another file parser.
+
+### Shared Rotation Convention
+
+`AlphaModelPlacement.Rotation` and `AlphaWorldModelPlacement.Rotation` intentionally store the raw file-space values in a round-trip-safe order:
+
+```csharp
+Rotation = new Vector3(fileRotX, fileRotZ, fileRotY)
+```
+
+`AlphaWdtReader`, `AlphaWdtWriter`, and `LkAdtWriter` all use that exact convention so Alpha and LK placement tables can move through the shared domain model without recomputing renderer Euler angles. Renderer-space conversion belongs in the consumer bridge (`BuildLegacyMdxPlacementTransform` or equivalent), not in file I/O.
+
+Writer mapping:
+```csharp
+Write(Rotation.X)  // file rot.x
+Write(Rotation.Z)  // file rot.y
+Write(Rotation.Y)  // file rot.z
 ```
 
 ## Rotation Transform (identical for MDDF and MODF)
@@ -164,12 +187,7 @@ file_rot_at_offset_0x1C = renderer_rot_in_degrees.Y    (maps to file_rot.z -> re
 
 ### Our Code Convention
 
-Our `Rotation` vector stores the raw file values with the axis mapping **partially** applied:
-```csharp
-Rotation = (rotX, rotY, rotZ)  // where rotX=offset+20, rotZ=offset+24, rotY=offset+28
-```
-
-This is a **round-trip-safe** convention: reader writes `(rotX, rotY, rotZ)` and writer reads `(Rotation.X, Rotation.Z, Rotation.Y)` back to the same offsets. But it is NOT the true renderer rotation order; the viewer's `BuildLegacyMdxPlacementTransform` compensates:
+This is a **round-trip-safe** convention, not the true renderer rotation order. The viewer's `BuildLegacyMdxPlacementTransform` compensates:
 
 ```csharp
 float rx = -DegreesToRadians(rotationDegrees.Y);  // -Y becomes roll
@@ -180,9 +198,9 @@ float rz = DegreesToRadians(rotationDegrees.Z);   // Z becomes yaw
 
 The separate `Matrix4x4.CreateRotationZ(MathF.PI)` compensates for the `+π` yaw offset in the client, and the negation of rx/ry compensates for the axis-negation in the position transform (since positions are negated in X/Y, the rotation senses are also negated).
 
-### ⚠ IMPORTANT NOTE
+### IMPORTANT NOTE
 
-The `+π` yaw offset (`renderer_rot.z = file_rot.y * π/180 + π`) means that a doodad with `file_rot.y = 0` will be rotated 180° (π radians) around the Z axis in the renderer. This is NOT captured in our `Rotation` vector — it's handled by the viewer's explicit `CreateRotationZ(π)` prefix. When writing rotation values to file, we do NOT subtract π from the yaw; we write `Rotation.Y` directly to offset+0x1C, and the `+π` is applied by the client at load time.
+The `+π` yaw offset (`renderer_rot.z = file_rot.y * π/180 + π`) means that a doodad with `file_rot.y = 0` will be rotated 180° (π radians) around the Z axis in the renderer. This is NOT captured in the shared `Rotation` vector; it is handled by the consuming renderer bridge. When writing rotation values to file, we do NOT subtract π from yaw. We write the raw file-space values back out and let the client apply `+π` at load time.
 
 ## Bounds Transform (MODF only)
 
@@ -207,17 +225,15 @@ But after axis transform, `extents.b.z` maps to `-min_renderer_X` and `extents.t
 ### Our Code Convention
 
 ```csharp
-// Reader (AlphaWdtReader.cs:805-806)
 BoundsMin = new Vector3(MapOrigin - bbMaxY, MapOrigin - bbMaxX, bbMinZ)
 BoundsMax = new Vector3(MapOrigin - bbMinY, MapOrigin - bbMinX, bbMaxZ)
 
-// Writer (AlphaWdtWriter.cs:577-582)
-Write(MapOrigin - BoundsMax.Y)   // offset+32  (file extents.b.z -> -max_renderer.X + MapOrigin)
-Write(BoundsMin.Z)               // offset+36  (file extents.b.x -> renderer min.Z)
-Write(MapOrigin - BoundsMax.X)   // offset+40  (file extents.b.y -> -max_renderer.Y + MapOrigin)
-Write(MapOrigin - BoundsMin.Y)   // offset+44  (file extents.t.z -> -min_renderer.X + MapOrigin)
-Write(BoundsMax.Z)               // offset+48  (file extents.t.x -> renderer max.Z)
-Write(MapOrigin - BoundsMin.X)   // offset+52  (file extents.t.y -> -min_renderer.Y + MapOrigin)
+Write(MapOrigin - BoundsMax.Y)   // offset+32
+Write(BoundsMin.Z)               // offset+36
+Write(MapOrigin - BoundsMax.X)   // offset+40
+Write(MapOrigin - BoundsMin.Y)   // offset+44
+Write(BoundsMax.Z)               // offset+48
+Write(MapOrigin - BoundsMin.X)   // offset+52
 ```
 
 The variable naming `bbMin/Max` in the reader matches the raw byte layout: `bbMin` reads from offset+32 (the file extents.b field), `bbMax` reads from offset+44 (the file extents.t field).
@@ -243,13 +259,7 @@ The LK ADT writer (`LkAdtWriter.cs`) uses the **same** coordinate conventions as
 
 `LkToAlphaRoundTripTests.cs` includes:
 
-1. **`WriteAlphaWdt_UsesClientMainOrderAndMcnkSubchunkContract`** — structural validation
-2. **`ConvertTile_AndWriteAlphaWdt_RoundTripsChunkHeightsAlphaAndLiquid`** — terrain/liquid
-3. **`ConvertTile_ThroughAlphaWdt_BackToLkAdt_RoundTripsLiquidIntoMh2o`** — liquid → MH2O
-4. **`LkAdtWriter_RoundTripsModfBoundsWithReaderOrientation`** — MODF through LK writer
-5. **`AlphaWdt_RoundTripsMddfAndModfPlacements`** — MDDF/MODF through alpha WDT reader/writer
-
-All tests pass as of 2026-05-09.
+Current focused coverage in `LkToAlphaRoundTripTests` includes structural MAIN/MCNK checks, terrain and liquid round-trip, MDDF/MODF placement round-trip, odd-sized top-level chunk contiguity, and current doodad-owner behavior. The focused alphaWDT slice passes as of 2026-05-11.
 
 ## Cross-Reference
 
