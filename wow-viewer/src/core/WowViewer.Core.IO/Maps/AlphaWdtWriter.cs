@@ -222,6 +222,7 @@ public static class AlphaWdtWriter
             BinaryPrimitives.WriteInt32LittleEndian(mcrfRaw.AsSpan((nDoodadRefs + i) * 4), mapObjRefs[i]);
 
         byte[] mclyWhole = WrapChunk("MCLY", mclyRaw);
+        byte[] mcrfWhole = WrapChunk("MCRF", mcrfRaw);
 
         int cursor = 0;
         int offsHeight = cursor;
@@ -231,7 +232,7 @@ public static class AlphaWdtWriter
         int offsLayer = cursor;
         cursor += mclyWhole.Length;
         int offsRefs = cursor;
-        cursor += mcrfRaw.Length;
+        cursor += mcrfWhole.Length;
         int offsShadow = mcshRaw.Length > 0 ? cursor : 0;
         cursor += mcshRaw.Length;
         int offsAlpha = cursor;
@@ -239,30 +240,7 @@ public static class AlphaWdtWriter
         int offsLiquid = mclqRaw.Length > 0 ? cursor : 0;
         cursor += mclqRaw.Length;
 
-        uint flags = 0u;
-        if (liquidChunk is not null)
-        {
-            // Ghidra-verified (CMapChunk::Create, client 0.5.3.3368):
-            // The client's liquid loop tests MCNK flag bits 2, 3, 4, 5 (masks 0x04, 0x08, 0x10, 0x20).
-            // Bit 2 (0x04): has water surface — liquid type 1 (river/lake)
-            // Bit 3 (0x08): has ocean/coast water — liquid type 2
-            // Bit 4 (0x10): has lava — liquid type 3 sub-type 0
-            // Bit 5 (0x20): has slime — liquid type 3 sub-type 1
-            //
-            // The 4.x source data stores liquid type in MH2O chunks, not MCNK flags.
-            // We regenerate alpha flags from the liquid chunk data:
-            // - Any liquid present → set bit 2 (0x04, water surface)
-            // - Lava slime → additionally set bit 5 (0x20)
-            flags |= 0x04u;
-            if (liquidChunk.McnkFlags != 0)
-            {
-                int liquidType = ClassifyAlphaLiquidType(liquidChunk.McnkFlags);
-                if (liquidType == 3)
-                    flags |= 0x10u;
-                else if (liquidType == 4)
-                    flags |= 0x20u;
-            }
-        }
+        uint flags = liquidChunk is not null ? (liquidChunk.McnkFlags & 0x3Cu) : 0u;
         if (mcshRaw.Length > 0) flags |= 0x01;
 
         float radius = CalculateRadius(heights);
@@ -313,7 +291,7 @@ public static class AlphaWdtWriter
         msw.Write(mcvtAlpha);
         msw.Write(mcnrAlpha);
         msw.Write(mclyWhole);
-        msw.Write(mcrfRaw);
+        msw.Write(mcrfWhole);
         if (mcshRaw.Length > 0) msw.Write(mcshRaw);
         if (mcalRaw.Length > 0) msw.Write(mcalRaw);
         if (mclqRaw.Length > 0) msw.Write(mclqRaw);
@@ -411,14 +389,11 @@ public static class AlphaWdtWriter
         int baseX = cx * 16;
         int baseY = cy * 16;
 
-        // Ghidra-verified (CMapChunk::CreateNormals, client 0.5.3.3368):
-        // Alpha MCNR normal format per vertex: byte[0] = round(-Y * 127), byte[1] = round(Z * 127), byte[2] = round(-X * 127)
-        // i.e. (-Y_signed, Z_signed, -X_signed) where signed = clamp(round(normal * 127), -128, 127)
-        // The client decodes: normal.Y = byte[0] * (-1/127), normal.Z = byte[1] * (1/127), normal.X = byte[2] * (-1/127)
-        // Layout: 81 outer normals (9 rows × 9 cols) then 64 inner normals (8 rows × 8 cols)
+        // Alpha MCNR layout: 81 outer normals (9 rows × 9 cols) then 64 inner normals (8 rows × 8 cols)
         // followed by 13 zero-pad bytes = 448 total
         int dst = 0;
 
+        // Outer vertices (9 rows × 9 cols)
         for (int outerRow = 0; outerRow < 9; outerRow++)
         {
             for (int col = 0; col < 9; col++)
@@ -428,17 +403,15 @@ public static class AlphaWdtWriter
 
                 if ((uint)px < TileSize && (uint)py < TileSize)
                 {
-                    float nx = normalXyz[py, px, 0];
-                    float ny = normalXyz[py, px, 1];
-                    float nz = normalXyz[py, px, 2];
-                    data[dst] = EncodeAlphaNormal(-ny);
-                    data[dst + 1] = EncodeAlphaNormal(nz);
-                    data[dst + 2] = EncodeAlphaNormal(-nx);
+                    data[dst] = EncodeNormal(normalXyz[py, px, 0]);
+                    data[dst + 1] = EncodeNormal(normalXyz[py, px, 2]);
+                    data[dst + 2] = EncodeNormal(normalXyz[py, px, 1]);
                 }
                 dst += 3;
             }
         }
 
+        // Inner vertices (8 rows × 8 cols)
         for (int innerRow = 0; innerRow < 8; innerRow++)
         {
             for (int col = 0; col < 8; col++)
@@ -448,12 +421,9 @@ public static class AlphaWdtWriter
 
                 if ((uint)px < TileSize && (uint)py < TileSize)
                 {
-                    float nx = normalXyz[py, px, 0];
-                    float ny = normalXyz[py, px, 1];
-                    float nz = normalXyz[py, px, 2];
-                    data[dst] = EncodeAlphaNormal(-ny);
-                    data[dst + 1] = EncodeAlphaNormal(nz);
-                    data[dst + 2] = EncodeAlphaNormal(-nx);
+                    data[dst] = EncodeNormal(normalXyz[py, px, 0]);
+                    data[dst + 1] = EncodeNormal(normalXyz[py, px, 2]);
+                    data[dst + 2] = EncodeNormal(normalXyz[py, px, 1]);
                 }
                 dst += 3;
             }
@@ -463,7 +433,7 @@ public static class AlphaWdtWriter
         return data;
     }
 
-    private static byte EncodeAlphaNormal(float value)
+    private static byte EncodeNormal(float value)
     {
         return unchecked((byte)(sbyte)Math.Clamp(MathF.Round(value * 127f), -128, 127));
     }
@@ -603,20 +573,6 @@ public static class AlphaWdtWriter
         }
 
         return null;
-    }
-
-    private static int ClassifyAlphaLiquidType(uint mcnkFlags)
-    {
-        if ((mcnkFlags & 0x04) != 0) return 1;
-        if ((mcnkFlags & 0x08) != 0) return 2;
-        int bits = (int)((mcnkFlags >> 4) & 3);
-        return bits switch
-        {
-            1 => 3,
-            2 => 3,
-            3 => 4,
-            _ => 1
-        };
     }
 
     private static byte[] BuildAlphaMclq(AlphaLiquidChunk? liquidChunk)
