@@ -877,9 +877,9 @@ public static class AlphaWdtWriter
             float filePosX = MapOrigin - p.Position.Y;
             float filePosY = p.Position.Z;
             float filePosZ = MapOrigin - p.Position.X;
-            float fileRotX = p.Rotation.Y;
-            float fileRotY = p.Rotation.Z - 180.0f;
-            float fileRotZ = p.Rotation.X;
+            float fileRotX = p.Rotation.X;
+            float fileRotY = p.Rotation.Z;
+            float fileRotZ = p.Rotation.Y;
             BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(off + 0x00), nameId);
             BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(off + 0x04), p.UniqueId);
             BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(off + 0x08), filePosX);
@@ -908,9 +908,9 @@ public static class AlphaWdtWriter
             float filePosX = MapOrigin - p.Position.Y;
             float filePosY = p.Position.Z;
             float filePosZ = MapOrigin - p.Position.X;
-            float fileRotX = p.Rotation.Y;
-            float fileRotY = p.Rotation.Z - 180.0f;
-            float fileRotZ = p.Rotation.X;
+            float fileRotX = p.Rotation.X;
+            float fileRotY = p.Rotation.Z;
+            float fileRotZ = p.Rotation.Y;
             float extentsTopX = MapOrigin - p.BoundsMin.Y;
             float extentsTopY = p.BoundsMax.Z;
             float extentsTopZ = MapOrigin - p.BoundsMin.X;

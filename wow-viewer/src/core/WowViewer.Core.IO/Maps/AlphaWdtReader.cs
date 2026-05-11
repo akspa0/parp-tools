@@ -769,15 +769,12 @@ public static class AlphaWdtReader
             float rendererX = MapOrigin - filePosZ;
             float rendererY = MapOrigin - filePosX;
             float rendererZ = filePosY;
-            float rendererRollDeg = fileRotZ;
-            float rendererPitchDeg = fileRotX;
-            float rendererYawDeg = fileRotY + 180.0f;
             placements.Add(new AlphaModelPlacement(
                 nameId,
                 ResolveName(modelNames, nameId),
                 uniqueId,
                 new Vector3(rendererX, rendererY, rendererZ),
-                new Vector3(rendererRollDeg, rendererPitchDeg, rendererYawDeg),
+                new Vector3(fileRotX, fileRotZ, fileRotY),
                 scale / 1024f));
         }
     }
@@ -805,9 +802,6 @@ public static class AlphaWdtReader
             float rendererX = MapOrigin - filePosZ;
             float rendererY = MapOrigin - filePosX;
             float rendererZ = filePosY;
-            float rendererRollDeg = fileRotZ;
-            float rendererPitchDeg = fileRotX;
-            float rendererYawDeg = fileRotY + 180.0f;
             float boundsMinX = MapOrigin - extentsTopZ;
             float boundsMinY = MapOrigin - extentsTopX;
             float boundsMinZ = extentsBotY;
@@ -819,7 +813,7 @@ public static class AlphaWdtReader
                 ResolveName(modelNames, nameId),
                 uniqueId,
                 new Vector3(rendererX, rendererY, rendererZ),
-                new Vector3(rendererRollDeg, rendererPitchDeg, rendererYawDeg),
+                new Vector3(fileRotX, fileRotZ, fileRotY),
                 new Vector3(boundsMinX, boundsMinY, boundsMinZ),
                 new Vector3(boundsMaxX, boundsMaxY, boundsMaxZ),
                 flags));
