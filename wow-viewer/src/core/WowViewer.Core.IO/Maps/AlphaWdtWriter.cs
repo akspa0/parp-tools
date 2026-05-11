@@ -83,9 +83,7 @@ public static class AlphaWdtWriter
         IReadOnlyList<string> mdxNames, IReadOnlyList<string> wmoNames,
         Dictionary<string, int> mdxIndex, Dictionary<string, int> wmoIndex)
     {
-        byte[] mddfData = BuildMddfData(tile, mdxIndex);
-        byte[] modfData = BuildModfData(tile, wmoIndex);
-        var refsByChunk = BuildPlacementReferences(tile, tileX, tileY);
+        AlphaPlacementWritePlan placementPlan = BuildPlacementWritePlan(tile, tileX, tileY, mdxIndex, wmoIndex);
 
         var mcnkDataList = new List<byte[]>(256);
         for (int cy = 0; cy < 16; cy++)
@@ -93,7 +91,7 @@ public static class AlphaWdtWriter
             for (int cx = 0; cx < 16; cx++)
             {
                 int chunkIndex = cy * 16 + cx;
-                mcnkDataList.Add(BuildMcnkData(tile, cx, cy, refsByChunk[chunkIndex]));
+                mcnkDataList.Add(BuildMcnkData(tile, cx, cy, placementPlan.RefsByChunk[chunkIndex]));
             }
         }
 
@@ -114,10 +112,10 @@ public static class AlphaWdtWriter
         WriteDataChunk(bw, "MTEX", mtexData);
 
         int mddfRelative = (int)(bw.Seek(0, SeekOrigin.Current) - mhdrDataStart);
-        WriteDataChunk(bw, "MDDF", mddfData);
+        WriteDataChunk(bw, "MDDF", placementPlan.MddfData);
 
         int modfRelative = (int)(bw.Seek(0, SeekOrigin.Current) - mhdrDataStart);
-        WriteDataChunk(bw, "MODF", modfData);
+        WriteDataChunk(bw, "MODF", placementPlan.ModfData);
 
         int tileHeaderSize = checked((int)(bw.Seek(0, SeekOrigin.Current) - mhdrStart));
 
@@ -245,18 +243,39 @@ public static class AlphaWdtWriter
         return ms.ToArray();
     }
 
-    private static AlphaPlacementRefs[] BuildPlacementReferences(AlphaTileData tile, int tileX, int tileY)
+    private static AlphaPlacementWritePlan BuildPlacementWritePlan(AlphaTileData tile, int tileX, int tileY,
+        Dictionary<string, int> mdxIndex, Dictionary<string, int> wmoIndex)
+    {
+        byte[] mddfData = BuildMddfData(tile, mdxIndex);
+        byte[] modfData = BuildModfData(tile, wmoIndex);
+        Dictionary<int, int> doodadIndexByUniqueId = BuildDoodadIndexByUniqueId(tile.ModelPlacements);
+        Dictionary<int, int> worldIndexByUniqueId = BuildWorldModelIndexByUniqueId(tile.WorldModelPlacements);
+        AlphaPlacementRefs[] refsByChunk = BuildPlacementReferences(tile, tileX, tileY, doodadIndexByUniqueId, worldIndexByUniqueId);
+
+        return new AlphaPlacementWritePlan(mddfData, modfData, refsByChunk);
+    }
+
+    private static AlphaPlacementRefs[] BuildPlacementReferences(AlphaTileData tile, int tileX, int tileY,
+        Dictionary<int, int> doodadIndexByUniqueId, Dictionary<int, int> worldIndexByUniqueId)
     {
         var refsByChunk = new AlphaPlacementRefs[256];
         for (int index = 0; index < refsByChunk.Length; index++)
             refsByChunk[index] = new AlphaPlacementRefs();
 
+        IReadOnlyList<int>[]? preservedDoodadUniqueIdsByChunk = tile.McrfDoodadUniqueIdsByChunk;
+        IReadOnlyList<int>[]? preservedWorldUniqueIdsByChunk = tile.McrfWorldModelUniqueIdsByChunk;
         IReadOnlyList<int>[]? preservedDoodadRefsByChunk = tile.McrfDoodadRefsByChunk;
         IReadOnlyList<int>[]? preservedWorldModelRefsByChunk = tile.McrfWorldModelRefsByChunk;
+        bool usePreservedDoodadUniqueIds = HasAnyChunkRefs(preservedDoodadUniqueIdsByChunk);
+        bool usePreservedWorldUniqueIds = HasAnyChunkRefs(preservedWorldUniqueIdsByChunk);
         bool usePreservedDoodadRefs = HasAnyChunkRefs(preservedDoodadRefsByChunk);
         bool usePreservedWorldModelRefs = HasAnyChunkRefs(preservedWorldModelRefsByChunk);
 
-        if (usePreservedDoodadRefs)
+        if (usePreservedDoodadUniqueIds)
+        {
+            AddMappedUniqueIdRefs(refsByChunk, preservedDoodadUniqueIdsByChunk!, doodadIndexByUniqueId, static (placementRefs, placementIndex) => placementRefs.DoodadIndices.Add(placementIndex));
+        }
+        else if (usePreservedDoodadRefs)
         {
             for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
             {
@@ -273,7 +292,11 @@ public static class AlphaWdtWriter
             }
         }
 
-        if (usePreservedWorldModelRefs)
+        if (usePreservedWorldUniqueIds)
+        {
+            AddMappedUniqueIdRefs(refsByChunk, preservedWorldUniqueIdsByChunk!, worldIndexByUniqueId, static (placementRefs, placementIndex) => placementRefs.MapObjIndices.Add(placementIndex));
+        }
+        else if (usePreservedWorldModelRefs)
         {
             for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
             {
@@ -290,6 +313,38 @@ public static class AlphaWdtWriter
         }
 
         return refsByChunk;
+    }
+
+    private static void AddMappedUniqueIdRefs(AlphaPlacementRefs[] refsByChunk, IReadOnlyList<int>[] refsByUniqueIdChunk,
+        Dictionary<int, int> placementIndexByUniqueId, Action<AlphaPlacementRefs, int> addPlacementIndex)
+    {
+        for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
+        {
+            if (refsByUniqueIdChunk[chunkIndex] is not { Count: > 0 } refs)
+                continue;
+
+            foreach (int uniqueId in refs)
+            {
+                if (placementIndexByUniqueId.TryGetValue(uniqueId, out int placementIndex))
+                    addPlacementIndex(refsByChunk[chunkIndex], placementIndex);
+            }
+        }
+    }
+
+    private static Dictionary<int, int> BuildDoodadIndexByUniqueId(IReadOnlyList<AlphaModelPlacement> placements)
+    {
+        var indexByUniqueId = new Dictionary<int, int>();
+        for (int index = 0; index < placements.Count; index++)
+            indexByUniqueId.TryAdd(placements[index].UniqueId, index);
+        return indexByUniqueId;
+    }
+
+    private static Dictionary<int, int> BuildWorldModelIndexByUniqueId(IReadOnlyList<AlphaWorldModelPlacement> placements)
+    {
+        var indexByUniqueId = new Dictionary<int, int>();
+        for (int index = 0; index < placements.Count; index++)
+            indexByUniqueId.TryAdd(placements[index].UniqueId, index);
+        return indexByUniqueId;
     }
 
     private static int FindContainingChunk(Vector3 position, int tileX, int tileY)
@@ -932,5 +987,12 @@ public static class AlphaWdtWriter
     {
         public List<int> DoodadIndices { get; } = [];
         public List<int> MapObjIndices { get; } = [];
+    }
+
+    private sealed class AlphaPlacementWritePlan(byte[] mddfData, byte[] modfData, AlphaPlacementRefs[] refsByChunk)
+    {
+        public byte[] MddfData { get; } = mddfData;
+        public byte[] ModfData { get; } = modfData;
+        public AlphaPlacementRefs[] RefsByChunk { get; } = refsByChunk;
     }
 }

@@ -248,6 +248,61 @@ public sealed class LkToAlphaRoundTripTests
     }
 
     [Fact]
+    public void WriteAlphaWdt_RemapPreservedChunkRefsByUniqueIdAgainstFilteredPlacementTables()
+    {
+        float[,] heightmap = new float[257, 257];
+        int[,,] texIds = new int[16, 16, 4];
+        bool[,,] layerMask = new bool[16, 16, 4];
+        for (int cy = 0; cy < 16; cy++)
+            for (int cx = 0; cx < 16; cx++)
+                layerMask[cx, cy, 0] = true;
+
+        IReadOnlyList<int>[] doodadUniqueIdsByChunk = CreateEmptyChunkRefSet();
+        IReadOnlyList<int>[] worldUniqueIdsByChunk = CreateEmptyChunkRefSet();
+        IReadOnlyList<int>[] staleDoodadRefsByChunk = CreateEmptyChunkRefSet();
+        IReadOnlyList<int>[] staleWorldRefsByChunk = CreateEmptyChunkRefSet();
+        doodadUniqueIdsByChunk[37] = [222];
+        worldUniqueIdsByChunk[115] = [333];
+        staleDoodadRefsByChunk[37] = [7];
+        staleWorldRefsByChunk[115] = [9];
+
+        AlphaTileData tile = new(
+            sourcePath: "filtered_ref_remap",
+            heightmap: heightmap,
+            mcalAlphaPack: null,
+            mclyTextureIds: texIds,
+            mclyLayerMask: layerMask,
+            holeMask: new bool[16, 16],
+            textureNames: ["terrain_a.blp"],
+            modelPlacements:
+            [
+                new AlphaModelPlacement(0, "world\\azeroth\\tree.mdx", 222, new Vector3(17000f, 16900f, 45.5f), Vector3.Zero, 1.0f)
+            ],
+            worldModelPlacements:
+            [
+                new AlphaWorldModelPlacement(0, "world\\azeroth\\barracks.wmo", 333, new Vector3(16950f, 16900f, 40.2f), Vector3.Zero, new Vector3(16800f, 16700f, 35f), new Vector3(17100f, 17100f, 50f), 0x0001)
+            ],
+            liquidChunks: [],
+            mcrfDoodadRefsByChunk: staleDoodadRefsByChunk,
+            mcrfWorldModelRefsByChunk: staleWorldRefsByChunk,
+            mcrfDoodadUniqueIdsByChunk: doodadUniqueIdsByChunk,
+            mcrfWorldModelUniqueIdsByChunk: worldUniqueIdsByChunk);
+
+        byte[] wdt = AlphaWdtWriter.Build("filtered_ref_remap", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        var chunk37Refs = ReadMcrfRefs(wdt, 0, 0, 37);
+        Assert.Equal([0], chunk37Refs.DoodadRefs);
+        Assert.Empty(chunk37Refs.WorldModelRefs);
+
+        var chunk115Refs = ReadMcrfRefs(wdt, 0, 0, 115);
+        Assert.Empty(chunk115Refs.DoodadRefs);
+        Assert.Equal([0], chunk115Refs.WorldModelRefs);
+    }
+
+    [Fact]
     public void ConvertTile_AndWriteAlphaWdt_UsesSingleFixedSizeLiquidBlock()
     {
         List<LkMcnkData> chunks = [];
@@ -623,6 +678,15 @@ public sealed class LkToAlphaRoundTripTests
             worldModelRefs[i] = BitConverter.ToInt32(wdt, payloadOffset + ((nDoodadRefs + i) * 4));
 
         return (doodadRefs, worldModelRefs);
+    }
+
+    private static IReadOnlyList<int>[] CreateEmptyChunkRefSet()
+    {
+        IReadOnlyList<int>[] refsByChunk = new IReadOnlyList<int>[256];
+        for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
+            refsByChunk[chunkIndex] = [];
+
+        return refsByChunk;
     }
 
     private static string ReadChunkId(byte[] data, int offset)

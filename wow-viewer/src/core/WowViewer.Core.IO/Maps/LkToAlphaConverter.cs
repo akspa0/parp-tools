@@ -46,6 +46,8 @@ public static class LkToAlphaConverter
         byte[,,]? mclvLighting = new byte[257, 257, 4];
         IReadOnlyList<int>[] mcrfDoodadRefsByChunk = new IReadOnlyList<int>[ChunksPerTile * ChunksPerTile];
         IReadOnlyList<int>[] mcrfWorldModelRefsByChunk = new IReadOnlyList<int>[ChunksPerTile * ChunksPerTile];
+        IReadOnlyList<int>[] mcrfDoodadUniqueIdsByChunk = new IReadOnlyList<int>[ChunksPerTile * ChunksPerTile];
+        IReadOnlyList<int>[] mcrfWorldModelUniqueIdsByChunk = new IReadOnlyList<int>[ChunksPerTile * ChunksPerTile];
         bool hasMccv = false;
         bool hasMclv = false;
         List<AlphaLiquidChunk> liquidChunks = [];
@@ -62,6 +64,8 @@ public static class LkToAlphaConverter
                 LkMcnkData chunk = adt.Chunks[chunkIdx];
                 mcrfDoodadRefsByChunk[chunkIdx] = chunk.DoodadRefs.Count > 0 ? [.. chunk.DoodadRefs] : Array.Empty<int>();
                 mcrfWorldModelRefsByChunk[chunkIdx] = chunk.WorldModelRefs.Count > 0 ? [.. chunk.WorldModelRefs] : Array.Empty<int>();
+                mcrfDoodadUniqueIdsByChunk[chunkIdx] = MapDoodadRefsToUniqueIds(chunk.DoodadRefs, adt.ModelPlacements);
+                mcrfWorldModelUniqueIdsByChunk[chunkIdx] = MapWorldModelRefsToUniqueIds(chunk.WorldModelRefs, adt.WorldModelPlacements);
                 InjectChunkHeights(heightmap, chunk, tileBaseHeight, cx, cy);
                 InjectChunkNormals(normalXyz, chunk, cx, cy);
                 InjectChunkAlpha(alphaPack, chunk, adt.TextureNames, texIds, layerMask, cx, cy);
@@ -161,7 +165,39 @@ public static class LkToAlphaConverter
             mclvLightingBytes: hasMclv ? mclvLighting : null,
             holeFullMasks: holeFullMasks,
             mcrfDoodadRefsByChunk: mcrfDoodadRefsByChunk,
-            mcrfWorldModelRefsByChunk: mcrfWorldModelRefsByChunk);
+            mcrfWorldModelRefsByChunk: mcrfWorldModelRefsByChunk,
+            mcrfDoodadUniqueIdsByChunk: mcrfDoodadUniqueIdsByChunk,
+            mcrfWorldModelUniqueIdsByChunk: mcrfWorldModelUniqueIdsByChunk);
+    }
+
+    private static IReadOnlyList<int> MapDoodadRefsToUniqueIds(IReadOnlyList<int> refs, IReadOnlyList<LkMddfEntry> placements)
+    {
+        if (refs.Count == 0 || placements.Count == 0)
+            return Array.Empty<int>();
+
+        List<int> uniqueIds = [];
+        foreach (int refIndex in refs)
+        {
+            if ((uint)refIndex < (uint)placements.Count)
+                uniqueIds.Add(placements[refIndex].UniqueId);
+        }
+
+        return uniqueIds.Count > 0 ? uniqueIds : Array.Empty<int>();
+    }
+
+    private static IReadOnlyList<int> MapWorldModelRefsToUniqueIds(IReadOnlyList<int> refs, IReadOnlyList<LkModfEntry> placements)
+    {
+        if (refs.Count == 0 || placements.Count == 0)
+            return Array.Empty<int>();
+
+        List<int> uniqueIds = [];
+        foreach (int refIndex in refs)
+        {
+            if ((uint)refIndex < (uint)placements.Count)
+                uniqueIds.Add(placements[refIndex].UniqueId);
+        }
+
+        return uniqueIds.Count > 0 ? uniqueIds : Array.Empty<int>();
     }
 
     // Fill heightmap gaps for sparse tiles where some chunks had no height data.

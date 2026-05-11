@@ -136,7 +136,7 @@ internal static class LkToAlphaCommand
                             // Filter placements against target client if provided
                             if (targetFileSet != null)
                             {
-                                var (mdlNames, mdlPlacements, wmoNames, wmoPlacements, skippedModels, skippedWmos) =
+                                var (mdlNames, mdlPlacements, wmoNames, wmoPlacements, filteredChunks, skippedModels, skippedWmos) =
                                     FilterPlacements(adtData, targetFileSet);
                                 adtData = new LkAdtData
                                 {
@@ -148,7 +148,7 @@ internal static class LkToAlphaCommand
                                     WorldModelNames = wmoNames,
                                     ModelPlacements = mdlPlacements,
                                     WorldModelPlacements = wmoPlacements,
-                                    Chunks = adtData.Chunks,
+                                    Chunks = filteredChunks,
                                     MhdrFlags = adtData.MhdrFlags,
                                     MfboFlightBounds = adtData.MfboFlightBounds
                                 };
@@ -233,7 +233,7 @@ internal static class LkToAlphaCommand
 
                         if (targetFileSet != null)
                         {
-                            var (mdlNames, mdlPlacements, wmoNames, wmoPlacements, skippedModels, skippedWmos) =
+                            var (mdlNames, mdlPlacements, wmoNames, wmoPlacements, filteredChunks, skippedModels, skippedWmos) =
                                 FilterPlacements(adtData, targetFileSet);
                             adtData = new LkAdtData
                             {
@@ -245,7 +245,7 @@ internal static class LkToAlphaCommand
                                 WorldModelNames = wmoNames,
                                 ModelPlacements = mdlPlacements,
                                 WorldModelPlacements = wmoPlacements,
-                                Chunks = adtData.Chunks,
+                                Chunks = filteredChunks,
                                 MhdrFlags = adtData.MhdrFlags,
                                 MfboFlightBounds = adtData.MfboFlightBounds
                             };
@@ -334,7 +334,11 @@ internal static class LkToAlphaCommand
                             areaIds: kvp.Value.AreaIds,
                             mccvRgb: kvp.Value.MccvRgb,
                             mclvLightingBytes: kvp.Value.MclvLightingBytes,
-                            holeFullMasks: kvp.Value.HoleFullMasks);
+                            holeFullMasks: kvp.Value.HoleFullMasks,
+                            mcrfDoodadRefsByChunk: kvp.Value.McrfDoodadRefsByChunk,
+                            mcrfWorldModelRefsByChunk: kvp.Value.McrfWorldModelRefsByChunk,
+                            mcrfDoodadUniqueIdsByChunk: kvp.Value.McrfDoodadUniqueIdsByChunk,
+                            mcrfWorldModelUniqueIdsByChunk: kvp.Value.McrfWorldModelUniqueIdsByChunk);
                     });
             }
 
@@ -382,16 +386,18 @@ internal static class LkToAlphaCommand
     private const string PlaceholderMdx = "World\\ArtTest\\Boxtest\\xyz.mdx";
     private const string PlaceholderWmo = "World\\wmo\\Dungeon\\test\\missingwmo.wmo";
 
-    private static (List<string> names, List<LkMddfEntry> placements, List<string> wmoNames, List<LkModfEntry> wmoPlacements, int mappedModels, int mappedWmos)
+    private static (List<string> names, List<LkMddfEntry> placements, List<string> wmoNames, List<LkModfEntry> wmoPlacements, List<LkMcnkData> chunks, int mappedModels, int mappedWmos)
         FilterPlacements(LkAdtData adtData, HashSet<string> targetFileSet)
     {
         var names = new List<string>();
         var nameIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var placementList = new List<LkMddfEntry>();
+        int[] filteredModelIndexBySourceIndex = Enumerable.Repeat(-1, adtData.ModelPlacements.Count).ToArray();
         var seenModelUniqueIds = new HashSet<int>();
         var wmoNames = new List<string>();
         var wmoNameIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var wmoPlacementList = new List<LkModfEntry>();
+        int[] filteredWmoIndexBySourceIndex = Enumerable.Repeat(-1, adtData.WorldModelPlacements.Count).ToArray();
         var seenWmoUniqueIds = new HashSet<int>();
         int mappedModels = 0, mappedWmos = 0;
 
@@ -428,6 +434,7 @@ internal static class LkToAlphaCommand
             if (!ReferenceEquals(mappedPath, path) && !string.Equals(mappedPath, path, StringComparison.OrdinalIgnoreCase))
                 mappedModels++;
 
+            filteredModelIndexBySourceIndex[i] = placementList.Count;
             placementList.Add(new LkMddfEntry(
                 mappedNameId, p.UniqueId, p.Position, p.Rotation, p.Scale));
         }
@@ -445,12 +452,59 @@ internal static class LkToAlphaCommand
             if (!ReferenceEquals(mappedPath, path) && !string.Equals(mappedPath, path, StringComparison.OrdinalIgnoreCase))
                 mappedWmos++;
 
+            filteredWmoIndexBySourceIndex[i] = wmoPlacementList.Count;
             wmoPlacementList.Add(new LkModfEntry(
                 mappedNameId, p.UniqueId, p.Position, p.Rotation,
                 p.BoundsMin, p.BoundsMax, p.Flags, p.DoodadSet, p.NameSet, p.Scale));
         }
 
-        return (names, placementList, wmoNames, wmoPlacementList, mappedModels, mappedWmos);
+        List<LkMcnkData> filteredChunks = adtData.Chunks
+            .Select(chunk => new LkMcnkData
+            {
+                IndexX = chunk.IndexX,
+                IndexY = chunk.IndexY,
+                Flags = chunk.Flags,
+                AreaId = chunk.AreaId,
+                NLayers = chunk.NLayers,
+                HoleMask = chunk.HoleMask,
+                BaseHeight = chunk.BaseHeight,
+                Heights = chunk.Heights,
+                Normals = chunk.Normals,
+                ShadowMap = chunk.ShadowMap,
+                AlphaMapData = chunk.AlphaMapData,
+                AlphaMapSize = chunk.AlphaMapSize,
+                Layers = chunk.Layers,
+                DoodadRefs = RemapChunkRefs(chunk.DoodadRefs, filteredModelIndexBySourceIndex),
+                WorldModelRefs = RemapChunkRefs(chunk.WorldModelRefs, filteredWmoIndexBySourceIndex),
+                LiquidData = chunk.LiquidData,
+                MccvColors = chunk.MccvColors,
+                MclvLighting = chunk.MclvLighting,
+                PosX = chunk.PosX,
+                PosY = chunk.PosY,
+                PosZ = chunk.PosZ,
+            })
+            .ToList();
+
+        return (names, placementList, wmoNames, wmoPlacementList, filteredChunks, mappedModels, mappedWmos);
+    }
+
+    private static IReadOnlyList<int> RemapChunkRefs(IReadOnlyList<int> refs, IReadOnlyList<int> filteredIndexBySourceIndex)
+    {
+        if (refs.Count == 0)
+            return [];
+
+        List<int> remapped = [];
+        foreach (int refIndex in refs)
+        {
+            if ((uint)refIndex >= (uint)filteredIndexBySourceIndex.Count)
+                continue;
+
+            int filteredIndex = filteredIndexBySourceIndex[refIndex];
+            if (filteredIndex >= 0)
+                remapped.Add(filteredIndex);
+        }
+
+        return remapped.Count > 0 ? remapped : [];
     }
 
     private static HashSet<string> ScanAlphaClientFiles(string clientRoot)
@@ -577,7 +631,7 @@ internal static class LkToAlphaCommand
                 OutputPath: GetOption(args, "--output", "-o"),
                 OutputWdlPath: GetOption(args, "--output-wdl", "--wdl"),
                 ClientRoot: GetOption(args, "--client-root", "-c"),
-                TargetClientRoot: GetOption(args, "--target-client-root", "-tcr"),
+                TargetClientRoot: GetOption(args, "--target-client-root", "-tcr") ?? GetOption(args, "--target-client-route", "--target-client-route"),
                 MapName: GetOption(args, "--map", "-m"),
                 Verbose: HasFlag(args, "--verbose") || HasFlag(args, "-v"),
                 TerrainOnly: HasFlag(args, "--terrain-only") || HasFlag(args, "-to"),
