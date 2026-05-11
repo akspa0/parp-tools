@@ -576,7 +576,7 @@ internal static class AlphaEmbeddedAdtReader
             }
         }
 
-        // Ghidra-verified (CMapChunk::CreateVertices, 0.5.3.3368):
+    // Ghidra-verified (CMapChunk::CreateVertices, 0.5.3.3368):
         // Alpha MCVT heights are ABSOLUTE world-space Z values — no base height addition.
         // The MCNK header field at offset 0x80 stores the chunk's world Position.Z,
         // which the client uses for bounding-box math and vertex relativization, NOT as

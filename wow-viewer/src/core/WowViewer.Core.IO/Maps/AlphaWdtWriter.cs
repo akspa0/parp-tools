@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using System.Text;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.Maps;
@@ -27,7 +28,7 @@ public static class AlphaWdtWriter
     private const int AlphaMclqFlowCountOffset = 0x2D0;
     private const int AlphaMclqPayloadSize = 0x324;
     private const float MapOrigin = 17066.666f;
-    private const float TileWorldSize = 533.3333f;
+    private const float TileWorldSize = 533.33333f;
     private const float ChunkWorldSize = TileWorldSize / 16f;
 
     public static byte[] Build(string mapName, Dictionary<(int tileX, int tileY), AlphaTileData> tiles)
@@ -84,94 +85,15 @@ public static class AlphaWdtWriter
     {
         byte[] mddfData = BuildMddfData(tile, mdxIndex);
         byte[] modfData = BuildModfData(tile, wmoIndex);
-
-        int mddfCount = mddfData.Length / MddfEntrySize;
-        int modfCount = modfData.Length / ModfEntrySize;
-        float tileOriginX = MapOrigin - tileX * TileWorldSize;
-        float tileOriginY = MapOrigin - tileY * TileWorldSize;
-
-        var mcrfDoodadRefs = new List<int>[256];
-        var mcrfMapObjRefs = new List<int>[256];
-        for (int i = 0; i < 256; i++)
-        {
-            mcrfDoodadRefs[i] = [];
-            mcrfMapObjRefs[i] = [];
-        }
-
-        IReadOnlyList<int>[]? preservedDoodadRefsByChunk = tile.McrfDoodadRefsByChunk;
-        IReadOnlyList<int>[]? preservedWorldModelRefsByChunk = tile.McrfWorldModelRefsByChunk;
-        bool usePreservedDoodadRefs = HasAnyChunkRefs(preservedDoodadRefsByChunk);
-        bool usePreservedWorldModelRefs = HasAnyChunkRefs(preservedWorldModelRefsByChunk);
-
-        if (usePreservedDoodadRefs)
-        {
-            for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
-            {
-                if (preservedDoodadRefsByChunk![chunkIndex] is { Count: > 0 } refs)
-                    mcrfDoodadRefs[chunkIndex].AddRange(refs);
-            }
-        }
-        else
-        {
-            for (int di = 0; di < mddfCount; di++)
-            {
-                int off = di * MddfEntrySize;
-                float filePosX = BitConverter.ToSingle(mddfData, off + 0x08);
-                float filePosZ = BitConverter.ToSingle(mddfData, off + 0x10);
-                float rendererX = MapOrigin - filePosZ;
-                float rendererY = MapOrigin - filePosX;
-                int cx = (int)Math.Floor((tileOriginY - rendererY) / ChunkWorldSize);
-                int cy = (int)Math.Floor((tileOriginX - rendererX) / ChunkWorldSize);
-                if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
-                    mcrfDoodadRefs[(cy * 16) + cx].Add(di);
-            }
-        }
-
-        if (usePreservedWorldModelRefs)
-        {
-            for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
-            {
-                if (preservedWorldModelRefsByChunk![chunkIndex] is { Count: > 0 } refs)
-                    mcrfMapObjRefs[chunkIndex].AddRange(refs);
-            }
-        }
-        else
-        {
-            for (int wi = 0; wi < modfCount; wi++)
-            {
-                int off = wi * ModfEntrySize;
-                float filePosX = BitConverter.ToSingle(modfData, off + 0x08);
-                float filePosZ = BitConverter.ToSingle(modfData, off + 0x10);
-                float extentsTopX = BitConverter.ToSingle(modfData, off + 0x20);
-                float extentsTopZ = BitConverter.ToSingle(modfData, off + 0x28);
-                float extentsBotX = BitConverter.ToSingle(modfData, off + 0x2C);
-                float extentsBotZ = BitConverter.ToSingle(modfData, off + 0x34);
-                float wmoMinRendererX = MapOrigin - extentsTopZ;
-                float wmoMaxRendererX = MapOrigin - extentsBotZ;
-                float wmoMinRendererY = MapOrigin - extentsTopX;
-                float wmoMaxRendererY = MapOrigin - extentsBotX;
-                float wmoMinCX = MathF.Floor((tileOriginY - wmoMaxRendererY) / ChunkWorldSize);
-                float wmoMaxCX = MathF.Floor((tileOriginY - wmoMinRendererY) / ChunkWorldSize);
-                float wmoMinCY = MathF.Floor((tileOriginX - wmoMaxRendererX) / ChunkWorldSize);
-                float wmoMaxCY = MathF.Floor((tileOriginX - wmoMinRendererX) / ChunkWorldSize);
-                int cxMin = Math.Max(0, (int)wmoMinCX);
-                int cxMax = Math.Min(15, (int)wmoMaxCX);
-                int cyMin = Math.Max(0, (int)wmoMinCY);
-                int cyMax = Math.Min(15, (int)wmoMaxCY);
-                for (int cx = cxMin; cx <= cxMax; cx++)
-                    for (int cy = cyMin; cy <= cyMax; cy++)
-                        mcrfMapObjRefs[(cy * 16) + cx].Add(wi);
-            }
-        }
+        var refsByChunk = BuildPlacementReferences(tile, tileX, tileY);
 
         var mcnkDataList = new List<byte[]>(256);
         for (int cy = 0; cy < 16; cy++)
         {
             for (int cx = 0; cx < 16; cx++)
             {
-                int chunkIdx = (cy * 16) + cx;
-                mcnkDataList.Add(BuildMcnkData(tile, cx, cy, tileX, tileY,
-                    mcrfDoodadRefs[chunkIdx], mcrfMapObjRefs[chunkIdx]));
+                int chunkIndex = cy * 16 + cx;
+                mcnkDataList.Add(BuildMcnkData(tile, cx, cy, refsByChunk[chunkIndex]));
             }
         }
 
@@ -219,8 +141,7 @@ public static class AlphaWdtWriter
         return tileHeaderSize;
     }
 
-    private static byte[] BuildMcnkData(AlphaTileData tile, int cx, int cy, int tileX, int tileY,
-        List<int> doodadRefs, List<int> mapObjRefs)
+    private static byte[] BuildMcnkData(AlphaTileData tile, int cx, int cy, AlphaPlacementRefs placementRefs)
     {
         float[] heights = ExtractChunkHeights(tile.Heightmap, cx, cy);
         float chunkBaseHeight = heights[0];
@@ -242,13 +163,9 @@ public static class AlphaWdtWriter
         byte[] mcalRaw = BuildAlphaMcal(tile, cx, cy, nLayers);
         byte[] mclqRaw = BuildAlphaMclq(liquidChunk);
 
-        int nDoodadRefs = doodadRefs.Count;
-        int nMapObjRefs = mapObjRefs.Count;
-        byte[] mcrfRaw = new byte[(nDoodadRefs + nMapObjRefs) * 4];
-        for (int i = 0; i < nDoodadRefs; i++)
-            BinaryPrimitives.WriteInt32LittleEndian(mcrfRaw.AsSpan(i * 4), doodadRefs[i]);
-        for (int i = 0; i < nMapObjRefs; i++)
-            BinaryPrimitives.WriteInt32LittleEndian(mcrfRaw.AsSpan((nDoodadRefs + i) * 4), mapObjRefs[i]);
+        byte[] mcrfRaw = BuildMcrfData(placementRefs);
+        int nDoodadRefs = placementRefs.DoodadIndices.Count;
+        int nMapObjRefs = placementRefs.MapObjIndices.Count;
 
         byte[] mclyWhole = WrapChunk("MCLY", mclyRaw);
         byte[] mcrfWhole = WrapChunk("MCRF", mcrfRaw);
@@ -328,6 +245,124 @@ public static class AlphaWdtWriter
         return ms.ToArray();
     }
 
+    private static AlphaPlacementRefs[] BuildPlacementReferences(AlphaTileData tile, int tileX, int tileY)
+    {
+        var refsByChunk = new AlphaPlacementRefs[256];
+        for (int index = 0; index < refsByChunk.Length; index++)
+            refsByChunk[index] = new AlphaPlacementRefs();
+
+        IReadOnlyList<int>[]? preservedDoodadRefsByChunk = tile.McrfDoodadRefsByChunk;
+        IReadOnlyList<int>[]? preservedWorldModelRefsByChunk = tile.McrfWorldModelRefsByChunk;
+        bool usePreservedDoodadRefs = HasAnyChunkRefs(preservedDoodadRefsByChunk);
+        bool usePreservedWorldModelRefs = HasAnyChunkRefs(preservedWorldModelRefsByChunk);
+
+        if (usePreservedDoodadRefs)
+        {
+            for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
+            {
+                if (preservedDoodadRefsByChunk![chunkIndex] is { Count: > 0 } refs)
+                    refsByChunk[chunkIndex].DoodadIndices.AddRange(refs);
+            }
+        }
+        else
+        {
+            for (int index = 0; index < tile.ModelPlacements.Count; index++)
+            {
+                int chunkIndex = FindContainingChunk(tile.ModelPlacements[index].Position, tileX, tileY);
+                refsByChunk[chunkIndex].DoodadIndices.Add(index);
+            }
+        }
+
+        if (usePreservedWorldModelRefs)
+        {
+            for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
+            {
+                if (preservedWorldModelRefsByChunk![chunkIndex] is { Count: > 0 } refs)
+                    refsByChunk[chunkIndex].MapObjIndices.AddRange(refs);
+            }
+        }
+        else
+        {
+            for (int index = 0; index < tile.WorldModelPlacements.Count; index++)
+            {
+                AddMapObjReference(refsByChunk, index, tile.WorldModelPlacements[index], tileX, tileY);
+            }
+        }
+
+        return refsByChunk;
+    }
+
+    private static int FindContainingChunk(Vector3 position, int tileX, int tileY)
+    {
+        float tileOriginX = MapOrigin - tileX * TileWorldSize;
+        float tileOriginY = MapOrigin - tileY * TileWorldSize;
+
+        int cy = Math.Clamp((int)MathF.Floor((tileOriginX - position.X) / ChunkWorldSize), 0, 15);
+        int cx = Math.Clamp((int)MathF.Floor((tileOriginY - position.Y) / ChunkWorldSize), 0, 15);
+        return cy * 16 + cx;
+    }
+
+    private static void AddMapObjReference(AlphaPlacementRefs[] refsByChunk, int placementIndex, AlphaWorldModelPlacement placement, int tileX, int tileY)
+    {
+        float minX = MathF.Min(placement.BoundsMin.X, placement.BoundsMax.X);
+        float maxX = MathF.Max(placement.BoundsMin.X, placement.BoundsMax.X);
+        float minY = MathF.Min(placement.BoundsMin.Y, placement.BoundsMax.Y);
+        float maxY = MathF.Max(placement.BoundsMin.Y, placement.BoundsMax.Y);
+
+        bool added = false;
+        for (int cy = 0; cy < 16; cy++)
+        {
+            for (int cx = 0; cx < 16; cx++)
+            {
+                GetChunkPlanarBounds(tileX, tileY, cx, cy, out float chunkMinX, out float chunkMaxX, out float chunkMinY, out float chunkMaxY);
+                if (maxX < chunkMinX || minX > chunkMaxX || maxY < chunkMinY || minY > chunkMaxY)
+                    continue;
+
+                refsByChunk[cy * 16 + cx].MapObjIndices.Add(placementIndex);
+                added = true;
+            }
+        }
+
+        if (!added)
+        {
+            int chunkIndex = FindContainingChunk(placement.Position, tileX, tileY);
+            refsByChunk[chunkIndex].MapObjIndices.Add(placementIndex);
+        }
+    }
+
+    private static void GetChunkPlanarBounds(int tileX, int tileY, int cx, int cy, out float minX, out float maxX, out float minY, out float maxY)
+    {
+        float tileOriginX = MapOrigin - tileX * TileWorldSize;
+        float tileOriginY = MapOrigin - tileY * TileWorldSize;
+
+        maxX = tileOriginX - cy * ChunkWorldSize;
+        minX = maxX - ChunkWorldSize;
+        maxY = tileOriginY - cx * ChunkWorldSize;
+        minY = maxY - ChunkWorldSize;
+    }
+
+    private static byte[] BuildMcrfData(AlphaPlacementRefs placementRefs)
+    {
+        int totalRefs = placementRefs.DoodadIndices.Count + placementRefs.MapObjIndices.Count;
+        if (totalRefs == 0)
+            return [];
+
+        byte[] data = new byte[totalRefs * sizeof(uint)];
+        int offset = 0;
+        foreach (int index in placementRefs.DoodadIndices)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(offset), (uint)index);
+            offset += sizeof(uint);
+        }
+
+        foreach (int index in placementRefs.MapObjIndices)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(offset), (uint)index);
+            offset += sizeof(uint);
+        }
+
+        return data;
+    }
     private static float[] ExtractChunkHeights(float[,] heightmap, int cx, int cy)
     {
         float[] heights = new float[145];
@@ -375,18 +410,6 @@ public static class AlphaWdtWriter
         {
             for (int col = 0; col < 9; col++)
             {
-                // Outer row N comes from LK heights index: N*17 + col  (9 outer entries for even rows)
-                // Actually, LK heights layout: row 0 outer (9 entries at indices 0..8),
-                //   row 0 inner (8 entries at indices 9..16), row 1 outer (9 entries at indices 17..25), ...
-                // Outer row R is at heights index: R*17 (for the first entry of that outer row)
-                // But wait, this is interleaved so:
-                //   Even rows (0,2,...,16): 9 entries starting at index row*9 - (row/2)*8
-                // That's complex. Instead, just map directly.
-                // Alpha outer[R][C] = heights at grid position (C*2, R*2)
-                // In LK heights[]: row r (0..16), col count 9 or 8 depending on r parity
-                // For outer row R (R=0..8): LK heights position = sum of row sizes up to R*2
-                // Each even row has 9 entries, each odd row has 8 entries.
-                // Heights index for outer row R, col C = R*17 + C
                 int srcIdx = outerRow * 17 + col;
                 float v = srcIdx < heights.Length ? heights[srcIdx] : 0f;
                 BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(dst), v);
@@ -398,8 +421,6 @@ public static class AlphaWdtWriter
         {
             for (int col = 0; col < 8; col++)
             {
-                // Inner row I (I=0..7) maps to LK heights row I*2+1
-                // Heights index for inner row I, col C = I*17 + 9 + C
                 int srcIdx = innerRow * 17 + 9 + col;
                 float v = srcIdx < heights.Length ? heights[srcIdx] : 0f;
                 BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(dst), v);
@@ -619,15 +640,15 @@ public static class AlphaWdtWriter
         bool hasVertexHeights = liquidChunk.Heights is { Length: >= 81 };
         bool hasTileFlags = liquidChunk.TileFlags is { Length: >= 64 };
 
-        // Ghidra-verified (CMapChunk::Create, 0.5.3.3368): each active liquid bit
-        // consumes one fixed-size 0x324-byte block. The client copies:
-        // - min/max height at 0x000
-        // - 81 * 8-byte vertex records at 0x008
-        // - 64 tile flags at 0x290
-        // - flow count at 0x2D0
-        // - 20 dwords of flow data at 0x2D4
-        // Even when flow data is absent, the block still needs the full size.
-        byte[] payload = new byte[AlphaMclqPayloadSize];
+    // Ghidra-verified (CMapChunk::Create, 0.5.3.3368): each active liquid bit
+    // consumes one fixed-size 0x324-byte block. The client copies:
+    // - min/max height at 0x000
+    // - 81 * 8-byte vertex records at 0x008
+    // - 64 tile flags at 0x290
+    // - flow count at 0x2D0
+    // - 20 dwords of flow data at 0x2D4
+    // Even when flow data is absent, the block still needs the full size.
+    byte[] payload = new byte[AlphaMclqPayloadSize];
         BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(0), minHeight);
         BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(4), maxHeight);
 
@@ -905,5 +926,11 @@ public static class AlphaWdtWriter
         bw.Write(payload);
         if ((payload.Length & 1) != 0)
             bw.Write((byte)0);
+    }
+
+    private sealed class AlphaPlacementRefs
+    {
+        public List<int> DoodadIndices { get; } = [];
+        public List<int> MapObjIndices { get; } = [];
     }
 }

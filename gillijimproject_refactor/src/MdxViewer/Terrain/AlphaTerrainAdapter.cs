@@ -399,30 +399,16 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         var heights = ExtractHeights(mcnk.McvtData);
         if (heights == null) return null;
 
-        // Ghidra-verified (u001): MCNK header offset 0x68 stores Position as 3 floats.
-        // MCVT heights are relative to Position Z (the base height of this chunk).
-        // Unused1/2/3 in McnkAlphaHeader are int fields that actually hold float position data.
-        // Add Position Z to all MCVT heights to get absolute world-space Z values,
-        // matching absolute MCLQ liquid heights.
-        float posA = BitConverter.Int32BitsToSingle(mcnk.Header.Unused1);
-        float posB = BitConverter.Int32BitsToSingle(mcnk.Header.Unused2);
-        float posC = BitConverter.Int32BitsToSingle(mcnk.Header.Unused3);
-
-        // Diagnostic: log first chunk's position values to identify which component is height
-        if (chunkX == 0 && chunkY == 0)
-            ViewerLog.Trace($"[MCNK Position] tile({tileX},{tileY}) chunk(0,0): posA={posA:F2} posB={posB:F2} posC={posC:F2}  mcvt[0]={heights[0]:F2}");
-
-        // Position format per Ghidra u001: (X, Z, Y) — posB is the Z (height) component.
-        // If posB looks like a world coordinate (large), try posA instead (LK uses Z, X, Y order).
-        float baseHeight = posA; // Try posA first — LK convention stores Z first
-        if (float.IsNaN(baseHeight) || MathF.Abs(baseHeight) > 50000f)
-            baseHeight = 0f;
-
-        if (baseHeight != 0f)
-        {
-            for (int i = 0; i < heights.Length; i++)
-                heights[i] += baseHeight;
-        }
+        // Ghidra-verified (CMapChunk::CreateVertices, 0x5.3.3368):
+        // Alpha MCVT heights are ABSOLUTE world-space Z values — no base height addition.
+        // The client's CreateVertices uses v->z = *he directly, then subtracts the chunk's
+        // position vector (field_0x64/0x68/0x6C) to make vertices relative to the chunk center.
+        // That position Z comes from MCNK offset 0x88 (chunk start), not offset 0x70.
+        // The old code was reading offset 0x68 from header data (=0x70 from chunk start)
+        // and adding it to absolute heights, which caused each chunk to float at a
+        // disconnected elevation from its neighbors.
+        // mcnk.Header.Unused1/2/3 fields contain the chunk's world position (not a height delta)
+        // so they must NOT be added to the MCVT heights.
 
         // Extract normals (145 × 3 signed bytes, Alpha non-interleaved format)
         var normals = ExtractNormals(mcnk.McnrData);
@@ -446,9 +432,8 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         LastLoadedChunkPositions.Add(new Vector3(worldX, worldY, 0f));
 
         // Extract MCLQ inline liquid data (type from MCNK header flags bits 2-5)
-        // Pass baseHeight so MCLQ heights (which may be relative) get the same offset as MCVT terrain heights
         var liquid = ExtractLiquid(mcnk.MclqData, mcnk.Header.Flags, tileX, tileY, chunkX, chunkY,
-            new Vector3(worldX, worldY, 0f), baseHeight);
+            new Vector3(worldX, worldY, 0f));
 
         return new TerrainChunkData
         {
@@ -674,7 +659,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// Returns the first valid liquid instance found, or null.
     /// </summary>
     private static LiquidChunkData? ExtractLiquid(byte[] mclqData, int mcnkFlags, int tileX, int tileY,
-        int chunkX, int chunkY, Vector3 worldPos, float baseHeight = 0f)
+        int chunkX, int chunkY, Vector3 worldPos)
     {
         // Alpha 0.5.3 MCLQ is NOT the 804-byte LK format with 81 vertex heights.
         // Ghidra analysis (CChunkLiquid): just float height[2] (min/max) + flow data.
@@ -713,14 +698,11 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         // Use the average of min/max as the flat liquid surface height
         float liquidHeight = (minHeight + maxHeight) * 0.5f;
 
-        // Apply base height offset if heights are relative (same as MCVT terrain)
-        liquidHeight += baseHeight;
-        minHeight += baseHeight;
-        maxHeight += baseHeight;
+        // Alpha MCLQ heights are absolute world-space Z — no base height offset needed.
 
         // Diagnostic
         if (chunkX == 0 && chunkY == 0)
-            ViewerLog.Trace($"[MCLQ] tile({tileX},{tileY}) chunk(0,0): minH={minHeight:F2} maxH={maxHeight:F2} liquidH={liquidHeight:F2} baseH={baseHeight:F2} dataLen={mclqData.Length} type={liquidType}");
+            ViewerLog.Trace($"[MCLQ] tile({tileX},{tileY}) chunk(0,0): minH={minHeight:F2} maxH={maxHeight:F2} liquidH={liquidHeight:F2} dataLen={mclqData.Length} type={liquidType}");
 
         // If the height range is absurd after offset, skip (bad data)
         if (MathF.Abs(liquidHeight) > 50000f)
@@ -749,7 +731,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             if (hasNonZeroVertex)
             {
                 for (int i = 0; i < 81; i++)
-                    heights[i] = vertHeights[i] + baseHeight;
+                    heights[i] = vertHeights[i];
                 if (chunkX == 0 && chunkY == 0)
                     ViewerLog.Trace($"[MCLQ]   Using per-vertex heights: h[0]={heights[0]:F2} h[40]={heights[40]:F2}");
             }

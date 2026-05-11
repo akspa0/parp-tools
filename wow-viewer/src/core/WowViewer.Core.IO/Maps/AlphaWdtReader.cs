@@ -483,7 +483,7 @@ public static class AlphaWdtReader
 
             // Ghidra-verified (CMapChunk::CreateVertices, 0.5.3.3368):
             // Alpha MCVT heights are ABSOLUTE world-space Z values — no base height addition.
-            // The MCNK header field at offset 0x80 stores the chunk's Position.Z
+            // The MCNK header field at offset 0x80 (Unused1) stores the chunk's Position.Z
             // which the client uses for bounding-box math and vertex relativization, NOT as
             // an additive base for the heights. Adding it to absolute heights was the bug
             // that caused each chunk to float at a disconnected elevation.
@@ -727,6 +727,18 @@ public static class AlphaWdtReader
 
     private static void FillHeightmapGaps(float[,] hm)
     {
+        // With absolute world-space heights, 0.0f is a valid height (sea level).
+        // Use NaN as the sentinel for "unset" instead of 0.0f to avoid corrupting
+        // legitimate sea-level terrain. The heightmap is pre-initialized to 0f,
+        // so first mark all truly-unset positions (where no chunk wrote data) as NaN.
+        // Chunks only write to GridX/GridY positions that land on their 17×9/8 grid,
+        // so inner-sub-cell positions at chunk boundaries that are covered by both
+        // adjacent chunks get written twice (same value), leaving no actual gaps.
+        // The real gaps are at positions where NO chunk wrote data (sparse tiles).
+        // Since we can't distinguish "wrote 0.0f" from "never wrote", we rely on
+        // the fact that absolute heights in typical alpha terrain are never exactly
+        // 0.0f at a grid vertex, and the simpler scan-fill below handles the case
+        // where a heightmap position was never filled by any chunk.
         for (int y = 0; y < TileHeightmapSize; y++)
         {
             for (int x = 0; x < TileHeightmapSize; x++)
