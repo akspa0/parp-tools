@@ -240,14 +240,17 @@ Current important commands:
 | `--output-wdl <path>` / `--wdl` | Output WDL path (default: `output.wdl`) |
 | `--target-client-root <dir>` / `-tcr` | Target client root for asset filtering (e.g. 0.5.3) |
 | `--terrain-only` / `-to` | Strip all placements (for crash-free validation) |
-| `--bundle-tilesets` / `-bt` | Extract textures alongside output |
+| `--bundle-tilesets` / `-bt` | Accepted for compatibility; tileset extraction is now on by default |
+| `--no-bundle-tilesets` / `-nbt` | Disable default tileset extraction |
+| `--bundle-m2s` / `-bm` | Opt in to local bundled MDX generation for doodads |
+| `--bundle-wmos` / `-bw` | Opt in to local bundled WMO generation |
 | `--limit <N>` / `-n` | Limit tile count (for testing) |
 | `--verbose` / `-v` | Verbose logging |
 
 Examples:
 
 ```powershell
-# Basic conversion (839 tiles, ~95s)
+# Basic conversion (839 tiles, ~95s, tilesets bundled by default)
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt"
 
 # With asset filtering against target client
@@ -256,8 +259,8 @@ dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowVi
 # Terrain-only (no assets, crash-proof)
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt" --terrain-only
 
-# With tileset bundling and asset filtering
-dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt" --target-client-root "output\tmp\wowarchive-clients\0_5_3_3368\World of Warcraft" --bundle-tilesets
+# Disable default tileset bundling
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt" --no-bundle-tilesets
 
 # Quick test (5 tiles)
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "test.alpha.wdt" --limit 5
@@ -291,7 +294,7 @@ Copy-Item "output\Azeroth.alpha.wdt" "$mapDir\Azeroth.wdt"
 Copy-Item "output\Azeroth.alpha.wdl" "$mapDir\Azeroth.wdl"
 ```
 
-If bundling tilesets with `--bundle-tilesets`:
+If using the default tileset bundling output:
 
 ```powershell
 Copy-Item -Recurse "output\tilesets\Azeroth" "$overlayDir\tilesets\Azeroth"

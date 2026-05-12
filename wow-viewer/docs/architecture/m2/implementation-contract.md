@@ -48,13 +48,13 @@ Current proof boundary:
 - `MDX -> M2` is also structural and bounded, not later-client renderer parity.
 - bundled `MDX` outputs in the `convert-lk-to-alpha --bundle-m2s` lane now rewrite local texture references beside the emitted bundle outputs.
 - generated `MDX` and `M2` outputs are expected to re-read cleanly through inspect and library readers, but that alone is not proof of active-client animation, material, or effect parity.
-- the current `M2ToMdxConverter` writes sequence headers plus static `BONE`/`PIVT` structure, but it does not currently emit MDX node-track payloads such as `KGTR`, `KGRT`, or `KGSC`, and it does not ingest external M2 `%04d-%02d.anim` payloads at all.
-- practical implication: bundled Alpha-facing `MDX` outputs are currently best treated as static or animation-incomplete shells even when the source `M2` carries valid sequences.
+- the current `M2ToMdxConverter` now emits classic MDX bone node tracks (`KGTR`, `KGRT`, `KGSC`) from shared M2 bone tracks, writes `GLBS` when the source model carries global loops, and uses companion external M2 `%04d-%02d.anim` payloads when those sequences are not stored inline.
+- practical implication: bundled Alpha-facing `MDX` outputs are no longer limited to static bone shells for inline or companion-backed bone transforms, but that is still not proof of full native Alpha animation/material/effect parity.
 
 Important unresolved converter seam:
 
-- sequence and animation fidelity remains open for Alpha-facing `MDX`, especially around `SEQS` ownership and the exact native expectations for record shape and runtime consumption.
-- the next real converter slice is explicit animation export: global-sequence mapping, bone translation or rotation or scaling track emission, and external-animation ingestion for sequences whose keyframes live outside the root `M2`.
+- sequence and animation fidelity still remains open for Alpha-facing `MDX`, especially around broader `SEQS` semantics, alias-heavy corpora, and native expectations beyond bone transform playback.
+- the next real converter slice is broader real-data proof and remaining animation-family coverage rather than first bone-track ownership: materials, attachments, ribbons, particles, and native-client parity checks still need closure.
 
 This means the current M2-family converter lane is useful for bounded asset bundling and structural validation, but it should not yet be documented as a full runtime-equivalent substitute for native `M2` or `MDX` behavior.
 

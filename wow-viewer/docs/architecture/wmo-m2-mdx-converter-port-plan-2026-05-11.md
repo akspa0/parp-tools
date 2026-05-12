@@ -21,8 +21,8 @@ Landed in `wow-viewer`:
 
 Still open:
 
-- `M2 -> MDX` remains a structural downgrade lane, not Alpha-client runtime parity proof.
-- sequence and animation compatibility for Alpha `MDX` remains open, especially around `SEQS` fidelity and broader native animation expectations.
+- `M2 -> MDX` now emits classic bone transform tracks and can consume companion external `.anim` payloads in both direct converter use and the `convert-lk-to-alpha --bundle-m2s` lane, but it still remains a structural downgrade lane rather than Alpha-client runtime parity proof.
+- sequence and animation compatibility for Alpha `MDX` remains open beyond bone transforms, especially around `SEQS` fidelity and broader native animation expectations.
 - `MDX -> M2` remains structural rather than renderer- or runtime-parity complete.
 - do not treat successful converter builds or inspect re-reads as active Alpha-client signoff for all bundled MDX assets.
 
@@ -68,6 +68,7 @@ What the repo evidence says:
    - Alpha `WMO v14` expects monolithic `MOMO`-wrapped roots with embedded `MOGP` groups rather than later split root plus `_NNN.wmo` companions.
    - the downgrade path must handle the practical Alpha-era `384` group ceiling, legacy `MOBA` `ushort` batch-index limits, and an observed native GX vertex-budget ceiling that requires compacted split-group meshes rather than index-only partitioning.
 - `M2 <-> MDX` is still harder. `wow-viewer` now has minimal converter ownership, but broad semantic mapping for animation tracks, sequence fidelity, materials, particles, ribbons, and effect routing is still incomplete.
+- `M2 -> MDX` is no longer limited to static bone shells: the shared converter now writes `KGTR`/`KGRT`/`KGSC`, emits `GLBS`, and can read external `%04d-%02d.anim` sidecars where the source sequence is not inline.
 
 ## Ownership Rule
 

@@ -12,6 +12,7 @@ using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Wmo;
 using WowViewer.Core.Maps;
+using WowViewer.Core.M2;
 using WowViewer.Core.Mdx;
 using WowViewer.Core.Wmo;
 
@@ -330,7 +331,7 @@ internal static class LkToAlphaCommand
 
             if (tilesetRoot is not null || bundledMdxPaths is not null || bundledWmoPaths is not null)
             {
-                string? tilesetPrefix = tilesetRoot is null ? null : $"tilesets\\{mapName}\\";
+                string? tilesetPrefix = tilesetRoot is null ? null : $"World\\Maps\\{mapName}\\tilesets\\{mapName}\\";
                 tiles = tiles.ToDictionary(
                     kvp => kvp.Key,
                     kvp => RewriteBundledAssetPaths(kvp.Value, tilesetPrefix, bundledMdxPaths, bundledWmoPaths, targetFileSet));
@@ -994,6 +995,7 @@ internal static class LkToAlphaCommand
                     using MemoryStream skinStream = new(skinBytes, writable: false);
                     var geometry = M2GeometryReader.Read(geometryStream, modelPath);
                     var skin = M2SkinReader.Read(skinStream, skinPath);
+                    IReadOnlyDictionary<string, M2ExternalAnimationDocument> externalAnimations = LoadM2ExternalAnimations(geometry.Model, sourceRoot, catalog);
                     IReadOnlyDictionary<string, string> rewrittenTexturePaths = BundleModelTextures(
                         geometry.Textures.Select(static texture => texture.Filename).Where(static filename => !string.IsNullOrWhiteSpace(filename)).Cast<string>(),
                         sourceRoot,
@@ -1006,7 +1008,7 @@ internal static class LkToAlphaCommand
                         ref texturesResized,
                         ref texturesSpecularReencoded);
 
-                    outputBytes = M2ToMdxConverter.Convert(geometry, skin, rewrittenTexturePaths);
+                    outputBytes = M2ToMdxConverter.Convert(geometry, skin, rewrittenTexturePaths, externalAnimations);
                     converted++;
                 }
                 else if (extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase) || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase))
@@ -1050,6 +1052,62 @@ internal static class LkToAlphaCommand
         }
 
         return bundledPaths;
+    }
+
+    private static IReadOnlyDictionary<string, M2ExternalAnimationDocument> LoadM2ExternalAnimations(
+        M2ModelDocument model,
+        string sourceRoot,
+        NativeMpqService? catalog)
+    {
+        Dictionary<string, M2ExternalAnimationDocument> animations = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> companionPaths = new(StringComparer.OrdinalIgnoreCase);
+
+        for (int sequenceIndex = 0; sequenceIndex < model.Sequences.Count; sequenceIndex++)
+        {
+            int sourceSequenceIndex = ResolveM2SourceSequenceIndex(model, sequenceIndex);
+            if (sourceSequenceIndex < 0 || sourceSequenceIndex >= model.Sequences.Count)
+                continue;
+
+            M2SequenceDefinition sequence = model.Sequences[sourceSequenceIndex];
+            if (!sequence.UsesExternalAnimationFile)
+                continue;
+
+            companionPaths.Add(model.Identity.BuildAnimationPath(sequence.AnimationId, sequence.VariationIndex));
+        }
+
+        foreach (string companionPath in companionPaths)
+        {
+            byte[]? animationBytes = ReadSourceAsset(sourceRoot, catalog, companionPath);
+            if (animationBytes is null)
+                continue;
+
+            using MemoryStream stream = new(animationBytes, writable: false);
+            animations[companionPath] = M2AnimationReader.Read(stream, companionPath);
+        }
+
+        return animations;
+    }
+
+    private static int ResolveM2SourceSequenceIndex(M2ModelDocument model, int sequenceIndex)
+    {
+        int resolvedSequenceIndex = sequenceIndex;
+        HashSet<int> visited = new();
+        while (resolvedSequenceIndex >= 0 && resolvedSequenceIndex < model.Sequences.Count)
+        {
+            if (!visited.Add(resolvedSequenceIndex))
+                break;
+
+            M2SequenceDefinition sequence = model.Sequences[resolvedSequenceIndex];
+            if (!sequence.IsAlias || sequence.AliasNext == ushort.MaxValue)
+                break;
+
+            if (sequence.AliasNext >= model.Sequences.Count)
+                break;
+
+            resolvedSequenceIndex = sequence.AliasNext;
+        }
+
+        return resolvedSequenceIndex;
     }
 
     private static byte[] BundleLegacyMdxTexturesAndRewriteModel(
@@ -1691,7 +1749,7 @@ internal static class LkToAlphaCommand
                 MapName: GetOption(args, "--map", "-m"),
                 Verbose: HasFlag(args, "--verbose") || HasFlag(args, "-v"),
                 TerrainOnly: HasFlag(args, "--terrain-only") || HasFlag(args, "-to"),
-                BundleTilesets: HasFlag(args, "--bundle-tilesets") || HasFlag(args, "-bt"),
+                BundleTilesets: !HasFlag(args, "--no-bundle-tilesets") && !HasFlag(args, "-nbt"),
                 BundleM2s: HasFlag(args, "--bundle-m2s") || HasFlag(args, "-bm"),
                 BundleWmos: HasFlag(args, "--bundle-wmos") || HasFlag(args, "-bw"));
     }

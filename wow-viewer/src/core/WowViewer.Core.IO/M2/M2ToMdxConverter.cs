@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Numerics;
 using System.Text;
 using WowViewer.Core.M2;
@@ -9,6 +10,7 @@ public static class M2ToMdxConverter
     private const uint ClassicMdxVersion = 1300u;
     private const int ModlNameSizeBytes = 0x50;
     private const int TexsPathSizeBytes = 0x104;
+    private const int TrackArrayReferenceSizeBytes = 0x08;
     private const uint NoGeosetBinding = uint.MaxValue;
 
     public static void Convert(string inputPath, string skinPath, string outputPath)
@@ -19,7 +21,8 @@ public static class M2ToMdxConverter
 
         M2GeometryDocument geometry = M2GeometryReader.Read(inputPath);
         M2SkinDocument skin = M2SkinReader.Read(skinPath);
-        byte[] converted = Convert(geometry, skin);
+        IReadOnlyDictionary<string, M2ExternalAnimationDocument> externalAnimations = LoadLocalExternalAnimations(geometry.Model);
+        byte[] converted = Convert(geometry, skin, rewrittenTexturePaths: null, externalAnimations);
 
         string fullOutputPath = Path.GetFullPath(outputPath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath) ?? ".");
@@ -54,6 +57,15 @@ public static class M2ToMdxConverter
         M2SkinDocument skin,
         IReadOnlyDictionary<string, string>? rewrittenTexturePaths)
     {
+        return Convert(geometry, skin, rewrittenTexturePaths, externalAnimations: null);
+    }
+
+    public static byte[] Convert(
+        M2GeometryDocument geometry,
+        M2SkinDocument skin,
+        IReadOnlyDictionary<string, string>? rewrittenTexturePaths,
+        IReadOnlyDictionary<string, M2ExternalAnimationDocument>? externalAnimations)
+    {
         ArgumentNullException.ThrowIfNull(geometry);
         ArgumentNullException.ThrowIfNull(skin);
 
@@ -63,6 +75,7 @@ public static class M2ToMdxConverter
         int geosetMaterialId = materialLayer is null ? -1 : 0;
         uint selectionGroup = skin.Submeshes.Count == 0 ? 0u : skin.Submeshes[0].SkinSectionId;
         string modelName = ResolveModelName(geometry.Model);
+        int[] sequenceStartTimes = BuildSequenceStartTimes(geometry.Model.Sequences);
 
         using MemoryStream stream = new();
         using BinaryWriter writer = new(stream, Encoding.ASCII, leaveOpen: true);
@@ -72,7 +85,10 @@ public static class M2ToMdxConverter
         WriteChunk(writer, "MODL", payload => WriteModl(payload, modelName, geometry.Model));
 
         if (geometry.Model.Sequences.Count > 0)
-            WriteChunk(writer, "SEQS", payload => WriteSeqs(payload, geometry.Model.Sequences));
+            WriteChunk(writer, "SEQS", payload => WriteSeqs(payload, geometry.Model.Sequences, sequenceStartTimes));
+
+        if (geometry.Model.GlobalLoops.Count > 0)
+            WriteChunk(writer, "GLBS", payload => WriteGlbs(payload, geometry.Model.GlobalLoops));
 
         if (textures.Count > 0)
             WriteChunk(writer, "TEXS", payload => WriteTexs(payload, textures));
@@ -92,7 +108,7 @@ public static class M2ToMdxConverter
 
         if (geometry.Model.Bones.Count > 0)
         {
-            WriteChunk(writer, "BONE", payload => WriteBone(payload, geometry.Model.Bones));
+            WriteChunk(writer, "BONE", payload => WriteBone(payload, geometry.Model, sequenceStartTimes, externalAnimations));
             WriteChunk(writer, "PIVT", payload => WritePivt(payload, geometry.Model.Bones));
         }
 
@@ -226,14 +242,16 @@ public static class M2ToMdxConverter
         writer.Write((uint)150);
     }
 
-    private static void WriteSeqs(BinaryWriter writer, IReadOnlyList<M2SequenceDefinition> sequences)
+    private static void WriteSeqs(BinaryWriter writer, IReadOnlyList<M2SequenceDefinition> sequences, IReadOnlyList<int> sequenceStartTimes)
     {
         writer.Write((uint)sequences.Count);
-        foreach (M2SequenceDefinition sequence in sequences)
+        for (int index = 0; index < sequences.Count; index++)
         {
+            M2SequenceDefinition sequence = sequences[index];
+            int startTime = index < sequenceStartTimes.Count ? sequenceStartTimes[index] : 0;
             WriteFixedAscii(writer, GetAnimationSequenceName(sequence.AnimationId, sequence.VariationIndex), 0x50);
-            writer.Write(0);
-            writer.Write(checked((int)sequence.Duration));
+            writer.Write(startTime);
+            writer.Write(checked(startTime + (int)Math.Min(sequence.Duration, int.MaxValue - Math.Max(startTime, 0))));
             writer.Write(sequence.MoveSpeed);
             writer.Write(sequence.Flags);
             writer.Write(sequence.Frequency < 0 ? 0f : sequence.Frequency);
@@ -243,6 +261,12 @@ public static class M2ToMdxConverter
             WriteVector3(writer, sequence.BoundsMin);
             WriteVector3(writer, sequence.BoundsMax);
         }
+    }
+
+    private static void WriteGlbs(BinaryWriter writer, IReadOnlyList<uint> globalLoops)
+    {
+        foreach (uint duration in globalLoops)
+            writer.Write(duration);
     }
 
     private static void WriteTexs(BinaryWriter writer, IReadOnlyList<M2GeometryTexture> textures)
@@ -326,10 +350,50 @@ public static class M2ToMdxConverter
         });
     }
 
-    private static void WriteBone(BinaryWriter writer, IReadOnlyList<M2BoneDefinition> bones)
+    private static IReadOnlyDictionary<string, M2ExternalAnimationDocument> LoadLocalExternalAnimations(M2ModelDocument model)
     {
-        writer.Write((uint)bones.Count);
-        foreach (M2BoneDefinition bone in bones)
+        Dictionary<string, M2ExternalAnimationDocument> animations = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string companionPath in EnumerateExternalAnimationPaths(model))
+        {
+            if (!File.Exists(companionPath))
+                continue;
+
+            using MemoryStream stream = new(File.ReadAllBytes(companionPath), writable: false);
+            animations[companionPath] = M2AnimationReader.Read(stream, companionPath);
+        }
+
+        return animations;
+    }
+
+    internal static IReadOnlyList<string> EnumerateExternalAnimationPaths(M2ModelDocument model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        HashSet<string> paths = new(StringComparer.OrdinalIgnoreCase);
+        for (int sequenceIndex = 0; sequenceIndex < model.Sequences.Count; sequenceIndex++)
+        {
+            int sourceSequenceIndex = ResolveTrackSourceSequenceIndex(model, sequenceIndex);
+            if (sourceSequenceIndex < 0 || sourceSequenceIndex >= model.Sequences.Count)
+                continue;
+
+            M2SequenceDefinition sequence = model.Sequences[sourceSequenceIndex];
+            if (!sequence.UsesExternalAnimationFile)
+                continue;
+
+            paths.Add(model.Identity.BuildAnimationPath(sequence.AnimationId, sequence.VariationIndex));
+        }
+
+        return [.. paths];
+    }
+
+    private static void WriteBone(
+        BinaryWriter writer,
+        M2ModelDocument model,
+        IReadOnlyList<int> sequenceStartTimes,
+        IReadOnlyDictionary<string, M2ExternalAnimationDocument>? externalAnimations)
+    {
+        writer.Write((uint)model.Bones.Count);
+        foreach (M2BoneDefinition bone in model.Bones)
         {
             WriteSizedBlock(writer, boneWriter =>
             {
@@ -337,10 +401,352 @@ public static class M2ToMdxConverter
                 boneWriter.Write(bone.Index);
                 boneWriter.Write((int)bone.ParentBone);
                 boneWriter.Write(bone.Flags);
+
+                WriteVector3Track(boneWriter, "KGTR", model, bone.TranslationTrack, sequenceStartTimes, externalAnimations);
+                WriteQuaternionTrack(boneWriter, "KGRT", model, bone.RotationTrack, sequenceStartTimes, externalAnimations);
+                WriteVector3Track(boneWriter, "KGSC", model, bone.ScalingTrack, sequenceStartTimes, externalAnimations);
             });
             writer.Write(NoGeosetBinding);
             writer.Write(NoGeosetBinding);
         }
+    }
+
+    private static int[] BuildSequenceStartTimes(IReadOnlyList<M2SequenceDefinition> sequences)
+    {
+        int[] startTimes = new int[sequences.Count];
+        int currentStart = 0;
+        for (int index = 0; index < sequences.Count; index++)
+        {
+            startTimes[index] = currentStart;
+            int duration = checked((int)Math.Min(sequences[index].Duration, int.MaxValue));
+            currentStart = checked(currentStart + Math.Max(duration, 0));
+        }
+
+        return startTimes;
+    }
+
+    private static void WriteVector3Track(
+        BinaryWriter writer,
+        string tag,
+        M2ModelDocument model,
+        M2TrackDefinition<Vector3> track,
+        IReadOnlyList<int> sequenceStartTimes,
+        IReadOnlyDictionary<string, M2ExternalAnimationDocument>? externalAnimations)
+    {
+        List<Vector3TrackKeyframe> keys = BuildVector3TrackKeyframes(model, track, sequenceStartTimes, externalAnimations);
+        if (keys.Count == 0)
+            return;
+
+        WriteTrackHeader(writer, tag, keys.Count, track.Interpolation, track.GlobalSequenceIndex);
+        bool usesTangents = TrackUsesTangents(track.Interpolation);
+        foreach (Vector3TrackKeyframe key in keys)
+        {
+            writer.Write(key.Time);
+            WriteVector3(writer, key.Value);
+            if (!usesTangents)
+                continue;
+
+            WriteVector3(writer, key.InTangent);
+            WriteVector3(writer, key.OutTangent);
+        }
+    }
+
+    private static void WriteQuaternionTrack(
+        BinaryWriter writer,
+        string tag,
+        M2ModelDocument model,
+        M2TrackDefinition<M2CompQuaternion> track,
+        IReadOnlyList<int> sequenceStartTimes,
+        IReadOnlyDictionary<string, M2ExternalAnimationDocument>? externalAnimations)
+    {
+        List<QuaternionTrackKeyframe> keys = BuildQuaternionTrackKeyframes(model, track, sequenceStartTimes, externalAnimations);
+        if (keys.Count == 0)
+            return;
+
+        WriteTrackHeader(writer, tag, keys.Count, track.Interpolation, track.GlobalSequenceIndex);
+        bool usesTangents = TrackUsesTangents(track.Interpolation);
+        foreach (QuaternionTrackKeyframe key in keys)
+        {
+            writer.Write(key.Time);
+            WriteCompressedQuaternion(writer, key.Value);
+            if (!usesTangents)
+                continue;
+
+            WriteCompressedQuaternion(writer, key.InTangent);
+            WriteCompressedQuaternion(writer, key.OutTangent);
+        }
+    }
+
+    private static void WriteTrackHeader(BinaryWriter writer, string tag, int keyCount, M2TrackInterpolation interpolation, int globalSequenceIndex)
+    {
+        writer.Write(Encoding.ASCII.GetBytes(tag));
+        writer.Write((uint)keyCount);
+        writer.Write((uint)interpolation);
+        writer.Write(globalSequenceIndex);
+    }
+
+    private static List<Vector3TrackKeyframe> BuildVector3TrackKeyframes(
+        M2ModelDocument model,
+        M2TrackDefinition<Vector3> track,
+        IReadOnlyList<int> sequenceStartTimes,
+        IReadOnlyDictionary<string, M2ExternalAnimationDocument>? externalAnimations)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(track);
+
+        byte[] payload = model.RawBytes;
+        List<Vector3TrackKeyframe> keyframes = [];
+
+        if (track.UsesGlobalSequence)
+        {
+            AppendVector3TrackKeyframes(payload, track, sequenceIndex: 0, baseTime: 0, keyframes);
+            return keyframes;
+        }
+
+        for (int sequenceIndex = 0; sequenceIndex < model.Sequences.Count; sequenceIndex++)
+        {
+            int sourceSequenceIndex = ResolveTrackSourceSequenceIndex(model, sequenceIndex);
+            int baseTime = sequenceIndex < sequenceStartTimes.Count ? sequenceStartTimes[sequenceIndex] : 0;
+            byte[]? sequencePayload = ResolveTrackPayload(model, sourceSequenceIndex, externalAnimations);
+            if (sequencePayload is null)
+                continue;
+
+            AppendVector3TrackKeyframes(sequencePayload, track, sourceSequenceIndex, baseTime, keyframes);
+        }
+
+        return keyframes;
+    }
+
+    private static List<QuaternionTrackKeyframe> BuildQuaternionTrackKeyframes(
+        M2ModelDocument model,
+        M2TrackDefinition<M2CompQuaternion> track,
+        IReadOnlyList<int> sequenceStartTimes,
+        IReadOnlyDictionary<string, M2ExternalAnimationDocument>? externalAnimations)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(track);
+
+        byte[] payload = model.RawBytes;
+        List<QuaternionTrackKeyframe> keyframes = [];
+
+        if (track.UsesGlobalSequence)
+        {
+            AppendQuaternionTrackKeyframes(payload, track, sequenceIndex: 0, baseTime: 0, keyframes);
+            return keyframes;
+        }
+
+        for (int sequenceIndex = 0; sequenceIndex < model.Sequences.Count; sequenceIndex++)
+        {
+            int sourceSequenceIndex = ResolveTrackSourceSequenceIndex(model, sequenceIndex);
+            int baseTime = sequenceIndex < sequenceStartTimes.Count ? sequenceStartTimes[sequenceIndex] : 0;
+            byte[]? sequencePayload = ResolveTrackPayload(model, sourceSequenceIndex, externalAnimations);
+            if (sequencePayload is null)
+                continue;
+
+            AppendQuaternionTrackKeyframes(sequencePayload, track, sourceSequenceIndex, baseTime, keyframes);
+        }
+
+        return keyframes;
+    }
+
+    private static byte[]? ResolveTrackPayload(
+        M2ModelDocument model,
+        int sourceSequenceIndex,
+        IReadOnlyDictionary<string, M2ExternalAnimationDocument>? externalAnimations)
+    {
+        if (sourceSequenceIndex < 0 || sourceSequenceIndex >= model.Sequences.Count)
+            return null;
+
+        M2SequenceDefinition sequence = model.Sequences[sourceSequenceIndex];
+        if (!sequence.UsesExternalAnimationFile)
+            return model.RawBytes;
+
+        if (externalAnimations is null || externalAnimations.Count == 0)
+            return null;
+
+        string companionPath = model.Identity.BuildAnimationPath(sequence.AnimationId, sequence.VariationIndex);
+        return externalAnimations.TryGetValue(companionPath, out M2ExternalAnimationDocument? animation)
+            ? animation.Payload
+            : null;
+    }
+
+    private static int ResolveTrackSourceSequenceIndex(M2ModelDocument model, int sequenceIndex)
+    {
+        int resolvedSequenceIndex = sequenceIndex;
+        HashSet<int> visited = [];
+        while (resolvedSequenceIndex >= 0 && resolvedSequenceIndex < model.Sequences.Count)
+        {
+            if (!visited.Add(resolvedSequenceIndex))
+                break;
+
+            M2SequenceDefinition sequence = model.Sequences[resolvedSequenceIndex];
+            if (!sequence.IsAlias || sequence.AliasNext == ushort.MaxValue)
+                break;
+
+            if (sequence.AliasNext >= model.Sequences.Count)
+                break;
+
+            resolvedSequenceIndex = sequence.AliasNext;
+        }
+
+        return resolvedSequenceIndex;
+    }
+
+    private static void AppendVector3TrackKeyframes(
+        byte[] payload,
+        M2TrackDefinition<Vector3> track,
+        int sequenceIndex,
+        int baseTime,
+        List<Vector3TrackKeyframe> destination)
+    {
+        if (!TryReadSequenceSlice(payload, track.TimestampArray, track.ValueArray, sequenceIndex, out M2TrackSequenceSlice slice) || !slice.HasData)
+            return;
+
+        int keyCount = checked((int)Math.Min(slice.TimestampCount, slice.ValueCount));
+        if (keyCount <= 0)
+            return;
+
+        int valueStride = GetTrackValueStride(track.Interpolation, scalarSize: 12);
+        if (!IsReadable(payload, slice.TimestampOffset, checked(keyCount * sizeof(uint)))
+            || !IsReadable(payload, slice.ValueOffset, checked(keyCount * valueStride)))
+        {
+            return;
+        }
+
+        for (int keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            uint timeOffset = checked(slice.TimestampOffset + (uint)(keyIndex * sizeof(uint)));
+            uint valueOffset = checked(slice.ValueOffset + (uint)(keyIndex * valueStride));
+            int time = checked(baseTime + (int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan((int)timeOffset, sizeof(uint))));
+            Vector3 value = ReadVector3Value(payload, valueOffset);
+            Vector3 inTangent = value;
+            Vector3 outTangent = value;
+            if (TrackUsesTangents(track.Interpolation))
+            {
+                inTangent = ReadVector3Value(payload, valueOffset + 12u);
+                outTangent = ReadVector3Value(payload, valueOffset + 24u);
+            }
+
+            destination.Add(new Vector3TrackKeyframe(time, value, inTangent, outTangent));
+        }
+    }
+
+    private static void AppendQuaternionTrackKeyframes(
+        byte[] payload,
+        M2TrackDefinition<M2CompQuaternion> track,
+        int sequenceIndex,
+        int baseTime,
+        List<QuaternionTrackKeyframe> destination)
+    {
+        if (!TryReadSequenceSlice(payload, track.TimestampArray, track.ValueArray, sequenceIndex, out M2TrackSequenceSlice slice) || !slice.HasData)
+            return;
+
+        int keyCount = checked((int)Math.Min(slice.TimestampCount, slice.ValueCount));
+        if (keyCount <= 0)
+            return;
+
+        int valueStride = GetTrackValueStride(track.Interpolation, scalarSize: 8);
+        if (!IsReadable(payload, slice.TimestampOffset, checked(keyCount * sizeof(uint)))
+            || !IsReadable(payload, slice.ValueOffset, checked(keyCount * valueStride)))
+        {
+            return;
+        }
+
+        for (int keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            uint timeOffset = checked(slice.TimestampOffset + (uint)(keyIndex * sizeof(uint)));
+            uint valueOffset = checked(slice.ValueOffset + (uint)(keyIndex * valueStride));
+            int time = checked(baseTime + (int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan((int)timeOffset, sizeof(uint))));
+            Quaternion value = ReadCompQuaternionValue(payload, valueOffset);
+            Quaternion inTangent = value;
+            Quaternion outTangent = value;
+            if (TrackUsesTangents(track.Interpolation))
+            {
+                inTangent = ReadCompQuaternionValue(payload, valueOffset + 8u);
+                outTangent = ReadCompQuaternionValue(payload, valueOffset + 16u);
+            }
+
+            destination.Add(new QuaternionTrackKeyframe(time, value, inTangent, outTangent));
+        }
+    }
+
+    private static Vector3 ReadVector3Value(byte[] payload, uint offset)
+    {
+        return new Vector3(
+            BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan((int)offset, sizeof(float))),
+            BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan((int)offset + sizeof(float), sizeof(float))),
+            BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan((int)offset + (sizeof(float) * 2), sizeof(float))));
+    }
+
+    private static Quaternion ReadCompQuaternionValue(byte[] payload, uint offset)
+    {
+        short x = BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan((int)offset, sizeof(short)));
+        short y = BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan((int)offset + sizeof(short), sizeof(short)));
+        short z = BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan((int)offset + (sizeof(short) * 2), sizeof(short)));
+        short w = BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan((int)offset + (sizeof(short) * 3), sizeof(short)));
+        return new M2CompQuaternion(x, y, z, w).ToQuaternion();
+    }
+
+    private static void WriteCompressedQuaternion(BinaryWriter writer, Quaternion value)
+    {
+        Quaternion normalized = Quaternion.Normalize(value);
+        int xq = (int)MathF.Round(normalized.X * (1 << 21));
+        int yq = (int)MathF.Round(normalized.Y * (1 << 20));
+        int zq = (int)MathF.Round(normalized.Z * (1 << 20));
+        xq = Math.Clamp(xq, -(1 << 21), (1 << 21) - 1);
+        yq = Math.Clamp(yq, -(1 << 20), (1 << 20) - 1);
+        zq = Math.Clamp(zq, -(1 << 20), (1 << 20) - 1);
+
+        uint ux = unchecked((uint)xq) & 0x003F_FFFFu;
+        uint uy = unchecked((uint)yq) & 0x001F_FFFFu;
+        uint uz = unchecked((uint)zq) & 0x001F_FFFFu;
+
+        uint data0 = (uz & 0x001F_FFFFu) | ((uy & 0x0000_07FFu) << 21);
+        uint data1 = ((uy >> 11) & 0x0000_03FFu) | (ux << 10);
+        writer.Write(data0);
+        writer.Write(data1);
+    }
+
+    private static bool TryReadSequenceSlice(byte[] payload, M2TrackArrayReference timestampArray, M2TrackArrayReference valueArray, int sequenceIndex, out M2TrackSequenceSlice slice)
+    {
+        slice = default;
+        if (timestampArray.Count == 0 || valueArray.Count == 0)
+            return false;
+
+        if (sequenceIndex < 0 || sequenceIndex >= timestampArray.Count || sequenceIndex >= valueArray.Count)
+            return false;
+
+        int timestampRefOffset = checked((int)timestampArray.Offset + (sequenceIndex * TrackArrayReferenceSizeBytes));
+        int valueRefOffset = checked((int)valueArray.Offset + (sequenceIndex * TrackArrayReferenceSizeBytes));
+        if (!IsReadable(payload, (uint)timestampRefOffset, TrackArrayReferenceSizeBytes)
+            || !IsReadable(payload, (uint)valueRefOffset, TrackArrayReferenceSizeBytes))
+        {
+            return false;
+        }
+
+        uint timestampCount = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(timestampRefOffset, sizeof(uint)));
+        uint timestampOffset = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(timestampRefOffset + 0x04, sizeof(uint)));
+        uint valueCount = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(valueRefOffset, sizeof(uint)));
+        uint valueOffset = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(valueRefOffset + 0x04, sizeof(uint)));
+        slice = new M2TrackSequenceSlice(timestampCount, timestampOffset, valueCount, valueOffset);
+        return true;
+    }
+
+    private static bool IsReadable(byte[] payload, uint offset, int size)
+    {
+        return offset <= payload.Length && size >= 0 && offset <= payload.Length - size;
+    }
+
+    private static int GetTrackValueStride(M2TrackInterpolation interpolation, int scalarSize)
+    {
+        return interpolation is M2TrackInterpolation.Hermite or M2TrackInterpolation.Bezier
+            ? checked(scalarSize * 3)
+            : scalarSize;
+    }
+
+    private static bool TrackUsesTangents(M2TrackInterpolation interpolation)
+    {
+        return interpolation is M2TrackInterpolation.Hermite or M2TrackInterpolation.Bezier;
     }
 
     private static void WritePivt(BinaryWriter writer, IReadOnlyList<M2BoneDefinition> bones)
@@ -468,4 +874,9 @@ public static class M2ToMdxConverter
         int TransformId,
         int CoordId,
         float StaticAlpha);
+
+    private readonly record struct Vector3TrackKeyframe(int Time, Vector3 Value, Vector3 InTangent, Vector3 OutTangent);
+
+    private readonly record struct QuaternionTrackKeyframe(int Time, Quaternion Value, Quaternion InTangent, Quaternion OutTangent);
+
 }

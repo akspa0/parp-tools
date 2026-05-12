@@ -55,7 +55,7 @@
 | **Phase C: Alpha shard raw-chunk preservation** | **DONE** — Alpha tile tensor packs now preserve raw embedded tile chunks under `raw_chunks/alpha/...` alongside decoded signals |
 | **Phase C: Wmo v17->v14 converter** | **DONE** — shared `wow-viewer` downgrade path plus converter CLI and focused regression coverage are landed; large sources now merge past the Alpha-era `384` group ceiling with spatial buckets and portal remap instead of blunt overflow collapse |
 | **Phase C: Wmo v14->v17 converter** | **DONE** — shared `wow-viewer` upgrade path plus converter CLI and focused tests are landed |
-| **Phase C: M2->MDX minimal converter** | **DONE (STRUCTURAL ONLY)** — shared `wow-viewer` minimal downgrade lane is landed and reader-validated for geometry, materials, textures, sequence headers, bones, pivots, and skin-fed index data, but it still does not emit MDX bone transform tracks (`KGTR`/`KGRT`/`KGSC`) or ingest external M2 `.anim` payloads, so Alpha-runtime animation parity remains open |
+| **Phase C: M2->MDX minimal converter** | **DONE (STRUCTURAL, ANIMATED BONE TRACKS LANDED)** — shared `wow-viewer` downgrade lane is landed and reader-validated for geometry, materials, textures, sequence headers, bones, pivots, skin-fed index data, classic bone transform tracks (`KGTR`/`KGRT`/`KGSC`), `GLBS`, and companion external M2 `.anim` ingestion, but Alpha-runtime parity beyond bone transforms remains open |
 | **Phase C: MDX->M2 minimal converter** | **DONE** — shared `wow-viewer` minimal upgrade lane is landed, emits a strict `MD20` root plus `00.skin`, has focused reader-backed regression coverage, and is wired into `WowViewer.Tool.Converter` |
 
 ## IN PROGRESS
@@ -201,7 +201,7 @@ Both commits after `47cbb435` were reverted because they broke 0.5.3 client map 
 ## OBJECT CONVERTER STATUS NOTE (2026-05-11)
 - `wow-viewer` now owns both WMO directions in shared I/O: `WmoV17ToV14Converter` and `WmoV14ToV17Converter`, with converter CLI wiring and focused test coverage.
 - The `WmoV17ToV14` downgrade path now handles the practical Alpha 0.5.3 ceiling of `384` groups with spatial bucket merging and portal index remap instead of flattening all overflow into one terminal group.
-- `wow-viewer/src/core/WowViewer.Core.IO/M2/M2ToMdxConverter.cs` now provides a first minimal `M2 -> MDX` downgrade lane. Current proof is reader-backed structure validation rather than broad real-data parity.
+- `wow-viewer/src/core/WowViewer.Core.IO/M2/M2ToMdxConverter.cs` now provides a first minimal `M2 -> MDX` downgrade lane with classic bone transform track export and companion external `.anim` ingestion. Current proof is still reader-backed structure validation rather than broad real-data parity.
 - `convert-m2-to-mdx` is now wired in `WowViewer.Tool.Converter` and validated with a focused converter build.
 - `wow-viewer/src/core/WowViewer.Core.IO/M2/MdxToM2Converter.cs` now provides the first minimal `MDX -> M2` upgrade lane. Current proof is a synthetic round-trip that re-reads the generated strict `MD20` root and `00.skin` through existing M2 readers, plus converter CLI build validation.
 - The next object-converter slice is broad real-data proof for both `M2 -> MDX` and `MDX -> M2` rather than another new ownership seam.

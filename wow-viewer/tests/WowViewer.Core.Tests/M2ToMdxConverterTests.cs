@@ -196,6 +196,52 @@ public sealed class M2ToMdxConverterTests
         Assert.Equal("World\\Maps\\Azeroth\\mdxs\\Azeroth\\Creature\\SyntheticCrate\\SyntheticCrateMain.blp", summary.Textures[0].Path);
     }
 
+    [Fact]
+    public void Convert_WhenBoneTracksExist_WritesAnimatedBoneTracksIntoClassicMdx()
+    {
+        SyntheticAnimatedFixture fixture = CreateAnimatedFixture(useExternalPayload: false);
+
+        byte[] converted = M2ToMdxConverter.Convert(fixture.Geometry, fixture.Skin);
+
+        using MemoryStream boneStream = new(converted, writable: false);
+        MdxBoneFile boneFile = MdxBoneReader.Read(boneStream, "synthetic_animated.mdx");
+
+        MdxBone bone = Assert.Single(boneFile.Bones);
+        Assert.NotNull(bone.TranslationTrack);
+        Assert.NotNull(bone.RotationTrack);
+        Assert.NotNull(bone.ScalingTrack);
+        Assert.Equal(2, bone.TranslationTrack!.KeyCount);
+        Assert.Equal(2, bone.RotationTrack!.KeyCount);
+        Assert.Equal(2, bone.ScalingTrack!.KeyCount);
+        Assert.Equal(new Vector3(1.0f, 2.0f, 3.0f), bone.PivotPoint);
+    }
+
+    [Fact]
+    public void Convert_WhenBoneTracksLiveInExternalAnim_UsesExternalAnimationPayload()
+    {
+        SyntheticAnimatedFixture fixture = CreateAnimatedFixture(useExternalPayload: true);
+
+        byte[] converted = M2ToMdxConverter.Convert(
+            fixture.Geometry,
+            fixture.Skin,
+            rewrittenTexturePaths: null,
+            new Dictionary<string, M2ExternalAnimationDocument>(StringComparer.OrdinalIgnoreCase)
+            {
+                [fixture.Animation!.SourcePath] = fixture.Animation
+            });
+
+        using MemoryStream boneStream = new(converted, writable: false);
+        MdxBoneFile boneFile = MdxBoneReader.Read(boneStream, "synthetic_animated_external.mdx");
+
+        MdxBone bone = Assert.Single(boneFile.Bones);
+        Assert.NotNull(bone.TranslationTrack);
+        Assert.NotNull(bone.RotationTrack);
+        Assert.NotNull(bone.ScalingTrack);
+        Assert.Equal(2, bone.TranslationTrack!.KeyCount);
+        Assert.Equal(2, bone.RotationTrack!.KeyCount);
+        Assert.Equal(2, bone.ScalingTrack!.KeyCount);
+    }
+
     private readonly record struct SyntheticSequence(
         ushort AnimationId,
         ushort VariationIndex,
@@ -212,6 +258,8 @@ public sealed class M2ToMdxConverterTests
         float BoundsRadius,
         short VariationNext,
         ushort AliasNext);
+
+    private readonly record struct SyntheticAnimatedFixture(M2GeometryDocument Geometry, M2SkinDocument Skin, M2ExternalAnimationDocument? Animation);
 
     private static byte[] CreateMd20Bytes(
         uint version,
@@ -252,6 +300,99 @@ public sealed class M2ToMdxConverterTests
         return data;
     }
 
+    private static SyntheticAnimatedFixture CreateAnimatedFixture(bool useExternalPayload)
+    {
+        SyntheticTrackPayloadBuilder payloadBuilder = new();
+        M2BoneDefinition bone = new(
+            index: 0,
+            keyBoneId: -1,
+            flags: 0u,
+            parentBone: -1,
+            submeshId: 0,
+            boneNameCrc: 0u,
+            translationTrack: payloadBuilder.AddTrack(
+                M2TrackInterpolation.Linear,
+                globalSequenceIndex: -1,
+                times: [0u, 1000u],
+                values: [Vector3.Zero, new Vector3(2.0f, 0.0f, 0.0f)]),
+            rotationTrack: payloadBuilder.AddTrack(
+                M2TrackInterpolation.Linear,
+                globalSequenceIndex: -1,
+                times: [0u, 1000u],
+                values: [M2CompQuaternion.Identity, new M2CompQuaternion(32767, 32767, unchecked((short)55937), 9597)]),
+            scalingTrack: payloadBuilder.AddTrack(
+                M2TrackInterpolation.Linear,
+                globalSequenceIndex: -1,
+                times: [0u, 1000u],
+                values: [Vector3.One, new Vector3(2.0f, 2.0f, 2.0f)]),
+            pivot: new Vector3(1.0f, 2.0f, 3.0f));
+
+        byte[] animatedPayload = payloadBuilder.ToArray();
+        byte[] rootPayload = useExternalPayload ? [0] : animatedPayload;
+
+        M2ModelDocument model = new(
+            M2ModelIdentity.FromPath("Creature\\SyntheticAnimated\\SyntheticAnimated.m2"),
+            rootPayload,
+            "MD20",
+            0x108u,
+            0u,
+            1u,
+            "SyntheticAnimated",
+            [],
+            [new M2SequenceDefinition(0, animationId: 7, variationIndex: 0, duration: 1000u, moveSpeed: 0f, flags: useExternalPayload ? 0u : (uint)M2SequenceFlags.StoredInline, frequency: 0, replayMinimum: 0u, replayMaximum: 0u, blendTimeIn: 0, blendTimeOut: 0, boundsMin: Vector3.Zero, boundsMax: Vector3.One, boundsRadius: 1.0f, variationNext: -1, aliasNext: ushort.MaxValue)],
+            [(short)0],
+            [],
+            [],
+            [],
+            [],
+            [],
+            new Vector3(-1.0f, -1.0f, -1.0f),
+            new Vector3(1.0f, 1.0f, 1.0f),
+            2.0f,
+            0u,
+            0u,
+            bones: [bone]);
+
+        M2GeometryDocument geometry = new(
+            model,
+            vertices:
+            [
+                new M2GeometryVertex(new Vector3(0f, 0f, 0f), Vector3.UnitZ, new Vector2(0f, 0f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(1f, 0f, 0f), Vector3.UnitZ, new Vector2(1f, 0f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(0f, 1f, 0f), Vector3.UnitZ, new Vector2(0f, 1f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+            ],
+            textures: [],
+            renderFlags: [],
+            textureLookup: [],
+            textureUnitLookup: [],
+            transparencyLookup: [],
+            textureAnimationLookup: [],
+            boneLookup: []);
+
+        M2SkinDocument skin = new(
+            sourcePath: "Creature\\SyntheticAnimated\\SyntheticAnimated00.skin",
+            signature: "SKIN",
+            vertexLookup: [0, 1, 2],
+            vertexLookupOffset: 0,
+            triangleIndices: [0, 1, 2],
+            triangleIndexOffset: 0,
+            boneEntries: [],
+            boneEntryOffset: 0,
+            submeshes: [new M2SkinSubmesh(1, 0, 0, 3, 0, 3)],
+            submeshOffset: 0,
+            batches: [],
+            batchOffset: 0,
+            globalVertexOffset: 0,
+            shadowBatchCount: 0,
+            shadowBatchOffset: 0);
+
+        M2ExternalAnimationDocument? animation = useExternalPayload
+            ? M2AnimationReader.Read(new MemoryStream(animatedPayload, writable: false), model.Identity.BuildAnimationPath(animationId: 7, variationIndex: 0))
+            : null;
+
+        return new SyntheticAnimatedFixture(geometry, skin, animation);
+    }
+
     private static int Align(int value, int alignment)
     {
         int remainder = value % alignment;
@@ -282,5 +423,112 @@ public sealed class M2ToMdxConverterTests
         BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(offset + 0x00, 4), BitConverter.SingleToInt32Bits(value.X));
         BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(offset + 0x04, 4), BitConverter.SingleToInt32Bits(value.Y));
         BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(offset + 0x08, 4), BitConverter.SingleToInt32Bits(value.Z));
+    }
+
+    private sealed class SyntheticTrackPayloadBuilder
+    {
+        private readonly MemoryStream _stream = new();
+
+        public M2TrackDefinition<T> AddTrack<T>(M2TrackInterpolation interpolation, int globalSequenceIndex, IReadOnlyList<uint> times, IReadOnlyList<T> values)
+        {
+            ArgumentNullException.ThrowIfNull(times);
+            ArgumentNullException.ThrowIfNull(values);
+            if (times.Count != values.Count)
+                throw new ArgumentException("Synthetic animated test tracks require matching time/value counts.");
+
+            uint timestampArrayOffset = checked((uint)_stream.Position);
+            WriteUInt32((uint)times.Count);
+            long timestampDataPointerOffset = _stream.Position;
+            WriteUInt32(0);
+
+            uint valueArrayOffset = checked((uint)_stream.Position);
+            WriteUInt32((uint)values.Count);
+            long valueDataPointerOffset = _stream.Position;
+            WriteUInt32(0);
+
+            Align(4);
+            uint timestampDataOffset = checked((uint)_stream.Position);
+            foreach (uint time in times)
+                WriteUInt32(time);
+            PatchUInt32(timestampDataPointerOffset, timestampDataOffset);
+
+            Align(4);
+            uint valueDataOffset = checked((uint)_stream.Position);
+            foreach (T value in values)
+                WriteValue(value);
+            PatchUInt32(valueDataPointerOffset, valueDataOffset);
+
+            return new M2TrackDefinition<T>(
+                interpolation,
+                globalSequenceIndex,
+                new M2TrackArrayReference(1u, timestampArrayOffset),
+                new M2TrackArrayReference(1u, valueArrayOffset));
+        }
+
+        public byte[] ToArray()
+        {
+            return _stream.ToArray();
+        }
+
+        private void Align(int alignment)
+        {
+            while ((_stream.Position % alignment) != 0)
+                _stream.WriteByte(0);
+        }
+
+        private void PatchUInt32(long offset, uint value)
+        {
+            long previousPosition = _stream.Position;
+            _stream.Position = offset;
+            WriteUInt32(value);
+            _stream.Position = previousPosition;
+        }
+
+        private void WriteUInt32(uint value)
+        {
+            Span<byte> bytes = stackalloc byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
+            _stream.Write(bytes);
+        }
+
+        private void WriteInt16(short value)
+        {
+            Span<byte> bytes = stackalloc byte[sizeof(short)];
+            BinaryPrimitives.WriteInt16LittleEndian(bytes, value);
+            _stream.Write(bytes);
+        }
+
+        private void WriteSingle(float value)
+        {
+            Span<byte> bytes = stackalloc byte[sizeof(float)];
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, BitConverter.SingleToInt32Bits(value));
+            _stream.Write(bytes);
+        }
+
+        private void WriteValue<T>(T value)
+        {
+            switch (value)
+            {
+                case short shortValue:
+                    WriteInt16(shortValue);
+                    break;
+                case float floatValue:
+                    WriteSingle(floatValue);
+                    break;
+                case Vector3 vectorValue:
+                    WriteSingle(vectorValue.X);
+                    WriteSingle(vectorValue.Y);
+                    WriteSingle(vectorValue.Z);
+                    break;
+                case M2CompQuaternion quaternionValue:
+                    WriteInt16(quaternionValue.X);
+                    WriteInt16(quaternionValue.Y);
+                    WriteInt16(quaternionValue.Z);
+                    WriteInt16(quaternionValue.W);
+                    break;
+                default:
+                    throw new NotSupportedException($"Unsupported synthetic M2 track value type '{typeof(T).FullName}'.");
+            }
+        }
     }
 }
