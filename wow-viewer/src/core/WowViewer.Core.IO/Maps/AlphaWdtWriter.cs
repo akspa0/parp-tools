@@ -16,6 +16,7 @@ public static class AlphaWdtWriter
     private const int MainEntrySize = 16;
     private const int TilesPerAxis = 64;
     private const int TileSize = 257;
+    private const int AlphaClientMaxMcnkPayloadSize = 15000;
     private const int MddfEntrySize = 36;
     private const int ModfEntrySize = 64;
     private const int MclyEntrySize = 16;
@@ -251,8 +252,20 @@ public static class AlphaWdtWriter
         Dictionary<int, int> doodadIndexByUniqueId = BuildDoodadIndexByUniqueId(tile.ModelPlacements);
         Dictionary<int, int> worldIndexByUniqueId = BuildWorldModelIndexByUniqueId(tile.WorldModelPlacements);
         AlphaPlacementRefs[] refsByChunk = BuildPlacementReferences(tile, tileX, tileY, doodadIndexByUniqueId, worldIndexByUniqueId);
+        ApplyClientMcnkSizeBudget(tile, tileX, tileY, refsByChunk);
 
         return new AlphaPlacementWritePlan(mddfData, modfData, refsByChunk);
+    }
+
+    private static void ApplyClientMcnkSizeBudget(AlphaTileData tile, int tileX, int tileY, AlphaPlacementRefs[] refsByChunk)
+    {
+        int[] mapObjRefChunkCounts = BuildMapObjRefChunkCounts(refsByChunk, tile.WorldModelPlacements.Count);
+        int[] mapObjAnchorChunks = BuildMapObjAnchorChunks(tile.WorldModelPlacements, tileX, tileY);
+
+        for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
+        {
+            TrimChunkMapObjRefsToBudget(tile, tileX, tileY, chunkIndex, refsByChunk[chunkIndex], mapObjRefChunkCounts, mapObjAnchorChunks);
+        }
     }
 
     private static AlphaPlacementRefs[] BuildPlacementReferences(AlphaTileData tile, int tileX, int tileY,
@@ -502,6 +515,118 @@ public static class AlphaWdtWriter
             int chunkIndex = FindContainingChunk(placement.Position, tileX, tileY);
             refsByChunk[chunkIndex].MapObjIndices.Add(placementIndex);
         }
+    }
+
+    private static int[] BuildMapObjRefChunkCounts(AlphaPlacementRefs[] refsByChunk, int placementCount)
+    {
+        if (placementCount <= 0)
+            return [];
+
+        int[] counts = new int[placementCount];
+        for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
+        {
+            foreach (int placementIndex in refsByChunk[chunkIndex].MapObjIndices)
+            {
+                if ((uint)placementIndex < (uint)counts.Length)
+                    counts[placementIndex]++;
+            }
+        }
+
+        return counts;
+    }
+
+    private static int[] BuildMapObjAnchorChunks(IReadOnlyList<AlphaWorldModelPlacement> placements, int tileX, int tileY)
+    {
+        int[] anchors = new int[placements.Count];
+        for (int index = 0; index < placements.Count; index++)
+            anchors[index] = FindContainingChunk(placements[index].Position, tileX, tileY);
+
+        return anchors;
+    }
+
+    private static void TrimChunkMapObjRefsToBudget(
+        AlphaTileData tile,
+        int tileX,
+        int tileY,
+        int chunkIndex,
+        AlphaPlacementRefs placementRefs,
+        int[] mapObjRefChunkCounts,
+        int[] mapObjAnchorChunks)
+    {
+        int cx = chunkIndex % 16;
+        int cy = chunkIndex / 16;
+
+        while (GetMcnkPayloadSize(BuildMcnkData(tile, cx, cy, placementRefs)) >= AlphaClientMaxMcnkPayloadSize)
+        {
+            int trimIndex = SelectLeastLocalDuplicateMapObjRef(tile, tileX, tileY, chunkIndex, placementRefs.MapObjIndices, mapObjRefChunkCounts, mapObjAnchorChunks);
+            if (trimIndex < 0)
+                break;
+
+            int placementIndex = placementRefs.MapObjIndices[trimIndex];
+            placementRefs.MapObjIndices.RemoveAt(trimIndex);
+            if ((uint)placementIndex < (uint)mapObjRefChunkCounts.Length && mapObjRefChunkCounts[placementIndex] > 0)
+                mapObjRefChunkCounts[placementIndex]--;
+        }
+
+        int payloadSize = GetMcnkPayloadSize(BuildMcnkData(tile, cx, cy, placementRefs));
+        if (payloadSize >= AlphaClientMaxMcnkPayloadSize)
+        {
+            throw new InvalidDataException(
+                $"Alpha MCNK ({tileX},{tileY}) chunk ({cx},{cy}) payload size {payloadSize} exceeds the client limit {AlphaClientMaxMcnkPayloadSize - 1}. Doodads={placementRefs.DoodadIndices.Count}, WMOs={placementRefs.MapObjIndices.Count}.");
+        }
+    }
+
+    private static int SelectLeastLocalDuplicateMapObjRef(
+        AlphaTileData tile,
+        int tileX,
+        int tileY,
+        int chunkIndex,
+        IReadOnlyList<int> mapObjIndices,
+        int[] mapObjRefChunkCounts,
+        int[] mapObjAnchorChunks)
+    {
+        if (mapObjIndices.Count == 0)
+            return -1;
+
+        int cx = chunkIndex % 16;
+        int cy = chunkIndex / 16;
+        GetChunkCenter(tileX, tileY, cx, cy, out float centerX, out float centerY);
+
+        int selectedIndex = -1;
+        float farthestDistanceSquared = float.NegativeInfinity;
+        for (int index = 0; index < mapObjIndices.Count; index++)
+        {
+            int placementIndex = mapObjIndices[index];
+            if ((uint)placementIndex >= (uint)tile.WorldModelPlacements.Count
+                || (uint)placementIndex >= (uint)mapObjRefChunkCounts.Length
+                || (uint)placementIndex >= (uint)mapObjAnchorChunks.Length)
+            {
+                continue;
+            }
+
+            if (mapObjRefChunkCounts[placementIndex] <= 1 || mapObjAnchorChunks[placementIndex] == chunkIndex)
+                continue;
+
+            AlphaWorldModelPlacement placement = tile.WorldModelPlacements[placementIndex];
+            float dx = placement.Position.X - centerX;
+            float dy = placement.Position.Y - centerY;
+            float distanceSquared = dx * dx + dy * dy;
+            if (distanceSquared > farthestDistanceSquared)
+            {
+                farthestDistanceSquared = distanceSquared;
+                selectedIndex = index;
+            }
+        }
+
+        return selectedIndex;
+    }
+
+    private static int GetMcnkPayloadSize(byte[] mcnkBytes)
+    {
+        if (mcnkBytes.Length < 8)
+            return 0;
+
+        return BinaryPrimitives.ReadInt32LittleEndian(mcnkBytes.AsSpan(4, 4));
     }
 
     private static void GetChunkPlanarBounds(int tileX, int tileY, int cx, int cy, out float minX, out float maxX, out float minY, out float maxY)

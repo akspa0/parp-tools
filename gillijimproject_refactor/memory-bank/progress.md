@@ -48,9 +48,13 @@
 | **Phase C: LkToAlpha AlphaWdtWriter structural parity** | **DONE** — MAIN row-major per 0.5.3 client, always emit MCNK+MCRF, FourCC I/O convention |
 | **Phase C: Placement orientation proof** | **DONE** — Ghidra-confirmed Alpha MDDF/MODF position and rotation transforms; LK writer MODF bounds now round-trip through the shared reader |
 | **Phase C: AlphaWDT placement and MCRF stabilization** | **DONE** — reverse AreaID mapping, target-backed asset filtering, top-level chunk contiguity, raw-file rotation convention, and single-owner doodad chunk assignment are all landed in the shared wow-viewer alphaWDT path |
+| **Phase C: AlphaWDT MCNK size hardening** | **DONE** — Ghidra-backed client limit `chunkInfo->size < 15000` is now enforced in `AlphaWdtWriter` by trimming duplicate non-anchor WMO refs before emit and throwing on irreducible overflow |
 | **Phase C: ADT shard raw-chunk preservation** | **DONE** — unconsumed ADT-family chunks now persist into NPZ shards as raw uint8 blobs with metadata instead of being dropped outright |
 | **Phase C: ADT preservation signal promotion** | **DONE** — `MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, and `MCRW` now persist as first-class NPZ entries rather than raw-only fallback blobs; `MCSE` currently retains raw fallback beside the typed signals, and staged real-data `MCSE`/`MCRF` coverage is broadened smoke rather than a pinned positive regression |
 | **Phase C: Alpha shard raw-chunk preservation** | **DONE** — Alpha tile tensor packs now preserve raw embedded tile chunks under `raw_chunks/alpha/...` alongside decoded signals |
+| **Phase C: Wmo v17->v14 converter** | **DONE** — shared `wow-viewer` downgrade path plus converter CLI and focused regression coverage are landed; large sources now merge past the Alpha-era `384` group ceiling with spatial buckets and portal remap instead of blunt overflow collapse |
+| **Phase C: Wmo v14->v17 converter** | **DONE** — shared `wow-viewer` upgrade path plus converter CLI and focused tests are landed |
+| **Phase C: M2->MDX minimal converter** | **DONE** — shared `wow-viewer` minimal downgrade lane is landed and reader-validated for geometry, materials, textures, sequences, bones, pivots, and skin-fed index data |
 
 ## IN PROGRESS
 | What | Status |
@@ -59,8 +63,9 @@
 | Phase C: AlphaToLk AreaID crosswalk | NOT YET — `AreaIdMapper` exists in `WowViewer.Core.IO/Dbc/`, not yet wired to converter |
 | Phase C: LkToAlpha real-data MdxViewer validation | DONE — 839/839 tiles, terrain renders, WMOs load, ExitCode=0 |
 | Phase C: Alpha/LK full chunk preservation | OPEN — current converter lane is still a reduced terrain-domain reconstruction, not chunk-for-chunk spec closure. Gap inventory documented below. |
-| Phase C: Mdx↔M2 converters | NOT PORTED |
-| Phase C: Wmo v14↔v17 converters | NOT PORTED |
+| Phase C: Wmo v14↔v17 converters | DONE — shared writers, CLI wiring, and focused tests are landed in `wow-viewer` |
+| Phase C: M2->MDX CLI wiring | OPEN — minimal shared converter is landed, but converter command wiring still needs to be finished |
+| Phase C: Mdx->M2 converter | NOT STARTED |
 | Phase C: Legacy MdxViewer → wow-viewer port | LONG-RANGE — `WowViewer.App` shell exists but needs world-session, terrain, WMO, M2 rendering
 
 ## CHUNK PRESERVATION GAP INVENTORY (2026-05-08)
@@ -188,8 +193,14 @@ Both commits after `47cbb435` were reverted because they broke 0.5.3 client map 
 8. **Binary Chunk Tag Corruption** — `LkAdtWriter` used endian-swapping `FourCC.ToFileBytes()` for `MCNK` subchunks (`MCVT`, etc.), breaking binary validation. Fixed to use `ASCII.GetBytes`.
 
 ## FOCUSED VALIDATION NOTE (2026-05-11)
-- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter LkToAlphaRoundTripTests` currently passes with `12/12` tests.
+- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter LkToAlphaRoundTripTests` currently passes with `13/13` tests.
 - Do not describe this as full suite closure: the broader `WowViewer.Core.Tests` run still hits missing `wow-viewer/test_data/development` fixtures and one unrelated pre-existing invalid-data test.
+
+## OBJECT CONVERTER STATUS NOTE (2026-05-11)
+- `wow-viewer` now owns both WMO directions in shared I/O: `WmoV17ToV14Converter` and `WmoV14ToV17Converter`, with converter CLI wiring and focused test coverage.
+- The `WmoV17ToV14` downgrade path now handles the practical Alpha 0.5.3 ceiling of `384` groups with spatial bucket merging and portal index remap instead of flattening all overflow into one terminal group.
+- `wow-viewer/src/core/WowViewer.Core.IO/M2/M2ToMdxConverter.cs` now provides a first minimal `M2 -> MDX` downgrade lane. Current proof is reader-backed structure validation rather than broad real-data parity.
+- The next object-converter slice is to wire `convert-m2-to-mdx` in `WowViewer.Tool.Converter`, then start `MdxToM2`.
 
 ## BUGS FIXED IN NPZ SHARD VALIDATION (2026-05-08)
 1. **OverflowException in MCNK sub-chunk locators** — `LocateMcvtDataOffset`, `LocateMcnrDataOffset`, `LocateMccvDataOffset`, and `TryReadSplitMcnkSubchunkPayload` all used `checked((int)header.Size)` casts that threw `OverflowException` when encountering MCNK sub-chunk headers with `uint` sizes > `int.MaxValue`. Fixed by converting all three locators and `TryReadSplitMcnkSubchunkPayload` to `long` arithmetic.

@@ -38,6 +38,7 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 - `AlphaWdtReader`, `AlphaWdtWriter`, and `LkAdtWriter` now share the same round-trip-safe raw rotation convention: `Rotation = (fileRotX, fileRotZ, fileRotY)`. Do not subtract 180 degrees on write; the client applies the yaw `+π` at load time.
 - Alpha doodads stay single-owner in `MCRF` to avoid the native purge assert. The writer now chooses the chunk containing the doodad anchor by default; preserved LK source refs only win when they stay inside that chunk's local `3x3` neighborhood.
 - Alpha WMOs keep overlap-based multi-chunk refs derived from bounds, with containing-chunk fallback only when no bounds overlap exists.
+- Alpha `MCNK` payloads must stay below the client-side limit `chunkInfo->size < 15000` confirmed in the 0.5.3 binary (`MapChunk.cpp` assert string). `AlphaWdtWriter` now trims only duplicate non-anchor WMO refs when a chunk would exceed that ceiling and throws if a chunk still cannot be brought under budget.
 - Target-client asset matching must be built from the actual target archives, Alpha wrapper scan, and loose files only. Do not treat external listfiles as proof that a 0.5.3 asset exists.
 - Top-level alphaWDT chunks are contiguous. Do not odd-byte pad `MDNM`, `MONM`, or other top-level chunks between headers.
 
@@ -79,6 +80,18 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 - **Filtered-placements mode**: loads with v14 WMOs through Alpha `.wmo.MPQ` resolution. No crash (filtering prevents missing-asset fallback). `ExitCode=0`. Capture saved.
 - See `wow-viewer/README.md` for complete validation workflow.
 
+### Landed In The May 11 Session (Object Converter Slice)
+
+**WMO v14 <-> v17 converters:**
+- `wow-viewer` now owns both shared WMO directions: `WmoV17ToV14Converter` and `WmoV14ToV17Converter` live in `WowViewer.Core.IO/Wmo` with focused tests and converter CLI wiring.
+- The downgrade path is not a raw copy. It rebuilds legacy `MOHD`/`MOGI`, downgrades root and group chunk layouts, and handles the Alpha 0.5.3-era practical ceiling of `384` groups through spatial bucket merging rather than blunt overflow collapse.
+- Portal refs are remapped into the merged legacy group index space so converted roots stay structurally consistent after overflow merging.
+
+**M2 -> MDX minimal downgrade lane:**
+- `wow-viewer` now owns a first minimal shared `M2ToMdxConverter` in `WowViewer.Core.IO/M2`.
+- The current proof boundary is explicit: geometry, texture names, materials, sequences, bones, pivots, and skin-fed index data are mapped into structurally valid classic `MDX` output and validated by re-reading the produced bytes through existing MDX readers.
+- This is not full parity yet. CLI wiring for `convert-m2-to-mdx` was still open at session end, and `MdxToM2` had not started.
+
 **New CLI flags for `convert-lk-to-alpha`:**
 - `--target-client-root <dir>` / `-tcr` — filter placements against target client
 - `--terrain-only` / `-to` — strip all placements (crash-proof validation)
@@ -119,7 +132,8 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 - Forward `AlphaToLk` AreaID crosswalk wiring (reverse `LkToAlpha` mapping landed; the forward lane is still open)
 - LkToAlpha real-data batch validation beyond the new focused round-trip regressions
 - Full Alpha/LK chunk-for-chunk preservation instead of reduced terrain-domain reconstruction
-- M2/MDX converters and WMO v14↔v17 converters
+- `M2ToMdx` CLI wiring and broader real-data downgrade proof
+- `MdxToM2` implementation and tests
 - Deep format readers Phase D
 - DBC/DB2 metadata enrichment Phase E
 - Placement provenance Phase F
@@ -148,7 +162,7 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 
 ## NEXT
 1. Dataset prep lane: use staged clients + `dataset-list-maps` for discovery + `WowViewer.Tool.Harvest harvest-map-mpq` for shard generation into `wow-viewer\output\datasets\`, then NPZ-based validation/visualization from the harvested shards
-2. Phase C (continued): AreaID crosswalk, LkToAlpha real-data validation, Mdx↔M2, Wmo v14↔v17
+2. Phase C (continued): AreaID crosswalk, LkToAlpha broader real-data validation, finish `M2ToMdx` CLI wiring, then implement `MdxToM2`
 3. Phase D: Deep format readers (WDT retail flags, WDL, WMO full version range, MDX, BLP pixel decode)
 4. Phase E: DBC/DB2 metadata enrichment (AreaTable, WorldSafeLocs, LiquidType, GroundEffects)
 5. Phase F: Placement provenance (MCRF per-chunk arrays, PM4 SQLite, prefab detection)

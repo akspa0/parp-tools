@@ -404,6 +404,75 @@ public sealed class LkToAlphaRoundTripTests
     }
 
     [Fact]
+    public void WriteAlphaWdt_TrimsDuplicateWorldRefsToRespectAlphaClientMcnkLimit()
+    {
+        float[,] heightmap = new float[257, 257];
+        int[,,] texIds = new int[16, 16, 4];
+        bool[,,] layerMask = new bool[16, 16, 4];
+        for (int cy = 0; cy < 16; cy++)
+            for (int cx = 0; cx < 16; cx++)
+                layerMask[cx, cy, 0] = true;
+
+        const float mapOrigin = 17066.666f;
+        const float tileWorldSize = 533.33333f;
+        const float chunkWorldSize = tileWorldSize / 16f;
+
+        const int worldModelCount = 4096;
+        List<AlphaWorldModelPlacement> placements = new(worldModelCount);
+        for (int index = 0; index < worldModelCount; index++)
+        {
+            int anchorChunk = (index % 255) + 1;
+            int anchorCx = anchorChunk % 16;
+            int anchorCy = anchorChunk / 16;
+
+            float chunkMaxX = mapOrigin - anchorCy * chunkWorldSize;
+            float chunkMinX = chunkMaxX - chunkWorldSize;
+            float chunkMaxY = mapOrigin - anchorCx * chunkWorldSize;
+            float chunkMinY = chunkMaxY - chunkWorldSize;
+            Vector3 position = new((chunkMinX + chunkMaxX) * 0.5f, (chunkMinY + chunkMaxY) * 0.5f, 50f);
+
+            placements.Add(new AlphaWorldModelPlacement(
+                NameId: 0,
+                ModelPath: "world\\azeroth\\stormwind_keep.wmo",
+                UniqueId: index + 1,
+                Position: position,
+                Rotation: Vector3.Zero,
+                BoundsMin: new Vector3(mapOrigin - tileWorldSize - 10f, mapOrigin - tileWorldSize - 10f, 0f),
+                BoundsMax: new Vector3(mapOrigin + 10f, mapOrigin + 10f, 100f),
+                Flags: 0x0001));
+        }
+
+        AlphaTileData tile = new(
+            sourcePath: "mcnk_world_ref_budget",
+            heightmap: heightmap,
+            mcalAlphaPack: null,
+            mclyTextureIds: texIds,
+            mclyLayerMask: layerMask,
+            holeMask: new bool[16, 16],
+            textureNames: ["terrain_a.blp"],
+            modelPlacements: [],
+            worldModelPlacements: placements,
+            liquidChunks: []);
+
+        byte[] wdt = AlphaWdtWriter.Build("mcnk_world_ref_budget", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        int chunk0DeclaredSize = ReadMcnkDeclaredSize(wdt, 0, 0, 0);
+        var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
+
+        Assert.True(chunk0DeclaredSize < 15000, $"Expected MCNK payload below Alpha client limit, found {chunk0DeclaredSize}.");
+        Assert.True(chunk0Refs.WorldModelRefs.Length < worldModelCount, "Expected duplicate WMO refs to be trimmed for the stressed chunk.");
+
+        int totalWorldRefs = 0;
+        for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+            totalWorldRefs += ReadMcrfRefs(wdt, 0, 0, chunkIndex).WorldModelRefs.Length;
+
+        Assert.True(totalWorldRefs >= worldModelCount, "Expected every WMO to keep at least one owning chunk after trimming.");
+    }
+
+    [Fact]
     public void ConvertTile_AndWriteAlphaWdt_UsesSingleFixedSizeLiquidBlock()
     {
         List<LkMcnkData> chunks = [];
@@ -825,6 +894,17 @@ public sealed class LkToAlphaRoundTripTests
             worldModelRefs[i] = BitConverter.ToInt32(wdt, payloadOffset + ((nDoodadRefs + i) * 4));
 
         return (doodadRefs, worldModelRefs);
+    }
+
+    private static int ReadMcnkDeclaredSize(byte[] wdt, int tileX, int tileY, int chunkIndex)
+    {
+        int mainPayloadOffset = 12 + 8 + 128 + 8;
+        int tileOffset = BitConverter.ToInt32(wdt, mainPayloadOffset + (((tileY * 64) + tileX) * 16));
+        int mhdrDataOffset = tileOffset + 8;
+        int mcinRelativeOffset = BitConverter.ToInt32(wdt, mhdrDataOffset + 0x00);
+        int mcinOffset = mhdrDataOffset + mcinRelativeOffset;
+        int mcnkOffset = BitConverter.ToInt32(wdt, mcinOffset + 8 + (chunkIndex * 16));
+        return BitConverter.ToInt32(wdt, mcnkOffset + 4);
     }
 
     private static IReadOnlyList<int>[] CreateEmptyChunkRefSet()
