@@ -46,14 +46,14 @@ Based on Ghidra decompilation of `CMapChunk::Create` (0x5.3.3.3368) and cross-re
 | 0x38 | 4 | AreaId | Ghidra: `zoneId = *(uint*)(param_1 + 0x40)` where `param_1` includes the 8-byte MCNK chunk header |
 | 0x3C | 4 | WMOGroup | Count of WMO/map object references in MCRF; passed to `CreateRefs` from `*(uint*)(param_1 + 0x44)` |
 | 0x40 | 4 | Holes | 16-bit hole mask (low 16 bits); Ghidra: `holes = *(ushort*)(param_1 + 0x48)` |
-| 0x44 | 4 | Unknown5 | Purpose unknown |
-| 0x48 | 4 | Unknown6 | Purpose unknown |
-| 0x4C | 4 | PredTex1 | Predetermined texture data (4 × uint) |
-| 0x50 | 4 | PredTex2 | |
-| 0x54 | 4 | PredTex3 | |
-| 0x58 | 4 | PredTex4 | |
-| 0x5C | 4 | NoEffectDoodad1 | No-effect doodad refs (2 × uint) |
-| 0x60 | 4 | NoEffectDoodad2 | |
+| 0x44 | 4 | PredTex1 | Predominant-texture / low-detail terrain data (part 1 of 16-byte payload) |
+| 0x48 | 4 | PredTex2 | Predominant-texture / low-detail terrain data (part 2 of 16-byte payload) |
+| 0x4C | 4 | PredTex3 | Predominant-texture / low-detail terrain data (part 3 of 16-byte payload) |
+| 0x50 | 4 | PredTex4 | Predominant-texture / low-detail terrain data (part 4 of 16-byte payload) |
+| 0x54 | 4 | NoEffectDoodad1 | No-effect doodad bitset (part 1 of 8-byte payload) |
+| 0x58 | 4 | NoEffectDoodad2 | No-effect doodad bitset (part 2 of 8-byte payload) |
+| 0x5C | 4 | Unknown7 | Purpose unknown |
+| 0x60 | 4 | Unknown8 | Purpose unknown |
 | 0x64 | 4 | MclqOffset | Offset from MCNK data start to MCLQ liquid sub-chunk |
 | 0x68 | 4 | Unknown8 | Purpose unknown (NOT Position.X — see Position below) |
 | 0x6C | 4 | Unknown9 | Purpose unknown |

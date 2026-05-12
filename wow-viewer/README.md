@@ -87,6 +87,8 @@ Current validated alphaWDT rules:
 - doodads stay single-owner in `MCRF` with containing-chunk-first selection; WMOs keep overlap-based multi-chunk refs
 - target-client asset presence must come from target archives, wrapper scan, and loose files, not external listfiles
 
+External wiki handoff drafts for Alpha, ADT/v18, PM4, and PD4 live under `wow-viewer/docs/wowdev-wiki/`.
+
 ## Supported Client Eras
 
 `wow-viewer` is built around real client data, not mock assets.
