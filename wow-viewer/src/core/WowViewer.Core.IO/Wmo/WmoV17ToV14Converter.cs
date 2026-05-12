@@ -9,6 +9,7 @@ namespace WowViewer.Core.IO.Wmo;
 public static class WmoV17ToV14Converter
 {
     private const int LegacyMaxGroupCount = 384;
+    private const int LegacyMaxGroupVertexCount = 0xBFFF;
 
     private static readonly FourCC[] RootChunkOrder =
     [
@@ -26,6 +27,23 @@ public static class WmoV17ToV14Converter
         WmoChunkIds.Modd,
         WmoChunkIds.Mfog,
         WmoChunkIds.Mcvp,
+    ];
+
+    private static readonly FourCC[] RequiredRootChunks =
+    [
+        WmoChunkIds.Mohd,
+        WmoChunkIds.Motx,
+        WmoChunkIds.Momt,
+        WmoChunkIds.Mogn,
+        WmoChunkIds.Mogi,
+        WmoChunkIds.Mopv,
+        WmoChunkIds.Mopt,
+        WmoChunkIds.Mopr,
+        WmoChunkIds.Molt,
+        WmoChunkIds.Mods,
+        WmoChunkIds.Modn,
+        WmoChunkIds.Modd,
+        WmoChunkIds.Mfog,
     ];
 
     public static void Convert(string v17RootPath, string outputPath, string? groupsDirectory = null)
@@ -400,10 +418,10 @@ public static class WmoV17ToV14Converter
             return [group];
 
         int maxBatchEnd = group.Mesh.Batches.Max(static batch => batch.FirstIndex + batch.IndexCount);
-        if (maxBatchEnd <= ushort.MaxValue)
+        if (maxBatchEnd <= ushort.MaxValue && group.Mesh.Vertices.Count <= LegacyMaxGroupVertexCount)
             return [group];
 
-        List<List<int>> partitions = PartitionLegacyGroupBatches(group.Mesh.Batches);
+        List<List<int>> partitions = PartitionLegacyGroupBatches(group);
         if (partitions.Count == 1)
             return [group];
 
@@ -414,24 +432,43 @@ public static class WmoV17ToV14Converter
         return splitGroups;
     }
 
-    private static List<List<int>> PartitionLegacyGroupBatches(IReadOnlyList<WmoGroupBatchDetail> batches)
+    private static List<List<int>> PartitionLegacyGroupBatches(LegacyGroupDocument group)
     {
         List<List<int>> partitions = [];
         List<int> currentPartition = [];
         int currentIndexCount = 0;
+        HashSet<ushort> currentVertices = [];
 
-        for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
+        for (int batchIndex = 0; batchIndex < group.Mesh.Batches.Count; batchIndex++)
         {
-            WmoGroupBatchDetail batch = batches[batchIndex];
-            if (currentPartition.Count > 0 && currentIndexCount + batch.IndexCount > ushort.MaxValue)
+            WmoGroupBatchDetail batch = group.Mesh.Batches[batchIndex];
+            HashSet<ushort> batchVertices = GetBatchReferencedVertices(group.Mesh.Indices, batch, batchIndex);
+            if (batchVertices.Count > LegacyMaxGroupVertexCount)
+            {
+                throw new InvalidDataException(
+                    $"Legacy batch {batchIndex} references {batchVertices.Count} unique vertices, which exceeds the Alpha vertex budget of {LegacyMaxGroupVertexCount}.");
+            }
+
+            int additionalVertexCount = 0;
+            foreach (ushort vertexIndex in batchVertices)
+            {
+                if (!currentVertices.Contains(vertexIndex))
+                    additionalVertexCount++;
+            }
+
+            if (currentPartition.Count > 0
+                && (currentIndexCount + batch.IndexCount > ushort.MaxValue
+                    || currentVertices.Count + additionalVertexCount > LegacyMaxGroupVertexCount))
             {
                 partitions.Add(currentPartition);
                 currentPartition = [];
                 currentIndexCount = 0;
+                currentVertices = [];
             }
 
             currentPartition.Add(batchIndex);
             currentIndexCount += batch.IndexCount;
+            currentVertices.UnionWith(batchVertices);
         }
 
         if (currentPartition.Count > 0)
@@ -440,11 +477,32 @@ public static class WmoV17ToV14Converter
         return partitions;
     }
 
+    private static HashSet<ushort> GetBatchReferencedVertices(IReadOnlyList<ushort> indices, WmoGroupBatchDetail batch, int batchOrdinal)
+    {
+        if (batch.FirstIndex + batch.IndexCount > indices.Count)
+        {
+            throw new InvalidDataException($"Legacy batch {batchOrdinal} overruns the group's index buffer while computing vertex usage.");
+        }
+
+        HashSet<ushort> batchVertices = [];
+        for (int index = 0; index < batch.IndexCount; index++)
+            batchVertices.Add(indices[batch.FirstIndex + index]);
+
+        return batchVertices;
+    }
+
     private static LegacyGroupDocument CreateSplitLegacyGroup(LegacyGroupDocument group, IReadOnlyList<int> batchOrdinals, bool isPrimarySplit)
     {
         List<ushort> indices = [];
         List<WmoGroupFaceMaterialDetail> faceMaterials = [];
         List<WmoGroupBatchDetail> batches = [];
+        Dictionary<ushort, ushort> vertexRemap = [];
+        List<Vector3> vertices = [];
+        List<Vector3> normals = [];
+        List<Vector2> primaryUvs = [];
+        List<List<Vector2>> additionalUvSets = group.Mesh.AdditionalUvSets.Select(static _ => new List<Vector2>()).ToList();
+        List<uint> primaryVertexColors = [];
+        List<List<uint>> additionalVertexColorSets = group.Mesh.AdditionalVertexColorSetsBgra.Select(static _ => new List<uint>()).ToList();
         int transparentBatchCount = 0;
         int interiorBatchCount = 0;
         int exteriorBatchCount = 0;
@@ -467,8 +525,26 @@ public static class WmoV17ToV14Converter
             if (faceStart + faceCount > group.Mesh.FaceMaterials.Count)
                 throw new InvalidDataException($"Legacy batch {batchOrdinal} overruns the group's face-material buffer.");
 
+            int batchMinVertex = int.MaxValue;
+            int batchMaxVertex = int.MinValue;
             for (int index = 0; index < batch.IndexCount; index++)
-                indices.Add(group.Mesh.Indices[batch.FirstIndex + index]);
+            {
+                ushort originalVertexIndex = group.Mesh.Indices[batch.FirstIndex + index];
+                ushort remappedVertexIndex = GetOrCreateRemappedVertex(
+                    group,
+                    originalVertexIndex,
+                    vertexRemap,
+                    vertices,
+                    normals,
+                    primaryUvs,
+                    additionalUvSets,
+                    primaryVertexColors,
+                    additionalVertexColorSets);
+
+                indices.Add(remappedVertexIndex);
+                batchMinVertex = Math.Min(batchMinVertex, remappedVertexIndex);
+                batchMaxVertex = Math.Max(batchMaxVertex, remappedVertexIndex);
+            }
 
             for (int faceIndex = 0; faceIndex < faceCount; faceIndex++)
             {
@@ -477,6 +553,12 @@ public static class WmoV17ToV14Converter
             }
 
             byte[] rawEntryBytes = CreateLegacyBatchEntry(batch, firstIndex, group.Mesh.Version);
+            if (batchMinVertex <= batchMaxVertex)
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(rawEntryBytes.AsSpan(18, 2), checked((ushort)batchMinVertex));
+                BinaryPrimitives.WriteUInt16LittleEndian(rawEntryBytes.AsSpan(20, 2), checked((ushort)batchMaxVertex));
+            }
+
             batches.Add(new WmoGroupBatchDetail(
                 batches.Count,
                 batches.Count * 24,
@@ -491,7 +573,13 @@ public static class WmoV17ToV14Converter
             firstIndex += batch.IndexCount;
         }
 
-        (Vector3 boundsMin, Vector3 boundsMax) = ComputeBoundsForIndices(group.Mesh.Vertices, indices, group.Summary.BoundsMin, group.Summary.BoundsMax);
+        if (vertices.Count > LegacyMaxGroupVertexCount)
+        {
+            throw new InvalidDataException(
+                $"Split legacy group still references {vertices.Count} unique vertices, which exceeds the Alpha vertex budget of {LegacyMaxGroupVertexCount}.");
+        }
+
+        (Vector3 boundsMin, Vector3 boundsMax) = ComputeBoundsForIndices(vertices, indices, group.Summary.BoundsMin, group.Summary.BoundsMax);
         IReadOnlyList<ushort> doodadRefs = isPrimarySplit ? group.DoodadRefs : Array.Empty<ushort>();
         IReadOnlyList<ushort> lightRefs = isPrimarySplit ? group.LightRefs : Array.Empty<ushort>();
         byte[]? liquidPayload = isPrimarySplit ? group.LiquidPayload : null;
@@ -500,10 +588,10 @@ public static class WmoV17ToV14Converter
         uint flags = NormalizeFlags(
             group.Summary.Flags,
             faceMaterials.Count,
-            group.Mesh.PrimaryUvs.Count,
-            group.Mesh.AdditionalUvSets.Count,
-            group.Mesh.PrimaryVertexColorsBgra.Count,
-            group.Mesh.AdditionalVertexColorSetsBgra.Count,
+            primaryUvs.Count,
+            additionalUvSets.Count,
+            primaryVertexColors.Count,
+            additionalVertexColorSets.Count,
             doodadRefs.Count,
             lightRefs.Count,
             hasLiquid);
@@ -524,13 +612,13 @@ public static class WmoV17ToV14Converter
             exteriorBatchCount,
             hasLiquid ? group.Summary.GroupLiquid : 0,
             faceMaterials.Count,
-            group.Mesh.Vertices.Count,
+            vertices.Count,
             indices.Count,
-            group.Mesh.Normals.Count,
-            group.Mesh.PrimaryUvs.Count,
-            group.Mesh.AdditionalUvSets.Count,
+            normals.Count,
+            primaryUvs.Count,
+            additionalUvSets.Count,
             batches.Count,
-            group.Mesh.PrimaryVertexColorsBgra.Count,
+            primaryVertexColors.Count,
             doodadRefs.Count,
             lightRefs.Count,
             indices.Count > 0 ? 1 : 0,
@@ -542,13 +630,13 @@ public static class WmoV17ToV14Converter
             group.Mesh.Version,
             group.Mesh.HeaderSizeBytes,
             group.Mesh.IndexChunkId,
-            group.Mesh.Vertices,
-            group.Mesh.Normals,
+            vertices,
+            normals,
             indices,
-            group.Mesh.PrimaryUvs,
-            group.Mesh.AdditionalUvSets,
-            group.Mesh.PrimaryVertexColorsBgra,
-            group.Mesh.AdditionalVertexColorSetsBgra,
+            primaryUvs,
+            additionalUvSets,
+            primaryVertexColors,
+            additionalVertexColorSets,
             faceMaterials,
             batches);
 
@@ -561,6 +649,53 @@ public static class WmoV17ToV14Converter
             transparentBatchCount,
             interiorBatchCount,
             exteriorBatchCount);
+    }
+
+    private static ushort GetOrCreateRemappedVertex(
+        LegacyGroupDocument group,
+        ushort originalVertexIndex,
+        IDictionary<ushort, ushort> vertexRemap,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector2> primaryUvs,
+        List<List<Vector2>> additionalUvSets,
+        List<uint> primaryVertexColors,
+        List<List<uint>> additionalVertexColorSets)
+    {
+        if (vertexRemap.TryGetValue(originalVertexIndex, out ushort remappedVertexIndex))
+            return remappedVertexIndex;
+
+        if (originalVertexIndex >= group.Mesh.Vertices.Count)
+        {
+            throw new InvalidDataException(
+                $"Group vertex index {originalVertexIndex} exceeds the available vertex count {group.Mesh.Vertices.Count} while compacting a split legacy group.");
+        }
+
+        remappedVertexIndex = checked((ushort)vertices.Count);
+        vertexRemap[originalVertexIndex] = remappedVertexIndex;
+
+        vertices.Add(group.Mesh.Vertices[originalVertexIndex]);
+        normals.Add(originalVertexIndex < group.Mesh.Normals.Count ? group.Mesh.Normals[originalVertexIndex] : Vector3.UnitZ);
+
+        if (group.Mesh.PrimaryUvs.Count > 0)
+            primaryUvs.Add(originalVertexIndex < group.Mesh.PrimaryUvs.Count ? group.Mesh.PrimaryUvs[originalVertexIndex] : Vector2.Zero);
+
+        for (int setIndex = 0; setIndex < additionalUvSets.Count; setIndex++)
+        {
+            IReadOnlyList<Vector2> sourceSet = group.Mesh.AdditionalUvSets[setIndex];
+            additionalUvSets[setIndex].Add(originalVertexIndex < sourceSet.Count ? sourceSet[originalVertexIndex] : Vector2.Zero);
+        }
+
+        if (group.Mesh.PrimaryVertexColorsBgra.Count > 0)
+            primaryVertexColors.Add(originalVertexIndex < group.Mesh.PrimaryVertexColorsBgra.Count ? group.Mesh.PrimaryVertexColorsBgra[originalVertexIndex] : 0u);
+
+        for (int setIndex = 0; setIndex < additionalVertexColorSets.Count; setIndex++)
+        {
+            IReadOnlyList<uint> sourceSet = group.Mesh.AdditionalVertexColorSetsBgra[setIndex];
+            additionalVertexColorSets[setIndex].Add(originalVertexIndex < sourceSet.Count ? sourceSet[originalVertexIndex] : 0u);
+        }
+
+        return remappedVertexIndex;
     }
 
     private static void CountBatchRegion(LegacyGroupDocument group, int batchOrdinal, ref int transparentBatchCount, ref int interiorBatchCount, ref int exteriorBatchCount)
@@ -1356,6 +1491,7 @@ public static class WmoV17ToV14Converter
         Dictionary<FourCC, byte[]> payloadsById = rootChunkPayloads.ToDictionary(static pair => pair.Key, static pair => pair.Value.ToArray());
         payloadsById[WmoChunkIds.Mohd] = BuildLegacyMohdPayload(payloadsById[WmoChunkIds.Mohd], groups.Count, portalLayout.KeepPortalChunks ? portalLayout.PortalCount : 0);
         payloadsById[WmoChunkIds.Mogi] = BuildLegacyMogiPayload(groups);
+
         if (portalLayout.KeepPortalChunks)
         {
             if (portalLayout.MoprPayload is not null)
@@ -1363,9 +1499,15 @@ public static class WmoV17ToV14Converter
         }
         else
         {
-            payloadsById.Remove(WmoChunkIds.Mopv);
-            payloadsById.Remove(WmoChunkIds.Mopt);
-            payloadsById.Remove(WmoChunkIds.Mopr);
+            payloadsById[WmoChunkIds.Mopv] = [];
+            payloadsById[WmoChunkIds.Mopt] = [];
+            payloadsById[WmoChunkIds.Mopr] = [];
+        }
+
+        foreach (FourCC chunkId in RequiredRootChunks)
+        {
+            if (!payloadsById.ContainsKey(chunkId))
+                payloadsById[chunkId] = [];
         }
 
         using MemoryStream rootStream = new();
@@ -1377,8 +1519,11 @@ public static class WmoV17ToV14Converter
         using BinaryWriter momoWriter = new(momoStream);
         foreach (FourCC chunkId in RootChunkOrder)
         {
-            if (payloadsById.TryGetValue(chunkId, out byte[]? payload) && payload.Length > 0)
+            if (payloadsById.TryGetValue(chunkId, out byte[]? payload)
+                && (payload.Length > 0 || RequiredRootChunks.Contains(chunkId)))
+            {
                 WriteChunk(momoWriter, chunkId, payload);
+            }
         }
 
         foreach (LegacyGroupDocument group in groups)

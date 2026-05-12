@@ -55,7 +55,7 @@
 | **Phase C: Alpha shard raw-chunk preservation** | **DONE** — Alpha tile tensor packs now preserve raw embedded tile chunks under `raw_chunks/alpha/...` alongside decoded signals |
 | **Phase C: Wmo v17->v14 converter** | **DONE** — shared `wow-viewer` downgrade path plus converter CLI and focused regression coverage are landed; large sources now merge past the Alpha-era `384` group ceiling with spatial buckets and portal remap instead of blunt overflow collapse |
 | **Phase C: Wmo v14->v17 converter** | **DONE** — shared `wow-viewer` upgrade path plus converter CLI and focused tests are landed |
-| **Phase C: M2->MDX minimal converter** | **DONE** — shared `wow-viewer` minimal downgrade lane is landed and reader-validated for geometry, materials, textures, sequences, bones, pivots, and skin-fed index data |
+| **Phase C: M2->MDX minimal converter** | **DONE (STRUCTURAL ONLY)** — shared `wow-viewer` minimal downgrade lane is landed and reader-validated for geometry, materials, textures, sequence headers, bones, pivots, and skin-fed index data, but it still does not emit MDX bone transform tracks (`KGTR`/`KGRT`/`KGSC`) or ingest external M2 `.anim` payloads, so Alpha-runtime animation parity remains open |
 | **Phase C: MDX->M2 minimal converter** | **DONE** — shared `wow-viewer` minimal upgrade lane is landed, emits a strict `MD20` root plus `00.skin`, has focused reader-backed regression coverage, and is wired into `WowViewer.Tool.Converter` |
 
 ## IN PROGRESS

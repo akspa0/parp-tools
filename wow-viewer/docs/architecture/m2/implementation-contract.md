@@ -48,10 +48,13 @@ Current proof boundary:
 - `MDX -> M2` is also structural and bounded, not later-client renderer parity.
 - bundled `MDX` outputs in the `convert-lk-to-alpha --bundle-m2s` lane now rewrite local texture references beside the emitted bundle outputs.
 - generated `MDX` and `M2` outputs are expected to re-read cleanly through inspect and library readers, but that alone is not proof of active-client animation, material, or effect parity.
+- the current `M2ToMdxConverter` writes sequence headers plus static `BONE`/`PIVT` structure, but it does not currently emit MDX node-track payloads such as `KGTR`, `KGRT`, or `KGSC`, and it does not ingest external M2 `%04d-%02d.anim` payloads at all.
+- practical implication: bundled Alpha-facing `MDX` outputs are currently best treated as static or animation-incomplete shells even when the source `M2` carries valid sequences.
 
 Important unresolved converter seam:
 
 - sequence and animation fidelity remains open for Alpha-facing `MDX`, especially around `SEQS` ownership and the exact native expectations for record shape and runtime consumption.
+- the next real converter slice is explicit animation export: global-sequence mapping, bone translation or rotation or scaling track emission, and external-animation ingestion for sequences whose keyframes live outside the root `M2`.
 
 This means the current M2-family converter lane is useful for bounded asset bundling and structural validation, but it should not yet be documented as a full runtime-equivalent substitute for native `M2` or `MDX` behavior.
 

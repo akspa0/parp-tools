@@ -361,6 +361,146 @@ public sealed class WmoV17ToV14ConverterTests
         Assert.True(rootChunkIds.SequenceEqual(expectedRootChunkIds));
     }
 
+    [Fact]
+    public void Convert_WhenGroupVertexBudgetExceedsAlphaLimit_SplitsAndCompactsLegacyGroups()
+    {
+        const int verticesPerBatch = 25002;
+        const int totalVertices = verticesPerBatch * 2;
+        const int trianglesPerBatch = verticesPerBatch / 3;
+
+        byte[] rootBytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(17)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOHD", CreateMohd(materialCount: 1, groupCount: 1)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOTX", CreateStringBlock("modern.blp")),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOMT", CreateMomtEntry(64, texture1Offset: 0)),
+        ];
+
+        byte[] groupBytes = CreateGroupFile(17, CreateMogpPayload(
+            headerSize: 0x44,
+            flags: 0x8,
+            boundsMin: Vector3.Zero,
+            boundsMax: new Vector3(totalVertices, 8f, 1f),
+            portalStart: 0,
+            portalCount: 0,
+            transBatchCount: 0,
+            intBatchCount: 2,
+            extBatchCount: 0,
+            groupLiquid: 0,
+            nameOffset: 0,
+            descriptiveNameOffset: 0,
+            subchunks:
+            [
+                ("MOPY", CreateRepeatedMopyEntriesV17(faceCount: trianglesPerBatch * 2, flags: 0x01, materialId: 0x02)),
+                ("MOIN", CreateSequentialTriangleIndices(0, trianglesPerBatch, verticesPerBatch, trianglesPerBatch)),
+                ("MOVT", CreateSequentialVertices(totalVertices)),
+                ("MONR", CreateRepeatedVertices(totalVertices, Vector3.UnitZ)),
+                ("MOBA", CreateMobaPayloadV17(
+                    CreateMobaEntryV17(materialIdRaw: 0x02, firstIndex: 0, indexCount: (ushort)verticesPerBatch, firstVertex: 0, lastVertex: (ushort)(verticesPerBatch - 1), flags: 0x00),
+                    CreateMobaEntryV17(materialIdRaw: 0x02, firstIndex: (uint)verticesPerBatch, indexCount: (ushort)verticesPerBatch, firstVertex: (ushort)verticesPerBatch, lastVertex: (ushort)(totalVertices - 1), flags: 0x00))),
+            ]));
+
+        byte[] converted = WmoV17ToV14Converter.Convert(rootBytes, [groupBytes], "synthetic_v17_vertex_budget_root.wmo");
+
+        using MemoryStream summaryStream = new(converted);
+        WmoSummary summary = WmoSummaryReader.Read(summaryStream, "converted_v14_vertex_budget.wmo");
+        Assert.Equal((uint)14, summary.Version);
+        Assert.Equal(2, summary.ReportedGroupCount);
+
+        using MemoryStream renderStream = new(converted);
+        WmoRenderDocument document = WmoRenderDocumentReader.Read(renderStream, "converted_v14_vertex_budget.wmo");
+        Assert.Equal(2, document.Groups.Count);
+        Assert.All(document.Groups, static group => Assert.InRange(group.Mesh.Vertices.Count, 1, 0xBFFF));
+        Assert.All(document.Groups, static group => Assert.Equal(group.Mesh.Vertices.Count, group.Mesh.Normals.Count));
+        Assert.Equal(verticesPerBatch, document.Groups[0].Mesh.Vertices.Count);
+        Assert.Equal(verticesPerBatch, document.Groups[1].Mesh.Vertices.Count);
+    }
+
+    [Fact]
+    public void Convert_WhenSourceHasNoPortalOrOptionalRootChunks_StillEmitsEmptyAlphaRootChain()
+    {
+        byte[] rootBytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(17)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOHD", CreateMohd(materialCount: 1, groupCount: 1, portalCount: 0)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOTX", CreateStringBlock("modern.blp")),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOMT", CreateMomtEntry(64, texture1Offset: 0)),
+        ];
+
+        byte[] groupBytes = CreateGroupFile(17, CreateMogpPayload(
+            headerSize: 0x44,
+            flags: 0x8,
+            boundsMin: new Vector3(-1f, -1f, -1f),
+            boundsMax: new Vector3(1f, 1f, 1f),
+            portalStart: 0,
+            portalCount: 0,
+            transBatchCount: 0,
+            intBatchCount: 1,
+            extBatchCount: 0,
+            groupLiquid: 0,
+            nameOffset: 0,
+            descriptiveNameOffset: 0,
+            subchunks:
+            [
+                ("MOPY", CreateMopyEntryV17(flags: 0x01, materialId: 0x00)),
+                ("MOIN", CreateIndices(0, 1, 2)),
+                ("MOVT", CreateVertices(new Vector3(0f, 0f, 0f), new Vector3(1f, 0f, 0f), new Vector3(0f, 1f, 0f))),
+                ("MONR", CreateVertices(Vector3.UnitZ, Vector3.UnitZ, Vector3.UnitZ)),
+                ("MOBA", CreateMobaEntryV17(materialIdRaw: 0x00, firstIndex: 0, indexCount: 3, firstVertex: 0, lastVertex: 2, flags: 0x00)),
+            ]));
+
+        byte[] converted = WmoV17ToV14Converter.Convert(rootBytes, [groupBytes], "synthetic_v17_root_without_optional_chunks.wmo");
+
+        using MemoryStream topLevelStream = new(converted);
+        IReadOnlyList<ChunkSpan> topLevelChunks = ChunkedFileReader.ReadTopLevelChunks(topLevelStream, padOddChunkSizes: false);
+        ChunkSpan momoChunk = Assert.Single(topLevelChunks, static chunk => chunk.Header.Id == WmoChunkIds.Momo);
+        byte[] momoPayload = ReadChunkPayload(converted, momoChunk);
+
+        using MemoryStream momoStream = new(momoPayload);
+        IReadOnlyList<ChunkSpan> momoChunks = ChunkedFileReader.ReadTopLevelChunks(momoStream, padOddChunkSizes: false);
+        FourCC[] rootChunkIds = momoChunks
+            .TakeWhile(static chunk => chunk.Header.Id != WmoChunkIds.Mogp)
+            .Select(static chunk => chunk.Header.Id)
+            .ToArray();
+
+        FourCC[] expectedRootChunkIds =
+        [
+            WmoChunkIds.Mohd,
+            WmoChunkIds.Motx,
+            WmoChunkIds.Momt,
+            WmoChunkIds.Mogn,
+            WmoChunkIds.Mogi,
+            WmoChunkIds.Mopv,
+            WmoChunkIds.Mopt,
+            WmoChunkIds.Mopr,
+            WmoChunkIds.Molt,
+            WmoChunkIds.Mods,
+            WmoChunkIds.Modn,
+            WmoChunkIds.Modd,
+            WmoChunkIds.Mfog,
+        ];
+
+        Assert.True(rootChunkIds.SequenceEqual(expectedRootChunkIds));
+
+        ChunkSpan mopvChunk = Assert.Single(momoChunks, static chunk => chunk.Header.Id == WmoChunkIds.Mopv);
+        ChunkSpan moptChunk = Assert.Single(momoChunks, static chunk => chunk.Header.Id == WmoChunkIds.Mopt);
+        ChunkSpan moprChunk = Assert.Single(momoChunks, static chunk => chunk.Header.Id == WmoChunkIds.Mopr);
+        ChunkSpan moltChunk = Assert.Single(momoChunks, static chunk => chunk.Header.Id == WmoChunkIds.Molt);
+        ChunkSpan modsChunk = Assert.Single(momoChunks, static chunk => chunk.Header.Id == WmoChunkIds.Mods);
+        ChunkSpan modnChunk = Assert.Single(momoChunks, static chunk => chunk.Header.Id == WmoChunkIds.Modn);
+        ChunkSpan moddChunk = Assert.Single(momoChunks, static chunk => chunk.Header.Id == WmoChunkIds.Modd);
+        ChunkSpan mfogChunk = Assert.Single(momoChunks, static chunk => chunk.Header.Id == WmoChunkIds.Mfog);
+
+        Assert.Equal(0u, mopvChunk.Header.Size);
+        Assert.Equal(0u, moptChunk.Header.Size);
+        Assert.Equal(0u, moprChunk.Header.Size);
+        Assert.Equal(0u, moltChunk.Header.Size);
+        Assert.Equal(0u, modsChunk.Header.Size);
+        Assert.Equal(0u, modnChunk.Header.Size);
+        Assert.Equal(0u, moddChunk.Header.Size);
+        Assert.Equal(0u, mfogChunk.Header.Size);
+    }
+
     private static byte[] CreateMohd(uint materialCount, uint groupCount, uint portalCount = 0)
     {
         byte[] bytes = new byte[64];
@@ -454,6 +594,21 @@ public sealed class WmoV17ToV14ConverterTests
         return bytes;
     }
 
+    private static byte[] CreateRepeatedVertices(int count, Vector3 value)
+    {
+        Vector3[] values = Enumerable.Repeat(value, count).ToArray();
+        return CreateVertices(values);
+    }
+
+    private static byte[] CreateSequentialVertices(int count)
+    {
+        Vector3[] values = new Vector3[count];
+        for (int index = 0; index < count; index++)
+            values[index] = new Vector3(index, index % 7, 0f);
+
+        return CreateVertices(values);
+    }
+
     private static byte[] CreateIndices(params ushort[] values)
     {
         byte[] bytes = new byte[values.Length * 2];
@@ -526,6 +681,28 @@ public sealed class WmoV17ToV14ConverterTests
         }
 
         return bytes;
+    }
+
+    private static byte[] CreateSequentialTriangleIndices(int firstVertexA, int triangleCountA, int firstVertexB, int triangleCountB)
+    {
+        ushort[] values = new ushort[(triangleCountA + triangleCountB) * 3];
+        int cursor = 0;
+        cursor = WriteSequentialTriangleIndices(values, cursor, firstVertexA, triangleCountA);
+        _ = WriteSequentialTriangleIndices(values, cursor, firstVertexB, triangleCountB);
+        return CreateIndices(values);
+    }
+
+    private static int WriteSequentialTriangleIndices(ushort[] values, int cursor, int firstVertex, int triangleCount)
+    {
+        for (int triangleIndex = 0; triangleIndex < triangleCount; triangleIndex++)
+        {
+            int vertex = firstVertex + triangleIndex * 3;
+            values[cursor++] = checked((ushort)vertex);
+            values[cursor++] = checked((ushort)(vertex + 1));
+            values[cursor++] = checked((ushort)(vertex + 2));
+        }
+
+        return cursor;
     }
 
     private static byte[] CreatePortalVertices(params Vector3[] values)

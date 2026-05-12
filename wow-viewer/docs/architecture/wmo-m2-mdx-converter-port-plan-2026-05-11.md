@@ -15,7 +15,9 @@ Landed in `wow-viewer`:
 - the WMO downgrade path now has two extra compatibility guards beyond the earlier structural downgrade rules:
    - spatial merge when a source root would exceed the practical Alpha-era `384` group ceiling
    - batch-boundary group splitting when any `v17` `MOBA.firstIndex` exceeds the legacy `ushort` ceiling used by `v14`
+   - compacted per-split mesh payloads plus conservative Alpha GX vertex-budget partitioning so split groups do not keep the source group's full vertex arrays or exceed the observed native `0xBFFF` safe vertex count
 - real staged Kalimdor proof for `4.0.0.11927 -> 0.5.3.3368` now reports `311` converted WMOs, `1` missing root, and `0` conversion failures under the temp `wmo-full-debug-after-split` validation output.
+- rebuilt staged Kalimdor output under `H:\053-client` now scans clean after regeneration: `311` bundled WMOs, maximum emitted embedded-group vertex count `30335`, and `0` groups over the conservative Alpha vertex budget.
 
 Still open:
 
@@ -64,7 +66,7 @@ What the repo evidence says:
 - `WMO` is the easier port. The workspace already has real upgrade and downgrade implementations plus tests and writer helpers in legacy/reference code.
 - `WMO` is now the more mature converter lane. The hard object-side blockers found so far were Alpha-specific constraints, not missing basic format ownership:
    - Alpha `WMO v14` expects monolithic `MOMO`-wrapped roots with embedded `MOGP` groups rather than later split root plus `_NNN.wmo` companions.
-   - the downgrade path must handle both the practical Alpha-era `384` group ceiling and legacy `MOBA` `ushort` batch-index limits.
+   - the downgrade path must handle the practical Alpha-era `384` group ceiling, legacy `MOBA` `ushort` batch-index limits, and an observed native GX vertex-budget ceiling that requires compacted split-group meshes rather than index-only partitioning.
 - `M2 <-> MDX` is still harder. `wow-viewer` now has minimal converter ownership, but broad semantic mapping for animation tracks, sequence fidelity, materials, particles, ribbons, and effect routing is still incomplete.
 
 ## Ownership Rule
