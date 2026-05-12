@@ -329,6 +329,8 @@ public static class AlphaWdtWriter
         for (int chunkIndex = 0; chunkIndex < refsByChunk.Length; chunkIndex++)
             refsByChunk[chunkIndex].DoodadIndices.Clear();
 
+        int[] doodadRefCountsByChunk = new int[refsByChunk.Length];
+
         Dictionary<int, List<int>> candidateChunksByPlacementIndex = BuildDoodadCandidateChunksByPlacementIndex(
             tile,
             preservedDoodadUniqueIdsByChunk,
@@ -341,9 +343,11 @@ public static class AlphaWdtWriter
                 tile.ModelPlacements[index],
                 index,
                 candidateChunksByPlacementIndex,
+                doodadRefCountsByChunk,
                 tileX,
                 tileY);
             refsByChunk[chunkIndex].DoodadIndices.Add(index);
+            doodadRefCountsByChunk[chunkIndex]++;
         }
     }
 
@@ -408,6 +412,7 @@ public static class AlphaWdtWriter
         AlphaModelPlacement placement,
         int placementIndex,
         Dictionary<int, List<int>> candidateChunksByPlacementIndex,
+        IReadOnlyList<int> doodadRefCountsByChunk,
         int tileX,
         int tileY)
     {
@@ -415,14 +420,17 @@ public static class AlphaWdtWriter
         if (!candidateChunksByPlacementIndex.TryGetValue(placementIndex, out List<int>? candidateChunks) || candidateChunks.Count == 0)
             return containingChunk;
 
-        if (candidateChunks.Contains(containingChunk))
-            return containingChunk;
-
         int containingChunkX = containingChunk % 16;
         int containingChunkY = containingChunk / 16;
 
-        int bestLocalChunk = -1;
-        float bestDistanceSquared = float.MaxValue;
+        int bestLocalChunk = containingChunk;
+        int bestChunkLoad = (uint)containingChunk < (uint)doodadRefCountsByChunk.Count
+            ? doodadRefCountsByChunk[containingChunk]
+            : int.MaxValue;
+
+        GetChunkCenter(tileX, tileY, containingChunkX, containingChunkY, out float containingCenterX, out float containingCenterY);
+        float bestDistanceSquared = DistanceSquared(placement.Position.X, placement.Position.Y, containingCenterX, containingCenterY);
+
         foreach (int candidateChunk in candidateChunks)
         {
             int candidateChunkX = candidateChunk % 16;
@@ -431,20 +439,20 @@ public static class AlphaWdtWriter
                 continue;
 
             GetChunkCenter(tileX, tileY, candidateChunkX, candidateChunkY, out float centerX, out float centerY);
-            float dx = placement.Position.X - centerX;
-            float dy = placement.Position.Y - centerY;
-            float distanceSquared = (dx * dx) + (dy * dy);
-            if (distanceSquared < bestDistanceSquared)
+            float distanceSquared = DistanceSquared(placement.Position.X, placement.Position.Y, centerX, centerY);
+            int chunkLoad = (uint)candidateChunk < (uint)doodadRefCountsByChunk.Count
+                ? doodadRefCountsByChunk[candidateChunk]
+                : int.MaxValue;
+
+            if (chunkLoad < bestChunkLoad || (chunkLoad == bestChunkLoad && distanceSquared < bestDistanceSquared))
             {
-                bestDistanceSquared = distanceSquared;
                 bestLocalChunk = candidateChunk;
+                bestChunkLoad = chunkLoad;
+                bestDistanceSquared = distanceSquared;
             }
         }
 
-        if (bestLocalChunk >= 0)
-            return bestLocalChunk;
-
-        return containingChunk;
+        return bestLocalChunk;
     }
 
     private static void AddMappedUniqueIdRefs(AlphaPlacementRefs[] refsByChunk, IReadOnlyList<int>[] refsByUniqueIdChunk,
@@ -645,6 +653,13 @@ public static class AlphaWdtWriter
         GetChunkPlanarBounds(tileX, tileY, cx, cy, out float minX, out float maxX, out float minY, out float maxY);
         centerX = (minX + maxX) * 0.5f;
         centerY = (minY + maxY) * 0.5f;
+    }
+
+    private static float DistanceSquared(float x0, float y0, float x1, float y1)
+    {
+        float dx = x0 - x1;
+        float dy = y0 - y1;
+        return (dx * dx) + (dy * dy);
     }
 
     private static byte[] BuildMcrfData(AlphaPlacementRefs placementRefs)

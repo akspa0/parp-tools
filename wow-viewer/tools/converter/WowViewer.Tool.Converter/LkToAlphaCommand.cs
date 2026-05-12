@@ -4,7 +4,9 @@ using WowViewer.Core.IO.Blp;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.IO.Wmo;
 using WowViewer.Core.Maps;
+using WowViewer.Core.Wmo;
 
 namespace WowViewer.Tool.Converter;
 
@@ -126,7 +128,7 @@ internal static class LkToAlphaCommand
                             if (targetFileSet != null)
                             {
                                 var (mdlNames, mdlPlacements, wmoNames, wmoPlacements, filteredChunks, skippedModels, skippedWmos) =
-                                    FilterPlacements(adtData, targetFileSet);
+                                    FilterPlacements(adtData, targetFileSet, options.BundleWmos);
                                 adtData = new LkAdtData
                                 {
                                     MapName = adtData.MapName,
@@ -223,7 +225,7 @@ internal static class LkToAlphaCommand
                         if (targetFileSet != null)
                         {
                             var (mdlNames, mdlPlacements, wmoNames, wmoPlacements, filteredChunks, skippedModels, skippedWmos) =
-                                FilterPlacements(adtData, targetFileSet);
+                                FilterPlacements(adtData, targetFileSet, options.BundleWmos);
                             adtData = new LkAdtData
                             {
                                 MapName = adtData.MapName,
@@ -295,40 +297,28 @@ internal static class LkToAlphaCommand
                         holeFullMasks: kvp.Value.HoleFullMasks));
             }
 
+            string sourceForAssets = options.ClientRoot ?? options.InputDir ?? ".";
             string? tilesetRoot = null;
+            string? wmoRoot = null;
             if (options.BundleTilesets)
             {
                 tilesetRoot = Path.Combine(outputDir, "tilesets", mapName);
-                string sourceForTextures = options.ClientRoot ?? options.InputDir ?? ".";
-                BundleTilesets(tiles, sourceForTextures, mapName, tilesetRoot);
+                BundleTilesets(tiles, sourceForAssets, mapName, tilesetRoot);
+            }
 
-                // The Alpha WDT MTEX table must point at the bundled files before it is written.
-                string tilesetPrefix = $"tilesets\\{mapName}\\";
+            Dictionary<string, string>? bundledWmoPaths = null;
+            if (options.BundleWmos && !options.TerrainOnly)
+            {
+                wmoRoot = Path.Combine(outputDir, "wmos", mapName);
+                bundledWmoPaths = BundleWorldModels(tiles, sourceForAssets, mapName, wmoRoot);
+            }
+
+            if (tilesetRoot is not null || bundledWmoPaths is not null)
+            {
+                string? tilesetPrefix = tilesetRoot is null ? null : $"tilesets\\{mapName}\\";
                 tiles = tiles.ToDictionary(
                     kvp => kvp.Key,
-                    kvp =>
-                    {
-                        var fixedTextures = kvp.Value.TextureNames
-                            .Select(t => tilesetPrefix + t.TrimStart('\\'))
-                            .ToList();
-                        return new AlphaTileData(
-                            kvp.Value.SourcePath, kvp.Value.Heightmap,
-                            kvp.Value.McalAlphaPack, kvp.Value.MclyTextureIds,
-                            kvp.Value.MclyLayerMask, kvp.Value.HoleMask,
-                            fixedTextures, kvp.Value.ModelPlacements,
-                            kvp.Value.WorldModelPlacements, kvp.Value.LiquidChunks,
-                            mcnrNormalXyz: kvp.Value.McnrNormalXyz,
-                            mcshShadowMask256: kvp.Value.McshShadowMask256,
-                            mcshShadowMask1024: kvp.Value.McshShadowMask1024,
-                            areaIds: kvp.Value.AreaIds,
-                            mccvRgb: kvp.Value.MccvRgb,
-                            mclvLightingBytes: kvp.Value.MclvLightingBytes,
-                            holeFullMasks: kvp.Value.HoleFullMasks,
-                            mcrfDoodadRefsByChunk: kvp.Value.McrfDoodadRefsByChunk,
-                            mcrfWorldModelRefsByChunk: kvp.Value.McrfWorldModelRefsByChunk,
-                            mcrfDoodadUniqueIdsByChunk: kvp.Value.McrfDoodadUniqueIdsByChunk,
-                            mcrfWorldModelUniqueIdsByChunk: kvp.Value.McrfWorldModelUniqueIdsByChunk);
-                    });
+                    kvp => RewriteBundledAssetPaths(kvp.Value, tilesetPrefix, bundledWmoPaths));
             }
 
             byte[] wdtData = AlphaWdtWriter.Build(mapName, tiles);
@@ -361,6 +351,8 @@ internal static class LkToAlphaCommand
 
             if (tilesetRoot != null)
                 Console.WriteLine($"  Tilesets: extracted and fixed up paths in {tilesetRoot}");
+            if (wmoRoot != null)
+                Console.WriteLine($"  WMOs:     converted and bundled in {wmoRoot}");
         }
         catch (Exception ex)
         {
@@ -376,7 +368,7 @@ internal static class LkToAlphaCommand
     private const string PlaceholderWmo = "World\\wmo\\Dungeon\\test\\missingwmo.wmo";
 
     private static (List<string> names, List<LkMddfEntry> placements, List<string> wmoNames, List<LkModfEntry> wmoPlacements, List<LkMcnkData> chunks, int mappedModels, int mappedWmos)
-        FilterPlacements(LkAdtData adtData, HashSet<string> targetFileSet)
+        FilterPlacements(LkAdtData adtData, HashSet<string> targetFileSet, bool preserveSourceWmoPaths = false)
     {
         var names = new List<string>();
         var nameIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -460,11 +452,13 @@ internal static class LkToAlphaCommand
             if (!seenWmoUniqueIds.Add(p.UniqueId))
                 continue;
 
-            string path = ResolveName(p.NameId, adtData.WorldModelNames);
-            string mappedPath = PathExists(path) ? path : PlaceholderWmo;
+            string path = NormalizeVirtualPath(ResolveName(p.NameId, adtData.WorldModelNames));
+            string mappedPath = preserveSourceWmoPaths
+                ? path
+                : (PathExists(path) ? path : PlaceholderWmo);
             int mappedNameId = GetOrAddNameIndex(mappedPath, wmoNames, wmoNameIndex);
 
-            if (!ReferenceEquals(mappedPath, path) && !string.Equals(mappedPath, path, StringComparison.OrdinalIgnoreCase))
+            if (!preserveSourceWmoPaths && !ReferenceEquals(mappedPath, path) && !string.Equals(mappedPath, path, StringComparison.OrdinalIgnoreCase))
                 mappedWmos++;
 
             filteredWmoIndexBySourceIndex[i] = wmoPlacementList.Count;
@@ -682,30 +676,8 @@ internal static class LkToAlphaCommand
 
         if (texturePaths.Count == 0) return;
 
-        bool isMpq = Directory.Exists(sourceRoot) &&
-            (Directory.Exists(Path.Combine(sourceRoot, "Data")) ||
-             Directory.GetFiles(sourceRoot, "*.mpq", SearchOption.TopDirectoryOnly).Length > 0);
-
-        byte[]? ReadTexture(string path)
-        {
-            if (isMpq)
-            {
-                using var cat = new NativeMpqService();
-                cat.LoadArchives([sourceRoot]);
-                return cat.ReadFile(path) ?? cat.ReadFile(path.Replace('\\', '/'));
-            }
-            else
-            {
-                foreach (string candidate in new[] {
-                    Path.Combine(sourceRoot, path),
-                    Path.Combine(sourceRoot, path.Replace('\\', '/'))})
-                {
-                    if (File.Exists(candidate))
-                        return File.ReadAllBytes(candidate);
-                }
-                return null;
-            }
-        }
+        bool useArchives = IsArchiveBackedSource(sourceRoot);
+        using NativeMpqService? catalog = useArchives ? CreateSourceCatalog(sourceRoot) : null;
 
         Directory.CreateDirectory(tilesetRoot);
 
@@ -717,7 +689,7 @@ internal static class LkToAlphaCommand
             string? localDir = Path.GetDirectoryName(localPath);
             if (localDir != null) Directory.CreateDirectory(localDir);
 
-            byte[]? data = ReadTexture(normPath);
+            byte[]? data = ReadSourceAsset(sourceRoot, catalog, normPath);
             if (data != null)
             {
                 AlphaBlpCompatibilityResult compatibility = AlphaBlpCompatibilityService.NormalizeForAlphaClient(normPath, data);
@@ -744,6 +716,208 @@ internal static class LkToAlphaCommand
             Console.WriteLine($"    Re-encoded: {normalized} textures for 0.5.x compatibility ({specularReencoded} specular, {resized} resized)");
     }
 
+    private static Dictionary<string, string> BundleWorldModels(
+        Dictionary<(int, int), AlphaTileData> tiles,
+        string sourceRoot,
+        string mapName,
+        string wmoRoot)
+    {
+        HashSet<string> wmoPaths = new(StringComparer.OrdinalIgnoreCase);
+        foreach (AlphaTileData tile in tiles.Values)
+        {
+            foreach (AlphaWorldModelPlacement placement in tile.WorldModelPlacements)
+            {
+                string normalized = NormalizeVirtualPath(placement.ModelPath);
+                if (string.IsNullOrWhiteSpace(normalized) || string.Equals(normalized, PlaceholderWmo, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                wmoPaths.Add(normalized);
+            }
+        }
+
+        if (wmoPaths.Count == 0)
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        bool useArchives = IsArchiveBackedSource(sourceRoot);
+        using NativeMpqService? catalog = useArchives ? CreateSourceCatalog(sourceRoot) : null;
+
+        Directory.CreateDirectory(wmoRoot);
+
+        Dictionary<string, string> bundledPaths = new(StringComparer.OrdinalIgnoreCase);
+        int converted = 0;
+        int copied = 0;
+        int missing = 0;
+        int failed = 0;
+
+        foreach (string wmoPath in wmoPaths)
+        {
+            try
+            {
+                byte[]? rootBytes = ReadSourceAsset(sourceRoot, catalog, wmoPath);
+                if (rootBytes is null)
+                {
+                    missing++;
+                    continue;
+                }
+
+                byte[] outputBytes;
+                using (MemoryStream rootStream = new(rootBytes, writable: false))
+                {
+                    WmoSummary summary = WmoSummaryReader.Read(rootStream, wmoPath);
+                    if (summary.Version == 17)
+                    {
+                        int groupCount = summary.ReportedGroupCount > 0 ? summary.ReportedGroupCount : summary.GroupInfoCount;
+                        if (groupCount <= 0)
+                            throw new InvalidDataException($"WMO '{wmoPath}' does not report any groups for v17 conversion.");
+
+                        List<byte[]> groupBytes = new(groupCount);
+                        for (int groupIndex = 0; groupIndex < groupCount; groupIndex++)
+                        {
+                            string groupPath = BuildWmoGroupPath(wmoPath, groupIndex);
+                            byte[]? groupData = ReadSourceAsset(sourceRoot, catalog, groupPath);
+                            if (groupData is null)
+                                throw new FileNotFoundException($"Missing WMO group '{groupPath}' for root '{wmoPath}'.", groupPath);
+
+                            groupBytes.Add(groupData);
+                        }
+
+                        outputBytes = WmoV17ToV14Converter.Convert(rootBytes, groupBytes, wmoPath);
+                        converted++;
+                    }
+                    else if (summary.Version == 14)
+                    {
+                        outputBytes = rootBytes;
+                        copied++;
+                    }
+                    else
+                    {
+                        throw new InvalidDataException($"WMO '{wmoPath}' uses unsupported root version '{summary.Version?.ToString() ?? "unknown"}' for 0.5.x bundling.");
+                    }
+                }
+
+                string localPath = Path.Combine(wmoRoot, wmoPath);
+                string? localDir = Path.GetDirectoryName(localPath);
+                if (!string.IsNullOrWhiteSpace(localDir))
+                    Directory.CreateDirectory(localDir);
+
+                File.WriteAllBytes(localPath, outputBytes);
+                bundledPaths[wmoPath] = NormalizeVirtualPath(Path.Combine("World", "Maps", mapName, "wmos", mapName, wmoPath));
+            }
+            catch
+            {
+                failed++;
+            }
+        }
+
+        Console.WriteLine($"    WMOs: converted {converted}, copied {copied}, missing {missing}, failed {failed} into {wmoRoot}");
+        return bundledPaths;
+    }
+
+    private static AlphaTileData RewriteBundledAssetPaths(
+        AlphaTileData tile,
+        string? tilesetPrefix,
+        IReadOnlyDictionary<string, string>? bundledWmoPaths)
+    {
+        IReadOnlyList<string> textureNames = tilesetPrefix is null
+            ? tile.TextureNames
+            : tile.TextureNames.Select(t => tilesetPrefix + t.TrimStart('\\')).ToList();
+
+        IReadOnlyList<AlphaWorldModelPlacement> worldModelPlacements = bundledWmoPaths is null
+            ? tile.WorldModelPlacements
+            : tile.WorldModelPlacements.Select(placement =>
+            {
+                string normalized = NormalizeVirtualPath(placement.ModelPath);
+                string mappedPath = string.Equals(normalized, PlaceholderWmo, StringComparison.OrdinalIgnoreCase)
+                    ? PlaceholderWmo
+                    : bundledWmoPaths.TryGetValue(normalized, out string? bundledPath)
+                        ? bundledPath
+                        : PlaceholderWmo;
+
+                return new AlphaWorldModelPlacement(
+                    placement.NameId,
+                    mappedPath,
+                    placement.UniqueId,
+                    placement.Position,
+                    placement.Rotation,
+                    placement.BoundsMin,
+                    placement.BoundsMax,
+                    placement.Flags);
+                    }).ToList();
+
+        return new AlphaTileData(
+            tile.SourcePath,
+            tile.Heightmap,
+            tile.McalAlphaPack,
+            tile.MclyTextureIds,
+            tile.MclyLayerMask,
+            tile.HoleMask,
+            textureNames,
+            tile.ModelPlacements,
+            worldModelPlacements,
+            tile.LiquidChunks,
+            diagnostics: tile.Diagnostics,
+            mcnrNormalXyz: tile.McnrNormalXyz,
+            mcshShadowMask256: tile.McshShadowMask256,
+            mclqSurfaceHeight: tile.MclqSurfaceHeight,
+            mclqTypeMask: tile.MclqTypeMask,
+            mcshShadowMask1024: tile.McshShadowMask1024,
+            rawChunks: tile.RawChunks,
+            areaIds: tile.AreaIds,
+            mfboFlightBounds: tile.MfboFlightBounds,
+            mccvRgb: tile.MccvRgb,
+            mclvLightingBytes: tile.MclvLightingBytes,
+            holeFullMasks: tile.HoleFullMasks,
+            mcrfDoodadRefsByChunk: tile.McrfDoodadRefsByChunk,
+            mcrfWorldModelRefsByChunk: tile.McrfWorldModelRefsByChunk,
+            mcrfDoodadUniqueIdsByChunk: tile.McrfDoodadUniqueIdsByChunk,
+            mcrfWorldModelUniqueIdsByChunk: tile.McrfWorldModelUniqueIdsByChunk);
+    }
+
+    private static bool IsArchiveBackedSource(string sourceRoot)
+    {
+        return Directory.Exists(sourceRoot)
+            && (Directory.Exists(Path.Combine(sourceRoot, "Data"))
+                || Directory.GetFiles(sourceRoot, "*.mpq", SearchOption.TopDirectoryOnly).Length > 0);
+    }
+
+    private static NativeMpqService CreateSourceCatalog(string sourceRoot)
+    {
+        NativeMpqService catalog = new();
+        catalog.LoadArchives([sourceRoot]);
+        return catalog;
+    }
+
+    private static byte[]? ReadSourceAsset(string sourceRoot, NativeMpqService? catalog, string path)
+    {
+        string normalized = NormalizeVirtualPath(path);
+        if (catalog is not null)
+            return catalog.ReadFile(normalized) ?? catalog.ReadFile(normalized.Replace('\\', '/'));
+
+        string[] candidates =
+        [
+            Path.Combine(sourceRoot, normalized),
+            Path.Combine(sourceRoot, normalized.Replace('\\', Path.DirectorySeparatorChar)),
+            Path.Combine(sourceRoot, "Data", normalized),
+            Path.Combine(sourceRoot, "Data", normalized.Replace('\\', Path.DirectorySeparatorChar)),
+        ];
+
+        foreach (string candidate in candidates)
+        {
+            if (File.Exists(candidate))
+                return File.ReadAllBytes(candidate);
+        }
+
+        return null;
+    }
+
+    private static string BuildWmoGroupPath(string rootPath, int groupIndex)
+    {
+        string directory = Path.GetDirectoryName(rootPath) ?? string.Empty;
+        string baseName = Path.GetFileNameWithoutExtension(rootPath);
+        string fileName = $"{baseName}_{groupIndex:D3}.wmo";
+        return string.IsNullOrWhiteSpace(directory) ? fileName : $"{directory}\\{fileName}";
+    }
+
     private static LkToAlphaOptions ParseOptions(string[] args)
     {
             return new LkToAlphaOptions(
@@ -755,7 +929,8 @@ internal static class LkToAlphaCommand
                 MapName: GetOption(args, "--map", "-m"),
                 Verbose: HasFlag(args, "--verbose") || HasFlag(args, "-v"),
                 TerrainOnly: HasFlag(args, "--terrain-only") || HasFlag(args, "-to"),
-                BundleTilesets: HasFlag(args, "--bundle-tilesets") || HasFlag(args, "-bt"));
+                BundleTilesets: HasFlag(args, "--bundle-tilesets") || HasFlag(args, "-bt"),
+                BundleWmos: HasFlag(args, "--bundle-wmos") || HasFlag(args, "-bw"));
     }
 
     private static string? GetOption(string[] args, string longName, string shortName)
@@ -796,5 +971,6 @@ internal static class LkToAlphaCommand
         string? MapName,
         bool Verbose,
         bool TerrainOnly,
-        bool BundleTilesets);
+        bool BundleTilesets,
+        bool BundleWmos);
 }

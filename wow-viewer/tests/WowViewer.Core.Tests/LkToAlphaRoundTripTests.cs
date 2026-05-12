@@ -473,6 +473,79 @@ public sealed class LkToAlphaRoundTripTests
     }
 
     [Fact]
+    public void WriteAlphaWdt_RebalancesLocalDoodadOwnersToRespectAlphaClientMcnkLimit()
+    {
+        float[,] heightmap = new float[257, 257];
+        int[,,] texIds = new int[16, 16, 4];
+        bool[,,] layerMask = new bool[16, 16, 4];
+        for (int cy = 0; cy < 16; cy++)
+            for (int cx = 0; cx < 16; cx++)
+                layerMask[cx, cy, 0] = true;
+
+        const float mapOrigin = 17066.666f;
+        const float tileWorldSize = 533.33333f;
+        const float chunkWorldSize = tileWorldSize / 16f;
+        const int doodadCount = 4096;
+
+        float chunk0CenterX = mapOrigin - (chunkWorldSize * 0.5f);
+        float chunk0CenterY = mapOrigin - (chunkWorldSize * 0.5f);
+        Vector3 placementPosition = new(chunk0CenterX, chunk0CenterY, 42f);
+
+        List<AlphaModelPlacement> placements = new(doodadCount);
+        List<int> uniqueIds = new(doodadCount);
+        for (int index = 0; index < doodadCount; index++)
+        {
+            int uniqueId = index + 1;
+            placements.Add(new AlphaModelPlacement(
+                NameId: 0,
+                ModelPath: "world\\azeroth\\tree.mdx",
+                UniqueId: uniqueId,
+                Position: placementPosition,
+                Rotation: Vector3.Zero,
+                Scale: 1.0f));
+            uniqueIds.Add(uniqueId);
+        }
+
+        IReadOnlyList<int>[] doodadUniqueIdsByChunk = CreateEmptyChunkRefSet();
+        doodadUniqueIdsByChunk[0] = [.. uniqueIds];
+        doodadUniqueIdsByChunk[1] = [.. uniqueIds];
+
+        AlphaTileData tile = new(
+            sourcePath: "mcnk_doodad_ref_budget",
+            heightmap: heightmap,
+            mcalAlphaPack: null,
+            mclyTextureIds: texIds,
+            mclyLayerMask: layerMask,
+            holeMask: new bool[16, 16],
+            textureNames: ["terrain_a.blp"],
+            modelPlacements: placements,
+            worldModelPlacements: [],
+            liquidChunks: [],
+            mcrfDoodadUniqueIdsByChunk: doodadUniqueIdsByChunk);
+
+        byte[] wdt = AlphaWdtWriter.Build("mcnk_doodad_ref_budget", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        int chunk0DeclaredSize = ReadMcnkDeclaredSize(wdt, 0, 0, 0);
+        int chunk1DeclaredSize = ReadMcnkDeclaredSize(wdt, 0, 0, 1);
+        var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
+        var chunk1Refs = ReadMcrfRefs(wdt, 0, 0, 1);
+
+        Assert.True(chunk0DeclaredSize < 15000, $"Expected chunk 0 MCNK payload below Alpha client limit, found {chunk0DeclaredSize}.");
+        Assert.True(chunk1DeclaredSize < 15000, $"Expected chunk 1 MCNK payload below Alpha client limit, found {chunk1DeclaredSize}.");
+        Assert.True(chunk0Refs.DoodadRefs.Length < doodadCount, "Expected local preserved doodad ownership to be rebalanced away from the containing chunk.");
+        Assert.True(chunk1Refs.DoodadRefs.Length > 0, "Expected at least one neighboring local chunk to receive doodad ownership when the containing chunk is overloaded.");
+
+        int totalDoodadRefs = 0;
+        for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+            totalDoodadRefs += ReadMcrfRefs(wdt, 0, 0, chunkIndex).DoodadRefs.Length;
+
+        Assert.Equal(doodadCount, totalDoodadRefs);
+    }
+
+    [Fact]
     public void ConvertTile_AndWriteAlphaWdt_UsesSingleFixedSizeLiquidBlock()
     {
         List<LkMcnkData> chunks = [];

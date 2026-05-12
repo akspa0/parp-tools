@@ -90,7 +90,13 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 **M2 -> MDX minimal downgrade lane:**
 - `wow-viewer` now owns a first minimal shared `M2ToMdxConverter` in `WowViewer.Core.IO/M2`.
 - The current proof boundary is explicit: geometry, texture names, materials, sequences, bones, pivots, and skin-fed index data are mapped into structurally valid classic `MDX` output and validated by re-reading the produced bytes through existing MDX readers.
-- This is not full parity yet. CLI wiring for `convert-m2-to-mdx` was still open at session end, and `MdxToM2` had not started.
+- This is not full parity yet. `convert-m2-to-mdx` is now wired into `WowViewer.Tool.Converter` and validated with a focused converter build, but broad real-data downgrade proof is still open and `MdxToM2` had not started.
+
+**MDX -> M2 minimal upgrade lane:**
+- `wow-viewer` now owns a first minimal shared `MdxToM2Converter` in `WowViewer.Core.IO/M2`.
+- The current proof boundary is explicit: a strict `MD20` root plus one `00.skin` companion are emitted from classic `MDX` using the current minimal shared subset for geometry, sequences, textures, material flags/blend mode, and skin-fed submesh or batch tables.
+- The lane is validated by re-reading the produced root with `M2GeometryReader` and the companion skin with `M2SkinReader`, and `convert-mdx-to-m2` is now wired into `WowViewer.Tool.Converter`.
+- This is still a minimal structure lane, not a full parity pass for MDX animation tracks, helpers, lights, ribbons, particles, or deep material semantics.
 
 **New CLI flags for `convert-lk-to-alpha`:**
 - `--target-client-root <dir>` / `-tcr` — filter placements against target client
@@ -162,7 +168,7 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 
 ## NEXT
 1. Dataset prep lane: use staged clients + `dataset-list-maps` for discovery + `WowViewer.Tool.Harvest harvest-map-mpq` for shard generation into `wow-viewer\output\datasets\`, then NPZ-based validation/visualization from the harvested shards
-2. Phase C (continued): AreaID crosswalk, LkToAlpha broader real-data validation, finish `M2ToMdx` CLI wiring, then implement `MdxToM2`
+2. Phase C (continued): AreaID crosswalk, LkToAlpha broader real-data validation, broader real-data proof for `M2ToMdx` and `MdxToM2`
 3. Phase D: Deep format readers (WDT retail flags, WDL, WMO full version range, MDX, BLP pixel decode)
 4. Phase E: DBC/DB2 metadata enrichment (AreaTable, WorldSafeLocs, LiquidType, GroundEffects)
 5. Phase F: Placement provenance (MCRF per-chunk arrays, PM4 SQLite, prefab detection)

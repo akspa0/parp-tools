@@ -55,6 +55,7 @@
 | **Phase C: Wmo v17->v14 converter** | **DONE** — shared `wow-viewer` downgrade path plus converter CLI and focused regression coverage are landed; large sources now merge past the Alpha-era `384` group ceiling with spatial buckets and portal remap instead of blunt overflow collapse |
 | **Phase C: Wmo v14->v17 converter** | **DONE** — shared `wow-viewer` upgrade path plus converter CLI and focused tests are landed |
 | **Phase C: M2->MDX minimal converter** | **DONE** — shared `wow-viewer` minimal downgrade lane is landed and reader-validated for geometry, materials, textures, sequences, bones, pivots, and skin-fed index data |
+| **Phase C: MDX->M2 minimal converter** | **DONE** — shared `wow-viewer` minimal upgrade lane is landed, emits a strict `MD20` root plus `00.skin`, has focused reader-backed regression coverage, and is wired into `WowViewer.Tool.Converter` |
 
 ## IN PROGRESS
 | What | Status |
@@ -64,8 +65,8 @@
 | Phase C: LkToAlpha real-data MdxViewer validation | DONE — 839/839 tiles, terrain renders, WMOs load, ExitCode=0 |
 | Phase C: Alpha/LK full chunk preservation | OPEN — current converter lane is still a reduced terrain-domain reconstruction, not chunk-for-chunk spec closure. Gap inventory documented below. |
 | Phase C: Wmo v14↔v17 converters | DONE — shared writers, CLI wiring, and focused tests are landed in `wow-viewer` |
-| Phase C: M2->MDX CLI wiring | OPEN — minimal shared converter is landed, but converter command wiring still needs to be finished |
-| Phase C: Mdx->M2 converter | NOT STARTED |
+| Phase C: M2->MDX CLI wiring | DONE — `convert-m2-to-mdx` is now wired in `WowViewer.Tool.Converter` and the converter project builds cleanly |
+| Phase C: Mdx->M2 minimal lane | DONE — shared converter, focused regression, and `convert-mdx-to-m2` CLI wiring are landed; broader real-data parity proof is still open |
 | Phase C: Legacy MdxViewer → wow-viewer port | LONG-RANGE — `WowViewer.App` shell exists but needs world-session, terrain, WMO, M2 rendering
 
 ## CHUNK PRESERVATION GAP INVENTORY (2026-05-08)
@@ -200,7 +201,9 @@ Both commits after `47cbb435` were reverted because they broke 0.5.3 client map 
 - `wow-viewer` now owns both WMO directions in shared I/O: `WmoV17ToV14Converter` and `WmoV14ToV17Converter`, with converter CLI wiring and focused test coverage.
 - The `WmoV17ToV14` downgrade path now handles the practical Alpha 0.5.3 ceiling of `384` groups with spatial bucket merging and portal index remap instead of flattening all overflow into one terminal group.
 - `wow-viewer/src/core/WowViewer.Core.IO/M2/M2ToMdxConverter.cs` now provides a first minimal `M2 -> MDX` downgrade lane. Current proof is reader-backed structure validation rather than broad real-data parity.
-- The next object-converter slice is to wire `convert-m2-to-mdx` in `WowViewer.Tool.Converter`, then start `MdxToM2`.
+- `convert-m2-to-mdx` is now wired in `WowViewer.Tool.Converter` and validated with a focused converter build.
+- `wow-viewer/src/core/WowViewer.Core.IO/M2/MdxToM2Converter.cs` now provides the first minimal `MDX -> M2` upgrade lane. Current proof is a synthetic round-trip that re-reads the generated strict `MD20` root and `00.skin` through existing M2 readers, plus converter CLI build validation.
+- The next object-converter slice is broad real-data proof for both `M2 -> MDX` and `MDX -> M2` rather than another new ownership seam.
 
 ## BUGS FIXED IN NPZ SHARD VALIDATION (2026-05-08)
 1. **OverflowException in MCNK sub-chunk locators** — `LocateMcvtDataOffset`, `LocateMcnrDataOffset`, `LocateMccvDataOffset`, and `TryReadSplitMcnkSubchunkPayload` all used `checked((int)header.Size)` casts that threw `OverflowException` when encountering MCNK sub-chunk headers with `uint` sizes > `int.MaxValue`. Fixed by converting all three locators and `TryReadSplitMcnkSubchunkPayload` to `long` arithmetic.

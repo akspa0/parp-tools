@@ -136,6 +136,12 @@ string[] tail = args.Skip(1).ToArray();
 	case "convert-wmo-v14-to-v17":
 		WmoV14ToV17Command.Run(tail);
 		break;
+	case "convert-m2-to-mdx":
+		M2ToMdxCommand.Run(tail);
+		break;
+	case "convert-mdx-to-m2":
+		MdxToM2Command.Run(tail);
+		break;
 	case "validate-roundtrip":
 		ValidateRoundTripCommand.Run(tail);
 		break;
@@ -4562,10 +4568,12 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input <minimap.png> --mask <liquid-mask.png> --output <no-liquid.png>");
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input-dir <images> --mask-dir <masks> --output-dir <images>");
 	Console.WriteLine("  wowviewer-converter convert-alpha-to-lk --input <Azeroth.wdt> --output <output-dir> [--verbose|-v]");
-	Console.WriteLine("  wowviewer-converter convert-lk-to-alpha --input <dir> --output <output.wdt> [--output-wdl <output.wdl>] [--verbose|-v]");
-	Console.WriteLine("  wowviewer-converter convert-lk-to-alpha --client-root <dir> --map <name> --output <output.wdt> [--output-wdl <output.wdl>] [--limit <n>] [--verbose|-v]");
+	Console.WriteLine("  wowviewer-converter convert-lk-to-alpha --input <dir> --output <output.wdt> [--output-wdl <output.wdl>] [--bundle-tilesets|-bt] [--bundle-wmos|-bw] [--verbose|-v]");
+	Console.WriteLine("  wowviewer-converter convert-lk-to-alpha --client-root <dir> --map <name> --output <output.wdt> [--output-wdl <output.wdl>] [--limit <n>] [--bundle-tilesets|-bt] [--bundle-wmos|-bw] [--verbose|-v]");
 	Console.WriteLine("  wowviewer-converter convert-wmo-v14-to-v17 --input-root <root.wmo> --output <output_root.wmo> [--groups-dir <dir>] [--verbose|-v]");
 	Console.WriteLine("  wowviewer-converter convert-wmo-v17-to-v14 --input-root <root.wmo> --output <output.wmo> [--groups-dir <dir>] [--verbose|-v]");
+	Console.WriteLine("  wowviewer-converter convert-m2-to-mdx --input <model.m2> --skin <model00.skin> --output <output.mdx> [--verbose|-v]");
+	Console.WriteLine("  wowviewer-converter convert-mdx-to-m2 --input <model.mdx> --output <output.m2> [--verbose|-v]");
 }
 
 file sealed record V10TensorExtractionResult(
