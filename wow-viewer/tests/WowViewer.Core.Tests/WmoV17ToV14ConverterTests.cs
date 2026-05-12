@@ -83,11 +83,153 @@ public sealed class WmoV17ToV14ConverterTests
         Assert.Equal(4, faceSummary.EntrySizeBytes);
     }
 
-    private static byte[] CreateMohd(uint materialCount, uint groupCount)
+    [Fact]
+    public void Convert_WhenSourceExceedsLegacyGroupLimit_MergesOverflowIntoFinalLegacyGroup()
+    {
+        const int sourceGroupCount = 385;
+
+        byte[] rootBytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(17)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOHD", CreateMohd(materialCount: 1, groupCount: sourceGroupCount)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOTX", CreateStringBlock("compat.blp")),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOMT", CreateMomtEntry(64, texture1Offset: 0)),
+        ];
+
+        List<byte[]> groupBytes = new(sourceGroupCount);
+        for (int groupIndex = 0; groupIndex < sourceGroupCount; groupIndex++)
+        {
+            float offset = groupIndex * 10f;
+            groupBytes.Add(CreateGroupFile(17, CreateMogpPayload(
+                headerSize: 0x44,
+                flags: 0x8,
+                boundsMin: new Vector3(offset, 0f, 0f),
+                boundsMax: new Vector3(offset + 1f, 1f, 1f),
+                portalStart: 0,
+                portalCount: 0,
+                transBatchCount: 0,
+                intBatchCount: 1,
+                extBatchCount: 0,
+                groupLiquid: 0,
+                nameOffset: 0,
+                descriptiveNameOffset: 0,
+                subchunks:
+                [
+                    ("MOPY", CreateMopyEntryV17(flags: 0x01, materialId: 0x02)),
+                    ("MOIN", CreateIndices(0, 1, 2)),
+                    ("MOVT", CreateVertices(new Vector3(offset, 0f, 0f), new Vector3(offset + 1f, 0f, 0f), new Vector3(offset, 1f, 0f))),
+                    ("MONR", CreateVertices(Vector3.UnitZ, Vector3.UnitZ, Vector3.UnitZ)),
+                    ("MOBA", CreateMobaEntryV17(materialIdRaw: 0x02, firstIndex: 0, indexCount: 3, firstVertex: 0, lastVertex: 2, flags: 0x00)),
+                ])));
+        }
+
+        byte[] converted = WmoV17ToV14Converter.Convert(rootBytes, groupBytes, "synthetic_v17_large_root.wmo");
+
+        using MemoryStream summaryStream = new(converted);
+        WmoSummary summary = WmoSummaryReader.Read(summaryStream, "converted_v14_large.wmo");
+        Assert.Equal((uint)14, summary.Version);
+        Assert.Equal(384, summary.ReportedGroupCount);
+        Assert.Equal(384, summary.GroupInfoCount);
+
+        using MemoryStream renderStream = new(converted);
+        WmoRenderDocument document = WmoRenderDocumentReader.Read(renderStream, "converted_v14_large.wmo");
+        Assert.Equal(384, document.Groups.Count);
+
+        WmoEmbeddedGroupMeshDetail mergedGroup = Assert.Single(document.Groups, static group => group.Mesh.Vertices.Count == 6);
+        Assert.Equal(6, mergedGroup.Mesh.Vertices.Count);
+        Assert.Equal(6, mergedGroup.Mesh.Indices.Count);
+        Assert.Equal(2, mergedGroup.Mesh.FaceMaterials.Count);
+        Assert.Equal(2, mergedGroup.Mesh.Batches.Count);
+        Assert.Equal(new Vector3(3830f, 0f, 0f), mergedGroup.GroupSummary.BoundsMin);
+        Assert.Equal(new Vector3(3841f, 1f, 1f), mergedGroup.GroupSummary.BoundsMax);
+    }
+
+    [Fact]
+    public void Convert_WhenSourceExceedsLegacyGroupLimit_RemapsPortalRefsIntoMergedGroupRange()
+    {
+        const int sourceGroupCount = 385;
+
+        byte[] rootBytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(17)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOHD", CreateMohd(materialCount: 1, groupCount: sourceGroupCount, portalCount: 1)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOTX", CreateStringBlock("compat.blp")),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOMT", CreateMomtEntry(64, texture1Offset: 0)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOPV", CreatePortalVertices(
+                new Vector3(3830f, 0f, 0f),
+                new Vector3(3831f, 0f, 0f),
+                new Vector3(3831f, 1f, 0f),
+                new Vector3(3830f, 1f, 0f))),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOPT", CreatePortalInfo(startVertex: 0, vertexCount: 4, normal: Vector3.UnitX, planeDistance: 0f)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOPR", CreatePortalRefs(
+                (portalIndex: 0, groupIndex: 383, side: (short)-1),
+                (portalIndex: 0, groupIndex: 384, side: (short)1))),
+        ];
+
+        List<byte[]> groupBytes = new(sourceGroupCount);
+        for (int groupIndex = 0; groupIndex < sourceGroupCount; groupIndex++)
+        {
+            float offset = groupIndex * 10f;
+            bool hasPortal = groupIndex >= 383;
+            ushort portalStart = groupIndex switch
+            {
+                383 => 0,
+                384 => 1,
+                _ => 0,
+            };
+            ushort portalCount = hasPortal ? (ushort)1 : (ushort)0;
+
+            groupBytes.Add(CreateGroupFile(17, CreateMogpPayload(
+                headerSize: 0x44,
+                flags: 0x8,
+                boundsMin: new Vector3(offset, 0f, 0f),
+                boundsMax: new Vector3(offset + 1f, 1f, 1f),
+                portalStart: portalStart,
+                portalCount: portalCount,
+                transBatchCount: 0,
+                intBatchCount: 1,
+                extBatchCount: 0,
+                groupLiquid: 0,
+                nameOffset: 0,
+                descriptiveNameOffset: 0,
+                subchunks:
+                [
+                    ("MOPY", CreateMopyEntryV17(flags: 0x01, materialId: 0x02)),
+                    ("MOIN", CreateIndices(0, 1, 2)),
+                    ("MOVT", CreateVertices(new Vector3(offset, 0f, 0f), new Vector3(offset + 1f, 0f, 0f), new Vector3(offset, 1f, 0f))),
+                    ("MONR", CreateVertices(Vector3.UnitZ, Vector3.UnitZ, Vector3.UnitZ)),
+                    ("MOBA", CreateMobaEntryV17(materialIdRaw: 0x02, firstIndex: 0, indexCount: 3, firstVertex: 0, lastVertex: 2, flags: 0x00)),
+                ])));
+        }
+
+        byte[] converted = WmoV17ToV14Converter.Convert(rootBytes, groupBytes, "synthetic_v17_large_portal_root.wmo");
+
+        using MemoryStream summaryStream = new(converted);
+        WmoSummary summary = WmoSummaryReader.Read(summaryStream, "converted_v14_large_portal.wmo");
+        Assert.Equal(384, summary.ReportedGroupCount);
+        Assert.Equal(1, summary.ReportedPortalCount);
+
+        using MemoryStream portalRefRangeStream = new(converted);
+        WmoPortalRefRangeSummary portalRefRange = WmoPortalRefRangeSummaryReader.Read(portalRefRangeStream, "converted_v14_large_portal.wmo");
+        Assert.Equal(0, portalRefRange.OutOfRangeRefCount);
+        Assert.Equal(portalRefRange.RefCount, portalRefRange.CoveredRefCount);
+
+        using MemoryStream portalGroupRangeStream = new(converted);
+        WmoPortalGroupRangeSummary portalGroupRange = WmoPortalGroupRangeSummaryReader.Read(portalGroupRangeStream, "converted_v14_large_portal.wmo");
+        Assert.Equal(0, portalGroupRange.OutOfRangeRefCount);
+        Assert.Equal(portalGroupRange.RefCount, portalGroupRange.CoveredRefCount);
+
+        using MemoryStream renderStream = new(converted);
+        WmoRenderDocument document = WmoRenderDocumentReader.Read(renderStream, "converted_v14_large_portal.wmo");
+        Assert.Contains(document.Groups, static group => group.GroupSummary.PortalCount > 0);
+    }
+
+    private static byte[] CreateMohd(uint materialCount, uint groupCount, uint portalCount = 0)
     {
         byte[] bytes = new byte[64];
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0, 4), materialCount);
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4, 4), groupCount);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8, 4), portalCount);
         return bytes;
     }
 
@@ -196,6 +338,37 @@ public sealed class WmoV17ToV14ConverterTests
         BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(20, 2), lastVertex);
         bytes[22] = flags;
         bytes[23] = materialIdRaw;
+        return bytes;
+    }
+
+    private static byte[] CreatePortalVertices(params Vector3[] values)
+    {
+        return CreateVertices(values);
+    }
+
+    private static byte[] CreatePortalInfo(ushort startVertex, ushort vertexCount, Vector3 normal, float planeDistance)
+    {
+        byte[] bytes = new byte[20];
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(0, 2), startVertex);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(2, 2), vertexCount);
+        WriteSingle(bytes, 4, normal.X);
+        WriteSingle(bytes, 8, normal.Y);
+        WriteSingle(bytes, 12, normal.Z);
+        WriteSingle(bytes, 16, planeDistance);
+        return bytes;
+    }
+
+    private static byte[] CreatePortalRefs(params (ushort portalIndex, ushort groupIndex, short side)[] values)
+    {
+        byte[] bytes = new byte[values.Length * 8];
+        for (int index = 0; index < values.Length; index++)
+        {
+            int offset = index * 8;
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset, 2), values[index].portalIndex);
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset + 2, 2), values[index].groupIndex);
+            BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(offset + 4, 2), values[index].side);
+        }
+
         return bytes;
     }
 

@@ -133,6 +133,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "convert-wmo-v17-to-v14":
 		WmoV17ToV14Command.Run(tail);
 		break;
+	case "convert-wmo-v14-to-v17":
+		WmoV14ToV17Command.Run(tail);
+		break;
 	case "validate-roundtrip":
 		ValidateRoundTripCommand.Run(tail);
 		break;
@@ -4561,6 +4564,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter convert-alpha-to-lk --input <Azeroth.wdt> --output <output-dir> [--verbose|-v]");
 	Console.WriteLine("  wowviewer-converter convert-lk-to-alpha --input <dir> --output <output.wdt> [--output-wdl <output.wdl>] [--verbose|-v]");
 	Console.WriteLine("  wowviewer-converter convert-lk-to-alpha --client-root <dir> --map <name> --output <output.wdt> [--output-wdl <output.wdl>] [--limit <n>] [--verbose|-v]");
+	Console.WriteLine("  wowviewer-converter convert-wmo-v14-to-v17 --input-root <root.wmo> --output <output_root.wmo> [--groups-dir <dir>] [--verbose|-v]");
 	Console.WriteLine("  wowviewer-converter convert-wmo-v17-to-v14 --input-root <root.wmo> --output <output.wmo> [--groups-dir <dir>] [--verbose|-v]");
 }
 
