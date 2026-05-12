@@ -498,10 +498,7 @@ public static class AlphaToLkConverter
         {
             if (lc.IndexX == cx && lc.IndexY == cy)
             {
-                if ((lc.McnkFlags & 0x04) != 0) return 1;
-                if ((lc.McnkFlags & 0x08) != 0) return 1;
-                int bits = (int)((lc.McnkFlags >> 4) & 3);
-                return bits switch { 1 => 1, 2 => 2, 3 => 3, _ => 0 };
+                return AlphaLiquidTypeCodec.ClassifyCoarseType(lc.TileFlags, lc.McnkFlags);
             }
         }
         return 0;
@@ -517,7 +514,7 @@ public static class AlphaToLkConverter
             if (liquidChunk.IndexX != cx || liquidChunk.IndexY != cy)
                 continue;
 
-            AdtLiquidBasicType basicType = ResolveLiquidBasicType(liquidChunk.McnkFlags);
+            AdtLiquidBasicType basicType = ResolveLiquidBasicType(liquidChunk.TileFlags, liquidChunk.McnkFlags);
             float[] heights = liquidChunk.Heights is { Length: >= 81 }
                 ? [.. liquidChunk.Heights]
                 : CreateFlatLiquidHeights((liquidChunk.MinHeight + liquidChunk.MaxHeight) * 0.5f);
@@ -544,17 +541,9 @@ public static class AlphaToLkConverter
         return null;
     }
 
-    private static AdtLiquidBasicType ResolveLiquidBasicType(uint mcnkFlags)
+    private static AdtLiquidBasicType ResolveLiquidBasicType(byte[]? tileFlags, uint mcnkFlags)
     {
-        if ((mcnkFlags & 0x08) != 0)
-            return AdtLiquidBasicType.Ocean;
-
-        return ((mcnkFlags >> 4) & 0x3) switch
-        {
-            2 => AdtLiquidBasicType.Magma,
-            3 => AdtLiquidBasicType.Slime,
-            _ => AdtLiquidBasicType.Water,
-        };
+        return AlphaLiquidTypeCodec.ResolveBasicType(tileFlags, mcnkFlags);
     }
 
     private static ushort MapLiquidTypeId(AdtLiquidBasicType basicType)

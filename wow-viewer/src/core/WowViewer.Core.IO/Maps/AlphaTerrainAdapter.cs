@@ -262,7 +262,7 @@ public sealed class AlphaTerrainAdapter : ITerrainAdapter
             {
                 return new LiquidChunkData
                 {
-                    LiquidType = ClassifyLiquidType(liquid.McnkFlags),
+                    LiquidType = ClassifyLiquidType(liquid.TileFlags, liquid.McnkFlags),
                     MinHeight = liquid.MinHeight,
                     MaxHeight = liquid.MaxHeight,
                     TileFlags = liquid.TileFlags
@@ -273,17 +273,9 @@ public sealed class AlphaTerrainAdapter : ITerrainAdapter
         return null;
     }
 
-    private static int ClassifyLiquidType(uint mcnkFlags)
+    private static int ClassifyLiquidType(byte[]? tileFlags, uint mcnkFlags)
     {
-        if ((mcnkFlags & 0x08) != 0) return 1;
-        int bits = (int)((mcnkFlags >> 4) & 3);
-        return bits switch
-        {
-            1 => 1,
-            2 => 2,
-            3 => 3,
-            _ => 0
-        };
+        return AlphaLiquidTypeCodec.ClassifyCoarseType(tileFlags, mcnkFlags);
     }
 
     private static byte[] ReadMainPayload(byte[] wdtData)

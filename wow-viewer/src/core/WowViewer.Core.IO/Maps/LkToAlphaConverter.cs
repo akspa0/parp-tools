@@ -552,7 +552,7 @@ public static class LkToAlphaConverter
         if (layer is null)
             return null;
 
-        uint mcnkFlags = MapAlphaLiquidFlags(layer.BasicType);
+        uint mcnkFlags = AlphaLiquidTypeCodec.GetWriterChunkFlags(layer.BasicType);
 
         byte[]? tileFlags = BuildAlphaTileFlags(layer);
         float[] heights = BuildAlphaLiquidHeights(layer);
@@ -568,17 +568,6 @@ public static class LkToAlphaConverter
             heights);
     }
 
-    private static uint MapAlphaLiquidFlags(AdtLiquidBasicType basicType)
-    {
-        return basicType switch
-        {
-            AdtLiquidBasicType.Ocean => 0x08u,
-            AdtLiquidBasicType.Magma => 0x10u,
-            AdtLiquidBasicType.Slime => 0x20u,
-            _ => 0x04u,
-        };
-    }
-
     private static byte[]? BuildAlphaTileFlags(AdtLiquidLayer layer)
     {
         if (layer.Width <= 0 || layer.Height <= 0)
@@ -586,6 +575,7 @@ public static class LkToAlphaConverter
 
         byte[] tileFlags = new byte[64];
         Array.Fill(tileFlags, (byte)0x0F);
+        byte visibleTileFlag = AlphaLiquidTypeCodec.GetWriterTileTypeNibble(layer.BasicType);
 
         for (int y = 0; y < layer.Height; y++)
         {
@@ -597,7 +587,7 @@ public static class LkToAlphaConverter
                     continue;
 
                 if (layer.TileExists(x, y))
-                    tileFlags[(globalY * 8) + globalX] = 0;
+                    tileFlags[(globalY * 8) + globalX] = visibleTileFlag;
             }
         }
 

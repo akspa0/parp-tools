@@ -257,7 +257,7 @@ public static class AlphaWdtReader
                 for (int y = baseY; y < endY; y++)
                     for (int x = baseX; x < endX; x++)
                         mclqSurface[y, x] = avgHeight;
-                mclqTypes[lc.IndexX, lc.IndexY] = ClassifyLiquid(lc.McnkFlags);
+                mclqTypes[lc.IndexX, lc.IndexY] = ClassifyLiquid(lc.TileFlags, lc.McnkFlags);
                 hasLiquid = true;
             }
         }
@@ -978,17 +978,8 @@ public static class AlphaWdtReader
 
     private const float WorldTileSize = 533.33333f;
 
-    private static int ClassifyLiquid(uint mcnkFlags)
+    private static int ClassifyLiquid(byte[]? tileFlags, uint mcnkFlags)
     {
-        if ((mcnkFlags & 0x04) != 0) return 1;
-        if ((mcnkFlags & 0x08) != 0) return 1;
-        int bits = (int)((mcnkFlags >> 4) & 3);
-        return bits switch
-        {
-            1 => 1,
-            2 => 2,
-            3 => 3,
-            _ => 0
-        };
+        return AlphaLiquidTypeCodec.ClassifyCoarseType(tileFlags, mcnkFlags);
     }
 }

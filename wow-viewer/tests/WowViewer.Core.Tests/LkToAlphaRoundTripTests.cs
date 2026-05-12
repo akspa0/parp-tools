@@ -155,7 +155,9 @@ public sealed class LkToAlphaRoundTripTests
         Assert.Equal(4, liquidChunk.IndexY);
         Assert.Equal(33f, liquidChunk.MinHeight, 3);
         Assert.Equal(33f, liquidChunk.MaxHeight, 3);
-        Assert.Equal(0x04u, liquidChunk.McnkFlags & 0x3Cu);
+        Assert.Equal(0x3Cu, liquidChunk.McnkFlags & 0x3Cu);
+        Assert.NotNull(liquidChunk.TileFlags);
+        Assert.Equal(0x01, liquidChunk.TileFlags![0] & 0x0F);
     }
 
     [Fact]
@@ -394,13 +396,19 @@ public sealed class LkToAlphaRoundTripTests
         });
 
         var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
-        Assert.Empty(chunk0Refs.DoodadRefs);
+        Assert.Equal([0], chunk0Refs.DoodadRefs);
 
         var chunk37Refs = ReadMcrfRefs(wdt, 0, 0, 37);
-        Assert.Equal([0], chunk37Refs.DoodadRefs);
+        Assert.Empty(chunk37Refs.DoodadRefs);
 
         var chunk115Refs = ReadMcrfRefs(wdt, 0, 0, 115);
-        Assert.Equal([0], chunk115Refs.DoodadRefs);
+        Assert.Empty(chunk115Refs.DoodadRefs);
+
+        int totalDoodadRefs = 0;
+        for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+            totalDoodadRefs += ReadMcrfRefs(wdt, 0, 0, chunkIndex).DoodadRefs.Length;
+
+        Assert.Equal(1, totalDoodadRefs);
     }
 
     [Fact]
@@ -509,7 +517,10 @@ public sealed class LkToAlphaRoundTripTests
         });
 
         var chunk73Refs = ReadMcrfRefs(wdt, 0, 0, 73);
-        Assert.Equal([0], chunk73Refs.DoodadRefs);
+        Assert.Empty(chunk73Refs.DoodadRefs);
+
+        var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
+        Assert.Equal([0], chunk0Refs.DoodadRefs);
 
         int totalDoodadRefs = 0;
         for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
@@ -591,7 +602,7 @@ public sealed class LkToAlphaRoundTripTests
         int mclqOffset = BitConverter.ToInt32(wdt, headerOffset + 0x64);
         uint flags = BitConverter.ToUInt32(wdt, headerOffset + 0x00) & 0x3Cu;
 
-        Assert.Equal(0x04u, flags);
+        Assert.Equal(0x3Cu, flags);
         Assert.Equal(0x324, chunkDataSize - mclqOffset);
     }
 
@@ -690,6 +701,85 @@ public sealed class LkToAlphaRoundTripTests
         Assert.Equal(81, mh2oLayer.Heights!.Length);
         Assert.Equal(liquidHeights[0], mh2oLayer.Heights[0], 3);
         Assert.Equal(liquidHeights[80], mh2oLayer.Heights[80], 3);
+    }
+
+    [Fact]
+    public void ConvertTile_ThroughAlphaWdt_BackToLkAdt_PreservesOceanLiquidTypeViaTileFlags()
+    {
+        List<LkMcnkData> chunks = [];
+        for (int index = 0; index < 256; index++)
+        {
+            int chunkX = index % 16;
+            int chunkY = index / 16;
+            chunks.Add(new LkMcnkData
+            {
+                IndexX = chunkX,
+                IndexY = chunkY,
+                Flags = 0,
+                BaseHeight = 0f,
+                Heights = [],
+                Normals = [],
+                Layers = []
+            });
+        }
+
+        float[] liquidHeights = new float[81];
+        Array.Fill(liquidHeights, 52f);
+
+        chunks[(6 * 16) + 5] = CreateChunk(
+            5,
+            6,
+            10f,
+            0f,
+            flags: 0x08,
+            withAlpha: false,
+            liquidData: new AdtLiquidChunk(
+                (6 * 16) + 5,
+                null,
+                null,
+                [new AdtLiquidLayer(
+                    17,
+                    AdtLiquidBasicType.Ocean,
+                    AdtLiquidVertexFormat.HeightDepth,
+                    52f,
+                    52f,
+                    0,
+                    0,
+                    8,
+                    8,
+                    null,
+                    liquidHeights,
+                    new byte[81],
+                    null)]));
+
+        LkAdtData adt = new()
+        {
+            TileX = 0,
+            TileY = 0,
+            TextureNames = ["terrain_a.blp"],
+            Chunks = chunks
+        };
+
+        AlphaTileData alphaTile = LkToAlphaConverter.ConvertTile(adt, 0, 0);
+        byte[] wdt = AlphaWdtWriter.Build("ocean_roundtrip_liquid", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = alphaTile
+        });
+
+        Assert.True(AlphaWdtReader.TryReadTile(wdt, 0, 0, out AlphaTileData? alphaRoundTrip));
+        Assert.NotNull(alphaRoundTrip);
+
+        AlphaLiquidChunk alphaLiquid = Assert.Single(alphaRoundTrip.LiquidChunks, static chunk => chunk.IndexX == 5 && chunk.IndexY == 6);
+        Assert.NotNull(alphaLiquid.TileFlags);
+        Assert.Equal(0x02, alphaLiquid.TileFlags![0] & 0x0F);
+        Assert.Equal(0x3Cu, alphaLiquid.McnkFlags & 0x3Cu);
+
+        LkAdtData lkRoundTrip = AlphaToLkConverter.ConvertTile(alphaRoundTrip, 0, 0);
+        AdtLiquidChunk mh2oChunk = Assert.Single(lkRoundTrip.Chunks.Where(static chunk => chunk.LiquidData?.Layers.Count > 0).Select(static chunk => chunk.LiquidData!));
+        AdtLiquidLayer layer = Assert.Single(mh2oChunk.Layers);
+
+        Assert.Equal(AdtLiquidBasicType.Ocean, layer.BasicType);
+        Assert.Equal((ushort)17, layer.LiquidTypeId);
     }
 
     [Fact]
