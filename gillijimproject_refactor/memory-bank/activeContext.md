@@ -102,6 +102,7 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 - `--target-client-root <dir>` / `-tcr` — filter placements against target client
 - `--terrain-only` / `-to` — strip all placements (crash-proof validation)
 - `--bundle-tilesets` / `-bt` — extract textures alongside output
+- `--bundle-m2s` / `-bm` — bundle doodad models as local MDX outputs, rewrite placement paths, and rewrite bundled MDX TEXS paths to colocated local BLPs
 - `--limit <N>` / `-n` — limit tile count for testing
 
 ### Architecture Notes for LkToAlpha

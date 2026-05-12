@@ -7,13 +7,14 @@ public sealed class WmoGroupBatchDetail
         int payloadOffset,
         byte materialIdRaw,
         bool hasMaterialId,
-        ushort firstIndex,
+        int firstIndex,
         ushort indexCount,
         byte flags,
         byte[] rawEntryBytes)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(batchIndex);
         ArgumentOutOfRangeException.ThrowIfNegative(payloadOffset);
+        ArgumentOutOfRangeException.ThrowIfNegative(firstIndex);
         ArgumentNullException.ThrowIfNull(rawEntryBytes);
 
         BatchIndex = batchIndex;
@@ -36,7 +37,7 @@ public sealed class WmoGroupBatchDetail
 
     public int? MaterialId => HasMaterialId ? MaterialIdRaw : null;
 
-    public ushort FirstIndex { get; }
+    public int FirstIndex { get; }
 
     public ushort IndexCount { get; }
 

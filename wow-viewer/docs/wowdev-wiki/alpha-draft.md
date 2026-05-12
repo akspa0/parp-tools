@@ -38,6 +38,14 @@ Translate -> RotateZ -> RotateY -> RotateX
 
 > In 0.5.3, the payload is a fixed-size `0x324`-byte block per chunk when present.
 
+1. Add an explicit MCNK payload-limit note:
+
+> Alpha `MCNK` payloads must stay below `15000` bytes. This is a client-side load constraint, not just a writer preference. When object refs pressure the chunk budget, the implementation should preserve stable placement ownership and only trim duplicate non-anchor overlap refs as a last resort.
+
+1. Make placement-ref ownership explicit:
+
+> Alpha doodads are single-owner in chunk `MCRF` and should keep their preserved owning chunk when converting from later formats. WMOs still use overlap-based multi-chunk references.
+
 1. Expand the `predTex` note conservatively:
 
 > `predTex[8]` is the Alpha-era predominant-texture / low-detail terrain map, matching the same data family later documented on `ADT/v18` as `predominantTexture` / `predTex` / `ReallyLowQualityTextureingMap`.
@@ -54,6 +62,7 @@ Optional follow-up sentence:
 
 - Keep `predTex` terminology aligned with `ADT/v18` `predominantTexture`.
 - Call out that Alpha `MCVT` heights are absolute.
+- Call out the Alpha `MCNK < 15000` compatibility ceiling.
 - Keep Alpha `MCLQ` specifics local to the Alpha page.
 
 ## Repo-Backed Sources

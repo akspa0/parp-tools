@@ -122,6 +122,80 @@ public sealed class M2ToMdxConverterTests
         Assert.Equal(new Vector2(1f, 0f), geoset.PrimaryUvSet[1]);
     }
 
+    [Fact]
+    public void Convert_WithTexturePathOverrides_WritesBundledTexturePathsIntoTexs()
+    {
+        M2ModelDocument model = M2ModelReader.Read(
+            new MemoryStream(CreateMd20Bytes(
+                version: 0x108u,
+                modelName: "SyntheticCrate",
+                boundsMin: new Vector3(-1.0f, -2.0f, -3.0f),
+                boundsMax: new Vector3(4.0f, 5.0f, 6.0f),
+                boundsRadius: 7.5f,
+                embeddedSkinProfileCount: 0,
+                embeddedSkinProfileOffset: 0),
+            writable: false),
+            "Creature\\SyntheticCrate\\SyntheticCrate.m2");
+
+        M2GeometryDocument geometry = new(
+            model,
+            vertices:
+            [
+                new M2GeometryVertex(new Vector3(0f, 0f, 0f), Vector3.UnitZ, new Vector2(0f, 0f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(1f, 0f, 0f), Vector3.UnitZ, new Vector2(1f, 0f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(0f, 1f, 0f), Vector3.UnitZ, new Vector2(0f, 1f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+            ],
+            textures:
+            [
+                new M2GeometryTexture("Textures\\SyntheticCrateMain.blp", 0, 0),
+            ],
+            renderFlags:
+            [
+                new M2GeometryRenderFlag(flags: 0x10, rawBlendMode: 2),
+            ],
+            textureLookup:
+            [
+                new M2GeometryTextureLookup(textureId: 0),
+            ],
+            textureUnitLookup:
+            [
+                new M2GeometryTextureUnitLookup(0),
+            ],
+            transparencyLookup: [],
+            textureAnimationLookup: [],
+            boneLookup: []);
+
+        M2SkinDocument skin = new(
+            sourcePath: "Creature\\SyntheticCrate\\SyntheticCrate00.skin",
+            signature: "SKIN",
+            vertexLookup: [0, 1, 2],
+            vertexLookupOffset: 0,
+            triangleIndices: [0, 1, 2],
+            triangleIndexOffset: 0,
+            boneEntries: [],
+            boneEntryOffset: 0,
+            submeshes: [new M2SkinSubmesh(1, 0, 0, 3, 0, 3)],
+            submeshOffset: 0,
+            batches: [new M2SkinBatch(0x2, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, ushort.MaxValue)],
+            batchOffset: 0,
+            globalVertexOffset: 0,
+            shadowBatchCount: 0,
+            shadowBatchOffset: 0);
+
+        byte[] converted = M2ToMdxConverter.Convert(
+            geometry,
+            skin,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Textures\\SyntheticCrateMain.blp"] = "World\\Maps\\Azeroth\\mdxs\\Azeroth\\Creature\\SyntheticCrate\\SyntheticCrateMain.blp"
+            });
+
+        using MemoryStream summaryStream = new(converted, writable: false);
+        MdxSummary summary = MdxSummaryReader.Read(summaryStream, "synthetic_crate.mdx");
+
+        Assert.Equal("World\\Maps\\Azeroth\\mdxs\\Azeroth\\Creature\\SyntheticCrate\\SyntheticCrateMain.blp", summary.Textures[0].Path);
+    }
+
     private readonly record struct SyntheticSequence(
         ushort AnimationId,
         ushort VariationIndex,

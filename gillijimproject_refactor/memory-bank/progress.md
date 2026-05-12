@@ -45,6 +45,7 @@
 | **Phase C: LkToAlpha real-data MdxViewer render** | **DONE** — 839/839 tiles, terrain + WMOs + MCLQ render, ExitCode=0 |
 | **Phase C: LkToAlpha asset name fixup** | **DONE** — `--target-client-root` filters 244k+ missing placements |
 | **Phase C: LkToAlpha tileset bundling** | **DONE** — `--bundle-tilesets` extracts 327 textures, fixes up paths |
+| **Phase C: LkToAlpha model bundling** | **DONE** — `--bundle-m2s` now bundles doodad outputs as local MDX assets, rewrites placement paths, and rewrites bundled MDX TEXS entries to colocated local BLPs |
 | **Phase C: LkToAlpha AlphaWdtWriter structural parity** | **DONE** — MAIN row-major per 0.5.3 client, always emit MCNK+MCRF, FourCC I/O convention |
 | **Phase C: Placement orientation proof** | **DONE** — Ghidra-confirmed Alpha MDDF/MODF position and rotation transforms; LK writer MODF bounds now round-trip through the shared reader |
 | **Phase C: AlphaWDT placement and MCRF stabilization** | **DONE** — reverse AreaID mapping, target-backed asset filtering, top-level chunk contiguity, raw-file rotation convention, and single-owner doodad chunk assignment are all landed in the shared wow-viewer alphaWDT path |

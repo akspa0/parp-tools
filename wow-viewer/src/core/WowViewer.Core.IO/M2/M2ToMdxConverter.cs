@@ -46,11 +46,20 @@ public static class M2ToMdxConverter
 
     public static byte[] Convert(M2GeometryDocument geometry, M2SkinDocument skin)
     {
+        return Convert(geometry, skin, rewrittenTexturePaths: null);
+    }
+
+    public static byte[] Convert(
+        M2GeometryDocument geometry,
+        M2SkinDocument skin,
+        IReadOnlyDictionary<string, string>? rewrittenTexturePaths)
+    {
         ArgumentNullException.ThrowIfNull(geometry);
         ArgumentNullException.ThrowIfNull(skin);
 
+        IReadOnlyList<M2GeometryTexture> textures = RewriteTextures(geometry.Textures, rewrittenTexturePaths);
         ushort[] indices = BuildTriangleIndices(geometry, skin);
-        MaterialLayerInfo? materialLayer = TryBuildMaterialLayer(geometry, skin);
+        MaterialLayerInfo? materialLayer = TryBuildMaterialLayer(textures, geometry, skin);
         int geosetMaterialId = materialLayer is null ? -1 : 0;
         uint selectionGroup = skin.Submeshes.Count == 0 ? 0u : skin.Submeshes[0].SkinSectionId;
         string modelName = ResolveModelName(geometry.Model);
@@ -65,8 +74,8 @@ public static class M2ToMdxConverter
         if (geometry.Model.Sequences.Count > 0)
             WriteChunk(writer, "SEQS", payload => WriteSeqs(payload, geometry.Model.Sequences));
 
-        if (geometry.Textures.Count > 0)
-            WriteChunk(writer, "TEXS", payload => WriteTexs(payload, geometry.Textures));
+        if (textures.Count > 0)
+            WriteChunk(writer, "TEXS", payload => WriteTexs(payload, textures));
 
         if (materialLayer is not null)
             WriteChunk(writer, "MTLS", payload => WriteMtls(payload, materialLayer.Value));
@@ -89,6 +98,35 @@ public static class M2ToMdxConverter
 
         writer.Flush();
         return stream.ToArray();
+    }
+
+    private static IReadOnlyList<M2GeometryTexture> RewriteTextures(
+        IReadOnlyList<M2GeometryTexture> textures,
+        IReadOnlyDictionary<string, string>? rewrittenTexturePaths)
+    {
+        if (textures.Count == 0 || rewrittenTexturePaths is null || rewrittenTexturePaths.Count == 0)
+            return textures;
+
+        List<M2GeometryTexture>? rewritten = null;
+        for (int index = 0; index < textures.Count; index++)
+        {
+            M2GeometryTexture texture = textures[index];
+            string? filename = texture.Filename;
+            if (string.IsNullOrWhiteSpace(filename))
+                continue;
+
+            string normalized = NormalizeVirtualPath(filename);
+            if (!rewrittenTexturePaths.TryGetValue(normalized, out string? mappedPath)
+                || string.Equals(mappedPath, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            rewritten ??= [.. textures];
+            rewritten[index] = new M2GeometryTexture(mappedPath, texture.ReplaceableId, texture.Flags);
+        }
+
+        return rewritten ?? textures;
     }
 
     private static ushort[] BuildTriangleIndices(M2GeometryDocument geometry, M2SkinDocument skin)
@@ -119,9 +157,12 @@ public static class M2ToMdxConverter
         return [.. remapped.Take(triangleSafeCount)];
     }
 
-    private static MaterialLayerInfo? TryBuildMaterialLayer(M2GeometryDocument geometry, M2SkinDocument skin)
+    private static MaterialLayerInfo? TryBuildMaterialLayer(
+        IReadOnlyList<M2GeometryTexture> textures,
+        M2GeometryDocument geometry,
+        M2SkinDocument skin)
     {
-        if (geometry.Textures.Count == 0)
+        if (textures.Count == 0)
             return null;
 
         int textureId = 0;
@@ -170,6 +211,11 @@ public static class M2ToMdxConverter
 
         string fileName = Path.GetFileNameWithoutExtension(model.Identity.CanonicalModelPath);
         return string.IsNullOrWhiteSpace(fileName) ? "Converted" : fileName;
+    }
+
+    private static string NormalizeVirtualPath(string path)
+    {
+        return path.Replace('/', '\\').Trim().TrimStart('\\');
     }
 
     private static void WriteModl(BinaryWriter writer, string modelName, M2ModelDocument model)

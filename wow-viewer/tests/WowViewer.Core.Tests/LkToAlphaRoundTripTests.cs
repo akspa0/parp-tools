@@ -351,7 +351,7 @@ public sealed class LkToAlphaRoundTripTests
     }
 
     [Fact]
-    public void WriteAlphaWdt_CollapsesDoodadRefsToSingleContainingChunkWhenPreservedChunksAreRemote()
+    public void WriteAlphaWdt_PreservesDoodadChunkOwnershipFromSourceRefs()
     {
         float[,] heightmap = new float[257, 257];
         int[,,] texIds = new int[16, 16, 4];
@@ -394,13 +394,13 @@ public sealed class LkToAlphaRoundTripTests
         });
 
         var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
-        Assert.Equal([0], chunk0Refs.DoodadRefs);
+        Assert.Empty(chunk0Refs.DoodadRefs);
 
         var chunk37Refs = ReadMcrfRefs(wdt, 0, 0, 37);
-        Assert.Empty(chunk37Refs.DoodadRefs);
+        Assert.Equal([0], chunk37Refs.DoodadRefs);
 
         var chunk115Refs = ReadMcrfRefs(wdt, 0, 0, 115);
-        Assert.Empty(chunk115Refs.DoodadRefs);
+        Assert.Equal([0], chunk115Refs.DoodadRefs);
     }
 
     [Fact]
@@ -473,7 +473,7 @@ public sealed class LkToAlphaRoundTripTests
     }
 
     [Fact]
-    public void WriteAlphaWdt_RebalancesLocalDoodadOwnersToRespectAlphaClientMcnkLimit()
+    public void WriteAlphaWdt_PreservesSingleSourceChunkForDoodadOwnership()
     {
         float[,] heightmap = new float[257, 257];
         int[,,] texIds = new int[16, 16, 4];
@@ -482,33 +482,10 @@ public sealed class LkToAlphaRoundTripTests
             for (int cx = 0; cx < 16; cx++)
                 layerMask[cx, cy, 0] = true;
 
-        const float mapOrigin = 17066.666f;
-        const float tileWorldSize = 533.33333f;
-        const float chunkWorldSize = tileWorldSize / 16f;
-        const int doodadCount = 4096;
-
-        float chunk0CenterX = mapOrigin - (chunkWorldSize * 0.5f);
-        float chunk0CenterY = mapOrigin - (chunkWorldSize * 0.5f);
-        Vector3 placementPosition = new(chunk0CenterX, chunk0CenterY, 42f);
-
-        List<AlphaModelPlacement> placements = new(doodadCount);
-        List<int> uniqueIds = new(doodadCount);
-        for (int index = 0; index < doodadCount; index++)
-        {
-            int uniqueId = index + 1;
-            placements.Add(new AlphaModelPlacement(
-                NameId: 0,
-                ModelPath: "world\\azeroth\\tree.mdx",
-                UniqueId: uniqueId,
-                Position: placementPosition,
-                Rotation: Vector3.Zero,
-                Scale: 1.0f));
-            uniqueIds.Add(uniqueId);
-        }
+        Vector3 placementPosition = new(17050f, 17050f, 42f);
 
         IReadOnlyList<int>[] doodadUniqueIdsByChunk = CreateEmptyChunkRefSet();
-        doodadUniqueIdsByChunk[0] = [.. uniqueIds];
-        doodadUniqueIdsByChunk[1] = [.. uniqueIds];
+        doodadUniqueIdsByChunk[73] = [444];
 
         AlphaTileData tile = new(
             sourcePath: "mcnk_doodad_ref_budget",
@@ -518,7 +495,10 @@ public sealed class LkToAlphaRoundTripTests
             mclyLayerMask: layerMask,
             holeMask: new bool[16, 16],
             textureNames: ["terrain_a.blp"],
-            modelPlacements: placements,
+            modelPlacements:
+            [
+                new AlphaModelPlacement(0, "world\\azeroth\\tree.mdx", 444, placementPosition, Vector3.Zero, 1.0f)
+            ],
             worldModelPlacements: [],
             liquidChunks: [],
             mcrfDoodadUniqueIdsByChunk: doodadUniqueIdsByChunk);
@@ -528,21 +508,14 @@ public sealed class LkToAlphaRoundTripTests
             [(0, 0)] = tile
         });
 
-        int chunk0DeclaredSize = ReadMcnkDeclaredSize(wdt, 0, 0, 0);
-        int chunk1DeclaredSize = ReadMcnkDeclaredSize(wdt, 0, 0, 1);
-        var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
-        var chunk1Refs = ReadMcrfRefs(wdt, 0, 0, 1);
-
-        Assert.True(chunk0DeclaredSize < 15000, $"Expected chunk 0 MCNK payload below Alpha client limit, found {chunk0DeclaredSize}.");
-        Assert.True(chunk1DeclaredSize < 15000, $"Expected chunk 1 MCNK payload below Alpha client limit, found {chunk1DeclaredSize}.");
-        Assert.True(chunk0Refs.DoodadRefs.Length < doodadCount, "Expected local preserved doodad ownership to be rebalanced away from the containing chunk.");
-        Assert.True(chunk1Refs.DoodadRefs.Length > 0, "Expected at least one neighboring local chunk to receive doodad ownership when the containing chunk is overloaded.");
+        var chunk73Refs = ReadMcrfRefs(wdt, 0, 0, 73);
+        Assert.Equal([0], chunk73Refs.DoodadRefs);
 
         int totalDoodadRefs = 0;
         for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
             totalDoodadRefs += ReadMcrfRefs(wdt, 0, 0, chunkIndex).DoodadRefs.Length;
 
-        Assert.Equal(doodadCount, totalDoodadRefs);
+        Assert.Equal(1, totalDoodadRefs);
     }
 
     [Fact]

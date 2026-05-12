@@ -218,7 +218,9 @@ public static class WmoGroupMeshDetailReader
             int offset = batchIndex * BatchEntrySize;
             byte materialIdRaw = payload[offset + 1];
             bool hasMaterialId = materialIdRaw != byte.MaxValue || version != 16;
-            ushort firstIndex = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset + 14, 2));
+            int firstIndex = version > 16
+                ? checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(offset + 12, 4)))
+                : BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset + 14, 2));
             ushort indexCount = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset + 16, 2));
             byte flags = payload[offset + 22];
             byte[] rawEntry = payload.AsSpan(offset, BatchEntrySize).ToArray();

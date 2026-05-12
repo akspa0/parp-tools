@@ -33,6 +33,19 @@ All offsets above include the 8-byte FourCC+size chunk header. Subtract 8 for of
 
 However, the offset fields ARE read by our `AlphaWdtReader` and by `McnkAlpha` in the legacy codebase. So they must still be correct for round-trip fidelity.
 
+## Key Finding: MCNK Payload Size Is A Hard Client Constraint
+
+Separate native-client investigation exposed the literal assert string `chunkInfo->size < 15000` from the Alpha `WorldClient/MapChunk.cpp` path.
+
+Practical implication for shared write-side ownership:
+
+- treat `MCNK` payload size `< 15000` bytes as a hard compatibility requirement for Alpha outputs
+- do not silently emit larger chunks and hope the client tolerates them
+- object-heavy chunks can cross that boundary through placement-ref pressure, especially duplicate overlap-driven WMO refs
+- the current shared writer response is intentionally narrow: trim only duplicate non-anchor WMO refs when a chunk would exceed budget, then throw if the chunk still cannot be brought back under the client ceiling
+
+This is a compatibility rule for `AlphaWdtWriter`, not a license to broadly rewrite placement ownership heuristically.
+
 ## Key Finding: Heights Are Absolute (Confirmed)
 
 `CMapChunk::Create` passes `(float*)(param_1 + 0x88)` to `CreateVertices`. In `CreateVertices`:

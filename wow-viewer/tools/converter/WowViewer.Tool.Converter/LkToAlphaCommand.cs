@@ -1,11 +1,18 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
+using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Blp;
+using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Wmo;
 using WowViewer.Core.Maps;
+using WowViewer.Core.Mdx;
 using WowViewer.Core.Wmo;
 
 namespace WowViewer.Tool.Converter;
@@ -128,7 +135,7 @@ internal static class LkToAlphaCommand
                             if (targetFileSet != null)
                             {
                                 var (mdlNames, mdlPlacements, wmoNames, wmoPlacements, filteredChunks, skippedModels, skippedWmos) =
-                                    FilterPlacements(adtData, targetFileSet, options.BundleWmos);
+                                    FilterPlacements(adtData, targetFileSet, options.BundleM2s, options.BundleWmos);
                                 adtData = new LkAdtData
                                 {
                                     MapName = adtData.MapName,
@@ -225,7 +232,7 @@ internal static class LkToAlphaCommand
                         if (targetFileSet != null)
                         {
                             var (mdlNames, mdlPlacements, wmoNames, wmoPlacements, filteredChunks, skippedModels, skippedWmos) =
-                                FilterPlacements(adtData, targetFileSet, options.BundleWmos);
+                                FilterPlacements(adtData, targetFileSet, options.BundleM2s, options.BundleWmos);
                             adtData = new LkAdtData
                             {
                                 MapName = adtData.MapName,
@@ -299,6 +306,7 @@ internal static class LkToAlphaCommand
 
             string sourceForAssets = options.ClientRoot ?? options.InputDir ?? ".";
             string? tilesetRoot = null;
+            string? mdxRoot = null;
             string? wmoRoot = null;
             if (options.BundleTilesets)
             {
@@ -306,20 +314,29 @@ internal static class LkToAlphaCommand
                 BundleTilesets(tiles, sourceForAssets, mapName, tilesetRoot);
             }
 
+            Dictionary<string, string>? bundledMdxPaths = null;
+            if (options.BundleM2s && !options.TerrainOnly)
+            {
+                mdxRoot = Path.Combine(outputDir, "mdxs", mapName);
+                bundledMdxPaths = BundleModels(tiles, sourceForAssets, mapName, mdxRoot, targetFileSet);
+            }
+
             Dictionary<string, string>? bundledWmoPaths = null;
             if (options.BundleWmos && !options.TerrainOnly)
             {
                 wmoRoot = Path.Combine(outputDir, "wmos", mapName);
-                bundledWmoPaths = BundleWorldModels(tiles, sourceForAssets, mapName, wmoRoot);
+                bundledWmoPaths = BundleWorldModels(tiles, sourceForAssets, mapName, wmoRoot, targetFileSet, options.Verbose);
             }
 
-            if (tilesetRoot is not null || bundledWmoPaths is not null)
+            if (tilesetRoot is not null || bundledMdxPaths is not null || bundledWmoPaths is not null)
             {
                 string? tilesetPrefix = tilesetRoot is null ? null : $"tilesets\\{mapName}\\";
                 tiles = tiles.ToDictionary(
                     kvp => kvp.Key,
-                    kvp => RewriteBundledAssetPaths(kvp.Value, tilesetPrefix, bundledWmoPaths));
+                    kvp => RewriteBundledAssetPaths(kvp.Value, tilesetPrefix, bundledMdxPaths, bundledWmoPaths, targetFileSet));
             }
+
+            (int finalPlaceholderModels, int finalPlaceholderWmos) = CountPlaceholderPlacements(tiles);
 
             byte[] wdtData = AlphaWdtWriter.Build(mapName, tiles);
             File.WriteAllBytes(outputPath, wdtData);
@@ -338,7 +355,7 @@ internal static class LkToAlphaCommand
             Console.WriteLine($"  Elapsed:   {sw.ElapsedMilliseconds}ms");
 
             if (targetFileSet != null)
-                Console.WriteLine($"  Assets:   {missingModelNames} MDX + {missingWmoNames} WMO placements mapped to placeholders ({PlaceholderMdx}, {PlaceholderWmo})");
+                Console.WriteLine($"  Assets:   {finalPlaceholderModels} MDX + {finalPlaceholderWmos} WMO placements mapped to placeholders ({PlaceholderMdx}, {PlaceholderWmo})");
 
             if (warnings.Count > 0)
             {
@@ -351,6 +368,8 @@ internal static class LkToAlphaCommand
 
             if (tilesetRoot != null)
                 Console.WriteLine($"  Tilesets: extracted and fixed up paths in {tilesetRoot}");
+            if (mdxRoot != null)
+                Console.WriteLine($"  MDXs:     converted/copied and bundled in {mdxRoot}");
             if (wmoRoot != null)
                 Console.WriteLine($"  WMOs:     converted and bundled in {wmoRoot}");
         }
@@ -368,7 +387,7 @@ internal static class LkToAlphaCommand
     private const string PlaceholderWmo = "World\\wmo\\Dungeon\\test\\missingwmo.wmo";
 
     private static (List<string> names, List<LkMddfEntry> placements, List<string> wmoNames, List<LkModfEntry> wmoPlacements, List<LkMcnkData> chunks, int mappedModels, int mappedWmos)
-        FilterPlacements(LkAdtData adtData, HashSet<string> targetFileSet, bool preserveSourceWmoPaths = false)
+        FilterPlacements(LkAdtData adtData, HashSet<string> targetFileSet, bool preserveSourceModelPaths = false, bool preserveSourceWmoPaths = false)
     {
         var names = new List<string>();
         var nameIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -435,10 +454,12 @@ internal static class LkToAlphaCommand
                 continue;
 
             string path = ResolveName(p.NameId, adtData.ModelNames);
-            string mappedPath = ResolveModelPath(path);
+            string mappedPath = preserveSourceModelPaths
+                ? ResolveBundledModelSourcePath(path)
+                : ResolveModelPath(path);
             int mappedNameId = GetOrAddNameIndex(mappedPath, names, nameIndex);
 
-            if (!ReferenceEquals(mappedPath, path) && !string.Equals(mappedPath, path, StringComparison.OrdinalIgnoreCase))
+            if (!preserveSourceModelPaths && !ReferenceEquals(mappedPath, path) && !string.Equals(mappedPath, path, StringComparison.OrdinalIgnoreCase))
                 mappedModels++;
 
             filteredModelIndexBySourceIndex[i] = placementList.Count;
@@ -454,7 +475,7 @@ internal static class LkToAlphaCommand
 
             string path = NormalizeVirtualPath(ResolveName(p.NameId, adtData.WorldModelNames));
             string mappedPath = preserveSourceWmoPaths
-                ? path
+                ? (PathExists(path) ? path : path)
                 : (PathExists(path) ? path : PlaceholderWmo);
             int mappedNameId = GetOrAddNameIndex(mappedPath, wmoNames, wmoNameIndex);
 
@@ -495,6 +516,23 @@ internal static class LkToAlphaCommand
             .ToList();
 
         return (names, placementList, wmoNames, wmoPlacementList, filteredChunks, mappedModels, mappedWmos);
+
+        string ResolveBundledModelSourcePath(string path)
+        {
+            string normalized = NormalizeVirtualPath(path);
+            if (PathExists(normalized))
+                return ResolveModelPath(path);
+
+            string extension = Path.GetExtension(normalized);
+            if (!extension.Equals(".m2", StringComparison.OrdinalIgnoreCase)
+                && !extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
+                && !extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase))
+            {
+                return PlaceholderMdx;
+            }
+
+            return normalized;
+        }
     }
 
     private static IReadOnlyList<int> RemapChunkRefs(IReadOnlyList<int> refs, IReadOnlyList<int> filteredIndexBySourceIndex)
@@ -653,6 +691,36 @@ internal static class LkToAlphaCommand
         return path.Replace('/', '\\').Trim().TrimStart('\\');
     }
 
+    private static string ChangeVirtualExtension(string path, string extension)
+    {
+        string currentExtension = Path.GetExtension(path);
+        return string.IsNullOrEmpty(currentExtension)
+            ? path + extension
+            : path[..^currentExtension.Length] + extension;
+    }
+
+    private static string BuildDefaultM2SkinPath(string modelPath)
+    {
+        string currentExtension = Path.GetExtension(modelPath);
+        return string.IsNullOrEmpty(currentExtension)
+            ? modelPath + "00.skin"
+            : modelPath[..^currentExtension.Length] + "00.skin";
+    }
+
+    private static void WriteFixedAscii(BinaryWriter writer, string value, int size)
+    {
+        byte[] bytes = Encoding.ASCII.GetBytes(value ?? string.Empty);
+        if (bytes.Length >= size)
+        {
+            writer.Write(bytes, 0, size - 1);
+            writer.Write((byte)0);
+            return;
+        }
+
+        writer.Write(bytes);
+        writer.Write(new byte[size - bytes.Length]);
+    }
+
     private static void AddVirtualPath(HashSet<string> files, string path)
     {
         string normalized = NormalizeVirtualPath(path);
@@ -720,7 +788,9 @@ internal static class LkToAlphaCommand
         Dictionary<(int, int), AlphaTileData> tiles,
         string sourceRoot,
         string mapName,
-        string wmoRoot)
+        string wmoRoot,
+        HashSet<string>? targetFileSet,
+        bool verbose)
     {
         HashSet<string> wmoPaths = new(StringComparer.OrdinalIgnoreCase);
         foreach (AlphaTileData tile in tiles.Values)
@@ -729,6 +799,9 @@ internal static class LkToAlphaCommand
             {
                 string normalized = NormalizeVirtualPath(placement.ModelPath);
                 if (string.IsNullOrWhiteSpace(normalized) || string.Equals(normalized, PlaceholderWmo, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (targetFileSet is not null && (targetFileSet.Contains(normalized) || targetFileSet.Contains(normalized.Replace('\\', '/'))))
                     continue;
 
                 wmoPaths.Add(normalized);
@@ -748,6 +821,11 @@ internal static class LkToAlphaCommand
         int copied = 0;
         int missing = 0;
         int failed = 0;
+        int texturesExtracted = 0;
+        int texturesMissing = 0;
+        int texturesNormalized = 0;
+        int texturesResized = 0;
+        int texturesSpecularReencoded = 0;
 
         foreach (string wmoPath in wmoPaths)
         {
@@ -757,6 +835,7 @@ internal static class LkToAlphaCommand
                 if (rootBytes is null)
                 {
                     missing++;
+                    bundledPaths[wmoPath] = PlaceholderWmo;
                     continue;
                 }
 
@@ -795,32 +874,699 @@ internal static class LkToAlphaCommand
                     }
                 }
 
+                string bundledVirtualPath = NormalizeVirtualPath(Path.Combine("World", "Maps", mapName, "wmos", mapName, wmoPath));
                 string localPath = Path.Combine(wmoRoot, wmoPath);
                 string? localDir = Path.GetDirectoryName(localPath);
                 if (!string.IsNullOrWhiteSpace(localDir))
                     Directory.CreateDirectory(localDir);
 
+                outputBytes = BundleWorldModelTexturesAndRewriteRoot(
+                    outputBytes,
+                    sourceRoot,
+                    catalog,
+                    wmoPath,
+                    bundledVirtualPath,
+                    localPath,
+                    ref texturesExtracted,
+                    ref texturesMissing,
+                    ref texturesNormalized,
+                    ref texturesResized,
+                    ref texturesSpecularReencoded);
+
                 File.WriteAllBytes(localPath, outputBytes);
-                bundledPaths[wmoPath] = NormalizeVirtualPath(Path.Combine("World", "Maps", mapName, "wmos", mapName, wmoPath));
+                bundledPaths[wmoPath] = bundledVirtualPath;
             }
-            catch
+            catch (Exception ex)
             {
                 failed++;
+                bundledPaths[wmoPath] = PlaceholderWmo;
+                if (verbose)
+                    Console.WriteLine($"      WMO bundle failed: {wmoPath} ({ex.GetType().Name}: {ex.Message})");
             }
         }
 
         Console.WriteLine($"    WMOs: converted {converted}, copied {copied}, missing {missing}, failed {failed} into {wmoRoot}");
+        if (texturesExtracted > 0 || texturesMissing > 0)
+        {
+            Console.WriteLine($"    WMO textures: extracted {texturesExtracted}" +
+                (texturesMissing > 0 ? $", missing {texturesMissing}" : string.Empty) +
+                (texturesNormalized > 0 ? $", re-encoded {texturesNormalized} ({texturesSpecularReencoded} specular, {texturesResized} resized)" : string.Empty));
+        }
         return bundledPaths;
+    }
+
+    private static Dictionary<string, string> BundleModels(
+        Dictionary<(int, int), AlphaTileData> tiles,
+        string sourceRoot,
+        string mapName,
+        string mdxRoot,
+        HashSet<string>? targetFileSet)
+    {
+        HashSet<string> modelPaths = new(StringComparer.OrdinalIgnoreCase);
+        foreach (AlphaTileData tile in tiles.Values)
+        {
+            foreach (AlphaModelPlacement placement in tile.ModelPlacements)
+            {
+                string normalized = NormalizeVirtualPath(placement.ModelPath);
+                if (string.IsNullOrWhiteSpace(normalized) || string.Equals(normalized, PlaceholderMdx, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (targetFileSet is not null && (targetFileSet.Contains(normalized) || targetFileSet.Contains(normalized.Replace('\\', '/'))))
+                    continue;
+
+                modelPaths.Add(normalized);
+            }
+        }
+
+        if (modelPaths.Count == 0)
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        bool useArchives = IsArchiveBackedSource(sourceRoot);
+        using NativeMpqService? catalog = useArchives ? CreateSourceCatalog(sourceRoot) : null;
+
+        Directory.CreateDirectory(mdxRoot);
+
+        Dictionary<string, string> bundledPaths = new(StringComparer.OrdinalIgnoreCase);
+        int converted = 0;
+        int copied = 0;
+        int missing = 0;
+        int failed = 0;
+        int texturesExtracted = 0;
+        int texturesMissing = 0;
+        int texturesNormalized = 0;
+        int texturesResized = 0;
+        int texturesSpecularReencoded = 0;
+
+        foreach (string modelPath in modelPaths)
+        {
+            try
+            {
+                string extension = Path.GetExtension(modelPath);
+                string bundledRelativePath = extension.Equals(".m2", StringComparison.OrdinalIgnoreCase)
+                    ? ChangeVirtualExtension(modelPath, ".mdx")
+                    : modelPath;
+                string bundledVirtualPath = NormalizeVirtualPath(Path.Combine("World", "Maps", mapName, "mdxs", mapName, bundledRelativePath));
+                string localPath = Path.Combine(mdxRoot, bundledRelativePath);
+                string? localDir = Path.GetDirectoryName(localPath);
+                if (!string.IsNullOrWhiteSpace(localDir))
+                    Directory.CreateDirectory(localDir);
+
+                byte[]? modelBytes = ReadSourceAsset(sourceRoot, catalog, modelPath);
+                if (modelBytes is null)
+                {
+                    missing++;
+                    bundledPaths[modelPath] = PlaceholderMdx;
+                    continue;
+                }
+
+                byte[] outputBytes;
+                if (extension.Equals(".m2", StringComparison.OrdinalIgnoreCase))
+                {
+                    string skinPath = BuildDefaultM2SkinPath(modelPath);
+                    byte[]? skinBytes = ReadSourceAsset(sourceRoot, catalog, skinPath);
+                    if (skinBytes is null)
+                    {
+                        missing++;
+                        continue;
+                    }
+
+                    using MemoryStream geometryStream = new(modelBytes, writable: false);
+                    using MemoryStream skinStream = new(skinBytes, writable: false);
+                    var geometry = M2GeometryReader.Read(geometryStream, modelPath);
+                    var skin = M2SkinReader.Read(skinStream, skinPath);
+                    IReadOnlyDictionary<string, string> rewrittenTexturePaths = BundleModelTextures(
+                        geometry.Textures.Select(static texture => texture.Filename).Where(static filename => !string.IsNullOrWhiteSpace(filename)).Cast<string>(),
+                        sourceRoot,
+                        catalog,
+                        bundledVirtualPath,
+                        localPath,
+                        ref texturesExtracted,
+                        ref texturesMissing,
+                        ref texturesNormalized,
+                        ref texturesResized,
+                        ref texturesSpecularReencoded);
+
+                    outputBytes = M2ToMdxConverter.Convert(geometry, skin, rewrittenTexturePaths);
+                    converted++;
+                }
+                else if (extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase) || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase))
+                {
+                    outputBytes = BundleLegacyMdxTexturesAndRewriteModel(
+                        modelBytes,
+                        sourceRoot,
+                        catalog,
+                        modelPath,
+                        bundledVirtualPath,
+                        localPath,
+                        ref texturesExtracted,
+                        ref texturesMissing,
+                        ref texturesNormalized,
+                        ref texturesResized,
+                        ref texturesSpecularReencoded);
+                    copied++;
+                }
+                else
+                {
+                    failed++;
+                    continue;
+                }
+
+                File.WriteAllBytes(localPath, outputBytes);
+                bundledPaths[modelPath] = bundledVirtualPath;
+            }
+            catch
+            {
+                failed++;
+                bundledPaths[modelPath] = PlaceholderMdx;
+            }
+        }
+
+        Console.WriteLine($"    MDXs: converted {converted}, copied {copied}, missing {missing}, failed {failed} into {mdxRoot}");
+        if (texturesExtracted > 0 || texturesMissing > 0)
+        {
+            Console.WriteLine($"    MDX textures: extracted {texturesExtracted}" +
+                (texturesMissing > 0 ? $", missing {texturesMissing}" : string.Empty) +
+                (texturesNormalized > 0 ? $", re-encoded {texturesNormalized} ({texturesSpecularReencoded} specular, {texturesResized} resized)" : string.Empty));
+        }
+
+        return bundledPaths;
+    }
+
+    private static byte[] BundleLegacyMdxTexturesAndRewriteModel(
+        byte[] modelBytes,
+        string sourceRoot,
+        NativeMpqService? catalog,
+        string sourceModelPath,
+        string bundledModelVirtualPath,
+        string bundledModelLocalPath,
+        ref int texturesExtracted,
+        ref int texturesMissing,
+        ref int texturesNormalized,
+        ref int texturesResized,
+        ref int texturesSpecularReencoded)
+    {
+        MdxSummary summary;
+        using (MemoryStream summaryStream = new(modelBytes, writable: false))
+        {
+            summary = MdxSummaryReader.Read(summaryStream, sourceModelPath);
+        }
+
+        if (summary.TextureCount == 0)
+            return modelBytes;
+
+        IReadOnlyDictionary<string, string> rewrittenTexturePaths = BundleModelTextures(
+            summary.Textures.Select(static texture => texture.Path).Where(static path => !string.IsNullOrWhiteSpace(path)).Cast<string>(),
+            sourceRoot,
+            catalog,
+            bundledModelVirtualPath,
+            bundledModelLocalPath,
+            ref texturesExtracted,
+            ref texturesMissing,
+            ref texturesNormalized,
+            ref texturesResized,
+            ref texturesSpecularReencoded);
+
+        return rewrittenTexturePaths.Count == 0
+            ? modelBytes
+            : RewriteBundledMdxTextureReferences(modelBytes, summary.Textures, rewrittenTexturePaths);
+    }
+
+    private static IReadOnlyDictionary<string, string> BundleModelTextures(
+        IEnumerable<string> texturePaths,
+        string sourceRoot,
+        NativeMpqService? catalog,
+        string bundledModelVirtualPath,
+        string bundledModelLocalPath,
+        ref int texturesExtracted,
+        ref int texturesMissing,
+        ref int texturesNormalized,
+        ref int texturesResized,
+        ref int texturesSpecularReencoded)
+    {
+        string bundledModelDirectoryVirtualPath = NormalizeVirtualPath(Path.GetDirectoryName(bundledModelVirtualPath) ?? string.Empty);
+        string bundledModelDirectoryLocalPath = Path.GetDirectoryName(bundledModelLocalPath) ?? ".";
+        Dictionary<string, string> rewrittenTexturePaths = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> assignedFileNamesBySourceTexture = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> usedLocalFileNames = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string texturePath in texturePaths)
+        {
+            string normalizedSourceTexturePath = NormalizeVirtualPath(texturePath);
+            if (rewrittenTexturePaths.ContainsKey(normalizedSourceTexturePath))
+                continue;
+
+            byte[]? textureBytes = ReadSourceAsset(sourceRoot, catalog, normalizedSourceTexturePath);
+            if (textureBytes is null)
+            {
+                texturesMissing++;
+                rewrittenTexturePaths[normalizedSourceTexturePath] = normalizedSourceTexturePath;
+                continue;
+            }
+
+            string localFileName = GetOrAssignUniqueTextureFileName(normalizedSourceTexturePath);
+            string bundledTextureVirtualPath = NormalizeVirtualPath(Path.Combine(bundledModelDirectoryVirtualPath, localFileName));
+            string bundledTextureLocalPath = Path.Combine(bundledModelDirectoryLocalPath, localFileName);
+
+            AlphaBlpCompatibilityResult compatibility = AlphaBlpCompatibilityService.NormalizeForAlphaClient(normalizedSourceTexturePath, textureBytes);
+            File.WriteAllBytes(bundledTextureLocalPath, compatibility.Data);
+            texturesExtracted++;
+
+            if (compatibility.Rewritten)
+            {
+                texturesNormalized++;
+                if (compatibility.Resized)
+                    texturesResized++;
+                if (compatibility.SpecularReencoded)
+                    texturesSpecularReencoded++;
+            }
+
+            rewrittenTexturePaths[normalizedSourceTexturePath] = bundledTextureVirtualPath;
+        }
+
+        return rewrittenTexturePaths;
+
+        string GetOrAssignUniqueTextureFileName(string normalizedSourceTexturePath)
+        {
+            if (assignedFileNamesBySourceTexture.TryGetValue(normalizedSourceTexturePath, out string? existingFileName))
+                return existingFileName;
+
+            string extension = Path.GetExtension(normalizedSourceTexturePath);
+            string baseName = Path.GetFileNameWithoutExtension(normalizedSourceTexturePath);
+            if (string.IsNullOrWhiteSpace(baseName))
+                baseName = "texture";
+
+            string candidate = baseName + extension;
+            int suffix = 1;
+            while (!usedLocalFileNames.Add(candidate))
+            {
+                suffix++;
+                candidate = $"{baseName}_{suffix}{extension}";
+            }
+
+            assignedFileNamesBySourceTexture[normalizedSourceTexturePath] = candidate;
+            return candidate;
+        }
+    }
+
+    private static byte[] BundleWorldModelTexturesAndRewriteRoot(
+        byte[] rootBytes,
+        string sourceRoot,
+        NativeMpqService? catalog,
+        string sourceWmoPath,
+        string bundledWmoVirtualPath,
+        string bundledWmoLocalPath,
+        ref int texturesExtracted,
+        ref int texturesMissing,
+        ref int texturesNormalized,
+        ref int texturesResized,
+        ref int texturesSpecularReencoded)
+    {
+        int extractedCount = 0;
+        int missingCount = 0;
+        int normalizedCount = 0;
+        int resizedCount = 0;
+        int specularReencodedCount = 0;
+
+        IReadOnlyList<WmoMaterialDetail> materials;
+        using (MemoryStream materialStream = new(rootBytes, writable: false))
+        {
+            materials = WmoMaterialDetailReader.Read(materialStream, sourceWmoPath);
+        }
+
+        if (materials.Count == 0)
+            return rootBytes;
+
+        string bundledWmoDirectoryVirtualPath = NormalizeVirtualPath(Path.GetDirectoryName(bundledWmoVirtualPath) ?? string.Empty);
+        string bundledWmoDirectoryLocalPath = Path.GetDirectoryName(bundledWmoLocalPath) ?? Path.GetDirectoryName(bundledWmoLocalPath) ?? ".";
+
+        Dictionary<string, string> rewrittenTexturePaths = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> assignedFileNamesBySourceTexture = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> usedLocalFileNames = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (WmoMaterialDetail material in materials)
+        {
+            BundleWorldModelTexture(material.Texture1Name);
+            BundleWorldModelTexture(material.Texture2Name);
+            BundleWorldModelTexture(material.Texture3Name);
+        }
+
+        byte[] rewrittenRootBytes = rewrittenTexturePaths.Count == 0
+            ? rootBytes
+            : RewriteBundledWmoTextureReferences(rootBytes, sourceWmoPath, rewrittenTexturePaths);
+
+        void BundleWorldModelTexture(string texturePath)
+        {
+            if (string.IsNullOrWhiteSpace(texturePath))
+                return;
+
+            string normalizedSourceTexturePath = NormalizeVirtualPath(texturePath);
+            if (rewrittenTexturePaths.ContainsKey(normalizedSourceTexturePath))
+                return;
+
+            byte[]? textureBytes = ReadSourceAsset(sourceRoot, catalog, normalizedSourceTexturePath);
+            if (textureBytes is null)
+            {
+                missingCount++;
+                rewrittenTexturePaths[normalizedSourceTexturePath] = normalizedSourceTexturePath;
+                return;
+            }
+
+            string localFileName = GetOrAssignUniqueTextureFileName(normalizedSourceTexturePath);
+            string bundledTextureVirtualPath = NormalizeVirtualPath(Path.Combine(bundledWmoDirectoryVirtualPath, localFileName));
+            string bundledTextureLocalPath = Path.Combine(bundledWmoDirectoryLocalPath, localFileName);
+
+            AlphaBlpCompatibilityResult compatibility = AlphaBlpCompatibilityService.NormalizeForAlphaClient(normalizedSourceTexturePath, textureBytes);
+            File.WriteAllBytes(bundledTextureLocalPath, compatibility.Data);
+            extractedCount++;
+
+            if (compatibility.Rewritten)
+            {
+                normalizedCount++;
+                if (compatibility.Resized)
+                    resizedCount++;
+                if (compatibility.SpecularReencoded)
+                    specularReencodedCount++;
+            }
+
+            rewrittenTexturePaths[normalizedSourceTexturePath] = bundledTextureVirtualPath;
+        }
+
+        string GetOrAssignUniqueTextureFileName(string normalizedSourceTexturePath)
+        {
+            if (assignedFileNamesBySourceTexture.TryGetValue(normalizedSourceTexturePath, out string? existingFileName))
+                return existingFileName;
+
+            string extension = Path.GetExtension(normalizedSourceTexturePath);
+            string baseName = Path.GetFileNameWithoutExtension(normalizedSourceTexturePath);
+            if (string.IsNullOrWhiteSpace(baseName))
+                baseName = "texture";
+
+            string candidate = baseName + extension;
+            int suffix = 1;
+            while (!usedLocalFileNames.Add(candidate))
+            {
+                suffix++;
+                candidate = $"{baseName}_{suffix}{extension}";
+            }
+
+            assignedFileNamesBySourceTexture[normalizedSourceTexturePath] = candidate;
+            return candidate;
+        }
+
+        texturesExtracted += extractedCount;
+        texturesMissing += missingCount;
+        texturesNormalized += normalizedCount;
+        texturesResized += resizedCount;
+        texturesSpecularReencoded += specularReencodedCount;
+
+        return rewrittenRootBytes;
+    }
+
+    private static byte[] RewriteBundledWmoTextureReferences(
+        byte[] rootBytes,
+        string sourceWmoPath,
+        IReadOnlyDictionary<string, string> rewrittenTexturePaths)
+    {
+        List<ChunkSpan> chunks = ReadWmoRootChunks(rootBytes);
+        ChunkSpan? momoChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Momo);
+
+        ChunkSpan? momtChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Momt);
+        ChunkSpan? motxChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Motx);
+
+        IReadOnlyList<WmoMaterialDetail> materials;
+        using (MemoryStream materialStream = new(rootBytes, writable: false))
+        {
+            materials = WmoMaterialDetailReader.Read(materialStream, sourceWmoPath);
+        }
+
+        if (momoChunk is not null)
+        {
+            byte[] rewrittenMomoPayload = RewriteBundledWmoTextureReferencesInContainer(
+                CopyChunkPayload(rootBytes, momoChunk.Value),
+                materials,
+                rewrittenTexturePaths);
+
+            if (ReferenceEquals(rewrittenMomoPayload, rootBytes))
+                return rootBytes;
+
+            using MemoryStream rewrittenRoot = new(rootBytes.Length + rewrittenMomoPayload.Length);
+            foreach (ChunkSpan chunk in chunks)
+            {
+                byte[] payload = chunk.Header.Id == WmoChunkIds.Momo
+                    ? rewrittenMomoPayload
+                    : CopyChunkPayload(rootBytes, chunk);
+
+                rewrittenRoot.Write(chunk.Header.Id.ToFileBytes());
+                rewrittenRoot.Write(BitConverter.GetBytes(payload.Length));
+                rewrittenRoot.Write(payload);
+            }
+
+            return rewrittenRoot.ToArray();
+        }
+
+        if (momtChunk is null || motxChunk is null)
+            return rootBytes;
+
+        byte[] momtPayload = CopyChunkPayload(rootBytes, momtChunk.Value);
+        byte[] motxPayload = BuildBundledWmoTextureTable(materials, rewrittenTexturePaths, momtPayload);
+
+        using MemoryStream output = new(rootBytes.Length + motxPayload.Length);
+        foreach (ChunkSpan chunk in chunks)
+        {
+            byte[] payload = chunk.Header.Id switch
+            {
+                _ when chunk.Header.Id == WmoChunkIds.Momt => momtPayload,
+                _ when chunk.Header.Id == WmoChunkIds.Motx => motxPayload,
+                _ => CopyChunkPayload(rootBytes, chunk)
+            };
+
+            output.Write(chunk.Header.Id.ToFileBytes());
+            output.Write(BitConverter.GetBytes(payload.Length));
+            output.Write(payload);
+        }
+
+        return output.ToArray();
+    }
+
+    private static byte[] RewriteBundledWmoTextureReferencesInContainer(
+        byte[] containerBytes,
+        IReadOnlyList<WmoMaterialDetail> materials,
+        IReadOnlyDictionary<string, string> rewrittenTexturePaths)
+    {
+        List<ChunkSpan> chunks = ReadWmoRootChunks(containerBytes);
+        ChunkSpan? momtChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Momt);
+        ChunkSpan? motxChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Motx);
+        if (momtChunk is null || motxChunk is null)
+            return containerBytes;
+
+        byte[] momtPayload = CopyChunkPayload(containerBytes, momtChunk.Value);
+        byte[] motxPayload = BuildBundledWmoTextureTable(materials, rewrittenTexturePaths, momtPayload);
+
+        using MemoryStream output = new(containerBytes.Length + motxPayload.Length);
+        foreach (ChunkSpan chunk in chunks)
+        {
+            byte[] payload = chunk.Header.Id switch
+            {
+                _ when chunk.Header.Id == WmoChunkIds.Momt => momtPayload,
+                _ when chunk.Header.Id == WmoChunkIds.Motx => motxPayload,
+                _ => CopyChunkPayload(containerBytes, chunk)
+            };
+
+            output.Write(chunk.Header.Id.ToFileBytes());
+            output.Write(BitConverter.GetBytes(payload.Length));
+            output.Write(payload);
+        }
+
+        return output.ToArray();
+    }
+
+    private static byte[] RewriteBundledMdxTextureReferences(
+        byte[] modelBytes,
+        IReadOnlyList<MdxTextureSummary> textures,
+        IReadOnlyDictionary<string, string> rewrittenTexturePaths)
+    {
+        if (modelBytes.Length < 4 || !Encoding.ASCII.GetString(modelBytes, 0, 4).Equals("MDLX", StringComparison.Ordinal))
+            return modelBytes;
+
+        int offset = 4;
+        while (offset + 8 <= modelBytes.Length)
+        {
+            string chunkId = Encoding.ASCII.GetString(modelBytes, offset, 4);
+            int chunkSize = BinaryPrimitives.ReadInt32LittleEndian(modelBytes.AsSpan(offset + 4, 4));
+            int payloadOffset = offset + 8;
+            int nextOffset = payloadOffset + chunkSize;
+            if (chunkSize < 0 || nextOffset > modelBytes.Length)
+                return modelBytes;
+
+            if (string.Equals(chunkId, "TEXS", StringComparison.Ordinal))
+            {
+                byte[] texsPayload = BuildBundledMdxTextureTable(textures, rewrittenTexturePaths, chunkSize);
+                using MemoryStream output = new(modelBytes.Length - chunkSize + texsPayload.Length);
+                output.Write(modelBytes, 0, offset);
+                output.Write(Encoding.ASCII.GetBytes("TEXS"));
+                output.Write(BitConverter.GetBytes(texsPayload.Length));
+                output.Write(texsPayload);
+                output.Write(modelBytes, nextOffset, modelBytes.Length - nextOffset);
+                return output.ToArray();
+            }
+
+            offset = nextOffset;
+        }
+
+        return modelBytes;
+    }
+
+    private static byte[] BuildBundledMdxTextureTable(
+        IReadOnlyList<MdxTextureSummary> textures,
+        IReadOnlyDictionary<string, string> rewrittenTexturePaths,
+        int originalPayloadSize)
+    {
+        (int entrySize, int pathSize) = ResolveMdxTexsLayout(originalPayloadSize);
+        using MemoryStream payload = new(textures.Count * entrySize);
+        using BinaryWriter writer = new(payload, Encoding.ASCII, leaveOpen: true);
+
+        foreach (MdxTextureSummary texture in textures)
+        {
+            writer.Write(texture.ReplaceableId);
+            string normalizedPath = string.IsNullOrWhiteSpace(texture.Path)
+                ? string.Empty
+                : NormalizeVirtualPath(texture.Path);
+            string remappedPath = string.IsNullOrEmpty(normalizedPath)
+                ? string.Empty
+                : rewrittenTexturePaths.TryGetValue(normalizedPath, out string? bundledPath)
+                    ? bundledPath
+                    : normalizedPath;
+            WriteFixedAscii(writer, remappedPath, pathSize);
+            writer.Write(texture.Flags);
+        }
+
+        writer.Flush();
+        return payload.ToArray();
+    }
+
+    private static (int EntrySize, int PathSize) ResolveMdxTexsLayout(int payloadSize)
+    {
+        if (payloadSize % 0x10C == 0)
+            return (0x10C, 0x104);
+
+        if (payloadSize % 0x108 == 0)
+            return (0x108, 0x100);
+
+        throw new InvalidDataException($"Invalid MDX TEXS payload size 0x{payloadSize:X}.");
+    }
+
+    private static byte[] BuildBundledWmoTextureTable(
+        IReadOnlyList<WmoMaterialDetail> materials,
+        IReadOnlyDictionary<string, string> rewrittenTexturePaths,
+        byte[] momtPayload)
+    {
+        Dictionary<string, uint> offsetsByTexturePath = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [string.Empty] = 0,
+        };
+
+        using MemoryStream motx = new();
+        motx.WriteByte(0);
+
+        foreach (WmoMaterialDetail material in materials)
+        {
+            WriteTextureOffset(material.PayloadOffset + 12, material.Texture1Name);
+            WriteTextureOffset(material.PayloadOffset + 24, material.Texture2Name);
+            WriteTextureOffset(material.PayloadOffset + 36, material.Texture3Name);
+        }
+
+        return motx.ToArray();
+
+        void WriteTextureOffset(int payloadOffset, string sourceTexturePath)
+        {
+            string normalizedSourceTexturePath = NormalizeVirtualPath(sourceTexturePath);
+            string remappedTexturePath = string.IsNullOrWhiteSpace(normalizedSourceTexturePath)
+                ? string.Empty
+                : rewrittenTexturePaths.TryGetValue(normalizedSourceTexturePath, out string? bundledTexturePath)
+                    ? bundledTexturePath
+                    : normalizedSourceTexturePath;
+
+            uint offset = GetOrAddTextureOffset(remappedTexturePath);
+            BinaryPrimitives.WriteUInt32LittleEndian(momtPayload.AsSpan(payloadOffset, 4), offset);
+        }
+
+        uint GetOrAddTextureOffset(string texturePath)
+        {
+            if (offsetsByTexturePath.TryGetValue(texturePath, out uint existingOffset))
+                return existingOffset;
+
+            uint offset = checked((uint)motx.Position);
+            byte[] bytes = Encoding.UTF8.GetBytes(texturePath);
+            motx.Write(bytes);
+            motx.WriteByte(0);
+            offsetsByTexturePath[texturePath] = offset;
+            return offset;
+        }
+    }
+
+    private static List<ChunkSpan> ReadWmoRootChunks(byte[] rootBytes)
+    {
+        List<ChunkSpan> chunks = [];
+        int offset = 0;
+        while (offset + ChunkHeader.SizeInBytes <= rootBytes.Length)
+        {
+            FourCC id = FourCC.FromFileBytes(rootBytes.AsSpan(offset, 4));
+            uint size = BinaryPrimitives.ReadUInt32LittleEndian(rootBytes.AsSpan(offset + 4, 4));
+            int dataOffset = offset + ChunkHeader.SizeInBytes;
+            int endOffset = checked(dataOffset + (int)size);
+            if (endOffset > rootBytes.Length)
+                throw new InvalidDataException($"WMO root chunk '{id}' overruns the supplied byte buffer.");
+
+            chunks.Add(new ChunkSpan(new ChunkHeader(id, size), offset, dataOffset));
+            offset = endOffset;
+        }
+
+        return chunks;
+    }
+
+    private static byte[] CopyChunkPayload(byte[] rootBytes, ChunkSpan chunk)
+    {
+        byte[] payload = new byte[chunk.Header.Size];
+        Buffer.BlockCopy(rootBytes, checked((int)chunk.DataOffset), payload, 0, checked((int)chunk.Header.Size));
+        return payload;
     }
 
     private static AlphaTileData RewriteBundledAssetPaths(
         AlphaTileData tile,
         string? tilesetPrefix,
-        IReadOnlyDictionary<string, string>? bundledWmoPaths)
+        IReadOnlyDictionary<string, string>? bundledMdxPaths,
+        IReadOnlyDictionary<string, string>? bundledWmoPaths,
+        HashSet<string>? targetFileSet)
     {
+        bool IsTargetPath(string path) =>
+            targetFileSet is not null
+            && (targetFileSet.Contains(path) || targetFileSet.Contains(path.Replace('\\', '/')));
+
         IReadOnlyList<string> textureNames = tilesetPrefix is null
             ? tile.TextureNames
             : tile.TextureNames.Select(t => tilesetPrefix + t.TrimStart('\\')).ToList();
+
+        IReadOnlyList<AlphaModelPlacement> modelPlacements = bundledMdxPaths is null
+            ? tile.ModelPlacements
+            : tile.ModelPlacements.Select(placement =>
+            {
+                string normalized = NormalizeVirtualPath(placement.ModelPath);
+                string mappedPath = string.Equals(normalized, PlaceholderMdx, StringComparison.OrdinalIgnoreCase)
+                    ? PlaceholderMdx
+                    : bundledMdxPaths.TryGetValue(normalized, out string? bundledPath)
+                        ? bundledPath
+                        : IsTargetPath(normalized)
+                            ? normalized
+                            : PlaceholderMdx;
+
+                return new AlphaModelPlacement(
+                    placement.NameId,
+                    mappedPath,
+                    placement.UniqueId,
+                    placement.Position,
+                    placement.Rotation,
+                    placement.Scale);
+            }).ToList();
 
         IReadOnlyList<AlphaWorldModelPlacement> worldModelPlacements = bundledWmoPaths is null
             ? tile.WorldModelPlacements
@@ -831,7 +1577,9 @@ internal static class LkToAlphaCommand
                     ? PlaceholderWmo
                     : bundledWmoPaths.TryGetValue(normalized, out string? bundledPath)
                         ? bundledPath
-                        : PlaceholderWmo;
+                        : IsTargetPath(normalized)
+                            ? normalized
+                            : PlaceholderWmo;
 
                 return new AlphaWorldModelPlacement(
                     placement.NameId,
@@ -852,7 +1600,7 @@ internal static class LkToAlphaCommand
             tile.MclyLayerMask,
             tile.HoleMask,
             textureNames,
-            tile.ModelPlacements,
+            modelPlacements,
             worldModelPlacements,
             tile.LiquidChunks,
             diagnostics: tile.Diagnostics,
@@ -871,6 +1619,20 @@ internal static class LkToAlphaCommand
             mcrfWorldModelRefsByChunk: tile.McrfWorldModelRefsByChunk,
             mcrfDoodadUniqueIdsByChunk: tile.McrfDoodadUniqueIdsByChunk,
             mcrfWorldModelUniqueIdsByChunk: tile.McrfWorldModelUniqueIdsByChunk);
+    }
+
+    private static (int PlaceholderModels, int PlaceholderWmos) CountPlaceholderPlacements(Dictionary<(int, int), AlphaTileData> tiles)
+    {
+        int placeholderModels = 0;
+        int placeholderWmos = 0;
+
+        foreach (AlphaTileData tile in tiles.Values)
+        {
+            placeholderModels += tile.ModelPlacements.Count(static placement => string.Equals(placement.ModelPath, PlaceholderMdx, StringComparison.OrdinalIgnoreCase));
+            placeholderWmos += tile.WorldModelPlacements.Count(static placement => string.Equals(placement.ModelPath, PlaceholderWmo, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return (placeholderModels, placeholderWmos);
     }
 
     private static bool IsArchiveBackedSource(string sourceRoot)
@@ -930,6 +1692,7 @@ internal static class LkToAlphaCommand
                 Verbose: HasFlag(args, "--verbose") || HasFlag(args, "-v"),
                 TerrainOnly: HasFlag(args, "--terrain-only") || HasFlag(args, "-to"),
                 BundleTilesets: HasFlag(args, "--bundle-tilesets") || HasFlag(args, "-bt"),
+                BundleM2s: HasFlag(args, "--bundle-m2s") || HasFlag(args, "-bm"),
                 BundleWmos: HasFlag(args, "--bundle-wmos") || HasFlag(args, "-bw"));
     }
 
@@ -972,5 +1735,6 @@ internal static class LkToAlphaCommand
         bool Verbose,
         bool TerrainOnly,
         bool BundleTilesets,
+        bool BundleM2s,
         bool BundleWmos);
 }

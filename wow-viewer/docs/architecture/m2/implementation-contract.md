@@ -34,6 +34,27 @@ It is implementation-facing. It should be the main handoff for building or corre
 
 It should not keep accumulating its own separate long-term M2 design.
 
+## Converter Boundary (May 12, 2026)
+
+`wow-viewer` now owns the first minimal converter directions for the M2-family surface as well:
+
+- `M2ToMdxConverter` in shared I/O
+- `MdxToM2Converter` in shared I/O
+- converter CLI entry points for both directions
+
+Current proof boundary:
+
+- `M2 -> MDX` is structural and bounded, not native Alpha runtime parity.
+- `MDX -> M2` is also structural and bounded, not later-client renderer parity.
+- bundled `MDX` outputs in the `convert-lk-to-alpha --bundle-m2s` lane now rewrite local texture references beside the emitted bundle outputs.
+- generated `MDX` and `M2` outputs are expected to re-read cleanly through inspect and library readers, but that alone is not proof of active-client animation, material, or effect parity.
+
+Important unresolved converter seam:
+
+- sequence and animation fidelity remains open for Alpha-facing `MDX`, especially around `SEQS` ownership and the exact native expectations for record shape and runtime consumption.
+
+This means the current M2-family converter lane is useful for bounded asset bundling and structural validation, but it should not yet be documented as a full runtime-equivalent substitute for native `M2` or `MDX` behavior.
+
 ## Current Contract By Seam
 
 ### Landed wow-viewer baseline as of Apr 15, 2026

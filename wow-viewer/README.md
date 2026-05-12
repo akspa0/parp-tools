@@ -45,6 +45,7 @@ The project currently has four practical jobs:
 - **LkAdtWriter FourCC fix**: all chunk IDs use `FourCC.FromString().ToFileBytes()` instead of `Encoding.ASCII.GetBytes()` for I/O boundary consistency
 - **Asset name fixup** (`--target-client-root`): filters placements referencing assets missing in target client (scans Alpha per-asset `.wmo.MPQ`/`.mdx.MPQ` wrappers)
 - **Tileset bundling** (`--bundle-tilesets`): extracts unique BLP textures from source client, writes to `tilesets/{map_name}/`, fixes up WDT MTEX references to local paths
+- **Model bundling** (`--bundle-m2s`): converts source `M2` doodads into local bundled `MDX` assets, copies or rewrites bundled model textures beside those outputs, and rewrites Alpha placement paths plus `TEXS` entries to the local bundled BLP paths
 - **End-to-end validation**: `convert-lk-to-alpha` output loads and renders successfully in legacy MdxViewer with staged 0.5.3 client (terrain-only and filtered-placements modes)
 
 ### Validated
@@ -160,6 +161,10 @@ wow-viewer/output/roundtrip-validation/4_0_0_11927/
       Azeroth.wdl
     tilesets/Azeroth/        # Extracted BLP textures (if --bundle-tilesets)
       Tileset/...
+    mdxs/Azeroth/            # Local bundled doodad MDX outputs (if --bundle-m2s)
+      Creature/...
+    wmos/Azeroth/            # Local bundled WMO outputs + rewritten local textures (if --bundle-wmos)
+      World/...
   captures-0_5_3/            # MdxViewer capture output
     Azeroth/0.5.3.3368/*.png
 ```

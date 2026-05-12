@@ -2,6 +2,28 @@
 
 Date: 2026-05-11
 
+## Status Update (May 12, 2026)
+
+This plan is now partially landed.
+
+Landed in `wow-viewer`:
+
+- `WmoV17ToV14Converter` and `WmoV14ToV17Converter` are owned in shared I/O and wired through converter CLI entry points.
+- `M2ToMdxConverter` and `MdxToM2Converter` are also owned in shared I/O and wired through converter CLI entry points.
+- `convert-lk-to-alpha --bundle-wmos` now emits Alpha-compatible monolithic `WMO v14` roots using `MOMO` plus embedded `MOGP` groups, rewrites bundled WMO texture tables inside `MOMO` roots, and rewrites Alpha placement paths to the local bundle outputs.
+- `convert-lk-to-alpha --bundle-m2s` now emits local bundled `MDX` outputs and rewrites bundled texture references beside those outputs.
+- the WMO downgrade path now has two extra compatibility guards beyond the earlier structural downgrade rules:
+   - spatial merge when a source root would exceed the practical Alpha-era `384` group ceiling
+   - batch-boundary group splitting when any `v17` `MOBA.firstIndex` exceeds the legacy `ushort` ceiling used by `v14`
+- real staged Kalimdor proof for `4.0.0.11927 -> 0.5.3.3368` now reports `311` converted WMOs, `1` missing root, and `0` conversion failures under the temp `wmo-full-debug-after-split` validation output.
+
+Still open:
+
+- `M2 -> MDX` remains a structural downgrade lane, not Alpha-client runtime parity proof.
+- sequence and animation compatibility for Alpha `MDX` remains open, especially around `SEQS` fidelity and broader native animation expectations.
+- `MDX -> M2` remains structural rather than renderer- or runtime-parity complete.
+- do not treat successful converter builds or inspect re-reads as active Alpha-client signoff for all bundled MDX assets.
+
 ## Purpose
 
 Plan the next converter slice needed to make Cataclysm-era object content viable in the Alpha 0.5.3 target lane without routing new ownership back into `gillijimproject_refactor`.
@@ -20,24 +42,30 @@ What already exists:
 
 - `wow-viewer` already owns modern read-side surfaces for `WMO`, `M2`, and `MDX`
 - `wow-viewer` already has active `M2` runtime ownership work and `MDX` summary/runtime surfaces
-- legacy/reference converter code exists for:
-  - `WmoV14ToV17Converter`
-  - `WmoV17ToV14Converter`
-  - `M2ToMdxConverter`
-  - `MdxToM2Converter`
+- `wow-viewer` now owns active converter code for:
+   - `WmoV14ToV17Converter`
+   - `WmoV17ToV14Converter`
+   - `M2ToMdxConverter`
+   - `MdxToM2Converter`
+   - `convert-wmo-v17-to-v14`
+   - `convert-wmo-v14-to-v17`
+   - `convert-m2-to-mdx`
+   - `convert-mdx-to-m2`
 
-What does not exist yet in active `wow-viewer`:
+What is still not complete in active `wow-viewer`:
 
-- no canonical writer path for `WMO v14`
-- no canonical writer path for `WMO v17`
-- no canonical writer path for `MDX`
-- no canonical writer path for `M2` or `.skin`
-- no `wow-viewer` converter CLI for these object-model families
+- no broad runtime-parity proof for the landed converter directions
+- no Alpha-runtime-safe `MDX` animation/signature guarantee for the full Cataclysm doodad corpus
+- no complete policy for every unsupported `M2` feature family such as particles, ribbons, attachments, or effect-heavy materials
+- no claim yet that all generated `MDX` or `M2` outputs are suitable for active viewer or native-client runtime use
 
 What the repo evidence says:
 
 - `WMO` is the easier port. The workspace already has real upgrade and downgrade implementations plus tests and writer helpers in legacy/reference code.
-- `M2 <-> MDX` is harder. `wow-viewer` has parser and runtime foundations, but conversion still needs a new write path plus semantic mapping for skin profiles, animation tracks, materials, particles, ribbons, and effect routing.
+- `WMO` is now the more mature converter lane. The hard object-side blockers found so far were Alpha-specific constraints, not missing basic format ownership:
+   - Alpha `WMO v14` expects monolithic `MOMO`-wrapped roots with embedded `MOGP` groups rather than later split root plus `_NNN.wmo` companions.
+   - the downgrade path must handle both the practical Alpha-era `384` group ceiling and legacy `MOBA` `ushort` batch-index limits.
+- `M2 <-> MDX` is still harder. `wow-viewer` now has minimal converter ownership, but broad semantic mapping for animation tracks, sequence fidelity, materials, particles, ribbons, and effect routing is still incomplete.
 
 ## Ownership Rule
 
@@ -129,10 +157,15 @@ Expected subtasks:
 3. Implement a `WmoV14Writer` in `wow-viewer`.
 4. Port root and group downgrade mapping rules.
 5. Preserve group ordering, bounds, portal data, doodad sets, and material references.
+6. Treat Alpha `v14` roots as monolithic `MOMO` containers with embedded `MOGP` groups, not as later split root-plus-companion-group files.
+7. Preserve both known Alpha-era hard limits in the downgrade path:
+   - practical `384` group ceiling on the emitted legacy root
+   - legacy `MOBA` batch `firstIndex` `ushort` ceiling, handled by batch-boundary group splitting before legacy write
 6. Add focused tests for:
    - root version change `17 -> 14`
    - group count and required chunk presence
    - legacy `MOMO` packaging for the Alpha lane if required by the target format path
+   - oversized `MOBA` batch ranges splitting into multiple legacy embedded groups while staying inspect-readable
 7. Add inspect-level proof for converted output.
 
 Validation:
@@ -200,6 +233,7 @@ Expected subtasks:
 3. Implement `MdxWriter` in `wow-viewer`.
 4. Port geometry, texture-name, material, sequence, bone, and pivot mapping at a minimal strict subset.
 5. Make unsupported features explicit instead of silently inventing data.
+6. Keep the current proof boundary explicit: bundled `MDX` texture rewrites and inspect re-read validity are landed, but Alpha runtime-safe animation fidelity is not yet closed.
 6. Add focused tests for:
    - signature/version correctness
    - non-empty geometry round-trip through `mdx inspect`

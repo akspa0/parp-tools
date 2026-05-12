@@ -17,12 +17,9 @@ public static class WmoV17ToV14Converter
         WmoChunkIds.Momt,
         WmoChunkIds.Mogn,
         WmoChunkIds.Mogi,
-        WmoChunkIds.Mosb,
         WmoChunkIds.Mopv,
         WmoChunkIds.Mopt,
         WmoChunkIds.Mopr,
-        WmoChunkIds.Movv,
-        WmoChunkIds.Movb,
         WmoChunkIds.Molt,
         WmoChunkIds.Mods,
         WmoChunkIds.Modn,
@@ -69,17 +66,42 @@ public static class WmoV17ToV14Converter
                 $"WMO root reports {rootPayloads.ReportedGroupCount} groups, but {groupBytes.Count} group payloads were supplied.");
         }
 
-        List<LegacyGroupDocument> legacyGroups = new(groupBytes.Count);
+        List<LegacyGroupDocument> sourceLegacyGroups = new(groupBytes.Count);
         for (int groupIndex = 0; groupIndex < groupBytes.Count; groupIndex++)
         {
-            byte[] legacyGroupPayload = ConvertGroupPayload(groupBytes[groupIndex], $"{sourcePath}#{groupIndex:D3}");
-            legacyGroups.Add(ParseLegacyGroup(legacyGroupPayload, $"{sourcePath}#legacy[{groupIndex:D3}]"));
+            string groupSourcePath = $"{sourcePath}#{groupIndex:D3}";
+            if (TryCreateLegacySeedFromOversizedV17Group(groupBytes[groupIndex], groupSourcePath, out LegacyGroupDocument? oversizedSeed))
+            {
+                sourceLegacyGroups.Add(oversizedSeed);
+                continue;
+            }
+
+            byte[] legacyGroupPayload = ConvertGroupPayload(groupBytes[groupIndex], groupSourcePath);
+            sourceLegacyGroups.Add(ParseLegacyGroup(legacyGroupPayload, $"{sourcePath}#legacy[{groupIndex:D3}]"));
         }
 
-        LegacyPortalLayout portalLayout = BuildDefaultPortalLayout(rootPayloads.PayloadsById);
+        List<int> sourceToExpandedFirstIndex = new(sourceLegacyGroups.Count);
+        List<LegacyGroupDocument> legacyGroups = new();
+        bool splitAnyGroups = false;
+        foreach (LegacyGroupDocument group in sourceLegacyGroups)
+        {
+            sourceToExpandedFirstIndex.Add(legacyGroups.Count);
+            IReadOnlyList<LegacyGroupDocument> splitGroups = SplitLegacyGroupForLegacyBatchIndexLimit(group);
+            splitAnyGroups |= splitGroups.Count > 1;
+            legacyGroups.AddRange(splitGroups);
+        }
+
+        LegacyPortalLayout portalLayout = splitAnyGroups
+            ? ExpandPortalLayout(sourceLegacyGroups, legacyGroups, sourceToExpandedFirstIndex, rootPayloads.PayloadsById)
+            : BuildDefaultPortalLayout(rootPayloads.PayloadsById);
+
+        if (portalLayout.UpdatedGroups is not null)
+            legacyGroups = portalLayout.UpdatedGroups.ToList();
+
+        IReadOnlyDictionary<FourCC, byte[]> effectiveRootPayloads = ApplyPortalLayout(rootPayloads.PayloadsById, portalLayout);
         if (legacyGroups.Count > LegacyMaxGroupCount)
         {
-            MergeOverflowResult mergeResult = MergeOverflowGroups(legacyGroups, rootPayloads.PayloadsById);
+            MergeOverflowResult mergeResult = MergeOverflowGroups(legacyGroups, effectiveRootPayloads);
             portalLayout = mergeResult.PortalLayout;
             legacyGroups = (portalLayout.UpdatedGroups ?? mergeResult.Groups).ToList();
         }
@@ -231,7 +253,7 @@ public static class WmoV17ToV14Converter
             if (startIndex > ushort.MaxValue)
             {
                 throw new InvalidDataException(
-                    $"MOBA batch {batchIndex} firstIndex {startIndex} exceeds the legacy ushort range.");
+                    $"MOBA batch {batchIndex} firstIndex {startIndex} exceeds the legacy ushort range and requires group splitting.");
             }
 
             ushort indexCount = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(sourceOffset + 16, 2));
@@ -252,6 +274,418 @@ public static class WmoV17ToV14Converter
         }
 
         return converted;
+    }
+
+    private static bool TryCreateLegacySeedFromOversizedV17Group(byte[] groupBytes, string sourcePath, out LegacyGroupDocument legacyGroup)
+    {
+        ArgumentNullException.ThrowIfNull(groupBytes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+
+        using MemoryStream stream = new(groupBytes, writable: false);
+        (uint? version, byte[] mogpPayload) = WmoGroupReaderCommon.ReadGroupPayload(stream, sourcePath);
+        if (version is null || version <= 16)
+        {
+            legacyGroup = null!;
+            return false;
+        }
+
+        int headerSizeBytes = WmoGroupReaderCommon.FindHeaderSize(mogpPayload);
+        byte[]? mobaPayload = WmoGroupReaderCommon.TryReadFirstSubchunkPayload(mogpPayload, headerSizeBytes, WmoChunkIds.Moba);
+        if (!RequiresLegacyGroupSplit(mobaPayload))
+        {
+            legacyGroup = null!;
+            return false;
+        }
+
+        WmoGroupSummary sourceSummary = WmoGroupSummaryReader.ReadMogpPayload(mogpPayload, sourcePath, version);
+        WmoGroupMeshDetail sourceMesh = WmoGroupMeshDetailReader.ReadMogpPayload(mogpPayload, sourcePath, version);
+        List<WmoGroupFaceMaterialDetail> legacyFaceMaterials = new(sourceMesh.FaceMaterials.Count);
+        foreach (WmoGroupFaceMaterialDetail face in sourceMesh.FaceMaterials)
+            legacyFaceMaterials.Add(new WmoGroupFaceMaterialDetail(legacyFaceMaterials.Count, face.Flags, face.MaterialId, face.LegacyExtraValue ?? 0));
+
+        List<ushort> doodadRefs = ReadRefs(mogpPayload, sourceMesh.HeaderSizeBytes, WmoChunkIds.Modr);
+        List<ushort> lightRefs = ReadRefs(mogpPayload, sourceMesh.HeaderSizeBytes, WmoChunkIds.Molr);
+        byte[]? liquidPayload = WmoGroupReaderCommon.TryReadFirstSubchunkPayload(mogpPayload, sourceMesh.HeaderSizeBytes, WmoChunkIds.Mliq);
+        bool hasLiquid = liquidPayload is { Length: > 0 };
+
+        uint flags = NormalizeFlags(
+            sourceSummary.Flags,
+            legacyFaceMaterials.Count,
+            sourceMesh.PrimaryUvs.Count,
+            sourceMesh.AdditionalUvSets.Count,
+            sourceMesh.PrimaryVertexColorsBgra.Count,
+            sourceMesh.AdditionalVertexColorSetsBgra.Count,
+            doodadRefs.Count,
+            lightRefs.Count,
+            hasLiquid);
+
+        WmoGroupSummary legacySummary = new(
+            sourceSummary.SourcePath,
+            14,
+            0x44,
+            sourceSummary.NameOffset,
+            sourceSummary.DescriptiveNameOffset,
+            flags,
+            sourceSummary.BoundsMin,
+            sourceSummary.BoundsMax,
+            sourceSummary.PortalStart,
+            sourceSummary.PortalCount,
+            sourceSummary.TransparentBatchCount,
+            sourceSummary.InteriorBatchCount,
+            sourceSummary.ExteriorBatchCount,
+            hasLiquid ? sourceSummary.GroupLiquid : 0,
+            legacyFaceMaterials.Count,
+            sourceMesh.Vertices.Count,
+            sourceMesh.Indices.Count,
+            sourceMesh.Normals.Count,
+            sourceMesh.PrimaryUvs.Count,
+            sourceMesh.AdditionalUvSets.Count,
+            sourceMesh.Batches.Count,
+            sourceMesh.PrimaryVertexColorsBgra.Count,
+            doodadRefs.Count,
+            lightRefs.Count,
+            sourceMesh.Indices.Count > 0 ? 1 : 0,
+            sourceMesh.Indices.Count / 3,
+            hasLiquid);
+
+        WmoGroupMeshDetail legacyMesh = new(
+            sourceMesh.SourcePath,
+            14,
+            0x44,
+            WmoChunkIds.Movi.ToString(),
+            sourceMesh.Vertices,
+            sourceMesh.Normals,
+            sourceMesh.Indices,
+            sourceMesh.PrimaryUvs,
+            sourceMesh.AdditionalUvSets,
+            sourceMesh.PrimaryVertexColorsBgra,
+            sourceMesh.AdditionalVertexColorSetsBgra,
+            legacyFaceMaterials,
+            sourceMesh.Batches);
+
+        legacyGroup = new LegacyGroupDocument(
+            legacySummary,
+            legacyMesh,
+            doodadRefs,
+            lightRefs,
+            liquidPayload,
+            sourceSummary.TransparentBatchCount,
+            sourceSummary.InteriorBatchCount,
+            sourceSummary.ExteriorBatchCount);
+        return true;
+    }
+
+    private static bool RequiresLegacyGroupSplit(byte[]? mobaPayload)
+    {
+        if (mobaPayload is null || mobaPayload.Length == 0)
+            return false;
+
+        const int batchEntrySize = 24;
+        if (mobaPayload.Length % batchEntrySize != 0)
+            throw new InvalidDataException($"MOBA payload size {mobaPayload.Length} is not divisible by {batchEntrySize}.");
+
+        for (int batchOffset = 0; batchOffset < mobaPayload.Length; batchOffset += batchEntrySize)
+        {
+            uint firstIndex = BinaryPrimitives.ReadUInt32LittleEndian(mobaPayload.AsSpan(batchOffset + 12, 4));
+            if (firstIndex > ushort.MaxValue)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static IReadOnlyList<LegacyGroupDocument> SplitLegacyGroupForLegacyBatchIndexLimit(LegacyGroupDocument group)
+    {
+        if (group.Mesh.Batches.Count == 0)
+            return [group];
+
+        int maxBatchEnd = group.Mesh.Batches.Max(static batch => batch.FirstIndex + batch.IndexCount);
+        if (maxBatchEnd <= ushort.MaxValue)
+            return [group];
+
+        List<List<int>> partitions = PartitionLegacyGroupBatches(group.Mesh.Batches);
+        if (partitions.Count == 1)
+            return [group];
+
+        List<LegacyGroupDocument> splitGroups = new(partitions.Count);
+        for (int partitionIndex = 0; partitionIndex < partitions.Count; partitionIndex++)
+            splitGroups.Add(CreateSplitLegacyGroup(group, partitions[partitionIndex], partitionIndex == 0));
+
+        return splitGroups;
+    }
+
+    private static List<List<int>> PartitionLegacyGroupBatches(IReadOnlyList<WmoGroupBatchDetail> batches)
+    {
+        List<List<int>> partitions = [];
+        List<int> currentPartition = [];
+        int currentIndexCount = 0;
+
+        for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
+        {
+            WmoGroupBatchDetail batch = batches[batchIndex];
+            if (currentPartition.Count > 0 && currentIndexCount + batch.IndexCount > ushort.MaxValue)
+            {
+                partitions.Add(currentPartition);
+                currentPartition = [];
+                currentIndexCount = 0;
+            }
+
+            currentPartition.Add(batchIndex);
+            currentIndexCount += batch.IndexCount;
+        }
+
+        if (currentPartition.Count > 0)
+            partitions.Add(currentPartition);
+
+        return partitions;
+    }
+
+    private static LegacyGroupDocument CreateSplitLegacyGroup(LegacyGroupDocument group, IReadOnlyList<int> batchOrdinals, bool isPrimarySplit)
+    {
+        List<ushort> indices = [];
+        List<WmoGroupFaceMaterialDetail> faceMaterials = [];
+        List<WmoGroupBatchDetail> batches = [];
+        int transparentBatchCount = 0;
+        int interiorBatchCount = 0;
+        int exteriorBatchCount = 0;
+        int firstIndex = 0;
+
+        foreach (int batchOrdinal in batchOrdinals)
+        {
+            WmoGroupBatchDetail batch = group.Mesh.Batches[batchOrdinal];
+            if (batch.IndexCount % 3 != 0)
+                throw new InvalidDataException($"Legacy batch {batchOrdinal} indexCount {batch.IndexCount} is not divisible by 3.");
+
+            if (batch.FirstIndex % 3 != 0)
+                throw new InvalidDataException($"Legacy batch {batchOrdinal} firstIndex {batch.FirstIndex} is not aligned to triangle boundaries.");
+
+            if (batch.FirstIndex + batch.IndexCount > group.Mesh.Indices.Count)
+                throw new InvalidDataException($"Legacy batch {batchOrdinal} overruns the group's index buffer.");
+
+            int faceStart = batch.FirstIndex / 3;
+            int faceCount = batch.IndexCount / 3;
+            if (faceStart + faceCount > group.Mesh.FaceMaterials.Count)
+                throw new InvalidDataException($"Legacy batch {batchOrdinal} overruns the group's face-material buffer.");
+
+            for (int index = 0; index < batch.IndexCount; index++)
+                indices.Add(group.Mesh.Indices[batch.FirstIndex + index]);
+
+            for (int faceIndex = 0; faceIndex < faceCount; faceIndex++)
+            {
+                WmoGroupFaceMaterialDetail face = group.Mesh.FaceMaterials[faceStart + faceIndex];
+                faceMaterials.Add(new WmoGroupFaceMaterialDetail(faceMaterials.Count, face.Flags, face.MaterialId, face.LegacyExtraValue));
+            }
+
+            byte[] rawEntryBytes = CreateLegacyBatchEntry(batch, firstIndex, group.Mesh.Version);
+            batches.Add(new WmoGroupBatchDetail(
+                batches.Count,
+                batches.Count * 24,
+                batch.MaterialIdRaw,
+                batch.HasMaterialId,
+                firstIndex,
+                batch.IndexCount,
+                batch.Flags,
+                rawEntryBytes));
+
+            CountBatchRegion(group, batchOrdinal, ref transparentBatchCount, ref interiorBatchCount, ref exteriorBatchCount);
+            firstIndex += batch.IndexCount;
+        }
+
+        (Vector3 boundsMin, Vector3 boundsMax) = ComputeBoundsForIndices(group.Mesh.Vertices, indices, group.Summary.BoundsMin, group.Summary.BoundsMax);
+        IReadOnlyList<ushort> doodadRefs = isPrimarySplit ? group.DoodadRefs : Array.Empty<ushort>();
+        IReadOnlyList<ushort> lightRefs = isPrimarySplit ? group.LightRefs : Array.Empty<ushort>();
+        byte[]? liquidPayload = isPrimarySplit ? group.LiquidPayload : null;
+        bool hasLiquid = liquidPayload is { Length: > 0 };
+
+        uint flags = NormalizeFlags(
+            group.Summary.Flags,
+            faceMaterials.Count,
+            group.Mesh.PrimaryUvs.Count,
+            group.Mesh.AdditionalUvSets.Count,
+            group.Mesh.PrimaryVertexColorsBgra.Count,
+            group.Mesh.AdditionalVertexColorSetsBgra.Count,
+            doodadRefs.Count,
+            lightRefs.Count,
+            hasLiquid);
+
+        WmoGroupSummary summary = new(
+            group.Summary.SourcePath,
+            group.Summary.Version,
+            group.Summary.HeaderSizeBytes,
+            group.Summary.NameOffset,
+            group.Summary.DescriptiveNameOffset,
+            flags,
+            boundsMin,
+            boundsMax,
+            isPrimarySplit ? group.Summary.PortalStart : 0,
+            isPrimarySplit ? group.Summary.PortalCount : 0,
+            transparentBatchCount,
+            interiorBatchCount,
+            exteriorBatchCount,
+            hasLiquid ? group.Summary.GroupLiquid : 0,
+            faceMaterials.Count,
+            group.Mesh.Vertices.Count,
+            indices.Count,
+            group.Mesh.Normals.Count,
+            group.Mesh.PrimaryUvs.Count,
+            group.Mesh.AdditionalUvSets.Count,
+            batches.Count,
+            group.Mesh.PrimaryVertexColorsBgra.Count,
+            doodadRefs.Count,
+            lightRefs.Count,
+            indices.Count > 0 ? 1 : 0,
+            indices.Count / 3,
+            hasLiquid);
+
+        WmoGroupMeshDetail mesh = new(
+            group.Mesh.SourcePath,
+            group.Mesh.Version,
+            group.Mesh.HeaderSizeBytes,
+            group.Mesh.IndexChunkId,
+            group.Mesh.Vertices,
+            group.Mesh.Normals,
+            indices,
+            group.Mesh.PrimaryUvs,
+            group.Mesh.AdditionalUvSets,
+            group.Mesh.PrimaryVertexColorsBgra,
+            group.Mesh.AdditionalVertexColorSetsBgra,
+            faceMaterials,
+            batches);
+
+        return new LegacyGroupDocument(
+            summary,
+            mesh,
+            doodadRefs.ToList(),
+            lightRefs.ToList(),
+            liquidPayload,
+            transparentBatchCount,
+            interiorBatchCount,
+            exteriorBatchCount);
+    }
+
+    private static void CountBatchRegion(LegacyGroupDocument group, int batchOrdinal, ref int transparentBatchCount, ref int interiorBatchCount, ref int exteriorBatchCount)
+    {
+        if (batchOrdinal < group.TransparentBatchCount)
+        {
+            transparentBatchCount++;
+            return;
+        }
+
+        if (batchOrdinal < group.TransparentBatchCount + group.InteriorBatchCount)
+        {
+            interiorBatchCount++;
+            return;
+        }
+
+        exteriorBatchCount++;
+    }
+
+    private static (Vector3 BoundsMin, Vector3 BoundsMax) ComputeBoundsForIndices(
+        IReadOnlyList<Vector3> vertices,
+        IReadOnlyList<ushort> indices,
+        Vector3 fallbackMin,
+        Vector3 fallbackMax)
+    {
+        if (indices.Count == 0)
+            return (fallbackMin, fallbackMax);
+
+        Vector3 boundsMin = vertices[indices[0]];
+        Vector3 boundsMax = boundsMin;
+        foreach (ushort vertexIndex in indices)
+        {
+            if (vertexIndex >= vertices.Count)
+                throw new InvalidDataException($"Group index {vertexIndex} exceeds the available vertex count {vertices.Count}.");
+
+            Vector3 vertex = vertices[vertexIndex];
+            boundsMin = Vector3.Min(boundsMin, vertex);
+            boundsMax = Vector3.Max(boundsMax, vertex);
+        }
+
+        return (boundsMin, boundsMax);
+    }
+
+    private static byte[] CreateLegacyBatchEntry(WmoGroupBatchDetail batch, int firstIndex, uint? sourceVersion)
+    {
+        byte[] entry = new byte[24];
+        int boundsOffset = sourceVersion > 16 ? 0 : 2;
+        batch.RawEntryBytes.AsSpan(boundsOffset, 12).CopyTo(entry.AsSpan(2, 12));
+        entry[0] = 0;
+        entry[1] = batch.MaterialIdRaw;
+        BinaryPrimitives.WriteUInt16LittleEndian(entry.AsSpan(14, 2), checked((ushort)firstIndex));
+        BinaryPrimitives.WriteUInt16LittleEndian(entry.AsSpan(16, 2), batch.IndexCount);
+        BinaryPrimitives.WriteUInt16LittleEndian(entry.AsSpan(18, 2), BinaryPrimitives.ReadUInt16LittleEndian(batch.RawEntryBytes.AsSpan(18, 2)));
+        BinaryPrimitives.WriteUInt16LittleEndian(entry.AsSpan(20, 2), BinaryPrimitives.ReadUInt16LittleEndian(batch.RawEntryBytes.AsSpan(20, 2)));
+        entry[22] = batch.Flags;
+        entry[23] = 0;
+        return entry;
+    }
+
+    private static LegacyPortalLayout ExpandPortalLayout(
+        IReadOnlyList<LegacyGroupDocument> sourceGroups,
+        IReadOnlyList<LegacyGroupDocument> expandedGroups,
+        IReadOnlyList<int> sourceToExpandedFirstIndex,
+        IReadOnlyDictionary<FourCC, byte[]> rootPayloads)
+    {
+        if (!TryGetPortalLayout(rootPayloads, out int portalCount, out byte[]? moprPayload) || moprPayload is null)
+            return new LegacyPortalLayout(false, 0, null, expandedGroups);
+
+        List<RootPortalReference> sourceRefs = ReadRootPortalReferences(moprPayload);
+        List<List<RootPortalReference>> expandedRefs = Enumerable.Range(0, expandedGroups.Count).Select(static _ => new List<RootPortalReference>()).ToList();
+        for (int sourceGroupIndex = 0; sourceGroupIndex < sourceGroups.Count; sourceGroupIndex++)
+        {
+            LegacyGroupDocument sourceGroup = sourceGroups[sourceGroupIndex];
+            if (sourceGroup.Summary.PortalCount == 0)
+                continue;
+
+            int start = sourceGroup.Summary.PortalStart;
+            int count = sourceGroup.Summary.PortalCount;
+            if (start < 0 || count < 0 || start + count > sourceRefs.Count)
+                return new LegacyPortalLayout(false, 0, null, expandedGroups);
+
+            int expandedGroupIndex = sourceToExpandedFirstIndex[sourceGroupIndex];
+            for (int portalRefIndex = 0; portalRefIndex < count; portalRefIndex++)
+            {
+                RootPortalReference sourceRef = sourceRefs[start + portalRefIndex];
+                expandedRefs[expandedGroupIndex].Add(sourceRef with { GroupIndex = checked((ushort)expandedGroupIndex) });
+            }
+        }
+
+        int cursor = 0;
+        List<LegacyGroupDocument> updatedGroups = new(expandedGroups.Count);
+        List<RootPortalReference> remappedRefs = new();
+        for (int sourceGroupIndex = 0; sourceGroupIndex < sourceGroups.Count; sourceGroupIndex++)
+        {
+            int expandedStart = sourceToExpandedFirstIndex[sourceGroupIndex];
+            int expandedEnd = sourceGroupIndex + 1 < sourceToExpandedFirstIndex.Count
+                ? sourceToExpandedFirstIndex[sourceGroupIndex + 1]
+                : expandedGroups.Count;
+
+            for (int expandedIndex = expandedStart; expandedIndex < expandedEnd; expandedIndex++)
+            {
+                List<RootPortalReference> refs = expandedIndex == expandedStart ? expandedRefs[expandedIndex] : [];
+                updatedGroups.Add(UpdatePortalRange(expandedGroups[expandedIndex], cursor, refs.Count));
+                if (expandedIndex == expandedStart)
+                {
+                    remappedRefs.AddRange(refs);
+                    cursor += refs.Count;
+                }
+            }
+        }
+
+        byte[] remappedPayload = WriteRootPortalReferences(remappedRefs);
+        return new LegacyPortalLayout(true, portalCount, remappedPayload, updatedGroups);
+    }
+
+    private static IReadOnlyDictionary<FourCC, byte[]> ApplyPortalLayout(
+        IReadOnlyDictionary<FourCC, byte[]> rootPayloads,
+        LegacyPortalLayout portalLayout)
+    {
+        if (!portalLayout.KeepPortalChunks || portalLayout.MoprPayload is null)
+            return rootPayloads;
+
+        Dictionary<FourCC, byte[]> updated = rootPayloads.ToDictionary(static pair => pair.Key, static pair => pair.Value.ToArray());
+        updated[WmoChunkIds.Mopr] = portalLayout.MoprPayload;
+        return updated;
     }
 
     private static MergeOverflowResult MergeOverflowGroups(IReadOnlyList<LegacyGroupDocument> sourceGroups, IReadOnlyDictionary<FourCC, byte[]> rootPayloads)
