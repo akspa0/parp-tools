@@ -22,7 +22,7 @@ The project currently has four practical jobs:
 3. **Inspection and validation**
    Probe client files and generated outputs without opening the old legacy tools.
 4. **Format conversion**
-   Convert Alpha monolithic WDT terrain to LK ADT/WDT/WDL output, and convert LK/Cataclysm ADT terrain back into Alpha-compatible monolithic WDT output.
+  Convert Alpha monolithic WDT terrain to LK ADT/WDT/WDL output, convert LK/Cataclysm split ADT terrain into monolithic LK ADT output for loose-overlay workflows, and convert LK/Cataclysm ADT terrain back into Alpha-compatible monolithic WDT output.
 
 ## Current Status
 
@@ -204,6 +204,8 @@ dotnet run --project .\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer
 Useful commands:
 
 - `map inspect`
+- `map uniqueid-report`
+- `map uniqueid-filter`
 - `pm4 inspect`
 - `pm4 audit`
 - `blp inspect`
@@ -217,6 +219,14 @@ Example:
 dotnet run --project .\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -c Debug -- map inspect --input "I:\parp\parp-tools\wow-viewer\output\datasets\alpha_to_lk\Azeroth\Azeroth_32_32.adt"
 ```
 
+```powershell
+dotnet run --project .\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -c Debug -- map uniqueid-report --input ".\wow-viewer\test_data\original_development\World\Maps\development\development.wdt" --input ".\wow-viewer\test_data\original_development\World\Maps\development\development_0_0_obj0.adt" --output ".\output\build-validation\uniqueid-report-smoke.json"
+```
+
+```powershell
+dotnet run --project .\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -c Debug -- map uniqueid-filter --input ".\output\build-validation\uniqueid-report-smoke.json" --max-uniqueid 100000 --kind m2 --output ".\output\build-validation\uniqueid-filter-smoke.json"
+```
+
 ### Converter CLI
 
 ```powershell
@@ -226,6 +236,7 @@ dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowVi
 Current important commands:
 
 - `convert-alpha-to-lk` — Alpha monolithic WDT → LK ADT/WDT/WDL
+- `convert-split-adt-to-lk` — staged client plus loose overlay split ADT family → monolithic LK ADTs plus regenerated WDT
 - `convert-lk-to-alpha` — LK/Cataclysm split ADT → Alpha monolithic WDT/WDL
 - `dataset-list-maps`
 - `detect`
@@ -252,6 +263,9 @@ Examples:
 ```powershell
 # Basic conversion (839 tiles, ~95s, tilesets bundled by default)
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt"
+
+# Split-family LK output from a staged client plus loose overlay
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-split-adt-to-lk --client-root "output\tmp\wowarchive-clients\0_6_0_3592\World of Warcraft" --overlay-root ".\wow-viewer\test_data\original_development" --map development --output-dir ".\output\build-validation\development-lk" --limit 5
 
 # With asset filtering against target client
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt" --target-client-root "output\tmp\wowarchive-clients\0_5_3_3368\World of Warcraft"

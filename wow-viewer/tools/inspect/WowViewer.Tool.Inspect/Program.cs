@@ -1414,6 +1414,9 @@ static void RunMap(string[] args)
 		case "terrain-patch-report":
 			RunMapTerrainPatchReport(tail);
 			break;
+		case "uniqueid-filter":
+			RunMapUniqueIdFilter(tail);
+			break;
 		case "uniqueid-report":
 			RunMapUniqueIdReport(tail);
 			break;
@@ -1561,10 +1564,14 @@ static void RunLitInspect(string[] args)
 
 static void RunMapUniqueIdReport(string[] args)
 {
-	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	IReadOnlyList<string> inputs = GetOptionValues(args, "--input", "-i");
+	string? positionalInput = GetFirstPositionalArgument(args);
 	string? output = GetOption(args, "--output", "-o");
 	string? build = GetOption(args, "--build", "-b");
-	if (string.IsNullOrWhiteSpace(input))
+	if (inputs.Count == 0 && !string.IsNullOrWhiteSpace(positionalInput))
+		inputs = [positionalInput];
+
+	if (inputs.Count == 0)
 	{
 		Console.Error.WriteLine("Error: input map source is required.");
 		Environment.ExitCode = 1;
@@ -1573,9 +1580,48 @@ static void RunMapUniqueIdReport(string[] args)
 
 	try
 	{
-		MapUniqueIdReport report = MapUniqueIdReportSupport.Build(input, build);
+		MapUniqueIdReport report = MapUniqueIdReportSupport.Build(inputs, build);
 		string outputPath = MapUniqueIdReportSupport.Write(report, output);
 		MapUniqueIdReportSupport.PrintSummary(report, outputPath);
+	}
+	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
+}
+
+static void RunMapUniqueIdFilter(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? output = GetOption(args, "--output", "-o");
+	int? minUniqueId = TryGetIntOption(args, "--min-uniqueid", "-min");
+	int? maxUniqueId = TryGetIntOption(args, "--max-uniqueid", "-max");
+	string kind = GetOption(args, "--kind", "-k") ?? "all";
+	bool invert = args.Any(static arg => string.Equals(arg, "--invert", StringComparison.OrdinalIgnoreCase));
+	IReadOnlyList<string> buildLabels = ParseCsvOption(GetOption(args, "--build", "-b"));
+
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input uniqueid report is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!minUniqueId.HasValue && !maxUniqueId.HasValue && buildLabels.Count == 0 && string.Equals(kind, "all", StringComparison.OrdinalIgnoreCase))
+	{
+		Console.Error.WriteLine("Error: provide at least one filter: --min-uniqueid, --max-uniqueid, --build, or --kind.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	try
+	{
+		MapUniqueIdFilterReport report = MapUniqueIdFilterSupport.Filter(
+			input,
+			new MapUniqueIdFilterOptions(minUniqueId, maxUniqueId, buildLabels, kind, invert));
+		string outputPath = MapUniqueIdFilterSupport.Write(report, output);
+		MapUniqueIdFilterSupport.PrintSummary(report, outputPath);
 	}
 	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
 	{
@@ -2309,6 +2355,22 @@ static string? GetOption(string[] args, string longName, string shortName)
 	return null;
 }
 
+static IReadOnlyList<string> GetOptionValues(string[] args, string longName, string shortName)
+{
+	List<string> values = [];
+	for (int index = 0; index < args.Length - 1; index++)
+	{
+		if (string.Equals(args[index], longName, StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(args[index], shortName, StringComparison.OrdinalIgnoreCase))
+		{
+			values.Add(args[index + 1]);
+			index++;
+		}
+	}
+
+	return values;
+}
+
 static string? GetFirstPositionalArgument(string[] args)
 {
 	for (int index = 0; index < args.Length; index++)
@@ -2342,6 +2404,18 @@ static int? TryGetIntOption(string[] args, string longName, string shortName)
 	Console.Error.WriteLine($"Error: option {longName} requires an integer value.");
 	Environment.ExitCode = 1;
 	return null;
+}
+
+static IReadOnlyList<string> ParseCsvOption(string? value)
+{
+	if (string.IsNullOrWhiteSpace(value))
+		return [];
+
+	return value
+		.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+		.Where(static entry => !string.IsNullOrWhiteSpace(entry))
+		.Distinct(StringComparer.OrdinalIgnoreCase)
+		.ToArray();
 }
 
 static bool MatchesSearch(AlphaAreaAudioBinding binding, string search)
@@ -3900,7 +3974,8 @@ static void ShowMapUsage()
 {
 	Console.WriteLine("Map commands:");
 	Console.WriteLine("  map inspect --input <file.wdt|file.adt|file.error> [--dump-tex-chunks]");
-	Console.WriteLine("  map uniqueid-report --input <file.wdt|file.adt|directory> [--build <label>] [--output <report.json>]");
+	Console.WriteLine("  map uniqueid-filter --input <report.json> [--min-uniqueid <n>] [--max-uniqueid <n>] [--build <label[,label...]>] [--kind all|m2|wmo] [--invert] [--output <report.json>]");
+	Console.WriteLine("  map uniqueid-report --input <file.wdt|file.adt|directory> [--input <second-source> ...] [--build <label>] [--output <report.json>]");
 }
 
 static void ShowPm4Usage()

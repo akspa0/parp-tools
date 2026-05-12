@@ -621,3 +621,5 @@ wow-viewer/test_data/*
 wow-viewer/data-harvester/*.png
 wow-viewer/data-harvester/*.npz
 wow-viewer/data-harvester/*.lock
+.mcp.json
+opencode.jsonc

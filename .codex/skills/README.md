@@ -16,6 +16,9 @@ Codex-oriented skill docs live here. They are reusable workflow playbooks conver
 - `terrain-alpha-regression/SKILL.md`
   - Use for terrain alpha-mask, MCAL, MCLY, split ADT texture, and blending regressions in `gillijimproject_refactor`.
 
+- `x64dbg/SKILL.md`
+  - Use for reverse engineering, debugging, and binary analysis with x64dbg Automate MCP and the x64dbg-skills plugin.
+
 ## How to use this registry
 
 - Start with `AGENTS.md` for the always-on workspace rules.
