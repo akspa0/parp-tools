@@ -292,6 +292,65 @@ public sealed class LkToAlphaRoundTripTests
     }
 
     [Fact]
+    public void ConvertTile_ThroughAlphaWdt_BackToLkAdt_PreservesChunkFlagsAndMapsAreaIdsToLk()
+    {
+        string tempDirectory = Path.Combine(Path.GetTempPath(), $"wowviewer-alpha-to-lk-crosswalk-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(tempDirectory, "crosswalk.csv"),
+                "src_mapId,src_areaId,src_parentId,src_isZone,src_name,match_count,matches\n" +
+                "0,500,0,1,Dun Morogh,1,0:77:1:map_name:active:Anvilmar\n");
+
+            AreaIdMapper mapper = new();
+            mapper.LoadCrosswalkCsv(tempDirectory);
+
+            List<LkMcnkData> chunks = [];
+            for (int index = 0; index < 256; index++)
+            {
+                int chunkX = index % 16;
+                int chunkY = index / 16;
+                chunks.Add(CreateChunk(chunkX, chunkY, 25f + index, 0.01f, flags: 0, withAlpha: false));
+            }
+
+            chunks[(1 * 16) + 2] = CreateChunk(2, 1, 42f, 0.02f, flags: 0x40, withAlpha: false, areaId: 500);
+
+            LkAdtData adt = new()
+            {
+                TileX = 0,
+                TileY = 0,
+                TextureNames = ["terrain_a.blp"],
+                Chunks = chunks
+            };
+
+            AlphaTileData alphaTile = LkToAlphaConverter.ConvertTile(adt, 0, 0);
+            byte[] wdt = AlphaWdtWriter.Build("area_flag_roundtrip", new Dictionary<(int tileX, int tileY), AlphaTileData>
+            {
+                [(0, 0)] = alphaTile
+            });
+
+            Assert.True(AlphaWdtReader.TryReadTile(wdt, 0, 0, out AlphaTileData? alphaRoundTrip));
+            Assert.NotNull(alphaRoundTrip);
+            Assert.NotNull(alphaRoundTrip.AreaIds);
+            Assert.NotNull(alphaRoundTrip.McnkFlagsByChunk);
+            Assert.Equal(500, alphaRoundTrip.AreaIds![2, 1]);
+            Assert.Equal(0x40u, alphaRoundTrip.McnkFlagsByChunk![2, 1] & 0x40u);
+
+            LkAdtData lkRoundTrip = AlphaToLkConverter.ConvertTile(alphaRoundTrip, 0, 0, mapper, "Azeroth");
+            LkMcnkData roundTripChunk = lkRoundTrip.Chunks[(1 * 16) + 2];
+
+            Assert.Equal(77, roundTripChunk.AreaId);
+            Assert.Equal(0x40, roundTripChunk.Flags & 0x40);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void WriteAlphaWdt_RemapPreservedChunkRefsByUniqueIdAgainstFilteredPlacementTables()
     {
         float[,] heightmap = new float[257, 257];
@@ -478,6 +537,74 @@ public sealed class LkToAlphaRoundTripTests
             totalWorldRefs += ReadMcrfRefs(wdt, 0, 0, chunkIndex).WorldModelRefs.Length;
 
         Assert.True(totalWorldRefs >= worldModelCount, "Expected every WMO to keep at least one owning chunk after trimming.");
+    }
+
+    [Fact]
+    public void WriteAlphaWdt_ReassignsAdjacentDoodadOwnersWhenChunkWouldExceedAlphaClientLimit()
+    {
+        float[,] heightmap = new float[257, 257];
+        int[,,] texIds = new int[16, 16, 4];
+        bool[,,] layerMask = new bool[16, 16, 4];
+        for (int cy = 0; cy < 16; cy++)
+            for (int cx = 0; cx < 16; cx++)
+                layerMask[cx, cy, 0] = true;
+
+        const float mapOrigin = 17066.666f;
+        const float tileWorldSize = 533.33333f;
+        const float chunkWorldSize = tileWorldSize / 16f;
+        float chunk0MaxX = mapOrigin;
+        float chunk0MinX = chunk0MaxX - chunkWorldSize;
+        float chunk0MaxY = mapOrigin;
+        float chunk0MinY = chunk0MaxY - chunkWorldSize;
+
+        const int doodadCount = 4000;
+        List<AlphaModelPlacement> placements = new(doodadCount);
+        for (int index = 0; index < doodadCount; index++)
+        {
+            float xBias = (index % 5) * 0.25f;
+            float yBias = ((index / 5) % 5) * 0.25f;
+            placements.Add(new AlphaModelPlacement(
+                NameId: 0,
+                ModelPath: "world\\azeroth\\tree.mdx",
+                UniqueId: index + 1,
+                Position: new Vector3(chunk0MinX + 1.5f + xBias, chunk0MinY + 1.5f + yBias, 40f),
+                Rotation: Vector3.Zero,
+                Scale: 1.0f));
+        }
+
+        AlphaTileData tile = new(
+            sourcePath: "mcnk_doodad_spill_budget",
+            heightmap: heightmap,
+            mcalAlphaPack: null,
+            mclyTextureIds: texIds,
+            mclyLayerMask: layerMask,
+            holeMask: new bool[16, 16],
+            textureNames: ["terrain_a.blp"],
+            modelPlacements: placements,
+            worldModelPlacements: [],
+            liquidChunks: []);
+
+        byte[] wdt = AlphaWdtWriter.Build("mcnk_doodad_spill_budget", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        int chunk0DeclaredSize = ReadMcnkDeclaredSize(wdt, 0, 0, 0);
+        var chunk0Refs = ReadMcrfRefs(wdt, 0, 0, 0);
+        var chunk1Refs = ReadMcrfRefs(wdt, 0, 0, 1);
+        var chunk16Refs = ReadMcrfRefs(wdt, 0, 0, 16);
+        var chunk17Refs = ReadMcrfRefs(wdt, 0, 0, 17);
+
+        Assert.True(chunk0DeclaredSize < 15000, $"Expected MCNK payload below Alpha client limit, found {chunk0DeclaredSize}.");
+        Assert.True(chunk0Refs.DoodadRefs.Length < doodadCount, "Expected overloaded doodad ownership to spill into adjacent chunks.");
+        Assert.True(chunk1Refs.DoodadRefs.Length > 0 || chunk16Refs.DoodadRefs.Length > 0 || chunk17Refs.DoodadRefs.Length > 0,
+            "Expected at least one adjacent chunk to receive reassigned doodad ownership.");
+
+        int totalDoodadRefs = 0;
+        for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+            totalDoodadRefs += ReadMcrfRefs(wdt, 0, 0, chunkIndex).DoodadRefs.Length;
+
+        Assert.Equal(doodadCount, totalDoodadRefs);
     }
 
     [Fact]

@@ -196,8 +196,15 @@ public sealed class AlphaTerrainAdapter : ITerrainAdapter
             AlphaMaps = alphaMaps,
             Liquid = liquid,
             WorldPosition = new Vector3(chunkWorldX, chunkWorldY, 0f),
-            AreaId = 0,
-            McnkFlags = liquid != null ? 0x3C : 0
+            AreaId = tileData.AreaIds != null && cx < tileData.AreaIds.GetLength(0) && cy < tileData.AreaIds.GetLength(1)
+                ? tileData.AreaIds[cx, cy]
+                : 0,
+            McnkFlags = tileData.McnkFlagsByChunk != null && cx < tileData.McnkFlagsByChunk.GetLength(0) && cy < tileData.McnkFlagsByChunk.GetLength(1)
+                ? (int)tileData.McnkFlagsByChunk[cx, cy]
+                : 0,
+            AlphaSourceFlags = tileData.McnkFlagsByChunk != null && cx < tileData.McnkFlagsByChunk.GetLength(0) && cy < tileData.McnkFlagsByChunk.GetLength(1)
+                ? (int)tileData.McnkFlagsByChunk[cx, cy]
+                : 0
         };
     }
 

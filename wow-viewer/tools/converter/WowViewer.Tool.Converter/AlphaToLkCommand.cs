@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 
@@ -40,6 +41,10 @@ internal static class AlphaToLkCommand
             Console.WriteLine($"  Input:    {wdtPath}");
             Console.WriteLine($"  Output:   {outputDir}");
             Console.WriteLine($"  Verbose:  {options.Verbose}");
+
+            AreaIdMapper areaIdMapper = new();
+            if (!string.IsNullOrWhiteSpace(options.AreaCrosswalkPath))
+                areaIdMapper.LoadCrosswalkCsv(Path.GetFullPath(options.AreaCrosswalkPath));
 
             var sw = Stopwatch.StartNew();
 
@@ -84,7 +89,7 @@ internal static class AlphaToLkCommand
 
                 try
                 {
-                    LkAdtData adtData = AlphaToLkConverter.ConvertTile(tileData, tileX, tileY);
+                    LkAdtData adtData = AlphaToLkConverter.ConvertTile(tileData, tileX, tileY, areaIdMapper, mapName);
                     byte[] adtBytes = LkAdtWriter.Build(adtData);
                     string adtOutPath = Path.Combine(outputDir, $"{mapName}_{tileX}_{tileY}.adt");
                     File.WriteAllBytes(adtOutPath, adtBytes);
@@ -145,6 +150,7 @@ internal static class AlphaToLkCommand
         return new AlphaToLkOptions(
             InputPath: GetOption(args, "--input", "-i") ?? GetOption(args, "--wdt", "-w"),
             OutputDir: GetOption(args, "--output", "-o"),
+            AreaCrosswalkPath: GetOption(args, "--area-crosswalk", "-ac"),
             Verbose: HasFlag(args, "--verbose") || HasFlag(args, "-v"));
     }
 
@@ -174,5 +180,6 @@ internal static class AlphaToLkCommand
     private readonly record struct AlphaToLkOptions(
         string? InputPath,
         string? OutputDir,
+        string? AreaCrosswalkPath,
         bool Verbose);
 }

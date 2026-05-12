@@ -42,6 +42,7 @@ public static class LkToAlphaConverter
         bool[,,] layerMask = new bool[16, 16, 4];
         bool[,] holes = new bool[16, 16];
         int[,] areaIds = new int[16, 16];
+        uint[,] mcnkFlagsByChunk = new uint[16, 16];
         ushort[,] holeFullMasks = new ushort[16, 16];
         float[,,]? mccvRgb = new float[257, 257, 3];
         byte[,,]? mclvLighting = new byte[257, 257, 4];
@@ -73,6 +74,7 @@ public static class LkToAlphaConverter
                 InjectChunkShadow(shadowMask1024, chunk, cx, cy);
                 holes[cx, cy] = chunk.HoleMask != 0;
                 holeFullMasks[cx, cy] = (ushort)(chunk.HoleMask & 0xFFFF);
+                mcnkFlagsByChunk[cx, cy] = unchecked((uint)chunk.Flags);
                 areaIds[cx, cy] = areaIdMapper is null
                     ? chunk.AreaId
                     : areaIdMapper.MapAreaIdToAlpha(chunk.AreaId, sourceMapDirectory);
@@ -170,7 +172,8 @@ public static class LkToAlphaConverter
             mcrfDoodadRefsByChunk: mcrfDoodadRefsByChunk,
             mcrfWorldModelRefsByChunk: mcrfWorldModelRefsByChunk,
             mcrfDoodadUniqueIdsByChunk: mcrfDoodadUniqueIdsByChunk,
-            mcrfWorldModelUniqueIdsByChunk: mcrfWorldModelUniqueIdsByChunk);
+            mcrfWorldModelUniqueIdsByChunk: mcrfWorldModelUniqueIdsByChunk,
+            mcnkFlagsByChunk: mcnkFlagsByChunk);
     }
 
     private static IReadOnlyList<int> MapDoodadRefsToUniqueIds(IReadOnlyList<int> refs, IReadOnlyList<LkMddfEntry> placements)

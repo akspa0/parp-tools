@@ -1,4 +1,5 @@
 using System.Numerics;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -28,6 +29,12 @@ public static class AlphaToLkConverter
     private const float ChunkSubSize = ChunkSize / 16f;
     private const int TileHeightmapSize = 257;
     private const int ChunksPerTile = 16;
+
+    private static readonly Dictionary<string, int> AlphaContinentHints = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Azeroth"] = 0,
+        ["Kalimdor"] = 1,
+    };
 
     public static AlphaToLkConversionResult ConvertWdt(
         string wdtPath,
@@ -62,6 +69,10 @@ public static class AlphaToLkConverter
             var wdlTiles = new List<WdlHeightTile>();
             int converted = 0;
 
+            AreaIdMapper areaIdMapper = new();
+            if (!string.IsNullOrWhiteSpace(options?.AreaCrosswalkPath))
+                areaIdMapper.LoadCrosswalkCsv(options.AreaCrosswalkPath);
+
             foreach (var (tileX, tileY) in existingTiles)
             {
                 if (!AlphaWdtReader.TryReadTile(wdtData, tileX, tileY, out AlphaTileData? tileData) || tileData == null)
@@ -70,7 +81,7 @@ public static class AlphaToLkConverter
                     continue;
                 }
 
-                LkAdtData adtData = ConvertTile(tileData, tileX, tileY);
+                LkAdtData adtData = ConvertTile(tileData, tileX, tileY, areaIdMapper, mapName);
                 byte[] adtBytes = LkAdtWriter.Build(adtData);
                 File.WriteAllBytes(Path.Combine(outputDir, $"{mapName}_{tileX}_{tileY}.adt"), adtBytes);
 
@@ -104,7 +115,7 @@ public static class AlphaToLkConverter
         }
     }
 
-    public static LkAdtData ConvertTile(AlphaTileData tile, int tileX, int tileY)
+    public static LkAdtData ConvertTile(AlphaTileData tile, int tileX, int tileY, AreaIdMapper? areaIdMapper = null, string? sourceMapDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(tile);
 
@@ -134,7 +145,7 @@ public static class AlphaToLkConverter
         {
             for (int cx = 0; cx < ChunksPerTile; cx++)
             {
-                chunks.Add(BuildChunkData(tile, cx, cy, tileX, tileY, textureNames, modelPlacements, worldModelPlacements));
+                chunks.Add(BuildChunkData(tile, cx, cy, tileX, tileY, textureNames, modelPlacements, worldModelPlacements, areaIdMapper, sourceMapDirectory));
             }
         }
 
@@ -158,8 +169,14 @@ public static class AlphaToLkConverter
         AlphaTileData tile, int cx, int cy, int tileX, int tileY,
         List<string> textureNames,
         List<LkMddfEntry> modelPlacements,
-        List<LkModfEntry> worldModelPlacements)
+        List<LkModfEntry> worldModelPlacements,
+        AreaIdMapper? areaIdMapper,
+        string? sourceMapDirectory)
     {
+        int sourceAreaId = GetSourceAreaId(tile, cx, cy);
+        int areaId = MapAreaIdToLk(sourceAreaId, areaIdMapper, sourceMapDirectory);
+        uint sourceFlags = GetSourceChunkFlags(tile, cx, cy);
+
         int chunkAlphaSourceSize = tile.McalAlphaPack != null
             ? tile.McalAlphaPack.GetLength(0) / 16
             : 64;
@@ -168,7 +185,13 @@ public static class AlphaToLkConverter
         float baseHeight = 0f;
         float[] heights = ExtractChunkHeights(tile.Heightmap, cx, cy);
         foreach (float h in heights) { if (h != 0f) { hasData = true; } }
-        if (!hasData) return CreateEmptyChunk(cx, cy, tileX, tileY);
+        if (!hasData)
+        {
+            int emptyLiquidType = (sourceFlags & 0x3Cu) != 0
+                ? AlphaLiquidTypeCodec.ClassifyCoarseType(null, sourceFlags)
+                : 0;
+            return CreateEmptyChunk(cx, cy, tileX, tileY, areaId, ResolveLkChunkFlags(sourceFlags, shadowPresent: (sourceFlags & 0x01u) != 0, emptyLiquidType));
+        }
 
         baseHeight = ComputeBaseHeight(heights);
 
@@ -183,17 +206,8 @@ public static class AlphaToLkConverter
 
         AdtLiquidChunk? liquidData = BuildLiquidData(tile, cx, cy);
 
-        uint mcnkFlags = 0;
         int liquid = FindLiquidType(tile, cx, cy);
-        if (liquid > 0)
-            mcnkFlags |= (liquid == 1) ? 0x08u : (liquid == 2) ? 0x10u : 0x18u;
-
-        if (shadowMap != null)
-            mcnkFlags |= 0x01u;
-
-        int areaId = tile.AreaIds != null && cy < tile.AreaIds.GetLength(0) && cx < tile.AreaIds.GetLength(1)
-            ? tile.AreaIds[cy, cx]
-            : 0;
+        uint mcnkFlags = ResolveLkChunkFlags(sourceFlags, shadowMap != null, liquid);
 
         int nLayers = 0;
         for (int l = 0; l < 4; l++)
@@ -271,7 +285,7 @@ public static class AlphaToLkConverter
         };
     }
 
-    private static LkMcnkData CreateEmptyChunk(int cx, int cy, int tileX, int tileY)
+    private static LkMcnkData CreateEmptyChunk(int cx, int cy, int tileX, int tileY, int areaId, uint mcnkFlags)
     {
         float posX = -((ChunkSubSize * cy) + ChunkSize * tileY - ChunkSize * 32f);
         float posY = -((ChunkSubSize * cx) + ChunkSize * tileX - ChunkSize * 32f);
@@ -280,8 +294,8 @@ public static class AlphaToLkConverter
         {
             IndexX = cx,
             IndexY = cy,
-            Flags = 0,
-            AreaId = 0,
+            Flags = (int)mcnkFlags,
+            AreaId = areaId,
             NLayers = 0,
             HoleMask = 0,
             BaseHeight = 0f,
@@ -291,6 +305,58 @@ public static class AlphaToLkConverter
             PosY = posY,
             PosZ = 0f
         };
+    }
+
+    private static int GetSourceAreaId(AlphaTileData tile, int cx, int cy)
+    {
+        return tile.AreaIds != null && cx < tile.AreaIds.GetLength(0) && cy < tile.AreaIds.GetLength(1)
+            ? tile.AreaIds[cx, cy]
+            : 0;
+    }
+
+    private static uint GetSourceChunkFlags(AlphaTileData tile, int cx, int cy)
+    {
+        if (tile.McnkFlagsByChunk != null && cx < tile.McnkFlagsByChunk.GetLength(0) && cy < tile.McnkFlagsByChunk.GetLength(1))
+            return tile.McnkFlagsByChunk[cx, cy];
+
+        AlphaLiquidChunk? liquidChunk = FindAlphaLiquidChunk(tile, cx, cy);
+        return liquidChunk?.McnkFlags ?? 0u;
+    }
+
+    private static int MapAreaIdToLk(int alphaAreaId, AreaIdMapper? areaIdMapper, string? sourceMapDirectory)
+    {
+        if (alphaAreaId == 0 || areaIdMapper is null)
+            return alphaAreaId;
+
+        int? continentHint = ResolveAlphaContinentHint(sourceMapDirectory);
+        int mappedAreaId = areaIdMapper.MapAreaId(alphaAreaId, continentHint);
+        return mappedAreaId != 0 ? mappedAreaId : alphaAreaId;
+    }
+
+    private static int? ResolveAlphaContinentHint(string? sourceMapDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(sourceMapDirectory))
+            return null;
+
+        return AlphaContinentHints.TryGetValue(sourceMapDirectory, out int continentHint)
+            ? continentHint
+            : null;
+    }
+
+    private static uint ResolveLkChunkFlags(uint sourceFlags, bool shadowPresent, int liquidType)
+    {
+        uint flags = sourceFlags & ~0x3Cu;
+
+        if (liquidType <= 0 && (sourceFlags & 0x3Cu) != 0)
+            liquidType = AlphaLiquidTypeCodec.ClassifyCoarseType(null, sourceFlags);
+
+        if (liquidType > 0)
+            flags |= liquidType == 1 ? 0x08u : liquidType == 2 ? 0x10u : 0x18u;
+
+        if (shadowPresent)
+            flags |= 0x01u;
+
+        return flags;
     }
 
     private static float[] ExtractChunkHeights(float[,] heightmap, int cx, int cy)
@@ -502,6 +568,20 @@ public static class AlphaToLkConverter
             }
         }
         return 0;
+    }
+
+    private static AlphaLiquidChunk? FindAlphaLiquidChunk(AlphaTileData tile, int cx, int cy)
+    {
+        if (tile.LiquidChunks == null)
+            return null;
+
+        foreach (AlphaLiquidChunk liquidChunk in tile.LiquidChunks)
+        {
+            if (liquidChunk.IndexX == cx && liquidChunk.IndexY == cy)
+                return liquidChunk;
+        }
+
+        return null;
     }
 
     private static AdtLiquidChunk? BuildLiquidData(AlphaTileData tile, int cx, int cy)
