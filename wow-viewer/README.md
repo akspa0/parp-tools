@@ -43,7 +43,7 @@ The project currently has four practical jobs:
 - **AlphaWdtWriter structural fixup**: MAIN grid order corrected to row-major (matching the 0.5.3 client), all 256 MCNKs always emitted with full subchunk structure, and client-required empty MDDF/MODF/MCRF chunks emitted when needed
 - **Canonical alphaWDT read/write stack**: `AlphaWdtReader`, `AlphaWdtWriter`, `AlphaTerrainAdapter`, `AlphaToLkConverter`, and `LkToAlphaConverter` now carry the shared alphaWDT contract; `MdxViewer` is a compatibility consumer, not the format owner
 - **LkAdtWriter FourCC fix**: all chunk IDs use `FourCC.FromString().ToFileBytes()` instead of `Encoding.ASCII.GetBytes()` for I/O boundary consistency
-- **Asset name fixup** (`--target-client-root`): filters placements referencing assets missing in target client (scans Alpha per-asset `.wmo.MPQ`/`.mdx.MPQ` wrappers)
+- **Asset name fixup** (`--target-client-root`): filters placements against assets actually present in the target client (including Alpha per-asset `.wmo.MPQ`/`.mdx.MPQ` wrappers) and removes target-incompatible placements instead of writing fake placeholder asset paths into the alpha output
 - **Tileset bundling** (`--bundle-tilesets`): extracts unique BLP textures from source client, writes to `tilesets/{map_name}/`, fixes up WDT MTEX references to local paths
 - **Model bundling** (`--bundle-m2s`): converts source `M2` doodads into local bundled `MDX` assets, copies or rewrites bundled model textures beside those outputs, and rewrites Alpha placement paths plus `TEXS` entries to the local bundled BLP paths
 - **End-to-end validation**: `convert-lk-to-alpha` output loads and renders successfully in legacy MdxViewer with staged 0.5.3 client (terrain-only and filtered-placements modes)
@@ -250,7 +250,8 @@ Current important commands:
 | `--output <path>` / `-o` | Output Alpha WDT path |
 | `--output-wdl <path>` / `--wdl` | Output WDL path (default: `output.wdl`) |
 | `--asset-root <dir>` | Optional repeated asset search root for loose `--input` conversions; searched in order before the input directory when bundling tilesets |
-| `--target-client-root <dir>` / `-tcr` | Target client root for asset filtering (e.g. 0.5.3) |
+| `--tileset-provenance-report <report.json>` | Optional JSON report recording which asset root supplied each bundled tileset texture |
+| `--target-client-root <dir>` / `-tcr` | Target client root for asset filtering (e.g. 0.5.3); placements missing from that client are removed from the alpha output |
 | `--terrain-only` / `-to` | Strip all placements (for crash-free validation) |
 | `--bundle-tilesets` / `-bt` | Accepted for compatibility; tileset extraction is now on by default |
 | `--no-bundle-tilesets` / `-nbt` | Disable default tileset extraction |
@@ -290,8 +291,8 @@ dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowVi
 # Disable default tileset bundling
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt" --no-bundle-tilesets
 
-# Loose LK input with mixed-era tileset roots
-dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --input ".\output\build-validation\development-lk-museum-report" --asset-root ".\wow-viewer\test_data\0.6.0\World of Warcraft" --asset-root ".\output\tmp\wowarchive-clients\3_3_5_12340\World of Warcraft" --output ".\output\build-validation\development.alpha.wdt"
+# Loose LK input with mixed-era tileset roots and provenance capture
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --input ".\output\build-validation\development-lk-museum-report" --asset-root ".\wow-viewer\test_data\0.6.0\World of Warcraft" --asset-root ".\output\tmp\wowarchive-clients\3_3_5_12340\World of Warcraft" --tileset-provenance-report ".\output\build-validation\development.alpha.tileset-provenance.json" --output ".\output\build-validation\development.alpha.wdt"
 
 # Quick test (5 tiles)
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "test.alpha.wdt" --limit 5
@@ -347,7 +348,7 @@ The executable is at `gillijimproject_refactor\src\MdxViewer\bin\Debug\net10.0\P
 & "gillijimproject_refactor\src\MdxViewer\bin\Debug\net10.0\ParpToolsWoWViewer.exe" --verbose --partial-load --game-path "output\tmp\wowarchive-clients\0_5_3_3368\World of Warcraft" --build "0.5.3.3368" --loose-map-overlay "$PWD\output\overlay" --world "World\Maps\Azeroth\Azeroth.wdt" --capture-shot current --capture-output "$PWD\output\captures" --capture-after-frames 30 --capture-with-ui --exit-after-capture
 ```
 
-**With asset filtering (placements reference only existing 0.5.3 assets):**
+**With asset filtering (placements missing from 0.5.3 are removed before write):**
 
 Same command as above, but generate the WDT with `--target-client-root` pointing to 0.5.3:
 
@@ -427,7 +428,7 @@ Still open:
 - split ADT output for later clients
 - Mdx↔M2 converters and WMO v14↔v17 converters
 
-The reverse LK-to-Alpha converter now exists in `wow-viewer` and is covered by focused `LkToAlphaRoundTripTests`, including `MH2O <-> MCLQ` liquid preservation through the shared conversion path. Extended features include `--target-client-root` asset filtering and `--bundle-tilesets` texture extraction.
+The reverse LK-to-Alpha converter now exists in `wow-viewer` and is covered by focused `LkToAlphaRoundTripTests`, including `MH2O <-> MCLQ` liquid preservation through the shared conversion path. Extended features include `--target-client-root` target-aware placement removal and `--bundle-tilesets` texture extraction.
 
 For harvested ADT tiles, the NPZ shard contract now also preserves unconsumed ADT-family chunks as raw uint8 blobs under `raw_chunks/...` inside the `.npz`, with metadata entries describing source file kind, chunk id, and MCNK location when applicable. That closes the previous hard drop of format data the current tensor pack does not yet decode.
 

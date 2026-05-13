@@ -402,7 +402,7 @@ internal static class SplitAdtToLkCommand
         if (!AlphaWdtReader.TryReadTile(donor.WdtBytes, tileX, tileY, out AlphaTileData? tileData) || tileData is null)
             return false;
 
-        adtData = AlphaToLkConverter.ConvertTile(tileData, tileX, tileY, sourceMapDirectory: donor.MapName);
+        adtData = AlphaToLkConverter.ConvertTile(tileData, tileX, tileY);
         donorSource = $"{donor.DonorWdtVirtualPath}#{tileX},{tileY}";
         return true;
     }

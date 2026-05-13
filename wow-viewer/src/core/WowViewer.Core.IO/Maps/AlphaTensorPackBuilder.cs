@@ -160,7 +160,7 @@ public static class AlphaTensorPackBuilder
             int baseY = chunkY * VerticesPerChunk;
 
             float avgHeight = (lc.MinHeight + lc.MaxHeight) * 0.5f;
-            int liquidType = McnkFlagsToLiquidType(lc.TileFlags, lc.McnkFlags);
+            int liquidType = McnkFlagsToLiquidType(lc.MinHeight, lc.MaxHeight, lc.McnkFlags);
 
             for (int vy = 0; vy < VerticesPerChunk; vy++)
             {
@@ -181,9 +181,12 @@ public static class AlphaTensorPackBuilder
         signals.Add("mclq_type_mask");
     }
 
-    private static int McnkFlagsToLiquidType(byte[]? tileFlags, uint mcnkFlags)
+    private static int McnkFlagsToLiquidType(float minH, float maxH, uint mcnkFlags)
     {
-        return AlphaLiquidTypeCodec.ClassifyCoarseType(tileFlags, mcnkFlags);
+        if ((mcnkFlags & 0x08u) != 0)
+            return 1;
+        int liquidBits = (int)((mcnkFlags >> 4) & 3u);
+        return liquidBits;
     }
 
     private static float[,]? DownsampleHeightmap(float[,]? source, int targetSize)

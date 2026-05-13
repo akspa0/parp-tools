@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Blp;
 using WowViewer.Core.IO.Chunked;
@@ -308,12 +309,13 @@ internal static class LkToAlphaCommand
             string sourceForAssets = options.ClientRoot ?? options.InputDir ?? ".";
             List<string> tilesetAssetRoots = ResolveTilesetAssetRoots(options);
             string? tilesetRoot = null;
+            TilesetBundlingResult? tilesetBundlingResult = null;
             string? mdxRoot = null;
             string? wmoRoot = null;
             if (options.BundleTilesets)
             {
                 tilesetRoot = Path.Combine(outputDir, "tilesets", mapName);
-                BundleTilesets(tiles, tilesetAssetRoots, mapName, tilesetRoot);
+                tilesetBundlingResult = BundleTilesets(tiles, tilesetAssetRoots, mapName, tilesetRoot);
             }
 
             Dictionary<string, string>? bundledMdxPaths = null;
@@ -338,8 +340,6 @@ internal static class LkToAlphaCommand
                     kvp => RewriteBundledAssetPaths(kvp.Value, tilesetPrefix, bundledMdxPaths, bundledWmoPaths, targetFileSet));
             }
 
-            (int finalPlaceholderModels, int finalPlaceholderWmos) = CountPlaceholderPlacements(tiles);
-
             byte[] wdtData = AlphaWdtWriter.Build(mapName, tiles);
             File.WriteAllBytes(outputPath, wdtData);
             var wdlTiles = tiles
@@ -357,7 +357,7 @@ internal static class LkToAlphaCommand
             Console.WriteLine($"  Elapsed:   {sw.ElapsedMilliseconds}ms");
 
             if (targetFileSet != null)
-                Console.WriteLine($"  Assets:   {finalPlaceholderModels} MDX + {finalPlaceholderWmos} WMO placements mapped to placeholders ({PlaceholderMdx}, {PlaceholderWmo})");
+                Console.WriteLine($"  Assets:   removed {missingModelNames} MDX + {missingWmoNames} WMO placements missing from the target client");
 
             if (warnings.Count > 0)
             {
@@ -370,6 +370,12 @@ internal static class LkToAlphaCommand
 
             if (tilesetRoot != null)
                 Console.WriteLine($"  Tilesets: extracted and fixed up paths in {tilesetRoot}");
+            if (!string.IsNullOrWhiteSpace(options.TilesetProvenanceReportPath) && tilesetBundlingResult is not null)
+            {
+                string reportPath = Path.GetFullPath(options.TilesetProvenanceReportPath);
+                WriteTilesetProvenanceReport(reportPath, mapName, tilesetAssetRoots, tilesetBundlingResult.Value);
+                Console.WriteLine($"  Tileset provenance: {reportPath}");
+            }
             if (mdxRoot != null)
                 Console.WriteLine($"  MDXs:     converted/copied and bundled in {mdxRoot}");
             if (wmoRoot != null)
@@ -388,7 +394,7 @@ internal static class LkToAlphaCommand
     private const string PlaceholderMdx = "World\\ArtTest\\Boxtest\\xyz.mdx";
     private const string PlaceholderWmo = "World\\wmo\\Dungeon\\test\\missingwmo.wmo";
 
-    private static (List<string> names, List<LkMddfEntry> placements, List<string> wmoNames, List<LkModfEntry> wmoPlacements, List<LkMcnkData> chunks, int mappedModels, int mappedWmos)
+    private static (List<string> names, List<LkMddfEntry> placements, List<string> wmoNames, List<LkModfEntry> wmoPlacements, List<LkMcnkData> chunks, int skippedModels, int skippedWmos)
         FilterPlacements(LkAdtData adtData, HashSet<string> targetFileSet, bool preserveSourceModelPaths = false, bool preserveSourceWmoPaths = false)
     {
         var names = new List<string>();
@@ -401,7 +407,7 @@ internal static class LkToAlphaCommand
         var wmoPlacementList = new List<LkModfEntry>();
         int[] filteredWmoIndexBySourceIndex = Enumerable.Repeat(-1, adtData.WorldModelPlacements.Count).ToArray();
         var seenWmoUniqueIds = new HashSet<int>();
-        int mappedModels = 0, mappedWmos = 0;
+        int skippedModels = 0, skippedWmos = 0;
 
         static int GetOrAddNameIndex(string path, List<string> names, Dictionary<string, int> index)
         {
@@ -459,10 +465,14 @@ internal static class LkToAlphaCommand
             string mappedPath = preserveSourceModelPaths
                 ? ResolveBundledModelSourcePath(path)
                 : ResolveModelPath(path);
-            int mappedNameId = GetOrAddNameIndex(mappedPath, names, nameIndex);
 
-            if (!preserveSourceModelPaths && !ReferenceEquals(mappedPath, path) && !string.Equals(mappedPath, path, StringComparison.OrdinalIgnoreCase))
-                mappedModels++;
+            if (!preserveSourceModelPaths && string.Equals(mappedPath, PlaceholderMdx, StringComparison.OrdinalIgnoreCase))
+            {
+                skippedModels++;
+                continue;
+            }
+
+            int mappedNameId = GetOrAddNameIndex(mappedPath, names, nameIndex);
 
             filteredModelIndexBySourceIndex[i] = placementList.Count;
             placementList.Add(new LkMddfEntry(
@@ -479,10 +489,14 @@ internal static class LkToAlphaCommand
             string mappedPath = preserveSourceWmoPaths
                 ? (PathExists(path) ? path : path)
                 : (PathExists(path) ? path : PlaceholderWmo);
-            int mappedNameId = GetOrAddNameIndex(mappedPath, wmoNames, wmoNameIndex);
 
-            if (!preserveSourceWmoPaths && !ReferenceEquals(mappedPath, path) && !string.Equals(mappedPath, path, StringComparison.OrdinalIgnoreCase))
-                mappedWmos++;
+            if (!preserveSourceWmoPaths && string.Equals(mappedPath, PlaceholderWmo, StringComparison.OrdinalIgnoreCase))
+            {
+                skippedWmos++;
+                continue;
+            }
+
+            int mappedNameId = GetOrAddNameIndex(mappedPath, wmoNames, wmoNameIndex);
 
             filteredWmoIndexBySourceIndex[i] = wmoPlacementList.Count;
             wmoPlacementList.Add(new LkModfEntry(
@@ -517,7 +531,7 @@ internal static class LkToAlphaCommand
             })
             .ToList();
 
-        return (names, placementList, wmoNames, wmoPlacementList, filteredChunks, mappedModels, mappedWmos);
+        return (names, placementList, wmoNames, wmoPlacementList, filteredChunks, skippedModels, skippedWmos);
 
         string ResolveBundledModelSourcePath(string path)
         {
@@ -733,7 +747,7 @@ internal static class LkToAlphaCommand
         files.Add(normalized.Replace('\\', '/'));
     }
 
-    private static void BundleTilesets(
+    private static TilesetBundlingResult BundleTilesets(
         Dictionary<(int, int), AlphaTileData> tiles,
         IReadOnlyList<string> sourceRoots, string mapName, string tilesetRoot)
     {
@@ -744,9 +758,11 @@ internal static class LkToAlphaCommand
                 texturePaths.Add(tex);
         }
 
-        if (texturePaths.Count == 0) return;
+        if (texturePaths.Count == 0)
+            return new TilesetBundlingResult(0, 0, 0, 0, 0, []);
 
         List<AssetSource> assetSources = CreateAssetSources(sourceRoots);
+        List<TilesetProvenanceEntry> provenanceEntries = [];
 
         Directory.CreateDirectory(tilesetRoot);
 
@@ -760,12 +776,20 @@ internal static class LkToAlphaCommand
                 string? localDir = Path.GetDirectoryName(localPath);
                 if (localDir != null) Directory.CreateDirectory(localDir);
 
-                byte[]? data = ReadSourceAsset(assetSources, normPath);
+                byte[]? data = TryReadSourceAsset(assetSources, normPath, out string? sourceRootUsed);
                 if (data != null)
                 {
                     AlphaBlpCompatibilityResult compatibility = AlphaBlpCompatibilityService.NormalizeForAlphaClient(normPath, data);
                     File.WriteAllBytes(localPath, compatibility.Data);
                     extracted++;
+                    provenanceEntries.Add(new TilesetProvenanceEntry(
+                        TexturePath: normPath,
+                        BundledRelativePath: normPath,
+                        SourceRoot: sourceRootUsed,
+                        Found: true,
+                        Rewritten: compatibility.Rewritten,
+                        Resized: compatibility.Resized,
+                        SpecularReencoded: compatibility.SpecularReencoded));
                     if (compatibility.Rewritten)
                     {
                         normalized++;
@@ -778,6 +802,14 @@ internal static class LkToAlphaCommand
                 else
                 {
                     failed++;
+                    provenanceEntries.Add(new TilesetProvenanceEntry(
+                        TexturePath: normPath,
+                        BundledRelativePath: normPath,
+                        SourceRoot: null,
+                        Found: false,
+                        Rewritten: false,
+                        Resized: false,
+                        SpecularReencoded: false));
                 }
             }
         }
@@ -790,6 +822,8 @@ internal static class LkToAlphaCommand
             (failed > 0 ? $" ({failed} missing)" : ""));
         if (normalized > 0)
             Console.WriteLine($"    Re-encoded: {normalized} textures for 0.5.x compatibility ({specularReencoded} specular, {resized} resized)");
+
+        return new TilesetBundlingResult(extracted, failed, normalized, resized, specularReencoded, provenanceEntries);
     }
 
     private static Dictionary<string, string> BundleWorldModels(
@@ -1612,7 +1646,7 @@ internal static class LkToAlphaCommand
             : tile.TextureNames.Select(t => tilesetPrefix + t.TrimStart('\\')).ToList();
 
         IReadOnlyList<AlphaModelPlacement> modelPlacements = bundledMdxPaths is null
-            ? tile.ModelPlacements
+            ? tile.ModelPlacements.Where(static placement => !string.Equals(placement.ModelPath, PlaceholderMdx, StringComparison.OrdinalIgnoreCase)).ToList()
             : tile.ModelPlacements.Select(placement =>
             {
                 string normalized = NormalizeVirtualPath(placement.ModelPath);
@@ -1631,10 +1665,12 @@ internal static class LkToAlphaCommand
                     placement.Position,
                     placement.Rotation,
                     placement.Scale);
-            }).ToList();
+            })
+            .Where(static placement => !string.Equals(placement.ModelPath, PlaceholderMdx, StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
         IReadOnlyList<AlphaWorldModelPlacement> worldModelPlacements = bundledWmoPaths is null
-            ? tile.WorldModelPlacements
+            ? tile.WorldModelPlacements.Where(static placement => !string.Equals(placement.ModelPath, PlaceholderWmo, StringComparison.OrdinalIgnoreCase)).ToList()
             : tile.WorldModelPlacements.Select(placement =>
             {
                 string normalized = NormalizeVirtualPath(placement.ModelPath);
@@ -1655,7 +1691,9 @@ internal static class LkToAlphaCommand
                     placement.BoundsMin,
                     placement.BoundsMax,
                     placement.Flags);
-                    }).ToList();
+                    })
+            .Where(static placement => !string.Equals(placement.ModelPath, PlaceholderWmo, StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
         return new AlphaTileData(
             tile.SourcePath,
@@ -1684,20 +1722,6 @@ internal static class LkToAlphaCommand
             mcrfWorldModelRefsByChunk: tile.McrfWorldModelRefsByChunk,
             mcrfDoodadUniqueIdsByChunk: tile.McrfDoodadUniqueIdsByChunk,
             mcrfWorldModelUniqueIdsByChunk: tile.McrfWorldModelUniqueIdsByChunk);
-    }
-
-    private static (int PlaceholderModels, int PlaceholderWmos) CountPlaceholderPlacements(Dictionary<(int, int), AlphaTileData> tiles)
-    {
-        int placeholderModels = 0;
-        int placeholderWmos = 0;
-
-        foreach (AlphaTileData tile in tiles.Values)
-        {
-            placeholderModels += tile.ModelPlacements.Count(static placement => string.Equals(placement.ModelPath, PlaceholderMdx, StringComparison.OrdinalIgnoreCase));
-            placeholderWmos += tile.WorldModelPlacements.Count(static placement => string.Equals(placement.ModelPath, PlaceholderWmo, StringComparison.OrdinalIgnoreCase));
-        }
-
-        return (placeholderModels, placeholderWmos);
     }
 
     private static bool IsArchiveBackedSource(string sourceRoot)
@@ -1751,6 +1775,22 @@ internal static class LkToAlphaCommand
         return sources;
     }
 
+    private static byte[]? TryReadSourceAsset(IReadOnlyList<AssetSource> assetSources, string path, out string? sourceRoot)
+    {
+        foreach (AssetSource assetSource in assetSources)
+        {
+            byte[]? data = ReadSourceAsset(assetSource.Root, assetSource.Catalog, path);
+            if (data is not null)
+            {
+                sourceRoot = assetSource.Root;
+                return data;
+            }
+        }
+
+        sourceRoot = null;
+        return null;
+    }
+
     private static void DisposeAssetSources(IEnumerable<AssetSource> assetSources)
     {
         foreach (AssetSource assetSource in assetSources)
@@ -1766,14 +1806,31 @@ internal static class LkToAlphaCommand
 
     private static byte[]? ReadSourceAsset(IReadOnlyList<AssetSource> assetSources, string path)
     {
-        foreach (AssetSource assetSource in assetSources)
-        {
-            byte[]? data = ReadSourceAsset(assetSource.Root, assetSource.Catalog, path);
-            if (data is not null)
-                return data;
-        }
+        return TryReadSourceAsset(assetSources, path, out _);
+    }
 
-        return null;
+    private static void WriteTilesetProvenanceReport(
+        string reportPath,
+        string mapName,
+        IReadOnlyList<string> assetRoots,
+        TilesetBundlingResult bundlingResult)
+    {
+        string? reportDirectory = Path.GetDirectoryName(reportPath);
+        if (!string.IsNullOrWhiteSpace(reportDirectory))
+            Directory.CreateDirectory(reportDirectory);
+
+        var report = new TilesetProvenanceReport(
+            MapName: mapName,
+            AssetRoots: assetRoots,
+            Extracted: bundlingResult.Extracted,
+            Missing: bundlingResult.Missing,
+            Rewritten: bundlingResult.Rewritten,
+            Resized: bundlingResult.Resized,
+            SpecularReencoded: bundlingResult.SpecularReencoded,
+            Entries: bundlingResult.Entries);
+
+        string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(reportPath, json);
     }
 
     private static byte[]? ReadSourceAsset(string sourceRoot, NativeMpqService? catalog, string path)
@@ -1814,6 +1871,7 @@ internal static class LkToAlphaCommand
                 AssetRoots: GetOptions(args, "--asset-root"),
                 OutputPath: GetOption(args, "--output", "-o"),
                 OutputWdlPath: GetOption(args, "--output-wdl", "--wdl"),
+                TilesetProvenanceReportPath: GetOption(args, "--tileset-provenance-report", "-tpr"),
                 ClientRoot: GetOption(args, "--client-root", "-c"),
                 TargetClientRoot: GetOption(args, "--target-client-root", "-tcr") ?? GetOption(args, "--target-client-route", "--target-client-route"),
                 MapName: GetOption(args, "--map", "-m"),
@@ -1870,6 +1928,7 @@ internal static class LkToAlphaCommand
         IReadOnlyList<string> AssetRoots,
         string? OutputPath,
         string? OutputWdlPath,
+        string? TilesetProvenanceReportPath,
         string? ClientRoot,
         string? TargetClientRoot,
         string? MapName,
@@ -1880,4 +1939,31 @@ internal static class LkToAlphaCommand
         bool BundleWmos);
 
     private readonly record struct AssetSource(string Root, NativeMpqService? Catalog);
+
+    private readonly record struct TilesetBundlingResult(
+        int Extracted,
+        int Missing,
+        int Rewritten,
+        int Resized,
+        int SpecularReencoded,
+        IReadOnlyList<TilesetProvenanceEntry> Entries);
+
+    private readonly record struct TilesetProvenanceEntry(
+        string TexturePath,
+        string BundledRelativePath,
+        string? SourceRoot,
+        bool Found,
+        bool Rewritten,
+        bool Resized,
+        bool SpecularReencoded);
+
+    private readonly record struct TilesetProvenanceReport(
+        string MapName,
+        IReadOnlyList<string> AssetRoots,
+        int Extracted,
+        int Missing,
+        int Rewritten,
+        int Resized,
+        int SpecularReencoded,
+        IReadOnlyList<TilesetProvenanceEntry> Entries);
 }

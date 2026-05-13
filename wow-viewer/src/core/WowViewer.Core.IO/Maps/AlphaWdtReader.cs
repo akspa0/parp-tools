@@ -209,8 +209,6 @@ public static class AlphaWdtReader
         int[,,] texIds = new int[16, 16, 4];
         bool[,,] layerMask = new bool[16, 16, 4];
         bool[,] holes = new bool[16, 16];
-        int[,] areaIds = new int[16, 16];
-        uint[,] mcnkFlagsByChunk = new uint[16, 16];
         List<AlphaLiquidChunk> liquidChunks = [];
         List<AlphaModelPlacement> modelPlacements = [];
         List<AlphaWorldModelPlacement> worldModelPlacements = [];
@@ -225,7 +223,7 @@ public static class AlphaWdtReader
             activeChunkCount++;
 
             if (!TryParseMcnk(container, mcnkOffset, textureNameList,
-                    heightmap, alphaPack, normalXyz, alphaPackShadow, texIds, layerMask, holes, areaIds, mcnkFlagsByChunk, liquidChunks,
+                    heightmap, alphaPack, normalXyz, alphaPackShadow, texIds, layerMask, holes, liquidChunks,
                     ref hasHeight, ref hasAlpha, ref hasNormals, ref hasShadow, ref totalMcshBytes))
                 continue;
         }
@@ -259,7 +257,7 @@ public static class AlphaWdtReader
                 for (int y = baseY; y < endY; y++)
                     for (int x = baseX; x < endX; x++)
                         mclqSurface[y, x] = avgHeight;
-                mclqTypes[lc.IndexX, lc.IndexY] = ClassifyLiquid(lc.TileFlags, lc.McnkFlags);
+                mclqTypes[lc.IndexX, lc.IndexY] = ClassifyLiquid(lc.McnkFlags);
                 hasLiquid = true;
             }
         }
@@ -280,9 +278,7 @@ public static class AlphaWdtReader
             mclqSurfaceHeight: hasLiquid ? mclqSurface : null,
             mclqTypeMask: hasLiquid ? mclqTypes : null,
             mcshShadowMask1024: hasShadow ? alphaPackShadow : null,
-            rawChunks: rawChunks,
-            areaIds: areaIds,
-            mcnkFlagsByChunk: mcnkFlagsByChunk);
+            rawChunks: rawChunks);
 
         return true;
     }
@@ -434,7 +430,7 @@ public static class AlphaWdtReader
     private static bool TryParseMcnk(byte[] container, int mcnkOffset,
         IReadOnlyList<string> textureNames,
         float[,] heightmap, float[,,] alphaPack, float[,,] normalXyz, float[,] alphaPackShadow,
-        int[,,] texIds, bool[,,] layerMask, bool[,] holes, int[,] areaIds, uint[,] mcnkFlagsByChunk,
+        int[,,] texIds, bool[,,] layerMask, bool[,] holes,
         List<AlphaLiquidChunk> liquidChunks, ref bool hasHeight, ref bool hasAlpha,
         ref bool hasNormals, ref bool hasShadow, ref int totalMcshBytes)
     {
@@ -447,7 +443,6 @@ public static class AlphaWdtReader
         int indexX = BitConverter.ToInt32(container, headerOffset + 0x04);
         int indexY = BitConverter.ToInt32(container, headerOffset + 0x08);
         int layerCount = BitConverter.ToInt32(container, headerOffset + 0x10);
-        int areaId = BitConverter.ToInt32(container, headerOffset + 0x38) & 0xFFFF;
         ushort holeMask = (ushort)BitConverter.ToUInt32(container, headerOffset + 0x40);
         int mcvtRel = BitConverter.ToInt32(container, headerOffset + 0x18);
         int mcnrRel = BitConverter.ToInt32(container, headerOffset + 0x1C);
@@ -464,8 +459,6 @@ public static class AlphaWdtReader
 
         int cx = indexX, cy = indexY;
         int chunkDataBase = mcnkOffset + ChunkHeaderSize + McnkHeaderSize;
-        areaIds[cx, cy] = areaId;
-        mcnkFlagsByChunk[cx, cy] = flags;
 
         if (mcvtRel >= 0 && chunkDataBase + mcvtRel + AlphaMcvtSize <= container.Length)
         {
@@ -985,8 +978,17 @@ public static class AlphaWdtReader
 
     private const float WorldTileSize = 533.33333f;
 
-    private static int ClassifyLiquid(byte[]? tileFlags, uint mcnkFlags)
+    private static int ClassifyLiquid(uint mcnkFlags)
     {
-        return AlphaLiquidTypeCodec.ClassifyCoarseType(tileFlags, mcnkFlags);
+        if ((mcnkFlags & 0x04) != 0) return 1;
+        if ((mcnkFlags & 0x08) != 0) return 1;
+        int bits = (int)((mcnkFlags >> 4) & 3);
+        return bits switch
+        {
+            1 => 1,
+            2 => 2,
+            3 => 3,
+            _ => 0
+        };
     }
 }

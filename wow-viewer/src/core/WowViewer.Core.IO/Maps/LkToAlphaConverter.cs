@@ -42,7 +42,6 @@ public static class LkToAlphaConverter
         bool[,,] layerMask = new bool[16, 16, 4];
         bool[,] holes = new bool[16, 16];
         int[,] areaIds = new int[16, 16];
-        uint[,] mcnkFlagsByChunk = new uint[16, 16];
         ushort[,] holeFullMasks = new ushort[16, 16];
         float[,,]? mccvRgb = new float[257, 257, 3];
         byte[,,]? mclvLighting = new byte[257, 257, 4];
@@ -74,7 +73,6 @@ public static class LkToAlphaConverter
                 InjectChunkShadow(shadowMask1024, chunk, cx, cy);
                 holes[cx, cy] = chunk.HoleMask != 0;
                 holeFullMasks[cx, cy] = (ushort)(chunk.HoleMask & 0xFFFF);
-                mcnkFlagsByChunk[cx, cy] = unchecked((uint)chunk.Flags);
                 areaIds[cx, cy] = areaIdMapper is null
                     ? chunk.AreaId
                     : areaIdMapper.MapAreaIdToAlpha(chunk.AreaId, sourceMapDirectory);
@@ -172,8 +170,7 @@ public static class LkToAlphaConverter
             mcrfDoodadRefsByChunk: mcrfDoodadRefsByChunk,
             mcrfWorldModelRefsByChunk: mcrfWorldModelRefsByChunk,
             mcrfDoodadUniqueIdsByChunk: mcrfDoodadUniqueIdsByChunk,
-            mcrfWorldModelUniqueIdsByChunk: mcrfWorldModelUniqueIdsByChunk,
-            mcnkFlagsByChunk: mcnkFlagsByChunk);
+            mcrfWorldModelUniqueIdsByChunk: mcrfWorldModelUniqueIdsByChunk);
     }
 
     private static IReadOnlyList<int> MapDoodadRefsToUniqueIds(IReadOnlyList<int> refs, IReadOnlyList<LkMddfEntry> placements)
@@ -555,7 +552,7 @@ public static class LkToAlphaConverter
         if (layer is null)
             return null;
 
-        uint mcnkFlags = AlphaLiquidTypeCodec.GetWriterChunkFlags(layer.BasicType);
+        uint mcnkFlags = MapAlphaLiquidFlags(layer.BasicType);
 
         byte[]? tileFlags = BuildAlphaTileFlags(layer);
         float[] heights = BuildAlphaLiquidHeights(layer);
@@ -571,6 +568,17 @@ public static class LkToAlphaConverter
             heights);
     }
 
+    private static uint MapAlphaLiquidFlags(AdtLiquidBasicType basicType)
+    {
+        return basicType switch
+        {
+            AdtLiquidBasicType.Ocean => 0x08u,
+            AdtLiquidBasicType.Magma => 0x10u,
+            AdtLiquidBasicType.Slime => 0x20u,
+            _ => 0x04u,
+        };
+    }
+
     private static byte[]? BuildAlphaTileFlags(AdtLiquidLayer layer)
     {
         if (layer.Width <= 0 || layer.Height <= 0)
@@ -578,7 +586,6 @@ public static class LkToAlphaConverter
 
         byte[] tileFlags = new byte[64];
         Array.Fill(tileFlags, (byte)0x0F);
-        byte visibleTileFlag = AlphaLiquidTypeCodec.GetWriterTileTypeNibble(layer.BasicType);
 
         for (int y = 0; y < layer.Height; y++)
         {
@@ -590,7 +597,7 @@ public static class LkToAlphaConverter
                     continue;
 
                 if (layer.TileExists(x, y))
-                    tileFlags[(globalY * 8) + globalX] = visibleTileFlag;
+                    tileFlags[(globalY * 8) + globalX] = 0;
             }
         }
 

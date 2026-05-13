@@ -89,7 +89,7 @@ internal static class AlphaToLkCommand
 
                 try
                 {
-                    LkAdtData adtData = AlphaToLkConverter.ConvertTile(tileData, tileX, tileY, areaIdMapper, mapName);
+                    LkAdtData adtData = AlphaToLkConverter.ConvertTile(tileData, tileX, tileY);
                     byte[] adtBytes = LkAdtWriter.Build(adtData);
                     string adtOutPath = Path.Combine(outputDir, $"{mapName}_{tileX}_{tileY}.adt");
                     File.WriteAllBytes(adtOutPath, adtBytes);

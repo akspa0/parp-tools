@@ -196,15 +196,8 @@ public sealed class AlphaTerrainAdapter : ITerrainAdapter
             AlphaMaps = alphaMaps,
             Liquid = liquid,
             WorldPosition = new Vector3(chunkWorldX, chunkWorldY, 0f),
-            AreaId = tileData.AreaIds != null && cx < tileData.AreaIds.GetLength(0) && cy < tileData.AreaIds.GetLength(1)
-                ? tileData.AreaIds[cx, cy]
-                : 0,
-            McnkFlags = tileData.McnkFlagsByChunk != null && cx < tileData.McnkFlagsByChunk.GetLength(0) && cy < tileData.McnkFlagsByChunk.GetLength(1)
-                ? (int)tileData.McnkFlagsByChunk[cx, cy]
-                : 0,
-            AlphaSourceFlags = tileData.McnkFlagsByChunk != null && cx < tileData.McnkFlagsByChunk.GetLength(0) && cy < tileData.McnkFlagsByChunk.GetLength(1)
-                ? (int)tileData.McnkFlagsByChunk[cx, cy]
-                : 0
+            AreaId = 0,
+            McnkFlags = liquid != null ? 0x3C : 0
         };
     }
 
@@ -269,7 +262,7 @@ public sealed class AlphaTerrainAdapter : ITerrainAdapter
             {
                 return new LiquidChunkData
                 {
-                    LiquidType = ClassifyLiquidType(liquid.TileFlags, liquid.McnkFlags),
+                    LiquidType = ClassifyLiquidType(liquid.McnkFlags),
                     MinHeight = liquid.MinHeight,
                     MaxHeight = liquid.MaxHeight,
                     TileFlags = liquid.TileFlags
@@ -280,9 +273,17 @@ public sealed class AlphaTerrainAdapter : ITerrainAdapter
         return null;
     }
 
-    private static int ClassifyLiquidType(byte[]? tileFlags, uint mcnkFlags)
+    private static int ClassifyLiquidType(uint mcnkFlags)
     {
-        return AlphaLiquidTypeCodec.ClassifyCoarseType(tileFlags, mcnkFlags);
+        if ((mcnkFlags & 0x08) != 0) return 1;
+        int bits = (int)((mcnkFlags >> 4) & 3);
+        return bits switch
+        {
+            1 => 1,
+            2 => 2,
+            3 => 3,
+            _ => 0
+        };
     }
 
     private static byte[] ReadMainPayload(byte[] wdtData)
