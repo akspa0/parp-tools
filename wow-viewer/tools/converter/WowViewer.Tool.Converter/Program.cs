@@ -4572,7 +4572,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-converter ml-synth-no-liquid --input-dir <images> --mask-dir <masks> --output-dir <images>");
 	Console.WriteLine("  wowviewer-converter convert-alpha-to-lk --input <Azeroth.wdt> --output <output-dir> [--verbose|-v]");
 	Console.WriteLine("  wowviewer-converter convert-split-adt-to-lk --client-root <dir> --map <name> --output-dir <dir> [--overlay-root <dir>] [--lk-donor-root <dir>] [--alpha-donor-client-root <dir> --alpha-donor-map <name> [--alpha-donor-tiles <x,y[-y];...>]] [--report <report.json>] [--limit <n>] [--verbose|-v]");
-	Console.WriteLine("  wowviewer-converter convert-lk-to-alpha --input <dir> --output <output.wdt> [--output-wdl <output.wdl>] [--no-bundle-tilesets|-nbt] [--bundle-m2s|-bm] [--bundle-wmos|-bw] [--verbose|-v]");
+	Console.WriteLine("  wowviewer-converter convert-lk-to-alpha --input <dir> --output <output.wdt> [--output-wdl <output.wdl>] [--asset-root <dir> ...] [--no-bundle-tilesets|-nbt] [--bundle-m2s|-bm] [--bundle-wmos|-bw] [--verbose|-v]");
 	Console.WriteLine("  wowviewer-converter convert-lk-to-alpha --client-root <dir> --map <name> --output <output.wdt> [--output-wdl <output.wdl>] [--limit <n>] [--no-bundle-tilesets|-nbt] [--bundle-m2s|-bm] [--bundle-wmos|-bw] [--verbose|-v]");
 	Console.WriteLine("  wowviewer-converter convert-wmo-v14-to-v17 --input-root <root.wmo> --output <output_root.wmo> [--groups-dir <dir>] [--verbose|-v]");
 	Console.WriteLine("  wowviewer-converter convert-wmo-v17-to-v14 --input-root <root.wmo> --output <output.wmo> [--groups-dir <dir>] [--verbose|-v]");

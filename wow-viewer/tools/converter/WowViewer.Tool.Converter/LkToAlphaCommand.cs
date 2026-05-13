@@ -306,13 +306,14 @@ internal static class LkToAlphaCommand
             }
 
             string sourceForAssets = options.ClientRoot ?? options.InputDir ?? ".";
+            List<string> tilesetAssetRoots = ResolveTilesetAssetRoots(options);
             string? tilesetRoot = null;
             string? mdxRoot = null;
             string? wmoRoot = null;
             if (options.BundleTilesets)
             {
                 tilesetRoot = Path.Combine(outputDir, "tilesets", mapName);
-                BundleTilesets(tiles, sourceForAssets, mapName, tilesetRoot);
+                BundleTilesets(tiles, tilesetAssetRoots, mapName, tilesetRoot);
             }
 
             Dictionary<string, string>? bundledMdxPaths = null;
@@ -734,7 +735,7 @@ internal static class LkToAlphaCommand
 
     private static void BundleTilesets(
         Dictionary<(int, int), AlphaTileData> tiles,
-        string sourceRoot, string mapName, string tilesetRoot)
+        IReadOnlyList<string> sourceRoots, string mapName, string tilesetRoot)
     {
         var texturePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var tile in tiles.Values)
@@ -745,38 +746,44 @@ internal static class LkToAlphaCommand
 
         if (texturePaths.Count == 0) return;
 
-        bool useArchives = IsArchiveBackedSource(sourceRoot);
-        using NativeMpqService? catalog = useArchives ? CreateSourceCatalog(sourceRoot) : null;
+        List<AssetSource> assetSources = CreateAssetSources(sourceRoots);
 
         Directory.CreateDirectory(tilesetRoot);
 
         int extracted = 0, failed = 0, normalized = 0, resized = 0, specularReencoded = 0;
-        foreach (string texPath in texturePaths)
+        try
         {
-            string normPath = texPath.Replace('/', '\\').TrimStart('\\');
-            string localPath = Path.Combine(tilesetRoot, normPath);
-            string? localDir = Path.GetDirectoryName(localPath);
-            if (localDir != null) Directory.CreateDirectory(localDir);
-
-            byte[]? data = ReadSourceAsset(sourceRoot, catalog, normPath);
-            if (data != null)
+            foreach (string texPath in texturePaths)
             {
-                AlphaBlpCompatibilityResult compatibility = AlphaBlpCompatibilityService.NormalizeForAlphaClient(normPath, data);
-                File.WriteAllBytes(localPath, compatibility.Data);
-                extracted++;
-                if (compatibility.Rewritten)
+                string normPath = texPath.Replace('/', '\\').TrimStart('\\');
+                string localPath = Path.Combine(tilesetRoot, normPath);
+                string? localDir = Path.GetDirectoryName(localPath);
+                if (localDir != null) Directory.CreateDirectory(localDir);
+
+                byte[]? data = ReadSourceAsset(assetSources, normPath);
+                if (data != null)
                 {
-                    normalized++;
-                    if (compatibility.Resized)
-                        resized++;
-                    if (compatibility.SpecularReencoded)
-                        specularReencoded++;
+                    AlphaBlpCompatibilityResult compatibility = AlphaBlpCompatibilityService.NormalizeForAlphaClient(normPath, data);
+                    File.WriteAllBytes(localPath, compatibility.Data);
+                    extracted++;
+                    if (compatibility.Rewritten)
+                    {
+                        normalized++;
+                        if (compatibility.Resized)
+                            resized++;
+                        if (compatibility.SpecularReencoded)
+                            specularReencoded++;
+                    }
+                }
+                else
+                {
+                    failed++;
                 }
             }
-            else
-            {
-                failed++;
-            }
+        }
+        finally
+        {
+            DisposeAssetSources(assetSources);
         }
 
         Console.WriteLine($"    Extracted: {extracted}/{texturePaths.Count} textures to {tilesetRoot}" +
@@ -1700,11 +1707,73 @@ internal static class LkToAlphaCommand
                 || Directory.GetFiles(sourceRoot, "*.mpq", SearchOption.TopDirectoryOnly).Length > 0);
     }
 
+    private static List<string> ResolveTilesetAssetRoots(LkToAlphaOptions options)
+    {
+        List<string> roots = [];
+
+        foreach (string assetRoot in options.AssetRoots)
+        {
+            if (string.IsNullOrWhiteSpace(assetRoot))
+                continue;
+
+            string fullPath = Path.GetFullPath(assetRoot);
+            if (!roots.Contains(fullPath, StringComparer.OrdinalIgnoreCase))
+                roots.Add(fullPath);
+        }
+
+        string? defaultRoot = options.ClientRoot ?? options.InputDir;
+        if (!string.IsNullOrWhiteSpace(defaultRoot))
+        {
+            string fullDefaultRoot = Path.GetFullPath(defaultRoot);
+            if (!roots.Contains(fullDefaultRoot, StringComparer.OrdinalIgnoreCase))
+                roots.Add(fullDefaultRoot);
+        }
+
+        return roots;
+    }
+
+    private static List<AssetSource> CreateAssetSources(IReadOnlyList<string> sourceRoots)
+    {
+        List<AssetSource> sources = [];
+
+        foreach (string sourceRoot in sourceRoots)
+        {
+            if (string.IsNullOrWhiteSpace(sourceRoot) || !Directory.Exists(sourceRoot))
+                continue;
+
+            NativeMpqService? catalog = IsArchiveBackedSource(sourceRoot)
+                ? CreateSourceCatalog(sourceRoot)
+                : null;
+
+            sources.Add(new AssetSource(Path.GetFullPath(sourceRoot), catalog));
+        }
+
+        return sources;
+    }
+
+    private static void DisposeAssetSources(IEnumerable<AssetSource> assetSources)
+    {
+        foreach (AssetSource assetSource in assetSources)
+            assetSource.Catalog?.Dispose();
+    }
+
     private static NativeMpqService CreateSourceCatalog(string sourceRoot)
     {
         NativeMpqService catalog = new();
         catalog.LoadArchives([sourceRoot]);
         return catalog;
+    }
+
+    private static byte[]? ReadSourceAsset(IReadOnlyList<AssetSource> assetSources, string path)
+    {
+        foreach (AssetSource assetSource in assetSources)
+        {
+            byte[]? data = ReadSourceAsset(assetSource.Root, assetSource.Catalog, path);
+            if (data is not null)
+                return data;
+        }
+
+        return null;
     }
 
     private static byte[]? ReadSourceAsset(string sourceRoot, NativeMpqService? catalog, string path)
@@ -1742,6 +1811,7 @@ internal static class LkToAlphaCommand
     {
             return new LkToAlphaOptions(
                 InputDir: GetOption(args, "--input", "-i"),
+                AssetRoots: GetOptions(args, "--asset-root"),
                 OutputPath: GetOption(args, "--output", "-o"),
                 OutputWdlPath: GetOption(args, "--output-wdl", "--wdl"),
                 ClientRoot: GetOption(args, "--client-root", "-c"),
@@ -1767,6 +1837,18 @@ internal static class LkToAlphaCommand
         return null;
     }
 
+    private static IReadOnlyList<string> GetOptions(string[] args, string longName)
+    {
+        List<string> values = [];
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], longName, StringComparison.OrdinalIgnoreCase))
+                values.Add(args[i + 1]);
+        }
+
+        return values;
+    }
+
     private static int? GetIntOption(string[] args, string longName, string shortName)
     {
         string? value = GetOption(args, longName, shortName);
@@ -1785,6 +1867,7 @@ internal static class LkToAlphaCommand
 
     private readonly record struct LkToAlphaOptions(
         string? InputDir,
+        IReadOnlyList<string> AssetRoots,
         string? OutputPath,
         string? OutputWdlPath,
         string? ClientRoot,
@@ -1795,4 +1878,6 @@ internal static class LkToAlphaCommand
         bool BundleTilesets,
         bool BundleM2s,
         bool BundleWmos);
+
+    private readonly record struct AssetSource(string Root, NativeMpqService? Catalog);
 }

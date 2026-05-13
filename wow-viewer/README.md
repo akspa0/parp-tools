@@ -249,6 +249,7 @@ Current important commands:
 | `--map <name>` / `-m` | Map name from Map.dbc |
 | `--output <path>` / `-o` | Output Alpha WDT path |
 | `--output-wdl <path>` / `--wdl` | Output WDL path (default: `output.wdl`) |
+| `--asset-root <dir>` | Optional repeated asset search root for loose `--input` conversions; searched in order before the input directory when bundling tilesets |
 | `--target-client-root <dir>` / `-tcr` | Target client root for asset filtering (e.g. 0.5.3) |
 | `--terrain-only` / `-to` | Strip all placements (for crash-free validation) |
 | `--bundle-tilesets` / `-bt` | Accepted for compatibility; tileset extraction is now on by default |
@@ -288,6 +289,9 @@ dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowVi
 
 # Disable default tileset bundling
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt" --no-bundle-tilesets
+
+# Loose LK input with mixed-era tileset roots
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --input ".\output\build-validation\development-lk-museum-report" --asset-root ".\wow-viewer\test_data\0.6.0\World of Warcraft" --asset-root ".\output\tmp\wowarchive-clients\3_3_5_12340\World of Warcraft" --output ".\output\build-validation\development.alpha.wdt"
 
 # Quick test (5 tiles)
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "test.alpha.wdt" --limit 5
