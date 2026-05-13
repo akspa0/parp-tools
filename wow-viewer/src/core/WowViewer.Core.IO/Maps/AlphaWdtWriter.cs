@@ -118,7 +118,10 @@ public static class AlphaWdtWriter
         int modfRelative = (int)(bw.Seek(0, SeekOrigin.Current) - mhdrDataStart);
         WriteDataChunk(bw, "MODF", placementPlan.ModfData);
 
-        int tileHeaderSize = checked((int)(bw.Seek(0, SeekOrigin.Current) - mhdrDataStart));
+        // MAIN tile-size accounting must include the MHDR chunk header bytes.
+        // Using mhdrDataStart under-reports by one chunk header and can misalign
+        // native client chunk seeks (0.5.3 CMapArea::Create MODF token assert).
+        int tileHeaderSize = checked((int)(bw.Seek(0, SeekOrigin.Current) - mhdrStart));
 
         int[] mcnkOffsets = new int[McinEntryCount];
         for (int i = 0; i < McinEntryCount; i++)
