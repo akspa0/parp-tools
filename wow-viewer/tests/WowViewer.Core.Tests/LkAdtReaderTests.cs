@@ -21,6 +21,26 @@ public class LkAdtReaderTests
         Assert.Equal(2, adt.Chunks[0].Layers.Count);
     }
 
+    [Fact]
+    public void Read_OriginalDevelopmentSplitFamily_MergesTexAndObjWithoutThrowing()
+    {
+        string rootPath = Path.Combine(MapTestPaths.OriginalDevelopmentDirectoryPath, "development_0_0.adt");
+        string texPath = Path.Combine(MapTestPaths.OriginalDevelopmentDirectoryPath, "development_0_0_tex0.adt");
+        string objPath = Path.Combine(MapTestPaths.OriginalDevelopmentDirectoryPath, "development_0_0_obj0.adt");
+
+        var adt = LkAdtReader.Read(
+            File.ReadAllBytes(rootPath),
+            File.ReadAllBytes(texPath),
+            File.ReadAllBytes(objPath),
+            0,
+            0);
+
+        Assert.NotEmpty(adt.Chunks);
+        Assert.Contains(adt.Chunks, static chunk => chunk.Layers.Count > 0);
+        Assert.True(adt.ModelNames.Count > 0 || adt.WorldModelNames.Count > 0);
+        Assert.True(adt.ModelPlacements.Count > 0 || adt.WorldModelPlacements.Count > 0);
+    }
+
     private static void WriteMcnkWithThreeLayerPayloadButTwoDeclaredLayers(BinaryWriter writer)
     {
         byte[] header = new byte[128];

@@ -236,7 +236,7 @@ dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowVi
 Current important commands:
 
 - `convert-alpha-to-lk` — Alpha monolithic WDT → LK ADT/WDT/WDL
-- `convert-split-adt-to-lk` — staged client plus loose overlay split ADT family → monolithic LK ADTs plus regenerated WDT
+- `convert-split-adt-to-lk` — staged client plus loose overlay split ADT family → monolithic LK ADTs plus regenerated WDT, with optional LK donor-root fallback, optional Alpha donor fallback for missing tiles, and optional JSON auditing via `--report`
 - `convert-lk-to-alpha` — LK/Cataclysm split ADT → Alpha monolithic WDT/WDL
 - `dataset-list-maps`
 - `detect`
@@ -266,6 +266,19 @@ dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowVi
 
 # Split-family LK output from a staged client plus loose overlay
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-split-adt-to-lk --client-root "output\tmp\wowarchive-clients\0_6_0_3592\World of Warcraft" --overlay-root ".\wow-viewer\test_data\original_development" --map development --output-dir ".\output\build-validation\development-lk" --limit 5
+
+# Patch missing development roots from the 2021 WoWMuseum 3.3.5 backport while preserving original obj0 placements when present
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-split-adt-to-lk --client-root "output\tmp\wowarchive-clients\0_6_0_3592\World of Warcraft" --overlay-root ".\wow-viewer\test_data\original_development" --lk-donor-root ".\wow-viewer\test_data\WoWMuseum\335-dev" --map development --output-dir ".\output\build-validation\development-lk-museum" --limit 12
+
+# Write a per-tile audit report showing whether each tile came from original split data, LK donor, Alpha donor, or failed as missing-everything
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-split-adt-to-lk --client-root "output\tmp\wowarchive-clients\0_6_0_3592\World of Warcraft" --overlay-root ".\wow-viewer\test_data\original_development" --lk-donor-root ".\wow-viewer\test_data\WoWMuseum\335-dev" --map development --output-dir ".\output\build-validation\development-lk-museum" --report ".\output\build-validation\development-lk-museum\split_report.json" --limit 12
+
+# Borrow explicitly listed missing development tiles from staged 0.5.3 Azeroth
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-split-adt-to-lk --client-root "output\tmp\wowarchive-clients\0_6_0_3592\World of Warcraft" --overlay-root ".\wow-viewer\test_data\original_development" --map development --alpha-donor-client-root "output\tmp\wowarchive-clients\0_5_3_3368\World of Warcraft" --alpha-donor-map Azeroth --alpha-donor-tiles "63,1-3" --output-dir ".\output\build-validation\development-lk-donor" --limit 46
+
+For `convert-split-adt-to-lk`, donor precedence is intentionally asymmetric: if a tile root `.adt` is missing, the command can borrow the root from `--lk-donor-root`, but when the original loose overlay still has `_obj0` or `_tex0` sidecars, those original sidecars win over donor sidecars. This preserves original development placement UniqueIDs whenever original object data still exists, instead of inheriting the donor map's rewritten placement IDs.
+
+When `--report` is supplied, the command writes one JSON entry per processed tile with fields such as `outcome`, `rootSourceKind`, `objectSourceKind`, `originalObjectPlacementsPreserved`, and `message`. The important audit outcomes are `converted-original`, `borrowed-lk-donor`, `borrowed-alpha-donor`, `missing-everything`, and `error`.
 
 # With asset filtering against target client
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "Azeroth.alpha.wdt" --target-client-root "output\tmp\wowarchive-clients\0_5_3_3368\World of Warcraft"

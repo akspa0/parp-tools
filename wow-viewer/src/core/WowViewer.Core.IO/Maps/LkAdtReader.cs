@@ -1,8 +1,11 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using WowViewer.Core.Chunks;
+using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -12,6 +15,9 @@ public static class LkAdtReader
     private const int LkMddfEntrySize = 36;
     private const int LkModfEntrySize = 64;
     private const float MapOrigin = 17066.666f;
+    private const int RootMcnkHeaderSize = 128;
+    private const int RootMcnkMcalSizeOffset = 0x28;
+    private const int McnrConsumedSize = 0x1C0;
 
     public static LkAdtData Read(byte[] adtBytes, byte[]? tex0Bytes, byte[]? obj0Bytes, int tileX, int tileY)
     {
@@ -27,22 +33,10 @@ public static class LkAdtReader
         ParseAdtStream(adtBytes, rootChunks, textureNames, modelNames, worldModelNames, modelPlacements, worldModelPlacements, ref mhdrFlags, ref mfboFlightBounds);
 
         if (tex0Bytes != null)
-        {
-            var texChunks = new Dictionary<int, LkMcnkData>();
-            uint dummyFlags = 0;
-            int[,,]? dummyMfbo = null;
-            ParseAdtStream(tex0Bytes, texChunks, textureNames, modelNames, worldModelNames, modelPlacements, worldModelPlacements, ref dummyFlags, ref dummyMfbo);
-            MergeChunks(rootChunks, texChunks);
-        }
+            MergeSplitTextureChunks(tex0Bytes, textureNames, rootChunks);
 
         if (obj0Bytes != null)
-        {
-            var objChunks = new Dictionary<int, LkMcnkData>();
-            uint dummyFlags = 0;
-            int[,,]? dummyMfbo = null;
-            ParseAdtStream(obj0Bytes, objChunks, textureNames, modelNames, worldModelNames, modelPlacements, worldModelPlacements, ref dummyFlags, ref dummyMfbo);
-            MergeChunks(rootChunks, objChunks);
-        }
+            MergeSplitObjectData(obj0Bytes, modelNames, worldModelNames, modelPlacements, worldModelPlacements, rootChunks);
 
         var chunksList = new List<LkMcnkData>(256);
         for (int i = 0; i < 256; i++)
@@ -65,6 +59,288 @@ public static class LkAdtReader
             MhdrFlags = mhdrFlags,
             MfboFlightBounds = mfboFlightBounds
         };
+    }
+
+    private static void MergeSplitTextureChunks(byte[] tex0Bytes, List<string> textureNames, Dictionary<int, LkMcnkData> rootChunks)
+    {
+        using var stream = new MemoryStream(tex0Bytes, writable: false);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, "synthetic_tex0.adt");
+        if (fileSummary.Kind != MapFileKind.AdtTex)
+            return;
+
+        byte[]? mtexData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mtex);
+        if (textureNames.Count == 0 && mtexData is { Length: > 0 })
+            textureNames.AddRange(MapSummaryReaderCommon.ReadStringEntries(mtexData));
+
+        int chunkIndex = 0;
+        foreach (MapChunkLocation mcnkChunk in fileSummary.Chunks.Where(static chunk => chunk.Id == MapChunkIds.Mcnk))
+        {
+            if (chunkIndex >= 256)
+                break;
+
+            byte[] payload = MapSummaryReaderCommon.ReadChunkPayload(stream, mcnkChunk);
+            LkMcnkData splitChunk = ReadSplitTextureChunk(payload, chunkIndex);
+            MergeChunks(rootChunks, new Dictionary<int, LkMcnkData>
+            {
+                [splitChunk.IndexY * 16 + splitChunk.IndexX] = splitChunk,
+            });
+
+            chunkIndex++;
+        }
+    }
+
+    private static void MergeSplitObjectData(
+        byte[] obj0Bytes,
+        List<string> modelNames,
+        List<string> worldModelNames,
+        List<LkMddfEntry> modelPlacements,
+        List<LkModfEntry> worldModelPlacements,
+        Dictionary<int, LkMcnkData> rootChunks)
+    {
+        using var stream = new MemoryStream(obj0Bytes, writable: false);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, "synthetic_obj0.adt");
+        if (fileSummary.Kind != MapFileKind.AdtObj)
+            return;
+
+        int modelNameBase = modelNames.Count;
+        byte[]? mmdxData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mmdx);
+        if (mmdxData is { Length: > 0 })
+            modelNames.AddRange(MapSummaryReaderCommon.ReadStringEntries(mmdxData));
+
+        int worldModelNameBase = worldModelNames.Count;
+        byte[]? mwmoData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mwmo);
+        if (mwmoData is { Length: > 0 })
+            worldModelNames.AddRange(MapSummaryReaderCommon.ReadStringEntries(mwmoData));
+
+        int modelPlacementBase = modelPlacements.Count;
+        byte[]? mddfData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mddf);
+        if (mddfData is { Length: > 0 })
+        {
+            using var mddfStream = new MemoryStream(mddfData, writable: false);
+            using var mddfReader = new BinaryReader(mddfStream, Encoding.ASCII, leaveOpen: true);
+            foreach (LkMddfEntry placement in ReadMddfEntries(mddfReader, mddfData.Length))
+                modelPlacements.Add(placement with { NameId = placement.NameId + modelNameBase });
+        }
+
+        int worldPlacementBase = worldModelPlacements.Count;
+        byte[]? modfData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Modf);
+        if (modfData is { Length: > 0 })
+        {
+            using var modfStream = new MemoryStream(modfData, writable: false);
+            using var modfReader = new BinaryReader(modfStream, Encoding.ASCII, leaveOpen: true);
+            foreach (LkModfEntry placement in ReadModfEntries(modfReader, modfData.Length))
+                worldModelPlacements.Add(placement with { NameId = placement.NameId + worldModelNameBase });
+        }
+
+        int chunkIndex = 0;
+        foreach (MapChunkLocation mcnkChunk in fileSummary.Chunks.Where(static chunk => chunk.Id == MapChunkIds.Mcnk))
+        {
+            if (chunkIndex >= 256)
+                break;
+
+            byte[] payload = MapSummaryReaderCommon.ReadChunkPayload(stream, mcnkChunk);
+            byte[]? mcrdPayload = TryReadSplitMcnkSubchunkPayload(payload, AdtChunkIds.Mcrd);
+            byte[]? mcrwPayload = TryReadSplitMcnkSubchunkPayload(payload, AdtChunkIds.Mcrw);
+            if (mcrdPayload is null && mcrwPayload is null)
+            {
+                chunkIndex++;
+                continue;
+            }
+
+            int chunkX = chunkIndex % 16;
+            int chunkY = chunkIndex / 16;
+            MergeChunks(rootChunks, new Dictionary<int, LkMcnkData>
+            {
+                [chunkIndex] = new LkMcnkData
+                {
+                    IndexX = chunkX,
+                    IndexY = chunkY,
+                    DoodadRefs = ReadSplitChunkReferences(mcrdPayload, modelPlacementBase),
+                    WorldModelRefs = ReadSplitChunkReferences(mcrwPayload, worldPlacementBase),
+                },
+            });
+
+            chunkIndex++;
+        }
+    }
+
+    private static IReadOnlyList<int> ReadSplitChunkReferences(byte[]? payload, int baseIndex)
+    {
+        if (payload is not { Length: >= 4 })
+            return [];
+
+        int count = payload.Length / sizeof(int);
+        List<int> references = new(count);
+        for (int index = 0; index < count; index++)
+            references.Add(baseIndex + BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(index * sizeof(int), sizeof(int))));
+
+        return references;
+    }
+
+    private static LkMcnkData ReadSplitTextureChunk(byte[] payload, int chunkIndex)
+    {
+        uint flags = 0;
+        int? headerMcalPayloadSize = null;
+        int chunkX = chunkIndex % 16;
+        int chunkY = chunkIndex / 16;
+        int startOffset = 0;
+        if (TryReadEmbeddedSplitMcnkHeader(payload, out flags, out headerMcalPayloadSize, out int? headerChunkX, out int? headerChunkY))
+        {
+            startOffset = RootMcnkHeaderSize;
+            chunkX = headerChunkX ?? chunkX;
+            chunkY = headerChunkY ?? chunkY;
+        }
+
+        List<LkMclyEntry> layers = [];
+        byte[]? alphaData = null;
+        byte[]? shadowMap = null;
+        byte[]? mccvData = null;
+        byte[]? mclvData = null;
+
+        int position = startOffset;
+        while (position <= payload.Length - ChunkHeader.SizeInBytes)
+        {
+            if (!ChunkHeaderReader.TryRead(payload.AsSpan(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
+                break;
+
+            int declaredSize = unchecked((int)header.Size);
+            int consumedSize = header.Id == AdtChunkIds.Mcnr
+                ? Math.Max(declaredSize, McnrConsumedSize)
+                : declaredSize;
+            long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
+            if (declaredSize < 0 || nextOffset > payload.Length)
+                break;
+
+            int dataOffset = position + ChunkHeader.SizeInBytes;
+            if (header.Id == AdtChunkIds.Mcly)
+            {
+                byte[] layerPayload = new byte[declaredSize];
+                Buffer.BlockCopy(payload, dataOffset, layerPayload, 0, declaredSize);
+                foreach (AdtTextureLayerDescriptor layer in AdtMcalDecoder.ReadTextureLayers(layerPayload))
+                    layers.Add(new LkMclyEntry(layer.TextureId, layer.Flags, layer.AlphaOffset, layer.EffectId));
+            }
+            else if (header.Id == AdtChunkIds.Mcal)
+            {
+                int mcalPayloadSize = declaredSize;
+                if (headerMcalPayloadSize.HasValue && headerMcalPayloadSize.Value > mcalPayloadSize && dataOffset + headerMcalPayloadSize.Value <= payload.Length)
+                    mcalPayloadSize = headerMcalPayloadSize.Value;
+
+                alphaData = new byte[mcalPayloadSize];
+                Buffer.BlockCopy(payload, dataOffset, alphaData, 0, mcalPayloadSize);
+            }
+            else if (header.Id == AdtChunkIds.Mcsh)
+            {
+                shadowMap = new byte[declaredSize];
+                Buffer.BlockCopy(payload, dataOffset, shadowMap, 0, declaredSize);
+            }
+            else if (header.Id == AdtChunkIds.Mccv)
+            {
+                mccvData = new byte[declaredSize];
+                Buffer.BlockCopy(payload, dataOffset, mccvData, 0, declaredSize);
+            }
+            else if (header.Id == AdtChunkIds.Mclv)
+            {
+                mclvData = new byte[declaredSize];
+                Buffer.BlockCopy(payload, dataOffset, mclvData, 0, declaredSize);
+            }
+
+            position = checked((int)nextOffset);
+        }
+
+        return new LkMcnkData
+        {
+            IndexX = chunkX,
+            IndexY = chunkY,
+            Flags = unchecked((int)flags),
+            NLayers = layers.Count,
+            Layers = layers,
+            AlphaMapData = alphaData,
+            AlphaMapSize = alphaData?.Length ?? 0,
+            ShadowMap = shadowMap,
+            MccvColors = mccvData,
+            MclvLighting = mclvData,
+        };
+    }
+
+    private static bool TryReadEmbeddedSplitMcnkHeader(
+        byte[] payload,
+        out uint flags,
+        out int? headerMcalPayloadSize,
+        out int? chunkX,
+        out int? chunkY)
+    {
+        flags = 0;
+        headerMcalPayloadSize = null;
+        chunkX = null;
+        chunkY = null;
+
+        if (payload.Length < RootMcnkHeaderSize + ChunkHeader.SizeInBytes)
+            return false;
+
+        if (!ChunkHeaderReader.TryRead(payload.AsSpan(RootMcnkHeaderSize, ChunkHeader.SizeInBytes), out ChunkHeader firstSubchunk))
+            return false;
+
+        if (!IsKnownSplitSubchunk(firstSubchunk.Id))
+            return false;
+
+        int declaredSize = checked((int)firstSubchunk.Size);
+        int consumedSize = firstSubchunk.Id == AdtChunkIds.Mcnr
+            ? Math.Max(declaredSize, McnrConsumedSize)
+            : declaredSize;
+        long firstSubchunkEnd = (long)RootMcnkHeaderSize + ChunkHeader.SizeInBytes + consumedSize;
+        if (declaredSize < 0 || firstSubchunkEnd > payload.Length)
+            return false;
+
+        flags = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x00, 4));
+        chunkX = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x04, 4)));
+        chunkY = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x08, 4)));
+
+        uint sizeMcal = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(RootMcnkMcalSizeOffset, 4));
+        if (sizeMcal >= ChunkHeader.SizeInBytes)
+            headerMcalPayloadSize = checked((int)(sizeMcal - ChunkHeader.SizeInBytes));
+
+        return true;
+    }
+
+    private static bool IsKnownSplitSubchunk(FourCC id)
+    {
+        return id == AdtChunkIds.Mcvt
+            || id == AdtChunkIds.Mcnr
+            || id == AdtChunkIds.Mcly
+            || id == AdtChunkIds.Mcal
+            || id == AdtChunkIds.Mcsh
+            || id == AdtChunkIds.Mcse
+            || id == AdtChunkIds.Mccv
+            || id == AdtChunkIds.Mclv
+            || id == AdtChunkIds.Mclq
+            || id == AdtChunkIds.Mcrd
+            || id == AdtChunkIds.Mcrw
+            || id == AdtChunkIds.Mcmt;
+    }
+
+    private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payload, FourCC chunkId)
+    {
+        int position = 0;
+        while (position <= payload.Length - ChunkHeader.SizeInBytes)
+        {
+            if (!ChunkHeaderReader.TryRead(payload.Slice(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
+                break;
+
+            int declaredSize = checked((int)header.Size);
+            int consumedSize = header.Id == AdtChunkIds.Mcnr
+                ? Math.Max(declaredSize, McnrConsumedSize)
+                : declaredSize;
+            long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
+            if (declaredSize < 0 || nextOffset > payload.Length)
+                break;
+
+            if (header.Id == chunkId)
+                return payload.Slice(position + ChunkHeader.SizeInBytes, declaredSize).ToArray();
+
+            position = checked((int)nextOffset);
+        }
+
+        return null;
     }
 
     private static void MergeChunks(Dictionary<int, LkMcnkData> root, Dictionary<int, LkMcnkData> other)

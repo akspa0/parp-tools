@@ -24,15 +24,14 @@
       "enabled": true
     },
 
-    "x64dbg-mcp": {
+    "x64dbg": {
       "type": "local",
       "command": [
-        "C:/Users/akspa/anaconda3/python.exe",
-        "-m",
-        "x64dbg_mcp",
-        "--stdio"
+        "C:/Users/akspa/AppData/Roaming/Python/Python314/Scripts/x64dbg-automate-mcp.exe"
       ],
-      "environment": {},
+      "environment": {
+        "X64DBG_PATH": "C:\\x64dbg\\release\\x96dbg.exe"
+      },
       "enabled": true
     }
   }
