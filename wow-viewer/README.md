@@ -298,6 +298,44 @@ dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowVi
 dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --client-root "output\tmp\wowarchive-clients\4_0_0_11927\World of Warcraft" --map Azeroth --output "test.alpha.wdt" --limit 5
 ```
 
+### Loose development files: practical converter recipes
+
+Use this when working from repo-local loose development files (overlay + donors) instead of a fully self-contained client map.
+
+#### 1) Build monolithic LK ADTs from split development files
+
+```powershell
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-split-adt-to-lk --client-root "output\tmp\wowarchive-clients\0_6_0_3592\World of Warcraft" --overlay-root ".\wow-viewer\test_data\original_development" --map development --output-dir ".\wow-viewer\output\build-validation\development-lk" --report ".\wow-viewer\output\build-validation\development-lk\split_report.json"
+```
+
+#### 2) Fill missing roots from LK donor files, then fallback to Alpha donor tiles
+
+```powershell
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-split-adt-to-lk --client-root "output\tmp\wowarchive-clients\0_6_0_3592\World of Warcraft" --overlay-root ".\wow-viewer\test_data\original_development" --lk-donor-root ".\wow-viewer\test_data\WoWMuseum\335-dev" --alpha-donor-client-root "output\tmp\wowarchive-clients\0_5_3_3368\World of Warcraft" --alpha-donor-map Azeroth --alpha-donor-tiles "63,1-3" --map development --output-dir ".\wow-viewer\output\build-validation\development-lk-donors" --report ".\wow-viewer\output\build-validation\development-lk-donors\split_report.json"
+```
+
+#### 3) Convert those loose LK ADTs back to Alpha WDT/WDL
+
+```powershell
+dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -c Debug -- convert-lk-to-alpha --input ".\wow-viewer\output\build-validation\development-lk-donors" --asset-root ".\wow-viewer\test_data\0.6.0\World of Warcraft" --asset-root ".\output\tmp\wowarchive-clients\3_3_5_12340\World of Warcraft" --tileset-provenance-report ".\wow-viewer\output\build-validation\development.alpha.tileset-provenance.json" --output ".\wow-viewer\output\build-validation\development.alpha.wdt" --output-wdl ".\wow-viewer\output\build-validation\development.alpha.wdl"
+```
+
+#### `convert-split-adt-to-lk` options (loose development workflow)
+
+| Option | Purpose |
+|---|---|
+| `--client-root` | Staged client root used for archive reads and base map context |
+| `--overlay-root` | Loose file overlay root containing `World\Maps\<map>\...` files |
+| `--lk-donor-root` | Optional LK loose donor root used when tile root `.adt` is missing |
+| `--alpha-donor-client-root` + `--alpha-donor-map` | Optional Alpha donor fallback source |
+| `--alpha-donor-tiles` | Optional tile subset for Alpha donor fallback (e.g. `63,1-3`) |
+| `--report` | Writes per-tile JSON audit (`converted-original`, `borrowed-lk-donor`, `borrowed-alpha-donor`, `missing-everything`, `error`) |
+
+Notes:
+
+- Donor precedence is intentional: original overlay sidecars (`_obj0`/`_tex0`) win over donor sidecars when present.
+- Use staged clients under `output\tmp\wowarchive-clients\...`; do not use deprecated external client roots.
+
 ## Manual Validation with MdxViewer
 
 The legacy `MdxViewer` (in `gillijimproject_refactor`) is the canonical runtime validation tool for converted Alpha WDT maps. Here is the complete workflow:
