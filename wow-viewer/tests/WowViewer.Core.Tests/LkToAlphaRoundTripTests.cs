@@ -412,6 +412,46 @@ public sealed class LkToAlphaRoundTripTests
     }
 
     [Fact]
+    public void WriteAlphaWdt_IgnoresStalePreservedWorldRefIndicesWhenUniqueIdsAreMissing()
+    {
+        float[,] heightmap = new float[257, 257];
+        int[,,] texIds = new int[16, 16, 4];
+        bool[,,] layerMask = new bool[16, 16, 4];
+        for (int cy = 0; cy < 16; cy++)
+            for (int cx = 0; cx < 16; cx++)
+                layerMask[cx, cy, 0] = true;
+
+        IReadOnlyList<int>[] staleWorldRefsByChunk = CreateEmptyChunkRefSet();
+        staleWorldRefsByChunk[115] = [9, 9999];
+
+        AlphaTileData tile = new(
+            sourcePath: "stale_world_ref_indices",
+            heightmap: heightmap,
+            mcalAlphaPack: null,
+            mclyTextureIds: texIds,
+            mclyLayerMask: layerMask,
+            holeMask: new bool[16, 16],
+            textureNames: ["terrain_a.blp"],
+            modelPlacements: [],
+            worldModelPlacements:
+            [
+                new AlphaWorldModelPlacement(0, "world\\azeroth\\barracks.wmo", 333, new Vector3(16950f, 16900f, 40.2f), Vector3.Zero, new Vector3(16800f, 16700f, 35f), new Vector3(17100f, 17100f, 50f), 0x0001)
+            ],
+            liquidChunks: [],
+            mcrfWorldModelRefsByChunk: staleWorldRefsByChunk,
+            mcrfWorldModelUniqueIdsByChunk: CreateEmptyChunkRefSet());
+
+        byte[] wdt = AlphaWdtWriter.Build("stale_world_ref_indices", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        var chunk115Refs = ReadMcrfRefs(wdt, 0, 0, 115);
+        Assert.Empty(chunk115Refs.DoodadRefs);
+        Assert.Empty(chunk115Refs.WorldModelRefs);
+    }
+
+    [Fact]
     public void WriteAlphaWdt_PreservesDoodadChunkOwnershipFromSourceRefs()
     {
         float[,] heightmap = new float[257, 257];
@@ -731,6 +771,64 @@ public sealed class LkToAlphaRoundTripTests
 
         Assert.Equal(0x3Cu, flags);
         Assert.Equal(0x324, chunkDataSize - mclqOffset);
+    }
+
+    [Fact]
+    public void WriteAlphaWdt_DoesNotDuplicateDoodadRefsAcrossChunks()
+    {
+        List<LkMcnkData> chunks = [];
+        for (int index = 0; index < 256; index++)
+        {
+            int chunkX = index % 16;
+            int chunkY = index / 16;
+            chunks.Add(CreateChunk(chunkX, chunkY, 25f + index, 0.01f, flags: 0, withAlpha: false));
+        }
+
+        const float mapOrigin = 17066.666f;
+        const float chunkWorldSize = 533.3333f / 16f;
+        List<LkMddfEntry> doodads = [];
+        for (int i = 0; i < 64; i++)
+        {
+            int cx = i % 8;
+            int cy = i / 8;
+            doodads.Add(new LkMddfEntry(
+                NameId: i,
+                UniqueId: 10000 + i,
+                Position: new Vector3(
+                    mapOrigin - ((cy + 0.5f) * chunkWorldSize),
+                    mapOrigin - ((cx + 0.5f) * chunkWorldSize),
+                    50f),
+                Rotation: Vector3.Zero,
+                Scale: 1f));
+        }
+
+        LkAdtData adt = new()
+        {
+            TileX = 0,
+            TileY = 0,
+            TextureNames = ["terrain_a.blp"],
+            ModelNames = doodads.Select(static d => $"World\\Doodads\\d{d.NameId:D4}.mdx").ToList(),
+            ModelPlacements = doodads,
+            Chunks = chunks
+        };
+
+        AlphaTileData tile = LkToAlphaConverter.ConvertTile(adt, 0, 0);
+        byte[] wdt = AlphaWdtWriter.Build("no_duplicate_doodad_refs", new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(0, 0)] = tile
+        });
+
+        var seen = new HashSet<int>();
+        int totalRefs = 0;
+        for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+        {
+            var refs = ReadMcrfRefs(wdt, 0, 0, chunkIndex).DoodadRefs;
+            totalRefs += refs.Length;
+            foreach (int idx in refs)
+                Assert.True(seen.Add(idx), $"Duplicate doodad ref {idx} found in chunk {chunkIndex}.");
+        }
+
+        Assert.Equal(doodads.Count, totalRefs);
     }
 
     [Fact]

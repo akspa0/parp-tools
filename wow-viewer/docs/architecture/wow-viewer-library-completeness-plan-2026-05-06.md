@@ -11,6 +11,7 @@
 - Recent May 6-7 commits fixed the Alpha `MCLY` header handling bug, restored missing Alpha `AvailableSignals` metadata, added Alpha placement export via `AlphaTileData.ToPlacementCatalog()`, and added Alpha object-mask plus shadow-residual generation.
 - The remaining near-term gap is explicit `0.6.0` split-ADT validation via `AdtProfile060070Baseline`, not basic Alpha/retail harvest plumbing.
 - Follow-up on May 8 landed the reverse `LkToAlphaConverter` path in `wow-viewer`, repaired the Alpha WDT writer so emitted tiles parse correctly, and added focused `LkToAlphaRoundTripTests` covering structural round-trip plus `MH2O <-> MCLQ -> MH2O` liquid parity.
+- Current AlphaWDT regression baseline confirms focused LK↔Alpha test coverage remains green (`LkToAlphaRoundTripTests`: `17/17` passing), including MCNK metadata/liquid/reference ownership checks.
 - Proof boundary matters: AlphaToLk has real-data batch validation, while LkToAlpha is currently proven at focused library-regression scope rather than broad LK corpus runs.
 - ADT-family raw fallback preservation is now real: undecoded top-level chunks and undecoded `MCNK` subchunks persist into NPZ shards under `raw_chunks/...` with metadata (`source_kind`, `source_path`, `scope`, `chunk_id`, `chunk_index`, `chunk_x`, `chunk_y`, `byte_length`).
 - Several formerly raw-only chunks are now also promoted into typed shard signals (`MAMP`, `MFBO`, `MCMT`, `MCLV`, `MCSE`, `MCRF`, `MCRD`, `MCRW`).
@@ -183,7 +184,7 @@ The goal is to make `wow-viewer` a **complete, self-contained, repo-independent 
   - Convert coordinates
   - Convert liquid (Alpha `MCLQ` → LK `MH2O` payloads in the current shared writer path)
 - [x] Add converter CLI commands in `WowViewer.Tool.Converter` with `convert-alpha-to-lk` and `convert-lk-to-alpha`
-- [ ] Wire `AreaIdMapper` into `AlphaToLkConverter`
+- [ ] Complete `AreaIdMapper` orchestration wiring: `AlphaToLkConverter.ConvertTile(...)` now accepts and applies `AreaIdMapper`, but `ConvertWdt`/CLI-side auto-load and broad real-data proof refresh are still open
 - [ ] Cross-validate: round-trip Alpha→LK→Alpha and LK→Alpha→LK should preserve data on broader real-data corpora, not just focused library regressions
 - [ ] Validate chunk-family mapping: every expected input chunk surface must either become the correct native output chunk family (`MH2O` in LK, `MCLQ` in Alpha) or be explicitly accounted for through preserved/raw interchange data
 - [ ] Promote converter proof from reduced terrain-domain reconstruction to chunk-preserving conversion where required

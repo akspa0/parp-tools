@@ -5,127 +5,161 @@
 - status: active
 - date: 2026-05-13
 - owner: `wow-viewer`
-- intent: port legacy `MdxViewer` capability into a standalone `WoWAlphaViewer` hosted in `wow-viewer`, backed by `WowViewer.Core`, `WowViewer.Core.IO`, and `WowViewer.Core.Runtime`
+- strategy: strict layer-by-layer port from legacy `MdxViewer` behavior into a clean `WoWAlphaViewer` implementation
 
-## Goal
+## Outcome Target
 
-Deliver a `wow-viewer`-native viewer product surface named **WoWAlphaViewer** with the same practical world-viewing functionality as legacy `MdxViewer`, while keeping all new ownership in `wow-viewer` and treating `gillijimproject_refactor` as read-only reference plus compatibility evidence.
+Build an open-source, durable, modern viewer implementation that:
 
-## Reference Behavior Target
+1. matches `0.5.3` engine behavior as the reference baseline,
+2. supports multi-era data (`0.5.3` through `4.0.0`) through explicit compatibility layers,
+3. includes first-class GUI workflow for conversion tooling,
+4. avoids the monolithic, mixed-responsibility architecture that made legacy maintenance brittle.
 
-- Primary runtime reference is the native `0.5.3` client behavior.
-- Feature direction is **0.5.3-first correctness**, then multi-era compatibility (`0.5.3` through `4.0.0`) on top of that baseline.
-- Performance direction is **engine-style LOD and visibility discipline**, not brute-force scene submission.
-- Reverse-engineering evidence should use current x64dbg/Ghidra workflows when behavior conflicts are discovered.
+## Non-Negotiable Rules
 
-## Hard Boundaries
+1. `gillijimproject_refactor` remains read-only reference input.
+2. Every migrated behavior must be assigned to one architecture layer.
+3. No feature may bypass layer boundaries for convenience.
+4. Each layer requires proof before the next layer begins.
+5. Performance policy must follow LOD/visibility discipline, not brute-force submission.
 
-1. Do not add new viewer architecture to `gillijimproject_refactor/src/MdxViewer`.
-2. Keep file-format ownership in shared libraries (`WowViewer.Core` and `WowViewer.Core.IO`).
-3. Keep runtime ownership in `WowViewer.Core.Runtime`.
-4. Use staged client roots under `output/tmp/wowarchive-clients/` for real-data validation.
-5. Land one bounded slice at a time with explicit proof and explicit remaining boundary.
+## Architecture Layers
 
-## Scope Matrix (High-Level)
+### Layer 0 — Foundation Contracts (current executable slice)
 
-- shell + workspace UX owner: `wow-viewer/src/viewer/WowViewer.App`
-- world bootstrap and map/session opening owner: `wow-viewer/src/viewer/WowViewer.App` + `WowViewer.Core.IO`
-- world runtime frame composition owner: `wow-viewer/src/core/WowViewer.Core.Runtime/World`
-- model runtime consumption owner: `wow-viewer/src/core/WowViewer.Core.Runtime/M2` and `.../Mdx`
-- compatibility validation harness only: `gillijimproject_refactor/src/MdxViewer`
+Owner surface: `wow-viewer/src/viewer/WowViewer.App`
 
-## Ordered Slices
+Scope:
+- app composition contracts
+- module registration and lifecycle contracts
+- diagnostics/reporting contracts for startup readiness
 
-### Slice 0 — Product Branding Surface (Start Here)
+Proof:
+- app builds cleanly
+- CLI can report registered layers and readiness
 
-**Intent**
-- Introduce `WoWAlphaViewer` as the user-facing app identity without changing architectural ownership seams.
+### Layer 1 — Host Shell + Session State
 
-**In Scope**
-- User-visible app title strings in `WowViewer.App` desktop and capture windows.
-- CLI banner/log prefixes/help text in `WowViewer.App` command outputs.
-- New migration plan doc (this file) and bounded status notes.
+Owner surface: `wow-viewer/src/viewer/WowViewer.App`
 
-**Out of Scope**
-- No namespace/package/project renames.
-- No runtime behavior changes.
-- No feature-parity claims.
+Scope:
+- deterministic app host boot path
+- workspace/session state persistence
+- command routing and user-safe failure boundaries
 
-**Proof**
-- `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WowViewer.App/WowViewer.App.csproj -c Debug`
+Proof:
+- session bootstrap and reload reproducible in CLI/desktop host
 
-### Slice 1 — Explicit Legacy-to-New Parity Matrix
+### Layer 2 — World Session Bootstrap
 
-**Intent**
-- Build a deterministic feature matrix from legacy `ViewerApp_*` surfaces to `wow-viewer` workspaces/panels/commands.
+Owner surface: `WowViewer.App` + `WowViewer.Core.IO`
 
-**Proof**
-- Matrix committed in `wow-viewer/docs/architecture/` with each row marked: done / partial / missing / intentionally dropped.
+Scope:
+- attach staged client root
+- map resolution and WDT bootstrap
+- tile-selection entry path with explicit diagnostics
 
-### Slice 2 — World Session Closure Pass
+Proof:
+- staged `0.5.3` and one later-era map bootstrap with deterministic logs
 
-**Intent**
-- Close highest-value world-session parity gaps in `wow-viewer` runtime + app consumer path.
+### Layer 3 — World Runtime Data Graph
 
-**Must Include**
-- Terrain and object visibility policy aligned to `0.5.3` reference behavior.
-- LOD/range/priority controls that reduce overdraw and unnecessary submissions.
+Owner surface: `wow-viewer/src/core/WowViewer.Core.Runtime/World`
 
-**Proof**
-- Real-data `world-frame` runs with staged clients plus deterministic output summaries/captures.
+Scope:
+- terrain/object/liquid/sky data pipelines
+- frame-stage contracts
+- pass ownership and metrics
 
-### Slice 3 — Terrain/Liquid Shader Baseline
+Proof:
+- bounded runtime frame output with stable stage counters
 
-**Intent**
-- Replace flat preview-style world composition with a real shader baseline for terrain and liquids.
+### Layer 4 — Visibility, Culling, and LOD Discipline
 
-**Must Include**
-- Dedicated terrain shader path (layering, alpha, and lighting-ready inputs).
-- Dedicated liquid shader path (surface type-aware rendering baseline).
-- Explicit performance instrumentation for pass cost before/after shader integration.
+Owner surface: `WowViewer.Core.Runtime`
 
-**Proof**
-- Real-data captures and runtime counters showing shader path active and stable on staged `0.5.3` plus one later-era map.
+Scope:
+- `0.5.3`-style visibility and LOD policy baseline
+- object family range gates
+- budget-aware scheduling hooks
 
-### Slice 4 — Skybox And Lighting Parity Baseline
+Proof:
+- measurable reduction in submitted counts with same camera scenes
 
-**Intent**
-- Land real skybox rendering and lighting behavior that matches `0.5.3` expectations as the baseline.
+### Layer 5 — Terrain + Liquid Shader Baseline
 
-**Must Include**
-- Runtime skybox consumer path in `wow-viewer` app/world renderer.
-- World-lighting baseline that can be extended for non-`0.5.3` data.
-- Clear seam between baseline lighting and later-era compatibility extensions.
+Owner surface: `WowViewer.App` renderer consumer + runtime seam contracts
 
-**Proof**
-- Bounded capture workflow proving skybox + lighting active in world session, with reproducible settings.
+Scope:
+- terrain shader path
+- liquid shader path
+- pass cost instrumentation
 
-### Slice 5 — Standalone Asset Consumer Closure
+Proof:
+- shader-active captures and pass counters on staged real data
 
-**Intent**
-- Raise M2/MDX/WMO standalone workspaces to practical parity targets needed for normal inspection workflows.
+### Layer 6 — Skybox + Lighting Baseline
 
-**Proof**
-- Focused CLI capture paths (`m2-gpu-frame`, `mdx-gpu-frame`) and desktop workspace acceptance notes.
+Owner surface: runtime + app consumer
 
-### Slice 6 — Legacy Utility Triage
+Scope:
+- real skybox rendering
+- baseline world lighting matched to `0.5.3` expectations
+- compatibility seam for later-era lighting differences
 
-**Intent**
-- Classify legacy editor/utility surfaces into: migrate now, migrate later, keep external, or retire.
+Proof:
+- reproducible world captures proving skybox and lighting path active
 
-**Proof**
-- Documented triage with bounded follow-up slices.
+### Layer 7 — Model Consumers (M2/MDX/WMO)
 
-### Slice 7 — Decoupling Checkpoint
+Owner surface: `WowViewer.Core.Runtime` + app consumers
 
-**Intent**
-- Reach a point where routine viewer validation no longer depends on launching legacy `MdxViewer`.
+Scope:
+- standalone and world-integrated model consumer parity
+- pass routing and correctness checks
 
-**Proof**
-- `WoWAlphaViewer`-first validation workflow documented and runnable from `wow-viewer` only.
+Proof:
+- deterministic model/world captures and runtime summaries
+
+### Layer 8 — Converter UX Integration
+
+Owner surface: `WoWAlphaViewer` GUI + converter tool adapters
+
+Scope:
+- bulletproof, user-friendly conversion workflows in GUI
+- safe defaults, explicit provenance, actionable errors
+
+Proof:
+- guided conversion flows validated on staged clients without manual command reconstruction
+
+### Layer 9 — Parity Closure + Legacy Decoupling
+
+Owner surface: docs + validation workflow
+
+Scope:
+- close parity matrix rows
+- remove legacy runtime dependency for normal verification
+
+Proof:
+- `WoWAlphaViewer`-first validation workflow documented and sufficient
+
+## Reference Behavior and Research Policy
+
+- reference runtime behavior: native `0.5.3` client
+- reverse-engineering support: x64dbg/Ghidra evidence when behavior is ambiguous
+- later-era support policy: additive compatibility, never baseline drift
+
+## Parity Matrix Requirement
+
+Feature porting must be tracked in the companion matrix file:
+
+- `wow-viewer/docs/architecture/wow-alpha-viewer-parity-matrix-template-2026-05-13.md`
+
+No layer is complete until all scoped matrix rows are proven.
 
 ## Validation Language Rule
 
-- Build/test/CLI proof in `wow-viewer` is primary.
-- Legacy `MdxViewer` runtime checks are compatibility evidence, not ownership evidence.
-- Avoid claiming full parity until the parity matrix rows are closed.
+- `wow-viewer` build/test/runtime proof is primary.
+- legacy `MdxViewer` runs are compatibility evidence only.
+- no parity claims without matrix closure and proof artifacts.

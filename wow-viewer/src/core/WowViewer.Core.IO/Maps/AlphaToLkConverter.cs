@@ -1,4 +1,5 @@
 using System.Numerics;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -104,7 +105,7 @@ public static class AlphaToLkConverter
         }
     }
 
-    public static LkAdtData ConvertTile(AlphaTileData tile, int tileX, int tileY)
+    public static LkAdtData ConvertTile(AlphaTileData tile, int tileX, int tileY, AreaIdMapper? areaIdMapper = null, string? sourceMapDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(tile);
 
@@ -134,7 +135,7 @@ public static class AlphaToLkConverter
         {
             for (int cx = 0; cx < ChunksPerTile; cx++)
             {
-                chunks.Add(BuildChunkData(tile, cx, cy, tileX, tileY, textureNames, modelPlacements, worldModelPlacements));
+                chunks.Add(BuildChunkData(tile, cx, cy, tileX, tileY, textureNames, modelPlacements, worldModelPlacements, areaIdMapper, sourceMapDirectory));
             }
         }
 
@@ -158,7 +159,9 @@ public static class AlphaToLkConverter
         AlphaTileData tile, int cx, int cy, int tileX, int tileY,
         List<string> textureNames,
         List<LkMddfEntry> modelPlacements,
-        List<LkModfEntry> worldModelPlacements)
+        List<LkModfEntry> worldModelPlacements,
+        AreaIdMapper? areaIdMapper,
+        string? sourceMapDirectory)
     {
         int chunkAlphaSourceSize = tile.McalAlphaPack != null
             ? tile.McalAlphaPack.GetLength(0) / 16
@@ -183,17 +186,22 @@ public static class AlphaToLkConverter
 
         AdtLiquidChunk? liquidData = BuildLiquidData(tile, cx, cy);
 
-        uint mcnkFlags = 0;
+        uint mcnkFlags = tile.McnkFlagsByChunk != null && cx < tile.McnkFlagsByChunk.GetLength(0) && cy < tile.McnkFlagsByChunk.GetLength(1)
+            ? tile.McnkFlagsByChunk[cx, cy]
+            : 0u;
         int liquid = FindLiquidType(tile, cx, cy);
-        if (liquid > 0)
+        if (mcnkFlags == 0u && liquid > 0)
             mcnkFlags |= (liquid == 1) ? 0x08u : (liquid == 2) ? 0x10u : 0x18u;
 
-        if (shadowMap != null)
+        if ((mcnkFlags & 0x01u) == 0u && shadowMap != null)
             mcnkFlags |= 0x01u;
 
-        int areaId = tile.AreaIds != null && cy < tile.AreaIds.GetLength(0) && cx < tile.AreaIds.GetLength(1)
-            ? tile.AreaIds[cy, cx]
+        int areaId = tile.AreaIds != null && cx < tile.AreaIds.GetLength(0) && cy < tile.AreaIds.GetLength(1)
+            ? tile.AreaIds[cx, cy]
             : 0;
+
+        if (areaIdMapper is not null)
+            areaId = areaIdMapper.MapAreaId(areaId);
 
         int nLayers = 0;
         for (int l = 0; l < 4; l++)

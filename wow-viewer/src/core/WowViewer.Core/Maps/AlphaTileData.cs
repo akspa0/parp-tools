@@ -66,7 +66,8 @@ public sealed class AlphaTileData
         IReadOnlyList<int>[]? mcrfDoodadRefsByChunk = null,
         IReadOnlyList<int>[]? mcrfWorldModelRefsByChunk = null,
         IReadOnlyList<int>[]? mcrfDoodadUniqueIdsByChunk = null,
-        IReadOnlyList<int>[]? mcrfWorldModelUniqueIdsByChunk = null)
+        IReadOnlyList<int>[]? mcrfWorldModelUniqueIdsByChunk = null,
+        uint[,]? mcnkFlagsByChunk = null)
     {
         SourcePath = sourcePath;
         Heightmap = heightmap;
@@ -94,6 +95,7 @@ public sealed class AlphaTileData
         McrfWorldModelRefsByChunk = mcrfWorldModelRefsByChunk;
         McrfDoodadUniqueIdsByChunk = mcrfDoodadUniqueIdsByChunk;
         McrfWorldModelUniqueIdsByChunk = mcrfWorldModelUniqueIdsByChunk;
+        McnkFlagsByChunk = mcnkFlagsByChunk;
     }
 
     public string SourcePath { get; }
@@ -122,6 +124,7 @@ public sealed class AlphaTileData
     public IReadOnlyList<int>[]? McrfWorldModelRefsByChunk { get; }
     public IReadOnlyList<int>[]? McrfDoodadUniqueIdsByChunk { get; }
     public IReadOnlyList<int>[]? McrfWorldModelUniqueIdsByChunk { get; }
+    public uint[,]? McnkFlagsByChunk { get; }
 
     public AdtPlacementCatalog ToPlacementCatalog()
     {
@@ -202,7 +205,9 @@ var heights = SliceChunkHeights(Heightmap, cx, cy, tileSize);
                     Liquid = liquid,
                     WorldPosition = new Vector3(chunkWorldX, chunkWorldY, 0f),
                     AreaId = AreaIds != null && cx < AreaIds.GetLength(0) && cy < AreaIds.GetLength(1) ? AreaIds[cx, cy] : 0,
-                    McnkFlags = liquid != null ? 0x3C : 0
+                    McnkFlags = McnkFlagsByChunk != null && cx < McnkFlagsByChunk.GetLength(0) && cy < McnkFlagsByChunk.GetLength(1)
+                        ? (int)McnkFlagsByChunk[cx, cy]
+                        : (liquid != null ? 0x3C : 0)
                 });
             }
         }

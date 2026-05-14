@@ -113,7 +113,7 @@ Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMap
 - Note: 0.5.5.3494 Azeroth has 755 tiles vs 0.5.3.3368's 685; the extra ~70 tiles were added in the 0.5.5 patch
 
 **Remaining Phase C work**:
-1. **AreaID crosswalk** — `AreaIdMapper` already exists in `WowViewer.Core.IO/Dbc/AreaIdMapper.cs`; still needs wiring into `AlphaToLkConverter`
+1. **AreaID crosswalk completion** — `AreaIdMapper` is now consumed by the `AlphaToLkConverter.ConvertTile(...)` path; remaining work is broader orchestration wiring (for example CLI/`ConvertWdt` auto-load strategy and real-data proof updates)
 2. **Round-trip chunk-family validation** — prove that every expected input surface either maps to the correct output chunk family (`MH2O` for LK output, `MCLQ` for Alpha output) or is explicitly accounted for as out-of-band preserved/raw data
 3. **Broad LK corpus validation for `LkToAlpha`** — current proof covers 100% terrain geometry and alpha mask parity on Alpha 0.5.5 roundtrips, plus `MH2O <-> MCLQ -> MH2O` parity, but broad batch conversion of native LK maps is still open
 4. **Full chunk-preserving conversion** — current converter lane is still a reduced terrain-domain reconstruction, not chunk-for-chunk spec closure
@@ -123,7 +123,7 @@ Port conversion engine from `gillijimproject_refactor/src/WoWMapConverter/WoWMap
 
 **Validation truth boundary**:
 - `AlphaToLk` has real-data batch proof.
-- `LkToAlpha` is landed and fully validated for 100% terrain and alpha roundtrip parity against real Alpha 0.5.5 data, and has been verified to successfully round-trip Cataclysm 4.0.0 split ADTs (`_tex0.adt`, `_obj0.adt`). Broad batch conversion of native LK/Cata maps is still open.
+- `LkToAlpha` is landed and fully validated for focused LK↔Alpha regression coverage (`LkToAlphaRoundTripTests`: `17/17` passing), plus previously documented real-data Alpha and Cataclysm 4.0.0 split-ADT round-trip checks. Broad batch conversion of native LK/Cata maps is still open.
 - Neither direction should currently be described as full ADT-family chunk preservation.
 - Native output chunk types remain the target: use `MH2O` for LK output and `MCLQ` for Alpha output. A temporary `MCLQ`-in-LK diagnostic path is acceptable only as a stopgap proof tool, not as the desired end state.
 

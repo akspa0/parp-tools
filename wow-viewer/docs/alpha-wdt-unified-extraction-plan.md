@@ -16,7 +16,7 @@ Implemented shared surfaces:
 Current proof anchors:
 
 - staged `0.5.3` / `0.5.5` harvest and tensor-pack extraction through `AlphaWdtReader`
-- focused `LkToAlphaRoundTripTests` for structural alphaWDT write parity, placements, and liquid round-trip
+- focused `LkToAlphaRoundTripTests` for structural alphaWDT write parity, placements, and liquid round-trip (`17/17` passing in the current recovery baseline)
 - staged `4.0.0 -> 0.5.3` Azeroth conversion validated in `MdxViewer`
 - staged `4.0.0 -> 0.5.3` Kalimdor conversion now has full real-data WMO bundle proof in temp output with `311` converted WMOs, `1` missing root, and `0` converter failures after the WMO downgrade lane absorbed Alpha group-count and legacy batch-index limits
 - Ghidra-backed format notes in `docs/architecture/alpha-wdt-ghidra-research-2026-05-10.md` and `docs/architecture/alpha-placement-coordinate-transforms-2026-05-09.md`
@@ -41,7 +41,10 @@ This means `AlphaEmbeddedAdtReader` is compatibility-only. Keep it aligned until
 - alpha doodads are single-owner in `MCRF`; containing chunk wins unless a preserved LK source ref stays in the same local `3x3` neighborhood
 - preserved LK per-chunk `DoodadRefs` and `WorldModelRefs` must be remapped into the filtered placement-table index space before write; rebuilding placement tables without that remap collapses Alpha chunk ownership
 - WMOs still use overlap-based multi-chunk references
-- the Alpha client enforces an `MCNK` payload hard limit below `15000` bytes; `AlphaWdtWriter` treats that as a hard compatibility ceiling and trims only duplicate non-anchor WMO refs when a chunk would exceed budget
+- MCNK header `AreaId` round-trips through offset `0x38` (header-relative)
+- per-chunk MCNK flags are preserved when present; for chunks with active liquid payloads, liquid bits are normalized to `0x3C` as the current compatibility contract
+- Alpha `MCLQ` tile flags are preserved when present; if missing, fallback nibble synthesis remains local to `AlphaWdtWriter` (`water=0x01`, `ocean=0x02`, `magma=0x03`, `slime=0x04`, absent=`0x0F`)
+- the Alpha client enforces an `MCNK` payload hard limit below `15000` bytes; `AlphaWdtWriter` treats that as a hard compatibility ceiling by first trimming duplicate non-anchor overlap refs and then using bounded doodad spillover to adjacent chunks when needed
 - target-client asset presence is determined from target archives, wrapper scan, and loose files only
 
 ## What Still Remains

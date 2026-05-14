@@ -209,6 +209,8 @@ public static class AlphaWdtReader
         int[,,] texIds = new int[16, 16, 4];
         bool[,,] layerMask = new bool[16, 16, 4];
         bool[,] holes = new bool[16, 16];
+        int[,] areaIds = new int[16, 16];
+        uint[,] mcnkFlagsByChunk = new uint[16, 16];
         List<AlphaLiquidChunk> liquidChunks = [];
         List<AlphaModelPlacement> modelPlacements = [];
         List<AlphaWorldModelPlacement> worldModelPlacements = [];
@@ -224,6 +226,8 @@ public static class AlphaWdtReader
 
             if (!TryParseMcnk(container, mcnkOffset, textureNameList,
                     heightmap, alphaPack, normalXyz, alphaPackShadow, texIds, layerMask, holes, liquidChunks,
+                    areaIds,
+                    mcnkFlagsByChunk,
                     ref hasHeight, ref hasAlpha, ref hasNormals, ref hasShadow, ref totalMcshBytes))
                 continue;
         }
@@ -278,7 +282,9 @@ public static class AlphaWdtReader
             mclqSurfaceHeight: hasLiquid ? mclqSurface : null,
             mclqTypeMask: hasLiquid ? mclqTypes : null,
             mcshShadowMask1024: hasShadow ? alphaPackShadow : null,
-            rawChunks: rawChunks);
+            rawChunks: rawChunks,
+            areaIds: areaIds,
+            mcnkFlagsByChunk: mcnkFlagsByChunk);
 
         return true;
     }
@@ -431,7 +437,7 @@ public static class AlphaWdtReader
         IReadOnlyList<string> textureNames,
         float[,] heightmap, float[,,] alphaPack, float[,,] normalXyz, float[,] alphaPackShadow,
         int[,,] texIds, bool[,,] layerMask, bool[,] holes,
-        List<AlphaLiquidChunk> liquidChunks, ref bool hasHeight, ref bool hasAlpha,
+        List<AlphaLiquidChunk> liquidChunks, int[,] areaIds, uint[,] mcnkFlagsByChunk, ref bool hasHeight, ref bool hasAlpha,
         ref bool hasNormals, ref bool hasShadow, ref int totalMcshBytes)
     {
         if (mcnkOffset + ChunkHeaderSize + McnkHeaderSize > container.Length) return false;
@@ -451,6 +457,7 @@ public static class AlphaWdtReader
         int mcalSize = BitConverter.ToInt32(container, headerOffset + 0x2C);
         int mcshRel = BitConverter.ToInt32(container, headerOffset + 0x30);
         int mcshSize = BitConverter.ToInt32(container, headerOffset + 0x34);
+        int areaId = BitConverter.ToInt32(container, headerOffset + 0x38);
         int mclqRel = BitConverter.ToInt32(container, headerOffset + 0x64);
         int mcnkChunksSize = BitConverter.ToInt32(container, headerOffset + 0x5C);
         int mccvRel = BitConverter.ToInt32(container, headerOffset + 0x74);
@@ -458,6 +465,8 @@ public static class AlphaWdtReader
         if ((uint)indexX >= 16 || (uint)indexY >= 16) return true;
 
         int cx = indexX, cy = indexY;
+        areaIds[cx, cy] = areaId;
+        mcnkFlagsByChunk[cx, cy] = flags;
         int chunkDataBase = mcnkOffset + ChunkHeaderSize + McnkHeaderSize;
 
         if (mcvtRel >= 0 && chunkDataBase + mcvtRel + AlphaMcvtSize <= container.Length)
