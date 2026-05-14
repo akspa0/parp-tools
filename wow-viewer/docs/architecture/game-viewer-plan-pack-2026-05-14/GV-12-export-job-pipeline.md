@@ -28,3 +28,4 @@ Mirror imports with a shared export pipeline so conversion and extraction flows 
 ## Non-Goals
 
 - no batch scheduler yet
+- no forward-native package specifics in this generic slice; those belong in `GV-12A`

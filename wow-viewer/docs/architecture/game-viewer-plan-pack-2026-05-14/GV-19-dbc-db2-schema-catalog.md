@@ -28,3 +28,4 @@ Create the schema catalog that all metadata-table viewing and editing flows depe
 ## Non-Goals
 
 - no row editor UI yet
+- no non-DBC sidecar schema routing; that belongs in `GV-19A`

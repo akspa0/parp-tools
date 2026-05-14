@@ -11,6 +11,7 @@ Define how future model-generated assets and worlds enter the engine without pri
 - provenance fields
 - compatibility/profile hints
 - validation hooks
+- relation to Museums-backed forward-native stores
 
 ## Outputs
 

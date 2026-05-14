@@ -4,6 +4,13 @@
 
 - status: active planning note
 - intent: define the first real audio-engine ownership lane for the game-engine side of `wow-viewer`
+- related micro-plans:
+  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-14A-audio-system-foundation.md`
+  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-14B-profile-audio-resolution-contracts.md`
+  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-14C-runtime-audio-scene-and-mixer.md`
+  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-14D-audio-asset-family-support-matrix.md`
+  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-17A-audio-backend-bridge.md`
+  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-17B-midi-synth-and-instrument-bank-bridge.md`
 - immediate trigger:
   - user direction is to start planning `wow-viewer` as a game-engine host, with audio as one of the first missing runtime subsystems
   - the user then explicitly reprioritized this lane toward `0.5.x` Alpha support first, especially MIDI ambience plus DLS soundbanks
@@ -20,6 +27,8 @@
   - Alpha area-audio lookup and asset discovery
   - ADT `MCSE` parsing across Alpha and later layouts
   - audio lookup tables and sound-entry resolution for later FMOD-era families
+  - decoded-audio support for `wav`, `ogg`, and `flac`
+  - MIDI sequencing plus instrument-bank support for `SFP0` and `DLS`
   - listener/emitter runtime state
   - backend playback and debug surfaces
 
@@ -48,6 +57,9 @@ Today `wow-viewer` does not have:
 - keep runtime audio-scene ownership in `wow-viewer/src/core/WowViewer.Core.Runtime`
 - keep `WowViewer.App` as the first bounded consumer and diagnostics host, not the design owner of parsing or runtime contracts
 - do not route new audio architecture back into `gillijimproject_refactor/src/MdxViewer` unless a bounded compatibility hotfix is explicitly requested
+- in the future extracted repo shape, this subsystem belongs to `BASE` plus profile/personality libraries:
+  - `BASE` owns engine-neutral audio runtime, mixer, backend, and diagnostics contracts
+  - profile/personality libraries own audio lookup, schema, and asset-resolution differences
 
 ## Architectural Direction
 
@@ -60,6 +72,8 @@ The target stack should be:
    - root ADT `MCSE` parsing
   - DB client lookup readers for Alpha area MIDI bindings and later emitter/sound resolution
    - virtual-file resolution for real sound asset paths
+  - decoded-audio family identification for `wav`, `ogg`, and `flac`
+  - MIDI sequence plus bank resolution for `midi` + `SFP0` or `DLS`
 
 2. runtime scene layer
    - listener state
@@ -70,6 +84,7 @@ The target stack should be:
 3. backend layer
    - backend-neutral audio-device interface
    - sample or stream decode path
+   - MIDI-to-rendered-audio synth bridge before backend playback
    - one initial desktop backend for bounded proof
 
 4. app or engine integration layer
@@ -149,6 +164,7 @@ The rationale is repo-local evidence:
   - add shared lookup readers for the minimum needed world-audio tables, keeping Alpha MIDI/DLS and later FMOD-era families explicit instead of flattening them together
   - first verify Alpha-era `AreaMIDIAmbiences` and related area bindings on `0.5.3` and `0.5.5`
   - then verify later-era emitter families such as `SoundEmitters`, `SoundEntries`, `SoundKit`, `WorldChunkSounds`, and `TerrainTypeSounds`
+  - shape resolved assets so decoded-audio families and `midi` + bank families are explicit in the runtime-facing result
   - keep this as shared table-loading and record-shaping work, not tool-local parsing
 - proof goal:
   - one shared resolver layer can take either an Alpha area-audio binding or a later emitter reference and produce a runtime-shaped audio recipe or a precise unresolved reason
@@ -197,7 +213,12 @@ The rationale is repo-local evidence:
 - implementation scope:
   - introduce one desktop backend suitable for bounded proof on Windows first
   - keep the backend behind an interface so later engine or headless consumers do not depend on app-local implementation details
-  - support the smallest viable asset set first, likely streamed or decoded wave assets, then expand only as real asset evidence requires
+  - support the smallest viable asset set first, but plan explicitly for:
+    - decoded `wav`
+    - decoded `ogg`
+    - decoded `flac`
+    - rendered output from `midi` + `SFP0`
+    - rendered output from `midi` + `DLS`
 - proof goal:
   - bounded proof that a known world emitter can be heard at the expected listener position
   - backend can start, update, and stop one emitter without leaking resources
@@ -271,6 +292,7 @@ Use this order:
 - `MCSE` payload interpretation may vary more across client eras than the current docs imply
 - the exact lookup chain from `MCSE` to real playable assets may differ by build family, so the first shared resolver should stay explicit about supported eras
 - sound assets may not all be simple wave playback; Alpha already proves `.mid` plus `.dls`, and later eras bring `.wav`, `.mp3`, and `.ogg`, so format handling should be proven from real client evidence before the backend scope expands
+- supporting `midi` means the engine also owns the complexity of instrument-bank resolution and synthesis; `SFP0` and `DLS` should stay explicit as separate proof targets rather than being hand-waved as generic "soundfont support"
 - occlusion, indoor/outdoor routing, reverb, and portal-aware audio are later world-runtime problems, not first-slice requirements
 
 ## Broader Game-Engine Direction

@@ -19,10 +19,14 @@ Deliver a `wow-viewer`-backed app-host product surface named **game-viewer** wit
 
 This plan no longer defines the entire program. It defines the viewer/app slice of the larger engine direction.
 
+It should also be read as a temporary host plan inside the current repo shape. In the future extracted repo, `game-viewer` belongs under a host family and `wow-viewer` belongs under a supported profile/personality family rather than remaining the accidental top-level engine identity.
+
 The editor/import-export shell direction is now also constrained by:
 
 - `wow-viewer/docs/architecture/wow-engine-editor-and-interop-plan-2026-05-14.md`
 - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/README.md`
+
+The host direction should also leave room for future browser/embed output components layered on top of the same engine/runtime contracts, rather than assuming every output experience must stay desktop-only.
 
 ## Reference Behavior Target
 

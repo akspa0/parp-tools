@@ -16,6 +16,7 @@ Keep Vulkan primary and OpenGL fallback behind one small backend bridge.
 - `IRenderBackend`
 - backend capability record
 - packet-to-backend submission contract
+- one explicit rule that WebGL, if added, is a delivery/component surface layered beside this bridge rather than a replacement for the native backend plan
 
 ## Dependencies
 

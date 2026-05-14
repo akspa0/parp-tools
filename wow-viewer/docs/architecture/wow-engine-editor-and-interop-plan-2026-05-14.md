@@ -27,6 +27,7 @@ The initial UI should reflect that.
 Near-term host identity:
 - one tool for MPQ-era WoW modding and asset/world interoperability
 - shipped through the current `game-viewer` app host while `wow-viewer` remains the library/runtime foundation
+- developed now inside `wow-viewer`, but aimed at a future extracted engine repo where `game-viewer` is a host and `wow-viewer` is one profile/personality library
 
 Early compatibility targets:
 - WoW `0.5.x`
@@ -35,6 +36,7 @@ Early compatibility targets:
 
 Early forward-native target:
 - custom content roots built from GLB + textures + per-object metadata sidecars
+- `Museums` roots as the named family for the user's own evolving forward-native data model
 
 Longer-term identity:
 - generalized engine/editor that can host both Blizzard-era content and future custom/generated content
@@ -48,6 +50,9 @@ Longer-term identity:
 5. DBC/DB2 read and edit support is part of the tool vision, not an optional sidecar.
 6. Cross-root workflows must be designed intentionally; copying data between clients/maps is a first-class use case.
 7. The shell must not assume that every profile is archive-backed or WoW-shaped.
+8. The shell must treat profile/personality libraries as first-class citizens rather than one-off hardcoded exceptions.
+9. Audio inspection and playback diagnostics belong in the same managed-shell story as rendering diagnostics.
+10. Browser/embed output surfaces should be supported through explicit delivery contracts, not by making the editor shell browser-shaped by default.
 
 ## Core User Stories
 
@@ -72,6 +77,7 @@ The tool can render supported asset types through explicit layers:
 - M2/MDX models
 - overlays and diagnostics
 - future generated/custom assets
+- future browser/embed previews through a WebGL-facing delivery component when the active workspace supports it
 
 ### User story 3 — multi-root game manager
 
@@ -109,6 +115,7 @@ Instead:
 The engine/editor should support compatibility by profile:
 
 - `Custom.Forward.GlbMetadata`
+- `Museums.ForwardNative.v0`
 - `WoW.Alpha.0.5.x`
 - `WoW.PreRelease.0.6-0.7`
 - `WoW.LK.3.x`
@@ -122,6 +129,7 @@ Each profile controls:
 - file families
 - supported import/export paths
 - renderer features
+- audio resolution features
 - editor tools
 - metadata schema bindings
 
@@ -161,6 +169,8 @@ It should own:
 4. Switch active roots quickly in the UI.
 5. Open multiple roots in one session.
 6. Drive feature gating and conversion choices from the active root metadata.
+7. Support multiple Museums roots the same way it supports multiple game roots.
+8. Surface which profile/personality library is bound to each root.
 
 ## Stretch capabilities
 
@@ -247,6 +257,7 @@ Core layers:
 - WMO/world-object layer
 - M2/MDX model layer
 - overlay/selection/diagnostic layer
+- audio diagnostics layer in the shell, fed by engine-neutral audio runtime state
 
 Compatibility layers:
 
@@ -286,6 +297,7 @@ The initial editor shell should prioritize these workspaces:
 ### Workspace 4 — Render Preview
 
 - preview selected assets and worlds using the runtime/backend layers
+- leave room for a WebGL-facing preview/export or embedded web panel without making it the primary renderer path
 
 ### Workspace 5 — Database Editor
 
@@ -403,3 +415,4 @@ Proof:
 2. update the `game-viewer` host sub-plan so its first shell slices reflect game-manager and asset-interoperability entrypoints
 3. later write a dedicated compatibility-profile technical plan for WoW + Warcraft 3 schema and feature routing
 4. later write a dedicated forward-native content-profile plan for GLB + textures + metadata-sidecar roots
+5. treat `Museums` as the named supported forward-native family while its exact storage spec evolves

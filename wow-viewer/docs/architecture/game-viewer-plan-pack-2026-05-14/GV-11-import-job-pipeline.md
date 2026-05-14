@@ -29,3 +29,4 @@ Define import as a first-class job system rather than ad hoc button handlers.
 ## Non-Goals
 
 - no UI polish
+- no forward-native GLB specifics in this generic slice; those belong in `GV-11A`

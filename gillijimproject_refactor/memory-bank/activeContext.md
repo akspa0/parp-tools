@@ -1,7 +1,7 @@
 # ACTIVE CONTEXT — V14 Branch (V11 Reset)
 
 ## BRANCH
-`v0.4.9-strict-guards` forked from `971fff2` on 2026-05-06.
+`v0.5.0-dev` branched forward from the `v0.4.9-strict-guards` line on 2026-05-14.
 
 ## wow-viewer Library Completeness / Harvest Status — Resynced 2026-05-11
 
@@ -177,11 +177,19 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 ## TOP-LEVEL DIRECTION UPDATE — 2026-05-14
 
 - The program framing has been widened from "viewer migration" to "engine modernization."
+- The current simple working label for this broader engine program is `museum-explorer`.
 - The new top-level architecture doc is `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md`.
 - The editor/modding-tool follow-up doc is `wow-viewer/docs/architecture/wow-engine-editor-and-interop-plan-2026-05-14.md`.
 - `wow-viewer/docs/architecture/game-viewer-host-plan-2026-05-13.md` remains active, but only as the current app-host/viewer sub-plan inside the broader engine direction.
-- The active execution skeleton is now `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/README.md` plus the `GV-01` through `GV-24` micro-plans under that folder.
+- The active execution skeleton is now `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/README.md` plus the `GV-00` through `GV-26` micro-plans under that folder.
 - The pack now has a corrected universal foundation: `GV-00-universal-content-contracts.md`, `GV-00A-artifact-provenance-and-preservation.md`, and a rewritten `GV-01-core-constants-registry.md` that explicitly forbids WoW-style assumptions in engine core constants.
+- The pack now also carries explicit future-extraction/base-architecture stories: `GV-00B-base-engine-repo-extraction-boundary.md`, `GV-00C-base-solution-and-folder-topology.md`, and `GV-06A-profile-personality-library-contract.md`. The long-range shape is an extracted engine repo with a first-class `BASE` layer plus sibling profile/personality libraries such as WoW, Warcraft 3, and Museums.
+- The plan pack now also makes `.NET 10` / `C#` the default engine-orchestration story via `GV-00D-dotnet-first-engine-and-orchestration-boundary.md`, with Python kept explicit as the ML/data side rather than the owner of engine-truth orchestration.
+- The pack has also been widened for forward-native content and small-model execution: `GV-04A-forward-native-glb-metadata-profile.md`, `GV-09A-raw-artifact-capture-store.md`, `GV-10A-sidecar-metadata-schema-index.md`, `GV-11A-glb-import-adapter.md`, `GV-12A-forward-native-export-package.md`, `GV-19A-profile-schema-source-routing.md`, `GV-25-small-model-story-template.md`, and `GV-26-plan-pack-audit-matrix.md`.
+- `Museums` is now an explicit named supported data family in the plan pack, centered on `GV-04A-museums-forward-native-profile.md`, `GV-04B-museums-object-package-contract.md`, `GV-04C-museums-shard-and-index-store.md`, and `GV-23A-distilled-portable-model-packages.md`.
+- Audio is now treated as a first-class engine subsystem in the plan pack and higher-level docs, anchored by `audio-engine-plan-2026-04-21.md` plus the micro-plans `GV-14A-audio-system-foundation.md`, `GV-14B-profile-audio-resolution-contracts.md`, `GV-14C-runtime-audio-scene-and-mixer.md`, and `GV-17A-audio-backend-bridge.md`.
+- The audio lane now explicitly calls out the required asset families and their complexity split: decoded `wav`/`ogg`/`flac` are separate from `midi` sequencing plus instrument-bank families `SFP0` and `DLS`, with new micro-plans `GV-14D-audio-asset-family-support-matrix.md` and `GV-17B-midi-synth-and-instrument-bank-bridge.md`.
+- Web delivery is now explicit as a component surface rather than a replacement backend: `GV-17C-webgl-component-and-web-delivery-surface.md` treats WebGL as a browser/embed output seam alongside the Vulkan-first and OpenGL-fallback native renderer story.
 - Backend direction is now explicit: Vulkan first, OpenGL fallback.
 - Future planning should treat `WowViewer.App` as the current `game-viewer` host product rather than the full identity of the program.
 - Future app-shell planning should start from import/export-first UX, game/data-root management, metadata-driven feature gating, DBC/DB2 editing direction, and compatibility profiles rather than assuming a single-version viewer shell.

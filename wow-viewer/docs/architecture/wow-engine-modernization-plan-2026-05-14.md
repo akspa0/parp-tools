@@ -4,8 +4,11 @@
 
 - status: active
 - date: 2026-05-14
+- working-label: `museum-explorer`
 - owner: `wow-viewer`
 - intent: evolve `wow-viewer` from a viewer-led migration into a real engine program with WoW-data support, modern rendering backends, and future ML-native content seams
+
+This working label refers to the broader engine-modernization program, not the final product or repo name.
 
 ## Thesis
 
@@ -22,6 +25,7 @@ The right mental model is:
 
 - `WowViewer.Core` and `WowViewer.Core.IO` are becoming content and world-foundation layers.
 - `WowViewer.Core.Runtime` is becoming the engine runtime.
+- the future extracted repo should treat the engine-neutral layer as a first-class `BASE` family rather than letting `wow-viewer` remain the top-level identity forever.
 - `WowViewer.App` is becoming the current `game-viewer` host product of that engine.
 - the current viewer cutover is a sub-problem inside the larger engine plan.
 
@@ -41,6 +45,7 @@ Long term:
 - support prompt-driven or model-driven world generation
 - support generated imagery, structures, props, terrain, and characters as engine content inputs
 - support a future external dataset-management system without baking that private system into this repo
+- support `Museums` as a first-class forward-native data family for the user's own evolving engine/content ecosystem
 
 ## Hard Direction Changes
 
@@ -53,6 +58,9 @@ New framing:
 3. WoW data is the first major content compatibility target, not the final boundary.
 4. ML work is not a sidecar; it is a planned future content source, but it must enter through explicit engine seams.
 5. The engine core must stay game-neutral; WoW-style formats are compatibility profiles, not the shape of the engine itself.
+6. Audio is a first-class engine subsystem beside rendering, not an app-side extra.
+7. The future extracted repo must treat engine layers and profile/personality libraries as first-class siblings.
+8. `.NET 10` and `C#` should be the default implementation and orchestration backbone for the engine program.
 
 ## Non-Negotiable Constraints
 
@@ -73,10 +81,15 @@ New framing:
 
 - OpenGL
 
+### Additional delivery surface
+
+- WebGL component for browser/embed output experiences
+
 ### Why this is the right split
 
 - Vulkan is the correct long-range engine backend for the user's intended architecture: explicit resource control, modern frame graphs, compute-friendly workflows, and future coexistence with small ML-driven generation or inference systems.
 - OpenGL remains the practical compatibility fallback and proof surface while the engine backend is maturing.
+- WebGL is valuable as a universal delivery surface and future embedding bridge, but it should consume engine-facing scene or asset contracts rather than redefine the native renderer plan.
 - The runtime and engine contracts must stay backend-agnostic. Vulkan should be the lead implementation, not the only shape the architecture can express.
 
 ## Engine Pillars
@@ -112,12 +125,26 @@ The engine runtime must own:
 - terrain/liquid/sky/object submission contracts
 - diagnostics and frame summaries
 
+### Pillar B1 — Audio Truth
+
+The engine must also own:
+
+- music playback contracts
+- world/object emitter contracts
+- listener state
+- multi-channel routing policy
+- decoded audio support for `wav`, `ogg`, and `flac`
+- MIDI sequencing plus instrument-bank support for `SFP0` and `DLS`
+- diagnostics-first null-backend proof
+- backend-neutral audio updates
+
 ### Pillar C — Backend Separation
 
 Backend layers must consume runtime packets rather than invent policy:
 
 - Vulkan backend
 - OpenGL fallback backend
+- WebGL delivery/component surface
 - optional later headless/test backend
 
 ### Pillar D — Data/Model Interop
@@ -135,6 +162,7 @@ The engine must be able to host:
 - WoW-native content
 - Warcraft 3-compatible asset/archive content where the profile contract supports it
 - forward-native content profiles such as GLB + textures + sidecar metadata
+- `Museums` roots and packages as a named supported forward-native family
 - converted/custom assets
 - future generated terrain/props/buildings/characters
 - non-WoW world semantics where practical
@@ -153,12 +181,18 @@ Engine Runtime
   visibility/LOD
   streaming
   render packet generation
+  audio scene and mixer contracts
   simulation-facing contracts
 
 Engine Rendering
   backend-agnostic render graph/contracts
   Vulkan backend
   OpenGL fallback backend
+
+Engine Audio
+  backend-agnostic audio runtime/contracts
+  null diagnostics backend
+  first desktop playback backend
 
 Content Foundation
   WowViewer.Core
@@ -174,6 +208,10 @@ Data + ML Pipeline
   data-harvester/
   V14 training/inference tools
   future engine-consumable generated content outputs
+
+Engine And Tool Orchestration
+  `.NET 10` / `C#` first
+  Python kept for ML/data workflows and optional downstream automation
 ```
 
 ## Core Reframe Of Existing Projects
@@ -207,6 +245,7 @@ This becomes the real engine center:
 - streaming/residency
 - asset lifecycle
 - simulation-ready world services
+- .NET-first orchestration seams for hosts, tools, and services that need engine truth and performance
 
 ### `WowViewer.App`
 
@@ -218,6 +257,28 @@ This is one engine host:
 - runtime proof harness
 
 It is not the engine itself.
+
+## Future Repo Shape
+
+The current repo still uses `wow-viewer` as the practical development root.
+
+That is not the desired long-range extracted shape.
+
+After `v0.5.0` stabilizes and the final legacy `MdxViewer` binary ships from the old repo, the engine should be extractable into its own repository with first-class sibling ownership such as:
+
+- `BASE/` for engine-neutral runtime, rendering, audio, content-service, provenance, and diagnostics contracts
+- `Hosts/` for `game-viewer` and later app shells
+- `Profiles/WoW/`
+- `Profiles/Warcraft3/`
+- `Profiles/Museums/`
+- `Tools/`
+
+In that future shape:
+
+- `wow-viewer` becomes one supported profile/personality family
+- `Museums` becomes another
+- no single profile is allowed to define the engine's shape
+- browser/embed delivery can exist as a host or component surface without becoming the shape of the engine core
 
 ## Editor And Interop Direction
 
@@ -236,6 +297,7 @@ The detailed host plan for this lives in:
 - `wow-viewer/docs/architecture/wow-engine-editor-and-interop-plan-2026-05-14.md`
 - `wow-viewer/docs/architecture/game-viewer-host-plan-2026-05-13.md`
 - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/README.md`
+- `wow-viewer/docs/architecture/audio-engine-plan-2026-04-21.md`
 
 ## ML And Generated-Content Direction
 
@@ -262,6 +324,8 @@ The repo should explicitly plan for three ML integration lanes:
 Hard rule:
 - runtime ML systems must enter through asset/content services or world-generation services, not by bypassing engine ownership seams
 
+`Museums` is the most likely first landing zone for that future generated/distilled content ecosystem, but its exact file/index/storage formats remain intentionally open for now.
+
 ## Future Dataset-Management Boundary
 
 The user has a separate non-public dataset-management project.
@@ -277,6 +341,7 @@ Therefore:
 - prefer manifests, artifact contracts, and content-package boundaries
 - avoid hardwiring repo logic to one external orchestration system
 - keep the engine core compatible with forward-native content profiles that never touch WoW-style storage
+- prefer `C#`/`.NET 10` orchestration for engine-truth flows rather than rebuilding those flows in Python
 
 ## Execution Phases
 
