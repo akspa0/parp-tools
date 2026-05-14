@@ -15,6 +15,8 @@ permissions:
 
 env:
   DOTNET_VERSION: '10.0.x'
+  RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+  RELEASE_NOTES_DIR: .github/releases/mdxviewer
 
 jobs:
   build:
@@ -87,15 +89,20 @@ jobs:
         shell: pwsh
         run: |
           $pubDir = "publish/MdxViewer-${{ matrix.rid }}"
+          $releaseNotes = "${{ env.RELEASE_NOTES_DIR }}/${{ env.RELEASE_VERSION }}.md"
+          if (!(Test-Path $releaseNotes)) {
+            Write-Error "Release notes not found: $releaseNotes"
+            exit 1
+          }
           Copy-Item "gillijimproject_refactor/README.md" "$pubDir/README.md"
           Copy-Item "gillijimproject_refactor/src/MdxViewer/README.md" "$pubDir/MdxViewer.README.md"
           Copy-Item "gillijimproject_refactor/src/MdxViewer/USERGUIDE.md" "$pubDir/USERGUIDE.md"
-          Copy-Item "gillijimproject_refactor/src/MdxViewer/docs/releases/v0.4.7.md" "$pubDir/CHANGES-v0.4.7.md"
+          Copy-Item $releaseNotes "$pubDir/CHANGES-${{ env.RELEASE_VERSION }}.md"
 
       - name: Create ZIP archive
         shell: pwsh
         run: |
-          $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
+          $version = "${{ env.RELEASE_VERSION }}"
           $zipName = "parp-tools-wow-viewer-${version}-${{ matrix.rid }}.zip"
           Compress-Archive -Path "publish/MdxViewer-${{ matrix.rid }}/*" -DestinationPath $zipName
           Write-Host "Created $zipName"
@@ -122,9 +129,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.version || github.ref_name }}
-          name: parp-tools WoW Viewer ${{ github.event.inputs.version || github.ref_name }}
-          body_path: gillijimproject_refactor/src/MdxViewer/docs/releases/v0.4.7.md
+          tag_name: ${{ env.RELEASE_VERSION }}
+          name: parp-tools WoW Viewer ${{ env.RELEASE_VERSION }}
+          body_path: ${{ env.RELEASE_NOTES_DIR }}/${{ env.RELEASE_VERSION }}.md
           files: artifacts/parp-tools-wow-viewer-*.zip
           draft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
