@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- External repos cloned under wow-viewer/libs manage their own package versions. -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+</Project>
