@@ -174,5 +174,18 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 4. Phase E: DBC/DB2 metadata enrichment (AreaTable, WorldSafeLocs, LiquidType, GroundEffects)
 5. Phase F: Placement provenance (MCRF per-chunk arrays, PM4 SQLite, prefab detection)
 
+## TOP-LEVEL DIRECTION UPDATE — 2026-05-14
+
+- The program framing has been widened from "viewer migration" to "engine modernization."
+- The new top-level architecture doc is `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md`.
+- The editor/modding-tool follow-up doc is `wow-viewer/docs/architecture/wow-engine-editor-and-interop-plan-2026-05-14.md`.
+- `wow-viewer/docs/architecture/game-viewer-host-plan-2026-05-13.md` remains active, but only as the current app-host/viewer sub-plan inside the broader engine direction.
+- The active execution skeleton is now `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/README.md` plus the `GV-01` through `GV-24` micro-plans under that folder.
+- The pack now has a corrected universal foundation: `GV-00-universal-content-contracts.md`, `GV-00A-artifact-provenance-and-preservation.md`, and a rewritten `GV-01-core-constants-registry.md` that explicitly forbids WoW-style assumptions in engine core constants.
+- Backend direction is now explicit: Vulkan first, OpenGL fallback.
+- Future planning should treat `WowViewer.App` as the current `game-viewer` host product rather than the full identity of the program.
+- Future app-shell planning should start from import/export-first UX, game/data-root management, metadata-driven feature gating, DBC/DB2 editing direction, and compatibility profiles rather than assuming a single-version viewer shell.
+- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaWdtWriter.cs` is now treated as a protected complete surface on `v0.5.0-dev`; future edits should happen only when the user explicitly reopens alphaWDT writer work or when a focused validated regression fix is required.
+
 **Full roadmap**: `wow-viewer/docs/architecture/wow-viewer-full-porting-roadmap.md`
 **Current architecture**: library → dataset → trainer → CLI → viewer (bottom-up)

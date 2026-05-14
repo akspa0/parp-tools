@@ -15,7 +15,7 @@ internal static class MdxGpuPreviewCaptureRunner
         Exception? failure = null;
 
         WindowOptions options = WindowOptions.Default;
-        options.Title = "WoWAlphaViewer MDX GPU Preview Capture";
+        options.Title = "game-viewer MDX GPU Preview Capture";
         options.Size = new Vector2D<int>(request.VisualWidth, request.VisualHeight);
         options.IsVisible = false;
         options.VSync = false;

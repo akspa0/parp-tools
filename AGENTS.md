@@ -1,8 +1,8 @@
-# Codex Workspace Instructions — v0.4.9 Branch (V14 Reset)
+# Codex Workspace Instructions — v0.5.0 Branch (Engine Reset)
 
-**THIS BRANCH WAS FORKED FROM COMMIT `971fff2` ON 2026-05-06.**
+**THIS BRANCH CONTINUES FROM `v0.4.9-strict-guards` INTO `v0.5.0-dev` ON 2026-05-14.**
 **Previous AGENTS.md backed up to `AGENTS.md.bak.v0.4.9-strict-guards`.**
-**Full plan: `wow-viewer/docs/architecture/v14-model-and-refactor-plan-2026-05-06.md`.**
+**Top-level plan: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md`.**
 
 ---
 
@@ -118,6 +118,20 @@ The ONLY trusted client data lives in the project-local staging area:
 - NEVER reference `H:\CLIENTS` in code, scripts, commands, validation notes, or documentation.
 - ALL references to `H:\CLIENTS` paths in existing docs (including `data-paths.md` and `AGENTS.md`) are stale and must be treated as incorrect. Only `output/tmp/wowarchive-clients/` paths are valid.
 
+### RULE 10: `AlphaWdtWriter` IS FROZEN UNLESS EXPLICITLY REOPENED
+
+**Treat `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaWdtWriter.cs` as COMPLETE for current project needs.**
+
+- DO NOT refactor `AlphaWdtWriter.cs` as part of viewer, runtime, renderer, engine, or planning work.
+- DO NOT "clean up" `AlphaWdtWriter.cs` for style, structure, or speculative correctness.
+- DO NOT change alphaWDT write semantics because a later plan suggests a nicer architecture.
+- DO NOT bundle unrelated `AlphaWdtWriter.cs` edits into broader shared-I/O or converter slices.
+
+The ONLY valid reasons to edit `AlphaWdtWriter.cs` are:
+1. The user explicitly asks to reopen alphaWDT writer work.
+2. A focused regression fix is required for a proven break in the current validated contract.
+3. A bounded compatibility change is required and comes with focused round-trip proof plus real-data validation.
+
 ### RULE 8: ONE PHASE AT A TIME — NO SCOPE CREEP
 
 **You cannot work on Phase N+1 until Phase N is done. Done means validated, not coded.**
@@ -227,6 +241,7 @@ This rule exists because the pattern has been: see the whole mountain → try to
 - Keep file detection, top-level chunk reading, and summary contracts in shared libraries once they exist; do not duplicate those heuristics across tools.
 - Be explicit about proof level: classification, top-level summary, deep payload parsing, and writing are different milestones.
 - Each shared-I/O slice should land with concrete validation in `wow-viewer/tests/WowViewer.Core.Tests`, `WowViewer.Tool.Inspect`, `WowViewer.Tool.Converter`, or an appropriate combination.
+- `AlphaWdtWriter.cs` is a protected complete surface on `v0.5.0-dev`. Do not touch it unless Rule 10 is satisfied.
 
 ## wow-viewer Data Harvester Guardrails
 

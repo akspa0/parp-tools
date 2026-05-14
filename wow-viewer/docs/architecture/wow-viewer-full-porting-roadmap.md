@@ -1,5 +1,10 @@
 # wow-viewer Complete Porting Roadmap
 
+Top-level direction note:
+
+- `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` is now the primary architectural framing for the program.
+- This roadmap remains the porting and capability roadmap for the current `wow-viewer` codebase underneath that broader engine direction.
+
 **Version**: 1.4 — 2026-05-09
 **Status**: Active — Phase C (Converters) IN PROGRESS — AlphaToLk validated, LkToAlpha landed with focused regression proof; NPZ interchange promoted, archival-grade ADT regeneration from shards not yet complete
 **Parent**: `gillijimproject_refactor` → `wow-viewer` full refactor
@@ -210,12 +215,17 @@ Each model trains independently. If H3 improves, only H3's checkpoint changes. F
 
 | Component | Source | Purpose |
 |-----------|--------|---------|
+| Game manager / data-root manager | New | Register roots, detect version/profile metadata, switch active data sets |
+| Import/export shell | New + existing converter/inspect tools | Asset/world interop-first UI entry surface |
 | World session management | `MdxViewer/WorldScene.cs` | AOI tile streaming, map loading |
 | Navigator/inspector panels | `MdxViewer/ViewerApp*.cs` | Tile browser, placement inspector |
 | Minimap overlay | `MdxViewer/MinimapRenderer.cs` | 2D minimap panel |
 | WDL terrain preview | `MdxViewer/WdlTerrainRenderer.cs` | Low-res 3D terrain mesh |
 | OpenGL renderer port | `MdxViewer/Rendering/*.cs` | GPU-accelerated terrain/WMO/M2 rendering |
+| Vulkan renderer primary backend | New | Explicit primary engine backend for terrain/WMO/M2/editor rendering |
+| Asset compatibility layers | New | Per-profile rendering/interop support for WoW families and early Warcraft 3 overlap |
 | Map editor | `MdxViewer export tools` | Terrain brush painting, object placement |
+| DBC/DB2 table editor | New over DBCD + WoWDBDefs | Metadata inspection and schema-driven editing |
 | GLB export | `MdxViewer/Export/MapGlbExporter.cs` | Terrain tile → glTF mesh |
 
 ### Phase J: CLI Toolkit
@@ -250,7 +260,7 @@ Each model trains independently. If H3 improves, only H3's checkpoint changes. F
 | `WowViewer.Tool.Harvest` | `extract-unified`, `harvest-map-mpq`, `harvest-tile`, `harvest-map`, `synthetic-minimap` |
 | `WowViewer.Tool.Convert` | `convert-alpha-to-lk`, dataset/ML utilities |
 | `WowViewer.Tool.Inspect` | PM4/ADT/WDT format inspection |
-| `WowViewer.App` | Viewer shell, terrain rendering, minimap overlay |
+| `WowViewer.App` | `game-viewer` host shell, terrain rendering, minimap overlay |
 | `data-harvester/` | Python: training, inference, quilt visualization, NPZ analysis |
 
 ---
@@ -319,6 +329,13 @@ Priorities flow from foundation upward. Library + dataset tooling first, renderi
 
 ### Priority 5: Viewer/Editor
 - **Phase I** — OpenGL renderer, UI panels, map editor
+
+### Priority 6: Modding Tool Closure
+- Game manager and active profile routing
+- Import/export-first UI
+- DBC/DB2 editing
+- Warcraft 3 early compatibility profile
+- Cross-root interop workflows
 
 ### NPZ as Interchange Format
 The NPZ tensor shard format is the **strategic interchange target** for downstream tooling:

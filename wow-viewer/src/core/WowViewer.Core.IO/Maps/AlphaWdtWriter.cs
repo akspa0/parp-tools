@@ -6,6 +6,9 @@ using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
 
+// Protected surface on v0.5.0-dev:
+// treat this writer as complete unless the user explicitly reopens alphaWDT work
+// or a focused validated regression fix is required.
 public static class AlphaWdtWriter
 {
     private const int ChunkHeaderSize = 8;

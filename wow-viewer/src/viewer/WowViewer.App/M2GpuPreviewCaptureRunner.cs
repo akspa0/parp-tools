@@ -15,7 +15,7 @@ internal static class M2GpuPreviewCaptureRunner
         Exception? failure = null;
 
         WindowOptions options = WindowOptions.Default;
-        options.Title = "WoWAlphaViewer GPU Preview Capture";
+        options.Title = "game-viewer GPU Preview Capture";
         options.Size = new Vector2D<int>(request.VisualWidth, request.VisualHeight);
         options.IsVisible = false;
         options.VSync = false;

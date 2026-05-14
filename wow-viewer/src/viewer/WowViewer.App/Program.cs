@@ -168,7 +168,7 @@ internal static class Program
             if (!string.IsNullOrWhiteSpace(dir))
                 Directory.CreateDirectory(dir);
             File.WriteAllText(fullOutput, json);
-            Console.WriteLine($"WoWAlphaViewer m2-bounds: models={succeeded + failed} succeeded={succeeded} failed={failed} output={fullOutput}");
+            Console.WriteLine($"game-viewer m2-bounds: models={succeeded + failed} succeeded={succeeded} failed={failed} output={fullOutput}");
         }
         else
         {
@@ -184,14 +184,14 @@ internal static class Program
         M2PreviewLoadResult result = M2PreviewLoader.Load(request);
         M2RuntimeGoldenFrame frame = result.FrameResult.GoldenFrame;
 
-        Console.WriteLine($"WoWAlphaViewer m2-frame: model={frame.CanonicalModelPath} version=0x{frame.ModelVersion:X} sequence={frame.RequestedSequenceIndex}->{frame.ResolvedSequenceIndex} timeMs={frame.TimeMs} bones={frame.BoneCount} skinnedVertices={frame.SkinnedVertexCount} visiblePasses={frame.VisiblePassCount} batches={frame.Batches.Count} hash={frame.RuntimeHash}");
+        Console.WriteLine($"game-viewer m2-frame: model={frame.CanonicalModelPath} version=0x{frame.ModelVersion:X} sequence={frame.RequestedSequenceIndex}->{frame.ResolvedSequenceIndex} timeMs={frame.TimeMs} bones={frame.BoneCount} skinnedVertices={frame.SkinnedVertexCount} visiblePasses={frame.VisiblePassCount} batches={frame.Batches.Count} hash={frame.RuntimeHash}");
         foreach (M2RuntimeGoldenBatch batch in frame.Batches)
-            Console.WriteLine($"WoWAlphaViewer m2-frame batch[{batch.BatchIndex}]: family={batch.Family} handler={batch.Handler} direct={batch.Direct} entries={batch.EntryCount} effect={batch.EffectKey} vertices={batch.VertexCount} indices={batch.IndexCount}");
+            Console.WriteLine($"game-viewer m2-frame batch[{batch.BatchIndex}]: family={batch.Family} handler={batch.Handler} direct={batch.Direct} entries={batch.EntryCount} effect={batch.EffectKey} vertices={batch.VertexCount} indices={batch.IndexCount}");
 
         M2RenderFrame renderFrame = result.FrameResult.RenderFrame;
-        Console.WriteLine($"WoWAlphaViewer m2-frame render-frame: commands={renderFrame.CommandCount} backendVertices={renderFrame.BackendVertexCount} backendIndices={renderFrame.BackendIndexCount} submittedVertices={renderFrame.SubmittedVertexCount} submittedIndices={renderFrame.SubmittedIndexCount} hash={renderFrame.FrameHash}");
-        Console.WriteLine($"WoWAlphaViewer m2-frame effects: particles={result.FrameResult.EffectRuntimeState.Particles.Count} visibleParticles={result.FrameResult.EffectRuntimeState.VisibleParticleEmitterCount} ribbons={result.FrameResult.EffectRuntimeState.Ribbons.Count} visibleRibbons={result.FrameResult.EffectRuntimeState.VisibleRibbonEmitterCount}");
-        Console.WriteLine($"WoWAlphaViewer m2-frame visual: size={result.FrameResult.VisualSnapshot.Width}x{result.FrameResult.VisualSnapshot.Height} litPixels={result.FrameResult.VisualSnapshot.LitPixelCount} hash={result.FrameResult.VisualSnapshot.VisualHash}");
+        Console.WriteLine($"game-viewer m2-frame render-frame: commands={renderFrame.CommandCount} backendVertices={renderFrame.BackendVertexCount} backendIndices={renderFrame.BackendIndexCount} submittedVertices={renderFrame.SubmittedVertexCount} submittedIndices={renderFrame.SubmittedIndexCount} hash={renderFrame.FrameHash}");
+        Console.WriteLine($"game-viewer m2-frame effects: particles={result.FrameResult.EffectRuntimeState.Particles.Count} visibleParticles={result.FrameResult.EffectRuntimeState.VisibleParticleEmitterCount} ribbons={result.FrameResult.EffectRuntimeState.Ribbons.Count} visibleRibbons={result.FrameResult.EffectRuntimeState.VisibleRibbonEmitterCount}");
+        Console.WriteLine($"game-viewer m2-frame visual: size={result.FrameResult.VisualSnapshot.Width}x{result.FrameResult.VisualSnapshot.Height} litPixels={result.FrameResult.VisualSnapshot.LitPixelCount} hash={result.FrameResult.VisualSnapshot.VisualHash}");
 
         string? goldenOutput = GetOption(args, "--golden-output");
         string? renderFrameOutput = GetOption(args, "--render-frame-output");
@@ -247,20 +247,20 @@ internal static class Program
         WowViewerWorldSessionOpenRequest request = ParseRequiredWorldRequest(args);
         WowViewerWorldSessionBootstrapResult result = WowViewerWorldSessionBootstrapper.Open(request);
 
-        Console.WriteLine($"WoWAlphaViewer world-bootstrap: root={result.ClientRoot} build={FormatOptionalValue(result.BuildLabel)} map={result.RequestedMapInput}->{result.ResolvedMapDirectory} source={(result.LoadedFromArchive ? "archive" : "loose")} lookupLoaded={result.UsedMapDirectoryLookup} resolvedViaDbc={result.ResolvedViaDbc} loadMs={result.LoadDuration.TotalMilliseconds:F1}");
+        Console.WriteLine($"game-viewer world-bootstrap: root={result.ClientRoot} build={FormatOptionalValue(result.BuildLabel)} map={result.RequestedMapInput}->{result.ResolvedMapDirectory} source={(result.LoadedFromArchive ? "archive" : "loose")} lookupLoaded={result.UsedMapDirectoryLookup} resolvedViaDbc={result.ResolvedViaDbc} loadMs={result.LoadDuration.TotalMilliseconds:F1}");
         if (!string.IsNullOrWhiteSpace(result.LooseOverlayRoot))
-            Console.WriteLine($"WoWAlphaViewer world-bootstrap loose-overlay: {result.LooseOverlayRoot}");
-        Console.WriteLine($"WoWAlphaViewer world-bootstrap wdt: path={result.WdtSourcePath} kind={result.FileSummary.Kind} version={result.FileSummary.Version?.ToString() ?? "n/a"} chunks={result.FileSummary.ChunkCount}");
-        Console.WriteLine($"WoWAlphaViewer world-bootstrap semantics: wmoBased={result.WdtSummary.IsWmoBased} tiles={result.WdtSummary.TilesWithData}/{result.WdtSummary.TotalTiles} mainCellBytes={result.WdtSummary.MainCellSizeBytes} doodadNames={result.WdtSummary.DoodadNameCount} wmoNames={result.WdtSummary.WorldModelNameCount} doodadPlacements={result.WdtSummary.DoodadPlacementCount} wmoPlacements={result.WdtSummary.WorldModelPlacementCount}");
+            Console.WriteLine($"game-viewer world-bootstrap loose-overlay: {result.LooseOverlayRoot}");
+        Console.WriteLine($"game-viewer world-bootstrap wdt: path={result.WdtSourcePath} kind={result.FileSummary.Kind} version={result.FileSummary.Version?.ToString() ?? "n/a"} chunks={result.FileSummary.ChunkCount}");
+        Console.WriteLine($"game-viewer world-bootstrap semantics: wmoBased={result.WdtSummary.IsWmoBased} tiles={result.WdtSummary.TilesWithData}/{result.WdtSummary.TotalTiles} mainCellBytes={result.WdtSummary.MainCellSizeBytes} doodadNames={result.WdtSummary.DoodadNameCount} wmoNames={result.WdtSummary.WorldModelNameCount} doodadPlacements={result.WdtSummary.DoodadPlacementCount} wmoPlacements={result.WdtSummary.WorldModelPlacementCount}");
         if (result.WdtSummary.MainFlags is not null)
         {
-            Console.WriteLine($"WoWAlphaViewer world-bootstrap main-flags: any={result.WdtSummary.MainFlags.CellsWithAnyFlags} hasAdt={result.WdtSummary.MainFlags.CellsWithHasAdt} allWater={result.WdtSummary.MainFlags.CellsWithAllWater} loaded={result.WdtSummary.MainFlags.CellsWithLoaded} unknown={result.WdtSummary.MainFlags.CellsWithUnknownFlags} asyncIds={result.WdtSummary.MainFlags.CellsWithAsyncId} distinct={FormatWdtMainFlags(result.WdtSummary.MainFlags)}");
+            Console.WriteLine($"game-viewer world-bootstrap main-flags: any={result.WdtSummary.MainFlags.CellsWithAnyFlags} hasAdt={result.WdtSummary.MainFlags.CellsWithHasAdt} allWater={result.WdtSummary.MainFlags.CellsWithAllWater} loaded={result.WdtSummary.MainFlags.CellsWithLoaded} unknown={result.WdtSummary.MainFlags.CellsWithUnknownFlags} asyncIds={result.WdtSummary.MainFlags.CellsWithAsyncId} distinct={FormatWdtMainFlags(result.WdtSummary.MainFlags)}");
         }
 
         string sampleTiles = result.OccupiedTiles.Count == 0
             ? "none"
             : string.Join(", ", result.OccupiedTiles.Take(12).Select(static tile => $"({tile.TileX},{tile.TileY})"));
-        Console.WriteLine($"WoWAlphaViewer world-bootstrap occupied-tiles: count={result.OccupiedTiles.Count} sample={sampleTiles}");
+        Console.WriteLine($"game-viewer world-bootstrap occupied-tiles: count={result.OccupiedTiles.Count} sample={sampleTiles}");
         return 0;
     }
 
@@ -270,26 +270,26 @@ internal static class Program
         WowViewerWorldRuntimeFrameRequest request = ParseRequiredWorldFrameRequest(args);
         WowViewerWorldRuntimeFrameResult result = WowViewerWorldRuntimeBridge.Build(request);
 
-        Console.WriteLine($"WoWAlphaViewer world-frame: map={result.Session.RequestedMapInput}->{result.Session.ResolvedMapDirectory} tile=({result.SelectedTileX},{result.SelectedTileY}) placementSource={result.PlacementSourcePath} objectPhase={result.ObjectPhaseExecuted} totalMs={result.Stats.TotalCpuMs:F2}");
+        Console.WriteLine($"game-viewer world-frame: map={result.Session.RequestedMapInput}->{result.Session.ResolvedMapDirectory} tile=({result.SelectedTileX},{result.SelectedTileY}) placementSource={result.PlacementSourcePath} objectPhase={result.ObjectPhaseExecuted} totalMs={result.Stats.TotalCpuMs:F2}");
         if (!string.IsNullOrWhiteSpace(result.Session.LooseOverlayRoot))
-            Console.WriteLine($"WoWAlphaViewer world-frame loose-overlay: {result.Session.LooseOverlayRoot}");
-        Console.WriteLine($"WoWAlphaViewer world-frame options: wmo={result.PassOptions.WmosVisible} mdx={result.PassOptions.DoodadsVisible} sky={result.PassOptions.SkyVisible} wdl={result.PassOptions.WdlVisible} terrain={result.PassOptions.TerrainVisible} liquid={result.PassOptions.LiquidVisible} overlay={result.PassOptions.OverlayVisible}");
-        Console.WriteLine($"WoWAlphaViewer world-frame composition: {FormatCompositionLayers(result.Composition)}");
-        Console.WriteLine($"WoWAlphaViewer world-frame active-adt-tiles: count={result.ActiveTerrainTiles.Count} sample={FormatActiveTerrainTiles(result.ActiveTerrainTiles)}");
-        Console.WriteLine($"WoWAlphaViewer world-frame terrain: source={result.TileStageSummary.SourcePath} wdlTiles={result.Stats.WdlVisibleTileCount}/{result.TileStageSummary.WdlVisibleTileCount} terrainChunks={result.Stats.TerrainChunksRendered}/{result.TileStageSummary.TerrainChunkCount} holes={result.TileStageSummary.TerrainHoleChunkCount} liquidChunks={result.Stats.Liquid.VisibleCount}/{result.TileStageSummary.LiquidChunkCount} liquidLayers={result.TileStageSummary.LiquidLayerCount} liquidVisibleTiles={result.Stats.Liquid.SubmittedCount}/{result.TileStageSummary.VisibleLiquidTileCount} hasWater={result.TileStageSummary.HasWater}");
-        Console.WriteLine($"WoWAlphaViewer world-frame wdl-service: found={result.WdlTileData.SourceFound} hasData={result.WdlTileData.HasData} source={result.WdlTileData.SourcePath} version={FormatOptionalUInt(result.WdlTileData.Version)} range={FormatHeightRange(result.WdlTileData)} center={FormatOptionalHeight(result.WdlTileData.CenterHeight)} corners={FormatWdlCorners(result.WdlTileData)} samples={result.WdlTileData.OuterHeightCount}+{result.WdlTileData.InnerHeightCount}");
-        Console.WriteLine($"WoWAlphaViewer world-frame terrain-service: sourceChunks={result.TerrainTileData.ChunkCount} holeChunks={result.TerrainTileData.HoleChunkCount} liquidFlagChunks={result.TerrainTileData.LiquidFlagChunkCount} areas={result.TerrainTileData.DistinctAreaIdCount} sample={FormatTerrainChunkSample(result.TerrainTileData)}");
-        Console.WriteLine($"WoWAlphaViewer world-frame terrain-visual: size={result.TerrainVisualSnapshot.Width}x{result.TerrainVisualSnapshot.Height} sampled={result.TerrainVisualSnapshot.SampledPixelCount} range={FormatTerrainHeightRange(result.TerrainTileData)} center={FormatTerrainCenter(result.TerrainTileData)} corners={FormatTerrainCorners(result.TerrainTileData)} hash={result.TerrainVisualSnapshot.VisualHash}");
-        Console.WriteLine($"WoWAlphaViewer world-frame liquid-service: sourceChunks={result.LiquidTileData.ActiveChunkCount} sourceLayers={result.LiquidTileData.LayerCount} sourceVisibleTiles={result.LiquidTileData.VisibleTileCount} types={FormatLiquidTypeCounts(result.LiquidTileData)} sample={FormatLiquidChunkSample(result.LiquidTileData)}");
-        Console.WriteLine($"WoWAlphaViewer world-frame placements: wmo={result.WmoInstances.Count} readyWmo={result.ReadyWmoCount} mdx={result.MdxInstances.Count} readyMdx={result.ReadyMdxCount} skyboxBackdrop={result.SkyboxBackdropInstances.Count} pending={result.PendingAssetKeys.Count}");
+            Console.WriteLine($"game-viewer world-frame loose-overlay: {result.Session.LooseOverlayRoot}");
+        Console.WriteLine($"game-viewer world-frame options: wmo={result.PassOptions.WmosVisible} mdx={result.PassOptions.DoodadsVisible} sky={result.PassOptions.SkyVisible} wdl={result.PassOptions.WdlVisible} terrain={result.PassOptions.TerrainVisible} liquid={result.PassOptions.LiquidVisible} overlay={result.PassOptions.OverlayVisible}");
+        Console.WriteLine($"game-viewer world-frame composition: {FormatCompositionLayers(result.Composition)}");
+        Console.WriteLine($"game-viewer world-frame active-adt-tiles: count={result.ActiveTerrainTiles.Count} sample={FormatActiveTerrainTiles(result.ActiveTerrainTiles)}");
+        Console.WriteLine($"game-viewer world-frame terrain: source={result.TileStageSummary.SourcePath} wdlTiles={result.Stats.WdlVisibleTileCount}/{result.TileStageSummary.WdlVisibleTileCount} terrainChunks={result.Stats.TerrainChunksRendered}/{result.TileStageSummary.TerrainChunkCount} holes={result.TileStageSummary.TerrainHoleChunkCount} liquidChunks={result.Stats.Liquid.VisibleCount}/{result.TileStageSummary.LiquidChunkCount} liquidLayers={result.TileStageSummary.LiquidLayerCount} liquidVisibleTiles={result.Stats.Liquid.SubmittedCount}/{result.TileStageSummary.VisibleLiquidTileCount} hasWater={result.TileStageSummary.HasWater}");
+        Console.WriteLine($"game-viewer world-frame wdl-service: found={result.WdlTileData.SourceFound} hasData={result.WdlTileData.HasData} source={result.WdlTileData.SourcePath} version={FormatOptionalUInt(result.WdlTileData.Version)} range={FormatHeightRange(result.WdlTileData)} center={FormatOptionalHeight(result.WdlTileData.CenterHeight)} corners={FormatWdlCorners(result.WdlTileData)} samples={result.WdlTileData.OuterHeightCount}+{result.WdlTileData.InnerHeightCount}");
+        Console.WriteLine($"game-viewer world-frame terrain-service: sourceChunks={result.TerrainTileData.ChunkCount} holeChunks={result.TerrainTileData.HoleChunkCount} liquidFlagChunks={result.TerrainTileData.LiquidFlagChunkCount} areas={result.TerrainTileData.DistinctAreaIdCount} sample={FormatTerrainChunkSample(result.TerrainTileData)}");
+        Console.WriteLine($"game-viewer world-frame terrain-visual: size={result.TerrainVisualSnapshot.Width}x{result.TerrainVisualSnapshot.Height} sampled={result.TerrainVisualSnapshot.SampledPixelCount} range={FormatTerrainHeightRange(result.TerrainTileData)} center={FormatTerrainCenter(result.TerrainTileData)} corners={FormatTerrainCorners(result.TerrainTileData)} hash={result.TerrainVisualSnapshot.VisualHash}");
+        Console.WriteLine($"game-viewer world-frame liquid-service: sourceChunks={result.LiquidTileData.ActiveChunkCount} sourceLayers={result.LiquidTileData.LayerCount} sourceVisibleTiles={result.LiquidTileData.VisibleTileCount} types={FormatLiquidTypeCounts(result.LiquidTileData)} sample={FormatLiquidChunkSample(result.LiquidTileData)}");
+        Console.WriteLine($"game-viewer world-frame placements: wmo={result.WmoInstances.Count} readyWmo={result.ReadyWmoCount} mdx={result.MdxInstances.Count} readyMdx={result.ReadyMdxCount} skyboxBackdrop={result.SkyboxBackdropInstances.Count} pending={result.PendingAssetKeys.Count}");
         if (result.SkyboxBackdropInstances.Count > 0)
-            Console.WriteLine($"WoWAlphaViewer world-frame skybox-backdrop-sample: {string.Join(", ", result.SkyboxBackdropInstances.Take(4).Select(static instance => instance.ModelPath))}");
-        Console.WriteLine($"WoWAlphaViewer world-frame visibility: visibleWmo={result.Visibility.VisibleWmos.Count} culledWmo={result.CulledWmoCount} visibleMdx={result.Visibility.VisibleMdx.Count} culledMdx={result.CulledMdxCount} taxi={result.Visibility.VisibleTaxiMdxCount}");
-        Console.WriteLine($"WoWAlphaViewer world-frame passes: updatedMdx={result.Stats.MdxAnimation.SubmittedCount} wmoOpaque={result.Stats.WmoSubmission.SubmittedCount} mdxOpaque={result.Stats.MdxOpaqueSubmission.SubmittedCount} mdxTransparent={result.Stats.MdxTransparentSubmission.SubmittedCount} opaqueRoutes={result.PassFrame.OpaqueVisibleMdxRoutes.Count} transparentRoutes={result.PassFrame.TransparentVisibleMdxRoutes.Count}");
-        Console.WriteLine($"WoWAlphaViewer world-frame gpu-plan: opaqueBatches={result.MdxRenderPlan.OpaqueBatchCount} transparentBatches={result.MdxRenderPlan.TransparentBatchCount} opaqueInstances={result.MdxRenderPlan.OpaqueInstanceCount} transparentInstances={result.MdxRenderPlan.TransparentInstanceCount}");
-        Console.WriteLine($"WoWAlphaViewer world-frame hint: {result.OptimizationHint}");
+            Console.WriteLine($"game-viewer world-frame skybox-backdrop-sample: {string.Join(", ", result.SkyboxBackdropInstances.Take(4).Select(static instance => instance.ModelPath))}");
+        Console.WriteLine($"game-viewer world-frame visibility: visibleWmo={result.Visibility.VisibleWmos.Count} culledWmo={result.CulledWmoCount} visibleMdx={result.Visibility.VisibleMdx.Count} culledMdx={result.CulledMdxCount} taxi={result.Visibility.VisibleTaxiMdxCount}");
+        Console.WriteLine($"game-viewer world-frame passes: updatedMdx={result.Stats.MdxAnimation.SubmittedCount} wmoOpaque={result.Stats.WmoSubmission.SubmittedCount} mdxOpaque={result.Stats.MdxOpaqueSubmission.SubmittedCount} mdxTransparent={result.Stats.MdxTransparentSubmission.SubmittedCount} opaqueRoutes={result.PassFrame.OpaqueVisibleMdxRoutes.Count} transparentRoutes={result.PassFrame.TransparentVisibleMdxRoutes.Count}");
+        Console.WriteLine($"game-viewer world-frame gpu-plan: opaqueBatches={result.MdxRenderPlan.OpaqueBatchCount} transparentBatches={result.MdxRenderPlan.TransparentBatchCount} opaqueInstances={result.MdxRenderPlan.OpaqueInstanceCount} transparentInstances={result.MdxRenderPlan.TransparentInstanceCount}");
+        Console.WriteLine($"game-viewer world-frame hint: {result.OptimizationHint}");
         if (result.PendingAssetKeys.Count > 0)
-            Console.WriteLine($"WoWAlphaViewer world-frame pending-sample: {string.Join(", ", result.PendingAssetKeys.Take(8))}");
+            Console.WriteLine($"game-viewer world-frame pending-sample: {string.Join(", ", result.PendingAssetKeys.Take(8))}");
 
         if (!string.IsNullOrWhiteSpace(terrainPreviewOutput))
             WriteImage(terrainPreviewOutput, result.TerrainVisualSnapshot);
@@ -302,18 +302,18 @@ internal static class Program
         WowViewerWorldPlacementAuditRequest request = ParseRequiredWorldPlacementAuditRequest(args);
         WowViewerWorldPlacementAuditResult result = WowViewerWorldRuntimeBridge.AuditPlacements(request);
 
-        Console.WriteLine($"WoWAlphaViewer world-placement-audit: root={result.Session.ClientRoot} build={FormatOptionalValue(result.Session.BuildLabel)} map={result.Session.RequestedMapInput}->{result.Session.ResolvedMapDirectory} scannedTiles={result.ScannedTileCount} tilesWithPlacements={result.TilesWithPlacements}");
+        Console.WriteLine($"game-viewer world-placement-audit: root={result.Session.ClientRoot} build={FormatOptionalValue(result.Session.BuildLabel)} map={result.Session.RequestedMapInput}->{result.Session.ResolvedMapDirectory} scannedTiles={result.ScannedTileCount} tilesWithPlacements={result.TilesWithPlacements}");
         if (!string.IsNullOrWhiteSpace(result.Session.LooseOverlayRoot))
-            Console.WriteLine($"WoWAlphaViewer world-placement-audit loose-overlay: {result.Session.LooseOverlayRoot}");
+            Console.WriteLine($"game-viewer world-placement-audit loose-overlay: {result.Session.LooseOverlayRoot}");
         if (result.TopTiles.Count == 0)
         {
-            Console.WriteLine("WoWAlphaViewer world-placement-audit top: none");
+            Console.WriteLine("game-viewer world-placement-audit top: none");
             return 0;
         }
 
         foreach (WowViewerWorldPlacementTileSummary tile in result.TopTiles)
         {
-            Console.WriteLine($"WoWAlphaViewer world-placement-audit tile=({tile.TileX},{tile.TileY}) total={tile.PlacementCount} wmo={tile.WmoCount} mdx={tile.MdxCount} source={tile.SourcePath} sampleWmo={FormatOptionalValue(tile.SampleWmoPath)} sampleMdx={FormatOptionalValue(tile.SampleMdxPath)}");
+            Console.WriteLine($"game-viewer world-placement-audit tile=({tile.TileX},{tile.TileY}) total={tile.PlacementCount} wmo={tile.WmoCount} mdx={tile.MdxCount} source={tile.SourcePath} sampleWmo={FormatOptionalValue(tile.SampleWmoPath)} sampleMdx={FormatOptionalValue(tile.SampleMdxPath)}");
             if (!string.IsNullOrWhiteSpace(tile.SampleMdxPath))
             {
                 AssetPathDescriptor mdxDescriptor = AssetPathTaxonomy.Describe(tile.SampleMdxPath);
@@ -358,15 +358,15 @@ internal static class Program
             .Take(20)
             .ToArray();
 
-        Console.WriteLine($"WoWAlphaViewer archive-probe: root={normalizedClientRoot} build={FormatOptionalValue(buildLabel)} path={normalizedVirtualPath}");
-        Console.WriteLine($"WoWAlphaViewer archive-probe bootstrap: listfile={FormatOptionalValue(resolvedListfilePath)}");
-        Console.WriteLine($"WoWAlphaViewer archive-probe catalog: exists={exists} len={(data is null ? "null" : data.Length.ToString())}");
-        Console.WriteLine($"WoWAlphaViewer archive-probe known-matches: count={knownMatches.Length} sample={(knownMatches.Length == 0 ? "none" : string.Join(", ", knownMatches))}");
+        Console.WriteLine($"game-viewer archive-probe: root={normalizedClientRoot} build={FormatOptionalValue(buildLabel)} path={normalizedVirtualPath}");
+        Console.WriteLine($"game-viewer archive-probe bootstrap: listfile={FormatOptionalValue(resolvedListfilePath)}");
+        Console.WriteLine($"game-viewer archive-probe catalog: exists={exists} len={(data is null ? "null" : data.Length.ToString())}");
+        Console.WriteLine($"game-viewer archive-probe known-matches: count={knownMatches.Length} sample={(knownMatches.Length == 0 ? "none" : string.Join(", ", knownMatches))}");
 
         if (archiveCatalog is MpqArchiveCatalog mpqArchiveCatalog)
         {
             IReadOnlyList<string>? loadedArchivePaths = InvokePrivate<IReadOnlyList<string>>(mpqArchiveCatalog, "GetLoadedArchivePaths");
-            Console.WriteLine($"WoWAlphaViewer archive-probe archives: count={loadedArchivePaths?.Count ?? 0} sample={(loadedArchivePaths is null || loadedArchivePaths.Count == 0 ? "none" : string.Join(", ", loadedArchivePaths.Take(12).Select(Path.GetFileName)))}");
+            Console.WriteLine($"game-viewer archive-probe archives: count={loadedArchivePaths?.Count ?? 0} sample={(loadedArchivePaths is null || loadedArchivePaths.Count == 0 ? "none" : string.Join(", ", loadedArchivePaths.Take(12).Select(Path.GetFileName)))}");
         }
 
         return data is null ? 1 : 0;
@@ -869,7 +869,7 @@ internal static class Program
 
     private static void ShowUsage()
     {
-        Console.WriteLine("WoWAlphaViewer");
+        Console.WriteLine("game-viewer");
         Console.WriteLine($"Solution: {ProjectIdentity.SolutionName} {ProjectIdentity.PlannedVersion}");
         Console.WriteLine($"PM4 canonical owner: {Pm4Boundary.CanonicalOwner}");
         Console.WriteLine($"PM4 legacy reference: {Pm4Boundary.LegacyReference}");

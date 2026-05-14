@@ -64,7 +64,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
         public HashSet<int> OccupiedTileIndices { get; }
     }
 
-    private const string WindowTitle = "WoWAlphaViewer";
+    private const string WindowTitle = "game-viewer";
     private static readonly string[] MdxCameraPresetLabels = ["Custom", "Front", "Back", "Left", "Right", "Top", "Three Quarter"];
     private static readonly string?[] MdxCameraPresetValues = [null, "front", "back", "left", "right", "top", PreviewCameraSettings.DefaultPresetName];
     private static readonly MethodInfo? ImGuiControllerWindowResizedMethod =
@@ -3710,7 +3710,7 @@ internal sealed class WowViewerDesktopApp : IDisposable
 
     private void DrawAboutContents()
     {
-        ImGui.TextWrapped("`WoWAlphaViewer` is the active shell for bounded viewer/runtime proof work in `wow-viewer`. The diagnostics panel is the main place for detailed technical state now.");
+        ImGui.TextWrapped("`game-viewer` is the active shell for bounded viewer/runtime proof work on top of `wow-viewer`. The diagnostics panel is the main place for detailed technical state now.");
         ImGui.Separator();
         ImGui.TextDisabled("Commands");
         ImGui.BulletText("No args: open the desktop viewer");
