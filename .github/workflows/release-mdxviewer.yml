@@ -50,6 +50,11 @@ jobs:
         shell: pwsh
         run: ./setup-libs.ps1
 
+      - name: Bootstrap wow-viewer baseline dependencies
+        working-directory: wow-viewer
+        shell: pwsh
+        run: ./scripts/bootstrap.ps1
+
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
