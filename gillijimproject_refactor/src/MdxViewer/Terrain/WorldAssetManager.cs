@@ -1113,7 +1113,7 @@ public class WorldAssetManager : IDisposable
                 }
             }
 
-            var converter = new M2ToMdxConverter();
+            var converter = new WowViewer.Core.IO.M2.M2ToMdxConverter();
             byte[] mdxBytes = converter.ConvertToBytes(m2Bytes, skinBytes, _buildVersion);
             ViewerLog.Trace($"[M2] Converted {Path.GetFileName(normalizedKey)}: {m2Bytes.Length} -> {mdxBytes.Length} bytes");
             return mdxBytes;
