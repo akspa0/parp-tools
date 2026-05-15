@@ -524,12 +524,9 @@ public static class AlphaWdtReader
 
                     if (srcIdx + 2 < 435 && mcnrOffset + srcIdx + 2 < container.Length)
                     {
-                        float nx = (sbyte)container[mcnrOffset + srcIdx] / 127f;
-                        float nz = (sbyte)container[mcnrOffset + srcIdx + 1] / 127f;
-                        float ny = (sbyte)container[mcnrOffset + srcIdx + 2] / 127f;
-                        float len = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
-                        if (len > 0.001f) { nx /= len; ny /= len; nz /= len; }
-                        else { nx = 0f; ny = 0f; nz = 1f; }
+                        float nx = Math.Clamp((sbyte)container[mcnrOffset + srcIdx] / 127f, -1f, 1f);
+                        float nz = Math.Clamp((sbyte)container[mcnrOffset + srcIdx + 1] / 127f, -1f, 1f);
+                        float ny = Math.Clamp((sbyte)container[mcnrOffset + srcIdx + 2] / 127f, -1f, 1f);
 
                         int sampleX = isInner ? (col * 2) + 1 : col * 2;
                         int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;

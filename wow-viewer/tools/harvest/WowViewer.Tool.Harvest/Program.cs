@@ -316,6 +316,9 @@ static class Program
             return;
         }
 
+        string? buildVersion = DetectBuildVersionFromClientRoot(clientRoot);
+        Console.WriteLine($"Build version: {buildVersion ?? "(unknown)"}");
+
         Directory.CreateDirectory(outputDir);
 
         using var catalog = new NativeMpqService();
@@ -349,7 +352,7 @@ static class Program
                     Console.SetError(TextWriter.Null);
                     try
                     {
-                        if (RunExtractTileFromMpq(catalog, mapName, wdtBytes, tx, ty, outputPath, exportPlacements: false))
+                        if (RunExtractTileFromMpq(catalog, mapName, wdtBytes, tx, ty, outputPath, exportPlacements: false, buildVersion: buildVersion))
                             extracted++;
                     }
                     finally { Console.SetError(oldErr); }
@@ -387,6 +390,8 @@ static class Program
             return;
         }
 
+        string? buildVersion = DetectBuildVersionFromClientRoot(clientRoot);
+
         if (string.IsNullOrWhiteSpace(mapName))
         {
             Console.Error.WriteLine("Error: --map <name> is required.");
@@ -409,7 +414,7 @@ static class Program
 
         if (tileX.HasValue && tileY.HasValue)
         {
-            if (!RunExtractTileFromMpq(catalog, mapName, wdtBytes, tileX.Value, tileY.Value, output, exportPlacements, syntheticMinimap))
+            if (!RunExtractTileFromMpq(catalog, mapName, wdtBytes, tileX.Value, tileY.Value, output, exportPlacements, syntheticMinimap, buildVersion: buildVersion))
                 Environment.ExitCode = 1;
         }
         else
@@ -425,7 +430,7 @@ static class Program
         }
     }
 
-    static bool RunExtractTileFromMpq(NativeMpqService catalog, string mapName, byte[] wdtBytes, int tileX, int tileY, string? outputPath, bool exportPlacements, string? syntheticMinimapPath = null)
+    static bool RunExtractTileFromMpq(NativeMpqService catalog, string mapName, byte[] wdtBytes, int tileX, int tileY, string? outputPath, bool exportPlacements, string? syntheticMinimapPath = null, string? buildVersion = null)
     {
         TerrainTileTensorPack pack;
         AdtPlacementCatalog? placementCatalog = null;
@@ -467,7 +472,7 @@ static class Program
 
             try
             {
-                pack = AdtTensorPackBuilder.Build(adtDiskPath, tex0Bytes != null ? tex0DiskPath : null, null);
+                pack = AdtTensorPackBuilder.Build(adtDiskPath, tex0Bytes != null ? tex0DiskPath : null, buildVersion);
             }
             finally
             {
@@ -841,6 +846,26 @@ static class Program
         }
 
         return rgb;
+    }
+
+    static string? DetectBuildVersionFromClientRoot(string clientRoot)
+    {
+        string dirName = Path.GetFileName(clientRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (string.IsNullOrWhiteSpace(dirName))
+            return null;
+
+        // If the last directory is a generic game root (not a build key), walk up.
+        if (dirName.Equals("World of Warcraft", StringComparison.OrdinalIgnoreCase)
+            || dirName.Equals("Data", StringComparison.OrdinalIgnoreCase))
+        {
+            string? parent = Path.GetDirectoryName(clientRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrWhiteSpace(parent))
+                return null;
+            dirName = Path.GetFileName(parent);
+        }
+
+        string versionString = dirName.Replace('_', '.');
+        return ClientBuildKey.TryParse(versionString, out _) ? versionString : null;
     }
 
     static string? GetOption(string[] args, string name, string shortName)

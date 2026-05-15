@@ -452,7 +452,12 @@ public static class AdtTensorPackBuilder
         }
 
         if (string.IsNullOrWhiteSpace(effectiveTexturePath) || !File.Exists(effectiveTexturePath))
-            return (null, Array.Empty<string>(), null, null, null, null, null);
+        {
+            if (!profile.PreferTex0ForTextureData && File.Exists(adtPath))
+                effectiveTexturePath = adtPath;
+            else
+                return (null, Array.Empty<string>(), null, null, null, null, null);
+        }
 
         try
         {
