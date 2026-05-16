@@ -21,6 +21,7 @@ game-extracted training data.
 | `normals` | 257×257×3 float32 | [-1,1] unit vectors | `mcnr_normal_xyz` | 1−cosine similarity, valid-normal-masked × signal-available |
 | `alpha` | 256×256×4 float32 | [0,1] blend weights | `mcal_alpha_pack_256` | L1, object-masked × signal-available |
 | `holes` | 16×16 float32 | [0,1] hole probability | `hole_mask_16` | L1, object-masked × signal-available |
+| `liquid` | 256×256 float32 | [0,1] liquid presence mask | `unified_liquid_mask` | L1, object-masked × signal-available |
 
 ## Architecture
 
@@ -47,7 +48,8 @@ Decoder (U-Net skip fusion):
   ├─ height: Upsample→257 + Conv→1
   ├─ normals: Upsample→257 + Conv→3 + Tanh
   ├─ alpha: Upsample→256 + Conv→4 + Sigmoid
-  └─ holes: AdaptivePool→16 + Conv→1 + Sigmoid
+  ├─ holes: AdaptivePool→16 + Conv→1 + Sigmoid
+  └─ liquid: Upsample→256 + Conv→1 + Sigmoid
 ```
 
 Total: ~27.3M parameters.
@@ -73,7 +75,7 @@ Tiles missing any required training signal are excluded from the dataset.
 ### Loss
 
 ```
-L = L1_height + 2.0 × Cos_normals × [has_normals] + L1_alpha × [has_alpha] + L1_holes × [has_holes]
+L = L1_height + 2.0 × Cos_normals × [has_normals] + L1_alpha × [has_alpha] + L1_holes × [has_holes] + L1_liquid × [has_liquid]
 ```
 
 Normals loss uses **cosine similarity** (`1 − cos_sim`) on unit-length vectors, masked to

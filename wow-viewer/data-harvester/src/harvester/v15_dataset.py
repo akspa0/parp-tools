@@ -1,6 +1,6 @@
 """V15Dataset — PyTorch Dataset for V15 terrain model.
 
-Returns (minimap, height, normals, alpha, holes, object_weight).
+Returns (minimap, height, normals, alpha, holes, liquid, object_weight).
 Missing signals are returned as zero tensors and masked from loss.
 """
 
@@ -122,6 +122,16 @@ class V15Dataset(Dataset):
                 hol = hol.astype(np.float32)
             has_holes = hol is not None
 
+            liq = _parse_key(data, "unified_liquid_mask")
+            if liq is not None:
+                liq = liq.astype(np.float32)
+                if liq.ndim == 3 and liq.shape[-1] == 1:
+                    liq = liq.squeeze(-1)
+                if liq.max() > 1.5:
+                    liq /= 255.0
+                liq = np.clip(liq, 0, 1)
+            has_liquid = liq is not None
+
             mcly_ids = _parse_key(data, "mcly_texture_ids")
             mcly_mask = _parse_key(data, "mcly_layer_mask")
             has_mcly = mcly_ids is not None and mcly_mask is not None
@@ -154,6 +164,7 @@ class V15Dataset(Dataset):
                     alp = alp[:, ::-1]
                 if hol is not None:
                     hol = hol[:, ::-1]
+                liq = liq[:, ::-1] if liq is not None else None
                 mcly_ids = mcly_ids[:, ::-1]
                 mcly_mask = mcly_mask[:, ::-1]
                 obj = obj[:, ::-1]
@@ -170,6 +181,7 @@ class V15Dataset(Dataset):
                     alp = alp[::-1]
                 if hol is not None:
                     hol = hol[::-1]
+                liq = liq[::-1] if liq is not None else None
                 mcly_ids = mcly_ids[::-1]
                 mcly_mask = mcly_mask[::-1]
                 obj = obj[::-1]
@@ -188,6 +200,7 @@ class V15Dataset(Dataset):
                     alp = np.rot90(alp, k=1)
                 if hol is not None:
                     hol = np.rot90(hol, k=1)
+                liq = np.rot90(liq, k=1) if liq is not None else None
                 mcly_ids = np.rot90(mcly_ids, k=1)
                 mcly_mask = np.rot90(mcly_mask, k=1)
                 obj = np.rot90(obj, k=1)
@@ -198,6 +211,7 @@ class V15Dataset(Dataset):
         nm_mask = torch.from_numpy(normal_mask.copy()).unsqueeze(0)
         alp_t = torch.from_numpy(alp.copy()).permute(2, 0, 1) if has_alpha else torch.zeros(4, 256, 256)
         hol_t = torch.from_numpy(hol.copy()).unsqueeze(0) if has_holes else torch.zeros(1, 16, 16)
+        liq_t = torch.from_numpy(liq.copy()).unsqueeze(0) if has_liquid else torch.zeros(1, 256, 256)
         mcly_t = torch.from_numpy(mcly_ids.copy())
         mcly_m = torch.from_numpy(mcly_mask.copy())
         wgt = torch.from_numpy(1.0 - obj).unsqueeze(0)
@@ -209,12 +223,14 @@ class V15Dataset(Dataset):
             "normal_mask": nm_mask,
             "alpha": alp_t,
             "holes": hol_t,
+            "liquid": liq_t,
             "mcly_ids": mcly_t,
             "mcly_mask": mcly_m,
             "weight": wgt,
             "has_normals": has_normals,
             "has_alpha": has_alpha,
             "has_holes": has_holes,
+            "has_liquid": has_liquid,
             "has_mcly": has_mcly,
         }
 

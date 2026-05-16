@@ -25,7 +25,15 @@ public static class NpzTileSerializer
             Directory.CreateDirectory(directory);
 
         using FileStream fs = File.Create(outputPath);
-        using ZipOutputStream zip = new(fs);
+        Serialize(pack, fs);
+    }
+
+    public static void Serialize(TerrainTileTensorPack pack, Stream outputStream)
+    {
+        ArgumentNullException.ThrowIfNull(pack);
+        ArgumentNullException.ThrowIfNull(outputStream);
+
+        using ZipOutputStream zip = new(outputStream);
         zip.SetLevel(3); // balance speed vs compression
 
         // Write each present signal as a .npy entry

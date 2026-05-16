@@ -120,13 +120,13 @@ public sealed class TerrainTileTensorPack
     /// 257×257 unified liquid mask combining MH2O, MCLQ, and WL* sources.
     /// Priority: MH2O > MCLQ > WL*. 1.0 where any liquid source indicates water.
     /// </summary>
-    public float[,]? UnifiedLiquidMask { get; init; }
+    public float[,]? UnifiedLiquidMask { get; set; }
 
     /// <summary>
     /// 257×257 unified liquid surface height combining MH2O, MCLQ, and WL* sources.
     /// Priority: MH2O > MCLQ > WL*.
     /// </summary>
-    public float[,]? UnifiedLiquidHeight { get; init; }
+    public float[,]? UnifiedLiquidHeight { get; set; }
 
     // ── Object and footprint masks ─────────────────────────────────────────
 

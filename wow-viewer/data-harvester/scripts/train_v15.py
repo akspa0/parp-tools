@@ -162,6 +162,7 @@ def main() -> None:
         epoch_n = 0.0
         epoch_a = 0.0
         epoch_ho = 0.0
+        epoch_lq = 0.0
         epoch_mc = 0.0
         t0 = time.perf_counter()
 
@@ -172,22 +173,25 @@ def main() -> None:
             nm_mask = batch["normal_mask"].to(device, non_blocking=True)
             alp = batch["alpha"].to(device, non_blocking=True)
             hol = batch["holes"].to(device, non_blocking=True)
+            liq = batch["liquid"].to(device, non_blocking=True)
             mly = batch["mcly_ids"].to(device, non_blocking=True)
             mlm = batch["mcly_mask"].to(device, non_blocking=True)
             wgt = batch["weight"].to(device, non_blocking=True)
             has_n = batch["has_normals"]
             has_a = batch["has_alpha"]
             has_ho = batch["has_holes"]
+            has_lq = batch["has_liquid"]
             has_mc = batch["has_mcly"]
 
             optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not args.no_amp)):
-                pred_h, pred_n, pred_a, pred_ho, pred_mc = model(inp)
+                pred_h, pred_n, pred_a, pred_ho, pred_lq, pred_mc = model(inp)
                 loss_h = _weighted_l1(pred_h, hgt, wgt)
                 loss_n = _cosine_loss(pred_n, nrm, nm_mask) * has_n.float().mean()
                 loss_a = _weighted_l1(pred_a, alp, wgt) * has_a.float().mean()
                 loss_ho = _weighted_l1(pred_ho, hol, wgt) * has_ho.float().mean()
+                loss_lq = _weighted_l1(pred_lq, liq, wgt) * has_lq.float().mean()
 
                 B = pred_mc.size(0)
                 pred_mc_r = pred_mc.view(B, 4, 16, 16, 16).permute(0, 1, 4, 2, 3)
@@ -200,7 +204,7 @@ def main() -> None:
                 n_active = mc_mask.sum() + 1e-8
                 loss_mc = (loss_mc * mc_mask).sum() / n_active * has_mc.float().mean()
 
-                loss = loss_h + 2.0 * loss_n + loss_a + loss_ho + 0.3 * loss_mc
+                loss = loss_h + 2.0 * loss_n + loss_a + loss_ho + loss_lq + 0.3 * loss_mc
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -212,6 +216,7 @@ def main() -> None:
             epoch_n += loss_n.item()
             epoch_a += loss_a.item()
             epoch_ho += loss_ho.item()
+            epoch_lq += loss_lq.item()
             epoch_mc += loss_mc.item()
 
         scheduler.step()
@@ -223,18 +228,18 @@ def main() -> None:
             f"Epoch {epoch:3d}/{args.epochs} | "
             f"h={epoch_h / n_bt:.4f} n={epoch_n / n_bt:.4f} "
             f"a={epoch_a / n_bt:.4f} ho={epoch_ho / n_bt:.4f} "
-            f"mc={epoch_mc / n_bt:.4f} "
+            f"lq={epoch_lq / n_bt:.4f} mc={epoch_mc / n_bt:.4f} "
             f"lr={lr_now:.2e} {elapsed:.1f}s"
         )
 
         entry = {"epoch": epoch, "train_h": epoch_h / n_bt, "train_n": epoch_n / n_bt,
                  "train_a": epoch_a / n_bt, "train_ho": epoch_ho / n_bt,
-                 "train_mc": epoch_mc / n_bt, "lr": lr_now}
+                 "train_lq": epoch_lq / n_bt, "train_mc": epoch_mc / n_bt, "lr": lr_now}
 
         if epoch % args.val_interval == 0 and len(val_ds) > 0:
             v = _validate(model, val_loader, device)
             entry.update(v)
-            print(f"        val | h={v['val_h']:.4f} n={v['val_n']:.4f} a={v['val_a']:.4f}")
+            print(f"        val | h={v['val_h']:.4f} n={v['val_n']:.4f} a={v['val_a']:.4f} lq={v['val_lq']:.4f}")
             if v["val_h"] < best_val:
                 best_val = v["val_h"]
                 torch.save(
@@ -293,7 +298,7 @@ def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch):
             nm_mask = batch["normal_mask"][i].squeeze().cpu().numpy()
             alp = batch["alpha"][i].permute(1, 2, 0).cpu().numpy()
             wgt = batch["weight"][i].squeeze().cpu().numpy()
-            pred_h_raw, pred_n, pred_a, _pred_ho, _pred_mc = model(inp)
+            pred_h_raw, pred_n, pred_a, _pred_ho, pred_lq, _pred_mc = model(inp)
             pred_h = pred_h_raw.squeeze().cpu().numpy()
             pred_n = F.normalize(pred_n, dim=1).squeeze(0).permute(1, 2, 0).cpu().numpy()
             pred_a = pred_a.squeeze(0).permute(1, 2, 0).cpu().numpy()
@@ -309,6 +314,16 @@ def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch):
             _snap_save(pred_a[:, :, 0], 0, 1, tile_dir / "alpha_pred_ch0.png")
             _snap_save(wgt, 0, 1, tile_dir / "object_weight.png")
             _snap_save(nm_mask, 0, 1, tile_dir / "normal_mask.png")
+
+            liq_gt = batch["liquid"][i].squeeze().cpu().numpy()
+            liq_pred = pred_lq.squeeze().cpu().numpy()
+            if "has_liquid" in batch:
+                has_lq = bool(batch["has_liquid"][i])
+            else:
+                has_lq = liq_gt.max() > 0.5
+            if has_lq:
+                _snap_save(liq_gt, 0, 1, tile_dir / "liquid_gt.png")
+                _snap_save(liq_pred, 0, 1, tile_dir / "liquid_pred.png")
 
             valid = nm_mask > 0.5
             if valid.any():
@@ -350,6 +365,7 @@ def _validate(model, loader, device):
     total_h = 0.0
     total_n = 0.0
     total_a = 0.0
+    total_lq = 0.0
     n = 0
     for batch in loader:
         inp = batch["input"].to(device, non_blocking=True)
@@ -357,14 +373,17 @@ def _validate(model, loader, device):
         nrm = batch["normals"].to(device, non_blocking=True)
         nm_mask = batch["normal_mask"].to(device, non_blocking=True)
         alp = batch["alpha"].to(device, non_blocking=True)
+        liq = batch["liquid"].to(device, non_blocking=True)
         wgt = batch["weight"].to(device, non_blocking=True)
+        has_lq = batch["has_liquid"]
         with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
-            pred_h, pred_n, pred_a, _, _ = model(inp)
+            pred_h, pred_n, pred_a, _, pred_lq, _ = model(inp)
             total_h += _weighted_l1(pred_h, hgt, wgt).item()
             total_n += _cosine_loss(pred_n, nrm, nm_mask).item()
             total_a += _weighted_l1(pred_a, alp, wgt).item()
+            total_lq += (_weighted_l1(pred_lq, liq, wgt) * has_lq.float().mean()).item()
         n += 1
-    return {"val_h": total_h / n, "val_n": total_n / n, "val_a": total_a / n}
+    return {"val_h": total_h / n, "val_n": total_n / n, "val_a": total_a / n, "val_lq": total_lq / n}
 
 
 if __name__ == "__main__":

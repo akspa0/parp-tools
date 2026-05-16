@@ -11,6 +11,7 @@ dependencies = [
     "zarr>=2.0",
     "numcodecs>=0.13",
     "triton-windows>=3.7",
+    "pyarrow>=24.0.0",
 ]
 
 [project.optional-dependencies]

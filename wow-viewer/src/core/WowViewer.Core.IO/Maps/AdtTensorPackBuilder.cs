@@ -735,14 +735,13 @@ public static class AdtTensorPackBuilder
             signals.Add("mh2o_type_mask");
             return (heights, depths, typeMask);
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[MH2O] Warning: Failed to parse liquid data for tile: {ex.GetType().Name}: {ex.Message}");
             return (null, null, null);
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // MCLQ legacy liquid
     // ═══════════════════════════════════════════════════════════════════════
 
     private static (float[,]? height, int[,]? typeMask)
@@ -1836,7 +1835,7 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
     // Unified liquid mask and height
     // ═══════════════════════════════════════════════════════════════════════
 
-    private static (float[,]? mask, float[,]? height)
+    internal static (float[,]? mask, float[,]? height)
         BuildUnifiedLiquid(float[,]? mh2oHeight, float[,]? mclqHeight, float[,]? wlMask, float[,]? wlHeight, HashSet<string> signals)
     {
         // Priority: MH2O > MCLQ > WL*

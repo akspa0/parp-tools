@@ -132,6 +132,16 @@ The ONLY valid reasons to edit `AlphaWdtWriter.cs` are:
 2. A focused regression fix is required for a proven break in the current validated contract.
 3. A bounded compatibility change is required and comes with focused round-trip proof plus real-data validation.
 
+### RULE 11: DOCUMENTATION HYGIENE — PLANS ARE BITE-SIZED, DOCS STAY SYNCED, MEMORY BANK STAYS COMPRESSED
+
+**Break big ideas into tiny bite-sized steps. Keep every spec doc and memory-bank file current.**
+
+- Every plan must be decomposed into steps small enough for ANY LLM model to implement in a single focused pass. One concern per step, independently validatable, max 10 steps per phase.
+- Spec docs in `docs/architecture/` are the source of truth. When you change code that a spec describes, update the spec. No exceptions.
+- **Known bug: the memory bank does NOT auto-update when code edits are made.** This is a manual discipline. At the end of every non-trivial session, update `activeContext.md` and `progress.md`. Compress aggressively — prefer a 20-line accurate summary over a 200-line log.
+- If no spec exists for something you're building, create one before implementing.
+- See `.opencode/skills/doc-hygiene/SKILL.md` for the full checklist and conventions.
+
 ### RULE 8: ONE PHASE AT A TIME — NO SCOPE CREEP
 
 **You cannot work on Phase N+1 until Phase N is done. Done means validated, not coded.**
@@ -171,6 +181,7 @@ This rule exists because the pattern has been: see the whole mountain → try to
 - Read all relevant memory-bank files before making non-trivial changes; at minimum, read `activeContext.md` and `progress.md` for the area you are touching.
 - Keep the memory bank accurate after significant workflow, status, or boundary changes.
 - Prefer updating the smallest relevant continuity file instead of leaving stale guidance behind.
+- **WARNING: The memory bank does NOT auto-update when you make code edits.** You must manually update `activeContext.md` and `progress.md` after non-trivial changes. This is a known gap — see RULE 11.
 
 ## Memory Bank Structure
 
@@ -185,6 +196,7 @@ This rule exists because the pattern has been: see the whole mountain → try to
 - Use `.codex/skills/wow-viewer-shared-io-library/SKILL.md` for `Core` or `Core.IO` non-PM4 slices such as ADT root, `_tex0.adt`, `_obj0.adt`, `_lod.adt`, WDT, WMO, BLP, DBC, or DB2 detection or summary work, chunk readers, `map inspect`, `converter detect`, or shared-format regression updates.
 - Use `.codex/skills/wow-viewer-migration-continuation/SKILL.md` for continuation routing, next-slice selection, migration regrouping, or workflow-surface updates across chats.
 - Use `.codex/skills/terrain-alpha-regression/SKILL.md` for terrain alpha-mask, MCAL, MCLY, split ADT texture, or blending regressions in `gillijimproject_refactor`.
+- Use `.opencode/skills/doc-hygiene/SKILL.md` for doc sync, plan chunking, memory-bank compression, and spec-doc hygiene checks. Trigger at the start and end of any non-trivial task.
 
 ## Agent Registry
 
