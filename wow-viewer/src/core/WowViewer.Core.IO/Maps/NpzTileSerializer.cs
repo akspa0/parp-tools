@@ -76,6 +76,14 @@ public static class NpzTileSerializer
         WriteArray(zip, "mcrw_ref_indices", pack.McrwRefIndices, "<i4");
         WriteArray(zip, "placement_mddf_data", pack.PlacementMddfData, "<f4");
         WriteArray(zip, "placement_modf_data", pack.PlacementModfData, "<f4");
+
+        // Texture swatches for tileset identification
+        if (pack.MclyTexturePixels is { Count: > 0 } pixels)
+        {
+            for (int i = 0; i < pixels.Count; i++)
+                WriteArray(zip, $"mcly_texture_pixels_{i}", pixels[i], "|u1");
+        }
+
         WriteRawChunks(zip, pack.RawChunks);
 
         // Write metadata JSON

@@ -41,7 +41,7 @@ D1_OPTIONAL_KEYS = frozenset(
 _PATH_RE = re.compile(
     r"[\\/](?P<build>\d+_\d+_\d+_\d+)[\\/]"
     r"(?P<map>[^\\/]+)[\\/]"
-    r"(?P<map2>[^\\/]+)_(?P<tx>\d+)_(?P<ty>\d+)_harvest\.npz$"
+    r"(?P<map2>[^\\/]+)_(?P<tx>\d+)_(?P<ty>\d+)_harvest\.(?:npz|zarr)$"
 )
 
 
@@ -106,12 +106,20 @@ def signal_inventory(npz_path: Path) -> ShardSignalInventory:
     """
     try:
         build, map_name, tx, ty = _parse_shard_path(npz_path)
-        with np.load(npz_path) as data:
-            all_keys = set(data.files)
-            present = sorted(all_keys)
-            missing_req = sorted(D1_REQUIRED_KEYS - all_keys)
-            missing_alpha = [] if (all_keys & D1_ALPHA_KEYS) else ["mcal_alpha_pack_256"]
-            is_eligible = len(missing_req) == 0 and len(missing_alpha) == 0
+        all_keys: set[str]
+        if npz_path.suffix == ".zarr" and npz_path.is_dir():
+            import zarr as _zarr
+
+            store = _zarr.storage.LocalStore(str(npz_path), read_only=True)
+            root = _zarr.open_group(store, mode="r")
+            all_keys = set(root.array_keys())
+        else:
+            with np.load(npz_path) as data:
+                all_keys = set(data.files)
+        present = sorted(all_keys)
+        missing_req = sorted(D1_REQUIRED_KEYS - all_keys)
+        missing_alpha = [] if (all_keys & D1_ALPHA_KEYS) else ["mcal_alpha_pack_256"]
+        is_eligible = len(missing_req) == 0 and len(missing_alpha) == 0
         return ShardSignalInventory(
             path=str(npz_path),
             build=build,

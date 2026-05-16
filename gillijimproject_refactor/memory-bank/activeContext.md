@@ -197,3 +197,65 @@ Phase C (Converters): AlphaToLk is real-data validated at 100% tile conversion a
 
 **Full roadmap**: `wow-viewer/docs/architecture/wow-viewer-full-porting-roadmap.md`
 **Current architecture**: library → dataset → trainer → CLI → viewer (bottom-up)
+
+## Pending Merge
+
+Commit `e5b149167bbc703e3f257566701fbc0f0380941a` (`fix: bind MdxViewer to legacy M2ToMdxConverter`) on a sibling branch resolves circular dependencies that broke cross-platform GitHub Actions compilation. Three files changed in `gillijimproject_refactor/src/MdxViewer/`: `WmoRenderer.cs`, `WorldAssetManager.cs`, `ViewerApp.cs`. Needs to be merged into `v0.5.0-dev` at the next convenient integration point. Secondary to the harvest/training lane.
+
+## Active Development — 2026-05-15
+
+### V15 Terrain Model (CURRENT FOCUS)
+
+**Status**: Spec written, code ready, training not yet started.
+
+**What**: Single model that takes a 256×256 minimap and predicts a full terrain ADT patch:
+- Height (257×257), normals (257×257×3), alpha (256×256×4), holes (16×16), MCLY texture IDs (16×16×4)
+
+**Architecture**: ConvNeXt V2 Nano encoder (15.6M) + U-Net decoder, 27.4M params total.
+**No priors at inference** — just the minimap image. All supervision from NPZ shard signals.
+
+**Files**:
+- Spec: `wow-viewer/docs/architecture/v15-terrain-model-spec-2026-05-15.md`
+- Model: `wow-viewer/data-harvester/src/harvester/v15_model.py`
+- Dataset: `wow-viewer/data-harvester/src/harvester/v15_dataset.py`
+- Training: `wow-viewer/data-harvester/scripts/train_v15.py`
+- Test/inference: `wow-viewer/data-harvester/scripts/test_v15.py`
+
+**Training command**:
+```
+cd wow-viewer/data-harvester
+uv run python scripts/train_v15.py --device cuda --epochs 200 --batch-size 8 --val-interval 10 --max-samples 1000
+```
+Outputs: checkpoints at `checkpoints/v15_best.pt`, validation snapshots at `logs/val_epoch<NNNN>/tile_XX/`, training log at `logs/v15_training_log.json`.
+
+**Dependencies**: `pyproject.toml` has CUDA torch pinned via `[[tool.uv.index]]` → PyTorch cu130. `triton-windows>=3.7` for `torch.compile`.
+
+### C# Pipeline Fixes (Landed)
+
+Three fixes applied to the harvest tool to eliminate signal dropouts:
+
+| File | Fix |
+|------|-----|
+| `AdtTensorPackBuilder.cs:454` | When `_tex0.adt` missing, fall back to root ADT for pre-Cata builds (fixes 3.0.1) |
+| `Program.cs:470` | Auto-detect `buildVersion` from client root dir name (fixes 4.0.0 profile) |
+| `AlphaWdtReader.cs:527` | Remove MCNR re-normalization; clamp only. Matches `DecodeNormalComponent` |
+| `Program.cs` | Added `DecodeBlpToRgbNative` and texture swatch extraction to NPZ shards |
+
+### D1 Model (Attempted, Not Converged)
+
+Small U-Net tileset decomposition. Trained but outputs not useful — BCE loss collapsed alphas to zero. Switched to L1 but user assessed outputs as insufficient. Deferred in favor of V15.
+
+### Dataset State
+
+- Re-harvested corpus at `output/datasets/d1_reharvest/shards/` — 6 builds, 23K+ shards
+- 16,079 D1/V15-eligible training shards, 66 validation
+- Texture swatches extracted via C# fix (requires re-harvest to populate)
+- `object_mask_257` used for loss weighting (object pixels excluded)
+
+### Python Environment
+
+Managed by `uv` in `wow-viewer/data-harvester/`. Key deps:
+- `torch==2.12.0+cu130` (CUDA 13.0)
+- `timm>=1.0` (ConvNeXt backbone)
+- `zarr>=2.0`, `numcodecs>=0.13`
+- `triton-windows>=3.7` (for `torch.compile`)

@@ -39,6 +39,9 @@ public sealed class TerrainTileTensorPack
     /// </summary>
     public IReadOnlyList<string> MclyTextureNames { get; init; } = Array.Empty<string>();
 
+    /// <summary>Per-texture native-resolution RGB pixel arrays (name-aligned with MclyTextureNames).</summary>
+    public IReadOnlyList<byte[,,]>? MclyTexturePixels { get; set; }
+
     /// <summary>
     /// 16×16 chunk grid × 4 layers.
     /// Boolean flags: is this layer active in this chunk?

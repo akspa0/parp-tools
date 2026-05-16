@@ -623,3 +623,5 @@ wow-viewer/data-harvester/*.npz
 wow-viewer/data-harvester/*.lock
 .mcp.json
 opencode.jsonc
+wow-viewer/data-harvester/checkpoints/*
+wow-viewer/data-harvester/*.zip

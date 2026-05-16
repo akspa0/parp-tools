@@ -491,6 +491,25 @@ static class Program
             }
         }
 
+        // Load texture swatches from MPQ for tileset identification training
+        if (pack.MclyTextureNames.Count > 0)
+        {
+            var texPixels = new List<byte[,,]>();
+            foreach (string texName in pack.MclyTextureNames)
+            {
+                byte[,,]? pixels = LoadTextureFromMpq(catalog, texName);
+                if (pixels is not null)
+                {
+                    texPixels.Add(pixels);
+                }
+            }
+            if (texPixels.Count > 0)
+            {
+                pack.MclyTexturePixels = texPixels;
+                pack.AvailableSignals = new HashSet<string>(pack.AvailableSignals) { "mcly_texture_pixels" };
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(outputPath))
             outputPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), $"{mapName}_{tileX}_{tileY}_v14.npz");
 
@@ -813,8 +832,33 @@ static class Program
         byte[]? blpBytes = catalog.ReadFile(virtualPath);
         if (blpBytes is null || blpBytes.Length < 8)
             return null;
-        try { return DecodeBlpToRgb(blpBytes); }
+        try { return DecodeBlpToRgbNative(blpBytes); }
         catch { return null; }
+    }
+
+    static byte[,,]? DecodeBlpToRgbNative(byte[] blpBytes)
+    {
+        using var ms = new MemoryStream(blpBytes, writable: false);
+        using var blp = new SereniaBLPLib.BlpFile(ms);
+        var bitmap = blp.GetBitmap(0);
+        if (bitmap == null) return null;
+
+        int w = bitmap.Width;
+        int h = bitmap.Height;
+        if (w < 1 || h < 1) return null;
+
+        var rgb = new byte[h, w, 3];
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                var px = bitmap.GetPixel(x, y);
+                rgb[y, x, 0] = px.R;
+                rgb[y, x, 1] = px.G;
+                rgb[y, x, 2] = px.B;
+            }
+        }
+        return rgb;
     }
 
     static byte[,,]? DecodeBlpToRgb(byte[] blpBytes)
