@@ -1,7 +1,9 @@
 """Build V16 consolidated Zarr dataset directly from game client archives.
 
-Single-pass pipeline: C# harvester streams NPZ blobs → Python reads from pipe → Zarr.
+Single-pass pipeline: C# harvester streams NPZ blobs -> Python reads from pipe -> Zarr.
 NO intermediate files on disk. The Zarr store IS the dataset.
+
+Now carries ALL available NPZ signals including per-instance object mask and placement data.
 
 Usage:
     cd wow-viewer/data-harvester
@@ -25,6 +27,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import struct
 import subprocess
@@ -45,6 +48,8 @@ _HARVEST_TOOL_DIR = _PROJECT_ROOT / "tools" / "harvest" / "WowViewer.Tool.Harves
 _DATASET_ROOT = _PROJECT_ROOT / "output" / "datasets" / "v16"
 _CLIENT_ROOTS = _PROJECT_ROOT.parent / "output" / "tmp" / "wowarchive-clients"
 
+# ── NPZ key → Zarr array name mapping ──────────────────────────────────
+# All signals from the C# harvester that map to fixed-shape Zarr arrays.
 OUTPUT_ARRAY_NAMES = {
     "height_257": "height_257",
     "mcnr_normal_xyz": "normal_xyz",
@@ -53,6 +58,8 @@ OUTPUT_ARRAY_NAMES = {
     "unified_liquid_mask": "liquid_mask",
     "unified_liquid_height": "liquid_height",
     "object_mask_257": "object_mask",
+    "object_precise_mask_257": "object_precise_mask",
+    "object_instance_mask_257": "object_instance_mask",
     "minimap_rgb_256": "minimap_rgb",
     "mcsh_shadow_mask_256": "shadow_mask",
     "mcly_texture_ids": "mcly_texture_ids",
@@ -62,21 +69,24 @@ OUTPUT_ARRAY_NAMES = {
 DTYPES = {
     "height_257": np.float32, "normal_xyz": np.float32, "normal_mask": np.bool_,
     "alpha_256": np.float32, "holes_16": np.bool_, "liquid_mask": np.float32,
-    "liquid_height": np.float32, "object_mask": np.bool_, "minimap_rgb": np.uint8,
+    "liquid_height": np.float32, "object_mask": np.bool_, "object_precise_mask": np.float32,
+    "object_instance_mask": np.int32, "minimap_rgb": np.uint8,
     "shadow_mask": np.float32, "mcly_texture_ids": np.int32, "mcly_layer_mask": np.float32,
 }
 
 FILL_VALUES = {
     "height_257": 0.0, "normal_xyz": 0.0, "normal_mask": False,
     "alpha_256": 0.0, "holes_16": False, "liquid_mask": 0.0,
-    "liquid_height": 0.0, "object_mask": False, "minimap_rgb": 0,
+    "liquid_height": 0.0, "object_mask": False, "object_precise_mask": 0.0,
+    "object_instance_mask": 0, "minimap_rgb": 0,
     "shadow_mask": 0.0, "mcly_texture_ids": -1, "mcly_layer_mask": 0.0,
 }
 
 SHAPES = {
     "height_257": (257, 257), "normal_xyz": (257, 257, 3), "normal_mask": (257, 257),
     "alpha_256": (256, 256, 4), "holes_16": (16, 16), "liquid_mask": (256, 256),
-    "liquid_height": (256, 256), "object_mask": (257, 257), "minimap_rgb": (256, 256, 3),
+    "liquid_height": (256, 256), "object_mask": (257, 257), "object_precise_mask": (257, 257),
+    "object_instance_mask": (257, 257), "minimap_rgb": (256, 256, 3),
     "shadow_mask": (256, 256), "mcly_texture_ids": (16, 16, 4), "mcly_layer_mask": (16, 16, 4),
 }
 
@@ -85,17 +95,35 @@ CHUNK_SIZES = {
     "normal_mask": (256, 257, 257), "alpha_256": (64, 256, 256, 4),
     "holes_16": (1024, 16, 16), "liquid_mask": (64, 256, 256),
     "liquid_height": (64, 256, 256), "object_mask": (256, 257, 257),
+    "object_precise_mask": (256, 257, 257), "object_instance_mask": (256, 257, 257),
     "minimap_rgb": (64, 256, 256, 3), "shadow_mask": (64, 256, 256),
     "mcly_texture_ids": (1024, 16, 16, 4), "mcly_layer_mask": (256, 16, 16, 4),
 }
 
 ALL_ARRAY_KEYS = [
     "height_257", "normal_xyz", "normal_mask", "alpha_256", "holes_16",
-    "liquid_mask", "liquid_height", "object_mask", "minimap_rgb",
-    "shadow_mask", "mcly_texture_ids", "mcly_layer_mask",
+    "liquid_mask", "liquid_height", "object_mask", "object_precise_mask",
+    "object_instance_mask", "minimap_rgb", "shadow_mask",
+    "mcly_texture_ids", "mcly_layer_mask",
+]
+
+# Integration keys: derive has_* flags for these signals in the Parquet index
+SIGNAL_FLAG_KEYS = [
+    "normal_xyz", "alpha_256", "holes_16", "liquid_mask", "shadow_mask",
+    "object_mask", "object_instance_mask", "mcly_texture_ids",
 ]
 
 REQUIRED_KEYS = {"minimap_rgb_256", "height_257"}
+
+# ── Placement data columns for the companion Parquet table ────────────
+PLACEMENT_COLUMNS_MDDF = [
+    "nameId", "uniqueId", "posX", "posY", "posZ", "rotX", "rotY", "rotZ", "scale",
+]
+PLACEMENT_COLUMNS_MODF = [
+    "nameId", "uniqueId", "posX", "posY", "posZ", "rotX", "rotY", "rotZ",
+    "bbMinX", "bbMinY", "bbMinZ", "bbMaxX", "bbMaxY", "bbMaxZ",
+]
+
 NPZB_MAGIC = b"NPZB"
 ENDS_MAGIC = b"ENDS"
 
@@ -118,34 +146,6 @@ def _find_client_root(build: str) -> Path | None:
         if child.is_dir() and ((child / "WoW.exe").exists() or (child / "Data").exists()):
             return child
     return None
-
-
-def _read_npblobs_from_stream(proc: subprocess.Popen) -> list[dict[str, np.ndarray]]:
-    """Read length-prefixed NPZ blobs from the harvester's stdout pipe."""
-    tiles = []
-    buf = proc.stdout
-    while True:
-        header = buf.read(8)
-        if not header or len(header) < 8:
-            break
-        magic = header[:4]
-        if magic == ENDS_MAGIC:
-            break
-        if magic != NPZB_MAGIC:
-            # Skip until we find a valid header
-            continue
-        length = struct.unpack("<I", header[4:8])[0]
-        if length == 0 or length > 50_000_000:
-            break
-        blob = buf.read(length)
-        if not blob or len(blob) < length:
-            break
-        try:
-            data = dict(np.load(BytesIO(blob), allow_pickle=False))
-            tiles.append(data)
-        except Exception:
-            continue
-    return tiles
 
 
 def _process_tile_data(data: dict[str, np.ndarray]) -> tuple[dict[str, np.ndarray], dict[str, bool]] | None:
@@ -187,6 +187,47 @@ def _process_tile_data(data: dict[str, np.ndarray]) -> tuple[dict[str, np.ndarra
     return tile_arrays, has_signals
 
 
+def _extract_metadata(data: dict[str, np.ndarray]) -> dict:
+    meta_raw = data.get("metadata.json")
+    if meta_raw is None:
+        return {}
+    try:
+        if isinstance(meta_raw, str):
+            return json.loads(meta_raw)
+        return json.loads(meta_raw.tobytes().decode())
+    except Exception:
+        return {}
+
+
+def _extract_placements(data: dict[str, np.ndarray], meta: dict) -> tuple[list[dict], list[dict], list[str], list[str]]:
+    mddf_rows = []
+    modf_rows = []
+    mddf_names = meta.get("placement_mddf_names", [])
+    modf_names = meta.get("placement_modf_names", [])
+
+    mddf_data = data.get("placement_mddf_data")
+    if mddf_data is not None and mddf_data.ndim == 2 and mddf_data.shape[0] > 0:
+        for i in range(mddf_data.shape[0]):
+            row = {col: float(mddf_data[i, j]) for j, col in enumerate(PLACEMENT_COLUMNS_MDDF) if j < mddf_data.shape[1]}
+            row["instance_type"] = "mddf"
+            row["instance_idx"] = i
+            name_id = int(row.get("nameId", -1))
+            row["asset_path"] = mddf_names[name_id] if 0 <= name_id < len(mddf_names) else ""
+            mddf_rows.append(row)
+
+    modf_data = data.get("placement_modf_data")
+    if modf_data is not None and modf_data.ndim == 2 and modf_data.shape[0] > 0:
+        for i in range(modf_data.shape[0]):
+            row = {col: float(modf_data[i, j]) for j, col in enumerate(PLACEMENT_COLUMNS_MODF) if j < modf_data.shape[1]}
+            row["instance_type"] = "modf"
+            row["instance_idx"] = i
+            name_id = int(row.get("nameId", -1))
+            row["asset_path"] = modf_names[name_id] if 0 <= name_id < len(modf_names) else ""
+            modf_rows.append(row)
+
+    return mddf_rows, modf_rows, mddf_names, modf_names
+
+
 def _normalize_array(arr: np.ndarray, dst_key: str) -> np.ndarray:
     arr = arr.astype(DTYPES.get(dst_key, np.float32))
     if dst_key == "alpha_256":
@@ -199,6 +240,8 @@ def _normalize_array(arr: np.ndarray, dst_key: str) -> np.ndarray:
         arr = np.clip(arr, 0.0, 1.0)
     elif dst_key in ("holes_16", "object_mask"):
         arr = arr.astype(np.bool_)
+    elif dst_key == "object_instance_mask":
+        arr = arr.astype(np.int32)
     return arr
 
 
@@ -234,6 +277,32 @@ def _write_index(rows: list[dict], output_path: Path) -> None:
 
     table = pa.table(col_data, schema=schema)
     pq.write_table(table, str(output_path / "index.parquet"))
+
+
+def _write_placements(all_placements: list[dict], output_path: Path) -> None:
+    if not all_placements:
+        return
+    fields = [
+        pa.field("tile_id", pa.int64()),
+        pa.field("instance_type", pa.string()),
+        pa.field("instance_idx", pa.int32()),
+        pa.field("asset_path", pa.string()),
+    ]
+    for col in PLACEMENT_COLUMNS_MDDF:
+        fields.append(pa.field(col, pa.float32()))
+    for col in PLACEMENT_COLUMNS_MODF:
+        if col not in [f.name for f in fields]:
+            fields.append(pa.field(col, pa.float32()))
+
+    schema = pa.schema(fields)
+    col_data = {f.name: [] for f in fields}
+    for row in all_placements:
+        for f in fields:
+            val = row.get(f.name, 0.0 if f.type == pa.float32() else "")
+            col_data[f.name].append(val)
+
+    table = pa.table(col_data, schema=schema)
+    pq.write_table(table, str(output_path / "placements.parquet"))
 
 
 def cmd_build(args: argparse.Namespace) -> None:
@@ -290,6 +359,7 @@ def _build_zarr_streaming(
 
     arrays: dict[str, zarr.Array] = {}
     index_rows: list[dict] = []
+    all_placements: list[dict] = []
     valid = 0
     t0 = time.perf_counter()
     capacity = 50000
@@ -327,7 +397,6 @@ def _build_zarr_streaming(
             if magic == ENDS_MAGIC:
                 break
             if magic != NPZB_MAGIC:
-                # Out of sync — drain and break
                 proc.terminate()
                 break
 
@@ -353,38 +422,39 @@ def _build_zarr_streaming(
             h_mean = float(np.mean(tile_arrays["height_257"]))
             h_std = float(np.std(tile_arrays["height_257"])) + 1e-8
 
-            # Parse tile coords from metadata or filename
-            meta_raw = data.get("metadata.json")
+            meta = _extract_metadata(data)
             tx, ty = 0, 0
-            if meta_raw is not None:
-                try:
-                    import json
-                    meta = json.loads(meta_raw) if isinstance(meta_raw, str) else json.loads(meta_raw.tobytes().decode())
-                    source = meta.get("source_adt_path", "")
-                    # Parse "Azeroth_28_27.adt" → (28, 27)
-                    parts = source.replace(".adt", "").rsplit("_", 2)
-                    if len(parts) >= 2:
-                        try:
-                            ty = int(parts[-1])
-                            tx = int(parts[-2])
-                        except (ValueError, IndexError):
-                            pass
-                    actual_map = meta.get("map_name", map_name)
-                except Exception:
-                    actual_map = map_name
-            else:
-                actual_map = map_name
+            actual_map = map_name
+            if meta:
+                source = meta.get("source_adt_path", "")
+                parts = source.replace(".adt", "").rsplit("_", 2)
+                if len(parts) >= 2:
+                    try:
+                        ty = int(parts[-1])
+                        tx = int(parts[-2])
+                    except (ValueError, IndexError):
+                        pass
+                actual_map = meta.get("map_name", map_name)
+
+            # Extract placement data
+            mddf_rows, modf_rows, mddf_names, modf_names = _extract_placements(data, meta)
+            for row in mddf_rows:
+                row["tile_id"] = valid
+                all_placements.append(row)
+            for row in modf_rows:
+                row["tile_id"] = valid
+                all_placements.append(row)
 
             row = {
                 "tile_id": valid, "build": build, "map": actual_map,
                 "tile_x": tx, "tile_y": ty,
                 "height_mean": h_mean, "height_std": h_std,
+                "n_mddf": len(mddf_rows), "n_modf": len(modf_rows),
             }
-            for key, present in has_signals.items():
-                row[f"has_{key}"] = present
+            for key in SIGNAL_FLAG_KEYS:
+                row[f"has_{key}"] = has_signals.get(key, False)
             index_rows.append(row)
 
-            # Grow arrays if needed
             if valid >= capacity - 1:
                 capacity += 50000
                 for key in ALL_ARRAY_KEYS:
@@ -410,20 +480,25 @@ def _build_zarr_streaming(
         if limit is not None and valid >= limit:
             break
 
-    # Trim arrays to actual size
     for key in ALL_ARRAY_KEYS:
         arrays[key].resize((valid,) + SHAPES[key])
 
     if index_rows:
         _write_index(index_rows, output_path)
 
+    if all_placements:
+        _write_placements(all_placements, output_path)
+
     store.close()
 
     total_bytes = sum(f.stat().st_size for f in output_path.rglob("*") if f.is_file())
     liq_count = sum(1 for r in index_rows if r.get("has_liquid_mask", False))
+    inst_count = sum(1 for r in index_rows if r.get("has_object_instance_mask", False))
     elapsed = time.perf_counter() - t0
     print(f"\nDone. {valid} tiles -> {output_path}")
-    print(f"Size: {total_bytes / 1024 / 1024:.1f} MB, Liquid: {liq_count}/{valid}")
+    print(f"Size: {total_bytes / 1024 / 1024:.1f} MB")
+    print(f"Liquid: {liq_count}/{valid}, Instance mask: {inst_count}/{valid}")
+    print(f"Placements: {len(all_placements)} total")
     print(f"Time: {elapsed:.0f}s ({valid / max(elapsed, 0.01):.1f} tiles/s)")
 
 
@@ -442,6 +517,20 @@ def cmd_stats(args: argparse.Namespace) -> None:
             a = root[k]
             print(f"  {k}: shape={a.shape} dtype={a.dtype}")
         store.close()
+
+        idx_path = zarr_path / "index.parquet"
+        if idx_path.exists():
+            table = pq.read_table(str(idx_path))
+            print(f"  index.parquet: {table.num_rows} rows, {table.num_columns} cols")
+            for col in table.column_names:
+                if col.startswith("has_"):
+                    count = table.column(col).sum().as_py()
+                    print(f"    {col}: {count}/{table.num_rows}")
+
+        pl_path = zarr_path / "placements.parquet"
+        if pl_path.exists():
+            pl_table = pq.read_table(str(pl_path))
+            print(f"  placements.parquet: {pl_table.num_rows} placements")
 
 
 def main() -> None:

@@ -90,7 +90,7 @@ public static class AdtTensorPackBuilder
             ReadWlFiles(adtPath, availableSignals);
 
         // ── Build object footprint masks from MDDF/MODF ──────────────────────
-        (float[,]? objectMask257, float[,]? objectPreciseMask257) =
+        (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257) =
             BuildObjectMasks(adtPath, stream, fileSummary, availableSignals);
 
         float[,]? shadowResidualMask256 = BuildShadowResidualMask256(mcshShadowMask256, objectPreciseMask257, availableSignals);
@@ -160,6 +160,7 @@ public static class AdtTensorPackBuilder
             UnifiedLiquidHeight = unifiedLiquidHeight,
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
+            ObjectInstanceMask257 = objectInstanceMask257,
             Pm4PathMask = pm4PathMask,
             Pm4BuildingFootprintMask = pm4BuildingFootprintMask,
             Pm4MprlMask = pm4MprlMask,
@@ -1186,11 +1187,11 @@ public static class AdtTensorPackBuilder
     private const float ObjectWorldTileSize = 533.33333f;
     private const float ObjectMapOrigin = 17066.666f;
 
-    private static (float[,]? mask, float[,]? preciseMask)
+    private static (float[,]? mask, float[,]? preciseMask, int[,]? instanceMask)
         BuildObjectMasks(string adtPath, Stream stream, MapFileSummary fileSummary, HashSet<string> signals)
     {
         if (!TryParseAdtTileCoords(fileSummary.SourcePath, out int tileX, out int tileY))
-            return (null, null);
+            return (null, null, null);
 
         AdtPlacementCatalog placements;
         try
@@ -1203,14 +1204,16 @@ public static class AdtTensorPackBuilder
         }
         catch
         {
-            return (null, null);
+            return (null, null, null);
         }
 
         if (placements.ModelPlacements.Count == 0 && placements.WorldModelPlacements.Count == 0)
-            return (null, null);
+            return (null, null, null);
 
         float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
         float[,] preciseMask = new float[TileHeightmapSize, TileHeightmapSize];
+        int[,] instanceMask = new int[TileHeightmapSize, TileHeightmapSize];
+        int instanceId = 1;
 
         foreach (AdtModelPlacement placement in placements.ModelPlacements)
         {
@@ -1222,6 +1225,8 @@ public static class AdtTensorPackBuilder
 
             PaintCircle(mask, px, py, radiusBinary, value: 1.0f);
             PaintSoftCircle(preciseMask, px, py, radiusPrecise);
+            PaintCircle(instanceMask, px, py, radiusBinary, value: instanceId);
+            instanceId++;
         }
 
         foreach (AdtWorldModelPlacement placement in placements.WorldModelPlacements)
@@ -1242,18 +1247,22 @@ public static class AdtTensorPackBuilder
 
                 PaintRect(mask, minPx, minPy, maxPx, maxPy, value: 1.0f);
                 PaintSoftRect(preciseMask, minPx, minPy, maxPx, maxPy);
+                PaintRect(instanceMask, minPx, minPy, maxPx, maxPy, value: instanceId);
+                instanceId++;
             }
             else
             {
-                // Fallback to centroid circle when bounds are missing
                 PaintCircle(mask, px, py, radius: 3f, value: 1.0f);
                 PaintSoftCircle(preciseMask, px, py, radius: 3f);
+                PaintCircle(instanceMask, px, py, radius: 3f, value: instanceId);
+                instanceId++;
             }
         }
 
         signals.Add("object_mask_257");
         signals.Add("object_precise_mask_257");
-        return (mask, preciseMask);
+        signals.Add("object_instance_mask_257");
+        return (mask, preciseMask, instanceMask);
     }
 
     private static bool TryProjectPlacementToTilePixel(Vector3 position, int tileX, int tileY, out int pixelX, out int pixelY)
@@ -1354,6 +1363,27 @@ public static class AdtTensorPackBuilder
         }
     }
 
+    private static void PaintCircle(int[,] buffer, int cx, int cy, float radius, int value)
+    {
+        int r = (int)MathF.Ceiling(radius);
+        int rSq = r * r;
+        for (int dy = -r; dy <= r; dy++)
+        {
+            for (int dx = -r; dx <= r; dx++)
+            {
+                if ((dx * dx) + (dy * dy) > rSq)
+                    continue;
+
+                int x = cx + dx;
+                int y = cy + dy;
+                if ((uint)x >= TileHeightmapSize || (uint)y >= TileHeightmapSize)
+                    continue;
+
+                buffer[y, x] = value;
+            }
+        }
+    }
+
     private static void PaintSoftCircle(float[,] buffer, int cx, int cy, float radius)
     {
         int r = (int)MathF.Ceiling(radius * 1.5f);
@@ -1380,6 +1410,19 @@ public static class AdtTensorPackBuilder
     }
 
     private static void PaintRect(float[,] buffer, int minX, int minY, int maxX, int maxY, float value)
+    {
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+            {
+                if ((uint)x >= TileHeightmapSize || (uint)y >= TileHeightmapSize)
+                    continue;
+                buffer[y, x] = value;
+            }
+        }
+    }
+
+    private static void PaintRect(int[,] buffer, int minX, int minY, int maxX, int maxY, int value)
     {
         for (int y = minY; y <= maxY; y++)
         {

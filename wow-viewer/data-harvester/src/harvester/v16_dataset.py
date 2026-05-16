@@ -86,6 +86,7 @@ class V16Dataset(Dataset):
         has_alpha = bool(entry.get("has_alpha_256", False))
         has_holes = bool(entry.get("has_holes_16", False))
         has_liquid = bool(entry.get("has_liquid_mask", False))
+        has_instance = bool(entry.get("has_object_instance_mask", False))
 
         if has_normals:
             normals = root["normal_xyz"][tile_id].astype(np.float32)
@@ -114,6 +115,11 @@ class V16Dataset(Dataset):
         obj_mask = root["object_mask"][tile_id].astype(np.float32)
         weight = 1.0 - obj_mask
 
+        if has_instance and "object_instance_mask" in root:
+            instance_mask = root["object_instance_mask"][tile_id].astype(np.int64)
+        else:
+            instance_mask = np.zeros((257, 257), dtype=np.int64)
+
         if self.augment:
             xform = self._rng.randint(0, 8)
             if xform & 1:
@@ -126,6 +132,7 @@ class V16Dataset(Dataset):
                 holes = holes[:, ::-1]
                 liquid_mask = liquid_mask[:, ::-1]
                 weight = weight[:, ::-1]
+                instance_mask = instance_mask[:, ::-1]
             if xform & 2:
                 minimap = minimap[::-1]
                 height = height[::-1]
@@ -136,6 +143,7 @@ class V16Dataset(Dataset):
                 holes = holes[::-1]
                 liquid_mask = liquid_mask[::-1]
                 weight = weight[::-1]
+                instance_mask = instance_mask[::-1]
             if xform & 4:
                 minimap = np.rot90(minimap, k=1)
                 height = np.rot90(height, k=1)
@@ -148,6 +156,7 @@ class V16Dataset(Dataset):
                 holes = np.rot90(holes, k=1)
                 liquid_mask = np.rot90(liquid_mask, k=1)
                 weight = np.rot90(weight, k=1)
+                instance_mask = np.rot90(instance_mask, k=1)
 
         return {
             "input": torch.from_numpy(minimap.copy()).permute(2, 0, 1),
@@ -158,8 +167,10 @@ class V16Dataset(Dataset):
             "holes": torch.from_numpy(holes.copy()).unsqueeze(0),
             "liquid": torch.from_numpy(liquid_mask.copy()).unsqueeze(0),
             "weight": torch.from_numpy(weight.copy()).unsqueeze(0),
+            "instance_mask": torch.from_numpy(instance_mask.copy()).unsqueeze(0).long(),
             "has_normals": has_normals,
             "has_alpha": has_alpha,
             "has_holes": has_holes,
             "has_liquid": has_liquid,
+            "has_instance": has_instance,
         }

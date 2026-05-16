@@ -62,7 +62,8 @@ public static class AlphaTensorPackBuilder
         // Generate object footprint masks from MDDF/MODF placements
         float[,]? objectMask257 = null;
         float[,]? objectPreciseMask257 = null;
-        BuildObjectMasks(tileData, tileX, tileY, ref objectMask257, ref objectPreciseMask257, signals);
+        int[,]? objectInstanceMask257 = null;
+        BuildObjectMasks(tileData, tileX, tileY, ref objectMask257, ref objectPreciseMask257, ref objectInstanceMask257, signals);
 
         // Shadow residual: MCSH shadow not explained by objects
         float[,]? shadowResidual256 = null;
@@ -98,6 +99,7 @@ public static class AlphaTensorPackBuilder
             HoleMask16 = holeMask16,
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
+            ObjectInstanceMask257 = objectInstanceMask257,
             ShadowResidualMask256 = shadowResidual256,
             PlacementMddfCount = tileData.ModelPlacements.Count,
             PlacementModfCount = tileData.WorldModelPlacements.Count,
@@ -269,6 +271,7 @@ public static class AlphaTensorPackBuilder
         AlphaTileData tileData, int tileX, int tileY,
         ref float[,]? objectMask,
         ref float[,]? objectPreciseMask,
+        ref int[,]? objectInstanceMask,
         HashSet<string> signals)
     {
         if (tileData.ModelPlacements.Count == 0 && tileData.WorldModelPlacements.Count == 0)
@@ -276,14 +279,14 @@ public static class AlphaTensorPackBuilder
 
         objectMask = new float[TileHeightmapSize, TileHeightmapSize];
         objectPreciseMask = new float[TileHeightmapSize, TileHeightmapSize];
+        objectInstanceMask = new int[TileHeightmapSize, TileHeightmapSize];
+        int instanceId = 1;
 
         float tileWorldX = ObjectMapOrigin - tileX * ObjectTileSize;
         float tileWorldY = ObjectMapOrigin - tileY * ObjectTileSize;
 
         foreach (var p in tileData.ModelPlacements)
         {
-            // Position is (rendererX, rendererY, rendererZ) = (MapOrigin - fileY, MapOrigin - fileX, fileZ)
-            // Project: pixelX from rendererX (east-west), pixelY from rendererY (north-south)
             float localX = p.Position.X - tileWorldX;
             float localY = p.Position.Y - tileWorldY;
             if (localX < -ObjectTileSize * 0.1f || localX > ObjectTileSize * 1.1f ||
@@ -294,15 +297,15 @@ public static class AlphaTensorPackBuilder
             float r = MathF.Max(1.5f, p.Scale * 2f);
             PaintCircle(objectMask, px, py, 2f, 1.0f);
             PaintSoftCircle(objectPreciseMask, px, py, r);
+            PaintIntCircle(objectInstanceMask, px, py, 2f, instanceId);
+            instanceId++;
         }
 
         foreach (var p in tileData.WorldModelPlacements)
         {
-            // Bounds are in renderer coords: (rendererX, rendererY, rendererZ)
             Vector3 min = p.BoundsMin, max = p.BoundsMax;
             if (min.X < max.X && min.Y < max.Y && !float.IsNaN(min.X) && !float.IsNaN(max.X))
             {
-                // Project bounds corners to tile pixels
                 float localMinX = min.X - tileWorldX;
                 float localMaxX = max.X - tileWorldX;
                 float localMinY = min.Y - tileWorldY;
@@ -316,6 +319,8 @@ public static class AlphaTensorPackBuilder
                 int maxPy = Math.Clamp((int)MathF.Ceiling(localMaxY / ObjectTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
                 PaintRect(objectMask, minPx, minPy, maxPx, maxPy, 1.0f);
                 PaintSoftRect(objectPreciseMask, minPx, minPy, maxPx, maxPy);
+                PaintIntRect(objectInstanceMask, minPx, minPy, maxPx, maxPy, instanceId);
+                instanceId++;
             }
             else
             {
@@ -328,11 +333,46 @@ public static class AlphaTensorPackBuilder
                 int py = Math.Clamp((int)MathF.Round(localY / ObjectTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
                 PaintCircle(objectMask, px, py, 3f, 1.0f);
                 PaintSoftCircle(objectPreciseMask, px, py, 3f);
+                PaintIntCircle(objectInstanceMask, px, py, 3f, instanceId);
+                instanceId++;
             }
         }
 
         signals.Add("object_mask_257");
         signals.Add("object_precise_mask_257");
+        signals.Add("object_instance_mask_257");
+    }
+
+    private static void PaintIntCircle(int[,] buffer, int cx, int cy, float radius, int value)
+    {
+        int r = (int)MathF.Ceiling(radius);
+        int rSq = r * r;
+        for (int dy = -r; dy <= r; dy++)
+        {
+            for (int dx = -r; dx <= r; dx++)
+            {
+                if ((dx * dx) + (dy * dy) > rSq)
+                    continue;
+                int x = cx + dx;
+                int y = cy + dy;
+                if ((uint)x >= TileHeightmapSize || (uint)y >= TileHeightmapSize)
+                    continue;
+                buffer[y, x] = value;
+            }
+        }
+    }
+
+    private static void PaintIntRect(int[,] buffer, int minX, int minY, int maxX, int maxY, int value)
+    {
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+            {
+                if ((uint)x >= TileHeightmapSize || (uint)y >= TileHeightmapSize)
+                    continue;
+                buffer[y, x] = value;
+            }
+        }
     }
 
     private static float[,]? BuildShadowResidual(float[,] shadowMask256, float[,] objectPreciseMask257)

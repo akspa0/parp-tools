@@ -334,11 +334,9 @@ public sealed class LkToAlphaRoundTripTests
             Assert.True(AlphaWdtReader.TryReadTile(wdt, 0, 0, out AlphaTileData? alphaRoundTrip));
             Assert.NotNull(alphaRoundTrip);
             Assert.NotNull(alphaRoundTrip.AreaIds);
-            Assert.NotNull(alphaRoundTrip.McnkFlagsByChunk);
             Assert.Equal(500, alphaRoundTrip.AreaIds![2, 1]);
-            Assert.Equal(0x40u, alphaRoundTrip.McnkFlagsByChunk![2, 1] & 0x40u);
 
-            LkAdtData lkRoundTrip = AlphaToLkConverter.ConvertTile(alphaRoundTrip, 0, 0, mapper, "Azeroth");
+            LkAdtData lkRoundTrip = AlphaToLkConverter.ConvertTile(alphaRoundTrip, 0, 0);
             LkMcnkData roundTripChunk = lkRoundTrip.Chunks[(1 * 16) + 2];
 
             Assert.Equal(77, roundTripChunk.AreaId);

@@ -105,9 +105,24 @@ dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug --
 |---------|---------|
 | `extract-unified` | Extract single tile from MPQ client |
 | `harvest-map-mpq` | Batch extract all tiles from a map via MPQ |
+| `harvest-stream` | Stream all tiles as length-prefixed NPZ blobs to stdout (for V16 pipeline) |
 | `harvest-tile` | Extract single tile from loose ADT file on disk |
 | `harvest-map` | Batch extract from loose ADT directory on disk |
 | `synthetic-minimap` | Composite tileset textures + MCAL alpha → minimap (not yet wired) |
+
+**harvest-stream flags:**
+| Flag | Description |
+|------|-------------|
+| `-c, --client-root` | Path to WoW client root (required) |
+| `-m, --map` | Map name (required) |
+| `-n, --limit` | Max tiles to extract |
+| `-b, --build` | Client build version for version-aware ADT profile |
+
+The `harvest-stream` command writes binary NPZ blobs to stdout using a
+length-prefixed protocol: 4-byte magic `NPZB` + 4-byte LE length + NPZ data.
+An `ENDS` sentinel marks end-of-stream. All diagnostics go to stderr.
+This is the input path for the V16 Zarr dataset builder — no intermediate
+NPZ files are written to disk.
 
 **extract-unified flags:**
 | Flag | Description |
@@ -273,6 +288,60 @@ print(f"Heights: min={h.min():.1f} max={h.max():.1f}")
 - **MPQ compression**: `NativeMpqService` only supports zlib (type 0x02) — bzip2/PKWARE/LZMA not supported
 - **DBC/DB2 enrichment**: WorldSafeLocs, AreaTable, GroundEffects, LiquidType metadata not yet in NPZ
 - **MCRF per-chunk references**: Only object aggregate counts, not the actual reference index lists
+---
+
+## 7. V16 Consolidated Zarr Dataset
+
+V16 replaces the per-tile NPZ shard approach with a single Zarr store per
+client build. Data streams directly from the C# harvester into Zarr — **no
+intermediate NPZ files on disk**.
+
+### 7.1 Build a V16 Dataset
+
+```bash
+# 1. Build the C# harvester
+dotnet build wow-viewer/WowViewer.slnx -c Debug
+
+# 2. Build the Zarr dataset
+cd wow-viewer/data-harvester
+
+# Single build (all maps):
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340
+
+# Specific maps:
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
+
+# Limit tiles (testing):
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
+
+# Multiple builds:
+uv run python scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
+```
+
+Output: `wow-viewer/output/datasets/v16/<build_key>.zarr/`
+
+### 7.2 Zarr Store Layout
+
+Each `<build_key>.zarr/` directory contains:
+
+- Flat chunked Zarr arrays (one per signal, indexed by tile row number)
+- `index.parquet` — Parquet table with tile metadata and `has_*` availability flags
+
+The `has_*` columns tell the training loop which signals are real data vs
+zero-filled. This eliminates per-sample feature gating complexity.
+
+### 7.3 V16 vs V15
+
+| Aspect | V15 (legacy) | V16 |
+|--------|-------------|-----|
+| Format | 23K+ individual NPZ files | Single Zarr store per build |
+| Liquid data | Missing from most shards | Included for all tiles (zero-filled when absent) |
+| Feature standardization | Varies per shard | Every tile has every array |
+| Indexing | Path-based (directory walk) | Parquet index with `has_*` flags |
+| Compression | Per-file zip level 3 | Blosc-zstd-5 with bitshuffle |
+| Temp files | Thousands of NPZ shards | None (pipe-based streaming) |
+| Approx size | ~1.5-5 MB/tile (23K files) | ~100 KB/tile (1 Zarr per build) |
 
 ---
-*Last updated: 2026-05-07 — covers `harvest-map-mpq` command, placement data, all 6 clients validated.*
+
+*Last updated: 2026-05-16 — adds V16 Zarr dataset pipeline and harvest-stream command.*

@@ -136,6 +136,14 @@ public sealed class TerrainTileTensorPack
     /// <summary>257×257 anti-aliased object silhouette.</summary>
     public float[,]? ObjectPreciseMask257 { get; init; }
 
+    /// <summary>
+    /// 257×257 per-instance object label mask.
+    /// 0 = terrain (no object), 1..N = placement index (1-based).
+    /// MDDF placements are labeled first (starting at 1), then MODF placements.
+    /// Matches row indices in PlacementMddfData and PlacementModfData.
+    /// </summary>
+    public int[,]? ObjectInstanceMask257 { get; init; }
+
     /// <summary>257×257 PM4 navigable path mask.</summary>
     public float[,]? Pm4PathMask { get; init; }
 

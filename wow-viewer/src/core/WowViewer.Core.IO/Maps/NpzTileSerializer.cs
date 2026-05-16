@@ -61,6 +61,7 @@ public static class NpzTileSerializer
         WriteArray(zip, "unified_liquid_height", pack.UnifiedLiquidHeight, "<f4");
         WriteArray(zip, "object_mask_257", pack.ObjectMask257, "<f4");
         WriteArray(zip, "object_precise_mask_257", pack.ObjectPreciseMask257, "<f4");
+        WriteArray(zip, "object_instance_mask_257", pack.ObjectInstanceMask257, "<i4");
         WriteArray(zip, "pm4_path_mask", pack.Pm4PathMask, "<f4");
         WriteArray(zip, "pm4_building_footprint_mask", pack.Pm4BuildingFootprintMask, "<f4");
         WriteArray(zip, "pm4_mprl_mask", pack.Pm4MprlMask, "<f4");
