@@ -971,31 +971,19 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         if (adtBytes is null)
             return null;
 
-        string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_harvest_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
+        string tex0Virtual = $"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}_tex0.adt";
+        string obj0Virtual = $"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}_obj0.adt";
+        byte[]? tex0Bytes = catalog.ReadFile(tex0Virtual);
+        byte[]? obj0Bytes = catalog.ReadFile(obj0Virtual);
 
-        string adtDiskPath = Path.Combine(tempDir, Path.GetFileName(adtVirtual));
-        string tex0DiskPath = Path.Combine(tempDir, $"{mapName}_{tileX}_{tileY}_tex0.adt");
-        string obj0DiskPath = Path.Combine(tempDir, $"{mapName}_{tileX}_{tileY}_obj0.adt");
-
-        File.WriteAllBytes(adtDiskPath, adtBytes);
-
-        byte[]? tex0Bytes = catalog.ReadFile($"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}_tex0.adt");
-        if (tex0Bytes is not null)
-            File.WriteAllBytes(tex0DiskPath, tex0Bytes);
-
-        byte[]? obj0Bytes = catalog.ReadFile($"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}_obj0.adt");
-        if (obj0Bytes is not null)
-            File.WriteAllBytes(obj0DiskPath, obj0Bytes);
-
-        try
-        {
-            return AdtTensorPackBuilder.Build(adtDiskPath, tex0Bytes is not null ? tex0DiskPath : null, buildVersion);
-        }
-        finally
-        {
-            try { Directory.Delete(tempDir, true); } catch { }
-        }
+        return AdtTensorPackBuilder.BuildFromBytes(
+            adtVirtual,
+            adtBytes,
+            tex0Bytes,
+            obj0Bytes,
+            buildVersion,
+            tex0Bytes is not null ? tex0Virtual : null,
+            obj0Bytes is not null ? obj0Virtual : null);
     }
 
     static void GenerateSyntheticMinimap(NativeMpqService catalog, TerrainTileTensorPack pack, int tileX, int tileY, string outputPath)

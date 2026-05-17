@@ -108,6 +108,51 @@ public static class AdtRawChunkBlobCollector
         return rawChunks;
     }
 
+    public static IReadOnlyList<TerrainRawChunkBlob> CollectMemory(
+        string rootSourcePath,
+        byte[] rootBytes,
+        string? textureSourcePath = null,
+        byte[]? textureBytes = null,
+        string? placementSourcePath = null,
+        byte[]? placementBytes = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootSourcePath);
+        ArgumentNullException.ThrowIfNull(rootBytes);
+
+        List<RawChunkMemoryContext> contexts =
+        [
+            new(rootSourcePath, "root", rootBytes, StructuralTopLevelChunkIds, AlwaysDecodedRootTopLevelChunkIds, AlwaysDecodedRootMcnkChunkIds),
+        ];
+
+        if (textureBytes is not null && !string.IsNullOrWhiteSpace(textureSourcePath))
+        {
+            contexts.Add(new RawChunkMemoryContext(
+                textureSourcePath,
+                ClassifySourceKindFromPath(textureSourcePath),
+                textureBytes,
+                [MapChunkIds.Mver, MapChunkIds.Mcnk],
+                TextureDecodedTopLevelChunkIds,
+                TextureDecodedMcnkChunkIds));
+        }
+
+        if (placementBytes is not null && !string.IsNullOrWhiteSpace(placementSourcePath))
+        {
+            contexts.Add(new RawChunkMemoryContext(
+                placementSourcePath,
+                ClassifySourceKindFromPath(placementSourcePath),
+                placementBytes,
+                [MapChunkIds.Mver, MapChunkIds.Mcnk],
+                PlacementDecodedTopLevelChunkIds,
+                PlacementDecodedMcnkChunkIds));
+        }
+
+        List<TerrainRawChunkBlob> rawChunks = [];
+        foreach (RawChunkMemoryContext context in contexts.OrderBy(static c => c.SourcePath, StringComparer.OrdinalIgnoreCase))
+            CollectFromMemoryContext(context, rawChunks);
+
+        return rawChunks;
+    }
+
     private static RawChunkSourceContext GetOrAddContext(Dictionary<string, RawChunkSourceContext> contexts, string path, string sourceKind)
     {
         string fullPath = Path.GetFullPath(path);
@@ -141,12 +186,85 @@ public static class AdtRawChunkBlobCollector
         return "root";
     }
 
+    private static string ClassifySourceKindFromPath(string path)
+    {
+        string fileName = Path.GetFileName(path);
+        if (fileName.EndsWith("_tex0.adt", StringComparison.OrdinalIgnoreCase))
+            return "tex0";
+        if (fileName.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase))
+            return "obj0";
+        if (fileName.EndsWith("_lod.adt", StringComparison.OrdinalIgnoreCase))
+            return "lod";
+        return "root";
+    }
+
     private static void CollectFromContext(RawChunkSourceContext context, List<TerrainRawChunkBlob> rawChunks)
     {
         if (!File.Exists(context.SourcePath))
             return;
 
         using FileStream stream = File.OpenRead(context.SourcePath);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, context.SourcePath);
+
+        Dictionary<string, int> topLevelCounts = new(StringComparer.OrdinalIgnoreCase);
+        foreach (MapChunkLocation chunk in fileSummary.Chunks)
+        {
+            if (chunk.Id == MapChunkIds.Mcnk)
+                continue;
+
+            if (context.ProcessedTopLevelChunkIds.Contains(chunk.Id))
+                continue;
+
+            byte[] payload = MapSummaryReaderCommon.ReadChunkPayload(stream, chunk);
+            if (payload.Length == 0)
+                continue;
+
+            string chunkId = chunk.Id.ToString();
+            int occurrence = topLevelCounts.TryGetValue(chunkId, out int count) ? count : 0;
+            topLevelCounts[chunkId] = occurrence + 1;
+
+            rawChunks.Add(new TerrainRawChunkBlob
+            {
+                EntryName = $"raw_chunks/{context.SourceKind}/top/{chunkId}_{occurrence:D3}",
+                SourceKind = context.SourceKind,
+                SourcePath = context.SourcePath,
+                Scope = "top-level",
+                ChunkId = chunkId,
+                Data = payload,
+            });
+        }
+
+        List<MapChunkLocation> mcnkChunks = fileSummary.Chunks.Where(static chunk => chunk.Id == MapChunkIds.Mcnk).ToList();
+        for (int mcnkIndex = 0; mcnkIndex < mcnkChunks.Count; mcnkIndex++)
+        {
+            MapChunkLocation mcnkChunk = mcnkChunks[mcnkIndex];
+            byte[] payload = MapSummaryReaderCommon.ReadChunkPayload(stream, mcnkChunk);
+            if (payload.Length == 0)
+                continue;
+
+            int? chunkX = null;
+            int? chunkY = null;
+            int scanOffset = 0;
+
+            if (fileSummary.Kind == MapFileKind.Adt && payload.Length >= RootMcnkHeaderSize)
+            {
+                chunkX = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x04, 4));
+                chunkY = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x08, 4));
+                scanOffset = RootMcnkSubchunkOffset;
+            }
+            else if (mcnkIndex < 256)
+            {
+                chunkX = mcnkIndex % 16;
+                chunkY = mcnkIndex / 16;
+            }
+
+            CollectRawMcnkSubchunks(context, payload, mcnkIndex, chunkX, chunkY, scanOffset, rawChunks);
+        }
+    }
+
+    private static void CollectFromMemoryContext(RawChunkMemoryContext context, List<TerrainRawChunkBlob> rawChunks)
+    {
+        using MemoryStream stream = new(context.Data, writable: false);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, context.SourcePath);
 
         Dictionary<string, int> topLevelCounts = new(StringComparer.OrdinalIgnoreCase);
@@ -296,5 +414,29 @@ public static class AdtRawChunkBlobCollector
         public HashSet<FourCC> ProcessedTopLevelChunkIds { get; } = [];
 
         public HashSet<FourCC> ProcessedMcnkChunkIds { get; } = [];
+    }
+
+    private sealed class RawChunkMemoryContext
+    {
+        public RawChunkMemoryContext(
+            string sourcePath,
+            string sourceKind,
+            byte[] data,
+            IEnumerable<FourCC> structuralTopLevelChunkIds,
+            IEnumerable<FourCC> processedTopLevelChunkIds,
+            IEnumerable<FourCC> processedMcnkChunkIds)
+        {
+            SourcePath = sourcePath;
+            SourceKind = sourceKind;
+            Data = data;
+            ProcessedTopLevelChunkIds = [.. structuralTopLevelChunkIds, .. processedTopLevelChunkIds];
+            ProcessedMcnkChunkIds = [.. processedMcnkChunkIds];
+        }
+
+        public string SourcePath { get; }
+        public string SourceKind { get; }
+        public byte[] Data { get; }
+        public HashSet<FourCC> ProcessedTopLevelChunkIds { get; }
+        public HashSet<FourCC> ProcessedMcnkChunkIds { get; }
     }
 }

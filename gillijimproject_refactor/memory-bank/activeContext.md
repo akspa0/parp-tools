@@ -84,6 +84,24 @@ Six independent models, each training on ground truth only:
 - `v16_dataset.py` → reads `object_instance_mask` from Zarr, returns int64 `instance_mask` tensor and `has_instance` flag
 - `train_v16.py` → unchanged (V16 model doesn't use instance mask yet; will be used by future Model A)
 
+## Active Recovery Plan (2026-05-17)
+
+- The archive-backed V16 lane was still staging root/`_tex0`/`_obj0` ADTs to `%TEMP%` before tensor-pack extraction. That seam is the primary performance regression this recovery slice targets.
+- Recovery plan doc: `wow-viewer/docs/architecture/v16-harvest-recovery-plan-2026-05-17.md`
+- Recovery implementation order:
+  1. move archive-backed harvest/discovery to an in-memory ADT family builder path
+  2. add real map-level resume for `<build>.zarr.partial`
+  3. switch future V16 builder defaults to a faster Zarr codec profile while keeping the current schema and reader contract
+- Existing finished `.zarr` stores remain valid; the recovery slice is aimed at future rebuild speed and at resuming incomplete client builds without redoing finished maps.
+- Implementation is now partially landed but unvalidated in-chat because the user explicitly blocked agent-run builds:
+  - `WowViewer.Tool.Harvest` archive-backed ADT families now route through `AdtTensorPackBuilder.BuildFromBytes(...)` instead of temp-file staging
+  - `build_v16_dataset.py` now carries map-level `_resume_state.json` state for `<build>.zarr.partial`
+  - `build_v16_dataset.py` now skips already-complete final `<build>.zarr` stores by default unless `--rebuild-existing` is passed
+  - successful final stores now retain `_resume_state.json` as completion metadata instead of deleting it at finalization
+  - `scripts/backfill_v16_resume_state.py` can backfill `_resume_state.json` into older completed final stores
+  - future V16 builds now default to `lz4` / level `1` / `shuffle`
+- Repo truth still needs operator proof from a user-run rebuild before this recovery slice can be treated as validated.
+
 ## NOT YET (Blocked on User)
 - Full V16 builds for all client builds (rebuild harvester binary first)
 - V16 training run

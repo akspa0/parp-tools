@@ -177,6 +177,146 @@ public static class AdtTensorPackBuilder
         };
     }
 
+    public static TerrainTileTensorPack BuildFromBytes(
+        string sourceAdtPath,
+        byte[] adtBytes,
+        byte[]? textureSourceBytes = null,
+        byte[]? placementSourceBytes = null,
+        string? buildVersion = null,
+        string? textureSourcePath = null,
+        string? placementSourcePath = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceAdtPath);
+        ArgumentNullException.ThrowIfNull(adtBytes);
+
+        AdtFormatProfile profile = AdtFormatProfiles.Resolve(buildVersion);
+
+        using MemoryStream stream = new(adtBytes, writable: false);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, sourceAdtPath);
+        if (fileSummary.Kind != MapFileKind.Adt)
+            throw new InvalidDataException($"Tensor pack builder requires a root ADT file, but found {fileSummary.Kind}.");
+
+        string tileName = Path.GetFileNameWithoutExtension(sourceAdtPath);
+        HashSet<string> availableSignals = [];
+
+        List<MapChunkLocation> terrainChunks = ResolveTerrainChunkLocations(stream, fileSummary);
+        float[,]? height257 = AssembleHeightmap(stream, terrainChunks, availableSignals);
+        float[,,]? mcnrNormalXyz = AssembleNormals(stream, terrainChunks, availableSignals);
+        float[,,]? mccvRgb = AssembleMccv(stream, terrainChunks, availableSignals);
+        byte[,,]? mclvLightingBytes = AssembleMclv(stream, terrainChunks, availableSignals);
+        int[,,]? mfboFlightBounds = ReadMfbo(stream, fileSummary, availableSignals);
+
+        (int[,,]? mclyTextureIds, IReadOnlyList<string> mclyTextureNames, bool[,,]? mclyLayerMask, byte[,,]? mcmtMaterialIds, byte[]? mampValue, float[,,]? mcalAlphaPack, float[,]? mcshShadowMask256) =
+            ReadTextureDataFromBytes(sourceAdtPath, adtBytes, textureSourcePath, textureSourceBytes, profile, availableSignals);
+
+        (float[,]? mh2oHeight, float[,]? mh2oDepth, int[,]? mh2oType, bool[,]? mh2oPresence) =
+            ReadMh2o(stream, fileSummary, availableSignals);
+
+        (int[,]? mtxfAnimated, int[,]? mtxfTransform) =
+            ReadMtxf(stream, fileSummary, mclyTextureIds, availableSignals);
+
+        (float[,]? mclqHeight, int[,]? mclqType, bool[,]? mclqPresence) =
+            ReadMclq(stream, terrainChunks, availableSignals);
+
+        (bool[,]? holeMask, int[,]? objectMask16, int[,]? mcrfDoodadRefCounts16, int[]? mcrfDoodadRefIndices, int[,]? mcrfWmoRefCounts16, int[]? mcrfWmoRefIndices) =
+            ReadMcrfAndHoles(stream, terrainChunks, availableSignals);
+
+        (int[,]? mcseEmitterCounts16, int[]? mcseEntryIds, float[,]? mcsePositionXyz, byte[,]? mcseEntryBytes) =
+            ReadMcse(stream, terrainChunks, availableSignals);
+
+        (int[,]? mcrdRefCounts16, int[]? mcrdRefIndices, int[,]? mcrwRefCounts16, int[]? mcrwRefIndices) =
+            ReadSplitPlacementChunkReferencesFromBytes(placementSourcePath, placementSourceBytes, availableSignals);
+
+        (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257) =
+            BuildObjectMasks(sourceAdtPath, stream, fileSummary, availableSignals, placementSourcePath, placementSourceBytes);
+
+        float[,]? shadowResidualMask256 = BuildShadowResidualMask256(mcshShadowMask256, objectPreciseMask257, availableSignals);
+
+        (float[,]? pm4PathMask, float[,]? pm4BuildingFootprintMask, float[,]? pm4MprlMask) =
+            BuildPm4Masks(sourceAdtPath, availableSignals);
+
+        (float[,]? unifiedLiquidMask, float[,]? unifiedLiquidHeight) =
+            BuildUnifiedLiquid(mh2oHeight, mh2oPresence, mclqHeight, mclqPresence, null, null, availableSignals);
+
+        float[,]? height65 = DownsampleHeightmap(height257, 65);
+        float[,]? height17 = DownsampleHeightmap(height257, 17);
+
+        (int mddfCount, int modfCount, float[,]? mddfData, float[,]? modfData, IReadOnlyList<string> mddfNames, IReadOnlyList<string> modfNames) =
+            ExtractPlacementArrays(sourceAdtPath, stream, fileSummary, placementSourcePath, placementSourceBytes);
+
+        IReadOnlyList<TerrainRawChunkBlob> rawChunks = AdtRawChunkBlobCollector.CollectMemory(
+            sourceAdtPath,
+            adtBytes,
+            textureSourcePath,
+            textureSourceBytes,
+            placementSourcePath,
+            placementSourceBytes);
+        if (rawChunks.Count > 0)
+            availableSignals.Add("raw_adt_chunks");
+
+        return new TerrainTileTensorPack
+        {
+            TileName = tileName,
+            MapName = ExtractMapName(sourceAdtPath),
+            BuildKey = buildVersion ?? string.Empty,
+            SourceAdtPath = sourceAdtPath,
+            Height257 = height257,
+            Height65 = height65,
+            Height17 = height17,
+            MclyTextureIds = mclyTextureIds,
+            MclyTextureNames = mclyTextureNames,
+            MclyLayerMask = mclyLayerMask,
+            McmtMaterialIds = mcmtMaterialIds,
+            MampValue = mampValue,
+            McalAlphaPack = mcalAlphaPack,
+            McalAlphaPack256 = DownsampleAlpha256(mcalAlphaPack),
+            MccvRgb = mccvRgb,
+            MclvLightingBytes = mclvLightingBytes,
+            McnrNormalXyz = mcnrNormalXyz,
+            MfboFlightBounds = mfboFlightBounds,
+            Mh2oSurfaceHeight = mh2oHeight,
+            Mh2oDepth = mh2oDepth,
+            Mh2oTypeMask = mh2oType,
+            MclqSurfaceHeight = mclqHeight,
+            MclqTypeMask = mclqType,
+            MtxfAnimatedMask = mtxfAnimated,
+            MtxfTransformId = mtxfTransform,
+            HoleMask16 = holeMask,
+            McseEmitterCounts16 = mcseEmitterCounts16,
+            McseEntryIds = mcseEntryIds,
+            McsePositionXyz = mcsePositionXyz,
+            McseEntryBytes = mcseEntryBytes,
+            McrfDoodadRefCounts16 = mcrfDoodadRefCounts16,
+            McrfDoodadRefIndices = mcrfDoodadRefIndices,
+            McrfWmoRefCounts16 = mcrfWmoRefCounts16,
+            McrfWmoRefIndices = mcrfWmoRefIndices,
+            McrdRefCounts16 = mcrdRefCounts16,
+            McrdRefIndices = mcrdRefIndices,
+            McrwRefCounts16 = mcrwRefCounts16,
+            McrwRefIndices = mcrwRefIndices,
+            WlLiquidMask = null,
+            WlLiquidHeight = null,
+            UnifiedLiquidMask = unifiedLiquidMask,
+            UnifiedLiquidHeight = unifiedLiquidHeight,
+            ObjectMask257 = objectMask257,
+            ObjectPreciseMask257 = objectPreciseMask257,
+            ObjectInstanceMask257 = objectInstanceMask257,
+            Pm4PathMask = pm4PathMask,
+            Pm4BuildingFootprintMask = pm4BuildingFootprintMask,
+            Pm4MprlMask = pm4MprlMask,
+            McshShadowMask256 = mcshShadowMask256,
+            ShadowResidualMask256 = shadowResidualMask256,
+            PlacementMddfCount = mddfCount,
+            PlacementModfCount = modfCount,
+            PlacementMddfData = mddfData,
+            PlacementModfData = modfData,
+            PlacementMddfNames = mddfNames,
+            PlacementModfNames = modfNames,
+            RawChunks = rawChunks,
+            AvailableSignals = availableSignals,
+        };
+    }
+
     /// <summary>
     /// Builds a placeholder <see cref="TerrainTileTensorPack"/> for a tile that has PM4 data
     /// and a minimap but no root ADT. Height, MCAL, and MCLY fields are left null.
@@ -671,6 +811,149 @@ public static class AdtTensorPackBuilder
     // MH2O liquid
     // ═══════════════════════════════════════════════════════════════════════
 
+    private static (int[,,]? MclyTextureIds, IReadOnlyList<string> MclyTextureNames, bool[,,]? MclyLayerMask, byte[,,]? McmtMaterialIds, byte[]? MampValue, float[,,]? McalAlphaPack, float[,]? McshShadowMask256)
+        ReadTextureDataFromBytes(
+            string sourceAdtPath,
+            byte[] adtBytes,
+            string? textureSourcePath,
+            byte[]? textureSourceBytes,
+            AdtFormatProfile profile,
+            HashSet<string> signals)
+    {
+        string? effectiveTextureSourcePath = textureSourcePath;
+        byte[]? effectiveTextureBytes = textureSourceBytes;
+
+        if (effectiveTextureBytes is null && profile.PreferTex0ForTextureData)
+            return (null, Array.Empty<string>(), null, null, null, null, null);
+
+        try
+        {
+            AdtTextureFile textureFile;
+            if (effectiveTextureBytes is not null)
+            {
+                effectiveTextureSourcePath ??= $"{sourceAdtPath}_tex0";
+                using MemoryStream textureStream = new(effectiveTextureBytes, writable: false);
+                MapFileSummary textureSummary = MapFileSummaryReader.Read(textureStream, effectiveTextureSourcePath);
+                textureFile = AdtTextureReader.Read(textureStream, textureSummary, profile.DecodeProfile);
+            }
+            else
+            {
+                using MemoryStream rootStream = new(adtBytes, writable: false);
+                MapFileSummary rootSummary = MapFileSummaryReader.Read(rootStream, sourceAdtPath);
+                textureFile = AdtTextureReader.Read(rootStream, rootSummary, profile.DecodeProfile);
+            }
+
+            if (textureFile.Chunks.Count == 0)
+                return (null, textureFile.TextureNames, null, null, textureFile.MampValue.HasValue ? [textureFile.MampValue.Value] : null, null, null);
+
+            int[,,] textureIds = new int[TileChunks, TileChunks, 4];
+            bool[,,] layerMask = new bool[TileChunks, TileChunks, 4];
+            byte[,,] materialIds = new byte[TileChunks, TileChunks, 4];
+            float[,,] alphaPack = new float[TileAlphaSize, TileAlphaSize, 4];
+            float[,] shadowAccum256 = new float[TileMinimapSize, TileMinimapSize];
+            int[,] shadowCount256 = new int[TileMinimapSize, TileMinimapSize];
+
+            for (int y = 0; y < TileChunks; y++)
+                for (int x = 0; x < TileChunks; x++)
+                    for (int l = 0; l < 4; l++)
+                        textureIds[y, x, l] = -1;
+
+            bool any = false;
+            foreach (AdtTextureChunk chunk in textureFile.Chunks)
+            {
+                if (chunk.Layers.Count == 0)
+                    continue;
+
+                int chunkX = chunk.ChunkX;
+                int chunkY = chunk.ChunkY;
+                if ((uint)chunkX >= TileChunks || (uint)chunkY >= TileChunks)
+                    continue;
+
+                any = true;
+
+                if (chunk.MaterialIds is { Length: > 0 })
+                {
+                    for (int materialIndex = 0; materialIndex < chunk.MaterialIds.Length && materialIndex < 4; materialIndex++)
+                        materialIds[chunkY, chunkX, materialIndex] = chunk.MaterialIds[materialIndex];
+                }
+
+                for (int layerIndex = 0; layerIndex < chunk.Layers.Count && layerIndex < 4; layerIndex++)
+                {
+                    AdtTextureChunkLayer layer = chunk.Layers[layerIndex];
+                    textureIds[chunkY, chunkX, layerIndex] = (int)layer.TextureId;
+                    layerMask[chunkY, chunkX, layerIndex] = true;
+
+                    byte[]? alphaMap = layer.DecodedAlpha?.AlphaMap;
+                    if (alphaMap is null || alphaMap.Length != ChunkAlphaSize * ChunkAlphaSize)
+                        continue;
+
+                    for (int localY = 0; localY < ChunkAlphaSize; localY++)
+                    {
+                        for (int localX = 0; localX < ChunkAlphaSize; localX++)
+                        {
+                            int globalX = (chunkX * ChunkAlphaSize) + localX;
+                            int globalY = (chunkY * ChunkAlphaSize) + localY;
+                            alphaPack[globalY, globalX, layerIndex] = alphaMap[(localY * ChunkAlphaSize) + localX] / 255f;
+                        }
+                    }
+                }
+
+                byte[]? shadowMap = chunk.ShadowMap;
+                if (shadowMap is { Length: ChunkAlphaSize * ChunkAlphaSize })
+                {
+                    for (int localY = 0; localY < ChunkAlphaSize; localY++)
+                    {
+                        for (int localX = 0; localX < ChunkAlphaSize; localX++)
+                        {
+                            int globalX = (chunkX * ChunkAlphaSize) + localX;
+                            int globalY = (chunkY * ChunkAlphaSize) + localY;
+                            int minimapX = Math.Clamp(globalX / 4, 0, TileMinimapSize - 1);
+                            int minimapY = Math.Clamp(globalY / 4, 0, TileMinimapSize - 1);
+                            shadowAccum256[minimapY, minimapX] += shadowMap[(localY * ChunkAlphaSize) + localX] / 255f;
+                            shadowCount256[minimapY, minimapX]++;
+                        }
+                    }
+                }
+            }
+
+            if (!any)
+                return (null, textureFile.TextureNames, null, null, textureFile.MampValue.HasValue ? [textureFile.MampValue.Value] : null, null, null);
+
+            float[,]? mcshShadowMask256 = null;
+            bool anyShadow = false;
+            for (int y = 0; y < TileMinimapSize; y++)
+            {
+                for (int x = 0; x < TileMinimapSize; x++)
+                {
+                    int count = shadowCount256[y, x];
+                    if (count <= 0)
+                        continue;
+
+                    mcshShadowMask256 ??= new float[TileMinimapSize, TileMinimapSize];
+                    float value = shadowAccum256[y, x] / count;
+                    mcshShadowMask256[y, x] = value;
+                    anyShadow |= value > 0f;
+                }
+            }
+
+            signals.Add("mcly_texture_ids");
+            signals.Add("mcly_layer_mask");
+            signals.Add("mcal_alpha_pack_256");
+            if (textureFile.MampValue.HasValue)
+                signals.Add("mamp_value");
+            if (textureFile.Chunks.Any(static chunk => chunk.MaterialIds is { Length: > 0 }))
+                signals.Add("mcmt_material_ids");
+            if (anyShadow)
+                signals.Add("mcsh_shadow_mask_256");
+
+            return (textureIds, textureFile.TextureNames, layerMask, materialIds, textureFile.MampValue.HasValue ? [textureFile.MampValue.Value] : null, alphaPack, mcshShadowMask256);
+        }
+        catch
+        {
+            return (null, Array.Empty<string>(), null, null, null, null, null);
+        }
+    }
+
     private static (float[,]? height, float[,]? depth, int[,]? typeMask, bool[,]? presenceMask)
         ReadMh2o(Stream stream, MapFileSummary fileSummary, HashSet<string> signals)
     {
@@ -1034,6 +1317,67 @@ public static class AdtTensorPackBuilder
     }
 
     private static (int[,]? mcrdRefCounts16, int[]? mcrdRefIndices, int[,]? mcrwRefCounts16, int[]? mcrwRefIndices)
+        ReadSplitPlacementChunkReferencesFromBytes(string? placementSourcePath, byte[]? placementBytes, HashSet<string> signals)
+    {
+        if (placementBytes is null || string.IsNullOrWhiteSpace(placementSourcePath))
+            return (null, null, null, null);
+
+        using MemoryStream stream = new(placementBytes, writable: false);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, placementSourcePath);
+        List<MapChunkLocation> placementChunks = fileSummary.Chunks.Where(static chunk => chunk.Id == MapChunkIds.Mcnk).ToList();
+        if (placementChunks.Count == 0)
+            return (null, null, null, null);
+
+        int[,] mcrdCounts = new int[TileChunks, TileChunks];
+        int[,] mcrwCounts = new int[TileChunks, TileChunks];
+        List<int> mcrdIndices = [];
+        List<int> mcrwIndices = [];
+        bool anyMcrd = false;
+        bool anyMcrw = false;
+
+        for (int chunkIndex = 0; chunkIndex < placementChunks.Count && chunkIndex < TileChunks * TileChunks; chunkIndex++)
+        {
+            int chunkX = chunkIndex % TileChunks;
+            int chunkY = chunkIndex / TileChunks;
+            byte[] payload = ReadChunkPayload(stream, placementChunks[chunkIndex]);
+
+            byte[]? mcrdPayload = TryReadSplitMcnkSubchunkPayload(payload, AdtChunkIds.Mcrd);
+            if (mcrdPayload is { Length: >= 4 })
+            {
+                int count = mcrdPayload.Length / sizeof(int);
+                mcrdCounts[chunkY, chunkX] = count;
+                for (int index = 0; index < count; index++)
+                    mcrdIndices.Add(BinaryPrimitives.ReadInt32LittleEndian(mcrdPayload.AsSpan(index * sizeof(int), sizeof(int))));
+                anyMcrd = true;
+            }
+
+            byte[]? mcrwPayload = TryReadSplitMcnkSubchunkPayload(payload, AdtChunkIds.Mcrw);
+            if (mcrwPayload is { Length: >= 4 })
+            {
+                int count = mcrwPayload.Length / sizeof(int);
+                mcrwCounts[chunkY, chunkX] = count;
+                for (int index = 0; index < count; index++)
+                    mcrwIndices.Add(BinaryPrimitives.ReadInt32LittleEndian(mcrwPayload.AsSpan(index * sizeof(int), sizeof(int))));
+                anyMcrw = true;
+            }
+        }
+
+        if (anyMcrd)
+        {
+            signals.Add("mcrd_ref_counts_16");
+            signals.Add("mcrd_ref_indices");
+        }
+
+        if (anyMcrw)
+        {
+            signals.Add("mcrw_ref_counts_16");
+            signals.Add("mcrw_ref_indices");
+        }
+
+        return (anyMcrd ? mcrdCounts : null, anyMcrd ? [.. mcrdIndices] : null, anyMcrw ? mcrwCounts : null, anyMcrw ? [.. mcrwIndices] : null);
+    }
+
+    private static (int[,]? mcrdRefCounts16, int[]? mcrdRefIndices, int[,]? mcrwRefCounts16, int[]? mcrwRefIndices)
         ReadSplitPlacementChunkReferences(string adtPath, HashSet<string> signals)
     {
         AdtTileFamily family = AdtTileFamilyResolver.Resolve(adtPath);
@@ -1192,7 +1536,13 @@ public static class AdtTensorPackBuilder
     private const float ObjectMapOrigin = 17066.666f;
 
     private static (float[,]? mask, float[,]? preciseMask, int[,]? instanceMask)
-        BuildObjectMasks(string adtPath, Stream stream, MapFileSummary fileSummary, HashSet<string> signals)
+        BuildObjectMasks(
+            string adtPath,
+            Stream stream,
+            MapFileSummary fileSummary,
+            HashSet<string> signals,
+            string? placementSourcePathOverride = null,
+            byte[]? placementBytesOverride = null)
     {
         if (!TryParseAdtTileCoords(fileSummary.SourcePath, out int tileX, out int tileY))
             return (null, null, null);
@@ -1200,11 +1550,20 @@ public static class AdtTensorPackBuilder
         AdtPlacementCatalog placements;
         try
         {
-            AdtTileFamily family = AdtTileFamilyResolver.Resolve(adtPath);
-            string? placementSourcePath = family.PlacementSourcePath;
-            placements = !string.IsNullOrWhiteSpace(placementSourcePath) && File.Exists(placementSourcePath)
-                ? AdtPlacementReader.Read(placementSourcePath)
-                : AdtPlacementReader.Read(stream, fileSummary);
+            if (placementBytesOverride is not null && !string.IsNullOrWhiteSpace(placementSourcePathOverride))
+            {
+                using MemoryStream placementStream = new(placementBytesOverride, writable: false);
+                MapFileSummary placementSummary = MapFileSummaryReader.Read(placementStream, placementSourcePathOverride);
+                placements = AdtPlacementReader.Read(placementStream, placementSummary);
+            }
+            else
+            {
+                AdtTileFamily family = AdtTileFamilyResolver.Resolve(adtPath);
+                string? placementSourcePath = placementSourcePathOverride ?? family.PlacementSourcePath;
+                placements = !string.IsNullOrWhiteSpace(placementSourcePath) && File.Exists(placementSourcePath)
+                    ? AdtPlacementReader.Read(placementSourcePath)
+                    : AdtPlacementReader.Read(stream, fileSummary);
+            }
         }
         catch
         {
@@ -2034,15 +2393,30 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
     }
 
     private static (int mddfCount, int modfCount, float[,]? mddfData, float[,]? modfData, IReadOnlyList<string> mddfNames, IReadOnlyList<string> modfNames)
-        ExtractPlacementArrays(string adtPath, Stream stream, MapFileSummary fileSummary)
+        ExtractPlacementArrays(
+            string adtPath,
+            Stream stream,
+            MapFileSummary fileSummary,
+            string? placementSourcePathOverride = null,
+            byte[]? placementBytesOverride = null)
     {
         try
         {
-            AdtTileFamily family = AdtTileFamilyResolver.Resolve(adtPath);
-            string? sourcePath = family.PlacementSourcePath;
-            var placements = !string.IsNullOrWhiteSpace(sourcePath) && File.Exists(sourcePath)
-                ? AdtPlacementReader.Read(sourcePath)
-                : AdtPlacementReader.Read(stream, fileSummary);
+            AdtPlacementCatalog placements;
+            if (placementBytesOverride is not null && !string.IsNullOrWhiteSpace(placementSourcePathOverride))
+            {
+                using MemoryStream placementStream = new(placementBytesOverride, writable: false);
+                MapFileSummary placementSummary = MapFileSummaryReader.Read(placementStream, placementSourcePathOverride);
+                placements = AdtPlacementReader.Read(placementStream, placementSummary);
+            }
+            else
+            {
+                AdtTileFamily family = AdtTileFamilyResolver.Resolve(adtPath);
+                string? sourcePath = placementSourcePathOverride ?? family.PlacementSourcePath;
+                placements = !string.IsNullOrWhiteSpace(sourcePath) && File.Exists(sourcePath)
+                    ? AdtPlacementReader.Read(sourcePath)
+                    : AdtPlacementReader.Read(stream, fileSummary);
+            }
 
             float[,]? mddfData = null;
             List<string> mddfNames = [];

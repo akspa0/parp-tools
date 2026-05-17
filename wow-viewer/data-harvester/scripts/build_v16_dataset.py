@@ -118,6 +118,9 @@ SIGNAL_FLAG_KEYS = [
 ]
 
 REQUIRED_KEYS = {"minimap_rgb_256", "height_257"}
+DEFAULT_CODEC = "lz4"
+DEFAULT_CLEVEL = 1
+DEFAULT_SHUFFLE = "shuffle"
 
 
 def _decode_metadata_json(tile_blob: dict[str, np.ndarray]) -> dict[str, object]:
@@ -139,6 +142,109 @@ def _decode_metadata_json(tile_blob: dict[str, np.ndarray]) -> dict[str, object]
 
 def _tile_rejection_report_path(output_path: Path, build_name: str) -> Path:
     return output_path.parent / f"{build_name}.rejected_tiles.jsonl"
+
+
+def _resume_state_path(output_path: Path) -> Path:
+    return output_path / "_resume_state.json"
+
+
+def _load_resume_state(output_path: Path) -> dict[str, object] | None:
+    path = _resume_state_path(output_path)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _open_zarr_group_readonly(zarr_path: Path):
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Object at .* is not recognized as a component of a Zarr hierarchy\.",
+            category=UserWarning,
+        )
+        store = zarr.storage.LocalStore(str(zarr_path), read_only=True)
+        root = zarr.open_group(store=store, mode="r")
+    return store, root
+
+
+def _load_completed_final_store_state(output_path: Path) -> dict[str, object] | None:
+    if not output_path.exists():
+        return None
+
+    idx_path = output_path / "index.parquet"
+    if not idx_path.exists():
+        return None
+
+    table = pq.read_table(str(idx_path), columns=["map"])
+    store, root = _open_zarr_group_readonly(output_path)
+    try:
+        array_length = int(root["height_257"].shape[0])
+    finally:
+        store.close()
+
+    if table.num_rows != array_length:
+        return None
+
+    state = _load_resume_state(output_path) or {}
+    if not state:
+        maps: list[str] = []
+        seen: set[str] = set()
+        for value in table.column("map"):
+            map_name = str(value.as_py())
+            if map_name in seen:
+                continue
+            seen.add(map_name)
+            maps.append(map_name)
+        state = {
+            "build": output_path.stem.replace(".zarr", ""),
+            "requested_maps": maps,
+            "completed_maps": maps,
+            "valid_tiles": table.num_rows,
+            "skipped_zero_usable_maps": 0,
+            "rejected_tile_count": 0,
+            "codec": "unknown-final-store",
+            "clevel": -1,
+            "shuffle": "unknown-final-store",
+            "capacity": table.num_rows,
+            "finalized": True,
+            "inferred_from_final_store": True,
+        }
+    else:
+        state = dict(state)
+        state["finalized"] = True
+
+    return state
+
+
+def _write_resume_state(
+    output_path: Path,
+    *,
+    build: str,
+    requested_maps: list[str],
+    completed_maps: list[str],
+    valid: int,
+    skipped_zero_usable_maps: int,
+    rejected_tile_count: int,
+    codec_name: str,
+    codec_level: int,
+    codec_shuffle: str,
+    capacity: int,
+    finalized: bool = False,
+) -> None:
+    state = {
+        "build": build,
+        "requested_maps": requested_maps,
+        "completed_maps": completed_maps,
+        "valid_tiles": valid,
+        "skipped_zero_usable_maps": skipped_zero_usable_maps,
+        "rejected_tile_count": rejected_tile_count,
+        "codec": codec_name,
+        "clevel": codec_level,
+        "shuffle": codec_shuffle,
+        "capacity": capacity,
+        "finalized": finalized,
+    }
+    _resume_state_path(output_path).write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 # ── Placement data columns for the companion Parquet table ────────────
 PLACEMENT_COLUMNS_MDDF = [
@@ -409,6 +515,11 @@ def cmd_build(args: argparse.Namespace) -> None:
 
     maps_override = getattr(args, "maps", None)
     limit = args.limit
+    resume = args.resume
+    codec_name = args.codec
+    codec_level = args.clevel
+    codec_shuffle = args.shuffle
+    rebuild_existing = args.rebuild_existing
 
     for build in builds:
         client_root = _find_client_root(build)
@@ -418,9 +529,18 @@ def cmd_build(args: argparse.Namespace) -> None:
 
         output_path = _DATASET_ROOT / f"{build}.zarr"
         staging_path = _DATASET_ROOT / f"{build}.zarr.partial"
-        if staging_path.exists():
+        completed_state = None if rebuild_existing else _load_completed_final_store_state(output_path)
+        if completed_state is not None and not staging_path.exists():
+            completed_maps = completed_state.get("completed_maps", [])
+            print(
+                f"SKIP build {build}: final store already complete at {output_path} "
+                f"({len(completed_maps)} maps, {completed_state.get('valid_tiles', 'unknown')} tiles)"
+            )
+            continue
+        if staging_path.exists() and not resume:
             shutil.rmtree(staging_path)
-        staging_path.mkdir(parents=True, exist_ok=True)
+        if not staging_path.exists():
+            staging_path.mkdir(parents=True, exist_ok=True)
 
         build_version = build.replace("_", ".")
         map_names = maps_override or _discover_maps_for_build(harvest_tool, client_root)
@@ -432,6 +552,8 @@ def cmd_build(args: argparse.Namespace) -> None:
         print(f"Output: {output_path}")
         print(f"Staging: {staging_path}")
         print(f"Rejected tiles report: {_tile_rejection_report_path(output_path, build)}")
+        print(f"Resume: {resume}")
+        print(f"Codec: {codec_name} clevel={codec_level} shuffle={codec_shuffle}")
 
         try:
             _build_zarr_streaming(
@@ -443,6 +565,10 @@ def cmd_build(args: argparse.Namespace) -> None:
                 output_path=staging_path,
                 limit=limit,
                 rejected_tiles_report_path=_tile_rejection_report_path(output_path, build),
+                resume=resume,
+                codec_name=codec_name,
+                codec_level=codec_level,
+                codec_shuffle=codec_shuffle,
             )
             if output_path.exists():
                 shutil.rmtree(output_path)
@@ -466,10 +592,15 @@ def _build_zarr_streaming(
     output_path: Path,
     limit: int | None,
     rejected_tiles_report_path: Path | None = None,
+    resume: bool = False,
+    codec_name: str = DEFAULT_CODEC,
+    codec_level: int = DEFAULT_CLEVEL,
+    codec_shuffle: str = DEFAULT_SHUFFLE,
 ) -> None:
-    codec = zarr.codecs.BloscCodec(cname="zstd", clevel=5, shuffle="bitshuffle")
+    codec = zarr.codecs.BloscCodec(cname=codec_name, clevel=codec_level, shuffle=codec_shuffle)
     store = zarr.storage.LocalStore(str(output_path), read_only=False)
-    root = zarr.group(store=store)
+    resume_state = _load_resume_state(output_path) if resume else None
+    root = zarr.open_group(store=store, mode="a" if resume_state is not None else "w")
 
     arrays: dict[str, zarr.Array] = {}
     index_rows: list[dict] = []
@@ -479,23 +610,71 @@ def _build_zarr_streaming(
     rejected_tile_count = 0
     t0 = time.perf_counter()
     capacity = 50000
+    completed_maps: list[str] = []
+
+    if resume and resume_state is None and output_path.exists() and any(output_path.iterdir()):
+        raise RuntimeError(
+            f"Resume requested for {output_path}, but no {_resume_state_path(output_path).name} was found."
+        )
+
+    if resume_state is not None:
+        expected_maps = resume_state.get("requested_maps", [])
+        if expected_maps != map_names:
+            raise RuntimeError(
+                f"Resume map list mismatch for {build}. Existing partial requested_maps={expected_maps} "
+                f"but current maps={map_names}."
+            )
+        if resume_state.get("codec") != codec_name or int(resume_state.get("clevel", -1)) != codec_level or resume_state.get("shuffle") != codec_shuffle:
+            raise RuntimeError(
+                f"Resume codec mismatch for {build}. Existing partial uses "
+                f"{resume_state.get('codec')} clevel={resume_state.get('clevel')} shuffle={resume_state.get('shuffle')}, "
+                f"current request is {codec_name} clevel={codec_level} shuffle={codec_shuffle}."
+            )
+        capacity = int(resume_state.get("capacity", capacity))
+        completed_maps = [str(name) for name in resume_state.get("completed_maps", [])]
+        skipped_zero_usable_maps = int(resume_state.get("skipped_zero_usable_maps", 0))
+        rejected_tile_count = int(resume_state.get("rejected_tile_count", 0))
+        idx_path = output_path / "index.parquet"
+        if idx_path.exists():
+            table = pq.read_table(str(idx_path))
+            index_rows = [
+                {col: table.column(col)[i].as_py() for col in table.column_names}
+                for i in range(table.num_rows)
+            ]
+            valid = len(index_rows)
+        else:
+            valid = int(resume_state.get("valid_tiles", 0))
+        pl_path = output_path / "placements.parquet"
+        if pl_path.exists():
+            pl_table = pq.read_table(str(pl_path))
+            all_placements = [
+                {col: pl_table.column(col)[i].as_py() for col in pl_table.column_names}
+                for i in range(pl_table.num_rows)
+            ]
 
     rejected_tiles_report = None
     if rejected_tiles_report_path is not None:
         rejected_tiles_report_path.parent.mkdir(parents=True, exist_ok=True)
-        if rejected_tiles_report_path.exists():
+        if rejected_tiles_report_path.exists() and resume_state is None:
             rejected_tiles_report_path.unlink()
-        rejected_tiles_report = rejected_tiles_report_path.open("w", encoding="utf-8")
+        rejected_tiles_report = rejected_tiles_report_path.open("a" if resume_state is not None else "w", encoding="utf-8")
 
     for key in ALL_ARRAY_KEYS:
-        shape = (capacity,) + SHAPES[key]
-        chunks = CHUNK_SIZES.get(key, (64,) + SHAPES[key])
-        arrays[key] = root.create_array(
-            key, shape=shape, chunks=chunks, dtype=DTYPES[key],
-            compressors=[codec], fill_value=FILL_VALUES.get(key, 0),
-        )
+        if key in root:
+            arrays[key] = root[key]
+        else:
+            shape = (capacity,) + SHAPES[key]
+            chunks = CHUNK_SIZES.get(key, (64,) + SHAPES[key])
+            arrays[key] = root.create_array(
+                key, shape=shape, chunks=chunks, dtype=DTYPES[key],
+                compressors=[codec], fill_value=FILL_VALUES.get(key, 0),
+            )
 
     for map_name in map_names:
+        if map_name in completed_maps:
+            print(f"\n  Skipping completed map: {map_name}")
+            continue
+
         print(f"\n  Streaming map: {map_name}")
 
         cmd = [
@@ -692,6 +871,20 @@ def _build_zarr_streaming(
             )
         if tile_count == 0:
             skipped_zero_usable_maps += 1
+            completed_maps.append(map_name)
+            _write_resume_state(
+                output_path,
+                build=build,
+                requested_maps=map_names,
+                completed_maps=completed_maps,
+                valid=valid,
+                skipped_zero_usable_maps=skipped_zero_usable_maps,
+                rejected_tile_count=rejected_tile_count,
+                codec_name=codec_name,
+                codec_level=codec_level,
+                codec_shuffle=codec_shuffle,
+                capacity=capacity,
+            )
             print(
                 f"    Warning: skipping map {map_name} because harvest produced zero usable V16 tiles. "
                 f"Dropped missing-required blobs: {dropped_missing_required}. "
@@ -717,6 +910,25 @@ def _build_zarr_streaming(
             flush=True,
         )
 
+        completed_maps.append(map_name)
+        if index_rows:
+            _write_index(index_rows, output_path)
+        if all_placements:
+            _write_placements(all_placements, output_path)
+        _write_resume_state(
+            output_path,
+            build=build,
+            requested_maps=map_names,
+            completed_maps=completed_maps,
+            valid=valid,
+            skipped_zero_usable_maps=skipped_zero_usable_maps,
+            rejected_tile_count=rejected_tile_count,
+            codec_name=codec_name,
+            codec_level=codec_level,
+            codec_shuffle=codec_shuffle,
+            capacity=capacity,
+        )
+
         if limit is not None and valid >= limit:
             break
 
@@ -735,6 +947,20 @@ def _build_zarr_streaming(
         _write_placements(all_placements, output_path)
 
     store.close()
+    _write_resume_state(
+        output_path,
+        build=build,
+        requested_maps=map_names,
+        completed_maps=completed_maps,
+        valid=valid,
+        skipped_zero_usable_maps=skipped_zero_usable_maps,
+        rejected_tile_count=rejected_tile_count,
+        codec_name=codec_name,
+        codec_level=codec_level,
+        codec_shuffle=codec_shuffle,
+        capacity=valid,
+        finalized=True,
+    )
 
     total_bytes = _dir_size_bytes(output_path)
     liq_count = sum(1 for r in index_rows if r.get("has_liquid_mask", False))
@@ -812,6 +1038,11 @@ def main() -> None:
     build_p = sub.add_parser("build", parents=[common])
     build_p.add_argument("--limit", type=int, default=None, help="Max tiles to extract")
     build_p.add_argument("--maps", nargs="+", default=None, help="Specific maps to extract")
+    build_p.add_argument("--resume", action="store_true", help="Resume from <build>.zarr.partial if a compatible resume state exists")
+    build_p.add_argument("--rebuild-existing", action="store_true", help="Rebuild even if a final <build>.zarr already looks complete")
+    build_p.add_argument("--codec", choices=["lz4", "zstd"], default=DEFAULT_CODEC, help="Blosc codec for future writes")
+    build_p.add_argument("--clevel", type=int, default=DEFAULT_CLEVEL, help="Blosc compression level")
+    build_p.add_argument("--shuffle", choices=["noshuffle", "shuffle", "bitshuffle"], default=DEFAULT_SHUFFLE, help="Blosc shuffle mode")
 
     stats_p = sub.add_parser("stats", parents=[common])
 

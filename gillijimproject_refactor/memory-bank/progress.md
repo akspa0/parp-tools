@@ -46,6 +46,11 @@
 | **V16 stats command repair** | **DONE** — `build_v16_dataset.py stats` now uses `pyarrow.compute.sum` for Parquet `has_*` counts and suppresses harmless Zarr sidecar warnings from `index.parquet` / `placements.parquet` |
 | **V16 rejected-tile sidecar report** | **DONE** — tiles dropped for missing required dataset keys now land in `wow-viewer/output/datasets/v16/<build>.rejected_tiles.jsonl`, and per-map summaries now print `dropped_missing_required=<n>` instead of forcing operators to recover that truth from scrolled stderr warnings |
 | **Harvest WL archive discovery fix** | **DONE** — archive-backed harvest now finds real `*.wl*` virtual files from MPQ listfiles instead of guessing `World\\Maps\\<map>\\<map>.wl*`; focused smoke on staged `3_3_5_12340 / Azeroth` reports no WL entries in the loaded archives |
+| **V16 harvest recovery plan recorded** | **DONE** — `docs/architecture/v16-harvest-recovery-plan-2026-05-17.md` now scopes the next bounded fixes: remove archive temp ADT extraction, add map-level resume, and switch future V16 builds to faster Zarr defaults without changing the reader schema |
+| **V16 archive in-memory harvest path** | **DONE (UNVALIDATED)** — archive-backed `root` / `_tex0` / `_obj0` ADT families now route through `AdtTensorPackBuilder.BuildFromBytes(...)` instead of `%TEMP%` staging; operator rebuild proof is still pending because this chat did not run builds |
+| **V16 partial-build resume state** | **DONE (UNVALIDATED)** — `build_v16_dataset.py build --resume` now reuses `<build>.zarr.partial`, skips completed maps from `_resume_state.json`, and preserves the existing schema/reader contract |
+| **V16 faster default codec profile** | **DONE (UNVALIDATED)** — new builds default to Blosc `lz4` level `1` with `shuffle`; older completed stores remain valid |
+| **V16 completed-store restart guard + backfill script** | **DONE (UNVALIDATED)** — build commands now skip already-complete final `<build>.zarr` stores unless `--rebuild-existing` is passed, successful new final stores retain `_resume_state.json`, and `scripts/backfill_v16_resume_state.py` can add `_resume_state.json` to older completed final stores |
 | **Coordinate fixes** | **DONE** |
 | **Phase C: AlphaToLk writer infrastructure** | **DONE** — WdlWriter, LkWdtWriter, LkAdtWriter, AlphaToLkConverter |
 | **Phase C: AlphaToLk CLI command** | **DONE** — convert-alpha-to-lk in WowViewer.Tool.Converter |
@@ -72,6 +77,7 @@
 | What | Status |
 |------|--------|
 | Multi-client full shard dataset prep | SWITCHED TO HARVEST PATH — use `WowViewer.Tool.Harvest harvest-map-mpq` on staged clients, not converter `dataset-scan` manifests |
+| V16 harvest recovery implementation | PROOF PENDING — code is landed for in-memory archive harvest, map-level resume, completed-store skip guards, backfill tooling, and faster default codec settings, but this chat did not run user-blocked rebuild validation |
 | data-harvester launcher posture | CANONICAL UV RESTORED — elevated proof on 2026-05-16 showed `.venv\\Scripts\\python.exe` and `uv run` both work in a real shell; `scripts/run-data-harvester-python.ps1` remains a sandbox/AppData-access fallback, not the primary operator path |
 | 3_3_5_12340 V16 final store health | DONE — full rebuild landed at `wow-viewer/output/datasets/v16/3_3_5_12340.zarr` with `5134` tiles, `index.parquet` `5134` rows, `placements.parquet` `1,015,470` rows, and clean `stats` output |
 | Phase C: AlphaToLk AreaID crosswalk | NOT YET — `AreaIdMapper` exists in `WowViewer.Core.IO/Dbc/`, not yet wired to converter |

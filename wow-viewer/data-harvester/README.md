@@ -26,7 +26,8 @@ repo-local launcher is still available as a fallback:
 
 The V16 dataset is a consolidated Zarr store per client build — no individual
 NPZ shards. Data streams directly from the C# harvester into Zarr with no
-intermediate files on disk.
+intermediate NPZ files on disk, and archive-backed ADT families now stay in
+memory instead of being staged through `%TEMP%`.
 
 ### Build a V16 dataset
 
@@ -36,6 +37,15 @@ dotnet build ../WowViewer.slnx -c Debug
 
 # Single build (auto-discovered terrain maps):
 uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340
+
+# Resume an interrupted staged build:
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --resume
+
+# Force a rebuild even if the final store already looks complete:
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --rebuild-existing
+
+# Backfill _resume_state.json into older completed final stores:
+uv run python scripts/backfill_v16_resume_state.py --builds 0_5_3_3368 0_5_5_3494 3_3_5_12340
 
 # Specific maps:
 uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
@@ -53,14 +63,19 @@ Build behavior:
 - Progress is printed during streaming, including tile counts, placement counts, raw streamed NPZ volume, and current staged store size.
 - Harvester stderr is forwarded live with a `[harvest:<map>]` prefix.
 - When `--maps` is not supplied, the builder asks `WowViewer.Tool.Harvest discover-maps` for a V16-driven map list and skips WMO-only, no-tile, and no-V16-usable-tile maps automatically.
+- Completed final stores (`<build>.zarr/`) are now skipped by default so restart commands do not silently rebuild already-finished builds. Use `--rebuild-existing` to force a rebuild.
 - Builds stage into `wow-viewer/output/datasets/v16/<build>.zarr.partial/` and only replace the final `.zarr` store after successful finalization.
+- Interrupted builds can resume from `wow-viewer/output/datasets/v16/<build>.zarr.partial/` with `--resume`; completed maps are skipped from the saved `_resume_state.json`.
+- Successful final stores now keep `_resume_state.json` as completion metadata, so future restart commands can recognize them as finished without rebuilding.
 - If a discovered map still produces zero usable V16 tiles during streaming, the builder now warns and skips that map instead of aborting the whole build.
 - Tiles dropped for missing required dataset keys are also written to `wow-viewer/output/datasets/v16/<build>.rejected_tiles.jsonl` so rejected coordinates and missing keys survive the console log.
+- Future builds now default to a faster Blosc profile: `lz4`, compression level `1`, `shuffle`. Older finished stores using `zstd` remain valid.
+- `scripts/backfill_v16_resume_state.py` can add `_resume_state.json` to older completed final stores so their completion metadata matches the new format.
 
 ### Train V16
 
 ```bash
-.\scripts\run-data-harvester-python.ps1 scripts/train_v16.py \
+uv run python scripts/train_v16.py \
     --dataset-dir ../output/datasets/v16 \
     --builds 3_3_5_12340
 ```
@@ -87,7 +102,8 @@ Each `<build>.zarr/` contains:
 Plus `index.parquet` with columns: `tile_id`, `build`, `map`, `tile_x`,
 `tile_y`, `height_mean`, `height_std`, and `has_*` flags for each signal.
 
-Compression: blosc-zstd-5 with bitshuffle. Typical build (~5000 tiles): ~500 MB.
+Compression for new builds defaults to blosc-lz4-1 with shuffle. Existing
+older stores may still use blosc-zstd-5 with bitshuffle.
 
 ## V15 Dataset (NPZ shards, legacy)
 
@@ -111,17 +127,18 @@ ConvNeXt V2 Nano encoder (15.6M pretrained) + U-Net decoder with skip fusion.
 
 ```bash
 # V16 (Zarr-based):
-.\scripts\run-data-harvester-python.ps1 scripts/train_v16.py --builds 3_3_5_12340 --epochs 200
+uv run python scripts/train_v16.py --builds 3_3_5_12340 --epochs 200
 
 # V15 (NPZ-based, legacy):
-.\scripts\run-data-harvester-python.ps1 scripts/train_v15.py --epochs 200
+uv run python scripts/train_v15.py --epochs 200
 ```
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `scripts/build_v16_dataset.py` | V16 build pipeline (harvester → Zarr, no temp files) |
+| `scripts/build_v16_dataset.py` | V16 build pipeline (harvester → Zarr, resume, no archive temp staging) |
+| `scripts/backfill_v16_resume_state.py` | Backfill `_resume_state.json` into older completed final stores |
 | `scripts/run-data-harvester-python.ps1` | Repo-local launcher for `.venv` packages when the venv stub is broken |
 | `scripts/train_v15.py` | V15 training script |
 | `src/harvester/v16_dataset.py` | V16 PyTorch Dataset (Zarr) |

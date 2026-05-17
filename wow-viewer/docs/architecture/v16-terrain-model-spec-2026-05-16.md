@@ -13,7 +13,8 @@ bag of arrays with no standardized feature set. This created several problems:
   raw chunks — most of which the training loop never reads.
 
 V16 replaces all of this with a single consolidated Zarr store per build,
-using blosc-zstd compression and standardized feature arrays. Data flows directly
+using standardized feature arrays and a faster default Blosc profile for new
+builds. Data flows directly
 from the C# harvester through a pipe into the Zarr writer — **no intermediate
 NPZ files on disk**.
 
@@ -45,8 +46,9 @@ wow-viewer/output/datasets/v16/
 2. **Standardized feature set** — every tile has every array. Missing signals
    are stored as zero-filled arrays with a `has_<signal>` boolean column in
    the index. This eliminates per-sample feature-gating complexity.
-3. **Blosc-zstd compression (level 5, bitshuffle)** — excellent compression
-   ratio for the repetitive terrain data while keeping random-access fast.
+3. **Configurable Blosc compression** — future builds now default to
+   `lz4` level `1` with `shuffle` for better write throughput, while older
+   completed stores may still use `zstd` level `5` with `bitshuffle`.
 4. **One Zarr store per build** — builds can be loaded independently or merged
    for cross-client training via `--builds`.
 5. **Liquid data is mandatory when present** — `liquid_mask` and `liquid_height`
@@ -138,6 +140,15 @@ cd wow-viewer/data-harvester
 # Single build (auto-discovered terrain maps):
 uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340
 
+# Resume an interrupted staged build:
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --resume
+
+# Force a rebuild even if the final store already looks complete:
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --rebuild-existing
+
+# Backfill _resume_state.json into older completed final stores:
+uv run python scripts/backfill_v16_resume_state.py --builds 0_5_3_3368 0_5_5_3494 3_3_5_12340
+
 # Multiple builds:
 uv run python scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
 
@@ -156,7 +167,8 @@ Output goes to `wow-viewer/output/datasets/v16/<build_key>.zarr/`.
 ### How It Works
 
 1. The Python builder spawns the C# `WowViewer.Tool.Harvest harvest-stream` process.
-2. The harvester opens the MPQ archives, iterates tiles for each map, and writes
+2. The harvester opens the MPQ archives, keeps archive-backed ADT families
+   (`root`, `_tex0`, `_obj0`) in memory, iterates tiles for each map, and writes
    length-prefixed NPZ blobs to stdout (format: 4-byte magic `NPZB` + 4-byte
    little-endian length + NPZ bytes). All diagnostics go to stderr.
 3. The Python builder reads the binary stream, decodes each NPZ blob in memory,
@@ -173,13 +185,24 @@ periodic progress lines with streamed tile counts, placement counts, raw NPZ
 volume, and staged store size. The dataset is written to
 `<build>.zarr.partial/` first and is only promoted to `<build>.zarr/` after
 successful finalization, so interrupted runs do not silently poison the final
-dataset path.
+dataset path. Interrupted builds can resume from the staged partial store with
+`--resume`; completed maps are skipped from the saved `_resume_state.json`.
+Successful final stores now retain `_resume_state.json` as completion metadata,
+so future restart commands can recognize them as already finished.
+Completed final stores are skipped by default on future build commands so
+restarting one incomplete build does not silently rebuild the already-finished
+ones; `--rebuild-existing` opts back into a full rebuild. Older completed final
+stores can be backfilled with `_resume_state.json` using
+`scripts/backfill_v16_resume_state.py`.
 When `--maps` is omitted, the builder now calls `WowViewer.Tool.Harvest
 discover-maps` and keeps only maps whose WDT/archive probe path can produce at
 least one V16-usable tile (`height_257` + `minimap_rgb_256`). Pure WMO-only,
 zero-tile, and "terrain but no V16-usable tile" maps are skipped.
 If a discovered map still yields zero usable tiles during the full stream, the
 builder warns and skips that map instead of aborting the whole dataset build.
+Tiles dropped for missing required dataset keys are persisted to
+`wow-viewer/output/datasets/v16/<build>.rejected_tiles.jsonl` so rejected
+coordinates and missing keys survive the console log.
 
 ### Streaming Protocol
 
@@ -197,7 +220,7 @@ All diagnostic text goes to stderr.
 
 ```bash
 cd wow-viewer/data-harvester
-.\scripts\run-data-harvester-python.ps1 scripts/train_v16.py \
+uv run python scripts/train_v16.py \
     --dataset-dir ../output/datasets/v16 \
     --builds 3_3_5_12340 4_0_0_11927
 ```
@@ -246,7 +269,8 @@ decoder. Total ~27.4M parameters with the liquid head.
 
 | File | Purpose |
 |------|---------|
-| `scripts/build_v16_dataset.py` | Build pipeline: stream from harvester → Zarr |
+| `scripts/build_v16_dataset.py` | Build pipeline: stream from harvester → Zarr, resume, rejected-tile reporting |
+| `scripts/backfill_v16_resume_state.py` | Backfill `_resume_state.json` into older completed final stores |
 | `scripts/run-data-harvester-python.ps1` | Repo-local launcher for `.venv` packages when the venv stub is broken |
 | `src/harvester/v16_dataset.py` | PyTorch Dataset reading from Zarr stores |
 | `src/harvester/v16_model.py` | V16Model (ConvNeXt V2 Nano + U-Net + liquid head) |
