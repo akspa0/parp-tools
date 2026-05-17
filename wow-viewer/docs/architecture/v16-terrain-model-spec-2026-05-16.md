@@ -119,8 +119,13 @@ the Python Zarr writer.
    uv sync
    ```
 
-4. If `.venv\Scripts\python.exe` is unusable in this checkout, run data-harvester
-   Python commands through the repo-local launcher:
+4. Run Python commands through `uv run`:
+   ```powershell
+   uv run python -c "import sys; print(sys.executable)"
+   ```
+
+5. If a sandboxed agent session cannot reach the uv-managed AppData paths, the
+   repo-local launcher is still available as a fallback:
    ```powershell
    .\scripts\run-data-harvester-python.ps1 -c "import sys; print(sys.executable)"
    ```
@@ -130,20 +135,20 @@ the Python Zarr writer.
 ```bash
 cd wow-viewer/data-harvester
 
-# Single build (all maps for that build):
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340
+# Single build (auto-discovered terrain maps):
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340
 
 # Multiple builds:
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
+uv run python scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
 
 # Specific maps only:
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
 
 # Limit tiles (for testing):
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
 
 # Check stats:
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py stats --build 3_3_5_12340
+uv run python scripts/build_v16_dataset.py stats --build 3_3_5_12340
 ```
 
 Output goes to `wow-viewer/output/datasets/v16/<build_key>.zarr/`.
@@ -162,6 +167,16 @@ Output goes to `wow-viewer/output/datasets/v16/<build_key>.zarr/`.
 
 **No temporary NPZ files are written to disk.** The only on-disk artifact is the
 final Zarr store.
+
+During builds, the Python side forwards harvester stderr live and prints
+periodic progress lines with streamed tile counts, placement counts, raw NPZ
+volume, and staged store size. The dataset is written to
+`<build>.zarr.partial/` first and is only promoted to `<build>.zarr/` after
+successful finalization, so interrupted runs do not silently poison the final
+dataset path.
+When `--maps` is omitted, the builder now calls `WowViewer.Tool.Harvest
+discover-maps` and keeps only maps whose WDT summaries show terrain plus at
+least one readable tile; pure WMO-only and zero-tile maps are skipped.
 
 ### Streaming Protocol
 

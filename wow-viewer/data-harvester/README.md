@@ -9,8 +9,14 @@ cd wow-viewer/data-harvester
 uv sync
 ```
 
-If `.venv\Scripts\python.exe` is broken in this checkout, use the repo-local
-launcher instead of `uv run`:
+Use `uv run` as the normal entrypoint:
+
+```powershell
+uv run python -c "import sys; print(sys.executable)"
+```
+
+If a sandboxed agent session cannot reach the uv-managed AppData paths, the
+repo-local launcher is still available as a fallback:
 
 ```powershell
 .\scripts\run-data-harvester-python.ps1 -c "import sys; print(sys.executable)"
@@ -28,20 +34,26 @@ intermediate files on disk.
 # Prerequisites: build the C# harvester first
 dotnet build ../WowViewer.slnx -c Debug
 
-# Single build (all maps):
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340
+# Single build (auto-discovered terrain maps):
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340
 
 # Specific maps:
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
 
 # Limit tiles (testing):
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
 
 # Check stats:
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py stats --build 3_3_5_12340
+uv run python scripts/build_v16_dataset.py stats --build 3_3_5_12340
 ```
 
 Output: `wow-viewer/output/datasets/v16/<build>.zarr/`
+
+Build behavior:
+- Progress is printed during streaming, including tile counts, placement counts, raw streamed NPZ volume, and current staged store size.
+- Harvester stderr is forwarded live with a `[harvest:<map>]` prefix.
+- When `--maps` is not supplied, the builder asks `WowViewer.Tool.Harvest discover-maps` for a WDT-driven map list and skips WMO-only or no-tile maps automatically.
+- Builds stage into `wow-viewer/output/datasets/v16/<build>.zarr.partial/` and only replace the final `.zarr` store after successful finalization.
 
 ### Train V16
 

@@ -64,6 +64,7 @@ Six independent models, each training on ground truth only:
 - `WowViewer.Tool.Harvest` archive-backed extraction now stages `_obj0.adt` beside the root ADT and `_tex0.adt`, so V16/archive harvest output no longer drops placements, object masks, or instance masks on split ADT builds like `3_3_5_12340`
 - `AdtTensorPackBuilder.BuildUnifiedLiquid` now uses explicit liquid-presence masks from `MH2O`/`MCLQ` instead of treating `height == 0` as "no liquid", fixing sea-level water loss in unified liquid masks
 - `AdtTensorPackBuilder.ExtractMapName` now falls back to the staged tile stem so archive temp extraction still records the real map name in NPZ metadata
+- `WowViewer.Tool.Harvest` WL fallback no longer synthesizes fake `World\Maps\<map>\<map>.wl*` paths. It now enumerates actual `*.wlw/*.wlm/*.wlq/*.wll` virtual files from the loaded MPQ listfiles under `World\Maps\<map>\`, caches and parses them once per staged client/map, and reuses them across tiles. Focused `harvest-stream --limit 1` smoke on staged `3_3_5_12340 / Azeroth` now reports `no WL* files found in loaded archives for Azeroth`, so the fallback is currently a real archive-backed no-op for that build/map rather than a naming bug
 - `AdtTensorPackBuilder.BuildObjectMasks` → returns `(float[,], float[,], int[,])` tuple with instance mask
 - `AlphaTensorPackBuilder.BuildObjectMasks` → same pattern, added `PaintIntCircle`/`PaintIntRect` overloads
 - `TerrainTileTensorPack.ObjectInstanceMask257` → new `int[,]?` property
@@ -72,7 +73,11 @@ Six independent models, each training on ground truth only:
 
 ## Python Changes (This Session)
 
-- `wow-viewer/data-harvester/scripts/run-data-harvester-python.ps1` is now the repo-local fallback launcher when `wow-viewer/data-harvester/.venv\Scripts\python.exe` is broken because the uv-managed base interpreter path drifted; it reuses `.venv` site-packages and `src/` against the base Python declared in `pyvenv.cfg`
+- `wow-viewer/data-harvester/scripts/run-data-harvester-python.ps1` remains available as a repo-local fallback when sandboxed agent sessions cannot reach the uv-managed AppData paths, but elevated proof on 2026-05-16 showed both `.venv\Scripts\python.exe` and `uv run` work correctly in a real shell and remain the canonical operator path
+- `build_v16_dataset.py` now forwards `harvest-stream` stderr live, prints per-map progress early enough for small maps, and raises explicit errors on truncated headers, bad magic, invalid blob lengths, NPZ decode failures, non-zero harvester exit codes, missing `ENDS`, and zero-tile maps instead of silently `break`ing
+- V16 builds now stage into `wow-viewer/output/datasets/v16/<build>.zarr.partial` and only replace the final `.zarr` store after successful finalization; failed runs preserve the partial store and no longer silently leave a poisoned final dataset path with preallocated `50000`-tile arrays
+- `build_v16_dataset.py stats` now warns when `index.parquet` is missing or when array length does not match finalized index rows, making interrupted/incomplete V16 stores obvious
+- `WowViewer.Tool.Harvest` now exposes `discover-maps --client-root <staged client>` and filters map candidates using WDT semantics instead of a bootstrap hard-coded map list: pure WMO-only maps (`MWMO/MONM` present, no terrain tiles), zero-tile maps, and missing-WDT transport entries are skipped, while maps with terrain plus WMOs stay included after a one-tile readability probe
 - `build_v16_dataset.py` → now carries 14 Zarr arrays (was 12), adds `object_precise_mask` and `object_instance_mask`, writes `placements.parquet` companion table with per-placement rows + asset_path linkage, index includes `n_mddf`/`n_modf` counts
 - `v16_dataset.py` → reads `object_instance_mask` from Zarr, returns int64 `instance_mask` tensor and `has_instance` flag
 - `train_v16.py` → unchanged (V16 model doesn't use instance mask yet; will be used by future Model A)
@@ -83,4 +88,5 @@ Six independent models, each training on ground truth only:
 - Object segmentation Model A training script
 - Asset vocabulary build
 - PM4 cross-reference analysis
-- Repair or recreate `wow-viewer/data-harvester/.venv\Scripts\python.exe` so `uv run` works again without the repo-local wrapper
+- Rebuild `3_3_5_12340`; `stats` now confirms the current final store is an interrupted pre-finalization output (`50000` preallocated rows, no `index.parquet`). The new builder will replace it atomically on success, while failures stay in `.zarr.partial`
+- Full V16 rebuilds can use canonical `uv run` again; the remaining environment caveat is sandbox/AppData access during agent-run validation, not a broken repo-local `.venv`

@@ -1,5 +1,6 @@
 using System.Numerics;
 using SixLabors.ImageSharp.PixelFormats;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
@@ -9,6 +10,26 @@ namespace WowViewer.Tools.Harvest;
 static class Program
 {
     private static Dictionary<string, string>? _md5Lookup;
+    private static readonly Dictionary<string, WlLooseFileEntry[]> _wlLooseFileCache = new(StringComparer.OrdinalIgnoreCase);
+    private sealed record HarvestMapDiscoveryResult(
+        string Map,
+        string DisplayName,
+        bool Include,
+        string Reason,
+        bool IsAlpha,
+        bool IsWmoBased,
+        bool HasWorldModelAsset,
+        int WorldModelNameCount,
+        int TilesWithData,
+        bool HasReadableTile,
+        int? ProbeTileX,
+        int? ProbeTileY);
+
+    private sealed class WlLooseFileEntry
+    {
+        public required string Path { get; init; }
+        public required WlFile File { get; init; }
+    }
 
     static int Main(string[] args)
     {
@@ -41,6 +62,9 @@ static class Program
             case "harvest-stream":
                 RunHarvestStream(tail);
                 break;
+            case "discover-maps":
+                RunDiscoverMaps(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown command '{command}'.");
                 ShowUsage();
@@ -63,6 +87,8 @@ static class Program
               extract-unified   Extract NPZ shard from a tile inside MPQ archives
                                 (reads tileset BLP + ADT + WDL from MPQ, outputs NPZ shard)
               harvest-stream    Stream all tiles from a map as length-prefixed NPZ blobs to stdout
+              discover-maps     List terrain-trainable maps from a staged client using
+                                WDT summary + tile probe checks
               synthetic-minimap Composite tilesets + alpha → synthetic minimap
 
             Global options:
@@ -74,6 +100,105 @@ static class Program
 
             See --help on each command for options.
             """);
+    }
+
+    static void RunDiscoverMaps(string[] args)
+    {
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        if (string.IsNullOrWhiteSpace(clientRoot))
+        {
+            Console.Error.WriteLine("Error: --client-root <dir> is required.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (!Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine($"Error: client root not found: {clientRoot}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        using var catalog = new NativeMpqService();
+        catalog.LoadArchives([clientRoot]);
+
+        MapDirectoryLookup lookup = new();
+        lookup.Load(BuildClientSearchRoots(clientRoot), catalog);
+        if (!lookup.IsLoaded)
+        {
+            Console.Error.WriteLine("Error: Map.dbc could not be loaded from the staged client.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        List<HarvestMapDiscoveryResult> results = [];
+        foreach (MapDirectoryEntry entry in lookup.Entries.OrderBy(static entry => entry.Directory, StringComparer.OrdinalIgnoreCase))
+        {
+            results.Add(DiscoverMap(catalog, entry));
+        }
+
+        string json = System.Text.Json.JsonSerializer.Serialize(
+            results,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                WriteIndented = true
+            });
+        Console.WriteLine(json);
+    }
+
+    static string? TryFindDefaultListfilePath()
+    {
+        DirectoryInfo? current = new(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            string candidate = Path.Combine(current.FullName, "libs", "wowdev", "wow-listfile", "listfile.txt");
+            if (File.Exists(candidate))
+                return candidate;
+
+            current = current.Parent;
+        }
+
+        return null;
+    }
+
+    static void TryLoadSupplementalListfile(NativeMpqService catalog)
+    {
+        string? listfilePath = TryFindDefaultListfilePath();
+        if (string.IsNullOrWhiteSpace(listfilePath) || !File.Exists(listfilePath))
+            return;
+
+        try
+        {
+            catalog.LoadListfile(listfilePath);
+            Console.WriteLine($"  Loaded supplemental listfile: {listfilePath}");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Warning: failed to load supplemental listfile '{listfilePath}': {ex.Message}");
+        }
+    }
+
+    static string[] ReadSupplementalListfileEntriesForMap(string mapName)
+    {
+        string? listfilePath = TryFindDefaultListfilePath();
+        if (string.IsNullOrWhiteSpace(listfilePath) || !File.Exists(listfilePath))
+            return [];
+
+        string mapPrefix = $"world\\maps\\{mapName}\\".ToLowerInvariant();
+        return File.ReadLines(listfilePath)
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0)
+            .Select(line => line.Replace('/', '\\'))
+            .Where(path =>
+                path.StartsWith(mapPrefix, StringComparison.OrdinalIgnoreCase) &&
+                (path.EndsWith(".wlw", StringComparison.OrdinalIgnoreCase) ||
+                 path.EndsWith(".wlm", StringComparison.OrdinalIgnoreCase) ||
+                 path.EndsWith(".wlq", StringComparison.OrdinalIgnoreCase) ||
+                 path.EndsWith(".wll", StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     static void RunHarvestTile(string[] args)
@@ -328,6 +453,7 @@ static class Program
 
         using var catalog = new NativeMpqService();
         catalog.LoadArchives([clientRoot]);
+        TryLoadSupplementalListfile(catalog);
         LoadMd5Translate(clientRoot, catalog);
 
         string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
@@ -357,7 +483,7 @@ static class Program
                     Console.SetError(TextWriter.Null);
                     try
                     {
-                        if (RunExtractTileFromMpq(catalog, mapName, wdtBytes, tx, ty, outputPath, exportPlacements: false, buildVersion: buildVersion))
+                        if (RunExtractTileFromMpq(catalog, clientRoot, mapName, wdtBytes, tx, ty, outputPath, exportPlacements: false, buildVersion: buildVersion))
                             extracted++;
                     }
                     finally { Console.SetError(oldErr); }
@@ -399,6 +525,7 @@ static class Program
 
         using var catalog = new NativeMpqService();
         catalog.LoadArchives([clientRoot]);
+        TryLoadSupplementalListfile(catalog);
         LoadMd5Translate(clientRoot, catalog);
 
         string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
@@ -443,7 +570,7 @@ static class Program
 
                         // Try WL* liquid from MPQ for ALL tiles
                         if (pack.UnifiedLiquidMask is null)
-                            TryAddWlLiquidFromMpq(catalog, mapName, tx, ty, pack);
+                            TryAddWlLiquidFromArchiveFiles(catalog, clientRoot, mapName, tx, ty, pack);
 
                         if (pack.MinimapRgb256 is null)
                         {
@@ -543,6 +670,7 @@ static class Program
 
         using var catalog = new NativeMpqService();
         catalog.LoadArchives([clientRoot]);
+        TryLoadSupplementalListfile(catalog);
         LoadMd5Translate(clientRoot, catalog);
 
         string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
@@ -556,7 +684,7 @@ static class Program
 
         if (tileX.HasValue && tileY.HasValue)
         {
-            if (!RunExtractTileFromMpq(catalog, mapName, wdtBytes, tileX.Value, tileY.Value, output, exportPlacements, syntheticMinimap, buildVersion: buildVersion))
+            if (!RunExtractTileFromMpq(catalog, clientRoot, mapName, wdtBytes, tileX.Value, tileY.Value, output, exportPlacements, syntheticMinimap, buildVersion: buildVersion))
                 Environment.ExitCode = 1;
         }
         else
@@ -572,7 +700,7 @@ static class Program
         }
     }
 
-    static bool RunExtractTileFromMpq(NativeMpqService catalog, string mapName, byte[] wdtBytes, int tileX, int tileY, string? outputPath, bool exportPlacements, string? syntheticMinimapPath = null, string? buildVersion = null)
+    static bool RunExtractTileFromMpq(NativeMpqService catalog, string clientRoot, string mapName, byte[] wdtBytes, int tileX, int tileY, string? outputPath, bool exportPlacements, string? syntheticMinimapPath = null, string? buildVersion = null)
     {
         TerrainTileTensorPack pack;
         AdtPlacementCatalog? placementCatalog = null;
@@ -599,9 +727,9 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
                 }
             }
 
-            // Try WL* liquid from MPQ for ALL tiles (Alpha, Classic, TBC, WotLK, Cata+)
+            // Try loose WL* liquid fallback for tiles with no MH2O/MCLQ coverage.
             if (pack.UnifiedLiquidMask is null)
-                TryAddWlLiquidFromMpq(catalog, mapName, tileX, tileY, pack);
+                TryAddWlLiquidFromArchiveFiles(catalog, clientRoot, mapName, tileX, tileY, pack);
 
         if (pack.MinimapRgb256 is null)
         {
@@ -672,6 +800,124 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             GenerateSyntheticMinimap(catalog, pack, tileX, tileY, syntheticMinimapPath);
 
         return true;
+    }
+
+    private static HarvestMapDiscoveryResult DiscoverMap(NativeMpqService catalog, MapDirectoryEntry entry)
+    {
+        string mapName = entry.Directory;
+        string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+        byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
+        if (wdtBytes is null || wdtBytes.Length == 0)
+        {
+            return new HarvestMapDiscoveryResult(
+                Map: mapName,
+                DisplayName: entry.Name,
+                Include: false,
+                Reason: "wdt_missing",
+                IsAlpha: false,
+                IsWmoBased: false,
+                HasWorldModelAsset: false,
+                WorldModelNameCount: 0,
+                TilesWithData: 0,
+                HasReadableTile: false,
+                ProbeTileX: null,
+                ProbeTileY: null);
+        }
+
+        using MemoryStream ms = new(wdtBytes, writable: false);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(ms, wdtVirtual);
+        WdtSummary summary = WdtSummaryReader.Read(ms, fileSummary);
+        IReadOnlyList<WdtTileCoordinate> occupiedTiles = WdtTileIndexReader.ReadOccupiedTiles(ms, fileSummary);
+        bool isAlpha = AlphaWdtReader.IsAlphaWdt(wdtBytes);
+        bool hasWorldModelAsset = summary.WorldModelNameCount > 0;
+
+        int? probeTileX = null;
+        int? probeTileY = null;
+        bool hasReadableTile = false;
+
+        if (summary.TilesWithData > 0)
+        {
+            foreach (WdtTileCoordinate tile in occupiedTiles)
+            {
+                if (TryProbeMapTile(catalog, mapName, tile, wdtBytes, isAlpha))
+                {
+                    probeTileX = tile.TileX;
+                    probeTileY = tile.TileY;
+                    hasReadableTile = true;
+                    break;
+                }
+            }
+        }
+
+        string reason;
+        bool include;
+        if (summary.TilesWithData <= 0 && hasWorldModelAsset)
+        {
+            include = false;
+            reason = "wmo_only";
+        }
+        else if (summary.TilesWithData <= 0)
+        {
+            include = false;
+            reason = "no_tiles";
+        }
+        else if (!hasReadableTile)
+        {
+            include = false;
+            reason = "no_readable_tile";
+        }
+        else if (hasWorldModelAsset)
+        {
+            include = true;
+            reason = "terrain_plus_wmo";
+        }
+        else
+        {
+            include = true;
+            reason = "terrain";
+        }
+
+        return new HarvestMapDiscoveryResult(
+            Map: mapName,
+            DisplayName: entry.Name,
+            Include: include,
+            Reason: reason,
+            IsAlpha: isAlpha,
+            IsWmoBased: summary.IsWmoBased,
+            HasWorldModelAsset: hasWorldModelAsset,
+            WorldModelNameCount: summary.WorldModelNameCount,
+            TilesWithData: summary.TilesWithData,
+            HasReadableTile: hasReadableTile,
+            ProbeTileX: probeTileX,
+            ProbeTileY: probeTileY);
+    }
+
+    private static bool TryProbeMapTile(
+        NativeMpqService catalog,
+        string mapName,
+        WdtTileCoordinate tile,
+        byte[] wdtBytes,
+        bool isAlpha)
+    {
+        if (isAlpha)
+            return AlphaWdtReader.TryReadTile(wdtBytes, tile.TileX, tile.TileY, out AlphaTileData? tileData) && tileData is not null;
+
+        string adtVirtual = $"World\\Maps\\{mapName}\\{mapName}_{tile.TileX}_{tile.TileY}.adt";
+        byte[]? adtBytes = catalog.ReadFile(adtVirtual);
+        return adtBytes is { Length: > 0 };
+    }
+
+    private static IReadOnlyList<string> BuildClientSearchRoots(string clientRoot)
+    {
+        List<string> roots = [];
+        string dataRoot = Path.Combine(clientRoot, "Data");
+        if (Directory.Exists(dataRoot))
+            roots.Add(dataRoot);
+
+        if (!string.Equals(clientRoot, dataRoot, StringComparison.OrdinalIgnoreCase))
+            roots.Add(clientRoot);
+
+        return roots.Count > 0 ? roots : [clientRoot];
     }
 
     private static TerrainTileTensorPack? BuildPackFromArchiveAdt(
@@ -837,10 +1083,69 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         Console.WriteLine($"Synthetic minimap: {outputPath}");
     }
 
-    static void TryAddWlLiquidFromMpq(NativeMpqService catalog, string mapName, int tileX, int tileY, TerrainTileTensorPack pack)
+    static WlLooseFileEntry[] GetArchiveWlFiles(NativeMpqService catalog, string clientRoot, string mapName)
     {
-        string[] wlExtensions = [".wlw", ".wlm", ".wlq", ".wll"];
-        string basePath = $"World\\Maps\\{mapName}\\{mapName}";
+        string cacheKey = $"{Path.GetFullPath(clientRoot)}|{mapName}";
+        if (_wlLooseFileCache.TryGetValue(cacheKey, out WlLooseFileEntry[]? cached))
+            return cached;
+
+        string mapPrefix = $"World\\Maps\\{mapName}\\";
+        string[] paths = catalog.GetAllKnownFiles()
+            .Select(path => path.Replace('/', '\\'))
+            .Where(path =>
+                path.StartsWith(mapPrefix, StringComparison.OrdinalIgnoreCase) &&
+                (path.EndsWith(".wlw", StringComparison.OrdinalIgnoreCase) ||
+                 path.EndsWith(".wlm", StringComparison.OrdinalIgnoreCase) ||
+                 path.EndsWith(".wlq", StringComparison.OrdinalIgnoreCase) ||
+                 path.EndsWith(".wll", StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (paths.Length == 0)
+            paths = ReadSupplementalListfileEntriesForMap(mapName);
+
+        if (paths.Length == 0)
+        {
+            Console.WriteLine($"  [WL] no WL* files found in loaded archives for {mapName}");
+            cached = [];
+            _wlLooseFileCache[cacheKey] = cached;
+            return cached;
+        }
+
+        var loaded = new List<WlLooseFileEntry>(paths.Length);
+        foreach (string path in paths)
+        {
+            try
+            {
+                byte[]? data = catalog.ReadFile(path);
+                if (data is null || data.Length == 0)
+                    continue;
+
+                using var ms = new MemoryStream(data, writable: false);
+                loaded.Add(new WlLooseFileEntry
+                {
+                    Path = path,
+                    File = WlFileReader.Read(ms, path)
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  [WL] failed to read {Path.GetFileName(path)}: {ex.Message}");
+            }
+        }
+
+        Console.WriteLine($"  [WL] discovered {loaded.Count}/{paths.Length} WL* files in loaded archives for {mapName}");
+        cached = loaded.ToArray();
+        _wlLooseFileCache[cacheKey] = cached;
+        return cached;
+    }
+
+    static void TryAddWlLiquidFromArchiveFiles(NativeMpqService catalog, string clientRoot, string mapName, int tileX, int tileY, TerrainTileTensorPack pack)
+    {
+        WlLooseFileEntry[] wlFiles = GetArchiveWlFiles(catalog, clientRoot, mapName);
+        if (wlFiles.Length == 0)
+            return;
 
         bool any = false;
         float[,]? mask = null;
@@ -850,51 +1155,37 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         const float tileWorldSize = 533.33333f;
         const float mapOrigin = 17066.666f;
 
-        foreach (string ext in wlExtensions)
+        foreach (WlLooseFileEntry entry in wlFiles)
         {
-            byte[]? data = catalog.ReadFile(basePath + ext);
-            if (data is null || data.Length == 0)
+            foreach (var block in entry.File.Blocks)
             {
-                Console.WriteLine($"  [WL] {basePath}{ext}: not found");
-                continue;
-            }
-            Console.WriteLine($"  [WL] {basePath}{ext}: {data.Length} bytes");
+                Vector3 pos = block.WorldPosition;
+                int blockTileX = Math.Clamp((int)Math.Floor((mapOrigin - pos.Y) / tileWorldSize), 0, 63);
+                int blockTileY = Math.Clamp((int)Math.Floor((mapOrigin - pos.X) / tileWorldSize), 0, 63);
+                if (blockTileX != tileX || blockTileY != tileY)
+                    continue;
 
-            try
-            {
-                using var ms = new MemoryStream(data);
-                var wl = WlFileReader.Read(ms);
-                foreach (var block in wl.Blocks)
+                float avgH = block.Vertices.Average(v => v.Z);
+                float localX = (mapOrigin - pos.Y) - (tileX * tileWorldSize);
+                float localY = (mapOrigin - pos.X) - (tileY * tileWorldSize);
+                int cx = Math.Clamp((int)(localX / tileWorldSize * (size - 1)), 0, size - 1);
+                int cy = Math.Clamp((int)(localY / tileWorldSize * (size - 1)), 0, size - 1);
+
+                mask ??= new float[size, size];
+                heights ??= new float[size, size];
+
+                for (int dy = -1; dy <= 1; dy++)
                 {
-                    Vector3 pos = block.WorldPosition;
-                    // Project block world position to tile-local coordinates
-                    int blockTileX = Math.Clamp((int)Math.Floor((mapOrigin - pos.Y) / tileWorldSize), 0, 63);
-                    int blockTileY = Math.Clamp((int)Math.Floor((mapOrigin - pos.X) / tileWorldSize), 0, 63);
-                    if (blockTileX != tileX || blockTileY != tileY) continue;
-
-                    float avgH = block.Vertices.Average(v => v.Z);
-                    float localX = (mapOrigin - pos.Y) - (tileX * tileWorldSize);
-                    float localY = (mapOrigin - pos.X) - (tileY * tileWorldSize);
-                    int cx = Math.Clamp((int)(localX / tileWorldSize * (size - 1)), 0, size - 1);
-                    int cy = Math.Clamp((int)(localY / tileWorldSize * (size - 1)), 0, size - 1);
-
-                    mask ??= new float[size, size];
-                    heights ??= new float[size, size];
-
-                    for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
                     {
-                        for (int dx = -1; dx <= 1; dx++)
-                        {
-                            int px = Math.Clamp(cx + dx, 0, size - 1);
-                            int py = Math.Clamp(cy + dy, 0, size - 1);
-                            mask[py, px] = 1.0f;
-                            heights[py, px] = avgH;
-                        }
+                        int px = Math.Clamp(cx + dx, 0, size - 1);
+                        int py = Math.Clamp(cy + dy, 0, size - 1);
+                        mask[py, px] = 1.0f;
+                        heights[py, px] = avgH;
                     }
-                    any = true;
                 }
+                any = true;
             }
-            catch { }
         }
 
         if (any)

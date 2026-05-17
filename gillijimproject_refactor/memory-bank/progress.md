@@ -39,6 +39,10 @@
 | **WL* loose-file liquid fallback** | **DONE** |
 | **Unified liquid sea-level presence fix** | **DONE** — `height == 0` no longer suppresses valid MH2O/MCLQ water |
 | **Archive temp map-name fallback** | **DONE** — staged archive temp extraction now preserves real `map_name` metadata |
+| **V16 builder live progress + fail-loud stream handling** | **DONE** — `build_v16_dataset.py` now forwards harvester stderr live, prints early progress for small maps, and throws explicit errors on stream/process/finalization failures |
+| **V16 staged finalization guard** | **DONE** — builds now write to `.zarr.partial` and only promote to final `.zarr` on success, so failed runs no longer silently poison the canonical dataset path |
+| **V16 WDT-driven auto map discovery** | **DONE** — hard-coded default map eras are gone; `WowViewer.Tool.Harvest discover-maps` now uses WDT `MWMO/MONM` plus occupied-tile/readable-tile checks so the builder skips WMO-only, zero-tile, and missing-WDT transport maps automatically |
+| **Harvest WL archive discovery fix** | **DONE** — archive-backed harvest now finds real `*.wl*` virtual files from MPQ listfiles instead of guessing `World\\Maps\\<map>\\<map>.wl*`; focused smoke on staged `3_3_5_12340 / Azeroth` reports no WL entries in the loaded archives |
 | **Coordinate fixes** | **DONE** |
 | **Phase C: AlphaToLk writer infrastructure** | **DONE** — WdlWriter, LkWdtWriter, LkAdtWriter, AlphaToLkConverter |
 | **Phase C: AlphaToLk CLI command** | **DONE** — convert-alpha-to-lk in WowViewer.Tool.Converter |
@@ -65,7 +69,8 @@
 | What | Status |
 |------|--------|
 | Multi-client full shard dataset prep | SWITCHED TO HARVEST PATH — use `WowViewer.Tool.Harvest harvest-map-mpq` on staged clients, not converter `dataset-scan` manifests |
-| data-harvester `.venv` launcher repair | WORKAROUND LANDED — `scripts/run-data-harvester-python.ps1` reuses `.venv` packages while `.venv\\Scripts\\python.exe` remains broken from uv base-interpreter path drift |
+| data-harvester launcher posture | CANONICAL UV RESTORED — elevated proof on 2026-05-16 showed `.venv\\Scripts\\python.exe` and `uv run` both work in a real shell; `scripts/run-data-harvester-python.ps1` remains a sandbox/AppData-access fallback, not the primary operator path |
+| 3_3_5_12340 V16 final store health | INCOMPLETE — current `wow-viewer/output/datasets/v16/3_3_5_12340.zarr` reports `50000` preallocated rows and no `index.parquet`; needs a clean rebuild |
 | Phase C: AlphaToLk AreaID crosswalk | NOT YET — `AreaIdMapper` exists in `WowViewer.Core.IO/Dbc/`, not yet wired to converter |
 | Phase C: LkToAlpha real-data MdxViewer validation | DONE — 839/839 tiles, terrain renders, WMOs load, ExitCode=0 |
 | Phase C: Alpha/LK full chunk preservation | OPEN — current converter lane is still a reduced terrain-domain reconstruction, not chunk-for-chunk spec closure. Gap inventory documented below. |

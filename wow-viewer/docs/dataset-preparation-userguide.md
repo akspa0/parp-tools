@@ -316,20 +316,27 @@ dotnet build wow-viewer/WowViewer.slnx -c Debug
 # 2. Build the Zarr dataset
 cd wow-viewer/data-harvester
 
-# Single build (all maps):
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340
+# Single build (auto-discovered terrain maps):
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340
 
 # Specific maps:
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
 
 # Limit tiles (testing):
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
 
 # Multiple builds:
-.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
+uv run python scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
 ```
 
 Output: `wow-viewer/output/datasets/v16/<build_key>.zarr/`
+
+The builder now prints live streaming progress and forwards harvester stderr.
+Each run stages into `wow-viewer/output/datasets/v16/<build_key>.zarr.partial/`
+and only promotes that staged store to the final `.zarr/` path after
+successful finalization.
+When `--maps` is omitted, the builder now auto-discovers terrain-trainable maps
+from WDT summaries and skips pure WMO-only or zero-tile maps before streaming.
 
 ### 7.2 Zarr Store Layout
 

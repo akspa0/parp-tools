@@ -8,7 +8,7 @@ Now carries ALL available NPZ signals including per-instance object mask and pla
 Usage:
     cd wow-viewer/data-harvester
 
-    # Build one build (all maps):
+    # Build one build (auto-discovered terrain maps):
     uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340
 
     # Build multiple builds:
@@ -32,7 +32,9 @@ import shutil
 import struct
 import subprocess
 import sys
+import threading
 import time
+from collections import deque
 from io import BytesIO
 from pathlib import Path
 
@@ -126,6 +128,33 @@ PLACEMENT_COLUMNS_MODF = [
 
 NPZB_MAGIC = b"NPZB"
 ENDS_MAGIC = b"ENDS"
+
+
+def _dir_size_bytes(path: Path) -> int:
+    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+
+
+def _tail_text(lines: deque[str]) -> str:
+    if not lines:
+        return "(no stderr output)"
+    return "\n".join(lines)
+
+
+def _pump_stderr(stderr_pipe, map_name: str, tail: deque[str]) -> None:
+    try:
+        for raw in iter(stderr_pipe.readline, b""):
+            if not raw:
+                break
+            line = raw.decode("utf-8", errors="replace").rstrip()
+            if not line:
+                continue
+            tail.append(line)
+            print(f"    [harvest:{map_name}] {line}", file=sys.stderr, flush=True)
+    finally:
+        try:
+            stderr_pipe.close()
+        except Exception:
+            pass
 
 
 def _find_harvest_tool() -> Path:
@@ -245,14 +274,59 @@ def _normalize_array(arr: np.ndarray, dst_key: str) -> np.ndarray:
     return arr
 
 
-def _default_maps_for_build(build: str) -> list[str]:
-    if build.startswith("0_"):
-        return ["Azeroth", "Kalimdor", "Kalidar"]
-    elif build.startswith("3_"):
-        return ["Azeroth", "Kalimdor", "Expansion01", "Northrend"]
-    elif build.startswith("4_"):
-        return ["Azeroth", "Kalimdor", "Expansion01", "Northrend", "development_nonweighted", "Deephome"]
-    return ["Azeroth"]
+def _discover_maps_for_build(harvest_tool: Path, client_root: Path) -> list[str]:
+    def getv(row: dict, key: str, default=None):
+        return row.get(key, row.get(key[:1].upper() + key[1:], default))
+
+    cmd = [
+        str(harvest_tool),
+        "discover-maps",
+        "--client-root",
+        str(client_root),
+    ]
+    proc = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if proc.stderr:
+        print(proc.stderr, end="", file=sys.stderr, flush=True)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"discover-maps failed for {client_root} with exit code {proc.returncode}"
+        )
+
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as ex:
+        raise RuntimeError(
+            f"discover-maps returned invalid JSON for {client_root}: {ex}"
+        ) from ex
+
+    if not isinstance(payload, list):
+        raise RuntimeError(f"discover-maps returned unexpected payload type: {type(payload)!r}")
+
+    included = [getv(row, "map") for row in payload if getv(row, "include")]
+    print(f"Discovered {len(included)} trainable maps from WDT summaries")
+    for row in payload:
+        map_name = getv(row, "map", "<unknown>")
+        reason = getv(row, "reason", "unknown")
+        tiles = getv(row, "tilesWithData", 0)
+        has_wmo = getv(row, "hasWorldModelAsset", False)
+        has_tile = getv(row, "hasReadableTile", False)
+        status = "include" if getv(row, "include") else "skip"
+        print(
+            f"  [{status}] {map_name}: reason={reason}, "
+            f"tiles={tiles}, wmo={has_wmo}, readable_tile={has_tile}"
+        )
+
+    if not included:
+        raise RuntimeError(f"No trainable maps discovered for {client_root}")
+
+    return included
 
 
 def _write_index(rows: list[dict], output_path: Path) -> None:
@@ -320,28 +394,42 @@ def cmd_build(args: argparse.Namespace) -> None:
             continue
 
         output_path = _DATASET_ROOT / f"{build}.zarr"
-        if output_path.exists():
-            shutil.rmtree(output_path)
-        output_path.mkdir(parents=True, exist_ok=True)
+        staging_path = _DATASET_ROOT / f"{build}.zarr.partial"
+        if staging_path.exists():
+            shutil.rmtree(staging_path)
+        staging_path.mkdir(parents=True, exist_ok=True)
 
         build_version = build.replace("_", ".")
-        map_names = maps_override or _default_maps_for_build(build)
+        map_names = maps_override or _discover_maps_for_build(harvest_tool, client_root)
 
         print(f"\n{'='*60}")
         print(f"Building V16 dataset for {build}")
         print(f"Client: {client_root}")
         print(f"Maps: {map_names}")
         print(f"Output: {output_path}")
+        print(f"Staging: {staging_path}")
 
-        _build_zarr_streaming(
-            harvest_tool=harvest_tool,
-            client_root=client_root,
-            build=build,
-            build_version=build_version,
-            map_names=map_names,
-            output_path=output_path,
-            limit=limit,
-        )
+        try:
+            _build_zarr_streaming(
+                harvest_tool=harvest_tool,
+                client_root=client_root,
+                build=build,
+                build_version=build_version,
+                map_names=map_names,
+                output_path=staging_path,
+                limit=limit,
+            )
+            if output_path.exists():
+                shutil.rmtree(output_path)
+            staging_path.replace(output_path)
+            print(f"Promoted staged dataset -> {output_path}")
+        except Exception:
+            print(
+                f"Build failed for {build}. Partial output preserved at {staging_path}",
+                file=sys.stderr,
+                flush=True,
+            )
+            raise
 
 
 def _build_zarr_streaming(
@@ -386,35 +474,68 @@ def _build_zarr_streaming(
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
         )
+        if proc.stdout is None or proc.stderr is None:
+            proc.terminate()
+            raise RuntimeError(f"Failed to open harvest-stream pipes for map {map_name}.")
+
+        stderr_tail: deque[str] = deque(maxlen=40)
+        stderr_thread = threading.Thread(
+            target=_pump_stderr,
+            args=(proc.stderr, map_name, stderr_tail),
+            daemon=True,
+        )
+        stderr_thread.start()
 
         tile_count = 0
+        dropped_missing_required = 0
+        map_placements = 0
+        map_blob_bytes = 0
+        saw_end_marker = False
+        stream_error: str | None = None
         while True:
             header = proc.stdout.read(8)
-            if not header or len(header) < 8:
+            if not header:
+                stream_error = "stdout closed before ENDS sentinel"
+                break
+            if len(header) < 8:
+                stream_error = f"truncated stream header ({len(header)}/8 bytes)"
                 break
 
             magic = header[:4]
             if magic == ENDS_MAGIC:
+                saw_end_marker = True
                 break
             if magic != NPZB_MAGIC:
-                proc.terminate()
+                stream_error = f"unexpected stream magic {magic!r}"
                 break
 
             length = struct.unpack("<I", header[4:8])[0]
             if length == 0 or length > 50_000_000:
+                stream_error = f"invalid NPZ blob length {length}"
                 break
 
             blob = proc.stdout.read(length)
             if not blob or len(blob) < length:
+                stream_error = f"truncated NPZ blob ({len(blob) if blob else 0}/{length} bytes)"
                 break
 
             try:
                 data = dict(np.load(BytesIO(blob), allow_pickle=False))
-            except Exception:
-                continue
+            except Exception as ex:
+                stream_error = f"failed to decode streamed NPZ blob: {ex}"
+                break
 
             result = _process_tile_data(data)
             if result is None:
+                dropped_missing_required += 1
+                if dropped_missing_required <= 5:
+                    missing = sorted(REQUIRED_KEYS - set(data.keys()))
+                    print(
+                        f"    Warning: dropped tile blob missing required keys {missing}; "
+                        f"available keys: {sorted(data.keys())}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 continue
 
             tile_arrays, has_signals = result
@@ -444,6 +565,7 @@ def _build_zarr_streaming(
             for row in modf_rows:
                 row["tile_id"] = valid
                 all_placements.append(row)
+            map_placements += len(mddf_rows) + len(modf_rows)
 
             row = {
                 "tile_id": valid, "build": build, "map": actual_map,
@@ -465,17 +587,63 @@ def _build_zarr_streaming(
 
             valid += 1
             tile_count += 1
-            if valid % 50 == 0:
+            map_blob_bytes += length
+            if tile_count == 1 or tile_count % 10 == 0:
                 elapsed = time.perf_counter() - t0
                 rate = valid / max(elapsed, 0.01)
-                print(f"    [{valid} tiles] {rate:.1f} tiles/s, {elapsed:.0f}s")
+                store_mb = _dir_size_bytes(output_path) / 1024 / 1024
+                print(
+                    f"    Progress {map_name}: map_tiles={tile_count} total_tiles={valid} "
+                    f"placements={map_placements} raw_npz={map_blob_bytes / 1024 / 1024:.1f} MB "
+                    f"store={store_mb:.1f} MB rate={rate:.1f} tiles/s",
+                    flush=True,
+                )
 
             if limit is not None and valid >= limit:
                 proc.terminate()
                 break
 
-        proc.wait()
-        print(f"    Map {map_name}: {tile_count} tiles streamed")
+        if proc.poll() is None and (stream_error is not None or not saw_end_marker):
+            proc.terminate()
+
+        return_code = proc.wait()
+        stderr_thread.join(timeout=2.0)
+
+        if stream_error is not None:
+            raise RuntimeError(
+                f"Harvest stream failed for map {map_name}: {stream_error}\n"
+                f"stderr tail:\n{_tail_text(stderr_tail)}"
+            )
+        if not saw_end_marker:
+            raise RuntimeError(
+                f"Harvest stream ended without ENDS sentinel for map {map_name}.\n"
+                f"stderr tail:\n{_tail_text(stderr_tail)}"
+            )
+        if return_code != 0:
+            raise RuntimeError(
+                f"Harvest stream exited with code {return_code} for map {map_name}.\n"
+                f"stderr tail:\n{_tail_text(stderr_tail)}"
+            )
+        if tile_count == 0:
+            raise RuntimeError(
+                f"Harvest stream produced zero usable tiles for map {map_name}.\n"
+                f"Dropped missing-required blobs: {dropped_missing_required}\n"
+                f"stderr tail:\n{_tail_text(stderr_tail)}"
+            )
+
+        if dropped_missing_required > 0:
+            print(
+                f"    Warning: dropped {dropped_missing_required} blobs for map {map_name} "
+                f"because required dataset keys were missing.",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        print(
+            f"    Map {map_name}: {tile_count} tiles streamed, placements={map_placements}, "
+            f"raw_npz={map_blob_bytes / 1024 / 1024:.1f} MB",
+            flush=True,
+        )
 
         if limit is not None and valid >= limit:
             break
@@ -491,7 +659,7 @@ def _build_zarr_streaming(
 
     store.close()
 
-    total_bytes = sum(f.stat().st_size for f in output_path.rglob("*") if f.is_file())
+    total_bytes = _dir_size_bytes(output_path)
     liq_count = sum(1 for r in index_rows if r.get("has_liquid_mask", False))
     inst_count = sum(1 for r in index_rows if r.get("has_object_instance_mask", False))
     elapsed = time.perf_counter() - t0
@@ -526,11 +694,21 @@ def cmd_stats(args: argparse.Namespace) -> None:
                 if col.startswith("has_"):
                     count = table.column(col).sum().as_py()
                     print(f"    {col}: {count}/{table.num_rows}")
+            if table.num_rows != n:
+                print(
+                    f"  WARNING: array length ({n}) does not match index rows ({table.num_rows}). "
+                    f"Build may be incomplete or corrupted."
+                )
+        else:
+            print("  WARNING: index.parquet missing. This store looks incomplete or failed before finalization.")
 
         pl_path = zarr_path / "placements.parquet"
         if pl_path.exists():
             pl_table = pq.read_table(str(pl_path))
             print(f"  placements.parquet: {pl_table.num_rows} placements")
+        partial_path = _DATASET_ROOT / f"{build}.zarr.partial"
+        if partial_path.exists():
+            print(f"  WARNING: staged partial output still exists at {partial_path}")
 
 
 def main() -> None:
