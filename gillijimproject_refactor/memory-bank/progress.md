@@ -23,6 +23,7 @@
 | wow-viewer: Harvest tool extract-unified | DONE |
 | wow-viewer: MDDF/MODF model name resolution | DONE |
 | wow-viewer: Harvest --export-placements | DONE |
+| wow-viewer: V16 archive split-ADT placement staging | DONE — archive-backed harvest now stages `_obj0.adt`, restoring placements, object masks, and instance masks on split ADT builds |
 | wow-viewer: Alpha object/precise masks | DONE |
 | wow-viewer: Alpha shadow residual mask | DONE |
 | **Alpha 0.5.3/0.5.5: all 11 signals** | **DONE** |
@@ -36,6 +37,8 @@
 | **Placement model names resolved** | **DONE** |
 | **BuildKey provenance** | **DONE** |
 | **WL* loose-file liquid fallback** | **DONE** |
+| **Unified liquid sea-level presence fix** | **DONE** — `height == 0` no longer suppresses valid MH2O/MCLQ water |
+| **Archive temp map-name fallback** | **DONE** — staged archive temp extraction now preserves real `map_name` metadata |
 | **Coordinate fixes** | **DONE** |
 | **Phase C: AlphaToLk writer infrastructure** | **DONE** — WdlWriter, LkWdtWriter, LkAdtWriter, AlphaToLkConverter |
 | **Phase C: AlphaToLk CLI command** | **DONE** — convert-alpha-to-lk in WowViewer.Tool.Converter |
@@ -62,6 +65,7 @@
 | What | Status |
 |------|--------|
 | Multi-client full shard dataset prep | SWITCHED TO HARVEST PATH — use `WowViewer.Tool.Harvest harvest-map-mpq` on staged clients, not converter `dataset-scan` manifests |
+| data-harvester `.venv` launcher repair | WORKAROUND LANDED — `scripts/run-data-harvester-python.ps1` reuses `.venv` packages while `.venv\\Scripts\\python.exe` remains broken from uv base-interpreter path drift |
 | Phase C: AlphaToLk AreaID crosswalk | NOT YET — `AreaIdMapper` exists in `WowViewer.Core.IO/Dbc/`, not yet wired to converter |
 | Phase C: LkToAlpha real-data MdxViewer validation | DONE — 839/839 tiles, terrain renders, WMOs load, ExitCode=0 |
 | Phase C: Alpha/LK full chunk preservation | OPEN — current converter lane is still a reduced terrain-domain reconstruction, not chunk-for-chunk spec closure. Gap inventory documented below. |

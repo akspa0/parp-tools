@@ -62,7 +62,7 @@ public static class AdtTensorPackBuilder
             ReadTextureData(adtPath, textureSourcePath, profile, availableSignals);
 
         // ── Read MH2O liquid ─────────────────────────────────────────────────
-        (float[,]? mh2oHeight, float[,]? mh2oDepth, int[,]? mh2oType) =
+        (float[,]? mh2oHeight, float[,]? mh2oDepth, int[,]? mh2oType, bool[,]? mh2oPresence) =
             ReadMh2o(stream, fileSummary, availableSignals);
 
         // ── Read MTXF texture flags ──────────────────────────────────────────
@@ -70,7 +70,7 @@ public static class AdtTensorPackBuilder
             ReadMtxf(stream, fileSummary, mclyTextureIds, availableSignals);
 
         // ── Read MCLQ legacy liquid ──────────────────────────────────────────
-        (float[,]? mclqHeight, int[,]? mclqType) =
+        (float[,]? mclqHeight, int[,]? mclqType, bool[,]? mclqPresence) =
             ReadMclq(stream, terrainChunks, availableSignals);
 
         // ── Read MCRF object references ──────────────────────────────────────
@@ -101,7 +101,7 @@ public static class AdtTensorPackBuilder
 
         // ── Build unified liquid mask and height ─────────────────────────────
         (float[,]? unifiedLiquidMask, float[,]? unifiedLiquidHeight) =
-            BuildUnifiedLiquid(mh2oHeight, mclqHeight, wlMask, wlHeight, availableSignals);
+            BuildUnifiedLiquid(mh2oHeight, mh2oPresence, mclqHeight, mclqPresence, wlMask, wlHeight, availableSignals);
 
         // ── Compute downsampled heights ──────────────────────────────────────
         float[,]? height65 = DownsampleHeightmap(height257, 65);
@@ -671,18 +671,19 @@ public static class AdtTensorPackBuilder
     // MH2O liquid
     // ═══════════════════════════════════════════════════════════════════════
 
-    private static (float[,]? height, float[,]? depth, int[,]? typeMask)
+    private static (float[,]? height, float[,]? depth, int[,]? typeMask, bool[,]? presenceMask)
         ReadMh2o(Stream stream, MapFileSummary fileSummary, HashSet<string> signals)
     {
         try
         {
             AdtLiquidFile liquidFile = AdtLiquidReader.Read(stream, fileSummary);
             if (liquidFile.Chunks.Count == 0)
-                return (null, null, null);
+                return (null, null, null, null);
 
             float[,] heights = new float[TileHeightmapSize, TileHeightmapSize];
             float[,] depths = new float[TileHeightmapSize, TileHeightmapSize];
             int[,] typeMask = new int[TileHeightmapSize, TileHeightmapSize];
+            bool[,] presenceMask = new bool[TileHeightmapSize, TileHeightmapSize];
             bool any = false;
 
             foreach (AdtLiquidChunk chunk in liquidFile.Chunks)
@@ -720,6 +721,7 @@ public static class AdtTensorPackBuilder
 
                             heights[globalY, globalX] = layer.Heights[vertexIndex];
                             typeMask[globalY, globalX] = (int)layer.BasicType;
+                            presenceMask[globalY, globalX] = true;
 
                             if (layer.Depths is not null && vertexIndex < layer.Depths.Length)
                                 depths[globalY, globalX] = layer.Depths[vertexIndex];
@@ -729,27 +731,27 @@ public static class AdtTensorPackBuilder
             }
 
             if (!any)
-                return (null, null, null);
+                return (null, null, null, null);
 
             signals.Add("mh2o_surface_height");
             signals.Add("mh2o_depth");
             signals.Add("mh2o_type_mask");
-            return (heights, depths, typeMask);
+            return (heights, depths, typeMask, presenceMask);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[MH2O] Warning: Failed to parse liquid data for tile: {ex.GetType().Name}: {ex.Message}");
-            return (null, null, null);
+            return (null, null, null, null);
         }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
 
-    private static (float[,]? height, int[,]? typeMask)
+    private static (float[,]? height, int[,]? typeMask, bool[,]? presenceMask)
         ReadMclq(Stream stream, List<MapChunkLocation> chunks, HashSet<string> signals)
     {
         if (chunks.Count == 0)
-            return (null, null);
+            return (null, null, null);
 
         const int mclqVertsPerChunk = 9;
         const int mclqCellsPerChunk = 8;
@@ -757,6 +759,7 @@ public static class AdtTensorPackBuilder
 
         float[,] heights = new float[gridSize, gridSize];
         int[,] types = new int[gridSize, gridSize];
+        bool[,] presenceMask = new bool[gridSize, gridSize];
         bool any = false;
 
         foreach (MapChunkLocation chunk in chunks)
@@ -793,17 +796,18 @@ public static class AdtTensorPackBuilder
                     {
                         heights[globalY, globalX] = mclq.Heights[vertexIndex];
                         types[globalY, globalX] = mclq.LiquidType;
+                        presenceMask[globalY, globalX] = true;
                     }
                 }
             }
         }
 
         if (!any)
-            return (null, null);
+            return (null, null, null);
 
         signals.Add("mclq_surface_height");
         signals.Add("mclq_type_mask");
-        return (heights, types);
+        return (heights, types, presenceMask);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1879,11 +1883,18 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
     // ═══════════════════════════════════════════════════════════════════════
 
     internal static (float[,]? mask, float[,]? height)
-        BuildUnifiedLiquid(float[,]? mh2oHeight, float[,]? mclqHeight, float[,]? wlMask, float[,]? wlHeight, HashSet<string> signals)
+        BuildUnifiedLiquid(
+            float[,]? mh2oHeight,
+            bool[,]? mh2oPresence,
+            float[,]? mclqHeight,
+            bool[,]? mclqPresence,
+            float[,]? wlMask,
+            float[,]? wlHeight,
+            HashSet<string> signals)
     {
         // Priority: MH2O > MCLQ > WL*
         // MH2O is the richest source (WotLK+) with per-vertex heights at 257×257.
-        if (mh2oHeight is not null)
+        if (mh2oHeight is not null && mh2oPresence is not null)
         {
             float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
             float[,] height = new float[TileHeightmapSize, TileHeightmapSize];
@@ -1893,10 +1904,10 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
             {
                 for (int x = 0; x < TileHeightmapSize; x++)
                 {
-                    float h = mh2oHeight[y, x];
-                    if (h == 0f)
+                    if (!mh2oPresence[y, x])
                         continue;
 
+                    float h = mh2oHeight[y, x];
                     mask[y, x] = 1.0f;
                     height[y, x] = h;
                     any = true;
@@ -1912,7 +1923,7 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
         }
 
         // MCLQ is pre-WotLK, stored at 129×129 resolution.
-        if (mclqHeight is not null)
+        if (mclqHeight is not null && mclqPresence is not null)
         {
             int mclqSize = mclqHeight.GetLength(0);
             float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
@@ -1932,13 +1943,18 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
                     float fx = sourceX - ix;
                     float fy = sourceY - iy;
 
+                    if (!mclqPresence[iy, ix]
+                        && !mclqPresence[iy, ix + 1]
+                        && !mclqPresence[iy + 1, ix]
+                        && !mclqPresence[iy + 1, ix + 1])
+                    {
+                        continue;
+                    }
+
                     float h = BilinearInterpolate(
                         mclqHeight[iy, ix], mclqHeight[iy, ix + 1],
                         mclqHeight[iy + 1, ix], mclqHeight[iy + 1, ix + 1],
                         fx, fy);
-
-                    if (h == 0f)
-                        continue;
 
                     mask[y, x] = 1.0f;
                     height[y, x] = h;
@@ -1990,10 +2006,31 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
         // Path pattern: .../World/Maps/<MapName>/<MapName>_<x>_<y>.adt
         string? mapsDir = Path.GetDirectoryName(adtPath);
         if (mapsDir is null)
-            return string.Empty;
+            return ExtractMapNameFromTileStem(adtPath);
 
         string? mapName = Path.GetFileName(mapsDir);
-        return mapName ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(mapName)
+            && !mapName.StartsWith("wowviewer_", StringComparison.OrdinalIgnoreCase)
+            && !mapName.StartsWith("tmp", StringComparison.OrdinalIgnoreCase))
+        {
+            return mapName;
+        }
+
+        return ExtractMapNameFromTileStem(adtPath);
+    }
+
+    private static string ExtractMapNameFromTileStem(string adtPath)
+    {
+        string stem = Path.GetFileNameWithoutExtension(adtPath);
+        string[] parts = stem.Split('_');
+        if (parts.Length >= 3
+            && int.TryParse(parts[^1], out _)
+            && int.TryParse(parts[^2], out _))
+        {
+            return string.Join("_", parts[..^2]);
+        }
+
+        return string.Empty;
     }
 
     private static (int mddfCount, int modfCount, float[,]? mddfData, float[,]? modfData, IReadOnlyList<string> mddfNames, IReadOnlyList<string> modfNames)

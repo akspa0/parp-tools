@@ -119,25 +119,31 @@ the Python Zarr writer.
    uv sync
    ```
 
+4. If `.venv\Scripts\python.exe` is unusable in this checkout, run data-harvester
+   Python commands through the repo-local launcher:
+   ```powershell
+   .\scripts\run-data-harvester-python.ps1 -c "import sys; print(sys.executable)"
+   ```
+
 ### Build Commands
 
 ```bash
 cd wow-viewer/data-harvester
 
 # Single build (all maps for that build):
-uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340
 
 # Multiple builds:
-uv run python scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
 
 # Specific maps only:
-uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
 
 # Limit tiles (for testing):
-uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
 
 # Check stats:
-uv run python scripts/build_v16_dataset.py stats --build 3_3_5_12340
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py stats --build 3_3_5_12340
 ```
 
 Output goes to `wow-viewer/output/datasets/v16/<build_key>.zarr/`.
@@ -173,7 +179,7 @@ All diagnostic text goes to stderr.
 
 ```bash
 cd wow-viewer/data-harvester
-uv run python scripts/train_v16.py \
+.\scripts\run-data-harvester-python.ps1 scripts/train_v16.py \
     --dataset-dir ../output/datasets/v16 \
     --builds 3_3_5_12340 4_0_0_11927
 ```
@@ -223,6 +229,7 @@ decoder. Total ~27.4M parameters with the liquid head.
 | File | Purpose |
 |------|---------|
 | `scripts/build_v16_dataset.py` | Build pipeline: stream from harvester → Zarr |
+| `scripts/run-data-harvester-python.ps1` | Repo-local launcher for `.venv` packages when the venv stub is broken |
 | `src/harvester/v16_dataset.py` | PyTorch Dataset reading from Zarr stores |
 | `src/harvester/v16_model.py` | V16Model (ConvNeXt V2 Nano + U-Net + liquid head) |
 | `docs/architecture/v16-terrain-model-spec-2026-05-16.md` | This document |

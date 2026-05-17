@@ -436,30 +436,7 @@ static class Program
                         }
                         else
                         {
-                            string adtVirtual = $"World\\Maps\\{mapName}\\{mapName}_{tx}_{ty}.adt";
-                            byte[]? adtBytes = catalog.ReadFile(adtVirtual);
-                            if (adtBytes is null) continue;
-
-                            string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_stream_{Guid.NewGuid():N}");
-                            Directory.CreateDirectory(tempDir);
-                            string adtDiskPath = Path.Combine(tempDir, Path.GetFileName(adtVirtual));
-                            string tex0DiskPath = Path.Combine(tempDir, $"{mapName}_{tx}_{ty}_tex0.adt");
-
-                            File.WriteAllBytes(adtDiskPath, adtBytes);
-
-                            string? tex0Virtual = $"World\\Maps\\{mapName}\\{mapName}_{tx}_{ty}_tex0.adt";
-                            byte[]? tex0Bytes = catalog.ReadFile(tex0Virtual);
-                            if (tex0Bytes != null)
-                                File.WriteAllBytes(tex0DiskPath, tex0Bytes);
-
-                            try
-                            {
-                                pack = AdtTensorPackBuilder.Build(adtDiskPath, tex0Bytes != null ? tex0DiskPath : null, buildVersion);
-                            }
-                            finally
-                            {
-                                try { Directory.Delete(tempDir, true); } catch { }
-                            }
+                            pack = BuildPackFromArchiveAdt(catalog, mapName, tx, ty, buildVersion);
                         }
 
                         if (pack is null) continue;
@@ -613,33 +590,12 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             }
             else
             {
-                string adtVirtual = $"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}.adt";
-                byte[]? adtBytes = catalog.ReadFile(adtVirtual);
-                if (adtBytes is null)
+                pack = BuildPackFromArchiveAdt(catalog, mapName, tileX, tileY, buildVersion);
+                if (pack is null)
                 {
+                    string adtVirtual = $"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}.adt";
                     Console.Error.WriteLine($"Error: Could not read ADT '{adtVirtual}' from client.");
                     return false;
-                }
-
-                string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_harvest_{Guid.NewGuid():N}");
-                Directory.CreateDirectory(tempDir);
-                string adtDiskPath = Path.Combine(tempDir, Path.GetFileName(adtVirtual));
-                string tex0DiskPath = Path.Combine(tempDir, $"{mapName}_{tileX}_{tileY}_tex0.adt");
-
-                File.WriteAllBytes(adtDiskPath, adtBytes);
-
-                string? tex0Virtual = $"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}_tex0.adt";
-                byte[]? tex0Bytes = catalog.ReadFile(tex0Virtual);
-                if (tex0Bytes != null)
-                    File.WriteAllBytes(tex0DiskPath, tex0Bytes);
-
-                try
-                {
-                    pack = AdtTensorPackBuilder.Build(adtDiskPath, tex0Bytes != null ? tex0DiskPath : null, buildVersion);
-                }
-                finally
-                {
-                    try { Directory.Delete(tempDir, true); } catch { }
                 }
             }
 
@@ -716,6 +672,45 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             GenerateSyntheticMinimap(catalog, pack, tileX, tileY, syntheticMinimapPath);
 
         return true;
+    }
+
+    private static TerrainTileTensorPack? BuildPackFromArchiveAdt(
+        NativeMpqService catalog,
+        string mapName,
+        int tileX,
+        int tileY,
+        string? buildVersion)
+    {
+        string adtVirtual = $"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}.adt";
+        byte[]? adtBytes = catalog.ReadFile(adtVirtual);
+        if (adtBytes is null)
+            return null;
+
+        string tempDir = Path.Combine(Path.GetTempPath(), $"wowviewer_harvest_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        string adtDiskPath = Path.Combine(tempDir, Path.GetFileName(adtVirtual));
+        string tex0DiskPath = Path.Combine(tempDir, $"{mapName}_{tileX}_{tileY}_tex0.adt");
+        string obj0DiskPath = Path.Combine(tempDir, $"{mapName}_{tileX}_{tileY}_obj0.adt");
+
+        File.WriteAllBytes(adtDiskPath, adtBytes);
+
+        byte[]? tex0Bytes = catalog.ReadFile($"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}_tex0.adt");
+        if (tex0Bytes is not null)
+            File.WriteAllBytes(tex0DiskPath, tex0Bytes);
+
+        byte[]? obj0Bytes = catalog.ReadFile($"World\\Maps\\{mapName}\\{mapName}_{tileX}_{tileY}_obj0.adt");
+        if (obj0Bytes is not null)
+            File.WriteAllBytes(obj0DiskPath, obj0Bytes);
+
+        try
+        {
+            return AdtTensorPackBuilder.Build(adtDiskPath, tex0Bytes is not null ? tex0DiskPath : null, buildVersion);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
     }
 
     static void GenerateSyntheticMinimap(NativeMpqService catalog, TerrainTileTensorPack pack, int tileX, int tileY, string outputPath)

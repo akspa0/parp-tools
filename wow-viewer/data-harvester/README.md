@@ -9,6 +9,13 @@ cd wow-viewer/data-harvester
 uv sync
 ```
 
+If `.venv\Scripts\python.exe` is broken in this checkout, use the repo-local
+launcher instead of `uv run`:
+
+```powershell
+.\scripts\run-data-harvester-python.ps1 -c "import sys; print(sys.executable)"
+```
+
 ## V16 Dataset (Zarr)
 
 The V16 dataset is a consolidated Zarr store per client build — no individual
@@ -22,16 +29,16 @@ intermediate files on disk.
 dotnet build ../WowViewer.slnx -c Debug
 
 # Single build (all maps):
-uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340
 
 # Specific maps:
-uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
 
 # Limit tiles (testing):
-uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
 
 # Check stats:
-uv run python scripts/build_v16_dataset.py stats --build 3_3_5_12340
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py stats --build 3_3_5_12340
 ```
 
 Output: `wow-viewer/output/datasets/v16/<build>.zarr/`
@@ -39,7 +46,7 @@ Output: `wow-viewer/output/datasets/v16/<build>.zarr/`
 ### Train V16
 
 ```bash
-uv run python scripts/train_v16.py \
+.\scripts\run-data-harvester-python.ps1 scripts/train_v16.py \
     --dataset-dir ../output/datasets/v16 \
     --builds 3_3_5_12340
 ```
@@ -90,10 +97,10 @@ ConvNeXt V2 Nano encoder (15.6M pretrained) + U-Net decoder with skip fusion.
 
 ```bash
 # V16 (Zarr-based):
-uv run python scripts/train_v16.py --builds 3_3_5_12340 --epochs 200
+.\scripts\run-data-harvester-python.ps1 scripts/train_v16.py --builds 3_3_5_12340 --epochs 200
 
 # V15 (NPZ-based, legacy):
-uv run python scripts/train_v15.py --epochs 200
+.\scripts\run-data-harvester-python.ps1 scripts/train_v15.py --epochs 200
 ```
 
 ## Key Files
@@ -101,6 +108,7 @@ uv run python scripts/train_v15.py --epochs 200
 | File | Purpose |
 |------|---------|
 | `scripts/build_v16_dataset.py` | V16 build pipeline (harvester → Zarr, no temp files) |
+| `scripts/run-data-harvester-python.ps1` | Repo-local launcher for `.venv` packages when the venv stub is broken |
 | `scripts/train_v15.py` | V15 training script |
 | `src/harvester/v16_dataset.py` | V16 PyTorch Dataset (Zarr) |
 | `src/harvester/v15_dataset.py` | V15 PyTorch Dataset (NPZ) |

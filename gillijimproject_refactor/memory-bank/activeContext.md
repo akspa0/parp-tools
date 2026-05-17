@@ -61,6 +61,9 @@ Six independent models, each training on ground truth only:
 
 ## C# Changes (This Session)
 
+- `WowViewer.Tool.Harvest` archive-backed extraction now stages `_obj0.adt` beside the root ADT and `_tex0.adt`, so V16/archive harvest output no longer drops placements, object masks, or instance masks on split ADT builds like `3_3_5_12340`
+- `AdtTensorPackBuilder.BuildUnifiedLiquid` now uses explicit liquid-presence masks from `MH2O`/`MCLQ` instead of treating `height == 0` as "no liquid", fixing sea-level water loss in unified liquid masks
+- `AdtTensorPackBuilder.ExtractMapName` now falls back to the staged tile stem so archive temp extraction still records the real map name in NPZ metadata
 - `AdtTensorPackBuilder.BuildObjectMasks` → returns `(float[,], float[,], int[,])` tuple with instance mask
 - `AlphaTensorPackBuilder.BuildObjectMasks` → same pattern, added `PaintIntCircle`/`PaintIntRect` overloads
 - `TerrainTileTensorPack.ObjectInstanceMask257` → new `int[,]?` property
@@ -69,6 +72,7 @@ Six independent models, each training on ground truth only:
 
 ## Python Changes (This Session)
 
+- `wow-viewer/data-harvester/scripts/run-data-harvester-python.ps1` is now the repo-local fallback launcher when `wow-viewer/data-harvester/.venv\Scripts\python.exe` is broken because the uv-managed base interpreter path drifted; it reuses `.venv` site-packages and `src/` against the base Python declared in `pyvenv.cfg`
 - `build_v16_dataset.py` → now carries 14 Zarr arrays (was 12), adds `object_precise_mask` and `object_instance_mask`, writes `placements.parquet` companion table with per-placement rows + asset_path linkage, index includes `n_mddf`/`n_modf` counts
 - `v16_dataset.py` → reads `object_instance_mask` from Zarr, returns int64 `instance_mask` tensor and `has_instance` flag
 - `train_v16.py` → unchanged (V16 model doesn't use instance mask yet; will be used by future Model A)
@@ -79,3 +83,4 @@ Six independent models, each training on ground truth only:
 - Object segmentation Model A training script
 - Asset vocabulary build
 - PM4 cross-reference analysis
+- Repair or recreate `wow-viewer/data-harvester/.venv\Scripts\python.exe` so `uv run` works again without the repo-local wrapper

@@ -61,6 +61,17 @@ Minimap tiles are stored as BLP files with MD5-hashed filenames. The mapping is 
 dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug
 ```
 
+### 2.1.1 Python launcher
+
+The canonical Python environment is `wow-viewer/data-harvester/.venv`.
+If `.venv\Scripts\python.exe` is broken in this checkout, run Python commands
+through:
+
+```powershell
+cd wow-viewer/data-harvester
+.\scripts\run-data-harvester-python.ps1 -c "import sys; print(sys.executable)"
+```
+
 ### 2.2 Single Tile Extraction
 
 ```powershell
@@ -259,7 +270,7 @@ Each `.npz` file contains NumPy arrays (`.npy` format inside ZIP) and a `metadat
 
 ```powershell
 cd wow-viewer/data-harvester
-uv run python scripts/quilt_view.py <npz_path> <output_png>
+.\scripts\run-data-harvester-python.ps1 scripts/quilt_view.py <npz_path> <output_png>
 ```
 
 Produces a 10-panel image showing: height, normal-X/Y/Z, shadow, alpha layers 1-3, texture ID grid, and minimap.
@@ -306,16 +317,16 @@ dotnet build wow-viewer/WowViewer.slnx -c Debug
 cd wow-viewer/data-harvester
 
 # Single build (all maps):
-uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340
 
 # Specific maps:
-uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
 
 # Limit tiles (testing):
-uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
 
 # Multiple builds:
-uv run python scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
+.\scripts\run-data-harvester-python.ps1 scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
 ```
 
 Output: `wow-viewer/output/datasets/v16/<build_key>.zarr/`
