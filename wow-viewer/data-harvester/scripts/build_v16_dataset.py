@@ -119,6 +119,27 @@ SIGNAL_FLAG_KEYS = [
 
 REQUIRED_KEYS = {"minimap_rgb_256", "height_257"}
 
+
+def _decode_metadata_json(tile_blob: dict[str, np.ndarray]) -> dict[str, object]:
+    payload = tile_blob.get("metadata.json")
+    if payload is None:
+        return {}
+    try:
+        if hasattr(payload, "tobytes"):
+            raw = payload.tobytes()
+        elif isinstance(payload, bytes):
+            raw = payload
+        else:
+            raw = bytes(payload)
+        decoded = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _tile_rejection_report_path(output_path: Path, build_name: str) -> Path:
+    return output_path.parent / f"{build_name}.rejected_tiles.jsonl"
+
 # ── Placement data columns for the companion Parquet table ────────────
 PLACEMENT_COLUMNS_MDDF = [
     "nameId", "uniqueId", "posX", "posY", "posZ", "rotX", "rotY", "rotZ", "scale",
@@ -410,6 +431,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         print(f"Maps: {map_names}")
         print(f"Output: {output_path}")
         print(f"Staging: {staging_path}")
+        print(f"Rejected tiles report: {_tile_rejection_report_path(output_path, build)}")
 
         try:
             _build_zarr_streaming(
@@ -420,6 +442,7 @@ def cmd_build(args: argparse.Namespace) -> None:
                 map_names=map_names,
                 output_path=staging_path,
                 limit=limit,
+                rejected_tiles_report_path=_tile_rejection_report_path(output_path, build),
             )
             if output_path.exists():
                 shutil.rmtree(output_path)
@@ -442,6 +465,7 @@ def _build_zarr_streaming(
     map_names: list[str],
     output_path: Path,
     limit: int | None,
+    rejected_tiles_report_path: Path | None = None,
 ) -> None:
     codec = zarr.codecs.BloscCodec(cname="zstd", clevel=5, shuffle="bitshuffle")
     store = zarr.storage.LocalStore(str(output_path), read_only=False)
@@ -452,8 +476,16 @@ def _build_zarr_streaming(
     all_placements: list[dict] = []
     valid = 0
     skipped_zero_usable_maps = 0
+    rejected_tile_count = 0
     t0 = time.perf_counter()
     capacity = 50000
+
+    rejected_tiles_report = None
+    if rejected_tiles_report_path is not None:
+        rejected_tiles_report_path.parent.mkdir(parents=True, exist_ok=True)
+        if rejected_tiles_report_path.exists():
+            rejected_tiles_report_path.unlink()
+        rejected_tiles_report = rejected_tiles_report_path.open("w", encoding="utf-8")
 
     for key in ALL_ARRAY_KEYS:
         shape = (capacity,) + SHAPES[key]
@@ -531,8 +563,39 @@ def _build_zarr_streaming(
             result = _process_tile_data(data)
             if result is None:
                 dropped_missing_required += 1
+                rejected_tile_count += 1
+                missing = sorted(REQUIRED_KEYS - set(data.keys()))
+                meta = _decode_metadata_json(data)
+                source_adt_path = str(meta.get("source_adt_path", ""))
+                tx = meta.get("tile_x")
+                ty = meta.get("tile_y")
+                if (tx is None or ty is None) and source_adt_path:
+                    parts = source_adt_path.replace(".adt", "").rsplit("_", 2)
+                    if len(parts) >= 2:
+                        try:
+                            tx = int(parts[-2])
+                            ty = int(parts[-1])
+                        except (TypeError, ValueError):
+                            tx = tx if tx is not None else None
+                            ty = ty if ty is not None else None
+                if rejected_tiles_report is not None:
+                    rejected_tiles_report.write(
+                        json.dumps(
+                            {
+                                "build": build,
+                                "map_name": str(meta.get("map_name", map_name)),
+                                "source_adt_path": source_adt_path,
+                                "tile_x": tx,
+                                "tile_y": ty,
+                                "missing_required_keys": missing,
+                                "available_keys": sorted(data.keys()),
+                            },
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    )
+                    rejected_tiles_report.flush()
                 if dropped_missing_required <= 5:
-                    missing = sorted(REQUIRED_KEYS - set(data.keys()))
                     print(
                         f"    Warning: dropped tile blob missing required keys {missing}; "
                         f"available keys: {sorted(data.keys())}",
@@ -631,7 +694,8 @@ def _build_zarr_streaming(
             skipped_zero_usable_maps += 1
             print(
                 f"    Warning: skipping map {map_name} because harvest produced zero usable V16 tiles. "
-                f"Dropped missing-required blobs: {dropped_missing_required}",
+                f"Dropped missing-required blobs: {dropped_missing_required}. "
+                f"Report: {rejected_tiles_report_path}",
                 file=sys.stderr,
                 flush=True,
             )
@@ -640,14 +704,16 @@ def _build_zarr_streaming(
         if dropped_missing_required > 0:
             print(
                 f"    Warning: dropped {dropped_missing_required} blobs for map {map_name} "
-                f"because required dataset keys were missing.",
+                f"because required dataset keys were missing. "
+                f"Report: {rejected_tiles_report_path}",
                 file=sys.stderr,
                 flush=True,
             )
 
         print(
             f"    Map {map_name}: {tile_count} tiles streamed, placements={map_placements}, "
-            f"raw_npz={map_blob_bytes / 1024 / 1024:.1f} MB",
+            f"raw_npz={map_blob_bytes / 1024 / 1024:.1f} MB, "
+            f"dropped_missing_required={dropped_missing_required}",
             flush=True,
         )
 
@@ -674,11 +740,16 @@ def _build_zarr_streaming(
     liq_count = sum(1 for r in index_rows if r.get("has_liquid_mask", False))
     inst_count = sum(1 for r in index_rows if r.get("has_object_instance_mask", False))
     elapsed = time.perf_counter() - t0
+    if rejected_tiles_report is not None:
+        rejected_tiles_report.close()
     print(f"\nDone. {valid} tiles -> {output_path}")
     print(f"Size: {total_bytes / 1024 / 1024:.1f} MB")
     print(f"Liquid: {liq_count}/{valid}, Instance mask: {inst_count}/{valid}")
     print(f"Placements: {len(all_placements)} total")
     print(f"Skipped zero-usable maps: {skipped_zero_usable_maps}")
+    print(f"Rejected missing-required tiles: {rejected_tile_count}")
+    if rejected_tiles_report_path is not None:
+        print(f"Rejected tiles report: {rejected_tiles_report_path}")
     print(f"Time: {elapsed:.0f}s ({valid / max(elapsed, 0.01):.1f} tiles/s)")
 
 
