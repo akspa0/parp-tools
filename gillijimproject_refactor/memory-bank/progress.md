@@ -43,6 +43,7 @@
 | **V16 staged finalization guard** | **DONE** — builds now write to `.zarr.partial` and only promote to final `.zarr` on success, so failed runs no longer silently poison the canonical dataset path |
 | **V16 WDT-driven auto map discovery** | **DONE** — hard-coded default map eras are gone; `WowViewer.Tool.Harvest discover-maps` now uses WDT `MWMO/MONM` plus archive probe checks for a real V16-usable tile (`height_257` + `minimap_rgb_256`), so the builder skips WMO-only, zero-tile, missing-WDT transport, and terrain-but-no-V16-usable-tile maps automatically |
 | **V16 zero-usable map skip guard** | **DONE** — if a discovered map still yields zero usable V16 tiles during streaming, `build_v16_dataset.py` now warns and skips that map instead of aborting the whole build; the build still fails loud if all requested maps produce zero usable tiles |
+| **V16 stats command repair** | **DONE** — `build_v16_dataset.py stats` now uses `pyarrow.compute.sum` for Parquet `has_*` counts and suppresses harmless Zarr sidecar warnings from `index.parquet` / `placements.parquet` |
 | **Harvest WL archive discovery fix** | **DONE** — archive-backed harvest now finds real `*.wl*` virtual files from MPQ listfiles instead of guessing `World\\Maps\\<map>\\<map>.wl*`; focused smoke on staged `3_3_5_12340 / Azeroth` reports no WL entries in the loaded archives |
 | **Coordinate fixes** | **DONE** |
 | **Phase C: AlphaToLk writer infrastructure** | **DONE** — WdlWriter, LkWdtWriter, LkAdtWriter, AlphaToLkConverter |
@@ -71,7 +72,7 @@
 |------|--------|
 | Multi-client full shard dataset prep | SWITCHED TO HARVEST PATH — use `WowViewer.Tool.Harvest harvest-map-mpq` on staged clients, not converter `dataset-scan` manifests |
 | data-harvester launcher posture | CANONICAL UV RESTORED — elevated proof on 2026-05-16 showed `.venv\\Scripts\\python.exe` and `uv run` both work in a real shell; `scripts/run-data-harvester-python.ps1` remains a sandbox/AppData-access fallback, not the primary operator path |
-| 3_3_5_12340 V16 final store health | INCOMPLETE — current `wow-viewer/output/datasets/v16/3_3_5_12340.zarr` reports `50000` preallocated rows and no `index.parquet`; needs a clean rebuild |
+| 3_3_5_12340 V16 final store health | DONE — full rebuild landed at `wow-viewer/output/datasets/v16/3_3_5_12340.zarr` with `5134` tiles, `index.parquet` `5134` rows, `placements.parquet` `1,015,470` rows, and clean `stats` output |
 | Phase C: AlphaToLk AreaID crosswalk | NOT YET — `AreaIdMapper` exists in `WowViewer.Core.IO/Dbc/`, not yet wired to converter |
 | Phase C: LkToAlpha real-data MdxViewer validation | DONE — 839/839 tiles, terrain renders, WMOs load, ExitCode=0 |
 | Phase C: Alpha/LK full chunk preservation | OPEN — current converter lane is still a reduced terrain-domain reconstruction, not chunk-for-chunk spec closure. Gap inventory documented below. |

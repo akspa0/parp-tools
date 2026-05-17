@@ -76,7 +76,7 @@ Six independent models, each training on ground truth only:
 - `wow-viewer/data-harvester/scripts/run-data-harvester-python.ps1` remains available as a repo-local fallback when sandboxed agent sessions cannot reach the uv-managed AppData paths, but elevated proof on 2026-05-16 showed both `.venv\Scripts\python.exe` and `uv run` work correctly in a real shell and remain the canonical operator path
 - `build_v16_dataset.py` now forwards `harvest-stream` stderr live, prints per-map progress early enough for small maps, and raises explicit errors on truncated headers, bad magic, invalid blob lengths, NPZ decode failures, non-zero harvester exit codes, missing `ENDS`, and zero-tile maps instead of silently `break`ing
 - V16 builds now stage into `wow-viewer/output/datasets/v16/<build>.zarr.partial` and only replace the final `.zarr` store after successful finalization; failed runs preserve the partial store and no longer silently leave a poisoned final dataset path with preallocated `50000`-tile arrays
-- `build_v16_dataset.py stats` now warns when `index.parquet` is missing or when array length does not match finalized index rows, making interrupted/incomplete V16 stores obvious
+- `build_v16_dataset.py stats` now warns when `index.parquet` is missing or when array length does not match finalized index rows, uses `pyarrow.compute.sum` for `has_*` counts, and suppresses the harmless Zarr sidecar warnings from `index.parquet` / `placements.parquet`
 - `WowViewer.Tool.Harvest` now exposes `discover-maps --client-root <staged client>` and filters map candidates using the real V16 contract instead of a bootstrap hard-coded map list: pure WMO-only maps (`MWMO/MONM` present, no terrain tiles), zero-tile maps, missing-WDT transport entries, and "terrain but no V16-usable probe tile" maps are skipped, where "usable" currently means the archive probe path can produce both `height_257` and `minimap_rgb_256`
 - `build_v16_dataset.py` no longer aborts the whole build when one discovered map produces zero usable V16 tiles at stream time; it now warns and skips that map, while still failing loud if the entire requested build produces zero usable tiles
 - `build_v16_dataset.py` → now carries 14 Zarr arrays (was 12), adds `object_precise_mask` and `object_instance_mask`, writes `placements.parquet` companion table with per-placement rows + asset_path linkage, index includes `n_mddf`/`n_modf` counts
@@ -89,5 +89,5 @@ Six independent models, each training on ground truth only:
 - Object segmentation Model A training script
 - Asset vocabulary build
 - PM4 cross-reference analysis
-- Rebuild `3_3_5_12340`; `stats` now confirms the current final store is an interrupted pre-finalization output (`50000` preallocated rows, no `index.parquet`). The new builder will replace it atomically on success, while failures stay in `.zarr.partial`
+- Rebuild the remaining staged client builds after `3_3_5_12340`
 - Full V16 rebuilds can use canonical `uv run` again; the remaining environment caveat is sandbox/AppData access during agent-run validation, not a broken repo-local `.venv`

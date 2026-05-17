@@ -34,12 +34,14 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 from collections import deque
 from io import BytesIO
 from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import zarr
 import zarr.codecs
@@ -687,14 +689,20 @@ def cmd_stats(args: argparse.Namespace) -> None:
         if not zarr_path.exists():
             print(f"SKIP {build}: no Zarr store at {zarr_path}")
             continue
-        store = zarr.storage.LocalStore(str(zarr_path), read_only=True)
-        root = zarr.open_group(store=store, mode="r")
-        n = root["height_257"].shape[0]
-        print(f"\n{build}: {n} tiles")
-        for k in sorted(root.array_keys()):
-            a = root[k]
-            print(f"  {k}: shape={a.shape} dtype={a.dtype}")
-        store.close()
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"Object at .* is not recognized as a component of a Zarr hierarchy\.",
+                category=UserWarning,
+            )
+            store = zarr.storage.LocalStore(str(zarr_path), read_only=True)
+            root = zarr.open_group(store=store, mode="r")
+            n = root["height_257"].shape[0]
+            print(f"\n{build}: {n} tiles")
+            for k in sorted(root.array_keys()):
+                a = root[k]
+                print(f"  {k}: shape={a.shape} dtype={a.dtype}")
+            store.close()
 
         idx_path = zarr_path / "index.parquet"
         if idx_path.exists():
@@ -702,7 +710,8 @@ def cmd_stats(args: argparse.Namespace) -> None:
             print(f"  index.parquet: {table.num_rows} rows, {table.num_columns} cols")
             for col in table.column_names:
                 if col.startswith("has_"):
-                    count = table.column(col).sum().as_py()
+                    count_scalar = pc.sum(table.column(col))
+                    count = 0 if count_scalar is None else int(count_scalar.as_py() or 0)
                     print(f"    {col}: {count}/{table.num_rows}")
             if table.num_rows != n:
                 print(
