@@ -203,6 +203,14 @@ builder warns and skips that map instead of aborting the whole dataset build.
 Tiles dropped for missing required dataset keys are persisted to
 `wow-viewer/output/datasets/v16/<build>.rejected_tiles.jsonl` so rejected
 coordinates and missing keys survive the console log.
+On Windows, transient Zarr `LocalStore` atomic-replace failures (`WinError 5`
+or `WinError 32`) during chunk writes are now retried with bounded backoff
+instead of aborting the entire dataset build on the first hit.
+The Python writer now also buffers tiles in memory and flushes them to Zarr in
+small first-dimension batches instead of one tile-row assignment at a time,
+reducing chunk rewrite churn and filesystem pressure.
+Before batch flush, incoming fixed-shape arrays are coerced to the canonical
+dataset shapes so variable layer-count payloads do not break batch stacking.
 
 ### Streaming Protocol
 

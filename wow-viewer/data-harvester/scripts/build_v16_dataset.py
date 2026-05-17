@@ -121,6 +121,9 @@ REQUIRED_KEYS = {"minimap_rgb_256", "height_257"}
 DEFAULT_CODEC = "lz4"
 DEFAULT_CLEVEL = 1
 DEFAULT_SHUFFLE = "shuffle"
+WRITE_RETRY_ATTEMPTS = 8
+WRITE_RETRY_BASE_DELAY_SECONDS = 0.15
+WRITE_BATCH_SIZE = 16
 
 
 def _decode_metadata_json(tile_blob: dict[str, np.ndarray]) -> dict[str, object]:
@@ -263,6 +266,52 @@ def _dir_size_bytes(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
+def _is_retryable_windows_file_error(ex: BaseException) -> bool:
+    if isinstance(ex, PermissionError):
+        return True
+    if isinstance(ex, OSError) and getattr(ex, "winerror", None) in {5, 32}:
+        return True
+    return False
+
+
+def _flush_tile_batch_with_retry(
+    arrays: dict[str, zarr.Array],
+    start_index: int,
+    pending_arrays: dict[str, list[np.ndarray]],
+    pending_count: int,
+    *,
+    map_name: str,
+) -> int:
+    if pending_count <= 0:
+        return start_index
+
+    for key in ALL_ARRAY_KEYS:
+        batch_value = np.stack(pending_arrays[key], axis=0)
+        for attempt in range(1, WRITE_RETRY_ATTEMPTS + 1):
+            try:
+                arrays[key][start_index:start_index + pending_count] = batch_value
+                break
+            except Exception as ex:
+                if not _is_retryable_windows_file_error(ex) or attempt == WRITE_RETRY_ATTEMPTS:
+                    raise RuntimeError(
+                        f"Failed writing tile batch start={start_index} count={pending_count} "
+                        f"for map {map_name} array={key} after {attempt} attempts: {ex}"
+                    ) from ex
+                delay = WRITE_RETRY_BASE_DELAY_SECONDS * attempt
+                print(
+                    f"    Warning: retrying Zarr batch write for map {map_name} "
+                    f"array={key} start={start_index} count={pending_count} after filesystem error: {ex}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                time.sleep(delay)
+
+    for key in ALL_ARRAY_KEYS:
+        pending_arrays[key].clear()
+
+    return start_index + pending_count
+
+
 def _tail_text(lines: deque[str]) -> str:
     if not lines:
         return "(no stderr output)"
@@ -400,7 +449,35 @@ def _normalize_array(arr: np.ndarray, dst_key: str) -> np.ndarray:
         arr = arr.astype(np.bool_)
     elif dst_key == "object_instance_mask":
         arr = arr.astype(np.int32)
-    return arr
+    return _coerce_array_shape(arr, dst_key)
+
+
+def _coerce_array_shape(arr: np.ndarray, dst_key: str) -> np.ndarray:
+    target_shape = SHAPES[dst_key]
+    if arr.shape == target_shape:
+        return arr
+
+    # Common case for terrain signals with variable layer counts:
+    # squeeze accidental singleton axes, then restore missing trailing axes.
+    arr = np.squeeze(arr)
+    while arr.ndim < len(target_shape):
+        arr = np.expand_dims(arr, axis=-1)
+
+    fill = FILL_VALUES.get(dst_key, 0)
+    coerced = np.full(target_shape, fill, dtype=DTYPES[dst_key])
+
+    copy_rank = min(arr.ndim, len(target_shape))
+    src_slices = []
+    dst_slices = []
+    for axis in range(copy_rank):
+        extent = min(arr.shape[axis], target_shape[axis])
+        src_slices.append(slice(0, extent))
+        dst_slices.append(slice(0, extent))
+
+    if src_slices:
+        coerced[tuple(dst_slices)] = arr[tuple(src_slices)].astype(DTYPES[dst_key], copy=False)
+
+    return coerced
 
 
 def _discover_maps_for_build(harvest_tool: Path, client_root: Path) -> list[str]:
@@ -611,6 +688,8 @@ def _build_zarr_streaming(
     t0 = time.perf_counter()
     capacity = 50000
     completed_maps: list[str] = []
+    pending_arrays: dict[str, list[np.ndarray]] = {key: [] for key in ALL_ARRAY_KEYS}
+    pending_count = 0
 
     if resume and resume_state is None and output_path.exists() and any(output_path.iterdir()):
         raise RuntimeError(
@@ -803,17 +882,18 @@ def _build_zarr_streaming(
                 actual_map = meta.get("map_name", map_name)
 
             # Extract placement data
+            tile_id = valid + pending_count
             mddf_rows, modf_rows, mddf_names, modf_names = _extract_placements(data, meta)
             for row in mddf_rows:
-                row["tile_id"] = valid
+                row["tile_id"] = tile_id
                 all_placements.append(row)
             for row in modf_rows:
-                row["tile_id"] = valid
+                row["tile_id"] = tile_id
                 all_placements.append(row)
             map_placements += len(mddf_rows) + len(modf_rows)
 
             row = {
-                "tile_id": valid, "build": build, "map": actual_map,
+                "tile_id": tile_id, "build": build, "map": actual_map,
                 "tile_x": tx, "tile_y": ty,
                 "height_mean": h_mean, "height_std": h_std,
                 "n_mddf": len(mddf_rows), "n_modf": len(modf_rows),
@@ -822,29 +902,41 @@ def _build_zarr_streaming(
                 row[f"has_{key}"] = has_signals.get(key, False)
             index_rows.append(row)
 
-            if valid >= capacity - 1:
+            needed = valid + pending_count + 1
+            while needed >= capacity:
                 capacity += 50000
                 for key in ALL_ARRAY_KEYS:
                     arrays[key].resize((capacity,) + SHAPES[key])
 
             for key in ALL_ARRAY_KEYS:
-                arrays[key][valid] = tile_arrays[key]
+                pending_arrays[key].append(tile_arrays[key])
+            pending_count += 1
 
-            valid += 1
+            if pending_count >= WRITE_BATCH_SIZE:
+                valid = _flush_tile_batch_with_retry(
+                    arrays,
+                    valid,
+                    pending_arrays,
+                    pending_count,
+                    map_name=actual_map,
+                )
+                pending_count = 0
+
             tile_count += 1
             map_blob_bytes += length
             if tile_count == 1 or tile_count % 10 == 0:
                 elapsed = time.perf_counter() - t0
-                rate = valid / max(elapsed, 0.01)
+                total_written = valid + pending_count
+                rate = total_written / max(elapsed, 0.01)
                 store_mb = _dir_size_bytes(output_path) / 1024 / 1024
                 print(
-                    f"    Progress {map_name}: map_tiles={tile_count} total_tiles={valid} "
+                    f"    Progress {map_name}: map_tiles={tile_count} total_tiles={total_written} "
                     f"placements={map_placements} raw_npz={map_blob_bytes / 1024 / 1024:.1f} MB "
                     f"store={store_mb:.1f} MB rate={rate:.1f} tiles/s",
                     flush=True,
                 )
 
-            if limit is not None and valid >= limit:
+            if limit is not None and valid + pending_count >= limit:
                 proc.terminate()
                 break
 
@@ -869,6 +961,15 @@ def _build_zarr_streaming(
                 f"Harvest stream exited with code {return_code} for map {map_name}.\n"
                 f"stderr tail:\n{_tail_text(stderr_tail)}"
             )
+        if pending_count > 0:
+            valid = _flush_tile_batch_with_retry(
+                arrays,
+                valid,
+                pending_arrays,
+                pending_count,
+                map_name=map_name,
+            )
+            pending_count = 0
         if tile_count == 0:
             skipped_zero_usable_maps += 1
             completed_maps.append(map_name)

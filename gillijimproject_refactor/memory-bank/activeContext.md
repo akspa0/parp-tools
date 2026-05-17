@@ -99,6 +99,9 @@ Six independent models, each training on ground truth only:
   - `build_v16_dataset.py` now skips already-complete final `<build>.zarr` stores by default unless `--rebuild-existing` is passed
   - successful final stores now retain `_resume_state.json` as completion metadata instead of deleting it at finalization
   - `scripts/backfill_v16_resume_state.py` can backfill `_resume_state.json` into older completed final stores
+  - the Python Zarr writer now retries transient Windows `WinError 5` / `WinError 32` chunk-write failures instead of aborting immediately on the first `LocalStore` atomic-replace race
+  - the Python Zarr writer now buffers tiles in memory and flushes them in small slice batches, reducing one-row-at-a-time chunk rewrites on the filesystem
+  - incoming fixed-shape signals are now coerced to canonical Zarr shapes before batching so variable layer-count payloads do not fail `np.stack(...)` during resume/build runs
   - future V16 builds now default to `lz4` / level `1` / `shuffle`
 - Repo truth still needs operator proof from a user-run rebuild before this recovery slice can be treated as validated.
 
