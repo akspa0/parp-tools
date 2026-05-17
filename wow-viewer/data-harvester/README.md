@@ -52,8 +52,9 @@ Output: `wow-viewer/output/datasets/v16/<build>.zarr/`
 Build behavior:
 - Progress is printed during streaming, including tile counts, placement counts, raw streamed NPZ volume, and current staged store size.
 - Harvester stderr is forwarded live with a `[harvest:<map>]` prefix.
-- When `--maps` is not supplied, the builder asks `WowViewer.Tool.Harvest discover-maps` for a WDT-driven map list and skips WMO-only or no-tile maps automatically.
+- When `--maps` is not supplied, the builder asks `WowViewer.Tool.Harvest discover-maps` for a V16-driven map list and skips WMO-only, no-tile, and no-V16-usable-tile maps automatically.
 - Builds stage into `wow-viewer/output/datasets/v16/<build>.zarr.partial/` and only replace the final `.zarr` store after successful finalization.
+- If a discovered map still produces zero usable V16 tiles during streaming, the builder now warns and skips that map instead of aborting the whole build.
 
 ### Train V16
 

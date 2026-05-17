@@ -449,6 +449,7 @@ def _build_zarr_streaming(
     index_rows: list[dict] = []
     all_placements: list[dict] = []
     valid = 0
+    skipped_zero_usable_maps = 0
     t0 = time.perf_counter()
     capacity = 50000
 
@@ -625,11 +626,14 @@ def _build_zarr_streaming(
                 f"stderr tail:\n{_tail_text(stderr_tail)}"
             )
         if tile_count == 0:
-            raise RuntimeError(
-                f"Harvest stream produced zero usable tiles for map {map_name}.\n"
-                f"Dropped missing-required blobs: {dropped_missing_required}\n"
-                f"stderr tail:\n{_tail_text(stderr_tail)}"
+            skipped_zero_usable_maps += 1
+            print(
+                f"    Warning: skipping map {map_name} because harvest produced zero usable V16 tiles. "
+                f"Dropped missing-required blobs: {dropped_missing_required}",
+                file=sys.stderr,
+                flush=True,
             )
+            continue
 
         if dropped_missing_required > 0:
             print(
@@ -651,6 +655,11 @@ def _build_zarr_streaming(
     for key in ALL_ARRAY_KEYS:
         arrays[key].resize((valid,) + SHAPES[key])
 
+    if valid == 0:
+        raise RuntimeError(
+            "Harvest stream produced zero usable tiles across all requested maps."
+        )
+
     if index_rows:
         _write_index(index_rows, output_path)
 
@@ -667,6 +676,7 @@ def _build_zarr_streaming(
     print(f"Size: {total_bytes / 1024 / 1024:.1f} MB")
     print(f"Liquid: {liq_count}/{valid}, Instance mask: {inst_count}/{valid}")
     print(f"Placements: {len(all_placements)} total")
+    print(f"Skipped zero-usable maps: {skipped_zero_usable_maps}")
     print(f"Time: {elapsed:.0f}s ({valid / max(elapsed, 0.01):.1f} tiles/s)")
 
 

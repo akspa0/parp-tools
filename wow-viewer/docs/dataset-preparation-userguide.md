@@ -335,8 +335,11 @@ The builder now prints live streaming progress and forwards harvester stderr.
 Each run stages into `wow-viewer/output/datasets/v16/<build_key>.zarr.partial/`
 and only promotes that staged store to the final `.zarr/` path after
 successful finalization.
-When `--maps` is omitted, the builder now auto-discovers terrain-trainable maps
-from WDT summaries and skips pure WMO-only or zero-tile maps before streaming.
+When `--maps` is omitted, the builder now auto-discovers V16-usable maps from
+WDT/archive probe results and skips pure WMO-only, zero-tile, and no-V16-usable
+maps before streaming. If a discovered map still produces zero usable V16 tiles
+at stream time, the builder warns and skips that map instead of aborting the
+whole build.
 
 ### 7.2 Zarr Store Layout
 

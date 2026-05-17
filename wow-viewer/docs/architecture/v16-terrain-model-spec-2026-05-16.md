@@ -175,8 +175,11 @@ volume, and staged store size. The dataset is written to
 successful finalization, so interrupted runs do not silently poison the final
 dataset path.
 When `--maps` is omitted, the builder now calls `WowViewer.Tool.Harvest
-discover-maps` and keeps only maps whose WDT summaries show terrain plus at
-least one readable tile; pure WMO-only and zero-tile maps are skipped.
+discover-maps` and keeps only maps whose WDT/archive probe path can produce at
+least one V16-usable tile (`height_257` + `minimap_rgb_256`). Pure WMO-only,
+zero-tile, and "terrain but no V16-usable tile" maps are skipped.
+If a discovered map still yields zero usable tiles during the full stream, the
+builder warns and skips that map instead of aborting the whole dataset build.
 
 ### Streaming Protocol
 

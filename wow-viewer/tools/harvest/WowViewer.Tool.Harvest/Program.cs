@@ -22,6 +22,7 @@ static class Program
         int WorldModelNameCount,
         int TilesWithData,
         bool HasReadableTile,
+        bool HasUsableTile,
         int? ProbeTileX,
         int? ProbeTileY);
 
@@ -121,6 +122,7 @@ static class Program
 
         using var catalog = new NativeMpqService();
         catalog.LoadArchives([clientRoot]);
+        LoadMd5Translate(clientRoot, catalog);
 
         MapDirectoryLookup lookup = new();
         lookup.Load(BuildClientSearchRoots(clientRoot), catalog);
@@ -171,7 +173,7 @@ static class Program
         try
         {
             catalog.LoadListfile(listfilePath);
-            Console.WriteLine($"  Loaded supplemental listfile: {listfilePath}");
+            Console.Error.WriteLine($"  Loaded supplemental listfile: {listfilePath}");
         }
         catch (Exception ex)
         {
@@ -820,6 +822,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
                 WorldModelNameCount: 0,
                 TilesWithData: 0,
                 HasReadableTile: false,
+                HasUsableTile: false,
                 ProbeTileX: null,
                 ProbeTileY: null);
         }
@@ -834,18 +837,30 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         int? probeTileX = null;
         int? probeTileY = null;
         bool hasReadableTile = false;
+        bool hasUsableTile = false;
 
         if (summary.TilesWithData > 0)
         {
             foreach (WdtTileCoordinate tile in occupiedTiles)
             {
-                if (TryProbeMapTile(catalog, mapName, tile, wdtBytes, isAlpha))
+                ProbeTileState state = ProbeMapTile(catalog, mapName, tile, wdtBytes, isAlpha);
+                if (!state.HasReadableTile)
+                    continue;
+
+                hasReadableTile = true;
+                if (probeTileX is null || probeTileY is null)
                 {
                     probeTileX = tile.TileX;
                     probeTileY = tile.TileY;
-                    hasReadableTile = true;
-                    break;
                 }
+
+                if (!state.HasUsableTile)
+                    continue;
+
+                hasUsableTile = true;
+                probeTileX = tile.TileX;
+                probeTileY = tile.TileY;
+                break;
             }
         }
 
@@ -865,6 +880,11 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         {
             include = false;
             reason = "no_readable_tile";
+        }
+        else if (!hasUsableTile)
+        {
+            include = false;
+            reason = "no_v16_usable_tile";
         }
         else if (hasWorldModelAsset)
         {
@@ -888,11 +908,14 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             WorldModelNameCount: summary.WorldModelNameCount,
             TilesWithData: summary.TilesWithData,
             HasReadableTile: hasReadableTile,
+            HasUsableTile: hasUsableTile,
             ProbeTileX: probeTileX,
             ProbeTileY: probeTileY);
     }
 
-    private static bool TryProbeMapTile(
+    private readonly record struct ProbeTileState(bool HasReadableTile, bool HasUsableTile);
+
+    private static ProbeTileState ProbeMapTile(
         NativeMpqService catalog,
         string mapName,
         WdtTileCoordinate tile,
@@ -900,11 +923,27 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         bool isAlpha)
     {
         if (isAlpha)
-            return AlphaWdtReader.TryReadTile(wdtBytes, tile.TileX, tile.TileY, out AlphaTileData? tileData) && tileData is not null;
+        {
+            if (!AlphaWdtReader.TryReadTile(wdtBytes, tile.TileX, tile.TileY, out AlphaTileData? tileData) || tileData is null)
+                return new ProbeTileState(false, false);
 
-        string adtVirtual = $"World\\Maps\\{mapName}\\{mapName}_{tile.TileX}_{tile.TileY}.adt";
-        byte[]? adtBytes = catalog.ReadFile(adtVirtual);
-        return adtBytes is { Length: > 0 };
+            TerrainTileTensorPack pack = AlphaTensorPackBuilder.Build(tileData, tile.TileX, tile.TileY);
+            if (pack.MinimapRgb256 is null)
+                pack.MinimapRgb256 = TryLoadMinimapFromMpq(catalog, mapName, tile.TileX, tile.TileY);
+
+            bool hasUsableTile = pack.Height257 is not null && pack.MinimapRgb256 is not null;
+            return new ProbeTileState(true, hasUsableTile);
+        }
+
+        TerrainTileTensorPack? archivePack = BuildPackFromArchiveAdt(catalog, mapName, tile.TileX, tile.TileY, buildVersion: null);
+        if (archivePack is null)
+            return new ProbeTileState(false, false);
+
+        if (archivePack.MinimapRgb256 is null)
+            archivePack.MinimapRgb256 = TryLoadMinimapFromMpq(catalog, mapName, tile.TileX, tile.TileY);
+
+        bool usable = archivePack.Height257 is not null && archivePack.MinimapRgb256 is not null;
+        return new ProbeTileState(true, usable);
     }
 
     private static IReadOnlyList<string> BuildClientSearchRoots(string clientRoot)
@@ -1257,7 +1296,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             _md5Lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var kv in md5Index.PlainToHash)
                 _md5Lookup[kv.Key] = kv.Value;
-            Console.WriteLine($"  Loaded {_md5Lookup.Count} md5translate entries");
+            Console.Error.WriteLine($"  Loaded {_md5Lookup.Count} md5translate entries");
         }
     }
 
