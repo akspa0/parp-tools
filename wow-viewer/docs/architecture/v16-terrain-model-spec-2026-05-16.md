@@ -149,6 +149,9 @@ uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --rebuild-e
 # Backfill _resume_state.json into older completed final stores:
 uv run python scripts/backfill_v16_resume_state.py --builds 0_5_3_3368 0_5_5_3494 3_3_5_12340
 
+# Generate summaries and sample sheets from existing stores:
+uv run python scripts/inspect_v16_dataset.py --build 3_3_5_12340 --backfill-summary --write-images
+
 # Multiple builds:
 uv run python scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
 
@@ -187,6 +190,9 @@ volume, and staged store size. The dataset is written to
 successful finalization, so interrupted runs do not silently poison the final
 dataset path. Interrupted builds can resume from the staged partial store with
 `--resume`; completed maps are skipped from the saved `_resume_state.json`.
+If `--resume` is passed before a build has actually written resume state yet,
+the builder now falls back to a fresh staged build instead of aborting on a
+missing `_resume_state.json`.
 Successful final stores now retain `_resume_state.json` as completion metadata,
 so future restart commands can recognize them as already finished.
 Completed final stores are skipped by default on future build commands so
@@ -211,6 +217,11 @@ small first-dimension batches instead of one tile-row assignment at a time,
 reducing chunk rewrite churn and filesystem pressure.
 Before batch flush, incoming fixed-shape arrays are coerced to the canonical
 dataset shapes so variable layer-count payloads do not break batch stacking.
+Placement-heavy tiles still carry real per-placement mask painting cost, but
+the builder no longer reparses the same placement catalog twice per tile for
+masks and placement-array export.
+The `stats` command now reports logical raw array size versus on-disk Zarr
+size, including per-array compression ratios and whole-store savings.
 
 ### Streaming Protocol
 
@@ -279,6 +290,7 @@ decoder. Total ~27.4M parameters with the liquid head.
 |------|---------|
 | `scripts/build_v16_dataset.py` | Build pipeline: stream from harvester → Zarr, resume, rejected-tile reporting |
 | `scripts/backfill_v16_resume_state.py` | Backfill `_resume_state.json` into older completed final stores |
+| `scripts/inspect_v16_dataset.py` | Backfill `_dataset_summary.json` and sample visualizations from existing stores |
 | `scripts/run-data-harvester-python.ps1` | Repo-local launcher for `.venv` packages when the venv stub is broken |
 | `src/harvester/v16_dataset.py` | PyTorch Dataset reading from Zarr stores |
 | `src/harvester/v16_model.py` | V16Model (ConvNeXt V2 Nano + U-Net + liquid head) |

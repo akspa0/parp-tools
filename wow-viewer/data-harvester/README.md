@@ -47,6 +47,9 @@ uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --rebuild-e
 # Backfill _resume_state.json into older completed final stores:
 uv run python scripts/backfill_v16_resume_state.py --builds 0_5_3_3368 0_5_5_3494 3_3_5_12340
 
+# Generate human-friendly summaries and sample sheets from existing stores:
+uv run python scripts/inspect_v16_dataset.py --build 3_3_5_12340 --backfill-summary --write-images
+
 # Specific maps:
 uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
 
@@ -66,6 +69,7 @@ Build behavior:
 - Completed final stores (`<build>.zarr/`) are now skipped by default so restart commands do not silently rebuild already-finished builds. Use `--rebuild-existing` to force a rebuild.
 - Builds stage into `wow-viewer/output/datasets/v16/<build>.zarr.partial/` and only replace the final `.zarr` store after successful finalization.
 - Interrupted builds can resume from `wow-viewer/output/datasets/v16/<build>.zarr.partial/` with `--resume`; completed maps are skipped from the saved `_resume_state.json`.
+- If `--resume` is passed before a build has actually written resume state yet, the builder now falls back to a fresh staged build instead of aborting on a missing `_resume_state.json`.
 - Successful final stores now keep `_resume_state.json` as completion metadata, so future restart commands can recognize them as finished without rebuilding.
 - If a discovered map still produces zero usable V16 tiles during streaming, the builder now warns and skips that map instead of aborting the whole build.
 - Tiles dropped for missing required dataset keys are also written to `wow-viewer/output/datasets/v16/<build>.rejected_tiles.jsonl` so rejected coordinates and missing keys survive the console log.
@@ -74,6 +78,8 @@ Build behavior:
 - On Windows, transient `WinError 5` / `WinError 32` chunk-write races in Zarr `LocalStore` are now retried with bounded backoff instead of aborting the whole build immediately.
 - Tile writes are now buffered in memory and flushed to Zarr in small slice batches instead of one row at a time, which should reduce chunk rewrite churn and improve throughput on larger maps.
 - Incoming fixed-shape signals are now coerced to their canonical Zarr shapes before batching, so variable layer-count payloads do not break `np.stack(...)` during resume/build runs.
+- Placement-heavy tiles still cost more than empty terrain because object masks are painted per placement, but the builder no longer reparses the same placement catalog twice per tile for masks and placement arrays.
+- `stats` now reports logical raw array size versus on-disk Zarr size, including per-array ratios and whole-store savings, so compression wins are visible instead of inferred.
 
 ### Train V16
 
@@ -142,6 +148,7 @@ uv run python scripts/train_v15.py --epochs 200
 |------|---------|
 | `scripts/build_v16_dataset.py` | V16 build pipeline (harvester → Zarr, resume, no archive temp staging) |
 | `scripts/backfill_v16_resume_state.py` | Backfill `_resume_state.json` into older completed final stores |
+| `scripts/inspect_v16_dataset.py` | Backfill `_dataset_summary.json` and sample visualizations from existing V16 stores |
 | `scripts/run-data-harvester-python.ps1` | Repo-local launcher for `.venv` packages when the venv stub is broken |
 | `scripts/train_v15.py` | V15 training script |
 | `src/harvester/v16_dataset.py` | V16 PyTorch Dataset (Zarr) |

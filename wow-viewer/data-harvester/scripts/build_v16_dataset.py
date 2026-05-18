@@ -585,6 +585,21 @@ def _write_placements(all_placements: list[dict], output_path: Path) -> None:
     pq.write_table(table, str(output_path / "placements.parquet"))
 
 
+def _format_bytes(num_bytes: int) -> str:
+    value = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024.0 or unit == "TB":
+            return f"{value:.1f} {unit}"
+        value /= 1024.0
+    return f"{num_bytes} B"
+
+
+def _format_ratio(raw_bytes: int, stored_bytes: int) -> str:
+    if stored_bytes <= 0:
+        return "n/a"
+    return f"{raw_bytes / stored_bytes:.2f}x"
+
+
 def cmd_build(args: argparse.Namespace) -> None:
     builds = args.builds or [args.build]
     harvest_tool = _find_harvest_tool()
@@ -675,8 +690,27 @@ def _build_zarr_streaming(
     codec_shuffle: str = DEFAULT_SHUFFLE,
 ) -> None:
     codec = zarr.codecs.BloscCodec(cname=codec_name, clevel=codec_level, shuffle=codec_shuffle)
-    store = zarr.storage.LocalStore(str(output_path), read_only=False)
     resume_state = _load_resume_state(output_path) if resume else None
+
+    if resume and resume_state is None:
+        has_meaningful_partial = output_path.exists() and any(output_path.iterdir())
+        if has_meaningful_partial:
+            substantive_entries = [
+                path.name
+                for path in output_path.iterdir()
+                if path.name not in {"zarr.json", ".zgroup", ".zattrs"}
+            ]
+            if substantive_entries:
+                raise RuntimeError(
+                    f"Resume requested for {output_path}, but no {_resume_state_path(output_path).name} was found."
+                )
+        print(
+            f"  Resume requested for {build}, but no {_resume_state_path(output_path).name} exists yet. "
+            f"Starting a fresh staged build at {output_path}.",
+            flush=True,
+        )
+
+    store = zarr.storage.LocalStore(str(output_path), read_only=False)
     root = zarr.open_group(store=store, mode="a" if resume_state is not None else "w")
 
     arrays: dict[str, zarr.Array] = {}
@@ -690,11 +724,6 @@ def _build_zarr_streaming(
     completed_maps: list[str] = []
     pending_arrays: dict[str, list[np.ndarray]] = {key: [] for key in ALL_ARRAY_KEYS}
     pending_count = 0
-
-    if resume and resume_state is None and output_path.exists() and any(output_path.iterdir()):
-        raise RuntimeError(
-            f"Resume requested for {output_path}, but no {_resume_state_path(output_path).name} was found."
-        )
 
     if resume_state is not None:
         expected_maps = resume_state.get("requested_maps", [])
@@ -1087,6 +1116,9 @@ def cmd_stats(args: argparse.Namespace) -> None:
         if not zarr_path.exists():
             print(f"SKIP {build}: no Zarr store at {zarr_path}")
             continue
+        store_bytes = _dir_size_bytes(zarr_path)
+        total_raw_array_bytes = 0
+        total_array_disk_bytes = 0
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
@@ -1099,13 +1131,35 @@ def cmd_stats(args: argparse.Namespace) -> None:
             print(f"\n{build}: {n} tiles")
             for k in sorted(root.array_keys()):
                 a = root[k]
-                print(f"  {k}: shape={a.shape} dtype={a.dtype}")
+                raw_bytes = int(np.prod(a.shape, dtype=np.int64) * np.dtype(a.dtype).itemsize)
+                disk_bytes = _dir_size_bytes(zarr_path / k) if (zarr_path / k).exists() else 0
+                total_raw_array_bytes += raw_bytes
+                total_array_disk_bytes += disk_bytes
+                print(
+                    f"  {k}: shape={a.shape} dtype={a.dtype} "
+                    f"raw={_format_bytes(raw_bytes)} disk={_format_bytes(disk_bytes)} "
+                    f"ratio={_format_ratio(raw_bytes, disk_bytes)}"
+                )
             store.close()
+
+        print(
+            f"  arrays total: raw={_format_bytes(total_raw_array_bytes)} "
+            f"disk={_format_bytes(total_array_disk_bytes)} "
+            f"ratio={_format_ratio(total_raw_array_bytes, total_array_disk_bytes)}"
+        )
+        print(
+            f"  full store: disk={_format_bytes(store_bytes)} "
+            f"savings_vs_raw_arrays={_format_bytes(max(total_raw_array_bytes - store_bytes, 0))}"
+        )
 
         idx_path = zarr_path / "index.parquet"
         if idx_path.exists():
             table = pq.read_table(str(idx_path))
-            print(f"  index.parquet: {table.num_rows} rows, {table.num_columns} cols")
+            idx_bytes = idx_path.stat().st_size
+            print(
+                f"  index.parquet: {table.num_rows} rows, {table.num_columns} cols, "
+                f"disk={_format_bytes(idx_bytes)}"
+            )
             for col in table.column_names:
                 if col.startswith("has_"):
                     count_scalar = pc.sum(table.column(col))
@@ -1122,7 +1176,8 @@ def cmd_stats(args: argparse.Namespace) -> None:
         pl_path = zarr_path / "placements.parquet"
         if pl_path.exists():
             pl_table = pq.read_table(str(pl_path))
-            print(f"  placements.parquet: {pl_table.num_rows} placements")
+            pl_bytes = pl_path.stat().st_size
+            print(f"  placements.parquet: {pl_table.num_rows} placements, disk={_format_bytes(pl_bytes)}")
         partial_path = _DATASET_ROOT / f"{build}.zarr.partial"
         if partial_path.exists():
             print(f"  WARNING: staged partial output still exists at {partial_path}")

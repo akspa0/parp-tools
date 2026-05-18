@@ -96,12 +96,16 @@ Six independent models, each training on ground truth only:
 - Implementation is now partially landed but unvalidated in-chat because the user explicitly blocked agent-run builds:
   - `WowViewer.Tool.Harvest` archive-backed ADT families now route through `AdtTensorPackBuilder.BuildFromBytes(...)` instead of temp-file staging
   - `build_v16_dataset.py` now carries map-level `_resume_state.json` state for `<build>.zarr.partial`
+  - `--resume` now bootstraps cleanly when no resume state exists yet instead of tripping on a just-created staged directory
   - `build_v16_dataset.py` now skips already-complete final `<build>.zarr` stores by default unless `--rebuild-existing` is passed
   - successful final stores now retain `_resume_state.json` as completion metadata instead of deleting it at finalization
   - `scripts/backfill_v16_resume_state.py` can backfill `_resume_state.json` into older completed final stores
+  - `scripts/inspect_v16_dataset.py` can backfill `_dataset_summary.json`, emit human-friendly JSON summaries, and generate sample image sheets from existing V16 stores
   - the Python Zarr writer now retries transient Windows `WinError 5` / `WinError 32` chunk-write failures instead of aborting immediately on the first `LocalStore` atomic-replace race
   - the Python Zarr writer now buffers tiles in memory and flushes them in small slice batches, reducing one-row-at-a-time chunk rewrites on the filesystem
   - incoming fixed-shape signals are now coerced to canonical Zarr shapes before batching so variable layer-count payloads do not fail `np.stack(...)` during resume/build runs
+  - the C# builder no longer reparses the same placement catalog twice per tile for object masks and placement-array export, which was wasted work on placement-heavy tiles
+  - `build_v16_dataset.py stats` now reports logical raw array bytes versus on-disk Zarr bytes so compression savings are visible per array and per store
   - future V16 builds now default to `lz4` / level `1` / `shuffle`
 - Repo truth still needs operator proof from a user-run rebuild before this recovery slice can be treated as validated.
 

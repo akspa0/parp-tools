@@ -89,9 +89,13 @@ public static class AdtTensorPackBuilder
         (float[,]? wlMask, float[,]? wlHeight) =
             ReadWlFiles(adtPath, availableSignals);
 
+        // ── Read placements once for masks + placement arrays ───────────────
+        AdtPlacementCatalog? placementCatalog =
+            TryReadPlacementCatalog(adtPath, stream, fileSummary);
+
         // ── Build object footprint masks from MDDF/MODF ──────────────────────
         (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257) =
-            BuildObjectMasks(adtPath, stream, fileSummary, availableSignals);
+            BuildObjectMasks(adtPath, stream, fileSummary, availableSignals, placementsOverride: placementCatalog);
 
         float[,]? shadowResidualMask256 = BuildShadowResidualMask256(mcshShadowMask256, objectPreciseMask257, availableSignals);
 
@@ -108,7 +112,7 @@ public static class AdtTensorPackBuilder
         float[,]? height17 = DownsampleHeightmap(height257, 17);
 
         (int mddfCount, int modfCount, float[,]? mddfData, float[,]? modfData, IReadOnlyList<string> mddfNames, IReadOnlyList<string> modfNames) =
-            ExtractPlacementArrays(adtPath, stream, fileSummary);
+            ExtractPlacementArrays(adtPath, stream, fileSummary, placementsOverride: placementCatalog);
 
         IReadOnlyList<TerrainRawChunkBlob> rawChunks = AdtRawChunkBlobCollector.Collect(family.RootPath, textureSourcePath);
         if (rawChunks.Count > 0)
@@ -227,8 +231,18 @@ public static class AdtTensorPackBuilder
         (int[,]? mcrdRefCounts16, int[]? mcrdRefIndices, int[,]? mcrwRefCounts16, int[]? mcrwRefIndices) =
             ReadSplitPlacementChunkReferencesFromBytes(placementSourcePath, placementSourceBytes, availableSignals);
 
+        AdtPlacementCatalog? placementCatalog =
+            TryReadPlacementCatalog(sourceAdtPath, stream, fileSummary, placementSourcePath, placementSourceBytes);
+
         (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257) =
-            BuildObjectMasks(sourceAdtPath, stream, fileSummary, availableSignals, placementSourcePath, placementSourceBytes);
+            BuildObjectMasks(
+                sourceAdtPath,
+                stream,
+                fileSummary,
+                availableSignals,
+                placementSourcePath,
+                placementSourceBytes,
+                placementCatalog);
 
         float[,]? shadowResidualMask256 = BuildShadowResidualMask256(mcshShadowMask256, objectPreciseMask257, availableSignals);
 
@@ -242,7 +256,13 @@ public static class AdtTensorPackBuilder
         float[,]? height17 = DownsampleHeightmap(height257, 17);
 
         (int mddfCount, int modfCount, float[,]? mddfData, float[,]? modfData, IReadOnlyList<string> mddfNames, IReadOnlyList<string> modfNames) =
-            ExtractPlacementArrays(sourceAdtPath, stream, fileSummary, placementSourcePath, placementSourceBytes);
+            ExtractPlacementArrays(
+                sourceAdtPath,
+                stream,
+                fileSummary,
+                placementSourcePath,
+                placementSourceBytes,
+                placementCatalog);
 
         IReadOnlyList<TerrainRawChunkBlob> rawChunks = AdtRawChunkBlobCollector.CollectMemory(
             sourceAdtPath,
@@ -1535,6 +1555,34 @@ public static class AdtTensorPackBuilder
     private const float ObjectWorldTileSize = 533.33333f;
     private const float ObjectMapOrigin = 17066.666f;
 
+    private static AdtPlacementCatalog? TryReadPlacementCatalog(
+        string adtPath,
+        Stream stream,
+        MapFileSummary fileSummary,
+        string? placementSourcePathOverride = null,
+        byte[]? placementBytesOverride = null)
+    {
+        try
+        {
+            if (placementBytesOverride is not null && !string.IsNullOrWhiteSpace(placementSourcePathOverride))
+            {
+                using MemoryStream placementStream = new(placementBytesOverride, writable: false);
+                MapFileSummary placementSummary = MapFileSummaryReader.Read(placementStream, placementSourcePathOverride);
+                return AdtPlacementReader.Read(placementStream, placementSummary);
+            }
+
+            AdtTileFamily family = AdtTileFamilyResolver.Resolve(adtPath);
+            string? placementSourcePath = placementSourcePathOverride ?? family.PlacementSourcePath;
+            return !string.IsNullOrWhiteSpace(placementSourcePath) && File.Exists(placementSourcePath)
+                ? AdtPlacementReader.Read(placementSourcePath)
+                : AdtPlacementReader.Read(stream, fileSummary);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static (float[,]? mask, float[,]? preciseMask, int[,]? instanceMask)
         BuildObjectMasks(
             string adtPath,
@@ -1542,33 +1590,16 @@ public static class AdtTensorPackBuilder
             MapFileSummary fileSummary,
             HashSet<string> signals,
             string? placementSourcePathOverride = null,
-            byte[]? placementBytesOverride = null)
+            byte[]? placementBytesOverride = null,
+            AdtPlacementCatalog? placementsOverride = null)
     {
         if (!TryParseAdtTileCoords(fileSummary.SourcePath, out int tileX, out int tileY))
             return (null, null, null);
 
-        AdtPlacementCatalog placements;
-        try
-        {
-            if (placementBytesOverride is not null && !string.IsNullOrWhiteSpace(placementSourcePathOverride))
-            {
-                using MemoryStream placementStream = new(placementBytesOverride, writable: false);
-                MapFileSummary placementSummary = MapFileSummaryReader.Read(placementStream, placementSourcePathOverride);
-                placements = AdtPlacementReader.Read(placementStream, placementSummary);
-            }
-            else
-            {
-                AdtTileFamily family = AdtTileFamilyResolver.Resolve(adtPath);
-                string? placementSourcePath = placementSourcePathOverride ?? family.PlacementSourcePath;
-                placements = !string.IsNullOrWhiteSpace(placementSourcePath) && File.Exists(placementSourcePath)
-                    ? AdtPlacementReader.Read(placementSourcePath)
-                    : AdtPlacementReader.Read(stream, fileSummary);
-            }
-        }
-        catch
-        {
+        AdtPlacementCatalog? placements = placementsOverride
+            ?? TryReadPlacementCatalog(adtPath, stream, fileSummary, placementSourcePathOverride, placementBytesOverride);
+        if (placements is null)
             return (null, null, null);
-        }
 
         if (placements.ModelPlacements.Count == 0 && placements.WorldModelPlacements.Count == 0)
             return (null, null, null);
@@ -2398,25 +2429,15 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
             Stream stream,
             MapFileSummary fileSummary,
             string? placementSourcePathOverride = null,
-            byte[]? placementBytesOverride = null)
+            byte[]? placementBytesOverride = null,
+            AdtPlacementCatalog? placementsOverride = null)
     {
         try
         {
-            AdtPlacementCatalog placements;
-            if (placementBytesOverride is not null && !string.IsNullOrWhiteSpace(placementSourcePathOverride))
-            {
-                using MemoryStream placementStream = new(placementBytesOverride, writable: false);
-                MapFileSummary placementSummary = MapFileSummaryReader.Read(placementStream, placementSourcePathOverride);
-                placements = AdtPlacementReader.Read(placementStream, placementSummary);
-            }
-            else
-            {
-                AdtTileFamily family = AdtTileFamilyResolver.Resolve(adtPath);
-                string? sourcePath = placementSourcePathOverride ?? family.PlacementSourcePath;
-                placements = !string.IsNullOrWhiteSpace(sourcePath) && File.Exists(sourcePath)
-                    ? AdtPlacementReader.Read(sourcePath)
-                    : AdtPlacementReader.Read(stream, fileSummary);
-            }
+            AdtPlacementCatalog? placements = placementsOverride
+                ?? TryReadPlacementCatalog(adtPath, stream, fileSummary, placementSourcePathOverride, placementBytesOverride);
+            if (placements is null)
+                return (0, 0, null, null, Array.Empty<string>(), Array.Empty<string>());
 
             float[,]? mddfData = null;
             List<string> mddfNames = [];
