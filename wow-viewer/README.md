@@ -31,7 +31,7 @@ The current end-to-end terrain-AI lane is V16:
 1. `WowViewer.Tool.Harvest harvest-stream` reads staged client data and emits length-prefixed NPZ blobs over stdout.
 2. `data-harvester/scripts/build_v16_dataset.py build` consumes that stream and writes one finalized Zarr store per client build under `wow-viewer/output/datasets/v16/<build>.zarr/`.
 3. `build_v16_dataset.py repair-index` can repair existing `index.parquet` coordinate bookkeeping without regenerating the tensor arrays.
-4. `validate_v16_training_ready.py` proves that `V16Dataset`, a real `DataLoader`, and the current `V15Model` architecture can consume the built store.
+4. `validate_v16_training_ready.py` proves that `V16Dataset`, a real `DataLoader`, and the current `V16Model` architecture can consume the built store.
 5. `train_v16.py` trains directly from the finalized V16 Zarr corpus.
 
 This is the modern workflow to care about if the goal is terrain-model training tonight, not just file conversion demos.
@@ -49,6 +49,21 @@ Repo-level starting points:
 - [data-harvester README](./data-harvester/README.md)
 - [V16 terrain model spec](./docs/architecture/v16-terrain-model-spec-2026-05-16.md)
 - [V16 harvest recovery plan](./docs/architecture/v16-harvest-recovery-plan-2026-05-17.md)
+
+## Spec-Driven Workflow (Spec Kit)
+
+Spec Kit is installed in `wow-viewer` and should be used for non-trivial feature slices before implementation.
+
+- Integration files: `.specify/`
+- Codex skills: `.agents/skills/speckit-*`
+- Local agent guardrails: `wow-viewer/AGENTS.md`
+
+Typical flow:
+
+1. Run `$speckit-specify` to write or refine the feature spec.
+2. Run `$speckit-plan` to generate an implementation plan from that spec.
+3. Run `$speckit-tasks` to produce actionable task slices.
+4. Run `$speckit-implement` to execute tasks with validation evidence.
 
 ## Current Status
 
