@@ -261,6 +261,15 @@ uv run python scripts/train_v16.py \
     --builds 3_3_5_12340 4_0_0_11927 \
     --train-max-tiles 2000 \
     --val-max-tiles 256
+
+# resume existing run from latest checkpoint
+uv run python scripts/train_v16.py \
+    --dataset-dir ../output/datasets/v16 \
+    --builds 3_3_5_12340 4_0_0_11927 \
+    --train-max-tiles 2000 \
+    --val-max-tiles 256 \
+    --run-name <existing-run-name> \
+    --resume-from auto
 ```
 
 The `V16Dataset` class reads from Zarr stores, using the Parquet index for
@@ -279,10 +288,20 @@ subset from the split and records chain-of-evidence artifacts under:
 - `models/v16/runs/<run>/evidence/val_selection.jsonl`
 - `models/v16/runs/<run>/evidence/train_epoch_orders.jsonl`
 
+Curation excludes placeholder map labels (`memory`, `<memory>`, empty,
+unknown) by default so bad metadata rows are not selected; pass
+`--include-placeholder-map-tiles` to opt in.
+
 Validation snapshots now include one labeled composite overview image per
 validation epoch:
 
 - `models/v16/runs/<run>/validation/epoch_XXXX/validation_overview.png`
+
+Checkpoint policy:
+
+- `models/v16/runs/<run>/checkpoints/v16_last.pt` is written every epoch.
+- `models/v16/runs/<run>/checkpoints/v16_best.pt` tracks best `val_h`.
+- `models/v16/runs/<run>/checkpoints/v16_final.pt` is written at run end.
 
 The training-readiness validator writes:
 

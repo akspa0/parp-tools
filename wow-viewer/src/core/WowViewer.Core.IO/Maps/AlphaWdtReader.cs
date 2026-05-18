@@ -30,7 +30,14 @@ public static class AlphaWdtReader
 
     public static bool TryReadTile(byte[] wdtData, int tileX, int tileY, out AlphaTileData? data)
     {
-        return TryReadTile(wdtData, tileX, tileY, "memory", out data);
+        return TryReadTileInternal(wdtData, tileX, tileY, "memory", out data);
+    }
+
+    public static bool TryReadTile(byte[] wdtData, int tileX, int tileY, string sourcePath, out AlphaTileData? data)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            sourcePath = "memory";
+        return TryReadTileInternal(wdtData, tileX, tileY, sourcePath, out data);
     }
 
     public static bool IsAlphaWdt(byte[] wdtData)
@@ -162,7 +169,7 @@ public static class AlphaWdtReader
         return true;
     }
 
-    private static bool TryReadTile(byte[] wdtData, int tileX, int tileY, string sourcePath, out AlphaTileData? data)
+    private static bool TryReadTileInternal(byte[] wdtData, int tileX, int tileY, string sourcePath, out AlphaTileData? data)
     {
         data = null;
 

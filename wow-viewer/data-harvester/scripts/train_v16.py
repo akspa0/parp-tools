@@ -10,6 +10,7 @@ Usage:
     uv run python scripts/train_v16.py --builds 3_3_5_12340 4_0_0_11927
     uv run python scripts/train_v16.py --run-name my_experiment --builds 3_3_5_12340
     uv run python scripts/train_v16.py --resume-checkpoint models/v16/runs/<run>/checkpoints/v16_best.pt
+    uv run python scripts/train_v16.py --run-name my_experiment --resume-from auto
 """
 
 from __future__ import annotations
@@ -117,12 +118,24 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Seed for train/val subset curation (defaults to --seed)",
     )
+    p.add_argument(
+        "--include-placeholder-map-tiles",
+        action="store_true",
+        help="Allow curation to include rows with placeholder map labels (e.g. map=memory)",
+    )
     p.add_argument("--no-amp", action="store_true")
     p.add_argument("--augment", action="store_true", default=True)
     p.add_argument("--no-augment", action="store_false", dest="augment")
     p.add_argument("--run-name", type=str, default=None,
                     help="Name for this run (auto-generated from timestamp if omitted)")
     p.add_argument("--resume-checkpoint", type=Path, default=None)
+    p.add_argument(
+        "--resume-from",
+        type=str,
+        choices=["none", "auto", "last", "best"],
+        default="none",
+        help="Resume mode from run checkpoints directory when --resume-checkpoint is not provided",
+    )
     p.add_argument(
         "--no-compile",
         action="store_true",
@@ -147,6 +160,11 @@ def _as_int(v: Any) -> int | None:
         return None
 
 
+def _is_placeholder_map_name(name: Any) -> bool:
+    s = str(name or "").strip().lower()
+    return s in {"", "memory", "<memory>", "unknown", "<unknown>"}
+
+
 def _to_curation_row(entry: dict[str, Any], split: str, subset_pos: int) -> dict[str, Any]:
     return {
         "split": split,
@@ -167,18 +185,37 @@ def _curate_split(
     max_tiles: int,
     seed: int,
     evidence_dir: Path,
+    include_placeholder_map_tiles: bool,
 ) -> dict[str, Any]:
     full_indices = list(ds._indices)
     n_full = len(full_indices)
-    if max_tiles > 0 and max_tiles < n_full:
+    candidate_indices = full_indices
+    dropped_placeholder = 0
+    if not include_placeholder_map_tiles:
+        candidate_indices = []
+        for gi in full_indices:
+            entry = ds._index_entries[gi]
+            if _is_placeholder_map_name(entry.get("map")):
+                dropped_placeholder += 1
+                continue
+            candidate_indices.append(gi)
+
+    if not candidate_indices:
+        raise RuntimeError(
+            f"{split} curation has zero candidates after filtering. "
+            "Use --include-placeholder-map-tiles to bypass this guard or repair/rebuild the affected dataset."
+        )
+
+    n_candidates = len(candidate_indices)
+    if max_tiles > 0 and max_tiles < n_candidates:
         rng = np.random.RandomState(seed)
-        chosen_local = sorted(rng.choice(n_full, size=max_tiles, replace=False).tolist())
+        chosen_local = sorted(rng.choice(n_candidates, size=max_tiles, replace=False).tolist())
         mode = "random_subset_no_replace"
     else:
-        chosen_local = list(range(n_full))
+        chosen_local = list(range(n_candidates))
         mode = "all_tiles"
 
-    chosen_global = [full_indices[i] for i in chosen_local]
+    chosen_global = [candidate_indices[i] for i in chosen_local]
     ds._indices = chosen_global
 
     rows = []
@@ -196,10 +233,60 @@ def _curate_split(
         "mode": mode,
         "seed": int(seed),
         "available_tiles": n_full,
+        "candidate_tiles_after_filters": n_candidates,
+        "dropped_placeholder_map_tiles": dropped_placeholder,
         "selected_tiles": len(chosen_global),
         "selection_jsonl": str(jsonl_path),
         "selection_sha256": digest,
     }
+
+
+def _resolve_resume_checkpoint(args: argparse.Namespace, ckpt_dir: Path) -> Path | None:
+    if args.resume_checkpoint is not None:
+        return args.resume_checkpoint
+
+    mode = str(args.resume_from or "none")
+    if mode == "none":
+        return None
+
+    best_path = ckpt_dir / "v16_best.pt"
+    last_path = ckpt_dir / "v16_last.pt"
+    if mode == "best":
+        return best_path if best_path.exists() else None
+    if mode == "last":
+        return last_path if last_path.exists() else None
+
+    # auto
+    if last_path.exists():
+        return last_path
+    if best_path.exists():
+        return best_path
+    return None
+
+
+def _save_training_checkpoint(
+    path: Path,
+    *,
+    epoch: int,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    scaler: torch.amp.GradScaler,
+    best_val: float,
+    log_entries: list[dict[str, Any]],
+) -> None:
+    torch.save(
+        {
+            "epoch": int(epoch),
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "scaler_state_dict": scaler.state_dict(),
+            "best_val_height": float(best_val),
+            "training_log": log_entries,
+        },
+        path,
+    )
 
 
 def main() -> None:
@@ -231,9 +318,11 @@ def main() -> None:
         "train_max_tiles": args.train_max_tiles,
         "val_max_tiles": args.val_max_tiles,
         "curation_seed": args.curation_seed,
+        "include_placeholder_map_tiles": args.include_placeholder_map_tiles,
         "no_amp": args.no_amp,
         "augment": args.augment,
         "resume_checkpoint": str(args.resume_checkpoint) if args.resume_checkpoint else None,
+        "resume_from": args.resume_from,
         "no_compile": args.no_compile,
         "started_at": datetime.now().isoformat(),
     }
@@ -267,8 +356,22 @@ def main() -> None:
         augment=False,
     )
     curation_seed = args.curation_seed if args.curation_seed is not None else args.seed
-    train_cur = _curate_split(train_ds, "train", args.train_max_tiles, curation_seed + 101, evidence_dir)
-    val_cur = _curate_split(val_ds, "val", args.val_max_tiles, curation_seed + 202, evidence_dir)
+    train_cur = _curate_split(
+        train_ds,
+        "train",
+        args.train_max_tiles,
+        curation_seed + 101,
+        evidence_dir,
+        include_placeholder_map_tiles=args.include_placeholder_map_tiles,
+    )
+    val_cur = _curate_split(
+        val_ds,
+        "val",
+        args.val_max_tiles,
+        curation_seed + 202,
+        evidence_dir,
+        include_placeholder_map_tiles=args.include_placeholder_map_tiles,
+    )
 
     curation_manifest = {
         "run_name": run_name,
@@ -294,8 +397,6 @@ def main() -> None:
     )
 
     train_order_log = evidence_dir / "train_epoch_orders.jsonl"
-    if train_order_log.exists():
-        train_order_log.unlink()
     train_sampler = _DeterministicEpochSampler(len(train_ds), seed=args.seed, order_log_path=train_order_log)
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=False, sampler=train_sampler,
@@ -334,15 +435,47 @@ def main() -> None:
 
     start_epoch = 1
     best_val = float("inf")
-    if args.resume_checkpoint is not None:
-        ckpt = torch.load(args.resume_checkpoint, map_location=device, weights_only=True)
+    log_entries: list[dict[str, Any]] = []
+    resume_path = _resolve_resume_checkpoint(args, ckpt_dir)
+    config["resume_resolved_checkpoint"] = str(resume_path) if resume_path is not None else None
+    (run_dir / "config.json").write_text(json.dumps(config, indent=2))
+    if resume_path is not None:
+        if not resume_path.exists():
+            raise RuntimeError(f"Requested resume checkpoint does not exist: {resume_path}")
+        ckpt = torch.load(resume_path, map_location=device)
         model.load_state_dict(ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-        start_epoch = ckpt["epoch"] + 1
-        best_val = ckpt.get("val_height", float("inf"))
-        print(f"Resumed from epoch {start_epoch}, best val_h={best_val:.4f}")
-
-    log_entries: list[dict] = []
+        if "scheduler_state_dict" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        if "scaler_state_dict" in ckpt:
+            scaler.load_state_dict(ckpt["scaler_state_dict"])
+        start_epoch = int(ckpt["epoch"]) + 1
+        best_val = float(ckpt.get("best_val_height", ckpt.get("val_height", float("inf"))))
+        if isinstance(ckpt.get("training_log"), list):
+            log_entries = ckpt["training_log"]
+        else:
+            log_path = run_dir / "training_log.json"
+            if log_path.exists():
+                try:
+                    loaded = json.loads(log_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, list):
+                        log_entries = loaded
+                except Exception:
+                    log_entries = []
+        if start_epoch > args.epochs:
+            print(
+                f"Resume checkpoint epoch={ckpt['epoch']} already reached/exceeded requested "
+                f"--epochs={args.epochs}; nothing to do."
+            )
+            config["finished_at"] = datetime.now().isoformat()
+            config["best_val_height"] = best_val
+            config["resume_noop"] = True
+            (run_dir / "config.json").write_text(json.dumps(config, indent=2))
+            return
+        print(f"Resumed from {resume_path} -> start_epoch={start_epoch}, best_val_h={best_val:.4f}")
+    else:
+        if train_order_log.exists():
+            train_order_log.unlink()
     for epoch in range(start_epoch, args.epochs + 1):
         train_sampler.set_epoch(epoch)
         model.train()
@@ -443,14 +576,15 @@ def main() -> None:
             )
             if v["val_h"] < best_val:
                 best_val = v["val_h"]
-                torch.save(
-                    {
-                        "epoch": epoch,
-                        "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        "val_height": best_val,
-                    },
+                _save_training_checkpoint(
                     ckpt_dir / "v16_best.pt",
+                    epoch=epoch,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    scaler=scaler,
+                    best_val=best_val,
+                    log_entries=log_entries + [entry],
                 )
                 print(f"        *** new best val_h={best_val:.4f}")
 
@@ -467,15 +601,27 @@ def main() -> None:
             )
 
         log_entries.append(entry)
+        _save_training_checkpoint(
+            ckpt_dir / "v16_last.pt",
+            epoch=epoch,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            best_val=best_val,
+            log_entries=log_entries,
+        )
         (run_dir / "training_log.json").write_text(json.dumps(log_entries, indent=2))
 
-    torch.save(
-        {
-            "epoch": args.epochs,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-        },
+    _save_training_checkpoint(
         ckpt_dir / "v16_final.pt",
+        epoch=args.epochs,
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        scaler=scaler,
+        best_val=best_val,
+        log_entries=log_entries,
     )
     config["finished_at"] = datetime.now().isoformat()
     config["best_val_height"] = best_val

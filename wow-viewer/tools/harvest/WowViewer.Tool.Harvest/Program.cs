@@ -559,7 +559,8 @@ static class Program
                     {
                         if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
                         {
-                            if (!AlphaWdtReader.TryReadTile(wdtBytes, tx, ty, out AlphaTileData? tileData) || tileData is null)
+                            string alphaWdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+                            if (!AlphaWdtReader.TryReadTile(wdtBytes, tx, ty, alphaWdtVirtual, out AlphaTileData? tileData) || tileData is null)
                                 continue;
                             pack = AlphaTensorPackBuilder.Build(tileData, tx, ty);
                         }
@@ -709,7 +710,8 @@ static class Program
 
 if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             {
-                if (!AlphaWdtReader.TryReadTile(wdtBytes, tileX, tileY, out AlphaTileData? tileData) || tileData is null)
+                string alphaWdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+                if (!AlphaWdtReader.TryReadTile(wdtBytes, tileX, tileY, alphaWdtVirtual, out AlphaTileData? tileData) || tileData is null)
                 {
                     Console.Error.WriteLine($"Error: Alpha tile ({tileX},{tileY}) not present in WDT.");
                     return false;
@@ -924,7 +926,8 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     {
         if (isAlpha)
         {
-            if (!AlphaWdtReader.TryReadTile(wdtBytes, tile.TileX, tile.TileY, out AlphaTileData? tileData) || tileData is null)
+            string alphaWdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+            if (!AlphaWdtReader.TryReadTile(wdtBytes, tile.TileX, tile.TileY, alphaWdtVirtual, out AlphaTileData? tileData) || tileData is null)
                 return new ProbeTileState(false, false);
 
             TerrainTileTensorPack pack = AlphaTensorPackBuilder.Build(tileData, tile.TileX, tile.TileY);

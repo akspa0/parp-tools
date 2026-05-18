@@ -76,6 +76,36 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
   - `uv run python scripts/train_v16.py --builds 3_3_5_12340 --epochs 1 --batch-size 2 --device cpu --train-max-tiles 8 --val-max-tiles 4 --val-interval 1 --val-snapshots 1 --run-name smoke_v16_per_sample_maskfix`
   - completed successfully with checkpoints/validation output.
 
+### New: durable train resume for long sporadic runs (2026-05-18)
+- `train_v16.py` now supports explicit resume routing:
+  - `--resume-from none|auto|last|best`
+  - legacy explicit `--resume-checkpoint <path>` still works and takes priority.
+- Checkpoints now persist full training state, not just weights:
+  - model, optimizer, scheduler, AMP scaler, `best_val_height`, and `training_log`.
+- Per-run checkpoint policy is now:
+  - `checkpoints/v16_last.pt` written every epoch
+  - `checkpoints/v16_best.pt` updated on best `val_h`
+  - `checkpoints/v16_final.pt` written at run completion
+- Focused restart proof:
+  - run 1: `smoke_v16_resume` with `--epochs 1`
+  - run 2: same `--run-name smoke_v16_resume --epochs 2 --resume-from auto`
+  - second run resumed from `v16_last.pt` at `start_epoch=2` and finished cleanly.
+
+### New: Alpha map-name placeholder fix for `"memory"` labels (2026-05-18)
+- Root cause confirmed: Alpha archive byte-path reads used `AlphaWdtReader.TryReadTile(byte[],...)`, which previously tagged tile source path as `"memory"`, and `AlphaTensorPackBuilder` derived `map_name` from that source path.
+- Code changes:
+  - `AlphaWdtReader` now has a public `TryReadTile(byte[] wdtData, int tileX, int tileY, string sourcePath, out AlphaTileData? data)` overload.
+  - Harvest MPQ alpha call-sites now pass `World\\Maps\\<map>\\<map>.wdt` as source path.
+  - Python builder now normalizes placeholder map names (`memory`, `<memory>`, empty, unknown) back to the requested stream map.
+  - `repair-index` now has a fallback relabel mode when existing index map labels are placeholder-only.
+- Dataset evidence check before fix:
+  - `0_5_3_3368`: `1729/1729` rows had `map=memory`
+  - `0_5_5_3494`: `1820/1820` rows had `map=memory`
+  - later builds (`0_7.0+`) had `0` placeholder rows.
+- Trainer-side guard now also blocks bad metadata rows from curation by default:
+  - `train_v16.py` drops placeholder-map rows during subset selection unless
+    `--include-placeholder-map-tiles` is explicitly passed.
+
 ### Zarr Arrays (per tile)
 height_257, normal_xyz, normal_mask, alpha_256, holes_16, liquid_mask, liquid_height, **object_mask**, **object_precise_mask**, **object_instance_mask** (NEW), minimap_rgb, shadow_mask, mcly_texture_ids, mcly_layer_mask
 

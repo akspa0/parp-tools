@@ -103,7 +103,29 @@ uv run python scripts/train_v16.py \
     --builds 3_3_5_12340 \
     --train-max-tiles 2000 \
     --val-max-tiles 256
+
+# Resume the same run from latest checkpoint:
+uv run python scripts/train_v16.py \
+    --dataset-dir ../output/datasets/v16 \
+    --builds 3_3_5_12340 \
+    --train-max-tiles 2000 \
+    --val-max-tiles 256 \
+    --run-name <existing-run-name> \
+    --resume-from auto
+
+# Resume from best checkpoint instead:
+uv run python scripts/train_v16.py \
+    --dataset-dir ../output/datasets/v16 \
+    --builds 3_3_5_12340 \
+    --train-max-tiles 2000 \
+    --val-max-tiles 256 \
+    --run-name <existing-run-name> \
+    --resume-from best
 ```
+
+By default, curation excludes placeholder map labels (`map=memory`, empty,
+unknown) so those rows are not selected into train/val subsets. Use
+`--include-placeholder-map-tiles` only if you intentionally want them included.
 
 Subset curation + evidence artifacts are written per run:
 - `models/v16/runs/<run>/evidence/curation_manifest.json`
@@ -113,6 +135,11 @@ Subset curation + evidence artifacts are written per run:
 
 Validation snapshot exports now also include one labeled overview image:
 - `models/v16/runs/<run>/validation/epoch_XXXX/validation_overview.png`
+
+Checkpoint files per run:
+- `models/v16/runs/<run>/checkpoints/v16_last.pt` (written every epoch)
+- `models/v16/runs/<run>/checkpoints/v16_best.pt` (best `val_h`)
+- `models/v16/runs/<run>/checkpoints/v16_final.pt` (end-of-run snapshot)
 
 Training-readiness validation writes:
 - `wow-viewer/output/datasets/v16/validation/<build>.training_readiness.json`

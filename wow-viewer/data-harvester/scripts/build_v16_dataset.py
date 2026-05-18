@@ -614,6 +614,21 @@ def _ordered_maps_from_index_rows(index_rows: list[dict]) -> list[str]:
     return ordered
 
 
+def _normalize_map_name(meta_map: object, requested_map: str) -> str:
+    raw = str(meta_map or "").strip()
+    if not raw:
+        return requested_map
+    low = raw.lower()
+    if low in {"memory", "<memory>", "unknown", "<unknown>"}:
+        return requested_map
+    return raw
+
+
+def _is_placeholder_map_name(name: str) -> bool:
+    low = str(name or "").strip().lower()
+    return low in {"", "memory", "<memory>", "unknown", "<unknown>"}
+
+
 def _stream_valid_tile_metadata(
     harvest_tool: Path,
     client_root: Path,
@@ -691,7 +706,7 @@ def _stream_valid_tile_metadata(
 
         meta = _decode_metadata_json(data)
         tx, ty = _extract_tile_coords_from_metadata(meta)
-        actual_map = str(meta.get("map_name", map_name))
+        actual_map = _normalize_map_name(meta.get("map_name", map_name), map_name)
         rows.append({"map": actual_map, "tile_x": tx, "tile_y": ty})
 
     if proc.poll() is None and (stream_error is not None or not saw_end_marker):
@@ -1016,11 +1031,12 @@ def _build_zarr_streaming(
                 source_adt_path = str(meta.get("source_adt_path", ""))
                 tx, ty = _extract_tile_coords_from_metadata(meta)
                 if rejected_tiles_report is not None:
+                    rejected_map = _normalize_map_name(meta.get("map_name", map_name), map_name)
                     rejected_tiles_report.write(
                         json.dumps(
                             {
                                 "build": build,
-                                "map_name": str(meta.get("map_name", map_name)),
+                                "map_name": rejected_map,
                                 "source_adt_path": source_adt_path,
                                 "tile_x": tx,
                                 "tile_y": ty,
@@ -1051,7 +1067,7 @@ def _build_zarr_streaming(
             actual_map = map_name
             if meta:
                 tx, ty = _extract_tile_coords_from_metadata(meta)
-                actual_map = meta.get("map_name", map_name)
+                actual_map = _normalize_map_name(meta.get("map_name", map_name), map_name)
 
             # Extract placement data
             tile_id = valid + pending_count
@@ -1357,6 +1373,29 @@ def cmd_repair_index(args: argparse.Namespace) -> None:
         print(f"Repairing index coordinates for {build}")
         print(f"Client: {client_root}")
         print(f"Maps: {ordered_maps}")
+
+        if ordered_maps and all(_is_placeholder_map_name(m) for m in ordered_maps):
+            discovered_maps = _discover_maps_for_build(harvest_tool, client_root)
+            print("Index map labels are placeholder-only; attempting full map relabel from fresh stream order.")
+            print(f"Discovered maps: {discovered_maps}")
+            streamed_all: list[dict[str, object]] = []
+            for map_name in discovered_maps:
+                streamed_all.extend(_stream_valid_tile_metadata(harvest_tool, client_root, map_name, build_version))
+
+            if len(streamed_all) != len(index_rows):
+                raise RuntimeError(
+                    f"Repair relabel count mismatch for {build}: "
+                    f"index has {len(index_rows)} rows, discovered stream produced {len(streamed_all)} valid tiles."
+                )
+
+            for idx, streamed in enumerate(streamed_all):
+                index_rows[idx]["map"] = str(streamed["map"])
+                index_rows[idx]["tile_x"] = int(streamed["tile_x"])
+                index_rows[idx]["tile_y"] = int(streamed["tile_y"])
+
+            _write_index(index_rows, output_path)
+            print(f"Wrote repaired index: {idx_path}")
+            continue
 
         for map_name in ordered_maps:
             row_indices = [i for i, row in enumerate(index_rows) if str(row.get("map")) == map_name]
