@@ -3,13 +3,13 @@
 `wow-viewer` is the active standalone codebase for:
 
 - reading World of Warcraft terrain and client data across multiple eras
-- exporting model-ready NPZ terrain shards from real game clients
+- exporting model-ready V16 Zarr datasets and legacy NPZ terrain shards from real game clients
 - inspecting formats like ADT, WDT, PM4, BLP, WMO, MDX, and M2
 - converting Alpha-era maps to later formats and reverse (Cataclysm back to Alpha)
-- serving as the foundation for the V14 terrain-model pipeline
+- serving as the foundation for the V14 and V16 terrain-model pipelines
 - **future: standalone viewer** — porting MdxViewer's rendering and world-session logic into `wow-viewer` is a long-range goal
 
-It is not a toy viewer prototype anymore. The important part today is the data and format pipeline.
+It is not a toy viewer prototype anymore. A major reason this repo exists is to turn real staged client data into trainable terrain datasets and then consume those datasets with the Python training stack.
 
 ## What It Does
 
@@ -18,11 +18,37 @@ The project currently has four practical jobs:
 1. **Shared WoW file I/O**
    Read Alpha, pre-release, Wrath, and Cataclysm terrain formats from staged clients.
 2. **Dataset generation**
-   Export NPZ shards with height, normals, alpha layers, liquid, masks, minimap, and placement-derived signals.
+   Export V16 Zarr datasets and legacy NPZ shards with height, normals, alpha layers, liquid, masks, minimap, placements, and placement-derived signals.
 3. **Inspection and validation**
    Probe client files and generated outputs without opening the old legacy tools.
 4. **Format conversion**
   Convert Alpha monolithic WDT terrain to LK ADT/WDT/WDL output, convert LK/Cataclysm split ADT terrain into monolithic LK ADT output for loose-overlay workflows, and convert LK/Cataclysm ADT terrain back into Alpha-compatible monolithic WDT output.
+
+## V16 Dataset And Training
+
+The current end-to-end terrain-AI lane is V16:
+
+1. `WowViewer.Tool.Harvest harvest-stream` reads staged client data and emits length-prefixed NPZ blobs over stdout.
+2. `data-harvester/scripts/build_v16_dataset.py build` consumes that stream and writes one finalized Zarr store per client build under `wow-viewer/output/datasets/v16/<build>.zarr/`.
+3. `build_v16_dataset.py repair-index` can repair existing `index.parquet` coordinate bookkeeping without regenerating the tensor arrays.
+4. `validate_v16_training_ready.py` proves that `V16Dataset`, a real `DataLoader`, and the current `V15Model` architecture can consume the built store.
+5. `train_v16.py` trains directly from the finalized V16 Zarr corpus.
+
+This is the modern workflow to care about if the goal is terrain-model training tonight, not just file conversion demos.
+
+Key V16 artifacts:
+
+- `wow-viewer/output/datasets/v16/<build>.zarr/` — finalized per-build tensor store
+- `index.parquet` — one row per usable tile, including `build`, `map`, `tile_x`, `tile_y`, signal-presence flags, and placement counts
+- `placements.parquet` — per-placement rows with asset path linkage for placement-aware follow-up models
+- `<build>.rejected_tiles.jsonl` — rejected missing-required tiles so dropped rows do not disappear into console noise
+- `validation/<build>.training_readiness.json` — trainer-readiness report from the validator
+
+Repo-level starting points:
+
+- [data-harvester README](./data-harvester/README.md)
+- [V16 terrain model spec](./docs/architecture/v16-terrain-model-spec-2026-05-16.md)
+- [V16 harvest recovery plan](./docs/architecture/v16-harvest-recovery-plan-2026-05-17.md)
 
 ## Current Status
 
@@ -120,11 +146,32 @@ dotnet run --project .\wow-viewer\tools\converter\WowViewer.Tool.Converter\WowVi
 
 See the **Manual Validation with MdxViewer** section below for the complete workflow.
 
-### 4. Visualize Harvested NPZ Shards
+### 4. Build A V16 Dataset
 
 ```powershell
 cd .\wow-viewer\data-harvester
-uv run python scripts\visualize_npz.py "I:\parp\parp-tools\wow-viewer\output\datasets\full_shard_batch_staged_native\validation_samples" --output-dir "I:\parp\parp-tools\wow-viewer\output\datasets\full_shard_batch_staged_native\visualizations"
+uv run python scripts\build_v16_dataset.py build --build 3_3_5_12340
+```
+
+### 5. Validate Trainer Readiness
+
+```powershell
+cd .\wow-viewer\data-harvester
+uv run python scripts\validate_v16_training_ready.py --build 3_3_5_12340
+```
+
+### 6. Repair Existing Index Coordinates Without Rebuilding Arrays
+
+```powershell
+cd .\wow-viewer\data-harvester
+uv run python scripts\build_v16_dataset.py repair-index --build 3_3_5_12340
+```
+
+### 7. Start Training
+
+```powershell
+cd .\wow-viewer\data-harvester
+uv run python scripts\train_v16.py --builds 3_3_5_12340
 ```
 
 ## Output Layout
@@ -147,6 +194,22 @@ wow-viewer/output/datasets/full_shard_batch_staged_native/
       ...
   validation_samples/
   visualizations/
+```
+
+Current V16 structure:
+
+```text
+wow-viewer/output/datasets/v16/
+  0_5_3_3368.zarr/
+    zarr.json
+    height_257/
+    minimap_rgb/
+    index.parquet
+    placements.parquet
+    _resume_state.json
+  0_5_3_3368.rejected_tiles.jsonl
+  validation/
+    0_5_3_3368.training_readiness.json
 ```
 
 Round-trip validation output layout:
@@ -194,6 +257,25 @@ dotnet run --project .\wow-viewer\tools\harvest\WowViewer.Tool.Harvest\WowViewer
 ```powershell
 dotnet run --project .\wow-viewer\tools\harvest\WowViewer.Tool.Harvest\WowViewer.Tool.Harvest.csproj -c Debug -- extract-unified --client-root "I:\parp\parp-tools\output\tmp\wowarchive-clients\3_3_5_12340\World of Warcraft" --map Azeroth --tile-x 32 --tile-y 32 --output "I:\parp\parp-tools\wow-viewer\output\datasets\single_tile\Azeroth_32_32.npz"
 ```
+
+### Python data-harvester tooling
+
+```powershell
+cd .\wow-viewer\data-harvester
+uv run python scripts\build_v16_dataset.py <command>
+```
+
+Important commands:
+
+- `build --build <key>` — build one V16 dataset store
+- `build --build <key> --resume` — resume a staged partial build
+- `stats --build <key>` — report row counts plus raw-vs-compressed size savings
+- `repair-index --build <key>` — rewrite `index.parquet` from metadata only
+- `inspect_v16_dataset.py --build <key> --backfill-summary --write-images` — sample and summarize an existing store
+- `validate_v16_training_ready.py --build <key>` — prove the trainer stack can consume the dataset
+- `train_v16.py --builds <keys...>` — train from finalized V16 Zarr stores
+
+The detailed Python-side workflow lives in [data-harvester/README.md](./data-harvester/README.md).
 
 ### Inspect CLI
 
@@ -504,15 +586,14 @@ The current `WowViewer.App` shell exists but needs significant expansion to matc
 
 If you want a short demo flow:
 
-1. Run `harvest-map-mpq` on a staged client map.
-2. Open one generated `.npz` with `visualize_npz.py`.
-3. Show that the shard contains real decoded terrain signals, not screenshots.
-4. Show `convert-alpha-to-lk` on an Alpha WDT.
-5. Show `convert-lk-to-alpha` reading Cataclysm split ADTs.
-6. Show `map inspect` validating the produced files.
-7. Show MdxViewer loading the converted Alpha WDT and rendering it against the staged 0.5.3 client.
+1. Build one V16 Zarr dataset from a staged client build.
+2. Run `stats` to show tile counts, signal coverage, and compression savings.
+3. Run `validate_v16_training_ready.py` to show the current trainer stack can really read it.
+4. Open one generated summary or visualization from `inspect_v16_dataset.py`.
+5. Then show `convert-alpha-to-lk` or `convert-lk-to-alpha` if you want the file-conversion side of the repo.
+6. Show MdxViewer loading the converted Alpha WDT and rendering it against the staged 0.5.3 client.
 
-That tells the actual story of the project much better than waving around stale one-off tools.
+That tells the actual story of the project much better than waving around stale one-off tools or pretending the viewer shell is the only important part.
 
 ## Development Notes
 
@@ -524,6 +605,9 @@ That tells the actual story of the project much better than waving around stale 
 
 ## See Also
 
+- `data-harvester/README.md`
+- `docs/architecture/v16-terrain-model-spec-2026-05-16.md`
+- `docs/architecture/v16-harvest-recovery-plan-2026-05-17.md`
 - `docs/architecture/wow-viewer-full-porting-roadmap.md`
 - `docs/architecture/v14-model-and-refactor-plan-2026-05-06.md`
 - workspace `AGENTS.md`

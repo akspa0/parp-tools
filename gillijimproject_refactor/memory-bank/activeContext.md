@@ -111,6 +111,7 @@ Six independent models, each training on ground truth only:
   - `V16Dataset` now exposes `mcly_ids` / `mcly_mask` from Zarr and `train_v16.py` now uses the existing V15-style masked cross-entropy path for MCLY supervision; `instance_mask` remains readable but still is not used by the current terrain trainer
   - V16 coordinate bookkeeping is now patched in two places: future streamed NPZ metadata carries explicit `tile_x` / `tile_y`, and `build_v16_dataset.py repair-index --build <key>` can rewrite existing `index.parquet` files in place from a metadata-only re-stream without touching the stored tensor arrays
 - Repo truth still needs operator proof from a user-run rebuild before this recovery slice can be treated as validated.
+- `wow-viewer/README.md` now leads with the V16 dataset/training lane, including repo-level links and command surfaces for `build`, `repair-index`, validator, and `train_v16.py`, so new chats no longer have to infer that terrain-AI dataset generation is a primary repo goal.
 
 ## NOT YET (Blocked on User)
 - Full V16 builds for all client builds (rebuild harvester binary first)
