@@ -317,12 +317,12 @@ Every expected item below maps to a concrete file in `data-harvester/`.
 | Target | Source tensor key from `V16Dataset` | Loss path | Status |
 |---|---|---|---|
 | Height (257x257) | `height` | weighted L1 | Implemented |
-| Normals (257x257x3) | `normals`, `normal_mask` | cosine loss | Implemented |
-| Alpha (256x256x4) | `alpha` | weighted L1 | Implemented |
-| Holes (16x16) | `holes` | weighted L1 | Implemented |
-| Liquid mask (256x256) | `liquid` | weighted L1 | Implemented |
-| Liquid height (256x256) | `liquid_height` | masked weighted L1 (where liquid exists) | Implemented |
-| MCLY classes | `mcly_ids`, `mcly_mask` | masked cross-entropy | Implemented |
+| Normals (257x257x3) | `normals`, `normal_mask` | cosine loss, per-sample `has_normals` mask | Implemented |
+| Alpha (256x256x4) | `alpha` | weighted L1, per-sample `has_alpha` mask | Implemented |
+| Holes (16x16) | `holes` | weighted L1, per-sample `has_holes` mask | Implemented |
+| Liquid mask (256x256) | `liquid` | weighted L1, per-sample `has_liquid` mask | Implemented |
+| Liquid height (256x256) | `liquid_height` | masked weighted L1 (where liquid exists), per-sample `has_liquid` mask | Implemented |
+| MCLY classes | `mcly_ids`, `mcly_mask` | masked cross-entropy, per-sample `has_mcly` mask | Implemented |
 
 ### Signals present in V16 dataset but not yet supervised
 

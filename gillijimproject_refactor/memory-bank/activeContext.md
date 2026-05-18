@@ -67,6 +67,15 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
   - `torch.compile` is used only on CUDA by default, and can be disabled with `--no-compile`.
   - CPU-only smoke no longer fails on missing `cl.exe`.
 
+### New: strict per-sample `has_*` loss gating fix (2026-05-18)
+- `train_v16.py` no longer scales optional-head losses by batch-mean `has_*`.
+- Optional heads now compute per-sample loss first, then apply masked reduction with:
+  - `has_normals`, `has_alpha`, `has_holes`, `has_liquid`, `has_mcly`
+- This prevents tiles missing a signal from still influencing that head via zero-filled targets.
+- Focused smoke proof:
+  - `uv run python scripts/train_v16.py --builds 3_3_5_12340 --epochs 1 --batch-size 2 --device cpu --train-max-tiles 8 --val-max-tiles 4 --val-interval 1 --val-snapshots 1 --run-name smoke_v16_per_sample_maskfix`
+  - completed successfully with checkpoints/validation output.
+
 ### Zarr Arrays (per tile)
 height_257, normal_xyz, normal_mask, alpha_256, holes_16, liquid_mask, liquid_height, **object_mask**, **object_precise_mask**, **object_instance_mask** (NEW), minimap_rgb, shadow_mask, mcly_texture_ids, mcly_layer_mask
 

@@ -378,12 +378,12 @@ def main() -> None:
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not args.no_amp)):
                 pred_h, pred_n, pred_a, pred_ho, pred_lq, pred_lqh, pred_mc = model(inp)
 
-                loss_h = _weighted_l1(pred_h, hgt, wgt)
-                loss_n = _cosine_loss(pred_n, nrm, nm_mask) * has_n.mean()
-                loss_a = _weighted_l1(pred_a, alp, wgt) * has_a.mean()
-                loss_ho = _weighted_l1(pred_ho, hol, wgt) * has_ho.mean()
-                loss_lq = _weighted_l1(pred_lq, liq, wgt) * has_lq.mean()
-                loss_lqh = _liquid_height_l1(pred_lqh, liq_h, liq, wgt) * has_lq.mean()
+                loss_h = _weighted_l1_per_sample(pred_h, hgt, wgt).mean()
+                loss_n = _masked_mean(_cosine_loss_per_sample(pred_n, nrm, nm_mask), has_n)
+                loss_a = _masked_mean(_weighted_l1_per_sample(pred_a, alp, wgt), has_a)
+                loss_ho = _masked_mean(_weighted_l1_per_sample(pred_ho, hol, wgt), has_ho)
+                loss_lq = _masked_mean(_weighted_l1_per_sample(pred_lq, liq, wgt), has_lq)
+                loss_lqh = _masked_mean(_liquid_height_l1_per_sample(pred_lqh, liq_h, liq, wgt), has_lq)
 
                 B = pred_mc.size(0)
                 pred_mc_r = pred_mc.view(B, 4, 16, 16, 16).permute(0, 1, 4, 2, 3)
@@ -393,8 +393,10 @@ def main() -> None:
                     reduction="none",
                 ).view(B, 4, 16, 16)
                 mc_mask = mlm.permute(0, 3, 1, 2)
-                n_active = mc_mask.sum() + 1e-8
-                loss_mc = (loss_mc * mc_mask).sum() / n_active * has_mc.mean()
+                loss_mc = _masked_mean(
+                    (loss_mc * mc_mask).sum(dim=(1, 2, 3)) / (mc_mask.sum(dim=(1, 2, 3)) + 1e-8),
+                    has_mc,
+                )
 
                 loss = loss_h + 2.0 * loss_n + loss_a + loss_ho + loss_lq + 0.5 * loss_lqh + 0.3 * loss_mc
 
@@ -481,14 +483,20 @@ def main() -> None:
     print(f"Done. Run dir: {run_dir}")
 
 
-def _weighted_l1(pred: torch.Tensor, target: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    return (values * mask).sum() / (mask.sum() + 1e-8)
+
+
+def _weighted_l1_per_sample(pred: torch.Tensor, target: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
     diff = (pred - target).abs().mean(dim=1, keepdim=True)
     if diff.shape[2:] != weight.shape[2:]:
         weight = F.interpolate(weight, size=diff.shape[2:], mode="bilinear", align_corners=False)
-    return (diff * weight).sum() / (weight.sum() + 1e-8)
+    numer = (diff * weight).sum(dim=(1, 2, 3))
+    denom = weight.sum(dim=(1, 2, 3)) + 1e-8
+    return numer / denom
 
 
-def _liquid_height_l1(
+def _liquid_height_l1_per_sample(
     pred_height: torch.Tensor,
     target_height: torch.Tensor,
     liquid_mask: torch.Tensor,
@@ -500,16 +508,20 @@ def _liquid_height_l1(
         terrain_weight = F.interpolate(terrain_weight, size=mask.shape[2:], mode="bilinear", align_corners=False)
     eff = mask * terrain_weight
     diff = (pred_height - target_height).abs()
-    return (diff * eff).sum() / (eff.sum() + 1e-8)
+    numer = (diff * eff).sum(dim=(1, 2, 3))
+    denom = eff.sum(dim=(1, 2, 3)) + 1e-8
+    return numer / denom
 
 
-def _cosine_loss(pred: torch.Tensor, target: torch.Tensor, normal_mask: torch.Tensor) -> torch.Tensor:
+def _cosine_loss_per_sample(pred: torch.Tensor, target: torch.Tensor, normal_mask: torch.Tensor) -> torch.Tensor:
     pred_n = F.normalize(pred, dim=1)
     cos_sim = F.cosine_similarity(pred_n, target, dim=1)
     mask = normal_mask.squeeze(1)
     if cos_sim.shape[-2:] != mask.shape[-2:]:
         mask = F.interpolate(mask.unsqueeze(1), size=cos_sim.shape[-2:], mode="nearest").squeeze(1)
-    return ((1.0 - cos_sim) * mask).sum() / (mask.sum() + 1e-8)
+    numer = ((1.0 - cos_sim) * mask).sum(dim=(1, 2))
+    denom = mask.sum(dim=(1, 2)) + 1e-8
+    return numer / denom
 
 
 def _to_rgb_panel(arr: np.ndarray, lo: float, hi: float) -> np.ndarray:
@@ -720,11 +732,11 @@ def _validate(model, loader, device, no_amp: bool = False):
         has_mc = batch["has_mcly"].to(device, non_blocking=True).float()
         with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not no_amp)):
             pred_h, pred_n, pred_a, _, pred_lq, pred_lqh, pred_mc = model(inp)
-            total_h += _weighted_l1(pred_h, hgt, wgt).item()
-            total_n += (_cosine_loss(pred_n, nrm, nm_mask) * has_n.mean()).item()
-            total_a += (_weighted_l1(pred_a, alp, wgt) * has_a.mean()).item()
-            total_lq += (_weighted_l1(pred_lq, liq, wgt) * has_lq.mean()).item()
-            total_lqh += (_liquid_height_l1(pred_lqh, liq_h, liq, wgt) * has_lq.mean()).item()
+            total_h += _weighted_l1_per_sample(pred_h, hgt, wgt).mean().item()
+            total_n += _masked_mean(_cosine_loss_per_sample(pred_n, nrm, nm_mask), has_n).item()
+            total_a += _masked_mean(_weighted_l1_per_sample(pred_a, alp, wgt), has_a).item()
+            total_lq += _masked_mean(_weighted_l1_per_sample(pred_lq, liq, wgt), has_lq).item()
+            total_lqh += _masked_mean(_liquid_height_l1_per_sample(pred_lqh, liq_h, liq, wgt), has_lq).item()
             B = pred_mc.size(0)
             pred_mc_r = pred_mc.view(B, 4, 16, 16, 16).permute(0, 1, 4, 2, 3)
             loss_mc = torch.nn.functional.cross_entropy(
@@ -733,8 +745,10 @@ def _validate(model, loader, device, no_amp: bool = False):
                 reduction="none",
             ).view(B, 4, 16, 16)
             mc_mask = mlm.permute(0, 3, 1, 2)
-            n_active = mc_mask.sum() + 1e-8
-            total_mc += ((loss_mc * mc_mask).sum() / n_active * has_mc.mean()).item()
+            total_mc += _masked_mean(
+                (loss_mc * mc_mask).sum(dim=(1, 2, 3)) / (mc_mask.sum(dim=(1, 2, 3)) + 1e-8),
+                has_mc,
+            ).item()
         n += 1
     if n == 0:
         return {"val_h": 0.0, "val_n": 0.0, "val_a": 0.0, "val_lq": 0.0, "val_lqh": 0.0, "val_mc": 0.0}

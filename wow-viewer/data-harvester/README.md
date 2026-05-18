@@ -187,12 +187,12 @@ ConvNeXt V2 Nano encoder (15.6M pretrained) + U-Net decoder with skip fusion.
 | Head | Output | Loss |
 |------|---------|------|
 | height | (B,1,257,257) | L1, object-masked |
-| normals | (B,3,257,257) | 1 - cosine, normal-masked |
-| alpha | (B,4,256,256) | L1, object-masked |
-| holes | (B,1,16,16) | L1, object-masked |
-| liquid_mask | (B,1,256,256) | L1, object-masked |
-| liquid_height | (B,1,256,256) | masked L1 on liquid-present pixels |
-| mcly | (B,4,16,16,16 logits) | Cross-entropy, masked by `mcly_layer_mask` |
+| normals | (B,3,257,257) | 1 - cosine, normal-masked + per-sample `has_normals` gate |
+| alpha | (B,4,256,256) | L1, object-masked + per-sample `has_alpha` gate |
+| holes | (B,1,16,16) | L1, object-masked + per-sample `has_holes` gate |
+| liquid_mask | (B,1,256,256) | L1, object-masked + per-sample `has_liquid` gate |
+| liquid_height | (B,1,256,256) | masked L1 on liquid-present pixels + per-sample `has_liquid` gate |
+| mcly | (B,4,16,16,16 logits) | Cross-entropy, masked by `mcly_layer_mask` + per-sample `has_mcly` gate |
 
 ## Training
 
