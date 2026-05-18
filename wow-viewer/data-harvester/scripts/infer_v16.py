@@ -38,7 +38,7 @@ _SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from harvester.v15_model import V15Model  # noqa: E402
+from harvester.v16_model import V16Model  # noqa: E402
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -113,7 +113,7 @@ def _normalize_state_dict_keys(state_dict: dict[str, Any]) -> dict[str, Any]:
     return state_dict
 
 
-def _load_checkpoint_model(checkpoint_path: Path, device: torch.device) -> tuple[V15Model, dict[str, Any]]:
+def _load_checkpoint_model(checkpoint_path: Path, device: torch.device) -> tuple[V16Model, dict[str, Any]]:
     checkpoint = torch.load(checkpoint_path, map_location=device)
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
         state_dict = checkpoint["model_state_dict"]
@@ -122,7 +122,7 @@ def _load_checkpoint_model(checkpoint_path: Path, device: torch.device) -> tuple
     else:
         raise RuntimeError(f"Unsupported checkpoint payload type: {type(checkpoint)!r}")
 
-    model = V15Model().to(device)
+    model = V16Model().to(device)
     model.load_state_dict(_normalize_state_dict_keys(state_dict))
     model.eval()
     return model, checkpoint if isinstance(checkpoint, dict) else {}
@@ -134,7 +134,6 @@ def _write_patch_ready_summary(
     tile_name: str,
     predicted_height_257: np.ndarray,
     predicted_liquid_mask_256: np.ndarray,
-    predicted_liquid_height_256: np.ndarray,
     shard_tag: str,
 ) -> None:
     tile_dir = patch_ready_root / tile_name
@@ -143,15 +142,12 @@ def _write_patch_ready_summary(
     np.save(npy_path, predicted_height_257.astype(np.float32))
     liq_mask_path = tile_dir / "predicted_liquid_mask_256.npy"
     np.save(liq_mask_path, predicted_liquid_mask_256.astype(np.float32))
-    liq_height_path = tile_dir / "predicted_liquid_height_256.npy"
-    np.save(liq_height_path, predicted_liquid_height_256.astype(np.float32))
 
     summary = {
         "tile_name": tile_name,
         "shard": shard_tag,
         "predicted_height_257_path": npy_path.name,
         "predicted_liquid_mask_256_path": liq_mask_path.name,
-        "predicted_liquid_height_256_path": liq_height_path.name,
     }
     (tile_dir / "inference_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
@@ -259,13 +255,6 @@ def main() -> None:
         dtype=np.float32,
         compressors=[codec],
     )
-    pred_liquid_height = pred_root.create_array(
-        "liquid_pred_height_256",
-        shape=(_safe_int(total), _ALPHA_SIZE, _ALPHA_SIZE),
-        chunks=(batch_chunk, _ALPHA_SIZE, _ALPHA_SIZE),
-        dtype=np.float32,
-        compressors=[codec],
-    )
     pred_mcly = pred_root.create_array(
         "mcly_pred_logits_16x16x4x16",
         shape=(_safe_int(total), _HOLES_SIZE, _HOLES_SIZE, 4, 16),
@@ -296,14 +285,13 @@ def main() -> None:
 
             inp = torch.from_numpy(batch_minimap).permute(0, 3, 1, 2).to(device)
             with torch.amp.autocast("cuda", enabled=(args.amp and device.type == "cuda")):
-                out_height, out_normals, out_alpha, out_holes, out_liquid, out_liquid_height, out_mcly = model(inp)
+                out_height, out_normals, out_alpha, out_holes, out_liquid, out_mcly = model(inp)
 
             out_height_np = out_height.squeeze(1).cpu().numpy().astype(np.float32)
             out_normals_np = F.normalize(out_normals, dim=1).permute(0, 2, 3, 1).cpu().numpy().astype(np.float32)
             out_alpha_np = out_alpha.permute(0, 2, 3, 1).cpu().numpy().astype(np.float32)
             out_holes_np = out_holes.squeeze(1).cpu().numpy().astype(np.float32)
             out_liquid_np = out_liquid.squeeze(1).cpu().numpy().astype(np.float32)
-            out_liquid_height_np = out_liquid_height.squeeze(1).cpu().numpy().astype(np.float32)
             out_mcly_np = out_mcly.view(-1, 4, 16, 16, 16).permute(0, 3, 4, 1, 2).cpu().numpy().astype(np.float32)
 
             batch_means = means[start:end][:, None, None]
@@ -319,7 +307,6 @@ def main() -> None:
             pred_alpha[start:end] = out_alpha_np
             pred_holes[start:end] = out_holes_np
             pred_liquid[start:end] = out_liquid_np
-            pred_liquid_height[start:end] = out_liquid_height_np
             pred_mcly[start:end] = out_mcly_np
 
             if not args.no_patch_ready:
@@ -331,7 +318,6 @@ def main() -> None:
                         tile_name=tile_name,
                         predicted_height_257=out_height_world[batch_offset],
                         predicted_liquid_mask_256=out_liquid_np[batch_offset],
-                        predicted_liquid_height_256=out_liquid_height_np[batch_offset],
                         shard_tag=f"{args.build}.zarr:tile_id={source_tile_id}",
                     )
 

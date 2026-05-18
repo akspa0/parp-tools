@@ -1,7 +1,7 @@
 """Train V16 terrain model — minimap → terrain mesh from Zarr stores.
 
-Uses V16Dataset (consolidated Zarr) with V15Model architecture (ConvNeXt V2 Nano
-encoder + U-Net decoder + liquid mask+height heads). The model is the same; only the data
+Uses V16Dataset (consolidated Zarr) with V16Model architecture (ConvNeXt V2 Nano
+encoder + U-Net decoder + liquid-mask head). The model is the same; only the data
 pipeline changed (Zarr instead of individual NPZ shards).
 
 Usage:
@@ -36,7 +36,7 @@ from PIL import ImageDraw as _PILImageDraw  # noqa: E402
 from torch.utils.data import DataLoader  # noqa: E402
 from torch.utils.data import Sampler  # noqa: E402
 
-from harvester.v15_model import V15Model  # noqa: E402
+from harvester.v16_model import V16Model  # noqa: E402
 from harvester.v16_dataset import V16Dataset  # noqa: E402
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -409,7 +409,7 @@ def main() -> None:
         pin_memory=(device.type == "cuda"),
     )
 
-    model = V15Model().to(device)
+    model = V16Model().to(device)
     n = model.count_parameters()
     print(f"Parameters: {n:,}")
     can_compile = hasattr(torch, "compile") and not args.no_compile and device.type == "cuda"
@@ -484,7 +484,6 @@ def main() -> None:
         epoch_a = 0.0
         epoch_ho = 0.0
         epoch_lq = 0.0
-        epoch_lqh = 0.0
         epoch_mc = 0.0
         t0 = time.perf_counter()
 
@@ -496,7 +495,6 @@ def main() -> None:
             alp = batch["alpha"].to(device, non_blocking=True)
             hol = batch["holes"].to(device, non_blocking=True)
             liq = batch["liquid"].to(device, non_blocking=True)
-            liq_h = batch["liquid_height"].to(device, non_blocking=True)
             mly = batch["mcly_ids"].to(device, non_blocking=True)
             mlm = batch["mcly_mask"].to(device, non_blocking=True)
             wgt = batch["weight"].to(device, non_blocking=True)
@@ -509,14 +507,13 @@ def main() -> None:
             optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not args.no_amp)):
-                pred_h, pred_n, pred_a, pred_ho, pred_lq, pred_lqh, pred_mc = model(inp)
+                pred_h, pred_n, pred_a, pred_ho, pred_lq, pred_mc = model(inp)
 
                 loss_h = _weighted_l1_per_sample(pred_h, hgt, wgt).mean()
                 loss_n = _masked_mean(_cosine_loss_per_sample(pred_n, nrm, nm_mask), has_n)
                 loss_a = _masked_mean(_weighted_l1_per_sample(pred_a, alp, wgt), has_a)
                 loss_ho = _masked_mean(_weighted_l1_per_sample(pred_ho, hol, wgt), has_ho)
                 loss_lq = _masked_mean(_weighted_l1_per_sample(pred_lq, liq, wgt), has_lq)
-                loss_lqh = _masked_mean(_liquid_height_l1_per_sample(pred_lqh, liq_h, liq, wgt), has_lq)
 
                 B = pred_mc.size(0)
                 pred_mc_r = pred_mc.view(B, 4, 16, 16, 16).permute(0, 1, 4, 2, 3)
@@ -531,7 +528,7 @@ def main() -> None:
                     has_mc,
                 )
 
-                loss = loss_h + 2.0 * loss_n + loss_a + loss_ho + loss_lq + 0.5 * loss_lqh + 0.3 * loss_mc
+                loss = loss_h + 2.0 * loss_n + loss_a + loss_ho + loss_lq + 0.3 * loss_mc
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -544,7 +541,6 @@ def main() -> None:
             epoch_a += loss_a.item()
             epoch_ho += loss_ho.item()
             epoch_lq += loss_lq.item()
-            epoch_lqh += loss_lqh.item()
             epoch_mc += loss_mc.item()
 
         scheduler.step()
@@ -556,14 +552,14 @@ def main() -> None:
             f"Epoch {epoch:3d}/{args.epochs} | "
             f"h={epoch_h / n_bt:.4f} n={epoch_n / n_bt:.4f} "
             f"a={epoch_a / n_bt:.4f} ho={epoch_ho / n_bt:.4f} "
-            f"lq={epoch_lq / n_bt:.4f} lqh={epoch_lqh / n_bt:.4f} mc={epoch_mc / n_bt:.4f} "
+            f"lq={epoch_lq / n_bt:.4f} mc={epoch_mc / n_bt:.4f} "
             f"lr={lr_now:.2e} {elapsed:.1f}s"
         )
 
         entry = {
             "epoch": epoch, "train_h": epoch_h / n_bt, "train_n": epoch_n / n_bt,
             "train_a": epoch_a / n_bt, "train_ho": epoch_ho / n_bt,
-            "train_lq": epoch_lq / n_bt, "train_lqh": epoch_lqh / n_bt,
+            "train_lq": epoch_lq / n_bt,
             "train_mc": epoch_mc / n_bt, "lr": lr_now,
         }
 
@@ -572,7 +568,7 @@ def main() -> None:
             entry.update(v)
             print(
                 f"        val | h={v['val_h']:.4f} n={v['val_n']:.4f} "
-                f"a={v['val_a']:.4f} lq={v['val_lq']:.4f} lqh={v['val_lqh']:.4f} mc={v['val_mc']:.4f}"
+                f"a={v['val_a']:.4f} lq={v['val_lq']:.4f} mc={v['val_mc']:.4f}"
             )
             if v["val_h"] < best_val:
                 best_val = v["val_h"]
@@ -639,23 +635,6 @@ def _weighted_l1_per_sample(pred: torch.Tensor, target: torch.Tensor, weight: to
         weight = F.interpolate(weight, size=diff.shape[2:], mode="bilinear", align_corners=False)
     numer = (diff * weight).sum(dim=(1, 2, 3))
     denom = weight.sum(dim=(1, 2, 3)) + 1e-8
-    return numer / denom
-
-
-def _liquid_height_l1_per_sample(
-    pred_height: torch.Tensor,
-    target_height: torch.Tensor,
-    liquid_mask: torch.Tensor,
-    terrain_weight: torch.Tensor,
-) -> torch.Tensor:
-    # Only supervise liquid height where ground-truth liquid exists.
-    mask = (liquid_mask > 0.05).float()
-    if terrain_weight.shape[2:] != mask.shape[2:]:
-        terrain_weight = F.interpolate(terrain_weight, size=mask.shape[2:], mode="bilinear", align_corners=False)
-    eff = mask * terrain_weight
-    diff = (pred_height - target_height).abs()
-    numer = (diff * eff).sum(dim=(1, 2, 3))
-    denom = eff.sum(dim=(1, 2, 3)) + 1e-8
     return numer / denom
 
 
@@ -745,19 +724,13 @@ def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch, overvi
             nm_mask = batch["normal_mask"][i].squeeze().cpu().numpy()
             alp = batch["alpha"][i].permute(1, 2, 0).cpu().numpy()
             liq_gt = batch["liquid"][i].squeeze().cpu().numpy()
-            liq_h_gt = batch["liquid_height"][i].squeeze().cpu().numpy()
             wgt = batch["weight"][i].squeeze().cpu().numpy()
 
-            pred_h_raw, pred_n, pred_a, _pred_ho, pred_lq, pred_lqh, _pred_mc = model(inp)
+            pred_h_raw, pred_n, pred_a, _pred_ho, pred_lq, _pred_mc = model(inp)
             pred_h = pred_h_raw.squeeze().cpu().numpy()
             pred_n = F.normalize(pred_n, dim=1).squeeze(0).permute(1, 2, 0).cpu().numpy()
             pred_a = pred_a.squeeze(0).permute(1, 2, 0).cpu().numpy()
             pred_lq = pred_lq.squeeze().cpu().numpy()
-            pred_lqh = pred_lqh.squeeze().cpu().numpy()
-
-            liq_px = liq_gt > 0.05
-            liq_lo = float(liq_h_gt[liq_px].min()) if liq_px.any() else 0.0
-            liq_hi = float(liq_h_gt[liq_px].max()) if liq_px.any() else 1.0
 
             tile_dir = out_dir / f"tile_{count:02d}"
             tile_dir.mkdir(parents=True, exist_ok=True)
@@ -775,11 +748,6 @@ def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch, overvi
             if has_lq:
                 _snap_save(liq_gt, 0, 1, tile_dir / "liquid_gt.png")
                 _snap_save(pred_lq, 0, 1, tile_dir / "liquid_pred.png")
-                if liq_px.any():
-                    lo = min(float(liq_h_gt[liq_px].min()), float(pred_lqh[liq_px].min()))
-                    hi = max(float(liq_h_gt[liq_px].max()), float(pred_lqh[liq_px].max()))
-                    _snap_save(liq_h_gt, lo, hi, tile_dir / "liquid_height_gt.png")
-                    _snap_save(pred_lqh, lo, hi, tile_dir / "liquid_height_pred.png")
 
             valid = nm_mask > 0.5
             if valid.any():
@@ -797,7 +765,6 @@ def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch, overvi
                 "normals_cosine": n_cos,
                 "alpha_l1": float(np.abs(pred_a - alp).mean()),
                 "liquid_l1": float(np.abs(pred_lq - liq_gt).mean()),
-                "liquid_height_l1": float(np.abs(pred_lqh - liq_h_gt)[liq_gt > 0.05].mean()) if (liq_gt > 0.05).any() else 0.0,
             }
             (tile_dir / "metrics.json").write_text(json.dumps(tile_metrics, indent=2))
 
@@ -808,8 +775,6 @@ def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch, overvi
 
             h_lo = min(float(hgt.min()), float(pred_h.min()))
             h_hi = max(float(hgt.max()), float(pred_h.max()))
-            liq_h_lo = min(float(pred_lqh.min()), liq_lo)
-            liq_h_hi = max(float(pred_lqh.max()), liq_hi)
             panels = [
                 _draw_label(_to_rgb_panel(batch["input"][i].permute(1, 2, 0).cpu().numpy(), 0.0, 1.0), "input/minimap"),
                 _draw_label(_to_rgb_panel(hgt, h_lo, h_hi), "height gt"),
@@ -820,8 +785,6 @@ def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch, overvi
                 _draw_label(_to_rgb_panel(pred_a[:, :, 0], 0.0, 1.0), "alpha pred ch0"),
                 _draw_label(_to_rgb_panel(liq_gt, 0.0, 1.0), "liquid mask gt"),
                 _draw_label(_to_rgb_panel(pred_lq, 0.0, 1.0), "liquid mask pred"),
-                _draw_label(_to_rgb_panel(liq_h_gt, liq_h_lo, liq_h_hi), "liquid h gt"),
-                _draw_label(_to_rgb_panel(pred_lqh, liq_h_lo, liq_h_hi), "liquid h pred"),
                 _draw_label(_to_rgb_panel(wgt, 0.0, 1.0), "terrain weight"),
             ]
             overview_rows.append(
@@ -858,7 +821,6 @@ def _validate(model, loader, device, no_amp: bool = False):
     total_n = 0.0
     total_a = 0.0
     total_lq = 0.0
-    total_lqh = 0.0
     total_mc = 0.0
     n = 0
     for batch in loader:
@@ -868,7 +830,6 @@ def _validate(model, loader, device, no_amp: bool = False):
         nm_mask = batch["normal_mask"].to(device, non_blocking=True)
         alp = batch["alpha"].to(device, non_blocking=True)
         liq = batch["liquid"].to(device, non_blocking=True)
-        liq_h = batch["liquid_height"].to(device, non_blocking=True)
         mly = batch["mcly_ids"].to(device, non_blocking=True)
         mlm = batch["mcly_mask"].to(device, non_blocking=True)
         wgt = batch["weight"].to(device, non_blocking=True)
@@ -877,12 +838,11 @@ def _validate(model, loader, device, no_amp: bool = False):
         has_lq = batch["has_liquid"].to(device, non_blocking=True).float()
         has_mc = batch["has_mcly"].to(device, non_blocking=True).float()
         with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not no_amp)):
-            pred_h, pred_n, pred_a, _, pred_lq, pred_lqh, pred_mc = model(inp)
+            pred_h, pred_n, pred_a, _, pred_lq, pred_mc = model(inp)
             total_h += _weighted_l1_per_sample(pred_h, hgt, wgt).mean().item()
             total_n += _masked_mean(_cosine_loss_per_sample(pred_n, nrm, nm_mask), has_n).item()
             total_a += _masked_mean(_weighted_l1_per_sample(pred_a, alp, wgt), has_a).item()
             total_lq += _masked_mean(_weighted_l1_per_sample(pred_lq, liq, wgt), has_lq).item()
-            total_lqh += _masked_mean(_liquid_height_l1_per_sample(pred_lqh, liq_h, liq, wgt), has_lq).item()
             B = pred_mc.size(0)
             pred_mc_r = pred_mc.view(B, 4, 16, 16, 16).permute(0, 1, 4, 2, 3)
             loss_mc = torch.nn.functional.cross_entropy(
@@ -897,13 +857,12 @@ def _validate(model, loader, device, no_amp: bool = False):
             ).item()
         n += 1
     if n == 0:
-        return {"val_h": 0.0, "val_n": 0.0, "val_a": 0.0, "val_lq": 0.0, "val_lqh": 0.0, "val_mc": 0.0}
+        return {"val_h": 0.0, "val_n": 0.0, "val_a": 0.0, "val_lq": 0.0, "val_mc": 0.0}
     return {
         "val_h": total_h / n,
         "val_n": total_n / n,
         "val_a": total_a / n,
         "val_lq": total_lq / n,
-        "val_lqh": total_lqh / n,
         "val_mc": total_mc / n,
     }
 

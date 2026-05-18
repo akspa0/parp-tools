@@ -416,6 +416,28 @@ def _try_parse_tile_coords_from_stem(stem: str) -> tuple[int | None, int | None]
         return None, None
 
 
+def _try_parse_alpha_tile_coords(value: str) -> tuple[int | None, int | None]:
+    marker = "alpha-tile("
+    idx = value.lower().find(marker)
+    if idx < 0:
+        return None, None
+    inside = value[idx + len(marker):]
+    end = inside.find(")")
+    if end < 0:
+        return None, None
+    pair = inside[:end].split(",", 1)
+    if len(pair) != 2:
+        return None, None
+    try:
+        tx = int(pair[0].strip())
+        ty = int(pair[1].strip())
+    except (TypeError, ValueError):
+        return None, None
+    if tx < 0 or tx > 63 or ty < 0 or ty > 63:
+        return None, None
+    return tx, ty
+
+
 def _extract_tile_coords_from_metadata(meta: dict[str, object]) -> tuple[int, int]:
     tx = meta.get("tile_x")
     ty = meta.get("tile_y")
@@ -427,12 +449,18 @@ def _extract_tile_coords_from_metadata(meta: dict[str, object]) -> tuple[int, in
 
     tile_name = str(meta.get("tile_name", "") or "")
     if tile_name:
+        alpha_tx, alpha_ty = _try_parse_alpha_tile_coords(tile_name)
+        if alpha_tx is not None and alpha_ty is not None:
+            return alpha_tx, alpha_ty
         parsed_tx, parsed_ty = _try_parse_tile_coords_from_stem(tile_name)
         if parsed_tx is not None and parsed_ty is not None:
             return parsed_tx, parsed_ty
 
     source = str(meta.get("source_adt_path", "") or "")
     if source:
+        alpha_tx, alpha_ty = _try_parse_alpha_tile_coords(source)
+        if alpha_tx is not None and alpha_ty is not None:
+            return alpha_tx, alpha_ty
         parsed_tx, parsed_ty = _try_parse_tile_coords_from_stem(Path(source).stem)
         if parsed_tx is not None and parsed_ty is not None:
             return parsed_tx, parsed_ty

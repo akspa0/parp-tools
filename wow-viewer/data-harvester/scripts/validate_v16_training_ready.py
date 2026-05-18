@@ -18,7 +18,7 @@ import pyarrow.parquet as pq
 import torch
 from torch.utils.data import DataLoader
 
-from harvester.v15_model import V15Model
+from harvester.v16_model import V16Model
 from harvester.v16_dataset import V16Dataset
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-model-forward",
         action="store_true",
-        help="Skip the V15Model forward-pass check and validate dataset loading only",
+        help="Skip the V16Model forward-pass check and validate dataset loading only",
     )
     parser.add_argument(
         "--output-dir",
@@ -343,13 +343,13 @@ def _validate_model_forward(
             pin_memory=False,
         )
         batch = next(iter(loader))
-        model = V15Model().to(device)
+        model = V16Model().to(device)
         model.eval()
 
         with torch.no_grad():
             outputs = model(batch["input"].to(device))
 
-        height, normals, alpha, holes, liquid, liquid_height, mcly = outputs
+        height, normals, alpha, holes, liquid, mcly = outputs
         return {
             "ok": True,
             "device": str(device),
@@ -359,7 +359,6 @@ def _validate_model_forward(
                 "alpha": list(alpha.shape),
                 "holes": list(holes.shape),
                 "liquid": list(liquid.shape),
-                "liquid_height": list(liquid_height.shape),
                 "mcly_logits": list(mcly.shape),
             },
         }
@@ -435,14 +434,14 @@ def main() -> None:
         "builds": builds,
         "overall_ok": overall_ok,
         "trainer_contract": {
-            "consumed_targets": ["height", "normals", "alpha", "holes", "liquid", "liquid_height", "mcly"],
+            "consumed_targets": ["height", "normals", "alpha", "holes", "liquid", "mcly"],
             "dataset_exposes_instance_mask": True,
             "trainer_uses_instance_mask": False,
             "dataset_exposes_mcly_arrays": True,
             "trainer_uses_mcly_targets": True,
             "dataset_exposes_liquid_height": True,
-            "trainer_uses_liquid_height": True,
-            "note": "Current train_v16.py supervises MCLY and liquid-height targets from the V16 Zarr contract.",
+            "trainer_uses_liquid_height": False,
+            "note": "Current train_v16.py supervises liquid mask and MCLY; liquid height is retained in dataset for future refinement models.",
         },
         "build_summaries": build_summaries,
         "split_validation": {

@@ -91,6 +91,27 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
   - run 2: same `--run-name smoke_v16_resume --epochs 2 --resume-from auto`
   - second run resumed from `v16_last.pt` at `start_epoch=2` and finished cleanly.
 
+### New: liquid-height deferred from core V16 model (2026-05-18)
+- Per user direction, current V16 terrain model no longer predicts or supervises `liquid_height`.
+- `V15Model` now outputs 6 heads for V16 terrain lane:
+  - `height`, `normals`, `alpha`, `holes`, `liquid_mask`, `mcly_logits`
+- `train_v16.py` no longer consumes `batch["liquid_height"]` and no longer computes `loss_lqh`.
+- `infer_v16.py` no longer emits `liquid_pred_height_256` or `predicted_liquid_height_256.npy`; only liquid mask remains in core path.
+- `validate_v16_training_ready.py` now reports:
+  - `trainer_uses_liquid_height=false`
+  - consumed targets exclude `liquid_height`
+- `liquid_height` stays in the V16 dataset contract for a later dedicated liquid-refinement model.
+- Focused proofs:
+  - readiness: `overall_ok=true`, `issues=0` on staged `3_3_5_12340`
+  - smoke train run: `smoke_v16_no_liquid_height` completed (`Parameters: 27,396,026`).
+
+### New: explicit liquid-refinement model note (2026-05-18)
+- Docs now explicitly define a separate planned liquid model lane:
+  - inputs centered on `minimap_rgb` plus optional liquid priors
+  - targets/outputs for `liquid_mask` and `liquid_height`
+  - strict boundary: terrain lane owns terrain geometry/material channels, liquid lane owns liquid placement/height fidelity.
+- Terrain lane guidance now explicitly states liquid/object masks remain loss-gating signals for terrain supervision.
+
 ### New: Alpha map-name placeholder fix for `"memory"` labels (2026-05-18)
 - Root cause confirmed: Alpha archive byte-path reads used `AlphaWdtReader.TryReadTile(byte[],...)`, which previously tagged tile source path as `"memory"`, and `AlphaTensorPackBuilder` derived `map_name` from that source path.
 - Code changes:
@@ -105,6 +126,10 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
 - Trainer-side guard now also blocks bad metadata rows from curation by default:
   - `train_v16.py` drops placeholder-map rows during subset selection unless
     `--include-placeholder-map-tiles` is explicitly passed.
+- Legacy Alpha coordinate recovery hardening:
+  - `build_v16_dataset.py` now parses `#alpha-tile(x,y)` markers from
+    `tile_name` / `source_adt_path` when explicit metadata `tile_x` / `tile_y`
+    are absent, so Alpha quilt coordinates no longer silently default to `(0,0)`.
 
 ### Zarr Arrays (per tile)
 height_257, normal_xyz, normal_mask, alpha_256, holes_16, liquid_mask, liquid_height, **object_mask**, **object_precise_mask**, **object_instance_mask** (NEW), minimap_rgb, shadow_mask, mcly_texture_ids, mcly_layer_mask

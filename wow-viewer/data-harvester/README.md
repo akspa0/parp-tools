@@ -50,7 +50,7 @@ uv run python scripts/backfill_v16_resume_state.py --builds 0_5_3_3368 0_5_5_349
 # Generate human-friendly summaries and sample sheets from existing stores:
 uv run python scripts/inspect_v16_dataset.py --build 3_3_5_12340 --backfill-summary --write-images
 
-# Validate that V16Dataset/DataLoader/V15Model can consume the built store:
+# Validate that V16Dataset/DataLoader/V16Model can consume the built store:
 uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340
 
 # Repair tile_x/tile_y in index.parquet from a metadata-only re-stream.
@@ -87,9 +87,10 @@ Build behavior:
 - Incoming fixed-shape signals are now coerced to their canonical Zarr shapes before batching, so variable layer-count payloads do not break `np.stack(...)` during resume/build runs.
 - Placement-heavy tiles still cost more than empty terrain because object masks are painted per placement, but the builder no longer reparses the same placement catalog twice per tile for masks and placement arrays.
 - `stats` now reports logical raw array size versus on-disk Zarr size, including per-array ratios and whole-store savings, so compression wins are visible instead of inferred.
-- `scripts/validate_v16_training_ready.py` now provides a dedicated training-readiness proof surface: it opens the finalized stores, reads real samples through `V16Dataset`, checks a real `DataLoader` batch, and can run one `V15Model` forward pass on CPU so dataset validity is separated from trainer validity.
+- `scripts/validate_v16_training_ready.py` now provides a dedicated training-readiness proof surface: it opens the finalized stores, reads real samples through `V16Dataset`, checks a real `DataLoader` batch, and can run one `V16Model` forward pass on CPU so dataset validity is separated from trainer validity.
 - `repair-index` can now rewrite `index.parquet` tile coordinates in place from a metadata-only re-stream of the staged client, so bad coordinate bookkeeping no longer forces a full dataset rebuild.
 - Future harvest output now carries explicit `tile_x` / `tile_y` in `metadata.json`, and the builder trusts explicit metadata first instead of brittle `source_adt_path` parsing.
+- Legacy Alpha metadata fallback is now explicit: when `tile_x` / `tile_y` are missing, the builder can recover coordinates from `#alpha-tile(x,y)` markers in `tile_name` or `source_adt_path`.
 
 ### Train V16
 
@@ -145,7 +146,7 @@ Training-readiness validation writes:
 - `wow-viewer/output/datasets/v16/validation/<build>.training_readiness.json`
 
 It currently validates the signals that `train_v16.py` actually uses:
-- `input`, `height`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid`, `liquid_height`, `mcly_ids`, `mcly_mask`, `weight`
+- `input`, `height`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid`, `mcly_ids`, `mcly_mask`, `weight`
 
 It also checks that `instance_mask` can still be read cleanly, but the current trainer does not yet use:
 - `instance_mask`
@@ -218,8 +219,34 @@ ConvNeXt V2 Nano encoder (15.6M pretrained) + U-Net decoder with skip fusion.
 | alpha | (B,4,256,256) | L1, object-masked + per-sample `has_alpha` gate |
 | holes | (B,1,16,16) | L1, object-masked + per-sample `has_holes` gate |
 | liquid_mask | (B,1,256,256) | L1, object-masked + per-sample `has_liquid` gate |
-| liquid_height | (B,1,256,256) | masked L1 on liquid-present pixels + per-sample `has_liquid` gate |
 | mcly | (B,4,16,16,16 logits) | Cross-entropy, masked by `mcly_layer_mask` + per-sample `has_mcly` gate |
+
+`liquid_height` remains in the dataset contract for a later liquid-refinement model,
+but is intentionally not supervised in the current V16 terrain model.
+
+### Planned Liquid Model (separate from terrain)
+
+Keep terrain reconstruction and liquid reconstruction as separate models:
+
+- Terrain model (current V16): predicts terrain channels (`height/normals/alpha/holes`) + liquid mask signal for terrain-aware gating.
+- Liquid refinement model (planned): predicts liquid placement + liquid heights from minimap-centric inputs.
+
+Planned liquid-model training inputs:
+
+- `minimap_rgb`
+- `liquid_mask` (as supervision target and optional conditioning signal)
+- `liquid_height` (supervision target where liquid exists)
+- optional supplemental liquid priors (WL*/legacy liquid hints) when available
+
+Planned liquid-model outputs:
+
+- refined `liquid_mask`
+- refined `liquid_height`
+
+Loss-role boundary:
+
+- Terrain model uses liquid/object masks as exclusion weighting so non-terrain pixels do not bias terrain reconstruction.
+- Liquid model owns liquid placement/height quality and can be iterated independently without retraining terrain.
 
 ## Training
 
@@ -243,4 +270,5 @@ uv run python scripts/train_v15.py --epochs 200
 | `scripts/train_v15.py` | V15 training script |
 | `src/harvester/v16_dataset.py` | V16 PyTorch Dataset (Zarr) |
 | `src/harvester/v15_dataset.py` | V15 PyTorch Dataset (NPZ) |
-| `src/harvester/v15_model.py` | V15Model + V16Model (same architecture) |
+| `src/harvester/v16_model.py` | V16Model (current terrain model) |
+| `src/harvester/v15_model.py` | Compatibility shim for legacy V15 imports |

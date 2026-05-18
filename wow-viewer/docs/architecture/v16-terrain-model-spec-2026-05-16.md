@@ -229,7 +229,7 @@ masks and placement-array export.
 The `stats` command now reports logical raw array size versus on-disk Zarr
 size, including per-array compression ratios and whole-store savings.
 The dedicated `validate_v16_training_ready.py` command now answers a separate
-question: can the current `V16Dataset`, `DataLoader`, and `V15Model` actually
+question: can the current `V16Dataset`, `DataLoader`, and `V16Model` actually
 consume the finalized store without shape, dtype, or finite-value surprises.
 If older final stores have bad `tile_x` / `tile_y` bookkeeping, the
 `repair-index` command now rewrites `index.parquet` in place from a
@@ -238,6 +238,9 @@ placements table untouched.
 Future streamed NPZ metadata now carries explicit `tile_x` / `tile_y`, and the
 Python builder trusts those explicit fields before falling back to `tile_name`
 or `source_adt_path` parsing.
+For legacy Alpha blobs that lacked explicit coordinates, fallback parsing now
+also recognizes `#alpha-tile(x,y)` markers, so quilt coordinates can still be
+recovered deterministically.
 
 ### Streaming Protocol
 
@@ -309,7 +312,7 @@ The training-readiness validator writes:
 
 It validates the signals the current trainer actually uses:
 
-- `input`, `height`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid`, `liquid_height`, `mcly_ids`, `mcly_mask`, `weight`
+- `input`, `height`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid`, `mcly_ids`, `mcly_mask`, `weight`
 
 It also proves that `instance_mask` remains readable by the dataset layer, but
 the current trainer still does not supervise:
@@ -326,7 +329,7 @@ Every expected item below maps to a concrete file in `data-harvester/`.
 | Expected surface | Implemented in | Status |
 |---|---|---|
 | Zarr dataset loader (`<build>.zarr`, `index.parquet`) | `src/harvester/v16_dataset.py` | Implemented |
-| Model used by V16 trainer | `src/harvester/v15_model.py` (`V15Model`) | Implemented |
+| Model used by V16 trainer | `src/harvester/v16_model.py` (`V16Model`) | Implemented |
 | V16 trainer entrypoint | `scripts/train_v16.py` | Implemented |
 | Training-readiness gate | `scripts/validate_v16_training_ready.py` | Implemented |
 | Inference bridge for post-train patch flow | `scripts/infer_v16.py` | Implemented |
@@ -340,7 +343,6 @@ Every expected item below maps to a concrete file in `data-harvester/`.
 | Alpha (256x256x4) | `alpha` | weighted L1, per-sample `has_alpha` mask | Implemented |
 | Holes (16x16) | `holes` | weighted L1, per-sample `has_holes` mask | Implemented |
 | Liquid mask (256x256) | `liquid` | weighted L1, per-sample `has_liquid` mask | Implemented |
-| Liquid height (256x256) | `liquid_height` | masked weighted L1 (where liquid exists), per-sample `has_liquid` mask | Implemented |
 | MCLY classes | `mcly_ids`, `mcly_mask` | masked cross-entropy, per-sample `has_mcly` mask | Implemented |
 
 ### Signals present in V16 dataset but not yet supervised
@@ -349,13 +351,43 @@ Every expected item below maps to a concrete file in `data-harvester/`.
 |---|---|---|
 | `object_instance_mask` / dataset `instance_mask` | present in Zarr + dataset loader | readable, not yet in loss |
 | `object_precise_mask` | present in Zarr builder | not consumed by `V16Dataset` yet |
+| `liquid_height` | present in Zarr + dataset loader | intentionally deferred (future liquid-refinement model) |
 | `shadow_mask` | present in Zarr builder | archived auxiliary signal; not consumed by default terrain losses |
+
+### Planned Liquid Refinement Model (separate lane)
+
+The project should keep terrain reconstruction and liquid reconstruction in
+separate models:
+
+- Terrain lane (current V16): optimize terrain geometry/material channels and
+  use object/liquid masks as exclusion weighting for terrain losses.
+- Liquid lane (planned): optimize liquid placement + liquid height quality from
+  minimap-centric inputs.
+
+Planned liquid-lane contract:
+
+- Inputs:
+  - `minimap_rgb`
+  - optional liquid priors (`liquid_mask`, WL* hints, other map-level liquid cues)
+- Targets:
+  - `liquid_mask`
+  - `liquid_height` (supervised only where liquid is present)
+- Outputs:
+  - `liquid_pred_mask_256`
+  - `liquid_pred_height_256`
+
+Boundary rule:
+
+- Terrain model should not own liquid-height fidelity.
+- Liquid model should not own terrain geometry.
+- Terrain training continues to use liquid/object masks as loss gating so
+  non-terrain pixels do not contaminate terrain supervision.
 
 ### Explicit note on model file naming
 
-- There is no `src/harvester/v16_model.py` in the current repo.
-- `train_v16.py` intentionally uses `V15Model` from
-  `src/harvester/v15_model.py` as the current V16 terrain architecture.
+- Canonical V16 model module: `src/harvester/v16_model.py`.
+- Legacy `src/harvester/v15_model.py` now exists only as a compatibility shim
+  for older V15 imports.
 
 ## Compression Benchmarks (target)
 
@@ -371,7 +403,7 @@ Expected dataset size for one build (~5000 tiles): ~500 MB compressed.
 ## V16 Model
 
 ConvNeXt V2 Nano encoder (15.6M, pretrained ImageNet) with U-Net skip fusion
-decoder. Total ~27.4M parameters with the liquid head.
+decoder.
 
 | Head | Output shape | Loss |
 |------|-------------|------|
@@ -380,7 +412,6 @@ decoder. Total ~27.4M parameters with the liquid head.
 | alpha | (B, 4, 256, 256) | L1, object-masked × has_alpha |
 | holes | (B, 1, 16, 16) | L1, object-masked × has_holes |
 | liquid_mask | (B, 1, 256, 256) | L1, object-masked × has_liquid |
-| liquid_height | (B, 1, 256, 256) | masked L1 on liquid-present pixels × has_liquid |
 | mcly | (B, 4, 16, 16, 16 logits) | Cross-entropy, masked by `mcly_layer_mask` |
 
 ## Normalization
@@ -403,7 +434,8 @@ decoder. Total ~27.4M parameters with the liquid head.
 | `scripts/infer_v16.py` | Deterministic V16 inference to `<build>.pred.zarr` + patch-ready summaries |
 | `scripts/run-data-harvester-python.ps1` | Repo-local launcher for `.venv` packages when the venv stub is broken |
 | `src/harvester/v16_dataset.py` | PyTorch Dataset reading from Zarr stores |
-| `src/harvester/v15_model.py` | Current V16 terrain model implementation (`V15Model`) |
+| `src/harvester/v16_model.py` | Current V16 terrain model implementation (`V16Model`) |
+| `src/harvester/v15_model.py` | Compatibility shim for legacy V15 imports |
 | `docs/architecture/v16-terrain-model-spec-2026-05-16.md` | This document |
 
 ## Inference Contract (Paired Input/Output Stores)
@@ -437,7 +469,6 @@ Required prediction arrays per tile:
 | `alpha_pred_256` | 256x256x4 | float32 | clamped [0,1] |
 | `holes_pred_16` | 16x16 | float32 | [0,1] probability |
 | `liquid_pred_mask_256` | 256x256 | float32 | [0,1] probability |
-| `liquid_pred_height_256` | 256x256 | float32 | predicted liquid-surface height |
 | `mcly_pred_logits_16x16x4x16` | 16x16x4x16 | float32 | raw logits for layer-class choices |
 
 Required inference metadata sidecar:
