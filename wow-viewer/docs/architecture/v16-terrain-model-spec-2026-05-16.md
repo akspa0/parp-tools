@@ -327,3 +327,132 @@ decoder. Total ~27.4M parameters with the liquid head.
 | `src/harvester/v16_dataset.py` | PyTorch Dataset reading from Zarr stores |
 | `src/harvester/v16_model.py` | V16Model (ConvNeXt V2 Nano + U-Net + liquid head) |
 | `docs/architecture/v16-terrain-model-spec-2026-05-16.md` | This document |
+
+## Inference Contract (Paired Input/Output Stores)
+
+V16 training stores are now the canonical **input** dataset contract.
+Inference must write a matching **output** dataset contract so every input tile
+has a deterministic predicted counterpart and can flow into ADT patch tooling.
+
+### Input Store (existing)
+
+- Path: `wow-viewer/output/datasets/v16/<build>.zarr/`
+- Authority:
+  - `index.parquet` (`tile_id`, `build`, `map`, `tile_x`, `tile_y`)
+  - `placements.parquet` (placement rows + asset paths)
+  - fixed arrays (`height_257`, `normal_xyz`, `alpha_256`, and others)
+
+### Output Store (new requirement)
+
+- Path (target): `wow-viewer/output/datasets/v16_inference/<run_name>/<build>.pred.zarr/`
+- Rule: `index.parquet` is copied from the input store with identical row order
+  and identical `tile_id` values.
+- Rule: output arrays are one-to-one with input rows (same `N`).
+- Rule: output stores are append-forbidden after finalization; rebuild to change.
+
+Required prediction arrays per tile:
+
+| Array | Shape per tile | dtype | Notes |
+|-------|----------------|-------|------|
+| `height_pred_257` | 257x257 | float32 | denormalized world Z |
+| `normal_pred_xyz` | 257x257x3 | float32 | normalized to unit length |
+| `alpha_pred_256` | 256x256x4 | float32 | clamped [0,1] |
+| `holes_pred_16` | 16x16 | float32 | [0,1] probability |
+| `liquid_pred_mask_256` | 256x256 | float32 | [0,1] probability |
+| `mcly_pred_logits_16x16x4x16` | 16x16x4x16 | float32 | raw logits for layer-class choices |
+
+Required inference metadata sidecar:
+
+- `_inference_run.json` with:
+  - `model_version`, `checkpoint_path`, `checkpoint_sha256`
+  - `dataset_build`, `input_store_path`, `input_index_sha256`
+  - `seed`, `device`, `torch_version`, `started_at`, `finished_at`
+  - `amp_enabled`, `compile_enabled`
+
+### Determinism Rules
+
+For "same input -> same output" guarantees, inference runs must:
+
+1. Use `model.eval()` and disable data augmentation.
+2. Set fixed seeds for Python/NumPy/Torch and log them.
+3. Disable any random sampling or stochastic post-processing.
+4. Keep a single checkpoint for one run.
+5. Emit an input index hash and checkpoint hash into `_inference_run.json`.
+
+If checkpoint hash + input index hash + seed are identical, output bytes should
+be treated as expected-to-match for the same hardware/software stack.
+
+## Reconstruction Contract (ADT/WDT Tooling)
+
+Inference output stores are not just visualization artifacts; they are the
+source contract for terrain patch/synthesis tooling.
+
+### Mode A: Patch Existing ADTs
+
+Goal: apply predicted terrain channels onto an existing staged ADT while
+preserving non-terrain structures unless explicitly replaced.
+
+Patch input contract:
+
+- source staged client root under `output/tmp/wowarchive-clients/`
+- source map/tile coordinates from input/output index rows
+- prediction arrays from `<build>.pred.zarr`
+- patch policy (`replace_height`, `replace_normals`, `replace_alpha`,
+  `replace_holes`, `replace_liquid`)
+
+Patch output contract:
+
+- LK split-ADT files under a bounded output root
+- patch report per tile (`old_hash`, `new_hash`, replaced channels)
+
+### Mode B: Synthesize New Terrain Tiles
+
+Goal: create brand-new terrain outputs from model predictions:
+
+- LK ADT families (`root`, `_tex0`, `_obj0`) for new map regions
+- or Alpha tile content routed through existing alpha writer surfaces
+  (without changing `AlphaWdtWriter` semantics)
+
+Synthesis output contract:
+
+- generated tile files
+- emitted WDT/WDL metadata required by target client format
+- synthesis report (`tile count`, `format`, `channel provenance`)
+
+### Tooling Surfaces (Current + Remaining)
+
+Already implemented and usable now:
+
+- `wow-viewer/data-harvester/scripts/infer_v16.py`
+  - runs deterministic V16 inference
+  - emits `<build>.pred.zarr`
+  - emits per-tile `inference_summary.json` + `predicted_height_257.npy` for patch tooling
+- `WowViewer.Tool.Converter terrain-patch-adt`
+  - patches LK ADT terrain (MCVT/MCNR) from per-tile inference summaries
+- `WowViewer.Tool.Converter convert-lk-to-alpha`
+  - converts LK terrain outputs to alphaWDT outputs
+- `WowViewer.Tool.Converter convert-alpha-to-lk`
+  - converts alphaWDT outputs back to LK terrain outputs
+
+Still missing (future ergonomic wrapper work):
+
+- a single command that consumes `.pred.zarr` directly without the per-tile
+  summary staging convention
+- a one-shot "infer + patch + optional alpha conversion" pipeline command
+
+## Input/Output Pairing Policy
+
+Every training build should have an optional paired inference build:
+
+- Input: `v16/<build>.zarr`
+- Output: `v16_inference/<run_name>/<build>.pred.zarr`
+
+This pairing allows:
+
+- tile-level regression checks (`gt` vs `pred`)
+- deterministic replay of model outputs
+- direct downstream ADT patch or synthesis workflows
+
+Ground-truth training stores remain immutable. Inference stores are versioned by
+`run_name` so multiple checkpoints can be compared without mutating the source
+dataset.

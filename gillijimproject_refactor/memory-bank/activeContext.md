@@ -11,6 +11,22 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
 - `build_v16_dataset.py build --build <key>` → reads pipe, writes Zarr + Parquet index + placements Parquet
 - `train_v16.py --builds <keys>` → V16Dataset reads Zarr, trains V15Model arch (~27.4M params)
 
+### New Direction: Paired Inference Output Store (2026-05-18)
+- V16 spec now defines a required one-to-one inference companion store:
+  - input: `wow-viewer/output/datasets/v16/<build>.zarr`
+  - output: `wow-viewer/output/datasets/v16_inference/<run_name>/<build>.pred.zarr`
+- Output stores must preserve `tile_id` order from `index.parquet` and emit deterministic terrain predictions per tile (`height_pred_257`, `normal_pred_xyz`, `alpha_pred_256`, `holes_pred_16`, `liquid_pred_mask_256`, `mcly_pred_logits_16x16x4x16`).
+- Reconstruction routing is now explicit in spec and mapped to existing commands:
+  - patch existing ADTs from inference summaries via `terrain-patch-adt`
+  - route patched LK outputs into alphaWDT via `convert-lk-to-alpha`
+  - convert alphaWDT outputs back to LK where needed via `convert-alpha-to-lk`
+
+### New: V16 inference bridge to existing LK/Alpha tooling (2026-05-18)
+- `wow-viewer/data-harvester/scripts/infer_v16.py` now exists and emits:
+  - deterministic paired prediction stores (`<build>.pred.zarr`)
+  - patch-ready per-tile `inference_summary.json` + `predicted_height_257.npy`
+- The spec now reflects current repo truth: `terrain-patch-adt`, `convert-lk-to-alpha`, and `convert-alpha-to-lk` are already implemented and should be the immediate V16 inference post-processing path.
+
 ### Zarr Arrays (per tile)
 height_257, normal_xyz, normal_mask, alpha_256, holes_16, liquid_mask, liquid_height, **object_mask**, **object_precise_mask**, **object_instance_mask** (NEW), minimap_rgb, shadow_mask, mcly_texture_ids, mcly_layer_mask
 

@@ -112,6 +112,32 @@ It currently validates the signals that `train_v16.py` actually uses:
 It also checks that `instance_mask` can still be read cleanly, but the current trainer does not yet use:
 - `instance_mask`
 
+### Infer V16 and Patch Terrain (Current Fast Path)
+
+```bash
+# 1) Run deterministic inference into a paired prediction store + patch-ready summaries.
+uv run python scripts/infer_v16.py \
+    --build 3_3_5_12340 \
+    --checkpoint ../models/v16/runs/<run>/checkpoints/v16_best.pt
+
+# 2) Patch LK ADTs from inference summaries.
+dotnet run --project ../tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- \
+    terrain-patch-adt \
+    --input-adt-dir <staged-client-map-root> \
+    --inference-dir ../output/datasets/v16_inference/<run-name>/patch_ready \
+    --output-dir <patched-lk-output-root>
+
+# 3) Optional: produce alphaWDT from the patched LK output.
+dotnet run --project ../tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- \
+    convert-lk-to-alpha --input <patched-lk-output-root> --output <patched-output.wdt>
+```
+
+Outputs:
+- prediction store: `wow-viewer/output/datasets/v16_inference/<run-name>/<build>.pred.zarr`
+- patch-ready summaries: `wow-viewer/output/datasets/v16_inference/<run-name>/patch_ready/`
+- patched LK terrain: `<patched-lk-output-root>`
+- optional alpha output: `<patched-output.wdt>`
+
 ### V16 Zarr Store Contents
 
 Each `<build>.zarr/` contains:
