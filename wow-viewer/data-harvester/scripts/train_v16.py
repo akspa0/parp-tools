@@ -1,7 +1,7 @@
 """Train V16 terrain model — minimap → terrain mesh from Zarr stores.
 
 Uses V16Dataset (consolidated Zarr) with V15Model architecture (ConvNeXt V2 Nano
-encoder + U-Net decoder + liquid head). The model is the same; only the data
+encoder + U-Net decoder + liquid mask+height heads). The model is the same; only the data
 pipeline changed (Zarr instead of individual NPZ shards).
 
 Usage:
@@ -15,11 +15,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Iterable
 
 _src_dir = Path(__file__).resolve().parent.parent / "src"
 if str(_src_dir) not in sys.path:
@@ -29,7 +31,9 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 from PIL import Image as _PILImage  # noqa: E402
+from PIL import ImageDraw as _PILImageDraw  # noqa: E402
 from torch.utils.data import DataLoader  # noqa: E402
+from torch.utils.data import Sampler  # noqa: E402
 
 from harvester.v15_model import V15Model  # noqa: E402
 from harvester.v16_dataset import V16Dataset  # noqa: E402
@@ -37,6 +41,38 @@ from harvester.v16_dataset import V16Dataset  # noqa: E402
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 MODELS_ROOT = _PROJECT_ROOT / "models"
 DATASET_ROOT = _PROJECT_ROOT / "output" / "datasets" / "v16"
+_PANEL_SIZE = 256
+
+
+class _DeterministicEpochSampler(Sampler[int]):
+    """Deterministic no-replacement sampler with per-epoch order evidence."""
+
+    def __init__(self, n: int, seed: int, order_log_path: Path | None = None) -> None:
+        self._n = int(n)
+        self._seed = int(seed)
+        self._epoch = 0
+        self._order_log_path = order_log_path
+
+    def set_epoch(self, epoch: int) -> None:
+        self._epoch = int(epoch)
+
+    def __iter__(self) -> Iterable[int]:
+        g = torch.Generator()
+        g.manual_seed(self._seed + self._epoch)
+        order = torch.randperm(self._n, generator=g).tolist()
+        if self._order_log_path is not None:
+            payload = {
+                "epoch": self._epoch,
+                "num_samples": self._n,
+                "order_sha256": hashlib.sha256(np.asarray(order, dtype=np.int32).tobytes()).hexdigest(),
+                "order": order,
+            }
+            with self._order_log_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(payload) + "\n")
+        return iter(order)
+
+    def __len__(self) -> int:
+        return self._n
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,12 +93,41 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--val-interval", type=int, default=10)
     p.add_argument("--val-snapshots", type=int, default=5,
                     help="Number of validation tiles to export as images per val run")
+    p.add_argument(
+        "--val-overview-columns",
+        type=int,
+        default=12,
+        help="Column count for labeled validation overview image",
+    )
+    p.add_argument(
+        "--train-max-tiles",
+        type=int,
+        default=0,
+        help="If >0, randomly curate this many training tiles from the split",
+    )
+    p.add_argument(
+        "--val-max-tiles",
+        type=int,
+        default=0,
+        help="If >0, randomly curate this many validation tiles from the split",
+    )
+    p.add_argument(
+        "--curation-seed",
+        type=int,
+        default=None,
+        help="Seed for train/val subset curation (defaults to --seed)",
+    )
     p.add_argument("--no-amp", action="store_true")
     p.add_argument("--augment", action="store_true", default=True)
     p.add_argument("--no-augment", action="store_false", dest="augment")
     p.add_argument("--run-name", type=str, default=None,
                     help="Name for this run (auto-generated from timestamp if omitted)")
     p.add_argument("--resume-checkpoint", type=Path, default=None)
+    p.add_argument(
+        "--no-compile",
+        action="store_true",
+        help="Disable torch.compile (useful for CPU-only or limited toolchains)",
+    )
     return p.parse_args()
 
 
@@ -73,6 +138,70 @@ def seed_all(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def _as_int(v: Any) -> int | None:
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except Exception:
+        return None
+
+
+def _to_curation_row(entry: dict[str, Any], split: str, subset_pos: int) -> dict[str, Any]:
+    return {
+        "split": split,
+        "subset_pos": subset_pos,
+        "build": entry.get("_build"),
+        "tile_id": _as_int(entry.get("tile_id")),
+        "map": entry.get("map"),
+        "tile_x": _as_int(entry.get("tile_x")),
+        "tile_y": _as_int(entry.get("tile_y")),
+        "height_mean": float(entry.get("height_mean", 0.0)),
+        "height_std": float(entry.get("height_std", 0.0)),
+    }
+
+
+def _curate_split(
+    ds: V16Dataset,
+    split: str,
+    max_tiles: int,
+    seed: int,
+    evidence_dir: Path,
+) -> dict[str, Any]:
+    full_indices = list(ds._indices)
+    n_full = len(full_indices)
+    if max_tiles > 0 and max_tiles < n_full:
+        rng = np.random.RandomState(seed)
+        chosen_local = sorted(rng.choice(n_full, size=max_tiles, replace=False).tolist())
+        mode = "random_subset_no_replace"
+    else:
+        chosen_local = list(range(n_full))
+        mode = "all_tiles"
+
+    chosen_global = [full_indices[i] for i in chosen_local]
+    ds._indices = chosen_global
+
+    rows = []
+    for i, global_idx in enumerate(chosen_global):
+        rows.append(_to_curation_row(ds._index_entries[global_idx], split=split, subset_pos=i))
+
+    jsonl_path = evidence_dir / f"{split}_selection.jsonl"
+    with jsonl_path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
+
+    digest = hashlib.sha256(json.dumps(rows, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        "split": split,
+        "mode": mode,
+        "seed": int(seed),
+        "available_tiles": n_full,
+        "selected_tiles": len(chosen_global),
+        "selection_jsonl": str(jsonl_path),
+        "selection_sha256": digest,
+    }
+
+
 def main() -> None:
     args = parse_args()
 
@@ -80,8 +209,10 @@ def main() -> None:
     run_dir = MODELS_ROOT / "v16" / "runs" / run_name
     ckpt_dir = run_dir / "checkpoints"
     val_dir = run_dir / "validation"
+    evidence_dir = run_dir / "evidence"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     val_dir.mkdir(parents=True, exist_ok=True)
+    evidence_dir.mkdir(parents=True, exist_ok=True)
 
     config = {
         "version": "v16",
@@ -96,9 +227,14 @@ def main() -> None:
         "val_fraction": args.val_fraction,
         "val_interval": args.val_interval,
         "val_snapshots": args.val_snapshots,
+        "val_overview_columns": args.val_overview_columns,
+        "train_max_tiles": args.train_max_tiles,
+        "val_max_tiles": args.val_max_tiles,
+        "curation_seed": args.curation_seed,
         "no_amp": args.no_amp,
         "augment": args.augment,
         "resume_checkpoint": str(args.resume_checkpoint) if args.resume_checkpoint else None,
+        "no_compile": args.no_compile,
         "started_at": datetime.now().isoformat(),
     }
     (run_dir / "config.json").write_text(json.dumps(config, indent=2))
@@ -130,11 +266,40 @@ def main() -> None:
         seed=args.seed,
         augment=False,
     )
-    print(f"Training: {len(train_ds)}  Validation: {len(val_ds)}")
+    curation_seed = args.curation_seed if args.curation_seed is not None else args.seed
+    train_cur = _curate_split(train_ds, "train", args.train_max_tiles, curation_seed + 101, evidence_dir)
+    val_cur = _curate_split(val_ds, "val", args.val_max_tiles, curation_seed + 202, evidence_dir)
 
+    curation_manifest = {
+        "run_name": run_name,
+        "created_at": datetime.now().isoformat(),
+        "dataset_dir": str(args.dataset_dir),
+        "builds": args.builds,
+        "val_fraction": args.val_fraction,
+        "split_seed": args.seed,
+        "curation_seed": curation_seed,
+        "train": train_cur,
+        "val": val_cur,
+    }
+    (evidence_dir / "curation_manifest.json").write_text(json.dumps(curation_manifest, indent=2), encoding="utf-8")
+    config["curation_manifest"] = str(evidence_dir / "curation_manifest.json")
+    config["train_selected_tiles"] = int(train_cur["selected_tiles"])
+    config["val_selected_tiles"] = int(val_cur["selected_tiles"])
+    (run_dir / "config.json").write_text(json.dumps(config, indent=2))
+
+    print(
+        "Curated tiles: "
+        f"train={train_cur['selected_tiles']}/{train_cur['available_tiles']} "
+        f"val={val_cur['selected_tiles']}/{val_cur['available_tiles']}"
+    )
+
+    train_order_log = evidence_dir / "train_epoch_orders.jsonl"
+    if train_order_log.exists():
+        train_order_log.unlink()
+    train_sampler = _DeterministicEpochSampler(len(train_ds), seed=args.seed, order_log_path=train_order_log)
     train_loader = DataLoader(
-        train_ds, batch_size=args.batch_size, shuffle=True,
-        num_workers=args.num_workers, drop_last=True,
+        train_ds, batch_size=args.batch_size, shuffle=False, sampler=train_sampler,
+        num_workers=args.num_workers, drop_last=False,
         pin_memory=(device.type == "cuda"),
     )
     val_loader = DataLoader(
@@ -146,7 +311,15 @@ def main() -> None:
     model = V15Model().to(device)
     n = model.count_parameters()
     print(f"Parameters: {n:,}")
-    model = torch.compile(model)
+    can_compile = hasattr(torch, "compile") and not args.no_compile and device.type == "cuda"
+    if can_compile:
+        try:
+            model = torch.compile(model)
+            print("torch.compile: enabled")
+        except Exception as ex:
+            print(f"torch.compile: disabled (compile failed: {ex})")
+    else:
+        print("torch.compile: disabled")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.SequentialLR(
@@ -171,12 +344,14 @@ def main() -> None:
 
     log_entries: list[dict] = []
     for epoch in range(start_epoch, args.epochs + 1):
+        train_sampler.set_epoch(epoch)
         model.train()
         epoch_h = 0.0
         epoch_n = 0.0
         epoch_a = 0.0
         epoch_ho = 0.0
         epoch_lq = 0.0
+        epoch_lqh = 0.0
         epoch_mc = 0.0
         t0 = time.perf_counter()
 
@@ -188,6 +363,7 @@ def main() -> None:
             alp = batch["alpha"].to(device, non_blocking=True)
             hol = batch["holes"].to(device, non_blocking=True)
             liq = batch["liquid"].to(device, non_blocking=True)
+            liq_h = batch["liquid_height"].to(device, non_blocking=True)
             mly = batch["mcly_ids"].to(device, non_blocking=True)
             mlm = batch["mcly_mask"].to(device, non_blocking=True)
             wgt = batch["weight"].to(device, non_blocking=True)
@@ -200,13 +376,14 @@ def main() -> None:
             optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not args.no_amp)):
-                pred_h, pred_n, pred_a, pred_ho, pred_lq, pred_mc = model(inp)
+                pred_h, pred_n, pred_a, pred_ho, pred_lq, pred_lqh, pred_mc = model(inp)
 
                 loss_h = _weighted_l1(pred_h, hgt, wgt)
                 loss_n = _cosine_loss(pred_n, nrm, nm_mask) * has_n.mean()
                 loss_a = _weighted_l1(pred_a, alp, wgt) * has_a.mean()
                 loss_ho = _weighted_l1(pred_ho, hol, wgt) * has_ho.mean()
                 loss_lq = _weighted_l1(pred_lq, liq, wgt) * has_lq.mean()
+                loss_lqh = _liquid_height_l1(pred_lqh, liq_h, liq, wgt) * has_lq.mean()
 
                 B = pred_mc.size(0)
                 pred_mc_r = pred_mc.view(B, 4, 16, 16, 16).permute(0, 1, 4, 2, 3)
@@ -219,7 +396,7 @@ def main() -> None:
                 n_active = mc_mask.sum() + 1e-8
                 loss_mc = (loss_mc * mc_mask).sum() / n_active * has_mc.mean()
 
-                loss = loss_h + 2.0 * loss_n + loss_a + loss_ho + loss_lq + 0.3 * loss_mc
+                loss = loss_h + 2.0 * loss_n + loss_a + loss_ho + loss_lq + 0.5 * loss_lqh + 0.3 * loss_mc
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -232,6 +409,7 @@ def main() -> None:
             epoch_a += loss_a.item()
             epoch_ho += loss_ho.item()
             epoch_lq += loss_lq.item()
+            epoch_lqh += loss_lqh.item()
             epoch_mc += loss_mc.item()
 
         scheduler.step()
@@ -243,14 +421,15 @@ def main() -> None:
             f"Epoch {epoch:3d}/{args.epochs} | "
             f"h={epoch_h / n_bt:.4f} n={epoch_n / n_bt:.4f} "
             f"a={epoch_a / n_bt:.4f} ho={epoch_ho / n_bt:.4f} "
-            f"lq={epoch_lq / n_bt:.4f} mc={epoch_mc / n_bt:.4f} "
+            f"lq={epoch_lq / n_bt:.4f} lqh={epoch_lqh / n_bt:.4f} mc={epoch_mc / n_bt:.4f} "
             f"lr={lr_now:.2e} {elapsed:.1f}s"
         )
 
         entry = {
             "epoch": epoch, "train_h": epoch_h / n_bt, "train_n": epoch_n / n_bt,
             "train_a": epoch_a / n_bt, "train_ho": epoch_ho / n_bt,
-            "train_lq": epoch_lq / n_bt, "train_mc": epoch_mc / n_bt, "lr": lr_now,
+            "train_lq": epoch_lq / n_bt, "train_lqh": epoch_lqh / n_bt,
+            "train_mc": epoch_mc / n_bt, "lr": lr_now,
         }
 
         if epoch % args.val_interval == 0 and len(val_ds) > 0:
@@ -258,7 +437,7 @@ def main() -> None:
             entry.update(v)
             print(
                 f"        val | h={v['val_h']:.4f} n={v['val_n']:.4f} "
-                f"a={v['val_a']:.4f} lq={v['val_lq']:.4f} mc={v['val_mc']:.4f}"
+                f"a={v['val_a']:.4f} lq={v['val_lq']:.4f} lqh={v['val_lqh']:.4f} mc={v['val_mc']:.4f}"
             )
             if v["val_h"] < best_val:
                 best_val = v["val_h"]
@@ -275,7 +454,15 @@ def main() -> None:
 
             snap_dir = val_dir / f"epoch_{epoch:04d}"
             snap_dir.mkdir(parents=True, exist_ok=True)
-            _save_val_snapshots(model, val_loader, device, snap_dir, args.val_snapshots, epoch)
+            _save_val_snapshots(
+                model,
+                val_loader,
+                device,
+                snap_dir,
+                args.val_snapshots,
+                epoch,
+                args.val_overview_columns,
+            )
 
         log_entries.append(entry)
         (run_dir / "training_log.json").write_text(json.dumps(log_entries, indent=2))
@@ -301,6 +488,21 @@ def _weighted_l1(pred: torch.Tensor, target: torch.Tensor, weight: torch.Tensor)
     return (diff * weight).sum() / (weight.sum() + 1e-8)
 
 
+def _liquid_height_l1(
+    pred_height: torch.Tensor,
+    target_height: torch.Tensor,
+    liquid_mask: torch.Tensor,
+    terrain_weight: torch.Tensor,
+) -> torch.Tensor:
+    # Only supervise liquid height where ground-truth liquid exists.
+    mask = (liquid_mask > 0.05).float()
+    if terrain_weight.shape[2:] != mask.shape[2:]:
+        terrain_weight = F.interpolate(terrain_weight, size=mask.shape[2:], mode="bilinear", align_corners=False)
+    eff = mask * terrain_weight
+    diff = (pred_height - target_height).abs()
+    return (diff * eff).sum() / (eff.sum() + 1e-8)
+
+
 def _cosine_loss(pred: torch.Tensor, target: torch.Tensor, normal_mask: torch.Tensor) -> torch.Tensor:
     pred_n = F.normalize(pred, dim=1)
     cos_sim = F.cosine_similarity(pred_n, target, dim=1)
@@ -310,11 +512,71 @@ def _cosine_loss(pred: torch.Tensor, target: torch.Tensor, normal_mask: torch.Te
     return ((1.0 - cos_sim) * mask).sum() / (mask.sum() + 1e-8)
 
 
+def _to_rgb_panel(arr: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    rng = hi - lo if abs(hi - lo) > 1e-8 else 1.0
+    arr_n = np.clip((arr - lo) / rng, 0, 1)
+    if arr_n.ndim == 2:
+        panel = np.repeat((arr_n[..., None] * 255).astype(np.uint8), 3, axis=2)
+    else:
+        panel = (arr_n * 255).astype(np.uint8)
+    return panel
+
+
+def _draw_label(panel: np.ndarray, text: str) -> np.ndarray:
+    img = _PILImage.fromarray(panel, "RGB")
+    drw = _PILImageDraw.Draw(img)
+    drw.rectangle([(0, 0), (img.width, 17)], fill=(0, 0, 0))
+    drw.text((4, 3), text, fill=(255, 255, 255))
+    return np.asarray(img)
+
+
+def _save_labeled_overview(rows: list[dict[str, Any]], out_path: Path, cols: int) -> None:
+    if not rows:
+        return
+
+    max_cols = max(len(row["panels"]) for row in rows)
+    n_cols = max(cols, max_cols, 1)
+    panel_w = _PANEL_SIZE
+    panel_h = _PANEL_SIZE
+    row_h = panel_h + 20
+    total_rows = len(rows)
+    canvas = _PILImage.new("RGB", (n_cols * panel_w, total_rows * row_h), (25, 25, 25))
+    draw = _PILImageDraw.Draw(canvas)
+
+    for r, row in enumerate(rows):
+        y0 = r * row_h
+        title = row["title"]
+        draw.rectangle([(0, y0), (canvas.width, y0 + 19)], fill=(12, 12, 12))
+        draw.text((4, y0 + 4), title, fill=(240, 240, 240))
+        for c, panel in enumerate(row["panels"]):
+            x0 = c * panel_w
+            canvas.paste(_PILImage.fromarray(panel, "RGB"), (x0, y0 + 20))
+
+    canvas.save(out_path)
+
+
+def _batch_value(batch: dict[str, Any], key: str, idx: int, default: Any) -> Any:
+    value = batch.get(key)
+    if value is None:
+        return default
+    if torch.is_tensor(value):
+        if value.ndim == 0:
+            return value.item()
+        if idx < value.shape[0]:
+            item = value[idx]
+            return item.item() if torch.is_tensor(item) and item.ndim == 0 else item
+        return default
+    if isinstance(value, (list, tuple)):
+        return value[idx] if idx < len(value) else default
+    return value
+
+
 @torch.no_grad()
-def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch):
-    """Save side-by-side PNG comparisons for the first N validation tiles."""
+def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch, overview_cols):
+    """Save per-tile PNGs plus one labeled validation overview image."""
     model.eval()
     count = 0
+    overview_rows: list[dict[str, Any]] = []
     for batch in loader:
         for i in range(batch["input"].size(0)):
             if count >= n_samples:
@@ -325,13 +587,19 @@ def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch):
             nm_mask = batch["normal_mask"][i].squeeze().cpu().numpy()
             alp = batch["alpha"][i].permute(1, 2, 0).cpu().numpy()
             liq_gt = batch["liquid"][i].squeeze().cpu().numpy()
+            liq_h_gt = batch["liquid_height"][i].squeeze().cpu().numpy()
             wgt = batch["weight"][i].squeeze().cpu().numpy()
 
-            pred_h_raw, pred_n, pred_a, _pred_ho, pred_lq, _pred_mc = model(inp)
+            pred_h_raw, pred_n, pred_a, _pred_ho, pred_lq, pred_lqh, _pred_mc = model(inp)
             pred_h = pred_h_raw.squeeze().cpu().numpy()
             pred_n = F.normalize(pred_n, dim=1).squeeze(0).permute(1, 2, 0).cpu().numpy()
             pred_a = pred_a.squeeze(0).permute(1, 2, 0).cpu().numpy()
             pred_lq = pred_lq.squeeze().cpu().numpy()
+            pred_lqh = pred_lqh.squeeze().cpu().numpy()
+
+            liq_px = liq_gt > 0.05
+            liq_lo = float(liq_h_gt[liq_px].min()) if liq_px.any() else 0.0
+            liq_hi = float(liq_h_gt[liq_px].max()) if liq_px.any() else 1.0
 
             tile_dir = out_dir / f"tile_{count:02d}"
             tile_dir.mkdir(parents=True, exist_ok=True)
@@ -349,6 +617,11 @@ def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch):
             if has_lq:
                 _snap_save(liq_gt, 0, 1, tile_dir / "liquid_gt.png")
                 _snap_save(pred_lq, 0, 1, tile_dir / "liquid_pred.png")
+                if liq_px.any():
+                    lo = min(float(liq_h_gt[liq_px].min()), float(pred_lqh[liq_px].min()))
+                    hi = max(float(liq_h_gt[liq_px].max()), float(pred_lqh[liq_px].max()))
+                    _snap_save(liq_h_gt, lo, hi, tile_dir / "liquid_height_gt.png")
+                    _snap_save(pred_lqh, lo, hi, tile_dir / "liquid_height_pred.png")
 
             valid = nm_mask > 0.5
             if valid.any():
@@ -366,11 +639,46 @@ def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch):
                 "normals_cosine": n_cos,
                 "alpha_l1": float(np.abs(pred_a - alp).mean()),
                 "liquid_l1": float(np.abs(pred_lq - liq_gt).mean()),
+                "liquid_height_l1": float(np.abs(pred_lqh - liq_h_gt)[liq_gt > 0.05].mean()) if (liq_gt > 0.05).any() else 0.0,
             }
             (tile_dir / "metrics.json").write_text(json.dumps(tile_metrics, indent=2))
+
+            map_name = str(_batch_value(batch, "meta_map", i, "unknown"))
+            tile_id = int(_batch_value(batch, "meta_tile_id", i, -1))
+            tile_x = int(_batch_value(batch, "meta_tile_x", i, -1))
+            tile_y = int(_batch_value(batch, "meta_tile_y", i, -1))
+
+            h_lo = min(float(hgt.min()), float(pred_h.min()))
+            h_hi = max(float(hgt.max()), float(pred_h.max()))
+            liq_h_lo = min(float(pred_lqh.min()), liq_lo)
+            liq_h_hi = max(float(pred_lqh.max()), liq_hi)
+            panels = [
+                _draw_label(_to_rgb_panel(batch["input"][i].permute(1, 2, 0).cpu().numpy(), 0.0, 1.0), "input/minimap"),
+                _draw_label(_to_rgb_panel(hgt, h_lo, h_hi), "height gt"),
+                _draw_label(_to_rgb_panel(pred_h, h_lo, h_hi), "height pred"),
+                _draw_label(_to_rgb_panel((nrm + 1.0) / 2.0, 0.0, 1.0), "normals gt"),
+                _draw_label(_to_rgb_panel((pred_n + 1.0) / 2.0, 0.0, 1.0), "normals pred"),
+                _draw_label(_to_rgb_panel(alp[:, :, 0], 0.0, 1.0), "alpha gt ch0"),
+                _draw_label(_to_rgb_panel(pred_a[:, :, 0], 0.0, 1.0), "alpha pred ch0"),
+                _draw_label(_to_rgb_panel(liq_gt, 0.0, 1.0), "liquid mask gt"),
+                _draw_label(_to_rgb_panel(pred_lq, 0.0, 1.0), "liquid mask pred"),
+                _draw_label(_to_rgb_panel(liq_h_gt, liq_h_lo, liq_h_hi), "liquid h gt"),
+                _draw_label(_to_rgb_panel(pred_lqh, liq_h_lo, liq_h_hi), "liquid h pred"),
+                _draw_label(_to_rgb_panel(wgt, 0.0, 1.0), "terrain weight"),
+            ]
+            overview_rows.append(
+                {
+                    "title": (
+                        f"tile {count:02d} map={map_name} tile_id={tile_id} "
+                        f"xy=({tile_x},{tile_y}) h_l1={tile_metrics['height_l1']:.4f}"
+                    ),
+                    "panels": panels,
+                }
+            )
             count += 1
         if count >= n_samples:
             break
+    _save_labeled_overview(overview_rows, out_dir / "validation_overview.png", int(overview_cols))
     model.train()
 
 
@@ -392,6 +700,7 @@ def _validate(model, loader, device, no_amp: bool = False):
     total_n = 0.0
     total_a = 0.0
     total_lq = 0.0
+    total_lqh = 0.0
     total_mc = 0.0
     n = 0
     for batch in loader:
@@ -401,6 +710,7 @@ def _validate(model, loader, device, no_amp: bool = False):
         nm_mask = batch["normal_mask"].to(device, non_blocking=True)
         alp = batch["alpha"].to(device, non_blocking=True)
         liq = batch["liquid"].to(device, non_blocking=True)
+        liq_h = batch["liquid_height"].to(device, non_blocking=True)
         mly = batch["mcly_ids"].to(device, non_blocking=True)
         mlm = batch["mcly_mask"].to(device, non_blocking=True)
         wgt = batch["weight"].to(device, non_blocking=True)
@@ -409,11 +719,12 @@ def _validate(model, loader, device, no_amp: bool = False):
         has_lq = batch["has_liquid"].to(device, non_blocking=True).float()
         has_mc = batch["has_mcly"].to(device, non_blocking=True).float()
         with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not no_amp)):
-            pred_h, pred_n, pred_a, _, pred_lq, pred_mc = model(inp)
+            pred_h, pred_n, pred_a, _, pred_lq, pred_lqh, pred_mc = model(inp)
             total_h += _weighted_l1(pred_h, hgt, wgt).item()
             total_n += (_cosine_loss(pred_n, nrm, nm_mask) * has_n.mean()).item()
             total_a += (_weighted_l1(pred_a, alp, wgt) * has_a.mean()).item()
             total_lq += (_weighted_l1(pred_lq, liq, wgt) * has_lq.mean()).item()
+            total_lqh += (_liquid_height_l1(pred_lqh, liq_h, liq, wgt) * has_lq.mean()).item()
             B = pred_mc.size(0)
             pred_mc_r = pred_mc.view(B, 4, 16, 16, 16).permute(0, 1, 4, 2, 3)
             loss_mc = torch.nn.functional.cross_entropy(
@@ -426,12 +737,13 @@ def _validate(model, loader, device, no_amp: bool = False):
             total_mc += ((loss_mc * mc_mask).sum() / n_active * has_mc.mean()).item()
         n += 1
     if n == 0:
-        return {"val_h": 0.0, "val_n": 0.0, "val_a": 0.0, "val_lq": 0.0, "val_mc": 0.0}
+        return {"val_h": 0.0, "val_n": 0.0, "val_a": 0.0, "val_lq": 0.0, "val_lqh": 0.0, "val_mc": 0.0}
     return {
         "val_h": total_h / n,
         "val_n": total_n / n,
         "val_a": total_a / n,
         "val_lq": total_lq / n,
+        "val_lqh": total_lqh / n,
         "val_mc": total_mc / n,
     }
 

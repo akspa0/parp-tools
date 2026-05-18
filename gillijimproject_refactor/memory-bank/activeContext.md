@@ -27,6 +27,46 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
   - patch-ready per-tile `inference_summary.json` + `predicted_height_257.npy`
 - The spec now reflects current repo truth: `terrain-patch-adt`, `convert-lk-to-alpha`, and `convert-alpha-to-lk` are already implemented and should be the immediate V16 inference post-processing path.
 
+### New: V16 training contract sync + focused readiness proof (2026-05-18)
+- `v16-terrain-model-spec-2026-05-16.md` now includes a training contract matrix mapping expected surfaces to concrete files (`v16_dataset.py`, `train_v16.py`, `v15_model.py`, validator, infer bridge).
+- Spec drift was corrected: `src/harvester/v16_model.py` is not present; current V16 training architecture is `V15Model` in `src/harvester/v15_model.py`.
+- Focused readiness validation was run with small sample sizes on staged `3_3_5_12340`:
+  - command: `uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340 --train-samples 8 --val-samples 4 --batch-size 2`
+  - report: `wow-viewer/output/datasets/v16/validation/3_3_5_12340.training_readiness.json`
+  - result: `overall_ok=true`, `issues=0`, model forward shapes match expected V16 heads on CPU.
+
+### New: liquid-height supervision and inference signal wiring (2026-05-18)
+- V16 dataset/trainer now use liquid height directly:
+  - `V16Dataset` now returns `liquid_height` tensor from Zarr.
+  - `V15Model` now includes a dedicated liquid-height head (in addition to liquid-mask head).
+  - `train_v16.py` now supervises both liquid mask and liquid height (liquid-height loss masked to liquid-present pixels).
+- Validator and contracts were updated:
+  - `validate_v16_training_ready.py` now checks `liquid_height` tensor contract and model output shape for liquid height.
+  - `v16-terrain-model-spec-2026-05-16.md` now lists liquid height as an actively supervised target.
+- Inference surface now carries liquid signals for downstream ADT liquid writing work:
+  - `infer_v16.py` now writes `liquid_pred_height_256` into `.pred.zarr`.
+  - patch-ready per-tile summaries now include `predicted_liquid_mask_256.npy` and `predicted_liquid_height_256.npy` sidecars.
+- Focused proof:
+  - command: `uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340 --train-samples 4 --val-samples 2 --batch-size 2`
+  - result: `overall_ok=true`, `issues=0`, report confirms `trainer_uses_liquid_height=true`.
+
+### New: trainer-side curation evidence + labeled validation overview (2026-05-18)
+- `train_v16.py` now supports deterministic subset curation directly from available V16 Zarr splits:
+  - `--train-max-tiles <n>`
+  - `--val-max-tiles <n>`
+  - `--curation-seed <seed>`
+- Every run now writes dataset chain-of-evidence artifacts:
+  - `models/v16/runs/<run>/evidence/curation_manifest.json`
+  - `models/v16/runs/<run>/evidence/train_selection.jsonl`
+  - `models/v16/runs/<run>/evidence/val_selection.jsonl`
+  - `models/v16/runs/<run>/evidence/train_epoch_orders.jsonl` (deterministic per-epoch sample order)
+- Validation export now writes one labeled composite:
+  - `models/v16/runs/<run>/validation/epoch_XXXX/validation_overview.png`
+  - includes labeled input/output panels per tile so samples are operator-readable without extra context.
+- Training compile behavior is now guarded:
+  - `torch.compile` is used only on CUDA by default, and can be disabled with `--no-compile`.
+  - CPU-only smoke no longer fails on missing `cl.exe`.
+
 ### Zarr Arrays (per tile)
 height_257, normal_xyz, normal_mask, alpha_256, holes_16, liquid_mask, liquid_height, **object_mask**, **object_precise_mask**, **object_instance_mask** (NEW), minimap_rgb, shadow_mask, mcly_texture_ids, mcly_layer_mask
 

@@ -33,6 +33,7 @@ _TENSOR_SPECS: dict[str, dict[str, Any]] = {
     "alpha": {"shape": (4, 256, 256), "dtype": torch.float32, "min": 0.0, "max": 1.0},
     "holes": {"shape": (1, 16, 16), "dtype": torch.float32, "min": 0.0, "max": 1.0},
     "liquid": {"shape": (1, 256, 256), "dtype": torch.float32, "min": 0.0, "max": 1.0},
+    "liquid_height": {"shape": (1, 256, 256), "dtype": torch.float32},
     "weight": {"shape": (1, 257, 257), "dtype": torch.float32, "min": 0.0, "max": 1.0},
     "instance_mask": {"shape": (1, 257, 257), "dtype": torch.int64, "min": 0},
     "mcly_ids": {"shape": (16, 16, 4), "dtype": torch.int64, "min": 0, "max": 15},
@@ -348,7 +349,7 @@ def _validate_model_forward(
         with torch.no_grad():
             outputs = model(batch["input"].to(device))
 
-        height, normals, alpha, holes, liquid, mcly = outputs
+        height, normals, alpha, holes, liquid, liquid_height, mcly = outputs
         return {
             "ok": True,
             "device": str(device),
@@ -358,6 +359,7 @@ def _validate_model_forward(
                 "alpha": list(alpha.shape),
                 "holes": list(holes.shape),
                 "liquid": list(liquid.shape),
+                "liquid_height": list(liquid_height.shape),
                 "mcly_logits": list(mcly.shape),
             },
         }
@@ -433,12 +435,14 @@ def main() -> None:
         "builds": builds,
         "overall_ok": overall_ok,
         "trainer_contract": {
-            "consumed_targets": ["height", "normals", "alpha", "holes", "liquid", "mcly"],
+            "consumed_targets": ["height", "normals", "alpha", "holes", "liquid", "liquid_height", "mcly"],
             "dataset_exposes_instance_mask": True,
             "trainer_uses_instance_mask": False,
             "dataset_exposes_mcly_arrays": True,
             "trainer_uses_mcly_targets": True,
-            "note": "Current train_v16.py now supervises MCLY targets from mcly_texture_ids and mcly_layer_mask.",
+            "dataset_exposes_liquid_height": True,
+            "trainer_uses_liquid_height": True,
+            "note": "Current train_v16.py supervises MCLY and liquid-height targets from the V16 Zarr contract.",
         },
         "build_summaries": build_summaries,
         "split_validation": {

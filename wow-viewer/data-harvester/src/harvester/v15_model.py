@@ -4,7 +4,7 @@ Encoder: ConvNeXt V2 Nano (15.6M) from timm
 Decoder: U-Net with skip fusion at 4 resolutions
 Heads:  height (257×257), normals (257×257×3),
         alpha (256×256×4), holes (16×16),
-        liquid (256×256)
+        liquid mask (256×256), liquid height (256×256)
 
 Inference requires only a minimap image — no priors.
 """
@@ -56,7 +56,8 @@ class V15Model(nn.Module):
             normals   (B, 3, 257, 257)
             alpha     (B, 4, 256, 256)
             holes     (B, 1, 16, 16)
-            liquid    (B, 1, 256, 256)
+            liquid_mask   (B, 1, 256, 256)
+            liquid_height (B, 1, 256, 256)
     """
 
     def __init__(self) -> None:
@@ -122,6 +123,14 @@ class V15Model(nn.Module):
             nn.Sigmoid(),
         )
 
+        # Liquid height head (256×256), supervised where liquid is present.
+        self.head_liquid_height = nn.Sequential(
+            nn.Conv2d(64, 32, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Upsample(size=(256, 256), mode="bilinear", align_corners=True),
+            nn.Conv2d(32, 1, 1),
+        )
+
         self.head_mcly = nn.Sequential(
             nn.AdaptiveAvgPool2d((16, 16)),
             nn.Conv2d(64, 64, 3, padding=1),
@@ -130,7 +139,7 @@ class V15Model(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
     ]:
         feats = self.encoder(x)
         e0, e1, e2, e3 = feats[0], feats[1], feats[2], feats[3]
@@ -147,9 +156,10 @@ class V15Model(nn.Module):
         alpha = self.head_alpha(d0)
         holes = self.head_holes(d0)
         liquid = self.head_liquid(d0)
+        liquid_height = self.head_liquid_height(d0)
         mcly_logits = self.head_mcly(d0)  # (B, 64, 16, 16) → reshape to (B, 4, 16, 16)
 
-        return height, normals, alpha, holes, liquid, mcly_logits
+        return height, normals, alpha, holes, liquid, liquid_height, mcly_logits
 
     def count_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)

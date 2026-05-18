@@ -110,8 +110,10 @@ class V16Dataset(Dataset):
         if has_liquid:
             liquid_mask = root["liquid_mask"][tile_id].astype(np.float32)
             liquid_mask = np.clip(liquid_mask, 0.0, 1.0)
+            liquid_height = root["liquid_height"][tile_id].astype(np.float32)
         else:
             liquid_mask = np.zeros((256, 256), dtype=np.float32)
+            liquid_height = np.zeros((256, 256), dtype=np.float32)
 
         obj_mask = root["object_mask"][tile_id].astype(np.float32)
         weight = 1.0 - obj_mask
@@ -140,6 +142,7 @@ class V16Dataset(Dataset):
                 alpha = alpha[:, ::-1]
                 holes = holes[:, ::-1]
                 liquid_mask = liquid_mask[:, ::-1]
+                liquid_height = liquid_height[:, ::-1]
                 weight = weight[:, ::-1]
                 instance_mask = instance_mask[:, ::-1]
                 mcly_ids = mcly_ids[:, ::-1]
@@ -153,6 +156,7 @@ class V16Dataset(Dataset):
                 alpha = alpha[::-1]
                 holes = holes[::-1]
                 liquid_mask = liquid_mask[::-1]
+                liquid_height = liquid_height[::-1]
                 weight = weight[::-1]
                 instance_mask = instance_mask[::-1]
                 mcly_ids = mcly_ids[::-1]
@@ -168,6 +172,7 @@ class V16Dataset(Dataset):
                 alpha = np.rot90(alpha, k=1)
                 holes = np.rot90(holes, k=1)
                 liquid_mask = np.rot90(liquid_mask, k=1)
+                liquid_height = np.rot90(liquid_height, k=1)
                 weight = np.rot90(weight, k=1)
                 instance_mask = np.rot90(instance_mask, k=1)
                 mcly_ids = np.rot90(mcly_ids, k=1)
@@ -181,6 +186,7 @@ class V16Dataset(Dataset):
             "alpha": torch.from_numpy(alpha.copy()).permute(2, 0, 1),
             "holes": torch.from_numpy(holes.copy()).unsqueeze(0),
             "liquid": torch.from_numpy(liquid_mask.copy()).unsqueeze(0),
+            "liquid_height": torch.from_numpy(liquid_height.copy()).unsqueeze(0),
             "weight": torch.from_numpy(weight.copy()).unsqueeze(0),
             "instance_mask": torch.from_numpy(instance_mask.copy()).unsqueeze(0).long(),
             "mcly_ids": torch.from_numpy(mcly_ids.copy()).long(),
@@ -191,4 +197,9 @@ class V16Dataset(Dataset):
             "has_liquid": has_liquid,
             "has_instance": has_instance,
             "has_mcly": has_mcly,
+            "meta_build": str(build),
+            "meta_map": str(entry.get("map", "")),
+            "meta_tile_id": int(tile_id),
+            "meta_tile_x": int(entry.get("tile_x") if entry.get("tile_x") is not None else -1),
+            "meta_tile_y": int(entry.get("tile_y") if entry.get("tile_y") is not None else -1),
         }

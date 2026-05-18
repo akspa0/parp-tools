@@ -258,7 +258,9 @@ cd wow-viewer/data-harvester
 uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340
 uv run python scripts/train_v16.py \
     --dataset-dir ../output/datasets/v16 \
-    --builds 3_3_5_12340 4_0_0_11927
+    --builds 3_3_5_12340 4_0_0_11927 \
+    --train-max-tiles 2000 \
+    --val-max-tiles 256
 ```
 
 The `V16Dataset` class reads from Zarr stores, using the Parquet index for
@@ -268,18 +270,73 @@ Geometric augmentation (hflip/vflip/rot90) is applied at training time with
 correct normal vector transforms. Per-tile height z-score normalization uses
 `height_mean` and `height_std` from the index.
 
+Trainer-side subset curation is now first-class. If `--train-max-tiles` or
+`--val-max-tiles` is set, `train_v16.py` samples a deterministic no-replacement
+subset from the split and records chain-of-evidence artifacts under:
+
+- `models/v16/runs/<run>/evidence/curation_manifest.json`
+- `models/v16/runs/<run>/evidence/train_selection.jsonl`
+- `models/v16/runs/<run>/evidence/val_selection.jsonl`
+- `models/v16/runs/<run>/evidence/train_epoch_orders.jsonl`
+
+Validation snapshots now include one labeled composite overview image per
+validation epoch:
+
+- `models/v16/runs/<run>/validation/epoch_XXXX/validation_overview.png`
+
 The training-readiness validator writes:
 
 - `wow-viewer/output/datasets/v16/validation/<build>.training_readiness.json`
 
 It validates the signals the current trainer actually uses:
 
-- `input`, `height`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid`, `mcly_ids`, `mcly_mask`, `weight`
+- `input`, `height`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid`, `liquid_height`, `mcly_ids`, `mcly_mask`, `weight`
 
 It also proves that `instance_mask` remains readable by the dataset layer, but
 the current trainer still does not supervise:
 
 - `instance_mask`
+
+## Training Contract Matrix (Spec vs Code)
+
+This section is the executable truth surface for first training attempts.
+Every expected item below maps to a concrete file in `data-harvester/`.
+
+### Core training path (must exist)
+
+| Expected surface | Implemented in | Status |
+|---|---|---|
+| Zarr dataset loader (`<build>.zarr`, `index.parquet`) | `src/harvester/v16_dataset.py` | Implemented |
+| Model used by V16 trainer | `src/harvester/v15_model.py` (`V15Model`) | Implemented |
+| V16 trainer entrypoint | `scripts/train_v16.py` | Implemented |
+| Training-readiness gate | `scripts/validate_v16_training_ready.py` | Implemented |
+| Inference bridge for post-train patch flow | `scripts/infer_v16.py` | Implemented |
+
+### Targets currently supervised by `train_v16.py`
+
+| Target | Source tensor key from `V16Dataset` | Loss path | Status |
+|---|---|---|---|
+| Height (257x257) | `height` | weighted L1 | Implemented |
+| Normals (257x257x3) | `normals`, `normal_mask` | cosine loss | Implemented |
+| Alpha (256x256x4) | `alpha` | weighted L1 | Implemented |
+| Holes (16x16) | `holes` | weighted L1 | Implemented |
+| Liquid mask (256x256) | `liquid` | weighted L1 | Implemented |
+| Liquid height (256x256) | `liquid_height` | masked weighted L1 (where liquid exists) | Implemented |
+| MCLY classes | `mcly_ids`, `mcly_mask` | masked cross-entropy | Implemented |
+
+### Signals present in V16 dataset but not yet supervised
+
+| Signal | Availability | Current use |
+|---|---|---|
+| `object_instance_mask` / dataset `instance_mask` | present in Zarr + dataset loader | readable, not yet in loss |
+| `object_precise_mask` | present in Zarr builder | not consumed by `V16Dataset` yet |
+| `shadow_mask` | present in Zarr builder | archived auxiliary signal; not consumed by default terrain losses |
+
+### Explicit note on model file naming
+
+- There is no `src/harvester/v16_model.py` in the current repo.
+- `train_v16.py` intentionally uses `V15Model` from
+  `src/harvester/v15_model.py` as the current V16 terrain architecture.
 
 ## Compression Benchmarks (target)
 
@@ -303,7 +360,8 @@ decoder. Total ~27.4M parameters with the liquid head.
 | normals | (B, 3, 257, 257) | 1 - cosine similarity, normal-masked |
 | alpha | (B, 4, 256, 256) | L1, object-masked × has_alpha |
 | holes | (B, 1, 16, 16) | L1, object-masked × has_holes |
-| liquid | (B, 1, 256, 256) | L1, object-masked × has_liquid |
+| liquid_mask | (B, 1, 256, 256) | L1, object-masked × has_liquid |
+| liquid_height | (B, 1, 256, 256) | masked L1 on liquid-present pixels × has_liquid |
 | mcly | (B, 4, 16, 16, 16 logits) | Cross-entropy, masked by `mcly_layer_mask` |
 
 ## Normalization
@@ -323,9 +381,10 @@ decoder. Total ~27.4M parameters with the liquid head.
 | `scripts/backfill_v16_resume_state.py` | Backfill `_resume_state.json` into older completed final stores |
 | `scripts/inspect_v16_dataset.py` | Backfill `_dataset_summary.json` and sample visualizations from existing stores |
 | `scripts/validate_v16_training_ready.py` | Validate dataset readability through the current V16Dataset/DataLoader/model stack |
+| `scripts/infer_v16.py` | Deterministic V16 inference to `<build>.pred.zarr` + patch-ready summaries |
 | `scripts/run-data-harvester-python.ps1` | Repo-local launcher for `.venv` packages when the venv stub is broken |
 | `src/harvester/v16_dataset.py` | PyTorch Dataset reading from Zarr stores |
-| `src/harvester/v16_model.py` | V16Model (ConvNeXt V2 Nano + U-Net + liquid head) |
+| `src/harvester/v15_model.py` | Current V16 terrain model implementation (`V15Model`) |
 | `docs/architecture/v16-terrain-model-spec-2026-05-16.md` | This document |
 
 ## Inference Contract (Paired Input/Output Stores)
@@ -359,6 +418,7 @@ Required prediction arrays per tile:
 | `alpha_pred_256` | 256x256x4 | float32 | clamped [0,1] |
 | `holes_pred_16` | 16x16 | float32 | [0,1] probability |
 | `liquid_pred_mask_256` | 256x256 | float32 | [0,1] probability |
+| `liquid_pred_height_256` | 256x256 | float32 | predicted liquid-surface height |
 | `mcly_pred_logits_16x16x4x16` | 16x16x4x16 | float32 | raw logits for layer-class choices |
 
 Required inference metadata sidecar:
@@ -439,6 +499,8 @@ Still missing (future ergonomic wrapper work):
 - a single command that consumes `.pred.zarr` directly without the per-tile
   summary staging convention
 - a one-shot "infer + patch + optional alpha conversion" pipeline command
+- direct ADT liquid chunk patching in the converter path (`MH2O`/`MCLQ` write
+  integration) so predicted liquid mask+height are emitted into terrain outputs
 
 ## Input/Output Pairing Policy
 

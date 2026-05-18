@@ -100,14 +100,25 @@ uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340
 # Then train:
 uv run python scripts/train_v16.py \
     --dataset-dir ../output/datasets/v16 \
-    --builds 3_3_5_12340
+    --builds 3_3_5_12340 \
+    --train-max-tiles 2000 \
+    --val-max-tiles 256
 ```
+
+Subset curation + evidence artifacts are written per run:
+- `models/v16/runs/<run>/evidence/curation_manifest.json`
+- `models/v16/runs/<run>/evidence/train_selection.jsonl`
+- `models/v16/runs/<run>/evidence/val_selection.jsonl`
+- `models/v16/runs/<run>/evidence/train_epoch_orders.jsonl`
+
+Validation snapshot exports now also include one labeled overview image:
+- `models/v16/runs/<run>/validation/epoch_XXXX/validation_overview.png`
 
 Training-readiness validation writes:
 - `wow-viewer/output/datasets/v16/validation/<build>.training_readiness.json`
 
 It currently validates the signals that `train_v16.py` actually uses:
-- `input`, `height`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid`, `mcly_ids`, `mcly_mask`, `weight`
+- `input`, `height`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid`, `liquid_height`, `mcly_ids`, `mcly_mask`, `weight`
 
 It also checks that `instance_mask` can still be read cleanly, but the current trainer does not yet use:
 - `instance_mask`
@@ -179,7 +190,8 @@ ConvNeXt V2 Nano encoder (15.6M pretrained) + U-Net decoder with skip fusion.
 | normals | (B,3,257,257) | 1 - cosine, normal-masked |
 | alpha | (B,4,256,256) | L1, object-masked |
 | holes | (B,1,16,16) | L1, object-masked |
-| liquid | (B,1,256,256) | L1, object-masked |
+| liquid_mask | (B,1,256,256) | L1, object-masked |
+| liquid_height | (B,1,256,256) | masked L1 on liquid-present pixels |
 | mcly | (B,4,16,16,16 logits) | Cross-entropy, masked by `mcly_layer_mask` |
 
 ## Training
@@ -205,4 +217,3 @@ uv run python scripts/train_v15.py --epochs 200
 | `src/harvester/v16_dataset.py` | V16 PyTorch Dataset (Zarr) |
 | `src/harvester/v15_dataset.py` | V15 PyTorch Dataset (NPZ) |
 | `src/harvester/v15_model.py` | V15Model + V16Model (same architecture) |
-| `src/harvester/v16_model.py` | Duplicate — use v15_model.py |
