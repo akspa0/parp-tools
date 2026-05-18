@@ -158,6 +158,54 @@ This rule exists because the pattern has been: see the whole mountain → try to
 
 ---
 
+## Spec Kit First — Every Chat, Every Time
+
+**Every new chat session that involves `wow-viewer` work MUST start by loading a Spec Kit skill.**
+
+This is not optional. This is not "for non-trivial features only." This is the entrypoint.
+
+### Why
+
+Every previous session that went sideways started with "let me just jump in and fix this." Spec Kit forces you to orient before acting:
+
+1. **Where does this task live?** Check existing specs in `wow-viewer/specs/`.
+2. **Has someone already spec'd this?** If a spec exists, read it before writing code.
+3. **Is this a new feature?** Run `speckit-specify` to define it before planning.
+4. **Is this an existing feature?** Run `speckit-checklist` to verify current state.
+5. **Are we about to implement?** Run `speckit-tasks` to see the breakdown.
+
+### How
+
+At the start of every chat, do this:
+
+```
+1. Load skill: speckit-checklist  (or speckit-analyze if no spec exists yet)
+2. Read wow-viewer/specs/ to find the active feature
+3. Read wow-viewer/docs/architecture/speckit-doc-audit-*.md for current doc state
+4. Then proceed with the user's request
+```
+
+If the user's request doesn't match any existing spec, load `speckit-specify` and create one.
+
+If the user just wants a quick fix or question answered, load `speckit-checklist` to verify the fix doesn't violate any existing spec, then proceed.
+
+### What This Replaces
+
+- "Let me read the code first" → No. Read the spec first. The spec tells you what the code is supposed to do.
+- "Let me check what exists" → No. The audit table tells you what exists.
+- "I'll just make the change and we'll see" → No. Plan first. Then implement.
+
+### Exceptions
+
+The only times you can skip Spec Kit:
+1. Pure question-answering (no code changes)
+2. Reading/exploring code (no modifications)
+3. The user explicitly says "skip spec kit" or "just do it"
+
+Even for exceptions, you should still read the relevant spec if one exists.
+
+---
+
 ## Scope
 
 - The active code paths in this workspace are `gillijimproject_refactor` (READ-ONLY REFERENCE) and `wow-viewer` (ACTIVE DEVELOPMENT).

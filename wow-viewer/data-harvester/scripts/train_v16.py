@@ -11,6 +11,7 @@ Usage:
     uv run python scripts/train_v16.py --run-name my_experiment --builds 3_3_5_12340
     uv run python scripts/train_v16.py --resume-checkpoint models/v16/runs/<run>/checkpoints/v16_best.pt
     uv run python scripts/train_v16.py --run-name my_experiment --resume-from auto
+    uv run python scripts/train_v16.py --target-vram-gb 8 --gpu-duty-cycle 50
 """
 
 from __future__ import annotations
@@ -88,6 +89,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--weight-decay", type=float, default=0.05)
     p.add_argument("--num-workers", type=int, default=0)
     p.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu", "auto"])
+    p.add_argument(
+        "--target-vram-gb",
+        type=float,
+        default=0.0,
+        help="Soft VRAM target for guidance logs (0 disables guidance)",
+    )
+    p.add_argument(
+        "--gpu-duty-cycle",
+        type=float,
+        default=100.0,
+        help="Approximate max GPU active duty cycle percentage via step throttling (1-100)",
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--val-fraction", type=float, default=0.1,
                     help="Fraction of data held out for validation")
@@ -307,6 +320,8 @@ def main() -> None:
         "dataset_dir": str(args.dataset_dir),
         "builds": args.builds,
         "batch_size": args.batch_size,
+        "target_vram_gb": args.target_vram_gb,
+        "gpu_duty_cycle": args.gpu_duty_cycle,
         "epochs": args.epochs,
         "lr": args.lr,
         "weight_decay": args.weight_decay,
@@ -338,6 +353,11 @@ def main() -> None:
         else "cpu"
     )
     print(f"Device: {device}")
+    if device.type == "cuda":
+        print(
+            f"GPU budget controls: target_vram_gb={args.target_vram_gb:.2f} "
+            f"gpu_duty_cycle={args.gpu_duty_cycle:.1f}%"
+        )
 
     train_ds = V16Dataset(
         dataset_dir=args.dataset_dir,
@@ -486,8 +506,11 @@ def main() -> None:
         epoch_lq = 0.0
         epoch_mc = 0.0
         t0 = time.perf_counter()
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
 
         for batch in train_loader:
+            step_t0 = time.perf_counter()
             inp = batch["input"].to(device, non_blocking=True)
             hgt = batch["height"].to(device, non_blocking=True)
             nrm = batch["normals"].to(device, non_blocking=True)
@@ -536,6 +559,15 @@ def main() -> None:
             scaler.step(optimizer)
             scaler.update()
 
+            # Thermal guardrail: approximate duty-cycle throttling.
+            if device.type == "cuda" and args.gpu_duty_cycle < 100.0:
+                duty = max(1.0, min(100.0, float(args.gpu_duty_cycle)))
+                active_s = time.perf_counter() - step_t0
+                target_total_s = active_s / (duty / 100.0)
+                sleep_s = max(0.0, target_total_s - active_s)
+                if sleep_s > 0.0:
+                    time.sleep(sleep_s)
+
             epoch_h += loss_h.item()
             epoch_n += loss_n.item()
             epoch_a += loss_a.item()
@@ -548,6 +580,11 @@ def main() -> None:
         n_bt = len(train_loader)
         elapsed = time.perf_counter() - t0
         lr_now = optimizer.param_groups[0]["lr"]
+        peak_alloc_gb = None
+        peak_reserved_gb = None
+        if device.type == "cuda":
+            peak_alloc_gb = torch.cuda.max_memory_allocated(device) / (1024.0 ** 3)
+            peak_reserved_gb = torch.cuda.max_memory_reserved(device) / (1024.0 ** 3)
         print(
             f"Epoch {epoch:3d}/{args.epochs} | "
             f"h={epoch_h / n_bt:.4f} n={epoch_n / n_bt:.4f} "
@@ -555,6 +592,27 @@ def main() -> None:
             f"lq={epoch_lq / n_bt:.4f} mc={epoch_mc / n_bt:.4f} "
             f"lr={lr_now:.2e} {elapsed:.1f}s"
         )
+        if peak_reserved_gb is not None:
+            print(
+                f"        cuda_mem | alloc_peak={peak_alloc_gb:.2f}GB "
+                f"reserved_peak={peak_reserved_gb:.2f}GB"
+            )
+            if args.target_vram_gb > 0:
+                target = float(args.target_vram_gb)
+                if peak_reserved_gb < target * 0.70:
+                    suggested_bs = max(
+                        args.batch_size + 1,
+                        int(round(args.batch_size * (target / max(peak_reserved_gb, 1e-6)))),
+                    )
+                    print(
+                        f"        tuning | below target_vram_gb={target:.2f}; "
+                        f"consider batch-size ~{suggested_bs}"
+                    )
+                elif peak_reserved_gb > target * 1.05:
+                    print(
+                        f"        tuning | above target_vram_gb={target:.2f}; "
+                        f"consider reducing batch-size"
+                    )
 
         entry = {
             "epoch": epoch, "train_h": epoch_h / n_bt, "train_n": epoch_n / n_bt,
@@ -562,6 +620,9 @@ def main() -> None:
             "train_lq": epoch_lq / n_bt,
             "train_mc": epoch_mc / n_bt, "lr": lr_now,
         }
+        if peak_alloc_gb is not None and peak_reserved_gb is not None:
+            entry["cuda_peak_alloc_gb"] = peak_alloc_gb
+            entry["cuda_peak_reserved_gb"] = peak_reserved_gb
 
         if epoch % args.val_interval == 0 and len(val_ds) > 0:
             v = _validate(model, val_loader, device, args.no_amp)

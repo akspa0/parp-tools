@@ -122,6 +122,17 @@ uv run python scripts/train_v16.py \
     --val-max-tiles 256 \
     --run-name <existing-run-name> \
     --resume-from best
+
+# Thermal-friendly run targetting ~8 GB VRAM and ~50% duty cycle:
+uv run python scripts/train_v16.py \
+    --dataset-dir ../output/datasets/v16 \
+    --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 \
+    --train-max-tiles 1350 \
+    --val-max-tiles 150 \
+    --batch-size 24 \
+    --target-vram-gb 8 \
+    --gpu-duty-cycle 50 \
+    --run-name v16_full_corpus_1500_val10_thermal
 ```
 
 By default, curation excludes placeholder map labels (`map=memory`, empty,
@@ -136,6 +147,10 @@ Subset curation + evidence artifacts are written per run:
 
 Validation snapshot exports now also include one labeled overview image:
 - `models/v16/runs/<run>/validation/epoch_XXXX/validation_overview.png`
+
+Thermal/VRAM tuning flags:
+- `--target-vram-gb <float>`: soft target for guidance logs (trainer prints when you are far under/over target).
+- `--gpu-duty-cycle <1..100>`: approximates an upper GPU active duty-cycle via per-step throttling.
 
 Checkpoint files per run:
 - `models/v16/runs/<run>/checkpoints/v16_last.pt` (written every epoch)

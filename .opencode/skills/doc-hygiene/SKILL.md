@@ -57,7 +57,7 @@ docs/
 
 ## Checklist (Run Mentally Before Every Task)
 
-1. **Before starting:** Read the relevant spec/doc/memory-bank file for the area you're about to touch.
+1. **Before starting:** Load `speckit-checklist` (or `speckit-analyze` if no spec exists). Read `wow-viewer/specs/` for the active feature. Read the relevant spec/doc/memory-bank file for the area you're about to touch.
 2. **During implementation:** If the scope expands beyond what the spec covers, note the delta. Update the spec after or ask the user.
 3. **After completing:** Update the relevant memory-bank files. Compress if they've grown beyond 200 lines. Update the spec doc if behavior changed.
-4. **Before committing:** Verify spec docs match the code. Verify memory-bank reflects what actually happened.
+4. **Before committing:** Run `speckit-checklist` to verify spec/plan/implementation alignment. Verify memory-bank reflects what actually happened.
