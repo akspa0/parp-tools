@@ -13,6 +13,8 @@ public sealed class TerrainTileTensorPack
     public string MapName { get; init; } = string.Empty;
     public string BuildKey { get; init; } = string.Empty;
     public string SourceAdtPath { get; init; } = string.Empty;
+    public int? TileX { get; init; }
+    public int? TileY { get; init; }
 
     // ── Height fields ──────────────────────────────────────────────────────
 

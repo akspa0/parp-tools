@@ -101,12 +101,15 @@ Six independent models, each training on ground truth only:
   - successful final stores now retain `_resume_state.json` as completion metadata instead of deleting it at finalization
   - `scripts/backfill_v16_resume_state.py` can backfill `_resume_state.json` into older completed final stores
   - `scripts/inspect_v16_dataset.py` can backfill `_dataset_summary.json`, emit human-friendly JSON summaries, and generate sample image sheets from existing V16 stores
+  - `scripts/validate_v16_training_ready.py` now provides a separate trainer-readiness proof path: it opens finalized V16 stores, reads real samples through `V16Dataset`, validates a real `DataLoader` batch, and can run one `V15Model` forward pass so "dataset built" and "trainer can consume it" stop being conflated
   - the Python Zarr writer now retries transient Windows `WinError 5` / `WinError 32` chunk-write failures instead of aborting immediately on the first `LocalStore` atomic-replace race
   - the Python Zarr writer now buffers tiles in memory and flushes them in small slice batches, reducing one-row-at-a-time chunk rewrites on the filesystem
   - incoming fixed-shape signals are now coerced to canonical Zarr shapes before batching so variable layer-count payloads do not fail `np.stack(...)` during resume/build runs
   - the C# builder no longer reparses the same placement catalog twice per tile for object masks and placement-array export, which was wasted work on placement-heavy tiles
   - `build_v16_dataset.py stats` now reports logical raw array bytes versus on-disk Zarr bytes so compression savings are visible per array and per store
   - future V16 builds now default to `lz4` / level `1` / `shuffle`
+  - `V16Dataset` now exposes `mcly_ids` / `mcly_mask` from Zarr and `train_v16.py` now uses the existing V15-style masked cross-entropy path for MCLY supervision; `instance_mask` remains readable but still is not used by the current terrain trainer
+  - V16 coordinate bookkeeping is now patched in two places: future streamed NPZ metadata carries explicit `tile_x` / `tile_y`, and `build_v16_dataset.py repair-index --build <key>` can rewrite existing `index.parquet` files in place from a metadata-only re-stream without touching the stored tensor arrays
 - Repo truth still needs operator proof from a user-run rebuild before this recovery slice can be treated as validated.
 
 ## NOT YET (Blocked on User)

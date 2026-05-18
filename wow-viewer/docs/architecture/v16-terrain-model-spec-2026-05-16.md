@@ -152,6 +152,12 @@ uv run python scripts/backfill_v16_resume_state.py --builds 0_5_3_3368 0_5_5_349
 # Generate summaries and sample sheets from existing stores:
 uv run python scripts/inspect_v16_dataset.py --build 3_3_5_12340 --backfill-summary --write-images
 
+# Validate that the current training stack can consume the built dataset:
+uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340
+
+# Repair tile_x/tile_y in index.parquet without rebuilding the tensor arrays:
+uv run python scripts/build_v16_dataset.py repair-index --build 3_3_5_12340
+
 # Multiple builds:
 uv run python scripts/build_v16_dataset.py build --builds 3_3_5_12340 4_0_0_11927
 
@@ -222,6 +228,16 @@ the builder no longer reparses the same placement catalog twice per tile for
 masks and placement-array export.
 The `stats` command now reports logical raw array size versus on-disk Zarr
 size, including per-array compression ratios and whole-store savings.
+The dedicated `validate_v16_training_ready.py` command now answers a separate
+question: can the current `V16Dataset`, `DataLoader`, and `V15Model` actually
+consume the finalized store without shape, dtype, or finite-value surprises.
+If older final stores have bad `tile_x` / `tile_y` bookkeeping, the
+`repair-index` command now rewrites `index.parquet` in place from a
+metadata-only re-stream of the staged client. This leaves the Zarr arrays and
+placements table untouched.
+Future streamed NPZ metadata now carries explicit `tile_x` / `tile_y`, and the
+Python builder trusts those explicit fields before falling back to `tile_name`
+or `source_adt_path` parsing.
 
 ### Streaming Protocol
 
@@ -239,6 +255,7 @@ All diagnostic text goes to stderr.
 
 ```bash
 cd wow-viewer/data-harvester
+uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340
 uv run python scripts/train_v16.py \
     --dataset-dir ../output/datasets/v16 \
     --builds 3_3_5_12340 4_0_0_11927
@@ -250,6 +267,19 @@ train/val splitting and the `has_*` columns for feature masking.
 Geometric augmentation (hflip/vflip/rot90) is applied at training time with
 correct normal vector transforms. Per-tile height z-score normalization uses
 `height_mean` and `height_std` from the index.
+
+The training-readiness validator writes:
+
+- `wow-viewer/output/datasets/v16/validation/<build>.training_readiness.json`
+
+It validates the signals the current trainer actually uses:
+
+- `input`, `height`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid`, `mcly_ids`, `mcly_mask`, `weight`
+
+It also proves that `instance_mask` remains readable by the dataset layer, but
+the current trainer still does not supervise:
+
+- `instance_mask`
 
 ## Compression Benchmarks (target)
 
@@ -274,6 +304,7 @@ decoder. Total ~27.4M parameters with the liquid head.
 | alpha | (B, 4, 256, 256) | L1, object-masked × has_alpha |
 | holes | (B, 1, 16, 16) | L1, object-masked × has_holes |
 | liquid | (B, 1, 256, 256) | L1, object-masked × has_liquid |
+| mcly | (B, 4, 16, 16, 16 logits) | Cross-entropy, masked by `mcly_layer_mask` |
 
 ## Normalization
 
@@ -291,6 +322,7 @@ decoder. Total ~27.4M parameters with the liquid head.
 | `scripts/build_v16_dataset.py` | Build pipeline: stream from harvester → Zarr, resume, rejected-tile reporting |
 | `scripts/backfill_v16_resume_state.py` | Backfill `_resume_state.json` into older completed final stores |
 | `scripts/inspect_v16_dataset.py` | Backfill `_dataset_summary.json` and sample visualizations from existing stores |
+| `scripts/validate_v16_training_ready.py` | Validate dataset readability through the current V16Dataset/DataLoader/model stack |
 | `scripts/run-data-harvester-python.ps1` | Repo-local launcher for `.venv` packages when the venv stub is broken |
 | `src/harvester/v16_dataset.py` | PyTorch Dataset reading from Zarr stores |
 | `src/harvester/v16_model.py` | V16Model (ConvNeXt V2 Nano + U-Net + liquid head) |

@@ -406,6 +406,40 @@ def _extract_metadata(data: dict[str, np.ndarray]) -> dict:
         return {}
 
 
+def _try_parse_tile_coords_from_stem(stem: str) -> tuple[int | None, int | None]:
+    parts = stem.rsplit("_", 2)
+    if len(parts) < 3:
+        return None, None
+    try:
+        return int(parts[-2]), int(parts[-1])
+    except (TypeError, ValueError):
+        return None, None
+
+
+def _extract_tile_coords_from_metadata(meta: dict[str, object]) -> tuple[int, int]:
+    tx = meta.get("tile_x")
+    ty = meta.get("tile_y")
+    if tx is not None and ty is not None:
+        try:
+            return int(tx), int(ty)
+        except (TypeError, ValueError):
+            pass
+
+    tile_name = str(meta.get("tile_name", "") or "")
+    if tile_name:
+        parsed_tx, parsed_ty = _try_parse_tile_coords_from_stem(tile_name)
+        if parsed_tx is not None and parsed_ty is not None:
+            return parsed_tx, parsed_ty
+
+    source = str(meta.get("source_adt_path", "") or "")
+    if source:
+        parsed_tx, parsed_ty = _try_parse_tile_coords_from_stem(Path(source).stem)
+        if parsed_tx is not None and parsed_ty is not None:
+            return parsed_tx, parsed_ty
+
+    return 0, 0
+
+
 def _extract_placements(data: dict[str, np.ndarray], meta: dict) -> tuple[list[dict], list[dict], list[str], list[str]]:
     mddf_rows = []
     modf_rows = []
@@ -557,6 +591,132 @@ def _write_index(rows: list[dict], output_path: Path) -> None:
 
     table = pa.table(col_data, schema=schema)
     pq.write_table(table, str(output_path / "index.parquet"))
+
+
+def _read_index_rows(output_path: Path) -> list[dict]:
+    idx_path = output_path / "index.parquet"
+    table = pq.read_table(str(idx_path))
+    return [
+        {col: table.column(col)[i].as_py() for col in table.column_names}
+        for i in range(table.num_rows)
+    ]
+
+
+def _ordered_maps_from_index_rows(index_rows: list[dict]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for row in index_rows:
+        map_name = str(row.get("map", ""))
+        if not map_name or map_name in seen:
+            continue
+        seen.add(map_name)
+        ordered.append(map_name)
+    return ordered
+
+
+def _stream_valid_tile_metadata(
+    harvest_tool: Path,
+    client_root: Path,
+    map_name: str,
+    build_version: str | None,
+) -> list[dict[str, object]]:
+    cmd = [
+        str(harvest_tool),
+        "harvest-stream",
+        "--client-root",
+        str(client_root),
+        "--map",
+        map_name,
+    ]
+    if build_version:
+        cmd.extend(["--build", build_version])
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0,
+    )
+    if proc.stdout is None or proc.stderr is None:
+        proc.terminate()
+        raise RuntimeError(f"Failed to open harvest-stream pipes for map {map_name}.")
+
+    stderr_tail: deque[str] = deque(maxlen=40)
+    stderr_thread = threading.Thread(
+        target=_pump_stderr,
+        args=(proc.stderr, map_name, stderr_tail),
+        daemon=True,
+    )
+    stderr_thread.start()
+
+    rows: list[dict[str, object]] = []
+    saw_end_marker = False
+    stream_error: str | None = None
+
+    while True:
+        header = proc.stdout.read(8)
+        if not header:
+            stream_error = "stdout closed before ENDS sentinel"
+            break
+        if len(header) < 8:
+            stream_error = f"truncated stream header ({len(header)}/8 bytes)"
+            break
+
+        magic = header[:4]
+        if magic == ENDS_MAGIC:
+            saw_end_marker = True
+            break
+        if magic != NPZB_MAGIC:
+            stream_error = f"unexpected stream magic {magic!r}"
+            break
+
+        length = struct.unpack("<I", header[4:8])[0]
+        if length == 0 or length > 50_000_000:
+            stream_error = f"invalid NPZ blob length {length}"
+            break
+
+        blob = proc.stdout.read(length)
+        if not blob or len(blob) < length:
+            stream_error = f"truncated NPZ blob ({len(blob) if blob else 0}/{length} bytes)"
+            break
+
+        try:
+            data = dict(np.load(BytesIO(blob), allow_pickle=False))
+        except Exception as ex:
+            stream_error = f"failed to decode streamed NPZ blob: {ex}"
+            break
+
+        if not REQUIRED_KEYS.issubset(data.keys()):
+            continue
+
+        meta = _decode_metadata_json(data)
+        tx, ty = _extract_tile_coords_from_metadata(meta)
+        actual_map = str(meta.get("map_name", map_name))
+        rows.append({"map": actual_map, "tile_x": tx, "tile_y": ty})
+
+    if proc.poll() is None and (stream_error is not None or not saw_end_marker):
+        proc.terminate()
+
+    return_code = proc.wait()
+    stderr_thread.join(timeout=2.0)
+
+    if stream_error is not None:
+        raise RuntimeError(
+            f"Harvest stream failed for map {map_name}: {stream_error}\n"
+            f"stderr tail:\n{_tail_text(stderr_tail)}"
+        )
+    if not saw_end_marker:
+        raise RuntimeError(
+            f"Harvest stream ended without ENDS sentinel for map {map_name}.\n"
+            f"stderr tail:\n{_tail_text(stderr_tail)}"
+        )
+    if return_code != 0:
+        raise RuntimeError(
+            f"Harvest stream exited with code {return_code} for map {map_name}.\n"
+            f"stderr tail:\n{_tail_text(stderr_tail)}"
+        )
+
+    return rows
 
 
 def _write_placements(all_placements: list[dict], output_path: Path) -> None:
@@ -854,17 +1014,7 @@ def _build_zarr_streaming(
                 missing = sorted(REQUIRED_KEYS - set(data.keys()))
                 meta = _decode_metadata_json(data)
                 source_adt_path = str(meta.get("source_adt_path", ""))
-                tx = meta.get("tile_x")
-                ty = meta.get("tile_y")
-                if (tx is None or ty is None) and source_adt_path:
-                    parts = source_adt_path.replace(".adt", "").rsplit("_", 2)
-                    if len(parts) >= 2:
-                        try:
-                            tx = int(parts[-2])
-                            ty = int(parts[-1])
-                        except (TypeError, ValueError):
-                            tx = tx if tx is not None else None
-                            ty = ty if ty is not None else None
+                tx, ty = _extract_tile_coords_from_metadata(meta)
                 if rejected_tiles_report is not None:
                     rejected_tiles_report.write(
                         json.dumps(
@@ -900,14 +1050,7 @@ def _build_zarr_streaming(
             tx, ty = 0, 0
             actual_map = map_name
             if meta:
-                source = meta.get("source_adt_path", "")
-                parts = source.replace(".adt", "").rsplit("_", 2)
-                if len(parts) >= 2:
-                    try:
-                        ty = int(parts[-1])
-                        tx = int(parts[-2])
-                    except (ValueError, IndexError):
-                        pass
+                tx, ty = _extract_tile_coords_from_metadata(meta)
                 actual_map = meta.get("map_name", map_name)
 
             # Extract placement data
@@ -1183,6 +1326,59 @@ def cmd_stats(args: argparse.Namespace) -> None:
             print(f"  WARNING: staged partial output still exists at {partial_path}")
 
 
+def cmd_repair_index(args: argparse.Namespace) -> None:
+    builds = args.builds or [args.build]
+    harvest_tool = _find_harvest_tool()
+
+    for build in builds:
+        output_path = _DATASET_ROOT / f"{build}.zarr"
+        if not output_path.exists():
+            print(f"SKIP {build}: no final store at {output_path}")
+            continue
+
+        client_root = _find_client_root(build)
+        if client_root is None:
+            raise RuntimeError(f"Could not find staged client root for build {build}.")
+
+        idx_path = output_path / "index.parquet"
+        if not idx_path.exists():
+            raise RuntimeError(f"Build {build} has no index.parquet to repair.")
+
+        if not args.no_backup:
+            backup_path = output_path / "index.parquet.bak"
+            if not backup_path.exists():
+                shutil.copy2(idx_path, backup_path)
+                print(f"Backed up {idx_path} -> {backup_path}")
+
+        index_rows = _read_index_rows(output_path)
+        ordered_maps = _ordered_maps_from_index_rows(index_rows)
+        build_version = build.replace("_", ".")
+
+        print(f"Repairing index coordinates for {build}")
+        print(f"Client: {client_root}")
+        print(f"Maps: {ordered_maps}")
+
+        for map_name in ordered_maps:
+            row_indices = [i for i, row in enumerate(index_rows) if str(row.get("map")) == map_name]
+            streamed_rows = _stream_valid_tile_metadata(harvest_tool, client_root, map_name, build_version)
+
+            if len(streamed_rows) != len(row_indices):
+                raise RuntimeError(
+                    f"Coordinate repair count mismatch for {build}/{map_name}: "
+                    f"index has {len(row_indices)} rows, stream produced {len(streamed_rows)} valid tiles."
+                )
+
+            for row_idx, streamed in zip(row_indices, streamed_rows):
+                index_rows[row_idx]["map"] = str(streamed["map"])
+                index_rows[row_idx]["tile_x"] = int(streamed["tile_x"])
+                index_rows[row_idx]["tile_y"] = int(streamed["tile_y"])
+
+            print(f"  repaired {map_name}: {len(row_indices)} rows")
+
+        _write_index(index_rows, output_path)
+        print(f"Wrote repaired index: {idx_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build V16 consolidated Zarr dataset")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1201,6 +1397,8 @@ def main() -> None:
     build_p.add_argument("--shuffle", choices=["noshuffle", "shuffle", "bitshuffle"], default=DEFAULT_SHUFFLE, help="Blosc shuffle mode")
 
     stats_p = sub.add_parser("stats", parents=[common])
+    repair_p = sub.add_parser("repair-index", parents=[common])
+    repair_p.add_argument("--no-backup", action="store_true", help="Skip creating index.parquet.bak before rewriting index.parquet")
 
     args = parser.parse_args()
 
@@ -1208,6 +1406,8 @@ def main() -> None:
         cmd_build(args)
     elif args.command == "stats":
         cmd_stats(args)
+    elif args.command == "repair-index":
+        cmd_repair_index(args)
 
 
 if __name__ == "__main__":

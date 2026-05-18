@@ -37,6 +37,7 @@ public static class AdtTensorPackBuilder
             throw new InvalidDataException($"Tensor pack builder requires a root ADT file, but found {fileSummary.Kind}.");
 
         string tileName = Path.GetFileNameWithoutExtension(adtPath);
+        TryParseAdtTileCoords(adtPath, out int tileX, out int tileY);
         HashSet<string> availableSignals = [];
 
         // ── Resolve terrain chunks ───────────────────────────────────────────
@@ -124,6 +125,8 @@ public static class AdtTensorPackBuilder
             MapName = ExtractMapName(adtPath),
             BuildKey = buildVersion ?? string.Empty,
             SourceAdtPath = adtPath,
+            TileX = tileX,
+            TileY = tileY,
             Height257 = height257,
             Height65 = height65,
             Height17 = height17,
@@ -201,6 +204,7 @@ public static class AdtTensorPackBuilder
             throw new InvalidDataException($"Tensor pack builder requires a root ADT file, but found {fileSummary.Kind}.");
 
         string tileName = Path.GetFileNameWithoutExtension(sourceAdtPath);
+        TryParseAdtTileCoords(sourceAdtPath, out int tileX, out int tileY);
         HashSet<string> availableSignals = [];
 
         List<MapChunkLocation> terrainChunks = ResolveTerrainChunkLocations(stream, fileSummary);
@@ -280,6 +284,8 @@ public static class AdtTensorPackBuilder
             MapName = ExtractMapName(sourceAdtPath),
             BuildKey = buildVersion ?? string.Empty,
             SourceAdtPath = sourceAdtPath,
+            TileX = tileX,
+            TileY = tileY,
             Height257 = height257,
             Height65 = height65,
             Height17 = height17,
@@ -381,6 +387,8 @@ public static class AdtTensorPackBuilder
             MapName = mapName,
             BuildKey = buildKey,
             SourceAdtPath = string.Empty, // no ADT source
+            TileX = tileX,
+            TileY = tileY,
             Height257 = null,
             Height65 = null,
             Height17 = null,

@@ -188,11 +188,14 @@ def main() -> None:
             alp = batch["alpha"].to(device, non_blocking=True)
             hol = batch["holes"].to(device, non_blocking=True)
             liq = batch["liquid"].to(device, non_blocking=True)
+            mly = batch["mcly_ids"].to(device, non_blocking=True)
+            mlm = batch["mcly_mask"].to(device, non_blocking=True)
             wgt = batch["weight"].to(device, non_blocking=True)
             has_n = batch["has_normals"].to(device, non_blocking=True).float()
             has_a = batch["has_alpha"].to(device, non_blocking=True).float()
             has_ho = batch["has_holes"].to(device, non_blocking=True).float()
             has_lq = batch["has_liquid"].to(device, non_blocking=True).float()
+            has_mc = batch["has_mcly"].to(device, non_blocking=True).float()
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -205,13 +208,16 @@ def main() -> None:
                 loss_ho = _weighted_l1(pred_ho, hol, wgt) * has_ho.mean()
                 loss_lq = _weighted_l1(pred_lq, liq, wgt) * has_lq.mean()
 
-                # MCLY head: only compute if the model outputs it
                 B = pred_mc.size(0)
                 pred_mc_r = pred_mc.view(B, 4, 16, 16, 16).permute(0, 1, 4, 2, 3)
-
-                # MCLY targets from V16 Zarr not yet wired into dataset
-                # Use zero loss placeholder
-                loss_mc = torch.tensor(0.0, device=device)
+                loss_mc = torch.nn.functional.cross_entropy(
+                    pred_mc_r.reshape(-1, 16),
+                    mly.permute(0, 3, 1, 2).reshape(-1),
+                    reduction="none",
+                ).view(B, 4, 16, 16)
+                mc_mask = mlm.permute(0, 3, 1, 2)
+                n_active = mc_mask.sum() + 1e-8
+                loss_mc = (loss_mc * mc_mask).sum() / n_active * has_mc.mean()
 
                 loss = loss_h + 2.0 * loss_n + loss_a + loss_ho + loss_lq + 0.3 * loss_mc
 
@@ -226,6 +232,7 @@ def main() -> None:
             epoch_a += loss_a.item()
             epoch_ho += loss_ho.item()
             epoch_lq += loss_lq.item()
+            epoch_mc += loss_mc.item()
 
         scheduler.step()
 
@@ -236,14 +243,14 @@ def main() -> None:
             f"Epoch {epoch:3d}/{args.epochs} | "
             f"h={epoch_h / n_bt:.4f} n={epoch_n / n_bt:.4f} "
             f"a={epoch_a / n_bt:.4f} ho={epoch_ho / n_bt:.4f} "
-            f"lq={epoch_lq / n_bt:.4f} "
+            f"lq={epoch_lq / n_bt:.4f} mc={epoch_mc / n_bt:.4f} "
             f"lr={lr_now:.2e} {elapsed:.1f}s"
         )
 
         entry = {
             "epoch": epoch, "train_h": epoch_h / n_bt, "train_n": epoch_n / n_bt,
             "train_a": epoch_a / n_bt, "train_ho": epoch_ho / n_bt,
-            "train_lq": epoch_lq / n_bt, "lr": lr_now,
+            "train_lq": epoch_lq / n_bt, "train_mc": epoch_mc / n_bt, "lr": lr_now,
         }
 
         if epoch % args.val_interval == 0 and len(val_ds) > 0:
@@ -251,7 +258,7 @@ def main() -> None:
             entry.update(v)
             print(
                 f"        val | h={v['val_h']:.4f} n={v['val_n']:.4f} "
-                f"a={v['val_a']:.4f} lq={v['val_lq']:.4f}"
+                f"a={v['val_a']:.4f} lq={v['val_lq']:.4f} mc={v['val_mc']:.4f}"
             )
             if v["val_h"] < best_val:
                 best_val = v["val_h"]
@@ -385,6 +392,7 @@ def _validate(model, loader, device, no_amp: bool = False):
     total_n = 0.0
     total_a = 0.0
     total_lq = 0.0
+    total_mc = 0.0
     n = 0
     for batch in loader:
         inp = batch["input"].to(device, non_blocking=True)
@@ -393,20 +401,39 @@ def _validate(model, loader, device, no_amp: bool = False):
         nm_mask = batch["normal_mask"].to(device, non_blocking=True)
         alp = batch["alpha"].to(device, non_blocking=True)
         liq = batch["liquid"].to(device, non_blocking=True)
+        mly = batch["mcly_ids"].to(device, non_blocking=True)
+        mlm = batch["mcly_mask"].to(device, non_blocking=True)
         wgt = batch["weight"].to(device, non_blocking=True)
         has_n = batch["has_normals"].to(device, non_blocking=True).float()
         has_a = batch["has_alpha"].to(device, non_blocking=True).float()
         has_lq = batch["has_liquid"].to(device, non_blocking=True).float()
+        has_mc = batch["has_mcly"].to(device, non_blocking=True).float()
         with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not no_amp)):
-            pred_h, pred_n, pred_a, _, pred_lq, _ = model(inp)
+            pred_h, pred_n, pred_a, _, pred_lq, pred_mc = model(inp)
             total_h += _weighted_l1(pred_h, hgt, wgt).item()
             total_n += (_cosine_loss(pred_n, nrm, nm_mask) * has_n.mean()).item()
             total_a += (_weighted_l1(pred_a, alp, wgt) * has_a.mean()).item()
             total_lq += (_weighted_l1(pred_lq, liq, wgt) * has_lq.mean()).item()
+            B = pred_mc.size(0)
+            pred_mc_r = pred_mc.view(B, 4, 16, 16, 16).permute(0, 1, 4, 2, 3)
+            loss_mc = torch.nn.functional.cross_entropy(
+                pred_mc_r.reshape(-1, 16),
+                mly.permute(0, 3, 1, 2).reshape(-1),
+                reduction="none",
+            ).view(B, 4, 16, 16)
+            mc_mask = mlm.permute(0, 3, 1, 2)
+            n_active = mc_mask.sum() + 1e-8
+            total_mc += ((loss_mc * mc_mask).sum() / n_active * has_mc.mean()).item()
         n += 1
     if n == 0:
-        return {"val_h": 0.0, "val_n": 0.0, "val_a": 0.0, "val_lq": 0.0}
-    return {"val_h": total_h / n, "val_n": total_n / n, "val_a": total_a / n, "val_lq": total_lq / n}
+        return {"val_h": 0.0, "val_n": 0.0, "val_a": 0.0, "val_lq": 0.0, "val_mc": 0.0}
+    return {
+        "val_h": total_h / n,
+        "val_n": total_n / n,
+        "val_a": total_a / n,
+        "val_lq": total_lq / n,
+        "val_mc": total_mc / n,
+    }
 
 
 if __name__ == "__main__":

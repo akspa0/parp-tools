@@ -80,6 +80,8 @@ public static class AlphaTensorPackBuilder
             MapName = mapName,
             BuildKey = "alpha",
             SourceAdtPath = sourcePath,
+            TileX = tileX,
+            TileY = tileY,
             Height257 = height257,
             Height65 = height65,
             Height17 = height17,

@@ -87,6 +87,7 @@ class V16Dataset(Dataset):
         has_holes = bool(entry.get("has_holes_16", False))
         has_liquid = bool(entry.get("has_liquid_mask", False))
         has_instance = bool(entry.get("has_object_instance_mask", False))
+        has_mcly = bool(entry.get("has_mcly_texture_ids", False))
 
         if has_normals:
             normals = root["normal_xyz"][tile_id].astype(np.float32)
@@ -120,6 +121,14 @@ class V16Dataset(Dataset):
         else:
             instance_mask = np.zeros((257, 257), dtype=np.int64)
 
+        if has_mcly and "mcly_texture_ids" in root and "mcly_layer_mask" in root:
+            mcly_ids = root["mcly_texture_ids"][tile_id].astype(np.int64)
+            mcly_ids = np.clip(mcly_ids, 0, 15)
+            mcly_mask = root["mcly_layer_mask"][tile_id].astype(np.float32)
+        else:
+            mcly_ids = np.zeros((16, 16, 4), dtype=np.int64)
+            mcly_mask = np.zeros((16, 16, 4), dtype=np.float32)
+
         if self.augment:
             xform = self._rng.randint(0, 8)
             if xform & 1:
@@ -133,6 +142,8 @@ class V16Dataset(Dataset):
                 liquid_mask = liquid_mask[:, ::-1]
                 weight = weight[:, ::-1]
                 instance_mask = instance_mask[:, ::-1]
+                mcly_ids = mcly_ids[:, ::-1]
+                mcly_mask = mcly_mask[:, ::-1]
             if xform & 2:
                 minimap = minimap[::-1]
                 height = height[::-1]
@@ -144,6 +155,8 @@ class V16Dataset(Dataset):
                 liquid_mask = liquid_mask[::-1]
                 weight = weight[::-1]
                 instance_mask = instance_mask[::-1]
+                mcly_ids = mcly_ids[::-1]
+                mcly_mask = mcly_mask[::-1]
             if xform & 4:
                 minimap = np.rot90(minimap, k=1)
                 height = np.rot90(height, k=1)
@@ -157,6 +170,8 @@ class V16Dataset(Dataset):
                 liquid_mask = np.rot90(liquid_mask, k=1)
                 weight = np.rot90(weight, k=1)
                 instance_mask = np.rot90(instance_mask, k=1)
+                mcly_ids = np.rot90(mcly_ids, k=1)
+                mcly_mask = np.rot90(mcly_mask, k=1)
 
         return {
             "input": torch.from_numpy(minimap.copy()).permute(2, 0, 1),
@@ -168,9 +183,12 @@ class V16Dataset(Dataset):
             "liquid": torch.from_numpy(liquid_mask.copy()).unsqueeze(0),
             "weight": torch.from_numpy(weight.copy()).unsqueeze(0),
             "instance_mask": torch.from_numpy(instance_mask.copy()).unsqueeze(0).long(),
+            "mcly_ids": torch.from_numpy(mcly_ids.copy()).long(),
+            "mcly_mask": torch.from_numpy(mcly_mask.copy()),
             "has_normals": has_normals,
             "has_alpha": has_alpha,
             "has_holes": has_holes,
             "has_liquid": has_liquid,
             "has_instance": has_instance,
+            "has_mcly": has_mcly,
         }

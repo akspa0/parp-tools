@@ -136,6 +136,8 @@ public static class NpzTileSerializer
         {
             tile_name = pack.TileName,
             map_name = pack.MapName,
+            tile_x = pack.TileX,
+            tile_y = pack.TileY,
             build_key = pack.BuildKey,
             source_adt_path = pack.SourceAdtPath,
             available_signals = pack.AvailableSignals.OrderBy(static signal => signal, StringComparer.OrdinalIgnoreCase),

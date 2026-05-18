@@ -50,6 +50,13 @@ uv run python scripts/backfill_v16_resume_state.py --builds 0_5_3_3368 0_5_5_349
 # Generate human-friendly summaries and sample sheets from existing stores:
 uv run python scripts/inspect_v16_dataset.py --build 3_3_5_12340 --backfill-summary --write-images
 
+# Validate that V16Dataset/DataLoader/V15Model can consume the built store:
+uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340
+
+# Repair tile_x/tile_y in index.parquet from a metadata-only re-stream.
+# This rewrites the index only; it does not touch the Zarr arrays:
+uv run python scripts/build_v16_dataset.py repair-index --build 3_3_5_12340
+
 # Specific maps:
 uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
 
@@ -80,14 +87,30 @@ Build behavior:
 - Incoming fixed-shape signals are now coerced to their canonical Zarr shapes before batching, so variable layer-count payloads do not break `np.stack(...)` during resume/build runs.
 - Placement-heavy tiles still cost more than empty terrain because object masks are painted per placement, but the builder no longer reparses the same placement catalog twice per tile for masks and placement arrays.
 - `stats` now reports logical raw array size versus on-disk Zarr size, including per-array ratios and whole-store savings, so compression wins are visible instead of inferred.
+- `scripts/validate_v16_training_ready.py` now provides a dedicated training-readiness proof surface: it opens the finalized stores, reads real samples through `V16Dataset`, checks a real `DataLoader` batch, and can run one `V15Model` forward pass on CPU so dataset validity is separated from trainer validity.
+- `repair-index` can now rewrite `index.parquet` tile coordinates in place from a metadata-only re-stream of the staged client, so bad coordinate bookkeeping no longer forces a full dataset rebuild.
+- Future harvest output now carries explicit `tile_x` / `tile_y` in `metadata.json`, and the builder trusts explicit metadata first instead of brittle `source_adt_path` parsing.
 
 ### Train V16
 
 ```bash
+# First validate that the current trainer can read the built dataset:
+uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340
+
+# Then train:
 uv run python scripts/train_v16.py \
     --dataset-dir ../output/datasets/v16 \
     --builds 3_3_5_12340
 ```
+
+Training-readiness validation writes:
+- `wow-viewer/output/datasets/v16/validation/<build>.training_readiness.json`
+
+It currently validates the signals that `train_v16.py` actually uses:
+- `input`, `height`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid`, `mcly_ids`, `mcly_mask`, `weight`
+
+It also checks that `instance_mask` can still be read cleanly, but the current trainer does not yet use:
+- `instance_mask`
 
 ### V16 Zarr Store Contents
 
@@ -131,6 +154,7 @@ ConvNeXt V2 Nano encoder (15.6M pretrained) + U-Net decoder with skip fusion.
 | alpha | (B,4,256,256) | L1, object-masked |
 | holes | (B,1,16,16) | L1, object-masked |
 | liquid | (B,1,256,256) | L1, object-masked |
+| mcly | (B,4,16,16,16 logits) | Cross-entropy, masked by `mcly_layer_mask` |
 
 ## Training
 
@@ -149,6 +173,7 @@ uv run python scripts/train_v15.py --epochs 200
 | `scripts/build_v16_dataset.py` | V16 build pipeline (harvester → Zarr, resume, no archive temp staging) |
 | `scripts/backfill_v16_resume_state.py` | Backfill `_resume_state.json` into older completed final stores |
 | `scripts/inspect_v16_dataset.py` | Backfill `_dataset_summary.json` and sample visualizations from existing V16 stores |
+| `scripts/validate_v16_training_ready.py` | Validate that the current V16Dataset/DataLoader/model stack can consume finalized V16 stores |
 | `scripts/run-data-harvester-python.ps1` | Repo-local launcher for `.venv` packages when the venv stub is broken |
 | `scripts/train_v15.py` | V15 training script |
 | `src/harvester/v16_dataset.py` | V16 PyTorch Dataset (Zarr) |
