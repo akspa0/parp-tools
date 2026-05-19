@@ -7,6 +7,8 @@ import warnings
 from pathlib import Path
 
 import numpy as np
+from PIL import Image as _PILImage
+from PIL import ImageDraw as _PILImageDraw
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import zarr
@@ -28,12 +30,38 @@ def _open_store(zarr_path: Path):
     return store, root
 
 
-def _select_sample_ids(tile_count: int, sample_count: int) -> list[int]:
+def _select_sample_ids(
+    table,
+    sample_count: int,
+    seed: int,
+    mode: str,
+) -> list[int]:
+    tile_count = int(table.num_rows)
     if tile_count <= 0 or sample_count <= 0:
         return []
     if tile_count <= sample_count:
         return list(range(tile_count))
-    return sorted({int(round(v)) for v in np.linspace(0, tile_count - 1, num=sample_count)})
+    if mode == "linspace":
+        return sorted({int(round(v)) for v in np.linspace(0, tile_count - 1, num=sample_count)})
+
+    rng = np.random.RandomState(int(seed))
+    all_ids = np.arange(tile_count, dtype=np.int64)
+
+    if mode == "liquid_focus" and "has_liquid_mask" in table.column_names:
+        liquid_col = table.column("has_liquid_mask")
+        liquid_ids = np.array([i for i in range(tile_count) if bool(liquid_col[i].as_py())], dtype=np.int64)
+        non_liquid_ids = np.array([i for i in range(tile_count) if not bool(liquid_col[i].as_py())], dtype=np.int64)
+        target_liquid = min(len(liquid_ids), max(1, sample_count // 2))
+        chosen_liquid = rng.choice(liquid_ids, size=target_liquid, replace=False) if target_liquid > 0 else np.array([], dtype=np.int64)
+        remaining = sample_count - len(chosen_liquid)
+        pool = np.setdiff1d(all_ids, chosen_liquid, assume_unique=False)
+        chosen_other = rng.choice(pool, size=remaining, replace=False) if remaining > 0 else np.array([], dtype=np.int64)
+        out = np.concatenate([chosen_liquid, chosen_other])
+        rng.shuffle(out)
+        return [int(v) for v in out.tolist()]
+
+    chosen = rng.choice(all_ids, size=sample_count, replace=False)
+    return [int(v) for v in chosen.tolist()]
 
 
 def _table_rows(table, tile_ids: list[int]) -> list[dict[str, object]]:
@@ -43,7 +71,14 @@ def _table_rows(table, tile_ids: list[int]) -> list[dict[str, object]]:
     return rows
 
 
-def _build_summary(build: str, zarr_path: Path) -> tuple[dict[str, object], list[dict[str, object]]]:
+def _build_summary(
+    build: str,
+    zarr_path: Path,
+    *,
+    sample_count: int,
+    sample_seed: int,
+    sample_mode: str,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
     store, root = _open_store(zarr_path)
     try:
         index_path = zarr_path / "index.parquet"
@@ -86,7 +121,7 @@ def _build_summary(build: str, zarr_path: Path) -> tuple[dict[str, object], list
             for key in sorted(root.array_keys())
         }
 
-        sample_ids = _select_sample_ids(tile_count, sample_count=16)
+        sample_ids = _select_sample_ids(table, sample_count=sample_count, seed=sample_seed, mode=sample_mode)
         sample_rows = _table_rows(table, sample_ids)
 
         summary = {
@@ -98,6 +133,9 @@ def _build_summary(build: str, zarr_path: Path) -> tuple[dict[str, object], list
             "signal_counts": signal_counts,
             "maps": maps,
             "sample_tile_ids": sample_ids,
+            "sample_count": int(sample_count),
+            "sample_seed": int(sample_seed),
+            "sample_mode": sample_mode,
         }
         return summary, sample_rows
     finally:
@@ -159,13 +197,119 @@ def _write_contact_sheets(zarr_path: Path, build: str, tile_ids: list[int], outp
         store.close()
 
 
+def _resize_u8(arr: np.ndarray, size: int) -> np.ndarray:
+    img = _PILImage.fromarray(arr)
+    img = img.resize((size, size), _PILImage.Resampling.BILINEAR)
+    return np.asarray(img)
+
+
+def _to_gray_u8(arr: np.ndarray, lo: float | None = None, hi: float | None = None) -> np.ndarray:
+    x = arr.astype(np.float32)
+    if lo is None:
+        lo = float(np.min(x))
+    if hi is None:
+        hi = float(np.max(x))
+    rng = hi - lo
+    if abs(rng) < 1e-8:
+        y = np.zeros_like(x, dtype=np.float32)
+    else:
+        y = np.clip((x - lo) / rng, 0.0, 1.0)
+    return (y * 255.0).astype(np.uint8)
+
+
+def _draw_label_rgb(img_u8: np.ndarray, text: str) -> np.ndarray:
+    if img_u8.ndim == 2:
+        rgb = np.repeat(img_u8[:, :, None], 3, axis=2)
+    else:
+        rgb = img_u8
+    img = _PILImage.fromarray(rgb, "RGB")
+    drw = _PILImageDraw.Draw(img)
+    drw.rectangle([(0, 0), (img.width, 18)], fill=(0, 0, 0))
+    drw.text((4, 3), text, fill=(255, 255, 255))
+    return np.asarray(img)
+
+
+def _write_labeled_visual_audit(
+    zarr_path: Path,
+    build: str,
+    tile_ids: list[int],
+    sample_rows: list[dict[str, object]],
+    output_dir: Path,
+    *,
+    panel_size: int = 256,
+    overview_columns: int = 2,
+) -> None:
+    store, root = _open_store(zarr_path)
+    try:
+        strips: list[np.ndarray] = []
+        for i, tile_id in enumerate(tile_ids):
+            row = sample_rows[i] if i < len(sample_rows) else {}
+            minimap = root["minimap_rgb"][tile_id].astype(np.uint8)
+            height = root["height_257"][tile_id].astype(np.float32)
+            liquid = root["liquid_mask"][tile_id].astype(np.float32)
+            obj = root["object_mask"][tile_id].astype(np.float32)
+
+            h_u8 = _to_gray_u8(height)
+            l_u8 = _to_gray_u8(np.clip(liquid, 0.0, 1.0), lo=0.0, hi=1.0)
+            o_u8 = _to_gray_u8(np.clip(obj, 0.0, 1.0), lo=0.0, hi=1.0)
+
+            p_minimap = _draw_label_rgb(_resize_u8(minimap, panel_size), "input/minimap")
+            p_height = _draw_label_rgb(_resize_u8(h_u8, panel_size), "height")
+            p_liquid = _draw_label_rgb(_resize_u8(l_u8, panel_size), "liquid mask")
+            p_object = _draw_label_rgb(_resize_u8(o_u8, panel_size), "object mask")
+            strip = np.concatenate([p_minimap, p_height, p_liquid, p_object], axis=1)
+
+            map_name = str(row.get("map", "unknown"))
+            tile_x = int(row.get("tile_x") or -1)
+            tile_y = int(row.get("tile_y") or -1)
+            liq_src = "none"
+            for src in ("mh2o", "mclq", "unified", "wl"):
+                if bool(row.get(f"has_liquid_source_{src}", False)):
+                    liq_src = src
+                    break
+            title = f"{build} sample={i:02d} tile_id={tile_id} map={map_name} xy=({tile_x},{tile_y}) liquid_src={liq_src}"
+            img = _PILImage.fromarray(strip, "RGB")
+            drw = _PILImageDraw.Draw(img)
+            drw.rectangle([(0, 0), (img.width, 18)], fill=(20, 20, 20))
+            drw.text((4, 3), title, fill=(240, 240, 240))
+            strips.append(np.asarray(img))
+
+        if not strips:
+            return
+
+        strip_h, strip_w = strips[0].shape[0], strips[0].shape[1]
+        cols = max(1, int(overview_columns))
+        rows = math.ceil(len(strips) / cols)
+        canvas = _PILImage.new("RGB", (cols * strip_w, rows * strip_h), (12, 12, 12))
+        for i, strip in enumerate(strips):
+            x = (i % cols) * strip_w
+            y = (i // cols) * strip_h
+            canvas.paste(_PILImage.fromarray(strip, "RGB"), (x, y))
+        canvas.save(output_dir / f"{build}.validation_audit_overview.png")
+    finally:
+        store.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Inspect V16 Zarr datasets and backfill human-friendly summaries")
     parser.add_argument("--build", type=str, help="Single build key")
     parser.add_argument("--builds", nargs="+", help="Multiple build keys")
     parser.add_argument("--sample-count", type=int, default=16, help="Number of sample tiles to record")
+    parser.add_argument("--sample-seed", type=int, default=42, help="Seed for sample tile selection")
+    parser.add_argument(
+        "--sample-mode",
+        choices=["random", "linspace", "liquid_focus"],
+        default="random",
+        help="How sample tiles are selected",
+    )
     parser.add_argument("--output-dir", type=Path, default=_DATASET_ROOT / "inspection", help="Directory for summary/sample outputs")
     parser.add_argument("--write-images", action="store_true", help="Write contact-sheet PNGs for sample tiles")
+    parser.add_argument(
+        "--write-overview",
+        action="store_true",
+        help="Write labeled visual audit overview with minimap/height/liquid/object panels",
+    )
+    parser.add_argument("--overview-columns", type=int, default=2, help="Column count for labeled overview grid")
     parser.add_argument("--backfill-summary", action="store_true", help="Write _dataset_summary.json into each build store")
     args = parser.parse_args()
 
@@ -181,7 +325,13 @@ def main() -> None:
             print(f"SKIP {build}: no final store at {zarr_path}")
             continue
 
-        summary, sample_rows = _build_summary(build, zarr_path)
+        summary, sample_rows = _build_summary(
+            build,
+            zarr_path,
+            sample_count=int(args.sample_count),
+            sample_seed=int(args.sample_seed),
+            sample_mode=str(args.sample_mode),
+        )
         sample_ids = summary["sample_tile_ids"]
 
         summary_path = args.output_dir / f"{build}.summary.json"
@@ -195,6 +345,15 @@ def main() -> None:
 
         if args.write_images:
             _write_contact_sheets(zarr_path, build, list(sample_ids), args.output_dir)
+        if args.write_overview:
+            _write_labeled_visual_audit(
+                zarr_path,
+                build,
+                list(sample_ids),
+                sample_rows,
+                args.output_dir,
+                overview_columns=int(args.overview_columns),
+            )
 
         print(f"Wrote {summary_path}")
         print(f"Wrote {sample_path}")
@@ -202,6 +361,8 @@ def main() -> None:
             print(f"Wrote {zarr_path / '_dataset_summary.json'}")
         if args.write_images:
             print(f"Wrote sample sheets for {build} into {args.output_dir}")
+        if args.write_overview:
+            print(f"Wrote labeled visual audit overview for {build} into {args.output_dir}")
 
 
 if __name__ == "__main__":

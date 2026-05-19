@@ -121,12 +121,15 @@ SIGNAL_FLAG_KEYS = [
 ]
 
 REQUIRED_KEYS = {"minimap_rgb_256", "height_257"}
-DEFAULT_CODEC = "lz4"
-DEFAULT_CLEVEL = 1
-DEFAULT_SHUFFLE = "shuffle"
+DEFAULT_CODEC = "none"
+DEFAULT_CLEVEL = 0
+DEFAULT_SHUFFLE = "noshuffle"
 WRITE_RETRY_ATTEMPTS = 8
 WRITE_RETRY_BASE_DELAY_SECONDS = 0.15
 WRITE_BATCH_SIZE = 16
+
+ALPHA_BUILD_PREFIXES = ("0_5_", "0_7_")
+LK_CATA_BUILD_PREFIXES = ("3_", "4_")
 
 
 def _decode_metadata_json(tile_blob: dict[str, np.ndarray]) -> dict[str, object]:
@@ -425,43 +428,81 @@ def _derive_liquid_supervision(
     def _coerce_liq(arr: np.ndarray, key: str) -> np.ndarray:
         return _normalize_array(arr, key)
 
+    def _presence_mask(name: str) -> np.ndarray | None:
+        raw = _to_2d(data.get(name))
+        if raw is None:
+            return None
+        if raw.dtype == np.bool_:
+            mask = raw.astype(np.float32)
+        else:
+            mask = (raw.astype(np.float32) > 0.5).astype(np.float32)
+        if float(mask.max()) <= 0.0:
+            return None
+        return mask
+
+    def _normalize_binary_mask(mask: np.ndarray) -> np.ndarray:
+        out = mask.astype(np.float32)
+        if out.max() > 1.5:
+            out = out / 255.0
+        return np.clip(out, 0.0, 1.0)
+
     # 1) MH2O (preferred)
+    mh2o_mask = _presence_mask("mh2o_presence_mask")
     mh2o_type = _to_2d(data.get("mh2o_type_mask"))
-    if mh2o_type is not None:
-        mh2o_mask = (mh2o_type.astype(np.float32) > 0.0).astype(np.float32)
-        if float(mh2o_mask.max()) > 0.0:
-            mh2o_height = _to_2d(data.get("mh2o_surface_height"))
-            if mh2o_height is None:
-                mh2o_height = np.zeros_like(mh2o_mask, dtype=np.float32)
-            return (
-                _coerce_liq(mh2o_mask, "liquid_mask"),
-                _coerce_liq(mh2o_height.astype(np.float32), "liquid_height"),
-                True,
-                "mh2o",
-            )
+    mh2o_height = _to_2d(data.get("mh2o_surface_height"))
+    mh2o_depth = _to_2d(data.get("mh2o_depth"))
+    if mh2o_mask is None and (mh2o_type is not None or mh2o_height is not None or mh2o_depth is not None):
+        inferred = np.zeros(SHAPES["liquid_mask"], dtype=np.bool_)
+        if mh2o_height is not None:
+            inferred |= (np.abs(mh2o_height.astype(np.float32)) > 1e-6)
+        if mh2o_depth is not None:
+            inferred |= (np.abs(mh2o_depth.astype(np.float32)) > 1e-6)
+        if mh2o_type is not None:
+            # Preserve legacy behavior as a weak fallback for shards without explicit presence masks.
+            inferred |= (mh2o_type.astype(np.float32) > 0.0)
+        mh2o_mask = inferred.astype(np.float32)
+        if float(mh2o_mask.max()) <= 0.0:
+            mh2o_mask = None
+    if mh2o_mask is not None:
+        if mh2o_height is None:
+            mh2o_height = np.zeros_like(mh2o_mask, dtype=np.float32)
+        return (
+            _coerce_liq(_normalize_binary_mask(mh2o_mask), "liquid_mask"),
+            _coerce_liq(mh2o_height.astype(np.float32), "liquid_height"),
+            True,
+            "mh2o",
+        )
 
     # 2) MCLQ (next priority)
+    mclq_mask = _presence_mask("mclq_presence_mask")
     mclq_type = _to_2d(data.get("mclq_type_mask"))
-    if mclq_type is not None:
-        mclq_mask = (mclq_type.astype(np.float32) > 0.0).astype(np.float32)
-        if float(mclq_mask.max()) > 0.0:
-            mclq_height = _to_2d(data.get("mclq_surface_height"))
-            if mclq_height is None:
-                mclq_height = np.zeros_like(mclq_mask, dtype=np.float32)
-            return (
-                _coerce_liq(mclq_mask, "liquid_mask"),
-                _coerce_liq(mclq_height.astype(np.float32), "liquid_height"),
-                True,
-                "mclq",
-            )
+    mclq_height = _to_2d(data.get("mclq_surface_height"))
+    if mclq_mask is None and mclq_type is not None:
+        mclq_type_i = mclq_type.astype(np.int32, copy=False)
+        if int(mclq_type_i.min()) < 0:
+            # Alpha-derived shards use -1 for "not present"; 0 is valid water.
+            mclq_mask = (mclq_type_i >= 0).astype(np.float32)
+        elif mclq_height is not None:
+            # Legacy fallback when no explicit mask exists: infer from non-zero heights.
+            mclq_mask = (np.abs(mclq_height.astype(np.float32)) > 1e-6).astype(np.float32)
+        else:
+            mclq_mask = (mclq_type_i > 0).astype(np.float32)
+        if float(mclq_mask.max()) <= 0.0:
+            mclq_mask = None
+    if mclq_mask is not None:
+        if mclq_height is None:
+            mclq_height = np.zeros_like(mclq_mask, dtype=np.float32)
+        return (
+            _coerce_liq(_normalize_binary_mask(mclq_mask), "liquid_mask"),
+            _coerce_liq(mclq_height.astype(np.float32), "liquid_height"),
+            True,
+            "mclq",
+        )
 
     # 3) Existing unified signal
     unified_mask = _to_2d(data.get("unified_liquid_mask"))
     if unified_mask is not None:
-        unified_mask = unified_mask.astype(np.float32)
-        if unified_mask.max() > 1.5:
-            unified_mask = unified_mask / 255.0
-        unified_mask = np.clip(unified_mask, 0.0, 1.0)
+        unified_mask = _normalize_binary_mask(unified_mask)
         if float(unified_mask.max()) > 0.0:
             unified_height = _to_2d(data.get("unified_liquid_height"))
             if unified_height is None:
@@ -476,10 +517,7 @@ def _derive_liquid_supervision(
     # 4) WL* last-resort fallback
     wl_mask = _to_2d(data.get("wl_liquid_mask"))
     if wl_mask is not None:
-        wl_mask = wl_mask.astype(np.float32)
-        if wl_mask.max() > 1.5:
-            wl_mask = wl_mask / 255.0
-        wl_mask = np.clip(wl_mask, 0.0, 1.0)
+        wl_mask = _normalize_binary_mask(wl_mask.astype(np.float32))
         if float(wl_mask.max()) > 0.0:
             wl_height = _to_2d(data.get("wl_liquid_height"))
             if wl_height is None:
@@ -779,6 +817,115 @@ def _write_harvest_metrics(
     return out_path
 
 
+def _count_signal_coverage(index_rows: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in index_rows:
+        for key, value in row.items():
+            if not key.startswith("has_"):
+                continue
+            counts[key] = counts.get(key, 0) + (1 if bool(value) else 0)
+    return counts
+
+
+def _validate_build_signals(build: str, output_path: Path, strict: bool = True) -> Path:
+    index_rows = _read_index_rows(output_path)
+    tile_count = len(index_rows)
+    expected_has_cols = sorted(f"has_{key}" for key in SIGNAL_FLAG_KEYS)
+    present_cols = sorted({
+        key
+        for row in index_rows
+        for key in row.keys()
+        if key.startswith("has_")
+    })
+    coverage = _count_signal_coverage(index_rows)
+
+    failures: list[str] = []
+    warnings_list: list[str] = []
+
+    if tile_count <= 0:
+        failures.append("index has zero rows")
+
+    missing_cols = sorted(set(expected_has_cols) - set(present_cols))
+    if missing_cols:
+        failures.append(f"missing has_* columns: {missing_cols}")
+
+    required_all_tiles = [
+        "has_height_257",
+        "has_minimap_rgb",
+        "has_normal_mask",
+    ]
+    for key in required_all_tiles:
+        count = int(coverage.get(key, 0))
+        if count != tile_count:
+            failures.append(f"{key} expected {tile_count}/{tile_count}, got {count}/{tile_count}")
+
+    required_nonzero = [
+        "has_normal_xyz",
+        "has_alpha_256",
+        "has_holes_16",
+        "has_mcly_texture_ids",
+        "has_mcly_layer_mask",
+    ]
+    for key in required_nonzero:
+        count = int(coverage.get(key, 0))
+        if count <= 0:
+            failures.append(f"{key} expected >0, got {count}")
+
+    liquid_count = int(coverage.get("has_liquid_mask", 0))
+    liquid_source_keys = [
+        "has_liquid_source_mh2o",
+        "has_liquid_source_mclq",
+        "has_liquid_source_unified",
+        "has_liquid_source_wl",
+    ]
+    liquid_source_total = sum(int(coverage.get(key, 0)) for key in liquid_source_keys)
+    if liquid_source_total != liquid_count:
+        failures.append(
+            f"liquid source total mismatch: sources={liquid_source_total}, has_liquid_mask={liquid_count}"
+        )
+
+    if build.startswith(ALPHA_BUILD_PREFIXES):
+        mclq_count = int(coverage.get("has_liquid_source_mclq", 0))
+        if mclq_count <= 0:
+            failures.append("alpha-era build expected MCLQ-derived liquid coverage (>0), got 0")
+        wl_count = int(coverage.get("has_liquid_source_wl", 0))
+        if wl_count > mclq_count:
+            warnings_list.append(
+                f"WL* fallback dominates alpha liquid labels (wl={wl_count}, mclq={mclq_count})"
+            )
+
+    if build.startswith(LK_CATA_BUILD_PREFIXES):
+        mh2o_count = int(coverage.get("has_liquid_source_mh2o", 0))
+        if mh2o_count <= 0:
+            failures.append("LK/Cata build expected MH2O-derived liquid coverage (>0), got 0")
+
+    payload = {
+        "build": build,
+        "tile_count": tile_count,
+        "strict": bool(strict),
+        "passed": len(failures) == 0,
+        "failures": failures,
+        "warnings": warnings_list,
+        "signal_coverage": {
+            key: {
+                "count": int(coverage.get(key, 0)),
+                "fraction": float(coverage.get(key, 0) / tile_count) if tile_count > 0 else 0.0,
+            }
+            for key in sorted(set(expected_has_cols) | set(coverage.keys()))
+        },
+    }
+    out_path = output_path / "signal_validation.json"
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    if failures and strict:
+        raise RuntimeError(
+            f"Signal validation failed for {build}. See {out_path}.\n"
+            + "\n".join(f"  - {item}" for item in failures)
+        )
+
+    return out_path
+
+
 def _read_index_rows(output_path: Path) -> list[dict]:
     idx_path = output_path / "index.parquet"
     table = pq.read_table(str(idx_path))
@@ -928,6 +1075,123 @@ def _stream_valid_tile_metadata(
     return rows
 
 
+def _stream_valid_tile_liquid_rows(
+    harvest_tool: Path,
+    client_root: Path,
+    map_name: str,
+    build_version: str | None,
+) -> list[dict[str, object]]:
+    cmd = [
+        str(harvest_tool),
+        "harvest-stream",
+        "--client-root",
+        str(client_root),
+        "--map",
+        map_name,
+    ]
+    if build_version:
+        cmd.extend(["--build", build_version])
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0,
+    )
+    if proc.stdout is None or proc.stderr is None:
+        proc.terminate()
+        raise RuntimeError(f"Failed to open harvest-stream pipes for map {map_name}.")
+
+    stderr_tail: deque[str] = deque(maxlen=40)
+    stderr_thread = threading.Thread(
+        target=_pump_stderr,
+        args=(proc.stderr, map_name, stderr_tail),
+        daemon=True,
+    )
+    stderr_thread.start()
+
+    rows: list[dict[str, object]] = []
+    saw_end_marker = False
+    stream_error: str | None = None
+
+    while True:
+        header = proc.stdout.read(8)
+        if not header:
+            stream_error = "stdout closed before ENDS sentinel"
+            break
+        if len(header) < 8:
+            stream_error = f"truncated stream header ({len(header)}/8 bytes)"
+            break
+
+        magic = header[:4]
+        if magic == ENDS_MAGIC:
+            saw_end_marker = True
+            break
+        if magic != NPZB_MAGIC:
+            stream_error = f"unexpected stream magic {magic!r}"
+            break
+
+        length = struct.unpack("<I", header[4:8])[0]
+        if length == 0 or length > 50_000_000:
+            stream_error = f"invalid NPZ blob length {length}"
+            break
+
+        blob = proc.stdout.read(length)
+        if not blob or len(blob) < length:
+            stream_error = f"truncated NPZ blob ({len(blob) if blob else 0}/{length} bytes)"
+            break
+
+        try:
+            data = dict(np.load(BytesIO(blob), allow_pickle=False))
+        except Exception as ex:
+            stream_error = f"failed to decode streamed NPZ blob: {ex}"
+            break
+
+        if not REQUIRED_KEYS.issubset(data.keys()):
+            continue
+
+        liquid_mask, liquid_height, liquid_has_signal, liquid_source = _derive_liquid_supervision(data)
+        meta = _decode_metadata_json(data)
+        tx, ty = _extract_tile_coords_from_metadata(meta)
+        actual_map = _normalize_map_name(meta.get("map_name", map_name), map_name)
+        row = {
+            "map": actual_map,
+            "tile_x": int(tx),
+            "tile_y": int(ty),
+            "liquid_mask": liquid_mask.astype(np.float32, copy=False),
+            "liquid_height": liquid_height.astype(np.float32, copy=False),
+            "has_liquid_mask": bool(liquid_has_signal),
+            "has_liquid_height": bool(liquid_has_signal),
+        }
+        for source_name in LIQUID_SOURCE_KEYS:
+            row[f"has_liquid_source_{source_name}"] = liquid_source == source_name
+        rows.append(row)
+
+    if proc.poll() is None and (stream_error is not None or not saw_end_marker):
+        proc.terminate()
+
+    return_code = proc.wait()
+    stderr_thread.join(timeout=2.0)
+
+    if stream_error is not None:
+        raise RuntimeError(
+            f"Harvest stream failed for map {map_name}: {stream_error}\n"
+            f"stderr tail:\n{_tail_text(stderr_tail)}"
+        )
+    if not saw_end_marker:
+        raise RuntimeError(
+            f"Harvest stream ended without ENDS sentinel for map {map_name}.\n"
+            f"stderr tail:\n{_tail_text(stderr_tail)}"
+        )
+    if return_code != 0:
+        raise RuntimeError(
+            f"Harvest stream exited with code {return_code} for map {map_name}.\n"
+            f"stderr tail:\n{_tail_text(stderr_tail)}"
+        )
+
+    return rows
+
+
 def _write_placements(all_placements: list[dict], output_path: Path) -> None:
     if not all_placements:
         return
@@ -981,6 +1245,14 @@ def cmd_build(args: argparse.Namespace) -> None:
     codec_level = args.clevel
     codec_shuffle = args.shuffle
     rebuild_existing = args.rebuild_existing
+    signal_validation = args.signal_validation
+    signal_validation_strict = args.signal_validation_strict
+    if codec_name == "none" and (codec_level != 0 or codec_shuffle != "noshuffle"):
+        print(
+            "Warning: --codec none ignores --clevel/--shuffle; storing arrays uncompressed.",
+            file=sys.stderr,
+            flush=True,
+        )
 
     for build in builds:
         client_root = _find_client_root(build)
@@ -1015,6 +1287,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         print(f"Rejected tiles report: {_tile_rejection_report_path(output_path, build)}")
         print(f"Resume: {resume}")
         print(f"Codec: {codec_name} clevel={codec_level} shuffle={codec_shuffle}")
+        print(f"Signal validation: enabled={signal_validation} strict={signal_validation_strict}")
 
         try:
             _build_zarr_streaming(
@@ -1035,6 +1308,13 @@ def cmd_build(args: argparse.Namespace) -> None:
                 shutil.rmtree(output_path)
             staging_path.replace(output_path)
             print(f"Promoted staged dataset -> {output_path}")
+            if signal_validation:
+                validation_path = _validate_build_signals(
+                    build=build,
+                    output_path=output_path,
+                    strict=signal_validation_strict,
+                )
+                print(f"Signal validation report: {validation_path}")
         except Exception:
             print(
                 f"Build failed for {build}. Partial output preserved at {staging_path}",
@@ -1058,7 +1338,9 @@ def _build_zarr_streaming(
     codec_level: int = DEFAULT_CLEVEL,
     codec_shuffle: str = DEFAULT_SHUFFLE,
 ) -> None:
-    codec = zarr.codecs.BloscCodec(cname=codec_name, clevel=codec_level, shuffle=codec_shuffle)
+    compressors = None
+    if codec_name != "none":
+        compressors = [zarr.codecs.BloscCodec(cname=codec_name, clevel=codec_level, shuffle=codec_shuffle)]
     resume_state = _load_resume_state(output_path) if resume else None
 
     if resume and resume_state is None:
@@ -1144,7 +1426,7 @@ def _build_zarr_streaming(
             chunks = CHUNK_SIZES.get(key, (64,) + SHAPES[key])
             arrays[key] = root.create_array(
                 key, shape=shape, chunks=chunks, dtype=DTYPES[key],
-                compressors=[codec], fill_value=FILL_VALUES.get(key, 0),
+                compressors=compressors, fill_value=FILL_VALUES.get(key, 0),
             )
 
     for map_name in map_names:
@@ -1553,6 +1835,9 @@ def cmd_stats(args: argparse.Namespace) -> None:
         metrics_path = zarr_path / "harvest_metrics.json"
         if metrics_path.exists():
             print(f"  harvest_metrics.json: {metrics_path}")
+        signal_validation_path = zarr_path / "signal_validation.json"
+        if signal_validation_path.exists():
+            print(f"  signal_validation.json: {signal_validation_path}")
 
         pl_path = zarr_path / "placements.parquet"
         if pl_path.exists():
@@ -1572,6 +1857,17 @@ def cmd_stats(args: argparse.Namespace) -> None:
         print(f"  duplication factor: {duplication_factor:.2f}x")
         for build in sorted(aggregate_per_build_unique):
             print(f"  {build}: unique tile coords={aggregate_per_build_unique[build]}")
+
+
+def cmd_validate_signals(args: argparse.Namespace) -> None:
+    builds = args.builds or [args.build]
+    strict = bool(args.strict)
+    for build in builds:
+        zarr_path = _DATASET_ROOT / f"{build}.zarr"
+        if not zarr_path.exists():
+            raise RuntimeError(f"Build store not found: {zarr_path}")
+        report_path = _validate_build_signals(build=build, output_path=zarr_path, strict=strict)
+        print(f"{build}: signal validation report -> {report_path}")
 
 
 def cmd_merge_builds(args: argparse.Namespace) -> None:
@@ -1657,7 +1953,15 @@ def cmd_merge_builds(args: argparse.Namespace) -> None:
             raise RuntimeError("No records selected for merge.")
 
         capacity = len(records)
-        codec = zarr.codecs.BloscCodec(cname=DEFAULT_CODEC, clevel=DEFAULT_CLEVEL, shuffle=DEFAULT_SHUFFLE)
+        compressors = None
+        if DEFAULT_CODEC != "none":
+            compressors = [
+                zarr.codecs.BloscCodec(
+                    cname=DEFAULT_CODEC,
+                    clevel=DEFAULT_CLEVEL,
+                    shuffle=DEFAULT_SHUFFLE,
+                )
+            ]
         out_store = zarr.storage.LocalStore(str(output_partial), read_only=False)
         out_root = zarr.open_group(store=out_store, mode="w")
         out_arrays: dict[str, zarr.Array] = {}
@@ -1668,7 +1972,7 @@ def cmd_merge_builds(args: argparse.Namespace) -> None:
                 shape=(capacity,) + SHAPES[key],
                 chunks=chunks,
                 dtype=DTYPES[key],
-                compressors=[codec],
+                compressors=compressors,
                 fill_value=FILL_VALUES.get(key, 0),
             )
 
@@ -1862,6 +2166,132 @@ def cmd_repair_index(args: argparse.Namespace) -> None:
         print(f"Wrote repaired index: {idx_path}")
 
 
+def cmd_patch_liquids(args: argparse.Namespace) -> None:
+    builds = args.builds or [args.build]
+    harvest_tool = _find_harvest_tool()
+    batch_size = max(1, int(args.batch_size))
+
+    for build in builds:
+        output_path = _DATASET_ROOT / f"{build}.zarr"
+        if not output_path.exists():
+            print(f"SKIP {build}: no final store at {output_path}")
+            continue
+
+        client_root = _find_client_root(build)
+        if client_root is None:
+            raise RuntimeError(f"Could not find staged client root for build {build}.")
+
+        idx_path = output_path / "index.parquet"
+        if not idx_path.exists():
+            raise RuntimeError(f"Build {build} has no index.parquet to patch.")
+
+        if not args.no_backup:
+            backup_path = output_path / "index.parquet.bak.liquids"
+            if not backup_path.exists():
+                shutil.copy2(idx_path, backup_path)
+                print(f"Backed up {idx_path} -> {backup_path}")
+
+        index_rows = _read_index_rows(output_path)
+        build_version = build.replace("_", ".")
+        old_counts = _count_signal_coverage(index_rows)
+
+        print(f"Patching liquid supervision for {build}")
+        print(f"Client: {client_root}")
+        print(f"Store: {output_path}")
+
+        patch_rows: list[dict[str, object]] = [None] * len(index_rows)  # type: ignore[list-item]
+        ordered_maps = _ordered_maps_from_index_rows(index_rows)
+
+        if ordered_maps and all(_is_placeholder_map_name(m) for m in ordered_maps):
+            discovered_maps = _discover_maps_for_build(harvest_tool, client_root)
+            print("Index map labels are placeholder-only; patching by full discovered stream order.")
+            streamed_all: list[dict[str, object]] = []
+            for map_name in discovered_maps:
+                streamed_all.extend(_stream_valid_tile_liquid_rows(harvest_tool, client_root, map_name, build_version))
+
+            if len(streamed_all) != len(index_rows):
+                raise RuntimeError(
+                    f"Liquid patch count mismatch for {build}: "
+                    f"index has {len(index_rows)} rows, stream produced {len(streamed_all)} valid tiles."
+                )
+            for i, streamed in enumerate(streamed_all):
+                patch_rows[i] = streamed
+        else:
+            for map_name in ordered_maps:
+                row_indices = [i for i, row in enumerate(index_rows) if str(row.get("map")) == map_name]
+                streamed_rows = _stream_valid_tile_liquid_rows(harvest_tool, client_root, map_name, build_version)
+                if len(streamed_rows) != len(row_indices):
+                    raise RuntimeError(
+                        f"Liquid patch count mismatch for {build}/{map_name}: "
+                        f"index has {len(row_indices)} rows, stream produced {len(streamed_rows)} valid tiles."
+                    )
+                for row_idx, streamed in zip(row_indices, streamed_rows):
+                    patch_rows[row_idx] = streamed
+                print(f"  patched stream rows for {map_name}: {len(row_indices)}")
+
+        if any(row is None for row in patch_rows):
+            missing = sum(1 for row in patch_rows if row is None)
+            raise RuntimeError(f"Internal patch error for {build}: {missing} rows were not assigned streamed liquid data.")
+
+        store = zarr.storage.LocalStore(str(output_path), read_only=False)
+        root = zarr.open_group(store=store, mode="a")
+        try:
+            if "liquid_mask" not in root or "liquid_height" not in root:
+                raise RuntimeError(f"Build {build} store missing liquid arrays.")
+            arr_mask = root["liquid_mask"]
+            arr_height = root["liquid_height"]
+            if arr_mask.shape[0] != len(index_rows) or arr_height.shape[0] != len(index_rows):
+                raise RuntimeError(
+                    f"Array/index length mismatch for {build}: "
+                    f"liquid_mask={arr_mask.shape[0]} liquid_height={arr_height.shape[0]} index={len(index_rows)}"
+                )
+
+            tile_ids = np.asarray([int(row.get("tile_id", i)) for i, row in enumerate(index_rows)], dtype=np.int64)
+            order = np.argsort(tile_ids)
+            sorted_ids = tile_ids[order]
+            if len(sorted_ids) > 1 and np.any(np.diff(sorted_ids) != 1):
+                raise RuntimeError(f"Build {build} tile_id sequence is non-contiguous; aborting in-place liquid patch.")
+
+            for start in range(0, len(order), batch_size):
+                end = min(start + batch_size, len(order))
+                chunk_order = order[start:end]
+                chunk_ids = sorted_ids[start:end]
+                masks = np.stack([patch_rows[i]["liquid_mask"] for i in chunk_order], axis=0).astype(np.float32, copy=False)
+                heights = np.stack([patch_rows[i]["liquid_height"] for i in chunk_order], axis=0).astype(np.float32, copy=False)
+                arr_mask[int(chunk_ids[0]): int(chunk_ids[-1]) + 1] = masks
+                arr_height[int(chunk_ids[0]): int(chunk_ids[-1]) + 1] = heights
+        finally:
+            store.close()
+
+        for i, row in enumerate(index_rows):
+            patch = patch_rows[i]
+            row["has_liquid_mask"] = bool(patch["has_liquid_mask"])
+            row["has_liquid_height"] = bool(patch["has_liquid_height"])
+            for source_name in LIQUID_SOURCE_KEYS:
+                row[f"has_liquid_source_{source_name}"] = bool(patch[f"has_liquid_source_{source_name}"])
+
+        _write_index(index_rows, output_path)
+        new_counts = _count_signal_coverage(index_rows)
+
+        patch_report = {
+            "build": build,
+            "patched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "tile_count": len(index_rows),
+            "batch_size": batch_size,
+            "before": {k: int(v) for k, v in sorted(old_counts.items()) if k.startswith("has_liquid")},
+            "after": {k: int(v) for k, v in sorted(new_counts.items()) if k.startswith("has_liquid")},
+            "client_root": str(client_root),
+        }
+        report_path = output_path / "liquid_patch_report.json"
+        report_path.write_text(json.dumps(patch_report, indent=2), encoding="utf-8")
+        print(f"Wrote patched liquid arrays + index flags for {build}")
+        print(f"Liquid patch report: {report_path}")
+
+        if args.signal_validation:
+            validation_path = _validate_build_signals(build=build, output_path=output_path, strict=args.signal_validation_strict)
+            print(f"Signal validation report: {validation_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build V16 consolidated Zarr dataset")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1875,13 +2305,22 @@ def main() -> None:
     build_p.add_argument("--maps", nargs="+", default=None, help="Specific maps to extract")
     build_p.add_argument("--resume", action="store_true", help="Resume from <build>.zarr.partial if a compatible resume state exists")
     build_p.add_argument("--rebuild-existing", action="store_true", help="Rebuild even if a final <build>.zarr already looks complete")
-    build_p.add_argument("--codec", choices=["lz4", "zstd"], default=DEFAULT_CODEC, help="Blosc codec for future writes")
+    build_p.add_argument("--codec", choices=["none", "lz4", "zstd"], default=DEFAULT_CODEC, help="Compression codec (none disables compression)")
     build_p.add_argument("--clevel", type=int, default=DEFAULT_CLEVEL, help="Blosc compression level")
     build_p.add_argument("--shuffle", choices=["noshuffle", "shuffle", "bitshuffle"], default=DEFAULT_SHUFFLE, help="Blosc shuffle mode")
+    build_p.add_argument("--signal-validation", action=argparse.BooleanOptionalAction, default=True, help="Run post-build signal validation checks")
+    build_p.add_argument("--signal-validation-strict", action=argparse.BooleanOptionalAction, default=True, help="Fail build when signal validation fails")
 
     stats_p = sub.add_parser("stats", parents=[common])
+    validate_p = sub.add_parser("validate-signals", parents=[common], help="Validate has_* signal coverage for finalized stores")
+    validate_p.add_argument("--strict", action=argparse.BooleanOptionalAction, default=True, help="Fail when validation checks fail")
     repair_p = sub.add_parser("repair-index", parents=[common])
     repair_p.add_argument("--no-backup", action="store_true", help="Skip creating index.parquet.bak before rewriting index.parquet")
+    patch_liquids_p = sub.add_parser("patch-liquids", parents=[common], help="Patch liquid_mask/liquid_height arrays and liquid has_* flags in-place")
+    patch_liquids_p.add_argument("--batch-size", type=int, default=128, help="Tile batch size for array writes")
+    patch_liquids_p.add_argument("--no-backup", action="store_true", help="Skip creating index.parquet.bak.liquids before rewriting index.parquet")
+    patch_liquids_p.add_argument("--signal-validation", action=argparse.BooleanOptionalAction, default=True, help="Run post-patch signal validation checks")
+    patch_liquids_p.add_argument("--signal-validation-strict", action=argparse.BooleanOptionalAction, default=True, help="Fail when post-patch signal validation fails")
     merge_p = sub.add_parser("merge-builds", parents=[common], help="Merge per-build stores into one combined Zarr store")
     merge_p.add_argument("--output-name", type=str, default="merged_all", help="Output store name (without .zarr)")
     merge_p.add_argument(
@@ -1899,8 +2338,12 @@ def main() -> None:
         cmd_build(args)
     elif args.command == "stats":
         cmd_stats(args)
+    elif args.command == "validate-signals":
+        cmd_validate_signals(args)
     elif args.command == "repair-index":
         cmd_repair_index(args)
+    elif args.command == "patch-liquids":
+        cmd_patch_liquids(args)
     elif args.command == "merge-builds":
         cmd_merge_builds(args)
 

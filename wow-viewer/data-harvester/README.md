@@ -44,11 +44,23 @@ uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --resume
 # Force a rebuild even if the final store already looks complete:
 uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --rebuild-existing
 
+# Optional: lighter/faster compression than default no-compression:
+uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --codec lz4 --clevel 1 --shuffle shuffle
+
 # Backfill _resume_state.json into older completed final stores:
 uv run python scripts/backfill_v16_resume_state.py --builds 0_5_3_3368 0_5_5_3494 3_3_5_12340
 
 # Generate human-friendly summaries and sample sheets from existing stores:
 uv run python scripts/inspect_v16_dataset.py --build 3_3_5_12340 --backfill-summary --write-images
+
+# Generate seeded random visual QA + JSON sample metadata for human review:
+uv run python scripts/inspect_v16_dataset.py \
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 \
+  --sample-count 24 \
+  --sample-seed 1337 \
+  --sample-mode liquid_focus \
+  --write-overview \
+  --output-dir ../output/datasets/v16/inspection
 
 # Validate that V16Dataset/DataLoader/V16Model can consume the built store:
 uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340
@@ -56,6 +68,11 @@ uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340
 # Repair tile_x/tile_y in index.parquet from a metadata-only re-stream.
 # This rewrites the index only; it does not touch the Zarr arrays:
 uv run python scripts/build_v16_dataset.py repair-index --build 3_3_5_12340
+
+# Patch only liquid supervision in-place (no full dataset rebuild):
+# Recomputes liquid_mask/liquid_height + liquid has_* flags from fresh harvest stream
+# and rewrites only those arrays + index.parquet liquid columns.
+uv run python scripts/build_v16_dataset.py patch-liquids --build 0_5_3_3368
 
 # Specific maps:
 uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --maps Azeroth Northrend
@@ -65,6 +82,9 @@ uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
 
 # Check stats:
 uv run python scripts/build_v16_dataset.py stats --build 3_3_5_12340
+
+# Validate signal coverage on an existing built store:
+uv run python scripts/build_v16_dataset.py validate-signals --build 3_3_5_12340
 
 # Cross-build overlap stats:
 uv run python scripts/build_v16_dataset.py stats --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927
@@ -90,7 +110,7 @@ Build behavior:
 - Successful final stores now keep `_resume_state.json` as completion metadata, so future restart commands can recognize them as finished without rebuilding.
 - If a discovered map still produces zero usable V16 tiles during streaming, the builder now warns and skips that map instead of aborting the whole build.
 - Tiles dropped for missing required dataset keys are also written to `wow-viewer/output/datasets/v16/<build>.rejected_tiles.jsonl` so rejected coordinates and missing keys survive the console log.
-- Future builds now default to a faster Blosc profile: `lz4`, compression level `1`, `shuffle`. Older finished stores using `zstd` remain valid.
+- Future builds now default to uncompressed Zarr writes (`--codec none`) for maximum rebuild speed; older compressed stores remain valid.
 - `scripts/backfill_v16_resume_state.py` can add `_resume_state.json` to older completed final stores so their completion metadata matches the new format.
 - On Windows, transient `WinError 5` / `WinError 32` chunk-write races in Zarr `LocalStore` are now retried with bounded backoff instead of aborting the whole build immediately.
 - Tile writes are now buffered in memory and flushed to Zarr in small slice batches instead of one row at a time, which should reduce chunk rewrite churn and improve throughput on larger maps.
@@ -99,12 +119,15 @@ Build behavior:
 - `stats` now reports logical raw array size versus on-disk Zarr size, including per-array ratios and whole-store savings, so compression wins are visible instead of inferred.
 - `scripts/validate_v16_training_ready.py` now provides a dedicated training-readiness proof surface: it opens the finalized stores, reads real samples through `V16Dataset`, checks a real `DataLoader` batch, and can run one `V16Model` forward pass on CPU so dataset validity is separated from trainer validity.
 - `repair-index` can now rewrite `index.parquet` tile coordinates in place from a metadata-only re-stream of the staged client, so bad coordinate bookkeeping no longer forces a full dataset rebuild.
+- `patch-liquids` can rewrite only `liquid_mask` / `liquid_height` arrays and liquid `has_*` provenance flags in `index.parquet` from a fresh stream, so liquid fixes do not require rebuilding non-liquid tensors.
 - Future harvest output now carries explicit `tile_x` / `tile_y` in `metadata.json`, and the builder trusts explicit metadata first instead of brittle `source_adt_path` parsing.
 - Legacy Alpha metadata fallback is now explicit: when `tile_x` / `tile_y` are missing, the builder can recover coordinates from `#alpha-tile(x,y)` markers in `tile_name` or `source_adt_path`.
 - V16 liquid supervision rebuild now prefers raw liquid sources in priority order `MH2O > MCLQ > unified > WL*` while streaming NPZ tiles, so WL* fallback no longer masks richer ADT-native liquid signals.
 - Completed builds now include `harvest_metrics.json` with per-build coverage metrics for all harvested `has_*` signals (including liquid-source provenance flags), per-map tile counts, placement totals, and throughput.
+- `build` now runs post-build signal validation by default and writes `signal_validation.json`; strict mode fails immediately when expected coverage gates are violated (disable with `--no-signal-validation` or `--no-signal-validation-strict`).
 - `stats` across multiple builds now prints a cross-build overlap summary (`total rows`, `unique (map,tile_x,tile_y)`, and duplication factor).
 - `merge-builds` can consolidate per-build stores into one `merged_all.zarr` with optional dedupe modes (`none`, `coords`, `coords_height`).
+- `inspect_v16_dataset.py` now supports seeded random sampling (`--sample-seed --sample-mode`) and writes a labeled `validation_audit_overview.png` plus `*.samples.json`, so datasets can be visually approved by humans before training.
 
 ### Train V16
 
@@ -173,6 +196,13 @@ Subset curation + evidence artifacts are written per run:
 
 Validation snapshot exports now also include one labeled overview image:
 - `models/v16/runs/<run>/validation/epoch_XXXX/validation_overview.png`
+- `models/v16/runs/<run>/validation/epoch_XXXX/snapshot_selection.json` (exact sampled val positions/seed)
+
+Training randomness + evidence behavior:
+- If `--seed` is omitted, each new run now gets a fresh random seed; resume runs reuse the prior run seed automatically.
+- Train/val curation order is randomized by seed (no longer sorted by tile index after sampling).
+- Validation snapshots are sampled per epoch from the full curated val split (not first-N loader order).
+- Snapshot sampling is build-balanced by default (`--val-snapshot-build-balanced`; disable with `--no-val-snapshot-build-balanced`).
 
 Thermal/VRAM tuning flags:
 - `--target-vram-gb <float>`: soft target for guidance logs (trainer prints when you are far under/over target).

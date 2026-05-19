@@ -53,8 +53,10 @@ public static class NpzTileSerializer
         WriteArray(zip, "mh2o_surface_height", pack.Mh2oSurfaceHeight, "<f4");
         WriteArray(zip, "mh2o_depth", pack.Mh2oDepth, "<f4");
         WriteArray(zip, "mh2o_type_mask", pack.Mh2oTypeMask, "<i4");
+        WriteArray(zip, "mh2o_presence_mask", pack.Mh2oPresenceMask, "|b1");
         WriteArray(zip, "mclq_surface_height", pack.MclqSurfaceHeight, "<f4");
         WriteArray(zip, "mclq_type_mask", pack.MclqTypeMask, "<i4");
+        WriteArray(zip, "mclq_presence_mask", pack.MclqPresenceMask, "|b1");
         WriteArray(zip, "wl_liquid_mask", pack.WlLiquidMask, "<f4");
         WriteArray(zip, "wl_liquid_height", pack.WlLiquidHeight, "<f4");
         WriteArray(zip, "unified_liquid_mask", pack.UnifiedLiquidMask, "<f4");

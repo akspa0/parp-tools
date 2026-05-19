@@ -106,11 +106,17 @@ public sealed class TerrainTileTensorPack
     /// <summary>257×257 liquid type mask from MH2O (WotLK+).</summary>
     public int[,]? Mh2oTypeMask { get; init; }
 
+    /// <summary>257×257 boolean MH2O presence mask (true only where liquid is defined).</summary>
+    public bool[,]? Mh2oPresenceMask { get; init; }
+
     /// <summary>257×257 liquid surface height from MCLQ (pre-WotLK).</summary>
     public float[,]? MclqSurfaceHeight { get; init; }
 
     /// <summary>257×257 liquid type mask from MCLQ (pre-WotLK).</summary>
     public int[,]? MclqTypeMask { get; init; }
+
+    /// <summary>257×257 boolean MCLQ presence mask (true only where liquid is defined).</summary>
+    public bool[,]? MclqPresenceMask { get; init; }
 
     /// <summary>257×257 liquid mask from WLW/WLM/WLQ/WLL loose files.</summary>
     public float[,]? WlLiquidMask { get; set; }

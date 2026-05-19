@@ -105,6 +105,32 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
   - readiness: `overall_ok=true`, `issues=0` on staged `3_3_5_12340`
   - smoke train run: `smoke_v16_no_liquid_height` completed (`Parameters: 27,396,026`).
 
+### New: V16 liquid presence-mask contract hardening (2026-05-19)
+- Root cause for missing Alpha liquid GT confirmed: Python derivation treated `type_mask > 0` as liquid presence, which drops valid type `0` water.
+- `TerrainTileTensorPack`/NPZ now carry explicit `mh2o_presence_mask` and `mclq_presence_mask`.
+- `build_v16_dataset.py` liquid derivation now prefers explicit presence masks, uses Alpha-safe `mclq_type_mask >= 0` fallback when legacy shards use `-1` sentinel, and keeps WL* only as last-resort fallback.
+
+### New: V16 post-build signal gate + faster default write profile (2026-05-19)
+- `build_v16_dataset.py build` now runs signal validation after promotion by default and writes `signal_validation.json` into each finalized `<build>.zarr`.
+- Strict mode is enabled by default (`--signal-validation --signal-validation-strict`) and fails the build if required has-signal coverage or era-specific liquid-source expectations regress.
+- Dataset-build defaults now prioritize speed: `--codec none` / `--clevel 0` / `--shuffle noshuffle` (no compression); optional compression remains available via `--codec lz4 --clevel 1 --shuffle shuffle`.
+
+### New: V16 trainer snapshot/curation randomness fix (2026-05-19)
+- `train_v16.py` no longer pins every run to `seed=42` unless explicitly requested; omitted `--seed` now generates a fresh run seed, while resume routes reuse existing run seed from `config.json`.
+- Curation order for selected train/val subsets is now randomized by seed (no post-sample sort back to dataset index order).
+- Validation snapshot export no longer uses first-N from ordered `val_loader`; it now samples positions per epoch from curated val data, with build-balanced selection enabled by default and a per-epoch `snapshot_selection.json` evidence artifact.
+- Overview row titles now include source build id, making cross-build validation mixes visible at a glance.
+
+### New: V16 in-place datastore liquid patch command (2026-05-19)
+- `build_v16_dataset.py patch-liquids` now patches existing finalized stores in place without full rebuild.
+- It re-streams tiles from staged clients, recomputes liquid supervision (`liquid_mask`, `liquid_height`, and liquid-source `has_*` flags), rewrites only those two Zarr arrays plus `index.parquet` liquid flags, and emits `liquid_patch_report.json`.
+- Default behavior also runs post-patch signal validation; `index.parquet` is backed up to `index.parquet.bak.liquids` unless `--no-backup` is used.
+
+### New: V16 human-eye dataset QA sampling lane (2026-05-19)
+- `inspect_v16_dataset.py` now supports seeded random sample selection (`--sample-seed`, `--sample-mode=random|linspace|liquid_focus`) instead of fixed linspace-only picks.
+- The inspector now emits a labeled visual artifact per build (`<build>.validation_audit_overview.png`) with minimap/height/liquid/object panels and tile metadata in each row header.
+- JSON evidence remains paired with visuals (`<build>.summary.json`, `<build>.samples.json`) so dataset readiness can be reviewed by humans before training runs.
+
 ### New: explicit liquid-refinement model note (2026-05-18)
 - Docs now explicitly define a separate planned liquid model lane:
   - inputs centered on `minimap_rgb` plus optional liquid priors

@@ -112,7 +112,12 @@ def parse_args() -> argparse.Namespace:
         default=100.0,
         help="Approximate max GPU active duty cycle percentage via step throttling (1-100)",
     )
-    p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Global seed. If omitted, a fresh random seed is generated per run (resume reuses prior run seed).",
+    )
     p.add_argument("--val-fraction", type=float, default=0.1,
                     help="Fraction of data held out for validation")
     p.add_argument(
@@ -136,6 +141,18 @@ def parse_args() -> argparse.Namespace:
         help="Column count for labeled validation overview image",
     )
     p.add_argument(
+        "--val-snapshot-seed",
+        type=int,
+        default=None,
+        help="Seed for validation snapshot tile sampling (defaults to curation seed).",
+    )
+    p.add_argument(
+        "--val-snapshot-build-balanced",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Balance validation snapshot tile selection across builds when possible.",
+    )
+    p.add_argument(
         "--train-max-tiles",
         type=int,
         default=0,
@@ -151,7 +168,7 @@ def parse_args() -> argparse.Namespace:
         "--curation-seed",
         type=int,
         default=None,
-        help="Seed for train/val subset curation (defaults to --seed)",
+        help="Seed for train/val subset curation (defaults to resolved run seed)",
     )
     p.add_argument(
         "--include-placeholder-map-tiles",
@@ -244,18 +261,23 @@ def _curate_split(
     n_candidates = len(candidate_indices)
     if max_tiles > 0 and max_tiles < n_candidates:
         rng = np.random.RandomState(seed)
-        chosen_local = sorted(rng.choice(n_candidates, size=max_tiles, replace=False).tolist())
+        chosen_local = rng.choice(n_candidates, size=max_tiles, replace=False).tolist()
         mode = "random_subset_no_replace"
     else:
-        chosen_local = list(range(n_candidates))
-        mode = "all_tiles"
+        rng = np.random.RandomState(seed)
+        chosen_local = rng.permutation(n_candidates).tolist()
+        mode = "all_tiles_random_order"
 
     chosen_global = [candidate_indices[i] for i in chosen_local]
     ds._indices = chosen_global
 
     rows = []
+    build_counts: dict[str, int] = {}
     for i, global_idx in enumerate(chosen_global):
-        rows.append(_to_curation_row(ds._index_entries[global_idx], split=split, subset_pos=i))
+        entry = ds._index_entries[global_idx]
+        rows.append(_to_curation_row(entry, split=split, subset_pos=i))
+        b = str(entry.get("_build", "unknown"))
+        build_counts[b] = build_counts.get(b, 0) + 1
 
     jsonl_path = evidence_dir / f"{split}_selection.jsonl"
     with jsonl_path.open("w", encoding="utf-8") as f:
@@ -271,6 +293,7 @@ def _curate_split(
         "candidate_tiles_after_filters": n_candidates,
         "dropped_placeholder_map_tiles": dropped_placeholder,
         "selected_tiles": len(chosen_global),
+        "build_tile_counts": dict(sorted(build_counts.items())),
         "selection_jsonl": str(jsonl_path),
         "selection_sha256": digest,
     }
@@ -297,6 +320,24 @@ def _resolve_resume_checkpoint(args: argparse.Namespace, ckpt_dir: Path) -> Path
     if best_path.exists():
         return best_path
     return None
+
+
+def _resolve_run_seed(args: argparse.Namespace, run_dir: Path) -> int:
+    if args.seed is not None:
+        return int(args.seed)
+
+    # If resuming an existing run and seed was not explicitly supplied, reuse prior seed.
+    cfg_path = run_dir / "config.json"
+    if cfg_path.exists() and (args.resume_checkpoint is not None or str(args.resume_from) != "none"):
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            prev = cfg.get("resolved_seed")
+            if prev is not None:
+                return int(prev)
+        except Exception:
+            pass
+
+    return int(np.random.SeedSequence().generate_state(1, dtype=np.uint32)[0])
 
 
 def _save_training_checkpoint(
@@ -335,6 +376,7 @@ def main() -> None:
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     val_dir.mkdir(parents=True, exist_ok=True)
     evidence_dir.mkdir(parents=True, exist_ok=True)
+    run_seed = _resolve_run_seed(args, run_dir)
 
     config = {
         "version": "v16",
@@ -351,10 +393,13 @@ def main() -> None:
         "lr": args.lr,
         "weight_decay": args.weight_decay,
         "seed": args.seed,
+        "resolved_seed": run_seed,
         "val_fraction": args.val_fraction,
         "val_interval": args.val_interval,
         "val_snapshots": args.val_snapshots,
         "val_snapshot_interval": args.val_snapshot_interval,
+        "val_snapshot_seed": args.val_snapshot_seed,
+        "val_snapshot_build_balanced": args.val_snapshot_build_balanced,
         "val_overview_columns": args.val_overview_columns,
         "train_max_tiles": args.train_max_tiles,
         "val_max_tiles": args.val_max_tiles,
@@ -370,8 +415,9 @@ def main() -> None:
     (run_dir / "config.json").write_text(json.dumps(config, indent=2))
     print(f"Run: {run_name}")
     print(f"Output: {run_dir}")
+    print(f"Seed: requested={args.seed} resolved={run_seed}")
 
-    seed_all(args.seed)
+    seed_all(run_seed)
 
     device = torch.device(
         "cuda" if args.device == "cuda" and torch.cuda.is_available()
@@ -395,7 +441,7 @@ def main() -> None:
         builds=args.builds,
         split="train",
         val_fraction=args.val_fraction,
-        seed=args.seed,
+        seed=run_seed,
         augment=args.augment,
     )
     val_ds = V16Dataset(
@@ -403,10 +449,13 @@ def main() -> None:
         builds=args.builds,
         split="val",
         val_fraction=args.val_fraction,
-        seed=args.seed,
+        seed=run_seed,
         augment=False,
     )
-    curation_seed = args.curation_seed if args.curation_seed is not None else args.seed
+    curation_seed = args.curation_seed if args.curation_seed is not None else run_seed
+    val_snapshot_seed = args.val_snapshot_seed if args.val_snapshot_seed is not None else curation_seed
+    config["resolved_curation_seed"] = int(curation_seed)
+    config["resolved_val_snapshot_seed"] = int(val_snapshot_seed)
     train_cur = _curate_split(
         train_ds,
         "train",
@@ -430,8 +479,9 @@ def main() -> None:
         "dataset_dir": str(args.dataset_dir),
         "builds": args.builds,
         "val_fraction": args.val_fraction,
-        "split_seed": args.seed,
+        "split_seed": run_seed,
         "curation_seed": curation_seed,
+        "val_snapshot_seed": val_snapshot_seed,
         "train": train_cur,
         "val": val_cur,
     }
@@ -446,9 +496,11 @@ def main() -> None:
         f"train={train_cur['selected_tiles']}/{train_cur['available_tiles']} "
         f"val={val_cur['selected_tiles']}/{val_cur['available_tiles']}"
     )
+    print(f"Curated build mix (train): {train_cur.get('build_tile_counts', {})}")
+    print(f"Curated build mix (val): {val_cur.get('build_tile_counts', {})}")
 
     train_order_log = evidence_dir / "train_epoch_orders.jsonl"
-    train_sampler = _DeterministicEpochSampler(len(train_ds), seed=args.seed, order_log_path=train_order_log)
+    train_sampler = _DeterministicEpochSampler(len(train_ds), seed=run_seed, order_log_path=train_order_log)
     if args.prefetch_factor < 1:
         raise RuntimeError("--prefetch-factor must be >= 1")
     if args.val_interval < 1:
@@ -698,12 +750,14 @@ def main() -> None:
                 snap_dir.mkdir(parents=True, exist_ok=True)
                 _save_val_snapshots(
                     model,
-                    val_loader,
+                    val_ds,
                     device,
                     snap_dir,
                     args.val_snapshots,
                     epoch,
                     args.val_overview_columns,
+                    val_snapshot_seed,
+                    args.val_snapshot_build_balanced,
                 )
 
         log_entries.append(entry)
@@ -803,114 +857,179 @@ def _save_labeled_overview(rows: list[dict[str, Any]], out_path: Path, cols: int
     canvas.save(out_path)
 
 
-def _batch_value(batch: dict[str, Any], key: str, idx: int, default: Any) -> Any:
-    value = batch.get(key)
-    if value is None:
-        return default
-    if torch.is_tensor(value):
-        if value.ndim == 0:
-            return value.item()
-        if idx < value.shape[0]:
-            item = value[idx]
-            return item.item() if torch.is_tensor(item) and item.ndim == 0 else item
-        return default
-    if isinstance(value, (list, tuple)):
-        return value[idx] if idx < len(value) else default
-    return value
+def _sample_val_positions(
+    ds: V16Dataset,
+    n_samples: int,
+    seed: int,
+    epoch: int,
+    build_balanced: bool,
+) -> list[int]:
+    n = len(ds)
+    if n <= 0 or n_samples <= 0:
+        return []
+    take = min(int(n_samples), n)
+    rng = np.random.RandomState(int(seed) + (int(epoch) * 10007))
+
+    all_pos = list(range(n))
+    if not build_balanced:
+        return rng.choice(all_pos, size=take, replace=False).tolist()
+
+    by_build: dict[str, list[int]] = {}
+    for pos in all_pos:
+        global_idx = ds._indices[pos]
+        entry = ds._index_entries[global_idx]
+        build = str(entry.get("_build", "unknown"))
+        by_build.setdefault(build, []).append(pos)
+
+    build_order = sorted(by_build.keys())
+    rng.shuffle(build_order)
+    for b in build_order:
+        rng.shuffle(by_build[b])
+
+    out: list[int] = []
+    while len(out) < take:
+        progressed = False
+        for b in build_order:
+            items = by_build[b]
+            if not items:
+                continue
+            out.append(items.pop())
+            progressed = True
+            if len(out) >= take:
+                break
+        if not progressed:
+            break
+
+    if len(out) < take:
+        remaining: list[int] = []
+        for b in build_order:
+            remaining.extend(by_build[b])
+        if remaining:
+            rng.shuffle(remaining)
+            out.extend(remaining[: take - len(out)])
+
+    rng.shuffle(out)
+    return out[:take]
 
 
 @torch.no_grad()
-def _save_val_snapshots(model, loader, device, out_dir, n_samples, epoch, overview_cols):
+def _save_val_snapshots(
+    model,
+    val_ds: V16Dataset,
+    device,
+    out_dir,
+    n_samples,
+    epoch,
+    overview_cols,
+    snapshot_seed,
+    snapshot_build_balanced,
+):
     """Save per-tile PNGs plus one labeled validation overview image."""
     model.eval()
-    count = 0
+    positions = _sample_val_positions(
+        val_ds,
+        n_samples=n_samples,
+        seed=int(snapshot_seed),
+        epoch=int(epoch),
+        build_balanced=bool(snapshot_build_balanced),
+    )
     overview_rows: list[dict[str, Any]] = []
-    for batch in loader:
-        for i in range(batch["input"].size(0)):
-            if count >= n_samples:
-                break
-            inp = batch["input"][i:i + 1].to(device)
-            hgt = batch["height"][i].squeeze().cpu().numpy()
-            nrm = batch["normals"][i].permute(1, 2, 0).cpu().numpy()
-            nm_mask = batch["normal_mask"][i].squeeze().cpu().numpy()
-            alp = batch["alpha"][i].permute(1, 2, 0).cpu().numpy()
-            liq_gt = batch["liquid"][i].squeeze().cpu().numpy()
-            wgt = batch["weight"][i].squeeze().cpu().numpy()
+    for count, pos in enumerate(positions):
+        sample = val_ds[pos]
+        inp_t = sample["input"].unsqueeze(0).to(device)
+        hgt = sample["height"].squeeze().cpu().numpy()
+        nrm = sample["normals"].permute(1, 2, 0).cpu().numpy()
+        nm_mask = sample["normal_mask"].squeeze().cpu().numpy()
+        alp = sample["alpha"].permute(1, 2, 0).cpu().numpy()
+        liq_gt = sample["liquid"].squeeze().cpu().numpy()
+        wgt = sample["weight"].squeeze().cpu().numpy()
 
-            pred_h_raw, pred_n, pred_a, _pred_ho, pred_lq, _pred_mc = model(inp)
-            pred_h = pred_h_raw.squeeze().cpu().numpy()
-            pred_n = F.normalize(pred_n, dim=1).squeeze(0).permute(1, 2, 0).cpu().numpy()
-            pred_a = pred_a.squeeze(0).permute(1, 2, 0).cpu().numpy()
-            pred_lq = pred_lq.squeeze().cpu().numpy()
+        pred_h_raw, pred_n, pred_a, _pred_ho, pred_lq, _pred_mc = model(inp_t)
+        pred_h = pred_h_raw.squeeze().cpu().numpy()
+        pred_n = F.normalize(pred_n, dim=1).squeeze(0).permute(1, 2, 0).cpu().numpy()
+        pred_a = pred_a.squeeze(0).permute(1, 2, 0).cpu().numpy()
+        pred_lq = pred_lq.squeeze().cpu().numpy()
 
-            tile_dir = out_dir / f"tile_{count:02d}"
-            tile_dir.mkdir(parents=True, exist_ok=True)
+        tile_dir = out_dir / f"tile_{count:02d}"
+        tile_dir.mkdir(parents=True, exist_ok=True)
 
-            _snap_save(hgt, hgt.min(), hgt.max(), tile_dir / "height_gt.png")
-            _snap_save(pred_h, pred_h.min(), pred_h.max(), tile_dir / "height_pred.png")
-            _snap_save((nrm + 1) / 2, 0, 1, tile_dir / "normals_gt.png")
-            _snap_save((pred_n + 1) / 2, 0, 1, tile_dir / "normals_pred.png")
-            _snap_save(alp[:, :, 0], 0, 1, tile_dir / "alpha_gt_ch0.png")
-            _snap_save(pred_a[:, :, 0], 0, 1, tile_dir / "alpha_pred_ch0.png")
-            _snap_save(wgt, 0, 1, tile_dir / "object_weight.png")
-            _snap_save(nm_mask, 0, 1, tile_dir / "normal_mask.png")
+        _snap_save(hgt, hgt.min(), hgt.max(), tile_dir / "height_gt.png")
+        _snap_save(pred_h, pred_h.min(), pred_h.max(), tile_dir / "height_pred.png")
+        _snap_save((nrm + 1) / 2, 0, 1, tile_dir / "normals_gt.png")
+        _snap_save((pred_n + 1) / 2, 0, 1, tile_dir / "normals_pred.png")
+        _snap_save(alp[:, :, 0], 0, 1, tile_dir / "alpha_gt_ch0.png")
+        _snap_save(pred_a[:, :, 0], 0, 1, tile_dir / "alpha_pred_ch0.png")
+        _snap_save(wgt, 0, 1, tile_dir / "object_weight.png")
+        _snap_save(nm_mask, 0, 1, tile_dir / "normal_mask.png")
 
-            has_lq = bool(batch["has_liquid"][i]) if "has_liquid" in batch else liq_gt.max() > 0.5
-            if has_lq:
-                _snap_save(liq_gt, 0, 1, tile_dir / "liquid_gt.png")
-                _snap_save(pred_lq, 0, 1, tile_dir / "liquid_pred.png")
+        has_lq = bool(sample.get("has_liquid", liq_gt.max() > 0.5))
+        if has_lq:
+            _snap_save(liq_gt, 0, 1, tile_dir / "liquid_gt.png")
+            _snap_save(pred_lq, 0, 1, tile_dir / "liquid_pred.png")
 
-            valid = nm_mask > 0.5
-            if valid.any():
-                pred_n_v = pred_n[valid]
-                nrm_v = nrm[valid]
-                cos_pp = (pred_n_v * nrm_v).sum(axis=-1) / (
-                    np.linalg.norm(pred_n_v, axis=-1) * np.linalg.norm(nrm_v, axis=-1) + 1e-8
-                )
-                n_cos = float(cos_pp.mean())
-            else:
-                n_cos = 0.0
-            tile_metrics = {
-                "epoch": epoch, "tile": count,
-                "height_l1": float(np.abs(pred_h - hgt).mean()),
-                "normals_cosine": n_cos,
-                "alpha_l1": float(np.abs(pred_a - alp).mean()),
-                "liquid_l1": float(np.abs(pred_lq - liq_gt).mean()),
-            }
-            (tile_dir / "metrics.json").write_text(json.dumps(tile_metrics, indent=2))
-
-            map_name = str(_batch_value(batch, "meta_map", i, "unknown"))
-            tile_id = int(_batch_value(batch, "meta_tile_id", i, -1))
-            tile_x = int(_batch_value(batch, "meta_tile_x", i, -1))
-            tile_y = int(_batch_value(batch, "meta_tile_y", i, -1))
-
-            h_lo = min(float(hgt.min()), float(pred_h.min()))
-            h_hi = max(float(hgt.max()), float(pred_h.max()))
-            panels = [
-                _draw_label(_to_rgb_panel(batch["input"][i].permute(1, 2, 0).cpu().numpy(), 0.0, 1.0), "input/minimap"),
-                _draw_label(_to_rgb_panel(hgt, h_lo, h_hi), "height gt"),
-                _draw_label(_to_rgb_panel(pred_h, h_lo, h_hi), "height pred"),
-                _draw_label(_to_rgb_panel((nrm + 1.0) / 2.0, 0.0, 1.0), "normals gt"),
-                _draw_label(_to_rgb_panel((pred_n + 1.0) / 2.0, 0.0, 1.0), "normals pred"),
-                _draw_label(_to_rgb_panel(alp[:, :, 0], 0.0, 1.0), "alpha gt ch0"),
-                _draw_label(_to_rgb_panel(pred_a[:, :, 0], 0.0, 1.0), "alpha pred ch0"),
-                _draw_label(_to_rgb_panel(liq_gt, 0.0, 1.0), "liquid mask gt"),
-                _draw_label(_to_rgb_panel(pred_lq, 0.0, 1.0), "liquid mask pred"),
-                _draw_label(_to_rgb_panel(wgt, 0.0, 1.0), "terrain weight"),
-            ]
-            overview_rows.append(
-                {
-                    "title": (
-                        f"tile {count:02d} map={map_name} tile_id={tile_id} "
-                        f"xy=({tile_x},{tile_y}) h_l1={tile_metrics['height_l1']:.4f}"
-                    ),
-                    "panels": panels,
-                }
+        valid = nm_mask > 0.5
+        if valid.any():
+            pred_n_v = pred_n[valid]
+            nrm_v = nrm[valid]
+            cos_pp = (pred_n_v * nrm_v).sum(axis=-1) / (
+                np.linalg.norm(pred_n_v, axis=-1) * np.linalg.norm(nrm_v, axis=-1) + 1e-8
             )
-            count += 1
-        if count >= n_samples:
-            break
+            n_cos = float(cos_pp.mean())
+        else:
+            n_cos = 0.0
+        tile_metrics = {
+            "epoch": epoch, "tile": count,
+            "dataset_pos": int(pos),
+            "height_l1": float(np.abs(pred_h - hgt).mean()),
+            "normals_cosine": n_cos,
+            "alpha_l1": float(np.abs(pred_a - alp).mean()),
+            "liquid_l1": float(np.abs(pred_lq - liq_gt).mean()),
+        }
+        (tile_dir / "metrics.json").write_text(json.dumps(tile_metrics, indent=2))
+
+        map_name = str(sample.get("meta_map", "unknown"))
+        tile_id = int(sample.get("meta_tile_id", -1))
+        tile_x = int(sample.get("meta_tile_x", -1))
+        tile_y = int(sample.get("meta_tile_y", -1))
+        src_build = str(sample.get("meta_build", "unknown"))
+
+        h_lo = min(float(hgt.min()), float(pred_h.min()))
+        h_hi = max(float(hgt.max()), float(pred_h.max()))
+        panels = [
+            _draw_label(_to_rgb_panel(sample["input"].permute(1, 2, 0).cpu().numpy(), 0.0, 1.0), "input/minimap"),
+            _draw_label(_to_rgb_panel(hgt, h_lo, h_hi), "height gt"),
+            _draw_label(_to_rgb_panel(pred_h, h_lo, h_hi), "height pred"),
+            _draw_label(_to_rgb_panel((nrm + 1.0) / 2.0, 0.0, 1.0), "normals gt"),
+            _draw_label(_to_rgb_panel((pred_n + 1.0) / 2.0, 0.0, 1.0), "normals pred"),
+            _draw_label(_to_rgb_panel(alp[:, :, 0], 0.0, 1.0), "alpha gt ch0"),
+            _draw_label(_to_rgb_panel(pred_a[:, :, 0], 0.0, 1.0), "alpha pred ch0"),
+            _draw_label(_to_rgb_panel(liq_gt, 0.0, 1.0), "liquid mask gt"),
+            _draw_label(_to_rgb_panel(pred_lq, 0.0, 1.0), "liquid mask pred"),
+            _draw_label(_to_rgb_panel(wgt, 0.0, 1.0), "terrain weight"),
+        ]
+        overview_rows.append(
+            {
+                "title": (
+                    f"tile {count:02d} build={src_build} map={map_name} tile_id={tile_id} "
+                    f"xy=({tile_x},{tile_y}) h_l1={tile_metrics['height_l1']:.4f}"
+                ),
+                "panels": panels,
+            }
+        )
     _save_labeled_overview(overview_rows, out_dir / "validation_overview.png", int(overview_cols))
+    (out_dir / "snapshot_selection.json").write_text(
+        json.dumps(
+            {
+                "epoch": int(epoch),
+                "requested_samples": int(n_samples),
+                "selected_positions": positions,
+                "snapshot_seed": int(snapshot_seed),
+                "build_balanced": bool(snapshot_build_balanced),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     model.train()
 
 

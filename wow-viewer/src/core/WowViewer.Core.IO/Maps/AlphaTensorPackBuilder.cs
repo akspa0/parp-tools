@@ -34,14 +34,17 @@ public static class AlphaTensorPackBuilder
 
         float[,]? mclqSurfaceHeight257 = tileData.MclqSurfaceHeight;
         int[,]? mclqTypeMask257 = tileData.MclqTypeMask;
+        bool[,]? mclqPresenceMask257 = null;
         if (mclqSurfaceHeight257 != null)
         {
             signals.Add("mclq_surface_height");
             signals.Add("mclq_type_mask");
+            if (mclqTypeMask257 is not null)
+                mclqPresenceMask257 = BuildPresenceMaskFromTypeMask(mclqTypeMask257);
         }
         else
         {
-            BuildAlphaLiquid(tileData, ref mclqSurfaceHeight257, ref mclqTypeMask257, signals);
+            BuildAlphaLiquid(tileData, ref mclqSurfaceHeight257, ref mclqTypeMask257, ref mclqPresenceMask257, signals);
         }
 
         bool[,]? holeMask16 = tileData.HoleMask;
@@ -96,8 +99,10 @@ public static class AlphaTensorPackBuilder
             Mh2oSurfaceHeight = null,
             Mh2oDepth = null,
             Mh2oTypeMask = null,
+            Mh2oPresenceMask = null,
             MclqSurfaceHeight = mclqSurfaceHeight257,
             MclqTypeMask = mclqTypeMask257,
+            MclqPresenceMask = mclqPresenceMask257,
             HoleMask16 = holeMask16,
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
@@ -139,6 +144,7 @@ public static class AlphaTensorPackBuilder
         AlphaTileData tileData,
         ref float[,]? mclqSurfaceHeight,
         ref int[,]? mclqTypeMask,
+        ref bool[,]? mclqPresenceMask,
         HashSet<string> signals)
     {
         if (tileData.LiquidChunks.Count == 0)
@@ -146,6 +152,7 @@ public static class AlphaTensorPackBuilder
 
         mclqSurfaceHeight = new float[TileLiquidSize, TileLiquidSize];
         mclqTypeMask = new int[TileLiquidSize, TileLiquidSize];
+        mclqPresenceMask = new bool[TileLiquidSize, TileLiquidSize];
 
         for (int i = 0; i < TileLiquidSize; i++)
             for (int j = 0; j < TileLiquidSize; j++)
@@ -176,6 +183,7 @@ public static class AlphaTensorPackBuilder
                     {
                         mclqSurfaceHeight[gy, gx] = avgHeight;
                         mclqTypeMask[gy, gx] = liquidType;
+                        mclqPresenceMask[gy, gx] = true;
                     }
                 }
             }
@@ -183,6 +191,20 @@ public static class AlphaTensorPackBuilder
 
         signals.Add("mclq_surface_height");
         signals.Add("mclq_type_mask");
+    }
+
+    private static bool[,] BuildPresenceMaskFromTypeMask(int[,] typeMask)
+    {
+        int h = typeMask.GetLength(0);
+        int w = typeMask.GetLength(1);
+        bool[,] presence = new bool[h, w];
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+                presence[y, x] = typeMask[y, x] >= 0;
+        }
+
+        return presence;
     }
 
     private static int McnkFlagsToLiquidType(float minH, float maxH, uint mcnkFlags)
