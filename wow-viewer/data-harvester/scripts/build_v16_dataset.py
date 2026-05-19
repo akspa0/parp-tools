@@ -431,10 +431,11 @@ def _derive_liquid_supervision(
         raw = _to_2d(data.get(name))
         if raw is None:
             return None
+        raw_liq = _coerce_liq(raw.astype(np.float32), "liquid_mask")
         if raw.dtype == np.bool_:
-            mask = raw.astype(np.float32)
+            mask = raw_liq.astype(np.float32)
         else:
-            mask = (raw.astype(np.float32) > 0.5).astype(np.float32)
+            mask = (raw_liq > 0.5).astype(np.float32)
         if float(mask.max()) <= 0.0:
             return None
         return mask
@@ -453,12 +454,12 @@ def _derive_liquid_supervision(
     if mh2o_mask is None and (mh2o_type is not None or mh2o_height is not None or mh2o_depth is not None):
         inferred = np.zeros(SHAPES["liquid_mask"], dtype=np.bool_)
         if mh2o_height is not None:
-            inferred |= (np.abs(mh2o_height.astype(np.float32)) > 1e-6)
+            inferred |= (_coerce_liq(np.abs(mh2o_height.astype(np.float32)), "liquid_mask") > 1e-6)
         if mh2o_depth is not None:
-            inferred |= (np.abs(mh2o_depth.astype(np.float32)) > 1e-6)
+            inferred |= (_coerce_liq(np.abs(mh2o_depth.astype(np.float32)), "liquid_mask") > 1e-6)
         if mh2o_type is not None:
             # Preserve legacy behavior as a weak fallback for shards without explicit presence masks.
-            inferred |= (mh2o_type.astype(np.float32) > 0.0)
+            inferred |= (_coerce_liq(mh2o_type.astype(np.float32), "liquid_mask") > 0.0)
         mh2o_mask = inferred.astype(np.float32)
         if float(mh2o_mask.max()) <= 0.0:
             mh2o_mask = None
@@ -477,13 +478,13 @@ def _derive_liquid_supervision(
     mclq_type = _to_2d(data.get("mclq_type_mask"))
     mclq_height = _to_2d(data.get("mclq_surface_height"))
     if mclq_mask is None and mclq_type is not None:
-        mclq_type_i = mclq_type.astype(np.int32, copy=False)
+        mclq_type_i = _coerce_liq(mclq_type.astype(np.float32), "liquid_mask").astype(np.int32, copy=False)
         if int(mclq_type_i.min()) < 0:
             # Alpha-derived shards use -1 for "not present"; 0 is valid water.
             mclq_mask = (mclq_type_i >= 0).astype(np.float32)
         elif mclq_height is not None:
             # Legacy fallback when no explicit mask exists: infer from non-zero heights.
-            mclq_mask = (np.abs(mclq_height.astype(np.float32)) > 1e-6).astype(np.float32)
+            mclq_mask = (_coerce_liq(np.abs(mclq_height.astype(np.float32)), "liquid_mask") > 1e-6).astype(np.float32)
         else:
             mclq_mask = (mclq_type_i > 0).astype(np.float32)
         if float(mclq_mask.max()) <= 0.0:

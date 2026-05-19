@@ -136,6 +136,10 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
 - Dense command variants and extended options were moved to `wow-viewer/data-harvester/docs/advanced-v16-workflows.md`.
 - Intent: keep the default README scannable and execution-focused; keep deep detail in one advanced companion doc.
 
+### New: patch-liquids shape-mismatch hotfix (2026-05-19)
+- `patch-liquids` previously crashed on mixed liquid source shapes (`257x257` MH2O/MCLQ vs `256x256` liquid target) during presence inference.
+- `_derive_liquid_supervision` now coerces all presence/fallback inference inputs to `liquid_mask` shape before boolean combination, preventing broadcast errors on builds like `3_3_5_12340`.
+
 ### New: explicit liquid-refinement model note (2026-05-18)
 - Docs now explicitly define a separate planned liquid model lane:
   - inputs centered on `minimap_rgb` plus optional liquid priors
