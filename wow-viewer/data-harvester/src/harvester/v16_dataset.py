@@ -73,6 +73,7 @@ class V16Dataset(Dataset):
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         entry = self._index_entries[self._indices[idx]]
         build = entry["_build"]
+        source_build = str(entry.get("build") or build)
         tile_id = entry["tile_id"]
         root = self._stores[build]
 
@@ -197,7 +198,8 @@ class V16Dataset(Dataset):
             "has_liquid": has_liquid,
             "has_instance": has_instance,
             "has_mcly": has_mcly,
-            "meta_build": str(build),
+            "meta_build": source_build,
+            "meta_store": str(build),
             "meta_map": str(entry.get("map", "")),
             "meta_tile_id": int(tile_id),
             "meta_tile_x": int(entry.get("tile_x") if entry.get("tile_x") is not None else -1),

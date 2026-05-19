@@ -88,6 +88,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--weight-decay", type=float, default=0.05)
     p.add_argument("--num-workers", type=int, default=0)
+    p.add_argument(
+        "--persistent-workers",
+        action="store_true",
+        help="Keep DataLoader worker processes alive between epochs (effective when --num-workers > 0)",
+    )
+    p.add_argument(
+        "--prefetch-factor",
+        type=int,
+        default=2,
+        help="Batches prefetched per worker (effective when --num-workers > 0)",
+    )
     p.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu", "auto"])
     p.add_argument(
         "--target-vram-gb",
@@ -104,9 +115,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--val-fraction", type=float, default=0.1,
                     help="Fraction of data held out for validation")
-    p.add_argument("--val-interval", type=int, default=10)
+    p.add_argument(
+        "--val-interval",
+        type=int,
+        default=1,
+        help="Run scalar validation every N epochs (best checkpoint updates only when validation runs)",
+    )
     p.add_argument("--val-snapshots", type=int, default=5,
                     help="Number of validation tiles to export as images per val run")
+    p.add_argument(
+        "--val-snapshot-interval",
+        type=int,
+        default=10,
+        help="Export validation snapshot images every N epochs (0 disables snapshot export)",
+    )
     p.add_argument(
         "--val-overview-columns",
         type=int,
@@ -320,6 +342,9 @@ def main() -> None:
         "dataset_dir": str(args.dataset_dir),
         "builds": args.builds,
         "batch_size": args.batch_size,
+        "num_workers": args.num_workers,
+        "persistent_workers": args.persistent_workers,
+        "prefetch_factor": args.prefetch_factor,
         "target_vram_gb": args.target_vram_gb,
         "gpu_duty_cycle": args.gpu_duty_cycle,
         "epochs": args.epochs,
@@ -329,6 +354,7 @@ def main() -> None:
         "val_fraction": args.val_fraction,
         "val_interval": args.val_interval,
         "val_snapshots": args.val_snapshots,
+        "val_snapshot_interval": args.val_snapshot_interval,
         "val_overview_columns": args.val_overview_columns,
         "train_max_tiles": args.train_max_tiles,
         "val_max_tiles": args.val_max_tiles,
@@ -353,6 +379,11 @@ def main() -> None:
         else "cpu"
     )
     print(f"Device: {device}")
+    print(
+        f"DataLoader: workers={args.num_workers} "
+        f"persistent_workers={bool(args.persistent_workers and args.num_workers > 0)} "
+        f"prefetch_factor={(args.prefetch_factor if args.num_workers > 0 else 'n/a')}"
+    )
     if device.type == "cuda":
         print(
             f"GPU budget controls: target_vram_gb={args.target_vram_gb:.2f} "
@@ -418,15 +449,28 @@ def main() -> None:
 
     train_order_log = evidence_dir / "train_epoch_orders.jsonl"
     train_sampler = _DeterministicEpochSampler(len(train_ds), seed=args.seed, order_log_path=train_order_log)
+    if args.prefetch_factor < 1:
+        raise RuntimeError("--prefetch-factor must be >= 1")
+    if args.val_interval < 1:
+        raise RuntimeError("--val-interval must be >= 1")
+    if args.val_snapshot_interval < 0:
+        raise RuntimeError("--val-snapshot-interval must be >= 0")
+    _loader_kwargs: dict[str, Any] = {
+        "num_workers": args.num_workers,
+        "drop_last": False,
+        "pin_memory": (device.type == "cuda"),
+    }
+    if args.num_workers > 0:
+        _loader_kwargs["persistent_workers"] = bool(args.persistent_workers)
+        _loader_kwargs["prefetch_factor"] = int(args.prefetch_factor)
+
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=False, sampler=train_sampler,
-        num_workers=args.num_workers, drop_last=False,
-        pin_memory=(device.type == "cuda"),
+        **_loader_kwargs,
     )
     val_loader = DataLoader(
         val_ds, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.num_workers, drop_last=False,
-        pin_memory=(device.type == "cuda"),
+        **_loader_kwargs,
     )
 
     model = V16Model().to(device)
@@ -645,17 +689,22 @@ def main() -> None:
                 )
                 print(f"        *** new best val_h={best_val:.4f}")
 
-            snap_dir = val_dir / f"epoch_{epoch:04d}"
-            snap_dir.mkdir(parents=True, exist_ok=True)
-            _save_val_snapshots(
-                model,
-                val_loader,
-                device,
-                snap_dir,
-                args.val_snapshots,
-                epoch,
-                args.val_overview_columns,
-            )
+            if (
+                args.val_snapshots > 0
+                and args.val_snapshot_interval > 0
+                and epoch % args.val_snapshot_interval == 0
+            ):
+                snap_dir = val_dir / f"epoch_{epoch:04d}"
+                snap_dir.mkdir(parents=True, exist_ok=True)
+                _save_val_snapshots(
+                    model,
+                    val_loader,
+                    device,
+                    snap_dir,
+                    args.val_snapshots,
+                    epoch,
+                    args.val_overview_columns,
+                )
 
         log_entries.append(entry)
         _save_training_checkpoint(
@@ -668,6 +717,7 @@ def main() -> None:
             best_val=best_val,
             log_entries=log_entries,
         )
+        print("        checkpoint | wrote v16_last.pt")
         (run_dir / "training_log.json").write_text(json.dumps(log_entries, indent=2))
 
     _save_training_checkpoint(

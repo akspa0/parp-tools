@@ -111,10 +111,13 @@ ALL_ARRAY_KEYS = [
     "mcly_texture_ids", "mcly_layer_mask",
 ]
 
-# Integration keys: derive has_* flags for these signals in the Parquet index
+LIQUID_SOURCE_KEYS = ("mh2o", "mclq", "unified", "wl")
+
+# Integration keys: derive has_* flags for these signals in the Parquet index.
+# Include all fixed-shape arrays plus explicit liquid-source provenance flags.
 SIGNAL_FLAG_KEYS = [
-    "normal_xyz", "alpha_256", "holes_16", "liquid_mask", "shadow_mask",
-    "object_mask", "object_instance_mask", "mcly_texture_ids",
+    *ALL_ARRAY_KEYS,
+    *(f"liquid_source_{name}" for name in LIQUID_SOURCE_KEYS),
 ]
 
 REQUIRED_KEYS = {"minimap_rgb_256", "height_257"}
@@ -373,6 +376,16 @@ def _process_tile_data(data: dict[str, np.ndarray]) -> tuple[dict[str, np.ndarra
             tile_arrays[dst_key] = np.full(shape, fill, dtype=dtype)
             has_signals[dst_key] = False
 
+    # Rebuild liquid supervision from raw liquid signals with explicit priority.
+    # This avoids over-trusting legacy unified_liquid_* payloads when they only carry WL* fallback.
+    liquid_mask, liquid_height, liquid_has_signal, liquid_source = _derive_liquid_supervision(data)
+    tile_arrays["liquid_mask"] = liquid_mask
+    tile_arrays["liquid_height"] = liquid_height
+    has_signals["liquid_mask"] = liquid_has_signal
+    has_signals["liquid_height"] = liquid_has_signal
+    for source_name in LIQUID_SOURCE_KEYS:
+        has_signals[f"liquid_source_{source_name}"] = liquid_source == source_name
+
     if "mcnr_normal_xyz" in data:
         nrm = data["mcnr_normal_xyz"].astype(np.float32)
         normal_mask = (np.abs(nrm).sum(axis=-1) > 1e-6)
@@ -392,6 +405,99 @@ def _process_tile_data(data: dict[str, np.ndarray]) -> tuple[dict[str, np.ndarra
     has_signals["normal_mask"] = True
 
     return tile_arrays, has_signals
+
+
+def _derive_liquid_supervision(
+    data: dict[str, np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, bool, str | None]:
+    def _to_2d(arr: np.ndarray | None) -> np.ndarray | None:
+        if arr is None:
+            return None
+        out = np.asarray(arr)
+        if out.ndim < 2:
+            return None
+        if out.ndim > 2:
+            out = np.squeeze(out)
+            if out.ndim != 2:
+                return None
+        return out
+
+    def _coerce_liq(arr: np.ndarray, key: str) -> np.ndarray:
+        return _normalize_array(arr, key)
+
+    # 1) MH2O (preferred)
+    mh2o_type = _to_2d(data.get("mh2o_type_mask"))
+    if mh2o_type is not None:
+        mh2o_mask = (mh2o_type.astype(np.float32) > 0.0).astype(np.float32)
+        if float(mh2o_mask.max()) > 0.0:
+            mh2o_height = _to_2d(data.get("mh2o_surface_height"))
+            if mh2o_height is None:
+                mh2o_height = np.zeros_like(mh2o_mask, dtype=np.float32)
+            return (
+                _coerce_liq(mh2o_mask, "liquid_mask"),
+                _coerce_liq(mh2o_height.astype(np.float32), "liquid_height"),
+                True,
+                "mh2o",
+            )
+
+    # 2) MCLQ (next priority)
+    mclq_type = _to_2d(data.get("mclq_type_mask"))
+    if mclq_type is not None:
+        mclq_mask = (mclq_type.astype(np.float32) > 0.0).astype(np.float32)
+        if float(mclq_mask.max()) > 0.0:
+            mclq_height = _to_2d(data.get("mclq_surface_height"))
+            if mclq_height is None:
+                mclq_height = np.zeros_like(mclq_mask, dtype=np.float32)
+            return (
+                _coerce_liq(mclq_mask, "liquid_mask"),
+                _coerce_liq(mclq_height.astype(np.float32), "liquid_height"),
+                True,
+                "mclq",
+            )
+
+    # 3) Existing unified signal
+    unified_mask = _to_2d(data.get("unified_liquid_mask"))
+    if unified_mask is not None:
+        unified_mask = unified_mask.astype(np.float32)
+        if unified_mask.max() > 1.5:
+            unified_mask = unified_mask / 255.0
+        unified_mask = np.clip(unified_mask, 0.0, 1.0)
+        if float(unified_mask.max()) > 0.0:
+            unified_height = _to_2d(data.get("unified_liquid_height"))
+            if unified_height is None:
+                unified_height = np.zeros_like(unified_mask, dtype=np.float32)
+            return (
+                _coerce_liq(unified_mask, "liquid_mask"),
+                _coerce_liq(unified_height.astype(np.float32), "liquid_height"),
+                True,
+                "unified",
+            )
+
+    # 4) WL* last-resort fallback
+    wl_mask = _to_2d(data.get("wl_liquid_mask"))
+    if wl_mask is not None:
+        wl_mask = wl_mask.astype(np.float32)
+        if wl_mask.max() > 1.5:
+            wl_mask = wl_mask / 255.0
+        wl_mask = np.clip(wl_mask, 0.0, 1.0)
+        if float(wl_mask.max()) > 0.0:
+            wl_height = _to_2d(data.get("wl_liquid_height"))
+            if wl_height is None:
+                wl_height = np.zeros_like(wl_mask, dtype=np.float32)
+            return (
+                _coerce_liq(wl_mask, "liquid_mask"),
+                _coerce_liq(wl_height.astype(np.float32), "liquid_height"),
+                True,
+                "wl",
+            )
+
+    # No usable liquid signal
+    return (
+        np.zeros(SHAPES["liquid_mask"], dtype=np.float32),
+        np.zeros(SHAPES["liquid_height"], dtype=np.float32),
+        False,
+        None,
+    )
 
 
 def _extract_metadata(data: dict[str, np.ndarray]) -> dict:
@@ -607,7 +713,12 @@ def _write_index(rows: list[dict], output_path: Path) -> None:
         pa.field("height_mean", pa.float32()),
         pa.field("height_std", pa.float32()),
     ]
-    bool_fields = [k for k in rows[0] if k.startswith("has_")] if rows else []
+    bool_fields = sorted({
+        k
+        for row in rows
+        for k in row.keys()
+        if k.startswith("has_")
+    }) if rows else []
     for bf in bool_fields:
         schema_fields.append(pa.field(bf, pa.bool_()))
 
@@ -621,9 +732,64 @@ def _write_index(rows: list[dict], output_path: Path) -> None:
     pq.write_table(table, str(output_path / "index.parquet"))
 
 
+def _write_harvest_metrics(
+    *,
+    build: str,
+    output_path: Path,
+    index_rows: list[dict],
+    placements_total: int,
+    skipped_zero_usable_maps: int,
+    rejected_tile_count: int,
+    elapsed_seconds: float,
+) -> Path:
+    tile_count = len(index_rows)
+    signal_counts: dict[str, int] = {}
+    for row in index_rows:
+        for key, value in row.items():
+            if not key.startswith("has_"):
+                continue
+            signal_counts[key] = signal_counts.get(key, 0) + (1 if bool(value) else 0)
+
+    coverage = {
+        key: {
+            "count": int(count),
+            "fraction": float(count / tile_count) if tile_count > 0 else 0.0,
+        }
+        for key, count in sorted(signal_counts.items())
+    }
+
+    map_counts: dict[str, int] = {}
+    for row in index_rows:
+        map_name = str(row.get("map", ""))
+        map_counts[map_name] = map_counts.get(map_name, 0) + 1
+
+    payload = {
+        "build": build,
+        "tile_count": tile_count,
+        "placements_total": int(placements_total),
+        "skipped_zero_usable_maps": int(skipped_zero_usable_maps),
+        "rejected_missing_required_tiles": int(rejected_tile_count),
+        "elapsed_seconds": float(elapsed_seconds),
+        "tiles_per_second": float(tile_count / max(elapsed_seconds, 0.01)),
+        "signal_coverage": coverage,
+        "map_tile_counts": dict(sorted(map_counts.items())),
+    }
+    out_path = output_path / "harvest_metrics.json"
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return out_path
+
+
 def _read_index_rows(output_path: Path) -> list[dict]:
     idx_path = output_path / "index.parquet"
     table = pq.read_table(str(idx_path))
+    return [
+        {col: table.column(col)[i].as_py() for col in table.column_names}
+        for i in range(table.num_rows)
+    ]
+
+
+def _read_parquet_rows(parquet_path: Path) -> list[dict]:
+    table = pq.read_table(str(parquet_path))
     return [
         {col: table.column(col)[i].as_py() for col in table.column_names}
         for i in range(table.num_rows)
@@ -1115,7 +1281,7 @@ def _build_zarr_streaming(
                 "n_mddf": len(mddf_rows), "n_modf": len(modf_rows),
             }
             for key in SIGNAL_FLAG_KEYS:
-                row[f"has_{key}"] = has_signals.get(key, False)
+                row[f"has_{key}"] = bool(has_signals.get(key, False))
             index_rows.append(row)
 
             needed = valid + pending_count + 1
@@ -1293,11 +1459,24 @@ def _build_zarr_streaming(
     print(f"Rejected missing-required tiles: {rejected_tile_count}")
     if rejected_tiles_report_path is not None:
         print(f"Rejected tiles report: {rejected_tiles_report_path}")
+    metrics_path = _write_harvest_metrics(
+        build=build,
+        output_path=output_path,
+        index_rows=index_rows,
+        placements_total=len(all_placements),
+        skipped_zero_usable_maps=skipped_zero_usable_maps,
+        rejected_tile_count=rejected_tile_count,
+        elapsed_seconds=elapsed,
+    )
+    print(f"Harvest metrics: {metrics_path}")
     print(f"Time: {elapsed:.0f}s ({valid / max(elapsed, 0.01):.1f} tiles/s)")
 
 
 def cmd_stats(args: argparse.Namespace) -> None:
     builds = args.builds or [args.build]
+    aggregate_total_rows = 0
+    aggregate_unique_tiles: set[tuple[str, int, int]] = set()
+    aggregate_per_build_unique: dict[str, int] = {}
     for build in builds:
         zarr_path = _DATASET_ROOT / f"{build}.zarr"
         if not zarr_path.exists():
@@ -1352,6 +1531,17 @@ def cmd_stats(args: argparse.Namespace) -> None:
                     count_scalar = pc.sum(table.column(col))
                     count = 0 if count_scalar is None else int(count_scalar.as_py() or 0)
                     print(f"    {col}: {count}/{table.num_rows}")
+            local_unique: set[tuple[str, int, int]] = set()
+            if {"map", "tile_x", "tile_y"}.issubset(set(table.column_names)):
+                for row in table.select(["map", "tile_x", "tile_y"]).to_pylist():
+                    map_name = str(row.get("map") or "")
+                    tx = int(row.get("tile_x") or 0)
+                    ty = int(row.get("tile_y") or 0)
+                    key = (map_name, tx, ty)
+                    local_unique.add(key)
+                    aggregate_unique_tiles.add(key)
+                aggregate_total_rows += int(table.num_rows)
+                aggregate_per_build_unique[build] = len(local_unique)
             if table.num_rows != n:
                 print(
                     f"  WARNING: array length ({n}) does not match index rows ({table.num_rows}). "
@@ -1359,6 +1549,10 @@ def cmd_stats(args: argparse.Namespace) -> None:
                 )
         else:
             print("  WARNING: index.parquet missing. This store looks incomplete or failed before finalization.")
+
+        metrics_path = zarr_path / "harvest_metrics.json"
+        if metrics_path.exists():
+            print(f"  harvest_metrics.json: {metrics_path}")
 
         pl_path = zarr_path / "placements.parquet"
         if pl_path.exists():
@@ -1368,6 +1562,214 @@ def cmd_stats(args: argparse.Namespace) -> None:
         partial_path = _DATASET_ROOT / f"{build}.zarr.partial"
         if partial_path.exists():
             print(f"  WARNING: staged partial output still exists at {partial_path}")
+
+    if len(builds) > 1 and aggregate_total_rows > 0:
+        unique_count = len(aggregate_unique_tiles)
+        duplication_factor = aggregate_total_rows / max(unique_count, 1)
+        print("\nCross-build overlap summary:")
+        print(f"  total rows across builds: {aggregate_total_rows}")
+        print(f"  unique (map,tile_x,tile_y): {unique_count}")
+        print(f"  duplication factor: {duplication_factor:.2f}x")
+        for build in sorted(aggregate_per_build_unique):
+            print(f"  {build}: unique tile coords={aggregate_per_build_unique[build]}")
+
+
+def cmd_merge_builds(args: argparse.Namespace) -> None:
+    builds = args.builds or sorted(
+        d.stem.replace(".zarr", "")
+        for d in _DATASET_ROOT.glob("*.zarr")
+        if d.is_dir()
+    )
+    if not builds:
+        raise RuntimeError("No source build stores found under output/datasets/v16.")
+
+    output_name = args.output_name or "merged_all"
+    output_path = _DATASET_ROOT / f"{output_name}.zarr"
+    output_partial = _DATASET_ROOT / f"{output_name}.zarr.partial"
+    dedupe_mode = str(args.dedupe_mode or "coords_height")
+    if dedupe_mode not in {"none", "coords", "coords_height"}:
+        raise RuntimeError("--dedupe-mode must be one of: none, coords, coords_height")
+
+    if output_path.exists() and not args.rebuild_existing:
+        raise RuntimeError(
+            f"Output merged store already exists at {output_path}. Use --rebuild-existing to overwrite."
+        )
+
+    if output_partial.exists():
+        shutil.rmtree(output_partial)
+    if output_path.exists() and args.rebuild_existing:
+        shutil.rmtree(output_path)
+
+    source_handles: dict[str, tuple[zarr.storage.LocalStore, zarr.Group]] = {}
+    source_index_rows: dict[str, list[dict]] = {}
+    source_placements_rows: dict[str, list[dict]] = {}
+    t0 = time.perf_counter()
+
+    for build in builds:
+        zarr_path = _DATASET_ROOT / f"{build}.zarr"
+        if not zarr_path.exists():
+            print(f"SKIP {build}: no store at {zarr_path}")
+            continue
+        store, root = _open_zarr_group_readonly(zarr_path)
+        source_handles[build] = (store, root)
+        idx_path = zarr_path / "index.parquet"
+        if not idx_path.exists():
+            store.close()
+            raise RuntimeError(f"Source build {build} has no index.parquet.")
+        source_index_rows[build] = _read_parquet_rows(idx_path)
+        pl_path = zarr_path / "placements.parquet"
+        source_placements_rows[build] = _read_parquet_rows(pl_path) if pl_path.exists() else []
+
+    try:
+        records: list[tuple[str, int, dict]] = []
+        if dedupe_mode == "none":
+            for build in builds:
+                rows = source_index_rows.get(build, [])
+                for row in rows:
+                    records.append((build, int(row["tile_id"]), row))
+        else:
+            selected: dict[tuple, tuple[str, int, dict]] = {}
+            ordered_keys: list[tuple] = []
+            for build in builds:
+                rows = source_index_rows.get(build, [])
+                for row in rows:
+                    map_name = str(row.get("map", ""))
+                    tx = int(row.get("tile_x") or 0)
+                    ty = int(row.get("tile_y") or 0)
+                    if dedupe_mode == "coords":
+                        key = (map_name, tx, ty)
+                    else:
+                        key = (
+                            map_name,
+                            tx,
+                            ty,
+                            round(float(row.get("height_mean", 0.0)), 4),
+                            round(float(row.get("height_std", 0.0)), 4),
+                        )
+                    if key not in selected:
+                        ordered_keys.append(key)
+                    # Keep latest source in requested build order.
+                    selected[key] = (build, int(row["tile_id"]), row)
+            for key in ordered_keys:
+                records.append(selected[key])
+
+        if not records:
+            raise RuntimeError("No records selected for merge.")
+
+        capacity = len(records)
+        codec = zarr.codecs.BloscCodec(cname=DEFAULT_CODEC, clevel=DEFAULT_CLEVEL, shuffle=DEFAULT_SHUFFLE)
+        out_store = zarr.storage.LocalStore(str(output_partial), read_only=False)
+        out_root = zarr.open_group(store=out_store, mode="w")
+        out_arrays: dict[str, zarr.Array] = {}
+        for key in ALL_ARRAY_KEYS:
+            chunks = CHUNK_SIZES.get(key, (64,) + SHAPES[key])
+            out_arrays[key] = out_root.create_array(
+                key,
+                shape=(capacity,) + SHAPES[key],
+                chunks=chunks,
+                dtype=DTYPES[key],
+                compressors=[codec],
+                fill_value=FILL_VALUES.get(key, 0),
+            )
+
+        merged_index_rows: list[dict] = []
+        source_to_merged_tile: dict[tuple[str, int], int] = {}
+        batch_size = int(args.batch_size or 64)
+        pending_arrays: dict[str, list[np.ndarray]] = {key: [] for key in ALL_ARRAY_KEYS}
+        write_pos = 0
+
+        for build, src_tile_id, row in records:
+            _, src_root = source_handles[build]
+            for key in ALL_ARRAY_KEYS:
+                pending_arrays[key].append(src_root[key][src_tile_id].astype(DTYPES[key], copy=False))
+
+            merged_row = dict(row)
+            merged_row["tile_id"] = write_pos
+            merged_row["build"] = str(row.get("build") or build)
+            merged_row["source_build"] = build
+            merged_row["source_tile_id"] = src_tile_id
+            merged_index_rows.append(merged_row)
+            source_to_merged_tile[(build, src_tile_id)] = write_pos
+            write_pos += 1
+
+            if len(pending_arrays["height_257"]) >= batch_size:
+                start = write_pos - len(pending_arrays["height_257"])
+                for key in ALL_ARRAY_KEYS:
+                    out_arrays[key][start:write_pos] = np.stack(pending_arrays[key], axis=0)
+                    pending_arrays[key].clear()
+
+        remaining = len(pending_arrays["height_257"])
+        if remaining > 0:
+            start = write_pos - remaining
+            for key in ALL_ARRAY_KEYS:
+                out_arrays[key][start:write_pos] = np.stack(pending_arrays[key], axis=0)
+                pending_arrays[key].clear()
+
+        _write_index(merged_index_rows, output_partial)
+
+        merged_placements: list[dict] = []
+        for build in builds:
+            for row in source_placements_rows.get(build, []):
+                old_tile_id = int(row.get("tile_id", -1))
+                new_tile_id = source_to_merged_tile.get((build, old_tile_id))
+                if new_tile_id is None:
+                    continue
+                new_row = dict(row)
+                new_row["tile_id"] = int(new_tile_id)
+                new_row["source_build"] = build
+                new_row["source_tile_id"] = old_tile_id
+                merged_placements.append(new_row)
+        if merged_placements:
+            _write_placements(merged_placements, output_partial)
+
+        elapsed = time.perf_counter() - t0
+        metrics_path = _write_harvest_metrics(
+            build=output_name,
+            output_path=output_partial,
+            index_rows=merged_index_rows,
+            placements_total=len(merged_placements),
+            skipped_zero_usable_maps=0,
+            rejected_tile_count=0,
+            elapsed_seconds=elapsed,
+        )
+        merge_manifest = {
+            "output_name": output_name,
+            "output_path": str(output_path),
+            "source_builds": builds,
+            "dedupe_mode": dedupe_mode,
+            "selected_tiles": len(records),
+            "source_tiles_total": int(sum(len(source_index_rows.get(b, [])) for b in builds)),
+            "batch_size": batch_size,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "harvest_metrics_path": str(metrics_path),
+        }
+        (output_partial / "merge_manifest.json").write_text(json.dumps(merge_manifest, indent=2), encoding="utf-8")
+        _write_resume_state(
+            output_partial,
+            build=output_name,
+            requested_maps=sorted({str(r.get("map", "")) for r in merged_index_rows}),
+            completed_maps=sorted({str(r.get("map", "")) for r in merged_index_rows}),
+            valid=len(merged_index_rows),
+            skipped_zero_usable_maps=0,
+            rejected_tile_count=0,
+            codec_name=DEFAULT_CODEC,
+            codec_level=DEFAULT_CLEVEL,
+            codec_shuffle=DEFAULT_SHUFFLE,
+            capacity=len(merged_index_rows),
+            finalized=True,
+        )
+        out_store.close()
+
+        os_replace_target = output_path
+        output_partial.replace(os_replace_target)
+        print(f"Merged store: {output_path}")
+        print(f"Tiles: {len(merged_index_rows)} (from {sum(len(source_index_rows.get(b, [])) for b in builds)} source rows)")
+        print(f"Placements: {len(merged_placements)}")
+        print(f"Dedupe mode: {dedupe_mode}")
+        print(f"Metrics: {output_path / 'harvest_metrics.json'}")
+    finally:
+        for store, _root in source_handles.values():
+            store.close()
 
 
 def cmd_repair_index(args: argparse.Namespace) -> None:
@@ -1466,6 +1868,16 @@ def main() -> None:
     stats_p = sub.add_parser("stats", parents=[common])
     repair_p = sub.add_parser("repair-index", parents=[common])
     repair_p.add_argument("--no-backup", action="store_true", help="Skip creating index.parquet.bak before rewriting index.parquet")
+    merge_p = sub.add_parser("merge-builds", parents=[common], help="Merge per-build stores into one combined Zarr store")
+    merge_p.add_argument("--output-name", type=str, default="merged_all", help="Output store name (without .zarr)")
+    merge_p.add_argument(
+        "--dedupe-mode",
+        choices=["none", "coords", "coords_height"],
+        default="coords_height",
+        help="Deduplication key: none, map+coords, or map+coords+height stats",
+    )
+    merge_p.add_argument("--batch-size", type=int, default=64, help="Array copy batch size during merge")
+    merge_p.add_argument("--rebuild-existing", action="store_true", help="Overwrite existing merged output store")
 
     args = parser.parse_args()
 
@@ -1475,6 +1887,8 @@ def main() -> None:
         cmd_stats(args)
     elif args.command == "repair-index":
         cmd_repair_index(args)
+    elif args.command == "merge-builds":
+        cmd_merge_builds(args)
 
 
 if __name__ == "__main__":

@@ -65,6 +65,16 @@ uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --limit 100
 
 # Check stats:
 uv run python scripts/build_v16_dataset.py stats --build 3_3_5_12340
+
+# Cross-build overlap stats:
+uv run python scripts/build_v16_dataset.py stats --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927
+
+# Merge per-build stores into one combined store (dedupe by coords+height stats):
+uv run python scripts/build_v16_dataset.py merge-builds \
+    --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 \
+    --output-name merged_all \
+    --dedupe-mode coords_height \
+    --rebuild-existing
 ```
 
 Output: `wow-viewer/output/datasets/v16/<build>.zarr/`
@@ -91,6 +101,10 @@ Build behavior:
 - `repair-index` can now rewrite `index.parquet` tile coordinates in place from a metadata-only re-stream of the staged client, so bad coordinate bookkeeping no longer forces a full dataset rebuild.
 - Future harvest output now carries explicit `tile_x` / `tile_y` in `metadata.json`, and the builder trusts explicit metadata first instead of brittle `source_adt_path` parsing.
 - Legacy Alpha metadata fallback is now explicit: when `tile_x` / `tile_y` are missing, the builder can recover coordinates from `#alpha-tile(x,y)` markers in `tile_name` or `source_adt_path`.
+- V16 liquid supervision rebuild now prefers raw liquid sources in priority order `MH2O > MCLQ > unified > WL*` while streaming NPZ tiles, so WL* fallback no longer masks richer ADT-native liquid signals.
+- Completed builds now include `harvest_metrics.json` with per-build coverage metrics for all harvested `has_*` signals (including liquid-source provenance flags), per-map tile counts, placement totals, and throughput.
+- `stats` across multiple builds now prints a cross-build overlap summary (`total rows`, `unique (map,tile_x,tile_y)`, and duplication factor).
+- `merge-builds` can consolidate per-build stores into one `merged_all.zarr` with optional dedupe modes (`none`, `coords`, `coords_height`).
 
 ### Train V16
 
@@ -102,6 +116,13 @@ uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340
 uv run python scripts/train_v16.py \
     --dataset-dir ../output/datasets/v16 \
     --builds 3_3_5_12340 \
+    --train-max-tiles 2000 \
+    --val-max-tiles 256
+
+# Train from merged single-store corpus:
+uv run python scripts/train_v16.py \
+    --dataset-dir ../output/datasets/v16 \
+    --builds merged_all \
     --train-max-tiles 2000 \
     --val-max-tiles 256
 
@@ -130,6 +151,11 @@ uv run python scripts/train_v16.py \
     --train-max-tiles 1350 \
     --val-max-tiles 150 \
     --batch-size 24 \
+    --num-workers 4 \
+    --persistent-workers \
+    --prefetch-factor 4 \
+    --val-interval 1 \
+    --val-snapshot-interval 10 \
     --target-vram-gb 8 \
     --gpu-duty-cycle 50 \
     --run-name v16_full_corpus_1500_val10_thermal
@@ -151,6 +177,11 @@ Validation snapshot exports now also include one labeled overview image:
 Thermal/VRAM tuning flags:
 - `--target-vram-gb <float>`: soft target for guidance logs (trainer prints when you are far under/over target).
 - `--gpu-duty-cycle <1..100>`: approximates an upper GPU active duty-cycle via per-step throttling.
+- `--num-workers <int>`: DataLoader worker count for CPU-side throughput.
+- `--persistent-workers`: keep workers alive between epochs (only used when `--num-workers > 0`).
+- `--prefetch-factor <int>`: batches prefetched per worker (only used when `--num-workers > 0`).
+- `--val-interval <int>`: scalar validation cadence; `v16_best.pt` can only update on these epochs.
+- `--val-snapshot-interval <int>`: visualization snapshot cadence (`0` disables snapshot export while keeping scalar validation/checkpointing).
 
 Checkpoint files per run:
 - `models/v16/runs/<run>/checkpoints/v16_last.pt` (written every epoch)
