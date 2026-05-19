@@ -131,6 +131,11 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
 - The inspector now emits a labeled visual artifact per build (`<build>.validation_audit_overview.png`) with minimap/height/liquid/object panels and tile metadata in each row header.
 - JSON evidence remains paired with visuals (`<build>.summary.json`, `<build>.samples.json`) so dataset readiness can be reviewed by humans before training runs.
 
+### New: data-harvester README compression + advanced guide split (2026-05-19)
+- `wow-viewer/data-harvester/README.md` is now a concise operator runbook (setup, core commands, outputs).
+- Dense command variants and extended options were moved to `wow-viewer/data-harvester/docs/advanced-v16-workflows.md`.
+- Intent: keep the default README scannable and execution-focused; keep deep detail in one advanced companion doc.
+
 ### New: explicit liquid-refinement model note (2026-05-18)
 - Docs now explicitly define a separate planned liquid model lane:
   - inputs centered on `minimap_rgb` plus optional liquid priors

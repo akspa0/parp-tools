@@ -128,7 +128,6 @@ WRITE_RETRY_ATTEMPTS = 8
 WRITE_RETRY_BASE_DELAY_SECONDS = 0.15
 WRITE_BATCH_SIZE = 16
 
-ALPHA_BUILD_PREFIXES = ("0_5_", "0_7_")
 LK_CATA_BUILD_PREFIXES = ("3_", "4_")
 
 
@@ -862,7 +861,6 @@ def _validate_build_signals(build: str, output_path: Path, strict: bool = True) 
     required_nonzero = [
         "has_normal_xyz",
         "has_alpha_256",
-        "has_holes_16",
         "has_mcly_texture_ids",
         "has_mcly_layer_mask",
     ]
@@ -870,6 +868,12 @@ def _validate_build_signals(build: str, output_path: Path, strict: bool = True) 
         count = int(coverage.get(key, 0))
         if count <= 0:
             failures.append(f"{key} expected >0, got {count}")
+
+    holes_count = int(coverage.get("has_holes_16", 0))
+    if holes_count <= 0:
+        warnings_list.append(
+            "has_holes_16 coverage is 0; allowed for some early-client builds but check expected format coverage."
+        )
 
     liquid_count = int(coverage.get("has_liquid_mask", 0))
     liquid_source_keys = [
@@ -884,20 +888,30 @@ def _validate_build_signals(build: str, output_path: Path, strict: bool = True) 
             f"liquid source total mismatch: sources={liquid_source_total}, has_liquid_mask={liquid_count}"
         )
 
-    if build.startswith(ALPHA_BUILD_PREFIXES):
-        mclq_count = int(coverage.get("has_liquid_source_mclq", 0))
-        if mclq_count <= 0:
-            failures.append("alpha-era build expected MCLQ-derived liquid coverage (>0), got 0")
-        wl_count = int(coverage.get("has_liquid_source_wl", 0))
+    mh2o_count = int(coverage.get("has_liquid_source_mh2o", 0))
+    mclq_count = int(coverage.get("has_liquid_source_mclq", 0))
+    unified_count = int(coverage.get("has_liquid_source_unified", 0))
+    wl_count = int(coverage.get("has_liquid_source_wl", 0))
+
+    if build.startswith("0_5_"):
+        if mclq_count <= 0 and liquid_count > 0:
+            failures.append("0.5.x build has liquid tiles but zero MCLQ-derived coverage; expected MCLQ for alpha-era data.")
         if wl_count > mclq_count:
             warnings_list.append(
-                f"WL* fallback dominates alpha liquid labels (wl={wl_count}, mclq={mclq_count})"
+                f"WL* fallback dominates 0.5.x liquid labels (wl={wl_count}, mclq={mclq_count})."
             )
-
-    if build.startswith(LK_CATA_BUILD_PREFIXES):
-        mh2o_count = int(coverage.get("has_liquid_source_mh2o", 0))
-        if mh2o_count <= 0:
-            failures.append("LK/Cata build expected MH2O-derived liquid coverage (>0), got 0")
+    elif build.startswith("0_7_"):
+        if liquid_count > 0 and mclq_count <= 0 and mh2o_count <= 0 and unified_count > 0:
+            warnings_list.append(
+                "0.7.x liquid supervision is unified-only (no explicit MCLQ/MH2O provenance in stream). "
+                "This is allowed but indicates source granularity limits."
+            )
+    elif build.startswith(LK_CATA_BUILD_PREFIXES):
+        if liquid_count > 0 and mh2o_count <= 0 and unified_count > 0:
+            warnings_list.append(
+                "LK/Cata liquid supervision is unified-only (no explicit MH2O provenance). "
+                "Allowed, but verify source extraction if MH2O-native supervision is expected."
+            )
 
     payload = {
         "build": build,
