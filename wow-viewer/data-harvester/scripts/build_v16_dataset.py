@@ -1760,6 +1760,20 @@ def cmd_merge_builds(args: argparse.Namespace) -> None:
         )
         out_store.close()
 
+        # Safety gate: never publish an incomplete merged store.
+        missing_paths: list[str] = []
+        for key in ALL_ARRAY_KEYS:
+            if not (output_partial / key).exists():
+                missing_paths.append(key)
+        for required_file in ("index.parquet", "harvest_metrics.json", "merge_manifest.json", "_resume_state.json"):
+            if not (output_partial / required_file).exists():
+                missing_paths.append(required_file)
+        if missing_paths:
+            raise RuntimeError(
+                "Refusing to publish incomplete merged store. Missing: "
+                + ", ".join(missing_paths)
+            )
+
         os_replace_target = output_path
         output_partial.replace(os_replace_target)
         print(f"Merged store: {output_path}")
