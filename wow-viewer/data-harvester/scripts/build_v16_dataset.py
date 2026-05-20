@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import struct
 import subprocess
@@ -36,6 +37,7 @@ import threading
 import time
 import warnings
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
 
@@ -51,6 +53,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _HARVEST_TOOL_DIR = _PROJECT_ROOT / "tools" / "harvest" / "WowViewer.Tool.Harvest" / "bin" / "Debug" / "net10.0"
 _DATASET_ROOT = _PROJECT_ROOT / "output" / "datasets" / "v16"
 _CLIENT_ROOTS = _PROJECT_ROOT.parent / "output" / "tmp" / "wowarchive-clients"
+DEFAULT_MAP_WORKERS = max(1, min(4, os.cpu_count() or 1))
 
 # ── NPZ key → Zarr array name mapping ──────────────────────────────────
 # All signals from the C# harvester that map to fixed-shape Zarr arrays.
@@ -409,6 +412,61 @@ def _process_tile_data(data: dict[str, np.ndarray]) -> tuple[dict[str, np.ndarra
     return tile_arrays, has_signals
 
 
+def _derive_alpha_mcnk_liquid_flags(
+    data: dict[str, np.ndarray],
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    meta = _decode_metadata_json(data)
+    raw_chunks = meta.get("raw_chunks")
+    if not isinstance(raw_chunks, list):
+        return None, None
+
+    flag_grid = np.zeros((16, 16), dtype=np.uint32)
+    type_grid = np.full((16, 16), -1, dtype=np.int32)
+    any_liquid = False
+
+    for raw_chunk in raw_chunks:
+        if not isinstance(raw_chunk, dict):
+            continue
+        if str(raw_chunk.get("scope", "")).lower() != "mcnk":
+            continue
+        if str(raw_chunk.get("chunk_id", "")).upper() != "MCNK":
+            continue
+
+        chunk_x = raw_chunk.get("chunk_x")
+        chunk_y = raw_chunk.get("chunk_y")
+        entry_name = raw_chunk.get("entry_name")
+        if not isinstance(chunk_x, int) or not isinstance(chunk_y, int) or not isinstance(entry_name, str):
+            continue
+        if not (0 <= chunk_x < 16 and 0 <= chunk_y < 16):
+            continue
+
+        payload = data.get(entry_name)
+        if payload is None:
+            continue
+        raw = np.asarray(payload)
+        if raw.ndim != 1 or raw.size < 4:
+            continue
+
+        flags = struct.unpack_from("<I", raw.astype(np.uint8, copy=False).tobytes(), 0)[0]
+        flag_grid[chunk_y, chunk_x] = flags
+        if (flags & 0x3C) == 0:
+            continue
+
+        any_liquid = True
+        if (flags & 0x20) != 0:
+            liquid_type = 3
+        elif (flags & 0x10) != 0:
+            liquid_type = 2
+        else:
+            liquid_type = 1
+        type_grid[chunk_y, chunk_x] = liquid_type
+
+    if not any_liquid:
+        return None, None
+
+    return flag_grid, type_grid
+
+
 def _derive_liquid_supervision(
     data: dict[str, np.ndarray],
 ) -> tuple[np.ndarray, np.ndarray, bool, str | None]:
@@ -424,14 +482,49 @@ def _derive_liquid_supervision(
                 return None
         return out
 
-    def _coerce_liq(arr: np.ndarray, key: str) -> np.ndarray:
-        return _normalize_array(arr, key)
+    def _resize_liquid_grid(arr: np.ndarray) -> np.ndarray:
+        src = np.asarray(arr)
+        if src.ndim != 2:
+            return src
+        target_h, target_w = SHAPES["liquid_mask"]
+        if src.shape == (target_h, target_w):
+            return src
+        y_idx = np.rint(np.linspace(0, src.shape[0] - 1, num=target_h)).astype(np.int32)
+        x_idx = np.rint(np.linspace(0, src.shape[1] - 1, num=target_w)).astype(np.int32)
+        return src[np.ix_(y_idx, x_idx)]
 
-    def _presence_mask(name: str) -> np.ndarray | None:
+    def _reorient_non_wl_liquid(arr: np.ndarray | None) -> np.ndarray | None:
+        if arr is None:
+            return None
+        # Trust the harvester's terrain-space orientation directly.
+        # Dataset curation should not apply extra liquid rotations on top.
+        return arr
+
+    def _coerce_liq_mask(arr: np.ndarray) -> np.ndarray:
+        out = _resize_liquid_grid(arr.astype(np.float32, copy=False))
+        if out.max() > 1.5:
+            out = out / 255.0
+        return np.clip(out, 0.0, 1.0).astype(np.float32, copy=False)
+
+    def _coerce_liq_height(arr: np.ndarray) -> np.ndarray:
+        return _resize_liquid_grid(arr.astype(np.float32, copy=False)).astype(np.float32, copy=False)
+
+    def _coerce_liq_type(arr: np.ndarray) -> np.ndarray:
+        return _resize_liquid_grid(arr.astype(np.float32, copy=False)).astype(np.float32, copy=False)
+
+    alpha_mcnk_flags, alpha_mcnk_type_16 = _derive_alpha_mcnk_liquid_flags(data)
+    alpha_mcnk_type = _coerce_liq_type(alpha_mcnk_type_16) if alpha_mcnk_type_16 is not None else None
+    alpha_mcnk_mask = None
+    if alpha_mcnk_flags is not None:
+        alpha_mcnk_mask = _coerce_liq_mask(((alpha_mcnk_flags & 0x3C) != 0).astype(np.float32))
+
+    def _presence_mask(name: str, *, reorient_non_wl: bool = False) -> np.ndarray | None:
         raw = _to_2d(data.get(name))
         if raw is None:
             return None
-        raw_liq = _coerce_liq(raw.astype(np.float32), "liquid_mask")
+        if reorient_non_wl:
+            raw = _reorient_non_wl_liquid(raw)
+        raw_liq = _coerce_liq_mask(raw.astype(np.float32))
         if raw.dtype == np.bool_:
             mask = raw_liq.astype(np.float32)
         else:
@@ -447,19 +540,19 @@ def _derive_liquid_supervision(
         return np.clip(out, 0.0, 1.0)
 
     # 1) MH2O (preferred)
-    mh2o_mask = _presence_mask("mh2o_presence_mask")
-    mh2o_type = _to_2d(data.get("mh2o_type_mask"))
-    mh2o_height = _to_2d(data.get("mh2o_surface_height"))
-    mh2o_depth = _to_2d(data.get("mh2o_depth"))
+    mh2o_mask = _presence_mask("mh2o_presence_mask", reorient_non_wl=True)
+    mh2o_type = _reorient_non_wl_liquid(_to_2d(data.get("mh2o_type_mask")))
+    mh2o_height = _reorient_non_wl_liquid(_to_2d(data.get("mh2o_surface_height")))
+    mh2o_depth = _reorient_non_wl_liquid(_to_2d(data.get("mh2o_depth")))
     if mh2o_mask is None and (mh2o_type is not None or mh2o_height is not None or mh2o_depth is not None):
         inferred = np.zeros(SHAPES["liquid_mask"], dtype=np.bool_)
         if mh2o_height is not None:
-            inferred |= (_coerce_liq(np.abs(mh2o_height.astype(np.float32)), "liquid_mask") > 1e-6)
+            inferred |= (np.abs(_coerce_liq_height(mh2o_height)) > 1e-6)
         if mh2o_depth is not None:
-            inferred |= (_coerce_liq(np.abs(mh2o_depth.astype(np.float32)), "liquid_mask") > 1e-6)
+            inferred |= (np.abs(_coerce_liq_height(mh2o_depth)) > 1e-6)
         if mh2o_type is not None:
             # Preserve legacy behavior as a weak fallback for shards without explicit presence masks.
-            inferred |= (_coerce_liq(mh2o_type.astype(np.float32), "liquid_mask") > 0.0)
+            inferred |= (_coerce_liq_type(mh2o_type) > 0.0)
         mh2o_mask = inferred.astype(np.float32)
         if float(mh2o_mask.max()) <= 0.0:
             mh2o_mask = None
@@ -467,24 +560,34 @@ def _derive_liquid_supervision(
         if mh2o_height is None:
             mh2o_height = np.zeros_like(mh2o_mask, dtype=np.float32)
         return (
-            _coerce_liq(_normalize_binary_mask(mh2o_mask), "liquid_mask"),
-            _coerce_liq(mh2o_height.astype(np.float32), "liquid_height"),
+            _coerce_liq_mask(_normalize_binary_mask(mh2o_mask)),
+            _coerce_liq_height(mh2o_height.astype(np.float32)),
             True,
             "mh2o",
         )
 
     # 2) MCLQ (next priority)
-    mclq_mask = _presence_mask("mclq_presence_mask")
-    mclq_type = _to_2d(data.get("mclq_type_mask"))
-    mclq_height = _to_2d(data.get("mclq_surface_height"))
+    mclq_mask = _presence_mask("mclq_presence_mask", reorient_non_wl=True)
+    mclq_type = _reorient_non_wl_liquid(_to_2d(data.get("mclq_type_mask")))
+    mclq_height = _reorient_non_wl_liquid(_to_2d(data.get("mclq_surface_height")))
+    if alpha_mcnk_mask is not None:
+        # Alpha MCLQ chunk flags are a more trustworthy presence signal than the
+        # legacy 16x16 type/mask grids in existing harvested shards.
+        mclq_mask = alpha_mcnk_mask
+    if alpha_mcnk_type is not None:
+        mclq_type = alpha_mcnk_type
     if mclq_mask is None and mclq_type is not None:
-        mclq_type_i = _coerce_liq(mclq_type.astype(np.float32), "liquid_mask").astype(np.int32, copy=False)
+        mclq_type_i = _coerce_liq_type(mclq_type).astype(np.int32, copy=False)
         if int(mclq_type_i.min()) < 0:
             # Alpha-derived shards use -1 for "not present"; 0 is valid water.
             mclq_mask = (mclq_type_i >= 0).astype(np.float32)
+        elif int(mclq_type_i.max()) > 0:
+            # When a coarse type grid exists, prefer it over height-based inference:
+            # liquid heights can legitimately sit at 0.0f for sea-level water.
+            mclq_mask = (mclq_type_i > 0).astype(np.float32)
         elif mclq_height is not None:
             # Legacy fallback when no explicit mask exists: infer from non-zero heights.
-            mclq_mask = (_coerce_liq(np.abs(mclq_height.astype(np.float32)), "liquid_mask") > 1e-6).astype(np.float32)
+            mclq_mask = (np.abs(_coerce_liq_height(mclq_height)) > 1e-6).astype(np.float32)
         else:
             mclq_mask = (mclq_type_i > 0).astype(np.float32)
         if float(mclq_mask.max()) <= 0.0:
@@ -493,23 +596,23 @@ def _derive_liquid_supervision(
         if mclq_height is None:
             mclq_height = np.zeros_like(mclq_mask, dtype=np.float32)
         return (
-            _coerce_liq(_normalize_binary_mask(mclq_mask), "liquid_mask"),
-            _coerce_liq(mclq_height.astype(np.float32), "liquid_height"),
+            _coerce_liq_mask(_normalize_binary_mask(mclq_mask)),
+            _coerce_liq_height(mclq_height.astype(np.float32)),
             True,
             "mclq",
         )
 
     # 3) Existing unified signal
-    unified_mask = _to_2d(data.get("unified_liquid_mask"))
+    unified_mask = _reorient_non_wl_liquid(_to_2d(data.get("unified_liquid_mask")))
     if unified_mask is not None:
         unified_mask = _normalize_binary_mask(unified_mask)
         if float(unified_mask.max()) > 0.0:
-            unified_height = _to_2d(data.get("unified_liquid_height"))
+            unified_height = _reorient_non_wl_liquid(_to_2d(data.get("unified_liquid_height")))
             if unified_height is None:
                 unified_height = np.zeros_like(unified_mask, dtype=np.float32)
             return (
-                _coerce_liq(unified_mask, "liquid_mask"),
-                _coerce_liq(unified_height.astype(np.float32), "liquid_height"),
+                _coerce_liq_mask(unified_mask),
+                _coerce_liq_height(unified_height.astype(np.float32)),
                 True,
                 "unified",
             )
@@ -523,8 +626,8 @@ def _derive_liquid_supervision(
             if wl_height is None:
                 wl_height = np.zeros_like(wl_mask, dtype=np.float32)
             return (
-                _coerce_liq(wl_mask, "liquid_mask"),
-                _coerce_liq(wl_height.astype(np.float32), "liquid_height"),
+                _coerce_liq_mask(wl_mask),
+                _coerce_liq_height(wl_height.astype(np.float32)),
                 True,
                 "wl",
             )
@@ -968,6 +1071,37 @@ def _ordered_maps_from_index_rows(index_rows: list[dict]) -> list[str]:
         seen.add(map_name)
         ordered.append(map_name)
     return ordered
+
+
+def _collect_map_rows_parallel(
+    map_names: list[str],
+    worker_fn,
+    *,
+    map_workers: int,
+    label: str,
+) -> dict[str, list[dict[str, object]]]:
+    ordered_maps = [str(name) for name in map_names]
+    if not ordered_maps:
+        return {}
+
+    worker_count = max(1, min(int(map_workers), len(ordered_maps)))
+    if worker_count == 1:
+        return {map_name: worker_fn(map_name) for map_name in ordered_maps}
+
+    print(f"{label}: using map_workers={worker_count}")
+    results: dict[str, list[dict[str, object]]] = {}
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_to_map = {
+            executor.submit(worker_fn, map_name): map_name
+            for map_name in ordered_maps
+        }
+        for future in as_completed(future_to_map):
+            map_name = future_to_map[future]
+            rows = future.result()
+            results[map_name] = rows
+            print(f"  finished {label} stream for {map_name}: {len(rows)} rows")
+
+    return results
 
 
 def _normalize_map_name(meta_map: object, requested_map: str) -> str:
@@ -2108,6 +2242,7 @@ def cmd_merge_builds(args: argparse.Namespace) -> None:
 def cmd_repair_index(args: argparse.Namespace) -> None:
     builds = args.builds or [args.build]
     harvest_tool = _find_harvest_tool()
+    map_workers = max(1, int(args.map_workers))
 
     for build in builds:
         output_path = _DATASET_ROOT / f"{build}.zarr"
@@ -2141,9 +2276,15 @@ def cmd_repair_index(args: argparse.Namespace) -> None:
             discovered_maps = _discover_maps_for_build(harvest_tool, client_root)
             print("Index map labels are placeholder-only; attempting full map relabel from fresh stream order.")
             print(f"Discovered maps: {discovered_maps}")
+            streamed_by_map = _collect_map_rows_parallel(
+                discovered_maps,
+                lambda map_name: _stream_valid_tile_metadata(harvest_tool, client_root, map_name, build_version),
+                map_workers=map_workers,
+                label=f"repair-index {build}",
+            )
             streamed_all: list[dict[str, object]] = []
             for map_name in discovered_maps:
-                streamed_all.extend(_stream_valid_tile_metadata(harvest_tool, client_root, map_name, build_version))
+                streamed_all.extend(streamed_by_map[map_name])
 
             if len(streamed_all) != len(index_rows):
                 raise RuntimeError(
@@ -2160,9 +2301,16 @@ def cmd_repair_index(args: argparse.Namespace) -> None:
             print(f"Wrote repaired index: {idx_path}")
             continue
 
+        streamed_by_map = _collect_map_rows_parallel(
+            ordered_maps,
+            lambda map_name: _stream_valid_tile_metadata(harvest_tool, client_root, map_name, build_version),
+            map_workers=map_workers,
+            label=f"repair-index {build}",
+        )
+
         for map_name in ordered_maps:
             row_indices = [i for i, row in enumerate(index_rows) if str(row.get("map")) == map_name]
-            streamed_rows = _stream_valid_tile_metadata(harvest_tool, client_root, map_name, build_version)
+            streamed_rows = streamed_by_map[map_name]
 
             if len(streamed_rows) != len(row_indices):
                 raise RuntimeError(
@@ -2185,6 +2333,7 @@ def cmd_patch_liquids(args: argparse.Namespace) -> None:
     builds = args.builds or [args.build]
     harvest_tool = _find_harvest_tool()
     batch_size = max(1, int(args.batch_size))
+    map_workers = max(1, int(args.map_workers))
 
     for build in builds:
         output_path = _DATASET_ROOT / f"{build}.zarr"
@@ -2220,9 +2369,15 @@ def cmd_patch_liquids(args: argparse.Namespace) -> None:
         if ordered_maps and all(_is_placeholder_map_name(m) for m in ordered_maps):
             discovered_maps = _discover_maps_for_build(harvest_tool, client_root)
             print("Index map labels are placeholder-only; patching by full discovered stream order.")
+            streamed_by_map = _collect_map_rows_parallel(
+                discovered_maps,
+                lambda map_name: _stream_valid_tile_liquid_rows(harvest_tool, client_root, map_name, build_version),
+                map_workers=map_workers,
+                label=f"patch-liquids {build}",
+            )
             streamed_all: list[dict[str, object]] = []
             for map_name in discovered_maps:
-                streamed_all.extend(_stream_valid_tile_liquid_rows(harvest_tool, client_root, map_name, build_version))
+                streamed_all.extend(streamed_by_map[map_name])
 
             if len(streamed_all) != len(index_rows):
                 raise RuntimeError(
@@ -2232,9 +2387,15 @@ def cmd_patch_liquids(args: argparse.Namespace) -> None:
             for i, streamed in enumerate(streamed_all):
                 patch_rows[i] = streamed
         else:
+            streamed_by_map = _collect_map_rows_parallel(
+                ordered_maps,
+                lambda map_name: _stream_valid_tile_liquid_rows(harvest_tool, client_root, map_name, build_version),
+                map_workers=map_workers,
+                label=f"patch-liquids {build}",
+            )
             for map_name in ordered_maps:
                 row_indices = [i for i, row in enumerate(index_rows) if str(row.get("map")) == map_name]
-                streamed_rows = _stream_valid_tile_liquid_rows(harvest_tool, client_root, map_name, build_version)
+                streamed_rows = streamed_by_map[map_name]
                 if len(streamed_rows) != len(row_indices):
                     raise RuntimeError(
                         f"Liquid patch count mismatch for {build}/{map_name}: "
@@ -2331,8 +2492,10 @@ def main() -> None:
     validate_p.add_argument("--strict", action=argparse.BooleanOptionalAction, default=True, help="Fail when validation checks fail")
     repair_p = sub.add_parser("repair-index", parents=[common])
     repair_p.add_argument("--no-backup", action="store_true", help="Skip creating index.parquet.bak before rewriting index.parquet")
+    repair_p.add_argument("--map-workers", type=int, default=DEFAULT_MAP_WORKERS, help="Parallel harvest-stream workers across maps during index repair")
     patch_liquids_p = sub.add_parser("patch-liquids", parents=[common], help="Patch liquid_mask/liquid_height arrays and liquid has_* flags in-place")
     patch_liquids_p.add_argument("--batch-size", type=int, default=128, help="Tile batch size for array writes")
+    patch_liquids_p.add_argument("--map-workers", type=int, default=DEFAULT_MAP_WORKERS, help="Parallel harvest-stream workers across maps during liquid patching")
     patch_liquids_p.add_argument("--no-backup", action="store_true", help="Skip creating index.parquet.bak.liquids before rewriting index.parquet")
     patch_liquids_p.add_argument("--signal-validation", action=argparse.BooleanOptionalAction, default=True, help="Run post-patch signal validation checks")
     patch_liquids_p.add_argument("--signal-validation-strict", action=argparse.BooleanOptionalAction, default=True, help="Fail when post-patch signal validation fails")

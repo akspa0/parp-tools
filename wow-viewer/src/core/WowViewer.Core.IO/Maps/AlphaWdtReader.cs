@@ -251,20 +251,23 @@ public static class AlphaWdtReader
 
         float[,] mclqSurface = new float[TileHeightmapSize, TileHeightmapSize];
         int[,] mclqTypes = new int[16, 16];
+        for (int y = 0; y < 16; y++)
+            for (int x = 0; x < 16; x++)
+                mclqTypes[y, x] = -1;
         bool hasLiquid = false;
         foreach (var lc in liquidChunks)
         {
             if ((uint)lc.IndexX < 16 && (uint)lc.IndexY < 16)
             {
                 float avgHeight = (lc.MinHeight + lc.MaxHeight) * 0.5f;
-                int baseX = lc.IndexY * 16;
-                int baseY = lc.IndexX * 16;
+                int baseX = lc.IndexX * 16;
+                int baseY = lc.IndexY * 16;
                 int endX = Math.Min(baseX + 17, TileHeightmapSize);
                 int endY = Math.Min(baseY + 17, TileHeightmapSize);
                 for (int y = baseY; y < endY; y++)
                     for (int x = baseX; x < endX; x++)
                         mclqSurface[y, x] = avgHeight;
-                mclqTypes[lc.IndexX, lc.IndexY] = ClassifyLiquid(lc.McnkFlags);
+                mclqTypes[lc.IndexY, lc.IndexX] = ClassifyLiquid(lc.McnkFlags);
                 hasLiquid = true;
             }
         }
