@@ -5,6 +5,7 @@ import json
 import random
 import struct
 import subprocess
+import sys
 import threading
 import warnings
 from collections import deque
@@ -85,8 +86,8 @@ def _load_index_lookup(zarr_path: Path) -> tuple[dict[tuple[str, int, int], int]
             row = {col: table.column(col)[i].as_py() for col in table.column_names}
             tile_id = int(row.get("tile_id", i))
             map_name = str(row.get("map", ""))
-            tile_x = int(row.get("tile_x", -1) or -1)
-            tile_y = int(row.get("tile_y", -1) or -1)
+            tile_x = int(row["tile_x"]) if row.get("tile_x") is not None else -1
+            tile_y = int(row["tile_y"]) if row.get("tile_y") is not None else -1
             rows_by_tile_id[tile_id] = row
             lookup[(map_name, tile_x, tile_y)] = tile_id
     except Exception:
@@ -295,6 +296,24 @@ def _count_rows(arr: np.ndarray | None) -> int:
     return int(src.shape[0]) if src.ndim >= 2 else 0
 
 
+def _count_mclq_active_chunks(mclq_presence: np.ndarray | None) -> int:
+    src = _to_2d(mclq_presence)
+    if src is None:
+        return 0
+
+    chunk_count = 0
+    for chunk_y in range(16):
+        for chunk_x in range(16):
+            y0 = chunk_y * 8
+            x0 = chunk_x * 8
+            block = src[y0 : y0 + 9, x0 : x0 + 9]
+            if block.size == 0:
+                continue
+            if np.any(np.asarray(block, dtype=np.float32) > 0.0):
+                chunk_count += 1
+    return chunk_count
+
+
 def _sample_stats(data: dict[str, np.ndarray], meta: dict[str, object]) -> dict[str, object]:
     mh2o_presence = _presence_from_raw(data.get("mh2o_presence_mask"))
     mh2o_height_presence = _presence_from_raw(data.get("mh2o_surface_height"))
@@ -307,6 +326,7 @@ def _sample_stats(data: dict[str, np.ndarray], meta: dict[str, object]) -> dict[
     mcnk_flags = _extract_mcnk_flag_grid(data, meta)
     mcnk_liquid_presence = _mcnk_liquid_presence_from_flags(mcnk_flags)
     mcnk_liquid_types = _mcnk_liquid_types_from_flags(mcnk_flags)
+    derived_mclq_chunk_count = _count_mclq_active_chunks(mclq_presence)
 
     mddf_rows = _count_rows(data.get("placement_mddf_data"))
     modf_rows = _count_rows(data.get("placement_modf_data"))
@@ -330,7 +350,7 @@ def _sample_stats(data: dict[str, np.ndarray], meta: dict[str, object]) -> dict[
         "mclq_height_presence_sum": float(mclq_height_presence.sum()) if mclq_height_presence is not None else 0.0,
         "wl_presence_sum": float(wl_presence.sum()) if wl_presence is not None else 0.0,
         "unified_presence_sum": float(unified_presence.sum()) if unified_presence is not None else 0.0,
-        "mcnk_liquid_chunk_count": int(np.count_nonzero(mcnk_liquid_presence)) if mcnk_liquid_presence is not None else 0,
+        "mcnk_liquid_chunk_count": int(np.count_nonzero(mcnk_liquid_presence)) if mcnk_liquid_presence is not None else derived_mclq_chunk_count,
         "mcnk_water_chunks": mcnk_water_chunks,
         "mcnk_magma_chunks": mcnk_magma_chunks,
         "mcnk_slime_chunks": mcnk_slime_chunks,
@@ -355,7 +375,7 @@ def _matches_kind(kind: str, stats: dict[str, object]) -> bool:
     if kind == "unified":
         return float(stats["unified_presence_sum"]) > 0.0
     if kind == "mcnk_liquid":
-        return int(stats["mcnk_liquid_chunk_count"]) > 0
+        return int(stats["mcnk_liquid_chunk_count"]) > 0 or float(stats["mclq_presence_sum"]) > 0.0 or float(stats["mclq_height_presence_sum"]) > 0.0
     if kind == "object":
         return float(stats["object_mask_sum"]) > 0.0 or int(stats["object_instance_nonzero"]) > 0
     if kind == "placement":
@@ -384,7 +404,10 @@ def _stream_samples(
     kinds: list[str],
     sample_count: int,
     sample_seed: int,
-) -> list[dict[str, object]]:
+    trace_map: str | None = None,
+    trace_tile_x: int | None = None,
+    trace_tile_y: int | None = None,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
     harvest_tool = _find_harvest_tool()
     client_root = _find_client_root(build)
     if client_root is None:
@@ -393,6 +416,9 @@ def _stream_samples(
     rng = random.Random(int(sample_seed))
     pools: dict[str, list[dict[str, object]]] = {kind: [] for kind in kinds}
     seen_counts: dict[str, int] = {kind: 0 for kind in kinds}
+    trace_requested = trace_map is not None and trace_tile_x is not None and trace_tile_y is not None
+    trace_matches: list[dict[str, object]] = []
+    streamed_tile_count = 0
 
     for map_name in maps:
         cmd = [
@@ -444,6 +470,7 @@ def _stream_samples(
                 continue
 
             meta = _decode_metadata_json(data)
+            streamed_tile_count += 1
             tile_x, tile_y = _extract_tile_coords_from_metadata(meta)
             actual_map = _normalize_map_name(meta.get("map_name", map_name), map_name)
             stats = _sample_stats(data, meta)
@@ -464,6 +491,16 @@ def _stream_samples(
                 "derived_liquid_mask": derived_liquid_mask,
             }
 
+            if (
+                trace_requested
+                and actual_map == trace_map
+                and int(tile_x) == int(trace_tile_x)
+                and int(tile_y) == int(trace_tile_y)
+            ):
+                item = dict(base_item)
+                item["sample_kind"] = "trace"
+                trace_matches.append(item)
+
             for kind in kinds:
                 if not _matches_kind(kind, stats):
                     continue
@@ -480,9 +517,42 @@ def _stream_samples(
             raise RuntimeError(f"Harvest stream ended without ENDS sentinel for {map_name}")
 
     combined: list[dict[str, object]] = []
+    combined.extend(trace_matches)
     for kind in kinds:
         combined.extend(sorted(pools[kind], key=lambda row: (str(row["map"]), int(row["tile_x"]), int(row["tile_y"]))))
-    return combined
+    summary = {
+        "build": build,
+        "maps": maps,
+        "kinds": kinds,
+        "sample_count": int(sample_count),
+        "sample_seed": int(sample_seed),
+        "streamed_tile_count": streamed_tile_count,
+        "kinds_summary": [
+            {
+                "kind": kind,
+                "sample_count_found": int(seen_counts[kind]),
+                "captured_sample_count": int(len(pools[kind])),
+                "status": "ok" if int(seen_counts[kind]) > 0 else "missing",
+            }
+            for kind in kinds
+        ],
+        "missing_kinds": [kind for kind in kinds if int(seen_counts[kind]) <= 0],
+        "trace": {
+            "requested": trace_requested,
+            "map": trace_map,
+            "tile_x": trace_tile_x,
+            "tile_y": trace_tile_y,
+            "matched_count": len(trace_matches),
+            "status": (
+                "not_requested"
+                if not trace_requested
+                else "found"
+                if trace_matches
+                else "missing"
+            ),
+        },
+    }
+    return combined, summary
 
 
 def _visualize_sample(
@@ -536,7 +606,7 @@ def _write_outputs(
     zarr_lookup: dict[tuple[str, int, int], int],
     zarr_store_root: object | None,
     zarr_rows_by_tile_id: dict[int, dict[str, object]],
-) -> None:
+) -> Path:
     build_dir = output_dir / build
     build_dir.mkdir(parents=True, exist_ok=True)
 
@@ -622,8 +692,10 @@ def _write_outputs(
             y += strip.shape[0]
         canvas.save(build_dir / f"{build}.overview.png")
 
-    with (build_dir / f"{build}.samples.json").open("w", encoding="utf-8") as fh:
+    samples_path = build_dir / f"{build}.samples.json"
+    with samples_path.open("w", encoding="utf-8") as fh:
         json.dump(summary_rows, fh, indent=2)
+    return samples_path
 
 
 def main() -> None:
@@ -634,19 +706,30 @@ def main() -> None:
     parser.add_argument("--sample-count", type=int, default=4, help="Reservoir sample size per category")
     parser.add_argument("--sample-seed", type=int, default=1234, help="Reservoir sampling seed")
     parser.add_argument("--output-dir", type=Path, default=_DEFAULT_OUTPUT, help="Output directory for summaries, NPZs, and PNGs")
+    parser.add_argument("--trace-map", help="Emit a deterministic one-tile trace for this map name")
+    parser.add_argument("--trace-tile-x", type=int, help="Tile X for deterministic trace mode")
+    parser.add_argument("--trace-tile-y", type=int, help="Tile Y for deterministic trace mode")
+    parser.add_argument("--allow-missing-kinds", action="store_true", help="Do not exit non-zero when any requested kind yields zero samples")
     args = parser.parse_args()
+
+    trace_values = [args.trace_map is not None, args.trace_tile_x is not None, args.trace_tile_y is not None]
+    if any(trace_values) and not all(trace_values):
+        parser.error("--trace-map, --trace-tile-x, and --trace-tile-y must be provided together")
 
     zarr_path = _DATASET_ROOT / f"{args.build}.zarr"
     zarr_lookup, zarr_store_root, zarr_rows_by_tile_id = _load_index_lookup(zarr_path)
     try:
-        samples = _stream_samples(
+        samples, summary = _stream_samples(
             build=args.build,
             maps=[str(v) for v in args.maps],
             kinds=[str(v) for v in args.kinds],
             sample_count=int(args.sample_count),
             sample_seed=int(args.sample_seed),
+            trace_map=str(args.trace_map) if args.trace_map is not None else None,
+            trace_tile_x=int(args.trace_tile_x) if args.trace_tile_x is not None else None,
+            trace_tile_y=int(args.trace_tile_y) if args.trace_tile_y is not None else None,
         )
-        _write_outputs(
+        samples_path = _write_outputs(
             build=args.build,
             output_dir=args.output_dir,
             samples=samples,
@@ -654,7 +737,30 @@ def main() -> None:
             zarr_store_root=zarr_store_root,
             zarr_rows_by_tile_id=zarr_rows_by_tile_id,
         )
-        print(f"Wrote {len(samples)} samples to {args.output_dir / args.build}")
+        build_dir = args.output_dir / args.build
+        summary["written_sample_count"] = len(samples)
+        summary["samples_path"] = str(samples_path)
+        summary["overview_path"] = str(build_dir / f"{args.build}.overview.png") if (build_dir / f"{args.build}.overview.png").exists() else None
+        summary_path = build_dir / f"{args.build}.summary.json"
+        with summary_path.open("w", encoding="utf-8") as fh:
+            json.dump(summary, fh, indent=2)
+
+        missing_kinds = list(summary.get("missing_kinds", []))
+        trace_summary = summary.get("trace", {})
+        trace_missing = bool(trace_summary.get("requested")) and str(trace_summary.get("status")) != "found"
+
+        print(f"Wrote {len(samples)} samples to {build_dir}")
+        print(f"Summary: {summary_path}")
+        if missing_kinds:
+            print(f"Missing requested kinds: {', '.join(str(kind) for kind in missing_kinds)}", file=sys.stderr)
+        if trace_missing:
+            print(
+                f"Missing requested trace tile: map={trace_summary.get('map')} "
+                f"xy=({trace_summary.get('tile_x')},{trace_summary.get('tile_y')})",
+                file=sys.stderr,
+            )
+        if (missing_kinds and not args.allow_missing_kinds) or trace_missing:
+            raise SystemExit(2)
     finally:
         if zarr_store_root is not None:
             store, _root = zarr_store_root

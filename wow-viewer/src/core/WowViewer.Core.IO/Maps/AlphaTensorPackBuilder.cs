@@ -11,6 +11,7 @@ public static class AlphaTensorPackBuilder
     private const int TileLiquidSize = TileChunks * VerticesPerChunk;
     private const float ObjectTileSize = 533.33333f;
     private const float ObjectMapOrigin = 17066.666f;
+    private const float ObjectMaskMarginTiles = 0.25f;
 
     public static TerrainTileTensorPack Build(AlphaTileData tileData, int tileX, int tileY)
     {
@@ -306,18 +307,11 @@ public static class AlphaTensorPackBuilder
         objectInstanceMask = new int[TileHeightmapSize, TileHeightmapSize];
         int instanceId = 1;
 
-        float tileWorldX = ObjectMapOrigin - tileX * ObjectTileSize;
-        float tileWorldY = ObjectMapOrigin - tileY * ObjectTileSize;
-
         foreach (var p in tileData.ModelPlacements)
         {
-            float localX = p.Position.X - tileWorldX;
-            float localY = p.Position.Y - tileWorldY;
-            if (localX < -ObjectTileSize * 0.1f || localX > ObjectTileSize * 1.1f ||
-                localY < -ObjectTileSize * 0.1f || localY > ObjectTileSize * 1.1f)
+            if (!TryProjectPlacementToTilePixel(p.Position, tileX, tileY, out int px, out int py))
                 continue;
-            int px = Math.Clamp((int)MathF.Round(localX / ObjectTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
-            int py = Math.Clamp((int)MathF.Round(localY / ObjectTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
+
             float r = MathF.Max(1.5f, p.Scale * 2f);
             PaintCircle(objectMask, px, py, 2f, 1.0f);
             PaintSoftCircle(objectPreciseMask, px, py, r);
@@ -330,17 +324,10 @@ public static class AlphaTensorPackBuilder
             Vector3 min = p.BoundsMin, max = p.BoundsMax;
             if (min.X < max.X && min.Y < max.Y && !float.IsNaN(min.X) && !float.IsNaN(max.X))
             {
-                float localMinX = min.X - tileWorldX;
-                float localMaxX = max.X - tileWorldX;
-                float localMinY = min.Y - tileWorldY;
-                float localMaxY = max.Y - tileWorldY;
-                if (localMaxX < -ObjectTileSize * 0.1f || localMinX > ObjectTileSize * 1.1f ||
-                    localMaxY < -ObjectTileSize * 0.1f || localMinY > ObjectTileSize * 1.1f)
+                ProjectBoundsToTilePixels(min, max, tileX, tileY, out int minPx, out int minPy, out int maxPx, out int maxPy);
+                if (minPx > maxPx || minPy > maxPy)
                     continue;
-                int minPx = Math.Clamp((int)MathF.Floor(localMinX / ObjectTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
-                int maxPx = Math.Clamp((int)MathF.Ceiling(localMaxX / ObjectTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
-                int minPy = Math.Clamp((int)MathF.Floor(localMinY / ObjectTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
-                int maxPy = Math.Clamp((int)MathF.Ceiling(localMaxY / ObjectTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
+
                 PaintRect(objectMask, minPx, minPy, maxPx, maxPy, 1.0f);
                 PaintSoftRect(objectPreciseMask, minPx, minPy, maxPx, maxPy);
                 PaintIntRect(objectInstanceMask, minPx, minPy, maxPx, maxPy, instanceId);
@@ -348,13 +335,9 @@ public static class AlphaTensorPackBuilder
             }
             else
             {
-                float localX = p.Position.X - tileWorldX;
-                float localY = p.Position.Y - tileWorldY;
-                if (localX < -ObjectTileSize * 0.1f || localX > ObjectTileSize * 1.1f ||
-                    localY < -ObjectTileSize * 0.1f || localY > ObjectTileSize * 1.1f)
+                if (!TryProjectPlacementToTilePixel(p.Position, tileX, tileY, out int px, out int py))
                     continue;
-                int px = Math.Clamp((int)MathF.Round(localX / ObjectTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
-                int py = Math.Clamp((int)MathF.Round(localY / ObjectTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
+
                 PaintCircle(objectMask, px, py, 3f, 1.0f);
                 PaintSoftCircle(objectPreciseMask, px, py, 3f);
                 PaintIntCircle(objectInstanceMask, px, py, 3f, instanceId);
@@ -365,6 +348,98 @@ public static class AlphaTensorPackBuilder
         signals.Add("object_mask_257");
         signals.Add("object_precise_mask_257");
         signals.Add("object_instance_mask_257");
+    }
+
+    private static bool TryProjectPlacementToTilePixel(Vector3 position, int tileX, int tileY, out int pixelX, out int pixelY)
+    {
+        pixelX = 0;
+        pixelY = 0;
+
+        (float U, float V)[] candidates =
+        [
+            ((position.X / ObjectTileSize) - tileX, (position.Z / ObjectTileSize) - tileY),
+            (((ObjectMapOrigin - position.Z) / ObjectTileSize) - tileX, ((ObjectMapOrigin - position.X) / ObjectTileSize) - tileY),
+            ((position.X / ObjectTileSize) - tileX, (position.Y / ObjectTileSize) - tileY),
+            (((ObjectMapOrigin - position.Y) / ObjectTileSize) - tileX, ((ObjectMapOrigin - position.X) / ObjectTileSize) - tileY),
+        ];
+
+        float bestOverflow = float.PositiveInfinity;
+        (float U, float V) best = default;
+        bool found = false;
+
+        foreach ((float U, float V) candidate in candidates)
+        {
+            float overflow =
+                MathF.Max(0f, -candidate.U) + MathF.Max(0f, candidate.U - 1f) +
+                MathF.Max(0f, -candidate.V) + MathF.Max(0f, candidate.V - 1f);
+
+            if (overflow < bestOverflow)
+            {
+                bestOverflow = overflow;
+                best = candidate;
+                found = true;
+                if (overflow <= 0.000001f)
+                    break;
+            }
+        }
+
+        if (!found ||
+            best.U < -ObjectMaskMarginTiles || best.U > 1f + ObjectMaskMarginTiles ||
+            best.V < -ObjectMaskMarginTiles || best.V > 1f + ObjectMaskMarginTiles)
+        {
+            return false;
+        }
+
+        pixelX = Math.Clamp((int)MathF.Round(Math.Clamp(best.U, 0f, 1f) * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
+        pixelY = Math.Clamp((int)MathF.Round(Math.Clamp(best.V, 0f, 1f) * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
+        return true;
+    }
+
+    private static void ProjectBoundsToTilePixels(
+        Vector3 min,
+        Vector3 max,
+        int tileX,
+        int tileY,
+        out int minPx,
+        out int minPy,
+        out int maxPx,
+        out int maxPy)
+    {
+        minPx = int.MaxValue;
+        minPy = int.MaxValue;
+        maxPx = int.MinValue;
+        maxPy = int.MinValue;
+
+        ReadOnlySpan<Vector3> corners =
+        [
+            new(min.X, min.Y, min.Z),
+            new(min.X, max.Y, min.Z),
+            new(max.X, min.Y, min.Z),
+            new(max.X, max.Y, min.Z),
+            new(min.X, min.Y, max.Z),
+            new(min.X, max.Y, max.Z),
+            new(max.X, min.Y, max.Z),
+            new(max.X, max.Y, max.Z),
+        ];
+
+        foreach (Vector3 corner in corners)
+        {
+            if (!TryProjectPlacementToTilePixel(corner, tileX, tileY, out int px, out int py))
+                continue;
+
+            minPx = Math.Min(minPx, px);
+            minPy = Math.Min(minPy, py);
+            maxPx = Math.Max(maxPx, px);
+            maxPy = Math.Max(maxPy, py);
+        }
+
+        if (minPx == int.MaxValue)
+        {
+            minPx = 1;
+            minPy = 1;
+            maxPx = 0;
+            maxPy = 0;
+        }
     }
 
     private static void PaintIntCircle(int[,] buffer, int cx, int cy, float radius, int value)

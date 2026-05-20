@@ -117,7 +117,11 @@ class V16Dataset(Dataset):
             liquid_height = np.zeros((256, 256), dtype=np.float32)
 
         obj_mask = root["object_mask"][tile_id].astype(np.float32)
-        weight = 1.0 - obj_mask
+        # Use filtered mask for terrain loss weighting (excludes trees, includes WMOs)
+        if "object_filtered_mask" in root:
+            weight = 1.0 - root["object_filtered_mask"][tile_id].astype(np.float32)
+        else:
+            weight = 1.0 - obj_mask
 
         if has_instance and "object_instance_mask" in root:
             instance_mask = root["object_instance_mask"][tile_id].astype(np.int64)

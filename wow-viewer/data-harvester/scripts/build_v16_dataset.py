@@ -67,6 +67,10 @@ OUTPUT_ARRAY_NAMES = {
     "object_mask_257": "object_mask",
     "object_precise_mask_257": "object_precise_mask",
     "object_instance_mask_257": "object_instance_mask",
+    "mcnk_flags_16": "mcnk_flags_16",
+    "mddf_mask_257": "mddf_mask",
+    "modf_mask_257": "modf_mask",
+    "object_filtered_mask_257": "object_filtered_mask",
     "minimap_rgb_256": "minimap_rgb",
     "mcsh_shadow_mask_256": "shadow_mask",
     "mcly_texture_ids": "mcly_texture_ids",
@@ -77,7 +81,9 @@ DTYPES = {
     "height_257": np.float32, "normal_xyz": np.float32, "normal_mask": np.bool_,
     "alpha_256": np.float32, "holes_16": np.bool_, "liquid_mask": np.float32,
     "liquid_height": np.float32, "object_mask": np.bool_, "object_precise_mask": np.float32,
-    "object_instance_mask": np.int32, "minimap_rgb": np.uint8,
+    "object_instance_mask": np.int32, "mcnk_flags_16": np.int32,
+    "mddf_mask": np.float32, "modf_mask": np.float32, "object_filtered_mask": np.float32,
+    "minimap_rgb": np.uint8,
     "shadow_mask": np.float32, "mcly_texture_ids": np.int32, "mcly_layer_mask": np.float32,
 }
 
@@ -85,7 +91,9 @@ FILL_VALUES = {
     "height_257": 0.0, "normal_xyz": 0.0, "normal_mask": False,
     "alpha_256": 0.0, "holes_16": False, "liquid_mask": 0.0,
     "liquid_height": 0.0, "object_mask": False, "object_precise_mask": 0.0,
-    "object_instance_mask": 0, "minimap_rgb": 0,
+    "object_instance_mask": 0, "mcnk_flags_16": 0,
+    "mddf_mask": 0.0, "modf_mask": 0.0, "object_filtered_mask": 0.0,
+    "minimap_rgb": 0,
     "shadow_mask": 0.0, "mcly_texture_ids": -1, "mcly_layer_mask": 0.0,
 }
 
@@ -93,7 +101,9 @@ SHAPES = {
     "height_257": (257, 257), "normal_xyz": (257, 257, 3), "normal_mask": (257, 257),
     "alpha_256": (256, 256, 4), "holes_16": (16, 16), "liquid_mask": (256, 256),
     "liquid_height": (256, 256), "object_mask": (257, 257), "object_precise_mask": (257, 257),
-    "object_instance_mask": (257, 257), "minimap_rgb": (256, 256, 3),
+    "object_instance_mask": (257, 257), "mcnk_flags_16": (16, 16),
+    "mddf_mask": (257, 257), "modf_mask": (257, 257), "object_filtered_mask": (257, 257),
+    "minimap_rgb": (256, 256, 3),
     "shadow_mask": (256, 256), "mcly_texture_ids": (16, 16, 4), "mcly_layer_mask": (16, 16, 4),
 }
 
@@ -103,6 +113,9 @@ CHUNK_SIZES = {
     "holes_16": (1024, 16, 16), "liquid_mask": (64, 256, 256),
     "liquid_height": (64, 256, 256), "object_mask": (256, 257, 257),
     "object_precise_mask": (256, 257, 257), "object_instance_mask": (256, 257, 257),
+    "mcnk_flags_16": (256, 16, 16),
+    "mddf_mask": (256, 257, 257), "modf_mask": (256, 257, 257),
+    "object_filtered_mask": (256, 257, 257),
     "minimap_rgb": (64, 256, 256, 3), "shadow_mask": (64, 256, 256),
     "mcly_texture_ids": (1024, 16, 16, 4), "mcly_layer_mask": (256, 16, 16, 4),
 }
@@ -110,11 +123,13 @@ CHUNK_SIZES = {
 ALL_ARRAY_KEYS = [
     "height_257", "normal_xyz", "normal_mask", "alpha_256", "holes_16",
     "liquid_mask", "liquid_height", "object_mask", "object_precise_mask",
-    "object_instance_mask", "minimap_rgb", "shadow_mask",
+    "object_instance_mask", "mcnk_flags_16", "mddf_mask", "modf_mask",
+    "object_filtered_mask", "minimap_rgb", "shadow_mask",
     "mcly_texture_ids", "mcly_layer_mask",
 ]
 
 LIQUID_SOURCE_KEYS = ("mcnk", "mh2o", "mclq", "unified", "wl")
+OBJECT_SIGNAL_KEYS = ("object_mask", "object_precise_mask", "object_instance_mask")
 
 # Integration keys: derive has_* flags for these signals in the Parquet index.
 # Include all fixed-shape arrays plus explicit liquid-source provenance flags.
@@ -415,6 +430,30 @@ def _process_tile_data(data: dict[str, np.ndarray]) -> tuple[dict[str, np.ndarra
 def _derive_mcnk_liquid_flags(
     data: dict[str, np.ndarray],
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
+    # Fast path: read directly from mcnk_flags_16 NPZ key (new C# extraction)
+    raw_flags = data.get("mcnk_flags_16")
+    if raw_flags is not None:
+        flags_arr = np.asarray(raw_flags, dtype=np.int32)
+        if flags_arr.shape == (16, 16):
+            flag_grid = flags_arr.astype(np.uint32, copy=False)
+            type_grid = np.full((16, 16), -1, dtype=np.int32)
+            any_liquid = False
+            for cy in range(16):
+                for cx in range(16):
+                    f = flag_grid[cy, cx]
+                    if (f & 0x3C) == 0:
+                        continue
+                    any_liquid = True
+                    if (f & 0x20) != 0:
+                        type_grid[cy, cx] = 3
+                    elif (f & 0x10) != 0:
+                        type_grid[cy, cx] = 2
+                    else:
+                        type_grid[cy, cx] = 1
+            if any_liquid:
+                return flag_grid, type_grid
+
+    # Legacy fallback: parse from raw_chunks metadata (pre-existing shards)
     meta = _decode_metadata_json(data)
     raw_chunks = meta.get("raw_chunks")
     if not isinstance(raw_chunks, list):
@@ -657,6 +696,59 @@ def _derive_liquid_supervision(
         False,
         None,
     )
+
+
+def _derive_object_supervision(
+    data: dict[str, np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, bool, bool, bool, np.ndarray, np.ndarray, np.ndarray, bool, bool, bool]:
+    raw_mask = data.get("object_mask_257")
+    raw_precise = data.get("object_precise_mask_257")
+    raw_instance = data.get("object_instance_mask_257")
+    raw_mddf = data.get("mddf_mask_257")
+    raw_modf = data.get("modf_mask_257")
+    raw_filtered = data.get("object_filtered_mask_257")
+
+    if raw_mask is not None:
+        object_mask = _normalize_array(raw_mask, "object_mask")
+    else:
+        object_mask = np.zeros(SHAPES["object_mask"], dtype=DTYPES["object_mask"])
+
+    if raw_precise is not None:
+        object_precise = _normalize_array(raw_precise, "object_precise_mask")
+    else:
+        object_precise = np.zeros(SHAPES["object_precise_mask"], dtype=DTYPES["object_precise_mask"])
+
+    if raw_instance is not None:
+        object_instance = _normalize_array(raw_instance, "object_instance_mask")
+    else:
+        object_instance = np.zeros(SHAPES["object_instance_mask"], dtype=DTYPES["object_instance_mask"])
+
+    if raw_mddf is not None:
+        mddf_mask = _normalize_array(raw_mddf, "mddf_mask").astype(np.float32)
+    else:
+        mddf_mask = np.zeros(SHAPES["mddf_mask"], dtype=np.float32)
+
+    if raw_modf is not None:
+        modf_mask = _normalize_array(raw_modf, "modf_mask").astype(np.float32)
+    else:
+        modf_mask = np.zeros(SHAPES["modf_mask"], dtype=np.float32)
+
+    if raw_filtered is not None:
+        object_filtered = _normalize_array(raw_filtered, "object_filtered_mask").astype(np.float32)
+    else:
+        # Fallback: use merged mask if filtered not available (legacy shards)
+        object_filtered = object_mask.astype(np.float32)
+
+    has_object_mask = bool(np.any(object_mask))
+    has_object_precise = bool(np.any(object_precise > 0.0))
+    has_object_instance = bool(np.any(object_instance > 0))
+    has_mddf = bool(np.any(mddf_mask > 0.0))
+    has_modf = bool(np.any(modf_mask > 0.0))
+    has_filtered = bool(np.any(object_filtered > 0.0))
+    return (object_mask, object_precise, object_instance,
+            has_object_mask, has_object_precise, has_object_instance,
+            mddf_mask, modf_mask, object_filtered,
+            has_mddf, has_modf, has_filtered)
 
 
 def _extract_metadata(data: dict[str, np.ndarray]) -> dict:
@@ -1335,6 +1427,124 @@ def _stream_valid_tile_liquid_rows(
         for source_name in LIQUID_SOURCE_KEYS:
             row[f"has_liquid_source_{source_name}"] = liquid_source == source_name
         rows.append(row)
+
+    if proc.poll() is None and (stream_error is not None or not saw_end_marker):
+        proc.terminate()
+
+    return_code = proc.wait()
+    stderr_thread.join(timeout=2.0)
+
+    if stream_error is not None:
+        raise RuntimeError(
+            f"Harvest stream failed for map {map_name}: {stream_error}\n"
+            f"stderr tail:\n{_tail_text(stderr_tail)}"
+        )
+    if not saw_end_marker:
+        raise RuntimeError(
+            f"Harvest stream ended without ENDS sentinel for map {map_name}.\n"
+            f"stderr tail:\n{_tail_text(stderr_tail)}"
+        )
+    if return_code != 0:
+        raise RuntimeError(
+            f"Harvest stream exited with code {return_code} for map {map_name}.\n"
+            f"stderr tail:\n{_tail_text(stderr_tail)}"
+        )
+
+    return rows
+
+
+def _stream_valid_tile_object_rows(
+    harvest_tool: Path,
+    client_root: Path,
+    map_name: str,
+    build_version: str | None,
+) -> list[dict[str, object]]:
+    cmd = [
+        str(harvest_tool),
+        "harvest-stream",
+        "--client-root",
+        str(client_root),
+        "--map",
+        map_name,
+    ]
+    if build_version:
+        cmd.extend(["--build", build_version])
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0,
+    )
+    if proc.stdout is None or proc.stderr is None:
+        proc.terminate()
+        raise RuntimeError(f"Failed to open harvest-stream pipes for map {map_name}.")
+
+    stderr_tail: deque[str] = deque(maxlen=40)
+    stderr_thread = threading.Thread(
+        target=_pump_stderr,
+        args=(proc.stderr, map_name, stderr_tail),
+        daemon=True,
+    )
+    stderr_thread.start()
+
+    rows: list[dict[str, object]] = []
+    saw_end_marker = False
+    stream_error: str | None = None
+
+    while True:
+        header = proc.stdout.read(8)
+        if not header:
+            stream_error = "stdout closed before ENDS sentinel"
+            break
+        if len(header) < 8:
+            stream_error = f"truncated stream header ({len(header)}/8 bytes)"
+            break
+
+        magic = header[:4]
+        if magic == ENDS_MAGIC:
+            saw_end_marker = True
+            break
+        if magic != NPZB_MAGIC:
+            stream_error = f"unexpected stream magic {magic!r}"
+            break
+
+        length = struct.unpack("<I", header[4:8])[0]
+        if length == 0 or length > 50_000_000:
+            stream_error = f"invalid NPZ blob length {length}"
+            break
+
+        blob = proc.stdout.read(length)
+        if not blob or len(blob) < length:
+            stream_error = f"truncated NPZ blob ({len(blob) if blob else 0}/{length} bytes)"
+            break
+
+        try:
+            data = dict(np.load(BytesIO(blob), allow_pickle=False))
+        except Exception as ex:
+            stream_error = f"failed to decode streamed NPZ blob: {ex}"
+            break
+
+        if not REQUIRED_KEYS.issubset(data.keys()):
+            continue
+
+        object_mask, object_precise, object_instance, has_mask, has_precise, has_instance, mddf_mask, modf_mask, object_filtered, has_mddf, has_modf, has_filtered = _derive_object_supervision(data)
+        meta = _decode_metadata_json(data)
+        tx, ty = _extract_tile_coords_from_metadata(meta)
+        actual_map = _normalize_map_name(meta.get("map_name", map_name), map_name)
+        rows.append(
+            {
+                "map": actual_map,
+                "tile_x": int(tx),
+                "tile_y": int(ty),
+                "object_mask": object_mask,
+                "object_precise_mask": object_precise,
+                "object_instance_mask": object_instance,
+                "has_object_mask": bool(has_mask),
+                "has_object_precise_mask": bool(has_precise),
+                "has_object_instance_mask": bool(has_instance),
+            }
+        )
 
     if proc.poll() is None and (stream_error is not None or not saw_end_marker):
         proc.terminate()
@@ -2488,6 +2698,155 @@ def cmd_patch_liquids(args: argparse.Namespace) -> None:
             print(f"Signal validation report: {validation_path}")
 
 
+def cmd_patch_objects(args: argparse.Namespace) -> None:
+    builds = args.builds or [args.build]
+    harvest_tool = _find_harvest_tool()
+    batch_size = max(1, int(args.batch_size))
+    map_workers = max(1, int(args.map_workers))
+
+    for build in builds:
+        output_path = _DATASET_ROOT / f"{build}.zarr"
+        if not output_path.exists():
+            print(f"SKIP {build}: no final store at {output_path}")
+            continue
+
+        client_root = _find_client_root(build)
+        if client_root is None:
+            raise RuntimeError(f"Could not find staged client root for build {build}.")
+
+        idx_path = output_path / "index.parquet"
+        if not idx_path.exists():
+            raise RuntimeError(f"Build {build} has no index.parquet to patch.")
+
+        if not args.no_backup:
+            backup_path = output_path / "index.parquet.bak.objects"
+            if not backup_path.exists():
+                shutil.copy2(idx_path, backup_path)
+                print(f"Backed up {idx_path} -> {backup_path}")
+
+        index_rows = _read_index_rows(output_path)
+        build_version = build.replace("_", ".")
+        old_counts = _count_signal_coverage(index_rows)
+
+        print(f"Patching object supervision for {build}")
+        print(f"Client: {client_root}")
+        print(f"Store: {output_path}")
+
+        patch_rows: list[dict[str, object]] = [None] * len(index_rows)  # type: ignore[list-item]
+        ordered_maps = _ordered_maps_from_index_rows(index_rows)
+
+        if ordered_maps and all(_is_placeholder_map_name(m) for m in ordered_maps):
+            discovered_maps = _discover_maps_for_build(harvest_tool, client_root)
+            print("Index map labels are placeholder-only; patching by full discovered stream order.")
+            streamed_by_map = _collect_map_rows_parallel(
+                discovered_maps,
+                lambda map_name: _stream_valid_tile_object_rows(harvest_tool, client_root, map_name, build_version),
+                map_workers=map_workers,
+                label=f"patch-objects {build}",
+            )
+            streamed_all: list[dict[str, object]] = []
+            for map_name in discovered_maps:
+                streamed_all.extend(streamed_by_map[map_name])
+
+            if len(streamed_all) != len(index_rows):
+                raise RuntimeError(
+                    f"Object patch count mismatch for {build}: "
+                    f"index has {len(index_rows)} rows, stream produced {len(streamed_all)} valid tiles."
+                )
+            for i, streamed in enumerate(streamed_all):
+                patch_rows[i] = streamed
+        else:
+            streamed_by_map = _collect_map_rows_parallel(
+                ordered_maps,
+                lambda map_name: _stream_valid_tile_object_rows(harvest_tool, client_root, map_name, build_version),
+                map_workers=map_workers,
+                label=f"patch-objects {build}",
+            )
+            for map_name in ordered_maps:
+                row_indices = [i for i, row in enumerate(index_rows) if str(row.get("map")) == map_name]
+                streamed_rows = streamed_by_map[map_name]
+                if len(streamed_rows) != len(row_indices):
+                    raise RuntimeError(
+                        f"Object patch count mismatch for {build}/{map_name}: "
+                        f"index has {len(row_indices)} rows, stream produced {len(streamed_rows)} valid tiles."
+                    )
+                for row_idx, streamed in zip(row_indices, streamed_rows):
+                    patch_rows[row_idx] = streamed
+                print(f"  patched stream rows for {map_name}: {len(row_indices)}")
+
+        if any(row is None for row in patch_rows):
+            missing = sum(1 for row in patch_rows if row is None)
+            raise RuntimeError(f"Internal patch error for {build}: {missing} rows were not assigned streamed object data.")
+
+        store = zarr.storage.LocalStore(str(output_path), read_only=False)
+        root = zarr.open_group(store=store, mode="a")
+        try:
+            required_arrays = ["object_mask", "object_precise_mask", "object_instance_mask"]
+            for key in required_arrays:
+                if key not in root:
+                    raise RuntimeError(f"Build {build} store missing {key} array.")
+
+            arr_mask = root["object_mask"]
+            arr_precise = root["object_precise_mask"]
+            arr_instance = root["object_instance_mask"]
+            if (
+                arr_mask.shape[0] != len(index_rows)
+                or arr_precise.shape[0] != len(index_rows)
+                or arr_instance.shape[0] != len(index_rows)
+            ):
+                raise RuntimeError(
+                    f"Array/index length mismatch for {build}: "
+                    f"object_mask={arr_mask.shape[0]} object_precise_mask={arr_precise.shape[0]} "
+                    f"object_instance_mask={arr_instance.shape[0]} index={len(index_rows)}"
+                )
+
+            tile_ids = np.asarray([int(row.get("tile_id", i)) for i, row in enumerate(index_rows)], dtype=np.int64)
+            order = np.argsort(tile_ids)
+            sorted_ids = tile_ids[order]
+            if len(sorted_ids) > 1 and np.any(np.diff(sorted_ids) != 1):
+                raise RuntimeError(f"Build {build} tile_id sequence is non-contiguous; aborting in-place object patch.")
+
+            for start in range(0, len(order), batch_size):
+                end = min(start + batch_size, len(order))
+                chunk_order = order[start:end]
+                chunk_ids = sorted_ids[start:end]
+                masks = np.stack([patch_rows[i]["object_mask"] for i in chunk_order], axis=0).astype(np.bool_, copy=False)
+                precise = np.stack([patch_rows[i]["object_precise_mask"] for i in chunk_order], axis=0).astype(np.float32, copy=False)
+                instances = np.stack([patch_rows[i]["object_instance_mask"] for i in chunk_order], axis=0).astype(np.int32, copy=False)
+                arr_mask[int(chunk_ids[0]): int(chunk_ids[-1]) + 1] = masks
+                arr_precise[int(chunk_ids[0]): int(chunk_ids[-1]) + 1] = precise
+                arr_instance[int(chunk_ids[0]): int(chunk_ids[-1]) + 1] = instances
+        finally:
+            store.close()
+
+        for i, row in enumerate(index_rows):
+            patch = patch_rows[i]
+            row["has_object_mask"] = bool(patch["has_object_mask"])
+            row["has_object_precise_mask"] = bool(patch["has_object_precise_mask"])
+            row["has_object_instance_mask"] = bool(patch["has_object_instance_mask"])
+
+        _write_index(index_rows, output_path)
+        new_counts = _count_signal_coverage(index_rows)
+
+        patch_report = {
+            "build": build,
+            "patched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "tile_count": len(index_rows),
+            "batch_size": batch_size,
+            "before": {k: int(v) for k, v in sorted(old_counts.items()) if k in {f"has_{name}" for name in OBJECT_SIGNAL_KEYS}},
+            "after": {k: int(v) for k, v in sorted(new_counts.items()) if k in {f"has_{name}" for name in OBJECT_SIGNAL_KEYS}},
+            "client_root": str(client_root),
+        }
+        report_path = output_path / "object_patch_report.json"
+        report_path.write_text(json.dumps(patch_report, indent=2), encoding="utf-8")
+        print(f"Wrote patched object arrays + index flags for {build}")
+        print(f"Object patch report: {report_path}")
+
+        if args.signal_validation:
+            validation_path = _validate_build_signals(build=build, output_path=output_path, strict=args.signal_validation_strict)
+            print(f"Signal validation report: {validation_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build V16 consolidated Zarr dataset")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2519,6 +2878,12 @@ def main() -> None:
     patch_liquids_p.add_argument("--no-backup", action="store_true", help="Skip creating index.parquet.bak.liquids before rewriting index.parquet")
     patch_liquids_p.add_argument("--signal-validation", action=argparse.BooleanOptionalAction, default=True, help="Run post-patch signal validation checks")
     patch_liquids_p.add_argument("--signal-validation-strict", action=argparse.BooleanOptionalAction, default=True, help="Fail when post-patch signal validation fails")
+    patch_objects_p = sub.add_parser("patch-objects", parents=[common], help="Patch object mask arrays and object has_* flags in-place")
+    patch_objects_p.add_argument("--batch-size", type=int, default=128, help="Tile batch size for array writes")
+    patch_objects_p.add_argument("--map-workers", type=int, default=DEFAULT_MAP_WORKERS, help="Parallel harvest-stream workers across maps during object patching")
+    patch_objects_p.add_argument("--no-backup", action="store_true", help="Skip creating index.parquet.bak.objects before rewriting index.parquet")
+    patch_objects_p.add_argument("--signal-validation", action=argparse.BooleanOptionalAction, default=True, help="Run post-patch signal validation checks")
+    patch_objects_p.add_argument("--signal-validation-strict", action=argparse.BooleanOptionalAction, default=True, help="Fail when post-patch signal validation fails")
     merge_p = sub.add_parser("merge-builds", parents=[common], help="Merge per-build stores into one combined Zarr store")
     merge_p.add_argument("--output-name", type=str, default="merged_all", help="Output store name (without .zarr)")
     merge_p.add_argument(
@@ -2542,6 +2907,8 @@ def main() -> None:
         cmd_repair_index(args)
     elif args.command == "patch-liquids":
         cmd_patch_liquids(args)
+    elif args.command == "patch-objects":
+        cmd_patch_objects(args)
     elif args.command == "merge-builds":
         cmd_merge_builds(args)
 

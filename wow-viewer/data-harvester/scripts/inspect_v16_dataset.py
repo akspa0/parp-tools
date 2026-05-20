@@ -260,8 +260,8 @@ def _write_labeled_visual_audit(
             strip = np.concatenate([p_minimap, p_height, p_liquid, p_object], axis=1)
 
             map_name = str(row.get("map", "unknown"))
-            tile_x = int(row.get("tile_x") or -1)
-            tile_y = int(row.get("tile_y") or -1)
+            tile_x = int(row["tile_x"]) if row.get("tile_x") is not None else -1
+            tile_y = int(row["tile_y"]) if row.get("tile_y") is not None else -1
             liq_src = "none"
             for src in ("mcnk", "mh2o", "mclq", "unified", "wl"):
                 if bool(row.get(f"has_liquid_source_{src}", False)):

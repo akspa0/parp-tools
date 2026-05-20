@@ -47,6 +47,46 @@ public sealed class AdtLiquidReaderTests
     }
 
     [Fact]
+    public void Read_MhdrReferencesMh2o_WhenSummaryMissesTopLevelChunk_UsesMhdrFallback()
+    {
+        byte[] mhdrPayload = new byte[64];
+        byte[] mver = MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18));
+        byte[] mhdr = MapFileSummaryReaderTestsAccessor.CreateChunk("MHDR", mhdrPayload);
+        byte[] mh2o = MapFileSummaryReaderTestsAccessor.CreateChunk("MH2O", CreateMh2oPayload());
+        byte[] mcnk = MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", CreateMinimalRootMcnkPayload(indexX: 0, indexY: 0));
+
+        int mhdrDataOffset = mver.Length + 8;
+        int mh2oHeaderOffset = mver.Length + mhdr.Length;
+        BinaryPrimitives.WriteInt32LittleEndian(mhdrPayload.AsSpan(40, 4), mh2oHeaderOffset - mhdrDataOffset);
+        mhdr = MapFileSummaryReaderTestsAccessor.CreateChunk("MHDR", mhdrPayload);
+
+        byte[] bytes =
+        [
+            .. mver,
+            .. mhdr,
+            .. mh2o,
+            .. mcnk,
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary fullSummary = MapFileSummaryReader.Read(stream, "synthetic_0_0.adt");
+        MapFileSummary summaryWithoutMh2o = new(
+            fullSummary.SourcePath,
+            fullSummary.Kind,
+            fullSummary.Version,
+            fullSummary.Chunks.Where(static chunk => chunk.Id != MapChunkIds.Mh2o).ToArray());
+
+        AdtLiquidFile liquidFile = AdtLiquidReader.Read(stream, summaryWithoutMh2o, AdtFormatProfiles.AdtProfile3018303);
+
+        AdtLiquidChunk chunk = liquidFile.Chunks[5];
+        AdtLiquidLayer layer = Assert.Single(chunk.Layers);
+        Assert.Equal((ushort)17, layer.LiquidTypeId);
+        Assert.NotNull(layer.Heights);
+        Assert.Equal(42f, layer.Heights![0]);
+        Assert.Equal(50f, layer.Heights[^1]);
+    }
+
+    [Fact]
     public void Read_DevelopmentRootAdt_ProducesStableMh2oSignals()
     {
         AdtLiquidFile liquidFile = AdtLiquidReader.Read(MapTestPaths.DevelopmentRootAdtPath);

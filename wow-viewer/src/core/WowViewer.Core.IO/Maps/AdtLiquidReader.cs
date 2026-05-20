@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using WowViewer.Core.Chunks;
+using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -8,17 +10,28 @@ public static class AdtLiquidReader
     private const int ChunkCount = 256;
     private const int ChunkHeaderSize = 12;
     private const int LayerSize = 24;
+    private const int MhdrMh2oOffsetField = 40;
 
     public static AdtLiquidFile Read(string path)
+    {
+        return Read(path, profile: null);
+    }
+
+    public static AdtLiquidFile Read(string path, AdtFormatProfile? profile)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         using FileStream stream = File.OpenRead(path);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, Path.GetFullPath(path));
-        return Read(stream, fileSummary);
+        return Read(stream, fileSummary, profile);
     }
 
     public static AdtLiquidFile Read(Stream stream, MapFileSummary fileSummary)
+    {
+        return Read(stream, fileSummary, profile: null);
+    }
+
+    public static AdtLiquidFile Read(Stream stream, MapFileSummary fileSummary, AdtFormatProfile? profile)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(fileSummary);
@@ -27,10 +40,73 @@ public static class AdtLiquidReader
             throw new InvalidDataException($"ADT liquid reader requires a root ADT file, but found {fileSummary.Kind}.");
 
         byte[]? payload = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mh2o);
+        payload ??= TryReadMh2oPayloadViaMhdr(stream, fileSummary, profile);
         if (payload is null)
             return CreateEmpty(fileSummary.SourcePath, fileSummary.Kind);
 
         return Parse(fileSummary.SourcePath, fileSummary.Kind, payload);
+    }
+
+    private static byte[]? TryReadMh2oPayloadViaMhdr(Stream stream, MapFileSummary fileSummary, AdtFormatProfile? profile)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(fileSummary);
+
+        if (!stream.CanSeek || fileSummary.Kind != MapFileKind.Adt)
+            return null;
+
+        MapChunkLocation mhdrChunk = default;
+        bool foundMhdr = false;
+        foreach (MapChunkLocation chunk in fileSummary.Chunks)
+        {
+            if (chunk.Id != MapChunkIds.Mhdr)
+                continue;
+
+            mhdrChunk = chunk;
+            foundMhdr = true;
+            break;
+        }
+
+        if (!foundMhdr)
+            return null;
+
+        byte[] mhdrPayload = MapSummaryReaderCommon.ReadChunkPayload(stream, mhdrChunk);
+        if (mhdrPayload.Length < MhdrMh2oOffsetField + sizeof(int))
+            return null;
+
+        int mh2oRelativeOffset = BinaryPrimitives.ReadInt32LittleEndian(mhdrPayload.AsSpan(MhdrMh2oOffsetField, sizeof(int)));
+        if (mh2oRelativeOffset <= 0)
+            return null;
+
+        long mh2oHeaderOffset = mhdrChunk.DataOffset + mh2oRelativeOffset;
+        if (mh2oHeaderOffset < 0 || mh2oHeaderOffset > stream.Length - ChunkHeader.SizeInBytes)
+            return null;
+
+        long previousPosition = stream.Position;
+        try
+        {
+            stream.Position = mh2oHeaderOffset;
+
+            Span<byte> headerBytes = stackalloc byte[ChunkHeader.SizeInBytes];
+            stream.ReadExactly(headerBytes);
+            if (!ChunkHeaderReader.TryRead(headerBytes, out ChunkHeader header) || header.Id != MapChunkIds.Mh2o)
+                return null;
+
+            if (header.Size == 0)
+                return null;
+
+            long payloadEnd = stream.Position + header.Size;
+            if (payloadEnd > stream.Length)
+                return null;
+
+            byte[] payload = new byte[header.Size];
+            stream.ReadExactly(payload);
+            return payload;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
     }
 
     private static AdtLiquidFile Parse(string sourcePath, MapFileKind kind, byte[] payload)

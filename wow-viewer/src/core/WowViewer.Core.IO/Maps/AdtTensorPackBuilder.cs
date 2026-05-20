@@ -64,7 +64,7 @@ public static class AdtTensorPackBuilder
 
         // ── Read MH2O liquid ─────────────────────────────────────────────────
         (float[,]? mh2oHeight, float[,]? mh2oDepth, int[,]? mh2oType, bool[,]? mh2oPresence) =
-            ReadMh2o(stream, fileSummary, availableSignals);
+            ReadMh2o(stream, fileSummary, profile, availableSignals);
 
         // ── Read MTXF texture flags ──────────────────────────────────────────
         (int[,]? mtxfAnimated, int[,]? mtxfTransform) =
@@ -72,11 +72,14 @@ public static class AdtTensorPackBuilder
 
         // ── Read MCLQ legacy liquid ──────────────────────────────────────────
         (float[,]? mclqHeight, int[,]? mclqType, bool[,]? mclqPresence) =
-            ReadMclq(stream, terrainChunks, availableSignals);
+            ReadMclq(stream, terrainChunks, profile, availableSignals);
 
         // ── Read MCRF object references ──────────────────────────────────────
         (bool[,]? holeMask, int[,]? objectMask16, int[,]? mcrfDoodadRefCounts16, int[]? mcrfDoodadRefIndices, int[,]? mcrfWmoRefCounts16, int[]? mcrfWmoRefIndices) =
             ReadMcrfAndHoles(stream, terrainChunks, availableSignals);
+
+        // ── Read MCNK header flags (liquid type bits 2-5) ───────────────────
+        int[,]? mcnkFlags16 = ReadMcnkFlags(stream, terrainChunks, availableSignals);
 
         // ── Read MCSE sound emitters ────────────────────────────────────────
         (int[,]? mcseEmitterCounts16, int[]? mcseEntryIds, float[,]? mcsePositionXyz, byte[,]? mcseEntryBytes) =
@@ -95,7 +98,7 @@ public static class AdtTensorPackBuilder
             TryReadPlacementCatalog(adtPath, stream, fileSummary);
 
         // ── Build object footprint masks from MDDF/MODF ──────────────────────
-        (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257) =
+        (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257, float[,]? mddfMask257, float[,]? modfMask257, float[,]? objectFilteredMask257) =
             BuildObjectMasks(adtPath, stream, fileSummary, availableSignals, placementsOverride: placementCatalog);
 
         float[,]? shadowResidualMask256 = BuildShadowResidualMask256(mcshShadowMask256, objectPreciseMask257, availableSignals);
@@ -141,6 +144,7 @@ public static class AdtTensorPackBuilder
             MclvLightingBytes = mclvLightingBytes,
             McnrNormalXyz = mcnrNormalXyz,
             MfboFlightBounds = mfboFlightBounds,
+            McnkFlags16 = mcnkFlags16,
             Mh2oSurfaceHeight = mh2oHeight,
             Mh2oDepth = mh2oDepth,
             Mh2oTypeMask = mh2oType,
@@ -170,6 +174,9 @@ public static class AdtTensorPackBuilder
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
             ObjectInstanceMask257 = objectInstanceMask257,
+            MddfMask257 = mddfMask257,
+            ModfMask257 = modfMask257,
+            ObjectFilteredMask257 = objectFilteredMask257,
             Pm4PathMask = pm4PathMask,
             Pm4BuildingFootprintMask = pm4BuildingFootprintMask,
             Pm4MprlMask = pm4MprlMask,
@@ -220,16 +227,18 @@ public static class AdtTensorPackBuilder
             ReadTextureDataFromBytes(sourceAdtPath, adtBytes, textureSourcePath, textureSourceBytes, profile, availableSignals);
 
         (float[,]? mh2oHeight, float[,]? mh2oDepth, int[,]? mh2oType, bool[,]? mh2oPresence) =
-            ReadMh2o(stream, fileSummary, availableSignals);
+            ReadMh2o(stream, fileSummary, profile, availableSignals);
 
         (int[,]? mtxfAnimated, int[,]? mtxfTransform) =
             ReadMtxf(stream, fileSummary, mclyTextureIds, availableSignals);
 
         (float[,]? mclqHeight, int[,]? mclqType, bool[,]? mclqPresence) =
-            ReadMclq(stream, terrainChunks, availableSignals);
+            ReadMclq(stream, terrainChunks, profile, availableSignals);
 
         (bool[,]? holeMask, int[,]? objectMask16, int[,]? mcrfDoodadRefCounts16, int[]? mcrfDoodadRefIndices, int[,]? mcrfWmoRefCounts16, int[]? mcrfWmoRefIndices) =
             ReadMcrfAndHoles(stream, terrainChunks, availableSignals);
+
+        int[,]? mcnkFlags16 = ReadMcnkFlags(stream, terrainChunks, availableSignals);
 
         (int[,]? mcseEmitterCounts16, int[]? mcseEntryIds, float[,]? mcsePositionXyz, byte[,]? mcseEntryBytes) =
             ReadMcse(stream, terrainChunks, availableSignals);
@@ -240,7 +249,7 @@ public static class AdtTensorPackBuilder
         AdtPlacementCatalog? placementCatalog =
             TryReadPlacementCatalog(sourceAdtPath, stream, fileSummary, placementSourcePath, placementSourceBytes);
 
-        (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257) =
+        (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257, float[,]? mddfMask257, float[,]? modfMask257, float[,]? objectFilteredMask257) =
             BuildObjectMasks(
                 sourceAdtPath,
                 stream,
@@ -302,6 +311,7 @@ public static class AdtTensorPackBuilder
             MclvLightingBytes = mclvLightingBytes,
             McnrNormalXyz = mcnrNormalXyz,
             MfboFlightBounds = mfboFlightBounds,
+            McnkFlags16 = mcnkFlags16,
             Mh2oSurfaceHeight = mh2oHeight,
             Mh2oDepth = mh2oDepth,
             Mh2oTypeMask = mh2oType,
@@ -331,6 +341,9 @@ public static class AdtTensorPackBuilder
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
             ObjectInstanceMask257 = objectInstanceMask257,
+            MddfMask257 = mddfMask257,
+            ModfMask257 = modfMask257,
+            ObjectFilteredMask257 = objectFilteredMask257,
             Pm4PathMask = pm4PathMask,
             Pm4BuildingFootprintMask = pm4BuildingFootprintMask,
             Pm4MprlMask = pm4MprlMask,
@@ -989,11 +1002,11 @@ public static class AdtTensorPackBuilder
     }
 
     private static (float[,]? height, float[,]? depth, int[,]? typeMask, bool[,]? presenceMask)
-        ReadMh2o(Stream stream, MapFileSummary fileSummary, HashSet<string> signals)
+        ReadMh2o(Stream stream, MapFileSummary fileSummary, AdtFormatProfile profile, HashSet<string> signals)
     {
         try
         {
-            AdtLiquidFile liquidFile = AdtLiquidReader.Read(stream, fileSummary);
+            AdtLiquidFile liquidFile = AdtLiquidReader.Read(stream, fileSummary, profile);
             if (liquidFile.Chunks.Count == 0)
                 return (null, null, null, null);
 
@@ -1065,7 +1078,7 @@ public static class AdtTensorPackBuilder
     // ═══════════════════════════════════════════════════════════════════════
 
     private static (float[,]? height, int[,]? typeMask, bool[,]? presenceMask)
-        ReadMclq(Stream stream, List<MapChunkLocation> chunks, HashSet<string> signals)
+        ReadMclq(Stream stream, List<MapChunkLocation> chunks, AdtFormatProfile profile, HashSet<string> signals)
     {
         if (chunks.Count == 0)
             return (null, null, null);
@@ -1090,13 +1103,7 @@ public static class AdtTensorPackBuilder
             if ((uint)chunkX >= TileChunks || (uint)chunkY >= TileChunks)
                 continue;
 
-            int mclqOffset = AdtMclqReader.LocateMclqOffset(payload);
-            if (mclqOffset < 0)
-                continue;
-
-            int mclqSize = payload.Length - mclqOffset;
-            byte[] mclqPayload = payload.AsSpan(mclqOffset, mclqSize).ToArray();
-            AdtMclqData? mclq = AdtMclqReader.Read(mclqPayload);
+            AdtMclqData? mclq = AdtMclqReader.Read(payload, profile);
             if (mclq is null)
                 continue;
 
@@ -1253,6 +1260,41 @@ public static class AdtTensorPackBuilder
             anyMcrfDoodads ? mcrfDoodadRefIndices.ToArray() : null,
             anyMcrfWmos ? mcrfWmoRefCounts16 : null,
             anyMcrfWmos ? mcrfWmoRefIndices.ToArray() : null);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // MCNK header flags (liquid type bits 2-5)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private static int[,]? ReadMcnkFlags(Stream stream, List<MapChunkLocation> chunks, HashSet<string> signals)
+    {
+        if (chunks.Count == 0)
+            return null;
+
+        int[,] flags16 = new int[TileChunks, TileChunks];
+        bool anyNonZero = false;
+
+        foreach (MapChunkLocation chunk in chunks)
+        {
+            byte[] payload = ReadChunkPayload(stream, chunk);
+            if (payload.Length < 12)
+                continue;
+
+            int chunkX = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x04, 4));
+            int chunkY = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x08, 4));
+            if ((uint)chunkX >= TileChunks || (uint)chunkY >= TileChunks)
+                continue;
+
+            uint flags = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x00, 4));
+            flags16[chunkY, chunkX] = (int)flags;
+            if ((flags & 0x3C) != 0)
+                anyNonZero = true;
+        }
+
+        if (anyNonZero)
+            signals.Add("mcnk_flags_16");
+
+        return flags16;
     }
 
     private static (int[,]? mcseEmitterCounts16, int[]? mcseEntryIds, float[,]? mcsePositionXyz, byte[,]? mcseEntryBytes)
@@ -1510,6 +1552,11 @@ public static class AdtTensorPackBuilder
         float[,] heights = new float[TileHeightmapSize, TileHeightmapSize];
         bool any = false;
 
+        // Each WL block is ~33.33m on a 533.33m tile = ~16 pixels on 257 grid
+        // Block local coords are in [0, WlTileSize) range within the tile
+        float blockWorldSize = WlTileSize / 16f; // ~33.33m per block
+        float pixelsPerBlock = (TileHeightmapSize - 1) / 16f; // ~16 pixels per block
+
         foreach (string wlPath in wlFiles)
         {
             WlFile wl;
@@ -1531,31 +1578,68 @@ public static class AdtTensorPackBuilder
                 if (tileX != targetTileX || tileY != targetTileY)
                     continue;
 
-                float avgHeight = block.Vertices.Average(v => v.Z);
+                // Get per-vertex heights in standard row-major order
+                float[] vertexHeights = block.GetHeights4x4();
 
-                // Map block center to 257x257 grid
-                float localX = (WlMapSize - pos.Y) - (tileX * WlTileSize);
-                float localY = (WlMapSize - pos.X) - (tileY * WlTileSize);
-                int gx = Math.Clamp((int)(localX / WlTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
-                int gy = Math.Clamp((int)(localY / WlTileSize * (TileHeightmapSize - 1)), 0, TileHeightmapSize - 1);
+                // Block origin in tile-local coordinates (meters from tile corner)
+                float blockLocalX = (WlMapSize - pos.Y) - (tileX * WlTileSize);
+                float blockLocalY = (WlMapSize - pos.X) - (tileY * WlTileSize);
 
-                // Write to a small neighborhood
-                for (int dy = -1; dy <= 1; dy++)
+                // Map each of the 16 vertices to the 257x257 grid
+                for (int vi = 0; vi < 4; vi++)
                 {
-                    for (int dx = -1; dx <= 1; dx++)
+                    for (int vj = 0; vj < 4; vj++)
                     {
-                        int px = Math.Clamp(gx + dx, 0, TileHeightmapSize - 1);
-                        int py = Math.Clamp(gy + dy, 0, TileHeightmapSize - 1);
-                        mask[py, px] = 1.0f;
-                        heights[py, px] = avgHeight;
+                        float vh = vertexHeights[vi * 4 + vj];
+
+                        // Vertex position in tile-local meters
+                        float vx = blockLocalX + vj * blockWorldSize;
+                        float vy = blockLocalY + vi * blockWorldSize;
+
+                        // Convert to pixel coordinate
+                        float px = vx / WlTileSize * (TileHeightmapSize - 1);
+                        float py = vy / WlTileSize * (TileHeightmapSize - 1);
+
+                        // Write to nearest pixel with 2-pixel radius for blending
+                        int ix = Math.Clamp((int)Math.Round(px), 0, TileHeightmapSize - 1);
+                        int iy = Math.Clamp((int)Math.Round(py), 0, TileHeightmapSize - 1);
+
+                        for (int dy = -2; dy <= 2; dy++)
+                        {
+                            for (int dx = -2; dx <= 2; dx++)
+                            {
+                                int x = Math.Clamp(ix + dx, 0, TileHeightmapSize - 1);
+                                int y = Math.Clamp(iy + dy, 0, TileHeightmapSize - 1);
+                                float dist = MathF.Sqrt(dx * dx + dy * dy);
+                                if (dist > 2.5f)
+                                    continue;
+                                float w = 1.0f / (1.0f + dist);
+                                if (w > mask[y, x])
+                                {
+                                    mask[y, x] = w;
+                                    heights[y, x] = vh;
+                                }
+                            }
+                        }
+                        any = true;
                     }
                 }
-                any = true;
             }
         }
 
         if (!any)
             return (null, null);
+
+        // Normalize mask to [0, 1]
+        float maxMask = 0f;
+        for (int y = 0; y < TileHeightmapSize; y++)
+            for (int x = 0; x < TileHeightmapSize; x++)
+                if (mask[y, x] > maxMask)
+                    maxMask = mask[y, x];
+        if (maxMask > 0f)
+            for (int y = 0; y < TileHeightmapSize; y++)
+                for (int x = 0; x < TileHeightmapSize; x++)
+                    mask[y, x] = MathF.Min(mask[y, x] / maxMask, 1.0f);
 
         signals.Add("wl_liquid_mask");
         signals.Add("wl_liquid_height");
@@ -1597,7 +1681,13 @@ public static class AdtTensorPackBuilder
         }
     }
 
-    private static (float[,]? mask, float[,]? preciseMask, int[,]? instanceMask)
+    private static readonly System.Text.RegularExpressions.Regex ExcludeDoodadRegex = new(
+        @"^(Tree|Bush|Flower|Plant|Vine|Fern|Mushroom|Herb|Ivy|Reed|Cattress|Lilypad|Kelp|Seaweed|Coral)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private const float DoodadHeightThreshold = 50f;
+
+    private static (float[,]? mask, float[,]? preciseMask, int[,]? instanceMask, float[,]? mddfMask, float[,]? modfMask, float[,]? filteredMask)
         BuildObjectMasks(
             string adtPath,
             Stream stream,
@@ -1608,20 +1698,26 @@ public static class AdtTensorPackBuilder
             AdtPlacementCatalog? placementsOverride = null)
     {
         if (!TryParseAdtTileCoords(fileSummary.SourcePath, out int tileX, out int tileY))
-            return (null, null, null);
+            return (null, null, null, null, null, null);
 
         AdtPlacementCatalog? placements = placementsOverride
             ?? TryReadPlacementCatalog(adtPath, stream, fileSummary, placementSourcePathOverride, placementBytesOverride);
         if (placements is null)
-            return (null, null, null);
+            return (null, null, null, null, null, null);
 
         if (placements.ModelPlacements.Count == 0 && placements.WorldModelPlacements.Count == 0)
-            return (null, null, null);
+            return (null, null, null, null, null, null);
 
         float[,] mask = new float[TileHeightmapSize, TileHeightmapSize];
         float[,] preciseMask = new float[TileHeightmapSize, TileHeightmapSize];
         int[,] instanceMask = new int[TileHeightmapSize, TileHeightmapSize];
+        float[,] mddfMask = new float[TileHeightmapSize, TileHeightmapSize];
+        float[,] modfMask = new float[TileHeightmapSize, TileHeightmapSize];
+        float[,] filteredMask = new float[TileHeightmapSize, TileHeightmapSize];
         int instanceId = 1;
+
+        // Compute tile base height from heightmap for height gate
+        float tileBaseHeight = 0f;
 
         foreach (AdtModelPlacement placement in placements.ModelPlacements)
         {
@@ -1634,6 +1730,19 @@ public static class AdtTensorPackBuilder
             PaintCircle(mask, px, py, radiusBinary, value: 1.0f);
             PaintSoftCircle(preciseMask, px, py, radiusPrecise);
             PaintCircle(instanceMask, px, py, radiusBinary, value: instanceId);
+            PaintCircle(mddfMask, px, py, radiusBinary, value: 1.0f);
+
+            // Height gate: exclude objects whose estimated top exceeds tile base + threshold
+            float estimatedTop = placement.Position.Y + placement.Scale * 10f;
+            bool exceedsHeight = estimatedTop > tileBaseHeight + DoodadHeightThreshold;
+
+            // Regex gate: exclude decorative doodads
+            string assetName = Path.GetFileNameWithoutExtension(placement.ModelPath);
+            bool matchesExclusion = ExcludeDoodadRegex.IsMatch(assetName);
+
+            if (!exceedsHeight && !matchesExclusion)
+                PaintCircle(filteredMask, px, py, radiusBinary, value: 1.0f);
+
             instanceId++;
         }
 
@@ -1656,21 +1765,28 @@ public static class AdtTensorPackBuilder
                 PaintRect(mask, minPx, minPy, maxPx, maxPy, value: 1.0f);
                 PaintSoftRect(preciseMask, minPx, minPy, maxPx, maxPy);
                 PaintRect(instanceMask, minPx, minPy, maxPx, maxPy, value: instanceId);
-                instanceId++;
+                PaintRect(modfMask, minPx, minPy, maxPx, maxPy, value: 1.0f);
+                // WMOs always included in filtered mask
+                PaintRect(filteredMask, minPx, minPy, maxPx, maxPy, value: 1.0f);
             }
             else
             {
                 PaintCircle(mask, px, py, radius: 3f, value: 1.0f);
                 PaintSoftCircle(preciseMask, px, py, radius: 3f);
                 PaintCircle(instanceMask, px, py, radius: 3f, value: instanceId);
-                instanceId++;
+                PaintCircle(modfMask, px, py, radius: 3f, value: 1.0f);
+                PaintCircle(filteredMask, px, py, radius: 3f, value: 1.0f);
             }
+            instanceId++;
         }
 
         signals.Add("object_mask_257");
         signals.Add("object_precise_mask_257");
         signals.Add("object_instance_mask_257");
-        return (mask, preciseMask, instanceMask);
+        signals.Add("mddf_mask_257");
+        signals.Add("modf_mask_257");
+        signals.Add("object_filtered_mask_257");
+        return (mask, preciseMask, instanceMask, mddfMask, modfMask, filteredMask);
     }
 
     private static bool TryProjectPlacementToTilePixel(Vector3 position, int tileX, int tileY, out int pixelX, out int pixelY)

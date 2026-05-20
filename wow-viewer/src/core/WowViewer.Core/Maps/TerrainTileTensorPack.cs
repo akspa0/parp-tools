@@ -97,6 +97,9 @@ public sealed class TerrainTileTensorPack
 
     // ── Liquid data ────────────────────────────────────────────────────────
 
+    /// <summary>16×16 per-chunk MCNK header flags. Bits 2-5 indicate liquid type.</summary>
+    public int[,]? McnkFlags16 { get; init; }
+
     /// <summary>257×257 liquid surface height from MH2O (WotLK+).</summary>
     public float[,]? Mh2oSurfaceHeight { get; init; }
 
@@ -125,14 +128,14 @@ public sealed class TerrainTileTensorPack
     public float[,]? WlLiquidHeight { get; set; }
 
     /// <summary>
-    /// 257×257 unified liquid mask combining MH2O, MCLQ, and WL* sources.
-    /// Priority: MH2O > MCLQ > WL*. 1.0 where any liquid source indicates water.
+    /// 257×257 unified liquid mask combining MCNK, MCLQ, MH2O, and WL* sources.
+    /// Priority: MCNK > MCLQ > MH2O > WL*. 1.0 where any liquid source indicates water.
     /// </summary>
     public float[,]? UnifiedLiquidMask { get; set; }
 
     /// <summary>
-    /// 257×257 unified liquid surface height combining MH2O, MCLQ, and WL* sources.
-    /// Priority: MH2O > MCLQ > WL*.
+    /// 257×257 unified liquid surface height combining MCNK, MCLQ, MH2O, and WL* sources.
+    /// Priority: MCNK > MCLQ > MH2O > WL*.
     /// </summary>
     public float[,]? UnifiedLiquidHeight { get; set; }
 
@@ -151,6 +154,19 @@ public sealed class TerrainTileTensorPack
     /// Matches row indices in PlacementMddfData and PlacementModfData.
     /// </summary>
     public int[,]? ObjectInstanceMask257 { get; init; }
+
+    /// <summary>257×257 raw MDDF (doodad) binary mask — unfiltered, all doodads.</summary>
+    public float[,]? MddfMask257 { get; init; }
+
+    /// <summary>257×257 raw MODF (WMO) binary mask — all WMOs.</summary>
+    public float[,]? ModfMask257 { get; init; }
+
+    /// <summary>
+    /// 257×257 filtered combined object mask for terrain loss weighting.
+    /// Excludes MDDF objects matching the exclusion regex (trees, bushes, etc.)
+    /// and objects exceeding the height threshold. All MODF (WMO) are included.
+    /// </summary>
+    public float[,]? ObjectFilteredMask257 { get; init; }
 
     /// <summary>257×257 PM4 navigable path mask.</summary>
     public float[,]? Pm4PathMask { get; init; }
@@ -316,8 +332,11 @@ public sealed class TerrainTileTensorPack
                     holeMask = HoleMask16[cx, cy] ? 1 : 0;
 
                 int mcnkFlags = 0;
+                if (McnkFlags16 != null && cx < McnkFlags16.GetLength(0) && cy < McnkFlags16.GetLength(1))
+                    mcnkFlags = McnkFlags16[cx, cy];
+
                 var liquid = FindLiquid(cx, cy);
-                if (liquid != null)
+                if (mcnkFlags == 0 && liquid != null)
                     mcnkFlags |= 0x3C;
 
                 float chunkWorldX = tileWorldX - cy * chunkSmall;
