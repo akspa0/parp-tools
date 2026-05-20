@@ -870,9 +870,6 @@ public static class AdtTensorPackBuilder
         string? effectiveTextureSourcePath = textureSourcePath;
         byte[]? effectiveTextureBytes = textureSourceBytes;
 
-        if (effectiveTextureBytes is null && profile.PreferTex0ForTextureData)
-            return (null, Array.Empty<string>(), null, null, null, null, null);
-
         try
         {
             AdtTextureFile textureFile;
@@ -885,6 +882,9 @@ public static class AdtTensorPackBuilder
             }
             else
             {
+                // Mixed-era archive tiles can omit _tex0 entirely while still carrying
+                // valid inline MCLY/MCAL in the root ADT. Match the older file-path
+                // builder behavior by falling back to the root bytes in that case.
                 using MemoryStream rootStream = new(adtBytes, writable: false);
                 MapFileSummary rootSummary = MapFileSummaryReader.Read(rootStream, sourceAdtPath);
                 textureFile = AdtTextureReader.Read(rootStream, rootSummary, profile.DecodeProfile);

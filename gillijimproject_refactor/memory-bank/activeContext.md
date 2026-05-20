@@ -274,8 +274,24 @@ Six independent models, each training on ground truth only:
   - future V16 builds now default to `lz4` / level `1` / `shuffle`
   - `V16Dataset` now exposes `mcly_ids` / `mcly_mask` from Zarr and `train_v16.py` now uses the existing V15-style masked cross-entropy path for MCLY supervision; `instance_mask` remains readable but still is not used by the current terrain trainer
   - V16 coordinate bookkeeping is now patched in two places: future streamed NPZ metadata carries explicit `tile_x` / `tile_y`, and `build_v16_dataset.py repair-index --build <key>` can rewrite existing `index.parquet` files in place from a metadata-only re-stream without touching the stored tensor arrays
+  - `AdtTensorPackBuilder.ReadTextureDataFromBytes(...)` now falls back to inline root ADT texture parsing when `_tex0.adt` bytes are absent, restoring mixed-Cata archive tiles that still carry `MCLY` / `MCAL` in the root file
 - Repo truth still needs operator proof from a user-run rebuild before this recovery slice can be treated as validated.
 - `wow-viewer/README.md` now leads with the V16 dataset/training lane, including repo-level links and command surfaces for `build`, `repair-index`, validator, and `train_v16.py`, so new chats no longer have to infer that terrain-AI dataset generation is a primary repo goal.
+
+## Focused Regression Proof (2026-05-20)
+- Failed `4_0_0_11927` final validation was a real harvest regression, not a Python-only false negative:
+  - finalized store had `alpha_256` all-zero and `mcly_*` missing across all tiles
+  - one-tile repro on staged `4_0_0_11927 / AhnQiraj / (27,46)` initially harvested no `mcly_texture_ids`, `mcly_layer_mask`, or `mcal_alpha_pack_256`
+- Root cause: the newer in-memory archive path effectively treated `PreferTex0ForTextureData` as "require `_tex0`", while some mixed Cata tiles still expose valid inline `MCLY` / `MCAL` in the root ADT.
+- After the fallback fix, the same one-tile repro again reports `mcly_texture_ids`, `mcly_layer_mask`, and `mcal_alpha_pack_256`.
+
+## Visual QA Pass (2026-05-20)
+- Human-eye inspection artifacts were generated for all six finalized V16 stores:
+  - `0_5_3_3368`, `0_5_5_3494`, `0_7_0_3694`, `3_0_1_8303`, `3_3_5_12340`, `4_0_0_11927`
+  - output root: `wow-viewer/output/datasets/v16/inspection/`
+  - each build now has `<build>.summary.json`, `<build>.samples.json`, and `<build>.validation_audit_overview.png`
+- Current finalized `signal_validation.json` state is green for all six stores.
+- Only standing validator warning in the current set: `0_7_0_3694` has `has_holes_16` coverage `0`, which the validator already treats as allowed for that early-era build.
 
 ## NOT YET (Blocked on User)
 - Full V16 builds for all client builds (rebuild harvester binary first)
