@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using SixLabors.ImageSharp.PixelFormats;
+using StreamProfile = WowViewer.Core.IO.Maps.RawArraySerializer.StreamProfile;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
@@ -92,7 +93,7 @@ static class Program
               harvest-map       Batch-extract all tiles from a map directory (disk path)
               extract-unified   Extract NPZ shard from a tile inside MPQ archives
                                 (reads tileset BLP + ADT + WDL from MPQ, outputs NPZ shard)
-              harvest-stream    Stream all tiles from a map as length-prefixed NPZ blobs to stdout
+              harvest-stream    Stream V16-ready raw tile blobs from a map to stdout
               discover-maps     List terrain-trainable maps from a staged client using
                                 WDT summary + tile probe checks
               synthetic-minimap Composite tilesets + alpha → synthetic minimap
@@ -510,6 +511,10 @@ static class Program
         int? limit = GetIntOption(args, "--limit", "-n");
         int maxTiles = limit ?? int.MaxValue;
         int tileWorkers = Math.Max(1, GetIntOption(args, "--tile-workers", "--tile-workers") ?? DefaultHarvestTileWorkers);
+        string streamProfileRaw = (GetOption(args, "--stream-profile", "") ?? "v16").Trim();
+        StreamProfile streamProfile = streamProfileRaw.Equals("full", StringComparison.OrdinalIgnoreCase)
+            ? StreamProfile.Full
+            : StreamProfile.V16;
 
         if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(mapName))
         {
@@ -565,6 +570,7 @@ static class Program
                         wdtBytes,
                         isAlpha,
                         buildVersion,
+                        streamProfile,
                         new HarvestTileJob(extracted + errors, tx, ty));
                     if (result.HadError)
                     {
@@ -582,7 +588,7 @@ static class Program
         }
         else
         {
-            Console.Error.WriteLine($"  harvest-stream tile_workers={tileWorkers}");
+            Console.Error.WriteLine($"  harvest-stream tile_workers={tileWorkers} profile={streamProfileRaw}");
             List<HarvestTileJob> jobs = new(64 * 64);
             int order = 0;
             for (int tx = 0; tx < 64; tx++)
@@ -599,7 +605,7 @@ static class Program
                 {
                     HarvestTileJob job = jobs[nextLaunch++];
                     inflight[job.Order] = Task.Run(() =>
-                        HarvestStreamTileWorker(catalog, clientRoot, mapName, wdtBytes, isAlpha, buildVersion, job));
+                        HarvestStreamTileWorker(catalog, clientRoot, mapName, wdtBytes, isAlpha, buildVersion, streamProfile, job));
                 }
             }
 
@@ -644,13 +650,14 @@ static class Program
         byte[] wdtBytes,
         bool isAlpha,
         string? buildVersion,
+        StreamProfile streamProfile,
         HarvestTileJob job)
     {
         try
         {
             return new HarvestTileResult(
                 job.Order,
-                TryBuildHarvestStreamBlob(catalog, clientRoot, mapName, wdtBytes, isAlpha, buildVersion, job.TileX, job.TileY),
+                TryBuildHarvestStreamBlob(catalog, clientRoot, mapName, wdtBytes, isAlpha, buildVersion, streamProfile, job.TileX, job.TileY),
                 false);
         }
         catch
@@ -666,6 +673,7 @@ static class Program
         byte[] wdtBytes,
         bool isAlpha,
         string? buildVersion,
+        StreamProfile streamProfile,
         int tileX,
         int tileY)
     {
@@ -699,7 +707,7 @@ static class Program
             }
         }
 
-        if (pack.MclyTextureNames.Count > 0)
+        if (streamProfile == StreamProfile.Full && pack.MclyTextureNames.Count > 0)
         {
             var texPixels = new List<byte[,,]>();
             foreach (string texName in pack.MclyTextureNames)
@@ -716,18 +724,17 @@ static class Program
         }
 
         using var ms = new MemoryStream();
-        NpzTileSerializer.Serialize(pack, ms);
+        RawArraySerializer.Serialize(pack, ms, streamProfile);
         return ms.ToArray();
     }
 
     private static void WriteHarvestStreamBlob(Stream stdout, byte[] blob)
     {
         byte[] header = new byte[8];
-        System.Text.Encoding.ASCII.GetBytes("NPZB").CopyTo(header, 0);
+        System.Text.Encoding.ASCII.GetBytes("ARRY").CopyTo(header, 0);
         BitConverter.TryWriteBytes(header.AsSpan(4, 4), blob.Length);
         stdout.Write(header, 0, 8);
         stdout.Write(blob, 0, blob.Length);
-        stdout.Flush();
     }
 
     static void RunExtractUnified(string[] args)
@@ -863,13 +870,13 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
 
         if (outputPath == "-")
         {
-            // Write NPZ to stdout as length-prefixed binary blob
+            // Write raw binary to stdout as length-prefixed blob
             using var ms = new MemoryStream();
-            NpzTileSerializer.Serialize(pack, ms);
+            RawArraySerializer.Serialize(pack, ms);
             byte[] blob = ms.ToArray();
             var stdout = Console.OpenStandardOutput();
-            // 8-byte header: magic "NPZB" + 4-byte little-endian length
-            stdout.Write(System.Text.Encoding.ASCII.GetBytes("NPZB"), 0, 4);
+            // 8-byte header: magic "ARRY" + 4-byte little-endian length
+            stdout.Write(System.Text.Encoding.ASCII.GetBytes("ARRY"), 0, 4);
             byte[] lenBytes = BitConverter.GetBytes(blob.Length);
             stdout.Write(lenBytes, 0, 4);
             stdout.Write(blob, 0, blob.Length);

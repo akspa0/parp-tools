@@ -145,14 +145,13 @@ def _build_summary(
 def _make_contact_sheet(images: list[np.ndarray], *, fill_value: int = 0) -> np.ndarray:
     if not images:
         raise ValueError("No images provided")
+    # Ensure all images are RGB
+    images = [np.repeat(x[:, :, None], 3, axis=2) if x.ndim == 2 else x for x in images]
     height, width = images[0].shape[:2]
-    channels = 1 if images[0].ndim == 2 else images[0].shape[2]
+    channels = images[0].shape[2]
     cols = math.ceil(math.sqrt(len(images)))
     rows = math.ceil(len(images) / cols)
-    if channels == 1:
-        sheet = np.full((rows * height, cols * width), fill_value, dtype=images[0].dtype)
-    else:
-        sheet = np.full((rows * height, cols * width, channels), fill_value, dtype=images[0].dtype)
+    sheet = np.full((rows * height, cols * width, channels), fill_value, dtype=images[0].dtype)
 
     for idx, image in enumerate(images):
         y = (idx // cols) * height
@@ -173,6 +172,9 @@ def _write_contact_sheets(zarr_path: Path, build: str, tile_ids: list[int], outp
         object_masks: list[np.ndarray] = []
         liquid_masks: list[np.ndarray] = []
         instance_masks: list[np.ndarray] = []
+        filtered_masks: list[np.ndarray] = []
+        mddf_masks: list[np.ndarray] = []
+        modf_masks: list[np.ndarray] = []
 
         for tile_id in tile_ids:
             minimaps.append(root["minimap_rgb"][tile_id].astype(np.uint8))
@@ -189,10 +191,25 @@ def _write_contact_sheets(zarr_path: Path, build: str, tile_ids: list[int], outp
             else:
                 instance_masks.append(np.zeros_like(instance, dtype=np.uint8))
 
-        plt.imsave(output_dir / f"{build}.minimap_sheet.png", _make_contact_sheet(minimaps))
-        plt.imsave(output_dir / f"{build}.object_mask_sheet.png", _make_contact_sheet(object_masks), cmap="gray", vmin=0, vmax=255)
-        plt.imsave(output_dir / f"{build}.liquid_mask_sheet.png", _make_contact_sheet(liquid_masks), cmap="gray", vmin=0, vmax=255)
-        plt.imsave(output_dir / f"{build}.instance_mask_sheet.png", _make_contact_sheet(instance_masks), cmap="viridis", vmin=0, vmax=255)
+            if "object_filtered_mask" in root:
+                filtered_masks.append((root["object_filtered_mask"][tile_id].astype(np.float32) * 255).astype(np.uint8))
+            if "mddf_mask" in root:
+                mddf_masks.append((root["mddf_mask"][tile_id].astype(np.float32) * 255).astype(np.uint8))
+            if "modf_mask" in root:
+                modf_masks.append((root["modf_mask"][tile_id].astype(np.float32) * 255).astype(np.uint8))
+
+        # One combined grid: all signals for all tiles
+        def _to_rgb(img: np.ndarray) -> np.ndarray:
+            if img.ndim == 2:
+                return np.repeat(img[:, :, None], 3, axis=2)
+            return img
+
+        all_images = [_to_rgb(x) for x in minimaps + liquid_masks + object_masks + instance_masks]
+        if filtered_masks:
+            all_images += [_to_rgb(x) for x in filtered_masks + mddf_masks + modf_masks]
+        combined = _make_contact_sheet(all_images)
+
+        plt.imsave(output_dir / f"{build}.contact_sheet.png", combined)
     finally:
         store.close()
 
@@ -253,11 +270,36 @@ def _write_labeled_visual_audit(
             l_u8 = _to_gray_u8(np.clip(liquid, 0.0, 1.0), lo=0.0, hi=1.0)
             o_u8 = _to_gray_u8(np.clip(obj, 0.0, 1.0), lo=0.0, hi=1.0)
 
-            p_minimap = _draw_label_rgb(_resize_u8(minimap, panel_size), "input/minimap")
-            p_height = _draw_label_rgb(_resize_u8(h_u8, panel_size), "height")
-            p_liquid = _draw_label_rgb(_resize_u8(l_u8, panel_size), "liquid mask")
-            p_object = _draw_label_rgb(_resize_u8(o_u8, panel_size), "object mask")
-            strip = np.concatenate([p_minimap, p_height, p_liquid, p_object], axis=1)
+            panels = [
+                _draw_label_rgb(_resize_u8(minimap, panel_size), "input/minimap"),
+                _draw_label_rgb(_resize_u8(h_u8, panel_size), "height"),
+                _draw_label_rgb(_resize_u8(l_u8, panel_size), "liquid mask"),
+                _draw_label_rgb(_resize_u8(o_u8, panel_size), "object mask"),
+            ]
+
+            # New arrays from spec 003
+            if "object_filtered_mask" in root:
+                filtered = root["object_filtered_mask"][tile_id].astype(np.float32)
+                f_u8 = _to_gray_u8(np.clip(filtered, 0.0, 1.0), lo=0.0, hi=1.0)
+                panels.append(_draw_label_rgb(_resize_u8(f_u8, panel_size), "filtered mask"))
+
+            if "mddf_mask" in root:
+                mddf = root["mddf_mask"][tile_id].astype(np.float32)
+                mddf_u8 = _to_gray_u8(np.clip(mddf, 0.0, 1.0), lo=0.0, hi=1.0)
+                panels.append(_draw_label_rgb(_resize_u8(mddf_u8, panel_size), "mddf mask"))
+
+            if "modf_mask" in root:
+                modf = root["modf_mask"][tile_id].astype(np.float32)
+                modf_u8 = _to_gray_u8(np.clip(modf, 0.0, 1.0), lo=0.0, hi=1.0)
+                panels.append(_draw_label_rgb(_resize_u8(modf_u8, panel_size), "modf mask"))
+
+            if "mcnk_flags_16" in root:
+                flags = root["mcnk_flags_16"][tile_id].astype(np.float32)
+                flags_u8 = _to_gray_u8(flags, lo=0.0, hi=float(max(int(flags.max()), 1)))
+                flags_up = _resize_u8(flags_u8, panel_size)
+                panels.append(_draw_label_rgb(flags_up, "mcnk flags"))
+
+            strip = np.concatenate(panels, axis=1)
 
             map_name = str(row.get("map", "unknown"))
             tile_x = int(row["tile_x"]) if row.get("tile_x") is not None else -1
@@ -303,7 +345,7 @@ def main() -> None:
         help="How sample tiles are selected",
     )
     parser.add_argument("--output-dir", type=Path, default=_DATASET_ROOT / "inspection", help="Directory for summary/sample outputs")
-    parser.add_argument("--write-images", action="store_true", help="Write contact-sheet PNGs for sample tiles")
+    parser.add_argument("--write-images", action="store_true", help="Write combined contact-sheet PNG with all signals")
     parser.add_argument(
         "--write-overview",
         action="store_true",

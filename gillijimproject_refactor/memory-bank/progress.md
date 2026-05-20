@@ -85,6 +85,7 @@
 | **V16 batched tile-array writes** | **DONE (UNVALIDATED)** — the Python writer now buffers tile arrays in memory and flushes them to Zarr as small slice batches instead of one row at a time, reducing chunk rewrite churn and filesystem pressure |
 | **V16 batch-shape coercion hardening** | **DONE (UNVALIDATED)** — incoming fixed-shape signals are now padded/truncated into canonical Zarr array shapes before batching so resume/build runs do not fail `np.stack(...)` on variable layer-count payloads |
 | **V16 placement catalog reuse** | **DONE (UNVALIDATED)** — the C# builder now reads the placement catalog once per tile and reuses it for both object-mask generation and `placement_*_data` export instead of reparsing the same tile placements twice |
+| **V16 lean harvest-stream profile + tile-worker control** | **DONE (FOCUSED PROOF)** — `harvest-stream` now supports a lean `v16` raw profile that drops per-tile texture swatches and raw-preservation payloads from rebuild streams, and `build_v16_dataset.py build` now exposes `--tile-workers` while forcing that lean profile. Focused 3.3.5 Azeroth smoke: `profile=v16 tiles=4 bytes=10,284,924 elapsed=2.47s` vs `profile=full bytes=78,257,968 elapsed=3.21s` with the same `--tile-workers 16`. |
 | **Coordinate fixes** | **DONE** |
 | **Phase C: AlphaToLk writer infrastructure** | **DONE** — WdlWriter, LkWdtWriter, LkAdtWriter, AlphaToLkConverter |
 | **Phase C: AlphaToLk CLI command** | **DONE** — convert-alpha-to-lk in WowViewer.Tool.Converter |

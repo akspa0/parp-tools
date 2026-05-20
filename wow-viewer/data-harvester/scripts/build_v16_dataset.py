@@ -54,6 +54,7 @@ _HARVEST_TOOL_DIR = _PROJECT_ROOT / "tools" / "harvest" / "WowViewer.Tool.Harves
 _DATASET_ROOT = _PROJECT_ROOT / "output" / "datasets" / "v16"
 _CLIENT_ROOTS = _PROJECT_ROOT.parent / "output" / "tmp" / "wowarchive-clients"
 DEFAULT_MAP_WORKERS = max(1, min(4, os.cpu_count() or 1))
+DEFAULT_TILE_WORKERS = max(1, min(16, os.cpu_count() or 1))
 
 # ── NPZ key → Zarr array name mapping ──────────────────────────────────
 # All signals from the C# harvester that map to fixed-shape Zarr arrays.
@@ -282,7 +283,60 @@ PLACEMENT_COLUMNS_MODF = [
 ]
 
 NPZB_MAGIC = b"NPZB"
+ARRY_MAGIC = b"ARRY"
 ENDS_MAGIC = b"ENDS"
+
+
+def _decode_blob(blob: bytes) -> dict[str, np.ndarray]:
+    """Decode a tile blob — supports both raw binary (ARRY) and legacy NPZ formats."""
+    if blob[:4] == ARRY_MAGIC:
+        return _read_raw_blob(blob)
+    return dict(np.load(BytesIO(blob), allow_pickle=False))
+
+
+def _read_raw_blob(blob: bytes) -> dict[str, np.ndarray]:
+    """Read one raw binary tile blob (zero-compression ARRY format)."""
+    stream = BytesIO(blob)
+    magic = stream.read(4)
+    if magic != ARRY_MAGIC:
+        raise ValueError(f"Expected ARRY magic, got {magic!r}")
+    meta_len = struct.unpack("<I", stream.read(4))[0]
+    meta_bytes = stream.read(meta_len)
+    metadata = json.loads(meta_bytes.decode("utf-8"))
+    result: dict[str, np.ndarray] = {}
+    result["metadata.json"] = meta_bytes
+    result["_metadata"] = metadata
+    while stream.tell() < len(blob):
+        pos = stream.tell()
+        peek = stream.read(4)
+        if not peek or len(peek) < 4:
+            break
+        if peek == b"ENDS":
+            break
+        stream.seek(pos)
+        name_len = struct.unpack("<I", stream.read(4))[0]
+        name = stream.read(name_len).decode("utf-8")
+        ndim = struct.unpack("<I", stream.read(4))[0]
+        shape = struct.unpack(f"<{ndim}I", stream.read(ndim * 4))
+        dtype_raw = stream.read(8).rstrip(b"\x00")
+        try:
+            from harvester.raw_reader import _DTYPE_MAP
+            dtype = _DTYPE_MAP.get(dtype_raw, np.dtype("float32"))
+        except ImportError:
+            dt_str = dtype_raw.decode()
+            if dt_str in ("<f4", "<f8", "<i4", "<u4", "<i2", "<u2"):
+                dtype = np.dtype(dt_str)
+            elif dt_str == "|u1":
+                dtype = np.dtype("uint8")
+            elif dt_str == "|b1":
+                dtype = np.dtype("bool")
+            else:
+                dtype = np.dtype("float32")
+        data_len = struct.unpack("<Q", stream.read(8))[0]
+        data = stream.read(data_len)
+        arr = np.frombuffer(data, dtype=dtype).reshape(shape).copy()
+        result[name] = arr
+    return result
 
 
 def _dir_size_bytes(path: Path) -> int:
@@ -758,6 +812,8 @@ def _extract_metadata(data: dict[str, np.ndarray]) -> dict:
     try:
         if isinstance(meta_raw, str):
             return json.loads(meta_raw)
+        if isinstance(meta_raw, bytes):
+            return json.loads(meta_raw.decode())
         return json.loads(meta_raw.tobytes().decode())
     except Exception:
         return {}
@@ -1060,7 +1116,7 @@ def _validate_build_signals(build: str, output_path: Path, strict: bool = True) 
 
     missing_cols = sorted(set(expected_has_cols) - set(present_cols))
     if missing_cols:
-        failures.append(f"missing has_* columns: {missing_cols}")
+        warnings_list.append(f"missing has_* columns (store predates these signals): {missing_cols}")
 
     required_all_tiles = [
         "has_height_257",
@@ -1283,7 +1339,7 @@ def _stream_valid_tile_metadata(
         if magic == ENDS_MAGIC:
             saw_end_marker = True
             break
-        if magic != NPZB_MAGIC:
+        if magic not in (NPZB_MAGIC, ARRY_MAGIC):
             stream_error = f"unexpected stream magic {magic!r}"
             break
 
@@ -1298,7 +1354,7 @@ def _stream_valid_tile_metadata(
             break
 
         try:
-            data = dict(np.load(BytesIO(blob), allow_pickle=False))
+            data = _decode_blob(blob)
         except Exception as ex:
             stream_error = f"failed to decode streamed NPZ blob: {ex}"
             break
@@ -1388,7 +1444,7 @@ def _stream_valid_tile_liquid_rows(
         if magic == ENDS_MAGIC:
             saw_end_marker = True
             break
-        if magic != NPZB_MAGIC:
+        if magic not in (NPZB_MAGIC, ARRY_MAGIC):
             stream_error = f"unexpected stream magic {magic!r}"
             break
 
@@ -1403,7 +1459,7 @@ def _stream_valid_tile_liquid_rows(
             break
 
         try:
-            data = dict(np.load(BytesIO(blob), allow_pickle=False))
+            data = _decode_blob(blob)
         except Exception as ex:
             stream_error = f"failed to decode streamed NPZ blob: {ex}"
             break
@@ -1505,7 +1561,7 @@ def _stream_valid_tile_object_rows(
         if magic == ENDS_MAGIC:
             saw_end_marker = True
             break
-        if magic != NPZB_MAGIC:
+        if magic not in (NPZB_MAGIC, ARRY_MAGIC):
             stream_error = f"unexpected stream magic {magic!r}"
             break
 
@@ -1520,7 +1576,7 @@ def _stream_valid_tile_object_rows(
             break
 
         try:
-            data = dict(np.load(BytesIO(blob), allow_pickle=False))
+            data = _decode_blob(blob)
         except Exception as ex:
             stream_error = f"failed to decode streamed NPZ blob: {ex}"
             break
@@ -1626,6 +1682,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     rebuild_existing = args.rebuild_existing
     signal_validation = args.signal_validation
     signal_validation_strict = args.signal_validation_strict
+    tile_workers = max(1, int(args.tile_workers))
     if codec_name == "none" and (codec_level != 0 or codec_shuffle != "noshuffle"):
         print(
             "Warning: --codec none ignores --clevel/--shuffle; storing arrays uncompressed.",
@@ -1665,6 +1722,7 @@ def cmd_build(args: argparse.Namespace) -> None:
         print(f"Staging: {staging_path}")
         print(f"Rejected tiles report: {_tile_rejection_report_path(output_path, build)}")
         print(f"Resume: {resume}")
+        print(f"Tile workers: {tile_workers}")
         print(f"Codec: {codec_name} clevel={codec_level} shuffle={codec_shuffle}")
         print(f"Signal validation: enabled={signal_validation} strict={signal_validation_strict}")
 
@@ -1682,6 +1740,7 @@ def cmd_build(args: argparse.Namespace) -> None:
                 codec_name=codec_name,
                 codec_level=codec_level,
                 codec_shuffle=codec_shuffle,
+                tile_workers=tile_workers,
             )
             if output_path.exists():
                 shutil.rmtree(output_path)
@@ -1716,6 +1775,7 @@ def _build_zarr_streaming(
     codec_name: str = DEFAULT_CODEC,
     codec_level: int = DEFAULT_CLEVEL,
     codec_shuffle: str = DEFAULT_SHUFFLE,
+    tile_workers: int = DEFAULT_TILE_WORKERS,
 ) -> None:
     compressors = None
     if codec_name != "none":
@@ -1819,6 +1879,8 @@ def _build_zarr_streaming(
             str(harvest_tool), "harvest-stream",
             "--client-root", str(client_root),
             "--map", map_name,
+            "--stream-profile", "v16",
+            "--tile-workers", str(tile_workers),
         ]
         if build_version:
             cmd.extend(["--build", build_version])
@@ -1857,7 +1919,7 @@ def _build_zarr_streaming(
             if magic == ENDS_MAGIC:
                 saw_end_marker = True
                 break
-            if magic != NPZB_MAGIC:
+            if magic not in (NPZB_MAGIC, ARRY_MAGIC):
                 stream_error = f"unexpected stream magic {magic!r}"
                 break
 
@@ -1872,7 +1934,7 @@ def _build_zarr_streaming(
                 break
 
             try:
-                data = dict(np.load(BytesIO(blob), allow_pickle=False))
+                data = _decode_blob(blob)
             except Exception as ex:
                 stream_error = f"failed to decode streamed NPZ blob: {ex}"
                 break
@@ -2860,6 +2922,7 @@ def main() -> None:
     build_p.add_argument("--maps", nargs="+", default=None, help="Specific maps to extract")
     build_p.add_argument("--resume", action="store_true", help="Resume from <build>.zarr.partial if a compatible resume state exists")
     build_p.add_argument("--rebuild-existing", action="store_true", help="Rebuild even if a final <build>.zarr already looks complete")
+    build_p.add_argument("--tile-workers", type=int, default=DEFAULT_TILE_WORKERS, help="harvest-stream workers per map during build")
     build_p.add_argument("--codec", choices=["none", "lz4", "zstd"], default=DEFAULT_CODEC, help="Compression codec (none disables compression)")
     build_p.add_argument("--clevel", type=int, default=DEFAULT_CLEVEL, help="Blosc compression level")
     build_p.add_argument("--shuffle", choices=["noshuffle", "shuffle", "bitshuffle"], default=DEFAULT_SHUFFLE, help="Blosc shuffle mode")

@@ -7,7 +7,7 @@
 Single Zarr store per client build. Data flows from C# harvester via binary pipe → Python Zarr writer. No intermediate NPZ files on disk.
 
 ### Pipeline
-- `WowViewer.Tool.Harvest harvest-stream` → NPZB length-prefixed binary blobs on stdout
+- `WowViewer.Tool.Harvest harvest-stream --stream-profile v16` → lean ARRY length-prefixed binary blobs on stdout
 - `build_v16_dataset.py build --build <key>` → reads pipe, writes Zarr + Parquet index + placements Parquet
 - `train_v16.py --builds <keys>` → V16Dataset reads Zarr, trains V15Model arch (~27.4M params)
 
@@ -230,6 +230,7 @@ Six independent models, each training on ground truth only:
 
 - `wow-viewer/data-harvester/scripts/run-data-harvester-python.ps1` remains available as a repo-local fallback when sandboxed agent sessions cannot reach the uv-managed AppData paths, but elevated proof on 2026-05-16 showed both `.venv\Scripts\python.exe` and `uv run` work correctly in a real shell and remain the canonical operator path
 - `build_v16_dataset.py` now forwards `harvest-stream` stderr live, prints per-map progress early enough for small maps, and raises explicit errors on truncated headers, bad magic, invalid blob lengths, NPZ decode failures, non-zero harvester exit codes, missing `ENDS`, and zero-tile maps instead of silently `break`ing
+- `build_v16_dataset.py build` now passes `--stream-profile v16` and exposes `--tile-workers`, so V16 rebuilds can drive the lean raw stream explicitly instead of inheriting heavier debug payloads
 - V16 builds now stage into `wow-viewer/output/datasets/v16/<build>.zarr.partial` and only replace the final `.zarr` store after successful finalization; failed runs preserve the partial store and no longer silently leave a poisoned final dataset path with preallocated `50000`-tile arrays
 - `build_v16_dataset.py stats` now warns when `index.parquet` is missing or when array length does not match finalized index rows, uses `pyarrow.compute.sum` for `has_*` counts, and suppresses the harmless Zarr sidecar warnings from `index.parquet` / `placements.parquet`
 - `build_v16_dataset.py` now writes dropped missing-required tiles to `wow-viewer/output/datasets/v16/<build>.rejected_tiles.jsonl` and surfaces `dropped_missing_required=<n>` in each per-map summary so rejected coordinates/keys survive the live console scrollback
@@ -250,6 +251,7 @@ Six independent models, each training on ground truth only:
 - Existing finished `.zarr` stores remain valid; the recovery slice is aimed at future rebuild speed and at resuming incomplete client builds without redoing finished maps.
 - Implementation is now partially landed but unvalidated in-chat because the user explicitly blocked agent-run builds:
   - `WowViewer.Tool.Harvest` archive-backed ADT families now route through `AdtTensorPackBuilder.BuildFromBytes(...)` instead of temp-file staging
+  - `harvest-stream` now has a lean V16 stream profile that skips per-tile texture swatch/raw-preservation payloads; focused 3.3.5 Azeroth smoke showed `4`-tile stream bytes drop from `78,257,968` (`full`) to `10,284,924` (`v16`) with the same worker count
   - `build_v16_dataset.py` now carries map-level `_resume_state.json` state for `<build>.zarr.partial`
   - `--resume` now bootstraps cleanly when no resume state exists yet instead of tripping on a just-created staged directory
   - `build_v16_dataset.py` now skips already-complete final `<build>.zarr` stores by default unless `--rebuild-existing` is passed
