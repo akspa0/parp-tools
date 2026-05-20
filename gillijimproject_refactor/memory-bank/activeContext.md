@@ -115,6 +115,13 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
 - Strict mode is enabled by default (`--signal-validation --signal-validation-strict`) and fails the build if required has-signal coverage or era-specific liquid-source expectations regress.
 - Dataset-build defaults now use light Blosc compression: `--codec lz4` / `--clevel 1` / `--shuffle shuffle`, keeping Zarr chunk compression on without going back to NPZ/zip-heavy per-tile compression.
 
+### New: V16 dataset/spec doc contract resynced (2026-05-20)
+- `docs/architecture/v16-terrain-model-spec-2026-05-16.md`, `wow-viewer/README.md`, and `data-harvester/README.md` now describe the live V16 corpus instead of the older reduced signal set.
+- Doc truth now matches code on the important seams:
+  - final Zarr arrays include `object_precise_mask`, `object_instance_mask`, `mcnk_flags_16`, `mddf_mask`, `modf_mask`, and `object_filtered_mask`
+  - liquid supervision is derived from richer harvested sources with provenance flags, while `liquid_height` stays present in the dataset but deferred from the current terrain trainer
+  - `harvest-stream` is documented as the lean raw `ARRY` stream, not the older NPZB wording
+
 ### New: V16 trainer snapshot/curation randomness fix (2026-05-19)
 - `train_v16.py` no longer pins every run to `seed=42` unless explicitly requested; omitted `--seed` now generates a fresh run seed, while resume routes reuse existing run seed from `config.json`.
 - Curation order for selected train/val subsets is now randomized by seed (no post-sample sort back to dataset index order).

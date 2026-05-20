@@ -13,10 +13,9 @@ bag of arrays with no standardized feature set. This created several problems:
   raw chunks — most of which the training loop never reads.
 
 V16 replaces all of this with a single consolidated Zarr store per build,
-using standardized feature arrays and a faster default Blosc profile for new
-builds. Data flows directly
-from the C# harvester through a pipe into the Zarr writer — **no intermediate
-NPZ files on disk**.
+using standardized feature arrays and a light default Blosc profile for new
+builds. Data flows directly from the C# harvester through a lean raw binary
+pipe into the Zarr writer — **no intermediate NPZ files on disk**.
 
 ## Dataset Layout
 
@@ -25,18 +24,26 @@ wow-viewer/output/datasets/v16/
   <build_key>.zarr/              # One Zarr v3 LocalStore per client build
     zarr.json                    # Group metadata
     index.parquet                # Tile index: (tile_id, map, tx, ty, has_* flags, height stats)
-    height_257/                  # (N, 257, 257) float32 — blosc-zstd-5
+    height_257/                  # (N, 257, 257) float32
     normal_xyz/                  # (N, 257, 257, 3) float32
-    normal_mask/                  # (N, 257, 257) bool
-    alpha_256/                    # (N, 256, 256, 4) float32
-    holes_16/                     # (N, 16, 16) bool
-    liquid_mask/                  # (N, 256, 256) float32
-    liquid_height/                # (N, 256, 256) float32
-    object_mask/                  # (N, 257, 257) bool
-    minimap_rgb/                  # (N, 256, 256, 3) uint8
-    shadow_mask/                  # (N, 256, 256) float32
-    mcly_texture_ids/             # (N, 16, 16, 4) int32
-    mcly_layer_mask/              # (N, 16, 16, 4) float32
+    normal_mask/                 # (N, 257, 257) bool
+    alpha_256/                   # (N, 256, 256, 4) float32
+    holes_16/                    # (N, 16, 16) bool
+    liquid_mask/                 # (N, 256, 256) float32
+    liquid_height/               # (N, 256, 256) float32
+    object_mask/                 # (N, 257, 257) bool
+    object_precise_mask/         # (N, 257, 257) float32
+    object_instance_mask/        # (N, 257, 257) int32
+    mcnk_flags_16/               # (N, 16, 16) int32
+    mddf_mask/                   # (N, 257, 257) float32
+    modf_mask/                   # (N, 257, 257) float32
+    object_filtered_mask/        # (N, 257, 257) float32
+    minimap_rgb/                 # (N, 256, 256, 3) uint8
+    shadow_mask/                 # (N, 256, 256) float32
+    mcly_texture_ids/            # (N, 16, 16, 4) int32
+    mcly_layer_mask/             # (N, 16, 16, 4) float32
+    placements.parquet           # Per-placement rows with asset-path linkage
+    signal_validation.json       # Post-build signal/provenance validation report
 ```
 
 ### Key Design Decisions
@@ -54,8 +61,13 @@ wow-viewer/output/datasets/v16/
 5. **Liquid data is mandatory when present** — `liquid_mask` and `liquid_height`
    are zero-filled for tiles without water, and `has_liquid_mask` in the index
    marks which tiles have real liquid data.
-6. **No intermediate files** — the C# harvester streams NPZ blobs over a pipe
-   directly to the Python builder. The Zarr store is the only on-disk artifact.
+6. **No intermediate files** — the C# harvester streams lean `ARRY`
+   length-prefixed tile blobs over a pipe directly to the Python builder. The
+   Zarr store is the only canonical on-disk training artifact.
+7. **Keep every fixed-shape training/loss signal** — the final Zarr store keeps
+   the comprehensive terrain, liquid, masking, and MCLY supervision surfaces,
+   while placement rows and liquid-source provenance live beside it in Parquet
+   metadata rather than being discarded.
 
 ## Array Specifications
 
@@ -69,6 +81,12 @@ wow-viewer/output/datasets/v16/
 | `liquid_mask` | 256×256 | float32 | `unified_liquid_mask` | [0,1] water presence |
 | `liquid_height` | 256×256 | float32 | `unified_liquid_height` | World Z, meters |
 | `object_mask` | 257×257 | bool | `object_mask_257` | True = object placed |
+| `object_precise_mask` | 257×257 | float32 | `object_precise_mask_257` | [0,1] placement coverage |
+| `object_instance_mask` | 257×257 | int32 | `object_instance_mask_257` | 0 = terrain, 1+ = instance id |
+| `mcnk_flags_16` | 16×16 | int32 | `mcnk_flags_16` | MCNK liquid/classification flags |
+| `mddf_mask` | 257×257 | float32 | `mddf_mask_257` | Raw doodad mask |
+| `modf_mask` | 257×257 | float32 | `modf_mask_257` | Raw WMO mask |
+| `object_filtered_mask` | 257×257 | float32 | `object_filtered_mask_257` | Loss-gating mask after MDDF filtering |
 | `minimap_rgb` | 256×256×3 | uint8 | `minimap_rgb_256` | [0,255] RGB |
 | `shadow_mask` | 256×256 | float32 | `mcsh_shadow_mask_256` | [0,1] |
 | `mcly_texture_ids` | 16×16×4 | int32 | `mcly_texture_ids` | Texture layer IDs |
@@ -79,8 +97,14 @@ wow-viewer/output/datasets/v16/
 - **`normal_mask`**: computed from `mcnr_normal_xyz` where
   `|nx| + |ny| + |nz| > 1e-6`. Zero-vectors (pad/gap vertices) are replaced
   with (0,0,1) before training and masked out of the normals loss.
-- **Liquid arrays** are zero-filled for tiles where `unified_liquid_mask` is
-  absent from the NPZ shard. The `has_liquid_mask` index column marks real data.
+- **Liquid arrays** are derived by Python from the richer harvested liquid
+  sources using the priority chain `MCNK flags > MCLQ > MH2O > WL* > none`.
+  The raw harvester may emit `mh2o_*`, `mclq_*`, explicit presence masks, and
+  `wl_liquid_*`; the finalized V16 store persists the unified training targets
+  plus liquid-source provenance flags in `index.parquet`.
+- **Object loss weighting** uses `object_filtered_mask`, not the raw merged
+  object mask. The final terrain-loss weight seen by the trainer is
+  `1.0 - object_filtered_mask`.
 
 ## Index (Parquet)
 
@@ -93,18 +117,27 @@ wow-viewer/output/datasets/v16/
 | `tile_y` | int32 | Tile Y coordinate |
 | `height_mean` | float32 | Per-tile height mean (for z-score denormalization) |
 | `height_std` | float32 | Per-tile height std (for z-score denormalization) |
-| `has_normal_xyz` | bool | normal_xyz present and nontrivial |
-| `has_alpha_256` | bool | alpha_256 present |
-| `has_holes_16` | bool | holes_16 present |
-| `has_liquid_mask` | bool | unified_liquid_mask present with nonzero values |
-| `has_shadow_mask` | bool | shadow_mask present |
-| `has_mcly_texture_ids` | bool | mcly_texture_ids present |
+| `n_mddf` | int32 | Number of MDDF placements exported for the tile |
+| `n_modf` | int32 | Number of MODF placements exported for the tile |
+
+In addition to the core columns above, the index carries:
+
+- `has_<array>` boolean columns for every fixed-shape V16 array in the store:
+  `height_257`, `normal_xyz`, `normal_mask`, `alpha_256`, `holes_16`,
+  `liquid_mask`, `liquid_height`, `object_mask`, `object_precise_mask`,
+  `object_instance_mask`, `mcnk_flags_16`, `mddf_mask`, `modf_mask`,
+  `object_filtered_mask`, `minimap_rgb`, `shadow_mask`,
+  `mcly_texture_ids`, `mcly_layer_mask`.
+- Liquid provenance booleans:
+  `has_liquid_source_mcnk`, `has_liquid_source_mh2o`,
+  `has_liquid_source_mclq`, `has_liquid_source_unified`,
+  `has_liquid_source_wl`.
 
 ## Build Pipeline
 
 The V16 build pipeline has zero intermediate files. Data flows from the C#
-harvester through a length-prefixed binary protocol over stdout directly into
-the Python Zarr writer.
+harvester through a length-prefixed raw-binary protocol over stdout directly
+into the Python Zarr writer.
 
 ### Prerequisites
 
@@ -178,15 +211,16 @@ Output goes to `wow-viewer/output/datasets/v16/<build_key>.zarr/`.
 1. The Python builder spawns the C# `WowViewer.Tool.Harvest harvest-stream` process.
 2. The harvester opens the MPQ archives, keeps archive-backed ADT families
    (`root`, `_tex0`, `_obj0`) in memory, iterates tiles for each map, and writes
-   length-prefixed NPZ blobs to stdout (format: 4-byte magic `NPZB` + 4-byte
-   little-endian length + NPZ bytes). All diagnostics go to stderr.
-3. The Python builder reads the binary stream, decodes each NPZ blob in memory,
+   length-prefixed raw blobs to stdout (default V16 format: 4-byte magic
+   `ARRY` + 4-byte little-endian length + serialized tile payload). All
+   diagnostics go to stderr.
+3. The Python builder reads the binary stream, decodes each tile blob in memory,
    normalizes the arrays, and writes them into the Zarr store.
 4. When the harvester finishes all tiles, it writes an `ENDS` sentinel.
 5. The Python builder finalizes the Zarr store, writes the Parquet index, and
    trims arrays to the actual tile count.
 
-**No temporary NPZ files are written to disk.** The only on-disk artifact is the
+**No temporary NPZ files are written to disk.** The only canonical on-disk artifact is the
 final Zarr store.
 
 During builds, the Python side forwards harvester stderr live and prints
@@ -314,6 +348,9 @@ It validates the signals the current trainer actually uses:
 
 - `input`, `height`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid`, `mcly_ids`, `mcly_mask`, `weight`
 
+`weight` is derived from `object_filtered_mask` when available, falling back to
+`1.0 - object_mask` only for legacy stores that predate filtered masking.
+
 It also proves that `instance_mask` remains readable by the dataset layer, but
 the current trainer still does not supervise:
 
@@ -349,6 +386,10 @@ Every expected item below maps to a concrete file in `data-harvester/`.
 
 | Signal | Availability | Current use |
 |---|---|---|
+| `mcnk_flags_16` | present in Zarr builder | liquid provenance / QA signal, not read by current terrain trainer |
+| `mddf_mask` | present in Zarr builder | QA / future object-loss experiments |
+| `modf_mask` | present in Zarr builder | QA / future object-loss experiments |
+| `object_filtered_mask` | present in Zarr builder | consumed indirectly as terrain-loss `weight`; not a standalone model target |
 | `object_instance_mask` / dataset `instance_mask` | present in Zarr + dataset loader | readable, not yet in loss |
 | `object_precise_mask` | present in Zarr builder | not consumed by `V16Dataset` yet |
 | `liquid_height` | present in Zarr + dataset loader | intentionally deferred (future liquid-refinement model) |
@@ -389,16 +430,18 @@ Boundary rule:
 - Legacy `src/harvester/v15_model.py` now exists only as a compatibility shim
   for older V15 imports.
 
-## Compression Benchmarks (target)
+## Compression Benchmarks (illustrative)
 
-| Array | Uncompressed | Blosc-zstd-5 | Ratio |
+| Array | Uncompressed | Light Blosc (`lz4`/1/`shuffle`) | Expected trend |
 |-------|-------------|-------------|-------|
-| height_257 (257×257 f32) | 264 KB | ~50 KB | 5:1 |
-| minimap_rgb (256×256×3 u8) | 196 KB | ~20 KB | 10:1 |
-| alpha_256 (256×256×4 f32) | 1024 KB | ~80 KB | 13:1 |
-| liquid_mask (256×256 f32) | 256 KB | ~5 KB | 50:1 |
+| height_257 (257×257 f32) | 264 KB | materially smaller | moderate compression |
+| minimap_rgb (256×256×3 u8) | 196 KB | somewhat smaller | limited compression |
+| alpha_256 (256×256×4 f32) | 1024 KB | materially smaller | good compression |
+| liquid_mask (256×256 f32) | 256 KB | much smaller on sparse tiles | very good compression |
 
-Expected dataset size for one build (~5000 tiles): ~500 MB compressed.
+The important contract is qualitative, not these exact numbers: future builds
+should keep light Zarr chunk compression on, while avoiding the old per-tile
+NPZ/zip compression overhead.
 
 ## V16 Model
 

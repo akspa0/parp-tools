@@ -28,10 +28,12 @@ dotnet build ./WowViewer.slnx -c Debug
 cd i:/parp/parp-tools/wow-viewer/data-harvester
 uv run python scripts/build_v16_dataset.py build `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --tile-workers 16 `
   --rebuild-existing
 ```
 
-Default build writes uncompressed Zarr for speed.
+Default build keeps light Zarr chunk compression on: Blosc `lz4` level `1`
+with `shuffle`.
 
 ## Patch liquids only (no full rebuild)
 

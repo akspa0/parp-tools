@@ -28,7 +28,7 @@ The project currently has four practical jobs:
 
 The current end-to-end terrain-AI lane is V16:
 
-1. `WowViewer.Tool.Harvest harvest-stream` reads staged client data and emits length-prefixed NPZ blobs over stdout.
+1. `WowViewer.Tool.Harvest harvest-stream` reads staged client data and emits lean length-prefixed raw tile blobs over stdout.
 2. `data-harvester/scripts/build_v16_dataset.py build` consumes that stream and writes one finalized Zarr store per client build under `wow-viewer/output/datasets/v16/<build>.zarr/`.
 3. `build_v16_dataset.py repair-index` can repair existing `index.parquet` coordinate bookkeeping without regenerating the tensor arrays.
 4. `validate_v16_training_ready.py` proves that `V16Dataset`, a real `DataLoader`, and the current `V16Model` architecture can consume the built store.
@@ -538,12 +538,31 @@ Depending on build and map contents, harvested shards can include:
 - `mcly_layer_mask`
 - `hole_mask_16`
 - `minimap_rgb_256`
+- `mcnk_flags_16`
+- `mh2o_surface_height`
+- `mh2o_type_mask`
+- `mh2o_presence_mask`
 - `mclq_surface_height`
 - `mclq_type_mask`
-- object and placement-derived masks
+- `mclq_presence_mask`
+- `wl_liquid_mask`
+- `wl_liquid_height`
+- `unified_liquid_mask`
+- `unified_liquid_height`
+- `object_mask_257`
+- `object_precise_mask_257`
+- `object_instance_mask_257`
+- `mddf_mask_257`
+- `modf_mask_257`
+- `object_filtered_mask_257`
+- `placement_mddf_data`
+- `placement_modf_data`
 - metadata and provenance fields
 
-This is the real training contract. The point is to preserve decoded game signals, not render pretty screenshots and pretend they are ground truth.
+The final V16 training contract is the consolidated Zarr store plus
+`index.parquet` / `placements.parquet`, not these transient shard blobs. The
+point of the harvester is to preserve decoded game signals so the Zarr dataset
+can keep every fixed-shape terrain/loss signal available for training and QA.
 
 ## Alpha/LK Conversion
 
