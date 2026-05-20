@@ -224,7 +224,7 @@ Output goes to `wow-viewer/output/datasets/v16/<build_key>.zarr/`.
 final Zarr store.
 
 During builds, the Python side forwards harvester stderr live and prints
-periodic progress lines with streamed tile counts, placement counts, raw NPZ
+periodic progress lines with streamed tile counts, placement counts, raw stream
 volume, and staged store size. The dataset is written to
 `<build>.zarr.partial/` first and is only promoted to `<build>.zarr/` after
 successful finalization, so interrupted runs do not silently poison the final
@@ -263,7 +263,7 @@ masks and placement-array export.
 The `stats` command now reports logical raw array size versus on-disk Zarr
 size, including per-array compression ratios and whole-store savings.
 The dedicated `validate_v16_training_ready.py` command now answers a separate
-question: can the current `V16Dataset`, `DataLoader`, and `V16Model` actually
+question: can the current `V16Dataset`, `DataLoader`, and `V15Model` actually
 consume the finalized store without shape, dtype, or finite-value surprises.
 If older final stores have bad `tile_x` / `tile_y` bookkeeping, the
 `repair-index` command now rewrites `index.parquet` in place from a
@@ -279,11 +279,17 @@ recovered deterministically.
 ### Streaming Protocol
 
 ```
-[4 bytes: "NPZB"] [4 bytes: length LE uint32] [length bytes: NPZ data]
-[4 bytes: "NPZB"] [4 bytes: length LE uint32] [length bytes: NPZ data]
+[4 bytes: "ARRY"] [4 bytes: length LE uint32] [length bytes: serialized tile blob]
+[4 bytes: "ARRY"] [4 bytes: length LE uint32] [length bytes: serialized tile blob]
 ...
 [4 bytes: "ENDS"] [4 bytes: 0x00000000]
 ```
+
+Each serialized tile blob is itself an `ARRY` payload containing:
+
+- metadata JSON
+- fixed-shape arrays by name / shape / dtype
+- an inner `ENDS` sentinel
 
 All stdout output from the harvester in streaming mode is this binary protocol.
 All diagnostic text goes to stderr.
@@ -366,7 +372,7 @@ Every expected item below maps to a concrete file in `data-harvester/`.
 | Expected surface | Implemented in | Status |
 |---|---|---|
 | Zarr dataset loader (`<build>.zarr`, `index.parquet`) | `src/harvester/v16_dataset.py` | Implemented |
-| Model used by V16 trainer | `src/harvester/v16_model.py` (`V16Model`) | Implemented |
+| Model used by V16 trainer | `src/harvester/v15_model.py` (`V15Model`) | Implemented |
 | V16 trainer entrypoint | `scripts/train_v16.py` | Implemented |
 | Training-readiness gate | `scripts/validate_v16_training_ready.py` | Implemented |
 | Inference bridge for post-train patch flow | `scripts/infer_v16.py` | Implemented |
@@ -426,9 +432,11 @@ Boundary rule:
 
 ### Explicit note on model file naming
 
-- Canonical V16 model module: `src/harvester/v16_model.py`.
-- Legacy `src/harvester/v15_model.py` now exists only as a compatibility shim
-  for older V15 imports.
+- Current V16 terrain model module: `src/harvester/v15_model.py`.
+- There is no live `src/harvester/v16_model.py` implementation in the current
+  repo state.
+- A later rename to `v16_model.py` would be cosmetic unless the implementation
+  itself changes.
 
 ## Compression Benchmarks (illustrative)
 
@@ -477,8 +485,7 @@ decoder.
 | `scripts/infer_v16.py` | Deterministic V16 inference to `<build>.pred.zarr` + patch-ready summaries |
 | `scripts/run-data-harvester-python.ps1` | Repo-local launcher for `.venv` packages when the venv stub is broken |
 | `src/harvester/v16_dataset.py` | PyTorch Dataset reading from Zarr stores |
-| `src/harvester/v16_model.py` | Current V16 terrain model implementation (`V16Model`) |
-| `src/harvester/v15_model.py` | Compatibility shim for legacy V15 imports |
+| `src/harvester/v15_model.py` | Current V16 terrain model implementation (`V15Model`) |
 | `docs/architecture/v16-terrain-model-spec-2026-05-16.md` | This document |
 
 ## Inference Contract (Paired Input/Output Stores)
@@ -579,7 +586,7 @@ Already implemented and usable now:
 - `wow-viewer/data-harvester/scripts/infer_v16.py`
   - runs deterministic V16 inference
   - emits `<build>.pred.zarr`
-  - emits per-tile `inference_summary.json` + `predicted_height_257.npy` for patch tooling
+  - emits per-tile `inference_summary.json`, `predicted_height_257.npy`, and `predicted_liquid_mask_256.npy` for patch tooling
 - `WowViewer.Tool.Converter terrain-patch-adt`
   - patches LK ADT terrain (MCVT/MCNR) from per-tile inference summaries
 - `WowViewer.Tool.Converter convert-lk-to-alpha`
@@ -593,7 +600,8 @@ Still missing (future ergonomic wrapper work):
   summary staging convention
 - a one-shot "infer + patch + optional alpha conversion" pipeline command
 - direct ADT liquid chunk patching in the converter path (`MH2O`/`MCLQ` write
-  integration) so predicted liquid mask+height are emitted into terrain outputs
+  integration) so predicted liquid outputs can be emitted into terrain results,
+  with liquid height expected to come from the later dedicated liquid model
 
 ## Input/Output Pairing Policy
 

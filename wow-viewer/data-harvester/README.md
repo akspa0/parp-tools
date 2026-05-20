@@ -35,6 +35,11 @@ uv run python scripts/build_v16_dataset.py build `
 Default build keeps light Zarr chunk compression on: Blosc `lz4` level `1`
 with `shuffle`.
 
+Current finalized corpus status:
+- six finalized stores currently exist for `0_5_3_3368`, `0_5_5_3494`, `0_7_0_3694`, `3_0_1_8303`, `3_3_5_12340`, and `4_0_0_11927`
+- all six current `signal_validation.json` files pass
+- `0_7_0_3694` has the expected allowed warning for zero `has_holes_16` coverage
+
 ## Patch liquids only (no full rebuild)
 
 ```powershell
@@ -64,6 +69,7 @@ uv run python scripts/inspect_v16_dataset.py `
 Review:
 - `output/datasets/v16/inspection/<build>.validation_audit_overview.png`
 - `output/datasets/v16/inspection/<build>.samples.json`
+- `output/datasets/v16/inspection/<build>.summary.json`
 - `output/datasets/v16/<build>.zarr/signal_validation.json`
 
 ## Train V16

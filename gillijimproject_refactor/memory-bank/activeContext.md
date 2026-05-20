@@ -24,7 +24,7 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
 ### New: V16 inference bridge to existing LK/Alpha tooling (2026-05-18)
 - `wow-viewer/data-harvester/scripts/infer_v16.py` now exists and emits:
   - deterministic paired prediction stores (`<build>.pred.zarr`)
-  - patch-ready per-tile `inference_summary.json` + `predicted_height_257.npy`
+  - patch-ready per-tile `inference_summary.json`, `predicted_height_257.npy`, and `predicted_liquid_mask_256.npy`
 - The spec now reflects current repo truth: `terrain-patch-adt`, `convert-lk-to-alpha`, and `convert-alpha-to-lk` are already implemented and should be the immediate V16 inference post-processing path.
 
 ### New: V16 training contract sync + focused readiness proof (2026-05-18)
@@ -35,20 +35,14 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
   - report: `wow-viewer/output/datasets/v16/validation/3_3_5_12340.training_readiness.json`
   - result: `overall_ok=true`, `issues=0`, model forward shapes match expected V16 heads on CPU.
 
-### New: liquid-height supervision and inference signal wiring (2026-05-18)
-- V16 dataset/trainer now use liquid height directly:
-  - `V16Dataset` now returns `liquid_height` tensor from Zarr.
-  - `V15Model` now includes a dedicated liquid-height head (in addition to liquid-mask head).
-  - `train_v16.py` now supervises both liquid mask and liquid height (liquid-height loss masked to liquid-present pixels).
-- Validator and contracts were updated:
-  - `validate_v16_training_ready.py` now checks `liquid_height` tensor contract and model output shape for liquid height.
-  - `v16-terrain-model-spec-2026-05-16.md` now lists liquid height as an actively supervised target.
-- Inference surface now carries liquid signals for downstream ADT liquid writing work:
-  - `infer_v16.py` now writes `liquid_pred_height_256` into `.pred.zarr`.
-  - patch-ready per-tile summaries now include `predicted_liquid_mask_256.npy` and `predicted_liquid_height_256.npy` sidecars.
-- Focused proof:
-  - command: `uv run python scripts/validate_v16_training_ready.py --build 3_3_5_12340 --train-samples 4 --val-samples 2 --batch-size 2`
-  - result: `overall_ok=true`, `issues=0`, report confirms `trainer_uses_liquid_height=true`.
+### Historical: liquid-height supervision experiment (superseded on 2026-05-18)
+- A short-lived V16 terrain-lane experiment temporarily supervised `liquid_height`
+  and emitted `liquid_pred_height_256`.
+- This is no longer the current truth. The active terrain lane is defined by the
+  later deferral note below:
+  - `liquid_height` stays in the dataset contract
+  - the current terrain trainer/infer path does not consume or predict it
+  - future liquid-height work belongs to a separate liquid-refinement model
 
 ### New: trainer-side curation evidence + labeled validation overview (2026-05-18)
 - `train_v16.py` now supports deterministic subset curation directly from available V16 Zarr splits:
@@ -184,7 +178,7 @@ Companion table mapping tile_id → per-placement rows with columns: nameId, uni
 
 ### Data Flow (full)
 ```
-C# harvester → NPZB pipe → build_v16_dataset.py
+C# harvester → ARRY pipe → build_v16_dataset.py
   ├── Zarr arrays (14 fixed-shape arrays per tile)
   ├── index.parquet (tile_id, build, map, tile_x/y, height_mean/std, has_* flags, n_mddf, n_modf)
   └── placements.parquet (per-placement rows with asset_path linkage)
@@ -273,7 +267,7 @@ Six independent models, each training on ground truth only:
   - `build_v16_dataset.py stats` now reports logical raw array bytes versus on-disk Zarr bytes so compression savings are visible per array and per store
   - future V16 builds now default to `lz4` / level `1` / `shuffle`
   - `V16Dataset` now exposes `mcly_ids` / `mcly_mask` from Zarr and `train_v16.py` now uses the existing V15-style masked cross-entropy path for MCLY supervision; `instance_mask` remains readable but still is not used by the current terrain trainer
-  - V16 coordinate bookkeeping is now patched in two places: future streamed NPZ metadata carries explicit `tile_x` / `tile_y`, and `build_v16_dataset.py repair-index --build <key>` can rewrite existing `index.parquet` files in place from a metadata-only re-stream without touching the stored tensor arrays
+  - V16 coordinate bookkeeping is now patched in two places: future streamed tile metadata carries explicit `tile_x` / `tile_y`, and `build_v16_dataset.py repair-index --build <key>` can rewrite existing `index.parquet` files in place from a metadata-only re-stream without touching the stored tensor arrays
   - `AdtTensorPackBuilder.ReadTextureDataFromBytes(...)` now falls back to inline root ADT texture parsing when `_tex0.adt` bytes are absent, restoring mixed-Cata archive tiles that still carry `MCLY` / `MCAL` in the root file
 - Repo truth still needs operator proof from a user-run rebuild before this recovery slice can be treated as validated.
 - `wow-viewer/README.md` now leads with the V16 dataset/training lane, including repo-level links and command surfaces for `build`, `repair-index`, validator, and `train_v16.py`, so new chats no longer have to infer that terrain-AI dataset generation is a primary repo goal.

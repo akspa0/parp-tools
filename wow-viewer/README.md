@@ -31,7 +31,7 @@ The current end-to-end terrain-AI lane is V16:
 1. `WowViewer.Tool.Harvest harvest-stream` reads staged client data and emits lean length-prefixed raw tile blobs over stdout.
 2. `data-harvester/scripts/build_v16_dataset.py build` consumes that stream and writes one finalized Zarr store per client build under `wow-viewer/output/datasets/v16/<build>.zarr/`.
 3. `build_v16_dataset.py repair-index` can repair existing `index.parquet` coordinate bookkeeping without regenerating the tensor arrays.
-4. `validate_v16_training_ready.py` proves that `V16Dataset`, a real `DataLoader`, and the current `V16Model` architecture can consume the built store.
+4. `validate_v16_training_ready.py` proves that `V16Dataset`, a real `DataLoader`, and the current `V15Model` architecture can consume the built store.
 5. `train_v16.py` trains directly from the finalized V16 Zarr corpus.
 
 This is the modern workflow to care about if the goal is terrain-model training tonight, not just file conversion demos.
@@ -43,6 +43,14 @@ Key V16 artifacts:
 - `placements.parquet` — per-placement rows with asset path linkage for placement-aware follow-up models
 - `<build>.rejected_tiles.jsonl` — rejected missing-required tiles so dropped rows do not disappear into console noise
 - `validation/<build>.training_readiness.json` — trainer-readiness report from the validator
+- `inspection/<build>.validation_audit_overview.png` — human-eye QA artifact for each finalized store
+
+Current V16 corpus status:
+
+- finalized stores exist for `0_5_3_3368`, `0_5_5_3494`, `0_7_0_3694`, `3_0_1_8303`, `3_3_5_12340`, and `4_0_0_11927`
+- all six current `signal_validation.json` files pass
+- all six current stores have visual QA artifacts under `wow-viewer/output/datasets/v16/inspection/`
+- `0_7_0_3694` still carries the expected allowed warning for zero `has_holes_16` coverage
 
 Repo-level starting points:
 

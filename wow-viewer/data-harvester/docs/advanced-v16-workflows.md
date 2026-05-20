@@ -13,11 +13,16 @@ uv run python scripts/build_v16_dataset.py build --build 3_3_5_12340 --rebuild-e
 ```
 
 Useful options:
-- `--codec {none,lz4,zstd}` (default `none`)
+- `--codec {none,lz4,zstd}` (default `lz4`)
 - `--clevel <int>`
 - `--shuffle {noshuffle,shuffle,bitshuffle}`
 - `--signal-validation/--no-signal-validation`
 - `--signal-validation-strict/--no-signal-validation-strict`
+
+Current default profile:
+- `--codec lz4`
+- `--clevel 1`
+- `--shuffle shuffle`
 
 ### Patch liquids in-place
 
@@ -53,6 +58,10 @@ Artifacts:
 - `<build>.summary.json`
 - `<build>.samples.json`
 - `<build>.validation_audit_overview.png`
+
+Current operator proof:
+- all six finalized stores currently have inspection artifacts under `output/datasets/v16/inspection/`
+- all six current `signal_validation.json` files pass
 
 ## Training commands
 
