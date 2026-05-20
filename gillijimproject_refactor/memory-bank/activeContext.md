@@ -113,7 +113,7 @@ Single Zarr store per client build. Data flows from C# harvester via binary pipe
 ### New: V16 post-build signal gate + faster default write profile (2026-05-19)
 - `build_v16_dataset.py build` now runs signal validation after promotion by default and writes `signal_validation.json` into each finalized `<build>.zarr`.
 - Strict mode is enabled by default (`--signal-validation --signal-validation-strict`) and fails the build if required has-signal coverage or era-specific liquid-source expectations regress.
-- Dataset-build defaults now prioritize speed: `--codec none` / `--clevel 0` / `--shuffle noshuffle` (no compression); optional compression remains available via `--codec lz4 --clevel 1 --shuffle shuffle`.
+- Dataset-build defaults now use light Blosc compression: `--codec lz4` / `--clevel 1` / `--shuffle shuffle`, keeping Zarr chunk compression on without going back to NPZ/zip-heavy per-tile compression.
 
 ### New: V16 trainer snapshot/curation randomness fix (2026-05-19)
 - `train_v16.py` no longer pins every run to `seed=42` unless explicitly requested; omitted `--seed` now generates a fresh run seed, while resume routes reuse existing run seed from `config.json`.
