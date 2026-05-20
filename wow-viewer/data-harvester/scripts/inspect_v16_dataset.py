@@ -263,7 +263,7 @@ def _write_labeled_visual_audit(
             tile_x = int(row.get("tile_x") or -1)
             tile_y = int(row.get("tile_y") or -1)
             liq_src = "none"
-            for src in ("mh2o", "mclq", "unified", "wl"):
+            for src in ("mcnk", "mh2o", "mclq", "unified", "wl"):
                 if bool(row.get(f"has_liquid_source_{src}", False)):
                     liq_src = src
                     break

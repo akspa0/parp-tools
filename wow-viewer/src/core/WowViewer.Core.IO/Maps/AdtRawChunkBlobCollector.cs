@@ -335,7 +335,7 @@ public static class AdtRawChunkBlobCollector
     }
 
     private static void CollectRawMcnkSubchunks(
-        RawChunkSourceContext context,
+        IRawChunkContext context,
         byte[] payload,
         int mcnkIndex,
         int? chunkX,
@@ -399,7 +399,15 @@ public static class AdtRawChunkBlobCollector
         }
     }
 
-    private sealed class RawChunkSourceContext
+    private interface IRawChunkContext
+    {
+        string SourcePath { get; }
+        string SourceKind { get; }
+        HashSet<FourCC> ProcessedTopLevelChunkIds { get; }
+        HashSet<FourCC> ProcessedMcnkChunkIds { get; }
+    }
+
+    private sealed class RawChunkSourceContext : IRawChunkContext
     {
         public RawChunkSourceContext(string sourcePath, string sourceKind)
         {
@@ -416,7 +424,7 @@ public static class AdtRawChunkBlobCollector
         public HashSet<FourCC> ProcessedMcnkChunkIds { get; } = [];
     }
 
-    private sealed class RawChunkMemoryContext
+    private sealed class RawChunkMemoryContext : IRawChunkContext
     {
         public RawChunkMemoryContext(
             string sourcePath,

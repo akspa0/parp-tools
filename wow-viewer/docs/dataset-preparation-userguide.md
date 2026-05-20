@@ -127,11 +127,15 @@ dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug --
 | `-c, --client-root` | Path to WoW client root (required) |
 | `-m, --map` | Map name (required) |
 | `-n, --limit` | Max tiles to extract |
+| `--tile-workers` | Parallel tile workers inside `harvest-stream` (default: up to 8, ordered output preserved) |
 | `-b, --build` | Client build version for version-aware ADT profile |
 
 The `harvest-stream` command writes binary NPZ blobs to stdout using a
 length-prefixed protocol: 4-byte magic `NPZB` + 4-byte LE length + NPZ data.
 An `ENDS` sentinel marks end-of-stream. All diagnostics go to stderr.
+Tile extraction can run in parallel via `--tile-workers`, but stream emission
+still preserves deterministic tile order for downstream repair and dataset
+index workflows.
 This is the input path for the V16 Zarr dataset builder — no intermediate
 NPZ files are written to disk.
 

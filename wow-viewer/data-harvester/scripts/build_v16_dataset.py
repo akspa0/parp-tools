@@ -114,7 +114,7 @@ ALL_ARRAY_KEYS = [
     "mcly_texture_ids", "mcly_layer_mask",
 ]
 
-LIQUID_SOURCE_KEYS = ("mh2o", "mclq", "unified", "wl")
+LIQUID_SOURCE_KEYS = ("mcnk", "mh2o", "mclq", "unified", "wl")
 
 # Integration keys: derive has_* flags for these signals in the Parquet index.
 # Include all fixed-shape arrays plus explicit liquid-source provenance flags.
@@ -412,7 +412,7 @@ def _process_tile_data(data: dict[str, np.ndarray]) -> tuple[dict[str, np.ndarra
     return tile_arrays, has_signals
 
 
-def _derive_alpha_mcnk_liquid_flags(
+def _derive_mcnk_liquid_flags(
     data: dict[str, np.ndarray],
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
     meta = _decode_metadata_json(data)
@@ -512,11 +512,44 @@ def _derive_liquid_supervision(
     def _coerce_liq_type(arr: np.ndarray) -> np.ndarray:
         return _resize_liquid_grid(arr.astype(np.float32, copy=False)).astype(np.float32, copy=False)
 
-    alpha_mcnk_flags, alpha_mcnk_type_16 = _derive_alpha_mcnk_liquid_flags(data)
-    alpha_mcnk_type = _coerce_liq_type(alpha_mcnk_type_16) if alpha_mcnk_type_16 is not None else None
-    alpha_mcnk_mask = None
-    if alpha_mcnk_flags is not None:
-        alpha_mcnk_mask = _coerce_liq_mask(((alpha_mcnk_flags & 0x3C) != 0).astype(np.float32))
+    def _normalize_binary_mask(mask: np.ndarray) -> np.ndarray:
+        out = mask.astype(np.float32)
+        if out.max() > 1.5:
+            out = out / 255.0
+        return np.clip(out, 0.0, 1.0)
+
+    mcnk_flags, mcnk_type_16 = _derive_mcnk_liquid_flags(data)
+    mcnk_type = _coerce_liq_type(mcnk_type_16) if mcnk_type_16 is not None else None
+    mcnk_mask = None
+    if mcnk_flags is not None:
+        mcnk_mask = _coerce_liq_mask(((mcnk_flags & 0x3C) != 0).astype(np.float32))
+
+    mh2o_type = _reorient_non_wl_liquid(_to_2d(data.get("mh2o_type_mask")))
+    mh2o_height = _reorient_non_wl_liquid(_to_2d(data.get("mh2o_surface_height")))
+    mh2o_depth = _reorient_non_wl_liquid(_to_2d(data.get("mh2o_depth")))
+    mclq_type = _reorient_non_wl_liquid(_to_2d(data.get("mclq_type_mask")))
+    mclq_height = _reorient_non_wl_liquid(_to_2d(data.get("mclq_surface_height")))
+    unified_height = _reorient_non_wl_liquid(_to_2d(data.get("unified_liquid_height")))
+    wl_height = _to_2d(data.get("wl_liquid_height"))
+
+    if mcnk_mask is not None:
+        height_source = (
+            mh2o_height
+            if mh2o_height is not None
+            else mclq_height
+            if mclq_height is not None
+            else unified_height
+            if unified_height is not None
+            else wl_height
+        )
+        if height_source is None:
+            height_source = np.zeros_like(mcnk_mask, dtype=np.float32)
+        return (
+            _coerce_liq_mask(_normalize_binary_mask(mcnk_mask)),
+            _coerce_liq_height(height_source.astype(np.float32)),
+            True,
+            "mcnk",
+        )
 
     def _presence_mask(name: str, *, reorient_non_wl: bool = False) -> np.ndarray | None:
         raw = _to_2d(data.get(name))
@@ -533,17 +566,8 @@ def _derive_liquid_supervision(
             return None
         return mask
 
-    def _normalize_binary_mask(mask: np.ndarray) -> np.ndarray:
-        out = mask.astype(np.float32)
-        if out.max() > 1.5:
-            out = out / 255.0
-        return np.clip(out, 0.0, 1.0)
-
     # 1) MH2O (preferred)
     mh2o_mask = _presence_mask("mh2o_presence_mask", reorient_non_wl=True)
-    mh2o_type = _reorient_non_wl_liquid(_to_2d(data.get("mh2o_type_mask")))
-    mh2o_height = _reorient_non_wl_liquid(_to_2d(data.get("mh2o_surface_height")))
-    mh2o_depth = _reorient_non_wl_liquid(_to_2d(data.get("mh2o_depth")))
     if mh2o_mask is None and (mh2o_type is not None or mh2o_height is not None or mh2o_depth is not None):
         inferred = np.zeros(SHAPES["liquid_mask"], dtype=np.bool_)
         if mh2o_height is not None:
@@ -568,14 +592,8 @@ def _derive_liquid_supervision(
 
     # 2) MCLQ (next priority)
     mclq_mask = _presence_mask("mclq_presence_mask", reorient_non_wl=True)
-    mclq_type = _reorient_non_wl_liquid(_to_2d(data.get("mclq_type_mask")))
-    mclq_height = _reorient_non_wl_liquid(_to_2d(data.get("mclq_surface_height")))
-    if alpha_mcnk_mask is not None:
-        # Alpha MCLQ chunk flags are a more trustworthy presence signal than the
-        # legacy 16x16 type/mask grids in existing harvested shards.
-        mclq_mask = alpha_mcnk_mask
-    if alpha_mcnk_type is not None:
-        mclq_type = alpha_mcnk_type
+    if mcnk_type is not None:
+        mclq_type = mcnk_type
     if mclq_mask is None and mclq_type is not None:
         mclq_type_i = _coerce_liq_type(mclq_type).astype(np.int32, copy=False)
         if int(mclq_type_i.min()) < 0:
@@ -981,6 +999,7 @@ def _validate_build_signals(build: str, output_path: Path, strict: bool = True) 
 
     liquid_count = int(coverage.get("has_liquid_mask", 0))
     liquid_source_keys = [
+        "has_liquid_source_mcnk",
         "has_liquid_source_mh2o",
         "has_liquid_source_mclq",
         "has_liquid_source_unified",
@@ -992,28 +1011,29 @@ def _validate_build_signals(build: str, output_path: Path, strict: bool = True) 
             f"liquid source total mismatch: sources={liquid_source_total}, has_liquid_mask={liquid_count}"
         )
 
+    mcnk_count = int(coverage.get("has_liquid_source_mcnk", 0))
     mh2o_count = int(coverage.get("has_liquid_source_mh2o", 0))
     mclq_count = int(coverage.get("has_liquid_source_mclq", 0))
     unified_count = int(coverage.get("has_liquid_source_unified", 0))
     wl_count = int(coverage.get("has_liquid_source_wl", 0))
 
     if build.startswith("0_5_"):
-        if mclq_count <= 0 and liquid_count > 0:
-            failures.append("0.5.x build has liquid tiles but zero MCLQ-derived coverage; expected MCLQ for alpha-era data.")
-        if wl_count > mclq_count:
+        if mclq_count <= 0 and mcnk_count <= 0 and liquid_count > 0:
+            failures.append("0.5.x build has liquid tiles but zero MCNK/MCLQ-derived coverage; expected chunk-flag or MCLQ liquid provenance for alpha-era data.")
+        if wl_count > max(mclq_count, mcnk_count):
             warnings_list.append(
-                f"WL* fallback dominates 0.5.x liquid labels (wl={wl_count}, mclq={mclq_count})."
+                f"WL* fallback dominates 0.5.x liquid labels (wl={wl_count}, mcnk={mcnk_count}, mclq={mclq_count})."
             )
     elif build.startswith("0_7_"):
-        if liquid_count > 0 and mclq_count <= 0 and mh2o_count <= 0 and unified_count > 0:
+        if liquid_count > 0 and mcnk_count <= 0 and mclq_count <= 0 and mh2o_count <= 0 and unified_count > 0:
             warnings_list.append(
-                "0.7.x liquid supervision is unified-only (no explicit MCLQ/MH2O provenance in stream). "
+                "0.7.x liquid supervision is unified-only (no explicit MCNK/MCLQ/MH2O provenance in stream). "
                 "This is allowed but indicates source granularity limits."
             )
     elif build.startswith(LK_CATA_BUILD_PREFIXES):
-        if liquid_count > 0 and mh2o_count <= 0 and unified_count > 0:
+        if liquid_count > 0 and mcnk_count <= 0 and mh2o_count <= 0 and unified_count > 0:
             warnings_list.append(
-                "LK/Cata liquid supervision is unified-only (no explicit MH2O provenance). "
+                "LK/Cata liquid supervision is unified-only (no explicit MCNK/MH2O provenance). "
                 "Allowed, but verify source extraction if MH2O-native supervision is expected."
             )
 

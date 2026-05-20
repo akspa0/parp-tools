@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Numerics;
 using SixLabors.ImageSharp.PixelFormats;
 using WowViewer.Core.IO.Dbc;
@@ -10,7 +11,8 @@ namespace WowViewer.Tools.Harvest;
 static class Program
 {
     private static Dictionary<string, string>? _md5Lookup;
-    private static readonly Dictionary<string, WlLooseFileEntry[]> _wlLooseFileCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, Lazy<WlLooseFileEntry[]>> _wlLooseFileCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly int DefaultHarvestTileWorkers = Math.Max(1, Math.Min(8, Environment.ProcessorCount));
     private sealed record HarvestMapDiscoveryResult(
         string Map,
         string DisplayName,
@@ -31,6 +33,9 @@ static class Program
         public required string Path { get; init; }
         public required WlFile File { get; init; }
     }
+
+    private readonly record struct HarvestTileJob(int Order, int TileX, int TileY);
+    private readonly record struct HarvestTileResult(int Order, byte[]? Blob, bool HadError);
 
     static int Main(string[] args)
     {
@@ -504,6 +509,7 @@ static class Program
         string? mapName = GetOption(args, "--map", "-m");
         int? limit = GetIntOption(args, "--limit", "-n");
         int maxTiles = limit ?? int.MaxValue;
+        int tileWorkers = Math.Max(1, GetIntOption(args, "--tile-workers", "--tile-workers") ?? DefaultHarvestTileWorkers);
 
         if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(mapName))
         {
@@ -542,90 +548,84 @@ static class Program
         int extracted = 0;
         int errors = 0;
         var stdout = Console.OpenStandardOutput();
+        bool isAlpha = AlphaWdtReader.IsAlphaWdt(wdtBytes);
 
-        for (int tx = 0; tx < 64; tx++)
+        if (tileWorkers <= 1)
         {
-            for (int ty = 0; ty < 64; ty++)
+            for (int tx = 0; tx < 64; tx++)
             {
-                if (extracted >= maxTiles) break;
-
-                try
+                for (int ty = 0; ty < 64; ty++)
                 {
-                    // Redirect Console.Error to suppress per-tile diagnostics
-                    var oldErr = Console.Error;
-                    Console.SetError(TextWriter.Null);
-                    TerrainTileTensorPack? pack = null;
-                    try
+                    if (extracted >= maxTiles) break;
+
+                    HarvestTileResult result = HarvestStreamTileWorker(
+                        catalog,
+                        clientRoot,
+                        mapName,
+                        wdtBytes,
+                        isAlpha,
+                        buildVersion,
+                        new HarvestTileJob(extracted + errors, tx, ty));
+                    if (result.HadError)
                     {
-                        if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
-                        {
-                            string alphaWdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
-                            if (!AlphaWdtReader.TryReadTile(wdtBytes, tx, ty, alphaWdtVirtual, out AlphaTileData? tileData) || tileData is null)
-                                continue;
-                            pack = AlphaTensorPackBuilder.Build(tileData, tx, ty);
-                        }
-                        else
-                        {
-                            pack = BuildPackFromArchiveAdt(catalog, mapName, tx, ty, buildVersion);
-                        }
-
-                        if (pack is null) continue;
-
-                        // Try WL* liquid from MPQ for ALL tiles
-                        if (pack.UnifiedLiquidMask is null)
-                            TryAddWlLiquidFromArchiveFiles(catalog, clientRoot, mapName, tx, ty, pack);
-
-                        if (pack.MinimapRgb256 is null)
-                        {
-                            byte[,,]? minimapRgb = TryLoadMinimapFromMpq(catalog, mapName, tx, ty);
-                            if (minimapRgb is not null)
-                            {
-                                pack.MinimapRgb256 = minimapRgb;
-                                pack.MinimapSourceTag = "mpq_blp";
-                                pack.AvailableSignals = new HashSet<string>(pack.AvailableSignals) { "minimap_rgb" };
-                            }
-                        }
-
-                        if (pack.MclyTextureNames.Count > 0)
-                        {
-                            var texPixels = new List<byte[,,]>();
-                            foreach (string texName in pack.MclyTextureNames)
-                            {
-                                byte[,,]? pixels = LoadTextureFromMpq(catalog, texName);
-                                if (pixels is not null)
-                                    texPixels.Add(pixels);
-                            }
-                            if (texPixels.Count > 0)
-                            {
-                                pack.MclyTexturePixels = texPixels;
-                                pack.AvailableSignals = new HashSet<string>(pack.AvailableSignals) { "mcly_texture_pixels" };
-                            }
-                        }
-
-                        // Write tile to stdout as length-prefixed NPZ blob
-                        // Format: 4 bytes "NPZB" + 4 bytes LE length + NPZ bytes
-                        using var ms = new MemoryStream();
-                        NpzTileSerializer.Serialize(pack, ms);
-                        byte[] blob = ms.ToArray();
-                        byte[] header = new byte[8];
-                        System.Text.Encoding.ASCII.GetBytes("NPZB").CopyTo(header, 0);
-                        BitConverter.TryWriteBytes(header.AsSpan(4, 4), blob.Length);
-                        stdout.Write(header, 0, 8);
-                        stdout.Write(blob, 0, blob.Length);
-                        stdout.Flush();
-                        extracted++;
+                        errors++;
+                        continue;
                     }
-                    finally
-                    {
-                        Console.SetError(oldErr);
-                    }
+                    if (result.Blob is null)
+                        continue;
+
+                    WriteHarvestStreamBlob(stdout, result.Blob);
+                    extracted++;
                 }
-                catch
+                if (extracted >= maxTiles) break;
+            }
+        }
+        else
+        {
+            Console.Error.WriteLine($"  harvest-stream tile_workers={tileWorkers}");
+            List<HarvestTileJob> jobs = new(64 * 64);
+            int order = 0;
+            for (int tx = 0; tx < 64; tx++)
+                for (int ty = 0; ty < 64; ty++)
+                    jobs.Add(new HarvestTileJob(order++, tx, ty));
+
+            int prefetch = Math.Max(tileWorkers * 2, tileWorkers);
+            Dictionary<int, Task<HarvestTileResult>> inflight = [];
+            int nextLaunch = 0;
+
+            void LaunchUntilWindowFull()
+            {
+                while (nextLaunch < jobs.Count && inflight.Count < prefetch)
                 {
-                    errors++;
+                    HarvestTileJob job = jobs[nextLaunch++];
+                    inflight[job.Order] = Task.Run(() =>
+                        HarvestStreamTileWorker(catalog, clientRoot, mapName, wdtBytes, isAlpha, buildVersion, job));
                 }
             }
-            if (extracted >= maxTiles) break;
+
+            LaunchUntilWindowFull();
+            for (int nextOrder = 0; nextOrder < jobs.Count; nextOrder++)
+            {
+                HarvestTileResult result = inflight[nextOrder].GetAwaiter().GetResult();
+                inflight.Remove(nextOrder);
+                LaunchUntilWindowFull();
+
+                if (result.HadError)
+                {
+                    errors++;
+                    continue;
+                }
+                if (result.Blob is null)
+                    continue;
+
+                WriteHarvestStreamBlob(stdout, result.Blob);
+                extracted++;
+                if (extracted >= maxTiles)
+                    break;
+            }
+
+            if (inflight.Count > 0)
+                Task.WaitAll(inflight.Values.ToArray());
         }
 
         // Write end marker: 4 bytes "ENDS" + 4 zero bytes
@@ -635,6 +635,99 @@ static class Program
         stdout.Flush();
 
         Console.Error.WriteLine($"Streamed {extracted} tiles, {errors} errors");
+    }
+
+    private static HarvestTileResult HarvestStreamTileWorker(
+        NativeMpqService catalog,
+        string clientRoot,
+        string mapName,
+        byte[] wdtBytes,
+        bool isAlpha,
+        string? buildVersion,
+        HarvestTileJob job)
+    {
+        try
+        {
+            return new HarvestTileResult(
+                job.Order,
+                TryBuildHarvestStreamBlob(catalog, clientRoot, mapName, wdtBytes, isAlpha, buildVersion, job.TileX, job.TileY),
+                false);
+        }
+        catch
+        {
+            return new HarvestTileResult(job.Order, null, true);
+        }
+    }
+
+    private static byte[]? TryBuildHarvestStreamBlob(
+        NativeMpqService catalog,
+        string clientRoot,
+        string mapName,
+        byte[] wdtBytes,
+        bool isAlpha,
+        string? buildVersion,
+        int tileX,
+        int tileY)
+    {
+        TerrainTileTensorPack? pack = null;
+        if (isAlpha)
+        {
+            string alphaWdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+            if (!AlphaWdtReader.TryReadTile(wdtBytes, tileX, tileY, alphaWdtVirtual, out AlphaTileData? tileData) || tileData is null)
+                return null;
+            pack = AlphaTensorPackBuilder.Build(tileData, tileX, tileY);
+        }
+        else
+        {
+            pack = BuildPackFromArchiveAdt(catalog, mapName, tileX, tileY, buildVersion);
+        }
+
+        if (pack is null)
+            return null;
+
+        if (pack.UnifiedLiquidMask is null)
+            TryAddWlLiquidFromArchiveFiles(catalog, clientRoot, mapName, tileX, tileY, pack);
+
+        if (pack.MinimapRgb256 is null)
+        {
+            byte[,,]? minimapRgb = TryLoadMinimapFromMpq(catalog, mapName, tileX, tileY);
+            if (minimapRgb is not null)
+            {
+                pack.MinimapRgb256 = minimapRgb;
+                pack.MinimapSourceTag = "mpq_blp";
+                pack.AvailableSignals = new HashSet<string>(pack.AvailableSignals) { "minimap_rgb" };
+            }
+        }
+
+        if (pack.MclyTextureNames.Count > 0)
+        {
+            var texPixels = new List<byte[,,]>();
+            foreach (string texName in pack.MclyTextureNames)
+            {
+                byte[,,]? pixels = LoadTextureFromMpq(catalog, texName);
+                if (pixels is not null)
+                    texPixels.Add(pixels);
+            }
+            if (texPixels.Count > 0)
+            {
+                pack.MclyTexturePixels = texPixels;
+                pack.AvailableSignals = new HashSet<string>(pack.AvailableSignals) { "mcly_texture_pixels" };
+            }
+        }
+
+        using var ms = new MemoryStream();
+        NpzTileSerializer.Serialize(pack, ms);
+        return ms.ToArray();
+    }
+
+    private static void WriteHarvestStreamBlob(Stream stdout, byte[] blob)
+    {
+        byte[] header = new byte[8];
+        System.Text.Encoding.ASCII.GetBytes("NPZB").CopyTo(header, 0);
+        BitConverter.TryWriteBytes(header.AsSpan(4, 4), blob.Length);
+        stdout.Write(header, 0, 8);
+        stdout.Write(blob, 0, blob.Length);
+        stdout.Flush();
     }
 
     static void RunExtractUnified(string[] args)
@@ -1116,9 +1209,16 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     static WlLooseFileEntry[] GetArchiveWlFiles(NativeMpqService catalog, string clientRoot, string mapName)
     {
         string cacheKey = $"{Path.GetFullPath(clientRoot)}|{mapName}";
-        if (_wlLooseFileCache.TryGetValue(cacheKey, out WlLooseFileEntry[]? cached))
-            return cached;
+        Lazy<WlLooseFileEntry[]> lazy = _wlLooseFileCache.GetOrAdd(
+            cacheKey,
+            _ => new Lazy<WlLooseFileEntry[]>(
+                () => LoadArchiveWlFiles(catalog, clientRoot, mapName),
+                LazyThreadSafetyMode.ExecutionAndPublication));
+        return lazy.Value;
+    }
 
+    static WlLooseFileEntry[] LoadArchiveWlFiles(NativeMpqService catalog, string clientRoot, string mapName)
+    {
         string mapPrefix = $"World\\Maps\\{mapName}\\";
         string[] paths = catalog.GetAllKnownFiles()
             .Select(path => path.Replace('/', '\\'))
@@ -1138,9 +1238,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         if (paths.Length == 0)
         {
             Console.WriteLine($"  [WL] no WL* files found in loaded archives for {mapName}");
-            cached = [];
-            _wlLooseFileCache[cacheKey] = cached;
-            return cached;
+            return [];
         }
 
         var loaded = new List<WlLooseFileEntry>(paths.Length);
@@ -1166,9 +1264,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         }
 
         Console.WriteLine($"  [WL] discovered {loaded.Count}/{paths.Length} WL* files in loaded archives for {mapName}");
-        cached = loaded.ToArray();
-        _wlLooseFileCache[cacheKey] = cached;
-        return cached;
+        return loaded.ToArray();
     }
 
     static void TryAddWlLiquidFromArchiveFiles(NativeMpqService catalog, string clientRoot, string mapName, int tileX, int tileY, TerrainTileTensorPack pack)
