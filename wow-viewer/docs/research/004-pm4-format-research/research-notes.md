@@ -1196,3 +1196,55 @@ Full analysis: `wow-viewer/docs/research/004-pm4-format-research/naming-drift-an
 1. MSHD is completely opaque — cannot confirm or deny either hypothesis from the header alone
 2. MPRR graph semantics are unclear — could be nav-graph or scene-graph
 3. MSUR.GroupKey and MSUR.AttributeMask are unknown — could support either interpretation
+
+---
+
+## MSHD.Field04 — CONFIRMED: Scene Container / Region ID
+
+**Date**: 2026-05-21
+**Status**: CONFIRMED by user (direct domain knowledge)
+
+### What Field04 Is
+
+MSHD.Field04 is a **scene container** — it groups all objects belonging to a single level designer's work area. It is NOT a per-object subdivision key. It is the root grouping layer that sits above CK24 objects.
+
+**User confirmation**: "the field04 in the MSHD appears to be a container for a bunch of objects in a set scene"
+
+### Hierarchy Model (Confirmed)
+
+```
+Level 0: MSHD.Field04 (Region) — scene container, spans multiple ADT tiles
+  └─ Level 1: CK24 (Object) — WMO or M2 collision mesh
+       └─ Level 2: MSLK.GroupObjectId (Sub-object) — linked surface sets
+            └─ Level 3: Individual MSUR surfaces + MPRL positions
+```
+
+### Evidence Summary
+
+1. **227 distinct Field04 values** across 502 non-empty development tiles.
+2. **Field04 values cluster in spatially adjacent tiles** — a contiguous 3×2 block shares one Field04.
+3. **Field04=1 appears only on empty stub tiles** (140/502). Active tiles never have Field04=1.
+4. **Same Field04 can appear in non-adjacent regions** — same scene type, different locations.
+5. **Field04 does NOT encode per-tile metrics** — within F04=3262 tiles, surface count ranges from 11 to 6,575.
+
+### Implementation
+
+- **`Pm4RegionObjectGrouper`** (`wow-viewer/src/core/WowViewer.Core.PM4/Research/Pm4RegionObjectGrouper.cs`): Reads all PM4 files, groups by Field04 → region, then by CK24 → object, then by MSLK.GroupObjectId → sub-object.
+- **`Pm4ObjectPositionDecoder`** (`wow-viewer/src/core/WowViewer.Core.PM4/Services/Pm4ObjectPositionDecoder.cs`): Resolves MPRL positions to world coordinates for each grouped object using existing Pm4PlacementMath infrastructure.
+- **Integration tests** (`wow-viewer/tests/WowViewer.Core.PM4.Tests/Pm4RegionObjectGrouperTests.cs`): 8 tests validating region grouping, object decomposition, and position reference collection against the 616-file development corpus.
+- **Spec doc** (`wow-viewer/docs/architecture/pm4-region-aware-object-grouping-2026-05-21.md`): Full specification and validation criteria.
+
+### What This Unlocks
+
+1. **Object matching**: Each region groups all objects for a scene area. Within a region, CK24 objects can be matched to WMO/M2 assets by comparing MPRL positions against MODF/MDDF entries in the ADT.
+2. **Position decoding**: MPRL entries provide world-space placement (position + heading) for each object. The existing coordinate mode resolution and planar transform infrastructure handles the transform.
+3. **Cross-tile object merge**: Objects with the same CK24 across tiles in the same region are naturally grouped. The existing `BuildMergedGroupMap` can merge them via MSCN connector keys.
+4. **Scene reconstruction**: The region-first hierarchy provides the complete scene graph structure needed to reconstruct the development map from PM4 data.
+
+### Open Questions (Updated)
+
+1. Does Field04 being the same across non-adjacent tiles mean "same scene type" or "same designer area"?
+2. Should the grouper merge objects across tiles only within the same region, or also across regions?
+3. How does the nav mesh (CK24=0x000000) interact with region grouping? It spans the entire map.
+4. What is the relationship between Field00/Field08 and Field04?
+5. **PM4 data loading performance**: The user notes that PM4 data loading and instancing needs performance enhancements — draw calls should cull far-off data and only load within ADT detail range.

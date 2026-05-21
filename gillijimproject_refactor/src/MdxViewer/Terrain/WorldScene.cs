@@ -921,6 +921,7 @@ public class WorldScene : ISceneRenderer
     private bool _showPm4Overlay;
     private bool _showPm4SolidOverlay = true;
     private bool _showPm4ObjectBounds;
+    private bool _showPm4Ck24Bounds;
     private bool _pm4OverlayIgnoreDepth;
     private bool _pm4FlipAllObjectsY;
     private bool _showPm4PositionRefs;
@@ -1228,6 +1229,7 @@ public class WorldScene : ISceneRenderer
     public int Pm4VisiblePositionRefCount => _pm4VisiblePositionRefCount;
     public bool ShowPm4SolidOverlay { get => _showPm4SolidOverlay; set => _showPm4SolidOverlay = value; }
     public bool ShowPm4ObjectBounds { get => _showPm4ObjectBounds; set => _showPm4ObjectBounds = value; }
+    public bool ShowPm4Ck24Bounds { get => _showPm4Ck24Bounds; set => _showPm4Ck24Bounds = value; }
     public bool Pm4OverlayIgnoreDepth { get => _pm4OverlayIgnoreDepth; set => _pm4OverlayIgnoreDepth = value; }
     public bool Pm4FlipAllObjectsY
     {
@@ -8403,6 +8405,79 @@ public class WorldScene : ISceneRenderer
 
                             _bbRenderer.BatchBoxMinMax(boundsMin, boundsMax, boxColor);
                         }
+                    }
+                }
+
+                // CK24-level bounding boxes: one merged box per CK24 object across all sub-objects.
+                if (_showPm4Ck24Bounds && _showPm4Overlay && _pm4TileObjects.Count > 0)
+                {
+                    Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
+                    bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
+                        || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
+                        || _pm4OverlayScale != Vector3.One;
+
+                    // Group objects by (tileX, tileY, Ck24) to merge sub-objects into one box per CK24.
+                    var ck24Groups = new Dictionary<(int tileX, int tileY, uint ck24), (Vector3 min, Vector3 max, byte ck24Type, int count)>();
+
+                    foreach (var (tileKey, objects) in _pm4TileObjects)
+                    {
+                        if (!ShouldRenderPm4Tile(tileKey.tileX, tileKey.tileY))
+                            continue;
+
+                        foreach (Pm4OverlayObject obj in objects)
+                        {
+                            if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
+                                continue;
+
+                            var ck24Key = (tileKey.tileX, tileKey.tileY, obj.Ck24);
+                            var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
+                            Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+                            if (!ShouldRenderPm4Object(obj, objectTransform, applyObjectTransform, cameraPos, out _))
+                                continue;
+
+                            Vector3 boundsMin = obj.BoundsMin;
+                            Vector3 boundsMax = obj.BoundsMax;
+                            if (applyObjectTransform)
+                                TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+
+                            if (ck24Groups.TryGetValue(ck24Key, out var existing))
+                            {
+                                ck24Groups[ck24Key] = (
+                                    Vector3.Min(existing.min, boundsMin),
+                                    Vector3.Max(existing.max, boundsMax),
+                                    existing.ck24Type,
+                                    existing.count + 1);
+                            }
+                            else
+                            {
+                                ck24Groups[ck24Key] = (boundsMin, boundsMax, obj.Ck24Type, 1);
+                            }
+                        }
+                    }
+
+                    // Render one box per CK24 object.
+                    foreach (var ((tileX, tileY, ck24), (boundsMin, boundsMax, ck24Type, count)) in ck24Groups)
+                    {
+                        // Color by CK24 type: WMO=cyan, M2=yellow, nav-mesh=dark gray
+                        Vector3 boxColor = ck24Type switch
+                        {
+                            0x00 => new Vector3(0.3f, 0.3f, 0.3f),  // nav mesh: dark gray
+                            0x40 or 0x41 => new Vector3(1.0f, 0.9f, 0.2f),  // M2: yellow
+                            0x42 or 0x43 => new Vector3(0.2f, 1.0f, 0.95f),  // WMO: cyan
+                            0xC0 or 0xC1 or 0xC2 or 0xC3 => new Vector3(1.0f, 0.5f, 0.2f),  // M2 exterior: orange
+                            _ => new Vector3(0.7f, 0.7f, 0.7f)  // unknown: light gray
+                        };
+
+                        // Highlight the selected object's CK24 group.
+                        if (_selectedPm4ObjectKey.HasValue
+                            && _selectedPm4ObjectKey.Value.tileX == tileX
+                            && _selectedPm4ObjectKey.Value.tileY == tileY
+                            && _selectedPm4ObjectKey.Value.ck24 == ck24)
+                        {
+                            boxColor = new Vector3(1.0f, 1.0f, 1.0f);
+                        }
+
+                        _bbRenderer.BatchBoxMinMax(boundsMin, boundsMax, boxColor);
                     }
                 }
 

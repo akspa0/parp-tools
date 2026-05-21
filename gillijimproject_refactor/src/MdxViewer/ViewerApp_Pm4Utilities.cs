@@ -120,6 +120,11 @@ public partial class ViewerApp
         if (ImGui.Checkbox("PM4 Bounds", ref showPm4Bounds))
             _worldScene.ShowPm4ObjectBounds = showPm4Bounds;
 
+        ImGui.SameLine();
+        bool showPm4Ck24Bounds = _worldScene.ShowPm4Ck24Bounds;
+        if (ImGui.Checkbox("PM4 CK24 Bounds", ref showPm4Ck24Bounds))
+            _worldScene.ShowPm4Ck24Bounds = showPm4Ck24Bounds;
+
         bool showPm4Refs = _worldScene.ShowPm4PositionRefs;
         if (ImGui.Checkbox("PM4 MPRL Refs", ref showPm4Refs))
             _worldScene.ShowPm4PositionRefs = showPm4Refs;
