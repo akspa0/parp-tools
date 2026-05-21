@@ -23,6 +23,7 @@ using CorePm4GeometryLineSegment = WowViewer.Core.PM4.Models.Pm4GeometryLineSegm
 using CorePm4GeometryTriangle = WowViewer.Core.PM4.Models.Pm4GeometryTriangle;
 using CorePm4LinkedPositionRefSummary = WowViewer.Core.PM4.Models.Pm4LinkedPositionRefSummary;
 using CorePm4MprlEntry = WowViewer.Core.PM4.Models.Pm4MprlEntry;
+using CorePm4MshdGroupingService = WowViewer.Core.PM4.Services.Pm4MshdGroupingService;
 using CorePm4MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
 using CorePm4MsurEntry = WowViewer.Core.PM4.Models.Pm4MsurEntry;
 using CorePm4CoordinateModeResolution = WowViewer.Core.PM4.Models.Pm4CoordinateModeResolution;
@@ -64,6 +65,7 @@ public enum Pm4OverlayColorMode
     Ck24ObjectId,
     Ck24Key,
     Tile,
+    MshdRegionId,
     GroupKey,
     AttributeMask,
     Height
@@ -81,6 +83,9 @@ public readonly struct Pm4ObjectDebugInfo
         Pm4LinkedPositionRefSummary linkedPositionRefSummary,
         int tileX,
         int tileY,
+        uint mshdField00,
+        uint mshdRegionId,
+        uint mshdField08,
         int surfaceCount,
         byte dominantGroupKey,
         byte dominantAttributeMask,
@@ -104,6 +109,9 @@ public readonly struct Pm4ObjectDebugInfo
         LinkedPositionRefSummary = linkedPositionRefSummary;
         TileX = tileX;
         TileY = tileY;
+        MshdField00 = mshdField00;
+        MshdRegionId = mshdRegionId;
+        MshdField08 = mshdField08;
         SurfaceCount = surfaceCount;
         DominantGroupKey = dominantGroupKey;
         DominantAttributeMask = dominantAttributeMask;
@@ -128,6 +136,9 @@ public readonly struct Pm4ObjectDebugInfo
     public Pm4LinkedPositionRefSummary LinkedPositionRefSummary { get; }
     public int TileX { get; }
     public int TileY { get; }
+    public uint MshdField00 { get; }
+    public uint MshdRegionId { get; }
+    public uint MshdField08 { get; }
     public int SurfaceCount { get; }
     public byte DominantGroupKey { get; }
     public byte DominantAttributeMask { get; }
@@ -1340,6 +1351,12 @@ public class WorldScene : ISceneRenderer
                             ck24Type = obj.Ck24Type,
                             ck24ObjectId = obj.Ck24ObjectId,
                             objectPartId = obj.ObjectPartId,
+                            mshd = new
+                            {
+                                field00 = obj.MshdField00,
+                                regionId = obj.MshdRegionId,
+                                field08 = obj.MshdField08,
+                            },
                             linkGroupObjectId = obj.LinkGroupObjectId,
                             objectGroupKey = new
                             {
@@ -3630,6 +3647,9 @@ public class WorldScene : ISceneRenderer
                 Pm4OverlayObject obj = tileEntry.Value[i];
                 objects.Add(new Pm4OverlayCacheObject(
                     obj.SourcePath,
+                    obj.MshdField00,
+                    obj.MshdRegionId,
+                    obj.MshdField08,
                     obj.Ck24,
                     obj.Ck24Type,
                     obj.ObjectPartId,
@@ -3829,6 +3849,9 @@ public class WorldScene : ISceneRenderer
                 Pm4OverlayObject obj = tileEntry.Value[i];
                 objects.Add(new Pm4OverlayCacheObject(
                     obj.SourcePath,
+                    obj.MshdField00,
+                    obj.MshdRegionId,
+                    obj.MshdField08,
                     obj.Ck24,
                     obj.Ck24Type,
                     obj.ObjectPartId,
@@ -3882,6 +3905,9 @@ public class WorldScene : ISceneRenderer
                 Pm4OverlayCacheObject cachedObject = tile.Objects[objectIndex];
                 Pm4OverlayObject restored = Pm4OverlayObject.FromCachedLocalized(
                     cachedObject.SourcePath,
+                    cachedObject.MshdField00,
+                    cachedObject.MshdRegionId,
+                    cachedObject.MshdField08,
                     cachedObject.Ck24,
                     cachedObject.Ck24Type,
                     cachedObject.ObjectPartId,
@@ -4087,6 +4113,9 @@ public class WorldScene : ISceneRenderer
             Pm4OverlayObject obj = objects[i];
             rebased.Add(Pm4OverlayObject.FromCachedLocalized(
                 obj.SourcePath,
+                obj.MshdField00,
+                obj.MshdRegionId,
+                obj.MshdField08,
                 obj.Ck24,
                 obj.Ck24Type,
                 obj.ObjectPartId + objectPartOffset,
@@ -4198,6 +4227,7 @@ public class WorldScene : ISceneRenderer
         if (seedGroups.Count == 0)
             return objects;
 
+        var mshdGrouping = CorePm4MshdGroupingService.Describe(pm4.KnownChunks.Mshd);
         Pm4AxisConvention fileAxisConvention = DetectPm4AxisConvention(pm4);
         bool fallbackTileLocalCoordinates = IsLikelyTileLocal(meshVertices);
         int tileLineBudget = Math.Min(Pm4MaxLinesPerTile, remainingLineBudget);
@@ -4325,6 +4355,9 @@ public class WorldScene : ISceneRenderer
 
                         objects.Add(new Pm4OverlayObject(
                             sourcePath,
+                            mshdGrouping.Field00,
+                            mshdGrouping.RegionId,
+                            mshdGrouping.Field08,
                             ck24,
                             ck24Type,
                             nextObjectPartId++,
@@ -9388,6 +9421,9 @@ public class WorldScene : ISceneRenderer
             obj.LinkedPositionRefSummary,
             objectKey.tileX,
             objectKey.tileY,
+            obj.MshdField00,
+            obj.MshdRegionId,
+            obj.MshdField08,
             obj.SurfaceCount,
             obj.DominantGroupKey,
             obj.DominantAttributeMask,
@@ -9724,7 +9760,7 @@ public class WorldScene : ISceneRenderer
             "PM4",
             $"CK24 0x{obj.Ck24:X6} part={obj.ObjectPartId}",
             obj.SourcePath,
-            $"type=0x{obj.Ck24Type:X2} obj={obj.Ck24ObjectId} mslk=0x{obj.LinkGroupObjectId:X8} surfaces={obj.SurfaceCount}",
+            $"type=0x{obj.Ck24Type:X2} obj={obj.Ck24ObjectId} region={obj.MshdRegionId} mslk=0x{obj.LinkGroupObjectId:X8} surfaces={obj.SurfaceCount}",
             worldPosition,
             0,
                 objectKey,
@@ -9933,6 +9969,7 @@ public class WorldScene : ISceneRenderer
             Pm4OverlayColorMode.Ck24ObjectId => ColorFromSeed(obj.Ck24ObjectId),
             Pm4OverlayColorMode.Ck24Key => ColorFromSeed(obj.Ck24),
             Pm4OverlayColorMode.Tile => ColorFromSeed((uint)HashCode.Combine(tileKey.tileX, tileKey.tileY)),
+            Pm4OverlayColorMode.MshdRegionId => ColorFromSeed(obj.MshdRegionId),
             Pm4OverlayColorMode.GroupKey => ColorFromSeed(obj.DominantGroupKey),
             Pm4OverlayColorMode.AttributeMask => ColorFromSeed(obj.DominantAttributeMask),
             Pm4OverlayColorMode.Height => ColorFromHeight(obj.Center.Z),
@@ -10157,6 +10194,7 @@ public class WorldScene : ISceneRenderer
                 {
                     Pm4OverlayColorMode.Ck24ObjectId => obj.Ck24ObjectId,
                     Pm4OverlayColorMode.Ck24Key => obj.Ck24,
+                    Pm4OverlayColorMode.MshdRegionId => obj.MshdRegionId,
                     Pm4OverlayColorMode.GroupKey => obj.DominantGroupKey,
                     Pm4OverlayColorMode.AttributeMask => obj.DominantAttributeMask,
                     _ => obj.Ck24Type
@@ -10183,6 +10221,7 @@ public class WorldScene : ISceneRenderer
                     Pm4OverlayColorMode.Ck24Type => $"CK24 type 0x{value:X2}",
                     Pm4OverlayColorMode.Ck24ObjectId => $"CK24 obj {value} (0x{value:X4})",
                     Pm4OverlayColorMode.Ck24Key => $"CK24 0x{value:X6}",
+                    Pm4OverlayColorMode.MshdRegionId => $"MSHD region {value}",
                     Pm4OverlayColorMode.GroupKey => $"GroupKey 0x{value:X2}",
                     Pm4OverlayColorMode.AttributeMask => $"AttrMask 0x{value:X2}",
                     _ => value.ToString(CultureInfo.InvariantCulture)
@@ -10195,6 +10234,7 @@ public class WorldScene : ISceneRenderer
                 {
                     Pm4OverlayColorMode.Ck24ObjectId => ColorFromSeed(value),
                     Pm4OverlayColorMode.Ck24Key => ColorFromSeed(value),
+                    Pm4OverlayColorMode.MshdRegionId => ColorFromSeed(value),
                     Pm4OverlayColorMode.GroupKey => ColorFromSeed(value),
                     Pm4OverlayColorMode.AttributeMask => ColorFromSeed(value),
                     _ => GetPm4TypeColor((byte)value)
@@ -10700,6 +10740,9 @@ internal sealed class Pm4OverlayObject
 {
     public static Pm4OverlayObject FromCachedLocalized(
         string sourcePath,
+        uint mshdField00,
+        uint mshdRegionId,
+        uint mshdField08,
         uint ck24,
         byte ck24Type,
         int objectPartId,
@@ -10723,6 +10766,9 @@ internal sealed class Pm4OverlayObject
     {
         return new Pm4OverlayObject(
             sourcePath,
+            mshdField00,
+            mshdRegionId,
+            mshdField08,
             ck24,
             ck24Type,
             objectPartId,
@@ -10748,6 +10794,9 @@ internal sealed class Pm4OverlayObject
 
     public Pm4OverlayObject(
         string sourcePath,
+        uint mshdField00,
+        uint mshdRegionId,
+        uint mshdField08,
         uint ck24,
         byte ck24Type,
         int objectPartId,
@@ -10768,6 +10817,9 @@ internal sealed class Pm4OverlayObject
         IReadOnlyList<Pm4ConnectorKey> connectorKeys)
         : this(
             sourcePath,
+            mshdField00,
+            mshdRegionId,
+            mshdField08,
             ck24,
             ck24Type,
             objectPartId,
@@ -10794,6 +10846,9 @@ internal sealed class Pm4OverlayObject
 
     private Pm4OverlayObject(
         string sourcePath,
+        uint mshdField00,
+        uint mshdRegionId,
+        uint mshdField08,
         uint ck24,
         byte ck24Type,
         int objectPartId,
@@ -10817,6 +10872,9 @@ internal sealed class Pm4OverlayObject
         bool geometryIsLocalized)
     {
         SourcePath = sourcePath;
+        MshdField00 = mshdField00;
+        MshdRegionId = mshdRegionId;
+        MshdField08 = mshdField08;
         Ck24 = ck24;
         Ck24Type = ck24Type;
         ObjectPartId = objectPartId;
@@ -10863,6 +10921,9 @@ internal sealed class Pm4OverlayObject
     }
 
     public string SourcePath { get; }
+    public uint MshdField00 { get; }
+    public uint MshdRegionId { get; }
+    public uint MshdField08 { get; }
     public uint Ck24 { get; }
     public byte Ck24Type { get; }
     public ushort Ck24ObjectId => (ushort)(Ck24 & 0xFFFF);

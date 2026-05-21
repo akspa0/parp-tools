@@ -79,6 +79,7 @@ public partial class ViewerApp
             return;
 
         ImGui.TextWrapped("The PM4 workbench mixes raw chunk names, viewer aliases, and viewer-generated structure. Not every label here is a proven native PM4 field name.");
+        ImGui.BulletText("MSHD region: promoted from MSHD.Field04. Current research says it behaves like a tile-level region id, useful for grouping/coloring but not yet a proven placement or scoring semantic.");
         ImGui.BulletText("CK24: viewer alias for the packed MSUR field at 0x1C. Type = high byte, ObjId = low 16 bits.");
         ImGui.BulletText("part / ObjectPartId: viewer-generated split id. MdxViewer assigns it during the current overlay build after CK24 grouping, dominant MSLK grouping, optional MDOS split, then optional connectivity split. It is not a raw PM4 field.");
         ImGui.BulletText("MSLK Group: dominant MSLK.GroupObjectId seen in the current viewer object. Strong grouping hint, not final proof of identity.");
@@ -230,6 +231,7 @@ public partial class ViewerApp
             if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
             {
                 ImGui.TextDisabled($"Type=0x{debugInfo.Ck24Type:X2} ObjId={debugInfo.Ck24ObjectId} Surfaces={debugInfo.SurfaceCount}");
+                ImGui.TextDisabled($"MSHD F00={debugInfo.MshdField00} Region={debugInfo.MshdRegionId} F08={debugInfo.MshdField08}");
                 ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} Mdos={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
                 ImGui.TextDisabled($"MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8} Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
             }
@@ -1871,6 +1873,7 @@ public partial class ViewerApp
             Pm4OverlayColorMode.Ck24ObjectId => "MSUR._0x1C-derived low16",
             Pm4OverlayColorMode.Ck24Key => "MSUR._0x1C-derived key24",
             Pm4OverlayColorMode.Tile => "Tile",
+            Pm4OverlayColorMode.MshdRegionId => "MSHD.Field04 region id",
             Pm4OverlayColorMode.GroupKey => "MSUR._0x00 (alias GroupKey)",
             Pm4OverlayColorMode.AttributeMask => "MSUR._0x02 (alias AttributeMask)",
             Pm4OverlayColorMode.Height => "MSUR._0x10 plane-distance gradient",
@@ -2200,12 +2203,19 @@ public partial class ViewerApp
                 bool selected = _worldScene != null
                     && _worldScene.SelectedPm4ObjectKey.HasValue
                     && _worldScene.SelectedPm4ObjectKey.Value == key;
+                uint? regionId = _worldScene != null
+                    && _worldScene.TryGetPm4ObjectDebugInfo(key, out Pm4ObjectDebugInfo debugInfo)
+                    ? debugInfo.MshdRegionId
+                    : null;
+                string label = regionId.HasValue
+                    ? $"{index + 1}. CK24 0x{key.ck24:X6} part={key.objectPart} tile=({key.tileX},{key.tileY}) region={regionId.Value}"
+                    : $"{index + 1}. CK24 0x{key.ck24:X6} part={key.objectPart} tile=({key.tileX},{key.tileY})";
 
                 ImGui.PushID($"Pm4CollectionItem{idSuffix}_{index}");
                 if (selected)
-                    ImGui.TextColored(new Vector4(1f, 0.95f, 0.35f, 1f), $"{index + 1}. CK24 0x{key.ck24:X6} part={key.objectPart} tile=({key.tileX},{key.tileY})");
+                    ImGui.TextColored(new Vector4(1f, 0.95f, 0.35f, 1f), label);
                 else
-                    ImGui.TextUnformatted($"{index + 1}. CK24 0x{key.ck24:X6} part={key.objectPart} tile=({key.tileX},{key.tileY})");
+                    ImGui.TextUnformatted(label);
 
                 ImGui.SameLine();
                 if (ImGui.SmallButton("Select"))
@@ -2328,6 +2338,26 @@ public partial class ViewerApp
             })
             .ToList();
 
+        var regionGroups = entries
+            .GroupBy(static entry => entry.DebugInfo.MshdRegionId)
+            .OrderByDescending(static group => group.Count())
+            .ThenBy(static group => group.Key)
+            .Select(group => new
+            {
+                regionId = group.Key,
+                count = group.Count(),
+                tileCount = group.Select(static entry => (entry.Key.tileX, entry.Key.tileY)).Distinct().Count(),
+                members = group.Select(static entry => new
+                {
+                    tileX = entry.Key.tileX,
+                    tileY = entry.Key.tileY,
+                    ck24 = entry.DebugInfo.Ck24,
+                    objectPartId = entry.Key.objectPart,
+                    center = VectorToArray(entry.DebugInfo.Center)
+                }).ToList()
+            })
+            .ToList();
+
         Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4CollectionDuplicateMetrics> duplicateMetrics = BuildPm4CollectionDuplicateMetrics(entries);
         var stackClusters = BuildPm4CollectionStackClusters(entries, duplicateMetrics);
         string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? string.Empty;
@@ -2347,8 +2377,10 @@ public partial class ViewerApp
                 }
                 : null,
             signatureGroupCount = signatureGroups.Count,
+            regionGroupCount = regionGroups.Count,
             stackClusterCount = stackClusters.Count,
             signatureGroups,
+            regionGroups,
             stackClusters,
             objects = entries.Select(entry => new
             {
@@ -2381,6 +2413,12 @@ public partial class ViewerApp
                     headingMinDegrees = JsonFiniteOrNull(entry.DebugInfo.LinkedPositionRefSummary.HeadingMinDegrees),
                     headingMaxDegrees = JsonFiniteOrNull(entry.DebugInfo.LinkedPositionRefSummary.HeadingMaxDegrees),
                     headingMeanDegrees = JsonFiniteOrNull(entry.DebugInfo.LinkedPositionRefSummary.HeadingMeanDegrees)
+                },
+                mshd = new
+                {
+                    field00 = entry.DebugInfo.MshdField00,
+                    regionId = entry.DebugInfo.MshdRegionId,
+                    field08 = entry.DebugInfo.MshdField08
                 },
                 surfaceCount = entry.DebugInfo.SurfaceCount,
                 dominantGroupKey = entry.DebugInfo.DominantGroupKey,

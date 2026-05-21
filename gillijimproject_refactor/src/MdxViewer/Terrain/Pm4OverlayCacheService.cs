@@ -10,7 +10,7 @@ namespace MdxViewer.Terrain;
 internal sealed class Pm4OverlayCacheService
 {
     private const string CacheMagic = "PM4C";
-    private const int CacheVersion = 3;
+    private const int CacheVersion = 4;
     private readonly string _cacheRoot;
 
     public Pm4OverlayCacheService(string cacheRoot)
@@ -290,6 +290,9 @@ internal sealed class Pm4OverlayCacheService
             for (int objectIndex = 0; objectIndex < objectEntryCount; objectIndex++)
             {
                 string sourcePath = reader.ReadString();
+                uint mshdField00 = reader.ReadUInt32();
+                uint mshdRegionId = reader.ReadUInt32();
+                uint mshdField08 = reader.ReadUInt32();
                 uint ck24 = reader.ReadUInt32();
                 byte ck24Type = reader.ReadByte();
                 int objectPartId = reader.ReadInt32();
@@ -345,6 +348,9 @@ internal sealed class Pm4OverlayCacheService
 
                 objects.Add(new Pm4OverlayCacheObject(
                     sourcePath,
+                    mshdField00,
+                    mshdRegionId,
+                    mshdField08,
                     ck24,
                     ck24Type,
                     objectPartId,
@@ -413,6 +419,9 @@ internal sealed class Pm4OverlayCacheService
             {
                 Pm4OverlayCacheObject obj = tile.Objects[objectIndex];
                 writer.Write(obj.SourcePath);
+                writer.Write(obj.MshdField00);
+                writer.Write(obj.MshdRegionId);
+                writer.Write(obj.MshdField08);
                 writer.Write(obj.Ck24);
                 writer.Write(obj.Ck24Type);
                 writer.Write(obj.ObjectPartId);
@@ -543,6 +552,9 @@ internal sealed class Pm4OverlayCacheObject
 {
     public Pm4OverlayCacheObject(
         string sourcePath,
+        uint mshdField00,
+        uint mshdRegionId,
+        uint mshdField08,
         uint ck24,
         byte ck24Type,
         int objectPartId,
@@ -565,6 +577,9 @@ internal sealed class Pm4OverlayCacheObject
         List<Pm4ConnectorKey> connectorKeys)
     {
         SourcePath = sourcePath;
+        MshdField00 = mshdField00;
+        MshdRegionId = mshdRegionId;
+        MshdField08 = mshdField08;
         Ck24 = ck24;
         Ck24Type = ck24Type;
         ObjectPartId = objectPartId;
@@ -588,6 +603,9 @@ internal sealed class Pm4OverlayCacheObject
     }
 
     public string SourcePath { get; }
+    public uint MshdField00 { get; }
+    public uint MshdRegionId { get; }
+    public uint MshdField08 { get; }
     public uint Ck24 { get; }
     public byte Ck24Type { get; }
     public int ObjectPartId { get; }

@@ -20,6 +20,12 @@ This file is intentionally compressed. Keep only the latest compatibility milest
 - Viewer-side skeletal animation playback is proven for the bounded wolf repro.
 - Character customization and projected-heavy object fixes improved the bounded runtime path.
 
+### May 21, 2026 - PM4 MSHD region grouping surfaced through wow-viewer
+
+- `wow-viewer` now exposes `MSHD.Field04` as a region-id grouping contract with compatibility aliases for older PM4 consumer names.
+- `MdxViewer` now colors/groups PM4 overlays by region id, shows the raw `MSHD` trio in the PM4 workbench, and includes the metadata in PM4 JSON exports and cache payloads.
+- Current `MdxViewer.csproj` build is still blocked by an unrelated `M2ToMdxConverter` symbol ambiguity in `ViewerApp.cs`.
+
 ## Open Risks
 
 - Full M2 parity is still open.

@@ -24,7 +24,12 @@ public sealed record Pm4MshdHeader(
     uint Field10,
     uint Field14,
     uint Field18,
-    uint Field1C);
+    uint Field1C)
+{
+    public uint RegionId => Field04;
+
+    public bool IsEmptyStubRegion => RegionId == 1;
+}
 
 public sealed record Pm4MslkEntry(
     byte TypeFlags,
@@ -60,6 +65,9 @@ public sealed record Pm4MsurEntry(
     public uint MscnIndex => _0x18;
 
     public uint MscnRefIndex => _0x18;
+
+    // Compatibility alias for older consumer code that has not finished the MdosIndex -> MscnIndex rename.
+    public uint MdosIndex => _0x18;
 
     public uint _0x1C => PackedParams;
 

@@ -32,6 +32,9 @@ public sealed record Pm4CorrelationObjectDescriptor(
     float AverageSurfaceHeight)
 {
     public ushort Ck24ObjectId => (ushort)(Ck24 & 0xFFFF);
+
+    // Compatibility alias for older consumer code that has not finished the MdosIndex -> MscnIndex rename.
+    public uint DominantMdosIndex => DominantMscnRefIndex;
 }
 
 public sealed record Pm4CorrelationObjectInput(

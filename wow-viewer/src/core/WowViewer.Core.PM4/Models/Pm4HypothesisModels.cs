@@ -16,7 +16,11 @@ public sealed record Pm4ObjectHypothesis(
     uint DominantLinkGroupObjectId,
     Pm4ForensicsPlacementComparison PlacementComparison,
     Pm4Bounds3? Bounds,
-    Pm4MprlFootprintSummary MprlFootprint);
+    Pm4MprlFootprintSummary MprlFootprint)
+{
+    // Compatibility alias for older consumer code that has not finished the MdosIndex -> MscnIndex rename.
+    public IReadOnlyList<uint> MdosIndices => MscnRefIndices;
+}
 
 public sealed record Pm4TileObjectHypothesisReport(
     string? SourcePath,

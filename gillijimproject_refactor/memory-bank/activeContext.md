@@ -125,3 +125,4 @@
 ## Next Likely Slice
 - Monitor `v16_full_corpus_epoch_rotation`, inspect `train_quality_audit.json`, and tighten mismatch rejection if the alpha/minimap bad tail still leaks into validation.
 - If WL* chunk-fill behavior matters to loss semantics, handle it in the loader/trainer, not by reopening harvest.
+- PM4 follow-up now has a library-owned `MSHD.Field04` region-id seam feeding `MdxViewer` overlay coloring/debug/export; broader PM4 object-mapping work can build on that without reintroducing viewer-owned decode logic.

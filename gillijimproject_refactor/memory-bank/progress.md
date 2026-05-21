@@ -119,6 +119,7 @@
 - Object segmentation Model A.
 - Global asset vocabulary for instance/asset follow-up work.
 - PM4 cross-reference / object mapping follow-up.
+- PM4 `MSHD.Field04` region-id promotion is now landed in `wow-viewer` and consumed by `MdxViewer` for overlay grouping/coloring/debug export; full viewer build is currently blocked by an unrelated `M2ToMdxConverter` symbol ambiguity in `ViewerApp.cs`.
 
 ## High-Value Open Gaps
 - Forward `AlphaToLk` AreaID wiring.
