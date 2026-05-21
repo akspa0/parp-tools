@@ -5,6 +5,10 @@
 
 ## Primary Live Lane
 - V16 terrain dataset + training is the current execution path.
+- Canonical short docs were rewritten and should now be the first read for this lane:
+  - `wow-viewer/README.md`
+  - `wow-viewer/data-harvester/README.md`
+  - `wow-viewer/docs/architecture/v16-terrain-model-spec-2026-05-16.md`
 - Canonical flow:
   - `WowViewer.Tool.Harvest harvest-stream --stream-profile v16`
   - `build_v16_dataset.py build`
@@ -48,6 +52,8 @@
 - Validation snapshot alpha QA now uses a painted-layer composite (`max(ch1..3)` with fallback) instead of raw `alpha[...,0]`, because channel `0` is commonly the implicit base layer and was producing false-black GT panels.
 - `train-max-tiles` is now the persistent run-level train pool, while `train-epoch-tiles` can rotate a fresh per-epoch subset from that pool.
 - CUDA-oriented loader defaults are less conservative now: `--num-workers=-1` auto-resolves a worker count and `persistent_workers` defaults on when workers are active.
+- Trainer curation now has a basic quality gate by default: it drops obviously low-signal flat tiles and writes `train_quality_audit.json` / `val_quality_audit.json`.
+- Every new best `val_h` epoch now writes a fresh random validation snapshot set under `validation/best_epoch_XXXX/`, separate from the normal interval snapshots.
 
 ## Harvest / Dataset Truth
 - Stream format is lean `ARRY`, not legacy `NPZB`.
@@ -56,6 +62,10 @@
 - `repair-index` is the fast fix for coordinate-only damage.
 - `patch-liquids` can rewrite only liquid arrays + liquid provenance flags in-place.
 - `inspect_v16_dataset.py` is the human-eye QA surface.
+- Operator routing is intentionally simpler now:
+  - root README = repo + workflow orientation
+  - data-harvester README = commands + outputs
+  - V16 spec = contract and boundaries
 
 ## Critical Recent Fixes
 - Mixed Cataclysm archive tiles can carry inline root `MCLY` / `MCAL` without `_tex0`.
@@ -105,7 +115,13 @@
 - Current production-oriented launch contract:
   - run name: `v16_full_corpus_epoch_rotation`
   - command uses `train-max-tiles 4000`, `train-epoch-tiles 1350`, `val-max-tiles 150`, `batch-size 72`, `gpu-duty-cycle 100`
+- Alpha/minimap alignment audit:
+  - `wow-viewer/output/datasets/v16/validation/alpha_minimap_alignment/alpha_minimap_alignment.summary.json`
+  - sampled corpus result: `edge_f1_mean≈0.54`, `median≈0.64`, but `p10=0.0`, confirming a real zero-match bad tail
+- Quality-curation proof:
+  - `wow-viewer/models/v16/runs/smoke_quality_curation/evidence/train_quality_audit.json`
+  - basic gate dropped `196` obviously low-signal flat train tiles from the `3_3_5_12340` smoke candidate pool (`4621 -> 4425`)
 
 ## Next Likely Slice
-- Monitor `v16_full_corpus_epoch_rotation` and tune throughput / batch size upward if VRAM headroom remains.
+- Monitor `v16_full_corpus_epoch_rotation`, inspect `train_quality_audit.json`, and tighten mismatch rejection if the alpha/minimap bad tail still leaks into validation.
 - If WL* chunk-fill behavior matters to loss semantics, handle it in the loader/trainer, not by reopening harvest.

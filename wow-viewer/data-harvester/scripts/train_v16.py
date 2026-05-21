@@ -254,6 +254,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow curation to include rows with placeholder map labels (e.g. map=memory)",
     )
+    p.add_argument(
+        "--curation-quality-profile",
+        choices=["off", "basic"],
+        default="basic",
+        help="Train/val curation quality filter. 'basic' drops obviously low-signal flat tiles and biases subset sampling toward richer supervision.",
+    )
     p.add_argument("--no-amp", action="store_true")
     p.add_argument("--augment", action="store_true", default=True)
     p.add_argument("--no-augment", action="store_false", dest="augment")
@@ -310,6 +316,94 @@ def _to_curation_row(entry: dict[str, Any], split: str, subset_pos: int) -> dict
     }
 
 
+def _entry_tile_id(entry: dict[str, Any]) -> int:
+    return int(entry.get("tile_id", -1))
+
+
+def _entry_build(entry: dict[str, Any]) -> str:
+    return str(entry.get("_build", "unknown"))
+
+
+def _minimap_grayscale(minimap: np.ndarray) -> np.ndarray:
+    x = minimap.astype(np.float32)
+    return (0.299 * x[:, :, 0] + 0.587 * x[:, :, 1] + 0.114 * x[:, :, 2]).astype(np.float32)
+
+
+def _alpha_painted(alpha: np.ndarray) -> np.ndarray:
+    if alpha.ndim != 3 or alpha.shape[2] <= 0:
+        return np.zeros(alpha.shape[:2], dtype=np.float32)
+    if alpha.shape[2] > 1:
+        painted = alpha[:, :, 1:]
+        if float(painted.max()) > 0.0:
+            return painted.max(axis=2).astype(np.float32, copy=False)
+    return alpha.max(axis=2).astype(np.float32, copy=False)
+
+
+def _read_minimap_stats(ds: V16Dataset, global_idx: int) -> tuple[float, float]:
+    entry = ds._index_entries[global_idx]
+    build = _entry_build(entry)
+    tile_id = _entry_tile_id(entry)
+    root = ds._stores[build]
+    minimap = root["minimap_rgb"][tile_id].astype(np.float32)
+    gray = _minimap_grayscale(minimap)
+    return float(minimap.std()), float(gray.std())
+
+
+def _read_alpha_coverage(ds: V16Dataset, global_idx: int, threshold: float = 0.05) -> float:
+    entry = ds._index_entries[global_idx]
+    if not bool(entry.get("has_alpha_256", False)):
+        return 0.0
+    build = _entry_build(entry)
+    tile_id = _entry_tile_id(entry)
+    root = ds._stores[build]
+    alpha = root["alpha_256"][tile_id].astype(np.float32)
+    painted = _alpha_painted(alpha)
+    return float((painted >= float(threshold)).mean())
+
+
+def _candidate_quality(
+    entry: dict[str, Any],
+    minimap_std: float,
+    minimap_gray_std: float,
+    alpha_cov: float | None = None,
+) -> tuple[bool, float, str | None]:
+    height_std = float(entry.get("height_std", 0.0) or 0.0)
+    has_alpha = bool(entry.get("has_alpha_256", False))
+    has_liquid = bool(entry.get("has_liquid_mask", False))
+    has_mcly = bool(entry.get("has_mcly_texture_ids", False))
+    has_normals = bool(entry.get("has_normal_xyz", False))
+    has_holes = bool(entry.get("has_holes_16", False))
+    n_mddf = int(entry.get("n_mddf", 0) or 0)
+    n_modf = int(entry.get("n_modf", 0) or 0)
+    placement_count = n_mddf + n_modf
+
+    low_signal = (
+        minimap_gray_std < 6.0
+        and height_std < 3.0
+        and not has_alpha
+        and not has_liquid
+        and not has_mcly
+        and placement_count <= 0
+    )
+    if low_signal:
+        return False, 0.0, "low_signal_flat_tile"
+
+    if has_alpha and minimap_gray_std < 2.5 and height_std < 2.0:
+        if alpha_cov is not None and alpha_cov > 0.60:
+            return False, 0.0, "flat_minimap_with_heavy_alpha"
+
+    score = 0.05
+    score += min(max(minimap_gray_std, 0.0) / 18.0, 2.0)
+    score += min(max(height_std, 0.0) / 18.0, 2.0)
+    score += 0.35 if has_normals else 0.0
+    score += 0.35 if has_alpha else 0.0
+    score += 0.30 if has_liquid else 0.0
+    score += 0.35 if has_mcly else 0.0
+    score += 0.15 if has_holes else 0.0
+    score += min(placement_count, 20) / 40.0
+    return True, float(score), None
+
+
 def _curate_split(
     ds: V16Dataset,
     split: str,
@@ -317,6 +411,7 @@ def _curate_split(
     seed: int,
     evidence_dir: Path,
     include_placeholder_map_tiles: bool,
+    quality_profile: str,
 ) -> dict[str, Any]:
     full_indices = list(ds._indices)
     n_full = len(full_indices)
@@ -337,13 +432,88 @@ def _curate_split(
             "Use --include-placeholder-map-tiles to bypass this guard or repair/rebuild the affected dataset."
         )
 
+    quality_rows: list[dict[str, Any]] = []
+    dropped_quality = 0
+    quality_filtered_indices: list[int] = []
+    candidate_weights: list[float] = []
+    if quality_profile != "off":
+        for gi in candidate_indices:
+            entry = ds._index_entries[gi]
+            minimap_std, minimap_gray_std = _read_minimap_stats(ds, gi)
+            alpha_cov = None
+            if bool(entry.get("has_alpha_256", False)) and minimap_gray_std < 2.5 and float(entry.get("height_std", 0.0) or 0.0) < 2.0:
+                alpha_cov = _read_alpha_coverage(ds, gi)
+            keep, score, reject_reason = _candidate_quality(
+                entry,
+                minimap_std=minimap_std,
+                minimap_gray_std=minimap_gray_std,
+                alpha_cov=alpha_cov,
+            )
+            row = {
+                "split": split,
+                "build": _entry_build(entry),
+                "tile_id": _entry_tile_id(entry),
+                "map": entry.get("map"),
+                "tile_x": _as_int(entry.get("tile_x")),
+                "tile_y": _as_int(entry.get("tile_y")),
+                "minimap_std": float(minimap_std),
+                "minimap_gray_std": float(minimap_gray_std),
+                "height_std": float(entry.get("height_std", 0.0)),
+                "alpha_cov": float(alpha_cov) if alpha_cov is not None else None,
+                "quality_score": float(score),
+                "keep": bool(keep),
+                "reject_reason": reject_reason,
+                "has_alpha": bool(entry.get("has_alpha_256", False)),
+                "has_liquid": bool(entry.get("has_liquid_mask", False)),
+                "has_mcly": bool(entry.get("has_mcly_texture_ids", False)),
+                "n_mddf": int(entry.get("n_mddf", 0) or 0),
+                "n_modf": int(entry.get("n_modf", 0) or 0),
+            }
+            quality_rows.append(row)
+            if keep:
+                quality_filtered_indices.append(gi)
+                candidate_weights.append(float(score))
+            else:
+                dropped_quality += 1
+        if quality_filtered_indices:
+            candidate_indices = quality_filtered_indices
+
+    quality_audit_path = evidence_dir / f"{split}_quality_audit.json"
+    if quality_rows:
+        kept_scores = [row["quality_score"] for row in quality_rows if row["keep"]]
+        quality_payload = {
+            "split": split,
+            "quality_profile": quality_profile,
+            "full_tiles": n_full,
+            "post_placeholder_candidates": len(full_indices) - dropped_placeholder,
+            "post_quality_candidates": len(candidate_indices),
+            "dropped_placeholder_map_tiles": dropped_placeholder,
+            "dropped_quality_tiles": dropped_quality,
+            "kept_quality_score_mean": float(np.mean(kept_scores)) if kept_scores else 0.0,
+            "kept_quality_score_p25": float(np.percentile(kept_scores, 25)) if kept_scores else 0.0,
+            "worst_rejected_examples": [row for row in quality_rows if not row["keep"]][:32],
+        }
+        quality_audit_path.write_text(json.dumps(quality_payload, indent=2), encoding="utf-8")
+
+    if not candidate_indices:
+        raise RuntimeError(
+            f"{split} curation has zero candidates after quality filtering. "
+            "Use --curation-quality-profile off to bypass this guard."
+        )
+
     n_candidates = len(candidate_indices)
+    rng = np.random.RandomState(seed)
     if max_tiles > 0 and max_tiles < n_candidates:
-        rng = np.random.RandomState(seed)
-        chosen_local = rng.choice(n_candidates, size=max_tiles, replace=False).tolist()
-        mode = "random_subset_no_replace"
+        if quality_profile != "off" and candidate_weights and len(candidate_weights) == n_candidates:
+            weights = np.asarray(candidate_weights, dtype=np.float64)
+            weights = np.clip(weights, 1e-8, None)
+            weights = weights / weights.sum()
+            chosen_local = rng.choice(n_candidates, size=max_tiles, replace=False, p=weights).tolist()
+            mode = "weighted_quality_subset_no_replace"
+        else:
+            chosen_local = rng.choice(n_candidates, size=max_tiles, replace=False).tolist()
+            mode = "random_subset_no_replace"
     else:
-        rng = np.random.RandomState(seed)
         chosen_local = rng.permutation(n_candidates).tolist()
         mode = "all_tiles_random_order"
 
@@ -371,9 +541,12 @@ def _curate_split(
         "available_tiles": n_full,
         "candidate_tiles_after_filters": n_candidates,
         "dropped_placeholder_map_tiles": dropped_placeholder,
+        "quality_profile": quality_profile,
+        "dropped_quality_tiles": dropped_quality,
         "selected_tiles": len(chosen_global),
         "build_tile_counts": dict(sorted(build_counts.items())),
         "selection_jsonl": str(jsonl_path),
+        "quality_audit_json": str(quality_audit_path) if quality_rows else None,
         "selection_sha256": digest,
     }
 
@@ -503,6 +676,7 @@ def main() -> None:
         "val_max_tiles": args.val_max_tiles,
         "curation_seed": args.curation_seed,
         "include_placeholder_map_tiles": args.include_placeholder_map_tiles,
+        "curation_quality_profile": args.curation_quality_profile,
         "no_amp": args.no_amp,
         "augment": args.augment,
         "resume_checkpoint": str(args.resume_checkpoint) if args.resume_checkpoint else None,
@@ -566,6 +740,7 @@ def main() -> None:
         curation_seed + 101,
         evidence_dir,
         include_placeholder_map_tiles=args.include_placeholder_map_tiles,
+        quality_profile=str(args.curation_quality_profile),
     )
     val_cur = _curate_split(
         val_ds,
@@ -574,6 +749,7 @@ def main() -> None:
         curation_seed + 202,
         evidence_dir,
         include_placeholder_map_tiles=args.include_placeholder_map_tiles,
+        quality_profile=str(args.curation_quality_profile),
     )
 
     curation_manifest = {
@@ -601,6 +777,15 @@ def main() -> None:
         f"train={train_cur['selected_tiles']}/{train_cur['available_tiles']} "
         f"val={val_cur['selected_tiles']}/{val_cur['available_tiles']}"
     )
+    if str(args.curation_quality_profile) != "off":
+        print(
+            "Curation quality: "
+            f"profile={args.curation_quality_profile} "
+            f"train_candidates={train_cur['candidate_tiles_after_filters']} "
+            f"train_dropped_quality={train_cur.get('dropped_quality_tiles', 0)} "
+            f"val_candidates={val_cur['candidate_tiles_after_filters']} "
+            f"val_dropped_quality={val_cur.get('dropped_quality_tiles', 0)}"
+        )
     print(f"Curated build mix (train): {train_cur.get('build_tile_counts', {})}")
     print(f"Curated build mix (val): {val_cur.get('build_tile_counts', {})}")
     if args.train_epoch_tiles > 0:
@@ -851,8 +1036,10 @@ def main() -> None:
                 f"        val | h={v['val_h']:.4f} n={v['val_n']:.4f} "
                 f"a={v['val_a']:.4f} lq={v['val_lq']:.4f} mc={v['val_mc']:.4f}"
             )
+            is_new_best = False
             if v["val_h"] < best_val:
                 best_val = v["val_h"]
+                is_new_best = True
                 _save_training_checkpoint(
                     ckpt_dir / "v16_best.pt",
                     epoch=epoch,
@@ -882,6 +1069,23 @@ def main() -> None:
                     args.val_overview_columns,
                     val_snapshot_seed,
                     args.val_snapshot_build_balanced,
+                    snapshot_reason="interval",
+                )
+
+            if args.val_snapshots > 0 and is_new_best:
+                best_snap_dir = val_dir / f"best_epoch_{epoch:04d}"
+                best_snap_dir.mkdir(parents=True, exist_ok=True)
+                _save_val_snapshots(
+                    model,
+                    val_ds,
+                    device,
+                    best_snap_dir,
+                    args.val_snapshots,
+                    epoch,
+                    args.val_overview_columns,
+                    val_snapshot_seed + 1_000_003,
+                    args.val_snapshot_build_balanced,
+                    snapshot_reason="best_epoch",
                 )
 
         log_entries.append(entry)
@@ -1066,6 +1270,7 @@ def _save_val_snapshots(
     overview_cols,
     snapshot_seed,
     snapshot_build_balanced,
+    snapshot_reason: str = "interval",
 ):
     """Save per-tile PNGs plus one labeled validation overview image."""
     model.eval()
@@ -1170,6 +1375,7 @@ def _save_val_snapshots(
                 "selected_positions": positions,
                 "snapshot_seed": int(snapshot_seed),
                 "build_balanced": bool(snapshot_build_balanced),
+                "reason": str(snapshot_reason),
             },
             indent=2,
         ),

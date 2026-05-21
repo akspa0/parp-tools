@@ -6,6 +6,10 @@
   - `WowViewer.Tool.Harvest`
   - staged clients under `output/tmp/wowarchive-clients/`
 - Old converter-side `dataset-scan` / `dataset-audit` / `dataset-build-cache` flows are not the primary terrain-AI path.
+- V16-facing docs were rewritten into shorter source-of-truth surfaces:
+  - `wow-viewer/README.md`
+  - `wow-viewer/data-harvester/README.md`
+  - `wow-viewer/docs/architecture/v16-terrain-model-spec-2026-05-16.md`
 
 ## Validated Now
 
@@ -72,6 +76,22 @@
   - `--num-workers=-1` auto-resolves a worker count
   - `persistent_workers` defaults on when workers are active
   - `prefetch-factor` default is now `4`
+- Basic trainer-side quality curation is now landed:
+  - `--curation-quality-profile basic` is the default
+  - low-signal flat tiles are dropped before subset selection
+  - weighted curation now favors richer tiles when `train-max-tiles` / `val-max-tiles` cap the pool
+  - focused proof run: `wow-viewer/models/v16/runs/smoke_quality_curation/`
+- Alpha/minimap discrepancy audit is now landed:
+  - script: `data-harvester/scripts/audit_v16_alpha_minimap_alignment.py`
+  - sampled corpus result: `edge_f1_mean≈0.54`, `median≈0.64`, `p10=0.0`
+  - this confirms a real mismatch bad tail rather than purely subjective screenshot reading
+- Best-epoch qualitative snapshots are now landed:
+  - every new best `val_h` writes a fresh random validation sample set under `validation/best_epoch_XXXX/`
+  - this is separate from the normal interval snapshots so review is not pinned to one repeating tile set
+- The main doc routing is now cleaner:
+  - root README for repo orientation
+  - data-harvester README for operational commands
+  - V16 spec for dataset / trainer / inference contract
 
 ### Alpha / LK Conversion Lane
 - `AlphaToLk` and `LkToAlpha` are both landed in shared `wow-viewer` surfaces.

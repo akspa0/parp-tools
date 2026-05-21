@@ -690,7 +690,164 @@ The user's goal: match PM4 collision objects to real WMO/M2 assets. The WoWEdit 
 
 ---
 
-## TypeFlags Bitmask Verification — Revised Hypothesis
+## Phase 1 Raw Analysis — Corpus-Wide Analyzer Findings
+
+**Date**: 2026-05-20
+**Source**: All 8 analyzers run against `test_data/original_development/World/Maps/development/` (616 files)
+**Output files**: `wow-viewer/output/research/pm4-phase-1/*.json`
+
+### Corpus Shape (Verified)
+
+| Metric | Value | Source |
+|--------|-------|--------|
+| Total files | 616 | audit-directory |
+| Files with PM4 data | 502 (114 empty) | audit-directory |
+| Files with unknown chunks | 0 | audit-directory |
+| Files with diagnostics | 0 | audit-directory |
+| PM4 version | 12304 | inspect ref tile |
+| All chunk strides validated | Yes (0 stride violations) | audit-directory |
+
+### Critical Correction: MSHD.Field04 is NOT always 1
+
+**Research notes previously stated**: "Field04 is always 1" — **WRONG**.
+
+**Actual data** (mshd.json):
+- Field04: distinct=227 values, zero=0, nonZero=502
+- Field04 == 1: only 140/502 files (28%)
+- Top values: 1→140, 3262→13, 974→13, 3285→8
+- Field04 == 1: 140/502 — far from constant
+
+This contradicts the prior assumption. Field04 has high cardinality and likely carries meaningful data.
+
+### MSHD Field Profiles (mshd.json)
+
+| Field | Distinct | Zero | NonZero | Top Value | Notes |
+|-------|----------|------|---------|-----------|-------|
+| Field00 | 155 | 0 | 502 | 534→289 | Top value dominates (57.6%) |
+| Field04 | **227** | 0 | 502 | 1→140 | **HIGH VARIETY** — 227 distinct |
+| Field08 | 152 | 0 | 502 | 534→292 | Similar to Field00 |
+| Field0C-1C | 1 | **502** | **0** | 0→502 | Always zero — confirmed |
+
+**Key**: Field00 == Field08 in only 233/502 (46.4%) — they are NOT the same field.
+
+### MSLK Families (unknowns.json)
+
+Only **10 distinct TypeFlags values** and **19 distinct Subtype values** across all 1,273,335 MSLK entries.
+
+**Top 8 families** (all system=0x8000):
+
+| TypeFlags | Subtype | Entries | Files | MSUR fit | NonZero Group |
+|-----------|---------|---------|-------|----------|---------------|
+| 0x01 | 2 | 184,531 | 300 | 183,619 | 184,439 |
+| 0x01 | 1 | 182,445 | 297 | 181,846 | 182,342 |
+| 0x01 | 0 | 180,448 | 291 | 180,436 | 180,361 |
+| 0x02 | 2 | 121,853 | 277 | 121,112 | 121,813 |
+| 0x02 | 0 | 116,836 | 262 | 116,784 | 116,783 |
+| 0x02 | 1 | 112,821 | 271 | 112,308 | 112,777 |
+| 0x01 | 3 | 95,452 | 288 | 94,844 | 95,397 |
+| 0x02 | 3 | 77,709 | 267 | 77,171 | 77,692 |
+
+**Observation**: TypeFlags values (0x01, 0x02) do NOT match CK24 type bytes (0x00, 0x40, 0x42, 0x43). The WoWRollback hypothesis that TypeFlags stores the CK24 type byte is **INCORRECT for the dominant families**.
+
+### TypeFlags in CK24=0x40AA0A Forensics
+
+In the top CK24 group (type=0x40, M2), observed TypeFlags values:
+- 0x11 (17) = 0b0001_0001
+- 0x12 (18) = 0b0001_0010
+- 0x14 (20) = 0b0001_0100
+- 0x1A (26) = 0b0001_1010
+- 0x1C (28) = 0b0001_1100
+
+High nibble is always 0x1 (0b0001), NOT 0x4 (CK24 type byte). **TypeFlags does not store the CK24 type byte directly.**
+
+### MSPI Modes (unknowns.json)
+
+- Active links: 598,882
+- Indices-only: 399,183
+- Triangles-only: **0**
+- Both modes fit: 199,699
+- Neither: 0
+
+Confirmed: MSPI is always in indices mode. Triangle mode is not used.
+
+### MSUR Families (unknowns.json)
+
+Top families by attribute mask / group key:
+
+| Attr | Group | Indices | Surfaces | Files | Distinct CK24 |
+|------|-------|---------|----------|-------|---------------|
+| 0x02 | 3 | 3 | 35,779 | 260 | **1** |
+| 0x03 | 3 | 3 | 27,724 | 232 | **1** |
+| 0x01 | 3 | 3 | 24,323 | 261 | **1** |
+| 0x02 | **18** | 4 | 23,814 | 187 | **932** |
+| 0x02 | **18** | 3 | 23,065 | 183 | **824** |
+| 0x03 | **18** | 4 | 19,455 | 180 | **906** |
+| 0x03 | **18** | 3 | 17,767 | 178 | **759** |
+| 0x02 | 3 | 4 | 15,333 | 251 | **1** |
+
+**Critical observation**: GroupKey=3 surfaces have exactly **1 distinct CK24 value** per family. GroupKey=18 surfaces have **759-932 CK24 values**. This confirms GroupKey=3 is terrain/nav-mesh and GroupKey=18 is object/WMO collision geometry.
+
+### MPRL Profile (unknowns.json, inspect ref tile)
+
+- Total: 178,588 entries across 502 files
+- Unk14 (floor) range: -1..15
+- Heading range (ref tile): 0.01°..22.30°
+- Normal entries: 1,886 per-tile | Terminator entries: 607 per-tile
+
+### MPRR Profile (unknowns.json)
+
+- Total entries: 17,150,640 across 502 files
+- Value1 → MPRL: 6,778,712 fits (39.5%)
+- Value1 → MSVT: 8,740,189 fits (51.0%)
+- **Value2: 566 distinct values** — a new high-cardinality unknown
+
+### MSCN Analysis (mscn.json)
+
+- Files with MSCN: 309 (out of 502 non-empty)
+- MSUR._0x18 → MSCN: 511,891 fits, 6,201 misses (~1.2% gap)
+- CK24 groups referencing distinct MSCN nodes: 1,214
+- Dominant coordinate mode: only 1 file has tile-local dominance; 615/616 ambiguous
+- CK24 alignment: raw-only=1,152, neither=724, both=10, mesh-only=9
+
+### Ref Tile (development_00_00) — Corrected CK24 Values (inspect-ref-tile.json)
+
+Previously documented CK24 values were stale. Actual top groups:
+
+| CK24 | Type | ObjectId | Surfaces | Indices | MSCN Ref |
+|------|------|----------|----------|---------|----------|
+| 0x40AA0A | 0x40 | 43530 | 896 | 3,406 | 892 |
+| 0x418D9F | 0x41 | 36255 | 896 | 3,406 | 892 |
+| 0x421809 | 0x42 | 6153 | 890 | 3,423 | 887 |
+| 0x41D4B1 | 0x41 | 54449 | 233 | 886 | 231 |
+| 0x40DB09 | 0x40 | 56073 | 206 | 803 | 206 |
+| 0x409E75 | 0x40 | 40565 | 189 | 679 | 189 |
+| 0x40B023 | 0x40 | 45091 | 189 | 679 | 189 |
+| 0x407F21 | 0x40 | 32545 | 129 | 493 | 129 |
+| 0x415881 | 0x41 | 22657 | 129 | 493 | 129 |
+| 0x410C11 | 0x41 | 3089 | 87 | 307 | 87 |
+
+**CK24 0x43A9AA does NOT exist in development_00_00**. Previous research notes were based on stale data.
+
+### MSUR._0x18 Naming Fix — Already Applied
+
+The inspect output for the ref tile shows:
+```
+MSUR._0x18 -> local alias _0x18 (medium)
+  wowdev.wiki calls this _0x18. It indexes into MSCN (scene nodes),
+  NOT MDOS. Renamed from MdosIndex to correct a critical naming error.
+```
+
+The naming fix has already been applied in the wow-viewer codebase. The naming-drift-analysis.md was documenting a state that was already corrected.
+
+### Open Questions from Phase 1
+
+1. **What does Field04 encode?** 227 distinct values, not constant. Needs correlation with per-file content.
+2. **What does TypeFlags actually classify?** Not the CK24 type byte. High nibble=0x1 for CK24=0x40AA0A links. Low nibble=1, 2, 4 — bitmask pattern?
+3. **What does MPRR.Value2 encode?** 566 distinct values — this is a new high-dimensional unknown.
+4. **Why do 24/25 MDOS buildingIndex refs fail?** Only 1 valid reference in the entire corpus. Bug or correct behavior?
+5. **What are the 114 empty PM4 files?** They exist but have no chunks at all.
+
+---
 
 ### My Initial Hypothesis Was Wrong
 
