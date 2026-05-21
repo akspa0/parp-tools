@@ -1241,10 +1241,40 @@ Level 0: MSHD.Field04 (Region) — scene container, spans multiple ADT tiles
 3. **Cross-tile object merge**: Objects with the same CK24 across tiles in the same region are naturally grouped. The existing `BuildMergedGroupMap` can merge them via MSCN connector keys.
 4. **Scene reconstruction**: The region-first hierarchy provides the complete scene graph structure needed to reconstruct the development map from PM4 data.
 
+### Critical Ground Truth (2026-05-21)
+
+**Field04 is tied to data types, not just spatial regions.** The user confirmed: "the field04 stuff may actually be tied to types of data more than we realize."
+
+**One WMO is NOT one PM4 object.** The user confirmed: "now the whole object is actually multiple pm4 sub-objects, not a single object." A single WMO (e.g., WESTFALL_HUMAN_FARMB.WMO) produces multiple CK24 entries with different type bytes (0x42, 0x43) and multiple sub-objects within each CK24 group.
+
+This means:
+1. **CK24 is NOT the object matching unit** — it's a surface grouping key, not an asset identifier
+2. **MSLK.GroupObjectId splits WMOs into sub-parts** — walls, roof, floor, foundation may each be separate sub-objects
+3. **Field04 may encode data-type semantics** — different Field04 values may correspond to different categories of scene data (terrain, buildings, doodads, etc.)
+4. **The matching pipeline needs to account for multi-sub-object WMOs** — a single WMO placement (MODF) may correspond to multiple PM4 sub-objects
+
+### Revised Understanding (2026-05-21)
+
+```
+MSHD.Field04 (Region) — scene container, possibly type-keyed
+  └─ CK24 (Surface Group) — groups surfaces by packed key, NOT a single asset
+       └─ MSLK.GroupObjectId (Sub-object) — linked surface sets within a CK24 group
+            └─ Individual MSUR surfaces + MPRL positions
+```
+
+**What we got wrong**: We assumed CK24 = one WMO/M2 asset. It doesn't. A single WMO can produce multiple CK24 entries (different type bytes for different collision categories) and each CK24 entry can have multiple sub-objects.
+
+**What this means for object matching**: The matching pipeline must:
+1. Collect ALL sub-objects belonging to a CK24 group
+2. Combine their MPRL positions into a single placement candidate
+3. Match the combined placement against MODF/MDDF entries
+4. Account for the fact that one WMO may span multiple CK24 groups (e.g., type 0x42 + type 0x43)
+
 ### Open Questions (Updated)
 
-1. Does Field04 being the same across non-adjacent tiles mean "same scene type" or "same designer area"?
-2. Should the grouper merge objects across tiles only within the same region, or also across regions?
-3. How does the nav mesh (CK24=0x000000) interact with region grouping? It spans the entire map.
-4. What is the relationship between Field00/Field08 and Field04?
-5. **PM4 data loading performance**: The user notes that PM4 data loading and instancing needs performance enhancements — draw calls should cull far-off data and only load within ADT detail range.
+1. Does Field04 encode data-type semantics (terrain vs building vs doodad)?
+2. How do multiple CK24 groups with different type bytes relate to a single WMO?
+3. Should the matching pipeline merge CK24 groups before matching, or match each group independently?
+4. How does the nav mesh (CK24=0x000000) interact with Field04 grouping?
+5. What is the relationship between Field00/Field08 and Field04?
+6. **PM4 data loading performance**: draw calls should cull far-off data and only load within ADT detail range.

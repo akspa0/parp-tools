@@ -320,10 +320,10 @@ public partial class ViewerApp : IDisposable
     {
         new(ShellPanelId.Navigator, "Navigator", ShellPanelLane.Left, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
         new(ShellPanelId.Inspector, "Selection", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
-        new(ShellPanelId.Pm4Workbench, "PM4 Workbench", ShellPanelLane.Right, 420f, 300f, 220f, 820f),
+        new(ShellPanelId.Pm4Workbench, "PM4 Workbench", ShellPanelLane.Right, 420f, 300f, 220f, SidebarMaxWidth),
         new(ShellPanelId.TerrainControls, "Terrain Controls", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
         new(ShellPanelId.RuntimeStats, "Runtime Stats", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
-        new(ShellPanelId.WorldObjects, "World Objects", ShellPanelLane.Right, 420f, 300f, 220f, 820f),
+        new(ShellPanelId.WorldObjects, "World Objects", ShellPanelLane.Right, 420f, 300f, 220f, SidebarMaxWidth),
         new(ShellPanelId.ModelInfo, "Model Info", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
         new(ShellPanelId.Minimap, "Minimap", ShellPanelLane.Floating, 360f, 300f, 260f, 520f),
         new(ShellPanelId.WorkspaceBars, "Workspace Bars", ShellPanelLane.Left, 360f, 280f, 240f, 520f),
@@ -587,10 +587,10 @@ public partial class ViewerApp : IDisposable
     // Sidebar layout
     private bool _showLeftSidebar = true;
     private bool _showRightSidebar = true;
-    private const float DefaultSidebarWidth = 320f;
+    private const float DefaultSidebarWidth = 360f;
     private const float SidebarMinWidth = 260f;
     private const float SidebarCompactMinWidth = 180f;
-    private const float SidebarMaxWidth = 720f;
+    private const float SidebarMaxWidth = 1080f;
     private const float SidebarSplitterWidth = 8f;
     private const float DefaultBottomDrawerHeight = 280f;
     private const float BottomDrawerMinHeight = 220f;
