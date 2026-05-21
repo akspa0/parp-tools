@@ -155,6 +155,9 @@ A terrain researcher checks `signal_validation.json` and sees liquid source prov
 - [x] Python `v16_dataset.py`: uses `object_filtered_mask` for training weight when available, falls back to merged mask for legacy shards
 - [x] Python `inspect_v16_dataset.py`: fixed tile_x/tile_y truthiness bug (`0 or -1` → proper `is not None` check)
 - [x] Python `inspect_v16_harvest_samples.py`: fixed same truthiness bug
+- [x] Python `train_v16.py`: validation alpha QA now renders painted alpha instead of raw channel `0`
+- [x] Python `train_v16.py`: `train-max-tiles` now defines a persistent run-level train pool and `train-epoch-tiles` can rotate fresh per-epoch train subsets from that pool
+- [x] Python `train_v16.py`: CUDA-oriented loader defaults are less conservative (`--num-workers=-1` auto mode, persistent workers default on, `prefetch-factor=4`)
 - [x] Build: 0 errors, all Python files syntax-valid
 
 ### Not Yet Validated
@@ -164,4 +167,6 @@ A terrain researcher checks `signal_validation.json` and sees liquid source prov
 - [ ] Verify `object_filtered_mask` excludes tree-class MDDF objects
 - [ ] Verify WL* liquid heights are smooth (not blocky)
 - [ ] Verify `patch-liquids` picks up `mcnk_flags_16` from fresh harvest
-- [ ] Smoke train run with filtered weight mask
+- [x] Smoke train run with filtered weight mask
+- [x] Smoke proof that epoch-rotating train subsets change per epoch when `train-epoch-tiles < train-max-tiles`
+- [ ] Production-oriented epoch-rotation run outcome (`v16_full_corpus_epoch_rotation`) still pending final training results

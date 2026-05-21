@@ -10,6 +10,12 @@
   - `build_v16_dataset.py build`
   - `validate_v16_training_ready.py`
   - `train_v16.py`
+- Current real-run trainer shape:
+  - train pool: `--train-max-tiles 4000`
+  - epoch budget: `--train-epoch-tiles 1350`
+  - val budget: `--val-max-tiles 150`
+  - batch size: `72`
+  - GPU throttle: `--gpu-duty-cycle 100`
 - `wow-viewer` is the implementation owner. `gillijimproject_refactor` is reference/continuity/validation only.
 
 ## Current V16 Corpus Truth
@@ -40,6 +46,8 @@
 - Terrain loss weighting uses `object_filtered_mask`.
 - `object_instance_mask` is readable but not yet used by the terrain trainer.
 - Validation snapshot alpha QA now uses a painted-layer composite (`max(ch1..3)` with fallback) instead of raw `alpha[...,0]`, because channel `0` is commonly the implicit base layer and was producing false-black GT panels.
+- `train-max-tiles` is now the persistent run-level train pool, while `train-epoch-tiles` can rotate a fresh per-epoch subset from that pool.
+- CUDA-oriented loader defaults are less conservative now: `--num-workers=-1` auto-resolves a worker count and `persistent_workers` defaults on when workers are active.
 
 ## Harvest / Dataset Truth
 - Stream format is lean `ARRY`, not legacy `NPZB`.
@@ -91,7 +99,13 @@
 - Alpha-validation snapshot fix proof:
   - `wow-viewer/models/v16/runs/smoke_alpha_validation_fix/validation/epoch_0001/tile_00/alpha_gt_painted_max.png`
   - `alpha_gt_painted_max.png` now carries nonzero GT intensity; the prior false-black symptom was a channel-selection issue, not a corpus-alpha loss issue
+- Epoch-rotation proof:
+  - `wow-viewer/models/v16/runs/smoke_epoch_rotation/evidence/train_epoch_orders.jsonl`
+  - epoch `1` selected positions `[7,4,2,0]`; epoch `2` selected `[5,6,4,2]`, proving fresh epoch subsets from a larger curated pool
+- Current production-oriented launch contract:
+  - run name: `v16_full_corpus_epoch_rotation`
+  - command uses `train-max-tiles 4000`, `train-epoch-tiles 1350`, `val-max-tiles 150`, `batch-size 72`, `gpu-duty-cycle 100`
 
 ## Next Likely Slice
-- Start the first non-smoke V16 training run.
+- Monitor `v16_full_corpus_epoch_rotation` and tune throughput / batch size upward if VRAM headroom remains.
 - If WL* chunk-fill behavior matters to loss semantics, handle it in the loader/trainer, not by reopening harvest.

@@ -194,7 +194,7 @@ uv run python scripts\build_v16_dataset.py repair-index --build 3_3_5_12340
 
 ```powershell
 cd .\wow-viewer\data-harvester
-uv run python scripts\train_v16.py --builds 3_3_5_12340
+uv run python scripts\train_v16.py --builds 3_3_5_12340 --train-max-tiles 4000 --train-epoch-tiles 1350 --gpu-duty-cycle 100
 ```
 
 ## Output Layout

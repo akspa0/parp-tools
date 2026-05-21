@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -47,25 +48,85 @@ _PANEL_SIZE = 256
 
 
 class _DeterministicEpochSampler(Sampler[int]):
-    """Deterministic no-replacement sampler with per-epoch order evidence."""
+    """Deterministic sampler with optional per-epoch subset rotation."""
 
-    def __init__(self, n: int, seed: int, order_log_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        n: int,
+        seed: int,
+        order_log_path: Path | None = None,
+        epoch_size: int | None = None,
+        build_labels: list[str] | None = None,
+        build_balanced: bool = False,
+    ) -> None:
         self._n = int(n)
         self._seed = int(seed)
         self._epoch = 0
         self._order_log_path = order_log_path
+        self._epoch_size = None if epoch_size is None or int(epoch_size) <= 0 else min(int(epoch_size), self._n)
+        self._build_labels = list(build_labels) if build_labels is not None else None
+        self._build_balanced = bool(build_balanced)
 
     def set_epoch(self, epoch: int) -> None:
         self._epoch = int(epoch)
 
+    def _sample_subset(self, rng: np.random.RandomState) -> list[int]:
+        if self._n <= 0:
+            return []
+        if self._epoch_size is None or self._epoch_size >= self._n:
+            return list(range(self._n))
+
+        if not self._build_balanced or not self._build_labels or len(self._build_labels) != self._n:
+            return rng.choice(self._n, size=self._epoch_size, replace=False).tolist()
+
+        by_build: dict[str, list[int]] = {}
+        for pos, build in enumerate(self._build_labels):
+            by_build.setdefault(str(build), []).append(pos)
+
+        build_order = sorted(by_build.keys())
+        rng.shuffle(build_order)
+        for build in build_order:
+            rng.shuffle(by_build[build])
+
+        out: list[int] = []
+        while len(out) < self._epoch_size:
+            progressed = False
+            for build in build_order:
+                items = by_build[build]
+                if not items:
+                    continue
+                out.append(items.pop())
+                progressed = True
+                if len(out) >= self._epoch_size:
+                    break
+            if not progressed:
+                break
+
+        if len(out) < self._epoch_size:
+            remaining: list[int] = []
+            for build in build_order:
+                remaining.extend(by_build[build])
+            if remaining:
+                rng.shuffle(remaining)
+                out.extend(remaining[: self._epoch_size - len(out)])
+
+        rng.shuffle(out)
+        return out[: self._epoch_size]
+
     def __iter__(self) -> Iterable[int]:
-        g = torch.Generator()
-        g.manual_seed(self._seed + self._epoch)
-        order = torch.randperm(self._n, generator=g).tolist()
+        rng = np.random.RandomState(self._seed + self._epoch)
+        selected = self._sample_subset(rng)
+        order = list(selected)
+        rng.shuffle(order)
         if self._order_log_path is not None:
             payload = {
                 "epoch": self._epoch,
                 "num_samples": self._n,
+                "epoch_size": len(order),
+                "selected_positions_sha256": hashlib.sha256(
+                    np.asarray(selected, dtype=np.int32).tobytes()
+                ).hexdigest(),
+                "selected_positions": selected,
                 "order_sha256": hashlib.sha256(np.asarray(order, dtype=np.int32).tobytes()).hexdigest(),
                 "order": order,
             }
@@ -74,7 +135,7 @@ class _DeterministicEpochSampler(Sampler[int]):
         return iter(order)
 
     def __len__(self) -> int:
-        return self._n
+        return self._epoch_size if self._epoch_size is not None else self._n
 
 
 def parse_args() -> argparse.Namespace:
@@ -87,16 +148,22 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--epochs", type=int, default=200)
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--weight-decay", type=float, default=0.05)
-    p.add_argument("--num-workers", type=int, default=0)
+    p.add_argument(
+        "--num-workers",
+        type=int,
+        default=-1,
+        help="DataLoader worker count. Use -1 to auto-resolve a CUDA-friendly default.",
+    )
     p.add_argument(
         "--persistent-workers",
-        action="store_true",
-        help="Keep DataLoader worker processes alive between epochs (effective when --num-workers > 0)",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Keep DataLoader worker processes alive between epochs (defaults to true when workers > 0)",
     )
     p.add_argument(
         "--prefetch-factor",
         type=int,
-        default=2,
+        default=4,
         help="Batches prefetched per worker (effective when --num-workers > 0)",
     )
     p.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu", "auto"])
@@ -156,7 +223,19 @@ def parse_args() -> argparse.Namespace:
         "--train-max-tiles",
         type=int,
         default=0,
-        help="If >0, randomly curate this many training tiles from the split",
+        help="If >0, randomly curate this many training tiles into the persistent run-level train pool",
+    )
+    p.add_argument(
+        "--train-epoch-tiles",
+        type=int,
+        default=0,
+        help="If >0, sample this many training tiles per epoch from the curated train pool",
+    )
+    p.add_argument(
+        "--train-epoch-build-balanced",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Balance per-epoch train tile sampling across builds when possible.",
     )
     p.add_argument(
         "--val-max-tiles",
@@ -340,6 +419,23 @@ def _resolve_run_seed(args: argparse.Namespace, run_dir: Path) -> int:
     return int(np.random.SeedSequence().generate_state(1, dtype=np.uint32)[0])
 
 
+def _resolve_num_workers(requested: int, device: torch.device) -> int:
+    if requested >= 0:
+        return int(requested)
+    if device.type != "cuda":
+        return 0
+    cpu_count = os.cpu_count() or 4
+    return max(2, min(8, cpu_count // 2))
+
+
+def _resolve_persistent_workers(requested: bool | None, num_workers: int) -> bool:
+    if num_workers <= 0:
+        return False
+    if requested is None:
+        return True
+    return bool(requested)
+
+
 def _save_training_checkpoint(
     path: Path,
     *,
@@ -402,6 +498,8 @@ def main() -> None:
         "val_snapshot_build_balanced": args.val_snapshot_build_balanced,
         "val_overview_columns": args.val_overview_columns,
         "train_max_tiles": args.train_max_tiles,
+        "train_epoch_tiles": args.train_epoch_tiles,
+        "train_epoch_build_balanced": args.train_epoch_build_balanced,
         "val_max_tiles": args.val_max_tiles,
         "curation_seed": args.curation_seed,
         "include_placeholder_map_tiles": args.include_placeholder_map_tiles,
@@ -424,11 +522,16 @@ def main() -> None:
         else "cuda" if args.device == "auto" and torch.cuda.is_available()
         else "cpu"
     )
+    resolved_num_workers = _resolve_num_workers(int(args.num_workers), device)
+    resolved_persistent_workers = _resolve_persistent_workers(args.persistent_workers, resolved_num_workers)
+    config["resolved_num_workers"] = int(resolved_num_workers)
+    config["resolved_persistent_workers"] = bool(resolved_persistent_workers)
+    (run_dir / "config.json").write_text(json.dumps(config, indent=2))
     print(f"Device: {device}")
     print(
-        f"DataLoader: workers={args.num_workers} "
-        f"persistent_workers={bool(args.persistent_workers and args.num_workers > 0)} "
-        f"prefetch_factor={(args.prefetch_factor if args.num_workers > 0 else 'n/a')}"
+        f"DataLoader: workers={resolved_num_workers} "
+        f"persistent_workers={resolved_persistent_workers} "
+        f"prefetch_factor={(args.prefetch_factor if resolved_num_workers > 0 else 'n/a')}"
     )
     if device.type == "cuda":
         print(
@@ -482,6 +585,8 @@ def main() -> None:
         "split_seed": run_seed,
         "curation_seed": curation_seed,
         "val_snapshot_seed": val_snapshot_seed,
+        "train_epoch_tiles": int(args.train_epoch_tiles),
+        "train_epoch_build_balanced": bool(args.train_epoch_build_balanced),
         "train": train_cur,
         "val": val_cur,
     }
@@ -498,22 +603,41 @@ def main() -> None:
     )
     print(f"Curated build mix (train): {train_cur.get('build_tile_counts', {})}")
     print(f"Curated build mix (val): {val_cur.get('build_tile_counts', {})}")
+    if args.train_epoch_tiles > 0:
+        print(
+            "Epoch sampling: "
+            f"train_epoch_tiles={min(int(args.train_epoch_tiles), len(train_ds))}/{len(train_ds)} "
+            f"build_balanced={bool(args.train_epoch_build_balanced)}"
+        )
 
     train_order_log = evidence_dir / "train_epoch_orders.jsonl"
-    train_sampler = _DeterministicEpochSampler(len(train_ds), seed=run_seed, order_log_path=train_order_log)
+    train_build_labels = [
+        str(train_ds._index_entries[global_idx].get("_build", "unknown"))
+        for global_idx in train_ds._indices
+    ]
+    train_sampler = _DeterministicEpochSampler(
+        len(train_ds),
+        seed=run_seed,
+        order_log_path=train_order_log,
+        epoch_size=args.train_epoch_tiles,
+        build_labels=train_build_labels,
+        build_balanced=args.train_epoch_build_balanced,
+    )
     if args.prefetch_factor < 1:
         raise RuntimeError("--prefetch-factor must be >= 1")
     if args.val_interval < 1:
         raise RuntimeError("--val-interval must be >= 1")
     if args.val_snapshot_interval < 0:
         raise RuntimeError("--val-snapshot-interval must be >= 0")
+    if args.train_epoch_tiles < 0:
+        raise RuntimeError("--train-epoch-tiles must be >= 0")
     _loader_kwargs: dict[str, Any] = {
-        "num_workers": args.num_workers,
+        "num_workers": resolved_num_workers,
         "drop_last": False,
         "pin_memory": (device.type == "cuda"),
     }
-    if args.num_workers > 0:
-        _loader_kwargs["persistent_workers"] = bool(args.persistent_workers)
+    if resolved_num_workers > 0:
+        _loader_kwargs["persistent_workers"] = bool(resolved_persistent_workers)
         _loader_kwargs["prefetch_factor"] = int(args.prefetch_factor)
 
     train_loader = DataLoader(

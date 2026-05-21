@@ -78,11 +78,12 @@ Review:
 uv run python scripts/train_v16.py `
   --dataset-dir ../output/datasets/v16 `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
-  --train-max-tiles 1350 `
+  --train-max-tiles 4000 `
+  --train-epoch-tiles 1350 `
   --val-max-tiles 150 `
   --batch-size 72 `
   --target-vram-gb 8 `
-  --gpu-duty-cycle 80 `
+  --gpu-duty-cycle 100 `
   --val-interval 1 `
   --val-snapshots 8 `
   --val-snapshot-interval 1 `
@@ -95,11 +96,18 @@ Resume:
 uv run python scripts/train_v16.py `
   --dataset-dir ../output/datasets/v16 `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
-  --train-max-tiles 1350 `
+  --train-max-tiles 4000 `
+  --train-epoch-tiles 1350 `
   --val-max-tiles 150 `
   --run-name v16_full_corpus_1500_val10 `
   --resume-from auto
 ```
+
+Notes:
+- `--train-max-tiles` is the persistent curated train pool for the run.
+- `--train-epoch-tiles` rotates a fresh per-epoch slice from that pool.
+- `--num-workers` now defaults to `-1`, which auto-resolves a CUDA-friendly loader worker count.
+- `--gpu-duty-cycle 100` disables intentional step throttling; lower values trade speed for thermal headroom.
 
 ## Key outputs
 

@@ -176,13 +176,15 @@ MDBF <--- (filename associated with MDBH entries?)
 | PM4-Format-Specification.md | `gillijimproject_refactor/WoWRollback/docs/-specifications-/` | 711 |
 | pm4-specification.md | `gillijimproject_refactor/next/parpDocumentation/` | 202 |
 
-### Test Data
+### Test Data (CONFIRMED)
 
 | Location | Description |
 |----------|-------------|
-| `gillijimproject_refactor/test_data/development/World/Maps/development/` | 616 PM4 tiles, 309 non-empty |
-| `gillijimproject_refactor/test_data/development/development_00_00.pm4` | Primary reference tile |
+| `wow-viewer/test_data/original_development/World/Maps/development/` | **616 PM4 files** + ADTs (confirmed by user) |
+| `wow-viewer/test_data/original_development/World/Maps/development/development_00_00.pm4` | Primary reference tile |
 | `wow-viewer/tests/WowViewer.Core.PM4.Tests/Pm4ResearchIntegrationTests.cs` | 1025-line integration test |
+
+**Note**: MdxViewer can read this loose map folder against the 3.3.5 client with PM4 overlays enabled. Any findings can be visually verified in the viewer.
 
 ---
 
@@ -694,26 +696,36 @@ The user's goal: match PM4 collision objects to real WMO/M2 assets. The WoWEdit 
 
 I proposed: `&1=walkable, &2=wall, &4=ledge, &8=water, &16=special`
 
-The observed TypeFlags values from WoWRollback tooling tell a different story:
+The observed TypeFlags values from WoWRollback (ANCIENT code, pre-dates MdxViewer — labels are unverified guesses):
 
-| Value | WoWRollback Label | Binary | CK24 Type Byte Match? |
-|-------|------------------|--------|----------------------|
-| 0x00 | "Nav Mesh" | 0b00000000 | CK24 type 0x00 (terrain) |
-| 0x01 | (dominant family) | 0b00000001 | No match |
-| 0x40 | "M2 Interior" | 0b01000000 | CK24 type 0x40 (M2) |
-| 0x41 | "M2 Interior" | 0b01000001 | CK24 type 0x41 (M2) |
-| 0x42 | "WMO" | 0b01000010 | CK24 type 0x42 (WMO) |
-| 0x43 | "WMO" | 0b01000011 | CK24 type 0x43 (WMO) |
-| 0xC0 | "M2 Exterior" | 0b11000000 | CK24 type 0xC0 (M2) |
-| 0xC1 | "M2 Exterior" | 0b11000001 | CK24 type 0xC1 (M2) |
-| 0xC2 | "M2 Exterior" | 0b11000010 | CK24 type 0xC2 (M2) |
-| 0xC3 | "M2 Exterior" | 0b11000011 | CK24 type 0xC3 (M2) |
+| Value | WoWRollback Label (UNVERIFIED) | Binary | CK24 Type Byte Match? |
+|-------|-------------------------------|--------|----------------------|
+| 0x00 | "Nav Mesh" (unverified) | 0b00000000 | CK24 type 0x00 |
+| 0x01 | (dominant family, ~185k entries) | 0b00000001 | No match |
+| 0x40 | "M2 Interior" (unverified) | 0b01000000 | CK24 type 0x40 |
+| 0x41 | "M2 Interior" (unverified) | 0b01000001 | CK24 type 0x41 |
+| 0x42 | "WMO" (unverified) | 0b01000010 | CK24 type 0x42 |
+| 0x43 | "WMO" (unverified) | 0b01000011 | CK24 type 0x43 |
+| 0xC0 | "M2 Exterior" (unverified) | 0b11000000 | CK24 type 0xC0 |
+| 0xC1 | "M2 Exterior" (unverified) | 0b11000001 | CK24 type 0xC1 |
+| 0xC2 | "M2 Exterior" (unverified) | 0b11000010 | CK24 type 0xC2 |
+| 0xC3 | "M2 Exterior" (unverified) | 0b11000011 | CK24 type 0xC3 |
 
-### The Critical Observation
+### The Critical Observation (UNVERIFIED)
 
-**TypeFlags values 0x40-0x43 and 0xC0-0xC3 are identical to CK24 type bytes.** The WoWRollback classification even uses the same labels (WMO, M2 Interior, M2 Exterior) that CK24 type uses.
+**The TypeFlags values 0x40-0x43 and 0xC0-0xC3 numerically match CK24 type byte values.** However, the WoWRollback labels ("M2 Interior", "WMO", "M2 Exterior") are **assumptions from the earliest phase of the project** — WoWRollback predates MdxViewer by months and was built before the coordinate system work, CK24 grouping analysis, or any of the deep PM4 research. Those labels should be treated as **initial guesses, not verified facts**.
 
-This suggests **TypeFlags may be the CK24 type byte of the surface that the MSLK entry references** — copied from MSUR.PackedParams high byte into the MSLK entry for quick access.
+What IS verified:
+- The numeric values exist in the TypeFlags distribution
+- The values numerically overlap with CK24 type byte values
+- The dominant family has TypeFlags=0x01 (which doesn't match any CK24 type)
+
+What is NOT verified:
+- Whether the WoWRollback labels ("M2 Interior", "WMO", etc.) are correct — they're from ancient code
+- Whether TypeFlags actually stores the CK24 type byte
+- Whether the high-nibble/low-nibble two-layer hypothesis is correct
+
+**We need to load the data and verify empirically.**
 
 ### The Bitmask Pattern
 
@@ -731,21 +743,21 @@ The dominant family has `type=0x01`. This doesn't match any CK24 type byte. Poss
 2. 0x01 = a different classification layer (edge type vs object type)
 3. 0x01 = the actual bitmask meaning &1 = walkable floor edge (my original hypothesis was right for this value)
 
-### The Two-Layer Hypothesis
+### The Two-Layer Hypothesis (SPECULATIVE)
 
-TypeFlags may encode TWO things:
-- **High nibble (bits 4-7)**: Object type (copied from CK24 type byte) — 0x00=nav, 0x40=M2, 0x42=WMO, 0xC0=M2ext
+If TypeFlags does store the CK24 type byte plus edge flags, the two-layer model would be:
+- **High nibble (bits 4-7)**: Object type (from CK24 type byte)
 - **Low nibble (bits 0-3)**: Edge type within that object — 0x01=walkable, 0x02=wall, etc.
 
 This would explain:
-- 0x00 = nav mesh, walkable (high=0x00, low=0x00)
+- 0x00 = nav mesh, no edge flags (high=0x00, low=0x00)
 - 0x01 = nav mesh, walkable (high=0x00, low=0x01)
-- 0x40 = M2, no edge flags (high=0x40, low=0x00)
-- 0x41 = M2, walkable (high=0x40, low=0x01)
-- 0x42 = M2, wall (high=0x40, low=0x02)
-- 0x43 = M2, walkable+wall (high=0x40, low=0x01|0x02)
-- 0xC0 = M2 exterior, no edge flags
-- 0xC3 = M2 exterior, walkable+wall
+- 0x40 = unknown object, no edge flags (high=0x40, low=0x00)
+- 0x41 = unknown object, walkable (high=0x40, low=0x01)
+- 0x42 = unknown object, wall (high=0x40, low=0x02)
+- 0x43 = unknown object, walkable+wall (high=0x40, low=0x03)
+
+**But this is entirely speculative.** The labels "M2 Interior", "WMO", "M2 Exterior" from WoWRollback are not verified. We need to check the actual data.
 
 ### What Needs Verification
 
@@ -753,6 +765,61 @@ This would explain:
 2. Cross-tabulate TypeFlags x CK24Type for MSLK entries where RefIndex < MSUR.Count
 3. Check if TypeFlags low nibble correlates with path triangle normals (flat vs wall)
 4. Check if the dominant 0x01 family has different MSPI patterns than 0x42/0x43 families
+
+---
+
+## The MSHD Suspicion and Rare Value Hypothesis
+
+### MSHD: We Never Dug In
+
+The user says MSHD is suspicious because we never really investigated whether it helps decode other chunks. Current state:
+- 8 x uint32 fields, 32 bytes total
+- Fields 0x0C-0x1C are ALL zero in 616 development tiles
+- Field00 and Field08 vary but don't correlate with chunk counts
+- Field04 is always 1
+
+We dismissed MSHD as "probably dead padding" without seriously testing whether it encodes layout information, region boundaries, or root-level grouping keys.
+
+### The Rare Value Hypothesis
+
+The user notes that some unknown field values only appear once or twice in the corpus. These rare values are likely NOT noise — they're likely **root group IDs or top-level identifiers** that would help with object isolation/subdivision from CK24.
+
+In a hierarchy:
+- Common values = leaf-level attributes (walkable, wall, floor, etc.)
+- Rare values = root-level identifiers (object group, region, scene node)
+
+If MSLK.Subtype (0-11-ish) has some values that appear only once or twice, those might be **top-level scene divisions** — the missing layer between CK24 (which groups too broadly) and individual polygons (which is too granular).
+
+### The Object Decomposition Problem Revisited
+
+Current splitting chain:
+```
+CK24 (flat key) → MSLK.GroupObjectId (union-find) → sub-objects
+```
+
+What we might be missing:
+```
+CK24 (flat key) → ??? root grouping ??? → MSLK.GroupObjectId → sub-objects
+```
+
+The missing root grouping could be in:
+1. **MSHD** — header fields encoding top-level scene structure
+2. **MSLK.Subtype** — rare values as root group identifiers
+3. **MSLK.TypeFlags** — rare values as scene division markers
+4. **MSUR.GroupKey** — unknown byte, could be a region/group identifier
+5. **The discarded low byte of MSUR.PackedParams** — never extracted, could carry a key layer
+
+### What Analysis Would Reveal This
+
+1. **MSHD field value distribution** — min/max/mode/frequency across 616 tiles. If Field00 has a bimodal distribution (common values + rare outliers), the rare values might be root identifiers.
+
+2. **MSLK.Subtype rare value analysis** — which Subtype values appear only once or twice per tile? What CK24 groups do they belong to? Do they span multiple tiles?
+
+3. **MSLK.TypeFlags rare value analysis** — same question. Are there TypeFlags values that appear < 10 times in the entire corpus?
+
+4. **MSUR.GroupKey distribution** — what values exist? Are there rare values that could be root group markers?
+
+5. **Cross-chunk rare value correlation** — do rare values in different chunks co-occur? If Subtype=7 appears once in a tile and GroupKey=0x12 appears once in the same tile, they might be related.
 
 ---
 

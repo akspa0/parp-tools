@@ -63,6 +63,15 @@
   - the trainer no longer renders raw `alpha[...,0]` as the only alpha GT view
   - validation snapshots now write `alpha_gt_painted_max.png` / `alpha_pred_painted_max.png`
   - focused proof run: `wow-viewer/models/v16/runs/smoke_alpha_validation_fix/`
+- Epoch-rotating train subsets are now landed:
+  - `train-max-tiles` defines the persistent train pool for the run
+  - `train-epoch-tiles` can draw a fresh no-replacement subset from that pool every epoch
+  - `train_epoch_orders.jsonl` now records both selected positions and final order per epoch
+  - focused proof run: `wow-viewer/models/v16/runs/smoke_epoch_rotation/`
+- Loader defaults are less throttled for CUDA runs:
+  - `--num-workers=-1` auto-resolves a worker count
+  - `persistent_workers` defaults on when workers are active
+  - `prefetch-factor` default is now `4`
 
 ### Alpha / LK Conversion Lane
 - `AlphaToLk` and `LkToAlpha` are both landed in shared `wow-viewer` surfaces.
@@ -79,7 +88,13 @@
   - shared placement rotation stays in raw-file convention
 
 ## In Progress
-- First real V16 training run.
+- First real V16 training run:
+  - `v16_full_corpus_epoch_rotation`
+  - `train-max-tiles 4000`
+  - `train-epoch-tiles 1350`
+  - `val-max-tiles 150`
+  - `batch-size 72`
+  - `gpu-duty-cycle 100`
 - WL* partial chunk-fill semantics in the loader / trainer.
 - Object segmentation Model A.
 - Global asset vocabulary for instance/asset follow-up work.
@@ -96,6 +111,6 @@
   - higher-fidelity `MH2O`
 
 ## Not Yet
-- Production V16 training run with curated corpus.
+- Completed / running proof for a production-oriented V16 training run with epoch rotation is still pending final training outcomes.
 - Asset-attribute model / PM4 cross-ref workflow.
 - Broader chunk-for-chunk terrain conversion closure.

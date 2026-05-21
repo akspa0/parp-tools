@@ -303,6 +303,7 @@ uv run python scripts/train_v16.py \
     --dataset-dir ../output/datasets/v16 \
     --builds 3_3_5_12340 4_0_0_11927 \
     --train-max-tiles 2000 \
+    --train-epoch-tiles 512 \
     --val-max-tiles 256
 
 # resume existing run from latest checkpoint
@@ -310,6 +311,7 @@ uv run python scripts/train_v16.py \
     --dataset-dir ../output/datasets/v16 \
     --builds 3_3_5_12340 4_0_0_11927 \
     --train-max-tiles 2000 \
+    --train-epoch-tiles 512 \
     --val-max-tiles 256 \
     --run-name <existing-run-name> \
     --resume-from auto
@@ -330,6 +332,17 @@ subset from the split and records chain-of-evidence artifacts under:
 - `models/v16/runs/<run>/evidence/train_selection.jsonl`
 - `models/v16/runs/<run>/evidence/val_selection.jsonl`
 - `models/v16/runs/<run>/evidence/train_epoch_orders.jsonl`
+
+`--train-max-tiles` now defines the persistent run-level train pool. If
+`--train-epoch-tiles` is set, each epoch samples a fresh no-replacement subset
+from that pool instead of traversing the full curated pool every epoch. By
+default this per-epoch slice is build-balanced when possible so cross-build
+variety stays high even with capped epoch budgets.
+
+For CUDA runs, `--num-workers=-1` now resolves to an automatic loader-worker
+count and `--persistent-workers` defaults on when workers are active. This is
+meant to use more host-side throughput without forcing every training command
+to hand-tune loader flags first.
 
 Curation excludes placeholder map labels (`memory`, `<memory>`, empty,
 unknown) by default so bad metadata rows are not selected; pass

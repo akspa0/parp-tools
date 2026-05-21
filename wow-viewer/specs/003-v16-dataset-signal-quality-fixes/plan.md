@@ -44,10 +44,14 @@ For 3_3_5 and 3_0_1, find coastal/ocean tiles and verify liquid is present.
 **Validation**: `overall_ok=true`, `issues=0`.
 
 ### Step 3.2 — Smoke training run
-`train_v16.py --builds 3_3_5_12340 --epochs 1 --batch-size 2 --device cpu --train-max-tiles 8 --val-max-tiles 4`
-**Validation**: Completes without errors, validation images show filtered weight mask.
+`train_v16.py --builds 3_3_5_12340 --epochs 1 --batch-size 2 --device cpu --train-max-tiles 8 --train-epoch-tiles 4 --val-max-tiles 4`
+**Validation**: Completes without errors, validation images show filtered weight mask, and epoch-order evidence proves rotating epoch subsets when the epoch budget is smaller than the curated train pool.
+
+### Step 3.3 — First non-smoke epoch-rotation run
+`train_v16.py --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 --train-max-tiles 4000 --train-epoch-tiles 1350 --val-max-tiles 150 --batch-size 72 --gpu-duty-cycle 100`
+**Validation**: Early epochs use the rotated-train-pool contract, `train_epoch_orders.jsonl` records changing `selected_positions`, and throughput / VRAM behavior are measured against the larger real-run budget.
 
 ## Phase 4: Doc Sync
 
 Update `wow-viewer/docs/architecture/v16-terrain-model-spec-2026-05-16.md` to reflect new arrays (`mcnk_flags_16`, `mddf_mask`, `modf_mask`, `object_filtered_mask`).
-Update memory bank files.
+Update memory bank files and the live training command examples to reflect epoch-rotating train subsets plus the current `gpu-duty-cycle 100` real-run contract.

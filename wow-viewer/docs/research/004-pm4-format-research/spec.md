@@ -84,6 +84,8 @@ The core unsolved problem is **how to decompose CK24 groups into individual obje
 - **OBJ-12**: Reinterpret MSLK as a pathfinding graph edge catalog — test whether TypeFlags/classifies edge types (walkable, wall, ledge, etc.) and Subtype encodes edge properties (height level, direction, etc.).
 - **OBJ-13**: Investigate MPRL's dual role — the user reports MPRL contains both terrain intersection points AND WMO doodad references. Determine whether MPRL serves dual purposes (pathfinding nodes + doodad placement) or whether the doodad data is actually a different chunk overlap.
 - **OBJ-14**: Investigate the M2/WMO bleed problem in object splitting — adjacent M2 data sometimes gets included in WMO objects. Determine whether CK24 type bytes (0x40 vs 0x42/0x43) are insufficient for type separation, or whether the bleed comes from MSLK edge linking across type boundaries.
+- **OBJ-15**: Investigate rare field values across all chunks — values that appear only once or twice in the corpus may be root group IDs or top-level scene identifiers, not noise. Cross-correlate rare values in MSHD, MSLK.Subtype, MSLK.TypeFlags, and MSUR.GroupKey to find the missing root grouping layer between CK24 and individual polygons.
+- **OBJ-16**: Re-examine MSHD with the assumption that it encodes something that helps decode other chunks — test whether MSHD fields correlate with rare values in other chunks, or encode region/scene boundaries.
 
 ---
 
@@ -496,6 +498,24 @@ As a format researcher, I need every PM4 field in our codebase audited against t
 
 ---
 
+### User Story 9 — Rare Value Analysis and Root Group Discovery (Priority: P1)
+
+As a format researcher, I need to identify rare field values (appearing 1-2 times in the corpus) across MSHD, MSLK.Subtype, MSLK.TypeFlags, and MSUR.GroupKey, then cross-correlate them to find the missing root-level grouping layer between CK24 (too broad) and individual polygons (too granular).
+
+**Why this priority**: The object decomposition problem is unsolved because we're missing a hierarchy level. CK24 groups hundreds of surfaces together. MSLK.GroupObjectId splits them into sub-objects. But there may be a root-level grouping above GroupObjectId that defines the top-level scene divisions. Rare values (appearing once or twice) are often identifiers, not noise.
+
+**Independent Test**: For each target field, compute the per-value frequency across the development corpus. Identify values with frequency <= 5. Cross-correlate rare values across chunks to find co-occurrence patterns.
+
+**Acceptance Scenarios**:
+
+1. **Given** MSLK.Subtype values across 616 tiles, **When** frequency is computed, **Then** values appearing <= 5 times are identified and their MSLK entries are inspected for TypeFlags, LinkId, RefIndex, and GroupObjectId patterns.
+2. **Given** MSLK.TypeFlags values across 616 tiles, **When** frequency is computed, **Then** rare TypeFlags values (<= 5 occurrences) are identified and compared against CK24 type bytes to test the type-byte-storage hypothesis.
+3. **Given** MSUR.GroupKey values across 616 tiles, **When** frequency is computed, **Then** rare GroupKey values are identified and correlated with CK24 groups to test whether GroupKey encodes region or scene-level grouping.
+4. **Given** MSHD.Field00 and MSHD.Field08 across 616 tiles, **When** value distribution is computed, **Then** rare values (appearing in < 5 tiles) are identified and checked for correlation with rare values in other chunks.
+5. **Given** all rare values across all target fields, **When** co-occurrence is analyzed, **Then** any chunk pairs where rare values co-occur in the same tile are flagged as potential root-group candidates.
+
+---
+
 ## 7. Edge Cases
 
 - What if MSHD.Field00/Field08 are actually hash values rather than counts?
@@ -519,6 +539,8 @@ As a format researcher, I need every PM4 field in our codebase audited against t
 - **FR-006**: MSHD analysis MUST include correlation of Field00/Field08 against all chunk counts across the full corpus.
 - **FR-007**: MSHD analysis MUST include inspection of non-development PM4 files if available.
 - **FR-008**: All claims MUST cite file paths, line numbers, and evidence from the codebase.
+- **FR-009**: Rare value analysis MUST compute per-value frequency for MSLK.Subtype, MSLK.TypeFlags, MSUR.GroupKey, MSHD.Field00, and MSHD.Field08 across the full development corpus, and flag values with frequency <= 5 as root-group candidates.
+- **FR-010**: Rare value candidates MUST be cross-correlated across chunks to find co-occurrence patterns that suggest shared root-group identity.
 
 ---
 
