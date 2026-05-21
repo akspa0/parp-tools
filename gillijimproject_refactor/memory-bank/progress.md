@@ -130,6 +130,33 @@
   - focused proof run:
     - `wow-viewer/models/v16_1/normal/runs/smoke_normal_accum_cpu/`
     - micro-batch `1`, accumulation `4`, effective batch `4`, `opt_steps=1`
+- The shared V16.1 trainer now preserves the useful V16 runtime seam instead of
+  stripped-down defaults:
+  - `torch.compile`
+  - auto CUDA-friendly `--num-workers -1`
+  - `--persistent-workers`
+  - `--prefetch-factor`
+  - focused proof run:
+    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_compile_gpu/`
+    - completed on GPU with `torch.compile: enabled`
+- V16.1 now has a separate reusable curation layer between Zarr and trainers:
+  - module: `src/harvester/v16_curation.py`
+  - builder: `scripts/build_v16_curation_manifest.py`
+  - trainer/dataset consumption: `--curation-manifest`
+  - first profile: `normal_terrain_v1`
+  - builder now supports multi-process tile auditing via `--workers` and
+    `--chunk-size`
+  - focused proof outputs:
+    - `wow-viewer/output/datasets/v16/curation/smoke_normal_curation_335/`
+    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_curated_cpu/`
+    - `wow-viewer/output/datasets/v16/curation/smoke_normal_curation_335_mt/`
+  - sampled `3_3_5_12340` proof rejected `59/128` low-signal or blank-normal
+    cases before training (`keep_ratio≈0.54`)
+- Operator docs now expose that workflow directly:
+  - `wow-viewer/data-harvester/README.md` documents manifest build, curated
+    V16.1 normal training, resume, and VRAM tuning ladder
+  - `wow-viewer/README.md` now points root-level readers at the curation-first
+    V16.1 path
 - V16.1 direction has shifted from height-first to normal-first for terrain
   signal learning, with height follow-on meant to absorb what the normal lane
   teaches about minimap-to-terrain supervision.
@@ -168,6 +195,7 @@
 - WL* partial chunk-fill semantics in the loader / trainer.
 - V16.1 spec pack and continuity routing for the dense-correlation model family.
 - V16.1 liquid, texcomp, and holes smoke proof.
+- Additional target-aware curation profiles beyond `normal_terrain_v1`.
 - Full stitched multi-family output proof into one `.pred.zarr` bundle.
 - Object segmentation Model A.
 - Global asset vocabulary for instance/asset follow-up work.

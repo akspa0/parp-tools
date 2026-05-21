@@ -16,8 +16,10 @@
   - linked together into resulting terrain outputs after per-family prediction
 - V16 stays as the baseline/reference trainer until V16.1 lands smoke proof.
 - The first V16.1 implementation slice is now landed in code:
+  - `v16_curation.py`
   - `v16_1_dataset.py`
   - `v16_1_models.py`
+  - `build_v16_curation_manifest.py`
   - `train_v16_1_common.py`
   - `train_v16_1_height.py`
   - `train_v16_1_normal.py`
@@ -26,6 +28,10 @@
   - `train_v16_1_texcomp.py`
   - `infer_v16_1.py`
 - Focused proof that is already real:
+  - normal-oriented curation manifest:
+    - `wow-viewer/output/datasets/v16/curation/smoke_normal_curation_335/`
+  - normal-only curated CPU smoke run:
+    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_curated_cpu/`
   - normal-only CPU smoke run:
     - `wow-viewer/models/v16_1/normal/runs/smoke_normal_cpu/`
   - height-only CPU smoke run:
@@ -44,12 +50,33 @@
 - The shared V16.1 trainer now has real gradient accumulation through
   `--grad-accum-steps`; this is the intended path for the 4070 Ti SUPER instead
   of pretending large micro-batches fit in VRAM.
+- The shared V16.1 trainer now also carries forward the useful V16 runtime
+  seams:
+  - `torch.compile`
+  - `--num-workers -1` auto resolution
+  - `--persistent-workers`
+  - `--prefetch-factor`
+- Focused proof exists at:
+  - `wow-viewer/models/v16_1/normal/runs/smoke_normal_compile_gpu/`
+  - GPU smoke completed with `torch.compile: enabled`
 - Current V16.1 direction is to treat normals as the first terrain-signal proof
   lane and let that inform later height-lane shaping.
+- V16.1 now has a separate reusable curation layer between Zarr and trainers.
+  - trainer consumption path: `--curation-manifest`
+  - first profile: `normal_terrain_v1`
+  - curation builder now supports multi-process tile auditing:
+    - `--workers`
+    - `--chunk-size`
+  - rule direction: all future model families should train from curated
+    manifests, not raw tile rows
 - Canonical short docs were rewritten and should now be the first read for this lane:
   - `wow-viewer/README.md`
   - `wow-viewer/data-harvester/README.md`
   - `wow-viewer/docs/architecture/v16-terrain-model-spec-2026-05-16.md`
+- The README surfaces now explicitly document the curation-first V16.1 normal
+  workflow:
+  - build `normal_terrain_v1` manifest
+  - train via `--curation-manifest`
 - Canonical flow:
   - `WowViewer.Tool.Harvest harvest-stream --stream-profile v16`
   - `build_v16_dataset.py build`
@@ -177,6 +204,11 @@
 ## Next Likely Slice
 - Run smoke proof for V16.1 liquid, texcomp, and holes trainers using the
   current V16 corpus as the dataset contract.
+- Extend the curation layer with additional target-aware profiles after the
+  normal lane:
+  - height
+  - liquid
+  - texture decomposition
 - Re-launch the first real normal run with `batch-size 1` or `2` plus
   accumulation instead of high micro-batch counts that trigger WDDM offload.
 - Write the short note on what the normal lane teaches the height lane, then

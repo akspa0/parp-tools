@@ -126,8 +126,10 @@ The first real V16.1 code slice is now landed in `wow-viewer/data-harvester/`.
 
 Implemented modules:
 
+- `src/harvester/v16_curation.py`
 - `src/harvester/v16_1_dataset.py`
 - `src/harvester/v16_1_models.py`
+- `scripts/build_v16_curation_manifest.py`
 - `scripts/train_v16_1_common.py`
 - `scripts/train_v16_1_height.py`
 - `scripts/train_v16_1_normal.py`
@@ -140,15 +142,27 @@ What is real now:
 
 - independent per-family model hosts with no shared trainable weights
 - shared Zarr-backed dataset contract for V16.1 targets
+- separate reusable curation layer between Zarr stores and trainers
 - shared object-mask-derived weighting for the first trainer set
 - trainer-side gradient accumulation for low-VRAM micro-batch training
+- V16-style training/runtime seams ported into the shared trainer:
+  - `torch.compile`
+  - auto CUDA-friendly worker resolution
+  - persistent workers
+  - prefetch-factor controls
 - stitched inference CLI that accepts per-target checkpoint paths and writes a
   V16.1 output Zarr store
 
 Focused proof already exists for:
 
+- normal-oriented curation manifest proof:
+  - `wow-viewer/output/datasets/v16/curation/smoke_normal_curation_335/`
+- normal-only curated 1-epoch CPU smoke:
+  - `wow-viewer/models/v16_1/normal/runs/smoke_normal_curated_cpu/`
 - normal-only 1-epoch CPU smoke:
   - `wow-viewer/models/v16_1/normal/runs/smoke_normal_cpu/`
+- normal-only 1-epoch GPU compile smoke:
+  - `wow-viewer/models/v16_1/normal/runs/smoke_normal_compile_gpu/`
 - height-only 1-epoch CPU smoke:
   - `wow-viewer/models/v16_1/height/runs/smoke_height_cpu/`
 - normal-checkpoint stitched inference smoke:
@@ -184,12 +198,40 @@ The current normal objective is a blend of:
 The shared V16.1 trainer now also supports:
 
 - `--grad-accum-steps <N>`
+- `--no-compile`
+- `--num-workers -1`
+- `--persistent-workers`
+- `--prefetch-factor`
 
 That makes `batch-size 1` or `2` usable on constrained VRAM while still
 reaching a larger effective optimization batch.
 
 This is a first-pass terrain-aware normal contract, not a final claim that the
 best loss shape is solved.
+
+## Curation Layer Rule
+
+Blank, nonsense, or target-misaligned tiles should not be decided ad hoc inside
+every trainer.
+
+V16.1 now has a separate curation layer:
+
+- input: V16 Zarr stores
+- output: reusable tile manifests
+- consumption: trainer-side `--curation-manifest`
+
+The first profile is `normal_terrain_v1`. It explicitly checks:
+
+- blank/low-signal minimaps
+- normal coverage
+- minimap-vs-normal edge agreement
+- related low-signal reject cases before training
+
+This is the intended pattern for all future model families:
+
+1. build a target-aware curation manifest
+2. inspect kept/rejected worst cases
+3. train only on the curated tile set
 
 ## Initial Liquid-Type Contract
 

@@ -18,8 +18,9 @@ The modern V16 path is:
 2. `data-harvester/scripts/build_v16_dataset.py build`
 3. `build_v16_dataset.py validate-signals`
 4. `inspect_v16_dataset.py --write-overview`
-5. `validate_v16_training_ready.py`
-6. `train_v16.py`
+5. `build_v16_curation_manifest.py`
+6. `validate_v16_training_ready.py`
+7. `train_v16.py` or curated `train_v16_1_*.py`
 
 Key docs:
 
@@ -80,6 +81,31 @@ uv run python scripts\train_v16.py `
   --gpu-duty-cycle 100 `
   --run-name v16_full_corpus_epoch_rotation_qc1
 ```
+
+### Curated V16.1 Normal Training
+
+```powershell
+cd .\wow-viewer\data-harvester
+uv run python -u scripts\build_v16_curation_manifest.py `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --profile normal_terrain_v1 `
+  --workers -1 `
+  --chunk-size 128 `
+  --run-name normal_terrain_full_corpus_v1
+
+uv run python -u scripts\train_v16_1_normal.py `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --curation-manifest ..\output\datasets\v16\curation\normal_terrain_full_corpus_v1 `
+  --device auto `
+  --batch-size 1 `
+  --grad-accum-steps 8 `
+  --num-workers -1 `
+  --epochs 50 `
+  --run-name v16_1_normal_curated_bs1_acc8
+```
+
+This is the preferred V16.1 pattern now: curate first, then train from the
+manifest instead of raw tile rows.
 
 ## What Lives Here
 

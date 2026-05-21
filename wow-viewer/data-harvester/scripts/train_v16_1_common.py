@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 import time
@@ -54,6 +55,23 @@ def _resolve_device(name: str) -> torch.device:
             raise RuntimeError("Requested CUDA but CUDA is unavailable.")
         return torch.device("cuda")
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _resolve_num_workers(requested: int, device: torch.device) -> int:
+    if requested >= 0:
+        return int(requested)
+    if device.type != "cuda":
+        return 0
+    cpu_count = os.cpu_count() or 4
+    return max(2, min(8, cpu_count // 2))
+
+
+def _resolve_persistent_workers(requested: bool | None, num_workers: int) -> bool:
+    if num_workers <= 0:
+        return False
+    if requested is None:
+        return True
+    return bool(requested)
 
 
 def _masked_mean(loss_map: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -308,13 +326,36 @@ TASKS: dict[str, TaskSpec] = {
 def _parse_args(task_name: str) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=f"Train V16.1 {task_name} model")
     p.add_argument("--dataset-dir", type=Path, default=_DATASET_ROOT)
+    p.add_argument(
+        "--curation-manifest",
+        type=Path,
+        default=None,
+        help="Optional curation manifest directory/file produced by build_v16_curation_manifest.py",
+    )
     p.add_argument("--builds", nargs="+", default=["3_3_5_12340"])
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--grad-accum-steps", type=int, default=1)
     p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--weight-decay", type=float, default=0.05)
-    p.add_argument("--num-workers", type=int, default=0)
+    p.add_argument(
+        "--num-workers",
+        type=int,
+        default=-1,
+        help="DataLoader worker count. Use -1 to auto-resolve a CUDA-friendly default.",
+    )
+    p.add_argument(
+        "--persistent-workers",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Keep DataLoader worker processes alive between epochs (defaults to true when workers > 0)",
+    )
+    p.add_argument(
+        "--prefetch-factor",
+        type=int,
+        default=4,
+        help="Batches prefetched per worker (effective when --num-workers > 0)",
+    )
     p.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--val-fraction", type=float, default=0.1)
@@ -326,6 +367,11 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     p.add_argument("--resume-checkpoint", type=Path, default=None)
     p.add_argument("--no-augment", action="store_true")
     p.add_argument("--no-amp", action="store_true")
+    p.add_argument(
+        "--no-compile",
+        action="store_true",
+        help="Disable torch.compile (useful for CPU-only or limited toolchains)",
+    )
     p.add_argument("--target-vram-gb", type=float, default=0.0)
     return p.parse_args()
 
@@ -337,8 +383,12 @@ def run_task(task_name: str) -> None:
     task = TASKS[task_name]
     if args.grad_accum_steps < 1:
         raise RuntimeError("--grad-accum-steps must be >= 1")
+    if args.prefetch_factor < 1:
+        raise RuntimeError("--prefetch-factor must be >= 1")
     _seed_all(args.seed)
     device = _resolve_device(args.device)
+    resolved_num_workers = _resolve_num_workers(int(args.num_workers), device)
+    resolved_persistent_workers = _resolve_persistent_workers(args.persistent_workers, resolved_num_workers)
     run_name = args.run_name or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = _MODELS_ROOT / task_name / "runs" / run_name
     ckpt_dir = run_dir / "checkpoints"
@@ -346,16 +396,48 @@ def run_task(task_name: str) -> None:
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     val_dir.mkdir(parents=True, exist_ok=True)
 
-    train_ds = V161Dataset(args.dataset_dir, builds=args.builds, split="train", val_fraction=args.val_fraction, seed=args.seed, augment=not args.no_augment)
-    val_ds = V161Dataset(args.dataset_dir, builds=args.builds, split="val", val_fraction=args.val_fraction, seed=args.seed, augment=False)
+    train_ds = V161Dataset(
+        args.dataset_dir,
+        builds=args.builds,
+        split="train",
+        val_fraction=args.val_fraction,
+        seed=args.seed,
+        augment=not args.no_augment,
+        curation_manifest=args.curation_manifest,
+    )
+    val_ds = V161Dataset(
+        args.dataset_dir,
+        builds=args.builds,
+        split="val",
+        val_fraction=args.val_fraction,
+        seed=args.seed,
+        augment=False,
+        curation_manifest=args.curation_manifest,
+    )
     if args.max_train_samples > 0:
         train_ds = Subset(train_ds, range(min(args.max_train_samples, len(train_ds))))
     if args.max_val_samples > 0:
         val_ds = Subset(val_ds, range(min(args.max_val_samples, len(val_ds))))
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=(device.type == "cuda"))
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=(device.type == "cuda"))
+    loader_kwargs: dict[str, Any] = {
+        "num_workers": resolved_num_workers,
+        "pin_memory": (device.type == "cuda"),
+    }
+    if resolved_num_workers > 0:
+        loader_kwargs["persistent_workers"] = bool(resolved_persistent_workers)
+        loader_kwargs["prefetch_factor"] = int(args.prefetch_factor)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, **loader_kwargs)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, **loader_kwargs)
 
     model = task.model_factory().to(device)
+    can_compile = hasattr(torch, "compile") and not args.no_compile and device.type == "cuda"
+    if can_compile:
+        try:
+            model = torch.compile(model)
+            compile_status = "enabled"
+        except Exception as ex:
+            compile_status = f"disabled (compile failed: {ex})"
+    else:
+        compile_status = "disabled"
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
     scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and not args.no_amp))
@@ -378,10 +460,16 @@ def run_task(task_name: str) -> None:
         "task": task_name,
         "run_name": run_name,
         "dataset_dir": str(Path(args.dataset_dir)),
+        "curation_manifest": str(args.curation_manifest) if args.curation_manifest else None,
         "builds": list(args.builds),
         "batch_size": args.batch_size,
         "grad_accum_steps": args.grad_accum_steps,
         "effective_batch_size": args.batch_size * args.grad_accum_steps,
+        "num_workers": args.num_workers,
+        "resolved_num_workers": resolved_num_workers,
+        "persistent_workers": args.persistent_workers,
+        "resolved_persistent_workers": resolved_persistent_workers,
+        "prefetch_factor": args.prefetch_factor,
         "epochs": args.epochs,
         "lr": args.lr,
         "weight_decay": args.weight_decay,
@@ -389,6 +477,8 @@ def run_task(task_name: str) -> None:
         "val_fraction": args.val_fraction,
         "max_train_samples": args.max_train_samples,
         "max_val_samples": args.max_val_samples,
+        "no_compile": args.no_compile,
+        "compile_status": compile_status,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
@@ -397,12 +487,21 @@ def run_task(task_name: str) -> None:
     print(f"Device: {device}", flush=True)
     print(f"Run dir: {run_dir}", flush=True)
     print(f"Dataset: train={len(train_ds)} val={len(val_ds)}", flush=True)
+    if args.curation_manifest is not None:
+        print(f"Curation manifest: {args.curation_manifest}", flush=True)
+    print(
+        f"DataLoader: workers={resolved_num_workers} "
+        f"persistent_workers={resolved_persistent_workers} "
+        f"prefetch_factor={(args.prefetch_factor if resolved_num_workers > 0 else 'n/a')}",
+        flush=True,
+    )
     print(
         f"Batching: micro={args.batch_size} accum={args.grad_accum_steps} "
         f"effective={args.batch_size * args.grad_accum_steps}",
         flush=True,
     )
     print(f"Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}", flush=True)
+    print(f"torch.compile: {compile_status}", flush=True)
 
     for epoch in range(start_epoch, args.epochs + 1):
         model.train()

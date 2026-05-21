@@ -1,0 +1,135 @@
+"""Reusable V16 dataset curation metrics and manifest filtering helpers.
+
+This sits between the raw Zarr truth stores and the trainers so tile-quality
+rules can be computed once and reused across model families.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+
+def minimap_grayscale(minimap: np.ndarray) -> np.ndarray:
+    x = minimap.astype(np.float32)
+    if x.max() > 1.0:
+        x = x / 255.0
+    return (0.299 * x[:, :, 0] + 0.587 * x[:, :, 1] + 0.114 * x[:, :, 2]).astype(np.float32)
+
+
+def edge_strength(x: np.ndarray) -> np.ndarray:
+    gx = np.zeros_like(x, dtype=np.float32)
+    gy = np.zeros_like(x, dtype=np.float32)
+    gx[:, 1:] = np.abs(x[:, 1:] - x[:, :-1])
+    gy[1:, :] = np.abs(x[1:, :] - x[:-1, :])
+    return np.maximum(gx, gy)
+
+
+def dilate(mask: np.ndarray, radius: int) -> np.ndarray:
+    out = mask.astype(bool)
+    for _ in range(max(0, int(radius))):
+        acc = out.copy()
+        acc[:-1, :] |= out[1:, :]
+        acc[1:, :] |= out[:-1, :]
+        acc[:, :-1] |= out[:, 1:]
+        acc[:, 1:] |= out[:, :-1]
+        acc[:-1, :-1] |= out[1:, 1:]
+        acc[1:, 1:] |= out[:-1, :-1]
+        acc[:-1, 1:] |= out[1:, :-1]
+        acc[1:, :-1] |= out[:-1, 1:]
+        out = acc
+    return out
+
+
+def f1(a: np.ndarray, b: np.ndarray) -> float:
+    aa = a.astype(bool)
+    bb = b.astype(bool)
+    inter = int(np.logical_and(aa, bb).sum())
+    denom = int(aa.sum()) + int(bb.sum())
+    if denom <= 0:
+        return 1.0
+    return float((2.0 * inter) / denom)
+
+
+def iou(a: np.ndarray, b: np.ndarray) -> float:
+    aa = a.astype(bool)
+    bb = b.astype(bool)
+    inter = int(np.logical_and(aa, bb).sum())
+    union = int(np.logical_or(aa, bb).sum())
+    if union <= 0:
+        return 1.0
+    return float(inter / union)
+
+
+def alpha_painted(alpha: np.ndarray) -> np.ndarray:
+    if alpha.ndim != 3 or alpha.shape[2] <= 0:
+        return np.zeros(alpha.shape[:2], dtype=np.float32)
+    if alpha.shape[2] > 1:
+        painted = alpha[:, :, 1:]
+        if float(painted.max()) > 0.0:
+            return painted.max(axis=2).astype(np.float32, copy=False)
+    return alpha.max(axis=2).astype(np.float32, copy=False)
+
+
+def normal_relief(normals: np.ndarray, normal_mask: np.ndarray) -> np.ndarray:
+    nx = normals[:, :, 0].astype(np.float32, copy=False)
+    ny = normals[:, :, 1].astype(np.float32, copy=False)
+    relief = np.sqrt(np.maximum(0.0, (nx * nx) + (ny * ny))).astype(np.float32, copy=False)
+    return relief * normal_mask.astype(np.float32, copy=False)
+
+
+def normal_edge_strength(normals: np.ndarray, normal_mask: np.ndarray) -> np.ndarray:
+    mask = normal_mask.astype(np.float32, copy=False)
+    nx = normals[:, :, 0].astype(np.float32, copy=False) * mask
+    ny = normals[:, :, 1].astype(np.float32, copy=False) * mask
+    nz = normals[:, :, 2].astype(np.float32, copy=False) * mask
+    return np.maximum(edge_strength(nx), np.maximum(edge_strength(ny), edge_strength(nz)))
+
+
+def load_curation_keys(manifest_path: str | Path) -> set[tuple[str, int]]:
+    path = Path(manifest_path)
+    if path.is_dir():
+        kept_path = path / "kept_tiles.parquet"
+        all_path = path / "tiles.parquet"
+        if kept_path.exists():
+            path = kept_path
+        elif all_path.exists():
+            path = all_path
+        else:
+            raise FileNotFoundError(f"No kept_tiles.parquet or tiles.parquet under {path}")
+
+    if path.suffix.lower() == ".parquet":
+        table = pq.read_table(str(path))
+        rows = table.to_pylist()
+    elif path.suffix.lower() in {".jsonl", ".ndjson"}:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    elif path.suffix.lower() == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, list):
+            rows = payload
+        else:
+            rows = payload.get("rows", [])
+    else:
+        raise RuntimeError(f"Unsupported curation manifest format: {path}")
+
+    keys: set[tuple[str, int]] = set()
+    for row in rows:
+        if not bool(row.get("keep", True)):
+            continue
+        build = str(row.get("build", ""))
+        tile_id = int(row.get("tile_id", -1))
+        if build and tile_id >= 0:
+            keys.add((build, tile_id))
+    return keys
+
+
+def write_rows_parquet(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    table = pa.Table.from_pylist(rows)
+    pq.write_table(table, str(path))
+

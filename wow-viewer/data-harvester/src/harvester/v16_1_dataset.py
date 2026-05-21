@@ -15,6 +15,8 @@ import zarr
 import zarr.storage
 from torch.utils.data import Dataset
 
+from harvester.v16_curation import load_curation_keys
+
 
 def _build_split_indices(n_items: int, split: str, val_fraction: float, seed: int) -> list[int]:
     n_val = int(n_items * val_fraction)
@@ -67,12 +69,15 @@ class V161Dataset(Dataset):
         val_fraction: float = 0.1,
         seed: int = 42,
         augment: bool = False,
+        curation_manifest: str | Path | None = None,
     ) -> None:
         self.dataset_dir = Path(dataset_dir)
         self.augment = augment and split == "train"
         self._rng = np.random.RandomState(seed)
         self._stores: dict[str, zarr.Group] = {}
         self._index_entries: list[dict] = []
+        self._curation_manifest = Path(curation_manifest) if curation_manifest is not None else None
+        curated_keys = load_curation_keys(self._curation_manifest) if self._curation_manifest is not None else None
 
         build_dirs = builds or [d.stem.replace(".zarr", "") for d in sorted(self.dataset_dir.glob("*.zarr"))]
         for build in build_dirs:
@@ -90,6 +95,10 @@ class V161Dataset(Dataset):
             for i in range(table.num_rows):
                 row = {col: table.column(col)[i].as_py() for col in table.column_names}
                 row["_build"] = build
+                if curated_keys is not None:
+                    tile_id = int(row.get("tile_id", -1))
+                    if (build, tile_id) not in curated_keys:
+                        continue
                 self._index_entries.append(row)
 
         if not self._index_entries:

@@ -236,6 +236,19 @@ writes a single combined output bundle.
 - **FR-006B**: Each V16.1 trainer MUST support gradient accumulation so
   low-VRAM micro-batches can still emulate a larger effective optimization
   batch without relying on WDDM/shared-memory spill.
+- **FR-006C**: The shared V16.1 trainer MUST preserve the useful V16 runtime
+  training seams instead of regressing to stripped-down defaults, including
+  `torch.compile`, auto CUDA-friendly worker resolution, persistent workers,
+  and configurable prefetch.
+- **FR-006D**: Dataset curation MUST be a separate reusable layer between the
+  V16 Zarr stores and any model trainer, not a hidden one-off heuristic inside a
+  single training loop.
+- **FR-006E**: The curation layer MUST be able to reject blank or nonsensical
+  tiles and MUST support minimap-vs-target alignment metrics for the target
+  family being trained.
+- **FR-006F**: The V16.1 normal lane MUST support manifest-driven filtering from
+  a normal-oriented curation pass that checks blank minimaps, normal coverage,
+  and minimap-vs-normal edge agreement before training.
 - **FR-006A**: V16.1 MUST explicitly build dense minimap-to-signal correlation
   models using the richer supervision already present in the V16 Zarr dataset,
   then link those per-family outputs together into assembled terrain outputs.
@@ -316,6 +329,11 @@ writes a single combined output bundle.
   without mixing metrics from unrelated targets.
 - **SC-003A**: The shared trainer supports `--grad-accum-steps`, and a
   micro-batch `1` smoke run with accumulation completes.
+- **SC-003B**: The shared trainer supports the V16-style compile/runtime seam,
+  and a GPU smoke run completes with `torch.compile` enabled.
+- **SC-003C**: A reusable curation-manifest builder exists, and a V16.1 normal
+  smoke run completes while consuming a normal-oriented manifest instead of raw
+  Zarr rows.
 - **SC-004**: The liquid trainer emits both footprint and liquid-type evidence.
 - **SC-005**: The texture-decomposition trainer emits both decomposition outputs
   and a recomposed review image.

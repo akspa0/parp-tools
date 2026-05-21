@@ -18,8 +18,9 @@ uv sync
 1. Build or patch dataset stores.
 2. Validate dataset signals.
 3. Generate visual QA artifacts.
-4. Run trainer-readiness validation.
-5. Train only after the store passes both JSON and human-eye QA.
+4. Build a target-aware curation manifest.
+5. Run trainer-readiness validation.
+6. Train only after the store passes JSON QA, human-eye QA, and curation.
 
 ## Build Dataset
 
@@ -95,6 +96,47 @@ uv run python scripts/validate_v16_training_ready.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927
 ```
 
+## Build Curation Manifest
+
+Dataset curation is now a separate layer between the V16 Zarr stores and the
+trainers. The intent is to reject blank, nonsensical, or target-misaligned
+tiles before any model sees them.
+
+Current normal-oriented curation pass:
+
+```powershell
+uv run python -u scripts/build_v16_curation_manifest.py `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --profile normal_terrain_v1 `
+  --workers -1 `
+  --chunk-size 128 `
+  --run-name normal_terrain_full_corpus_v1
+```
+
+Outputs:
+
+- `output/datasets/v16/curation/<run-name>/summary.json`
+- `output/datasets/v16/curation/<run-name>/tiles.parquet`
+- `output/datasets/v16/curation/<run-name>/kept_tiles.parquet`
+- `output/datasets/v16/curation/<run-name>/worst_cases.png`
+
+For `normal_terrain_v1`, the curation layer checks:
+
+- blank or low-signal minimaps
+- normal coverage
+- minimap-vs-normal edge agreement
+- related low-signal reject cases
+
+Curation runtime notes:
+
+- `--workers -1` auto-resolves a CPU-friendly worker count
+- `--workers 1` forces single-process behavior
+- `--chunk-size` controls tile rows per worker task
+- the builder now prints chunk progress per build so a long run is visibly alive
+
+This is the intended rule for future model families too: build a target-aware
+manifest first, then train from the curated tile set instead of raw Zarr rows.
+
 ## Train V16
 
 ```powershell
@@ -161,10 +203,61 @@ Outputs:
 Use this when validation tiles suggest the harvested supervision does not match
 the baked minimap appearance.
 
+## Train V16.1 Normal With Curation
+
+Use the curation manifest as an explicit trainer input:
+
+```powershell
+uv run python -u scripts/train_v16_1_normal.py `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v1 `
+  --device auto `
+  --batch-size 1 `
+  --grad-accum-steps 8 `
+  --epochs 50 `
+  --num-workers -1 `
+  --val-preview-interval 2 `
+  --run-name v16_1_normal_curated_bs1_acc8
+```
+
+If VRAM stays comfortably below budget on your card, raise micro-batch before
+raising accumulation:
+
+- start: `--batch-size 1 --grad-accum-steps 8`
+- then try: `--batch-size 2 --grad-accum-steps 4`
+- then try: `--batch-size 4 --grad-accum-steps 2`
+- then maybe: `--batch-size 8 --grad-accum-steps 1`
+
+V16.1 trainer runtime notes:
+
+- `torch.compile` is enabled by default on CUDA
+- `--no-compile` disables it for comparison or troubleshooting
+- `--num-workers -1` auto-resolves a CUDA-friendly worker count
+- `--curation-manifest` is the preferred path for normal training now
+- startup prints now show the effective batch and the curation manifest path
+
+Resume a curated normal run:
+
+```powershell
+uv run python -u scripts/train_v16_1_normal.py `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v1 `
+  --device auto `
+  --batch-size 1 `
+  --grad-accum-steps 8 `
+  --epochs 100 `
+  --num-workers -1 `
+  --val-preview-interval 2 `
+  --run-name v16_1_normal_curated_bs1_acc8 `
+  --resume-checkpoint ../models/v16_1/normal/runs/v16_1_normal_curated_bs1_acc8/checkpoints/v16_1_normal_last.pt
+```
+
 ## Key Outputs
 
 - dataset stores: `output/datasets/v16/<build>.zarr`
 - per-build visual QA: `output/datasets/v16/inspection/`
 - validation reports: `output/datasets/v16/validation/`
+- curation manifests: `output/datasets/v16/curation/<run-name>/`
 - training runs: `models/v16/runs/<run-name>/`
+- V16.1 training runs: `models/v16_1/<task>/runs/<run-name>/`
 - curation evidence: `models/v16/runs/<run-name>/evidence/`

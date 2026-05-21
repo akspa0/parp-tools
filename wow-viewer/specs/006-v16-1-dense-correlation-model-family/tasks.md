@@ -14,6 +14,21 @@
   - record V16.1 as the next terrain-model lane
   - record that V16 remains the baseline/reference path
 
+## Phase 1A: Curation Layer
+
+- [x] **1A.1** Create a separate reusable V16 curation layer
+  - build manifests between Zarr stores and trainers
+  - do not hide the rule set only inside one training loop
+- [x] **1A.2** Add a normal-oriented curation profile
+  - reject blank/low-signal tiles
+  - check minimap-vs-normal edge agreement
+- [x] **1A.3** Wire V16.1 trainer/dataset manifest consumption
+  - `--curation-manifest`
+  - filtered train/val dataset entry selection
+- [x] **1A.4** Run focused proof
+  - manifest builder writes kept/rejected outputs
+  - normal smoke run completes through the curated tile set
+
 ## Phase 2: Normal First
 
 - [x] **2.1** Extract V16.1-safe trainer helpers from `train_v16.py`
