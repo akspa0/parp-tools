@@ -5,6 +5,17 @@
 
 ## Primary Live Lane
 - V16 terrain dataset + training is the current execution path.
+- V16.1.1 is now the named next bounded implementation slice on top of the
+  landed V16.1 base:
+  - normal-first again, not a fresh family reset
+  - smarter curated manifests, not blind full-pool replay
+  - difficulty buckets: `easy`, `medium`, `hard`, `pathological`
+  - bucket-aware epoch sampling for short scouting runs
+  - stronger hard-region weighting inside the normal loss
+  - optional uncertainty-guided normal training if the simpler weighting lane
+    proves insufficient
+  - target fresh-chat spec pack:
+    - `wow-viewer/specs/007-v16-1-1-curated-normal-acceleration/`
 - V16.1 is now the named next architecture lane for terrain models:
   - one independent model per target family
   - `minimap -> height`
@@ -221,6 +232,12 @@
 - Current production-oriented launch contract:
   - run name: `v16_full_corpus_epoch_rotation`
   - command uses `train-max-tiles 4000`, `train-epoch-tiles 1350`, `val-max-tiles 150`, `batch-size 72`, `gpu-duty-cycle 100`
+- Immediate next planning truth:
+  - do not widen into a giant new foundation-model rewrite
+  - use V16.1.1 to harden the normal lane first through curation intelligence
+    and training-efficiency improvements
+  - treat a mixed `400`-tile scouting pool as the first proof surface before
+    any longer rerun
 - Alpha/minimap alignment audit:
   - `wow-viewer/output/datasets/v16/validation/alpha_minimap_alignment/alpha_minimap_alignment.summary.json`
   - sampled corpus result: `edge_f1_mean≈0.54`, `median≈0.64`, but `p10=0.0`, confirming a real zero-match bad tail

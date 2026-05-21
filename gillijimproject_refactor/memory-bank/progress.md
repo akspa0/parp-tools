@@ -206,6 +206,18 @@
   - shared object-mask loss gating remains part of the trainer contract
   - V16 remains the baseline/reference path while V16.1 is brought up
   - the split-up families are linked back together to build final output signals
+- The next bounded fresh-chat implementation pack is now V16.1.1:
+  - spec pack:
+    - `wow-viewer/specs/007-v16-1-1-curated-normal-acceleration/`
+  - purpose:
+    - keep V16.1 as the landed base
+    - improve sample efficiency in the normal lane before more long training
+  - planned upgrades:
+    - difficulty-aware curated manifests
+    - bucket-aware epoch sampling
+    - stronger hard-region normal weighting
+    - optional uncertainty-guided normal loss
+    - mixed `400`-tile scouting workflow before larger reruns
 
 ### Alpha / LK Conversion Lane
 - `AlphaToLk` and `LkToAlpha` are both landed in shared `wow-viewer` surfaces.
