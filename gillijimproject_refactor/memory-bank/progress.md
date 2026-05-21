@@ -218,6 +218,35 @@
     - stronger hard-region normal weighting
     - optional uncertainty-guided normal loss
     - mixed `400`-tile scouting workflow before larger reruns
+- The first V16.1.1 implementation slice is now landed:
+  - curation builder:
+    - new profile `normal_terrain_v16_1_1`
+    - per-tile usefulness scoring
+    - difficulty buckets:
+      - `easy`
+      - `medium`
+      - `hard`
+      - `pathological`
+    - `summary.json` now writes bucket counts, examples, and scouting guidance
+  - trainer:
+    - manifest ingestion carries bucket metadata into the normal lane
+    - new CLI flag:
+      - `--bucket-sampling-profile v16_1_1_normal`
+    - per-epoch sampler evidence:
+      - `train_epoch_orders.jsonl`
+      - `train_epoch_bucket_usage.jsonl`
+    - hard-region weighting now includes painted alpha / MCLY transition signal
+      while terrain-valid masking stays authoritative
+- Focused proof now exists for that slice:
+  - curation smoke:
+    - `wow-viewer/output/datasets/v16/curation/smoke_v16_1_1_curation_335/`
+    - result: `21/32` kept, bucket mix `hard=14`, `pathological=7`
+  - manifest-ingestion normal smoke:
+    - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_1_bucket_cpu/`
+    - result: 1 CPU epoch completed cleanly with bucket mix printed at startup
+  - bucket-rotation smoke:
+    - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_1_bucket_rotation_cpu/`
+    - result: epoch `1` sampled `hard=3`, `pathological=1` from a `16`-tile train pool and wrote the new bucket-evidence logs
 
 ### Alpha / LK Conversion Lane
 - `AlphaToLk` and `LkToAlpha` are both landed in shared `wow-viewer` surfaces.

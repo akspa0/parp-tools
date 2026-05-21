@@ -77,6 +77,34 @@ Start with:
   - hard-region weighting stats
   - whether uncertainty improves or just adds noise
 
+## Implemented Now
+
+The first V16.1.1 code slice is now real in `wow-viewer/data-harvester/`:
+
+- `build_v16_curation_manifest.py` now supports `--profile normal_terrain_v16_1_1`
+- the curation manifest now writes:
+  - usefulness scoring fields
+  - difficulty buckets
+  - scouting recipe metadata
+- `train_v16_1_normal.py` now consumes that metadata through:
+  - `--bucket-sampling-profile v16_1_1_normal`
+  - per-epoch bucket usage evidence
+- the normal hard-region weighting now extends beyond plain gradient boost:
+  - height gradients
+  - local normal variation
+  - painted alpha transitions
+  - MCLY transitions
+  - terrain-valid masking remains authoritative
+
+Focused smoke proof roots:
+
+- curation:
+  - `wow-viewer/output/datasets/v16/curation/smoke_v16_1_1_curation_335/`
+- manifest-ingestion trainer smoke:
+  - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_1_bucket_cpu/`
+- bucket-rotation trainer smoke:
+  - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_1_bucket_rotation_cpu/`
+
 ## Guardrails
 
 - keep raw Zarr tensors as the supervised truth

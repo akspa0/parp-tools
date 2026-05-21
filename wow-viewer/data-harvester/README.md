@@ -107,10 +107,10 @@ Current normal-oriented curation pass:
 ```powershell
 uv run python -u scripts/build_v16_curation_manifest.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
-  --profile normal_terrain_v1 `
+  --profile normal_terrain_v16_1_1 `
   --workers -1 `
   --chunk-size 128 `
-  --run-name normal_terrain_full_corpus_v1
+  --run-name normal_terrain_full_corpus_v16_1_1
 ```
 
 Outputs:
@@ -120,13 +120,27 @@ Outputs:
 - `output/datasets/v16/curation/<run-name>/kept_tiles.parquet`
 - `output/datasets/v16/curation/<run-name>/worst_cases.png`
 
-For `normal_terrain_v1`, the curation layer checks:
+For `normal_terrain_v16_1_1`, the curation layer now checks and scores:
 
 - blank or low-signal minimaps
 - normal coverage
 - minimap-vs-normal edge agreement
 - explicit blank genesis `what plate` tiles
 - related low-signal reject cases
+- deformation richness
+- terrain-valid coverage
+- painted alpha / MCLY presence
+- per-tile difficulty buckets:
+  - `easy`
+  - `medium`
+  - `hard`
+  - `pathological`
+
+`summary.json` now also publishes:
+
+- `difficulty_bucket_counts`
+- `difficulty_bucket_examples`
+- `scouting_pool_recipe`
 
 Curation runtime notes:
 
@@ -213,17 +227,18 @@ Recommended optimized launch contract for a 16 GB card:
 ```powershell
 uv run python -u scripts/train_v16_1_normal.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
-  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v1 `
+  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1 `
   --device auto `
   --batch-size 8 `
   --grad-accum-steps 1 `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
+  --bucket-sampling-profile v16_1_1_normal `
   --val-max-tiles 48 `
   --epochs 50 `
   --num-workers -1 `
   --val-preview-interval 2 `
-  --run-name v16_1_normal_curated_bs8_acc1_compile
+  --run-name v16_1_1_normal_curated_bs8_acc1_compile
 ```
 
 Why this is the recommended starting point now:
@@ -239,17 +254,18 @@ Small scouting run for concept-mix proof before longer training:
 ```powershell
 uv run python -u scripts/train_v16_1_normal.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
-  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v1 `
+  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1 `
   --device auto `
   --batch-size 8 `
   --grad-accum-steps 1 `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
+  --bucket-sampling-profile v16_1_1_normal `
   --val-max-tiles 48 `
   --epochs 20 `
   --num-workers 4 `
   --val-preview-interval 1 `
-  --run-name v16_1_normal_curated_pool400_epoch128 `
+  --run-name v16_1_1_normal_curated_pool400_epoch128 `
   --no-compile
 ```
 
@@ -275,8 +291,12 @@ V16.1 trainer runtime notes:
 - `--no-compile` disables it for comparison or troubleshooting
 - `--num-workers -1` auto-resolves a CUDA-friendly worker count
 - `--curation-manifest` is the preferred path for normal training now
+- `--bucket-sampling-profile v16_1_1_normal` over-indexes `hard` tiles while
+  preserving `medium` / `easy` stability when those buckets are present
 - `--normal-detail-boost` emphasizes terrain deformations over broad flats in
   the normal loss while still keeping flat tiles in the dataset
+- hard-region weighting now also considers painted alpha / MCLY transitions and
+  stays clipped by terrain-valid masking
 - the normal trainer now also consumes raw supervision guidance channels from
   the V16 Zarr seam:
   - terrain-valid mask
@@ -286,24 +306,28 @@ V16.1 trainer runtime notes:
   - blank `what plate` flag
 - startup prints now show the effective batch, the curated pool sizes, and the
   curation manifest path
+- new epoch evidence files:
+  - `evidence/train_epoch_orders.jsonl`
+  - `evidence/train_epoch_bucket_usage.jsonl`
 
 Resume a curated normal run:
 
 ```powershell
 uv run python -u scripts/train_v16_1_normal.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
-  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v1 `
+  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1 `
   --device auto `
   --batch-size 8 `
   --grad-accum-steps 1 `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
+  --bucket-sampling-profile v16_1_1_normal `
   --val-max-tiles 48 `
   --epochs 100 `
   --num-workers -1 `
   --val-preview-interval 2 `
-  --run-name v16_1_normal_curated_pool400_epoch128 `
-  --resume-checkpoint ../models/v16_1/normal/runs/v16_1_normal_curated_pool400_epoch128/checkpoints/v16_1_normal_last.pt
+  --run-name v16_1_1_normal_curated_pool400_epoch128 `
+  --resume-checkpoint ../models/v16_1/normal/runs/v16_1_1_normal_curated_pool400_epoch128/checkpoints/v16_1_normal_last.pt
 ```
 
 ## Key Outputs

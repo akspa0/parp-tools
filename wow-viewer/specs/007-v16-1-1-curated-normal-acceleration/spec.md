@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-21
 
-**Status**: Planned
+**Status**: In Progress
 
 **Input**: User direction to treat the next lane as `v16.1.1`, keep it V16/V16.1-derived, and focus on smarter curated normal training informed by recent surface-normal and hard-region mining research rather than restarting from a giant new model family.
 

@@ -16,6 +16,26 @@
     proves insufficient
   - target fresh-chat spec pack:
     - `wow-viewer/specs/007-v16-1-1-curated-normal-acceleration/`
+  - the first implementation slice is now landed:
+    - curation profile:
+      - `normal_terrain_v16_1_1`
+    - manifest fields:
+      - usefulness scoring
+      - difficulty buckets
+      - scouting recipe metadata
+    - trainer seam:
+      - `--bucket-sampling-profile v16_1_1_normal`
+      - `evidence/train_epoch_bucket_usage.jsonl`
+    - hard-region weighting now includes:
+      - height gradients
+      - local normal variation
+      - painted alpha transitions
+      - MCLY transitions
+      - terrain-valid masking remains authoritative
+  - focused proof now exists at:
+    - `wow-viewer/output/datasets/v16/curation/smoke_v16_1_1_curation_335/`
+    - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_1_bucket_cpu/`
+    - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_1_bucket_rotation_cpu/`
 - V16.1 is now the named next architecture lane for terrain models:
   - one independent model per target family
   - `minimap -> height`

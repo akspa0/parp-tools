@@ -14,6 +14,8 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+DIFFICULTY_BUCKETS = ("easy", "medium", "hard", "pathological")
+
 
 def minimap_grayscale(minimap: np.ndarray) -> np.ndarray:
     x = minimap.astype(np.float32)
@@ -135,7 +137,7 @@ def is_blank_what_plate(
     )
 
 
-def load_curation_keys(manifest_path: str | Path) -> set[tuple[str, int]]:
+def load_curation_rows(manifest_path: str | Path) -> list[dict[str, Any]]:
     path = Path(manifest_path)
     if path.is_dir():
         kept_path = path / "kept_tiles.parquet"
@@ -161,6 +163,22 @@ def load_curation_keys(manifest_path: str | Path) -> set[tuple[str, int]]:
     else:
         raise RuntimeError(f"Unsupported curation manifest format: {path}")
 
+    return rows
+
+
+def load_curation_index(manifest_path: str | Path) -> dict[tuple[str, int], dict[str, Any]]:
+    rows = load_curation_rows(manifest_path)
+    out: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in rows:
+        build = str(row.get("build", ""))
+        tile_id = int(row.get("tile_id", -1))
+        if build and tile_id >= 0:
+            out[(build, tile_id)] = row
+    return out
+
+
+def load_curation_keys(manifest_path: str | Path) -> set[tuple[str, int]]:
+    rows = load_curation_rows(manifest_path)
     keys: set[tuple[str, int]] = set()
     for row in rows:
         if not bool(row.get("keep", True)):

@@ -88,28 +88,33 @@ uv run python scripts\train_v16.py `
 cd .\wow-viewer\data-harvester
 uv run python -u scripts\build_v16_curation_manifest.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
-  --profile normal_terrain_v1 `
+  --profile normal_terrain_v16_1_1 `
   --workers -1 `
   --chunk-size 128 `
-  --run-name normal_terrain_full_corpus_v1
+  --run-name normal_terrain_full_corpus_v16_1_1
 
 uv run python -u scripts\train_v16_1_normal.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
-  --curation-manifest ..\output\datasets\v16\curation\normal_terrain_full_corpus_v1 `
+  --curation-manifest ..\output\datasets\v16\curation\normal_terrain_full_corpus_v16_1_1 `
   --device auto `
   --batch-size 8 `
   --grad-accum-steps 1 `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
+  --bucket-sampling-profile v16_1_1_normal `
   --val-max-tiles 48 `
   --num-workers -1 `
   --epochs 50 `
-  --run-name v16_1_normal_curated_pool400_epoch128
+  --run-name v16_1_1_normal_curated_pool400_epoch128
 ```
 
 This is the preferred V16.1 pattern now: curate first, then train from the
 manifest instead of raw tile rows, then keep epochs bounded with a curated
-train pool and rotating per-epoch subsets. For the current 16 GB-card
+train pool and rotating per-epoch subsets. The V16.1.1 normal lane now also
+records difficulty buckets in the manifest, biases epoch subsets toward harder
+tiles, and strengthens intra-tile weighting with painted-transition-aware
+hard-region emphasis while keeping terrain-valid masking authoritative. For the
+current 16 GB-card
 recommendation, start at `8 x 1` before falling back to `4 x 2`, `2 x 4`, or
 `1 x 8`.
 

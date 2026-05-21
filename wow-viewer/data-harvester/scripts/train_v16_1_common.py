@@ -38,6 +38,16 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DATASET_ROOT = _PROJECT_ROOT / "output" / "datasets" / "v16"
 _MODELS_ROOT = _PROJECT_ROOT / "models" / "v16_1"
 _PANEL_SIZE = 256
+_DIFFICULTY_BUCKETS = ("easy", "medium", "hard", "pathological")
+_BUCKET_SAMPLING_PROFILES: dict[str, dict[str, float]] = {
+    "uniform": {bucket: 1.0 for bucket in _DIFFICULTY_BUCKETS},
+    "v16_1_1_normal": {
+        "easy": 1.0,
+        "medium": 1.75,
+        "hard": 3.5,
+        "pathological": 1.25,
+    },
+}
 
 
 def _seed_all(seed: int) -> None:
@@ -75,6 +85,19 @@ def _resolve_persistent_workers(requested: bool | None, num_workers: int) -> boo
     return bool(requested)
 
 
+def _normalize_bucket_label(value: Any) -> str:
+    label = str(value or "").strip().lower()
+    if label in _DIFFICULTY_BUCKETS:
+        return label
+    return "unbucketed"
+
+
+def _bucket_sampling_weights(profile: str | None) -> dict[str, float] | None:
+    if profile is None:
+        return None
+    return _BUCKET_SAMPLING_PROFILES.get(str(profile))
+
+
 class _DeterministicEpochSampler(Sampler[int]):
     """Deterministic sampler with optional per-epoch subset rotation."""
 
@@ -83,17 +106,26 @@ class _DeterministicEpochSampler(Sampler[int]):
         n: int,
         seed: int,
         order_log_path: Path | None = None,
+        bucket_log_path: Path | None = None,
         epoch_size: int | None = None,
         build_labels: list[str] | None = None,
         build_balanced: bool = False,
+        bucket_labels: list[str] | None = None,
+        bucket_sampling_profile: str | None = None,
+        sample_rows: list[dict[str, Any]] | None = None,
     ) -> None:
         self._n = int(n)
         self._seed = int(seed)
         self._epoch = 0
         self._order_log_path = order_log_path
+        self._bucket_log_path = bucket_log_path
         self._epoch_size = None if epoch_size is None or int(epoch_size) <= 0 else min(int(epoch_size), self._n)
         self._build_labels = list(build_labels) if build_labels is not None else None
         self._build_balanced = bool(build_balanced)
+        self._bucket_labels = [_normalize_bucket_label(label) for label in bucket_labels] if bucket_labels is not None else None
+        self._bucket_sampling_profile = bucket_sampling_profile
+        self._bucket_sampling_weights = _bucket_sampling_weights(bucket_sampling_profile)
+        self._sample_rows = [dict(row) for row in sample_rows] if sample_rows is not None else None
 
     def set_epoch(self, epoch: int) -> None:
         self._epoch = int(epoch)
@@ -109,6 +141,8 @@ class _DeterministicEpochSampler(Sampler[int]):
             take=self._epoch_size,
             build_labels=self._build_labels,
             build_balanced=self._build_balanced,
+            bucket_labels=self._bucket_labels,
+            bucket_sampling_weights=self._bucket_sampling_weights,
         )
 
     def __iter__(self):
@@ -116,17 +150,42 @@ class _DeterministicEpochSampler(Sampler[int]):
         selected = self._sample_subset(rng)
         order = list(selected)
         rng.shuffle(order)
+        available_bucket_counts = _bucket_counts(self._bucket_labels or [])
+        selected_bucket_labels = [self._bucket_labels[pos] for pos in selected] if self._bucket_labels is not None else []
+        ordered_bucket_labels = [self._bucket_labels[pos] for pos in order] if self._bucket_labels is not None else []
+        selected_rows = [self._sample_rows[pos] for pos in selected] if self._sample_rows is not None else None
+        order_rows = [self._sample_rows[pos] for pos in order] if self._sample_rows is not None else None
         if self._order_log_path is not None:
             payload = {
                 "epoch": self._epoch,
                 "num_samples": self._n,
                 "epoch_size": len(order),
+                "bucket_sampling_profile": self._bucket_sampling_profile,
+                "bucket_sampling_weights": self._bucket_sampling_weights,
+                "available_bucket_counts": available_bucket_counts,
+                "selected_bucket_counts": _bucket_counts(selected_bucket_labels),
+                "ordered_bucket_counts": _bucket_counts(ordered_bucket_labels),
                 "selected_positions_sha256": hashlib.sha256(np.asarray(selected, dtype=np.int32).tobytes()).hexdigest(),
                 "selected_positions": selected,
+                "selected_rows": selected_rows,
                 "order_sha256": hashlib.sha256(np.asarray(order, dtype=np.int32).tobytes()).hexdigest(),
                 "order": order,
+                "order_rows": order_rows,
             }
             with self._order_log_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(payload) + "\n")
+        if self._bucket_log_path is not None:
+            payload = {
+                "epoch": self._epoch,
+                "num_samples": self._n,
+                "epoch_size": len(order),
+                "bucket_sampling_profile": self._bucket_sampling_profile,
+                "bucket_sampling_weights": self._bucket_sampling_weights,
+                "available_bucket_counts": available_bucket_counts,
+                "selected_bucket_counts": _bucket_counts(selected_bucket_labels),
+                "selected_build_counts": _count_string_values([row.get("build", "unknown") for row in selected_rows] if selected_rows is not None else []),
+            }
+            with self._bucket_log_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(payload) + "\n")
         return iter(order)
 
@@ -140,6 +199,8 @@ def _sample_positions(
     take: int,
     build_labels: list[str] | None = None,
     build_balanced: bool = True,
+    bucket_labels: list[str] | None = None,
+    bucket_sampling_weights: dict[str, float] | None = None,
 ) -> list[int]:
     if n <= 0 or take <= 0:
         return []
@@ -148,7 +209,13 @@ def _sample_positions(
 
     rng = np.random.RandomState(int(seed))
     if not build_balanced or not build_labels or len(build_labels) != n:
-        return rng.choice(n, size=take, replace=False).tolist()
+        return _sample_weighted_positions(
+            list(range(n)),
+            take=take,
+            rng=rng,
+            bucket_labels=bucket_labels,
+            bucket_sampling_weights=bucket_sampling_weights,
+        )
 
     by_build: dict[str, list[int]] = {}
     for pos, build in enumerate(build_labels):
@@ -156,9 +223,6 @@ def _sample_positions(
 
     build_order = sorted(by_build.keys())
     rng.shuffle(build_order)
-    for build in build_order:
-        rng.shuffle(by_build[build])
-
     out: list[int] = []
     while len(out) < take:
         progressed = False
@@ -166,7 +230,18 @@ def _sample_positions(
             items = by_build[build]
             if not items:
                 continue
-            out.append(items.pop())
+            chosen = _sample_weighted_positions(
+                items,
+                take=1,
+                rng=rng,
+                bucket_labels=bucket_labels,
+                bucket_sampling_weights=bucket_sampling_weights,
+            )
+            if not chosen:
+                continue
+            selected = chosen[0]
+            items.remove(selected)
+            out.append(selected)
             progressed = True
             if len(out) >= take:
                 break
@@ -178,11 +253,58 @@ def _sample_positions(
         for build in build_order:
             remaining.extend(by_build[build])
         if remaining:
-            rng.shuffle(remaining)
-            out.extend(remaining[: take - len(out)])
+            extra = _sample_weighted_positions(
+                remaining,
+                take=take - len(out),
+                rng=rng,
+                bucket_labels=bucket_labels,
+                bucket_sampling_weights=bucket_sampling_weights,
+            )
+            out.extend(extra)
 
     rng.shuffle(out)
     return out[:take]
+
+
+def _count_string_values(values: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        key = str(value)
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _bucket_counts(bucket_labels: list[str]) -> dict[str, int]:
+    counts = _count_string_values([_normalize_bucket_label(label) for label in bucket_labels if str(label or "").strip()])
+    return {bucket: counts.get(bucket, 0) for bucket in _DIFFICULTY_BUCKETS if counts.get(bucket, 0) > 0}
+
+
+def _sample_weighted_positions(
+    positions: list[int],
+    *,
+    take: int,
+    rng: np.random.RandomState,
+    bucket_labels: list[str] | None = None,
+    bucket_sampling_weights: dict[str, float] | None = None,
+) -> list[int]:
+    if take <= 0 or not positions:
+        return []
+    if take >= len(positions):
+        return list(positions)
+
+    weights = None
+    if bucket_labels is not None and bucket_sampling_weights:
+        raw = np.asarray(
+            [
+                max(float(bucket_sampling_weights.get(_normalize_bucket_label(bucket_labels[pos]), 1.0)), 0.0)
+                for pos in positions
+            ],
+            dtype=np.float64,
+        )
+        if float(raw.sum()) > 0.0 and not np.allclose(raw, raw[0]):
+            weights = raw / raw.sum()
+    chosen_idx = rng.choice(len(positions), size=take, replace=False, p=weights)
+    return [positions[int(idx)] for idx in chosen_idx.tolist()]
 
 
 def _pool_row(entry: dict[str, Any], subset_pos: int, split_pos: int) -> dict[str, Any]:
@@ -202,6 +324,11 @@ def _pool_row(entry: dict[str, Any], subset_pos: int, split_pos: int) -> dict[st
         "has_mcly_texture_ids": bool(entry.get("has_mcly_texture_ids", False)),
         "n_mddf": int(entry.get("n_mddf", 0) or 0),
         "n_modf": int(entry.get("n_modf", 0) or 0),
+        "difficulty_bucket": str(entry.get("_curation_difficulty_bucket", "")),
+        "difficulty_rank": int(entry.get("_curation_difficulty_rank", -1)),
+        "quality_score": float(entry.get("_curation_quality_score", 0.0) or 0.0),
+        "usefulness_score": float(entry.get("_curation_usefulness_score", 0.0) or 0.0),
+        "difficulty_score": float(entry.get("_curation_difficulty_score", 0.0) or 0.0),
     }
 
 
@@ -218,6 +345,10 @@ def _apply_dataset_pool(
         str(ds._index_entries[global_idx].get("_build", "unknown"))
         for global_idx in ds._indices
     ]
+    bucket_labels = [
+        _normalize_bucket_label(ds._index_entries[global_idx].get("_curation_difficulty_bucket", ""))
+        for global_idx in ds._indices
+    ]
     selected_positions = _sample_positions(
         available,
         seed=seed,
@@ -230,12 +361,16 @@ def _apply_dataset_pool(
 
     rows: list[dict[str, Any]] = []
     build_counts: dict[str, int] = {}
+    bucket_counts: dict[str, int] = {}
     for subset_pos, split_pos in enumerate(selected_positions):
         entry = ds._index_entries[selected_global_indices[subset_pos]]
         row = _pool_row(entry, subset_pos=subset_pos, split_pos=split_pos)
         rows.append(row)
         build = str(row["build"])
         build_counts[build] = build_counts.get(build, 0) + 1
+        bucket = _normalize_bucket_label(row.get("difficulty_bucket", ""))
+        if bucket != "unbucketed":
+            bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
 
     selection_jsonl = evidence_dir / f"{split}_pool_selection.jsonl"
     with selection_jsonl.open("w", encoding="utf-8") as f:
@@ -253,6 +388,8 @@ def _apply_dataset_pool(
             np.asarray(selected_positions, dtype=np.int32).tobytes()
         ).hexdigest(),
         "build_tile_counts": build_counts,
+        "available_bucket_counts": _bucket_counts(bucket_labels),
+        "selected_bucket_counts": dict(sorted(bucket_counts.items())),
         "selection_jsonl": str(selection_jsonl),
     }
     (evidence_dir / f"{split}_pool_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -357,23 +494,44 @@ def _gradient_magnitude_257(x: torch.Tensor) -> torch.Tensor:
     return torch.sqrt((dx * dx) + (dy * dy) + 1e-8)
 
 
-def _detail_weight_from_targets(
+def _hard_region_weight_from_targets(
     height_raw: torch.Tensor,
     target_normals: torch.Tensor,
+    alpha_painted_256: torch.Tensor,
+    mcly_any_16: torch.Tensor,
+    terrain_valid_mask: torch.Tensor,
     base_mask: torch.Tensor,
     detail_boost: float,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     height_grad = _gradient_magnitude_257(height_raw)
     normal_grad = _gradient_magnitude_257(target_normals)
     normal_grad = normal_grad.mean(dim=1, keepdim=True)
+    alpha_painted_257 = _resize_weight(alpha_painted_256, target_normals.shape[-2:])
+    alpha_grad = _gradient_magnitude_257(alpha_painted_257)
+    mcly_any_257 = _resize_weight(mcly_any_16, target_normals.shape[-2:])
+    mcly_grad = _gradient_magnitude_257(mcly_any_257)
 
     valid_mean_height = _masked_mean(height_grad, base_mask)
     valid_mean_normal = _masked_mean(normal_grad, base_mask)
+    valid_mean_alpha = _masked_mean(alpha_grad, base_mask)
+    valid_mean_mcly = _masked_mean(mcly_grad, base_mask)
     height_grad_n = (height_grad / valid_mean_height.clamp_min(1e-6)).clamp(0.0, 4.0)
     normal_grad_n = (normal_grad / valid_mean_normal.clamp_min(1e-6)).clamp(0.0, 4.0)
+    alpha_grad_n = (alpha_grad / valid_mean_alpha.clamp_min(1e-6)).clamp(0.0, 4.0)
+    mcly_grad_n = (mcly_grad / valid_mean_mcly.clamp_min(1e-6)).clamp(0.0, 4.0)
 
-    detail_signal = ((0.65 * height_grad_n) + (0.35 * normal_grad_n)).clamp(0.0, 4.0)
-    return 1.0 + (float(detail_boost) * detail_signal)
+    transition_signal = torch.maximum(alpha_grad_n, mcly_grad_n)
+    hard_region_signal = ((0.50 * height_grad_n) + (0.25 * normal_grad_n) + (0.25 * transition_signal)).clamp(0.0, 4.0)
+    hard_region_signal = hard_region_signal * terrain_valid_mask
+    hard_region_weight = 1.0 + (float(detail_boost) * hard_region_signal)
+    return hard_region_weight, {
+        "hard_region_signal": hard_region_signal,
+        "height_grad_signal": height_grad_n,
+        "normal_grad_signal": normal_grad_n,
+        "alpha_grad_signal": alpha_grad_n,
+        "mcly_grad_signal": mcly_grad_n,
+        "transition_signal": transition_signal,
+    }
 
 
 def _normal_loss(
@@ -394,6 +552,8 @@ def _normal_loss(
     what_plate_flag = batch["what_plate_flag"].to(device, non_blocking=True).view(-1, 1, 1, 1)
     alpha_painted_cov = batch["alpha_painted_cov"].to(device, non_blocking=True)
     mcly_cov = batch["mcly_cov"].to(device, non_blocking=True)
+    alpha_painted_256 = batch["alpha_painted_256"].to(device, non_blocking=True)
+    mcly_any_16 = batch["mcly_any_16"].to(device, non_blocking=True)
     pred = model(inp)
     pred_n = F.normalize(pred, dim=1, eps=1e-6)
     target_n = F.normalize(target, dim=1, eps=1e-6)
@@ -404,13 +564,16 @@ def _normal_loss(
     instance_weight = 1.0 - (0.75 * object_presence)
     base_mask = normal_mask * terrain_valid_mask * object_weight * liquid_weight * instance_weight
     base_mask = base_mask * (1.0 - what_plate_flag)
-    detail_weight = _detail_weight_from_targets(
+    hard_region_weight, hard_region_debug = _hard_region_weight_from_targets(
         height_raw=height_raw,
         target_normals=target_n,
+        alpha_painted_256=alpha_painted_256,
+        mcly_any_16=mcly_any_16,
+        terrain_valid_mask=terrain_valid_mask,
         base_mask=base_mask,
         detail_boost=float(args.normal_detail_boost),
     )
-    train_mask = base_mask * detail_weight
+    train_mask = base_mask * hard_region_weight
     vec_l1 = (pred_n - target_n).abs().mean(dim=1, keepdim=True)
     nz_l2 = (pred_n[:, 2:3] - target_n[:, 2:3]) ** 2
     loss_cos = _masked_mean(cosine, train_mask)
@@ -423,7 +586,9 @@ def _normal_loss(
         "normal_vec": float(loss_vec.item()),
         "normal_nz": float(loss_nz.item()),
         "normal_mask_cov": float(base_mask.mean().item()),
-        "normal_detail_mean": float(_masked_mean(detail_weight, base_mask).item()),
+        "normal_detail_mean": float(_masked_mean(hard_region_weight, base_mask).item()),
+        "normal_hard_region_mean": float(_masked_mean(hard_region_debug["hard_region_signal"], base_mask).item()),
+        "normal_transition_mean": float(_masked_mean(hard_region_debug["transition_signal"], base_mask).item()),
         "what_plate_rate": float(what_plate_flag.mean().item()),
         "alpha_painted_cov": float(alpha_painted_cov.mean().item()),
         "mcly_cov": float(mcly_cov.mean().item()),
@@ -432,7 +597,9 @@ def _normal_loss(
         "target": target_n,
         "train_mask": train_mask,
         "base_mask": base_mask,
-        "detail_weight": detail_weight,
+        "detail_weight": hard_region_weight,
+        "hard_region_signal": hard_region_debug["hard_region_signal"],
+        "transition_signal": hard_region_debug["transition_signal"],
         "terrain_valid_mask": terrain_valid_mask,
         "object_weight": object_weight,
         "liquid_mask": liquid_mask_257,
@@ -533,6 +700,8 @@ def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
         ("normal_pred", _normals_to_rgb(outputs["pred"][0])),
         ("terrain_valid", outputs["terrain_valid_mask"][0]),
         ("base_mask", outputs["base_mask"][0]),
+        ("hard_region", outputs["hard_region_signal"][0] / outputs["hard_region_signal"][0].max().clamp_min(1e-6)),
+        ("transition", outputs["transition_signal"][0] / outputs["transition_signal"][0].max().clamp_min(1e-6)),
         ("detail_weight", outputs["detail_weight"][0] / outputs["detail_weight"][0].max().clamp_min(1e-6)),
         ("train_mask", outputs["train_mask"][0] / outputs["train_mask"][0].max().clamp_min(1e-6)),
         ("liquid_mask", outputs["liquid_mask"][0]),
@@ -643,6 +812,12 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         help="Balance per-epoch train sampling across builds when possible.",
     )
     p.add_argument(
+        "--bucket-sampling-profile",
+        choices=sorted(_BUCKET_SAMPLING_PROFILES.keys()),
+        default=("v16_1_1_normal" if task_name == "normal" else "uniform"),
+        help="Per-epoch difficulty-bucket sampling profile used when curated manifests carry bucket metadata.",
+    )
+    p.add_argument(
         "--val-max-tiles",
         type=int,
         default=0,
@@ -742,14 +917,27 @@ def run_task(task_name: str) -> None:
         str(train_ds._index_entries[global_idx].get("_build", "unknown"))
         for global_idx in train_ds._indices
     ]
+    train_bucket_labels = [
+        _normalize_bucket_label(train_ds._index_entries[global_idx].get("_curation_difficulty_bucket", ""))
+        for global_idx in train_ds._indices
+    ]
+    train_sample_rows = [
+        _pool_row(train_ds._index_entries[global_idx], subset_pos=idx, split_pos=idx)
+        for idx, global_idx in enumerate(train_ds._indices)
+    ]
     train_order_log = evidence_dir / "train_epoch_orders.jsonl"
+    train_bucket_log = evidence_dir / "train_epoch_bucket_usage.jsonl"
     train_sampler = _DeterministicEpochSampler(
         len(train_ds),
         seed=int(args.seed),
         order_log_path=train_order_log,
+        bucket_log_path=train_bucket_log,
         epoch_size=int(args.train_epoch_tiles),
         build_labels=train_build_labels,
         build_balanced=bool(args.train_epoch_build_balanced),
+        bucket_labels=train_bucket_labels,
+        bucket_sampling_profile=args.bucket_sampling_profile,
+        sample_rows=train_sample_rows,
     )
     loader_kwargs: dict[str, Any] = {
         "num_workers": resolved_num_workers,
@@ -812,6 +1000,8 @@ def run_task(task_name: str) -> None:
         "train_max_tiles": args.train_max_tiles,
         "train_epoch_tiles": args.train_epoch_tiles,
         "train_epoch_build_balanced": args.train_epoch_build_balanced,
+        "bucket_sampling_profile": args.bucket_sampling_profile,
+        "bucket_sampling_weights": _bucket_sampling_weights(args.bucket_sampling_profile),
         "val_max_tiles": args.val_max_tiles,
         "max_train_samples": args.max_train_samples,
         "max_val_samples": args.max_val_samples,
@@ -838,11 +1028,17 @@ def run_task(task_name: str) -> None:
     )
     print(f"Curated build mix (train): {train_pool.get('build_tile_counts', {})}", flush=True)
     print(f"Curated build mix (val): {val_pool.get('build_tile_counts', {})}", flush=True)
+    if train_pool.get("selected_bucket_counts"):
+        print(f"Curated difficulty mix (train): {train_pool.get('selected_bucket_counts', {})}", flush=True)
+        print(f"Available difficulty mix (train): {train_pool.get('available_bucket_counts', {})}", flush=True)
+    if val_pool.get("selected_bucket_counts"):
+        print(f"Curated difficulty mix (val): {val_pool.get('selected_bucket_counts', {})}", flush=True)
     if args.train_epoch_tiles > 0:
         print(
             "Epoch sampling: "
             f"train_epoch_tiles={min(int(args.train_epoch_tiles), len(train_ds))}/{len(train_ds)} "
-            f"build_balanced={bool(args.train_epoch_build_balanced)}",
+            f"build_balanced={bool(args.train_epoch_build_balanced)} "
+            f"bucket_profile={args.bucket_sampling_profile}",
             flush=True,
         )
     print(

@@ -20,6 +20,7 @@ import zarr
 import zarr.storage
 
 from harvester.v16_curation import (
+    DIFFICULTY_BUCKETS,
     alpha_painted,
     crop_257_to_256,
     dilate,
@@ -47,7 +48,11 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--dataset-dir", type=Path, default=_DATASET_ROOT)
     p.add_argument("--build", type=str)
     p.add_argument("--builds", nargs="+")
-    p.add_argument("--profile", choices=["basic_v1", "normal_terrain_v1"], default="normal_terrain_v1")
+    p.add_argument(
+        "--profile",
+        choices=["basic_v1", "normal_terrain_v1", "normal_terrain_v16_1_1"],
+        default="normal_terrain_v16_1_1",
+    )
     p.add_argument("--sample-seed", type=int, default=42)
     p.add_argument("--max-tiles-per-build", type=int, default=0)
     p.add_argument("--min-minimap-gray-std", type=float, default=4.0)
@@ -161,6 +166,71 @@ def _crop_257_to_256(x: np.ndarray) -> np.ndarray:
     return x[:256, :256]
 
 
+def _clamp01(value: float) -> float:
+    return float(max(0.0, min(1.0, float(value))))
+
+
+def _score_row_v16_1_1(row: dict[str, Any]) -> dict[str, float | str]:
+    deformation_richness = _clamp01(
+        (0.45 * min(row["terrain_detail_mean"] / 0.22, 1.5))
+        + (0.35 * min(row["normal_relief_mean"] / 0.20, 1.5))
+        + (0.20 * min(row["normal_edge_frac"] / 0.12, 1.5))
+    )
+    normal_coverage = _clamp01((row["normal_cov"] - 0.20) / 0.60)
+    terrain_validity = _clamp01(
+        (0.80 * min(row["terrain_valid_cov"] / 0.75, 1.25))
+        + (0.20 * (1.0 - min((row["object_cov"] + (0.85 * row["liquid_cov"])) / 0.75, 1.0)))
+    )
+    painted_signal = _clamp01(max(row["alpha_cov"] / 0.60, row["mcly_cov"] / 0.60))
+    minimap_target_usefulness = _clamp01(
+        (0.55 * min(row["normal_edge_f1"] / 0.75, 1.25))
+        + (0.25 * min(row["minimap_gray_std"] / 18.0, 1.25))
+        + (0.20 * min(min(row["normal_edge_frac"], row["minimap_edge_frac"]) / 0.10, 1.25))
+    )
+
+    usefulness_score = _clamp01(
+        (0.30 * deformation_richness)
+        + (0.15 * normal_coverage)
+        + (0.20 * terrain_validity)
+        + (0.15 * painted_signal)
+        + (0.20 * minimap_target_usefulness)
+    )
+    difficulty_score = _clamp01(
+        (0.55 * deformation_richness)
+        + (0.20 * painted_signal)
+        + (0.15 * normal_coverage)
+        + (0.10 * minimap_target_usefulness)
+    )
+    pathology_pressure = _clamp01(
+        max(0.0, 0.40 - terrain_validity) * 1.6
+        + max(0.0, 0.32 - minimap_target_usefulness) * 1.2
+        + max(0.0, row["object_cov"] + row["liquid_cov"] - 0.55) * 1.5
+    )
+
+    if pathology_pressure >= 0.22 and difficulty_score >= 0.35:
+        difficulty_bucket = "pathological"
+    elif difficulty_score >= 0.62 and usefulness_score >= 0.42:
+        difficulty_bucket = "hard"
+    elif difficulty_score >= 0.34 or usefulness_score >= 0.38:
+        difficulty_bucket = "medium"
+    else:
+        difficulty_bucket = "easy"
+
+    return {
+        "quality_score": usefulness_score,
+        "usefulness_score": usefulness_score,
+        "difficulty_score": difficulty_score,
+        "difficulty_bucket": difficulty_bucket,
+        "difficulty_rank": int(DIFFICULTY_BUCKETS.index(difficulty_bucket)),
+        "score_deformation_richness": deformation_richness,
+        "score_normal_coverage": normal_coverage,
+        "score_terrain_validity": terrain_validity,
+        "score_painted_signal": painted_signal,
+        "score_minimap_target_usefulness": minimap_target_usefulness,
+        "score_pathology_pressure": pathology_pressure,
+    }
+
+
 def _compute_row(
     *,
     build: str,
@@ -193,14 +263,20 @@ def _compute_row(
         mcly_cov = mcly_painted_coverage(root["mcly_layer_mask"][tile_id].astype(np.float32))
 
     liquid_cov = 0.0
+    liquid_mask_256 = np.zeros((256, 256), dtype=np.float32)
     if bool(row_meta["has_liquid"]) and "liquid_mask" in root:
-        liquid_cov = float(root["liquid_mask"][tile_id].astype(np.float32).mean())
+        liquid_mask_256 = root["liquid_mask"][tile_id].astype(np.float32)
+        liquid_cov = float(liquid_mask_256.mean())
 
-    object_cov = 0.0
-    if "object_filtered_mask" in root:
-        object_cov = float(root["object_filtered_mask"][tile_id].astype(np.float32).mean())
-    elif "object_mask" in root:
-        object_cov = float(root["object_mask"][tile_id].astype(np.float32).mean())
+    mddf_mask = root["mddf_mask"][tile_id].astype(np.float32) if "mddf_mask" in root else np.zeros((257, 257), dtype=np.float32)
+    modf_mask = root["modf_mask"][tile_id].astype(np.float32) if "modf_mask" in root else np.zeros((257, 257), dtype=np.float32)
+    object_presence_257 = np.maximum(mddf_mask, modf_mask).astype(np.float32, copy=False)
+    object_cov = float(object_presence_257.mean())
+    if object_cov <= 0.0:
+        if "object_filtered_mask" in root:
+            object_cov = float(root["object_filtered_mask"][tile_id].astype(np.float32).mean())
+        elif "object_mask" in root:
+            object_cov = float(root["object_mask"][tile_id].astype(np.float32).mean())
 
     height_grad = crop_257_to_256(height_gradient_strength(height_257))
     terrain_detail_mean = float((0.65 * height_grad + 0.35 * relief).mean())
@@ -211,6 +287,13 @@ def _compute_row(
         liquid_cov=liquid_cov,
         object_cov=object_cov,
     )
+    liquid_mask_257 = np.pad(liquid_mask_256, ((0, 1), (0, 1)), mode="edge")
+    terrain_valid_257 = normal_mask * (1.0 - np.clip(object_presence_257, 0.0, 1.0))
+    terrain_valid_257 *= 1.0 - (0.85 * np.clip(liquid_mask_257, 0.0, 1.0))
+    if what_plate:
+        terrain_valid_257[...] = 0.0
+    terrain_valid_cov = float(_crop_257_to_256(terrain_valid_257).mean())
+    painted_signal_cov = float(max(alpha_cov, mcly_cov))
 
     metrics = {
         "build": build,
@@ -232,6 +315,8 @@ def _compute_row(
         "mcly_cov": mcly_cov,
         "liquid_cov": liquid_cov,
         "object_cov": object_cov,
+        "terrain_valid_cov": terrain_valid_cov,
+        "painted_signal_cov": painted_signal_cov,
         "terrain_detail_mean": terrain_detail_mean,
         "what_plate": bool(what_plate),
         "n_mddf": int(row_meta["n_mddf"]),
@@ -240,13 +325,13 @@ def _compute_row(
     return metrics
 
 
-def _evaluate_profile(row: dict[str, Any], args: argparse.Namespace) -> tuple[bool, float, str | None]:
+def _evaluate_profile(row: dict[str, Any], args: argparse.Namespace) -> tuple[bool, dict[str, Any]]:
     if bool(row.get("what_plate", False)):
-        return False, 0.0, "blank_what_plate_tile"
+        return False, {"quality_score": 0.0, "reject_reason": "blank_what_plate_tile"}
 
     if row["minimap_gray_std"] < float(args.min_minimap_gray_std):
         if row["height_std"] < float(args.min_height_std) and row["alpha_cov"] < 0.01 and row["liquid_cov"] < 0.01 and row["normal_cov"] < float(args.min_normal_coverage):
-            return False, 0.0, "blank_low_signal_tile"
+            return False, {"quality_score": 0.0, "reject_reason": "blank_low_signal_tile"}
 
     if args.profile == "basic_v1":
         score = 0.1
@@ -255,17 +340,35 @@ def _evaluate_profile(row: dict[str, Any], args: argparse.Namespace) -> tuple[bo
         score += min(row["normal_cov"], 1.0)
         score += min(row["normal_edge_f1"], 1.0)
         score += min(row["terrain_detail_mean"] * 10.0, 1.5)
-        return True, float(score), None
+        return True, {
+            "quality_score": float(score),
+            "usefulness_score": float(score),
+            "difficulty_score": float(score),
+            "difficulty_bucket": "medium",
+            "difficulty_rank": int(DIFFICULTY_BUCKETS.index("medium")),
+            "score_deformation_richness": 0.0,
+            "score_normal_coverage": 0.0,
+            "score_terrain_validity": 0.0,
+            "score_painted_signal": 0.0,
+            "score_minimap_target_usefulness": 0.0,
+            "score_pathology_pressure": 0.0,
+            "reject_reason": None,
+        }
 
     if not row["has_normals"] or row["normal_cov"] < float(args.min_normal_coverage):
-        return False, 0.0, "insufficient_normal_coverage"
+        return False, {"quality_score": 0.0, "reject_reason": "insufficient_normal_coverage"}
 
     if row["normal_relief_mean"] < 0.015 and row["minimap_gray_std"] < float(args.min_minimap_gray_std):
-        return False, 0.0, "blank_minimap_blank_normals"
+        return False, {"quality_score": 0.0, "reject_reason": "blank_minimap_blank_normals"}
 
     if row["normal_edge_frac"] >= float(args.min_edge_frac) and row["minimap_edge_frac"] >= float(args.min_edge_frac):
         if row["normal_edge_f1"] < float(args.min_normal_edge_f1):
-            return False, 0.0, "normal_minimap_edge_mismatch"
+            return False, {"quality_score": 0.0, "reject_reason": "normal_minimap_edge_mismatch"}
+
+    if args.profile == "normal_terrain_v16_1_1":
+        payload = _score_row_v16_1_1(row)
+        payload["reject_reason"] = None
+        return True, payload
 
     score = 0.1
     score += min(row["minimap_gray_std"] / 18.0, 2.0)
@@ -274,7 +377,20 @@ def _evaluate_profile(row: dict[str, Any], args: argparse.Namespace) -> tuple[bo
     score += min(row["normal_relief_mean"] * 6.0, 1.5)
     score += min(row["normal_edge_f1"] * 2.0, 2.0)
     score += min(row["terrain_detail_mean"] * 10.0, 1.5)
-    return True, float(score), None
+    return True, {
+        "quality_score": float(score),
+        "usefulness_score": float(score),
+        "difficulty_score": float(score),
+        "difficulty_bucket": "medium",
+        "difficulty_rank": int(DIFFICULTY_BUCKETS.index("medium")),
+        "score_deformation_richness": 0.0,
+        "score_normal_coverage": 0.0,
+        "score_terrain_validity": 0.0,
+        "score_painted_signal": 0.0,
+        "score_minimap_target_usefulness": 0.0,
+        "score_pathology_pressure": 0.0,
+        "reject_reason": None,
+    }
 
 
 def _process_chunk(
@@ -289,11 +405,17 @@ def _process_chunk(
         out: list[dict[str, Any]] = []
         for row_meta in row_chunk:
             row = _compute_row(build=build, row_meta=row_meta, root=root, args_dict=args_dict)
-            keep, quality_score, reject_reason = _evaluate_profile(row, argparse.Namespace(**args_dict))
+            keep, evaluation = _evaluate_profile(row, argparse.Namespace(**args_dict))
             row["profile"] = args_dict["profile"]
             row["keep"] = bool(keep)
-            row["quality_score"] = float(quality_score)
-            row["reject_reason"] = reject_reason
+            row.update(evaluation)
+            row["quality_score"] = float(row.get("quality_score", 0.0) or 0.0)
+            row["usefulness_score"] = float(row.get("usefulness_score", row["quality_score"]) or 0.0)
+            row["difficulty_score"] = float(row.get("difficulty_score", row["quality_score"]) or 0.0)
+            if row.get("difficulty_bucket") is None:
+                row["difficulty_bucket"] = "pathological" if keep else None
+            if row.get("difficulty_bucket") is not None:
+                row["difficulty_rank"] = int(DIFFICULTY_BUCKETS.index(str(row["difficulty_bucket"])))
             out.append(row)
         return out
     finally:
@@ -384,7 +506,17 @@ def main() -> None:
         "normal_edge_f1_mean_kept": float(np.mean([row["normal_edge_f1"] for row in kept])) if kept else 0.0,
         "normal_edge_f1_p10_kept": float(np.percentile([row["normal_edge_f1"] for row in kept], 10)) if kept else 0.0,
         "minimap_gray_std_mean_kept": float(np.mean([row["minimap_gray_std"] for row in kept])) if kept else 0.0,
+        "quality_score_mean_kept": float(np.mean([row["quality_score"] for row in kept])) if kept else 0.0,
+        "usefulness_score_mean_kept": float(np.mean([row["usefulness_score"] for row in kept])) if kept else 0.0,
         "reject_reason_counts": {},
+        "difficulty_bucket_counts": {},
+        "difficulty_bucket_examples": {},
+        "scouting_pool_recipe": {
+            "train_max_tiles": 400,
+            "train_epoch_tiles": 128,
+            "val_max_tiles": 48,
+            "intent": "mixed-complexity scouting pool with bucket-aware epoch rotation",
+        },
         "worst_rejected_examples": rejected[: int(args.worst_k)],
     }
     reason_counts: dict[str, int] = {}
@@ -392,6 +524,26 @@ def main() -> None:
         reason = str(row.get("reject_reason") or "unknown")
         reason_counts[reason] = reason_counts.get(reason, 0) + 1
     summary["reject_reason_counts"] = dict(sorted(reason_counts.items()))
+    bucket_counts: dict[str, int] = {bucket: 0 for bucket in DIFFICULTY_BUCKETS}
+    bucket_examples: dict[str, list[dict[str, Any]]] = {bucket: [] for bucket in DIFFICULTY_BUCKETS}
+    for row in sorted(kept, key=lambda entry: (-float(entry.get("quality_score", 0.0)), int(entry.get("tile_id", -1)))):
+        bucket = str(row.get("difficulty_bucket") or "")
+        if bucket not in bucket_counts:
+            continue
+        bucket_counts[bucket] += 1
+        if len(bucket_examples[bucket]) < 3:
+            bucket_examples[bucket].append(
+                {
+                    "build": row["build"],
+                    "map": row["map"],
+                    "tile_id": int(row["tile_id"]),
+                    "quality_score": float(row["quality_score"]),
+                    "usefulness_score": float(row["usefulness_score"]),
+                    "difficulty_score": float(row["difficulty_score"]),
+                }
+            )
+    summary["difficulty_bucket_counts"] = bucket_counts
+    summary["difficulty_bucket_examples"] = bucket_examples
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     worst_rows = rejected[: int(args.worst_k)]
@@ -432,7 +584,8 @@ def main() -> None:
     print(f"Wrote {output_dir / 'kept_tiles.parquet'}", flush=True)
     print(
         f"profile={args.profile} kept={len(kept)}/{len(rows)} "
-        f"keep_ratio={summary['keep_ratio']:.3f}",
+        f"keep_ratio={summary['keep_ratio']:.3f} "
+        f"buckets={summary['difficulty_bucket_counts']}",
         flush=True,
     )
 

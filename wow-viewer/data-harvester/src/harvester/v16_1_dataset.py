@@ -15,7 +15,7 @@ import zarr
 import zarr.storage
 from torch.utils.data import Dataset
 
-from harvester.v16_curation import alpha_painted, is_blank_what_plate, load_curation_keys, mcly_painted_coverage
+from harvester.v16_curation import alpha_painted, is_blank_what_plate, load_curation_index, mcly_painted_coverage
 
 
 def _build_split_indices(n_items: int, split: str, val_fraction: float, seed: int) -> list[int]:
@@ -77,7 +77,7 @@ class V161Dataset(Dataset):
         self._stores: dict[str, zarr.Group] = {}
         self._index_entries: list[dict] = []
         self._curation_manifest = Path(curation_manifest) if curation_manifest is not None else None
-        curated_keys = load_curation_keys(self._curation_manifest) if self._curation_manifest is not None else None
+        curation_index = load_curation_index(self._curation_manifest) if self._curation_manifest is not None else None
 
         build_dirs = builds or [d.stem.replace(".zarr", "") for d in sorted(self.dataset_dir.glob("*.zarr"))]
         for build in build_dirs:
@@ -95,10 +95,24 @@ class V161Dataset(Dataset):
             for i in range(table.num_rows):
                 row = {col: table.column(col)[i].as_py() for col in table.column_names}
                 row["_build"] = build
-                if curated_keys is not None:
+                if curation_index is not None:
                     tile_id = int(row.get("tile_id", -1))
-                    if (build, tile_id) not in curated_keys:
+                    curation_row = curation_index.get((build, tile_id))
+                    if curation_row is None or not bool(curation_row.get("keep", True)):
                         continue
+                    row["_curation_profile"] = str(curation_row.get("profile", ""))
+                    row["_curation_quality_score"] = float(curation_row.get("quality_score", 0.0) or 0.0)
+                    row["_curation_usefulness_score"] = float(curation_row.get("usefulness_score", row["_curation_quality_score"]) or 0.0)
+                    row["_curation_difficulty_score"] = float(curation_row.get("difficulty_score", row["_curation_quality_score"]) or 0.0)
+                    row["_curation_difficulty_bucket"] = str(curation_row.get("difficulty_bucket", ""))
+                    row["_curation_difficulty_rank"] = int(
+                        curation_row["difficulty_rank"] if "difficulty_rank" in curation_row and curation_row["difficulty_rank"] is not None else -1
+                    )
+                    row["_curation_score_deformation_richness"] = float(curation_row.get("score_deformation_richness", 0.0) or 0.0)
+                    row["_curation_score_normal_coverage"] = float(curation_row.get("score_normal_coverage", 0.0) or 0.0)
+                    row["_curation_score_terrain_validity"] = float(curation_row.get("score_terrain_validity", 0.0) or 0.0)
+                    row["_curation_score_painted_signal"] = float(curation_row.get("score_painted_signal", 0.0) or 0.0)
+                    row["_curation_score_minimap_target_usefulness"] = float(curation_row.get("score_minimap_target_usefulness", 0.0) or 0.0)
                 self._index_entries.append(row)
 
         if not self._index_entries:
@@ -271,6 +285,11 @@ class V161Dataset(Dataset):
             "what_plate_flag": torch.tensor(what_plate_flag, dtype=torch.float32),
             "alpha_painted_cov": torch.tensor(alpha_painted_cov, dtype=torch.float32),
             "mcly_cov": torch.tensor(mcly_cov, dtype=torch.float32),
+            "curation_quality_score": torch.tensor(float(entry.get("_curation_quality_score", 0.0) or 0.0), dtype=torch.float32),
+            "curation_usefulness_score": torch.tensor(float(entry.get("_curation_usefulness_score", 0.0) or 0.0), dtype=torch.float32),
+            "curation_difficulty_score": torch.tensor(float(entry.get("_curation_difficulty_score", 0.0) or 0.0), dtype=torch.float32),
+            "curation_difficulty_rank": torch.tensor(int(entry.get("_curation_difficulty_rank", -1)), dtype=torch.int64),
+            "curation_difficulty_bucket": str(entry.get("_curation_difficulty_bucket", "")),
             "has_normals": bool(entry.get("has_normal_xyz", False)),
             "has_alpha": bool(entry.get("has_alpha_256", False)),
             "has_holes": bool(entry.get("has_holes_16", False)),
