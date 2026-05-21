@@ -145,7 +145,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--builds", nargs="+", default=["3_3_5_12340"],
                     help="Build keys to include in training")
     p.add_argument("--batch-size", type=int, default=8)
-    p.add_argument("--epochs", type=int, default=200)
+    p.add_argument(
+        "--epochs",
+        type=int,
+        default=200,
+        help="Total epoch target for the run; resume continues until this overall ceiling.",
+    )
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--weight-decay", type=float, default=0.05)
     p.add_argument(
@@ -265,7 +270,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-augment", action="store_false", dest="augment")
     p.add_argument("--run-name", type=str, default=None,
                     help="Name for this run (auto-generated from timestamp if omitted)")
-    p.add_argument("--resume-checkpoint", type=Path, default=None)
+    p.add_argument(
+        "--resume-checkpoint",
+        type=Path,
+        default=None,
+        help="Checkpoint file to resume from directly (restores model, optimizer, scheduler, and scaler state).",
+    )
     p.add_argument(
         "--resume-from",
         type=str,

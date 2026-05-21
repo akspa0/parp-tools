@@ -5,6 +5,16 @@
 
 ## Primary Live Lane
 - V16 terrain dataset + training is the current execution path.
+- V16.1 is now the named next architecture lane for terrain models:
+  - one independent model per target family
+  - `minimap -> height`
+  - `minimap -> normal`
+  - `minimap -> holes`
+  - `minimap -> liquid footprint + liquid type`
+  - `minimap -> MCLY/MCAL decomposition + recomposition`
+  - shared object-mask loss gating stays available across appropriate trainers
+  - linked together into resulting terrain outputs after per-family prediction
+- V16 stays as the baseline/reference trainer until V16.1 lands smoke proof.
 - Canonical short docs were rewritten and should now be the first read for this lane:
   - `wow-viewer/README.md`
   - `wow-viewer/data-harvester/README.md`
@@ -54,6 +64,17 @@
 - CUDA-oriented loader defaults are less conservative now: `--num-workers=-1` auto-resolves a worker count and `persistent_workers` defaults on when workers are active.
 - Trainer curation now has a basic quality gate by default: it drops obviously low-signal flat tiles and writes `train_quality_audit.json` / `val_quality_audit.json`.
 - Every new best `val_h` epoch now writes a fresh random validation snapshot set under `validation/best_epoch_XXXX/`, separate from the normal interval snapshots.
+- Current conclusion from the long V16 run: the shared-head trainer is not the
+  long-range architecture owner. Future model work should target the V16.1
+  dense-correlation family instead of adding more complexity to the V16 monolith.
+- Liquids are no longer treated as "mask only" in the next architecture lane;
+  V16.1 should carry liquid type as a first-class prediction surface.
+- Alpha is no longer treated as a standalone generic mask head in the next
+  architecture lane; V16.1 should handle it as a dedicated MCLY/MCAL
+  decomposition + recomposition family.
+- That decomposition family is not greenfield: existing `train_d1.py` /
+  `D1UNet` / `D1Dataset` work should be migrated onto the V16 Zarr-quality
+  signals and current loss-gating contract.
 
 ## Harvest / Dataset Truth
 - Stream format is lean `ARRY`, not legacy `NPZB`.
@@ -123,6 +144,13 @@
   - basic gate dropped `196` obviously low-signal flat train tiles from the `3_3_5_12340` smoke candidate pool (`4621 -> 4425`)
 
 ## Next Likely Slice
-- Monitor `v16_full_corpus_epoch_rotation`, inspect `train_quality_audit.json`, and tighten mismatch rejection if the alpha/minimap bad tail still leaks into validation.
+- Land V16.1 height first, then V16.1 normals, using the current V16 corpus as the
+  dataset contract.
+- Land V16.1 liquid footprint/type and V16.1 texture decomposition soon after the
+  first two trainers.
+- Reuse the existing D1 tileset/decomposition lane as the starting point for
+  V16.1 texture decomposition instead of redesigning it from scratch.
+- Treat `v16_full_corpus_epoch_rotation*` as baseline evidence, not as the main
+  future architecture investment surface.
 - If WL* chunk-fill behavior matters to loss semantics, handle it in the loader/trainer, not by reopening harvest.
 - PM4 follow-up now has a library-owned `MSHD.Field04` region-id seam feeding `MdxViewer` overlay coloring/debug/export, selected-region peer summaries, and LLM-oriented visible-overlay evidence bundles; broader PM4 object-mapping work can build on that without reintroducing viewer-owned decode logic.

@@ -1,0 +1,173 @@
+# V16.1 Dense Correlation Model Family
+
+## Purpose
+
+V16.1 is the new terrain-model family name for the next V16-derived
+architecture reset.
+
+Its defining rule is simple:
+
+```text
+one minimap input
+one target family
+one model
+one trainer
+one checkpoint stream
+```
+
+V16.1 exists because the V16 shared-head terrain trainer has shown clear signs of
+task interference during real training:
+
+- long validation plateaus
+- uneven head quality
+- fragile normal prediction
+- hard-to-interpret failure surfaces
+
+V16.1 keeps the existing V16 Zarr corpus as the dataset contract and keeps V16
+as the baseline, but rejects the V16 shared multitask model as the long-range
+architecture owner.
+
+## Core Rule
+
+No shared trainable weights across target families.
+
+Shared utility code is fine.
+Shared dataset code is fine.
+Shared run-layout helpers are fine.
+
+But height, normals, holes, liquids, and texture decomposition must each have
+their own model/trainer/checkpoint surface, and then be linked together to
+build the resulting outputs.
+
+## Target Families
+
+The first V16.1 surfaces are:
+
+- `minimap -> height`
+- `minimap -> normal`
+- `minimap -> holes`
+- `minimap -> liquid footprint + liquid type`
+- `minimap -> MCLY/MCAL decomposition + recomposition`
+
+These are intentionally direct mappings because the immediate goal is to build a
+dense minimap-to-signal correlation network without hiding failures inside one
+shared model. Alpha is treated as a decomposition/recomposition problem rather
+than a generic mask head.
+
+## Existing Reuse
+
+The texture-decomposition lane is not greenfield.
+
+The repo already contains earlier minimap-to-tileset work:
+
+- `data-harvester/scripts/train_d1.py`
+- `data-harvester/src/harvester/d1_model.py`
+- `data-harvester/src/harvester/dataset.py`
+
+That earlier D1 work should be treated as the migration baseline for the V16.1
+texture-decomposition family.
+
+What changes in V16.1 is not the existence of the idea, but the contract around
+it:
+
+- move from old shard-root / NPZ assumptions to the V16 Zarr dataset
+- use the better modern supervision surfaces already present in Zarr
+- carry forward object-mask-derived loss gating
+- emit recomposition proof as part of validation
+
+## What V16.1 Replaces
+
+V16.1 replaces further architecture investment in the V16 monolithic terrain
+trainer.
+
+V16 remains:
+
+- a baseline/reference run surface
+- a source of validation evidence
+- a compatibility training path while V16.1 comes online
+
+V16 does not remain the design owner for future terrain-model complexity.
+
+## Initial Implementation Order
+
+1. `v16_1_height`
+2. `v16_1_normal`
+3. `v16_1_liquid`
+4. `v16_1_texcomp`
+5. `v16_1_holes`
+6. stitched inference from per-target checkpoints
+
+This order is deliberate:
+
+- height is the primary terrain geometry signal
+- normals are the current fragile target that most needs isolation
+- liquids need type-aware interpretation, not just a broad mask
+- alpha belongs inside a dedicated MCLY/MCAL decomposition family
+- existing D1 work should be migrated into that family, not replaced blindly
+
+## Inference Direction
+
+V16.1 inference should assemble outputs from separate checkpoints through an
+explicit manifest/CLI contract rather than a shared-head model.
+
+That means:
+
+- swapping a better height checkpoint should not require retraining normals
+- swapping a better liquid checkpoint should not touch alpha
+- swapping a better decomposition checkpoint should not touch height/liquids
+- per-target regressions should be visible and reversible independently
+
+## Shared Loss Gating
+
+Object masks stay important in V16.1.
+
+The model split does not remove the need for reusable loss weighting. Instead,
+V16.1 should carry forward shared object-mask-derived loss gates across all
+appropriate trainers so baked object pixels do not distort terrain-adjacent
+targets.
+
+The main allowed shared signals are:
+
+- `object_filtered_mask`
+- `mddf_mask`
+- `modf_mask`
+
+These are shared training weights or masks, not shared trainable weights.
+
+For the texture-decomposition family specifically, this means the migrated D1
+successor should use the same level of loss gating quality as the V16 terrain
+lane instead of reverting to weaker legacy masking assumptions.
+
+## Boundary With Object Work
+
+Object segmentation and asset attribution are still important, but they are not
+part of the first V16.1 split-up slice.
+
+The immediate V16.1 goal is:
+
+- split the current terrain targets into independent trainers
+- build dense minimap correlations into those target families using the existing
+  V16 Zarr supervision
+- keep object-mask loss gating available across those trainers
+- stop hiding target-specific failures inside one shared optimizer
+- link the per-family outputs back together into resulting terrain signals
+
+Object-aware terrain cleaning can layer on top later.
+
+## Current Truth
+
+- dataset contract: V16 Zarr stores
+- current monolith baseline: `train_v16.py` + `V16Model`
+- next architecture lane: `wow-viewer/specs/006-v16-1-dense-correlation-model-family/`
+
+## Near-Term Proof Requirement
+
+V16.1 is not considered live just because the docs exist.
+
+The first real proof threshold is:
+
+1. height-only trainer smoke run
+2. normal-only trainer smoke run
+3. liquid footprint/type trainer smoke run
+4. texture decomposition/recomposition trainer smoke run
+5. separate checkpoints and separate validation artifacts for all of them

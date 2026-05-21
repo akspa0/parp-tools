@@ -105,6 +105,7 @@ uv run python scripts/train_v16.py `
   --train-epoch-tiles 1350 `
   --val-max-tiles 150 `
   --batch-size 72 `
+  --epochs 200 `
   --target-vram-gb 8 `
   --gpu-duty-cycle 100 `
   --val-interval 1 `
@@ -122,14 +123,18 @@ uv run python scripts/train_v16.py `
   --train-max-tiles 4000 `
   --train-epoch-tiles 1350 `
   --val-max-tiles 150 `
+  --epochs 400 `
   --run-name v16_full_corpus_epoch_rotation_qc1 `
   --resume-from auto
 ```
+
+When resuming, `--epochs` is the new total target, not "extra epochs from the checkpoint". If the checkpoint was written at epoch `200`, use something like `--epochs 400` to continue through epoch `400`.
 
 ### Training Notes
 
 - `--train-max-tiles` is the persistent curated train pool.
 - `--train-epoch-tiles` rotates a fresh per-epoch subset from that pool.
+- `--epochs` is the total run ceiling. Resume starts at `checkpoint_epoch + 1` and stops when it reaches the requested total.
 - `--curation-quality-profile basic` is the current default and filters obviously bad flat tiles before selection.
 - `--num-workers -1` auto-resolves a CUDA-friendly worker count.
 - `--gpu-duty-cycle 100` disables intentional step throttling.

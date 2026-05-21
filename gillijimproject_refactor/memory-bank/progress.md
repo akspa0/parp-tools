@@ -92,6 +92,15 @@
   - root README for repo orientation
   - data-harvester README for operational commands
   - V16 spec for dataset / trainer / inference contract
+- The next architecture lane is now named V16.1:
+  - separate `minimap -> target-family` trainers
+  - no shared trainable weights across height / normals / holes / liquids / texture decomposition
+  - liquids become footprint + type, not only a soft mask
+  - alpha moves into a dedicated MCLY/MCAL decomposition + recomposition family
+  - existing D1 minimap-to-tileset work is now explicitly the migration baseline for that family
+  - shared object-mask loss gating remains part of the trainer contract
+  - V16 remains the baseline/reference path while V16.1 is brought up
+  - the split-up families are linked back together to build final output signals
 
 ### Alpha / LK Conversion Lane
 - `AlphaToLk` and `LkToAlpha` are both landed in shared `wow-viewer` surfaces.
@@ -116,6 +125,9 @@
   - `batch-size 72`
   - `gpu-duty-cycle 100`
 - WL* partial chunk-fill semantics in the loader / trainer.
+- V16.1 spec pack and continuity routing for the dense-correlation model family.
+- V16.1 liquid-type + texture-decomposition direction is now part of that spec
+  pack.
 - Object segmentation Model A.
 - Global asset vocabulary for instance/asset follow-up work.
 - PM4 cross-reference / object mapping follow-up.
@@ -133,5 +145,10 @@
 
 ## Not Yet
 - Completed / running proof for a production-oriented V16 training run with epoch rotation is still pending final training outcomes.
+- V16.1 height trainer implementation and smoke proof.
+- V16.1 normal trainer implementation and smoke proof.
+- V16.1 liquid footprint/type trainer implementation and smoke proof.
+- V16.1 texture decomposition/recomposition trainer implementation and smoke
+  proof.
 - Asset-attribute model / PM4 cross-ref workflow.
 - Broader chunk-for-chunk terrain conversion closure.

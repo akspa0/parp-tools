@@ -1,0 +1,78 @@
+# Tasks: V16.1 Dense Correlation Model Family
+
+**Plan**: `006-v16-1-dense-correlation-model-family/plan.md`
+
+---
+
+## Phase 1: Contract
+
+- [x] **1.1** Create the V16.1 spec pack
+  - add `spec.md`
+  - add `plan.md`
+  - add `tasks.md`
+- [x] **1.2** Update continuity files
+  - record V16.1 as the next terrain-model lane
+  - record that V16 remains the baseline/reference path
+
+## Phase 2: Height First
+
+- [ ] **2.1** Extract V16.1-safe trainer helpers from `train_v16.py`
+  - keep shared utilities only
+  - no shared model/loss contract
+- [ ] **2.2** Create `data-harvester/scripts/train_v16_1_height.py`
+  - minimap -> height only
+  - dedicated checkpoints and validation artifacts
+- [ ] **2.3** Run 1-epoch CPU smoke for `3_3_5_12340`
+  - verify run root exists
+  - verify best/last checkpoints exist
+
+## Phase 3: Normals Second
+
+- [ ] **3.1** Create `data-harvester/scripts/train_v16_1_normal.py`
+  - minimap -> normals only
+  - use normal-mask-aware loss
+- [ ] **3.2** Run 1-epoch CPU smoke for `3_3_5_12340`
+  - verify normal-only validation panels
+- [ ] **3.3** Write a short comparison note versus the V16 normal head
+
+## Phase 4: Liquid Family
+
+- [ ] **4.1** Create `train_v16_1_liquid.py`
+  - minimap -> liquid footprint / placement
+  - minimap -> liquid type
+- [ ] **4.2** Define the initial liquid-type label contract
+  - document class set
+  - document fallback/degraded cases
+
+## Phase 5: Texture Decomposition/Recomposition
+
+- [ ] **5.1** Audit existing D1 work for migration
+  - `scripts/train_d1.py`
+  - `src/harvester/d1_model.py`
+  - `src/harvester/dataset.py`
+  - record what survives into V16.1
+- [ ] **5.2** Create `train_v16_1_texcomp.py`
+  - minimap -> `mcly_texture_ids`
+  - minimap -> `alpha_256` / `mcly_layer_mask`
+- [ ] **5.3** Add recomposition validation output
+  - predicted decomposition
+  - recomposed terrain-only review image
+- [ ] **5.4** Migrate trainer inputs to V16 Zarr-quality signals
+  - `alpha_256`
+  - `mcly_texture_ids`
+  - `mcly_layer_mask`
+  - object-mask-derived loss gating
+
+## Phase 6: Remaining Target Trainers
+
+- [ ] **6.1** Create `train_v16_1_holes.py`
+
+## Phase 7: Shared Object Loss Gating
+
+- [ ] **7.1** Define shared object-mask gating utility/contract
+- [ ] **7.2** Apply gating to height, normal, liquid, and texture-decomposition trainers
+
+## Phase 8: Stitched Inference
+
+- [ ] **8.1** Define checkpoint manifest / CLI contract
+- [ ] **8.2** Implement first stitched inference smoke path

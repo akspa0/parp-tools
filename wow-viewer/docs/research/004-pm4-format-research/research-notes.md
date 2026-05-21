@@ -121,21 +121,29 @@ Example: WESTFALL_HUMAN_FARMB.WMO on tile (23,32):
 - CK24=0x43855A (type=0x43, WMO) — multiple sub-objects with different MSLK.GroupObjectIds
 - Each sub-object has different surfaces, different MPRL positions, different MscnRefIndices
 
-### Observed CK24Type Values (Verified from MdxViewer + Corpus)
+### CK24Type — UNTESTED High Byte of CK24
 
-| Type Byte | Interpretation | Source |
-|-----------|---------------|--------|
-| 0x00 | No object / terrain mesh (CK24=0) | WorldScene.cs |
-| 0x40 | M2 Interior | MdxViewer filter |
-| 0x41 | M2 Interior | MdxViewer filter |
-| 0x42 | WMO collision | MdxViewer filter |
-| 0x43 | WMO collision | MdxViewer filter |
-| 0x80 | M2 Exterior | MdxViewer filter |
-| 0xBF | Unknown (exists in corpus) | Corpus analysis |
-| 0xC0 | M2 Exterior | Corpus analysis |
-| 0xC3 | M2 Exterior variant | Corpus analysis |
+**CK24Type is the high byte of the 24-bit CK24 value**: `(PackedParams >> 24) & 0xFF`. This is verified code in [`Pm4ResearchChunkModels.cs`](wow-viewer/src/core/WowViewer.Core.PM4/Models/Pm4ResearchChunkModels.cs:76).
 
-**No code anywhere assigns semantic names to type byte values.** The labels above are from MdxViewer's filter logic, not from format documentation.
+**What's uncertain**: We have NEVER tested whether this high byte actually classifies object types. It could simply be the high 8 bits of a flat 24-bit surface grouping key with no semantic meaning at the byte level. The labels ("WMO", "M2 Interior", etc.) came from WoWRollback code that may contain hallucinations.
+
+**Status**: UNTESTED. Do not assume CK24Type classifies objects until we verify it against real ADT/MODF/MDDF placement data.
+
+### Observed CK24Type Values (Raw Byte Values — UNTESTED)
+
+| Type Byte | Status | Notes |
+|-----------|--------|-------|
+| 0x00 | **Likely real** | Always paired with CK24=0 (terrain/nav-mesh) |
+| 0x40 | **Untested** | WoWRollback called this "M2 Interior" — never verified |
+| 0x41 | **Untested** | WoWRollback called this "M2 Interior" — never verified |
+| 0x42 | **Untested** | WoWRollback called this "WMO" — never verified |
+| 0x43 | **Untested** | WoWRollback called this "WMO" — never verified |
+| 0x80 | **Untested** | WoWRollback called this "M2 Exterior" — never verified |
+| 0xBF | **Untested** | Exists in corpus, no label assigned |
+| 0xC0 | **Untested** | WoWRollback called this "M2 Exterior" — never verified |
+| 0xC3 | **Untested** | WoWRollback called this "M2 Exterior" — never verified |
+
+**Bottom line**: The high byte values are real. Whether they classify object types or are just part of a flat 24-bit key is UNTESTED. Do not treat any semantic labels as confirmed facts.
 
 ---
 
