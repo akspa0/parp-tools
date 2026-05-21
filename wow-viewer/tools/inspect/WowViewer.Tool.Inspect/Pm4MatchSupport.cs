@@ -459,7 +459,7 @@ internal static class Pm4MatchSupport
                 pm4Object.State.Object.LinkedPositionRefCount,
                 pm4Object.State.Object.DominantGroupKey,
                 pm4Object.State.Object.DominantAttributeMask,
-                pm4Object.State.Object.DominantMdosIndex,
+                pm4Object.State.Object.DominantMscnRefIndex,
                 pm4Object.State.Object.AverageSurfaceHeight,
                 pm4Object.State.FootprintArea,
                 pm4Object.AnchorPlanarPoints.Count,
@@ -514,7 +514,7 @@ internal static class Pm4MatchSupport
                 entry.Candidate.State.Object.LinkedPositionRefCount,
                 entry.Candidate.State.Object.DominantGroupKey,
                 entry.Candidate.State.Object.DominantAttributeMask,
-                entry.Candidate.State.Object.DominantMdosIndex,
+                entry.Candidate.State.Object.DominantMscnRefIndex,
                 entry.Candidate.State.Object.AverageSurfaceHeight,
                 entry.AnchorPlanarGap,
                 entry.Score.Metrics.PlanarGap,
@@ -571,7 +571,7 @@ internal static class Pm4MatchSupport
                 Pm4PlacementSolution linkedPlacement = Pm4PlacementMath.ResolvePlacementSolution(meshVertices, meshIndices, linkedSurfaces, linkedRefs, linkedRefs, tileX, tileY, linkedModeResolution.CoordinateMode, axisConvention);
 
                 List<List<Pm4MsurEntry>> mdosGroups = !seedGroup.RequiresConnectivitySeedSplit
-                    ? linkedSurfaces.GroupBy(static surface => surface.MdosIndex).Select(static group => group.ToList()).ToList()
+                    ? linkedSurfaces.GroupBy(static surface => surface.MscnRefIndex).Select(static group => group.ToList()).ToList()
                     : [linkedSurfaces];
 
                 foreach (List<Pm4MsurEntry> mdosGroup in mdosGroups)
@@ -593,7 +593,7 @@ internal static class Pm4MatchSupport
 
                         byte dominantGroupKey = SelectDominantSurfaceValue(component, static surface => surface.GroupKey);
                         byte dominantAttributeMask = SelectDominantSurfaceValue(component, static surface => surface.AttributeMask);
-                        uint dominantMdosIndex = SelectDominantSurfaceValue(component, static surface => surface.MdosIndex);
+                        uint dominantMscnRefIndex = SelectDominantSurfaceValue(component, static surface => surface.MscnRefIndex);
                         float averageSurfaceHeight = component.Count > 0 ? component.Average(static surface => surface.Height) : 0f;
                         List<IndexedSurface> componentIndexed = matchingIndexed.Where(surface => component.Contains(surface.Surface)).ToList();
                         List<Pm4MprlEntry> componentRefs = CollectLinkedPositionRefs(document, componentIndexed);
@@ -604,7 +604,7 @@ internal static class Pm4MatchSupport
                             tileX,
                             tileY,
                             new Pm4ObjectGroupKey(tileX, tileY, internalGroupCk24),
-                            new Pm4CorrelationObjectDescriptor(seedGroup.DisplayCk24, seedGroup.DisplayCk24Type, objectPartId, dominantLinkGroupObjectId, component.Count, componentRefs.Count, dominantGroupKey, dominantAttributeMask, dominantMdosIndex, averageSurfaceHeight),
+                            new Pm4CorrelationObjectDescriptor(seedGroup.DisplayCk24, seedGroup.DisplayCk24Type, objectPartId, dominantLinkGroupObjectId, component.Count, componentRefs.Count, dominantGroupKey, dominantAttributeMask, dominantMscnRefIndex, averageSurfaceHeight),
                             worldPoints,
                             seedPlacement.WorldPivot));
                         anchorPlanarPoints.Add(BuildAnchorPlanarPoints(componentRefs));
@@ -616,7 +616,7 @@ internal static class Pm4MatchSupport
                             surface.Surface.IndexCount,
                             surface.Surface.Height,
                             surface.Surface.MsviFirstIndex,
-                            surface.Surface.MdosIndex,
+                            surface.Surface.MscnRefIndex,
                             surface.Surface._0x1C,
                             surface.Surface.Ck24,
                             surface.Surface.Ck24Type,

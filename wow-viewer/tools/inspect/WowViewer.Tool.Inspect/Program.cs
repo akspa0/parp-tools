@@ -2621,7 +2621,7 @@ static void PrintPm4Report(Pm4AnalysisReport report)
 	{
 		foreach (Pm4Ck24Summary summary in report.TopCk24Groups.Take(10))
 		{
-			Console.WriteLine($"  key24=0x{summary.Ck24:X6} type=0x{summary.Ck24Type:X2} low16={summary.Ck24ObjectId} surfaces={summary.SurfaceCount} indices={summary.TotalIndexCount} mdos={summary.DistinctMdosCount}");
+			Console.WriteLine($"  key24=0x{summary.Ck24:X6} type=0x{summary.Ck24Type:X2} low16={summary.Ck24ObjectId} surfaces={summary.SurfaceCount} indices={summary.TotalIndexCount} mscnRef={summary.DistinctMscnRefCount}");
 		}
 	}
 
@@ -2927,7 +2927,7 @@ static void PrintPm4MscnReport(Pm4MscnRelationshipReport report)
 		Console.WriteLine("Top invalid-MDOS clusters:");
 		foreach (Pm4MscnClusterExample cluster in report.TopInvalidMdosClusters.Take(8))
 		{
-			Console.WriteLine($"  tile={cluster.TileX}_{cluster.TileY} ck24=0x{cluster.Ck24:X6} type=0x{cluster.Ck24Type:X2} obj={cluster.Ck24ObjectId} invalidMdos={cluster.InvalidMdosRefCount} distinctMdos={cluster.DistinctMdosCount} align={cluster.AlignmentMode}");
+			Console.WriteLine($"  tile={cluster.TileX}_{cluster.TileY} ck24=0x{cluster.Ck24:X6} type=0x{cluster.Ck24Type:X2} obj={cluster.Ck24ObjectId} invalidMdos={cluster.InvalidMdosRefCount} distinctMscnRef={cluster.DistinctMscnRefCount} align={cluster.AlignmentMode}");
 		}
 	}
 
@@ -2981,7 +2981,7 @@ static void PrintPm4UnknownsReport(Pm4UnknownsReport report)
 		Console.WriteLine("Top MSUR families:");
 		foreach (Pm4MsurFamilySummary family in report.TopMsurFamilies.Take(8))
 		{
-			Console.WriteLine($"  {family.FamilyKey}: surfaces={family.SurfaceCount} files={family.FileCount} distinctCk24={family.DistinctCk24Count} distinctType={family.DistinctCk24TypeCount} distinctMdos={family.DistinctMdosIndexCount} incomingMslk={family.IncomingMslkCount} incomingFamilies={family.DistinctIncomingMslkFamilyCount} avgPlane={family.AveragePlaneDistance:F3}");
+			Console.WriteLine($"  {family.FamilyKey}: surfaces={family.SurfaceCount} files={family.FileCount} distinctCk24={family.DistinctCk24Count} distinctType={family.DistinctCk24TypeCount} distinctMscnRef={family.DistinctMscnRefCount} incomingMslk={family.IncomingMslkCount} incomingFamilies={family.DistinctIncomingMslkFamilyCount} avgPlane={family.AveragePlaneDistance:F3}");
 		}
 	}
 

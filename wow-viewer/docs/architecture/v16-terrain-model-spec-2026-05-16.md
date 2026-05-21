@@ -340,6 +340,15 @@ validation epoch:
 
 - `models/v16/runs/<run>/validation/epoch_XXXX/validation_overview.png`
 
+The alpha QA panels now render the painted-layer surface, not raw channel `0`.
+Snapshot tile folders write:
+
+- `alpha_gt_painted_max.png`
+- `alpha_pred_painted_max.png`
+
+This avoids the common false-black case where channel `0` is the implicit base
+layer while real MCAL paint lives in channels `1..3`.
+
 Checkpoint policy:
 
 - `models/v16/runs/<run>/checkpoints/v16_last.pt` is written every epoch.

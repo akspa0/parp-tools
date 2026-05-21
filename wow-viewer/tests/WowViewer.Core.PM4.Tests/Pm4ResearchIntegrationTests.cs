@@ -45,7 +45,7 @@ public sealed class Pm4ResearchIntegrationTests
 
         Assert.Equal(surface.GroupKey, surface._0x00);
         Assert.Equal(surface.AttributeMask, surface._0x02);
-        Assert.Equal(surface.MdosIndex, surface._0x18);
+        Assert.Equal(surface.MscnRefIndex, surface._0x18);
         Assert.Equal(surface.PackedParams, surface._0x1C);
         Assert.Equal(surface.Height, surface.PlaneDistance);
         Assert.Equal(link.GroupObjectId, link._0x04);
@@ -647,7 +647,7 @@ public sealed class Pm4ResearchIntegrationTests
             LinkedPositionRefCount: 2,
             DominantGroupKey: 3,
             DominantAttributeMask: 7,
-            DominantMdosIndex: 11u,
+            DominantMscnRefIndex: 11u,
             AverageSurfaceHeight: 5f);
         Pm4CorrelationObjectInput input = new(
             TileX: 1,

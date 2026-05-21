@@ -44,6 +44,8 @@
 - `V16Dataset` is the live loader.
 - `V15Model` is the current V16 terrain model host.
 - `validate_v16_training_ready.py` passed on staged `3_3_5_12340`.
+- `validate_v16_training_ready.py` also passed across all six finalized stores and wrote:
+  - `wow-viewer/output/datasets/v16/validation/all-builds.training_readiness.json`
 - Current terrain lane supervises:
   - height
   - normals
@@ -53,6 +55,14 @@
   - MCLY
 - `liquid_height` remains in the dataset but is deferred from the current terrain model.
 - Short-lived terrain-lane `liquid_height` supervision was superseded.
+- Multi-build training smoke is now proven:
+  - run: `smoke_v16_full_corpus_post_fix`
+  - output: `wow-viewer/models/v16/runs/smoke_v16_full_corpus_post_fix/`
+  - result: 1 CPU epoch completed cleanly on curated tiles from the six-build corpus
+- Validation alpha QA fix is now landed:
+  - the trainer no longer renders raw `alpha[...,0]` as the only alpha GT view
+  - validation snapshots now write `alpha_gt_painted_max.png` / `alpha_pred_painted_max.png`
+  - focused proof run: `wow-viewer/models/v16/runs/smoke_alpha_validation_fix/`
 
 ### Alpha / LK Conversion Lane
 - `AlphaToLk` and `LkToAlpha` are both landed in shared `wow-viewer` surfaces.

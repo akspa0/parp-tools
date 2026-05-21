@@ -48,7 +48,7 @@ public sealed record Pm4MsurEntry(
     Vector3 Normal,
     float Height,
     uint MsviFirstIndex,
-    uint MdosIndex,
+    uint _0x18, // wowdev.wiki: _0x18 — index into MSCN (scene nodes), NOT MDOS
     uint PackedParams)
 {
     public byte _0x00 => GroupKey;
@@ -57,7 +57,9 @@ public sealed record Pm4MsurEntry(
 
     public float PlaneDistance => Height;
 
-    public uint _0x18 => MdosIndex;
+    public uint MscnIndex => _0x18;
+
+    public uint MscnRefIndex => _0x18;
 
     public uint _0x1C => PackedParams;
 
@@ -160,7 +162,7 @@ public sealed record Pm4Ck24Summary(
     int SurfaceCount,
     int TotalIndexCount,
     float AverageHeight,
-    int DistinctMdosCount);
+    int DistinctMscnRefCount);
 
 public sealed record Pm4ChunkSummary(
     string Signature,
@@ -194,7 +196,7 @@ public static class Pm4TerminologyCatalog
         new("MSUR._0x00", "GroupKey", "low", "Local research alias only; wowdev does not currently give this byte a settled semantic name."),
         new("MSUR._0x02", "AttributeMask", "low", "This replaced an older 'unknown byte 2' label locally, but the bit meanings are still open."),
         new("MSUR._0x10", "Height", "medium", "Current corpus evidence says this float behaves like a signed plane-distance term, not a generic vertical height."),
-        new("MSUR._0x18", "MdosIndex", "medium", "The linkage is useful, but raw-name-first wording is still safer than presenting this as official format terminology."),
+        new("MSUR._0x18", "_0x18", "medium", "wowdev.wiki calls this _0x18. It indexes into MSCN (scene nodes), NOT MDOS. Renamed from MdosIndex to correct a critical naming error."),
         new("MSUR._0x1C", "PackedParams; derived CK24/Ck24Type/Ck24ObjectId", "medium", "The 24-bit key and low16 slice are local derived identities, not format-native field names."),
         new("MSLK._0x04", "GroupObjectId", "low", "Local alias only; current evidence does not justify treating it as a confirmed full-object identity field.")
     ];
@@ -385,7 +387,7 @@ public sealed record Pm4MscnClusterExample(
     ushort Ck24ObjectId,
     int SurfaceCount,
     int ValidMdosRefCount,
-    int DistinctMdosCount,
+    int DistinctMscnRefCount,
     int InvalidMdosRefCount,
     int MeshVertexCount,
     string AlignmentMode);
@@ -449,7 +451,7 @@ public sealed record Pm4MsurFamilySummary(
     int DistinctCk24Count,
     int DistinctCk24TypeCount,
     int DistinctCk24ObjectIdCount,
-    int DistinctMdosIndexCount,
+    int DistinctMscnRefCount,
     int IncomingMslkCount,
     int DistinctIncomingMslkFamilyCount,
     double AverageIndexCount,

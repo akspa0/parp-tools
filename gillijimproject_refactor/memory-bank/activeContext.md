@@ -39,6 +39,7 @@
 - `liquid_height` stays in the dataset contract but is deferred from the current terrain trainer/inference path.
 - Terrain loss weighting uses `object_filtered_mask`.
 - `object_instance_mask` is readable but not yet used by the terrain trainer.
+- Validation snapshot alpha QA now uses a painted-layer composite (`max(ch1..3)` with fallback) instead of raw `alpha[...,0]`, because channel `0` is commonly the implicit base layer and was producing false-black GT panels.
 
 ## Harvest / Dataset Truth
 - Stream format is lean `ARRY`, not legacy `NPZB`.
@@ -77,13 +78,20 @@
 ## Focused Proof Pointers
 - Trainer-readiness proof:
   - `wow-viewer/output/datasets/v16/validation/3_3_5_12340.training_readiness.json`
+  - `wow-viewer/output/datasets/v16/validation/all-builds.training_readiness.json`
 - Visual QA root:
   - `wow-viewer/output/datasets/v16/inspection/`
 - Current per-build summaries:
   - `<build>.summary.json`
   - `<build>.samples.json`
   - `<build>.validation_audit_overview.png`
+- Multi-build training smoke run:
+  - `wow-viewer/models/v16/runs/smoke_v16_full_corpus_post_fix/`
+  - 1 epoch on CPU completed cleanly against curated tiles from the finalized six-build corpus
+- Alpha-validation snapshot fix proof:
+  - `wow-viewer/models/v16/runs/smoke_alpha_validation_fix/validation/epoch_0001/tile_00/alpha_gt_painted_max.png`
+  - `alpha_gt_painted_max.png` now carries nonzero GT intensity; the prior false-black symptom was a channel-selection issue, not a corpus-alpha loss issue
 
 ## Next Likely Slice
-- Start the first real V16 training run.
+- Start the first non-smoke V16 training run.
 - If WL* chunk-fill behavior matters to loss semantics, handle it in the loader/trainer, not by reopening harvest.

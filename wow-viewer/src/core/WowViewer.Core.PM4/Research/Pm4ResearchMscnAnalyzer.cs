@@ -24,8 +24,8 @@ public static class Pm4ResearchMscnAnalyzer
         int filesWithTileCoordinates = 0;
         int totalMscnPointCount = 0;
 
-        int mdosToMscnFits = 0;
-        int mdosToMscnMisses = 0;
+        int mscnRefToFits = 0;
+        int mscnRefToMisses = 0;
         int ck24GroupsWithMscn = 0;
         int ck24GroupsWithoutMscn = 0;
         int ck24GroupsWithBoth = 0;
@@ -52,7 +52,7 @@ public static class Pm4ResearchMscnAnalyzer
         int filesNoDominant = 0;
 
         Dictionary<string, int> ck24SurfaceCount = new(StringComparer.Ordinal);
-        Dictionary<string, int> ck24DistinctMdosCount = new(StringComparer.Ordinal);
+        Dictionary<string, int> ck24DistinctMscnRefCount = new(StringComparer.Ordinal);
         Dictionary<string, int> ck24MeshVertexCount = new(StringComparer.Ordinal);
         Dictionary<string, int> ck24AlignmentMode = new(StringComparer.Ordinal);
         List<Pm4MscnClusterExample> clusterExamples = new();
@@ -155,10 +155,10 @@ public static class Pm4ResearchMscnAnalyzer
 
             foreach (Pm4MsurEntry surface in msur)
             {
-                if (surface.MdosIndex < mscn.Count)
-                    mdosToMscnFits++;
+                if (surface.MscnRefIndex < mscn.Count)
+                    mscnRefToFits++;
                 else
-                    mdosToMscnMisses++;
+                    mscnRefToMisses++;
             }
 
             foreach (IGrouping<uint, Pm4MsurEntry> group in msur.GroupBy(static surface => surface.Ck24))
@@ -171,10 +171,10 @@ public static class Pm4ResearchMscnAnalyzer
 
                 foreach (Pm4MsurEntry surface in surfaces)
                 {
-                    if (surface.MdosIndex < mscn.Count)
+                    if (surface.MscnRefIndex < mscn.Count)
                     {
                         validMdosRefCount++;
-                        distinctValidMdos.Add(surface.MdosIndex);
+                        distinctValidMdos.Add(surface.MscnRefIndex);
                     }
                     else
                     {
@@ -194,7 +194,7 @@ public static class Pm4ResearchMscnAnalyzer
                 }
 
                 AddCount(ck24SurfaceCount, surfaces.Count.ToString());
-                AddCount(ck24DistinctMdosCount, distinctValidMdos.Count.ToString());
+                AddCount(ck24DistinctMscnRefCount, distinctValidMdos.Count.ToString());
                 AddCount(ck24MeshVertexCount, meshVertexIndices.Count.ToString());
 
                 bool hasMscn = distinctValidMdos.Count > 0;
@@ -257,8 +257,8 @@ public static class Pm4ResearchMscnAnalyzer
 
         IReadOnlyList<Pm4RelationshipEdgeSummary> relationships =
         [
-            BuildEdge("MSUR.MdosIndex -> MSCN", mdosToMscnFits, mdosToMscnMisses, "Surface records referencing MSCN scene-node entries.", "Inspect misses by CK24 family; these likely isolate placeholder or alternate-node semantics."),
-            BuildEdge("CK24 group -> MSCN coverage", ck24GroupsWithMscn, ck24GroupsWithoutMscn, "CK24 groups with at least one valid MdosIndex-backed MSCN node.", "Break missing groups down by Ck24Type and surface count to see whether MSCN is intentionally absent for some object families."),
+            BuildEdge("MSUR._0x18 -> MSCN", mscnRefToFits, mscnRefToMisses, "Surface records referencing MSCN scene-node entries.", "Inspect misses by CK24 family; these likely isolate placeholder or alternate-node semantics."),
+            BuildEdge("CK24 group -> MSCN coverage", ck24GroupsWithMscn, ck24GroupsWithoutMscn, "CK24 groups with at least one valid _0x18-backed MSCN node.", "Break missing groups down by Ck24Type and surface count to see whether MSCN is intentionally absent for some object families."),
             BuildEdge("CK24 group -> combined mesh+MSCN geometry", ck24GroupsWithBoth, ck24GroupsMscnOnly + ck24GroupsMeshOnly, "Whether a CK24 family carries both mesh-side geometry and MSCN-side collision nodes.", "Use MSCN-only and mesh-only families as candidate missing-layer cases instead of assuming one geometry stream is sufficient."),
             BuildEdge("CK24 MSCN(raw) bounds -> MSVT bounds", ck24RawOverlapFits, ck24RawOverlapMisses, "AABB overlap between raw MSCN-backed bounds and mesh-backed bounds within the same CK24 group.", "If this stays weak while swapped overlap is strong, keep treating MSCN as an axis-swapped companion stream rather than raw mesh-space truth."),
             BuildEdge("CK24 MSCN(swapped XY) bounds -> MSVT bounds", ck24SwappedOverlapFits, ck24SwappedOverlapMisses, "AABB overlap after swapping MSCN X/Y before comparing to mesh-backed bounds.", "Use the better-fitting transform as the current MSCN-to-mesh working hypothesis, then validate it against ADT/object truth on trusted tiles."),
@@ -281,14 +281,14 @@ public static class Pm4ResearchMscnAnalyzer
         IReadOnlyList<Pm4FieldDistribution> distributions =
         [
             BuildDistribution("CK24.SurfaceCount", ck24SurfaceCount, null, "How many MSUR surfaces typically contribute to one CK24 group."),
-            BuildDistribution("CK24.DistinctMdosCount", ck24DistinctMdosCount, null, "Distinct MSCN scene-node references observed per CK24 group."),
+            BuildDistribution("CK24.DistinctMscnRefCount", ck24DistinctMscnRefCount, null, "Distinct MSCN scene-node references observed per CK24 group."),
             BuildDistribution("CK24.MeshVertexCount", ck24MeshVertexCount, null, "Distinct MSVT vertices reached through MSUR/MSVI for one CK24 group."),
             BuildDistribution("CK24.AlignmentMode", ck24AlignmentMode, null, "`swapped-only` is especially relevant if MSCN is an axis-swapped companion geometry stream.")
         ];
 
         IReadOnlyList<Pm4MscnClusterExample> topNonZeroClusters = clusterExamples
             .Where(static cluster => cluster.Ck24 != 0)
-            .OrderByDescending(static cluster => cluster.DistinctMdosCount)
+            .OrderByDescending(static cluster => cluster.DistinctMscnRefCount)
             .ThenByDescending(static cluster => cluster.SurfaceCount)
             .ThenBy(static cluster => cluster.SourcePath)
             .Take(24)
@@ -296,7 +296,7 @@ public static class Pm4ResearchMscnAnalyzer
 
         IReadOnlyList<Pm4MscnClusterExample> topZeroClusters = clusterExamples
             .Where(static cluster => cluster.Ck24 == 0)
-            .OrderByDescending(static cluster => cluster.DistinctMdosCount)
+            .OrderByDescending(static cluster => cluster.DistinctMscnRefCount)
             .ThenByDescending(static cluster => cluster.SurfaceCount)
             .ThenBy(static cluster => cluster.SourcePath)
             .Take(12)
@@ -311,7 +311,7 @@ public static class Pm4ResearchMscnAnalyzer
 
         IReadOnlyList<string> notes =
         [
-            "This report keeps treating MSUR.MdosIndex as the main bridge into MSCN scene-node data.",
+            "This report keeps treating MSUR._0x18 as the main bridge into MSCN scene-node data.",
             "It is intended to test whether MSCN behaves like a missing ownership or collision layer, not to declare MSCN authoritative for final viewer reconstruction by itself.",
             $"CK24 groups reusing MSCN nodes: {groupsWithSharedMdosNodes}.",
             "If swapped XY overlap consistently beats raw overlap, MSCN remains more plausible as an axis-swapped companion stream than as raw mesh-space truth."

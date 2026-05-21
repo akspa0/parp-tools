@@ -912,6 +912,25 @@ def _sample_val_positions(
     return out[:take]
 
 
+def _alpha_painted_visual(alpha: np.ndarray) -> np.ndarray:
+    """Return a human-meaningful alpha QA view.
+
+    Channel 0 is usually the implicit base layer in WoW terrain, so it is
+    commonly all zeros even when the tile has valid painted MCAL data. For QA
+    images, prefer the max of channels 1..3 and fall back to all channels only
+    if the painted subset is entirely empty.
+    """
+    if alpha.ndim != 3 or alpha.shape[2] <= 0:
+        return np.zeros(alpha.shape[:2], dtype=np.float32)
+
+    if alpha.shape[2] > 1:
+        painted = alpha[:, :, 1:]
+        if float(painted.max()) > 0.0:
+            return painted.max(axis=2).astype(np.float32, copy=False)
+
+    return alpha.max(axis=2).astype(np.float32, copy=False)
+
+
 @torch.no_grad()
 def _save_val_snapshots(
     model,
@@ -949,6 +968,8 @@ def _save_val_snapshots(
         pred_n = F.normalize(pred_n, dim=1).squeeze(0).permute(1, 2, 0).cpu().numpy()
         pred_a = pred_a.squeeze(0).permute(1, 2, 0).cpu().numpy()
         pred_lq = pred_lq.squeeze().cpu().numpy()
+        alp_vis = _alpha_painted_visual(alp)
+        pred_a_vis = _alpha_painted_visual(pred_a)
 
         tile_dir = out_dir / f"tile_{count:02d}"
         tile_dir.mkdir(parents=True, exist_ok=True)
@@ -957,8 +978,8 @@ def _save_val_snapshots(
         _snap_save(pred_h, pred_h.min(), pred_h.max(), tile_dir / "height_pred.png")
         _snap_save((nrm + 1) / 2, 0, 1, tile_dir / "normals_gt.png")
         _snap_save((pred_n + 1) / 2, 0, 1, tile_dir / "normals_pred.png")
-        _snap_save(alp[:, :, 0], 0, 1, tile_dir / "alpha_gt_ch0.png")
-        _snap_save(pred_a[:, :, 0], 0, 1, tile_dir / "alpha_pred_ch0.png")
+        _snap_save(alp_vis, 0, 1, tile_dir / "alpha_gt_painted_max.png")
+        _snap_save(pred_a_vis, 0, 1, tile_dir / "alpha_pred_painted_max.png")
         _snap_save(wgt, 0, 1, tile_dir / "object_weight.png")
         _snap_save(nm_mask, 0, 1, tile_dir / "normal_mask.png")
 
@@ -1001,8 +1022,8 @@ def _save_val_snapshots(
             _draw_label(_to_rgb_panel(pred_h, h_lo, h_hi), "height pred"),
             _draw_label(_to_rgb_panel((nrm + 1.0) / 2.0, 0.0, 1.0), "normals gt"),
             _draw_label(_to_rgb_panel((pred_n + 1.0) / 2.0, 0.0, 1.0), "normals pred"),
-            _draw_label(_to_rgb_panel(alp[:, :, 0], 0.0, 1.0), "alpha gt ch0"),
-            _draw_label(_to_rgb_panel(pred_a[:, :, 0], 0.0, 1.0), "alpha pred ch0"),
+            _draw_label(_to_rgb_panel(alp_vis, 0.0, 1.0), "alpha gt painted max"),
+            _draw_label(_to_rgb_panel(pred_a_vis, 0.0, 1.0), "alpha pred painted max"),
             _draw_label(_to_rgb_panel(liq_gt, 0.0, 1.0), "liquid mask gt"),
             _draw_label(_to_rgb_panel(pred_lq, 0.0, 1.0), "liquid mask pred"),
             _draw_label(_to_rgb_panel(wgt, 0.0, 1.0), "terrain weight"),

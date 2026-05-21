@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: "PM4 may be a datastore format more than just a pathfinding overlay. We need a complete audit of every chunk — decoded vs. unknown — and a path to resolving MSHD and the remaining unknowns."
+**Input**: "PM4 is a compressed server-side pathfinding dataset from ~2010. MSCN contains surface centroids from the MSVT mesh. MSLK is a graph edge catalog. The peg/dowel points at tile boundaries are cross-tile pathfinding connection markers. Our naming has drifted from wowdev.wiki and our understanding of the data model has accumulated errors from early GPT-3.5 hallucinations. We need to correct the naming, verify the centroid hypothesis, and rebuild our understanding from first principles."
 
 ---
 
@@ -20,9 +20,46 @@ The PM4 format has been reverse-engineered piecemeal across multiple codebases (
 - **CK24 objects cross tile boundaries** — 21.6% of CK24 values span multiple tiles.
 - **Destructible building chunks** (MDBH/MDOS/MDSF) encode building state, not pathfinding.
 
-The MSHD header chunk (32 bytes, 8x uint32) is completely opaque — fields 0x0C-0x1C are zero across the entire development corpus, and no correlation has been found between MSHD fields and any chunk counts, bounds, or metrics. This is a critical gap: if MSHD is a layout descriptor, we cannot trust our interpretation of the rest of the format.
+The MSHD header chunk (32 bytes, 8x uint32) is completely opaque — fields 0x0C-0x1C are zero across the entire development corpus, and no correlation has been found between MSHD fields and any chunk counts, bounds, or metrics.
 
-**Goal**: Produce a single authoritative document that maps every PM4 chunk and field to a confidence level (verified / partial / unknown), identifies the remaining unknowns, and defines a research path to resolve them.
+Additionally, our codebase has accumulated naming errors and semantic misunderstandings from early work with GPT-3.5 hallucinations. Fields were given invented names that hardened into "truth" through repetition. The MSCN chunk was misidentified as "collision wall vertices" when it actually contains surface centroids. MSLK was interpreted as a scene-graph linkage when it is a pathfinding graph edge catalog.
+
+### Project Context
+
+This work is a continuation of a 2021 hobbyist effort to reconstruct the WoW development map from server-side data. The PM4 format is the **definitive object reference** — it tells us what objects exist and where they belong, so we can match PM4 data to real WMO/M2 objects and construct appropriate placement data for the development map, which is incomplete.
+
+The 2021 group tried to fix the development map by hand and got close on some objects but not 100% correct. The user's PM4 decoding work surpassed what they achieved manually. Terrain reconstruction work has been validated by that community.
+
+**The downstream goal**: Match PM4 collision/pathfinding objects to real WMO/M2 assets, then place them correctly on the development map. This eliminates the need for expensive model training to match objects to PM4 data — the format itself encodes the answer, if we can read it correctly.
+
+**The ground truth**: Two screenshots from WoWEdit (Data 1.9.0) in "The WoW Diary" by John Staats show what the PM4 data represents:
+1. **Outdoor view**: Terrain mesh (gray), wall/barrier edges (red), navigation nodes (blue markers) — the pathfinding collision mesh with graph nodes
+2. **Interior view**: WMO dungeon with floor surfaces, walls, staircase (multi-level), and M2 doodads (candelabras, banner) — MPRL stores doodad placements as collision obstacles
+
+These screenshots are the visual ground truth for what PM4 encodes. The challenge is matching PM4 collision objects (CK24 groups) to the real WMO/M2 models visible in the editor.
+
+**Goal**: Rebuild our understanding of the PM4 format from first principles. Correct all naming drift from wowdev.wiki. Verify what MSCN, MSLK, and MPRL actually encode. Produce a single authoritative document that maps every chunk and field to a confidence level (verified / partial / unknown).
+
+### The Object Splitting Problem
+
+The core unsolved problem is **how to decompose CK24 groups into individual objects**. Today:
+
+1. CK24 groups surfaces by a 24-bit key extracted from MSUR.PackedParams. The viewer treats this as a flat grouping key.
+2. Within each CK24 group, the viewer applies `SplitSurfaceGroupByMslk()` — a union-find on MSLK.GroupObjectId — to decompose into sub-objects.
+3. CK24=0 surfaces (35.9% of all surfaces) are handled separately: sub-grouped by `(GroupKey, AttributeMask)` then split by connectivity.
+4. Cross-tile merging uses MSCN connector keys, NOT CK24 matching.
+
+**What we don't know:**
+- Whether CK24 itself encodes a hierarchy (the LSB-as-base-group hypothesis: 0x000000=group 0, 0x000001=group 1). Current evidence is inconclusive — Ck24ObjectId (low 16 bits) shows reuse across type bytes, arguing against clean hierarchy.
+- What MSLK.TypeFlags and MSLK.Subtype actually classify — these could be the missing linking layer.
+- How to properly split a single CK24 value into sub-objects when the same CK24 spans multiple tiles and contains hundreds of surfaces.
+- Whether the low byte of MSUR.PackedParams (bits 0-7, currently discarded by the `>> 8` shift) carries meaningful data.
+
+**What MSCN adds:**
+- MSCN positions are consumed via `MSUR.MdosIndex` as connector keys for cross-tile object merging.
+- MSCN contains ~98% unique geometry not in MSVT — "collision wall vertices" that represent object shapes.
+- The active viewer only uses MSCN positions referenced by MdosIndex. Most MSCN data is unread.
+- MSCN may be the key to understanding object containment and boundaries across tiles.
 
 ---
 
@@ -38,6 +75,15 @@ The MSHD header chunk (32 bytes, 8x uint32) is completely opaque — fields 0x0C
 
 - **OBJ-4**: Identify which unknown fields are high-impact (affecting object reconstruction, coordinate solving, or cross-tile linkage) vs. low-impact (diagnostic, redundant, or vestigial).
 - **OBJ-5**: Define the minimum set of field resolutions needed to produce a self-contained PM4 specification that does not rely on external context (ADT, WDT, client memory).
+- **OBJ-6**: Determine the correct CK24 decomposition strategy — whether CK24's 24 bits encode a hierarchy, whether MSLK.TypeFlags/Subtype provide the missing linking layer, or whether MSCN boundaries define the true object segmentation.
+- **OBJ-7**: Map MSCN consumption — how much of the MSCN data is actually used today, what the unused portion contains, and whether the full MSCN data enables better object boundary detection across tiles.
+- **OBJ-8**: Determine whether the low byte of MSUR.PackedParams (bits 0-7, currently discarded) carries meaningful data that could aid object splitting.
+- **OBJ-9**: Audit all PM4 field names in the codebase against wowdev.wiki PM4/PD4 documentation, correct the `MdosIndex` → `MscnIndex` naming error, and document the mapping for every invented name.
+- **OBJ-10**: Verify the MSCN centroid hypothesis — compute MSUR surface centroids and compare against MSCN points accessed via `MSUR._0x18`. If they match, confirm MSCN as the surface-centroid navigation node layer.
+- **OBJ-11**: Identify MSCN "peg/dowel" points that fall outside tile bounds and correlate them with cross-tile CK24 objects, to map the cross-tile pathfinding connection network.
+- **OBJ-12**: Reinterpret MSLK as a pathfinding graph edge catalog — test whether TypeFlags/classifies edge types (walkable, wall, ledge, etc.) and Subtype encodes edge properties (height level, direction, etc.).
+- **OBJ-13**: Investigate MPRL's dual role — the user reports MPRL contains both terrain intersection points AND WMO doodad references. Determine whether MPRL serves dual purposes (pathfinding nodes + doodad placement) or whether the doodad data is actually a different chunk overlap.
+- **OBJ-14**: Investigate the M2/WMO bleed problem in object splitting — adjacent M2 data sometimes gets included in WMO objects. Determine whether CK24 type bytes (0x40 vs 0x42/0x43) are insufficient for type separation, or whether the bleed comes from MSLK edge linking across type boundaries.
 
 ---
 
@@ -274,21 +320,49 @@ Plus: any unknown/undecoded trailing chunks found in specific files.
 
 ---
 
-## 5. The "Datastore" Hypothesis
+## 5. The Data Model — Rebuilt From First Principles
 
-The user's hypothesis is that PM4 is a **datastore format** — a structured container for game-world collision, placement, and destructible-state data — rather than a pathfinding-specific overlay. Evidence:
+PM4 is a **compressed server-side pathfinding dataset** from ~2010. The format encodes a navigation graph in which:
 
-1. **CK24 type classification** separates nav-mesh (0x00) from WMO (0x42/0x43) and M2 (0x40/0x41) collision. Pathfinding is 35.9% of surfaces; object collision is 64.1%.
-2. **MSLK** links surfaces to position references and encodes tile coordinates — this is a scene-graph structure, not a nav-graph.
-3. **MPRL** stores placement positions validated against ADT object data — this is world-building metadata.
-4. **MSCN** stores collision hull geometry unique from the mesh — this is physics data.
-5. **MDBH/MDOS/MDSF** encode destructible building state — this is gameplay data.
-6. **Cross-tile CK24 objects** span multiple tiles — this is a global scene description, not local pathfinding.
+- **MSVT + MSVI + MSUR** define collision mesh surfaces (the polygons that define walkable and non-walkable areas)
+- **MSCN** contains the centroid of each MSUR surface — these are the **navigation graph nodes**
+- **MSLK** is the **edge catalog** — each entry links a surface (RefIndex → MSUR) to path geometry (MspiFirstIndex → MSPI → MSPV) with metadata (TypeFlags, Subtype) describing the edge type
+- **MPRL** provides world-space placement anchors for the navigation nodes
+- **MPRR** chains MPRL entries into a graph structure
+- **MDBH/MDOS/MDSF** encode destructible building state (dynamic obstacles in the pathfinding network)
 
-**If PM4 is a datastore**, then:
-- MSHD likely encodes a layout table (offsets, counts, or region boundaries) for the chunks that follow.
-- Unknown fields in MSLK, MSUR, MPRL, MPRR likely encode metadata about data ownership, layering, or state.
-- The format is designed for server-side scene queries (collision, placement, destruction) rather than client-side navigation.
+The "peg" or "dowel" points at tile boundaries are cross-tile connection markers — MSCN centroids that exist in adjacent tile space, enabling the pathfinding graph to span multiple tiles.
+
+**CK24 groups surfaces into objects.** Within each object, MSLK edges connect MSCN centroids into a sub-graph. The CK24 type byte (0x00 = terrain, 0x40 = M2, 0x42/0x43 = WMO) classifies the object type, and the object decomposition problem is really "how to identify independent pathfinding sub-graphs within a CK24 group."
+
+**The format is a compressed dataset** — the user estimates it stores scene data at ~1/1000th the size of the uncompressed equivalent. Each chunk is a data layer optimized for its role, with its own coordinate convention.
+
+### The MSLK Linkage Map
+
+MSLK is the glue that connects everything. Every field has a role:
+
+| Field | Role | Links To |
+|-------|------|----------|
+| TypeFlags | Edge type classification | Nothing — used for grouping/clustering |
+| Subtype | Edge property / sequence position | Nothing — used for grouping/clustering |
+| GroupObjectId | Sub-object membership | Surfaces via RefIndex (union-find partitioning) |
+| MspiFirstIndex + MspiIndexCount | Path geometry window | MSPI → MSPV (navigation path vertices) |
+| LinkId | Tile coordinate tag | Diagnostic — identifies source tile |
+| RefIndex | **Dual-use**: surface index + position index | MSUR (surface partitioning) AND MPRL (position/heading) |
+| SystemFlag | Constant flag (0x8000) | Nothing — format marker |
+
+**The critical insight**: RefIndex is ALWAYS both a MSUR index AND a MPRL index. The code checks MSUR first for surface partitioning, then checks MPRL for position collection. Entries where RefIndex >= MSUR.Count are "mismatches" but may still validly index into MPRL.
+
+### The CK24 Multi-Layer Hypothesis
+
+The user recalls an experiment that subdivided objects down to every single polygon, creating 2 million objects. This suggests CK24 may encode multiple layers of keys — not just a flat object ID, but a hierarchy:
+
+- **High byte (Ck24Type)**: Object type (0x00=terrain, 0x40=M2, 0x42/0x43=WMO)
+- **Middle byte**: Group or category
+- **Low byte**: Instance or sub-object
+- **The discarded low byte of PackedParams (bits 0-7)**: Possibly another key layer
+
+The 2-million-object explosion happened when the code treated every polygon as独立 — meaning the sub-object splitting went too far. The correct decomposition is somewhere between "one CK24 = one object" and "one polygon = one object." MSLK.GroupObjectId is the mechanism that finds the right level.
 
 ---
 
@@ -372,6 +446,56 @@ As a format researcher, I need a plan for validating PM4 field semantics against
 
 ---
 
+### User Story 6 — CK24 Object Decomposition Strategy (Priority: P1)
+
+As a format researcher, I need to determine how to correctly decompose CK24 groups into individual objects — testing the LSB-hierarchy hypothesis, MSLK.TypeFlags/Subtype as linking layers, and MSCN boundary detection — so that we can reliably split a single CK24 value (which may contain hundreds of surfaces across multiple tiles) into coherent object instances.
+
+**Why this priority**: This is the core unsolved problem. Without knowing how to split objects, we cannot reconstruct PM4 data into usable collision geometry, and we must rely on expensive model training to match objects to PM4 data.
+
+**Independent Test**: For the reference tile (development_00_00), the top CK24 group (0x43A9AA, 896 surfaces) is decomposed into sub-objects using each strategy. The decomposition is validated against ADT _obj0.adt WMO/M2 placements.
+
+**Acceptance Scenarios**:
+
+1. **Given** the CK24 bit layout (`(PackedParams >> 8) & 0xFFFFFF`), **When** the LSB-hierarchy hypothesis is tested (low bits as base groups), **Then** either a clean hierarchical structure is found (r > 0.9 correlation between bit position and object identity) or the hypothesis is rejected with evidence.
+2. **Given** MSLK.TypeFlags and MSLK.Subtype across the development corpus, **When** the values are correlated with object boundaries (ADT placements, CK24 group splits), **Then** either TypeFlags/Subtype encode object-part or layer semantics, or they are classified as unknown.
+3. **Given** the unused low byte of MSUR.PackedParams (bits 0-7), **When** the byte is extracted and correlated with CK24 splits, **Then** either it carries meaningful grouping data or it is confirmed as padding/unused.
+4. **Given** MSCN positions for a CK24 group, **When** the positions are used to define object boundaries (bounding boxes, containment tests), **Then** the MSCN-based boundaries are compared against MSLK-based and connectivity-based boundaries for accuracy.
+
+---
+
+### User Story 7 — MSCN Full Consumption Audit (Priority: P2)
+
+As a format researcher, I need to understand what portion of MSCN data is consumed today versus raw, and whether the unconsumed data contains object boundary or containment information that would improve cross-tile object reconstruction.
+
+**Why this priority**: The user reports that MSCN helps identify where objects exist across tiles. If we're only consuming a small fraction of MSCN data (the MdosIndex-referenced positions), the rest may hold the missing linking information.
+
+**Independent Test**: For each MSCN vertex in the reference tile, determine whether it is (a) referenced by any MSUR.MdosIndex, (b) used as a connector key, (c) consumed by any other code path, or (d) completely unused.
+
+**Acceptance Scenarios**:
+
+1. **Given** all MSCN vertices in the reference tile (9,990 points), **When** MdosIndex references are tallied, **Then** the audit reports what percentage are referenced vs. unreferenced.
+2. **Given** unreferenced MSCN vertices, **When** spatial clustering is computed, **Then** the clusters are compared against CK24 group boundaries to test whether unreferenced vertices define object containment.
+3. **Given** the parpToolbox MscnRemapper (legacy), **When** its (Y,X,Z) swap and remap logic is analyzed, **Then** the audit documents what the swap achieves and whether the active viewer should adopt it.
+4. **Given** MSCN coordinate space analysis results, **When** per-CK24 alignment modes are reviewed, **Then** the audit identifies whether a consistent coordinate convention exists or is file-dependent.
+
+---
+
+### User Story 8 — wowdev.wiki Naming Alignment (Priority: P1)
+
+As a format researcher, I need every PM4 field in our codebase audited against the wowdev.wiki PM4/PD4 documentation, with invented names corrected and the mapping documented, so that new contributors can cross-reference our code against the canonical community documentation without encountering contradictions.
+
+**Why this priority**: The naming drift has already caused one critical error (MSUR._0x18 named `MdosIndex` when it points to MSCN, not MDOS). Invented names that harden into "truth" through repetition are a hallucination vector that undermines research credibility.
+
+**Independent Test**: Every field in `Pm4ResearchChunkModels.cs` has a comment mapping it to its wowdev.wiki equivalent. The `MdosIndex` → `MscnIndex` rename is applied across all code.
+
+**Acceptance Scenarios**:
+
+1. **Given** all 16 chunk types in `Pm4ResearchChunkModels.cs`, **When** the audit is complete, **Then** every field has either (a) a matching wowdev.wiki name, or (b) a `// wowdev.wiki: _0xNN` comment with the original offset name.
+2. **Given** `MSUR._0x18` (currently `MdosIndex`), **When** the rename is applied, **Then** the field is renamed to `MscnIndex` (or `_0x18` with a comment) across all code, and no references to the old name remain.
+3. **Given** `MSLK._0x10` (currently `RefIndex`, wiki calls it `msur_index`), **When** the mapping is documented, **Then** a comment explains why the rename was made (multi-domain RefIndex behavior).
+
+---
+
 ## 7. Edge Cases
 
 - What if MSHD.Field00/Field08 are actually hash values rather than counts?
@@ -379,6 +503,9 @@ As a format researcher, I need a plan for validating PM4 field semantics against
 - What if MPRR is not a graph but a flat array with a specific packing order?
 - What if some PM4 files contain unknown chunk types not in the current 16?
 - What if fields 0x0C-0x1C in MSHD are only populated in PD4 (the retail variant) and are genuinely dead in PM4?
+- What if the MSVT YXZ coordinate formula from wowdev.wiki (`worldPos.y = 17066.666 - position.y`) is the canonical transform and our axis-convention detection is over-engineered?
+- What if `MSLK._0x04` ("An index somewhere" per wiki) is not a group/object ID but an index into a different chunk entirely?
+- What if `MSLK._0x0c` ("Always 0xffffffff in version_48" per wiki) is a sentinel that we incorrectly decoded as tile coordinates?
 
 ---
 
@@ -442,3 +569,6 @@ As a format researcher, I need a plan for validating PM4 field semantics against
 | PM4 Research Integration Tests | `wow-viewer/tests/WowViewer.Core.PM4.Tests/Pm4ResearchIntegrationTests.cs` | 1025 |
 | Viewer PM4 Utilities | `gillijimproject_refactor/src/MdxViewer/ViewerApp_Pm4Utilities.cs` | 1380+ |
 | PM4 Object Builder | `gillijimproject_refactor/WoWRollback/WoWRollback.PM4Module/Decoding/Pm4ObjectBuilder.cs` | 272 |
+| wowdev.wiki PM4 | `https://wowdev.wiki/PM4` | — |
+| wowdev.wiki PD4 | `https://wowdev.wiki/PD4` | — |
+| Naming Drift Analysis | `wow-viewer/docs/research/004-pm4-format-research/naming-drift-analysis.md` | — |

@@ -682,17 +682,17 @@ public static class Pm4PlacementMath
         if (surfaces.Count == 0 || exteriorVertices.Count == 0)
             return Array.Empty<Pm4ConnectorKey>();
 
-        HashSet<uint> distinctMdosIndices = new();
+        HashSet<uint> distinctMscnRefIndices = new();
         HashSet<Pm4ConnectorKey> connectorKeys = new();
         List<Pm4ConnectorKey> ordered = new();
 
         for (int index = 0; index < surfaces.Count; index++)
         {
-            uint mdosIndex = surfaces[index].MdosIndex;
-            if (!distinctMdosIndices.Add(mdosIndex) || mdosIndex >= exteriorVertices.Count)
+            uint mscnRefIndex = surfaces[index].MscnRefIndex;
+            if (!distinctMscnRefIndices.Add(mscnRefIndex) || mscnRefIndex >= exteriorVertices.Count)
                 continue;
 
-            Vector3 connectorPoint = ConvertPm4VertexToWorld(exteriorVertices[(int)mdosIndex], placement);
+            Vector3 connectorPoint = ConvertPm4VertexToWorld(exteriorVertices[(int)mscnRefIndex], placement);
             if (!float.IsFinite(connectorPoint.X) || !float.IsFinite(connectorPoint.Y) || !float.IsFinite(connectorPoint.Z))
                 continue;
 

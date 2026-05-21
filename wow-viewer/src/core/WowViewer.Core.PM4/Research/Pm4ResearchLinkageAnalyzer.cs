@@ -31,8 +31,8 @@ public static class Pm4ResearchLinkageAnalyzer
         int filesWithRefIndexMismatches = 0;
         int filesWithBadMdos = 0;
         int totalRefIndexMismatchCount = 0;
-        int mdosToMscnFits = 0;
-        int mdosToMscnMisses = 0;
+        int mscnRefToFits = 0;
+        int mscnRefToMisses = 0;
         int mismatchLow16Fits = 0;
         int mismatchLow16Misses = 0;
         int mismatchLow24Fits = 0;
@@ -76,11 +76,11 @@ public static class Pm4ResearchLinkageAnalyzer
             bool fileHasBadMdos = false;
             foreach (Pm4MsurEntry surface in msur)
             {
-                if (surface.MdosIndex < mscnCount)
-                    mdosToMscnFits++;
+                if (surface.MscnRefIndex < mscnCount)
+                    mscnRefToFits++;
                 else
                 {
-                    mdosToMscnMisses++;
+                    mscnRefToMisses++;
                     fileHasBadMdos = true;
                 }
             }
@@ -136,15 +136,15 @@ public static class Pm4ResearchLinkageAnalyzer
 
                 foreach (Pm4MsurEntry surface in surfaces)
                 {
-                    if (surface.MdosIndex < mscnCount)
+                    if (surface.MscnRefIndex < mscnCount)
                     {
                         validMdosCount++;
-                        distinctValid.Add(surface.MdosIndex);
+                        distinctValid.Add(surface.MscnRefIndex);
                     }
                     else
                     {
                         invalidMdosCount++;
-                        distinctInvalid.Add(surface.MdosIndex);
+                        distinctInvalid.Add(surface.MscnRefIndex);
                     }
 
                     for (int index = 0; index < surface.IndexCount; index++)
@@ -257,7 +257,7 @@ public static class Pm4ResearchLinkageAnalyzer
 
         IReadOnlyList<Pm4RelationshipEdgeSummary> relationships =
         [
-            BuildEdge("MSUR.MdosIndex -> MSCN", mdosToMscnFits, mdosToMscnMisses, "Surface records referencing MSCN scene-node entries across the raw corpus.", "Break the misses down by CK24 type/object layer and compare them with placeholder or mismatch-heavy tiles."),
+            BuildEdge("MSUR._0x18 -> MSCN", mscnRefToFits, mscnRefToMisses, "Surface records referencing MSCN scene-node entries across the raw corpus.", "Break the misses down by CK24 type/object layer and compare them with placeholder or mismatch-heavy tiles."),
             BuildEdge("RefIndex mismatch low16(GroupObjectId) -> CK24ObjectId", mismatchLow16Fits, mismatchLow16Misses, "Bad MSLK.RefIndex entries whose GroupObjectId low16 matches a CK24ObjectId in the same file.", "If this clusters by LinkId/TypeFlags, low16 may be a member or hierarchy id instead of a full object key."),
             BuildEdge("RefIndex mismatch low24(GroupObjectId) -> CK24", mismatchLow24Fits, mismatchLow24Misses, "Bad MSLK.RefIndex entries whose GroupObjectId low24 matches a full CK24 key in the same file.", "Current weakness here argues against treating GroupObjectId as a direct full-CK24 identity field."),
             BuildEdge("Non-zero CK24ObjectId reused across full CK24s", reusedObjectIdGroupCount, Math.Max(0, objectIdGroupsAnalyzed - reusedObjectIdGroupCount), "File-local CK24 object-id groups whose low16 id maps to more than one full CK24 value.", "If reuse is common, treat the UI object-id as a sub-identifier or hierarchy-member key, not a globally unique PM4 object id."),

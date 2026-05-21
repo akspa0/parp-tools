@@ -176,7 +176,7 @@ public static class Pm4ResearchAnalyzer
                 group.Count(),
                 group.Sum(static surface => surface.IndexCount),
                 group.Average(static surface => surface.Height),
-                group.Select(static surface => surface.MdosIndex).Distinct().Count()))
+                group.Select(static surface => surface.MscnRefIndex).Distinct().Count()))
             .OrderByDescending(static summary => summary.SurfaceCount)
             .ThenBy(static summary => summary.Ck24)
             .Take(32)

@@ -28,7 +28,7 @@ public sealed record Pm4CorrelationObjectDescriptor(
     int LinkedPositionRefCount,
     byte DominantGroupKey,
     byte DominantAttributeMask,
-    uint DominantMdosIndex,
+    uint DominantMscnRefIndex,
     float AverageSurfaceHeight)
 {
     public ushort Ck24ObjectId => (ushort)(Ck24 & 0xFFFF);

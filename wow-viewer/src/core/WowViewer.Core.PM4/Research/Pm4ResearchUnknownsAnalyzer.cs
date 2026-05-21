@@ -253,7 +253,7 @@ public static class Pm4ResearchUnknownsAnalyzer
                 msurFamily.Ck24Values.Add(surface.Ck24);
                 msurFamily.Ck24Types.Add(surface.Ck24Type);
                 msurFamily.Ck24ObjectIds.Add(surface.Ck24ObjectId);
-                msurFamily.MdosIndices.Add(surface.MdosIndex);
+                msurFamily.MscnRefIndices.Add(surface.MscnRefIndex);
                 msurFamily.IndexCountSum += surface.IndexCount;
                 msurFamily.PlaneDistanceSum += surface.PlaneDistance;
                 msurFamily.NormalZSum += surface.Normal.Z;
@@ -564,7 +564,7 @@ public static class Pm4ResearchUnknownsAnalyzer
 
         public HashSet<ushort> Ck24ObjectIds { get; } = new();
 
-        public HashSet<uint> MdosIndices { get; } = new();
+        public HashSet<uint> MscnRefIndices { get; } = new();
 
         public int IncomingMslkCount { get; set; }
 
@@ -588,7 +588,7 @@ public static class Pm4ResearchUnknownsAnalyzer
                 Ck24Values.Count,
                 Ck24Types.Count,
                 Ck24ObjectIds.Count,
-                MdosIndices.Count,
+                MscnRefIndices.Count,
                 IncomingMslkCount,
                 IncomingMslkFamilyKeys.Count,
                 SurfaceCount == 0 ? 0d : IndexCountSum / SurfaceCount,

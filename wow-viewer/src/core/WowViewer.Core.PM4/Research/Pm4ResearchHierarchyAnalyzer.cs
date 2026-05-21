@@ -117,7 +117,7 @@ public static partial class Pm4ResearchHierarchyAnalyzer
     {
         IReadOnlyList<int> surfaceIndices = surfaces.Select(static surface => surface.SurfaceIndex).ToList();
         IReadOnlyList<uint> mdosIndices = surfaces
-            .Select(static surface => surface.Surface.MdosIndex)
+            .Select(static surface => surface.Surface.MscnRefIndex)
             .Distinct()
             .OrderBy(static value => value)
             .ToList();
@@ -369,7 +369,7 @@ public static partial class Pm4ResearchHierarchyAnalyzer
             return [surfaces.ToList()];
 
         List<List<IndexedSurface>> groups = surfaces
-            .GroupBy(static surface => surface.Surface.MdosIndex)
+            .GroupBy(static surface => surface.Surface.MscnRefIndex)
             .Select(static group => group.OrderBy(static surface => surface.SurfaceIndex).ToList())
             .ToList();
 

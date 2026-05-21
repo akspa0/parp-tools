@@ -22,7 +22,7 @@ public static class Pm4ResearchMshdAnalyzer
         int DistinctNonZeroCk24Count,
         int DistinctNonZeroCk24ObjectIdCount,
         int DistinctCk24TypeCount,
-        int DistinctMdosIndexCount,
+        int DistinctMscnRefCount,
         int DistinctGroupKeyCount,
         int DistinctAttributeMaskCount,
         int NonEmptyChunkFamilyCount);
@@ -133,7 +133,7 @@ public static class Pm4ResearchMshdAnalyzer
             surfaces.Select(static surface => surface.Ck24).Where(static value => value != 0).Distinct().Count(),
             surfaces.Select(static surface => surface.Ck24ObjectId).Where(static value => value != 0).Distinct().Count(),
             surfaces.Select(static surface => surface.Ck24Type).Distinct().Count(),
-            surfaces.Select(static surface => surface.MdosIndex).Distinct().Count(),
+            surfaces.Select(static surface => surface.MscnRefIndex).Distinct().Count(),
             surfaces.Select(static surface => surface.GroupKey).Distinct().Count(),
             surfaces.Select(static surface => surface.AttributeMask).Distinct().Count(),
             nonEmptyChunkFamilyCount);
@@ -155,7 +155,7 @@ public static class Pm4ResearchMshdAnalyzer
             BuildMetricCorrelation("DistinctNonZeroCK24.Count", samples, selector, static sample => sample.DistinctNonZeroCk24Count),
             BuildMetricCorrelation("DistinctNonZeroCk24ObjectId.Count", samples, selector, static sample => sample.DistinctNonZeroCk24ObjectIdCount),
             BuildMetricCorrelation("DistinctCk24Type.Count", samples, selector, static sample => sample.DistinctCk24TypeCount),
-            BuildMetricCorrelation("DistinctMdosIndex.Count", samples, selector, static sample => sample.DistinctMdosIndexCount),
+            BuildMetricCorrelation("DistinctMscnRef.Count", samples, selector, static sample => sample.DistinctMscnRefCount),
             BuildMetricCorrelation("DistinctGroupKey.Count", samples, selector, static sample => sample.DistinctGroupKeyCount),
             BuildMetricCorrelation("DistinctAttributeMask.Count", samples, selector, static sample => sample.DistinctAttributeMaskCount),
             BuildMetricCorrelation("NonEmptyChunkFamily.Count", samples, selector, static sample => sample.NonEmptyChunkFamilyCount)
