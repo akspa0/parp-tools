@@ -76,6 +76,25 @@ into the operator docs.
 **Validation**: README surfaces carry a curation-first normal launch path with
 recommended `batch-size` / `grad-accum-steps` combinations.
 
+### Step 2.5 — Port V16 curated-pool + epoch-rotation behavior
+Recover the useful V16 train-pool and per-epoch rotation seam so V16.1 normal
+training does not drag the entire curated manifest through every epoch.
+**Validation**: `train_v16_1_normal.py` supports `--train-max-tiles`,
+`--train-epoch-tiles`, and `--val-max-tiles`, and a smoke run writes fixed
+pool evidence plus `train_epoch_orders.jsonl`.
+
+### Step 2.6 — Add deformation-aware normal steering
+Bias the normal trainer toward terrain deformations so flats do not dominate the
+loss surface even when they remain present in the curated dataset.
+**Validation**: `train_v16_1_normal.py` supports `--normal-detail-boost` and a
+smoke run logs nontrivial `normal_detail_mean` metrics.
+
+### Step 2.7 — Add raw supervision guidance channels
+Carry blank-plate, object-aware terrain-validity, and texturing-presence truth
+through the V16.1 dataset/trainer seam before more normal training proceeds.
+**Validation**: curation can reject `blank_what_plate_tile`, and a normal smoke
+run logs raw-supervision metrics such as `what_plate_rate`.
+
 ## Phase 3: Height Follow-On
 
 **Goal**: Let the height lane absorb what the normal lane teaches about

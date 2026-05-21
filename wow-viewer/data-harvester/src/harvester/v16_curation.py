@@ -76,6 +76,16 @@ def alpha_painted(alpha: np.ndarray) -> np.ndarray:
     return alpha.max(axis=2).astype(np.float32, copy=False)
 
 
+def crop_257_to_256(x: np.ndarray) -> np.ndarray:
+    return x[:256, :256]
+
+
+def downsample_256_to_16(x: np.ndarray) -> np.ndarray:
+    arr = x[:256, :256]
+    reshaped = arr.reshape(16, 16, 16, 16)
+    return reshaped.mean(axis=(1, 3)).astype(np.float32, copy=False)
+
+
 def normal_relief(normals: np.ndarray, normal_mask: np.ndarray) -> np.ndarray:
     nx = normals[:, :, 0].astype(np.float32, copy=False)
     ny = normals[:, :, 1].astype(np.float32, copy=False)
@@ -89,6 +99,40 @@ def normal_edge_strength(normals: np.ndarray, normal_mask: np.ndarray) -> np.nda
     ny = normals[:, :, 1].astype(np.float32, copy=False) * mask
     nz = normals[:, :, 2].astype(np.float32, copy=False) * mask
     return np.maximum(edge_strength(nx), np.maximum(edge_strength(ny), edge_strength(nz)))
+
+
+def height_gradient_strength(height_257: np.ndarray) -> np.ndarray:
+    return edge_strength(height_257.astype(np.float32, copy=False))
+
+
+def mcly_painted_coverage(mcly_mask: np.ndarray) -> float:
+    if mcly_mask.ndim != 3 or mcly_mask.shape[2] <= 0:
+        return 0.0
+    painted = mcly_mask.max(axis=2).astype(np.float32, copy=False)
+    return float((painted > 0.05).mean())
+
+
+def is_blank_what_plate(
+    *,
+    height_257: np.ndarray,
+    alpha_cov: float,
+    mcly_cov: float,
+    liquid_cov: float,
+    object_cov: float,
+    height_abs_max_eps: float = 1e-6,
+    height_std_eps: float = 1e-6,
+) -> bool:
+    height = height_257.astype(np.float32, copy=False)
+    height_abs_max = float(np.abs(height).max())
+    height_std = float(height.std())
+    return bool(
+        height_abs_max <= float(height_abs_max_eps)
+        and height_std <= float(height_std_eps)
+        and float(alpha_cov) <= 1e-4
+        and float(mcly_cov) <= 1e-4
+        and float(liquid_cov) <= 1e-4
+        and float(object_cov) <= 1e-4
+    )
 
 
 def load_curation_keys(manifest_path: str | Path) -> set[tuple[str, int]]:
@@ -132,4 +176,3 @@ def write_rows_parquet(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     table = pa.Table.from_pylist(rows)
     pq.write_table(table, str(path))
-

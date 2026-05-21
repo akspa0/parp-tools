@@ -124,6 +124,22 @@
   - `mddf_mask` / `modf_mask`
   - `liquid_mask`
   - blended objective: angular alignment + vector agreement + `z` stabilization
+- The V16.1 normal trainer now also has deformation-aware steering:
+  - target height gradients and local normal variation increase loss weight on
+    terrain-shape transitions
+  - CLI knob: `--normal-detail-boost`
+  - focused proof run:
+    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_detail_steering_cpu/`
+    - logged `train_normal_detail_mean≈1.88`, `val_normal_detail_mean≈1.75`
+- The V16.1 normal lane now also carries raw supervision guidance channels:
+  - `terrain_valid_mask_257`
+  - `object_presence_257`
+  - `alpha_painted_256`
+  - `mcly_any_16`
+  - `what_plate_flag`
+  - focused proof run:
+    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_supervision_channels_cpu/`
+    - logged `what_plate_rate=0.0`, `alpha_painted_cov≈0.66`, `mcly_cov=1.0`
 - The shared V16.1 trainer now has real gradient accumulation:
   - CLI flag: `--grad-accum-steps`
   - trainer prints now flush immediately instead of hiding early startup
@@ -139,6 +155,19 @@
   - focused proof run:
     - `wow-viewer/models/v16_1/normal/runs/smoke_normal_compile_gpu/`
     - completed on GPU with `torch.compile: enabled`
+- The shared V16.1 trainer now also preserves the useful V16 small-epoch seam:
+  - run-level curated pool caps:
+    - `--train-max-tiles`
+    - `--val-max-tiles`
+  - rotating per-epoch train subsets:
+    - `--train-epoch-tiles`
+  - focused proof run:
+    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_curated_epoch_rotation_cpu/`
+    - `32/63` train-pool cap, `8` sampled train tiles for epoch `1`
+    - evidence written:
+      - `train_pool_summary.json`
+      - `val_pool_summary.json`
+      - `train_epoch_orders.jsonl`
 - V16.1 now has a separate reusable curation layer between Zarr and trainers:
   - module: `src/harvester/v16_curation.py`
   - builder: `scripts/build_v16_curation_manifest.py`
@@ -150,8 +179,11 @@
     - `wow-viewer/output/datasets/v16/curation/smoke_normal_curation_335/`
     - `wow-viewer/models/v16_1/normal/runs/smoke_normal_curated_cpu/`
     - `wow-viewer/output/datasets/v16/curation/smoke_normal_curation_335_mt/`
+    - `wow-viewer/output/datasets/v16/curation/smoke_normal_curation_335_whatplate/`
   - sampled `3_3_5_12340` proof rejected `59/128` low-signal or blank-normal
     cases before training (`keep_ratio≈0.54`)
+  - the current curation proof also rejected explicit blank genesis tiles:
+    - `blank_what_plate_tile=4`
 - Operator docs now expose that workflow directly:
   - `wow-viewer/data-harvester/README.md` documents manifest build, curated
     V16.1 normal training, resume, and VRAM tuning ladder
@@ -160,6 +192,7 @@
   - current recommended command contract is now documented:
     - curation: `--workers -1 --chunk-size 128`
     - train: `--batch-size 8 --grad-accum-steps 1`
+    - small scouting pool: `--train-max-tiles 400 --train-epoch-tiles 128 --val-max-tiles 48`
     - VRAM fallback ladder: `4 x 2`, `2 x 4`, `1 x 8`
 - V16.1 direction has shifted from height-first to normal-first for terrain
   signal learning, with height follow-on meant to absorb what the normal lane

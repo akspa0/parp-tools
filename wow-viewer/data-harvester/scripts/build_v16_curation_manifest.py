@@ -21,10 +21,14 @@ import zarr.storage
 
 from harvester.v16_curation import (
     alpha_painted,
+    crop_257_to_256,
     dilate,
     edge_strength,
     f1,
+    height_gradient_strength,
     iou,
+    is_blank_what_plate,
+    mcly_painted_coverage,
     load_curation_keys,
     minimap_grayscale,
     normal_edge_strength,
@@ -109,6 +113,7 @@ def _build_row_meta(table, row_idx: int) -> dict[str, Any]:
         "has_normals": bool(_row_get(table, row_idx, "has_normal_xyz", False)),
         "has_alpha": bool(_row_get(table, row_idx, "has_alpha_256", False)),
         "has_liquid": bool(_row_get(table, row_idx, "has_liquid_mask", False)),
+        "has_mcly": bool(_row_get(table, row_idx, "has_mcly_texture_ids", False)),
         "height_std": float(_row_get(table, row_idx, "height_std", 0.0) or 0.0),
         "n_mddf": int(_row_get(table, row_idx, "n_mddf", 0) or 0),
         "n_modf": int(_row_get(table, row_idx, "n_modf", 0) or 0),
@@ -165,6 +170,7 @@ def _compute_row(
 ) -> dict[str, Any]:
     tile_id = int(row_meta["tile_id"])
     minimap = root["minimap_rgb"][tile_id].astype(np.uint8)
+    height_257 = root["height_257"][tile_id].astype(np.float32)
     gray = minimap_grayscale(minimap)
     minimap_edge = edge_strength(gray) >= float(args_dict["minimap_edge_threshold"])
     minimap_edge_d = dilate(minimap_edge, int(args_dict["dilate_radius"]))
@@ -182,6 +188,10 @@ def _compute_row(
         alpha = root["alpha_256"][tile_id].astype(np.float32)
         alpha_cov = float((alpha_painted(alpha) >= 0.05).mean())
 
+    mcly_cov = 0.0
+    if bool(row_meta["has_mcly"]) and "mcly_layer_mask" in root:
+        mcly_cov = mcly_painted_coverage(root["mcly_layer_mask"][tile_id].astype(np.float32))
+
     liquid_cov = 0.0
     if bool(row_meta["has_liquid"]) and "liquid_mask" in root:
         liquid_cov = float(root["liquid_mask"][tile_id].astype(np.float32).mean())
@@ -191,6 +201,16 @@ def _compute_row(
         object_cov = float(root["object_filtered_mask"][tile_id].astype(np.float32).mean())
     elif "object_mask" in root:
         object_cov = float(root["object_mask"][tile_id].astype(np.float32).mean())
+
+    height_grad = crop_257_to_256(height_gradient_strength(height_257))
+    terrain_detail_mean = float((0.65 * height_grad + 0.35 * relief).mean())
+    what_plate = is_blank_what_plate(
+        height_257=height_257,
+        alpha_cov=alpha_cov,
+        mcly_cov=mcly_cov,
+        liquid_cov=liquid_cov,
+        object_cov=object_cov,
+    )
 
     metrics = {
         "build": build,
@@ -209,8 +229,11 @@ def _compute_row(
         "normal_edge_f1": float(f1(normal_edge_d, minimap_edge_d)),
         "normal_edge_iou": float(iou(normal_edge_d, minimap_edge_d)),
         "alpha_cov": alpha_cov,
+        "mcly_cov": mcly_cov,
         "liquid_cov": liquid_cov,
         "object_cov": object_cov,
+        "terrain_detail_mean": terrain_detail_mean,
+        "what_plate": bool(what_plate),
         "n_mddf": int(row_meta["n_mddf"]),
         "n_modf": int(row_meta["n_modf"]),
     }
@@ -218,6 +241,9 @@ def _compute_row(
 
 
 def _evaluate_profile(row: dict[str, Any], args: argparse.Namespace) -> tuple[bool, float, str | None]:
+    if bool(row.get("what_plate", False)):
+        return False, 0.0, "blank_what_plate_tile"
+
     if row["minimap_gray_std"] < float(args.min_minimap_gray_std):
         if row["height_std"] < float(args.min_height_std) and row["alpha_cov"] < 0.01 and row["liquid_cov"] < 0.01 and row["normal_cov"] < float(args.min_normal_coverage):
             return False, 0.0, "blank_low_signal_tile"
@@ -228,6 +254,7 @@ def _evaluate_profile(row: dict[str, Any], args: argparse.Namespace) -> tuple[bo
         score += min(row["height_std"] / 18.0, 2.0)
         score += min(row["normal_cov"], 1.0)
         score += min(row["normal_edge_f1"], 1.0)
+        score += min(row["terrain_detail_mean"] * 10.0, 1.5)
         return True, float(score), None
 
     if not row["has_normals"] or row["normal_cov"] < float(args.min_normal_coverage):
@@ -246,6 +273,7 @@ def _evaluate_profile(row: dict[str, Any], args: argparse.Namespace) -> tuple[bo
     score += min(row["normal_cov"] * 1.5, 1.5)
     score += min(row["normal_relief_mean"] * 6.0, 1.5)
     score += min(row["normal_edge_f1"] * 2.0, 2.0)
+    score += min(row["terrain_detail_mean"] * 10.0, 1.5)
     return True, float(score), None
 
 

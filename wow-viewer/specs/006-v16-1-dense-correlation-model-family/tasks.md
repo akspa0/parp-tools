@@ -53,6 +53,19 @@
 - [x] **2.5** Write optimized operator launch commands
   - curated normal-training command
   - VRAM fallback ladder
+- [x] **2.6** Port V16 curated-pool + epoch-rotation behavior
+  - `--train-max-tiles`
+  - `--train-epoch-tiles`
+  - `--val-max-tiles`
+  - `train_epoch_orders.jsonl` proof
+- [x] **2.7** Add deformation-aware normal steering
+  - `--normal-detail-boost`
+  - detail-weighted terrain-only normal loss
+  - `normal_detail_mean` proof
+- [x] **2.8** Add raw supervision guidance channels
+  - blank `what plate` rejection in curation
+  - terrain-valid/object-aware trainer masks
+  - raw-supervision metric proof
 
 ## Phase 3: Height Follow-On
 

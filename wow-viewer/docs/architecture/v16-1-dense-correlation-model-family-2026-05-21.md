@@ -195,6 +195,15 @@ The current normal objective is a blend of:
 - vector agreement
 - normal-`z` stabilization
 
+It now also supports deformation-aware steering:
+
+- height-gradient-derived detail emphasis
+- local normal-variation emphasis
+- operator-tunable strength through `--normal-detail-boost`
+- visible metrics:
+  - `train_normal_detail_mean`
+  - `val_normal_detail_mean`
+
 The shared V16.1 trainer now also supports:
 
 - `--grad-accum-steps <N>`
@@ -202,9 +211,21 @@ The shared V16.1 trainer now also supports:
 - `--num-workers -1`
 - `--persistent-workers`
 - `--prefetch-factor`
+- `--train-max-tiles`
+- `--train-epoch-tiles`
+- `--val-max-tiles`
 
 That makes `batch-size 1` or `2` usable on constrained VRAM while still
 reaching a larger effective optimization batch.
+
+It also restores the useful V16 small-run seam:
+
+- fixed run-level curated train/val pools
+- deterministic per-epoch train rotation from the train pool
+- evidence at:
+  - `evidence/train_pool_summary.json`
+  - `evidence/val_pool_summary.json`
+  - `evidence/train_epoch_orders.jsonl`
 
 This is a first-pass terrain-aware normal contract, not a final claim that the
 best loss shape is solved.
@@ -231,7 +252,9 @@ This is the intended pattern for all future model families:
 
 1. build a target-aware curation manifest
 2. inspect kept/rejected worst cases
-3. train only on the curated tile set
+3. carve a bounded persistent train/val pool for the run when needed
+4. rotate smaller per-epoch train subsets from that pool when needed
+5. train only on the curated tile set
 
 ## Initial Liquid-Type Contract
 

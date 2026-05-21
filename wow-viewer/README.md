@@ -99,14 +99,19 @@ uv run python -u scripts\train_v16_1_normal.py `
   --device auto `
   --batch-size 8 `
   --grad-accum-steps 1 `
+  --train-max-tiles 400 `
+  --train-epoch-tiles 128 `
+  --val-max-tiles 48 `
   --num-workers -1 `
   --epochs 50 `
-  --run-name v16_1_normal_curated_bs8_acc1_compile
+  --run-name v16_1_normal_curated_pool400_epoch128
 ```
 
 This is the preferred V16.1 pattern now: curate first, then train from the
-manifest instead of raw tile rows. For the current 16 GB-card recommendation,
-start at `8 x 1` before falling back to `4 x 2`, `2 x 4`, or `1 x 8`.
+manifest instead of raw tile rows, then keep epochs bounded with a curated
+train pool and rotating per-epoch subsets. For the current 16 GB-card
+recommendation, start at `8 x 1` before falling back to `4 x 2`, `2 x 4`, or
+`1 x 8`.
 
 ## What Lives Here
 

@@ -15,7 +15,7 @@ import zarr
 import zarr.storage
 from torch.utils.data import Dataset
 
-from harvester.v16_curation import load_curation_keys
+from harvester.v16_curation import alpha_painted, is_blank_what_plate, load_curation_keys, mcly_painted_coverage
 
 
 def _build_split_indices(n_items: int, split: str, val_fraction: float, seed: int) -> list[int]:
@@ -141,6 +141,26 @@ class V161Dataset(Dataset):
         weight_16 = _downsample_256_to_16(weight_256)
         mddf_mask = root["mddf_mask"][tile_id].astype(np.float32) if "mddf_mask" in root else np.zeros((257, 257), dtype=np.float32)
         modf_mask = root["modf_mask"][tile_id].astype(np.float32) if "modf_mask" in root else np.zeros((257, 257), dtype=np.float32)
+        object_presence_257 = np.maximum(mddf_mask, modf_mask).astype(np.float32, copy=False)
+        alpha_painted_256 = alpha_painted(alpha).astype(np.float32, copy=False)
+        alpha_painted_cov = float((alpha_painted_256 >= 0.05).mean())
+        mcly_cov = mcly_painted_coverage(mcly_mask)
+        liquid_cov = float(liquid_mask.mean())
+        object_cov = float(object_presence_257.mean())
+        what_plate_flag = float(
+            is_blank_what_plate(
+                height_257=height_raw,
+                alpha_cov=alpha_painted_cov,
+                mcly_cov=mcly_cov,
+                liquid_cov=liquid_cov,
+                object_cov=object_cov,
+            )
+        )
+        terrain_valid_mask_257 = normal_mask * (1.0 - np.clip(object_presence_257, 0.0, 1.0))
+        terrain_valid_mask_257 *= (1.0 - np.clip(np.pad(liquid_mask, ((0, 1), (0, 1)), mode="edge"), 0.0, 1.0) * 0.85)
+        if what_plate_flag > 0.5:
+            terrain_valid_mask_257[...] = 0.0
+        mcly_any_16 = (mcly_mask.max(axis=2) > 0.05).astype(np.float32, copy=False)
 
         if self.augment:
             xform = int(self._rng.randint(0, 8))
@@ -165,6 +185,10 @@ class V161Dataset(Dataset):
                 weight_16 = weight_16[:, ::-1]
                 mddf_mask = mddf_mask[:, ::-1]
                 modf_mask = modf_mask[:, ::-1]
+                object_presence_257 = object_presence_257[:, ::-1]
+                alpha_painted_256 = alpha_painted_256[:, ::-1]
+                terrain_valid_mask_257 = terrain_valid_mask_257[:, ::-1]
+                mcly_any_16 = mcly_any_16[:, ::-1]
             if xform & 2:
                 minimap = minimap[::-1]
                 height_raw = height_raw[::-1]
@@ -186,6 +210,10 @@ class V161Dataset(Dataset):
                 weight_16 = weight_16[::-1]
                 mddf_mask = mddf_mask[::-1]
                 modf_mask = modf_mask[::-1]
+                object_presence_257 = object_presence_257[::-1]
+                alpha_painted_256 = alpha_painted_256[::-1]
+                terrain_valid_mask_257 = terrain_valid_mask_257[::-1]
+                mcly_any_16 = mcly_any_16[::-1]
             if xform & 4:
                 minimap = np.rot90(minimap, k=1)
                 height_raw = np.rot90(height_raw, k=1)
@@ -209,6 +237,10 @@ class V161Dataset(Dataset):
                 weight_16 = np.rot90(weight_16, k=1)
                 mddf_mask = np.rot90(mddf_mask, k=1)
                 modf_mask = np.rot90(modf_mask, k=1)
+                object_presence_257 = np.rot90(object_presence_257, k=1)
+                alpha_painted_256 = np.rot90(alpha_painted_256, k=1)
+                terrain_valid_mask_257 = np.rot90(terrain_valid_mask_257, k=1)
+                mcly_any_16 = np.rot90(mcly_any_16, k=1)
 
         return {
             "input": torch.from_numpy(minimap.copy()).permute(2, 0, 1),
@@ -232,6 +264,13 @@ class V161Dataset(Dataset):
             "weight_16": torch.from_numpy(weight_16.copy()).unsqueeze(0),
             "mddf_mask": torch.from_numpy(mddf_mask.copy()).unsqueeze(0),
             "modf_mask": torch.from_numpy(modf_mask.copy()).unsqueeze(0),
+            "object_presence_257": torch.from_numpy(object_presence_257.copy()).unsqueeze(0),
+            "alpha_painted_256": torch.from_numpy(alpha_painted_256.copy()).unsqueeze(0),
+            "terrain_valid_mask_257": torch.from_numpy(terrain_valid_mask_257.copy()).unsqueeze(0),
+            "mcly_any_16": torch.from_numpy(mcly_any_16.copy()).unsqueeze(0),
+            "what_plate_flag": torch.tensor(what_plate_flag, dtype=torch.float32),
+            "alpha_painted_cov": torch.tensor(alpha_painted_cov, dtype=torch.float32),
+            "mcly_cov": torch.tensor(mcly_cov, dtype=torch.float32),
             "has_normals": bool(entry.get("has_normal_xyz", False)),
             "has_alpha": bool(entry.get("has_alpha_256", False)),
             "has_holes": bool(entry.get("has_holes_16", False)),

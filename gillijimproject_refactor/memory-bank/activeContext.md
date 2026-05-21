@@ -47,6 +47,15 @@
   - object-filter-derived terrain weighting
   - `mddf_mask` / `modf_mask`
   - `liquid_mask`
+  - deformation-aware detail steering from target height gradients plus local
+    normal variation
+  - operator knob: `--normal-detail-boost`
+  - raw supervision guidance channels:
+    - `terrain_valid_mask_257`
+    - `object_presence_257`
+    - `alpha_painted_256`
+    - `mcly_any_16`
+    - `what_plate_flag`
 - The shared V16.1 trainer now has real gradient accumulation through
   `--grad-accum-steps`; this is the intended path for the 4070 Ti SUPER instead
   of pretending large micro-batches fit in VRAM.
@@ -69,6 +78,8 @@
     - `--chunk-size`
   - rule direction: all future model families should train from curated
     manifests, not raw tile rows
+  - current blank-genesis rule:
+    - reject `blank_what_plate_tile` before normal training
 - Canonical short docs were rewritten and should now be the first read for this lane:
   - `wow-viewer/README.md`
   - `wow-viewer/data-harvester/README.md`
@@ -80,6 +91,19 @@
   - preferred current operator launch:
     - curation: `--workers -1 --chunk-size 128`
     - train: `--batch-size 8 --grad-accum-steps 1`
+    - small scouting pool: `--train-max-tiles 400 --train-epoch-tiles 128 --val-max-tiles 48`
+- The shared V16.1 trainer now also preserves the useful V16 small-run seam:
+  - bounded persistent train/val pools:
+    - `--train-max-tiles`
+    - `--val-max-tiles`
+  - rotating per-epoch train subsets:
+    - `--train-epoch-tiles`
+  - proof root:
+    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_curated_epoch_rotation_cpu/`
+  - evidence files:
+    - `evidence/train_pool_summary.json`
+    - `evidence/val_pool_summary.json`
+    - `evidence/train_epoch_orders.jsonl`
 - Canonical flow:
   - `WowViewer.Tool.Harvest harvest-stream --stream-profile v16`
   - `build_v16_dataset.py build`

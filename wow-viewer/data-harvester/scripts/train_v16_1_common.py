@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -21,7 +22,7 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 from PIL import Image  # noqa: E402
-from torch.utils.data import DataLoader, Subset  # noqa: E402
+from torch.utils.data import DataLoader, Sampler  # noqa: E402
 
 from harvester.v16_1_dataset import V161Dataset  # noqa: E402
 from harvester.v16_1_models import (  # noqa: E402
@@ -72,6 +73,195 @@ def _resolve_persistent_workers(requested: bool | None, num_workers: int) -> boo
     if requested is None:
         return True
     return bool(requested)
+
+
+class _DeterministicEpochSampler(Sampler[int]):
+    """Deterministic sampler with optional per-epoch subset rotation."""
+
+    def __init__(
+        self,
+        n: int,
+        seed: int,
+        order_log_path: Path | None = None,
+        epoch_size: int | None = None,
+        build_labels: list[str] | None = None,
+        build_balanced: bool = False,
+    ) -> None:
+        self._n = int(n)
+        self._seed = int(seed)
+        self._epoch = 0
+        self._order_log_path = order_log_path
+        self._epoch_size = None if epoch_size is None or int(epoch_size) <= 0 else min(int(epoch_size), self._n)
+        self._build_labels = list(build_labels) if build_labels is not None else None
+        self._build_balanced = bool(build_balanced)
+
+    def set_epoch(self, epoch: int) -> None:
+        self._epoch = int(epoch)
+
+    def _sample_subset(self, rng: np.random.RandomState) -> list[int]:
+        if self._n <= 0:
+            return []
+        if self._epoch_size is None or self._epoch_size >= self._n:
+            return list(range(self._n))
+        return _sample_positions(
+            self._n,
+            seed=self._seed + self._epoch,
+            take=self._epoch_size,
+            build_labels=self._build_labels,
+            build_balanced=self._build_balanced,
+        )
+
+    def __iter__(self):
+        rng = np.random.RandomState(self._seed + self._epoch)
+        selected = self._sample_subset(rng)
+        order = list(selected)
+        rng.shuffle(order)
+        if self._order_log_path is not None:
+            payload = {
+                "epoch": self._epoch,
+                "num_samples": self._n,
+                "epoch_size": len(order),
+                "selected_positions_sha256": hashlib.sha256(np.asarray(selected, dtype=np.int32).tobytes()).hexdigest(),
+                "selected_positions": selected,
+                "order_sha256": hashlib.sha256(np.asarray(order, dtype=np.int32).tobytes()).hexdigest(),
+                "order": order,
+            }
+            with self._order_log_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(payload) + "\n")
+        return iter(order)
+
+    def __len__(self) -> int:
+        return self._epoch_size if self._epoch_size is not None else self._n
+
+
+def _sample_positions(
+    n: int,
+    seed: int,
+    take: int,
+    build_labels: list[str] | None = None,
+    build_balanced: bool = True,
+) -> list[int]:
+    if n <= 0 or take <= 0:
+        return []
+    if take >= n:
+        return list(range(n))
+
+    rng = np.random.RandomState(int(seed))
+    if not build_balanced or not build_labels or len(build_labels) != n:
+        return rng.choice(n, size=take, replace=False).tolist()
+
+    by_build: dict[str, list[int]] = {}
+    for pos, build in enumerate(build_labels):
+        by_build.setdefault(str(build), []).append(pos)
+
+    build_order = sorted(by_build.keys())
+    rng.shuffle(build_order)
+    for build in build_order:
+        rng.shuffle(by_build[build])
+
+    out: list[int] = []
+    while len(out) < take:
+        progressed = False
+        for build in build_order:
+            items = by_build[build]
+            if not items:
+                continue
+            out.append(items.pop())
+            progressed = True
+            if len(out) >= take:
+                break
+        if not progressed:
+            break
+
+    if len(out) < take:
+        remaining: list[int] = []
+        for build in build_order:
+            remaining.extend(by_build[build])
+        if remaining:
+            rng.shuffle(remaining)
+            out.extend(remaining[: take - len(out)])
+
+    rng.shuffle(out)
+    return out[:take]
+
+
+def _pool_row(entry: dict[str, Any], subset_pos: int, split_pos: int) -> dict[str, Any]:
+    return {
+        "subset_pos": int(subset_pos),
+        "split_pos": int(split_pos),
+        "build": str(entry.get("_build", "unknown")),
+        "map": entry.get("map"),
+        "tile_id": int(entry.get("tile_id", -1)),
+        "tile_x": int(entry.get("tile_x", -1) if entry.get("tile_x") is not None else -1),
+        "tile_y": int(entry.get("tile_y", -1) if entry.get("tile_y") is not None else -1),
+        "height_mean": float(entry.get("height_mean", 0.0) or 0.0),
+        "height_std": float(entry.get("height_std", 0.0) or 0.0),
+        "has_normal_xyz": bool(entry.get("has_normal_xyz", False)),
+        "has_alpha_256": bool(entry.get("has_alpha_256", False)),
+        "has_liquid_mask": bool(entry.get("has_liquid_mask", False)),
+        "has_mcly_texture_ids": bool(entry.get("has_mcly_texture_ids", False)),
+        "n_mddf": int(entry.get("n_mddf", 0) or 0),
+        "n_modf": int(entry.get("n_modf", 0) or 0),
+    }
+
+
+def _apply_dataset_pool(
+    ds: V161Dataset,
+    split: str,
+    max_tiles: int,
+    seed: int,
+    evidence_dir: Path,
+    build_balanced: bool = True,
+) -> dict[str, Any]:
+    available = len(ds._indices)
+    build_labels = [
+        str(ds._index_entries[global_idx].get("_build", "unknown"))
+        for global_idx in ds._indices
+    ]
+    selected_positions = _sample_positions(
+        available,
+        seed=seed,
+        take=max_tiles if max_tiles > 0 else available,
+        build_labels=build_labels,
+        build_balanced=build_balanced,
+    )
+    selected_global_indices = [ds._indices[pos] for pos in selected_positions]
+    ds._indices = selected_global_indices
+
+    rows: list[dict[str, Any]] = []
+    build_counts: dict[str, int] = {}
+    for subset_pos, split_pos in enumerate(selected_positions):
+        entry = ds._index_entries[selected_global_indices[subset_pos]]
+        row = _pool_row(entry, subset_pos=subset_pos, split_pos=split_pos)
+        rows.append(row)
+        build = str(row["build"])
+        build_counts[build] = build_counts.get(build, 0) + 1
+
+    selection_jsonl = evidence_dir / f"{split}_pool_selection.jsonl"
+    with selection_jsonl.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
+
+    summary = {
+        "split": split,
+        "available_tiles": int(available),
+        "selected_tiles": int(len(ds._indices)),
+        "requested_max_tiles": int(max_tiles),
+        "build_balanced": bool(build_balanced),
+        "seed": int(seed),
+        "selected_positions_sha256": hashlib.sha256(
+            np.asarray(selected_positions, dtype=np.int32).tobytes()
+        ).hexdigest(),
+        "build_tile_counts": build_counts,
+        "selection_jsonl": str(selection_jsonl),
+    }
+    (evidence_dir / f"{split}_pool_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    return summary
+
+
+def _apply_dataset_limit(ds: V161Dataset, max_samples: int) -> None:
+    if max_samples > 0:
+        ds._indices = ds._indices[: min(int(max_samples), len(ds._indices))]
 
 
 def _masked_mean(loss_map: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -141,11 +331,16 @@ def _coarse_type_to_rgb(type_grid: torch.Tensor) -> torch.Tensor:
 class TaskSpec:
     name: str
     model_factory: Callable[[], torch.nn.Module]
-    loss_fn: Callable[[torch.nn.Module, dict[str, Any], torch.device], tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]]
+    loss_fn: Callable[[torch.nn.Module, dict[str, Any], torch.device, argparse.Namespace], tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]]
     save_preview: Callable[[dict[str, Any], dict[str, torch.Tensor], Path], None]
 
 
-def _height_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.device) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
+def _height_loss(
+    model: torch.nn.Module,
+    batch: dict[str, Any],
+    device: torch.device,
+    args: argparse.Namespace,
+) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["height_norm"].to(device, non_blocking=True)
     weight = batch["weight_257"].to(device, non_blocking=True)
@@ -154,14 +349,51 @@ def _height_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.de
     return loss, {"height": float(loss.item())}, {"pred": pred, "target": target, "weight": weight}
 
 
-def _normal_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.device) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
+def _gradient_magnitude_257(x: torch.Tensor) -> torch.Tensor:
+    dx = x[:, :, :, 1:] - x[:, :, :, :-1]
+    dy = x[:, :, 1:, :] - x[:, :, :-1, :]
+    dx = F.pad(dx, (0, 1, 0, 0))
+    dy = F.pad(dy, (0, 0, 0, 1))
+    return torch.sqrt((dx * dx) + (dy * dy) + 1e-8)
+
+
+def _detail_weight_from_targets(
+    height_raw: torch.Tensor,
+    target_normals: torch.Tensor,
+    base_mask: torch.Tensor,
+    detail_boost: float,
+) -> torch.Tensor:
+    height_grad = _gradient_magnitude_257(height_raw)
+    normal_grad = _gradient_magnitude_257(target_normals)
+    normal_grad = normal_grad.mean(dim=1, keepdim=True)
+
+    valid_mean_height = _masked_mean(height_grad, base_mask)
+    valid_mean_normal = _masked_mean(normal_grad, base_mask)
+    height_grad_n = (height_grad / valid_mean_height.clamp_min(1e-6)).clamp(0.0, 4.0)
+    normal_grad_n = (normal_grad / valid_mean_normal.clamp_min(1e-6)).clamp(0.0, 4.0)
+
+    detail_signal = ((0.65 * height_grad_n) + (0.35 * normal_grad_n)).clamp(0.0, 4.0)
+    return 1.0 + (float(detail_boost) * detail_signal)
+
+
+def _normal_loss(
+    model: torch.nn.Module,
+    batch: dict[str, Any],
+    device: torch.device,
+    args: argparse.Namespace,
+) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["normals"].to(device, non_blocking=True)
+    height_raw = batch["height_raw"].to(device, non_blocking=True)
     normal_mask = batch["normal_mask"].to(device, non_blocking=True)
+    terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
     object_weight = batch["weight_257"].to(device, non_blocking=True)
     mddf_mask = batch["mddf_mask"].to(device, non_blocking=True)
     modf_mask = batch["modf_mask"].to(device, non_blocking=True)
     liquid_mask = batch["liquid_mask"].to(device, non_blocking=True)
+    what_plate_flag = batch["what_plate_flag"].to(device, non_blocking=True).view(-1, 1, 1, 1)
+    alpha_painted_cov = batch["alpha_painted_cov"].to(device, non_blocking=True)
+    mcly_cov = batch["mcly_cov"].to(device, non_blocking=True)
     pred = model(inp)
     pred_n = F.normalize(pred, dim=1, eps=1e-6)
     target_n = F.normalize(target, dim=1, eps=1e-6)
@@ -170,7 +402,15 @@ def _normal_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.de
     object_presence = torch.maximum(mddf_mask, modf_mask)
     liquid_weight = 1.0 - (0.85 * liquid_mask_257)
     instance_weight = 1.0 - (0.75 * object_presence)
-    train_mask = normal_mask * object_weight * liquid_weight * instance_weight
+    base_mask = normal_mask * terrain_valid_mask * object_weight * liquid_weight * instance_weight
+    base_mask = base_mask * (1.0 - what_plate_flag)
+    detail_weight = _detail_weight_from_targets(
+        height_raw=height_raw,
+        target_normals=target_n,
+        base_mask=base_mask,
+        detail_boost=float(args.normal_detail_boost),
+    )
+    train_mask = base_mask * detail_weight
     vec_l1 = (pred_n - target_n).abs().mean(dim=1, keepdim=True)
     nz_l2 = (pred_n[:, 2:3] - target_n[:, 2:3]) ** 2
     loss_cos = _masked_mean(cosine, train_mask)
@@ -182,18 +422,30 @@ def _normal_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.de
         "normal_cos": float(loss_cos.item()),
         "normal_vec": float(loss_vec.item()),
         "normal_nz": float(loss_nz.item()),
-        "normal_mask_cov": float(train_mask.mean().item()),
+        "normal_mask_cov": float(base_mask.mean().item()),
+        "normal_detail_mean": float(_masked_mean(detail_weight, base_mask).item()),
+        "what_plate_rate": float(what_plate_flag.mean().item()),
+        "alpha_painted_cov": float(alpha_painted_cov.mean().item()),
+        "mcly_cov": float(mcly_cov.mean().item()),
     }, {
         "pred": pred_n,
         "target": target_n,
         "train_mask": train_mask,
+        "base_mask": base_mask,
+        "detail_weight": detail_weight,
+        "terrain_valid_mask": terrain_valid_mask,
         "object_weight": object_weight,
         "liquid_mask": liquid_mask_257,
         "instance_weight": instance_weight,
     }
 
 
-def _holes_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.device) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
+def _holes_loss(
+    model: torch.nn.Module,
+    batch: dict[str, Any],
+    device: torch.device,
+    args: argparse.Namespace,
+) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["holes"].to(device, non_blocking=True)
     weight = batch["weight_16"].to(device, non_blocking=True)
@@ -203,7 +455,12 @@ def _holes_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.dev
     return loss, {"holes": float(loss.item())}, {"pred": pred, "target": target}
 
 
-def _liquid_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.device) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
+def _liquid_loss(
+    model: torch.nn.Module,
+    batch: dict[str, Any],
+    device: torch.device,
+    args: argparse.Namespace,
+) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     inp = batch["input"].to(device, non_blocking=True)
     target_mask = batch["liquid_mask"].to(device, non_blocking=True)
     target_type = batch["liquid_type_16"].to(device, non_blocking=True)
@@ -219,7 +476,12 @@ def _liquid_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.de
     return loss, {"liquid_mask": float(mask_loss.item()), "liquid_type": float(type_loss.item())}, {"pred_mask": pred_mask, "target_mask": target_mask, "pred_type": type_pred, "target_type": target_type}
 
 
-def _texcomp_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.device) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
+def _texcomp_loss(
+    model: torch.nn.Module,
+    batch: dict[str, Any],
+    device: torch.device,
+    args: argparse.Namespace,
+) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     inp = batch["input"].to(device, non_blocking=True)
     alpha_target = batch["alpha"].to(device, non_blocking=True)
     mcly_ids = batch["mcly_ids"].to(device, non_blocking=True)
@@ -269,7 +531,10 @@ def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
         ("input", batch["input"][0]),
         ("normal_gt", _normals_to_rgb(outputs["target"][0])),
         ("normal_pred", _normals_to_rgb(outputs["pred"][0])),
-        ("train_mask", outputs["train_mask"][0]),
+        ("terrain_valid", outputs["terrain_valid_mask"][0]),
+        ("base_mask", outputs["base_mask"][0]),
+        ("detail_weight", outputs["detail_weight"][0] / outputs["detail_weight"][0].max().clamp_min(1e-6)),
+        ("train_mask", outputs["train_mask"][0] / outputs["train_mask"][0].max().clamp_min(1e-6)),
         ("liquid_mask", outputs["liquid_mask"][0]),
         ("object_weight", outputs["object_weight"][0]),
     ]
@@ -359,6 +624,36 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     p.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--val-fraction", type=float, default=0.1)
+    p.add_argument(
+        "--train-max-tiles",
+        type=int,
+        default=0,
+        help="If >0, curate this many tiles into the persistent train pool before epoch rotation.",
+    )
+    p.add_argument(
+        "--train-epoch-tiles",
+        type=int,
+        default=0,
+        help="If >0, sample this many train-pool tiles per epoch.",
+    )
+    p.add_argument(
+        "--train-epoch-build-balanced",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Balance per-epoch train sampling across builds when possible.",
+    )
+    p.add_argument(
+        "--val-max-tiles",
+        type=int,
+        default=0,
+        help="If >0, curate this many tiles into the fixed validation pool.",
+    )
+    p.add_argument(
+        "--curation-seed",
+        type=int,
+        default=None,
+        help="Seed for train/val pool selection (defaults to --seed).",
+    )
     p.add_argument("--max-train-samples", type=int, default=0)
     p.add_argument("--max-val-samples", type=int, default=0)
     p.add_argument("--val-interval", type=int, default=1)
@@ -367,6 +662,12 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     p.add_argument("--resume-checkpoint", type=Path, default=None)
     p.add_argument("--no-augment", action="store_true")
     p.add_argument("--no-amp", action="store_true")
+    p.add_argument(
+        "--normal-detail-boost",
+        type=float,
+        default=1.0,
+        help="Extra weight placed on high-deformation normal targets relative to broad flat terrain.",
+    )
     p.add_argument(
         "--no-compile",
         action="store_true",
@@ -385,6 +686,8 @@ def run_task(task_name: str) -> None:
         raise RuntimeError("--grad-accum-steps must be >= 1")
     if args.prefetch_factor < 1:
         raise RuntimeError("--prefetch-factor must be >= 1")
+    if args.train_epoch_tiles < 0:
+        raise RuntimeError("--train-epoch-tiles must be >= 0")
     _seed_all(args.seed)
     device = _resolve_device(args.device)
     resolved_num_workers = _resolve_num_workers(int(args.num_workers), device)
@@ -393,8 +696,10 @@ def run_task(task_name: str) -> None:
     run_dir = _MODELS_ROOT / task_name / "runs" / run_name
     ckpt_dir = run_dir / "checkpoints"
     val_dir = run_dir / "validation"
+    evidence_dir = run_dir / "evidence"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     val_dir.mkdir(parents=True, exist_ok=True)
+    evidence_dir.mkdir(parents=True, exist_ok=True)
 
     train_ds = V161Dataset(
         args.dataset_dir,
@@ -414,10 +719,38 @@ def run_task(task_name: str) -> None:
         augment=False,
         curation_manifest=args.curation_manifest,
     )
-    if args.max_train_samples > 0:
-        train_ds = Subset(train_ds, range(min(args.max_train_samples, len(train_ds))))
-    if args.max_val_samples > 0:
-        val_ds = Subset(val_ds, range(min(args.max_val_samples, len(val_ds))))
+    curation_seed = int(args.curation_seed) if args.curation_seed is not None else int(args.seed)
+    train_pool = _apply_dataset_pool(
+        train_ds,
+        split="train",
+        max_tiles=int(args.train_max_tiles),
+        seed=curation_seed + 101,
+        evidence_dir=evidence_dir,
+        build_balanced=True,
+    )
+    val_pool = _apply_dataset_pool(
+        val_ds,
+        split="val",
+        max_tiles=int(args.val_max_tiles),
+        seed=curation_seed + 202,
+        evidence_dir=evidence_dir,
+        build_balanced=True,
+    )
+    _apply_dataset_limit(train_ds, int(args.max_train_samples))
+    _apply_dataset_limit(val_ds, int(args.max_val_samples))
+    train_build_labels = [
+        str(train_ds._index_entries[global_idx].get("_build", "unknown"))
+        for global_idx in train_ds._indices
+    ]
+    train_order_log = evidence_dir / "train_epoch_orders.jsonl"
+    train_sampler = _DeterministicEpochSampler(
+        len(train_ds),
+        seed=int(args.seed),
+        order_log_path=train_order_log,
+        epoch_size=int(args.train_epoch_tiles),
+        build_labels=train_build_labels,
+        build_balanced=bool(args.train_epoch_build_balanced),
+    )
     loader_kwargs: dict[str, Any] = {
         "num_workers": resolved_num_workers,
         "pin_memory": (device.type == "cuda"),
@@ -425,7 +758,7 @@ def run_task(task_name: str) -> None:
     if resolved_num_workers > 0:
         loader_kwargs["persistent_workers"] = bool(resolved_persistent_workers)
         loader_kwargs["prefetch_factor"] = int(args.prefetch_factor)
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, **loader_kwargs)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=False, sampler=train_sampler, **loader_kwargs)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, **loader_kwargs)
 
     model = task.model_factory().to(device)
@@ -474,9 +807,17 @@ def run_task(task_name: str) -> None:
         "lr": args.lr,
         "weight_decay": args.weight_decay,
         "seed": args.seed,
+        "resolved_curation_seed": curation_seed,
         "val_fraction": args.val_fraction,
+        "train_max_tiles": args.train_max_tiles,
+        "train_epoch_tiles": args.train_epoch_tiles,
+        "train_epoch_build_balanced": args.train_epoch_build_balanced,
+        "val_max_tiles": args.val_max_tiles,
         "max_train_samples": args.max_train_samples,
         "max_val_samples": args.max_val_samples,
+        "normal_detail_boost": args.normal_detail_boost,
+        "train_pool": train_pool,
+        "val_pool": val_pool,
         "no_compile": args.no_compile,
         "compile_status": compile_status,
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -490,6 +831,21 @@ def run_task(task_name: str) -> None:
     if args.curation_manifest is not None:
         print(f"Curation manifest: {args.curation_manifest}", flush=True)
     print(
+        "Curated pools: "
+        f"train={train_pool['selected_tiles']}/{train_pool['available_tiles']} "
+        f"val={val_pool['selected_tiles']}/{val_pool['available_tiles']}",
+        flush=True,
+    )
+    print(f"Curated build mix (train): {train_pool.get('build_tile_counts', {})}", flush=True)
+    print(f"Curated build mix (val): {val_pool.get('build_tile_counts', {})}", flush=True)
+    if args.train_epoch_tiles > 0:
+        print(
+            "Epoch sampling: "
+            f"train_epoch_tiles={min(int(args.train_epoch_tiles), len(train_ds))}/{len(train_ds)} "
+            f"build_balanced={bool(args.train_epoch_build_balanced)}",
+            flush=True,
+        )
+    print(
         f"DataLoader: workers={resolved_num_workers} "
         f"persistent_workers={resolved_persistent_workers} "
         f"prefetch_factor={(args.prefetch_factor if resolved_num_workers > 0 else 'n/a')}",
@@ -500,10 +856,13 @@ def run_task(task_name: str) -> None:
         f"effective={args.batch_size * args.grad_accum_steps}",
         flush=True,
     )
+    if task_name == "normal":
+        print(f"Normal detail steering: boost={args.normal_detail_boost:.2f}", flush=True)
     print(f"Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}", flush=True)
     print(f"torch.compile: {compile_status}", flush=True)
 
     for epoch in range(start_epoch, args.epochs + 1):
+        train_sampler.set_epoch(epoch)
         model.train()
         metric_sums: dict[str, float] = {}
         train_loss_sum = 0.0
@@ -512,7 +871,7 @@ def run_task(task_name: str) -> None:
         optimizer.zero_grad(set_to_none=True)
         for batch_idx, batch in enumerate(train_loader, start=1):
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not args.no_amp)):
-                loss, metrics, _outputs = task.loss_fn(model, batch, device)
+                loss, metrics, _outputs = task.loss_fn(model, batch, device, args)
             scaler.scale(loss / args.grad_accum_steps).backward()
             should_step = (batch_idx % args.grad_accum_steps == 0) or (batch_idx == len(train_loader))
             if should_step:
@@ -553,7 +912,7 @@ def run_task(task_name: str) -> None:
             with torch.no_grad():
                 for batch in val_loader:
                     with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not args.no_amp)):
-                        loss, metrics, outputs = task.loss_fn(model, batch, device)
+                        loss, metrics, outputs = task.loss_fn(model, batch, device, args)
                     val_loss_sum += float(loss.item())
                     for key, value in metrics.items():
                         val_metric_sums[key] = val_metric_sums.get(key, 0.0) + float(value)

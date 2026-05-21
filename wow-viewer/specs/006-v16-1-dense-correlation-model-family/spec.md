@@ -246,9 +246,17 @@ writes a single combined output bundle.
 - **FR-006E**: The curation layer MUST be able to reject blank or nonsensical
   tiles and MUST support minimap-vs-target alignment metrics for the target
   family being trained.
+- **FR-006E1**: The curation layer MUST explicitly detect genesis blank
+  "what plate" tiles where terrain height is effectively all zero and terrain
+  texturing/liquid/object truth is absent, and MUST keep those out of terrain
+  signal training pools.
 - **FR-006F**: The V16.1 normal lane MUST support manifest-driven filtering from
   a normal-oriented curation pass that checks blank minimaps, normal coverage,
   and minimap-vs-normal edge agreement before training.
+- **FR-006G**: V16.1 target-family trainers MUST support a V16-style bounded
+  train-pool plus per-epoch rotation seam so long runs can learn from curated
+  mixed-complexity subsets instead of replaying the full curated corpus every
+  epoch.
 - **FR-006A**: V16.1 MUST explicitly build dense minimap-to-signal correlation
   models using the richer supervision already present in the V16 Zarr dataset,
   then link those per-family outputs together into assembled terrain outputs.
@@ -256,6 +264,9 @@ writes a single combined output bundle.
   selection and MUST NOT depend on normal/alpha/liquid metrics.
 - **FR-008**: The normal trainer MUST own normal-specific masking and metrics
   and MUST NOT depend on height/liquid/texture-decomposition losses.
+- **FR-008A**: The normal trainer MUST support deformation-aware steering so
+  strong terrain-shape transitions can carry more optimization weight than
+  broad flat terrain without removing flat examples from the dataset.
 - **FR-009**: The holes trainer MUST own hole-specific metrics and MUST NOT be
   coupled into the height or liquid optimization surface.
 - **FR-010**: The liquid trainer MUST predict both liquid footprint and liquid
@@ -283,6 +294,10 @@ writes a single combined output bundle.
 - **FR-014**: Shared object-mask gating MUST reuse the existing V16 object-mask
   dataset signals (`object_filtered_mask`, and optionally `mddf_mask` /
   `modf_mask`) instead of inventing a separate mask format for each trainer.
+- **FR-014A**: The V16.1 dataset/trainer seam MUST expose raw supervision
+  guidance channels for terrain-only training, including at least object-aware
+  validity, painted-alpha presence, MCLY presence, and blank-plate flags,
+  without turning validation RGB panels into the actual supervised data path.
 - **FR-015**: V16.1 inference MUST stitch separate checkpoint outputs into one
   combined terrain prediction surface through an explicit manifest or CLI
   contract.
@@ -334,6 +349,17 @@ writes a single combined output bundle.
 - **SC-003C**: A reusable curation-manifest builder exists, and a V16.1 normal
   smoke run completes while consuming a normal-oriented manifest instead of raw
   Zarr rows.
+- **SC-003D**: The shared V16.1 trainer now supports `--train-max-tiles`,
+  `--train-epoch-tiles`, and `--val-max-tiles`, and a curated normal smoke run
+  writes `train_pool_summary.json`, `val_pool_summary.json`, and
+  `train_epoch_orders.jsonl`.
+- **SC-003E**: The normal trainer now supports `--normal-detail-boost`, logs
+  `train_normal_detail_mean` / `val_normal_detail_mean`, and a smoke run
+  completes with deformation-aware steering active.
+- **SC-003F**: The normal-oriented curation pass can now reject
+  `blank_what_plate_tile`, and a V16.1 normal smoke run logs
+  `what_plate_rate`, `alpha_painted_cov`, and `mcly_cov` from the raw
+  supervision seam.
 - **SC-004**: The liquid trainer emits both footprint and liquid-type evidence.
 - **SC-005**: The texture-decomposition trainer emits both decomposition outputs
   and a recomposed review image.
