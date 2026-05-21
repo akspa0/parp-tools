@@ -494,6 +494,41 @@ public sealed record Pm4MshdRelationshipSummary(
     int FileCount,
     string Notes);
 
+public sealed record Pm4CrossTileCk24Record(
+    uint Ck24,
+    byte Ck24Type,
+    ushort Ck24ObjectId,
+    IReadOnlyList<string> TileCoordinates,
+    int TotalSurfaces,
+    int TotalMscnRefs,
+    int TotalMprlRefs);
+
+public sealed record Pm4CrossTileTileSummary(
+    string TileCoordinate,
+    int Ck24GroupCount,
+    int SurfaceCount,
+    int MslkCount,
+    int MscnCount,
+    int MprlCount,
+    uint MshdField00,
+    uint MshdField04,
+    uint MshdField08,
+    bool HasAdtPlacements,
+    int AdtWmoCount,
+    int AdtM2Count);
+
+public sealed record Pm4CrossTileReport(
+    string InputDirectory,
+    int TotalFiles,
+    int NonEmptyFiles,
+    int AdtTilesWithPlacements,
+    int TotalDistinctCk24,
+    int CrossTileCk24Count,
+    int MergedObjectCount,
+    IReadOnlyList<Pm4CrossTileCk24Record> TopCrossTileCk24,
+    IReadOnlyList<Pm4CrossTileTileSummary> TileSummaries,
+    IReadOnlyList<string> Notes);
+
 public sealed record Pm4MshdReport(
     string InputDirectory,
     int FileCount,

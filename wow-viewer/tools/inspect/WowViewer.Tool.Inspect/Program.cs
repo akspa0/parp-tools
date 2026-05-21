@@ -1671,6 +1671,9 @@ static void RunPm4(string[] args)
 		case "audit-directory":
 			RunPm4AuditDirectory(tail);
 			break;
+		case "cross-tile":
+			RunPm4CrossTile(tail);
+			break;
 		case "export-json":
 			RunPm4ExportJson(tail);
 			break;
@@ -3990,7 +3993,65 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 mshd --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 audit --input <file.pm4>");
 	Console.WriteLine("  pm4 audit-directory --input <directory>");
+	Console.WriteLine("  pm4 cross-tile --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
+}
+
+static void RunPm4CrossTile(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4CrossTileReport report = Pm4ResearchCrossTileAnalyzer.AnalyzeDirectory(input);
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	PrintPm4CrossTileReport(report);
+}
+
+static void PrintPm4CrossTileReport(Pm4CrossTileReport report)
+{
+	Console.WriteLine($"Input directory: {report.InputDirectory}");
+	Console.WriteLine($"Files: {report.TotalFiles} total, {report.NonEmptyFiles} non-empty");
+	Console.WriteLine($"Distinct CK24 values: {report.TotalDistinctCk24}");
+	Console.WriteLine($"Cross-tile CK24 (span 2+ tiles): {report.CrossTileCk24Count} ({report.CrossTileCk24Count * 100.0 / Math.Max(1, report.TotalDistinctCk24):F1}%)");
+	Console.WriteLine();
+
+	Console.WriteLine("Top cross-tile CK24 objects:");
+	Console.WriteLine("  CK24     Type  ObjectId  Tiles  Surfaces  MSCNrefs");
+	foreach (Pm4CrossTileCk24Record row in report.TopCrossTileCk24.Where(r => r.TileCoordinates.Count > 1).Take(25))
+	{
+		Console.WriteLine($"  0x{row.Ck24:X6}  0x{row.Ck24Type:X2}   {row.Ck24ObjectId,-8} {row.TileCoordinates.Count,-5}  {row.TotalSurfaces,-8}  {row.TotalMscnRefs,-8}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("Tile summary (all non-empty tiles):");
+	Console.WriteLine("  Tile     CK24grps  Surfaces  MSLK     MSCN    MPRL");
+	foreach (Pm4CrossTileTileSummary row in report.TileSummaries.Take(40))
+	{
+		Console.WriteLine($"  {row.TileCoordinate,-8} {row.Ck24GroupCount,-9} {row.SurfaceCount,-9} {row.MslkCount,-8} {row.MscnCount,-7} {row.MprlCount,-7}");
+	}
+
+	Console.WriteLine();
+	foreach (string note in report.Notes)
+		Console.WriteLine($"[*] {note}");
 }
 
 sealed record TerrainPatchReportEntry(

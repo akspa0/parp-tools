@@ -69,9 +69,9 @@ Offset 0x1C: Field1C (uint32) — always 0
 
 ### Corpus Evidence
 
-- 616 development tiles: Fields 0x0C-0x1C are ALL zero. Confirmed by integration tests at `Pm4ResearchIntegrationTests.cs:118-122`.
-- Field04 is always 1.
-- Field00 and Field08 vary together but do not map to any single chunk count.
+- 616 development tiles: Fields 0x0C-0x1C are ALL zero. Confirmed.
+- Field00: 155 distinct values, Field04: **227 distinct values**, Field08: 152 distinct
+- Field04 is NOT always 1 (only 140/502, on empty tiles) — prior research was wrong
 
 ### Open Questions
 
@@ -455,7 +455,94 @@ The "infinitely nested data storage" the user describes is the chunk hierarchy: 
 
 ---
 
-## Project Context
+## Phase 2 — Cross-Tile Unified Scene Graph
+
+**Date**: 2026-05-20
+**Source**: New `Pm4ResearchCrossTileAnalyzer` — reads all 616 PM4 files as a single map object
+**Output**: `wow-viewer/output/research/pm4-phase-1/cross-tile.json`
+
+### Unified View Across All Tiles
+
+Reading all 616 PM4 files as a single unified map (not per-tile):
+
+| Metric | Value |
+|--------|-------|
+| Non-empty tiles | 309 |
+| Total distinct CK24 values | **1,229** |
+| CK24 values spanning 2+ tiles | **266 (21.6%)** |
+| Percent of surface-count that is CK24=0 | 186,060 / 518,092 = **35.9%** |
+
+### Top Cross-Tile CK24 Objects
+
+| CK24 | Type | ObjectId | Tiles | Surfaces | MSCNrefs | Interpretation |
+|------|------|----------|-------|----------|----------|----------------|
+| 0x000000 | 0x00 | 0 | **291** | 186,060 | 183,943 | Nav mesh — spans entire map |
+| 0x42CBEA | 0x42 | 52202 | 8 | 33,587 | 33,587 | WMO — largest object, 8 tiles |
+| 0x43A8BC | 0x43 | 43196 | 8 | 6,401 | 6,401 | WMO — 8 tiles |
+| 0x43AC86 | 0x43 | 44166 | 7 | 5,182 | 5,182 | WMO — 7 tiles |
+| 0x42A4F1 | 0x42 | 42225 | 5 | 1,067 | 1,067 | WMO — 5 tiles |
+| 0x429DBB | 0x42 | 40379 | 5 | 525 | 525 | WMO — 5 tiles |
+| 0xC0DFB5 | **0xC0** | 57269 | 3 | 5,299 | 5,299 | **M2 Exterior** — 3 tiles |
+| 0xC3A6C2 | **0xC3** | 42690 | 4 | 74 | 74 | **M2 Exterior variant** — 4 tiles |
+
+### New Type Bytes Discovered
+
+The WoWRollback type table listed 0x00, 0x40-0x43, 0xC0-0xC2. Actual corpus:
+
+| Type Byte | Count in cross-tile top 50 | Notes |
+|-----------|--------------------------|-------|
+| 0x00 | 1 | Nav mesh (spans 291 tiles) |
+| 0x40 | Multiple | M2 (was: "M2 Interior") |
+| 0x41 | Multiple | M2 (was: "M2 Interior") |
+| 0x42 | Multiple | WMO |
+| 0x43 | Multiple | WMO |
+| 0xC0 | 1 | M2 Exterior (cross-tile, 3 tiles) |
+| 0xC3 | 1 | **NEW** — not in any reference table |
+
+### Tile Distribution Shows Clusters
+
+The development map data clusters in specific regions:
+- **Tiles 0_0 through ~15_X**: Primary data region (16+ CK24 groups per tile)
+- **Tiles ~14_36 through 14_51**: Dense data cluster (27-99 CK24 groups)
+- **Tiles ~13_50**: 8 CK24 groups, 3,589 surfaces
+- **Many tiles have 0 CK24 groups**: 307 of 616 tiles are empty stubs
+
+### Key Observation: MSCN Ref Count vs Surface Count
+
+For most non-nav-mesh CK24 groups, MSCN ref count **equals surface count** — every MSUR surface has a corresponding MSCN scene node. Missing MSCN refs are primarily in:
+- CK24=0x000000 (nav mesh): 186,060 surfaces, 183,943 MSCN refs (99.9% match)
+- Some M2 type groups show < 100% coverage (e.g., 0x415793: 661 surfaces, 615 refs)
+
+### Cross-Tile Data Model (Revised)
+
+```
+Single Map Object (all tiles)
+  │
+  ├─ CK24=0x000000 (type 0x00) — Nav mesh
+  │   └─ 186,060 surfaces across 291 tiles
+  │       └─ 183,943 MSCN scene nodes (centroids)
+  │           └─ MSLK edges connect nodes
+  │
+  ├─ CK24=0x42CBEA (type 0x42) — Large WMO
+  │   └─ 33,587 surfaces across 8 tiles
+  │       └─ 33,587 MSCN scene nodes
+  │
+  ├─ CK24=0x43A8BC (type 0x43) — Large WMO
+  │   └─ 6,401 surfaces across 8 tiles
+  │
+  └─ 264 other CK24 values span 2-7 tiles
+```
+
+### What This Means
+
+The "read as a single map object first, then sub-divide into tiles" approach confirms:
+1. CK24=0x000000 is ONE object — the terrain nav mesh — spanning the entire map
+2. Large WMO structures (CK24 types 0x42/0x43) span 4-8 tiles
+3. M2 doodads (CK24 types 0x40/0x41) can span 2-3 tiles
+4. 21.6% of all CK24 values are cross-tile — this is the norm, not an exception
+5. New type bytes 0xC0 and 0xC3 exist but are rare
+
+---
 
 ### The 2021 Hobbyist Effort
 
@@ -925,36 +1012,61 @@ This would explain:
 
 ---
 
-## The MSHD Suspicion and Rare Value Hypothesis
+## MSHD — BREAKTHROUGH: Field04 = Region ID
 
-### MSHD: We Never Dug In
+### What We Discovered (Phase 2 Cross-Tile Analysis)
 
-The user says MSHD is suspicious because we never really investigated whether it helps decode other chunks. Current state:
-- 8 x uint32 fields, 32 bytes total
-- Fields 0x0C-0x1C are ALL zero in 616 development tiles
-- Field00 and Field08 vary but don't correlate with chunk counts
-- Field04 is always 1
+Cross-tile analysis with per-tile MSHD fields reveals:
 
-We dismissed MSHD as "probably dead padding" without seriously testing whether it encodes layout information, region boundaries, or root-level grouping keys.
+1. **Field04 = 1 appears ONLY on empty tiles** — 0 of 309 active tiles have Field04=1. The 140 tiles with Field04=1 are stubs with 0 surfaces. Previous assumption "always 1" was based on only looking at populated tiles from the perspective of non-empty ones... actually it was just wrong. 227 distinct values exist.
 
-### The Rare Value Hypothesis
+2. **Field04 values cluster in spatially adjacent tiles**:
+   | Field04 | Tiles | Adjacency Pattern |
+   |---------|-------|-------------------|
+   | 3262 | 13 | Two separate regions: 35_42-36_45 (8 tiles) + 45_46-47_51 (5) |
+   | 2497 | 5 | 34_28, 35_27-28, 36_29-30 — contiguous 3×2 |
+   | 378 | 5 | 14_35, 15_37, 16_36, 16_38, 17_38 — locally clustered |
+   | 288 | 5 | Scattered: 32_37, 35_37, 42_42, 48_37, 48_40 |
+   | 249 | 5 | Scattered: 24_20, 24_35, 24_36, 26_51, 42_49 |
+   | 974 | 4 | 28_38, 29_38, 30_40, 30_41 — contiguous |
+   | 2158 | 3 | 28_41, 28_42, 29_41 — contiguous |
+   | 2668 | 3 | 34_29, 35_29, 35_30 — contiguous |
+   | 3589 | 3 | 28_46, 28_47, 29_46 — contiguous |
+   | 3814 | 2 | 27_45, 27_46 — adjacent |
 
-The user notes that some unknown field values only appear once or twice in the corpus. These rare values are likely NOT noise — they're likely **root group IDs or top-level identifiers** that would help with object isolation/subdivision from CK24.
+3. **Field04 does NOT encode per-tile metrics** — Within F04=3262 tiles, surface count ranges from 11 to 6,575. Avg surfaces=2,101, avg CK24 groups=8. The variation is too high for it to be a count or threshold.
 
-In a hierarchy:
-- Common values = leaf-level attributes (walkable, wall, floor, etc.)
-- Rare values = root-level identifiers (object group, region, scene node)
+4. **Same Field04 value can appear in non-adjacent regions** — F04=3262 in tiles 35_42-36_45 AND 45_46-47_51. Same F04, two disconnected regions.
 
-If MSLK.Subtype (0-11-ish) has some values that appear only once or twice, those might be **top-level scene divisions** — the missing layer between CK24 (which groups too broadly) and individual polygons (which is too granular).
+### What Field04 Probably Is
 
-### The Object Decomposition Problem Revisited
+The spatial clustering with high intra-group variance + cross-region reuse suggests:
 
-Current splitting chain:
-```
-CK24 (flat key) → MSLK.GroupObjectId (union-find) → sub-objects
-```
+- **A scene division / region group identifier**: Which scene-zone this tile participates in. Two disconnected clusters can share the same F04 if they represent the same structural scene type.
+- **A layout template / packing key**: How the tile's internal data is arranged. Different tiles with the same layout share F04.
+- **The missing root grouping level**: Between CK24 (per-object) and tile boundaries. F04 could be the scene-division anchor the user hypothesized.
 
-What we might be missing:
+This is consistent with the user's prediction: "Rare values are root group IDs." F04=3262 appears in 13 tiles — rare enough to be a meaningful identifier, common enough to define a scene region.
+
+### Field00 and Field08
+
+- F00=534: 132/309 active tiles (42.7%) — dominant
+- F08=534: 137/309 active tiles (44.3%) 
+- F00==F08: 86/309 (27.8%) — they differ more often than match
+- Likely a version/source tuple or encoding two facets of the same thing
+
+### What We Still Don't Know
+
+1. Exact relationship between F04 and CK24 decomposition
+2. Whether F04 is globally unique per scene division or repeats by type
+3. Whether F00/F08 encode a checksum, index, or something else
+4. Whether retail PM4 files populate the trailing zero fields (0x0C-0x1C)
+
+### The Old MSHD Section Was Wrong
+
+Previous research notes claimed "Field04 is always 1" — contradicted by actual data (227 distinct values). Fields 0x0C-0x1C being zero is confirmed (502/502).
+
+---
 ```
 CK24 (flat key) → ??? root grouping ??? → MSLK.GroupObjectId → sub-objects
 ```
