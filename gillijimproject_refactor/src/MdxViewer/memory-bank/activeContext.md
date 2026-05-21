@@ -25,6 +25,7 @@ This file is intentionally compressed. Keep only the current compatibility role,
 ### PM4 compatibility surface
 
 - `MdxViewer` now consumes a `wow-viewer` PM4 `MSHD.Field04` region-id seam for overlay coloring, workbench diagnostics, collection/export metadata, and PM4 cache payloads.
+- The PM4 selection workbench now also exposes selected-region peer summaries and can export an LLM-oriented evidence bundle (`json` + `md` + `svg`) derived from the currently visible overlay objects.
 - This is a grouping/debug aid only. It does not change PM4 placement math or match scoring.
 
 ## Important Boundaries

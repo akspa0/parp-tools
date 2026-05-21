@@ -1061,7 +1061,7 @@ The spatial clustering with high intra-group variance + cross-region reuse sugge
 
 This is consistent with the user's prediction: "Rare values are root group IDs." F04=3262 appears in 13 tiles — rare enough to be a meaningful identifier, common enough to define a scene region.
 
-Consumer note (2026-05-21): `wow-viewer` now promotes `MSHD.Field04` as a region-id grouping contract, and `MdxViewer` consumes it for PM4 overlay coloring, workbench diagnostics, collection/export metadata, and cache payloads. This is a research-driven grouping aid, not placement proof.
+Consumer note (2026-05-21): `wow-viewer` now promotes `MSHD.Field04` as a region-id grouping contract, and `MdxViewer` consumes it for PM4 overlay coloring, selected-region peer summaries, collection/export metadata, cache payloads, and LLM-oriented JSON/Markdown/SVG evidence bundles. This is a research-driven grouping aid, not placement proof.
 
 ### Field00 and Field08
 

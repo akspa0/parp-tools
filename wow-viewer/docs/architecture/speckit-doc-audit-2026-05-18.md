@@ -16,6 +16,7 @@ All architecture/spec documents under `wow-viewer/docs/architecture/` plus subdi
 | `low-resolution-world-image-alignment-plan-2026-04-22.md` | planned | No code. Pure design doc. No `world-image-align` or `world-image-cut-tiles` commands exist. | Keep open. Low priority. |
 | `m2-native-client-research-2026-03-31.md` | implemented | Raw Ghidra evidence. Findings consumed by `m2/implementation-contract.md`. `WowViewer.Core.M2/` (11 files), `Core.IO.M2/` (6 files), `Core.Runtime.M2/` (26 files) all exist. | Archive as reference. |
 | `multi-model-terrain-reconstruction-2026-05-16.md` | planned | Draft spec. Depends on object segmentation model (does NOT exist). Four-model chain not implemented. | Keep open. Blocked on object segmentation. |
+| `pm4-llm-evidence-export-2026-05-21.md` | implemented | `MdxViewer` PM4 workbench now exposes selected-region peer summaries and writes JSON/Markdown/SVG evidence bundles from the visible overlay. | Keep as active compatibility note. |
 | `v10-stage2-terrain-synth-architecture-2026-04-27.md` | stale | Superseded by V14/V15/V16. `train_v10_stage2_terrain_synth.py` exists but is legacy. | Mark historical. Point to V16. |
 | `v11-terrain-model-architecture-2026-05-02.md` | stale | Superseded by V14/V15/V16. `train_v11.py` and `infer_v11.py` exist but are legacy. | Mark historical. Point to V16. |
 | `v14-model-and-refactor-plan-2026-05-06.md` | partial | Core philosophy doc. Gaps it identified (synthetic minimap compositor, Harvester CLI, data-harvester/) ALL NOW EXIST. Code audit tables stale. Full V14 multi-model pipeline not fully landed; V16 is active. | Update code audit tables. Keep as architectural reference. |
@@ -42,11 +43,11 @@ All architecture/spec documents under `wow-viewer/docs/architecture/` plus subdi
 
 | Classification | Count |
 |---------------|-------|
-| implemented | 9 |
+| implemented | 10 |
 | partial | 11 |
 | planned | 4 |
 | stale | 2 |
-| **Total** | **26** |
+| **Total** | **27** |
 
 ## Key Findings
 
@@ -56,7 +57,8 @@ All architecture/spec documents under `wow-viewer/docs/architecture/` plus subdi
 4. **Vulkan/WebGL do not exist**: Only OpenGL (Silk.NET) implemented.
 5. **Game-viewer-plan-pack is largest planned surface**: 49 micro-plans with zero implementation.
 6. **M2 subsystem well-implemented**: 43 files matching implementation contract.
-7. **V16 pipeline is most current ML path**: All scripts and model files form a coherent pipeline.
+7. **PM4 evidence export now has a dedicated note**: the selected-region / JSON+Markdown+SVG compatibility surface is documented instead of living only in viewer code.
+8. **V16 pipeline is most current ML path**: All scripts and model files form a coherent pipeline.
 
 ## Highest-Value Active Lane
 

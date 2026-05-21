@@ -11102,7 +11102,7 @@ void main() {
                     skinBytes = ReadStandaloneFileData(bestSkinPath);
             }
 
-            var converter = new M2ToMdxConverter();
+            var converter = new WoWMapConverter.Core.Converters.M2ToMdxConverter();
             return converter.ConvertToBytes(m2Bytes, skinBytes, _dbcBuild);
         }
         catch (Exception ex)

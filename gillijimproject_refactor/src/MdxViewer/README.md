@@ -142,6 +142,8 @@ Example:
 - PM4/WMO correlation report window
 - PM4/WMO correlation JSON export
 - PM4 OBJ set export from the viewer
+- selected-region peer summary in the PM4 workbench
+- PM4 LLM evidence bundle export (`JSON` + `Markdown` + `SVG`)
 
 ### PM4 terminology and evidence level
 
@@ -151,7 +153,7 @@ The PM4 data shown in the viewer is still partly reverse-engineered. Some labels
   - `MSHD` is the fixed-size PM4 or PD4 header chunk.
   - In the current corpus it decodes cleanly as eight `uint32` fields at offsets `0x00..0x1C`.
   - We have not closed the semantics of those fields yet.
-  - `MSHD.Field04` is now surfaced in the active viewer as a region-id grouping/coloring signal and exported in PM4 object JSON.
+  - `MSHD.Field04` is now surfaced in the active viewer as a region-id grouping/coloring signal, a selected-region sidebar summary key, and an export field in PM4 JSON / Markdown / SVG evidence bundles.
   - The active confidence report still treats the broader `MSHD` semantic model as unresolved, and the active `MdxViewer` PM4 path does not use `MSHD` to drive overlay placement or match scoring.
 - `MSUR._0x1c` -> local alias: `CK24`
   - `CK24` is a viewer or research alias for the packed `MSUR` field at offset `0x1c`.

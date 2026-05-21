@@ -328,6 +328,161 @@ public readonly struct Pm4ColorLegendInfo
     public int HiddenEntryCount => Math.Max(0, TotalEntryCount - Entries.Count);
 }
 
+public readonly struct Pm4VisibleTypeBucket
+{
+    public Pm4VisibleTypeBucket(byte ck24Type, int objectCount)
+    {
+        Ck24Type = ck24Type;
+        ObjectCount = objectCount;
+    }
+
+    public byte Ck24Type { get; }
+    public int ObjectCount { get; }
+}
+
+public readonly struct Pm4VisibleRegionSummary
+{
+    public Pm4VisibleRegionSummary(
+        uint regionId,
+        int objectCount,
+        int tileCount,
+        int uniqueCk24Count,
+        int uniqueLinkGroupCount,
+        float averageCenterHeight,
+        bool isSelectedRegion,
+        IReadOnlyList<Pm4VisibleTypeBucket> typeBuckets)
+    {
+        RegionId = regionId;
+        ObjectCount = objectCount;
+        TileCount = tileCount;
+        UniqueCk24Count = uniqueCk24Count;
+        UniqueLinkGroupCount = uniqueLinkGroupCount;
+        AverageCenterHeight = averageCenterHeight;
+        IsSelectedRegion = isSelectedRegion;
+        TypeBuckets = typeBuckets;
+    }
+
+    public uint RegionId { get; }
+    public int ObjectCount { get; }
+    public int TileCount { get; }
+    public int UniqueCk24Count { get; }
+    public int UniqueLinkGroupCount { get; }
+    public float AverageCenterHeight { get; }
+    public bool IsSelectedRegion { get; }
+    public IReadOnlyList<Pm4VisibleTypeBucket> TypeBuckets { get; }
+}
+
+public readonly struct Pm4VisibleOverlaySummaryInfo
+{
+    public Pm4VisibleOverlaySummaryInfo(
+        int visibleObjectCount,
+        int visibleTileCount,
+        int regionCount,
+        uint? selectedRegionId,
+        IReadOnlyList<Pm4VisibleRegionSummary> regions)
+    {
+        VisibleObjectCount = visibleObjectCount;
+        VisibleTileCount = visibleTileCount;
+        RegionCount = regionCount;
+        SelectedRegionId = selectedRegionId;
+        Regions = regions;
+    }
+
+    public int VisibleObjectCount { get; }
+    public int VisibleTileCount { get; }
+    public int RegionCount { get; }
+    public uint? SelectedRegionId { get; }
+    public IReadOnlyList<Pm4VisibleRegionSummary> Regions { get; }
+}
+
+public readonly struct Pm4RegionPeerSummary
+{
+    public Pm4RegionPeerSummary(
+        (int tileX, int tileY, uint ck24, int objectPart) objectKey,
+        byte ck24Type,
+        ushort ck24ObjectId,
+        int surfaceCount,
+        uint linkGroupObjectId,
+        uint dominantMdosIndex,
+        Vector3 center,
+        bool isSelected,
+        bool sameCk24,
+        bool sameLinkGroup,
+        bool sameMdosIndex)
+    {
+        ObjectKey = objectKey;
+        Ck24Type = ck24Type;
+        Ck24ObjectId = ck24ObjectId;
+        SurfaceCount = surfaceCount;
+        LinkGroupObjectId = linkGroupObjectId;
+        DominantMdosIndex = dominantMdosIndex;
+        Center = center;
+        IsSelected = isSelected;
+        SameCk24 = sameCk24;
+        SameLinkGroup = sameLinkGroup;
+        SameMdosIndex = sameMdosIndex;
+    }
+
+    public (int tileX, int tileY, uint ck24, int objectPart) ObjectKey { get; }
+    public byte Ck24Type { get; }
+    public ushort Ck24ObjectId { get; }
+    public int SurfaceCount { get; }
+    public uint LinkGroupObjectId { get; }
+    public uint DominantMdosIndex { get; }
+    public Vector3 Center { get; }
+    public bool IsSelected { get; }
+    public bool SameCk24 { get; }
+    public bool SameLinkGroup { get; }
+    public bool SameMdosIndex { get; }
+}
+
+public readonly struct Pm4SelectedObjectRegionInfo
+{
+    public Pm4SelectedObjectRegionInfo(
+        uint regionId,
+        int visibleObjectCount,
+        int visibleTileCount,
+        int uniqueCk24Count,
+        int uniqueLinkGroupCount,
+        int uniqueMdosCount,
+        int sameCk24Count,
+        int sameLinkGroupCount,
+        int sameMdosCount,
+        float averageSurfaceCount,
+        float averageCenterHeight,
+        IReadOnlyList<Pm4VisibleTypeBucket> typeBuckets,
+        IReadOnlyList<Pm4RegionPeerSummary> peers)
+    {
+        RegionId = regionId;
+        VisibleObjectCount = visibleObjectCount;
+        VisibleTileCount = visibleTileCount;
+        UniqueCk24Count = uniqueCk24Count;
+        UniqueLinkGroupCount = uniqueLinkGroupCount;
+        UniqueMdosCount = uniqueMdosCount;
+        SameCk24Count = sameCk24Count;
+        SameLinkGroupCount = sameLinkGroupCount;
+        SameMdosCount = sameMdosCount;
+        AverageSurfaceCount = averageSurfaceCount;
+        AverageCenterHeight = averageCenterHeight;
+        TypeBuckets = typeBuckets;
+        Peers = peers;
+    }
+
+    public uint RegionId { get; }
+    public int VisibleObjectCount { get; }
+    public int VisibleTileCount { get; }
+    public int UniqueCk24Count { get; }
+    public int UniqueLinkGroupCount { get; }
+    public int UniqueMdosCount { get; }
+    public int SameCk24Count { get; }
+    public int SameLinkGroupCount { get; }
+    public int SameMdosCount { get; }
+    public float AverageSurfaceCount { get; }
+    public float AverageCenterHeight { get; }
+    public IReadOnlyList<Pm4VisibleTypeBucket> TypeBuckets { get; }
+    public IReadOnlyList<Pm4RegionPeerSummary> Peers { get; }
+}
+
 public readonly struct Pm4SelectedObjectGraphPartNode
 {
     public Pm4SelectedObjectGraphPartNode(
@@ -10174,6 +10329,179 @@ public class WorldScene : ISceneRenderer
                     categoricalEntries);
             }
 
+            public IReadOnlyList<(int tileX, int tileY, uint ck24, int objectPart)> GetVisiblePm4ObjectsForRegion(uint regionId)
+            {
+                var keys = new List<(int tileX, int tileY, uint ck24, int objectPart)>();
+                foreach (((int tileX, int tileY) tileKey, Pm4OverlayObject obj) in EnumerateVisiblePm4OverlayObjects())
+                {
+                    if (obj.MshdRegionId != regionId)
+                        continue;
+
+                    keys.Add((tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId));
+                }
+
+                return keys;
+            }
+
+            public Pm4VisibleOverlaySummaryInfo GetPm4VisibleOverlaySummary(int maxRegions = 10, int maxTypeBucketsPerRegion = 3)
+            {
+                maxRegions = Math.Max(1, maxRegions);
+                maxTypeBucketsPerRegion = Math.Max(1, maxTypeBucketsPerRegion);
+
+                var objectsByRegion = new Dictionary<uint, List<((int tileX, int tileY, uint ck24, int objectPart) key, Pm4ObjectDebugInfo debug)>>();
+                int visibleObjectCount = 0;
+                var visibleTiles = new HashSet<(int tileX, int tileY)>();
+
+                foreach (((int tileX, int tileY, uint ck24, int objectPart) key, _, Pm4ObjectDebugInfo debug) in EnumerateVisiblePm4OverlayDebugObjects())
+                {
+                    visibleObjectCount++;
+                    visibleTiles.Add((key.tileX, key.tileY));
+                    if (!objectsByRegion.TryGetValue(debug.MshdRegionId, out var entries))
+                    {
+                        entries = new List<((int tileX, int tileY, uint ck24, int objectPart), Pm4ObjectDebugInfo)>();
+                        objectsByRegion[debug.MshdRegionId] = entries;
+                    }
+
+                    entries.Add((key, debug));
+                }
+
+                uint? selectedRegionId = null;
+                if (_selectedPm4ObjectKey.HasValue
+                    && _pm4ObjectLookup.TryGetValue(_selectedPm4ObjectKey.Value, out Pm4OverlayObject? selectedObject))
+                {
+                    selectedRegionId = selectedObject.MshdRegionId;
+                }
+
+                List<Pm4VisibleRegionSummary> regions = objectsByRegion
+                    .Select(entry =>
+                    {
+                        Dictionary<byte, int> typeCounts = entry.Value
+                            .GroupBy(static regionEntry => regionEntry.debug.Ck24Type)
+                            .ToDictionary(static group => group.Key, static group => group.Count());
+                        int objectCount = entry.Value.Count;
+                        float averageHeight = objectCount > 0
+                            ? entry.Value.Average(static regionEntry => regionEntry.debug.Center.Z)
+                            : 0f;
+                        return new Pm4VisibleRegionSummary(
+                            entry.Key,
+                            objectCount,
+                            entry.Value.Select(static regionEntry => (regionEntry.key.tileX, regionEntry.key.tileY)).Distinct().Count(),
+                            entry.Value.Select(static regionEntry => regionEntry.debug.Ck24).Distinct().Count(),
+                            entry.Value.Select(static regionEntry => regionEntry.debug.LinkGroupObjectId).Distinct().Count(),
+                            averageHeight,
+                            selectedRegionId.HasValue && selectedRegionId.Value == entry.Key,
+                            BuildPm4VisibleTypeBuckets(typeCounts, maxTypeBucketsPerRegion));
+                    })
+                    .OrderByDescending(static entry => entry.ObjectCount)
+                    .ThenBy(static entry => entry.RegionId)
+                    .Take(maxRegions)
+                    .ToList();
+
+                return new Pm4VisibleOverlaySummaryInfo(
+                    visibleObjectCount,
+                    visibleTiles.Count,
+                    objectsByRegion.Count,
+                    selectedRegionId,
+                    regions);
+            }
+
+            public bool TryGetSelectedPm4RegionInfo(out Pm4SelectedObjectRegionInfo info, int maxPeers = 18, int maxTypeBuckets = 4)
+            {
+                info = default;
+                maxPeers = Math.Max(1, maxPeers);
+                maxTypeBuckets = Math.Max(1, maxTypeBuckets);
+
+                if (!_selectedPm4ObjectKey.HasValue
+                    || !_pm4ObjectLookup.TryGetValue(_selectedPm4ObjectKey.Value, out Pm4OverlayObject? selectedObject)
+                    || !TryGetPm4ObjectDebugInfo(_selectedPm4ObjectKey.Value, out Pm4ObjectDebugInfo selectedDebug))
+                {
+                    return false;
+                }
+
+                uint regionId = selectedObject.MshdRegionId;
+                var peers = new List<Pm4RegionPeerSummary>();
+                var typeCounts = new Dictionary<byte, int>();
+                var uniqueTiles = new HashSet<(int tileX, int tileY)>();
+                var uniqueCk24 = new HashSet<uint>();
+                var uniqueLinkGroups = new HashSet<uint>();
+                var uniqueMdos = new HashSet<uint>();
+                int sameCk24Count = 0;
+                int sameLinkGroupCount = 0;
+                int sameMdosCount = 0;
+                int totalSurfaceCount = 0;
+                float totalHeight = 0f;
+
+                foreach (((int tileX, int tileY, uint ck24, int objectPart) key, _, Pm4ObjectDebugInfo debug) in EnumerateVisiblePm4OverlayDebugObjects())
+                {
+                    if (debug.MshdRegionId != regionId)
+                        continue;
+
+                    uniqueTiles.Add((key.tileX, key.tileY));
+                    uniqueCk24.Add(debug.Ck24);
+                    uniqueLinkGroups.Add(debug.LinkGroupObjectId);
+                    uniqueMdos.Add(debug.DominantMdosIndex);
+                    totalSurfaceCount += debug.SurfaceCount;
+                    totalHeight += debug.Center.Z;
+                    if (typeCounts.TryGetValue(debug.Ck24Type, out int existingTypeCount))
+                        typeCounts[debug.Ck24Type] = existingTypeCount + 1;
+                    else
+                        typeCounts[debug.Ck24Type] = 1;
+
+                    bool sameCk24 = debug.Ck24 == selectedDebug.Ck24;
+                    bool sameLinkGroup = debug.LinkGroupObjectId == selectedDebug.LinkGroupObjectId;
+                    bool sameMdosIndex = debug.DominantMdosIndex == selectedDebug.DominantMdosIndex;
+                    if (sameCk24)
+                        sameCk24Count++;
+                    if (sameLinkGroup)
+                        sameLinkGroupCount++;
+                    if (sameMdosIndex)
+                        sameMdosCount++;
+
+                    peers.Add(new Pm4RegionPeerSummary(
+                        key,
+                        debug.Ck24Type,
+                        debug.Ck24ObjectId,
+                        debug.SurfaceCount,
+                        debug.LinkGroupObjectId,
+                        debug.DominantMdosIndex,
+                        debug.Center,
+                        key == _selectedPm4ObjectKey.Value,
+                        sameCk24,
+                        sameLinkGroup,
+                        sameMdosIndex));
+                }
+
+                if (peers.Count == 0)
+                    return false;
+
+                var selectedKey = _selectedPm4ObjectKey.Value;
+                IReadOnlyList<Pm4RegionPeerSummary> peerList = peers
+                    .OrderByDescending(static peer => peer.IsSelected)
+                    .ThenByDescending(static peer => peer.SameCk24)
+                    .ThenByDescending(static peer => peer.SameLinkGroup)
+                    .ThenByDescending(static peer => peer.SameMdosIndex)
+                    .ThenBy(peer => Math.Abs(peer.ObjectKey.tileX - selectedKey.tileX) + Math.Abs(peer.ObjectKey.tileY - selectedKey.tileY))
+                    .ThenBy(static peer => peer.ObjectKey.objectPart)
+                    .Take(maxPeers)
+                    .ToList();
+
+                info = new Pm4SelectedObjectRegionInfo(
+                    regionId,
+                    peers.Count,
+                    uniqueTiles.Count,
+                    uniqueCk24.Count,
+                    uniqueLinkGroups.Count,
+                    uniqueMdos.Count,
+                    sameCk24Count,
+                    sameLinkGroupCount,
+                    sameMdosCount,
+                    (float)totalSurfaceCount / peers.Count,
+                    totalHeight / peers.Count,
+                    BuildPm4VisibleTypeBuckets(typeCounts, maxTypeBuckets),
+                    peerList);
+                return true;
+            }
+
             private IEnumerable<((int tileX, int tileY) tileKey, Pm4OverlayObject obj)> EnumerateVisiblePm4OverlayObjects()
             {
                 foreach (KeyValuePair<(int tileX, int tileY), List<Pm4OverlayObject>> tileEntry in _pm4TileObjects)
@@ -10186,6 +10514,28 @@ public class WorldScene : ISceneRenderer
                             yield return (tileEntry.Key, obj);
                     }
                 }
+            }
+
+            private IEnumerable<((int tileX, int tileY, uint ck24, int objectPart) key, Pm4OverlayObject obj, Pm4ObjectDebugInfo debug)> EnumerateVisiblePm4OverlayDebugObjects()
+            {
+                foreach (((int tileX, int tileY) tileKey, Pm4OverlayObject obj) in EnumerateVisiblePm4OverlayObjects())
+                {
+                    var key = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
+                    if (TryGetPm4ObjectDebugInfo(key, out Pm4ObjectDebugInfo debug))
+                        yield return (key, obj, debug);
+                }
+            }
+
+            private static IReadOnlyList<Pm4VisibleTypeBucket> BuildPm4VisibleTypeBuckets(
+                IReadOnlyDictionary<byte, int> typeCounts,
+                int maxTypeBuckets)
+            {
+                return typeCounts
+                    .OrderByDescending(static entry => entry.Value)
+                    .ThenBy(static entry => entry.Key)
+                    .Take(Math.Max(1, maxTypeBuckets))
+                    .Select(static entry => new Pm4VisibleTypeBucket(entry.Key, entry.Value))
+                    .ToList();
             }
 
             private static uint GetPm4LegendValue(Pm4OverlayColorMode mode, Pm4OverlayObject obj)

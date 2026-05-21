@@ -1983,7 +1983,7 @@ void main() {
                     break;
             }
 
-            var converter = new M2ToMdxConverter();
+            var converter = new WoWMapConverter.Core.Converters.M2ToMdxConverter();
             return converter.ConvertToBytes(modelData, skinBytes, _buildVersion);
         }
         catch (Exception ex)

@@ -206,6 +206,9 @@ public partial class ViewerApp
             ImGui.SameLine();
             if (ImGui.Button("Export PM4 OBJ Set"))
                 ExportPm4ObjectsObjSet();
+            ImGui.SameLine();
+            if (ImGui.Button("Export PM4 LLM Bundle"))
+                ExportPm4LlmEvidenceBundle();
             return;
         }
 
@@ -247,7 +250,12 @@ public partial class ViewerApp
             ImGui.SameLine();
             if (ImGui.Button("Export PM4 OBJ Set"))
                 ExportPm4ObjectsObjSet();
+            ImGui.SameLine();
+            if (ImGui.Button("Export PM4 LLM Bundle"))
+                ExportPm4LlmEvidenceBundle();
         }
+
+        DrawSelectedPm4RegionSummary("WorkbenchSelectedRegion");
 
         if (ImGui.CollapsingHeader("Match Suggestions", ImGuiTreeNodeFlags.DefaultOpen))
             DrawPm4SelectedObjectMatchSuggestions("WorkbenchSelectedPm4", compact: false);
@@ -1893,6 +1901,9 @@ public partial class ViewerApp
         if (!string.IsNullOrWhiteSpace(legend.Description))
             ImGui.TextDisabled(legend.Description);
 
+        if (ImGui.Button($"Export PM4 LLM Bundle##{idSuffix}"))
+            ExportPm4LlmEvidenceBundle();
+
         if (legend.Entries.Count == 0)
         {
             ImGui.TextDisabled("No loaded PM4 objects for the current legend mode.");
@@ -1918,6 +1929,463 @@ public partial class ViewerApp
 
         if (legend.IsTruncated)
             ImGui.TextDisabled($"Showing {legend.Entries.Count} of {legend.TotalEntryCount} legend entries.");
+    }
+
+    private void DrawSelectedPm4RegionSummary(string idSuffix)
+    {
+        if (_worldScene == null || !_worldScene.TryGetSelectedPm4RegionInfo(out Pm4SelectedObjectRegionInfo regionInfo))
+            return;
+
+        if (!ImGui.CollapsingHeader($"Selected MSHD Region##{idSuffix}", ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        ImGui.TextDisabled("Visible peers from the current camera-window PM4 overlay that share the selected object's MSHD.Field04 region id.");
+        ImGui.TextDisabled($"Region {regionInfo.RegionId} | objects={regionInfo.VisibleObjectCount} tiles={regionInfo.VisibleTileCount} unique CK24={regionInfo.UniqueCk24Count} unique MSLK={regionInfo.UniqueLinkGroupCount} unique MDOS={regionInfo.UniqueMdosCount}");
+        ImGui.TextDisabled($"Same CK24={regionInfo.SameCk24Count} same MSLK={regionInfo.SameLinkGroupCount} same MDOS={regionInfo.SameMdosCount} avg surfaces={regionInfo.AverageSurfaceCount:F1} avg center Z={regionInfo.AverageCenterHeight:F1}");
+        ImGui.TextDisabled($"Type mix: {FormatPm4TypeBuckets(regionInfo.TypeBuckets)}");
+
+        if (ImGui.Button($"Collect Visible Region##{idSuffix}"))
+            AddPm4VisibleRegionToCollection(regionInfo.RegionId);
+
+        ImGui.SameLine();
+        if (ImGui.Button($"Export PM4 LLM Bundle##Region{idSuffix}"))
+            ExportPm4LlmEvidenceBundle();
+
+        if (ImGui.BeginChild($"Pm4RegionPeers##{idSuffix}", new Vector2(0f, 190f), true))
+        {
+            for (int index = 0; index < regionInfo.Peers.Count; index++)
+            {
+                Pm4RegionPeerSummary peer = regionInfo.Peers[index];
+                string label = $"{index + 1}. tile=({peer.ObjectKey.tileX},{peer.ObjectKey.tileY}) CK24=0x{peer.ObjectKey.ck24:X6} part={peer.ObjectKey.objectPart} type=0x{peer.Ck24Type:X2} surf={peer.SurfaceCount}";
+                if (peer.IsSelected)
+                    ImGui.TextColored(new Vector4(1f, 0.95f, 0.35f, 1f), $"{label}  [selected]");
+                else
+                    ImGui.TextUnformatted(label);
+
+                ImGui.TextDisabled(
+                    $"objId={peer.Ck24ObjectId} mslk=0x{peer.LinkGroupObjectId:X8} mdos={peer.DominantMdosIndex} center=({peer.Center.X:F1}, {peer.Center.Y:F1}, {peer.Center.Z:F1}) {FormatPm4PeerFlags(peer)}");
+
+                ImGui.PushID($"Pm4RegionPeer{idSuffix}_{index}");
+                if (!peer.IsSelected && ImGui.SmallButton("Select"))
+                    SelectPm4GraphPart(peer.ObjectKey, frameCamera: false);
+
+                if (!peer.IsSelected)
+                    ImGui.SameLine();
+
+                if (ImGui.SmallButton("Frame"))
+                    SelectPm4GraphPart(peer.ObjectKey, frameCamera: true);
+
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Collect"))
+                    TogglePm4ObjectCollectionMembership(peer.ObjectKey, reportStatus: true, removeIfPresent: false);
+
+                ImGui.PopID();
+                if (index + 1 < regionInfo.Peers.Count)
+                    ImGui.Separator();
+            }
+        }
+
+        ImGui.EndChild();
+    }
+
+    private int AddPm4VisibleRegionToCollection(uint regionId)
+    {
+        if (_worldScene == null)
+            return 0;
+
+        int added = AddPm4ObjectsToCollection(_worldScene.GetVisiblePm4ObjectsForRegion(regionId));
+        _statusMessage = added > 0
+            ? $"Added {added} visible PM4 parts from MSHD region {regionId} to the collection."
+            : $"All visible PM4 parts from MSHD region {regionId} were already in the collection.";
+        SyncPm4CollectionHighlight();
+        return added;
+    }
+
+    private void ExportPm4LlmEvidenceBundle()
+    {
+        if (_worldScene == null)
+            return;
+
+        Directory.CreateDirectory(ExportDir);
+        string? picked = ShowFolderDialogSTA(
+            "Choose a folder for the PM4 LLM evidence bundle",
+            ExportDir,
+            showNewFolderButton: true);
+
+        if (string.IsNullOrWhiteSpace(picked))
+            return;
+
+        try
+        {
+            string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? "map";
+            string bundleDirectory = Path.Combine(
+                picked,
+                $"pm4_llm_{SanitizeProjectPathSegment(mapName)}_{DateTime.Now:yyyyMMdd_HHmmss}");
+            Directory.CreateDirectory(bundleDirectory);
+
+            Pm4VisibleOverlaySummaryInfo visibleSummary = _worldScene.GetPm4VisibleOverlaySummary();
+            Pm4ObjectDebugInfo selectedDebugInfo = default;
+            bool hasSelectedObject = _worldScene.SelectedPm4ObjectKey.HasValue
+                && _worldScene.TryGetSelectedPm4ObjectDebugInfo(out selectedDebugInfo);
+            bool hasSelectedRegion = _worldScene.TryGetSelectedPm4RegionInfo(out Pm4SelectedObjectRegionInfo selectedRegionInfo);
+
+            string jsonPath = Path.Combine(bundleDirectory, "pm4_llm_bundle.json");
+            string markdownPath = Path.Combine(bundleDirectory, "pm4_llm_bundle.md");
+            string visibleRegionsSvgPath = Path.Combine(bundleDirectory, "pm4_visible_regions.svg");
+            string selectedRegionSvgPath = Path.Combine(bundleDirectory, "pm4_selected_region.svg");
+
+            string json = JsonSerializer.Serialize(
+                BuildJsonSafePm4LlmBundle(
+                    visibleSummary,
+                    hasSelectedObject ? selectedDebugInfo : null,
+                    hasSelectedRegion ? selectedRegionInfo : null),
+                new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(jsonPath, json, Encoding.UTF8);
+            File.WriteAllText(markdownPath, BuildPm4LlmBundleMarkdown(visibleSummary, hasSelectedObject ? selectedDebugInfo : null, hasSelectedRegion ? selectedRegionInfo : null), Encoding.UTF8);
+            File.WriteAllText(visibleRegionsSvgPath, BuildPm4VisibleRegionsSvg(visibleSummary), Encoding.UTF8);
+            if (hasSelectedRegion)
+                File.WriteAllText(selectedRegionSvgPath, BuildPm4SelectedRegionSvg(selectedRegionInfo), Encoding.UTF8);
+
+            _statusMessage = hasSelectedRegion
+                ? $"Exported PM4 LLM bundle to {bundleDirectory} (JSON, Markdown, visible-regions SVG, selected-region SVG)."
+                : $"Exported PM4 LLM bundle to {bundleDirectory} (JSON, Markdown, visible-regions SVG).";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"PM4 LLM bundle export failed: {ex.Message}";
+            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 LLM Bundle] Export failed: {ex}");
+        }
+    }
+
+    private object BuildJsonSafePm4LlmBundle(
+        Pm4VisibleOverlaySummaryInfo visibleSummary,
+        Pm4ObjectDebugInfo? selectedDebugInfo,
+        Pm4SelectedObjectRegionInfo? selectedRegionInfo)
+    {
+        Pm4ColorLegendInfo legend = _worldScene!.GetPm4ColorLegend(12);
+        string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? string.Empty;
+
+        return new
+        {
+            generatedAtUtc = DateTime.UtcNow,
+            mapName,
+            pm4Status = _worldScene.Pm4Status,
+            pm4VisibleObjectCount = _worldScene.Pm4VisibleObjectCount,
+            pm4ObjectCount = _worldScene.Pm4ObjectCount,
+            pm4LoadedFiles = _worldScene.Pm4LoadedFiles,
+            pm4TotalFiles = _worldScene.Pm4TotalFiles,
+            colorMode = _worldScene.Pm4ColorMode.ToString(),
+            colorModeLabel = GetPm4ColorModeLabel(_worldScene.Pm4ColorMode),
+            legend = new
+            {
+                description = legend.Description,
+                totalEntryCount = legend.TotalEntryCount,
+                shownEntryCount = legend.Entries.Count,
+                entries = legend.Entries.Select(entry => new
+                {
+                    label = entry.Label,
+                    objectCount = entry.ObjectCount,
+                    isSelected = entry.IsSelected
+                }).ToList()
+            },
+            visibleOverlay = new
+            {
+                objectCount = visibleSummary.VisibleObjectCount,
+                tileCount = visibleSummary.VisibleTileCount,
+                regionCount = visibleSummary.RegionCount,
+                selectedRegionId = visibleSummary.SelectedRegionId,
+                topRegions = visibleSummary.Regions.Select(region => new
+                {
+                    regionId = region.RegionId,
+                    objectCount = region.ObjectCount,
+                    tileCount = region.TileCount,
+                    uniqueCk24Count = region.UniqueCk24Count,
+                    uniqueLinkGroupCount = region.UniqueLinkGroupCount,
+                    averageCenterHeight = region.AverageCenterHeight,
+                    isSelectedRegion = region.IsSelectedRegion,
+                    typeBuckets = region.TypeBuckets.Select(static bucket => new
+                    {
+                        ck24Type = bucket.Ck24Type,
+                        objectCount = bucket.ObjectCount
+                    }).ToList()
+                }).ToList()
+            },
+            selectedObject = selectedDebugInfo.HasValue && _worldScene.SelectedPm4ObjectKey.HasValue
+                ? new
+                {
+                    tileX = _worldScene.SelectedPm4ObjectKey.Value.tileX,
+                    tileY = _worldScene.SelectedPm4ObjectKey.Value.tileY,
+                    ck24 = selectedDebugInfo.Value.Ck24,
+                    ck24Type = selectedDebugInfo.Value.Ck24Type,
+                    ck24ObjectId = selectedDebugInfo.Value.Ck24ObjectId,
+                    objectPartId = _worldScene.SelectedPm4ObjectKey.Value.objectPart,
+                    mshd = new
+                    {
+                        field00 = selectedDebugInfo.Value.MshdField00,
+                        regionId = selectedDebugInfo.Value.MshdRegionId,
+                        field08 = selectedDebugInfo.Value.MshdField08
+                    },
+                    linkGroupObjectId = selectedDebugInfo.Value.LinkGroupObjectId,
+                    dominantMdosIndex = selectedDebugInfo.Value.DominantMdosIndex,
+                    linkedPositionRefCount = selectedDebugInfo.Value.LinkedPositionRefCount,
+                    surfaceCount = selectedDebugInfo.Value.SurfaceCount,
+                    dominantGroupKey = selectedDebugInfo.Value.DominantGroupKey,
+                    dominantAttributeMask = selectedDebugInfo.Value.DominantAttributeMask,
+                    averageSurfaceHeight = JsonFiniteOrNull(selectedDebugInfo.Value.AverageSurfaceHeight),
+                    center = VectorToArray(selectedDebugInfo.Value.Center),
+                    boundsMin = VectorToArray(selectedDebugInfo.Value.BoundsMin),
+                    boundsMax = VectorToArray(selectedDebugInfo.Value.BoundsMax)
+                }
+                : null,
+            selectedRegion = selectedRegionInfo.HasValue
+                ? new
+                {
+                    regionId = selectedRegionInfo.Value.RegionId,
+                    visibleObjectCount = selectedRegionInfo.Value.VisibleObjectCount,
+                    visibleTileCount = selectedRegionInfo.Value.VisibleTileCount,
+                    uniqueCk24Count = selectedRegionInfo.Value.UniqueCk24Count,
+                    uniqueLinkGroupCount = selectedRegionInfo.Value.UniqueLinkGroupCount,
+                    uniqueMdosCount = selectedRegionInfo.Value.UniqueMdosCount,
+                    sameCk24Count = selectedRegionInfo.Value.SameCk24Count,
+                    sameLinkGroupCount = selectedRegionInfo.Value.SameLinkGroupCount,
+                    sameMdosCount = selectedRegionInfo.Value.SameMdosCount,
+                    averageSurfaceCount = selectedRegionInfo.Value.AverageSurfaceCount,
+                    averageCenterHeight = selectedRegionInfo.Value.AverageCenterHeight,
+                    typeBuckets = selectedRegionInfo.Value.TypeBuckets.Select(static bucket => new
+                    {
+                        ck24Type = bucket.Ck24Type,
+                        objectCount = bucket.ObjectCount
+                    }).ToList(),
+                    peers = selectedRegionInfo.Value.Peers.Select(peer => new
+                    {
+                        tileX = peer.ObjectKey.tileX,
+                        tileY = peer.ObjectKey.tileY,
+                        ck24 = peer.ObjectKey.ck24,
+                        objectPartId = peer.ObjectKey.objectPart,
+                        ck24Type = peer.Ck24Type,
+                        ck24ObjectId = peer.Ck24ObjectId,
+                        surfaceCount = peer.SurfaceCount,
+                        linkGroupObjectId = peer.LinkGroupObjectId,
+                        dominantMdosIndex = peer.DominantMdosIndex,
+                        center = VectorToArray(peer.Center),
+                        isSelected = peer.IsSelected,
+                        sameCk24 = peer.SameCk24,
+                        sameLinkGroup = peer.SameLinkGroup,
+                        sameMdosIndex = peer.SameMdosIndex
+                    }).ToList()
+                }
+                : null
+        };
+    }
+
+    private string BuildPm4LlmBundleMarkdown(
+        Pm4VisibleOverlaySummaryInfo visibleSummary,
+        Pm4ObjectDebugInfo? selectedDebugInfo,
+        Pm4SelectedObjectRegionInfo? selectedRegionInfo)
+    {
+        string mapName = _terrainManager?.MapName ?? _worldScene!.Terrain.MapName ?? "map";
+        var builder = new StringBuilder();
+        builder.AppendLine("# PM4 Visible Overlay LLM Bundle");
+        builder.AppendLine();
+        builder.AppendLine($"- Generated: `{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC`");
+        builder.AppendLine($"- Map: `{mapName}`");
+        builder.AppendLine($"- PM4 status: `{_worldScene!.Pm4Status}`");
+        builder.AppendLine($"- Color mode: `{_worldScene.Pm4ColorMode}` ({GetPm4ColorModeLabel(_worldScene.Pm4ColorMode)})");
+        builder.AppendLine($"- Visible overlay objects: `{visibleSummary.VisibleObjectCount}` across `{visibleSummary.VisibleTileCount}` visible tiles");
+        builder.AppendLine($"- Visible MSHD regions: `{visibleSummary.RegionCount}`");
+        builder.AppendLine();
+        builder.AppendLine("## Top Visible Regions");
+        builder.AppendLine();
+
+        foreach (Pm4VisibleRegionSummary region in visibleSummary.Regions)
+        {
+            string selectedSuffix = region.IsSelectedRegion ? " [selected region]" : string.Empty;
+            builder.AppendLine($"- Region `{region.RegionId}`: `{region.ObjectCount}` objects across `{region.TileCount}` tiles, `{region.UniqueCk24Count}` unique CK24, `{region.UniqueLinkGroupCount}` unique MSLK groups, avg center Z `{region.AverageCenterHeight:F1}`{selectedSuffix}. Types: {FormatPm4TypeBuckets(region.TypeBuckets)}");
+        }
+
+        if (selectedDebugInfo.HasValue && _worldScene.SelectedPm4ObjectKey.HasValue)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Selected Object");
+            builder.AppendLine();
+            builder.AppendLine($"- tile=(`{_worldScene.SelectedPm4ObjectKey.Value.tileX}`, `{_worldScene.SelectedPm4ObjectKey.Value.tileY}`) ck24=`0x{selectedDebugInfo.Value.Ck24:X6}` part=`{_worldScene.SelectedPm4ObjectKey.Value.objectPart}` type=`0x{selectedDebugInfo.Value.Ck24Type:X2}` objId=`{selectedDebugInfo.Value.Ck24ObjectId}`");
+            builder.AppendLine($"- MSHD: field00=`{selectedDebugInfo.Value.MshdField00}` region=`{selectedDebugInfo.Value.MshdRegionId}` field08=`{selectedDebugInfo.Value.MshdField08}`");
+            builder.AppendLine($"- MSLK group=`0x{selectedDebugInfo.Value.LinkGroupObjectId:X8}` MDOS=`{selectedDebugInfo.Value.DominantMdosIndex}` linked refs=`{selectedDebugInfo.Value.LinkedPositionRefCount}` surfaces=`{selectedDebugInfo.Value.SurfaceCount}`");
+            builder.AppendLine($"- center=(`{selectedDebugInfo.Value.Center.X:F1}`, `{selectedDebugInfo.Value.Center.Y:F1}`, `{selectedDebugInfo.Value.Center.Z:F1}`)");
+        }
+
+        if (selectedRegionInfo.HasValue)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Selected Region Peers");
+            builder.AppendLine();
+            builder.AppendLine($"- Region `{selectedRegionInfo.Value.RegionId}` contains `{selectedRegionInfo.Value.VisibleObjectCount}` visible PM4 parts across `{selectedRegionInfo.Value.VisibleTileCount}` tiles.");
+            builder.AppendLine($"- Same CK24 as selection: `{selectedRegionInfo.Value.SameCk24Count}`. Same MSLK group: `{selectedRegionInfo.Value.SameLinkGroupCount}`. Same MDOS index: `{selectedRegionInfo.Value.SameMdosCount}`.");
+            builder.AppendLine($"- Type mix: {FormatPm4TypeBuckets(selectedRegionInfo.Value.TypeBuckets)}");
+            builder.AppendLine();
+            foreach (Pm4RegionPeerSummary peer in selectedRegionInfo.Value.Peers)
+            {
+                builder.AppendLine($"- tile=(`{peer.ObjectKey.tileX}`, `{peer.ObjectKey.tileY}`) ck24=`0x{peer.ObjectKey.ck24:X6}` part=`{peer.ObjectKey.objectPart}` type=`0x{peer.Ck24Type:X2}` surf=`{peer.SurfaceCount}` center=(`{peer.Center.X:F1}`, `{peer.Center.Y:F1}`, `{peer.Center.Z:F1}`) {FormatPm4PeerFlags(peer)}");
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## Files");
+        builder.AppendLine();
+        builder.AppendLine("- `pm4_llm_bundle.json`: machine-readable summary of the visible overlay and current selection.");
+        builder.AppendLine("- `pm4_visible_regions.svg`: bar-chart style infographic for the top visible MSHD regions.");
+        if (selectedRegionInfo.HasValue)
+            builder.AppendLine("- `pm4_selected_region.svg`: selected-region peer sheet for quick visual review.");
+
+        return builder.ToString();
+    }
+
+    private string BuildPm4VisibleRegionsSvg(Pm4VisibleOverlaySummaryInfo visibleSummary)
+    {
+        int width = 1200;
+        int left = 240;
+        int top = 80;
+        int rowHeight = 32;
+        int chartWidth = 860;
+        int rowCount = Math.Max(1, visibleSummary.Regions.Count);
+        int height = top + 70 + (rowCount * rowHeight);
+        int maxCount = Math.Max(1, visibleSummary.Regions.Count > 0 ? visibleSummary.Regions.Max(static region => region.ObjectCount) : 1);
+        var builder = new StringBuilder();
+        builder.AppendLine($"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">""");
+        builder.AppendLine("""<rect width="100%" height="100%" fill="#10141a" />""");
+        builder.AppendLine("""<text x="32" y="38" fill="#f5f7fa" font-family="Consolas, 'Courier New', monospace" font-size="28">PM4 Visible Regions</text>""");
+        builder.AppendLine($"""<text x="32" y="64" fill="#aab6c3" font-family="Consolas, 'Courier New', monospace" font-size="16">visible objects={visibleSummary.VisibleObjectCount} tiles={visibleSummary.VisibleTileCount} regions={visibleSummary.RegionCount}</text>""");
+
+        for (int index = 0; index < visibleSummary.Regions.Count; index++)
+        {
+            Pm4VisibleRegionSummary region = visibleSummary.Regions[index];
+            int y = top + (index * rowHeight);
+            int barWidth = (int)MathF.Round(chartWidth * (region.ObjectCount / (float)maxCount));
+            string color = Pm4ColorToHex(Pm4ColorFromSeed(region.RegionId));
+            string labelColor = region.IsSelectedRegion ? "#ffe36a" : "#f5f7fa";
+            builder.AppendLine($"""<text x="32" y="{y + 20}" fill="{labelColor}" font-family="Consolas, 'Courier New', monospace" font-size="15">region {region.RegionId}</text>""");
+            builder.AppendLine($"""<rect x="{left}" y="{y}" width="{Math.Max(1, barWidth)}" height="18" fill="{color}" rx="4" ry="4" />""");
+            builder.AppendLine($"""<text x="{left + Math.Max(8, barWidth + 10)}" y="{y + 14}" fill="#d8e0e8" font-family="Consolas, 'Courier New', monospace" font-size="13">{EscapeSvgText($"{region.ObjectCount} objs | {region.TileCount} tiles | {FormatPm4TypeBuckets(region.TypeBuckets)}")}</text>""");
+        }
+
+        builder.AppendLine("</svg>");
+        return builder.ToString();
+    }
+
+    private string BuildPm4SelectedRegionSvg(Pm4SelectedObjectRegionInfo regionInfo)
+    {
+        int width = 1280;
+        int top = 92;
+        int rowHeight = 34;
+        int rowCount = Math.Max(1, regionInfo.Peers.Count);
+        int height = top + 80 + (rowCount * rowHeight);
+        string accent = Pm4ColorToHex(Pm4ColorFromSeed(regionInfo.RegionId));
+        var builder = new StringBuilder();
+        builder.AppendLine($"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">""");
+        builder.AppendLine("""<rect width="100%" height="100%" fill="#0f1318" />""");
+        builder.AppendLine($"""<text x="32" y="38" fill="#f5f7fa" font-family="Consolas, 'Courier New', monospace" font-size="28">Selected PM4 Region {regionInfo.RegionId}</text>""");
+        builder.AppendLine($"""<text x="32" y="64" fill="#aab6c3" font-family="Consolas, 'Courier New', monospace" font-size="16">visible objects={regionInfo.VisibleObjectCount} tiles={regionInfo.VisibleTileCount} sameCK24={regionInfo.SameCk24Count} sameMSLK={regionInfo.SameLinkGroupCount} sameMDOS={regionInfo.SameMdosCount}</text>""");
+        builder.AppendLine($"""<rect x="32" y="76" width="1216" height="2" fill="{accent}" />""");
+
+        for (int index = 0; index < regionInfo.Peers.Count; index++)
+        {
+            Pm4RegionPeerSummary peer = regionInfo.Peers[index];
+            int y = top + (index * rowHeight);
+            string rowFill = peer.IsSelected ? "#1e2b38" : "#151b23";
+            string textFill = peer.IsSelected ? "#ffe36a" : "#f5f7fa";
+            builder.AppendLine($"""<rect x="24" y="{y - 18}" width="1232" height="26" fill="{rowFill}" rx="4" ry="4" />""");
+            builder.AppendLine($"""<rect x="24" y="{y - 18}" width="6" height="26" fill="{accent}" rx="3" ry="3" />""");
+            builder.AppendLine($"""<text x="40" y="{y}" fill="{textFill}" font-family="Consolas, 'Courier New', monospace" font-size="14">{EscapeSvgText($"tile ({peer.ObjectKey.tileX},{peer.ObjectKey.tileY}) ck24 0x{peer.ObjectKey.ck24:X6} part {peer.ObjectKey.objectPart} type 0x{peer.Ck24Type:X2} surf {peer.SurfaceCount}")}</text>""");
+            builder.AppendLine($"""<text x="700" y="{y}" fill="#b8c4cf" font-family="Consolas, 'Courier New', monospace" font-size="13">{EscapeSvgText($"mslk 0x{peer.LinkGroupObjectId:X8} mdos {peer.DominantMdosIndex} center ({peer.Center.X:F1}, {peer.Center.Y:F1}, {peer.Center.Z:F1}) {FormatPm4PeerFlags(peer)}")}</text>""");
+        }
+
+        builder.AppendLine("</svg>");
+        return builder.ToString();
+    }
+
+    private static string FormatPm4TypeBuckets(IReadOnlyList<Pm4VisibleTypeBucket> buckets)
+    {
+        if (buckets.Count == 0)
+            return "none";
+
+        return string.Join(", ", buckets.Select(static bucket => $"0x{bucket.Ck24Type:X2} x{bucket.ObjectCount}"));
+    }
+
+    private static string FormatPm4PeerFlags(Pm4RegionPeerSummary peer)
+    {
+        var flags = new List<string>(4);
+        if (peer.IsSelected)
+            flags.Add("selected");
+        if (peer.SameCk24)
+            flags.Add("same-ck24");
+        if (peer.SameLinkGroup)
+            flags.Add("same-mslk");
+        if (peer.SameMdosIndex)
+            flags.Add("same-mdos");
+
+        return flags.Count == 0
+            ? "shared=none"
+            : $"shared={string.Join("/", flags)}";
+    }
+
+    private static Vector3 Pm4ColorFromSeed(uint seed)
+    {
+        uint golden = seed * 2654435761u;
+        float hue = (golden & 0x00FFFFFF) / 16777215f;
+        return Pm4HsvToRgb(hue, 0.75f, 0.95f);
+    }
+
+    private static Vector3 Pm4HsvToRgb(float h, float s, float v)
+    {
+        h = h - MathF.Floor(h);
+        float c = v * s;
+        float x = c * (1f - MathF.Abs((h * 6f) % 2f - 1f));
+        float m = v - c;
+
+        float r;
+        float g;
+        float b;
+        int sector = (int)(h * 6f);
+        switch (sector)
+        {
+            case 0:
+                r = c; g = x; b = 0f;
+                break;
+            case 1:
+                r = x; g = c; b = 0f;
+                break;
+            case 2:
+                r = 0f; g = c; b = x;
+                break;
+            case 3:
+                r = 0f; g = x; b = c;
+                break;
+            case 4:
+                r = x; g = 0f; b = c;
+                break;
+            default:
+                r = c; g = 0f; b = x;
+                break;
+        }
+
+        return new Vector3(r + m, g + m, b + m);
+    }
+
+    private static string Pm4ColorToHex(Vector3 color)
+    {
+        int r = (int)Math.Clamp(MathF.Round(color.X * 255f), 0f, 255f);
+        int g = (int)Math.Clamp(MathF.Round(color.Y * 255f), 0f, 255f);
+        int b = (int)Math.Clamp(MathF.Round(color.Z * 255f), 0f, 255f);
+        return $"#{r:X2}{g:X2}{b:X2}";
+    }
+
+    private static string EscapeSvgText(string value)
+    {
+        return value
+            .Replace("&", "&amp;", StringComparison.Ordinal)
+            .Replace("<", "&lt;", StringComparison.Ordinal)
+            .Replace(">", "&gt;", StringComparison.Ordinal)
+            .Replace("\"", "&quot;", StringComparison.Ordinal);
     }
 
     private void DrawSelectedPm4ObjectGraph(string idSuffix = "")
