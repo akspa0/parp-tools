@@ -90,8 +90,8 @@ V16 does not remain the design owner for future terrain-model complexity.
 
 ## Initial Implementation Order
 
-1. `v16_1_height`
-2. `v16_1_normal`
+1. `v16_1_normal`
+2. `v16_1_height`
 3. `v16_1_liquid`
 4. `v16_1_texcomp`
 5. `v16_1_holes`
@@ -99,8 +99,11 @@ V16 does not remain the design owner for future terrain-model complexity.
 
 This order is deliberate:
 
-- height is the primary terrain geometry signal
 - normals are the current fragile target that most needs isolation
+- the normal lane is the best first terrain signal for learning what the
+  minimap is really telling us about terrain shape
+- height can follow after those normal-lane findings sharpen the terrain-only
+  supervision strategy
 - liquids need type-aware interpretation, not just a broad mask
 - alpha belongs inside a dedicated MCLY/MCAL decomposition family
 - existing D1 work should be migrated into that family, not replaced blindly
@@ -138,18 +141,55 @@ What is real now:
 - independent per-family model hosts with no shared trainable weights
 - shared Zarr-backed dataset contract for V16.1 targets
 - shared object-mask-derived weighting for the first trainer set
+- trainer-side gradient accumulation for low-VRAM micro-batch training
 - stitched inference CLI that accepts per-target checkpoint paths and writes a
   V16.1 output Zarr store
 
 Focused proof already exists for:
 
+- normal-only 1-epoch CPU smoke:
+  - `wow-viewer/models/v16_1/normal/runs/smoke_normal_cpu/`
 - height-only 1-epoch CPU smoke:
   - `wow-viewer/models/v16_1/height/runs/smoke_height_cpu/`
+- normal-checkpoint stitched inference smoke:
+  - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_normal/3_3_5_12340.pred.zarr`
 - height-checkpoint stitched inference smoke:
   - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_height/3_3_5_12340.pred.zarr`
 
 The other target families are implemented but still need their own smoke-proof
 run roots.
+
+## Normal-Lane Loss Focus
+
+The first V16.1 normal trainer is not treated as a naive dense supervision
+problem.
+
+Its current loss mask intentionally combines:
+
+- `normal_mask`
+- object-filter-derived terrain weighting
+- `mddf_mask` / `modf_mask`
+- `liquid_mask`
+
+That means the normal trainer is explicitly pushed toward terrain-only signal
+instead of over-learning object silhouettes or liquid-covered areas where the
+minimap is less faithful to terrain normals.
+
+The current normal objective is a blend of:
+
+- angular alignment
+- vector agreement
+- normal-`z` stabilization
+
+The shared V16.1 trainer now also supports:
+
+- `--grad-accum-steps <N>`
+
+That makes `batch-size 1` or `2` usable on constrained VRAM while still
+reaching a larger effective optimization batch.
+
+This is a first-pass terrain-aware normal contract, not a final claim that the
+best loss shape is solved.
 
 ## Initial Liquid-Type Contract
 

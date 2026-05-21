@@ -14,26 +14,26 @@
   - record V16.1 as the next terrain-model lane
   - record that V16 remains the baseline/reference path
 
-## Phase 2: Height First
+## Phase 2: Normal First
 
 - [x] **2.1** Extract V16.1-safe trainer helpers from `train_v16.py`
   - keep shared utilities only
   - no shared model/loss contract
-- [x] **2.2** Create `data-harvester/scripts/train_v16_1_height.py`
-  - minimap -> height only
+- [x] **2.2** Create `data-harvester/scripts/train_v16_1_normal.py`
+  - minimap -> normals only
+  - include object/liquid-aware loss gating
   - dedicated checkpoints and validation artifacts
 - [x] **2.3** Run 1-epoch CPU smoke for `3_3_5_12340`
   - verify run root exists
   - verify best/last checkpoints exist
 
-## Phase 3: Normals Second
+## Phase 3: Height Follow-On
 
-- [x] **3.1** Create `data-harvester/scripts/train_v16_1_normal.py`
-  - minimap -> normals only
-  - use normal-mask-aware loss
-- [ ] **3.2** Run 1-epoch CPU smoke for `3_3_5_12340`
-  - verify normal-only validation panels
-- [ ] **3.3** Write a short comparison note versus the V16 normal head
+- [x] **3.1** Create `data-harvester/scripts/train_v16_1_height.py`
+  - minimap -> height only
+- [x] **3.2** Run 1-epoch CPU smoke for `3_3_5_12340`
+  - verify height-only validation panels
+- [ ] **3.3** Write a short note on what the normal lane teaches the height lane
 
 ## Phase 4: Liquid Family
 

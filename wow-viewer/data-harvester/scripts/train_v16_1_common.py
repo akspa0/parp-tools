@@ -64,6 +64,10 @@ def _weighted_l1(pred: torch.Tensor, target: torch.Tensor, weight: torch.Tensor)
     return _masked_mean((pred - target).abs(), weight)
 
 
+def _weighted_l2(pred: torch.Tensor, target: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    return _masked_mean((pred - target) ** 2, weight)
+
+
 def _resize_weight(weight: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
     if tuple(weight.shape[-2:]) == tuple(size):
         return weight
@@ -136,14 +140,39 @@ def _normal_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.de
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["normals"].to(device, non_blocking=True)
     normal_mask = batch["normal_mask"].to(device, non_blocking=True)
-    weight = batch["weight_257"].to(device, non_blocking=True)
+    object_weight = batch["weight_257"].to(device, non_blocking=True)
+    mddf_mask = batch["mddf_mask"].to(device, non_blocking=True)
+    modf_mask = batch["modf_mask"].to(device, non_blocking=True)
+    liquid_mask = batch["liquid_mask"].to(device, non_blocking=True)
     pred = model(inp)
     pred_n = F.normalize(pred, dim=1, eps=1e-6)
     target_n = F.normalize(target, dim=1, eps=1e-6)
     cosine = 1.0 - (pred_n * target_n).sum(dim=1, keepdim=True)
-    mask = normal_mask * weight
-    loss = _masked_mean(cosine, mask)
-    return loss, {"normal": float(loss.item())}, {"pred": pred_n, "target": target_n, "mask": mask}
+    liquid_mask_257 = _resize_weight(liquid_mask, target_n.shape[-2:])
+    object_presence = torch.maximum(mddf_mask, modf_mask)
+    liquid_weight = 1.0 - (0.85 * liquid_mask_257)
+    instance_weight = 1.0 - (0.75 * object_presence)
+    train_mask = normal_mask * object_weight * liquid_weight * instance_weight
+    vec_l1 = (pred_n - target_n).abs().mean(dim=1, keepdim=True)
+    nz_l2 = (pred_n[:, 2:3] - target_n[:, 2:3]) ** 2
+    loss_cos = _masked_mean(cosine, train_mask)
+    loss_vec = _masked_mean(vec_l1, train_mask)
+    loss_nz = _masked_mean(nz_l2, train_mask)
+    loss = loss_cos + (0.35 * loss_vec) + (0.15 * loss_nz)
+    return loss, {
+        "normal": float(loss.item()),
+        "normal_cos": float(loss_cos.item()),
+        "normal_vec": float(loss_vec.item()),
+        "normal_nz": float(loss_nz.item()),
+        "normal_mask_cov": float(train_mask.mean().item()),
+    }, {
+        "pred": pred_n,
+        "target": target_n,
+        "train_mask": train_mask,
+        "object_weight": object_weight,
+        "liquid_mask": liquid_mask_257,
+        "instance_weight": instance_weight,
+    }
 
 
 def _holes_loss(model: torch.nn.Module, batch: dict[str, Any], device: torch.device) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
@@ -222,7 +251,9 @@ def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
         ("input", batch["input"][0]),
         ("normal_gt", _normals_to_rgb(outputs["target"][0])),
         ("normal_pred", _normals_to_rgb(outputs["pred"][0])),
-        ("mask", outputs["mask"][0]),
+        ("train_mask", outputs["train_mask"][0]),
+        ("liquid_mask", outputs["liquid_mask"][0]),
+        ("object_weight", outputs["object_weight"][0]),
     ]
     _save_horizontal_panel(panels, out_path)
 
@@ -279,6 +310,7 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     p.add_argument("--dataset-dir", type=Path, default=_DATASET_ROOT)
     p.add_argument("--builds", nargs="+", default=["3_3_5_12340"])
     p.add_argument("--batch-size", type=int, default=8)
+    p.add_argument("--grad-accum-steps", type=int, default=1)
     p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--weight-decay", type=float, default=0.05)
@@ -303,6 +335,8 @@ def run_task(task_name: str) -> None:
         raise RuntimeError(f"Unknown V16.1 task: {task_name}")
     args = _parse_args(task_name)
     task = TASKS[task_name]
+    if args.grad_accum_steps < 1:
+        raise RuntimeError("--grad-accum-steps must be >= 1")
     _seed_all(args.seed)
     device = _resolve_device(args.device)
     run_name = args.run_name or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -346,6 +380,8 @@ def run_task(task_name: str) -> None:
         "dataset_dir": str(Path(args.dataset_dir)),
         "builds": list(args.builds),
         "batch_size": args.batch_size,
+        "grad_accum_steps": args.grad_accum_steps,
+        "effective_batch_size": args.batch_size * args.grad_accum_steps,
         "epochs": args.epochs,
         "lr": args.lr,
         "weight_decay": args.weight_decay,
@@ -357,26 +393,36 @@ def run_task(task_name: str) -> None:
     }
     (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
-    print(f"Task: {task_name}")
-    print(f"Device: {device}")
-    print(f"Run dir: {run_dir}")
-    print(f"Dataset: train={len(train_ds)} val={len(val_ds)}")
-    print(f"Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
+    print(f"Task: {task_name}", flush=True)
+    print(f"Device: {device}", flush=True)
+    print(f"Run dir: {run_dir}", flush=True)
+    print(f"Dataset: train={len(train_ds)} val={len(val_ds)}", flush=True)
+    print(
+        f"Batching: micro={args.batch_size} accum={args.grad_accum_steps} "
+        f"effective={args.batch_size * args.grad_accum_steps}",
+        flush=True,
+    )
+    print(f"Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}", flush=True)
 
     for epoch in range(start_epoch, args.epochs + 1):
         model.train()
         metric_sums: dict[str, float] = {}
         train_loss_sum = 0.0
+        optimizer_steps = 0
         t0 = time.perf_counter()
-        for batch in train_loader:
-            optimizer.zero_grad(set_to_none=True)
+        optimizer.zero_grad(set_to_none=True)
+        for batch_idx, batch in enumerate(train_loader, start=1):
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not args.no_amp)):
                 loss, metrics, _outputs = task.loss_fn(model, batch, device)
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            scaler.step(optimizer)
-            scaler.update()
+            scaler.scale(loss / args.grad_accum_steps).backward()
+            should_step = (batch_idx % args.grad_accum_steps == 0) or (batch_idx == len(train_loader))
+            if should_step:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+                optimizer_steps += 1
             train_loss_sum += float(loss.item())
             for key, value in metrics.items():
                 metric_sums[key] = metric_sums.get(key, 0.0) + float(value)
@@ -388,11 +434,16 @@ def run_task(task_name: str) -> None:
             "train_loss": train_loss_sum / n_train,
             "lr": optimizer.param_groups[0]["lr"],
             "elapsed_s": time.perf_counter() - t0,
+            "optimizer_steps": optimizer_steps,
         }
         for key, value in metric_sums.items():
             entry[f"train_{key}"] = value / n_train
 
-        print(f"Epoch {epoch:3d}/{args.epochs} | loss={entry['train_loss']:.4f} lr={entry['lr']:.2e} {entry['elapsed_s']:.1f}s")
+        print(
+            f"Epoch {epoch:3d}/{args.epochs} | loss={entry['train_loss']:.4f} "
+            f"lr={entry['lr']:.2e} opt_steps={optimizer_steps} {entry['elapsed_s']:.1f}s",
+            flush=True,
+        )
 
         if epoch % args.val_interval == 0 and len(val_loader) > 0:
             model.eval()
@@ -414,7 +465,7 @@ def run_task(task_name: str) -> None:
             entry["val_loss"] = val_loss_sum / n_val
             for key, value in val_metric_sums.items():
                 entry[f"val_{key}"] = value / n_val
-            print(f"        val | loss={entry['val_loss']:.4f}")
+            print(f"        val | loss={entry['val_loss']:.4f}", flush=True)
 
             if preview_batch is not None and preview_outputs is not None and args.val_preview_interval > 0 and epoch % args.val_preview_interval == 0:
                 task.save_preview(preview_batch, preview_outputs, val_dir / f"epoch_{epoch:04d}.png")
@@ -461,4 +512,4 @@ def run_task(task_name: str) -> None:
         },
         ckpt_dir / f"v16_1_{task_name}_final.pt",
     )
-    print(f"Done. Run dir: {run_dir}")
+    print(f"Done. Run dir: {run_dir}", flush=True)

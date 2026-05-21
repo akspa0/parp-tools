@@ -110,10 +110,29 @@
   - the texture-decomposition family now includes recomposition validation
     output in the initial implementation
 - Focused V16.1 proof now exists:
+  - 1-epoch CPU normal smoke run:
+    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_cpu/`
   - 1-epoch CPU height smoke run:
     - `wow-viewer/models/v16_1/height/runs/smoke_height_cpu/`
+  - stitched inference smoke using the normal checkpoint:
+    - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_normal/3_3_5_12340.pred.zarr`
   - stitched inference smoke using the height checkpoint:
     - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_height/3_3_5_12340.pred.zarr`
+- The V16.1 normal trainer now uses terrain-aware loss gating:
+  - `normal_mask`
+  - object-filter-derived terrain weights
+  - `mddf_mask` / `modf_mask`
+  - `liquid_mask`
+  - blended objective: angular alignment + vector agreement + `z` stabilization
+- The shared V16.1 trainer now has real gradient accumulation:
+  - CLI flag: `--grad-accum-steps`
+  - trainer prints now flush immediately instead of hiding early startup
+  - focused proof run:
+    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_accum_cpu/`
+    - micro-batch `1`, accumulation `4`, effective batch `4`, `opt_steps=1`
+- V16.1 direction has shifted from height-first to normal-first for terrain
+  signal learning, with height follow-on meant to absorb what the normal lane
+  teaches about minimap-to-terrain supervision.
 - The next architecture lane is now named V16.1:
   - separate `minimap -> target-family` trainers
   - no shared trainable weights across height / normals / holes / liquids / texture decomposition
@@ -148,7 +167,7 @@
   - `gpu-duty-cycle 100`
 - WL* partial chunk-fill semantics in the loader / trainer.
 - V16.1 spec pack and continuity routing for the dense-correlation model family.
-- V16.1 normal, liquid, texcomp, and holes smoke proof.
+- V16.1 liquid, texcomp, and holes smoke proof.
 - Full stitched multi-family output proof into one `.pred.zarr` bundle.
 - Object segmentation Model A.
 - Global asset vocabulary for instance/asset follow-up work.
@@ -167,7 +186,6 @@
 
 ## Not Yet
 - Completed / running proof for a production-oriented V16 training run with epoch rotation is still pending final training outcomes.
-- V16.1 normal trainer smoke proof.
 - V16.1 liquid footprint/type trainer smoke proof.
 - V16.1 texture decomposition/recomposition trainer smoke proof.
 - V16.1 holes trainer smoke proof.

@@ -233,6 +233,9 @@ writes a single combined output bundle.
 - **FR-006**: Each V16.1 trainer MUST be runnable independently against the
   existing V16 Zarr dataset contract. No new corpus format is allowed for the
   initial split.
+- **FR-006B**: Each V16.1 trainer MUST support gradient accumulation so
+  low-VRAM micro-batches can still emulate a larger effective optimization
+  batch without relying on WDDM/shared-memory spill.
 - **FR-006A**: V16.1 MUST explicitly build dense minimap-to-signal correlation
   models using the richer supervision already present in the V16 Zarr dataset,
   then link those per-family outputs together into assembled terrain outputs.
@@ -305,13 +308,14 @@ writes a single combined output bundle.
 ### Measurable Outcomes
 
 - **SC-001**: Dedicated scripts exist for `train_v16_1_height.py` and
-  `train_v16_1_normal.py`; the height trainer already completes a 1-epoch CPU
-  smoke run and the normal trainer still needs its own smoke proof.
+  `train_v16_1_normal.py`; both now complete 1-epoch CPU smoke runs.
 - **SC-002**: Dedicated scripts exist for `holes`, `liquid`, and texture
   decomposition, even if some start as thin wrappers around shared training
   utilities.
 - **SC-003**: Each target family writes checkpoints under its own run root
   without mixing metrics from unrelated targets.
+- **SC-003A**: The shared trainer supports `--grad-accum-steps`, and a
+  micro-batch `1` smoke run with accumulation completes.
 - **SC-004**: The liquid trainer emits both footprint and liquid-type evidence.
 - **SC-005**: The texture-decomposition trainer emits both decomposition outputs
   and a recomposed review image.
@@ -340,8 +344,9 @@ writes a single combined output bundle.
 
 ## Initial Implementation Direction
 
-1. Start with `height` as the first V16.1 production slice.
-2. Land `normal` second so the current failure mode is tested directly.
+1. Start with `normal` as the first V16.1 terrain-signal proof slice.
+2. Land `height` next so the height lane can absorb what the normal lane
+   teaches about minimap-to-terrain supervision.
 3. Land `liquid` as a dedicated footprint + type family.
 4. Land texture decomposition/recomposition as the dedicated `MCLY/MCAL`
    trainer.

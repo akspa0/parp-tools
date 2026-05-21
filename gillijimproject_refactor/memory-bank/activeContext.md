@@ -26,12 +26,26 @@
   - `train_v16_1_texcomp.py`
   - `infer_v16_1.py`
 - Focused proof that is already real:
+  - normal-only CPU smoke run:
+    - `wow-viewer/models/v16_1/normal/runs/smoke_normal_cpu/`
   - height-only CPU smoke run:
     - `wow-viewer/models/v16_1/height/runs/smoke_height_cpu/`
+  - stitched inference smoke from the normal checkpoint:
+    - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_normal/3_3_5_12340.pred.zarr`
   - stitched inference smoke from the height checkpoint:
     - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_height/3_3_5_12340.pred.zarr`
 - Current V16.1 liquid typing is a coarse `16x16` five-class grid derived from
   `mcnk_flags_16`: `none`, `water`, `ocean`, `magma`, `slime`.
+- Current V16.1 normal-loss focus now explicitly combines:
+  - `normal_mask`
+  - object-filter-derived terrain weighting
+  - `mddf_mask` / `modf_mask`
+  - `liquid_mask`
+- The shared V16.1 trainer now has real gradient accumulation through
+  `--grad-accum-steps`; this is the intended path for the 4070 Ti SUPER instead
+  of pretending large micro-batches fit in VRAM.
+- Current V16.1 direction is to treat normals as the first terrain-signal proof
+  lane and let that inform later height-lane shaping.
 - Canonical short docs were rewritten and should now be the first read for this lane:
   - `wow-viewer/README.md`
   - `wow-viewer/data-harvester/README.md`
@@ -161,8 +175,12 @@
   - basic gate dropped `196` obviously low-signal flat train tiles from the `3_3_5_12340` smoke candidate pool (`4621 -> 4425`)
 
 ## Next Likely Slice
-- Run smoke proof for V16.1 normal, liquid, texcomp, and holes trainers using
-  the current V16 corpus as the dataset contract.
+- Run smoke proof for V16.1 liquid, texcomp, and holes trainers using the
+  current V16 corpus as the dataset contract.
+- Re-launch the first real normal run with `batch-size 1` or `2` plus
+  accumulation instead of high micro-batch counts that trigger WDDM offload.
+- Write the short note on what the normal lane teaches the height lane, then
+  tighten the height loss around that terrain-only framing.
 - Tighten the stitched-output contract so the final V16.1 `.pred.zarr` bundle
   consistently carries all per-family signals plus provenance.
 - Reuse the existing D1 tileset/decomposition lane as the starting point for
