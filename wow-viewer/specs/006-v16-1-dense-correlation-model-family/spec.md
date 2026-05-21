@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-21
 
-**Status**: Draft
+**Status**: In Progress
 
 **Input**: User description: "rename this to v16.1, we're still basing it on v16 heavily, it just needs the sledgehammer approach to build a dense correlation network between minimaps and other data we have in the Zarr dataset, and then we link it all together to build the resulting output signals."
 
@@ -49,6 +49,35 @@ The first-class V16.1 model surfaces are:
 - minimap -> holes
 - minimap -> liquid presence / placement / type
 - minimap -> MCLY/MCAL decomposition + recomposition
+
+## Implemented So Far
+
+The first implementation slice is now landed under `wow-viewer/data-harvester/`:
+
+- dataset + shared target contract:
+  - `src/harvester/v16_1_dataset.py`
+- independent per-family model hosts:
+  - `src/harvester/v16_1_models.py`
+- shared non-weight trainer utility surface:
+  - `scripts/train_v16_1_common.py`
+- target-family entrypoints:
+  - `scripts/train_v16_1_height.py`
+  - `scripts/train_v16_1_normal.py`
+  - `scripts/train_v16_1_holes.py`
+  - `scripts/train_v16_1_liquid.py`
+  - `scripts/train_v16_1_texcomp.py`
+- stitched inference entrypoint:
+  - `scripts/infer_v16_1.py`
+
+Focused proof already exists for:
+
+- 1-epoch CPU height smoke:
+  - `wow-viewer/models/v16_1/height/runs/smoke_height_cpu/`
+- stitched inference smoke from the height checkpoint into an output Zarr store:
+  - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_height/3_3_5_12340.pred.zarr`
+
+Normal, holes, liquid, and texture-decomposition trainers are implemented but do
+not yet have dedicated smoke-proof run roots.
 
 ## User Scenarios & Testing
 
@@ -217,6 +246,9 @@ writes a single combined output bundle.
   type, and MUST expose type-aware validation artifacts.
 - **FR-011**: The liquid trainer MUST treat liquid type as a first-class output
   surface, not as a comment derived only after inference.
+- **FR-011A**: The initial liquid-type contract MAY start as a coarse `16x16`
+  class grid derived from `mcnk_flags_16`, with the first class set defined as:
+  `0=none`, `1=water`, `2=ocean`, `3=magma`, `4=slime`.
 - **FR-012**: The texture-decomposition trainer MUST jointly predict MCLY
   texture IDs and MCAL alpha in one dedicated family and MUST validate via
   recomposition back toward the minimap.
@@ -273,7 +305,8 @@ writes a single combined output bundle.
 ### Measurable Outcomes
 
 - **SC-001**: Dedicated scripts exist for `train_v16_1_height.py` and
-  `train_v16_1_normal.py`, and both complete 1-epoch CPU smoke runs.
+  `train_v16_1_normal.py`; the height trainer already completes a 1-epoch CPU
+  smoke run and the normal trainer still needs its own smoke proof.
 - **SC-002**: Dedicated scripts exist for `holes`, `liquid`, and texture
   decomposition, even if some start as thin wrappers around shared training
   utilities.
@@ -283,7 +316,8 @@ writes a single combined output bundle.
 - **SC-005**: The texture-decomposition trainer emits both decomposition outputs
   and a recomposed review image.
 - **SC-006**: A stitched-inference contract exists that can combine multiple
-  V16.1 checkpoint outputs into one prediction bundle.
+  V16.1 checkpoint outputs into one prediction bundle, and the first partial
+  height-only smoke write is proven.
 - **SC-007**: Future validation review can answer "which target failed?"
   without reading a multitask overview panel.
 

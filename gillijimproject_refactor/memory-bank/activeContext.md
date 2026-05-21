@@ -15,6 +15,23 @@
   - shared object-mask loss gating stays available across appropriate trainers
   - linked together into resulting terrain outputs after per-family prediction
 - V16 stays as the baseline/reference trainer until V16.1 lands smoke proof.
+- The first V16.1 implementation slice is now landed in code:
+  - `v16_1_dataset.py`
+  - `v16_1_models.py`
+  - `train_v16_1_common.py`
+  - `train_v16_1_height.py`
+  - `train_v16_1_normal.py`
+  - `train_v16_1_holes.py`
+  - `train_v16_1_liquid.py`
+  - `train_v16_1_texcomp.py`
+  - `infer_v16_1.py`
+- Focused proof that is already real:
+  - height-only CPU smoke run:
+    - `wow-viewer/models/v16_1/height/runs/smoke_height_cpu/`
+  - stitched inference smoke from the height checkpoint:
+    - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_height/3_3_5_12340.pred.zarr`
+- Current V16.1 liquid typing is a coarse `16x16` five-class grid derived from
+  `mcnk_flags_16`: `none`, `water`, `ocean`, `magma`, `slime`.
 - Canonical short docs were rewritten and should now be the first read for this lane:
   - `wow-viewer/README.md`
   - `wow-viewer/data-harvester/README.md`
@@ -144,10 +161,10 @@
   - basic gate dropped `196` obviously low-signal flat train tiles from the `3_3_5_12340` smoke candidate pool (`4621 -> 4425`)
 
 ## Next Likely Slice
-- Land V16.1 height first, then V16.1 normals, using the current V16 corpus as the
-  dataset contract.
-- Land V16.1 liquid footprint/type and V16.1 texture decomposition soon after the
-  first two trainers.
+- Run smoke proof for V16.1 normal, liquid, texcomp, and holes trainers using
+  the current V16 corpus as the dataset contract.
+- Tighten the stitched-output contract so the final V16.1 `.pred.zarr` bundle
+  consistently carries all per-family signals plus provenance.
 - Reuse the existing D1 tileset/decomposition lane as the starting point for
   V16.1 texture decomposition instead of redesigning it from scratch.
 - Treat `v16_full_corpus_epoch_rotation*` as baseline evidence, not as the main

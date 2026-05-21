@@ -93,6 +93,28 @@
   - data-harvester README for operational commands
   - V16 spec for dataset / trainer / inference contract
 - The next architecture lane is now named V16.1:
+- The first V16.1 implementation slice is now landed:
+  - `src/harvester/v16_1_dataset.py`
+  - `src/harvester/v16_1_models.py`
+  - `scripts/train_v16_1_common.py`
+  - `scripts/train_v16_1_height.py`
+  - `scripts/train_v16_1_normal.py`
+  - `scripts/train_v16_1_holes.py`
+  - `scripts/train_v16_1_liquid.py`
+  - `scripts/train_v16_1_texcomp.py`
+  - `scripts/infer_v16_1.py`
+  - trainer CLI now supports bounded smoke caps through
+    `--max-train-samples` / `--max-val-samples`
+  - `V161Dataset` now exposes shared object-loss weights plus the first coarse
+    liquid-type labels from `mcnk_flags_16`
+  - the texture-decomposition family now includes recomposition validation
+    output in the initial implementation
+- Focused V16.1 proof now exists:
+  - 1-epoch CPU height smoke run:
+    - `wow-viewer/models/v16_1/height/runs/smoke_height_cpu/`
+  - stitched inference smoke using the height checkpoint:
+    - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_height/3_3_5_12340.pred.zarr`
+- The next architecture lane is now named V16.1:
   - separate `minimap -> target-family` trainers
   - no shared trainable weights across height / normals / holes / liquids / texture decomposition
   - liquids become footprint + type, not only a soft mask
@@ -126,8 +148,8 @@
   - `gpu-duty-cycle 100`
 - WL* partial chunk-fill semantics in the loader / trainer.
 - V16.1 spec pack and continuity routing for the dense-correlation model family.
-- V16.1 liquid-type + texture-decomposition direction is now part of that spec
-  pack.
+- V16.1 normal, liquid, texcomp, and holes smoke proof.
+- Full stitched multi-family output proof into one `.pred.zarr` bundle.
 - Object segmentation Model A.
 - Global asset vocabulary for instance/asset follow-up work.
 - PM4 cross-reference / object mapping follow-up.
@@ -145,10 +167,9 @@
 
 ## Not Yet
 - Completed / running proof for a production-oriented V16 training run with epoch rotation is still pending final training outcomes.
-- V16.1 height trainer implementation and smoke proof.
-- V16.1 normal trainer implementation and smoke proof.
-- V16.1 liquid footprint/type trainer implementation and smoke proof.
-- V16.1 texture decomposition/recomposition trainer implementation and smoke
-  proof.
+- V16.1 normal trainer smoke proof.
+- V16.1 liquid footprint/type trainer smoke proof.
+- V16.1 texture decomposition/recomposition trainer smoke proof.
+- V16.1 holes trainer smoke proof.
 - Asset-attribute model / PM4 cross-ref workflow.
 - Broader chunk-for-chunk terrain conversion closure.

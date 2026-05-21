@@ -117,6 +117,60 @@ That means:
 - swapping a better decomposition checkpoint should not touch height/liquids
 - per-target regressions should be visible and reversible independently
 
+## Implemented Surface
+
+The first real V16.1 code slice is now landed in `wow-viewer/data-harvester/`.
+
+Implemented modules:
+
+- `src/harvester/v16_1_dataset.py`
+- `src/harvester/v16_1_models.py`
+- `scripts/train_v16_1_common.py`
+- `scripts/train_v16_1_height.py`
+- `scripts/train_v16_1_normal.py`
+- `scripts/train_v16_1_holes.py`
+- `scripts/train_v16_1_liquid.py`
+- `scripts/train_v16_1_texcomp.py`
+- `scripts/infer_v16_1.py`
+
+What is real now:
+
+- independent per-family model hosts with no shared trainable weights
+- shared Zarr-backed dataset contract for V16.1 targets
+- shared object-mask-derived weighting for the first trainer set
+- stitched inference CLI that accepts per-target checkpoint paths and writes a
+  V16.1 output Zarr store
+
+Focused proof already exists for:
+
+- height-only 1-epoch CPU smoke:
+  - `wow-viewer/models/v16_1/height/runs/smoke_height_cpu/`
+- height-checkpoint stitched inference smoke:
+  - `wow-viewer/output/datasets/v16_1_inference/smoke_infer_height/3_3_5_12340.pred.zarr`
+
+The other target families are implemented but still need their own smoke-proof
+run roots.
+
+## Initial Liquid-Type Contract
+
+The first liquid-type label surface is intentionally coarse and uses the
+existing V16 dataset truth that is already available at loader time.
+
+Current class set:
+
+- `0 = none`
+- `1 = water`
+- `2 = ocean`
+- `3 = magma`
+- `4 = slime`
+
+Current source:
+
+- coarse `16x16` labels derived from `mcnk_flags_16`
+
+This is a first-pass supervision contract for minimap correlation and placement
+behavior, not a claim that the final liquid-type surface is finished.
+
 ## Shared Loss Gating
 
 Object masks stay important in V16.1.
@@ -170,4 +224,5 @@ The first real proof threshold is:
 2. normal-only trainer smoke run
 3. liquid footprint/type trainer smoke run
 4. texture decomposition/recomposition trainer smoke run
-5. separate checkpoints and separate validation artifacts for all of them
+5. holes trainer smoke run
+6. separate checkpoints and separate validation artifacts for all of them

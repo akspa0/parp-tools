@@ -20,7 +20,7 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 from PIL import Image  # noqa: E402
-from torch.utils.data import DataLoader  # noqa: E402
+from torch.utils.data import DataLoader, Subset  # noqa: E402
 
 from harvester.v16_1_dataset import V161Dataset  # noqa: E402
 from harvester.v16_1_models import (  # noqa: E402
@@ -286,6 +286,8 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     p.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--val-fraction", type=float, default=0.1)
+    p.add_argument("--max-train-samples", type=int, default=0)
+    p.add_argument("--max-val-samples", type=int, default=0)
     p.add_argument("--val-interval", type=int, default=1)
     p.add_argument("--val-preview-interval", type=int, default=5)
     p.add_argument("--run-name", type=str, default=None)
@@ -312,6 +314,10 @@ def run_task(task_name: str) -> None:
 
     train_ds = V161Dataset(args.dataset_dir, builds=args.builds, split="train", val_fraction=args.val_fraction, seed=args.seed, augment=not args.no_augment)
     val_ds = V161Dataset(args.dataset_dir, builds=args.builds, split="val", val_fraction=args.val_fraction, seed=args.seed, augment=False)
+    if args.max_train_samples > 0:
+        train_ds = Subset(train_ds, range(min(args.max_train_samples, len(train_ds))))
+    if args.max_val_samples > 0:
+        val_ds = Subset(val_ds, range(min(args.max_val_samples, len(val_ds))))
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=(device.type == "cuda"))
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=(device.type == "cuda"))
 
@@ -345,6 +351,8 @@ def run_task(task_name: str) -> None:
         "weight_decay": args.weight_decay,
         "seed": args.seed,
         "val_fraction": args.val_fraction,
+        "max_train_samples": args.max_train_samples,
+        "max_val_samples": args.max_val_samples,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
@@ -352,6 +360,7 @@ def run_task(task_name: str) -> None:
     print(f"Task: {task_name}")
     print(f"Device: {device}")
     print(f"Run dir: {run_dir}")
+    print(f"Dataset: train={len(train_ds)} val={len(val_ds)}")
     print(f"Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
     for epoch in range(start_epoch, args.epochs + 1):
