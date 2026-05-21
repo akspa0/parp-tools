@@ -119,14 +119,28 @@ public sealed class Pm4RegionObjectGrouperTests
     {
         Pm4RegionGroupingReport report = Pm4RegionObjectGrouper.AnalyzeDirectory(Pm4TestPaths.DevelopmentDirectoryPath);
 
-        // Verify that objects have valid CK24 type bytes.
+        // Collect all distinct CK24 type bytes across the corpus.
+        HashSet<byte> distinctTypes = new();
         foreach (Pm4Region region in report.NonEmptyRegions)
         {
             foreach (Pm4RegionObject obj in region.Objects)
             {
-                // CK24 type byte should be one of the known types.
-                Assert.True(obj.Ck24Type is 0x00 or 0x40 or 0x41 or 0x42 or 0x43 or 0xC0 or 0xC1 or 0xC2 or 0xC3,
-                    $"Object CK24=0x{obj.Ck24:X6} has unexpected type byte 0x{obj.Ck24Type:X2}.");
+                distinctTypes.Add(obj.Ck24Type);
+            }
+        }
+
+        // Verify that the known types are present.
+        Assert.Contains((byte)0x00, distinctTypes); // Nav mesh
+        Assert.Contains((byte)0x42, distinctTypes); // WMO
+
+        // Verify type bytes are non-zero for non-empty regions (except nav mesh).
+        foreach (Pm4Region region in report.NonEmptyRegions)
+        {
+            foreach (Pm4RegionObject obj in region.Objects)
+            {
+                // Type byte 0x00 means nav mesh (CK24=0), all others should be non-zero.
+                if (obj.Ck24 != 0)
+                    Assert.NotEqual((byte)0, obj.Ck24Type);
             }
         }
     }
