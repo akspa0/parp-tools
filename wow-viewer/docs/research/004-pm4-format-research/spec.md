@@ -138,7 +138,7 @@ Plus: any unknown/undecoded trailing chunks found in specific files.
 | Offset | Field | Dev Corpus Value | Status |
 |--------|-------|-----------------|--------|
 | 0x00 | Field00 | Non-zero, varies | **Unknown** — correlates weakly with MSUR count but no exact match |
-| 0x04 | Field04 | 1 (constant) | **Unknown** — possibly version or flag |
+| 0x04 | Field04 | **227 distinct values; =1 only on empty tiles** | **Partial** — REGION ID. Clusters in spatially adjacent tiles. 13 tiles share F04=3262 across two tile clusters. Does not encode a per-tile count (surface counts vary 11-6575 within same F04). |
 | 0x08 | Field08 | Non-zero, varies | **Unknown** — often equals Field00 |
 | 0x0C | Field0C | 0 | **Unknown** — zero across all 616 files |
 | 0x10 | Field10 | 0 | **Unknown** — zero across all 616 files |
@@ -148,8 +148,9 @@ Plus: any unknown/undecoded trailing chunks found in specific files.
 
 **Research questions**:
 1. Are fields 0x0C-0x1C reserved for future use, or do they encode something only populated in non-development builds?
-2. Does Field00/Field08 encode total surface count, total vertex count, or a memory layout hint?
-3. Is Field04 always 1 across the entire WoW client corpus, or only in development?
+2. Does Field00/Field08 encode a version, checksum, or memory layout hint? Both favor 534 as dominant value but differ in ~72% of tiles.
+3. **BREAKTHROUGH (2026-05-21)**: Field04 is a REGION ID. Clusters in adjacent tiles. =1 only on empty tiles. Can Field04 be used as the root grouping key for CK24 object decomposition?
+4. What does Field04=3262 mean when it appears across two disconnected tile regions (35_42-36_45 and 45_46-47_51)? Same scene type in different locations?
 
 ### 4.3 MSVT (Mesh Vertices)
 
@@ -185,7 +186,7 @@ Plus: any unknown/undecoded trailing chunks found in specific files.
 | 0x04-0x0F | Normal | **Verified** | True surface normal (validated on 518k surfaces) |
 | 0x10 | Height | **Verified** | Signed plane-distance term |
 | 0x14 | MsviFirstIndex | **Verified** | Start index into MSVI |
-| 0x18 | MdosIndex | **Partial** | Index into MSCN; cross-reference with MDOS not fully validated |
+| 0x18 | _0x18 (MscnIndex) | **Verified** | Index into MSCN (scene nodes). Previously misnamed `MdosIndex`. Renamed 2026-05-20. |
 | 0x1C | PackedParams | **Partial** | CK24, CK24Type, CK24ObjectId decoded; raw field meaning open |
 
 ### 4.6 MSPV (Path Vertices)
@@ -326,6 +327,7 @@ Plus: any unknown/undecoded trailing chunks found in specific files.
 
 PM4 is a **compressed server-side pathfinding dataset** from ~2010. The format encodes a navigation graph in which:
 
+- **MSHD.Field04** is a scene-division region key — tiles in the same scene region share the same Field04 value. This is the missing root grouping layer.
 - **MSVT + MSVI + MSUR** define collision mesh surfaces (the polygons that define walkable and non-walkable areas)
 - **MSCN** contains the centroid of each MSUR surface — these are the **navigation graph nodes**
 - **MSLK** is the **edge catalog** — each entry links a surface (RefIndex → MSUR) to path geometry (MspiFirstIndex → MSPI → MSPV) with metadata (TypeFlags, Subtype) describing the edge type

@@ -170,8 +170,8 @@ Our code uses a more general axis convention detection system (`DetectAxisConven
 
 ## Recommended Actions
 
-1. **Immediate**: Rename `MdosIndex` → `MscnIndex` in `Pm4MsurEntry` and all downstream code. This is a correctness issue, not just style.
-2. **Immediate**: Add `// wowdev.wiki: _0x18` comments to the renamed field to preserve the wiki mapping.
+1. **DONE**: Rename `MdosIndex` → `MscnIndex` in `Pm4MsurEntry` and all downstream code. Applied 2026-05-20.
+2. **DONE**: Add `// wowdev.wiki: _0x18` comments to the renamed field.
 3. **Short-term**: Add `// wowdev.wiki: _0x04` / `// wowdev.wiki: _0x00` etc. comments to all fields where we've invented names.
 4. **Short-term**: Audit whether the MSVT YXZ formula from wowdev.wiki matches our `DetectAxisConventionBySurfaceNormals()` output.
 5. **Document**: This drift analysis should be part of the PM4 research output to prevent future hallucination hardening.

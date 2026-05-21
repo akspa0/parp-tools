@@ -44,14 +44,14 @@
 32 bytes total, 8 fields of 4 bytes each:
 
 ```
-Offset 0x00: Field00 (uint32) — non-zero, varies per tile
-Offset 0x04: Field04 (uint32) — always 1 in development corpus
-Offset 0x08: Field08 (uint32) — non-zero, often equals Field00
-Offset 0x0C: Field0C (uint32) — always 0
-Offset 0x10: Field10 (uint32) — always 0
-Offset 0x14: Field14 (uint32) — always 0
-Offset 0x18: Field18 (uint32) — always 0
-Offset 0x1C: Field1C (uint32) — always 0
+Offset 0x00: Field00 (uint32) — non-zero, varies. Top=534 in 289/502 files.
+Offset 0x04: Field04 (uint32) — REGION ID. 227 distinct values. =1 only on empty tiles (140 stubs). Clusters in adjacent tiles.
+Offset 0x08: Field08 (uint32) — non-zero, varies. Top=534 in 292/502 files. Only 233/502 equal Field00.
+Offset 0x0C: Field0C (uint32) — always 0 (confirmed 502/502)
+Offset 0x10: Field10 (uint32) — always 0 (confirmed 502/502)
+Offset 0x14: Field14 (uint32) — always 0 (confirmed 502/502)
+Offset 0x18: Field18 (uint32) — always 0 (confirmed 502/502)
+Offset 0x1C: Field1C (uint32) — always 0 (confirmed 502/502)
 ```
 
 ### Analyzer Results
@@ -73,12 +73,14 @@ Offset 0x1C: Field1C (uint32) — always 0
 - Field00: 155 distinct values, Field04: **227 distinct values**, Field08: 152 distinct
 - Field04 is NOT always 1 (only 140/502, on empty tiles) — prior research was wrong
 
-### Open Questions
+### Open Questions (Updated 2026-05-21)
 
-1. Could Field00 be a byte offset to the first chunk after MSHD?
-2. Could Field08 be the total file size minus the MSHD chunk?
-3. Are fields 0x0C-0x1C part of a different header layout (e.g., 2x uint32 header + 6x uint32 reserved)?
-4. Do retail/non-development PM4 files populate fields 0x0C-0x1C?
+1. **What is Field04's exact semantics?** It's a region ID that clusters in adjacent tiles. Does it identify a source scene division, a data layout template, or an engine grouping key?
+2. **What do Field00 and Field08 encode?** Both favor 534 as the dominant value but differ in ~72% of tiles. Version tuple? Checksum + index?
+3. **Do retail PM4 files populate the trailing zero fields?** All zero in development corpus. Retail might differ.
+4. **Can Field04 be used as the root grouping layer** for CK24 object decomposition? (See Phase 2 MSHD breakthrough section)
+5. ~~Could Field00 be a byte offset?~~ DISPROVEN — no correlation with file size.
+6. ~~Could Field08 be file size minus MSHD?~~ DISPROVEN — no correlation with file size.
 
 ---
 
@@ -89,7 +91,7 @@ MSVT <--- MSVI <--- MSUR
   |                   |
   |                   +--- PackedParams -> CK24 (object grouping)
   |                   +--- MsviFirstIndex -> MSVI
-  |                   +--- MdosIndex -> MSCN
+   |                   +--- _0x18 (MscnIndex) -> MSCN
   |
 MSPV <--- MSPI <--- MSLK.MspiFirstIndex
                     MSLK.RefIndex ------> MSUR (primary, ~96.8%)
@@ -100,7 +102,7 @@ MSPV <--- MSPI <--- MSLK.MspiFirstIndex
                     MSLK.LinkId --------> (tile coordinate sentinel)
                     MSLK.GroupObjectId -> (local alias, not global ID)
 
-MSCN <--- MSUR.MdosIndex
+MSCN <--- MSUR._0x18 (MscnIndex)
        <--- (CK24 groups reference MSCN indirectly)
 
 MPRL <--- MPRR.Value1 (when Value1 < MPRL.Count)
@@ -336,17 +338,17 @@ Flat pool of Vector3 positions (12 bytes each). Described as "collision wall ver
 
 | Use Case | Where | What's Consumed | Status |
 |----------|-------|----------------|--------|
-| **Connector Keys** | WorldScene.cs, Pm4PlacementMath.cs | MSCN positions via `MSUR.MdosIndex` → quantized to 2-unit grid | **ACTIVE** — cross-tile object merging |
+| **Connector Keys** | WorldScene.cs, Pm4PlacementMath.cs | MSCN positions via `MSUR._0x18` (MscnIndex) → quantized to 2-unit grid | **ACTIVE** — cross-tile object merging |
 | **Cross-tile Remap** | parpToolbox MscnRemapper | ALL MSCN positions, (Y,X,Z) swap | **LEGACY** — parpToolbox only |
-| **Object Discovery** | WoWRollback MscnObjectBuilder | MSCN positions grouped by CK24 via MdosIndex | **LEGACY** — WoWRollback only |
+| **Object Discovery** | WoWRollback MscnObjectBuilder | MSCN positions grouped by CK24 via _0x18 (MscnIndex) | **LEGACY** — WoWRollback only |
 | **Coordinate Analysis** | Pm4ResearchMscnAnalyzer | ALL positions per file | **RESEARCH** — statistical |
 | **Spatial Proximity** | MscnMeshComparisonAnalyzer | Sampled points | **DIAGNOSTIC** |
 
-**Key finding**: The active viewer only consumes MSCN positions that are **directly referenced by MSUR.MdosIndex**. The remaining MSCN vertices (most of them) are read but NOT used in the active viewer pipeline.
+**Key finding**: The active viewer only consumes MSCN positions that are **directly referenced by MSUR._0x18 (MscnIndex)**. The remaining MSCN vertices (most of them) are read but NOT used in the active viewer pipeline.
 
 ### How MSCN Enables Cross-Tile Object Merging
 
-1. Each MSUR surface has `MdosIndex` → index into MSCN pool
+1. Each MSUR surface has `_0x18` (MscnIndex) → index into MSCN pool
 2. MSCN positions are quantized to 2-unit grid → `Pm4ConnectorKey(X,Y,Z)`
 3. Per CK24 object group, connector keys are collected
 4. Adjacent tiles sharing 2+ connector keys (with overlap >= 35-50%) are merged via Union-Find
@@ -364,7 +366,7 @@ Result: "No dominant mode" for 615 of 616 development tiles. Swapped-XY overlap 
 
 ### What's Missing in MSCN Consumption
 
-- **Most MSCN vertices are unused** — only MdosIndex-referenced ones are consumed
+- **Most MSCN vertices are unused** — only _0x18 (MscnIndex)-referenced ones are consumed
 - **MSCN as collision hull geometry** — MscnObjectBuilder treats MSCN as "collision wall vertices that better represent object shapes" but this code is in legacy WoWRollback, not the active viewer
 - **MSCN-to-WMO coordinate transform** — brute-force MscnWmoComparisonCommand tests 14+ transforms; no conclusion
 - **MSCN as object containment boundary** — the user's hypothesis that MSCN identifies where objects exist across tiles is supported by the connector key system, but the full containment/boundary role is unexplored
@@ -566,7 +568,7 @@ MdxViewer is the most complete PM4 implementation. It has:
 - Full coordinate transform pipeline (axis convention → planar transform → yaw correction → renderer space)
 - Per-object reconstruction with rotation handling
 - Cross-tile merge via MSCN connector keys
-- WMO/M2 bleed handling via MdosIndex splitting
+- WMO/M2 bleed handling via _0x18/MscnIndex splitting (MdxViewer code uses old name `MdosIndex`)
 - JSON/OBJ export of reconstructed objects
 
 wow-viewer may not be fully implemented yet. MdxViewer should be the primary source for deriving PM4 truths.
@@ -589,9 +591,11 @@ The user confirms MdxViewer is the most complete PM4 implementation. wow-viewer 
 
 5. **Planar transform is resolved by footprint scoring**, not centroid matching. Bidirectional nearest-neighbor footprint score (85% weight) + centroid distance (15% weight) selects from up to 4 candidate transforms.
 
-6. **MSCN entries are "exterior vertices"** used for cross-tile connector key generation. Each distinct MdosIndex on a surface selects one MSCN point, quantized to 2-unit resolution.
+6. **MSCN entries are "exterior vertices"** used for cross-tile connector key generation. Each distinct _0x18 (MscnIndex) on a surface selects one MSCN point, quantized to 2-unit resolution.
 
 7. **WMO/M2 bleed** is handled by MdosIndex grouping within a CK24 seed group. User toggle: `splitCk24ByMdos`.
+
+[Note: MdosIndex in MdxViewer code was renamed to _0x18/MscnIndex in wow-viewer. The MdxViewer variable name `MdosIndex` in the old codebase predates this fix. The field indexes into MSCN, not MDOS.]
 
 8. **Yaw correction threshold is 12 degrees.** Smaller corrections are noise.
 
@@ -955,14 +959,23 @@ The observed TypeFlags values from WoWRollback (ANCIENT code, pre-dates MdxViewe
 | 0xC2 | "M2 Exterior" (unverified) | 0b11000010 | CK24 type 0xC2 |
 | 0xC3 | "M2 Exterior" (unverified) | 0b11000011 | CK24 type 0xC3 |
 
-### The Critical Observation (UNVERIFIED)
+### The Critical Observation — DISPROVEN (2026-05-20)
 
-**The TypeFlags values 0x40-0x43 and 0xC0-0xC3 numerically match CK24 type byte values.** However, the WoWRollback labels ("M2 Interior", "WMO", "M2 Exterior") are **assumptions from the earliest phase of the project** — WoWRollback predates MdxViewer by months and was built before the coordinate system work, CK24 grouping analysis, or any of the deep PM4 research. Those labels should be treated as **initial guesses, not verified facts**.
+**The TypeFlags values 0x40-0x43 and 0xC0-0xC3 numerically match CK24 type byte values** — this was the old hypothesis. **Phase 1 forensics disproved it.**
+
+From CK24=0x40AA0A (CK24 type=0x40, M2) forensics, the actual MSLK entries for this group have TypeFlags values:
+- 0x11 (17), 0x12 (18), 0x14 (20), 0x1A (26), 0x1C (28)
+- High nibble is always 0x1 (0b0001), NOT 0x4. **TypeFlags does NOT store the CK24 type byte.**
+
+The WoWRollback labels ("M2 Interior", "WMO", "M2 Exterior") are **unverified guesses from the earliest project phase**. The numeric overlap between TypeFlags values and CK24 type bytes in the WoWRollback values was coincidental — those TypeFlags values (0x40-0x43) may never appear in the development corpus at all, OR appear only as rare edge cases, not as the dominant pattern.
+
+Similarly, the corpus-wide unknowns analysis shows only **10 distinct TypeFlags values** (0x01, 0x02, and variants) dominating 99%+ of all MSLK entries. The 0x40-0xC3 range values are rare if they exist at all.
 
 What IS verified:
-- The numeric values exist in the TypeFlags distribution
-- The values numerically overlap with CK24 type byte values
-- The dominant family has TypeFlags=0x01 (which doesn't match any CK24 type)
+- TypeFlags has only 10 distinct values across 1.27M entries
+- The dominant values are 0x01 and 0x02 (each with subtypes 0, 1, 2, 3)
+- TypeFlags does NOT encode the CK24 type byte
+- The low nibble may encode edge type (bitmask) — not disproven
 
 What is NOT verified:
 - Whether the WoWRollback labels ("M2 Interior", "WMO", etc.) are correct — they're from ancient code
@@ -1062,6 +1075,14 @@ This is consistent with the user's prediction: "Rare values are root group IDs."
 3. Whether F00/F08 encode a checksum, index, or something else
 4. Whether retail PM4 files populate the trailing zero fields (0x0C-0x1C)
 
+### Practical Application: Darkportal WMO on tile 3,1
+
+A darkportal WMO sits on tile 3,1 in the development map. It spans 4 ADT edges but gets split into 3-4 separate mesh groups in the current per-tile CK24-only approach. This is exactly the object-splitting problem.
+
+**Field04 hypothesis**: The darkportal's surfaces across its 4 ADT tiles should share the same Field04 value. By grouping surfaces by `(Field04, CK24)` instead of just `CK24`, the 3-4 mesh fragments should merge into one object.
+
+**Next validation step**: Read tile 3,1 and its neighbors, extract Field04 values, and check if the darkportal surfaces share F04 across tile boundaries. If they do, Field04 is confirmed as the scene-division key that solves the cross-tile WMO fragmentation problem.
+
 ### The Old MSHD Section Was Wrong
 
 Previous research notes claimed "Field04 is always 1" — contradicted by actual data (227 distinct values). Fields 0x0C-0x1C being zero is confirmed (502/502).
@@ -1094,11 +1115,11 @@ The missing root grouping could be in:
 
 ### What We Should Do Next
 
-1. **Verify the centroid hypothesis**: For MSUR surfaces in the reference tile, compute centroids and compare against MSCN points accessed via MSUR._0x18. If they match, the hypothesis is confirmed.
-2. **Map the peg/dowel points**: Identify MSCN points that fall outside the tile bounds (adjacent tile space) and correlate them with cross-tile CK24 objects.
-3. **Reinterpret MSLK as graph edges**: Treat TypeFlags as edge type (walkable, wall, ledge, etc.) and Subtype as edge property (height level, direction, etc.).
-4. **Update all analyzers**: The Pm4ResearchMscnAnalyzer should test "centroid of MSUR surface" as a hypothesis, not just "raw vs swapped coordinate fit."
-5. **Fix the naming**: Rename `MdosIndex` → `MscnIndex` (or `_0x18` with comment), add wowdev.wiki mapping comments to all invented names.
+1. **Validate Field04 on darkportal WMO**: Read tile 3,1 and neighbors, check if the WMO surfaces share Field04 across boundaries
+2. **Implement Field04-aware merging in wow-viewer**: Add `(Field04, CK24)` grouping to `BuildMergedGroupMap`
+3. **Decode the MSLK edge classification**: TypeFlags low nibble as walkable/wall/ledge bitmask — test against surface normals
+4. **Investigate MPRR.Value2**: 566 distinct values — may encode edge weight or type in the position graph
+5. **Done**: MdosIndex → MscnIndex rename (already applied in wow-viewer codebase)
 
 ---
 
