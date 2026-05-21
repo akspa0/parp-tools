@@ -28,6 +28,10 @@
 - [x] **1A.4** Run focused proof
   - manifest builder writes kept/rejected outputs
   - normal smoke run completes through the curated tile set
+- [x] **1A.5** Add multi-process curation execution
+  - `--workers`
+  - `--chunk-size`
+  - visible chunk progress
 
 ## Phase 2: Normal First
 
@@ -41,6 +45,14 @@
 - [x] **2.3** Run 1-epoch CPU smoke for `3_3_5_12340`
   - verify run root exists
   - verify best/last checkpoints exist
+- [x] **2.4** Preserve V16 runtime training seam
+  - `torch.compile`
+  - worker auto-resolution
+  - prefetch / persistent workers
+  - gradient accumulation
+- [x] **2.5** Write optimized operator launch commands
+  - curated normal-training command
+  - VRAM fallback ladder
 
 ## Phase 3: Height Follow-On
 

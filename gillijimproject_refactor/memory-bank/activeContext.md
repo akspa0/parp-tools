@@ -77,6 +77,9 @@
   workflow:
   - build `normal_terrain_v1` manifest
   - train via `--curation-manifest`
+  - preferred current operator launch:
+    - curation: `--workers -1 --chunk-size 128`
+    - train: `--batch-size 8 --grad-accum-steps 1`
 - Canonical flow:
   - `WowViewer.Tool.Harvest harvest-stream --stream-profile v16`
   - `build_v16_dataset.py build`
@@ -211,6 +214,9 @@
   - texture decomposition
 - Re-launch the first real normal run with `batch-size 1` or `2` plus
   accumulation instead of high micro-batch counts that trigger WDDM offload.
+- Preferred current launch contract after the runaway-process cleanup:
+  - start normal training at `8 x 1`
+  - fall back to `4 x 2`, `2 x 4`, then `1 x 8` only if VRAM forces it
 - Write the short note on what the normal lane teaches the height lane, then
   tighten the height loss around that terrain-only framing.
 - Tighten the stitched-output contract so the final V16.1 `.pred.zarr` bundle

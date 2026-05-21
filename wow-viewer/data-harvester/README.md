@@ -205,28 +205,42 @@ the baked minimap appearance.
 
 ## Train V16.1 Normal With Curation
 
-Use the curation manifest as an explicit trainer input:
+Use the curation manifest as an explicit trainer input.
+
+Recommended optimized launch contract for a 16 GB card:
 
 ```powershell
 uv run python -u scripts/train_v16_1_normal.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
   --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v1 `
   --device auto `
-  --batch-size 1 `
-  --grad-accum-steps 8 `
+  --batch-size 8 `
+  --grad-accum-steps 1 `
   --epochs 50 `
   --num-workers -1 `
   --val-preview-interval 2 `
-  --run-name v16_1_normal_curated_bs1_acc8
+  --run-name v16_1_normal_curated_bs8_acc1_compile
 ```
 
-If VRAM stays comfortably below budget on your card, raise micro-batch before
-raising accumulation:
+Why this is the recommended starting point now:
 
-- start: `--batch-size 1 --grad-accum-steps 8`
-- then try: `--batch-size 2 --grad-accum-steps 4`
-- then try: `--batch-size 4 --grad-accum-steps 2`
-- then maybe: `--batch-size 8 --grad-accum-steps 1`
+- compile warmup is expensive, so judge throughput from epoch `2+`, not epoch `1`
+- after the runaway-process cleanup, `micro=1 accum=8` was only using about
+  `1.5 GB` VRAM
+- `8 x 1` keeps the same effective batch as `1 x 8` but uses the card much
+  more directly
+
+Fallback VRAM ladder:
+
+- preferred start: `--batch-size 8 --grad-accum-steps 1`
+- if needed: `--batch-size 4 --grad-accum-steps 2`
+- if needed: `--batch-size 2 --grad-accum-steps 4`
+- safe floor: `--batch-size 1 --grad-accum-steps 8`
+
+Optional higher-VRAM follow-ons if the card stays comfortable:
+
+- `--batch-size 12 --grad-accum-steps 1`
+- `--batch-size 16 --grad-accum-steps 1`
 
 V16.1 trainer runtime notes:
 
@@ -243,13 +257,13 @@ uv run python -u scripts/train_v16_1_normal.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
   --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v1 `
   --device auto `
-  --batch-size 1 `
-  --grad-accum-steps 8 `
+  --batch-size 8 `
+  --grad-accum-steps 1 `
   --epochs 100 `
   --num-workers -1 `
   --val-preview-interval 2 `
-  --run-name v16_1_normal_curated_bs1_acc8 `
-  --resume-checkpoint ../models/v16_1/normal/runs/v16_1_normal_curated_bs1_acc8/checkpoints/v16_1_normal_last.pt
+  --run-name v16_1_normal_curated_bs8_acc1_compile `
+  --resume-checkpoint ../models/v16_1/normal/runs/v16_1_normal_curated_bs8_acc1_compile/checkpoints/v16_1_normal_last.pt
 ```
 
 ## Key Outputs

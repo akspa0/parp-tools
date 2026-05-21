@@ -97,15 +97,16 @@ uv run python -u scripts\train_v16_1_normal.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
   --curation-manifest ..\output\datasets\v16\curation\normal_terrain_full_corpus_v1 `
   --device auto `
-  --batch-size 1 `
-  --grad-accum-steps 8 `
+  --batch-size 8 `
+  --grad-accum-steps 1 `
   --num-workers -1 `
   --epochs 50 `
-  --run-name v16_1_normal_curated_bs1_acc8
+  --run-name v16_1_normal_curated_bs8_acc1_compile
 ```
 
 This is the preferred V16.1 pattern now: curate first, then train from the
-manifest instead of raw tile rows.
+manifest instead of raw tile rows. For the current 16 GB-card recommendation,
+start at `8 x 1` before falling back to `4 x 2`, `2 x 4`, or `1 x 8`.
 
 ## What Lives Here
 

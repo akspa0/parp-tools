@@ -20,10 +20,38 @@ baseline and V16.1 as the next architecture slice.
 **Validation**: `activeContext.md` and `progress.md` mention V16.1 and the
 split-and-link dense-correlation framing.
 
-## Phase 2: Height First
+## Phase 1A: Separate Curation Layer
 
-**Goal**: Prove the first dense-correlation family with the most important terrain
-signal before touching the rest of the stack.
+**Goal**: Reject blank, nonsensical, or target-misaligned tiles before any
+V16.1 trainer sees them.
+
+### Step 1A.1 — Build reusable curation metrics/helpers
+Land a reusable curation helper surface between raw Zarr stores and trainers.
+**Validation**: a shared curation module exists and can compute target-aware
+tile metrics outside any one trainer.
+
+### Step 1A.2 — Add normal-oriented curation profile
+Build a first profile that filters low-signal and minimap-vs-normal-mismatched
+tiles.
+**Validation**: a normal-oriented manifest build completes and writes kept /
+rejected outputs plus worst-case review artifacts.
+
+### Step 1A.3 — Wire trainer manifest consumption
+Make V16.1 trainers consume curated manifests explicitly instead of only raw
+split rows.
+**Validation**: `--curation-manifest` is available and a normal trainer smoke
+run completes through the curated tile set.
+
+### Step 1A.4 — Make curation performant enough to use
+Add multi-process tile auditing and visible progress output so curation is not a
+single-core crawl.
+**Validation**: curation builder supports `--workers` / `--chunk-size` and
+prints chunk progress during a focused proof run.
+
+## Phase 2: Normal First
+
+**Goal**: Prove the first terrain-signal family with the strongest immediate
+alignment to baked minimap shape before pushing geometry-specific follow-ons.
 
 ### Step 2.1 — Extract shared trainer utilities
 Move only non-model, non-loss helper logic out of `train_v16.py` into a shared
@@ -31,31 +59,37 @@ V16.1-safe utility surface.
 **Validation**: helpers are importable without dragging in a shared multitask
 loss/model contract.
 
-### Step 2.2 — Create `train_v16_1_height.py`
-Implement a dedicated height-only trainer, run layout, checkpoint naming, and
-validation artifact contract.
+### Step 2.2 — Create `train_v16_1_normal.py`
+Implement a dedicated normal-only trainer, run layout, checkpoint naming,
+terrain-aware masking, and validation artifact contract.
 **Validation**: 1-epoch CPU smoke run against `3_3_5_12340` completes.
 
-### Step 2.3 — Compare against V16 baseline
-Run a bounded validation comparison between V16 height output and V16.1 height
-output on the same curated tiles.
-**Validation**: one comparison summary exists under the V16.1 run root.
+### Step 2.3 — Preserve the useful V16 runtime seam
+Port compile, worker, prefetch, and accumulation behavior into the shared V16.1
+trainer instead of regressing to stripped-down defaults.
+**Validation**: one GPU smoke run completes with `torch.compile` enabled and one
+micro-batch accumulation smoke run completes.
 
-## Phase 3: Normals Second
+### Step 2.4 — Record the optimized operator launch contract
+Write the recommended curated normal-training commands and fallback VRAM ladder
+into the operator docs.
+**Validation**: README surfaces carry a curation-first normal launch path with
+recommended `batch-size` / `grad-accum-steps` combinations.
 
-**Goal**: Directly test whether the current normals failure is architectural or
-fundamental.
+## Phase 3: Height Follow-On
 
-### Step 3.1 — Create `train_v16_1_normal.py`
-Implement a dedicated normal-only trainer with normal-mask-aware loss and
-focused validation panels.
-**Validation**: 1-epoch CPU smoke run completes and writes normal-only review
+**Goal**: Let the height lane absorb what the normal lane teaches about
+terrain-only supervision and curated tile quality.
+
+### Step 3.1 — Create `train_v16_1_height.py`
+Implement a dedicated height-only trainer with its own checkpoints and review
 artifacts.
+**Validation**: 1-epoch CPU smoke run completes.
 
-### Step 3.2 — Height-vs-normal independence proof
-Show that changing the normal trainer does not require touching the height
-trainer code or checkpoint contract.
-**Validation**: two disjoint run roots and checkpoint names exist.
+### Step 3.2 — Write the normal-to-height learning note
+Record what the normal lane revealed about blank tiles, minimap alignment, and
+terrain-only masking so the height trainer does not repeat known mistakes.
+**Validation**: one short implementation note or spec note exists.
 
 ## Phase 4: Liquid Family
 

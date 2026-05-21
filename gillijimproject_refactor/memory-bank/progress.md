@@ -157,6 +157,10 @@
     V16.1 normal training, resume, and VRAM tuning ladder
   - `wow-viewer/README.md` now points root-level readers at the curation-first
     V16.1 path
+  - current recommended command contract is now documented:
+    - curation: `--workers -1 --chunk-size 128`
+    - train: `--batch-size 8 --grad-accum-steps 1`
+    - VRAM fallback ladder: `4 x 2`, `2 x 4`, `1 x 8`
 - V16.1 direction has shifted from height-first to normal-first for terrain
   signal learning, with height follow-on meant to absorb what the normal lane
   teaches about minimap-to-terrain supervision.
