@@ -499,7 +499,7 @@ public static class LkAdtReader
         int scanStart = mcnkPayloadOffset + headerSize;
         int scanEnd = mcnkPayloadEnd;
         int pos = scanStart;
-        while (pos + 8 <= scanEnd)
+        while (pos >= 0 && pos + 8 <= scanEnd)
         {
             if (pos + 4 <= adtBytes.Length)
             {

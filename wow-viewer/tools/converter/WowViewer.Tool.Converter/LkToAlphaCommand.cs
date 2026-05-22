@@ -769,10 +769,17 @@ internal static class LkToAlphaCommand
         int extracted = 0, failed = 0, normalized = 0, resized = 0, specularReencoded = 0;
         try
         {
+            // Strip common tileset prefix from LK paths to avoid double-nesting on disk.
+            // LK texture names often already contain "World\Maps\<map>\tilesets\<map>\..."
+            string stripPrefix = $"World\\Maps\\{mapName}\\tilesets\\{mapName}\\";
+
             foreach (string texPath in texturePaths)
             {
                 string normPath = texPath.Replace('/', '\\').TrimStart('\\');
-                string localPath = Path.Combine(tilesetRoot, normPath);
+                string relativePath = normPath.StartsWith(stripPrefix, StringComparison.OrdinalIgnoreCase)
+                    ? normPath[stripPrefix.Length..]
+                    : normPath;
+                string localPath = Path.Combine(tilesetRoot, relativePath);
                 string? localDir = Path.GetDirectoryName(localPath);
                 if (localDir != null) Directory.CreateDirectory(localDir);
 
@@ -1641,9 +1648,23 @@ internal static class LkToAlphaCommand
             targetFileSet is not null
             && (targetFileSet.Contains(path) || targetFileSet.Contains(path.Replace('\\', '/')));
 
-        IReadOnlyList<string> textureNames = tilesetPrefix is null
-            ? tile.TextureNames
-            : tile.TextureNames.Select(t => tilesetPrefix + t.TrimStart('\\')).ToList();
+        IReadOnlyList<string> textureNames;
+        if (tilesetPrefix is null)
+        {
+            textureNames = tile.TextureNames;
+        }
+        else
+        {
+            // Strip the tilesetPrefix from LK paths to avoid double-nesting.
+            // LK texture names often already contain the prefix path.
+            textureNames = tile.TextureNames.Select(t =>
+            {
+                string trimmed = t.TrimStart('\\');
+                if (trimmed.StartsWith(tilesetPrefix, StringComparison.OrdinalIgnoreCase))
+                    return trimmed;
+                return tilesetPrefix + trimmed;
+            }).ToList();
+        }
 
         IReadOnlyList<AlphaModelPlacement> modelPlacements = bundledMdxPaths is null
             ? tile.ModelPlacements.Where(static placement => !string.Equals(placement.ModelPath, PlaceholderMdx, StringComparison.OrdinalIgnoreCase)).ToList()

@@ -105,6 +105,8 @@ public static class LkToAlphaConverter
             }
         }
 
+        StitchLiquidChunkEdges(liquidChunks);
+
         var modelPlacements = adt.ModelPlacements.Select(p => new AlphaModelPlacement(
             p.NameId,
             adt.ModelNames.Count > p.NameId ? adt.ModelNames[p.NameId] : $"unknown_{p.NameId}",
@@ -635,6 +637,98 @@ public static class LkToAlphaConverter
         }
 
         return heights;
+    }
+
+    private static void StitchLiquidChunkEdges(List<AlphaLiquidChunk> liquidChunks)
+    {
+        // Build a lookup: (cx, cy) -> index in liquidChunks
+        var byPos = new Dictionary<(int cx, int cy), int>();
+        for (int i = 0; i < liquidChunks.Count; i++)
+        {
+            AlphaLiquidChunk lc = liquidChunks[i];
+            if (lc.Heights is { Length: >= 81 })
+                byPos[(lc.IndexX, lc.IndexY)] = i;
+        }
+
+        const int gridStride = 9;
+
+        // Stitch horizontally: (cx, cy).right edge <-> (cx+1, cy).left edge
+        foreach (var kvp in byPos)
+        {
+            (int cx, int cy) = kvp.Key;
+            int leftIdx = kvp.Value;
+            if (!byPos.TryGetValue((cx + 1, cy), out int rightIdx))
+                continue;
+
+            AlphaLiquidChunk left = liquidChunks[leftIdx];
+            AlphaLiquidChunk right = liquidChunks[rightIdx];
+            if (left.Heights is null || right.Heights is null)
+                continue;
+
+            float[] lh = left.Heights;
+            float[] rh = right.Heights;
+
+            for (int y = 0; y < gridStride; y++)
+            {
+                int leftEdge = y * gridStride + 8;   // rightmost column of left chunk
+                int rightEdge = y * gridStride + 0;   // leftmost column of right chunk
+                float avg = (lh[leftEdge] + rh[rightEdge]) * 0.5f;
+                lh[leftEdge] = avg;
+                rh[rightEdge] = avg;
+            }
+
+            liquidChunks[leftIdx] = left with
+            {
+                MinHeight = lh.Min(),
+                MaxHeight = lh.Max(),
+                Heights = lh
+            };
+            liquidChunks[rightIdx] = right with
+            {
+                MinHeight = rh.Min(),
+                MaxHeight = rh.Max(),
+                Heights = rh
+            };
+        }
+
+        // Stitch vertically: (cx, cy).bottom edge <-> (cx, cy+1).top edge
+        foreach (var kvp in byPos)
+        {
+            (int cx, int cy) = kvp.Key;
+            int topIdx = kvp.Value;
+            if (!byPos.TryGetValue((cx, cy + 1), out int bottomIdx))
+                continue;
+
+            AlphaLiquidChunk top = liquidChunks[topIdx];
+            AlphaLiquidChunk bottom = liquidChunks[bottomIdx];
+            if (top.Heights is null || bottom.Heights is null)
+                continue;
+
+            float[] th = top.Heights;
+            float[] bh = bottom.Heights;
+
+            for (int x = 0; x < gridStride; x++)
+            {
+                int topEdge = 8 * gridStride + x;    // bottom row of top chunk
+                int bottomEdge = 0 * gridStride + x;  // top row of bottom chunk
+                float avg = (th[topEdge] + bh[bottomEdge]) * 0.5f;
+                th[topEdge] = avg;
+                bh[bottomEdge] = avg;
+            }
+
+            liquidChunks[topIdx] = top with
+            {
+                MinHeight = th.Min(),
+                MaxHeight = th.Max(),
+                Heights = th
+            };
+            liquidChunks[bottomIdx] = bottom with
+            {
+                MinHeight = bh.Min(),
+                MaxHeight = bh.Max(),
+                Heights = bh
+            };
+        }
     }
 
     private static float[,,] DownsampleAlphaPack(float[,,] src)
