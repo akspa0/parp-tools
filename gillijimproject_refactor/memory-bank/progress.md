@@ -54,6 +54,36 @@
 - Raw harvest preview now renders `raw mddf`, `raw modf`, and
   `filtered loss mask` panels, so preview-first QA can confirm whether clutter
   is leaking into terrain-loss gating before any Zarr mutation
+- MdxViewer validation capture object artifacts are now a real renderer-truth
+  path instead of WMO-only truth:
+  - doodads now follow world-object visibility during the capture batch, so
+    MDX/M2 silhouettes are included in `object_visibility_mask`
+  - object artifact generation now prefers direct `objectsonly` silhouettes for
+    `0.x` builds and prefers `primary` vs `noobjects` visibility diffs for
+    later builds so terrain occlusion wins where underground geometry should
+    stay hidden
+  - startup automation can now run a bounded validation batch directly from a
+    dataset root and exit when complete, which makes real-data capture proof
+    scriptable instead of UI-only
+  - focused proof: `dotnet build gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` succeeded after the capture-mask hotfix
+  - focused real-data proof roots:
+    - `output/tmp/mdxviewer_validation_smoke/0_5_3_3368_Azeroth_30_48`
+    - `output/tmp/mdxviewer_validation_smoke/3_3_5_12340_Azeroth_30_48`
+    - `output/tmp/mdxviewer_validation_smoke_fix_wmo/3_3_5_12340_Azeroth_30_48`
+    - `output/tmp/mdxviewer_validation_smoke_heightfilter/3_3_5_12340_Azeroth_30_48`
+  - runtime result on `Azeroth_30_48`:
+    - `0.5.3.3368` final mask exactly matched direct `objectsonly`
+    - `3.3.5.12340` final mask differed from direct `objectsonly`, confirming
+      the later-build occluded-diff policy executed at runtime
+  - bounded follow-up fixes now landed in the MdxViewer proof path:
+    - WMO near-camera culling hotfix in `WmoRenderer`
+    - longer validation settle delay before capture
+    - MDX bounds-height filtering during capture to suppress very tall clutter
+  - current proof boundary is still only `0_5_3_3368` + `3_3_5_12340`; the
+    remaining four builds still need real renderer-truth capture proof before
+    this lane can claim broad coverage
+  - active `V16.2` direction is sidecar-first instead of mutating finalized
+    base V16 stores immediately
 
 ### V16 Training Surfaces
 - `V16Dataset` is the live loader.

@@ -28,6 +28,7 @@ Key docs:
 - [data-harvester README](./data-harvester/README.md)
 - [V16 terrain model spec](./docs/architecture/v16-terrain-model-spec-2026-05-16.md)
 - [V16 harvest recovery plan](./docs/architecture/v16-harvest-recovery-plan-2026-05-17.md)
+- [V16.2 sidecar signal-expansion spec](./specs/011-v16-2-patched-signal-expansion/spec.md)
 
 ## Current V16 Status
 
@@ -45,6 +46,18 @@ Current corpus truth:
 - all six current `signal_validation.json` files pass
 - visual QA artifacts exist under `wow-viewer/output/datasets/v16/inspection/`
 - `0_7_0_3694` still carries the expected allowed warning for zero `has_holes_16`
+
+Renderer-truth upgrade truth is narrower than the base V16 corpus truth:
+
+- bounded MdxViewer capture proofs currently exist only for `0_5_3_3368` and
+  `3_3_5_12340`
+- current proof roots live under:
+  - `output/tmp/mdxviewer_validation_smoke/`
+  - `output/tmp/mdxviewer_validation_smoke_fix_wmo/`
+  - `output/tmp/mdxviewer_validation_smoke_heightfilter/`
+- do not treat those richer signals as six-build-validated yet
+- the active `V16.2` direction is sidecar signal stores first, then optional
+  merge-back only after the broader build-validation matrix exists
 
 ## Quick Start
 

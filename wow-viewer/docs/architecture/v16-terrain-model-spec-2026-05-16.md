@@ -97,7 +97,23 @@ wow-viewer/output/datasets/v16/
 - `liquid_mask` and `liquid_height` are unified Python-side outputs built from richer raw liquid signals.
 - terrain loss weighting uses `1.0 - object_filtered_mask`, not raw `object_mask`.
 - archive-backed ADT harvest now prefers geometry-derived WMO footprints for `modf_mask` / `object_filtered_mask`; bounds fallback remains for unresolved WMO assets.
+- MdxViewer dataset finalize now writes renderer-truth `object_visibility_mask` and `no_object_minimap` artifacts from the validation capture families; `0.x` builds prefer direct `objectsonly` silhouettes so early underground object bleed-through is preserved, while later builds prefer `primary` vs `noobjects` visibility diffs so terrain occlusion wins.
+- Those renderer-truth artifacts are currently `V16.2` candidate signals, not part of the finalized base V16 Zarr contract yet.
+- Current real capture proof for that renderer-truth lane is bounded to `0_5_3_3368` and `3_3_5_12340` on the `Azeroth_30_48` tile family until the remaining builds are explicitly validated.
 - alpha QA should use the painted-layer view, not raw channel `0`.
+
+## V16.2 Transition Note
+
+The next dataset-contract lane for richer object guidance is `V16.2`, tracked
+under `wow-viewer/specs/011-v16-2-patched-signal-expansion/`.
+
+Current transition rule:
+
+- keep finalized V16 base stores intact
+- stage renderer-truth and richer precise-mask signals into sidecar stores first
+- consume those sidecars through loader metadata overlay semantics
+- only consider merge-back into canonical base stores after broader cross-build
+  renderer-truth validation exists
 
 ## Index Contract
 

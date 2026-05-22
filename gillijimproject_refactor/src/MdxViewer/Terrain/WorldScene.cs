@@ -737,6 +737,7 @@ public class WorldScene : ISceneRenderer
     private float _hoveredAssetMaxDistance = 533.33f;
     private float _lastHoverPickFogEnd = 1500f;
     private float _objectStreamingRangeMultiplier = 0.5f;
+    private float _maxVisibleMdxBoundsHeight;
     private WorldObjectVisibilityProfile _objectVisibilityProfile = WorldObjectVisibilityProfile.Performance;
 
     // Frustum culling
@@ -1040,6 +1041,11 @@ public class WorldScene : ISceneRenderer
     {
         get => _objectStreamingRangeMultiplier;
         set => _objectStreamingRangeMultiplier = Math.Clamp(value, 0.25f, 4.0f);
+    }
+    public float MaxVisibleMdxBoundsHeight
+    {
+        get => _maxVisibleMdxBoundsHeight;
+        set => _maxVisibleMdxBoundsHeight = value > 0f ? value : 0f;
     }
     public WorldObjectVisibilityProfile ObjectVisibilityProfile
     {
@@ -7747,6 +7753,18 @@ public class WorldScene : ISceneRenderer
         return false;
     }
 
+    private bool ShouldHideVisibleMdxInstance(in ObjectInstance inst)
+    {
+        if (ShouldHideObjectInstanceByUniqueId(inst))
+            return true;
+
+        if (_maxVisibleMdxBoundsHeight <= 0f)
+            return false;
+
+        float boundsHeight = MathF.Abs(inst.BoundsMax.Z - inst.BoundsMin.Z);
+        return float.IsFinite(boundsHeight) && boundsHeight > _maxVisibleMdxBoundsHeight;
+    }
+
     private static (int tileX, int tileY) ComputeTileCoordinates(Vector3 rendererPosition)
     {
         int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - rendererPosition.X) / WoWConstants.ChunkSize);
@@ -7821,7 +7839,7 @@ public class WorldScene : ISceneRenderer
                 countAsTaxiActor,
                 verticalFieldOfViewRadians,
                 _objectVisibilityProfile),
-            inst => ShouldHideObjectInstanceByUniqueId(inst),
+            inst => ShouldHideVisibleMdxInstance(inst),
             (min, max) => _frustumCuller.TestAABB(min, max),
             modelKey => ResolveVisibleMdxRenderer(frame, modelKey) != null,
             (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleMdxLoadDistances, modelKey, priorityScore));

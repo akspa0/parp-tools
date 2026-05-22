@@ -18,6 +18,11 @@ public partial class ViewerApp
         public int CaptureAfterFrames { get; init; }
         public bool CaptureIncludeUi { get; init; }
         public bool ExitAfterCapture { get; init; }
+        public string? ValidationDatasetRoot { get; init; }
+        public string? ValidationOutputDir { get; init; }
+        public int ValidationResolution { get; init; }
+        public bool ForceValidationRegeneration { get; init; }
+        public bool ExitAfterValidation { get; init; }
     }
 
     private void ApplyStartupAutomation(string[]? initialArgs)
@@ -60,6 +65,9 @@ public partial class ViewerApp
 
         if (!string.IsNullOrWhiteSpace(request.CaptureShotName))
             QueueNamedStartupCapture(request.CaptureShotName, request.CaptureIncludeUi, request.ExitAfterCapture, request.CaptureAfterFrames);
+
+        if (!string.IsNullOrWhiteSpace(request.ValidationDatasetRoot))
+            QueueStartupValidationCaptureBatch(request);
     }
 
     private StartupAutomationRequest ParseStartupAutomationRequest(string[]? initialArgs, out string? legacyPath)
@@ -78,8 +86,13 @@ public partial class ViewerApp
         string? captureShotName = null;
         string? captureOutputDir = null;
         string? captureAfterFrames = null;
+        string? validationDatasetRoot = null;
+        string? validationOutputDir = null;
+        string? validationResolution = null;
         bool captureIncludeUi = false;
         bool exitAfterCapture = false;
+        bool forceValidationRegeneration = false;
+        bool exitAfterValidation = false;
 
         for (int index = 0; index < initialArgs.Length; index++)
         {
@@ -136,6 +149,21 @@ public partial class ViewerApp
                         return new StartupAutomationRequest();
                     break;
 
+                case "--validation-dataset-root":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out validationDatasetRoot))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--validation-output":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out validationOutputDir))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--validation-resolution":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out validationResolution))
+                        return new StartupAutomationRequest();
+                    break;
+
                 case "--capture-with-ui":
                     captureIncludeUi = true;
                     break;
@@ -146,6 +174,14 @@ public partial class ViewerApp
 
                 case "--exit-after-capture":
                     exitAfterCapture = true;
+                    break;
+
+                case "--force-validation-regeneration":
+                    forceValidationRegeneration = true;
+                    break;
+
+                case "--exit-after-validation":
+                    exitAfterValidation = true;
                     break;
 
                 default:
@@ -169,6 +205,9 @@ public partial class ViewerApp
         if (!TryParseOptionalPositiveInt(captureAfterFrames, "--capture-after-frames", out int resolvedCaptureAfterFrames))
             return new StartupAutomationRequest();
 
+        if (!TryParseOptionalPositiveInt(validationResolution, "--validation-resolution", out int resolvedValidationResolution))
+            return new StartupAutomationRequest();
+
         return new StartupAutomationRequest
         {
             GamePath = NormalizeOptionalPath(gamePath),
@@ -183,7 +222,56 @@ public partial class ViewerApp
             CaptureAfterFrames = resolvedCaptureAfterFrames,
             CaptureIncludeUi = captureIncludeUi,
             ExitAfterCapture = exitAfterCapture,
+            ValidationDatasetRoot = NormalizeOptionalPath(validationDatasetRoot),
+            ValidationOutputDir = NormalizeOptionalPath(validationOutputDir),
+            ValidationResolution = resolvedValidationResolution,
+            ForceValidationRegeneration = forceValidationRegeneration,
+            ExitAfterValidation = exitAfterValidation,
         };
+    }
+
+    private void QueueStartupValidationCaptureBatch(StartupAutomationRequest request)
+    {
+        MkHarvestViewerValidationCapturePlan? plan = BuildMkHarvestViewerValidationCapturePlan(
+            request.ValidationDatasetRoot!,
+            request.ValidationOutputDir,
+            request.ForceValidationRegeneration,
+            request.ValidationResolution,
+            out string? statusMessage);
+
+        if (!string.IsNullOrWhiteSpace(statusMessage))
+            AppendMkHarvestLogLine(statusMessage);
+
+        if (plan == null)
+            return;
+
+        plan.ExitAfterCompletion = request.ExitAfterValidation;
+
+        if (plan.Tiles.Count == 0)
+        {
+            StitchMkHarvestViewerValidationOutputs(
+                plan.MapName,
+                plan.OutputDirectory,
+                plan.NoLiquidsOutputDirectory,
+                plan.NoObjectsOutputDirectory,
+                plan.ObjectsOnlyOutputDirectory,
+                plan.RequestedResolution);
+            GenerateMkHarvestViewerValidationObjectArtifacts(
+                plan.DatasetRoot,
+                plan.OutputDirectory,
+                plan.NoObjectsOutputDirectory,
+                plan.ObjectsOnlyOutputDirectory);
+
+            if (request.ExitAfterValidation)
+                _window.Close();
+
+            return;
+        }
+
+        _pendingMkHarvestViewerValidationCapturePlan = plan;
+        _mkHarvestViewerValidationQueued = plan.Tiles.Count;
+        AppendMkHarvestLogLine(
+            $"Queued startup validation capture batch: {plan.Tiles.Count} capture(s) at {plan.RequestedResolution}px into {plan.OutputDirectory}.");
     }
 
     private bool TryReadStartupOptionValue(string[] args, ref int index, string optionName, out string? value)

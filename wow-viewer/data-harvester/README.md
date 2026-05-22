@@ -62,6 +62,19 @@ Default V16 build compression is light Blosc:
 
 ## Patch Existing Stores
 
+These commands mutate the finalized base V16 stores. They remain correct for
+the original V16 contract, but they are not the recommended first surface for
+new renderer-truth guidance signals while cross-build validation is still
+incomplete.
+
+Current `V16.2` direction:
+
+- keep the existing V16 stores intact
+- stage new renderer-truth signals into sidecar stores first
+- validate those sidecars across the intended build matrix before any merge-back
+- today the bounded real capture proof exists for `0_5_3_3368` and
+  `3_3_5_12340`, not the full six-build corpus
+
 Liquids only:
 
 ```powershell
@@ -238,6 +251,29 @@ Outputs:
 
 Use this when validation tiles suggest the harvested supervision does not match
 the baked minimap appearance.
+
+## Renderer-Truth Validation Artifacts
+
+The richer object-guidance lane now depends on bounded MdxViewer validation
+captures in addition to the standard V16 inspection surfaces.
+
+Current real proof roots:
+
+- `output/tmp/mdxviewer_validation_smoke/0_5_3_3368_Azeroth_30_48`
+- `output/tmp/mdxviewer_validation_smoke/3_3_5_12340_Azeroth_30_48`
+- `output/tmp/mdxviewer_validation_smoke_fix_wmo/3_3_5_12340_Azeroth_30_48`
+- `output/tmp/mdxviewer_validation_smoke_heightfilter/3_3_5_12340_Azeroth_30_48`
+
+These proofs currently establish:
+
+- renderer-truth capture is working on the bounded `Azeroth_30_48` tile for
+  `0_5_3_3368` and `3_3_5_12340`
+- WMO near-camera culling needed a dedicated runtime fix before the later-build
+  proofs were credible
+- validation batches now wait longer before capture and can suppress very tall
+  MDX clutter via a bounds-height threshold during the batch
+
+They do not yet establish full six-build closure for the renderer-truth lane.
 
 ## Train V16.1 Normal With Curation
 

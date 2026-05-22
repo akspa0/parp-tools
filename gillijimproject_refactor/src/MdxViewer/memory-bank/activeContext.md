@@ -21,6 +21,22 @@ This file is intentionally compressed. Keep only the current compatibility role,
 - The pure `wow-viewer`-backed M2 renderer is the default successful runtime route in `MdxViewer`.
 - Viewer-side skeletal animation playback is proven for the bounded wolf repro.
 - Standalone character customization and projected-heavy doodad cull fixes landed for the runtime path.
+- Validation capture now keeps doodads visible with world objects and can be
+	driven from startup automation for bounded dataset-root runs.
+- Current renderer-truth object-mask policy is build-aware:
+	- `0.x` prefers direct `objectsonly` silhouettes
+	- later builds prefer `primary` vs `noobjects` diffs so terrain occlusion wins
+- `WmoRenderer` now has a bounded near-camera visibility fix so nearby large
+	WMOs no longer collapse to a single visible group during validation capture.
+- Validation capture now waits longer before saving frames and can suppress very
+	tall MDX clutter via a bounds-height threshold during the batch.
+- Current bounded real-data proof roots are:
+	- `output/tmp/mdxviewer_validation_smoke/0_5_3_3368_Azeroth_30_48`
+	- `output/tmp/mdxviewer_validation_smoke/3_3_5_12340_Azeroth_30_48`
+	- `output/tmp/mdxviewer_validation_smoke_fix_wmo/3_3_5_12340_Azeroth_30_48`
+	- `output/tmp/mdxviewer_validation_smoke_heightfilter/3_3_5_12340_Azeroth_30_48`
+- Do not describe this validation lane as six-build closed yet; only `0_5_3_3368`
+	and `3_3_5_12340` have real capture proof so far.
 
 ### PM4 compatibility surface
 

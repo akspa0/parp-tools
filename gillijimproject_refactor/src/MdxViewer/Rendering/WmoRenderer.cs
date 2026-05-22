@@ -1007,10 +1007,12 @@ void main() {
         Vector3 localCameraPos = Vector3.Transform(cameraPos, inverseModel);
         _groupFrustumCuller.Update(view * proj);
 
+    float nearRootFullVisibilityDistance = ComputeNearRootFullVisibilityDistance(_wmo.BoundsMin, _wmo.BoundsMax, fogEnd);
+    float nearRootFullVisibilityDistanceSq = nearRootFullVisibilityDistance * nearRootFullVisibilityDistance;
         bool anyExteriorGroups = false;
         bool cameraInsideRoot = ContainsPointExpanded(localCameraPos, _wmo.BoundsMin, _wmo.BoundsMax, GroupVisibilityBoundsPadding);
         float nearRootDistanceSq = DistanceSquaredPointToAabb(localCameraPos, _wmo.BoundsMin, _wmo.BoundsMax);
-        bool cameraNearRoot = nearRootDistanceSq <= NearRootFullVisibilityDistance * NearRootFullVisibilityDistance;
+    bool cameraNearRoot = nearRootDistanceSq <= nearRootFullVisibilityDistanceSq;
         int nearestGroupIndex = -1;
         float nearestGroupDistSq = float.MaxValue;
 
@@ -1054,6 +1056,16 @@ void main() {
 
         if (_visibilityQueue.Count == 0)
         {
+            if (nearestGroupDistSq <= nearRootFullVisibilityDistanceSq)
+            {
+                for (int groupIndex = 0; groupIndex < _runtimeVisibleGroups.Length; groupIndex++)
+                    _runtimeVisibleGroups[groupIndex] = true;
+
+                ApplyRuntimeVisibilityToBuffers();
+                CollectVisibleDoodadDefs();
+                return;
+            }
+
             if (!cameraInsideRoot && !anyExteriorGroups)
             {
                 for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
@@ -1167,6 +1179,15 @@ void main() {
         return point.X >= min.X - padding && point.X <= max.X + padding
             && point.Y >= min.Y - padding && point.Y <= max.Y + padding
             && point.Z >= min.Z - padding && point.Z <= max.Z + padding;
+    }
+
+    private static float ComputeNearRootFullVisibilityDistance(Vector3 min, Vector3 max, float fogEnd)
+    {
+        Vector3 extents = max - min;
+        float largestDimension = MathF.Max(extents.X, MathF.Max(extents.Y, extents.Z));
+        float scaledDistance = largestDimension * 0.75f;
+        float fogLimitedDistance = MathF.Max(NearRootFullVisibilityDistance, fogEnd * 0.75f);
+        return MathF.Max(NearRootFullVisibilityDistance, MathF.Min(scaledDistance, fogLimitedDistance));
     }
 
     private static bool IsExteriorGroup(uint flags) => (flags & 0x8) != 0;

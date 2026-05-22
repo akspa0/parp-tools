@@ -18,6 +18,9 @@ namespace MdxViewer;
 public partial class ViewerApp
 {
     private static readonly string CameraShotPointsPath = Path.Combine(SettingsDir, "camera_shot_points.json");
+    private const float MkHarvestViewerValidationMaxVisibleMdxBoundsHeight = 24f;
+    private const int MkHarvestViewerValidationRequiredSettledFrames = 48;
+    private const int MkHarvestViewerValidationMaxFramesBeforeCapture = 2400;
 
     private readonly List<CameraShotPoint> _cameraShotPoints = new();
     private readonly Queue<PendingCaptureRequest> _captureQueue = new();
@@ -123,6 +126,7 @@ public partial class ViewerApp
         public string ObjectsOnlyOutputDirectory { get; set; } = string.Empty;
         public int RequestedResolution { get; set; }
         public bool RestoreWorldRequested { get; set; }
+        public bool ExitAfterCompletion { get; set; }
         public List<MkHarvestViewerValidationCaptureTile> Tiles { get; set; } = new();
     }
 
@@ -150,6 +154,7 @@ public partial class ViewerApp
         public required bool PreviousWlLiquidsVisible { get; init; }
         public required bool PreviousObjectPathFiltersEnabled { get; init; }
         public required float PreviousObjectStreamingRangeMultiplier { get; init; }
+        public required float PreviousMaxVisibleMdxBoundsHeight { get; init; }
         public required string DatasetRoot { get; init; }
         public required string MapName { get; init; }
         public required string OutputDirectory { get; init; }
@@ -157,6 +162,7 @@ public partial class ViewerApp
         public required string NoObjectsOutputDirectory { get; init; }
         public required string ObjectsOnlyOutputDirectory { get; init; }
         public required int RequestedResolution { get; init; }
+        public required bool ExitAfterCompletion { get; init; }
         public int RemainingCaptures { get; set; }
     }
 
@@ -561,7 +567,7 @@ public partial class ViewerApp
             bool showObjects = !request.HideObjects;
             _worldScene.ObjectsVisible = showObjects;
             _worldScene.WmosVisible = showObjects;
-            _worldScene.DoodadsVisible = false;
+            _worldScene.DoodadsVisible = showObjects;
         }
     }
 
@@ -783,6 +789,7 @@ public partial class ViewerApp
             PreviousWlLiquidsVisible = _worldScene?.ShowWlLiquids ?? true,
             PreviousObjectPathFiltersEnabled = _worldScene?.ObjectPathFiltersEnabled ?? true,
             PreviousObjectStreamingRangeMultiplier = _worldScene?.ObjectStreamingRangeMultiplier ?? 0.5f,
+            PreviousMaxVisibleMdxBoundsHeight = _worldScene?.MaxVisibleMdxBoundsHeight ?? 0f,
             DatasetRoot = plan.DatasetRoot,
             MapName = plan.MapName,
             OutputDirectory = plan.OutputDirectory,
@@ -790,6 +797,7 @@ public partial class ViewerApp
             NoObjectsOutputDirectory = plan.NoObjectsOutputDirectory,
             ObjectsOnlyOutputDirectory = plan.ObjectsOnlyOutputDirectory,
             RequestedResolution = requestedResolution,
+            ExitAfterCompletion = plan.ExitAfterCompletion,
             RemainingCaptures = plan.Tiles.Count,
         };
 
@@ -810,6 +818,7 @@ public partial class ViewerApp
             _worldScene.ShowWlLiquids = false;
             _worldScene.ObjectPathFiltersEnabled = false;
             _worldScene.ObjectStreamingRangeMultiplier = Math.Max(_worldScene.ObjectStreamingRangeMultiplier, 1.0f);
+            _worldScene.MaxVisibleMdxBoundsHeight = MkHarvestViewerValidationMaxVisibleMdxBoundsHeight;
         }
 
         foreach (MkHarvestViewerValidationCaptureTile tile in plan.Tiles)
@@ -825,8 +834,8 @@ public partial class ViewerApp
                     WaitForSceneReady = true,
                     TargetTileX = tile.TileX,
                     TargetTileY = tile.TileY,
-                    RequiredSettledFrames = 24,
-                    MaxFramesBeforeCapture = 1800,
+                    RequiredSettledFrames = MkHarvestViewerValidationRequiredSettledFrames,
+                    MaxFramesBeforeCapture = MkHarvestViewerValidationMaxFramesBeforeCapture,
                     CaptureLabel = tile.HideTerrain
                         ? $"{tile.TileName} (objectsonly)"
                         : (tile.HideObjects
@@ -840,7 +849,7 @@ public partial class ViewerApp
         }
 
         AppendMkHarvestLogLine(
-            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} capture(s). Viewer chrome is hidden, doodads and WL liquids are disabled for all variants, object path filters are disabled, the primary output keeps terrain liquids and visible objects, the 'noliquids' sub-folder disables terrain liquids, the 'noobjects' sub-folder hides world objects, the 'objectsonly' sub-folder hides terrain, WDL, liquids, and sky while keeping visible world objects, object streaming is widened, the validation sun direction is forced for deterministic top-down shading, the batch waits for world assets to settle, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
+            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} capture(s). Viewer chrome is hidden, WL liquids are disabled for all variants, object path filters are disabled, MDX objects taller than {MkHarvestViewerValidationMaxVisibleMdxBoundsHeight:F0} world units are suppressed during the batch, the primary output keeps terrain liquids and visible world objects including doodads, the 'noliquids' sub-folder disables terrain liquids, the 'noobjects' sub-folder hides world objects, the 'objectsonly' sub-folder hides terrain, WDL, liquids, and sky while keeping visible world objects, object streaming is widened, the validation sun direction is forced for deterministic top-down shading, the batch waits for world assets to settle for {MkHarvestViewerValidationRequiredSettledFrames} ready frame(s), and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
     }
 
     private static Vector3 BuildMkHarvestViewerValidationLightDirection(Vector3 currentLightDirection)
@@ -978,6 +987,7 @@ public partial class ViewerApp
             _worldScene.ShowWlLiquids = batch.PreviousWlLiquidsVisible;
             _worldScene.ObjectPathFiltersEnabled = batch.PreviousObjectPathFiltersEnabled;
             _worldScene.ObjectStreamingRangeMultiplier = batch.PreviousObjectStreamingRangeMultiplier;
+            _worldScene.MaxVisibleMdxBoundsHeight = batch.PreviousMaxVisibleMdxBoundsHeight;
         }
 
         StitchMkHarvestViewerValidationOutputs(
@@ -994,6 +1004,9 @@ public partial class ViewerApp
             _statusMessage = statusMessage;
             AppendMkHarvestLogLine(statusMessage);
         }
+
+        if (batch.ExitAfterCompletion)
+            _window.Close();
     }
 
     private void StitchMkHarvestViewerValidationOutputs(
@@ -1039,6 +1052,9 @@ public partial class ViewerApp
         string imagesDirectory = Path.Combine(datasetRoot, "images");
         Directory.CreateDirectory(imagesDirectory);
 
+        string buildVersion = GetCurrentCaptureBuildVersion();
+        bool preferDirectObjectsOnlyMask = ShouldPreferDirectObjectsOnlyMask(buildVersion);
+
         int updatedTiles = 0;
         int skippedTiles = 0;
 
@@ -1066,7 +1082,9 @@ public partial class ViewerApp
                     noObjectsImage.Mutate(ctx => ctx.Resize(withObjectsImage.Width, withObjectsImage.Height));
                 }
 
-                using Image<L8> maskImage = TryBuildDirectObjectVisibilityMask(tileName, withObjectsImage.Width, withObjectsImage.Height, objectsOnlyOutputDirectory)
+                using Image<L8> maskImage = (preferDirectObjectsOnlyMask
+                    ? TryBuildDirectObjectVisibilityMask(tileName, withObjectsImage.Width, withObjectsImage.Height, objectsOnlyOutputDirectory)
+                    : null)
                     ?? BuildObjectVisibilityDiffMask(withObjectsImage, noObjectsImage);
 
                 string objectMaskFileName = $"{tileName}_object_visibility_mask.png";
@@ -1103,7 +1121,14 @@ public partial class ViewerApp
             }
         }
 
-        AppendMkHarvestLogLine($"Object-visibility artifacts: updated {updatedTiles} tile json(s), skipped {skippedTiles} tile(s) without matching captures. Direct object-only masks are preferred when available; with/no-object diff remains the fallback.");
+        AppendMkHarvestLogLine(
+            $"Object-visibility artifacts: updated {updatedTiles} tile json(s), skipped {skippedTiles} tile(s) without matching captures. {(preferDirectObjectsOnlyMask ? "This build prefers direct object-only silhouettes so early underground object bleed-through is preserved." : "This build prefers with/no-object diffs so terrain occlusion wins over terrain-hidden silhouettes." )} Build={buildVersion}.");
+    }
+
+    private static bool ShouldPreferDirectObjectsOnlyMask(string buildVersion)
+    {
+        int[]? buildTuple = ParseBuildTuple(buildVersion);
+        return buildTuple != null && buildTuple[0] == 0;
     }
 
     private static Image<L8>? TryBuildDirectObjectVisibilityMask(string tileName, int width, int height, string objectsOnlyOutputDirectory)

@@ -108,14 +108,62 @@
   - `inspect_v16_harvest_samples.py` now renders raw `mddf`, raw `modf`, and
     `object_filtered_mask_257` explicitly, so preview QA shows the real terrain
     loss gate instead of only the merged raw object channel
+  - MdxViewer validation capture now also emits renderer-truth
+    `object_visibility_mask` / `no_object_minimap` artifacts from the live
+    primary/noobjects/objectsonly families instead of depending only on the
+    harvester-side approximate object masks
+  - capture overrides now keep doodads visible with world objects, so MDX/M2
+    silhouettes flow into the same renderer-truth object-mask path as WMOs
+  - startup automation can now queue a bounded validation batch directly with:
+    - `--validation-dataset-root`
+    - `--validation-output`
+    - `--validation-resolution`
+    - `--force-validation-regeneration`
+    - `--exit-after-validation`
+  - object-mask artifact generation is now build-aware:
+    - `0.x` builds prefer the direct `objectsonly` silhouette so early
+      underground-object bleed-through is preserved
+    - later builds prefer `primary` vs `noobjects` diffs so terrain occlusion
+      wins over terrain-hidden silhouettes
   - Zarr-mutating `build_v16_dataset.py` commands now require
     `--allow-zarr-write`; preview-first is the enforced operator path
   - current proof level:
     - `dotnet build wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj -c Debug`
     - raw harvest preview rerun for `3_3_5_12340 / Azeroth` succeeded after the
       MDDF filter and inspector changes
-  - remaining open issue: WMO/MODF panels are still largely box-shaped in raw
-    preview, so the precise silhouette slice is not yet closed end-to-end
+    - `dotnet build gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug`
+      succeeded after the renderer-truth doodad/mask policy hotfix
+    - bounded renderer-truth validation runs now exist at:
+      - `output/tmp/mdxviewer_validation_smoke/0_5_3_3368_Azeroth_30_48`
+      - `output/tmp/mdxviewer_validation_smoke/3_3_5_12340_Azeroth_30_48`
+        - `output/tmp/mdxviewer_validation_smoke_fix_wmo/3_3_5_12340_Azeroth_30_48`
+        - `output/tmp/mdxviewer_validation_smoke_heightfilter/3_3_5_12340_Azeroth_30_48`
+    - the `0.5.3.3368` exported mask matched the direct `objectsonly`
+      silhouette exactly on `Azeroth_30_48`
+    - the `3.3.5.12340` exported mask diverged from the direct
+      `objectsonly` silhouette on the same tile, proving the later-build
+      occluded diff path was the one used at runtime
+      - `WmoRenderer` now carries a bounded near-camera visibility hotfix so
+        large nearby WMO roots no longer collapse to a single visible group in
+        the validation captures
+      - validation capture batches now wait longer before capture and can hide
+        very tall MDX clutter through a bounds-height threshold during the batch
+      - current real renderer-truth proof still covers only:
+        - `0_5_3_3368`
+        - `3_3_5_12340`
+      - remaining build proof is still open for:
+        - `0_5_5_3494`
+        - `0_7_0_3694`
+        - `3_0_1_8303`
+        - `4_0_0_11927`
+      - active `V16.2` direction is now sidecar-first:
+        - keep finalized base V16 stores intact
+        - stage renderer-truth and richer precise-mask signals into separate
+          sidecar stores first
+        - only consider merge-back after broader cross-build validation exists
+  - remaining open issue: the shared harvester-side raw WMO/MODF preview is
+    still approximate; the precise renderer-truth path currently lives in
+    MdxViewer validation capture artifacts instead
 - The shared V16.1 trainer now has real gradient accumulation through
   `--grad-accum-steps`; this is the intended path for the 4070 Ti SUPER instead
   of pretending large micro-batches fit in VRAM.

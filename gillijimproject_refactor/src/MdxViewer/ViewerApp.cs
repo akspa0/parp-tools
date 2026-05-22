@@ -6870,7 +6870,7 @@ void main() {
         ImGui.SetNextItemWidth(180f);
         ImGui.SliderInt("Validation Resolution", ref _mkHarvestViewerValidationResolution, 512, 4096);
         ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "ML dataset finalize now writes the manifest and only queues live MdxViewer validation minimaps. It no longer generates baked 4k reference minimaps from exported layers.");
-        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "Validation capture defaults to 512px square output, temporarily hides chrome, disables doodads and WL liquids, emits both the primary viewer_validation_minimaps set and a noliquids/ variant, stitches both families after capture, waits for world assets to settle, and resizes the viewer window to the requested square output size while the batch runs.");
+        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "Validation capture defaults to 512px square output, temporarily hides chrome, disables WL liquids, keeps visible world objects including doodads in the primary and objectsonly captures, emits primary plus noliquids/noobjects/objectsonly variants, prefers direct objectsonly silhouettes for 0.x builds, prefers primary-vs-noobjects visibility diffs for later builds so terrain occlusion wins, stitches the capture families after the batch, waits for world assets to settle, and resizes the viewer window to the requested square output size while the batch runs.");
 
         ImGui.Spacing();
         bool hasDatasetRoot = !string.IsNullOrWhiteSpace(_mkHarvestDatasetRoot);
