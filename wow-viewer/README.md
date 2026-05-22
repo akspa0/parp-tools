@@ -121,6 +121,32 @@ headroom is available; keep `8 x 1` as the safer fallback before dropping to
 `4 x 2`, `2 x 4`, or `1 x 8`. The shared trainer can now also probe a batch
 ladder automatically with `--target-vram-gb` plus `--autotune-batch-size`.
 
+For V16.1.x normal training, resume uses `--resume-checkpoint`. The older
+`--resume-from auto` flow is only on `train_v16.py`.
+
+```powershell
+uv run python -u scripts\train_v16_1_normal.py `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --curation-manifest ..\output\datasets\v16\curation\normal_terrain_full_corpus_v16_1_1 `
+  --device auto `
+  --batch-size 16 `
+  --grad-accum-steps 1 `
+  --target-vram-gb 12 `
+  --autotune-batch-size `
+  --train-max-tiles 400 `
+  --train-epoch-tiles 128 `
+  --bucket-sampling-profile v16_1_1_normal `
+  --val-max-tiles 48 `
+  --epochs 100 `
+  --num-workers -1 `
+  --val-preview-interval 2 `
+  --run-name v16_1_1_normal_curated_pool400_epoch128_bs16 `
+  --resume-checkpoint ..\models\v16_1\normal\runs\v16_1_1_normal_curated_pool400_epoch128_bs16\checkpoints\v16_1_normal_last.pt
+```
+
+As with V16, `--epochs` is the new total ceiling for the run, not extra epochs
+to add after the checkpoint.
+
 ## What Lives Here
 
 ### Shared WoW I/O

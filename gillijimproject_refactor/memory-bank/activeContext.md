@@ -36,6 +36,12 @@
     - `wow-viewer/output/datasets/v16/curation/smoke_v16_1_1_curation_335/`
     - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_1_bucket_cpu/`
     - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_1_bucket_rotation_cpu/`
+  - first longer GPU normal run now exists at:
+    - `wow-viewer/models/v16_1/normal/runs/v16_1_1_normal_pool800_epoch256_autotune12_compile/`
+  - current operator truth:
+    - the first longer V16.1.1 normal run finished, but it still needs more epochs
+    - V16.1.x normal training resumes with `--resume-checkpoint`, not `--resume-from auto`
+    - `--epochs` remains the total run ceiling, so the continuation command must raise that ceiling above the completed checkpoint epoch
 - V16.1 is now the named next architecture lane for terrain models:
   - one independent model per target family
   - `minimap -> height`
@@ -282,6 +288,8 @@
     and training-efficiency improvements
   - treat a mixed `400`-tile scouting pool as the first proof surface before
     any longer rerun
+  - the current longer-run continuation path is a resume, not a fresh launch
+    from scratch
 - Alpha/minimap alignment audit:
   - `wow-viewer/output/datasets/v16/validation/alpha_minimap_alignment/alpha_minimap_alignment.summary.json`
   - sampled corpus result: `edge_f1_mean≈0.54`, `median≈0.64`, but `p10=0.0`, confirming a real zero-match bad tail

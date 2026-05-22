@@ -188,7 +188,8 @@
   - `wow-viewer/data-harvester/README.md` documents manifest build, curated
     V16.1 normal training, resume, and VRAM tuning ladder
   - `wow-viewer/README.md` now points root-level readers at the curation-first
-    V16.1 path
+    V16.1 path and explicitly calls out that V16.1.x resume uses
+    `--resume-checkpoint` rather than the older V16 `--resume-from auto`
   - current recommended command contract is now documented:
     - curation: `--workers -1 --chunk-size 128`
     - train: `--batch-size 16 --grad-accum-steps 1`
@@ -258,6 +259,11 @@
       - evidence writes at `evidence/batch_autotune.json`
       - focused proof run:
         - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_autotune_gpu/`
+  - first longer real-run proof now exists at:
+    - `wow-viewer/models/v16_1/normal/runs/v16_1_1_normal_pool800_epoch256_autotune12_compile/`
+  - current continuation rule for that lane:
+    - resume the existing run with `--resume-checkpoint .../checkpoints/v16_1_normal_last.pt`
+    - increase `--epochs` to the new total target instead of treating it as extra epochs to add
 - Focused proof now exists for that slice:
   - curation smoke:
     - `wow-viewer/output/datasets/v16/curation/smoke_v16_1_1_curation_335/`
