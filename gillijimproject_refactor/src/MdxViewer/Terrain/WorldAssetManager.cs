@@ -72,6 +72,7 @@ public class WorldAssetManager : IDisposable
     private readonly IDataSource? _dataSource;
     private readonly ReplaceableTextureResolver? _texResolver;
     private string? _buildVersion;
+    private bool _enableRuntimeWmoGroupVisibility = true;
 
     // ── Shared caches ──────────────────────────────────────────────────
 
@@ -145,6 +146,21 @@ public class WorldAssetManager : IDisposable
     public void SetBuildVersion(string? buildVersion)
     {
         _buildVersion = buildVersion;
+    }
+
+    public bool EnableRuntimeWmoGroupVisibility
+    {
+        get => _enableRuntimeWmoGroupVisibility;
+        set
+        {
+            if (_enableRuntimeWmoGroupVisibility == value)
+                return;
+
+            _enableRuntimeWmoGroupVisibility = value;
+
+            foreach (var renderer in _wmoModels.Values)
+                renderer?.SetRuntimeGroupVisibilityEnabled(value);
+        }
     }
 
     public void ApplyTextureSamplingSettings()
@@ -1198,7 +1214,8 @@ public class WorldAssetManager : IDisposable
             string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
             return new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion,
                 deferInitialDoodadLoads: true,
-                deferInitialMaterialTextureLoads: true);
+                deferInitialMaterialTextureLoads: true,
+                enableRuntimeGroupVisibility: _enableRuntimeWmoGroupVisibility);
         }
         catch (Exception ex)
         {

@@ -42,7 +42,7 @@ public class WmoRenderer : ISceneRenderer
     private readonly string? _buildVersion;
     private readonly bool _deferInitialDoodadLoads;
     private readonly bool _deferInitialMaterialTextureLoads;
-    private readonly bool _enableRuntimeGroupVisibility;
+    private bool _enableRuntimeGroupVisibility;
 
     // Shared static shader program — prevents race condition when multiple WmoRenderers
     // exist and one is disposed (same fix as MdxRenderer)
@@ -358,6 +358,11 @@ public class WmoRenderer : ISceneRenderer
     public void SetRuntimeDoodadsVisible(bool visible)
     {
         _runtimeDoodadsVisible = visible;
+    }
+
+    public void SetRuntimeGroupVisibilityEnabled(bool enabled)
+    {
+        _enableRuntimeGroupVisibility = enabled;
     }
 
     public void ToggleWireframe()

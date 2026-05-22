@@ -10,6 +10,10 @@
   - `wow-viewer/README.md`
   - `wow-viewer/data-harvester/README.md`
   - `wow-viewer/docs/architecture/v16-terrain-model-spec-2026-05-16.md`
+- **Spec 009 landed (2026-05-22):** Master design specification at
+  `wow-viewer/specs/009-full-project-reimplementation-spec/spec.md` (2,650 lines).
+  28 sections covering every subsystem with byte-level detail. The doc audit
+  (`speckit-doc-audit-2026-05-18.md`) updated to reflect this.
 
 ## Validated Now
 

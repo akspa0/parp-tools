@@ -3,6 +3,7 @@
 **Feature:** 009 — Complete Reimplementation Spec
 **Date:** 2026-05-22
 **Purpose:** Design specification sufficient to fully reimplement the MdxViewer + wow-viewer project as a single new project in a new repository from scratch, preserving all functionality.
+**Scope:** 4+ years of personal WoW format reverse engineering, terrain AI research, and viewer development — condensed into a single design notebook.
 
 ---
 
@@ -22,6 +23,89 @@ The system has three major product surfaces:
 - **~35,000+ lines of C#** (core libraries, tools, viewer)
 - **~8,000+ lines of Python** (dataset building, training, inference)
 - **~140 test files** with broad format coverage
+
+### Design Notebook Index
+
+This specification is organized as a layered reference. Sections 1–12 define the **what** (requirements, architecture, formats at a glance). Sections 13–28 are the **how** (deep-dives into every subsystem with exact algorithms, byte layouts, shader source, and hard-won edge cases that only exist in code).
+
+---
+
+## Design Notebook — Table of Contents with Synopses
+
+### Part I: Foundations (Sections 1–7)
+
+**§1 Executive Summary** — Project scope, statistics, and this index.
+
+**§2 Architecture Overview** — The four-layer stack: Domain Models → Core I/O → Runtime Pipeline → Product Surfaces. Technology stack (C#/.NET 10, Silk.NET/OpenGL, Python/PyTorch, Zarr v3). Repo independence constraint: the project must be extractable as a standalone repository with zero external path references.
+
+**§3 Binary Format Specifications** — The byte-level truth for every WoW file format the project reads or writes. Covers WDT (Alpha and LK variants), ADT (embedded and split), MCNK chunks, MCVT heightmap (145-vertex staggered grid), MCNR normals (XZY-swizzled sbytes), MCLY texture layers, MCAL alpha decoding (all 4 encoding types: Packed4Bit, Compressed/RLE, BigAlpha, BigAlphaFixed), MDDF/MODF placement structs, MCCV vertex colors (BGR swizzle), MCSH shadow maps, BLP textures (BLP0/1/2 headers), M2 models (MD20 header, 48-byte vertex format, 20-byte animation tracks, skin profiles), MDX legacy models (MDLX, geoset sub-chunks), WMO root and groups (MOHD, MOMT, portal system, doodad system), WDL low-res heightmaps, LIT lighting, and MPQ archive structure (hash/block tables, encryption, compression). Every FourCC, every field offset, every struct stride.
+
+**§4 Rendering Pipeline Specifications** — GPU-side contracts. OpenGL 3.3 core shaders. Vertex attribute layouts for all renderers (terrain: 44-byte interleaved + separate chunk-slice/tex-index VBOs; M2: 32-byte position+normal+UV; WMO: 32-byte). Shader uniform bindings and texture unit assignments. Draw call batching sort keys and batch-sharing rules. World composition 8-layer stack (Sky → SkyboxBackdrop → Wdl → Terrain → Liquid → Wmo → Doodad → Overlay). Pass execution order. M2 10-stage frame pipeline (animation → bone pose → skinning → effects → scene submission → render frame). Framebuffer formats (Rgba8 + DepthComponent24).
+
+**§5 Terrain AI Pipeline Specifications** — The complete ML dataset contract. Zarr v3 store layout with 18 signal arrays (height, normals, alpha, holes, liquid, objects, shadows, MCLY) and their exact shapes, dtypes, and chunk sizes. Parquet index format. Streaming protocol: C# harvester writes ARRY binary blobs to stdout, Python reads and writes directly to Zarr — no intermediate files. ARRY format byte layout. Compositing algorithm: 4-layer hierarchical MCAL alpha blend (`w0=1-a1, w1=a1*(1-a2), ...`). Placeholder colors. All 5 V16.1 model architectures with exact layer specs (ConvNeXt V2 Nano encoder, U-Net decoder, task-specific heads). All 5 loss function formulas (height L1 masked, normal cosine+vec_l1+nz_l2, holes BCE, liquid mask+type CE, texcomp alpha+mask+id+recompose). Training config (AdamW, cosine LR, AMP, grad clipping, difficulty bucket sampling). Inference output contract. Curation metrics (grayscale, edge strength, alpha painted, normal relief, difficulty buckets).
+
+**§6 CLI Tool Specifications** — Every command surface. Inspect tool: 14 commands for format diagnostics (archive, audio, blp, m2, mdx, map, lit, pm4, wmo). Converter tool: 30+ commands for format conversion and dataset management (detect, dataset-*, convert-*, ml-*, mine-*, validate-roundtrip). Harvest tool: 7 commands for dataset extraction (harvest-tile, harvest-map, harvest-map-mpq, harvest-stream, extract-unified, synthetic-minimap, discover-maps). Dataset build CLI subcommands. Training CLI arguments. Inference CLI arguments.
+
+**§7 Client Build Support** — The 6 supported WoW client builds (0.5.3 through 4.0.0), their expansion era, and format characteristics (Alpha embedded ADT, LK split ADT, Cataclysm changes).
+
+### Part II: Requirements and Planning (Sections 8–12)
+
+**§8 Functional Requirements** — 12 FRs covering multi-era terrain reading, format conversion, 3D rendering, interactive viewer, dataset harvesting, ML training, ML inference, format inspection, archive access, glTF export, PM4 analysis, and data validation.
+
+**§9 Non-Functional Requirements** — 8 NFRs: repo independence, real-data validation, streaming-first pipelines, residual model chain, buildability, test coverage, performance (AOI streaming), extensibility (Vulkan, WebGL, ML content).
+
+**§10 User Stories** — 13 stories across P1/P2/P3 priorities with Given/When/Then acceptance scenarios.
+
+**§11 Implementation Phases** — 8 phases from Core I/O foundation through advanced features (Vulkan, WebGL, audio, ML content generation).
+
+**§12 Success Criteria** — 8 measurable outcomes.
+
+### Part III: Deep-Dives — The Code Is the Truth (Sections 13–28)
+
+These sections capture what only exists in working code. Documentation is often wrong or outdated; the codebase is the authoritative source. Each deep-dive extracts exact algorithms, constants, edge cases, and open questions from the implementation.
+
+**§13 Deep-Dive: PM4 Format (Practically Unknown)** — The pathmap format that took years of research to partially decode. 16 recognized chunks with binary record layouts and field-level confidence ratings (Known/Partial/Open). The 4-level hierarchy model: Region (MSHD.Field04) → Object (CK24) → Sub-object (MSLK.GroupObjectId) → Surfaces (MSUR) + Positions (MPRL). CK24 type classification (nav mesh, M2 interior/exterior, WMO). Cross-tile merge via MSCN connector keys with Union-Find. Coordinate transforms (3 axis conventions, 2 coordinate modes, planar transform scoring). Verified vs partial linkages. 10 open research questions ranked by impact. This section is a living research document — not a solved spec.
+
+**§14 Deep-Dive: WMO Portal Visibility (BFS Flood-Fill)** — The algorithm that determines which WMO interior groups are visible. BFS from camera through portal adjacency graph. Two early-out paths (camera inside root → all visible; no exterior groups → frustum only). Portal reveal distances (exterior: 1024, interior: 3072). Traversal depth limits (exterior: 1, interior: 4). Known simplifications: portal plane-side test not used, BSP tree not traversed.
+
+**§15 Deep-Dive: Terrain Edge Cases and Special Handling** — The accumulated terrain knowledge from 4 years of format work. 3-phase seam stitching (edge → corner → predicted edge anchoring). MCNK subchunk size inflation (declared sizes unreliable for MCNR/MCAL/MCSH). Coordinate system transform (world↔file, axes swapped and negated through MapOrigin=17066.666). Normal XZY swap. MCCV BGR swizzle. MCAL packed 4-bit column 31 edge case. Legacy edge fix (corrupted last column/row). BigAlphaFixed Cataclysm truncation fix. MCAL force-compressed logic. Residual alpha synthesis. Heightmap sentinel 0.0f. Normal Z-flip guarantee. Format profile matrix per build.
+
+**§16 Deep-Dive: M2 Animation System** — The animation evaluation pipeline. Hermite and Bezier cubic interpolation (exact formulas). Quaternion cubic as linear blend of components + normalize (NOT slerp — this is the WoW engine's approach, not standard). Compressed quaternion encoding (4 × int16 with asymmetric decode around 32767/-32768). 4-influence bone skinning with 3-level bone index resolution. Skin vertex resolution two-pass (direct lookup + GlobalVertexOffset fallback).
+
+**§17 Deep-Dive: GLSL Shaders (Complete Source)** — All 5 shader programs embedded in the C# viewer: terrain (textured quad with alpha layer blending), sky backdrop (procedural gradient + starfield via FNV-1a hash), M2 model (directional lighting + UV transform), MDX model (half-Lambert diffuse + bone skinning + sphere env map), WMO model (half-Lambert with minimum 0.18 ambient floor). Full GLSL 330 core source for both vertex and fragment shaders.
+
+**§18 Deep-Dive: Converter Algorithms** — The exact conversion pipelines. WMO v14→v17: split monolithic file, upconvert MOMT 44/48→64 bytes, upconvert MOGI 40→32 bytes, rename MOIN→MOVI, upconvert MOPY 4→2 bytes. WMO v17→v14: reverse with group splitting (max 384 groups, max 49151 vertices), portal layout remapping, overflow merging. MDX→M2: build M2 v0x108 with 48-byte vertices, single skin per geoset. M2→MDX: compress quaternion encoding, accumulate sequence start times.
+
+**§19 Deep-Dive: WMO Liquid System** — MLIQ parsing (30-byte header, 8-byte vertex records). Orientation auto-fit: test 4 rotations, score by overflow penalty × 1000 + center distance, legacy default orientation 2. Liquid type dispatch from Ghidra (nibble→water/magma/slime, ocean flag override). Color assignment per type. Vertex mapping for 4 orientations. Tile size: 4.16666f (1/8th of map chunk).
+
+**§20 Deep-Dive: Vertex Lighting Fallback Chain** — Three-tier fallback for WMO vertex colors: (1) direct BGRA vertex colors with luminosity ≥ 10/255 rejection, (2) v14 lightmap sampling (MOLV UVs + MOLD pixels + MOLM infos) with luminosity ≥ 0.08 rejection, (3) all-white fallback. Why these thresholds exist: prevents black lighting from corrupting the scene.
+
+**§21 Deep-Dive: M2 Draw Call Batching** — Batch limits (65535 vertices, 98304 indices). Sort key hierarchy (Family → ModelKey → TextureSortKey → EffectKey → StateBucket → DepthSortValue → EntryKey). Batch sharing rules (7 fields must match). Family policies (Core=batched, Projected=dedicated state, Doodad=batched if flag, Ribbon/Particle=dedicated). M2RuntimeOptions flags.
+
+**§22 Deep-Dive: Triangle Winding Conversion** — WoW uses CW front faces, OpenGL uses CCW. Swap `indices[t+1] <-> indices[t+2]` at buffer upload time. Applied to WMO, M2, and terrain index buffers.
+
+**§23 Deep-Dive: M2 Effect Recipe Classification** — Diffuse family selection (None/T1/T1T2/T1T2T3/T1T2T3T4/Projected). Combiner family from blend mode (Opaque/AlphaKey/Decal/Add/Mod/Mod2X/Fade). State bucket bitfield for render state sorting (10 bits encoding blend mode, depth write, alpha test, two-sided, unshaded, additive, projected).
+
+**§24 Deep-Dive: M2 Particle/Ribbon Effects** — Particle classification (7 blend types → effect keys). State bucket encoding (blend type | emitter type | particle type | head/tail). Max 65535 particles per emitter. Ribbon edge count estimation. Geometry estimation (particles: 4 verts + 6 indices per quad; ribbons: 2 verts per edge point).
+
+**§25 Deep-Dive: Object Masking System (Training Breakthrough)** — The breakthrough that made ML training viable. Six 257×257 output masks: binary, precise (soft-edged), instance ID, doodad-only, WMO-only, filtered (excludes nature/clutter). Four candidate projection modes for world→tile coordinate conversion (handles coordinate ambiguity across Alpha/LK/Cata/WoD). MODF bounding box flip through origin. PaintCircle/PaintSoftCircle algorithms. Three-tier WMO fallback: exact mesh footprint (Sutherland-Hodgman clipping + edge-function rasterization) → chunk-coverage from MCRF/MCRW → AABB bounds → circle. Object filtered mask: regex exclusions for 30+ nature keywords, size thresholds (3m extent, 6m² area, 8m height with 1.35 aspect). Shadow residual: isolates terrain self-shadowing by subtracting object mask from shadow map.
+
+**§26 Deep-Dive: Liquid System Across All Versions** — Complete version-handling matrix (Alpha through Cata+). Unified liquid priority chain: MH2O > MCLQ > WL* (strict fallback, NO blending). MH2O per-layer mapping with offset/width/height. MCLQ 129×129 → 257×257 bilinear upsample. WL loose file 4×4 block rasterization with distance-weighted blending. Alpha flat per-chunk fill. 8 edge cases including the viewer using MCLQ>MH2O (opposite priority from unified builder).
+
+**§27 Deep-Dive: World Rendering Pipeline (Open Map → Pixels)** — Complete 7-phase pipeline. Session bootstrap (WDT resolution, archive catalog, fuzzy map directory lookup). 3×3 tile window construction. Object instance construction with the exact MDX legacy rotation matrix. Visibility culling: vision cone factor from dot product, cone-adjusted cull distance, 3 quality profiles (Quality/Balanced/Performance). Asset inventory streaming with budget (2 loads/frame, 4ms max). Pass coordination: 11-pass render order. GPU terrain rendering with Texture2DArray and alpha shadow array. Sky rendering with procedural gradient and starfield. Marker rendering (GL_POINTS, gold for WMO, blue for MDX).
+
+**§28 Deep-Dive: Legacy WMO Renderer (Reference Implementation)** — The complete 2,564-line reference renderer. 5-pass pipeline (opaque shell → doodad opaque → liquid → doodad transparent → transparent shell). Portal BFS with all constants (32f padding, 192f near-root distance, 1024/3072 portal reveal, depth 1/4). WMO 48-byte vertex format with vertex lighting. Half-Lambert + baked lighting shader. Deferred loading budgets (1 load/frame, 2ms max). M2 skin resolution 3-level fallback. Vertex lighting 3-tier fallback. Blend state from Ghidra (EGxBlend). Render queue (opaque front-to-back, transparent back-to-front). 20 specific features NOT yet ported to wow-viewer — the remaining work.
+
+---
+
+## How to Use This Spec
+
+1. **For format work:** Start at §3 (byte layouts), then check the relevant §15+ deep-dive for edge cases.
+2. **For rendering work:** Start at §4 (GPU contracts), then §17 (shader source), then §27 (world pipeline).
+3. **For ML/dataset work:** Start at §5 (dataset contract), then §25 (object masking), then §26 (liquid).
+4. **For conversion work:** Start at §18 (converter algorithms), then §15 (terrain edge cases).
+5. **For PM4 research:** §13 is the entire research state — knowns, unknowns, hypotheses, open questions.
+6. **For porting legacy features:** §28 lists everything not yet ported, with exact source locations.
 
 ---
 
@@ -1333,3 +1417,1234 @@ Vulkan backend, WebGL output, audio engine, ML content generation.
 6. Test suite passes with zero failures against real game data
 7. Project builds cleanly with zero errors on .NET 10 + Python 3.11+
 8. Project is extractable as standalone with no external references
+
+---
+
+## 13. Deep-Dive: PM4 Format (Practically Unknown)
+
+### 13.1 Chunk Inventory (16 Recognized Chunks)
+
+| Chunk | Full Name | Status |
+|-------|-----------|--------|
+| `MVER` | Version | Known |
+| `MSHD` | Map Scene Header | Partially understood |
+| `MSLK` | Map Scene Link | Partially understood |
+| `MSPV` | Map Scene Path Vertices | Known |
+| `MSPI` | Map Scene Path Indices | Known |
+| `MSVT` | Map Scene Vertex | Known |
+| `MSVI` | Map Scene Vertex Indices | Known |
+| `MSUR` | Map Scene Surface | Partially understood |
+| `MSCN` | Map Scene Nodes | Hypothesized role |
+| `MPRL` | Map Position Ref List | Partially understood |
+| `MPRR` | Map Position Ref Range | Partially understood |
+| `MDBH` | Map Destructible Building Header | Partially understood |
+| `MDBI` | Map Destructible Building Index | Partially understood |
+| `MDBF` | Map Destructible Building Filename | Partially understood |
+| `MDOS` | Map Destructible Object State | Partially understood |
+| `MDSF` | Map Destructible Surface | Partially understood |
+
+### 13.2 Binary Record Layouts
+
+**MSHD Header (32 bytes):**
+```
+Offset  Type  Field      Status
+0x00    uint  Field00    Unknown. Candidate: tile-level count.
+0x04    uint  Field04    Region ID. Groups tiles into level-designer areas. (PROMOTED)
+0x08    uint  Field08    Unknown. Appears to mirror Field00 in many files.
+0x0C-0x1C  uint[5]      All zero across entire development corpus. Placeholders.
+```
+- Field04 == 1 = empty stub region (140 of 502 tiles). Active tiles never have Field04=1.
+- Field0C-Field1C are ALL zero across the full development corpus.
+
+**MSUR Entry (32 bytes):**
+```
+Offset  Type   Field        Confidence
+0x00    byte   GroupKey     LOW — grouping/diagnostic semantics open
+0x01    byte   IndexCount   MEDIUM
+0x02    byte   AttributeMask LOW — bit meanings remain open
+0x03    byte   Padding
+0x04    Vector3 Normal     Surface normal (partially used)
+0x10    float  Height      MEDIUM — behaves like signed plane-distance
+0x14    uint   MsviFirstIndex First index into MSVI
+0x18    uint   MscnRefIndex  MEDIUM — index into MSCN (NOT MDOS — naming corrected)
+0x1C    uint   PackedParams  MEDIUM — CK24 derived from this
+```
+PackedParams decoding: `Ck24 = (PackedParams >> 8) & 0x00FF_FFFF`, `Ck24Type = (byte)((PackedParams >> 24) & 0xFF)`.
+
+**MSLK Entry (24 bytes):**
+```
+Offset  Type   Field              Status
+0x00    byte   TypeFlags          OPEN
+0x01    byte   Subtype            OPEN — often floor/layer-like
+0x02    ushort Padding
+0x04    uint   GroupObjectId      LOW — NOT confirmed as full-object identity
+0x08    int    MspiFirstIndex     First index into MSPI path stream
+0x0C    byte   MspiIndexCount     OPEN — indices vs triangles ambiguity
+0x10    uint   LinkId             PARTIAL — sentinel tiles decoded
+0x14    ushort RefIndex           PRIMARY target is MSUR, but mismatches exist
+0x16    ushort SystemFlag         OPEN — 0x8000 dominates
+```
+LinkId decoded: if high 16 bits == 0xFFFF, low 16 bits encode tile coordinates: `tileY = (low >> 8) & 0xFF`, `tileX = low & 0xFF`.
+
+**MPRL Entry (24 bytes):**
+```
+Offset  Type   Field     Status
+0x00    ushort Unk00     OPEN
+0x02    short  Unk02     OPEN — often -1
+0x04    ushort Unk04     MEDIUM — heading angle (degrees = value * 360/65536)
+0x06    ushort Unk06     OPEN — often 0x8000
+0x08    Vector3 Position World-space position (MEDIUM)
+0x14    short  Unk14     OPEN — floor/level indicator
+0x16    ushort Unk16     MEDIUM — 0=normal, nonzero=terminator
+```
+
+### 13.3 The 4-Level Hierarchy Model
+
+```
+Level 0: MSHD.Field04 (Region) — spans multiple ADT tiles
+  Level 1: CK24 (Object) — WMO or M2 collision mesh
+    Level 2: MSLK.GroupObjectId (Sub-object) — linked surface sets
+      Level 3: Individual MSUR surfaces + MPRL positions
+```
+
+**CK24 Type Classification:**
+- 0x00 = Nav mesh
+- 0x40-0x41 = M2 Interior
+- 0x42-0x43 = WMO
+- 0xC0-0xC3 = M2 Exterior
+- CK24 = 0 = nav mesh spanning entire map
+
+**Cross-tile merge:** 21.6% of distinct CK24 values appear in 2+ tiles. Top cross-tile CK24 spans 13+ tiles. Merge uses MSCN connector keys with Union-Find. Keys quantized to 2.0-unit grid. Merge criteria: adjacent tiles, ≥2 shared keys, bounds overlap (32-unit padding) OR center distance ≤256.
+
+### 13.4 Coordinate Transforms
+
+**Constants:**
+```
+TileSize = 533.33333f
+HalfMapExtent = 32 * TileSize = 17066.66656f
+```
+
+**Two Coordinate Modes:** `TileLocal` (0..533.33 range) and `WorldSpace`.
+
+**Three Axis Conventions:** `XZPlaneYUp`, `XYPlaneZUp` (default WoW), `YZPlaneXUp`.
+
+**Planar Transform:** `Pm4PlanarTransform(bool SwapPlanarAxes, bool InvertU, bool InvertV)` — 2-4 candidates tested per mode. Footprint scoring: 85% overlap + 15% centroid distance. Decisive margin: 512.0.
+
+**PM4-to-World (XYPlaneZUp):**
+```
+localU = pm4Vertex.Y; localV = pm4Vertex.X; localUp = pm4Vertex.Z
+if SwapPlanarAxes: swap(localU, localV)
+if TileLocal:
+  mappedU = InvertU ? TileSize - localU : localU
+  mappedV = InvertV ? TileSize - localV : localV
+  worldX = tileY * TileSize + mappedU
+  worldY = tileX * TileSize + mappedV
+else (WorldSpace):
+  worldX = InvertU ? -localU : localU
+  worldY = InvertV ? -localV : localV
+world = (worldX, worldY, localUp)
+```
+
+**MPRL Position Conversion:** `ConvertMprlPositionToWorld(refPos) = (refPos.X, refPos.Z, refPos.Y)` — Y and Z swapped.
+
+**MSCN Hypothesis:** Axis-swapped companion geometry stream. Swapped XY overlap consistently beats raw overlap for MSCN-to-mesh bounds comparison. Not proven with ADT/object ground truth yet.
+
+### 13.5 Verified Linkages
+
+| Relationship | Status |
+|---|---|
+| MSVI → MSVT | Verified |
+| MSPI → MSPV | Verified |
+| MSUR.Msvi window → MSVI | Verified |
+| MDSF.MsurIndex → MSUR | Verified |
+| MDSF.MdosIndex → MDOS | Verified |
+| MSUR._0x18 → MSCN | Partial (many fits, significant misses) |
+| MSLK.RefIndex → MSUR | Partial (primary target, but mismatches) |
+| MPRR.Value1 → MPRL or MSVT | Partial (mixed-mode hypothesis) |
+
+### 13.6 Open Research Questions (Ranked by Impact)
+
+1. MSCN coordinate transform: Is swapped-XY correct?
+2. CK24ObjectId identity mapping: Real UniqueID or sub-identifier?
+3. MSLK.RefIndex final semantics: What are non-MSUR target domains?
+4. MSHD.Field00/Field08 relationship to Field04
+5. MSLK.MspiIndexCount: Indices or triangles?
+6. MPRR.Value1/Value2 full semantics
+7. MPRL.Unk02/Unk06/Unk14 full semantics
+8. Nav mesh (CK24=0) interaction with regions
+9. Cross-region merge rules
+10. MDOS.buildingIndex link type
+
+### 13.7 Cross-Tile Statistics (Development Corpus)
+
+- 616 total PM4 files, 502 non-empty tiles
+- 227 distinct Field04 values (regions)
+- 21.6% of CK24 values span 2+ tiles
+- Field04=1 on 140/502 tiles (empty stubs)
+
+---
+
+## 14. Deep-Dive: WMO Portal Visibility (BFS Flood-Fill)
+
+### 14.1 Algorithm Overview
+
+The renderer uses a **BFS flood-fill through portals** to determine which WMO groups are visible from the camera position.
+
+### 14.2 Initialization
+
+1. Build `portalGroups` dictionary: portal index → set of groups it belongs to
+2. For each group, collect `_groupPortalRefs[groupIndex]` — indices into PortalRefs
+3. Compute `_portalCenters[portalIndex]` — average position of all portal polygon vertices
+4. Build `_groupPortalNeighbors[groupIndex]` — list of `PortalNeighbor(neighborGroup, portalIndex)` tuples. Two groups are neighbors if they share a portal. Dedup key: `((long)portalIndex << 32) | (uint)neighborGroup`.
+
+### 14.3 Runtime BFS
+
+**Step 1: Transform camera to WMO-local space:** `localCameraPos = Vector3.Transform(cameraPos, inverseModelMatrix)`.
+
+**Step 2: Near-root fast path.** If camera is inside the WMO root AABB (expanded by 32 units) OR within `ComputeNearRootFullVisibilityDistance()`:
+```
+largestDimension = max(extents.X, extents.Y, extents.Z)
+scaledDistance = largestDimension * 0.75
+fogLimitedDistance = max(192, fogEnd * 0.75)
+nearRootDist = max(192, min(scaledDistance, fogLimitedDistance))
+```
+ALL groups become visible immediately. No BFS needed.
+
+**Step 3: Seed selection:**
+- Camera inside root: find groups containing camera, enqueue at depth 0
+- Camera outside root: find exterior groups (`flags & 0x8 != 0`) that are frustum-visible, enqueue at depth 0
+- If queue empty: fall back to nearest group by AABB distance
+- If nearest group within near-root distance: show all groups
+
+**Step 4: BFS traversal:**
+```
+portalRevealDistance = cameraInsideRoot
+    ? max(InteriorPortalRevealDistance=3072, min(fogEnd, 5000))
+    : max(ExteriorPortalRevealDistance=1024, min(fogEnd * 0.4, 1800))
+maxTraversalDepth = cameraInsideRoot ? 4 : 1
+
+while queue not empty:
+    (groupIndex, depth) = dequeue
+    runtimeVisible[groupIndex] = true
+    if depth >= maxTraversalDepth: continue
+    for each neighbor in groupPortalNeighbors[groupIndex]:
+        if neighbor already visited: continue
+        if !ShouldTraversePortal(neighbor, ...): continue
+        enqueue neighbor at depth + 1
+```
+
+**Step 5: `ShouldTraversePortal`:**
+- Compute portal center in world space
+- Check `distanceSq <= portalRevealDistanceSq`
+- If camera inside root: always traverse (distance check only)
+- If camera outside root: traverse only if neighbor is frustum-visible OR is exterior group
+
+### 14.4 Known Simplifications
+
+1. **Portal plane-side test NOT used:** The renderer uses portal center distance rather than testing the camera's relationship to the portal plane normal. The `Side` field from WmoPortalRef and the `Normal`/`PlaneDistance` from WmoPortalDetail are parsed but NOT used in the visibility BFS.
+
+2. **BSP tree NOT traversed:** The renderer does group-level culling via BFS + frustum + distance, but does NOT use the per-group BSP tree (MOBN/MOBF) for face-level occlusion culling within a group.
+
+---
+
+## 15. Deep-Dive: Terrain Edge Cases and Special Handling
+
+### 15.1 Seam Stitching (Three-Phase Algorithm)
+
+**Phase 1 — Edge stitching:** For each tile, average the shared edge row/column with its neighbor. Simple `(a + b) * 0.5f`. Both sides mutated in-place.
+
+**Phase 2 — Corner stitching:** For each corner where up to 4 tiles meet, gather all contributions, compute uniform average, write back. Uses `HashSet<(CornerX, CornerY)>` to ensure each corner processed exactly once.
+
+**Phase 3 — Predicted edge anchoring:** For ML-generated heightmaps that don't cover all tiles: only copy from neighbors NOT in the predicted set. Prevents overwriting predicted data.
+
+### 15.2 MCNK Subchunk Size Inflation (CRITICAL)
+
+The subchunk header's size field is **unreliable** for MCNR, MCAL, and MCSH. The authoritative sizes come from:
+- MCNR: fixed known size = 0x1C0 (448 bytes)
+- MCAL: MCNK header offset 0x28 (`sizeMcal`)
+- MCSH: MCNK header offset 0x30 (`sizeMcsh`)
+
+```csharp
+// When encountering MCNR:
+consumedSize = Math.Max(declaredSize, McnrConsumedSize); // 448
+
+// When encountering MCAL:
+consumedSize = Math.Max(declaredSize, headerMcalSize - ChunkHeader.SizeInBytes);
+
+// When encountering MCSH:
+consumedSize = Math.Max(declaredSize, headerMcshSize - ChunkHeader.SizeInBytes);
+```
+
+### 15.3 Coordinate System Transform (CRITICAL)
+
+WoW ADT file format uses a **different coordinate system** than the 3D world:
+
+```csharp
+// World -> ADT file:
+rawX = MapOrigin - worldPosition.Y;  // 17066.666 - Y
+rawY = MapOrigin - worldPosition.X;  // 17066.666 - X
+rawZ = worldPosition.Z;              // Z unchanged
+
+// ADT file -> World:
+worldX = MapOrigin - rawY;
+worldY = MapOrigin - rawX;
+worldZ = rawZ;
+```
+
+Axes are **swapped and negated** through `MapOrigin = 17066.666f`. Z (height) is preserved.
+
+### 15.4 Normal XZY Swap
+
+MCNR stores normals in **XZY order** (not XYZ):
+```
+Byte 0: X component
+Byte 1: Z component (vertical!)
+Byte 2: Y component
+```
+
+Encoding: `clamp(value, -1, 1) * 127`, cast to signed byte, reinterpreted as unsigned.
+
+### 15.5 MCCV BGR Swizzle
+
+Vertex colors are stored **BGR+Alpha**, not RGB:
+```csharp
+colors[idx]     = (byte)(b * 255f); // Blue first
+colors[idx + 1] = (byte)(g * 255f); // Green second
+colors[idx + 2] = (byte)(r * 255f); // Red third
+colors[idx + 3] = 0xFF;              // Alpha = fully opaque
+```
+
+### 15.6 MCAL Packed 4-Bit Column 31 Edge Case
+
+At the end of each row (column 31), the high nibble is **discarded** and replaced with the low nibble value. This handles the fact that 32 bytes × 2 pixels = 64 pixels per row, but the last pixel pair only uses the low nibble.
+
+### 15.7 Legacy Edge Fix (Hard-Won Bug Fix)
+
+The rightmost column and bottom row of packed 4-bit alpha are **corrupted by the packing process**:
+```csharp
+// Fix rightmost column (column 63) of every row
+for (int row = 0; row < 64; row++)
+    alpha[(row * 64) + 63] = alpha[(row * 64) + 62];
+
+// Copy row 62 to row 63 (bottom row)
+Buffer.BlockCopy(alpha, 62 * 64, alpha, 63 * 64, 64);
+
+// Bottom-right corner = row 62, column 62
+alpha[(64 * 64) - 1] = alpha[(62 * 64) + 62];
+```
+
+### 15.8 BigAlphaFixed (Cataclysm Truncation Fix)
+
+Cataclysm sometimes truncates big alpha to 63×63 (3969 bytes). Expansion:
+```csharp
+for row = 0 to 62:
+    bytes_available = min(63, source_end - readPos)
+    copy source to output[row*64 .. row*64+bytes_available]
+    output[row*64 + 63] = output[row*64 + max(0, bytes_available - 1)]  // replicate
+// row 63 = copy of row 62
+```
+
+### 15.9 MCAL Force-Compressed (LK Strict Only)
+
+In LK Strict mode, if `maxLength > 0 && maxLength < 2048` and the compressed flag is NOT set, the code **forces** the compressed flag:
+```csharp
+if (maxLength > 0 && maxLength < 2048)
+    effectiveFlags |= CompressedAlphaFlag;
+```
+This handles cases where the MCLY flag is missing but data is clearly RLE-compressed.
+
+### 15.10 Residual Alpha Synthesis
+
+For overlay layers with no direct alpha data, the last active overlay gets residual coverage:
+```csharp
+alpha_last = 1.0 - sum(alpha_prev_overlays)
+```
+Without this, the base layer would show through everywhere.
+
+### 15.11 Heightmap Sentinel 0.0f
+
+Height 0.0 means "no data" in Alpha format. Gap-filling propagates from nearest non-zero neighbor. Known limitation: could theoretically overwrite legitimate sea-level heights. In practice, Alpha terrain heights are rarely exactly 0.0f at grid vertices.
+
+### 15.12 Normal Z-Flip Guarantee
+
+Computed normals are always flipped to have positive Z:
+```csharp
+if (normal.Z < 0) normal = -normal;
+```
+Ensures terrain surfaces never have downward-facing normals.
+
+### 15.13 Format Profile Matrix
+
+| Build | Alpha Decode | Big Alpha Mask | Liquid Profile |
+|-------|-------------|----------------|----------------|
+| 0.6.0-0.7.0 | LegacySequential | 0 | MCLQ fallback |
+| 3.0.1 (8303) | LichKingStrict | 0x4\|0x80 | MH2O+MCLQ |
+| 3.3.5 (12340) | LichKingStrict | 0x4\|0x80 | MH2O+MCLQ |
+| 4.0.x | Cataclysm400 | 0x4\|0x80 | MH2O only |
+
+---
+
+## 16. Deep-Dive: M2 Animation System
+
+### 16.1 Track Evaluation Pipeline
+
+For each animated property (color, transparency, translation, rotation, scaling):
+1. If no keyframes, return type-specific fallback
+2. Resolve duration: global sequence or sequence-specific
+3. Sample time: `timeMs % period` (no wrapping if duration=0)
+4. Interpolation dispatch: None/Step, Linear, Hermite, Bezier
+
+### 16.2 Hermite Cubic Interpolation
+
+```
+t2 = factor * factor; t3 = t2 * factor
+h00 = 2*t3 - 3*t2 + 1
+h10 = t3 - 2*t2 + factor
+h01 = -2*t3 + 3*t2
+h11 = t3 - t2
+result = start.Value*h00 + start.OutTangent*h10 + end.Value*h01 + end.InTangent*h11
+```
+
+### 16.3 Bezier Cubic Interpolation
+
+```
+inv = 1 - factor
+b0 = inv^3; b1 = 3*inv^2*factor; b2 = 3*inv*factor^2; b3 = factor^3
+result = start.Value*b0 + start.OutTangent*b1 + end.InTangent*b2 + end.Value*b3
+```
+
+### 16.4 Quaternion Cubic (NOT Slerp-Based)
+
+For Hermite/Bezier quaternion tracks, the `CombineCubic` method converts all four Quaternion operands to Vector4, does a weighted sum of all four components independently, then re-normalizes. This is a **linear blend of quaternion components**, not slerp-based spherical interpolation. This is the WoW engine's approach.
+
+### 16.5 Compressed Quaternion Encoding
+
+Four int16 values (8 bytes total):
+```
+Offset 0x00: short (Y)
+Offset 0x02: short (negated X)
+Offset 0x04: short (Z)
+Offset 0x06: short (W)
+```
+
+Decoding: `if value < 0: (value + 32768) / 32767.0; else: (value - 32767) / 32767.0`. Clamped to [-1, 1]. Identity: `(32767, 32767, 32767, -1)` ≈ `(0, 0, 0, -1)`.
+
+### 16.6 Bone Skinning (4 Influences Per Vertex)
+
+```
+For each influence (0..3):
+    weight = vertex.BoneWeights[influence]
+    if weight <= 0: skip
+    boneIndex = ResolveBoneIndex(renderModel, section, vertex.BoneIndices[influence])
+    skinnedPosition += Transform(vertex.Position, pose.Matrices[boneIndex]) * weight
+    skinnedNormal  += TransformNormal(vertex.Normal, pose.Matrices[boneIndex]) * weight
+    totalWeight += weight
+
+if totalWeight <= 0: use original unskinned position/normal
+if |totalWeight - 1.0| > 0.0001: normalize by dividing by totalWeight
+```
+
+**Bone index resolution (three-level fallback):**
+1. Scoped: `section.BoneComboIndex + sectionBoneIndex` → BoneLookup
+2. Direct: `sectionBoneIndex` → BoneLookup
+3. Raw passthrough
+
+### 16.7 Skin Vertex Resolution (Two-Pass)
+
+1. First: `globalIndex = skin.VertexLookup[localSkinVertexIndex]`
+2. Fallback: `globalIndex = skin.VertexLookup[localSkinVertexIndex] + skin.GlobalVertexOffset`
+
+---
+
+## 17. Deep-Dive: GLSL Shaders (Complete Source)
+
+### 17.1 Terrain Fragment Shader
+
+```glsl
+#version 330 core
+in vec3 vWorldPosition;
+in vec3 vNormal;
+in vec2 vTexCoord;
+flat in uint vChunkSlice;
+flat in uvec4 vTexIndices;
+in vec3 vFallbackColor;
+
+uniform sampler2DArray uDiffuseArray;
+uniform sampler2DArray uAlphaShadowArray;
+uniform int uDiffuseLayerCount;
+uniform vec3 uLightDirection;
+uniform vec3 uLightColor;
+uniform vec3 uAmbientColor;
+
+out vec4 FragColor;
+
+bool HasLayer(uint textureIndex)
+{
+    return textureIndex != 65535u && int(textureIndex) < uDiffuseLayerCount;
+}
+
+void main()
+{
+    vec3 normal = normalize(vNormal);
+    float ndotl = max(dot(normal, normalize(uLightDirection)), 0.0);
+    vec3 lighting = uAmbientColor + (uLightColor * ndotl);
+    float texScale = 8.0 / 33.333;
+    vec2 diffuseUv = vec2(-vWorldPosition.y, -vWorldPosition.x) * texScale;
+    vec4 alphaShadow = texture(uAlphaShadowArray, vec3(vTexCoord, float(vChunkSlice)));
+
+    bool has0 = HasLayer(vTexIndices.x);
+    bool has1 = HasLayer(vTexIndices.y);
+    bool has2 = HasLayer(vTexIndices.z);
+    bool has3 = HasLayer(vTexIndices.w);
+
+    vec3 result = vFallbackColor * lighting;
+    if (has0)
+        result = texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.x))).rgb * lighting;
+    if (has1)
+        result = mix(result, texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.y))).rgb * lighting, alphaShadow.r);
+    if (has2)
+        result = mix(result, texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.z))).rgb * lighting, alphaShadow.g);
+    if (has3)
+        result = mix(result, texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.w))).rgb * lighting, alphaShadow.b);
+
+    FragColor = vec4(result, 1.0);
+}
+```
+
+### 17.2 Sky Backdrop Fragment Shader
+
+```glsl
+#version 330 core
+in vec2 vClip;
+uniform mat4 uInverseViewProjection;
+uniform vec3 uCameraPosition;
+uniform vec3 uZenithColor;
+uniform vec3 uHorizonColor;
+uniform vec3 uFogColor;
+uniform float uBackdropStrength;
+uniform vec3 uBackdropTint;
+uniform float uBackdropSeed;
+out vec4 FragColor;
+
+float hash21(vec2 p)
+{
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+
+void main()
+{
+    vec4 farPoint = uInverseViewProjection * vec4(vClip, 1.0, 1.0);
+    vec3 worldPoint = farPoint.xyz / farPoint.w;
+    vec3 ray = normalize(worldPoint - uCameraPosition);
+    float up = clamp(ray.z * 0.5 + 0.5, 0.0, 1.0);
+    float dome = smoothstep(0.18, 0.96, up);
+    float horizonBand = exp(-abs(ray.z) * 5.5);
+    vec3 color = mix(uHorizonColor, uZenithColor, dome);
+    color = mix(color, uFogColor, horizonBand * 0.34);
+    if (uBackdropStrength > 0.0)
+    {
+        float azimuth = atan(ray.y, ray.x) / 6.2831853 + 0.5 + (uBackdropSeed * 0.37);
+        float latitude = acos(clamp(ray.z, -1.0, 1.0)) / 3.1415926;
+        vec2 shellCell = floor(vec2(azimuth * 96.0, latitude * 42.0));
+        float star = step(0.988, hash21(shellCell + uBackdropSeed));
+        float zenithMask = smoothstep(0.30, 0.88, up);
+        float shellBand = smoothstep(0.04, 0.42, abs(ray.z)) * (1.0 - smoothstep(0.78, 1.0, abs(ray.z)));
+        vec3 shell = mix(uBackdropTint, vec3(0.86, 0.82, 0.66), star * zenithMask);
+        color = mix(color, shell, uBackdropStrength * (0.22 + shellBand * 0.38 + star * 0.65));
+    }
+    FragColor = vec4(color, 1.0);
+}
+```
+
+### 17.3 M2 Fragment Shader
+
+```glsl
+#version 330 core
+in vec3 vNormal;
+in vec2 vTexCoord;
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
+uniform vec3 uAmbientColor;
+uniform vec3 uBaseColor;
+uniform vec3 uEmissiveColor;
+uniform float uAlpha;
+uniform bool uHasTexture;
+uniform sampler2D uTexture0;
+uniform bool uAlphaCutout;
+uniform bool uReceivesLighting;
+out vec4 FragColor;
+
+void main()
+{
+    vec4 texel = uHasTexture ? texture(uTexture0, vTexCoord) : vec4(1.0);
+    float finalAlpha = clamp(texel.a * uAlpha, 0.0, 1.0);
+    if (uAlphaCutout && finalAlpha < 0.5)
+        discard;
+
+    vec3 shaded = texel.rgb * uBaseColor;
+    if (uReceivesLighting)
+    {
+        vec3 normal = normalize(vNormal);
+        float diffuse = max(dot(normal, normalize(-uLightDir)), 0.0);
+        shaded *= clamp(uAmbientColor + (uLightColor * diffuse), vec3(0.0), vec3(1.5));
+    }
+
+    shaded += uEmissiveColor;
+    FragColor = vec4(shaded, finalAlpha);
+}
+```
+
+### 17.4 MDX Fragment Shader (with Skinning and Half-Lambert)
+
+```glsl
+#version 330 core
+in vec3 vNormal;
+in vec3 vViewNormal;
+in vec2 vTexCoord;
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
+uniform vec3 uAmbientColor;
+uniform vec3 uBaseColor;
+uniform vec3 uEmissiveColor;
+uniform float uAlpha;
+uniform bool uHasTexture;
+uniform sampler2D uTexture0;
+uniform bool uAlphaCutout;
+uniform float uAlphaThreshold;
+uniform bool uReceivesLighting;
+uniform bool uUseTextureAlpha;
+uniform bool uPremultiplyAlpha;
+uniform bool uSphereEnvMap;
+out vec4 FragColor;
+
+void main()
+{
+    vec2 texCoord = vTexCoord;
+    if (uSphereEnvMap)
+    {
+        vec3 viewNormal = normalize(vViewNormal);
+        if (!gl_FrontFacing) viewNormal = -viewNormal;
+        texCoord = viewNormal.xy * 0.5 + 0.5;
+    }
+
+    vec4 texel = uHasTexture ? texture(uTexture0, texCoord) : vec4(1.0);
+    vec3 texRgb = texel.rgb;
+    if (uPremultiplyAlpha) texRgb *= texel.a;
+
+    float sampledAlpha = uUseTextureAlpha ? texel.a : 1.0;
+    float finalAlpha = clamp(sampledAlpha * uAlpha, 0.0, 1.0);
+    if ((uAlphaCutout || uAlphaThreshold > 0.0) && finalAlpha < uAlphaThreshold)
+        discard;
+
+    vec3 shaded = texRgb * uBaseColor;
+    if (uReceivesLighting)
+    {
+        vec3 normal = normalize(vNormal);
+        float NdotL = dot(normal, normalize(uLightDir));
+        float diffuse = NdotL * 0.5 + 0.5;   // Half-Lambert
+        diffuse = diffuse * diffuse;            // Squared for softer falloff
+        shaded *= clamp(uAmbientColor + (uLightColor * diffuse), vec3(0.0), vec3(1.75));
+    }
+
+    shaded += uEmissiveColor;
+    FragColor = vec4(shaded, finalAlpha);
+}
+```
+
+### 17.5 WMO Fragment Shader (with Minimum Ambient Floor)
+
+```glsl
+#version 330 core
+in vec3 vNormal;
+in vec2 vTexCoord;
+uniform vec3 uLightDir;
+uniform vec3 uAmbientColor;
+uniform vec3 uBaseColor;
+uniform bool uHasTexture;
+uniform sampler2D uTexture0;
+uniform float uAlphaTestThreshold;
+uniform bool uUseTextureAlpha;
+out vec4 fragColor;
+
+void main()
+{
+    vec4 texel = uHasTexture ? texture(uTexture0, vTexCoord) : vec4(1.0);
+    float alpha = uUseTextureAlpha ? texel.a : 1.0;
+    if (uAlphaTestThreshold > 0.0 && alpha < uAlphaTestThreshold)
+        discard;
+
+    float light = max(dot(normalize(vNormal), normalize(uLightDir)), 0.18); // min ambient floor
+    vec3 shaded = texel.rgb * uBaseColor;
+    shaded *= clamp(uAmbientColor + vec3(light), vec3(0.0), vec3(1.75));
+    fragColor = vec4(shaded, alpha);
+}
+```
+
+---
+
+## 18. Deep-Dive: Converter Algorithms
+
+### 18.1 WMO v14→v17 Conversion
+
+1. Parse v17 root, validate version==14
+2. Extract embedded MOGP groups
+3. Upconvert MOMT: pad 44/48-byte entries to 64 bytes (zero-fill remainder)
+4. Upconvert MOGI: 40-byte entries → 32 bytes (copy bytes [8..40) → [0..32))
+5. Convert each group: rename MOIN→MOVI, upconvert MOPY 4-byte→2-byte (drop extra u16)
+6. Build output: MVER(17) + root chunks in canonical order + MVER(17) + MOGP per group
+
+### 18.2 WMO v17→v14 Conversion (Much More Complex)
+
+1. Downconvert MOMT: 64→48 bytes (truncate last 16)
+2. Read all group files
+3. Convert each group: downconvert MOPY 2→4 bytes, downconvert MOBA firstIndex u32→u16, rename MOVI→MOIN
+4. **Split oversized groups** if any batch has firstIndex > ushort.MaxValue or vertex count > 49151
+5. **Handle portal layout** remapping when groups are split
+6. **Merge overflow** if total groups > 384: spatial bucket splitting + group merging
+7. Build v14 root: MVER(14) + MOMO wrapper + all root chunks + embedded group payloads
+
+### 18.3 MDX→M2 Conversion
+
+1. Read MDX geometry + bones + materials
+2. Build M2 header (version 0x108, header size 0x130)
+3. Build sequences from MDX sequence summaries
+4. Build bones from MDX bone summaries (parent, pivot, empty animation tracks)
+5. Build geometry per geoset: vertex format 48 bytes (pos + weights + boneIndices + normal + uv0 + uv1)
+6. Build skin: one submesh per geoset, one batch per geoset
+7. Single material layer from first resolved material
+
+### 18.4 M2→MDX Conversion
+
+1. Read M2 geometry + skin
+2. Build triangle indices by remapping skin.VertexLookup → geometry vertex index
+3. Build single material layer from first skin batch
+4. Write MDX chunks: VERS→MODL→SEQS→GLBS→TEXS→MTLS→GEOS→BONE→PIVT
+5. Compressed quaternion encoding: `xq = round(x * 2^21)`, `yq = round(y * 2^20)`, `zq = round(z * 2^20)`, packed into uint32
+
+---
+
+## 19. Deep-Dive: WMO Liquid System
+
+### 19.1 MLIQ Parsing
+
+Header: 30 bytes — xverts(4), yverts(4), xtiles(4), ytiles(4), cornerX/Y/Z(4 each), matId(2).
+
+Vertex heights: 8 bytes each (4 bytes flow/filler + 4 bytes float height).
+
+Tile flags: 1 byte per tile. `(tileFlags[t] & 0x0F) == 0x0F` means no liquid.
+
+### 19.2 Orientation Auto-Fit
+
+Tests 4 rotations (0/90/180/270), scores by overflow outside group bounds (weighted 1000×) + center distance. Default/tie-break = orientation 2 (90° CCW).
+
+Effective rotation = `(autoOrientation + baselineRotation + userRotation) & 3`.
+
+### 19.3 Liquid Type Dispatch (Per 0.8.0 Ghidra Spec)
+
+- Nibble 0/4/8 → water
+- Nibble 2/6 → magma
+- Nibble 3/7 → slime
+- Ocean flag: if `group.Flags & 0x80000` and type is water → ocean
+
+### 19.4 Color Assignment
+
+| Type | RGBA |
+|------|------|
+| Water | (0.15, 0.35, 0.65, 0.55) |
+| Ocean | (0.10, 0.25, 0.55, 0.60) |
+| Magma | (0.85, 0.25, 0.05, 0.70) |
+| Slime | (0.20, 0.65, 0.10, 0.65) |
+
+### 19.5 Vertex Mapping (4 Orientations)
+
+```
+orientation 0: (cornerX + i*tileSize, cornerY + j*tileSize)       -- no rotation
+orientation 1: (cornerX + j*tileSize, cornerY - i*tileSize)       -- 90° CW
+orientation 2: (cornerX - j*tileSize, cornerY + i*tileSize)       -- 90° CCW (legacy default)
+orientation 3: (cornerX - i*tileSize, cornerY - j*tileSize)       -- 180°
+```
+
+Tile size: `4.16666f` (1/8th of map chunk).
+
+---
+
+## 20. Deep-Dive: Vertex Lighting Fallback Chain
+
+Three-tier fallback for WMO vertex colors:
+
+1. **Direct vertex colors:** If group.VertexColors count matches vertex count AND average luminosity > 10/255, decode BGRA packed colors.
+2. **Lightmap sampling:** If v14 lightmap data exists (MOLV UVs + MOLD pixels + MOLM infos), sample nearest pixel for each vertex across all faces, average per-vertex. Requires average luminosity > 0.08/1.0.
+3. **Fallback:** All vertices get `Vector4.One` (white).
+
+---
+
+## 21. Deep-Dive: M2 Draw Call Batching
+
+### 21.1 Batch Limits
+
+MaxVertices = 65535, MaxIndices = 98304.
+
+### 21.2 Sort Key Order
+
+Family → ModelKey → TextureSortKey → EffectKey → StateBucket → DepthSortValue (descending for transparent) → EntryKey.
+
+### 21.3 Batch Sharing Rules
+
+Two entries share a batch if ALL match: Family, ModelKey, EffectKey, TextureSortKey, StateBucket, IsTransparent, IsAdditive.
+
+A batch is flushed when: key changes, direct/batch mode switches, vertex count exceeds limit, or index count exceeds limit.
+
+### 21.4 Family Policies
+
+| Family | Batching | Always Direct | Dedicated State |
+|--------|----------|---------------|-----------------|
+| Core | Yes | No | No |
+| Projected | Yes | No | Yes |
+| Doodad | If BatchDoodads | No | No |
+| Ribbon | No | Yes | Yes |
+| Particle | If BatchParticles | No | Yes |
+| Callback | No | Yes | Yes |
+| HitTest | No | Yes | Yes |
+
+### 21.5 M2RuntimeOptions Flags
+
+```
+None = 0
+UseZFill = 0x1
+UseClipPlanes = 0x2
+UseThreads = 0x4
+Faster = 0x8
+BatchDoodads = 0x20
+BatchParticles = 0x80
+ForceAdditiveParticleSort = 0x100
+```
+
+---
+
+## 22. Deep-Dive: Triangle Winding Conversion
+
+At buffer upload time, WoW uses CW front faces but OpenGL uses CCW. The converter swaps `indices[t+1] <-> indices[t+2]` for every triangle during GPU upload.
+
+---
+
+## 23. Deep-Dive: M2 Effect Recipe Classification
+
+### Diffuse Family Selection
+- Projected (batch flags 0x4 or geoset index 0x2) → Projected
+- 0 textures → None, 1 → T1, 2 → T1T2, 3 → T1T2T3, 4+ → T1T2T3T4
+
+### Combiner Family Selection
+| BlendMode | Combiner |
+|-----------|----------|
+| Opaque | Opaque |
+| AlphaKey | AlphaKey |
+| AlphaBlend | Decal |
+| NoAlphaAdd | Add |
+| Add | Add |
+| Mod | Mod |
+| Mod2X | Mod2X |
+| BlendAdd | Fade |
+
+### State Bucket Bitfield
+```
+bits [0:3]   = blendMode
+bit  [4]     = depthWrite
+bit  [5]     = alphaTest
+bit  [6]     = isTwoSided
+bit  [7]     = !receivesLighting (unshaded)
+bit  [8]     = isAdditive
+bit  [9]     = isProjected
+```
+
+---
+
+## 24. Deep-Dive: M2 Particle/Ribbon Effects
+
+### Particle Classification
+- Blending types 0-6 map to effect keys (Particle_Opaque through Particle_BlendAdditive)
+- Additive types: 1, 4, 5, 6
+- State bucket: bits [0:7]=blendingType, [8:15]=emitterType, [16:19]=particleType, [20:23]=headOrTail
+- Max 65535 particles per emitter
+- Estimated vertex count: count × 4 (quad), index count: count × 6
+
+### Ribbon Classification
+- Effect key: "Ribbon_Material_{sortKey}" or "Ribbon_Default"
+- State bucket: bits [0:15]=materialSortKey, [16:23]=textureRows, [24:31]=textureColumns
+- Estimated vertex count: edgeCount × 2, index count: max(0, edgeCount-1) × 6
+
+---
+
+## 25. Deep-Dive: Object Masking System (Training Breakthrough)
+
+### 25.1 Six Output Masks (All 257×257)
+
+| Mask | Type | Purpose |
+|------|------|---------|
+| `objectMask257` | float | Binary presence of ANY object (doodad or WMO) |
+| `objectPreciseMask257` | float | Soft-edged presence with radius from scale |
+| `objectInstanceMask257` | int | Unique instance ID per object |
+| `mddfMask257` | float | Binary presence of doodads (MDDF) only |
+| `modfMask257` | float | Binary presence of WMOs (MODF) only |
+| `objectFilteredMask257` | float | Like objectMask but excluding vegetation/clutter |
+
+### 25.2 Placement Coordinate Transform
+
+The WoW ADT file format uses a **different coordinate system** than the 3D world:
+
+```csharp
+// World -> ADT file:
+rawX = MapOrigin - worldPosition.Y;  // 17066.666 - Y
+rawY = MapOrigin - worldPosition.X;  // 17066.666 - X
+rawZ = worldPosition.Z;              // Z unchanged
+
+// ADT file -> World:
+worldX = MapOrigin - rawY;
+worldY = MapOrigin - rawX;
+worldZ = rawZ;
+```
+
+Axes are **swapped and negated** through `MapOrigin = 17066.666f`. Z (height) is preserved.
+
+### 25.3 MODF Bounding Box Flip (Critical Edge Case)
+
+The MODF BB corners are in WoW client space but the origin flip inverts which is min vs max:
+```csharp
+BoundsMin = (MapOrigin - bbMaxY, MapOrigin - bbMaxX, bbMinZ)
+BoundsMax = (MapOrigin - bbMinY, MapOrigin - bbMinX, bbMaxZ)
+```
+
+### 25.4 World-Space → Tile-Local 257×257 Grid Conversion
+
+`TryProjectPlacementToTilePixel` tries **four candidate projection modes**:
+
+```
+Candidates:
+  (U, V) = (position.X / 533.333 - tileX,  position.Z / 533.333 - tileY)           [WorldXZ]
+  (U, V) = ((17066.666 - position.Z) / 533.333 - tileX, (17066.666 - position.X) / 533.333 - tileY)  [OriginZX]
+  (U, V) = (position.X / 533.333 - tileX,  position.Y / 533.333 - tileY)           [WorldXY]
+  (U, V) = ((17066.666 - position.Y) / 533.333 - tileX, (17066.666 - position.X) / 533.333 - tileY)  [OriginYX]
+```
+
+**Selection:** Candidate valid if `U ∈ [-0.25, 1.25]` AND `V ∈ [-0.25, 1.25]`. Scoring: `score = -(|U - 0.5| + |V - 0.5|)` — closest to tile center wins.
+
+**Final pixel:** `pixelX = Clamp(round(best.U * 256), 0, 256)`, `pixelY = Clamp(round(best.V * 256), 0, 256)`.
+
+### 25.5 Doodad (MDDF) Mask Computation
+
+For each placement:
+1. Project center to tile pixel (px, py)
+2. `radiusBinary = 2.0` (fixed 2-pixel radius)
+3. `radiusPrecise = Max(1.5, placement.Scale * 2.0)` (scale-dependent)
+4. `PaintCircle(mask, px, py, radiusBinary, value=1.0)` — hard binary
+5. `PaintSoftCircle(preciseMask, px, py, radiusPrecise)` — linear falloff
+6. `PaintCircle(instanceMask, px, py, radiusBinary, value=instanceId)` — unique ID
+7. `PaintCircle(mddfMask, px, py, radiusBinary, value=1.0)` — doodad-only
+8. If `ShouldIncludeDoodadInFilteredMask()`: paint filtered mask
+
+**PaintCircle:** Iterate square of radius, skip if `dx² + dy² > r²`, write value.
+
+**PaintSoftCircle:** Iterate square of `radius * 1.5`, `alpha = 1.0 - min(1.0, dist / radius)`, `buffer[y,x] = max(buffer[y,x], alpha)`.
+
+### 25.6 WMO (MODF) Mask Computation — Three-Tier Fallback
+
+**Tier 1: Exact WMO mesh footprint** (when assetReader available):
+1. Load WmoRenderDocument
+2. Resolve transform via `ResolveWmoPlacementTransform()` (tests 3 candidates, scores by MODF BB match)
+3. For each group mesh triangle: transform vertices, project to tile, clip (Sutherland-Hodgman), rasterize
+
+**Tier 2: Chunk-coverage fallback** (MCRF/MCRW per-chunk references):
+1. Build `WmoPlacementChunkCoverage16[placementCount, 16, 16]` from MCRF/MCRW
+2. For each covered chunk: paint 16×16-pixel rect
+
+**Tier 3: Bounding-box fallback** (MODF bounds):
+1. Project all 8 BB corners to tile pixels (auto-resolves projection mode)
+2. Compute pixel AABB, paint rect + soft rect (2-pixel pad)
+
+**Triangle rasterization:** Edge function test at pixel centers. Sutherland-Hodgman clipping against tile bounds [0, 256] × [0, 256].
+
+### 25.7 Object Filtered Mask — What Gets Excluded
+
+**Regex exclusion** (case-insensitive, word-boundary anchored):
+```
+/(^|[\/_\-])(tree|trees|bush|bushes|shrub|shrubs|flower|flowers|
+  plant|plants|vine|vines|fern|ferns|mushroom|mushrooms|herb|herbs|
+  ivy|reed|reeds|cattail|cattails|lilypad|lilypads|kelp|
+  seaweed|coral|grass|grasses|weed|weeds|rock|rocks|stone|stones|
+  pebble|pebbles|gravel|twig|twigs|log|logs|stump|stumps)
+  ([\/_\-.]|$)/
+```
+
+**Size-based exclusion** (when model metadata available):
+- Small clutter: `planarMaxExtent ≤ 3.0` OR `planarArea ≤ 6.0`
+- Tall clutter: `height ≥ 8.0` AND `height ≥ planarMaxExtent × 1.35`
+- Small doodads: `scale ≤ 0.35` (when no model metadata)
+
+**WMOs are ALWAYS included** — they are buildings and man-made structures.
+
+### 25.8 Shadow Residual Mask
+
+```
+residual[y, x] = max(0, shadowMask256[y, x] - clamp(objectMask256[y, x], 0, 1))
+```
+
+Isolates shadows NOT caused by objects (terrain self-shadowing, baked shadowmap detail on open ground).
+
+---
+
+## 26. Deep-Dive: Liquid System Across All Versions
+
+### 26.1 Version Availability Matrix
+
+| Signal | Alpha | WotLK (3.3.5) | Cata+ | With WL files |
+|--------|-------|---------------|-------|---------------|
+| `mclq_*` | Yes | Yes | Rare | Yes |
+| `mh2o_*` | No | Yes | Yes | Yes |
+| `mcnk_flags_16` | Yes | Yes | Yes | Yes |
+| `wl_*` | No | Possible | Possible | Yes |
+| `unified_*` | via mclq | via mh2o>mclq | via mh2o | via mh2o>mclq>wl |
+
+### 26.2 Unified Liquid Priority Chain
+
+**Strict fallback — only highest-priority available source used, NO blending:**
+
+1. **MH2O (WotLK+)** — Highest. If `mh2oHeight` + `mh2oPresence` non-null and any pixel present → use exclusively.
+2. **MCLQ (pre-WotLK)** — Second. If `mclqHeight` + `mclqPresence` non-null → bilinear upsample 129×129 → 257×257.
+3. **WL* loose files** — Last resort. 4×4 vertex blocks rasterized with 2-pixel radius distance-weighted blending, then globally normalized to [0,1].
+
+### 26.3 MH2O Per-Layer Mapping
+
+Each MH2O chunk covers a 16×16 half-step region. Per layer:
+```
+globalX = chunkX * 16 + layer.XOffset + localX
+globalY = chunkY * 16 + layer.YOffset + localY
+heights[globalY, globalX] = layer.Heights[vertexIndex]
+typeMask[globalY, globalX] = (int)layer.BasicType
+presenceMask[globalY, globalX] = true
+```
+
+### 26.4 MCLQ Legacy Liquid
+
+9 vertices per chunk side (8 cells + 1 boundary), 16 chunks = 129×129 total. Per chunk: 81 heights + 64 tile flags. Tile visibility: `(tileFlags[t] & 0x0F) != 0x0F`.
+
+### 26.5 WL Loose File Integration
+
+Discovery: scan map directory for `*.wlw`, `*.wlm`, `*.wlq`, `*.wll`. Each 4×4 vertex block mapped to 257×257 with distance-weighted blending. WLM always forces magma type regardless of header.
+
+### 26.6 Alpha Liquid
+
+Flat per-chunk fill: `avgHeight = (MinHeight + MaxHeight) * 0.5f`. All 289 vertices per chunk filled with same average. Liquid type from MCNK flags: `0x04`/`0x08`=water, `0x10`=magma, `0x20`=slime.
+
+### 26.7 Edge Cases
+
+1. MH2O not found at expected position → fallback via MHDR header field at byte 40
+2. Layer width/height clamped to [0,8]
+3. MCLQ NaN/overflow guard: fills with maxHeight if height is NaN or |height| > 50000
+4. WLM always forces magma type
+5. WL vertex order reversed in `GetHeights4x4()`
+6. MCLQ upsample skips pixels where all 4 source neighbors have no liquid
+7. MH2O multiple layers: last layer's height overwrites earlier at same positions
+8. Viewer uses MCLQ>MH2O priority (opposite of unified liquid builder!)
+
+---
+
+## 27. Deep-Dive: World Rendering Pipeline (Open Map → Pixels)
+
+### 27.1 Phase 1: Session Bootstrap
+
+1. Resolve client root directory
+2. Open `ArchiveCatalogSession` (cached MPQ/loose file catalog)
+3. Resolve map directory via `MapDirectoryLookup` (Map.dbc) or fuzzy matching
+4. Read WDT file (loose overlay → on-disk → per-asset MPQ → global archive)
+5. Parse WDT: `MapFileSummaryReader` → `WdtSummaryReader` → `WdtTileIndexReader`
+6. Fallback: brute-force probe all 4096 tile coordinates if WDT missing
+
+### 27.2 Phase 2: 3×3 Tile Window
+
+For each tile in 3×3 around selected tile:
+- Read root ADT → `WorldTerrainTileData` (257×257 heightmap, 256 MCNK chunks)
+- Read liquid → `WorldLiquidTileData` (MCLQ/MH2O layers)
+- Read placements → `AdtPlacementCatalog` (WMO + MDX placements)
+
+**Tile coordinate convention:** `tileX` = row (Y on disk), `tileY` = column (X on disk). ADT naming: `Map_{tileY}_{tileX}.adt`.
+
+### 27.3 Phase 3: Object Instance Construction
+
+**WMO instances:** Bounds from ADT placement entry. Transform: simple translation. No WMO file parsing needed for preview.
+
+**MDX instances:** Fallback bounds scaled by placement.Scale. Transform uses legacy rotation matrix:
+```
+Matrix4x4.CreateRotationZ(PI)
+* Matrix4x4.CreateScale(scale)
+* Matrix4x4.CreateRotationX(-DegreesToRadians(rotation.Y))
+* Matrix4x4.CreateRotationY(-DegreesToRadians(rotation.X))
+* Matrix4x4.CreateRotationZ(DegreesToRadians(rotation.Z))
+* Matrix4x4.CreateTranslation(position)
+```
+
+**Skybox backdrop classification:** Must be .m2/.mdx/.mdl, must NOT contain "skylight", must contain one of: `environments/stars/`, `/skybox/`, `skybox`, `skybowl`.
+
+### 27.4 Phase 4: Visibility Culling
+
+**Per-object pipeline:**
+1. Hide check → near-hold (384 units) → no-cull radius (512 units)
+2. Frustum test → vision cone factor (`dot(toTarget, cameraForward)` mapped from [-0.35, 0.15] to [0, 1])
+3. Cone-adjusted cull distance: `baseDistance * (0.45 + 0.55 * coneFactor)`
+4. Hard limit: `MaxWorldObjectViewDistance = 8192`
+5. Projected size threshold (profile-dependent)
+6. Asset readiness check
+
+**Three visibility profiles:**
+
+| Profile | WMO Threshold | MDX Threshold |
+|---------|--------------|--------------|
+| Quality | 0 (never cull) | 0 |
+| Balanced | 0.0009 | 0.0020 |
+| Performance | 0.0014 | 0.0035 |
+
+### 27.5 Phase 5: Asset Inventory Streaming
+
+- Visible-but-not-loaded → priority queue
+- Budget: 2 loads per frame, 4ms max
+- State tracking: referenced/ready/pending/visible counts
+
+### 27.6 Phase 6: Pass Coordination
+
+**Render order:**
+```
+1. RenderLighting()
+2. RenderSky() / RenderSkyboxBackdrop()
+3. RenderWdl()
+4. RenderTerrain()
+--- Objects Visible Gate ---
+5. PrepareObjectPhase()  -- animation + route planning
+6. RenderWmoOpaque()
+7. RenderMdxOpaque()
+8. RenderLiquid()
+9. RenderMdxTransparent()  -- back-to-front sorted
+10. RenderOverlay()
+```
+
+### 27.7 Phase 7: GPU Rendering
+
+**Terrain:** Per-tile VAO/VBO with positions, normals, UVs, chunk data. Diffuse Texture2DArray (BLP→RGBA). Alpha Shadow Texture2DArray (64×64 per chunk). Fragment: directional lighting + alpha layer blending via `mix()`.
+
+**Sky:** Fullscreen triangle. Procedural gradient: `smoothstep(0.18, 0.96, ray.z*0.5+0.5)`. Horizon fog band: `exp(-abs(ray.z) * 5.5) * 0.34`. Optional starfield via FNV-1a hash.
+
+**Markers:** GL_POINTS for WMO (gold) and MDX (blue) placement positions.
+
+---
+
+## 28. Deep-Dive: Legacy WMO Renderer (Reference Implementation)
+
+### 28.1 Five-Pass Pipeline
+
+```
+Pass 1: Opaque shell geometry (depth write ON, no blend)
+Pass 2: Doodad opaque layers (distance-culled, sorted nearest-first, capped at 1024)
+Pass 3: Liquid surfaces (semi-transparent MLIQ)
+Pass 4: Doodad transparent layers (back-to-front)
+Pass 5: Transparent shell geometry (back-to-front by group center distance)
+```
+
+### 28.2 Portal BFS Constants
+
+| Constant | Value |
+|----------|-------|
+| GroupVisibilityBoundsPadding | 32f |
+| NearRootFullVisibilityDistance | 192f |
+| ExteriorPortalRevealDistance | 1024f |
+| InteriorPortalRevealDistance | 3072f |
+| ExteriorPortalTraversalDepth | 1 |
+| InteriorPortalTraversalDepth | 4 |
+| DoodadCullDistance | 4000f |
+| DoodadMaxRenderCount | 1024 |
+
+### 28.3 Vertex Formats
+
+**WMO (legacy):** 12 floats = 48 bytes: position(3) + normal(3) + UV(2) + vertexLight(4)
+
+**M2 (legacy):** 10 floats = 40 bytes: position(3) + normal(3) + texCoord0(2) + texCoord1(2)
+
+**Index winding:** WoW uses CW, OpenGL uses CCW. Swap `indices[t+1] <-> indices[t+2]` at upload.
+
+### 28.4 WMO Shader (Half-Lambert + Baked Lighting)
+
+```glsl
+// Fragment
+float NdotL = dot(normalize(vNormal), normalize(uLightDir));
+float diffuse = NdotL * 0.5 + 0.5;   // Half-Lambert
+diffuse = diffuse * diffuse;           // Squared for sharper falloff
+vec3 bakedLighting = mix(vec3(1.0), clamp(vVertexLight.rgb, 0, 1), 0.6); // 60% vertex light
+vec3 final = texColor.rgb * uBaseColor * (uAmbientColor + uLightColor * diffuse) * bakedLighting;
+```
+
+### 28.5 Deferred Loading Budgets
+
+- Material textures: 1 load/frame, 2ms max
+- Doodad models: 1 load/frame, 2ms max
+- Doodad path resolution: data source → MPQ case-insensitive → alternate extensions (.mdx/.m2/.mdl)
+
+### 28.6 M2 Doodad Skin Resolution (3-Level Fallback)
+
+1. Try all `.skin` candidates from `BuildSkinCandidates()`
+2. Try embedded root-profile geometry (3.3.5 build 3018303 only)
+3. Try M2→MDX conversion via `M2ToMdxConverter`
+
+### 28.7 Vertex Lighting (Three-Tier Fallback)
+
+1. **Direct vertex colors:** BGRA packed, requires average luminosity ≥ 10/255
+2. **Lightmap sampling:** v14 MOLV UVs + MOLD pixels + MOLM infos, requires luminosity ≥ 0.08
+3. **Fallback:** All vertices white (Vector4.One)
+
+### 28.8 Blend State (EGxBlend from Ghidra)
+
+| Value | Name | Blend | Depth Write |
+|-------|------|-------|-------------|
+| 0 | Opaque | disabled | ON |
+| 1 | Blend | SrcAlpha/OneMinusSrcAlpha | OFF |
+| 2 | Add | SrcAlpha/One | OFF |
+| 3 | AlphaKey | SrcAlpha/OneMinusSrcAlpha | ON (test < 0.5) |
+
+### 28.9 Render Queue
+
+Two-list architecture: `_opaqueItems` sorted front-to-back (early-Z), `_transparentItems` sorted back-to-front (correct alpha). Material application: texture binding, alpha test, two-sided toggle.
+
+### 28.10 Frustum Culler (from Ghidra)
+
+Plane extraction from view-projection matrix (6 planes). AABB test: for each plane, count corners inside; reject if zero for any plane.
+
+### 28.11 Default Lighting
+
+| Uniform | Default |
+|---------|---------|
+| fogColor | (0.6, 0.7, 0.85) |
+| fogStart | 200f |
+| fogEnd | 1500f |
+| lightDir | normalize(0.5, 0.3, 1.0) |
+| lightColor | (1.0, 0.95, 0.85) |
+| ambientColor | (0.35, 0.35, 0.4) |
+
+### 28.12 Things NOT Yet Ported to wow-viewer
+
+1. WMO portal BFS visibility (group-level culling through portals)
+2. WMO 5-pass rendering (opaque shell → doodad opaque → liquid → doodad transparent → transparent shell)
+3. WMO liquid mesh building (MLIQ parsing, orientation auto-fit, type dispatch)
+4. WMO vertex lighting (three-tier fallback with lightmap sampling)
+5. M2 world-context rendering (skin selection, animation, bone skinning on GPU)
+6. Particle rendering (billboard quads, atlas UV, blend modes)
+7. TerrainManager AOI streaming (area-of-interest tile loading/unloading)
+8. Full terrain renderer feature set (per-layer visibility, alpha debug, shadow display, contour lines)
+9. GLB export
+10. Terrain image import/export
+11. PM4 workbench UI
+12. WMO group controls (bounding boxes, per-group show/hide)
+13. Camera click selection and terrain raycasting
+14. Sky dome with day/night cycle
+15. Terrain lighting + LitLoader (Alpha lights.lit)
+16. Format profile registry
+17. Build version catalog
+18. Map discovery service (full DBC integration)
+19. AreaTable service
+20. TaxiPath loader

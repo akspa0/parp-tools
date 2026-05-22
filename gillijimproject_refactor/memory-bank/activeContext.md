@@ -5,6 +5,13 @@
 
 ## Primary Live Lane
 - V16 terrain dataset + training is the current execution path.
+- **Spec 009 landed (2026-05-22):** 2,650-line comprehensive design specification at
+  `wow-viewer/specs/009-full-project-reimplementation-spec/spec.md`.
+  Covers all 28 sections: binary format specs, rendering pipeline, ML pipeline,
+  CLI tools, PM4 research, WMO portals, terrain edge cases, M2 animation, GLSL
+  shaders, converters, liquid system, object masking, world rendering, legacy
+  renderer. Sufficient for full from-scratch reimplementation. This is now the
+  master design reference for the project.
 - V16.1.1 is now the named next bounded implementation slice on top of the
   landed V16.1 base:
   - normal-first again, not a fresh family reset

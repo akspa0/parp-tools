@@ -1047,6 +1047,11 @@ public class WorldScene : ISceneRenderer
         get => _maxVisibleMdxBoundsHeight;
         set => _maxVisibleMdxBoundsHeight = value > 0f ? value : 0f;
     }
+    public bool EnableRuntimeWmoGroupVisibility
+    {
+        get => _assets.EnableRuntimeWmoGroupVisibility;
+        set => _assets.EnableRuntimeWmoGroupVisibility = value;
+    }
     public WorldObjectVisibilityProfile ObjectVisibilityProfile
     {
         get => _objectVisibilityProfile;

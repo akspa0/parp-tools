@@ -155,6 +155,7 @@ public partial class ViewerApp
         public required bool PreviousObjectPathFiltersEnabled { get; init; }
         public required float PreviousObjectStreamingRangeMultiplier { get; init; }
         public required float PreviousMaxVisibleMdxBoundsHeight { get; init; }
+        public required bool PreviousEnableRuntimeWmoGroupVisibility { get; init; }
         public required string DatasetRoot { get; init; }
         public required string MapName { get; init; }
         public required string OutputDirectory { get; init; }
@@ -790,6 +791,7 @@ public partial class ViewerApp
             PreviousObjectPathFiltersEnabled = _worldScene?.ObjectPathFiltersEnabled ?? true,
             PreviousObjectStreamingRangeMultiplier = _worldScene?.ObjectStreamingRangeMultiplier ?? 0.5f,
             PreviousMaxVisibleMdxBoundsHeight = _worldScene?.MaxVisibleMdxBoundsHeight ?? 0f,
+            PreviousEnableRuntimeWmoGroupVisibility = _worldScene?.EnableRuntimeWmoGroupVisibility ?? true,
             DatasetRoot = plan.DatasetRoot,
             MapName = plan.MapName,
             OutputDirectory = plan.OutputDirectory,
@@ -819,6 +821,7 @@ public partial class ViewerApp
             _worldScene.ObjectPathFiltersEnabled = false;
             _worldScene.ObjectStreamingRangeMultiplier = Math.Max(_worldScene.ObjectStreamingRangeMultiplier, 1.0f);
             _worldScene.MaxVisibleMdxBoundsHeight = MkHarvestViewerValidationMaxVisibleMdxBoundsHeight;
+            _worldScene.EnableRuntimeWmoGroupVisibility = false;
         }
 
         foreach (MkHarvestViewerValidationCaptureTile tile in plan.Tiles)
@@ -988,6 +991,7 @@ public partial class ViewerApp
             _worldScene.ObjectPathFiltersEnabled = batch.PreviousObjectPathFiltersEnabled;
             _worldScene.ObjectStreamingRangeMultiplier = batch.PreviousObjectStreamingRangeMultiplier;
             _worldScene.MaxVisibleMdxBoundsHeight = batch.PreviousMaxVisibleMdxBoundsHeight;
+            _worldScene.EnableRuntimeWmoGroupVisibility = batch.PreviousEnableRuntimeWmoGroupVisibility;
         }
 
         StitchMkHarvestViewerValidationOutputs(
