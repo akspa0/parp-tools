@@ -251,6 +251,13 @@
     - validation previews now also carry visible labels again:
       - panel labels
       - per-sample row headers with tile metadata
+    - startup VRAM autotune is now landed:
+      - dormant `--target-vram-gb` seam is active
+      - batch-size ladder probe runs before loader creation
+      - `train_epoch_tiles` can rescale automatically to preserve steps/epoch
+      - evidence writes at `evidence/batch_autotune.json`
+      - focused proof run:
+        - `wow-viewer/models/v16_1/normal/runs/smoke_v16_1_autotune_gpu/`
 - Focused proof now exists for that slice:
   - curation smoke:
     - `wow-viewer/output/datasets/v16/curation/smoke_v16_1_1_curation_335/`

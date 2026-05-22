@@ -135,6 +135,13 @@ artifact.
 **Validation**: new-best preview outputs show panel labels plus build/map/tile
 headers across multiple validation rows instead of a single unlabeled tile.
 
+### Step 7.0B — Add startup VRAM autotune
+Use the dormant `target_vram_gb` seam to probe a batch-size ladder against the
+current card, record the chosen batch size, and optionally preserve the
+steps-per-epoch budget by rescaling `train_epoch_tiles`.
+**Validation**: a focused smoke run writes autotune evidence, prints the chosen
+batch size before training, and logs per-epoch peak CUDA memory plus guidance.
+
 ### Step 7.1 — Publish the new curation commands
 Write the V16.1.1 manifest-build commands for full-corpus and `400`-tile
 scouting modes.

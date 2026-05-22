@@ -148,9 +148,17 @@
 - Validation previews are no longer single-sample lies:
   - the shared V16.1 preview path now renders up to `8` samples from the
      selected validation batch per artifact instead of only batch item `0`
- - Validation previews now draw labels again:
-   - panel labels such as `input`, `normal_gt`, `normal_pred`, `train_mask`
-   - per-row sample headers with build/map/tile metadata
+- Validation previews now draw labels again:
+  - panel labels such as `input`, `normal_gt`, `normal_pred`, `train_mask`
+  - per-row sample headers with build/map/tile metadata
+- The shared V16.1 trainer now supports startup VRAM autotune:
+  - `--target-vram-gb`
+  - `--autotune-batch-size`
+  - `--autotune-batch-candidates`
+  - `--autotune-keep-epoch-steps`
+  - evidence path:
+    - `evidence/batch_autotune.json`
+  - per-epoch CUDA memory guidance prints are back too
 - Canonical flow:
   - `WowViewer.Tool.Harvest harvest-stream --stream-profile v16`
   - `build_v16_dataset.py build`

@@ -75,6 +75,11 @@
   - best-gated preview writes
   - multi-sample preview grids
   - visible panel labels and per-tile row headers
+- [x] **7.0B** Add startup VRAM autotune
+  - batch-size ladder probe
+  - `target_vram_gb` activation
+  - autotune evidence output
+  - optional `train_epoch_tiles` rescaling to preserve steps per epoch
 - [x] **7.1** Publish V16.1.1 curation commands
   - full-corpus
   - scouting mode

@@ -99,6 +99,8 @@ uv run python -u scripts\train_v16_1_normal.py `
   --device auto `
   --batch-size 16 `
   --grad-accum-steps 1 `
+  --target-vram-gb 12 `
+  --autotune-batch-size `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
   --bucket-sampling-profile v16_1_1_normal `
@@ -116,7 +118,8 @@ tiles, and strengthens intra-tile weighting with painted-transition-aware
 hard-region emphasis while keeping terrain-valid masking authoritative. For the
 current 16 GB card, treat `16 x 1` as the preferred starting point when VRAM
 headroom is available; keep `8 x 1` as the safer fallback before dropping to
-`4 x 2`, `2 x 4`, or `1 x 8`.
+`4 x 2`, `2 x 4`, or `1 x 8`. The shared trainer can now also probe a batch
+ladder automatically with `--target-vram-gb` plus `--autotune-batch-size`.
 
 ## What Lives Here
 

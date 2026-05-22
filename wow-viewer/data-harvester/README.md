@@ -231,6 +231,8 @@ uv run python -u scripts/train_v16_1_normal.py `
   --device auto `
   --batch-size 16 `
   --grad-accum-steps 1 `
+  --target-vram-gb 12 `
+  --autotune-batch-size `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
   --bucket-sampling-profile v16_1_1_normal `
@@ -250,6 +252,10 @@ Why this is the recommended starting point now:
   is that the recommendation was too conservative for the 16 GB card
 - prefer a larger micro-batch first so epoch wall-clock falls before reaching
   for accumulation tricks
+- if `--autotune-batch-size` is enabled, the trainer now probes the pooled
+  training set before the real run, writes `evidence/batch_autotune.json`, and
+  can rescale `train_epoch_tiles` to preserve the original steps-per-epoch
+  budget
 
 Small scouting run for concept-mix proof before longer training:
 
@@ -260,6 +266,8 @@ uv run python -u scripts/train_v16_1_normal.py `
   --device auto `
   --batch-size 16 `
   --grad-accum-steps 1 `
+  --target-vram-gb 12 `
+  --autotune-batch-size `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
   --bucket-sampling-profile v16_1_1_normal `
@@ -300,6 +308,13 @@ V16.1 trainer runtime notes:
 - `--curation-manifest` is the preferred path for normal training now
 - `--bucket-sampling-profile v16_1_1_normal` over-indexes `hard` tiles while
   preserving `medium` / `easy` stability when those buckets are present
+- `--target-vram-gb` now drives both per-epoch guidance logs and optional
+  startup autotune
+- `--autotune-batch-size` probes a batch-size ladder on the actual pooled train
+  set and picks the largest safe batch under the effective VRAM target
+- `--autotune-keep-epoch-steps` defaults on, so when batch-size grows the
+  trainer rescales `train_epoch_tiles` to keep the original steps-per-epoch
+  budget coherent
 - `--normal-detail-boost` emphasizes terrain deformations over broad flats in
   the normal loss while still keeping flat tiles in the dataset
 - hard-region weighting now also considers painted alpha / MCLY transitions and
@@ -317,6 +332,8 @@ V16.1 trainer runtime notes:
   - `v16_1_<task>_best.pt` stores `best_val` and `best_epoch`
   - validation preview PNGs now write only on new best checkpoints:
     - `validation/best_epoch_XXXX.png`
+- autotune evidence now writes at:
+  - `evidence/batch_autotune.json`
 - new epoch evidence files:
   - `evidence/train_epoch_orders.jsonl`
   - `evidence/train_epoch_bucket_usage.jsonl`
@@ -330,6 +347,8 @@ uv run python -u scripts/train_v16_1_normal.py `
   --device auto `
   --batch-size 16 `
   --grad-accum-steps 1 `
+  --target-vram-gb 12 `
+  --autotune-batch-size `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
   --bucket-sampling-profile v16_1_1_normal `

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import json
+import math
 import os
 import random
 import sys
@@ -23,6 +25,7 @@ import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 from PIL import Image, ImageDraw  # noqa: E402
 from torch.utils.data import DataLoader, Sampler  # noqa: E402
+from torch.utils.data._utils.collate import default_collate  # noqa: E402
 
 from harvester.v16_1_dataset import V161Dataset  # noqa: E402
 from harvester.v16_1_models import (  # noqa: E402
@@ -50,6 +53,7 @@ _BUCKET_SAMPLING_PROFILES: dict[str, dict[str, float]] = {
         "pathological": 1.25,
     },
 }
+_DEFAULT_AUTOTUNE_BATCH_CANDIDATES = (8, 12, 16, 20, 24, 32, 40, 48, 56, 64)
 
 
 def _seed_all(seed: int) -> None:
@@ -85,6 +89,13 @@ def _resolve_persistent_workers(requested: bool | None, num_workers: int) -> boo
     if requested is None:
         return True
     return bool(requested)
+
+
+def _resolve_autotune_batch_candidates(base_batch_size: int, requested: list[int] | None) -> list[int]:
+    raw = list(requested) if requested else list(_DEFAULT_AUTOTUNE_BATCH_CANDIDATES)
+    raw.append(int(base_batch_size))
+    candidates = sorted({int(value) for value in raw if int(value) > 0})
+    return [value for value in candidates if value >= int(base_batch_size)]
 
 
 def _normalize_bucket_label(value: Any) -> str:
@@ -401,6 +412,152 @@ def _apply_dataset_pool(
 def _apply_dataset_limit(ds: V161Dataset, max_samples: int) -> None:
     if max_samples > 0:
         ds._indices = ds._indices[: min(int(max_samples), len(ds._indices))]
+
+
+def _autotune_batch_size(
+    *,
+    task: "TaskSpec",
+    train_ds: V161Dataset,
+    device: torch.device,
+    args: argparse.Namespace,
+    evidence_dir: Path,
+) -> dict[str, Any] | None:
+    if not bool(getattr(args, "autotune_batch_size", False)):
+        return None
+    if device.type != "cuda":
+        print("Autotune: skipped because device is not CUDA.", flush=True)
+        return None
+    if float(args.target_vram_gb) <= 0.0:
+        print("Autotune: skipped because --target-vram-gb <= 0.", flush=True)
+        return None
+    if len(train_ds) <= 0:
+        print("Autotune: skipped because train dataset is empty.", flush=True)
+        return None
+
+    base_batch_size = int(args.batch_size)
+    candidates = _resolve_autotune_batch_candidates(base_batch_size, args.autotune_batch_candidates)
+    if not candidates:
+        return None
+
+    safety_factor = 0.85 if (hasattr(torch, "compile") and not args.no_compile) else 0.92
+    effective_target_vram_gb = float(args.target_vram_gb) * float(safety_factor)
+    use_amp = bool(device.type == "cuda" and not args.no_amp)
+    results: list[dict[str, Any]] = []
+    chosen_batch_size = base_batch_size
+    reached_limit = False
+
+    print(
+        "Autotune: probing batch-size ladder "
+        f"{candidates} against target_vram_gb={float(args.target_vram_gb):.2f} "
+        f"(effective_target={effective_target_vram_gb:.2f}GB)",
+        flush=True,
+    )
+
+    def _cleanup_probe_state() -> None:
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats(device)
+
+    for candidate in candidates:
+        probe_batch_size = min(int(candidate), len(train_ds))
+        probe_batch = default_collate([train_ds[idx] for idx in range(probe_batch_size)])
+        probe_model = None
+        probe_optimizer = None
+        probe_scaler = None
+        probe_loss = None
+        probe_metrics = None
+        peak_alloc_gb = None
+        peak_reserved_gb = None
+        status = "ok"
+        fits_target = False
+
+        _cleanup_probe_state()
+        try:
+            probe_model = task.model_factory().to(device)
+            probe_optimizer = torch.optim.AdamW(probe_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+            probe_scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+            probe_model.train()
+            probe_optimizer.zero_grad(set_to_none=True)
+            with torch.amp.autocast("cuda", enabled=use_amp):
+                probe_loss, probe_metrics, _probe_outputs = task.loss_fn(probe_model, probe_batch, device, args)
+            probe_scaler.scale(probe_loss).backward()
+            probe_scaler.unscale_(probe_optimizer)
+            torch.nn.utils.clip_grad_norm_(probe_model.parameters(), max_norm=1.0)
+            probe_scaler.step(probe_optimizer)
+            probe_scaler.update()
+            torch.cuda.synchronize(device)
+            peak_alloc_gb = torch.cuda.max_memory_allocated(device) / (1024.0 ** 3)
+            peak_reserved_gb = torch.cuda.max_memory_reserved(device) / (1024.0 ** 3)
+            fits_target = bool(peak_reserved_gb <= effective_target_vram_gb)
+            if fits_target:
+                chosen_batch_size = int(candidate)
+            else:
+                status = "above_target"
+                reached_limit = True
+        except RuntimeError as ex:
+            if "out of memory" in str(ex).lower():
+                status = "oom"
+                reached_limit = True
+            else:
+                raise
+        finally:
+            del probe_batch
+            del probe_loss
+            del probe_metrics
+            del probe_scaler
+            del probe_optimizer
+            del probe_model
+            _cleanup_probe_state()
+
+        result = {
+            "candidate_batch_size": int(candidate),
+            "probe_batch_size": int(probe_batch_size),
+            "status": status,
+            "fits_target": bool(fits_target),
+            "peak_alloc_gb": peak_alloc_gb,
+            "peak_reserved_gb": peak_reserved_gb,
+        }
+        results.append(result)
+        reserved_text = "n/a" if peak_reserved_gb is None else f"{peak_reserved_gb:.2f}GB"
+        alloc_text = "n/a" if peak_alloc_gb is None else f"{peak_alloc_gb:.2f}GB"
+        print(
+            f"Autotune: batch-size {candidate} -> status={status} "
+            f"alloc_peak={alloc_text} reserved_peak={reserved_text}",
+            flush=True,
+        )
+        if reached_limit:
+            break
+
+    tuned_epoch_tiles = int(args.train_epoch_tiles)
+    original_epoch_tiles = int(args.train_epoch_tiles)
+    original_batch_size = int(base_batch_size)
+    if bool(getattr(args, "autotune_keep_epoch_steps", True)) and original_epoch_tiles > 0 and original_batch_size > 0:
+        original_steps = max(1, math.ceil(original_epoch_tiles / original_batch_size))
+        tuned_epoch_tiles = min(len(train_ds), chosen_batch_size * original_steps)
+
+    payload = {
+        "enabled": True,
+        "target_vram_gb": float(args.target_vram_gb),
+        "effective_target_vram_gb": effective_target_vram_gb,
+        "compile_enabled_for_run": bool(hasattr(torch, "compile") and not args.no_compile),
+        "original_batch_size": int(base_batch_size),
+        "chosen_batch_size": int(chosen_batch_size),
+        "original_train_epoch_tiles": int(original_epoch_tiles),
+        "tuned_train_epoch_tiles": int(tuned_epoch_tiles),
+        "keep_epoch_steps": bool(getattr(args, "autotune_keep_epoch_steps", True)),
+        "candidate_results": results,
+    }
+    (evidence_dir / "batch_autotune.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    args.batch_size = int(chosen_batch_size)
+    if tuned_epoch_tiles > 0:
+        args.train_epoch_tiles = int(tuned_epoch_tiles)
+    print(
+        f"Autotune: selected batch-size={args.batch_size} "
+        f"train_epoch_tiles={int(args.train_epoch_tiles)}",
+        flush=True,
+    )
+    return payload
 
 
 def _masked_mean(loss_map: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -943,7 +1100,31 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         action="store_true",
         help="Disable torch.compile (useful for CPU-only or limited toolchains)",
     )
-    p.add_argument("--target-vram-gb", type=float, default=0.0)
+    p.add_argument(
+        "--target-vram-gb",
+        type=float,
+        default=0.0,
+        help="Soft VRAM target used by startup batch autotune and per-epoch guidance logs (0 disables both).",
+    )
+    p.add_argument(
+        "--autotune-batch-size",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Probe a batch-size ladder against --target-vram-gb before the run starts and pick the largest safe candidate.",
+    )
+    p.add_argument(
+        "--autotune-batch-candidates",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Optional explicit batch-size ladder for startup autotune.",
+    )
+    p.add_argument(
+        "--autotune-keep-epoch-steps",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="When autotune changes batch-size, rescale train-epoch-tiles to preserve the original steps-per-epoch budget.",
+    )
     return p.parse_args()
 
 
@@ -1008,6 +1189,13 @@ def run_task(task_name: str) -> None:
     )
     _apply_dataset_limit(train_ds, int(args.max_train_samples))
     _apply_dataset_limit(val_ds, int(args.max_val_samples))
+    autotune_result = _autotune_batch_size(
+        task=task,
+        train_ds=train_ds,
+        device=device,
+        args=args,
+        evidence_dir=evidence_dir,
+    )
     train_build_labels = [
         str(train_ds._index_entries[global_idx].get("_build", "unknown"))
         for global_idx in train_ds._indices
@@ -1094,6 +1282,10 @@ def run_task(task_name: str) -> None:
         "seed": args.seed,
         "resolved_curation_seed": curation_seed,
         "val_fraction": args.val_fraction,
+        "target_vram_gb": args.target_vram_gb,
+        "autotune_batch_size": args.autotune_batch_size,
+        "autotune_batch_candidates": list(args.autotune_batch_candidates) if args.autotune_batch_candidates else None,
+        "autotune_keep_epoch_steps": args.autotune_keep_epoch_steps,
         "train_max_tiles": args.train_max_tiles,
         "train_epoch_tiles": args.train_epoch_tiles,
         "train_epoch_build_balanced": args.train_epoch_build_balanced,
@@ -1110,6 +1302,7 @@ def run_task(task_name: str) -> None:
         "started_at": datetime.now(timezone.utc).isoformat(),
         "best_val": best_val if np.isfinite(best_val) else None,
         "best_epoch": best_epoch,
+        "autotune_result": autotune_result,
     }
     (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
@@ -1151,6 +1344,14 @@ def run_task(task_name: str) -> None:
         f"effective={args.batch_size * args.grad_accum_steps}",
         flush=True,
     )
+    if autotune_result is not None:
+        print(
+            "Autotune: "
+            f"target_vram_gb={autotune_result['target_vram_gb']:.2f} "
+            f"chosen_batch_size={autotune_result['chosen_batch_size']} "
+            f"train_epoch_tiles={autotune_result['tuned_train_epoch_tiles']}",
+            flush=True,
+        )
     if task_name == "normal":
         print(f"Normal detail steering: boost={args.normal_detail_boost:.2f}", flush=True)
     print(f"Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}", flush=True)
@@ -1163,6 +1364,8 @@ def run_task(task_name: str) -> None:
         train_loss_sum = 0.0
         optimizer_steps = 0
         t0 = time.perf_counter()
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
         optimizer.zero_grad(set_to_none=True)
         for batch_idx, batch in enumerate(train_loader, start=1):
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not args.no_amp)):
@@ -1182,6 +1385,11 @@ def run_task(task_name: str) -> None:
         scheduler.step()
 
         n_train = max(len(train_loader), 1)
+        peak_alloc_gb = None
+        peak_reserved_gb = None
+        if device.type == "cuda":
+            peak_alloc_gb = torch.cuda.max_memory_allocated(device) / (1024.0 ** 3)
+            peak_reserved_gb = torch.cuda.max_memory_reserved(device) / (1024.0 ** 3)
         entry: dict[str, Any] = {
             "epoch": epoch,
             "train_loss": train_loss_sum / n_train,
@@ -1189,6 +1397,9 @@ def run_task(task_name: str) -> None:
             "elapsed_s": time.perf_counter() - t0,
             "optimizer_steps": optimizer_steps,
         }
+        if peak_alloc_gb is not None and peak_reserved_gb is not None:
+            entry["cuda_peak_alloc_gb"] = peak_alloc_gb
+            entry["cuda_peak_reserved_gb"] = peak_reserved_gb
         for key, value in metric_sums.items():
             entry[f"train_{key}"] = value / n_train
 
@@ -1197,6 +1408,30 @@ def run_task(task_name: str) -> None:
             f"lr={entry['lr']:.2e} opt_steps={optimizer_steps} {entry['elapsed_s']:.1f}s",
             flush=True,
         )
+        if peak_reserved_gb is not None:
+            print(
+                f"        cuda_mem | alloc_peak={peak_alloc_gb:.2f}GB "
+                f"reserved_peak={peak_reserved_gb:.2f}GB",
+                flush=True,
+            )
+            if float(args.target_vram_gb) > 0.0:
+                target = float(args.target_vram_gb)
+                if peak_reserved_gb < target * 0.70:
+                    suggested_bs = max(
+                        int(args.batch_size) + 1,
+                        int(round(int(args.batch_size) * (target / max(peak_reserved_gb, 1e-6)))),
+                    )
+                    print(
+                        f"        tuning | below target_vram_gb={target:.2f}; "
+                        f"consider batch-size ~{suggested_bs}",
+                        flush=True,
+                    )
+                elif peak_reserved_gb > target * 1.05:
+                    print(
+                        f"        tuning | above target_vram_gb={target:.2f}; "
+                        f"consider reducing batch-size",
+                        flush=True,
+                    )
 
         if epoch % args.val_interval == 0 and len(val_loader) > 0:
             model.eval()

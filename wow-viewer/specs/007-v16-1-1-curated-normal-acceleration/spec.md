@@ -189,6 +189,10 @@ uncertainty.
 - **FR-016**: Validation preview artifacts MUST be best-gated, render multiple
   samples per output, and carry visible panel labels plus per-sample tile
   metadata so operator review is not worse than dataset validation.
+- **FR-017**: The shared V16.1 normal trainer MUST support startup VRAM-aware
+  batch-size autotuning from a candidate ladder using `--target-vram-gb`,
+  record the chosen batch size as run evidence, and preserve a coherent
+  steps-per-epoch budget when requested.
 
 ### Non-Goals
 
