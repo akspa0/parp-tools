@@ -71,6 +71,10 @@
 
 ## Phase 7: Operator Commands And Fresh-Chat Handoff
 
+- [x] **7.0** Repair the validation review surface
+  - best-gated preview writes
+  - multi-sample preview grids
+  - visible panel labels and per-tile row headers
 - [x] **7.1** Publish V16.1.1 curation commands
   - full-corpus
   - scouting mode

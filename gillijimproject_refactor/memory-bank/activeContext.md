@@ -117,12 +117,15 @@
   - `wow-viewer/docs/architecture/v16-terrain-model-spec-2026-05-16.md`
 - The README surfaces now explicitly document the curation-first V16.1 normal
   workflow:
-  - build `normal_terrain_v1` manifest
+  - build `normal_terrain_v16_1_1` manifest
   - train via `--curation-manifest`
   - preferred current operator launch:
     - curation: `--workers -1 --chunk-size 128`
-    - train: `--batch-size 8 --grad-accum-steps 1`
+    - train: `--batch-size 16 --grad-accum-steps 1`
     - small scouting pool: `--train-max-tiles 400 --train-epoch-tiles 128 --val-max-tiles 48`
+  - current VRAM truth on the 16 GB card:
+    - if `8 x 1` sits under about `5 GB`, it is too conservative
+    - prefer raising micro-batch before adding accumulation
 - The shared V16.1 trainer now also preserves the useful V16 small-run seam:
   - bounded persistent train/val pools:
     - `--train-max-tiles`
@@ -135,6 +138,19 @@
     - `evidence/train_pool_summary.json`
     - `evidence/val_pool_summary.json`
     - `evidence/train_epoch_orders.jsonl`
+ - The shared V16.1 trainer now explicitly tracks:
+   - `best_val`
+   - `best_epoch`
+- V16.1 validation preview writing is best-gated again:
+  - previews write only on new best checkpoints
+  - output path:
+    - `validation/best_epoch_XXXX.png`
+- Validation previews are no longer single-sample lies:
+  - the shared V16.1 preview path now renders up to `8` samples from the
+     selected validation batch per artifact instead of only batch item `0`
+ - Validation previews now draw labels again:
+   - panel labels such as `input`, `normal_gt`, `normal_pred`, `train_mask`
+   - per-row sample headers with build/map/tile metadata
 - Canonical flow:
   - `WowViewer.Tool.Harvest harvest-stream --stream-profile v16`
   - `build_v16_dataset.py build`

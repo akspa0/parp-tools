@@ -21,7 +21,7 @@ if str(_SRC_DIR) not in sys.path:
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
-from PIL import Image  # noqa: E402
+from PIL import Image, ImageDraw  # noqa: E402
 from torch.utils.data import DataLoader, Sampler  # noqa: E402
 
 from harvester.v16_1_dataset import V161Dataset  # noqa: E402
@@ -38,6 +38,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DATASET_ROOT = _PROJECT_ROOT / "output" / "datasets" / "v16"
 _MODELS_ROOT = _PROJECT_ROOT / "models" / "v16_1"
 _PANEL_SIZE = 256
+_PANEL_LABEL_HEIGHT = 18
+_ROW_LABEL_HEIGHT = 18
 _DIFFICULTY_BUCKETS = ("easy", "medium", "hard", "pathological")
 _BUCKET_SAMPLING_PROFILES: dict[str, dict[str, float]] = {
     "uniform": {bucket: 1.0 for bucket in _DIFFICULTY_BUCKETS},
@@ -434,18 +436,71 @@ def _to_uint8_hwc(x: torch.Tensor) -> np.ndarray:
     return (arr * 255.0).astype(np.uint8)
 
 
-def _save_horizontal_panel(panels: list[tuple[str, torch.Tensor]], out_path: Path) -> None:
+def _draw_text_strip(img: Image.Image, text: str, height: int) -> Image.Image:
+    canvas = Image.new("RGB", (img.width, img.height + height), color=(0, 0, 0))
+    canvas.paste(img, (0, height))
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle([(0, 0), (canvas.width, height - 1)], fill=(14, 14, 14))
+    draw.text((4, 3), str(text), fill=(240, 240, 240))
+    return canvas
+
+
+def _compose_horizontal_panel(panels: list[tuple[str, torch.Tensor]]) -> Image.Image:
     images: list[Image.Image] = []
-    for _label, tensor in panels:
+    for label, tensor in panels:
         arr = _to_uint8_hwc(tensor)
         img = Image.fromarray(arr)
         if img.size != (_PANEL_SIZE, _PANEL_SIZE):
             img = img.resize((_PANEL_SIZE, _PANEL_SIZE), Image.Resampling.BILINEAR)
+        img = _draw_text_strip(img, label, _PANEL_LABEL_HEIGHT)
         images.append(img)
-    canvas = Image.new("RGB", (_PANEL_SIZE * len(images), _PANEL_SIZE), color=(0, 0, 0))
+    canvas = Image.new("RGB", (_PANEL_SIZE * len(images), _PANEL_SIZE + _PANEL_LABEL_HEIGHT), color=(0, 0, 0))
     for idx, img in enumerate(images):
         canvas.paste(img, (idx * _PANEL_SIZE, 0))
+    return canvas
+
+
+def _save_horizontal_panel(panels: list[tuple[str, torch.Tensor]], out_path: Path) -> None:
+    canvas = _compose_horizontal_panel(panels)
     canvas.save(out_path)
+
+
+def _save_preview_grid(rows: list[list[tuple[str, torch.Tensor]]], out_path: Path, row_titles: list[str] | None = None) -> None:
+    if not rows:
+        raise RuntimeError("Cannot save preview grid with no rows.")
+    row_images = []
+    for idx, row in enumerate(rows):
+        row_img = _compose_horizontal_panel(row)
+        if row_titles is not None:
+            row_img = _draw_text_strip(row_img, row_titles[idx], _ROW_LABEL_HEIGHT)
+        row_images.append(row_img)
+    width = max(img.width for img in row_images)
+    height = sum(img.height for img in row_images)
+    canvas = Image.new("RGB", (width, height), color=(0, 0, 0))
+    y = 0
+    for img in row_images:
+        canvas.paste(img, (0, y))
+        y += img.height
+    canvas.save(out_path)
+
+
+def _meta_value(x: Any, idx: int) -> Any:
+    if isinstance(x, torch.Tensor):
+        return x[idx].item()
+    if isinstance(x, np.ndarray):
+        return x[idx]
+    if isinstance(x, (list, tuple)):
+        return x[idx]
+    return x
+
+
+def _preview_row_title(batch: dict[str, Any], idx: int) -> str:
+    build = _meta_value(batch.get("meta_build", "unknown"), idx)
+    map_name = _meta_value(batch.get("meta_map", ""), idx)
+    tile_id = _meta_value(batch.get("meta_tile_id", -1), idx)
+    tile_x = _meta_value(batch.get("meta_tile_x", -1), idx)
+    tile_y = _meta_value(batch.get("meta_tile_y", -1), idx)
+    return f"{build} | {map_name} | tile={tile_id} | ({tile_x},{tile_y})"
 
 
 def _coarse_type_to_rgb(type_grid: torch.Tensor) -> torch.Tensor:
@@ -684,68 +739,103 @@ def _texcomp_loss(
 
 
 def _preview_height(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out_path: Path) -> None:
-    panels = [
-        ("input", batch["input"][0]),
-        ("height_gt", batch["height_norm"][0]),
-        ("height_pred", outputs["pred"][0]),
-        ("weight", batch["weight_257"][0]),
-    ]
-    _save_horizontal_panel(panels, out_path)
+    n = min(int(batch["input"].shape[0]), 8)
+    rows = []
+    row_titles = []
+    for idx in range(n):
+        row_titles.append(_preview_row_title(batch, idx))
+        rows.append(
+            [
+                ("input", batch["input"][idx]),
+                ("height_gt", batch["height_norm"][idx]),
+                ("height_pred", outputs["pred"][idx]),
+                ("weight", batch["weight_257"][idx]),
+            ]
+        )
+    _save_preview_grid(rows, out_path, row_titles=row_titles)
 
 
 def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out_path: Path) -> None:
-    panels = [
-        ("input", batch["input"][0]),
-        ("normal_gt", _normals_to_rgb(outputs["target"][0])),
-        ("normal_pred", _normals_to_rgb(outputs["pred"][0])),
-        ("terrain_valid", outputs["terrain_valid_mask"][0]),
-        ("base_mask", outputs["base_mask"][0]),
-        ("hard_region", outputs["hard_region_signal"][0] / outputs["hard_region_signal"][0].max().clamp_min(1e-6)),
-        ("transition", outputs["transition_signal"][0] / outputs["transition_signal"][0].max().clamp_min(1e-6)),
-        ("detail_weight", outputs["detail_weight"][0] / outputs["detail_weight"][0].max().clamp_min(1e-6)),
-        ("train_mask", outputs["train_mask"][0] / outputs["train_mask"][0].max().clamp_min(1e-6)),
-        ("liquid_mask", outputs["liquid_mask"][0]),
-        ("object_weight", outputs["object_weight"][0]),
-    ]
-    _save_horizontal_panel(panels, out_path)
+    n = min(int(batch["input"].shape[0]), 8)
+    rows = []
+    row_titles = []
+    for idx in range(n):
+        row_titles.append(_preview_row_title(batch, idx))
+        rows.append(
+            [
+                ("input", batch["input"][idx]),
+                ("normal_gt", _normals_to_rgb(outputs["target"][idx])),
+                ("normal_pred", _normals_to_rgb(outputs["pred"][idx])),
+                ("terrain_valid", outputs["terrain_valid_mask"][idx]),
+                ("base_mask", outputs["base_mask"][idx]),
+                ("hard_region", outputs["hard_region_signal"][idx] / outputs["hard_region_signal"][idx].max().clamp_min(1e-6)),
+                ("transition", outputs["transition_signal"][idx] / outputs["transition_signal"][idx].max().clamp_min(1e-6)),
+                ("detail_weight", outputs["detail_weight"][idx] / outputs["detail_weight"][idx].max().clamp_min(1e-6)),
+                ("train_mask", outputs["train_mask"][idx] / outputs["train_mask"][idx].max().clamp_min(1e-6)),
+                ("liquid_mask", outputs["liquid_mask"][idx]),
+                ("object_weight", outputs["object_weight"][idx]),
+            ]
+        )
+    _save_preview_grid(rows, out_path, row_titles=row_titles)
 
 
 def _preview_holes(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out_path: Path) -> None:
-    panels = [
-        ("input", batch["input"][0]),
-        ("holes_gt", outputs["target"][0]),
-        ("holes_pred", outputs["pred"][0]),
-    ]
-    _save_horizontal_panel(panels, out_path)
+    n = min(int(batch["input"].shape[0]), 8)
+    rows = []
+    row_titles = []
+    for idx in range(n):
+        row_titles.append(_preview_row_title(batch, idx))
+        rows.append(
+            [
+                ("input", batch["input"][idx]),
+                ("holes_gt", outputs["target"][idx]),
+                ("holes_pred", outputs["pred"][idx]),
+            ]
+        )
+    _save_preview_grid(rows, out_path, row_titles=row_titles)
 
 
 def _preview_liquid(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out_path: Path) -> None:
-    pred_type_rgb = _coarse_type_to_rgb(outputs["pred_type"][0])
-    target_type_rgb = _coarse_type_to_rgb(outputs["target_type"][0])
-    panels = [
-        ("input", batch["input"][0]),
-        ("liq_gt", outputs["target_mask"][0]),
-        ("liq_pred", outputs["pred_mask"][0]),
-        ("type_gt", target_type_rgb),
-        ("type_pred", pred_type_rgb),
-    ]
-    _save_horizontal_panel(panels, out_path)
+    n = min(int(batch["input"].shape[0]), 8)
+    rows = []
+    row_titles = []
+    for idx in range(n):
+        row_titles.append(_preview_row_title(batch, idx))
+        pred_type_rgb = _coarse_type_to_rgb(outputs["pred_type"][idx])
+        target_type_rgb = _coarse_type_to_rgb(outputs["target_type"][idx])
+        rows.append(
+            [
+                ("input", batch["input"][idx]),
+                ("liq_gt", outputs["target_mask"][idx]),
+                ("liq_pred", outputs["pred_mask"][idx]),
+                ("type_gt", target_type_rgb),
+                ("type_pred", pred_type_rgb),
+            ]
+        )
+    _save_preview_grid(rows, out_path, row_titles=row_titles)
 
 
 def _preview_texcomp(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out_path: Path) -> None:
-    gt_alpha_painted = batch["alpha"][0, 1:].max(dim=0).values.unsqueeze(0)
-    pred_alpha_painted = outputs["pred_alpha"][0, 1:].max(dim=0).values.unsqueeze(0)
-    gt_mask = outputs["target_mask"][0].max(dim=0).values.unsqueeze(0)
-    pred_mask = outputs["pred_mask"][0].max(dim=0).values.unsqueeze(0)
-    panels = [
-        ("input", batch["input"][0]),
-        ("alpha_gt", gt_alpha_painted),
-        ("alpha_pred", pred_alpha_painted),
-        ("mask_gt", gt_mask),
-        ("mask_pred", pred_mask),
-        ("recomposed", outputs["recomposed"][0]),
-    ]
-    _save_horizontal_panel(panels, out_path)
+    n = min(int(batch["input"].shape[0]), 8)
+    rows = []
+    row_titles = []
+    for idx in range(n):
+        row_titles.append(_preview_row_title(batch, idx))
+        gt_alpha_painted = batch["alpha"][idx, 1:].max(dim=0).values.unsqueeze(0)
+        pred_alpha_painted = outputs["pred_alpha"][idx, 1:].max(dim=0).values.unsqueeze(0)
+        gt_mask = outputs["target_mask"][idx].max(dim=0).values.unsqueeze(0)
+        pred_mask = outputs["pred_mask"][idx].max(dim=0).values.unsqueeze(0)
+        rows.append(
+            [
+                ("input", batch["input"][idx]),
+                ("alpha_gt", gt_alpha_painted),
+                ("alpha_pred", pred_alpha_painted),
+                ("mask_gt", gt_mask),
+                ("mask_pred", pred_mask),
+                ("recomposed", outputs["recomposed"][idx]),
+            ]
+        )
+    _save_preview_grid(rows, out_path, row_titles=row_titles)
 
 
 TASKS: dict[str, TaskSpec] = {
@@ -832,7 +922,12 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     p.add_argument("--max-train-samples", type=int, default=0)
     p.add_argument("--max-val-samples", type=int, default=0)
     p.add_argument("--val-interval", type=int, default=1)
-    p.add_argument("--val-preview-interval", type=int, default=5)
+    p.add_argument(
+        "--val-preview-interval",
+        type=int,
+        default=1,
+        help="If >0, write a validation preview only when a new best checkpoint is found. 0 disables preview writes.",
+    )
     p.add_argument("--run-name", type=str, default=None)
     p.add_argument("--resume-checkpoint", type=Path, default=None)
     p.add_argument("--no-augment", action="store_true")
@@ -963,6 +1058,7 @@ def run_task(task_name: str) -> None:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
     scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and not args.no_amp))
     best_val = float("inf")
+    best_epoch: int | None = None
     start_epoch = 1
     log_entries: list[dict[str, Any]] = []
 
@@ -976,6 +1072,7 @@ def run_task(task_name: str) -> None:
             scaler.load_state_dict(ckpt["scaler_state_dict"])
         start_epoch = int(ckpt["epoch"]) + 1
         best_val = float(ckpt.get("best_val", float("inf")))
+        best_epoch = int(ckpt["best_epoch"]) if ckpt.get("best_epoch") is not None else None
 
     config = {
         "task": task_name,
@@ -1011,6 +1108,8 @@ def run_task(task_name: str) -> None:
         "no_compile": args.no_compile,
         "compile_status": compile_status,
         "started_at": datetime.now(timezone.utc).isoformat(),
+        "best_val": best_val if np.isfinite(best_val) else None,
+        "best_epoch": best_epoch,
     }
     (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
@@ -1120,12 +1219,12 @@ def run_task(task_name: str) -> None:
             for key, value in val_metric_sums.items():
                 entry[f"val_{key}"] = value / n_val
             print(f"        val | loss={entry['val_loss']:.4f}", flush=True)
-
-            if preview_batch is not None and preview_outputs is not None and args.val_preview_interval > 0 and epoch % args.val_preview_interval == 0:
-                task.save_preview(preview_batch, preview_outputs, val_dir / f"epoch_{epoch:04d}.png")
-
+            is_new_best = False
             if entry["val_loss"] < best_val:
                 best_val = float(entry["val_loss"])
+                best_epoch = int(epoch)
+                is_new_best = True
+                entry["is_new_best"] = True
                 torch.save(
                     {
                         "epoch": epoch,
@@ -1134,10 +1233,19 @@ def run_task(task_name: str) -> None:
                         "scheduler_state_dict": scheduler.state_dict(),
                         "scaler_state_dict": scaler.state_dict(),
                         "best_val": best_val,
+                        "best_epoch": best_epoch,
                         "task": task_name,
                     },
                     ckpt_dir / f"v16_1_{task_name}_best.pt",
                 )
+                print(f"        *** new best val_loss={best_val:.4f}", flush=True)
+            if (
+                is_new_best
+                and preview_batch is not None
+                and preview_outputs is not None
+                and args.val_preview_interval > 0
+            ):
+                task.save_preview(preview_batch, preview_outputs, val_dir / f"best_epoch_{epoch:04d}.png")
 
         log_entries.append(entry)
         torch.save(
@@ -1148,12 +1256,17 @@ def run_task(task_name: str) -> None:
                 "scheduler_state_dict": scheduler.state_dict(),
                 "scaler_state_dict": scaler.state_dict(),
                 "best_val": best_val,
+                "best_epoch": best_epoch,
                 "task": task_name,
             },
             ckpt_dir / f"v16_1_{task_name}_last.pt",
         )
         (run_dir / "training_log.json").write_text(json.dumps(log_entries, indent=2), encoding="utf-8")
 
+    config["best_val"] = best_val if np.isfinite(best_val) else None
+    config["best_epoch"] = best_epoch
+    config["finished_at"] = datetime.now(timezone.utc).isoformat()
+    (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     torch.save(
         {
             "epoch": args.epochs,
@@ -1162,6 +1275,7 @@ def run_task(task_name: str) -> None:
             "scheduler_state_dict": scheduler.state_dict(),
             "scaler_state_dict": scaler.state_dict(),
             "best_val": best_val,
+            "best_epoch": best_epoch,
             "task": task_name,
         },
         ckpt_dir / f"v16_1_{task_name}_final.pt",

@@ -229,7 +229,7 @@ uv run python -u scripts/train_v16_1_normal.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
   --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1 `
   --device auto `
-  --batch-size 8 `
+  --batch-size 16 `
   --grad-accum-steps 1 `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
@@ -238,7 +238,7 @@ uv run python -u scripts/train_v16_1_normal.py `
   --epochs 50 `
   --num-workers -1 `
   --val-preview-interval 2 `
-  --run-name v16_1_1_normal_curated_bs8_acc1_compile
+  --run-name v16_1_1_normal_curated_bs16_acc1_compile
 ```
 
 Why this is the recommended starting point now:
@@ -246,8 +246,10 @@ Why this is the recommended starting point now:
 - compile warmup is expensive, so judge throughput from epoch `2+`, not epoch `1`
 - the bounded `400`-tile train pool plus `128`-tile rotating epochs avoids
   dragging the full curated manifest through every epoch
-- `8 x 1` keeps the same effective batch as `1 x 8` but uses the card much
-  more directly on the 16 GB card
+- if the current `8 x 1` launch sits under roughly `5 GB` VRAM, the repo truth
+  is that the recommendation was too conservative for the 16 GB card
+- prefer a larger micro-batch first so epoch wall-clock falls before reaching
+  for accumulation tricks
 
 Small scouting run for concept-mix proof before longer training:
 
@@ -256,7 +258,7 @@ uv run python -u scripts/train_v16_1_normal.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
   --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1 `
   --device auto `
-  --batch-size 8 `
+  --batch-size 16 `
   --grad-accum-steps 1 `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
@@ -265,7 +267,7 @@ uv run python -u scripts/train_v16_1_normal.py `
   --epochs 20 `
   --num-workers 4 `
   --val-preview-interval 1 `
-  --run-name v16_1_1_normal_curated_pool400_epoch128 `
+  --run-name v16_1_1_normal_curated_pool400_epoch128_bs16 `
   --no-compile
 ```
 
@@ -275,15 +277,20 @@ settled.
 
 Fallback VRAM ladder:
 
-- preferred start: `--batch-size 8 --grad-accum-steps 1`
+- preferred start: `--batch-size 16 --grad-accum-steps 1`
+- if the card still sits comfortably below saturation: `--batch-size 20 --grad-accum-steps 1`
+- if the card still has real headroom after that: `--batch-size 24 --grad-accum-steps 1`
+- first fallback: `--batch-size 12 --grad-accum-steps 1`
+- second fallback: `--batch-size 8 --grad-accum-steps 1`
 - if needed: `--batch-size 4 --grad-accum-steps 2`
 - if needed: `--batch-size 2 --grad-accum-steps 4`
 - safe floor: `--batch-size 1 --grad-accum-steps 8`
 
-Optional higher-VRAM follow-ons if the card stays comfortable:
+Use actual GPU memory and throughput, not old defaults:
 
-- `--batch-size 12 --grad-accum-steps 1`
-- `--batch-size 16 --grad-accum-steps 1`
+- if VRAM stays under about `10 GB`, increase micro-batch again
+- if throughput drops or compile becomes unstable, step back one rung
+- keep `--grad-accum-steps 1` while the card can hold the larger micro-batch
 
 V16.1 trainer runtime notes:
 
@@ -306,6 +313,10 @@ V16.1 trainer runtime notes:
   - blank `what plate` flag
 - startup prints now show the effective batch, the curated pool sizes, and the
   curation manifest path
+- best-model tracking is explicit again:
+  - `v16_1_<task>_best.pt` stores `best_val` and `best_epoch`
+  - validation preview PNGs now write only on new best checkpoints:
+    - `validation/best_epoch_XXXX.png`
 - new epoch evidence files:
   - `evidence/train_epoch_orders.jsonl`
   - `evidence/train_epoch_bucket_usage.jsonl`
@@ -317,7 +328,7 @@ uv run python -u scripts/train_v16_1_normal.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
   --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1 `
   --device auto `
-  --batch-size 8 `
+  --batch-size 16 `
   --grad-accum-steps 1 `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
@@ -326,8 +337,8 @@ uv run python -u scripts/train_v16_1_normal.py `
   --epochs 100 `
   --num-workers -1 `
   --val-preview-interval 2 `
-  --run-name v16_1_1_normal_curated_pool400_epoch128 `
-  --resume-checkpoint ../models/v16_1/normal/runs/v16_1_1_normal_curated_pool400_epoch128/checkpoints/v16_1_normal_last.pt
+  --run-name v16_1_1_normal_curated_bs16_acc1_compile `
+  --resume-checkpoint ../models/v16_1/normal/runs/v16_1_1_normal_curated_bs16_acc1_compile/checkpoints/v16_1_normal_last.pt
 ```
 
 ## Key Outputs

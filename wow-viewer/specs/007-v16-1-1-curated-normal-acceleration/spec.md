@@ -186,6 +186,9 @@ uncertainty.
   curated manifest build, small scouting run, and longer resumed run.
 - **FR-015**: Continuity docs MUST explicitly route fresh chats to V16.1.1 as
   the next normal-lane implementation slice.
+- **FR-016**: Validation preview artifacts MUST be best-gated, render multiple
+  samples per output, and carry visible panel labels plus per-sample tile
+  metadata so operator review is not worse than dataset validation.
 
 ### Non-Goals
 

@@ -128,6 +128,13 @@ the operator-facing notes.
 
 **Goal**: Leave the next chat with exact bounded commands and clear proof gates.
 
+### Step 7.0 — Repair the validation review surface
+Keep V16.1.1 model validation at least as legible as dataset validation by
+restoring best-gated previews with visible labels and multiple samples per
+artifact.
+**Validation**: new-best preview outputs show panel labels plus build/map/tile
+headers across multiple validation rows instead of a single unlabeled tile.
+
 ### Step 7.1 — Publish the new curation commands
 Write the V16.1.1 manifest-build commands for full-corpus and `400`-tile
 scouting modes.

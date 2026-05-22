@@ -97,7 +97,7 @@ uv run python -u scripts\train_v16_1_normal.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
   --curation-manifest ..\output\datasets\v16\curation\normal_terrain_full_corpus_v16_1_1 `
   --device auto `
-  --batch-size 8 `
+  --batch-size 16 `
   --grad-accum-steps 1 `
   --train-max-tiles 400 `
   --train-epoch-tiles 128 `
@@ -105,7 +105,7 @@ uv run python -u scripts\train_v16_1_normal.py `
   --val-max-tiles 48 `
   --num-workers -1 `
   --epochs 50 `
-  --run-name v16_1_1_normal_curated_pool400_epoch128
+  --run-name v16_1_1_normal_curated_pool400_epoch128_bs16
 ```
 
 This is the preferred V16.1 pattern now: curate first, then train from the
@@ -114,9 +114,9 @@ train pool and rotating per-epoch subsets. The V16.1.1 normal lane now also
 records difficulty buckets in the manifest, biases epoch subsets toward harder
 tiles, and strengthens intra-tile weighting with painted-transition-aware
 hard-region emphasis while keeping terrain-valid masking authoritative. For the
-current 16 GB-card
-recommendation, start at `8 x 1` before falling back to `4 x 2`, `2 x 4`, or
-`1 x 8`.
+current 16 GB card, treat `16 x 1` as the preferred starting point when VRAM
+headroom is available; keep `8 x 1` as the safer fallback before dropping to
+`4 x 2`, `2 x 4`, or `1 x 8`.
 
 ## What Lives Here
 

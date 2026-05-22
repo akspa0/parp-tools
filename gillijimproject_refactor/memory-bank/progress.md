@@ -191,9 +191,13 @@
     V16.1 path
   - current recommended command contract is now documented:
     - curation: `--workers -1 --chunk-size 128`
-    - train: `--batch-size 8 --grad-accum-steps 1`
+    - train: `--batch-size 16 --grad-accum-steps 1`
     - small scouting pool: `--train-max-tiles 400 --train-epoch-tiles 128 --val-max-tiles 48`
-    - VRAM fallback ladder: `4 x 2`, `2 x 4`, `1 x 8`
+    - VRAM-first ladder:
+      - `16 x 1`
+      - `20 x 1`
+      - `24 x 1`
+      - fallback `12 x 1`, `8 x 1`, then accumulation rungs
 - V16.1 direction has shifted from height-first to normal-first for terrain
   signal learning, with height follow-on meant to absorb what the normal lane
   teaches about minimap-to-terrain supervision.
@@ -237,6 +241,16 @@
       - `train_epoch_bucket_usage.jsonl`
     - hard-region weighting now includes painted alpha / MCLY transition signal
       while terrain-valid masking stays authoritative
+    - best-model tracking is explicit again:
+      - `best_val`
+      - `best_epoch`
+    - validation previews are best-gated again:
+      - `validation/best_epoch_XXXX.png`
+    - validation previews now render multiple samples again:
+      - up to `8` rows from the selected validation batch per preview image
+    - validation previews now also carry visible labels again:
+      - panel labels
+      - per-sample row headers with tile metadata
 - Focused proof now exists for that slice:
   - curation smoke:
     - `wow-viewer/output/datasets/v16/curation/smoke_v16_1_1_curation_335/`
