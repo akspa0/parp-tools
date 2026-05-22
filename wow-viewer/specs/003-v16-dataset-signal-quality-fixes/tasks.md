@@ -26,7 +26,7 @@
 
 - [ ] **2.1** Generate overview + contact sheet for `3_3_5_12340`
   - `inspect_v16_dataset.py --build 3_3_5_12340 --write-overview --write-images --sample-mode random --sample-seed 42`
-  - Visual check: tile coords, liquid mask, filtered vs raw object masks
+  - Visual check: tile coords, liquid mask, filtered vs raw object masks, WMO footprints not inflated into coarse bounds rectangles
 - [ ] **2.2** Generate for `3_0_1_8303`
   - Spot-check ocean/coastal tiles — liquid must be present
 - [ ] **2.3** Generate for `0_7_0_3694`

@@ -1086,7 +1086,8 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             obj0Bytes,
             buildVersion,
             tex0Bytes is not null ? tex0Virtual : null,
-            obj0Bytes is not null ? obj0Virtual : null);
+            obj0Bytes is not null ? obj0Virtual : null,
+            catalog.ReadFile);
     }
 
     static void GenerateSyntheticMinimap(NativeMpqService catalog, TerrainTileTensorPack pack, int tileX, int tileY, string outputPath)

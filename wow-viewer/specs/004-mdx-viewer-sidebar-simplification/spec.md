@@ -106,7 +106,7 @@ As a developer, I need training-related UI elements removed from the right sideb
 ### Measurable Outcomes
 
 - **SC-001**: All text in the right sidebar is fully readable at 600px+ width without truncation.
-- **SC-002**: Sidebar resize操作 is smooth (no frame drops) from 260px to 1080px.
+- **SC-002**: Sidebar resize is smooth (no frame drops) from 260px to 1080px.
 - **SC-003**: PM4 CK24 Bounds shows one box per CK24 object (not per sub-object).
 - **SC-004**: Version 0.5.0 appears in the About dialog.
 - **SC-005**: No training-related controls appear in the right sidebar.

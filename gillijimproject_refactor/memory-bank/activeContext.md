@@ -42,6 +42,7 @@
     - the first longer V16.1.1 normal run finished, but it still needs more epochs
     - V16.1.x normal training resumes with `--resume-checkpoint`, not `--resume-from auto`
     - `--epochs` remains the total run ceiling, so the continuation command must raise that ceiling above the completed checkpoint epoch
+    - the shared V16.1 trainer now extends the cosine scheduler when resuming to a higher total epoch ceiling, so resume is no longer pinned to the original scheduler `T_max`
 - V16.1 is now the named next architecture lane for terrain models:
   - one independent model per target family
   - `minimap -> height`
@@ -93,6 +94,28 @@
     - `alpha_painted_256`
     - `mcly_any_16`
     - `what_plate_flag`
+- Current object-mask correction state:
+  - archive-backed ADT harvest now attempts geometry-derived WMO footprints in
+    `AdtTensorPackBuilder` before falling back to projected MODF bounds
+  - the new path is wired through `WowViewer.Tool.Harvest` via archive asset
+    reads, so LK/Cata/V16 rebuilds can stop depending only on coarse WMO AABBs
+  - MDDF loss gating is no longer just filename regex plus a fake scale-based
+    height guess; archive-backed harvest now resolves doodad model bounds and
+    filters tree or clutter assets plus tiny/tall doodads out of
+    `object_filtered_mask_257`
+  - `inspect_v16_harvest_samples.py` can now run raw-only without any finalized
+    `.zarr` store, so object-mask QA can happen before dataset mutation
+  - `inspect_v16_harvest_samples.py` now renders raw `mddf`, raw `modf`, and
+    `object_filtered_mask_257` explicitly, so preview QA shows the real terrain
+    loss gate instead of only the merged raw object channel
+  - Zarr-mutating `build_v16_dataset.py` commands now require
+    `--allow-zarr-write`; preview-first is the enforced operator path
+  - current proof level:
+    - `dotnet build wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj -c Debug`
+    - raw harvest preview rerun for `3_3_5_12340 / Azeroth` succeeded after the
+      MDDF filter and inspector changes
+  - remaining open issue: WMO/MODF panels are still largely box-shaped in raw
+    preview, so the precise silhouette slice is not yet closed end-to-end
 - The shared V16.1 trainer now has real gradient accumulation through
   `--grad-accum-steps`; this is the intended path for the 4070 Ti SUPER instead
   of pretending large micro-batches fit in VRAM.
@@ -167,7 +190,8 @@
   - per-epoch CUDA memory guidance prints are back too
 - Canonical flow:
   - `WowViewer.Tool.Harvest harvest-stream --stream-profile v16`
-  - `build_v16_dataset.py build`
+  - `inspect_v16_harvest_samples.py` raw preview before any store write
+  - `build_v16_dataset.py build --allow-zarr-write`
   - `validate_v16_training_ready.py`
   - `train_v16.py`
 - Current real-run trainer shape:

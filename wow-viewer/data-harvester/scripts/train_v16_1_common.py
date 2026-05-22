@@ -1256,6 +1256,19 @@ def run_task(task_name: str) -> None:
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         if "scheduler_state_dict" in ckpt:
             scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+            completed_epoch = int(ckpt["epoch"])
+            loaded_t_max = int(getattr(scheduler, "T_max", max(args.epochs, 1)))
+            requested_t_max = max(int(args.epochs), 1)
+            if requested_t_max > loaded_t_max:
+                scheduler.T_max = requested_t_max
+                eta_min = float(getattr(scheduler, "eta_min", 0.0))
+                resumed_lrs = [
+                    eta_min + (base_lr - eta_min) * (1.0 + math.cos(math.pi * completed_epoch / requested_t_max)) / 2.0
+                    for base_lr in scheduler.base_lrs
+                ]
+                for param_group, resumed_lr in zip(optimizer.param_groups, resumed_lrs):
+                    param_group["lr"] = float(resumed_lr)
+                scheduler._last_lr = [float(lr) for lr in resumed_lrs]
         if "scaler_state_dict" in ckpt:
             scaler.load_state_dict(ckpt["scaler_state_dict"])
         start_epoch = int(ckpt["epoch"]) + 1
@@ -1356,6 +1369,9 @@ def run_task(task_name: str) -> None:
         print(f"Normal detail steering: boost={args.normal_detail_boost:.2f}", flush=True)
     print(f"Parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}", flush=True)
     print(f"torch.compile: {compile_status}", flush=True)
+    if args.resume_checkpoint is not None:
+        print(f"Resume checkpoint: {args.resume_checkpoint}", flush=True)
+        print(f"Resume scheduler T_max: {getattr(scheduler, 'T_max', 'n/a')}", flush=True)
 
     for epoch in range(start_epoch, args.epochs + 1):
         train_sampler.set_epoch(epoch)

@@ -1668,7 +1668,21 @@ def _format_ratio(raw_bytes: int, stored_bytes: int) -> str:
     return f"{raw_bytes / stored_bytes:.2f}x"
 
 
+def _require_explicit_zarr_write(args: argparse.Namespace, operation: str) -> None:
+    if getattr(args, "allow_zarr_write", False):
+        return
+
+    raise SystemExit(
+        "Refusing to write or mutate a Zarr store without --allow-zarr-write. "
+        f"This {operation} command changes ../output/datasets/v16/*.zarr directly. "
+        "Inspect raw harvest output first with scripts/inspect_v16_harvest_samples.py, "
+        "then rerun the write command with --allow-zarr-write once the raw masks/signals look correct."
+    )
+
+
 def cmd_build(args: argparse.Namespace) -> None:
+    _require_explicit_zarr_write(args, "build")
+
     builds = args.builds or [args.build]
     harvest_tool = _find_harvest_tool()
     print(f"Harvest tool: {harvest_tool}")
@@ -2312,6 +2326,8 @@ def cmd_validate_signals(args: argparse.Namespace) -> None:
 
 
 def cmd_merge_builds(args: argparse.Namespace) -> None:
+    _require_explicit_zarr_write(args, "merge-builds")
+
     builds = args.builds or sorted(
         d.stem.replace(".zarr", "")
         for d in _DATASET_ROOT.glob("*.zarr")
@@ -2622,6 +2638,8 @@ def cmd_repair_index(args: argparse.Namespace) -> None:
 
 
 def cmd_patch_liquids(args: argparse.Namespace) -> None:
+    _require_explicit_zarr_write(args, "patch-liquids")
+
     builds = args.builds or [args.build]
     harvest_tool = _find_harvest_tool()
     batch_size = max(1, int(args.batch_size))
@@ -2761,6 +2779,8 @@ def cmd_patch_liquids(args: argparse.Namespace) -> None:
 
 
 def cmd_patch_objects(args: argparse.Namespace) -> None:
+    _require_explicit_zarr_write(args, "patch-objects")
+
     builds = args.builds or [args.build]
     harvest_tool = _find_harvest_tool()
     batch_size = max(1, int(args.batch_size))
@@ -2922,6 +2942,7 @@ def main() -> None:
     build_p.add_argument("--maps", nargs="+", default=None, help="Specific maps to extract")
     build_p.add_argument("--resume", action="store_true", help="Resume from <build>.zarr.partial if a compatible resume state exists")
     build_p.add_argument("--rebuild-existing", action="store_true", help="Rebuild even if a final <build>.zarr already looks complete")
+    build_p.add_argument("--allow-zarr-write", action="store_true", help="Required confirmation flag before creating or replacing any V16 Zarr store")
     build_p.add_argument("--tile-workers", type=int, default=DEFAULT_TILE_WORKERS, help="harvest-stream workers per map during build")
     build_p.add_argument("--codec", choices=["none", "lz4", "zstd"], default=DEFAULT_CODEC, help="Compression codec (none disables compression)")
     build_p.add_argument("--clevel", type=int, default=DEFAULT_CLEVEL, help="Blosc compression level")
@@ -2938,17 +2959,20 @@ def main() -> None:
     patch_liquids_p = sub.add_parser("patch-liquids", parents=[common], help="Patch liquid_mask/liquid_height arrays and liquid has_* flags in-place")
     patch_liquids_p.add_argument("--batch-size", type=int, default=128, help="Tile batch size for array writes")
     patch_liquids_p.add_argument("--map-workers", type=int, default=DEFAULT_MAP_WORKERS, help="Parallel harvest-stream workers across maps during liquid patching")
+    patch_liquids_p.add_argument("--allow-zarr-write", action="store_true", help="Required confirmation flag before mutating any V16 Zarr store")
     patch_liquids_p.add_argument("--no-backup", action="store_true", help="Skip creating index.parquet.bak.liquids before rewriting index.parquet")
     patch_liquids_p.add_argument("--signal-validation", action=argparse.BooleanOptionalAction, default=True, help="Run post-patch signal validation checks")
     patch_liquids_p.add_argument("--signal-validation-strict", action=argparse.BooleanOptionalAction, default=True, help="Fail when post-patch signal validation fails")
     patch_objects_p = sub.add_parser("patch-objects", parents=[common], help="Patch object mask arrays and object has_* flags in-place")
     patch_objects_p.add_argument("--batch-size", type=int, default=128, help="Tile batch size for array writes")
     patch_objects_p.add_argument("--map-workers", type=int, default=DEFAULT_MAP_WORKERS, help="Parallel harvest-stream workers across maps during object patching")
+    patch_objects_p.add_argument("--allow-zarr-write", action="store_true", help="Required confirmation flag before mutating any V16 Zarr store")
     patch_objects_p.add_argument("--no-backup", action="store_true", help="Skip creating index.parquet.bak.objects before rewriting index.parquet")
     patch_objects_p.add_argument("--signal-validation", action=argparse.BooleanOptionalAction, default=True, help="Run post-patch signal validation checks")
     patch_objects_p.add_argument("--signal-validation-strict", action=argparse.BooleanOptionalAction, default=True, help="Fail when post-patch signal validation fails")
     merge_p = sub.add_parser("merge-builds", parents=[common], help="Merge per-build stores into one combined Zarr store")
     merge_p.add_argument("--output-name", type=str, default="merged_all", help="Output store name (without .zarr)")
+    merge_p.add_argument("--allow-zarr-write", action="store_true", help="Required confirmation flag before creating any merged V16 Zarr store")
     merge_p.add_argument(
         "--dedupe-mode",
         choices=["none", "coords", "coords_height"],

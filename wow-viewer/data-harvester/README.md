@@ -15,12 +15,28 @@ uv sync
 
 ## Standard Flow
 
-1. Build or patch dataset stores.
-2. Validate dataset signals.
-3. Generate visual QA artifacts.
-4. Build a target-aware curation manifest.
-5. Run trainer-readiness validation.
-6. Train only after the store passes JSON QA, human-eye QA, and curation.
+1. Inspect raw harvest samples before any Zarr write.
+2. Build or patch dataset stores with explicit write confirmation.
+3. Validate dataset signals.
+4. Generate visual QA artifacts.
+5. Build a target-aware curation manifest.
+6. Run trainer-readiness validation.
+7. Train only after the store passes raw-harvest QA, JSON QA, human-eye QA, and curation.
+
+## Raw Harvest QA Before Zarr
+
+Use raw archive-backed harvest sampling first when a signal lane is under investigation. This writes preview NPZs and PNGs under `output/datasets/v16/harvest_signal_inspection/` and does not require an existing `.zarr` store.
+
+```powershell
+uv run python scripts/inspect_v16_harvest_samples.py `
+  --build 3_3_5_12340 `
+  --maps Azeroth `
+  --kinds object placement `
+  --sample-count 8 `
+  --output-dir ../output/datasets/v16/harvest_signal_inspection
+```
+
+Add `--compare-zarr` only when you intentionally want side-by-side comparison against an already finalized store.
 
 ## Build Dataset
 
@@ -31,9 +47,12 @@ dotnet build ./WowViewer.slnx -c Debug
 cd i:/parp/parp-tools/wow-viewer/data-harvester
 uv run python scripts/build_v16_dataset.py build `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --allow-zarr-write `
   --tile-workers 16 `
   --rebuild-existing
 ```
+
+`build`, `patch-liquids`, `patch-objects`, and `merge-builds` now refuse to touch `.zarr` stores unless `--allow-zarr-write` is present.
 
 Default V16 build compression is light Blosc:
 
@@ -47,6 +66,7 @@ Liquids only:
 
 ```powershell
 uv run python scripts/build_v16_dataset.py patch-liquids `
+  --allow-zarr-write `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927
 ```
 
@@ -54,6 +74,7 @@ Objects only:
 
 ```powershell
 uv run python scripts/build_v16_dataset.py patch-objects `
+  --allow-zarr-write `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927
 ```
 

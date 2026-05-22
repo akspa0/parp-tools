@@ -43,6 +43,17 @@
 - Alpha placeholder `map=memory` metadata fix is landed.
 - Liquid presence-mask fix for valid type-`0` water is landed.
 - Object instance mask + `placements.parquet` are landed.
+- Bounds-based MDDF clutter filtering is now landed in
+  `AdtTensorPackBuilder` for archive-backed harvest:
+  - normalized asset-path clutter regex expanded beyond the old basename-only
+    tree check
+  - resolved doodad model bounds now classify tiny clutter and tall clutter for
+    `object_filtered_mask_257`
+  - focused proof: harvest project build succeeded and raw preview rerun for
+    `3_3_5_12340 / Azeroth` completed cleanly
+- Raw harvest preview now renders `raw mddf`, `raw modf`, and
+  `filtered loss mask` panels, so preview-first QA can confirm whether clutter
+  is leaking into terrain-loss gating before any Zarr mutation
 
 ### V16 Training Surfaces
 - `V16Dataset` is the live loader.
@@ -140,6 +151,25 @@
   - focused proof run:
     - `wow-viewer/models/v16_1/normal/runs/smoke_normal_supervision_channels_cpu/`
     - logged `what_plate_rate=0.0`, `alpha_painted_cov≈0.66`, `mcly_cov=1.0`
+- Archive-backed ADT harvest now has a first bounded WMO-mask repair:
+  - `AdtTensorPackBuilder.BuildObjectMasks` now tries to raster transformed WMO
+    mesh triangles into `modf_mask` / `object_filtered_mask` instead of always
+    painting projected bounds rectangles
+  - the harvest path passes archive asset reads into the builder so WMO render
+    documents can be opened during pack generation
+  - raw harvest QA no longer requires a finalized store:
+    - `inspect_v16_harvest_samples.py` can inspect NPZ samples without loading a
+      `.zarr` store unless `--compare-zarr` is explicitly requested
+  - Zarr-mutating dataset commands now require `--allow-zarr-write`:
+    - `build`
+    - `patch-liquids`
+    - `patch-objects`
+    - `merge-builds`
+  - current proof is targeted compile-only:
+    - `dotnet build wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj -c Debug`
+  - remaining required proof:
+    - rebuild a representative V16 store
+    - inspect WMO-heavy validation images before retraining
 - The shared V16.1 trainer now has real gradient accumulation:
   - CLI flag: `--grad-accum-steps`
   - trainer prints now flush immediately instead of hiding early startup
@@ -264,6 +294,7 @@
   - current continuation rule for that lane:
     - resume the existing run with `--resume-checkpoint .../checkpoints/v16_1_normal_last.pt`
     - increase `--epochs` to the new total target instead of treating it as extra epochs to add
+    - the shared V16.1 trainer now also extends the resumed cosine schedule to that higher total instead of restoring the old run ceiling unchanged
 - Focused proof now exists for that slice:
   - curation smoke:
     - `wow-viewer/output/datasets/v16/curation/smoke_v16_1_1_curation_335/`

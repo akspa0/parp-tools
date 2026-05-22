@@ -23,9 +23,11 @@ except ImportError:  # pragma: no cover - optional for raw-only inspection runs
     zarr = None  # type: ignore[assignment]
 
 from build_v16_dataset import (
+    ARRY_MAGIC,
     ENDS_MAGIC,
     NPZB_MAGIC,
     REQUIRED_KEYS,
+    _decode_blob,
     _decode_metadata_json,
     _derive_liquid_supervision,
     _extract_tile_coords_from_metadata,
@@ -322,6 +324,9 @@ def _sample_stats(data: dict[str, np.ndarray], meta: dict[str, object]) -> dict[
     wl_presence = _presence_from_raw(data.get("wl_liquid_mask"))
     unified_presence = _presence_from_raw(data.get("unified_liquid_mask"))
     object_presence = _presence_from_raw(data.get("object_mask_257"))
+    mddf_presence = _presence_from_raw(data.get("mddf_mask_257"))
+    modf_presence = _presence_from_raw(data.get("modf_mask_257"))
+    filtered_presence = _presence_from_raw(data.get("object_filtered_mask_257"))
     instance_mask = _to_2d(data.get("object_instance_mask_257"))
     mcnk_flags = _extract_mcnk_flag_grid(data, meta)
     mcnk_liquid_presence = _mcnk_liquid_presence_from_flags(mcnk_flags)
@@ -356,6 +361,9 @@ def _sample_stats(data: dict[str, np.ndarray], meta: dict[str, object]) -> dict[
         "mcnk_slime_chunks": mcnk_slime_chunks,
         "mcnk_mixed_chunks": mcnk_mixed_chunks,
         "object_mask_sum": float(object_presence.sum()) if object_presence is not None else 0.0,
+        "mddf_mask_sum": float(mddf_presence.sum()) if mddf_presence is not None else 0.0,
+        "modf_mask_sum": float(modf_presence.sum()) if modf_presence is not None else 0.0,
+        "object_filtered_mask_sum": float(filtered_presence.sum()) if filtered_presence is not None else 0.0,
         "object_instance_nonzero": int(np.count_nonzero(instance_mask)) if instance_mask is not None else 0,
         "object_instance_max": int(instance_mask.max()) if instance_mask is not None and instance_mask.size > 0 else 0,
         "placement_mddf_rows": mddf_rows,
@@ -457,15 +465,15 @@ def _stream_samples(
             if magic == ENDS_MAGIC:
                 saw_end = True
                 break
-            if magic != NPZB_MAGIC:
+            if magic not in (NPZB_MAGIC, ARRY_MAGIC):
                 raise RuntimeError(f"Unexpected stream magic {magic!r} for {map_name}")
 
             length = struct.unpack("<I", header[4:8])[0]
             blob = proc.stdout.read(length)
             if not blob or len(blob) < length:
-                raise RuntimeError(f"Truncated NPZ blob for {map_name}")
+                raise RuntimeError(f"Truncated tile blob for {map_name}")
 
-            data = dict(np.load(BytesIO(blob), allow_pickle=False))
+            data = _decode_blob(blob)
             if not REQUIRED_KEYS.issubset(data.keys()):
                 continue
 
@@ -569,6 +577,9 @@ def _visualize_sample(
     raw_wl = _presence_from_raw(arrays.get("wl_liquid_mask"))
     raw_unified = _presence_from_raw(arrays.get("unified_liquid_mask"))
     raw_object = _presence_from_raw(arrays.get("object_mask_257"))
+    raw_mddf = _presence_from_raw(arrays.get("mddf_mask_257"))
+    raw_modf = _presence_from_raw(arrays.get("modf_mask_257"))
+    raw_filtered = _presence_from_raw(arrays.get("object_filtered_mask_257"))
     raw_instance = _to_2d(arrays.get("object_instance_mask_257"))
     derived_liquid = np.asarray(sample["derived_liquid_mask"]).astype(np.float32)
     mcnk_flags = _extract_mcnk_flag_grid(arrays, sample["metadata"])  # type: ignore[arg-type]
@@ -583,6 +594,9 @@ def _visualize_sample(
         _draw_label(_render_mcnk_liquid_types_u8(mcnk_types, panel_size), "mcnk liquid flags"),
         _draw_label(_resize_rgb_or_gray(_normalize_u8_mask(derived_liquid), panel_size), "python derived"),
         _draw_label(_resize_rgb_or_gray(_normalize_u8_mask(raw_object), panel_size), "raw object"),
+        _draw_label(_resize_rgb_or_gray(_normalize_u8_mask(raw_mddf), panel_size), "raw mddf"),
+        _draw_label(_resize_rgb_or_gray(_normalize_u8_mask(raw_modf), panel_size), "raw modf"),
+        _draw_label(_resize_rgb_or_gray(_normalize_u8_mask(raw_filtered), panel_size), "filtered loss mask"),
         _draw_label(_resize_rgb_or_gray(_normalize_instance_u8(raw_instance), panel_size), "raw instance"),
     ]
 
@@ -649,7 +663,8 @@ def _write_outputs(
         title = (
             f"{build} sample={i:02d} kind={kind} map={map_name} xy=({tile_x},{tile_y}) "
             f"derived={sample['derived_source']} mddf={sample['stats']['placement_mddf_rows']} "
-            f"modf={sample['stats']['placement_modf_rows']} obj_sum={sample['stats']['object_mask_sum']:.1f}"
+            f"modf={sample['stats']['placement_modf_rows']} obj_sum={sample['stats']['object_mask_sum']:.1f} "
+            f"filt_sum={sample['stats']['object_filtered_mask_sum']:.1f}"
         )
         img = _PILImage.fromarray(strip, "RGB")
         drw = _PILImageDraw.Draw(img)
@@ -699,13 +714,14 @@ def _write_outputs(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Inspect raw V16 harvest NPZ samples and compare them to finalized Zarr outputs")
+    parser = argparse.ArgumentParser(description="Inspect raw V16 harvest NPZ samples before Zarr writes; finalized-store comparison is optional")
     parser.add_argument("--build", required=True, help="Build key, e.g. 3_3_5_12340")
     parser.add_argument("--maps", nargs="+", required=True, help="Maps to stream from the staged client")
     parser.add_argument("--kinds", nargs="+", choices=_KIND_CHOICES, default=["mh2o", "mclq", "object", "placement"], help="Sample categories to collect")
     parser.add_argument("--sample-count", type=int, default=4, help="Reservoir sample size per category")
     parser.add_argument("--sample-seed", type=int, default=1234, help="Reservoir sampling seed")
     parser.add_argument("--output-dir", type=Path, default=_DEFAULT_OUTPUT, help="Output directory for summaries, NPZs, and PNGs")
+    parser.add_argument("--compare-zarr", action=argparse.BooleanOptionalAction, default=False, help="Optionally compare sampled raw harvest outputs against an existing finalized <build>.zarr store")
     parser.add_argument("--trace-map", help="Emit a deterministic one-tile trace for this map name")
     parser.add_argument("--trace-tile-x", type=int, help="Tile X for deterministic trace mode")
     parser.add_argument("--trace-tile-y", type=int, help="Tile Y for deterministic trace mode")
@@ -716,8 +732,17 @@ def main() -> None:
     if any(trace_values) and not all(trace_values):
         parser.error("--trace-map, --trace-tile-x, and --trace-tile-y must be provided together")
 
-    zarr_path = _DATASET_ROOT / f"{args.build}.zarr"
-    zarr_lookup, zarr_store_root, zarr_rows_by_tile_id = _load_index_lookup(zarr_path)
+    zarr_lookup: dict[tuple[str, int, int], int] = {}
+    zarr_store_root: object | None = None
+    zarr_rows_by_tile_id: dict[int, dict[str, object]] = {}
+    if args.compare_zarr:
+        zarr_path = _DATASET_ROOT / f"{args.build}.zarr"
+        if not zarr_path.exists():
+            parser.error(f"--compare-zarr requested but no finalized store exists at {zarr_path}")
+        zarr_lookup, zarr_store_root, zarr_rows_by_tile_id = _load_index_lookup(zarr_path)
+        if zarr_store_root is None:
+            parser.error(f"--compare-zarr requested but finalized-store comparison is unavailable for {zarr_path}")
+
     try:
         samples, summary = _stream_samples(
             build=args.build,
@@ -739,6 +764,7 @@ def main() -> None:
         )
         build_dir = args.output_dir / args.build
         summary["written_sample_count"] = len(samples)
+        summary["zarr_comparison_enabled"] = bool(args.compare_zarr)
         summary["samples_path"] = str(samples_path)
         summary["overview_path"] = str(build_dir / f"{args.build}.overview.png") if (build_dir / f"{args.build}.overview.png").exists() else None
         summary_path = build_dir / f"{args.build}.summary.json"

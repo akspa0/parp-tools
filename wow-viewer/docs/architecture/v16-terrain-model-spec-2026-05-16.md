@@ -84,8 +84,8 @@ wow-viewer/output/datasets/v16/
 | `object_instance_mask` | `257x257` | `int32` | instance-id raster |
 | `mcnk_flags_16` | `16x16` | `int32` | MCNK liquid/classification flags |
 | `mddf_mask` | `257x257` | `float32` | doodad-only mask |
-| `modf_mask` | `257x257` | `float32` | WMO-only mask |
-| `object_filtered_mask` | `257x257` | `float32` | terrain-loss gating mask |
+| `modf_mask` | `257x257` | `float32` | WMO-only footprint mask; archive harvest prefers geometry-derived WMO footprints when asset bytes are available |
+| `object_filtered_mask` | `257x257` | `float32` | terrain-loss gating mask; includes WMO footprints and filtered MDDF footprints |
 | `minimap_rgb` | `256x256x3` | `uint8` | baked minimap RGB |
 | `shadow_mask` | `256x256` | `float32` | archived shadow signal |
 | `mcly_texture_ids` | `16x16x4` | `int32` | texture-layer ids |
@@ -96,6 +96,7 @@ wow-viewer/output/datasets/v16/
 - `normal_mask` is derived from nonzero normal vectors.
 - `liquid_mask` and `liquid_height` are unified Python-side outputs built from richer raw liquid signals.
 - terrain loss weighting uses `1.0 - object_filtered_mask`, not raw `object_mask`.
+- archive-backed ADT harvest now prefers geometry-derived WMO footprints for `modf_mask` / `object_filtered_mask`; bounds fallback remains for unresolved WMO assets.
 - alpha QA should use the painted-layer view, not raw channel `0`.
 
 ## Index Contract

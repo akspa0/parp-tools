@@ -40,18 +40,19 @@ A terrain researcher opens a V16 Zarr store and finds `mcnk_flags_16` array with
 
 ### User Story 2 — Object Mask Split with MDDF Filtering (Priority: P1)
 
-A terrain researcher opens a validation image and sees that tree doodads no longer create false loss signals. The dataset stores raw MDDF mask, raw MODF mask, and a filtered combined mask. Training uses only the filtered mask for terrain loss weighting.
+A terrain researcher opens a validation image and sees that tree doodads no longer create false loss signals, while WMO footprints are no longer inflated into coarse projected bounds rectangles. The dataset stores raw MDDF mask, raw MODF mask, and a filtered combined mask. Training uses only the filtered mask for terrain loss weighting.
 
 **Why this priority**: MDDF false loss signals are the largest source of incorrect terrain supervision. Trees cover significant terrain area but never appear in minimaps. Fixing this alone should measurably improve model terrain understanding.
 
-**Independent Test**: Build a V16 store, inspect the validation overview, verify that tree-heavy tiles no longer show full object mask coverage. Run a smoke train and verify loss computation uses the filtered mask.
+**Independent Test**: Build a V16 store, inspect the validation overview, verify that tree-heavy tiles no longer show full object mask coverage and that WMO-heavy tiles no longer show oversized projected rectangle masks. Run a smoke train and verify loss computation uses the filtered mask.
 
 **Acceptance Scenarios**:
 
 1. **Given** a V16 store with tiles containing trees, **When** the filtered object mask is inspected, **Then** tree footprints are excluded while rock/WMO footprints are retained.
-2. **Given** a tile with MDDF objects matching the exclusion regex, **When** `object_filtered_mask_257` is generated, **Then** excluded objects have mask value 0.0 at their footprint pixels.
-3. **Given** a tile with MDDF objects exceeding the height threshold, **When** `object_filtered_mask_257` is generated, **Then** tall objects (bounding box max-Z > tile_base + 50m) have mask value 0.0.
-4. **Given** a V16 store, **When** `train_v16.py` runs, **Then** terrain loss is weighted by `1.0 - object_filtered_mask_257` (not the raw merged mask).
+2. **Given** a tile with MDDF objects matching the clutter exclusion regex against the normalized asset path, **When** `object_filtered_mask_257` is generated, **Then** excluded vegetation and clutter assets have mask value 0.0 at their footprint pixels.
+3. **Given** a tile with MDDF objects whose resolved model bounds classify them as tiny clutter or tall clutter, **When** `object_filtered_mask_257` is generated, **Then** those doodads are excluded from the filtered loss mask even if they remain present in the raw MDDF mask.
+4. **Given** a tile with a resolvable WMO asset, **When** `modf_mask_257` is generated during archive-backed harvest, **Then** the raster follows transformed WMO mesh triangles instead of a projected placement AABB.
+5. **Given** a V16 store, **When** `train_v16.py` runs, **Then** terrain loss is weighted by `1.0 - object_filtered_mask_257` (not the raw merged mask).
 
 ---
 
@@ -103,9 +104,10 @@ A terrain researcher checks `signal_validation.json` and sees liquid source prov
 - **FR-001**: `AdtTensorPackBuilder` MUST extract MCNK header flags (uint32 at offset 0x00 of each chunk payload) and store them as `int[16,16]` in `TerrainTileTensorPack.McnkFlags16`.
 - **FR-002**: `NpzTileSerializer` MUST write `mcnk_flags_16` as `<i4` dtype with shape `(16, 16)`.
 - **FR-003**: `AdtTensorPackBuilder.BuildObjectMasks` MUST produce separate `MddfMask257`, `ModfMask257`, and `ObjectFilteredMask257` arrays.
-- **FR-004**: `ObjectFilteredMask257` MUST exclude MDDF objects matching the exclusion regex pattern `^(Tree|Bush|Flower|Plant|Vine|Fern|Mushroom|Herb|Ivy|Reed|Cattress|Lilypad|Kelp|Seaweed|Coral)` (case-insensitive) against the resolved asset name.
-- **FR-005**: `ObjectFilteredMask257` MUST exclude MDDF objects whose bounding box max-Z exceeds the tile base height + 50 meters.
+- **FR-004**: `ObjectFilteredMask257` MUST exclude MDDF objects matching a clutter exclusion regex against the normalized asset path, including vegetation and small-prop families such as trees, shrubs, grass, stones, pebbles, logs, and stumps.
+- **FR-005**: `ObjectFilteredMask257` MUST exclude MDDF objects whose resolved model bounds classify them as tiny planar clutter or tall clutter; the filter must use real model bounding boxes when the asset can be opened from the active asset source and only fall back to coarse placement heuristics when bounds cannot be resolved.
 - **FR-006**: `ObjectFilteredMask257` MUST include all MODF (WMO) placements unconditionally.
+- **FR-006a**: `AdtTensorPackBuilder.BuildObjectMasks` MUST prefer geometry-derived MODF footprints when a WMO render document can be opened from the active asset source, and MAY fall back to projected placement bounds only when geometry cannot be resolved.
 - **FR-007**: `NpzTileSerializer` MUST write `mddf_mask_257`, `modf_mask_257`, and `object_filtered_mask_257` as `<f4` dtype with shape `(257, 257)`.
 - **FR-008**: `ReadWlFiles` MUST map each WL block's 4x4 vertex grid to a ~16x16 patch on the 257 grid using per-vertex heights with bilinear interpolation between adjacent blocks.
 - **FR-009**: `build_v16_dataset.py` `_derive_liquid_supervision` MUST use priority chain: MCNK flags > MCLQ > MH2O > WL* > none.
@@ -118,7 +120,7 @@ A terrain researcher checks `signal_validation.json` and sees liquid source prov
 ### Key Entities
 
 - **MCNK Header Flags**: uint32 at offset 0x00 of each MCNK chunk payload. Bits 2-5 indicate liquid type: `0x04`=water, `0x08`=ocean/deep, `0x10`=magma, `0x20`=slime.
-- **ObjectFilteredMask257**: 257x257 float32 mask where 1.0 = object that appears in minimap and should suppress terrain loss. Built from MDDF (filtered by regex + height) + MODF (all).
+- **ObjectFilteredMask257**: 257x257 float32 mask where 1.0 = object that appears in minimap and should suppress terrain loss. Built from raw MDDF after clutter filtering based on normalized asset-path tokens plus resolved model bounds, and from MODF (all).
 - **WL Block**: 4x4 vertex grid with world position, spanning ~33m x ~33m on the terrain.
 - **Liquid Priority Chain**: MCNK > MCLQ > MH2O > WL* > none. First source with data wins.
 
@@ -136,8 +138,7 @@ A terrain researcher checks `signal_validation.json` and sees liquid source prov
 ## Assumptions
 
 - MCNK header flags are reliable for liquid classification across all WoW client eras.
-- The exclusion regex covers the majority of non-visible MDDF objects; edge cases can be tuned later.
-- 50m height threshold is a reasonable default for distinguishing ground-covering objects from tall decorative objects.
+- Normalized asset-path tokens plus resolved model bounds are sufficient to remove the current dominant MDDF false-loss cases, even if later tuning is still needed for edge assets.
 - WL* files exist primarily for pre-LK builds; LK+ builds use MH2O.
 - Existing Zarr stores can be patched in place via `patch-liquids` and a new `patch-object-masks` command.
 

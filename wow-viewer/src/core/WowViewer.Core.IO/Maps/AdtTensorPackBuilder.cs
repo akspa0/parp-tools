@@ -2,7 +2,13 @@ using System.Buffers.Binary;
 using System.Numerics;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Chunked;
+using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.IO.Wmo;
 using WowViewer.Core.Maps;
+using WowViewer.Core.M2;
+using WowViewer.Core.Mdx;
+using WowViewer.Core.Wmo;
 
 namespace WowViewer.Core.IO.Maps;
 
@@ -24,7 +30,7 @@ public static class AdtTensorPackBuilder
     private const int TileAlphaSize = ChunkAlphaSize * TileChunks;
     private const int TileMinimapSize = 256;
 
-    public static TerrainTileTensorPack Build(string adtPath, string? textureSourcePath = null, string? buildVersion = null)
+    public static TerrainTileTensorPack Build(string adtPath, string? textureSourcePath = null, string? buildVersion = null, Func<string, byte[]?>? assetReader = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(adtPath);
 
@@ -99,7 +105,7 @@ public static class AdtTensorPackBuilder
 
         // ── Build object footprint masks from MDDF/MODF ──────────────────────
         (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257, float[,]? mddfMask257, float[,]? modfMask257, float[,]? objectFilteredMask257) =
-            BuildObjectMasks(adtPath, stream, fileSummary, availableSignals, placementsOverride: placementCatalog);
+            BuildObjectMasks(adtPath, stream, fileSummary, availableSignals, placementsOverride: placementCatalog, assetReader: assetReader, terrainChunksOverride: terrainChunks);
 
         float[,]? shadowResidualMask256 = BuildShadowResidualMask256(mcshShadowMask256, objectPreciseMask257, availableSignals);
 
@@ -200,7 +206,8 @@ public static class AdtTensorPackBuilder
         byte[]? placementSourceBytes = null,
         string? buildVersion = null,
         string? textureSourcePath = null,
-        string? placementSourcePath = null)
+        string? placementSourcePath = null,
+        Func<string, byte[]?>? assetReader = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceAdtPath);
         ArgumentNullException.ThrowIfNull(adtBytes);
@@ -257,7 +264,9 @@ public static class AdtTensorPackBuilder
                 availableSignals,
                 placementSourcePath,
                 placementSourceBytes,
-                placementCatalog);
+                placementCatalog,
+                assetReader,
+                terrainChunks);
 
         float[,]? shadowResidualMask256 = BuildShadowResidualMask256(mcshShadowMask256, objectPreciseMask257, availableSignals);
 
@@ -1682,10 +1691,23 @@ public static class AdtTensorPackBuilder
     }
 
     private static readonly System.Text.RegularExpressions.Regex ExcludeDoodadRegex = new(
-        @"^(Tree|Bush|Flower|Plant|Vine|Fern|Mushroom|Herb|Ivy|Reed|Cattress|Lilypad|Kelp|Seaweed|Coral)",
+        @"(^|[\\/_\-])(tree|trees|bush|bushes|shrub|shrubs|flower|flowers|plant|plants|vine|vines|fern|ferns|mushroom|mushrooms|herb|herbs|ivy|reed|reeds|cattress|cattail|cattails|lilypad|lilypads|kelp|seaweed|coral|grass|grasses|weed|weeds|rock|rocks|stone|stones|pebble|pebbles|gravel|twig|twigs|log|logs|stump|stumps)([\\/_\-.]|$)",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
 
-    private const float DoodadHeightThreshold = 50f;
+    private const float DoodadSmallPlanarExtentThreshold = 3.0f;
+    private const float DoodadSmallPlanarAreaThreshold = 6.0f;
+    private const float DoodadTallHeightThreshold = 8.0f;
+    private const float DoodadTallAspectThreshold = 1.35f;
+
+    private enum TileProjectionMode
+    {
+        WorldXZ,
+        OriginZX,
+        WorldXY,
+        OriginYX,
+    }
+
+    private sealed record DoodadModelMetadata(Vector3 BoundsMin, Vector3 BoundsMax);
 
     private static (float[,]? mask, float[,]? preciseMask, int[,]? instanceMask, float[,]? mddfMask, float[,]? modfMask, float[,]? filteredMask)
         BuildObjectMasks(
@@ -1695,7 +1717,9 @@ public static class AdtTensorPackBuilder
             HashSet<string> signals,
             string? placementSourcePathOverride = null,
             byte[]? placementBytesOverride = null,
-            AdtPlacementCatalog? placementsOverride = null)
+            AdtPlacementCatalog? placementsOverride = null,
+            Func<string, byte[]?>? assetReader = null,
+            List<MapChunkLocation>? terrainChunksOverride = null)
     {
         if (!TryParseAdtTileCoords(fileSummary.SourcePath, out int tileX, out int tileY))
             return (null, null, null, null, null, null);
@@ -1714,10 +1738,23 @@ public static class AdtTensorPackBuilder
         float[,] mddfMask = new float[TileHeightmapSize, TileHeightmapSize];
         float[,] modfMask = new float[TileHeightmapSize, TileHeightmapSize];
         float[,] filteredMask = new float[TileHeightmapSize, TileHeightmapSize];
+        Dictionary<string, DoodadModelMetadata?>? doodadModelCache = assetReader is not null
+            ? new Dictionary<string, DoodadModelMetadata?>(StringComparer.OrdinalIgnoreCase)
+            : null;
+        Dictionary<string, WmoRenderDocument?>? wmoCache = assetReader is not null
+            ? new Dictionary<string, WmoRenderDocument?>(StringComparer.OrdinalIgnoreCase)
+            : null;
+        bool[,,]? wmoChunkCoverage16 = placements.WorldModelPlacements.Count > 0
+            ? TryBuildWmoPlacementChunkCoverage16(
+                adtPath,
+                stream,
+                fileSummary,
+                terrainChunksOverride,
+                placementSourcePathOverride,
+                placementBytesOverride,
+                placements.WorldModelPlacements.Count)
+            : null;
         int instanceId = 1;
-
-        // Compute tile base height from heightmap for height gate
-        float tileBaseHeight = 0f;
 
         foreach (AdtModelPlacement placement in placements.ModelPlacements)
         {
@@ -1732,24 +1769,55 @@ public static class AdtTensorPackBuilder
             PaintCircle(instanceMask, px, py, radiusBinary, value: instanceId);
             PaintCircle(mddfMask, px, py, radiusBinary, value: 1.0f);
 
-            // Height gate: exclude objects whose estimated top exceeds tile base + threshold
-            float estimatedTop = placement.Position.Y + placement.Scale * 10f;
-            bool exceedsHeight = estimatedTop > tileBaseHeight + DoodadHeightThreshold;
-
-            // Regex gate: exclude decorative doodads
-            string assetName = Path.GetFileNameWithoutExtension(placement.ModelPath);
-            bool matchesExclusion = ExcludeDoodadRegex.IsMatch(assetName);
-
-            if (!exceedsHeight && !matchesExclusion)
+            if (ShouldIncludeDoodadInFilteredMask(placement, assetReader, doodadModelCache))
                 PaintCircle(filteredMask, px, py, radiusBinary, value: 1.0f);
 
             instanceId++;
         }
 
-        foreach (AdtWorldModelPlacement placement in placements.WorldModelPlacements)
+        for (int placementIndex = 0; placementIndex < placements.WorldModelPlacements.Count; placementIndex++)
         {
+            AdtWorldModelPlacement placement = placements.WorldModelPlacements[placementIndex];
             if (!TryProjectPlacementToTilePixel(placement.Position, tileX, tileY, out int px, out int py))
                 continue;
+
+            bool paintedFootprint = assetReader is not null
+                && wmoCache is not null
+                && TryPaintWmoFootprint(
+                    placement,
+                    tileX,
+                    tileY,
+                    assetReader,
+                    wmoCache,
+                    mask,
+                    preciseMask,
+                    instanceMask,
+                    modfMask,
+                    filteredMask,
+                    instanceId);
+
+            if (paintedFootprint)
+            {
+                instanceId++;
+                continue;
+            }
+
+            bool paintedChunkFallback = wmoChunkCoverage16 is not null
+                && PaintPlacementChunkCoverage(
+                    wmoChunkCoverage16,
+                    placementIndex,
+                    mask,
+                    preciseMask,
+                    instanceMask,
+                    modfMask,
+                    filteredMask,
+                    instanceId);
+
+            if (paintedChunkFallback)
+            {
+                instanceId++;
+                continue;
+            }
 
             Vector3 min = placement.BoundsMin;
             Vector3 max = placement.BoundsMax;
@@ -1788,6 +1856,444 @@ public static class AdtTensorPackBuilder
         signals.Add("object_filtered_mask_257");
         return (mask, preciseMask, instanceMask, mddfMask, modfMask, filteredMask);
     }
+
+    private static bool[,,]? TryBuildWmoPlacementChunkCoverage16(
+        string adtPath,
+        Stream rootStream,
+        MapFileSummary rootFileSummary,
+        List<MapChunkLocation>? rootTerrainChunks,
+        string? placementSourcePathOverride,
+        byte[]? placementBytesOverride,
+        int placementCount)
+    {
+        if (placementCount <= 0)
+            return null;
+
+        if (placementBytesOverride is not null && !string.IsNullOrWhiteSpace(placementSourcePathOverride))
+        {
+            using MemoryStream placementStream = new(placementBytesOverride, writable: false);
+            MapFileSummary placementSummary = MapFileSummaryReader.Read(placementStream, placementSourcePathOverride);
+            bool[,,]? placementCoverage = BuildWmoPlacementChunkCoverage16(
+                placementStream,
+                ResolveTerrainChunkLocations(placementStream, placementSummary),
+                placementCount);
+            if (placementCoverage is not null)
+                return placementCoverage;
+        }
+
+        string? placementPath = placementSourcePathOverride ?? AdtTileFamilyResolver.Resolve(adtPath).PlacementSourcePath;
+        if (!string.IsNullOrWhiteSpace(placementPath) && File.Exists(placementPath))
+        {
+            using FileStream placementStream = File.OpenRead(placementPath);
+            MapFileSummary placementSummary = MapFileSummaryReader.Read(placementStream, Path.GetFullPath(placementPath));
+            bool[,,]? placementCoverage = BuildWmoPlacementChunkCoverage16(
+                placementStream,
+                ResolveTerrainChunkLocations(placementStream, placementSummary),
+                placementCount);
+            if (placementCoverage is not null)
+                return placementCoverage;
+        }
+
+        return BuildWmoPlacementChunkCoverage16(
+            rootStream,
+            rootTerrainChunks ?? ResolveTerrainChunkLocations(rootStream, rootFileSummary),
+            placementCount);
+    }
+
+    private static bool[,,]? BuildWmoPlacementChunkCoverage16(
+        Stream stream,
+        List<MapChunkLocation> chunks,
+        int placementCount)
+    {
+        if (chunks.Count == 0 || placementCount <= 0)
+            return null;
+
+        bool[,,] coverage = new bool[placementCount, TileChunks, TileChunks];
+        bool any = false;
+
+        for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
+        {
+            MapChunkLocation chunk = chunks[chunkIndex];
+            byte[] payload = ReadChunkPayload(stream, chunk);
+            if (payload.Length < RootMcnkHeaderSize)
+                continue;
+
+            byte[]? splitMcrwPayload = TryReadSplitMcnkSubchunkPayload(payload, AdtChunkIds.Mcrw);
+            if (splitMcrwPayload is { Length: >= 4 })
+            {
+                int chunkX = chunkIndex % TileChunks;
+                int chunkY = chunkIndex / TileChunks;
+                int count = splitMcrwPayload.Length / sizeof(int);
+                bool sawZeroBasedRef = false;
+
+                for (int index = 0; index < count; index++)
+                {
+                    int refIndex = BinaryPrimitives.ReadInt32LittleEndian(splitMcrwPayload.AsSpan(index * sizeof(int), sizeof(int)));
+                    if ((uint)refIndex < (uint)placementCount)
+                    {
+                        sawZeroBasedRef = true;
+                        break;
+                    }
+                }
+
+                for (int index = 0; index < count; index++)
+                {
+                    int refIndex = BinaryPrimitives.ReadInt32LittleEndian(splitMcrwPayload.AsSpan(index * sizeof(int), sizeof(int)));
+                    if (!sawZeroBasedRef && refIndex > 0 && refIndex <= placementCount)
+                        refIndex -= 1;
+
+                    if ((uint)refIndex >= (uint)placementCount)
+                        continue;
+
+                    coverage[refIndex, chunkY, chunkX] = true;
+                    any = true;
+                }
+
+                continue;
+            }
+
+            int rootChunkX = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x04, 4));
+            int rootChunkY = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x08, 4));
+            if ((uint)rootChunkX >= TileChunks || (uint)rootChunkY >= TileChunks)
+                continue;
+
+            if (!AdtMcrfReader.TryLocateMcrfPayload(payload, out int mcrfOffset, out int mcrfSize) || mcrfSize < 4)
+                continue;
+
+            int doodadCount = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x14, 4));
+            int wmoCount = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x3C, 4));
+            AdtMcrfData refs = AdtMcrfReader.Read(payload.AsSpan(mcrfOffset, mcrfSize).ToArray(), doodadCount, wmoCount);
+            foreach (int refIndex in refs.WmoIndices)
+            {
+                if ((uint)refIndex >= (uint)placementCount)
+                    continue;
+
+                coverage[refIndex, rootChunkY, rootChunkX] = true;
+                any = true;
+            }
+        }
+
+        return any ? coverage : null;
+    }
+
+    private static bool PaintPlacementChunkCoverage(
+        bool[,,] wmoChunkCoverage16,
+        int placementIndex,
+        float[,] mask,
+        float[,] preciseMask,
+        int[,] instanceMask,
+        float[,] modfMask,
+        float[,] filteredMask,
+        int instanceId)
+    {
+        bool painted = false;
+        for (int chunkY = 0; chunkY < TileChunks; chunkY++)
+        {
+            for (int chunkX = 0; chunkX < TileChunks; chunkX++)
+            {
+                if (!wmoChunkCoverage16[placementIndex, chunkY, chunkX])
+                    continue;
+
+                PaintChunkCoverage(mask, chunkX, chunkY, 1.0f);
+                PaintChunkCoverage(preciseMask, chunkX, chunkY, 1.0f);
+                PaintChunkCoverage(instanceMask, chunkX, chunkY, instanceId);
+                PaintChunkCoverage(modfMask, chunkX, chunkY, 1.0f);
+                PaintChunkCoverage(filteredMask, chunkX, chunkY, 1.0f);
+                painted = true;
+            }
+        }
+
+        return painted;
+    }
+
+    private static void PaintChunkCoverage(float[,] buffer, int chunkX, int chunkY, float value)
+    {
+        int minX = chunkX * HalfStepsPerChunk;
+        int minY = chunkY * HalfStepsPerChunk;
+        int maxX = Math.Min(TileHeightmapSize - 1, minX + HalfStepsPerChunk);
+        int maxY = Math.Min(TileHeightmapSize - 1, minY + HalfStepsPerChunk);
+        PaintRect(buffer, minX, minY, maxX, maxY, value);
+    }
+
+    private static void PaintChunkCoverage(int[,] buffer, int chunkX, int chunkY, int value)
+    {
+        int minX = chunkX * HalfStepsPerChunk;
+        int minY = chunkY * HalfStepsPerChunk;
+        int maxX = Math.Min(TileHeightmapSize - 1, minX + HalfStepsPerChunk);
+        int maxY = Math.Min(TileHeightmapSize - 1, minY + HalfStepsPerChunk);
+        PaintRect(buffer, minX, minY, maxX, maxY, value);
+    }
+
+    private static bool TryPaintWmoFootprint(
+        AdtWorldModelPlacement placement,
+        int tileX,
+        int tileY,
+        Func<string, byte[]?> assetReader,
+        Dictionary<string, WmoRenderDocument?> wmoCache,
+        float[,] mask,
+        float[,] preciseMask,
+        int[,] instanceMask,
+        float[,] modfMask,
+        float[,] filteredMask,
+        int instanceId)
+    {
+        string modelPath = NormalizeAssetPath(placement.ModelPath);
+        if (!TryLoadWmoRenderDocument(modelPath, assetReader, wmoCache, out WmoRenderDocument? document)
+            || document is null
+            || document.Groups.Count == 0)
+        {
+            return false;
+        }
+
+        Matrix4x4 transform = ResolveWmoPlacementTransform(placement, document);
+        if (!TryResolveProjectionMode(placement, document, transform, tileX, tileY, out TileProjectionMode projectionMode))
+            return false;
+
+        bool paintedAny = false;
+
+        foreach (WmoEmbeddedGroupMeshDetail group in document.Groups)
+        {
+            IReadOnlyList<Vector3> vertices = group.Mesh.Vertices;
+            IReadOnlyList<ushort> indices = group.Mesh.Indices;
+            if (vertices.Count == 0 || indices.Count < 3)
+                continue;
+
+            for (int index = 0; index + 2 < indices.Count; index += 3)
+            {
+                ushort i0 = indices[index + 0];
+                ushort i1 = indices[index + 1];
+                ushort i2 = indices[index + 2];
+                if ((uint)i0 >= (uint)vertices.Count || (uint)i1 >= (uint)vertices.Count || (uint)i2 >= (uint)vertices.Count)
+                    continue;
+
+                Vector3 w0 = Vector3.Transform(vertices[i0], transform);
+                Vector3 w1 = Vector3.Transform(vertices[i1], transform);
+                Vector3 w2 = Vector3.Transform(vertices[i2], transform);
+
+                if (!TryProjectToTilePixel(w0, tileX, tileY, projectionMode, out Vector2 p0)
+                    || !TryProjectToTilePixel(w1, tileX, tileY, projectionMode, out Vector2 p1)
+                    || !TryProjectToTilePixel(w2, tileX, tileY, projectionMode, out Vector2 p2))
+                {
+                    continue;
+                }
+
+                if (!PaintClippedTriangle(mask, p0, p1, p2, 1.0f))
+                    continue;
+
+                paintedAny = true;
+                PaintClippedTriangle(preciseMask, p0, p1, p2, 1.0f);
+                PaintClippedTriangle(instanceMask, p0, p1, p2, instanceId);
+                PaintClippedTriangle(modfMask, p0, p1, p2, 1.0f);
+                PaintClippedTriangle(filteredMask, p0, p1, p2, 1.0f);
+            }
+        }
+
+        return paintedAny;
+    }
+
+    private static bool ShouldIncludeDoodadInFilteredMask(
+        AdtModelPlacement placement,
+        Func<string, byte[]?>? assetReader,
+        Dictionary<string, DoodadModelMetadata?>? doodadModelCache)
+    {
+        string modelPath = NormalizeAssetPath(placement.ModelPath);
+        if (ExcludeDoodadRegex.IsMatch(modelPath))
+            return false;
+
+        if (assetReader is null || doodadModelCache is null)
+            return placement.Scale > 0.35f;
+
+        if (!TryLoadDoodadModelMetadata(modelPath, assetReader, doodadModelCache, out DoodadModelMetadata? metadata)
+            || metadata is null)
+        {
+            return placement.Scale > 0.35f;
+        }
+
+        Vector3 localSize = Vector3.Abs(metadata.BoundsMax - metadata.BoundsMin);
+        float scale = MathF.Max(placement.Scale, 0.01f);
+        float planarExtentX = localSize.X * scale;
+        float planarExtentY = localSize.Z * scale;
+        float planarMaxExtent = MathF.Max(planarExtentX, planarExtentY);
+        float planarArea = planarExtentX * planarExtentY;
+        float height = localSize.Y * scale;
+
+        bool isSmallClutter = planarMaxExtent <= DoodadSmallPlanarExtentThreshold || planarArea <= DoodadSmallPlanarAreaThreshold;
+        bool isTallClutter = height >= DoodadTallHeightThreshold && height >= (planarMaxExtent * DoodadTallAspectThreshold);
+
+        return !isSmallClutter && !isTallClutter;
+    }
+
+    private static bool TryLoadDoodadModelMetadata(
+        string modelPath,
+        Func<string, byte[]?> assetReader,
+        Dictionary<string, DoodadModelMetadata?> doodadModelCache,
+        out DoodadModelMetadata? metadata)
+    {
+        if (doodadModelCache.TryGetValue(modelPath, out metadata))
+            return metadata is not null;
+
+        try
+        {
+            byte[]? bytes = assetReader(modelPath);
+            if (bytes is null || bytes.Length == 0)
+            {
+                doodadModelCache[modelPath] = null;
+                metadata = null;
+                return false;
+            }
+
+            using MemoryStream stream = new(bytes, writable: false);
+            string extension = Path.GetExtension(modelPath);
+            if (extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase))
+            {
+                MdxSummary summary = MdxSummaryReader.Read(stream, modelPath);
+                if (summary.BoundsMin is Vector3 boundsMin && summary.BoundsMax is Vector3 boundsMax)
+                {
+                    metadata = new DoodadModelMetadata(boundsMin, boundsMax);
+                    doodadModelCache[modelPath] = metadata;
+                    return true;
+                }
+            }
+            else
+            {
+                M2ModelDocument model = M2ModelReader.Read(stream, modelPath);
+                metadata = new DoodadModelMetadata(model.BoundsMin, model.BoundsMax);
+                doodadModelCache[modelPath] = metadata;
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        doodadModelCache[modelPath] = null;
+        metadata = null;
+        return false;
+    }
+
+    private static bool TryLoadWmoRenderDocument(
+        string modelPath,
+        Func<string, byte[]?> assetReader,
+        Dictionary<string, WmoRenderDocument?> wmoCache,
+        out WmoRenderDocument? document)
+    {
+        if (wmoCache.TryGetValue(modelPath, out document))
+            return document is not null;
+
+        try
+        {
+            byte[]? bytes = assetReader(modelPath);
+            if (bytes is null || bytes.Length == 0)
+            {
+                wmoCache[modelPath] = null;
+                document = null;
+                return false;
+            }
+
+            using MemoryStream stream = new(bytes, writable: false);
+            document = WmoRenderDocumentReader.Read(stream, modelPath, assetReader);
+            wmoCache[modelPath] = document;
+            return true;
+        }
+        catch
+        {
+            wmoCache[modelPath] = null;
+            document = null;
+            return false;
+        }
+    }
+
+    private static Matrix4x4 ResolveWmoPlacementTransform(AdtWorldModelPlacement placement, WmoRenderDocument document)
+    {
+        Matrix4x4[] candidates =
+        [
+            Matrix4x4.CreateTranslation(placement.Position),
+            BuildLegacyWmoPlacementTransform(placement.Position, placement.Rotation),
+            BuildLegacyWmoPlacementTransformWithoutFlip(placement.Position, placement.Rotation),
+        ];
+
+        Vector3[] localCorners = GetBoundsCorners(document.Summary.BoundsMin, document.Summary.BoundsMax);
+        float bestScore = float.PositiveInfinity;
+        Matrix4x4 best = candidates[0];
+
+        foreach (Matrix4x4 candidate in candidates)
+        {
+            float score = ScoreTransformedBounds(localCorners, candidate, placement.BoundsMin, placement.BoundsMax);
+            if (score < bestScore)
+            {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+
+        return best;
+    }
+
+    private static Matrix4x4 BuildLegacyWmoPlacementTransform(Vector3 position, Vector3 rotationDegrees)
+    {
+        float rx = -DegreesToRadians(rotationDegrees.Y);
+        float ry = -DegreesToRadians(rotationDegrees.X);
+        float rz = DegreesToRadians(rotationDegrees.Z);
+        return Matrix4x4.CreateRotationZ(MathF.PI)
+            * Matrix4x4.CreateRotationX(rx)
+            * Matrix4x4.CreateRotationY(ry)
+            * Matrix4x4.CreateRotationZ(rz)
+            * Matrix4x4.CreateTranslation(position);
+    }
+
+    private static Matrix4x4 BuildLegacyWmoPlacementTransformWithoutFlip(Vector3 position, Vector3 rotationDegrees)
+    {
+        float rx = -DegreesToRadians(rotationDegrees.Y);
+        float ry = -DegreesToRadians(rotationDegrees.X);
+        float rz = DegreesToRadians(rotationDegrees.Z);
+        return Matrix4x4.CreateRotationX(rx)
+            * Matrix4x4.CreateRotationY(ry)
+            * Matrix4x4.CreateRotationZ(rz)
+            * Matrix4x4.CreateTranslation(position);
+    }
+
+    private static float ScoreTransformedBounds(
+        IReadOnlyList<Vector3> localCorners,
+        Matrix4x4 transform,
+        Vector3 expectedMin,
+        Vector3 expectedMax)
+    {
+        Vector3 actualMin = new(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        Vector3 actualMax = new(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+
+        for (int index = 0; index < localCorners.Count; index++)
+        {
+            Vector3 world = Vector3.Transform(localCorners[index], transform);
+            actualMin = Vector3.Min(actualMin, world);
+            actualMax = Vector3.Max(actualMax, world);
+        }
+
+        return MathF.Abs(actualMin.X - expectedMin.X)
+            + MathF.Abs(actualMin.Y - expectedMin.Y)
+            + MathF.Abs(actualMin.Z - expectedMin.Z)
+            + MathF.Abs(actualMax.X - expectedMax.X)
+            + MathF.Abs(actualMax.Y - expectedMax.Y)
+            + MathF.Abs(actualMax.Z - expectedMax.Z);
+    }
+
+    private static Vector3[] GetBoundsCorners(Vector3 min, Vector3 max)
+    {
+        return
+        [
+            new Vector3(min.X, min.Y, min.Z),
+            new Vector3(min.X, max.Y, min.Z),
+            new Vector3(max.X, min.Y, min.Z),
+            new Vector3(max.X, max.Y, min.Z),
+            new Vector3(min.X, min.Y, max.Z),
+            new Vector3(min.X, max.Y, max.Z),
+            new Vector3(max.X, min.Y, max.Z),
+            new Vector3(max.X, max.Y, max.Z),
+        ];
+    }
+
+    private static float DegreesToRadians(float degrees) => degrees * (MathF.PI / 180f);
+
+    private static string NormalizeAssetPath(string path) => path.Trim().Replace('/', '\\');
 
     private static bool TryProjectPlacementToTilePixel(Vector3 position, int tileX, int tileY, out int pixelX, out int pixelY)
     {
@@ -1828,6 +2334,134 @@ public static class AdtTensorPackBuilder
         return true;
     }
 
+    private static bool TryResolveProjectionMode(
+        AdtWorldModelPlacement placement,
+        WmoRenderDocument document,
+        Matrix4x4 transform,
+        int tileX,
+        int tileY,
+        out TileProjectionMode mode)
+    {
+        Vector3[] samples = GetBoundsCorners(document.Summary.BoundsMin, document.Summary.BoundsMax);
+        for (int index = 0; index < samples.Length; index++)
+            samples[index] = Vector3.Transform(samples[index], transform);
+
+        return TryResolveProjectionMode(samples, placement.Position, tileX, tileY, out mode);
+    }
+
+    private static bool TryResolveProjectionMode(
+        IReadOnlyList<Vector3> samples,
+        Vector3 anchor,
+        int tileX,
+        int tileY,
+        out TileProjectionMode mode)
+    {
+        mode = TileProjectionMode.WorldXZ;
+        int bestInRangeCount = int.MinValue;
+        float bestPenalty = float.PositiveInfinity;
+        bool found = false;
+
+        foreach (TileProjectionMode candidate in Enum.GetValues<TileProjectionMode>())
+        {
+            int inRangeCount = 0;
+            float penalty = 0f;
+
+            for (int index = 0; index < samples.Count; index++)
+            {
+                if (!TryProjectToTileUv(samples[index], tileX, tileY, candidate, out float u, out float v))
+                {
+                    penalty += 1000f;
+                    continue;
+                }
+
+                if (u >= -0.25f && u <= 1.25f && v >= -0.25f && v <= 1.25f)
+                    inRangeCount++;
+
+                penalty += DistanceOutsideExpandedUnitSquare(u, v);
+            }
+
+            if (TryProjectToTileUv(anchor, tileX, tileY, candidate, out float anchorU, out float anchorV))
+            {
+                if (anchorU >= -0.25f && anchorU <= 1.25f && anchorV >= -0.25f && anchorV <= 1.25f)
+                    inRangeCount += 4;
+
+                penalty += DistanceOutsideExpandedUnitSquare(anchorU, anchorV) * 4f;
+                penalty += MathF.Abs(anchorU - 0.5f) + MathF.Abs(anchorV - 0.5f);
+            }
+            else
+            {
+                penalty += 1000f;
+            }
+
+            if (!found || inRangeCount > bestInRangeCount || (inRangeCount == bestInRangeCount && penalty < bestPenalty))
+            {
+                found = true;
+                bestInRangeCount = inRangeCount;
+                bestPenalty = penalty;
+                mode = candidate;
+            }
+        }
+
+        return found && bestInRangeCount > 0;
+    }
+
+    private static bool TryProjectToTileUv(Vector3 position, int tileX, int tileY, TileProjectionMode mode, out float u, out float v)
+    {
+        switch (mode)
+        {
+            case TileProjectionMode.WorldXZ:
+                u = (position.X / ObjectWorldTileSize) - tileX;
+                v = (position.Z / ObjectWorldTileSize) - tileY;
+                break;
+            case TileProjectionMode.OriginZX:
+                u = ((ObjectMapOrigin - position.Z) / ObjectWorldTileSize) - tileX;
+                v = ((ObjectMapOrigin - position.X) / ObjectWorldTileSize) - tileY;
+                break;
+            case TileProjectionMode.WorldXY:
+                u = (position.X / ObjectWorldTileSize) - tileX;
+                v = (position.Y / ObjectWorldTileSize) - tileY;
+                break;
+            case TileProjectionMode.OriginYX:
+                u = ((ObjectMapOrigin - position.Y) / ObjectWorldTileSize) - tileX;
+                v = ((ObjectMapOrigin - position.X) / ObjectWorldTileSize) - tileY;
+                break;
+            default:
+                u = 0f;
+                v = 0f;
+                return false;
+        }
+
+        return float.IsFinite(u) && float.IsFinite(v);
+    }
+
+    private static bool TryProjectToTilePixel(Vector3 position, int tileX, int tileY, TileProjectionMode mode, out Vector2 pixel)
+    {
+        pixel = default;
+        if (!TryProjectToTileUv(position, tileX, tileY, mode, out float u, out float v))
+            return false;
+
+        pixel = new Vector2(
+            u * (TileHeightmapSize - 1),
+            v * (TileHeightmapSize - 1));
+        return float.IsFinite(pixel.X) && float.IsFinite(pixel.Y);
+    }
+
+    private static float DistanceOutsideExpandedUnitSquare(float u, float v)
+    {
+        static float AxisPenalty(float value)
+        {
+            if (value < -0.25f)
+                return -0.25f - value;
+
+            if (value > 1.25f)
+                return value - 1.25f;
+
+            return 0f;
+        }
+
+        return AxisPenalty(u) + AxisPenalty(v);
+    }
+
     private static void ProjectBoundsToTilePixels(Vector3 min, Vector3 max, int tileX, int tileY,
         out int minPx, out int minPy, out int maxPx, out int maxPy)
     {
@@ -1849,10 +2483,21 @@ public static class AdtTensorPackBuilder
             new Vector3(max.X, max.Y, max.Z),
         ];
 
+        if (!TryResolveProjectionMode(corners.ToArray(), (min + max) * 0.5f, tileX, tileY, out TileProjectionMode projectionMode))
+        {
+            minPx = 0;
+            minPy = 0;
+            maxPx = 0;
+            maxPy = 0;
+            return;
+        }
+
         foreach (Vector3 corner in corners)
         {
-            if (TryProjectPlacementToTilePixel(corner, tileX, tileY, out int px, out int py))
+            if (TryProjectToTilePixel(corner, tileX, tileY, projectionMode, out Vector2 pixel))
             {
+                int px = Math.Clamp((int)MathF.Round(pixel.X), 0, TileHeightmapSize - 1);
+                int py = Math.Clamp((int)MathF.Round(pixel.Y), 0, TileHeightmapSize - 1);
                 minPx = Math.Min(minPx, px);
                 minPy = Math.Min(minPy, py);
                 maxPx = Math.Max(maxPx, px);
@@ -1864,6 +2509,226 @@ public static class AdtTensorPackBuilder
         {
             minPx = 0; minPy = 0; maxPx = 0; maxPy = 0;
         }
+    }
+
+    private static bool PaintClippedTriangle(float[,] buffer, Vector2 p0, Vector2 p1, Vector2 p2, float value)
+    {
+        List<Vector2> polygon = ClipTriangleToTile(p0, p1, p2);
+        if (polygon.Count < 3)
+            return false;
+
+        bool painted = false;
+        Vector2 origin = polygon[0];
+        for (int index = 1; index + 1 < polygon.Count; index++)
+            painted |= PaintTriangle(buffer, origin, polygon[index], polygon[index + 1], value);
+
+        return painted;
+    }
+
+    private static bool PaintClippedTriangle(int[,] buffer, Vector2 p0, Vector2 p1, Vector2 p2, int value)
+    {
+        List<Vector2> polygon = ClipTriangleToTile(p0, p1, p2);
+        if (polygon.Count < 3)
+            return false;
+
+        bool painted = false;
+        Vector2 origin = polygon[0];
+        for (int index = 1; index + 1 < polygon.Count; index++)
+            painted |= PaintTriangle(buffer, origin, polygon[index], polygon[index + 1], value);
+
+        return painted;
+    }
+
+    private static List<Vector2> ClipTriangleToTile(Vector2 p0, Vector2 p1, Vector2 p2)
+    {
+        List<Vector2> polygon = [p0, p1, p2];
+        polygon = ClipPolygon(polygon, static point => point.X >= 0f, static (start, end) => IntersectVertical(start, end, 0f));
+        polygon = ClipPolygon(polygon, static point => point.X <= TileHeightmapSize - 1, static (start, end) => IntersectVertical(start, end, TileHeightmapSize - 1));
+        polygon = ClipPolygon(polygon, static point => point.Y >= 0f, static (start, end) => IntersectHorizontal(start, end, 0f));
+        polygon = ClipPolygon(polygon, static point => point.Y <= TileHeightmapSize - 1, static (start, end) => IntersectHorizontal(start, end, TileHeightmapSize - 1));
+        return polygon;
+    }
+
+    private static List<Vector2> ClipPolygon(
+        List<Vector2> polygon,
+        Func<Vector2, bool> isInside,
+        Func<Vector2, Vector2, Vector2> intersect)
+    {
+        if (polygon.Count == 0)
+            return polygon;
+
+        List<Vector2> output = new(polygon.Count + 4);
+        Vector2 previous = polygon[^1];
+        bool previousInside = isInside(previous);
+        foreach (Vector2 current in polygon)
+        {
+            bool currentInside = isInside(current);
+            if (currentInside)
+            {
+                if (!previousInside)
+                    output.Add(intersect(previous, current));
+
+                output.Add(current);
+            }
+            else if (previousInside)
+            {
+                output.Add(intersect(previous, current));
+            }
+
+            previous = current;
+            previousInside = currentInside;
+        }
+
+        return output;
+    }
+
+    private static Vector2 IntersectVertical(Vector2 start, Vector2 end, float x)
+    {
+        float dx = end.X - start.X;
+        if (MathF.Abs(dx) < 0.00001f)
+            return new Vector2(x, start.Y);
+
+        float t = (x - start.X) / dx;
+        return new Vector2(x, start.Y + ((end.Y - start.Y) * t));
+    }
+
+    private static Vector2 IntersectHorizontal(Vector2 start, Vector2 end, float y)
+    {
+        float dy = end.Y - start.Y;
+        if (MathF.Abs(dy) < 0.00001f)
+            return new Vector2(start.X, y);
+
+        float t = (y - start.Y) / dy;
+        return new Vector2(start.X + ((end.X - start.X) * t), y);
+    }
+
+    private static bool PaintTriangle(float[,] buffer, Vector2 p0, Vector2 p1, Vector2 p2, float value)
+    {
+        int minX = Math.Max(0, (int)MathF.Floor(MathF.Min(p0.X, MathF.Min(p1.X, p2.X))));
+        int minY = Math.Max(0, (int)MathF.Floor(MathF.Min(p0.Y, MathF.Min(p1.Y, p2.Y))));
+        int maxX = Math.Min(TileHeightmapSize - 1, (int)MathF.Ceiling(MathF.Max(p0.X, MathF.Max(p1.X, p2.X))));
+        int maxY = Math.Min(TileHeightmapSize - 1, (int)MathF.Ceiling(MathF.Max(p0.Y, MathF.Max(p1.Y, p2.Y))));
+        float area = EdgeFunction(p0.X, p0.Y, p1.X, p1.Y, p2.X, p2.Y);
+        if (MathF.Abs(area) < 0.0001f)
+            return false;
+
+        bool painted = false;
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+            {
+                float sampleX = x + 0.5f;
+                float sampleY = y + 0.5f;
+                float w0 = EdgeFunction(p1.X, p1.Y, p2.X, p2.Y, sampleX, sampleY);
+                float w1 = EdgeFunction(p2.X, p2.Y, p0.X, p0.Y, sampleX, sampleY);
+                float w2 = EdgeFunction(p0.X, p0.Y, p1.X, p1.Y, sampleX, sampleY);
+                if ((w0 >= 0f && w1 >= 0f && w2 >= 0f) || (w0 <= 0f && w1 <= 0f && w2 <= 0f))
+                {
+                    buffer[y, x] = Math.Max(buffer[y, x], value);
+                    painted = true;
+                }
+            }
+        }
+
+        return painted;
+    }
+
+    private static bool PaintTriangle(int[,] buffer, Vector2 p0, Vector2 p1, Vector2 p2, int value)
+    {
+        int minX = Math.Max(0, (int)MathF.Floor(MathF.Min(p0.X, MathF.Min(p1.X, p2.X))));
+        int minY = Math.Max(0, (int)MathF.Floor(MathF.Min(p0.Y, MathF.Min(p1.Y, p2.Y))));
+        int maxX = Math.Min(TileHeightmapSize - 1, (int)MathF.Ceiling(MathF.Max(p0.X, MathF.Max(p1.X, p2.X))));
+        int maxY = Math.Min(TileHeightmapSize - 1, (int)MathF.Ceiling(MathF.Max(p0.Y, MathF.Max(p1.Y, p2.Y))));
+        float area = EdgeFunction(p0.X, p0.Y, p1.X, p1.Y, p2.X, p2.Y);
+        if (MathF.Abs(area) < 0.0001f)
+            return false;
+
+        bool painted = false;
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+            {
+                float sampleX = x + 0.5f;
+                float sampleY = y + 0.5f;
+                float w0 = EdgeFunction(p1.X, p1.Y, p2.X, p2.Y, sampleX, sampleY);
+                float w1 = EdgeFunction(p2.X, p2.Y, p0.X, p0.Y, sampleX, sampleY);
+                float w2 = EdgeFunction(p0.X, p0.Y, p1.X, p1.Y, sampleX, sampleY);
+                if ((w0 >= 0f && w1 >= 0f && w2 >= 0f) || (w0 <= 0f && w1 <= 0f && w2 <= 0f))
+                {
+                    buffer[y, x] = value;
+                    painted = true;
+                }
+            }
+        }
+
+        return painted;
+    }
+
+    private static bool PaintTriangle(float[,] buffer, int x0, int y0, int x1, int y1, int x2, int y2, float value)
+    {
+        int minX = Math.Max(0, Math.Min(x0, Math.Min(x1, x2)));
+        int minY = Math.Max(0, Math.Min(y0, Math.Min(y1, y2)));
+        int maxX = Math.Min(TileHeightmapSize - 1, Math.Max(x0, Math.Max(x1, x2)));
+        int maxY = Math.Min(TileHeightmapSize - 1, Math.Max(y0, Math.Max(y1, y2)));
+        float area = EdgeFunction(x0, y0, x1, y1, x2, y2);
+        if (MathF.Abs(area) < 0.0001f)
+            return false;
+
+        bool painted = false;
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+            {
+                float sampleX = x + 0.5f;
+                float sampleY = y + 0.5f;
+                float w0 = EdgeFunction(x1, y1, x2, y2, sampleX, sampleY);
+                float w1 = EdgeFunction(x2, y2, x0, y0, sampleX, sampleY);
+                float w2 = EdgeFunction(x0, y0, x1, y1, sampleX, sampleY);
+                if ((w0 >= 0f && w1 >= 0f && w2 >= 0f) || (w0 <= 0f && w1 <= 0f && w2 <= 0f))
+                {
+                    buffer[y, x] = Math.Max(buffer[y, x], value);
+                    painted = true;
+                }
+            }
+        }
+
+        return painted;
+    }
+
+    private static bool PaintTriangle(int[,] buffer, int x0, int y0, int x1, int y1, int x2, int y2, int value)
+    {
+        int minX = Math.Max(0, Math.Min(x0, Math.Min(x1, x2)));
+        int minY = Math.Max(0, Math.Min(y0, Math.Min(y1, y2)));
+        int maxX = Math.Min(TileHeightmapSize - 1, Math.Max(x0, Math.Max(x1, x2)));
+        int maxY = Math.Min(TileHeightmapSize - 1, Math.Max(y0, Math.Max(y1, y2)));
+        float area = EdgeFunction(x0, y0, x1, y1, x2, y2);
+        if (MathF.Abs(area) < 0.0001f)
+            return false;
+
+        bool painted = false;
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+            {
+                float sampleX = x + 0.5f;
+                float sampleY = y + 0.5f;
+                float w0 = EdgeFunction(x1, y1, x2, y2, sampleX, sampleY);
+                float w1 = EdgeFunction(x2, y2, x0, y0, sampleX, sampleY);
+                float w2 = EdgeFunction(x0, y0, x1, y1, sampleX, sampleY);
+                if ((w0 >= 0f && w1 >= 0f && w2 >= 0f) || (w0 <= 0f && w1 <= 0f && w2 <= 0f))
+                {
+                    buffer[y, x] = value;
+                    painted = true;
+                }
+            }
+        }
+
+        return painted;
+    }
+
+    private static float EdgeFunction(float ax, float ay, float bx, float by, float px, float py)
+    {
+        return (px - ax) * (by - ay) - (py - ay) * (bx - ax);
     }
 
     private static void PaintCircle(float[,] buffer, int cx, int cy, float radius, float value)

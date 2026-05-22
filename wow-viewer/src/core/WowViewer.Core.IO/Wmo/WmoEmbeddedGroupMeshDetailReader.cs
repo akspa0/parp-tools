@@ -30,24 +30,37 @@ public static class WmoEmbeddedGroupMeshDetailReader
             ChunkSpan groupChunk = groupChunks[groupIndex];
             string detailSourcePath = $"{sourcePath}#MOGP[{groupIndex}]@{groupChunk.HeaderOffset}";
             byte[] mogp = WmoGroupReaderCommon.ReadChunkPayload(stream, groupChunk);
-
-            WmoGroupSummary groupSummary = WmoGroupSummaryReader.ReadMogpPayload(mogp, detailSourcePath, version);
-            WmoGroupMeshDetail mesh = WmoGroupMeshDetailReader.ReadMogpPayload(mogp, detailSourcePath, version);
-            WmoGroupLiquidSummary? liquidSummary = groupSummary.HasLiquid
-                ? WmoGroupLiquidSummaryReader.ReadMogpPayload(mogp, detailSourcePath, version)
-                : null;
-
-            details.Add(new WmoEmbeddedGroupMeshDetail(
-                groupIndex,
-                groupChunk.HeaderOffset,
-                groupSummary,
-                mesh,
-                liquidSummary,
-                ReadRefs(mogp, mesh.HeaderSizeBytes, WmoChunkIds.Modr),
-                ReadRefs(mogp, mesh.HeaderSizeBytes, WmoChunkIds.Molr)));
+            details.Add(CreateDetail(mogp, detailSourcePath, version, groupIndex, groupChunk.HeaderOffset));
         }
 
         return details;
+    }
+
+    internal static WmoEmbeddedGroupMeshDetail ReadGroup(Stream stream, string sourcePath, int groupIndex, long groupHeaderOffset = 0)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+
+        (uint? version, byte[] mogp) = WmoGroupReaderCommon.ReadGroupPayload(stream, sourcePath);
+        return CreateDetail(mogp, sourcePath, version, groupIndex, groupHeaderOffset);
+    }
+
+    private static WmoEmbeddedGroupMeshDetail CreateDetail(byte[] mogp, string detailSourcePath, uint? version, int groupIndex, long groupHeaderOffset)
+    {
+        WmoGroupSummary groupSummary = WmoGroupSummaryReader.ReadMogpPayload(mogp, detailSourcePath, version);
+        WmoGroupMeshDetail mesh = WmoGroupMeshDetailReader.ReadMogpPayload(mogp, detailSourcePath, version);
+        WmoGroupLiquidSummary? liquidSummary = groupSummary.HasLiquid
+            ? WmoGroupLiquidSummaryReader.ReadMogpPayload(mogp, detailSourcePath, version)
+            : null;
+
+        return new WmoEmbeddedGroupMeshDetail(
+            groupIndex,
+            groupHeaderOffset,
+            groupSummary,
+            mesh,
+            liquidSummary,
+            ReadRefs(mogp, mesh.HeaderSizeBytes, WmoChunkIds.Modr),
+            ReadRefs(mogp, mesh.HeaderSizeBytes, WmoChunkIds.Molr));
     }
 
     private static List<ushort> ReadRefs(byte[] mogp, int headerSizeBytes, FourCC chunkId)

@@ -366,7 +366,7 @@ The user recalls an experiment that subdivided objects down to every single poly
 - **Low byte**: Instance or sub-object
 - **The discarded low byte of PackedParams (bits 0-7)**: Possibly another key layer
 
-The 2-million-object explosion happened when the code treated every polygon as独立 — meaning the sub-object splitting went too far. The correct decomposition is somewhere between "one CK24 = one object" and "one polygon = one object." MSLK.GroupObjectId is the mechanism that finds the right level.
+The 2-million-object explosion happened when the code treated every polygon as independent — meaning the sub-object splitting went too far. The correct decomposition is somewhere between "one CK24 = one object" and "one polygon = one object." MSLK.GroupObjectId is the mechanism that finds the right level.
 
 ---
 
@@ -392,7 +392,7 @@ As a format researcher, I need every field of every PM4 chunk classified as Veri
 
 As a format researcher, I need to determine whether MSHD fields 0x00 and 0x08 encode total surface/vertex counts or memory layout hints, and whether fields 0x0C-0x1C are reserved or dead, so that we can either decode the header or confirm it is not blocking format understanding.
 
-**Why this priority**: MSHD is the only chunk that could全局 describe the rest of the format. If it encodes counts/offsets, our entire chunk-reading model may need adjustment. If it is dead padding, we can stop investigating it.
+**Why this priority**: MSHD is the only chunk that could comprehensively describe the rest of the format. If it encodes counts/offsets, our entire chunk-reading model may need adjustment. If it is dead padding, we can stop investigating it.
 
 **Independent Test**: Run correlation analysis of MSHD.Field00 and MSHD.Field08 against MSUR.Count, MSVT.Count, MSPI.Count, MSLK.Count, MPRL.Count, MSCN.Count across the full development corpus. Test against non-development client PM4 files if available.
 

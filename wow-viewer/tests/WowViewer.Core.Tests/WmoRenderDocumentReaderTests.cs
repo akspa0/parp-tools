@@ -9,6 +9,56 @@ namespace WowViewer.Core.Tests;
 public sealed class WmoRenderDocumentReaderTests
 {
     [Fact]
+    public void Read_RootWithExternalGroups_LoadsCompanionGroupMeshes()
+    {
+        const string rootPath = "WORLD\\WMO\\AZEROTH\\BUILDINGS\\STORMWIND\\STORMWIND.WMO";
+        const string groupPath = "WORLD\\WMO\\AZEROTH\\BUILDINGS\\STORMWIND\\STORMWIND_000.wmo";
+
+        byte[] rootBytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(17)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOHD", CreateMohd(materialCount: 1, groupCount: 1)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOMT", CreateMomtEntry(64, texture1Offset: 0)),
+        ];
+
+        byte[] groupBytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(17)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOGP", CreateMogpPayload(
+                headerSize: 0x44,
+                flags: 0x8,
+                boundsMin: new Vector3(0f, 0f, 0f),
+                boundsMax: new Vector3(1f, 1f, 0f),
+                portalStart: 0,
+                portalCount: 0,
+                transBatchCount: 0,
+                intBatchCount: 1,
+                extBatchCount: 0,
+                groupLiquid: 0,
+                nameOffset: 0,
+                descriptiveNameOffset: 0,
+                subchunks:
+                [
+                    ("MOVI", CreateIndices(0, 1, 2)),
+                    ("MOVT", CreateVertices(new Vector3(0f, 0f, 0f), new Vector3(1f, 0f, 0f), new Vector3(0f, 1f, 0f))),
+                ])),
+        ];
+
+        using MemoryStream stream = new(rootBytes);
+        WmoRenderDocument document = WmoRenderDocumentReader.Read(
+            stream,
+            rootPath,
+            path => string.Equals(path, groupPath, StringComparison.OrdinalIgnoreCase) ? groupBytes : null);
+
+        WmoEmbeddedGroupMeshDetail group = Assert.Single(document.Groups);
+        Assert.Equal(0, group.GroupIndex);
+        Assert.Equal(3, group.Mesh.Vertices.Count);
+        Assert.Equal(3, group.Mesh.Indices.Count);
+        Assert.Equal(new Vector3(0f, 0f, 0f), group.GroupSummary.BoundsMin);
+        Assert.Equal(new Vector3(1f, 1f, 0f), group.GroupSummary.BoundsMax);
+    }
+
+    [Fact]
     public void Read_AlphaRootWithEmbeddedGroups_ProducesRenderableDocument()
     {
         byte[] bytes =

@@ -15,12 +15,13 @@ The current high-value workflow is terrain AI, not legacy NPZ tooling.
 The modern V16 path is:
 
 1. `WowViewer.Tool.Harvest harvest-stream`
-2. `data-harvester/scripts/build_v16_dataset.py build`
-3. `build_v16_dataset.py validate-signals`
-4. `inspect_v16_dataset.py --write-overview`
-5. `build_v16_curation_manifest.py`
-6. `validate_v16_training_ready.py`
-7. `train_v16.py` or curated `train_v16_1_*.py`
+2. `data-harvester/scripts/inspect_v16_harvest_samples.py`
+3. `data-harvester/scripts/build_v16_dataset.py build --allow-zarr-write`
+4. `build_v16_dataset.py validate-signals`
+5. `inspect_v16_dataset.py --write-overview`
+6. `build_v16_curation_manifest.py`
+7. `validate_v16_training_ready.py`
+8. `train_v16.py` or curated `train_v16_1_*.py`
 
 Key docs:
 
@@ -57,7 +58,9 @@ dotnet build .\wow-viewer\WowViewer.slnx -c Debug
 
 ```powershell
 cd .\wow-viewer\data-harvester
-uv run python scripts\build_v16_dataset.py build --build 3_3_5_12340
+uv run python scripts\inspect_v16_harvest_samples.py --build 3_3_5_12340 --maps Azeroth --kinds object placement
+
+uv run python scripts\build_v16_dataset.py build --build 3_3_5_12340 --allow-zarr-write
 ```
 
 ### Validate Trainer Readiness
@@ -145,7 +148,9 @@ uv run python -u scripts\train_v16_1_normal.py `
 ```
 
 As with V16, `--epochs` is the new total ceiling for the run, not extra epochs
-to add after the checkpoint.
+to add after the checkpoint. The shared V16.1 trainer now also extends the
+cosine scheduler to that higher total when resuming, instead of staying pinned
+to the original run ceiling.
 
 ## What Lives Here
 
