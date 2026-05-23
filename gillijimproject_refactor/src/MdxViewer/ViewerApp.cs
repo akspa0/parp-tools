@@ -7298,6 +7298,18 @@ void main() {
 
         plan.Tiles.Sort(static (left, right) =>
         {
+            int mapCompare = string.Compare(left.TileName, right.TileName, StringComparison.OrdinalIgnoreCase);
+            if (mapCompare != 0)
+                return mapCompare;
+
+            int tileXCompare = left.TileX.CompareTo(right.TileX);
+            if (tileXCompare != 0)
+                return tileXCompare;
+
+            int tileYCompare = left.TileY.CompareTo(right.TileY);
+            if (tileYCompare != 0)
+                return tileYCompare;
+
             int terrainCompare = left.HideTerrain.CompareTo(right.HideTerrain);
             if (terrainCompare != 0)
                 return terrainCompare;
@@ -7306,16 +7318,7 @@ void main() {
             if (objectCompare != 0)
                 return objectCompare;
 
-            int liquidCompare = left.HideTerrainLiquids.CompareTo(right.HideTerrainLiquids);
-            if (liquidCompare != 0)
-                return liquidCompare;
-
-            int mapCompare = string.Compare(left.TileName, right.TileName, StringComparison.OrdinalIgnoreCase);
-            if (mapCompare != 0)
-                return mapCompare;
-
-            int tileXCompare = left.TileX.CompareTo(right.TileX);
-            return tileXCompare != 0 ? tileXCompare : left.TileY.CompareTo(right.TileY);
+            return left.HideTerrainLiquids.CompareTo(right.HideTerrainLiquids);
         });
 
         if (string.IsNullOrWhiteSpace(plan.MapName))
