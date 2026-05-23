@@ -12,6 +12,7 @@
   shaders, converters, liquid system, object masking, world rendering, legacy
   renderer. Sufficient for full from-scratch reimplementation. This is now the
   master design reference for the project.
+- `wow-viewer/specs/012-real-validation-batch-extraction/` now has bounded wow-viewer GPU proof on both staged anchors: `0_5_3_3368 / Azeroth_30_48` and `3_3_5_12340 / Azeroth_30_48`. `ValidationWorldSceneAdapter` now owns the hidden-window OpenGL render/readback path behind `IValidationWorldSceneAdapter`, and `WowViewer.Tool.ValidationCapture capture --gpu-viewer-style` completes `4/4` variants on both anchors. This still bypasses `WowViewerWorldScenePlanner` preview framing, but it continues to reuse `WorldGpuPreviewRenderer` as a temporary backend; the next open step is Phase 5 artifact handoff plus longer-range renderer extraction.
 - V16.1.1 is now the named next bounded implementation slice on top of the
   landed V16.1 base:
   - normal-first again, not a fresh family reset

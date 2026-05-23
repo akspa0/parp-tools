@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-23
 
-**Status**: Draft
+**Status**: In Progress
 
 **Input**: User direction: the real renderer-truth path is the existing MdxViewer validation batch, not the preview-only `WorldGpuPreviewRenderer` path in `WowViewer.App`. The next preparation step should use Spec Kit and turn the extraction direction into a concrete implementation-ready checklist.
 
@@ -28,6 +28,20 @@ A preview-only terrain renderer is not sufficient for this lane. The replacement
 Create a `wow-viewer`-owned headless validation-capture contract that reproduces the real renderer-truth batch behavior closely enough to replace the current legacy-driven capture lane for bounded dataset validation and later batch automation.
 
 The first target is not full viewer parity. The first target is a faithful headless validation-capture slice that can drive the real world renderer, produce the real capture families, apply deterministic policy overrides, and emit the same downstream artifact family used by the current dataset workflow.
+
+## Current Implementation Status
+
+- Phases 1 through 4 are now landed for the bounded proof surface.
+- `ValidationWorldSceneAdapter` owns the current hidden-window OpenGL render/readback path behind `IValidationWorldSceneAdapter`.
+- `WowViewer.Tool.ValidationCapture capture --gpu-viewer-style` has bounded real-data proof on:
+	- staged `0_5_3_3368 / Azeroth_30_48`
+	- staged `3_3_5_12340 / Azeroth_30_48`
+- Both anchors currently complete `4/4` variants for:
+	- `primary`
+	- `noliquids`
+	- `noobjects`
+	- `objectsonly`
+- The next open work is Phase 5 dataset handoff: emit `object_visibility_mask` and `no_object_minimap` from the new tool path and document the bounded cutover point.
 
 ## User Scenarios & Testing
 
@@ -118,5 +132,5 @@ A terrain researcher wants the dataset pipeline to keep using renderer-truth art
 - **SC-001**: A Speckit package exists that defines the real validation-batch extraction lane as a dedicated feature rather than a loose architecture note.
 - **SC-002**: The plan breaks the lane into independently validatable steps that do not depend on the fake preview path.
 - **SC-003**: The tasks file names exact `wow-viewer` target projects and files for the first implementation slice.
-- **SC-004**: The first implementation slice is small enough to prove one bounded tile with real renderer-truth family output before any wider batch automation.
+- **SC-004**: The first implementation slice is small enough to prove one bounded tile with real renderer-truth family output before any wider batch automation, and that bounded proof now exists on the staged `0_5_3_3368` and `3_3_5_12340` anchors for `Azeroth_30_48`.
 - **SC-005**: Continuity surfaces explicitly treat the legacy MdxViewer validation batch as the source reference and the new `wow-viewer` headless path as the replacement target.

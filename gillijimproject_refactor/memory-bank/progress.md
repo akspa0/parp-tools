@@ -17,6 +17,12 @@
 
 ## Validated Now
 
+### wow-viewer validation capture extraction
+- `wow-viewer/specs/012-real-validation-batch-extraction/` now has bounded wow-viewer GPU proof on staged `0_5_3_3368 / Azeroth_30_48` and staged `3_3_5_12340 / Azeroth_30_48`.
+- Command proof: `dotnet run --project wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/WowViewer.Tool.ValidationCapture.csproj -- capture ... --gpu-viewer-style`
+- Result: `4/4` variants succeeded on both anchors, with PNG output under `wow-viewer/output/tmp/validation-capture-gpu-viewer-style/` and `wow-viewer/output/tmp/validation-capture-gpu-viewer-style-335/`.
+- Current proof level is precise: `ValidationWorldSceneAdapter` now owns render/readback behind `IValidationWorldSceneAdapter`, the host uses explicit `ValidationCaptureCameraFrame` matrices and bypasses `WowViewerWorldScenePlanner`, but it still reuses `WorldGpuPreviewRenderer` as a temporary backend and does not yet mean the long-range dedicated viewer-style renderer extraction is done.
+
 ### V16 Corpus
 - Finalized stores built for:
   - `0_5_3_3368`

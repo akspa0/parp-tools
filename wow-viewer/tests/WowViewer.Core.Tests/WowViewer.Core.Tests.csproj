@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\core\WowViewer.Core\WowViewer.Core.csproj" />
     <ProjectReference Include="..\..\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
     <ProjectReference Include="..\..\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />
+    <ProjectReference Include="..\..\tools\validation-capture\WowViewer.Tool.ValidationCapture\WowViewer.Tool.ValidationCapture.csproj" />
   </ItemGroup>
 
 </Project>

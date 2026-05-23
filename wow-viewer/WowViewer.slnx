@@ -26,4 +26,7 @@
   <Folder Name="/tools/harvest/">
     <Project Path="tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj" />
   </Folder>
+  <Folder Name="/tools/validation-capture/">
+    <Project Path="tools/validation-capture/WowViewer.Tool.ValidationCapture/WowViewer.Tool.ValidationCapture.csproj" />
+  </Folder>
 </Solution>

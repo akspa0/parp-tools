@@ -10,7 +10,7 @@
 
 ## Guardrails
 
-- [ ] No planned file depends on `wow-viewer/src/viewer/WowViewer.App/WorldGpuPreviewRenderer.cs`
+- [x] No planned file depends on `WowViewerWorldScenePlanner` or the default preview-camera path; the current temporary `WorldGpuPreviewRenderer` reuse stays isolated behind `IValidationWorldSceneAdapter`
 - [ ] No new shared-runtime type depends on ImGui, desktop-window state, or preview-only image objects
 - [ ] No work item requires editing `gillijimproject_refactor`; it remains reference-only for this feature
 - [ ] The current implementation target is one bounded tile and four variants, not stitched-map parity first
@@ -18,45 +18,47 @@
 
 ## Legacy To New Ownership Map
 
-- [ ] `StartMkHarvestViewerValidationBatch(...)` is split into `ValidationCaptureBatchPlan`, `ValidationCaptureScenePolicy`, and `ValidationCaptureCommand`
-- [ ] `ApplyCaptureRequestSceneOverrides(...)` is split into `ValidationCaptureScenePolicy` and `ValidationWorldScenePolicyApplier`
-- [ ] `BuildMkHarvestViewerValidationShot(...)` is split into `ValidationCaptureCameraInput`, `ValidationCaptureCameraFrame`, and `ValidationCaptureCameraSolver`
-- [ ] `TryGetMkHarvestViewerValidationSceneMatrices(...)` stays under `ValidationCaptureCameraSolver` plus adapter-provided ground-height resolution
-- [ ] `IsCaptureRequestReady(...)` is split into `ValidationWorldSceneSnapshot`, `ValidationCaptureReadinessSnapshot`, and `ValidationCaptureReadinessEvaluator`
-- [ ] `CompleteCaptureIfReady(...)` is split into `HeadlessValidationCaptureRunner` and `HeadlessValidationFramebufferExporter`
-- [ ] `GenerateMkHarvestViewerValidationObjectArtifacts(...)` is split into `ValidationCaptureArtifactInputs`, `ValidationCaptureArtifactOutputs`, and `ValidationCaptureArtifactBuilder`
-- [ ] `TryBuildDirectObjectVisibilityMask(...)` maps to the early-build branch in `ValidationCaptureArtifactBuilder`
-- [ ] `BuildObjectVisibilityMaskFromObjectsOnlyCapture(...)` maps to the direct silhouette branch in `ValidationCaptureArtifactBuilder`
-- [ ] `BuildObjectVisibilityDiffMask(...)` maps to the later-build diff branch in `ValidationCaptureArtifactBuilder`
+- [x] `StartMkHarvestViewerValidationBatch(...)` is split into `ValidationCaptureBatchPlan`, `ValidationCaptureScenePolicy`, and `ValidationCaptureCommand`
+- [x] `PendingCaptureRequest` readiness outcome fields map cleanly into `ValidationCaptureReadinessState` and `ValidationCaptureVariantResult`
+- [x] `ApplyCaptureRequestSceneOverrides(...)` is split into `ValidationCaptureScenePolicy` and `ValidationWorldScenePolicyApplier`
+- [x] `BuildMkHarvestViewerValidationShot(...)` is split into `ValidationCaptureCameraInput`, `ValidationCaptureCameraFrame`, and `ValidationCaptureCameraSolver`
+- [x] `TryGetMkHarvestViewerValidationSceneMatrices(...)` stays under `ValidationCaptureCameraSolver` plus adapter-provided ground-height resolution
+- [x] `IsCaptureRequestReady(...)` is split into `ValidationWorldSceneSnapshot`, `ValidationCaptureReadinessSnapshot`, and `ValidationCaptureReadinessEvaluator`
+- [x] `CompleteCaptureIfReady(...)` is split into `HeadlessValidationCaptureRunner` and `HeadlessValidationFramebufferExporter`
+- [x] `GenerateMkHarvestViewerValidationObjectArtifacts(...)` is split into `ValidationCaptureArtifactInputs`, `ValidationCaptureArtifactOutputs`, and `ValidationCaptureArtifactBuilder`
+- [x] `TryBuildDirectObjectVisibilityMask(...)` maps to the early-build branch in `ValidationCaptureArtifactBuilder`
+- [x] `BuildObjectVisibilityMaskFromObjectsOnlyCapture(...)` maps to the direct silhouette branch in `ValidationCaptureArtifactBuilder`
+- [x] `BuildObjectVisibilityDiffMask(...)` maps to the later-build diff branch in `ValidationCaptureArtifactBuilder`
 
 ## Phase Exit Gates
 
 ### Phase 1 Exit
 
-- [ ] Shared batch models compile under `WowViewer.Core.Runtime`
-- [ ] Scene-policy types compile under `WowViewer.Core.Runtime`
-- [ ] Camera math compiles under `WowViewer.Core.Runtime`
-- [ ] No tool-project file was added to compensate for missing shared types
+- [x] Shared batch models compile under `WowViewer.Core.Runtime`
+- [x] `ValidationCaptureReadinessState` is available early enough for `ValidationCaptureVariantResult` to compile without a fake placeholder type
+- [x] Scene-policy types compile under `WowViewer.Core.Runtime`
+- [x] Camera math compiles under `WowViewer.Core.Runtime`
+- [x] No tool-project file was added to compensate for missing shared types
 
 ### Phase 2 Exit
 
-- [ ] Readiness types compile under `WowViewer.Core.Runtime`
-- [ ] Artifact types compile under `WowViewer.Core.Runtime`
-- [ ] Focused tests exist in `wow-viewer/tests/WowViewer.Core.Tests/`
-- [ ] `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter ValidationCapture` passes
+- [x] Readiness types compile under `WowViewer.Core.Runtime`
+- [x] Artifact types compile under `WowViewer.Core.Runtime`
+- [x] Focused tests exist in `wow-viewer/tests/WowViewer.Core.Tests/`
+- [x] `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter ValidationCapture` passes
 
 ### Phase 3 Exit
 
-- [ ] `WowViewer.Tool.ValidationCapture` builds without opening the desktop viewer shell
-- [ ] The tool shell constructs `HeadlessValidationCaptureSession` and routes through shared contracts
-- [ ] The runner and exporter do not introduce preview-only rendering dependencies
+- [x] `WowViewer.Tool.ValidationCapture` builds without opening the desktop viewer shell
+- [x] The tool shell constructs the shared-runtime `HeadlessValidationCaptureSession` and routes through shared contracts
+- [x] The runner and exporter do not introduce preview-only rendering dependencies
 
 ### Phase 4 Exit
 
-- [ ] A concrete scene adapter implements `IValidationWorldSceneAdapter`
-- [ ] Readiness evaluation consumes adapter snapshots instead of tool-local state bags
-- [ ] A bounded run produces `primary`, `noliquids`, `noobjects`, and `objectsonly`
-- [ ] The bounded proof exists on staged `0_5_3_3368` and staged `3_3_5_12340` for `Azeroth_30_48`
+- [x] A concrete scene adapter implements `IValidationWorldSceneAdapter`
+- [x] Readiness evaluation consumes adapter snapshots instead of tool-local state bags
+- [x] A bounded run produces `primary`, `noliquids`, `noobjects`, and `objectsonly`
+- [x] The bounded proof exists on staged `0_5_3_3368` and staged `3_3_5_12340` for `Azeroth_30_48`
 
 ### Phase 5 Exit
 

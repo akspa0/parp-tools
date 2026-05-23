@@ -8,6 +8,21 @@
   - a fake top-down preview path is not a substitute for the capture stack that already produces the primary, `noobjects`, `noliquids`, and `objectsonly` variants
 - this note defines the smallest extraction seam that preserves the real renderer behavior without dragging the whole `ViewerApp` UI into `wow-viewer`
 
+## Current Status
+
+- the shared validation-batch contracts, readiness logic, camera math, and artifact builder are landed in `wow-viewer`
+- the dedicated host tool `WowViewer.Tool.ValidationCapture` is landed
+- `ValidationWorldSceneAdapter` now owns the bounded hidden-window GPU render/readback path behind `IValidationWorldSceneAdapter`
+- bounded real-data proof now exists on both staged anchors:
+  - `0_5_3_3368 / Azeroth_30_48`
+  - `3_3_5_12340 / Azeroth_30_48`
+- each current bounded proof completes the four capture families:
+  - primary
+  - `noliquids`
+  - `noobjects`
+  - `objectsonly`
+- the remaining open step is not Phase 4 proof anymore; it is Phase 5 dataset handoff for `object_visibility_mask` and `no_object_minimap`, followed by longer-range replacement of the temporary `WorldGpuPreviewRenderer` backend reuse
+
 ## Problem Statement
 
 - current renderer-truth capture for V16 and related dataset work depends on the legacy validation batch in:
@@ -190,6 +205,8 @@ Current downstream homes:
 2. port the readiness evaluator so single-tile capture waits for the same conditions the legacy batch requires
 3. reproduce one real single-tile capture family set for `primary`, `noobjects`, `noliquids`, and `objectsonly`
 
+Status: landed for the bounded `0_5_3_3368` and `3_3_5_12340` `Azeroth_30_48` proof anchors.
+
 ### Phase 3 - Artifact Parity
 
 1. port the object-artifact post-process so `object_visibility_mask` and `no_object_minimap` are generated from the captured families with the same build-policy branch
@@ -199,10 +216,14 @@ Current downstream homes:
 - staged `3_3_5_12340`
 - the established bounded `Azeroth_30_48` tile roots
 
+Status: proof anchors now exist for the raw capture families, but artifact generation is still the next open work item.
+
 ### Phase 4 - Batch And Pipeline Ownership
 
 1. add manifest-driven batch execution so the tool can consume dataset-generated tile plans directly
 2. wire the existing `wow-viewer` dataset scripts to call the new tool instead of the legacy app for renderer-truth batches
+
+Status: not started. Current next slice should stay smaller: finish Phase 3 artifact parity first.
 
 ## First Implementation Slice Recommendation
 

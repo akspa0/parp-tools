@@ -2,6 +2,7 @@ using System.IO;
 using System.Numerics;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
+using WowViewer.Core.Runtime.World.Validation;
 
 namespace WowViewer.App;
 
@@ -155,11 +156,21 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     {
         ArgumentNullException.ThrowIfNull(camera);
 
+        BuildMatrices(width, height, camera, out Matrix4x4 view, out Matrix4x4 projection);
+        RenderCore(width, height, camera.Position, view, projection);
+    }
+
+    public unsafe void Render(int width, int height, ValidationCaptureCameraFrame cameraFrame)
+    {
+        RenderCore(width, height, cameraFrame.Eye, cameraFrame.View, cameraFrame.Projection);
+    }
+
+    private unsafe void RenderCore(int width, int height, Vector3 cameraPosition, Matrix4x4 view, Matrix4x4 projection)
+    {
         if (!HasRenderableGeometry)
             return;
 
         EnsureFramebuffer(width, height);
-        BuildMatrices(width, height, camera, out Matrix4x4 view, out Matrix4x4 projection);
         Matrix4x4 viewProjection = view * projection;
         Matrix4x4.Invert(viewProjection, out Matrix4x4 inverseViewProjection);
 
@@ -176,7 +187,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _gl.Disable(EnableCap.DepthTest);
             _gl.UseProgram(_skyProgram);
             _gl.UniformMatrix4(_skyInverseViewProjectionLocation, 1, false, (float*)&inverseViewProjection.M11);
-            _gl.Uniform3(_skyCameraPositionLocation, camera.Position.X, camera.Position.Y, camera.Position.Z);
+            _gl.Uniform3(_skyCameraPositionLocation, cameraPosition.X, cameraPosition.Y, cameraPosition.Z);
             _gl.Uniform3(_skyZenithColorLocation, _skyZenithColor.X, _skyZenithColor.Y, _skyZenithColor.Z);
             _gl.Uniform3(_skyHorizonColorLocation, _skyHorizonColor.X, _skyHorizonColor.Y, _skyHorizonColor.Z);
             _gl.Uniform3(_skyFogColorLocation, _skyFogColor.X, _skyFogColor.Y, _skyFogColor.Z);

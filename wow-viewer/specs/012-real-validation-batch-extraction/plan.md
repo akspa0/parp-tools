@@ -12,7 +12,7 @@
 
 - Phase order is strict. Do not start Phase 3 work until Phase 2 shared tests are green.
 - Do not let the tool-host work backfill missing shared-runtime contracts. If a host need appears first, add the shared contract first and return to the host.
-- Do not bind to `WorldGpuPreviewRenderer` or any preview-only world path for interim progress.
+- Do not bind to `WowViewerWorldScenePlanner` or the default preview-camera path for interim progress. A bounded Phase 4 proof may temporarily reuse the `WorldGpuPreviewRenderer` backend only when it is fed explicit `ValidationCaptureCameraFrame` matrices and kept clearly separate from the long-range renderer target.
 - Keep one bounded tile and one bounded four-variant proof as the controlling validation target until Phase 4 succeeds.
 - Keep the legacy method-to-new-file mapping in `checklists/pre-implementation.md` current if the plan or contract split changes.
 
@@ -35,6 +35,7 @@ Add these files:
 - `ValidationCaptureBatchPlan.cs`
 - `ValidationCaptureBatchResult.cs`
 - `ValidationCaptureVariantResult.cs`
+- `ValidationCaptureReadinessState.cs`
 
 Legacy source reference:
 
@@ -99,8 +100,9 @@ Target project and folder:
 Add these files:
 
 - `ValidationCaptureReadinessSnapshot.cs`
-- `ValidationCaptureReadinessState.cs`
 - `ValidationCaptureReadinessEvaluator.cs`
+
+`ValidationCaptureReadinessState.cs` is pulled forward into Step 1.1 because `ValidationCaptureVariantResult` already reports readiness outcomes.
 
 Legacy source reference:
 
@@ -162,11 +164,16 @@ Target project root:
 
 - `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/`
 
+Shared-runtime support type for this step:
+
+- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Validation/HeadlessValidationCaptureSession.cs`
+
 Add these files:
 
 - `WowViewer.Tool.ValidationCapture.csproj`
 - `Program.cs`
 - `ValidationCaptureCommand.cs`
+- `HeadlessValidationCaptureSession.cs`
 
 Repository updates:
 
@@ -186,11 +193,15 @@ Target project and folder:
 
 - `wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture/`
 
+Pulled-forward shared-runtime support types for this step:
+
+- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Validation/ValidationWorldSceneSnapshot.cs`
+- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Validation/IValidationWorldSceneAdapter.cs`
+
 Add these files:
 
 - `HeadlessValidationCaptureRunner.cs`
 - `HeadlessValidationFramebufferExporter.cs`
-- `HeadlessValidationCaptureSession.cs`
 
 Legacy source reference:
 
@@ -200,16 +211,16 @@ Legacy source reference:
 - `gillijimproject_refactor/src/MdxViewer/ViewerApp.cs`
   - render-loop timing around validation matrix override use
 
-**Validation**: the headless host can create a bounded renderable session and write a single PNG frame when the scene is ready.
+**Validation**: the headless host can create a bounded renderable session and write a single PNG frame when the scene is ready. Until the real renderer adapter exists, a clearly synthetic stub-scene path may be used to prove the runner and exporter wiring without claiming parity.
 
 ## Phase 4: Real Renderer Adapter
 
-**Goal**: Wire the headless tool to the real world renderer path rather than the existing preview-only app surface.
+**Goal**: Wire the headless tool to a GPU-accelerated world renderer that preserves the old MdxViewer viewer-style world semantics rather than the existing preview-only app surface.
 
 Entry gate:
 
 - the tool project builds
-- the runner shell can execute the shared contract without taking a dependency on preview-only world capture code
+- the runner shell can execute the shared contract without taking a dependency on preview-only camera behavior
 
 ### Step 4.1 — Add a real validation-scene adapter layer
 
@@ -235,6 +246,13 @@ Required inputs the adapter must surface:
 - pending world-object load count
 - real frame render invocation
 
+Required behavior constraint:
+
+- do not reuse the current `WowViewerWorldScenePlanner` + `WorldGpuPreviewRenderer` oblique single-tile framing as the long-range renderer target
+- preserve the old MdxViewer viewer-style engine behavior first, beginning with the deterministic validation top-down capture matrices from `BuildMkHarvestViewerValidationShot(...)` and `TryGetMkHarvestViewerValidationSceneMatrices(...)`
+- GPU acceleration remains desirable, but it must serve the viewer-style engine semantics rather than replacing them with a Blender-like preview camera
+- a bounded proof may temporarily reuse the `WorldGpuPreviewRenderer` backend only when it is driven directly by `ValidationCaptureCameraFrame` and not by `WowViewerWorldScenePlanner`
+
 Legacy source reference:
 
 - `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs`
@@ -242,7 +260,7 @@ Legacy source reference:
 - `gillijimproject_refactor/src/MdxViewer/Terrain/TerrainRenderer.cs`
 - `gillijimproject_refactor/src/MdxViewer/Rendering/WmoRenderer.cs`
 
-**Validation**: the adapter exposes the state needed by readiness evaluation without inventing a second fake world-render contract.
+**Validation**: the adapter exposes the state needed by readiness evaluation without inventing a second fake world-render contract, and it now owns the bounded hidden-window GPU render/readback path behind `IValidationWorldSceneAdapter`.
 
 ### Step 4.2 — Reproduce the bounded four-variant tile proof
 
@@ -260,6 +278,12 @@ Bounded proof anchors:
 - `Azeroth_30_48`
 
 **Validation**: one headless run per bounded proof anchor produces the four expected capture families over real terrain plus real world-object rendering.
+
+Current status:
+
+- staged `0_5_3_3368 / Azeroth_30_48` now has a bounded wow-viewer-owned GPU proof via `WowViewer.Tool.ValidationCapture capture --gpu-viewer-style`
+- staged `3_3_5_12340 / Azeroth_30_48` now also passes the same bounded four-variant proof through the real adapter path
+- the remaining open item is no longer bounded proof coverage; it is downstream artifact handoff plus long-range replacement of the temporary `WorldGpuPreviewRenderer` backend reuse
 
 ## Phase 5: Dataset Handoff
 
@@ -296,3 +320,8 @@ Target docs:
 - continuity memory and active-context docs if the proof boundary moves
 
 **Validation**: docs say exactly what is replaced, what proof exists, and what remains legacy-only.
+
+Current status:
+
+- `wow-viewer/README.md`, the architecture note, the active Speckit files, and continuity docs now describe the completed Phase 4 proof boundary accurately
+- the remaining open item in Step 5.2 is simply keeping that cutover language aligned once Phase 5 artifact emission lands

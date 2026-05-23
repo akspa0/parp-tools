@@ -59,6 +59,24 @@ Renderer-truth upgrade truth is narrower than the base V16 corpus truth:
 - V16.2 training is now the active lane — 7-channel input (3 minimap + 4 guidance) with object mask data patched directly into existing V16 stores
 - first V16.2 normal run is in progress on all 6 builds
 
+The replacement `wow-viewer` validation-capture lane now has the same bounded
+proof anchors, but only for the raw capture families so far:
+
+- command: `WowViewer.Tool.ValidationCapture capture --gpu-viewer-style`
+- proof anchors:
+  - `0_5_3_3368 / Azeroth_30_48`
+  - `3_3_5_12340 / Azeroth_30_48`
+- output roots:
+  - `wow-viewer/output/tmp/validation-capture-gpu-viewer-style/`
+  - `wow-viewer/output/tmp/validation-capture-gpu-viewer-style-335/`
+- current boundary:
+  - the tool now owns bounded four-variant capture through
+    `ValidationWorldSceneAdapter` and `IValidationWorldSceneAdapter`
+  - it bypasses `WowViewerWorldScenePlanner`
+  - it still reuses `WorldGpuPreviewRenderer` as a temporary backend
+  - Phase 5 artifact handoff (`object_visibility_mask`, `no_object_minimap`) is
+    still the next required slice before any bounded dataset cutover claim
+
 ## Quick Start
 
 ### Build

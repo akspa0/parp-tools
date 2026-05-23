@@ -36,15 +36,20 @@ Headless tool ownership:
 Implement these files in this order unless a later step proves impossible without a local adjustment:
 
 1. `ValidationCaptureVariant.cs`, `ValidationCaptureTileRequest.cs`, `ValidationCaptureBatchPlan.cs`, `ValidationCaptureVariantResult.cs`, `ValidationCaptureBatchResult.cs`
-2. `ValidationCaptureScenePolicy.cs`, `ValidationCaptureVariantPolicy.cs`, `ValidationCaptureArtifactPolicy.cs`, `ValidationCaptureCameraInput.cs`, `ValidationCaptureCameraFrame.cs`, `ValidationCaptureCameraSolver.cs`
-3. `ValidationCaptureReadinessSnapshot.cs`, `ValidationCaptureReadinessState.cs`, `ValidationCaptureReadinessEvaluator.cs`, `ValidationCaptureArtifactInputs.cs`, `ValidationCaptureArtifactOutputs.cs`, `ValidationCaptureArtifactBuilder.cs`
-4. focused tests in `wow-viewer/tests/WowViewer.Core.Tests/`
-5. `Program.cs`, `ValidationCaptureCommand.cs`, `HeadlessValidationCaptureSession.cs`
-6. `HeadlessValidationCaptureRunner.cs`, `HeadlessValidationFramebufferExporter.cs`, `IValidationWorldSceneAdapter`, `ValidationWorldSceneSnapshot.cs`, `ValidationWorldScenePolicyApplier.cs`
+2. `ValidationCaptureReadinessState.cs` as the one pulled-forward Phase 2 support type because `ValidationCaptureVariantResult` depends on it
+3. `ValidationCaptureScenePolicy.cs`, `ValidationCaptureVariantPolicy.cs`, `ValidationCaptureArtifactPolicy.cs`, `ValidationCaptureCameraInput.cs`, `ValidationCaptureCameraFrame.cs`, `ValidationCaptureCameraSolver.cs`
+4. `ValidationCaptureReadinessSnapshot.cs`, `ValidationCaptureReadinessEvaluator.cs`, `ValidationCaptureArtifactInputs.cs`, `ValidationCaptureArtifactOutputs.cs`, `ValidationCaptureArtifactBuilder.cs`
+5. focused tests in `wow-viewer/tests/WowViewer.Core.Tests/`
+6. `Program.cs`, `ValidationCaptureCommand.cs`, `HeadlessValidationCaptureSession.cs`
+7. `IValidationWorldSceneAdapter` and `ValidationWorldSceneSnapshot.cs` as the minimal pulled-forward support contracts because the host runner already depends on them
+8. `HeadlessValidationCaptureRunner.cs`, `HeadlessValidationFramebufferExporter.cs`, `ValidationWorldScenePolicyApplier.cs`
 
 ## Non-Negotiable Invariants
 
-- Do not route the replacement lane through `wow-viewer/src/viewer/WowViewer.App/WorldGpuPreviewRenderer.cs`.
+- Do not route the replacement lane through `WowViewerWorldScenePlanner` or the default `WorldGpuPreviewRenderer` preview camera behavior.
+- The current bounded Phase 4 proof temporarily reuses the `WorldGpuPreviewRenderer` backend only through `IValidationWorldSceneAdapter`, driven directly by `ValidationCaptureCameraFrame` matrices and isolated from `WowViewerWorldScenePlanner`; this is still a temporary backend reuse rather than the long-range renderer target.
+- Do not inherit the current `WowViewerWorldScenePlanner` / `WorldGpuPreviewRenderer` camera behavior that frames one tile from far away like an oblique preview scene; the accepted target is GPU-accelerated rendering with MdxViewer-style world-view semantics.
+- For validation capture specifically, the first acceptable renderer behavior is the legacy deterministic viewer-style top-down capture framing from `BuildMkHarvestViewerValidationShot(...)` and `TryGetMkHarvestViewerValidationSceneMatrices(...)`, not the current preview renderer's fixed perspective preview camera.
 - Do not add viewer-shell or ImGui types to any shared-runtime contract under `WowViewer.Core.Runtime`.
 - Keep contract payloads on primitive values, byte buffers, hashes, counts, and validated strings; do not introduce UI-owned image objects into shared-runtime public shapes.
 - Do not widen scope from one bounded tile and four variants to map-wide batching before bounded parity exists.
@@ -223,6 +228,42 @@ public sealed class ValidationCaptureVariantResult
     public int SettledFrames { get; }
 
     public string? FailureReason { get; }
+}
+```
+
+## Proposed File: ValidationCaptureReadinessState.cs
+
+```csharp
+namespace WowViewer.Core.Runtime.World.Validation;
+
+public enum ValidationCaptureReadinessStatus
+{
+    Ready = 0,
+    WaitingForSceneContent = 1,
+    WaitingForFramebuffer = 2,
+    WaitingForFramebufferResolution = 3,
+    WaitingForWorldObjectLoads = 4,
+    WaitingForTargetTile = 5,
+    WaitingForSettledFrames = 6,
+    TimedOut = 7,
+}
+
+public readonly record struct ValidationCaptureReadinessState(
+    ValidationCaptureReadinessStatus Status,
+    bool IsReady,
+    bool TimedOut,
+    int FramesObserved,
+    int SettledFrames,
+    string? Detail)
+{
+    public static ValidationCaptureReadinessState Ready(int framesObserved, int settledFrames)
+        => new(
+            ValidationCaptureReadinessStatus.Ready,
+            IsReady: true,
+            TimedOut: false,
+            FramesObserved: framesObserved,
+            SettledFrames: settledFrames,
+            Detail: null);
 }
 ```
 
@@ -468,42 +509,6 @@ public readonly record struct ValidationCaptureReadinessSnapshot(
     int SettledFrames,
     int RequiredSettledFrames,
     int MaxFramesBeforeCapture);
-```
-
-## Proposed File: ValidationCaptureReadinessState.cs
-
-```csharp
-namespace WowViewer.Core.Runtime.World.Validation;
-
-public enum ValidationCaptureReadinessStatus
-{
-    Ready = 0,
-    WaitingForSceneContent = 1,
-    WaitingForFramebuffer = 2,
-    WaitingForFramebufferResolution = 3,
-    WaitingForWorldObjectLoads = 4,
-    WaitingForTargetTile = 5,
-    WaitingForSettledFrames = 6,
-    TimedOut = 7,
-}
-
-public readonly record struct ValidationCaptureReadinessState(
-    ValidationCaptureReadinessStatus Status,
-    bool IsReady,
-    bool TimedOut,
-    int FramesObserved,
-    int SettledFrames,
-    string? Detail)
-{
-    public static ValidationCaptureReadinessState Ready(int framesObserved, int settledFrames)
-        => new(
-            ValidationCaptureReadinessStatus.Ready,
-            IsReady: true,
-            TimedOut: false,
-            FramesObserved: framesObserved,
-            SettledFrames: settledFrames,
-            Detail: null);
-}
 ```
 
 ## Proposed File: ValidationCaptureReadinessEvaluator.cs
@@ -807,13 +812,14 @@ public static class ValidationWorldScenePolicyApplier
 - The readiness and artifact types stay shared-runtime and byte-buffer based so the replacement lane does not depend on the preview-only app renderer or on UI-owned image surfaces.
 - `HeadlessValidationCaptureRunner` and `ValidationCaptureCommand` stay static because existing tool command surfaces in this repo are predominantly static command classes or static runner entrypoints.
 - The scene adapter is the one place where an interface is preferred: it keeps the headless runner bound to the real renderer contract without coupling the shared runtime layer to one concrete app-shell implementation class.
+- `ValidationWorldSceneSnapshot` and `IValidationWorldSceneAdapter` are pulled forward before the concrete adapter implementation because the host runner already needs a stable renderer-agnostic surface.
 
 ## Phase Gates
 
 - Phase 1 is complete only when the shared-runtime models, policy types, and camera solver exist without any tool-project dependency and have focused tests where practical.
 - Phase 2 is complete only when readiness and artifact logic are proven in `WowViewer.Core.Tests` without invoking any real renderer host.
 - Phase 3 may create the tool project and runner shell, but it must stop short of inventing a preview substitute or a second fake renderer contract.
-- Phase 4 is the first point where a concrete real-renderer binding is allowed; keep all renderer-specific state behind `IValidationWorldSceneAdapter`.
+- Phase 4 is the first point where a concrete real-renderer binding is allowed; keep renderer-specific state behind `IValidationWorldSceneAdapter`, and keep any temporary backend reuse explicitly labeled as temporary until the long-range renderer seam replaces it.
 - Phase 5 starts only after the four-variant bounded tile proof exists on the staged proof builds and the shared artifact builder can reproduce the legacy artifact family.
 
 ## Deliberate Deferrals
