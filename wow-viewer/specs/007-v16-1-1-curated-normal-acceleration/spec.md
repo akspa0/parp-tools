@@ -86,10 +86,13 @@ bucket counts and reviewable reasons.
 1. **Given** a V16 Zarr store, **When** V16.1.1 curation runs, **Then** it can
    reject blank genesis tiles and low-signal mismatches before bucket
    assignment.
-2. **Given** a kept tile, **When** the manifest is written, **Then** it carries
+2. **Given** a tile whose WMO-driven loss gate wipes out most of the
+  trainable terrain area, **When** V16.1.1 curation runs, **Then** that tile
+  is rejected before it can dilute the normal-training pool.
+3. **Given** a kept tile, **When** the manifest is written, **Then** it carries
    enough metadata to explain why it was scored easy, medium, hard, or
    pathological.
-3. **Given** a short scouting run, **When** the trainer samples tiles,
+4. **Given** a short scouting run, **When** the trainer samples tiles,
    **Then** it can bias toward hard tiles without deleting easy examples from
    the available pool.
 
@@ -159,6 +162,9 @@ uncertainty.
 - **FR-004**: The curation layer MUST support a new normal-oriented profile that
   scores tiles for deformation richness, target coverage, and minimap-vs-target
   usefulness rather than only rejecting obvious garbage.
+- **FR-004A**: The curation layer MUST reject WMO-dominated tiles when the
+  active object-loss gate leaves too little trainable terrain coverage for the
+  normal lane to learn from usefully.
 - **FR-005**: The curation manifest MUST support at least four difficulty
   buckets: `easy`, `medium`, `hard`, and `pathological`.
 - **FR-006**: The normal trainer MUST be able to consume difficulty-bucketed

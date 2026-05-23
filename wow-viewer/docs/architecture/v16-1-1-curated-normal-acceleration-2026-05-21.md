@@ -86,6 +86,8 @@ The first V16.1.1 code slice is now real in `wow-viewer/data-harvester/`:
   - usefulness scoring fields
   - difficulty buckets
   - scouting recipe metadata
+  - trainable-coverage and WMO-loss evidence used to reject tiles whose WMO
+    loss gate wipes out most of the terrain-supervision area
 - `train_v16_1_normal.py` now consumes that metadata through:
   - `--bucket-sampling-profile v16_1_1_normal`
   - per-epoch bucket usage evidence
@@ -110,6 +112,9 @@ Focused smoke proof roots:
 - keep raw Zarr tensors as the supervised truth
 - validation PNGs remain review-only
 - keep object/liquid/invalid-terrain masking authoritative
+- reject WMO-dominated tiles in curation when the loss gate leaves too little
+  trainable terrain instead of hoping the trainer can recover from near-empty
+  supervision
 - do not widen into a multitask trainer again
 - do not restart the whole family under a new giant architecture name
 

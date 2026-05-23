@@ -170,6 +170,7 @@ uv run python -u scripts\train_v16_2_normal.py `
 ```
 
 Available V16.2 task wrappers:
+
 - `train_v16_2_normal.py` — normal prediction (first consumer of guidance channels)
 - `train_v16_2_height.py` — height prediction
 - `train_v16_2_holes.py` — hole mask prediction

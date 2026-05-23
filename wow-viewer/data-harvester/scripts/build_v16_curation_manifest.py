@@ -62,6 +62,30 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--minimap-edge-threshold", type=float, default=0.08)
     p.add_argument("--min-normal-edge-f1", type=float, default=0.10)
     p.add_argument("--min-edge-frac", type=float, default=0.01)
+    p.add_argument(
+        "--max-wmo-wipeout-trainable-cov",
+        type=float,
+        default=0.30,
+        help="Reject a tile when WMO-driven loss gating leaves at most this much trainable terrain.",
+    )
+    p.add_argument(
+        "--min-wmo-wipeout-modf-cov",
+        type=float,
+        default=0.25,
+        help="Require at least this much WMO footprint coverage before the WMO wipeout filter can reject a tile.",
+    )
+    p.add_argument(
+        "--min-wmo-wipeout-loss-gate-cov",
+        type=float,
+        default=0.35,
+        help="Require at least this much loss-gate coverage before the WMO wipeout filter can reject a tile.",
+    )
+    p.add_argument(
+        "--min-wmo-wipeout-share",
+        type=float,
+        default=0.75,
+        help="Require WMOs to dominate the loss gate by at least this fraction before the wipeout filter can reject a tile.",
+    )
     p.add_argument("--dilate-radius", type=int, default=2)
     p.add_argument("--worst-k", type=int, default=12)
     p.add_argument(
@@ -271,12 +295,23 @@ def _compute_row(
     mddf_mask = root["mddf_mask"][tile_id].astype(np.float32) if "mddf_mask" in root else np.zeros((257, 257), dtype=np.float32)
     modf_mask = root["modf_mask"][tile_id].astype(np.float32) if "modf_mask" in root else np.zeros((257, 257), dtype=np.float32)
     object_presence_257 = np.maximum(mddf_mask, modf_mask).astype(np.float32, copy=False)
+    if "object_precise_mask" in root:
+        loss_gate_mask_257 = root["object_precise_mask"][tile_id].astype(np.float32)
+    elif "object_filtered_mask" in root:
+        loss_gate_mask_257 = root["object_filtered_mask"][tile_id].astype(np.float32)
+    elif "object_mask" in root:
+        loss_gate_mask_257 = root["object_mask"][tile_id].astype(np.float32)
+    else:
+        loss_gate_mask_257 = np.zeros((257, 257), dtype=np.float32)
     object_cov = float(object_presence_257.mean())
     if object_cov <= 0.0:
         if "object_filtered_mask" in root:
             object_cov = float(root["object_filtered_mask"][tile_id].astype(np.float32).mean())
         elif "object_mask" in root:
             object_cov = float(root["object_mask"][tile_id].astype(np.float32).mean())
+    mddf_cov = float(np.clip(mddf_mask, 0.0, 1.0).mean())
+    modf_cov = float(np.clip(modf_mask, 0.0, 1.0).mean())
+    loss_gate_cov = float(np.clip(loss_gate_mask_257, 0.0, 1.0).mean())
 
     height_grad = crop_257_to_256(height_gradient_strength(height_257))
     terrain_detail_mean = float((0.65 * height_grad + 0.35 * relief).mean())
@@ -290,10 +325,15 @@ def _compute_row(
     liquid_mask_257 = np.pad(liquid_mask_256, ((0, 1), (0, 1)), mode="edge")
     terrain_valid_257 = normal_mask * (1.0 - np.clip(object_presence_257, 0.0, 1.0))
     terrain_valid_257 *= 1.0 - (0.85 * np.clip(liquid_mask_257, 0.0, 1.0))
+    trainable_257 = normal_mask * (1.0 - np.clip(loss_gate_mask_257, 0.0, 1.0))
+    trainable_257 *= 1.0 - (0.85 * np.clip(liquid_mask_257, 0.0, 1.0))
     if what_plate:
         terrain_valid_257[...] = 0.0
+        trainable_257[...] = 0.0
     terrain_valid_cov = float(_crop_257_to_256(terrain_valid_257).mean())
+    trainable_cov = float(_crop_257_to_256(trainable_257).mean())
     painted_signal_cov = float(max(alpha_cov, mcly_cov))
+    wmo_loss_share = float(modf_cov / max(loss_gate_cov, 1e-6)) if loss_gate_cov > 0.0 else 0.0
 
     metrics = {
         "build": build,
@@ -315,7 +355,12 @@ def _compute_row(
         "mcly_cov": mcly_cov,
         "liquid_cov": liquid_cov,
         "object_cov": object_cov,
+        "mddf_cov": mddf_cov,
+        "modf_cov": modf_cov,
+        "loss_gate_cov": loss_gate_cov,
+        "wmo_loss_share": wmo_loss_share,
         "terrain_valid_cov": terrain_valid_cov,
+        "trainable_cov": trainable_cov,
         "painted_signal_cov": painted_signal_cov,
         "terrain_detail_mean": terrain_detail_mean,
         "what_plate": bool(what_plate),
@@ -364,6 +409,14 @@ def _evaluate_profile(row: dict[str, Any], args: argparse.Namespace) -> tuple[bo
     if row["normal_edge_frac"] >= float(args.min_edge_frac) and row["minimap_edge_frac"] >= float(args.min_edge_frac):
         if row["normal_edge_f1"] < float(args.min_normal_edge_f1):
             return False, {"quality_score": 0.0, "reject_reason": "normal_minimap_edge_mismatch"}
+
+    if (
+        row["modf_cov"] >= float(args.min_wmo_wipeout_modf_cov)
+        and row["loss_gate_cov"] >= float(args.min_wmo_wipeout_loss_gate_cov)
+        and row["wmo_loss_share"] >= float(args.min_wmo_wipeout_share)
+        and row["trainable_cov"] <= float(args.max_wmo_wipeout_trainable_cov)
+    ):
+        return False, {"quality_score": 0.0, "reject_reason": "wmo_loss_wipeout_tile"}
 
     if args.profile == "normal_terrain_v16_1_1":
         payload = _score_row_v16_1_1(row)
@@ -508,6 +561,9 @@ def main() -> None:
         "minimap_gray_std_mean_kept": float(np.mean([row["minimap_gray_std"] for row in kept])) if kept else 0.0,
         "quality_score_mean_kept": float(np.mean([row["quality_score"] for row in kept])) if kept else 0.0,
         "usefulness_score_mean_kept": float(np.mean([row["usefulness_score"] for row in kept])) if kept else 0.0,
+        "trainable_cov_mean_kept": float(np.mean([row["trainable_cov"] for row in kept])) if kept else 0.0,
+        "loss_gate_cov_mean_kept": float(np.mean([row["loss_gate_cov"] for row in kept])) if kept else 0.0,
+        "modf_cov_mean_kept": float(np.mean([row["modf_cov"] for row in kept])) if kept else 0.0,
         "reject_reason_counts": {},
         "difficulty_bucket_counts": {},
         "difficulty_bucket_examples": {},
