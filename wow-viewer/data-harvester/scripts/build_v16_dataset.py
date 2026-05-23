@@ -1185,6 +1185,22 @@ def _validate_build_signals(build: str, output_path: Path, strict: bool = True) 
                 "Allowed, but verify source extraction if MH2O-native supervision is expected."
             )
 
+    # V16.2 renderer-truth signal validation
+    object_visibility_count = int(coverage.get("has_object_visibility_mask", 0))
+    no_object_count = int(coverage.get("has_no_object_minimap", 0))
+    if object_visibility_count > 0:
+        if object_visibility_count != no_object_count:
+            failures.append(
+                f"object_visibility_mask ({object_visibility_count}) and "
+                f"no_object_minimap ({no_object_count}) tile counts must match when either is >0"
+            )
+    if object_visibility_count > 0 or no_object_count > 0:
+        warnings_list.append(
+            f"Renderer-truth signals present: object_visibility_mask={object_visibility_count}/{tile_count}, "
+            f"no_object_minimap={no_object_count}/{tile_count}. "
+            "These are optional quality-of-training signals; coverage is expected to be partial until all builds are captured."
+        )
+
     payload = {
         "build": build,
         "tile_count": tile_count,
@@ -2929,6 +2945,134 @@ def cmd_patch_objects(args: argparse.Namespace) -> None:
             print(f"Signal validation report: {validation_path}")
 
 
+def cmd_generate_viewer_stubs(args: argparse.Namespace) -> None:
+    """Generate per-tile JSON stubs from V16 Zarr index for MdxViewer tile discovery."""
+    builds = args.builds or [args.build]
+    if not builds[0]:
+        print("ERROR: specify --build or --builds")
+        sys.exit(1)
+    output_root = _DATASET_ROOT
+
+    capture_root = Path(args.capture_root) if args.capture_root else _PROJECT_ROOT.parent / "output" / "tmp" / "mdxviewer_validation_smoke"
+
+    total = 0
+    for build in builds:
+        zarr_path = _DATASET_ROOT / f"{build}.zarr"
+        if not zarr_path.exists():
+            print(f"  SKIP: no store at {zarr_path}")
+            continue
+
+        index_path = zarr_path / "index.parquet"
+        if not index_path.exists():
+            print(f"  SKIP: no index.parquet at {index_path}")
+            continue
+
+        table = pq.read_table(str(index_path))
+        build_capture_dir = capture_root / build
+        dataset_dir = build_capture_dir / "dataset"
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+
+        written = 0
+        for i in range(table.num_rows):
+            map_name = str(table.column("map")[i].as_py())
+            tile_x = int(table.column("tile_x")[i].as_py())
+            tile_y = int(table.column("tile_y")[i].as_py())
+            if not map_name:
+                continue
+            tile_name = f"{map_name}_{tile_y}_{tile_x}"
+            json_path = dataset_dir / f"{tile_name}.json"
+            stub = {
+                "image": f"images/{tile_name}.png",
+                "depth": None,
+                "terrain_data": {
+                    "adt_tile": tile_name,
+                    "heights": [],
+                    "chunk_positions": None,
+                    "holes": None,
+                    "heightmap": None,
+                    "heightmap_local": None,
+                    "heightmap_global": None,
+                    "normalmap": None,
+                    "mccv_map": None,
+                    "shadow_maps": None,
+                    "shadow_bits": None,
+                    "shadow_analysis": None,
+                    "alpha_masks": None,
+                    "alpha_atlas": None,
+                    "liquid_mask": None,
+                    "liquid_height": None,
+                    "liquid_min": 0.0,
+                    "liquid_max": 0.0,
+                    "no_liquid_minimap": None,
+                    "no_mccv_minimap": None,
+                    "object_visibility_mask": None,
+                    "pm4_mask": None,
+                    "no_object_minimap": None,
+                    "terrain_only_minimap": None,
+                    "holes_mask": None,
+                    "area_id_map": None,
+                    "chunk_flags_map": None,
+                    "liquid_type_map": None,
+                    "dominant_effect_id_map": None,
+                    "textures": [],
+                    "chunk_layers": None,
+                    "liquids": None,
+                    "objects": [],
+                    "wdl_heights": None,
+                    "height_min": 0.0,
+                    "height_max": 0.0,
+                    "height_global_min": 0.0,
+                    "height_global_max": 0.0,
+                    "is_interleaved": False,
+                },
+            }
+            json_path.write_text(json.dumps(stub, indent=2), encoding="utf-8")
+            written += 1
+
+        print(f"  {build}: wrote {written} stubs to {dataset_dir}")
+        total += written
+
+    print(f"\nTotal: {total} stubs across {len(builds)} build(s)")
+    print(f"Capture root: {capture_root}")
+    print("Next: run MdxViewer with --validation-dataset-root pointing at the capture root,")
+    print("      or run the generate_all_renderer_truth_captures.bat batch file.")
+
+
+def cmd_patch_renderer_truth(args: argparse.Namespace) -> None:
+    """Patch renderer-truth PNGs into V16 Zarr stores."""
+    builds = args.builds or [args.build]
+    if not builds[0]:
+        print("ERROR: specify --build or --builds")
+        sys.exit(1)
+    capture_root = Path(args.capture_root) if args.capture_root else _PROJECT_ROOT.parent / "output" / "tmp" / "mdxviewer_validation_smoke"
+    patch_script = Path(__file__).parent / "patch_v16_renderer_truth.py"
+
+    if not patch_script.exists():
+        print(f"ERROR: patch script not found at {patch_script}")
+        sys.exit(1)
+
+    for build in builds:
+        capture_dir = capture_root / build
+        if not capture_dir.exists():
+            print(f"  SKIP: no capture directory at {capture_dir}")
+            continue
+        print(f"  Patching {build} from {capture_dir}")
+        cmd = [
+            sys.executable, str(patch_script),
+            "--build", build,
+            "--capture-dir", str(capture_dir),
+            "--dataset-root", str(_DATASET_ROOT),
+            "--allow-zarr-write",
+        ]
+        if args.no_backup:
+            cmd.append("--no-backup")
+        result = subprocess.run(cmd, capture_output=False)
+        if result.returncode != 0:
+            print(f"  ERROR: patch failed for {build} (exit {result.returncode})")
+        else:
+            print(f"  OK: {build} patched")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build V16 consolidated Zarr dataset")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2982,6 +3126,13 @@ def main() -> None:
     merge_p.add_argument("--batch-size", type=int, default=64, help="Array copy batch size during merge")
     merge_p.add_argument("--rebuild-existing", action="store_true", help="Overwrite existing merged output store")
 
+    stubs_p = sub.add_parser("generate-viewer-stubs", parents=[common], help="Generate per-tile JSON stubs from index.parquet for MdxViewer tile discovery")
+    stubs_p.add_argument("--capture-root", type=str, default=None, help="Output root for per-build dataset directories (default: output/tmp/mdxviewer_validation_smoke)")
+
+    patch_rt_p = sub.add_parser("patch-renderer-truth", parents=[common], help="Patch MdxViewer renderer-truth PNGs into V16 Zarr stores")
+    patch_rt_p.add_argument("--capture-root", type=str, default=None, help="Root directory containing per-build capture output (default: output/tmp/mdxviewer_validation_smoke)")
+    patch_rt_p.add_argument("--no-backup", action="store_true", help="Skip backing up index.parquet before patching")
+
     args = parser.parse_args()
 
     if args.command == "build":
@@ -2998,6 +3149,10 @@ def main() -> None:
         cmd_patch_objects(args)
     elif args.command == "merge-builds":
         cmd_merge_builds(args)
+    elif args.command == "generate-viewer-stubs":
+        cmd_generate_viewer_stubs(args)
+    elif args.command == "patch-renderer-truth":
+        cmd_patch_renderer_truth(args)
 
 
 if __name__ == "__main__":

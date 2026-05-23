@@ -152,10 +152,14 @@ public partial class ViewerApp
         public required bool PreviousWmosVisible { get; init; }
         public required bool PreviousDoodadsVisible { get; init; }
         public required bool PreviousWlLiquidsVisible { get; init; }
+        public required bool PreviousIgnoreTerrainHolesGlobally { get; init; }
+        public required bool PreviousIgnoreVlmTerrainHolesGlobally { get; init; }
         public required bool PreviousObjectPathFiltersEnabled { get; init; }
         public required float PreviousObjectStreamingRangeMultiplier { get; init; }
         public required float PreviousMaxVisibleMdxBoundsHeight { get; init; }
+        public required bool PreviousHideTerrainOccludedMdx { get; init; }
         public required bool PreviousEnableRuntimeWmoGroupVisibility { get; init; }
+        public required bool PreviousEnableRuntimeWmoGroupLiquids { get; init; }
         public required string DatasetRoot { get; init; }
         public required string MapName { get; init; }
         public required string OutputDirectory { get; init; }
@@ -562,6 +566,7 @@ public partial class ViewerApp
         if (_worldScene != null)
         {
             _worldScene.ShowWlLiquids = false;
+            _worldScene.EnableRuntimeWmoGroupLiquids = showTerrainLiquids;
             _worldScene.ShowWdlTerrain = !request.HideTerrain;
             _worldScene.ShowSky = !request.HideTerrain;
 
@@ -788,10 +793,14 @@ public partial class ViewerApp
             PreviousWmosVisible = _worldScene?.WmosVisible ?? true,
             PreviousDoodadsVisible = _worldScene?.DoodadsVisible ?? true,
             PreviousWlLiquidsVisible = _worldScene?.ShowWlLiquids ?? true,
+            PreviousIgnoreTerrainHolesGlobally = _terrainManager.IgnoreTerrainHolesGlobally,
+            PreviousIgnoreVlmTerrainHolesGlobally = _vlmTerrainManager?.IgnoreTerrainHolesGlobally ?? false,
             PreviousObjectPathFiltersEnabled = _worldScene?.ObjectPathFiltersEnabled ?? true,
             PreviousObjectStreamingRangeMultiplier = _worldScene?.ObjectStreamingRangeMultiplier ?? 0.5f,
             PreviousMaxVisibleMdxBoundsHeight = _worldScene?.MaxVisibleMdxBoundsHeight ?? 0f,
+            PreviousHideTerrainOccludedMdx = _worldScene?.HideTerrainOccludedMdx ?? false,
             PreviousEnableRuntimeWmoGroupVisibility = _worldScene?.EnableRuntimeWmoGroupVisibility ?? true,
+            PreviousEnableRuntimeWmoGroupLiquids = _worldScene?.EnableRuntimeWmoGroupLiquids ?? true,
             DatasetRoot = plan.DatasetRoot,
             MapName = plan.MapName,
             OutputDirectory = plan.OutputDirectory,
@@ -806,6 +815,9 @@ public partial class ViewerApp
         _hideUiChrome = true;
         _window.Size = new Vector2D<int>(requestedResolution, requestedResolution);
         _terrainManager.DetailedTileCountOverride = Math.Min(25, TerrainManager.MaxManualDetailedTileCount);
+        _terrainManager.IgnoreTerrainHolesGlobally = true;
+        if (_vlmTerrainManager != null)
+            _vlmTerrainManager.IgnoreTerrainHolesGlobally = true;
         terrainLighting.FogStart = MaxTerrainFogDistance * 0.75f;
         terrainLighting.FogEnd = MaxTerrainFogDistance;
         Vector3 validationLightDirection = BuildMkHarvestViewerValidationLightDirection(terrainLighting.LightDirection);
@@ -821,7 +833,9 @@ public partial class ViewerApp
             _worldScene.ObjectPathFiltersEnabled = false;
             _worldScene.ObjectStreamingRangeMultiplier = Math.Max(_worldScene.ObjectStreamingRangeMultiplier, 1.0f);
             _worldScene.MaxVisibleMdxBoundsHeight = MkHarvestViewerValidationMaxVisibleMdxBoundsHeight;
+            _worldScene.HideTerrainOccludedMdx = true;
             _worldScene.EnableRuntimeWmoGroupVisibility = false;
+            _worldScene.EnableRuntimeWmoGroupLiquids = true;
         }
 
         foreach (MkHarvestViewerValidationCaptureTile tile in plan.Tiles)
@@ -960,6 +974,7 @@ public partial class ViewerApp
             _terrainManager.Lighting.FogStart = batch.PreviousFogStart;
             _terrainManager.Lighting.FogEnd = batch.PreviousFogEnd;
             _terrainManager.TerrainVisible = batch.PreviousTerrainVisible;
+            _terrainManager.IgnoreTerrainHolesGlobally = batch.PreviousIgnoreTerrainHolesGlobally;
             if (_terrainManager.LiquidRenderer != null)
                 _terrainManager.LiquidRenderer.ShowLiquid = batch.PreviousTerrainLiquidsVisible;
             if (batch.PreviousTerrainLightDirectionOverride)
@@ -971,6 +986,7 @@ public partial class ViewerApp
         if (_vlmTerrainManager != null)
         {
             _vlmTerrainManager.TerrainVisible = batch.PreviousVlmTerrainVisible;
+            _vlmTerrainManager.IgnoreTerrainHolesGlobally = batch.PreviousIgnoreVlmTerrainHolesGlobally;
             if (_vlmTerrainManager.LiquidRenderer != null)
                 _vlmTerrainManager.LiquidRenderer.ShowLiquid = batch.PreviousVlmTerrainLiquidsVisible;
             if (batch.PreviousVlmLightDirectionOverride)
@@ -991,7 +1007,9 @@ public partial class ViewerApp
             _worldScene.ObjectPathFiltersEnabled = batch.PreviousObjectPathFiltersEnabled;
             _worldScene.ObjectStreamingRangeMultiplier = batch.PreviousObjectStreamingRangeMultiplier;
             _worldScene.MaxVisibleMdxBoundsHeight = batch.PreviousMaxVisibleMdxBoundsHeight;
+            _worldScene.HideTerrainOccludedMdx = batch.PreviousHideTerrainOccludedMdx;
             _worldScene.EnableRuntimeWmoGroupVisibility = batch.PreviousEnableRuntimeWmoGroupVisibility;
+            _worldScene.EnableRuntimeWmoGroupLiquids = batch.PreviousEnableRuntimeWmoGroupLiquids;
         }
 
         StitchMkHarvestViewerValidationOutputs(
@@ -1131,8 +1149,7 @@ public partial class ViewerApp
 
     private static bool ShouldPreferDirectObjectsOnlyMask(string buildVersion)
     {
-        int[]? buildTuple = ParseBuildTuple(buildVersion);
-        return buildTuple != null && buildTuple[0] == 0;
+        return false;
     }
 
     private static Image<L8>? TryBuildDirectObjectVisibilityMask(string tileName, int width, int height, string objectsOnlyOutputDirectory)

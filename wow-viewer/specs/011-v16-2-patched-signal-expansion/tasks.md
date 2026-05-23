@@ -50,12 +50,16 @@
 
 ## Phase 4: Cross-Build Validation Matrix
 
-- [ ] **4.1** Run the remaining real capture proofs
-  - `0_5_5_3494`
-  - `0_7_0_3694`
-  - `3_0_1_8303`
-  - `4_0_0_11927`
-- [ ] **4.2** Gate later base-store merge on matrix completion
+- [ ] **4.1** Generate per-tile viewer stubs for all builds
+  - run `build_v16_dataset.py generate-viewer-stubs --all`
+  - verify each build has `dataset/` with correct stub count
+- [ ] **4.2** Run MdxViewer capture batches for all builds
+  - run `generate_all_renderer_truth_captures.bat`
+  - verify primary/noobjects/objectsonly/noliquids PNGs exist per tile
+- [ ] **4.3** Patch renderer-truth into Zarr stores
+  - run `build_v16_dataset.py patch-renderer-truth --all`
+  - verify `object_visibility_mask` and `no_object_minimap` coverage in all 6 stores
+- [ ] **4.4** Gate later base-store merge on matrix completion
   - define when sidecar-only is sufficient
   - define when merge-back into canonical stores is allowed
 

@@ -116,12 +116,14 @@ class V16Dataset(Dataset):
             liquid_mask = np.zeros((256, 256), dtype=np.float32)
             liquid_height = np.zeros((256, 256), dtype=np.float32)
 
-        obj_mask = root["object_mask"][tile_id].astype(np.float32)
-        # Use filtered mask for terrain loss weighting (excludes trees, includes WMOs)
-        if "object_filtered_mask" in root:
-            weight = 1.0 - root["object_filtered_mask"][tile_id].astype(np.float32)
+        # Prefer precise mask (rasterized WMO mesh) over filtered (coarse AABB)
+        if "object_precise_mask" in root:
+            obj_mask = root["object_precise_mask"][tile_id].astype(np.float32)
+        elif "object_filtered_mask" in root:
+            obj_mask = root["object_filtered_mask"][tile_id].astype(np.float32)
         else:
-            weight = 1.0 - obj_mask
+            obj_mask = root["object_mask"][tile_id].astype(np.float32)
+        weight = 1.0 - obj_mask
 
         if has_instance and "object_instance_mask" in root:
             instance_mask = root["object_instance_mask"][tile_id].astype(np.int64)

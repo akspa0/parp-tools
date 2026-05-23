@@ -67,13 +67,15 @@ the original V16 contract, but they are not the recommended first surface for
 new renderer-truth guidance signals while cross-build validation is still
 incomplete.
 
-Current `V16.2` direction:
+Current `V16.2` direction (direct-patch, not sidecar):
 
-- keep the existing V16 stores intact
-- stage new renderer-truth signals into sidecar stores first
-- validate those sidecars across the intended build matrix before any merge-back
-- today the bounded real capture proof exists for `0_5_3_3368` and
-  `3_3_5_12340`, not the full six-build corpus
+- object mask data is patched directly into existing V16 Zarr stores
+- V16.2 training uses 7-channel input (3 minimap + 4 guidance channels)
+- renderer-truth arrays (`object_visibility_mask`, `no_object_minimap`) are
+  optional — training works without them using the guidance channels already
+  in the stores
+- renderer-truth patches are available for `0_5_3_3368` and `3_3_5_12340`
+  via `patch_v16_renderer_truth.py`
 
 Liquids only:
 
@@ -96,6 +98,118 @@ Coordinate repair only:
 ```powershell
 uv run python scripts/build_v16_dataset.py repair-index --build 3_3_5_12340
 ```
+
+## Renderer-Truth Capture And Patch (V16.2)
+
+The V16.2 dataset adds renderer-truth object masks and terrain-only minimaps
+from MdxViewer captures. This is a three-step pipeline.
+
+**Signal inventory — what the harvest stream vs the viewer produce:**
+
+| Signal | Source | In V16 Zarr? |
+|--------|--------|-------------|
+| height_257, normal_xyz, alpha_256, holes_16 | harvest stream (C#) | Yes |
+| liquid_mask, liquid_height, mcnk_flags_16 | harvest stream (C#) | Yes |
+| object_mask, object_precise_mask, object_filtered_mask | harvest stream (C#) | Yes |
+| mddf_mask, modf_mask, object_instance_mask | harvest stream (C#) | Yes |
+| minimap_rgb, shadow_mask | harvest stream (C#) | Yes |
+| mcly_texture_ids, mcly_layer_mask | harvest stream (C#) | Yes |
+| **object_visibility_mask** | **MdxViewer capture** | V16.2 only |
+| **no_object_minimap** | **MdxViewer capture** | V16.2 only |
+
+The harvest stream generates all terrain/texture/object signals. The viewer
+produces the renderer-truth overlay that the harvest cannot: the actual
+rendered minimap with objects visible vs hidden, and the diff mask.
+
+### Step 1: Generate per-tile stubs
+
+Reads `index.parquet` from each V16 Zarr store and writes per-tile JSON stubs
+that the viewer uses for tile discovery.
+
+```powershell
+cd i:\parp\parp-tools\wow-viewer\data-harvester
+uv run python scripts/build_v16_dataset.py generate-viewer-stubs `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927
+```
+
+Output: `output/tmp/mdxviewer_validation_smoke/<build>/dataset/<MapName>_<tileY>_<tileX>.json`
+
+### Step 2: Run MdxViewer captures
+
+Each viewer session renders all tiles for one build in multiple visibility
+families (primary, noobjects, objectsonly, noliquids) and outputs PNGs.
+
+**Required CLI parameters:**
+- `--game-path` — staged client root (`output/tmp/wowarchive-clients/<build>/World of Warcraft`)
+- `--build` — build version string (e.g. `0.5.3.3368`)
+- `--listfile` — community listfile for name resolution
+- `--world` — WDT path for the map to render (e.g. `World\Maps\Azeroth\Azeroth.wdt`)
+- `--validation-dataset-root` — directory containing `dataset/` with per-tile stubs
+- `--validation-output` — where to write captured PNGs
+- `--validation-resolution` — capture size in pixels (256-4096)
+- `--force-validation-regeneration` — re-capture even if outputs exist
+- `--exit-after-validation` — close viewer when batch completes
+
+**Run all 6 builds:**
+
+```powershell
+cd i:\parp\parp-tools\wow-viewer\data-harvester
+scripts\generate_all_renderer_truth_captures.bat
+```
+
+**Run one build manually:**
+
+```powershell
+$build = "3_3_5_12340"
+$version = "3.3.5.12340"
+$map = "Azeroth"
+$root = "i:\parp\parp-tools\output\tmp\mdxviewer_validation_smoke\$build"
+
+& "i:\parp\parp-tools\gillijimproject_refactor\src\MdxViewer\bin\Debug\net10.0-windows\ParpToolsWoWViewer.exe" `
+  --game-path "i:/parp/parp-tools/output/tmp/wowarchive-clients/$build/World of Warcraft" `
+  --build $version `
+  --listfile "i:/parp/parp-tools/gillijimproject_refactor/test_data/community-listfile-withcapitals.csv" `
+  --world "World\Maps\$map\$map.wdt" `
+  --validation-dataset-root $root `
+  --validation-output $root `
+  --validation-resolution 512 `
+  --force-validation-regeneration `
+  --exit-after-validation
+```
+
+**Note:** Different builds use different map names and WDT paths. Check the
+client's `World\Maps\` directory for available maps. Common maps:
+- `Azeroth` (Kalimdor + Eastern Kingdoms)
+- `Northrend`
+- `Expansion01` (Outland)
+
+### Step 3: Patch into Zarr stores
+
+Reads the captured PNGs and writes `object_visibility_mask` and
+`no_object_minimap` arrays into the V16 Zarr stores.
+
+```powershell
+uv run python scripts/build_v16_dataset.py patch-renderer-truth `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927
+```
+
+### One-shot batch (all three steps after stubs)
+
+```powershell
+cd i:\parp\parp-tools\wow-viewer\data-harvester
+uv run python scripts/build_v16_dataset.py generate-viewer-stubs --all
+scripts\generate_all_renderer_truth_captures.bat
+uv run python scripts/build_v16_dataset.py patch-renderer-truth --all
+```
+
+### Future: Zarr-native viewer
+
+The eventual goal is for the wow-viewer to read directly from V16 Zarr
+stores instead of game client archives. The Zarr stores are compact and
+fast compared to MPQ, and contain all the terrain/texture/object signals
+already harvested. The viewer would only need the game client for
+rendering (shaders, models, textures) while loading terrain geometry
+directly from the store.
 
 ## Validate Dataset Signals
 
@@ -417,6 +531,71 @@ uv run python -u scripts/train_v16_1_normal.py `
   --resume-checkpoint ../models/v16_1/normal/runs/v16_1_1_normal_curated_bs16_acc1_compile/checkpoints/v16_1_normal_last.pt
 ```
 
+## Train V16.2 (7-Channel Input)
+
+V16.2 extends V16.1.1 with 7-channel input. The extra 4 channels are guidance
+signals derived from the existing V16 store arrays:
+
+| Channel | Signal | Source |
+|---------|--------|--------|
+| 0-2 | minimap RGB | Existing V16 store |
+| 3 | object_filtered_mask | Existing V16 store (from patch-objects) |
+| 4 | terrain_valid_mask_257 | Computed: normal_mask × (1 - object_presence) × (1 - liquid) |
+| 5 | alpha_painted_256 | Computed: max(alpha channels 1-3) |
+| 6 | mcly_any_16 (upsampled) | Computed: any MCLY layer > 0.05 |
+
+No store mutation is needed — the guidance channels are computed on-the-fly
+from arrays already in the V16 stores.
+
+```powershell
+uv run python -u scripts/train_v16_2_normal.py `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --device auto `
+  --batch-size 8 `
+  --train-max-tiles 800 `
+  --train-epoch-tiles 256 `
+  --val-max-tiles 96 `
+  --epochs 256 `
+  --run-name v16_2_normal_all_builds_256ep
+```
+
+Resume:
+
+```powershell
+uv run python -u scripts/train_v16_2_normal.py `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --device auto `
+  --batch-size 8 `
+  --epochs 512 `
+  --resume-checkpoint ../models/v16_2/normal/runs/v16_2_normal_all_builds_256ep/checkpoints/v16_2_normal_last.pt `
+  --run-name v16_2_normal_resume
+```
+
+Available V16.2 task wrappers:
+
+- `train_v16_2_normal.py` — normal prediction (first consumer of guidance channels)
+- `train_v16_2_height.py` — height prediction
+- `train_v16_2_holes.py` — hole mask prediction
+- `train_v16_2_liquid.py` — liquid mask + type prediction
+- `train_v16_2_texcomp.py` — texture decomposition + recomposition
+
+### Patch Renderer-Truth Masks (Optional)
+
+If MdxViewer validation captures exist, you can patch renderer-truth arrays
+into the stores. This is optional — training works without them.
+
+```powershell
+uv run python scripts/patch_v16_renderer_truth.py `
+  --build 3_3_5_12340 `
+  --capture-dir ../../output/tmp/mdxviewer_validation_smoke/3_3_5_12340_Azeroth_30_48 `
+  --allow-zarr-write
+```
+
+This adds `object_visibility_mask` and `no_object_minimap` arrays to the store.
+The V16.2 dataset loader reads them automatically when present.
+
+V16.2 outputs go to `models/v16_2/<task>/runs/<run-name>/`.
+
 ## Key Outputs
 
 - dataset stores: `output/datasets/v16/<build>.zarr`
@@ -425,4 +604,5 @@ uv run python -u scripts/train_v16_1_normal.py `
 - curation manifests: `output/datasets/v16/curation/<run-name>/`
 - training runs: `models/v16/runs/<run-name>/`
 - V16.1 training runs: `models/v16_1/<task>/runs/<run-name>/`
+- V16.2 training runs: `models/v16_2/<task>/runs/<run-name>/`
 - curation evidence: `models/v16/runs/<run-name>/evidence/`

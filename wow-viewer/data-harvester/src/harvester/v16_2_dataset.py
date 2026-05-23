@@ -1,7 +1,22 @@
-"""V16.1 dataset helpers built on the V16 Zarr corpus contract.
+"""V16.2 dataset — extends V16.1.1 with richer object-guidance signals.
 
-This keeps the V16 storage format as the truth surface while exposing the extra
-signals needed by the split-and-link V16.1 model family.
+Reads from the same V16 Zarr stores but exposes additional channels that
+trainers can use for terrain-aware loss gating and guidance:
+
+  - object_filtered_mask (already in stores from patch-objects)
+  - terrain_valid_mask_257 (computed: normal_mask * (1 - object_presence) * (1 - liquid))
+  - object_visibility_mask (renderer-truth, optional, patched by V16.2 workflow)
+  - no_object_minimap (renderer-truth, optional, patched by V16.2 workflow)
+
+The V16.2 input tensor becomes 7 channels:
+  channels 0-2: minimap RGB (existing)
+  channel 3:    object_filtered_mask (terrain loss gate)
+  channel 4:    terrain_valid_mask_257 (composite terrain validity)
+  channel 5:    alpha_painted_256 (upsampled painted alpha)
+  channel 6:    mcly_any_16 (upsampled MCLY presence)
+
+When renderer-truth arrays are present, they are also returned as
+supervision targets for the normal lane.
 """
 
 from __future__ import annotations
@@ -37,7 +52,6 @@ def _flags_to_liquid_type(flags_16: np.ndarray) -> tuple[np.ndarray, np.ndarray]
       3 magma
       4 slime
     """
-
     flags = flags_16.astype(np.int32, copy=False)
     out = np.zeros(flags.shape, dtype=np.int64)
     valid = ((flags & 0x3C) != 0).astype(np.float32)
@@ -58,8 +72,27 @@ def _downsample_256_to_16(x: np.ndarray) -> np.ndarray:
     return reshaped.mean(axis=(1, 3)).astype(np.float32, copy=False)
 
 
-class V161Dataset(Dataset):
-    """Read V16 Zarr stores and expose richer signals for V16.1 trainers."""
+def _upsample_16_to_256(x: np.ndarray) -> np.ndarray:
+    """Upsample 16x16 to 256x256 via repeat."""
+    return np.repeat(np.repeat(x, 16, axis=0), 16, axis=1).astype(np.float32, copy=False)
+
+
+class V162Dataset(Dataset):
+    """Read V16 Zarr stores and expose V16.2 object-guidance signals.
+
+    The input tensor is 7 channels:
+      0-2: minimap RGB
+      3:   object_filtered_mask (terrain loss gate)
+      4:   terrain_valid_mask_257 (composite terrain validity)
+      5:   alpha_painted_256 (upsampled painted alpha)
+      6:   mcly_any_16 (upsampled MCLY presence)
+
+    Renderer-truth signals (object_visibility_mask, no_object_minimap) are
+    returned as separate supervision targets when present in the store.
+    """
+
+    # Number of extra guidance channels beyond the 3-channel minimap
+    GUIDANCE_CHANNELS = 4
 
     def __init__(
         self,
@@ -129,26 +162,35 @@ class V161Dataset(Dataset):
         root = self._stores[build]
         tile_id = int(entry["tile_id"])
 
+        # --- Core signals (same as V16.1.1) ---
         minimap = root["minimap_rgb"][tile_id].astype(np.float32) / 255.0
         height_raw = root["height_257"][tile_id].astype(np.float32)
         h_mean = float(entry["height_mean"])
         h_std = float(entry["height_std"]) + 1e-8
         height_norm = (height_raw - h_mean) / h_std
 
-        normals = root["normal_xyz"][tile_id].astype(np.float32) if bool(entry.get("has_normal_xyz", False)) else np.zeros((257, 257, 3), dtype=np.float32)
-        normal_mask = root["normal_mask"][tile_id].astype(np.float32) if bool(entry.get("has_normal_xyz", False)) and "normal_mask" in root else np.zeros((257, 257), dtype=np.float32)
-        alpha = root["alpha_256"][tile_id].astype(np.float32) if bool(entry.get("has_alpha_256", False)) else np.zeros((256, 256, 4), dtype=np.float32)
+        has_normals = bool(entry.get("has_normal_xyz", False))
+        has_alpha = bool(entry.get("has_alpha_256", False))
+        has_holes = bool(entry.get("has_holes_16", False))
+        has_liquid = bool(entry.get("has_liquid_mask", False))
+        has_instance = bool(entry.get("has_object_instance_mask", False))
+        has_mcly = bool(entry.get("has_mcly_texture_ids", False))
+
+        normals = root["normal_xyz"][tile_id].astype(np.float32) if has_normals and "normal_xyz" in root else np.zeros((257, 257, 3), dtype=np.float32)
+        normal_mask = root["normal_mask"][tile_id].astype(np.float32) if has_normals and "normal_mask" in root else np.zeros((257, 257), dtype=np.float32)
+        alpha = root["alpha_256"][tile_id].astype(np.float32) if has_alpha and "alpha_256" in root else np.zeros((256, 256, 4), dtype=np.float32)
         alpha = np.clip(alpha, 0.0, 1.0)
-        holes = root["holes_16"][tile_id].astype(np.float32) if bool(entry.get("has_holes_16", False)) else np.zeros((16, 16), dtype=np.float32)
-        liquid_mask = root["liquid_mask"][tile_id].astype(np.float32) if bool(entry.get("has_liquid_mask", False)) else np.zeros((256, 256), dtype=np.float32)
+        holes = root["holes_16"][tile_id].astype(np.float32) if has_holes and "holes_16" in root else np.zeros((16, 16), dtype=np.float32)
+        liquid_mask = root["liquid_mask"][tile_id].astype(np.float32) if has_liquid and "liquid_mask" in root else np.zeros((256, 256), dtype=np.float32)
         liquid_mask = np.clip(liquid_mask, 0.0, 1.0)
-        liquid_height = root["liquid_height"][tile_id].astype(np.float32) if bool(entry.get("has_liquid_height", False)) and "liquid_height" in root else np.zeros((256, 256), dtype=np.float32)
-        mcly_ids = root["mcly_texture_ids"][tile_id].astype(np.int64) if bool(entry.get("has_mcly_texture_ids", False)) and "mcly_texture_ids" in root else np.zeros((16, 16, 4), dtype=np.int64)
+        liquid_height = root["liquid_height"][tile_id].astype(np.float32) if has_liquid and "liquid_height" in root else np.zeros((256, 256), dtype=np.float32)
+        mcly_ids = root["mcly_texture_ids"][tile_id].astype(np.int64) if has_mcly and "mcly_texture_ids" in root else np.zeros((16, 16, 4), dtype=np.int64)
         mcly_ids = np.clip(mcly_ids, 0, 15)
-        mcly_mask = root["mcly_layer_mask"][tile_id].astype(np.float32) if bool(entry.get("has_mcly_layer_mask", False)) and "mcly_layer_mask" in root else np.zeros((16, 16, 4), dtype=np.float32)
+        mcly_mask = root["mcly_layer_mask"][tile_id].astype(np.float32) if has_mcly and "mcly_layer_mask" in root else np.zeros((16, 16, 4), dtype=np.float32)
         mcnk_flags_16 = root["mcnk_flags_16"][tile_id].astype(np.int32) if "mcnk_flags_16" in root else np.zeros((16, 16), dtype=np.int32)
         liquid_type_16, liquid_type_valid_16 = _flags_to_liquid_type(mcnk_flags_16)
 
+        # --- Object masks (existing in stores) ---
         # Prefer precise mask (rasterized WMO mesh) over filtered (coarse AABB)
         if "object_precise_mask" in root:
             object_filtered = root["object_precise_mask"][tile_id].astype(np.float32)
@@ -156,12 +198,11 @@ class V161Dataset(Dataset):
             object_filtered = root["object_filtered_mask"][tile_id].astype(np.float32)
         else:
             object_filtered = root["object_mask"][tile_id].astype(np.float32)
-        weight_257 = 1.0 - np.clip(object_filtered, 0.0, 1.0)
-        weight_256 = _crop_257_to_256(weight_257)
-        weight_16 = _downsample_256_to_16(weight_256)
         mddf_mask = root["mddf_mask"][tile_id].astype(np.float32) if "mddf_mask" in root else np.zeros((257, 257), dtype=np.float32)
         modf_mask = root["modf_mask"][tile_id].astype(np.float32) if "modf_mask" in root else np.zeros((257, 257), dtype=np.float32)
         object_presence_257 = np.maximum(mddf_mask, modf_mask).astype(np.float32, copy=False)
+
+        # --- Derived guidance channels (computed, not stored) ---
         alpha_painted_256 = alpha_painted(alpha).astype(np.float32, copy=False)
         alpha_painted_cov = float((alpha_painted_256 >= 0.05).mean())
         mcly_cov = mcly_painted_coverage(mcly_mask)
@@ -182,10 +223,44 @@ class V161Dataset(Dataset):
             terrain_valid_mask_257[...] = 0.0
         mcly_any_16 = (mcly_mask.max(axis=2) > 0.05).astype(np.float32, copy=False)
 
+        # --- V16.2: Build 7-channel input ---
+        # Channel 0-2: minimap RGB
+        # Channel 3:   object_filtered_mask (257->256 crop)
+        # Channel 4:   terrain_valid_mask_257 (257->256 crop)
+        # Channel 5:   alpha_painted_256 (already 256)
+        # Channel 6:   mcly_any_16 (upsampled to 256)
+        guidance_ch3 = _crop_257_to_256(object_filtered).astype(np.float32)
+        guidance_ch4 = _crop_257_to_256(terrain_valid_mask_257).astype(np.float32)
+        guidance_ch5 = alpha_painted_256.astype(np.float32)
+        guidance_ch6 = _upsample_16_to_256(mcly_any_16).astype(np.float32)
+
+        input_7ch = np.stack([
+            minimap[:, :, 0],
+            minimap[:, :, 1],
+            minimap[:, :, 2],
+            guidance_ch3,
+            guidance_ch4,
+            guidance_ch5,
+            guidance_ch6,
+        ], axis=-1)  # (256, 256, 7)
+
+        # --- Renderer-truth signals (optional, from V16.2 patch) ---
+        has_object_visibility = "object_visibility_mask" in root
+        has_no_object_minimap = "no_object_minimap" in root
+
+        object_visibility = root["object_visibility_mask"][tile_id].astype(np.float32) if has_object_visibility else np.zeros((256, 256), dtype=np.float32)
+        no_object_minimap = root["no_object_minimap"][tile_id].astype(np.float32) / 255.0 if has_no_object_minimap else np.zeros((256, 256, 3), dtype=np.float32)
+
+        # --- Weight tensors (same as V16.1.1) ---
+        weight_257 = 1.0 - np.clip(object_filtered, 0.0, 1.0)
+        weight_256 = _crop_257_to_256(weight_257)
+        weight_16 = _downsample_256_to_16(weight_256)
+
+        # --- Augmentation ---
         if self.augment:
             xform = int(self._rng.randint(0, 8))
             if xform & 1:
-                minimap = minimap[:, ::-1]
+                input_7ch = input_7ch[:, ::-1]
                 height_raw = height_raw[:, ::-1]
                 height_norm = height_norm[:, ::-1]
                 normals = normals[:, ::-1]
@@ -209,8 +284,10 @@ class V161Dataset(Dataset):
                 alpha_painted_256 = alpha_painted_256[:, ::-1]
                 terrain_valid_mask_257 = terrain_valid_mask_257[:, ::-1]
                 mcly_any_16 = mcly_any_16[:, ::-1]
+                object_visibility = object_visibility[:, ::-1]
+                no_object_minimap = no_object_minimap[:, ::-1]
             if xform & 2:
-                minimap = minimap[::-1]
+                input_7ch = input_7ch[::-1]
                 height_raw = height_raw[::-1]
                 height_norm = height_norm[::-1]
                 normals = normals[::-1]
@@ -234,8 +311,10 @@ class V161Dataset(Dataset):
                 alpha_painted_256 = alpha_painted_256[::-1]
                 terrain_valid_mask_257 = terrain_valid_mask_257[::-1]
                 mcly_any_16 = mcly_any_16[::-1]
+                object_visibility = object_visibility[::-1]
+                no_object_minimap = no_object_minimap[::-1]
             if xform & 4:
-                minimap = np.rot90(minimap, k=1)
+                input_7ch = np.rot90(input_7ch, k=1)
                 height_raw = np.rot90(height_raw, k=1)
                 height_norm = np.rot90(height_norm, k=1)
                 normals = np.rot90(normals, k=1)
@@ -261,50 +340,79 @@ class V161Dataset(Dataset):
                 alpha_painted_256 = np.rot90(alpha_painted_256, k=1)
                 terrain_valid_mask_257 = np.rot90(terrain_valid_mask_257, k=1)
                 mcly_any_16 = np.rot90(mcly_any_16, k=1)
+                object_visibility = np.rot90(object_visibility, k=1)
+                no_object_minimap = np.rot90(no_object_minimap, k=1)
 
-        return {
-            "input": torch.from_numpy(minimap.copy()).permute(2, 0, 1),
+        # --- Build output dict ---
+        result: dict[str, torch.Tensor | bool | int | str] = {
+            # 7-channel input
+            "input": torch.from_numpy(input_7ch.copy()).permute(2, 0, 1),  # (7, 256, 256)
+            # Core terrain targets
+            "height": torch.from_numpy(height_norm.copy()).unsqueeze(0),
             "height_raw": torch.from_numpy(height_raw.copy()).unsqueeze(0),
-            "height_norm": torch.from_numpy(height_norm.copy()).unsqueeze(0),
-            "height_mean": torch.tensor(h_mean, dtype=torch.float32),
-            "height_std": torch.tensor(h_std, dtype=torch.float32),
             "normals": torch.from_numpy(normals.copy()).permute(2, 0, 1),
             "normal_mask": torch.from_numpy(normal_mask.copy()).unsqueeze(0),
             "alpha": torch.from_numpy(alpha.copy()).permute(2, 0, 1),
             "holes": torch.from_numpy(holes.copy()).unsqueeze(0),
-            "liquid_mask": torch.from_numpy(liquid_mask.copy()).unsqueeze(0),
+            "liquid": torch.from_numpy(liquid_mask.copy()).unsqueeze(0),
             "liquid_height": torch.from_numpy(liquid_height.copy()).unsqueeze(0),
-            "liquid_type_16": torch.from_numpy(liquid_type_16.copy()).long(),
-            "liquid_type_valid_16": torch.from_numpy(liquid_type_valid_16.copy()).unsqueeze(0),
-            "mcly_ids": torch.from_numpy(mcly_ids.copy()).long(),
-            "mcly_mask": torch.from_numpy(mcly_mask.copy()),
-            "mcnk_flags_16": torch.from_numpy(mcnk_flags_16.copy()).long(),
+            "liquid_type": torch.from_numpy(liquid_type_16.copy()).unsqueeze(0).long(),
+            "liquid_type_valid": torch.from_numpy(liquid_type_valid_16.copy()).unsqueeze(0),
+            # Loss weighting
             "weight_257": torch.from_numpy(weight_257.copy()).unsqueeze(0),
             "weight_256": torch.from_numpy(weight_256.copy()).unsqueeze(0),
             "weight_16": torch.from_numpy(weight_16.copy()).unsqueeze(0),
+            # Object signals
+            "object_filtered_mask": torch.from_numpy(object_filtered.copy()).unsqueeze(0),
             "mddf_mask": torch.from_numpy(mddf_mask.copy()).unsqueeze(0),
             "modf_mask": torch.from_numpy(modf_mask.copy()).unsqueeze(0),
             "object_presence_257": torch.from_numpy(object_presence_257.copy()).unsqueeze(0),
-            "alpha_painted_256": torch.from_numpy(alpha_painted_256.copy()).unsqueeze(0),
+            # V16.2 guidance channels (also returned as separate tensors for inspection)
+            "guidance_ch3_object_filtered": torch.from_numpy(guidance_ch3.copy()).unsqueeze(0),
+            "guidance_ch4_terrain_valid": torch.from_numpy(guidance_ch4.copy()).unsqueeze(0),
+            "guidance_ch5_alpha_painted": torch.from_numpy(guidance_ch5.copy()).unsqueeze(0),
+            "guidance_ch6_mcly_any": torch.from_numpy(guidance_ch6.copy()).unsqueeze(0),
+            # Texture decomposition
+            "mcly_ids": torch.from_numpy(mcly_ids.copy()).long(),
+            "mcly_mask": torch.from_numpy(mcly_mask.copy()),
+            "mcnk_flags_16": torch.from_numpy(mcnk_flags_16.copy()),
+            # V16.2 renderer-truth (optional supervision targets)
+            "object_visibility_mask": torch.from_numpy(object_visibility.copy()).unsqueeze(0),
+            "no_object_minimap": torch.from_numpy(no_object_minimap.copy()).permute(2, 0, 1),
+            # Collation-compatible derived tensors (needed by loss functions)
             "terrain_valid_mask_257": torch.from_numpy(terrain_valid_mask_257.copy()).unsqueeze(0),
-            "mcly_any_16": torch.from_numpy(mcly_any_16.copy()).unsqueeze(0),
-            "what_plate_flag": torch.tensor(what_plate_flag, dtype=torch.float32),
-            "alpha_painted_cov": torch.tensor(alpha_painted_cov, dtype=torch.float32),
-            "mcly_cov": torch.tensor(mcly_cov, dtype=torch.float32),
-            "curation_quality_score": torch.tensor(float(entry.get("_curation_quality_score", 0.0) or 0.0), dtype=torch.float32),
-            "curation_usefulness_score": torch.tensor(float(entry.get("_curation_usefulness_score", 0.0) or 0.0), dtype=torch.float32),
-            "curation_difficulty_score": torch.tensor(float(entry.get("_curation_difficulty_score", 0.0) or 0.0), dtype=torch.float32),
-            "curation_difficulty_rank": torch.tensor(int(entry.get("_curation_difficulty_rank", -1)), dtype=torch.int64),
-            "curation_difficulty_bucket": str(entry.get("_curation_difficulty_bucket", "")),
-            "has_normals": bool(entry.get("has_normal_xyz", False)),
-            "has_alpha": bool(entry.get("has_alpha_256", False)),
-            "has_holes": bool(entry.get("has_holes_16", False)),
-            "has_liquid": bool(entry.get("has_liquid_mask", False)),
-            "has_mcly": bool(entry.get("has_mcly_texture_ids", False)),
-            "meta_build": str(entry.get("build") or build),
+            "alpha_painted_256": torch.from_numpy(alpha_painted_256.copy()).unsqueeze(0),
+            "mcly_any_16": torch.from_numpy(mcly_any_16.copy()).unsqueeze(0).float(),
+            "alpha_painted_cov": torch.tensor([alpha_painted_cov], dtype=torch.float32),
+            "mcly_cov": torch.tensor([mcly_cov], dtype=torch.float32),
+            "what_plate_flag": torch.tensor([what_plate_flag], dtype=torch.float32),
+            "liquid_mask": torch.from_numpy(liquid_mask.copy()).unsqueeze(0),
+            # Presence flags
+            "has_normals": has_normals,
+            "has_alpha": has_alpha,
+            "has_holes": has_holes,
+            "has_liquid": has_liquid,
+            "has_instance": has_instance,
+            "has_mcly": has_mcly,
+            "has_object_visibility": has_object_visibility,
+            "has_no_object_minimap": has_no_object_minimap,
+            # Metadata
+            "meta_build": str(entry.get("build", build)),
             "meta_store": str(build),
             "meta_map": str(entry.get("map", "")),
-            "meta_tile_id": tile_id,
+            "meta_tile_id": int(tile_id),
             "meta_tile_x": int(entry.get("tile_x") if entry.get("tile_x") is not None else -1),
             "meta_tile_y": int(entry.get("tile_y") if entry.get("tile_y") is not None else -1),
+            "meta_height_mean": h_mean,
+            "meta_height_std": float(entry["height_std"]),
+            "meta_what_plate_flag": what_plate_flag,
         }
+
+        # Curation metadata if available
+        if "_curation_difficulty_bucket" in entry:
+            result["_curation_difficulty_bucket"] = str(entry["_curation_difficulty_bucket"])
+            result["_curation_usefulness_score"] = float(entry.get("_curation_usefulness_score", 0.0))
+            result["_curation_difficulty_score"] = float(entry.get("_curation_difficulty_score", 0.0))
+            result["_curation_difficulty_rank"] = int(entry.get("_curation_difficulty_rank", -1))
+
+        return result

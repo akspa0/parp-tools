@@ -73,6 +73,7 @@ public class WorldAssetManager : IDisposable
     private readonly ReplaceableTextureResolver? _texResolver;
     private string? _buildVersion;
     private bool _enableRuntimeWmoGroupVisibility = true;
+    private bool _enableRuntimeWmoGroupLiquids = true;
 
     // ── Shared caches ──────────────────────────────────────────────────
 
@@ -160,6 +161,21 @@ public class WorldAssetManager : IDisposable
 
             foreach (var renderer in _wmoModels.Values)
                 renderer?.SetRuntimeGroupVisibilityEnabled(value);
+        }
+    }
+
+    public bool EnableRuntimeWmoGroupLiquids
+    {
+        get => _enableRuntimeWmoGroupLiquids;
+        set
+        {
+            if (_enableRuntimeWmoGroupLiquids == value)
+                return;
+
+            _enableRuntimeWmoGroupLiquids = value;
+
+            foreach (var renderer in _wmoModels.Values)
+                renderer?.SetRuntimeGroupLiquidsVisible(value);
         }
     }
 
@@ -1212,10 +1228,12 @@ public class WorldAssetManager : IDisposable
                 return null;
 
             string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
-            return new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion,
+            WmoRenderer renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion,
                 deferInitialDoodadLoads: true,
                 deferInitialMaterialTextureLoads: true,
                 enableRuntimeGroupVisibility: _enableRuntimeWmoGroupVisibility);
+            renderer.SetRuntimeGroupLiquidsVisible(_enableRuntimeWmoGroupLiquids);
+            return renderer;
         }
         catch (Exception ex)
         {

@@ -168,6 +168,22 @@
         - stage renderer-truth and richer precise-mask signals into separate
           sidecar stores first
         - only consider merge-back after broader cross-build validation exists
+      - renderer-truth capture pipeline is now integrated into the V16 build:
+        - `build_v16_dataset.py generate-viewer-stubs` reads index.parquet and
+          writes per-tile JSON stubs for MdxViewer tile discovery
+        - `generate_all_renderer_truth_captures.bat` runs MdxViewer batches per build
+        - `build_v16_dataset.py patch-renderer-truth` patches captured PNGs into Zarr
+        - all 20,627 stubs generated across 6 builds as of 2026-05-22
+      - MdxViewer CLI requires: --game-path, --build, --listfile, --world,
+        --validation-dataset-root, --validation-output, --validation-resolution,
+        --force-validation-regeneration, --exit-after-validation
+      - harvest stream produces all core terrain signals (height, normals, alpha,
+        holes, liquid, object masks, minimap, shadow, MCLY/MCAL, placements)
+      - viewer produces only renderer-truth overlay: object_visibility_mask and
+        no_object_minimap (diff of primary vs noobjects capture families)
+      - future direction: wow-viewer reads terrain geometry from Zarr stores
+        directly instead of game client archives (Zarr is compact and fast
+        compared to MPQ)
   - remaining open issue: the shared harvester-side raw WMO/MODF preview is
     still approximate; the precise renderer-truth path currently lives in
     MdxViewer validation capture artifacts instead

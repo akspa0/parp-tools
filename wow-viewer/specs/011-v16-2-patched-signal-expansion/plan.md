@@ -87,12 +87,37 @@ one representative build.
 **Goal**: Prove the renderer-truth signal lane on the intended client matrix
 before any later merge of sidecar signals back into the base V16 stores.
 
-### Step 4.1 — Run the remaining real capture proofs
-Extend the same bounded validation capture path across `0_5_5_3494`,
-`0_7_0_3694`, `3_0_1_8303`, and `4_0_0_11927`.
-**Validation**: a six-build coverage matrix exists with concrete artifact roots.
+### Step 4.1 — Generate per-tile viewer stubs for all builds
+Run `build_v16_dataset.py generate-viewer-stubs` to read `index.parquet` from
+each V16 store and write per-tile JSON stubs that MdxViewer uses for tile
+discovery.
+**Validation**: each build has a `dataset/` directory with one JSON stub per
+tile in its capture root.
 
-### Step 4.2 — Gate merge-on-success semantics
+### Step 4.2 — Run MdxViewer capture batches for all builds
+Run `generate_all_renderer_truth_captures.bat` (or individual viewer sessions)
+to render all tiles across all 6 builds in multiple visibility families.
+
+Viewer CLI requires: `--game-path`, `--build`, `--listfile`, `--world`,
+`--validation-dataset-root`, `--validation-output`, `--validation-resolution`,
+`--force-validation-regeneration`, `--exit-after-validation`.
+
+Per build, the viewer renders 4 families: primary, noliquids, noobjects,
+objectsonly. After capture, it generates `object_visibility_mask` (diff of
+primary vs noobjects) and `no_object_minimap` (copy of noobjects capture).
+
+**Validation**: each build capture directory contains primary, noobjects,
+objectsonly, and noliquids PNGs for all tiles, plus `images/` directory
+with object visibility masks and no-object minimaps.
+
+### Step 4.3 — Patch renderer-truth into Zarr stores
+Run `build_v16_dataset.py patch-renderer-truth` to read captured PNGs and write
+`object_visibility_mask` and `no_object_minimap` arrays into the V16 Zarr
+stores.
+**Validation**: all 6 stores report non-zero coverage for
+`object_visibility_mask` and `no_object_minimap` in `signal_validation.json`.
+
+### Step 4.4 — Gate later base-store merge on matrix completion
 Define that any future merge of sidecar signals into the canonical base stores
 depends on the build matrix being complete enough for the targeted model lane.
 **Validation**: the plan distinguishes sidecar proof from later base-store

@@ -90,6 +90,7 @@ public class WmoRenderer : ISceneRenderer
     private int _activeDoodadSet = 0;
     private bool _doodadsVisible = true;
     private bool _runtimeDoodadsVisible = true;
+    private bool _runtimeGroupLiquidsVisible = true;
     private const int DeferredDoodadLoadsPerFrame = 1;
     private const double DeferredDoodadLoadBudgetMs = 2.0;
     private const float GroupVisibilityBoundsPadding = 32f;
@@ -365,6 +366,11 @@ public class WmoRenderer : ISceneRenderer
         _enableRuntimeGroupVisibility = enabled;
     }
 
+    public void SetRuntimeGroupLiquidsVisible(bool visible)
+    {
+        _runtimeGroupLiquidsVisible = visible;
+    }
+
     public void ToggleWireframe()
     {
         _wireframe = !_wireframe;
@@ -603,7 +609,7 @@ public class WmoRenderer : ISceneRenderer
         }
 
         // Pass 3: Liquid surfaces (semi-transparent, before transparent WMO geometry)
-        if (renderTransparentPass && _liquidMeshes.Count > 0)
+        if (renderTransparentPass && _runtimeGroupLiquidsVisible && _liquidMeshes.Count > 0)
         {
             _gl.UseProgram(_liquidShader);
             _gl.UniformMatrix4(_uLiqModel, 1, false, (float*)&model);

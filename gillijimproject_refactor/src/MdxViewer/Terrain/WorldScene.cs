@@ -738,6 +738,7 @@ public class WorldScene : ISceneRenderer
     private float _lastHoverPickFogEnd = 1500f;
     private float _objectStreamingRangeMultiplier = 0.5f;
     private float _maxVisibleMdxBoundsHeight;
+    private bool _hideTerrainOccludedMdx;
     private WorldObjectVisibilityProfile _objectVisibilityProfile = WorldObjectVisibilityProfile.Performance;
 
     // Frustum culling
@@ -1047,10 +1048,20 @@ public class WorldScene : ISceneRenderer
         get => _maxVisibleMdxBoundsHeight;
         set => _maxVisibleMdxBoundsHeight = value > 0f ? value : 0f;
     }
+    public bool HideTerrainOccludedMdx
+    {
+        get => _hideTerrainOccludedMdx;
+        set => _hideTerrainOccludedMdx = value;
+    }
     public bool EnableRuntimeWmoGroupVisibility
     {
         get => _assets.EnableRuntimeWmoGroupVisibility;
         set => _assets.EnableRuntimeWmoGroupVisibility = value;
+    }
+    public bool EnableRuntimeWmoGroupLiquids
+    {
+        get => _assets.EnableRuntimeWmoGroupLiquids;
+        set => _assets.EnableRuntimeWmoGroupLiquids = value;
     }
     public WorldObjectVisibilityProfile ObjectVisibilityProfile
     {
@@ -7763,11 +7774,120 @@ public class WorldScene : ISceneRenderer
         if (ShouldHideObjectInstanceByUniqueId(inst))
             return true;
 
-        if (_maxVisibleMdxBoundsHeight <= 0f)
+        if (_maxVisibleMdxBoundsHeight > 0f)
+        {
+            float boundsHeight = MathF.Abs(inst.BoundsMax.Z - inst.BoundsMin.Z);
+            if (float.IsFinite(boundsHeight) && boundsHeight > _maxVisibleMdxBoundsHeight)
+                return true;
+        }
+
+        return _hideTerrainOccludedMdx && IsMdxFullyOccludedByTerrain(inst);
+    }
+
+    private bool IsMdxFullyOccludedByTerrain(in ObjectInstance inst)
+    {
+        if (!TrySampleLoadedTerrainHeight(inst.PlacementPosition.X, inst.PlacementPosition.Y, out float terrainHeight))
             return false;
 
-        float boundsHeight = MathF.Abs(inst.BoundsMax.Z - inst.BoundsMin.Z);
-        return float.IsFinite(boundsHeight) && boundsHeight > _maxVisibleMdxBoundsHeight;
+        float objectTop = MathF.Max(inst.BoundsMin.Z, inst.BoundsMax.Z);
+        if (!float.IsFinite(objectTop))
+            return false;
+
+        const float terrainOcclusionMargin = 1.0f;
+        return terrainHeight >= objectTop + terrainOcclusionMargin;
+    }
+
+    private bool TrySampleLoadedTerrainHeight(float worldX, float worldY, out float height)
+    {
+        height = 0f;
+
+        return TrySampleLoadedTerrainHeight(_terrainManager, _terrainManager.Renderer, worldX, worldY, out height);
+    }
+
+    private static bool TrySampleLoadedTerrainHeight(TerrainManager terrainManager, TerrainRenderer renderer, float worldX, float worldY, out float height)
+    {
+        height = 0f;
+
+        TerrainRenderer.TerrainChunkInfo? chunkInfo = renderer.GetChunkInfoAt(worldX, worldY);
+        if (!chunkInfo.HasValue)
+            return false;
+
+        if (!terrainManager.TryGetTileLoadResult(chunkInfo.Value.TileX, chunkInfo.Value.TileY, out TileLoadResult tile))
+            return false;
+
+        TerrainChunkData? chunk = tile.Chunks.FirstOrDefault(c => c.ChunkX == chunkInfo.Value.ChunkX && c.ChunkY == chunkInfo.Value.ChunkY);
+        if (chunk == null || chunk.Heights == null || chunk.Heights.Length < 145)
+            return false;
+
+        float localX = chunk.WorldPosition.Y - worldY;
+        float localY = chunk.WorldPosition.X - worldX;
+        localX = Math.Clamp(localX, 0f, WoWConstants.ChunkSize);
+        localY = Math.Clamp(localY, 0f, WoWConstants.ChunkSize);
+        height = SampleHeightOuterGrid(chunk, localX, localY);
+        return true;
+    }
+
+    private static float SampleHeightOuterGrid(TerrainChunkData chunk, float localX, float localY)
+    {
+        if (chunk.Heights == null || chunk.Heights.Length < 145)
+            return chunk.WorldPosition.Z;
+
+        float cellSize = WoWConstants.ChunkSize / 16f;
+        float subCellSize = cellSize / 8f;
+
+        Span<float> grid = stackalloc float[9 * 9];
+        grid.Clear();
+
+        for (int i = 0; i < 145; i++)
+        {
+            GetChunkVertexPosition(i, out int row, out int col, out bool isInner);
+            if (isInner)
+                continue;
+
+            int gridY = row / 2;
+            if ((uint)gridY >= 9u || (uint)col >= 9u)
+                continue;
+
+            grid[(gridY * 9) + col] = chunk.Heights[i];
+        }
+
+        float gridX = localX / subCellSize;
+        float gridYFloat = localY / subCellSize;
+        int ix = Math.Clamp((int)MathF.Floor(gridX), 0, 7);
+        int iy = Math.Clamp((int)MathF.Floor(gridYFloat), 0, 7);
+        float fx = Math.Clamp(gridX - ix, 0f, 1f);
+        float fy = Math.Clamp(gridYFloat - iy, 0f, 1f);
+
+        float h00 = grid[(iy * 9) + ix];
+        float h10 = grid[(iy * 9) + (ix + 1)];
+        float h01 = grid[((iy + 1) * 9) + ix];
+        float h11 = grid[((iy + 1) * 9) + (ix + 1)];
+
+        float h0 = h00 + ((h10 - h00) * fx);
+        float h1 = h01 + ((h11 - h01) * fx);
+        return h0 + ((h1 - h0) * fy);
+    }
+
+    private static void GetChunkVertexPosition(int index, out int row, out int col, out bool isInner)
+    {
+        int remaining = index;
+        row = 0;
+        col = 0;
+        isInner = false;
+
+        for (int currentRow = 0; currentRow < 17; currentRow++)
+        {
+            int rowSize = (currentRow % 2 == 0) ? 9 : 8;
+            if (remaining < rowSize)
+            {
+                row = currentRow;
+                col = remaining;
+                isInner = (currentRow % 2 == 1);
+                return;
+            }
+
+            remaining -= rowSize;
+        }
     }
 
     private static (int tileX, int tileY) ComputeTileCoordinates(Vector3 rendererPosition)

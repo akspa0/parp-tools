@@ -56,8 +56,8 @@ Renderer-truth upgrade truth is narrower than the base V16 corpus truth:
   - `output/tmp/mdxviewer_validation_smoke_fix_wmo/`
   - `output/tmp/mdxviewer_validation_smoke_heightfilter/`
 - do not treat those richer signals as six-build-validated yet
-- the active `V16.2` direction is sidecar signal stores first, then optional
-  merge-back only after the broader build-validation matrix exists
+- V16.2 training is now the active lane — 7-channel input (3 minimap + 4 guidance) with object mask data patched directly into existing V16 stores
+- first V16.2 normal run is in progress on all 6 builds
 
 ## Quick Start
 
@@ -136,6 +136,47 @@ current 16 GB card, treat `16 x 1` as the preferred starting point when VRAM
 headroom is available; keep `8 x 1` as the safer fallback before dropping to
 `4 x 2`, `2 x 4`, or `1 x 8`. The shared trainer can now also probe a batch
 ladder automatically with `--target-vram-gb` plus `--autotune-batch-size`.
+
+### V16.2 Training (7-Channel Input)
+
+V16.2 extends V16.1.1 with 7-channel input (3 minimap RGB + 4 guidance channels:
+object_filtered_mask, terrain_valid_mask, alpha_painted, mcly_any). Object mask
+data is patched directly into existing V16 stores — no sidecar files.
+
+```powershell
+cd .\wow-viewer\data-harvester
+
+uv run python -u scripts\train_v16_2_normal.py `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --device auto `
+  --batch-size 8 `
+  --train-max-tiles 800 `
+  --train-epoch-tiles 256 `
+  --val-max-tiles 96 `
+  --epochs 256 `
+  --run-name v16_2_normal_all_builds_256ep
+```
+
+Resume:
+
+```powershell
+uv run python -u scripts\train_v16_2_normal.py `
+  --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
+  --device auto `
+  --batch-size 8 `
+  --epochs 512 `
+  --resume-checkpoint ..\models\v16_2\normal\runs\v16_2_normal_all_builds_256ep\checkpoints\v16_2_normal_last.pt `
+  --run-name v16_2_normal_resume
+```
+
+Available V16.2 task wrappers:
+- `train_v16_2_normal.py` — normal prediction (first consumer of guidance channels)
+- `train_v16_2_height.py` — height prediction
+- `train_v16_2_holes.py` — hole mask prediction
+- `train_v16_2_liquid.py` — liquid mask + type prediction
+- `train_v16_2_texcomp.py` — texture decomposition + recomposition
+
+Outputs go to `models/v16_2/<task>/runs/<run-name>/`.
 
 For V16.1.x normal training, resume uses `--resume-checkpoint`. The older
 `--resume-from auto` flow is only on `train_v16.py`.

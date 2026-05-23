@@ -88,6 +88,16 @@
     this lane can claim broad coverage
   - active `V16.2` direction is sidecar-first instead of mutating finalized
     base V16 stores immediately
+  - renderer-truth capture pipeline is now integrated into the V16 build:
+    - `build_v16_dataset.py generate-viewer-stubs` generates per-tile JSON stubs
+    - `generate_all_renderer_truth_captures.bat` runs MdxViewer capture batches
+    - `build_v16_dataset.py patch-renderer-truth` patches PNGs into Zarr stores
+    - all 20,627 stubs generated across 6 builds (2026-05-22)
+    - MdxViewer CLI requires: --game-path, --build, --listfile, --world,
+      --validation-dataset-root, --validation-output, --validation-resolution,
+      --force-validation-regeneration, --exit-after-validation
+  - harvest stream produces all core terrain signals; viewer produces only
+    renderer-truth overlay (object_visibility_mask, no_object_minimap)
 
 ### V16 Training Surfaces
 - `V16Dataset` is the live loader.

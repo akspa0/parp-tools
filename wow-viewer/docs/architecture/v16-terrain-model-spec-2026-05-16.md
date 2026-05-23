@@ -107,13 +107,24 @@ wow-viewer/output/datasets/v16/
 The next dataset-contract lane for richer object guidance is `V16.2`, tracked
 under `wow-viewer/specs/011-v16-2-patched-signal-expansion/`.
 
-Current transition rule:
+Current V16.2 approach (direct-patch, not sidecar):
 
-- keep finalized V16 base stores intact
-- stage renderer-truth and richer precise-mask signals into sidecar stores first
-- consume those sidecars through loader metadata overlay semantics
-- only consider merge-back into canonical base stores after broader cross-build
-  renderer-truth validation exists
+- object mask data is patched directly into existing V16 Zarr stores
+- V16.2 training uses 7-channel input (3 minimap + 4 guidance channels)
+- guidance channels are computed on-the-fly from existing store arrays:
+  channel 3 = object_filtered_mask, channel 4 = terrain_valid_mask_257,
+  channel 5 = alpha_painted_256, channel 6 = mcly_any_16 (upsampled)
+- renderer-truth arrays (`object_visibility_mask`, `no_object_minimap`) are
+  optional — training works without them
+- the renderer-truth capture pipeline is now integrated into the V16 build:
+  1. `build_v16_dataset.py generate-viewer-stubs` reads index.parquet and
+     writes per-tile JSON stubs for MdxViewer tile discovery
+  2. `generate_all_renderer_truth_captures.bat` runs MdxViewer batches per build
+  3. `build_v16_dataset.py patch-renderer-truth` patches captured PNGs into
+     the Zarr stores
+- first V16.2 normal run is in progress on all 6 builds
+- V16.2 code lives in `src/harvester/v16_2_dataset.py`, `v16_2_models.py`,
+  and `scripts/train_v16_2_*.py`
 
 ## Index Contract
 

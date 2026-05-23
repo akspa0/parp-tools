@@ -943,7 +943,7 @@ return synthetic_rgb.clip(0.0, 1.0)
 | liquid | Conv(64,32,3)→ReLU→Upsample(256)→Conv(32,1,1)→Sigmoid | (B,1,256,256) |
 | mcly | AdaptiveAvgPool(16)→Conv(64,64,3)→ReLU→Conv(64,64,1) | (B,64,16,16)→reshape(4,16,16,16) logits |
 
-#### V16.1 Independent Models (5 models, shared backbone architecture)
+#### V16.1 Independent Models (5 models, shared backbone architecture) — LANDED
 
 All share `_UNetBackbone`:
 
@@ -972,6 +972,12 @@ Output: d0 (B,32,256,256), pooled16 = AdaptiveAvgPool(d0, (16,16)) → (B,32,16,
 | V161HolesModel | Conv(32,16,3)→ReLU→AdaptiveAvgPool(16)→Conv(16,1,1)→Sigmoid | (B,1,16,16) |
 | V161LiquidModel | mask_head: Conv(32,32,3)→ReLU→Conv(32,1,1)→Sigmoid; type_head: Conv(32,32,3)→ReLU→Conv(32,5,1) | mask (B,1,256,256) + type (B,5,16,16) |
 | V161TexcompModel | alpha_head: Conv(32,32,3)→ReLU→Conv(32,4,1)→Sigmoid; mask_head: Conv(32,32,3)→ReLU→Conv(32,4,1)→Sigmoid; ids_head: Conv(32,64,3)→ReLU→Conv(64,64,1)→view(4,16,16,16) | alpha (B,4,256,256) + mask (B,4,16,16) + ids (B,4,16,16,16) |
+
+#### V16.1 Helper Functions (New)
+
+**`compute_compositor_weights_torch(alpha_pack)`:** Converts raw 4-layer MCAL alpha pack into normalized compositor weights using the hierarchical formula: `w0=1-a1, w1=a1*(1-a2), w2=a1*a2*(1-a3), w3=a1*a2*a3*(1-a4)`. Normalized by total weight.
+
+**`recompose_from_mcly_alpha(pred_alpha, pred_ids, pred_mask)`:** Reconstructs terrain RGB from predicted texture IDs + alpha pack + layer mask using a 16-entry texture palette (`_TEXTURE_PALETTE_16`). Used by V16.1 texcomp model for recomposition loss.
 
 ### 5.5 Loss Functions (Exact Formulas)
 
@@ -1024,31 +1030,75 @@ loss = alpha_loss + 0.35 * mask_loss + 0.25 * id_loss + 0.5 * recompose_loss
 
 ### 5.6 Dataset Loading
 
-#### Normalization
-- `minimap_rgb`: `/ 255.0` to float32 [0, 1]
-- `height_raw`: `(height_raw - h_mean) / (h_std + 1e-8)` (per-tile z-score)
-- `alpha_256`: clip [0, 1]
-- `liquid_mask`: clip [0, 1]
+#### V16 Dataset (`V16Dataset`)
+- Source: Zarr v3 stores with Parquet index
+- Split: deterministic train/val via `np.random.RandomState(seed).permutation(n)`
+- Normalization: minimap `/255.0`, height z-scored per-tile, alpha/liquid clipped [0,1]
+- Augmentation: random 3-bit transform (hflip, vflip, rot90) with correct normal vector transforms
 
-#### Augmentation (Train Only)
+#### V16.1 Dataset (`V161Dataset`) — LANDED
 
-Random 3-bit transform (8 possibilities):
-- Bit 0: horizontal flip — flip all spatial dims on axis=1; flip normal_x sign
-- Bit 1: vertical flip — flip all spatial dims on axis=0; flip normal_y sign
-- Bit 2: 90° rotation — `np.rot90(k=1)` all spatial; swap normal_x = old_ny, normal_y = -old_nx
+Enriched dataset for V16.1 trainers with curation manifest integration:
 
-#### Terrain-Valid Mask
+**Curation integration:** Loads curation index, filters tiles by `keep` flag, attaches per-tile quality/usefulness/difficulty scores and bucket labels.
+
+**MCNK flag processing:** `_flags_to_liquid_type()` converts MCNK flags to coarse liquid types: 0=none, 1=water (0x04), 2=ocean (0x08), 3=magma (0x10), 4=slime (0x20).
+
+**Object mask integration:** Reads `object_filtered_mask`, `mddf_mask`, `modf_mask`, computes `object_presence_257 = max(mddf, modf)`.
+
+**Terrain valid mask:**
 ```
 terrain_valid_mask = normal_mask * (1 - clip(object_presence, 0, 1)) * (1 - clip(liquid_mask * 0.85, 0, 1))
 zeroed entirely if what_plate_flag > 0.5
 ```
 
-#### What-Plate Flag
-```
-is_blank = (|height|_max ≤ 1e-6 AND height_std ≤ 1e-6 AND alpha_cov ≤ 1e-4 AND mcly_cov ≤ 1e-4 AND liquid_cov ≤ 1e-4 AND object_cov ≤ 1e-4)
-```
+**Weight maps at 3 scales:**
+- `weight_257 = 1.0 - clip(object_filtered_mask, 0, 1)` (terrain-valid weight)
+- `weight_256 = crop_257_to_256(weight_257)`
+- `weight_16 = downsample_256_to_16(weight_256)`
+
+**Output keys (35+ tensors):** `input`, `height_raw`, `height_norm`, `height_mean`, `height_std`, `normals`, `normal_mask`, `alpha`, `holes`, `liquid_mask`, `liquid_height`, `liquid_type_16`, `liquid_type_valid_16`, `mcly_ids`, `mcly_mask`, `mcnk_flags_16`, `weight_257/256/16`, `mddf_mask`, `modf_mask`, `object_presence_257`, `alpha_painted_256`, `terrain_valid_mask_257`, `mcly_any_16`, `what_plate_flag`, `curation_*` scores, `has_normals`, `has_alpha`, and more.
 
 ### 5.7 Training Configuration
+
+#### V16.1 Training System — LANDED
+
+The V16.1 training system (`train_v16_1_common.py`, 1534 lines) is a shared infrastructure for all 5 task-specific trainers.
+
+**Task Registry (`TaskSpec` dataclass):**
+```python
+TASKS = {
+    "height":  TaskSpec(V161HeightModel,  _height_loss,  save_height_preview),
+    "normal":  TaskSpec(V161NormalModel,  _normal_loss,  save_normal_preview),
+    "holes":   TaskSpec(V161HolesModel,   _holes_loss,   save_holes_preview),
+    "liquid":  TaskSpec(V161LiquidModel,  _liquid_loss,  save_liquid_preview),
+    "texcomp": TaskSpec(V161TexcompModel, _texcomp_loss, save_texcomp_preview),
+}
+```
+
+**Loss functions (exact formulas):**
+
+Height: `masked_mean(|pred - target|, weight_257)`
+
+Normal: `cosine + 0.35 * vec_l1 + 0.15 * nz_l2` with terrain-valid masking, liquid weighting, object instance weighting, and hard-region boosting via `--normal-detail-boost`.
+
+Holes: `binary_cross_entropy(pred, target, reduction="none")` masked by `weight_16`.
+
+Liquid: `weighted_l1(mask) + 0.5 * cross_entropy(type)` masked by `type_valid * weight_16`.
+
+Texcomp: `alpha_L1 + 0.35 * mask_BCE + 0.25 * id_CE + 0.5 * recompose_L1`.
+
+**Batch autotuning:** Probes a ladder of batch sizes against `--target-vram-gb`, runs forward+backward per candidate, picks largest that fits. Safety factor: 0.85 with `torch.compile`, 0.92 without.
+
+**Deterministic epoch sampler:** Custom PyTorch `Sampler` with per-epoch subset rotation, build-balanced sampling, difficulty-bucket weighted sampling, and JSONL audit logging.
+
+**Difficulty bucket profiles:**
+```python
+PROFILES = {
+    "uniform": {"easy": 1.0, "medium": 1.0, "hard": 1.0, "pathological": 1.0},
+    "v16_1_1_normal": {"easy": 1.0, "medium": 1.75, "hard": 3.5, "pathological": 1.25},
+}
+```
 
 #### Optimizer
 ```python
@@ -1562,7 +1612,29 @@ world = (worldX, worldY, localUp)
 | MSLK.RefIndex → MSUR | Partial (primary target, but mismatches) |
 | MPRR.Value1 → MPRL or MSVT | Partial (mixed-mode hypothesis) |
 
-### 13.6 Open Research Questions (Ranked by Impact)
+### 13.6 Region-Aware Object Grouping (New)
+
+A 3-phase grouping system (`Pm4RegionObjectGrouper`) decomposes PM4 data into a hierarchical object model:
+
+**Phase 1: Region grouping** — Group tiles by `MSHD.Field04` value. Each distinct Field04 value (excluding 1 = empty stub) becomes a `Pm4Region` containing all tiles sharing that region ID.
+
+**Phase 2: Object grouping** — Within each region, group MSUR surfaces by CK24 value (derived from `MSUR.PackedParams >> 8 & 0x00FF_FFFF`). Each CK24 group becomes a `Pm4RegionObject` with multi-tile tracking.
+
+**Phase 3: Sub-object partitioning** — Within each object, partition surfaces by `MSLK.GroupObjectId` using Union-Find. Each partition becomes a `Pm4SubObject` containing surfaces, position refs, bounds, and average height.
+
+**Output types:**
+- `Pm4SubObject`: surfaces + position refs + bounds + average height
+- `Pm4RegionObject`: CK24 object containing multiple sub-objects
+- `Pm4Region`: all objects sharing an MSHD.Field04 value
+- `Pm4RegionGroupingReport`: full map-directory analysis report
+
+**Position decoding** (`Pm4ObjectPositionDecoder`):
+- Resolves MPRL positions to world coordinates
+- Two-pass approach: first via GroupObjectId linking, then fallback via direct surface-to-MSLK matching
+- Heading computation: mean heading from MPRL entries using circular mean (sin/cos averaging)
+- Uses existing `Pm4PlacementMath.ResolveCoordinateMode` and `ResolvePlacementSolution` infrastructure
+
+### 13.7 Open Research Questions (Ranked by Impact)
 
 1. MSCN coordinate transform: Is swapped-XY correct?
 2. CK24ObjectId identity mapping: Real UniqueID or sub-identifier?
@@ -1575,7 +1647,7 @@ world = (worldX, worldY, localUp)
 9. Cross-region merge rules
 10. MDOS.buildingIndex link type
 
-### 13.7 Cross-Tile Statistics (Development Corpus)
+### 13.8 Cross-Tile Statistics (Development Corpus)
 
 - 616 total PM4 files, 502 non-empty tiles
 - 227 distinct Field04 values (regions)
@@ -1781,6 +1853,23 @@ Ensures terrain surfaces never have downward-facing normals.
 | 3.0.1 (8303) | LichKingStrict | 0x4\|0x80 | MH2O+MCLQ |
 | 3.3.5 (12340) | LichKingStrict | 0x4\|0x80 | MH2O+MCLQ |
 | 4.0.x | Cataclysm400 | 0x4\|0x80 | MH2O only |
+
+### 15.14 Liquid Chunk Edge Stitching (New)
+
+After liquid chunks are built in `LkToAlphaConverter`, adjacent chunk edges are stitched for seamless water surfaces:
+
+**Horizontal stitching:** For each pair `(cx, cy)` and `(cx+1, cy)`, average the rightmost column of the left chunk with the leftmost column of the right chunk (9×9 grid stride).
+
+**Vertical stitching:** For each pair `(cx, cy)` and `(cx, cy+1)`, average the bottom row of the top chunk with the top row of the bottom chunk.
+
+After stitching, `MinHeight` and `MaxHeight` are recomputed on both chunks. Only stitches chunks where `Heights.Length >= 81` (full 9×9 grid present).
+
+### 15.15 WMO External Group File Loading (New)
+
+When no embedded MOGP groups exist in a WMO root file but `ReportedGroupCount > 0`, the reader loads external group files:
+- Path pattern: `{baseName}_{groupIndex:D3}.wmo` (zero-padded 3-digit index)
+- Loading: tries asset reader callback first, falls back to filesystem
+- Enables footprint projection for split-group WMOs common in some WoW builds
 
 ---
 
@@ -2347,22 +2436,73 @@ For each placement:
 
 **PaintSoftCircle:** Iterate square of `radius * 1.5`, `alpha = 1.0 - min(1.0, dist / radius)`, `buffer[y,x] = max(buffer[y,x], alpha)`.
 
+#### Model-Bound Doodad Filtering (New)
+
+When `assetReader` is available, the system loads actual `.m2`/`.mdx` model files at build time to read their bounding boxes:
+
+```
+DoodadModelMetadata { BoundsMin, BoundsMax }  // cached per model path
+
+For each doodad:
+  1. Load model metadata via assetReader (results cached in doodadModelCache)
+  2. Compute localSize = |BoundsMax - BoundsMin|
+  3. scale = Max(placement.Scale, 0.01)
+  4. planarExtentX = localSize.X * scale
+  5. planarExtentY = localSize.Z * scale
+  6. planarMaxExtent = max(planarExtentX, planarExtentY)
+  7. planarArea = planarExtentX * planarExtentY
+  8. height = localSize.Y * scale
+
+  isSmallClutter = planarMaxExtent ≤ 3.0  OR  planarArea ≤ 6.0
+  isTallClutter  = height ≥ 8.0  AND  height ≥ planarMaxExtent × 1.35
+
+  include if NOT isSmallClutter AND NOT isTallClutter
+```
+
+When `assetReader` is null, falls back to simple heuristic: `include if placement.Scale > 0.35`.
+
 ### 25.6 WMO (MODF) Mask Computation — Three-Tier Fallback
 
 **Tier 1: Exact WMO mesh footprint** (when assetReader available):
-1. Load WmoRenderDocument
-2. Resolve transform via `ResolveWmoPlacementTransform()` (tests 3 candidates, scores by MODF BB match)
-3. For each group mesh triangle: transform vertices, project to tile, clip (Sutherland-Hodgman), rasterize
+1. Load WmoRenderDocument (with wmoCache for dedup)
+2. Resolve transform via `ResolveWmoPlacementTransform()`:
+   - Tests 3 candidate transforms: translation-only, legacy with Z-flip, legacy without Z-flip
+   - Score: transform MODF-declared BoundsMin/BoundsMax through each candidate, sum absolute differences vs ADT-reported bounds. Lowest error wins.
+3. Resolve projection mode via `TryResolveProjectionMode()`:
+   - Tests 4 `TileProjectionMode` values (WorldXZ, OriginZX, WorldXY, OriginYX)
+   - Score: count of in-range sample points + penalty for out-of-range. Highest in-range count wins.
+4. For each WMO group mesh (loaded via `WmoRenderDocumentReader` with external group file support):
+   - For each triangle (i0, i1, i2):
+     - Transform vertices through placement transform
+     - Project to tile pixels via `TryProjectToTilePixel` (auto-resolves projection mode)
+     - Clip triangle to tile bounds [0, 256] × [0, 256] via Sutherland-Hodgman polygon clipping
+     - Rasterize clipped polygon via edge-function triangle rasterization
+
+**Sutherland-Hodgman clipping:** Generic polygon clipper against 4 edges (X≥0, X≤256, Y≥0, Y≤256). Each edge test: compute intersection point, add to output polygon if inside.
+
+**Edge-function rasterization:** For each pixel (x, y) in triangle bounding box:
+```
+sampleX = x + 0.5, sampleY = y + 0.5   (pixel center)
+w0 = EdgeFunction(v1, v2, sample)
+w1 = EdgeFunction(v2, v0, sample)
+w2 = EdgeFunction(v0, v1, sample)
+if (w0 ≥ 0 ∧ w1 ≥ 0 ∧ w2 ≥ 0) ∨ (w0 ≤ 0 ∧ w1 ≤ 0 ∧ w2 ≤ 0):
+    buffer[y, x] = max(buffer[y, x], value)
+```
+Edge function: `EdgeFunction(ax, ay, bx, by, px, py) = (px - ax) * (by - ay) - (py - ay) * (bx - ax)`
+
+**WMO render document assembly:** When no embedded MOGP groups exist, loads external group files `{basename}_{groupIndex:D3}.wmo` via asset reader or filesystem. This enables footprint projection for split-group WMOs common in some WoW builds.
 
 **Tier 2: Chunk-coverage fallback** (MCRF/MCRW per-chunk references):
-1. Build `WmoPlacementChunkCoverage16[placementCount, 16, 16]` from MCRF/MCRW
-2. For each covered chunk: paint 16×16-pixel rect
+1. Build `WmoPlacementChunkCoverage16[placementCount, 16, 16]` from MCRW (Cata+) or MCRF subchunks
+2. Auto-detect 0-based vs 1-based reference indexing
+3. For each covered chunk: paint 16×16-pixel rect
 
 **Tier 3: Bounding-box fallback** (MODF bounds):
-1. Project all 8 BB corners to tile pixels (auto-resolves projection mode)
-2. Compute pixel AABB, paint rect + soft rect (2-pixel pad)
-
-**Triangle rasterization:** Edge function test at pixel centers. Sutherland-Hodgman clipping against tile bounds [0, 256] × [0, 256].
+1. Validate bounds: min.X < max.X AND min.Y < max.Y AND not NaN
+2. Project all 8 BB corners to tile pixels (auto-resolves projection mode)
+3. Compute pixel AABB, paint rect + soft rect (2-pixel pad)
+4. If invalid bounds: fallback to circle at placement center, radius=3.0
 
 ### 25.7 Object Filtered Mask — What Gets Excluded
 
@@ -2376,12 +2516,14 @@ For each placement:
   ([\/_\-.]|$)/
 ```
 
-**Size-based exclusion** (when model metadata available):
+**Size-based exclusion** (when model metadata available from assetReader):
 - Small clutter: `planarMaxExtent ≤ 3.0` OR `planarArea ≤ 6.0`
 - Tall clutter: `height ≥ 8.0` AND `height ≥ planarMaxExtent × 1.35`
-- Small doodads: `scale ≤ 0.35` (when no model metadata)
+- Small doodads: `scale ≤ 0.35` (when no model metadata available)
 
 **WMOs are ALWAYS included** — they are buildings and man-made structures.
+
+**Doodad model metadata loading:** Both `.mdx` (legacy) and `.m2` (modern) formats are supported. MDX uses `MdxSummaryReader` for bounds; M2 uses `M2ModelReader`. Results are cached per model path in `doodadModelCache`.
 
 ### 25.8 Shadow Residual Mask
 
