@@ -70,6 +70,10 @@ internal static class ValidationCaptureCommand
         string noObjectsDirectory = Path.Combine(outputRoot, "noobjects");
         string objectsOnlyDirectory = Path.Combine(outputRoot, "objectsonly");
 
+        // Match the engine's row-major convention: engine TileX is Row (tileY), engine TileY is Column (tileX).
+        int engineTileX = tileY.Value;
+        int engineTileY = tileX.Value;
+
         ValidationCaptureBatchPlan batchPlan = new(
             datasetRoot,
             mapName,
@@ -80,10 +84,10 @@ internal static class ValidationCaptureCommand
             resolution,
             buildLabel,
             [
-                new ValidationCaptureTileRequest(tileName, tileX.Value, tileY.Value, ValidationCaptureVariant.Primary, Path.Combine(primaryDirectory, $"{tileName}_viewer_validation.png")),
-                new ValidationCaptureTileRequest(tileName, tileX.Value, tileY.Value, ValidationCaptureVariant.NoLiquids, Path.Combine(noLiquidsDirectory, $"{tileName}_viewer_validation.png")),
-                new ValidationCaptureTileRequest(tileName, tileX.Value, tileY.Value, ValidationCaptureVariant.NoObjects, Path.Combine(noObjectsDirectory, $"{tileName}_viewer_validation.png")),
-                new ValidationCaptureTileRequest(tileName, tileX.Value, tileY.Value, ValidationCaptureVariant.ObjectsOnly, Path.Combine(objectsOnlyDirectory, $"{tileName}_viewer_validation.png")),
+                new ValidationCaptureTileRequest(tileName, engineTileX, engineTileY, ValidationCaptureVariant.Primary, Path.Combine(primaryDirectory, $"{tileName}_viewer_validation.png")),
+                new ValidationCaptureTileRequest(tileName, engineTileX, engineTileY, ValidationCaptureVariant.NoLiquids, Path.Combine(noLiquidsDirectory, $"{tileName}_viewer_validation.png")),
+                new ValidationCaptureTileRequest(tileName, engineTileX, engineTileY, ValidationCaptureVariant.NoObjects, Path.Combine(noObjectsDirectory, $"{tileName}_viewer_validation.png")),
+                new ValidationCaptureTileRequest(tileName, engineTileX, engineTileY, ValidationCaptureVariant.ObjectsOnly, Path.Combine(objectsOnlyDirectory, $"{tileName}_viewer_validation.png")),
             ]);
 
         ValidationCaptureArtifactPolicy artifactPolicy = new(

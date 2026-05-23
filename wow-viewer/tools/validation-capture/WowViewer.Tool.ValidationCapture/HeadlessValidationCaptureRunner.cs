@@ -73,10 +73,10 @@ internal static class HeadlessValidationCaptureRunner
                 float aspectRatio = sceneSnapshot.FramebufferHeight > 0
                     ? sceneSnapshot.FramebufferWidth / (float)sceneSnapshot.FramebufferHeight
                     : 1f;
-                float groundHeight = sceneAdapter.ResolveGroundHeight(request.TileX, request.TileY);
+                float groundHeight = sceneAdapter.ResolveGroundHeight(request.TileY, request.TileX);
                 ValidationCaptureCameraFrame cameraFrame = ValidationCaptureCameraSolver.SolveTopDown(new ValidationCaptureCameraInput(
-                    request.TileX,
-                    request.TileY,
+                    TileX: request.TileY, // Column
+                    TileY: request.TileX, // Row
                     aspectRatio,
                     groundHeight,
                     DefaultMapOrigin,

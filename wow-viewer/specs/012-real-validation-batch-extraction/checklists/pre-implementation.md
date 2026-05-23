@@ -62,10 +62,10 @@
 
 ### Phase 5 Exit
 
-- [ ] The shared artifact builder emits `object_visibility_mask` and `no_object_minimap`
-- [ ] The build-policy branch is still explicit for early versus later builds
-- [ ] The bounded dataset workflow can consume the new artifacts without invoking `MdxViewer`
-- [ ] Continuity docs state what remains legacy-only after the bounded cutover
+- [x] The shared artifact builder emits `object_visibility_mask` and `no_object_minimap`
+- [x] The build-policy branch is still explicit for early versus later builds
+- [x] The bounded dataset workflow can consume the new artifacts without invoking `MdxViewer`
+- [x] Continuity docs state what remains legacy-only after the bounded cutover
 
 ## Reference Proof Surface
 

@@ -97,3 +97,14 @@ Execution rule:
   - [x] update continuity docs or memory when the bounded proof exists
   - [x] update the architecture note and Speckit status to reflect completed Phase 4 proof on both bounded anchors
   - [x] state what remains legacy-only after the first slice
+
+## Phase 6: Real 3D WMO and MDX Mesh Rendering
+
+- [x] **6.1** Define cache helper types and add caching fields to `WorldGpuPreviewRenderer.cs`.
+- [x] **6.2** Port WMO shader and MDX shader source code into `WorldGpuPreviewRenderer.cs` and compile them during shader initialization.
+- [x] **6.3** Port the WMO asset loading and buffer compilation from `WmoGpuPreviewRenderer` into `WorldGpuPreviewRenderer.cs`.
+- [x] **6.4** Port the MDX asset loading, skinning setup, and buffer compilation from `MdxGpuPreviewRenderer` into `WorldGpuPreviewRenderer.cs`.
+- [x] **6.5** Update the rendering loop `RenderCore` in `WorldGpuPreviewRenderer.cs` to render visible WMO and MDX opaque command buffers.
+- [x] **6.6** Sort and render transparent WMO and MDX command buffers during the transparent pass in `RenderCore`.
+- [x] **6.7** Run automated capture command on bounded proof anchors (`Azeroth_30_48` on `3_3_5_12340`) and verify that `_object_visibility_mask.png` and `_no_objects.png` show high-fidelity 3D meshes rather than point markers.
+

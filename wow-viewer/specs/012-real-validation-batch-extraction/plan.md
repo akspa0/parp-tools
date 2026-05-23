@@ -331,3 +331,37 @@ Current status:
 
 - `wow-viewer/README.md`, the architecture note, the active Speckit files, and continuity docs now describe the completed Phase 4 proof boundary accurately
 - the remaining open item in Step 5.2 is keeping the cutover language aligned while broader automation still routes through legacy MdxViewer for non-bounded runs
+
+## Phase 6: Real 3D WMO and MDX Mesh Rendering
+
+**Goal**: Upgrade `WorldGpuPreviewRenderer.cs` to load, cache, and render actual 3D WMO and MDX/M2 model geometry instead of point markers. This delivers high-fidelity `object_visibility_mask` and `no_object_minimap` outputs that exactly match the visual occlusion of the 3D meshes.
+
+### Step 6.1 — Add model caches and shader variables
+Extend `WorldGpuPreviewRenderer.cs` with in-memory caches for loaded WMO/MDX models and texture handles, and declare the uniform variables for WMO and MDX shaders.
+
+Target file:
+- `wow-viewer/src/viewer/WowViewer.App/WorldGpuPreviewRenderer.cs`
+
+Fields to add:
+- `Dictionary<string, CachedWmoModel> _wmoCache`
+- `Dictionary<string, CachedMdxModel> _mdxCache`
+- `Dictionary<string, uint> _textureCache`
+
+### Step 6.2 — Port and compile WMO and MDX Shaders
+Port WMO (Half-Lambert + baked lighting + textures) and MDX/M2 (directional lighting + UV transform + alpha cutout) shader sources from `WmoGpuPreviewRenderer.cs` and `MdxGpuPreviewRenderer.cs` respectively, and compile them during initialization.
+
+### Step 6.3 — Port buffer construction and asset loading
+Implement model asset parsing, texture loading, and GPU buffer construction in `WorldGpuPreviewRenderer.cs`:
+1. Use `_viewerIoService` to fetch virtual files from MPQ archives.
+2. Port WMO parsing/mesh culling from `WmoGpuPreviewRenderer.BuildBuffers`.
+3. Port MDX parsing/mesh culling from `MdxGpuPreviewRenderer.RebuildGeometryCommands` (CPU skinning can be omitted or fall back to base pose for culling silhouettes).
+4. Upload vertex arrays (stride 32 bytes: position, normal, UV) and index buffers to GPU.
+
+### Step 6.4 — Update World Render Loop
+In `WorldGpuPreviewRenderer.RenderCore`:
+1. Render opaque sections of visible WMO and MDX instances in the opaque pass using `Instance.Transform` as their model matrix.
+2. Sort transparent sections by distance and render them in the transparent pass with blending enabled.
+
+### Step 6.5 — Validation
+Run automated capture on `3_3_5_12340 / Azeroth_30_48` and verify that the generated `_object_visibility_mask.png` output shows high-fidelity 3D meshes rather than point markers.
+

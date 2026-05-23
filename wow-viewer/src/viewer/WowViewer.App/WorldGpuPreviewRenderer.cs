@@ -3,6 +3,14 @@ using System.Numerics;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
 using WowViewer.Core.Runtime.World.Validation;
+using WowViewer.Core.Wmo;
+using WowViewer.Core.IO.Wmo;
+using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.Mdx;
+using WowViewer.Core.Runtime.Mdx;
+using WowViewer.Core.Runtime.World;
+using WowViewer.Core.Runtime.World.Visibility;
 
 namespace WowViewer.App;
 
@@ -64,6 +72,57 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private float _skyBackdropStrength;
     private float _skyBackdropSeed;
     private readonly Dictionary<string, TerrainTextureSample?> _terrainTextureCache = new(StringComparer.OrdinalIgnoreCase);
+
+    // MDX Blend Modes
+    private const uint MdxBlendModeTransparentKey = 1;
+    private const uint MdxBlendModeBlend = 2;
+    private const uint MdxBlendModeAdditive = 3;
+    private const uint MdxBlendModeAddAlpha = 4;
+    private const uint MdxBlendModeModulate = 5;
+    private const uint MdxBlendModeModulate2X = 6;
+
+    // WMO Shader Program and Uniform Locations
+    private uint _wmoProgram;
+    private int _uWmoView;
+    private int _uWmoProj;
+    private int _uWmoModel;
+    private int _uWmoLightDir;
+    private int _uWmoAmbientColor;
+    private int _uWmoBaseColor;
+    private int _uWmoHasTexture;
+    private int _uWmoTexture0;
+    private int _uWmoAlphaTestThreshold;
+    private int _uWmoUseTextureAlpha;
+
+    // MDX Shader Program and Uniform Locations
+    private uint _mdxProgram;
+    private int _uMdxView;
+    private int _uMdxProj;
+    private int _uMdxModel;
+    private int _uMdxLightDir;
+    private int _uMdxLightColor;
+    private int _uMdxAmbientColor;
+    private int _uMdxBaseColor;
+    private int _uMdxEmissiveColor;
+    private int _uMdxAlpha;
+    private int _uMdxHasTexture;
+    private int _uMdxTexture0;
+    private int _uMdxAlphaCutout;
+    private int _uMdxAlphaThreshold;
+    private int _uMdxReceivesLighting;
+    private int _uMdxUseTextureAlpha;
+    private int _uMdxPremultiplyAlpha;
+    private int _uMdxSphereEnvMap;
+    private int _uMdxUseBoneSkinning;
+
+    // Object and Texture Caches
+    private readonly Dictionary<string, CachedWmo> _wmoCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CachedMdx> _mdxCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, uint> _loadedTextureCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<uint> _ownedTextureIds = [];
+    private uint _fallbackWhiteTexture;
+
+    private WowViewerWorldRuntimeFrameResult? _activeFrame;
     private bool _disposed;
 
     public WorldGpuPreviewRenderer(GL gl, IViewerIoService viewerIoService, ViewerIoSourceKey sourceKey)
@@ -75,11 +134,15 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         InitializeTerrainShader();
         InitializeOverlayShader();
         InitializeMarkerShader();
+        InitializeWmoShader();
+        InitializeMdxShader();
+        _fallbackWhiteTexture = CreateFallbackWhiteTexture();
     }
 
     public uint PreviewTextureHandle => _colorTexture;
 
-    public bool HasRenderableGeometry => _showSky || _terrainTiles.Count > 0 || _overlayVertexCount > 0 || _markerVertexCount > 0;
+    public bool HasRenderableGeometry => _showSky || _terrainTiles.Count > 0 || _overlayVertexCount > 0 || _markerVertexCount > 0
+        || (_activeFrame != null && _activeFrame.Visibility != null && (_activeFrame.Visibility.VisibleWmos.Count > 0 || _activeFrame.Visibility.VisibleMdx.Count > 0));
 
     public int TerrainTriangleCount => _terrainTiles.Sum(static tile => checked((int)(tile.IndexCount / 3)));
 
@@ -94,6 +157,36 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
         _disposed = true;
         ClearPreview();
+
+        foreach (var cached in _wmoCache.Values)
+        {
+            foreach (var cmd in cached.Commands)
+            {
+                cmd.Dispose(_gl);
+            }
+        }
+        _wmoCache.Clear();
+
+        foreach (var cached in _mdxCache.Values)
+        {
+            foreach (var cmd in cached.Commands)
+            {
+                cmd.Dispose(_gl);
+            }
+        }
+        _mdxCache.Clear();
+
+        foreach (uint textureId in _ownedTextureIds)
+            _gl.DeleteTexture(textureId);
+
+        _ownedTextureIds.Clear();
+        _loadedTextureCache.Clear();
+
+        if (_fallbackWhiteTexture != 0)
+        {
+            _gl.DeleteTexture(_fallbackWhiteTexture);
+            _fallbackWhiteTexture = 0;
+        }
 
         if (_skyProgram != 0)
         {
@@ -125,6 +218,18 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _markerProgram = 0;
         }
 
+        if (_wmoProgram != 0)
+        {
+            _gl.DeleteProgram(_wmoProgram);
+            _wmoProgram = 0;
+        }
+
+        if (_mdxProgram != 0)
+        {
+            _gl.DeleteProgram(_mdxProgram);
+            _mdxProgram = 0;
+        }
+
         DeleteFramebuffer();
     }
 
@@ -137,6 +242,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
         _showSky = false;
         _skyBackdropStrength = 0.0f;
+        _activeFrame = null;
     }
 
     public void LoadPreview(WowViewerWorldRuntimeFrameResult frame, bool ignoreTerrainHoles = false, bool showHoleOverlay = false)
@@ -144,12 +250,26 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         ArgumentNullException.ThrowIfNull(frame);
 
         ClearPreview();
+        _activeFrame = frame;
         _showSky = frame.PassOptions.SkyVisible;
         ConfigureSkyColors(frame);
         BuildTerrainBuffers(frame, ignoreTerrainHoles);
         if (showHoleOverlay)
             BuildHoleOverlayBuffers(frame);
         BuildMarkerBuffers(frame);
+
+        // Pre-load visible WMOs and MDXs to cache them
+        if (frame.Visibility != null)
+        {
+            foreach (var entry in frame.Visibility.VisibleWmos)
+            {
+                GetOrLoadWmo(entry.Instance.ModelPath);
+            }
+            foreach (var entry in frame.Visibility.VisibleMdx)
+            {
+                GetOrLoadMdx(entry.Instance.ModelPath);
+            }
+        }
     }
 
     public unsafe void Render(int width, int height, WorldViewCamera camera)
@@ -224,6 +344,102 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _gl.BindTexture(TextureTarget.Texture2DArray, 0);
         }
 
+        // Render Opaque WMOs
+        var visibleWmos = _activeFrame?.Visibility?.VisibleWmos ?? new List<WorldVisibleWmoEntry>();
+        if (visibleWmos.Count > 0)
+        {
+            _gl.UseProgram(_wmoProgram);
+            _gl.UniformMatrix4(_uWmoView, 1, false, (float*)&view.M11);
+            _gl.UniformMatrix4(_uWmoProj, 1, false, (float*)&projection.M11);
+            _gl.Uniform3(_uWmoLightDir, -0.45f, -0.55f, 0.70f);
+            _gl.Uniform3(_uWmoAmbientColor, 0.30f, 0.30f, 0.34f);
+            _gl.Uniform1(_uWmoTexture0, 0);
+
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthMask(true);
+            _gl.Disable(EnableCap.Blend);
+
+            foreach (var entry in visibleWmos)
+            {
+                var cached = GetOrLoadWmo(entry.Instance.ModelPath);
+                if (cached == null) continue;
+
+                Matrix4x4 modelMatrix = entry.Instance.Transform;
+                _gl.UniformMatrix4(_uWmoModel, 1, false, (float*)&modelMatrix.M11);
+
+                foreach (var command in cached.Commands)
+                {
+                    if (command.IsTransparent) continue;
+
+                    _gl.Uniform3(_uWmoBaseColor, command.BaseColor.X, command.BaseColor.Y, command.BaseColor.Z);
+                    _gl.Uniform1(_uWmoHasTexture, command.HasTexture ? 1 : 0);
+                    _gl.Uniform1(_uWmoAlphaTestThreshold, command.AlphaTestThreshold);
+                    _gl.Uniform1(_uWmoUseTextureAlpha, command.UseTextureAlpha ? 1 : 0);
+
+                    _gl.ActiveTexture(TextureUnit.Texture0);
+                    _gl.BindTexture(TextureTarget.Texture2D, command.TextureId);
+                    _gl.BindVertexArray(command.Vao);
+                    _gl.DrawElements(PrimitiveType.Triangles, command.IndexCount, DrawElementsType.UnsignedShort, null);
+                }
+            }
+        }
+
+        // Render Opaque MDXs
+        var visibleMdxs = _activeFrame?.Visibility?.VisibleMdx ?? new List<WorldVisibleMdxEntry>();
+        if (visibleMdxs.Count > 0)
+        {
+            _gl.UseProgram(_mdxProgram);
+            _gl.UniformMatrix4(_uMdxView, 1, false, (float*)&view.M11);
+            _gl.UniformMatrix4(_uMdxProj, 1, false, (float*)&projection.M11);
+            _gl.Uniform3(_uMdxLightDir, -0.45f, -0.55f, 0.70f);
+            _gl.Uniform3(_uMdxLightColor, 0.80f, 0.82f, 0.78f);
+            _gl.Uniform3(_uMdxAmbientColor, 0.30f, 0.30f, 0.34f);
+            _gl.Uniform1(_uMdxTexture0, 0);
+            _gl.Uniform1(_uMdxUseBoneSkinning, 0);
+
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.Disable(EnableCap.Blend);
+
+            foreach (var entry in visibleMdxs)
+            {
+                var cached = GetOrLoadMdx(entry.Instance.ModelPath);
+                if (cached == null) continue;
+
+                Matrix4x4 modelMatrix = entry.Instance.Transform;
+                _gl.UniformMatrix4(_uMdxModel, 1, false, (float*)&modelMatrix.M11);
+
+                foreach (var command in cached.Commands)
+                {
+                    if (command.IsTransparent) continue;
+
+                    if (command.DepthTest)
+                        _gl.Enable(EnableCap.DepthTest);
+                    else
+                        _gl.Disable(EnableCap.DepthTest);
+
+                    _gl.DepthMask(command.DepthWrite);
+
+                    ResolveAlphaHandling(command, out bool useTextureAlpha, out bool premultiplyAlpha, out float alphaThreshold);
+
+                    _gl.Uniform3(_uMdxBaseColor, command.BaseColor.X, command.BaseColor.Y, command.BaseColor.Z);
+                    _gl.Uniform3(_uMdxEmissiveColor, command.EmissiveColor.X, command.EmissiveColor.Y, command.EmissiveColor.Z);
+                    _gl.Uniform1(_uMdxAlpha, command.Alpha);
+                    _gl.Uniform1(_uMdxHasTexture, command.HasTexture ? 1 : 0);
+                    _gl.Uniform1(_uMdxAlphaCutout, command.AlphaCutout ? 1 : 0);
+                    _gl.Uniform1(_uMdxAlphaThreshold, alphaThreshold);
+                    _gl.Uniform1(_uMdxReceivesLighting, command.ReceivesLighting ? 1 : 0);
+                    _gl.Uniform1(_uMdxUseTextureAlpha, useTextureAlpha ? 1 : 0);
+                    _gl.Uniform1(_uMdxPremultiplyAlpha, premultiplyAlpha ? 1 : 0);
+                    _gl.Uniform1(_uMdxSphereEnvMap, command.UsesSphereEnvMap ? 1 : 0);
+
+                    _gl.ActiveTexture(TextureUnit.Texture0);
+                    _gl.BindTexture(TextureTarget.Texture2D, command.TextureId);
+                    _gl.BindVertexArray(command.Vao);
+                    _gl.DrawElements(PrimitiveType.Triangles, command.IndexCount, DrawElementsType.UnsignedShort, null);
+                }
+            }
+        }
+
         if (_overlayVertexCount > 0)
         {
             _gl.Enable(EnableCap.Blend);
@@ -236,16 +452,137 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _gl.Disable(EnableCap.Blend);
         }
 
-        if (_markerVertexCount > 0)
+        // Gather, sort and render transparent WMOs and MDXs
+        List<TransparentDrawEntry> transparentDraws = [];
+        foreach (var entry in visibleWmos)
         {
+            var cached = GetOrLoadWmo(entry.Instance.ModelPath);
+            if (cached == null) continue;
+
+            foreach (var command in cached.Commands)
+            {
+                if (!command.IsTransparent) continue;
+
+                Vector3 worldSortCenter = Vector3.Transform(command.SortCenter, entry.Instance.Transform);
+                float distSq = Vector3.DistanceSquared(cameraPosition, worldSortCenter);
+                transparentDraws.Add(new TransparentDrawEntry
+                {
+                    IsWmo = true,
+                    WmoCommand = command,
+                    Transform = entry.Instance.Transform,
+                    DistanceSq = distSq
+                });
+            }
+        }
+
+        foreach (var entry in visibleMdxs)
+        {
+            var cached = GetOrLoadMdx(entry.Instance.ModelPath);
+            if (cached == null) continue;
+
+            foreach (var command in cached.Commands)
+            {
+                if (!command.IsTransparent) continue;
+
+                Vector3 worldSortCenter = Vector3.Transform(command.TransparentSortCenter, entry.Instance.Transform);
+                float distSq = Vector3.DistanceSquared(cameraPosition, worldSortCenter);
+                transparentDraws.Add(new TransparentDrawEntry
+                {
+                    IsWmo = false,
+                    MdxCommand = command,
+                    Transform = entry.Instance.Transform,
+                    DistanceSq = distSq
+                });
+            }
+        }
+
+        if (transparentDraws.Count > 0)
+        {
+            // Sort back-to-front (descending by DistanceSq)
+            transparentDraws.Sort(static (a, b) => b.DistanceSq.CompareTo(a.DistanceSq));
+
             _gl.Enable(EnableCap.Blend);
-            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-            _gl.UseProgram(_markerProgram);
-            _gl.UniformMatrix4(_markerViewLocation, 1, false, (float*)&view.M11);
-            _gl.UniformMatrix4(_markerProjectionLocation, 1, false, (float*)&projection.M11);
-            _gl.BindVertexArray(_markerVao);
-            _gl.DrawArrays(PrimitiveType.Points, 0, _markerVertexCount);
+            _gl.DepthMask(false);
+
+            uint lastProgram = 0;
+
+            foreach (var draw in transparentDraws)
+            {
+                if (draw.IsWmo)
+                {
+                    if (lastProgram != _wmoProgram)
+                    {
+                        _gl.UseProgram(_wmoProgram);
+                        _gl.UniformMatrix4(_uWmoView, 1, false, (float*)&view.M11);
+                        _gl.UniformMatrix4(_uWmoProj, 1, false, (float*)&projection.M11);
+                        _gl.Uniform3(_uWmoLightDir, -0.45f, -0.55f, 0.70f);
+                        _gl.Uniform3(_uWmoAmbientColor, 0.30f, 0.30f, 0.34f);
+                        _gl.Uniform1(_uWmoTexture0, 0);
+                        _gl.Enable(EnableCap.DepthTest);
+                        _gl.DepthFunc(DepthFunction.Lequal);
+                        lastProgram = _wmoProgram;
+                    }
+
+                    var command = draw.WmoCommand;
+                    _gl.UniformMatrix4(_uWmoModel, 1, false, (float*)&draw.Transform.M11);
+                    _gl.Uniform3(_uWmoBaseColor, command.BaseColor.X, command.BaseColor.Y, command.BaseColor.Z);
+                    _gl.Uniform1(_uWmoHasTexture, command.HasTexture ? 1 : 0);
+                    _gl.Uniform1(_uWmoAlphaTestThreshold, command.AlphaTestThreshold);
+                    _gl.Uniform1(_uWmoUseTextureAlpha, command.UseTextureAlpha ? 1 : 0);
+
+                    _gl.BlendFunc(command.SourceBlendFactor, command.DestinationBlendFactor);
+
+                    _gl.ActiveTexture(TextureUnit.Texture0);
+                    _gl.BindTexture(TextureTarget.Texture2D, command.TextureId);
+                    _gl.BindVertexArray(command.Vao);
+                    _gl.DrawElements(PrimitiveType.Triangles, command.IndexCount, DrawElementsType.UnsignedShort, null);
+                }
+                else
+                {
+                    if (lastProgram != _mdxProgram)
+                    {
+                        _gl.UseProgram(_mdxProgram);
+                        _gl.UniformMatrix4(_uMdxView, 1, false, (float*)&view.M11);
+                        _gl.UniformMatrix4(_uMdxProj, 1, false, (float*)&projection.M11);
+                        _gl.Uniform3(_uMdxLightDir, -0.45f, -0.55f, 0.70f);
+                        _gl.Uniform3(_uMdxLightColor, 0.80f, 0.82f, 0.78f);
+                        _gl.Uniform3(_uMdxAmbientColor, 0.30f, 0.30f, 0.34f);
+                        _gl.Uniform1(_uMdxTexture0, 0);
+                        _gl.Uniform1(_uMdxUseBoneSkinning, 0);
+                        lastProgram = _mdxProgram;
+                    }
+
+                    var command = draw.MdxCommand;
+                    _gl.UniformMatrix4(_uMdxModel, 1, false, (float*)&draw.Transform.M11);
+
+                    if (command.DepthTest)
+                        _gl.Enable(EnableCap.DepthTest);
+                    else
+                        _gl.Disable(EnableCap.DepthTest);
+
+                    ConfigureBlendMode(command.IsAdditive, command.BlendMode);
+                    ResolveAlphaHandling(command, out bool useTextureAlpha, out bool premultiplyAlpha, out float alphaThreshold);
+
+                    _gl.Uniform3(_uMdxBaseColor, command.BaseColor.X, command.BaseColor.Y, command.BaseColor.Z);
+                    _gl.Uniform3(_uMdxEmissiveColor, command.EmissiveColor.X, command.EmissiveColor.Y, command.EmissiveColor.Z);
+                    _gl.Uniform1(_uMdxAlpha, command.Alpha);
+                    _gl.Uniform1(_uMdxHasTexture, command.HasTexture ? 1 : 0);
+                    _gl.Uniform1(_uMdxAlphaCutout, command.AlphaCutout ? 1 : 0);
+                    _gl.Uniform1(_uMdxAlphaThreshold, alphaThreshold);
+                    _gl.Uniform1(_uMdxReceivesLighting, command.ReceivesLighting ? 1 : 0);
+                    _gl.Uniform1(_uMdxUseTextureAlpha, useTextureAlpha ? 1 : 0);
+                    _gl.Uniform1(_uMdxPremultiplyAlpha, premultiplyAlpha ? 1 : 0);
+                    _gl.Uniform1(_uMdxSphereEnvMap, command.UsesSphereEnvMap ? 1 : 0);
+
+                    _gl.ActiveTexture(TextureUnit.Texture0);
+                    _gl.BindTexture(TextureTarget.Texture2D, command.TextureId);
+                    _gl.BindVertexArray(command.Vao);
+                    _gl.DrawElements(PrimitiveType.Triangles, command.IndexCount, DrawElementsType.UnsignedShort, null);
+                }
+            }
+
             _gl.Disable(EnableCap.Blend);
+            _gl.DepthMask(true);
         }
 
         _gl.BindVertexArray(0);
@@ -1442,6 +1779,1177 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         }
 
         _markerVertexCount = 0;
+    }
+
+    private static readonly IReadOnlyDictionary<uint, string> DefaultReplaceableTextures = new Dictionary<uint, string>
+    {
+        [1] = @"Textures\ReplaceableTextures\CreatureSkin\CreatureSkin01.blp",
+        [2] = @"Textures\ReplaceableTextures\ObjectSkin\ObjectSkin01.blp",
+        [3] = @"Textures\ReplaceableTextures\WeaponBlade\WeaponBlade01.blp",
+        [4] = @"Textures\ReplaceableTextures\WeaponHandle\WeaponHandle01.blp",
+        [5] = @"Textures\ReplaceableTextures\Environment\Environment01.blp",
+        [6] = @"Textures\ReplaceableTextures\CharHair\CharHair00_00.blp",
+        [7] = @"Textures\ReplaceableTextures\CharFacialHair\CharFacialHair00_00.blp",
+        [8] = @"Textures\ReplaceableTextures\SkinExtra\SkinExtra01.blp",
+        [9] = @"Textures\ReplaceableTextures\UISkin\UISkin01.blp",
+        [10] = @"Textures\ReplaceableTextures\TaurenMane\TaurenMane00_00.blp",
+        [11] = @"Textures\ReplaceableTextures\Monster\Monster01_01.blp",
+        [12] = @"Textures\ReplaceableTextures\Monster\Monster01_02.blp",
+        [13] = @"Textures\ReplaceableTextures\Monster\Monster01_03.blp",
+    };
+
+    private static float Lerp(float start, float end, float amount) => start + ((end - start) * amount);
+
+    private void InitializeWmoShader()
+    {
+        const string vertexShaderSource = """
+            #version 330 core
+            layout(location = 0) in vec3 aPosition;
+            layout(location = 1) in vec3 aNormal;
+            layout(location = 2) in vec2 aTexCoord;
+            uniform mat4 uModel;
+            uniform mat4 uView;
+            uniform mat4 uProj;
+            out vec3 vNormal;
+            out vec2 vTexCoord;
+            void main()
+            {
+                vNormal = normalize(mat3(uModel) * aNormal);
+                vTexCoord = aTexCoord;
+                gl_Position = uProj * uView * uModel * vec4(aPosition, 1.0);
+            }
+            """;
+        const string fragmentShaderSource = """
+            #version 330 core
+            in vec3 vNormal;
+            in vec2 vTexCoord;
+            uniform vec3 uLightDir;
+            uniform vec3 uAmbientColor;
+            uniform vec3 uBaseColor;
+            uniform bool uHasTexture;
+            uniform sampler2D uTexture0;
+            uniform float uAlphaTestThreshold;
+            uniform bool uUseTextureAlpha;
+            out vec4 fragColor;
+            void main()
+            {
+                vec4 texel = uHasTexture ? texture(uTexture0, vTexCoord) : vec4(1.0, 1.0, 1.0, 1.0);
+                float alpha = uUseTextureAlpha ? texel.a : 1.0;
+                if (uAlphaTestThreshold > 0.0 && alpha < uAlphaTestThreshold)
+                    discard;
+
+                float light = max(dot(normalize(vNormal), normalize(uLightDir)), 0.18);
+                vec3 shaded = texel.rgb * uBaseColor;
+                shaded *= clamp(uAmbientColor + vec3(light), vec3(0.0), vec3(1.75));
+                fragColor = vec4(shaded, alpha);
+            }
+            """;
+
+        _wmoProgram = CreateProgram(vertexShaderSource, fragmentShaderSource, "world wmo");
+        _uWmoView = _gl.GetUniformLocation(_wmoProgram, "uView");
+        _uWmoProj = _gl.GetUniformLocation(_wmoProgram, "uProj");
+        _uWmoModel = _gl.GetUniformLocation(_wmoProgram, "uModel");
+        _uWmoLightDir = _gl.GetUniformLocation(_wmoProgram, "uLightDir");
+        _uWmoAmbientColor = _gl.GetUniformLocation(_wmoProgram, "uAmbientColor");
+        _uWmoBaseColor = _gl.GetUniformLocation(_wmoProgram, "uBaseColor");
+        _uWmoHasTexture = _gl.GetUniformLocation(_wmoProgram, "uHasTexture");
+        _uWmoTexture0 = _gl.GetUniformLocation(_wmoProgram, "uTexture0");
+        _uWmoAlphaTestThreshold = _gl.GetUniformLocation(_wmoProgram, "uAlphaTestThreshold");
+        _uWmoUseTextureAlpha = _gl.GetUniformLocation(_wmoProgram, "uUseTextureAlpha");
+    }
+
+    private void InitializeMdxShader()
+    {
+        const string vertexSource = """
+            #version 330 core
+            layout (location = 0) in vec3 aPos;
+            layout (location = 1) in vec3 aNormal;
+            layout (location = 2) in vec2 aTexCoord;
+            layout (location = 3) in vec4 aBoneIndices;
+            layout (location = 4) in vec4 aBoneWeights;
+
+            uniform mat4 uModel;
+            uniform mat4 uView;
+            uniform mat4 uProj;
+            uniform bool uUseBoneSkinning;
+            uniform int uBoneCount;
+            uniform mat4 uBones[128];
+            uniform bool uUseUvTransform;
+            uniform vec2 uUvTranslation;
+            uniform vec2 uUvScale;
+            uniform vec2 uUvRotationRow0;
+            uniform vec2 uUvRotationRow1;
+
+            out vec3 vNormal;
+            out vec3 vViewNormal;
+            out vec2 vTexCoord;
+
+            vec4 ApplySkinning(vec4 source, vec4 boneIndices, vec4 boneWeights)
+            {
+                if (!uUseBoneSkinning)
+                    return source;
+
+                float totalWeight = boneWeights.x + boneWeights.y + boneWeights.z + boneWeights.w;
+                if (totalWeight <= 0.0001)
+                    return source;
+
+                vec4 skinned = vec4(0.0);
+                bool applied = false;
+
+                int index0 = int(aBoneIndices.x + 0.5);
+                int index1 = int(aBoneIndices.y + 0.5);
+                int index2 = int(aBoneIndices.z + 0.5);
+                int index3 = int(aBoneIndices.w + 0.5);
+
+                if (boneWeights.x > 0.0 && index0 >= 0 && index0 < uBoneCount && index0 < 128)
+                {
+                    skinned += (uBones[index0] * source) * (boneWeights.x / totalWeight);
+                    applied = true;
+                }
+
+                if (boneWeights.y > 0.0 && index1 >= 0 && index1 < uBoneCount && index1 < 128)
+                {
+                    skinned += (uBones[index1] * source) * (boneWeights.y / totalWeight);
+                    applied = true;
+                }
+
+                if (boneWeights.z > 0.0 && index2 >= 0 && index2 < uBoneCount && index2 < 128)
+                {
+                    skinned += (uBones[index2] * source) * (boneWeights.z / totalWeight);
+                    applied = true;
+                }
+
+                if (boneWeights.w > 0.0 && index3 >= 0 && index3 < uBoneCount && index3 < 128)
+                {
+                    skinned += (uBones[index3] * source) * (boneWeights.w / totalWeight);
+                    applied = true;
+                }
+
+                return applied ? skinned : source;
+            }
+
+            void main()
+            {
+                vec4 skinnedPosition = ApplySkinning(vec4(aPos, 1.0), aBoneIndices, aBoneWeights);
+                vec3 skinnedNormal = ApplySkinning(vec4(aNormal, 0.0), aBoneIndices, aBoneWeights).xyz;
+                gl_Position = uProj * uView * uModel * skinnedPosition;
+                vNormal = normalize(mat3(uModel) * skinnedNormal);
+                vViewNormal = mat3(uView * uModel) * skinnedNormal;
+                vec2 texCoord = aTexCoord;
+                if (uUseUvTransform)
+                {
+                    vec2 centered = (texCoord - vec2(0.5, 0.5)) * uUvScale;
+                    texCoord = vec2(
+                        dot(centered, uUvRotationRow0),
+                        dot(centered, uUvRotationRow1)) + vec2(0.5, 0.5) + uUvTranslation;
+                }
+
+                vTexCoord = texCoord;
+            }
+            """;
+
+        const string fragmentSource = """
+            #version 330 core
+            in vec3 vNormal;
+            in vec3 vViewNormal;
+            in vec2 vTexCoord;
+
+            uniform vec3 uLightDir;
+            uniform vec3 uLightColor;
+            uniform vec3 uAmbientColor;
+            uniform vec3 uBaseColor;
+            uniform vec3 uEmissiveColor;
+            uniform float uAlpha;
+            uniform bool uHasTexture;
+            uniform sampler2D uTexture0;
+            uniform bool uAlphaCutout;
+            uniform float uAlphaThreshold;
+            uniform bool uReceivesLighting;
+            uniform bool uUseTextureAlpha;
+            uniform bool uPremultiplyAlpha;
+            uniform bool uSphereEnvMap;
+            out vec4 FragColor;
+
+            void main()
+            {
+                vec2 texCoord = vTexCoord;
+                if (uSphereEnvMap)
+                {
+                    vec3 viewNormal = normalize(vViewNormal);
+                    if (!gl_FrontFacing)
+                        viewNormal = -viewNormal;
+
+                    texCoord = viewNormal.xy * 0.5 + 0.5;
+                }
+
+                vec4 texel = uHasTexture ? texture(uTexture0, texCoord) : vec4(1.0, 1.0, 1.0, 1.0);
+                vec3 texRgb = texel.rgb;
+                if (uPremultiplyAlpha)
+                    texRgb *= texel.a;
+
+                float sampledAlpha = uUseTextureAlpha ? texel.a : 1.0;
+                float finalAlpha = clamp(sampledAlpha * uAlpha, 0.0, 1.0);
+                if ((uAlphaCutout || uAlphaThreshold > 0.0) && finalAlpha < uAlphaThreshold)
+                    discard;
+
+                vec3 shaded = texRgb * uBaseColor;
+                if (uReceivesLighting)
+                {
+                    vec3 normal = normalize(vNormal);
+                    vec3 lightDir = normalize(uLightDir);
+                    float NdotL = dot(normal, lightDir);
+                    float diffuse = NdotL * 0.5 + 0.5;
+                    diffuse = diffuse * diffuse;
+                    shaded *= clamp(uAmbientColor + (uLightColor * diffuse), vec3(0.0), vec3(1.75));
+                }
+
+                shaded += uEmissiveColor;
+                FragColor = vec4(shaded, finalAlpha);
+            }
+            """;
+
+        _mdxProgram = CreateProgram(vertexSource, fragmentSource, "world mdx");
+        _uMdxView = _gl.GetUniformLocation(_mdxProgram, "uView");
+        _uMdxProj = _gl.GetUniformLocation(_mdxProgram, "uProj");
+        _uMdxModel = _gl.GetUniformLocation(_mdxProgram, "uModel");
+        _uMdxLightDir = _gl.GetUniformLocation(_mdxProgram, "uLightDir");
+        _uMdxLightColor = _gl.GetUniformLocation(_mdxProgram, "uLightColor");
+        _uMdxAmbientColor = _gl.GetUniformLocation(_mdxProgram, "uAmbientColor");
+        _uMdxBaseColor = _gl.GetUniformLocation(_mdxProgram, "uBaseColor");
+        _uMdxEmissiveColor = _gl.GetUniformLocation(_mdxProgram, "uEmissiveColor");
+        _uMdxAlpha = _gl.GetUniformLocation(_mdxProgram, "uAlpha");
+        _uMdxHasTexture = _gl.GetUniformLocation(_mdxProgram, "uHasTexture");
+        _uMdxTexture0 = _gl.GetUniformLocation(_mdxProgram, "uTexture0");
+        _uMdxAlphaCutout = _gl.GetUniformLocation(_mdxProgram, "uAlphaCutout");
+        _uMdxAlphaThreshold = _gl.GetUniformLocation(_mdxProgram, "uAlphaThreshold");
+        _uMdxReceivesLighting = _gl.GetUniformLocation(_mdxProgram, "uReceivesLighting");
+        _uMdxUseTextureAlpha = _gl.GetUniformLocation(_mdxProgram, "uUseTextureAlpha");
+        _uMdxPremultiplyAlpha = _gl.GetUniformLocation(_mdxProgram, "uPremultiplyAlpha");
+        _uMdxSphereEnvMap = _gl.GetUniformLocation(_mdxProgram, "uSphereEnvMap");
+        _uMdxUseBoneSkinning = _gl.GetUniformLocation(_mdxProgram, "uUseBoneSkinning");
+    }
+
+    private CachedWmo? GetOrLoadWmo(string modelPath)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return null;
+
+        string cacheKey = modelPath.Replace('/', '\\').ToLowerInvariant();
+        if (_wmoCache.TryGetValue(cacheKey, out CachedWmo? cachedWmo))
+            return cachedWmo;
+
+        if (!_viewerIoService.TryReadVirtualFile(_sourceKey, modelPath, out byte[]? modelBytes, out _)
+            || modelBytes is not { Length: > 0 })
+        {
+            _wmoCache[cacheKey] = null!;
+            return null;
+        }
+
+        try
+        {
+            using MemoryStream stream = new(modelBytes, writable: false);
+            WmoRenderDocument document = WmoRenderDocumentReader.Read(stream, modelPath);
+
+            CachedWmo cached = new();
+            bool hasBounds = false;
+            Vector3 boundsMin = new(float.MaxValue);
+            Vector3 boundsMax = new(float.MinValue);
+
+            foreach (WmoEmbeddedGroupMeshDetail group in document.Groups)
+            {
+                if (group.Mesh.Vertices.Count == 0 || group.Mesh.Indices.Count < 3)
+                    continue;
+
+                float[] interleaved = new float[group.Mesh.Vertices.Count * 8];
+                for (int index = 0; index < group.Mesh.Vertices.Count; index++)
+                {
+                    Vector3 vertex = group.Mesh.Vertices[index];
+                    Vector3 normal = index < group.Mesh.Normals.Count ? group.Mesh.Normals[index] : Vector3.UnitZ;
+                    Vector2 uv = index < group.Mesh.PrimaryUvs.Count ? group.Mesh.PrimaryUvs[index] : Vector2.Zero;
+                    int offset = index * 8;
+                    interleaved[offset + 0] = vertex.X;
+                    interleaved[offset + 1] = vertex.Y;
+                    interleaved[offset + 2] = vertex.Z;
+                    interleaved[offset + 3] = normal.X;
+                    interleaved[offset + 4] = normal.Y;
+                    interleaved[offset + 5] = normal.Z;
+                    interleaved[offset + 6] = uv.X;
+                    interleaved[offset + 7] = uv.Y;
+                    boundsMin = Vector3.Min(boundsMin, vertex);
+                    boundsMax = Vector3.Max(boundsMax, vertex);
+                    hasBounds = true;
+                }
+
+                bool builtBatchCommand = false;
+                foreach (WmoGroupBatchDetail batch in group.Mesh.Batches)
+                {
+                    if (batch.IndexCount < 3)
+                        continue;
+
+                    if (batch.FirstIndex < 0 || batch.FirstIndex + batch.IndexCount > group.Mesh.Indices.Count)
+                        continue;
+
+                    ushort[] batchIndices = group.Mesh.Indices.Skip(batch.FirstIndex).Take(batch.IndexCount).ToArray();
+                    int materialIndex = ResolveBatchMaterialIndex(document, group.Mesh, batch);
+                    uint loadedTextureId = 0;
+                    bool hasTexture = materialIndex >= 0
+                        && materialIndex < document.Materials.Count
+                        && TryGetOrLoadMaterialTextureWmo(document.Materials[materialIndex], out loadedTextureId);
+
+                    WmoMaterialDetail? material = materialIndex >= 0 && materialIndex < document.Materials.Count
+                        ? document.Materials[materialIndex]
+                        : null;
+
+                    WmoPreviewBlendMode blendMode = ResolveBlendMode(material?.BlendMode ?? 0);
+
+                    WmoCommandBuffers cmd = CreateWmoCommand(
+                        interleaved,
+                        batchIndices,
+                        ComputeBatchCenter(group.Mesh.Vertices, batchIndices),
+                        hasTexture ? loadedTextureId : _fallbackWhiteTexture,
+                        hasTexture,
+                        IsTransparentPass(blendMode),
+                        GetAlphaTestThreshold(blendMode),
+                        UsesTextureAlpha(blendMode),
+                        GetSourceBlendFactor(blendMode),
+                        GetDestinationBlendFactor(blendMode),
+                        hasTexture ? Vector3.One : ComputeGroupColor(group.GroupIndex));
+
+                    cached.Commands.Add(cmd);
+                    builtBatchCommand = true;
+                }
+
+                if (!builtBatchCommand)
+                {
+                    WmoCommandBuffers cmd = CreateWmoCommand(
+                        interleaved,
+                        group.Mesh.Indices.ToArray(),
+                        ComputeBoundsCenter(group.Mesh.Vertices),
+                        _fallbackWhiteTexture,
+                        hasTexture: false,
+                        isTransparent: false,
+                        alphaTestThreshold: 0.0f,
+                        useTextureAlpha: false,
+                        sourceBlendFactor: BlendingFactor.SrcAlpha,
+                        destinationBlendFactor: BlendingFactor.OneMinusSrcAlpha,
+                        ComputeGroupColor(group.GroupIndex));
+                    cached.Commands.Add(cmd);
+                }
+            }
+
+            if (hasBounds)
+            {
+                cached.BoundsMin = boundsMin;
+                cached.BoundsMax = boundsMax;
+            }
+
+            _wmoCache[cacheKey] = cached;
+            return cached;
+        }
+        catch
+        {
+            _wmoCache[cacheKey] = null!;
+            return null;
+        }
+    }
+
+    private unsafe WmoCommandBuffers CreateWmoCommand(
+        float[] interleaved,
+        ushort[] indices,
+        Vector3 sortCenter,
+        uint textureId,
+        bool hasTexture,
+        bool isTransparent,
+        float alphaTestThreshold,
+        bool useTextureAlpha,
+        BlendingFactor sourceBlendFactor,
+        BlendingFactor destinationBlendFactor,
+        Vector3 baseColor)
+    {
+        uint vao = _gl.GenVertexArray();
+        uint vbo = _gl.GenBuffer();
+        uint ebo = _gl.GenBuffer();
+        _gl.BindVertexArray(vao);
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
+        fixed (float* verticesPtr = interleaved)
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(interleaved.Length * sizeof(float)), verticesPtr, BufferUsageARB.StaticDraw);
+        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
+        fixed (ushort* indicesPtr = indices)
+            _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(ushort)), indicesPtr, BufferUsageARB.StaticDraw);
+        _gl.EnableVertexAttribArray(0);
+        _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, (uint)(8 * sizeof(float)), (void*)0);
+        _gl.EnableVertexAttribArray(1);
+        _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, (uint)(8 * sizeof(float)), (void*)(3 * sizeof(float)));
+        _gl.EnableVertexAttribArray(2);
+        _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, (uint)(8 * sizeof(float)), (void*)(6 * sizeof(float)));
+        _gl.BindVertexArray(0);
+        return new WmoCommandBuffers(vao, vbo, ebo, (uint)indices.Length, sortCenter, textureId, hasTexture, isTransparent, alphaTestThreshold, useTextureAlpha, sourceBlendFactor, destinationBlendFactor, baseColor);
+    }
+
+    private bool TryGetOrLoadMaterialTextureWmo(WmoMaterialDetail material, out uint textureId)
+    {
+        textureId = 0;
+        foreach (string candidate in EnumerateTextureCandidates(material))
+        {
+            if (!TryGetOrLoadTexture(candidate, out uint loadedTextureId))
+                continue;
+
+            textureId = loadedTextureId;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateTextureCandidates(WmoMaterialDetail material)
+    {
+        if (!string.IsNullOrWhiteSpace(material.Texture1Name))
+            yield return EnsureBlpExtension(material.Texture1Name);
+
+        if (!string.IsNullOrWhiteSpace(material.Texture2Name))
+            yield return EnsureBlpExtension(material.Texture2Name);
+
+        if (!string.IsNullOrWhiteSpace(material.Texture3Name))
+            yield return EnsureBlpExtension(material.Texture3Name);
+    }
+
+    private static int ResolveBatchMaterialIndex(WmoRenderDocument document, WmoGroupMeshDetail mesh, WmoGroupBatchDetail batch)
+    {
+        if (batch.MaterialId is int directMaterialId && directMaterialId >= 0 && directMaterialId < document.Materials.Count)
+            return directMaterialId;
+
+        int firstTriangle = batch.FirstIndex / 3;
+        if (firstTriangle >= 0 && firstTriangle < mesh.FaceMaterials.Count)
+        {
+            int faceMaterialId = mesh.FaceMaterials[firstTriangle].MaterialId;
+            if (faceMaterialId >= 0 && faceMaterialId < document.Materials.Count)
+                return faceMaterialId;
+        }
+
+        return document.Materials.Count > 0 ? 0 : -1;
+    }
+
+    private static WmoPreviewBlendMode ResolveBlendMode(uint rawBlendMode)
+    {
+        return rawBlendMode switch
+        {
+            0 => WmoPreviewBlendMode.Opaque,
+            1 => WmoPreviewBlendMode.Blend,
+            2 => WmoPreviewBlendMode.Add,
+            3 => WmoPreviewBlendMode.AlphaKey,
+            _ => WmoPreviewBlendMode.Blend,
+        };
+    }
+
+    private static bool IsTransparentPass(WmoPreviewBlendMode blendMode)
+    {
+        return blendMode is WmoPreviewBlendMode.Blend or WmoPreviewBlendMode.Add;
+    }
+
+    private static float GetAlphaTestThreshold(WmoPreviewBlendMode blendMode)
+    {
+        return blendMode == WmoPreviewBlendMode.AlphaKey ? 0.5f : 0.0f;
+    }
+
+    private static bool UsesTextureAlpha(WmoPreviewBlendMode blendMode)
+    {
+        return blendMode is WmoPreviewBlendMode.Blend or WmoPreviewBlendMode.Add or WmoPreviewBlendMode.AlphaKey;
+    }
+
+    private static BlendingFactor GetSourceBlendFactor(WmoPreviewBlendMode blendMode)
+    {
+        return blendMode switch
+        {
+            WmoPreviewBlendMode.Add => BlendingFactor.SrcAlpha,
+            _ => BlendingFactor.SrcAlpha,
+        };
+    }
+
+    private static BlendingFactor GetDestinationBlendFactor(WmoPreviewBlendMode blendMode)
+    {
+        return blendMode switch
+        {
+            WmoPreviewBlendMode.Add => BlendingFactor.One,
+            _ => BlendingFactor.OneMinusSrcAlpha,
+        };
+    }
+
+    private static Vector3 ComputeBatchCenter(IReadOnlyList<Vector3> vertices, IReadOnlyList<ushort> batchIndices)
+    {
+        if (vertices.Count == 0 || batchIndices.Count == 0)
+            return Vector3.Zero;
+
+        Vector3 sum = Vector3.Zero;
+        int count = 0;
+        foreach (ushort index in batchIndices)
+        {
+            if ((uint)index >= (uint)vertices.Count)
+                continue;
+
+            sum += vertices[index];
+            count++;
+        }
+
+        return count > 0 ? sum / count : ComputeBoundsCenter(vertices);
+    }
+
+    private static Vector3 ComputeBoundsCenter(IReadOnlyList<Vector3> vertices)
+    {
+        if (vertices.Count == 0)
+            return Vector3.Zero;
+
+        Vector3 min = new(float.MaxValue, float.MaxValue, float.MaxValue);
+        Vector3 max = new(float.MinValue, float.MinValue, float.MinValue);
+        foreach (Vector3 vertex in vertices)
+        {
+            min = Vector3.Min(min, vertex);
+            max = Vector3.Max(max, vertex);
+        }
+
+        return (min + max) * 0.5f;
+    }
+
+    private static Vector3 ComputeGroupColor(int groupIndex)
+    {
+        float red = ((groupIndex * 67 + 13) % 255) / 255f;
+        float green = ((groupIndex * 131 + 7) % 255) / 255f;
+        float blue = ((groupIndex * 43 + 29) % 255) / 255f;
+        return new Vector3(red, green, blue);
+    }
+
+    private CachedMdx? GetOrLoadMdx(string modelPath)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return null;
+
+        string cacheKey = modelPath.Replace('/', '\\').ToLowerInvariant();
+        if (_mdxCache.TryGetValue(cacheKey, out CachedMdx? cachedMdx))
+            return cachedMdx;
+
+        if (!_viewerIoService.TryReadVirtualFile(_sourceKey, modelPath, out byte[]? modelBytes, out _)
+            || modelBytes is not { Length: > 0 })
+        {
+            _mdxCache[cacheKey] = null!;
+            return null;
+        }
+
+        try
+        {
+            using MemoryStream summaryStream = new(modelBytes, writable: false);
+            MdxSummary summary = MdxSummaryReader.Read(summaryStream, modelPath);
+
+            using MemoryStream geometryStream = new(modelBytes, writable: false);
+            MdxGeometryFile geometry = MdxGeometryReader.Read(geometryStream, modelPath);
+
+            using MemoryStream boneStream = new(modelBytes, writable: false);
+            MdxBoneFile bones = MdxBoneReader.Read(boneStream, modelPath);
+
+            using MemoryStream materialStream = new(modelBytes, writable: false);
+            MdxMaterialFile materials = MdxMaterialReader.Read(materialStream, modelPath);
+
+            CachedMdx cached = new();
+            ResolveBoundsMdx(geometry, summary, out Vector3 initialMin, out Vector3 initialMax);
+            cached.BoundsMin = initialMin;
+            cached.BoundsMax = initialMax;
+
+            foreach (MdxGeosetGeometry geoset in geometry.Geosets)
+            {
+                if (geoset.Vertices.Count == 0 || geoset.Indices.Count < 3)
+                    continue;
+
+                float[] vertexData = new float[geoset.Vertices.Count * 8];
+                (Vector4[] boneIndices, Vector4[] boneWeights) = (Array.Empty<Vector4>(), Array.Empty<Vector4>());
+
+                Vector3 geosetMin = new(float.MaxValue);
+                Vector3 geosetMax = new(float.MinValue);
+                for (int index = 0; index < geoset.Vertices.Count; index++)
+                {
+                    Vector3 position = geoset.Vertices[index];
+                    Vector3 normal = index < geoset.Normals.Count ? geoset.Normals[index] : Vector3.UnitZ;
+
+                    if (float.IsFinite(position.X) && float.IsFinite(position.Y) && float.IsFinite(position.Z))
+                    {
+                        geosetMin = Vector3.Min(geosetMin, position);
+                        geosetMax = Vector3.Max(geosetMax, position);
+                    }
+
+                    int offset = index * 8;
+                    vertexData[offset + 0] = position.X;
+                    vertexData[offset + 1] = position.Y;
+                    vertexData[offset + 2] = position.Z;
+                    vertexData[offset + 3] = normal.X;
+                    vertexData[offset + 4] = normal.Y;
+                    vertexData[offset + 5] = normal.Z;
+                    vertexData[offset + 6] = 0.0f;
+                    vertexData[offset + 7] = 0.0f;
+                }
+
+                float[] skinningVertexData = MdxSkinningHelper.BuildSkinningVertexData(
+                    boneIndices,
+                    boneWeights,
+                    geoset.Vertices.Count);
+                ushort[] indices = geoset.Indices.ToArray();
+
+                int layerCount = geoset.MaterialId >= 0 && geoset.MaterialId < summary.MaterialCount
+                    ? summary.Materials[geoset.MaterialId].LayerCount
+                    : 0;
+                if (layerCount == 0)
+                    layerCount = 1;
+
+                for (int layerIndex = 0; layerIndex < layerCount; layerIndex++)
+                {
+                    MdxResolvedMaterialState materialState = MdxRenderStateResolver.ResolveMaterial(summary, materials, geoset.MaterialId, layerIndex, 0, 0);
+                    
+                    MdxResolvedGeosetRenderState geosetState = new()
+                    {
+                        Alpha = 1.0f,
+                        BaseColor = Vector3.One,
+                        ReceivesLighting = true,
+                        DepthTest = true,
+                        DepthWrite = !materialState.IsTransparent,
+                    };
+
+                    if (geosetState.Alpha <= 0.001f)
+                        continue;
+
+                    uint textureId = _fallbackWhiteTexture;
+                    bool hasTexture = false;
+                    if (TryGetOrLoadMaterialTextureMdx(summary, materialState, out uint loadedTextureId))
+                    {
+                        textureId = loadedTextureId;
+                        hasTexture = true;
+                    }
+
+                    float[] layeredVertexData = (float[])vertexData.Clone();
+                    IReadOnlyList<Vector2> layerUvSet = materialState.CoordId >= 0 && materialState.CoordId < geoset.UvSetCount
+                        ? geoset.UvSets[materialState.CoordId]
+                        : geoset.PrimaryUvSet;
+                    for (int vertexIndex = 0; vertexIndex < geoset.Vertices.Count; vertexIndex++)
+                    {
+                        Vector2 uv = vertexIndex < layerUvSet.Count ? layerUvSet[vertexIndex] : Vector2.Zero;
+                        int offset = (vertexIndex * 8) + 6;
+                        layeredVertexData[offset + 0] = uv.X;
+                        layeredVertexData[offset + 1] = uv.Y;
+                    }
+
+                    bool usesTransform = false;
+                    Vector2 uvTranslation = Vector2.Zero;
+                    Vector2 uvScale = Vector2.One;
+                    Vector2 uvRotationRow0 = new(1.0f, 0.0f);
+                    Vector2 uvRotationRow1 = new(0.0f, 1.0f);
+
+                    MdxCommandBuffers cmd = CreateMdxCommand(
+                        layeredVertexData,
+                        skinningVertexData,
+                        indices,
+                        textureId,
+                        hasTexture,
+                        materialState.IsTransparent,
+                        materialState.IsAdditive,
+                        geosetState.DepthTest,
+                        geosetState.DepthWrite,
+                        materialState.AlphaCutout,
+                        geosetState.ReceivesLighting,
+                        materialState.UsesSphereEnvMap,
+                        usesBoneSkinning: false,
+                        usesTransform,
+                        uvTranslation,
+                        uvScale,
+                        uvRotationRow0,
+                        uvRotationRow1,
+                        geosetState.BaseColor,
+                        new Vector3(materialState.EmissiveGain),
+                        geosetState.Alpha,
+                        materialState.BlendMode,
+                        geoset.MaterialId >= 0 && geoset.MaterialId < summary.MaterialCount
+                            ? summary.Materials[geoset.MaterialId].PriorityPlane
+                            : 0,
+                        ResolveBoundsCenter(geosetMin, geosetMax));
+
+                    cached.Commands.Add(cmd);
+                }
+            }
+
+            _mdxCache[cacheKey] = cached;
+            return cached;
+        }
+        catch
+        {
+            _mdxCache[cacheKey] = null!;
+            return null;
+        }
+    }
+
+    private unsafe MdxCommandBuffers CreateMdxCommand(
+        float[] interleaved,
+        float[] skinningInterleaved,
+        ushort[] indices,
+        uint textureId,
+        bool hasTexture,
+        bool isTransparent,
+        bool isAdditive,
+        bool depthTest,
+        bool depthWrite,
+        bool alphaCutout,
+        bool receivesLighting,
+        bool usesSphereEnvMap,
+        bool usesBoneSkinning,
+        bool usesUvTransform,
+        Vector2 uvTranslation,
+        Vector2 uvScale,
+        Vector2 uvRotationRow0,
+        Vector2 uvRotationRow1,
+        Vector3 baseColor,
+        Vector3 emissiveColor,
+        float alpha,
+        uint blendMode,
+        int transparentSortPriority,
+        Vector3 transparentSortCenter)
+    {
+        uint vao = _gl.GenVertexArray();
+        uint vbo = _gl.GenBuffer();
+        uint skinningVbo = _gl.GenBuffer();
+        uint ebo = _gl.GenBuffer();
+
+        _gl.BindVertexArray(vao);
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
+        fixed (float* vertexPtr = interleaved)
+        {
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(interleaved.Length * sizeof(float)), vertexPtr, BufferUsageARB.StaticDraw);
+        }
+
+        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
+        fixed (ushort* indexPtr = indices)
+        {
+            _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(ushort)), indexPtr, BufferUsageARB.StaticDraw);
+        }
+
+        const uint stride = 8u * sizeof(float);
+        _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, (void*)0);
+        _gl.EnableVertexAttribArray(0);
+        _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, stride, (void*)(3 * sizeof(float)));
+        _gl.EnableVertexAttribArray(1);
+        _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, stride, (void*)(6 * sizeof(float)));
+        _gl.EnableVertexAttribArray(2);
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, skinningVbo);
+        fixed (float* skinningPtr = skinningInterleaved)
+        {
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(skinningInterleaved.Length * sizeof(float)), skinningPtr, BufferUsageARB.StaticDraw);
+        }
+
+        _gl.VertexAttribPointer(3, 4, VertexAttribPointerType.Float, false, stride, (void*)0);
+        _gl.EnableVertexAttribArray(3);
+        _gl.VertexAttribPointer(4, 4, VertexAttribPointerType.Float, false, stride, (void*)(4 * sizeof(float)));
+        _gl.EnableVertexAttribArray(4);
+
+        _gl.BindVertexArray(0);
+
+        return new MdxCommandBuffers(
+            vao, vbo, skinningVbo, ebo, (uint)indices.Length,
+            textureId, hasTexture, isTransparent, isAdditive,
+            depthTest, depthWrite, alphaCutout, receivesLighting,
+            usesSphereEnvMap, usesBoneSkinning, usesUvTransform,
+            uvTranslation, uvScale, uvRotationRow0, uvRotationRow1,
+            baseColor, emissiveColor, alpha, blendMode,
+            transparentSortPriority, transparentSortCenter);
+    }
+
+    private bool TryGetOrLoadMaterialTextureMdx(MdxSummary summary, MdxResolvedMaterialState material, out uint textureId)
+    {
+        textureId = 0;
+        foreach (string candidate in EnumerateTextureCandidatesMdx(material))
+        {
+            if (!TryGetOrLoadTexture(candidate, out uint loadedTextureId))
+                continue;
+
+            textureId = loadedTextureId;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateTextureCandidatesMdx(MdxResolvedMaterialState material)
+    {
+        if (!string.IsNullOrWhiteSpace(material.TexturePath))
+            yield return material.TexturePath;
+
+        if (material.ReplaceableId != 0)
+        {
+            if (DefaultReplaceableTextures.TryGetValue(material.ReplaceableId, out string? replaceablePath))
+                yield return replaceablePath;
+        }
+    }
+
+    private uint CreateFallbackWhiteTexture()
+    {
+        byte[] whitePixel = [255, 255, 255, 255];
+        uint textureId = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, textureId);
+        unsafe
+        {
+            fixed (byte* pixelPtr = whitePixel)
+            {
+                _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8, 1, 1, 0, PixelFormat.Rgba, PixelType.UnsignedByte, pixelPtr);
+            }
+        }
+
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.Repeat);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.Repeat);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+        _ownedTextureIds.Add(textureId);
+        return textureId;
+    }
+
+    private static Vector3 ResolveBoundsCenter(Vector3 min, Vector3 max)
+    {
+        if (!float.IsFinite(min.X) || !float.IsFinite(min.Y) || !float.IsFinite(min.Z)
+            || !float.IsFinite(max.X) || !float.IsFinite(max.Y) || !float.IsFinite(max.Z))
+            return Vector3.Zero;
+
+        return (min + max) * 0.5f;
+    }
+
+    private static void ResolveBoundsMdx(MdxGeometryFile geometry, MdxSummary summary, out Vector3 min, out Vector3 max)
+    {
+        if (summary.BoundsMin is Vector3 summaryMin && summary.BoundsMax is Vector3 summaryMax)
+        {
+            Vector3 summaryExtent = summaryMax - summaryMin;
+            if (float.IsFinite(summaryExtent.X) && float.IsFinite(summaryExtent.Y) && float.IsFinite(summaryExtent.Z)
+                && summaryExtent.LengthSquared() > 0.0001f)
+            {
+                min = summaryMin;
+                max = summaryMax;
+                return;
+            }
+        }
+
+        bool found = false;
+        min = new Vector3(float.MaxValue);
+        max = new Vector3(float.MinValue);
+        foreach (MdxGeosetGeometry geoset in geometry.Geosets)
+        {
+            if (geoset.BoundsMin is Vector3 geosetMin && geoset.BoundsMax is Vector3 geosetMax)
+            {
+                min = Vector3.Min(min, geosetMin);
+                max = Vector3.Max(max, geosetMax);
+                found = true;
+            }
+        }
+
+        if (!found)
+        {
+            min = new Vector3(-1.0f, -1.0f, -1.0f);
+            max = new Vector3(1.0f, 1.0f, 1.0f);
+        }
+    }
+
+    private static float[] BuildZeroSkinningVertexData(int vertexCount)
+    {
+        return new float[vertexCount * 8];
+    }
+
+    private bool TryGetOrLoadTexture(string texturePath, out uint textureId)
+    {
+        string cacheKey = texturePath.Replace('/', '\\').ToLowerInvariant();
+        if (_loadedTextureCache.TryGetValue(cacheKey, out textureId))
+            return textureId != 0;
+
+        string normalized = EnsureBlpExtension(texturePath).Replace('/', '\\').TrimStart('\\');
+        if (!_viewerIoService.TryReadVirtualFile(_sourceKey, normalized, out byte[]? bytes, out _) || bytes == null || bytes.Length == 0)
+        {
+            _loadedTextureCache[cacheKey] = 0;
+            textureId = 0;
+            return false;
+        }
+
+        try
+        {
+            using MemoryStream stream = new(bytes, writable: false);
+            using BlpFile blp = new(stream);
+            byte[] rgbaPixels = blp.GetPixels(0, out int width, out int height, bgra: false);
+            textureId = UploadTexture(rgbaPixels, width, height);
+            _loadedTextureCache[cacheKey] = textureId;
+            _ownedTextureIds.Add(textureId);
+            return textureId != 0;
+        }
+        catch
+        {
+            _loadedTextureCache[cacheKey] = 0;
+            textureId = 0;
+            return false;
+        }
+    }
+
+    private uint UploadTexture(byte[] rgbaPixels, int width, int height)
+    {
+        uint textureId = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, textureId);
+        unsafe
+        {
+            fixed (byte* pixelPtr = rgbaPixels)
+            {
+                _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8, (uint)width, (uint)height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, pixelPtr);
+            }
+        }
+
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.LinearMipmapLinear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.Repeat);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.Repeat);
+        _gl.GenerateMipmap(TextureTarget.Texture2D);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+        return textureId;
+    }
+
+    private void ConfigureBlendMode(bool isAdditive, uint blendMode)
+    {
+        if (isAdditive || blendMode is MdxBlendModeAdditive or MdxBlendModeAddAlpha)
+        {
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
+            return;
+        }
+
+        if (blendMode is MdxBlendModeModulate or MdxBlendModeModulate2X)
+        {
+            _gl.BlendFunc(BlendingFactor.DstColor, BlendingFactor.Zero);
+            return;
+        }
+
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+    }
+
+    private static void ResolveAlphaHandling(MdxCommandBuffers command, out bool useTextureAlpha, out bool premultiplyAlpha, out float alphaThreshold)
+    {
+        if (command.AlphaCutout)
+        {
+            useTextureAlpha = true;
+            premultiplyAlpha = false;
+            alphaThreshold = 0.75f;
+            return;
+        }
+
+        if (!command.IsTransparent)
+        {
+            useTextureAlpha = false;
+            premultiplyAlpha = false;
+            alphaThreshold = 0.0f;
+            return;
+        }
+
+        switch (command.BlendMode)
+        {
+            case MdxBlendModeBlend:
+                useTextureAlpha = true;
+                premultiplyAlpha = true;
+                alphaThreshold = 0.0f;
+                return;
+            case MdxBlendModeAdditive:
+            case MdxBlendModeAddAlpha:
+                useTextureAlpha = true;
+                premultiplyAlpha = false;
+                alphaThreshold = 0.0f;
+                return;
+            case MdxBlendModeModulate:
+            case MdxBlendModeModulate2X:
+                useTextureAlpha = false;
+                premultiplyAlpha = false;
+                alphaThreshold = 0.0f;
+                return;
+            case 0:
+                useTextureAlpha = false;
+                premultiplyAlpha = false;
+                alphaThreshold = 0.05f;
+                return;
+            default:
+                useTextureAlpha = true;
+                premultiplyAlpha = false;
+                alphaThreshold = 0.05f;
+                return;
+        }
+    }
+
+    private sealed class CachedWmo
+    {
+        public List<WmoCommandBuffers> Commands { get; } = [];
+        public Vector3 BoundsMin { get; set; }
+        public Vector3 BoundsMax { get; set; }
+    }
+
+    private sealed class WmoCommandBuffers
+    {
+        public WmoCommandBuffers(
+            uint vao,
+            uint vbo,
+            uint ebo,
+            uint indexCount,
+            Vector3 sortCenter,
+            uint textureId,
+            bool hasTexture,
+            bool isTransparent,
+            float alphaTestThreshold,
+            bool useTextureAlpha,
+            BlendingFactor sourceBlendFactor,
+            BlendingFactor destinationBlendFactor,
+            Vector3 baseColor)
+        {
+            Vao = vao;
+            Vbo = vbo;
+            Ebo = ebo;
+            IndexCount = indexCount;
+            SortCenter = sortCenter;
+            TextureId = textureId;
+            HasTexture = hasTexture;
+            IsTransparent = isTransparent;
+            AlphaTestThreshold = alphaTestThreshold;
+            UseTextureAlpha = useTextureAlpha;
+            SourceBlendFactor = sourceBlendFactor;
+            DestinationBlendFactor = destinationBlendFactor;
+            BaseColor = baseColor;
+        }
+
+        public uint Vao { get; }
+        public uint Vbo { get; }
+        public uint Ebo { get; }
+        public uint IndexCount { get; }
+        public Vector3 SortCenter { get; }
+        public uint TextureId { get; }
+        public bool HasTexture { get; }
+        public bool IsTransparent { get; }
+        public float AlphaTestThreshold { get; }
+        public bool UseTextureAlpha { get; }
+        public BlendingFactor SourceBlendFactor { get; }
+        public BlendingFactor DestinationBlendFactor { get; }
+        public Vector3 BaseColor { get; }
+
+        public void Dispose(GL gl)
+        {
+            if (Vbo != 0) gl.DeleteBuffer(Vbo);
+            if (Ebo != 0) gl.DeleteBuffer(Ebo);
+            if (Vao != 0) gl.DeleteVertexArray(Vao);
+        }
+    }
+
+    private sealed class CachedMdx
+    {
+        public List<MdxCommandBuffers> Commands { get; } = [];
+        public Vector3 BoundsMin { get; set; }
+        public Vector3 BoundsMax { get; set; }
+    }
+
+    private sealed class MdxCommandBuffers
+    {
+        public MdxCommandBuffers(
+            uint vao,
+            uint vbo,
+            uint skinningVbo,
+            uint ebo,
+            uint indexCount,
+            uint textureId,
+            bool hasTexture,
+            bool isTransparent,
+            bool isAdditive,
+            bool depthTest,
+            bool depthWrite,
+            bool alphaCutout,
+            bool receivesLighting,
+            bool usesSphereEnvMap,
+            bool usesBoneSkinning,
+            bool usesUvTransform,
+            Vector2 uvTranslation,
+            Vector2 uvScale,
+            Vector2 uvRotationRow0,
+            Vector2 uvRotationRow1,
+            Vector3 baseColor,
+            Vector3 emissiveColor,
+            float alpha,
+            uint blendMode,
+            int transparentSortPriority,
+            Vector3 transparentSortCenter)
+        {
+            Vao = vao;
+            Vbo = vbo;
+            SkinningVbo = skinningVbo;
+            Ebo = ebo;
+            IndexCount = indexCount;
+            TextureId = textureId;
+            HasTexture = hasTexture;
+            IsTransparent = isTransparent;
+            IsAdditive = isAdditive;
+            DepthTest = depthTest;
+            DepthWrite = depthWrite;
+            AlphaCutout = alphaCutout;
+            ReceivesLighting = receivesLighting;
+            UsesSphereEnvMap = usesSphereEnvMap;
+            UsesBoneSkinning = usesBoneSkinning;
+            UsesUvTransform = usesUvTransform;
+            UvTranslation = uvTranslation;
+            UvScale = uvScale;
+            UvRotationRow0 = uvRotationRow0;
+            UvRotationRow1 = uvRotationRow1;
+            BaseColor = baseColor;
+            EmissiveColor = emissiveColor;
+            Alpha = alpha;
+            BlendMode = blendMode;
+            TransparentSortPriority = transparentSortPriority;
+            TransparentSortCenter = transparentSortCenter;
+        }
+
+        public uint Vao { get; }
+        public uint Vbo { get; }
+        public uint SkinningVbo { get; }
+        public uint Ebo { get; }
+        public uint IndexCount { get; }
+        public uint TextureId { get; }
+        public bool HasTexture { get; }
+        public bool IsTransparent { get; }
+        public bool IsAdditive { get; }
+        public bool DepthTest { get; }
+        public bool DepthWrite { get; }
+        public bool AlphaCutout { get; }
+        public bool ReceivesLighting { get; }
+        public bool UsesSphereEnvMap { get; }
+        public bool UsesBoneSkinning { get; }
+        public bool UsesUvTransform { get; }
+        public Vector2 UvTranslation { get; }
+        public Vector2 UvScale { get; }
+        public Vector2 UvRotationRow0 { get; }
+        public Vector2 UvRotationRow1 { get; }
+        public Vector3 BaseColor { get; }
+        public Vector3 EmissiveColor { get; }
+        public float Alpha { get; }
+        public uint BlendMode { get; }
+        public int TransparentSortPriority { get; }
+        public Vector3 TransparentSortCenter { get; }
+
+        public void Dispose(GL gl)
+        {
+            if (Vbo != 0) gl.DeleteBuffer(Vbo);
+            if (SkinningVbo != 0) gl.DeleteBuffer(SkinningVbo);
+            if (Ebo != 0) gl.DeleteBuffer(Ebo);
+            if (Vao != 0) gl.DeleteVertexArray(Vao);
+        }
+    }
+
+    private struct TransparentDrawEntry
+    {
+        public bool IsWmo;
+        public WmoCommandBuffers WmoCommand;
+        public MdxCommandBuffers MdxCommand;
+        public Matrix4x4 Transform;
+        public float DistanceSq;
+    }
+
+    private enum WmoPreviewBlendMode
+    {
+        Opaque,
+        Blend,
+        Add,
+        AlphaKey,
     }
 
 }
