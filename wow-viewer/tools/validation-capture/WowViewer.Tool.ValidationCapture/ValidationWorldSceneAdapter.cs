@@ -348,11 +348,8 @@ internal sealed class ValidationWorldSceneAdapter : IValidationWorldSceneAdapter
 
         private void OnClosing()
         {
-            _renderer?.Dispose();
             _renderer = null;
-            _viewerIoService?.Dispose();
             _viewerIoService = null;
-            _gl?.Dispose();
             _gl = null;
         }
 

@@ -60,7 +60,7 @@ Renderer-truth upgrade truth is narrower than the base V16 corpus truth:
 - first V16.2 normal run is in progress on all 6 builds
 
 The replacement `wow-viewer` validation-capture lane now has the same bounded
-proof anchors, but only for the raw capture families so far:
+proof anchors, and it now emits the bounded derived artifact images too:
 
 - command: `WowViewer.Tool.ValidationCapture capture --gpu-viewer-style`
 - proof anchors:
@@ -72,10 +72,14 @@ proof anchors, but only for the raw capture families so far:
 - current boundary:
   - the tool now owns bounded four-variant capture through
     `ValidationWorldSceneAdapter` and `IValidationWorldSceneAdapter`
+  - the tool now also writes compatible `images/<tile>_object_visibility_mask.png`
+    and `images/<tile>_no_objects.png` outputs under the dataset root
   - it bypasses `WowViewerWorldScenePlanner`
   - it still reuses `WorldGpuPreviewRenderer` as a temporary backend
-  - Phase 5 artifact handoff (`object_visibility_mask`, `no_object_minimap`) is
-    still the next required slice before any bounded dataset cutover claim
+  - broader non-bounded renderer-truth automation and the current full dataset
+    batch path still remain legacy-MdxViewer-owned
+  - later renderer ownership still needs to replace the temporary
+    `WorldGpuPreviewRenderer` backend reuse
 
 ## Quick Start
 

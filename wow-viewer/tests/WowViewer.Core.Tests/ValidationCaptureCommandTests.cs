@@ -57,6 +57,8 @@ public sealed class ValidationCaptureCommandTests
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "noliquids", "Azeroth_30_48_viewer_validation.png")));
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "noobjects", "Azeroth_30_48_viewer_validation.png")));
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "objectsonly", "Azeroth_30_48_viewer_validation.png")));
+            Assert.True(File.Exists(Path.Combine(temp.RootPath, "images", "Azeroth_30_48_object_visibility_mask.png")));
+            Assert.True(File.Exists(Path.Combine(temp.RootPath, "images", "Azeroth_30_48_no_objects.png")));
         }
     }
 

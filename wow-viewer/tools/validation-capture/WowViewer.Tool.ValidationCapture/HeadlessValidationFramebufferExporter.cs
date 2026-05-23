@@ -28,6 +28,39 @@ internal static class HeadlessValidationFramebufferExporter
         image.SaveAsPng(outputPath);
     }
 
+    public static void WriteMaskImage(
+        string outputPath,
+        int width,
+        int height,
+        byte[] l8Pixels)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
+        ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(height, 1);
+        ArgumentNullException.ThrowIfNull(l8Pixels);
+        if (l8Pixels.Length != checked(width * height))
+            throw new ArgumentException("L8 payload length must match width * height.", nameof(l8Pixels));
+
+        string? directory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        using Image<L8> image = Image.LoadPixelData<L8>(l8Pixels, width, height);
+        image.SaveAsPng(outputPath);
+    }
+
+    public static byte[] ReadRgbaImage(string inputPath, out int width, out int height)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(inputPath);
+
+        using Image<Rgba32> image = Image.Load<Rgba32>(inputPath);
+        width = image.Width;
+        height = image.Height;
+        byte[] rgbaPixels = new byte[checked(width * height * 4)];
+        image.CopyPixelDataTo(rgbaPixels);
+        return rgbaPixels;
+    }
+
     private static byte[] FlipVertical(int width, int height, byte[] rgbaPixels)
     {
         int rowLength = checked(width * 4);

@@ -102,7 +102,9 @@ uv run python scripts/build_v16_dataset.py repair-index --build 3_3_5_12340
 ## Renderer-Truth Capture And Patch (V16.2)
 
 The V16.2 dataset adds renderer-truth object masks and terrain-only minimaps
-from MdxViewer captures. This is a three-step pipeline.
+from viewer-generated captures. The current broad automation still uses
+MdxViewer, but `WowViewer.Tool.ValidationCapture` now has bounded proof on the
+two established anchors and emits the same `images/` artifact family.
 
 **Signal inventory — what the harvest stream vs the viewer produce:**
 
@@ -114,8 +116,8 @@ from MdxViewer captures. This is a three-step pipeline.
 | mddf_mask, modf_mask, object_instance_mask | harvest stream (C#) | Yes |
 | minimap_rgb, shadow_mask | harvest stream (C#) | Yes |
 | mcly_texture_ids, mcly_layer_mask | harvest stream (C#) | Yes |
-| **object_visibility_mask** | **MdxViewer capture** | V16.2 only |
-| **no_object_minimap** | **MdxViewer capture** | V16.2 only |
+| **object_visibility_mask** | **viewer capture (`MdxViewer` broad path, bounded `WowViewer.Tool.ValidationCapture` proof)** | V16.2 only |
+| **no_object_minimap** | **viewer capture (`MdxViewer` broad path, bounded `WowViewer.Tool.ValidationCapture` proof)** | V16.2 only |
 
 The harvest stream generates all terrain/texture/object signals. The viewer
 produces the renderer-truth overlay that the harvest cannot: the actual
@@ -134,10 +136,18 @@ uv run python scripts/build_v16_dataset.py generate-viewer-stubs `
 
 Output: `output/tmp/mdxviewer_validation_smoke/<build>/dataset/<MapName>_<tileY>_<tileX>.json`
 
-### Step 2: Run MdxViewer captures
+### Step 2: Run viewer captures
 
 Each viewer session renders all tiles for one build in multiple visibility
 families (primary, noobjects, objectsonly, noliquids) and outputs PNGs.
+
+Current routing truth:
+
+- broad all-build automation still uses `MdxViewer`
+- bounded wow-viewer proof now also exists through `WowViewer.Tool.ValidationCapture capture --gpu-viewer-style`
+- the bounded wow-viewer path is currently proven on:
+  - `0_5_3_3368 / Azeroth_30_48`
+  - `3_3_5_12340 / Azeroth_30_48`
 
 **Required CLI parameters:**
 - `--game-path` — staged client root (`output/tmp/wowarchive-clients/<build>/World of Warcraft`)
@@ -177,6 +187,21 @@ $root = "i:\parp\parp-tools\output\tmp\mdxviewer_validation_smoke\$build"
   --exit-after-validation
 ```
 
+**Run one bounded wow-viewer proof tile manually:**
+
+```powershell
+dotnet run --project .\wow-viewer\tools\validation-capture\WowViewer.Tool.ValidationCapture\WowViewer.Tool.ValidationCapture.csproj -- capture `
+  --client-root "I:\parp\parp-tools\output\tmp\wowarchive-clients\3_3_5_12340\World of Warcraft" `
+  --map-input "World\Maps\Azeroth\Azeroth.wdt" `
+  --dataset-root .\wow-viewer\output\tmp\validation-capture-phase5-335 `
+  --output-root .\wow-viewer\output\tmp\validation-capture-phase5-335 `
+  --tile-name Azeroth_30_48 `
+  --tile-x 30 `
+  --tile-y 48 `
+  --build 3.3.5.12340 `
+  --gpu-viewer-style
+```
+
 **Note:** Different builds use different map names and WDT paths. Check the
 client's `World\Maps\` directory for available maps. Common maps:
 - `Azeroth` (Kalimdor + Eastern Kingdoms)
@@ -187,6 +212,11 @@ client's `World\Maps\` directory for available maps. Common maps:
 
 Reads the captured PNGs and writes `object_visibility_mask` and
 `no_object_minimap` arrays into the V16 Zarr stores.
+
+The patch step is already compatible with both the legacy MdxViewer capture
+roots and the bounded wow-viewer proof roots because both write the same
+`images/<tile>_object_visibility_mask.png` and `images/<tile>_no_objects.png`
+files.
 
 ```powershell
 uv run python scripts/build_v16_dataset.py patch-renderer-truth `

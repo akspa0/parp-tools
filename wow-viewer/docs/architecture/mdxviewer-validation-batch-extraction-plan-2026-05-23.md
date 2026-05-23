@@ -22,6 +22,8 @@
   - `noobjects`
   - `objectsonly`
 - the remaining open step is not Phase 4 proof anymore; it is Phase 5 dataset handoff for `object_visibility_mask` and `no_object_minimap`, followed by longer-range replacement of the temporary `WorldGpuPreviewRenderer` backend reuse
+- the bounded Phase 5.1 handoff is now landed too: the new tool writes compatible `images/<tile>_object_visibility_mask.png` and `images/<tile>_no_objects.png` outputs under the dataset root on both staged proof anchors
+- the remaining open step is broader pipeline cutover and backend replacement, not first artifact emission
 
 ## Problem Statement
 
@@ -217,6 +219,8 @@ Status: landed for the bounded `0_5_3_3368` and `3_3_5_12340` `Azeroth_30_48` pr
 - the established bounded `Azeroth_30_48` tile roots
 
 Status: proof anchors now exist for the raw capture families, but artifact generation is still the next open work item.
+
+Updated status: raw capture families plus derived artifact images now both exist on the bounded proof anchors.
 
 ### Phase 4 - Batch And Pipeline Ownership
 

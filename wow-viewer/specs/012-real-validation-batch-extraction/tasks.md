@@ -86,13 +86,14 @@ Execution rule:
 
 ## Phase 5: Dataset Handoff
 
-- [ ] **5.1** Emit replacement downstream artifacts from the new tool path
-  - extend `ValidationCaptureCommand.cs` or add `ValidationCaptureArtifactCommand.cs`
-  - use shared `ValidationCaptureArtifactBuilder.cs`
-  - write compatible `object_visibility_mask` output
-  - write compatible `no_object_minimap` output
-- [ ] **5.2** Document the cutover point and proof boundary
+- [x] **5.1** Emit replacement downstream artifacts from the new tool path
+  - `ValidationCaptureCommand.cs` now emits derived artifacts after successful bounded runs
+  - uses shared `ValidationCaptureArtifactBuilder.cs`
+  - writes compatible `object_visibility_mask` output under `datasetRoot/images/`
+  - writes compatible `no_object_minimap` output under `datasetRoot/images/`
+  - bounded end-to-end proof now exists on staged `0_5_3_3368 / Azeroth_30_48` and staged `3_3_5_12340 / Azeroth_30_48`
+- [x] **5.2** Document the cutover point and proof boundary
   - [x] update `wow-viewer/README.md`
   - [x] update continuity docs or memory when the bounded proof exists
   - [x] update the architecture note and Speckit status to reflect completed Phase 4 proof on both bounded anchors
-  - state what remains legacy-only after the first slice
+  - [x] state what remains legacy-only after the first slice

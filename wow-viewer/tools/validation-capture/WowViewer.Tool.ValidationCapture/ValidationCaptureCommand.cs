@@ -161,6 +161,7 @@ internal static class ValidationCaptureCommand
         {
             using ValidationWorldSceneAdapter adapter = new();
             ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
+            EmitDerivedArtifacts(session);
             Console.WriteLine($"Validation capture gpu-viewer-style run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
             return result.FailedVariantCount == 0 ? 0 : 2;
         }
@@ -169,6 +170,7 @@ internal static class ValidationCaptureCommand
         {
             using SyntheticValidationWorldSceneAdapter adapter = new();
             ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
+            EmitDerivedArtifacts(session);
             Console.WriteLine($"Validation capture stub run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
             return result.FailedVariantCount == 0 ? 0 : 2;
         }
@@ -205,6 +207,52 @@ internal static class ValidationCaptureCommand
     private static bool HasFlag(string[] args, params string[] names)
     {
         return args.Any(arg => names.Contains(arg, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static void EmitDerivedArtifacts(HeadlessValidationCaptureSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        string imagesDirectory = Path.Combine(session.BatchPlan.DatasetRoot, "images");
+        Directory.CreateDirectory(imagesDirectory);
+
+        var requestsByVariant = session.BatchPlan.TileRequests.ToDictionary(request => request.Variant);
+        foreach (IGrouping<string, ValidationCaptureTileRequest> tileGroup in session.BatchPlan.TileRequests.GroupBy(static request => request.TileName, StringComparer.OrdinalIgnoreCase))
+        {
+            ValidationCaptureTileRequest primary = tileGroup.Single(request => request.Variant == ValidationCaptureVariant.Primary);
+            ValidationCaptureTileRequest noObjects = tileGroup.Single(request => request.Variant == ValidationCaptureVariant.NoObjects);
+            ValidationCaptureTileRequest? objectsOnly = tileGroup.SingleOrDefault(request => request.Variant == ValidationCaptureVariant.ObjectsOnly);
+
+            byte[] primaryRgba = HeadlessValidationFramebufferExporter.ReadRgbaImage(primary.OutputPath, out int width, out int height);
+            byte[] noObjectsRgba = HeadlessValidationFramebufferExporter.ReadRgbaImage(noObjects.OutputPath, out int noObjectsWidth, out int noObjectsHeight);
+            if (noObjectsWidth != width || noObjectsHeight != height)
+                throw new InvalidOperationException($"No-objects capture dimensions for '{tileGroup.Key}' do not match the primary capture.");
+
+            byte[]? objectsOnlyRgba = null;
+            if (objectsOnly is not null && File.Exists(objectsOnly.OutputPath))
+            {
+                objectsOnlyRgba = HeadlessValidationFramebufferExporter.ReadRgbaImage(objectsOnly.OutputPath, out int objectsOnlyWidth, out int objectsOnlyHeight);
+                if (objectsOnlyWidth != width || objectsOnlyHeight != height)
+                    throw new InvalidOperationException($"Objects-only capture dimensions for '{tileGroup.Key}' do not match the primary capture.");
+            }
+
+            ValidationCaptureArtifactOutputs outputs = ValidationCaptureArtifactBuilder.Build(
+                new ValidationCaptureArtifactInputs(
+                    tileGroup.Key,
+                    session.BuildLabel,
+                    width,
+                    height,
+                    primaryRgba,
+                    noObjectsRgba,
+                    objectsOnlyRgba),
+                session.ScenePolicy.ArtifactPolicy);
+
+            string objectMaskPath = Path.Combine(imagesDirectory, $"{tileGroup.Key}{session.ScenePolicy.ArtifactPolicy.ObjectVisibilityMaskFileSuffix}");
+            string noObjectMinimapPath = Path.Combine(imagesDirectory, $"{tileGroup.Key}{session.ScenePolicy.ArtifactPolicy.NoObjectMinimapFileSuffix}");
+
+            HeadlessValidationFramebufferExporter.WriteMaskImage(objectMaskPath, width, height, outputs.ObjectVisibilityMaskL8Pixels);
+            HeadlessValidationFramebufferExporter.WriteImage(noObjectMinimapPath, width, height, outputs.NoObjectMinimapRgbaPixels, sourceOriginBottomLeft: false);
+        }
     }
 
     private static void ShowUsage()

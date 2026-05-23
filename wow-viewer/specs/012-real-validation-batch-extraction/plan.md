@@ -311,6 +311,12 @@ Shared dependency:
 
 **Validation**: bounded headless runs can emit `object_visibility_mask` and `no_object_minimap` artifacts compatible with the current dataset lane.
 
+Current status:
+
+- landed for the bounded proof anchors via `WowViewer.Tool.ValidationCapture capture --gpu-viewer-style`
+- the tool now writes compatible `images/<tile>_object_visibility_mask.png` and `images/<tile>_no_objects.png` outputs under `datasetRoot/images/`
+- bounded real-data proof exists on staged `0_5_3_3368 / Azeroth_30_48` and staged `3_3_5_12340 / Azeroth_30_48`
+
 ### Step 5.2 — Document the cutover point
 
 Target docs:
@@ -324,4 +330,4 @@ Target docs:
 Current status:
 
 - `wow-viewer/README.md`, the architecture note, the active Speckit files, and continuity docs now describe the completed Phase 4 proof boundary accurately
-- the remaining open item in Step 5.2 is simply keeping that cutover language aligned once Phase 5 artifact emission lands
+- the remaining open item in Step 5.2 is keeping the cutover language aligned while broader automation still routes through legacy MdxViewer for non-bounded runs

@@ -41,7 +41,8 @@ The first target is not full viewer parity. The first target is a faithful headl
 	- `noliquids`
 	- `noobjects`
 	- `objectsonly`
-- The next open work is Phase 5 dataset handoff: emit `object_visibility_mask` and `no_object_minimap` from the new tool path and document the bounded cutover point.
+- Phase 5.1 is now also landed for the bounded proof surface: the tool emits compatible `images/<tile>_object_visibility_mask.png` and `images/<tile>_no_objects.png` artifacts under the dataset root.
+- The next open work is broader cutover, not first artifact emission: keep docs honest about what remains legacy-only, replace the current broader MdxViewer batch automation, and later remove the temporary `WorldGpuPreviewRenderer` backend reuse.
 
 ## User Scenarios & Testing
 
