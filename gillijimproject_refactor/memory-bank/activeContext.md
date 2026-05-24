@@ -51,6 +51,16 @@
     - V16.1.x normal training resumes with `--resume-checkpoint`, not `--resume-from auto`
     - `--epochs` remains the total run ceiling, so the continuation command must raise that ceiling above the completed checkpoint epoch
     - the shared V16.1 trainer now extends the cosine scheduler when resuming to a higher total epoch ceiling, so resume is no longer pinned to the original scheduler `T_max`
+- V16.1.3 height-channel normal model is now the active normal-lane iteration:
+  - adds `height_norm` as a 4th input channel to the normal model
+  - single model, clean gradient flow — no separate refiner, no distillation loops
+  - `V161NormalHeightModel` in `v16_1_models.py`: 3,549,955 params, Conv2d(4,64) first layer
+  - CLI: `--height-channel` flag on `train_v16_1_normal.py`
+  - smoke proof: 10 epochs, val_loss dropped from 2.01 to 0.54
+  - 1000-epoch long run now training at `v16_1_3_height_normal_pool4000` with 12GB autotune
+  - autotune selected batch-size=48, torch.compile enabled, ~172s/epoch
+  - V16.1.2 refiner approach was attempted but failed due to detached computation graph; V16.1.3 replaces it
+  - spec: `wow-viewer/specs/016-v16-1-3-height-channel-normal-model/`
 - V16.1 is now the named next architecture lane for terrain models:
   - one independent model per target family
   - `minimap -> height`

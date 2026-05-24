@@ -32,7 +32,9 @@ from harvester.v16_1_models import (  # noqa: E402
     V161HeightModel,
     V161HolesModel,
     V161LiquidModel,
+    V161NormalHeightModel,
     V161NormalModel,
+    V161NormalRefiner,
     V161TexcompModel,
     recompose_from_mcly_alpha,
 )
@@ -417,6 +419,7 @@ def _apply_dataset_limit(ds: V161Dataset, max_samples: int) -> None:
 def _autotune_batch_size(
     *,
     task: "TaskSpec",
+    task_name: str,
     train_ds: V161Dataset,
     device: torch.device,
     args: argparse.Namespace,
@@ -475,6 +478,8 @@ def _autotune_batch_size(
         _cleanup_probe_state()
         try:
             probe_model = task.model_factory().to(device)
+            if task_name == "normal" and bool(getattr(args, "height_channel", False)):
+                probe_model = V161NormalHeightModel().to(device)
             probe_optimizer = torch.optim.AdamW(probe_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
             probe_scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
             probe_model.train()
@@ -819,6 +824,75 @@ def _normal_loss(
     }
 
 
+def _refiner_refine_and_compare(
+    main_model: torch.nn.Module,
+    refiner: torch.nn.Module,
+    batch: dict[str, Any],
+    device: torch.device,
+    args: argparse.Namespace,
+) -> tuple[torch.Tensor, float, float, bool]:
+    """Run refiner on validation batch and compare refined vs raw loss.
+
+    Returns: (refined_normals, refined_loss, raw_loss, improved)
+    """
+    inp = batch["input"].to(device, non_blocking=True)
+    target = batch["normals"].to(device, non_blocking=True)
+    height_raw = batch["height_raw"].to(device, non_blocking=True)
+    normal_mask = batch["normal_mask"].to(device, non_blocking=True)
+    terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
+    object_weight = batch["weight_257"].to(device, non_blocking=True)
+    mddf_mask = batch["mddf_mask"].to(device, non_blocking=True)
+    modf_mask = batch["modf_mask"].to(device, non_blocking=True)
+    liquid_mask = batch["liquid_mask"].to(device, non_blocking=True)
+    alpha_painted_256 = batch["alpha_painted_256"].to(device, non_blocking=True)
+    mcly_any_16 = batch["mcly_any_16"].to(device, non_blocking=True)
+
+    with torch.no_grad():
+        pred = main_model(inp)
+        pred_n = F.normalize(pred, dim=1, eps=1e-6)
+        target_n = F.normalize(target, dim=1, eps=1e-6)
+
+        liquid_mask_257 = _resize_weight(liquid_mask, target_n.shape[-2:])
+        object_presence = torch.maximum(mddf_mask, modf_mask)
+        liquid_weight = 1.0 - (0.85 * liquid_mask_257)
+        instance_weight = 1.0 - (0.75 * object_presence)
+        base_mask = normal_mask * terrain_valid_mask * object_weight * liquid_weight * instance_weight
+
+        hard_region_weight, _hard_debug = _hard_region_weight_from_targets(
+            height_raw=height_raw,
+            target_normals=target_n,
+            alpha_painted_256=alpha_painted_256,
+            mcly_any_16=mcly_any_16,
+            terrain_valid_mask=terrain_valid_mask,
+            base_mask=base_mask,
+            detail_boost=float(args.normal_detail_boost),
+        )
+        train_mask = base_mask * hard_region_weight
+
+        raw_cos = _masked_mean(1.0 - (pred_n * target_n).sum(dim=1, keepdim=True), train_mask)
+        raw_vec = _masked_mean((pred_n - target_n).abs().mean(dim=1, keepdim=True), train_mask)
+        raw_nz = _masked_mean((pred_n[:, 2:3] - target_n[:, 2:3]) ** 2, train_mask)
+        raw_loss = float((raw_cos + 0.35 * raw_vec + 0.15 * raw_nz).item())
+
+        h_mean = batch["height_mean"].to(device).view(-1, 1, 1, 1) if "height_mean" in batch else None
+        h_std = batch["height_std"].to(device).view(-1, 1, 1, 1) if "height_std" in batch else None
+        norm_height = height_raw
+        if h_mean is not None and h_std is not None:
+            norm_height = (height_raw - h_mean) / (h_std + 1e-8)
+
+        refiner_input = torch.cat([pred, norm_height], dim=1)
+        refined = refiner(refiner_input)
+        refined_n = F.normalize(refined, dim=1, eps=1e-6)
+
+        ref_cos = _masked_mean(1.0 - (refined_n * target_n).sum(dim=1, keepdim=True), train_mask)
+        ref_vec = _masked_mean((refined_n - target_n).abs().mean(dim=1, keepdim=True), train_mask)
+        ref_nz = _masked_mean((refined_n[:, 2:3] - target_n[:, 2:3]) ** 2, train_mask)
+        refined_loss = float((ref_cos + 0.35 * ref_vec + 0.15 * ref_nz).item())
+
+    improved = bool(refined_loss < raw_loss)
+    return refined, refined_loss, raw_loss, improved
+
+
 def _holes_loss(
     model: torch.nn.Module,
     batch: dict[str, Any],
@@ -916,23 +990,27 @@ def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
     n = min(int(batch["input"].shape[0]), 8)
     rows = []
     row_titles = []
+    has_refined = "refined_normals" in outputs
     for idx in range(n):
         row_titles.append(_preview_row_title(batch, idx))
-        rows.append(
-            [
-                ("input", batch["input"][idx]),
-                ("normal_gt", _normals_to_rgb(outputs["target"][idx])),
-                ("normal_pred", _normals_to_rgb(outputs["pred"][idx])),
-                ("terrain_valid", outputs["terrain_valid_mask"][idx]),
-                ("base_mask", outputs["base_mask"][idx]),
-                ("hard_region", outputs["hard_region_signal"][idx] / outputs["hard_region_signal"][idx].max().clamp_min(1e-6)),
-                ("transition", outputs["transition_signal"][idx] / outputs["transition_signal"][idx].max().clamp_min(1e-6)),
-                ("detail_weight", outputs["detail_weight"][idx] / outputs["detail_weight"][idx].max().clamp_min(1e-6)),
-                ("train_mask", outputs["train_mask"][idx] / outputs["train_mask"][idx].max().clamp_min(1e-6)),
-                ("liquid_mask", outputs["liquid_mask"][idx]),
-                ("object_weight", outputs["object_weight"][idx]),
-            ]
-        )
+        panels: list[tuple[str, torch.Tensor]] = [
+            ("input", batch["input"][idx]),
+            ("normal_gt", _normals_to_rgb(outputs["target"][idx])),
+            ("normal_pred", _normals_to_rgb(outputs["pred"][idx])),
+        ]
+        if has_refined:
+            panels.append(("refined_gt", _normals_to_rgb(outputs["refined_normals"][idx])))
+        panels.extend([
+            ("terrain_valid", outputs["terrain_valid_mask"][idx]),
+            ("base_mask", outputs["base_mask"][idx]),
+            ("hard_region", outputs["hard_region_signal"][idx] / outputs["hard_region_signal"][idx].max().clamp_min(1e-6)),
+            ("transition", outputs["transition_signal"][idx] / outputs["transition_signal"][idx].max().clamp_min(1e-6)),
+            ("detail_weight", outputs["detail_weight"][idx] / outputs["detail_weight"][idx].max().clamp_min(1e-6)),
+            ("train_mask", outputs["train_mask"][idx] / outputs["train_mask"][idx].max().clamp_min(1e-6)),
+            ("liquid_mask", outputs["liquid_mask"][idx]),
+            ("object_weight", outputs["object_weight"][idx]),
+        ])
+        rows.append(panels)
     _save_preview_grid(rows, out_path, row_titles=row_titles)
 
 
@@ -1125,6 +1203,24 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         default=True,
         help="When autotune changes batch-size, rescale train-epoch-tiles to preserve the original steps-per-epoch budget.",
     )
+    p.add_argument(
+        "--refiner-disabled",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Disable the height-derived normal refiner and distillation (normal task only).",
+    )
+    p.add_argument(
+        "--refiner-distill-weight",
+        type=float,
+        default=0.25,
+        help="Weight of the distillation term when refiner is active (normal task only).",
+    )
+    p.add_argument(
+        "--height-channel",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Add height_norm as a 4th input channel to the normal model (normal task only).",
+    )
     return p.parse_args()
 
 
@@ -1144,6 +1240,16 @@ def run_task(task_name: str) -> None:
     resolved_num_workers = _resolve_num_workers(int(args.num_workers), device)
     resolved_persistent_workers = _resolve_persistent_workers(args.persistent_workers, resolved_num_workers)
     run_name = args.run_name or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    height_channel_enabled = bool(getattr(args, "height_channel", False))
+    refiner_enabled_for_task = bool(
+        task_name == "normal"
+        and not bool(getattr(args, "refiner_disabled", False))
+        and not bool(getattr(args, "height_channel", False))
+    )
+    if height_channel_enabled and not run_name.startswith("v16_1_3"):
+        run_name = f"v16_1_3_{run_name}"
+    elif refiner_enabled_for_task and not run_name.startswith("v16_1_2"):
+        run_name = f"v16_1_2_{run_name}"
     run_dir = _MODELS_ROOT / task_name / "runs" / run_name
     ckpt_dir = run_dir / "checkpoints"
     val_dir = run_dir / "validation"
@@ -1160,6 +1266,7 @@ def run_task(task_name: str) -> None:
         seed=args.seed,
         augment=not args.no_augment,
         curation_manifest=args.curation_manifest,
+        height_channel=bool(getattr(args, "height_channel", False)),
     )
     val_ds = V161Dataset(
         args.dataset_dir,
@@ -1169,6 +1276,7 @@ def run_task(task_name: str) -> None:
         seed=args.seed,
         augment=False,
         curation_manifest=args.curation_manifest,
+        height_channel=bool(getattr(args, "height_channel", False)),
     )
     curation_seed = int(args.curation_seed) if args.curation_seed is not None else int(args.seed)
     train_pool = _apply_dataset_pool(
@@ -1191,6 +1299,7 @@ def run_task(task_name: str) -> None:
     _apply_dataset_limit(val_ds, int(args.max_val_samples))
     autotune_result = _autotune_batch_size(
         task=task,
+        task_name=task_name,
         train_ds=train_ds,
         device=device,
         args=args,
@@ -1233,6 +1342,8 @@ def run_task(task_name: str) -> None:
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, **loader_kwargs)
 
     model = task.model_factory().to(device)
+    if task_name == "normal" and bool(getattr(args, "height_channel", False)):
+        model = V161NormalHeightModel().to(device)
     can_compile = hasattr(torch, "compile") and not args.no_compile and device.type == "cuda"
     if can_compile:
         try:
@@ -1245,6 +1356,10 @@ def run_task(task_name: str) -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
     scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and not args.no_amp))
+    refiner: torch.nn.Module | None = (
+        V161NormalRefiner().to(device) if refiner_enabled_for_task else None
+    )
+    refiner_active = False
     best_val = float("inf")
     best_epoch: int | None = None
     start_epoch = 1
@@ -1252,7 +1367,15 @@ def run_task(task_name: str) -> None:
 
     if args.resume_checkpoint is not None:
         ckpt = torch.load(args.resume_checkpoint, map_location=device)
-        model.load_state_dict(ckpt["model_state_dict"])
+        ckpt_state = ckpt["model_state_dict"]
+        model_state = model.state_dict()
+        ckpt_has_prefix = any(k.startswith("_orig_mod.") for k in ckpt_state)
+        model_has_prefix = any(k.startswith("_orig_mod.") for k in model_state)
+        if model_has_prefix and not ckpt_has_prefix:
+            ckpt_state = {f"_orig_mod.{k}": v for k, v in ckpt_state.items()}
+        elif ckpt_has_prefix and not model_has_prefix:
+            ckpt_state = {k.removeprefix("_orig_mod."): v for k, v in ckpt_state.items()}
+        model.load_state_dict(ckpt_state)
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         if "scheduler_state_dict" in ckpt:
             scheduler.load_state_dict(ckpt["scheduler_state_dict"])
@@ -1274,6 +1397,10 @@ def run_task(task_name: str) -> None:
         start_epoch = int(ckpt["epoch"]) + 1
         best_val = float(ckpt.get("best_val", float("inf")))
         best_epoch = int(ckpt["best_epoch"]) if ckpt.get("best_epoch") is not None else None
+        if refiner is not None and "refiner_state_dict" in ckpt:
+            refiner.load_state_dict(ckpt["refiner_state_dict"])
+            refiner_active = bool(ckpt.get("refiner_active", False))
+            print(f"        refiner | restored from checkpoint, active={refiner_active}", flush=True)
 
     config = {
         "task": task_name,
@@ -1308,6 +1435,13 @@ def run_task(task_name: str) -> None:
         "max_train_samples": args.max_train_samples,
         "max_val_samples": args.max_val_samples,
         "normal_detail_boost": args.normal_detail_boost,
+        "height_channel": bool(getattr(args, "height_channel", False)),
+        "model_params": sum(p.numel() for p in model.parameters() if p.requires_grad),
+        "refiner_enabled": refiner is not None,
+        "refiner_disabled": bool(getattr(args, "refiner_disabled", False)),
+        "refiner_distill_weight": float(getattr(args, "refiner_distill_weight", 0.25)),
+        "refiner_active": bool(refiner_active) if refiner is not None else False,
+        "refiner_params": refiner.count_parameters() if refiner is not None else 0,
         "train_pool": train_pool,
         "val_pool": val_pool,
         "no_compile": args.no_compile,
@@ -1386,6 +1520,25 @@ def run_task(task_name: str) -> None:
         for batch_idx, batch in enumerate(train_loader, start=1):
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and not args.no_amp)):
                 loss, metrics, _outputs = task.loss_fn(model, batch, device, args)
+
+            if refiner is not None and refiner_active and task_name == "normal":
+                with torch.no_grad():
+                    pred_raw = _outputs.get("pred")
+                    if pred_raw is not None:
+                        h_mean = batch["height_mean"].to(device).view(-1, 1, 1, 1)
+                        h_std = batch["height_std"].to(device).view(-1, 1, 1, 1)
+                        norm_height = (batch["height_raw"].to(device, non_blocking=True) - h_mean) / (h_std + 1e-8)
+                        teacher = refiner(torch.cat([pred_raw, norm_height], dim=1))
+                        teacher_n = F.normalize(teacher, dim=1, eps=1e-6)
+                        train_mask = _outputs.get("train_mask")
+                        if train_mask is not None:
+                            distill_cos = _masked_mean(
+                                1.0 - (pred_raw * teacher_n).sum(dim=1, keepdim=True),
+                                train_mask,
+                            )
+                            loss = loss + float(args.refiner_distill_weight) * distill_cos
+                            metrics["refiner_distill"] = float(distill_cos.item() / max(float(args.refiner_distill_weight), 1e-8))
+
             scaler.scale(loss / args.grad_accum_steps).backward()
             should_step = (batch_idx % args.grad_accum_steps == 0) or (batch_idx == len(train_loader))
             if should_step:
@@ -1465,6 +1618,14 @@ def run_task(task_name: str) -> None:
                     if preview_batch is None:
                         preview_batch = batch
                         preview_outputs = outputs
+                        if refiner is not None and task_name == "normal":
+                            _pred = outputs.get("pred")
+                            if _pred is not None:
+                                _h_mean = batch["height_mean"].to(device).view(-1, 1, 1, 1)
+                                _h_std = batch["height_std"].to(device).view(-1, 1, 1, 1)
+                                _norm_h = (batch["height_raw"].to(device, non_blocking=True) - _h_mean) / (_h_std + 1e-8)
+                                _refined = refiner(torch.cat([_pred, _norm_h], dim=1))
+                                preview_outputs["refined_normals"] = _refined
             n_val = max(len(val_loader), 1)
             entry["val_loss"] = val_loss_sum / n_val
             for key, value in val_metric_sums.items():
@@ -1476,19 +1637,63 @@ def run_task(task_name: str) -> None:
                 best_epoch = int(epoch)
                 is_new_best = True
                 entry["is_new_best"] = True
-                torch.save(
-                    {
-                        "epoch": epoch,
-                        "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        "scheduler_state_dict": scheduler.state_dict(),
-                        "scaler_state_dict": scaler.state_dict(),
-                        "best_val": best_val,
-                        "best_epoch": best_epoch,
-                        "task": task_name,
-                    },
-                    ckpt_dir / f"v16_1_{task_name}_best.pt",
-                )
+
+                ckpt_payload: dict[str, Any] = {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict(),
+                    "scaler_state_dict": scaler.state_dict(),
+                    "best_val": best_val,
+                    "best_epoch": best_epoch,
+                    "task": task_name,
+                }
+
+                if refiner is not None:
+                    refiner_loss_sum = 0.0
+                    refiner_n_val = 0
+                    raw_loss_sum = 0.0
+                    refined_outputs = None
+                    refiner.eval()
+                    for ref_batch in val_loader:
+                        with torch.no_grad():
+                            _r_refined, _r_loss, _raw_loss, _improved = _refiner_refine_and_compare(
+                                model, refiner, ref_batch, device, args,
+                            )
+                        refiner_loss_sum += _r_loss
+                        raw_loss_sum += _raw_loss
+                        refiner_n_val += 1
+                        if refined_outputs is None:
+                            refined_outputs = _r_refined
+                    _mean_refined = refiner_loss_sum / max(refiner_n_val, 1)
+                    _mean_raw = raw_loss_sum / max(refiner_n_val, 1)
+                    _refiner_improved = bool(_mean_refined < _mean_raw)
+                    entry["refiner_loss"] = _mean_refined
+                    entry["refiner_raw_loss"] = _mean_raw
+                    entry["refiner_improved"] = _refiner_improved
+
+                    if not refiner_active:
+                        refiner_active = True
+                        print(
+                            f"        refiner | activating distillation "
+                            f"(first best-epoch, raw={_mean_raw:.4f} refined={_mean_refined:.4f})",
+                            flush=True,
+                        )
+                    elif _refiner_improved:
+                        print(
+                            f"        refiner | improved: raw={_mean_raw:.4f} refined={_mean_refined:.4f}",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"        refiner | still active but not improved: "
+                            f"raw={_mean_raw:.4f} refined={_mean_refined:.4f}",
+                            flush=True,
+                        )
+                    ckpt_payload["refiner_state_dict"] = refiner.state_dict()
+                    ckpt_payload["refiner_active"] = bool(refiner_active)
+
+                torch.save(ckpt_payload, ckpt_dir / f"v16_1_{task_name}_best.pt")
                 print(f"        *** new best val_loss={best_val:.4f}", flush=True)
             if (
                 is_new_best
@@ -1499,28 +1704,8 @@ def run_task(task_name: str) -> None:
                 task.save_preview(preview_batch, preview_outputs, val_dir / f"best_epoch_{epoch:04d}.png")
 
         log_entries.append(entry)
-        torch.save(
-            {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict(),
-                "scaler_state_dict": scaler.state_dict(),
-                "best_val": best_val,
-                "best_epoch": best_epoch,
-                "task": task_name,
-            },
-            ckpt_dir / f"v16_1_{task_name}_last.pt",
-        )
-        (run_dir / "training_log.json").write_text(json.dumps(log_entries, indent=2), encoding="utf-8")
-
-    config["best_val"] = best_val if np.isfinite(best_val) else None
-    config["best_epoch"] = best_epoch
-    config["finished_at"] = datetime.now(timezone.utc).isoformat()
-    (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
-    torch.save(
-        {
-            "epoch": args.epochs,
+        last_ckpt: dict[str, Any] = {
+            "epoch": epoch,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
@@ -1528,7 +1713,29 @@ def run_task(task_name: str) -> None:
             "best_val": best_val,
             "best_epoch": best_epoch,
             "task": task_name,
-        },
-        ckpt_dir / f"v16_1_{task_name}_final.pt",
-    )
+        }
+        if refiner is not None:
+            last_ckpt["refiner_state_dict"] = refiner.state_dict()
+            last_ckpt["refiner_active"] = bool(refiner_active)
+        torch.save(last_ckpt, ckpt_dir / f"v16_1_{task_name}_last.pt")
+        (run_dir / "training_log.json").write_text(json.dumps(log_entries, indent=2), encoding="utf-8")
+
+    config["best_val"] = best_val if np.isfinite(best_val) else None
+    config["best_epoch"] = best_epoch
+    config["finished_at"] = datetime.now(timezone.utc).isoformat()
+    (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+    final_ckpt: dict[str, Any] = {
+        "epoch": args.epochs,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),
+        "scaler_state_dict": scaler.state_dict(),
+        "best_val": best_val,
+        "best_epoch": best_epoch,
+        "task": task_name,
+    }
+    if refiner is not None:
+        final_ckpt["refiner_state_dict"] = refiner.state_dict()
+        final_ckpt["refiner_active"] = bool(refiner_active)
+    torch.save(final_ckpt, ckpt_dir / f"v16_1_{task_name}_final.pt")
     print(f"Done. Run dir: {run_dir}", flush=True)

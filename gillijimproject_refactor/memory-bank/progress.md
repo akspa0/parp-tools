@@ -372,6 +372,14 @@
   - shared placement rotation stays in raw-file convention
 
 ## In Progress
+- V16.1.3 height-channel normal model 1000-epoch run:
+  - run: `v16_1_3_height_normal_pool4000`
+  - `--height-channel` adds `height_norm` as 4th input channel
+  - autotune selected batch-size=48 for 12GB VRAM target
+  - torch.compile enabled, ~172s/epoch
+  - resumed from smoke checkpoint (epoch 10), currently at epoch 12+
+  - first two resumed epochs: val_loss=0.3160, 0.3199
+  - run dir: `wow-viewer/models/v16_1/normal/runs/v16_1_3_height_normal_pool4000/`
 - First real V16 training run:
   - `v16_full_corpus_epoch_rotation`
   - `train-max-tiles 4000`

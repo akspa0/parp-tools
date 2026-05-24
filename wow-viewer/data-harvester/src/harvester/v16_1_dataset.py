@@ -70,9 +70,11 @@ class V161Dataset(Dataset):
         seed: int = 42,
         augment: bool = False,
         curation_manifest: str | Path | None = None,
+        height_channel: bool = False,
     ) -> None:
         self.dataset_dir = Path(dataset_dir)
         self.augment = augment and split == "train"
+        self.height_channel = bool(height_channel)
         self._rng = np.random.RandomState(seed)
         self._stores: dict[str, zarr.Group] = {}
         self._index_entries: list[dict] = []
@@ -262,8 +264,14 @@ class V161Dataset(Dataset):
                 terrain_valid_mask_257 = np.rot90(terrain_valid_mask_257, k=1)
                 mcly_any_16 = np.rot90(mcly_any_16, k=1)
 
+        minimap_t = torch.from_numpy(minimap.copy()).permute(2, 0, 1)
+        if self.height_channel:
+            height_norm_t = torch.from_numpy(height_norm[:256, :256].copy()).unsqueeze(0)
+            input_tensor = torch.cat([minimap_t, height_norm_t], dim=0)
+        else:
+            input_tensor = minimap_t
         return {
-            "input": torch.from_numpy(minimap.copy()).permute(2, 0, 1),
+            "input": input_tensor,
             "height_raw": torch.from_numpy(height_raw.copy()).unsqueeze(0),
             "height_norm": torch.from_numpy(height_norm.copy()).unsqueeze(0),
             "height_mean": torch.tensor(h_mean, dtype=torch.float32),

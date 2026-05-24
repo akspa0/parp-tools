@@ -77,9 +77,9 @@ class _UpBlock(nn.Module):
 
 
 class _UNetBackbone(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, in_channels: int = 3) -> None:
         super().__init__()
-        self.enc0 = _ConvBlock(3, 64)
+        self.enc0 = _ConvBlock(in_channels, 64)
         self.enc1 = _DownBlock(64, 96)
         self.enc2 = _DownBlock(96, 160)
         self.enc3 = _DownBlock(160, 224)
@@ -125,7 +125,7 @@ class V161HeightModel(nn.Module):
 class V161NormalModel(nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.backbone = _UNetBackbone()
+        self.backbone = _UNetBackbone(3)
         self.head = nn.Sequential(
             nn.Conv2d(32, 32, 3, padding=1),
             nn.ReLU(inplace=True),
@@ -137,6 +137,73 @@ class V161NormalModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         d0, _ = self.backbone(x)
         return self.head(d0)
+
+
+class V161NormalHeightModel(nn.Module):
+    """Normal model with height as an input channel: cat(minimap_rgb, height_norm) → normals."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.backbone = _UNetBackbone(4)
+        self.head = nn.Sequential(
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Upsample(size=(257, 257), mode="bilinear", align_corners=True),
+            nn.Conv2d(32, 3, 1),
+            nn.Tanh(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        d0, _ = self.backbone(x)
+        return self.head(d0)
+
+
+class V161NormalRefiner(nn.Module):
+    """Small conv refiner: pred_normals(3ch) + height(1ch) → refined_normals(3ch).
+
+    No masking. No object/liquid gating. Pure geometric refinement using
+    height as a structural prior. Skip connection from input normals to
+    output so the refiner starts as identity.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.proj = nn.Conv2d(4, 32, 3, padding=1)
+        self.bn_proj = nn.BatchNorm2d(32)
+
+        self.res1 = nn.Sequential(
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.BatchNorm2d(32),
+        )
+        self.res2 = nn.Sequential(
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.BatchNorm2d(32),
+        )
+        self.res3 = nn.Sequential(
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 3, 3, padding=1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        input_normals = x[:, :3]
+        h = self.proj(x)
+        h = self.bn_proj(h)
+        h = F.relu(h, inplace=True)
+        h = h + self.res1(h)
+        h = h + self.res2(h)
+        delta = self.res3(h)
+        return torch.tanh(input_normals + delta)
+
+    def count_parameters(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
 class V161HolesModel(nn.Module):
