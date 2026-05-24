@@ -15,8 +15,7 @@ public sealed class WorldTerrainChunkData
         bool hasLiquidFlags,
         bool hasVertexColors,
         float[]? heights,
-        IReadOnlyList<AdtTextureChunkLayer>? textureLayers = null,
-        byte[]? shadowMap = null)
+        IReadOnlyList<AdtTextureChunkLayer>? textureLayers = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(chunkIndex);
         ArgumentOutOfRangeException.ThrowIfNegative(indexX);
@@ -36,7 +35,6 @@ public sealed class WorldTerrainChunkData
         HasVertexColors = hasVertexColors;
         Heights = heights;
         TextureLayers = textureLayers ?? [];
-        ShadowMap = shadowMap;
     }
 
     public int ChunkIndex { get; }
@@ -68,6 +66,4 @@ public sealed class WorldTerrainChunkData
     public IReadOnlyList<AdtTextureChunkLayer> TextureLayers { get; }
 
     public bool HasTextureLayers => TextureLayers.Count > 0;
-
-    public byte[]? ShadowMap { get; }
 }

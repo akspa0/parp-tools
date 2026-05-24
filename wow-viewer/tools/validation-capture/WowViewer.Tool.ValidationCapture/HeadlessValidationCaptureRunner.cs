@@ -75,8 +75,8 @@ internal static class HeadlessValidationCaptureRunner
                     : 1f;
                 float groundHeight = sceneAdapter.ResolveGroundHeight(request.TileX, request.TileY);
                 ValidationCaptureCameraFrame cameraFrame = ValidationCaptureCameraSolver.SolveTopDown(new ValidationCaptureCameraInput(
-                    TileX: request.TileX,
-                    TileY: request.TileY,
+                    request.TileX,
+                    request.TileY,
                     aspectRatio,
                     groundHeight,
                     DefaultMapOrigin,

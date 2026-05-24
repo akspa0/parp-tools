@@ -419,7 +419,6 @@ internal static class WowViewerWorldRuntimeBridge
             ResolveTileAndPlacements(session, request.TileX, request.TileY, archiveCatalog);
         selectedTileResolveStopwatch.Stop();
 
-        Console.Error.WriteLine($"[Bridge] selectedTile=({selectedTile.tileX},{selectedTile.tileY}) placementSource={placementSourcePath} wmoPlacements={placementCatalog.WorldModelPlacements.Count} mddfPlacements={placementCatalog.ModelPlacements.Count}");
         WorldWdlTileData wdlTileData = WorldWdlTileData.Missing("WDL disabled for World Session; ADT terrain is the authoritative surface.", selectedTile.tileX, selectedTile.tileY);
         WorldLoadBuildCollector loadCollector = new();
         Stopwatch activeTerrainBuildStopwatch = Stopwatch.StartNew();
@@ -441,23 +440,10 @@ internal static class WowViewerWorldRuntimeBridge
         Stopwatch instanceBuildStopwatch = Stopwatch.StartNew();
         List<WorldObjectInstance> wmoInstances = [];
         List<WorldObjectInstance> mdxInstances = [];
-        HashSet<int> seenWmoUniqueIds = [];
-        HashSet<int> seenMdxUniqueIds = [];
         foreach (WowViewerWorldRuntimeTileFrame activeTile in activeTerrainTiles)
         {
-            AdtPlacementCatalog catalog = activeTile.PlacementCatalog;
-            List<WorldObjectInstance> tileWmos = BuildWmoInstances(catalog, activeTile.TileX, activeTile.TileY, assetReadyLookup);
-            for (int i = 0; i < tileWmos.Count; i++)
-            {
-                if (seenWmoUniqueIds.Add(tileWmos[i].UniqueId))
-                    wmoInstances.Add(tileWmos[i]);
-            }
-            List<WorldObjectInstance> tileMdxs = BuildMdxInstances(catalog, activeTile.TileX, activeTile.TileY, assetReadyLookup);
-            for (int i = 0; i < tileMdxs.Count; i++)
-            {
-                if (seenMdxUniqueIds.Add(tileMdxs[i].UniqueId))
-                    mdxInstances.Add(tileMdxs[i]);
-            }
+            wmoInstances.AddRange(BuildWmoInstances(activeTile.PlacementCatalog, activeTile.TileX, activeTile.TileY, assetReadyLookup));
+            mdxInstances.AddRange(BuildMdxInstances(activeTile.PlacementCatalog, activeTile.TileX, activeTile.TileY, assetReadyLookup));
         }
         IReadOnlyList<WorldObjectInstance> skyboxBackdropInstances = mdxInstances
             .Where(static instance => WorldSkyboxBackdropClassifier.IsBackdropModelPath(instance.ModelPath))
@@ -511,8 +497,6 @@ internal static class WowViewerWorldRuntimeBridge
                 (modelKey, _) => pendingAssetKeys.Add(modelKey))
             : 0;
         mdxVisibilityStopwatch.Stop();
-
-        Console.Error.WriteLine($"[Bridge] WMO visible={visibility.VisibleWmos.Count} MDX visible={visibility.VisibleMdx.Count} wmoInstances={wmoInstances.Count} mdxInstances={mdxInstances.Count}");
 
         WorldObjectPassFrame passFrame = new();
         int updatedMdxCount = 0;
@@ -917,20 +901,12 @@ internal static class WowViewerWorldRuntimeBridge
     {
         string mapDirectory = session.ResolvedMapDirectory;
         string objVirtualPath = BuildStandardAdtVirtualPath(mapDirectory, tileX, tileY, "_obj0.adt");
-        Console.Error.WriteLine($"[Bridge] Trying obj0: {objVirtualPath}");
         if (TryReadVirtualOrLooseFile(session.ClientRoot, session.LooseOverlayRoot, objVirtualPath, archiveCatalog, out byte[]? objData, out sourcePath))
-        {
-            Console.Error.WriteLine($"[Bridge] Read obj0: {sourcePath} ({objData!.Length} bytes)");
             return ReadPlacementCatalogFromBytes(objData!, sourcePath);
-        }
 
         string rootVirtualPath = BuildStandardAdtVirtualPath(mapDirectory, tileX, tileY);
-        Console.Error.WriteLine($"[Bridge] Trying root: {rootVirtualPath}");
         if (TryReadVirtualOrLooseFile(session.ClientRoot, session.LooseOverlayRoot, rootVirtualPath, archiveCatalog, out byte[]? rootData, out sourcePath))
-        {
-            Console.Error.WriteLine($"[Bridge] Read root: {sourcePath} ({rootData!.Length} bytes)");
             return ReadPlacementCatalogFromBytes(rootData!, sourcePath);
-        }
 
         if (AlphaEmbeddedAdtReader.TryReadPlacementCatalog(session.ClientRoot, mapDirectory, tileX, tileY, archiveCatalog, out AdtPlacementCatalog? alphaCatalog, out string alphaSourcePath))
         {
@@ -1116,7 +1092,7 @@ internal static class WowViewerWorldRuntimeBridge
                 PlacementPosition = placement.Position,
                 PlacementRotation = placement.Rotation,
                 PlacementScale = 1.0f,
-                Transform = BuildLegacyWmoPlacementTransform(placement.Position, placement.Rotation),
+                Transform = Matrix4x4.CreateTranslation(placement.Position),
                 BoundsMin = placement.BoundsMin,
                 BoundsMax = placement.BoundsMax,
                 LocalBoundsMin = localMin,
@@ -1367,18 +1343,6 @@ internal static class WowViewerWorldRuntimeBridge
             * Matrix4x4.CreateTranslation(position);
     }
 
-    private static Matrix4x4 BuildLegacyWmoPlacementTransform(Vector3 position, Vector3 rotationDegrees)
-    {
-        float rx = -DegreesToRadians(rotationDegrees.Y);
-        float ry = -DegreesToRadians(rotationDegrees.X);
-        float rz = DegreesToRadians(rotationDegrees.Z);
-        return Matrix4x4.CreateRotationZ(MathF.PI)
-            * Matrix4x4.CreateRotationX(rx)
-            * Matrix4x4.CreateRotationY(ry)
-            * Matrix4x4.CreateRotationZ(rz)
-            * Matrix4x4.CreateTranslation(position);
-    }
-
     private static float DegreesToRadians(float degrees)
     {
         return degrees * (MathF.PI / 180f);
@@ -1447,15 +1411,15 @@ internal static class WowViewerWorldRuntimeBridge
 
     internal static Vector2 ComputeTilePlanarMin(int tileX, int tileY)
     {
-        float minX = MapOrigin - ((tileX + 1) * TileSize);
-        float minY = MapOrigin - ((tileY + 1) * TileSize);
+        float minX = MapOrigin - ((tileY + 1) * TileSize);
+        float minY = MapOrigin - ((tileX + 1) * TileSize);
         return new Vector2(minX, minY);
     }
 
     internal static Vector2 ComputeTilePlanarMax(int tileX, int tileY)
     {
-        float maxX = MapOrigin - (tileX * TileSize);
-        float maxY = MapOrigin - (tileY * TileSize);
+        float maxX = MapOrigin - (tileY * TileSize);
+        float maxY = MapOrigin - (tileX * TileSize);
         return new Vector2(maxX, maxY);
     }
 
