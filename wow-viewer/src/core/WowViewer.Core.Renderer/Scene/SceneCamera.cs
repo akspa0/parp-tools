@@ -29,16 +29,32 @@ public sealed class SceneCamera
         }
     }
 
+    public bool UseExternalMatrix { get; set; }
+    public Matrix4x4 ExternalView { get; set; }
+    public Matrix4x4 ExternalProjection { get; set; }
+
     public Matrix4x4 GetViewMatrix()
     {
+        if (UseExternalMatrix)
+            return ExternalView;
         Vector3 target = Position + Forward;
         return Matrix4x4.CreateLookAt(Position, target, Vector3.UnitZ);
     }
 
     public Matrix4x4 GetProjectionMatrix()
     {
+        if (UseExternalMatrix)
+            return ExternalProjection;
         float fovRad = MathF.PI / 180f * FieldOfViewDegrees;
         return Matrix4x4.CreatePerspectiveFieldOfView(fovRad, AspectRatio, NearPlane, FarPlane);
+    }
+
+    public void SetViewProjection(Matrix4x4 view, Matrix4x4 projection, Vector3 position)
+    {
+        ExternalView = view;
+        ExternalProjection = projection;
+        Position = position;
+        UseExternalMatrix = true;
     }
 
     public void LookAtPosition(Vector3 target, float distance, float angleDegrees, float pitchDegrees)

@@ -32,13 +32,13 @@ public sealed class FrustumCuller
             viewProj.M24 - viewProj.M22,
             viewProj.M34 - viewProj.M32,
             viewProj.M44 - viewProj.M42);
-        // Near
+        // Near: col4 + col3 (OpenGL: z_clip + w_clip >= 0)
         _planes[4] = new Vector4(
-            viewProj.M13,
-            viewProj.M23,
-            viewProj.M33,
-            viewProj.M43);
-        // Far
+            viewProj.M14 + viewProj.M13,
+            viewProj.M24 + viewProj.M23,
+            viewProj.M34 + viewProj.M33,
+            viewProj.M44 + viewProj.M43);
+        // Far: col4 - col3 (OpenGL: w_clip - z_clip >= 0)
         _planes[5] = new Vector4(
             viewProj.M14 - viewProj.M13,
             viewProj.M24 - viewProj.M23,

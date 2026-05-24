@@ -1,3 +1,4 @@
+using WowViewer.Core.Renderer.Validation;
 using WowViewer.Core.Runtime.World.Validation;
 
 namespace WowViewer.Tools.ValidationCapture;
@@ -47,6 +48,7 @@ internal static class ValidationCaptureCommand
         bool dryRun = HasFlag(args, "--dry-run");
         bool gpuViewerStyle = HasFlag(args, "--gpu-viewer-style");
         bool realSceneDryRun = HasFlag(args, "--real-scene-dry-run");
+        bool nativeRenderer = HasFlag(args, "--native-renderer");
         bool stubScene = HasFlag(args, "--stub-scene");
 
         if (string.IsNullOrWhiteSpace(clientRoot)
@@ -163,6 +165,15 @@ internal static class ValidationCaptureCommand
             ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
             EmitDerivedArtifacts(session);
             Console.WriteLine($"Validation capture gpu-viewer-style run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
+            return result.FailedVariantCount == 0 ? 0 : 2;
+        }
+
+        if (nativeRenderer)
+        {
+            using NativeValidationWorldSceneAdapter adapter = new();
+            ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
+            EmitDerivedArtifacts(session);
+            Console.WriteLine($"Validation capture native-renderer run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
             return result.FailedVariantCount == 0 ? 0 : 2;
         }
 

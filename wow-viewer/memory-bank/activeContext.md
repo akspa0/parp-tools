@@ -1,43 +1,45 @@
-# Active Context — WowViewer Native GPU Renderer
+# Active Context — V16.x Terrain Training Pipeline
 
 ## Branch
-- `v0.5.0-dev` — working on spec `017-native-gpu-renderer`
+- `v0.5.0-dev`
 
 ## Current Focus
-Building a native GPU renderer (`WowViewer.Core.Renderer`) from scratch in wow-viewer:
-- Consumes existing `WorldTerrainTileData` from `Core.Runtime.WorldTerrainTileBuilder`
-- Uses `NativeMpqService` / `MpqArchiveCatalog` for file I/O
-- MdxViewer is REFERENCE ONLY for rendering techniques (shader code, vertex layout, UV math)
-- Headless rendering is the first-class mode; GUI is a future wrapper
+Terrain normal/height prediction from minimap images. Chain of V16.1.x model iterations:
+- **V16.1.1**: Normal model (minimap 3ch → normals)
+- **V16.1.2**: Abandoned — refiner approach (random refiner used as distillation target, never trained)
+- **V16.1.3**: Height-channel normal model (cat(minimap, height) 4ch → normals) — plateaued at epoch 123
+- **V16.1.4**: Combined normal+height model (4ch → normals + height, shared backbone) — just implemented, not yet trained
 
 ## What Exists (Completed)
-- **Spec 017**: spec.md, plan.md, tasks.md, research.md written
-- **Phase 1**: `WowViewer.Core.Renderer` project created, builds successfully
-  - `Headless/HeadlessContext.cs` — hidden Silk.NET window with offscreen GL context
-  - `Headless/RenderSurface.cs` — FBO with color texture + depth renderbuffer
-  - `Output/FrameCapture.cs` — framebuffer readback with Y-flip
-  - `Output/PngWriter.cs` — RGBA byte[] to PNG via ImageSharp
-  - `Scene/SceneCamera.cs` — camera with tile look-at positioning
-  - `Scene/FrustumCuller.cs` — view-frustum AABB test
-  - `Terrain/TerrainConstants.cs` — game-world constants
-  - `Terrain/TerrainMesh.cs` — GPU mesh data model (VAO, textures, bounds)
-  - `Terrain/TerrainMeshBuilder.cs` — converts `WorldTerrainTileData` → GL VAO/VBO/EBO with texture arrays
+- All model classes in `wow-viewer/data-harvester/src/harvester/v16_1_models.py`:
+  `V161NormalModel`, `V161HeightModel`, `V161NormalHeightModel`, `V161NormalHeightCombinedModel`,
+  `V161NormalRefiner`, `V161HolesModel`, `V161LiquidModel`, `V161TexcompModel`
+- Training loop in `train_v16_1_common.py` with autotune, curation, hard-region weighting
+- `_combined_loss` + `combined` task registered in TASKS (V16.1.4)
+- Working export script: `export_terrain_obj.py`
+- V16 dataset: 5134 tiles across 6 builds in Zarr stores
+- Spec 017 (V16.1.4): spec.md, plan.md, tasks.md (Phase 1 done)
 
-## What's Next
-- **Phase 2** (continuing): TextureCache (BLP→GL texture array)
-- **Phase 3**: TerrainShader (GLSL from MdxViewer reference), TerrainRenderer (draw calls), SceneRenderer (pass orchestration)
-- **Phase 4**: SkyRenderer, LiquidRenderer
-- **Phase 5**: WmoRenderer
-- **Phase 6**: Capture CLI tool
-- **Phase 7**: Validation against MdxViewer reference
+## What's Next (Immediate)
+- **Spec 020**: Fix renderer culling (renderer doesn't see objects) → tile-level capture → batch capture → V16.2 object mask generation
+- V16.1.4 combined model training (waiting on smoke test/launch)
+- V16.2 model architecture (V16.1.x lessons + proper object-aware loss weighting)
+
+## MotherShip Direction
+The long-range target is a universal game engine (`game-engine`) with a plugin architecture. WoW data support lives in `GameEngine.Plugin.WoW`. The current `wow-viewer` work feeds into this. The repo structure is placeholder but the direction is real: `theMothership/` with `game-engine/` core + plugins + viewer + tools. See `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` for the engine-modernization context.
 
 ## Known Issues
-- Normal computation is placeholder (Vector3.UnitZ) — no MCCV vertex color loading yet
-- Alpha+shadow texture array upload not yet implemented (TextureCache needs to be built)
-- No WMO rendering yet
+- Renderer culls all objects — coordinate system bug in `ComputeTilePlanarMin/Max` (spec 013 diagnosed, not fixed)
+- MdxViewer loads whole map for single-tile capture (performance bottleneck for V16.2 dataset gen)
+- Object mask weighting in training is ineffective (needs V16.2 precise masks)
+- V16.1.2 refiner is dead code (never trained, random distillation)
 
 ## Relevant Files
-- `wow-viewer/src/core/WowViewer.Core.Renderer/` — all renderer source
-- `wow-viewer/specs/017-native-gpu-renderer/` — spec/plan/tasks/research
-- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/` — input data types
-- `wow-viewer/src/core/WowViewer.Core.IO/Files/NativeMpqService.cs` — file I/O
+- `wow-viewer/data-harvester/src/harvester/v16_1_models.py` — all model classes
+- `wow-viewer/data-harvester/scripts/train_v16_1_common.py` — training loop, all loss functions
+- `wow-viewer/data-harvester/scripts/train_v16_1_combined.py` — V16.1.4 entrypoint
+- `wow-viewer/data-harvester/scripts/export_terrain_obj.py` — OBJ export
+- `wow-viewer/data-harvester/src/harvester/v16_1_dataset.py` — dataset loader
+- `wow-viewer/specs/017-v16-1-4-combined-normal-height-model/` — V16.1.4 spec
+- `wow-viewer/specs/020-renderer-culling-and-tile-capture/` — renderer fix spec (new)
+- `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` — MotherShip context

@@ -79,8 +79,8 @@ public sealed class TerrainMeshBuilder
 
                 float z = i < chunk.Heights.Length ? chunk.Heights[i] : 0f;
 
-                float wx = chunk.IndexX * TerrainConstants.ChunkSize - y;
-                float wy = chunk.IndexY * TerrainConstants.ChunkSize - x;
+                float wx = TerrainConstants.MapOrigin - (tileY * TerrainConstants.TileSize) - (chunk.IndexY * TerrainConstants.ChunkSize) - y;
+                float wy = TerrainConstants.MapOrigin - (tileX * TerrainConstants.TileSize) - (chunk.IndexX * TerrainConstants.ChunkSize) - x;
 
                 int vb = (chunkIndex * vertsPerChunk + i) * floatsPerVert;
                 vertices[vb + 0] = wx;
@@ -193,6 +193,33 @@ public sealed class TerrainMeshBuilder
 
         _gl.BindVertexArray(0);
 
+        int layerCount = Math.Max(1, texturePaths.Count);
+        uint diffuseArray = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2DArray, diffuseArray);
+        _gl.TexImage3D(TextureTarget.Texture2DArray, 0, InternalFormat.Rgba8, 256, 256, (uint)layerCount, 0, PixelFormat.Rgba, PixelType.UnsignedByte, null);
+        for (int layer = 0; layer < layerCount; layer++)
+        {
+            var defaultPixels = CreateCheckerPixels(256, 256, 96, 64, 48, 48, 48, 64);
+            fixed (byte* ptr = defaultPixels)
+                _gl.TexSubImage3D(TextureTarget.Texture2DArray, 0, 0, 0, layer, 256, 256, 1, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+        }
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+        _gl.GenerateMipmap(TextureTarget.Texture2DArray);
+        _gl.BindTexture(TextureTarget.Texture2DArray, 0);
+
+        uint alphaShadowArray = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2DArray, alphaShadowArray);
+        fixed (byte* ptr = alphaShadow)
+            _gl.TexImage3D(TextureTarget.Texture2DArray, 0, InternalFormat.Rgba8, 64, 64, 256, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        _gl.BindTexture(TextureTarget.Texture2DArray, 0);
+
         var mesh = new TerrainMesh
         {
             TileX = tileX,
@@ -208,6 +235,8 @@ public sealed class TerrainMeshBuilder
             ChunkCount = chunkCount,
             TexturePaths = texturePaths,
             DiffuseLayerCount = texturePaths.Count,
+            DiffuseArrayTexture = diffuseArray,
+            AlphaShadowArrayTexture = alphaShadowArray,
         };
         mesh.SetGl(_gl);
         return mesh;
@@ -288,5 +317,33 @@ public sealed class TerrainMeshBuilder
             result.Add(i1); result.Add(i2); result.Add(i3);
         }
         return result.ToArray();
+    }
+
+    private static byte[] CreateCheckerPixels(int w, int h, byte r1, byte g1, byte b1, byte r2, byte g2, byte b2)
+    {
+        var pixels = new byte[w * h * 4];
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                bool cx = (x / 16) % 2 == 0;
+                bool cy = (y / 16) % 2 == 0;
+                int idx = (y * w + x) * 4;
+                if (cx == cy)
+                {
+                    pixels[idx + 0] = r1;
+                    pixels[idx + 1] = g1;
+                    pixels[idx + 2] = b1;
+                }
+                else
+                {
+                    pixels[idx + 0] = r2;
+                    pixels[idx + 1] = g2;
+                    pixels[idx + 2] = b2;
+                }
+                pixels[idx + 3] = 255;
+            }
+        }
+        return pixels;
     }
 }

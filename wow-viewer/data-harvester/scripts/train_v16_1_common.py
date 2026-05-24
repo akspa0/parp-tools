@@ -32,6 +32,7 @@ from harvester.v16_1_models import (  # noqa: E402
     V161HeightModel,
     V161HolesModel,
     V161LiquidModel,
+    V161NormalHeightCombinedModel,
     V161NormalHeightModel,
     V161NormalModel,
     V161NormalRefiner,
@@ -824,6 +825,81 @@ def _normal_loss(
     }
 
 
+def _combined_loss(
+    model: torch.nn.Module,
+    batch: dict[str, Any],
+    device: torch.device,
+    args: argparse.Namespace,
+) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
+    inp = batch["input"].to(device, non_blocking=True)
+    target_normals = batch["normals"].to(device, non_blocking=True)
+    target_height = batch["height_norm"].to(device, non_blocking=True)
+    height_raw = batch["height_raw"].to(device, non_blocking=True)
+    normal_mask = batch["normal_mask"].to(device, non_blocking=True)
+    terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
+    object_weight = batch["weight_257"].to(device, non_blocking=True)
+    mddf_mask = batch["mddf_mask"].to(device, non_blocking=True)
+    modf_mask = batch["modf_mask"].to(device, non_blocking=True)
+    liquid_mask = batch["liquid_mask"].to(device, non_blocking=True)
+    alpha_painted_256 = batch["alpha_painted_256"].to(device, non_blocking=True)
+    mcly_any_16 = batch["mcly_any_16"].to(device, non_blocking=True)
+    what_plate_flag = batch["what_plate_flag"].to(device, non_blocking=True).view(-1, 1, 1, 1)
+
+    pred_normals, pred_height = model(inp)
+    pred_n = F.normalize(pred_normals, dim=1, eps=1e-6)
+    target_n = F.normalize(target_normals, dim=1, eps=1e-6)
+
+    # ── Normal loss (same as _normal_loss) ──
+    cosine = 1.0 - (pred_n * target_n).sum(dim=1, keepdim=True)
+    liquid_mask_257 = _resize_weight(liquid_mask, target_n.shape[-2:])
+    object_presence = torch.maximum(mddf_mask, modf_mask)
+    liquid_weight = 1.0 - (0.85 * liquid_mask_257)
+    instance_weight = 1.0 - (0.75 * object_presence)
+    base_mask = normal_mask * terrain_valid_mask * object_weight * liquid_weight * instance_weight
+    base_mask = base_mask * (1.0 - what_plate_flag)
+
+    hard_region_weight, _hard_debug = _hard_region_weight_from_targets(
+        height_raw=height_raw,
+        target_normals=target_n,
+        alpha_painted_256=alpha_painted_256,
+        mcly_any_16=mcly_any_16,
+        terrain_valid_mask=terrain_valid_mask,
+        base_mask=base_mask,
+        detail_boost=float(args.normal_detail_boost),
+    )
+    train_mask = base_mask * hard_region_weight
+    vec_l1 = (pred_n - target_n).abs().mean(dim=1, keepdim=True)
+    nz_l2 = (pred_n[:, 2:3] - target_n[:, 2:3]) ** 2
+    loss_cos = _masked_mean(cosine, train_mask)
+    loss_vec = _masked_mean(vec_l1, train_mask)
+    loss_nz = _masked_mean(nz_l2, train_mask)
+    normal_loss = loss_cos + (0.35 * loss_vec) + (0.15 * loss_nz)
+
+    # ── Height loss (weighted L1) ──
+    height_loss = _weighted_l1(pred_height, target_height, object_weight)
+
+    # ── Combined ──
+    w_normal = float(getattr(args, "normal_weight", 1.0))
+    w_height = float(getattr(args, "height_weight", 1.0))
+    loss = (w_normal * normal_loss) + (w_height * height_loss)
+
+    return loss, {
+        "normal": float(normal_loss.item()),
+        "normal_cos": float(loss_cos.item()),
+        "normal_vec": float(loss_vec.item()),
+        "normal_nz": float(loss_nz.item()),
+        "height": float(height_loss.item()),
+        "combined": float(loss.item()),
+    }, {
+        "pred": pred_n,
+        "target": target_n,
+        "pred_height": pred_height,
+        "target_height": target_height,
+        "train_mask": train_mask,
+        "base_mask": base_mask,
+    }
+
+
 def _refiner_refine_and_compare(
     main_model: torch.nn.Module,
     refiner: torch.nn.Module,
@@ -1073,12 +1149,31 @@ def _preview_texcomp(batch: dict[str, Any], outputs: dict[str, torch.Tensor], ou
     _save_preview_grid(rows, out_path, row_titles=row_titles)
 
 
+def _preview_combined(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out_path: Path) -> None:
+    n = min(int(batch["input"].shape[0]), 8)
+    rows = []
+    row_titles = []
+    for idx in range(n):
+        row_titles.append(_preview_row_title(batch, idx))
+        input_rgb = batch["input"][idx, :3]
+        rows.append(
+            [
+                ("input_rgb", input_rgb),
+                ("normal_gt", _normals_to_rgb(outputs["target"][idx])),
+                ("normal_pred", _normals_to_rgb(outputs["pred"][idx])),
+                ("train_mask", outputs["train_mask"][idx]),
+            ]
+        )
+    _save_preview_grid(rows, out_path, row_titles=row_titles)
+
+
 TASKS: dict[str, TaskSpec] = {
     "height": TaskSpec("height", V161HeightModel, _height_loss, _preview_height),
     "normal": TaskSpec("normal", V161NormalModel, _normal_loss, _preview_normal),
     "holes": TaskSpec("holes", V161HolesModel, _holes_loss, _preview_holes),
     "liquid": TaskSpec("liquid", V161LiquidModel, _liquid_loss, _preview_liquid),
     "texcomp": TaskSpec("texcomp", V161TexcompModel, _texcomp_loss, _preview_texcomp),
+    "combined": TaskSpec("combined", V161NormalHeightCombinedModel, _combined_loss, _preview_combined),
 }
 
 
@@ -1220,6 +1315,18 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=False,
         help="Add height_norm as a 4th input channel to the normal model (normal task only).",
+    )
+    p.add_argument(
+        "--normal-weight",
+        type=float,
+        default=1.0,
+        help="Weight of the normal loss term in the combined model (combined task only).",
+    )
+    p.add_argument(
+        "--height-weight",
+        type=float,
+        default=1.0,
+        help="Weight of the height loss term in the combined model (combined task only).",
     )
     return p.parse_args()
 

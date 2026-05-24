@@ -158,6 +158,34 @@ class V161NormalHeightModel(nn.Module):
         return self.head(d0)
 
 
+class V161NormalHeightCombinedModel(nn.Module):
+    """Combined model: cat(minimap_rgb, height_norm) -> (normals_3ch, height_1ch).
+
+    Shared backbone, two heads. Single checkpoint, both signals.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.backbone = _UNetBackbone(4)
+        self.normal_head = nn.Sequential(
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Upsample(size=(257, 257), mode="bilinear", align_corners=True),
+            nn.Conv2d(32, 3, 1),
+            nn.Tanh(),
+        )
+        self.height_head = nn.Sequential(
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Upsample(size=(257, 257), mode="bilinear", align_corners=True),
+            nn.Conv2d(32, 1, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        d0, _ = self.backbone(x)
+        return self.normal_head(d0), self.height_head(d0)
+
+
 class V161NormalRefiner(nn.Module):
     """Small conv refiner: pred_normals(3ch) + height(1ch) → refined_normals(3ch).
 
