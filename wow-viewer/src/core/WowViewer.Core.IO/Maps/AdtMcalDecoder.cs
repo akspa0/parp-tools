@@ -83,7 +83,8 @@ public static class AdtMcalDecoder
         if ((flags & CompressedAlphaFlag) != 0)
         {
             (byte[] alpha, int bytesConsumed) = ReadCompressedAlpha(mcalData, offset, maxLength);
-            return new AdtMcalDecodedLayer(layer.Index, layer.TextureId, layer.Flags, offset, bytesConsumed, AdtMcalAlphaEncoding.Compressed, appliedFixup: false, alpha);
+            ApplyLegacyEdgeFix(alpha);
+            return new AdtMcalDecodedLayer(layer.Index, layer.TextureId, layer.Flags, offset, bytesConsumed, AdtMcalAlphaEncoding.Compressed, appliedFixup: true, alpha);
         }
 
         if (useBigAlpha)
@@ -93,7 +94,8 @@ public static class AdtMcalDecoder
             if (available > 0)
                 Buffer.BlockCopy(mcalData, offset, alpha, 0, available);
 
-            return new AdtMcalDecodedLayer(layer.Index, layer.TextureId, layer.Flags, offset, available, AdtMcalAlphaEncoding.BigAlpha, appliedFixup: false, alpha);
+            ApplyLegacyEdgeFix(alpha);
+            return new AdtMcalDecodedLayer(layer.Index, layer.TextureId, layer.Flags, offset, available, AdtMcalAlphaEncoding.BigAlpha, appliedFixup: true, alpha);
         }
 
         (byte[] packedAlpha, int packedBytesConsumed) = ReadPackedAlpha(mcalData, offset, maxLength);

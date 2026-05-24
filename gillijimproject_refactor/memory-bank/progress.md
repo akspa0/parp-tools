@@ -399,6 +399,24 @@
   - `MTXF`
   - higher-fidelity `MH2O`
 
+## Spec 013 / 014 — Terrain MCAL & Object Mask Rendering Fixes (2026-05-23)
+
+### Spec 013 (Object Mask Rendering Fix) — Done
+- Root cause: `ComputeTilePlanarMin/Max` had swapped `tileX`/`tileY` axes.
+- Fix: `rendererX = MapOrigin - tileX * TileSize`, `rendererY = MapOrigin - tileY * TileSize`.
+- `BuildChunkPositions` IndexX/IndexY swap fixed in `WorldGpuPreviewRenderer.cs`.
+- UniqueID deduplication added in bridge instance builder.
+- Validation: `WMO visible=1, MDX visible=53` on `3_3_5_12340 / Azeroth_30_48`.
+
+### Spec 014 (Terrain MCAL Rendering Parity) — In Progress
+- `FillAlphaShadowSlice` now writes implicit 255 alpha for layers without MCLY `0x100` flag.
+- `WorldTerrainChunkData` now has `ShadowMap` property, threaded from `AdtTextureChunk.ShadowMap` via `WorldTerrainTileBuilder` (LK path).
+- Shadow map written into channel 3 of alpha-shadow texture array in `FillAlphaShadowSlice`, with edge-clamped indexing matching MdxViewer reference.
+- Terrain shader now applies shadow darkening from `alphaShadow.a`: `result *= mix(1.0, 0.4, shadow)`.
+- Terrain shader UV (`vec2(-vWorldPosition.y, -vWorldPosition.x) * texScale`) verified identical to MdxViewer.
+- Build passes, 477/492 tests pass (15 pre-existing failures unrelated to these changes).
+- Remaining: GPU validation capture with MCAL fixes on both anchors.
+
 ## Not Yet
 - Completed / running proof for a production-oriented V16 training run with epoch rotation is still pending final training outcomes.
 - V16.1 liquid footprint/type trainer smoke proof.

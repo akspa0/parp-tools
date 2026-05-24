@@ -84,7 +84,8 @@ public static class WorldTerrainTileBuilder
                 (flags & LiquidFlagMask) != 0,
                 (flags & VertexColorFlagMask) != 0,
                 heights,
-                textureChunk?.Layers));
+                textureChunk?.Layers,
+                textureChunk?.ShadowMap));
             chunkOrdinal++;
         }
 

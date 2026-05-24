@@ -2,6 +2,7 @@ using System.IO;
 using System.Numerics;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
+using WowViewer.Core.Maps;
 using WowViewer.Core.Runtime.World.Validation;
 using WowViewer.Core.Wmo;
 using WowViewer.Core.IO.Wmo;
@@ -80,6 +81,12 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     private const uint MdxBlendModeAddAlpha = 4;
     private const uint MdxBlendModeModulate = 5;
     private const uint MdxBlendModeModulate2X = 6;
+
+    // Diagnostics — object loading counters
+    private int _lastVisibleWmoCount;
+    private int _lastVisibleMdxCount;
+    private int _lastLoadedWmoCount;
+    private int _lastLoadedMdxCount;
 
     // WMO Shader Program and Uniform Locations
     private uint _wmoProgram;
@@ -261,14 +268,36 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         // Pre-load visible WMOs and MDXs to cache them
         if (frame.Visibility != null)
         {
+            int wmoLoaded = 0;
+            int mdxLoaded = 0;
             foreach (var entry in frame.Visibility.VisibleWmos)
             {
-                GetOrLoadWmo(entry.Instance.ModelPath);
+                if (GetOrLoadWmo(entry.Instance.ModelPath) != null)
+                    wmoLoaded++;
             }
             foreach (var entry in frame.Visibility.VisibleMdx)
             {
-                GetOrLoadMdx(entry.Instance.ModelPath);
+                if (GetOrLoadMdx(entry.Instance.ModelPath) != null)
+                    mdxLoaded++;
             }
+            _lastVisibleWmoCount = frame.Visibility.VisibleWmos.Count;
+            _lastVisibleMdxCount = frame.Visibility.VisibleMdx.Count;
+            _lastLoadedWmoCount = wmoLoaded;
+            _lastLoadedMdxCount = mdxLoaded;
+            string diag = $"Objects: WMO visible={_lastVisibleWmoCount} loaded={_lastLoadedWmoCount}, MDX visible={_lastVisibleMdxCount} loaded={_lastLoadedMdxCount}";
+            Console.Error.WriteLine($"[WorldGpuPreviewRenderer] {diag}");
+            try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "wow_renderer_diag.txt"), $"[{DateTime.UtcNow:O}] {diag}{Environment.NewLine}"); } catch { }
+            try
+            {
+                string tileCount = $"Terrain tile meshes: {_terrainTiles.Count}";
+                File.AppendAllText(Path.Combine(Path.GetTempPath(), "wow_renderer_diag.txt"), $"[{DateTime.UtcNow:O}] {tileCount}{Environment.NewLine}");
+                for (int i = 0; i < _terrainTiles.Count; i++)
+                {
+                    var t = _terrainTiles[i];
+                    File.AppendAllText(Path.Combine(Path.GetTempPath(), "wow_renderer_diag.txt"), $"[{DateTime.UtcNow:O}]   Tile[{i}]: ({t.TileX},{t.TileY}) indexCount={t.IndexCount} chunkCount={t.ChunkCount} layerCount={t.DiffuseLayerCount}{Environment.NewLine}");
+                }
+            }
+            catch { }
         }
     }
 
@@ -287,8 +316,18 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
     private unsafe void RenderCore(int width, int height, Vector3 cameraPosition, Matrix4x4 view, Matrix4x4 projection)
     {
+        try
+        {
+            File.AppendAllText(Path.Combine(Path.GetTempPath(), "wow_renderer_diag.txt"),
+                $"[{DateTime.UtcNow:O}] RenderCore: showSky={_showSky} terrainTiles={_terrainTiles.Count} markers={_markerVertexCount} overlay={_overlayVertexCount} wmos={_activeFrame?.Visibility?.VisibleWmos.Count} mdxs={_activeFrame?.Visibility?.VisibleMdx.Count}{Environment.NewLine}");
+        }
+        catch { }
+
         if (!HasRenderableGeometry)
+        {
+            try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "wow_renderer_diag.txt"), $"[{DateTime.UtcNow:O}] RenderCore: SKIP — no renderable geometry{Environment.NewLine}"); } catch { }
             return;
+        }
 
         EnsureFramebuffer(width, height);
         Matrix4x4 viewProjection = view * projection;
@@ -324,9 +363,9 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _gl.UseProgram(_terrainProgram);
             _gl.UniformMatrix4(_terrainViewLocation, 1, false, (float*)&view.M11);
             _gl.UniformMatrix4(_terrainProjectionLocation, 1, false, (float*)&projection.M11);
-            _gl.Uniform3(_terrainLightDirectionLocation, -0.45f, -0.55f, 0.70f);
-            _gl.Uniform3(_terrainLightColorLocation, 0.80f, 0.82f, 0.78f);
-            _gl.Uniform3(_terrainAmbientColorLocation, 0.28f, 0.30f, 0.34f);
+            _gl.Uniform3(_terrainLightDirectionLocation, 0.51f, 0.38f, 0.77f);
+            _gl.Uniform3(_terrainLightColorLocation, 0.55f, 0.54f, 0.50f);
+            _gl.Uniform3(_terrainAmbientColorLocation, 0.43f, 0.43f, 0.50f);
             foreach (TerrainTileMesh tileMesh in _terrainTiles)
             {
                 _gl.ActiveTexture(TextureUnit.Texture0);
@@ -351,8 +390,8 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _gl.UseProgram(_wmoProgram);
             _gl.UniformMatrix4(_uWmoView, 1, false, (float*)&view.M11);
             _gl.UniformMatrix4(_uWmoProj, 1, false, (float*)&projection.M11);
-            _gl.Uniform3(_uWmoLightDir, -0.45f, -0.55f, 0.70f);
-            _gl.Uniform3(_uWmoAmbientColor, 0.30f, 0.30f, 0.34f);
+_gl.Uniform3(_uWmoLightDir, 0.51f, 0.38f, 0.77f);
+_gl.Uniform3(_uWmoAmbientColor, 0.43f, 0.43f, 0.50f);
             _gl.Uniform1(_uWmoTexture0, 0);
 
             _gl.Enable(EnableCap.DepthTest);
@@ -391,9 +430,9 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _gl.UseProgram(_mdxProgram);
             _gl.UniformMatrix4(_uMdxView, 1, false, (float*)&view.M11);
             _gl.UniformMatrix4(_uMdxProj, 1, false, (float*)&projection.M11);
-            _gl.Uniform3(_uMdxLightDir, -0.45f, -0.55f, 0.70f);
-            _gl.Uniform3(_uMdxLightColor, 0.80f, 0.82f, 0.78f);
-            _gl.Uniform3(_uMdxAmbientColor, 0.30f, 0.30f, 0.34f);
+_gl.Uniform3(_uMdxLightDir, 0.51f, 0.38f, 0.77f);
+_gl.Uniform3(_uMdxLightColor, 0.55f, 0.54f, 0.50f);
+_gl.Uniform3(_uMdxAmbientColor, 0.43f, 0.43f, 0.50f);
             _gl.Uniform1(_uMdxTexture0, 0);
             _gl.Uniform1(_uMdxUseBoneSkinning, 0);
 
@@ -617,6 +656,11 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
     {
         List<string> tileTextureNames = CollectTileTextureNames(tile.TerrainTileData);
         Dictionary<string, int> textureIndices = BuildTextureIndexMap(tileTextureNames);
+        if (tileTextureNames.Count > 0)
+            Console.WriteLine($"[WorldGpuPreviewRenderer] Tile textures: {tileTextureNames.Count} names, first={tileTextureNames[0]}");
+        else
+            Console.WriteLine($"[WorldGpuPreviewRenderer] Tile textures: 0 names (chunks={tile.TerrainTileData.Chunks.Count}, layersChunks={tile.TerrainTileData.TextureLayerChunkCount})");
+
         const int chunkAlphaSliceCount = 256;
         byte[] alphaShadow = new byte[ChunkAlphaSize * ChunkAlphaSize * 4 * chunkAlphaSliceCount];
         List<float> vertexData = [];
@@ -624,17 +668,57 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         List<ushort> texIndexData = [];
         List<uint> indexData = [];
 
-        foreach (var chunk in tile.TerrainTileData.Chunks)
+        Vector3[] globalNormalsSum = new Vector3[257 * 257];
+        ushort[] globalNormalsCount = new ushort[257 * 257];
+
+        var chunksPositions = new Vector3[tile.TerrainTileData.Chunks.Count][];
+        var chunksIndices = new int[tile.TerrainTileData.Chunks.Count][];
+        var chunksValid = new bool[tile.TerrainTileData.Chunks.Count];
+
+        for (int chunkIdx = 0; chunkIdx < tile.TerrainTileData.Chunks.Count; chunkIdx++)
         {
+            var chunk = tile.TerrainTileData.Chunks[chunkIdx];
             if (!chunk.HasHeights || chunk.Heights is null)
                 continue;
 
             Vector3[] positions = BuildChunkPositions(tile.TileX, tile.TileY, chunk);
-            int[] chunkIndices = BuildChunkIndices(chunk.HoleMask, ignoreTerrainHoles);
-            if (chunkIndices.Length == 0)
+            int[] indices = BuildChunkIndices(chunk.HoleMask, ignoreTerrainHoles);
+            if (indices.Length == 0)
                 continue;
 
-            Vector3[] normals = BuildChunkNormals(chunkIndices, positions);
+            chunksPositions[chunkIdx] = positions;
+            chunksIndices[chunkIdx] = indices;
+            chunksValid[chunkIdx] = true;
+
+            for (int triangle = 0; triangle + 2 < indices.Length; triangle += 3)
+            {
+                int i0 = indices[triangle + 0];
+                int i1 = indices[triangle + 1];
+                int i2 = indices[triangle + 2];
+
+                Vector3 edge1 = positions[i1] - positions[i0];
+                Vector3 edge2 = positions[i2] - positions[i0];
+                Vector3 normal = Vector3.Cross(edge1, edge2);
+                if (normal.LengthSquared() < 1e-10f)
+                    continue;
+
+                normal = Vector3.Normalize(normal);
+
+                AccumulateGlobalNormal(chunk.IndexY, chunk.IndexX, i0, normal, globalNormalsSum, globalNormalsCount);
+                AccumulateGlobalNormal(chunk.IndexY, chunk.IndexX, i1, normal, globalNormalsSum, globalNormalsCount);
+                AccumulateGlobalNormal(chunk.IndexY, chunk.IndexX, i2, normal, globalNormalsSum, globalNormalsCount);
+            }
+        }
+
+        for (int chunkIdx = 0; chunkIdx < tile.TerrainTileData.Chunks.Count; chunkIdx++)
+        {
+            if (!chunksValid[chunkIdx])
+                continue;
+
+            var chunk = tile.TerrainTileData.Chunks[chunkIdx];
+            Vector3[] positions = chunksPositions[chunkIdx];
+            int[] indices = chunksIndices[chunkIdx];
+
             int baseVertex = vertexData.Count / 11;
             byte chunkSlice = GetChunkSlice(chunk);
             ushort[] chunkTextureIndices = BuildChunkTextureIndices(chunk, textureIndices);
@@ -642,7 +726,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             for (int index = 0; index < positions.Length; index++)
             {
                 Vector3 position = positions[index];
-                Vector3 normal = normals[index];
+                Vector3 normal = GetGlobalNormal(chunk.IndexY, chunk.IndexX, index, globalNormalsSum, globalNormalsCount);
                 float normalizedHeight = (position.Z - minHeight) / heightRange;
                 float slopeFactor = Math.Clamp(1.0f - normal.Z, 0.0f, 1.0f);
                 Vector3 fallbackColor = ComputeTerrainColor(normalizedHeight, slopeFactor);
@@ -656,9 +740,9 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
                 vertexData.Add(normal.Z);
                 vertexData.Add(alphaUv.X);
                 vertexData.Add(alphaUv.Y);
-                vertexData.Add(fallbackColor.X);
-                vertexData.Add(fallbackColor.Y);
-                vertexData.Add(fallbackColor.Z);
+                vertexData.Add(1.0f);
+                vertexData.Add(1.0f);
+                vertexData.Add(1.0f);
 
                 chunkSliceData.Add(chunkSlice);
                 texIndexData.Add(chunkTextureIndices[0]);
@@ -668,7 +752,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
                 ExpandBounds(position);
             }
 
-            foreach (int localIndex in chunkIndices)
+            foreach (int localIndex in indices)
                 indexData.Add((uint)(baseVertex + localIndex));
 
             FillAlphaShadowSlice(alphaShadow, chunkSlice, chunk);
@@ -702,8 +786,6 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         _gl.EnableVertexAttribArray(2);
         _gl.VertexAttribPointer(5, 3, VertexAttribPointerType.Float, false, vertexStride, (void*)(8 * sizeof(float)));
         _gl.EnableVertexAttribArray(5);
-
-        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, terrainTile.VboChunkSlice);
         byte[] chunkSliceArray = chunkSliceData.ToArray();
         fixed (byte* chunkSlicePtr = chunkSliceArray)
             _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)chunkSliceArray.Length, chunkSlicePtr, BufferUsageARB.StaticDraw);
@@ -940,8 +1022,8 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
     private static Vector3[] BuildChunkPositions(int tileX, int tileY, WowViewer.Core.Runtime.World.Terrain.WorldTerrainChunkData chunk)
     {
-        float chunkWorldX = MapOrigin - (tileY * TileSize) - (chunk.IndexY * ChunkSize);
-        float chunkWorldY = MapOrigin - (tileX * TileSize) - (chunk.IndexX * ChunkSize);
+        float chunkWorldX = MapOrigin - (tileX * TileSize) - (chunk.IndexY * ChunkSize);
+        float chunkWorldY = MapOrigin - (tileY * TileSize) - (chunk.IndexX * ChunkSize);
         Vector3[] positions = new Vector3[chunk.Heights!.Length];
         for (int index = 0; index < chunk.Heights.Length; index++)
         {
@@ -1018,17 +1100,22 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         string normalizedPath = NormalizeTerrainTexturePath(texturePath);
         if (!_viewerIoService.TryReadVirtualFile(_sourceKey, normalizedPath, out byte[]? data, out _)
             || data is not { Length: > 0 })
+        {
+            Console.WriteLine($"[WorldGpuPreviewRenderer] Texture NOT found: '{normalizedPath}' (original: '{texturePath}')");
             return null;
+        }
 
         try
         {
             using MemoryStream stream = new(data, writable: false);
             using BlpFile blp = new(stream);
             byte[] rgbaPixels = blp.GetPixels(0, out int width, out int height, bgra: false);
+            Console.WriteLine($"[WorldGpuPreviewRenderer] Texture LOADED: '{normalizedPath}' {width}x{height}");
             return new TerrainTextureSample(width, height, rgbaPixels);
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[WorldGpuPreviewRenderer] Texture decode FAILED: '{normalizedPath}' - {ex.Message}");
             return null;
         }
     }
@@ -1126,20 +1213,93 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         return (byte)slice;
     }
 
+    private static void AccumulateGlobalNormal(int chunkX, int chunkY, int vertexIdx, Vector3 normal, Vector3[] sum, ushort[] count)
+    {
+        GetChunkVertexLayout(vertexIdx, out int row, out int col, out bool isInner);
+        int sampleX = isInner ? (col * 2) + 1 : col * 2;
+        int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+
+        int px = (chunkX * 16) + sampleX;
+        int py = (chunkY * 16) + sampleY;
+
+        if (px >= 0 && px < 257 && py >= 0 && py < 257)
+        {
+            int gridIndex = (py * 257) + px;
+            sum[gridIndex] += normal;
+            count[gridIndex]++;
+        }
+    }
+
+    private static Vector3 GetGlobalNormal(int chunkX, int chunkY, int vertexIdx, Vector3[] sum, ushort[] count)
+    {
+        GetChunkVertexLayout(vertexIdx, out int row, out int col, out bool isInner);
+        int sampleX = isInner ? (col * 2) + 1 : col * 2;
+        int sampleY = isInner ? ((row / 2) * 2) + 1 : (row / 2) * 2;
+
+        int px = (chunkX * 16) + sampleX;
+        int py = (chunkY * 16) + sampleY;
+
+        if (px >= 0 && px < 257 && py >= 0 && py < 257)
+        {
+            int gridIndex = (py * 257) + px;
+            if (count[gridIndex] > 0)
+            {
+                Vector3 avg = sum[gridIndex];
+                if (avg.LengthSquared() > 1e-10f)
+                    return Vector3.Normalize(avg);
+            }
+        }
+
+        return Vector3.UnitZ;
+    }
+
     private static void FillAlphaShadowSlice(byte[] alphaShadow, byte slice, WowViewer.Core.Runtime.World.Terrain.WorldTerrainChunkData chunk)
     {
         int sliceBase = slice * ChunkAlphaSize * ChunkAlphaSize * 4;
         for (int layerIndex = 1; layerIndex <= 3; layerIndex++)
         {
-            byte[]? alphaMap = layerIndex < chunk.TextureLayers.Count
-                ? chunk.TextureLayers[layerIndex].DecodedAlpha?.AlphaMap
-                : null;
-            if (alphaMap is not { Length: ChunkAlphaSize * ChunkAlphaSize })
+            int channel = layerIndex - 1;
+
+            if (layerIndex >= chunk.TextureLayers.Count)
                 continue;
 
-            int channel = layerIndex - 1;
-            for (int sampleIndex = 0; sampleIndex < alphaMap.Length; sampleIndex++)
-                alphaShadow[sliceBase + (sampleIndex * 4) + channel] = alphaMap[sampleIndex];
+            AdtTextureChunkLayer layer = chunk.TextureLayers[layerIndex];
+            byte[]? alphaMap = layer.DecodedAlpha?.AlphaMap;
+
+            if (alphaMap is { Length: ChunkAlphaSize * ChunkAlphaSize })
+            {
+                for (int y = 0; y < ChunkAlphaSize; y++)
+                {
+                    for (int x = 0; x < ChunkAlphaSize; x++)
+                    {
+                        int srcX = Math.Min(x, ChunkAlphaSize - 2);
+                        int srcY = Math.Min(y, ChunkAlphaSize - 2);
+                        int dst = y * ChunkAlphaSize + x;
+                        int src = srcY * ChunkAlphaSize + srcX;
+                        alphaShadow[sliceBase + (dst * 4) + channel] = alphaMap[src];
+                    }
+                }
+            }
+            else if ((layer.Flags & 0x100u) == 0)
+            {
+                for (int sampleIndex = 0; sampleIndex < ChunkAlphaSize * ChunkAlphaSize; sampleIndex++)
+                    alphaShadow[sliceBase + (sampleIndex * 4) + channel] = 255;
+            }
+        }
+
+        if (chunk.ShadowMap is { Length: >= ChunkAlphaSize * ChunkAlphaSize })
+        {
+            for (int y = 0; y < ChunkAlphaSize; y++)
+            {
+                for (int x = 0; x < ChunkAlphaSize; x++)
+                {
+                    int srcX = Math.Min(x, ChunkAlphaSize - 2);
+                    int srcY = Math.Min(y, ChunkAlphaSize - 2);
+                    int dst = y * ChunkAlphaSize + x;
+                    int src = srcY * ChunkAlphaSize + srcX;
+                    alphaShadow[sliceBase + (dst * 4) + 3] = chunk.ShadowMap[src];
+                }
+            }
         }
     }
 
@@ -1171,6 +1331,7 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         }
 
         int layerCount = Math.Max(1, Math.Min(textureNames.Count, maxLayers));
+        Console.WriteLine($"[WorldGpuPreviewRenderer] CreateDiffuseArrayTexture: names={textureNames.Count} layerCount={layerCount}");
         int maxDimension = 0;
         for (int index = 0; index < Math.Min(textureNames.Count, layerCount); index++)
         {
@@ -1414,7 +1575,6 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             out vec2 vTexCoord;
             flat out uint vChunkSlice;
             flat out uvec4 vTexIndices;
-            out vec3 vFallbackColor;
 
             void main()
             {
@@ -1423,7 +1583,6 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
                 vTexCoord = aTexCoord;
                 vChunkSlice = aChunkSlice;
                 vTexIndices = aTexIndices;
-                vFallbackColor = aFallbackColor;
                 gl_Position = uProjection * uView * vec4(aPosition, 1.0);
             }
             """;
@@ -1435,7 +1594,6 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             in vec2 vTexCoord;
             flat in uint vChunkSlice;
             flat in uvec4 vTexIndices;
-            in vec3 vFallbackColor;
 
             uniform sampler2DArray uDiffuseArray;
             uniform sampler2DArray uAlphaShadowArray;
@@ -1446,34 +1604,50 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
 
             out vec4 FragColor;
 
-            bool HasLayer(uint textureIndex)
+            bool HasLayer(uint idx)
             {
-                return textureIndex != 65535u && int(textureIndex) < uDiffuseLayerCount;
+                return (idx != 65535u) && (int(idx) >= 0) && (int(idx) < uDiffuseLayerCount);
             }
 
             void main()
             {
-                vec3 normal = normalize(vNormal);
-                float ndotl = max(dot(normal, normalize(uLightDirection)), 0.0);
-                vec3 lighting = uAmbientColor + (uLightColor * ndotl);
                 float texScale = 8.0 / 33.333;
-                vec2 diffuseUv = vec2(-vWorldPosition.y, -vWorldPosition.x) * texScale;
+                vec2 diffuseUV = vec2(-vWorldPosition.y, -vWorldPosition.x) * texScale;
                 vec4 alphaShadow = texture(uAlphaShadowArray, vec3(vTexCoord, float(vChunkSlice)));
 
-                bool has0 = HasLayer(vTexIndices.x);
+                bool has0 = vTexIndices.x != 65535u;
                 bool has1 = HasLayer(vTexIndices.y);
                 bool has2 = HasLayer(vTexIndices.z);
                 bool has3 = HasLayer(vTexIndices.w);
 
-                vec3 result = vFallbackColor * lighting;
+                vec3 norm = normalize(vNormal);
+                float diff = abs(dot(norm, normalize(uLightDirection)));
+                vec3 lighting = uAmbientColor + (uLightColor * diff);
+
+                vec3 result = vec3(1.0);
                 if (has0)
-                    result = texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.x))).rgb * lighting;
+                {
+                    vec4 c0 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIndices.x)));
+                    result = c0.rgb * lighting;
+                }
                 if (has1)
-                    result = mix(result, texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.y))).rgb * lighting, alphaShadow.r);
+                {
+                    vec4 c1 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIndices.y)));
+                    result = mix(result, c1.rgb * lighting, alphaShadow.r);
+                }
                 if (has2)
-                    result = mix(result, texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.z))).rgb * lighting, alphaShadow.g);
+                {
+                    vec4 c2 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIndices.z)));
+                    result = mix(result, c2.rgb * lighting, alphaShadow.g);
+                }
                 if (has3)
-                    result = mix(result, texture(uDiffuseArray, vec3(diffuseUv, float(vTexIndices.w))).rgb * lighting, alphaShadow.b);
+                {
+                    vec4 c3 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIndices.w)));
+                    result = mix(result, c3.rgb * lighting, alphaShadow.b);
+                }
+
+                float shadow = alphaShadow.a;
+                result *= mix(1.0, 0.4, shadow);
 
                 FragColor = vec4(result, 1.0);
             }
@@ -2034,14 +2208,18 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         if (string.IsNullOrWhiteSpace(modelPath))
             return null;
 
-        string cacheKey = modelPath.Replace('/', '\\').ToLowerInvariant();
+        string normalizedPath = modelPath.Replace('/', '\\').TrimStart('\\');
+        string cacheKey = normalizedPath.ToLowerInvariant();
         if (_wmoCache.TryGetValue(cacheKey, out CachedWmo? cachedWmo))
             return cachedWmo;
 
-        if (!_viewerIoService.TryReadVirtualFile(_sourceKey, modelPath, out byte[]? modelBytes, out _)
+        if (!_viewerIoService.TryReadVirtualFile(_sourceKey, normalizedPath, out byte[]? modelBytes, out _)
             || modelBytes is not { Length: > 0 })
         {
             _wmoCache[cacheKey] = null!;
+            string msg = $"WMO not found: {modelPath}";
+            Console.Error.WriteLine($"[WorldGpuPreviewRenderer] {msg}");
+            try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "wow_renderer_diag.txt"), $"[{DateTime.UtcNow:O}] {msg}{Environment.NewLine}"); } catch { }
             return null;
         }
 
@@ -2146,9 +2324,12 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _wmoCache[cacheKey] = cached;
             return cached;
         }
-        catch
+        catch (Exception ex)
         {
             _wmoCache[cacheKey] = null!;
+            string msg = $"WMO parse error for {modelPath}: {ex.Message}";
+            Console.Error.WriteLine($"[WorldGpuPreviewRenderer] {msg}");
+            try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "wow_renderer_diag.txt"), $"[{DateTime.UtcNow:O}] {msg}{Environment.NewLine}"); } catch { }
             return null;
         }
     }
@@ -2322,14 +2503,18 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
         if (string.IsNullOrWhiteSpace(modelPath))
             return null;
 
-        string cacheKey = modelPath.Replace('/', '\\').ToLowerInvariant();
+        string normalizedPath = modelPath.Replace('/', '\\').TrimStart('\\');
+        string cacheKey = normalizedPath.ToLowerInvariant();
         if (_mdxCache.TryGetValue(cacheKey, out CachedMdx? cachedMdx))
             return cachedMdx;
 
-        if (!_viewerIoService.TryReadVirtualFile(_sourceKey, modelPath, out byte[]? modelBytes, out _)
+        if (!_viewerIoService.TryReadVirtualFile(_sourceKey, normalizedPath, out byte[]? modelBytes, out _)
             || modelBytes is not { Length: > 0 })
         {
             _mdxCache[cacheKey] = null!;
+            string msg = $"MDX not found: {modelPath}";
+            Console.Error.WriteLine($"[WorldGpuPreviewRenderer] {msg}");
+            try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "wow_renderer_diag.txt"), $"[{DateTime.UtcNow:O}] {msg}{Environment.NewLine}"); } catch { }
             return null;
         }
 
@@ -2473,9 +2658,12 @@ internal sealed class WorldGpuPreviewRenderer : IDisposable
             _mdxCache[cacheKey] = cached;
             return cached;
         }
-        catch
+        catch (Exception ex)
         {
             _mdxCache[cacheKey] = null!;
+            string msg = $"MDX parse error for {modelPath}: {ex.Message}";
+            Console.Error.WriteLine($"[WorldGpuPreviewRenderer] {msg}");
+            try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "wow_renderer_diag.txt"), $"[{DateTime.UtcNow:O}] {msg}{Environment.NewLine}"); } catch { }
             return null;
         }
     }
