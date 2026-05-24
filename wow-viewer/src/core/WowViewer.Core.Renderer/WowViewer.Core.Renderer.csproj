@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>WowViewer.Core.Renderer</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.OpenGL" />
+    <PackageReference Include="Silk.NET.Windowing" />
+    <PackageReference Include="SixLabors.ImageSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WowViewer.Core\WowViewer.Core.csproj" />
+    <ProjectReference Include="..\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
+    <ProjectReference Include="..\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />
+  </ItemGroup>
+
+</Project>

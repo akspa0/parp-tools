@@ -5,6 +5,7 @@
     <Project Path="src/core/WowViewer.Core.PM4/WowViewer.Core.PM4.csproj" />
     <Project Path="src/core/WowViewer.Core.Runtime/WowViewer.Core.Runtime.csproj" />
     <Project Path="src/core/WowViewer.Core/WowViewer.Core.csproj" />
+    <Project Path="src/core/WowViewer.Core.Renderer/WowViewer.Core.Renderer.csproj" />
   </Folder>
   <Folder Name="/src/tools-shared/">
     <Project Path="src/tools-shared/WowViewer.Tools.Shared/WowViewer.Tools.Shared.csproj" />
@@ -28,5 +29,8 @@
   </Folder>
   <Folder Name="/tools/validation-capture/">
     <Project Path="tools/validation-capture/WowViewer.Tool.ValidationCapture/WowViewer.Tool.ValidationCapture.csproj" />
+  </Folder>
+  <Folder Name="/tools/capture/">
+    <Project Path="tools/capture/WowViewer.Tool.Capture/WowViewer.Tool.Capture.csproj" />
   </Folder>
 </Solution>

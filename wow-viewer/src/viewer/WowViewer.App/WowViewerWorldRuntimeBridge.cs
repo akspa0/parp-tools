@@ -1411,15 +1411,15 @@ internal static class WowViewerWorldRuntimeBridge
 
     internal static Vector2 ComputeTilePlanarMin(int tileX, int tileY)
     {
-        float minX = MapOrigin - ((tileY + 1) * TileSize);
-        float minY = MapOrigin - ((tileX + 1) * TileSize);
+        float minX = MapOrigin - ((tileX + 1) * TileSize);
+        float minY = MapOrigin - ((tileY + 1) * TileSize);
         return new Vector2(minX, minY);
     }
 
     internal static Vector2 ComputeTilePlanarMax(int tileX, int tileY)
     {
-        float maxX = MapOrigin - (tileY * TileSize);
-        float maxY = MapOrigin - (tileX * TileSize);
+        float maxX = MapOrigin - (tileX * TileSize);
+        float maxY = MapOrigin - (tileY * TileSize);
         return new Vector2(maxX, maxY);
     }
 

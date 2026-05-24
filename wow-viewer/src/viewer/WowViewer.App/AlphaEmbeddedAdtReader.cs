@@ -402,16 +402,20 @@ internal static class AlphaEmbeddedAdtReader
             return [];
 
         int mclyDataOffset = mcnkOffset + AlphaChunkHeaderSize + AlphaMcnkHeaderSize + mclyRelativeOffset;
-        int mclyByteCount = Math.Min(layerLimit * 16, container.Length - mclyDataOffset);
-        if (mclyDataOffset < 0 || mclyByteCount < 16)
+        int mclyByteCount = 0;
+        if (mclyDataOffset + 8 <= container.Length)
+        {
+            int mclyPayloadSize = BitConverter.ToInt32(container, mclyDataOffset + 4);
+            mclyByteCount = Math.Min(mclyPayloadSize, Math.Max(0, container.Length - mclyDataOffset - 8));
+        }
+
+        if (mclyByteCount < 16 * layerLimit)
             return [];
 
         int availableLayers = Math.Min(layerLimit, mclyByteCount / 16);
-        if (availableLayers <= 0)
-            return [];
 
         byte[] mclyData = new byte[availableLayers * 16];
-        Buffer.BlockCopy(container, mclyDataOffset, mclyData, 0, mclyData.Length);
+        Buffer.BlockCopy(container, mclyDataOffset + 8, mclyData, 0, mclyData.Length);
 
         int mcalRelativeOffset = BitConverter.ToInt32(container, headerOffset + 0x28);
         int mcalSize = BitConverter.ToInt32(container, headerOffset + 0x2C);
