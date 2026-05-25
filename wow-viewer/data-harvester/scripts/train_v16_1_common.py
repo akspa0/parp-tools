@@ -554,7 +554,10 @@ def _autotune_batch_size(
                 current_reserved_gb = torch.cuda.max_memory_reserved(device) / (1024.0 ** 3)
                 peak_alloc_gb = current_alloc_gb if peak_alloc_gb is None else max(peak_alloc_gb, current_alloc_gb)
                 peak_reserved_gb = current_reserved_gb if peak_reserved_gb is None else max(peak_reserved_gb, current_reserved_gb)
-                if step >= warmup_steps:
+                if step + 1 == warmup_steps:
+                    # Drop compile/warmup transients before measured-window budgeting.
+                    torch.cuda.reset_peak_memory_stats(device)
+                elif step >= warmup_steps:
                     measured_allocs.append(current_alloc_gb)
                     measured_reserveds.append(current_reserved_gb)
 
@@ -884,6 +887,17 @@ def _normal_loss(
     loss_vec = _masked_mean(vec_l1, train_mask)
     loss_nz = _masked_mean(nz_l2, train_mask)
     loss = loss_cos + (0.35 * loss_vec) + (0.15 * loss_nz)
+
+    # Neutralize masked/invalid regions so object-heavy areas do not leak into
+    # predicted normals when they are excluded from terrain supervision.
+    invalid_mask = (1.0 - train_mask).clamp(0.0, 1.0)
+    up = torch.zeros_like(pred_n)
+    up[:, 2:3, :, :] = 1.0
+    loss_invalid_neutral = _masked_mean(1.0 - (pred_n * up).sum(dim=1, keepdim=True), invalid_mask)
+    invalid_neutral_weight = float(getattr(args, "invalid_neutral_weight", 0.0))
+    if invalid_neutral_weight > 0.0:
+        loss = loss + (invalid_neutral_weight * loss_invalid_neutral)
+
     height_sup_weight = float(getattr(args, "height_supervision_weight", 0.0))
     if str(getattr(args, "resolved_normal_variant", "")) == "v17_1_normals" and height_sup_weight > 0.0:
         height_teacher = _normals_from_height(height_norm)
@@ -902,6 +916,8 @@ def _normal_loss(
         "normal_transition_mean": float(_masked_mean(hard_region_debug["transition_signal"], base_mask).item()),
         "normal_height_sup": float(loss_height_sup.item()),
         "normal_height_sup_weight": float(height_sup_weight),
+        "normal_invalid_neutral": float(loss_invalid_neutral.item()),
+        "normal_invalid_neutral_weight": float(invalid_neutral_weight),
         "what_plate_rate": float(what_plate_flag.mean().item()),
         "alpha_painted_cov": float(alpha_painted_cov.mean().item()),
         "mcly_cov": float(mcly_cov.mean().item()),
@@ -909,6 +925,7 @@ def _normal_loss(
         "pred": pred_n,
         "target": target_n,
         "train_mask": train_mask,
+        "invalid_mask": invalid_mask,
         "base_mask": base_mask,
         "detail_weight": hard_region_weight,
         "hard_region_signal": hard_region_debug["hard_region_signal"],
@@ -1481,6 +1498,12 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         help="Additional cosine supervision weight against normals derived from height (normal task only).",
     )
     p.add_argument(
+        "--invalid-neutral-weight",
+        type=float,
+        default=0.20,
+        help="Weight for neutralizing masked/invalid normal regions toward up-vector (normal task only).",
+    )
+    p.add_argument(
         "--height-channel",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -1560,6 +1583,8 @@ def run_task(task_name: str) -> None:
                 args.target_vram_gb = 12.0
             if float(args.height_supervision_weight) <= 0.0:
                 args.height_supervision_weight = 1.0
+            if float(args.invalid_neutral_weight) <= 0.0:
+                args.invalid_neutral_weight = 0.20
             if int(args.num_workers) < 0:
                 args.num_workers = 2
             if int(args.prefetch_factor) > 2:
@@ -1570,6 +1595,8 @@ def run_task(task_name: str) -> None:
     args.resolved_height_channel = bool(resolved_height_channel)
     args.resolved_refiner_enabled = bool(resolved_refiner_enabled)
     args.resolved_normal_variant = str(normal_variant)
+    if task_name == "normal" and normal_variant == "v17_1_normals" and float(args.height_supervision_weight) <= 0.0:
+        raise RuntimeError("v17_1_normals requires --height-supervision-weight > 0 so height supervision is active.")
 
     _seed_all(args.seed)
     device = _resolve_device(args.device)
@@ -1828,6 +1855,7 @@ def run_task(task_name: str) -> None:
         "refiner_disabled": (None if getattr(args, "refiner_disabled", None) is None else bool(getattr(args, "refiner_disabled"))),
         "refiner_distill_weight": float(getattr(args, "refiner_distill_weight", 0.25)),
         "height_supervision_weight": float(getattr(args, "height_supervision_weight", 0.0)),
+        "invalid_neutral_weight": float(getattr(args, "invalid_neutral_weight", 0.0)),
         "refiner_active": bool(refiner_active) if refiner is not None else False,
         "refiner_params": refiner.count_parameters() if refiner is not None else 0,
         "train_pool": train_pool,
@@ -1997,6 +2025,12 @@ def run_task(task_name: str) -> None:
             f"lr={entry['lr']:.2e} opt_steps={optimizer_steps} {entry['elapsed_s']:.1f}s",
             flush=True,
         )
+        if task_name == "normal" and "train_normal_height_sup" in entry:
+            print(
+                f"        height_sup | loss={entry['train_normal_height_sup']:.4f} "
+                f"weight={float(getattr(args, 'height_supervision_weight', 0.0)):.3f}",
+                flush=True,
+            )
         if peak_reserved_gb is not None:
             print(
                 f"        cuda_mem | alloc_peak={peak_alloc_gb:.2f}GB "

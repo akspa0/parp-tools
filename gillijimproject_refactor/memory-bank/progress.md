@@ -5,6 +5,11 @@
 - Harvest-first is canonical:
   - `WowViewer.Tool.Harvest`
   - staged clients under `output/tmp/wowarchive-clients/`
+- New V18 planning lane is now documented with Spec Kit:
+  - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/spec.md`
+  - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/plan.md`
+  - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/tasks.md`
+  - target outcome: canvas-scale paste mining + cross-build dedupe + refined manifests for smaller/smarter V18 models
 - Old converter-side `dataset-scan` / `dataset-audit` / `dataset-build-cache` flows are not the primary terrain-AI path.
 - V16-facing docs were rewritten into shorter source-of-truth surfaces:
   - `wow-viewer/README.md`
@@ -224,6 +229,31 @@
     - `merge-builds`
   - current proof is targeted compile-only:
     - `dotnet build wow-viewer/tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj -c Debug`
+
+### V16.1/V17.1 Trainer Updates (Session)
+
+- `v17_1_normals` no longer uses refiner by default; training path is now direct minimap->normals + supervisor-only height guidance.
+- `v17_1_normals` default `height_supervision_weight` is now `1.0` and startup guard rejects disabled height supervision for this variant.
+- Autotune now measures warmup+steady probe steps (not one startup step) and records measured reserved peaks for candidate decisions.
+- Added autotune controls:
+  - `--autotune-safety-factor`
+  - `--autotune-probe-warmup-steps`
+  - `--autotune-probe-measure-steps`
+- Added conservative `v17_1_normals` loader defaults to reduce host RAM spikes (workers/prefetch/persistent worker behavior).
+- Added invalid-region neutral normal loss to reduce object-mask leakage in predictions:
+  - CLI: `--invalid-neutral-weight`
+  - metrics: `train_normal_invalid_neutral`, `val_normal_invalid_neutral`
+
+### Paste Mining / Dataset Refinement Surface
+
+- New script landed: `wow-viewer/data-harvester/scripts/mine_v17_pastes.py`
+  - extracts candidate paste regions from normal guidance maps
+  - emits candidate manifests, brush library seed manifests, and optional cell-library outputs
+  - supports cross-build/map dedupe via perceptual hash (`--dedupe`)
+- New script landed: `wow-viewer/data-harvester/scripts/quilt_v16_1_debug_signals.py`
+  - emits per-build/per-map stitched `hard_region`, `transition`, and `train_mask` quilts
+- Known gap now explicitly acknowledged and planned in Spec 024:
+  - current mining is still tile-local and must move to stitched canvas-space detection for true multi-tile paste recovery
   - remaining required proof:
     - rebuild a representative V16 store
     - inspect WMO-heavy validation images before retraining

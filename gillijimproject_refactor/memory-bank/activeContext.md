@@ -5,6 +5,12 @@
 
 ## Primary Live Lane
 - V16 terrain dataset + training is the current execution path.
+- New V18 direction is now explicitly spec'd as a dataset-refinement-first lane:
+  - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/spec.md`
+  - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/plan.md`
+  - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/tasks.md`
+  - key shift: detect/mined pastes on stitched map canvases (multi-tile), then cross-build dedupe into canonical paste families, then build refined manifests for model training
+  - rationale: tile-local mining/training overcounts copy-pasted motifs and fragments large authored regions
 - **Spec 009 landed (2026-05-22):** 2,650-line comprehensive design specification at
   `wow-viewer/specs/009-full-project-reimplementation-spec/spec.md`.
   Covers all 28 sections: binary format specs, rendering pipeline, ML pipeline,
@@ -266,6 +272,17 @@
   - script: `wow-viewer/data-harvester/scripts/quilt_v16_1_debug_signals.py`
   - outputs stitched `hard_region` / `transition` (local+global) and `train_mask` PNG quilts per `build/map`
   - supports optional `--curation-manifest`, map/build filters, and tile caps for bounded dataset slices
+- Paste/prefab mining now has a first script surface in `wow-viewer`:
+  - script: `wow-viewer/data-harvester/scripts/mine_v17_pastes.py`
+  - current scope: candidate extraction from normal guidance signals + optional grid-cell library seeds
+  - supports cross-build perceptual-hash dedupe (`--dedupe`) and emits brush/cell library seed manifests
+  - known limitation: current implementation is still tile-local; Phase 1 of Spec 024 moves mining to stitched canvas space for multi-tile authored regions
+- V17.1 normal trainer behavior adjustments landed during this session:
+  - `v17_1_normals` no longer enables refiner/distillation by default
+  - `height_supervision_weight` default for `v17_1_normals` restored to `1.0`
+  - explicit startup guard now fails if `v17_1_normals` runs with height supervision disabled
+  - invalid-region neutral normal loss added (`--invalid-neutral-weight`) to suppress object-region leakage in predicted normals
+  - batch autotune probing now uses warmup+measured steps with configurable safety/probe controls, and `v17_1_normals` loader defaults are more conservative on host RAM
 - The shared V16.1 trainer now supports startup VRAM autotune:
   - `--target-vram-gb`
   - `--autotune-batch-size`
