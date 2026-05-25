@@ -1013,7 +1013,10 @@ def _refiner_refine_and_compare(
         if h_mean is not None and h_std is not None:
             norm_height = (height_raw - h_mean) / (h_std + 1e-8)
 
-        refiner_input = torch.cat([pred, norm_height], dim=1)
+        if str(getattr(args, "resolved_normal_variant", "")) == "v17_1_normals":
+            refiner_input = torch.cat([torch.zeros_like(pred), norm_height], dim=1)
+        else:
+            refiner_input = torch.cat([pred, norm_height], dim=1)
         refined = refiner(refiner_input)
         refined_n = F.normalize(refined, dim=1, eps=1e-6)
 
@@ -1398,6 +1401,24 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         help="Weight of the distillation term when refiner is active (normal task only).",
     )
     p.add_argument(
+        "--refiner-probe-plateau-epochs",
+        type=int,
+        default=3,
+        help="Probe refiner only after this many non-best epochs.",
+    )
+    p.add_argument(
+        "--refiner-probe-min-improvement",
+        type=float,
+        default=0.0,
+        help="Minimum (raw-refined) improvement required to activate/retain refiner.",
+    )
+    p.add_argument(
+        "--preview-refiner-teacher",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Include refiner teacher panel in validation preview images.",
+    )
+    p.add_argument(
         "--height-supervision-weight",
         type=float,
         default=0.0,
@@ -1443,6 +1464,8 @@ def run_task(task_name: str) -> None:
         raise RuntimeError("--train-epoch-tiles must be >= 0")
     if args.val_epoch_tiles < 0:
         raise RuntimeError("--val-epoch-tiles must be >= 0")
+    if args.refiner_probe_plateau_epochs < 1:
+        raise RuntimeError("--refiner-probe-plateau-epochs must be >= 1")
 
     normal_variant, resolved_height_channel, resolved_refiner_enabled = _resolve_normal_variant(args, task_name)
     if task_name == "normal" and normal_variant in {"v17_hybrid", "v17_1_normals"}:
@@ -1850,7 +1873,11 @@ def run_task(task_name: str) -> None:
                     h_std = batch["height_std"].to(device).view(-1, 1, 1, 1)
                     norm_height = (batch["height_raw"].to(device, non_blocking=True) - h_mean) / (h_std + 1e-8)
                     with torch.no_grad():
-                        teacher = refiner(torch.cat([pred_raw.detach(), norm_height], dim=1))
+                        if str(getattr(args, "resolved_normal_variant", "")) == "v17_1_normals":
+                            teacher_input = torch.cat([torch.zeros_like(pred_raw), norm_height], dim=1)
+                        else:
+                            teacher_input = torch.cat([pred_raw.detach(), norm_height], dim=1)
+                        teacher = refiner(teacher_input)
                         teacher_n = F.normalize(teacher, dim=1, eps=1e-6)
                     train_mask = _outputs.get("train_mask")
                     if train_mask is not None:
@@ -1940,13 +1967,17 @@ def run_task(task_name: str) -> None:
                     if preview_batch is None:
                         preview_batch = batch
                         preview_outputs = outputs
-                        if refiner is not None and task_name == "normal":
+                        if refiner is not None and task_name == "normal" and bool(getattr(args, "preview_refiner_teacher", False)):
                             _pred = outputs.get("pred")
                             if _pred is not None:
                                 _h_mean = batch["height_mean"].to(device).view(-1, 1, 1, 1)
                                 _h_std = batch["height_std"].to(device).view(-1, 1, 1, 1)
                                 _norm_h = (batch["height_raw"].to(device, non_blocking=True) - _h_mean) / (_h_std + 1e-8)
-                                _refined = refiner(torch.cat([_pred, _norm_h], dim=1))
+                                if str(getattr(args, "resolved_normal_variant", "")) == "v17_1_normals":
+                                    _ref_input = torch.cat([torch.zeros_like(_pred), _norm_h], dim=1)
+                                else:
+                                    _ref_input = torch.cat([_pred, _norm_h], dim=1)
+                                _refined = refiner(_ref_input)
                                 preview_outputs["refined_normals"] = _refined
             n_val = max(len(val_loader), 1)
             entry["val_loss"] = val_loss_sum / n_val
