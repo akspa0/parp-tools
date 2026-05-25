@@ -202,6 +202,12 @@
   - focused proof run:
     - `wow-viewer/models/v16_1/normal/runs/smoke_normal_supervision_channels_cpu/`
     - logged `what_plate_rate=0.0`, `alpha_painted_cov≈0.66`, `mcly_cov=1.0`
+- New quilt tooling now exports validation-style hard-region maps as full stitched PNGs:
+  - script: `wow-viewer/data-harvester/scripts/quilt_v16_1_debug_signals.py`
+  - reproduces the same `hard_region` + `transition` signal math used in `train_v16_1_common.py`
+  - writes per-`build/map` local-normalized and global-normalized quilts plus `train_mask` for context
+  - bounded smoke proof completed with `--builds 3_3_5_12340 --maps Azeroth --max-tiles 2 --quilt-tile-size 32`
+    - output: `wow-viewer/output/tmp/quilt_debug_smoke/`
 - Archive-backed ADT harvest now has a first bounded WMO-mask repair:
   - `AdtTensorPackBuilder.BuildObjectMasks` now tries to raster transformed WMO
     mesh triangles into `modf_mask` / `object_filtered_mask` instead of always

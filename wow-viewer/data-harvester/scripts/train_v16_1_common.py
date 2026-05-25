@@ -75,7 +75,7 @@ def _resolve_normal_variant(args: argparse.Namespace, task_name: str) -> tuple[s
         raise RuntimeError(f"Unknown --normal-variant: {variant}")
 
     expected_height = variant in {"v16_1_3_height", "v17_hybrid"}
-    expected_refiner = variant in {"v16_1_2_refiner", "v17_hybrid", "v17_1_normals"}
+    expected_refiner = variant in {"v16_1_2_refiner", "v17_hybrid"}
 
     manual_height = getattr(args, "height_channel", None)
     if manual_height is not None and bool(manual_height) != bool(expected_height):
@@ -478,7 +478,9 @@ def _autotune_batch_size(
     if not candidates:
         return None
 
-    safety_factor = 0.85 if (hasattr(torch, "compile") and not args.no_compile) else 0.92
+    safety_factor = float(getattr(args, "autotune_safety_factor", 0.0))
+    if safety_factor <= 0.0:
+        safety_factor = 0.72 if (hasattr(torch, "compile") and not args.no_compile) else 0.82
     effective_target_vram_gb = float(args.target_vram_gb) * float(safety_factor)
     use_amp = bool(device.type == "cuda" and not args.no_amp)
     results: list[dict[str, Any]] = []
@@ -488,7 +490,7 @@ def _autotune_batch_size(
     print(
         "Autotune: probing batch-size ladder "
         f"{candidates} against target_vram_gb={float(args.target_vram_gb):.2f} "
-        f"(effective_target={effective_target_vram_gb:.2f}GB)",
+        f"(effective_target={effective_target_vram_gb:.2f}GB, safety_factor={safety_factor:.2f})",
         flush=True,
     )
 
@@ -498,9 +500,12 @@ def _autotune_batch_size(
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats(device)
 
+    warmup_steps = max(1, int(getattr(args, "autotune_probe_warmup_steps", 2)))
+    measure_steps = max(1, int(getattr(args, "autotune_probe_measure_steps", 3)))
+    total_steps = warmup_steps + measure_steps
+
     for candidate in candidates:
         probe_batch_size = min(int(candidate), len(train_ds))
-        probe_batch = default_collate([train_ds[idx] for idx in range(probe_batch_size)])
         probe_model = None
         probe_optimizer = None
         probe_scaler = None
@@ -508,6 +513,8 @@ def _autotune_batch_size(
         probe_metrics = None
         peak_alloc_gb = None
         peak_reserved_gb = None
+        measured_alloc_gb = None
+        measured_reserved_gb = None
         status = "ok"
         fits_target = False
 
@@ -516,21 +523,49 @@ def _autotune_batch_size(
             probe_model = task.model_factory().to(device)
             if task_name == "normal" and bool(getattr(args, "resolved_height_channel", getattr(args, "height_channel", False))):
                 probe_model = V161NormalHeightModel().to(device)
+            if bool(hasattr(torch, "compile") and not args.no_compile):
+                try:
+                    probe_model = torch.compile(probe_model)
+                except Exception:
+                    pass
             probe_optimizer = torch.optim.AdamW(probe_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
             probe_scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
             probe_model.train()
-            probe_optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast("cuda", enabled=use_amp):
-                probe_loss, probe_metrics, _probe_outputs = task.loss_fn(probe_model, probe_batch, device, args)
-            probe_scaler.scale(probe_loss).backward()
-            probe_scaler.unscale_(probe_optimizer)
-            torch.nn.utils.clip_grad_norm_(probe_model.parameters(), max_norm=1.0)
-            probe_scaler.step(probe_optimizer)
-            probe_scaler.update()
+            measured_allocs: list[float] = []
+            measured_reserveds: list[float] = []
+
+            for step in range(total_steps):
+                probe_batch = default_collate([train_ds[(step * probe_batch_size + idx) % len(train_ds)] for idx in range(probe_batch_size)])
+                probe_optimizer.zero_grad(set_to_none=True)
+                with torch.amp.autocast("cuda", enabled=use_amp):
+                    probe_loss, probe_metrics, _probe_outputs = task.loss_fn(probe_model, probe_batch, device, args)
+                probe_scaler.scale(probe_loss).backward()
+                probe_scaler.unscale_(probe_optimizer)
+                torch.nn.utils.clip_grad_norm_(probe_model.parameters(), max_norm=1.0)
+                probe_scaler.step(probe_optimizer)
+                probe_scaler.update()
+                del probe_batch
+                del probe_loss
+                del probe_metrics
+                del _probe_outputs
+
+                torch.cuda.synchronize(device)
+                current_alloc_gb = torch.cuda.max_memory_allocated(device) / (1024.0 ** 3)
+                current_reserved_gb = torch.cuda.max_memory_reserved(device) / (1024.0 ** 3)
+                peak_alloc_gb = current_alloc_gb if peak_alloc_gb is None else max(peak_alloc_gb, current_alloc_gb)
+                peak_reserved_gb = current_reserved_gb if peak_reserved_gb is None else max(peak_reserved_gb, current_reserved_gb)
+                if step >= warmup_steps:
+                    measured_allocs.append(current_alloc_gb)
+                    measured_reserveds.append(current_reserved_gb)
+
+            if measured_allocs:
+                measured_alloc_gb = max(measured_allocs)
+            if measured_reserveds:
+                measured_reserved_gb = max(measured_reserveds)
+
             torch.cuda.synchronize(device)
-            peak_alloc_gb = torch.cuda.max_memory_allocated(device) / (1024.0 ** 3)
-            peak_reserved_gb = torch.cuda.max_memory_reserved(device) / (1024.0 ** 3)
-            fits_target = bool(peak_reserved_gb <= effective_target_vram_gb)
+            decision_reserved_gb = measured_reserved_gb if measured_reserved_gb is not None else peak_reserved_gb
+            fits_target = bool(decision_reserved_gb is not None and decision_reserved_gb <= effective_target_vram_gb)
             if fits_target:
                 chosen_batch_size = int(candidate)
             else:
@@ -543,9 +578,6 @@ def _autotune_batch_size(
             else:
                 raise
         finally:
-            del probe_batch
-            del probe_loss
-            del probe_metrics
             del probe_scaler
             del probe_optimizer
             del probe_model
@@ -558,13 +590,18 @@ def _autotune_batch_size(
             "fits_target": bool(fits_target),
             "peak_alloc_gb": peak_alloc_gb,
             "peak_reserved_gb": peak_reserved_gb,
+            "measured_alloc_gb": measured_alloc_gb,
+            "measured_reserved_gb": measured_reserved_gb,
+            "warmup_steps": int(warmup_steps),
+            "measure_steps": int(measure_steps),
         }
         results.append(result)
         reserved_text = "n/a" if peak_reserved_gb is None else f"{peak_reserved_gb:.2f}GB"
         alloc_text = "n/a" if peak_alloc_gb is None else f"{peak_alloc_gb:.2f}GB"
+        measured_reserved_text = "n/a" if measured_reserved_gb is None else f"{measured_reserved_gb:.2f}GB"
         print(
             f"Autotune: batch-size {candidate} -> status={status} "
-            f"alloc_peak={alloc_text} reserved_peak={reserved_text}",
+            f"alloc_peak={alloc_text} reserved_peak={reserved_text} measured_reserved={measured_reserved_text}",
             flush=True,
         )
         if reached_limit:
@@ -581,6 +618,7 @@ def _autotune_batch_size(
         "enabled": True,
         "target_vram_gb": float(args.target_vram_gb),
         "effective_target_vram_gb": effective_target_vram_gb,
+        "autotune_safety_factor": safety_factor,
         "compile_enabled_for_run": bool(hasattr(torch, "compile") and not args.no_compile),
         "original_batch_size": int(base_batch_size),
         "chosen_batch_size": int(chosen_batch_size),
@@ -1389,6 +1427,24 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         help="When autotune changes batch-size, rescale train-epoch-tiles to preserve the original steps-per-epoch budget.",
     )
     p.add_argument(
+        "--autotune-safety-factor",
+        type=float,
+        default=0.0,
+        help="Override autotune VRAM safety factor (0 uses variant defaults).",
+    )
+    p.add_argument(
+        "--autotune-probe-warmup-steps",
+        type=int,
+        default=2,
+        help="Autotune probe warmup steps per candidate before measured peak capture.",
+    )
+    p.add_argument(
+        "--autotune-probe-measure-steps",
+        type=int,
+        default=3,
+        help="Autotune probe measured steps per candidate used for batch-size decision.",
+    )
+    p.add_argument(
         "--refiner-disabled",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -1460,6 +1516,12 @@ def run_task(task_name: str) -> None:
         raise RuntimeError("--grad-accum-steps must be >= 1")
     if args.prefetch_factor < 1:
         raise RuntimeError("--prefetch-factor must be >= 1")
+    if args.autotune_safety_factor < 0.0 or args.autotune_safety_factor > 1.0:
+        raise RuntimeError("--autotune-safety-factor must be in [0.0, 1.0]")
+    if args.autotune_probe_warmup_steps < 1:
+        raise RuntimeError("--autotune-probe-warmup-steps must be >= 1")
+    if args.autotune_probe_measure_steps < 1:
+        raise RuntimeError("--autotune-probe-measure-steps must be >= 1")
     if args.train_epoch_tiles < 0:
         raise RuntimeError("--train-epoch-tiles must be >= 0")
     if args.val_epoch_tiles < 0:
@@ -1497,7 +1559,13 @@ def run_task(task_name: str) -> None:
             if float(args.target_vram_gb) <= 0.0:
                 args.target_vram_gb = 12.0
             if float(args.height_supervision_weight) <= 0.0:
-                args.height_supervision_weight = 0.35
+                args.height_supervision_weight = 1.0
+            if int(args.num_workers) < 0:
+                args.num_workers = 2
+            if int(args.prefetch_factor) > 2:
+                args.prefetch_factor = 2
+            if args.persistent_workers is None:
+                args.persistent_workers = False
 
     args.resolved_height_channel = bool(resolved_height_channel)
     args.resolved_refiner_enabled = bool(resolved_refiner_enabled)
@@ -1734,6 +1802,9 @@ def run_task(task_name: str) -> None:
         "autotune_batch_size": args.autotune_batch_size,
         "autotune_batch_candidates": list(args.autotune_batch_candidates) if args.autotune_batch_candidates else None,
         "autotune_keep_epoch_steps": args.autotune_keep_epoch_steps,
+        "autotune_safety_factor": args.autotune_safety_factor,
+        "autotune_probe_warmup_steps": args.autotune_probe_warmup_steps,
+        "autotune_probe_measure_steps": args.autotune_probe_measure_steps,
         "train_max_tiles": args.train_max_tiles,
         "train_epoch_tiles": args.train_epoch_tiles,
         "train_epoch_build_balanced": args.train_epoch_build_balanced,

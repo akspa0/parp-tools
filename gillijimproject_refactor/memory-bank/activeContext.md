@@ -262,6 +262,10 @@
 - Validation previews now draw labels again:
   - panel labels such as `input`, `normal_gt`, `normal_pred`, `train_mask`
   - per-row sample headers with build/map/tile metadata
+- Full-map debug-signal quilts are now scriptable from the same normal-loss math:
+  - script: `wow-viewer/data-harvester/scripts/quilt_v16_1_debug_signals.py`
+  - outputs stitched `hard_region` / `transition` (local+global) and `train_mask` PNG quilts per `build/map`
+  - supports optional `--curation-manifest`, map/build filters, and tile caps for bounded dataset slices
 - The shared V16.1 trainer now supports startup VRAM autotune:
   - `--target-vram-gb`
   - `--autotune-batch-size`
