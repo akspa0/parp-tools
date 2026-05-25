@@ -253,6 +253,7 @@
 - New script landed: `wow-viewer/data-harvester/scripts/mine_v18_pastes_canvas.py`
   - stitches tiles into build/map canvases before extraction
   - emits `canvas_bbox` + `tile_coverage` per candidate for multi-tile paste preservation
+  - `tile_coverage` now carries `tile_id` for downstream trainer-manifest projection
   - writes machine-readable evidence:
     - `summary.json`
     - `candidates.jsonl`
@@ -304,6 +305,27 @@
   - rerun stability proof:
     - identical command with `--out-dir ../output/tmp/v18_canvas_phase2_run2`
     - `FC /B` reported no differences for `cluster_summary.jsonl`
+- New script landed: `wow-viewer/data-harvester/scripts/build_v18_refined_manifest.py`
+  - consumes `candidates_deduped.jsonl` and emits trainer-compatible refined manifests:
+    - `kept_tiles.parquet`
+    - `tiles.parquet`
+    - `tiles.jsonl`
+  - applies normal-aware quality gates and cluster-balanced selection controls
+  - writes evidence package:
+    - `summary.json` (selection hash, cluster distribution, duplicate-ratio metrics, bucket/build counts)
+    - `selected_candidates.jsonl`
+    - `config.snapshot.json`
+- Bounded proof for Spec 024 Phase 3 (refined manifest generation + trainer load) now exists:
+  - manifest build command:
+    - `uv run python -u scripts/build_v18_refined_manifest.py --deduped-candidates ../output/tmp/v18_canvas_phase3_source --run-name v18_refined_manifest_phase3_smoke --output-dir ../output/tmp/v18_refined_manifest_phase3_smoke --max-clusters 32 --max-variants-per-cluster 2 --max-tiles 128 --min-score-mean 0.10 --min-transition-mean 0.70 --min-hard-mean 0.30 --min-train-mask-mean 1.0`
+  - manifest result:
+    - `candidate_rows_in=48`
+    - `candidate_rows_selected=32`
+    - `kept_tiles=42`
+    - `selection_hash=83cc25fa09b855297103feba95ae267de1444d772885da950337a916f3b4b71c`
+  - trainer compatibility smoke:
+    - `uv run python -u scripts/train_v16_1_normal.py --builds 0_5_3_3368 3_3_5_12340 --curation-manifest ../output/tmp/v18_refined_manifest_phase3_smoke --device cpu --epochs 1 --batch-size 2 --train-max-tiles 24 --train-epoch-tiles 8 --val-max-tiles 8 --rotate-val-tiles --val-epoch-tiles 4 --num-workers 0 --no-compile --run-name v18_refined_manifest_load_smoke`
+    - completed with `train=24`, `val=3`, `new best val_loss=0.7973`
 
 ### Spec 024 Expansion (Session Close)
 
@@ -316,7 +338,7 @@
   - refined manifests must support family-balanced sampling (not raw-frequency sampling)
 - Next implementation anchor for fresh chat:
   - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/tasks.md`
-  - continue at Phase 3 (`T014`+) for refined manifest generation and trainer consumption proof
+  - continue at Phase 4 (`T018`+) for composition-graph extraction and AreaID-aware grouping
   - keep `mine_v17_pastes.py` as transitional tile-local tooling only
 - The shared V16.1 trainer now has real gradient accumulation:
   - CLI flag: `--grad-accum-steps`

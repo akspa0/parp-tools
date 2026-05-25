@@ -484,11 +484,13 @@ def main() -> None:
         train_mask_canvas = np.zeros((canvas_h, canvas_w), dtype=np.float32)
         present_mask = np.zeros((canvas_h, canvas_w), dtype=bool)
         present_tile_set: set[tuple[int, int]] = set()
+        present_tile_id_by_coord: dict[tuple[int, int], int] = {}
 
         for tile in tiles:
             tile_x = int(tile["tile_x"])
             tile_y = int(tile["tile_y"])
             present_tile_set.add((tile_x, tile_y))
+            present_tile_id_by_coord[(tile_x, tile_y)] = int(tile["tile_id"])
             ox = (tile_x - min_tile_x) * 256
             oy = (tile_y - min_tile_y) * 256
             minimap_canvas[oy:oy + 256, ox:ox + 256, :] = tile["minimap"]
@@ -551,7 +553,13 @@ def main() -> None:
                 tile_y = min_tile_y + int(local_ty)
                 if (tile_x, tile_y) not in present_tile_set:
                     continue
-                tile_coverage.append({"tile_x": int(tile_x), "tile_y": int(tile_y)})
+                tile_coverage.append(
+                    {
+                        "tile_x": int(tile_x),
+                        "tile_y": int(tile_y),
+                        "tile_id": int(present_tile_id_by_coord.get((tile_x, tile_y), -1)),
+                    }
+                )
             tile_coverage.sort(key=lambda t: (t["tile_y"], t["tile_x"]))
 
             score_crop = score[y0:y1 + 1, x0:x1 + 1]

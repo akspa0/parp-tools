@@ -291,6 +291,7 @@
     - result: `candidates=24`, `multi_tile_candidates=6`, `multi_tile_ratio=0.25`
 - Spec 024 Phase 2 dedupe is now landed in the same script:
   - deterministic candidate fingerprinting: `rgb_fingerprint`
+  - tile coverage now includes `tile_id` per covered tile for trainer-manifest projection
   - alpha-layer-aware metadata: `layer_means`, `layer_coverage`, `dominant_layers`, `alpha_layer_signature`
   - cluster lineage metadata per candidate: `cluster_id`, `canonical_id`, `variant_rank`, `cluster_size`, `is_canonical`
   - dedupe outputs: `candidates_deduped.jsonl`, `cluster_summary.jsonl`, `dedupe_stats.json`
@@ -299,6 +300,27 @@
     - `selection_hash=999c2e6880225c24fd979b70538f1353d60f8187b51ba2abfe5c43b40cefabe0`
     - `cluster_hash=4dc8ffa09cac92cd3c07ede9f8ad88aec91167c99837ffc418ec438622db14a8`
     - byte-identical `cluster_summary.jsonl`
+- Spec 024 Phase 3 refined manifest generation is now landed:
+  - script: `wow-viewer/data-harvester/scripts/build_v18_refined_manifest.py`
+  - consumes deduped canvas candidates and emits trainer-compatible manifest rows:
+    - `kept_tiles.parquet`
+    - `tiles.parquet`
+    - `tiles.jsonl`
+  - normal-aware gating + cluster-balancing controls:
+    - `--min-score-mean`
+    - `--min-transition-mean`
+    - `--min-hard-mean`
+    - `--min-train-mask-mean`
+    - `--max-clusters`
+    - `--max-variants-per-cluster`
+    - `--max-tiles`
+  - evidence outputs include:
+    - `summary.json` with `selection_hash`, cluster distribution, duplicate-ratio metrics, bucket/build counts
+    - `selected_candidates.jsonl`
+    - `config.snapshot.json`
+  - trainer load proof:
+    - command: `uv run python -u scripts/train_v16_1_normal.py --builds 0_5_3_3368 3_3_5_12340 --curation-manifest ../output/tmp/v18_refined_manifest_phase3_smoke --device cpu --epochs 1 --batch-size 2 --train-max-tiles 24 --train-epoch-tiles 8 --val-max-tiles 8 --rotate-val-tiles --val-epoch-tiles 4 --num-workers 0 --no-compile --run-name v18_refined_manifest_load_smoke`
+    - result: run completed (`train=24`, `val=3`), confirming manifest/trainer seam compatibility
 - V17.1 normal trainer behavior adjustments landed during this session:
   - `v17_1_normals` no longer enables refiner/distillation by default
   - `height_supervision_weight` default for `v17_1_normals` restored to `1.0`

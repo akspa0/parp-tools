@@ -21,10 +21,10 @@
 
 ## Phase 3 — Refined Manifest Generation
 
-- [ ] T014 Create `scripts/build_v18_refined_manifest.py` consuming deduped candidate clusters.
-- [ ] T015 Add normal-aware quality gates and cluster-balancing selection knobs.
-- [ ] T016 Emit trainer-compatible refined manifest format + evidence (`selection_hash`, cluster distribution, duplicate ratio).
-- [ ] T017 Validate manifest loads in `train_v16_1_normal.py` with bounded dry run.
+- [x] T014 Create `scripts/build_v18_refined_manifest.py` consuming deduped candidate clusters.
+- [x] T015 Add normal-aware quality gates and cluster-balancing selection knobs.
+- [x] T016 Emit trainer-compatible refined manifest format + evidence (`selection_hash`, cluster distribution, duplicate ratio).
+- [x] T017 Validate manifest loads in `train_v16_1_normal.py` with bounded dry run.
 
 ## Phase 4 — Composition Graph Layer
 
