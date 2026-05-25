@@ -321,6 +321,55 @@
   - trainer load proof:
     - command: `uv run python -u scripts/train_v16_1_normal.py --builds 0_5_3_3368 3_3_5_12340 --curation-manifest ../output/tmp/v18_refined_manifest_phase3_smoke --device cpu --epochs 1 --batch-size 2 --train-max-tiles 24 --train-epoch-tiles 8 --val-max-tiles 8 --rotate-val-tiles --val-epoch-tiles 4 --num-workers 0 --no-compile --run-name v18_refined_manifest_load_smoke`
     - result: run completed (`train=24`, `val=3`), confirming manifest/trainer seam compatibility
+- Spec 024 Phase 4 composition graph layer is now landed:
+  - script: `wow-viewer/data-harvester/scripts/build_v18_composition_graph.py`
+  - composition outputs:
+    - `composition_candidates.jsonl` (candidate-level `area_id_coverage`, `dominant_area_ids`, `composition_family_id`)
+    - `composition_nodes.jsonl` (cluster nodes + area distribution)
+    - `composition_edges.jsonl` (adjacency/co-occurrence edges with stable counts/distances)
+    - `composition_families.jsonl` (stable `composition_family_id` macro groups)
+  - AreaID behavior:
+    - supports optional external `--area-id-map` for tile-level labels
+    - soft-label fallback to `unknown` when AreaID data is absent
+  - deterministic graph proof:
+    - run1: `../output/tmp/v18_composition_phase4_run1`
+    - run2: `../output/tmp/v18_composition_phase4_run2`
+    - identical hashes:
+      - `graph_hash=eccd70abda63f7e5dcbabe2528f2809b62aed7455780c2cef125291a7333c09a`
+      - `family_hash=800a2029757e7988f736d70dc787087d8b4f72e692c3007e32fa4bdbdd8c2771`
+    - byte-identical `composition_edges.jsonl`
+- Phase 4 metadata integration into refined manifests is now landed:
+  - `build_v18_refined_manifest.py` accepts `--composition-graph`
+  - refined rows now carry:
+    - `source_composition_family_ids`
+    - `source_composition_family_count`
+    - `composition_balance_weight_mean`
+  - summary now includes composition-family distribution evidence
+- Spec 024 Phase 5 auto-naming + paste-library catalog is now landed:
+  - script: `wow-viewer/data-harvester/scripts/build_v18_paste_library_catalog.py`
+  - deterministic naming from role/shape/layer/family descriptors with stable `paste_id`
+  - metadata fields include:
+    - `canonical_name`
+    - `aliases`
+    - `name_confidence`
+    - `review_state` (auto)
+    - `review_required`
+  - catalog outputs:
+    - `paste_library_catalog.json`
+    - `paste_library_catalog.jsonl`
+  - deterministic stability proof:
+    - rerun output at `../output/tmp/v18_paste_library_phase5_run2`
+    - byte-identical `paste_library_catalog.jsonl` vs run1
+    - stable hash: `1ae9a2d2900a24aba4f7b34c260f747bd683527317278abdb2a22a783f372a2f`
+- Spec 024 Phase 6 baseline launch contract is now landed:
+  - script: `wow-viewer/data-harvester/scripts/run_v18_baseline_contract.py`
+  - defines profile contract (`small` / `medium` / `large`) in `baseline_profiles.json`
+  - executes bounded refined baseline run + non-ref comparison run
+  - writes comparison artifacts:
+    - `comparison_report.json`
+    - `comparison_report.md`
+  - bounded proof root:
+    - `../output/tmp/v18_baseline_contract_phase6`
 - V17.1 normal trainer behavior adjustments landed during this session:
   - `v17_1_normals` no longer enables refiner/distillation by default
   - `height_supervision_weight` default for `v17_1_normals` restored to `1.0`

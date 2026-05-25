@@ -28,20 +28,20 @@
 
 ## Phase 4 — Composition Graph Layer
 
-- [ ] T018 Build composition-graph generator from deduped canvas candidates (adjacency/co-occurrence edges).
-- [ ] T019 Add MCNK AreaID overlap extraction and dominant AreaID labeling per candidate/group.
-- [ ] T020 Emit stable composition-family IDs and macro-style summaries.
-- [ ] T021 Integrate composition-family balancing metadata into refined manifest outputs.
-- [ ] T022 Validate deterministic graph stats across reruns.
+- [x] T018 Build composition-graph generator from deduped canvas candidates (adjacency/co-occurrence edges).
+- [x] T019 Add MCNK AreaID overlap extraction and dominant AreaID labeling per candidate/group.
+- [x] T020 Emit stable composition-family IDs and macro-style summaries.
+- [x] T021 Integrate composition-family balancing metadata into refined manifest outputs.
+- [x] T022 Validate deterministic graph stats across reruns.
 
 ## Phase 5 — Auto-Naming + Library Metadata
 
-- [ ] T023 Add deterministic paste-family naming generator from role/shape/layer/AreaID descriptors.
-- [ ] T024 Add alias and naming confidence metadata fields plus review state (`auto`, `reviewed`, `locked`).
-- [ ] T025 Emit/validate paste-library catalog outputs with stable IDs and naming metadata.
+- [x] T023 Add deterministic paste-family naming generator from role/shape/layer/AreaID descriptors.
+- [x] T024 Add alias and naming confidence metadata fields plus review state (`auto`, `reviewed`, `locked`).
+- [x] T025 Emit/validate paste-library catalog outputs with stable IDs and naming metadata.
 
 ## Phase 6 — V18 Baseline Launch Contract
 
-- [ ] T026 Define baseline run profiles from refined manifests (small/medium/large pool).
-- [ ] T027 Execute first bounded V18 normal run and collect throughput/convergence evidence.
-- [ ] T028 Write comparison report vs prior non-refined curation runs.
+- [x] T026 Define baseline run profiles from refined manifests (small/medium/large pool).
+- [x] T027 Execute first bounded V18 normal run and collect throughput/convergence evidence.
+- [x] T028 Write comparison report vs prior non-refined curation runs.

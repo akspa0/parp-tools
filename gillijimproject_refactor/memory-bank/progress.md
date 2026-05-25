@@ -326,6 +326,72 @@
   - trainer compatibility smoke:
     - `uv run python -u scripts/train_v16_1_normal.py --builds 0_5_3_3368 3_3_5_12340 --curation-manifest ../output/tmp/v18_refined_manifest_phase3_smoke --device cpu --epochs 1 --batch-size 2 --train-max-tiles 24 --train-epoch-tiles 8 --val-max-tiles 8 --rotate-val-tiles --val-epoch-tiles 4 --num-workers 0 --no-compile --run-name v18_refined_manifest_load_smoke`
     - completed with `train=24`, `val=3`, `new best val_loss=0.7973`
+- New script landed: `wow-viewer/data-harvester/scripts/build_v18_composition_graph.py`
+  - builds composition graph from deduped canvas candidates:
+    - cluster-node summaries
+    - adjacency/co-occurrence edges
+    - stable composition-family IDs
+  - emits AreaID-aware candidate/group metadata:
+    - `area_id_coverage`
+    - `dominant_area_ids`
+  - AreaID source is optional (`--area-id-map`); missing labels fall back to `unknown` as soft labels
+  - output artifacts:
+    - `composition_candidates.jsonl`
+    - `composition_nodes.jsonl`
+    - `composition_edges.jsonl`
+    - `composition_families.jsonl`
+    - `summary.json`
+- Bounded proof for Spec 024 Phase 4 (composition graph + deterministic rerun) now exists:
+  - run1 command:
+    - `uv run python -u scripts/build_v18_composition_graph.py --deduped-candidates ../output/tmp/v18_canvas_phase3_source --output-dir ../output/tmp/v18_composition_phase4_run1 --adjacency-margin-px 64 --cooccur-edge-min 2`
+  - run2 command:
+    - same command with `--output-dir ../output/tmp/v18_composition_phase4_run2`
+  - deterministic result:
+    - `graph_hash=eccd70abda63f7e5dcbabe2528f2809b62aed7455780c2cef125291a7333c09a`
+    - `family_hash=800a2029757e7988f736d70dc787087d8b4f72e692c3007e32fa4bdbdd8c2771`
+    - `FC /B` reported no differences for `composition_edges.jsonl`
+- Phase 4 integration into refined manifests is now landed:
+  - `build_v18_refined_manifest.py --composition-graph ../output/tmp/v18_composition_phase4_run1`
+  - refined output now includes composition-family balancing metadata:
+    - `source_composition_family_ids`
+    - `source_composition_family_count`
+    - `composition_balance_weight_mean`
+  - trainer smoke with composition-augmented manifest completed:
+    - run: `v17_1_v18_refined_manifest_phase4_load_smoke`
+    - `train=24`, `val=3`, `new best val_loss=0.7973`
+- New script landed: `wow-viewer/data-harvester/scripts/build_v18_paste_library_catalog.py`
+  - deterministic paste-family naming and catalog emission
+  - emits stable IDs and naming metadata:
+    - `paste_id`
+    - `canonical_name`
+    - `aliases`
+    - `name_confidence`
+    - `review_state` / `review_required`
+  - catalog outputs:
+    - `paste_library_catalog.json`
+    - `paste_library_catalog.jsonl`
+    - `summary.json`
+- Bounded proof for Spec 024 Phase 5 (auto-naming + catalog stability) now exists:
+  - run1 output: `../output/tmp/v18_paste_library_phase5`
+  - run2 output: `../output/tmp/v18_paste_library_phase5_run2`
+  - deterministic result:
+    - `stable_name_hash=1ae9a2d2900a24aba4f7b34c260f747bd683527317278abdb2a22a783f372a2f`
+    - `FC /B` reported no differences for `paste_library_catalog.jsonl`
+- New script landed: `wow-viewer/data-harvester/scripts/run_v18_baseline_contract.py`
+  - defines baseline profile contract and writes `baseline_profiles.json`
+  - runs bounded refined baseline + non-ref baseline and emits comparison report
+- Bounded proof for Spec 024 Phase 6 (baseline launch + comparison) now exists:
+  - command:
+    - `uv run python -u scripts/run_v18_baseline_contract.py --refined-manifest ../output/tmp/v18_refined_manifest_phase4_smoke --builds 0_5_3_3368 3_3_5_12340 --profile small --output-dir ../output/tmp/v18_baseline_contract_phase6`
+  - refined run:
+    - `v17_1_v18_baseline_small_refined`
+    - epoch1 `val_loss=0.6008`, `elapsed_s=7.02`
+  - non-ref run:
+    - `v17_1_v18_baseline_small_nonref`
+    - epoch1 `val_loss=0.6505`, `elapsed_s=7.22`
+  - report outputs:
+    - `comparison_report.json`
+    - `comparison_report.md`
 
 ### Spec 024 Expansion (Session Close)
 
@@ -338,7 +404,8 @@
   - refined manifests must support family-balanced sampling (not raw-frequency sampling)
 - Next implementation anchor for fresh chat:
   - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/tasks.md`
-  - continue at Phase 4 (`T018`+) for composition-graph extraction and AreaID-aware grouping
+  - Spec 024 task checklist is now fully implemented (`T001` through `T028`)
+  - next likely lane is operational tuning on broader corpus slices (dedupe compression, AreaID map feeds, medium/large baseline runs)
   - keep `mine_v17_pastes.py` as transitional tile-local tooling only
 - The shared V16.1 trainer now has real gradient accumulation:
   - CLI flag: `--grad-accum-steps`

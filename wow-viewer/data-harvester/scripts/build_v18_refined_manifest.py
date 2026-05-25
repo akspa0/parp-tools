@@ -24,6 +24,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-name", type=str, default="v18_refined_manifest")
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--profile", type=str, default="normal_terrain_v18_refined_v1")
+    parser.add_argument(
+        "--composition-graph",
+        type=Path,
+        default=None,
+        help="Optional composition graph directory/file from build_v18_composition_graph.py to add composition-family metadata.",
+    )
     parser.add_argument("--max-clusters", type=int, default=0, help="If >0, keep only top-N clusters by quality score.")
     parser.add_argument("--max-variants-per-cluster", type=int, default=2, help="Per-cluster cap for balanced candidate selection.")
     parser.add_argument("--max-tiles", type=int, default=0, help="If >0, cap final unique tile rows.")
@@ -48,6 +54,21 @@ def _resolve_deduped_path(path: Path) -> Path:
     raise FileNotFoundError(f"No deduped candidates file under: {path}")
 
 
+def _resolve_composition_path(path: Path) -> tuple[Path | None, Path | None]:
+    if path.is_file():
+        if "famil" in path.stem.lower():
+            return path, None
+        return None, path
+    fam_jsonl = path / "composition_families.jsonl"
+    fam_json = path / "composition_families.json"
+    cand_jsonl = path / "composition_candidates.jsonl"
+    cand_json = path / "composition_candidates.json"
+
+    families = fam_jsonl if fam_jsonl.exists() else (fam_json if fam_json.exists() else None)
+    candidates = cand_jsonl if cand_jsonl.exists() else (cand_json if cand_json.exists() else None)
+    return families, candidates
+
+
 def _load_rows(path: Path) -> list[dict[str, Any]]:
     if path.suffix.lower() in {".jsonl", ".ndjson"}:
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -55,6 +76,44 @@ def _load_rows(path: Path) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return payload
     return list(payload.get("rows", []))
+
+
+def _load_composition_maps(path: Path | None) -> tuple[dict[str, str], dict[str, int]]:
+    if path is None:
+        return {}, {}
+    families_path, candidates_path = _resolve_composition_path(path)
+    cluster_to_family: dict[str, str] = {}
+    family_cluster_count: dict[str, int] = {}
+
+    if families_path is not None and families_path.exists():
+        families = _load_rows(families_path)
+        for row in families:
+            family_id = str(row.get("composition_family_id", "")).strip()
+            if not family_id:
+                continue
+            clusters = [str(c).strip() for c in row.get("cluster_ids", []) if str(c).strip()]
+            if not clusters:
+                continue
+            family_cluster_count[family_id] = int(max(1, len(clusters)))
+            for cluster_id in clusters:
+                cluster_to_family[cluster_id] = family_id
+
+    if candidates_path is not None and candidates_path.exists():
+        candidates = _load_rows(candidates_path)
+        for row in candidates:
+            cluster_id = str(row.get("cluster_id", "")).strip()
+            family_id = str(row.get("composition_family_id", "")).strip()
+            if cluster_id and family_id and cluster_id not in cluster_to_family:
+                cluster_to_family[cluster_id] = family_id
+        # backfill family sizes from candidate rows when family file missing
+        if not family_cluster_count and cluster_to_family:
+            inverse: dict[str, set[str]] = {}
+            for cluster_id, family_id in cluster_to_family.items():
+                inverse.setdefault(family_id, set()).add(cluster_id)
+            for family_id, clusters in inverse.items():
+                family_cluster_count[family_id] = int(max(1, len(clusters)))
+
+    return cluster_to_family, family_cluster_count
 
 
 def _clamp01(value: float) -> float:
@@ -127,7 +186,12 @@ def _candidate_passes(row: dict[str, Any], args: argparse.Namespace) -> bool:
     return True
 
 
-def _cluster_balanced_candidates(rows: list[dict[str, Any]], args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _cluster_balanced_candidates(
+    rows: list[dict[str, Any]],
+    args: argparse.Namespace,
+    cluster_to_family: dict[str, str],
+    family_cluster_count: dict[str, int],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     by_cluster: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         cluster_id = str(row.get("cluster_id", f"cluster_single_{int(row.get('candidate_id', -1)):08d}"))
@@ -151,8 +215,13 @@ def _cluster_balanced_candidates(rows: list[dict[str, Any]], args: argparse.Name
         kept = kept[: max(1, int(args.max_variants_per_cluster))]
         cluster_size = int(max(int(m.get("cluster_size", 1)) for m in members))
         cluster_weight = float(1.0 / math.sqrt(max(1, cluster_size)))
+        family_id = str(cluster_to_family.get(cluster_id, "")).strip()
+        family_size = int(max(1, family_cluster_count.get(family_id, 1))) if family_id else 1
+        family_weight = float(1.0 / math.sqrt(max(1, family_size)))
         for row in kept:
             row["cluster_balance_weight"] = cluster_weight
+            row["composition_family_id"] = family_id
+            row["composition_balance_weight"] = family_weight
         cluster_quality = float(max(float(m.get("quality_score", 0.0)) for m in kept))
         cluster_entries.append((cluster_id, kept, cluster_quality))
 
@@ -176,10 +245,17 @@ def _cluster_balanced_candidates(rows: list[dict[str, Any]], args: argparse.Name
             break
 
     cluster_counts = {cid: sum(1 for row in selected if str(row.get("cluster_id", "")) == cid) for cid in ordered_cluster_ids}
+    family_counts: dict[str, int] = {}
+    for row in selected:
+        family_id = str(row.get("composition_family_id", "")).strip()
+        if not family_id:
+            continue
+        family_counts[family_id] = int(family_counts.get(family_id, 0) + 1)
     evidence = {
         "clusters_available": len(by_cluster),
         "clusters_selected": len(ordered_cluster_ids),
         "cluster_selected_candidate_counts": cluster_counts,
+        "composition_family_selected_candidate_counts": dict(sorted(family_counts.items())),
         "max_variants_per_cluster": int(args.max_variants_per_cluster),
     }
     return selected, evidence
@@ -195,7 +271,8 @@ def _selection_hash(rows: list[dict[str, Any]]) -> str:
                 str(row.get("map", "")),
                 str(row.get("tile_x", "")),
                 str(row.get("tile_y", "")),
-                str(row.get("cluster_ids", "")),
+                str(row.get("source_cluster_ids", "")),
+                str(row.get("source_composition_family_ids", "")),
             ]
         )
         h.update(key.encode("utf-8"))
@@ -271,6 +348,8 @@ def _tile_rows_from_candidates(selected_candidates: list[dict[str, Any]], args: 
                     "_source_candidate_ids": [int(row.get("candidate_id", -1))],
                     "_source_clusters": {str(row.get("cluster_id", ""))},
                     "_source_cluster_weights": [float(row.get("cluster_balance_weight", 1.0))],
+                    "_source_composition_families": {str(row.get("composition_family_id", "")).strip()} if str(row.get("composition_family_id", "")).strip() else set(),
+                    "_source_composition_weights": [float(row.get("composition_balance_weight", 1.0))],
                 }
             else:
                 existing["quality_score"] = float(max(existing["quality_score"], float(quality["quality_score"])))
@@ -288,6 +367,10 @@ def _tile_rows_from_candidates(selected_candidates: list[dict[str, Any]], args: 
                 existing["_source_candidate_ids"].append(int(row.get("candidate_id", -1)))
                 existing["_source_clusters"].add(str(row.get("cluster_id", "")))
                 existing["_source_cluster_weights"].append(float(row.get("cluster_balance_weight", 1.0)))
+                family_id = str(row.get("composition_family_id", "")).strip()
+                if family_id:
+                    existing["_source_composition_families"].add(family_id)
+                existing["_source_composition_weights"].append(float(row.get("composition_balance_weight", 1.0)))
         if reached_cap:
             break
 
@@ -296,11 +379,16 @@ def _tile_rows_from_candidates(selected_candidates: list[dict[str, Any]], args: 
         row["difficulty_bucket"] = _difficulty_bucket_from_rank(int(row["difficulty_rank"]))
         clusters = sorted(c for c in row.pop("_source_clusters") if c)
         candidate_ids = sorted(cid for cid in row.pop("_source_candidate_ids") if cid >= 0)
-        weights = row.pop("_source_cluster_weights")
+        cluster_weights = row.pop("_source_cluster_weights")
+        composition_families = sorted(c for c in row.pop("_source_composition_families") if c)
+        composition_weights = row.pop("_source_composition_weights")
         row["source_candidate_ids"] = ",".join(str(v) for v in candidate_ids)
         row["source_cluster_ids"] = ",".join(clusters)
         row["source_cluster_count"] = int(len(clusters))
-        row["cluster_balance_weight_mean"] = float(np.mean(weights)) if weights else 1.0
+        row["cluster_balance_weight_mean"] = float(np.mean(cluster_weights)) if cluster_weights else 1.0
+        row["source_composition_family_ids"] = ",".join(composition_families)
+        row["source_composition_family_count"] = int(len(composition_families))
+        row["composition_balance_weight_mean"] = float(np.mean(composition_weights)) if composition_weights else 1.0
         out_rows.append(row)
 
     raw_duplicate_ratio = 1.0 - (float(len(unique_raw_tiles)) / float(raw_tile_refs)) if raw_tile_refs > 0 else 0.0
@@ -335,7 +423,8 @@ def main() -> None:
     if not rows:
         raise RuntimeError(f"No rows loaded from {input_path}")
 
-    selected_candidates, cluster_evidence = _cluster_balanced_candidates(rows, args)
+    cluster_to_family, family_cluster_count = _load_composition_maps(args.composition_graph)
+    selected_candidates, cluster_evidence = _cluster_balanced_candidates(rows, args, cluster_to_family, family_cluster_count)
     tile_rows, tile_evidence = _tile_rows_from_candidates(selected_candidates, args)
     if not tile_rows:
         raise RuntimeError("Refined manifest is empty after quality gates and selection.")
@@ -349,6 +438,7 @@ def main() -> None:
     bucket_counts: dict[str, int] = {}
     build_counts: dict[str, int] = {}
     cluster_counts: dict[str, int] = {}
+    composition_family_counts: dict[str, int] = {}
     for row in tile_rows:
         bucket = str(row.get("difficulty_bucket", "unbucketed"))
         build = str(row.get("build", "unknown"))
@@ -359,6 +449,11 @@ def main() -> None:
             if not cluster_id:
                 continue
             cluster_counts[cluster_id] = int(cluster_counts.get(cluster_id, 0) + 1)
+        for family_id in str(row.get("source_composition_family_ids", "")).split(","):
+            family_id = family_id.strip()
+            if not family_id:
+                continue
+            composition_family_counts[family_id] = int(composition_family_counts.get(family_id, 0) + 1)
 
     summary = {
         "profile": str(args.profile),
@@ -374,6 +469,10 @@ def main() -> None:
             "cluster_selected_candidate_counts": cluster_evidence["cluster_selected_candidate_counts"],
             "cluster_tile_counts": dict(sorted(cluster_counts.items(), key=lambda item: item[0])),
         },
+        "composition_distribution": {
+            "composition_family_selected_candidate_counts": cluster_evidence.get("composition_family_selected_candidate_counts", {}),
+            "composition_family_tile_counts": dict(sorted(composition_family_counts.items(), key=lambda item: item[0])),
+        },
         "duplicate_ratio_metrics": tile_evidence,
         "bucket_counts": dict(sorted(bucket_counts.items())),
         "build_counts": dict(sorted(build_counts.items())),
@@ -387,6 +486,7 @@ def main() -> None:
             "min_train_mask_mean": float(args.min_train_mask_mean),
             "min_tile_coverage_count": int(args.min_tile_coverage_count),
             "keep_noncanonical": bool(args.keep_noncanonical),
+            "composition_graph": str(args.composition_graph) if args.composition_graph else None,
         },
     }
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
