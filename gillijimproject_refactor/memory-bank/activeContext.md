@@ -11,6 +11,12 @@
   - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/tasks.md`
   - key shift: detect/mined pastes on stitched map canvases (multi-tile), then cross-build dedupe into canonical paste families, then build refined manifests for model training
   - rationale: tile-local mining/training overcounts copy-pasted motifs and fragments large authored regions
+  - latest refinement captured in spec pack:
+    - paste library is now a first-class metadata contract (stable IDs, canonical names, aliases, role/shape tags)
+    - alpha-layer-aware signatures are required for dedupe/variant separation
+    - MCNK AreaID overlap/distribution is required for macro-zone composition grouping
+    - auto-naming + confidence + review/lock workflow is now planned as a dedicated phase
+    - family-balanced manifest generation is now explicit (balance by paste family, not raw row frequency)
 - **Spec 009 landed (2026-05-22):** 2,650-line comprehensive design specification at
   `wow-viewer/specs/009-full-project-reimplementation-spec/spec.md`.
   Covers all 28 sections: binary format specs, rendering pipeline, ML pipeline,
@@ -277,6 +283,7 @@
   - current scope: candidate extraction from normal guidance signals + optional grid-cell library seeds
   - supports cross-build perceptual-hash dedupe (`--dedupe`) and emits brush/cell library seed manifests
   - known limitation: current implementation is still tile-local; Phase 1 of Spec 024 moves mining to stitched canvas space for multi-tile authored regions
+  - immediate next-chat implementation target: start Spec 024 Phase 1 task T001 (`scripts/mine_v18_pastes_canvas.py`) and keep `mine_v17_pastes.py` as transitional tooling only
 - V17.1 normal trainer behavior adjustments landed during this session:
   - `v17_1_normals` no longer enables refiner/distillation by default
   - `height_supervision_weight` default for `v17_1_normals` restored to `1.0`

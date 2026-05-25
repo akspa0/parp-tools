@@ -254,6 +254,19 @@
   - emits per-build/per-map stitched `hard_region`, `transition`, and `train_mask` quilts
 - Known gap now explicitly acknowledged and planned in Spec 024:
   - current mining is still tile-local and must move to stitched canvas-space detection for true multi-tile paste recovery
+
+### Spec 024 Expansion (Session Close)
+
+- Spec/plan/tasks for `024-v18-canvas-paste-refinement-layer` were expanded to reflect the macro-artwork thesis:
+  - map-as-canvas detection first, tile metadata second
+  - alpha-layer-aware dedupe required (layer signatures)
+  - MCNK AreaID overlap required for macro-zone grouping/lineage
+  - paste-library metadata contract added (stable IDs, canonical names, aliases, role/shape tags)
+  - deterministic auto-naming + confidence + review/lock workflow added as a dedicated phase
+  - refined manifests must support family-balanced sampling (not raw-frequency sampling)
+- Next implementation anchor for fresh chat:
+  - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/tasks.md`
+  - start at Phase 1, task `T001` (`scripts/mine_v18_pastes_canvas.py`)
   - remaining required proof:
     - rebuild a representative V16 store
     - inspect WMO-heavy validation images before retraining

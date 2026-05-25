@@ -104,6 +104,16 @@ A developer can rerun mining/dedupe/refine with fixed seeds and compare evidence
 - **FR-008**: Workflow MUST write machine-readable evidence (`summary.json`, jsonl manifests, config snapshot, duplicate/cluster stats).
 - **FR-009**: Commands MUST support bounded runs (`--builds`, `--maps`, tile/map caps, seed controls) for fast iteration.
 - **FR-010**: The refinement layer MUST remain inside `wow-viewer/` and MUST NOT introduce external path dependencies.
+- **FR-011**: Candidate and dedupe metadata MUST include alpha-layer-aware signatures so visually similar RGB patches with different MCAL-layer composition remain distinguishable.
+- **FR-012**: Canvas candidates MUST include MCNK AreaID overlap metadata (`area_id_coverage`, dominant AreaID set) to anchor macro-zone structure.
+- **FR-013**: Composition graph construction MUST support AreaID-aware grouping/weighting and treat AreaID as soft labels (tolerant of missing/noisy assignments).
+- **FR-014**: Refinement evidence MUST include per-layer variant statistics and AreaID distribution summaries.
+- **FR-015**: The refinement layer MUST emit a paste-library metadata catalog with stable IDs, canonical names, aliases, and role/shape tags for each paste family.
+- **FR-016**: The paste library MUST support orientation/role descriptors (`start`, `end`, `left`, `right`, `corner`, `connector`, `fill`, `transition`) when inferable from spatial relationships.
+- **FR-017**: The library MUST track alpha-layer profiles and normal-relief profiles per family to distinguish 2D/3D variant behavior.
+- **FR-018**: The library MUST preserve canonical exemplar + variant linkage and expose family-balanced sampling metadata for downstream manifest generation.
+- **FR-019**: Auto-generated names MUST be deterministic with confidence metadata and support human review/lock workflows.
+- **FR-020**: Refinement outputs MUST include build-span and AreaID distribution metadata per family for macro-zone lineage analysis.
 
 ### Key Entities
 
@@ -116,6 +126,12 @@ A developer can rerun mining/dedupe/refine with fixed seeds and compare evidence
 - **Alpha Brush Source**: Alpha-layer evidence interpreted as artist brush-work encoding (opacity/pressure-style signal proxy).
 - **Composition Graph**: Spatial relationship graph of prefab usage and adjacency over stitched map canvases.
 - **Macro Composition Object**: Zone-scale style structure assembled from repeated prefab motifs across multiple tiles.
+- **Layer Signature**: Per-alpha-layer fingerprint/descriptor for a candidate region.
+- **AreaID Coverage**: Fractional overlap of candidate region with one or more MCNK AreaIDs.
+- **Paste Family**: Cluster of related paste candidates with one canonical exemplar and controlled variants.
+- **Paste Library Catalog**: Metadata store describing paste families, names, tags, lineage, and sampling controls.
+- **Role Tags**: Orientation/composition descriptors such as `start`, `end`, `left`, `right`, `corner`, `connector`, `fill`, `transition`.
+- **Name Confidence**: Deterministic confidence score for auto-generated canonical naming.
 
 ## Success Criteria
 
@@ -127,6 +143,11 @@ A developer can rerun mining/dedupe/refine with fixed seeds and compare evidence
 - **SC-006**: Refined corpus compression achieves at least 40% reduction in raw candidate rows while preserving at least 90% of top transition/hard-region motif coverage.
 - **SC-007**: Composition graph outputs include reproducible adjacency/co-occurrence stats for multi-tile zone structures.
 - **SC-008**: At least one bounded V18 baseline run consumes refined manifests that include both prefab-family and composition-family balancing metadata.
+- **SC-009**: Dedupe reports show layer-signature-aware separation where RGB-similar candidates differ materially by alpha-layer composition.
+- **SC-010**: Composition outputs include AreaID coverage summaries and dominant AreaID labeling for macro groups.
+- **SC-011**: Paste library generation produces stable family IDs and canonical names across reruns with fixed seed/config.
+- **SC-012**: Family-balanced refined manifests report reduced duplicate dominance versus raw-frequency sampling.
+- **SC-013**: Library metadata includes role/shape tagging coverage and explicit review status for low-confidence names.
 
 ## Assumptions
 
