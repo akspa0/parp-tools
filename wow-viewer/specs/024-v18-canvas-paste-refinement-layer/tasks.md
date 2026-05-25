@@ -2,22 +2,22 @@
 
 ## Phase 1 — Canvas Mining Surface
 
-- [ ] T001 Create `scripts/mine_v18_pastes_canvas.py` with bounded CLI (`--builds`, `--maps`, `--max-tiles`, `--seed`).
-- [ ] T002 Add stitched map-canvas assembly from V16 dataset rows with tile coordinate placement.
-- [ ] T003 Add canvas-space signal generation (`alpha`/`transition`/`hard_region`/mask composites).
-- [ ] T004 Add canvas candidate detection that emits multi-tile regions with `canvas_bbox` and `tile_coverage`.
-- [ ] T005 Add debug overlay outputs and machine-readable evidence files (`summary.json`, `candidates.jsonl`, config snapshot).
-- [ ] T006 Validate bounded run on at least one map with confirmed multi-tile candidate output.
+- [x] T001 Create `scripts/mine_v18_pastes_canvas.py` with bounded CLI (`--builds`, `--maps`, `--max-tiles`, `--seed`).
+- [x] T002 Add stitched map-canvas assembly from V16 dataset rows with tile coordinate placement.
+- [x] T003 Add canvas-space signal generation (`alpha`/`transition`/`hard_region`/mask composites).
+- [x] T004 Add canvas candidate detection that emits multi-tile regions with `canvas_bbox` and `tile_coverage`.
+- [x] T005 Add debug overlay outputs and machine-readable evidence files (`summary.json`, `candidates.jsonl`, config snapshot).
+- [x] T006 Validate bounded run on at least one map with confirmed multi-tile candidate output.
 
 ## Phase 2 — Cross-Build Dedupe + Library
 
-- [ ] T007 Add deterministic fingerprinting for canvas candidates.
-- [ ] T008 Add alpha-layer-aware signatures (MCAL-layer descriptors) to candidate and dedupe metadata.
-- [ ] T009 Add cross-build cluster assignment and canonical exemplar selection.
-- [ ] T010 Add variant lineage metadata fields (`cluster_id`, `canonical_id`, `variant_rank`).
-- [ ] T011 Emit deduped outputs (`candidates_deduped.jsonl`, cluster summaries, duplicate stats).
-- [ ] T012 Add cluster atlas outputs for manual QA.
-- [ ] T013 Validate dedupe stability across two reruns with identical seed/config.
+- [x] T007 Add deterministic fingerprinting for canvas candidates.
+- [x] T008 Add alpha-layer-aware signatures (MCAL-layer descriptors) to candidate and dedupe metadata.
+- [x] T009 Add cross-build cluster assignment and canonical exemplar selection.
+- [x] T010 Add variant lineage metadata fields (`cluster_id`, `canonical_id`, `variant_rank`).
+- [x] T011 Emit deduped outputs (`candidates_deduped.jsonl`, cluster summaries, duplicate stats).
+- [x] T012 Add cluster atlas outputs for manual QA.
+- [x] T013 Validate dedupe stability across two reruns with identical seed/config.
 
 ## Phase 3 — Refined Manifest Generation
 

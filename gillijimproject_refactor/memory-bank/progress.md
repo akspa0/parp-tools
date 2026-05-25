@@ -250,10 +250,60 @@
   - extracts candidate paste regions from normal guidance maps
   - emits candidate manifests, brush library seed manifests, and optional cell-library outputs
   - supports cross-build/map dedupe via perceptual hash (`--dedupe`)
+- New script landed: `wow-viewer/data-harvester/scripts/mine_v18_pastes_canvas.py`
+  - stitches tiles into build/map canvases before extraction
+  - emits `canvas_bbox` + `tile_coverage` per candidate for multi-tile paste preservation
+  - writes machine-readable evidence:
+    - `summary.json`
+    - `candidates.jsonl`
+    - `canvas_summary.json`
+    - `config.snapshot.json`
+  - writes debug overlays/signals:
+    - `overlays/*_canvas_overlay.png`
+    - `canvas_debug/*_signals.png`
+  - now includes Phase 2 deterministic dedupe + library seams:
+    - per-candidate `rgb_fingerprint`
+    - alpha-layer descriptors:
+      - `layer_means`
+      - `layer_coverage`
+      - `dominant_layers`
+      - `alpha_layer_signature`
+    - cluster lineage fields:
+      - `cluster_id`
+      - `canonical_id`
+      - `variant_rank`
+      - `cluster_size`
+      - `is_canonical`
+    - dedupe artifacts:
+      - `candidates_deduped.jsonl`
+      - `cluster_summary.jsonl`
+      - `dedupe_stats.json`
+    - cluster QA atlases:
+      - `cluster_atlas/*.png`
+      - `clusters_canonical_top_atlas.png`
 - New script landed: `wow-viewer/data-harvester/scripts/quilt_v16_1_debug_signals.py`
   - emits per-build/per-map stitched `hard_region`, `transition`, and `train_mask` quilts
-- Known gap now explicitly acknowledged and planned in Spec 024:
-  - current mining is still tile-local and must move to stitched canvas-space detection for true multi-tile paste recovery
+- Bounded proof for Spec 024 Phase 1 (canvas mining) now exists:
+  - command:
+    - `uv run python -u scripts/mine_v18_pastes_canvas.py --builds 3_3_5_12340 --maps Azeroth --max-tiles 1024 --seed 42 --component-threshold 0.28 --out-dir ../output/tmp/v18_canvas_smoke_dense`
+  - result:
+    - `tiles_considered=1024`
+    - `candidates=24`
+    - `multi_tile_candidates=6`
+    - `multi_tile_ratio=0.25`
+- Bounded proof for Spec 024 Phase 2 (cross-build deterministic dedupe) now exists:
+  - command:
+    - `uv run python -u scripts/mine_v18_pastes_canvas.py --builds 0_5_3_3368 3_3_5_12340 --maps Azeroth --max-tiles 2048 --seed 42 --component-threshold 0.28 --dedupe --out-dir ../output/tmp/v18_canvas_phase2_run1`
+  - result:
+    - `candidates=48`
+    - `clusters=48`
+    - `duplicates_dropped_if_canonical_only=0` on this bounded corpus slice
+    - deterministic hashes:
+      - `selection_hash=999c2e6880225c24fd979b70538f1353d60f8187b51ba2abfe5c43b40cefabe0`
+      - `cluster_hash=4dc8ffa09cac92cd3c07ede9f8ad88aec91167c99837ffc418ec438622db14a8`
+  - rerun stability proof:
+    - identical command with `--out-dir ../output/tmp/v18_canvas_phase2_run2`
+    - `FC /B` reported no differences for `cluster_summary.jsonl`
 
 ### Spec 024 Expansion (Session Close)
 
@@ -266,10 +316,8 @@
   - refined manifests must support family-balanced sampling (not raw-frequency sampling)
 - Next implementation anchor for fresh chat:
   - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/tasks.md`
-  - start at Phase 1, task `T001` (`scripts/mine_v18_pastes_canvas.py`)
-  - remaining required proof:
-    - rebuild a representative V16 store
-    - inspect WMO-heavy validation images before retraining
+  - continue at Phase 3 (`T014`+) for refined manifest generation and trainer consumption proof
+  - keep `mine_v17_pastes.py` as transitional tile-local tooling only
 - The shared V16.1 trainer now has real gradient accumulation:
   - CLI flag: `--grad-accum-steps`
   - trainer prints now flush immediately instead of hiding early startup

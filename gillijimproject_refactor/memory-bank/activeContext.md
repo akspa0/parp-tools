@@ -282,8 +282,23 @@
   - script: `wow-viewer/data-harvester/scripts/mine_v17_pastes.py`
   - current scope: candidate extraction from normal guidance signals + optional grid-cell library seeds
   - supports cross-build perceptual-hash dedupe (`--dedupe`) and emits brush/cell library seed manifests
-  - known limitation: current implementation is still tile-local; Phase 1 of Spec 024 moves mining to stitched canvas space for multi-tile authored regions
-  - immediate next-chat implementation target: start Spec 024 Phase 1 task T001 (`scripts/mine_v18_pastes_canvas.py`) and keep `mine_v17_pastes.py` as transitional tooling only
+- Spec 024 Phase 1 canvas mining is now landed:
+  - script: `wow-viewer/data-harvester/scripts/mine_v18_pastes_canvas.py`
+  - stitched canvas candidates now emit `canvas_bbox` and `tile_coverage`
+  - evidence artifacts now include `summary.json`, `candidates.jsonl`, `canvas_summary.json`, and `config.snapshot.json`
+  - bounded proof run:
+    - command: `uv run python -u scripts/mine_v18_pastes_canvas.py --builds 3_3_5_12340 --maps Azeroth --max-tiles 1024 --seed 42 --component-threshold 0.28 --out-dir ../output/tmp/v18_canvas_smoke_dense`
+    - result: `candidates=24`, `multi_tile_candidates=6`, `multi_tile_ratio=0.25`
+- Spec 024 Phase 2 dedupe is now landed in the same script:
+  - deterministic candidate fingerprinting: `rgb_fingerprint`
+  - alpha-layer-aware metadata: `layer_means`, `layer_coverage`, `dominant_layers`, `alpha_layer_signature`
+  - cluster lineage metadata per candidate: `cluster_id`, `canonical_id`, `variant_rank`, `cluster_size`, `is_canonical`
+  - dedupe outputs: `candidates_deduped.jsonl`, `cluster_summary.jsonl`, `dedupe_stats.json`
+  - cluster QA outputs: `cluster_atlas/*.png` and `clusters_canonical_top_atlas.png`
+  - deterministic rerun proof (same command/seed twice) produced identical:
+    - `selection_hash=999c2e6880225c24fd979b70538f1353d60f8187b51ba2abfe5c43b40cefabe0`
+    - `cluster_hash=4dc8ffa09cac92cd3c07ede9f8ad88aec91167c99837ffc418ec438622db14a8`
+    - byte-identical `cluster_summary.jsonl`
 - V17.1 normal trainer behavior adjustments landed during this session:
   - `v17_1_normals` no longer enables refiner/distillation by default
   - `height_supervision_weight` default for `v17_1_normals` restored to `1.0`
