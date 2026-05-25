@@ -57,6 +57,41 @@ _BUCKET_SAMPLING_PROFILES: dict[str, dict[str, float]] = {
     },
 }
 _DEFAULT_AUTOTUNE_BATCH_CANDIDATES = (8, 12, 16, 20, 24, 32, 40, 48, 56, 64)
+_NORMAL_VARIANTS = (
+    "v16_1_1_base",
+    "v16_1_2_refiner",
+    "v16_1_3_height",
+    "v17_hybrid",
+    "v17_1_normals",
+)
+
+
+def _resolve_normal_variant(args: argparse.Namespace, task_name: str) -> tuple[str, bool, bool]:
+    if task_name != "normal":
+        return "not_normal_task", bool(getattr(args, "height_channel", False)), False
+
+    variant = str(getattr(args, "normal_variant", "v17_1_normals"))
+    if variant not in _NORMAL_VARIANTS:
+        raise RuntimeError(f"Unknown --normal-variant: {variant}")
+
+    expected_height = variant in {"v16_1_3_height", "v17_hybrid"}
+    expected_refiner = variant in {"v16_1_2_refiner", "v17_hybrid", "v17_1_normals"}
+
+    manual_height = getattr(args, "height_channel", None)
+    if manual_height is not None and bool(manual_height) != bool(expected_height):
+        raise RuntimeError(
+            f"--normal-variant {variant} requires height_channel={expected_height}, "
+            f"but CLI override set height_channel={bool(manual_height)}"
+        )
+
+    manual_refiner_disabled = getattr(args, "refiner_disabled", None)
+    if manual_refiner_disabled is not None and bool(manual_refiner_disabled) != (not expected_refiner):
+        raise RuntimeError(
+            f"--normal-variant {variant} requires refiner_enabled={expected_refiner}, "
+            f"but CLI override set refiner_disabled={bool(manual_refiner_disabled)}"
+        )
+
+    return variant, expected_height, expected_refiner
 
 
 def _seed_all(seed: int) -> None:
@@ -479,7 +514,7 @@ def _autotune_batch_size(
         _cleanup_probe_state()
         try:
             probe_model = task.model_factory().to(device)
-            if task_name == "normal" and bool(getattr(args, "height_channel", False)):
+            if task_name == "normal" and bool(getattr(args, "resolved_height_channel", getattr(args, "height_channel", False))):
                 probe_model = V161NormalHeightModel().to(device)
             probe_optimizer = torch.optim.AdamW(probe_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
             probe_scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
@@ -712,6 +747,18 @@ def _gradient_magnitude_257(x: torch.Tensor) -> torch.Tensor:
     return torch.sqrt((dx * dx) + (dy * dy) + 1e-8)
 
 
+def _normals_from_height(height_norm_257: torch.Tensor) -> torch.Tensor:
+    """Build a unit-normal field from normalized height using central differences."""
+    dzdx = height_norm_257[:, :, :, 2:] - height_norm_257[:, :, :, :-2]
+    dzdy = height_norm_257[:, :, 2:, :] - height_norm_257[:, :, :-2, :]
+    dzdx = F.pad(dzdx * 0.5, (1, 1, 0, 0), mode="replicate")
+    dzdy = F.pad(dzdy * 0.5, (0, 0, 1, 1), mode="replicate")
+    nx = -dzdx
+    ny = -dzdy
+    nz = torch.ones_like(nx)
+    return F.normalize(torch.cat([nx, ny, nz], dim=1), dim=1, eps=1e-6)
+
+
 def _hard_region_weight_from_targets(
     height_raw: torch.Tensor,
     target_normals: torch.Tensor,
@@ -761,6 +808,7 @@ def _normal_loss(
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["normals"].to(device, non_blocking=True)
     height_raw = batch["height_raw"].to(device, non_blocking=True)
+    height_norm = batch["height_norm"].to(device, non_blocking=True)
     normal_mask = batch["normal_mask"].to(device, non_blocking=True)
     terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
     object_weight = batch["weight_257"].to(device, non_blocking=True)
@@ -798,6 +846,13 @@ def _normal_loss(
     loss_vec = _masked_mean(vec_l1, train_mask)
     loss_nz = _masked_mean(nz_l2, train_mask)
     loss = loss_cos + (0.35 * loss_vec) + (0.15 * loss_nz)
+    height_sup_weight = float(getattr(args, "height_supervision_weight", 0.0))
+    if str(getattr(args, "resolved_normal_variant", "")) == "v17_1_normals" and height_sup_weight > 0.0:
+        height_teacher = _normals_from_height(height_norm)
+        loss_height_sup = _masked_mean(1.0 - (pred_n * height_teacher).sum(dim=1, keepdim=True), train_mask)
+        loss = loss + (height_sup_weight * loss_height_sup)
+    else:
+        loss_height_sup = torch.zeros((), device=device, dtype=loss.dtype)
     return loss, {
         "normal": float(loss.item()),
         "normal_cos": float(loss_cos.item()),
@@ -807,6 +862,8 @@ def _normal_loss(
         "normal_detail_mean": float(_masked_mean(hard_region_weight, base_mask).item()),
         "normal_hard_region_mean": float(_masked_mean(hard_region_debug["hard_region_signal"], base_mask).item()),
         "normal_transition_mean": float(_masked_mean(hard_region_debug["transition_signal"], base_mask).item()),
+        "normal_height_sup": float(loss_height_sup.item()),
+        "normal_height_sup_weight": float(height_sup_weight),
         "what_plate_rate": float(what_plate_flag.mean().item()),
         "alpha_painted_cov": float(alpha_painted_cov.mean().item()),
         "mcly_cov": float(mcly_cov.mean().item()),
@@ -1075,7 +1132,7 @@ def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
             ("normal_pred", _normals_to_rgb(outputs["pred"][idx])),
         ]
         if has_refined:
-            panels.append(("refined_gt", _normals_to_rgb(outputs["refined_normals"][idx])))
+            panels.append(("refiner_teacher_pred", _normals_to_rgb(outputs["refined_normals"][idx])))
         panels.extend([
             ("terrain_valid", outputs["terrain_valid_mask"][idx]),
             ("base_mask", outputs["base_mask"][idx]),
@@ -1244,10 +1301,40 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         help="If >0, curate this many tiles into the fixed validation pool.",
     )
     p.add_argument(
+        "--val-epoch-tiles",
+        type=int,
+        default=0,
+        help="If >0 and --rotate-val-tiles is set, sample this many validation-pool tiles per epoch.",
+    )
+    p.add_argument(
+        "--rotate-val-tiles",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Rotate validation tile subset each epoch (uses deterministic seeded sampler).",
+    )
+    p.add_argument(
         "--curation-seed",
         type=int,
         default=None,
         help="Seed for train/val pool selection (defaults to --seed).",
+    )
+    p.add_argument(
+        "--curation-min-terrain-validity",
+        type=float,
+        default=0.0,
+        help="Drop manifest tiles below this terrain-validity score.",
+    )
+    p.add_argument(
+        "--curation-min-minimap-usefulness",
+        type=float,
+        default=0.0,
+        help="Drop manifest tiles below this minimap-target-usefulness score.",
+    )
+    p.add_argument(
+        "--curation-reject-what-plate",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Reject manifest tiles flagged as what-plate/noise tiles.",
     )
     p.add_argument("--max-train-samples", type=int, default=0)
     p.add_argument("--max-val-samples", type=int, default=0)
@@ -1301,7 +1388,7 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     p.add_argument(
         "--refiner-disabled",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=None,
         help="Disable the height-derived normal refiner and distillation (normal task only).",
     )
     p.add_argument(
@@ -1311,10 +1398,22 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         help="Weight of the distillation term when refiner is active (normal task only).",
     )
     p.add_argument(
+        "--height-supervision-weight",
+        type=float,
+        default=0.0,
+        help="Additional cosine supervision weight against normals derived from height (normal task only).",
+    )
+    p.add_argument(
         "--height-channel",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=None,
         help="Add height_norm as a 4th input channel to the normal model (normal task only).",
+    )
+    p.add_argument(
+        "--normal-variant",
+        choices=list(_NORMAL_VARIANTS),
+        default="v17_1_normals",
+        help="Explicit normal-trainer variant contract. Use v17_1_normals for minimap->normals with height supervisor-only.",
     )
     p.add_argument(
         "--normal-weight",
@@ -1342,18 +1441,59 @@ def run_task(task_name: str) -> None:
         raise RuntimeError("--prefetch-factor must be >= 1")
     if args.train_epoch_tiles < 0:
         raise RuntimeError("--train-epoch-tiles must be >= 0")
+    if args.val_epoch_tiles < 0:
+        raise RuntimeError("--val-epoch-tiles must be >= 0")
+
+    normal_variant, resolved_height_channel, resolved_refiner_enabled = _resolve_normal_variant(args, task_name)
+    if task_name == "normal" and normal_variant in {"v17_hybrid", "v17_1_normals"}:
+        if args.curation_manifest is None:
+            raise RuntimeError(f"{normal_variant} requires --curation-manifest for curated runs")
+        if float(args.curation_min_terrain_validity) <= 0.0:
+            args.curation_min_terrain_validity = 0.55
+        if float(args.curation_min_minimap_usefulness) <= 0.0:
+            args.curation_min_minimap_usefulness = 0.45
+        if not bool(args.curation_reject_what_plate):
+            args.curation_reject_what_plate = True
+
+        if normal_variant == "v17_hybrid":
+            if int(args.train_max_tiles) <= 0:
+                args.train_max_tiles = 80
+            if int(args.val_max_tiles) <= 0:
+                args.val_max_tiles = 10
+        elif normal_variant == "v17_1_normals":
+            if int(args.train_max_tiles) <= 0:
+                args.train_max_tiles = 8000
+            if int(args.val_max_tiles) <= 0:
+                args.val_max_tiles = 800
+            if not bool(args.rotate_val_tiles):
+                args.rotate_val_tiles = True
+            if int(args.val_epoch_tiles) <= 0:
+                args.val_epoch_tiles = 128
+            if not bool(args.autotune_batch_size):
+                args.autotune_batch_size = True
+            if float(args.target_vram_gb) <= 0.0:
+                args.target_vram_gb = 12.0
+            if float(args.height_supervision_weight) <= 0.0:
+                args.height_supervision_weight = 0.35
+
+    args.resolved_height_channel = bool(resolved_height_channel)
+    args.resolved_refiner_enabled = bool(resolved_refiner_enabled)
+    args.resolved_normal_variant = str(normal_variant)
+
     _seed_all(args.seed)
     device = _resolve_device(args.device)
     resolved_num_workers = _resolve_num_workers(int(args.num_workers), device)
     resolved_persistent_workers = _resolve_persistent_workers(args.persistent_workers, resolved_num_workers)
     run_name = args.run_name or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    height_channel_enabled = bool(getattr(args, "height_channel", False))
-    refiner_enabled_for_task = bool(
-        task_name == "normal"
-        and not bool(getattr(args, "refiner_disabled", False))
-        and not bool(getattr(args, "height_channel", False))
-    )
-    if height_channel_enabled and not run_name.startswith("v16_1_3"):
+    height_channel_enabled = bool(resolved_height_channel)
+    refiner_enabled_for_task = bool(task_name == "normal" and resolved_refiner_enabled)
+    if task_name == "normal" and normal_variant == "v17_hybrid":
+        if not run_name.startswith("v17_"):
+            run_name = f"v17_{run_name}"
+    elif task_name == "normal" and normal_variant == "v17_1_normals":
+        if not run_name.startswith("v17_1_"):
+            run_name = f"v17_1_{run_name}"
+    elif height_channel_enabled and not run_name.startswith("v16_1_3"):
         run_name = f"v16_1_3_{run_name}"
     elif refiner_enabled_for_task and not run_name.startswith("v16_1_2"):
         run_name = f"v16_1_2_{run_name}"
@@ -1373,7 +1513,10 @@ def run_task(task_name: str) -> None:
         seed=args.seed,
         augment=not args.no_augment,
         curation_manifest=args.curation_manifest,
-        height_channel=bool(getattr(args, "height_channel", False)),
+        height_channel=bool(resolved_height_channel),
+        curation_min_terrain_validity=float(args.curation_min_terrain_validity),
+        curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
+        curation_reject_what_plate=bool(args.curation_reject_what_plate),
     )
     val_ds = V161Dataset(
         args.dataset_dir,
@@ -1383,7 +1526,10 @@ def run_task(task_name: str) -> None:
         seed=args.seed,
         augment=False,
         curation_manifest=args.curation_manifest,
-        height_channel=bool(getattr(args, "height_channel", False)),
+        height_channel=bool(resolved_height_channel),
+        curation_min_terrain_validity=float(args.curation_min_terrain_validity),
+        curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
+        curation_reject_what_plate=bool(args.curation_reject_what_plate),
     )
     curation_seed = int(args.curation_seed) if args.curation_seed is not None else int(args.seed)
     train_pool = _apply_dataset_pool(
@@ -1438,6 +1584,32 @@ def run_task(task_name: str) -> None:
         bucket_sampling_profile=args.bucket_sampling_profile,
         sample_rows=train_sample_rows,
     )
+    val_sampler: _DeterministicEpochSampler | None = None
+    if bool(args.rotate_val_tiles) and int(args.val_epoch_tiles) > 0:
+        val_build_labels = [
+            str(val_ds._index_entries[global_idx].get("_build", "unknown"))
+            for global_idx in val_ds._indices
+        ]
+        val_bucket_labels = [
+            _normalize_bucket_label(val_ds._index_entries[global_idx].get("_curation_difficulty_bucket", ""))
+            for global_idx in val_ds._indices
+        ]
+        val_sample_rows = [
+            _pool_row(val_ds._index_entries[global_idx], subset_pos=idx, split_pos=idx)
+            for idx, global_idx in enumerate(val_ds._indices)
+        ]
+        val_sampler = _DeterministicEpochSampler(
+            len(val_ds),
+            seed=int(args.seed) + 7001,
+            order_log_path=evidence_dir / "val_epoch_orders.jsonl",
+            bucket_log_path=evidence_dir / "val_epoch_bucket_usage.jsonl",
+            epoch_size=int(args.val_epoch_tiles),
+            build_labels=val_build_labels,
+            build_balanced=True,
+            bucket_labels=val_bucket_labels,
+            bucket_sampling_profile=args.bucket_sampling_profile,
+            sample_rows=val_sample_rows,
+        )
     loader_kwargs: dict[str, Any] = {
         "num_workers": resolved_num_workers,
         "pin_memory": (device.type == "cuda"),
@@ -1446,10 +1618,13 @@ def run_task(task_name: str) -> None:
         loader_kwargs["persistent_workers"] = bool(resolved_persistent_workers)
         loader_kwargs["prefetch_factor"] = int(args.prefetch_factor)
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=False, sampler=train_sampler, **loader_kwargs)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, **loader_kwargs)
+    if val_sampler is not None:
+        val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, sampler=val_sampler, **loader_kwargs)
+    else:
+        val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, **loader_kwargs)
 
     model = task.model_factory().to(device)
-    if task_name == "normal" and bool(getattr(args, "height_channel", False)):
+    if task_name == "normal" and bool(resolved_height_channel):
         model = V161NormalHeightModel().to(device)
     can_compile = hasattr(torch, "compile") and not args.no_compile and device.type == "cuda"
     if can_compile:
@@ -1528,6 +1703,9 @@ def run_task(task_name: str) -> None:
         "weight_decay": args.weight_decay,
         "seed": args.seed,
         "resolved_curation_seed": curation_seed,
+        "curation_min_terrain_validity": float(args.curation_min_terrain_validity),
+        "curation_min_minimap_usefulness": float(args.curation_min_minimap_usefulness),
+        "curation_reject_what_plate": bool(args.curation_reject_what_plate),
         "val_fraction": args.val_fraction,
         "target_vram_gb": args.target_vram_gb,
         "autotune_batch_size": args.autotune_batch_size,
@@ -1539,14 +1717,23 @@ def run_task(task_name: str) -> None:
         "bucket_sampling_profile": args.bucket_sampling_profile,
         "bucket_sampling_weights": _bucket_sampling_weights(args.bucket_sampling_profile),
         "val_max_tiles": args.val_max_tiles,
+        "rotate_val_tiles": bool(args.rotate_val_tiles),
+        "val_epoch_tiles": int(args.val_epoch_tiles),
         "max_train_samples": args.max_train_samples,
         "max_val_samples": args.max_val_samples,
         "normal_detail_boost": args.normal_detail_boost,
-        "height_channel": bool(getattr(args, "height_channel", False)),
+        "normal_variant": normal_variant,
+        "height_channel": bool(resolved_height_channel),
+        "resolved_height_channel": bool(resolved_height_channel),
+        "resolved_refiner_enabled": bool(resolved_refiner_enabled),
+        "resolved_input_contract": ("minimap_rgb" if task_name == "normal" and normal_variant == "v17_1_normals" else "variant_defined"),
+        "resolved_output_contract": ("normals_xyz" if task_name == "normal" else "task_defined"),
+        "height_supervision_only": bool(task_name == "normal" and normal_variant == "v17_1_normals"),
         "model_params": sum(p.numel() for p in model.parameters() if p.requires_grad),
         "refiner_enabled": refiner is not None,
-        "refiner_disabled": bool(getattr(args, "refiner_disabled", False)),
+        "refiner_disabled": (None if getattr(args, "refiner_disabled", None) is None else bool(getattr(args, "refiner_disabled"))),
         "refiner_distill_weight": float(getattr(args, "refiner_distill_weight", 0.25)),
+        "height_supervision_weight": float(getattr(args, "height_supervision_weight", 0.0)),
         "refiner_active": bool(refiner_active) if refiner is not None else False,
         "refiner_params": refiner.count_parameters() if refiner is not None else 0,
         "train_pool": train_pool,
@@ -1561,11 +1748,32 @@ def run_task(task_name: str) -> None:
     (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
     print(f"Task: {task_name}", flush=True)
+    if task_name == "normal":
+        print(
+            f"Normal variant: {normal_variant} | "
+            f"height_channel={bool(resolved_height_channel)} | "
+            f"refiner_enabled={bool(resolved_refiner_enabled)} | "
+            f"refiner_distill_weight={float(getattr(args, 'refiner_distill_weight', 0.25)):.3f} | "
+            f"height_supervision_weight={float(getattr(args, 'height_supervision_weight', 0.0)):.3f}",
+            flush=True,
+        )
+        if normal_variant == "v17_1_normals":
+            print(
+                "Normal contract: input=minimap_rgb -> output=normals_xyz | height_supervision_only=true",
+                flush=True,
+            )
     print(f"Device: {device}", flush=True)
     print(f"Run dir: {run_dir}", flush=True)
     print(f"Dataset: train={len(train_ds)} val={len(val_ds)}", flush=True)
     if args.curation_manifest is not None:
         print(f"Curation manifest: {args.curation_manifest}", flush=True)
+        print(
+            "Curation gates: "
+            f"terrain_validity>={float(args.curation_min_terrain_validity):.2f} "
+            f"minimap_usefulness>={float(args.curation_min_minimap_usefulness):.2f} "
+            f"reject_what_plate={bool(args.curation_reject_what_plate)}",
+            flush=True,
+        )
     print(
         "Curated pools: "
         f"train={train_pool['selected_tiles']}/{train_pool['available_tiles']} "
@@ -1579,6 +1787,11 @@ def run_task(task_name: str) -> None:
         print(f"Available difficulty mix (train): {train_pool.get('available_bucket_counts', {})}", flush=True)
     if val_pool.get("selected_bucket_counts"):
         print(f"Curated difficulty mix (val): {val_pool.get('selected_bucket_counts', {})}", flush=True)
+    if bool(args.rotate_val_tiles) and int(args.val_epoch_tiles) > 0:
+        print(
+            f"Validation rotation: val_epoch_tiles={min(int(args.val_epoch_tiles), len(val_ds))}/{len(val_ds)}",
+            flush=True,
+        )
     if args.train_epoch_tiles > 0:
         print(
             "Epoch sampling: "
@@ -1616,6 +1829,8 @@ def run_task(task_name: str) -> None:
 
     for epoch in range(start_epoch, args.epochs + 1):
         train_sampler.set_epoch(epoch)
+        if val_sampler is not None:
+            val_sampler.set_epoch(epoch)
         model.train()
         metric_sums: dict[str, float] = {}
         train_loss_sum = 0.0
@@ -1629,22 +1844,22 @@ def run_task(task_name: str) -> None:
                 loss, metrics, _outputs = task.loss_fn(model, batch, device, args)
 
             if refiner is not None and refiner_active and task_name == "normal":
-                with torch.no_grad():
-                    pred_raw = _outputs.get("pred")
-                    if pred_raw is not None:
-                        h_mean = batch["height_mean"].to(device).view(-1, 1, 1, 1)
-                        h_std = batch["height_std"].to(device).view(-1, 1, 1, 1)
-                        norm_height = (batch["height_raw"].to(device, non_blocking=True) - h_mean) / (h_std + 1e-8)
-                        teacher = refiner(torch.cat([pred_raw, norm_height], dim=1))
+                pred_raw = _outputs.get("pred")
+                if pred_raw is not None:
+                    h_mean = batch["height_mean"].to(device).view(-1, 1, 1, 1)
+                    h_std = batch["height_std"].to(device).view(-1, 1, 1, 1)
+                    norm_height = (batch["height_raw"].to(device, non_blocking=True) - h_mean) / (h_std + 1e-8)
+                    with torch.no_grad():
+                        teacher = refiner(torch.cat([pred_raw.detach(), norm_height], dim=1))
                         teacher_n = F.normalize(teacher, dim=1, eps=1e-6)
-                        train_mask = _outputs.get("train_mask")
-                        if train_mask is not None:
-                            distill_cos = _masked_mean(
-                                1.0 - (pred_raw * teacher_n).sum(dim=1, keepdim=True),
-                                train_mask,
-                            )
-                            loss = loss + float(args.refiner_distill_weight) * distill_cos
-                            metrics["refiner_distill"] = float(distill_cos.item() / max(float(args.refiner_distill_weight), 1e-8))
+                    train_mask = _outputs.get("train_mask")
+                    if train_mask is not None:
+                        distill_cos = _masked_mean(
+                            1.0 - (pred_raw * teacher_n).sum(dim=1, keepdim=True),
+                            train_mask,
+                        )
+                        loss = loss + float(args.refiner_distill_weight) * distill_cos
+                        metrics["refiner_distill"] = float(distill_cos.item() / max(float(args.refiner_distill_weight), 1e-8))
 
             scaler.scale(loss / args.grad_accum_steps).backward()
             should_step = (batch_idx % args.grad_accum_steps == 0) or (batch_idx == len(train_loader))
@@ -1780,12 +1995,19 @@ def run_task(task_name: str) -> None:
                     entry["refiner_improved"] = _refiner_improved
 
                     if not refiner_active:
-                        refiner_active = True
-                        print(
-                            f"        refiner | activating distillation "
-                            f"(first best-epoch, raw={_mean_raw:.4f} refined={_mean_refined:.4f})",
-                            flush=True,
-                        )
+                        if _refiner_improved:
+                            refiner_active = True
+                            print(
+                                f"        refiner | activating distillation "
+                                f"(first best-epoch, raw={_mean_raw:.4f} refined={_mean_refined:.4f})",
+                                flush=True,
+                            )
+                        else:
+                            print(
+                                f"        refiner | not activated (first best-epoch not improved): "
+                                f"raw={_mean_raw:.4f} refined={_mean_refined:.4f}",
+                                flush=True,
+                            )
                     elif _refiner_improved:
                         print(
                             f"        refiner | improved: raw={_mean_raw:.4f} refined={_mean_refined:.4f}",

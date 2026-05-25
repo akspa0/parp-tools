@@ -577,6 +577,44 @@ public static class AdtTensorPackBuilder
             return null;
 
         signals.Add("mcnr_normal_xyz");
+
+        // Fill MCNR checkerboard gaps by averaging valid cardinal neighbors
+        for (int y = 0; y < TileHeightmapSize; y++)
+        {
+            for (int x = 0; x < TileHeightmapSize; x++)
+            {
+                if (Math.Abs(normals[y, x, 0]) > 1e-6f ||
+                    Math.Abs(normals[y, x, 1]) > 1e-6f ||
+                    Math.Abs(normals[y, x, 2]) > 1e-6f)
+                {
+                    continue; // Already has data
+                }
+
+                float sx = 0f, sy = 0f, sz = 0f;
+                int count = 0;
+
+                if (y > 0 && (Math.Abs(normals[y - 1, x, 0]) > 1e-6f || Math.Abs(normals[y - 1, x, 1]) > 1e-6f || Math.Abs(normals[y - 1, x, 2]) > 1e-6f))
+                { sx += normals[y - 1, x, 0]; sy += normals[y - 1, x, 1]; sz += normals[y - 1, x, 2]; count++; }
+                if (y < TileHeightmapSize - 1 && (Math.Abs(normals[y + 1, x, 0]) > 1e-6f || Math.Abs(normals[y + 1, x, 1]) > 1e-6f || Math.Abs(normals[y + 1, x, 2]) > 1e-6f))
+                { sx += normals[y + 1, x, 0]; sy += normals[y + 1, x, 1]; sz += normals[y + 1, x, 2]; count++; }
+                if (x > 0 && (Math.Abs(normals[y, x - 1, 0]) > 1e-6f || Math.Abs(normals[y, x - 1, 1]) > 1e-6f || Math.Abs(normals[y, x - 1, 2]) > 1e-6f))
+                { sx += normals[y, x - 1, 0]; sy += normals[y, x - 1, 1]; sz += normals[y, x - 1, 2]; count++; }
+                if (x < TileHeightmapSize - 1 && (Math.Abs(normals[y, x + 1, 0]) > 1e-6f || Math.Abs(normals[y, x + 1, 1]) > 1e-6f || Math.Abs(normals[y, x + 1, 2]) > 1e-6f))
+                { sx += normals[y, x + 1, 0]; sy += normals[y, x + 1, 1]; sz += normals[y, x + 1, 2]; count++; }
+
+                if (count > 0)
+                {
+                    float mag = MathF.Sqrt(sx * sx + sy * sy + sz * sz);
+                    if (mag > 1e-6f)
+                    {
+                        normals[y, x, 0] = sx / mag;
+                        normals[y, x, 1] = sy / mag;
+                        normals[y, x, 2] = sz / mag;
+                    }
+                }
+            }
+        }
+
         return normals;
     }
 

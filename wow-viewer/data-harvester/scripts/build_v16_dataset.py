@@ -121,6 +121,43 @@ CHUNK_SIZES = {
     "mcly_texture_ids": (1024, 16, 16, 4), "mcly_layer_mask": (256, 16, 16, 4),
 }
 
+
+def _load_manifest_keep_keys(manifest_path: Path) -> set[tuple[str, int]]:
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Curation manifest not found: {manifest_path}")
+
+    path = manifest_path
+    if path.is_dir():
+        kept = path / "kept_tiles.parquet"
+        tiles = path / "tiles.parquet"
+        if kept.exists():
+            path = kept
+        elif tiles.exists():
+            path = tiles
+        else:
+            raise FileNotFoundError(f"No kept_tiles.parquet or tiles.parquet under {manifest_path}")
+
+    if path.suffix.lower() == ".parquet":
+        table = pq.read_table(str(path))
+        rows = [{col: table.column(col)[i].as_py() for col in table.column_names} for i in range(table.num_rows)]
+    elif path.suffix.lower() in {".jsonl", ".ndjson"}:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    elif path.suffix.lower() == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        rows = payload if isinstance(payload, list) else payload.get("rows", [])
+    else:
+        raise RuntimeError(f"Unsupported curation manifest format: {path}")
+
+    out: set[tuple[str, int]] = set()
+    for row in rows:
+        if not bool(row.get("keep", True)):
+            continue
+        build = str(row.get("build", "")).strip()
+        tile_id = int(row.get("tile_id", -1))
+        if build and tile_id >= 0:
+            out.add((build, tile_id))
+    return out
+
 ALL_ARRAY_KEYS = [
     "height_257", "normal_xyz", "normal_mask", "alpha_256", "holes_16",
     "liquid_mask", "liquid_height", "object_mask", "object_precise_mask",
@@ -2954,6 +2991,10 @@ def cmd_generate_viewer_stubs(args: argparse.Namespace) -> None:
     output_root = _DATASET_ROOT
 
     capture_root = Path(args.capture_root) if args.capture_root else _PROJECT_ROOT.parent / "output" / "tmp" / "mdxviewer_validation_smoke"
+    manifest_keys: set[tuple[str, int]] | None = None
+    if args.curation_manifest:
+        manifest_keys = _load_manifest_keep_keys(Path(args.curation_manifest))
+        print(f"Using curation manifest: {args.curation_manifest} (keep keys={len(manifest_keys)})")
 
     total = 0
     for build in builds:
@@ -2973,7 +3014,13 @@ def cmd_generate_viewer_stubs(args: argparse.Namespace) -> None:
         dataset_dir.mkdir(parents=True, exist_ok=True)
 
         written = 0
+        skipped_manifest = 0
+        requested_tiles: list[dict[str, int | str]] = []
         for i in range(table.num_rows):
+            tile_id = int(table.column("tile_id")[i].as_py()) if "tile_id" in table.column_names else i
+            if manifest_keys is not None and (build, tile_id) not in manifest_keys:
+                skipped_manifest += 1
+                continue
             map_name = str(table.column("map")[i].as_py())
             tile_x = int(table.column("tile_x")[i].as_py())
             tile_y = int(table.column("tile_y")[i].as_py())
@@ -3028,8 +3075,29 @@ def cmd_generate_viewer_stubs(args: argparse.Namespace) -> None:
             }
             json_path.write_text(json.dumps(stub, indent=2), encoding="utf-8")
             written += 1
+            requested_tiles.append({
+                "build": build,
+                "tile_id": tile_id,
+                "map": map_name,
+                "tile_x": tile_x,
+                "tile_y": tile_y,
+                "tile_name": tile_name,
+                "status": "pending_capture",
+            })
 
-        print(f"  {build}: wrote {written} stubs to {dataset_dir}")
+        ledger = {
+            "build": build,
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "manifest_path": str(args.curation_manifest) if args.curation_manifest else None,
+            "requested_tile_count": written,
+            "skipped_by_manifest": skipped_manifest,
+            "tiles": requested_tiles,
+        }
+        ledger_path = build_capture_dir / "manifest_capture_ledger.json"
+        ledger_path.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
+
+        print(f"  {build}: wrote {written} stubs to {dataset_dir} (skipped_by_manifest={skipped_manifest})")
+        print(f"  {build}: ledger {ledger_path}")
         total += written
 
     print(f"\nTotal: {total} stubs across {len(builds)} build(s)")
@@ -3064,6 +3132,8 @@ def cmd_patch_renderer_truth(args: argparse.Namespace) -> None:
             "--dataset-root", str(_DATASET_ROOT),
             "--allow-zarr-write",
         ]
+        if args.curation_manifest:
+            cmd.extend(["--curation-manifest", str(args.curation_manifest)])
         if args.no_backup:
             cmd.append("--no-backup")
         result = subprocess.run(cmd, capture_output=False)
@@ -3128,10 +3198,12 @@ def main() -> None:
 
     stubs_p = sub.add_parser("generate-viewer-stubs", parents=[common], help="Generate per-tile JSON stubs from index.parquet for MdxViewer tile discovery")
     stubs_p.add_argument("--capture-root", type=str, default=None, help="Output root for per-build dataset directories (default: output/tmp/mdxviewer_validation_smoke)")
+    stubs_p.add_argument("--curation-manifest", type=str, default=None, help="Optional curation manifest (dir/file). When provided, generate stubs only for keep=true tiles.")
 
     patch_rt_p = sub.add_parser("patch-renderer-truth", parents=[common], help="Patch MdxViewer renderer-truth PNGs into V16 Zarr stores")
     patch_rt_p.add_argument("--capture-root", type=str, default=None, help="Root directory containing per-build capture output (default: output/tmp/mdxviewer_validation_smoke)")
     patch_rt_p.add_argument("--no-backup", action="store_true", help="Skip backing up index.parquet before patching")
+    patch_rt_p.add_argument("--curation-manifest", type=str, default=None, help="Optional curation manifest (dir/file). When provided, patch only keep=true tiles in this manifest.")
 
     args = parser.parse_args()
 

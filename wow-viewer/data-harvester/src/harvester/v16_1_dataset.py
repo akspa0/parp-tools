@@ -58,6 +58,53 @@ def _downsample_256_to_16(x: np.ndarray) -> np.ndarray:
     return reshaped.mean(axis=(1, 3)).astype(np.float32, copy=False)
 
 
+def _interpolate_checkerboard_normals(normals: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Fill MCNR checkerboard gaps by averaging valid cardinal neighbors.
+
+    MCNR stores per-vertex normals on a checkerboard grid: positions where
+    x%2 == y%2 are valid, positions where x%2 != y%2 are gaps (zero).
+    Cardinal neighbors of a gap are always valid, so we average them and
+    renormalize to unit length.
+    """
+    result = normals.copy()
+    new_mask = mask.copy()
+    h, w = normals.shape[:2]
+
+    # Positions that need interpolation (currently zero / masked out)
+    gaps = ~mask.astype(bool)
+
+    # Accumulate valid cardinal neighbors
+    neighbor_sum = np.zeros_like(normals)
+    neighbor_count = np.zeros((h, w), dtype=np.int32)
+
+    for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        shifted = np.roll(normals, (dy, dx), axis=(0, 1))
+        shifted_mask = np.roll(mask, (dy, dx), axis=(0, 1))
+        # Zero out wrapped edges so we don't pull data from the opposite side
+        if dy == -1:
+            shifted_mask[0, :] = False
+        elif dy == 1:
+            shifted_mask[-1, :] = False
+        if dx == -1:
+            shifted_mask[:, 0] = False
+        elif dx == 1:
+            shifted_mask[:, -1] = False
+
+        valid = shifted_mask.astype(bool)
+        neighbor_sum[valid] += shifted[valid]
+        neighbor_count[valid] += 1
+
+    # Interpolate where we have at least one valid neighbor
+    interp = gaps & (neighbor_count > 0)
+    interp_vecs = neighbor_sum[interp]
+    interp_mags = np.linalg.norm(interp_vecs, axis=-1, keepdims=True)
+    interp_vecs = interp_vecs / np.maximum(interp_mags, 1e-8)
+
+    result[interp] = interp_vecs
+    new_mask[interp] = True
+    return result, new_mask
+
+
 class V161Dataset(Dataset):
     """Read V16 Zarr stores and expose richer signals for V16.1 trainers."""
 
@@ -71,6 +118,9 @@ class V161Dataset(Dataset):
         augment: bool = False,
         curation_manifest: str | Path | None = None,
         height_channel: bool = False,
+        curation_min_terrain_validity: float = 0.0,
+        curation_min_minimap_usefulness: float = 0.0,
+        curation_reject_what_plate: bool = False,
     ) -> None:
         self.dataset_dir = Path(dataset_dir)
         self.augment = augment and split == "train"
@@ -79,6 +129,9 @@ class V161Dataset(Dataset):
         self._stores: dict[str, zarr.Group] = {}
         self._index_entries: list[dict] = []
         self._curation_manifest = Path(curation_manifest) if curation_manifest is not None else None
+        self._curation_min_terrain_validity = float(curation_min_terrain_validity)
+        self._curation_min_minimap_usefulness = float(curation_min_minimap_usefulness)
+        self._curation_reject_what_plate = bool(curation_reject_what_plate)
         curation_index = load_curation_index(self._curation_manifest) if self._curation_manifest is not None else None
 
         build_dirs = builds or [d.stem.replace(".zarr", "") for d in sorted(self.dataset_dir.glob("*.zarr"))]
@@ -115,6 +168,17 @@ class V161Dataset(Dataset):
                     row["_curation_score_terrain_validity"] = float(curation_row.get("score_terrain_validity", 0.0) or 0.0)
                     row["_curation_score_painted_signal"] = float(curation_row.get("score_painted_signal", 0.0) or 0.0)
                     row["_curation_score_minimap_target_usefulness"] = float(curation_row.get("score_minimap_target_usefulness", 0.0) or 0.0)
+                    row["_curation_normal_edge_f1"] = float(curation_row.get("normal_edge_f1", 0.0) or 0.0)
+                    row["_curation_terrain_valid_cov"] = float(curation_row.get("terrain_valid_cov", 0.0) or 0.0)
+                    row["_curation_minimap_gray_std"] = float(curation_row.get("minimap_gray_std", 0.0) or 0.0)
+                    row["_curation_what_plate"] = bool(curation_row.get("what_plate", False))
+
+                    if row["_curation_score_terrain_validity"] < self._curation_min_terrain_validity:
+                        continue
+                    if row["_curation_score_minimap_target_usefulness"] < self._curation_min_minimap_usefulness:
+                        continue
+                    if self._curation_reject_what_plate and row["_curation_what_plate"]:
+                        continue
                 self._index_entries.append(row)
 
         if not self._index_entries:
@@ -139,6 +203,8 @@ class V161Dataset(Dataset):
 
         normals = root["normal_xyz"][tile_id].astype(np.float32) if bool(entry.get("has_normal_xyz", False)) else np.zeros((257, 257, 3), dtype=np.float32)
         normal_mask = root["normal_mask"][tile_id].astype(np.float32) if bool(entry.get("has_normal_xyz", False)) and "normal_mask" in root else np.zeros((257, 257), dtype=np.float32)
+        if bool(entry.get("has_normal_xyz", False)):
+            normals, normal_mask = _interpolate_checkerboard_normals(normals, normal_mask)
         alpha = root["alpha_256"][tile_id].astype(np.float32) if bool(entry.get("has_alpha_256", False)) else np.zeros((256, 256, 4), dtype=np.float32)
         alpha = np.clip(alpha, 0.0, 1.0)
         holes = root["holes_16"][tile_id].astype(np.float32) if bool(entry.get("has_holes_16", False)) else np.zeros((16, 16), dtype=np.float32)

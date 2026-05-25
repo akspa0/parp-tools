@@ -36,9 +36,47 @@ import numpy as np
 import PIL.Image
 import zarr
 import zarr.storage
+import pyarrow.parquet as pq
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_DATASET_ROOT = _PROJECT_ROOT / "output" / "datasets" / "v16"
+
+
+def _load_manifest_keep_keys(manifest_path: Path) -> set[tuple[str, int]]:
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Curation manifest not found: {manifest_path}")
+
+    path = manifest_path
+    if path.is_dir():
+        kept = path / "kept_tiles.parquet"
+        tiles = path / "tiles.parquet"
+        if kept.exists():
+            path = kept
+        elif tiles.exists():
+            path = tiles
+        else:
+            raise FileNotFoundError(f"No kept_tiles.parquet or tiles.parquet under {manifest_path}")
+
+    if path.suffix.lower() == ".parquet":
+        table = pq.read_table(str(path))
+        rows = [{col: table.column(col)[i].as_py() for col in table.column_names} for i in range(table.num_rows)]
+    elif path.suffix.lower() in {".jsonl", ".ndjson"}:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    elif path.suffix.lower() == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        rows = payload if isinstance(payload, list) else payload.get("rows", [])
+    else:
+        raise RuntimeError(f"Unsupported curation manifest format: {path}")
+
+    out: set[tuple[str, int]] = set()
+    for row in rows:
+        if not bool(row.get("keep", True)):
+            continue
+        build = str(row.get("build", "")).strip()
+        tile_id = int(row.get("tile_id", -1))
+        if build and tile_id >= 0:
+            out.add((build, tile_id))
+    return out
 
 
 def _require_explicit_zarr_write(args: argparse.Namespace) -> None:
@@ -128,6 +166,11 @@ def cmd_patch_renderer_truth(args: argparse.Namespace) -> None:
     print(f"Store: {store_path}")
     print(f"Captures: {capture_dir}")
 
+    manifest_keys: set[tuple[str, int]] | None = None
+    if args.curation_manifest:
+        manifest_keys = _load_manifest_keep_keys(Path(args.curation_manifest))
+        print(f"Curation manifest: {args.curation_manifest} (keep keys={len(manifest_keys)})")
+
     # Discover capture tiles
     tiles = _discover_capture_tiles(capture_dir)
     print(f"Found {len(tiles)} capture tiles: {sorted(tiles.keys())[:10]}...")
@@ -141,8 +184,16 @@ def cmd_patch_renderer_truth(args: argparse.Namespace) -> None:
 
     # Build capture -> tile_id mapping
     capture_to_tile_id: dict[str, int] = {}
+    manifest_expected: list[tuple[int, str]] = []
+    skipped_by_manifest = 0
     for i, entry in enumerate(index_rows):
+        tile_id = int(entry.get("tile_id", i))
+        if manifest_keys is not None and (build, tile_id) not in manifest_keys:
+            skipped_by_manifest += 1
+            continue
         tile_name = _tile_name_from_entry(entry)
+        if manifest_keys is not None:
+            manifest_expected.append((tile_id, tile_name))
         if tile_name in tiles:
             capture_to_tile_id[tile_name] = i
 
@@ -163,6 +214,25 @@ def cmd_patch_renderer_truth(args: argparse.Namespace) -> None:
 
     # Load capture data
     matched_count = 0
+    captured_complete = 0
+    captured_partial = 0
+    missing_capture = 0
+    tile_status: dict[str, str] = {}
+    if manifest_keys is not None:
+        for _tile_id, tile_name in manifest_expected:
+            caps = tiles.get(tile_name, {})
+            has_mask = "visibility_mask" in caps
+            has_noobj = "no_objects" in caps
+            if has_mask and has_noobj:
+                tile_status[tile_name] = "captured_complete"
+                captured_complete += 1
+            elif has_mask or has_noobj:
+                tile_status[tile_name] = "captured_partial"
+                captured_partial += 1
+            else:
+                tile_status[tile_name] = "missing"
+                missing_capture += 1
+
     for tile_name, tile_id in capture_to_tile_id.items():
         caps = tiles[tile_name]
         if "visibility_mask" in caps:
@@ -226,6 +296,13 @@ def cmd_patch_renderer_truth(args: argparse.Namespace) -> None:
         "visibility_mask_coverage": int(has_visibility.sum()),
         "no_object_minimap_coverage": int(has_no_object.sum()),
         "capture_dir": str(capture_dir),
+        "manifest_path": str(args.curation_manifest) if args.curation_manifest else None,
+        "manifest_scope_tile_count": len(manifest_expected) if manifest_keys is not None else None,
+        "manifest_skipped_index_tiles": skipped_by_manifest if manifest_keys is not None else None,
+        "manifest_captured_complete": captured_complete if manifest_keys is not None else None,
+        "manifest_captured_partial": captured_partial if manifest_keys is not None else None,
+        "manifest_missing_capture": missing_capture if manifest_keys is not None else None,
+        "manifest_tile_status": tile_status if manifest_keys is not None else None,
         "matched_tiles": sorted(capture_to_tile_id.keys()),
     }
     report_path = store_path / "renderer_truth_patch_report.json"
@@ -275,6 +352,7 @@ def main() -> None:
     p.add_argument("--build", required=True, help="Build identifier (e.g. 3_3_5_12340)")
     p.add_argument("--capture-dir", required=True, help="MdxViewer validation capture directory")
     p.add_argument("--dataset-root", type=Path, default=_DEFAULT_DATASET_ROOT)
+    p.add_argument("--curation-manifest", type=Path, default=None, help="Optional curation manifest (dir/file). When provided, patch scope is limited to keep=true manifest tiles for this build.")
     p.add_argument("--allow-zarr-write", action="store_true", help="Required confirmation flag")
     p.add_argument("--no-backup", action="store_true", help="Skip backing up index.parquet")
     args = p.parse_args()
