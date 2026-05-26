@@ -42,7 +42,7 @@ from harvester.v16_1_models import (  # noqa: E402
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DATASET_ROOT = _PROJECT_ROOT / "output" / "datasets" / "v16"
-_MODELS_ROOT = _PROJECT_ROOT / "models" / "v16_1"
+_MODELS_ROOT = _PROJECT_ROOT / "models" / "v18"
 _PANEL_SIZE = 256
 _PANEL_LABEL_HEIGHT = 18
 _ROW_LABEL_HEIGHT = 18

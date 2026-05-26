@@ -62,7 +62,34 @@ uv sync
 
 ---
 
-## Standard Flow
+## Why This Multi-Step Pipeline?
+
+Each layer solves a different problem. You can stop at any layer, but skipping
+layers means your training data has a specific blind spot:
+
+| Layer | Problem it solves | Without it |
+|-------|-------------------|-----------|
+| **V16.1 curation** | Blank/low-signal tiles pollute training | Model learns to predict noise |
+| **V18 canvas mining** | Authored structures span ADT boundaries; tile-local training fragments them | Model never learns multi-tile patterns |
+| **V18 dedupe** | Same river bend appears 12× across 6 builds | Model over-fits to repeated motifs (memorization, not generalization) |
+| **V18 refined manifest** | Common motifs dominate epoch sampling | Rare/unique terrain shapes get few gradient updates |
+
+**You can skip V18 entirely** — just use the V16.1 curation manifest directly
+with `train_v18.py`. That trains on ~50K quality-filtered tiles. But those
+50K tiles contain ~140 paste families repeated across builds, so the model
+spends most of its time looking at slight variations of the same terrain.
+
+**V18 refinement collapses those 50K curated tiles into ~47 unique tile
+references** — one per paste cluster — plus cluster-balancing weights. The
+trainer sees fewer total tiles each epoch, but each tile represents a
+genuinely different terrain shape. Validation evidence shows ~13.5% val_loss
+improvement from this alone.
+
+The composition graph and paste library catalog are informational — they
+describe *what* was deduped (family names, spatial relationships) for
+analysis and future work. They don't directly affect training.
+
+### Standard Flow
 
 1. Inspect raw harvest samples before any Zarr write.
 2. Build or patch dataset stores with explicit write confirmation.
@@ -245,31 +272,30 @@ structures that span ADT boundaries and repeat across builds.
 uv run python -u scripts/mine_v18_pastes_canvas.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
   --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1/kept_tiles.parquet `
-  --canvas-size-tiles 10 `
-  --canvas-stride 5 `
-  --min-paste-size 32 `
-  --alpha-threshold 0.15 `
-  --stitch-workers 4 `
-  --run-name v18_full_corpus_baseline
+  --dedupe --dedupe-hamming-threshold 12 `
+  --out-dir ../output/v18/pastes/v18_full_corpus_baseline
 ```
 
 Phase 1 (canvas mining):
 - Stitches tile signals (normals, SDF, alpha) into large canvases
-- Detects paste regions via adaptive thresholding on combined signals
+- Detects paste regions via connected-component analysis on
+  combined hard-region/transition signals
+- Thresholds: `--component-threshold 0.35`, `--min-component-area 240`
 - Outputs candidates with `canvas_bbox` (pixel coords on stitched canvas)
   and `tile_coverage` (which tiles the paste spans)
 
 Phase 2 (cross-build dedupe):
-- Extracts perceptual hashes (dHash 64-bit) for each candidate crop
-- Groups near-identical crops via Hamming distance (`--dedupe-hamming-threshold 16`)
+- Extracts perceptual hashes (dHash) for each candidate crop
+- Groups near-identical crops via Hamming distance (`--dedupe-hamming-threshold 12`)
 - Assigns stable `cluster_id` across builds/maps
 - Preserves alpha-layer signatures so RGB-similar candidates with different
   MCAL composition remain distinguishable
 
-Outputs:
-- `output/v18/pastes/<run-name>/candidates.jsonl`
-- `output/v18/pastes/<run-name>/deduped_candidates.jsonl`
-- `output/v18/pastes/<run-name>/dedupe_summary.json`
+Outputs (under `--out-dir`):
+- `candidates.jsonl`
+- `candidates_deduped.jsonl` (if `--dedupe` is set)
+- `dedupe_summary.json`
+- cluster atlases (PNG overviews per top cluster)
 
 ### Layer 3: V18 Composition Graph
 
@@ -279,14 +305,13 @@ grammar.
 
 ```powershell
 uv run python -u scripts/build_v18_composition_graph.py `
-  --candidates ../output/v18/pastes/v18_full_corpus_baseline/deduped_candidates.jsonl `
-  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1/kept_tiles.parquet `
-  --run-name v18_full_corpus_baseline
+  --deduped-candidates ../output/v18/pastes/v18_full_corpus_baseline/candidates_deduped.jsonl `
+  --output-dir ../output/v18/pastes/v18_full_corpus_baseline/composition_graph
 ```
 
-Outputs:
-- `output/v18/pastes/<run-name>/composition_graph/`
-- adjacency/co-occurrence statistics
+Outputs (under `--output-dir`):
+- `graph.json` — adjacency/co-occurrence edges
+- `summary.json` — node/edge stats, top motifs
 - composition family assignments
 
 ### Layer 4: V18 Paste Library Catalog
@@ -295,13 +320,12 @@ Assigns deterministic canonical names and role tags to each paste family.
 
 ```powershell
 uv run python -u scripts/build_v18_paste_library_catalog.py `
-  --candidates ../output/v18/pastes/v18_full_corpus_baseline/deduped_candidates.jsonl `
-  --run-name v18_full_corpus_baseline
+  --deduped-candidates ../output/v18/pastes/v18_full_corpus_baseline/candidates_deduped.jsonl `
+  --output-dir ../output/v18/pastes/v18_full_corpus_baseline/library_catalog
 ```
 
-Outputs:
-- `output/v18/pastes/<run-name>/paste_library_catalog.json`
-- stable family IDs, deterministic names
+Outputs (under `--output-dir`):
+- `paste_library_catalog.json` — stable family IDs, deterministic names
 - role/shape tags: start, end, left, right, corner, connector, fill, transition
 - canonical exemplar + variant linkage
 - confidence metadata for auto-generated names
@@ -313,26 +337,29 @@ supervision while preserving motif diversity.
 
 ```powershell
 uv run python -u scripts/build_v18_refined_manifest.py `
-  --candidates ../output/v18/pastes/v18_full_corpus_baseline/deduped_candidates.jsonl `
-  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1/kept_tiles.parquet `
-  --max-tiles-per-cluster 3 `
-  --min-normal-richness 0.1 `
+  --deduped-candidates ../output/v18/pastes/v18_full_corpus_baseline/candidates_deduped.jsonl `
   --run-name v18_refined_baseline
 ```
 
-Outputs:
-- `output/v18/manifests/<run-name>/refined_tiles.parquet`
-- cluster distribution stats and duplicate ratio metrics
+Outputs (under `../output/tmp/<run-name>/` by default):
+- `kept_tiles.parquet` — refined training rows
+- `tiles.parquet`, `tiles.jsonl` — full row dump
+- `selected_candidates.jsonl` — which candidates contributed
+- `summary.json` — cluster distribution stats, duplicate ratio
 
-The refined manifest is consumed by the trainer as a curation manifest:
+The refined manifest is consumed by the trainer as `--curation-manifest`:
 
 ```powershell
---curation-manifest ../output/v18/manifests/v18_refined_baseline
+--curation-manifest ../output/tmp/v18_refined_baseline/kept_tiles.parquet
 ```
 
 All V18 training commands below accept either a V16.1 curation manifest or a
 V18 refined manifest as `--curation-manifest`. The V18 refined manifest adds
 cluster-balancing metadata that the trainer uses for epoch sampling.
+
+> **Tip:** Use `--output-dir` to write the refined manifest to a permanent
+> location instead of `output/tmp/`. Example:
+> `--output-dir ../output/v18/manifests/v18_refined_baseline`
 
 ### End-to-End Pipeline (All Layers)
 
@@ -349,20 +376,18 @@ uv run python -u scripts/build_v16_curation_manifest.py `
 uv run python -u scripts/mine_v18_pastes_canvas.py `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
   --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1/kept_tiles.parquet `
-  --canvas-size-tiles 10 --canvas-stride 5 --min-paste-size 32 --alpha-threshold 0.15 `
-  --stitch-workers 4 --run-name v18_full_corpus_baseline
+  --dedupe --dedupe-hamming-threshold 12 `
+  --out-dir ../output/v18/pastes/v18_full_corpus_baseline
 
 # 3. V18 refined manifest
 uv run python -u scripts/build_v18_refined_manifest.py `
-  --candidates ../output/v18/pastes/v18_full_corpus_baseline/deduped_candidates.jsonl `
-  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1/kept_tiles.parquet `
-  --max-tiles-per-cluster 3 --min-normal-richness 0.1 `
+  --deduped-candidates ../output/v18/pastes/v18_full_corpus_baseline/candidates_deduped.jsonl `
   --run-name v18_refined_baseline
 
 # 4. Train V18 normal model with refined manifest
 uv run python -u scripts/train_v18.py normal `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
-  --curation-manifest ../output/v18/manifests/v18_refined_baseline/refined_tiles.parquet `
+  --curation-manifest ../output/tmp/v18_refined_baseline/kept_tiles.parquet `
   --device auto --batch-size 16 --grad-accum-steps 1 --target-vram-gb 12 --autotune-batch-size `
   --train-max-tiles 400 --train-epoch-tiles 128 --val-max-tiles 48 `
   --bucket-sampling-profile v16_1_1_normal `
@@ -377,14 +402,14 @@ against training with the raw V16.1 curation manifest:
 
 ```powershell
 uv run python -u scripts/run_v18_baseline_contract.py `
+  --refined-manifest ../output/tmp/v18_refined_baseline `
   --builds 0_5_3_3368 0_5_5_3494 0_7_0_3694 3_0_1_8303 3_3_5_12340 4_0_0_11927 `
-  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1/kept_tiles.parquet `
-  --candidates ../output/v18/pastes/v18_full_corpus_baseline/deduped_candidates.jsonl `
-  --device auto --target-vram-gb 12 --autotune-batch-size `
-  --train-max-tiles 400 --train-epoch-tiles 128 --val-max-tiles 48 `
-  --epochs 50 --bucket-sampling-profile v16_1_1_normal `
-  --run-name v18_baseline_contract
+  --profile small
 ```
+
+Profiles: `small` (20 epochs, 80 train), `medium` (50 epochs, 400 train),
+`large` (100 epochs, 2000 train). The script runs refined vs non-refined
+comparison and writes `comparison_report.md` to `--output-dir`.
 
 ---
 
@@ -541,10 +566,10 @@ These are stable but superseded. All new development uses the V18 namespace.
 | V16 dataset stores | `output/datasets/v16/<build>.zarr` |
 | Per-build visual QA | `output/datasets/v16/inspection/` |
 | V16.1 curation manifests | `output/datasets/v16/curation/<run-name>/` |
-| V18 paste candidates | `output/v18/pastes/<run-name>/` |
-| V18 composition graph | `output/v18/pastes/<run-name>/composition_graph/` |
-| V18 paste library catalog | `output/v18/pastes/<run-name>/paste_library_catalog.json` |
-| V18 refined manifests | `output/v18/manifests/<run-name>/` |
+| V18 paste candidates + dedupe | `output/v18/pastes/<run-name>/` (set via `--out-dir`) |
+| V18 composition graph | `output/v18/pastes/<run-name>/composition_graph/` (set via `--output-dir`) |
+| V18 paste library catalog | `output/v18/pastes/<run-name>/library_catalog/` (set via `--output-dir`) |
+| V18 refined manifests (default) | `output/tmp/<run-name>/` (or set via `--output-dir`) |
 | V18 training runs | `models/v18/<task>/runs/<run-name>/` |
 | V18 inference output | `output/datasets/v18_inference/<build>/<run-name>/` |
 | V16 training runs (legacy) | `models/v16/runs/<run-name>/` |
