@@ -9,6 +9,11 @@ Terrain normal/height prediction from minimap images. Chain of V16.1.x model ite
 - **V16.1.2**: Abandoned — refiner approach (random refiner used as distillation target, never trained)
 - **V16.1.3**: Height-channel normal model (cat(minimap, height) 4ch → normals) — plateaued at epoch 123
 - **V16.1.4**: Combined normal+height model (4ch → normals + height, shared backbone) — just implemented, not yet trained
+- **V18 object-roof lane**: new Spec Kit draft for object-family roof curation plus learned minimap object sieve (`specs/025-object-roof-mask-library-and-minimap-sieve/`)
+  - includes MdxViewer improvements for one-at-a-time object asset capture with pose metadata
+  - stores per-asset object visual outputs in a separate Zarr datastore for roof exemplars and object-family recognition
+  - separate object-identification model is intended to live in the Python `uv` stack and use the Hugging Face transformers library as the first host
+  - SAM2 is the first promptable mask-generation host; SAM3 is allowed later if the Hugging Face token has approved gated access
 
 ## What Exists (Completed)
 - All model classes in `wow-viewer/data-harvester/src/harvester/v16_1_models.py`:

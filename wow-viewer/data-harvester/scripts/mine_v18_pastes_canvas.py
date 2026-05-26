@@ -1,7 +1,10 @@
-"""Mine V18 paste candidates on stitched build/map canvases.
+"""Mine V18 paste candidates via direct Zarr bulk reads + GPU batch signals.
 
-Phase 1: stitched candidate extraction with multi-tile coverage.
-Phase 2: deterministic cross-build dedupe clusters with alpha-layer-aware keys.
+No canvas assembly. Each tile's signal map is processed independently to find
+sub-tile paste candidates. Cross-tile pastes are detected by edge-touching
+components and merged via dedupe.
+
+Output: Zarr tile->paste index + JSONL metadata (no pixel files).
 """
 
 from __future__ import annotations
@@ -10,39 +13,23 @@ import argparse
 import hashlib
 import json
 import sys
-from collections import deque
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from PIL import Image, ImageDraw
+import zarr
+from scipy.ndimage import find_objects, label, sum as nd_sum
 
 _SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from harvester.v18_dataset import V18Dataset  # noqa: E402
+_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+_BATCH_SIZE = 128
 
 
-def _safe(x: str) -> str:
-    out = []
-    for ch in str(x):
-        out.append(ch if ch.isalnum() or ch in ("-", "_") else "_")
-    return "".join(out) or "unknown"
-
-
-def _find_map_name(entry: dict[str, object]) -> str:
-    for key in ("map", "meta_map", "world", "map_name"):
-        value = entry.get(key)
-        if value is not None and str(value).strip():
-            return str(value).strip()
-    return "unknown_map"
-
-
-def _masked_mean(loss_map: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    return (loss_map * mask).sum() / mask.sum().clamp_min(1e-8)
-
+# ── GPU signal helpers ──────────────────────────────────────────────
 
 def _resize_weight(weight: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
     if tuple(weight.shape[-2:]) == tuple(size):
@@ -58,150 +45,96 @@ def _gradient_magnitude_257(x: torch.Tensor) -> torch.Tensor:
     return torch.sqrt((dx * dx) + (dy * dy) + 1e-8)
 
 
-def _hard_region_signals(sample: dict[str, torch.Tensor], detail_boost: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    target_n = F.normalize(sample["normals"].unsqueeze(0).float(), dim=1, eps=1e-6)
-    height_raw = sample["height_raw"].unsqueeze(0).float()
-    normal_mask = sample["normal_mask"].unsqueeze(0).float()
-    terrain_valid_mask = sample["terrain_valid_mask_257"].unsqueeze(0).float()
-    object_weight = sample["weight_257"].unsqueeze(0).float()
-    mddf_mask = sample["mddf_mask"].unsqueeze(0).float()
-    modf_mask = sample["modf_mask"].unsqueeze(0).float()
-    liquid_mask = sample["liquid_mask"].unsqueeze(0).float()
-    alpha_painted_256 = sample["alpha_painted_256"].unsqueeze(0).float()
-    mcly_any_16 = sample["mcly_any_16"].unsqueeze(0).float()
-    what_plate_flag = float(sample["what_plate_flag"].item())
+def _hard_region_signals_batched(
+    batch: dict[str, torch.Tensor], detail_boost: float
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Batched GPU signal computation. Returns (B, 257, 257) tensors on CPU."""
+    target_n = F.normalize(batch["normals"].float(), dim=1, eps=1e-6)
+    height_raw = batch["height_raw"].float()
+    normal_mask = batch["normal_mask"].float()
+    terrain_valid_mask = batch["terrain_valid_mask_257"].float()
+    object_weight = batch["weight_257"].float()
+    mddf_mask = batch["mddf_mask"].float()
+    modf_mask = batch["modf_mask"].float()
+    liquid_mask = batch["liquid_mask"].float()
+    alpha_painted_256 = batch["alpha_painted_256"].float()
+    mcly_any_16 = batch["mcly_any_16"].float()
+    what_plate_flag = batch["what_plate_flag"].float()
 
     liquid_mask_257 = _resize_weight(liquid_mask, target_n.shape[-2:])
     object_presence = torch.maximum(mddf_mask, modf_mask)
-    liquid_weight = 1.0 - (0.85 * liquid_mask_257)
-    instance_weight = 1.0 - (0.75 * object_presence)
-    base_mask = normal_mask * terrain_valid_mask * object_weight * liquid_weight * instance_weight
-    if what_plate_flag > 0.5:
-        base_mask = torch.zeros_like(base_mask)
+    base_mask = (
+        normal_mask
+        * terrain_valid_mask
+        * object_weight
+        * (1.0 - 0.85 * liquid_mask_257)
+        * (1.0 - 0.75 * object_presence)
+        * (1.0 - what_plate_flag.reshape(-1, 1, 1, 1).float())
+    )
 
     height_grad = _gradient_magnitude_257(height_raw)
     normal_grad = _gradient_magnitude_257(target_n).mean(dim=1, keepdim=True)
     alpha_grad = _gradient_magnitude_257(_resize_weight(alpha_painted_256, target_n.shape[-2:]))
     mcly_grad = _gradient_magnitude_257(_resize_weight(mcly_any_16, target_n.shape[-2:]))
 
-    height_grad_n = (height_grad / _masked_mean(height_grad, base_mask).clamp_min(1e-6)).clamp(0.0, 4.0)
-    normal_grad_n = (normal_grad / _masked_mean(normal_grad, base_mask).clamp_min(1e-6)).clamp(0.0, 4.0)
-    alpha_grad_n = (alpha_grad / _masked_mean(alpha_grad, base_mask).clamp_min(1e-6)).clamp(0.0, 4.0)
-    mcly_grad_n = (mcly_grad / _masked_mean(mcly_grad, base_mask).clamp_min(1e-6)).clamp(0.0, 4.0)
+    def _batch_norm(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        b = mask.shape[0]
+        sum_x = (x * mask).reshape(b, -1).sum(dim=1)
+        sum_m = mask.reshape(b, -1).sum(dim=1).clamp_min(1e-6)
+        return (x / (sum_x / sum_m).reshape(-1, 1, 1, 1)).clamp(0.0, 4.0)
 
-    transition = torch.maximum(alpha_grad_n, mcly_grad_n)
-    hard_region = ((0.50 * height_grad_n) + (0.25 * normal_grad_n) + (0.25 * transition)).clamp(0.0, 4.0)
+    hgn = _batch_norm(height_grad, base_mask)
+    ngn = _batch_norm(normal_grad, base_mask)
+    agn = _batch_norm(alpha_grad, base_mask)
+    mgn = _batch_norm(mcly_grad, base_mask)
+
+    transition = torch.maximum(agn, mgn)
+    hard_region = ((0.50 * hgn) + (0.25 * ngn) + (0.25 * transition)).clamp(0.0, 4.0)
     hard_region = hard_region * terrain_valid_mask
     train_mask = base_mask * (1.0 + float(detail_boost) * hard_region)
 
     return (
-        hard_region[0, 0].cpu().numpy().astype(np.float32, copy=False),
-        transition[0, 0].cpu().numpy().astype(np.float32, copy=False),
-        train_mask[0, 0].cpu().numpy().astype(np.float32, copy=False),
+        hard_region[:, 0].cpu(),
+        transition[:, 0].cpu(),
+        train_mask[:, 0].cpu(),
     )
 
 
-def _connected_components_with_tiles(binary: np.ndarray, tile_size: int) -> list[dict[str, object]]:
-    height, width = binary.shape
-    visited = np.zeros((height, width), dtype=bool)
+# ── Component finding ───────────────────────────────────────────────
+
+def _connected_components(binary: np.ndarray, _tile_size: int) -> list[dict[str, object]]:
+    labeled, n = label(binary)
+    if n == 0:
+        return []
+    objs = find_objects(labeled)
+    areas = nd_sum(binary, labeled, range(1, n + 1))
     components: list[dict[str, object]] = []
-    for y0 in range(height):
-        for x0 in range(width):
-            if not binary[y0, x0] or visited[y0, x0]:
-                continue
-            q: deque[tuple[int, int]] = deque()
-            q.append((y0, x0))
-            visited[y0, x0] = True
-            min_y, max_y = y0, y0
-            min_x, max_x = x0, x0
-            area = 0
-            tile_bins: set[tuple[int, int]] = set()
-            while q:
-                y, x = q.popleft()
-                area += 1
-                min_y = min(min_y, y)
-                max_y = max(max_y, y)
-                min_x = min(min_x, x)
-                max_x = max(max_x, x)
-                tile_bins.add((x // tile_size, y // tile_size))
-                for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
-                    if ny < 0 or ny >= height or nx < 0 or nx >= width:
-                        continue
-                    if visited[ny, nx] or not binary[ny, nx]:
-                        continue
-                    visited[ny, nx] = True
-                    q.append((ny, nx))
-            components.append({"bbox": (min_y, min_x, max_y, max_x), "area": int(area), "tile_bins": sorted(tile_bins)})
+    for i in range(n):
+        slice_y, slice_x = objs[i]
+        min_y, max_y = slice_y.start, slice_y.stop - 1
+        min_x, max_x = slice_x.start, slice_x.stop - 1
+        components.append({
+            "bbox": (min_y, min_x, max_y, max_x),
+            "area": int(areas[i]),
+        })
     return components
 
 
-def _to_u8(x: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
-    if x.size == 0:
-        return np.zeros((1, 1), dtype=np.uint8)
-    if mask is not None and np.any(mask):
-        m = float(np.max(x[mask]))
-    else:
-        m = float(np.max(x))
-    if m <= 0.0:
-        return np.zeros_like(x, dtype=np.uint8)
-    return (np.clip(x / m, 0.0, 1.0) * 255.0).astype(np.uint8)
+# ── Hash / fingerprint helpers ──────────────────────────────────────
 
-
-def _colorize_gray(x: np.ndarray) -> np.ndarray:
-    g = _to_u8(x)
-    return np.stack([g, g, g], axis=-1)
-
-
-def _overlay_candidates(minimap_rgb: np.ndarray, candidates: list[dict[str, object]], out_path: Path, downscale_max_side: int) -> None:
-    img = Image.fromarray((np.clip(minimap_rgb, 0.0, 1.0) * 255.0).astype(np.uint8), mode="RGB")
-    draw = ImageDraw.Draw(img)
-    for idx, row in enumerate(candidates, start=1):
-        x0, y0, x1, y1 = [int(v) for v in row["canvas_bbox"]]
-        color = (255, 96, 64) if bool(row.get("multi_tile")) else (255, 196, 64)
-        draw.rectangle([(x0, y0), (x1, y1)], outline=color, width=2)
-        draw.text((x0 + 2, y0 + 2), str(idx), fill=(255, 255, 255))
-    if max(img.size) > int(downscale_max_side):
-        scale = float(downscale_max_side) / float(max(img.size))
-        new_size = (max(1, int(round(img.width * scale))), max(1, int(round(img.height * scale))))
-        img = img.resize(new_size, Image.Resampling.BILINEAR)
-    img.save(out_path)
-
-
-def _atlas_rows(rows: list[dict[str, object]], out_dir: Path, out_path: Path, cols: int = 8, thumb: int = 128) -> None:
-    if not rows:
-        return
-    count = len(rows)
-    grid_rows = (count + cols - 1) // cols
-    atlas = Image.new("RGB", (cols * thumb, grid_rows * thumb), color=(0, 0, 0))
-    for i, row in enumerate(rows):
-        crop_rel = str(row.get("crop_path", ""))
-        if not crop_rel:
-            continue
-        crop_abs = out_dir / crop_rel
-        if not crop_abs.exists():
-            continue
-        crop_img = Image.open(crop_abs).convert("RGB").resize((thumb, thumb), Image.Resampling.BILINEAR)
-        x = (i % cols) * thumb
-        y = (i // cols) * thumb
-        atlas.paste(crop_img, (x, y))
-    atlas.save(out_path)
-
-
-def _selection_hash(rows: list[dict[str, object]]) -> str:
-    h = hashlib.sha256()
-    for row in rows:
-        key = "|".join(
-            [
-                str(row.get("build", "")),
-                str(row.get("map", "")),
-                str(row.get("candidate_id", "")),
-                ",".join(str(v) for v in row.get("canvas_bbox", [])),
-                ",".join(f"{t.get('tile_x', '')}:{t.get('tile_y', '')}" for t in row.get("tile_coverage", [])),
-            ]
-        )
-        h.update(key.encode("utf-8"))
-        h.update(b"\n")
-    return h.hexdigest()
+def _numpy_resize_bilinear(gray: np.ndarray, dst_h: int, dst_w: int) -> np.ndarray:
+    src_h, src_w = gray.shape
+    ys = np.linspace(0, src_h - 1, dst_h)
+    xs = np.linspace(0, src_w - 1, dst_w)
+    y0 = np.floor(ys).astype(np.int32)
+    y1 = np.minimum(y0 + 1, src_h - 1)
+    x0 = np.floor(xs).astype(np.int32)
+    x1 = np.minimum(x0 + 1, src_w - 1)
+    fy = (ys - y0)[:, np.newaxis]
+    fx = (xs - x0)[np.newaxis, :]
+    top = gray[y0][:, x0] * (1 - fx) + gray[y0][:, x1] * fx
+    bot = gray[y1][:, x0] * (1 - fx) + gray[y1][:, x1] * fx
+    return top * (1 - fy) + bot * fy
 
 
 def _crop_fingerprint(rgb_u8: np.ndarray, size: int = 16) -> str:
@@ -211,13 +144,26 @@ def _crop_fingerprint(rgb_u8: np.ndarray, size: int = 16) -> str:
         return "0" * ((size * size + 3) // 4)
     pad_h = max_side - h
     pad_w = max_side - w
-    padded = np.pad(rgb_u8, ((0, pad_h), (0, pad_w), (0, 0)), mode="constant", constant_values=128)
-    img = Image.fromarray(padded, mode="RGB").convert("L").resize((size + 1, size), Image.Resampling.BILINEAR)
-    arr = np.asarray(img, dtype=np.int16)
-    diff = arr[:, 1:] > arr[:, :-1]
-    bits = "".join("1" if v else "0" for v in diff.reshape(-1).tolist())
-    width = (len(bits) + 3) // 4
-    return f"{int(bits, 2):0{width}x}"
+    padded = np.pad(rgb_u8.astype(np.float32, copy=False), ((0, pad_h), (0, pad_w), (0, 0)), mode="constant", constant_values=128.0)
+    gray = 0.299 * padded[:, :, 0] + 0.587 * padded[:, :, 1] + 0.114 * padded[:, :, 2]
+    resized = _numpy_resize_bilinear(gray, size, size + 1)
+    diff = resized[:, 1:] > resized[:, :-1]
+    return bytes(np.packbits(diff.astype(np.uint8, copy=False))).hex()
+
+
+def _average_hash(rgb_u8: np.ndarray, size: int = 8) -> str:
+    h, w = rgb_u8.shape[:2]
+    max_side = max(h, w)
+    if max_side == 0:
+        return "0" * ((size * size + 3) // 4)
+    pad_h = max_side - h
+    pad_w = max_side - w
+    padded = np.pad(rgb_u8.astype(np.float32, copy=False), ((0, pad_h), (0, pad_w), (0, 0)), mode="constant", constant_values=128.0)
+    gray = 0.299 * padded[:, :, 0] + 0.587 * padded[:, :, 1] + 0.114 * padded[:, :, 2]
+    resized = _numpy_resize_bilinear(gray, size, size)
+    mean = float(np.mean(resized))
+    diff = resized > mean
+    return bytes(np.packbits(diff.astype(np.uint8, copy=False))).hex()
 
 
 def _alpha_layer_signature(alpha_crop: np.ndarray) -> dict[str, object]:
@@ -240,22 +186,6 @@ def _alpha_layer_signature(alpha_crop: np.ndarray) -> dict[str, object]:
     }
 
 
-def _average_hash(rgb_u8: np.ndarray, size: int = 8) -> str:
-    h, w = rgb_u8.shape[:2]
-    max_side = max(h, w)
-    if max_side == 0:
-        return "0" * ((size * size + 3) // 4)
-    pad_h = max_side - h
-    pad_w = max_side - w
-    padded = np.pad(rgb_u8, ((0, pad_h), (0, pad_w), (0, 0)), mode="constant", constant_values=128)
-    img = Image.fromarray(padded, mode="RGB").convert("L").resize((size, size), Image.Resampling.BILINEAR)
-    arr = np.asarray(img, dtype=np.int16)
-    mean = np.mean(arr)
-    bits = "".join("1" if int(v) > int(mean) else "0" for v in arr.reshape(-1).tolist())
-    width = (len(bits) + 3) // 4
-    return f"{int(bits, 2):0{width}x}"
-
-
 def _hamming_distance_hex(a: str, b: str) -> int:
     if len(a) != len(b):
         return 999
@@ -264,13 +194,11 @@ def _hamming_distance_hex(a: str, b: str) -> int:
 
 
 def _candidate_exact_key(row: dict[str, object]) -> str:
-    return "|".join(
-        [
-            str(row.get("rgb_fingerprint", "")),
-            str(row.get("alpha_layer_signature", "")),
-            str(row.get("tile_coverage_count", "")),
-        ]
-    )
+    return "|".join([
+        str(row.get("rgb_fingerprint", "")),
+        str(row.get("alpha_layer_signature", "")),
+        str(row.get("tile_coverage_count", "")),
+    ])
 
 
 def _cluster_score_key(row: dict[str, object]) -> tuple[float, float, int, int]:
@@ -282,24 +210,36 @@ def _cluster_score_key(row: dict[str, object]) -> tuple[float, float, int, int]:
     )
 
 
+def _selection_hash(rows: list[dict[str, object]]) -> str:
+    h = hashlib.sha256()
+    for row in rows:
+        key = "|".join([
+            str(row.get("build", "")),
+            str(row.get("map", "")),
+            str(row.get("candidate_id", "")),
+            ",".join(str(v) for v in row.get("tile_local_bbox", [])),
+            str(row.get("tile_id", "")),
+        ])
+        h.update(key.encode("utf-8"))
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+# ── Dedupe ──────────────────────────────────────────────────────────
+
 def _cluster_candidates(
     candidates: list[dict[str, object]],
     hamming_threshold: int = 0,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], dict[str, object]]:
     if hamming_threshold <= 0:
         return _cluster_candidates_exact(candidates)
-
-    # Approximate matching: bucket by (alpha_signature, tile_coverage_count),
-    # then cluster within each bucket by avg_hash Hamming distance.
     buckets: dict[str, list[dict[str, object]]] = {}
     for row in candidates:
         bucket_key = f'{row.get("alpha_layer_signature", "")}|{row.get("tile_coverage_count", "")}'
         buckets.setdefault(bucket_key, []).append(row)
-
     cluster_id_counter = 0
     deduped_rows: list[dict[str, object]] = []
     cluster_summaries: list[dict[str, object]] = []
-
     for bucket_key, bucket_rows in sorted(buckets.items()):
         bucket_rows.sort(key=_cluster_score_key, reverse=True)
         clusters_in_bucket: list[list[dict[str, object]]] = []
@@ -317,7 +257,6 @@ def _cluster_candidates(
                 clusters_in_bucket[best_idx].append(row)
             else:
                 clusters_in_bucket.append([row])
-
         for members in clusters_in_bucket:
             members.sort(key=_cluster_score_key, reverse=True)
             canonical = members[0]
@@ -360,16 +299,8 @@ def _cluster_candidates(
                 row["is_canonical"] = bool(variant_rank == 1)
                 row["cluster_key"] = f"approx_{cluster_key_payload}"
                 deduped_rows.append(row)
-
-    deduped_rows.sort(
-        key=lambda r: (
-            str(r.get("cluster_id", "")),
-            int(r.get("variant_rank", 0)),
-            -int(r.get("candidate_id", 0)),
-        )
-    )
+    deduped_rows.sort(key=lambda r: (str(r.get("cluster_id", "")), int(r.get("variant_rank", 0)), -int(r.get("candidate_id", 0))))
     cluster_summaries.sort(key=lambda r: (int(r.get("size", 0)), str(r.get("cluster_id", ""))), reverse=True)
-
     total_duplicates = sum(max(0, int(cs["size"]) - 1) for cs in cluster_summaries)
     stats = {
         "input_candidates": len(candidates),
@@ -387,10 +318,8 @@ def _cluster_candidates_exact(candidates: list[dict[str, object]]) -> tuple[list
     for row in candidates:
         key = _candidate_exact_key(row)
         by_key.setdefault(key, []).append(row)
-
     deduped_rows: list[dict[str, object]] = []
     cluster_summaries: list[dict[str, object]] = []
-
     sorted_keys = sorted(by_key.keys())
     total_duplicates = 0
     for idx, key in enumerate(sorted_keys, start=1):
@@ -401,7 +330,6 @@ def _cluster_candidates_exact(candidates: list[dict[str, object]]) -> tuple[list
         cluster_id = f"cluster_{idx:06d}_{cluster_hash}"
         canonical_id = int(canonical.get("candidate_id", -1))
         total_duplicates += max(0, len(members) - 1)
-
         build_set = sorted({str(m.get("build", "")) for m in members})
         map_set = sorted({str(m.get("map", "")) for m in members})
         tile_coverage_hist: dict[str, int] = {}
@@ -409,8 +337,7 @@ def _cluster_candidates_exact(candidates: list[dict[str, object]]) -> tuple[list
             tc = int(m.get("tile_coverage_count", 0))
             k = str(tc)
             tile_coverage_hist[k] = int(tile_coverage_hist.get(k, 0) + 1)
-
-        cluster_summary = {
+        cluster_summaries.append({
             "cluster_id": cluster_id,
             "cluster_key": key,
             "canonical_id": canonical_id,
@@ -422,9 +349,7 @@ def _cluster_candidates_exact(candidates: list[dict[str, object]]) -> tuple[list
             "score_mean_min": float(min(float(m.get("score_mean", 0.0)) for m in members)),
             "alpha_layer_signature": str(canonical.get("alpha_layer_signature", "")),
             "rgb_fingerprint": str(canonical.get("rgb_fingerprint", "")),
-        }
-        cluster_summaries.append(cluster_summary)
-
+        })
         for variant_rank, member in enumerate(members, start=1):
             row = dict(member)
             row["cluster_id"] = cluster_id
@@ -434,16 +359,8 @@ def _cluster_candidates_exact(candidates: list[dict[str, object]]) -> tuple[list
             row["is_canonical"] = bool(variant_rank == 1)
             row["cluster_key"] = key
             deduped_rows.append(row)
-
-    deduped_rows.sort(
-        key=lambda r: (
-            str(r.get("cluster_id", "")),
-            int(r.get("variant_rank", 0)),
-            -int(r.get("candidate_id", 0)),
-        )
-    )
+    deduped_rows.sort(key=lambda r: (str(r.get("cluster_id", "")), int(r.get("variant_rank", 0)), -int(r.get("candidate_id", 0))))
     cluster_summaries.sort(key=lambda r: (int(r.get("size", 0)), str(r.get("cluster_id", ""))), reverse=True)
-
     stats = {
         "input_candidates": len(candidates),
         "clusters": len(cluster_summaries),
@@ -454,333 +371,428 @@ def _cluster_candidates_exact(candidates: list[dict[str, object]]) -> tuple[list
     return deduped_rows, cluster_summaries, stats
 
 
+# ── I/O helpers ─────────────────────────────────────────────────────
+
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row) + "\n")
 
 
-def _cluster_atlas(
-    deduped_rows: list[dict[str, object]],
-    cluster_summaries: list[dict[str, object]],
-    out_dir: Path,
-    max_clusters: int,
-    per_cluster_items: int,
-    thumb: int,
+def _safe(x: str) -> str:
+    out = []
+    for ch in str(x):
+        out.append(ch if ch.isalnum() or ch in ("-", "_") else "_")
+    return "".join(out) or "unknown"
+
+
+def _compute_local_bboxes(
+    candidates: list[dict[str, object]],
+) -> list[tuple[int, int, tuple[int, int, int, int]]]:
+    pairs: list[tuple[int, int, tuple[int, int, int, int]]] = []
+    for cand_idx, row in enumerate(candidates):
+        tid = int(row.get("tile_id", -1))
+        bbox = row.get("tile_local_bbox", None)
+        if tid >= 0 and bbox and len(bbox) == 4:
+            pairs.append((tid, cand_idx, tuple(bbox)))
+    return pairs
+
+
+def _build_zarr_index(
+    zarr_path: Path,
+    tile_paste_pairs: list[tuple[int, int, tuple[int, int, int, int]]],
+    _deduped_rows: list[dict[str, object]],
 ) -> None:
-    cluster_members: dict[str, list[dict[str, object]]] = {}
-    for row in deduped_rows:
-        cluster_members.setdefault(str(row.get("cluster_id", "")), []).append(row)
-    for rows in cluster_members.values():
-        rows.sort(key=lambda r: int(r.get("variant_rank", 0)))
+    if not tile_paste_pairs:
+        return
+    max_tile_id = max(p[0] for p in tile_paste_pairs) + 1
+    pairs_by_tile: dict[int, list[tuple[int, tuple[int, int, int, int]]]] = {}
+    for tid, cidx, bbox in tile_paste_pairs:
+        pairs_by_tile.setdefault(tid, []).append((cidx, bbox))
 
-    cluster_atlas_dir = out_dir / "cluster_atlas"
-    cluster_atlas_dir.mkdir(parents=True, exist_ok=True)
+    tile_offset = np.zeros(max_tile_id + 1, dtype=np.int64)
+    cand_idxs: list[int] = []
+    bboxes: list[tuple[int, int, int, int]] = []
+    total = 0
+    for tid in range(max_tile_id):
+        tile_offset[tid] = total
+        for cidx, bbox in pairs_by_tile.get(tid, []):
+            cand_idxs.append(cidx)
+            bboxes.append(bbox)
+            total += 1
+    tile_offset[max_tile_id] = total
 
-    top_clusters = cluster_summaries[: max(0, int(max_clusters))]
-    for cluster in top_clusters:
-        cluster_id = str(cluster.get("cluster_id", "cluster_unknown"))
-        rows = cluster_members.get(cluster_id, [])[: max(1, int(per_cluster_items))]
-        if not rows:
+    z = zarr.open_group(str(zarr_path), mode="w")
+    z.create_array("tile_offset", data=tile_offset)
+    z.create_array("candidate_idx", data=np.array(cand_idxs, dtype=np.int64))
+    bbox_arr = np.zeros((len(bboxes), 4), dtype=np.int32)
+    for i, b in enumerate(bboxes):
+        bbox_arr[i] = list(b)
+    z.create_array("tile_local_bbox", data=bbox_arr)
+    z.attrs["total_tiles"] = int(max_tile_id)
+    z.attrs["total_paste_pairs"] = int(total)
+    print(f"Zarr index: {max_tile_id} tiles, {total} paste overlap pairs")
+
+
+def _save_checkpoint(out_dir: Path, candidates: list[dict], checkpoint_idx: int) -> None:
+    cp = out_dir / f"checkpoint_{checkpoint_idx:06d}.jsonl"
+    _write_jsonl(cp, candidates)
+    print(f"Checkpoint saved: {cp} ({len(candidates)} candidates)")
+
+
+# ── core per-tile processing ────────────────────────────────────────
+
+def _process_tile_signals(
+    hard_257: np.ndarray,
+    trans_257: np.ndarray,
+    mask_257: np.ndarray,
+    minimap: np.ndarray,
+    alpha: np.ndarray,
+    component_threshold: float,
+    min_component_area: int,
+    min_component_width: int,
+    min_component_height: int,
+    max_components: int,
+    bbox_padding: int,
+    dedupe_hash_size: int,
+) -> list[dict[str, object]]:
+    """Find paste candidates within one tile's signal maps."""
+    h, trans, m = hard_257[:256, :256], trans_257[:256, :256], mask_257[:256, :256]
+    hm = h.max()
+    tm = trans.max()
+    mm = m.max()
+    if hm < 1e-6 or mm < 1e-6:
+        return []
+    hn = h / hm
+    mn = m / mm
+    # Degenerate transition signal: if near-constant (single-layer terrain),
+    # fall back to hard_region only
+    if tm >= 1e-6 and float(np.std(trans)) > 0.05:
+        tn = trans / tm
+        score = np.maximum(hn, tn) * np.clip(mn, 0.0, 1.0)
+    else:
+        score = hn * np.clip(mn, 0.0, 1.0)
+    binary = score >= float(component_threshold)
+    if not binary.any():
+        return []
+
+    comps = _connected_components(binary, 256)
+    comps = [c for c in comps if int(c["area"]) >= int(min_component_area)]
+    comps = [c for c in comps
+             if (int(c["bbox"][2]) - int(c["bbox"][0]) + 1) >= int(min_component_width)
+             and (int(c["bbox"][3]) - int(c["bbox"][1]) + 1) >= int(min_component_height)]
+    comps.sort(key=lambda c: int(c["area"]), reverse=True)
+    comps = comps[:max(1, int(max_components))]
+
+    results: list[dict[str, object]] = []
+    for comp in comps:
+        min_y, min_x, max_y, max_x = [int(v) for v in comp["bbox"]]
+        pad = int(bbox_padding)
+        x0 = max(0, min_x - pad)
+        y0 = max(0, min_y - pad)
+        x1 = min(255, max_x + pad)
+        y1 = min(255, max_y + pad)
+        if x1 <= x0 or y1 <= y0:
             continue
-        strip = Image.new("RGB", (thumb * len(rows), thumb), color=(0, 0, 0))
-        for i, row in enumerate(rows):
-            crop_rel = str(row.get("crop_path", ""))
-            if not crop_rel:
-                continue
-            crop_abs = out_dir / crop_rel
-            if not crop_abs.exists():
-                continue
-            img = Image.open(crop_abs).convert("RGB").resize((thumb, thumb), Image.Resampling.BILINEAR)
-            strip.paste(img, (i * thumb, 0))
-        strip.save(cluster_atlas_dir / f"{cluster_id}.png")
 
-    canonical_rows: list[dict[str, object]] = []
-    for cluster in top_clusters:
-        cluster_id = str(cluster.get("cluster_id", ""))
-        rows = cluster_members.get(cluster_id, [])
-        if rows:
-            canonical_rows.append(rows[0])
-    _atlas_rows(canonical_rows, out_dir, out_dir / "clusters_canonical_top_atlas.png", cols=8, thumb=thumb)
+        # Snap to ADT chunk grid (16x16 sub-cells)
+        x0_a = (x0 // 16) * 16
+        y0_a = (y0 // 16) * 16
+        x1_a = min(255, ((x1 + 15) // 16) * 16 - 1)
+        y1_a = min(255, ((y1 + 15) // 16) * 16 - 1)
+        touches_edge = (x0_a == 0 or y0_a == 0 or x1_a == 255 or y1_a == 255)
+
+        crop_rgb = (np.clip(minimap[y0_a:y1_a + 1, x0_a:x1_a + 1, :], 0.0, 1.0) * 255.0).astype(np.uint8)
+        rgb_fp = _crop_fingerprint(crop_rgb, size=max(8, int(dedupe_hash_size)))
+        avg_h = _average_hash(crop_rgb, size=8)
+        alpha_crop = alpha[y0_a:y1_a + 1, x0_a:x1_a + 1, :]
+        alpha_sig = _alpha_layer_signature(alpha_crop)
+        score_crop = score[y0_a:y1_a + 1, x0_a:x1_a + 1]
+
+        results.append({
+            "tile_local_bbox": [int(x0_a), int(y0_a), int(x1_a), int(y1_a)],
+            "component_area": int(comp["area"]),
+            "score_mean": float(np.mean(score_crop)) if score_crop.size > 0 else 0.0,
+            "score_max": float(np.max(score_crop)) if score_crop.size > 0 else 0.0,
+            "rgb_fingerprint": rgb_fp,
+            "avg_hash": avg_h,
+            "touches_edge": touches_edge,
+            **alpha_sig,
+        })
+    return results
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Mine V18 paste candidates from stitched build/map canvases")
+    parser = argparse.ArgumentParser(description="Mine V18 paste candidates (direct Zarr, GPU batch, sub-tile)")
     parser.add_argument("--dataset-dir", type=str, default="../output/datasets/v16")
-    parser.add_argument("--curation-manifest", type=str, default=None)
     parser.add_argument("--builds", nargs="*", default=None)
-    parser.add_argument("--maps", nargs="*", default=None)
+    parser.add_argument("--curation-manifest", type=str, default=None,
+                        help="Path to kept_tiles.parquet for filtering tile_ids")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--max-tiles", type=int, default=0, help="Global cap over sampled tiles before canvas stitch")
+    parser.add_argument("--max-tiles", type=int, default=0)
     parser.add_argument("--detail-boost", type=float, default=1.5)
-    parser.add_argument("--component-threshold", type=float, default=0.35)
-    parser.add_argument("--min-component-area", type=int, default=240)
-    parser.add_argument("--max-components-per-canvas", type=int, default=24)
-    parser.add_argument("--min-component-width", type=int, default=10)
-    parser.add_argument("--min-component-height", type=int, default=10)
+    parser.add_argument("--component-threshold", type=float, default=0.20)
+    parser.add_argument("--min-component-area", type=int, default=256)
+    parser.add_argument("--max-components-per-tile", type=int, default=12)
+    parser.add_argument("--min-component-width", type=int, default=16)
+    parser.add_argument("--min-component-height", type=int, default=16)
     parser.add_argument("--bbox-padding", type=int, default=8)
-    parser.add_argument("--downscale-overlay-max-side", type=int, default=4096)
-    parser.add_argument("--topk-atlas", type=int, default=128)
-    parser.add_argument("--dedupe", action="store_true", help="Enable deterministic cross-build cluster assignment")
+    parser.add_argument("--dedupe", action="store_true")
     parser.add_argument("--dedupe-hash-size", type=int, default=16)
-    parser.add_argument("--dedupe-hamming-threshold", type=int, default=12, help="Hamming distance threshold for approximate matching (0=exact-only). default=12")
-    parser.add_argument("--cluster-atlas-top-clusters", type=int, default=64)
-    parser.add_argument("--cluster-atlas-per-cluster", type=int, default=4)
-    parser.add_argument("--cluster-atlas-thumb", type=int, default=128)
-    parser.add_argument("--out-dir", type=str, default="../output/validation/v18_paste_canvas")
+    parser.add_argument("--dedupe-hamming-threshold", type=int, default=12)
+    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--checkpoint-interval", type=int, default=10000,
+                        help="Save checkpoint every N tiles processed")
+    parser.add_argument("--out-dir", type=str, default="../output/v18/pastes/v18_full_corpus_v2")
     args = parser.parse_args()
 
-    ds = V18Dataset(
-        dataset_dir=args.dataset_dir,
-        builds=args.builds,
-        split="train",
-        val_fraction=0.0,
-        seed=int(args.seed),
-        augment=False,
-        curation_manifest=args.curation_manifest,
-        height_channel=False,
-    )
-
-    include_maps = set(args.maps) if args.maps else None
-    rng = np.random.RandomState(int(args.seed))
-    positions = list(range(len(ds._indices)))
-    if int(args.max_tiles) > 0 and len(positions) > int(args.max_tiles):
-        positions = sorted(rng.choice(positions, size=int(args.max_tiles), replace=False).tolist())
-
-    grouped_tiles: dict[tuple[str, str], list[dict[str, object]]] = {}
-    for local_idx, ds_pos in enumerate(positions, start=1):
-        global_idx = ds._indices[ds_pos]
-        entry = ds._index_entries[global_idx]
-        build = str(entry.get("build") or entry.get("_build") or "unknown_build")
-        map_name = _find_map_name(entry)
-        if include_maps is not None and map_name not in include_maps:
-            continue
-        tile_x = int(entry.get("tile_x") if entry.get("tile_x") is not None else -1)
-        tile_y = int(entry.get("tile_y") if entry.get("tile_y") is not None else -1)
-        if tile_x < 0 or tile_y < 0:
-            continue
-
-        sample = ds[ds_pos]
-        minimap = sample["input"][0:3].permute(1, 2, 0).numpy().astype(np.float32, copy=False)
-        alpha = sample["alpha"].permute(1, 2, 0).numpy().astype(np.float32, copy=False)
-        hard_region, transition, train_mask = _hard_region_signals(sample, detail_boost=float(args.detail_boost))
-        grouped_tiles.setdefault((build, map_name), []).append(
-            {
-                "tile_x": tile_x,
-                "tile_y": tile_y,
-                "tile_id": int(entry.get("tile_id", -1)),
-                "minimap": minimap,
-                "alpha": alpha,
-                "hard_region": hard_region,
-                "transition": transition,
-                "train_mask": train_mask,
-            }
-        )
-        if local_idx % 200 == 0 or local_idx == len(positions):
-            print(f"Prepared tiles: {local_idx}/{len(positions)} | groups={len(grouped_tiles)}")
+    global _BATCH_SIZE
+    _BATCH_SIZE = max(1, int(args.batch_size))
 
     out_dir = Path(args.out_dir)
-    crops_dir = out_dir / "crops"
-    overlays_dir = out_dir / "overlays"
-    canvas_debug_dir = out_dir / "canvas_debug"
-    crops_dir.mkdir(parents=True, exist_ok=True)
-    overlays_dir.mkdir(parents=True, exist_ok=True)
-    canvas_debug_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    all_candidates: list[dict[str, object]] = []
-    candidate_id = 0
-    canvas_summaries: list[dict[str, object]] = []
+    zarr_base = Path(args.dataset_dir)
 
-    for canvas_index, (canvas_key, tiles) in enumerate(sorted(grouped_tiles.items()), start=1):
-        build, map_name = canvas_key
-        if not tiles:
-            continue
-        tile_xs = [int(t["tile_x"]) for t in tiles]
-        tile_ys = [int(t["tile_y"]) for t in tiles]
-        min_tile_x = min(tile_xs)
-        max_tile_x = max(tile_xs)
-        min_tile_y = min(tile_ys)
-        max_tile_y = max(tile_ys)
-        tiles_w = (max_tile_x - min_tile_x + 1)
-        tiles_h = (max_tile_y - min_tile_y + 1)
-        canvas_w = tiles_w * 256
-        canvas_h = tiles_h * 256
+    # ── Phase 0: load index entries ──────────────────────────────
+    import pyarrow.parquet as pq
 
-        minimap_canvas = np.zeros((canvas_h, canvas_w, 3), dtype=np.float32)
-        alpha_canvas = np.zeros((canvas_h, canvas_w, 4), dtype=np.float32)
-        hard_canvas = np.zeros((canvas_h, canvas_w), dtype=np.float32)
-        transition_canvas = np.zeros((canvas_h, canvas_w), dtype=np.float32)
-        train_mask_canvas = np.zeros((canvas_h, canvas_w), dtype=np.float32)
-        present_mask = np.zeros((canvas_h, canvas_w), dtype=bool)
-        present_tile_set: set[tuple[int, int]] = set()
-        present_tile_id_by_coord: dict[tuple[int, int], int] = {}
-
-        for tile in tiles:
-            tile_x = int(tile["tile_x"])
-            tile_y = int(tile["tile_y"])
-            present_tile_set.add((tile_x, tile_y))
-            present_tile_id_by_coord[(tile_x, tile_y)] = int(tile["tile_id"])
-            ox = (tile_x - min_tile_x) * 256
-            oy = (tile_y - min_tile_y) * 256
-            minimap_canvas[oy:oy + 256, ox:ox + 256, :] = tile["minimap"]
-            alpha_canvas[oy:oy + 256, ox:ox + 256, :] = tile["alpha"][:256, :256, :]
-            hard_canvas[oy:oy + 256, ox:ox + 256] = tile["hard_region"][:256, :256]
-            transition_canvas[oy:oy + 256, ox:ox + 256] = tile["transition"][:256, :256]
-            train_mask_canvas[oy:oy + 256, ox:ox + 256] = tile["train_mask"][:256, :256]
-            present_mask[oy:oy + 256, ox:ox + 256] = True
-
-        hard_n = np.zeros_like(hard_canvas, dtype=np.float32)
-        trans_n = np.zeros_like(transition_canvas, dtype=np.float32)
-        mask_n = np.zeros_like(train_mask_canvas, dtype=np.float32)
-        if np.any(present_mask):
-            hard_max = float(np.max(hard_canvas[present_mask]))
-            trans_max = float(np.max(transition_canvas[present_mask]))
-            mask_max = float(np.max(train_mask_canvas[present_mask]))
-            if hard_max > 1e-6:
-                hard_n[present_mask] = hard_canvas[present_mask] / hard_max
-            if trans_max > 1e-6:
-                trans_n[present_mask] = transition_canvas[present_mask] / trans_max
-            if mask_max > 1e-6:
-                mask_n[present_mask] = train_mask_canvas[present_mask] / mask_max
-
-        score = np.maximum(hard_n, trans_n) * np.clip(mask_n, 0.0, 1.0)
-        binary = (score >= float(args.component_threshold)) & present_mask
-        components = _connected_components_with_tiles(binary, tile_size=256)
-        components = [c for c in components if int(c["area"]) >= int(args.min_component_area)]
-        components = [
-            c
-            for c in components
-            if (int(c["bbox"][3]) - int(c["bbox"][1]) + 1) >= int(args.min_component_width)
-            and (int(c["bbox"][2]) - int(c["bbox"][0]) + 1) >= int(args.min_component_height)
-        ]
-        components.sort(key=lambda c: int(c["area"]), reverse=True)
-        components = components[: max(1, int(args.max_components_per_canvas))]
-
-        safe_build = _safe(build)
-        safe_map = _safe(map_name)
-        kept_for_overlay: list[dict[str, object]] = []
-
-        for comp_rank, comp in enumerate(components, start=1):
-            min_y, min_x, max_y, max_x = [int(v) for v in comp["bbox"]]
-            pad = int(args.bbox_padding)
-            x0 = max(0, min_x - pad)
-            y0 = max(0, min_y - pad)
-            x1 = min(canvas_w - 1, max_x + pad)
-            y1 = min(canvas_h - 1, max_y + pad)
-            if x1 <= x0 or y1 <= y0:
-                continue
-
-            crop_rgb = (np.clip(minimap_canvas[y0:y1 + 1, x0:x1 + 1, :], 0.0, 1.0) * 255.0).astype(np.uint8)
-            crop_rel = f"crops/cand_{candidate_id:08d}_{safe_build}_{safe_map}.png"
-            crop_path = out_dir / crop_rel
-            Image.fromarray(crop_rgb, mode="RGB").save(crop_path)
-            rgb_fingerprint = _crop_fingerprint(crop_rgb, size=max(8, int(args.dedupe_hash_size)))
-            avg_hash = _average_hash(crop_rgb, size=8)
-
-            tile_coverage: list[dict[str, int]] = []
-            for local_tx, local_ty in comp["tile_bins"]:
-                tile_x = min_tile_x + int(local_tx)
-                tile_y = min_tile_y + int(local_ty)
-                if (tile_x, tile_y) not in present_tile_set:
-                    continue
-                tile_coverage.append(
-                    {
-                        "tile_x": int(tile_x),
-                        "tile_y": int(tile_y),
-                        "tile_id": int(present_tile_id_by_coord.get((tile_x, tile_y), -1)),
-                    }
-                )
-            tile_coverage.sort(key=lambda t: (t["tile_y"], t["tile_x"]))
-
-            score_crop = score[y0:y1 + 1, x0:x1 + 1]
-            hard_crop = hard_canvas[y0:y1 + 1, x0:x1 + 1]
-            transition_crop = transition_canvas[y0:y1 + 1, x0:x1 + 1]
-            train_mask_crop = train_mask_canvas[y0:y1 + 1, x0:x1 + 1]
-            alpha_crop = alpha_canvas[y0:y1 + 1, x0:x1 + 1, :]
-            alpha_sig = _alpha_layer_signature(alpha_crop)
-
-            row = {
-                "candidate_id": candidate_id,
-                "build": build,
-                "map": map_name,
-                "canvas_id": f"{safe_build}:{safe_map}",
-                "canvas_origin_tile": [int(min_tile_x), int(min_tile_y)],
-                "canvas_tiles_wh": [int(tiles_w), int(tiles_h)],
-                "canvas_px_wh": [int(canvas_w), int(canvas_h)],
-                "canvas_bbox": [int(x0), int(y0), int(x1), int(y1)],
-                "canvas_bbox_wh": [int(x1 - x0 + 1), int(y1 - y0 + 1)],
-                "component_rank": int(comp_rank),
-                "component_area": int(comp["area"]),
-                "tile_coverage": tile_coverage,
-                "tile_coverage_count": len(tile_coverage),
-                "multi_tile": bool(len(tile_coverage) > 1),
-                "score_mean": float(np.mean(score_crop)) if score_crop.size > 0 else 0.0,
-                "score_max": float(np.max(score_crop)) if score_crop.size > 0 else 0.0,
-                "hard_mean": float(np.mean(hard_crop)) if hard_crop.size > 0 else 0.0,
-                "transition_mean": float(np.mean(transition_crop)) if transition_crop.size > 0 else 0.0,
-                "train_mask_mean": float(np.mean(train_mask_crop)) if train_mask_crop.size > 0 else 0.0,
-                "rgb_fingerprint": rgb_fingerprint,
-                "avg_hash": avg_hash,
-                "crop_path": crop_rel.replace("\\", "/"),
-            }
-            row.update(alpha_sig)
-            all_candidates.append(row)
-            kept_for_overlay.append(row)
-            candidate_id += 1
-
-        overlay_rel = f"overlays/{safe_build}_{safe_map}_canvas_overlay.png"
-        _overlay_candidates(minimap_canvas, kept_for_overlay, out_dir / overlay_rel, downscale_max_side=int(args.downscale_overlay_max_side))
-
-        signal_panel = np.concatenate(
-            [
-                (np.clip(minimap_canvas, 0.0, 1.0) * 255.0).astype(np.uint8),
-                _colorize_gray(hard_canvas),
-                _colorize_gray(transition_canvas),
-                _colorize_gray(score),
-            ],
-            axis=1,
-        )
-        Image.fromarray(signal_panel, mode="RGB").save(canvas_debug_dir / f"{safe_build}_{safe_map}_signals.png")
-
-        canvas_summary = {
-            "canvas_index": int(canvas_index),
-            "build": build,
-            "map": map_name,
-            "origin_tile": [int(min_tile_x), int(min_tile_y)],
-            "tiles_wh": [int(tiles_w), int(tiles_h)],
-            "canvas_px_wh": [int(canvas_w), int(canvas_h)],
-            "tiles_present": int(len(tiles)),
-            "components_total": int(len(components)),
-            "candidates_emitted": int(len(kept_for_overlay)),
-            "multi_tile_candidates": int(sum(1 for r in kept_for_overlay if bool(r.get("multi_tile")))),
-            "overlay_path": overlay_rel.replace("\\", "/"),
-        }
-        canvas_summaries.append(canvas_summary)
-        print(
-            f"Canvas {canvas_index}/{len(grouped_tiles)} {build}/{map_name}: "
-            f"tiles={len(tiles)} candidates={canvas_summary['candidates_emitted']} "
-            f"multi_tile={canvas_summary['multi_tile_candidates']}"
-        )
-
-    all_candidates.sort(
-        key=lambda r: (
-            int(r.get("tile_coverage_count", 0)),
-            float(r.get("score_mean", 0.0)),
-            int(r.get("component_area", 0)),
-        ),
-        reverse=True,
+    build_dirs = args.builds or sorted(
+        d.stem.replace(".zarr", "") for d in zarr_base.glob("*.zarr")
     )
 
-    (out_dir / "candidates.json").write_text(json.dumps(all_candidates, indent=2), encoding="utf-8")
+    all_entries: list[dict] = []
+    for build in build_dirs:
+        index_path = zarr_base / f"{build}.zarr" / "index.parquet"
+        if not index_path.exists():
+            print(f"  Skipping {build}: no index.parquet")
+            continue
+        table = pq.read_table(str(index_path))
+        for i in range(table.num_rows):
+            row = {col: table.column(col)[i].as_py() for col in table.column_names}
+            row["_build"] = build
+            tx = int(row.get("tile_x", -1))
+            ty = int(row.get("tile_y", -1))
+            tid = int(row.get("tile_id", -1))
+            if tx < 0 or ty < 0 or tid < 0:
+                continue
+            all_entries.append(row)
+
+    print(f"Loaded {len(all_entries)} index entries from {len(build_dirs)} builds")
+
+    curation_manifest_path = args.curation_manifest
+    if curation_manifest_path:
+        if Path(curation_manifest_path).is_dir():
+            curation_manifest_path = str(Path(curation_manifest_path) / "kept_tiles.parquet")
+        curated = pq.read_table(str(curation_manifest_path))
+        curated_ids = set(int(v) for v in curated.column("tile_id").to_pylist())
+        before = len(all_entries)
+        all_entries = [e for e in all_entries if int(e["tile_id"]) in curated_ids]
+        print(f"Curation manifest: {before} -> {len(all_entries)} (kept {len(curated_ids)} unique tile_ids)")
+
+    rng = np.random.RandomState(int(args.seed))
+    rng.shuffle(all_entries)
+    if int(args.max_tiles) > 0 and len(all_entries) > int(args.max_tiles):
+        all_entries = all_entries[:int(args.max_tiles)]
+
+    # ── Prepare Zarr stores ──────────────────────────────────────
+    stores: dict[str, zarr.Group] = {}
+    for build in build_dirs:
+        zarr_path = zarr_base / f"{build}.zarr"
+        if not zarr_path.exists():
+            continue
+        store = zarr.storage.LocalStore(str(zarr_path), read_only=True)
+        stores[build] = zarr.open_group(store=store, mode="r")
+
+    # list of Zarr array names to read in bulk per build
+    bulk_keys = [
+        "minimap_rgb",
+        "alpha_256",
+        "normal_xyz",
+        "normal_mask",
+        "height_257",
+        "mddf_mask",
+        "modf_mask",
+        "liquid_mask",
+        "mcly_layer_mask",
+        "object_precise_mask",
+        "object_filtered_mask",
+        "object_mask",
+    ]
+
+    def _read_build_arrays(build: str) -> dict[str, np.ndarray]:
+        root = stores[build]
+        arrays: dict[str, np.ndarray] = {}
+        for k in bulk_keys:
+            if k in root:
+                arrays[k] = root[k][:]
+        return arrays
+
+    def _fill_checkerboard_mask(mask: np.ndarray) -> np.ndarray:
+        """Fill checkerboard gaps (valid/invalid alternating) via cardinal propagation."""
+        filled = mask.copy()
+        filled[1:, :] |= mask[:-1, :]
+        filled[:-1, :] |= mask[1:, :]
+        filled[:, 1:] |= mask[:, :-1]
+        filled[:, :-1] |= mask[:, 1:]
+        return filled.astype(np.float32)
+
+
+    def _resolve_object_mask(arrays: dict[str, np.ndarray]) -> np.ndarray:
+        for k in ("object_precise_mask", "object_filtered_mask", "object_mask"):
+            if k in arrays:
+                return arrays[k]
+        raise KeyError("No object mask found")
+
+    def _compute_what_plate(height_257: np.ndarray, normal_mask: np.ndarray, object_mask: np.ndarray) -> np.ndarray:
+        terrain_frac = (normal_mask > 0.1).reshape(normal_mask.shape[0], -1).mean(axis=1)
+        height_range = height_257.reshape(height_257.shape[0], -1).max(axis=1) - height_257.reshape(height_257.shape[0], -1).min(axis=1)
+        flat_terrain = terrain_frac < 0.30
+        blank_height = height_range < 0.5
+        obj_frac = (object_mask > 0.5).reshape(object_mask.shape[0], -1).mean(axis=1)
+        heavy_objects = obj_frac > 0.7
+        return (flat_terrain | blank_height | heavy_objects).astype(np.float32)
+
+    # ── Phase 1: process tiles in GPU batches ────────────────────
+    all_candidates: list[dict[str, object]] = []
+    candidate_id = 0
+    total_tiles = len(all_entries)
+    tiles_processed = 0
+
+    # Group entries by build for bulk array reads
+    by_build: dict[str, list[dict]] = {}
+    for e in all_entries:
+        by_build.setdefault(e["_build"], []).append(e)
+
+    for build, entries in sorted(by_build.items()):
+        if build not in stores:
+            continue
+        n = len(entries)
+        print(f"\nBuild {build} ({n} tiles) — loading arrays...")
+        arrays = _read_build_arrays(build)
+        n_arr = arrays["minimap_rgb"].shape[0]
+        print(f"  Loaded {len(arrays)} arrays ({n_arr} tiles in store)")
+
+        # Pre-compute per-tile derived fields (bulk numpy, fast)
+        print(f"  Pre-computing derived fields...")
+        obj_mask = _resolve_object_mask(arrays)
+        weight_257 = 1.0 - np.clip(obj_mask, 0.0, 1.0)
+        obj_presence = np.maximum(
+            arrays["mddf_mask"] if "mddf_mask" in arrays else np.zeros_like(weight_257),
+            arrays["modf_mask"] if "modf_mask" in arrays else np.zeros_like(weight_257),
+        )
+        alpha_painted = np.clip(arrays["alpha_256"], 0.0, 1.0)
+        mcly = arrays.get("mcly_layer_mask", np.zeros((n_arr, 16, 16, 4), dtype=np.float32))
+        mcly_any_16 = (mcly.max(axis=3) > 0.05).astype(np.float32)
+        # Fix checkerboard normal_mask (V18Dataset does this in __getitem__)
+        normal_mask_contiguous = _fill_checkerboard_mask(arrays["normal_mask"])
+        what_plate = _compute_what_plate(arrays["height_257"], normal_mask_contiguous, obj_mask)
+        terrain_valid = normal_mask_contiguous * (1.0 - np.clip(obj_presence, 0.0, 1.0))
+        liquid_resized = np.pad(arrays.get("liquid_mask", np.zeros((n_arr, 256, 256), dtype=np.float32)), ((0, 0), (0, 1), (0, 1)), mode="edge")
+        terrain_valid *= (1.0 - np.clip(liquid_resized, 0.0, 1.0) * 0.85)
+        what_plate_bool = what_plate > 0.5
+        terrain_valid[what_plate_bool] = 0.0
+
+        # Process in GPU batches
+        for batch_start in range(0, n, _BATCH_SIZE):
+            batch_end = min(batch_start + _BATCH_SIZE, n)
+            batch_entries = entries[batch_start:batch_end]
+            bs = batch_end - batch_start
+
+            # Look up tile indices in Zarr store (tile_id == position in arrays)
+            batch_indices = [int(e["tile_id"]) for e in batch_entries]
+
+            # Stack as torch + GPU
+            def _gather(arr: np.ndarray, idx: list[int]) -> torch.Tensor:
+                return torch.from_numpy(arr[idx]).to(_DEVICE)
+
+            batch: dict[str, torch.Tensor] = {
+                "normals": _gather(arrays["normal_xyz"], batch_indices).permute(0, 3, 1, 2).float(),
+                "height_raw": _gather(arrays["height_257"], batch_indices).unsqueeze(1),
+                "normal_mask": _gather(normal_mask_contiguous, batch_indices).unsqueeze(1),
+                "terrain_valid_mask_257": _gather(terrain_valid, batch_indices).unsqueeze(1),
+                "weight_257": _gather(weight_257, batch_indices).unsqueeze(1),
+                "mddf_mask": _gather(arrays.get("mddf_mask", np.zeros((n_arr, 257, 257), dtype=np.float32)), batch_indices).unsqueeze(1),
+                "modf_mask": _gather(arrays.get("modf_mask", np.zeros((n_arr, 257, 257), dtype=np.float32)), batch_indices).unsqueeze(1),
+                "liquid_mask": _gather(arrays.get("liquid_mask", np.zeros((n_arr, 256, 256), dtype=np.float32)), batch_indices).unsqueeze(1),
+                "alpha_painted_256": _gather(alpha_painted, batch_indices).permute(0, 3, 1, 2),
+                "mcly_any_16": _gather(mcly_any_16, batch_indices).unsqueeze(1),
+                "what_plate_flag": torch.from_numpy(what_plate[batch_indices]).to(_DEVICE),
+            }
+
+            hard_batch, trans_batch, mask_batch = _hard_region_signals_batched(batch, float(args.detail_boost))
+
+            for j, e in enumerate(batch_entries):
+                tid = int(e["tile_id"])
+                tile_idx = batch_indices[j]
+
+                minimap = arrays["minimap_rgb"][tile_idx].astype(np.float32, copy=False) / 255.0
+                alpha_t = arrays["alpha_256"][tile_idx].astype(np.float32, copy=False)
+
+                # Debug first tile of each build
+                comps = _process_tile_signals(
+                    hard_batch[j].numpy(),
+                    trans_batch[j].numpy(),
+                    mask_batch[j].numpy(),
+                    minimap,
+                    alpha_t,
+                    component_threshold=float(args.component_threshold),
+                    min_component_area=int(args.min_component_area),
+                    min_component_width=int(args.min_component_width),
+                    min_component_height=int(args.min_component_height),
+                    max_components=int(args.max_components_per_tile),
+                    bbox_padding=int(args.bbox_padding),
+                    dedupe_hash_size=int(args.dedupe_hash_size),
+                )
+
+                for comp in comps:
+                    row: dict[str, object] = {
+                        "candidate_id": candidate_id,
+                        "build": build,
+                        "tile_id": tid,
+                        "tile_x": int(e["tile_x"]),
+                        "tile_y": int(e["tile_y"]),
+                        "tile_local_bbox": comp["tile_local_bbox"],
+                        "component_area": comp["component_area"],
+                        "score_mean": comp["score_mean"],
+                        "score_max": comp["score_max"],
+                        "rgb_fingerprint": comp["rgb_fingerprint"],
+                        "avg_hash": comp["avg_hash"],
+                        "alpha_layer_signature": comp["alpha_layer_signature"],
+                        "layer_means": comp["layer_means"],
+                        "layer_coverage": comp["layer_coverage"],
+                        "dominant_layers": comp["dominant_layers"],
+                        "tile_coverage": [{"tile_x": int(e["tile_x"]), "tile_y": int(e["tile_y"]), "tile_id": tid}],
+                        "tile_coverage_count": 1,
+                        "multi_tile": False,
+                        "touches_edge": comp["touches_edge"],
+                    }
+                    all_candidates.append(row)
+                    candidate_id += 1
+
+                tiles_processed += 1
+
+            if tiles_processed % 500 == 0:
+                pct = 100.0 * tiles_processed / total_tiles
+                print(f"  {tiles_processed}/{total_tiles} tiles ({pct:.1f}%) — {candidate_id} candidates")
+
+        # Free build arrays
+        del arrays, weight_257, obj_presence, alpha_painted, mcly_any_16, what_plate, terrain_valid
+        import gc
+        gc.collect()
+
+    print(f"\nTotal: {tiles_processed} tiles -> {candidate_id} candidates")
+
+    # ── Phase 2: write metadata ──────────────────────────────────
+    all_candidates.sort(key=lambda r: (
+        int(r.get("tile_coverage_count", 0)),
+        float(r.get("score_mean", 0.0)),
+        int(r.get("component_area", 0)),
+    ), reverse=True)
+
     _write_jsonl(out_dir / "candidates.jsonl", all_candidates)
 
-    (out_dir / "canvas_summary.json").write_text(json.dumps(canvas_summaries, indent=2), encoding="utf-8")
-    _write_jsonl(out_dir / "canvas_summary.jsonl", canvas_summaries)
-
-    top_k = min(max(0, int(args.topk_atlas)), len(all_candidates))
-    if top_k > 0:
-        _atlas_rows(all_candidates[:top_k], out_dir, out_dir / "candidates_top_atlas.png", cols=8, thumb=128)
-
+    # ── Phase 3: dedupe ──────────────────────────────────────────
     dedupe_stats: dict[str, object] | None = None
     cluster_summaries: list[dict[str, object]] = []
     deduped_rows: list[dict[str, object]] = []
@@ -789,30 +801,26 @@ def main() -> None:
             all_candidates,
             hamming_threshold=int(args.dedupe_hamming_threshold),
         )
-        (out_dir / "candidates_deduped.json").write_text(json.dumps(deduped_rows, indent=2), encoding="utf-8")
         _write_jsonl(out_dir / "candidates_deduped.jsonl", deduped_rows)
-        (out_dir / "cluster_summary.json").write_text(json.dumps(cluster_summaries, indent=2), encoding="utf-8")
         _write_jsonl(out_dir / "cluster_summary.jsonl", cluster_summaries)
         (out_dir / "dedupe_stats.json").write_text(json.dumps(dedupe_stats, indent=2), encoding="utf-8")
-        _cluster_atlas(
-            deduped_rows,
-            cluster_summaries,
-            out_dir=out_dir,
-            max_clusters=int(args.cluster_atlas_top_clusters),
-            per_cluster_items=int(args.cluster_atlas_per_cluster),
-            thumb=int(args.cluster_atlas_thumb),
-        )
 
+    # ── Phase 4: Zarr index ──────────────────────────────────────
+    source_for_index = deduped_rows if deduped_rows else all_candidates
+    tile_paste_pairs = _compute_local_bboxes(source_for_index)
+    _build_zarr_index(out_dir / "tile_to_pastes.zarr", tile_paste_pairs, deduped_rows if deduped_rows else all_candidates)
+
+    # ── Phase 5: summary ─────────────────────────────────────────
     multi_tile_count = int(sum(1 for row in all_candidates if bool(row.get("multi_tile"))))
+    touches_edge_count = int(sum(1 for row in all_candidates if bool(row.get("touches_edge"))))
     summary = {
-        "tiles_considered": int(len(positions)),
-        "canvas_groups": int(len(canvas_summaries)),
+        "tiles_processed": int(tiles_processed),
         "candidates": int(len(all_candidates)),
         "multi_tile_candidates": int(multi_tile_count),
-        "multi_tile_ratio": (float(multi_tile_count) / float(len(all_candidates))) if all_candidates else 0.0,
+        "touches_edge_candidates": int(touches_edge_count),
         "component_threshold": float(args.component_threshold),
         "min_component_area": int(args.min_component_area),
-        "max_components_per_canvas": int(args.max_components_per_canvas),
+        "max_components_per_tile": int(args.max_components_per_tile),
         "selection_hash": _selection_hash(all_candidates),
         "dedupe_enabled": bool(args.dedupe),
         "dedupe_stats": dedupe_stats,

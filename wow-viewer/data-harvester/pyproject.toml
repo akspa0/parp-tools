@@ -12,6 +12,7 @@ dependencies = [
     "numcodecs>=0.13",
     "triton-windows>=3.7",
     "pyarrow>=24.0.0",
+    "scipy>=1.12",
 ]
 
 [project.optional-dependencies]

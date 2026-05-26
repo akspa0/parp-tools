@@ -19,6 +19,10 @@
 - Batch capture (Noggit-red composite pattern)
 - V16.2 precise object mask generation
 - V16.2 model with height-channel, combined heads, proper object weighting
+- V18 object-roof curation + minimap sieve spec now drafted; next step is to split it into bounded implementation slices
+- V18 object-roof lane now explicitly includes MdxViewer per-asset capture improvements and a separate object-visual Zarr store
+- V18 object-roof lane now also explicitly calls for a Python `uv` + transformers object-identification model that feeds the main V18 model
+- V18 object-roof lane now treats SAM2 as the initial promptable mask host and SAM3 as a gated follow-on if the Hugging Face token unlocks it
 
 ## MotherShip Direction
 Long-range: `theMothership/game-engine/` — universal game engine with WoW plugin. See `wow-engine-modernization-plan-2026-05-14.md`.

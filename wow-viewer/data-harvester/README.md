@@ -395,6 +395,82 @@ uv run python -u scripts/train_v18.py normal `
   --run-name v18_normal_refined
 ```
 
+### Full-Corpus V18 Paste-Curation Training (Copy/Paste)
+
+Use this when you want the full flow from paste mining to a real V18 normal run.
+
+```powershell
+cd i:\parp\parp-tools\wow-viewer\data-harvester
+
+# Shared build list for all steps
+$builds = @(
+  '0_5_3_3368','0_5_5_3494','0_7_0_3694',
+  '3_0_1_8303','3_3_5_12340','4_0_0_11927'
+)
+
+# 1) Base curation manifest (tile-level quality)
+uv run python -u scripts/build_v16_curation_manifest.py `
+  --builds $builds `
+  --profile normal_terrain_v16_1_1 `
+  --workers -1 --chunk-size 128 `
+  --run-name normal_terrain_full_corpus_v16_1_1
+
+# 2) Mine + dedupe pastes across full corpus
+uv run python -u scripts/mine_v18_pastes_canvas.py `
+  --dataset-dir ../output/datasets/v16 `
+  --builds $builds `
+  --curation-manifest ../output/datasets/v16/curation/normal_terrain_full_corpus_v16_1_1/kept_tiles.parquet `
+  --dedupe --dedupe-hamming-threshold 12 `
+  --out-dir ../output/v18/pastes/v18_full_corpus_train
+
+# 3) Optional: composition graph and library catalog artifacts
+uv run python -u scripts/build_v18_composition_graph.py `
+  --deduped-candidates ../output/v18/pastes/v18_full_corpus_train/candidates_deduped.jsonl `
+  --output-dir ../output/v18/pastes/v18_full_corpus_train/composition_graph
+
+uv run python -u scripts/build_v18_paste_library_catalog.py `
+  --deduped-candidates ../output/v18/pastes/v18_full_corpus_train/candidates_deduped.jsonl `
+  --composition-graph ../output/v18/pastes/v18_full_corpus_train/composition_graph `
+  --output-dir ../output/v18/pastes/v18_full_corpus_train/library_catalog
+
+# 4) Build refined manifest used by trainer
+uv run python -u scripts/build_v18_refined_manifest.py `
+  --deduped-candidates ../output/v18/pastes/v18_full_corpus_train/candidates_deduped.jsonl `
+  --composition-graph ../output/v18/pastes/v18_full_corpus_train/composition_graph `
+  --run-name v18_refined_full_corpus_train `
+  --output-dir ../output/v18/manifests/v18_refined_full_corpus_train
+
+# 5) Train V18 normal from refined paste manifest (real run)
+uv run python -u scripts/train_v18.py normal `
+  --dataset-dir ../output/datasets/v16 `
+  --builds $builds `
+  --curation-manifest ../output/v18/manifests/v18_refined_full_corpus_train/kept_tiles.parquet `
+  --device auto --target-vram-gb 12 --autotune-batch-size `
+  --batch-size 16 --grad-accum-steps 1 `
+  --train-max-tiles 4000 --train-epoch-tiles 512 `
+  --val-max-tiles 256 --rotate-val-tiles --val-epoch-tiles 128 `
+  --bucket-sampling-profile v16_1_1_normal `
+  --epochs 300 --num-workers -1 --val-preview-interval 2 `
+  --run-name v18_normal_full_from_pastes
+```
+
+Resume the same run:
+
+```powershell
+uv run python -u scripts/train_v18.py normal `
+  --dataset-dir ../output/datasets/v16 `
+  --builds $builds `
+  --curation-manifest ../output/v18/manifests/v18_refined_full_corpus_train/kept_tiles.parquet `
+  --device auto --target-vram-gb 12 --autotune-batch-size `
+  --batch-size 16 --grad-accum-steps 1 `
+  --train-max-tiles 4000 --train-epoch-tiles 512 `
+  --val-max-tiles 256 --rotate-val-tiles --val-epoch-tiles 128 `
+  --bucket-sampling-profile v16_1_1_normal `
+  --epochs 600 --num-workers -1 --val-preview-interval 2 `
+  --run-name v18_normal_full_from_pastes `
+  --resume-checkpoint ../models/v18/normal/runs/v18_normal_full_from_pastes/checkpoints/v18_normal_last.pt
+```
+
 ### Baseline Contract (Refined vs Non-Refined Comparison)
 
 The V18 baseline contract script compares training with a V18 refined manifest
@@ -407,9 +483,13 @@ uv run python -u scripts/run_v18_baseline_contract.py `
   --profile small
 ```
 
-Profiles: `small` (20 epochs, 80 train), `medium` (50 epochs, 400 train),
-`large` (100 epochs, 2000 train). The script runs refined vs non-refined
-comparison and writes `comparison_report.md` to `--output-dir`.
+The script runs refined vs non-refined comparison and writes
+`comparison_report.md` to `--output-dir`.
+
+Current script defaults in `run_v18_baseline_contract.py` are:
+- `small`: `epochs=1`, `train_max_tiles=64`, `train_epoch_tiles=16`, `val_max_tiles=16`, `val_epoch_tiles=8`, `batch_size=2`
+- `medium`: `epochs=2`, `train_max_tiles=256`, `train_epoch_tiles=64`, `val_max_tiles=48`, `val_epoch_tiles=24`, `batch_size=4`
+- `large`: `epochs=4`, `train_max_tiles=512`, `train_epoch_tiles=128`, `val_max_tiles=96`, `val_epoch_tiles=48`, `batch_size=8`
 
 ---
 

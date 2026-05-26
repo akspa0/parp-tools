@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader, Sampler  # noqa: E402
 from torch.utils.data._utils.collate import default_collate  # noqa: E402
 
 from harvester.v16_1_dataset import V161Dataset  # noqa: E402
+from harvester.paste_dataset import PasteAwareDataset  # noqa: E402
 from harvester.v16_1_models import (  # noqa: E402
     V161HeightModel,
     V161HolesModel,
@@ -1325,6 +1326,12 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         default=4,
         help="Batches prefetched per worker (effective when --num-workers > 0)",
     )
+    p.add_argument(
+        "--paste-dir",
+        type=Path,
+        default=None,
+        help="V18 paste candidate directory (enables paste-targeted training sampling)",
+    )
     p.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--val-fraction", type=float, default=0.1)
@@ -1623,7 +1630,7 @@ def run_task(task_name: str) -> None:
     val_dir.mkdir(parents=True, exist_ok=True)
     evidence_dir.mkdir(parents=True, exist_ok=True)
 
-    train_ds = V161Dataset(
+    train_ds: V161Dataset | PasteAwareDataset = V161Dataset(
         args.dataset_dir,
         builds=args.builds,
         split="train",
@@ -1636,7 +1643,7 @@ def run_task(task_name: str) -> None:
         curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
         curation_reject_what_plate=bool(args.curation_reject_what_plate),
     )
-    val_ds = V161Dataset(
+    val_ds: V161Dataset | PasteAwareDataset = V161Dataset(
         args.dataset_dir,
         builds=args.builds,
         split="val",
@@ -1649,6 +1656,27 @@ def run_task(task_name: str) -> None:
         curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
         curation_reject_what_plate=bool(args.curation_reject_what_plate),
     )
+    if args.paste_dir is not None:
+        train_ds = PasteAwareDataset(train_ds, args.paste_dir)
+        print(f"Paste-targeted training: {len(train_ds)} candidates")
+        try:
+            val_ds = PasteAwareDataset(val_ds, args.paste_dir)
+            print(f"Paste-targeted validation: {len(val_ds)} candidates")
+        except ValueError:
+            print("Validation set has zero paste candidates — using raw tile dataset")
+            val_ds = V161Dataset(
+                args.dataset_dir,
+                builds=args.builds,
+                split="val",
+                val_fraction=args.val_fraction,
+                seed=args.seed,
+                augment=False,
+                curation_manifest=args.curation_manifest,
+                height_channel=bool(resolved_height_channel),
+                curation_min_terrain_validity=float(args.curation_min_terrain_validity),
+                curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
+                curation_reject_what_plate=bool(args.curation_reject_what_plate),
+            )
     curation_seed = int(args.curation_seed) if args.curation_seed is not None else int(args.seed)
     train_pool = _apply_dataset_pool(
         train_ds,
@@ -1999,7 +2027,8 @@ def run_task(task_name: str) -> None:
             train_loss_sum += float(loss.item())
             for key, value in metrics.items():
                 metric_sums[key] = metric_sums.get(key, 0.0) + float(value)
-        scheduler.step()
+        if optimizer_steps > 0:
+            scheduler.step()
 
         n_train = max(len(train_loader), 1)
         peak_alloc_gb = None
