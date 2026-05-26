@@ -22,7 +22,7 @@ _SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from harvester.v16_1_dataset import V161Dataset  # noqa: E402
+from harvester.v18_dataset import V18Dataset  # noqa: E402
 
 
 def _safe(x: str) -> str:
@@ -205,7 +205,14 @@ def _selection_hash(rows: list[dict[str, object]]) -> str:
 
 
 def _crop_fingerprint(rgb_u8: np.ndarray, size: int = 16) -> str:
-    img = Image.fromarray(rgb_u8, mode="RGB").convert("L").resize((size + 1, size), Image.Resampling.BILINEAR)
+    h, w = rgb_u8.shape[:2]
+    max_side = max(h, w)
+    if max_side == 0:
+        return "0" * ((size * size + 3) // 4)
+    pad_h = max_side - h
+    pad_w = max_side - w
+    padded = np.pad(rgb_u8, ((0, pad_h), (0, pad_w), (0, 0)), mode="constant", constant_values=128)
+    img = Image.fromarray(padded, mode="RGB").convert("L").resize((size + 1, size), Image.Resampling.BILINEAR)
     arr = np.asarray(img, dtype=np.int16)
     diff = arr[:, 1:] > arr[:, :-1]
     bits = "".join("1" if v else "0" for v in diff.reshape(-1).tolist())
@@ -233,14 +240,35 @@ def _alpha_layer_signature(alpha_crop: np.ndarray) -> dict[str, object]:
     }
 
 
-def _candidate_cluster_key(row: dict[str, object]) -> str:
+def _average_hash(rgb_u8: np.ndarray, size: int = 8) -> str:
+    h, w = rgb_u8.shape[:2]
+    max_side = max(h, w)
+    if max_side == 0:
+        return "0" * ((size * size + 3) // 4)
+    pad_h = max_side - h
+    pad_w = max_side - w
+    padded = np.pad(rgb_u8, ((0, pad_h), (0, pad_w), (0, 0)), mode="constant", constant_values=128)
+    img = Image.fromarray(padded, mode="RGB").convert("L").resize((size, size), Image.Resampling.BILINEAR)
+    arr = np.asarray(img, dtype=np.int16)
+    mean = np.mean(arr)
+    bits = "".join("1" if int(v) > int(mean) else "0" for v in arr.reshape(-1).tolist())
+    width = (len(bits) + 3) // 4
+    return f"{int(bits, 2):0{width}x}"
+
+
+def _hamming_distance_hex(a: str, b: str) -> int:
+    if len(a) != len(b):
+        return 999
+    xor = int(a, 16) ^ int(b, 16)
+    return bin(xor).count("1")
+
+
+def _candidate_exact_key(row: dict[str, object]) -> str:
     return "|".join(
         [
             str(row.get("rgb_fingerprint", "")),
             str(row.get("alpha_layer_signature", "")),
             str(row.get("tile_coverage_count", "")),
-            str(row.get("canvas_bbox_wh", ["", ""])[0]),
-            str(row.get("canvas_bbox_wh", ["", ""])[1]),
         ]
     )
 
@@ -254,10 +282,110 @@ def _cluster_score_key(row: dict[str, object]) -> tuple[float, float, int, int]:
     )
 
 
-def _cluster_candidates(candidates: list[dict[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, object]], dict[str, object]]:
+def _cluster_candidates(
+    candidates: list[dict[str, object]],
+    hamming_threshold: int = 0,
+) -> tuple[list[dict[str, object]], list[dict[str, object]], dict[str, object]]:
+    if hamming_threshold <= 0:
+        return _cluster_candidates_exact(candidates)
+
+    # Approximate matching: bucket by (alpha_signature, tile_coverage_count),
+    # then cluster within each bucket by avg_hash Hamming distance.
+    buckets: dict[str, list[dict[str, object]]] = {}
+    for row in candidates:
+        bucket_key = f'{row.get("alpha_layer_signature", "")}|{row.get("tile_coverage_count", "")}'
+        buckets.setdefault(bucket_key, []).append(row)
+
+    cluster_id_counter = 0
+    deduped_rows: list[dict[str, object]] = []
+    cluster_summaries: list[dict[str, object]] = []
+
+    for bucket_key, bucket_rows in sorted(buckets.items()):
+        bucket_rows.sort(key=_cluster_score_key, reverse=True)
+        clusters_in_bucket: list[list[dict[str, object]]] = []
+        for row in bucket_rows:
+            row_hash = str(row.get("avg_hash", ""))
+            best_idx = -1
+            best_dist = 999
+            for ci, cluster in enumerate(clusters_in_bucket):
+                can_hash = str(cluster[0].get("avg_hash", ""))
+                dist = _hamming_distance_hex(row_hash, can_hash)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = ci
+            if best_idx >= 0 and best_dist <= int(hamming_threshold):
+                clusters_in_bucket[best_idx].append(row)
+            else:
+                clusters_in_bucket.append([row])
+
+        for members in clusters_in_bucket:
+            members.sort(key=_cluster_score_key, reverse=True)
+            canonical = members[0]
+            cluster_id_counter += 1
+            cluster_key_payload = "|".join([
+                str(canonical.get("avg_hash", "")),
+                str(canonical.get("alpha_layer_signature", "")),
+                str(canonical.get("tile_coverage_count", "")),
+            ])
+            cluster_hash = hashlib.sha256(cluster_key_payload.encode("utf-8")).hexdigest()[:12]
+            cluster_id = f"cluster_{cluster_id_counter:06d}_{cluster_hash}"
+            canonical_id = int(canonical.get("candidate_id", -1))
+            build_set = sorted({str(m.get("build", "")) for m in members})
+            map_set = sorted({str(m.get("map", "")) for m in members})
+            tile_coverage_hist: dict[str, int] = {}
+            for m in members:
+                tc = int(m.get("tile_coverage_count", 0))
+                k = str(tc)
+                tile_coverage_hist[k] = int(tile_coverage_hist.get(k, 0) + 1)
+            cluster_summaries.append({
+                "cluster_id": cluster_id,
+                "cluster_key": f"approx_{cluster_key_payload}",
+                "canonical_id": canonical_id,
+                "size": len(members),
+                "builds": build_set,
+                "maps": map_set,
+                "tile_coverage_hist": tile_coverage_hist,
+                "score_mean_max": float(max(float(m.get("score_mean", 0.0)) for m in members)),
+                "score_mean_min": float(min(float(m.get("score_mean", 0.0)) for m in members)),
+                "alpha_layer_signature": str(canonical.get("alpha_layer_signature", "")),
+                "avg_hash": str(canonical.get("avg_hash", "")),
+                "hamming_threshold": int(hamming_threshold),
+            })
+            for variant_rank, member in enumerate(members, start=1):
+                row = dict(member)
+                row["cluster_id"] = cluster_id
+                row["canonical_id"] = canonical_id
+                row["variant_rank"] = int(variant_rank)
+                row["cluster_size"] = int(len(members))
+                row["is_canonical"] = bool(variant_rank == 1)
+                row["cluster_key"] = f"approx_{cluster_key_payload}"
+                deduped_rows.append(row)
+
+    deduped_rows.sort(
+        key=lambda r: (
+            str(r.get("cluster_id", "")),
+            int(r.get("variant_rank", 0)),
+            -int(r.get("candidate_id", 0)),
+        )
+    )
+    cluster_summaries.sort(key=lambda r: (int(r.get("size", 0)), str(r.get("cluster_id", ""))), reverse=True)
+
+    total_duplicates = sum(max(0, int(cs["size"]) - 1) for cs in cluster_summaries)
+    stats = {
+        "input_candidates": len(candidates),
+        "clusters": len(cluster_summaries),
+        "canonical_count": len(cluster_summaries),
+        "duplicates_dropped_if_canonical_only": int(total_duplicates),
+        "canonical_ratio": (float(len(cluster_summaries)) / float(len(candidates))) if candidates else 0.0,
+        "hamming_threshold": int(hamming_threshold),
+    }
+    return deduped_rows, cluster_summaries, stats
+
+
+def _cluster_candidates_exact(candidates: list[dict[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, object]], dict[str, object]]:
     by_key: dict[str, list[dict[str, object]]] = {}
     for row in candidates:
-        key = _candidate_cluster_key(row)
+        key = _candidate_exact_key(row)
         by_key.setdefault(key, []).append(row)
 
     deduped_rows: list[dict[str, object]] = []
@@ -395,13 +523,14 @@ def main() -> None:
     parser.add_argument("--topk-atlas", type=int, default=128)
     parser.add_argument("--dedupe", action="store_true", help="Enable deterministic cross-build cluster assignment")
     parser.add_argument("--dedupe-hash-size", type=int, default=16)
+    parser.add_argument("--dedupe-hamming-threshold", type=int, default=12, help="Hamming distance threshold for approximate matching (0=exact-only). default=12")
     parser.add_argument("--cluster-atlas-top-clusters", type=int, default=64)
     parser.add_argument("--cluster-atlas-per-cluster", type=int, default=4)
     parser.add_argument("--cluster-atlas-thumb", type=int, default=128)
     parser.add_argument("--out-dir", type=str, default="../output/validation/v18_paste_canvas")
     args = parser.parse_args()
 
-    ds = V161Dataset(
+    ds = V18Dataset(
         dataset_dir=args.dataset_dir,
         builds=args.builds,
         split="train",
@@ -546,6 +675,7 @@ def main() -> None:
             crop_path = out_dir / crop_rel
             Image.fromarray(crop_rgb, mode="RGB").save(crop_path)
             rgb_fingerprint = _crop_fingerprint(crop_rgb, size=max(8, int(args.dedupe_hash_size)))
+            avg_hash = _average_hash(crop_rgb, size=8)
 
             tile_coverage: list[dict[str, int]] = []
             for local_tx, local_ty in comp["tile_bins"]:
@@ -590,6 +720,7 @@ def main() -> None:
                 "transition_mean": float(np.mean(transition_crop)) if transition_crop.size > 0 else 0.0,
                 "train_mask_mean": float(np.mean(train_mask_crop)) if train_mask_crop.size > 0 else 0.0,
                 "rgb_fingerprint": rgb_fingerprint,
+                "avg_hash": avg_hash,
                 "crop_path": crop_rel.replace("\\", "/"),
             }
             row.update(alpha_sig)
@@ -654,7 +785,10 @@ def main() -> None:
     cluster_summaries: list[dict[str, object]] = []
     deduped_rows: list[dict[str, object]] = []
     if bool(args.dedupe):
-        deduped_rows, cluster_summaries, dedupe_stats = _cluster_candidates(all_candidates)
+        deduped_rows, cluster_summaries, dedupe_stats = _cluster_candidates(
+            all_candidates,
+            hamming_threshold=int(args.dedupe_hamming_threshold),
+        )
         (out_dir / "candidates_deduped.json").write_text(json.dumps(deduped_rows, indent=2), encoding="utf-8")
         _write_jsonl(out_dir / "candidates_deduped.jsonl", deduped_rows)
         (out_dir / "cluster_summary.json").write_text(json.dumps(cluster_summaries, indent=2), encoding="utf-8")

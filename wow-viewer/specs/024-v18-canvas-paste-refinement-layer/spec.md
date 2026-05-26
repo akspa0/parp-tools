@@ -1,40 +1,46 @@
-# Feature Specification: V18 Canvas Paste Refinement Layer
+# Feature Specification: V18 Terrain System
 
 **Feature Branch**: `024-v18-canvas-paste-refinement-layer`
 
 **Created**: 2026-05-25
 
-**Status**: Draft
+**Status**: Implemented (Phase 1-6 complete)
 
 ## Problem Statement
 
 Current curation and paste mining are tile-local. That fragments authored structures that span multiple ADT tiles and over-counts duplicate data across builds where the same base content is copy-pasted and lightly retouched.
 
-For V18, we need a dataset refinement layer that models how maps are authored on a large canvas:
+**V18 is the whole terrain system.** It unifies the dataset refinement pipeline (canvas mining → dedupe → composition → library → manifest) with the model family (per-signal CNNs) under one namespace.
 
+For the dataset:
 - detect large multi-tile pastes from stitched map signals
 - dedupe repeated motifs across builds/maps
 - represent canonical paste families plus meaningful variants
 - produce training manifests that reduce duplicate supervision and improve signal diversity
 
+For the model:
+- `train_v18.py` — unified entrypoint for all tasks (normal, height, holes, liquid, texcomp)
+- `v18_models.py` — re-exports V16.1 model architectures under V18 names
+- `v18_dataset.py` — re-exports V161Dataset as V18Dataset
+
 The goal is smarter, smaller per-signal models by improving training data quality rather than adding model complexity.
 
 ## Scope
 
-This feature defines and implements a V18 refinement layer in `wow-viewer/data-harvester` that:
+V18 owns the entire terrain training pipeline in `wow-viewer/data-harvester`:
 
 1. Mines paste candidates on stitched map canvases (not tile boundaries)
 2. Builds cross-build/cross-map deduped paste libraries
 3. Produces normal-aware refined train/val manifests from canonical paste families
-4. Integrates with existing V16.1/V17.1 trainer inputs through manifest consumption
-
-5. Defines a two-layer V18 training data contract:
+4. Defines a two-layer training data contract:
    - **Prefab Library Layer** (micro artwork primitives)
    - **Composition Layer** (macro zone assembly grammar)
+5. Unified training entrypoint (`train_v18.py`) for all per-signal tasks
+6. V18-named model and dataset classes (`v18_models.py`, `v18_dataset.py`)
 
 Out of scope:
 
-- new terrain model architecture changes
+- new model architecture changes (V18 uses V16.1 model architectures)
 - runtime renderer changes
 - shipping model checkpoints
 
@@ -156,3 +162,41 @@ A developer can rerun mining/dedupe/refine with fixed seeds and compare evidence
 - Initial dedupe can use deterministic perceptual/feature hashing before optional richer embedding clustering.
 - Refinement layer is a data pipeline enhancement, not a model-architecture change in this feature scope.
 - Azeroth/Kalimdor historical continuity implies substantial cross-build motif reuse, so cross-build dedupe is expected to remove many rows without major motif loss.
+- V18 namespace (`v18_models.py`, `v18_dataset.py`, `train_v18.py`) is thin re-export of V16.1 implementations. V16.1 files remain the canonical implementation layer.
+- Training output paths use `models/v18/<task>/runs/<run-name>/` for V18 runs.
+
+## Namespace Map
+
+| V18 Name | Implementation | File |
+|----------|---------------|------|
+| `V18NormalModel` | `V161NormalModel` | `v18_models.py` → `v16_1_models.py` |
+| `V18HeightModel` | `V161HeightModel` | same |
+| `V18HolesModel` | `V161HolesModel` | same |
+| `V18LiquidModel` | `V161LiquidModel` | same |
+| `V18TexcompModel` | `V161TexcompModel` | same |
+| `V18NormalHeightModel` | `V161NormalHeightModel` | same |
+| `V18NormalRefiner` | `V161NormalRefiner` | same |
+| `V18Dataset` | `V161Dataset` | `v18_dataset.py` → `v16_1_dataset.py` |
+| `train_v18.py` | calls `run_task()` | scripts entrypoint |
+
+## Implemented Surface
+
+All V18 pipeline scripts exist and have been verified on the 6-build corpus:
+
+| Script | Phase | Status |
+|--------|-------|--------|
+| `mine_v18_pastes_canvas.py` | 1+2: Canvas mining + dedupe | Done |
+| `build_v18_refined_manifest.py` | 3: Refined manifest | Done |
+| `build_v18_composition_graph.py` | 4: Composition graph | Done |
+| `build_v18_paste_library_catalog.py` | 5: Paste library | Done |
+| `run_v18_baseline_contract.py` | 6: Baseline comparison | Done |
+| `v18_models.py` | Namespace re-export | Done |
+| `v18_dataset.py` | Namespace re-export | Done |
+| `train_v18.py` | Unified training | Done |
+
+### Key Results (6-Build Full Pipeline)
+
+- 600 tiles → 144 paste candidates → 140 clusters → 65 composition families → 47 refined tiles → 140 paste library families
+- Cross-build dedupe: ~141 candidates reduced to ~140 clusters (~0.7% reduction — conservative dedupe at Hamming threshold 12)
+- Refined vs non-refined val_loss comparison: 0.5623 (refined) vs 0.6505 (nonref) on small profile (~13.5% improvement)
+- GPU: CUDA-supported on RTX 4070 Ti SUPER (16 GB VRAM)

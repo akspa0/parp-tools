@@ -103,7 +103,8 @@ def main() -> None:
         refined_cmd = [
             sys.executable,
             "-u",
-            "scripts/train_v16_1_normal.py",
+            "scripts/train_v18.py",
+            "normal",
             "--dataset-dir",
             str(args.dataset_dir),
             "--builds",
@@ -133,7 +134,7 @@ def main() -> None:
         ]
         _run(refined_cmd, cwd=data_harvester_dir)
 
-    refined_run_dir = (data_harvester_dir.parent / "models" / "v16_1" / "normal" / "runs" / f"v17_1_{refined_run_name}")
+    refined_run_dir = (data_harvester_dir.parent / "models" / "v18" / "normal" / "runs" / refined_run_name)
     refined_metrics = _latest_epoch_metrics(refined_run_dir)
 
     nonref_payload: dict[str, Any] | None = None
@@ -166,7 +167,8 @@ def main() -> None:
             nonref_cmd = [
                 sys.executable,
                 "-u",
-                "scripts/train_v16_1_normal.py",
+                "scripts/train_v18.py",
+                "normal",
                 "--dataset-dir",
                 str(args.dataset_dir),
                 "--builds",
@@ -196,10 +198,10 @@ def main() -> None:
             ]
             _run(nonref_cmd, cwd=data_harvester_dir)
 
-        nonref_run_dir = (data_harvester_dir.parent / "models" / "v16_1" / "normal" / "runs" / f"v17_1_{nonref_run_name}")
+        nonref_run_dir = (data_harvester_dir.parent / "models" / "v18" / "normal" / "runs" / nonref_run_name)
         nonref_metrics = _latest_epoch_metrics(nonref_run_dir)
         nonref_payload = {
-            "run_name": f"v17_1_{nonref_run_name}",
+            "run_name": nonref_run_name,
             "run_dir": str(nonref_run_dir),
             "manifest_dir": str(nonref_manifest_dir),
             "metrics": nonref_metrics,
@@ -209,7 +211,7 @@ def main() -> None:
         "profile": args.profile,
         "profile_settings": profile,
         "refined_run": {
-            "run_name": f"v17_1_{refined_run_name}",
+            "run_name": refined_run_name,
             "run_dir": str(refined_run_dir),
             "manifest_dir": str(args.refined_manifest),
             "metrics": refined_metrics,

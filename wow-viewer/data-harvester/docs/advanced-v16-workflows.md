@@ -2,6 +2,15 @@
 
 This is the detailed companion doc for `data-harvester/README.md`.
 
+> **V18 is now the primary training namespace.**
+> The V18 pipeline (canvas mining → dedupe → refined manifest → `train_v18.py`)
+> supersedes direct V16.1 training. See `../README.md` for the full V18 operator
+> guide, and `../specs/024-v18-canvas-paste-refinement-layer/` for the spec.
+
+This doc covers the V16 dataset build/patch/validate commands that remain the
+foundation of both V16.1 and V18 training. These are stable infrastructure:
+you build the Zarr stores once, then curate and train with V18.
+
 ## Dataset commands
 
 ### Build

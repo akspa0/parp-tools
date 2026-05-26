@@ -1,9 +1,15 @@
 # V16.1 Dense Correlation Model Family
 
+> **Note (2026-05-25): V16.1 is now the implementation layer of V18.**
+> The public namespace is V18 (`v18_models.py`, `v18_dataset.py`, `train_v18.py`).
+> V16.1 files remain the canonical implementation; V18 re-exports them under
+> clean names. See `specs/024-v18-canvas-paste-refinement-layer/` for the
+> full V18 spec.
+
 ## Purpose
 
-V16.1 is the new terrain-model family name for the next V16-derived
-architecture reset.
+V16.1 is the terrain-model family that powers V18. It defines the
+architecture reset from V16's shared multitask model.
 
 Its defining rule is simple:
 
