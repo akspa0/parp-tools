@@ -139,6 +139,28 @@ class V161NormalModel(nn.Module):
         return self.head(d0)
 
 
+class V161NormalObjectRoofModel(nn.Module):
+    """Normal model with object-roof auxiliary mask channel.
+
+    Input contract: cat(minimap_rgb, object_roof_mask_256) -> normals_257.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.backbone = _UNetBackbone(4)
+        self.head = nn.Sequential(
+            nn.Conv2d(32, 32, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Upsample(size=(257, 257), mode="bilinear", align_corners=True),
+            nn.Conv2d(32, 3, 1),
+            nn.Tanh(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        d0, _ = self.backbone(x)
+        return self.head(d0)
+
+
 class V161NormalHeightModel(nn.Module):
     """Normal model with height as an input channel: cat(minimap_rgb, height_norm) → normals."""
 

@@ -33,6 +33,7 @@ from harvester.v16_1_models import (  # noqa: E402
     V161HeightModel,
     V161HolesModel,
     V161LiquidModel,
+    V161NormalObjectRoofModel,
     V161NormalHeightCombinedModel,
     V161NormalHeightModel,
     V161NormalModel,
@@ -64,12 +65,13 @@ _NORMAL_VARIANTS = (
     "v16_1_3_height",
     "v17_hybrid",
     "v17_1_normals",
+    "v18_object_roof_aux",
 )
 
 
-def _resolve_normal_variant(args: argparse.Namespace, task_name: str) -> tuple[str, bool, bool]:
+def _resolve_normal_variant(args: argparse.Namespace, task_name: str) -> tuple[str, bool, bool, bool]:
     if task_name != "normal":
-        return "not_normal_task", bool(getattr(args, "height_channel", False)), False
+        return "not_normal_task", bool(getattr(args, "height_channel", False)), False, bool(getattr(args, "object_roof_channel", False))
 
     variant = str(getattr(args, "normal_variant", "v17_1_normals"))
     if variant not in _NORMAL_VARIANTS:
@@ -77,6 +79,7 @@ def _resolve_normal_variant(args: argparse.Namespace, task_name: str) -> tuple[s
 
     expected_height = variant in {"v16_1_3_height", "v17_hybrid"}
     expected_refiner = variant in {"v16_1_2_refiner", "v17_hybrid"}
+    expected_object_roof = variant in {"v18_object_roof_aux"}
 
     manual_height = getattr(args, "height_channel", None)
     if manual_height is not None and bool(manual_height) != bool(expected_height):
@@ -92,7 +95,14 @@ def _resolve_normal_variant(args: argparse.Namespace, task_name: str) -> tuple[s
             f"but CLI override set refiner_disabled={bool(manual_refiner_disabled)}"
         )
 
-    return variant, expected_height, expected_refiner
+    manual_object_roof = getattr(args, "object_roof_channel", None)
+    if manual_object_roof is not None and bool(manual_object_roof) != bool(expected_object_roof):
+        raise RuntimeError(
+            f"--normal-variant {variant} requires object_roof_channel={expected_object_roof}, "
+            f"but CLI override set object_roof_channel={bool(manual_object_roof)}"
+        )
+
+    return variant, expected_height, expected_refiner, expected_object_roof
 
 
 def _seed_all(seed: int) -> None:
@@ -374,6 +384,8 @@ def _pool_row(entry: dict[str, Any], subset_pos: int, split_pos: int) -> dict[st
         "has_alpha_256": bool(entry.get("has_alpha_256", False)),
         "has_liquid_mask": bool(entry.get("has_liquid_mask", False)),
         "has_mcly_texture_ids": bool(entry.get("has_mcly_texture_ids", False)),
+        "has_object_roof_mask": bool(entry.get("has_object_roof_mask", False)),
+        "object_roof_mask_source": str(entry.get("object_roof_mask_source", "none")),
         "n_mddf": int(entry.get("n_mddf", 0) or 0),
         "n_modf": int(entry.get("n_modf", 0) or 0),
         "difficulty_bucket": str(entry.get("_curation_difficulty_bucket", "")),
@@ -414,6 +426,8 @@ def _apply_dataset_pool(
     rows: list[dict[str, Any]] = []
     build_counts: dict[str, int] = {}
     bucket_counts: dict[str, int] = {}
+    object_roof_source_counts: dict[str, int] = {}
+    object_roof_available = 0
     for subset_pos, split_pos in enumerate(selected_positions):
         entry = ds._index_entries[selected_global_indices[subset_pos]]
         row = _pool_row(entry, subset_pos=subset_pos, split_pos=split_pos)
@@ -423,6 +437,10 @@ def _apply_dataset_pool(
         bucket = _normalize_bucket_label(row.get("difficulty_bucket", ""))
         if bucket != "unbucketed":
             bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+        if bool(row.get("has_object_roof_mask", False)):
+            object_roof_available += 1
+        source = str(row.get("object_roof_mask_source", "none") or "none")
+        object_roof_source_counts[source] = object_roof_source_counts.get(source, 0) + 1
 
     selection_jsonl = evidence_dir / f"{split}_pool_selection.jsonl"
     with selection_jsonl.open("w", encoding="utf-8") as f:
@@ -442,6 +460,8 @@ def _apply_dataset_pool(
         "build_tile_counts": build_counts,
         "available_bucket_counts": _bucket_counts(bucket_labels),
         "selected_bucket_counts": dict(sorted(bucket_counts.items())),
+        "object_roof_mask_available_tiles": int(object_roof_available),
+        "object_roof_mask_source_counts": dict(sorted(object_roof_source_counts.items())),
         "selection_jsonl": str(selection_jsonl),
     }
     (evidence_dir / f"{split}_pool_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -854,6 +874,7 @@ def _normal_loss(
     normal_mask = batch["normal_mask"].to(device, non_blocking=True)
     terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
     object_weight = batch["weight_257"].to(device, non_blocking=True)
+    object_roof_weight = batch.get("object_roof_weight_257", batch["weight_257"]).to(device, non_blocking=True)
     mddf_mask = batch["mddf_mask"].to(device, non_blocking=True)
     modf_mask = batch["modf_mask"].to(device, non_blocking=True)
     liquid_mask = batch["liquid_mask"].to(device, non_blocking=True)
@@ -870,7 +891,7 @@ def _normal_loss(
     object_presence = torch.maximum(mddf_mask, modf_mask)
     liquid_weight = 1.0 - (0.85 * liquid_mask_257)
     instance_weight = 1.0 - (0.75 * object_presence)
-    base_mask = normal_mask * terrain_valid_mask * object_weight * liquid_weight * instance_weight
+    base_mask = normal_mask * terrain_valid_mask * object_weight * object_roof_weight * liquid_weight * instance_weight
     base_mask = base_mask * (1.0 - what_plate_flag)
     hard_region_weight, hard_region_debug = _hard_region_weight_from_targets(
         height_raw=height_raw,
@@ -912,6 +933,7 @@ def _normal_loss(
         "normal_vec": float(loss_vec.item()),
         "normal_nz": float(loss_nz.item()),
         "normal_mask_cov": float(base_mask.mean().item()),
+        "object_roof_cov": float((1.0 - object_roof_weight).mean().item()),
         "normal_detail_mean": float(_masked_mean(hard_region_weight, base_mask).item()),
         "normal_hard_region_mean": float(_masked_mean(hard_region_debug["hard_region_signal"], base_mask).item()),
         "normal_transition_mean": float(_masked_mean(hard_region_debug["transition_signal"], base_mask).item()),
@@ -933,6 +955,7 @@ def _normal_loss(
         "transition_signal": hard_region_debug["transition_signal"],
         "terrain_valid_mask": terrain_valid_mask,
         "object_weight": object_weight,
+        "object_roof_weight": object_roof_weight,
         "liquid_mask": liquid_mask_257,
         "instance_weight": instance_weight,
     }
@@ -1202,6 +1225,8 @@ def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
             ("liquid_mask", outputs["liquid_mask"][idx]),
             ("object_weight", outputs["object_weight"][idx]),
         ])
+        if "object_roof_weight" in outputs:
+            panels.append(("object_roof_weight", outputs["object_roof_weight"][idx]))
         rows.append(panels)
     _save_preview_grid(rows, out_path, row_titles=row_titles)
 
@@ -1517,6 +1542,12 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         help="Add height_norm as a 4th input channel to the normal model (normal task only).",
     )
     p.add_argument(
+        "--object-roof-channel",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Add object_roof_mask_256 as a 4th input channel to the normal model (normal task only).",
+    )
+    p.add_argument(
         "--normal-variant",
         choices=list(_NORMAL_VARIANTS),
         default="v17_1_normals",
@@ -1559,7 +1590,7 @@ def run_task(task_name: str) -> None:
     if args.refiner_probe_plateau_epochs < 1:
         raise RuntimeError("--refiner-probe-plateau-epochs must be >= 1")
 
-    normal_variant, resolved_height_channel, resolved_refiner_enabled = _resolve_normal_variant(args, task_name)
+    normal_variant, resolved_height_channel, resolved_refiner_enabled, resolved_object_roof_channel = _resolve_normal_variant(args, task_name)
     if task_name == "normal" and normal_variant in {"v17_hybrid", "v17_1_normals"}:
         if args.curation_manifest is None:
             raise RuntimeError(f"{normal_variant} requires --curation-manifest for curated runs")
@@ -1601,6 +1632,7 @@ def run_task(task_name: str) -> None:
 
     args.resolved_height_channel = bool(resolved_height_channel)
     args.resolved_refiner_enabled = bool(resolved_refiner_enabled)
+    args.resolved_object_roof_channel = bool(resolved_object_roof_channel)
     args.resolved_normal_variant = str(normal_variant)
     if task_name == "normal" and normal_variant == "v17_1_normals" and float(args.height_supervision_weight) <= 0.0:
         raise RuntimeError("v17_1_normals requires --height-supervision-weight > 0 so height supervision is active.")
@@ -1611,6 +1643,7 @@ def run_task(task_name: str) -> None:
     resolved_persistent_workers = _resolve_persistent_workers(args.persistent_workers, resolved_num_workers)
     run_name = args.run_name or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     height_channel_enabled = bool(resolved_height_channel)
+    object_roof_channel_enabled = bool(resolved_object_roof_channel)
     refiner_enabled_for_task = bool(task_name == "normal" and resolved_refiner_enabled)
     if task_name == "normal" and normal_variant == "v17_hybrid":
         if not run_name.startswith("v17_"):
@@ -1618,6 +1651,9 @@ def run_task(task_name: str) -> None:
     elif task_name == "normal" and normal_variant == "v17_1_normals":
         if not run_name.startswith("v17_1_"):
             run_name = f"v17_1_{run_name}"
+    elif task_name == "normal" and normal_variant == "v18_object_roof_aux":
+        if not run_name.startswith("v18_oroof_"):
+            run_name = f"v18_oroof_{run_name}"
     elif height_channel_enabled and not run_name.startswith("v16_1_3"):
         run_name = f"v16_1_3_{run_name}"
     elif refiner_enabled_for_task and not run_name.startswith("v16_1_2"):
@@ -1639,6 +1675,7 @@ def run_task(task_name: str) -> None:
         augment=not args.no_augment,
         curation_manifest=args.curation_manifest,
         height_channel=bool(resolved_height_channel),
+        object_roof_channel=bool(resolved_object_roof_channel),
         curation_min_terrain_validity=float(args.curation_min_terrain_validity),
         curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
         curation_reject_what_plate=bool(args.curation_reject_what_plate),
@@ -1652,6 +1689,7 @@ def run_task(task_name: str) -> None:
         augment=False,
         curation_manifest=args.curation_manifest,
         height_channel=bool(resolved_height_channel),
+        object_roof_channel=bool(resolved_object_roof_channel),
         curation_min_terrain_validity=float(args.curation_min_terrain_validity),
         curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
         curation_reject_what_plate=bool(args.curation_reject_what_plate),
@@ -1673,6 +1711,7 @@ def run_task(task_name: str) -> None:
                 augment=False,
                 curation_manifest=args.curation_manifest,
                 height_channel=bool(resolved_height_channel),
+                object_roof_channel=bool(resolved_object_roof_channel),
                 curation_min_terrain_validity=float(args.curation_min_terrain_validity),
                 curation_min_minimap_usefulness=float(args.curation_min_minimap_usefulness),
                 curation_reject_what_plate=bool(args.curation_reject_what_plate),
@@ -1772,6 +1811,8 @@ def run_task(task_name: str) -> None:
     model = task.model_factory().to(device)
     if task_name == "normal" and bool(resolved_height_channel):
         model = V161NormalHeightModel().to(device)
+    elif task_name == "normal" and bool(resolved_object_roof_channel):
+        model = V161NormalObjectRoofModel().to(device)
     can_compile = hasattr(torch, "compile") and not args.no_compile and device.type == "cuda"
     if can_compile:
         try:
@@ -1873,9 +1914,15 @@ def run_task(task_name: str) -> None:
         "normal_detail_boost": args.normal_detail_boost,
         "normal_variant": normal_variant,
         "height_channel": bool(resolved_height_channel),
+        "object_roof_channel": bool(resolved_object_roof_channel),
         "resolved_height_channel": bool(resolved_height_channel),
+        "resolved_object_roof_channel": bool(resolved_object_roof_channel),
         "resolved_refiner_enabled": bool(resolved_refiner_enabled),
-        "resolved_input_contract": ("minimap_rgb" if task_name == "normal" and normal_variant == "v17_1_normals" else "variant_defined"),
+        "resolved_input_contract": (
+            "minimap_rgb"
+            if task_name == "normal" and normal_variant == "v17_1_normals"
+            else ("minimap_rgb+object_roof_mask" if task_name == "normal" and normal_variant == "v18_object_roof_aux" else "variant_defined")
+        ),
         "resolved_output_contract": ("normals_xyz" if task_name == "normal" else "task_defined"),
         "height_supervision_only": bool(task_name == "normal" and normal_variant == "v17_1_normals"),
         "model_params": sum(p.numel() for p in model.parameters() if p.requires_grad),
@@ -1902,6 +1949,7 @@ def run_task(task_name: str) -> None:
         print(
             f"Normal variant: {normal_variant} | "
             f"height_channel={bool(resolved_height_channel)} | "
+            f"object_roof_channel={bool(resolved_object_roof_channel)} | "
             f"refiner_enabled={bool(resolved_refiner_enabled)} | "
             f"refiner_distill_weight={float(getattr(args, 'refiner_distill_weight', 0.25)):.3f} | "
             f"height_supervision_weight={float(getattr(args, 'height_supervision_weight', 0.0)):.3f}",
@@ -1910,6 +1958,11 @@ def run_task(task_name: str) -> None:
         if normal_variant == "v17_1_normals":
             print(
                 "Normal contract: input=minimap_rgb -> output=normals_xyz | height_supervision_only=true",
+                flush=True,
+            )
+        if normal_variant == "v18_object_roof_aux":
+            print(
+                "Normal contract: input=minimap_rgb+object_roof_mask -> output=normals_xyz | terrain_targets_authoritative=true",
                 flush=True,
             )
     print(f"Device: {device}", flush=True)

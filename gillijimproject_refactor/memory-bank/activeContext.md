@@ -370,6 +370,28 @@
     - `comparison_report.md`
   - bounded proof root:
     - `../output/tmp/v18_baseline_contract_phase6`
+- Spec 025 bounded continuation now spans Phases 1-4 proof surfaces:
+  - Phase 1 roof-library build+validation remains green on staged `3_3_5_12340`:
+    - `output/datasets/object_roof_library/smoke_spec025_phase1_335/`
+    - `validate_v18_object_roof_library.py` status: `pass`
+  - Phase 2 learned fallback + mask validation landed:
+    - `scripts/infer_v18_object_roof_masks.py`
+    - `scripts/validate_v18_object_roof_masks.py`
+    - bounded anchor proof: `output/tmp/v18_object_roof_infer_smoke_335_30_53/`
+      - `tiles_non_empty=1`, validator status: `pass`
+  - Phase 2 patch/report lane now writes side artifacts outside `.zarr` by default:
+    - report root: `output/tmp/object_roof_patch_reports/`
+    - bounded report: `output/tmp/object_roof_patch_reports/smoke_spec025_patch_335/3_3_5_12340/object_roof_patch_report.json`
+    - label contract artifact: `.../object_roof_label_contract.json`
+  - Phase 3 training integration landed for normal lane:
+    - variant: `v18_object_roof_aux`
+    - dataset/model/trainer consume `object_roof_mask_256` and `object_roof_weight_257`
+    - bounded CUDA aux run: `models/v18/normal/runs/v18_oroof_smoke_spec025_v18_oroof_aux_cuda/`
+    - bounded same-pool baseline run: `models/v18/normal/runs/smoke_spec025_v18_baseline_samepool_cuda/`
+  - task closure state in spec checklist:
+    - `wow-viewer/specs/025-object-roof-mask-library-and-minimap-sieve/tasks.md`
+    - complete: `T001`, `T003`-`T022`
+    - open by design: `T002` (MdxViewer one-at-a-time asset capture seam)
 - V17.1 normal trainer behavior adjustments landed during this session:
   - `v17_1_normals` no longer enables refiner/distillation by default
   - `height_supervision_weight` default for `v17_1_normals` restored to `1.0`

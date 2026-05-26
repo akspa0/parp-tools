@@ -201,6 +201,12 @@ class V162Dataset(Dataset):
         mddf_mask = root["mddf_mask"][tile_id].astype(np.float32) if "mddf_mask" in root else np.zeros((257, 257), dtype=np.float32)
         modf_mask = root["modf_mask"][tile_id].astype(np.float32) if "modf_mask" in root else np.zeros((257, 257), dtype=np.float32)
         object_presence_257 = np.maximum(mddf_mask, modf_mask).astype(np.float32, copy=False)
+        has_object_roof_mask = bool(entry.get("has_object_roof_mask", False)) and ("object_roof_mask" in root)
+        object_roof_mask_256 = root["object_roof_mask"][tile_id].astype(np.float32) if has_object_roof_mask else np.zeros((256, 256), dtype=np.float32)
+        object_roof_mask_256 = np.clip(object_roof_mask_256, 0.0, 1.0)
+        object_roof_weight_256 = 1.0 - object_roof_mask_256
+        object_roof_weight_257 = np.pad(object_roof_weight_256, ((0, 1), (0, 1)), mode="edge")
+        object_roof_source = str(entry.get("object_roof_mask_source", "none"))
 
         # --- Derived guidance channels (computed, not stored) ---
         alpha_painted_256 = alpha_painted(alpha).astype(np.float32, copy=False)
@@ -286,6 +292,9 @@ class V162Dataset(Dataset):
                 mcly_any_16 = mcly_any_16[:, ::-1]
                 object_visibility = object_visibility[:, ::-1]
                 no_object_minimap = no_object_minimap[:, ::-1]
+                object_roof_mask_256 = object_roof_mask_256[:, ::-1]
+                object_roof_weight_256 = object_roof_weight_256[:, ::-1]
+                object_roof_weight_257 = object_roof_weight_257[:, ::-1]
             if xform & 2:
                 input_7ch = input_7ch[::-1]
                 height_raw = height_raw[::-1]
@@ -313,6 +322,9 @@ class V162Dataset(Dataset):
                 mcly_any_16 = mcly_any_16[::-1]
                 object_visibility = object_visibility[::-1]
                 no_object_minimap = no_object_minimap[::-1]
+                object_roof_mask_256 = object_roof_mask_256[::-1]
+                object_roof_weight_256 = object_roof_weight_256[::-1]
+                object_roof_weight_257 = object_roof_weight_257[::-1]
             if xform & 4:
                 input_7ch = np.rot90(input_7ch, k=1)
                 height_raw = np.rot90(height_raw, k=1)
@@ -342,6 +354,9 @@ class V162Dataset(Dataset):
                 mcly_any_16 = np.rot90(mcly_any_16, k=1)
                 object_visibility = np.rot90(object_visibility, k=1)
                 no_object_minimap = np.rot90(no_object_minimap, k=1)
+                object_roof_mask_256 = np.rot90(object_roof_mask_256, k=1)
+                object_roof_weight_256 = np.rot90(object_roof_weight_256, k=1)
+                object_roof_weight_257 = np.rot90(object_roof_weight_257, k=1)
 
         # --- Build output dict ---
         result: dict[str, torch.Tensor | bool | int | str] = {
@@ -367,6 +382,9 @@ class V162Dataset(Dataset):
             "mddf_mask": torch.from_numpy(mddf_mask.copy()).unsqueeze(0),
             "modf_mask": torch.from_numpy(modf_mask.copy()).unsqueeze(0),
             "object_presence_257": torch.from_numpy(object_presence_257.copy()).unsqueeze(0),
+            "object_roof_mask_256": torch.from_numpy(object_roof_mask_256.copy()).unsqueeze(0),
+            "object_roof_weight_256": torch.from_numpy(object_roof_weight_256.copy()).unsqueeze(0),
+            "object_roof_weight_257": torch.from_numpy(object_roof_weight_257.copy()).unsqueeze(0),
             # V16.2 guidance channels (also returned as separate tensors for inspection)
             "guidance_ch3_object_filtered": torch.from_numpy(guidance_ch3.copy()).unsqueeze(0),
             "guidance_ch4_terrain_valid": torch.from_numpy(guidance_ch4.copy()).unsqueeze(0),
@@ -396,6 +414,7 @@ class V162Dataset(Dataset):
             "has_mcly": has_mcly,
             "has_object_visibility": has_object_visibility,
             "has_no_object_minimap": has_no_object_minimap,
+            "has_object_roof_mask": has_object_roof_mask,
             # Metadata
             "meta_build": str(entry.get("build", build)),
             "meta_store": str(build),
@@ -406,6 +425,7 @@ class V162Dataset(Dataset):
             "meta_height_mean": h_mean,
             "meta_height_std": float(entry["height_std"]),
             "meta_what_plate_flag": what_plate_flag,
+            "meta_object_roof_source": object_roof_source,
         }
 
         # Curation metadata if available

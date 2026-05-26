@@ -511,6 +511,7 @@ def _normal_loss(model, batch, device, args):
     normal_mask = batch["normal_mask"].to(device, non_blocking=True)
     terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
     object_weight = batch["weight_257"].to(device, non_blocking=True)
+    object_roof_weight = batch.get("object_roof_weight_257", batch["weight_257"]).to(device, non_blocking=True)
     mddf_mask = batch["mddf_mask"].to(device, non_blocking=True)
     modf_mask = batch["modf_mask"].to(device, non_blocking=True)
     liquid_mask = batch["liquid_mask"].to(device, non_blocking=True)
@@ -527,7 +528,7 @@ def _normal_loss(model, batch, device, args):
     object_presence = torch.maximum(mddf_mask, modf_mask)
     liquid_weight = 1.0 - (0.85 * liquid_mask_257)
     instance_weight = 1.0 - (0.75 * object_presence)
-    base_mask = normal_mask * terrain_valid_mask * object_weight * liquid_weight * instance_weight
+    base_mask = normal_mask * terrain_valid_mask * object_weight * object_roof_weight * liquid_weight * instance_weight
     base_mask = base_mask * (1.0 - what_plate_flag)
     hard_region_weight, hard_region_debug = _hard_region_weight_from_targets(
         height_raw=height_raw, target_normals=target_n, alpha_painted_256=alpha_painted_256,
@@ -545,6 +546,7 @@ def _normal_loss(model, batch, device, args):
         "normal": float(loss.item()), "normal_cos": float(loss_cos.item()),
         "normal_vec": float(loss_vec.item()), "normal_nz": float(loss_nz.item()),
         "normal_mask_cov": float(base_mask.mean().item()),
+        "object_roof_cov": float((1.0 - object_roof_weight).mean().item()),
         "normal_detail_mean": float(_masked_mean(hard_region_weight, base_mask).item()),
         "what_plate_rate": float(what_plate_flag.mean().item()),
         "alpha_painted_cov": float(alpha_painted_cov.mean().item()),
@@ -555,6 +557,7 @@ def _normal_loss(model, batch, device, args):
         "hard_region_signal": hard_region_debug["hard_region_signal"],
         "transition_signal": hard_region_debug["transition_signal"],
         "terrain_valid_mask": terrain_valid_mask, "object_weight": object_weight,
+        "object_roof_weight": object_roof_weight,
         "liquid_mask": liquid_mask_257, "instance_weight": instance_weight,
     }
 
@@ -644,6 +647,7 @@ def _preview_normal(batch, outputs, out_path):
             ("train_mask", train_m / train_max),
             ("liquid_mask", outputs["liquid_mask"][idx]),
             ("object_weight", outputs["object_weight"][idx]),
+            ("object_roof_weight", outputs["object_roof_weight"][idx]),
         ])
     _save_preview_grid(rows, out_path, row_titles=row_titles)
 
@@ -705,6 +709,12 @@ def _patch_batch_keys(batch: dict) -> dict:
         batch["mcly_any_16"] = mcly_256[:, :, ::16, ::16]  # (B, 1, 16, 16)
     if "liquid_mask" not in batch and "liquid" in batch:
         batch["liquid_mask"] = batch["liquid"]
+    if "object_roof_weight_257" not in batch:
+        batch["object_roof_weight_257"] = batch["weight_257"]
+    if "object_roof_weight_256" not in batch:
+        batch["object_roof_weight_256"] = batch["weight_256"]
+    if "object_roof_mask_256" not in batch:
+        batch["object_roof_mask_256"] = 1.0 - batch["object_roof_weight_256"]
     return batch
 
 

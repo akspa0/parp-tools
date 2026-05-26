@@ -393,6 +393,49 @@
     - `comparison_report.json`
     - `comparison_report.md`
 
+### Spec 025 — Object Roof Mask Library (Session)
+
+- Phase 1 bounded roof-library proof remains valid on staged `3_3_5_12340`:
+  - run: `wow-viewer/output/datasets/object_roof_library/smoke_spec025_phase1_335/`
+  - summary: `placements_selected=744`, `exemplars_kept=52`, `families_total=36`
+  - validator: `scripts/validate_v18_object_roof_library.py`
+  - current re-check status: `pass`
+
+- Phase 2 object-roof mask generation lane is now landed:
+  - new scripts:
+    - `scripts/infer_v18_object_roof_masks.py` (learned fallback inference host)
+    - `scripts/validate_v18_object_roof_masks.py` (bounded mask quality validator)
+    - `scripts/patch_v18_object_roof_masks.py` now writes label-contract/report artifacts under `output/tmp/object_roof_patch_reports/` (not inside `.zarr`)
+  - label contract proof:
+    - `output/tmp/object_roof_patch_reports/smoke_spec025_patch_335/3_3_5_12340/object_roof_label_contract.json`
+  - bounded anchor inference proof:
+    - `output/tmp/v18_object_roof_infer_smoke_335_30_53/summary.json`
+    - `tiles_non_empty=1`, `mean_mask_coverage≈0.0945`
+  - bounded mask validation proof:
+    - `output/tmp/v18_object_roof_infer_smoke_335_30_53/mask_validation_report.json`
+    - status: `pass`
+
+- Phase 3 training integration lane is now landed:
+  - dataset/model/trainer consume object-roof auxiliary signals:
+    - `v16_1_dataset.py` object-roof channels/weights
+    - `v16_1_models.py` `V161NormalObjectRoofModel`
+    - `train_v16_1_common.py` variant `v18_object_roof_aux`, object-roof sieve in normal loss, and evidence fields (`object_roof_mask_source_counts`, coverage metrics)
+  - bounded CUDA smoke run (aux enabled):
+    - `models/v18/normal/runs/v18_oroof_smoke_spec025_v18_oroof_aux_cuda/`
+    - confirms `resolved_input_contract=minimap_rgb+object_roof_mask`
+  - bounded same-pool baseline run:
+    - `models/v18/normal/runs/smoke_spec025_v18_baseline_samepool_cuda/`
+
+- Phase 4 operational proof is now captured for the bounded lane:
+  - roof library run + validation pass recorded
+  - object-mask generation run + validation pass recorded
+  - bounded comparison artifacts recorded between aux and same-pool baseline normal runs
+
+- Spec task checklist updated at:
+  - `wow-viewer/specs/025-object-roof-mask-library-and-minimap-sieve/tasks.md`
+  - completed: `T001`, `T003`-`T022`
+  - remaining deliberate open seam: `T002` (MdxViewer one-at-a-time asset capture with explicit pose metadata)
+
 ### Spec 024 Expansion (Session Close)
 
 - Spec/plan/tasks for `024-v18-canvas-paste-refinement-layer` were expanded to reflect the macro-artwork thesis:

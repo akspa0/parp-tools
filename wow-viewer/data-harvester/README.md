@@ -175,6 +175,82 @@ uv run python scripts/build_v16_dataset.py repair-index --build 3_3_5_12340
 
 ---
 
+## Spec 025 — Object-Roof Mask Library + Sieve
+
+This lane adds an object-roof auxiliary signal for V18 normal training while
+keeping terrain targets authoritative.
+
+Build bounded roof library (Phase 1 proof):
+
+```powershell
+uv run python -u scripts/build_v18_object_roof_library.py `
+  --build 3_3_5_12340 `
+  --max-tiles-per-build 512 `
+  --run-name smoke_spec025_phase1_335
+
+uv run python -u scripts/validate_v18_object_roof_library.py `
+  --library-dir ../output/datasets/object_roof_library/smoke_spec025_phase1_335
+```
+
+Train learned roof-family identifier (CUDA bounded proof):
+
+```powershell
+uv run python -u scripts/train_v18_object_roof_identifier.py `
+  --library-dir ../output/datasets/object_roof_library/smoke_spec025_phase1_335 `
+  --run-name smoke_spec025_roof_identifier_cuda_masked `
+  --device cuda `
+  --epochs 1 `
+  --batch-size 8 `
+  --max-samples 24 `
+  --apply-roof-mask
+```
+
+Infer learned masks on anchor tiles and validate:
+
+```powershell
+uv run python -u scripts/infer_v18_object_roof_masks.py `
+  --dataset-root ../output/datasets/v16 `
+  --build 3_3_5_12340 `
+  --map Azeroth `
+  --tile-x 30 `
+  --tile-y 53 `
+  --max-tiles 1 `
+  --model-dir ../models/v18/object_roof_identifier/smoke_spec025_roof_identifier_cuda_masked `
+  --library-dir ../output/datasets/object_roof_library/smoke_spec025_phase1_335 `
+  --output-dir ../output/tmp/v18_object_roof_infer_smoke_335_30_53
+
+uv run python -u scripts/validate_v18_object_roof_masks.py `
+  --pred-dir ../output/tmp/v18_object_roof_infer_smoke_335_30_53 `
+  --build 3_3_5_12340 `
+  --map Azeroth `
+  --tile-x 30 `
+  --tile-y 53 `
+  --min-mask-coverage 0.01 `
+  --min-top-family-score 0.05
+```
+
+Patch object-roof arrays into dataset stores (explicit write gate):
+
+```powershell
+uv run python -u scripts/patch_v18_object_roof_masks.py `
+  --dataset-root ../output/datasets/v16 `
+  --build 3_3_5_12340 `
+  --learned-mask-dir ../output/tmp/v18_object_roof_infer_smoke_335_30_53 `
+  --allow-zarr-write `
+  --report-root ../output/tmp/object_roof_patch_reports `
+  --run-name smoke_spec025_patch_335
+```
+
+Notes:
+- Side artifacts intentionally live outside `.zarr` by default under
+  `output/tmp/object_roof_patch_reports/`.
+- Label contract is written to `object_roof_label_contract.json` in the report
+  folder.
+- Training integration uses `--normal-variant v18_object_roof_aux` and consumes
+  `object_roof_mask_256` / `object_roof_weight_257` as auxiliary sieve signals.
+
+---
+
 ## Renderer-Truth Capture And Patch (V16.2)
 
 The V16.2 dataset adds renderer-truth object masks and terrain-only minimaps

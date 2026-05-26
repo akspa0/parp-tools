@@ -118,6 +118,7 @@ class V161Dataset(Dataset):
         augment: bool = False,
         curation_manifest: str | Path | None = None,
         height_channel: bool = False,
+        object_roof_channel: bool = False,
         curation_min_terrain_validity: float = 0.0,
         curation_min_minimap_usefulness: float = 0.0,
         curation_reject_what_plate: bool = False,
@@ -125,6 +126,7 @@ class V161Dataset(Dataset):
         self.dataset_dir = Path(dataset_dir)
         self.augment = augment and split == "train"
         self.height_channel = bool(height_channel)
+        self.object_roof_channel = bool(object_roof_channel)
         self._rng = np.random.RandomState(seed)
         self._stores: dict[str, zarr.Group] = {}
         self._index_entries: list[dict] = []
@@ -230,6 +232,12 @@ class V161Dataset(Dataset):
         mddf_mask = root["mddf_mask"][tile_id].astype(np.float32) if "mddf_mask" in root else np.zeros((257, 257), dtype=np.float32)
         modf_mask = root["modf_mask"][tile_id].astype(np.float32) if "modf_mask" in root else np.zeros((257, 257), dtype=np.float32)
         object_presence_257 = np.maximum(mddf_mask, modf_mask).astype(np.float32, copy=False)
+        has_object_roof_mask = bool(entry.get("has_object_roof_mask", False)) and ("object_roof_mask" in root)
+        object_roof_mask_256 = root["object_roof_mask"][tile_id].astype(np.float32) if has_object_roof_mask else np.zeros((256, 256), dtype=np.float32)
+        object_roof_mask_256 = np.clip(object_roof_mask_256, 0.0, 1.0)
+        object_roof_weight_256 = 1.0 - object_roof_mask_256
+        object_roof_weight_257 = np.pad(object_roof_weight_256, ((0, 1), (0, 1)), mode="edge")
+        object_roof_source = str(entry.get("object_roof_mask_source", "none"))
         alpha_painted_256 = alpha_painted(alpha).astype(np.float32, copy=False)
         alpha_painted_cov = float((alpha_painted_256 >= 0.05).mean())
         mcly_cov = mcly_painted_coverage(mcly_mask)
@@ -277,6 +285,9 @@ class V161Dataset(Dataset):
                 alpha_painted_256 = alpha_painted_256[:, ::-1]
                 terrain_valid_mask_257 = terrain_valid_mask_257[:, ::-1]
                 mcly_any_16 = mcly_any_16[:, ::-1]
+                object_roof_mask_256 = object_roof_mask_256[:, ::-1]
+                object_roof_weight_256 = object_roof_weight_256[:, ::-1]
+                object_roof_weight_257 = object_roof_weight_257[:, ::-1]
             if xform & 2:
                 minimap = minimap[::-1]
                 height_raw = height_raw[::-1]
@@ -302,6 +313,9 @@ class V161Dataset(Dataset):
                 alpha_painted_256 = alpha_painted_256[::-1]
                 terrain_valid_mask_257 = terrain_valid_mask_257[::-1]
                 mcly_any_16 = mcly_any_16[::-1]
+                object_roof_mask_256 = object_roof_mask_256[::-1]
+                object_roof_weight_256 = object_roof_weight_256[::-1]
+                object_roof_weight_257 = object_roof_weight_257[::-1]
             if xform & 4:
                 minimap = np.rot90(minimap, k=1)
                 height_raw = np.rot90(height_raw, k=1)
@@ -329,11 +343,17 @@ class V161Dataset(Dataset):
                 alpha_painted_256 = np.rot90(alpha_painted_256, k=1)
                 terrain_valid_mask_257 = np.rot90(terrain_valid_mask_257, k=1)
                 mcly_any_16 = np.rot90(mcly_any_16, k=1)
+                object_roof_mask_256 = np.rot90(object_roof_mask_256, k=1)
+                object_roof_weight_256 = np.rot90(object_roof_weight_256, k=1)
+                object_roof_weight_257 = np.rot90(object_roof_weight_257, k=1)
 
         minimap_t = torch.from_numpy(minimap.copy()).permute(2, 0, 1)
         if self.height_channel:
             height_norm_t = torch.from_numpy(height_norm[:256, :256].copy()).unsqueeze(0)
             input_tensor = torch.cat([minimap_t, height_norm_t], dim=0)
+        elif self.object_roof_channel:
+            object_roof_t = torch.from_numpy(object_roof_mask_256.copy()).unsqueeze(0)
+            input_tensor = torch.cat([minimap_t, object_roof_t], dim=0)
         else:
             input_tensor = minimap_t
         return {
@@ -359,6 +379,9 @@ class V161Dataset(Dataset):
             "mddf_mask": torch.from_numpy(mddf_mask.copy()).unsqueeze(0),
             "modf_mask": torch.from_numpy(modf_mask.copy()).unsqueeze(0),
             "object_presence_257": torch.from_numpy(object_presence_257.copy()).unsqueeze(0),
+            "object_roof_mask_256": torch.from_numpy(object_roof_mask_256.copy()).unsqueeze(0),
+            "object_roof_weight_256": torch.from_numpy(object_roof_weight_256.copy()).unsqueeze(0),
+            "object_roof_weight_257": torch.from_numpy(object_roof_weight_257.copy()).unsqueeze(0),
             "alpha_painted_256": torch.from_numpy(alpha_painted_256.copy()).unsqueeze(0),
             "terrain_valid_mask_257": torch.from_numpy(terrain_valid_mask_257.copy()).unsqueeze(0),
             "mcly_any_16": torch.from_numpy(mcly_any_16.copy()).unsqueeze(0),
@@ -375,10 +398,12 @@ class V161Dataset(Dataset):
             "has_holes": bool(entry.get("has_holes_16", False)),
             "has_liquid": bool(entry.get("has_liquid_mask", False)),
             "has_mcly": bool(entry.get("has_mcly_texture_ids", False)),
+            "has_object_roof_mask": has_object_roof_mask,
             "meta_build": str(entry.get("build") or build),
             "meta_store": str(build),
             "meta_map": str(entry.get("map", "")),
             "meta_tile_id": tile_id,
             "meta_tile_x": int(entry.get("tile_x") if entry.get("tile_x") is not None else -1),
             "meta_tile_y": int(entry.get("tile_y") if entry.get("tile_y") is not None else -1),
+            "meta_object_roof_source": object_roof_source,
         }
