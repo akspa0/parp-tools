@@ -160,6 +160,84 @@ def _load_manifest_keep_keys(manifest_path: Path) -> set[tuple[str, int]]:
             out.add((build, tile_id))
     return out
 
+
+def _build_tile_pose_metadata_from_placements(zarr_path: Path) -> dict[int, dict[str, object]]:
+    """Build a per-tile pose metadata map from placements.parquet.
+
+    Includes *all* placement rows per tile under `object_instances`, plus
+    a representative top-level entry for backwards-compatible consumers.
+    """
+    placements_path = zarr_path / "placements.parquet"
+    if not placements_path.exists():
+        return {}
+
+    table = pq.read_table(str(placements_path))
+    rows = [{col: table.column(col)[i].as_py() for col in table.column_names} for i in range(table.num_rows)]
+
+    by_tile: dict[int, list[dict[str, object]]] = {}
+    for row in rows:
+        try:
+            tile_id = int(row.get("tile_id", -1))
+        except Exception:
+            continue
+        if tile_id < 0:
+            continue
+        by_tile.setdefault(tile_id, []).append(row)
+
+    resolved: dict[int, dict[str, object]] = {}
+
+    def _to_int(value: object) -> int | None:
+        try:
+            return int(float(value))
+        except Exception:
+            return None
+
+    def _to_float(value: object) -> float | None:
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    for tile_id, tile_rows in by_tile.items():
+        if not tile_rows:
+            continue
+
+        modf_rows = [r for r in tile_rows if str(r.get("instance_type", "")).lower() == "modf"]
+        mddf_rows = [r for r in tile_rows if str(r.get("instance_type", "")).lower() == "mddf"]
+        chosen = modf_rows[0] if modf_rows else (mddf_rows[0] if mddf_rows else tile_rows[0])
+
+        instances: list[dict[str, object]] = []
+        for row in tile_rows:
+            instances.append(
+                {
+                    "asset_path": str(row.get("asset_path", "") or "") or None,
+                    "instance_type": str(row.get("instance_type", "") or "") or None,
+                    "instance_idx": _to_int(row.get("instance_idx")),
+                    "unique_id": _to_int(row.get("uniqueId")),
+                    "rot_x": _to_float(row.get("rotX")),
+                    "rot_y": _to_float(row.get("rotY")),
+                    "rot_z": _to_float(row.get("rotZ")),
+                    "scale": _to_float(row.get("scale")),
+                    "pos_x": _to_float(row.get("posX")),
+                    "pos_y": _to_float(row.get("posY")),
+                    "pos_z": _to_float(row.get("posZ")),
+                }
+            )
+
+        resolved[tile_id] = {
+            "object_instance_count": len(instances),
+            "object_instances": instances,
+            "asset_path": str(chosen.get("asset_path", "") or "") or None,
+            "instance_type": str(chosen.get("instance_type", "") or "") or None,
+            "unique_id": _to_int(chosen.get("uniqueId")),
+            "rot_x": _to_float(chosen.get("rotX")),
+            "rot_y": _to_float(chosen.get("rotY")),
+            "rot_z": _to_float(chosen.get("rotZ")),
+            "scale": _to_float(chosen.get("scale")),
+        }
+
+    return resolved
+
 ALL_ARRAY_KEYS = [
     "height_257", "normal_xyz", "normal_mask", "alpha_256", "holes_16",
     "liquid_mask", "liquid_height", "object_mask", "object_precise_mask",
@@ -1277,6 +1355,84 @@ def _validate_build_signals(build: str, output_path: Path, strict: bool = True) 
     return out_path
 
 
+def _validate_decoded_metadata_table(build: str, output_path: Path, strict: bool = True) -> Path:
+    index_rows = _read_index_rows(output_path)
+    expected_tile_count = len(index_rows)
+    expected_tile_ids = {int(row.get("tile_id", -1)) for row in index_rows}
+
+    metadata_path = output_path / "decoded_metadata.parquet"
+    failures: list[str] = []
+    warnings_list: list[str] = []
+
+    metadata_rows: list[dict[str, object]] = []
+    if not metadata_path.exists():
+        failures.append("decoded_metadata.parquet is missing")
+    else:
+        metadata_rows = _read_parquet_rows(metadata_path)
+
+    if metadata_rows:
+        row_count = len(metadata_rows)
+        if row_count != expected_tile_count:
+            failures.append(
+                f"decoded metadata row count mismatch: expected {expected_tile_count}, got {row_count}"
+            )
+
+        observed_ids = [int(row.get("tile_id", -1)) for row in metadata_rows]
+        observed_set = set(observed_ids)
+        if len(observed_set) != len(observed_ids):
+            failures.append("decoded metadata contains duplicate tile_id rows")
+
+        missing_ids = sorted(expected_tile_ids - observed_set)
+        extra_ids = sorted(observed_set - expected_tile_ids)
+        if missing_ids:
+            failures.append(
+                f"decoded metadata missing tile_ids (sample): {missing_ids[:16]}"
+            )
+        if extra_ids:
+            failures.append(
+                f"decoded metadata has unexpected tile_ids (sample): {extra_ids[:16]}"
+            )
+
+        bad_json_rows = 0
+        for row in metadata_rows:
+            raw = row.get("decoded_metadata_json", "{}")
+            text = str(raw if raw is not None else "{}")
+            if not text:
+                bad_json_rows += 1
+                continue
+            try:
+                parsed = json.loads(text)
+                if not isinstance(parsed, dict):
+                    bad_json_rows += 1
+            except Exception:
+                bad_json_rows += 1
+        if bad_json_rows > 0:
+            failures.append(
+                f"decoded metadata has {bad_json_rows} rows with invalid decoded_metadata_json payloads"
+            )
+
+    payload = {
+        "build": build,
+        "strict": bool(strict),
+        "expected_tile_count": expected_tile_count,
+        "metadata_row_count": len(metadata_rows),
+        "passed": len(failures) == 0,
+        "failures": failures,
+        "warnings": warnings_list,
+        "metadata_path": str(metadata_path),
+    }
+    out_path = output_path / "decoded_metadata_validation.json"
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    if failures and strict:
+        raise RuntimeError(
+            f"Decoded metadata validation failed for {build}. See {out_path}.\n"
+            + "\n".join(f"  - {item}" for item in failures)
+        )
+
+    return out_path
+
+
 def _read_index_rows(output_path: Path) -> list[dict]:
     idx_path = output_path / "index.parquet"
     table = pq.read_table(str(idx_path))
@@ -1718,6 +1874,44 @@ def _write_placements(all_placements: list[dict], output_path: Path) -> None:
     pq.write_table(table, str(output_path / "placements.parquet"))
 
 
+def _write_decoded_metadata(rows: list[dict[str, object]], output_path: Path) -> None:
+    if not rows:
+        return
+
+    schema = pa.schema(
+        [
+            pa.field("tile_id", pa.int64()),
+            pa.field("build", pa.string()),
+            pa.field("map", pa.string()),
+            pa.field("tile_x", pa.int32()),
+            pa.field("tile_y", pa.int32()),
+            pa.field("tile_name", pa.string()),
+            pa.field("source_adt_path", pa.string()),
+            pa.field("source_wdt_path", pa.string()),
+            pa.field("raw_chunks_count", pa.int32()),
+            pa.field("decoded_metadata_json", pa.large_string()),
+            pa.field("decoded_metadata_keys_json", pa.large_string()),
+        ]
+    )
+
+    col_data = {f.name: [] for f in schema}
+    for row in rows:
+        col_data["tile_id"].append(int(row.get("tile_id", -1)))
+        col_data["build"].append(str(row.get("build", "")))
+        col_data["map"].append(str(row.get("map", "")))
+        col_data["tile_x"].append(int(row.get("tile_x", 0)))
+        col_data["tile_y"].append(int(row.get("tile_y", 0)))
+        col_data["tile_name"].append(str(row.get("tile_name", "")))
+        col_data["source_adt_path"].append(str(row.get("source_adt_path", "")))
+        col_data["source_wdt_path"].append(str(row.get("source_wdt_path", "")))
+        col_data["raw_chunks_count"].append(int(row.get("raw_chunks_count", 0)))
+        col_data["decoded_metadata_json"].append(str(row.get("decoded_metadata_json", "{}")))
+        col_data["decoded_metadata_keys_json"].append(str(row.get("decoded_metadata_keys_json", "[]")))
+
+    table = pa.table(col_data, schema=schema)
+    pq.write_table(table, str(output_path / "decoded_metadata.parquet"))
+
+
 def _format_bytes(num_bytes: int) -> str:
     value = float(num_bytes)
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -1761,6 +1955,8 @@ def cmd_build(args: argparse.Namespace) -> None:
     rebuild_existing = args.rebuild_existing
     signal_validation = args.signal_validation
     signal_validation_strict = args.signal_validation_strict
+    decoded_metadata_validation = args.decoded_metadata_validation
+    decoded_metadata_validation_strict = args.decoded_metadata_validation_strict
     tile_workers = max(1, int(args.tile_workers))
     if codec_name == "none" and (codec_level != 0 or codec_shuffle != "noshuffle"):
         print(
@@ -1804,6 +2000,10 @@ def cmd_build(args: argparse.Namespace) -> None:
         print(f"Tile workers: {tile_workers}")
         print(f"Codec: {codec_name} clevel={codec_level} shuffle={codec_shuffle}")
         print(f"Signal validation: enabled={signal_validation} strict={signal_validation_strict}")
+        print(
+            "Decoded metadata validation: "
+            f"enabled={decoded_metadata_validation} strict={decoded_metadata_validation_strict}"
+        )
 
         try:
             _build_zarr_streaming(
@@ -1832,6 +2032,13 @@ def cmd_build(args: argparse.Namespace) -> None:
                     strict=signal_validation_strict,
                 )
                 print(f"Signal validation report: {validation_path}")
+            if decoded_metadata_validation:
+                metadata_validation_path = _validate_decoded_metadata_table(
+                    build=build,
+                    output_path=output_path,
+                    strict=decoded_metadata_validation_strict,
+                )
+                print(f"Decoded metadata validation report: {metadata_validation_path}")
         except Exception:
             print(
                 f"Build failed for {build}. Partial output preserved at {staging_path}",
@@ -1885,6 +2092,7 @@ def _build_zarr_streaming(
     arrays: dict[str, zarr.Array] = {}
     index_rows: list[dict] = []
     all_placements: list[dict] = []
+    decoded_metadata_rows: list[dict[str, object]] = []
     valid = 0
     skipped_zero_usable_maps = 0
     rejected_tile_count = 0
@@ -1927,6 +2135,13 @@ def _build_zarr_streaming(
             all_placements = [
                 {col: pl_table.column(col)[i].as_py() for col in pl_table.column_names}
                 for i in range(pl_table.num_rows)
+            ]
+        dm_path = output_path / "decoded_metadata.parquet"
+        if dm_path.exists():
+            dm_table = pq.read_table(str(dm_path))
+            decoded_metadata_rows = [
+                {col: dm_table.column(col)[i].as_py() for col in dm_table.column_names}
+                for i in range(dm_table.num_rows)
             ]
 
     rejected_tiles_report = None
@@ -2058,7 +2273,7 @@ def _build_zarr_streaming(
             h_mean = float(np.mean(tile_arrays["height_257"]))
             h_std = float(np.std(tile_arrays["height_257"])) + 1e-8
 
-            meta = _extract_metadata(data)
+            meta = _decode_metadata_json(data)
             tx, ty = 0, 0
             actual_map = map_name
             if meta:
@@ -2085,6 +2300,25 @@ def _build_zarr_streaming(
             for key in SIGNAL_FLAG_KEYS:
                 row[f"has_{key}"] = bool(has_signals.get(key, False))
             index_rows.append(row)
+
+            raw_chunks = meta.get("raw_chunks") if isinstance(meta, dict) else None
+            raw_chunks_count = len(raw_chunks) if isinstance(raw_chunks, list) else 0
+            metadata_keys = sorted(meta.keys()) if isinstance(meta, dict) else []
+            decoded_metadata_rows.append(
+                {
+                    "tile_id": tile_id,
+                    "build": build,
+                    "map": actual_map,
+                    "tile_x": int(tx),
+                    "tile_y": int(ty),
+                    "tile_name": str(meta.get("tile_name", "") if isinstance(meta, dict) else ""),
+                    "source_adt_path": str(meta.get("source_adt_path", "") if isinstance(meta, dict) else ""),
+                    "source_wdt_path": str(meta.get("source_wdt_path", "") if isinstance(meta, dict) else ""),
+                    "raw_chunks_count": int(raw_chunks_count),
+                    "decoded_metadata_json": json.dumps(meta if isinstance(meta, dict) else {}, sort_keys=True, separators=(",", ":")),
+                    "decoded_metadata_keys_json": json.dumps(metadata_keys, separators=(",", ":")),
+                }
+            )
 
             needed = valid + pending_count + 1
             while needed >= capacity:
@@ -2200,6 +2434,8 @@ def _build_zarr_streaming(
             _write_index(index_rows, output_path)
         if all_placements:
             _write_placements(all_placements, output_path)
+        if decoded_metadata_rows:
+            _write_decoded_metadata(decoded_metadata_rows, output_path)
         _write_resume_state(
             output_path,
             build=build,
@@ -2230,6 +2466,9 @@ def _build_zarr_streaming(
 
     if all_placements:
         _write_placements(all_placements, output_path)
+
+    if decoded_metadata_rows:
+        _write_decoded_metadata(decoded_metadata_rows, output_path)
 
     store.close()
     _write_resume_state(
@@ -2388,6 +2627,8 @@ def cmd_validate_signals(args: argparse.Namespace) -> None:
             raise RuntimeError(f"Build store not found: {zarr_path}")
         report_path = _validate_build_signals(build=build, output_path=zarr_path, strict=strict)
         print(f"{build}: signal validation report -> {report_path}")
+        metadata_report_path = _validate_decoded_metadata_table(build=build, output_path=zarr_path, strict=strict)
+        print(f"{build}: decoded metadata validation report -> {metadata_report_path}")
 
 
 def cmd_merge_builds(args: argparse.Namespace) -> None:
@@ -2421,6 +2662,7 @@ def cmd_merge_builds(args: argparse.Namespace) -> None:
     source_handles: dict[str, tuple[zarr.storage.LocalStore, zarr.Group]] = {}
     source_index_rows: dict[str, list[dict]] = {}
     source_placements_rows: dict[str, list[dict]] = {}
+    source_decoded_metadata_rows: dict[str, list[dict]] = {}
     t0 = time.perf_counter()
 
     for build in builds:
@@ -2437,6 +2679,8 @@ def cmd_merge_builds(args: argparse.Namespace) -> None:
         source_index_rows[build] = _read_parquet_rows(idx_path)
         pl_path = zarr_path / "placements.parquet"
         source_placements_rows[build] = _read_parquet_rows(pl_path) if pl_path.exists() else []
+        dm_path = zarr_path / "decoded_metadata.parquet"
+        source_decoded_metadata_rows[build] = _read_parquet_rows(dm_path) if dm_path.exists() else []
 
     try:
         records: list[tuple[str, int, dict]] = []
@@ -2548,6 +2792,47 @@ def cmd_merge_builds(args: argparse.Namespace) -> None:
         if merged_placements:
             _write_placements(merged_placements, output_partial)
 
+        merged_decoded_metadata: list[dict[str, object]] = []
+        for build in builds:
+            metadata_rows = source_decoded_metadata_rows.get(build, [])
+            if metadata_rows:
+                for row in metadata_rows:
+                    old_tile_id = int(row.get("tile_id", -1))
+                    new_tile_id = source_to_merged_tile.get((build, old_tile_id))
+                    if new_tile_id is None:
+                        continue
+                    new_row = dict(row)
+                    new_row["tile_id"] = int(new_tile_id)
+                    new_row["build"] = str(new_row.get("build") or build)
+                    merged_decoded_metadata.append(new_row)
+                continue
+
+            # Fallback for older stores: preserve complete tile coverage.
+            for src_build, src_tile_id, row in records:
+                if src_build != build:
+                    continue
+                new_tile_id = source_to_merged_tile.get((build, src_tile_id))
+                if new_tile_id is None:
+                    continue
+                merged_decoded_metadata.append(
+                    {
+                        "tile_id": int(new_tile_id),
+                        "build": str(row.get("build") or build),
+                        "map": str(row.get("map", "")),
+                        "tile_x": int(row.get("tile_x", 0)),
+                        "tile_y": int(row.get("tile_y", 0)),
+                        "tile_name": "",
+                        "source_adt_path": "",
+                        "source_wdt_path": "",
+                        "raw_chunks_count": 0,
+                        "decoded_metadata_json": "{}",
+                        "decoded_metadata_keys_json": "[]",
+                    }
+                )
+
+        if merged_decoded_metadata:
+            _write_decoded_metadata(merged_decoded_metadata, output_partial)
+
         elapsed = time.perf_counter() - t0
         metrics_path = _write_harvest_metrics(
             build=output_name,
@@ -2591,7 +2876,7 @@ def cmd_merge_builds(args: argparse.Namespace) -> None:
         for key in ALL_ARRAY_KEYS:
             if not (output_partial / key).exists():
                 missing_paths.append(key)
-        for required_file in ("index.parquet", "harvest_metrics.json", "merge_manifest.json", "_resume_state.json"):
+        for required_file in ("index.parquet", "decoded_metadata.parquet", "harvest_metrics.json", "merge_manifest.json", "_resume_state.json"):
             if not (output_partial / required_file).exists():
                 missing_paths.append(required_file)
         if missing_paths:
@@ -2607,6 +2892,12 @@ def cmd_merge_builds(args: argparse.Namespace) -> None:
         print(f"Placements: {len(merged_placements)}")
         print(f"Dedupe mode: {dedupe_mode}")
         print(f"Metrics: {output_path / 'harvest_metrics.json'}")
+        metadata_validation_path = _validate_decoded_metadata_table(
+            build=output_name,
+            output_path=output_path,
+            strict=True,
+        )
+        print(f"Decoded metadata validation report: {metadata_validation_path}")
     finally:
         for store, _root in source_handles.values():
             store.close()
@@ -3021,6 +3312,7 @@ def cmd_generate_viewer_stubs(args: argparse.Namespace) -> None:
             continue
 
         table = pq.read_table(str(index_path))
+        pose_by_tile_id = _build_tile_pose_metadata_from_placements(zarr_path)
         build_capture_dir = capture_root / build
         dataset_dir = build_capture_dir / "dataset"
         dataset_dir.mkdir(parents=True, exist_ok=True)
@@ -3095,6 +3387,7 @@ def cmd_generate_viewer_stubs(args: argparse.Namespace) -> None:
                 "tile_y": tile_y,
                 "tile_name": tile_name,
                 "status": "pending_capture",
+                **pose_by_tile_id.get(tile_id, {}),
             })
 
         ledger = {
@@ -3292,6 +3585,8 @@ def main() -> None:
     build_p.add_argument("--shuffle", choices=["noshuffle", "shuffle", "bitshuffle"], default=DEFAULT_SHUFFLE, help="Blosc shuffle mode")
     build_p.add_argument("--signal-validation", action=argparse.BooleanOptionalAction, default=True, help="Run post-build signal validation checks")
     build_p.add_argument("--signal-validation-strict", action=argparse.BooleanOptionalAction, default=True, help="Fail build when signal validation fails")
+    build_p.add_argument("--decoded-metadata-validation", action=argparse.BooleanOptionalAction, default=True, help="Run post-build decoded metadata table validation checks")
+    build_p.add_argument("--decoded-metadata-validation-strict", action=argparse.BooleanOptionalAction, default=True, help="Fail build when decoded metadata validation fails")
 
     stats_p = sub.add_parser("stats", parents=[common])
     validate_p = sub.add_parser("validate-signals", parents=[common], help="Validate has_* signal coverage for finalized stores")

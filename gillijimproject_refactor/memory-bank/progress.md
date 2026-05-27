@@ -485,6 +485,46 @@
     - `uv run python scripts/build_v16_dataset.py --help` lists `capture-renderer-truth`
     - `uv run python scripts/build_v16_dataset.py capture-renderer-truth --build 3_3_5_12340 --dry-run` completed cleanly in this environment (tool/root resolved; no ledger present so group count remained 0)
 
+- Spec 025 T002 fourth bounded slice (pose metadata carry-through) landed:
+  - `WowViewer.Tool.ValidationCapture capture-batch` now accepts optional pose metadata fields in ledger rows:
+    - `asset_path`, `instance_type`, `unique_id`, `rot_x`, `rot_y`, `rot_z`, `scale`
+  - render-mode batch runs now emit per-tile pose artifacts:
+    - `<dataset-root>/pose-metadata/<tile_name>_pose.json`
+  - `build_v16_dataset.py generate-viewer-stubs` now enriches ledger rows from real `<build>.zarr/placements.parquet` (prefers `modf`, then `mddf`) so pose metadata is sourced from dataset placement truth, not synthetic tile stubs
+  - focused test proof:
+    - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~ValidationCaptureCommandTests"`
+    - result: `6/6` passed
+  - bounded functional proof:
+    - regenerated ledger for `3_3_5_12340`
+    - ran `capture-renderer-truth --stub-scene` on single-tile trimmed ledger
+    - verified emitted pose artifact at `output/tmp/mdxviewer_validation_smoke/3_3_5_12340/pose-metadata/AhnQiraj_46_27_pose.json` contains non-null placement-derived metadata (`asset_path`, `instance_type`, `unique_id`, `rot*`, `scale`)
+
+- Spec 025 T002 fifth bounded slice (full per-tile placement resolution) landed:
+  - `build_v16_dataset.py generate-viewer-stubs` now hydrates each ledger tile row with all placement rows from `<build>.zarr/placements.parquet`:
+    - `object_instance_count`
+    - `object_instances[]`
+  - representative top-level pose fields remain for compatibility, but no longer represent the full tile placement set.
+  - `capture-batch` pose artifact outputs now preserve both full-instance fields in emitted JSON.
+  - focused parity proof (`3_3_5_12340`):
+    - regenerated ledger tile rows: `5134`
+    - `placements.parquet` rows: `1,015,470`
+    - mismatches between ledger per-tile counts and placement-table per-tile counts: `0`
+    - multi-instance sample tiles confirmed (`Northrend_21_23=3580`, `Northrend_22_22=3437`, `Azeroth_32_39=3015`).
+
+- V18 undecoded blob-preservation sketch documented:
+  - `wow-viewer/docs/architecture/v18-undecoded-blob-datastore-sketch-2026-05-27.md`
+  - defines sidecar `raw_blobs` manifest + content-addressed payload layout, phased migration path, and validation contract without reopening existing reader implementations.
+
+- Dataset contract hardening for "single-script full indexing" is now landed in the main build flow:
+  - `build_v16_dataset.py` now writes `decoded_metadata.parquet` during build with one row per harvested tile (`tile_id`) including decoded metadata payload + key provenance fields.
+  - new `decoded_metadata_validation.json` parity validation checks:
+    - row-count equality vs `index.parquet`
+    - 1:1 `tile_id` coverage (no missing/extra/duplicate tile rows)
+    - JSON object validity of `decoded_metadata_json`
+  - build command now exposes decoded metadata validation toggles and runs that validation by default.
+  - merge command now preserves/remaps decoded metadata into merged stores and validates parity post-merge.
+  - validate-signals command now validates both signal coverage and decoded metadata integrity.
+
 ### Spec 024 Expansion (Session Close)
 
 - Spec/plan/tasks for `024-v18-canvas-paste-refinement-layer` were expanded to reflect the macro-artwork thesis:

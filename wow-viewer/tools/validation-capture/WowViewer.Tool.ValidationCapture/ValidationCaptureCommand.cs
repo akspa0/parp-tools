@@ -77,7 +77,7 @@ internal static class ValidationCaptureCommand
             outputRoot,
             resolution,
             buildLabel,
-            [new CaptureTileInput(tileName, tileX.Value, tileY.Value)]);
+            [new CaptureTileInput(tileName, tileX.Value, tileY.Value, null, null, null, null, null, null, null, null, null)]);
 
         ValidationCaptureScenePolicy scenePolicy = CreateDefaultScenePolicy(resolution);
         Dictionary<ValidationCaptureVariant, ValidationCaptureVariantPolicy> variantPolicies = CreateDefaultVariantPolicies();
@@ -206,7 +206,19 @@ internal static class ValidationCaptureCommand
 
         List<CaptureTileInput> tiles = ledger.Tiles
             .Where(static t => !string.Equals(t.Status, "captured_complete", StringComparison.OrdinalIgnoreCase))
-            .Select(static t => new CaptureTileInput(t.TileName, t.TileX, t.TileY))
+            .Select(static t => new CaptureTileInput(
+                t.TileName,
+                t.TileX,
+                t.TileY,
+                t.AssetPath,
+                t.InstanceType,
+                t.UniqueId,
+                t.RotX,
+                t.RotY,
+                t.RotZ,
+                t.Scale,
+                t.ObjectInstanceCount,
+                t.ObjectInstances))
             .ToList();
 
         if (tiles.Count == 0)
@@ -261,6 +273,7 @@ internal static class ValidationCaptureCommand
             using ValidationWorldSceneAdapter adapter = new();
             ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
             EmitDerivedArtifacts(session);
+            WritePoseMetadataArtifacts(session, tiles);
             Console.WriteLine($"Validation capture batch gpu-viewer-style run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
             return result.FailedVariantCount == 0 ? 0 : 2;
         }
@@ -270,6 +283,7 @@ internal static class ValidationCaptureCommand
             using NativeValidationWorldSceneAdapter adapter = new();
             ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
             EmitDerivedArtifacts(session);
+            WritePoseMetadataArtifacts(session, tiles);
             Console.WriteLine($"Validation capture batch native-renderer run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
             return result.FailedVariantCount == 0 ? 0 : 2;
         }
@@ -279,6 +293,7 @@ internal static class ValidationCaptureCommand
             using SyntheticValidationWorldSceneAdapter adapter = new();
             ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
             EmitDerivedArtifacts(session);
+            WritePoseMetadataArtifacts(session, tiles);
             Console.WriteLine($"Validation capture batch stub run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
             return result.FailedVariantCount == 0 ? 0 : 2;
         }
@@ -464,6 +479,42 @@ internal static class ValidationCaptureCommand
         }
     }
 
+    private static void WritePoseMetadataArtifacts(HeadlessValidationCaptureSession session, IReadOnlyList<CaptureTileInput> tiles)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(tiles);
+
+        if (tiles.Count == 0)
+            return;
+
+        string metadataDirectory = Path.Combine(session.BatchPlan.DatasetRoot, "pose-metadata");
+        Directory.CreateDirectory(metadataDirectory);
+
+        foreach (CaptureTileInput tile in tiles)
+        {
+            string path = Path.Combine(metadataDirectory, $"{tile.TileName}_pose.json");
+            var payload = new
+            {
+                tile_name = tile.TileName,
+                tile_x = tile.TileX,
+                tile_y = tile.TileY,
+                build = session.BuildLabel,
+                map = session.BatchPlan.MapName,
+                object_instance_count = tile.ObjectInstanceCount,
+                object_instances = tile.ObjectInstances,
+                asset_path = tile.AssetPath,
+                instance_type = tile.InstanceType,
+                unique_id = tile.UniqueId,
+                rot_x = tile.RotX,
+                rot_y = tile.RotY,
+                rot_z = tile.RotZ,
+                scale = tile.Scale,
+            };
+
+            File.WriteAllText(path, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        }
+    }
+
     private static void ShowUsage()
     {
         Console.WriteLine("""
@@ -527,10 +578,28 @@ internal static class ValidationCaptureCommand
               --real-scene-dry-run    Build real runtime-frame snapshots without framebuffer rendering
               --native-renderer       Run bounded captures through NativeValidationWorldSceneAdapter
               --stub-scene            Run the host loop against a clearly synthetic scene adapter
+
+            Notes:
+              - capture-batch accepts optional pose metadata in ledger rows:
+                asset_path, instance_type, unique_id, rot_x, rot_y, rot_z, scale
+              - when rendering modes run, pose metadata artifacts are emitted to:
+                <dataset-root>/pose-metadata/<tile_name>_pose.json
             """);
     }
 
-    private sealed record CaptureTileInput(string TileName, int TileX, int TileY);
+    private sealed record CaptureTileInput(
+        string TileName,
+        int TileX,
+        int TileY,
+        string? AssetPath,
+        string? InstanceType,
+        int? UniqueId,
+        float? RotX,
+        float? RotY,
+        float? RotZ,
+        float? Scale,
+        int? ObjectInstanceCount,
+        IReadOnlyList<CaptureLedgerObjectInstance>? ObjectInstances);
 
     private sealed class CaptureLedger
     {
@@ -554,6 +623,69 @@ internal static class ValidationCaptureCommand
 
         [JsonPropertyName("status")]
         public string? Status { get; init; }
+
+        [JsonPropertyName("asset_path")]
+        public string? AssetPath { get; init; }
+
+        [JsonPropertyName("instance_type")]
+        public string? InstanceType { get; init; }
+
+        [JsonPropertyName("unique_id")]
+        public int? UniqueId { get; init; }
+
+        [JsonPropertyName("rot_x")]
+        public float? RotX { get; init; }
+
+        [JsonPropertyName("rot_y")]
+        public float? RotY { get; init; }
+
+        [JsonPropertyName("rot_z")]
+        public float? RotZ { get; init; }
+
+        [JsonPropertyName("scale")]
+        public float? Scale { get; init; }
+
+        [JsonPropertyName("object_instance_count")]
+        public int? ObjectInstanceCount { get; init; }
+
+        [JsonPropertyName("object_instances")]
+        public List<CaptureLedgerObjectInstance>? ObjectInstances { get; init; }
+    }
+
+    private sealed class CaptureLedgerObjectInstance
+    {
+        [JsonPropertyName("asset_path")]
+        public string? AssetPath { get; init; }
+
+        [JsonPropertyName("instance_type")]
+        public string? InstanceType { get; init; }
+
+        [JsonPropertyName("instance_idx")]
+        public int? InstanceIdx { get; init; }
+
+        [JsonPropertyName("unique_id")]
+        public int? UniqueId { get; init; }
+
+        [JsonPropertyName("rot_x")]
+        public float? RotX { get; init; }
+
+        [JsonPropertyName("rot_y")]
+        public float? RotY { get; init; }
+
+        [JsonPropertyName("rot_z")]
+        public float? RotZ { get; init; }
+
+        [JsonPropertyName("scale")]
+        public float? Scale { get; init; }
+
+        [JsonPropertyName("pos_x")]
+        public float? PosX { get; init; }
+
+        [JsonPropertyName("pos_y")]
+        public float? PosY { get; init; }
+
+        [JsonPropertyName("pos_z")]
+        public float? PosZ { get; init; }
     }
 
     private sealed class SyntheticValidationWorldSceneAdapter : IValidationWorldSceneAdapter

@@ -425,6 +425,34 @@
   - T002 status after this bridge slice:
     - end-to-end batch orchestration from data-harvester into wow-viewer capture is now wired
     - dedicated object-render backend parity + one-at-a-time per-asset pose-capture seam still remain for full T002 completion
+- Spec 025 T002 fourth bounded pose-metadata slice is now landed:
+  - `capture-batch` now accepts optional pose metadata fields from ledger rows (`asset_path`, `instance_type`, `unique_id`, `rot_x`, `rot_y`, `rot_z`, `scale`)
+  - render-mode `capture-batch` runs now emit per-tile pose artifacts at:
+    - `<dataset-root>/pose-metadata/<tile_name>_pose.json`
+  - `build_v16_dataset.py generate-viewer-stubs` now enriches ledger rows from real `<build>.zarr/placements.parquet` data (prefers `modf`, then `mddf`) so pose metadata is no longer dependent on bogus stub JSON
+  - focused proof:
+    - `ValidationCaptureCommandTests` now include pose-artifact assertion and pass (`6/6`)
+    - bounded `capture-renderer-truth --stub-scene` run produced non-null pose metadata in:
+      - `output/tmp/mdxviewer_validation_smoke/3_3_5_12340/pose-metadata/AhnQiraj_46_27_pose.json`
+- Spec 025 T002 fifth bounded per-tile placement-resolution slice is now landed:
+  - `build_v16_dataset.py generate-viewer-stubs` now materializes all placement rows per tile into ledger payload:
+    - `object_instance_count`
+    - `object_instances[]`
+  - `WowViewer.Tool.ValidationCapture capture-batch` pose artifact outputs now preserve those full fields per tile.
+  - focused parity proof against dataset truth (`3_3_5_12340`):
+    - regenerated ledger rows: `5134`
+    - `placements.parquet` rows: `1,015,470`
+    - mismatches between ledger per-tile counts and `placements.parquet` per-tile counts: `0`
+    - multi-instance samples confirmed (e.g. `Northrend_21_23=3580`, `Northrend_22_22=3437`, `Azeroth_32_39=3015`).
+  - this closes the first-instance-only gap for ledger pose/placement coverage.
+- V18 raw-blob datastore sketch is now documented for undecoded payload preservation:
+  - `wow-viewer/docs/architecture/v18-undecoded-blob-datastore-sketch-2026-05-27.md`
+  - defines sidecar `raw_blobs` manifest + content-addressed payload layout, phased migration path, and validation contract without rewriting current readers.
+- New canonical dataset-build requirement from latest user direction is now reflected in implementation:
+  - one script (`build_v16_dataset.py`) must produce complete dataset signals and decoded metadata coverage without depending on patch/fixup scripts.
+  - build flow now writes `decoded_metadata.parquet` with one decoded metadata row per harvested tile and validates parity against `index.parquet`.
+  - merge flow now carries `decoded_metadata.parquet` forward and validates merged parity.
+  - validation flow now checks both signal coverage and decoded metadata table integrity.
 - V17.1 normal trainer behavior adjustments landed during this session:
   - `v17_1_normals` no longer enables refiner/distillation by default
   - `height_supervision_weight` default for `v17_1_normals` restored to `1.0`

@@ -151,6 +151,79 @@ This slice closes policy-propagation and visibility-hook wiring, but T002 is sti
 - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~ValidationCaptureCommandTests"`
 - Result: `5/5` passed.
 
+## Fourth Bounded Slice Implemented (Pose Metadata Carry-Through)
+
+### A) Ledger pose metadata contract in `capture-batch`
+
+- Extended `capture-batch` ledger parsing to accept optional per-tile pose fields:
+  - `asset_path`
+  - `instance_type`
+  - `unique_id`
+  - `rot_x`
+  - `rot_y`
+  - `rot_z`
+  - `scale`
+- These fields are now carried from ledger rows into runtime tile planning inputs.
+
+### B) Per-tile pose artifact emission
+
+- Added bounded artifact emission after render-mode runs (`--stub-scene`, `--gpu-viewer-style`, `--native-renderer`):
+  - output root: `<dataset-root>/pose-metadata/`
+  - file name: `<tile_name>_pose.json`
+- Each artifact records tile identity + captured pose metadata values used for one-at-a-time object-capture continuity.
+
+### C) Ledger generation now hydrates pose metadata from real dataset placements
+
+- Updated `build_v16_dataset.py generate-viewer-stubs` to enrich ledger rows from `<build>.zarr/placements.parquet` (not stub JSON).
+- Per tile, it now carries:
+  - full `object_instance_count`
+  - full `object_instances[]` list (all placement rows for that tile)
+  - a representative top-level pose entry for backward-compatible consumers (prefers first `modf`, then first `mddf`, then first row).
+- Enriched ledger fields include the same pose metadata keys consumed by `capture-batch`, plus full per-tile instance payload.
+
+### D) Focused test + functional proof
+
+- Added command test:
+  - `Execute_CaptureBatchStubScene_WritesPoseMetadataArtifacts`
+- Focused test command:
+  - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~ValidationCaptureCommandTests"`
+  - Result: `6/6` passed.
+- Functional proof path:
+  1. regenerate ledger with `generate-viewer-stubs` for `3_3_5_12340`,
+  2. run `capture-renderer-truth --stub-scene` (single-tile trimmed ledger),
+  3. verify emitted pose file at `output/tmp/mdxviewer_validation_smoke/3_3_5_12340/pose-metadata/AhnQiraj_46_27_pose.json` carries non-null dataset placement metadata (`asset_path`, `instance_type`, `unique_id`, `rot*`, `scale`).
+
+## Fifth Bounded Slice Implemented (Full Per-Tile Placement Resolution)
+
+### A) All placement rows now flow into ledger rows
+
+- `build_v16_dataset.py` now materializes all placement rows per tile into ledger payload via:
+  - `object_instance_count`
+  - `object_instances[]`
+- This resolves the prior limitation where only a representative pose was effectively exposed as the actionable capture context.
+
+### B) `capture-batch` pose artifact output preserves full tile placement payload
+
+- `WowViewer.Tool.ValidationCapture` ledger tile contract now includes:
+  - `object_instance_count`
+  - `object_instances`
+- Emitted pose artifacts under `<dataset-root>/pose-metadata/` persist those full fields for downstream one-at-a-time orchestration logic.
+
+### C) Focused parity proof against dataset truth (`placements.parquet`)
+
+- Regenerated ledger proof build:
+  - `uv run python scripts/build_v16_dataset.py generate-viewer-stubs --build 3_3_5_12340 --capture-root ../../output/tmp/mdxviewer_validation_smoke`
+- Count parity check:
+  - ledger rows: `5134`
+  - placement rows: `1,015,470`
+  - mismatches (`ledger.object_instance_count` vs `placements.parquet` row count per `tile_id`): `0`
+- Multi-instance sample proof (all `>=3` instances per tile):
+  - `Northrend_21_23` (`tile_id=3704`): `3580`
+  - `Northrend_22_22` (`tile_id=3676`): `3437`
+  - `Azeroth_32_39` (`tile_id=600`): `3015`
+
+This confirms the ledger now resolves every object placement on each tile from Zarr placement truth, not first-instance-only summaries.
+
 ## Third Bounded Slice Implemented (Python Automation Bridge)
 
 ### A) End-to-end data-harvester command

@@ -14,6 +14,11 @@ Terrain normal/height prediction from minimap images. Chain of V16.1.x model ite
   - stores per-asset object visual outputs in a separate Zarr datastore for roof exemplars and object-family recognition
   - separate object-identification model is intended to live in the Python `uv` stack and use the Hugging Face transformers library as the first host
   - SAM2 is the first promptable mask-generation host; SAM3 is allowed later if the Hugging Face token has approved gated access
+- **V18 dataset canonical contract**: Spec Kit draft expanded in `specs/001-v18-dataset-spec/`
+  - now frames V18 as the direct versioned successor to the V16 dataset creation flow
+  - promotes decoded metadata plus currently patched-on V16 signal families into the main V18 build contract
+  - defines finalized dataset status, mandatory decoded metadata parity, merge fallback coverage, and additive raw-blob sidecar boundaries
+  - next step is planning bounded implementation slices for canonical build finalization, validation, and merge behavior
 
 ## What Exists (Completed)
 - All model classes in `wow-viewer/data-harvester/src/harvester/v16_1_models.py`:
