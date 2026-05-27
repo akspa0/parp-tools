@@ -17,4 +17,10 @@ public readonly record struct WorldObjectVisibilityContext(
     bool CullSmallDoodadsOnly,
     bool CountAsTaxiActor,
     float VerticalFieldOfViewRadians,
-    WorldObjectVisibilityProfile VisibilityProfile);
+    WorldObjectVisibilityProfile VisibilityProfile,
+    float MaxVisibleMdxBoundsHeight = 0f,
+    bool IgnoreDistanceCulling = false,
+    bool IgnoreProjectedSizeCulling = false,
+    bool IgnoreVisionConeCulling = false,
+    bool IgnoreFrustumCulling = false,
+    bool IgnoreMaxViewDistanceCulling = false);

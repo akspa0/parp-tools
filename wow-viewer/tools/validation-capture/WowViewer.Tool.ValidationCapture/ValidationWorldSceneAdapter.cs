@@ -112,7 +112,15 @@ internal sealed class ValidationWorldSceneAdapter : IValidationWorldSceneAdapter
             session.LooseOverlayRoot ?? string.Empty,
             request.TileX,
             request.TileY,
-            BuildPassOptions(policyState));
+            BuildPassOptions(policyState),
+            FogEndDistance: policyState.FogEndDistance,
+            ObjectStreamingRangeMultiplier: policyState.ObjectStreamingRangeMultiplier,
+            MaxVisibleMdxBoundsHeight: policyState.MaxVisibleMdxBoundsHeight,
+            IgnoreDistanceCulling: policyState.IgnoreDistanceCulling,
+            IgnoreProjectedSizeCulling: policyState.IgnoreProjectedSizeCulling,
+            IgnoreVisionConeCulling: policyState.IgnoreVisionConeCulling,
+            IgnoreFrustumCulling: policyState.IgnoreFrustumCulling,
+            IgnoreMaxViewDistanceCulling: policyState.IgnoreMaxViewDistanceCulling);
     }
 
     internal static WorldFramePassOptions BuildPassOptions(ValidationWorldScenePolicyState policyState)

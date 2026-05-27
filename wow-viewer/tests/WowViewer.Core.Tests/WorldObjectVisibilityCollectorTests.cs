@@ -185,13 +185,65 @@ public sealed class WorldObjectVisibilityCollectorTests
         Assert.Empty(frame.VisibleMdx);
     }
 
+    [Fact]
+    public void CollectVisibleMdx_RespectsMaxVisibleMdxBoundsHeight()
+    {
+        WorldVisibilityFrame frame = new();
+        WorldObjectVisibilityContext context = CreateContext(maxVisibleMdxBoundsHeight: 10f);
+        WorldObjectInstance instance = CreateInstance("mdx://tall", new Vector3(0f, 256f, 0f), halfExtent: 8f);
+
+        int culled = WorldObjectVisibilityCollector.CollectVisibleMdx(
+            frame,
+            [instance],
+            context,
+            static _ => false,
+            static (_, _) => true,
+            static _ => true,
+            static (_, _) => { });
+
+        Assert.Equal(1, culled);
+        Assert.Empty(frame.VisibleMdx);
+    }
+
+    [Fact]
+    public void CollectVisibleMdx_CaptureOverridesCanBypassDistanceCulling()
+    {
+        WorldVisibilityFrame frame = new();
+        WorldObjectVisibilityContext context = CreateContext(
+            fogEnd: 500f,
+            ignoreDistanceCulling: true,
+            ignoreMaxViewDistanceCulling: true,
+            ignoreProjectedSizeCulling: true,
+            ignoreVisionConeCulling: true,
+            ignoreFrustumCulling: true);
+        WorldObjectInstance instance = CreateInstance("mdx://far-capture", new Vector3(0f, 9000f, 0f), halfExtent: 2f);
+
+        int culled = WorldObjectVisibilityCollector.CollectVisibleMdx(
+            frame,
+            [instance],
+            context,
+            static _ => false,
+            static (_, _) => false,
+            static _ => true,
+            static (_, _) => { });
+
+        Assert.Equal(0, culled);
+        Assert.Single(frame.VisibleMdx);
+    }
+
     private static WorldObjectVisibilityContext CreateContext(
         Vector3? cameraForward = null,
         float fogEnd = 1200f,
         bool cullSmallDoodadsOnly = false,
         bool countAsTaxiActor = false,
         float verticalFieldOfViewRadians = MathF.PI / 3f,
-        WorldObjectVisibilityProfile visibilityProfile = WorldObjectVisibilityProfile.Quality)
+        WorldObjectVisibilityProfile visibilityProfile = WorldObjectVisibilityProfile.Quality,
+        float maxVisibleMdxBoundsHeight = 0f,
+        bool ignoreDistanceCulling = false,
+        bool ignoreProjectedSizeCulling = false,
+        bool ignoreVisionConeCulling = false,
+        bool ignoreFrustumCulling = false,
+        bool ignoreMaxViewDistanceCulling = false)
     {
         return new WorldObjectVisibilityContext(
             CameraPosition: Vector3.Zero,
@@ -201,7 +253,13 @@ public sealed class WorldObjectVisibilityCollectorTests
             CullSmallDoodadsOnly: cullSmallDoodadsOnly,
             CountAsTaxiActor: countAsTaxiActor,
             VerticalFieldOfViewRadians: verticalFieldOfViewRadians,
-            VisibilityProfile: visibilityProfile);
+            VisibilityProfile: visibilityProfile,
+            MaxVisibleMdxBoundsHeight: maxVisibleMdxBoundsHeight,
+            IgnoreDistanceCulling: ignoreDistanceCulling,
+            IgnoreProjectedSizeCulling: ignoreProjectedSizeCulling,
+            IgnoreVisionConeCulling: ignoreVisionConeCulling,
+            IgnoreFrustumCulling: ignoreFrustumCulling,
+            IgnoreMaxViewDistanceCulling: ignoreMaxViewDistanceCulling);
     }
 
     private static WorldObjectInstance CreateInstance(string modelKey, Vector3 center, float halfExtent)

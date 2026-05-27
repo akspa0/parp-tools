@@ -436,6 +436,55 @@
   - completed: `T001`, `T003`-`T022`
   - remaining deliberate open seam: `T002` (MdxViewer one-at-a-time asset capture with explicit pose metadata)
 
+- Spec 025 T002 object-capture audit + first wow-viewer capture-policy slice landed:
+  - architecture note:
+    - `wow-viewer/docs/architecture/spec025-t002-object-capture-audit-2026-05-26.md`
+  - shared-runtime capture-policy propagation is now wired end-to-end:
+    - `ValidationCaptureScenePolicy` includes explicit culling-override knobs
+    - `ValidationWorldScenePolicyApplier` maps these into policy state
+    - `ValidationWorldSceneAdapter.BuildFrameRequest(...)` forwards fog/object-streaming/MDX-height/culling knobs into runtime request
+    - `WowViewerWorldRuntimeFrameRequest`/`WowViewerWorldRuntimeBridge` carry those knobs into `WorldObjectVisibilityContext`
+    - `WorldObjectVisibilityCollector` now honors capture override flags and MDX max-bounds-height suppression
+  - focused test proof (filtered suite):
+    - `ValidationCaptureScenePolicyTests`
+    - `ValidationWorldScenePolicyApplierTests`
+    - `ValidationWorldSceneAdapterTests`
+    - `WorldObjectVisibilityCollectorTests`
+    - result: pass (`18/18`)
+  - bounded staged proof:
+    - `WowViewer.Tool.ValidationCapture capture --real-scene-dry-run`
+    - staged client root: `output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`
+    - tile: `Azeroth_30_48`
+    - variants: Primary / NoLiquids / NoObjects / ObjectsOnly all reported `sceneContent=True`, `tileLoaded=True`, `pendingObjects=0`
+  - open follow-up remains:
+    - dedicated object-render backend parity and one-at-a-time per-asset pose-capture orchestration for full T002 closure
+
+- Spec 025 T002 second bounded slice (automation cutover) landed:
+  - `WowViewer.Tool.ValidationCapture` now includes `capture-batch` command
+    - required: `--client-root --map-input --dataset-root --output-root --ledger-path`
+    - reads `manifest_capture_ledger.json`, skips `captured_complete`, expands pending entries into all 4 variant requests per tile
+    - reuses default scene + variant policy composition from single-tile `capture`
+  - `build_v16_dataset.py generate-viewer-stubs` messaging/help now routes to wow-viewer `capture-batch` as primary next step (legacy MdxViewer scripts remain for compatibility comparison only)
+  - focused tests added and passing under `ValidationCaptureCommandTests`:
+    - `Execute_CaptureBatchMissingLedger_ReturnsOne`
+    - `Execute_CaptureBatchDryRun_ReturnsZeroAndPrintsSummary`
+  - focused proof command:
+    - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~ValidationCaptureCommandTests"`
+    - result: `5/5` passed
+
+- Spec 025 T002 third bounded slice (Python automation bridge) landed:
+  - `wow-viewer/data-harvester/scripts/build_v16_dataset.py` now has `capture-renderer-truth`
+  - command behavior:
+    - discovers `WowViewer.Tool.ValidationCapture.exe`
+    - loads per-build `manifest_capture_ledger.json`
+    - skips `captured_complete` rows
+    - groups pending rows by `map`
+    - emits temporary per-map ledgers
+    - invokes wow-viewer `capture-batch` per map group using staged client roots and forwarded mode/resolution/build flags
+  - focused proof:
+    - `uv run python scripts/build_v16_dataset.py --help` lists `capture-renderer-truth`
+    - `uv run python scripts/build_v16_dataset.py capture-renderer-truth --build 3_3_5_12340 --dry-run` completed cleanly in this environment (tool/root resolved; no ledger present so group count remained 0)
+
 ### Spec 024 Expansion (Session Close)
 
 - Spec/plan/tasks for `024-v18-canvas-paste-refinement-layer` were expanded to reflect the macro-artwork thesis:

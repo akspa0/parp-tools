@@ -18,7 +18,12 @@ public sealed class ValidationCaptureScenePolicy
         bool hideUiChrome,
         bool enableRuntimeWmoGroupLiquids,
         bool enableRuntimeWmoGroupVisibility,
-        ValidationCaptureArtifactPolicy artifactPolicy)
+        ValidationCaptureArtifactPolicy artifactPolicy,
+        bool ignoreDistanceCulling = false,
+        bool ignoreProjectedSizeCulling = false,
+        bool ignoreVisionConeCulling = false,
+        bool ignoreFrustumCulling = false,
+        bool ignoreMaxViewDistanceCulling = false)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(requestedResolution, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(requiredSettledFrames, 1);
@@ -54,6 +59,11 @@ public sealed class ValidationCaptureScenePolicy
         HideUiChrome = hideUiChrome;
         EnableRuntimeWmoGroupLiquids = enableRuntimeWmoGroupLiquids;
         EnableRuntimeWmoGroupVisibility = enableRuntimeWmoGroupVisibility;
+        IgnoreDistanceCulling = ignoreDistanceCulling;
+        IgnoreProjectedSizeCulling = ignoreProjectedSizeCulling;
+        IgnoreVisionConeCulling = ignoreVisionConeCulling;
+        IgnoreFrustumCulling = ignoreFrustumCulling;
+        IgnoreMaxViewDistanceCulling = ignoreMaxViewDistanceCulling;
         ArtifactPolicy = artifactPolicy;
     }
 
@@ -86,6 +96,16 @@ public sealed class ValidationCaptureScenePolicy
     public bool EnableRuntimeWmoGroupLiquids { get; }
 
     public bool EnableRuntimeWmoGroupVisibility { get; }
+
+    public bool IgnoreDistanceCulling { get; }
+
+    public bool IgnoreProjectedSizeCulling { get; }
+
+    public bool IgnoreVisionConeCulling { get; }
+
+    public bool IgnoreFrustumCulling { get; }
+
+    public bool IgnoreMaxViewDistanceCulling { get; }
 
     public ValidationCaptureArtifactPolicy ArtifactPolicy { get; }
 }

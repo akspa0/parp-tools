@@ -49,27 +49,32 @@ public static class WorldObjectVisibilityCollector
             float coneCullDistance = ComputeConeCullDistance(wmoCullDistance, coneFactor);
             float coneCullDistanceSq = coneCullDistance * coneCullDistance;
             float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
-            bool frustumVisible = isBoundsVisible(inst.BoundsMin, inst.BoundsMax);
+            bool frustumVisible = context.IgnoreFrustumCulling || isBoundsVisible(inst.BoundsMin, inst.BoundsMax);
             float projectedFraction = ComputeProjectedHeightFraction(inst.BoundsMin, inst.BoundsMax, centerDistanceSq, context.VerticalFieldOfViewRadians);
-            if (boundsDistSq > noCullDistanceSq && !frustumVisible && coneFactor < MinOffFrustumConeFactor)
+            if (!context.IgnoreFrustumCulling
+                && !context.IgnoreVisionConeCulling
+                && boundsDistSq > noCullDistanceSq
+                && !frustumVisible
+                && coneFactor < MinOffFrustumConeFactor)
             {
                 culledCount++;
                 continue;
             }
 
-            if (boundsDistSq > coneCullDistanceSq)
+            if (!context.IgnoreDistanceCulling && boundsDistSq > coneCullDistanceSq)
             {
                 culledCount++;
                 continue;
             }
 
-            if (centerDistanceSq > MaxWorldObjectViewDistanceSq)
+            if (!context.IgnoreMaxViewDistanceCulling && centerDistanceSq > MaxWorldObjectViewDistanceSq)
             {
                 culledCount++;
                 continue;
             }
 
-            if (ShouldCullByProjectedSize(context, projectedFraction, centerDistanceSq, isWmo: true))
+            if (!context.IgnoreProjectedSizeCulling
+                && ShouldCullByProjectedSize(context, projectedFraction, centerDistanceSq, isWmo: true))
             {
                 culledCount++;
                 continue;
@@ -106,12 +111,26 @@ public static class WorldObjectVisibilityCollector
             if (shouldHideInstance(inst))
                 continue;
 
+            if (context.MaxVisibleMdxBoundsHeight > 0f)
+            {
+                float boundsHeight = MathF.Abs(inst.BoundsMax.Z - inst.BoundsMin.Z);
+                if (float.IsFinite(boundsHeight) && boundsHeight > context.MaxVisibleMdxBoundsHeight)
+                {
+                    culledCount++;
+                    continue;
+                }
+            }
+
             float boundsDistSq = DistanceSquaredPointToAabb(context.CameraPosition, inst.BoundsMin, inst.BoundsMax);
             float centerDistanceSq = Vector3.DistanceSquared(context.CameraPosition, inst.Transform.Translation);
             float coneFactor = ComputeVisionConeFactor(context.CameraPosition, context.CameraForward, inst.Transform.Translation, centerDistanceSq);
             float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
-            bool frustumVisible = isBoundsVisible(inst.BoundsMin, inst.BoundsMax);
-            if (boundsDistSq > noCullDistanceSq && !frustumVisible && coneFactor < MinOffFrustumConeFactor)
+            bool frustumVisible = context.IgnoreFrustumCulling || isBoundsVisible(inst.BoundsMin, inst.BoundsMax);
+            if (!context.IgnoreFrustumCulling
+                && !context.IgnoreVisionConeCulling
+                && boundsDistSq > noCullDistanceSq
+                && !frustumVisible
+                && coneFactor < MinOffFrustumConeFactor)
             {
                 culledCount++;
                 continue;
@@ -121,27 +140,28 @@ public static class WorldObjectVisibilityCollector
             float mdxCullDistance = ComputeMdxCullDistance(context.FogEnd, diag, context.CountAsTaxiActor, context.ObjectStreamingRangeMultiplier);
             float coneCullDistance = ComputeConeCullDistance(mdxCullDistance, coneFactor);
             float coneCullDistanceSq = coneCullDistance * coneCullDistance;
-            if (boundsDistSq > coneCullDistanceSq)
+            if (!context.IgnoreDistanceCulling && boundsDistSq > coneCullDistanceSq)
             {
                 culledCount++;
                 continue;
             }
 
             bool useSmallDoodadCull = context.CullSmallDoodadsOnly && diag < DoodadSmallThreshold;
-            if (useSmallDoodadCull && boundsDistSq > DoodadCullDistanceSq)
+            if (!context.IgnoreDistanceCulling && useSmallDoodadCull && boundsDistSq > DoodadCullDistanceSq)
             {
                 culledCount++;
                 continue;
             }
 
-            if (centerDistanceSq > MaxWorldObjectViewDistanceSq)
+            if (!context.IgnoreMaxViewDistanceCulling && centerDistanceSq > MaxWorldObjectViewDistanceSq)
             {
                 culledCount++;
                 continue;
             }
 
             float projectedFraction = ComputeProjectedHeightFraction(inst.BoundsMin, inst.BoundsMax, centerDistanceSq, context.VerticalFieldOfViewRadians);
-            if (ShouldCullByProjectedSize(context, projectedFraction, centerDistanceSq, isWmo: false))
+            if (!context.IgnoreProjectedSizeCulling
+                && ShouldCullByProjectedSize(context, projectedFraction, centerDistanceSq, isWmo: false))
             {
                 culledCount++;
                 continue;

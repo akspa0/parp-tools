@@ -73,4 +73,5 @@ public sealed class ValidationWorldSceneAdapterTests
         Assert.False(snapshot.TerrainStreaming);
         Assert.Equal(3, snapshot.PendingWorldObjectLoadCount);
     }
+
 }

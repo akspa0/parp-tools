@@ -1,4 +1,5 @@
 using WowViewer.Tools.ValidationCapture;
+using System.Text.Json;
 
 namespace WowViewer.Core.Tests;
 
@@ -59,6 +60,58 @@ public sealed class ValidationCaptureCommandTests
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "objectsonly", "Azeroth_30_48_viewer_validation.png")));
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "images", "Azeroth_30_48_object_visibility_mask.png")));
             Assert.True(File.Exists(Path.Combine(temp.RootPath, "images", "Azeroth_30_48_no_objects.png")));
+        }
+    }
+
+    [Fact]
+    public void Execute_CaptureBatchMissingLedger_ReturnsOne()
+    {
+        lock (ConsoleLock)
+        {
+            using TemporaryDirectory temp = new();
+            using ConsoleCapture capture = new();
+
+            int exitCode = ValidationCaptureCommand.Execute(
+            [
+                "capture-batch",
+                "--client-root", temp.RootPath,
+                "--map-input", "World\\Maps\\Azeroth\\Azeroth.wdt",
+                "--dataset-root", temp.RootPath,
+                "--output-root", temp.RootPath,
+                "--ledger-path", Path.Combine(temp.RootPath, "missing-ledger.json"),
+                "--dry-run",
+            ]);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("ledger file not found", capture.Error, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void Execute_CaptureBatchDryRun_ReturnsZeroAndPrintsSummary()
+    {
+        lock (ConsoleLock)
+        {
+            using TemporaryDirectory temp = new();
+            string ledgerPath = Path.Combine(temp.RootPath, "manifest_capture_ledger.json");
+            WriteLedger(ledgerPath);
+            using ConsoleCapture capture = new();
+
+            int exitCode = ValidationCaptureCommand.Execute(
+            [
+                "capture-batch",
+                "--client-root", temp.RootPath,
+                "--map-input", "World\\Maps\\Azeroth\\Azeroth.wdt",
+                "--dataset-root", temp.RootPath,
+                "--output-root", temp.RootPath,
+                "--ledger-path", ledgerPath,
+                "--dry-run",
+            ]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Validation capture batch dry-run succeeded.", capture.Output, StringComparison.Ordinal);
+            Assert.Contains("Tile count: 2", capture.Output, StringComparison.Ordinal);
+            Assert.Contains("Variant count: 8", capture.Output, StringComparison.Ordinal);
         }
     }
 
@@ -124,5 +177,21 @@ public sealed class ValidationCaptureCommandTests
             _outputWriter.Dispose();
             _errorWriter.Dispose();
         }
+    }
+
+    private static void WriteLedger(string ledgerPath)
+    {
+        var payload = new
+        {
+            build = "3_3_5_12340",
+            tiles = new[]
+            {
+                new { tile_name = "Azeroth_30_48", tile_x = 30, tile_y = 48, status = "pending_capture" },
+                new { tile_name = "Azeroth_30_49", tile_x = 30, tile_y = 49, status = "captured_partial" },
+                new { tile_name = "Azeroth_30_50", tile_x = 30, tile_y = 50, status = "captured_complete" },
+            },
+        };
+
+        File.WriteAllText(ledgerPath, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
     }
 }

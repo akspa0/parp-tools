@@ -26,7 +26,15 @@ internal sealed record WowViewerWorldRuntimeFrameRequest(
     string LooseOverlayRoot,
     int TileX,
     int TileY,
-    WorldFramePassOptions PassOptions);
+    WorldFramePassOptions PassOptions,
+    float FogEndDistance = 1600f,
+    float ObjectStreamingRangeMultiplier = 1.0f,
+    float MaxVisibleMdxBoundsHeight = 0f,
+    bool IgnoreDistanceCulling = false,
+    bool IgnoreProjectedSizeCulling = false,
+    bool IgnoreVisionConeCulling = false,
+    bool IgnoreFrustumCulling = false,
+    bool IgnoreMaxViewDistanceCulling = false);
 
 internal sealed record WowViewerWorldPlacementAuditRequest(
     string ClientRoot,
@@ -460,12 +468,18 @@ internal static class WowViewerWorldRuntimeBridge
         WorldObjectVisibilityContext context = new(
             CameraPosition: cameraPosition,
             CameraForward: cameraForward,
-            FogEnd: 1600f,
-            ObjectStreamingRangeMultiplier: 1.0f,
+            FogEnd: request.FogEndDistance,
+            ObjectStreamingRangeMultiplier: request.ObjectStreamingRangeMultiplier,
             CullSmallDoodadsOnly: false,
             CountAsTaxiActor: false,
             VerticalFieldOfViewRadians: MathF.PI / 4f,
-            VisibilityProfile: WorldObjectVisibilityProfile.Quality);
+            VisibilityProfile: WorldObjectVisibilityProfile.Quality,
+            MaxVisibleMdxBoundsHeight: request.MaxVisibleMdxBoundsHeight,
+            IgnoreDistanceCulling: request.IgnoreDistanceCulling,
+            IgnoreProjectedSizeCulling: request.IgnoreProjectedSizeCulling,
+            IgnoreVisionConeCulling: request.IgnoreVisionConeCulling,
+            IgnoreFrustumCulling: request.IgnoreFrustumCulling,
+            IgnoreMaxViewDistanceCulling: request.IgnoreMaxViewDistanceCulling);
 
         WorldVisibilityFrame visibility = new();
         HashSet<string> pendingAssetKeys = new(StringComparer.OrdinalIgnoreCase);

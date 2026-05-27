@@ -48,6 +48,11 @@ public sealed class ValidationCaptureScenePolicyTests
         Assert.True(policy.HideUiChrome);
         Assert.True(policy.EnableRuntimeWmoGroupLiquids);
         Assert.False(policy.EnableRuntimeWmoGroupVisibility);
+        Assert.False(policy.IgnoreDistanceCulling);
+        Assert.False(policy.IgnoreProjectedSizeCulling);
+        Assert.False(policy.IgnoreVisionConeCulling);
+        Assert.False(policy.IgnoreFrustumCulling);
+        Assert.False(policy.IgnoreMaxViewDistanceCulling);
         Assert.Equal(artifactPolicy, policy.ArtifactPolicy);
     }
 

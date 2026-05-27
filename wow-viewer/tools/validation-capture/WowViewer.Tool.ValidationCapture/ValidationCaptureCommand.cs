@@ -1,5 +1,7 @@
 using WowViewer.Core.Renderer.Validation;
 using WowViewer.Core.Runtime.World.Validation;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WowViewer.Tools.ValidationCapture;
 
@@ -19,6 +21,8 @@ internal static class ValidationCaptureCommand
         {
             case "capture":
                 return RunCapture(tail);
+            case "capture-batch":
+                return RunCaptureBatch(tail);
             default:
                 Console.Error.WriteLine($"Unknown validation-capture command '{command}'.");
                 ShowUsage();
@@ -67,60 +71,16 @@ internal static class ValidationCaptureCommand
         if (string.IsNullOrWhiteSpace(mapName))
             mapName = Path.GetFileNameWithoutExtension(mapInput);
 
-        string primaryDirectory = Path.Combine(outputRoot, "primary");
-        string noLiquidsDirectory = Path.Combine(outputRoot, "noliquids");
-        string noObjectsDirectory = Path.Combine(outputRoot, "noobjects");
-        string objectsOnlyDirectory = Path.Combine(outputRoot, "objectsonly");
-
-        ValidationCaptureBatchPlan batchPlan = new(
+        ValidationCaptureBatchPlan batchPlan = BuildBatchPlan(
             datasetRoot,
             mapName,
-            primaryDirectory,
-            noLiquidsDirectory,
-            noObjectsDirectory,
-            objectsOnlyDirectory,
+            outputRoot,
             resolution,
             buildLabel,
-            [
-                new ValidationCaptureTileRequest(tileName, tileX.Value, tileY.Value, ValidationCaptureVariant.Primary, Path.Combine(primaryDirectory, $"{tileName}_viewer_validation.png")),
-                new ValidationCaptureTileRequest(tileName, tileX.Value, tileY.Value, ValidationCaptureVariant.NoLiquids, Path.Combine(noLiquidsDirectory, $"{tileName}_viewer_validation.png")),
-                new ValidationCaptureTileRequest(tileName, tileX.Value, tileY.Value, ValidationCaptureVariant.NoObjects, Path.Combine(noObjectsDirectory, $"{tileName}_viewer_validation.png")),
-                new ValidationCaptureTileRequest(tileName, tileX.Value, tileY.Value, ValidationCaptureVariant.ObjectsOnly, Path.Combine(objectsOnlyDirectory, $"{tileName}_viewer_validation.png")),
-            ]);
+            [new CaptureTileInput(tileName, tileX.Value, tileY.Value)]);
 
-        ValidationCaptureArtifactPolicy artifactPolicy = new(
-            ValidationObjectMaskStrategy.DirectObjectsOnlySilhouette,
-            ValidationObjectMaskStrategy.PrimaryVsNoObjectsDiff,
-            ObjectsOnlyIntensityThreshold: 4,
-            DiffMaskThreshold: 8,
-            ObjectVisibilityMaskFileSuffix: "_object_visibility_mask.png",
-            NoObjectMinimapFileSuffix: "_no_objects.png");
-
-        ValidationCaptureScenePolicy scenePolicy = new(
-            requestedResolution: resolution,
-            requiredSettledFrames: 48,
-            maxFramesBeforeCapture: 2400,
-            detailedTileCountOverride: 25,
-            fogStartFactor: 0.75f,
-            fogEndDistance: 20000f,
-            objectStreamingRangeMultiplierFloor: 1.0f,
-            maxVisibleMdxBoundsHeight: 24f,
-            disableObjectFog: true,
-            disableObjectPathFilters: true,
-            hideWorldLiquids: true,
-            ignoreTerrainHolesGlobally: true,
-            hideUiChrome: true,
-            enableRuntimeWmoGroupLiquids: true,
-            enableRuntimeWmoGroupVisibility: false,
-            artifactPolicy: artifactPolicy);
-
-        Dictionary<ValidationCaptureVariant, ValidationCaptureVariantPolicy> variantPolicies = new()
-        {
-            [ValidationCaptureVariant.Primary] = new(true, true, true, true, true, true, true, false),
-            [ValidationCaptureVariant.NoLiquids] = new(true, false, true, true, true, true, true, false),
-            [ValidationCaptureVariant.NoObjects] = new(true, true, false, false, false, true, true, false),
-            [ValidationCaptureVariant.ObjectsOnly] = new(false, false, true, true, true, false, false, false),
-        };
+        ValidationCaptureScenePolicy scenePolicy = CreateDefaultScenePolicy(resolution);
+        Dictionary<ValidationCaptureVariant, ValidationCaptureVariantPolicy> variantPolicies = CreateDefaultVariantPolicies();
 
         HeadlessValidationCaptureSession session = new(
             clientRoot,
@@ -188,6 +148,244 @@ internal static class ValidationCaptureCommand
 
         Console.Error.WriteLine("Error: the validation-capture runner is not implemented yet. Re-run with --dry-run to validate arguments and shared-contract wiring.");
         return 2;
+    }
+
+    private static int RunCaptureBatch(string[] args)
+    {
+        if (args.Length == 0 || HasFlag(args, "--help", "-h"))
+        {
+            ShowCaptureBatchUsage();
+            return 0;
+        }
+
+        string? clientRoot = GetOption(args, "--client-root", "-c");
+        string? mapInput = GetOption(args, "--map-input", "-m");
+        string? mapName = GetOption(args, "--map-name");
+        string? datasetRoot = GetOption(args, "--dataset-root", "-d");
+        string? outputRoot = GetOption(args, "--output-root", "-o");
+        string? ledgerPath = GetOption(args, "--ledger-path", "-l");
+        int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
+        string? buildLabel = GetOption(args, "--build", "-b");
+        string? looseOverlayRoot = GetOption(args, "--loose-overlay-root");
+        bool dryRun = HasFlag(args, "--dry-run");
+        bool gpuViewerStyle = HasFlag(args, "--gpu-viewer-style");
+        bool realSceneDryRun = HasFlag(args, "--real-scene-dry-run");
+        bool nativeRenderer = HasFlag(args, "--native-renderer");
+        bool stubScene = HasFlag(args, "--stub-scene");
+
+        if (string.IsNullOrWhiteSpace(clientRoot)
+            || string.IsNullOrWhiteSpace(mapInput)
+            || string.IsNullOrWhiteSpace(datasetRoot)
+            || string.IsNullOrWhiteSpace(outputRoot)
+            || string.IsNullOrWhiteSpace(ledgerPath))
+        {
+            Console.Error.WriteLine("Error: capture-batch requires --client-root, --map-input, --dataset-root, --output-root, and --ledger-path.");
+            ShowCaptureBatchUsage();
+            return 1;
+        }
+
+        if (!File.Exists(ledgerPath))
+        {
+            Console.Error.WriteLine($"Error: ledger file not found at '{ledgerPath}'.");
+            return 1;
+        }
+
+        if (string.IsNullOrWhiteSpace(mapName))
+            mapName = Path.GetFileNameWithoutExtension(mapInput);
+
+        CaptureLedger ledger;
+        try
+        {
+            ledger = ReadCaptureLedger(ledgerPath);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: failed to read ledger '{ledgerPath}': {ex.Message}");
+            return 1;
+        }
+
+        List<CaptureTileInput> tiles = ledger.Tiles
+            .Where(static t => !string.Equals(t.Status, "captured_complete", StringComparison.OrdinalIgnoreCase))
+            .Select(static t => new CaptureTileInput(t.TileName, t.TileX, t.TileY))
+            .ToList();
+
+        if (tiles.Count == 0)
+        {
+            Console.WriteLine("Validation capture batch: no pending tiles in ledger; nothing to do.");
+            return 0;
+        }
+
+        ValidationCaptureBatchPlan batchPlan = BuildBatchPlan(datasetRoot, mapName, outputRoot, resolution, buildLabel, tiles);
+        ValidationCaptureScenePolicy scenePolicy = CreateDefaultScenePolicy(resolution);
+        Dictionary<ValidationCaptureVariant, ValidationCaptureVariantPolicy> variantPolicies = CreateDefaultVariantPolicies();
+
+        HeadlessValidationCaptureSession session = new(
+            clientRoot,
+            mapInput,
+            buildLabel,
+            looseOverlayRoot,
+            batchPlan,
+            scenePolicy,
+            variantPolicies);
+
+        if (dryRun)
+        {
+            Console.WriteLine("Validation capture batch dry-run succeeded.");
+            Console.WriteLine($"Map: {session.BatchPlan.MapName}");
+            Console.WriteLine($"Tile count: {tiles.Count}");
+            Console.WriteLine($"Variant count: {session.BatchPlan.RequestCount}");
+            Console.WriteLine($"Ledger: {ledgerPath}");
+            return 0;
+        }
+
+        if (realSceneDryRun)
+        {
+            using ValidationWorldSceneAdapter adapter = new();
+            adapter.Initialize(session);
+            adapter.ApplyScenePolicy(session.ScenePolicy);
+
+            bool allRequestsReady = true;
+            foreach (ValidationCaptureTileRequest request in session.BatchPlan.TileRequests)
+            {
+                adapter.ApplyVariantPolicy(session.VariantPolicies[request.Variant]);
+                ValidationWorldSceneSnapshot snapshot = adapter.CaptureSnapshot(request, framesObserved: 1, settledFrames: 0);
+                Console.WriteLine($"Validation capture real-scene dry-run {request.TileName}/{request.Variant}: sceneContent={snapshot.HasSceneContent} framebuffer={snapshot.FramebufferWidth}x{snapshot.FramebufferHeight} tileLoaded={snapshot.TargetTileLoaded} terrainStreaming={snapshot.TerrainStreaming} pendingObjects={snapshot.PendingWorldObjectLoadCount}");
+                allRequestsReady &= snapshot.HasSceneContent && snapshot.TargetTileLoaded;
+            }
+
+            return allRequestsReady ? 0 : 2;
+        }
+
+        if (gpuViewerStyle)
+        {
+            using ValidationWorldSceneAdapter adapter = new();
+            ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
+            EmitDerivedArtifacts(session);
+            Console.WriteLine($"Validation capture batch gpu-viewer-style run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
+            return result.FailedVariantCount == 0 ? 0 : 2;
+        }
+
+        if (nativeRenderer)
+        {
+            using NativeValidationWorldSceneAdapter adapter = new();
+            ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
+            EmitDerivedArtifacts(session);
+            Console.WriteLine($"Validation capture batch native-renderer run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
+            return result.FailedVariantCount == 0 ? 0 : 2;
+        }
+
+        if (stubScene)
+        {
+            using SyntheticValidationWorldSceneAdapter adapter = new();
+            ValidationCaptureBatchResult result = HeadlessValidationCaptureRunner.Run(session, adapter);
+            EmitDerivedArtifacts(session);
+            Console.WriteLine($"Validation capture batch stub run completed: {result.SucceededVariantCount}/{result.TotalVariantCount} succeeded, {result.TimedOutVariantCount} timed out.");
+            return result.FailedVariantCount == 0 ? 0 : 2;
+        }
+
+        Console.Error.WriteLine("Error: the validation-capture batch runner requires one of --dry-run, --real-scene-dry-run, --gpu-viewer-style, --native-renderer, or --stub-scene.");
+        return 2;
+    }
+
+    private static ValidationCaptureBatchPlan BuildBatchPlan(
+        string datasetRoot,
+        string mapName,
+        string outputRoot,
+        int resolution,
+        string? buildLabel,
+        IReadOnlyList<CaptureTileInput> tiles)
+    {
+        string primaryDirectory = Path.Combine(outputRoot, "primary");
+        string noLiquidsDirectory = Path.Combine(outputRoot, "noliquids");
+        string noObjectsDirectory = Path.Combine(outputRoot, "noobjects");
+        string objectsOnlyDirectory = Path.Combine(outputRoot, "objectsonly");
+
+        List<ValidationCaptureTileRequest> requests = new(capacity: tiles.Count * 4);
+        foreach (CaptureTileInput tile in tiles)
+        {
+            requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.Primary, Path.Combine(primaryDirectory, $"{tile.TileName}_viewer_validation.png")));
+            requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.NoLiquids, Path.Combine(noLiquidsDirectory, $"{tile.TileName}_viewer_validation.png")));
+            requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.NoObjects, Path.Combine(noObjectsDirectory, $"{tile.TileName}_viewer_validation.png")));
+            requests.Add(new ValidationCaptureTileRequest(tile.TileName, tile.TileX, tile.TileY, ValidationCaptureVariant.ObjectsOnly, Path.Combine(objectsOnlyDirectory, $"{tile.TileName}_viewer_validation.png")));
+        }
+
+        return new ValidationCaptureBatchPlan(
+            datasetRoot,
+            mapName,
+            primaryDirectory,
+            noLiquidsDirectory,
+            noObjectsDirectory,
+            objectsOnlyDirectory,
+            resolution,
+            buildLabel,
+            requests);
+    }
+
+    private static ValidationCaptureScenePolicy CreateDefaultScenePolicy(int resolution)
+    {
+        ValidationCaptureArtifactPolicy artifactPolicy = new(
+            ValidationObjectMaskStrategy.DirectObjectsOnlySilhouette,
+            ValidationObjectMaskStrategy.PrimaryVsNoObjectsDiff,
+            ObjectsOnlyIntensityThreshold: 4,
+            DiffMaskThreshold: 8,
+            ObjectVisibilityMaskFileSuffix: "_object_visibility_mask.png",
+            NoObjectMinimapFileSuffix: "_no_objects.png");
+
+        return new ValidationCaptureScenePolicy(
+            requestedResolution: resolution,
+            requiredSettledFrames: 48,
+            maxFramesBeforeCapture: 2400,
+            detailedTileCountOverride: 25,
+            fogStartFactor: 0.75f,
+            fogEndDistance: 20000f,
+            objectStreamingRangeMultiplierFloor: 1.0f,
+            maxVisibleMdxBoundsHeight: 24f,
+            disableObjectFog: true,
+            disableObjectPathFilters: true,
+            hideWorldLiquids: true,
+            ignoreTerrainHolesGlobally: true,
+            hideUiChrome: true,
+            enableRuntimeWmoGroupLiquids: true,
+            enableRuntimeWmoGroupVisibility: false,
+            ignoreDistanceCulling: true,
+            ignoreProjectedSizeCulling: true,
+            ignoreVisionConeCulling: true,
+            ignoreFrustumCulling: true,
+            ignoreMaxViewDistanceCulling: true,
+            artifactPolicy: artifactPolicy);
+    }
+
+    private static Dictionary<ValidationCaptureVariant, ValidationCaptureVariantPolicy> CreateDefaultVariantPolicies()
+    {
+        return new Dictionary<ValidationCaptureVariant, ValidationCaptureVariantPolicy>
+        {
+            [ValidationCaptureVariant.Primary] = new(true, true, true, true, true, true, true, false),
+            [ValidationCaptureVariant.NoLiquids] = new(true, false, true, true, true, true, true, false),
+            [ValidationCaptureVariant.NoObjects] = new(true, true, false, false, false, true, true, false),
+            [ValidationCaptureVariant.ObjectsOnly] = new(false, false, true, true, true, false, false, false),
+        };
+    }
+
+    private static CaptureLedger ReadCaptureLedger(string ledgerPath)
+    {
+        string json = File.ReadAllText(ledgerPath);
+        CaptureLedger? ledger = JsonSerializer.Deserialize<CaptureLedger>(json, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+        });
+
+        if (ledger is null)
+            throw new InvalidOperationException("Ledger JSON deserialized to null.");
+        if (ledger.Tiles is null || ledger.Tiles.Count == 0)
+            throw new InvalidOperationException("Ledger has no tiles.");
+
+        foreach (CaptureLedgerTile tile in ledger.Tiles)
+        {
+            if (string.IsNullOrWhiteSpace(tile.TileName))
+                throw new InvalidOperationException("Ledger tile has empty tile_name.");
+        }
+
+        return ledger;
     }
 
     private static string? GetOption(string[] args, params string[] names)
@@ -275,8 +473,9 @@ internal static class ValidationCaptureCommand
 
             Commands:
               capture        Validate one bounded validation-capture request and build a shared-runtime session
+              capture-batch  Execute a manifest/ledger-driven bounded validation-capture batch
 
-            Use 'capture --help' for the first bounded argument surface.
+            Use 'capture --help' or 'capture-batch --help' for argument details.
             """);
     }
 
@@ -304,6 +503,57 @@ internal static class ValidationCaptureCommand
                             --real-scene-dry-run    Build real runtime-frame snapshots without framebuffer rendering
               --stub-scene            Run the host loop against a clearly synthetic scene adapter
             """);
+    }
+
+    private static void ShowCaptureBatchUsage()
+    {
+        Console.WriteLine("""
+            Usage: WowViewer.Tool.ValidationCapture capture-batch [options]
+
+            Required:
+              --client-root <dir>
+              --map-input <path>
+              --dataset-root <dir>
+              --output-root <dir>
+              --ledger-path <path>
+
+            Optional:
+              --map-name <name>
+              --build <label>
+              --loose-overlay-root <dir>
+              --resolution <int>      Default: 512
+              --dry-run               Build session + tile plan summary without rendering
+              --gpu-viewer-style      Render bounded captures with wow-viewer GPU output using validation camera frames
+              --real-scene-dry-run    Build real runtime-frame snapshots without framebuffer rendering
+              --native-renderer       Run bounded captures through NativeValidationWorldSceneAdapter
+              --stub-scene            Run the host loop against a clearly synthetic scene adapter
+            """);
+    }
+
+    private sealed record CaptureTileInput(string TileName, int TileX, int TileY);
+
+    private sealed class CaptureLedger
+    {
+        [JsonPropertyName("build")]
+        public string? Build { get; init; }
+
+        [JsonPropertyName("tiles")]
+        public List<CaptureLedgerTile> Tiles { get; init; } = [];
+    }
+
+    private sealed class CaptureLedgerTile
+    {
+        [JsonPropertyName("tile_name")]
+        public string TileName { get; init; } = string.Empty;
+
+        [JsonPropertyName("tile_x")]
+        public int TileX { get; init; }
+
+        [JsonPropertyName("tile_y")]
+        public int TileY { get; init; }
+
+        [JsonPropertyName("status")]
+        public string? Status { get; init; }
     }
 
     private sealed class SyntheticValidationWorldSceneAdapter : IValidationWorldSceneAdapter

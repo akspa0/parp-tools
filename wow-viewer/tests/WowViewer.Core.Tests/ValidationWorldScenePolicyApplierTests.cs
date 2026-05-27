@@ -40,6 +40,11 @@ public sealed class ValidationWorldScenePolicyApplierTests
         Assert.Equal(24f, state.MaxVisibleMdxBoundsHeight);
         Assert.False(state.EnableRuntimeWmoGroupVisibility);
         Assert.True(state.EnableRuntimeWmoGroupLiquids);
+        Assert.False(state.IgnoreDistanceCulling);
+        Assert.False(state.IgnoreProjectedSizeCulling);
+        Assert.False(state.IgnoreVisionConeCulling);
+        Assert.False(state.IgnoreFrustumCulling);
+        Assert.False(state.IgnoreMaxViewDistanceCulling);
     }
 
     [Fact]
@@ -67,6 +72,11 @@ public sealed class ValidationWorldScenePolicyApplierTests
         Assert.False(state.ShowWorldLiquids);
         Assert.False(state.EnableRuntimeWmoGroupLiquids);
         Assert.False(state.EnableRuntimeWmoGroupVisibility);
+        Assert.False(state.IgnoreDistanceCulling);
+        Assert.False(state.IgnoreProjectedSizeCulling);
+        Assert.False(state.IgnoreVisionConeCulling);
+        Assert.False(state.IgnoreFrustumCulling);
+        Assert.False(state.IgnoreMaxViewDistanceCulling);
     }
 
     [Fact]

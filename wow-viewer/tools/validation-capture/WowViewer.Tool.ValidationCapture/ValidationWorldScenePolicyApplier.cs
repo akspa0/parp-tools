@@ -43,6 +43,16 @@ internal sealed class ValidationWorldScenePolicyState
     public bool EnableRuntimeWmoGroupVisibility { get; set; } = true;
 
     public bool EnableRuntimeWmoGroupLiquids { get; set; } = true;
+
+    public bool IgnoreDistanceCulling { get; set; }
+
+    public bool IgnoreProjectedSizeCulling { get; set; }
+
+    public bool IgnoreVisionConeCulling { get; set; }
+
+    public bool IgnoreFrustumCulling { get; set; }
+
+    public bool IgnoreMaxViewDistanceCulling { get; set; }
 }
 
 internal static class ValidationWorldScenePolicyApplier
@@ -79,6 +89,11 @@ internal static class ValidationWorldScenePolicyApplier
         state.MaxVisibleMdxBoundsHeight = scenePolicy.MaxVisibleMdxBoundsHeight;
         state.EnableRuntimeWmoGroupVisibility = scenePolicy.EnableRuntimeWmoGroupVisibility;
         state.EnableRuntimeWmoGroupLiquids = scenePolicy.EnableRuntimeWmoGroupLiquids;
+        state.IgnoreDistanceCulling = scenePolicy.IgnoreDistanceCulling;
+        state.IgnoreProjectedSizeCulling = scenePolicy.IgnoreProjectedSizeCulling;
+        state.IgnoreVisionConeCulling = scenePolicy.IgnoreVisionConeCulling;
+        state.IgnoreFrustumCulling = scenePolicy.IgnoreFrustumCulling;
+        state.IgnoreMaxViewDistanceCulling = scenePolicy.IgnoreMaxViewDistanceCulling;
     }
 
     public static void ApplyVariantPolicy(

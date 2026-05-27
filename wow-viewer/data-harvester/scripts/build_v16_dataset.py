@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import tempfile
 import shutil
 import struct
 import subprocess
@@ -51,6 +52,7 @@ import zarr.storage
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _HARVEST_TOOL_DIR = _PROJECT_ROOT / "tools" / "harvest" / "WowViewer.Tool.Harvest" / "bin" / "Debug" / "net10.0"
+_VALIDATION_CAPTURE_TOOL_DIR = _PROJECT_ROOT / "tools" / "validation-capture" / "WowViewer.Tool.ValidationCapture" / "bin" / "Debug" / "net10.0"
 _DATASET_ROOT = _PROJECT_ROOT / "output" / "datasets" / "v16"
 _CLIENT_ROOTS = _PROJECT_ROOT.parent / "output" / "tmp" / "wowarchive-clients"
 DEFAULT_MAP_WORKERS = max(1, min(4, os.cpu_count() or 1))
@@ -457,6 +459,16 @@ def _find_harvest_tool() -> Path:
         if p.exists():
             return p
     raise FileNotFoundError("Harvest tool not found. Build it first.")
+
+
+def _find_validation_capture_tool() -> Path:
+    exe = _VALIDATION_CAPTURE_TOOL_DIR / "WowViewer.Tool.ValidationCapture.exe"
+    if exe.exists():
+        return exe
+    for p in sorted((_PROJECT_ROOT / "tools" / "validation-capture" / "WowViewer.Tool.ValidationCapture" / "bin" / "Debug").glob("*/WowViewer.Tool.ValidationCapture.exe")):
+        if p.exists():
+            return p
+    raise FileNotFoundError("Validation capture tool not found. Build wow-viewer/tools/validation-capture/WowViewer.Tool.ValidationCapture first.")
 
 
 def _find_client_root(build: str) -> Path | None:
@@ -2983,7 +2995,7 @@ def cmd_patch_objects(args: argparse.Namespace) -> None:
 
 
 def cmd_generate_viewer_stubs(args: argparse.Namespace) -> None:
-    """Generate per-tile JSON stubs from V16 Zarr index for MdxViewer tile discovery."""
+    """Generate per-tile JSON stubs + capture ledger from V16 index for renderer-truth capture."""
     builds = args.builds or [args.build]
     if not builds[0]:
         print("ERROR: specify --build or --builds")
@@ -3102,8 +3114,8 @@ def cmd_generate_viewer_stubs(args: argparse.Namespace) -> None:
 
     print(f"\nTotal: {total} stubs across {len(builds)} build(s)")
     print(f"Capture root: {capture_root}")
-    print("Next: run MdxViewer with --validation-dataset-root pointing at the capture root,")
-    print("      or run the generate_all_renderer_truth_captures.bat batch file.")
+    print("Next: run WowViewer.Tool.ValidationCapture capture-batch using each build ledger,")
+    print("      or run legacy MdxViewer batch flows if you need compatibility comparison.")
 
 
 def cmd_patch_renderer_truth(args: argparse.Namespace) -> None:
@@ -3141,6 +3153,123 @@ def cmd_patch_renderer_truth(args: argparse.Namespace) -> None:
             print(f"  ERROR: patch failed for {build} (exit {result.returncode})")
         else:
             print(f"  OK: {build} patched")
+
+
+def cmd_capture_renderer_truth(args: argparse.Namespace) -> None:
+    """Run wow-viewer validation capture-batch from generated ledgers."""
+    builds = args.builds or [args.build]
+    if not builds[0]:
+        print("ERROR: specify --build or --builds")
+        sys.exit(1)
+
+    capture_root = Path(args.capture_root) if args.capture_root else _PROJECT_ROOT.parent / "output" / "tmp" / "mdxviewer_validation_smoke"
+    validation_tool = _find_validation_capture_tool()
+    print(f"Validation capture tool: {validation_tool}")
+    print(f"Capture root: {capture_root}")
+
+    requested_modes = [
+        flag
+        for enabled, flag in [
+            (bool(args.dry_run), "--dry-run"),
+            (bool(args.real_scene_dry_run), "--real-scene-dry-run"),
+            (bool(args.gpu_viewer_style), "--gpu-viewer-style"),
+            (bool(args.native_renderer), "--native-renderer"),
+            (bool(args.stub_scene), "--stub-scene"),
+        ]
+        if enabled
+    ]
+    if len(requested_modes) > 1:
+        raise SystemExit(
+            "capture-renderer-truth accepts exactly one run mode: "
+            "--dry-run OR --real-scene-dry-run OR --gpu-viewer-style OR --native-renderer OR --stub-scene"
+        )
+    mode_flags = requested_modes or ["--dry-run"]
+
+    total_groups = 0
+    failures = 0
+    for build in builds:
+        build_capture_dir = capture_root / build
+        ledger_path = build_capture_dir / "manifest_capture_ledger.json"
+        if not ledger_path.exists():
+            print(f"  SKIP {build}: no ledger at {ledger_path}")
+            continue
+
+        client_root = _find_client_root(build)
+        if client_root is None:
+            print(f"  SKIP {build}: no staged client root found at {_CLIENT_ROOTS / build}")
+            continue
+
+        try:
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except Exception as ex:
+            print(f"  ERROR {build}: failed to parse ledger {ledger_path}: {ex}")
+            failures += 1
+            continue
+
+        tiles = ledger.get("tiles", [])
+        map_groups: dict[str, list[dict]] = {}
+        for row in tiles:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("status", "")).lower() == "captured_complete":
+                continue
+            map_name = str(row.get("map", "")).strip()
+            if not map_name:
+                continue
+            map_groups.setdefault(map_name, []).append(row)
+
+        if not map_groups:
+            print(f"  {build}: ledger has no pending map groups (all captured_complete or no valid rows)")
+            continue
+
+        print(f"  {build}: map groups={len(map_groups)} client={client_root}")
+        for map_name in sorted(map_groups):
+            map_rows = map_groups[map_name]
+            map_input = f"World\\Maps\\{map_name}\\{map_name}.wdt"
+            map_ledger = {
+                "build": build,
+                "generated_at": ledger.get("generated_at"),
+                "manifest_path": ledger.get("manifest_path"),
+                "requested_tile_count": len(map_rows),
+                "tiles": map_rows,
+            }
+
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
+                json.dump(map_ledger, tmp, indent=2)
+                tmp_path = Path(tmp.name)
+
+            try:
+                cmd = [
+                    str(validation_tool),
+                    "capture-batch",
+                    "--client-root", str(client_root),
+                    "--map-input", map_input,
+                    "--map-name", map_name,
+                    "--dataset-root", str(build_capture_dir),
+                    "--output-root", str(build_capture_dir),
+                    "--ledger-path", str(tmp_path),
+                    "--build", build.replace("_", "."),
+                    "--resolution", str(args.resolution),
+                    *mode_flags,
+                ]
+                print(f"    {build}/{map_name}: running capture-batch ({len(map_rows)} pending tiles)")
+                result = subprocess.run(cmd, capture_output=False)
+                total_groups += 1
+                if result.returncode != 0:
+                    failures += 1
+                    print(f"    ERROR {build}/{map_name}: capture-batch exited {result.returncode}")
+                else:
+                    print(f"    OK {build}/{map_name}: capture-batch completed")
+            finally:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    print(f"Capture-batch groups attempted: {total_groups}")
+    if failures:
+        print(f"Capture-batch failures: {failures}")
+        sys.exit(1)
 
 
 def main() -> None:
@@ -3196,7 +3325,7 @@ def main() -> None:
     merge_p.add_argument("--batch-size", type=int, default=64, help="Array copy batch size during merge")
     merge_p.add_argument("--rebuild-existing", action="store_true", help="Overwrite existing merged output store")
 
-    stubs_p = sub.add_parser("generate-viewer-stubs", parents=[common], help="Generate per-tile JSON stubs from index.parquet for MdxViewer tile discovery")
+    stubs_p = sub.add_parser("generate-viewer-stubs", parents=[common], help="Generate per-tile JSON stubs + manifest_capture_ledger.json from index.parquet")
     stubs_p.add_argument("--capture-root", type=str, default=None, help="Output root for per-build dataset directories (default: output/tmp/mdxviewer_validation_smoke)")
     stubs_p.add_argument("--curation-manifest", type=str, default=None, help="Optional curation manifest (dir/file). When provided, generate stubs only for keep=true tiles.")
 
@@ -3204,6 +3333,15 @@ def main() -> None:
     patch_rt_p.add_argument("--capture-root", type=str, default=None, help="Root directory containing per-build capture output (default: output/tmp/mdxviewer_validation_smoke)")
     patch_rt_p.add_argument("--no-backup", action="store_true", help="Skip backing up index.parquet before patching")
     patch_rt_p.add_argument("--curation-manifest", type=str, default=None, help="Optional curation manifest (dir/file). When provided, patch only keep=true tiles in this manifest.")
+
+    capture_rt_p = sub.add_parser("capture-renderer-truth", parents=[common], help="Run wow-viewer validation capture-batch using generated manifest_capture_ledger.json files")
+    capture_rt_p.add_argument("--capture-root", type=str, default=None, help="Root directory containing per-build capture output + ledgers (default: output/tmp/mdxviewer_validation_smoke)")
+    capture_rt_p.add_argument("--resolution", type=int, default=512, help="Capture resolution forwarded to validation-capture")
+    capture_rt_p.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture dry-run mode")
+    capture_rt_p.add_argument("--real-scene-dry-run", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture real-scene dry-run mode")
+    capture_rt_p.add_argument("--gpu-viewer-style", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture gpu-viewer-style rendering mode")
+    capture_rt_p.add_argument("--native-renderer", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture native-renderer mode")
+    capture_rt_p.add_argument("--stub-scene", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture stub-scene mode")
 
     args = parser.parse_args()
 
@@ -3225,6 +3363,8 @@ def main() -> None:
         cmd_generate_viewer_stubs(args)
     elif args.command == "patch-renderer-truth":
         cmd_patch_renderer_truth(args)
+    elif args.command == "capture-renderer-truth":
+        cmd_capture_renderer_truth(args)
 
 
 if __name__ == "__main__":

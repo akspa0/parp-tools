@@ -392,6 +392,39 @@
     - `wow-viewer/specs/025-object-roof-mask-library-and-minimap-sieve/tasks.md`
     - complete: `T001`, `T003`-`T022`
     - open by design: `T002` (MdxViewer one-at-a-time asset capture seam)
+- Spec 025 T002 object-capture audit + first wow-viewer slice is now landed:
+  - architecture note:
+    - `wow-viewer/docs/architecture/spec025-t002-object-capture-audit-2026-05-26.md`
+  - implemented seam closure (bounded):
+    - `ValidationCaptureScenePolicy` now carries explicit capture culling-override flags
+    - `ValidationWorldScenePolicyApplier` propagates those flags into policy state
+    - `ValidationWorldSceneAdapter.BuildFrameRequest(...)` forwards fog/object-streaming/MDX-height/culling knobs into runtime request
+    - `WowViewerWorldRuntimeFrameRequest` and `WowViewerWorldRuntimeBridge` now route those knobs into `WorldObjectVisibilityContext`
+    - `WorldObjectVisibilityCollector` now honors capture override toggles and MDX max-bounds-height suppression via shared runtime context
+  - bounded proof:
+    - focused tests passed (`ValidationCaptureScenePolicyTests`, `ValidationWorldScenePolicyApplierTests`, `ValidationWorldSceneAdapterTests`, `WorldObjectVisibilityCollectorTests`)
+    - staged real-scene dry-run passed for `3_3_5_12340 / Azeroth_30_48` at staged client root `output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`
+  - T002 status after this slice:
+    - policy-propagation and culling-hook gap is closed in wow-viewer
+    - full dedicated object-render backend parity and one-at-a-time asset-pose capture orchestration remain open follow-up work
+- Spec 025 T002 second bounded automation slice is now landed in `wow-viewer`:
+  - `WowViewer.Tool.ValidationCapture` now supports `capture-batch` with ledger input (`--ledger-path`) for manifest-driven multi-tile batch execution
+  - batch path reads `manifest_capture_ledger.json`, skips `captured_complete`, expands each pending tile into 4 variant requests, and reuses the same default scene/variant policy composition as single-tile `capture`
+  - `build_v16_dataset.py generate-viewer-stubs` guidance now points to `capture-batch` as primary capture lane (legacy MdxViewer scripts retained only for compatibility comparison)
+  - focused command test proof passed (`ValidationCaptureCommandTests`, `5/5`)
+  - T002 status after automation cutover slice:
+    - manifest/ledger automation is now wow-viewer-owned
+    - dedicated object-render backend parity + per-asset pose-capture orchestration still remain for full T002 closure
+- Spec 025 T002 third bounded automation bridge slice is now landed in `wow-viewer/data-harvester`:
+  - `build_v16_dataset.py` now includes `capture-renderer-truth`
+  - the command discovers `WowViewer.Tool.ValidationCapture.exe` and invokes `capture-batch` per build/map ledger group
+  - it reads `manifest_capture_ledger.json`, skips `captured_complete`, groups pending tiles by map, emits temp per-map ledgers, and forwards mode flags/resolution/build label into wow-viewer capture
+  - focused proof:
+    - `uv run python scripts/build_v16_dataset.py --help` now lists `capture-renderer-truth`
+    - bounded dry-run for `3_3_5_12340` resolved tool + root and cleanly skipped missing ledger with exit `0`
+  - T002 status after this bridge slice:
+    - end-to-end batch orchestration from data-harvester into wow-viewer capture is now wired
+    - dedicated object-render backend parity + one-at-a-time per-asset pose-capture seam still remain for full T002 completion
 - V17.1 normal trainer behavior adjustments landed during this session:
   - `v17_1_normals` no longer enables refiner/distillation by default
   - `height_supervision_weight` default for `v17_1_normals` restored to `1.0`
