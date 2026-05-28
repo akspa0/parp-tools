@@ -1149,7 +1149,15 @@ public partial class ViewerApp
 
     private static bool ShouldPreferDirectObjectsOnlyMask(string buildVersion)
     {
-        return false;
+        if (string.IsNullOrWhiteSpace(buildVersion))
+            return false;
+
+        int separatorIndex = buildVersion.IndexOf('.');
+        string majorComponent = separatorIndex >= 0
+            ? buildVersion[..separatorIndex]
+            : buildVersion;
+
+        return int.TryParse(majorComponent, out int majorVersion) && majorVersion == 0;
     }
 
     private static Image<L8>? TryBuildDirectObjectVisibilityMask(string tileName, int width, int height, string objectsOnlyOutputDirectory)

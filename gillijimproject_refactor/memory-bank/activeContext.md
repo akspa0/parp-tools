@@ -155,6 +155,12 @@
       underground-object bleed-through is preserved
     - later builds prefer `primary` vs `noobjects` diffs so terrain occlusion
       wins over terrain-hidden silhouettes
+    - bounded hotfix note (2026-05-28):
+      - `ViewerApp_CaptureAutomation.ShouldPreferDirectObjectsOnlyMask(...)`
+        was still stubbed to `false`, so the documented `0.x` policy was not
+        actually enforced during artifact regeneration
+      - the stub is now fixed to route `0.x` builds through direct
+        `objectsonly` mask extraction in the real `MdxViewer` proof lane
   - Zarr-mutating `build_v16_dataset.py` commands now require
     `--allow-zarr-write`; preview-first is the enforced operator path
   - current proof level:
@@ -168,6 +174,13 @@
       - `output/tmp/mdxviewer_validation_smoke/3_3_5_12340_Azeroth_30_48`
         - `output/tmp/mdxviewer_validation_smoke_fix_wmo/3_3_5_12340_Azeroth_30_48`
         - `output/tmp/mdxviewer_validation_smoke_heightfilter/3_3_5_12340_Azeroth_30_48`
+      - fresh bounded rerun after the policy hotfix succeeded on staged
+        `0_5_3_3368 / Azeroth / 30_48` with proof owner still `MdxViewer`
+        validation capture:
+        - primary proof image:
+          `output/tmp/mdxviewer_validation_smoke/0_5_3_3368_Azeroth_30_48/viewer_validation_minimaps/Azeroth_30_48_viewer_validation.png`
+        - regenerated object-mask proof artifact:
+          `output/tmp/mdxviewer_validation_smoke/0_5_3_3368_Azeroth_30_48/images/Azeroth_30_48_object_visibility_mask.png`
     - the `0.5.3.3368` exported mask matched the direct `objectsonly`
       silhouette exactly on `Azeroth_30_48`
     - the `3.3.5.12340` exported mask diverged from the direct
@@ -181,6 +194,12 @@
       - current real renderer-truth proof still covers only:
         - `0_5_3_3368`
         - `3_3_5_12340`
+      - current throughput risk is still open:
+        - the bounded single-tile `MdxViewer` validation rerun took a little
+          over 3 minutes for one tile, which is too slow for broad proof or
+          patch workflows
+        - next operational pressure point is batching multiple tiles per loaded
+          world session instead of paying this cost one tile at a time
       - remaining build proof is still open for:
         - `0_5_5_3494`
         - `0_7_0_3694`

@@ -78,6 +78,11 @@
     `0.x` builds and prefers `primary` vs `noobjects` visibility diffs for
     later builds so terrain occlusion wins where underground geometry should
     stay hidden
+  - bounded hotfix (2026-05-28): `ViewerApp_CaptureAutomation`
+    `ShouldPreferDirectObjectsOnlyMask(...)` was still stubbed to `false`, so
+    the documented `0.x` direct-`objectsonly` path was not actually enforced at
+    artifact generation time; this is now fixed in the real `MdxViewer` proof
+    lane
   - startup automation can now run a bounded validation batch directly from a
     dataset root and exit when complete, which makes real-data capture proof
     scriptable instead of UI-only
@@ -89,12 +94,20 @@
     - `output/tmp/mdxviewer_validation_smoke_heightfilter/3_3_5_12340_Azeroth_30_48`
   - runtime result on `Azeroth_30_48`:
     - `0.5.3.3368` final mask exactly matched direct `objectsonly`
+      - refreshed bounded rerun after the policy fix succeeded at:
+        - `output/tmp/mdxviewer_validation_smoke/0_5_3_3368_Azeroth_30_48/viewer_validation_minimaps/Azeroth_30_48_viewer_validation.png`
+        - `output/tmp/mdxviewer_validation_smoke/0_5_3_3368_Azeroth_30_48/images/Azeroth_30_48_object_visibility_mask.png`
     - `3.3.5.12340` final mask differed from direct `objectsonly`, confirming
       the later-build occluded-diff policy executed at runtime
   - bounded follow-up fixes now landed in the MdxViewer proof path:
     - WMO near-camera culling hotfix in `WmoRenderer`
     - longer validation settle delay before capture
     - MDX bounds-height filtering during capture to suppress very tall clutter
+  - throughput warning remains open:
+    - one bounded single-tile rerun in the real `MdxViewer` lane still took a
+      little over 3 minutes, which is too slow for broader proof sweeps
+    - batching tiles within one loaded world session is now the clearest next
+      bounded follow-up if this proof lane stays active
   - current proof boundary is still only `0_5_3_3368` + `3_3_5_12340`; the
     remaining four builds still need real renderer-truth capture proof before
     this lane can claim broad coverage
