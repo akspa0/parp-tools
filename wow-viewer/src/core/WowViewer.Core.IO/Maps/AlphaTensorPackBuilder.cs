@@ -78,6 +78,9 @@ public static class AlphaTensorPackBuilder
                 signals.Add("shadow_residual_mask_256");
         }
 
+        (float[,]? objectRoofMask256, float[,]? objectRoofConfidence256, string objectRoofMaskSource) =
+            BuildObjectRoofMasks(tileData, tileX, tileY, signals);
+
         return new TerrainTileTensorPack
         {
             TileName = tileName,
@@ -108,6 +111,9 @@ public static class AlphaTensorPackBuilder
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
             ObjectInstanceMask257 = objectInstanceMask257,
+            ObjectRoofMask256 = objectRoofMask256,
+            ObjectRoofConfidence256 = objectRoofConfidence256,
+            ObjectRoofMaskSource = objectRoofMaskSource,
             ShadowResidualMask256 = shadowResidual256,
             PlacementMddfCount = tileData.ModelPlacements.Count,
             PlacementModfCount = tileData.WorldModelPlacements.Count,
@@ -574,6 +580,103 @@ public static class AlphaTensorPackBuilder
     }
 
     private const float ObjectWorldTileSize = 533.33333f;
+    private const int MinimapSize = 256;
+    private const string ObjectRoofSourceNone = "none";
+    private const string ObjectRoofSourceMetadata = "metadata";
+    private const float ObjectRoofMetadataConfidence = 0.95f;
+
+    private static readonly System.Text.RegularExpressions.Regex RoofLikeAssetRegex = new(
+        @"(^|[\\/_\-])(roof|roofs|house|houses|inn|tower|towers|building|buildings|city|village)([\\/_\-.]|$)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static (float[,]? mask256, float[,]? confidence256, string source)
+        BuildObjectRoofMasks(AlphaTileData tileData, int tileX, int tileY, HashSet<string> signals)
+    {
+        if (tileData.WorldModelPlacements.Count == 0)
+            return (null, null, ObjectRoofSourceNone);
+
+        float[,] roofMask = new float[MinimapSize, MinimapSize];
+        float[,] roofConfidence = new float[MinimapSize, MinimapSize];
+        bool any = false;
+
+        foreach (AlphaWorldModelPlacement placement in tileData.WorldModelPlacements)
+        {
+            if (!RoofLikeAssetRegex.IsMatch(placement.ModelPath.Replace('/', '\\')))
+                continue;
+
+            Vector3 min = placement.BoundsMin;
+            Vector3 max = placement.BoundsMax;
+            bool hasValidBounds =
+                min.X < max.X && min.Y < max.Y &&
+                !float.IsNaN(min.X) && !float.IsNaN(max.X);
+
+            if (hasValidBounds)
+            {
+                ProjectBoundsToMinimapPixels(min, max, tileX, tileY, out int minPx, out int minPy, out int maxPx, out int maxPy);
+                if (minPx > maxPx || minPy > maxPy)
+                    continue;
+
+                PaintRect(roofMask, minPx, minPy, maxPx, maxPy, 1.0f);
+                PaintRect(roofConfidence, minPx, minPy, maxPx, maxPy, ObjectRoofMetadataConfidence);
+                any = true;
+                continue;
+            }
+
+            if (!TryProjectPlacementToMinimapPixel(placement.Position, tileX, tileY, out int px, out int py))
+                continue;
+
+            PaintCircle(roofMask, px, py, 4f, 1.0f);
+            PaintCircle(roofConfidence, px, py, 4f, ObjectRoofMetadataConfidence);
+            any = true;
+        }
+
+        if (!any)
+            return (null, null, ObjectRoofSourceNone);
+
+        signals.Add("object_roof_mask_256");
+        signals.Add("object_roof_confidence_256");
+        return (roofMask, roofConfidence, ObjectRoofSourceMetadata);
+    }
+
+    private static bool TryProjectPlacementToMinimapPixel(Vector3 position, int tileX, int tileY, out int pixelX, out int pixelY)
+    {
+        if (!TryProjectPlacementToTilePixel(position, tileX, tileY, out int tilePixelX, out int tilePixelY))
+        {
+            pixelX = 0;
+            pixelY = 0;
+            return false;
+        }
+
+        pixelX = Math.Clamp((int)MathF.Round(tilePixelX * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
+        pixelY = Math.Clamp((int)MathF.Round(tilePixelY * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
+        return true;
+    }
+
+    private static void ProjectBoundsToMinimapPixels(
+        Vector3 min,
+        Vector3 max,
+        int tileX,
+        int tileY,
+        out int minPx,
+        out int minPy,
+        out int maxPx,
+        out int maxPy)
+    {
+        ProjectBoundsToTilePixels(min, max, tileX, tileY, out int tileMinX, out int tileMinY, out int tileMaxX, out int tileMaxY);
+        if (tileMinX > tileMaxX || tileMinY > tileMaxY)
+        {
+            minPx = 1;
+            minPy = 1;
+            maxPx = 0;
+            maxPy = 0;
+            return;
+        }
+
+        minPx = Math.Clamp((int)MathF.Round(tileMinX * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
+        minPy = Math.Clamp((int)MathF.Round(tileMinY * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
+        maxPx = Math.Clamp((int)MathF.Round(tileMaxX * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
+        maxPy = Math.Clamp((int)MathF.Round(tileMaxY * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
+    }
 
     private static void PaintCircle(float[,] buf, int cx, int cy, float radius, float value)
     {

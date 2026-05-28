@@ -78,6 +78,8 @@ public static class RawArraySerializer
         WriteArray(outputStream, "modf_mask_257", pack.ModfMask257);
         WriteArray(outputStream, "object_filtered_mask_257", pack.ObjectFilteredMask257);
         WriteArray(outputStream, "mcsh_shadow_mask_256", pack.McshShadowMask256);
+        WriteArray(outputStream, "object_roof_mask_256", pack.ObjectRoofMask256);
+        WriteArray(outputStream, "object_roof_confidence_256", pack.ObjectRoofConfidence256);
         WriteArray(outputStream, "minimap_rgb_256", pack.MinimapRgb256);
         WriteArray(outputStream, "hole_mask_16", pack.HoleMask16);
         WriteArray(outputStream, "placement_mddf_data", pack.PlacementMddfData);
@@ -122,6 +124,8 @@ public static class RawArraySerializer
         WriteArray(outputStream, "pm4_mprl_mask", pack.Pm4MprlMask);
         WriteArray(outputStream, "mcsh_shadow_mask_256", pack.McshShadowMask256);
         WriteArray(outputStream, "shadow_residual_mask_256", pack.ShadowResidualMask256);
+        WriteArray(outputStream, "object_roof_mask_256", pack.ObjectRoofMask256);
+        WriteArray(outputStream, "object_roof_confidence_256", pack.ObjectRoofConfidence256);
         WriteArray(outputStream, "minimap_rgb_256", pack.MinimapRgb256);
         WriteArray(outputStream, "hole_mask_16", pack.HoleMask16);
         WriteArray(outputStream, "mtxf_animated_mask", pack.MtxfAnimatedMask);
@@ -312,6 +316,8 @@ public static class RawArraySerializer
             first = false;
         }
         sb.Append("],");
+
+        sb.Append($"\"object_roof_mask_source\":\"{Escape(pack.ObjectRoofMaskSource)}\",");
 
         sb.Append($"\"placement_mddf_count\":{pack.PlacementMddfCount},");
         sb.Append($"\"placement_modf_count\":{pack.PlacementModfCount}");

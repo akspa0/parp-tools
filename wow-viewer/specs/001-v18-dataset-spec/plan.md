@@ -14,6 +14,15 @@ signals plus decoded metadata into the canonical build itself. The key
 implementation move is a versioned V18 workflow fork centered on a new
 [`build_v18_dataset.py`](wow-viewer/data-harvester/scripts/build_v16_dataset.py:1)-style script, not a net-new architecture. The V18 build must emit a publishable store in one run under [`wow-viewer/output/datasets/v18/`](wow-viewer/README.md:728) with no required post-build patch phase.
 
+The broader parser → decoded → dataset direct-pipeline redesign is intentionally
+deferred to a future V20 effort so V18 can stay focused on contract closure and
+proof instead of architecture replacement.
+
+**Proof owner reminder** ⚠️: for full ADT MCLY-layer terrain plus visible object
+evidence, bounded `gillijimproject_refactor/src/MdxViewer` validation capture is
+still the reference proof lane until wow-viewer captures are visually proven,
+not merely command-complete.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11+ via `uv`, with existing C# / .NET 10 harvest and validation tools reused as-is
@@ -41,6 +50,7 @@ implementation move is a versioned V18 workflow fork centered on a new
 - no new reader rewrites; reuse the existing harvest/validation tooling
 - no `H:\CLIENTS`; use only staged client roots
 - keep plans bite-sized and independently validatable
+- do not expand V18 into the future V20 direct-pipeline redesign
 
 **Scale/Scope**:
 
@@ -144,6 +154,9 @@ Validation:
 
 - One bounded V18 build writes the approved promoted signals without running a separate patch script.
 - Coverage metadata for promoted signals is visible directly in the V18 output artifacts.
+- **Reminder** 📌: image-derived promoted signals are contract-visible but still
+  require separate visual proof from the bounded MdxViewer lane before being
+  treated as semantically trustworthy.
 
 ## Phase 4 — Tighten Resume, Merge, and Finalization Rules
 
@@ -186,6 +199,10 @@ Goal: prove the V18 workflow on staged builds and document the new canonical pat
 4. Clearly mark which legacy V16 patch scripts are now compatibility/remediation-only after V18 adoption.
 5. Update continuity docs if proof changes the active workflow boundary.
 
+**Proof note** 🧭: if wow-viewer capture emits flat or all-black artifacts, do
+not treat that as proof. Re-route to bounded MdxViewer compatibility evidence and
+record the failure honestly.
+
 Validation:
 
 - Bounded staged-client proof exists for at least two builds with V18 outputs.
@@ -200,3 +217,6 @@ The only deliberate tradeoff is a versioned workflow fork at the Python script
 surface. This is acceptable because it preserves the existing shared C# reader
 ownership, keeps the implementation narrow, and matches the requested “copy
 forward and bump the version” direction without duplicating format readers.
+
+Tiny reminder marker 🧪: when progress feels “too smooth,” restate the current
+proof owner, current proof artifact, and current unproven gap before continuing.

@@ -64,6 +64,8 @@ Define a canonical V18 dataset-build contract that:
 - changing model architectures, loss functions, or training-run behavior
 - replacing current decoded signal extraction semantics with a wholly new build
   family
+- redesigning the end-to-end dataset pipeline to bypass the current raw array /
+  shard interchange shape entirely
 - requiring immediate archival completeness for every undecoded source byte
 - rewriting client file readers or introducing a second permanent dataset
   contract for the same decoded outputs
@@ -323,6 +325,9 @@ sidecar blob artifacts can be produced with traceable provenance when enabled.
   formalizes a versioned V16-to-V18 promotion of completeness, provenance, and
   validation guarantees rather than replacing extraction semantics with a new
   unrelated pipeline.
+- A future V20 dataset effort may replace the current intermediate raw-array /
+  NPZ-shaped interchange with a direct parser → decoded → dataset pipeline, but
+  that redesign is explicitly deferred and is not part of V18 scope.
 - Legacy patch or fixup commands may still exist for remediation or historical
   stores, but they are not part of the canonical completeness path for newly
   built datasets.
@@ -334,3 +339,6 @@ sidecar blob artifacts can be produced with traceable provenance when enabled.
 - Canonical V18 dataset publication may happen per staged client build and later
   merge into larger corpora, but each published dataset must independently obey
   this contract.
+- Image-derived promoted signals depend on separately proven real object-loading
+  and capture lanes; until that proof is refreshed, those signals must remain
+  explicitly bounded or experimental rather than silently treated as closed.

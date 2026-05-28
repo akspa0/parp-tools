@@ -142,6 +142,17 @@ The ONLY valid reasons to edit `AlphaWdtWriter.cs` are:
 - If no spec exists for something you're building, create one before implementing.
 - See `.opencode/skills/doc-hygiene/SKILL.md` for the full checklist and conventions.
 
+### RULE 11A: PERIODIC CONTEXT CHECK — SMALL, SILLY, AND EXPLICIT
+
+Every 3-5 substantive turns during non-trivial work, or immediately after a route or proof-owner change, perform a tiny context check before continuing:
+
+- restate the current target surface
+- restate the current proof owner
+- restate the main unproven gap
+- restate what is explicitly out of scope
+
+If the user has asked for a “silly check,” include one brief harmless marker such as a single restrained emoji or short odd phrase in that check. The point is not tone; the point is making context drift obvious before the work drifts further.
+
 ### RULE 8: ONE PHASE AT A TIME — NO SCOPE CREEP
 
 **You cannot work on Phase N+1 until Phase N is done. Done means validated, not coded.**

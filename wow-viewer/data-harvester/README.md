@@ -15,6 +15,33 @@ Detailed command coverage lives in:
 - `docs/advanced-v16-workflows.md` — V16 dataset build/patch/validate commands
 - `specs/024-v18-canvas-paste-refinement-layer/` — full V18 spec
 
+## V18 Dataset Builder Transition
+
+An initial copy-forward V18 dataset builder now exists at
+`scripts/build_v18_dataset.py`.
+
+Current bounded status:
+
+- it is the versioned successor to `build_v16_dataset.py`
+- it writes stores under `wow-viewer/output/datasets/v18/`
+- it keeps decoded metadata plus signal validation in the canonical build flow
+- it emits `finalization.json` alongside the existing validation artifacts
+- it can optionally promote renderer-truth captures during `build` with
+  `--capture-root`, but only behind the explicit
+  `--experimental-renderer-truth-promotion` gate
+- object-roof mask arrays and roof-mask provenance now flow through the shared
+  harvest/tensor-pack contract instead of depending only on a downstream Python
+  patch pass
+- remaining follow-up work is to reduce or retire the legacy Python-only
+  roof-patching path once bounded real-data proof is complete
+
+Use this as the active implementation surface for the V18 dataset contract while
+the older V16 builder remains the stable baseline.
+
+The larger direct parser → decoded → dataset redesign is intentionally deferred
+to a future V20 dataset effort; V18 remains a bounded contract-closure pass over
+the existing streaming interchange shape.
+
 ---
 
 ## V18 Pipeline Overview
@@ -125,6 +152,8 @@ against an already finalized store.
 
 ## Build Dataset
 
+### Stable Baseline: V16 Stores
+
 ```powershell
 cd i:/parp/parp-tools/wow-viewer
 dotnet build ./WowViewer.slnx -c Debug
@@ -139,6 +168,43 @@ uv run python scripts/build_v16_dataset.py build `
 
 `build`, `patch-liquids`, `patch-objects`, and `merge-builds` now refuse to
 touch `.zarr` stores unless `--allow-zarr-write` is present.
+
+### In-Progress V18 Builder Slice
+
+```powershell
+cd i:/parp/parp-tools/wow-viewer/data-harvester
+uv run python scripts/build_v18_dataset.py build `
+  --build 3_3_5_12340 `
+  --allow-zarr-write `
+  --tile-workers 16
+```
+
+Optional bounded-proof-only renderer-truth integration during the V18 build:
+
+```powershell
+uv run python scripts/build_v18_dataset.py build `
+  --build 3_3_5_12340 `
+  --allow-zarr-write `
+  --experimental-renderer-truth-promotion `
+  --capture-root ../output/tmp/mdxviewer_validation_smoke
+```
+
+Treat that capture-derived path as experimental until bounded staged-client proof
+reconfirms real object loading and image capture on the current anchors.
+
+Latest bounded proof status:
+
+- `WowViewer.Tool.ValidationCapture capture --real-scene-dry-run` reports ready
+  scene state on both staged anchors:
+  - `0_5_3_3368 / Azeroth_30_48`
+  - `3_3_5_12340 / Azeroth_30_48`
+- a non-dry-run `--gpu-viewer-style` capture on
+  `3_3_5_12340 / Azeroth_30_48` completed `4/4` variants and emitted output
+  files, but the captured images were still flat/uniform and the derived
+  `object_visibility_mask` was all black
+- therefore the renderer-truth promotion lane must still be treated as
+  **not yet visually proven for real object rendering**, even though the command
+  path and artifact emission completed successfully
 
 Default V16 build compression:
 - codec: `lz4`

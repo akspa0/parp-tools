@@ -107,6 +107,9 @@ public static class AdtTensorPackBuilder
         (float[,]? objectMask257, float[,]? objectPreciseMask257, int[,]? objectInstanceMask257, float[,]? mddfMask257, float[,]? modfMask257, float[,]? objectFilteredMask257) =
             BuildObjectMasks(adtPath, stream, fileSummary, availableSignals, placementsOverride: placementCatalog, assetReader: assetReader, terrainChunksOverride: terrainChunks);
 
+        (float[,]? objectRoofMask256, float[,]? objectRoofConfidence256, string objectRoofMaskSource) =
+            BuildObjectRoofMasks(placementCatalog, tileX, tileY, availableSignals);
+
         float[,]? shadowResidualMask256 = BuildShadowResidualMask256(mcshShadowMask256, objectPreciseMask257, availableSignals);
 
         // ── Build PM4 path, building footprint, and MPRL portal masks ────────
@@ -183,6 +186,9 @@ public static class AdtTensorPackBuilder
             MddfMask257 = mddfMask257,
             ModfMask257 = modfMask257,
             ObjectFilteredMask257 = objectFilteredMask257,
+            ObjectRoofMask256 = objectRoofMask256,
+            ObjectRoofConfidence256 = objectRoofConfidence256,
+            ObjectRoofMaskSource = objectRoofMaskSource,
             Pm4PathMask = pm4PathMask,
             Pm4BuildingFootprintMask = pm4BuildingFootprintMask,
             Pm4MprlMask = pm4MprlMask,
@@ -267,6 +273,9 @@ public static class AdtTensorPackBuilder
                 placementCatalog,
                 assetReader,
                 terrainChunks);
+
+        (float[,]? objectRoofMask256, float[,]? objectRoofConfidence256, string objectRoofMaskSource) =
+            BuildObjectRoofMasks(placementCatalog, tileX, tileY, availableSignals);
 
         float[,]? shadowResidualMask256 = BuildShadowResidualMask256(mcshShadowMask256, objectPreciseMask257, availableSignals);
 
@@ -353,6 +362,9 @@ public static class AdtTensorPackBuilder
             MddfMask257 = mddfMask257,
             ModfMask257 = modfMask257,
             ObjectFilteredMask257 = objectFilteredMask257,
+            ObjectRoofMask256 = objectRoofMask256,
+            ObjectRoofConfidence256 = objectRoofConfidence256,
+            ObjectRoofMaskSource = objectRoofMaskSource,
             Pm4PathMask = pm4PathMask,
             Pm4BuildingFootprintMask = pm4BuildingFootprintMask,
             Pm4MprlMask = pm4MprlMask,
@@ -1732,6 +1744,10 @@ public static class AdtTensorPackBuilder
         @"(^|[\\/_\-])(tree|trees|bush|bushes|shrub|shrubs|flower|flowers|plant|plants|vine|vines|fern|ferns|mushroom|mushrooms|herb|herbs|ivy|reed|reeds|cattress|cattail|cattails|lilypad|lilypads|kelp|seaweed|coral|grass|grasses|weed|weeds|rock|rocks|stone|stones|pebble|pebbles|gravel|twig|twigs|log|logs|stump|stumps)([\\/_\-.]|$)",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
 
+    private static readonly System.Text.RegularExpressions.Regex RoofLikeAssetRegex = new(
+        @"(^|[\\/_\-])(roof|roofs|house|houses|inn|tower|towers|building|buildings|city|village)([\\/_\-.]|$)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private const float DoodadSmallPlanarExtentThreshold = 3.0f;
     private const float DoodadSmallPlanarAreaThreshold = 6.0f;
     private const float DoodadTallHeightThreshold = 8.0f;
@@ -1746,6 +1762,11 @@ public static class AdtTensorPackBuilder
     }
 
     private sealed record DoodadModelMetadata(Vector3 BoundsMin, Vector3 BoundsMax);
+
+    private const int MinimapSize = 256;
+    private const string ObjectRoofSourceNone = "none";
+    private const string ObjectRoofSourceMetadata = "metadata";
+    private const float ObjectRoofMetadataConfidence = 0.95f;
 
     private static (float[,]? mask, float[,]? preciseMask, int[,]? instanceMask, float[,]? mddfMask, float[,]? modfMask, float[,]? filteredMask)
         BuildObjectMasks(
@@ -2012,6 +2033,106 @@ public static class AdtTensorPackBuilder
         }
 
         return any ? coverage : null;
+    }
+
+    private static (float[,]? mask256, float[,]? confidence256, string source)
+        BuildObjectRoofMasks(
+            AdtPlacementCatalog? placements,
+            int tileX,
+            int tileY,
+            HashSet<string> signals)
+    {
+        if (placements is null)
+            return (null, null, ObjectRoofSourceNone);
+
+        float[,] roofMask = new float[MinimapSize, MinimapSize];
+        float[,] roofConfidence = new float[MinimapSize, MinimapSize];
+        bool any = false;
+
+        foreach (AdtWorldModelPlacement placement in placements.WorldModelPlacements)
+        {
+            if (!IsProbableRoofAsset(placement.ModelPath))
+                continue;
+
+            Vector3 min = placement.BoundsMin;
+            Vector3 max = placement.BoundsMax;
+            bool hasValidBounds =
+                min.X < max.X && min.Y < max.Y &&
+                !float.IsNaN(min.X) && !float.IsNaN(max.X);
+
+            if (hasValidBounds)
+            {
+                ProjectBoundsToMinimapPixels(min, max, tileX, tileY,
+                    out int minPx, out int minPy, out int maxPx, out int maxPy);
+                if (minPx > maxPx || minPy > maxPy)
+                    continue;
+
+                PaintRect(roofMask, minPx, minPy, maxPx, maxPy, 1.0f);
+                PaintRect(roofConfidence, minPx, minPy, maxPx, maxPy, ObjectRoofMetadataConfidence);
+                any = true;
+                continue;
+            }
+
+            if (!TryProjectPlacementToMinimapPixel(placement.Position, tileX, tileY, out int px, out int py))
+                continue;
+
+            PaintCircle(roofMask, px, py, radius: 4f, value: 1.0f);
+            PaintCircle(roofConfidence, px, py, radius: 4f, value: ObjectRoofMetadataConfidence);
+            any = true;
+        }
+
+        if (!any)
+            return (null, null, ObjectRoofSourceNone);
+
+        signals.Add("object_roof_mask_256");
+        signals.Add("object_roof_confidence_256");
+        return (roofMask, roofConfidence, ObjectRoofSourceMetadata);
+    }
+
+    private static bool IsProbableRoofAsset(string modelPath)
+    {
+        string normalized = NormalizeAssetPath(modelPath);
+        return RoofLikeAssetRegex.IsMatch(normalized);
+    }
+
+    private static bool TryProjectPlacementToMinimapPixel(Vector3 position, int tileX, int tileY, out int pixelX, out int pixelY)
+    {
+        if (!TryProjectPlacementToTilePixel(position, tileX, tileY, out int tilePixelX, out int tilePixelY))
+        {
+            pixelX = 0;
+            pixelY = 0;
+            return false;
+        }
+
+        pixelX = Math.Clamp((int)MathF.Round(tilePixelX * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
+        pixelY = Math.Clamp((int)MathF.Round(tilePixelY * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
+        return true;
+    }
+
+    private static void ProjectBoundsToMinimapPixels(
+        Vector3 min,
+        Vector3 max,
+        int tileX,
+        int tileY,
+        out int minPx,
+        out int minPy,
+        out int maxPx,
+        out int maxPy)
+    {
+        ProjectBoundsToTilePixels(min, max, tileX, tileY, out int tileMinX, out int tileMinY, out int tileMaxX, out int tileMaxY);
+        if (tileMinX > tileMaxX || tileMinY > tileMaxY)
+        {
+            minPx = 1;
+            minPy = 1;
+            maxPx = 0;
+            maxPy = 0;
+            return;
+        }
+
+        minPx = Math.Clamp((int)MathF.Round(tileMinX * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
+        minPy = Math.Clamp((int)MathF.Round(tileMinY * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
+        maxPx = Math.Clamp((int)MathF.Round(tileMaxX * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
+        maxPy = Math.Clamp((int)MathF.Round(tileMaxY * (MinimapSize - 1f) / (TileHeightmapSize - 1f)), 0, MinimapSize - 1);
     }
 
     private static bool PaintPlacementChunkCoverage(

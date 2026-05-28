@@ -187,6 +187,15 @@ public sealed class TerrainTileTensorPack
     /// <summary>256×256 shadow occupancy not currently explained by the object explanation mask.</summary>
     public float[,]? ShadowResidualMask256 { get; init; }
 
+    /// <summary>256×256 roof-focused object mask aligned to minimap space.</summary>
+    public float[,]? ObjectRoofMask256 { get; init; }
+
+    /// <summary>256×256 per-pixel confidence for <see cref="ObjectRoofMask256"/>.</summary>
+    public float[,]? ObjectRoofConfidence256 { get; init; }
+
+    /// <summary>Provenance label for the roof mask source (metadata, learned, heuristic, none).</summary>
+    public string ObjectRoofMaskSource { get; init; } = string.Empty;
+
     // ── Minimap inputs ─────────────────────────────────────────────────────
 
     /// <summary>256×256 × 3 RGB minimap image used as the primary Stage 1 visual input.</summary>
