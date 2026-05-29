@@ -98,24 +98,41 @@ def build_map_tile_key(build: str, map_name: str, tile_x: int, tile_y: int) -> s
     return f"{build}|{map_name}|{int(tile_x)}|{int(tile_y)}"
 
 
-def tile_world_bounds(tile_x: int, tile_y: int) -> tuple[float, float, float, float]:
-    """Return world-space bounds (x_min, x_max, y_min, y_max) for a tile."""
-    x_max = (WORLD_TILE_ORIGIN - float(tile_x)) * TILE_WORLD_SIZE
+def _is_alpha_build(build: str) -> bool:
+    """Alpha builds (0.x) use swapped tile <-> world coordinate mapping."""
+    return build.startswith("0_")
+
+
+def tile_world_bounds(tile_x: int, tile_y: int, build: str = "") -> tuple[float, float, float, float]:
+    """Return world-space bounds (x_min, x_max, y_min, y_max) for a tile.
+
+    Alpha builds swap tile axes: file tile X advances along world Y and
+    file tile Y advances along world X. LK builds use the standard mapping.
+    """
+    if _is_alpha_build(build):
+        tx, ty = tile_y, tile_x
+    else:
+        tx, ty = tile_x, tile_y
+    x_max = (WORLD_TILE_ORIGIN - float(tx)) * TILE_WORLD_SIZE
     x_min = x_max - TILE_WORLD_SIZE
-    y_max = (WORLD_TILE_ORIGIN - float(tile_y)) * TILE_WORLD_SIZE
+    y_max = (WORLD_TILE_ORIGIN - float(ty)) * TILE_WORLD_SIZE
     y_min = y_max - TILE_WORLD_SIZE
     return x_min, x_max, y_min, y_max
 
 
-def world_xy_to_tile_pixel(x: float, y: float, tile_x: int, tile_y: int, tile_size: int = 256) -> tuple[float, float]:
+def world_xy_to_tile_pixel(x: float, y: float, tile_x: int, tile_y: int, tile_size: int = 256, build: str = "") -> tuple[float, float]:
     """Project world coordinates into tile-local pixel space.
 
-    The transform follows the same 32-origin tile convention used by ADT tile
-    naming. Output is not clipped so callers can apply bbox clipping policy.
+    Alpha builds swap tile axes to match the client's coordinate convention.
     """
-    x_min, x_max, y_min, y_max = tile_world_bounds(tile_x, tile_y)
-    px = ((x_max - float(x)) / TILE_WORLD_SIZE) * float(tile_size - 1)
-    py = ((y_max - float(y)) / TILE_WORLD_SIZE) * float(tile_size - 1)
+    x_min, x_max, y_min, y_max = tile_world_bounds(tile_x, tile_y, build=build)
+    if _is_alpha_build(build):
+        # Alpha minimap pixel Y advances along world X, pixel X along world Y
+        px = ((y_max - float(y)) / TILE_WORLD_SIZE) * float(tile_size - 1)
+        py = ((x_max - float(x)) / TILE_WORLD_SIZE) * float(tile_size - 1)
+    else:
+        px = ((x_max - float(x)) / TILE_WORLD_SIZE) * float(tile_size - 1)
+        py = ((y_max - float(y)) / TILE_WORLD_SIZE) * float(tile_size - 1)
     return px, py
 
 
@@ -129,16 +146,17 @@ def world_bbox_to_tile_bbox_xyxy(
     tile_y: int,
     tile_size: int = 256,
     padding_px: int = 2,
+    build: str = "",
 ) -> tuple[int, int, int, int] | None:
     """Project a world-space bbox into an inclusive tile-space bbox.
 
     Returns None when the projected box does not overlap the tile.
     """
     corners = [
-        world_xy_to_tile_pixel(min_x, min_y, tile_x, tile_y, tile_size=tile_size),
-        world_xy_to_tile_pixel(min_x, max_y, tile_x, tile_y, tile_size=tile_size),
-        world_xy_to_tile_pixel(max_x, min_y, tile_x, tile_y, tile_size=tile_size),
-        world_xy_to_tile_pixel(max_x, max_y, tile_x, tile_y, tile_size=tile_size),
+        world_xy_to_tile_pixel(min_x, min_y, tile_x, tile_y, tile_size=tile_size, build=build),
+        world_xy_to_tile_pixel(min_x, max_y, tile_x, tile_y, tile_size=tile_size, build=build),
+        world_xy_to_tile_pixel(max_x, min_y, tile_x, tile_y, tile_size=tile_size, build=build),
+        world_xy_to_tile_pixel(max_x, max_y, tile_x, tile_y, tile_size=tile_size, build=build),
     ]
     xs = [xy[0] for xy in corners]
     ys = [xy[1] for xy in corners]
@@ -167,13 +185,14 @@ def d1_style_bbox_fallback(
     tile_y: int,
     tile_size: int = 256,
     base_radius_px: float = 6.0,
+    build: str = "",
 ) -> tuple[int, int, int, int] | None:
     """Fallback bbox projection for placements without explicit world bbox.
 
     This is intentionally conservative and only used for MDDF-style placements
     that do not carry bounding extents.
     """
-    px, py = world_xy_to_tile_pixel(pos_x, pos_y, tile_x, tile_y, tile_size=tile_size)
+    px, py = world_xy_to_tile_pixel(pos_x, pos_y, tile_x, tile_y, tile_size=tile_size, build=build)
     radius = max(2.0, float(base_radius_px) * max(float(scale), 0.2))
     x0 = int(np.floor(px - radius))
     y0 = int(np.floor(py - radius))

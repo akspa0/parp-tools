@@ -119,6 +119,221 @@ public class ScreenshotRenderer : IDisposable
         return CaptureMdxRoofTopDown(entry, outputDir, width, height, resolvedModelPath);
     }
 
+    /// <summary>
+    /// Capture a roof-top-down image for any supported model type (WMO or M2) by path.
+    /// </summary>
+    public string? CapturePathByExtension(string modelPath, string outputDir, int width = 512, int height = 512)
+    {
+        string ext = Path.GetExtension(modelPath).ToLowerInvariant();
+        if (ext == ".wmo")
+            return CaptureWmoRoofTopDownByPath(modelPath, outputDir, width, height);
+        if (ext is ".m2" or ".mdx")
+            return CaptureMdxRoofTopDownByPath(modelPath, outputDir, width, height);
+        return null;
+    }
+
+    /// <summary>
+    /// Capture all-angle images for any supported model type (WMO or M2) by path.
+    /// </summary>
+    public string? CaptureAllAnglesByPath(string modelPath, string outputDir, int width = 512, int height = 512)
+    {
+        string ext = Path.GetExtension(modelPath).ToLowerInvariant();
+        if (ext == ".wmo")
+            return CaptureWmoAllAngles(modelPath, outputDir, width, height);
+        if (ext is ".m2" or ".mdx")
+            return CaptureMdxAllAngles(modelPath, outputDir, width, height);
+        return null;
+    }
+
+    /// <summary>
+    /// Capture top-down orthographic + all angles for an M2/MDX model by path (no AssetCatalogEntry).
+    /// </summary>
+    public string? CaptureMdxAllAngles(string modelPath, string outputDir, int width = 512, int height = 512)
+    {
+        byte[]? mdxData = _dataSource?.ReadFile(modelPath.Replace('/', '\\'));
+        if (mdxData == null) return null;
+
+        MdxFile mdx;
+        try { using var ms = new MemoryStream(mdxData); using var br = new BinaryReader(ms); mdx = MdxFile.Load(br); }
+        catch { return null; }
+        if (mdx.Geosets.Count == 0) return null;
+
+        string modelDir = Path.GetDirectoryName(modelPath.Replace('/', '\\')) ?? "";
+        MdxRenderer? renderer = null;
+        try { renderer = new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver); }
+        catch { return null; }
+
+        try
+        {
+            // Roof top-down
+            var (boundsMin, boundsMax) = ComputeBounds(mdx);
+            var modelTransform = Matrix4x4.CreateScale(-1f, 1f, 1f);
+            string? roofPath = RenderMdxRoofTopDown(renderer, boundsMin, boundsMax, modelTransform, outputDir, width, height);
+
+            // Multi-angle
+            RenderMdxMultiAngle(renderer, boundsMin, boundsMax, modelTransform, outputDir, width, height);
+
+            return roofPath;
+        }
+        finally { renderer.Dispose(); }
+    }
+
+    public string? CaptureMdxRoofTopDownByPath(string modelPath, string outputDir, int width = 512, int height = 512)
+    {
+        byte[]? mdxData = _dataSource?.ReadFile(modelPath.Replace('/', '\\'));
+        if (mdxData == null) return null;
+
+        MdxFile mdx;
+        try { using var ms = new MemoryStream(mdxData); using var br = new BinaryReader(ms); mdx = MdxFile.Load(br); }
+        catch { return null; }
+        if (mdx.Geosets.Count == 0) return null;
+
+        string modelDir = Path.GetDirectoryName(modelPath.Replace('/', '\\')) ?? "";
+        MdxRenderer? renderer = null;
+        try { renderer = new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver); }
+        catch { return null; }
+
+        try
+        {
+            var (boundsMin, boundsMax) = ComputeBounds(mdx);
+            var modelTransform = Matrix4x4.CreateScale(-1f, 1f, 1f);
+            return RenderMdxRoofTopDown(renderer, boundsMin, boundsMax, modelTransform, outputDir, width, height);
+        }
+        finally { renderer.Dispose(); }
+    }
+
+    private void RenderMdxMultiAngle(MdxRenderer renderer, Vector3 boundsMin, Vector3 boundsMax,
+        Matrix4x4 modelTransform, string outputDir, int width, int height)
+    {
+        var center = (boundsMin + boundsMax) * 0.5f;
+        float radius = (boundsMax - boundsMin).Length() * 0.5f;
+        if (radius < 0.01f) radius = 1.0f;
+
+        EnsureFbo(width, height);
+        if (!_fboReady) return;
+
+        float fovRad = 25f * MathF.PI / 180f;
+        float aspect = (float)width / height;
+        var corners = ComputeBoundsCorners(boundsMin, boundsMax);
+
+        foreach (var (angleName, azimuthDeg, elevationDeg) in CameraAngles)
+        {
+            try
+            {
+                float elev = elevationDeg * MathF.PI / 180f;
+                float azim = azimuthDeg * MathF.PI / 180f;
+                var camDir = Vector3.Normalize(new Vector3(MathF.Cos(elev) * MathF.Cos(azim), MathF.Cos(elev) * MathF.Sin(azim), -MathF.Sin(elev)));
+                var up = MathF.Abs(Vector3.Dot(camDir, Vector3.UnitZ)) > 0.99f ? Vector3.UnitX : Vector3.UnitZ;
+                var tmpView = Matrix4x4.CreateLookAt(center - camDir * radius, center, up);
+                float halfFovV = fovRad * 0.5f;
+                float halfFovH = MathF.Atan(MathF.Tan(halfFovV) * aspect);
+                float maxDist = radius;
+                for (int ci = 0; ci < 8; ci++)
+                {
+                    var viewPos = Vector3.Transform(corners[ci], tmpView);
+                    float depth = -viewPos.Z;
+                    float needV = MathF.Abs(viewPos.Y) / MathF.Tan(halfFovV) + depth;
+                    float needH = MathF.Abs(viewPos.X) / MathF.Tan(halfFovH) + depth;
+                    maxDist = MathF.Max(maxDist, MathF.Max(needV, needH));
+                }
+                float dist = maxDist * 1.15f;
+                var camPos = center - camDir * dist;
+                var view = Matrix4x4.CreateLookAt(camPos, center, up);
+                var proj = Matrix4x4.CreatePerspectiveFieldOfView(fovRad, aspect, 0.01f, dist * 10f);
+
+                _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+                _gl.Viewport(0, 0, (uint)width, (uint)height);
+                _gl.ClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+                _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+                _gl.Enable(EnableCap.DepthTest);
+                _gl.DepthFunc(DepthFunction.Less);
+                _gl.DepthMask(true);
+
+                var fogColor = new Vector3(1.0f, 1.0f, 1.0f);
+                var lightDir = Vector3.Normalize(new Vector3(-0.5f, 0.8f, 0.3f));
+                var lightColor = new Vector3(1.0f, 0.95f, 0.9f);
+                var ambientColor = new Vector3(0.3f, 0.3f, 0.35f);
+
+                _gl.Disable(EnableCap.Blend);
+                renderer.RenderWithTransform(modelTransform, view, proj, RenderPass.Opaque, 1.0f,
+                    fogColor, dist * 5f, dist * 10f, camPos, lightDir, lightColor, ambientColor);
+                _gl.Enable(EnableCap.DepthTest);
+                _gl.DepthFunc(DepthFunction.Lequal);
+                renderer.RenderWithTransform(modelTransform, view, proj, RenderPass.Transparent, 1.0f,
+                    fogColor, dist * 5f, dist * 10f, camPos, lightDir, lightColor, ambientColor);
+
+                byte[] pixels = new byte[width * height * 4];
+                unsafe { fixed (byte* ptr = pixels) _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr); }
+                ForceOpaqueAlpha(pixels);
+                _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+
+                using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, width, height);
+                image.Mutate(x => x.Flip(FlipMode.Vertical));
+                image.SaveAsJpeg(Path.Combine(outputDir, $"{angleName}.jpg"), new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 99 });
+            }
+            catch (Exception ex)
+            {
+                ViewerLog.Trace($"[Screenshot] M2 angle {angleName} failed: {ex.Message}");
+                _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            }
+        }
+    }
+
+    private string? RenderMdxRoofTopDown(MdxRenderer renderer, Vector3 boundsMin, Vector3 boundsMax,
+        Matrix4x4 modelTransform, string outputDir, int width, int height)
+    {
+        var corners = ComputeBoundsCorners(boundsMin, boundsMax);
+        for (int ci = 0; ci < 8; ci++)
+            corners[ci] = Vector3.Transform(corners[ci], modelTransform);
+
+        var wsMin = corners[0]; var wsMax = corners[0];
+        for (int ci = 1; ci < 8; ci++) { wsMin = Vector3.Min(wsMin, corners[ci]); wsMax = Vector3.Max(wsMax, corners[ci]); }
+
+        float spanX = wsMax.X - wsMin.X; if (spanX < 0.01f) spanX = 1.0f;
+        float spanY = wsMax.Y - wsMin.Y; if (spanY < 0.01f) spanY = 1.0f;
+        float spanZ = wsMax.Z - wsMin.Z;
+        var center = (wsMin + wsMax) * 0.5f;
+
+        float padFactor = 1.1f;
+        float orthoHalfX = spanX * padFactor * 0.5f;
+        float orthoHalfY = spanY * padFactor * 0.5f;
+        float aspect = (float)width / height;
+        if (aspect > 1.0f) orthoHalfX = MathF.Max(orthoHalfX, orthoHalfY * aspect);
+        else orthoHalfY = MathF.Max(orthoHalfY, orthoHalfX / aspect);
+
+        float eyeHeight = spanZ + 100.0f;
+        var eyePos = new Vector3(center.X, center.Y, center.Z + eyeHeight);
+        var view = Matrix4x4.CreateLookAt(eyePos, center, Vector3.UnitX);
+        var proj = Matrix4x4.CreateOrthographic(orthoHalfX * 2, orthoHalfY * 2, 0.1f, eyeHeight * 2 + spanZ + 200f);
+
+        EnsureFbo(width, height);
+        if (!_fboReady) return null;
+        Directory.CreateDirectory(outputDir);
+
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+        _gl.Viewport(0, 0, (uint)width, (uint)height);
+        _gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Less);
+        _gl.DepthMask(true);
+
+        var fogColor = new Vector3(0.0f, 0.0f, 0.0f);
+        var lightDir = Vector3.Normalize(new Vector3(0.3f, -0.2f, -1.0f));
+        var lightColor = new Vector3(1.0f, 0.97f, 0.92f);
+        var ambientColor = new Vector3(0.45f, 0.45f, 0.5f);
+
+        _gl.Disable(EnableCap.Blend);
+        renderer.RenderWithTransform(modelTransform, view, proj, RenderPass.Opaque, 1.0f,
+            fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, eyePos, lightDir, lightColor, ambientColor);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        renderer.RenderWithTransform(modelTransform, view, proj, RenderPass.Transparent, 1.0f,
+            fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, eyePos, lightDir, lightColor, ambientColor);
+
+        return ReadPixelsAndSave(width, height, outputDir);
+    }
+
     private int CaptureWmoMultiAngle(AssetCatalogEntry entry, string outputDir, int width, int height,
         string? resolvedModelPath)
     {
@@ -391,7 +606,7 @@ public class ScreenshotRenderer : IDisposable
             string assetDir = Path.Combine(outputDir, safeName);
             Directory.CreateDirectory(assetDir);
 
-            string? result = CaptureWmoRoofTopDownByPath(path, assetDir, width, height);
+            string? result = CapturePathByExtension(path, assetDir, width, height);
             if (result != null)
             {
                 success++;
@@ -442,7 +657,7 @@ public class ScreenshotRenderer : IDisposable
             string assetDir = Path.Combine(outputDir, safeName);
             Directory.CreateDirectory(assetDir);
 
-            string? result = CaptureWmoAllAngles(path, assetDir, width, height);
+            string? result = CaptureAllAnglesByPath(path, assetDir, width, height);
             if (result != null)
             {
                 success++;
@@ -723,9 +938,8 @@ string normalized = modelPath.Replace('/', '\\');
 
         using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, width, height);
         image.Mutate(x => x.Flip(FlipMode.Vertical));
-        string path = Path.Combine(outputDir, "roof_topdown.jpg");
-        var jpegEncoder = new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 99 };
-        image.SaveAsJpeg(path, jpegEncoder);
+        string path = Path.Combine(outputDir, "roof_topdown.png");
+        image.SaveAsPng(path);
         return path;
     }
 

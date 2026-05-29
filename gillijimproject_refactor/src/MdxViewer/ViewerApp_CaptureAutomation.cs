@@ -850,6 +850,30 @@ public partial class ViewerApp
         string assetPath = batch.AssetPaths[batch.CurrentIndex];
         string safeName = SanitizeRoofCaptureName(Path.GetFileNameWithoutExtension(assetPath.Replace('/', '\\')));
         string assetDir = Path.Combine(batch.OutputDir, safeName);
+
+        // Resume: skip if existing successful metadata
+        string existingMeta = Path.Combine(assetDir, "metadata.json");
+        bool alreadyDone = File.Exists(existingMeta);
+        if (alreadyDone)
+        {
+            try
+            {
+                string metaText = File.ReadAllText(existingMeta);
+                var meta = System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, object>>(metaText);
+                alreadyDone = meta != null && meta.TryGetValue("success", out var s) && (s is bool b && b || s is string str && str == "True");
+            }
+            catch { alreadyDone = false; }
+        }
+
+        if (alreadyDone)
+        {
+            batch.SuccessCount++;
+            _statusMessage = $"[RoofCapture] {batch.CurrentIndex + 1}/{batch.AssetPaths.Count} SKIP (existing) {assetPath}";
+            AppendMkHarvestLogLine(_statusMessage);
+            batch.CurrentIndex++;
+            return;
+        }
+
         Directory.CreateDirectory(assetDir);
 
         _statusMessage = $"[RoofCapture] {batch.CurrentIndex + 1}/{batch.AssetPaths.Count} {assetPath}";
@@ -857,9 +881,9 @@ public partial class ViewerApp
 
         string? result;
         if (batch.AllAngles)
-            result = batch.Renderer.CaptureWmoAllAngles(assetPath, assetDir, batch.Resolution, batch.Resolution);
+            result = batch.Renderer.CaptureAllAnglesByPath(assetPath, assetDir, batch.Resolution, batch.Resolution);
         else
-            result = batch.Renderer.CaptureWmoRoofTopDownByPath(assetPath, assetDir, batch.Resolution, batch.Resolution);
+            result = batch.Renderer.CapturePathByExtension(assetPath, assetDir, batch.Resolution, batch.Resolution);
 
         if (result != null)
         {

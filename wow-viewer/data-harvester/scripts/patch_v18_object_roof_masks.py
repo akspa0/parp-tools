@@ -143,7 +143,7 @@ def _load_tile_maps(index_rows: list[dict[str, Any]]) -> tuple[dict[int, dict[st
     return tile_meta, tile_to_row
 
 
-def _project_bbox(row: dict[str, Any], tile_x: int, tile_y: int, padding: int) -> tuple[int, int, int, int] | None:
+def _project_bbox(row: dict[str, Any], tile_x: int, tile_y: int, padding: int, build: str = "") -> tuple[int, int, int, int] | None:
     if str(row.get("instance_type", "")).lower() == "modf":
         return world_bbox_to_tile_bbox_xyxy(
             min_x=float(row.get("bbMinX", 0.0) or 0.0),
@@ -153,6 +153,7 @@ def _project_bbox(row: dict[str, Any], tile_x: int, tile_y: int, padding: int) -
             tile_x=tile_x,
             tile_y=tile_y,
             padding_px=padding,
+            build=build,
         )
     return d1_style_bbox_fallback(
         pos_x=float(row.get("posX", 0.0) or 0.0),
@@ -161,6 +162,7 @@ def _project_bbox(row: dict[str, Any], tile_x: int, tile_y: int, padding: int) -
         tile_x=tile_x,
         tile_y=tile_y,
         base_radius_px=6.0 + float(padding),
+        build=build,
     )
 
 
@@ -256,7 +258,7 @@ def _apply_build(args: argparse.Namespace, build: str) -> dict[str, Any]:
             rejected_non_roof += 1
             continue
 
-        bbox = _project_bbox(row, tile_x=tile_x, tile_y=tile_y, padding=int(args.bbox_padding))
+        bbox = _project_bbox(row, tile_x=tile_x, tile_y=tile_y, padding=int(args.bbox_padding), build=build)
         if bbox is None:
             rejected_invalid_bbox += 1
             continue
