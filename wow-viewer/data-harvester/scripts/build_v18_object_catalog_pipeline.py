@@ -85,6 +85,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--all-angles", action="store_true", default=True)
     parser.add_argument("--skip-capture", action="store_true", default=False)
     parser.add_argument("--skip-pack", action="store_true", default=False)
+    parser.add_argument("--pack-only", action="store_true", default=False)
     parser.add_argument("--dry-run", action="store_true", default=False)
     parser.add_argument("--allow-zarr-write", action="store_true", default=False)
     parser.add_argument("--roof-only", action="store_true", default=False)
@@ -447,6 +448,17 @@ def main() -> None:
 
     if args.dry_run:
         print("\n=== DRY RUN COMPLETE ===")
+        return
+
+    if args.pack_only:
+        print("\n=== PACK-ONLY MODE ===")
+        step3_pack_object_store(
+            output_dir=run_dir,
+            builds=builds,
+            crop_size=128,
+            allow_zarr_write=bool(args.allow_zarr_write),
+        )
+        print("\n=== PACK-ONLY COMPLETE ===")
         return
 
     # Step 2: MdxViewer capture

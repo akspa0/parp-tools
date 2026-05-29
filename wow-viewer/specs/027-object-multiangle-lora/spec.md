@@ -1,4 +1,4 @@
-# Feature Specification: Object Multi-Angle LoRA Dataset
+# Feature Specification: Object Multi-Angle LoRA Dataset (from Existing Roof Captures)
 
 **Feature Branch**: `027-object-multiangle-lora`
 
@@ -6,150 +6,154 @@
 
 **Status**: Draft
 
-**Input**: Build a multi-angle object reference image dataset from WoW WMO/M2 renders, structured for LoRA fine-tuning of Qwen-Image-Edit-2511 using the prompt schema from `fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA` (96 camera poses: 4 elevations × 8 azimuths × 3 distances). The eventual goal is to generate plausible reference images for unrecognized objects — a fallback when visual identification models can't match an object to a known asset.
+**Input**: Build a multi-angle object reference image dataset from the existing roof capture pipeline (spec `025`) for fine-tuning the `fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA`. Use the 7 existing captures per asset (6 perspective angles + 1 orthographic roof top-down, already 2-8GB per client at 2K resolution) instead of rendering 96 new poses. The LoRA improves the base model's ability to generate plausible WoW-style object views — a fallback when visual identification models can't match an unknown object to a known asset.
 
 ## Problem Statement
 
-The V18 terrain pipeline and object-roof library (spec `025`) can identify known objects from placement metadata and roof silhouettes. But there will always be edge cases: damaged or partial M2/WMO assets, objects from client builds not in the corpus, or novel combinations. When visual identification fails, the system needs a way to generate a plausible reference image for the unrecognized object — something that looks like what a WoW object would look like from that angle.
+The existing roof capture pipeline already produces high-fidelity 2K renders of known WMO/M2 assets at 6 perspective angles (front, back, left, right, top, three-quarter) plus an orthographic roof top-down. These captures total 2-8GB per client build and represent a uniquely valuable dataset — many of these assets are from 2003 with no proper high-resolution renders available anywhere.
 
-Fine-tuning a multi-angle LoRA on real WoW object renders gives us a generative prior that "knows" what WoW objects look like at any angle. We can then use that LoRA to synthesize missing views or even entire objects.
+The `fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA` already understands the multi-angle camera control task (trained on 3000+ Gaussian Splatting renders across 96 poses). Fine-tuning it on WoW object renders teaches it what WoW assets look like, while preserving the base model's multi-angle generalization.
 
-The reference LoRA (`fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA`) was trained on 3000+ Gaussian Splatting renders of real-world objects. We can extend or retrain it on WoW-specific object renders, using the same 96-pose camera system and the exact same `<sks> [azimuth] [elevation] [distance]` prompt format.
+The mapping from our 7 captures to the LoRA's 96-pose prompt system is a best-fit: each of our 6 perspective angles maps to the nearest `[azimuth] [elevation] [distance]` prompt. The model already knows the remaining 90 poses from the base LoRA; we just add WoW-specific visual knowledge.
 
 ## User Scenarios & Testing
 
-### User Story 1 — WoW objects can be rendered from 96 standard camera poses (Priority: P1)
+### User Story 1 — Existing roof captures are mapped to LoRA prompt format (Priority: P1)
 
-A dataset builder can take any known WMO or M2 object from a staged game client and produce 96 rendered views matching the reference LoRA's camera system (4 elevations × 8 azimuths × 3 distances).
+A dataset builder can run a reformatting pass over an existing roof capture output directory and produce LoRA-compatible training pairs, mapping each of the 6 perspective angles to the closest `<sks> [azimuth] [elevation] [distance]` prompt.
 
-**Why this priority**: Everything else depends on having the multi-angle renders. Without this, there is no dataset.
+**Why this priority**: The roof captures are already on disk. The bottleneck is just reformatting and labeling. This story validates the entire data pipeline.
 
-**Independent Test**: Render one WMO (e.g. `STORMWIND.WMO`) from all 96 poses and verify each output is a non-black, non-trivial image with the object clearly visible.
+**Independent Test**: Run the reformatter on one object's captures and verify 7 output mappings (6 perspective + 1 top-down) with correct prompts and image pairs.
 
 **Acceptance Scenarios**:
 
-1. **Given** a staged game client and a known WMO path, **When** the multi-angle renderer runs, **Then** it produces 96 output images (PNG, 512×512 or configurable)
-2. **Given** a single-pose render, **When** the camera is at `front view eye-level shot medium shot` (0° azimuth, 0° elevation, ×1.0 distance), **Then** the object is centered and fully visible
-3. **Given** all 96 renders for one object, **When** they are inspected, **Then** each file's metadata records the azimuth, elevation, distance, and source asset path
+1. **Given** a roof capture directory with `front.jpg`, `back.jpg`, `left.jpg`, `right.jpg`, `top.jpg`, `three_quarter.jpg`, and `roof_topdown.png`, **When** the LoRA pair-builder runs, **Then** it produces 7 training (input, prompt, target) tuples per object
+2. **Given** a `front.jpg` at 0° azimuth, 15° elevation, **When** mapped, **Then** the prompt is `<sks> front view elevated shot close-up`
+3. **Given** a `three_quarter.jpg` at 35° azimuth, 25° elevation, **When** mapped, **Then** the prompt is `<sks> front-right quarter view elevated shot close-up`
+4. **Given** a `roof_topdown.png` orthographic capture, **When** mapped, **Then** the prompt is `<sks> front view high-angle shot wide shot` (best approximation for top-down)
 
 ---
 
-### User Story 2 — Rendered views are formatted as LoRA training pairs (Priority: P1)
+### User Story 2 — Multi-object LoRA fine-tuning produces WoW-aware checkpoint (Priority: P2)
 
-A trainer can take the 96 renders for one object and produce 96 training examples, each being (input_image, prompt_string, target_image) where input_image is the canonical front-view eye-level medium shot, prompt contains `<sks> [azimuth] [elevation] [distance]`, and target_image is the render from that angle.
+A trainer can fine-tune the existing `fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA` on 100+ WoW objects using the mapped roof captures, producing a checkpoint that generates plausible WoW-style object views from novel angles given a front-view input.
 
-**Why this priority**: The LoRA requires paired training data. The prompt format must exactly match the reference LoRA's expectations.
+**Why this priority**: Validates that our limited-angle captures (6 poses vs the LoRA's 96) are sufficient to teach WoW visual style. The base LoRA already knows how to do view control — we just add WoW-specific appearance.
 
-**Independent Test**: Format one object's 96 renders into training pairs and verify one pair: `input=front_eye_medium.png`, `prompt="<sks> right side view elevated shot close-up"`, `target=right_elevated_closeup.png`.
+**Independent Test**: Fine-tune on 100 objects, then run inference on a held-out object's front view with an angle prompt not in our 6 (e.g. `right side view low-angle shot wide shot`) and visually assess plausibility.
 
 **Acceptance Scenarios**:
 
-1. **Given** 96 renders for one object, **When** the pair-builder runs, **Then** it emits 96 (input, prompt, target) tuples
-2. **Given** a training tuple, **When** the prompt is inspected, **Then** it matches the reference LoRA schema exactly (`<sks> {azimuth} {elevation} {distance}`)
-3. **Given** all tuples, **When** the canonical front-view (0° az, 0° elev, ×1.0 dist) tuple is checked, **Then** input == target (identity pair — standard practice for viewpoint control LoRAs)
+1. **Given** a LoRA checkpoint fine-tuned on 100+ WoW objects, **When** inference runs on a held-out object's front view with prompt `<sks> right side view low-angle shot wide shot` (not in our training set), **Then** the output is a plausible WoW-style object render from that angle
+2. **Given** inference outputs for 8 azimuths at eye-level medium shot, **When** viewed in sequence, **Then** they form a consistent object rotation (the base LoRA's view control is preserved)
+3. **Given** a non-WoW input image (e.g. a real-world photo), **When** inference runs, **Then** the output retains input structure but adopts WoW-style rendering (texture quality, color palette, edge sharpness)
+4. **Given** the fine-tuned checkpoint, **When** LoRA strength is varied from 0.0 to 1.0, **Then** strength 0.0 produces the base model's real-world style and strength 1.0 produces WoW-style rendering
 
 ---
 
-### User Story 3 — Multi-object dataset is usable for LoRA fine-tuning (Priority: P2)
+### User Story 3 — High-resolution asset renders serve dual purposes (Priority: P2)
 
-A trainer can run LoRA fine-tuning of `Qwen/Qwen-Image-Edit-2511` using the rendered WoW object dataset, producing a checkpoint that generates WoW-style objects from arbitrary angles given a front-view input.
+A researcher can use the same roof capture output directory for both the existing roof-mask pipeline (spec 025, top-down orthographic for roof silhouettes) and the LoRA training pipeline (6 perspective angles + top-down for generative training) without duplicating capture work.
 
-**Why this priority**: This validates the dataset quality and demonstrates the generative capability.
+**Why this priority**: This validates the design choice to reuse existing captures rather than building a separate multi-angle renderer.
 
-**Independent Test**: Fine-tune on 10+ objects with full 96-pose sets, then run inference on a held-out object's front view with a novel-angle prompt and visually assess the output.
+**Independent Test**: Run `build_v18_object_catalog_pipeline.py` once, then verify the output directory serves both `patch_v18_object_roof_masks.py` and the new LoRA pair-builder.
 
 **Acceptance Scenarios**:
 
-1. **Given** a dataset of 10+ objects with 96 poses each, **When** LoRA training runs on `fal.ai` or local diffusers, **Then** training completes without errors
-2. **Given** a trained LoRA checkpoint, **When** inference runs on a held-out object's front view with prompt `<sks> back view low-angle shot close-up`, **Then** the output is a plausible WoW-style object render from that angle
-3. **Given** inference outputs for 8 azimuths at eye-level medium shot, **When** they are viewed in sequence, **Then** they form a smooth rotation around the object
+1. **Given** a single roof capture run, **When** both the roof-mask pipeline and the LoRA pair-builder read from the same directory, **Then** both produce valid outputs
+2. **Given** the roof capture at 2K resolution, **When** the LoRA pair-builder runs, **Then** it produces 512×512 downsampled training images (configurable resolution) without modifying the originals
 
 ---
 
 ### User Story 4 — Generative fallback for unrecognized objects (Priority: P3)
 
-An inference pipeline can use the trained LoRA to generate a plausible reference image for an object that the visual identification system cannot match to a known asset.
+An inference pipeline can use the fine-tuned LoRA to generate a plausible reference image for an object that the visual identification system cannot match to a known asset.
 
-**Why this priority**: This is the ultimate goal, but it depends on having a working LoRA first. The pipeline itself is thin wrapper logic.
+**Why this priority**: This is the ultimate motivation — generating plausible stand-in images when identification fails. It's P3 because it requires the LoRA checkpoint first.
 
-**Independent Test**: Feed a cropped top-down or front-view image of an unknown object-like blob into the pipeline and verify the output is a plausible multi-angle WoW object image (even if not faithful to the "true" unknown object).
+**Independent Test**: Feed a cropped front-view image of an object region from a novel (not in training) map tile into the pipeline, and verify the output is a plausible WoW-style object from the requested angle.
 
 **Acceptance Scenarios**:
 
-1. **Given** an input image of an unrecognized object region, **When** the generative fallback runs, **Then** it outputs a plausible WoW-style object from the requested angle
-2. **Given** the same input, **When** different angle prompts are supplied, **Then** the outputs are consistent (same object style, different viewpoints)
-3. **Given** a clearly non-object input (empty terrain), **When** the fallback runs, **Then** the output quality degrades gracefully rather than producing a hallucinated object
+1. **Given** a cropped input image of an unrecognized object region, **When** the generative fallback runs, **Then** it outputs a plausible WoW-style object from the requested angle
+2. **Given** the same input, **When** different angle prompts are supplied, **Then** the outputs show consistent object identity across angles
+3. **Given** a clearly non-object input (empty terrain region), **When** the fallback runs, **Then** output degrades gracefully rather than hallucinating a detailed object
 
 ---
 
 ### Edge Cases
 
-- **Empty or transparent renders**: Some WMOs are fully underground or invisible from certain angles. The renderer must detect near-empty frames and either skip them or mark them as low-quality.
-- **Very large/small objects**: Camera framing must adapt to object bounding box size. A mailbox and a cathedral should both fit the output frame.
-- **Objects with interior-only geometry**: Some WMOs are interiors with no exterior mesh. The renderer must detect this and not produce blank frames.
-- **Partial objects**: M2 doodads may have alpha-cutout textures (trees, fences). The renderer must handle alpha blending correctly.
-- **Mixed-build objects**: Objects from different client builds (0.5.3 Alpha vs 3.3.5 LK) have different formats. The renderer must handle both.
+- **2003-era WMO quirks**: Early Alpha WMOs may have missing textures, degenerate geometry, or incorrect bounding boxes. The capture pipeline already handles these (black pixels in renders). The LoRA reformatter must detect and skip assets where >50% of pixels are background-colored.
+- **Alpha vs LK renders**: Alpha (0.5.3) textures are lower resolution and different color palette. Mixing builds in training data is fine for diversity, but the metadata must record which build each capture came from.
+- **Interior-only WMOs**: Some WMO groups have no exterior mesh. The capture pipeline already marks these by low mask_coverage. Skip them for LoRA training.
+- **M2 with alpha-cutout textures**: Trees, fences, signs with transparent regions. The existing JPEG capture loses alpha; the roof top-down PNG retains it. For LoRA training, we need to handle background removal or use white-background JPEGs as-is (the LoRA should learn that WoW objects are rendered on white backgrounds).
+- **Per-object distance variation**: Our captures don't have a distance variable (only one distance per angle). The reformatter maps all perspective angles to `close-up` since the object fills most of the frame at our standard capture distance.
 
 ## Requirements
 
 ### Functional Requirements
 
-- **FR-001**: The multi-angle renderer MUST consume a WMO or M2 path from a staged game client and produce 96 renders at the defined 4×8×3 camera poses.
-- **FR-002**: The camera system MUST match the reference LoRA's conventions: 8 azimuths (0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°), 4 elevations (-30°, 0°, 30°, 60°), 3 distances (×0.6, ×1.0, ×1.8).
-- **FR-003**: The output image size MUST be configurable (default 512×512).
-- **FR-004**: Each render output MUST carry metadata: source asset path, azimuth, elevation, distance, client build, and render timestamp.
-- **FR-005**: The pair-builder MUST use `<sks>` as the trigger token in every prompt, matching the reference LoRA convention.
-- **FR-006**: The pair-builder MUST use the reference LoRA's exact prompt vocabulary: `{front/back/left/right/etc} view`, `{low-angle/eye-level/elevated/high-angle} shot`, `{close-up/medium shot/wide shot}`.
-- **FR-007**: The canonical reference view (input for all pairs of one object) MUST be `front view eye-level shot medium shot` (0° az, 0° elev, ×1.0 dist).
-- **FR-008**: The renderer MUST detect and skip or flag near-empty renders (<1% non-background pixels).
-- **FR-009**: The renderer MUST handle both Alpha (0.5.3) and LK (3.3.5) WMO/M2 formats through the existing runtime data types.
-- **FR-010**: The dataset MUST be stored in a structured format consumable by the fal.ai Qwen Image Edit 2511 Trainer or local diffusers fine-tuning scripts.
-- **FR-011**: All game file I/O MUST use existing `IArchiveCatalog` (via `NativeMpqService` or `MpqArchiveCatalog`). No direct file path assumptions.
-- **FR-012**: The entire pipeline MUST live inside `wow-viewer/` with no references outside the repo.
-- **FR-013**: The dataset output MUST NOT contain any proprietary game client data beyond what is lawfully accessible. The spec follows Bring Your Own Data policy.
-- **FR-014**: The camera MUST orbit the object's bounding-box center, not the world origin.
-- **FR-015**: Distance values (×0.6, ×1.0, ×1.8) MUST be relative to the object's bounding sphere radius, not absolute world units.
-- **FR-016**: The training pipeline MUST support both fal.ai cloud training and local diffusers fine-tuning as interchangeable backends.
-- **FR-017**: The local training path MUST use the existing `wow-viewer/data-harvester/` Python environment and `uv` for dependency management, adding `diffusers` and `transformers` if not already present.
+- **FR-001**: The LoRA pair-builder MUST consume the existing roof capture directory structure produced by `build_v18_object_catalog_pipeline.py` (spec 025 output).
+- **FR-002**: The pair-builder MUST map each of the 6 perspective captures to the nearest LoRA prompt:
+
+  | Capture | Azimuth | Elevation | Prompt |
+  |---------|---------|-----------|--------|
+  | `front.jpg` | 0° | 15° | `<sks> front view elevated shot close-up` |
+  | `back.jpg` | 180° | 15° | `<sks> back view elevated shot close-up` |
+  | `left.jpg` | 90° | 15° | `<sks> left side view elevated shot close-up` |
+  | `right.jpg` | 270° | 15° | `<sks> right side view elevated shot close-up` |
+  | `top.jpg` | 0° | 80° | `<sks> front view high-angle shot close-up` |
+  | `three_quarter.jpg` | 35° | 25° | `<sks> front-right quarter view elevated shot close-up` |
+  | `roof_topdown.png` | ortho | ortho | `<sks> front view high-angle shot wide shot` |
+
+- **FR-003**: All distances map to `close-up` (×0.6 factor) since the object fills the frame at our standard capture distance.
+- **FR-004**: The pair-builder MUST use `<sks>` as the trigger token, matching the reference LoRA convention.
+- **FR-005**: The canonical reference view (input for all pairs of one object) MUST be the `front.jpg` capture mapped to `<sks> front view elevated shot close-up`. The input image for all 7 pairs of that object is the same `front.jpg`; the target varies.
+- **FR-006**: Output images MUST be 512×512 by default (configurable), downsampled from the original capture resolution.
+- **FR-007**: Assets with >50% background-colored pixels MUST be skipped and logged.
+- **FR-008**: The output MUST be structured as a directory of training pairs consumable by the fal.ai Qwen Image Edit 2511 Trainer or local diffusers `load_dataset()`.
+- **FR-009**: Each training pair MUST carry metadata: source asset path, build label, source capture angle, mapped prompt, and the original capture resolution.
+- **FR-010**: The pair-builder MUST detect and skip identity pairs (where input == target) — the front→front pair is trivial.
+- **FR-011**: The training pipeline MUST support both fal.ai cloud training and local diffusers fine-tuning as interchangeable backends.
+- **FR-012**: The local training path MUST use the existing `wow-viewer/data-harvester/` Python environment and `uv` with `diffusers` and `transformers`.
+- **FR-013**: The fine-tuning MUST start from the existing `fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA` checkpoint (not from the base Qwen model alone), preserving multi-angle generalization.
+- **FR-014**: All code MUST live inside `wow-viewer/` with no references outside the repo. The pair-builder goes in `wow-viewer/data-harvester/scripts/` or `wow-viewer/data-harvester/src/harvester/`.
+- **FR-015**: The dataset output MUST NOT contain any proprietary game client data beyond what is lawfully accessible (Bring Your Own Data policy).
 
 ### Key Entities
 
-- **Camera Pose**: A tuple of (azimuth: 0-315°, elevation: -30/0/30/60°, distance: 0.6/1.0/1.8) defining one viewpoint.
-- **Multi-Angle Render Set**: 96 images for one object, one per camera pose.
-- **Training Pair**: (input_image, prompt_string, target_image) — one per non-reference pose, totaling 95 per object (the reference pose is identity).
-- **Object Catalog**: A registry of known WMO/M2 assets to render, optionally filtered by placement frequency, object family, or client build.
-- **Render Manifest**: JSON/CSV file listing all renders produced with full metadata per row.
-- **LoRA Checkpoint**: The `.safetensors` LoRA weights file produced by fine-tuning, loadable by `pipe.load_lora_weights()`.
-- **Generative Fallback**: Inference-time logic that takes a cropped input image + angle prompt and produces a synthesized reference view.
+- **Roof Capture Output**: The per-asset directory containing 7 images + metadata from spec 025's pipeline.
+- **LoRA Training Pair**: (input_image=front.jpg, prompt_string, target_image=angle-specific render) — 6 usable pairs per object (front→front is identity and skipped).
+- **Angle-to-Prompt Map**: Static mapping from capture filenames to the nearest LoRA prompt string.
+- **LoRA Checkpoint**: The `.safetensors` weights file, loadable by `pipe.load_lora_weights()`, fine-tuned on top of `fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA`.
+- **Generative Fallback**: Inference-time logic taking a cropped object image + angle prompt → synthesized reference view.
 
 ## Success Criteria
 
-- **SC-001**: At least one WMO (e.g. `STORMWIND.WMO`) produces 96 non-empty renders covering all poses.
-- **SC-002**: At least one M2 (e.g. a tree doodad) produces 96 non-empty renders with correct alpha handling.
-- **SC-003**: The pair-builder produces training tuples consumable by `fal.ai` trainer without manual reformatting.
-- **SC-004**: A LoRA fine-tuning run on 10+ objects completes successfully (either on fal.ai or local diffusers).
-- **SC-005**: Inference with the trained LoRA on a held-out object produces visually plausible multi-angle outputs (validated by manual inspection).
-- **SC-006**: The full pipeline — render → pair-build → train → infer — is documented in a single script or README.
-- **SC-007**: Build succeeds with `dotnet build WowViewer.slnx -c Debug` for any C# components.
-- **SC-008**: Python environment setup works with `uv sync` in `wow-viewer/data-harvester/` after adding new dependencies.
+- **SC-001**: The pair-builder produces valid LoRA training pairs from one roof capture directory (6+1 pairs per object, prompts match the reference LoRA convention).
+- **SC-002**: A LoRA fine-tuning run on 100+ objects completes successfully on fal.ai or local diffusers.
+- **SC-003**: Inference with the fine-tuned LoRA on a held-out object produces plausible multi-angle outputs that look like WoW-style renders.
+- **SC-004**: The fine-tuned LoRA preserves the base model's view-control capability (smooth rotation across 8 azimuths at eye level).
+- **SC-005**: The pair-builder correctly filters out degenerate assets (interior-only, missing textures).
+- **SC-006**: The pair-builder runs in under 5 minutes for a full 6-build roof capture corpus.
+- **SC-007**: Python environment setup works with `uv sync` in `wow-viewer/data-harvester/` after adding `diffusers` and `transformers`.
 
 ## Assumptions
 
-- The existing headless capture infrastructure (spec `017`) and object renderer (spec `013`, `020`) can load individual WMO/M2 assets in isolation, not just full-tile scenes.
-- The headless renderer supports user-controlled camera positioning (not just tile-centered cameras).
-- We can load a single WMO or M2 file (with its dependencies) and render it in a minimal scene with no terrain, no lighting from terrain, just the object itself.
-- The object bounding box is available from the WMO/M2 reader (WMO groups have bounding boxes; M2 has a bounding radius).
-- The fal.ai Qwen Image Edit 2511 Trainer accepts the same prompt format as the reference LoRA and can be pointed at a custom dataset.
-- Local diffusers fine-tuning of LoRA on Qwen-Image-Edit-2511 is feasible on available hardware (RTX 4090 with 24GB VRAM for small runs, A100 for full runs).
-- Most WMO objects have meaningful exterior geometry visible from multiple angles (not just interiors).
-- Objects with zero placement instances in the corpus are not worth rendering for the initial dataset.
-- The reference LoRA's 96-pose system is the right choice; we don't need to invent a new camera system.
+- The existing roof capture pipeline (spec 025) already produces valid captures for hundreds of WMO/M2 assets across 6 client builds.
+- The reference LoRA's multi-angle generalization is robust enough that fine-tuning on only 6 angles per object (vs 96 in the original training set) transfers to novel angles.
+- 100+ objects is a sufficient training set size for a meaningful LoRA. Scaling to 1000+ would improve results but is not required for the first pass.
+- The front.jpg capture is a reasonable canonical input for all training pairs (the model learns: "given this front view, render from angle X").
+- White-background JPEG captures are acceptable training images (the LoRA learns to expect white backgrounds for WoW objects).
+- The existing roof capture resolution already exceeds the 512×512 training resolution, so no upscaling artifacts are introduced.
+- Degenerate captures (all-black interior WMOs, missing-texture M2s) are a small fraction (<5%) of the total corpus.
 
 ## Relationship to Other Specs
 
-- **Depends on**: `013-object-mask-rendering-fix` (object renderer works correctly)
-- **Depends on**: `017-mdxviewer-port-headless-capture` (headless renderer infrastructure)
-- **Depends on**: `020-renderer-culling-and-tile-capture` (culling fixes for correct object visibility)
-- **Shares concern with**: `025-object-roof-mask-library-and-minimap-sieve` (both need per-object rendering with pose metadata, but for different purposes — 025 needs top-down roof views, this needs 96-angle sphere)
-- **Extends**: the renderer infrastructure to support standalone object rendering (not tile-anchored)
-- **Enables**: future generative object synthesis for unknown-asset fallback in the terrain pipeline
+- **Consumes**: `025-object-roof-mask-library-and-minimap-sieve` — uses the roof capture output directory and per-asset renders. No changes needed to spec 025's pipeline.
+- **Depends on**: `013-object-mask-rendering-fix` (object renderer correctness for capture quality)
+- **Depends on**: `020-renderer-culling-and-tile-capture` (culling fixes for correct object visibility in captures)
+- **Complements**: `025`'s roof-identification goal (025 handles known-object identification via roof silhouettes; this handles unknown-object generation via LoRA)
+- **Independent from**: `017-mdxviewer-port-headless-capture` (spec 025 already routes through MdxViewer for captures; no new renderer work needed here)

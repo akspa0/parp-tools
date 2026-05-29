@@ -764,13 +764,18 @@ public class ScreenshotRenderer : IDisposable
         var lightColor = new Vector3(1.0f, 0.97f, 0.92f);
         var ambientColor = new Vector3(0.45f, 0.45f, 0.5f);
 
+        // Fake camera far below WMO for portal visibility — forces exterior-only rendering
+        var portalCameraPos = new Vector3(eyePos.X, eyePos.Y, boundsMin.Z - 1000f);
+
         _gl.Disable(EnableCap.Blend);
-        renderer.RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Opaque,
-            fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, eyePos, lightDir, lightColor, ambientColor);
+        try { renderer.RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Opaque,
+            fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, portalCameraPos, lightDir, lightColor, ambientColor); }
+        catch (Exception ex) { ViewerLog.Trace($"[RoofCapture] WMO opaque pass failed: {ex.Message}"); }
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
-        renderer.RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Transparent,
-            fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, eyePos, lightDir, lightColor, ambientColor);
+        try { renderer.RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Transparent,
+            fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, eyePos, lightDir, lightColor, ambientColor); }
+        catch (Exception ex) { ViewerLog.Trace($"[RoofCapture] WMO transparent pass failed: {ex.Message}"); }
 
         return ReadPixelsAndSave(width, height, outputDir);
     }
