@@ -259,8 +259,10 @@ public class ScreenshotRenderer : IDisposable
                     fogColor, dist * 5f, dist * 10f, camPos, lightDir, lightColor, ambientColor);
                 _gl.Enable(EnableCap.DepthTest);
                 _gl.DepthFunc(DepthFunction.Lequal);
+                _gl.DepthMask(false);
                 renderer.RenderWithTransform(modelTransform, view, proj, RenderPass.Transparent, 1.0f,
                     fogColor, dist * 5f, dist * 10f, camPos, lightDir, lightColor, ambientColor);
+                _gl.DepthMask(true);
 
                 byte[] pixels = new byte[width * height * 4];
                 unsafe { fixed (byte* ptr = pixels) _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr); }
