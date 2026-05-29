@@ -150,7 +150,8 @@ public class ScreenshotRenderer : IDisposable
     /// </summary>
     public string? CaptureMdxAllAngles(string modelPath, string outputDir, int width = 512, int height = 512)
     {
-        byte[]? mdxData = _dataSource?.ReadFile(modelPath.Replace('/', '\\'));
+        string resolved = RemapMdxToM2(modelPath);
+        byte[]? mdxData = _dataSource?.ReadFile(resolved.Replace('/', '\\'));
         if (mdxData == null) return null;
 
         MdxFile mdx;
@@ -180,7 +181,8 @@ public class ScreenshotRenderer : IDisposable
 
     public string? CaptureMdxRoofTopDownByPath(string modelPath, string outputDir, int width = 512, int height = 512)
     {
-        byte[]? mdxData = _dataSource?.ReadFile(modelPath.Replace('/', '\\'));
+        string resolved = RemapMdxToM2(modelPath);
+        byte[]? mdxData = _dataSource?.ReadFile(resolved.Replace('/', '\\'));
         if (mdxData == null) return null;
 
         MdxFile mdx;
@@ -784,7 +786,8 @@ public class ScreenshotRenderer : IDisposable
         string? resolvedModelPath)
     {
         string modelPath = resolvedModelPath ?? entry.ModelPath ?? "";
-        byte[]? mdxData = _dataSource!.ReadFile(modelPath);
+        string resolved = RemapMdxToM2(modelPath);
+        byte[]? mdxData = _dataSource!.ReadFile(resolved);
         if (mdxData == null) return null;
 
         MdxFile mdx;
@@ -1009,9 +1012,10 @@ string normalized = modelPath.Replace('/', '\\');
     {
         angles ??= CameraAngles;
         string modelPath = resolvedModelPath ?? entry.ModelPath ?? "";
+        string resolved = RemapMdxToM2(modelPath);
 
         // Load MDX once
-        byte[]? mdxData = _dataSource.ReadFile(modelPath);
+        byte[]? mdxData = _dataSource.ReadFile(resolved);
         if (mdxData == null)
         {
             ViewerLog.Trace($"[Screenshot] Skip {entry.Name}: MDX file not found: {modelPath}");
@@ -1314,6 +1318,14 @@ ForceOpaqueAlpha(pixels);
         }
         string result = sb.ToString();
         return result.Length > 100 ? result[..100] : result;
+    }
+
+    private static string RemapMdxToM2(string modelPath)
+    {
+        string ext = Path.GetExtension(modelPath);
+        if (string.Equals(ext, ".mdx", StringComparison.OrdinalIgnoreCase))
+            return Path.ChangeExtension(modelPath, ".m2");
+        return modelPath;
     }
 
     public void Dispose()
