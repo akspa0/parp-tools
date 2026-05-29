@@ -1,4 +1,4 @@
-using WowViewer.Core.Renderer.Validation;
+﻿using WowViewer.Core.Renderer.Validation;
 using WowViewer.Core.Runtime.World.Validation;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -49,6 +49,9 @@ internal static class ValidationCaptureCommand
         int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
         string? buildLabel = GetOption(args, "--build", "-b");
         string? looseOverlayRoot = GetOption(args, "--loose-overlay-root");
+        int? settledFrames = GetIntOption(args, "--settled-frames");
+        int? maxFrames = GetIntOption(args, "--max-frames");
+        int? batchSettledFrames = GetIntOption(args, "--batch-settled-frames");
         bool dryRun = HasFlag(args, "--dry-run");
         bool gpuViewerStyle = HasFlag(args, "--gpu-viewer-style");
         bool realSceneDryRun = HasFlag(args, "--real-scene-dry-run");
@@ -79,7 +82,10 @@ internal static class ValidationCaptureCommand
             buildLabel,
             [new CaptureTileInput(tileName, tileX.Value, tileY.Value, null, null, null, null, null, null, null, null, null)]);
 
-        ValidationCaptureScenePolicy scenePolicy = CreateDefaultScenePolicy(resolution);
+        ValidationCaptureScenePolicy scenePolicy = CreateDefaultScenePolicy(resolution,
+            settledFramesOverride: settledFrames,
+            maxFramesOverride: maxFrames,
+            batchSettledFramesOverride: batchSettledFrames);
         Dictionary<ValidationCaptureVariant, ValidationCaptureVariantPolicy> variantPolicies = CreateDefaultVariantPolicies();
 
         HeadlessValidationCaptureSession session = new(
@@ -164,9 +170,12 @@ internal static class ValidationCaptureCommand
         string? datasetRoot = GetOption(args, "--dataset-root", "-d");
         string? outputRoot = GetOption(args, "--output-root", "-o");
         string? ledgerPath = GetOption(args, "--ledger-path", "-l");
-        int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
+int resolution = GetIntOption(args, "--resolution", "-r") ?? 512;
         string? buildLabel = GetOption(args, "--build", "-b");
         string? looseOverlayRoot = GetOption(args, "--loose-overlay-root");
+        int? settledFrames = GetIntOption(args, "--settled-frames");
+        int? maxFrames = GetIntOption(args, "--max-frames");
+        int? batchSettledFrames = GetIntOption(args, "--batch-settled-frames");
         bool dryRun = HasFlag(args, "--dry-run");
         bool gpuViewerStyle = HasFlag(args, "--gpu-viewer-style");
         bool realSceneDryRun = HasFlag(args, "--real-scene-dry-run");
@@ -228,7 +237,10 @@ internal static class ValidationCaptureCommand
         }
 
         ValidationCaptureBatchPlan batchPlan = BuildBatchPlan(datasetRoot, mapName, outputRoot, resolution, buildLabel, tiles);
-        ValidationCaptureScenePolicy scenePolicy = CreateDefaultScenePolicy(resolution);
+        ValidationCaptureScenePolicy scenePolicy = CreateDefaultScenePolicy(resolution,
+            settledFramesOverride: settledFrames,
+            maxFramesOverride: maxFrames,
+            batchSettledFramesOverride: batchSettledFrames);
         Dictionary<ValidationCaptureVariant, ValidationCaptureVariantPolicy> variantPolicies = CreateDefaultVariantPolicies();
 
         HeadlessValidationCaptureSession session = new(
@@ -336,7 +348,10 @@ internal static class ValidationCaptureCommand
             requests);
     }
 
-    private static ValidationCaptureScenePolicy CreateDefaultScenePolicy(int resolution)
+private static ValidationCaptureScenePolicy CreateDefaultScenePolicy(int resolution,
+        int? settledFramesOverride = null,
+        int? maxFramesOverride = null,
+        int? batchSettledFramesOverride = null)
     {
         ValidationCaptureArtifactPolicy artifactPolicy = new(
             ValidationObjectMaskStrategy.DirectObjectsOnlySilhouette,
@@ -348,8 +363,8 @@ internal static class ValidationCaptureCommand
 
         return new ValidationCaptureScenePolicy(
             requestedResolution: resolution,
-            requiredSettledFrames: 48,
-            maxFramesBeforeCapture: 2400,
+            requiredSettledFrames: settledFramesOverride ?? 12,
+            maxFramesBeforeCapture: maxFramesOverride ?? 480,
             detailedTileCountOverride: 25,
             fogStartFactor: 0.75f,
             fogEndDistance: 20000f,
@@ -367,7 +382,9 @@ internal static class ValidationCaptureCommand
             ignoreVisionConeCulling: true,
             ignoreFrustumCulling: true,
             ignoreMaxViewDistanceCulling: true,
-            artifactPolicy: artifactPolicy);
+            artifactPolicy: artifactPolicy,
+            batchSettledFrames: batchSettledFramesOverride ?? 2,
+            fastSettleAfterBatchReady: true);
     }
 
     private static Dictionary<ValidationCaptureVariant, ValidationCaptureVariantPolicy> CreateDefaultVariantPolicies()
@@ -530,7 +547,7 @@ internal static class ValidationCaptureCommand
             """);
     }
 
-    private static void ShowCaptureUsage()
+private static void ShowCaptureUsage()
     {
         Console.WriteLine("""
             Usage: WowViewer.Tool.ValidationCapture capture [options]
@@ -549,6 +566,9 @@ internal static class ValidationCaptureCommand
               --build <label>
               --loose-overlay-root <dir>
               --resolution <int>      Default: 512
+              --settled-frames <int>  Frames to wait for scene settle (default: 12)
+              --max-frames <int>     Max frames before capture timeout (default: 480)
+              --batch-settled-frames <int>  Fast-settle frames after first tile settles (default: 2)
               --dry-run               Build the shared-runtime session and print a summary
                             --gpu-viewer-style      Render bounded captures with wow-viewer GPU output using validation camera frames
                             --real-scene-dry-run    Build real runtime-frame snapshots without framebuffer rendering
@@ -573,6 +593,9 @@ internal static class ValidationCaptureCommand
               --build <label>
               --loose-overlay-root <dir>
               --resolution <int>      Default: 512
+              --settled-frames <int>  Frames to wait for scene settle (default: 12)
+              --max-frames <int>     Max frames before capture timeout (default: 480)
+              --batch-settled-frames <int>  Fast-settle frames after first tile settles (default: 2)
               --dry-run               Build session + tile plan summary without rendering
               --gpu-viewer-style      Render bounded captures with wow-viewer GPU output using validation camera frames
               --real-scene-dry-run    Build real runtime-frame snapshots without framebuffer rendering

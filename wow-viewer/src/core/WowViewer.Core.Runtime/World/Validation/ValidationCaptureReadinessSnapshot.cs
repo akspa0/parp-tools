@@ -15,4 +15,7 @@ public readonly record struct ValidationCaptureReadinessSnapshot(
     int FramesObserved,
     int SettledFrames,
     int RequiredSettledFrames,
-    int MaxFramesBeforeCapture);
+    int MaxFramesBeforeCapture,
+    bool BatchHasSettled,
+    int BatchSettledFrames,
+    bool FastSettleAfterBatchReady);

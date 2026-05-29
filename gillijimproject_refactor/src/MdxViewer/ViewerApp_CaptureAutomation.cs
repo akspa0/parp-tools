@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Diagnostics;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using ImGuiNET;
@@ -19,8 +20,9 @@ public partial class ViewerApp
 {
     private static readonly string CameraShotPointsPath = Path.Combine(SettingsDir, "camera_shot_points.json");
     private const float MkHarvestViewerValidationMaxVisibleMdxBoundsHeight = 24f;
-    private const int MkHarvestViewerValidationRequiredSettledFrames = 48;
-    private const int MkHarvestViewerValidationMaxFramesBeforeCapture = 2400;
+    private const int DefaultRequiredSettledFrames = 12;
+    private const int DefaultMaxFramesBeforeCapture = 480;
+    private const int DefaultBatchSettledFrames = 2;
 
     private readonly List<CameraShotPoint> _cameraShotPoints = new();
     private readonly Queue<PendingCaptureRequest> _captureQueue = new();
@@ -116,6 +118,22 @@ public partial class ViewerApp
         public bool HideTerrain { get; set; }
     }
 
+    private sealed class CaptureTimingRecord
+    {
+        public string TileName { get; set; } = string.Empty;
+        public string BuildVersion { get; set; } = string.Empty;
+        public string MapName { get; set; } = string.Empty;
+        public int TileX { get; set; }
+        public int TileY { get; set; }
+        public string Variant { get; set; } = string.Empty;
+        public int SettledFrames { get; set; }
+        public int TotalFramesSinceApplied { get; set; }
+        public bool TimedOut { get; set; }
+        public int RequiredSettledFrames { get; set; }
+        public int MaxFramesBeforeCapture { get; set; }
+        public string OutputPath { get; set; } = string.Empty;
+    }
+
     private sealed class MkHarvestViewerValidationCapturePlan
     {
         public string DatasetRoot { get; set; } = string.Empty;
@@ -128,6 +146,10 @@ public partial class ViewerApp
         public bool RestoreWorldRequested { get; set; }
         public bool ExitAfterCompletion { get; set; }
         public List<MkHarvestViewerValidationCaptureTile> Tiles { get; set; } = new();
+        public int RequiredSettledFrames { get; set; } = DefaultRequiredSettledFrames;
+        public int MaxFramesBeforeCapture { get; set; } = DefaultMaxFramesBeforeCapture;
+        public int BatchSettledFrames { get; set; } = DefaultBatchSettledFrames;
+        public bool FastSettleAfterBatchReady { get; set; } = true;
     }
 
     private sealed class ActiveMkHarvestViewerValidationBatch
@@ -169,6 +191,11 @@ public partial class ViewerApp
         public required int RequestedResolution { get; init; }
         public required bool ExitAfterCompletion { get; init; }
         public int RemainingCaptures { get; set; }
+        public bool BatchHasSettled { get; set; }
+        public int RequiredSettledFrames { get; init; }
+        public int MaxFramesBeforeCapture { get; init; }
+        public int BatchSettledFrames { get; init; }
+        public bool FastSettleAfterBatchReady { get; init; }
     }
 
     private sealed class ActiveVideoRecording
@@ -622,6 +649,11 @@ public partial class ViewerApp
 
             if (_activeMkHarvestViewerValidationBatch != null)
             {
+                if (ok && !request.TimedOutWaitingForScene)
+                    _activeMkHarvestViewerValidationBatch.BatchHasSettled = true;
+
+                WriteCaptureTimingMetadata(request);
+
                 _activeMkHarvestViewerValidationBatch.RemainingCaptures = Math.Max(0, _activeMkHarvestViewerValidationBatch.RemainingCaptures - 1);
                 if (_activeMkHarvestViewerValidationBatch.RemainingCaptures == 0 && _captureQueue.Count == 0)
                 {
@@ -699,7 +731,15 @@ public partial class ViewerApp
         }
 
         request.SettledFrames++;
-        if (request.SettledFrames < request.RequiredSettledFrames)
+        int effectiveRequiredSettledFrames = request.RequiredSettledFrames;
+        if (request.IsMkHarvestViewerValidationCapture && _activeMkHarvestViewerValidationBatch != null
+            && _activeMkHarvestViewerValidationBatch.FastSettleAfterBatchReady
+            && _activeMkHarvestViewerValidationBatch.BatchHasSettled)
+        {
+            effectiveRequiredSettledFrames = Math.Max(1, _activeMkHarvestViewerValidationBatch.BatchSettledFrames);
+        }
+
+        if (request.SettledFrames < effectiveRequiredSettledFrames)
         {
             if (request.FramesSinceApplied < request.MaxFramesBeforeCapture)
                 return false;
@@ -763,6 +803,158 @@ public partial class ViewerApp
         _pendingMkHarvestViewerValidationCapturePlan = null;
     }
 
+    private void PromotePendingRoofCaptureBatch()
+    {
+        if (_pendingRoofCaptureBatch == null)
+            return;
+
+        if (_gl == null)
+        {
+            _statusMessage = "Cannot run roof capture: GL context not ready";
+            AppendMkHarvestLogLine(_statusMessage);
+            _pendingRoofCaptureBatch = null;
+            return;
+        }
+
+        var batch = _pendingRoofCaptureBatch;
+
+        // Initialize on first call
+        if (batch.Renderer == null)
+        {
+            Directory.CreateDirectory(batch.OutputDir);
+            batch.Renderer = new Catalog.ScreenshotRenderer(_gl, _dataSource, _texResolver, _dbcBuild);
+            _statusMessage = $"Starting roof batch capture: {batch.AssetPaths.Count} assets -> {batch.OutputDir}";
+            AppendMkHarvestLogLine(_statusMessage);
+        }
+
+        // Process one asset per frame
+        if (batch.CurrentIndex >= batch.AssetPaths.Count)
+        {
+            _statusMessage = $"Roof capture complete: {batch.SuccessCount}/{batch.AssetPaths.Count} succeeded -> {batch.OutputDir}";
+            AppendMkHarvestLogLine(_statusMessage);
+
+            // Write metadata
+            string metaPath = Path.Combine(batch.OutputDir, "roof_capture_metadata.json");
+            File.WriteAllText(metaPath,
+                System.Text.Json.JsonSerializer.Serialize(new { captures = batch.Metadata },
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+
+            batch.Renderer.Dispose();
+            _pendingRoofCaptureBatch = null;
+
+            if (batch.ExitAfterCompletion)
+                _window.Close();
+            return;
+        }
+
+        string assetPath = batch.AssetPaths[batch.CurrentIndex];
+        string safeName = SanitizeRoofCaptureName(Path.GetFileNameWithoutExtension(assetPath.Replace('/', '\\')));
+        string assetDir = Path.Combine(batch.OutputDir, safeName);
+        Directory.CreateDirectory(assetDir);
+
+        _statusMessage = $"[RoofCapture] {batch.CurrentIndex + 1}/{batch.AssetPaths.Count} {assetPath}";
+        AppendMkHarvestLogLine(_statusMessage);
+
+        string? result;
+        if (batch.AllAngles)
+            result = batch.Renderer.CaptureWmoAllAngles(assetPath, assetDir, batch.Resolution, batch.Resolution);
+        else
+            result = batch.Renderer.CaptureWmoRoofTopDownByPath(assetPath, assetDir, batch.Resolution, batch.Resolution);
+
+        if (result != null)
+        {
+            batch.SuccessCount++;
+            var angleNames = batch.AllAngles
+                ? Catalog.ScreenshotRenderer.CameraAngles.Select(a => new Dictionary<string, object>
+                {
+                    ["name"] = a.name,
+                    ["azimuth"] = a.azimuth,
+                    ["elevation"] = a.elevation,
+                    ["file"] = $"{a.name}.jpg"
+                }).ToList()
+                : null;
+
+            var entry = new Dictionary<string, object>
+            {
+                ["asset_path"] = assetPath,
+                ["asset_stem"] = Path.GetFileNameWithoutExtension(assetPath.Replace('/', '\\')),
+                ["success"] = true,
+                ["output_dir"] = assetDir,
+                ["resolution"] = batch.Resolution,
+                ["build"] = _dbcBuild ?? "",
+                ["capture_mode"] = batch.AllAngles ? "all_angles" : "roof_only",
+                ["roof_topdown"] = "roof_topdown.jpg",
+                ["angles"] = angleNames,
+            };
+
+            // Write per-asset HuggingFace-style metadata
+            string assetMeta = Path.Combine(assetDir, "metadata.json");
+            File.WriteAllText(assetMeta,
+                System.Text.Json.JsonSerializer.Serialize(entry,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+
+            batch.Metadata.Add(entry);
+        }
+        else
+        {
+            var entry = new Dictionary<string, object>
+            {
+                ["asset_path"] = assetPath,
+                ["asset_stem"] = Path.GetFileNameWithoutExtension(assetPath.Replace('/', '\\')),
+                ["success"] = false
+            };
+            string assetMeta = Path.Combine(assetDir, "metadata.json");
+            File.WriteAllText(assetMeta,
+                System.Text.Json.JsonSerializer.Serialize(entry,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            batch.Metadata.Add(entry);
+        }
+
+        // Write dataset config on first asset
+        if (batch.CurrentIndex == 0 && batch.SuccessCount > 0)
+        {
+            var config = new Dictionary<string, object>
+            {
+                ["dataset_name"] = "wmo-roof-capture",
+                ["build"] = _dbcBuild ?? "",
+                ["source"] = "ParpToolsWoWViewer roof capture",
+                ["resolution"] = batch.Resolution,
+                ["capture_mode"] = batch.AllAngles ? "all_angles" : "roof_only",
+                ["total_assets"] = batch.AssetPaths.Count,
+                ["camera_angles"] = batch.AllAngles
+                    ? Catalog.ScreenshotRenderer.CameraAngles.Select(a => new Dictionary<string, object>
+                    {
+                        ["name"] = a.name,
+                        ["azimuth"] = a.azimuth,
+                        ["elevation"] = a.elevation
+                    }).ToList()
+                    : null,
+                ["background"] = "black",
+                ["alpha_channel"] = "background_transparent",
+                ["format"] = "jpg",
+                ["jpeg_quality"] = 99,
+            };
+            string configPath = Path.Combine(batch.OutputDir, "dataset_config.json");
+            File.WriteAllText(configPath,
+                System.Text.Json.JsonSerializer.Serialize(config,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        }
+        batch.CurrentIndex++;
+    }
+
+    private static string SanitizeRoofCaptureName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var sb = new System.Text.StringBuilder(name.Length);
+        foreach (char c in name)
+        {
+            if (c == ' ' || c == '/' || c == '\\') sb.Append('_');
+            else if (Array.IndexOf(invalid, c) < 0 && c != '\0') sb.Append(c);
+        }
+        string result = sb.ToString();
+        return result.Length > 100 ? result[..100] : result;
+    }
+
     private void StartMkHarvestViewerValidationBatch(MkHarvestViewerValidationCapturePlan plan)
     {
         if (_terrainManager == null)
@@ -810,6 +1002,11 @@ public partial class ViewerApp
             RequestedResolution = requestedResolution,
             ExitAfterCompletion = plan.ExitAfterCompletion,
             RemainingCaptures = plan.Tiles.Count,
+            BatchHasSettled = false,
+            RequiredSettledFrames = plan.RequiredSettledFrames,
+            MaxFramesBeforeCapture = plan.MaxFramesBeforeCapture,
+            BatchSettledFrames = plan.BatchSettledFrames,
+            FastSettleAfterBatchReady = plan.FastSettleAfterBatchReady,
         };
 
         _hideUiChrome = true;
@@ -851,8 +1048,8 @@ public partial class ViewerApp
                     WaitForSceneReady = true,
                     TargetTileX = tile.TileX,
                     TargetTileY = tile.TileY,
-                    RequiredSettledFrames = MkHarvestViewerValidationRequiredSettledFrames,
-                    MaxFramesBeforeCapture = MkHarvestViewerValidationMaxFramesBeforeCapture,
+                    RequiredSettledFrames = plan.RequiredSettledFrames,
+                    MaxFramesBeforeCapture = plan.MaxFramesBeforeCapture,
                     CaptureLabel = tile.HideTerrain
                         ? $"{tile.TileName} (objectsonly)"
                         : (tile.HideObjects
@@ -866,7 +1063,7 @@ public partial class ViewerApp
         }
 
         AppendMkHarvestLogLine(
-            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} capture(s). Viewer chrome is hidden, WL liquids are disabled for all variants, object path filters are disabled, MDX objects taller than {MkHarvestViewerValidationMaxVisibleMdxBoundsHeight:F0} world units are suppressed during the batch, the primary output keeps terrain liquids and visible world objects including doodads, the 'noliquids' sub-folder disables terrain liquids, the 'noobjects' sub-folder hides world objects, the 'objectsonly' sub-folder hides terrain, WDL, liquids, and sky while keeping visible world objects, object streaming is widened, the validation sun direction is forced for deterministic top-down shading, the batch waits for world assets to settle for {MkHarvestViewerValidationRequiredSettledFrames} ready frame(s), and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
+            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} capture(s). Settled frames: {plan.RequiredSettledFrames} (batch-fast: {plan.BatchSettledFrames}, fast-settle enabled: {plan.FastSettleAfterBatchReady}), max frames: {plan.MaxFramesBeforeCapture}. Viewer chrome is hidden, WL liquids are disabled for all variants, object path filters are disabled, MDX objects taller than {MkHarvestViewerValidationMaxVisibleMdxBoundsHeight:F0} world units are suppressed during the batch, the primary output keeps terrain liquids and visible world objects including doodads, the 'noliquids' sub-folder disables terrain liquids, the 'noobjects' sub-folder hides world objects, the 'objectsonly' sub-folder hides terrain, WDL, liquids, and sky while keeping visible world objects, object streaming is widened, the validation sun direction is forced for deterministic top-down shading, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
     }
 
     private static Vector3 BuildMkHarvestViewerValidationLightDirection(Vector3 currentLightDirection)
@@ -1029,6 +1226,46 @@ public partial class ViewerApp
 
         if (batch.ExitAfterCompletion)
             _window.Close();
+    }
+
+    private void WriteCaptureTimingMetadata(PendingCaptureRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.OutputPath))
+            return;
+
+        string? outputDir = Path.GetDirectoryName(request.OutputPath);
+        if (string.IsNullOrWhiteSpace(outputDir))
+            return;
+
+        Directory.CreateDirectory(outputDir);
+
+        string baseName = Path.GetFileNameWithoutExtension(request.OutputPath);
+        string metadataPath = Path.Combine(outputDir, $"{baseName}_capture_metadata.json");
+
+        var record = new CaptureTimingRecord
+        {
+            TileName = request.Shot.Name,
+            BuildVersion = request.Shot.BuildVersion,
+            MapName = request.Shot.MapName,
+            TileX = request.TargetTileX ?? 0,
+            TileY = request.TargetTileY ?? 0,
+            Variant = request.CaptureLabel ?? "unknown",
+            SettledFrames = request.SettledFrames,
+            TotalFramesSinceApplied = request.FramesSinceApplied,
+            TimedOut = request.TimedOutWaitingForScene,
+            RequiredSettledFrames = request.RequiredSettledFrames,
+            MaxFramesBeforeCapture = request.MaxFramesBeforeCapture,
+            OutputPath = request.OutputPath,
+        };
+
+        try
+        {
+            File.WriteAllText(metadataPath, JsonSerializer.Serialize(record, MkDatasetJsonOptions));
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Error(ViewerLog.Category.Export, $"[Capture] Failed to write timing metadata for {baseName}: {ex.Message}");
+        }
     }
 
     private void StitchMkHarvestViewerValidationOutputs(

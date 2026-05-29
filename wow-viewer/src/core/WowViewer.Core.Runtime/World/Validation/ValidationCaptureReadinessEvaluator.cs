@@ -45,12 +45,16 @@ public static class ValidationCaptureReadinessEvaluator
                 $"target tile loaded={snapshot.TargetTileLoaded} terrain streaming={snapshot.TerrainStreaming}");
         }
 
-        if (snapshot.SettledFrames < snapshot.RequiredSettledFrames)
+        int effectiveRequiredSettledFrames = snapshot.RequiredSettledFrames;
+        if (snapshot.FastSettleAfterBatchReady && snapshot.BatchHasSettled)
+            effectiveRequiredSettledFrames = Math.Max(1, snapshot.BatchSettledFrames);
+
+        if (snapshot.SettledFrames < effectiveRequiredSettledFrames)
         {
             return WaitOrTimeout(
                 snapshot,
                 ValidationCaptureReadinessStatus.WaitingForSettledFrames,
-                $"settled frames {snapshot.SettledFrames}/{snapshot.RequiredSettledFrames}");
+                $"settled frames {snapshot.SettledFrames}/{effectiveRequiredSettledFrames}");
         }
 
         return ValidationCaptureReadinessState.Ready(snapshot.FramesObserved, snapshot.SettledFrames);

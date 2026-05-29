@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 from collections import defaultdict
@@ -25,16 +25,12 @@ from harvester.object_roof import (
     RoofExemplarRecord,
     RoofFamilySummary,
     build_map_tile_key,
-    crop_and_resize_mask,
-    crop_and_resize_rgb,
-    d1_style_bbox_fallback,
     exemplar_id_from_parts,
     family_id_from_asset_path,
     is_probable_roof_asset,
     normalize_asset_path,
     pose_vector_from_placement,
     variant_fingerprint_from_rgb,
-    world_bbox_to_tile_bbox_xyxy,
 )
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -43,20 +39,24 @@ _DEFAULT_OUTPUT_ROOT = _PROJECT_ROOT / "output" / "datasets" / "object_roof_libr
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build object-roof exemplar library from V16 stores.")
+    parser = argparse.ArgumentParser(description="Build object-roof exemplar library from MdxViewer per-asset renders.")
     parser.add_argument("--dataset-dir", type=Path, default=_DEFAULT_DATASET_DIR)
     parser.add_argument("--build", type=str, default=None)
     parser.add_argument("--builds", nargs="+", default=None)
     parser.add_argument("--run-name", type=str, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
-    parser.add_argument("--max-tiles-per-build", type=int, default=0)
-    parser.add_argument("--include-mddf", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--include-modf", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--roof-only", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--crop-size", type=int, default=128)
-    parser.add_argument("--min-bbox-area", type=int, default=64)
-    parser.add_argument("--bbox-padding", type=int, default=3)
     parser.add_argument("--max-canonical-atlas", type=int, default=196)
+    parser.add_argument("--emit-asset-list", action="store_true", default=False,
+                        help="Only write the asset list JSON for MdxViewer, do not build library")
+    parser.add_argument("--captured-roof-dir", type=Path, default=None,
+                        help="Directory containing MdxViewer per-asset roof renders (subdirs with roof_topdown.png)")
+    parser.add_argument("--captured-roof-metadata", type=Path, default=None,
+                        help="Path to roof_capture_metadata.json from batch capture")
+    parser.add_argument("--include-mddf", action="store_true", default=False)
+    parser.add_argument("--include-modf", action="store_true", default=True)
+    parser.add_argument("--roof-only", action="store_true", default=True)
+    parser.add_argument("--no-roof-only", action="store_false", dest="roof_only")
     return parser.parse_args()
 
 
@@ -68,139 +68,98 @@ def _resolve_builds(dataset_dir: Path, args: argparse.Namespace) -> list[str]:
     return [path.stem.replace(".zarr", "") for path in sorted(dataset_dir.glob("*.zarr"))]
 
 
-def _open_store(zarr_path: Path) -> tuple[zarr.storage.LocalStore, zarr.Group]:
-    store = zarr.storage.LocalStore(str(zarr_path), read_only=True)
-    root = zarr.open_group(store=store, mode="r")
-    return store, root
-
-
 def _read_table_rows(path: Path) -> list[dict[str, Any]]:
     table = pq.read_table(str(path))
     return [{column: table.column(column)[idx].as_py() for column in table.column_names} for idx in range(table.num_rows)]
 
 
-def _make_tile_index(index_rows: list[dict[str, Any]], max_tiles_per_build: int) -> dict[int, dict[str, Any]]:
-    rows = sorted(index_rows, key=lambda row: int(row.get("tile_id", -1)))
-    if max_tiles_per_build > 0:
-        rows = rows[:max_tiles_per_build]
-    out: dict[int, dict[str, Any]] = {}
-    for row in rows:
-        tile_id = int(row.get("tile_id", -1))
-        if tile_id < 0:
-            continue
-        out[tile_id] = {
-            "map": str(row.get("map", "")),
-            "tile_x": int(row.get("tile_x", -1) if row.get("tile_x") is not None else -1),
-            "tile_y": int(row.get("tile_y", -1) if row.get("tile_y") is not None else -1),
-        }
-    return out
-
-
-def _filter_placements(
-    placements: list[dict[str, Any]],
-    *,
-    include_mddf: bool,
-    include_modf: bool,
+def _collect_unique_wmo_assets(
+    dataset_dir: Path,
+    build: str,
     roof_only: bool,
-    valid_tile_ids: set[int],
-) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
+) -> list[str]:
+    """Extract unique MODF asset paths from placements, deduped, sorted."""
+    placements_path = dataset_dir / f"{build}.zarr" / "placements.parquet"
+    if not placements_path.exists():
+        return []
+
+    placements = _read_table_rows(placements_path)
+    seen: set[str] = set()
+    paths: list[str] = []
     for row in placements:
-        tile_id = int(row.get("tile_id", -1))
-        if tile_id not in valid_tile_ids:
-            continue
         instance_type = str(row.get("instance_type", "")).lower()
-        if instance_type == "modf" and not include_modf:
-            continue
-        if instance_type == "mddf" and not include_mddf:
+        if instance_type != "modf":
             continue
         asset_path = normalize_asset_path(str(row.get("asset_path", "")))
-        if not asset_path:
+        if not asset_path or asset_path in seen:
             continue
         if roof_only and not is_probable_roof_asset(asset_path):
             continue
-        out.append(dict(row))
-    return out
+        seen.add(asset_path)
+        paths.append(asset_path)
+    return sorted(paths)
 
 
-def _tile_mask_array(root: zarr.Group, tile_id: int) -> np.ndarray:
-    if "object_precise_mask" in root:
-        return root["object_precise_mask"][tile_id].astype(np.float32)
-    if "object_filtered_mask" in root:
-        return root["object_filtered_mask"][tile_id].astype(np.float32)
-    if "object_mask" in root:
-        return root["object_mask"][tile_id].astype(np.float32)
-    return np.zeros((257, 257), dtype=np.float32)
+def _load_captured_roof(captured_dir: Path, asset_path: str, crop_size: int) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Load a per-asset roof render from MdxViewer output.
+    Returns (rgb_uint8, mask_float32) cropped/resized to crop_size, or (None, None) on failure.
+    """
+    safe_name = _sanitize_path_component(Path(asset_path).stem)
+    asset_dir = captured_dir / safe_name
+    png_path = asset_dir / "roof_topdown.png"
+    if not png_path.exists():
+        return None, None
+
+    try:
+        img = Image.open(png_path).convert("RGBA")
+    except Exception:
+        return None, None
+
+    arr = np.asarray(img, dtype=np.uint8)  # (H, W, 4)
+    if arr.size == 0:
+        return None, None
+
+    rgb = arr[:, :, :3]
+    alpha = arr[:, :, 3].astype(np.float32) / 255.0
+
+    # Resize to crop_size using nearest neighbor
+    rgb_resized = _nearest_resize(rgb, crop_size, crop_size)
+    mask_resized = _nearest_resize(alpha, crop_size, crop_size)
+    mask_resized = np.clip(mask_resized, 0.0, 1.0)
+    return rgb_resized, mask_resized
 
 
-def _placement_bbox(row: dict[str, Any], tile_x: int, tile_y: int, padding: int) -> tuple[int, int, int, int] | None:
-    instance_type = str(row.get("instance_type", "")).lower()
-    if instance_type == "modf":
-        return world_bbox_to_tile_bbox_xyxy(
-            min_x=float(row.get("bbMinX", 0.0) or 0.0),
-            min_y=float(row.get("bbMinY", 0.0) or 0.0),
-            max_x=float(row.get("bbMaxX", 0.0) or 0.0),
-            max_y=float(row.get("bbMaxY", 0.0) or 0.0),
-            tile_x=tile_x,
-            tile_y=tile_y,
-            padding_px=int(padding),
-        )
-    return d1_style_bbox_fallback(
-        pos_x=float(row.get("posX", 0.0) or 0.0),
-        pos_y=float(row.get("posY", 0.0) or 0.0),
-        scale=float(row.get("scale", 1.0) or 1.0),
-        tile_x=tile_x,
-        tile_y=tile_y,
-        base_radius_px=6.0 + float(padding),
-    )
+def _nearest_resize(arr: np.ndarray, h: int, w: int) -> np.ndarray:
+    in_h, in_w = arr.shape[:2]
+    ys = np.linspace(0, in_h - 1, h).astype(np.int64)
+    xs = np.linspace(0, in_w - 1, w).astype(np.int64)
+    return arr[np.ix_(ys, xs)]
 
 
-def _collect_build_exemplars(
-    *,
-    dataset_dir: Path,
+def _sanitize_path_component(name: str) -> str:
+    invalid = set(r'<>:"/\|?*')
+    sb = []
+    for c in name:
+        if c in invalid or c == '\0':
+            sb.append('_')
+        else:
+            sb.append(c)
+    result = "".join(sb)
+    return result[:100] if len(result) > 100 else result
+
+
+def _build_from_captures(
+    captured_dir: Path,
+    metadata_path: Path | None,
     build: str,
-    max_tiles_per_build: int,
-    include_mddf: bool,
-    include_modf: bool,
-    roof_only: bool,
     crop_size: int,
-    min_bbox_area: int,
-    bbox_padding: int,
-) -> tuple[list[dict[str, Any]], list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], dict[str, int]]:
-    zarr_path = dataset_dir / f"{build}.zarr"
-    index_path = zarr_path / "index.parquet"
-    placements_path = zarr_path / "placements.parquet"
-    if not zarr_path.exists() or not index_path.exists() or not placements_path.exists():
-        return [], [], [], [], [], {
-            "placements_total": 0,
-            "placements_selected": 0,
-            "exemplars_kept": 0,
-            "missing_tile": 0,
-            "invalid_bbox": 0,
-            "too_small": 0,
-        }
-
-    index_rows = _read_table_rows(index_path)
-    tile_index = _make_tile_index(index_rows, max_tiles_per_build=max_tiles_per_build)
-    valid_tile_ids = set(tile_index.keys())
-
-    placements = _read_table_rows(placements_path)
-    placements_filtered = _filter_placements(
-        placements,
-        include_mddf=include_mddf,
-        include_modf=include_modf,
-        roof_only=roof_only,
-        valid_tile_ids=valid_tile_ids,
-    )
-
-    stats = {
-        "placements_total": len(placements),
-        "placements_selected": len(placements_filtered),
-        "exemplars_kept": 0,
-        "missing_tile": 0,
-        "invalid_bbox": 0,
-        "too_small": 0,
-    }
+) -> tuple[list[dict[str, Any]], list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+    """Build exemplar list from MdxViewer capture output directory."""
+    # Load metadata JSON if provided (maps asset path -> success status)
+    capture_metadata: list[dict[str, Any]] = []
+    if metadata_path and metadata_path.exists():
+        with open(metadata_path, "r") as f:
+            capture_metadata = json.load(f).get("captures", [])
 
     rows: list[dict[str, Any]] = []
     roof_rgbs: list[np.ndarray] = []
@@ -208,113 +167,64 @@ def _collect_build_exemplars(
     pose_vecs: list[np.ndarray] = []
     bbox_vecs: list[np.ndarray] = []
 
-    store, root = _open_store(zarr_path)
-    try:
-        cached_minimap: dict[int, np.ndarray] = {}
-        cached_mask: dict[int, np.ndarray] = {}
+    # Iterate over capture metadata entries for the ordered list of assets
+    for entry in capture_metadata:
+        if not entry.get("success", False):
+            continue
+        asset_path = str(entry.get("asset_path", ""))
+        if not asset_path:
+            continue
 
-        for placement in placements_filtered:
-            tile_id = int(placement.get("tile_id", -1))
-            tile_meta = tile_index.get(tile_id)
-            if tile_meta is None:
-                stats["missing_tile"] += 1
-                continue
+        rgb, mask = _load_captured_roof(captured_dir, asset_path, crop_size)
+        if rgb is None or mask is None:
+            continue
 
-            tile_x = int(tile_meta["tile_x"])
-            tile_y = int(tile_meta["tile_y"])
-            if tile_x < 0 or tile_y < 0:
-                stats["missing_tile"] += 1
-                continue
+        family_id = family_id_from_asset_path(asset_path)
+        mask_coverage = float((mask >= 0.2).mean())
+        variant_fp = variant_fingerprint_from_rgb(rgb)
+        exemplar_id = exemplar_id_from_parts([family_id, build, variant_fp])
+        review_required = bool(mask_coverage < 0.05)
+        review_state = "needs_review" if review_required else "auto"
 
-            bbox = _placement_bbox(placement, tile_x=tile_x, tile_y=tile_y, padding=bbox_padding)
-            if bbox is None:
-                stats["invalid_bbox"] += 1
-                continue
-            x0, y0, x1, y1 = [int(v) for v in bbox]
-            width = max(0, x1 - x0 + 1)
-            height = max(0, y1 - y0 + 1)
-            area = width * height
-            if area < int(min_bbox_area):
-                stats["too_small"] += 1
-                continue
-
-            if tile_id not in cached_minimap:
-                cached_minimap[tile_id] = root["minimap_rgb"][tile_id].astype(np.uint8)
-                cached_mask[tile_id] = _tile_mask_array(root, tile_id)[:256, :256]
-
-            minimap = cached_minimap[tile_id]
-            object_mask = cached_mask[tile_id]
-
-            crop_rgb = crop_and_resize_rgb(minimap, bbox, crop_size)
-            crop_mask = crop_and_resize_mask(object_mask, bbox, crop_size)
-            crop_mask = np.clip(crop_mask, 0.0, 1.0)
-
-            asset_path = normalize_asset_path(str(placement.get("asset_path", "")))
-            family_id = family_id_from_asset_path(asset_path)
-            map_name = str(tile_meta["map"])
-            instance_idx = int(placement.get("instance_idx", -1) or -1)
-            unique_id = int(float(placement.get("uniqueId", 0) or 0))
-            provenance_key = build_map_tile_key(build, map_name, tile_x, tile_y)
-            variant_fp = variant_fingerprint_from_rgb(crop_rgb)
-            exemplar_id = exemplar_id_from_parts(
-                [
-                    family_id,
-                    build,
-                    map_name,
-                    tile_id,
-                    instance_idx,
-                    unique_id,
-                    variant_fp,
-                ]
+        row = asdict(
+            RoofExemplarRecord(
+                exemplar_id=exemplar_id,
+                family_id=family_id,
+                variant_rank=0,
+                is_canonical=False,
+                asset_path=asset_path,
+                instance_type="modf",
+                build=build,
+                map_name="",
+                tile_id=-1,
+                tile_x=-1,
+                tile_y=-1,
+                instance_idx=-1,
+                unique_id=0,
+                pose_rot_x=0,
+                pose_rot_y=0,
+                pose_rot_z=0,
+                pose_scale=1.0,
+                bbox_xyxy=(0, 0, crop_size - 1, crop_size - 1),
+                bbox_wh=(crop_size, crop_size),
+                crop_size=int(crop_size),
+                mask_coverage=mask_coverage,
+                minimap_mean=float(rgb.astype(np.float32).mean() / 255.0),
+                minimap_std=float(rgb.astype(np.float32).std() / 255.0),
+                provenance_key=f"{build}|{asset_path}",
+                review_state=review_state,
+                review_required=review_required,
             )
-            mask_coverage = float((crop_mask >= 0.2).mean())
-            minimap_mean = float(crop_rgb.astype(np.float32).mean() / 255.0)
-            minimap_std = float(crop_rgb.astype(np.float32).std() / 255.0)
-            review_required = bool(mask_coverage < 0.12)
-            review_state = "needs_review" if review_required else "auto"
+        )
+        row["variant_fingerprint"] = variant_fp
 
-            row = asdict(
-                RoofExemplarRecord(
-                    exemplar_id=exemplar_id,
-                    family_id=family_id,
-                    variant_rank=0,
-                    is_canonical=False,
-                    asset_path=asset_path,
-                    instance_type=str(placement.get("instance_type", "")),
-                    build=build,
-                    map_name=map_name,
-                    tile_id=tile_id,
-                    tile_x=tile_x,
-                    tile_y=tile_y,
-                    instance_idx=instance_idx,
-                    unique_id=unique_id,
-                    pose_rot_x=float(placement.get("rotX", 0.0) or 0.0),
-                    pose_rot_y=float(placement.get("rotY", 0.0) or 0.0),
-                    pose_rot_z=float(placement.get("rotZ", 0.0) or 0.0),
-                    pose_scale=float(placement.get("scale", 1.0) or 1.0),
-                    bbox_xyxy=(x0, y0, x1, y1),
-                    bbox_wh=(width, height),
-                    crop_size=int(crop_size),
-                    mask_coverage=mask_coverage,
-                    minimap_mean=minimap_mean,
-                    minimap_std=minimap_std,
-                    provenance_key=provenance_key,
-                    review_state=review_state,
-                    review_required=review_required,
-                )
-            )
-            row["variant_fingerprint"] = variant_fp
+        rows.append(row)
+        roof_rgbs.append(rgb)
+        roof_masks.append(mask.astype(np.float32))
+        pose_vecs.append(np.zeros(8, dtype=np.float32))
+        bbox_vecs.append(np.array([0, 0, crop_size - 1, crop_size - 1], dtype=np.int32))
 
-            rows.append(row)
-            roof_rgbs.append(crop_rgb)
-            roof_masks.append(crop_mask.astype(np.float32))
-            pose_vecs.append(pose_vector_from_placement(placement))
-            bbox_vecs.append(np.asarray([x0, y0, x1, y1], dtype=np.int32))
-            stats["exemplars_kept"] += 1
-    finally:
-        store.close()
-
-    return rows, roof_rgbs, roof_masks, pose_vecs, bbox_vecs, stats
+    return rows, roof_rgbs, roof_masks, pose_vecs, bbox_vecs
 
 
 def _dedupe_and_rank(rows: list[dict[str, Any]], arrays: dict[str, list[np.ndarray]]) -> tuple[list[dict[str, Any]], dict[str, list[np.ndarray]], list[dict[str, Any]]]:
@@ -326,18 +236,15 @@ def _dedupe_and_rank(rows: list[dict[str, Any]], arrays: dict[str, list[np.ndarr
     family_summaries: list[dict[str, Any]] = []
 
     for family_id, member_indices in sorted(family_groups.items(), key=lambda item: item[0]):
-        # Sort by strongest roof signal, then by larger bbox area.
         ordered = sorted(
             member_indices,
             key=lambda idx: (
                 float(rows[idx].get("mask_coverage", 0.0)),
-                int(rows[idx].get("bbox_wh", [0, 0])[0]) * int(rows[idx].get("bbox_wh", [0, 0])[1]),
                 str(rows[idx].get("exemplar_id", "")),
             ),
             reverse=True,
         )
 
-        # Variant dedupe per family by perceptual fingerprint.
         seen_fp: set[str] = set()
         deduped_members: list[int] = []
         for idx in ordered:
@@ -375,11 +282,9 @@ def _dedupe_and_rank(rows: list[dict[str, Any]], arrays: dict[str, list[np.ndarr
 
     keep_indices = sorted(keep_indices)
     kept_rows = [rows[idx] for idx in keep_indices]
-
     kept_arrays: dict[str, list[np.ndarray]] = {}
     for key, values in arrays.items():
         kept_arrays[key] = [values[idx] for idx in keep_indices]
-
     return kept_rows, kept_arrays, family_summaries
 
 
@@ -408,14 +313,12 @@ def _write_object_visual_store(output_dir: Path, arrays: dict[str, list[np.ndarr
         root.create_array("roof_mask", data=roof_mask, chunks=(max(1, min(64, max(1, n))), crop_size, crop_size), compressors=codec, overwrite=True)
         root.create_array("pose_vec", data=pose_vec, chunks=(max(1, min(256, max(1, n))), 8), compressors=codec, overwrite=True)
         root.create_array("bbox_xyxy", data=bbox_xyxy, chunks=(max(1, min(256, max(1, n))), 4), compressors=codec, overwrite=True)
-        root.attrs.update(
-            {
-                "schema_version": "1.0.0",
-                "description": "Object-roof exemplar visual datastore",
-                "crop_size": int(crop_size),
-                "sample_count": int(n),
-            }
-        )
+        root.attrs.update({
+            "schema_version": "2.0.0",
+            "description": "Object-roof exemplar visual datastore from per-asset MdxViewer renders",
+            "crop_size": int(crop_size),
+            "sample_count": int(n),
+        })
     finally:
         store.close()
     return zarr_path
@@ -423,7 +326,6 @@ def _write_object_visual_store(output_dir: Path, arrays: dict[str, list[np.ndarr
 
 def _write_catalogs(output_dir: Path, exemplars: list[dict[str, Any]], families: list[dict[str, Any]]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-
     exemplar_table = pa.Table.from_pylist(exemplars) if exemplars else pa.table({})
     family_table = pa.Table.from_pylist(families) if families else pa.table({})
 
@@ -469,14 +371,12 @@ def _write_roof_atlas(
         col_idx = idx % cols
         x = col_idx * crop_size
         y = row_idx * (crop_size + label_height)
-
         exemplar_id = str(row.get("exemplar_id", ""))
         source_idx = exemplar_to_idx.get(exemplar_id)
         if source_idx is None:
             continue
         tile = Image.fromarray(roof_rgbs[source_idx], mode="RGB")
         atlas.paste(tile, (x, y + label_height))
-
         draw.rectangle([(x, y), (x + crop_size - 1, y + label_height - 1)], fill=(18, 18, 18))
         short_label = str(row.get("family_id", ""))[-10:]
         draw.text((x + 3, y + 2), short_label, fill=(235, 235, 235))
@@ -498,6 +398,26 @@ def main() -> None:
     output_dir = Path(output_root) / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.emit_asset_list:
+        for build in builds:
+            paths = _collect_unique_wmo_assets(dataset_dir, str(build), roof_only=bool(args.roof_only))
+            asset_list_path = output_dir / f"roof_capture_asset_list_{build}.json"
+            asset_list_path.write_text(json.dumps(paths, indent=2), encoding="utf-8")
+            print(f"Wrote {len(paths)} asset paths -> {asset_list_path}")
+            print(f"\nTo capture roof images, run MdxViewer with:\n"
+                  f"  --game-path <client_root> "
+                  f"--capture-roof {output_dir} "
+                  f"--capture-roof-asset-list {asset_list_path} "
+                  f"--exit-after-validation")
+        return
+
+    if args.captured_roof_dir is None:
+        raise RuntimeError("Must provide --captured-roof-dir (or --emit-asset-list to just write the asset list)")
+
+    captured_dir = Path(args.captured_roof_dir)
+    metadata_path = args.captured_roof_metadata or (captured_dir / "roof_capture_metadata.json")
+    crop_size = int(args.crop_size)
+
     all_rows: list[dict[str, Any]] = []
     all_roof_rgbs: list[np.ndarray] = []
     all_roof_masks: list[np.ndarray] = []
@@ -506,19 +426,16 @@ def main() -> None:
     build_stats: dict[str, dict[str, int]] = {}
 
     for build in builds:
-        rows, roof_rgbs, roof_masks, pose_vecs, bbox_vecs, stats = _collect_build_exemplars(
-            dataset_dir=dataset_dir,
+        rows, roof_rgbs, roof_masks, pose_vecs, bbox_vecs = _build_from_captures(
+            captured_dir=captured_dir,
+            metadata_path=metadata_path,
             build=str(build),
-            max_tiles_per_build=int(args.max_tiles_per_build),
-            include_mddf=bool(args.include_mddf),
-            include_modf=bool(args.include_modf),
-            roof_only=bool(args.roof_only),
-            crop_size=int(args.crop_size),
-            min_bbox_area=int(args.min_bbox_area),
-            bbox_padding=int(args.bbox_padding),
+            crop_size=crop_size,
         )
-        build_stats[str(build)] = stats
-
+        build_stats[str(build)] = {
+            "assets_in_metadata": len(rows),
+            "exemplars_kept": len(rows),
+        }
         all_rows.extend(rows)
         all_roof_rgbs.extend(roof_rgbs)
         all_roof_masks.extend(roof_masks)
@@ -533,19 +450,19 @@ def main() -> None:
     }
     deduped_rows, deduped_arrays, family_summaries = _dedupe_and_rank(all_rows, arrays)
 
-    zarr_path = _write_object_visual_store(output_dir, deduped_arrays, crop_size=int(args.crop_size))
+    zarr_path = _write_object_visual_store(output_dir, deduped_arrays, crop_size=crop_size)
     _write_catalogs(output_dir, deduped_rows, family_summaries)
     atlas_path = _write_roof_atlas(
         output_dir,
         exemplars=deduped_rows,
         roof_rgbs=deduped_arrays["roof_rgb"],
         max_tiles=int(args.max_canonical_atlas),
-        crop_size=int(args.crop_size),
+        crop_size=crop_size,
     )
 
     summary = {
         "run_name": run_name,
-        "dataset_dir": str(dataset_dir),
+        "captured_roof_dir": str(captured_dir),
         "builds": [str(item) for item in builds],
         "build_stats": build_stats,
         "exemplars_total": len(all_rows),

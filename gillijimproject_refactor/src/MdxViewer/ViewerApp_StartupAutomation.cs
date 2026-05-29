@@ -23,7 +23,29 @@ public partial class ViewerApp
         public int ValidationResolution { get; init; }
         public bool ForceValidationRegeneration { get; init; }
         public bool ExitAfterValidation { get; init; }
+        public int ValidationSettledFrames { get; init; }
+        public int ValidationMaxFramesBeforeCapture { get; init; }
+        public int ValidationBatchSettledFrames { get; init; }
+        public string? RoofCaptureOutputDir { get; init; }
+        public string? RoofCaptureAssetListPath { get; init; }
+        public int RoofCaptureResolution { get; init; }
+        public bool RoofCaptureAllAngles { get; init; }
     }
+
+    private sealed class PendingRoofCaptureBatch
+    {
+        public required List<string> AssetPaths { get; init; }
+        public required string OutputDir { get; init; }
+        public int Resolution { get; init; } = 512;
+        public bool AllAngles { get; init; }
+        public bool ExitAfterCompletion { get; init; }
+        public int CurrentIndex { get; set; }
+        public int SuccessCount { get; set; }
+        public Catalog.ScreenshotRenderer? Renderer { get; set; }
+        public List<Dictionary<string, object>> Metadata { get; set; } = new();
+    }
+
+    private PendingRoofCaptureBatch? _pendingRoofCaptureBatch;
 
     private void ApplyStartupAutomation(string[]? initialArgs)
     {
@@ -68,6 +90,9 @@ public partial class ViewerApp
 
         if (!string.IsNullOrWhiteSpace(request.ValidationDatasetRoot))
             QueueStartupValidationCaptureBatch(request);
+
+        if (!string.IsNullOrWhiteSpace(request.RoofCaptureOutputDir))
+            QueueStartupRoofCapture(request);
     }
 
     private StartupAutomationRequest ParseStartupAutomationRequest(string[]? initialArgs, out string? legacyPath)
@@ -89,10 +114,17 @@ public partial class ViewerApp
         string? validationDatasetRoot = null;
         string? validationOutputDir = null;
         string? validationResolution = null;
+        string? validationSettledFrames = null;
+        string? validationMaxFrames = null;
+        string? validationBatchSettledFrames = null;
         bool captureIncludeUi = false;
         bool exitAfterCapture = false;
         bool forceValidationRegeneration = false;
         bool exitAfterValidation = false;
+        string? roofCaptureOutputDir = null;
+        string? roofCaptureAssetListPath = null;
+        string? roofCaptureResolution = null;
+        bool roofCaptureAllAngles = false;
 
         for (int index = 0; index < initialArgs.Length; index++)
         {
@@ -184,6 +216,40 @@ public partial class ViewerApp
                     exitAfterValidation = true;
                     break;
 
+                case "--validation-settled-frames":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out validationSettledFrames))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--validation-max-frames":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out validationMaxFrames))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--validation-batch-settled-frames":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out validationBatchSettledFrames))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--capture-roof":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out roofCaptureOutputDir))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--capture-roof-asset-list":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out roofCaptureAssetListPath))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--capture-roof-resolution":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out roofCaptureResolution))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--capture-roof-all-angles":
+                    roofCaptureAllAngles = true;
+                    break;
+
                 default:
                     if (arg.StartsWith("--", StringComparison.Ordinal))
                     {
@@ -208,6 +274,21 @@ public partial class ViewerApp
         if (!TryParseOptionalPositiveInt(validationResolution, "--validation-resolution", out int resolvedValidationResolution))
             return new StartupAutomationRequest();
 
+        if (!TryParseOptionalPositiveInt(validationSettledFrames, "--validation-settled-frames", out int resolvedValidationSettledFrames))
+            return new StartupAutomationRequest();
+        if (validationSettledFrames == null)
+            resolvedValidationSettledFrames = DefaultRequiredSettledFrames;
+
+        if (!TryParseOptionalPositiveInt(validationMaxFrames, "--validation-max-frames", out int resolvedValidationMaxFrames))
+            return new StartupAutomationRequest();
+        if (validationMaxFrames == null)
+            resolvedValidationMaxFrames = DefaultMaxFramesBeforeCapture;
+
+        if (!TryParseOptionalPositiveInt(validationBatchSettledFrames, "--validation-batch-settled-frames", out int resolvedValidationBatchSettledFrames))
+            return new StartupAutomationRequest();
+        if (validationBatchSettledFrames == null)
+            resolvedValidationBatchSettledFrames = DefaultBatchSettledFrames;
+
         return new StartupAutomationRequest
         {
             GamePath = NormalizeOptionalPath(gamePath),
@@ -227,6 +308,13 @@ public partial class ViewerApp
             ValidationResolution = resolvedValidationResolution,
             ForceValidationRegeneration = forceValidationRegeneration,
             ExitAfterValidation = exitAfterValidation,
+            ValidationSettledFrames = resolvedValidationSettledFrames,
+            ValidationMaxFramesBeforeCapture = resolvedValidationMaxFrames,
+            ValidationBatchSettledFrames = resolvedValidationBatchSettledFrames,
+            RoofCaptureOutputDir = NormalizeOptionalPath(roofCaptureOutputDir),
+            RoofCaptureAssetListPath = NormalizeOptionalValue(roofCaptureAssetListPath),
+            RoofCaptureResolution = TryParseOptionalPositiveInt(roofCaptureResolution, "--capture-roof-resolution", out int resolvedRoofRes) ? resolvedRoofRes : 512,
+            RoofCaptureAllAngles = roofCaptureAllAngles,
         };
     }
 
@@ -237,7 +325,10 @@ public partial class ViewerApp
             request.ValidationOutputDir,
             request.ForceValidationRegeneration,
             request.ValidationResolution,
-            out string? statusMessage);
+            out string? statusMessage,
+            request.ValidationSettledFrames,
+            request.ValidationMaxFramesBeforeCapture,
+            request.ValidationBatchSettledFrames);
 
         if (!string.IsNullOrWhiteSpace(statusMessage))
             AppendMkHarvestLogLine(statusMessage);
@@ -335,6 +426,47 @@ public partial class ViewerApp
                 }
                 : null);
     }
+
+private void QueueStartupRoofCapture(StartupAutomationRequest request)
+    {
+        if (_dataSource == null)
+        {
+            _statusMessage = "Cannot start roof capture: no data source loaded";
+            return;
+        }
+
+        string outputDir = request.RoofCaptureOutputDir!;
+        int resolution = request.RoofCaptureResolution > 0 ? request.RoofCaptureResolution : 512;
+
+        List<string> assetPaths;
+        string? assetListPath = request.RoofCaptureAssetListPath;
+        AppendMkHarvestLogLine($"[RoofCapture] Asset list path = '{assetListPath}'");
+        if (!string.IsNullOrWhiteSpace(assetListPath) && File.Exists(assetListPath))
+        {
+            AppendMkHarvestLogLine($"[RoofCapture] Reading asset list from {assetListPath}");
+            string json = File.ReadAllText(assetListPath);
+            var list = System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.List<string>>(json);
+            assetPaths = list ?? new List<string>();
+            AppendMkHarvestLogLine($"[RoofCapture] Found {assetPaths.Count} assets");
+        }
+        else
+        {
+            _statusMessage = $"Roof capture requires --capture-roof-asset-list pointing to a JSON array of asset paths. Tried: '{assetListPath}' exists={File.Exists(assetListPath ?? "")}";
+            return;
+        }
+
+        _statusMessage = $"Queued roof batch capture: {assetPaths.Count} assets -> {outputDir}";
+        AppendMkHarvestLogLine(_statusMessage);
+
+        _pendingRoofCaptureBatch = new PendingRoofCaptureBatch
+        {
+            AssetPaths = assetPaths,
+            OutputDir = outputDir,
+            Resolution = resolution,
+            AllAngles = request.RoofCaptureAllAngles,
+            ExitAfterCompletion = request.ExitAfterValidation,
+        };
+}
 
     private bool TryParseOptionalPositiveInt(string? rawValue, string optionName, out int parsedValue)
     {

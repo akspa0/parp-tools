@@ -22,7 +22,10 @@ public sealed class ValidationCaptureReadinessEvaluatorTests
             FramesObserved: 0,
             SettledFrames: 0,
             RequiredSettledFrames: 48,
-            MaxFramesBeforeCapture: 2400));
+            MaxFramesBeforeCapture: 2400,
+            BatchHasSettled: false,
+            BatchSettledFrames: 2,
+            FastSettleAfterBatchReady: true));
 
         Assert.True(state.IsReady);
         Assert.Equal(ValidationCaptureReadinessStatus.Ready, state.Status);
@@ -46,7 +49,10 @@ public sealed class ValidationCaptureReadinessEvaluatorTests
             FramesObserved: 10,
             SettledFrames: 0,
             RequiredSettledFrames: 48,
-            MaxFramesBeforeCapture: 2400));
+            MaxFramesBeforeCapture: 2400,
+            BatchHasSettled: false,
+            BatchSettledFrames: 2,
+            FastSettleAfterBatchReady: true));
 
         Assert.False(state.IsReady);
         Assert.False(state.TimedOut);
@@ -71,7 +77,10 @@ public sealed class ValidationCaptureReadinessEvaluatorTests
             FramesObserved: 22,
             SettledFrames: 0,
             RequiredSettledFrames: 48,
-            MaxFramesBeforeCapture: 2400));
+            MaxFramesBeforeCapture: 2400,
+            BatchHasSettled: false,
+            BatchSettledFrames: 2,
+            FastSettleAfterBatchReady: true));
 
         Assert.Equal(ValidationCaptureReadinessStatus.WaitingForWorldObjectLoads, state.Status);
         Assert.Contains("pending world object loads", state.Detail);
@@ -95,7 +104,10 @@ public sealed class ValidationCaptureReadinessEvaluatorTests
             FramesObserved: 22,
             SettledFrames: 0,
             RequiredSettledFrames: 48,
-            MaxFramesBeforeCapture: 2400));
+            MaxFramesBeforeCapture: 2400,
+            BatchHasSettled: false,
+            BatchSettledFrames: 2,
+            FastSettleAfterBatchReady: true));
 
         Assert.Equal(ValidationCaptureReadinessStatus.WaitingForTargetTile, state.Status);
     }
@@ -118,7 +130,10 @@ public sealed class ValidationCaptureReadinessEvaluatorTests
             FramesObserved: 100,
             SettledFrames: 47,
             RequiredSettledFrames: 48,
-            MaxFramesBeforeCapture: 2400));
+            MaxFramesBeforeCapture: 2400,
+            BatchHasSettled: false,
+            BatchSettledFrames: 2,
+            FastSettleAfterBatchReady: true));
 
         Assert.Equal(ValidationCaptureReadinessStatus.WaitingForSettledFrames, state.Status);
     }
@@ -141,7 +156,10 @@ public sealed class ValidationCaptureReadinessEvaluatorTests
             FramesObserved: 2400,
             SettledFrames: 0,
             RequiredSettledFrames: 48,
-            MaxFramesBeforeCapture: 2400));
+            MaxFramesBeforeCapture: 2400,
+            BatchHasSettled: false,
+            BatchSettledFrames: 2,
+            FastSettleAfterBatchReady: true));
 
         Assert.Equal(ValidationCaptureReadinessStatus.TimedOut, state.Status);
         Assert.True(state.TimedOut);
@@ -166,9 +184,93 @@ public sealed class ValidationCaptureReadinessEvaluatorTests
             FramesObserved: 100,
             SettledFrames: 48,
             RequiredSettledFrames: 48,
-            MaxFramesBeforeCapture: 2400));
+            MaxFramesBeforeCapture: 2400,
+            BatchHasSettled: false,
+            BatchSettledFrames: 2,
+            FastSettleAfterBatchReady: true));
 
         Assert.Equal(ValidationCaptureReadinessStatus.Ready, state.Status);
         Assert.True(state.IsReady);
+    }
+
+    [Fact]
+    public void Evaluate_BatchFastSettle_UsesBatchSettledFrames()
+    {
+        ValidationCaptureReadinessState state = ValidationCaptureReadinessEvaluator.Evaluate(new ValidationCaptureReadinessSnapshot(
+            HasSceneContent: true,
+            HasFramebuffer: true,
+            FramebufferWidth: 512,
+            FramebufferHeight: 512,
+            RequestedResolution: 512,
+            WaitForSceneReady: true,
+            HasTargetTile: true,
+            TargetTileLoaded: true,
+            TerrainStreaming: false,
+            TrackPendingWorldObjectLoads: true,
+            PendingWorldObjectLoadCount: 0,
+            FramesObserved: 100,
+            SettledFrames: 2,
+            RequiredSettledFrames: 48,
+            MaxFramesBeforeCapture: 2400,
+            BatchHasSettled: true,
+            BatchSettledFrames: 2,
+            FastSettleAfterBatchReady: true));
+
+        Assert.Equal(ValidationCaptureReadinessStatus.Ready, state.Status);
+        Assert.True(state.IsReady);
+    }
+
+    [Fact]
+    public void Evaluate_BatchFastSettle_Disabled_StillRequiresFullSettle()
+    {
+        ValidationCaptureReadinessState state = ValidationCaptureReadinessEvaluator.Evaluate(new ValidationCaptureReadinessSnapshot(
+            HasSceneContent: true,
+            HasFramebuffer: true,
+            FramebufferWidth: 512,
+            FramebufferHeight: 512,
+            RequestedResolution: 512,
+            WaitForSceneReady: true,
+            HasTargetTile: true,
+            TargetTileLoaded: true,
+            TerrainStreaming: false,
+            TrackPendingWorldObjectLoads: true,
+            PendingWorldObjectLoadCount: 0,
+            FramesObserved: 100,
+            SettledFrames: 2,
+            RequiredSettledFrames: 48,
+            MaxFramesBeforeCapture: 2400,
+            BatchHasSettled: true,
+            BatchSettledFrames: 2,
+            FastSettleAfterBatchReady: false));
+
+        Assert.Equal(ValidationCaptureReadinessStatus.WaitingForSettledFrames, state.Status);
+        Assert.False(state.IsReady);
+    }
+
+    [Fact]
+    public void Evaluate_BatchNotYetSettled_StillRequiresFullSettle()
+    {
+        ValidationCaptureReadinessState state = ValidationCaptureReadinessEvaluator.Evaluate(new ValidationCaptureReadinessSnapshot(
+            HasSceneContent: true,
+            HasFramebuffer: true,
+            FramebufferWidth: 512,
+            FramebufferHeight: 512,
+            RequestedResolution: 512,
+            WaitForSceneReady: true,
+            HasTargetTile: true,
+            TargetTileLoaded: true,
+            TerrainStreaming: false,
+            TrackPendingWorldObjectLoads: true,
+            PendingWorldObjectLoadCount: 0,
+            FramesObserved: 100,
+            SettledFrames: 2,
+            RequiredSettledFrames: 48,
+            MaxFramesBeforeCapture: 2400,
+            BatchHasSettled: false,
+            BatchSettledFrames: 2,
+            FastSettleAfterBatchReady: true));
+
+        Assert.Equal(ValidationCaptureReadinessStatus.WaitingForSettledFrames, state.Status);
+        Assert.False(state.IsReady);
     }
 }

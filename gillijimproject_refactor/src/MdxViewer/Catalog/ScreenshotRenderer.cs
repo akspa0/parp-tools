@@ -7,18 +7,21 @@ using Silk.NET.OpenGL;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using WoWMapConverter.Core.Converters;
 
 namespace MdxViewer.Catalog;
 
 /// <summary>
-/// Renders a single MDX model to an offscreen framebuffer, composites a nameplate,
-/// and saves the result as a PNG screenshot.
+/// Renders a single MDX or WMO model to an offscreen framebuffer, composites a nameplate,
+/// and saves the result as a PNG screenshot. Supports perspective multi-angle and orthographic
+/// top-down (roof) capture modes.
 /// </summary>
 public class ScreenshotRenderer : IDisposable
 {
     private readonly GL _gl;
     private readonly IDataSource? _dataSource;
     private readonly ReplaceableTextureResolver? _texResolver;
+    private readonly string? _dbcBuild;
 
     private uint _fbo;
     private uint _colorTex;
@@ -27,11 +30,12 @@ public class ScreenshotRenderer : IDisposable
     private int _height;
     private bool _fboReady;
 
-    public ScreenshotRenderer(GL gl, IDataSource? dataSource, ReplaceableTextureResolver? texResolver = null)
+    public ScreenshotRenderer(GL gl, IDataSource? dataSource, ReplaceableTextureResolver? texResolver = null, string? dbcBuild = null)
     {
         _gl = gl;
         _dataSource = dataSource;
         _texResolver = texResolver;
+        _dbcBuild = dbcBuild;
     }
 
     /// <summary>
@@ -86,9 +90,669 @@ public class ScreenshotRenderer : IDisposable
 
         if (entry.IsWmo)
         {
-            ViewerLog.Trace($"[Screenshot] Skip {entry.Name}: WMO screenshot not yet supported");
+            return CaptureWmoMultiAngle(entry, outputDir, width, height, resolvedModelPath);
+        }
+
+        return CaptureMdxMultiAngle(entry, outputDir, width, height, resolvedModelPath);
+    }
+
+    /// <summary>
+    /// Capture a single top-down orthographic image of an asset (MDX or WMO) with no terrain,
+    /// black background, and the model filling the frame. Intended for roof exemplar capture.
+    /// Saves to {outputDir}/roof_topdown.png and returns the output path, or null on failure.
+    /// </summary>
+    public string? CaptureRoofTopDown(AssetCatalogEntry entry, string outputDir, int width = 512, int height = 512,
+        string? resolvedModelPath = null)
+    {
+        string modelPath = resolvedModelPath ?? entry.ModelPath ?? "";
+        if (_dataSource == null || string.IsNullOrEmpty(modelPath))
+        {
+            ViewerLog.Trace($"[Screenshot] Skip roof capture {entry.Name}: no data source or model path");
+            return null;
+        }
+
+        if (entry.IsWmo)
+        {
+            return CaptureWmoRoofTopDownByPath(modelPath, outputDir, width, height);
+        }
+
+        return CaptureMdxRoofTopDown(entry, outputDir, width, height, resolvedModelPath);
+    }
+
+    private int CaptureWmoMultiAngle(AssetCatalogEntry entry, string outputDir, int width, int height,
+        string? resolvedModelPath)
+    {
+        string modelPath = resolvedModelPath ?? entry.ModelPath ?? "";
+        WmoV14ToV17Converter.WmoV14Data? wmo = LoadWmoData(modelPath);
+        if (wmo == null) return 0;
+
+        string modelDir = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? "";
+        WmoRenderer? renderer = null;
+        try
+        {
+            renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _dbcBuild,
+                deferInitialDoodadLoads: true,
+                deferInitialMaterialTextureLoads: false,
+                enableRuntimeGroupVisibility: false);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[Screenshot] Skip {entry.Name}: WmoRenderer creation failed: {ex.Message}");
             return 0;
         }
+
+        var boundsMin = wmo.BoundsMin;
+        var boundsMax = wmo.BoundsMax;
+        var center = (boundsMin + boundsMax) * 0.5f;
+        float radius = (boundsMax - boundsMin).Length() * 0.5f;
+        if (radius < 0.01f) radius = 1.0f;
+
+        EnsureFbo(width, height);
+        if (!_fboReady) { renderer.Dispose(); return 0; }
+
+        Directory.CreateDirectory(outputDir);
+        int count = 0;
+        float fovRad = 25f * MathF.PI / 180f;
+        float aspect = (float)width / height;
+
+        try
+        {
+            foreach (var (angleName, azimuthDeg, elevationDeg) in CameraAngles)
+            {
+                try
+                {
+                    _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+                    _gl.Viewport(0, 0, (uint)width, (uint)height);
+                    _gl.ClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+                    _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+                    _gl.Enable(EnableCap.DepthTest);
+                    _gl.DepthFunc(DepthFunction.Less);
+                    _gl.DepthMask(true);
+
+                    float elev = elevationDeg * MathF.PI / 180f;
+                    float azim = azimuthDeg * MathF.PI / 180f;
+                    float cosElev = MathF.Cos(elev);
+                    float sinElev = MathF.Sin(elev);
+                    var camDir = Vector3.Normalize(new Vector3(cosElev * MathF.Cos(azim), cosElev * MathF.Sin(azim), -sinElev));
+                    var up = MathF.Abs(Vector3.Dot(camDir, Vector3.UnitZ)) > 0.99f ? Vector3.UnitX : Vector3.UnitZ;
+                    var tmpView = Matrix4x4.CreateLookAt(center - camDir * radius, center, up);
+                    float halfFovV = fovRad * 0.5f;
+                    float halfFovH = MathF.Atan(MathF.Tan(halfFovV) * aspect);
+                    float maxDist = radius;
+                    var corners = ComputeBoundsCorners(boundsMin, boundsMax);
+                    for (int ci = 0; ci < 8; ci++)
+                    {
+                        var viewPos = Vector3.Transform(corners[ci], tmpView);
+                        float depth = -viewPos.Z;
+                        float needV = MathF.Abs(viewPos.Y) / MathF.Tan(halfFovV) + depth;
+                        float needH = MathF.Abs(viewPos.X) / MathF.Tan(halfFovH) + depth;
+                        maxDist = MathF.Max(maxDist, MathF.Max(needV, needH));
+                    }
+                    float dist = maxDist * 1.15f;
+                    var camPos = center - camDir * dist;
+                    var view = Matrix4x4.CreateLookAt(camPos, center, up);
+                    var proj = Matrix4x4.CreatePerspectiveFieldOfView(fovRad, aspect, 0.01f, dist * 10f);
+
+                    var fogColor = new Vector3(1.0f, 1.0f, 1.0f);
+                    var lightDir = Vector3.Normalize(new Vector3(-0.5f, 0.8f, 0.3f));
+                    var lightColor = new Vector3(1.0f, 0.95f, 0.9f);
+                    var ambientColor = new Vector3(0.3f, 0.3f, 0.35f);
+
+                    _gl.Disable(EnableCap.Blend);
+                    renderer.RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Opaque,
+                        fogColor, dist * 5f, dist * 10f, camPos, lightDir, lightColor, ambientColor);
+                    _gl.Enable(EnableCap.DepthTest);
+                    _gl.DepthFunc(DepthFunction.Lequal);
+                    renderer.RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Transparent,
+                        fogColor, dist * 5f, dist * 10f, camPos, lightDir, lightColor, ambientColor);
+
+                    byte[] pixels = new byte[width * height * 4];
+                    unsafe { fixed (byte* ptr = pixels) _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr); }
+                    ForceOpaqueAlpha(pixels);
+                    _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+
+                    using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, width, height);
+                    image.Mutate(x => x.Flip(FlipMode.Vertical));
+                    image.SaveAsJpeg(Path.Combine(outputDir, $"{angleName}.jpg"), new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 99 });
+                    count++;
+                }
+                catch (Exception ex)
+                {
+                    ViewerLog.Trace($"[Screenshot] WMO angle {angleName} failed for {entry.Name}: {ex.Message}");
+                    _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+                }
+            }
+        }
+        finally
+        {
+            renderer.Dispose();
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Capture a WMO model from all predefined camera angles + orthographic top-down (roof).
+    /// Saves roof_topdown.png + {angleName}.png per angle. Returns the roof_topdown path or null.
+    /// </summary>
+    public string? CaptureWmoAllAngles(string modelPath, string outputDir, int width = 512, int height = 512)
+    {
+        ViewerLog.Info(ViewerLog.Category.Wmo, $"[RoofCapture] Loading {modelPath}");
+        WmoV14ToV17Converter.WmoV14Data? wmo = LoadWmoData(modelPath);
+        if (wmo == null)
+        {
+            ViewerLog.Info(ViewerLog.Category.Wmo, $"[RoofCapture] FAILED to load {modelPath}");
+            return null;
+        }
+
+        string modelDir = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? "";
+        WmoRenderer? renderer = null;
+        try
+        {
+            renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _dbcBuild,
+                deferInitialDoodadLoads: true, deferInitialMaterialTextureLoads: false, enableRuntimeGroupVisibility: false);
+        }
+        catch (Exception ex) { ViewerLog.Trace($"[Screenshot] WmoRenderer creation failed for {modelPath}: {ex.Message}"); return null; }
+
+        try
+        {
+            string? roofPath = RenderWmoRoofTopDown(renderer, wmo, outputDir, width, height);
+            RenderWmoMultiAngle(renderer, wmo, modelPath, outputDir, width, height);
+
+            return roofPath;
+        }
+        finally { renderer.Dispose(); }
+    }
+
+    private void RenderWmoMultiAngle(WmoRenderer renderer, WmoV14ToV17Converter.WmoV14Data wmo,
+        string modelPath, string outputDir, int width, int height)
+    {
+        var boundsMin = wmo.BoundsMin;
+        var boundsMax = wmo.BoundsMax;
+        var center = (boundsMin + boundsMax) * 0.5f;
+        float radius = (boundsMax - boundsMin).Length() * 0.5f;
+        if (radius < 0.01f) radius = 1.0f;
+
+        EnsureFbo(width, height);
+        if (!_fboReady) return;
+
+        float fovRad = 25f * MathF.PI / 180f;
+        float aspect = (float)width / height;
+
+        var corners = ComputeBoundsCorners(boundsMin, boundsMax);
+        foreach (var (angleName, azimuthDeg, elevationDeg) in CameraAngles)
+        {
+            try
+            {
+                float elev = elevationDeg * MathF.PI / 180f;
+                float azim = azimuthDeg * MathF.PI / 180f;
+                float cosElev = MathF.Cos(elev);
+                float sinElev = MathF.Sin(elev);
+                var camDir = Vector3.Normalize(new Vector3(cosElev * MathF.Cos(azim), cosElev * MathF.Sin(azim), -sinElev));
+                var up = MathF.Abs(Vector3.Dot(camDir, Vector3.UnitZ)) > 0.99f ? Vector3.UnitX : Vector3.UnitZ;
+                var tmpView = Matrix4x4.CreateLookAt(center - camDir * radius, center, up);
+                float halfFovV = fovRad * 0.5f;
+                float halfFovH = MathF.Atan(MathF.Tan(halfFovV) * aspect);
+                float maxDist = radius;
+                for (int ci = 0; ci < 8; ci++)
+                {
+                    var viewPos = Vector3.Transform(corners[ci], tmpView);
+                    float depth = -viewPos.Z;
+                    float needV = MathF.Abs(viewPos.Y) / MathF.Tan(halfFovV) + depth;
+                    float needH = MathF.Abs(viewPos.X) / MathF.Tan(halfFovH) + depth;
+                    maxDist = MathF.Max(maxDist, MathF.Max(needV, needH));
+                }
+                float dist = maxDist * 1.15f;
+                var camPos = center - camDir * dist;
+                var view = Matrix4x4.CreateLookAt(camPos, center, up);
+                var proj = Matrix4x4.CreatePerspectiveFieldOfView(fovRad, aspect, 0.01f, dist * 10f);
+
+                _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+                _gl.Viewport(0, 0, (uint)width, (uint)height);
+                _gl.ClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+                _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+                _gl.Enable(EnableCap.DepthTest);
+                _gl.DepthFunc(DepthFunction.Less);
+                _gl.DepthMask(true);
+
+                var fogColor = new Vector3(1.0f, 1.0f, 1.0f);
+                var lightDir = Vector3.Normalize(new Vector3(-0.5f, 0.8f, 0.3f));
+                var lightColor = new Vector3(1.0f, 0.95f, 0.9f);
+                var ambientColor = new Vector3(0.3f, 0.3f, 0.35f);
+
+                _gl.Disable(EnableCap.Blend);
+                renderer.RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Opaque,
+                    fogColor, dist * 5f, dist * 10f, camPos, lightDir, lightColor, ambientColor);
+                _gl.Enable(EnableCap.DepthTest);
+                _gl.DepthFunc(DepthFunction.Lequal);
+                renderer.RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Transparent,
+                    fogColor, dist * 5f, dist * 10f, camPos, lightDir, lightColor, ambientColor);
+
+                byte[] pixels = new byte[width * height * 4];
+                unsafe { fixed (byte* ptr = pixels) _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr); }
+                ForceOpaqueAlpha(pixels);
+                _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+
+                using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, width, height);
+                image.Mutate(x => x.Flip(FlipMode.Vertical));
+                image.SaveAsJpeg(Path.Combine(outputDir, $"{angleName}.jpg"), new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 99 });
+            }
+            catch (Exception ex)
+            {
+                ViewerLog.Trace($"[Screenshot] WMO angle {angleName} failed: {ex.Message}");
+                _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Capture a top-down orthographic roof image of a WMO model identified by its asset path.
+    /// Returns the output PNG path, or null on failure.
+    /// </summary>
+    public string? CaptureWmoRoofTopDownByPath(string modelPath, string outputDir, int width = 512, int height = 512)
+    {
+        WmoV14ToV17Converter.WmoV14Data? wmo = LoadWmoData(modelPath);
+        if (wmo == null) return null;
+
+        string modelDir = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? "";
+        WmoRenderer? renderer = null;
+        try
+        {
+            renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _dbcBuild,
+                deferInitialDoodadLoads: true, deferInitialMaterialTextureLoads: false, enableRuntimeGroupVisibility: false);
+        }
+        catch (Exception ex) { ViewerLog.Trace($"[Screenshot] WmoRenderer creation failed for {modelPath}: {ex.Message}"); return null; }
+
+        try
+        {
+            return RenderWmoRoofTopDown(renderer, wmo, outputDir, width, height);
+        }
+        finally { renderer.Dispose(); }
+    }
+
+    /// <summary>
+    /// Batch capture roof-only (top-down orthographic) renders for all WMO asset paths.
+    /// Output: one subdirectory per asset with roof_topdown.png.
+    /// </summary>
+    public int CaptureBatchRoofTopDown(IReadOnlyList<string> modelPaths, string outputDir,
+        int width = 512, int height = 512, Action<int, int, string>? onProgress = null)
+    {
+        Directory.CreateDirectory(outputDir);
+        int success = 0;
+        var metadata = new List<Dictionary<string, object>>();
+
+        for (int i = 0; i < modelPaths.Count; i++)
+        {
+            string path = modelPaths[i];
+            onProgress?.Invoke(i + 1, modelPaths.Count, Path.GetFileNameWithoutExtension(path));
+            ViewerLog.Trace($"[RoofCapture] ({i + 1}/{modelPaths.Count}) {path}");
+
+            string safeName = SanitizePathComponent(Path.GetFileNameWithoutExtension(path));
+            string assetDir = Path.Combine(outputDir, safeName);
+            Directory.CreateDirectory(assetDir);
+
+            string? result = CaptureWmoRoofTopDownByPath(path, assetDir, width, height);
+            if (result != null)
+            {
+                success++;
+                metadata.Add(new Dictionary<string, object>
+                {
+                    ["asset_path"] = path,
+                    ["roof_topdown"] = result,
+                    ["success"] = true
+                });
+            }
+            else
+            {
+                metadata.Add(new Dictionary<string, object>
+                {
+                    ["asset_path"] = path,
+                    ["success"] = false
+                });
+            }
+
+            if (i % 20 == 0)
+                System.Threading.Thread.Yield();
+        }
+
+        string metaPath = Path.Combine(outputDir, "roof_capture_metadata.json");
+        File.WriteAllText(metaPath,
+            System.Text.Json.JsonSerializer.Serialize(new { captures = metadata }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        return success;
+    }
+
+    /// <summary>
+    /// Batch capture all-angle renders for all WMO asset paths.
+    /// Output: one subdirectory per asset with roof_topdown.png + {angle}.png per angle.
+    /// </summary>
+    public int CaptureBatchAllAngles(IReadOnlyList<string> modelPaths, string outputDir,
+        int width = 512, int height = 512, Action<int, int, string>? onProgress = null)
+    {
+        Directory.CreateDirectory(outputDir);
+        int success = 0;
+        var metadata = new List<Dictionary<string, object>>();
+
+        for (int i = 0; i < modelPaths.Count; i++)
+        {
+            string path = modelPaths[i];
+            onProgress?.Invoke(i + 1, modelPaths.Count, Path.GetFileNameWithoutExtension(path));
+            ViewerLog.Trace($"[RoofCapture] ({i + 1}/{modelPaths.Count}) {path}");
+
+            string safeName = SanitizePathComponent(Path.GetFileNameWithoutExtension(path));
+            string assetDir = Path.Combine(outputDir, safeName);
+            Directory.CreateDirectory(assetDir);
+
+            string? result = CaptureWmoAllAngles(path, assetDir, width, height);
+            if (result != null)
+            {
+                success++;
+                metadata.Add(new Dictionary<string, object>
+                {
+                    ["asset_path"] = path,
+                    ["roof_topdown"] = result,
+                    ["angles"] = CameraAngles.Select(a => a.name).ToList(),
+                    ["success"] = true
+                });
+            }
+            else
+            {
+                metadata.Add(new Dictionary<string, object>
+                {
+                    ["asset_path"] = path,
+                    ["success"] = false
+                });
+            }
+
+            if (i % 20 == 0)
+                System.Threading.Thread.Yield();
+        }
+
+        string metaPath = Path.Combine(outputDir, "roof_capture_metadata.json");
+        File.WriteAllText(metaPath,
+            System.Text.Json.JsonSerializer.Serialize(new { captures = metadata }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        return success;
+    }
+
+    private string? RenderWmoRoofTopDown(WmoRenderer renderer, WmoV14ToV17Converter.WmoV14Data wmo,
+        string outputDir, int width, int height)
+    {
+        var boundsMin = wmo.BoundsMin;
+        var boundsMax = wmo.BoundsMax;
+        var center = (boundsMin + boundsMax) * 0.5f;
+        float spanX = boundsMax.X - boundsMin.X; if (spanX < 0.01f) spanX = 1.0f;
+        float spanY = boundsMax.Y - boundsMin.Y; if (spanY < 0.01f) spanY = 1.0f;
+        float spanZ = boundsMax.Z - boundsMin.Z;
+
+        float padFactor = 1.1f;
+        float orthoHalfX = spanX * padFactor * 0.5f;
+        float orthoHalfY = spanY * padFactor * 0.5f;
+        float aspect = (float)width / height;
+        if (aspect > 1.0f) orthoHalfX = MathF.Max(orthoHalfX, orthoHalfY * aspect);
+        else orthoHalfY = MathF.Max(orthoHalfY, orthoHalfX / aspect);
+
+        float eyeHeight = spanZ + 100.0f;
+        var eyePos = new Vector3(center.X, center.Y, center.Z + eyeHeight);
+        var view = Matrix4x4.CreateLookAt(eyePos, center, Vector3.UnitX);
+        var proj = Matrix4x4.CreateOrthographic(orthoHalfX * 2, orthoHalfY * 2, 0.1f, eyeHeight * 2 + spanZ + 200f);
+
+        EnsureFbo(width, height);
+        if (!_fboReady) return null;
+        Directory.CreateDirectory(outputDir);
+
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+        _gl.Viewport(0, 0, (uint)width, (uint)height);
+        _gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Less);
+        _gl.DepthMask(true);
+
+        var fogColor = new Vector3(0.0f, 0.0f, 0.0f);
+        var lightDir = Vector3.Normalize(new Vector3(0.3f, -0.2f, -1.0f));
+        var lightColor = new Vector3(1.0f, 0.97f, 0.92f);
+        var ambientColor = new Vector3(0.45f, 0.45f, 0.5f);
+
+        _gl.Disable(EnableCap.Blend);
+        renderer.RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Opaque,
+            fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, eyePos, lightDir, lightColor, ambientColor);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        renderer.RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Transparent,
+            fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, eyePos, lightDir, lightColor, ambientColor);
+
+        return ReadPixelsAndSave(width, height, outputDir);
+    }
+
+    private string? CaptureMdxRoofTopDown(AssetCatalogEntry entry, string outputDir, int width, int height,
+        string? resolvedModelPath)
+    {
+        string modelPath = resolvedModelPath ?? entry.ModelPath ?? "";
+        byte[]? mdxData = _dataSource!.ReadFile(modelPath);
+        if (mdxData == null) return null;
+
+        MdxFile mdx;
+        try { using var ms = new MemoryStream(mdxData); using var br = new BinaryReader(ms); mdx = MdxFile.Load(br); }
+        catch (Exception ex) { ViewerLog.Trace($"[Screenshot] MDX parse failed for {modelPath}: {ex.Message}"); return null; }
+        if (mdx.Geosets.Count == 0) return null;
+
+        string modelDir = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? "";
+        MdxRenderer? renderer = null;
+        try
+        {
+            renderer = new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver,
+                explicitTextureVariations: entry.TextureVariations);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[Screenshot] Skip roof capture {entry.Name}: MdxRenderer creation failed: {ex.Message}");
+            return null;
+        }
+
+        var (boundsMin, boundsMax) = ComputeBounds(mdx);
+        float scale = entry.EffectiveScale;
+        var modelTransform = Matrix4x4.CreateScale(-scale, scale, scale);
+
+        try
+        {
+            var corners = new Vector3[8];
+            for (int ci = 0; ci < 8; ci++)
+                corners[ci] = Vector3.Transform(new Vector3(
+                    (ci & 1) == 0 ? boundsMin.X : boundsMax.X,
+                    (ci & 2) == 0 ? boundsMin.Y : boundsMax.Y,
+                    (ci & 4) == 0 ? boundsMin.Z : boundsMax.Z), modelTransform);
+
+            var wsMin = corners[0]; var wsMax = corners[0];
+            for (int ci = 1; ci < 8; ci++) { wsMin = Vector3.Min(wsMin, corners[ci]); wsMax = Vector3.Max(wsMax, corners[ci]); }
+
+            float spanX = wsMax.X - wsMin.X; if (spanX < 0.01f) spanX = 1.0f;
+            float spanY = wsMax.Y - wsMin.Y; if (spanY < 0.01f) spanY = 1.0f;
+            float spanZ = wsMax.Z - wsMin.Z;
+            var center = (wsMin + wsMax) * 0.5f;
+
+            float padFactor = 1.1f;
+            float orthoHalfX = spanX * padFactor * 0.5f;
+            float orthoHalfY = spanY * padFactor * 0.5f;
+            float aspect = (float)width / height;
+            if (aspect > 1.0f) orthoHalfX = MathF.Max(orthoHalfX, orthoHalfY * aspect);
+            else orthoHalfY = MathF.Max(orthoHalfY, orthoHalfX / aspect);
+
+            float eyeHeight = spanZ + 100.0f;
+            var eyePos = new Vector3(center.X, center.Y, center.Z + eyeHeight);
+            var view = Matrix4x4.CreateLookAt(eyePos, center, Vector3.UnitX);
+            var proj = Matrix4x4.CreateOrthographic(orthoHalfX * 2, orthoHalfY * 2, 0.1f, eyeHeight * 2 + spanZ + 200f);
+
+            EnsureFbo(width, height);
+            if (!_fboReady) return null;
+            Directory.CreateDirectory(outputDir);
+
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+            _gl.Viewport(0, 0, (uint)width, (uint)height);
+            _gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthFunc(DepthFunction.Less);
+            _gl.DepthMask(true);
+
+            var fogColor = new Vector3(0.0f, 0.0f, 0.0f);
+            var lightDir = Vector3.Normalize(new Vector3(0.3f, -0.2f, -1.0f));
+            var lightColor = new Vector3(1.0f, 0.97f, 0.92f);
+            var ambientColor = new Vector3(0.45f, 0.45f, 0.5f);
+
+            _gl.Disable(EnableCap.Blend);
+            renderer.RenderWithTransform(modelTransform, view, proj, RenderPass.Opaque, 1.0f,
+                fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, eyePos, lightDir, lightColor, ambientColor);
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthFunc(DepthFunction.Lequal);
+            renderer.RenderWithTransform(modelTransform, view, proj, RenderPass.Transparent, 1.0f,
+                fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, eyePos, lightDir, lightColor, ambientColor);
+
+            return ReadPixelsAndSave(width, height, outputDir);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+private WmoV14ToV17Converter.WmoV14Data? LoadWmoData(string modelPath)
+    {
+        if (_dataSource == null)
+        {
+            Console.Error.WriteLine($"[RoofCapture] No data source");
+            return null;
+        }
+string normalized = modelPath.Replace('/', '\\');
+        Console.Error.WriteLine($"[RoofCapture] Reading {normalized}");
+        byte[]? data = _dataSource.ReadFile(normalized);
+        if (data == null || data.Length == 0)
+        {
+            Console.Error.WriteLine($"[RoofCapture] File not found: {normalized}");
+            return null;
+        }
+        Console.Error.WriteLine($"[RoofCapture] Read {data.Length} bytes from {normalized}");
+
+        string modelDir = Path.GetDirectoryName(normalized) ?? "";
+
+        // Try v17 first (current retail)
+        var v17Parser = new WmoV17ToV14Converter();
+        var groupBytes = LoadWmoGroupBytes(normalized);
+        Console.Error.WriteLine($"[RoofCapture] Loaded {groupBytes.Count} group files, trying v17 parse");
+        try
+        {
+            var wmo = v17Parser.ParseV17ToModel(data, groupBytes);
+            Console.Error.WriteLine($"[RoofCapture] v17 parse succeeded: {wmo.Groups.Count} groups, bounds=({wmo.BoundsMin},{wmo.BoundsMax})");
+            if (wmo.Groups.Count > 0)
+                return wmo;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[RoofCapture] v17 parse failed: {ex.Message}, trying v14");
+        }
+
+        // Fall back to v14
+        string tmpPath = Path.Combine(Path.GetTempPath(), $"wmo_roof_{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllBytes(tmpPath, data);
+            var converter = new WmoV14ToV17Converter();
+            WmoV14ToV17Converter.WmoV14Data wmo = converter.ParseWmoV14(tmpPath);
+            Console.Error.WriteLine($"[RoofCapture] Parsed v14 WMO: {wmo.Groups.Count} groups, {wmo.GroupCount} total, bounds=({wmo.BoundsMin},{wmo.BoundsMax})");
+
+            if (wmo.Groups.Count == 0 && wmo.GroupCount > 0)
+            {
+                string wmoBase = Path.GetFileNameWithoutExtension(normalized);
+                for (int gi = 0; gi < wmo.GroupCount; gi++)
+                {
+                    string groupName = $"{wmoBase}_{gi:D3}.wmo";
+                    string groupPath = string.IsNullOrEmpty(modelDir) ? groupName : $"{modelDir}\\{groupName}";
+                    byte[]? groupBytesFile = _dataSource.ReadFile(groupPath);
+                    if (groupBytesFile != null && groupBytesFile.Length > 0)
+                    {
+                        Console.Error.WriteLine($"[RoofCapture] Loading group {gi}: {groupPath} ({groupBytesFile.Length} bytes)");
+                        converter.ParseGroupFile(groupBytesFile, wmo, gi);
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine($"[RoofCapture] Group {gi} not found: {groupPath}");
+                    }
+                }
+            }
+            Console.Error.WriteLine($"[RoofCapture] Final WMO: {wmo.Groups.Count} groups");
+            return wmo;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[RoofCapture] v14 parse also failed: {ex.Message}");
+            ViewerLog.Trace($"[Screenshot] WMO parse failed for {normalized}: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            try { File.Delete(tmpPath); } catch { }
+        }
+    }
+
+    private List<byte[]> LoadWmoGroupBytes(string modelPath)
+    {
+        string directory = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? "";
+        string baseName = Path.GetFileNameWithoutExtension(modelPath);
+        var groupBytesList = new List<byte[]>();
+        for (int gi = 0; gi < 512; gi++)
+        {
+            string groupName = $"{baseName}_{gi:D3}.wmo";
+            string groupPath = string.IsNullOrEmpty(directory) ? groupName : $"{directory}\\{groupName}";
+            byte[]? groupBytes = _dataSource?.ReadFile(groupPath);
+            if (groupBytes == null || groupBytes.Length == 0) break;
+            groupBytesList.Add(groupBytes);
+        }
+        return groupBytesList;
+    }
+
+    private string? ReadPixelsAndSave(int width, int height, string outputDir)
+    {
+        byte[] pixels = new byte[width * height * 4];
+        unsafe { fixed (byte* ptr = pixels) _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr); }
+
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            byte r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+            pixels[i + 3] = (byte)((r + g + b > 10) ? 255 : 0);
+        }
+
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+
+        using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, width, height);
+        image.Mutate(x => x.Flip(FlipMode.Vertical));
+        string path = Path.Combine(outputDir, "roof_topdown.jpg");
+        var jpegEncoder = new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 99 };
+        image.SaveAsJpeg(path, jpegEncoder);
+        return path;
+    }
+
+    private static int DetectWmoVersion(byte[] data)
+    {
+        if (data.Length < 4) return 14;
+        uint magic = (uint)(data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24));
+        if (magic == 0x4F4D5756) return 17; // 'WMOV'
+        return 14;
+    }
+
+    private static Vector3[] ComputeBoundsCorners(Vector3 min, Vector3 max)
+    {
+        var corners = new Vector3[8];
+        for (int i = 0; i < 8; i++)
+            corners[i] = new Vector3(
+                (i & 1) == 0 ? min.X : max.X,
+                (i & 2) == 0 ? min.Y : max.Y,
+                (i & 4) == 0 ? min.Z : max.Z);
+        return corners;
+    }
+
+    private int CaptureMdxMultiAngle(AssetCatalogEntry entry, string outputDir, int width, int height,
+        string? resolvedModelPath, (string name, float azimuth, float elevation)[]? angles = null)
+    {
+        angles ??= CameraAngles;
+        string modelPath = resolvedModelPath ?? entry.ModelPath ?? "";
 
         // Load MDX once
         byte[]? mdxData = _dataSource.ReadFile(modelPath);
@@ -383,6 +1047,19 @@ public class ScreenshotRenderer : IDisposable
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         _fboReady = true;
+    }
+
+    private static string SanitizePathComponent(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var sb = new System.Text.StringBuilder(name.Length);
+        foreach (char c in name)
+        {
+            if (c == ' ' || c == '/' || c == '\\') sb.Append('_');
+            else if (Array.IndexOf(invalid, c) < 0 && c != '\0') sb.Append(c);
+        }
+        string result = sb.ToString();
+        return result.Length > 100 ? result[..100] : result;
     }
 
     public void Dispose()

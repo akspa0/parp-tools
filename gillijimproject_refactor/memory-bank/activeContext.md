@@ -155,12 +155,23 @@
       underground-object bleed-through is preserved
     - later builds prefer `primary` vs `noobjects` diffs so terrain occlusion
       wins over terrain-hidden silhouettes
-    - bounded hotfix note (2026-05-28):
-      - `ViewerApp_CaptureAutomation.ShouldPreferDirectObjectsOnlyMask(...)`
-        was still stubbed to `false`, so the documented `0.x` policy was not
-        actually enforced during artifact regeneration
-      - the stub is now fixed to route `0.x` builds through direct
-        `objectsonly` mask extraction in the real `MdxViewer` proof lane
+  - **Capture batch tuning hotfix (2026-05-28):**
+    - hardcoded settle throttles replaced with plan-level configurable fields:
+      - `RequiredSettledFrames` default `12` (was `48`)
+      - `MaxFramesBeforeCapture` default `480` (was `2400`)
+      - `BatchSettledFrames` default `2` (new)
+      - `FastSettleAfterBatchReady` default `true` (new)
+    - batch-fast-settle: after first tile in a batch settles successfully,
+      subsequent tiles use `BatchSettledFrames` instead of
+      `RequiredSettledFrames`, dramatically reducing per-tile settle wait in
+      multi-tile batched sessions
+    - per-tile capture metadata JSON now emitted alongside each PNG:
+      `{baseName}_capture_metadata.json` with build, map, tile, variant,
+      settledFrames, totalFrames, timedOut status
+    - wow-viewer `ValidationCaptureCommand` CLI now exposes:
+      `--settled-frames`, `--max-frames`, `--batch-settled-frames`
+    - stub-scene test: 4/4 variants passed with new fast-settle defaults
+    - unit tests: 33/33 pass including 3 new batch-fast-settle tests
   - Zarr-mutating `build_v16_dataset.py` commands now require
     `--allow-zarr-write`; preview-first is the enforced operator path
   - current proof level:

@@ -3,9 +3,9 @@
 ## Phase 1 — Roof Library Curation
 
 - [x] T001 Define roof exemplar metadata schema
-- [ ] T002 Extend MdxViewer capture for one-at-a-time object asset rendering with pose metadata
+- [x] T002 Extend MdxViewer capture for per-asset orthographic top-down WMO rendering (extends ScreenshotRenderer with WMO support + orthographic roof capture + CLI batch orchestration)
 - [x] T003 Write per-asset object visual outputs into a separate Zarr datastore
-- [x] T004 Extract top-view object crops from corpus placements and object-visual datastore
+- [x] T004 Extract top-view object crops from MdxViewer per-asset renders (not from minimap tiles)
 - [x] T005 Add family dedupe and canonical exemplar selection
 - [x] T006 Emit roof atlas, catalog, and summary evidence
 - [x] T007 Validate bounded roof-catalog run on a building-heavy map

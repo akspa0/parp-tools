@@ -23,12 +23,15 @@ public sealed class ValidationCaptureScenePolicy
         bool ignoreProjectedSizeCulling = false,
         bool ignoreVisionConeCulling = false,
         bool ignoreFrustumCulling = false,
-        bool ignoreMaxViewDistanceCulling = false)
+        bool ignoreMaxViewDistanceCulling = false,
+        int batchSettledFrames = 2,
+        bool fastSettleAfterBatchReady = true)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(requestedResolution, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(requiredSettledFrames, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxFramesBeforeCapture, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(detailedTileCountOverride, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(batchSettledFrames, 1);
         if (float.IsNaN(fogStartFactor) || fogStartFactor < 0f || fogStartFactor > 1f)
             throw new ArgumentOutOfRangeException(nameof(fogStartFactor), fogStartFactor, "Fog start factor must be between 0 and 1.");
         if (float.IsNaN(fogEndDistance) || fogEndDistance <= 0f)
@@ -65,6 +68,8 @@ public sealed class ValidationCaptureScenePolicy
         IgnoreFrustumCulling = ignoreFrustumCulling;
         IgnoreMaxViewDistanceCulling = ignoreMaxViewDistanceCulling;
         ArtifactPolicy = artifactPolicy;
+        BatchSettledFrames = batchSettledFrames;
+        FastSettleAfterBatchReady = fastSettleAfterBatchReady;
     }
 
     public int RequestedResolution { get; }
@@ -72,6 +77,10 @@ public sealed class ValidationCaptureScenePolicy
     public int RequiredSettledFrames { get; }
 
     public int MaxFramesBeforeCapture { get; }
+
+    public int BatchSettledFrames { get; }
+
+    public bool FastSettleAfterBatchReady { get; }
 
     public int DetailedTileCountOverride { get; }
 

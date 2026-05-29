@@ -1270,6 +1270,7 @@ public partial class ViewerApp : IDisposable
     {
         PromotePendingMlFinalizeAfterExport();
         PromotePendingMkHarvestViewerValidationCapturePlan();
+        PromotePendingRoofCaptureBatch();
         PrepareNextCaptureRequest();
 
         // FPS tracking
@@ -7185,7 +7186,10 @@ void main() {
         string? outputDirectory,
         bool forceRegenerate,
         int requestedResolution,
-        out string? statusMessage)
+        out string? statusMessage,
+        int requiredSettledFrames = DefaultRequiredSettledFrames,
+        int maxFramesBeforeCapture = DefaultMaxFramesBeforeCapture,
+        int batchSettledFrames = DefaultBatchSettledFrames)
     {
         statusMessage = null;
 
@@ -7221,7 +7225,10 @@ void main() {
             NoLiquidsOutputDirectory = validationNoLiquidsOutputDirectory,
             NoObjectsOutputDirectory = validationNoObjectsOutputDirectory,
             ObjectsOnlyOutputDirectory = validationObjectsOnlyOutputDirectory,
-            RequestedResolution = Math.Clamp(requestedResolution, 512, 4096)
+            RequestedResolution = Math.Clamp(requestedResolution, 512, 4096),
+            RequiredSettledFrames = requiredSettledFrames,
+            MaxFramesBeforeCapture = maxFramesBeforeCapture,
+            BatchSettledFrames = batchSettledFrames,
         };
 
         int skippedFiles = 0;
@@ -7791,7 +7798,10 @@ void main() {
                         viewerValidationOutputDir,
                         forceViewerValidationRegeneration,
                         viewerValidationResolution,
-                        out string? validationMessage);
+                        out string? validationMessage,
+                        DefaultRequiredSettledFrames,
+                        DefaultMaxFramesBeforeCapture,
+                        DefaultBatchSettledFrames);
 
                     if (!string.IsNullOrWhiteSpace(validationMessage))
                         AppendMkHarvestLogLine(validationMessage);

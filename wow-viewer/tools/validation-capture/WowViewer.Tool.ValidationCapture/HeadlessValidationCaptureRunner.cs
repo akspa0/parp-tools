@@ -22,10 +22,17 @@ internal static class HeadlessValidationCaptureRunner
         sceneAdapter.Initialize(session);
         sceneAdapter.ApplyScenePolicy(session.ScenePolicy);
 
+        bool batchHasSettled = false;
+
         foreach (ValidationCaptureTileRequest request in session.BatchPlan.TileRequests)
         {
             sceneAdapter.ApplyVariantPolicy(session.VariantPolicies[request.Variant]);
-            results.Add(ExecuteRequest(session, request, sceneAdapter));
+            ValidationCaptureVariantResult result = ExecuteRequest(
+                session, request, sceneAdapter, batchHasSettled);
+            results.Add(result);
+
+            if (result.Succeeded && !result.TimedOut)
+                batchHasSettled = true;
         }
 
         return new ValidationCaptureBatchResult(
@@ -38,7 +45,8 @@ internal static class HeadlessValidationCaptureRunner
     private static ValidationCaptureVariantResult ExecuteRequest(
         HeadlessValidationCaptureSession session,
         ValidationCaptureTileRequest request,
-        IValidationWorldSceneAdapter sceneAdapter)
+        IValidationWorldSceneAdapter sceneAdapter,
+        bool batchHasSettled)
     {
         int framesObserved = 0;
         int settledFrames = 0;
@@ -66,7 +74,10 @@ internal static class HeadlessValidationCaptureRunner
                 FramesObserved: framesObserved,
                 SettledFrames: settledFrames,
                 RequiredSettledFrames: session.ScenePolicy.RequiredSettledFrames,
-                MaxFramesBeforeCapture: session.ScenePolicy.MaxFramesBeforeCapture));
+                MaxFramesBeforeCapture: session.ScenePolicy.MaxFramesBeforeCapture,
+                BatchHasSettled: batchHasSettled,
+                BatchSettledFrames: session.ScenePolicy.BatchSettledFrames,
+                FastSettleAfterBatchReady: session.ScenePolicy.FastSettleAfterBatchReady));
 
             if (readinessState.IsReady)
             {
