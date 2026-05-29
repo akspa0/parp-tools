@@ -467,7 +467,7 @@ public class ScreenshotRenderer : IDisposable
         try
         {
             renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _dbcBuild,
-                deferInitialDoodadLoads: true, deferInitialMaterialTextureLoads: false, enableRuntimeGroupVisibility: false);
+                deferInitialDoodadLoads: false, deferInitialMaterialTextureLoads: false, enableRuntimeGroupVisibility: false);
         }
         catch (Exception ex) { ViewerLog.Trace($"[Screenshot] WmoRenderer creation failed for {modelPath}: {ex.Message}"); return null; }
 
@@ -510,7 +510,7 @@ public class ScreenshotRenderer : IDisposable
         try
         {
             renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _dbcBuild,
-                deferInitialDoodadLoads: true, deferInitialMaterialTextureLoads: false, enableRuntimeGroupVisibility: false);
+                deferInitialDoodadLoads: false, deferInitialMaterialTextureLoads: false, enableRuntimeGroupVisibility: false);
         }
         catch (Exception ex) { ViewerLog.Trace($"[Screenshot] WmoRenderer creation failed for {modelPath}: {ex.Message}"); return null; }
 
