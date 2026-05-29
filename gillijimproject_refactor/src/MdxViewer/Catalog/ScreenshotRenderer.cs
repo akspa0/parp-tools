@@ -264,7 +264,6 @@ public class ScreenshotRenderer : IDisposable
 
                 byte[] pixels = new byte[width * height * 4];
                 unsafe { fixed (byte* ptr = pixels) _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr); }
-                ForceOpaqueAlpha(pixels);
                 _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
 
                 using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, width, height);
@@ -446,9 +445,10 @@ public class ScreenshotRenderer : IDisposable
         return count;
     }
 
-    /// <summary>
+/// <summary>
     /// Capture a WMO model from all predefined camera angles + orthographic top-down (roof).
-    /// Saves roof_topdown.png + {angleName}.png per angle. Returns the roof_topdown path or null.
+    /// Renders each DoodadSet into a separate subfolder.
+    /// Saves roof_topdown.png + {angleName}.jpg per angle. Returns the roof_topdown path or null.
     /// </summary>
     public string? CaptureWmoAllAngles(string modelPath, string outputDir, int width = 512, int height = 512)
     {
@@ -471,15 +471,76 @@ public class ScreenshotRenderer : IDisposable
 
         try
         {
-            string? roofPath = RenderWmoRoofTopDown(renderer, wmo, outputDir, width, height);
-            RenderWmoMultiAngle(renderer, wmo, modelPath, outputDir, width, height);
+            int doodadSetCount = renderer.DoodadSetCount;
+            string? firstRoofPath = null;
 
-            return roofPath;
+            for (int ds = 0; ds < doodadSetCount; ds++)
+            {
+                string dsDir;
+                if (doodadSetCount <= 1)
+                {
+                    dsDir = outputDir;
+                }
+                else
+                {
+                    renderer.SetActiveDoodadSet(ds);
+                    string dsName = SanitizePathComponent(renderer.GetDoodadSetName(ds));
+                    dsDir = Path.Combine(outputDir, $"doodadset_{ds}_{dsName}");
+                }
+
+                string? roofPath = RenderWmoRoofTopDown(renderer, wmo, dsDir, width, height);
+                RenderWmoMultiAngle(renderer, wmo, modelPath, dsDir, width, height);
+                firstRoofPath ??= roofPath;
+            }
+
+            return firstRoofPath;
         }
         finally { renderer.Dispose(); }
     }
 
-    private void RenderWmoMultiAngle(WmoRenderer renderer, WmoV14ToV17Converter.WmoV14Data wmo,
+    public string? CaptureWmoRoofTopDownByPath(string modelPath, string outputDir, int width = 512, int height = 512)
+    {
+        WmoV14ToV17Converter.WmoV14Data? wmo = LoadWmoData(modelPath);
+        if (wmo == null) return null;
+
+        string modelDir = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? "";
+        WmoRenderer? renderer = null;
+        try
+        {
+            renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _dbcBuild,
+                deferInitialDoodadLoads: true, deferInitialMaterialTextureLoads: false, enableRuntimeGroupVisibility: false);
+        }
+        catch (Exception ex) { ViewerLog.Trace($"[Screenshot] WmoRenderer creation failed for {modelPath}: {ex.Message}"); return null; }
+
+        try
+        {
+            int doodadSetCount = renderer.DoodadSetCount;
+            string? firstRoofPath = null;
+
+            for (int ds = 0; ds < doodadSetCount; ds++)
+            {
+                string dsDir;
+                if (doodadSetCount <= 1)
+                {
+                    dsDir = outputDir;
+                }
+                else
+                {
+                    renderer.SetActiveDoodadSet(ds);
+                    string dsName = SanitizePathComponent(renderer.GetDoodadSetName(ds));
+                    dsDir = Path.Combine(outputDir, $"doodadset_{ds}_{dsName}");
+                }
+
+                string? roofPath = RenderWmoRoofTopDown(renderer, wmo, dsDir, width, height);
+                firstRoofPath ??= roofPath;
+            }
+
+            return firstRoofPath;
+        }
+        finally { renderer.Dispose(); }
+    }
+
+        private void RenderWmoMultiAngle(WmoRenderer renderer, WmoV14ToV17Converter.WmoV14Data wmo,
         string modelPath, string outputDir, int width, int height)
     {
         var boundsMin = wmo.BoundsMin;
@@ -545,7 +606,6 @@ public class ScreenshotRenderer : IDisposable
 
                 byte[] pixels = new byte[width * height * 4];
                 unsafe { fixed (byte* ptr = pixels) _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr); }
-                ForceOpaqueAlpha(pixels);
                 _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
 
                 using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, width, height);
@@ -558,31 +618,6 @@ public class ScreenshotRenderer : IDisposable
                 _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
             }
         }
-    }
-
-    /// <summary>
-    /// Capture a top-down orthographic roof image of a WMO model identified by its asset path.
-    /// Returns the output PNG path, or null on failure.
-    /// </summary>
-    public string? CaptureWmoRoofTopDownByPath(string modelPath, string outputDir, int width = 512, int height = 512)
-    {
-        WmoV14ToV17Converter.WmoV14Data? wmo = LoadWmoData(modelPath);
-        if (wmo == null) return null;
-
-        string modelDir = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? "";
-        WmoRenderer? renderer = null;
-        try
-        {
-            renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _dbcBuild,
-                deferInitialDoodadLoads: true, deferInitialMaterialTextureLoads: false, enableRuntimeGroupVisibility: false);
-        }
-        catch (Exception ex) { ViewerLog.Trace($"[Screenshot] WmoRenderer creation failed for {modelPath}: {ex.Message}"); return null; }
-
-        try
-        {
-            return RenderWmoRoofTopDown(renderer, wmo, outputDir, width, height);
-        }
-        finally { renderer.Dispose(); }
     }
 
     /// <summary>
@@ -1129,16 +1164,14 @@ string normalized = modelPath.Replace('/', '\\');
                             _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
                     }
 
-                    ForceOpaqueAlpha(pixels);
+ForceOpaqueAlpha(pixels);
 
                     _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
 
                     // Convert to image (OpenGL reads bottom-up, flip)
                     using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, width, height);
                     image.Mutate(x => x.Flip(FlipMode.Vertical));
-
-                    string path = Path.Combine(outputDir, $"{angleName}.png");
-                    image.SaveAsPng(path);
+                    image.SaveAsPng(Path.Combine(outputDir, $"{angleName}.png"));
                     count++;
                 }
                 catch (Exception ex)
