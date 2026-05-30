@@ -5,6 +5,11 @@
 - Harvest-first is canonical:
   - `WowViewer.Tool.Harvest`
   - staged clients under `output/tmp/wowarchive-clients/`
+- **Ghidra RE lane (2026-05-30):** WMO render pass architecture + terrain cell system fully decompiled from build 3368.
+  - Spec 029 (WMO minimap BLP harvest): spec+plan+tasks written, ready for Phase 1 implementation
+  - Spec 030 (WMO render pass architecture): spec written, architecture doc written at `docs/architecture/wmo-render-pass-architecture-2026-05-30.md`, plan+tasks pending
+  - Spec 031 (terrain cell awareness): spec written, plan+tasks pending
+  - Key RE findings: 11 WMO render passes, per-batch MOMT flags, interior fog, liquid type dispatch, 145-vertex terrain layout, 8x8 cell grid, hole masks, 13-bit cell addressing
 - New V18 planning lane is now documented with Spec Kit:
   - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/spec.md`
   - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/plan.md`

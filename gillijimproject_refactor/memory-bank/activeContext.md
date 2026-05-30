@@ -653,3 +653,33 @@
   future architecture investment surface.
 - If WL* chunk-fill behavior matters to loss semantics, handle it in the loader/trainer, not by reopening harvest.
 - PM4 follow-up now has a library-owned `MSHD.Field04` region-id seam feeding `MdxViewer` overlay coloring/debug/export, selected-region peer summaries, and LLM-oriented visible-overlay evidence bundles; broader PM4 object-mapping work can build on that without reintroducing viewer-owned decode logic.
+
+## Ghidra RE Session (2026-05-30)
+
+### WMO Render Pass Architecture (Build 3368)
+- Full WMO group render pipeline decompiled and documented
+- Key: `RenderGroup` dispatches interior/exterior via function ptrs at `DAT_00ec1b98`/`DAT_00ec1ca0`
+- 11 render pass functions confirmed (Int/Ext ColorTex, LightTex, Lightmap, LightmapTex, Tex, BSP, Normals, Portals)
+- Per-batch MOMT flags: bit0=lighting, bit1=fog, bit2=culling, bit0x10=emissive, bit0x20=window-lit
+- Interior fog: applied when `intFog != 0` and WMO == camMapObj
+- Liquid dispatch: types 0/4/8 → water (int/ext), types 2/3/6/7 → magma
+- Lightmap split: Int = lighting off + lightmap on tex1; Ext = lighting on + no lightmap on tex1
+- Group flags: `0x88` = skip, `0x48` = exterior, `0x1000` = liquid, `0x10000` = always-render
+- Portal walk: recursive visibility traversal with screen-rect clipping and depth limiting
+- Architecture doc: `wow-viewer/docs/architecture/wmo-render-pass-architecture-2026-05-30.md`
+- Spec: `wow-viewer/specs/030-wmo-render-pass-architecture/`
+
+### Terrain Cell System (Build 3368)
+- Vertex layout: 9x9 outer (81) + 8x8 inner (64) = 145 vertices per MCNK
+- Inner vertices at cell centers enable diagonal splits per cell
+- Face planes: 256 per chunk (8x8 cells × 4 triangles per cell)
+- Hole mask: 16-bit `holes` field, 4x4 grouping, each bit covers 2x2 cell block
+- Cell addressing: 13-bit packed coords (3 sub-chunk + 4 chunk + 6 ADT bits per axis)
+- Normals: packed 3 signed bytes, Y/Z/X order, scale ~0.251388
+- Rendering: 26 distance buckets, texture LOD drops layers at distance, low-detail 17x17 far area
+- Spec: `wow-viewer/specs/031-terrain-cell-awareness/`
+
+### WMO Minimap Naming (Build 3368) — previously confirmed
+- Pattern: `<WMOName>_<groupIdx>_<quadY>_<quadX>.blp` under `Textures\Minimap\`
+- Resolved through MINIMAPMD5NAME hash table in `SetupQuad`
+- Spec: `wow-viewer/specs/029-wmo-minimap-signal/` (spec+plan+tasks already written)

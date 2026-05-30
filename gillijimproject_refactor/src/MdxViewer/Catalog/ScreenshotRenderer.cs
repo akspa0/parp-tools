@@ -146,11 +146,34 @@ public class ScreenshotRenderer : IDisposable
     }
 
     /// <summary>
+    /// Read model bytes with MDX/M2 extension fallback for 3.x+ clients
+    /// where the listfile uses .mdx but files are stored as .m2.
+    /// </summary>
+    private byte[]? ReadModelData(string path)
+    {
+        string normalized = path.Replace('/', '\\');
+        byte[]? data = _dataSource?.ReadFile(normalized);
+        if (data != null) return data;
+
+        // Try swapping extension: .mdx <-> .m2
+        string ext = Path.GetExtension(normalized).ToLowerInvariant();
+        if (ext is ".mdx" or ".m2")
+        {
+            string swapped = normalized[..^ext.Length] + (ext == ".mdx" ? ".m2" : ".mdx");
+            ViewerLog.Trace($"[Screenshot] File not found as '{normalized}', trying '{swapped}'");
+            data = _dataSource?.ReadFile(swapped);
+            if (data != null) return data;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Capture top-down orthographic + all angles for an M2/MDX model by path (no AssetCatalogEntry).
     /// </summary>
     public string? CaptureMdxAllAngles(string modelPath, string outputDir, int width = 512, int height = 512)
     {
-        byte[]? mdxData = _dataSource?.ReadFile(modelPath.Replace('/', '\\'));
+        byte[]? mdxData = ReadModelData(modelPath);
         if (mdxData == null) return null;
 
         MdxFile mdx;
@@ -165,6 +188,9 @@ public class ScreenshotRenderer : IDisposable
 
         try
         {
+            // Animation disabled for static roof capture
+            try { renderer.UpdateAnimation(); } catch { /* static pose */ }
+
             // Roof top-down
             var (boundsMin, boundsMax) = ComputeBounds(mdx);
             var modelTransform = Matrix4x4.CreateScale(-1f, 1f, 1f);
@@ -180,7 +206,7 @@ public class ScreenshotRenderer : IDisposable
 
     public string? CaptureMdxRoofTopDownByPath(string modelPath, string outputDir, int width = 512, int height = 512)
     {
-        byte[]? mdxData = _dataSource?.ReadFile(modelPath.Replace('/', '\\'));
+        byte[]? mdxData = ReadModelData(modelPath);
         if (mdxData == null) return null;
 
         MdxFile mdx;
@@ -779,7 +805,7 @@ public class ScreenshotRenderer : IDisposable
         string? resolvedModelPath)
     {
         string modelPath = resolvedModelPath ?? entry.ModelPath ?? "";
-        byte[]? mdxData = _dataSource!.ReadFile(modelPath);
+        byte[]? mdxData = ReadModelData(modelPath);
         if (mdxData == null) return null;
 
         MdxFile mdx;
@@ -800,12 +826,15 @@ public class ScreenshotRenderer : IDisposable
             return null;
         }
 
-        var (boundsMin, boundsMax) = ComputeBounds(mdx);
-        float scale = entry.EffectiveScale;
-        var modelTransform = Matrix4x4.CreateScale(-scale, scale, scale);
-
         try
         {
+            // Animation disabled for roof capture — static model only
+            try { renderer.UpdateAnimation(); } catch { /* static bind-pose fallback */ }
+
+            var (boundsMin, boundsMax) = ComputeBounds(mdx);
+            float scale = entry.EffectiveScale;
+            var modelTransform = Matrix4x4.CreateScale(-scale, scale, scale);
+
             var corners = new Vector3[8];
             for (int ci = 0; ci < 8; ci++)
                 corners[ci] = Vector3.Transform(new Vector3(
@@ -837,6 +866,7 @@ public class ScreenshotRenderer : IDisposable
             if (!_fboReady) return null;
             Directory.CreateDirectory(outputDir);
 
+            // FBO restore: always bind + clear before rendering
             _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
             _gl.Viewport(0, 0, (uint)width, (uint)height);
             _gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -850,13 +880,12 @@ public class ScreenshotRenderer : IDisposable
             var lightColor = new Vector3(1.0f, 0.97f, 0.92f);
             var ambientColor = new Vector3(0.45f, 0.45f, 0.5f);
 
+            // Roof pass: render ALL geometry as opaque to avoid foliage-through-trunk issue
+            // In top-down view, leaves above trunks render wrong with transparent pass
             _gl.Disable(EnableCap.Blend);
             renderer.RenderWithTransform(modelTransform, view, proj, RenderPass.Opaque, 1.0f,
                 fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, eyePos, lightDir, lightColor, ambientColor);
-            _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthFunc(DepthFunction.Lequal);
-            renderer.RenderWithTransform(modelTransform, view, proj, RenderPass.Transparent, 1.0f,
-                fogColor, eyeHeight * 2, eyeHeight * 2 + spanZ + 200f, eyePos, lightDir, lightColor, ambientColor);
+            // Skip transparent pass in roof capture mode entirely
 
             return ReadPixelsAndSave(width, height, outputDir);
         }
