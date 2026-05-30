@@ -598,12 +598,21 @@ public class WmoRenderer : ISceneRenderer
             for (int vi = 0; vi < visibleDoodadRenderCount; vi++)
             {
                 var inst = _doodadInstances[_visibleDoodadsScratch[vi].idx];
+                if (inst.Renderer == null) continue;
                 var doodadWorld = inst.Transform * modelMatrix;
                 if (renderOpaquePass)
                 {
-                    inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Opaque, 1.0f,
-                        fogColor, fogStart, fogEnd, cameraPos,
-                        lightDir, lightColor, ambientColor);
+                    try
+                    {
+                        inst.Renderer.RenderWithTransform(doodadWorld, view, proj, RenderPass.Opaque, 1.0f,
+                            fogColor, fogStart, fogEnd, cameraPos,
+                            lightDir, lightColor, ambientColor);
+                    }
+                    catch (Exception ex)
+                    {
+                        ViewerLog.Trace($"[WmoRenderer] Doodad opaque render failed: {ex.Message}");
+                        inst.Renderer = null;
+                    }
                 }
             }
         }
@@ -641,13 +650,22 @@ public class WmoRenderer : ISceneRenderer
             for (int vi = visibleDoodadRenderCount - 1; vi >= 0; vi--)
             {
                 var inst = _doodadInstances[_visibleDoodadsScratch[vi].idx];
-                if (!inst.Renderer!.HasTransparentWorldPass)
+                if (inst.Renderer == null) continue;
+                if (!inst.Renderer.HasTransparentWorldPass)
                     continue;
 
                 var doodadWorld = inst.Transform * modelMatrix;
-                inst.Renderer.RenderWithTransform(doodadWorld, view, proj, RenderPass.Transparent, 1.0f,
-                    fogColor, fogStart, fogEnd, cameraPos,
-                    lightDir, lightColor, ambientColor);
+                try
+                {
+                    inst.Renderer.RenderWithTransform(doodadWorld, view, proj, RenderPass.Transparent, 1.0f,
+                        fogColor, fogStart, fogEnd, cameraPos,
+                        lightDir, lightColor, ambientColor);
+                }
+                catch (Exception ex)
+                {
+                    ViewerLog.Trace($"[WmoRenderer] Doodad transparent render failed: {ex.Message}");
+                    inst.Renderer = null;
+                }
             }
         }
 
