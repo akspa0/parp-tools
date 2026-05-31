@@ -5,6 +5,7 @@ using WoWViewer.DataSources;
 using WoWViewer.Logging;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
+using WowViewer.Core.M2;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.Runtime.M2;
 
@@ -157,7 +158,7 @@ public sealed class M2Renderer : IModelRenderer
         }
     }
 
-    public bool RequiresUnbatchedWorldRender => true;
+    public bool RequiresUnbatchedWorldRender => _legacyRenderer != null && _legacyRenderer.RequiresUnbatchedWorldRender;
 
     public IAnimationController? Animator => _legacyRenderer?.Animator ?? _runtimeAnimator;
 
@@ -313,7 +314,7 @@ public sealed class M2Renderer : IModelRenderer
         _batchStateValid = true;
     }
 
-    public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
+public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
     {
         if (_legacyRenderer != null)
         {
@@ -651,7 +652,7 @@ public sealed class M2Renderer : IModelRenderer
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
 
-        foreach (SectionBuffers section in _sections)
+foreach (SectionBuffers section in _sections)
         {
             if (!section.Visible)
                 continue;
@@ -662,11 +663,19 @@ public sealed class M2Renderer : IModelRenderer
             if (pass == RenderPass.Transparent && !transparent)
                 continue;
 
-            // Keep parity with the established M2 compatibility path until the
-            // pure runtime renderer has proven stable winding or projected-pass rules.
-            _gl.Disable(EnableCap.CullFace);
+            if (section.Material.IsTwoSided)
+                _gl.Disable(EnableCap.CullFace);
+            else
+                _gl.Enable(EnableCap.CullFace);
 
-            if (!backdrop && transparent)
+            bool isAlphaKey = section.Material.BlendMode == M2BlendMode.AlphaKey;
+            if (!backdrop && isAlphaKey)
+            {
+                _gl.Enable(EnableCap.Blend);
+                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                _gl.DepthMask(false);
+            }
+            else if (!backdrop && transparent)
             {
                 _gl.Enable(EnableCap.Blend);
                 ConfigureBlendMode(section.Material.BlendMode);
@@ -751,101 +760,101 @@ public sealed class M2Renderer : IModelRenderer
         if (_shaderInitialized)
             return;
 
-        const string vertexSource = """
-            #version 330 core
-            layout (location = 0) in vec3 aPos;
-            layout (location = 1) in vec3 aNormal;
-            layout (location = 2) in vec2 aTexCoord0;
-            layout (location = 3) in vec2 aTexCoord1;
+const string vertexSource = """
+#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec2 aTexCoord0;
+layout (location = 3) in vec2 aTexCoord1;
 
-            uniform mat4 uModel;
-            uniform mat4 uView;
-            uniform mat4 uProj;
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProj;
 
-            out vec3 vWorldPos;
-            out vec3 vNormal;
-            out vec3 vViewNormal;
-            out vec2 vTexCoord0;
-            out vec2 vTexCoord1;
+out vec3 vWorldPos;
+out vec3 vNormal;
+out vec3 vViewNormal;
+out vec2 vTexCoord0;
+out vec2 vTexCoord1;
 
-            void main()
-            {
-                vec4 worldPos = uModel * vec4(aPos, 1.0);
-                vWorldPos = worldPos.xyz;
-                vNormal = normalize(mat3(uModel) * aNormal);
-                vViewNormal = mat3(uView) * vNormal;
-                vTexCoord0 = aTexCoord0;
-                vTexCoord1 = aTexCoord1;
-                gl_Position = uProj * uView * worldPos;
-            }
-            """;
+void main()
+{
+    vec4 worldPos = uModel * vec4(aPos, 1.0);
+    vWorldPos = worldPos.xyz;
+    vNormal = normalize(mat3(uModel) * aNormal);
+    vViewNormal = mat3(uView) * vNormal;
+    vTexCoord0 = aTexCoord0;
+    vTexCoord1 = aTexCoord1;
+    gl_Position = uProj * uView * worldPos;
+}
+""";
 
-        const string fragmentSource = """
-            #version 330 core
-            in vec3 vWorldPos;
-            in vec3 vNormal;
-            in vec3 vViewNormal;
+const string fragmentSource = """
+#version 330 core
+in vec3 vWorldPos;
+in vec3 vNormal;
+in vec3 vViewNormal;
 
-            uniform vec3 uFogColor;
-            uniform float uFogStart;
-            uniform float uFogEnd;
-            uniform vec3 uCameraPos;
-            uniform vec3 uLightDir;
-            uniform vec3 uLightColor;
-            uniform vec3 uAmbientColor;
-            uniform vec3 uBaseColor;
-            uniform int uUnshaded;
-            uniform int uHasTexture;
-            uniform int uUvSet;
-            uniform int uGeneratedTexCoord;
-            uniform sampler2D uTexture0;
-            uniform int uAlphaCutout;
-            uniform float uAlpha;
-            uniform int uHasUvTransform;
-            uniform vec2 uUvTranslation;
-            uniform vec2 uUvScale;
-            uniform vec2 uUvRotation;
+uniform vec3 uFogColor;
+uniform float uFogStart;
+uniform float uFogEnd;
+uniform vec3 uCameraPos;
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
+uniform vec3 uAmbientColor;
+uniform vec3 uBaseColor;
+uniform int uUnshaded;
+uniform int uHasTexture;
+uniform int uUvSet;
+uniform int uGeneratedTexCoord;
+uniform sampler2D uTexture0;
+uniform int uAlphaCutout;
+uniform float uAlpha;
+uniform int uHasUvTransform;
+uniform vec2 uUvTranslation;
+uniform vec2 uUvScale;
+uniform vec2 uUvRotation;
 
-            in vec2 vTexCoord0;
-            in vec2 vTexCoord1;
+in vec2 vTexCoord0;
+in vec2 vTexCoord1;
 
-            out vec4 FragColor;
+out vec4 FragColor;
 
-            void main()
-            {
-                vec2 texCoord = uUvSet == 1 ? vTexCoord1 : vTexCoord0;
-                if (uGeneratedTexCoord == 1)
-                {
-                    vec3 viewNormal = normalize(vViewNormal);
-                    if (!gl_FrontFacing)
-                        viewNormal = -viewNormal;
+void main()
+{
+    vec2 texCoord = uUvSet == 1 ? vTexCoord1 : vTexCoord0;
+    if (uGeneratedTexCoord == 1)
+    {
+        vec3 viewNormal = normalize(vViewNormal);
+        if (!gl_FrontFacing)
+            viewNormal = -viewNormal;
 
-                    texCoord = viewNormal.xy * 0.5 + 0.5;
-                }
+        texCoord = viewNormal.xy * 0.5 + 0.5;
+    }
 
-                if (uHasUvTransform == 1)
-                {
-                    mat2 uvRotationScale = mat2(
-                        uUvRotation.x * uUvScale.x, -uUvRotation.y * uUvScale.y,
-                        uUvRotation.y * uUvScale.x,  uUvRotation.x * uUvScale.y);
-                    texCoord = (uvRotationScale * texCoord) + uUvTranslation;
-                }
+    if (uHasUvTransform == 1)
+    {
+        mat2 uvRotationScale = mat2(
+            uUvRotation.x * uUvScale.x, -uUvRotation.y * uUvScale.y,
+            uUvRotation.y * uUvScale.x,  uUvRotation.x * uUvScale.y);
+        texCoord = (uvRotationScale * texCoord) + uUvTranslation;
+    }
 
-                vec4 textureSample = uHasTexture == 1
-                    ? texture(uTexture0, texCoord)
-                    : vec4(1.0, 1.0, 1.0, 1.0);
-                if (uAlphaCutout == 1 && textureSample.a < 0.5)
-                    discard;
+    vec4 textureSample = uHasTexture == 1
+        ? texture(uTexture0, texCoord)
+        : vec4(1.0, 1.0, 1.0, 1.0);
+    if (uAlphaCutout == 1 && textureSample.a < 0.5)
+        discard;
 
-                float diffuseStrength = uUnshaded == 1 ? 1.0 : max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
-                vec3 litColor = (uBaseColor * textureSample.rgb) * (uAmbientColor + (uLightColor * diffuseStrength));
-                float distanceToCamera = distance(vWorldPos, uCameraPos);
-                float fogRange = max(uFogEnd - uFogStart, 0.001);
-                float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
-                vec3 finalColor = mix(uFogColor, litColor, fogFactor);
-                FragColor = vec4(finalColor, textureSample.a * uAlpha);
-            }
-            """;
+    float diffuseStrength = uUnshaded == 1 ? 1.0 : max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
+    vec3 litColor = (uBaseColor * textureSample.rgb) * (uAmbientColor + (uLightColor * diffuseStrength));
+    float distanceToCamera = distance(vWorldPos, uCameraPos);
+    float fogRange = max(uFogEnd - uFogStart, 0.001);
+    float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
+    vec3 finalColor = mix(uFogColor, litColor, fogFactor);
+    FragColor = vec4(finalColor, textureSample.a * uAlpha);
+}
+""";
 
         uint vertexShader = CompileShader(ShaderType.VertexShader, vertexSource);
         uint fragmentShader = CompileShader(ShaderType.FragmentShader, fragmentSource);
