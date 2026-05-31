@@ -5,10 +5,21 @@
 - Harvest-first is canonical:
   - `WowViewer.Tool.Harvest`
   - staged clients under `output/tmp/wowarchive-clients/`
+- **MdxViewer Migration (033) + WoWViewer Rename (034) — COMPLETED 2026-05-30/31**
+  - MdxViewer moved from `gillijimproject_refactor/src/MdxViewer/` → `wow-viewer/src/viewer/WoWViewer/`
+  - Renamed to WoWViewer, version bumped to v0.5.0 in csproj
+  - MDX-L_Tool vendored into `wow-viewer/libs/WoW-Tools/MDX-L_Tool/`
+  - gillijimProject-csharp.csproj vendored into `wow-viewer/libs/WoW-Tools/GillijimProject/`
+  - WowViewer.App moved to `wow-viewer/src/viewer/WowViewer.App.Defunct/`
+  - WoWViewer added to `wow-viewer/WowViewer.slnx`
+  - **Remaining gap**: Many source files still use `MdxLTool.Formats.Mdx` namespace (not yet ported to WowViewer.Core.IO)
+  - **MDX rendering is BROKEN** — recent M2 rendering fixes broke MDX rendering; namespace/type mismatches after migration
 - **Ghidra RE lane (2026-05-30):** WMO render pass architecture + terrain cell system fully decompiled from build 3368.
   - Spec 029 (WMO minimap BLP harvest): spec+plan+tasks written, ready for Phase 1 implementation
-  - Spec 030 (WMO render pass architecture): spec written, architecture doc written at `docs/architecture/wmo-render-pass-architecture-2026-05-30.md`, plan+tasks pending
-  - Spec 031 (terrain cell awareness): spec written, plan+tasks pending
+  - Spec 030 (WMO render pass architecture): spec written, architecture doc written at `docs/architecture/wmo-render-pass-architecture-2026-05-30.md`, **plan+tasks now complete** (created 2026-05-31, 27 tasks total)
+  - Spec 031 (terrain cell awareness): spec written, **plan+tasks now complete** (created 2026-05-31, 34 tasks total)
+  - Key RE findings: 11 WMO render passes, per-batch MOMT flags, interior fog, liquid type dispatch, 145-vertex terrain layout, 8x8 cell grid, hole masks, 13-bit cell addressing
+  - **MDX rendering is BROKEN** — many source files still use `MdxLTool.Formats.Mdx` namespace (not yet ported to WowViewer.Core.IO); recent M2 rendering fixes broke MDX rendering path
   - Key RE findings: 11 WMO render passes, per-batch MOMT flags, interior fog, liquid type dispatch, 145-vertex terrain layout, 8x8 cell grid, hole masks, 13-bit cell addressing
 - New V18 planning lane is now documented with Spec Kit:
   - `wow-viewer/specs/024-v18-canvas-paste-refinement-layer/spec.md`
@@ -768,3 +779,19 @@
 - V16.1 holes trainer smoke proof.
 - Asset-attribute model / PM4 cross-ref workflow.
 - Broader chunk-for-chunk terrain conversion closure.
+
+## Spec Status Update (2026-05-31)
+- **Spec 029** (WMO minimap BLP harvest): spec+plan+tasks complete, not yet implemented.
+- **Spec 030** (WMO render pass architecture): spec+plan+tasks now complete (plan+tasks created 2026-05-31, 27 tasks total).
+- **Spec 031** (terrain cell awareness): spec+plan+tasks now complete (plan+tasks created 2026-05-31, 34 tasks total).
+- **Spec 032** (native renderer parity): spec+plan+tasks complete, not yet implemented (depends on 033 completion).
+- **Spec 033** (MdxViewer migration): spec+plan+tasks complete, **PHASES 1-2 COMPLETE** (moved, vendored, renamed to WoWViewer v0.5.0), **Phase 3 INCOMPLETE** (WoWMapConverter.Core decoupling + MDX namespace porting remaining).
+- **Spec 034** (WowViewer rename): spec+plan+tasks complete, **COMPLETE** (WowViewer.App → WowViewer.App.Defunct, MdxViewer → WoWViewer, v0.5.0).
+
+## MDX/M2 Rendering Breakage (2026-05-31)
+- **MDX rendering is BROKEN** after recent M2 rendering fixes and migration.
+- Many source files in `wow-viewer/src/viewer/WoWViewer/` still use `MdxLTool.Formats.Mdx` namespace.
+- `MdxLTool` was vendored to `wow-viewer/libs/WoW-Tools/MDX-L_Tool/` but types not fully ported to `WowViewer.Core.IO`.
+- `Rendering/WmoRenderer.cs` line 32: still references `WoWMapConverter.Core`'s `WmoV14Data` model for geometry.
+- Remaining external reference in `WoWViewer.csproj` line 40: `gillijimProject-csharp.csproj` — but this is INSIDE `wow-viewer/libs/` (vendored), so repo-independence rule satisfied.
+- Next chat should: port `MdxLTool.Formats.Mdx` types to `WowViewer.Core.IO/Mdx/`, then fix all `using MdxLTool...` references in WoWViewer source files.

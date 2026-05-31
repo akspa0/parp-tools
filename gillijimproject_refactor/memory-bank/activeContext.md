@@ -679,7 +679,19 @@
 - Rendering: 26 distance buckets, texture LOD drops layers at distance, low-detail 17x17 far area
 - Spec: `wow-viewer/specs/031-terrain-cell-awareness/`
 
+### MdxViewer Migration (033) + WoWViewer Rename (034) — COMPLETED 2026-05-30/31
+- MdxViewer moved from `gillijimproject_refactor/src/MdxViewer/` → `wow-viewer/src/viewer/WoWViewer/`
+- Renamed to WoWViewer, version bumped to v0.5.0 in csproj (AssemblyName: ParpToolsWoWViewer)
+- MDX-L_Tool vendored into `wow-viewer/libs/WoW-Tools/MDX-L_Tool/`
+- gillijimproject-csharp.csproj vendored into `wow-viewer/libs/WoW-Tools/GillijimProject/`
+- WowViewer.App moved to `wow-viewer/src/viewer/WowViewer.App.Defunct/` (defunct)
+- WoWViewer added to `wow-viewer/WowViewer.slnx`
+- Remaining gap: Many source files still reference `MdxLTool.Formats.Mdx` namespace (not yet ported to WowViewer.Core.IO)
+- **MDX/M2 rendering is BROKEN** — namespace mismatch after migration; `MdxLTool.Formats.Mdx` types not fully ported
+- Spec: `wow-viewer/specs/033-mdxviewer-migration/` (spec+plan+tasks complete)
+- Spec: `wow-viewer/specs/034-wowviewer-rename/` (spec+plan+tasks complete)
+
 ### WMO Minimap Naming (Build 3368) — previously confirmed
 - Pattern: `<WMOName>_<groupIdx>_<quadY>_<quadX>.blp` under `Textures\Minimap\`
 - Resolved through MINIMAPMD5NAME hash table in `SetupQuad`
-- Spec: `wow-viewer/specs/029-wmo-minimap-signal/` (spec+plan+tasks already written)
+- Spec: `wow-viewer/specs/029-wmo-minimap-signal/` (spec+plan+tasks written, not yet implemented)
