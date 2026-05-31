@@ -1,0 +1,2575 @@
+using System.Diagnostics;
+using System.Numerics;
+using System.Text;
+using MdxLTool.Formats.Mdx;
+using WoWViewer.DataSources;
+using WoWViewer.Logging;
+using WoWViewer.Terrain;
+using Silk.NET.OpenGL;
+using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Wmo;
+using WowViewer.Core.IO.Converters;
+
+namespace WoWViewer.Rendering;
+
+public readonly record struct WmoDoodadInfo(
+    int Index,
+    string ModelPath,
+    int DoodadDefIndex,
+    Vector3 LocalPosition,
+    bool Visible,
+    bool IsLoaded);
+
+public enum WmoRenderPass
+{
+    Both,
+    Opaque,
+    Transparent,
+}
+
+/// <summary>
+/// Renders a WMO (World Map Object) using OpenGL.
+/// Uses WoWMapConverter.Core's WmoV14Data model for geometry.
+/// Supports loading and rendering MDX doodads from DoodadSets.
+/// </summary>
+public class WmoRenderer : ISceneRenderer
+{
+    private readonly GL _gl;
+    private readonly WmoV14ToV17Converter.WmoV14Data _wmo;
+    private readonly string _modelDir;
+    private readonly IDataSource? _dataSource;
+    private readonly ReplaceableTextureResolver? _texResolver;
+    private readonly string? _buildVersion;
+    private readonly bool _deferInitialDoodadLoads;
+    private readonly bool _deferInitialMaterialTextureLoads;
+    private bool _enableRuntimeGroupVisibility;
+
+    // Shared static shader program — prevents race condition when multiple WmoRenderers
+    // exist and one is disposed (same fix as MdxRenderer)
+    private static uint _shaderProgram;
+    private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest;
+    private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
+    private static int _uLightDir, _uLightColor, _uAmbientColor;
+    private static int _shaderRefCount;
+
+    private readonly List<GroupBuffers> _groups = new();
+    private readonly List<(int groupBufferIndex, float distSq)> _transparentGroupSortScratch = new();
+    private readonly FrustumCuller _groupFrustumCuller = new();
+    private readonly List<PortalNeighbor>[] _groupPortalNeighbors;
+    private readonly List<int>[] _groupPortalRefs;
+    private readonly Vector3[] _portalCenters;
+    private readonly bool[] _runtimeVisibleGroups;
+    private readonly bool[] _frustumVisibleScratch;
+    private readonly HashSet<int> _runtimeVisibleDoodadDefIndices = new();
+    private readonly Queue<(int GroupIndex, int Depth)> _visibilityQueue = new();
+    private readonly HashSet<int> _visibilityVisited = new();
+    private readonly HashSet<string> _updatedDoodadModelsScratch = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<(int idx, float distSq)> _visibleDoodadsScratch = new();
+    private bool _wireframe;
+
+    // Material textures: materialIndex → GL texture handle
+    private readonly Dictionary<int, uint> _materialTextures = new();
+    private readonly HashSet<string> _materialFallbackLogKeys = new(StringComparer.OrdinalIgnoreCase);
+    private int _materialFallbackLogCount;
+    private const int MaxMaterialFallbackLogs = 200;
+    private readonly Queue<int> _pendingMaterialTextureLoads = new();
+    private const int DeferredMaterialTextureLoadsPerFrame = 1;
+    private const double DeferredMaterialTextureLoadBudgetMs = 2.0;
+
+    // Doodad support
+    private readonly Dictionary<string, IModelRenderer?> _doodadModelCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<DoodadInstance> _doodadInstances = new();
+    private readonly List<string> _doodadNames = new(); // resolved from MODN
+    private readonly Dictionary<string, string> _canonicalDoodadPathCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string?> _bestSkinPathCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _loggedMissingDoodadSkinPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<string> _pendingDoodadModelLoads = new();
+    private readonly HashSet<string> _queuedDoodadModelLoads = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<int>> _doodadInstanceIndicesByModel = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _doodadSourceModelPaths = new(StringComparer.OrdinalIgnoreCase);
+    private int _activeDoodadSet = 0;
+    private bool _doodadsVisible = true;
+    private bool _runtimeDoodadsVisible = true;
+    private bool _runtimeGroupLiquidsVisible = true;
+    private const int DeferredDoodadLoadsPerFrame = 1;
+    private const double DeferredDoodadLoadBudgetMs = 2.0;
+    private const float GroupVisibilityBoundsPadding = 32f;
+    private const float NearRootFullVisibilityDistance = 192f;
+    private const float ExteriorPortalRevealDistance = 1024f;
+    private const float InteriorPortalRevealDistance = 3072f;
+    private const int ExteriorPortalTraversalDepth = 1;
+    private const int InteriorPortalTraversalDepth = 4;
+
+    // Doodad culling constants
+    private const float DoodadCullDistance = 4000f;  // Minimum distance from camera to render WMO doodads; expanded further by fog range at runtime
+    private const float DoodadMaxRenderCount = 1024; // Soft cap to avoid large WMO doodad sets dropping out too early
+
+    public int PendingDoodadModelLoadCount => _pendingDoodadModelLoads.Count;
+
+    // WMO liquid meshes (from MLIQ chunks in groups)
+    private readonly List<LiquidMeshData> _liquidMeshes = new();
+    private static uint _liquidShader;
+    private static int _uLiqModel, _uLiqView, _uLiqProj, _uLiqColor;
+    private static int _liquidShaderRefCount;
+    // Additional user-configurable quarter-turns applied after the shared WMO family baseline.
+    private static int _mliqRotationQuarterTurns;
+    private static int _mliqRotationRevision;
+    private int _builtMliqRotationRevision = -1;
+
+    public static int MliqRotationQuarterTurns
+    {
+        get => _mliqRotationQuarterTurns;
+        set
+        {
+            int normalized = ((value % 4) + 4) % 4;
+            if (_mliqRotationQuarterTurns == normalized)
+                return;
+
+            _mliqRotationQuarterTurns = normalized;
+            _mliqRotationRevision++;
+            ViewerLog.Important(ViewerLog.Category.Wmo,
+                $"[WmoRenderer] MLIQ additional rotation override set to {normalized * 90}°");
+        }
+    }
+
+    public WmoRenderer(GL gl, WmoV14ToV17Converter.WmoV14Data wmo, string modelDir,
+        IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null, string? buildVersion = null,
+        bool deferInitialDoodadLoads = false, bool deferInitialMaterialTextureLoads = false,
+        bool enableRuntimeGroupVisibility = true)
+    {
+        var initStopwatch = Stopwatch.StartNew();
+        _gl = gl;
+        _wmo = wmo;
+        _modelDir = modelDir;
+        _dataSource = dataSource;
+        _texResolver = texResolver;
+        _buildVersion = buildVersion;
+        _deferInitialDoodadLoads = deferInitialDoodadLoads;
+        _deferInitialMaterialTextureLoads = deferInitialMaterialTextureLoads;
+        _enableRuntimeGroupVisibility = enableRuntimeGroupVisibility;
+        _groupPortalNeighbors = new List<PortalNeighbor>[_wmo.Groups.Count];
+        _groupPortalRefs = new List<int>[_wmo.Groups.Count];
+        _portalCenters = new Vector3[_wmo.Portals.Count];
+        _runtimeVisibleGroups = new bool[_wmo.Groups.Count];
+        _frustumVisibleScratch = new bool[_wmo.Groups.Count];
+
+        InitializeGroupVisibilityData();
+
+        InitShaders();
+        InitLiquidShader();
+        InitBuffers();
+        BuildLiquidMeshes();
+        if (_deferInitialMaterialTextureLoads)
+            QueueDeferredMaterialTextureLoads();
+        else
+            LoadMaterialTextures();
+        ResolveDoodadNames();
+        LoadActiveDoodadSet();
+
+        if (initStopwatch.Elapsed.TotalMilliseconds >= 50)
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Wmo,
+                $"[WMO-LOAD] {modelDir}: init {initStopwatch.Elapsed.TotalMilliseconds:F1} ms (groups={_wmo.Groups.Count}, materials={_wmo.Materials.Count}, doodadDefs={_wmo.DoodadDefs.Count}, deferredMaterials={_deferInitialMaterialTextureLoads}, deferredDoodads={_deferInitialDoodadLoads})");
+        }
+    }
+
+    /// <summary>MOHD bounding box min in WMO local space.</summary>
+    public Vector3 BoundsMin => _wmo.BoundsMin;
+    /// <summary>MOHD bounding box max in WMO local space.</summary>
+    public Vector3 BoundsMax => _wmo.BoundsMax;
+    public int GroupRenderCount => _groups.Count;
+
+    // Sub-object visibility: WMO groups + doodad toggle
+    // Layout: [0..N-1] = WMO groups, [N] = "Doodads" toggle, [N+1..] = individual doodad models
+    public int SubObjectCount => _groups.Count + 1 + _doodadInstances.Count;
+
+    public int GetRenderGroupId(int renderGroupIndex)
+        => renderGroupIndex >= 0 && renderGroupIndex < _groups.Count ? _groups[renderGroupIndex].GroupIndex : -1;
+
+    public string GetRenderGroupName(int renderGroupIndex)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+            return string.Empty;
+
+        int groupIndex = _groups[renderGroupIndex].GroupIndex;
+        string name = (groupIndex < _wmo.Groups.Count ? _wmo.Groups[groupIndex].Name : null) ?? $"Group {groupIndex}";
+        return $"[{groupIndex}] {name}";
+    }
+
+    public bool GetRenderGroupManualVisible(int renderGroupIndex)
+        => renderGroupIndex >= 0 && renderGroupIndex < _groups.Count && _groups[renderGroupIndex].ManualVisible;
+
+    public bool GetRenderGroupRuntimeVisible(int renderGroupIndex)
+        => renderGroupIndex >= 0 && renderGroupIndex < _groups.Count && _groups[renderGroupIndex].RuntimeVisible;
+
+    public bool GetRenderGroupEffectiveVisible(int renderGroupIndex)
+        => renderGroupIndex >= 0 && renderGroupIndex < _groups.Count && _groups[renderGroupIndex].IsVisible;
+
+    public void SetRenderGroupVisible(int renderGroupIndex, bool visible)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+            return;
+
+        _groups[renderGroupIndex].ManualVisible = visible;
+    }
+
+    public void SetAllRenderGroupsVisible(bool visible)
+    {
+        for (int i = 0; i < _groups.Count; i++)
+            _groups[i].ManualVisible = visible;
+    }
+
+    public void IsolateRenderGroup(int renderGroupIndex)
+    {
+        for (int i = 0; i < _groups.Count; i++)
+            _groups[i].ManualVisible = i == renderGroupIndex;
+    }
+
+    public void GetRenderGroupBounds(int renderGroupIndex, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+        {
+            boundsMin = boundsMax = Vector3.Zero;
+            return;
+        }
+
+        var group = _wmo.Groups[_groups[renderGroupIndex].GroupIndex];
+        boundsMin = group.BoundsMin;
+        boundsMax = group.BoundsMax;
+    }
+
+    public Vector3 GetRenderGroupCenter(int renderGroupIndex)
+        => renderGroupIndex >= 0 && renderGroupIndex < _groups.Count
+            ? _groups[renderGroupIndex].GroupCenter
+            : Vector3.Zero;
+
+    public Vector3 GetRenderGroupDebugColor(int renderGroupIndex)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+            return new Vector3(0.8f, 0.8f, 0.8f);
+
+        int groupIndex = _groups[renderGroupIndex].GroupIndex;
+        return new Vector3(
+            ((groupIndex * 67 + 13) % 255) / 255f,
+            ((groupIndex * 131 + 7) % 255) / 255f,
+            ((groupIndex * 43 + 29) % 255) / 255f);
+    }
+
+    public string GetSubObjectName(int index)
+    {
+        if (index < _groups.Count)
+        {
+            int gi = _groups[index].GroupIndex;
+            string name = (gi < _wmo.Groups.Count ? _wmo.Groups[gi].Name : null) ?? $"Group {gi}";
+            return $"[{gi}] {name}";
+        }
+        if (index == _groups.Count)
+            return $"--- Doodads ({_doodadInstances.Count}) ---";
+        int di = index - _groups.Count - 1;
+        if (di < _doodadInstances.Count)
+        {
+            var inst = _doodadInstances[di];
+            return $"  Doodad: {Path.GetFileNameWithoutExtension(inst.ModelPath)}";
+        }
+        return "";
+    }
+
+    public bool GetSubObjectVisible(int index)
+    {
+        if (index < _groups.Count)
+            return _groups[index].ManualVisible;
+        if (index == _groups.Count)
+            return _doodadsVisible;
+        int di = index - _groups.Count - 1;
+        if (di < _doodadInstances.Count)
+            return _doodadInstances[di].Visible;
+        return false;
+    }
+
+    public void SetSubObjectVisible(int index, bool visible)
+    {
+        if (index < _groups.Count)
+            _groups[index].ManualVisible = visible;
+        else if (index == _groups.Count)
+            _doodadsVisible = visible;
+        else
+        {
+            int di = index - _groups.Count - 1;
+            if (di < _doodadInstances.Count)
+                _doodadInstances[di].Visible = visible;
+        }
+    }
+
+    // DoodadSet management
+    public int DoodadSetCount => _wmo.DoodadSets.Count;
+    public int ActiveDoodadSet => _activeDoodadSet;
+    public int DoodadInstanceCount => _doodadInstances.Count;
+    public string GetDoodadSetName(int index) =>
+        index < _wmo.DoodadSets.Count ? (_wmo.DoodadSets[index].Name ?? $"Set {index}") : "";
+
+    public bool TryGetDoodadInfo(int index, out WmoDoodadInfo info)
+    {
+        if (index >= 0 && index < _doodadInstances.Count)
+        {
+            DoodadInstance doodad = _doodadInstances[index];
+            info = new WmoDoodadInfo(
+                index,
+                doodad.ModelPath,
+                doodad.DoodadDefIndex,
+                doodad.LocalPosition,
+                doodad.Visible,
+                doodad.Renderer != null);
+            return true;
+        }
+
+        info = default;
+        return false;
+    }
+
+    public bool TryGetDoodadBounds(int index, in Matrix4x4 modelMatrix, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (index >= 0 && index < _doodadInstances.Count)
+        {
+            DoodadInstance doodad = _doodadInstances[index];
+            Matrix4x4 doodadWorld = doodad.Transform * modelMatrix;
+            if (doodad.Renderer is IModelRenderer modelRenderer)
+            {
+                TransformAabb(modelRenderer.BoundsMin, modelRenderer.BoundsMax, doodadWorld, out boundsMin, out boundsMax);
+                return true;
+            }
+
+            Vector3 worldPosition = Vector3.Transform(doodad.LocalPosition, modelMatrix);
+            boundsMin = worldPosition - new Vector3(2f);
+            boundsMax = worldPosition + new Vector3(2f);
+            return true;
+        }
+
+        boundsMin = boundsMax = Vector3.Zero;
+        return false;
+    }
+
+    public void SetActiveDoodadSet(int index)
+    {
+        if (index == _activeDoodadSet || index < 0 || index >= _wmo.DoodadSets.Count) return;
+        _activeDoodadSet = index;
+        LoadActiveDoodadSet();
+    }
+
+    public void SetRuntimeDoodadsVisible(bool visible)
+    {
+        _runtimeDoodadsVisible = visible;
+    }
+
+    public void SetRuntimeGroupVisibilityEnabled(bool enabled)
+    {
+        _enableRuntimeGroupVisibility = enabled;
+    }
+
+    public void SetRuntimeGroupLiquidsVisible(bool visible)
+    {
+        _runtimeGroupLiquidsVisible = visible;
+    }
+
+    public void ToggleWireframe()
+    {
+        _wireframe = !_wireframe;
+    }
+
+    public void ApplyTextureSamplingSettings()
+    {
+        foreach (var textureId in _materialTextures.Values)
+        {
+            if (textureId == 0)
+                continue;
+
+            _gl.BindTexture(TextureTarget.Texture2D, textureId);
+            RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true,
+                TextureWrapMode.Repeat, TextureWrapMode.Repeat);
+        }
+
+        foreach (var renderer in _doodadModelCache.Values)
+            renderer?.ApplyTextureSamplingSettings();
+
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+    }
+
+    public unsafe void RenderWireframeOverlay(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
+        Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
+        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
+    {
+        _gl.UseProgram(_shaderProgram);
+        _gl.Disable(EnableCap.CullFace);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _gl.DepthMask(false);
+        _gl.Disable(EnableCap.Blend);
+
+        var model = modelMatrix;
+        _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
+        _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
+        _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+
+        var fc = fogColor ?? new Vector3(0.6f, 0.7f, 0.85f);
+        var cp = cameraPos ?? Vector3.Zero;
+        _gl.Uniform3(_uFogColor, fc.X, fc.Y, fc.Z);
+        _gl.Uniform1(_uFogStart, fogStart);
+        _gl.Uniform1(_uFogEnd, fogEnd);
+        _gl.Uniform3(_uCameraPos, cp.X, cp.Y, cp.Z);
+
+        var ld = lightDir ?? Vector3.Normalize(new Vector3(0.5f, 0.3f, 1.0f));
+        var lc = lightColor ?? new Vector3(1.0f, 0.95f, 0.85f);
+        var ac = ambientColor ?? new Vector3(0.35f, 0.35f, 0.4f);
+        _gl.Uniform3(_uLightDir, ld.X, ld.Y, ld.Z);
+        _gl.Uniform3(_uLightColor, lc.X, lc.Y, lc.Z);
+        _gl.Uniform3(_uAmbientColor, ac.X, ac.Y, ac.Z);
+
+        _gl.Uniform1(_uHasTexture, 0);
+        _gl.Uniform1(_uAlphaTest, 0.0f);
+        _gl.Uniform4(_uColor, 0.95f, 1.0f, 0.65f, 1.0f);
+
+        _gl.LineWidth(1.5f);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+
+        foreach (var gb in _groups)
+        {
+            if (!gb.IsVisible) continue;
+            _gl.BindVertexArray(gb.Vao);
+            _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+        }
+
+        _gl.BindVertexArray(0);
+        _gl.LineWidth(1.0f);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.DepthMask(true);
+        _gl.Enable(EnableCap.CullFace);
+    }
+
+    public unsafe void Render(Matrix4x4 view, Matrix4x4 proj)
+    {
+        RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Both);
+    }
+
+    private int GetBaselineMliqRotationQuarterTurns()
+    {
+        return WmoLiquidLayoutResolver.GetBaselineRotationQuarterTurns(_wmo.Version, _buildVersion);
+    }
+
+    /// <summary>
+    /// Render this WMO with a custom world transform (for placed WMO instances in WorldScene).
+    /// </summary>
+    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
+        Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
+        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
+    {
+        RenderWithTransform(modelMatrix, view, proj, WmoRenderPass.Both,
+            fogColor, fogStart, fogEnd, cameraPos,
+            lightDir, lightColor, ambientColor);
+    }
+
+    /// <summary>
+    /// Render this WMO with a custom world transform (for placed WMO instances in WorldScene).
+    /// </summary>
+    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, WmoRenderPass pass,
+        Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
+        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
+    {
+        ProcessDeferredMaterialTextureLoads();
+        EnsureLiquidMeshesUpToDate();
+        ProcessDeferredDoodadLoads();
+
+        bool renderOpaquePass = pass != WmoRenderPass.Transparent;
+        bool renderTransparentPass = pass != WmoRenderPass.Opaque;
+
+        // WMO render order: opaque shell → doodad opaque → liquids → doodad transparent → transparent shell.
+        _gl.UseProgram(_shaderProgram);
+        ApplySurfaceCulling();
+
+        var model = modelMatrix;
+        _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
+        _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
+        _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+
+        // Fog uniforms (match terrain fog for seamless blending)
+        var fc = fogColor ?? new Vector3(0.6f, 0.7f, 0.85f);
+        var cp = cameraPos ?? Vector3.Zero;
+        _gl.Uniform3(_uFogColor, fc.X, fc.Y, fc.Z);
+        _gl.Uniform1(_uFogStart, fogStart);
+        _gl.Uniform1(_uFogEnd, fogEnd);
+        _gl.Uniform3(_uCameraPos, cp.X, cp.Y, cp.Z);
+
+        // Lighting uniforms (match terrain lighting for consistent scene illumination)
+        var ld = lightDir ?? Vector3.Normalize(new Vector3(0.5f, 0.3f, 1.0f));
+        var lc = lightColor ?? new Vector3(1.0f, 0.95f, 0.85f);
+        var ac = ambientColor ?? new Vector3(0.35f, 0.35f, 0.4f);
+        _gl.Uniform3(_uLightDir, ld.X, ld.Y, ld.Z);
+        _gl.Uniform3(_uLightColor, lc.X, lc.Y, lc.Z);
+        _gl.Uniform3(_uAmbientColor, ac.X, ac.Y, ac.Z);
+
+        UpdateRuntimeVisibility(modelMatrix, view, proj, cp, fogEnd);
+
+        if (_wireframe)
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+        else
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+
+        // Pass 1: Opaque geometry (BlendMode 0) — depth write ON, no blending
+        if (renderOpaquePass)
+        {
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthMask(true);
+            _gl.Disable(EnableCap.Blend);
+            _gl.Uniform1(_uAlphaTest, 0.0f);
+
+            foreach (var gb in _groups)
+            {
+                if (!gb.IsVisible) continue;
+                var group = _wmo.Groups[gb.GroupIndex];
+                _gl.BindVertexArray(gb.Vao);
+
+                if (group.Batches.Count > 0)
+                {
+                    foreach (var batch in group.Batches)
+                    {
+                        int matId = ResolveBatchMaterialId(group, batch);
+                        uint rawBlendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
+                        EGxBlend blendMode = ResolveWmoBlendMode(rawBlendMode);
+                        if (blendMode != EGxBlend.Opaque && blendMode != EGxBlend.AlphaKey)
+                            continue;
+
+                        if (blendMode == EGxBlend.AlphaKey)
+                        {
+                            _gl.Disable(EnableCap.Blend);
+                            _gl.DepthMask(true);
+                            _gl.Uniform1(_uAlphaTest, WoWConstants.AlphaKeyThreshold);
+                        }
+                        else
+                        {
+                            _gl.Disable(EnableCap.Blend);
+                            _gl.DepthMask(true);
+                            _gl.Uniform1(_uAlphaTest, 0.0f);
+                        }
+
+                        DrawBatch(gb, batch, matId);
+                    }
+                }
+                else
+                {
+                    DrawGroupFallback(gb);
+                }
+                _gl.BindVertexArray(0);
+            }
+        }
+
+        // Pass 2: Doodad opaque layers.
+        // Distance-culled, sorted nearest-first, capped at DoodadMaxRenderCount.
+        int visibleDoodadRenderCount = 0;
+        if (_doodadsVisible && _runtimeDoodadsVisible && _doodadInstances.Count > 0)
+        {
+            _updatedDoodadModelsScratch.Clear();
+            _visibleDoodadsScratch.Clear();
+
+            // Build list of visible doodads with world-space distance to camera
+            float doodadCullDistance = MathF.Max(DoodadCullDistance, MathF.Min(fogEnd + 800f, 6000f));
+            float cullDistSq = doodadCullDistance * doodadCullDistance;
+            for (int di = 0; di < _doodadInstances.Count; di++)
+            {
+                var inst = _doodadInstances[di];
+                if (!inst.Visible || inst.Renderer == null) continue;
+                if (_runtimeVisibleDoodadDefIndices.Count > 0 && !_runtimeVisibleDoodadDefIndices.Contains(inst.DoodadDefIndex))
+                    continue;
+
+                if (renderOpaquePass && _updatedDoodadModelsScratch.Add(inst.ModelPath))
+                    inst.Renderer.UpdateAnimation();
+
+                // Transform local position to world space
+                var worldPos = Vector3.Transform(inst.LocalPosition, modelMatrix);
+                float distSq = Vector3.DistanceSquared(cp, worldPos);
+                if (distSq > cullDistSq) continue; // Distance cull
+                _visibleDoodadsScratch.Add((di, distSq));
+            }
+
+            // Sort nearest-first and cap at max render count
+            if (_visibleDoodadsScratch.Count > 1)
+                _visibleDoodadsScratch.Sort((a, b) => a.distSq.CompareTo(b.distSq));
+
+            visibleDoodadRenderCount = Math.Min(_visibleDoodadsScratch.Count, (int)DoodadMaxRenderCount);
+
+            for (int vi = 0; vi < visibleDoodadRenderCount; vi++)
+            {
+                var inst = _doodadInstances[_visibleDoodadsScratch[vi].idx];
+                var doodadWorld = inst.Transform * modelMatrix;
+                if (renderOpaquePass)
+                {
+                    inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Opaque, 1.0f,
+                        fogColor, fogStart, fogEnd, cameraPos,
+                        lightDir, lightColor, ambientColor);
+                }
+            }
+        }
+
+        // Pass 3: Liquid surfaces (semi-transparent, before transparent WMO geometry)
+        if (renderTransparentPass && _runtimeGroupLiquidsVisible && _liquidMeshes.Count > 0)
+        {
+            _gl.UseProgram(_liquidShader);
+            _gl.UniformMatrix4(_uLiqModel, 1, false, (float*)&model);
+            _gl.UniformMatrix4(_uLiqView, 1, false, (float*)&view);
+            _gl.UniformMatrix4(_uLiqProj, 1, false, (float*)&proj);
+
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            _gl.DepthMask(false);
+
+            foreach (var liq in _liquidMeshes)
+            {
+                if (liq.GroupIndex >= 0 && liq.GroupIndex < _runtimeVisibleGroups.Length && !_runtimeVisibleGroups[liq.GroupIndex])
+                    continue;
+
+                _gl.Uniform4(_uLiqColor, liq.ColorR, liq.ColorG, liq.ColorB, liq.ColorA);
+                _gl.BindVertexArray(liq.Vao);
+                _gl.DrawElements(PrimitiveType.Triangles, liq.IndexCount, DrawElementsType.UnsignedShort, null);
+            }
+
+            _gl.BindVertexArray(0);
+            _gl.DepthMask(true);
+            _gl.Disable(EnableCap.Blend);
+        }
+
+        // Pass 4: Doodad transparent layers back-to-front so model glass/reflection stays above liquids.
+        if (renderTransparentPass && visibleDoodadRenderCount > 0)
+        {
+            for (int vi = visibleDoodadRenderCount - 1; vi >= 0; vi--)
+            {
+                var inst = _doodadInstances[_visibleDoodadsScratch[vi].idx];
+                if (!inst.Renderer!.HasTransparentWorldPass)
+                    continue;
+
+                var doodadWorld = inst.Transform * modelMatrix;
+                inst.Renderer.RenderWithTransform(doodadWorld, view, proj, RenderPass.Transparent, 1.0f,
+                    fogColor, fogStart, fogEnd, cameraPos,
+                    lightDir, lightColor, ambientColor);
+            }
+        }
+
+        // Pass 5: Transparent geometry (BlendMode 1+ = alpha key/blend)
+        // Alpha key (BlendMode 1): hard cutout at alpha < 0.5
+        // Alpha blend (BlendMode 2+): smooth blending with depth writes off
+        if (renderTransparentPass)
+        {
+            _gl.UseProgram(_shaderProgram);
+            _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
+            _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
+            _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+            // Re-set fog uniforms after UseProgram (doodad rendering may have changed active program)
+            _gl.Uniform3(_uFogColor, fc.X, fc.Y, fc.Z);
+            _gl.Uniform1(_uFogStart, fogStart);
+            _gl.Uniform1(_uFogEnd, fogEnd);
+            _gl.Uniform3(_uCameraPos, cp.X, cp.Y, cp.Z);
+
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+
+            _transparentGroupSortScratch.Clear();
+            for (int groupBufferIndex = 0; groupBufferIndex < _groups.Count; groupBufferIndex++)
+            {
+                var groupBuffer = _groups[groupBufferIndex];
+                if (!groupBuffer.IsVisible)
+                    continue;
+
+                Vector3 worldCenter = Vector3.Transform(groupBuffer.GroupCenter, modelMatrix);
+                float distSq = Vector3.DistanceSquared(cp, worldCenter);
+                _transparentGroupSortScratch.Add((groupBufferIndex, distSq));
+            }
+
+            _transparentGroupSortScratch.Sort((a, b) => b.distSq.CompareTo(a.distSq));
+
+            foreach (var (groupBufferIndex, _) in _transparentGroupSortScratch)
+            {
+                var gb = _groups[groupBufferIndex];
+                if (!gb.IsVisible) continue;
+                var group = _wmo.Groups[gb.GroupIndex];
+                _gl.BindVertexArray(gb.Vao);
+
+                if (group.Batches.Count > 0)
+                {
+                    foreach (var batch in group.Batches)
+                    {
+                        int matId = ResolveBatchMaterialId(group, batch);
+                        uint rawBlendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
+                        EGxBlend blendMode = ResolveWmoBlendMode(rawBlendMode);
+                        if (blendMode == EGxBlend.Opaque || blendMode == EGxBlend.AlphaKey)
+                            continue;
+
+                        _gl.DepthMask(false);
+                        _gl.Uniform1(_uAlphaTest, 0.0f);
+
+                        switch (blendMode)
+                        {
+                            case EGxBlend.Blend:
+                                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                                break;
+                            case EGxBlend.Add:
+                                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
+                                break;
+                            default:
+                                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                                break;
+                        }
+
+                        DrawBatch(gb, batch, matId);
+                    }
+                }
+                _gl.BindVertexArray(0);
+            }
+
+            _gl.DepthMask(true);
+            _gl.Disable(EnableCap.Blend);
+            _gl.Uniform1(_uAlphaTest, 0.0f);
+        }
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.Enable(EnableCap.CullFace);
+    }
+
+    private void ApplySurfaceCulling()
+    {
+        if (_wireframe || !RenderQualitySettings.EnableWmoBackfaceCulling)
+        {
+            _gl.Disable(EnableCap.CullFace);
+            return;
+        }
+
+        _gl.Enable(EnableCap.CullFace);
+        _gl.CullFace(TriangleFace.Back);
+    }
+
+    private static EGxBlend ResolveWmoBlendMode(uint rawBlendMode)
+    {
+        return rawBlendMode switch
+        {
+            0 => EGxBlend.Opaque,
+            1 => EGxBlend.Blend,
+            2 => EGxBlend.Add,
+            3 => EGxBlend.AlphaKey,
+            _ => EGxBlend.Blend,
+        };
+    }
+
+    private unsafe void DrawBatch(GroupBuffers gb, WmoV14ToV17Converter.WmoBatch batch, int matId)
+    {
+        if (_materialTextures.TryGetValue(matId, out uint glTex))
+        {
+            _gl.ActiveTexture(TextureUnit.Texture0);
+            _gl.BindTexture(TextureTarget.Texture2D, glTex);
+            _gl.Uniform1(_uHasTexture, 1);
+            _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
+        }
+        else
+        {
+            _gl.Uniform1(_uHasTexture, 0);
+            float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+            float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+            float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+            _gl.Uniform4(_uColor, r, g, b, 1.0f);
+        }
+        _gl.DrawElements(PrimitiveType.Triangles, batch.IndexCount,
+            DrawElementsType.UnsignedShort, (void*)(batch.FirstIndex * sizeof(ushort)));
+    }
+
+    private unsafe void DrawGroupFallback(GroupBuffers gb)
+    {
+        _gl.Uniform1(_uHasTexture, 0);
+        float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+        float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+        float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+        _gl.Uniform4(_uColor, r, g, b, 1.0f);
+        _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+    }
+
+    private void InitShaders()
+    {
+        _shaderRefCount++;
+        if (_shaderProgram != 0) return; // Already initialized by another instance
+
+        string vertSrc = @"
+#version 330 core
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aTexCoord;
+layout(location = 3) in vec4 aVertexLight;
+
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProj;
+
+out vec3 vNormal;
+out vec2 vTexCoord;
+out vec3 vFragPos;
+out vec4 vVertexLight;
+
+void main() {
+    vec4 worldPos = uModel * vec4(aPos, 1.0);
+    vFragPos = worldPos.xyz;
+    vNormal = mat3(transpose(inverse(uModel))) * aNormal;
+    vTexCoord = aTexCoord;
+    vVertexLight = aVertexLight;
+    gl_Position = uProj * uView * worldPos;
+}
+";
+
+        string fragSrc = @"
+#version 330 core
+in vec3 vNormal;
+in vec2 vTexCoord;
+in vec3 vFragPos;
+in vec4 vVertexLight;
+
+uniform sampler2D uSampler;
+uniform int uHasTexture;
+uniform vec4 uColor;
+uniform float uAlphaTest;
+uniform vec3 uFogColor;
+uniform float uFogStart;
+uniform float uFogEnd;
+uniform vec3 uCameraPos;
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
+uniform vec3 uAmbientColor;
+
+out vec4 FragColor;
+
+void main() {
+    vec3 norm = normalize(vNormal);
+    // Half-Lambert diffuse: wraps lighting around surfaces for softer shading
+    // Prevents harsh black shadows that don't match WoW's look
+    float NdotL = dot(norm, normalize(uLightDir));
+    float diff = NdotL * 0.5 + 0.5; // half-Lambert: remap [-1,1] to [0,1]
+    diff = diff * diff; // square for slightly sharper falloff
+    vec3 lighting = uAmbientColor + uLightColor * diff;
+    vec3 bakedLighting = mix(vec3(1.0), clamp(vVertexLight.rgb, vec3(0.0), vec3(1.0)), 0.6);
+
+    vec4 texColor;
+    if (uHasTexture == 1) {
+        texColor = texture(uSampler, vTexCoord);
+    } else {
+        texColor = uColor;
+    }
+
+    // Alpha test: discard fragments below threshold (for cutout/transparent materials)
+    if (uAlphaTest > 0.0 && texColor.a < uAlphaTest)
+        discard;
+
+    // Fog: blend to fog color based on distance from camera
+    vec3 litColor = texColor.rgb * lighting * bakedLighting;
+    float dist = length(vFragPos - uCameraPos);
+    float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
+    vec3 foggedColor = mix(uFogColor, litColor, fogFactor);
+
+    FragColor = vec4(foggedColor, texColor.a);
+}
+";
+
+        uint vert = CompileShader(ShaderType.VertexShader, vertSrc);
+        uint frag = CompileShader(ShaderType.FragmentShader, fragSrc);
+
+        _shaderProgram = _gl.CreateProgram();
+        _gl.AttachShader(_shaderProgram, vert);
+        _gl.AttachShader(_shaderProgram, frag);
+        _gl.LinkProgram(_shaderProgram);
+
+        _gl.GetProgram(_shaderProgram, ProgramPropertyARB.LinkStatus, out int status);
+        if (status == 0)
+            throw new Exception($"Shader link error: {_gl.GetProgramInfoLog(_shaderProgram)}");
+
+        _gl.DeleteShader(vert);
+        _gl.DeleteShader(frag);
+
+        _gl.UseProgram(_shaderProgram);
+        _uModel = _gl.GetUniformLocation(_shaderProgram, "uModel");
+        _uView = _gl.GetUniformLocation(_shaderProgram, "uView");
+        _uProj = _gl.GetUniformLocation(_shaderProgram, "uProj");
+        _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
+        _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
+        _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
+        _uFogColor = _gl.GetUniformLocation(_shaderProgram, "uFogColor");
+        _uFogStart = _gl.GetUniformLocation(_shaderProgram, "uFogStart");
+        _uFogEnd = _gl.GetUniformLocation(_shaderProgram, "uFogEnd");
+        _uCameraPos = _gl.GetUniformLocation(_shaderProgram, "uCameraPos");
+        _uLightDir = _gl.GetUniformLocation(_shaderProgram, "uLightDir");
+        _uLightColor = _gl.GetUniformLocation(_shaderProgram, "uLightColor");
+        _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
+    }
+
+    private uint CompileShader(ShaderType type, string source)
+    {
+        uint shader = _gl.CreateShader(type);
+        _gl.ShaderSource(shader, source);
+        _gl.CompileShader(shader);
+
+        _gl.GetShader(shader, ShaderParameterName.CompileStatus, out int status);
+        if (status == 0)
+            throw new Exception($"Shader compile error ({type}): {_gl.GetShaderInfoLog(shader)}");
+
+        return shader;
+    }
+
+    private void InitializeGroupVisibilityData()
+    {
+        var portalGroups = new Dictionary<ushort, HashSet<int>>();
+
+        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+        {
+            var group = _wmo.Groups[groupIndex];
+            var portalRefs = new List<int>();
+            _groupPortalRefs[groupIndex] = portalRefs;
+            _groupPortalNeighbors[groupIndex] = new List<PortalNeighbor>();
+
+            for (int offset = 0; offset < group.PortalCount; offset++)
+            {
+                int portalRefIndex = group.PortalStart + offset;
+                if ((uint)portalRefIndex >= (uint)_wmo.PortalRefs.Count)
+                    break;
+
+                portalRefs.Add(portalRefIndex);
+                ushort portalIndex = _wmo.PortalRefs[portalRefIndex].PortalIndex;
+                if (!portalGroups.TryGetValue(portalIndex, out var groups))
+                {
+                    groups = new HashSet<int>();
+                    portalGroups[portalIndex] = groups;
+                }
+
+                groups.Add(groupIndex);
+            }
+        }
+
+        for (int portalIndex = 0; portalIndex < _wmo.Portals.Count; portalIndex++)
+        {
+            var portal = _wmo.Portals[portalIndex];
+            Vector3 center = Vector3.Zero;
+            int count = 0;
+
+            for (int vertexOffset = 0; vertexOffset < portal.Count; vertexOffset++)
+            {
+                int vertexIndex = portal.StartVertex + vertexOffset;
+                if ((uint)vertexIndex >= (uint)_wmo.PortalVertices.Count)
+                    break;
+
+                center += _wmo.PortalVertices[vertexIndex];
+                count++;
+            }
+
+            _portalCenters[portalIndex] = count > 0 ? center / count : Vector3.Zero;
+        }
+
+        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+        {
+            var neighbors = new HashSet<long>();
+            foreach (int portalRefIndex in _groupPortalRefs[groupIndex])
+            {
+                ushort portalIndex = _wmo.PortalRefs[portalRefIndex].PortalIndex;
+                if (!portalGroups.TryGetValue(portalIndex, out var groups))
+                    continue;
+
+                foreach (int neighborGroup in groups)
+                {
+                    if (neighborGroup == groupIndex)
+                        continue;
+
+                    long key = ((long)portalIndex << 32) | (uint)neighborGroup;
+                    if (!neighbors.Add(key))
+                        continue;
+
+                    _groupPortalNeighbors[groupIndex].Add(new PortalNeighbor(neighborGroup, portalIndex));
+                }
+            }
+        }
+    }
+
+    private void UpdateRuntimeVisibility(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, float fogEnd)
+    {
+        Array.Clear(_runtimeVisibleGroups, 0, _runtimeVisibleGroups.Length);
+        Array.Clear(_frustumVisibleScratch, 0, _frustumVisibleScratch.Length);
+        _runtimeVisibleDoodadDefIndices.Clear();
+        _visibilityQueue.Clear();
+        _visibilityVisited.Clear();
+
+        if (_wmo.Groups.Count == 0)
+            return;
+
+        if (!_enableRuntimeGroupVisibility)
+        {
+            for (int groupIndex = 0; groupIndex < _runtimeVisibleGroups.Length; groupIndex++)
+                _runtimeVisibleGroups[groupIndex] = true;
+
+            ApplyRuntimeVisibilityToBuffers();
+            CollectVisibleDoodadDefs();
+            return;
+        }
+
+        if (!Matrix4x4.Invert(modelMatrix, out var inverseModel))
+        {
+            for (int i = 0; i < _runtimeVisibleGroups.Length; i++)
+                _runtimeVisibleGroups[i] = true;
+
+            ApplyRuntimeVisibilityToBuffers();
+            CollectVisibleDoodadDefs();
+            return;
+        }
+
+        Vector3 localCameraPos = Vector3.Transform(cameraPos, inverseModel);
+        _groupFrustumCuller.Update(view * proj);
+
+    float nearRootFullVisibilityDistance = ComputeNearRootFullVisibilityDistance(_wmo.BoundsMin, _wmo.BoundsMax, fogEnd);
+    float nearRootFullVisibilityDistanceSq = nearRootFullVisibilityDistance * nearRootFullVisibilityDistance;
+        bool anyExteriorGroups = false;
+        bool cameraInsideRoot = ContainsPointExpanded(localCameraPos, _wmo.BoundsMin, _wmo.BoundsMax, GroupVisibilityBoundsPadding);
+        float nearRootDistanceSq = DistanceSquaredPointToAabb(localCameraPos, _wmo.BoundsMin, _wmo.BoundsMax);
+    bool cameraNearRoot = nearRootDistanceSq <= nearRootFullVisibilityDistanceSq;
+        int nearestGroupIndex = -1;
+        float nearestGroupDistSq = float.MaxValue;
+
+        if (cameraInsideRoot || cameraNearRoot)
+        {
+            for (int groupIndex = 0; groupIndex < _runtimeVisibleGroups.Length; groupIndex++)
+                _runtimeVisibleGroups[groupIndex] = true;
+
+            ApplyRuntimeVisibilityToBuffers();
+            CollectVisibleDoodadDefs();
+            return;
+        }
+
+        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+        {
+            var group = _wmo.Groups[groupIndex];
+            if (IsExteriorGroup(group.Flags))
+                anyExteriorGroups = true;
+
+            TransformAabb(group.BoundsMin, group.BoundsMax, modelMatrix, out var worldMin, out var worldMax);
+            bool isFrustumVisible = _groupFrustumCuller.TestAABB(worldMin, worldMax);
+            _frustumVisibleScratch[groupIndex] = isFrustumVisible;
+
+            float distanceSq = DistanceSquaredPointToAabb(localCameraPos, group.BoundsMin, group.BoundsMax);
+            if (distanceSq < nearestGroupDistSq)
+            {
+                nearestGroupDistSq = distanceSq;
+                nearestGroupIndex = groupIndex;
+            }
+
+            if (cameraInsideRoot)
+            {
+                if (ContainsPointExpanded(localCameraPos, group.BoundsMin, group.BoundsMax, GroupVisibilityBoundsPadding))
+                    EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, groupIndex, 0);
+            }
+            else if (isFrustumVisible && IsExteriorGroup(group.Flags))
+            {
+                EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, groupIndex, 0);
+            }
+        }
+
+        if (_visibilityQueue.Count == 0)
+        {
+            if (nearestGroupDistSq <= nearRootFullVisibilityDistanceSq)
+            {
+                for (int groupIndex = 0; groupIndex < _runtimeVisibleGroups.Length; groupIndex++)
+                    _runtimeVisibleGroups[groupIndex] = true;
+
+                ApplyRuntimeVisibilityToBuffers();
+                CollectVisibleDoodadDefs();
+                return;
+            }
+
+            if (!cameraInsideRoot && !anyExteriorGroups)
+            {
+                for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+                    _runtimeVisibleGroups[groupIndex] = _frustumVisibleScratch[groupIndex];
+
+                ApplyRuntimeVisibilityToBuffers();
+                CollectVisibleDoodadDefs();
+                return;
+            }
+
+            if (nearestGroupIndex >= 0)
+                EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, nearestGroupIndex, 0);
+        }
+
+        float portalRevealDistance = cameraInsideRoot
+            ? MathF.Max(InteriorPortalRevealDistance, MathF.Min(fogEnd, 5000f))
+            : MathF.Max(ExteriorPortalRevealDistance, MathF.Min(fogEnd * 0.4f, 1800f));
+        int maxTraversalDepth = cameraInsideRoot ? InteriorPortalTraversalDepth : ExteriorPortalTraversalDepth;
+        float portalRevealDistanceSq = portalRevealDistance * portalRevealDistance;
+
+        while (_visibilityQueue.Count > 0)
+        {
+            var (groupIndex, depth) = _visibilityQueue.Dequeue();
+            _runtimeVisibleGroups[groupIndex] = true;
+
+            if (depth >= maxTraversalDepth)
+                continue;
+
+            foreach (var neighbor in _groupPortalNeighbors[groupIndex])
+            {
+                int neighborGroupIndex = neighbor.GroupIndex;
+                if (_visibilityVisited.Contains(neighborGroupIndex))
+                    continue;
+
+                if (!ShouldTraversePortal(neighbor, modelMatrix, cameraPos, portalRevealDistanceSq, cameraInsideRoot))
+                    continue;
+
+                EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, neighborGroupIndex, depth + 1);
+            }
+        }
+
+        if (!cameraInsideRoot)
+        {
+            for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+            {
+                if (_frustumVisibleScratch[groupIndex] && IsExteriorGroup(_wmo.Groups[groupIndex].Flags))
+                    _runtimeVisibleGroups[groupIndex] = true;
+            }
+        }
+
+        ApplyRuntimeVisibilityToBuffers();
+        CollectVisibleDoodadDefs();
+    }
+
+    private void ApplyRuntimeVisibilityToBuffers()
+    {
+        foreach (var groupBuffer in _groups)
+        {
+            if ((uint)groupBuffer.GroupIndex < (uint)_runtimeVisibleGroups.Length)
+                groupBuffer.RuntimeVisible = _runtimeVisibleGroups[groupBuffer.GroupIndex];
+            else
+                groupBuffer.RuntimeVisible = true;
+        }
+    }
+
+    private void CollectVisibleDoodadDefs()
+    {
+        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+        {
+            if (!_runtimeVisibleGroups[groupIndex])
+                continue;
+
+            foreach (ushort doodadRef in _wmo.Groups[groupIndex].DoodadRefs)
+            {
+                if ((uint)doodadRef < (uint)_wmo.DoodadDefs.Count)
+                    _runtimeVisibleDoodadDefIndices.Add(doodadRef);
+            }
+        }
+    }
+
+    private bool ShouldTraversePortal(PortalNeighbor neighbor, Matrix4x4 modelMatrix, Vector3 cameraPos,
+        float portalRevealDistanceSq, bool cameraInsideRoot)
+    {
+        int neighborGroupIndex = neighbor.GroupIndex;
+        bool neighborFrustumVisible = (uint)neighborGroupIndex < (uint)_frustumVisibleScratch.Length && _frustumVisibleScratch[neighborGroupIndex];
+        bool neighborExterior = IsExteriorGroup(_wmo.Groups[neighborGroupIndex].Flags);
+
+        ushort portalIndex = neighbor.PortalIndex;
+        if ((uint)portalIndex >= (uint)_portalCenters.Length)
+            return false;
+
+        Vector3 portalCenterWorld = Vector3.Transform(_portalCenters[portalIndex], modelMatrix);
+        float portalDistanceSq = Vector3.DistanceSquared(cameraPos, portalCenterWorld);
+        if (portalDistanceSq > portalRevealDistanceSq)
+            return false;
+
+        if (cameraInsideRoot)
+            return true;
+
+        return neighborFrustumVisible || neighborExterior;
+    }
+
+    private static void EnqueueVisibleGroup(Queue<(int GroupIndex, int Depth)> queue, HashSet<int> visited, int groupIndex, int depth)
+    {
+        if (visited.Add(groupIndex))
+            queue.Enqueue((groupIndex, depth));
+    }
+
+    private static bool ContainsPointExpanded(Vector3 point, Vector3 min, Vector3 max, float padding)
+    {
+        return point.X >= min.X - padding && point.X <= max.X + padding
+            && point.Y >= min.Y - padding && point.Y <= max.Y + padding
+            && point.Z >= min.Z - padding && point.Z <= max.Z + padding;
+    }
+
+    private static float ComputeNearRootFullVisibilityDistance(Vector3 min, Vector3 max, float fogEnd)
+    {
+        Vector3 extents = max - min;
+        float largestDimension = MathF.Max(extents.X, MathF.Max(extents.Y, extents.Z));
+        float scaledDistance = largestDimension * 0.75f;
+        float fogLimitedDistance = MathF.Max(NearRootFullVisibilityDistance, fogEnd * 0.75f);
+        return MathF.Max(NearRootFullVisibilityDistance, MathF.Min(scaledDistance, fogLimitedDistance));
+    }
+
+    private static bool IsExteriorGroup(uint flags) => (flags & 0x8) != 0;
+
+    private static float DistanceSquaredPointToAabb(Vector3 point, Vector3 min, Vector3 max)
+    {
+        float dx = point.X < min.X ? min.X - point.X : point.X > max.X ? point.X - max.X : 0f;
+        float dy = point.Y < min.Y ? min.Y - point.Y : point.Y > max.Y ? point.Y - max.Y : 0f;
+        float dz = point.Z < min.Z ? min.Z - point.Z : point.Z > max.Z ? point.Z - max.Z : 0f;
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    private static void TransformAabb(Vector3 min, Vector3 max, Matrix4x4 transform, out Vector3 outMin, out Vector3 outMax)
+    {
+        outMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+        outMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
+        Span<float> xs = stackalloc float[] { min.X, max.X };
+        Span<float> ys = stackalloc float[] { min.Y, max.Y };
+        Span<float> zs = stackalloc float[] { min.Z, max.Z };
+
+        foreach (float x in xs)
+        foreach (float y in ys)
+        foreach (float z in zs)
+        {
+            Vector3 transformed = Vector3.Transform(new Vector3(x, y, z), transform);
+            outMin = Vector3.Min(outMin, transformed);
+            outMax = Vector3.Max(outMax, transformed);
+        }
+    }
+
+    private unsafe void InitBuffers()
+    {
+        for (int gi = 0; gi < _wmo.Groups.Count; gi++)
+        {
+            var group = _wmo.Groups[gi];
+            if (group.Vertices.Count == 0 || group.Indices.Count == 0)
+                continue;
+
+            var gb = new GroupBuffers
+            {
+                GroupIndex = gi,
+                GroupCenter = (group.BoundsMin + group.BoundsMax) * 0.5f
+            };
+
+            // Generate normals from geometry
+            var normals = GenerateNormals(group);
+
+            int vertCount = group.Vertices.Count;
+            bool hasUVs = group.UVs.Count == vertCount;
+            if (!hasUVs)
+                ViewerLog.Trace($"[WmoRenderer] Group {gi} '{group.Name}': UV count mismatch! Verts={vertCount}, UVs={group.UVs.Count}");
+
+            Vector4[] vertexLightColors = BuildVertexLightColors(group);
+
+            // Interleave: pos(3) + normal(3) + uv(2) + vertexLight(4) = 12 floats
+            float[] vertexData = new float[vertCount * 12];
+            for (int v = 0; v < vertCount; v++)
+            {
+                // Pass through raw WoW model-local coords.
+                // Coordinate conversion is handled by the placement transform.
+                var pos = group.Vertices[v];
+                int baseOffset = v * 12;
+                vertexData[baseOffset + 0] = pos.X;
+                vertexData[baseOffset + 1] = pos.Y;
+                vertexData[baseOffset + 2] = pos.Z;
+
+                var n = v < normals.Count ? normals[v] : Vector3.UnitY;
+                vertexData[baseOffset + 3] = n.X;
+                vertexData[baseOffset + 4] = n.Y;
+                vertexData[baseOffset + 5] = n.Z;
+
+                if (hasUVs)
+                {
+                    var uv = group.UVs[v];
+                    vertexData[baseOffset + 6] = uv.X;
+                    vertexData[baseOffset + 7] = uv.Y;
+                }
+
+                Vector4 vertexLight = vertexLightColors[v];
+                vertexData[baseOffset + 8] = vertexLight.X;
+                vertexData[baseOffset + 9] = vertexLight.Y;
+                vertexData[baseOffset + 10] = vertexLight.Z;
+                vertexData[baseOffset + 11] = vertexLight.W;
+            }
+
+            gb.Vao = _gl.GenVertexArray();
+            _gl.BindVertexArray(gb.Vao);
+
+            gb.Vbo = _gl.GenBuffer();
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, gb.Vbo);
+            fixed (float* ptr = vertexData)
+                _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertexData.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
+
+            gb.Ebo = _gl.GenBuffer();
+            _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, gb.Ebo);
+            var indices = group.Indices.ToArray();
+            // Reverse triangle winding: WoW/D3D uses CW front faces, OpenGL uses CCW.
+            // Swap v1↔v2 in each triangle to convert CW→CCW.
+            for (int t = 0; t + 2 < indices.Length; t += 3)
+                (indices[t + 1], indices[t + 2]) = (indices[t + 2], indices[t + 1]);
+            fixed (ushort* ptr = indices)
+                _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
+
+            uint stride = 12 * sizeof(float);
+            _gl.EnableVertexAttribArray(0);
+            _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, (void*)0);
+            _gl.EnableVertexAttribArray(1);
+            _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, stride, (void*)(3 * sizeof(float)));
+            _gl.EnableVertexAttribArray(2);
+            _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, stride, (void*)(6 * sizeof(float)));
+            _gl.EnableVertexAttribArray(3);
+            _gl.VertexAttribPointer(3, 4, VertexAttribPointerType.Float, false, stride, (void*)(8 * sizeof(float)));
+
+            _gl.BindVertexArray(0);
+
+            gb.IndexCount = (uint)indices.Length;
+            _groups.Add(gb);
+        }
+    }
+
+    private static Vector4[] BuildVertexLightColors(WmoV14ToV17Converter.WmoGroupData group)
+    {
+        int vertexCount = group.Vertices.Count;
+        var vertexLightColors = new Vector4[vertexCount];
+        if (vertexCount == 0)
+            return vertexLightColors;
+
+        if (TryCopyParsedVertexColors(group, vertexLightColors))
+            return vertexLightColors;
+
+        if (TrySampleVertexColorsFromLightmaps(group, vertexLightColors))
+            return vertexLightColors;
+
+        for (int i = 0; i < vertexCount; i++)
+            vertexLightColors[i] = Vector4.One;
+
+        return vertexLightColors;
+    }
+
+    private static bool TryCopyParsedVertexColors(WmoV14ToV17Converter.WmoGroupData group, Vector4[] vertexLightColors)
+    {
+        if (group.VertexColors.Count != vertexLightColors.Length || group.VertexColors.Count == 0)
+            return false;
+
+        double averageLuminosity = 0.0;
+        foreach (uint packedColor in group.VertexColors)
+        {
+            byte blue = (byte)(packedColor & 0xFF);
+            byte green = (byte)((packedColor >> 8) & 0xFF);
+            byte red = (byte)((packedColor >> 16) & 0xFF);
+            averageLuminosity += (red + green + blue) / 3.0;
+        }
+
+        averageLuminosity /= group.VertexColors.Count;
+        if (averageLuminosity < 10.0)
+            return false;
+
+        for (int i = 0; i < vertexLightColors.Length; i++)
+            vertexLightColors[i] = DecodePackedBgra(group.VertexColors[i]);
+
+        return true;
+    }
+
+    private static bool TrySampleVertexColorsFromLightmaps(WmoV14ToV17Converter.WmoGroupData group, Vector4[] vertexLightColors)
+    {
+        if (group.LightmapData.Length == 0 || group.LightmapUVs.Count == 0 || group.LightmapInfos.Count == 0)
+            return false;
+
+        int vertexCount = vertexLightColors.Length;
+        var redSums = new float[vertexCount];
+        var greenSums = new float[vertexCount];
+        var blueSums = new float[vertexCount];
+        var sampleCounts = new int[vertexCount];
+        int faceCount = group.Indices.Count / 3;
+        bool hasSamples = false;
+
+        for (int faceIndex = 0; faceIndex < faceCount; faceIndex++)
+        {
+            var lightmapInfo = group.LightmapInfos[Math.Min(faceIndex, group.LightmapInfos.Count - 1)];
+            if (lightmapInfo.Width == 0 || lightmapInfo.Height == 0)
+                continue;
+
+            for (int corner = 0; corner < 3; corner++)
+            {
+                int uvIndex = faceIndex * 3 + corner;
+                int indexOffset = faceIndex * 3 + corner;
+                if (uvIndex >= group.LightmapUVs.Count || indexOffset >= group.Indices.Count)
+                    continue;
+
+                int vertexIndex = group.Indices[indexOffset];
+                if ((uint)vertexIndex >= (uint)vertexCount)
+                    continue;
+
+                Vector2 uv = group.LightmapUVs[uvIndex];
+                if (!float.IsFinite(uv.X) || !float.IsFinite(uv.Y))
+                    continue;
+
+                float u = Math.Clamp(uv.X, 0f, 1f);
+                float v = Math.Clamp(uv.Y, 0f, 1f);
+                int pixelX = (int)(u * (lightmapInfo.Width - 1));
+                int pixelY = (int)(v * (lightmapInfo.Height - 1));
+
+                long pixelOffset = (long)lightmapInfo.DataOffset + (((long)pixelY * lightmapInfo.Width) + pixelX) * 4L;
+                if (pixelOffset < 0 || pixelOffset + 4 > group.LightmapData.LongLength)
+                    continue;
+
+                int pixelOffsetInt = (int)pixelOffset;
+                blueSums[vertexIndex] += group.LightmapData[pixelOffsetInt + 0] / 255f;
+                greenSums[vertexIndex] += group.LightmapData[pixelOffsetInt + 1] / 255f;
+                redSums[vertexIndex] += group.LightmapData[pixelOffsetInt + 2] / 255f;
+                sampleCounts[vertexIndex]++;
+                hasSamples = true;
+            }
+        }
+
+        if (!hasSamples)
+            return false;
+
+        double averageLuminosity = 0.0;
+        for (int i = 0; i < vertexCount; i++)
+        {
+            if (sampleCounts[i] > 0)
+            {
+                float invCount = 1f / sampleCounts[i];
+                float red = redSums[i] * invCount;
+                float green = greenSums[i] * invCount;
+                float blue = blueSums[i] * invCount;
+                vertexLightColors[i] = new Vector4(red, green, blue, 1f);
+                averageLuminosity += (red + green + blue) / 3.0;
+            }
+            else
+            {
+                vertexLightColors[i] = Vector4.One;
+                averageLuminosity += 1.0;
+            }
+        }
+
+        averageLuminosity /= vertexCount;
+        if (averageLuminosity < 0.08)
+            return false;
+
+        return true;
+    }
+
+    private static Vector4 DecodePackedBgra(uint packedColor)
+    {
+        float blue = (packedColor & 0xFF) / 255f;
+        float green = ((packedColor >> 8) & 0xFF) / 255f;
+        float red = ((packedColor >> 16) & 0xFF) / 255f;
+        float alpha = ((packedColor >> 24) & 0xFF) / 255f;
+        return new Vector4(red, green, blue, alpha > 0f ? alpha : 1f);
+    }
+
+    private void LoadMaterialTextures()
+    {
+        if (_dataSource == null) return;
+
+        int loaded = 0, failed = 0;
+        for (int i = 0; i < _wmo.Materials.Count; i++)
+            TryLoadMaterialTexture(i, ref loaded, ref failed);
+
+        ViewerLog.Trace($"[WmoRenderer] Textures: {loaded} loaded, {failed} failed out of {_wmo.Materials.Count} materials");
+    }
+
+    private void QueueDeferredMaterialTextureLoads()
+    {
+        _pendingMaterialTextureLoads.Clear();
+        for (int i = 0; i < _wmo.Materials.Count; i++)
+            _pendingMaterialTextureLoads.Enqueue(i);
+
+        if (_pendingMaterialTextureLoads.Count > 0)
+        {
+            ViewerLog.Info(ViewerLog.Category.Wmo,
+                $"[WMO-LOAD] Deferred {_pendingMaterialTextureLoads.Count} material textures for {_modelDir}");
+        }
+    }
+
+    private void ProcessDeferredMaterialTextureLoads()
+    {
+        if (!_deferInitialMaterialTextureLoads || _pendingMaterialTextureLoads.Count == 0 || _dataSource == null)
+            return;
+
+        var stopwatch = Stopwatch.StartNew();
+        int loadsCompleted = 0;
+        int loaded = 0, failed = 0;
+
+        while (loadsCompleted < DeferredMaterialTextureLoadsPerFrame
+            && stopwatch.Elapsed.TotalMilliseconds < DeferredMaterialTextureLoadBudgetMs
+            && _pendingMaterialTextureLoads.TryDequeue(out int materialIndex))
+        {
+            TryLoadMaterialTexture(materialIndex, ref loaded, ref failed);
+            loadsCompleted++;
+        }
+    }
+
+    private void TryLoadMaterialTexture(int i, ref int loaded, ref int failed)
+    {
+        var mat = _wmo.Materials[i];
+        string? texName = ResolveMaterialTextureName(mat);
+        if (string.IsNullOrEmpty(texName))
+            return;
+
+        if (!texName.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+            texName += ".blp";
+
+        byte[]? blpData = _dataSource?.ReadFile(texName);
+
+        if (blpData == null)
+            blpData = _dataSource?.ReadFile(texName.Replace('/', '\\'));
+
+        if (blpData == null && _dataSource is MpqDataSource mpqDs)
+        {
+            var found = mpqDs.FindInFileSet(texName);
+            if (found != null)
+                blpData = _dataSource.ReadFile(found);
+        }
+
+        if (blpData != null && blpData.Length > 0)
+        {
+            uint glTex = LoadWmoTexture(blpData, texName);
+            if (glTex != 0)
+            {
+                _materialTextures[i] = glTex;
+                loaded++;
+            }
+            else
+            {
+                ViewerLog.Trace($"[WmoRenderer] Mat {i}: BLP decode failed for '{texName}'");
+                failed++;
+            }
+        }
+        else
+        {
+            ViewerLog.Trace($"[WmoRenderer] Mat {i}: texture not found '{texName}'");
+            failed++;
+        }
+    }
+
+    private int ResolveBatchMaterialId(WmoV14ToV17Converter.WmoGroupData group, WmoV14ToV17Converter.WmoBatch batch)
+    {
+        int originalMaterialId = batch.MaterialId;
+        int materialId = originalMaterialId;
+        if ((uint)materialId < (uint)_wmo.Materials.Count)
+            return materialId;
+
+        int firstFace = (int)(batch.FirstIndex / 3u);
+        if ((uint)firstFace < (uint)group.FaceMaterials.Count)
+        {
+            int faceMaterial = group.FaceMaterials[firstFace];
+            if ((uint)faceMaterial < (uint)_wmo.Materials.Count)
+            {
+                LogMaterialFallback(group, batch, originalMaterialId, faceMaterial, "MOPY");
+                return faceMaterial;
+            }
+        }
+
+        int defaultMaterial = _wmo.Materials.Count > 0 ? 0 : -1;
+        LogMaterialFallback(group, batch, originalMaterialId, defaultMaterial, "DEFAULT");
+        return defaultMaterial;
+    }
+
+    private void LogMaterialFallback(WmoV14ToV17Converter.WmoGroupData group, WmoV14ToV17Converter.WmoBatch batch,
+        int originalMaterialId, int resolvedMaterialId, string source)
+    {
+        if (_materialFallbackLogCount >= MaxMaterialFallbackLogs)
+            return;
+
+        string groupName = string.IsNullOrWhiteSpace(group.Name) ? "<unnamed>" : group.Name;
+        string key = $"{groupName}|{batch.FirstIndex}|{batch.IndexCount}|{originalMaterialId}|{resolvedMaterialId}|{source}";
+        if (!_materialFallbackLogKeys.Add(key))
+            return;
+
+        _materialFallbackLogCount++;
+        ViewerLog.Info(ViewerLog.Category.Wmo,
+            $"[WMO-MAT] Fallback source={source} group='{groupName}' firstIndex={batch.FirstIndex} indexCount={batch.IndexCount} material {originalMaterialId} -> {resolvedMaterialId}");
+    }
+
+    private string? ResolveMaterialTextureName(WmoV14ToV17Converter.WmoMaterial material)
+    {
+        string? textureName = material.Texture1Name;
+        if (!string.IsNullOrWhiteSpace(textureName))
+            return textureName;
+
+        if (_wmo.MotxRaw.Length == 0)
+            return null;
+
+        textureName = ResolveStringFromRaw(_wmo.MotxRaw, material.Texture1Offset);
+        if (string.IsNullOrWhiteSpace(textureName) && material.Texture1Offset >= 8)
+            textureName = ResolveStringFromRaw(_wmo.MotxRaw, material.Texture1Offset - 8);
+
+        return textureName;
+    }
+
+    private static string? ResolveStringFromRaw(byte[] raw, uint offset)
+    {
+        if (raw.Length == 0 || offset >= raw.Length)
+            return null;
+
+        int start = (int)offset;
+        int end = Array.IndexOf(raw, (byte)0, start);
+        if (end < 0)
+            end = raw.Length;
+        if (end <= start)
+            return null;
+
+        return Encoding.ASCII.GetString(raw, start, end - start).Trim();
+    }
+
+    private unsafe uint LoadWmoTexture(byte[] blpData, string name)
+    {
+        try
+        {
+            using var ms = new MemoryStream(blpData);
+            using var blp = new SereniaBLPLib.BlpFile(ms);
+            var bmp = blp.GetBitmap(0);
+
+            int w = bmp.Width, h = bmp.Height;
+            var pixels = new byte[w * h * 4];
+            var rect = new System.Drawing.Rectangle(0, 0, w, h);
+            var data = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            try
+            {
+                var srcBytes = new byte[data.Stride * h];
+                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, srcBytes, 0, srcBytes.Length);
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int srcIdx = y * data.Stride + x * 4;
+                        int dstIdx = (y * w + x) * 4;
+                        pixels[dstIdx + 0] = srcBytes[srcIdx + 2]; // R
+                        pixels[dstIdx + 1] = srcBytes[srcIdx + 1]; // G
+                        pixels[dstIdx + 2] = srcBytes[srcIdx + 0]; // B
+                        pixels[dstIdx + 3] = srcBytes[srcIdx + 3]; // A
+                    }
+                }
+            }
+            finally { bmp.UnlockBits(data); }
+            bmp.Dispose();
+
+            uint tex = _gl.GenTexture();
+            _gl.BindTexture(TextureTarget.Texture2D, tex);
+            fixed (byte* ptr = pixels)
+                _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
+                    (uint)w, (uint)h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+            RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true,
+                TextureWrapMode.Repeat, TextureWrapMode.Repeat);
+            _gl.GenerateMipmap(TextureTarget.Texture2D);
+            return tex;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[WmoRenderer] Failed to decode BLP {name}: {ex.Message}");
+            return 0;
+        }
+    }
+
+    private List<Vector3> GenerateNormals(WmoV14ToV17Converter.WmoGroupData group)
+    {
+        var normals = new Vector3[group.Vertices.Count];
+        for (int i = 0; i + 2 < group.Indices.Count; i += 3)
+        {
+            int i0 = group.Indices[i], i1 = group.Indices[i + 1], i2 = group.Indices[i + 2];
+            if (i0 >= group.Vertices.Count || i1 >= group.Vertices.Count || i2 >= group.Vertices.Count)
+                continue;
+            var e1 = group.Vertices[i1] - group.Vertices[i0];
+            var e2 = group.Vertices[i2] - group.Vertices[i0];
+            var n = Vector3.Normalize(Vector3.Cross(e1, e2));
+            if (float.IsNaN(n.X)) continue;
+            normals[i0] += n;
+            normals[i1] += n;
+            normals[i2] += n;
+        }
+        return normals.Select(n => n.Length() > 0.001f ? Vector3.Normalize(n) : Vector3.UnitY).ToList();
+    }
+
+    // --- Doodad loading ---
+
+    private void ResolveDoodadNames()
+    {
+        // Parse null-terminated string table from DoodadNamesRaw
+        // DoodadDef.NameIndex is a byte offset into this table
+        _doodadNames.Clear();
+        if (_wmo.DoodadNamesRaw.Length == 0) return;
+
+        // Build offset→name map for quick lookup
+        var raw = _wmo.DoodadNamesRaw;
+        int start = 0;
+        for (int i = 0; i <= raw.Length; i++)
+        {
+            if (i == raw.Length || raw[i] == 0)
+            {
+                if (i > start)
+                {
+                    // We don't store by index here — we'll resolve by offset in GetDoodadName
+                }
+                start = i + 1;
+            }
+        }
+    }
+
+    private string GetDoodadName(uint nameOffset)
+    {
+        if (nameOffset >= _wmo.DoodadNamesRaw.Length) return "";
+        int end = (int)nameOffset;
+        while (end < _wmo.DoodadNamesRaw.Length && _wmo.DoodadNamesRaw[end] != 0)
+            end++;
+        if (end == (int)nameOffset) return "";
+        return Encoding.UTF8.GetString(_wmo.DoodadNamesRaw, (int)nameOffset, end - (int)nameOffset);
+    }
+
+    private void LoadActiveDoodadSet()
+    {
+        _doodadInstances.Clear();
+        _pendingDoodadModelLoads.Clear();
+        _queuedDoodadModelLoads.Clear();
+        _doodadInstanceIndicesByModel.Clear();
+        _doodadSourceModelPaths.Clear();
+
+        if (_wmo.DoodadSets.Count == 0 || _wmo.DoodadDefs.Count == 0)
+            return;
+
+        if (_activeDoodadSet >= _wmo.DoodadSets.Count)
+            _activeDoodadSet = 0;
+
+        var set = _wmo.DoodadSets[_activeDoodadSet];
+        ViewerLog.Trace($"[WmoRenderer] Loading DoodadSet [{_activeDoodadSet}] \"{set.Name}\": {set.Count} doodads (start={set.StartIndex}), DoodadDefs.Count={_wmo.DoodadDefs.Count}, DoodadNamesRaw.Length={_wmo.DoodadNamesRaw.Length}");
+
+        int loaded = 0, failed = 0, emptyName = 0, notFound = 0, parseError = 0, deferredUniqueModels = 0;
+        for (uint i = set.StartIndex; i < set.StartIndex + set.Count && i < (uint)_wmo.DoodadDefs.Count; i++)
+        {
+            var def = _wmo.DoodadDefs[(int)i];
+            string modelPath = GetDoodadName(def.NameIndex);
+
+            if (string.IsNullOrEmpty(modelPath))
+            {
+                emptyName++;
+                failed++;
+                continue;
+            }
+
+            // Build transform matrix: Scale * Rotation * Translation
+            var transform = Matrix4x4.CreateScale(def.Scale)
+                          * Matrix4x4.CreateFromQuaternion(def.Orientation)
+                          * Matrix4x4.CreateTranslation(def.Position);
+
+            string normalizedModelPath = NormalizeDoodadPath(modelPath).ToLowerInvariant();
+            _doodadSourceModelPaths[normalizedModelPath] = modelPath;
+            if (!_doodadInstanceIndicesByModel.TryGetValue(normalizedModelPath, out List<int>? instanceIndices))
+            {
+                instanceIndices = new List<int>();
+                _doodadInstanceIndicesByModel[normalizedModelPath] = instanceIndices;
+            }
+
+            IModelRenderer? renderer = null;
+            if (_deferInitialDoodadLoads)
+            {
+                if (_queuedDoodadModelLoads.Add(normalizedModelPath))
+                {
+                    _pendingDoodadModelLoads.Enqueue(normalizedModelPath);
+                    deferredUniqueModels++;
+                }
+            }
+            else
+            {
+                renderer = GetOrLoadDoodadModel(modelPath);
+            }
+
+            _doodadInstances.Add(new DoodadInstance
+            {
+                ModelPath = modelPath,
+                NormalizedModelPath = normalizedModelPath,
+                Renderer = renderer,
+                Transform = transform,
+                Visible = true,
+                DoodadDefIndex = (int)i,
+                LocalPosition = def.Position
+            });
+            instanceIndices.Add(_doodadInstances.Count - 1);
+
+            if (_deferInitialDoodadLoads)
+                continue;
+
+            if (renderer != null)
+                loaded++;
+            else
+            {
+                failed++;
+                if (_lastLoadResult == DoodadLoadResult.NotFound) notFound++;
+                else if (_lastLoadResult == DoodadLoadResult.ParseError) parseError++;
+            }
+        }
+
+        if (_deferInitialDoodadLoads)
+        {
+            ViewerLog.Trace($"[WmoRenderer] Doodads queued for deferred loading: {_doodadInstances.Count} instances, {deferredUniqueModels} unique models");
+        }
+        else
+        {
+            ViewerLog.Trace($"[WmoRenderer] Doodads: {loaded} loaded, {failed} failed ({emptyName} empty names, {notFound} not found, {parseError} parse errors), {_doodadModelCache.Count} unique models cached");
+        }
+    }
+
+    private void ProcessDeferredDoodadLoads()
+    {
+        if (!_deferInitialDoodadLoads || _pendingDoodadModelLoads.Count == 0)
+            return;
+
+        var stopwatch = Stopwatch.StartNew();
+        int loadsCompleted = 0;
+        while (loadsCompleted < DeferredDoodadLoadsPerFrame
+            && stopwatch.Elapsed.TotalMilliseconds < DeferredDoodadLoadBudgetMs
+            && _pendingDoodadModelLoads.TryDequeue(out string? normalizedModelPath))
+        {
+            _queuedDoodadModelLoads.Remove(normalizedModelPath);
+            if (!_doodadInstanceIndicesByModel.TryGetValue(normalizedModelPath, out List<int>? indices) || indices.Count == 0)
+                continue;
+
+            string modelPath = _doodadSourceModelPaths.TryGetValue(normalizedModelPath, out string? sourceModelPath)
+                ? sourceModelPath
+                : _doodadInstances[indices[0]].ModelPath;
+            IModelRenderer? renderer = GetOrLoadDoodadModel(modelPath);
+            foreach (int idx in indices)
+                _doodadInstances[idx].Renderer = renderer;
+
+            loadsCompleted++;
+        }
+    }
+
+    private enum DoodadLoadResult { Loaded, NotFound, ParseError }
+    private DoodadLoadResult _lastLoadResult;
+
+    private IModelRenderer? GetOrLoadDoodadModel(string modelPath)
+    {
+        string normalized = NormalizeDoodadPath(modelPath).ToLowerInvariant();
+
+        if (_doodadModelCache.TryGetValue(normalized, out var cached))
+        {
+            _lastLoadResult = cached != null ? DoodadLoadResult.Loaded : DoodadLoadResult.NotFound;
+            return cached;
+        }
+
+        IModelRenderer? renderer = null;
+        _lastLoadResult = DoodadLoadResult.NotFound;
+        try
+        {
+            string resolvedModelPath = ResolveCanonicalDoodadPath(modelPath);
+            byte[]? modelData = ReadDoodadFileData(resolvedModelPath);
+            if ((modelData == null || modelData.Length == 0) && !resolvedModelPath.Equals(modelPath, StringComparison.OrdinalIgnoreCase))
+                modelData = ReadDoodadFileData(modelPath);
+
+            if (modelData == null || modelData.Length == 0)
+            {
+                if (_doodadModelCache.Count < 30) // only log first 30 unique misses
+                    ViewerLog.Trace($"  Doodad not found: {modelPath}");
+
+                _doodadModelCache[normalized] = null;
+                return null;
+            }
+
+            bool isM2Family = resolvedModelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)
+                || WarcraftNetM2Adapter.IsMd20(modelData)
+                || WarcraftNetM2Adapter.IsMd21(modelData);
+
+            if (isM2Family)
+            {
+                renderer = LoadM2DoodadRenderer(modelPath, resolvedModelPath, modelData);
+            }
+            else
+            {
+                using var stream = new MemoryStream(modelData);
+                var mdx = MdxFile.Load(stream);
+                string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
+                renderer = new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver, resolvedModelPath);
+            }
+
+            if (renderer != null)
+            {
+                _lastLoadResult = DoodadLoadResult.Loaded;
+                ViewerLog.Trace($"  Doodad loaded: {Path.GetFileName(modelPath)}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _lastLoadResult = DoodadLoadResult.ParseError;
+            ViewerLog.Trace($"  Doodad load failed: {modelPath} — {ex.Message}");
+        }
+
+        _doodadModelCache[normalized] = renderer;
+        return renderer;
+    }
+
+    private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string resolvedModelPath, byte[] modelData)
+    {
+        WarcraftNetM2Adapter.ValidateModelProfile(modelData, resolvedModelPath, _buildVersion);
+
+        var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
+        string? bestSkinPath = ResolveBestSkinPath(resolvedModelPath);
+        if (!string.IsNullOrWhiteSpace(bestSkinPath))
+            candidatePaths.Add(bestSkinPath);
+
+        Exception? lastSkinError = null;
+        bool anySkinFound = false;
+
+        foreach (string skinPath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            byte[]? skinBytes = ReadDoodadFileData(skinPath);
+            if (skinBytes == null || skinBytes.Length == 0)
+                continue;
+
+            anySkinFound = true;
+
+            try
+            {
+                ViewerLog.Trace($"[M2] Trying WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
+                M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelData, skinBytes, resolvedModelPath, skinPath);
+                var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, _buildVersion);
+                ViewerLog.Info(ViewerLog.Category.Mdx,
+                    $"[M2] Selected WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
+                return WowViewerM2RuntimeBridge.CreateRenderer(
+                    _gl,
+                    runtimeModel,
+                    adapted,
+                    Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir,
+                    _dataSource,
+                    _texResolver,
+                    _buildVersion,
+                    resolvedModelPath);
+            }
+            catch (Exception ex)
+            {
+                lastSkinError = ex;
+                ViewerLog.Debug(ViewerLog.Category.Mdx,
+                    $"[M2] WMO doodad skin candidate failed for {Path.GetFileName(originalModelPath)}: {skinPath} ({ex.Message})");
+            }
+        }
+
+        if (!anySkinFound)
+        {
+            if (string.Equals(FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+            {
+                try
+                {
+                    var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, null, resolvedModelPath, _buildVersion);
+                    string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
+                    ViewerLog.Info(ViewerLog.Category.Mdx,
+                        $"[M2] Loaded embedded root-profile geometry for WMO doodad {Path.GetFileName(originalModelPath)} after no external .skin resolved");
+                    return new M2Renderer(
+                        new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                        resolvedModelPath);
+                }
+                catch (Exception ex)
+                {
+                    lastSkinError = ex;
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Embedded root-profile WMO doodad fallback failed for {Path.GetFileName(originalModelPath)}: {ex.Message}");
+                }
+            }
+
+            if (_loggedMissingDoodadSkinPaths.Add(resolvedModelPath))
+                ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing WMO doodad .skin for: {Path.GetFileName(originalModelPath)}");
+        }
+
+        if (WarcraftNetM2Adapter.IsMd20(modelData))
+        {
+            byte[]? convertedBytes = ConvertM2ToMdx(modelData, resolvedModelPath);
+            if (convertedBytes != null && convertedBytes.Length > 0)
+            {
+                try
+                {
+                    using var convertedStream = new MemoryStream(convertedBytes);
+                    var convertedMdx = MdxFile.Load(convertedStream);
+                    if (WarcraftNetM2Adapter.HasRenderableGeometry(convertedMdx))
+                    {
+                        string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
+                        ViewerLog.Info(ViewerLog.Category.Mdx,
+                            $"[M2] Falling back to M2->MDX conversion for WMO doodad {Path.GetFileName(originalModelPath)} after adapter failure");
+                        return new M2Renderer(
+                            new MdxRenderer(_gl, convertedMdx, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                            resolvedModelPath);
+                    }
+
+                    lastSkinError = new InvalidDataException(
+                        $"M2->MDX fallback produced no renderable geometry for WMO doodad {Path.GetFileName(originalModelPath)} ({WarcraftNetM2Adapter.SummarizeGeometry(convertedMdx)})");
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Rejecting converted WMO doodad fallback for {Path.GetFileName(originalModelPath)}: {WarcraftNetM2Adapter.SummarizeGeometry(convertedMdx)}");
+                }
+                catch (Exception ex)
+                {
+                    lastSkinError = ex;
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Converted WMO doodad fallback load failed for {Path.GetFileName(originalModelPath)}: {ex.Message}");
+                }
+            }
+        }
+
+        if (lastSkinError != null)
+            throw new InvalidDataException($"All .skin candidates failed for WMO doodad M2: {Path.GetFileName(originalModelPath)}", lastSkinError);
+
+        return null;
+    }
+
+    private byte[]? ConvertM2ToMdx(byte[] modelData, string resolvedModelPath)
+    {
+        try
+        {
+            byte[]? skinBytes = null;
+            foreach (string skinPath in WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                skinBytes = ReadDoodadFileData(skinPath);
+                if (skinBytes != null && skinBytes.Length > 0)
+                    break;
+            }
+
+            var converter = new WoWViewer.Transfer.M2ToMdxConverter();
+            return converter.ConvertToBytes(modelData, skinBytes, _buildVersion);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                $"[M2] WMO doodad M2->MDX converter fallback failed for {Path.GetFileName(resolvedModelPath)}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private string ResolveCanonicalDoodadPath(string modelPath)
+    {
+        string normalizedPath = NormalizeDoodadPath(modelPath);
+        if (_canonicalDoodadPathCache.TryGetValue(normalizedPath, out string? cachedPath))
+            return cachedPath;
+
+        string resolvedPath = normalizedPath;
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            string? found = mpqDataSource.FindInFileSet(normalizedPath);
+            if (!string.IsNullOrWhiteSpace(found))
+            {
+                resolvedPath = NormalizeDoodadPath(found);
+            }
+            else
+            {
+                foreach (string alternatePath in EnumerateAlternateDoodadPaths(normalizedPath))
+                {
+                    found = mpqDataSource.FindInFileSet(alternatePath);
+                    if (string.IsNullOrWhiteSpace(found))
+                        continue;
+
+                    resolvedPath = NormalizeDoodadPath(found);
+                    break;
+                }
+            }
+        }
+
+        _canonicalDoodadPathCache[normalizedPath] = resolvedPath;
+        return resolvedPath;
+    }
+
+    private string? ResolveBestSkinPath(string resolvedModelPath)
+    {
+        if (_bestSkinPathCache.TryGetValue(resolvedModelPath, out string? cachedPath))
+            return cachedPath;
+
+        string? bestSkinPath = WarcraftNetM2Adapter.FindSkinInFileList(
+            resolvedModelPath,
+            _dataSource?.GetFileList(".skin") ?? Array.Empty<string>());
+
+        _bestSkinPathCache[resolvedModelPath] = bestSkinPath;
+        return bestSkinPath;
+    }
+
+    private byte[]? ReadDoodadFileData(string path)
+    {
+        string normalizedPath = NormalizeDoodadPath(path);
+
+        if (_dataSource != null)
+        {
+            byte[]? data = _dataSource.ReadFile(path);
+            if ((data == null || data.Length == 0) && !normalizedPath.Equals(path, StringComparison.OrdinalIgnoreCase))
+                data = _dataSource.ReadFile(normalizedPath);
+
+            if ((data == null || data.Length == 0) && _dataSource is MpqDataSource mpqDataSource)
+            {
+                string? found = mpqDataSource.FindInFileSet(normalizedPath);
+                if (!string.IsNullOrWhiteSpace(found))
+                    data = _dataSource.ReadFile(found);
+            }
+
+            if (data != null && data.Length > 0)
+                return data;
+        }
+
+        string diskPath = path;
+        if (!Path.IsPathRooted(diskPath))
+            diskPath = Path.Combine(_modelDir, normalizedPath);
+
+        if (File.Exists(diskPath))
+            return File.ReadAllBytes(diskPath);
+
+        string fallbackPath = Path.Combine(_modelDir, Path.GetFileName(normalizedPath));
+        if (!fallbackPath.Equals(diskPath, StringComparison.OrdinalIgnoreCase) && File.Exists(fallbackPath))
+            return File.ReadAllBytes(fallbackPath);
+
+        return null;
+    }
+
+    private static string NormalizeDoodadPath(string path)
+    {
+        return path.Replace('/', '\\');
+    }
+
+    private static IEnumerable<string> EnumerateAlternateDoodadPaths(string normalizedPath)
+    {
+        if (normalizedPath.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return normalizedPath[..^4] + ".m2";
+            yield return normalizedPath[..^4] + ".mdl";
+            yield break;
+        }
+
+        if (normalizedPath.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return normalizedPath[..^4] + ".mdx";
+            yield return normalizedPath[..^4] + ".m2";
+            yield break;
+        }
+
+        if (normalizedPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+            yield return normalizedPath[..^3] + ".mdx";
+    }
+
+    private void InitLiquidShader()
+    {
+        _liquidShaderRefCount++;
+        if (_liquidShader != 0) return; // Already initialized by another instance
+
+        string vertSrc = @"
+#version 330 core
+layout(location = 0) in vec3 aPos;
+
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProj;
+
+out vec3 vWorldPos;
+
+void main() {
+    vec4 worldPos = uModel * vec4(aPos, 1.0);
+    vWorldPos = worldPos.xyz;
+    gl_Position = uProj * uView * worldPos;
+}
+";
+        string fragSrc = @"
+#version 330 core
+in vec3 vWorldPos;
+
+uniform vec4 uColor;
+
+out vec4 FragColor;
+
+void main() {
+    // Simple semi-transparent liquid with slight depth variation
+    float depthShade = 0.85 + 0.15 * sin(vWorldPos.x * 0.5 + vWorldPos.y * 0.5);
+    FragColor = vec4(uColor.rgb * depthShade, uColor.a);
+}
+";
+        uint vert = CompileShader(ShaderType.VertexShader, vertSrc);
+        uint frag = CompileShader(ShaderType.FragmentShader, fragSrc);
+
+        _liquidShader = _gl.CreateProgram();
+        _gl.AttachShader(_liquidShader, vert);
+        _gl.AttachShader(_liquidShader, frag);
+        _gl.LinkProgram(_liquidShader);
+
+        _gl.GetProgram(_liquidShader, ProgramPropertyARB.LinkStatus, out int status);
+        if (status == 0)
+            ViewerLog.Trace($"[WmoRenderer] Liquid shader link error: {_gl.GetProgramInfoLog(_liquidShader)}");
+
+        _gl.DeleteShader(vert);
+        _gl.DeleteShader(frag);
+
+        _gl.UseProgram(_liquidShader);
+        _uLiqModel = _gl.GetUniformLocation(_liquidShader, "uModel");
+        _uLiqView = _gl.GetUniformLocation(_liquidShader, "uView");
+        _uLiqProj = _gl.GetUniformLocation(_liquidShader, "uProj");
+        _uLiqColor = _gl.GetUniformLocation(_liquidShader, "uColor");
+    }
+
+    private unsafe void BuildLiquidMeshes()
+    {
+        _liquidMeshes.Clear();
+
+        for (int gi = 0; gi < _wmo.Groups.Count; gi++)
+        {
+            var group = _wmo.Groups[gi];
+            if (group.LiquidData == null || group.LiquidData.Length < 30)
+                continue;
+
+            try
+            {
+                using var ms = new MemoryStream(group.LiquidData);
+                using var reader = new BinaryReader(ms);
+
+                // MLIQ header: C2iVector verts(8), C2iVector tiles(8), C3Vector corner(12), uint16 matId(2) = 30 bytes
+                int xverts = reader.ReadInt32();
+                int yverts = reader.ReadInt32();
+                int xtiles = reader.ReadInt32();
+                int ytiles = reader.ReadInt32();
+                float cornerX = reader.ReadSingle();
+                float cornerY = reader.ReadSingle();
+                float cornerZ = reader.ReadSingle();
+                ushort matId = reader.ReadUInt16();
+
+
+                if (xverts <= 0 || yverts <= 0 || xverts > 256 || yverts > 256)
+                {
+                    ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: invalid dimensions {xverts}x{yverts}, skipping");
+                    continue;
+                }
+
+                int expectedVertBytes = xverts * yverts * 8;
+                int expectedTileBytes = xtiles * ytiles;
+                int totalExpected = 30 + expectedVertBytes + expectedTileBytes;
+                if (ms.Length - ms.Position < expectedVertBytes)
+                {
+                    ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: not enough data for {xverts}x{yverts} verts (need {expectedVertBytes}, have {ms.Length - ms.Position}), totalExpected={totalExpected} vs dataLen={group.LiquidData.Length}");
+                    continue;
+                }
+
+                // Read vertex heights (8 bytes per vertex: 4 bytes flow data + 4 bytes float height)
+                float[] heights = new float[xverts * yverts];
+                for (int v = 0; v < xverts * yverts; v++)
+                {
+                    reader.ReadInt32(); // flow/filler data (skip)
+                    heights[v] = reader.ReadSingle();
+                }
+
+                // Read tile flags (1 byte per tile) — check for visible tiles
+                byte[] tileFlags = new byte[xtiles * ytiles];
+                if (ms.Length - ms.Position >= expectedTileBytes)
+                {
+                    for (int t = 0; t < xtiles * ytiles; t++)
+                        tileFlags[t] = reader.ReadByte();
+                }
+
+                // WMO MLIQ tile size = 1/8th of a map chunk = UNIT_SIZE/2 ≈ 4.16666
+                float liquidTileSize = 4.16666f;
+
+                // Build vertex positions in WMO-local space (raw file coords, Z-up).
+                // Auto-fit the liquid quad to the owning group's bounds, then apply
+                // any known build baseline plus the user-selected adjustment.
+                int liquidOrientation = SelectBestLiquidOrientation(group, cornerX, cornerY, xverts, yverts, liquidTileSize);
+                int baselineRotation = GetBaselineMliqRotationQuarterTurns();
+                int effectiveOrientation = (liquidOrientation + baselineRotation + _mliqRotationQuarterTurns) & 3;
+                int nverts = xverts * yverts;
+                var vertices = new float[nverts * 3];
+                for (int j = 0; j < yverts; j++)
+                {
+                    for (int i = 0; i < xverts; i++)
+                    {
+                        int idx = j * xverts + i;
+                        var p = MapLiquidVertex(effectiveOrientation, cornerX, cornerY, liquidTileSize, i, j);
+                        vertices[idx * 3 + 0] = p.X;
+                        vertices[idx * 3 + 1] = p.Y;
+                        vertices[idx * 3 + 2] = heights[idx];
+                    }
+                }
+
+                if (liquidOrientation != 2 || baselineRotation != 0 || _mliqRotationQuarterTurns != 0)
+                {
+                    ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: orientation={effectiveOrientation} (auto={liquidOrientation}, baselineRot={baselineRotation * 90}°, userRot={_mliqRotationQuarterTurns * 90}°)");
+                }
+
+                // Build indices: one quad per visible tile
+                // Per 0.8.0 Ghidra spec: (tileByte & 0x0F) == 0x0F means no liquid at tile
+                var indices = new List<ushort>();
+                for (int j = 0; j < ytiles; j++)
+                {
+                    for (int i = 0; i < xtiles; i++)
+                    {
+                        int tileIdx = j * xtiles + i;
+                        if (tileIdx >= tileFlags.Length) continue;
+                        if ((tileFlags[tileIdx] & 0x0F) == 0x0F)
+                            continue; // no liquid at this tile
+
+                        ushort p = (ushort)(j * xverts + i);
+                        ushort tl = p;
+                        ushort tr = (ushort)(p + 1);
+                        ushort bl = (ushort)(p + xverts);
+                        ushort br = (ushort)(p + xverts + 1);
+
+                        // Two triangles per quad (same winding as noggit)
+                        indices.Add(tl); indices.Add(tr); indices.Add(br);
+                        indices.Add(br); indices.Add(bl); indices.Add(tl);
+                    }
+                }
+
+                if (indices.Count == 0)
+                {
+                    ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: no visible tiles");
+                    continue;
+                }
+
+                // Determine liquid type from per-tile nibble (primary) and MOGP flags (hint).
+                // Per 0.8.0 Ghidra spec (FUN_006c0740 / FUN_006ae130):
+                //   Runtime returns first non-0x0F tile nibble, then dispatches:
+                //     nibble 0/4/8 → water renderer
+                //     nibble 2/3/6/7 → magma/slime renderer
+                // For our basic type mapping: water=0, ocean=1, magma=2, slime=3
+                bool isOcean = (group.Flags & 0x80000) != 0;
+                int liquidBasicType = 0; // default water
+
+                // Sample first visible tile nibble for liquid type dispatch
+                for (int t = 0; t < tileFlags.Length; t++)
+                {
+                    int nibble = tileFlags[t] & 0x0F;
+                    if (nibble == 0x0F) continue; // empty tile
+                    // Map nibble to basic type per 0.8.0 dispatch table
+                    switch (nibble)
+                    {
+                        case 0: case 4: case 8:
+                            liquidBasicType = 0; // water
+                            break;
+                        case 2: case 6:
+                            liquidBasicType = 2; // magma
+                            break;
+                        case 3: case 7:
+                            liquidBasicType = 3; // slime
+                            break;
+                        default:
+                            liquidBasicType = 0; // unknown nibble → water fallback
+                            break;
+                    }
+                    break; // use first visible tile
+                }
+
+                // Ocean flag override
+                if (isOcean && liquidBasicType == 0) liquidBasicType = 1;
+
+                // Assign color based on liquid type
+                float cr, cg, cb, ca;
+                switch (liquidBasicType)
+                {
+                    case 1: // ocean
+                        cr = 0.10f; cg = 0.25f; cb = 0.55f; ca = 0.60f;
+                        break;
+                    case 2: // magma/lava
+                        cr = 0.85f; cg = 0.25f; cb = 0.05f; ca = 0.70f;
+                        break;
+                    case 3: // slime
+                        cr = 0.20f; cg = 0.65f; cb = 0.10f; ca = 0.65f;
+                        break;
+                    default: // water
+                        cr = 0.15f; cg = 0.35f; cb = 0.65f; ca = 0.55f;
+                        break;
+                }
+                string liquidTypeName = liquidBasicType switch { 1 => "ocean", 2 => "magma", 3 => "slime", _ => "water" };
+
+                // Upload to GPU
+                uint vao = _gl.GenVertexArray();
+                uint vbo = _gl.GenBuffer();
+                uint ebo = _gl.GenBuffer();
+
+                _gl.BindVertexArray(vao);
+
+                _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
+                fixed (float* ptr = vertices)
+                    _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertices.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
+
+                _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
+                var indexArr = indices.ToArray();
+                fixed (ushort* ptr = indexArr)
+                    _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indexArr.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
+
+                _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), (void*)0);
+                _gl.EnableVertexAttribArray(0);
+                _gl.BindVertexArray(0);
+
+                _liquidMeshes.Add(new LiquidMeshData
+                {
+                    GroupIndex = gi,
+                    Vao = vao, Vbo = vbo, Ebo = ebo,
+                    IndexCount = (uint)indexArr.Length,
+                    ColorR = cr, ColorG = cg, ColorB = cb, ColorA = ca
+                });
+
+                ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: {xverts}x{yverts} verts, {xtiles}x{ytiles} tiles, {indices.Count / 3} tris, corner=({cornerX:F1},{cornerY:F1},{cornerZ:F1}), type={liquidTypeName}, groupLiquid={group.GroupLiquid}, matId={matId}");
+            }
+            catch (Exception ex)
+            {
+                ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: parse error — {ex.Message}");
+            }
+        }
+
+        if (_liquidMeshes.Count > 0)
+            ViewerLog.Trace($"[WmoRenderer] Built {_liquidMeshes.Count} liquid meshes");
+
+        _builtMliqRotationRevision = _mliqRotationRevision;
+    }
+
+    private void EnsureLiquidMeshesUpToDate()
+    {
+        if (_builtMliqRotationRevision == _mliqRotationRevision)
+            return;
+
+        DisposeLiquidMeshes();
+        BuildLiquidMeshes();
+    }
+
+    private void DisposeLiquidMeshes()
+    {
+        foreach (var liq in _liquidMeshes)
+        {
+            _gl.DeleteVertexArray(liq.Vao);
+            _gl.DeleteBuffer(liq.Vbo);
+            _gl.DeleteBuffer(liq.Ebo);
+        }
+
+        _liquidMeshes.Clear();
+    }
+
+    private static Vector2 MapLiquidVertex(int orientation, float cornerX, float cornerY, float tileSize, int i, int j)
+    {
+        return orientation switch
+        {
+            // No rotation
+            0 => new Vector2(cornerX + i * tileSize, cornerY + j * tileSize),
+            // 90° CW
+            1 => new Vector2(cornerX + j * tileSize, cornerY - i * tileSize),
+            // 90° CCW (legacy behavior)
+            2 => new Vector2(cornerX - j * tileSize, cornerY + i * tileSize),
+            // 180°
+            3 => new Vector2(cornerX - i * tileSize, cornerY - j * tileSize),
+            _ => new Vector2(cornerX - j * tileSize, cornerY + i * tileSize)
+        };
+    }
+
+    private static int SelectBestLiquidOrientation(
+        WmoV14ToV17Converter.WmoGroupData group,
+        float cornerX,
+        float cornerY,
+        int xverts,
+        int yverts,
+        float tileSize)
+    {
+        int maxI = Math.Max(0, xverts - 1);
+        int maxJ = Math.Max(0, yverts - 1);
+
+        var groupMin = group.BoundsMin;
+        var groupMax = group.BoundsMax;
+        float groupCenterX = (groupMin.X + groupMax.X) * 0.5f;
+        float groupCenterY = (groupMin.Y + groupMax.Y) * 0.5f;
+
+        // Keep legacy mapping as tie-break default.
+        int bestOrientation = 2;
+        float bestScore = float.MaxValue;
+
+        for (int orientation = 0; orientation < 4; orientation++)
+        {
+            var p00 = MapLiquidVertex(orientation, cornerX, cornerY, tileSize, 0, 0);
+            var p10 = MapLiquidVertex(orientation, cornerX, cornerY, tileSize, maxI, 0);
+            var p01 = MapLiquidVertex(orientation, cornerX, cornerY, tileSize, 0, maxJ);
+            var p11 = MapLiquidVertex(orientation, cornerX, cornerY, tileSize, maxI, maxJ);
+
+            float minX = MathF.Min(MathF.Min(p00.X, p10.X), MathF.Min(p01.X, p11.X));
+            float maxX = MathF.Max(MathF.Max(p00.X, p10.X), MathF.Max(p01.X, p11.X));
+            float minY = MathF.Min(MathF.Min(p00.Y, p10.Y), MathF.Min(p01.Y, p11.Y));
+            float maxY = MathF.Max(MathF.Max(p00.Y, p10.Y), MathF.Max(p01.Y, p11.Y));
+
+            float overflow = 0f;
+            if (minX < groupMin.X) overflow += groupMin.X - minX;
+            if (maxX > groupMax.X) overflow += maxX - groupMax.X;
+            if (minY < groupMin.Y) overflow += groupMin.Y - minY;
+            if (maxY > groupMax.Y) overflow += maxY - groupMax.Y;
+
+            float centerX = (minX + maxX) * 0.5f;
+            float centerY = (minY + maxY) * 0.5f;
+            float centerDx = centerX - groupCenterX;
+            float centerDy = centerY - groupCenterY;
+            float centerDistance = MathF.Sqrt(centerDx * centerDx + centerDy * centerDy);
+
+            // Prioritize staying inside group bounds, then center proximity.
+            float score = overflow * 1000f + centerDistance;
+
+            if (orientation == bestOrientation)
+            {
+                bestScore = score;
+                continue;
+            }
+
+            if (score + 0.001f < bestScore)
+            {
+                bestScore = score;
+                bestOrientation = orientation;
+            }
+        }
+
+        return bestOrientation;
+    }
+
+    public void Dispose()
+    {
+        foreach (var gb in _groups)
+        {
+            _gl.DeleteVertexArray(gb.Vao);
+            _gl.DeleteBuffer(gb.Vbo);
+            _gl.DeleteBuffer(gb.Ebo);
+        }
+
+        // Delete material textures
+        foreach (var tex in _materialTextures.Values)
+            _gl.DeleteTexture(tex);
+        _materialTextures.Clear();
+
+        // Dispose liquid meshes
+        DisposeLiquidMeshes();
+
+        // Dispose cached doodad renderers
+        foreach (var renderer in _doodadModelCache.Values)
+            renderer?.Dispose();
+        _doodadModelCache.Clear();
+        _doodadInstances.Clear();
+        _loggedMissingDoodadSkinPaths.Clear();
+
+        _shaderRefCount--;
+        if (_shaderRefCount <= 0 && _shaderProgram != 0)
+        {
+            _gl.DeleteProgram(_shaderProgram);
+            _shaderProgram = 0;
+            _shaderRefCount = 0;
+        }
+
+        _liquidShaderRefCount--;
+        if (_liquidShaderRefCount <= 0 && _liquidShader != 0)
+        {
+            _gl.DeleteProgram(_liquidShader);
+            _liquidShader = 0;
+            _liquidShaderRefCount = 0;
+        }
+    }
+
+    private class GroupBuffers
+    {
+        public int GroupIndex;
+        public Vector3 GroupCenter;
+        public uint Vao, Vbo, Ebo;
+        public uint IndexCount;
+        public bool ManualVisible = true;
+        public bool RuntimeVisible = true;
+        public bool IsVisible => ManualVisible && RuntimeVisible;
+    }
+
+    private readonly record struct PortalNeighbor(int GroupIndex, ushort PortalIndex);
+
+    private class DoodadInstance
+    {
+        public string ModelPath = "";
+        public string NormalizedModelPath = "";
+        public IModelRenderer? Renderer;
+        public Matrix4x4 Transform;
+        public bool Visible = true;
+        public int DoodadDefIndex;
+        public Vector3 LocalPosition; // WMO-local position for fast culling
+    }
+
+    private class LiquidMeshData
+    {
+        public int GroupIndex;
+        public uint Vao, Vbo, Ebo;
+        public uint IndexCount;
+        public float ColorR, ColorG, ColorB, ColorA;
+    }
+}

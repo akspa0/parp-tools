@@ -1,0 +1,618 @@
+using System.Numerics;
+using WoWViewer.Logging;
+using WoWViewer.Rendering;
+using Silk.NET.OpenGL;
+
+namespace WoWViewer.Terrain;
+
+/// <summary>
+/// Renders MCLQ liquid surfaces as semi-transparent planes over terrain.
+/// Each liquid chunk is a 9×9 vertex grid (8×8 quads) with per-tile visibility flags.
+/// Rendered as a separate pass after terrain with alpha blending.
+/// </summary>
+public class LiquidRenderer : IDisposable
+{
+    private readonly GL _gl;
+    private readonly ShaderProgram _shader;
+    private readonly ShaderProgram _wireframeShader;
+    private readonly FrustumCuller _frustumCuller = new();
+    private const float LiquidVisibilityPadding = 2.0f;
+    private const float LiquidDistanceSlack = 96.0f;
+
+    // Per-chunk liquid meshes (from MCLQ/MH2O)
+    private readonly List<LiquidMesh> _meshes = new();
+
+    // WL liquid body meshes (from loose WLW/WLQ/WLM files)
+    private readonly List<LiquidMesh> _wlMeshes = new();
+    private readonly HashSet<string> _hiddenWlBodies = new(StringComparer.OrdinalIgnoreCase);
+
+    // Global toggles
+    public bool ShowLiquid { get; set; } = true;
+    public bool ShowWlLiquids { get; set; } = true;
+    public bool ShowSelectedWlWireframeOverlay { get; set; } = true;
+    public string? SelectedWlBodyKey { get; set; }
+
+    // Animation time
+    private float _time;
+
+    public int MeshCount => _meshes.Count;
+    public int WlMeshCount => _wlMeshes.Count;
+    public int LastVisibleTerrainMeshCount { get; private set; }
+    public int LastVisibleWlMeshCount { get; private set; }
+
+    public bool IsWlBodyVisible(string bodyKey)
+    {
+        if (string.IsNullOrWhiteSpace(bodyKey))
+            return true;
+        return !_hiddenWlBodies.Contains(bodyKey);
+    }
+
+    public void SetWlBodyVisible(string bodyKey, bool visible)
+    {
+        if (string.IsNullOrWhiteSpace(bodyKey))
+            return;
+
+        if (visible)
+            _hiddenWlBodies.Remove(bodyKey);
+        else
+            _hiddenWlBodies.Add(bodyKey);
+    }
+
+    public void SetAllWlBodiesVisible(bool visible)
+    {
+        _hiddenWlBodies.Clear();
+        if (!visible)
+        {
+            foreach (var mesh in _wlMeshes)
+            {
+                if (!string.IsNullOrWhiteSpace(mesh.WlBodyKey))
+                    _hiddenWlBodies.Add(mesh.WlBodyKey);
+            }
+        }
+    }
+
+    public LiquidRenderer(GL gl)
+    {
+        _gl = gl;
+        _shader = CreateLiquidShader();
+        _wireframeShader = CreateWireframeShader();
+    }
+
+    /// <summary>
+    /// Build and upload liquid meshes from terrain chunk data.
+    /// Call on the render thread after terrain chunks are loaded.
+    /// </summary>
+    public void AddChunks(IEnumerable<TerrainChunkData> chunks)
+    {
+        int added = 0;
+        foreach (var chunk in chunks)
+        {
+            if (chunk.Liquid == null) continue;
+            var mesh = BuildLiquidMesh(chunk.Liquid);
+            if (mesh != null)
+            {
+                _meshes.Add(mesh);
+                added++;
+            }
+        }
+        if (added > 0)
+            ViewerLog.Trace($"[LiquidRenderer] Added {added} liquid meshes (total: {_meshes.Count})");
+    }
+
+    /// <summary>
+    /// Remove liquid meshes associated with unloaded tiles.
+    /// </summary>
+    public void RemoveChunksForTile(int tileX, int tileY)
+    {
+        for (int i = _meshes.Count - 1; i >= 0; i--)
+        {
+            var mesh = _meshes[i];
+            if (mesh.TileX != tileX || mesh.TileY != tileY)
+                continue;
+
+            mesh.Dispose(_gl);
+            _meshes.RemoveAt(i);
+        }
+    }
+
+    /// <summary>
+    /// Render all liquid surfaces. Call after terrain rendering.
+    /// </summary>
+    public unsafe void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, TerrainLighting lighting, float deltaTime)
+    {
+        bool renderTerrainLiquids = ShowLiquid && _meshes.Count > 0;
+        bool renderWlLiquids = ShowWlLiquids && _wlMeshes.Count > 0;
+        if (!renderTerrainLiquids && !renderWlLiquids)
+        {
+            LastVisibleTerrainMeshCount = 0;
+            LastVisibleWlMeshCount = 0;
+            return;
+        }
+
+        _time += deltaTime;
+        _frustumCuller.Update(view * proj);
+        float maxRenderDistance = MathF.Max(256f, lighting.FogEnd + LiquidDistanceSlack);
+        float maxRenderDistanceSq = maxRenderDistance * maxRenderDistance;
+
+        _shader.Use();
+        _shader.SetMat4("uView", view);
+        _shader.SetMat4("uProj", proj);
+        _shader.SetMat4("uModel", Matrix4x4.Identity);
+        _shader.SetVec3("uCameraPos", cameraPos);
+        _shader.SetFloat("uTime", _time);
+        _shader.SetVec3("uLightDir", lighting.LightDirection);
+        _shader.SetVec3("uLightColor", lighting.LightColor);
+        _shader.SetVec3("uAmbientColor", lighting.AmbientColor);
+        _shader.SetVec3("uFogColor", lighting.FogColor);
+        _shader.SetFloat("uFogStart", lighting.FogStart);
+        _shader.SetFloat("uFogEnd", lighting.FogEnd);
+
+        // Alpha blending for transparent water
+        _gl.Enable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.DepthMask(false); // Don't write to depth buffer
+        _gl.Disable(EnableCap.CullFace);
+
+        int visibleTerrainMeshCount = 0;
+        int visibleWlMeshCount = 0;
+
+        if (renderTerrainLiquids)
+        {
+            foreach (var mesh in _meshes)
+            {
+                if (!ShouldRenderMesh(mesh, cameraPos, maxRenderDistanceSq))
+                    continue;
+
+                var (r, g, b, a) = GetLiquidColor(mesh.Type);
+                _shader.SetVec4("uLiquidColor", new Vector4(r, g, b, a));
+
+                _gl.BindVertexArray(mesh.Vao);
+                _gl.DrawElements(PrimitiveType.Triangles, mesh.IndexCount, DrawElementsType.UnsignedShort, null);
+                visibleTerrainMeshCount++;
+            }
+        }
+
+        // Render WL liquid bodies (loose project files)
+        if (renderWlLiquids)
+        {
+            foreach (var mesh in _wlMeshes)
+            {
+                if (!string.IsNullOrWhiteSpace(mesh.WlBodyKey) && _hiddenWlBodies.Contains(mesh.WlBodyKey))
+                    continue;
+                if (!ShouldRenderMesh(mesh, cameraPos, maxRenderDistanceSq))
+                    continue;
+
+                var (r, g, b, a) = GetLiquidColor(mesh.Type);
+                _shader.SetVec4("uLiquidColor", new Vector4(r, g, b, a));
+
+                _gl.BindVertexArray(mesh.Vao);
+                _gl.DrawElements(PrimitiveType.Triangles, mesh.IndexCount,
+                    mesh.UseUint32Indices ? DrawElementsType.UnsignedInt : DrawElementsType.UnsignedShort, null);
+                visibleWlMeshCount++;
+            }
+
+            if (ShowSelectedWlWireframeOverlay && !string.IsNullOrWhiteSpace(SelectedWlBodyKey))
+                RenderSelectedWlWireframe(view, proj);
+        }
+
+        LastVisibleTerrainMeshCount = visibleTerrainMeshCount;
+        LastVisibleWlMeshCount = visibleWlMeshCount;
+
+        _gl.BindVertexArray(0);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.LineWidth(1.0f);
+        _gl.DepthMask(true);
+        _gl.Disable(EnableCap.Blend);
+        _gl.Enable(EnableCap.CullFace);
+    }
+
+    private unsafe void RenderSelectedWlWireframe(Matrix4x4 view, Matrix4x4 proj)
+    {
+        _wireframeShader.Use();
+        _wireframeShader.SetMat4("uView", view);
+        _wireframeShader.SetMat4("uProj", proj);
+        _wireframeShader.SetMat4("uModel", Matrix4x4.Identity);
+
+        _gl.DepthMask(false);
+        _gl.Disable(EnableCap.CullFace);
+        _gl.Enable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.LineWidth(1.8f);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+
+        foreach (var mesh in _wlMeshes)
+        {
+            if (!string.Equals(mesh.WlBodyKey, SelectedWlBodyKey, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!string.IsNullOrWhiteSpace(mesh.WlBodyKey) && _hiddenWlBodies.Contains(mesh.WlBodyKey))
+                continue;
+
+            Vector4 color = mesh.Type switch
+            {
+                LiquidType.Ocean => new Vector4(0.74f, 0.90f, 1.00f, 0.98f),
+                LiquidType.Magma => new Vector4(1.00f, 0.78f, 0.32f, 0.98f),
+                LiquidType.Slime => new Vector4(0.78f, 1.00f, 0.42f, 0.98f),
+                _ => new Vector4(0.96f, 0.92f, 0.30f, 0.98f)
+            };
+
+            _wireframeShader.SetVec4("uColor", color);
+            _gl.BindVertexArray(mesh.Vao);
+            _gl.DrawElements(
+                PrimitiveType.Triangles,
+                mesh.IndexCount,
+                mesh.UseUint32Indices ? DrawElementsType.UnsignedInt : DrawElementsType.UnsignedShort,
+                null);
+        }
+    }
+
+    private static (float r, float g, float b, float a) GetLiquidColor(LiquidType type)
+    {
+        return type switch
+        {
+            LiquidType.Water => (0.15f, 0.35f, 0.65f, 0.55f),
+            LiquidType.Ocean => (0.10f, 0.25f, 0.55f, 0.60f),
+            LiquidType.Magma => (0.85f, 0.30f, 0.05f, 0.75f),
+            LiquidType.Slime => (0.20f, 0.70f, 0.15f, 0.65f),
+            _ => (0.15f, 0.35f, 0.65f, 0.55f)
+        };
+    }
+
+    /// <summary>
+    /// Build a GPU mesh for a single liquid chunk.
+    /// 9×9 vertices with 8×8 quads. Alpha 0.5.3: all quads rendered (no per-tile flags).
+    /// </summary>
+    private unsafe LiquidMesh? BuildLiquidMesh(LiquidChunkData liquid)
+    {
+        if (liquid.Heights.Length < 81)
+            return null;
+
+        float chunkSize = WoWConstants.ChunkSize / 16f; // Size of one MCNK chunk in world units
+        float cellSize = chunkSize / 8f; // Size of one liquid cell
+
+        // Diagnostic: log actual height values arriving at GPU mesh builder
+        if (_meshes.Count < 3)
+            ViewerLog.Trace($"[LiquidMesh] chunk({liquid.ChunkX},{liquid.ChunkY}) tile({liquid.TileX},{liquid.TileY}): " +
+                $"h[0]={liquid.Heights[0]:F2} h[40]={liquid.Heights[40]:F2} h[80]={liquid.Heights[80]:F2} " +
+                $"minH={liquid.MinHeight:F2} maxH={liquid.MaxHeight:F2} worldPos=({liquid.WorldPosition.X:F0},{liquid.WorldPosition.Y:F0},{liquid.WorldPosition.Z:F0})");
+
+        // Build vertex data: position(3) = 3 floats per vertex, 81 vertices
+        var vertices = new float[81 * 3];
+        for (int vy = 0; vy < 9; vy++)
+        {
+            for (int vx = 0; vx < 9; vx++)
+            {
+                int idx = vy * 9 + vx;
+                float height = liquid.Heights[idx];
+
+                // World position: same coordinate system as terrain
+                // Chunk corner is at WorldPosition, vertices extend -X and -Y
+                float worldX = liquid.WorldPosition.X - vy * cellSize;
+                float worldY = liquid.WorldPosition.Y - vx * cellSize;
+
+                // MCLQ heights are absolute world Z values — same convention as terrain MCVT.
+                // No negation needed; terrain uses heights directly (TerrainMeshBuilder line 65).
+                vertices[idx * 3 + 0] = worldX;
+                vertices[idx * 3 + 1] = worldY;
+                vertices[idx * 3 + 2] = height;
+            }
+        }
+
+        // Build index buffer: 8×8 quads, each = 2 triangles
+        // Per 0.8.0 Ghidra spec: (tileFlag & 0x0F) == 0x0F means no liquid at that tile.
+        // If TileFlags is null (Alpha 0.5.3), render all 64 quads.
+        var indices = new List<ushort>(64 * 6);
+        for (int ty = 0; ty < 8; ty++)
+        {
+            for (int tx = 0; tx < 8; tx++)
+            {
+                int tileIdx = ty * 8 + tx;
+                if (liquid.TileFlags != null && tileIdx < liquid.TileFlags.Length)
+                {
+                    if ((liquid.TileFlags[tileIdx] & 0x0F) == 0x0F)
+                        continue; // no liquid at this tile
+                }
+
+                // Quad vertices:
+                // TL = (ty, tx), TR = (ty, tx+1)
+                // BL = (ty+1, tx), BR = (ty+1, tx+1)
+                ushort tl = (ushort)(ty * 9 + tx);
+                ushort tr = (ushort)(ty * 9 + tx + 1);
+                ushort bl = (ushort)((ty + 1) * 9 + tx);
+                ushort br = (ushort)((ty + 1) * 9 + tx + 1);
+
+                // Two triangles per quad
+                indices.Add(tl); indices.Add(bl); indices.Add(tr);
+                indices.Add(tr); indices.Add(bl); indices.Add(br);
+            }
+        }
+
+        if (indices.Count == 0) return null;
+
+        // Upload to GPU
+        uint vao = _gl.GenVertexArray();
+        uint vbo = _gl.GenBuffer();
+        uint ebo = _gl.GenBuffer();
+
+        _gl.BindVertexArray(vao);
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
+        fixed (float* ptr = vertices)
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertices.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
+
+        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
+        var indexArray = indices.ToArray();
+        fixed (ushort* ptr = indexArray)
+            _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indexArray.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
+
+        // Position attribute: location 0, 3 floats, stride = 12
+        _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), (void*)0);
+        _gl.EnableVertexAttribArray(0);
+
+        _gl.BindVertexArray(0);
+
+        float minX = liquid.WorldPosition.X - chunkSize;
+        float maxX = liquid.WorldPosition.X;
+        float minY = liquid.WorldPosition.Y - chunkSize;
+        float maxY = liquid.WorldPosition.Y;
+        float minZ = liquid.MinHeight - LiquidVisibilityPadding;
+        float maxZ = liquid.MaxHeight + LiquidVisibilityPadding;
+
+        return new LiquidMesh
+        {
+            Vao = vao,
+            Vbo = vbo,
+            Ebo = ebo,
+            IndexCount = (uint)indexArray.Length,
+            Type = liquid.Type,
+            TileX = liquid.TileX,
+            TileY = liquid.TileY,
+            BoundsMin = new Vector3(minX, minY, minZ),
+            BoundsMax = new Vector3(maxX, maxY, maxZ)
+        };
+    }
+
+    private ShaderProgram CreateLiquidShader()
+    {
+        string vertSrc = @"
+#version 330 core
+layout(location = 0) in vec3 aPos;
+
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProj;
+uniform float uTime;
+
+out vec3 vWorldPos;
+
+void main() {
+    vec3 pos = aPos;
+    // Gentle wave animation
+    float wave = sin(pos.x * 0.3 + uTime * 1.5) * 0.15
+               + cos(pos.y * 0.25 + uTime * 1.2) * 0.10;
+    pos.z += wave;
+
+    vec4 worldPos = uModel * vec4(pos, 1.0);
+    vWorldPos = worldPos.xyz;
+    gl_Position = uProj * uView * worldPos;
+}
+";
+
+        string fragSrc = @"
+#version 330 core
+in vec3 vWorldPos;
+
+uniform vec4 uLiquidColor;
+uniform vec3 uCameraPos;
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
+uniform vec3 uAmbientColor;
+uniform vec3 uFogColor;
+uniform float uFogStart;
+uniform float uFogEnd;
+uniform float uTime;
+
+out vec4 FragColor;
+
+void main() {
+    // Base liquid color
+    vec3 baseColor = uLiquidColor.rgb;
+    float baseAlpha = uLiquidColor.a;
+
+    // Simple specular highlight on water surface
+    vec3 viewDir = normalize(uCameraPos - vWorldPos);
+    vec3 normal = vec3(0.0, 0.0, 1.0); // Flat water surface normal
+    vec3 lightDir = normalize(uLightDir);
+    vec3 halfDir = normalize(viewDir + lightDir);
+    float spec = pow(max(dot(normal, halfDir), 0.0), 32.0);
+
+    // Lighting
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 lighting = uAmbientColor + uLightColor * diff;
+    vec3 litColor = baseColor * lighting + uLightColor * spec * 0.3;
+
+    // Animated caustic pattern (subtle)
+    float caustic = sin(vWorldPos.x * 1.2 + uTime * 2.0)
+                  * cos(vWorldPos.y * 1.1 + uTime * 1.8) * 0.5 + 0.5;
+    litColor += vec3(caustic * 0.05);
+
+    // Fog
+    float dist = length(vWorldPos - uCameraPos);
+    float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
+    vec3 finalColor = mix(uFogColor, litColor, fogFactor);
+
+    // Fresnel-like edge darkening: more opaque at glancing angles
+    float fresnel = 1.0 - max(dot(viewDir, normal), 0.0);
+    float alpha = mix(baseAlpha * 0.6, baseAlpha, fresnel);
+
+    FragColor = vec4(finalColor, alpha);
+}
+";
+
+        return ShaderProgram.Create(_gl, vertSrc, fragSrc);
+    }
+
+    private ShaderProgram CreateWireframeShader()
+    {
+        string vertSrc = @"
+#version 330 core
+layout(location = 0) in vec3 aPos;
+
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProj;
+
+void main() {
+    gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);
+}
+";
+
+        string fragSrc = @"
+#version 330 core
+uniform vec4 uColor;
+out vec4 FragColor;
+
+void main() {
+    FragColor = uColor;
+}
+";
+
+        return ShaderProgram.Create(_gl, vertSrc, fragSrc);
+    }
+
+    /// <summary>
+    /// Upload WL liquid bodies as GPU meshes for rendering.
+    /// Call once after WlLiquidLoader.LoadAll() completes.
+    /// </summary>
+    public unsafe void AddWlBodies(IEnumerable<WlLiquidBody> bodies)
+    {
+        int added = 0;
+        foreach (var body in bodies)
+        {
+            if (body.Vertices.Length == 0 || body.Indices.Length == 0) continue;
+
+            // Build flat vertex array: 3 floats per vertex
+            var verts = new float[body.Vertices.Length * 3];
+            Vector3 boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
+            for (int i = 0; i < body.Vertices.Length; i++)
+            {
+                Vector3 vertex = body.Vertices[i];
+                verts[i * 3 + 0] = vertex.X;
+                verts[i * 3 + 1] = vertex.Y;
+                verts[i * 3 + 2] = vertex.Z;
+                boundsMin = Vector3.Min(boundsMin, vertex);
+                boundsMax = Vector3.Max(boundsMax, vertex);
+            }
+
+            uint vao = _gl.GenVertexArray();
+            uint vbo = _gl.GenBuffer();
+            uint ebo = _gl.GenBuffer();
+
+            _gl.BindVertexArray(vao);
+
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
+            fixed (float* ptr = verts)
+                _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(verts.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
+
+            // Use uint32 indices since WL bodies can have >65k vertices
+            _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
+            var indices = body.Indices;
+            fixed (int* ptr = indices)
+                _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(int)), ptr, BufferUsageARB.StaticDraw);
+
+            _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), (void*)0);
+            _gl.EnableVertexAttribArray(0);
+
+            _gl.BindVertexArray(0);
+
+            _wlMeshes.Add(new LiquidMesh
+            {
+                Vao = vao,
+                Vbo = vbo,
+                Ebo = ebo,
+                IndexCount = (uint)indices.Length,
+                Type = body.Type,
+                TileX = -1, // WL bodies are not tile-specific
+                TileY = -1,
+                UseUint32Indices = true,
+                WlBodyKey = body.BodyKey,
+                WlBodyName = body.Name,
+                WlSourcePath = body.SourcePath,
+                BoundsMin = boundsMin - new Vector3(LiquidVisibilityPadding),
+                BoundsMax = boundsMax + new Vector3(LiquidVisibilityPadding)
+            });
+            added++;
+
+            ViewerLog.Info(ViewerLog.Category.Terrain,
+                $"[WlLoader] Uploaded '{body.Name}' ({body.FileType}, {body.GroupLabel}): {body.BlockCount} blocks, {body.Vertices.Length} verts, type={body.Type}");
+        }
+
+        if (added > 0)
+            ViewerLog.Info(ViewerLog.Category.Terrain, $"[LiquidRenderer] Added {added} WL liquid bodies (total WL: {_wlMeshes.Count})");
+    }
+
+    /// <summary>Remove all WL liquid body meshes.</summary>
+    public void ClearWlBodies()
+    {
+        foreach (var mesh in _wlMeshes)
+            mesh.Dispose(_gl);
+        _wlMeshes.Clear();
+        SelectedWlBodyKey = null;
+        _hiddenWlBodies.Clear();
+    }
+
+    public void Dispose()
+    {
+        foreach (var mesh in _meshes)
+            mesh.Dispose(_gl);
+        _meshes.Clear();
+        foreach (var mesh in _wlMeshes)
+            mesh.Dispose(_gl);
+        _wlMeshes.Clear();
+        _shader.Dispose();
+        _wireframeShader.Dispose();
+    }
+
+    private bool ShouldRenderMesh(LiquidMesh mesh, Vector3 cameraPos, float maxRenderDistanceSq)
+    {
+        if (!_frustumCuller.TestAABB(mesh.BoundsMin, mesh.BoundsMax))
+            return false;
+
+        return DistanceSquaredPointToAabb(cameraPos, mesh.BoundsMin, mesh.BoundsMax) <= maxRenderDistanceSq;
+    }
+
+    private static float DistanceSquaredPointToAabb(Vector3 point, Vector3 min, Vector3 max)
+    {
+        float dx = point.X < min.X ? min.X - point.X : point.X > max.X ? point.X - max.X : 0f;
+        float dy = point.Y < min.Y ? min.Y - point.Y : point.Y > max.Y ? point.Y - max.Y : 0f;
+        float dz = point.Z < min.Z ? min.Z - point.Z : point.Z > max.Z ? point.Z - max.Z : 0f;
+        return dx * dx + dy * dy + dz * dz;
+    }
+}
+
+/// <summary>
+/// GPU-resident mesh for a single liquid chunk surface.
+/// </summary>
+internal class LiquidMesh
+{
+    public uint Vao { get; init; }
+    public uint Vbo { get; init; }
+    public uint Ebo { get; init; }
+    public uint IndexCount { get; init; }
+    public LiquidType Type { get; init; }
+    public int TileX { get; init; }
+    public int TileY { get; init; }
+    public bool UseUint32Indices { get; init; }
+    public string? WlBodyKey { get; init; }
+    public string? WlBodyName { get; init; }
+    public string? WlSourcePath { get; init; }
+    public Vector3 BoundsMin { get; init; }
+    public Vector3 BoundsMax { get; init; }
+
+    public void Dispose(GL gl)
+    {
+        gl.DeleteVertexArray(Vao);
+        gl.DeleteBuffer(Vbo);
+        gl.DeleteBuffer(Ebo);
+    }
+}

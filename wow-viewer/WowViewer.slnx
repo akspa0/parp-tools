@@ -11,7 +11,8 @@
     <Project Path="src/tools-shared/WowViewer.Tools.Shared/WowViewer.Tools.Shared.csproj" />
   </Folder>
   <Folder Name="/src/viewer/">
-    <Project Path="src/viewer/WowViewer.App/WowViewer.App.csproj" />
+    
+    <Project Path="src/viewer/WoWViewer/WoWViewer.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj" />

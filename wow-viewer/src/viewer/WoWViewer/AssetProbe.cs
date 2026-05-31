@@ -1,0 +1,1183 @@
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Numerics;
+using System.Runtime.InteropServices;
+using MdxLTool.Formats.Mdx;
+using WoWViewer.DataSources;
+using WoWViewer.Logging;
+using WoWViewer.Rendering;
+using WoWViewer.Terrain;
+using WowViewer.Core.Blp;
+using WowViewer.Core.Files;
+using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.IO.Blp;
+using WowViewer.Core.IO.Files;
+using WowViewer.Core.M2;
+using WowViewer.Core.Mdx;
+using WowViewer.Core.Runtime.M2;
+using CoreBlpCompressionType = WowViewer.Core.Blp.BlpCompressionType;
+using CoreBlpPixelFormat = WowViewer.Core.Blp.BlpPixelFormat;
+using CoreMdxChunkSummary = WowViewer.Core.Mdx.MdxChunkSummary;
+using SereniaBlpFile = SereniaBLPLib.BlpFile;
+
+namespace WoWViewer;
+
+internal static class AssetProbe
+{
+    public static bool TryRun(string[] args)
+    {
+        int probeIndex = Array.FindIndex(args, arg => arg.Equals("--probe-mdx", StringComparison.OrdinalIgnoreCase));
+        if (probeIndex >= 0)
+        {
+            if (args.Length <= probeIndex + 2)
+            {
+                Console.Error.WriteLine("Usage: WoWViewer --probe-mdx <gamePath> <modelVirtualPath> [--build <version>] [--listfile <path>] [--character-hair-variation <id>] [--character-facial-variation <id>]");
+                Environment.ExitCode = 1;
+                return true;
+            }
+
+            string mdxGamePath = args[probeIndex + 1];
+            string mdxModelVirtualPath = args[probeIndex + 2];
+            string? mdxBuildVersion = TryGetOptionValue(args, "--build");
+            string? mdxListfilePath = TryGetOptionValue(args, "--listfile");
+            if (!TryParseOptionalVariationId(TryGetOptionValue(args, "--character-hair-variation"), "--character-hair-variation", out int? mdxHairVariationId))
+            {
+                Environment.ExitCode = 1;
+                return true;
+            }
+
+            if (!TryParseOptionalVariationId(TryGetOptionValue(args, "--character-facial-variation"), "--character-facial-variation", out int? mdxFacialVariationId))
+            {
+                Environment.ExitCode = 1;
+                return true;
+            }
+
+            ViewerLog.Verbose = true;
+            ViewerLog.Unmute(ViewerLog.Category.Mdx);
+            MdxFile.Verbose = true;
+
+            try
+            {
+                Run(mdxGamePath, mdxModelVirtualPath, mdxListfilePath, mdxBuildVersion, mdxHairVariationId, mdxFacialVariationId);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AssetProbe] Failed: {ex}");
+                Environment.ExitCode = 1;
+            }
+
+            return true;
+        }
+
+        int m2ProbeIndex = Array.FindIndex(args,
+            arg => arg.Equals("--probe-m2-adapter", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--probe-m2", StringComparison.OrdinalIgnoreCase));
+        int m2RuntimeProbeIndex = Array.FindIndex(args,
+            arg => arg.Equals("--probe-m2-runtime", StringComparison.OrdinalIgnoreCase));
+        int m2PoseCompareProbeIndex = Array.FindIndex(args,
+            arg => arg.Equals("--probe-m2-pose-compare", StringComparison.OrdinalIgnoreCase));
+
+        if (m2PoseCompareProbeIndex >= 0)
+        {
+            if (args.Length <= m2PoseCompareProbeIndex + 2)
+            {
+                Console.Error.WriteLine("Usage: WoWViewer --probe-m2-pose-compare <gamePath> <modelVirtualPath> [--build <version>] [--skin <virtualPath>] [--listfile <path>] [--sequence <index>] [--time-ms <value>]");
+                Environment.ExitCode = 1;
+                return true;
+            }
+
+            string compareGamePath = args[m2PoseCompareProbeIndex + 1];
+            string compareModelVirtualPath = args[m2PoseCompareProbeIndex + 2];
+            string compareBuildVersion = TryGetOptionValue(args, "--build") ?? "3.3.5.12340";
+            string? compareSkinOverride = TryGetOptionValue(args, "--skin");
+            string? compareListfilePath = TryGetOptionValue(args, "--listfile");
+            int compareSequenceIndex = TryGetOptionalInt(args, "--sequence") ?? 0;
+            int compareTimeMs = TryGetOptionalInt(args, "--time-ms") ?? 0;
+
+            ViewerLog.Verbose = true;
+            ViewerLog.Unmute(ViewerLog.Category.Mdx);
+            MdxFile.Verbose = true;
+
+            try
+            {
+                RunM2PoseCompareProbe(compareGamePath, compareModelVirtualPath, compareListfilePath, compareBuildVersion, compareSkinOverride, compareSequenceIndex, compareTimeMs);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AssetProbe:M2PoseCompare] Failed: {ex}");
+                Environment.ExitCode = 1;
+            }
+
+            return true;
+        }
+
+        if (m2RuntimeProbeIndex >= 0)
+        {
+            if (args.Length <= m2RuntimeProbeIndex + 2)
+            {
+                Console.Error.WriteLine("Usage: WoWViewer --probe-m2-runtime <gamePath> <modelVirtualPath> [--build <version>] [--skin <virtualPath>] [--listfile <path>]");
+                Environment.ExitCode = 1;
+                return true;
+            }
+
+            string runtimeGamePath = args[m2RuntimeProbeIndex + 1];
+            string runtimeModelVirtualPath = args[m2RuntimeProbeIndex + 2];
+            string? runtimeBuildVersion = TryGetOptionValue(args, "--build") ?? "3.3.5.12340";
+            string? runtimeSkinOverride = TryGetOptionValue(args, "--skin");
+            string? runtimeListfilePath = TryGetOptionValue(args, "--listfile");
+
+            ViewerLog.Verbose = true;
+
+            try
+            {
+                RunM2RuntimeProbe(runtimeGamePath, runtimeModelVirtualPath, runtimeListfilePath, runtimeBuildVersion, runtimeSkinOverride);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AssetProbe:M2Runtime] Failed: {ex}");
+                Environment.ExitCode = 1;
+            }
+
+            return true;
+        }
+
+        if (m2ProbeIndex < 0)
+            return false;
+
+        if (args.Length <= m2ProbeIndex + 2)
+        {
+            Console.Error.WriteLine("Usage: WoWViewer --probe-m2-adapter <gamePath> <modelVirtualPath> [--build <version>] [--skin <virtualPath>] [--listfile <path>]");
+            Environment.ExitCode = 1;
+            return true;
+        }
+
+        string gamePath = args[m2ProbeIndex + 1];
+        string modelVirtualPath = args[m2ProbeIndex + 2];
+        string? buildVersion = TryGetOptionValue(args, "--build") ?? "3.3.5.12340";
+        string? skinOverride = TryGetOptionValue(args, "--skin");
+        string? listfilePath = TryGetOptionValue(args, "--listfile");
+
+        ViewerLog.Verbose = true;
+        ViewerLog.Unmute(ViewerLog.Category.Mdx);
+        MdxFile.Verbose = true;
+
+        try
+        {
+            RunM2AdapterProbe(gamePath, modelVirtualPath, listfilePath, buildVersion, skinOverride);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[AssetProbe:M2] Failed: {ex}");
+            Environment.ExitCode = 1;
+        }
+
+        return true;
+    }
+
+    private static void RunM2AdapterProbe(string gamePath, string modelVirtualPath, string? listfilePath, string buildVersion, string? skinOverride)
+    {
+        string normalizedModelPath = modelVirtualPath.Replace('/', '\\').TrimStart('\\');
+
+        Console.WriteLine($"[M2-ADAPT-PROBE] Game path: {gamePath}");
+        Console.WriteLine($"[M2-ADAPT-PROBE] Model path: {normalizedModelPath}");
+        Console.WriteLine($"[M2-ADAPT-PROBE] Build: {buildVersion}");
+        if (!string.IsNullOrWhiteSpace(skinOverride))
+            Console.WriteLine($"[M2-ADAPT-PROBE] Skin override: {skinOverride}");
+        if (!string.IsNullOrWhiteSpace(listfilePath))
+            Console.WriteLine($"[M2-ADAPT-PROBE] Listfile: {listfilePath}");
+
+        using var dataSource = new MpqDataSource(gamePath, listfilePath);
+        byte[]? modelBytes = dataSource.ReadFile(normalizedModelPath)
+            ?? dataSource.ReadFile(normalizedModelPath.Replace('\\', '/'));
+        if (modelBytes == null)
+            throw new FileNotFoundException($"Model not found in data source: {normalizedModelPath}");
+
+        if (!WarcraftNetM2Adapter.IsMd20(modelBytes) && !WarcraftNetM2Adapter.IsMd21(modelBytes))
+            throw new InvalidDataException($"Model '{Path.GetFileName(normalizedModelPath)}' is not an M2-family container (MD20/MD21).");
+
+        M2Profile? profile = FormatProfileRegistry.ResolveModelProfile(buildVersion);
+        if (profile == null)
+            throw new InvalidOperationException($"No M2 profile is registered for build '{buildVersion}'.");
+
+        WarcraftNetM2Adapter.ValidateModelProfile(modelBytes, normalizedModelPath, profile, buildVersion);
+
+        List<string> skinCandidates = string.IsNullOrWhiteSpace(skinOverride)
+            ? WarcraftNetM2Adapter.BuildSkinCandidates(normalizedModelPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+            : new List<string> { skinOverride.Replace('/', '\\').TrimStart('\\') };
+
+        int missingSkinCount = 0;
+        int failedSkinCount = 0;
+        Exception? lastSkinFailure = null;
+
+        ReplaceableTextureResolver? replaceableResolver = TryCreateReplaceableTextureResolver(dataSource, buildVersion);
+
+        foreach (string skinPath in skinCandidates)
+        {
+            byte[]? skinBytes = dataSource.ReadFile(skinPath)
+                ?? dataSource.ReadFile(skinPath.Replace('\\', '/'));
+            if (skinBytes == null)
+            {
+                missingSkinCount++;
+                continue;
+            }
+
+            Console.WriteLine($"[M2-ADAPT-PROBE] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
+            try
+            {
+                var runtimeModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, skinBytes, normalizedModelPath, buildVersion);
+                Console.WriteLine($"[M2-ADAPT-PROBE] Selected skin: {skinPath}");
+                    PrintRendererEquivalentDiagnostics(runtimeModel, normalizedModelPath, skinPath, replaceableResolver, null);
+                return;
+            }
+            catch (Exception ex)
+            {
+                failedSkinCount++;
+                lastSkinFailure = ex;
+                Console.WriteLine($"[M2-ADAPT-PROBE] Skin candidate failed: {skinPath} ({ex.Message})");
+            }
+        }
+
+        if (string.Equals(profile.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+        {
+            Console.WriteLine("[M2-ADAPT-PROBE] No external .skin resolved; trying embedded root-profile fallback.");
+            var runtimeModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, null, normalizedModelPath, buildVersion);
+                PrintRendererEquivalentDiagnostics(runtimeModel, normalizedModelPath, "<embedded-root-profile>", replaceableResolver, null);
+            return;
+        }
+
+        throw new InvalidDataException(
+            $"No usable .skin for {Path.GetFileName(normalizedModelPath)}. candidates={skinCandidates.Count}, missing={missingSkinCount}, failed={failedSkinCount}.",
+            lastSkinFailure);
+    }
+
+    private static void RunM2RuntimeProbe(string gamePath, string modelVirtualPath, string? listfilePath, string buildVersion, string? skinOverride)
+    {
+        string normalizedModelPath = modelVirtualPath.Replace('/', '\\').TrimStart('\\');
+
+        Console.WriteLine($"[M2-RUNTIME-PROBE] Game path: {gamePath}");
+        Console.WriteLine($"[M2-RUNTIME-PROBE] Model path: {normalizedModelPath}");
+        Console.WriteLine($"[M2-RUNTIME-PROBE] Build: {buildVersion}");
+        if (!string.IsNullOrWhiteSpace(skinOverride))
+            Console.WriteLine($"[M2-RUNTIME-PROBE] Skin override: {skinOverride}");
+        if (!string.IsNullOrWhiteSpace(listfilePath))
+            Console.WriteLine($"[M2-RUNTIME-PROBE] Listfile: {listfilePath}");
+
+        using var dataSource = new MpqDataSource(gamePath, listfilePath);
+        byte[]? modelBytes = dataSource.ReadFile(normalizedModelPath)
+            ?? dataSource.ReadFile(normalizedModelPath.Replace('\\', '/'));
+        if (modelBytes == null)
+            throw new FileNotFoundException($"Model not found in data source: {normalizedModelPath}");
+
+        M2Profile? profile = FormatProfileRegistry.ResolveModelProfile(buildVersion);
+        if (profile == null)
+            throw new InvalidOperationException($"No M2 profile is registered for build '{buildVersion}'.");
+
+        WarcraftNetM2Adapter.ValidateModelProfile(modelBytes, normalizedModelPath, profile, buildVersion);
+
+        List<string> skinCandidates = string.IsNullOrWhiteSpace(skinOverride)
+            ? WarcraftNetM2Adapter.BuildSkinCandidates(normalizedModelPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+            : new List<string> { skinOverride.Replace('/', '\\').TrimStart('\\') };
+
+        int missingSkinCount = 0;
+        int failedSkinCount = 0;
+        Exception? lastSkinFailure = null;
+
+        foreach (string skinPath in skinCandidates)
+        {
+            byte[]? skinBytes = dataSource.ReadFile(skinPath)
+                ?? dataSource.ReadFile(skinPath.Replace('\\', '/'));
+            if (skinBytes == null)
+            {
+                missingSkinCount++;
+                continue;
+            }
+
+            Console.WriteLine($"[M2-RUNTIME-PROBE] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
+            try
+            {
+                var runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelBytes, skinBytes, normalizedModelPath, skinPath);
+                int vertexCount = runtimeModel.Sections.Sum(static section => section.Vertices.Count);
+                int triangleCount = runtimeModel.Sections.Sum(static section => section.Indices.Count / 3);
+                int transparentSectionCount = runtimeModel.Sections.Count(static section => section.Material.IsTransparent);
+                Console.WriteLine($"[M2-RUNTIME-PROBE] Selected skin: {skinPath}");
+                Console.WriteLine($"[M2-RUNTIME-PROBE] sections={runtimeModel.Sections.Count} transparentSections={transparentSectionCount} vertices={vertexCount} triangles={triangleCount} boundsMin={runtimeModel.BoundsMin} boundsMax={runtimeModel.BoundsMax}");
+                return;
+            }
+            catch (Exception ex)
+            {
+                failedSkinCount++;
+                lastSkinFailure = ex;
+                Console.WriteLine($"[M2-RUNTIME-PROBE] Skin candidate failed: {skinPath} ({ex.Message})");
+            }
+        }
+
+        throw new InvalidDataException(
+            $"No usable .skin for runtime probe {Path.GetFileName(normalizedModelPath)}. candidates={skinCandidates.Count}, missing={missingSkinCount}, failed={failedSkinCount}.",
+            lastSkinFailure);
+    }
+
+    private static void RunM2PoseCompareProbe(string gamePath, string modelVirtualPath, string? listfilePath, string buildVersion, string? skinOverride, int sequenceIndex, int timeMs)
+    {
+        string normalizedModelPath = modelVirtualPath.Replace('/', '\\').TrimStart('\\');
+
+        Console.WriteLine($"[M2-POSE-COMPARE] Game path: {gamePath}");
+        Console.WriteLine($"[M2-POSE-COMPARE] Model path: {normalizedModelPath}");
+        Console.WriteLine($"[M2-POSE-COMPARE] Build: {buildVersion}");
+        Console.WriteLine($"[M2-POSE-COMPARE] Sequence: {sequenceIndex}");
+        Console.WriteLine($"[M2-POSE-COMPARE] TimeMs: {timeMs}");
+        if (!string.IsNullOrWhiteSpace(skinOverride))
+            Console.WriteLine($"[M2-POSE-COMPARE] Skin override: {skinOverride}");
+        if (!string.IsNullOrWhiteSpace(listfilePath))
+            Console.WriteLine($"[M2-POSE-COMPARE] Listfile: {listfilePath}");
+
+        using var dataSource = new MpqDataSource(gamePath, listfilePath);
+        byte[] modelBytes = dataSource.ReadFile(normalizedModelPath)
+            ?? dataSource.ReadFile(normalizedModelPath.Replace('\\', '/'))
+            ?? throw new FileNotFoundException($"Model not found in data source: {normalizedModelPath}");
+
+        M2Profile profile = FormatProfileRegistry.ResolveModelProfile(buildVersion)
+            ?? throw new InvalidOperationException($"No M2 profile is registered for build '{buildVersion}'.");
+        WarcraftNetM2Adapter.ValidateModelProfile(modelBytes, normalizedModelPath, profile, buildVersion);
+
+        foreach (string skinPath in ResolveSkinCandidates(normalizedModelPath, skinOverride))
+        {
+            byte[]? skinBytes = dataSource.ReadFile(skinPath)
+                ?? dataSource.ReadFile(skinPath.Replace('\\', '/'));
+            if (skinBytes == null || skinBytes.Length == 0)
+                continue;
+
+            Console.WriteLine($"[M2-POSE-COMPARE] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
+
+            M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelBytes, skinBytes, normalizedModelPath, skinPath);
+            MdxFile adaptedModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, skinBytes, normalizedModelPath, buildVersion);
+
+            if (sequenceIndex < 0 || sequenceIndex >= runtimeModel.Model.SequenceCount)
+                throw new ArgumentOutOfRangeException(nameof(sequenceIndex), $"Sequence index {sequenceIndex} is out of range for runtime model '{normalizedModelPath}'.");
+
+            var runtimeAnimator = new M2RuntimeAnimator(runtimeModel.Model, dataSource)
+            {
+                IsPlaying = false,
+                CurrentFrame = timeMs,
+            };
+            runtimeAnimator.SetSequence(sequenceIndex);
+            runtimeAnimator.CurrentFrame = timeMs;
+            M2ExternalAnimationRuntimeState? externalState = runtimeAnimator.ResolveExternalAnimationState();
+            M2BonePoseState runtimePose = M2BonePoseEvaluator.Evaluate(runtimeModel.Model, sequenceIndex, timeMs, externalState);
+
+            Console.WriteLine($"[M2-POSE-COMPARE] runtimeRequestedSequence={runtimePose.RequestedSequenceIndex} resolvedSequence={runtimePose.ResolvedSequenceIndex} usesExternalPayload={runtimePose.UsesExternalPayload}");
+            PrintFlaggedBoneSummary(runtimeModel.Model.Bones);
+            if (externalState != null)
+            {
+                Console.WriteLine($"[M2-POSE-COMPARE] externalStage={externalState.Stage} usesExternalFile={externalState.UsesExternalFile} companionPath={externalState.CompanionPath ?? "<none>"}");
+            }
+
+            var legacyAnimator = new MdxAnimator(adaptedModel)
+            {
+                IsPlaying = false,
+                CurrentFrame = timeMs,
+            };
+            legacyAnimator.SetSequence(sequenceIndex);
+            legacyAnimator.CurrentFrame = timeMs;
+            legacyAnimator.Update(0.0f);
+
+            PrintPoseComparison(runtimePose, legacyAnimator.BoneMatrices);
+            return;
+        }
+
+        throw new InvalidDataException($"No usable .skin resolved for pose compare probe: {normalizedModelPath}");
+    }
+
+    private static void PrintFlaggedBoneSummary(IReadOnlyList<M2BoneDefinition> bones)
+    {
+        var flaggedBones = bones.Where(static bone => bone.Flags != 0).ToArray();
+        Console.WriteLine($"[M2-POSE-COMPARE] flaggedBones={flaggedBones.Length}");
+        foreach (M2BoneDefinition bone in flaggedBones.Take(24))
+        {
+            Console.WriteLine(
+                $"[M2-POSE-COMPARE] boneFlags index={bone.Index} flags=0x{bone.Flags:X} parent={bone.ParentBone} keyBone={bone.KeyBoneId} ignoreT={bone.IgnoresParentTranslation} ignoreR={bone.IgnoresParentRotation} ignoreS={bone.IgnoresParentScale}");
+        }
+
+        if (flaggedBones.Length > 24)
+            Console.WriteLine($"[M2-POSE-COMPARE] flaggedBonesRemaining={flaggedBones.Length - 24}");
+    }
+
+    private static IEnumerable<string> ResolveSkinCandidates(string modelPath, string? skinOverride)
+    {
+        return string.IsNullOrWhiteSpace(skinOverride)
+            ? WarcraftNetM2Adapter.BuildSkinCandidates(modelPath).Distinct(StringComparer.OrdinalIgnoreCase)
+            : new[] { skinOverride.Replace('/', '\\').TrimStart('\\') };
+    }
+
+    private static void PrintPoseComparison(M2BonePoseState runtimePose, IReadOnlyList<Matrix4x4> legacyBoneMatrices)
+    {
+        int compareCount = Math.Min(runtimePose.BoneCount, legacyBoneMatrices.Count);
+        Console.WriteLine($"[M2-POSE-COMPARE] runtimeBones={runtimePose.BoneCount} legacyBones={legacyBoneMatrices.Count} compareCount={compareCount}");
+
+        float maxScaleComponent = 0.0f;
+        int maxScaleBone = -1;
+        Vector3 maxScaleValue = Vector3.One;
+        foreach (M2BonePose pose in runtimePose.Bones)
+        {
+            float scaleComponent = MathF.Max(MathF.Abs(pose.Scaling.X), MathF.Max(MathF.Abs(pose.Scaling.Y), MathF.Abs(pose.Scaling.Z)));
+            if (scaleComponent > maxScaleComponent)
+            {
+                maxScaleComponent = scaleComponent;
+                maxScaleBone = pose.BoneIndex;
+                maxScaleValue = pose.Scaling;
+            }
+        }
+
+        Console.WriteLine($"[M2-POSE-COMPARE] maxScaleComponent={maxScaleComponent:F6} bone={maxScaleBone} scale={maxScaleValue}");
+
+        float maxMatrixDelta = 0.0f;
+        float maxTranslationDelta = 0.0f;
+        int maxMatrixBone = -1;
+        int maxTranslationBone = -1;
+
+        List<(int BoneIndex, float MatrixDelta, float TranslationDelta)> worstBones = new(compareCount);
+        for (int boneIndex = 0; boneIndex < compareCount; boneIndex++)
+        {
+            Matrix4x4 runtimeMatrix = runtimePose.Matrices[boneIndex];
+            Matrix4x4 legacyMatrix = legacyBoneMatrices[boneIndex];
+            float matrixDelta = ComputeMatrixDelta(runtimeMatrix, legacyMatrix);
+            float translationDelta = Vector3.Distance(
+                new Vector3(runtimeMatrix.M41, runtimeMatrix.M42, runtimeMatrix.M43),
+                new Vector3(legacyMatrix.M41, legacyMatrix.M42, legacyMatrix.M43));
+
+            worstBones.Add((boneIndex, matrixDelta, translationDelta));
+
+            if (matrixDelta > maxMatrixDelta)
+            {
+                maxMatrixDelta = matrixDelta;
+                maxMatrixBone = boneIndex;
+            }
+
+            if (translationDelta > maxTranslationDelta)
+            {
+                maxTranslationDelta = translationDelta;
+                maxTranslationBone = boneIndex;
+            }
+        }
+
+        Console.WriteLine($"[M2-POSE-COMPARE] maxMatrixDelta={maxMatrixDelta:F6} bone={maxMatrixBone}");
+        Console.WriteLine($"[M2-POSE-COMPARE] maxTranslationDelta={maxTranslationDelta:F6} bone={maxTranslationBone}");
+
+        foreach (var entry in worstBones.OrderByDescending(static value => value.MatrixDelta).ThenByDescending(static value => value.TranslationDelta).Take(12))
+        {
+            Matrix4x4 runtimeMatrix = runtimePose.Matrices[entry.BoneIndex];
+            Matrix4x4 legacyMatrix = legacyBoneMatrices[entry.BoneIndex];
+            Console.WriteLine(
+                $"[M2-POSE-COMPARE] bone={entry.BoneIndex} matrixDelta={entry.MatrixDelta:F6} translationDelta={entry.TranslationDelta:F6} runtimeT=({runtimeMatrix.M41:F3},{runtimeMatrix.M42:F3},{runtimeMatrix.M43:F3}) legacyT=({legacyMatrix.M41:F3},{legacyMatrix.M42:F3},{legacyMatrix.M43:F3})");
+        }
+    }
+
+    private static float ComputeMatrixDelta(Matrix4x4 left, Matrix4x4 right)
+    {
+        float[] deltas =
+        [
+            MathF.Abs(left.M11 - right.M11), MathF.Abs(left.M12 - right.M12), MathF.Abs(left.M13 - right.M13), MathF.Abs(left.M14 - right.M14),
+            MathF.Abs(left.M21 - right.M21), MathF.Abs(left.M22 - right.M22), MathF.Abs(left.M23 - right.M23), MathF.Abs(left.M24 - right.M24),
+            MathF.Abs(left.M31 - right.M31), MathF.Abs(left.M32 - right.M32), MathF.Abs(left.M33 - right.M33), MathF.Abs(left.M34 - right.M34),
+            MathF.Abs(left.M41 - right.M41), MathF.Abs(left.M42 - right.M42), MathF.Abs(left.M43 - right.M43), MathF.Abs(left.M44 - right.M44),
+        ];
+
+        return deltas.Max();
+    }
+
+    private static void PrintRendererEquivalentDiagnostics(MdxFile runtimeModel, string modelPath, string selectedSkinPath, ReplaceableTextureResolver? replaceableResolver, int? replaceableDisplayIndex)
+    {
+        replaceableDisplayIndex ??= TrySelectReplaceableDisplayIndex(replaceableResolver, modelPath, runtimeModel);
+        IReadOnlyCollection<uint>? defaultCharacterGroups = replaceableResolver?.GetDefaultCharacterSelectionGroups(modelPath);
+
+        int totalGeosets = runtimeModel.Geosets.Count;
+        int validGeosets = 0;
+        int indexRejected = 0;
+        int emptySkipped = 0;
+
+        for (int i = 0; i < runtimeModel.Geosets.Count; i++)
+        {
+            var geoset = runtimeModel.Geosets[i];
+            int vertCount = geoset.Vertices.Count;
+            int indexCount = geoset.Indices.Count;
+
+            if (vertCount == 0 || indexCount == 0)
+            {
+                emptySkipped++;
+                continue;
+            }
+
+            int maxIndex = geoset.Indices.Max(static idx => (int)idx);
+            if (maxIndex >= vertCount)
+            {
+                indexRejected++;
+                Console.WriteLine(
+                    $"[M2-DIAG-CPU] Geoset {i} would be rejected by renderer index validation (maxIndex={maxIndex}, vertCount={vertCount}, indexCount={indexCount})");
+                continue;
+            }
+
+            validGeosets++;
+        }
+
+        Console.WriteLine(
+            $"[M2-DIAG-CPU] {modelPath}: {totalGeosets} geosets, {validGeosets} valid, {indexRejected} index-rejected, {emptySkipped} empty-skipped (skin={selectedSkinPath})");
+        Console.WriteLine($"[M2-DIAG-CPU] {WarcraftNetM2Adapter.SummarizeGeometry(runtimeModel)}");
+        if (defaultCharacterGroups != null && defaultCharacterGroups.Count > 0)
+        {
+            Console.WriteLine(
+                $"[M2-DIAG-CHAR-GROUPS] default={string.Join(",", defaultCharacterGroups.OrderBy(static value => value))}");
+        }
+
+        int maxTextureSummaries = Math.Min(runtimeModel.Textures.Count, 8);
+        for (int textureIndex = 0; textureIndex < maxTextureSummaries; textureIndex++)
+        {
+            var texture = runtimeModel.Textures[textureIndex];
+            Console.WriteLine(
+                $"[M2-DIAG-TEX] texture={textureIndex} replaceable={texture.ReplaceableId} flags={texture.Flags} path={texture.Path}");
+
+            if (texture.ReplaceableId > 0 && replaceableResolver != null)
+            {
+                string? resolved = replaceableResolver.Resolve(modelPath, texture.ReplaceableId, replaceableDisplayIndex ?? 0, 0, 0);
+                Console.WriteLine(
+                    $"[M2-DIAG-TEX-RESOLVE] texture={textureIndex} resolved={(resolved ?? "<null>")} displayIndex={(replaceableDisplayIndex?.ToString() ?? "n/a")}");
+
+                foreach (var candidate in replaceableResolver.GetReplaceableResolutionCandidates(modelPath, texture.ReplaceableId, 0, 0, 0).Take(6))
+                {
+                    Console.WriteLine(
+                        $"[M2-DIAG-TEX-CAND] texture={textureIndex} source={candidate.Source} exists={candidate.Exists} path={candidate.Path}");
+                }
+            }
+        }
+
+        var animator = new MdxAnimator(runtimeModel);
+        Console.WriteLine(
+            $"[M2-DIAG-ANIM] sequences={animator.Sequences.Count} bones={animator.BoneCount} hasAnimation={animator.HasAnimation}");
+
+        int maxSequenceSummaries = Math.Min(animator.Sequences.Count, 8);
+        for (int sequenceIndex = 0; sequenceIndex < maxSequenceSummaries; sequenceIndex++)
+        {
+            animator.SetSequence(sequenceIndex);
+            var sequence = animator.Sequences[sequenceIndex];
+            var stats = animator.GetTrackDebugStatsForCurrentSequence();
+            Console.WriteLine(
+                $"[M2-DIAG-SEQ] seq={sequenceIndex} name={sequence.Name} range={sequence.Time.Start}-{sequence.Time.End} tIn={stats.TranslationKeysInSequence}/{stats.TranslationKeysTotal} rIn={stats.RotationKeysInSequence}/{stats.RotationKeysTotal} sIn={stats.ScalingKeysInSequence}/{stats.ScalingKeysTotal} min={stats.MinKeyTime} max={stats.MaxKeyTime}");
+        }
+
+        int maxGeosetSummaries = runtimeModel.Geosets.Count;
+        for (int geosetIndex = 0; geosetIndex < maxGeosetSummaries; geosetIndex++)
+        {
+            var geoset = runtimeModel.Geosets[geosetIndex];
+            string materialSummary = DescribeProbeMaterial(runtimeModel, geoset.MaterialId);
+            bool defaultVisible = defaultCharacterGroups?.Contains(geoset.SelectionGroup) ?? false;
+            Console.WriteLine(
+                $"[M2-DIAG-MAT] geoset={geosetIndex} material={geoset.MaterialId} selectionGroup={geoset.SelectionGroup} defaultVisible={defaultVisible} verts={geoset.Vertices.Count} tris={geoset.Indices.Count / 3} layers={materialSummary}");
+        }
+    }
+
+    private static string DescribeProbeMaterial(MdxFile runtimeModel, int materialId)
+    {
+        if (materialId < 0 || materialId >= runtimeModel.Materials.Count)
+            return "<invalid-material>";
+
+        var material = runtimeModel.Materials[materialId];
+        if (material.Layers.Count == 0)
+            return "<no-layers>";
+
+        return string.Join(", ",
+            material.Layers.Select((layer, index) =>
+            {
+                string texturePath = layer.TextureId >= 0 && layer.TextureId < runtimeModel.Textures.Count
+                    ? runtimeModel.Textures[layer.TextureId].Path
+                    : "<missing>";
+                return $"[{index}]tex={layer.TextureId}:{texturePath} blend={layer.BlendMode} coord={layer.CoordId} flags={layer.Flags}";
+            }));
+    }
+
+    private static void Run(string gamePath, string modelVirtualPath, string? listfilePath, string? buildVersion, int? characterHairVariationId, int? characterFacialVariationId)
+    {
+        Console.WriteLine($"[AssetProbe] Game path: {gamePath}");
+        Console.WriteLine($"[AssetProbe] Model path: {modelVirtualPath}");
+        if (!string.IsNullOrWhiteSpace(buildVersion))
+            Console.WriteLine($"[AssetProbe] Build: {buildVersion}");
+        if (!string.IsNullOrWhiteSpace(listfilePath))
+            Console.WriteLine($"[AssetProbe] Listfile: {listfilePath}");
+        if (characterHairVariationId.HasValue || characterFacialVariationId.HasValue)
+        {
+            Console.WriteLine($"[AssetProbe] CharacterVariations: hair={characterHairVariationId?.ToString() ?? "default"} facial={characterFacialVariationId?.ToString() ?? "default"}");
+        }
+
+        using var dataSource = new MpqDataSource(gamePath, listfilePath);
+        byte[]? modelBytes = dataSource.ReadFile(modelVirtualPath) ?? dataSource.ReadFile(modelVirtualPath.Replace('/', '\\'));
+        if (modelBytes == null)
+            throw new FileNotFoundException($"Model not found in data source: {modelVirtualPath}");
+
+        using var ms = new MemoryStream(modelBytes);
+        WowFileDetection modelDetection = WowFileDetector.Detect(ms, modelVirtualPath);
+        ms.Position = 0;
+        MdxSharedProbeResult? sharedMdxSummary = null;
+        MdxGeometryProbeResult? sharedMdxGeometry = null;
+        string? sharedMdxError = null;
+        string? sharedMdxGeometryError = null;
+        if (modelDetection.Kind == WowFileKind.Mdx)
+        {
+            sharedMdxSummary = TryReadSharedMdxSummary(modelVirtualPath, modelBytes, out sharedMdxError);
+            sharedMdxGeometry = TryReadSharedMdxGeometry(modelVirtualPath, modelBytes, out sharedMdxGeometryError);
+        }
+
+    var mdx = MdxFile.Load(ms);
+        ReplaceableTextureResolver? replaceableResolver = TryCreateReplaceableTextureResolver(dataSource, buildVersion);
+        int? replaceableDisplayIndex = TrySelectReplaceableDisplayIndex(replaceableResolver, modelVirtualPath, mdx);
+        HashSet<uint>? defaultCharacterSelectionGroups = replaceableResolver?.GetDefaultCharacterSelectionGroups(modelVirtualPath) is IReadOnlyCollection<uint> groups
+            ? new HashSet<uint>(groups)
+            : null;
+        HashSet<uint>? selectedCharacterSelectionGroups = replaceableResolver?.GetCharacterSelectionGroups(modelVirtualPath, characterHairVariationId, characterFacialVariationId) is IReadOnlyCollection<uint> selectedGroups
+            ? new HashSet<uint>(selectedGroups)
+            : defaultCharacterSelectionGroups;
+
+        Console.WriteLine($"[AssetProbe] SharedDetect kind={modelDetection.Kind} version={FormatVersion(modelDetection.Version)}");
+        if (sharedMdxSummary is MdxSharedProbeResult sharedMdx)
+        {
+            Console.WriteLine($"[AssetProbe] SharedMDX: version={FormatVersion(sharedMdx.Version)} model={sharedMdx.ModelName ?? "n/a"} blendTime={FormatVersion(sharedMdx.BlendTime)} chunks={sharedMdx.ChunkCount} knownChunks={sharedMdx.KnownChunkCount} unknownChunks={sharedMdx.UnknownChunkCount} textures={sharedMdx.TextureCount} replaceableTextures={sharedMdx.ReplaceableTextureCount} materials={sharedMdx.MaterialCount} materialLayers={sharedMdx.MaterialLayerCount} firstChunks={FormatChunkList(sharedMdx.Chunks)} firstTextures={FormatTextureList(sharedMdx.TexturePaths)} firstMaterials={FormatMaterialList(sharedMdx.MaterialLayers)}");
+
+            if (sharedMdx.PivotPointCount > 0)
+                Console.WriteLine($"[AssetProbe] SharedPIVT: count={sharedMdx.PivotPointCount} first={FormatVector(sharedMdx.FirstPivotPoint)}");
+
+            if (sharedMdx.CollisionVertexCount.HasValue && sharedMdx.CollisionTriangleCount.HasValue)
+            {
+                Console.WriteLine(
+                    $"[AssetProbe] SharedCLID: vertices={sharedMdx.CollisionVertexCount.Value} triangles={sharedMdx.CollisionTriangleCount.Value} bounds={FormatBounds(sharedMdx.CollisionBoundsMin, sharedMdx.CollisionBoundsMax)}");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(sharedMdxError))
+        {
+            Console.WriteLine($"[AssetProbe] SharedMDXError: {sharedMdxError}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(sharedMdxGeometryError))
+            Console.WriteLine($"[AssetProbe] SharedMDXGeometryError: {sharedMdxGeometryError}");
+
+        Console.WriteLine($"[AssetProbe] Version={mdx.Version} Name={mdx.Model.Name}");
+        Console.WriteLine($"[AssetProbe] Textures={mdx.Textures.Count} Materials={mdx.Materials.Count} Geosets={(sharedMdxGeometry?.GeosetCount ?? mdx.Geosets.Count)}");
+        if (replaceableDisplayIndex.HasValue && replaceableResolver != null)
+        {
+            int variantCount = replaceableResolver.GetVariantCount(modelVirtualPath);
+            string description = replaceableResolver.GetVariantDescription(modelVirtualPath, replaceableDisplayIndex.Value);
+            Console.WriteLine($"[AssetProbe] ReplaceableDisplayIndex={replaceableDisplayIndex.Value}/{Math.Max(variantCount - 1, 0)} Description={description}");
+        }
+        Console.WriteLine();
+
+        for (int i = 0; i < mdx.Textures.Count; i++)
+        {
+            var texture = mdx.Textures[i];
+            Console.WriteLine($"Texture[{i}] ReplaceableId={texture.ReplaceableId} Flags=0x{texture.Flags:X8} Path='{texture.Path}'");
+
+            if (texture.ReplaceableId > 0 && replaceableResolver != null)
+            {
+                PrintReplaceableResolutionCandidates(
+                    replaceableResolver.GetReplaceableResolutionCandidates(
+                        modelVirtualPath,
+                        texture.ReplaceableId,
+                        replaceableDisplayIndex ?? 0,
+                        characterHairVariationId,
+                        characterFacialVariationId));
+            }
+
+            var probe = ProbeTexture(dataSource, modelVirtualPath, texture, replaceableResolver, replaceableDisplayIndex, characterHairVariationId, characterFacialVariationId);
+            if (probe == null)
+            {
+                Console.WriteLine("  Decode: not found");
+            }
+            else
+            {
+                Console.WriteLine($"  ResolvedPath: {probe.Value.ResolvedPath}");
+                Console.WriteLine($"  SharedDetect: kind={probe.Value.DetectedKind} version={FormatVersion(probe.Value.DetectedVersion)}");
+                if (probe.Value.SharedBlpSummary is BlpSharedProbeResult sharedBlp)
+                {
+                    Console.WriteLine(
+                        $"  SharedBLP: format={sharedBlp.Signature} version={FormatVersion(sharedBlp.Version)} compression={sharedBlp.Compression} alphaBits={sharedBlp.AlphaDepthBits} pixelFormat={sharedBlp.PixelFormat} size={sharedBlp.Width}x{sharedBlp.Height} mips={sharedBlp.MipCount} inBoundsMips={sharedBlp.InBoundsMipLevelCount} outOfBoundsMips={sharedBlp.OutOfBoundsMipLevelCount}");
+                }
+                else if (!string.IsNullOrWhiteSpace(probe.Value.SharedBlpError))
+                {
+                    Console.WriteLine($"  SharedBLPError: {probe.Value.SharedBlpError}");
+                }
+
+                if (probe.Value.DecodeSucceeded)
+                {
+                    Console.WriteLine($"  Size: {probe.Value.Width}x{probe.Value.Height}");
+                    Console.WriteLine($"  Alpha: kind={probe.Value.AlphaKind} zero={probe.Value.ZeroAlphaPixels} full={probe.Value.FullAlphaPixels} translucent={probe.Value.TranslucentAlphaPixels}");
+                }
+                else
+                {
+                    Console.WriteLine($"  DecodeError: {probe.Value.DecodeError}");
+                }
+            }
+        }
+
+        Console.WriteLine();
+        for (int materialIndex = 0; materialIndex < mdx.Materials.Count; materialIndex++)
+        {
+            var material = mdx.Materials[materialIndex];
+            Console.WriteLine($"Material[{materialIndex}] PriorityPlane={material.PriorityPlane} Layers={material.Layers.Count}");
+            for (int layerIndex = 0; layerIndex < material.Layers.Count; layerIndex++)
+            {
+                var layer = material.Layers[layerIndex];
+                Console.WriteLine(
+                    $"  Layer[{layerIndex}] TextureId={layer.TextureId} Blend={layer.BlendMode} Flags=0x{(uint)layer.Flags:X8} CoordId={layer.CoordId} StaticAlpha={layer.StaticAlpha:F3}");
+            }
+        }
+
+        Console.WriteLine();
+        if (sharedMdxGeometry is MdxGeometryProbeResult geometryProbe)
+        {
+            for (int geosetIndex = 0; geosetIndex < geometryProbe.Geosets.Count; geosetIndex++)
+            {
+                MdxGeosetGeometry geoset = geometryProbe.Geosets[geosetIndex];
+                Console.WriteLine(
+                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} SelectionGroup={geoset.SelectionGroup} DefaultVisible={(defaultCharacterSelectionGroups == null ? "n/a" : defaultCharacterSelectionGroups.Contains(geoset.SelectionGroup))} SelectedVisible={(selectedCharacterSelectionGroups == null ? "n/a" : selectedCharacterSelectionGroups.Contains(geoset.SelectionGroup))} Vertices={geoset.VertexCount} Indices={geoset.IndexCount} Triangles={geoset.TriangleCount} UvSets={geoset.UvSetCount} PrimaryTexCoords={geoset.PrimaryUvCount} MatrixGroups={geoset.MatrixGroupCount} MatrixIndices={geoset.MatrixIndexCount}");
+            }
+        }
+        else
+        {
+            for (int geosetIndex = 0; geosetIndex < mdx.Geosets.Count; geosetIndex++)
+            {
+                var geoset = mdx.Geosets[geosetIndex];
+                Console.WriteLine(
+                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} SelectionGroup={geoset.SelectionGroup} DefaultVisible={(defaultCharacterSelectionGroups == null ? "n/a" : defaultCharacterSelectionGroups.Contains(geoset.SelectionGroup))} SelectedVisible={(selectedCharacterSelectionGroups == null ? "n/a" : selectedCharacterSelectionGroups.Contains(geoset.SelectionGroup))} Vertices={geoset.Vertices.Count} Indices={geoset.Indices.Count} TexCoords={geoset.TexCoords.Count}");
+            }
+        }
+    }
+
+    private static bool TryParseOptionalVariationId(string? rawValue, string optionName, out int? variationId)
+    {
+        variationId = null;
+        if (string.IsNullOrWhiteSpace(rawValue))
+            return true;
+
+        if (int.TryParse(rawValue, out int parsed) && parsed >= 0)
+        {
+            variationId = parsed;
+            return true;
+        }
+
+        Console.Error.WriteLine($"[AssetProbe] Invalid variation id for {optionName}: {rawValue}");
+        return false;
+    }
+
+    private static string? TryGetOptionValue(string[] args, string optionName)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i].Equals(optionName, StringComparison.OrdinalIgnoreCase))
+                return args[i + 1];
+        }
+
+        return null;
+    }
+
+    private static int? TryGetOptionalInt(string[] args, string optionName)
+    {
+        string? rawValue = TryGetOptionValue(args, optionName);
+        if (string.IsNullOrWhiteSpace(rawValue))
+            return null;
+
+        return int.TryParse(rawValue, out int parsed) ? parsed : null;
+    }
+
+    private static void PrintReplaceableResolutionCandidates(IReadOnlyList<ReplaceableTextureResolver.ReplaceableResolutionCandidate> candidates)
+    {
+        if (candidates.Count == 0)
+        {
+            Console.WriteLine("  ReplaceableCandidates: none");
+            return;
+        }
+
+        const int maxPrintedCandidates = 12;
+        for (int index = 0; index < candidates.Count && index < maxPrintedCandidates; index++)
+        {
+            var candidate = candidates[index];
+            Console.WriteLine($"  Candidate[{index}] Source={candidate.Source} Exists={candidate.Exists} Path={candidate.Path}");
+        }
+
+        if (candidates.Count > maxPrintedCandidates)
+            Console.WriteLine($"  Candidate[+] {candidates.Count - maxPrintedCandidates} more candidates omitted");
+    }
+
+    private static TextureProbeResult? ProbeTexture(
+        IDataSource dataSource,
+        string modelVirtualPath,
+        MdlTexture texture,
+        ReplaceableTextureResolver? replaceableResolver,
+        int? replaceableDisplayIndex,
+        int? characterHairVariationId,
+        int? characterFacialVariationId)
+    {
+        foreach (string candidate in EnumerateTextureCandidates(modelVirtualPath, texture, replaceableResolver, replaceableDisplayIndex, characterHairVariationId, characterFacialVariationId))
+        {
+            byte[]? data = dataSource.ReadFile(candidate);
+            if (data == null)
+                continue;
+
+            WowFileDetection detection = DetectFile(candidate, data);
+            BlpSharedProbeResult? sharedBlpSummary = null;
+            string? sharedBlpError = null;
+            if (detection.Kind == WowFileKind.Blp)
+                sharedBlpSummary = TryReadSharedBlpSummary(candidate, data, out sharedBlpError);
+
+            try
+            {
+                return DecodeTexture(candidate, data, detection.Kind, detection.Version, sharedBlpSummary, sharedBlpError);
+            }
+            catch (Exception ex)
+            {
+                return new TextureProbeResult(
+                    candidate,
+                    detection.Kind,
+                    detection.Version,
+                    sharedBlpSummary,
+                    sharedBlpError,
+                    0,
+                    0,
+                    "n/a",
+                    0,
+                    0,
+                    0,
+                    false,
+                    ex.Message);
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateTextureCandidates(
+        string modelVirtualPath,
+        MdlTexture texture,
+        ReplaceableTextureResolver? replaceableResolver,
+        int? replaceableDisplayIndex,
+        int? characterHairVariationId,
+        int? characterFacialVariationId)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (texture.ReplaceableId > 0 && replaceableResolver != null)
+        {
+            foreach (var candidate in replaceableResolver.GetReplaceableResolutionCandidates(modelVirtualPath, texture.ReplaceableId, replaceableDisplayIndex ?? 0, characterHairVariationId, characterFacialVariationId))
+            {
+                if (!candidate.Exists)
+                    continue;
+
+                string normalized = candidate.Path.Replace('/', '\\').TrimStart('\\');
+                if (seen.Add(normalized))
+                    yield return normalized;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(texture.Path))
+        {
+            string direct = texture.Path;
+            if (seen.Add(direct.Replace('/', '\\').TrimStart('\\')))
+                yield return direct.Replace('/', '\\').TrimStart('\\');
+
+            string fileName = Path.GetFileName(direct);
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                string? modelDir = Path.GetDirectoryName(modelVirtualPath.Replace('/', '\\'));
+                if (!string.IsNullOrWhiteSpace(modelDir))
+                {
+                    string combined = Path.Combine(modelDir, fileName).Replace('/', '\\');
+                    if (seen.Add(combined))
+                        yield return combined;
+                }
+            }
+        }
+    }
+
+    private static ReplaceableTextureResolver? TryCreateReplaceableTextureResolver(MpqDataSource dataSource, string? buildVersion)
+    {
+        if (string.IsNullOrWhiteSpace(buildVersion))
+            return null;
+
+        string? dbdDir = ResolveDbdDefinitionsDir();
+        if (string.IsNullOrWhiteSpace(dbdDir))
+            return null;
+
+        var resolver = new ReplaceableTextureResolver();
+        resolver.SetDataSource(dataSource);
+        resolver.LoadFromDBC(new MpqDBCProvider(dataSource.ArchiveReader), dbdDir, buildVersion);
+        return resolver.IsLoaded ? resolver : null;
+    }
+
+    private static int? TrySelectReplaceableDisplayIndex(ReplaceableTextureResolver? replaceableResolver, string modelVirtualPath, MdxFile mdx)
+    {
+        if (replaceableResolver == null)
+            return null;
+
+        uint[] replaceableIds = mdx.Textures
+            .Where(static texture => texture.ReplaceableId > 0)
+            .Select(static texture => texture.ReplaceableId)
+            .Distinct()
+            .ToArray();
+        if (replaceableIds.Length == 0)
+            return null;
+
+        return replaceableResolver.SelectBestDisplayIndex(modelVirtualPath, replaceableIds);
+    }
+
+    private static string? ResolveDbdDefinitionsDir()
+    {
+        string[] dbdSearchPaths =
+        {
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "lib", "WoWDBDefs", "definitions"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "definitions"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WoWDBDefs", "definitions"),
+        };
+
+        foreach (var path in dbdSearchPaths)
+        {
+            string resolved = Path.GetFullPath(path);
+            if (Directory.Exists(resolved) && File.Exists(Path.Combine(resolved, "Map.dbd")))
+                return resolved;
+        }
+
+        return null;
+    }
+
+    private static TextureProbeResult DecodeTexture(
+        string resolvedPath,
+        byte[] data,
+        WowFileKind detectedKind,
+        uint? detectedVersion,
+        BlpSharedProbeResult? sharedBlpSummary,
+        string? sharedBlpError)
+    {
+        using var stream = new MemoryStream(data);
+        using var blp = new SereniaBlpFile(stream);
+        using Bitmap bitmap = blp.GetBitmap(0);
+
+        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        BitmapData bitmapData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            byte[] pixels = new byte[bitmapData.Stride * bitmapData.Height];
+            Marshal.Copy(bitmapData.Scan0, pixels, 0, pixels.Length);
+
+            int zeroAlpha = 0;
+            int fullAlpha = 0;
+            int translucentAlpha = 0;
+
+            for (int i = 3; i < pixels.Length; i += 4)
+            {
+                byte alpha = pixels[i];
+                if (alpha == 0)
+                    zeroAlpha++;
+                else if (alpha == 255)
+                    fullAlpha++;
+                else
+                    translucentAlpha++;
+            }
+
+            return new TextureProbeResult(
+                resolvedPath,
+                detectedKind,
+                detectedVersion,
+                sharedBlpSummary,
+                sharedBlpError,
+                bitmap.Width,
+                bitmap.Height,
+                ClassifyTextureAlpha(zeroAlpha, translucentAlpha),
+                zeroAlpha,
+                fullAlpha,
+                translucentAlpha,
+                true,
+                null);
+        }
+        finally
+        {
+            bitmap.UnlockBits(bitmapData);
+        }
+    }
+
+    private static WowFileDetection DetectFile(string path, byte[] data)
+    {
+        using var stream = new MemoryStream(data, writable: false);
+        return WowFileDetector.Detect(stream, path);
+    }
+
+    private static BlpSharedProbeResult? TryReadSharedBlpSummary(string resolvedPath, byte[] data, out string? error)
+    {
+        try
+        {
+            using var stream = new MemoryStream(data, writable: false);
+            BlpSummary summary = BlpSummaryReader.Read(stream, resolvedPath);
+            error = null;
+            return new BlpSharedProbeResult(
+                summary.Signature,
+                summary.Version,
+                summary.Compression,
+                summary.AlphaDepthBits,
+                summary.PixelFormat,
+                summary.Width,
+                summary.Height,
+                summary.MipMaps.Count,
+                summary.InBoundsMipLevelCount,
+                summary.OutOfBoundsMipLevelCount);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
+
+    private static MdxSharedProbeResult? TryReadSharedMdxSummary(string resolvedPath, byte[] data, out string? error)
+    {
+        try
+        {
+            using var stream = new MemoryStream(data, writable: false);
+            MdxSummary summary = MdxSummaryReader.Read(stream, resolvedPath);
+            error = null;
+            return new MdxSharedProbeResult(
+                summary.Version,
+                summary.ModelName,
+                summary.BlendTime,
+                summary.ChunkCount,
+                summary.KnownChunkCount,
+                summary.UnknownChunkCount,
+                summary.TextureCount,
+                summary.ReplaceableTextureCount,
+                summary.Textures.Take(2).Select(static texture => string.IsNullOrWhiteSpace(texture.Path) ? $"Replaceable#{texture.ReplaceableId}" : texture.Path!).ToArray(),
+                summary.MaterialCount,
+                summary.MaterialLayerCount,
+                summary.Materials.Take(2)
+                    .SelectMany(static material => material.Layers.Take(1).Select(layer => $"tex{layer.TextureId}/blend{layer.BlendMode}/alpha{layer.StaticAlpha:F3}"))
+                    .ToArray(),
+                summary.PivotPointCount,
+                summary.PivotPoints.FirstOrDefault()?.Position,
+                summary.Collision?.VertexCount,
+                summary.Collision?.TriangleCount,
+                summary.Collision?.BoundsMin,
+                summary.Collision?.BoundsMax,
+                summary.Chunks.Take(4).Select(static chunk => chunk.Id.ToString()).ToArray());
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
+
+    private static MdxGeometryProbeResult? TryReadSharedMdxGeometry(string resolvedPath, byte[] data, out string? error)
+    {
+        try
+        {
+            using var stream = new MemoryStream(data, writable: false);
+            MdxGeometryFile geometry = MdxGeometryReader.Read(stream, resolvedPath);
+            error = null;
+            return new MdxGeometryProbeResult(
+                geometry.GeosetCount,
+                geometry.Geosets.ToArray());
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
+
+    private static string FormatVersion(uint? version)
+    {
+        return version?.ToString() ?? "n/a";
+    }
+
+    private static string FormatChunkList(IReadOnlyList<string> chunkIds)
+    {
+        return chunkIds.Count == 0 ? "n/a" : string.Join(",", chunkIds);
+    }
+
+    private static string FormatTextureList(IReadOnlyList<string> texturePaths)
+    {
+        return texturePaths.Count == 0 ? "n/a" : string.Join(",", texturePaths);
+    }
+
+    private static string FormatMaterialList(IReadOnlyList<string> materialLayers)
+    {
+        return materialLayers.Count == 0 ? "n/a" : string.Join(",", materialLayers);
+    }
+
+    private static string FormatVector(Vector3? vector)
+    {
+        if (!vector.HasValue)
+            return "n/a";
+
+        Vector3 value = vector.Value;
+        return $"({value.X:F3},{value.Y:F3},{value.Z:F3})";
+    }
+
+    private static string FormatBounds(Vector3? min, Vector3? max)
+    {
+        return $"{FormatVector(min)}..{FormatVector(max)}";
+    }
+
+    private static string ClassifyTextureAlpha(int zeroAlphaPixels, int translucentAlphaPixels)
+    {
+        if (translucentAlphaPixels > 0)
+            return "Translucent";
+
+        if (zeroAlphaPixels > 0)
+            return "Binary";
+
+        return "Opaque";
+    }
+
+    private readonly record struct TextureProbeResult(
+        string ResolvedPath,
+        WowFileKind DetectedKind,
+        uint? DetectedVersion,
+        BlpSharedProbeResult? SharedBlpSummary,
+        string? SharedBlpError,
+        int Width,
+        int Height,
+        string AlphaKind,
+        int ZeroAlphaPixels,
+        int FullAlphaPixels,
+        int TranslucentAlphaPixels,
+        bool DecodeSucceeded,
+        string? DecodeError);
+
+    private readonly record struct BlpSharedProbeResult(
+        string Signature,
+        uint? Version,
+        CoreBlpCompressionType Compression,
+        byte AlphaDepthBits,
+        CoreBlpPixelFormat PixelFormat,
+        int Width,
+        int Height,
+        int MipCount,
+        int InBoundsMipLevelCount,
+        int OutOfBoundsMipLevelCount);
+
+    private readonly record struct MdxSharedProbeResult(
+        uint? Version,
+        string? ModelName,
+        uint? BlendTime,
+        int ChunkCount,
+        int KnownChunkCount,
+        int UnknownChunkCount,
+        int TextureCount,
+        int ReplaceableTextureCount,
+        IReadOnlyList<string> TexturePaths,
+        int MaterialCount,
+        int MaterialLayerCount,
+        IReadOnlyList<string> MaterialLayers,
+        int PivotPointCount,
+        Vector3? FirstPivotPoint,
+        int? CollisionVertexCount,
+        int? CollisionTriangleCount,
+        Vector3? CollisionBoundsMin,
+        Vector3? CollisionBoundsMax,
+        IReadOnlyList<string> Chunks);
+
+    private readonly record struct MdxGeometryProbeResult(
+        int GeosetCount,
+        IReadOnlyList<MdxGeosetGeometry> Geosets);
+}

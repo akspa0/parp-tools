@@ -1,0 +1,249 @@
+using System.Text.Json.Serialization;
+
+namespace WowViewer.Core.IO.Maps;
+
+/// <summary>
+/// Complete training sample for VLM - maps to JSON output.
+/// </summary>
+public record VlmTrainingSample(
+    [property: JsonPropertyName("image")] string ImagePath,
+    [property: JsonPropertyName("depth")] string? DepthPath,
+    [property: JsonPropertyName("terrain_data")] VlmTerrainData TerrainData
+);
+
+/// <summary>
+/// Complete terrain data for a single ADT tile.
+/// </summary>
+public record VlmTerrainData(
+    [property: JsonPropertyName("adt_tile")] string AdtTile,
+    
+    // Compact Height Data (145 heights per chunk × 256 chunks)
+    [property: JsonPropertyName("heights")] VlmChunkHeights[]? Heights,
+    [property: JsonPropertyName("chunk_positions")] float[]? ChunkPositions,  // 256 × 3 (x,y,z)
+    [property: JsonPropertyName("holes")] int[]? Holes,                       // 256 hole bitmasks
+    [property: JsonPropertyName("heightmap")] string? HeightmapPath,          // Path to 16-bit PNG heightmap
+    [property: JsonPropertyName("heightmap_local")] string? HeightmapLocalPath,
+    [property: JsonPropertyName("heightmap_global")] string? HeightmapGlobalPath,
+    [property: JsonPropertyName("normalmap")] string? NormalmapPath,
+    [property: JsonPropertyName("mccv_map")] string? MccvMapPath,
+    
+    // Shadow maps exported at ADT/tile scope.
+    [property: JsonPropertyName("shadow_maps")] string[]? ShadowMaps,
+    
+    // Shadow Maps - raw bit data (64 bytes per chunk = 512 bits = 64x8 shadow map)
+    [property: JsonPropertyName("shadow_bits")] VlmChunkShadowBits[]? ShadowBits,
+
+    // Derived shadow-region and object-candidate summaries per chunk
+    [property: JsonPropertyName("shadow_analysis")] VlmChunkShadowAnalysis[]? ShadowAnalysis,
+    
+    // Alpha masks exported at ADT/tile scope, one image per layer.
+    [property: JsonPropertyName("alpha_masks")] string[]? AlphaMasks,
+    [property: JsonPropertyName("alpha_atlas")] string? AlphaAtlasPath,
+    
+    // Liquid Stitched Maps
+    [property: JsonPropertyName("liquid_mask")] string? LiquidMaskPath,
+    [property: JsonPropertyName("liquid_height")] string? LiquidHeightPath,
+    [property: JsonPropertyName("liquid_min")] float LiquidMinHeight,
+    [property: JsonPropertyName("liquid_max")] float LiquidMaxHeight,
+
+    // Synthesized minimap with liquid areas inpainted to show underlying terrain.
+    [property: JsonPropertyName("no_liquid_minimap")] string? NoLiquidMinimapPath,
+    [property: JsonPropertyName("no_mccv_minimap")] string? NoMccvMinimapPath,
+
+    // Exported object visibility mask and synthesized minimap with visible objects replaced by terrain rebake.
+    [property: JsonPropertyName("object_visibility_mask")] string? ObjectVisibilityMaskPath,
+    [property: JsonPropertyName("pm4_mask")] string? Pm4MaskPath,
+    [property: JsonPropertyName("no_object_minimap")] string? NoObjectMinimapPath,
+    [property: JsonPropertyName("terrain_only_minimap")] string? TerrainOnlyMinimapPath,
+
+    // Semantic context rasters exported at tile scope.
+    [property: JsonPropertyName("holes_mask")] string? HolesMaskPath,
+    [property: JsonPropertyName("area_id_map")] string? AreaIdMapPath,
+    [property: JsonPropertyName("chunk_flags_map")] string? ChunkFlagsMapPath,
+    [property: JsonPropertyName("liquid_type_map")] string? LiquidTypeMapPath,
+    [property: JsonPropertyName("dominant_effect_id_map")] string? DominantEffectIdMapPath,
+    
+    // Textures
+    [property: JsonPropertyName("textures")] List<string> Textures,
+    
+    // Per-Chunk Layer Data (MCLY)
+    [property: JsonPropertyName("chunk_layers")] VlmChunkLayers[]? ChunkLayers,
+    
+    // Liquids (MH2O/MCLQ)
+    [property: JsonPropertyName("liquids")] VlmLiquidData[]? Liquids,
+    
+    // Objects (MDDF/MODF)
+    [property: JsonPropertyName("objects")] List<VlmObjectPlacement> Objects,
+    
+    // WDL Low-Res Heightmap
+    [property: JsonPropertyName("wdl_heights")] VlmWdlData? WdlHeights,
+    
+    // Stats
+    [property: JsonPropertyName("height_min")] float HeightMin,
+    [property: JsonPropertyName("height_max")] float HeightMax,
+    [property: JsonPropertyName("height_global_min")] float HeightGlobalMin,
+    [property: JsonPropertyName("height_global_max")] float HeightGlobalMax,
+    [property: JsonPropertyName("is_interleaved")] bool IsInterleaved
+);
+
+/// <summary>
+/// WDL low-resolution heightmap data (17x17 + 16x16 shorts).
+/// </summary>
+public record VlmWdlData(
+    [property: JsonPropertyName("outer_17")] short[] Height17, // Flattened 17x17 = 289
+    [property: JsonPropertyName("inner_16")] short[] Height16  // Flattened 16x16 = 256
+);
+
+/// <summary>
+/// Compact height data for a single MCNK chunk (145 values).
+/// </summary>
+public record VlmChunkHeights(
+    [property: JsonPropertyName("idx")] int ChunkIndex,
+    [property: JsonPropertyName("h")] float[] Heights
+);
+
+/// <summary>
+/// Raw shadow map bit data for a single MCNK chunk (64 bytes = 512 bits).
+/// Encoded as Base64 for JSON serialization.
+/// </summary>
+public record VlmChunkShadowBits(
+    [property: JsonPropertyName("idx")] int ChunkIndex,
+    [property: JsonPropertyName("bits")] string BitsBase64  // 64 bytes -> Base64
+);
+
+/// <summary>
+/// Derived shadow-region summary for a single MCNK chunk.
+/// </summary>
+public record VlmChunkShadowAnalysis(
+    [property: JsonPropertyName("idx")] int ChunkIndex,
+    [property: JsonPropertyName("shadowed_pixels")] int ShadowedPixelCount,
+    [property: JsonPropertyName("coverage")] float Coverage,
+    [property: JsonPropertyName("region_count")] int RegionCount,
+    [property: JsonPropertyName("largest_region_pixels")] int LargestRegionPixelCount,
+    [property: JsonPropertyName("explained_shadow_pixels")] int ExplainedShadowPixelCount,
+    [property: JsonPropertyName("residual_shadow_pixels")] int ResidualShadowPixelCount,
+    [property: JsonPropertyName("explained_shadow_ratio")] float ExplainedShadowRatio,
+    [property: JsonPropertyName("residual_shadow_ratio")] float ResidualShadowRatio,
+    [property: JsonPropertyName("scar_candidate_region_count")] int ScarCandidateRegionCount,
+    [property: JsonPropertyName("scar_candidate_score")] float ScarCandidateScore,
+    [property: JsonPropertyName("regions")] VlmShadowRegion[] Regions,
+    [property: JsonPropertyName("candidate_objects")] VlmShadowObjectCandidate[] CandidateObjects
+);
+
+/// <summary>
+/// Connected shadow region summary within one chunk.
+/// </summary>
+public record VlmShadowRegion(
+    [property: JsonPropertyName("region_id")] int RegionId,
+    [property: JsonPropertyName("pixel_count")] int PixelCount,
+    [property: JsonPropertyName("coverage")] float Coverage,
+    [property: JsonPropertyName("bbox_min_px")] int[] BoundingBoxMinPixels,
+    [property: JsonPropertyName("bbox_max_px")] int[] BoundingBoxMaxPixels,
+    [property: JsonPropertyName("centroid_px")] float[] CentroidPixels,
+    [property: JsonPropertyName("centroid_world")] float[] CentroidWorld,
+    [property: JsonPropertyName("world_rect_min")] float[] WorldRectMin,
+    [property: JsonPropertyName("world_rect_max")] float[] WorldRectMax,
+    [property: JsonPropertyName("candidate_object_ids")] uint[] CandidateObjectIds,
+    [property: JsonPropertyName("explained_by_current_objects")] bool ExplainedByCurrentObjects,
+    [property: JsonPropertyName("explained_shadow_pixels")] int ExplainedShadowPixelCount,
+    [property: JsonPropertyName("residual_shadow_pixels")] int ResidualShadowPixelCount,
+    [property: JsonPropertyName("explained_overlap_ratio")] float ExplainedOverlapRatio,
+    [property: JsonPropertyName("nearest_candidate_distance_px")] float? NearestCandidateDistancePixels,
+    [property: JsonPropertyName("scar_candidate_score")] float ScarCandidateScore,
+    [property: JsonPropertyName("scar_type")] string ScarType
+);
+
+/// <summary>
+/// Object placement projected into chunk-shadow space for candidate association work.
+/// </summary>
+public record VlmShadowObjectCandidate(
+    [property: JsonPropertyName("unique_id")] uint UniqueId,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("position_world")] float[] PositionWorld,
+    [property: JsonPropertyName("position_chunk_px")] float[] PositionChunkPixels,
+    [property: JsonPropertyName("nearest_region_id")] int? NearestRegionId,
+    [property: JsonPropertyName("pixel_distance_to_region")] float PixelDistanceToRegion,
+    [property: JsonPropertyName("inside_chunk")] bool InsideChunk,
+    [property: JsonPropertyName("inside_region_bounds")] bool InsideRegionBounds
+);
+
+/// <summary>
+/// Per-chunk texture layer data (MCLY) with all data for terrain reconstruction.
+/// </summary>
+public record VlmChunkLayers(
+    [property: JsonPropertyName("idx")] int ChunkIndex,
+    [property: JsonPropertyName("layers")] VlmTextureLayer[] Layers,
+    // Legacy per-chunk shadow path for reconstruction. May be null when raw shadow bits are present on the tile.
+    [property: JsonPropertyName("shadow_path")] string? ShadowPath = null,
+    [property: JsonPropertyName("normals")] sbyte[]? Normals = null,  // MCNR 448 bytes (145 * 3 + 13 padding)
+    [property: JsonPropertyName("mccv_colors")] byte[]? MccvColors = null,  // MCCV vertex colors (145 * 4 BGRA = 580 bytes)
+    [property: JsonPropertyName("area_id")] uint AreaId = 0,
+    [property: JsonPropertyName("flags")] uint Flags = 0
+);
+
+/// <summary>
+/// Single texture layer definition (from MCLY) with full texture path for reconstruction.
+/// </summary>
+public record VlmTextureLayer(
+    [property: JsonPropertyName("tex_id")] uint TextureId,
+    [property: JsonPropertyName("texture_path")] string? TexturePath,  // Actual path from MTEX
+    [property: JsonPropertyName("flags")] uint Flags,
+    [property: JsonPropertyName("alpha_off")] uint AlphaOffset,
+    [property: JsonPropertyName("effect_id")] uint EffectId,
+    [property: JsonPropertyName("ground_effects")] string[]? GroundEffects = null,
+    // Decoded 64x64 grayscale alpha bytes for this chunk layer.
+    [property: JsonPropertyName("alpha_bits")] string? AlphaBitsBase64 = null,
+    // Legacy per-chunk alpha PNG path. May be null when alpha_bits are present.
+    [property: JsonPropertyName("alpha_path")] string? AlphaPath = null,
+    
+    // Raw alpha bytes (not serialized to JSON, kept for in-memory processing).
+    [property: JsonIgnore] byte[]? AlphaData = null
+);
+
+/// <summary>
+/// Liquid data per chunk (MH2O or MCLQ).
+/// </summary>
+public record VlmLiquidData(
+    [property: JsonPropertyName("idx")] int ChunkIndex,
+    [property: JsonPropertyName("type")] int LiquidType,
+    [property: JsonPropertyName("min_height")] float MinHeight,
+    [property: JsonPropertyName("max_height")] float MaxHeight,
+    [property: JsonPropertyName("mask_path")] string? MaskPath,
+    [property: JsonPropertyName("heights")] float[]? Heights,  // 9×9 = 81 values if present
+    [property: JsonPropertyName("x_offset")] int XOffset = 0,
+    [property: JsonPropertyName("y_offset")] int YOffset = 0,
+    [property: JsonPropertyName("width")] int Width = 8,
+    [property: JsonPropertyName("height")] int Height = 8,
+    [property: JsonPropertyName("exists_bitmap")] string? ExistsBitmapBase64 = null
+);
+
+/// <summary>
+/// Object placement from MDDF/MODF with bounding box data.
+/// </summary>
+public record VlmObjectPlacement(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("name_id")] uint NameId,
+    [property: JsonPropertyName("unique_id")] uint UniqueId,
+    [property: JsonPropertyName("x")] float X,
+    [property: JsonPropertyName("y")] float Y,
+    [property: JsonPropertyName("z")] float Z,
+    [property: JsonPropertyName("rot_x")] float RotX,
+    [property: JsonPropertyName("rot_y")] float RotY,
+    [property: JsonPropertyName("rot_z")] float RotZ,
+    [property: JsonPropertyName("scale")] float Scale,
+    [property: JsonPropertyName("category")] string Category,  // "wmo" or "m2"
+    [property: JsonPropertyName("bounds_min")] float[]? BoundsMin = null,  // [x, y, z] local min
+    [property: JsonPropertyName("bounds_max")] float[]? BoundsMax = null,  // [x, y, z] local max
+    [property: JsonPropertyName("model_path")] string? ModelPath = null
+);
+
+/// <summary>
+/// Result of VLM dataset export.
+/// </summary>
+public record VlmExportResult(
+    int TilesExported,
+    int TilesSkipped,
+    int UniqueTextures,
+    string OutputDirectory
+);

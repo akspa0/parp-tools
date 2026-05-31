@@ -1,0 +1,4 @@
+- [x] Defunct WowViewer.App
+- [x] Rename MdxViewer to WoWViewer
+- [x] Verify build
+- [x] Update documentation
