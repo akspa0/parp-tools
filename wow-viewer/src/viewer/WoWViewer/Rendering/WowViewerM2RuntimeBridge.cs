@@ -1,4 +1,4 @@
-using MdxLTool.Formats.Mdx;
+using WowViewer.Core.IO.Mdx;
 using WoWViewer.DataSources;
 using Silk.NET.OpenGL;
 using WowViewer.Core.IO.M2;

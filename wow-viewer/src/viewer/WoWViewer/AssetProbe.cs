@@ -2,7 +2,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using MdxLTool.Formats.Mdx;
+using WowViewer.Core.IO.Mdx;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;

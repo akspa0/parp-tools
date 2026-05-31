@@ -1,6 +1,6 @@
 using System.Numerics;
 using System.Text;
-using MdxLTool.Formats.Mdx;
+using WowViewer.Core.IO.Mdx;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
 using SereniaBLPLib;

@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Numerics;
 using System.Text;
-using MdxLTool.Formats.Mdx;
+using WowViewer.Core.IO.Mdx;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
 using WoWViewer.Terrain;
@@ -29,7 +29,7 @@ public enum WmoRenderPass
 
 /// <summary>
 /// Renders a WMO (World Map Object) using OpenGL.
-/// Uses WoWMapConverter.Core's WmoV14Data model for geometry.
+/// Uses WowViewer.Core.IO.Converters' WmoV14Data model for geometry.
 /// Supports loading and rendering MDX doodads from DoodadSets.
 /// </summary>
 public class WmoRenderer : ISceneRenderer

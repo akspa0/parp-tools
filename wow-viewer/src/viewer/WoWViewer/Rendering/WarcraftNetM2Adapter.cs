@@ -1,7 +1,7 @@
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
-using MdxLTool.Formats.Mdx;
+using WowViewer.Core.IO.Mdx;
 using WoWViewer.Logging;
 using WoWViewer.Terrain;
 using Warcraft.NET.Files.M2;

@@ -1,6 +1,6 @@
 using WoWViewer;
 using WoWViewer.Logging;
-using MdxLTool.Formats.Mdx;
+using WowViewer.Core.IO.Mdx;
 
 /// <summary>
 /// parp-tools WoW Viewer entry point.

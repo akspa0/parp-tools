@@ -1,5 +1,5 @@
 using System.Numerics;
-using MdxLTool.Formats.Mdx;
+using WowViewer.Core.IO.Mdx;
 
 namespace WoWViewer.Rendering;
 
