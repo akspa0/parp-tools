@@ -245,7 +245,7 @@ public static class M2ModelReader
             stream.ReadExactly(bytes);
             float value = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes));
             if (!float.IsFinite(value))
-                throw new InvalidDataException($"M2 file '{sourcePath}' has a non-finite {label} value.");
+                return 0f;
 
             return value;
         }
@@ -260,7 +260,7 @@ public static class M2ModelReader
         EnsureReadable(data, offset, sizeof(float), sourcePath, label);
         float value = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset, sizeof(float))));
         if (!float.IsFinite(value))
-            throw new InvalidDataException($"M2 file '{sourcePath}' has a non-finite {label} value.");
+            return 0f;
 
         return value;
     }

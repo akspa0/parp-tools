@@ -17,11 +17,11 @@
 
 **Independent Test**: Run discovery on staged `3_3_5_12340`, confirm entries found matching the Ghidra-confirmed pattern
 
-- [ ] T001 [US1] Create `WmoMinimapBlpReader.cs` in `wow-viewer/src/core/WowViewer.Core.IO/Wmo/` with a `DiscoverMinimapBlps(string clientRoot)` method that enumerates MPQ entries under `Textures\Minimap\`, filters by filename pattern matching `<stem>_<digits>_<digits>_<digits>.blp`, and returns a list of `WmoMinimapBlpEntry` records
-- [ ] T002 [US1] Add filename parsing logic to `WmoMinimapBlpReader.cs` that extracts `wmo_stem`, `group_index`, `quad_y`, `quad_x` from each matched filename, handling 2-digit and 3-digit group index padding variants
-- [ ] T003 [US1] Add `WmoMinimapBlpEntry` record type in `WmoMinimapBlpReader.cs`: fields `BlpPath`, `WmoStem`, `GroupIndex`, `QuadY`, `QuadX`, `Build`
-- [ ] T004 [US1] Add unit tests in `wow-viewer/tests/WowViewer.Core.Tests/` for filename parsing: verify that `deadmines_000_00_00.blp` parses to stem=`deadmines`, group=0, quadY=0, quadX=0; verify 3-digit padding like `stockades_001_01_02.blp`; verify non-matching filenames are rejected
-- [ ] T005 [US1] Add `WmoMinimapAssetResolver.cs` in `wow-viewer/src/core/WowViewer.Core.IO/Wmo/` with a `BuildStemToAssetPathMap(string clientRoot)` method that scans the MPQ file list for `.wmo` root files and builds a `Dictionary<string, string>` mapping stem names to full asset paths (e.g., `deadmines` → `World\wmo\dungeon\deadmines\deadmines.wmo`)
+- [x] T001 [US1] Create `WmoMinimapBlpReader.cs` in `wow-viewer/src/core/WowViewer.Core.IO/Wmo/` with a `DiscoverMinimapBlps(string clientRoot)` method that enumerates MPQ entries under `Textures\Minimap\`, filters by filename pattern matching `<stem>_<digits>_<digits>_<digits>.blp`, and returns a list of `WmoMinimapBlpEntry` records
+- [x] T002 [US1] Add filename parsing logic to `WmoMinimapBlpReader.cs` that extracts `wmo_stem`, `group_index`, `quad_y`, `quad_x` from each matched filename, handling 2-digit and 3-digit group index padding variants
+- [x] T003 [US1] Add `WmoMinimapBlpEntry` record type in `WmoMinimapBlpReader.cs`: fields `BlpPath`, `WmoStem`, `GroupIndex`, `QuadY`, `QuadX`, `Build`
+- [x] T004 [US1] Add unit tests in `wow-viewer/tests/WowViewer.Core.Tests/` for filename parsing: verify that `deadmines_000_00_00.blp` parses to stem=`deadmines`, group=0, quadY=0, quadX=0; verify 3-digit padding like `stockades_001_01_02.blp`; verify non-matching filenames are rejected
+- [x] T005 [US1] Add `WmoMinimapAssetResolver.cs` in `wow-viewer/src/core/WowViewer.Core.IO/Wmo/` with a `BuildStemToAssetPathMap(string clientRoot)` method that scans the MPQ file list for `.wmo` root files and builds a `Dictionary<string, string>` mapping stem names to full asset paths (e.g., `deadmines` → `World\wmo\dungeon\deadmines\deadmines.wmo`)
 
 **Checkpoint**: Discovery can enumerate BLPs and parse filenames; stem-to-asset mapping works on staged client
 
