@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Numerics;
 
 namespace WowViewer.Core.M2;
@@ -225,6 +226,18 @@ public sealed class M2CameraDefinition
 public readonly record struct M2CompQuaternion(short X, short Y, short Z, short W)
 {
     public static M2CompQuaternion Identity { get; } = new(32767, 32767, 32767, -1);
+
+    public static M2CompQuaternion FromRawLittleEndian(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < sizeof(short) * 4)
+            throw new ArgumentException("Compressed quaternion payload must contain 8 bytes.", nameof(bytes));
+
+        return new M2CompQuaternion(
+            BinaryPrimitives.ReadInt16LittleEndian(bytes.Slice(0x00, sizeof(short))),
+            BinaryPrimitives.ReadInt16LittleEndian(bytes.Slice(0x02, sizeof(short))),
+            BinaryPrimitives.ReadInt16LittleEndian(bytes.Slice(0x04, sizeof(short))),
+            BinaryPrimitives.ReadInt16LittleEndian(bytes.Slice(0x06, sizeof(short))));
+    }
 
     public Quaternion ToQuaternion()
     {

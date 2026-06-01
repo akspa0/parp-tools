@@ -1,6 +1,8 @@
 # Implementation Plan: Terrain Cell Awareness and Sub-Chunk Addressing
 **Branch**: `031-terrain-cell-awareness` | **Date**: 2026-05-30 | **Spec**: [spec.md](./spec.md)
 
+**Convergence Note**: Active renderer-owner planning now lives in [specs/036-renderer-improvements/plan.md](../036-renderer-improvements/plan.md). This document remains a source-slice reference for terrain topology and cell-awareness details.
+
 ## Summary
 
 Implement the terrain cell (sub-chunk) awareness system decompiled from wowclient.exe build 3368 in `WowViewer.Core.IO` and `WowViewer.Core.Runtime`. The native client uses a 145-vertex layout (9x9 outer + 8x8 inner), 8x8 cell grid with per-cell diagonal splits (256 face planes), 16-bit hole mask with 4x4 grouping, and 13-bit packed cell addressing. This plan covers porting the data structures from MdxViewer's `StandardTerrainAdapter` / `AlphaTerrainAdapter` into the wow-viewer libraries.

@@ -1,3 +1,4 @@
+using System.Numerics;
 using WowViewer.Core.M2;
 
 namespace WowViewer.Core.Runtime.M2;
@@ -48,12 +49,15 @@ public static class M2StaticRenderModelBuilder
                 {
                     mappedIndex = (uint)vertices.Count;
                     remap.Add(localSkinVertexIndex, mappedIndex);
+                    Vector4 boneIndices = TryGetSkinBoneIndices(skin, localSkinVertexIndex, out Vector4 overriddenBoneIndices)
+                        ? overriddenBoneIndices
+                        : vertex.BoneIndices;
                     vertices.Add(new M2StaticRenderVertex(
                         vertex.Position,
                         vertex.Normal,
                         vertex.TextureCoords0,
                         vertex.TextureCoords1,
-                        vertex.BoneIndices,
+                        boneIndices,
                         vertex.BoneWeights));
                 }
 
@@ -101,6 +105,17 @@ public static class M2StaticRenderModelBuilder
 
         ushort[] boneLookup = geometry.BoneLookup.Select(static entry => entry.BoneIndex).ToArray();
         return new M2StaticRenderModel(geometry.Model, compatibilitySections, structuredSections, boneLookup, activeSkinProfile.UsesCompatibilityFallback);
+    }
+
+    private static bool TryGetSkinBoneIndices(M2SkinDocument skin, ushort localSkinVertexIndex, out Vector4 boneIndices)
+    {
+        boneIndices = Vector4.Zero;
+        if (localSkinVertexIndex >= skin.BoneEntries.Count)
+            return false;
+
+        M2SkinBoneEntry boneEntry = skin.BoneEntries[localSkinVertexIndex];
+        boneIndices = new Vector4(boneEntry.Bone0, boneEntry.Bone1, boneEntry.Bone2, boneEntry.Bone3);
+        return true;
     }
 
     private static List<M2StructuredRenderPass> BuildStructuredPasses(M2GeometryDocument geometry, IReadOnlyList<M2ActiveSkinBatch> orderedBatches)

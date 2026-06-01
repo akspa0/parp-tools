@@ -680,11 +680,7 @@ public static class M2ToMdxConverter
 
     private static Quaternion ReadCompQuaternionValue(byte[] payload, uint offset)
     {
-        short x = BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan((int)offset, sizeof(short)));
-        short y = BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan((int)offset + sizeof(short), sizeof(short)));
-        short z = BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan((int)offset + (sizeof(short) * 2), sizeof(short)));
-        short w = BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan((int)offset + (sizeof(short) * 3), sizeof(short)));
-        return new M2CompQuaternion(x, y, z, w).ToQuaternion();
+        return M2CompQuaternion.FromRawLittleEndian(payload.AsSpan((int)offset, sizeof(short) * 4)).ToQuaternion();
     }
 
     private static void WriteCompressedQuaternion(BinaryWriter writer, Quaternion value)

@@ -1,6 +1,41 @@
 # PROGRESS — wow-viewer
 
 ## Position
+- **Renderer Improvements Convergence (036) — CREATED 2026-06-01**
+  - New owner plan at `wow-viewer/specs/036-renderer-improvements/`
+  - Artifacts written:
+    - `spec.md`
+    - `plan.md`
+    - `research.md`
+    - `data-model.md`
+    - `quickstart.md`
+    - `tasks.md`
+    - `contracts/renderer-capability-slice.schema.json`
+    - `contracts/renderer-validation-scenario.schema.json`
+  - Specs 030, 031, and 032 now carry convergence notes in their `plan.md` files pointing readers to 036
+  - Intent:
+    - keep 030-032 as source slices
+    - make 036 the active owner plan for renderer modernization sequencing in `wow-viewer`
+    - keep spec 035 M2 recovery as a separate adjacent feature lane
+- **M2 build-profile note (2026-06-01)**
+  - staged `3.0.1.8303` Northrend currently exposes a separate renderer-risk boundary:
+    - some `.mdx` assets fail `.skin` lookup and converter fallback
+    - logs suggest a possible prototype `MD20` / `Model2` family seam
+  - this is now recorded as deferred research in:
+    - `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`
+    - `wow-viewer/specs/035-m2-render-parity-recovery/research.md`
+  - future action is Ghidra on staged `3.0.1.8303` `wow.exe` plus repo archaeology for older `MD20` handling
+- **M2 3.3.5 wrong-axis animation hotfix (2026-06-01)**
+  - `WowViewer.Core.Runtime.M2.M2TrackSampler` now reads `M2CompQuaternion` payloads in the same direct little-endian component order as `M2ToMdxConverter`
+  - shared helper added at `WowViewer.Core.M2.M2CompQuaternion.FromRawLittleEndian(...)` so runtime and converter no longer drift on the same on-disk payload
+  - synthetic runtime fixture encoding in `WowViewer.Core.Tests` was updated to match the real payload order
+  - focused proof: `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter M2RuntimeTests` passed `25/25`
+  - remaining proof gap: active viewer runtime signoff still requires a viewer restart because the live `ParpToolsWoWViewer` process holds the app output binaries open
+- **M2 3.3.5 skin bone-remap hotfix (2026-06-01)**
+  - `WowViewer.Core.Runtime.M2.M2StaticRenderModelBuilder` now uses `.skin` `BoneEntries` for runtime render-vertex bone indices when present
+  - new runtime regression test proves skin-owned bone remap overrides raw M2 vertex bone indices
+  - focused proof: `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter M2RuntimeTests` passed `26/26`
+  - remaining proof gap: live viewer/world signoff still requires restarting the running viewer process and rechecking affected 3.3.5 animated doodads
 - V16 dataset generation + training is the primary active workflow.
 - Harvest-first is canonical:
   - `WowViewer.Tool.Harvest`

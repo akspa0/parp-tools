@@ -60,6 +60,7 @@
 - [ ] T025 [P] Update `specs/035-m2-render-parity-recovery/` docs with final evidence paths and known limitations.
 - [ ] T026 Run `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` and record build result in feature notes.
 - [ ] T027 Run targeted probes for all sample models and record a final pass/fail summary in `specs/035-m2-render-parity-recovery/parity-results.md`.
+- [ ] T028 [P] Record a deferred `3.0.1.8303` prototype `MD20` / `.mdx` investigation note in `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md` and carry the follow-up into future cross-build parity planning.
 
 ## Dependencies & Execution Order
 

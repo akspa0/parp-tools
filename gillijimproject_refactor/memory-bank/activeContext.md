@@ -1,7 +1,33 @@
 # ACTIVE CONTEXT — wow-viewer
 
 ## Branch
-- `v0.5.0-dev`
+- `036-renderer-improvements`
+
+## Renderer Planning Lane
+- Renderer modernization planning now has an explicit convergence owner:
+  - `wow-viewer/specs/036-renderer-improvements/spec.md`
+  - `wow-viewer/specs/036-renderer-improvements/plan.md`
+  - `wow-viewer/specs/036-renderer-improvements/tasks.md`
+- Purpose:
+  - converge source plans `030-wmo-render-pass-architecture`
+  - `031-terrain-cell-awareness`
+  - `032-native-renderer-parity`
+  - into one library-first owner plan for terrain, WMO, lighting, sky/fog, liquid, and thin viewer-host integration
+- Source specs 030-032 remain reference slices and now point readers to 036 as the active owner plan
+- Spec `035-m2-render-parity-recovery` remains a separate adjacent lane and is not absorbed into 036
+- New M2 note:
+  - staged `3.0.1.8303` Northrend currently shows some `.mdx` placements failing both `.skin` resolution and M2-to-MDX fallback
+  - treat these as a likely prototype `MD20` / `Model2` build-profile boundary
+  - future proof owner is a Ghidra pass over staged `3.0.1.8303` `wow.exe`, not more blind renderer guessing
+  - staged `3.3.5.12340` wrong-axis M2 animation regression is now localized to runtime compressed-quaternion payload interpretation drift:
+    - runtime sampler had been reading `M2CompQuaternion` as a swizzled `(y, -x, z, w)` payload
+    - converter/compatibility path was already reading direct little-endian `(x, y, z, w)`
+    - current fix centralizes the direct read path in `WowViewer.Core.M2.M2CompQuaternion.FromRawLittleEndian(...)`
+    - focused proof currently comes from `WowViewer.Core.Tests.M2RuntimeTests`; live viewer signoff still requires restarting the running viewer binary
+  - follow-up `3.3.5.12340` motion-coupling seam is now localized to skin vertex bone remap:
+    - `.skin` `BoneEntries` were parsed but ignored by `M2StaticRenderModelBuilder`
+    - runtime now prefers `skin.BoneEntries[localSkinVertexIndex]` over raw `M2Vertex.bone_indices` when constructing runtime render vertices
+    - this is the current best explanation for cases where separate visual sections move together after axis decode is fixed
 
 ## Primary Live Lane
 - V16 terrain dataset + training is the current execution path.

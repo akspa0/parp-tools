@@ -1,3 +1,13 @@
 {
-	"mcpServers": {}
+	"mcpServers": {
+		"playwright": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@playwright/mcp@0.0.38"
+			],
+			"disabled": true,
+			"alwaysAllow": []
+		}
+	}
 }

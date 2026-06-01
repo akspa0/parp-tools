@@ -2,6 +2,8 @@
 
 **Branch**: `032-native-renderer-parity` | **Date**: 2026-05-30 | **Spec**: [spec.md](./spec.md)
 
+**Convergence Note**: Active renderer-owner planning now lives in [specs/036-renderer-improvements/plan.md](../036-renderer-improvements/plan.md). This document remains a source-slice reference for broader runtime parity goals.
+
 **Input**: Feature specification from `wow-viewer/specs/032-native-renderer-parity/spec.md`
 
 ## Summary
