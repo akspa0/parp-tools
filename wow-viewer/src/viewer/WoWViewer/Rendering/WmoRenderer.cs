@@ -76,8 +76,9 @@ public class WmoRenderer : ISceneRenderer
     private const int DeferredMaterialTextureLoadsPerFrame = 1;
     private const double DeferredMaterialTextureLoadBudgetMs = 2.0;
 
-    // Doodad support
+// Doodad support
     private readonly Dictionary<string, IModelRenderer?> _doodadModelCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, M2RouteDecision?> _doodadRouteDecisions = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<DoodadInstance> _doodadInstances = new();
     private readonly List<string> _doodadNames = new(); // resolved from MODN
     private readonly Dictionary<string, string> _canonicalDoodadPathCache = new(StringComparer.OrdinalIgnoreCase);
@@ -105,6 +106,9 @@ public class WmoRenderer : ISceneRenderer
     private const float DoodadMaxRenderCount = 1024; // Soft cap to avoid large WMO doodad sets dropping out too early
 
     public int PendingDoodadModelLoadCount => _pendingDoodadModelLoads.Count;
+
+    public M2RouteDecision? GetDoodadRouteDecision(string normalizedPath)
+        => _doodadRouteDecisions.TryGetValue(normalizedPath, out var decision) ? decision : null;
 
     // WMO liquid meshes (from MLIQ chunks in groups)
     private readonly List<LiquidMeshData> _liquidMeshes = new();
@@ -1893,9 +1897,10 @@ void main() {
         return renderer;
     }
 
-    private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string resolvedModelPath, byte[] modelData)
+private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string resolvedModelPath, byte[] modelData)
     {
         WarcraftNetM2Adapter.ValidateModelProfile(modelData, resolvedModelPath, _buildVersion);
+        string buildProfileId = FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId ?? "unknown";
 
         var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
         string? bestSkinPath = ResolveBestSkinPath(resolvedModelPath);
@@ -1913,14 +1918,26 @@ void main() {
 
             anySkinFound = true;
 
-try
+            try
             {
                 ViewerLog.Trace($"[M2] Trying WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
+                M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelData, skinBytes, resolvedModelPath, skinPath);
                 var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, _buildVersion);
+
+                var route = M2RouteDecision.Create(originalModelPath, buildProfileId, M2RouteType.AdapterSkin, M2RouteType.AdapterSkin, skinPath);
+                _doodadRouteDecisions[NormalizeDoodadPath(originalModelPath)] = route;
+                M2RouteDiagnostics.LogRouteDecision(route);
+
                 ViewerLog.Info(ViewerLog.Category.Mdx,
                     $"[M2] Selected WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
-                return new M2Renderer(
-                    new MdxRenderer(_gl, adapted, Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                return WowViewerM2RuntimeBridge.CreateRenderer(
+                    _gl,
+                    runtimeModel,
+                    adapted,
+                    Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir,
+                    _dataSource,
+                    _texResolver,
+                    _buildVersion,
                     resolvedModelPath);
             }
             catch (Exception ex)
@@ -1939,6 +1956,11 @@ try
                 {
                     var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, null, resolvedModelPath, _buildVersion);
                     string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
+
+                    var route = M2RouteDecision.Create(originalModelPath, buildProfileId, M2RouteType.AdapterEmbeddedProfile, M2RouteType.AdapterEmbeddedProfile, fallbackReason: "No external .skin resolved for WMO doodad, using embedded root-profile");
+                    _doodadRouteDecisions[NormalizeDoodadPath(originalModelPath)] = route;
+                    M2RouteDiagnostics.LogRouteDecision(route);
+
                     ViewerLog.Info(ViewerLog.Category.Mdx,
                         $"[M2] Loaded embedded root-profile geometry for WMO doodad {Path.GetFileName(originalModelPath)} after no external .skin resolved");
                     return new M2Renderer(
@@ -1969,6 +1991,11 @@ try
                     if (WarcraftNetM2Adapter.HasRenderableGeometry(convertedMdx))
                     {
                         string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
+
+                        var route = M2RouteDecision.Create(originalModelPath, buildProfileId, M2RouteType.AdapterSkin, M2RouteType.ConversionFallback, fallbackReason: "Adapter/skin path failed for WMO doodad, fell back to M2->MDX conversion");
+                        _doodadRouteDecisions[NormalizeDoodadPath(originalModelPath)] = route;
+                        M2RouteDiagnostics.LogRouteDecision(route);
+
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Falling back to M2->MDX conversion for WMO doodad {Path.GetFileName(originalModelPath)} after adapter failure");
                         return new M2Renderer(

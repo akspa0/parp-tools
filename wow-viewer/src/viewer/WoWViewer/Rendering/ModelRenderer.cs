@@ -1009,13 +1009,13 @@ public class MdxRenderer : IModelRenderer
                             $"[M2-PASS] pass={pass} geoset={gb.GeosetIndex} layer={l} family={materialFamily} blend={effectiveBlendMode} coordId={layer.CoordId} uvSet={activeUvSet} env={(usesSphereEnvMap ? 1 : 0)} tex={texId}");
                     }
 
-                    if (isAlphaCutout)
+if (isAlphaCutout)
                     {
                         // Alpha-tested cutout: opaque pass, depth writes ON, high discard threshold
                         // Adapted M2 foliage textures often encode antialiased edge coverage below
                         // the historical 0.75 threshold; keep a lower gate there to avoid dropping
                         // entire canopies while preserving strict MDX cutout behavior elsewhere.
-                        float alphaCutoutThreshold = _isM2AdapterModel ? 0.20f : 0.75f;
+                        float alphaCutoutThreshold = _isM2AdapterModel ? 0.15f : 0.75f;
                         _gl.Disable(EnableCap.Blend);
                         _gl.DepthMask(!forceBackdropState);
                         _gl.Uniform1(_uAlphaTest, 1);

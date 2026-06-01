@@ -38,8 +38,8 @@ internal static class WowViewerM2RuntimeBridge
         get
         {
             string? value = Environment.GetEnvironmentVariable(NativeRendererSettingName);
-if (string.IsNullOrWhiteSpace(value))
-                return false;
+            if (string.IsNullOrWhiteSpace(value))
+                return true;
 
             if (string.Equals(value, "0", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(value, "false", StringComparison.OrdinalIgnoreCase)

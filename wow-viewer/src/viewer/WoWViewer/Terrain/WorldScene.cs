@@ -8330,7 +8330,7 @@ public class WorldScene : ISceneRenderer
                         batchRenderer?.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
                             lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
 
-                        (frame.OpaqueBatchedMdxCount, frame.OpaqueUnbatchedMdxCount) =
+(frame.OpaqueBatchedMdxCount, frame.OpaqueUnbatchedMdxCount) =
                             WorldObjectPassCoordinator.ExecutePlannedOpaqueMdx(
                                 frame.ObjectPasses,
                                 frame.Visibility,
@@ -8339,6 +8339,12 @@ public class WorldScene : ISceneRenderer
                                     IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
                                     if (renderer == null)
                                         return;
+
+                                    if (!_renderDiagPrinted)
+                                    {
+                                        ViewerLog.Info(ViewerLog.Category.Mdx,
+                                            $"[M2-WORLD-DIAG] opaqueUnbatched key=\"{visible.Instance.ModelKey}\" renderer={renderer?.GetType().Name} hasTransparent={renderer?.HasTransparentWorldPass} requiresUnbatched={renderer?.RequiresUnbatchedWorldRender} bounds=({visible.Instance.BoundsMin.X:F1},{visible.Instance.BoundsMin.Y:F1},{visible.Instance.BoundsMin.Z:F1})-({visible.Instance.BoundsMax.X:F1},{visible.Instance.BoundsMax.Y:F1},{visible.Instance.BoundsMax.Z:F1}) pos={visible.Instance.Transform.Translation}");
+                                    }
 
                                     renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Opaque, visible.OpaqueFade,
                                         fogColor, objectFogStart, objectFogEnd, cameraPos,

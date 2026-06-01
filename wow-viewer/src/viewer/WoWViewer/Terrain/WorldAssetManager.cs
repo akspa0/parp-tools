@@ -115,6 +115,9 @@ public class WorldAssetManager : IDisposable
     private readonly HashSet<string> _knownMissingM2SkinPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _loggedMissingM2SkinPaths = new(StringComparer.OrdinalIgnoreCase);
 
+// M2 route decision tracking
+    private readonly Dictionary<string, M2RouteDecision?> _mdxRouteDecisions = new(StringComparer.OrdinalIgnoreCase);
+
     // Stats
     public int MdxModelsLoaded => _mdxModels.Count(kv => kv.Value != null);
     public int MdxModelsFailed => _mdxModels.Count(kv => kv.Value == null);
@@ -122,9 +125,12 @@ public class WorldAssetManager : IDisposable
     public int WmoModelsFailed => _wmoModels.Count(kv => kv.Value == null);
     public int FileCacheCount => _fileDataCache.Count;
     public int PendingAssetLoadCount => _queuedMdxLoads.Count + _queuedWmoLoads.Count;
-    public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer => renderer?.PendingDoodadModelLoadCount ?? 0);
+public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer => renderer?.PendingDoodadModelLoadCount ?? 0);
     public int KnownMissingM2SkinCount => _knownMissingM2SkinPaths.Count;
     public long SuppressedFailedMdxRetryCount => _suppressedFailedMdxRetryCount;
+
+    public M2RouteDecision? GetRouteDecision(string normalizedKey)
+        => _mdxRouteDecisions.TryGetValue(normalizedKey, out var decision) ? decision : null;
     public long SuppressedMissingM2SkinLogCount => _suppressedMissingM2SkinLogCount;
 
     private long _fileReadRequests;
@@ -971,13 +977,14 @@ public class WorldAssetManager : IDisposable
 
     // ── Private loading ────────────────────────────────────────────────
 
-    private int _mdxLoadFailCount = 0;
+private int _mdxLoadFailCount = 0;
     private IModelRenderer? LoadMdxModel(string normalizedKey)
     {
         var stopwatch = Stopwatch.StartNew();
         try
         {
             string resolvedModelPath = ResolveCanonicalModelPath(normalizedKey);
+            string buildProfileId = FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId ?? "unknown";
             byte[]? data = ReadFileData(resolvedModelPath);
             if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
                 data = ReadFileData(normalizedKey);
@@ -1021,11 +1028,25 @@ public class WorldAssetManager : IDisposable
                     try
                     {
                         ViewerLog.Trace($"[M2] Trying skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
+                        M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(data, skinBytes, resolvedModelPath, skinPath);
                         var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, _buildVersion);
+
+                        var route = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.AdapterSkin, M2RouteType.AdapterSkin, skinPath);
+                        _mdxRouteDecisions[normalizedKey] = route;
+                        M2RouteDiagnostics.LogRouteDecision(route);
 
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Selected skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        return new M2Renderer(new MdxRenderer(_gl, adapted, Path.GetDirectoryName(resolvedModelPath) ?? "", _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true), resolvedModelPath);
+                        return WowViewerM2RuntimeBridge.CreateRenderer(
+                            _gl,
+                            runtimeModel,
+                            adapted,
+                            Path.GetDirectoryName(resolvedModelPath),
+                            _dataSource,
+                            _texResolver,
+                            _buildVersion,
+                            resolvedModelPath,
+                            deferInitialTextureLoads: true);
                     }
                     catch (Exception ex)
                     {
@@ -1043,6 +1064,11 @@ public class WorldAssetManager : IDisposable
                         {
                             var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, null, resolvedModelPath, _buildVersion);
                             string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
+
+                            var route = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.AdapterEmbeddedProfile, M2RouteType.AdapterEmbeddedProfile, fallbackReason: "No external .skin resolved, using embedded root-profile");
+                            _mdxRouteDecisions[normalizedKey] = route;
+                            M2RouteDiagnostics.LogRouteDecision(route);
+
                             ViewerLog.Info(ViewerLog.Category.Mdx,
                                 $"[M2] Loaded embedded root-profile geometry for {Path.GetFileName(normalizedKey)} after no external .skin resolved");
                             return new M2Renderer(
@@ -1072,6 +1098,11 @@ public class WorldAssetManager : IDisposable
                             if (WarcraftNetM2Adapter.HasRenderableGeometry(convertedMdx))
                             {
                                 string convertedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
+
+                                var route = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.AdapterSkin, M2RouteType.ConversionFallback, fallbackReason: "Adapter/skin path failed, fell back to M2->MDX conversion");
+                                _mdxRouteDecisions[normalizedKey] = route;
+                                M2RouteDiagnostics.LogRouteDecision(route);
+
                                 ViewerLog.Info(ViewerLog.Category.Mdx,
                                     $"[M2] Falling back to M2->MDX conversion for {Path.GetFileName(normalizedKey)} after adapter failure");
                                 return new M2Renderer(
@@ -1102,6 +1133,11 @@ public class WorldAssetManager : IDisposable
             using var ms = new MemoryStream(data);
             var mdx = MdxFile.Load(ms);
             string modelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
+
+            var mdxRoute = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.MdxDirect, M2RouteType.MdxDirect);
+            _mdxRouteDecisions[normalizedKey] = mdxRoute;
+            M2RouteDiagnostics.LogRouteDecision(mdxRoute);
+
             return new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver, resolvedModelPath, buildVersion: _buildVersion, deferInitialTextureLoads: true);
         }
         catch (Exception ex)

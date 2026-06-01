@@ -6,18 +6,18 @@
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Create parity evidence root at `wow-viewer/output/tmp/m2-parity/` and add run naming conventions in `specs/035-m2-render-parity-recovery/quickstart.md`.
-- [ ] T002 Add a feature-scoped parity sample manifest doc at `specs/035-m2-render-parity-recovery/parity-samples.md` with initial 3.3.5 model/tile sample IDs.
-- [ ] T003 [P] Add a small route-decision contract note in `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md` linking this feature.
+- [x] T001 Create parity evidence root at `wow-viewer/output/tmp/m2-parity/` and add run naming conventions in `specs/035-m2-render-parity-recovery/quickstart.md`.
+- [x] T002 Add a feature-scoped parity sample manifest doc at `specs/035-m2-render-parity-recovery/parity-samples.md` with initial 3.3.5 model/tile sample IDs.
+- [x] T003 [P] Add a small route-decision contract note in `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md` linking this feature.
 
 ## Phase 2: Foundational (Blocking Prerequisites)
 
-- [ ] T004 Implement a shared `M2RouteDecision` record and enums in `wow-viewer/src/viewer/WoWViewer/Rendering/` for world-route outcomes.
-- [ ] T005 Implement a shared `M2MaterialPassProfile` diagnostic record in `wow-viewer/src/viewer/WoWViewer/Rendering/`.
-- [ ] T006 Refactor world M2 load path to return route decision metadata from `wow-viewer/src/viewer/WoWViewer/Terrain/WorldAssetManager.cs`.
-- [ ] T007 Refactor WMO doodad M2 load path to return route decision metadata from `wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs`.
-- [ ] T008 [P] Extend probe output plumbing in `wow-viewer/src/viewer/WoWViewer/AssetProbe.cs` to print route decision metadata.
-- [ ] T009 Add a single formatter utility for route diagnostics in `wow-viewer/src/viewer/WoWViewer/Rendering/` and route all M2 probe/runtime logs through it.
+- [x] T004 Implement a shared `M2RouteDecision` record and enums in `wow-viewer/src/viewer/WoWViewer/Rendering/` for world-route outcomes.
+- [x] T005 Implement a shared `M2MaterialPassProfile` diagnostic record in `wow-viewer/src/viewer/WoWViewer/Rendering/`.
+- [x] T006 Refactor world M2 load path to return route decision metadata from `wow-viewer/src/viewer/WoWViewer/Terrain/WorldAssetManager.cs`.
+- [x] T007 Refactor WMO doodad M2 load path to return route decision metadata from `wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs`.
+- [x] T008 [P] Extend probe output plumbing in `wow-viewer/src/viewer/WoWViewer/AssetProbe.cs` to print route decision metadata.
+- [x] T009 Add a single formatter utility for route diagnostics in `wow-viewer/src/viewer/WoWViewer/Rendering/` and route all M2 probe/runtime logs through it.
 
 ## Phase 3: User Story 1 - Stable World Doodad Visibility (Priority: P1) 🎯 MVP
 

@@ -35,3 +35,24 @@ Store outputs/logs under:
 
 - `wow-viewer/output/tmp/m2-parity/`
 - include sample id, build, tile, and timestamp in file names.
+
+### Naming Conventions
+
+Evidence files MUST follow this naming scheme:
+
+```
+m2-parity-{phaseId}-{sampleId}-{buildId}-{tileX}_{tileY}-{timestamp}.txt
+```
+
+Where:
+- `phaseId` = evidence phase group: `us1`, `us2`, `us3`, `probe-adapter`, `probe-runtime`
+- `sampleId` = sample identifier from parity-samples.md (e.g. `elwynn-tree-01`)
+- `buildId` = staged build label (e.g. `335-12340`)
+- `tileX_tileY` = tile coordinates in `{x}_{y}` format (e.g. `27_57`)
+- `timestamp` = capture UTC in `YYYYMMDDTHHmmssZ` format
+
+Example:
+
+```
+m2-parity-us1-elwynn-tree-01-335-12340-27_57-20260601T143000Z.txt
+```

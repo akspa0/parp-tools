@@ -225,7 +225,9 @@ internal static class AssetProbe
             Console.WriteLine($"[M2-ADAPT-PROBE] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
             try
             {
-                var runtimeModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, skinBytes, normalizedModelPath, buildVersion);
+var runtimeModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, skinBytes, normalizedModelPath, buildVersion);
+                var adapterRoute = M2RouteDecision.Create(normalizedModelPath, profile.ProfileId, M2RouteType.AdapterSkin, M2RouteType.AdapterSkin, skinPath);
+                Console.WriteLine(M2RouteDiagnostics.FormatRouteDecision(adapterRoute));
                 Console.WriteLine($"[M2-ADAPT-PROBE] Selected skin: {skinPath}");
                     PrintRendererEquivalentDiagnostics(runtimeModel, normalizedModelPath, skinPath, replaceableResolver, null);
                 return;
@@ -240,8 +242,10 @@ internal static class AssetProbe
 
         if (string.Equals(profile.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
         {
-            Console.WriteLine("[M2-ADAPT-PROBE] No external .skin resolved; trying embedded root-profile fallback.");
+Console.WriteLine("[M2-ADAPT-PROBE] No external .skin resolved; trying embedded root-profile fallback.");
             var runtimeModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, null, normalizedModelPath, buildVersion);
+                var embeddedRoute = M2RouteDecision.Create(normalizedModelPath, profile.ProfileId, M2RouteType.AdapterEmbeddedProfile, M2RouteType.AdapterEmbeddedProfile, fallbackReason: "No external .skin resolved");
+                Console.WriteLine(M2RouteDiagnostics.FormatRouteDecision(embeddedRoute));
                 PrintRendererEquivalentDiagnostics(runtimeModel, normalizedModelPath, "<embedded-root-profile>", replaceableResolver, null);
             return;
         }
@@ -296,10 +300,12 @@ internal static class AssetProbe
             Console.WriteLine($"[M2-RUNTIME-PROBE] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
             try
             {
-                var runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelBytes, skinBytes, normalizedModelPath, skinPath);
+var runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelBytes, skinBytes, normalizedModelPath, skinPath);
                 int vertexCount = runtimeModel.Sections.Sum(static section => section.Vertices.Count);
                 int triangleCount = runtimeModel.Sections.Sum(static section => section.Indices.Count / 3);
                 int transparentSectionCount = runtimeModel.Sections.Count(static section => section.Material.IsTransparent);
+                var runtimeRoute = M2RouteDecision.Create(normalizedModelPath, profile.ProfileId, M2RouteType.AdapterSkin, M2RouteType.AdapterSkin, skinPath);
+                Console.WriteLine(M2RouteDiagnostics.FormatRouteDecision(runtimeRoute));
                 Console.WriteLine($"[M2-RUNTIME-PROBE] Selected skin: {skinPath}");
                 Console.WriteLine($"[M2-RUNTIME-PROBE] sections={runtimeModel.Sections.Count} transparentSections={transparentSectionCount} vertices={vertexCount} triangles={triangleCount} boundsMin={runtimeModel.BoundsMin} boundsMax={runtimeModel.BoundsMax}");
                 return;

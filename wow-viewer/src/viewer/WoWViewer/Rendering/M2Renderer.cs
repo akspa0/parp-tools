@@ -158,7 +158,7 @@ public sealed class M2Renderer : IModelRenderer
         }
     }
 
-    public bool RequiresUnbatchedWorldRender => _legacyRenderer != null && _legacyRenderer.RequiresUnbatchedWorldRender;
+    public bool RequiresUnbatchedWorldRender => true;
 
     public IAnimationController? Animator => _legacyRenderer?.Animator ?? _runtimeAnimator;
 
@@ -652,7 +652,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
 
-foreach (SectionBuffers section in _sections)
+        foreach (SectionBuffers section in _sections)
         {
             if (!section.Visible)
                 continue;
@@ -663,19 +663,11 @@ foreach (SectionBuffers section in _sections)
             if (pass == RenderPass.Transparent && !transparent)
                 continue;
 
-            if (section.Material.IsTwoSided)
-                _gl.Disable(EnableCap.CullFace);
-            else
-                _gl.Enable(EnableCap.CullFace);
+            // Keep parity with the established M2 compatibility path until the
+            // pure runtime renderer has proven stable winding or projected-pass rules.
+            _gl.Disable(EnableCap.CullFace);
 
-            bool isAlphaKey = section.Material.BlendMode == M2BlendMode.AlphaKey;
-            if (!backdrop && isAlphaKey)
-            {
-                _gl.Enable(EnableCap.Blend);
-                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-                _gl.DepthMask(false);
-            }
-            else if (!backdrop && transparent)
+            if (!backdrop && transparent)
             {
                 _gl.Enable(EnableCap.Blend);
                 ConfigureBlendMode(section.Material.BlendMode);

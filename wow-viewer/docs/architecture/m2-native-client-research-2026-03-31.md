@@ -1,5 +1,7 @@
 # Native M2 Client Research - Mar 31, 2026
 
+**See also**: [M2 Render Parity Recovery](../../specs/035-m2-render-parity-recovery/plan.md) — deterministic world route contract and parity evidence for 3.3.5 world M2 rendering.
+
 Implementation-facing readers should start with `docs/architecture/m2/`.
 
 This file remains the raw native evidence log and build-by-build behavior notebook behind that consolidated doc set.
@@ -19,6 +21,20 @@ The current confirmed findings now come from three native/reverse-engineering pa
 - Treat these findings as input for the future `wow-viewer` M2 library and renderer path.
 - Do not treat `MdxViewer` as the canonical implementation target for new M2 semantics.
 - Any future parser, skin, section, or render-state work derived from this note should land in `wow-viewer` first, with `MdxViewer` only as an optional compatibility consumer.
+
+## Migration Parity Note - Jun 1, 2026
+
+The last known-good pre-migration world M2 route in `MdxViewer` was narrower than the current `wow-viewer` worktree had become.
+
+- successful world and WMO doodad `.skin` loads went through `WowViewerM2RuntimeBridge.BuildStaticRenderModel(...)`
+- those loads then went through `WowViewerM2RuntimeBridge.CreateRenderer(...)`, not a direct `new M2Renderer(new MdxRenderer(...))` bypass
+- `WowViewerM2RuntimeBridge.PreferNativeStaticRenderer` defaulted to `true` when `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER` was unset
+- `M2Renderer.RequiresUnbatchedWorldRender` was effectively `true` for the world path
+
+Implication for parity recovery:
+
+- if `wow-viewer` bypasses the bridge or flips the bridge default to compatibility-first, it is no longer running the same default world M2 route that existed in the pre-migration renderer
+- if the native runtime renderer is restored as the default world route, it must keep the unbatched world-pass contract or world M2s can disappear by falling into a batched path they do not currently drive
 
 ## Early 2.0.0.5610 Boundary
 
