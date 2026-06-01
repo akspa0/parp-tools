@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "m2-route-decision.schema.json",
+  "title": "M2RouteDecision",
+  "type": "object",
+  "required": [
+    "modelPath",
+    "buildProfileId",
+    "primaryRoute",
+    "appliedRoute",
+    "timestampUtc"
+  ],
+  "properties": {
+    "modelPath": { "type": "string", "minLength": 1 },
+    "buildProfileId": { "type": "string", "minLength": 1 },
+    "primaryRoute": { "type": "string", "minLength": 1 },
+    "appliedRoute": { "type": "string", "minLength": 1 },
+    "selectedSkinPath": { "type": ["string", "null"] },
+    "fallbackReason": { "type": ["string", "null"] },
+    "timestampUtc": { "type": "string", "format": "date-time" }
+  }
+}

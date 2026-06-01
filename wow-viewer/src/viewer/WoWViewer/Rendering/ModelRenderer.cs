@@ -1012,11 +1012,15 @@ public class MdxRenderer : IModelRenderer
                     if (isAlphaCutout)
                     {
                         // Alpha-tested cutout: opaque pass, depth writes ON, high discard threshold
+                        // Adapted M2 foliage textures often encode antialiased edge coverage below
+                        // the historical 0.75 threshold; keep a lower gate there to avoid dropping
+                        // entire canopies while preserving strict MDX cutout behavior elsewhere.
+                        float alphaCutoutThreshold = _isM2AdapterModel ? 0.20f : 0.75f;
                         _gl.Disable(EnableCap.Blend);
                         _gl.DepthMask(!forceBackdropState);
                         _gl.Uniform1(_uAlphaTest, 1);
                         _gl.Uniform1(_uUseTextureAlpha, 1);
-                        _gl.Uniform1(_uAlphaThreshold, 0.75f);
+                        _gl.Uniform1(_uAlphaThreshold, alphaCutoutThreshold);
                         _gl.Uniform1(_uPremultiplyAlpha, 0);
                     }
                     else if (needsBlend)

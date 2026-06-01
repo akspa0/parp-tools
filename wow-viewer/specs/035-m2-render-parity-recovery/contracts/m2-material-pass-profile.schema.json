@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "m2-material-pass-profile.schema.json",
+  "title": "M2MaterialPassProfile",
+  "type": "object",
+  "required": [
+    "modelPath",
+    "sectionIndex",
+    "materialIndex",
+    "layerIndex",
+    "blendDeclaration",
+    "passClass",
+    "depthWrite",
+    "blendEnabled"
+  ],
+  "properties": {
+    "modelPath": { "type": "string", "minLength": 1 },
+    "sectionIndex": { "type": "integer", "minimum": 0 },
+    "materialIndex": { "type": "integer", "minimum": 0 },
+    "layerIndex": { "type": "integer", "minimum": 0 },
+    "blendDeclaration": { "type": "string", "minLength": 1 },
+    "passClass": { "type": "string", "enum": ["Opaque", "Cutout", "Blended"] },
+    "depthWrite": { "type": "boolean" },
+    "blendEnabled": { "type": "boolean" },
+    "alphaThreshold": { "type": ["number", "null"] }
+  }
+}
