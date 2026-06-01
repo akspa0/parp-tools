@@ -1021,20 +1021,11 @@ public class WorldAssetManager : IDisposable
                     try
                     {
                         ViewerLog.Trace($"[M2] Trying skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(data, skinBytes, resolvedModelPath, skinPath);
                         var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, _buildVersion);
+
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Selected skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        return WowViewerM2RuntimeBridge.CreateRenderer(
-                            _gl,
-                            runtimeModel,
-                            adapted,
-                            Path.GetDirectoryName(resolvedModelPath),
-                            _dataSource,
-                            _texResolver,
-                            _buildVersion,
-                            resolvedModelPath,
-                            deferInitialTextureLoads: true);
+                        return new M2Renderer(new MdxRenderer(_gl, adapted, Path.GetDirectoryName(resolvedModelPath) ?? "", _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true), resolvedModelPath);
                     }
                     catch (Exception ex)
                     {

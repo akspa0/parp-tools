@@ -1913,21 +1913,14 @@ void main() {
 
             anySkinFound = true;
 
-            try
+try
             {
                 ViewerLog.Trace($"[M2] Trying WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
-                M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelData, skinBytes, resolvedModelPath, skinPath);
                 var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, _buildVersion);
                 ViewerLog.Info(ViewerLog.Category.Mdx,
                     $"[M2] Selected WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
-                return WowViewerM2RuntimeBridge.CreateRenderer(
-                    _gl,
-                    runtimeModel,
-                    adapted,
-                    Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir,
-                    _dataSource,
-                    _texResolver,
-                    _buildVersion,
+                return new M2Renderer(
+                    new MdxRenderer(_gl, adapted, Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
                     resolvedModelPath);
             }
             catch (Exception ex)
