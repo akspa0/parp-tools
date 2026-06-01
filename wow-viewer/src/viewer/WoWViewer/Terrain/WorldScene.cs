@@ -855,14 +855,18 @@ public class WorldScene : ISceneRenderer
             double totalCpuMs,
             int pendingAssetLoadCount,
             int terrainChunksRendered,
-            int wdlVisibleTileCount)
+            int terrainChunksCulled,
+            int wdlVisibleTileCount,
+            int wdlHiddenTileCount)
         {
             int visibleMdxCount = Math.Max(0, VisibleMdxInstances.Count - VisibleTaxiMdxCount);
             return new WorldRenderFrameStats(
                 totalCpuMs,
                 pendingAssetLoadCount,
                 terrainChunksRendered,
+                terrainChunksCulled,
                 wdlVisibleTileCount,
+                wdlHiddenTileCount,
                 VisibleWmoInstances.Count,
                 visibleMdxCount,
                 VisibleTaxiMdxCount,
@@ -8065,12 +8069,16 @@ public class WorldScene : ISceneRenderer
     private void FinalizeRenderFrameStats(WorldRenderFrame frame, Stopwatch frameTimer)
     {
         int terrainChunksRendered = _terrainManager.Renderer.ChunksRendered;
+        int terrainChunksCulled = _terrainManager.Renderer.ChunksCulled;
         int wdlVisibleTiles = _wdlTerrain?.VisibleTiles ?? 0;
+        int wdlHiddenTiles = _wdlTerrain?.HiddenTiles ?? 0;
         LastRenderFrameStats = frame.ToStats(
             frameTimer.Elapsed.TotalMilliseconds,
             _assets.PendingAssetLoadCount,
             terrainChunksRendered,
-            wdlVisibleTiles);
+            terrainChunksCulled,
+            wdlVisibleTiles,
+            wdlHiddenTiles);
     }
 
     // ── ISceneRenderer ──────────────────────────────────────────────────

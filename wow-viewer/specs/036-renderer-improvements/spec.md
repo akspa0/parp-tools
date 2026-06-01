@@ -39,6 +39,7 @@ As a renderer engineer, I can implement renderer modernization as bounded, depen
 1. **Given** a terrain-topology slice, **When** the engineer checks the convergence plan, **Then** it is scheduled after lighting foundations only where truly required and before terrain LOD or liquid polish work that depends on it.
 2. **Given** a WMO pass-architecture slice, **When** the engineer checks the convergence plan, **Then** it lands under `WowViewer.Core.Runtime` ownership with viewer host wiring clearly separated.
 3. **Given** a viewer-only debug or inspection surface, **When** it is planned, **Then** the convergence plan distinguishes it from shared runtime/library work and keeps the app host thin.
+4. **Given** a runtime control surface extracted from 3.3.5 (`terrainLOD`, `mapObjLightLOD`, `terrainAlphaBitDepth`, `MaxLights`, `projectedTextures`, `waterLOD`, and M2 runtime optimization flags), **When** implementation phases are defined, **Then** each control has an owning layer and explicit proof checkpoint.
 
 ---
 
@@ -55,6 +56,7 @@ As an operator, I can validate each renderer-improvements phase against staged c
 1. **Given** a completed convergence phase, **When** the operator checks the validation notes, **Then** they can run the listed commands and compare the expected evidence against staged client output.
 2. **Given** an M2-specific regression like route drift or animation parity, **When** the operator checks this convergence feature, **Then** it is identified as a dependency or adjacent track instead of being silently absorbed.
 3. **Given** a proposed renderer change that crosses terrain, WMO, and viewer layers, **When** the maintainer checks the convergence plan, **Then** they can see which proofs must pass before moving to the next phase.
+4. **Given** parity drift in a staged-client run, **When** diagnostics are reviewed, **Then** telemetry logs expose runtime control values (terrain/light/liquid/fog/M2 flags) before visual-comparison signoff.
 
 ---
 
@@ -65,6 +67,7 @@ As an operator, I can validate each renderer-improvements phase against staged c
 - M2 recovery work from spec 035 affects world-scene confidence but is not the owner plan for terrain/WMO modernization.
 - Viewer host integration may require bounded `WowViewer.App` work without shifting canonical ownership away from shared libraries.
 - Some source-plan steps may need to be deferred or dropped if they duplicate a lower-level prerequisite already covered elsewhere in the convergence plan.
+- Runtime control surfaces from native 3.3.5 can silently alter output quality/perf (`terrainLOD`, `waterLOD`, `projectedTextures`, `mapObjLightLOD`, M2 optimization flags) and must be captured as explicit phase checkpoints.
 
 ## Requirements *(mandatory)*
 
@@ -78,6 +81,9 @@ As an operator, I can validate each renderer-improvements phase against staged c
 - **FR-006**: The convergence plan MUST keep each phase independently validatable and limited to bite-sized steps.
 - **FR-007**: The convergence plan MUST identify which source-plan documents remain reference inputs and which new document becomes the active owner.
 - **FR-008**: The source plans in specs 030-032 MUST point readers to the new convergence owner plan.
+- **FR-009**: The convergence plan MUST include a runtime-controls inventory (terrain, lighting, fog, liquid, projected-texture, and M2 optimization controls) derived from staged `3.3.5.12340` Ghidra evidence.
+- **FR-010**: Each convergence phase MUST define telemetry checkpoints that record relevant runtime control values before visual parity signoff.
+- **FR-011**: M2 runtime findings included in this feature MUST remain bounded to convergence dependencies and diagnostics; full M2 parity ownership remains with spec 035.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -96,6 +102,8 @@ As an operator, I can validate each renderer-improvements phase against staged c
 - **SC-003**: No convergence phase contains more than 10 implementation steps.
 - **SC-004**: Validation guidance exists for each convergence phase and uses staged-client proof surfaces rather than abstract claims.
 - **SC-005**: Specs 030, 031, and 032 each contain a visible note directing readers to the convergence owner plan.
+- **SC-006**: `spec.md` + `plan.md` enumerate runtime controls for terrain/lighting/fog/liquid/M2 and map each to a phase-level proof checkpoint.
+- **SC-007**: Phase validation guidance includes telemetry artifacts (structured log/table outputs) in addition to screenshots.
 
 ## Assumptions
 
@@ -103,3 +111,4 @@ As an operator, I can validate each renderer-improvements phase against staged c
 - The current renderer recovery work in spec 035 improves immediate M2 confidence but remains a separate feature track.
 - `wow-viewer` remains the only implementation target; `gillijimproject_refactor` stays read-only reference-only.
 - Initial convergence is a planning/documentation feature, not a promise to implement every renderer slice in one session.
+- Ghidra evidence from staged `3.3.5.12340` is treated as authoritative for initial runtime-control dependency modeling in this convergence feature.

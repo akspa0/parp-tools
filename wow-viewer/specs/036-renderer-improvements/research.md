@@ -39,3 +39,37 @@
 **Alternatives considered**:
 - Start with terrain topology first: rejected because several downstream visual behaviors depend on shared lighting/fog contracts.
 - Start with WMO pass architecture first: rejected because interior fog and exterior lighting ownership would still be unsettled.
+
+## Decision: Add a 3.3.5 runtime-controls evidence lane from Ghidra before deeper parity slicing
+
+**Rationale**:
+- New Ghidra extraction from staged `wow.exe` `3.3.5.12340` exposed concrete runtime control surfaces that are currently under-modeled in spec 036:
+  - `M2_RegisterRuntimeFlags` (`0x00402760`) with toggles for `M2UseZFill`, `M2UseClipPlanes`, `M2UseThreads`, `M2BatchDoodads`, `M2BatchParticles`, and `M2ForceAdditiveParticleSort`.
+  - Terrain/video option registration (`0x0078e400`) and handlers for `terrainLOD` (`0x0078d610`), `mapObjLightLOD` (`0x0078ded0`), `terrainAlphaBitDepth` (`0x0078da50`), `MaxLights` (`0x0078d6b0`), `projectedTextures` (`0x0078dcf0`), and `waterLOD` (`0x0078d8b0`).
+  - Liquid shader family loading showing distinct magma and water paths (`vsLiquidMagma`/`psLiquidMagma`, plus `psLiquidWater`, `psLiquidWaterNoSpec`, `psLiquidProcWater*`).
+  - Fog override parsing from frame/environment config (`fogNear`, `fogFar`, `FogColor`) in `0x0095f800`.
+- Convergence planning without these runtime controls leaves missing dependency gates for validation and can cause false parity conclusions.
+
+**Alternatives considered**:
+- Keep spec 036 purely high-level and defer runtime controls to implementation: rejected because the missing controls are phase-ordering inputs, not optional implementation detail.
+- Move all control-surface tracking into spec 035: rejected because most extracted controls are terrain/WMO/liquid/lighting convergence concerns rather than M2-only parity concerns.
+
+## Decision: Keep M2 in spec 036 as a bounded dependency surface, not a parity-owner transfer
+
+**Rationale**:
+- `M2_ChooseAndLoadSkinProfile` (`0x0083cc80`) and `M2_InitializeSkinProfileAndRebuildInstances` (`0x00838490`) show runtime initialization/failure gates that affect world-scene confidence and diagnostics.
+- These findings should inform renderer convergence phase gating (especially telemetry and diagnostics), while full M2 parity and behavior recovery remain owned by spec 035.
+
+**Alternatives considered**:
+- Exclude M2 entirely from spec 036: rejected because world-render diagnostics would miss key runtime-control interactions.
+- Absorb full M2 parity into spec 036: rejected because this violates one-phase-at-a-time scope control and existing ownership boundaries.
+
+## Decision: Add a telemetry-first validation contract for runtime controls
+
+**Rationale**:
+- Current phase guidance is mostly screenshot-comparison oriented.
+- Ghidra evidence now supports deterministic runtime telemetry checkpoints, including active values for terrain LOD state, map-object light LOD, alpha-bit depth, projected textures, water/material path, fog parameters, and M2 optimization flags.
+- Telemetry-first checkpoints reduce ambiguity before visual parity sweeps.
+
+**Alternatives considered**:
+- Keep only visual proof checkpoints: rejected because visual-only deltas are hard to root-cause when multiple runtime toggles are drifting.

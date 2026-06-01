@@ -8,6 +8,7 @@
   - `wow-viewer/specs/036-renderer-improvements/spec.md`
   - `wow-viewer/specs/036-renderer-improvements/plan.md`
   - `wow-viewer/specs/036-renderer-improvements/tasks.md`
+  - `wow-viewer/specs/036-renderer-improvements/research.md`
 - Purpose:
   - converge source plans `030-wmo-render-pass-architecture`
   - `031-terrain-cell-awareness`
@@ -15,6 +16,20 @@
   - into one library-first owner plan for terrain, WMO, lighting, sky/fog, liquid, and thin viewer-host integration
 - Source specs 030-032 remain reference slices and now point readers to 036 as the active owner plan
 - Spec `035-m2-render-parity-recovery` remains a separate adjacent lane and is not absorbed into 036
+- 2026-06-01 RE-grounded planning refresh landed for `036` using staged `3.3.5.12340` Ghidra evidence:
+  - added runtime-controls inventory and phase gates for:
+    - terrain/light/fog/liquid controls
+    - projected-texture and water LOD toggles
+    - bounded M2 runtime optimization flags as dependency diagnostics (not ownership transfer)
+  - added telemetry-first validation requirement so control snapshots/logs are required before screenshot-only signoff
+- 2026-06-01 first implementation slice from the new LOD/cell route is now landed as telemetry scaffolding (before topology changes):
+  - `WorldRenderFrameStats` now carries terrain and far-terrain visibility counters for runtime diagnostics:
+    - `TerrainChunksCulled`
+    - `WdlHiddenTileCount`
+  - `WoWViewer` runtime frame assembly now populates those counters from live renderer state:
+    - terrain from `TerrainRenderer.ChunksCulled`
+    - WDL from `WdlTerrainRenderer.HiddenTiles`
+  - sidebar diagnostics now surface rendered/culled terrain chunks plus visible/hidden WDL tiles in one line
 - New M2 note:
   - staged `3.0.1.8303` Northrend currently shows some `.mdx` placements failing both `.skin` resolution and M2-to-MDX fallback
   - treat these as a likely prototype `MD20` / `Model2` build-profile boundary

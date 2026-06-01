@@ -28,6 +28,34 @@ Create a single renderer-improvements owner plan that converges the active work 
 
 **Scale/Scope**: Planning convergence across 3 source specs, 5 implementation phases, and shared validation boundaries for terrain, WMO, lighting, sky/fog, liquid, and viewer wiring
 
+## Ghidra-Driven Runtime Controls Inventory (3.3.5.12340)
+
+Use these extracted native controls as explicit convergence inputs and validation checkpoints:
+
+- **M2 runtime controls** (`M2_RegisterRuntimeFlags`, `0x00402760`):
+  - `M2UseZFill`
+  - `M2UseClipPlanes`
+  - `M2UseThreads`
+  - `M2BatchDoodads`
+  - `M2BatchParticles`
+  - `M2ForceAdditiveParticleSort`
+- **Terrain/world controls** (`0x0078e400` registration cluster):
+  - `terrainLOD`
+  - `mapObjLightLOD`
+  - `terrainAlphaBitDepth`
+  - `MaxLights`
+  - `projectedTextures`
+  - `waterLOD`
+- **Fog controls** (`0x0095f800` frame parse):
+  - `fogNear`
+  - `fogFar`
+  - `FogColor`
+- **Liquid material families** (shader/material symbol lane):
+  - water / no-spec / procedural-water
+  - magma
+
+These are planning/validation dependencies for spec 036; they do not transfer full M2 parity ownership from spec 035.
+
 ## Constitution Check
 
 | Principle | Status | Notes |
@@ -103,6 +131,7 @@ wow-viewer/src/viewer/WowViewer.App/
 4. Define sky-dome and clear-color ownership under runtime sky surfaces.
 5. Define staged-client proof cases for noon, dusk, and night lighting states.
 6. Validate lighting evaluation outputs against staged-client-driven expectations before moving on.
+7. Add telemetry checkpoints for fog controls (`fogNear`, `fogFar`, `FogColor`) and map-object light policy (`mapObjLightLOD`, `MaxLights`) as required phase evidence.
 
 ---
 
@@ -123,6 +152,7 @@ wow-viewer/src/viewer/WowViewer.App/
 4. Define native-accurate versus reconstructive hole handling as an explicit runtime choice.
 5. Validate vertex counts, face-plane counts, and cell-address results on staged clients.
 6. Validate runtime mesh/topology parity on a known terrain sample before moving on.
+7. Add terrain runtime-control checkpoints (`terrainLOD`, `terrainAlphaBitDepth`) and bind them to topology parity runs.
 
 ---
 
@@ -143,6 +173,7 @@ wow-viewer/src/viewer/WowViewer.App/
 4. Sequence liquid-in-WMO dispatch only after group dispatch semantics are stable.
 5. Validate interior and exterior sample WMOs with staged-client comparison evidence.
 6. Validate skip-group and always-render behavior before declaring the phase complete.
+7. Add projected-texture and fog-state telemetry checkpoints so interior/exterior deltas are captured as control-state evidence, not screenshots only.
 
 ---
 
@@ -163,6 +194,7 @@ wow-viewer/src/viewer/WowViewer.App/
 4. Define frame-pass coordination boundaries between terrain, WMO, liquid, and scene-level fog/sky work.
 5. Validate close, mid, and far terrain behavior plus interior/exterior water on staged clients.
 6. Record known parity gaps that remain after the bounded runtime pipeline pass.
+7. Add liquid material-path telemetry checkpoints (water/no-spec/proc-water/magma) and `waterLOD` state capture for each liquid validation scenario.
 
 ---
 
@@ -183,6 +215,7 @@ wow-viewer/src/viewer/WowViewer.App/
 4. Validate that viewer host wiring does not become a second owner of renderer policy.
 5. Run end-to-end staged-client validation across representative terrain and WMO samples.
 6. Record final convergence evidence and remaining deferred work.
+7. Ensure diagnostics expose active runtime-control snapshots (terrain/light/fog/liquid plus bounded M2 optimization flags) without moving policy ownership into `WowViewer.App`.
 
 ## Complexity Tracking
 

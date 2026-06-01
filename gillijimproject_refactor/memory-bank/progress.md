@@ -17,6 +17,32 @@
     - keep 030-032 as source slices
     - make 036 the active owner plan for renderer modernization sequencing in `wow-viewer`
     - keep spec 035 M2 recovery as a separate adjacent feature lane
+- **Renderer Improvements Convergence (036) — RE evidence refresh 2026-06-01**
+  - Updated convergence artifacts with staged `3.3.5.12340` Ghidra-derived control surfaces:
+    - `wow-viewer/specs/036-renderer-improvements/research.md`
+    - `wow-viewer/specs/036-renderer-improvements/spec.md`
+    - `wow-viewer/specs/036-renderer-improvements/plan.md`
+    - `wow-viewer/specs/036-renderer-improvements/tasks.md`
+  - Added explicit runtime-controls inventory and phase checkpoints for:
+    - M2 optimization flags (`M2UseZFill`, `M2UseClipPlanes`, `M2UseThreads`, `M2BatchDoodads`, `M2BatchParticles`, `M2ForceAdditiveParticleSort`)
+    - terrain/light/fog/liquid controls (`terrainLOD`, `mapObjLightLOD`, `terrainAlphaBitDepth`, `MaxLights`, `projectedTextures`, `waterLOD`, `fogNear`, `fogFar`, `FogColor`)
+  - Added telemetry-first validation requirement so runtime-control snapshots/logs are required before screenshot-only parity signoff.
+- **Renderer Improvements Convergence (036) — implementation slice A (LOD telemetry scaffolding) 2026-06-01**
+  - Implemented the first bounded execution slice before topology/hole-mask changes:
+    - extended `WorldRenderFrameStats` with:
+      - `TerrainChunksCulled`
+      - `WdlHiddenTileCount`
+    - populated those counters in live `WoWViewer` frame finalization from:
+      - `TerrainRenderer.ChunksCulled`
+      - `WdlTerrainRenderer.HiddenTiles`
+    - updated runtime diagnostics sidebar to show:
+      - terrain rendered/culled
+      - WDL visible/hidden
+  - Compatibility compile fix:
+    - updated `WowViewer.App.Defunct/WowViewerWorldRuntimeBridge.cs` constructor call to pass new required stats fields.
+  - Focused validation:
+    - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldRenderOptimizationAdvisorTests|FullyQualifiedName~WorldRenderCompositionBuilderTests"`
+    - result: pass (`14/14`).
 - **M2 build-profile note (2026-06-01)**
   - staged `3.0.1.8303` Northrend currently exposes a separate renderer-risk boundary:
     - some `.mdx` assets fail `.skin` lookup and converter fallback

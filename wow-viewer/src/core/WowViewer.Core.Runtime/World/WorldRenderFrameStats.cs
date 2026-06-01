@@ -6,7 +6,9 @@ public readonly record struct WorldRenderFrameStats(
     double TotalCpuMs,
     int PendingAssetLoadCount,
     int TerrainChunksRendered,
+    int TerrainChunksCulled,
     int WdlVisibleTileCount,
+    int WdlHiddenTileCount,
     int VisibleWmoCount,
     int VisibleMdxCount,
     int VisibleTaxiMdxCount,
@@ -32,6 +34,8 @@ public readonly record struct WorldRenderFrameStats(
     WorldRenderStageStats Overlay)
 {
     public static WorldRenderFrameStats Empty { get; } = new(
+        0,
+        0,
         0,
         0,
         0,
