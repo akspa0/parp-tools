@@ -230,7 +230,7 @@ public static class M2GeometryReader
     {
         float value = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset, sizeof(float))));
         if (!float.IsFinite(value))
-            return 0f;
+            throw new InvalidDataException($"M2 geometry payload for '{sourcePath}' has a non-finite {label} value.");
 
         return value;
     }

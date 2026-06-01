@@ -1391,8 +1391,8 @@ public class MdxRenderer : IModelRenderer
 
     private void InitShaders()
     {
-        if (_shaderInitialized) return;
-        const string vertSrc = """
+        if (_shaderInitialized) return; // Shared across all MdxRenderer instances
+        string vertSrc = @"
 #version 330 core
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
@@ -1417,6 +1417,7 @@ void main() {
     vec4 position = vec4(aPos, 1.0);
     vec3 normal = aNormal;
     
+    // Apply bone skinning if enabled
     if (uHasBones > 0) {
         float totalWeight = aBoneWeights.x + aBoneWeights.y + aBoneWeights.z + aBoneWeights.w;
         if (totalWeight > 0.0001) {
@@ -1445,9 +1446,9 @@ void main() {
     vTexCoord1 = aTexCoord1;
     gl_Position = uProj * uView * worldPos;
 }
-""";
+";
 
-        const string fragSrc = """
+        string fragSrc = @"
 #version 330 core
 in vec3 vNormal;
 in vec2 vTexCoord0;
@@ -1489,6 +1490,7 @@ void main() {
         viewNorm = -viewNorm;
     }
 
+    // Sphere environment map: generate UVs from view-space normals
     vec2 texCoord = (uUvSet == 1) ? vTexCoord1 : vTexCoord0;
     if (uSphereEnvMap == 1) {
         texCoord = viewNorm.xy * 0.5 + 0.5;
@@ -1515,14 +1517,18 @@ void main() {
     if (uPremultiplyAlpha == 1)
         texRgb *= texColor.a;
 
+    // Lighting: skip if Unshaded flag (MDLGEO 0x1) is set
     vec3 litColor = texRgb;
     if (uUnshaded == 0) {
         vec3 lightDir = normalize(uLightDir);
+        // Half-Lambert diffuse: wraps lighting around surfaces for softer shading
+        // WoW models don't have harsh black shadows — this approximates that look
         float NdotL = dot(norm, lightDir);
-        float diff = NdotL * 0.5 + 0.5;
-        diff = diff * diff;
+        float diff = NdotL * 0.5 + 0.5; // remap [-1,1] to [0,1]
+        diff = diff * diff; // squared for slightly sharper falloff while staying soft
         vec3 diffuse = uLightColor * diff;
 
+        // Blinn-Phong specular (subtle)
         vec3 viewDir = normalize(uCameraPos - vFragPos);
         vec3 halfDir = normalize(lightDir + viewDir);
         float spec = pow(max(dot(norm, halfDir), 0.0), 32.0);
@@ -1531,6 +1537,8 @@ void main() {
         litColor = texRgb * (uAmbientColor + diffuse) + specular;
     }
 
+    // Fog: blend to fog color based on distance from camera (matches terrain fog)
+    // Skip fog for untextured (magenta fallback) fragments
     vec3 finalColor = litColor;
     if (uHasTexture == 1) {
         float dist = length(vFragPos - uCameraPos);
@@ -1541,7 +1549,7 @@ void main() {
     float outAlpha = (uUseTextureAlpha == 1) ? texColor.a : 1.0;
     FragColor = vec4(finalColor, outAlpha) * uColor;
 }
-""";
+";
 
         uint vert = CompileShader(ShaderType.VertexShader, vertSrc);
         uint frag = CompileShader(ShaderType.FragmentShader, fragSrc);
@@ -1606,7 +1614,6 @@ void main() {
         {
             string log = _gl.GetShaderInfoLog(shader);
             ViewerLog.Error(ViewerLog.Category.Shader, $"MDX {type} shader compile error: {log}");
-            ViewerLog.Error(ViewerLog.Category.Shader, $"Shader source length: {source.Length}");
             ViewerLog.Error(ViewerLog.Category.Shader, $"Shader source:\n{source}");
             throw new Exception($"Shader compile error ({type}): {log}");
         }
