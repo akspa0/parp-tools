@@ -43,6 +43,78 @@
   - Focused validation:
     - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldRenderOptimizationAdvisorTests|FullyQualifiedName~WorldRenderCompositionBuilderTests"`
     - result: pass (`14/14`).
+- **Renderer Improvements Convergence (036) — implementation slice B (terrain topology + hole-mask correction) 2026-06-01**
+  - Implemented core terrain mesh parity fixes in `WowViewer.Core.Renderer`:
+    - `TerrainMeshBuilder.GetVertexPosition(...)` now decodes the interleaved 145-vertex MCNK layout via 9/8 row walk.
+    - `TerrainMeshBuilder.BuildIndices(...)` now emits canonical 8x8 cell fan topology (4 triangles per cell around the inner vertex).
+    - hole-mask mapping now follows 4x4 groups over 2x2 cells using `holeBit = 1 << ((cellY/2)*4 + (cellX/2))`.
+  - Added focused regression coverage:
+    - `wow-viewer/tests/WowViewer.Core.Tests/TerrainMeshBuilderTopologyTests.cs`
+      - no-hole index count (`64 * 12`)
+      - single-group hole removal (`-48` indices)
+      - full-hole empty geometry
+      - vertex decode anchor checks for interleaved layout
+  - Test project update:
+    - `wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj` now references `WowViewer.Core.Renderer` so the topology tests compile and run.
+  - Focused validation:
+    - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~TerrainMeshBuilderTopologyTests|FullyQualifiedName~WorldRenderCompositionBuilderTests|FullyQualifiedName~WorldRenderOptimizationAdvisorTests"`
+    - result: pass (`18/18`).
+- **Renderer Improvements Convergence (036) — object wireframe toggle parity follow-up 2026-06-01**
+  - Implemented world-mode object wireframe support so the existing wireframe toggle now affects terrain + world objects together:
+    - `WorldScene.ToggleWireframe()` now calls `WorldAssetManager.SetObjectWireframeEnabled(...)`.
+    - `WorldAssetManager` now tracks object wireframe preference and applies it to:
+      - all currently loaded MDX/WMO renderers when toggled
+      - newly loaded MDX/WMO renderers in both immediate and deferred load paths.
+  - Alpha 0.5.3 layout compatibility remains guarded in the active viewer path:
+    - `AlphaTerrainAdapter` still converts non-interleaved Alpha MCVT/MCNR (81 outer + 64 inner) into interleaved runtime layout before terrain mesh use.
+  - Focused validation rerun:
+    - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~TerrainMeshBuilderTopologyTests|FullyQualifiedName~WorldRenderCompositionBuilderTests|FullyQualifiedName~WorldRenderOptimizationAdvisorTests"`
+    - result: pass (`18/18`).
+- **Renderer Improvements Convergence (036) — 3.3.5 WMO interior bleed hotfix 2026-06-01**
+  - User-reported runtime artifact: some 3.3.5 WMO interiors projected through exterior shell surfaces.
+  - Bounded root-cause lane: WMO MOMT blend ID mapping in `WmoRenderer` pass routing.
+  - Fix landed:
+    - `WmoRenderer.ResolveWmoBlendMode(...)` now maps
+      - `0 => Opaque`
+      - `1 => AlphaKey` (cutout)
+      - `2 => Blend`
+      - `3 => Add`
+    - this prevents blend-mode `1` shell cutouts from being treated as fully transparent pass geometry.
+  - Focused validation rerun:
+    - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldRenderCompositionBuilderTests|FullyQualifiedName~WorldRenderOptimizationAdvisorTests|FullyQualifiedName~TerrainMeshBuilderTopologyTests"`
+    - result: pass (`18/18`).
+- **Renderer Improvements Convergence (036) — liquid-family scope addendum (spec-only) 2026-06-01**
+  - Added explicit outstanding issue to `specs/036-renderer-improvements/spec.md`:
+    - staged `3.3.5.12340` rivers/oceans can be misrendered as magma when liquid routing relies on MCNK flags alone.
+  - New convergence requirements/success criteria now require build-aware liquid-family classification evidence (e.g., per-build LiquidType/DBC semantics) rather than one hard-coded cross-build mapping.
+  - Updated `specs/036-renderer-improvements/checklists/requirements.md` notes to reflect this scope extension.
+  - This entry records planning/spec continuity only; implementation of the liquid classification lane remains pending.
+- **Renderer Improvements Convergence (036) — 3.3.5 WMO dark-surface hotfix 2026-06-01**
+  - User-reported runtime artifact: 3.3.5 WMO surfaces appeared globally darker than expected.
+  - Bounded root-cause lane: `WmoRenderer` shading input path always regenerated normals from triangle geometry, ignoring parsed WMO `MONR` normals.
+  - Fix landed in `wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs`:
+    - `InitBuffers()` now uses `BuildRenderNormals(group)`.
+    - `BuildRenderNormals(...)` prefers parsed `group.Normals` when count matches vertices and at least one usable finite normal exists.
+    - Parsed normals are normalized with finite/zero-length guards and per-entry fallback to `Vector3.UnitY`; if unusable, renderer falls back to generated normals.
+  - Validation:
+    - default project output was locked by running `ParpToolsWoWViewer`, so bounded build used isolated output paths.
+    - command: `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/build/wowviewer/bin/ -p:IntermediateOutputPath=i:/parp/parp-tools/output/tmp/build/wowviewer/obj-wowviewer/`
+    - result: build passed (`0` errors).
+- **WoWViewer Taxi Route Video — unexpected app exit hotfix 2026-06-01**
+  - User-reported runtime artifact: after taxi route video recording finished writing, the entire viewer process exited unexpectedly.
+  - Root-cause lane: capture queue completion called window close whenever `ExitAfterCapture` was set, without an explicit source guard differentiating startup automation intent from interactive UI capture flows.
+  - Fix landed:
+    - `ViewerApp_CaptureAutomation.cs`
+      - `PendingCaptureRequest` now includes `AllowWindowCloseOnCapture`.
+      - `CaptureQueueOptions` now includes `AllowWindowCloseOnCapture`.
+      - completion guard now closes window only when `ExitAfterCapture && AllowWindowCloseOnCapture`.
+      - `QueueCurrentCameraCapture(...)` now carries `allowWindowCloseOnCapture` and propagates it into queue options.
+    - `ViewerApp_StartupAutomation.cs`
+      - startup queue paths now explicitly pass `AllowWindowCloseOnCapture = exitAfterCapture` so startup `--exit-after-capture` behavior is preserved.
+      - non-startup interactive video recording keeps close-permission false by default.
+  - Validation:
+    - bounded isolated-output build succeeded with `0` errors:
+      - `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/build/wowviewer/bin/ -p:IntermediateOutputPath=i:/parp/parp-tools/output/tmp/build/wowviewer/obj-wowviewer/`
 - **M2 build-profile note (2026-06-01)**
   - staged `3.0.1.8303` Northrend currently exposes a separate renderer-risk boundary:
     - some `.mdx` assets fail `.skin` lookup and converter fallback

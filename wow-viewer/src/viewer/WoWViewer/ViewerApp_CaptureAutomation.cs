@@ -78,6 +78,7 @@ public partial class ViewerApp
         public bool IncludeUi { get; set; }
         public bool Applied { get; set; }
         public bool ExitAfterCapture { get; set; }
+        public bool AllowWindowCloseOnCapture { get; set; }
         public bool WaitForSceneReady { get; set; }
         public int? TargetTileX { get; set; }
         public int? TargetTileY { get; set; }
@@ -106,6 +107,7 @@ public partial class ViewerApp
         public bool HideTerrainLiquids { get; init; }
         public bool HideObjects { get; init; }
         public bool HideTerrain { get; init; }
+        public bool AllowWindowCloseOnCapture { get; init; }
     }
 
     private sealed class MkHarvestViewerValidationCaptureTile
@@ -458,21 +460,20 @@ public partial class ViewerApp
         _fovDegrees = Math.Clamp(shot.FovDegrees, 20f, 90f);
     }
 
-    private void QueueCurrentCameraCapture(bool includeUi, bool exitAfterCapture = false, int captureAfterFrames = 1)
+    private void QueueCurrentCameraCapture(bool includeUi, bool exitAfterCapture = false, int captureAfterFrames = 1, bool allowWindowCloseOnCapture = false)
     {
         CameraShotPoint shot = CreateCameraShotPoint($"current_{DateTime.UtcNow:yyyyMMdd_HHmmss}");
         EnqueueShotCapture(
             shot,
             includeUi,
             exitAfterCapture,
-            captureAfterFrames > 1
-                ? new CaptureQueueOptions
-                {
-                    WaitForSceneReady = true,
-                    RequiredSettledFrames = captureAfterFrames,
-                    MaxFramesBeforeCapture = Math.Max(captureAfterFrames * 12, 120),
-                }
-                : null);
+            new CaptureQueueOptions
+            {
+                WaitForSceneReady = captureAfterFrames > 1,
+                RequiredSettledFrames = captureAfterFrames > 1 ? captureAfterFrames : 1,
+                MaxFramesBeforeCapture = captureAfterFrames > 1 ? Math.Max(captureAfterFrames * 12, 120) : 1,
+                AllowWindowCloseOnCapture = allowWindowCloseOnCapture,
+            });
     }
 
     private void EnqueueFilteredShotCaptures(bool includeUi)
@@ -543,6 +544,7 @@ public partial class ViewerApp
             OutputPath = outputPath,
             IncludeUi = includeUi,
             ExitAfterCapture = exitAfterCapture,
+            AllowWindowCloseOnCapture = options?.AllowWindowCloseOnCapture == true,
             WaitForSceneReady = options?.WaitForSceneReady == true,
             TargetTileX = options?.TargetTileX,
             TargetTileY = options?.TargetTileY,
@@ -664,7 +666,7 @@ public partial class ViewerApp
             }
         }
 
-        if (request.ExitAfterCapture)
+        if (request.ExitAfterCapture && request.AllowWindowCloseOnCapture)
             _window.Close();
     }
 

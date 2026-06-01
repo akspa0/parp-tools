@@ -400,7 +400,7 @@ public partial class ViewerApp
     {
         if (string.Equals(shotName, "current", StringComparison.OrdinalIgnoreCase))
         {
-            QueueCurrentCameraCapture(includeUi, exitAfterCapture, captureAfterFrames);
+            QueueCurrentCameraCapture(includeUi, exitAfterCapture, captureAfterFrames, allowWindowCloseOnCapture: exitAfterCapture);
             return;
         }
 
@@ -417,14 +417,13 @@ public partial class ViewerApp
             shot,
             includeUi,
             exitAfterCapture,
-            captureAfterFrames > 1
-                ? new CaptureQueueOptions
-                {
-                    WaitForSceneReady = true,
-                    RequiredSettledFrames = captureAfterFrames,
-                    MaxFramesBeforeCapture = captureAfterFrames,
-                }
-                : null);
+            new CaptureQueueOptions
+            {
+                WaitForSceneReady = captureAfterFrames > 1,
+                RequiredSettledFrames = captureAfterFrames > 1 ? captureAfterFrames : 1,
+                MaxFramesBeforeCapture = captureAfterFrames > 1 ? captureAfterFrames : 1,
+                AllowWindowCloseOnCapture = exitAfterCapture,
+            });
     }
 
 private void QueueStartupRoofCapture(StartupAutomationRequest request)

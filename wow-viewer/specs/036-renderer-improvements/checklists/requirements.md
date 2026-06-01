@@ -32,3 +32,4 @@
 ## Notes
 
 - This spec intentionally creates a convergence owner for existing renderer source plans rather than replacing their historical details.
+- 2026-06-01 update: added build-aware liquid-family classification requirements for staged `3.3.5.12340` to prevent river/ocean surfaces from being misrendered as magma under MCNK-flag-only routing.

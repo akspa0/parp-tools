@@ -30,6 +30,57 @@
     - terrain from `TerrainRenderer.ChunksCulled`
     - WDL from `WdlTerrainRenderer.HiddenTiles`
   - sidebar diagnostics now surface rendered/culled terrain chunks plus visible/hidden WDL tiles in one line
+- 2026-06-01 second implementation slice from the new LOD/cell route is now landed as core topology/hole correction:
+  - fixed `WowViewer.Core.Renderer` terrain vertex topology mapping to the canonical interleaved 145-vertex layout:
+    - replaced flat `row=i/17,col=i%17` decode with 9/8 row-walk decode in `TerrainMeshBuilder.GetVertexPosition(...)`
+  - fixed terrain index generation to the canonical 8x8 cell fan topology:
+    - each cell now emits 4 triangles around the matching inner vertex (12 indices/cell)
+  - fixed hole-mask semantics to 4x4 groups over 2x2 cells:
+    - replaced incorrect `cell/4` bit usage with `holeBit = 1 << ((cellY/2)*4 + (cellX/2))`
+  - added focused regression tests in `wow-viewer/tests/WowViewer.Core.Tests/TerrainMeshBuilderTopologyTests.cs` covering:
+    - no-hole index count
+    - single-group hole removal count
+    - full-hole empty geometry
+    - interleaved vertex decode anchors
+  - focused validation command passed (`18/18`):
+    - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~TerrainMeshBuilderTopologyTests|FullyQualifiedName~WorldRenderCompositionBuilderTests|FullyQualifiedName~WorldRenderOptimizationAdvisorTests"`
+- 2026-06-01 wireframe control parity follow-up landed for world object rendering:
+  - world-scene wireframe toggle now applies to object renderers in addition to terrain:
+    - `WorldScene.ToggleWireframe()` now forwards state to `WorldAssetManager.SetObjectWireframeEnabled(...)`
+  - `WorldAssetManager` now tracks object wireframe preference and applies it to:
+    - all currently loaded MDX/WMO renderers when toggled
+    - newly lazy-loaded MDX/WMO renderers as they enter cache (immediate and deferred load paths)
+  - this closes the "wireframe toggle for objects" gap in world mode while preserving existing standalone model/wmo wireframe behavior.
+  - Alpha `0.5.3` layout guardrail remains explicit in active viewer path:
+    - `AlphaTerrainAdapter` still reorders non-interleaved MCVT/MCNR (81 outer + 64 inner) into canonical interleaved 145 runtime layout before mesh generation.
+- 2026-06-01 3.3.5 WMO interior bleed follow-up landed as bounded blend-route correction:
+  - corrected `WmoRenderer.ResolveWmoBlendMode(...)` mapping for WMO MOMT blend ids:
+    - `1` now maps to `AlphaKey` (cutout) instead of `Blend`
+    - `2` now maps to `Blend`
+    - `3` now maps to `Add`
+  - rationale: mode `1` misrouted to transparent pass caused shell cutout surfaces to skip opaque depth ownership and made interior faces appear through exterior walls in some 3.3.5 placements.
+  - proof: focused `WowViewer.Core.Tests` filter rerun passed (`18/18`).
+- 2026-06-01 renderer convergence scope update (spec-only, no implementation yet):
+  - spec `036-renderer-improvements` now explicitly tracks a `3.3.5.12340` liquid-family misclassification risk where MCNK-flag-only routing can render river/ocean as magma.
+  - convergence requirements now require build-aware liquid classification evidence (per-build table semantics such as LiquidType/DBC-resolved meaning) instead of one hard-coded mapping across builds.
+  - this is currently an outstanding implementation lane, added to spec/quality checklist and continuity as a bounded next liquid slice.
+- 2026-06-01 3.3.5 WMO dark-surface follow-up landed as a bounded lighting-input correction:
+  - `WmoRenderer` now prefers parsed WMO `MONR` normals when they are present and count-aligned with vertices, instead of always regenerating normals from triangle geometry.
+  - parsed normals are normalized per-vertex with finite/length guards; invalid entries fall back to `Vector3.UnitY`; if the parsed set is unusable the renderer falls back to generated normals.
+  - rationale: 3.3.5 WMOs can carry authored normal data that better matches client shading; always-regenerated normals made many surfaces appear darker than expected.
+  - bounded build proof was captured with isolated output paths to avoid active viewer binary locks:
+    - `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/build/wowviewer/bin/ -p:IntermediateOutputPath=i:/parp/parp-tools/output/tmp/build/wowviewer/obj-wowviewer/`
+- 2026-06-01 taxi route video unexpected app-exit hotfix landed as capture-queue close-guard hardening:
+  - symptom: recording a taxi route video and finishing ffmpeg write could close the entire viewer unexpectedly.
+  - bounded fix in capture queue semantics:
+    - `PendingCaptureRequest` now carries explicit `AllowWindowCloseOnCapture`.
+    - queue completion now closes window only when both flags are true: `ExitAfterCapture && AllowWindowCloseOnCapture`.
+    - startup automation capture paths explicitly set `AllowWindowCloseOnCapture` only for startup-intended `--exit-after-capture` behavior.
+    - interactive UI capture/route-video paths keep `AllowWindowCloseOnCapture=false`, so normal recording completion no longer exits the app.
+  - touched files:
+    - `wow-viewer/src/viewer/WoWViewer/ViewerApp_CaptureAutomation.cs`
+    - `wow-viewer/src/viewer/WoWViewer/ViewerApp_StartupAutomation.cs`
+  - bounded build proof (isolated output paths) passed with 0 errors.
 - New M2 note:
   - staged `3.0.1.8303` Northrend currently shows some `.mdx` placements failing both `.skin` resolution and M2-to-MDX fallback
   - treat these as a likely prototype `MD20` / `Model2` build-profile boundary

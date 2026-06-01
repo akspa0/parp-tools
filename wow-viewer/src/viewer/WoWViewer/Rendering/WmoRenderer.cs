@@ -751,9 +751,13 @@ public class WmoRenderer : ISceneRenderer
         return rawBlendMode switch
         {
             0 => EGxBlend.Opaque,
-            1 => EGxBlend.Blend,
-            2 => EGxBlend.Add,
-            3 => EGxBlend.AlphaKey,
+            // WMO MOMT blend-mode mapping parity with Alpha-era EGx semantics:
+            // 0 = Opaque, 1 = AlphaKey (cutout), 2 = Blend, 3 = Add.
+            // Treating mode 1 as full Blend causes shell cutouts (e.g., windows/cloth)
+            // to render in transparent pass and can expose interior surfaces through walls.
+            1 => EGxBlend.AlphaKey,
+            2 => EGxBlend.Blend,
+            3 => EGxBlend.Add,
             _ => EGxBlend.Blend,
         };
     }
@@ -1248,8 +1252,9 @@ void main() {
                 GroupCenter = (group.BoundsMin + group.BoundsMax) * 0.5f
             };
 
-            // Generate normals from geometry
-            var normals = GenerateNormals(group);
+            // Prefer parsed MONR normals when available; fallback to generated normals.
+            // 3.3.5 WMOs can carry authored normals that better match client lighting.
+            var normals = BuildRenderNormals(group);
 
             int vertCount = group.Vertices.Count;
             bool hasUVs = group.UVs.Count == vertCount;
@@ -1662,7 +1667,42 @@ void main() {
         }
     }
 
-    private List<Vector3> GenerateNormals(WmoV14ToV17Converter.WmoGroupData group)
+    private static List<Vector3> BuildRenderNormals(WmoV14ToV17Converter.WmoGroupData group)
+    {
+        if (group.Normals.Count == group.Vertices.Count && group.Normals.Count > 0)
+        {
+            var normalized = new List<Vector3>(group.Normals.Count);
+            bool hasUsableNormal = false;
+
+            for (int i = 0; i < group.Normals.Count; i++)
+            {
+                Vector3 n = group.Normals[i];
+                if (!float.IsFinite(n.X) || !float.IsFinite(n.Y) || !float.IsFinite(n.Z))
+                {
+                    normalized.Add(Vector3.UnitY);
+                    continue;
+                }
+
+                float lengthSq = n.LengthSquared();
+                if (lengthSq > 1e-8f)
+                {
+                    normalized.Add(Vector3.Normalize(n));
+                    hasUsableNormal = true;
+                }
+                else
+                {
+                    normalized.Add(Vector3.UnitY);
+                }
+            }
+
+            if (hasUsableNormal)
+                return normalized;
+        }
+
+        return GenerateNormals(group);
+    }
+
+    private static List<Vector3> GenerateNormals(WmoV14ToV17Converter.WmoGroupData group)
     {
         var normals = new Vector3[group.Vertices.Count];
         for (int i = 0; i + 2 < group.Indices.Count; i += 3)

@@ -57,6 +57,7 @@ As an operator, I can validate each renderer-improvements phase against staged c
 2. **Given** an M2-specific regression like route drift or animation parity, **When** the operator checks this convergence feature, **Then** it is identified as a dependency or adjacent track instead of being silently absorbed.
 3. **Given** a proposed renderer change that crosses terrain, WMO, and viewer layers, **When** the maintainer checks the convergence plan, **Then** they can see which proofs must pass before moving to the next phase.
 4. **Given** parity drift in a staged-client run, **When** diagnostics are reviewed, **Then** telemetry logs expose runtime control values (terrain/light/liquid/fog/M2 flags) before visual-comparison signoff.
+5. **Given** a staged `3.3.5.12340` world with rivers/oceans and lava in the same validation route, **When** liquid rendering is compared against source classification evidence, **Then** river/ocean water does not render as magma due to hard-coded MCNK-flag-only assumptions.
 
 ---
 
@@ -68,6 +69,7 @@ As an operator, I can validate each renderer-improvements phase against staged c
 - Viewer host integration may require bounded `WowViewer.App` work without shifting canonical ownership away from shared libraries.
 - Some source-plan steps may need to be deferred or dropped if they duplicate a lower-level prerequisite already covered elsewhere in the convergence plan.
 - Runtime control surfaces from native 3.3.5 can silently alter output quality/perf (`terrainLOD`, `waterLOD`, `projectedTextures`, `mapObjLightLOD`, M2 optimization flags) and must be captured as explicit phase checkpoints.
+- In `3.3.5`, MCNK liquid bits alone are not sufficient to guarantee final visual liquid-family selection; build-aware liquid type resolution can require per-build data-table interpretation.
 
 ## Requirements *(mandatory)*
 
@@ -84,6 +86,8 @@ As an operator, I can validate each renderer-improvements phase against staged c
 - **FR-009**: The convergence plan MUST include a runtime-controls inventory (terrain, lighting, fog, liquid, projected-texture, and M2 optimization controls) derived from staged `3.3.5.12340` Ghidra evidence.
 - **FR-010**: Each convergence phase MUST define telemetry checkpoints that record relevant runtime control values before visual parity signoff.
 - **FR-011**: M2 runtime findings included in this feature MUST remain bounded to convergence dependencies and diagnostics; full M2 parity ownership remains with spec 035.
+- **FR-012**: The convergence plan MUST include a build-aware liquid classification contract so staged `3.3.5` water/ocean/river surfaces are not misclassified as magma when MCNK flags are ambiguous or incomplete.
+- **FR-013**: Liquid rendering validation MUST include per-build classification evidence inputs (such as liquid-type table lookups or equivalent build-resolved metadata), and MUST NOT rely on one hard-coded liquid-family mapping across all builds.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -92,6 +96,7 @@ As an operator, I can validate each renderer-improvements phase against staged c
 - **SourceSpecMapping**: A traceable mapping from a source plan section or requirement in spec 030/031/032 to a convergence phase in spec 036.
 - **RendererValidationScenario**: A staged-client proof case that defines map/build context, expected subsystem behavior, and evidence requirements.
 - **RendererOwnershipBoundary**: A rule that states which layer owns a behavior: shared I/O, runtime, or viewer host.
+- **LiquidClassificationEvidence**: Build-scoped liquid-family evidence used to resolve rendered liquid type (for example MCNK/MH2O fields plus per-build liquid-type table semantics).
 
 ## Success Criteria *(mandatory)*
 
@@ -104,6 +109,7 @@ As an operator, I can validate each renderer-improvements phase against staged c
 - **SC-005**: Specs 030, 031, and 032 each contain a visible note directing readers to the convergence owner plan.
 - **SC-006**: `spec.md` + `plan.md` enumerate runtime controls for terrain/lighting/fog/liquid/M2 and map each to a phase-level proof checkpoint.
 - **SC-007**: Phase validation guidance includes telemetry artifacts (structured log/table outputs) in addition to screenshots.
+- **SC-008**: For staged `3.3.5.12340` validation scenarios that include both river/ocean water and magma/slime, rendered liquid families match the source classification evidence, with zero river/ocean samples rendered as magma unless the evidence explicitly marks them as magma.
 
 ## Assumptions
 
@@ -112,3 +118,4 @@ As an operator, I can validate each renderer-improvements phase against staged c
 - `wow-viewer` remains the only implementation target; `gillijimproject_refactor` stays read-only reference-only.
 - Initial convergence is a planning/documentation feature, not a promise to implement every renderer slice in one session.
 - Ghidra evidence from staged `3.3.5.12340` is treated as authoritative for initial runtime-control dependency modeling in this convergence feature.
+- Cross-build liquid-family semantics can differ enough that a single global liquid-type hard-code is not assumed to be safe.

@@ -74,6 +74,7 @@ public class WorldAssetManager : IDisposable
     private string? _buildVersion;
     private bool _enableRuntimeWmoGroupVisibility = true;
     private bool _enableRuntimeWmoGroupLiquids = true;
+    private bool _objectWireframeEnabled;
 
     // ── Shared caches ──────────────────────────────────────────────────
 
@@ -185,6 +186,28 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
         }
     }
 
+    public bool ObjectWireframeEnabled => _objectWireframeEnabled;
+
+    public void SetObjectWireframeEnabled(bool enabled)
+    {
+        if (_objectWireframeEnabled == enabled)
+            return;
+
+        _objectWireframeEnabled = enabled;
+
+        foreach (IModelRenderer? renderer in _mdxModels.Values)
+            renderer?.ToggleWireframe();
+
+        foreach (WmoRenderer? renderer in _wmoModels.Values)
+            renderer?.ToggleWireframe();
+    }
+
+    private void ApplyObjectWireframePreference(ISceneRenderer? renderer)
+    {
+        if (_objectWireframeEnabled && renderer != null)
+            renderer.ToggleWireframe();
+    }
+
     public void ApplyTextureSamplingSettings()
     {
         foreach (var renderer in _mdxModels.Values)
@@ -288,6 +311,7 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
 
         var renderer = LoadMdxModel(normalizedKey);
         _mdxModels[normalizedKey] = renderer;
+        ApplyObjectWireframePreference(renderer);
         if (renderer != null)
             TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
         EvictMdxIfNeeded();
@@ -309,6 +333,7 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
 
         var renderer = LoadWmoModel(normalizedKey);
         _wmoModels[normalizedKey] = renderer;
+        ApplyObjectWireframePreference(renderer);
         TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
         EvictWmoIfNeeded();
     }
@@ -616,6 +641,7 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
 
                 var renderer = LoadMdxModel(key);
                 _mdxModels[key] = renderer;
+                ApplyObjectWireframePreference(renderer);
                 if (renderer != null)
                 {
                     TouchLru(_mdxLru, _mdxLruMap, key);
@@ -628,6 +654,7 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
                 {
                     var renderer = LoadWmoModel(key);
                     _wmoModels[key] = renderer;
+                    ApplyObjectWireframePreference(renderer);
                     if (renderer != null)
                     {
                         TouchLru(_wmoLru, _wmoLruMap, key);

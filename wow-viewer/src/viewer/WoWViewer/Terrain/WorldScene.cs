@@ -9026,6 +9026,7 @@ public class WorldScene : ISceneRenderer
     {
         _wireframeRevealEnabled = !_wireframeRevealEnabled;
         _terrainManager.ToggleWireframe();
+        _assets.SetObjectWireframeEnabled(_wireframeRevealEnabled);
         if (!_wireframeRevealEnabled)
             ClearWireframeReveal();
     }
