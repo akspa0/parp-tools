@@ -87,6 +87,12 @@
   - the selector now uses runtime chunk knowledge already exposed by [`WorldTerrainChunkData`](wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainChunkData.cs:7), including layer count plus cell-grid-derived renderable cell counts from native-style hole masks.
   - current scope is decision logic only: no viewer-host shader wiring or low-detail terrain mesh submission changes yet. This is the policy seam needed before `TerrainRenderer`/runtime pass integration.
   - focused proof passed via [`WorldTerrainLodSelectorTests`](wow-viewer/tests/WowViewer.Core.Tests/WorldTerrainLodSelectorTests.cs:1) together with the earlier terrain-cell tests (`17/17` pass under isolated outputs in `wow-viewer/output/validation/terrain-lod-selector-tests`).
+- 2026-06-02 WMO dark-lighting follow-up for staged `3.3.5.12340` landed as a bounded shader/input rebalance:
+  - inspection showed the current WMO shader multiplies dynamic lighting by baked vertex/lightmap lighting uniformly with a hard-coded `0.6` mix, regardless of whether the group is interior or exterior.
+  - spec/runtime docs still say interior 3.3.5 groups should rely much more heavily on baked illumination while exterior groups keep more dynamic light contribution; the old fixed-weight blend was collapsing many WMOs into overly dark masses.
+  - fix landed in [`WmoRenderer`](wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs:1241): per-group baked-lighting weight is now computed from group flags plus sampled vertex-light contribution, uploaded as an extra vertex attribute, and used by the fragment shader instead of the previous constant `0.6` bake mix.
+  - interior groups now bias heavily toward baked lighting; exterior groups still use baked lighting but keep a lower weight range.
+  - bounded compile proof passed with isolated outputs in `wow-viewer/output/validation/wmo-lighting-fix-build`.
 - 2026-06-01 3.3.5 WMO dark-surface follow-up landed as a bounded lighting-input correction:
   - `WmoRenderer` now prefers parsed WMO `MONR` normals when they are present and count-aligned with vertices, instead of always regenerating normals from triangle geometry.
   - parsed normals are normalized per-vertex with finite/length guards; invalid entries fall back to `Vector3.UnitY`; if the parsed set is unusable the renderer falls back to generated normals.

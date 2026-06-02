@@ -804,6 +804,7 @@ layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTexCoord;
 layout(location = 3) in vec4 aVertexLight;
+layout(location = 4) in float aBakedWeight;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -813,6 +814,7 @@ out vec3 vNormal;
 out vec2 vTexCoord;
 out vec3 vFragPos;
 out vec4 vVertexLight;
+out float vBakedWeight;
 
 void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
@@ -820,6 +822,7 @@ void main() {
     vNormal = mat3(transpose(inverse(uModel))) * aNormal;
     vTexCoord = aTexCoord;
     vVertexLight = aVertexLight;
+    vBakedWeight = aBakedWeight;
     gl_Position = uProj * uView * worldPos;
 }
 ";
@@ -830,6 +833,7 @@ in vec3 vNormal;
 in vec2 vTexCoord;
 in vec3 vFragPos;
 in vec4 vVertexLight;
+in float vBakedWeight;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
@@ -853,7 +857,8 @@ void main() {
     float diff = NdotL * 0.5 + 0.5; // half-Lambert: remap [-1,1] to [0,1]
     diff = diff * diff; // square for slightly sharper falloff
     vec3 lighting = uAmbientColor + uLightColor * diff;
-    vec3 bakedLighting = mix(vec3(1.0), clamp(vVertexLight.rgb, vec3(0.0), vec3(1.0)), 0.6);
+    float bakedWeight = clamp(vBakedWeight, 0.0, 1.0);
+    vec3 bakedLighting = mix(vec3(1.0), clamp(vVertexLight.rgb, vec3(0.0), vec3(1.0)), bakedWeight);
 
     vec4 texColor;
     if (uHasTexture == 1) {

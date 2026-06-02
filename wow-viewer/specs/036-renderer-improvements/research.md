@@ -73,3 +73,15 @@
 
 **Alternatives considered**:
 - Keep only visual proof checkpoints: rejected because visual-only deltas are hard to root-cause when multiple runtime toggles are drifting.
+
+## Cross-Reference: spec 038 — 3.0.1 Renderer Performance Research Slice
+
+`specs/038-m2-301-renderer-perf-research/spec.md` + `research.md` extend this convergence plan with deeper **3.0.1.8303** Ghidra evidence. Where this plan focuses on 3.3.5 runtime controls (lines 43-51 above), spec 038 documents the same control family in 3.0.1 with explicit function addresses, default values, and callback behavior:
+
+- The 3.0.1 graphics-options registry (`FUN_006ee8e0`) has **25 cvars** vs the 3.3.5 list — the extras are `groundEffectDensity`, `groundEffectDist`, `objectFade`, `objectFadeZFill`, `horizonfarclip`, `footstepBias`, `bspcache`, `worldPoolUsage`. The 3.0.1-only cvars should be gated behind `M2BuildProfile == Build301` (spec 037 owns the `M2BuildProfile` enum).
+- The 3.0.1 `waterLOD` cvar (`FUN_006edfb0`) is **frozen at 0** in 3.0.1.8303. Any 3.0.1 staging must keep `waterLOD == 0`.
+- The 3.0.1 per-batch alpha-cull algorithm (`FUN_00788fb0` + `FUN_00789440`) is **not** mentioned in this plan's 3.3.5 inventory. It is the recommended first implementation slice in spec 038 — adds an `M2BuildCullPolicy` service that consults `model_alpha × transparency × color` against a cull threshold constant for every M2 batch.
+- The 3.0.1 3-tier SmallCull (`FUN_006edb30` + `FUN_006f2a00`) and DistCull (`FUN_006ee4a0`) are confirmed in 3.0.1 with explicit precompute tables; 3.3.5 evidence (this plan, line 48) confirms the cvars exist but the algorithm is not decompiled there. Spec 038's recommended first slice takes both.
+- The 3.0.1 master render flag word `DAT_00edfae0` (init `0x7104b73`) is the cleanest single-source-of-truth state model in any build recovered so far. Spec 038 recommends mirroring it as a follow-on slice.
+
+When implementing Phase 1 (Lighting Foundation) or any later phase that touches cull/lighting, the spec 038 research pack should be read first to avoid re-decompiling the same 3.0.1 functions.

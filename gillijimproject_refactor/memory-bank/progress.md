@@ -143,6 +143,21 @@
   - Focused validation:
     - `dotnet test .\wow-viewer\tests\WowViewer.Core.Tests\WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldTerrainLodSelectorTests|FullyQualifiedName~WorldTerrainCellGridTests|FullyQualifiedName~WorldTerrainTileBuilderTests|FullyQualifiedName~TerrainMeshBuilderTopologyTests" -p:OutDir=I:\parp\parp-tools\wow-viewer\output\validation\terrain-lod-selector-tests\bin\ -p:IntermediateOutputPath=I:\parp\parp-tools\wow-viewer\output\validation\terrain-lod-selector-tests\obj\`
     - result: pass (`17/17`).
+- **Renderer Improvements Convergence (036) — 3.3.5 WMO dark-lighting rebalance 2026-06-02**
+  - Investigated the active viewer WMO lighting path in [`wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs`](wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs):
+    - WMO vertex/lightmap lighting was being mixed with a fixed `0.6` baked-light weight in the fragment shader,
+    - this ignored the important interior/exterior distinction documented in [`wow-viewer/docs/architecture/wmo-render-pass-architecture-2026-05-30.md`](wow-viewer/docs/architecture/wmo-render-pass-architecture-2026-05-30.md),
+    - the result was especially painful on staged `3.3.5.12340` WMOs, which could collapse into unreadably dark silhouettes.
+  - Landed bounded fix in [`WmoRenderer`](wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs):
+    - added per-group baked-light weighting derived from group flags and average vertex-light contribution,
+    - uploaded the weight as an additional vertex attribute,
+    - fragment shader now uses that dynamic weight instead of the old hard-coded `0.6` blend.
+  - New behavior:
+    - interior groups: strong baked-light emphasis (`0.80..0.95`),
+    - exterior groups: moderate baked-light emphasis (`0.45..0.70`).
+  - Build validation:
+    - `dotnet build .\wow-viewer\src\viewer\WoWViewer\WoWViewer.csproj -c Debug -p:OutDir=I:\parp\parp-tools\wow-viewer\output\validation\wmo-lighting-fix-build\bin\ -p:IntermediateOutputPath=I:\parp\parp-tools\wow-viewer\output\validation\wmo-lighting-fix-build\obj\`
+    - result: passed (`0` errors, warnings only).
 - **Renderer Improvements Convergence (036) — 3.3.5 WMO dark-surface hotfix 2026-06-01**
   - User-reported runtime artifact: 3.3.5 WMO surfaces appeared globally darker than expected.
   - Bounded root-cause lane: `WmoRenderer` shading input path always regenerated normals from triangle geometry, ignoring parsed WMO `MONR` normals.
