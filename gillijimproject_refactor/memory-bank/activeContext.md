@@ -64,6 +64,19 @@
   - spec `036-renderer-improvements` now explicitly tracks a `3.3.5.12340` liquid-family misclassification risk where MCNK-flag-only routing can render river/ocean as magma.
   - convergence requirements now require build-aware liquid classification evidence (per-build table semantics such as LiquidType/DBC-resolved meaning) instead of one hard-coded mapping across builds.
   - this is currently an outstanding implementation lane, added to spec/quality checklist and continuity as a bounded next liquid slice.
+- 2026-06-01 liquid-family classification lane (spec 036 FR-012/FR-013) is now partially implemented in active viewer terrain path:
+  - strengthened `StandardTerrainAdapter` MH2O liquid-family resolution with a build-aware trust gate for `LiquidType.dbc` class-column mappings.
+  - `LoadMh2oLiquidTypeLookup(...)` still attempts class-column decoding (`Type`/`LiquidType`/`TypeID`), but now validates anchor IDs before accepting that mapping:
+    - expected anchors: id `2` -> ocean, `3` -> water, `4` -> slime, `5` -> magma.
+  - if anchor checks fail, class-column mapping is rejected and the adapter falls back to ID-family mapping (`MapMh2oLiquidTypeFallback`) for every loaded row, preserving build-specific ID interpretation without one global class hard-code.
+  - fallback route is explicitly logged with build identifier for validation evidence.
+  - bounded compile proof passed (isolated output paths; 0 errors).
+- 2026-06-01 liquid-family follow-up for staged `3.3.5.12340` narrowed the remaining gap further:
+  - verified the active viewer does load `LiquidType.dbc` for standard WDT terrain sessions; `ViewerApp` passes `_dbcBuild`/`_dbcProvider`/`_dbdDir` into [`new StandardTerrainAdapter(...)`](wow-viewer/src/viewer/WoWViewer/ViewerApp.cs:11800), and the adapter calls [`LoadMh2oLiquidTypeLookup(...)`](wow-viewer/src/viewer/WoWViewer/Terrain/StandardTerrainAdapter.cs:1715) when those are present.
+  - verified `LiquidType.dbd` for build `3.3.5.12340` does **not** expose a simple family/class column like `Type`; it exposes fields such as `Name`, `Flags`, `MaterialID`, `Texture[6]`, `Color[2]`, `Float[18]`, `Int[4]` instead.
+  - bounded fix landed in [`StandardTerrainAdapter`](wow-viewer/src/viewer/WoWViewer/Terrain/StandardTerrainAdapter.cs:22): when class-column decoding is absent or fails trust checks, the adapter now classifies loaded rows by DBC `Name` heuristics (`ocean/sea`, `magma/lava`, `slime/ooze`, `river/water/lake/fast/slow`) and only then falls back to per-ID family defaults.
+  - added `_mh2oLiquidTypeLookupAttempted` so unknown MH2O IDs still log evidence even when the loaded table resolves via heuristic/fallback rather than a dense class-column projection.
+  - bounded compile proof passed again with isolated outputs (`wow-viewer/output/validation/liquid-fix-build`).
 - 2026-06-01 3.3.5 WMO dark-surface follow-up landed as a bounded lighting-input correction:
   - `WmoRenderer` now prefers parsed WMO `MONR` normals when they are present and count-aligned with vertices, instead of always regenerating normals from triangle geometry.
   - parsed normals are normalized per-vertex with finite/length guards; invalid entries fall back to `Vector3.UnitY`; if the parsed set is unusable the renderer falls back to generated normals.

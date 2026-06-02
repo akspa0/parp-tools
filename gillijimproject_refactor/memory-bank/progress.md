@@ -89,6 +89,30 @@
   - New convergence requirements/success criteria now require build-aware liquid-family classification evidence (e.g., per-build LiquidType/DBC semantics) rather than one hard-coded cross-build mapping.
   - Updated `specs/036-renderer-improvements/checklists/requirements.md` notes to reflect this scope extension.
   - This entry records planning/spec continuity only; implementation of the liquid classification lane remains pending.
+- **Renderer Improvements Convergence (036) — liquid-family classification slice (partial implementation) 2026-06-01**
+  - Implemented first bounded code slice for FR-012/FR-013 in active terrain liquid routing:
+    - file: `wow-viewer/src/viewer/WoWViewer/Terrain/StandardTerrainAdapter.cs`
+  - `LoadMh2oLiquidTypeLookup(...)` now validates class-column mappings against canonical liquid anchor IDs before accepting the class-based route:
+    - expected anchors: ID 2=ocean, 3=water, 4=slime, 5=magma.
+  - If anchors fail, adapter rejects class-column mapping and repopulates the table using per-ID fallback (`MapMh2oLiquidTypeFallback`) for all loaded IDs.
+  - This preserves build-scoped ID semantics and avoids unsafe cross-build class assumptions when DBCD schema/columns drift.
+  - Added explicit logging for trust-gate fallback so validation captures include evidence of which classification path was used.
+  - Build validation:
+    - `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/build/wowviewer/bin/ -p:IntermediateOutputPath=i:/parp/parp-tools/output/tmp/build/wowviewer/obj-wowviewer/`
+    - result: passed (`0` errors).
+- **Renderer Improvements Convergence (036) — 3.3.5 LiquidType DBC follow-up 2026-06-01**
+  - Verified the active viewer *does* route standard terrain through `LiquidType.dbc` when DBCD context is available:
+    - [`ViewerApp`](wow-viewer/src/viewer/WoWViewer/ViewerApp.cs:11800) constructs [`StandardTerrainAdapter`](wow-viewer/src/viewer/WoWViewer/Terrain/StandardTerrainAdapter.cs:54) with `_dbcBuild`, `_dbcProvider`, and `_dbdDir`.
+    - [`StandardTerrainAdapter.LoadMh2oLiquidTypeLookup(...)`](wow-viewer/src/viewer/WoWViewer/Terrain/StandardTerrainAdapter.cs:1715) runs during adapter construction when those values are non-empty.
+  - Verified from [`LiquidType.dbd`](wow-viewer/libs/wowdev/WoWDBDefs/definitions/LiquidType.dbd:107) that build `3.3.5.12340` does not expose a simple family/class field; the prior class-column lane was therefore incomplete for Wrath.
+  - Landed bounded follow-up in [`StandardTerrainAdapter`](wow-viewer/src/viewer/WoWViewer/Terrain/StandardTerrainAdapter.cs:1715):
+    - retain class-column route only when present and trustworthy,
+    - otherwise classify rows using DBC `Name` heuristics (`ocean/sea`, `magma/lava`, `slime/ooze`, `river/water/lake/fast/slow`),
+    - finally fall back per-ID via [`MapMh2oLiquidTypeFallback(...)`](wow-viewer/src/viewer/WoWViewer/Terrain/StandardTerrainAdapter.cs:1827).
+  - Added `_mh2oLiquidTypeLookupAttempted` so unknown MH2O IDs still emit proof logs even when the final mapping route is heuristic/fallback based instead of a populated class column.
+  - Build validation:
+    - `dotnet build .\wow-viewer\src\viewer\WoWViewer\WoWViewer.csproj -c Debug -p:OutDir=I:\parp\parp-tools\wow-viewer\output\validation\liquid-fix-build\bin\ -p:IntermediateOutputPath=I:\parp\parp-tools\wow-viewer\output\validation\liquid-fix-build\obj\`
+    - result: passed (`0` errors, warnings only).
 - **Renderer Improvements Convergence (036) — 3.3.5 WMO dark-surface hotfix 2026-06-01**
   - User-reported runtime artifact: 3.3.5 WMO surfaces appeared globally darker than expected.
   - Bounded root-cause lane: `WmoRenderer` shading input path always regenerated normals from triangle geometry, ignoring parsed WMO `MONR` normals.

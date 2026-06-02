@@ -35,6 +35,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private readonly AdtProfile _adtProfile;
     private readonly Dictionary<ushort, LiquidType> _mh2oLiquidTypesById = new();
     private readonly HashSet<ushort> _reportedUnknownMh2oLiquidTypeIds = new();
+    private bool _mh2oLiquidTypeLookupAttempted;
 
     public ConcurrentDictionary<(int tileX, int tileY), List<string>> TileTextures { get; } = new();
     public IReadOnlyList<string> MdxModelNames => _mdxNames;
@@ -1701,7 +1702,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
             return liquidType;
 
         liquidType = MapMh2oLiquidTypeFallback(liquidTypeId);
-        if (_mh2oLiquidTypesById.Count > 0 && _reportedUnknownMh2oLiquidTypeIds.Add(liquidTypeId))
+        if (_mh2oLiquidTypeLookupAttempted && _reportedUnknownMh2oLiquidTypeIds.Add(liquidTypeId))
         {
             ViewerLog.Important(ViewerLog.Category.Terrain,
                 $"[MH2O] LiquidType.dbc ID {liquidTypeId} was not present in the loaded LiquidType table for build {_buildVersion ?? "unknown"}; falling back to static family mapping as {liquidType}.");
@@ -1712,6 +1713,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
     private void LoadMh2oLiquidTypeLookup(IDBCProvider dbcProvider, string dbdDir, string build)
     {
+        _mh2oLiquidTypeLookupAttempted = true;
+
         try
         {
             var dbdProvider = new FilesystemDBDProvider(dbdDir);
@@ -1729,11 +1732,47 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             var availableColumns = new HashSet<string>(storage.AvailableColumns, StringComparer.OrdinalIgnoreCase);
             string? typeColumn = DetectColumn(availableColumns, "Type", "LiquidType", "TypeID");
+            string? nameColumn = DetectColumn(availableColumns, "Name");
+            string classificationRoute;
+
+            if (!string.IsNullOrWhiteSpace(typeColumn))
+            {
+                foreach (var key in storage.Keys)
+                {
+                    if ((uint)key > ushort.MaxValue)
+                        continue;
+
+                    var row = storage[key];
+                    int liquidClass = SafeField<int>(row, typeColumn, -1);
+                    if (!TryMapLiquidTypeClass(liquidClass, out var mappedLiquidType))
+                        continue;
+
+                    _mh2oLiquidTypesById[(ushort)key] = mappedLiquidType;
+                }
+
+                // Build-aware trust gate:
+                // some builds expose a "Type"-like column that does not map to canonical
+                // water/ocean/magma/slime families consistently. Validate against known
+                // anchor IDs from LiquidConverter before accepting class-column mapping.
+                if (!IsLiquidTypeClassMappingTrustworthy())
+                {
+                    _mh2oLiquidTypesById.Clear();
+                    ViewerLog.Important(ViewerLog.Category.Dbc,
+                        $"[MH2O] LiquidType.dbc class-column mapping failed trust checks for build {build}; retrying with DBC row-name heuristics plus ID-family fallback.");
+                }
+                else
+                {
+                    classificationRoute = $"class column '{typeColumn}'";
+                    ViewerLog.Important(ViewerLog.Category.Dbc,
+                        $"[MH2O] Loaded {_mh2oLiquidTypesById.Count} LiquidType.dbc family mappings for build {build} via {classificationRoute}.");
+                    return;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(typeColumn))
             {
                 ViewerLog.Important(ViewerLog.Category.Dbc,
-                    $"[MH2O] LiquidType.dbc loaded for build {build}, but no recognizable family column was found.");
-                return;
+                    $"[MH2O] LiquidType.dbc loaded for build {build}, but no recognizable family column was found. Falling back to DBC row-name heuristics plus ID-family mapping.");
             }
 
             foreach (var key in storage.Keys)
@@ -1741,16 +1780,17 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 if ((uint)key > ushort.MaxValue)
                     continue;
 
+                ushort id = (ushort)key;
                 var row = storage[key];
-                int liquidClass = SafeField<int>(row, typeColumn, -1);
-                if (!TryMapLiquidTypeClass(liquidClass, out var mappedLiquidType))
-                    continue;
-
-                _mh2oLiquidTypesById[(ushort)key] = mappedLiquidType;
+                _mh2oLiquidTypesById[id] = ClassifyLiquidTypeFromDbcRow(id, row, nameColumn);
             }
 
+            classificationRoute = string.IsNullOrWhiteSpace(nameColumn)
+                ? "ID-family fallback over loaded LiquidType.dbc IDs"
+                : $"DBC row-name heuristics ('{nameColumn}') with ID-family fallback";
+
             ViewerLog.Important(ViewerLog.Category.Dbc,
-                $"[MH2O] Loaded {_mh2oLiquidTypesById.Count} LiquidType.dbc family mappings for build {build} via column '{typeColumn}'.");
+                $"[MH2O] Loaded {_mh2oLiquidTypesById.Count} LiquidType.dbc family mappings for build {build} via {classificationRoute}.");
         }
         catch (Exception ex)
         {
@@ -1785,6 +1825,35 @@ public class StandardTerrainAdapter : ITerrainAdapter
         };
     }
 
+    private static LiquidType ClassifyLiquidTypeFromDbcRow(ushort liquidTypeId, dynamic row, string? nameColumn)
+    {
+        string name = SafeField<string>(row, nameColumn, string.Empty) ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            if (ContainsAnyInsensitive(name, "slime", "ooze"))
+                return LiquidType.Slime;
+            if (ContainsAnyInsensitive(name, "magma", "lava"))
+                return LiquidType.Magma;
+            if (ContainsAnyInsensitive(name, "ocean", "sea"))
+                return LiquidType.Ocean;
+            if (ContainsAnyInsensitive(name, "river", "water", "lake", "fast", "slow"))
+                return LiquidType.Water;
+        }
+
+        return MapMh2oLiquidTypeFallback(liquidTypeId);
+    }
+
+    private static bool ContainsAnyInsensitive(string text, params string[] needles)
+    {
+        foreach (string needle in needles)
+        {
+            if (text.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
     private static int GetMh2oLiquidPrecedence(LiquidType liquidType)
     {
         return liquidType switch
@@ -1795,6 +1864,54 @@ public class StandardTerrainAdapter : ITerrainAdapter
             LiquidType.Ocean => 3,
             _ => int.MaxValue,
         };
+    }
+
+    private bool IsLiquidTypeClassMappingTrustworthy()
+    {
+        // Canonical anchor IDs in legacy clients:
+        // 2=ocean, 3=water, 4=slime, 5=magma.
+        // If class-column decoding contradicts these anchors, treat it as unsafe.
+        int anchorsPresent = 0;
+        int anchorsMatching = 0;
+
+        if (MatchesExpectedLiquidAnchor(2, LiquidType.Ocean, out bool present2))
+            anchorsMatching++;
+        if (present2)
+            anchorsPresent++;
+
+        if (MatchesExpectedLiquidAnchor(3, LiquidType.Water, out bool present3))
+            anchorsMatching++;
+        if (present3)
+            anchorsPresent++;
+
+        if (MatchesExpectedLiquidAnchor(4, LiquidType.Slime, out bool present4))
+            anchorsMatching++;
+        if (present4)
+            anchorsPresent++;
+
+        if (MatchesExpectedLiquidAnchor(5, LiquidType.Magma, out bool present5))
+            anchorsMatching++;
+        if (present5)
+            anchorsPresent++;
+
+        // If no anchors are present in the table projection, we cannot trust the class-column route.
+        if (anchorsPresent == 0)
+            return false;
+
+        return anchorsMatching == anchorsPresent;
+    }
+
+    private bool MatchesExpectedLiquidAnchor(ushort id, LiquidType expected, out bool present)
+    {
+        if (!_mh2oLiquidTypesById.TryGetValue(id, out var actual))
+        {
+            present = false;
+            return false;
+        }
+
+        present = true;
+
+        return actual == expected;
     }
 
     private static string? DetectColumn(ISet<string> availableColumns, params string[] candidates)
