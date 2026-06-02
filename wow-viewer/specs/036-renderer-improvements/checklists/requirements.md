@@ -33,3 +33,5 @@
 
 - This spec intentionally creates a convergence owner for existing renderer source plans rather than replacing their historical details.
 - 2026-06-01 update: added build-aware liquid-family classification requirements for staged `3.3.5.12340` to prevent river/ocean surfaces from being misrendered as magma under MCNK-flag-only routing.
+- 2026-06-02 update: added a live `3.3.5.12340` terrain/world FPS lane with measurable frame-pacing outcomes, steady-state-versus-streaming proof separation, and route-based performance evidence requirements.
+- Checklist status after the 2026-06-02 performance update: all items still pass; the added requirements remain user-facing, measurable, and bounded to the renderer-improvements feature.

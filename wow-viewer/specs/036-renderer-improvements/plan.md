@@ -196,6 +196,14 @@ wow-viewer/src/viewer/WowViewer.App/
 6. Record known parity gaps that remain after the bounded runtime pipeline pass.
 7. Add liquid material-path telemetry checkpoints (water/no-spec/proc-water/magma) and `waterLOD` state capture for each liquid validation scenario.
 
+**First bounded execution slice for live terrain/world FPS**:
+1. Capture a repeatable staged `3.3.5.12340` mixed outdoor route and record median frame time, low-FPS segments, visible-scene counts, and pending asset-load pressure separately.
+2. Use that evidence to separate steady-state terrain/world render cost from deferred-load spikes during traversal.
+3. Land the first optimization in streaming world runtime policy before deeper geometry rewrites: tighten the per-frame visible-object/deferred asset-load admission path so traversal frame pacing stays stable while the scene streams in.
+4. Re-run the same route and compare before/after results on the same machine before taking a second performance slice.
+
+**Rationale**: The active terrain renderer already prefers a batched per-tile draw path, while the live world path still allows asset-load churn and visible-object admission pressure to dominate traversal frame pacing. This makes streaming-world load policy the safest first performance owner under spec 036.
+
 ---
 
 ### Phase 5 — Viewer Host Integration, Diagnostics, and Signoff

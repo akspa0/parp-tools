@@ -113,6 +113,20 @@
   - Build validation:
     - `dotnet build .\wow-viewer\src\viewer\WoWViewer\WoWViewer.csproj -c Debug -p:OutDir=I:\parp\parp-tools\wow-viewer\output\validation\liquid-fix-build\bin\ -p:IntermediateOutputPath=I:\parp\parp-tools\wow-viewer\output\validation\liquid-fix-build\obj\`
     - result: passed (`0` errors, warnings only).
+- **Renderer Improvements Convergence (036) — terrain-cell runtime knowledge slice 2026-06-02**
+  - Implemented the first bounded terrain-cell LOD prerequisite in runtime code:
+    - [`wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainHoleMask.cs`](wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainHoleMask.cs)
+    - [`wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainCellGrid.cs`](wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainCellGrid.cs)
+    - [`wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainChunkData.cs`](wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainChunkData.cs)
+    - [`wow-viewer/tests/WowViewer.Core.Tests/WorldTerrainCellGridTests.cs`](wow-viewer/tests/WowViewer.Core.Tests/WorldTerrainCellGridTests.cs)
+  - Runtime chunks now expose:
+    - typed 16-bit hole-mask semantics with native 2x2 cell-group evaluation,
+    - an explicit 8x8 cell grid,
+    - stable vertex-index mapping for top-left/top-right/bottom-left/bottom-right/center vertices per cell.
+  - This is the enabling slice before implementing actual terrain distance-LOD selection: the renderer/runtime now has a canonical cell/hole surface instead of re-deriving those rules ad hoc.
+  - Focused validation:
+    - `dotnet test .\wow-viewer\tests\WowViewer.Core.Tests\WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldTerrainCellGridTests|FullyQualifiedName~WorldTerrainTileBuilderTests|FullyQualifiedName~TerrainMeshBuilderTopologyTests" -p:OutDir=I:\parp\parp-tools\wow-viewer\output\validation\terrain-cell-lod-tests\bin\ -p:IntermediateOutputPath=I:\parp\parp-tools\wow-viewer\output\validation\terrain-cell-lod-tests\obj\`
+    - result: pass (`12/12`).
 - **Renderer Improvements Convergence (036) — 3.3.5 WMO dark-surface hotfix 2026-06-01**
   - User-reported runtime artifact: 3.3.5 WMO surfaces appeared globally darker than expected.
   - Bounded root-cause lane: `WmoRenderer` shading input path always regenerated normals from triangle geometry, ignoring parsed WMO `MONR` normals.
