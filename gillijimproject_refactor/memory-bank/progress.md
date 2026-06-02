@@ -127,6 +127,22 @@
   - Focused validation:
     - `dotnet test .\wow-viewer\tests\WowViewer.Core.Tests\WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldTerrainCellGridTests|FullyQualifiedName~WorldTerrainTileBuilderTests|FullyQualifiedName~TerrainMeshBuilderTopologyTests" -p:OutDir=I:\parp\parp-tools\wow-viewer\output\validation\terrain-cell-lod-tests\bin\ -p:IntermediateOutputPath=I:\parp\parp-tools\wow-viewer\output\validation\terrain-cell-lod-tests\obj\`
     - result: pass (`12/12`).
+- **Renderer Improvements Convergence (036) — first terrain distance-LOD selector slice 2026-06-02**
+  - Implemented bounded decision logic in [`wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainLodSelector.cs`](wow-viewer/src/core/WowViewer.Core.Runtime/World/Terrain/WorldTerrainLodSelector.cs):
+    - `FullDetail` before texture LOD threshold,
+    - `FadeToBaseLayer` across the native-style 256-unit fade window,
+    - `BaseLayerOnly` after the fade window,
+    - `LowDetail` once chunk distance reaches/exceeds fog end.
+  - The selector also surfaces runtime-friendly outputs for the next integration slice:
+    - active texture layer count,
+    - overlay fade factor,
+    - renderable cell count derived from the chunk's hole-aware cell grid,
+    - low-detail mesh usage flag.
+  - Added focused coverage in [`wow-viewer/tests/WowViewer.Core.Tests/WorldTerrainLodSelectorTests.cs`](wow-viewer/tests/WowViewer.Core.Tests/WorldTerrainLodSelectorTests.cs).
+  - This slice is policy-only and intentionally stops before viewer/runtime shader wiring; `TerrainRenderer` still renders all layers today.
+  - Focused validation:
+    - `dotnet test .\wow-viewer\tests\WowViewer.Core.Tests\WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~WorldTerrainLodSelectorTests|FullyQualifiedName~WorldTerrainCellGridTests|FullyQualifiedName~WorldTerrainTileBuilderTests|FullyQualifiedName~TerrainMeshBuilderTopologyTests" -p:OutDir=I:\parp\parp-tools\wow-viewer\output\validation\terrain-lod-selector-tests\bin\ -p:IntermediateOutputPath=I:\parp\parp-tools\wow-viewer\output\validation\terrain-lod-selector-tests\obj\`
+    - result: pass (`17/17`).
 - **Renderer Improvements Convergence (036) — 3.3.5 WMO dark-surface hotfix 2026-06-01**
   - User-reported runtime artifact: 3.3.5 WMO surfaces appeared globally darker than expected.
   - Bounded root-cause lane: `WmoRenderer` shading input path always regenerated normals from triangle geometry, ignoring parsed WMO `MONR` normals.
