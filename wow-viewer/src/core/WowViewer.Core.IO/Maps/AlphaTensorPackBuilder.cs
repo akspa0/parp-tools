@@ -216,10 +216,7 @@ public static class AlphaTensorPackBuilder
 
     private static int McnkFlagsToLiquidType(float minH, float maxH, uint mcnkFlags)
     {
-        if ((mcnkFlags & 0x08u) != 0)
-            return 1;
-        int liquidBits = (int)((mcnkFlags >> 4) & 3u);
-        return liquidBits;
+        return (int)McnkFlagDecoder.Decode(mcnkFlags);
     }
 
     private static float[,]? DownsampleHeightmap(float[,]? source, int targetSize)

@@ -546,15 +546,7 @@ public static class AlphaToLkConverter
 
     private static AdtLiquidBasicType ResolveLiquidBasicType(uint mcnkFlags)
     {
-        if ((mcnkFlags & 0x08) != 0)
-            return AdtLiquidBasicType.Ocean;
-
-        return ((mcnkFlags >> 4) & 0x3) switch
-        {
-            2 => AdtLiquidBasicType.Magma,
-            3 => AdtLiquidBasicType.Slime,
-            _ => AdtLiquidBasicType.Water,
-        };
+        return McnkFlagDecoder.Decode(mcnkFlags);
     }
 
     private static ushort MapLiquidTypeId(AdtLiquidBasicType basicType)

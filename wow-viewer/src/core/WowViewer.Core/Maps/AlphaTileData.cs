@@ -242,16 +242,7 @@ var heights = SliceChunkHeights(Heightmap, cx, cy, tileSize);
 
     private static int ClassifyLiquid(uint mcnkFlags)
     {
-        if ((mcnkFlags & 0x04) != 0) return 1;
-        if ((mcnkFlags & 0x08) != 0) return 1;
-        int bits = (int)((mcnkFlags >> 4) & 3);
-        return bits switch
-        {
-            1 => 1,
-            2 => 2,
-            3 => 3,
-            _ => 0
-        };
+        return (int)McnkFlagDecoder.Decode(mcnkFlags);
     }
 
     private static float[] SliceChunkHeights(float[,] heightmap, int cx, int cy, int tileSize)
