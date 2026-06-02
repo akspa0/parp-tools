@@ -596,7 +596,7 @@ public static class LkToAlphaConverter
                     continue;
 
                 if (layer.TileExists(x, y))
-                    tileFlags[(globalY * 8) + globalX] = 0;
+                    tileFlags[(globalY * 8) + globalX] = AlphaLiquidTypeCodec.GetWriterTileTypeNibble(layer.BasicType);
             }
         }
 

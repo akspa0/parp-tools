@@ -517,7 +517,7 @@ public static class AlphaToLkConverter
             if (liquidChunk.IndexX != cx || liquidChunk.IndexY != cy)
                 continue;
 
-            AdtLiquidBasicType basicType = ResolveLiquidBasicType(liquidChunk.McnkFlags);
+            AdtLiquidBasicType basicType = AlphaLiquidTypeCodec.ResolveBasicType(liquidChunk.TileFlags, liquidChunk.McnkFlags);
             float[] heights = liquidChunk.Heights is { Length: >= 81 }
                 ? [.. liquidChunk.Heights]
                 : CreateFlatLiquidHeights((liquidChunk.MinHeight + liquidChunk.MaxHeight) * 0.5f);
