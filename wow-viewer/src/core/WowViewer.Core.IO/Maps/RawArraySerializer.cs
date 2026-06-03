@@ -71,6 +71,7 @@ public static class RawArraySerializer
         WriteArray(outputStream, "wl_liquid_height", pack.WlLiquidHeight);
         WriteArray(outputStream, "unified_liquid_mask", pack.UnifiedLiquidMask);
         WriteArray(outputStream, "unified_liquid_height", pack.UnifiedLiquidHeight);
+        WriteArray(outputStream, "liquid_basic_type_257", pack.LiquidBasicType257);
         WriteArray(outputStream, "object_mask_257", pack.ObjectMask257);
         WriteArray(outputStream, "object_precise_mask_257", pack.ObjectPreciseMask257);
         WriteArray(outputStream, "object_instance_mask_257", pack.ObjectInstanceMask257);
@@ -113,6 +114,7 @@ public static class RawArraySerializer
         WriteArray(outputStream, "wl_liquid_height", pack.WlLiquidHeight);
         WriteArray(outputStream, "unified_liquid_mask", pack.UnifiedLiquidMask);
         WriteArray(outputStream, "unified_liquid_height", pack.UnifiedLiquidHeight);
+        WriteArray(outputStream, "liquid_basic_type_257", pack.LiquidBasicType257);
         WriteArray(outputStream, "object_mask_257", pack.ObjectMask257);
         WriteArray(outputStream, "object_precise_mask_257", pack.ObjectPreciseMask257);
         WriteArray(outputStream, "object_instance_mask_257", pack.ObjectInstanceMask257);

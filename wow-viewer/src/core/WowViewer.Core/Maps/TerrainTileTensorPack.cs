@@ -139,6 +139,17 @@ public sealed class TerrainTileTensorPack
     /// </summary>
     public float[,]? UnifiedLiquidHeight { get; set; }
 
+    /// <summary>
+    /// 257×257 per-vertex resolved <see cref="AdtLiquidBasicType"/> (0=Water, 1=Ocean,
+    /// 2=Magma, 3=Slime). Populated at harvest time using
+    /// <c>McnkFlagDecoder</c> for MCNK/MCLQ-driven tiles and
+    /// <c>DbcLiquidTypeTable</c> for MH2O-driven tiles. This is the canonical
+    /// liquid type field consumed by the viewer at runtime — the viewer MUST
+    /// NOT re-resolve liquid type from MCNK flags or MH2O LiquidTypeId at
+    /// render time. 0xFF where no liquid is present.
+    /// </summary>
+    public byte[,]? LiquidBasicType257 { get; set; }
+
     // ── Object and footprint masks ─────────────────────────────────────────
 
     /// <summary>257×257 binary mask: any object footprint present.</summary>

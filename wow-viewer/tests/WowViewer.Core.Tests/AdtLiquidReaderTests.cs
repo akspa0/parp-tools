@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 
@@ -96,7 +97,84 @@ public sealed class AdtLiquidReaderTests
         Assert.True(liquidFile.Chunks.All(chunk => chunk.Layers.Count == 0));
     }
 
-    private static byte[] CreateMh2oPayload()
+    [Theory]
+    [InlineData((ushort)17, AdtLiquidBasicType.Ocean)]
+    [InlineData((ushort)19, AdtLiquidBasicType.Magma)]
+    [InlineData((ushort)20, AdtLiquidBasicType.Slime)]
+    [InlineData((ushort)1, AdtLiquidBasicType.Water)]
+    [InlineData((ushort)9999, AdtLiquidBasicType.Water)]
+    public void Read_WithDbcTable_ResolvesBasicTypeFromDbc(ushort liquidTypeId, AdtLiquidBasicType expected)
+    {
+        DbcLiquidTypeTable dbcTable = DbcLiquidTypeTable.LoadFromJsonString("""
+        {
+          "rows": [
+            { "id": 1,  "type": 1 },
+            { "id": 17, "type": 1 },
+            { "id": 19, "type": 2 },
+            { "id": 20, "type": 3 }
+          ]
+        }
+        """);
+
+        byte[] bytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MHDR", new byte[64]),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MH2O", CreateMh2oPayload(liquidTypeId)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", CreateMinimalRootMcnkPayload(indexX: 0, indexY: 0)),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary summary = MapFileSummaryReader.Read(stream, "synthetic_0_0.adt");
+        AdtLiquidFile liquidFile = AdtLiquidReader.Read(stream, summary, profile: null, dbcTable);
+
+        AdtLiquidLayer layer = Assert.Single(liquidFile.Chunks[5].Layers);
+        Assert.Equal(liquidTypeId, layer.LiquidTypeId);
+        Assert.Equal(expected, layer.BasicType);
+    }
+
+    [Fact]
+    public void Read_WithDbcTable_RecordsMissingLiquidTypeIds()
+    {
+        DbcLiquidTypeTable dbcTable = DbcLiquidTypeTable.LoadFromJsonString("""
+        { "rows": [ { "id": 1, "type": 1 } ] }
+        """);
+
+        byte[] bytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MHDR", new byte[64]),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MH2O", CreateMh2oPayload(9999)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", CreateMinimalRootMcnkPayload(indexX: 0, indexY: 0)),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary summary = MapFileSummaryReader.Read(stream, "synthetic_0_0.adt");
+        AdtLiquidReader.Read(stream, summary, profile: null, dbcTable);
+
+        Assert.Single(dbcTable.MissingLiquidTypeIds);
+        Assert.Contains(9999, dbcTable.MissingLiquidTypeIds);
+    }
+
+    [Fact]
+    public void Read_WithoutDbcTable_FallsBackToHardcoded17_19_20Mapping()
+    {
+        byte[] bytes17 =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MHDR", new byte[64]),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MH2O", CreateMh2oPayload(17)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", CreateMinimalRootMcnkPayload(indexX: 0, indexY: 0)),
+        ];
+
+        using MemoryStream stream17 = new(bytes17);
+        MapFileSummary summary17 = MapFileSummaryReader.Read(stream17, "synthetic_0_0.adt");
+        AdtLiquidFile file17 = AdtLiquidReader.Read(stream17, summary17);
+
+        Assert.Equal(AdtLiquidBasicType.Ocean, Assert.Single(file17.Chunks[5].Layers).BasicType);
+    }
+
+    private static byte[] CreateMh2oPayload(ushort liquidTypeId = 17)
     {
         const int chunkCount = 256;
         const int headerSize = 12;
@@ -122,7 +200,7 @@ public sealed class AdtLiquidReaderTests
         BinaryPrimitives.WriteUInt64LittleEndian(payload.AsSpan(attributesOffset, 8), 0x0123456789ABCDEFUL);
         BinaryPrimitives.WriteUInt64LittleEndian(payload.AsSpan(attributesOffset + 8, 8), 0x0FEDCBA987654321UL);
 
-        BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(layerOffset, 2), 17);
+        BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(layerOffset, 2), liquidTypeId);
         BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(layerOffset + 2, 2), 0);
         BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(layerOffset + 4, 4), 42f);
         BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(layerOffset + 8, 4), 50f);

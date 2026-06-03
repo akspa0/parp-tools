@@ -107,6 +107,12 @@ public static class AlphaTensorPackBuilder
             MclqSurfaceHeight = mclqSurfaceHeight257,
             MclqTypeMask = mclqTypeMask257,
             MclqPresenceMask = mclqPresenceMask257,
+            LiquidBasicType257 = LiquidBasicTypePackBuilder.Build(
+                mh2oPresence: null,
+                mh2oType: null,
+                mclqPresence: mclqPresenceMask257,
+                mclqType: mclqTypeMask257,
+                mcnkFlags16: null),
             HoleMask16 = holeMask16,
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,

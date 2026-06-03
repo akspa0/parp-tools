@@ -180,6 +180,8 @@ public static class AdtTensorPackBuilder
             WlLiquidHeight = wlHeight,
             UnifiedLiquidMask = unifiedLiquidMask,
             UnifiedLiquidHeight = unifiedLiquidHeight,
+            LiquidBasicType257 = LiquidBasicTypePackBuilder.Build(
+                mh2oPresence, mh2oType, mclqPresence, mclqType, mcnkFlags16),
             ObjectMask257 = objectMask257,
             ObjectPreciseMask257 = objectPreciseMask257,
             ObjectInstanceMask257 = objectInstanceMask257,
@@ -466,6 +468,7 @@ public static class AdtTensorPackBuilder
             WlLiquidHeight = null,
             UnifiedLiquidMask = null,
             UnifiedLiquidHeight = null,
+            LiquidBasicType257 = null,
             ObjectMask257 = null,
             ObjectPreciseMask257 = null,
             Pm4PathMask = pm4PathMask,

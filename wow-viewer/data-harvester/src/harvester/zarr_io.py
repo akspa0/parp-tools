@@ -40,6 +40,7 @@ _CHUNK_PRESETS: dict[str, tuple[int, ...]] = {
     "mcnr_normal_xyz": (129, 129, 3),
     "mclq_surface_height": (129, 129),
     "mclq_type_mask": (16, 16),
+    "liquid_basic_type_257": (129, 129),
     "mcly_texture_ids": (16, 16, 4),
     "mcly_layer_mask": (16, 16, 4),
     "mcal_alpha_pack": (128, 128, 4),

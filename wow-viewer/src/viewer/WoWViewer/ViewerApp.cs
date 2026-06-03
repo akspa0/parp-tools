@@ -637,6 +637,7 @@ public partial class ViewerApp : IDisposable
     private VlmTerrainManager? _vlmTerrainManager;
     private WorldScene? _worldScene;
     private bool _wantOpenVlmProject = false;
+    private bool _wantOpenZarrDataset = false;
 
     // Object picking state
     private int _selectedObjectIndex = -1; // -1=none, 0..modf-1=WMO, modf..modf+mddf-1=MDX
@@ -1696,6 +1697,9 @@ void main() {
                 if (ImGui.MenuItem("Open MK Dataset..."))
                     _wantOpenVlmProject = true;
 
+                if (ImGui.MenuItem("Open Zarr Dataset..."))
+                    _wantOpenZarrDataset = true;
+
                 ImGui.Separator();
 
                 if (ImGui.MenuItem("Quit"))
@@ -2102,6 +2106,19 @@ void main() {
 
             if (!string.IsNullOrEmpty(vlmPath) && Directory.Exists(vlmPath))
                 LoadVlmProject(vlmPath);
+        }
+
+        if (_wantOpenZarrDataset)
+        {
+            _wantOpenZarrDataset = false;
+
+            string? zarrPath = ShowFolderDialogSTA(
+                "Select Zarr tile dataset folder (parent of <build>.zarr/ or the store root itself)",
+                initialDir: null,
+                showNewFolderButton: false);
+
+            if (!string.IsNullOrEmpty(zarrPath) && Directory.Exists(zarrPath))
+                LoadZarrDataset(zarrPath);
         }
 
         if (_wantOpenWdtFile)
@@ -12010,6 +12027,23 @@ void main() {
         var sz = _window.Size;
         _loadingScreen.Render(sz.X, sz.Y);
         _window.GLContext?.SwapBuffers();
+    }
+
+    private void LoadZarrDataset(string datasetRoot)
+    {
+        try
+        {
+            var loader = new ZarrTileDatasetLoader(datasetRoot);
+            ZarrStoreSummary summary = loader.Open();
+            _statusMessage =
+                $"Zarr store '{summary.MapName}' discovered: {summary.Arrays.Count} arrays " +
+                $"(liquid_basic_type_257: {(summary.HasLiquidBasicType ? "yes" : "MISSING — rebuild tiles")}). " +
+                "Per-tile loading is the spec 041 T-10 implementation slice.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Zarr dataset load failed: {ex.Message}";
+        }
     }
 
     private void LoadVlmProject(string projectRoot)
