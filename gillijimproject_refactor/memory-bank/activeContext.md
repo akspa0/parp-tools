@@ -114,6 +114,17 @@
   - staged `3.0.1.8303` Northrend currently shows some `.mdx` placements failing both `.skin` resolution and M2-to-MDX fallback
   - treat these as a likely prototype `MD20` / `Model2` build-profile boundary
   - future proof owner is a Ghidra pass over staged `3.0.1.8303` `wow.exe`, not more blind renderer guessing
+  - 2026-06-03 bounded follow-up clarified the currently fixed seam:
+    - real staged `3.0.1.8303` samples now have focused proof that `WarcraftNetM2Adapter` produces renderable embedded-profile geometry through the active viewer route
+    - the remaining "still do not render" symptom was localized to `WoWViewer/Rendering/ModelRenderer.cs`, where pre-release `3.0.1` adapted models were suppressing layer-0 missing-texture fallback and turning valid geometry into a no-draw
+    - current fix keeps the normal untextured primary-layer fallback for missing textures while preserving unresolved pre-release character-group filtering
+    - focused proof path is `M2EmbeddedProfileRealDataTests` plus a bounded `WoWViewer` build; this is still build/test signoff, not live UI revalidation
+  - classic chunked `MDLX` support for staged `0.5.3` / `1.12.1` is now partially integrated through `wow-viewer` runtime-owned surfaces instead of staying parser-only:
+    - `WowViewer.Core.IO.M2Chunked.M2ChunkedModelReader` + `M2ModelReaderDispatcher` remain the sibling adapter surface
+    - active `WoWViewer` standalone file-open now first attempts a chunked-MDX -> generated-`MD20` runtime route, with legacy `MdxRenderer` fallback only if that runtime bridge fails
+    - `WowViewer.Tool.Inspect m2 inspect` now accepts chunked `MDLX` roots and prints chunk/conversion/runtime summary from the same `M2Chunked` path
+    - standalone/runtime animation selection now guards invalid alias chains and malformed external `.anim` companions: bad sequences are logged, marked invalid, and fallback to another usable sequence instead of crashing the viewer
+    - focused proof currently covers `M2ChunkedReaderTests` plus bounded `WowViewer.Tool.Inspect` and `WoWViewer` builds; companion `.skin` / `.anim` ingestion inside `M2ChunkedModelReader` itself remains an open follow-up
   - staged `3.3.5.12340` wrong-axis M2 animation regression is now localized to runtime compressed-quaternion payload interpretation drift:
     - runtime sampler had been reading `M2CompQuaternion` as a swizzled `(y, -x, z, w)` payload
     - converter/compatibility path was already reading direct little-endian `(x, y, z, w)`

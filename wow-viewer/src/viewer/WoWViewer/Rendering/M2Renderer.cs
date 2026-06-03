@@ -270,14 +270,25 @@ public sealed class M2Renderer : IModelRenderer
         _lastAnimationUpdateTime = now;
         _runtimeAnimator.Update(Math.Clamp(deltaMs, 0.0f, 100.0f));
 
-        int sequenceIndex = _runtimeAnimator.CurrentSequence;
-        int timeMs = _runtimeAnimator.GetCurrentTimeMs();
-        M2ExternalAnimationRuntimeState? externalAnimationState = _runtimeAnimator.ResolveExternalAnimationState();
-        M2AnimatedRenderState animatedState = M2AnimatedRenderStateEvaluator.Evaluate(_runtimeModel.Model, _runtimeModel, sequenceIndex, timeMs, externalAnimationState);
-        M2BonePoseState bonePoseState = M2BonePoseEvaluator.Evaluate(_runtimeModel.Model, sequenceIndex, timeMs, externalAnimationState);
-        M2SkinnedRenderModel skinnedRenderModel = M2SkinnedRenderModelBuilder.ApplyPose(_runtimeModel, bonePoseState);
-        M2RenderConsumerFrameState consumerState = M2RenderConsumerFrameStateBuilder.Build(_runtimeModel, animatedState);
-        ApplyAnimatedFrame(skinnedRenderModel, consumerState);
+        if (!_runtimeAnimator.TryPrepareCurrentSequence(out int sequenceIndex, out int timeMs, out M2ExternalAnimationRuntimeState? externalAnimationState))
+            return;
+
+        try
+        {
+            M2AnimatedRenderState animatedState = M2AnimatedRenderStateEvaluator.Evaluate(_runtimeModel.Model, _runtimeModel, sequenceIndex, timeMs, externalAnimationState);
+            M2BonePoseState bonePoseState = M2BonePoseEvaluator.Evaluate(_runtimeModel.Model, sequenceIndex, timeMs, externalAnimationState);
+            M2SkinnedRenderModel skinnedRenderModel = M2SkinnedRenderModelBuilder.ApplyPose(_runtimeModel, bonePoseState);
+            M2RenderConsumerFrameState consumerState = M2RenderConsumerFrameStateBuilder.Build(_runtimeModel, animatedState);
+            ApplyAnimatedFrame(skinnedRenderModel, consumerState);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Error(
+                ViewerLog.Category.Mdx,
+                $"[M2] Animation update failed for '{Path.GetFileName(SourceModelPath)}' sequence {sequenceIndex}: {ex.Message}");
+
+            _runtimeAnimator.TryHandleRuntimeFailure(ex);
+        }
     }
 
     public void ApplyTextureSamplingSettings()

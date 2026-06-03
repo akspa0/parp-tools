@@ -22,6 +22,7 @@ using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WoWViewer.Terrain.Vlm;
 using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.M2;
 using WoWViewer.Terrain.Vlm;
@@ -10776,6 +10777,17 @@ void main() {
                     ViewerLog.Important(ViewerLog.Category.Mdx,
                         $"[ModelRouting] Extension/container mismatch: '{ext}' with MDLX root. Routing as MDX: {Path.GetFileName(sourcePath)}");
 
+                try
+                {
+                    LoadChunkedMdxFromBytes(modelBytes, sourcePath, dir);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    ViewerLog.Important(ViewerLog.Category.Mdx,
+                        $"[ModelRouting] Chunked MDX runtime route failed for {Path.GetFileName(sourcePath)}; falling back to legacy MDX renderer: {DescribeExceptionChain(ex)}");
+                }
+
                 MdxRuntimeSharedInfo? sharedRuntimeInfo = TryReadSharedMdxRuntimeInfo(sourcePath, modelBytes);
 
                 using (var ms = new MemoryStream(modelBytes))
@@ -10800,6 +10812,32 @@ void main() {
                 throw new InvalidDataException(
                     $"Unsupported model root magic ({GetModelMagicLabel(modelBytes)}) for '{Path.GetFileName(sourcePath)}'. Expected MDLX or MD20.");
         }
+    }
+
+    private void LoadChunkedMdxFromBytes(byte[] modelBytes, string sourcePath, string dir)
+    {
+        ArgumentNullException.ThrowIfNull(modelBytes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+
+        string resolvedModelPath = ResolveStandaloneCanonicalModelPath(sourcePath);
+        using MemoryStream stream = new(modelBytes, writable: false);
+        M2ChunkedReadResult chunked = M2ChunkedModelReader.ReadDetailed(stream, resolvedModelPath, ReadStandaloneFileData);
+
+        if (TryLoadStandaloneCameraPathM2(chunked.Conversion.ModelBytes, chunked.Conversion.ModelPath))
+        {
+            CaptureWorldReturnState();
+            return;
+        }
+
+        M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(
+            chunked.Conversion.ModelBytes,
+            chunked.Conversion.SkinBytes,
+            chunked.Conversion.ModelPath,
+            chunked.Conversion.SkinPath);
+
+        LoadM2RuntimeModel(runtimeModel, modelDir: dir, virtualPath: resolvedModelPath);
+        ViewerLog.Info(ViewerLog.Category.Mdx,
+            $"[ModelRouting] Loaded chunked MDX through M2 runtime: file={Path.GetFileName(sourcePath)} chunks={chunked.Chunks.Count} geosets={chunked.Geometry.GeosetCount} vertices={chunked.VertexCount} triangles={chunked.TriangleCount}");
     }
 
     /// <summary>

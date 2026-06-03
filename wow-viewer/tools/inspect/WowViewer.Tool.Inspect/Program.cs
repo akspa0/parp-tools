@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Buffers.Binary;
 using System.Numerics;
 using System.Text.Json;
 using WowViewer.Core.Audio;
@@ -11,6 +12,7 @@ using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Lit;
 using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Wmo;
@@ -287,23 +289,12 @@ static void RunM2Inspect(string[] args)
 	}
 
 	byte[]? TryReadExactSkinBytes(string companionPath)
-	{
-		if (!string.IsNullOrWhiteSpace(archiveRoot))
-		{
-			try
-			{
-				return ArchiveVirtualFileReader.ReadVirtualFile(companionPath, [archiveRoot], archiveBootstrapOptions);
-			}
-			catch (FileNotFoundException)
-			{
-				return null;
-			}
-		}
-
-		return File.Exists(companionPath) ? File.ReadAllBytes(companionPath) : null;
-	}
+		=> TryReadExactCompanionBytes(companionPath);
 
 	byte[]? TryReadExactAnimBytes(string companionPath)
+		=> TryReadExactCompanionBytes(companionPath);
+
+	byte[]? TryReadExactCompanionBytes(string companionPath)
 	{
 		if (!string.IsNullOrWhiteSpace(archiveRoot))
 		{
@@ -321,28 +312,58 @@ static void RunM2Inspect(string[] args)
 	}
 
 	byte[] modelBytes = ReadInputBytes();
+	bool isChunkedMdx = modelBytes.Length >= sizeof(uint)
+		&& BinaryPrimitives.ReadUInt32LittleEndian(modelBytes.AsSpan(0, sizeof(uint))) == MdxMagic.Mdlx;
+	M2ChunkedReadResult? chunkedRead = null;
 	M2ModelDocument model;
-	using (MemoryStream stream = new(modelBytes, writable: false))
-		model = M2ModelReader.Read(stream, sourceLabel);
-
 	M2GeometryDocument? geometry = null;
 	string? geometryError = null;
-	try
+
+	if (isChunkedMdx)
 	{
 		using MemoryStream stream = new(modelBytes, writable: false);
-		geometry = M2GeometryReader.Read(stream, sourceLabel);
+		chunkedRead = M2ChunkedModelReader.ReadDetailed(stream, sourceLabel, TryReadExactCompanionBytes);
+		model = chunkedRead.Model;
+
+		try
+		{
+			using MemoryStream geometryStream = new(chunkedRead.Conversion.ModelBytes, writable: false);
+			geometry = M2GeometryReader.Read(geometryStream, chunkedRead.Conversion.ModelPath);
+		}
+		catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+		{
+			geometryError = ex.Message;
+		}
 	}
-	catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+	else
 	{
-		geometryError = ex.Message;
+		using MemoryStream modelStream = new(modelBytes, writable: false);
+		model = M2ModelReader.Read(modelStream, sourceLabel);
+
+		try
+		{
+			using MemoryStream geometryStream = new(modelBytes, writable: false);
+			geometry = M2GeometryReader.Read(geometryStream, sourceLabel);
+		}
+		catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+		{
+			geometryError = ex.Message;
+		}
 	}
 
 	M2SkinProfileRuntimeState state = M2SkinProfileRuntime.Choose(model, profileIndex);
-	byte[]? skinBytes = TryReadExactSkinBytes(state.Selection.CompanionPath);
+	byte[]? skinBytes = chunkedRead is not null
+		&& string.Equals(state.Selection.CompanionPath, chunkedRead.Conversion.SkinPath, StringComparison.OrdinalIgnoreCase)
+		? chunkedRead.Conversion.SkinBytes
+		: TryReadExactSkinBytes(state.Selection.CompanionPath);
 	if (skinBytes is not null)
 	{
 		using MemoryStream skinStream = new(skinBytes, writable: false);
-		M2SkinDocument skin = M2SkinReader.Read(skinStream, state.Selection.CompanionPath);
+		string skinPath = chunkedRead is not null
+			&& string.Equals(state.Selection.CompanionPath, chunkedRead.Conversion.SkinPath, StringComparison.OrdinalIgnoreCase)
+			? chunkedRead.Conversion.SkinPath
+			: state.Selection.CompanionPath;
+		M2SkinDocument skin = M2SkinReader.Read(skinStream, skinPath);
 		state = M2SkinProfileRuntime.Load(state, skin);
 		state = M2SkinProfileRuntime.Initialize(state);
 	}
@@ -439,6 +460,8 @@ static void RunM2Inspect(string[] args)
 	}
 
 	PrintM2Summary(model, state, geometry, geometryError, renderModel, externalAnimationState, externalAnimationError, animatedRenderState, animatedRenderError, bonePoseState, bonePoseError, skinnedRenderModel, renderConsumerState, effectRuntimeState, sceneSubmissionPlan, renderFrame, visualSnapshot, goldenFrame);
+	if (chunkedRead is not null)
+		PrintChunkedM2ConversionSummary(chunkedRead);
 }
 
 static void RunMdx(string[] args)
@@ -599,6 +622,17 @@ static void PrintM2Summary(M2ModelDocument model, M2SkinProfileRuntimeState stat
 		PrintExternalAnimationSummary(externalAnimationState, externalAnimationError);
 
 	PrintM2RuntimeConsumers(animatedRenderState, animatedRenderError, bonePoseState, bonePoseError, skinnedRenderModel, renderConsumerState, effectRuntimeState, sceneSubmissionPlan, renderFrame, visualSnapshot, goldenFrame);
+}
+
+static void PrintChunkedM2ConversionSummary(M2ChunkedReadResult result)
+{
+	Console.WriteLine($"CHUNKED.MDX: sourceSignature={result.Summary.Signature} version={result.Summary.Version} chunks={result.Chunks.Count} materials={result.Summary.MaterialCount} sequences={result.Summary.SequenceCount} geosets={result.Geometry.GeosetCount} vertices={result.VertexCount} triangles={result.TriangleCount} convertedModelPath={result.Conversion.ModelPath} convertedSkinPath={result.Conversion.SkinPath}");
+	for (int index = 0; index < result.Chunks.Count; index++)
+	{
+		M2ChunkedChunkHeader chunk = result.Chunks[index];
+		string truncation = chunk.IsTruncated ? " truncated=true" : string.Empty;
+		Console.WriteLine($"CHUNK[{index:D2}]: fourCC={chunk.FourCC} size=0x{chunk.Size:X} offset=0x{chunk.Offset:X}{truncation}");
+	}
 }
 
 static void PrintM2RuntimeConsumers(M2AnimatedRenderState? animatedRenderState, string? animatedRenderError, M2BonePoseState? bonePoseState, string? bonePoseError, M2SkinnedRenderModel? skinnedRenderModel, M2RenderConsumerFrameState? renderConsumerState, M2EffectRuntimeState? effectRuntimeState, M2SceneSubmissionPlan? sceneSubmissionPlan, M2RenderFrame? renderFrame, M2SoftwareVisualSnapshot? visualSnapshot, M2RuntimeGoldenFrame? goldenFrame)

@@ -10,9 +10,11 @@ internal sealed class M2RuntimeAnimator : IAnimationController
 {
     private readonly M2ModelDocument _model;
     private readonly IDataSource? _dataSource;
-    private readonly IReadOnlyList<AnimationSequenceDescriptor> _sequences;
+    private readonly AnimationSequenceDescriptor[] _sequences;
     private readonly Dictionary<int, M2ExternalAnimationRuntimeState?> _externalStates = new();
     private readonly HashSet<string> _loggedAnimationPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<int, string> _sequenceFailures = new();
+    private readonly HashSet<int> _loggedSequenceFailures = new();
     private int _sequenceIndex;
     private float _currentFrame;
 
@@ -29,11 +31,11 @@ internal sealed class M2RuntimeAnimator : IAnimationController
                 new AnimationTimeRange(0.0f, sequence.Duration)))
             .ToArray();
 
-        if (_sequences.Count > 0)
-            SetSequence(0);
+        if (_sequences.Length > 0 && !TryActivateSequence(0, logFailure: false))
+            TryActivateFallbackSequence(excludingSequenceIndex: null, fallbackReason: "Default animation sequence is invalid.");
     }
 
-    public bool HasAnimation => _sequences.Count > 0;
+    public bool HasAnimation => _sequences.Length > 0;
 
     public IReadOnlyList<AnimationSequenceDescriptor> Sequences => _sequences;
 
@@ -49,11 +51,13 @@ internal sealed class M2RuntimeAnimator : IAnimationController
 
     public void SetSequence(int index)
     {
-        if ((uint)index >= (uint)_sequences.Count)
+        if ((uint)index >= (uint)_sequences.Length)
             return;
 
-        _sequenceIndex = index;
-        _currentFrame = 0.0f;
+        if (TryActivateSequence(index, logFailure: true))
+            return;
+
+        TryActivateFallbackSequence(excludingSequenceIndex: index, fallbackReason: $"Rejected sequence '{GetSequenceName(index)}'.");
     }
 
     public float StepToNextKeyframe()
@@ -105,19 +109,125 @@ internal sealed class M2RuntimeAnimator : IAnimationController
     public int GetCurrentTimeMs()
         => (int)MathF.Round(ClampFrame(_currentFrame, _sequenceIndex));
 
+    public bool TryPrepareCurrentSequence(
+        out int sequenceIndex,
+        out int timeMs,
+        out M2ExternalAnimationRuntimeState? externalAnimationState)
+    {
+        sequenceIndex = _sequenceIndex;
+        timeMs = 0;
+        externalAnimationState = null;
+
+        if (!HasAnimation)
+            return false;
+
+        if (!TryResolveSequenceState(_sequenceIndex, out externalAnimationState, out string? error))
+        {
+            LogSequenceFailure(_sequenceIndex, error ?? "Unknown animation validation failure.");
+            if (!TryActivateFallbackSequence(
+                    excludingSequenceIndex: _sequenceIndex,
+                    fallbackReason: $"Rejected sequence '{GetSequenceName(_sequenceIndex)}'."))
+            {
+                return false;
+            }
+
+            if (!TryResolveSequenceState(_sequenceIndex, out externalAnimationState, out error))
+            {
+                LogSequenceFailure(_sequenceIndex, error ?? "Unknown fallback animation validation failure.");
+                return false;
+            }
+        }
+
+        sequenceIndex = _sequenceIndex;
+        timeMs = GetCurrentTimeMs();
+        return true;
+    }
+
+    public bool TryHandleRuntimeFailure(Exception ex)
+    {
+        ArgumentNullException.ThrowIfNull(ex);
+
+        LogSequenceFailure(_sequenceIndex, ex.Message);
+        return TryActivateFallbackSequence(
+            excludingSequenceIndex: _sequenceIndex,
+            fallbackReason: $"Runtime animation evaluation failed for '{GetSequenceName(_sequenceIndex)}'.");
+    }
+
     public M2ExternalAnimationRuntimeState? ResolveExternalAnimationState()
     {
         if (!HasAnimation)
             return null;
 
-        if (_externalStates.TryGetValue(_sequenceIndex, out M2ExternalAnimationRuntimeState? cachedState))
-            return cachedState;
+        return TryResolveSequenceState(_sequenceIndex, out M2ExternalAnimationRuntimeState? state, out _)
+            ? state
+            : null;
+    }
 
-        M2ExternalAnimationRuntimeState chosenState = M2ExternalAnimationRuntime.Choose(_model, _sequenceIndex);
+    private bool TryActivateSequence(int index, bool logFailure)
+    {
+        if ((uint)index >= (uint)_sequences.Length)
+            return false;
+
+        if (!TryResolveSequenceState(index, out _, out string? error))
+        {
+            if (logFailure)
+                LogSequenceFailure(index, error ?? "Unknown animation validation failure.");
+
+            return false;
+        }
+
+        _sequenceIndex = index;
+        _currentFrame = 0.0f;
+        return true;
+    }
+
+    private bool TryActivateFallbackSequence(int? excludingSequenceIndex, string fallbackReason)
+    {
+        for (int index = 0; index < _sequences.Length; index++)
+        {
+            if (excludingSequenceIndex.HasValue && index == excludingSequenceIndex.Value)
+                continue;
+
+            if (!TryActivateSequence(index, logFailure: false))
+                continue;
+
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[M2] {fallbackReason} Falling back to '{GetSequenceName(index)}' for '{Path.GetFileName(_model.Identity.CanonicalModelPath)}'.");
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryResolveSequenceState(int sequenceIndex, out M2ExternalAnimationRuntimeState? state, out string? error)
+    {
+        if (_externalStates.TryGetValue(sequenceIndex, out state))
+        {
+            error = null;
+            return true;
+        }
+
+        if (_sequenceFailures.TryGetValue(sequenceIndex, out error))
+        {
+            state = null;
+            return false;
+        }
+
+        if (!M2ExternalAnimationRuntime.TryChoose(_model, sequenceIndex, out M2ExternalAnimationRuntimeState? chosenState, out error)
+            || chosenState == null)
+        {
+            state = null;
+            RecordSequenceFailure(sequenceIndex, error ?? "Unknown animation sequence resolution failure.");
+            return false;
+        }
+
         if (!chosenState.UsesExternalFile || string.IsNullOrWhiteSpace(chosenState.CompanionPath))
         {
-            _externalStates[_sequenceIndex] = chosenState;
-            return chosenState;
+            _externalStates[sequenceIndex] = chosenState;
+            state = chosenState;
+            error = null;
+            return true;
         }
 
         if (!TryReadAnimationBytes(chosenState.CompanionPath, out byte[]? animationBytes, out string resolvedPath)
@@ -131,23 +241,68 @@ internal sealed class M2RuntimeAnimator : IAnimationController
                     $"[M2] External animation companion missing for '{_model.Identity.CanonicalModelPath}': {chosenState.CompanionPath}");
             }
 
-            _externalStates[_sequenceIndex] = chosenState;
-            return chosenState;
+            _externalStates[sequenceIndex] = chosenState;
+            state = chosenState;
+            error = null;
+            return true;
         }
 
         using MemoryStream animationStream = new(animationBytes, writable: false);
-        M2ExternalAnimationDocument animation = M2AnimationReader.Read(animationStream, resolvedPath);
-        M2ExternalAnimationRuntimeState loadedState = M2ExternalAnimationRuntime.Load(chosenState, animation);
-        if (_loggedAnimationPaths.Add(resolvedPath))
+        if (!M2AnimationReader.TryRead(animationStream, resolvedPath, out M2ExternalAnimationDocument? animation, out error)
+            || animation == null)
         {
-            ViewerLog.Info(
-                ViewerLog.Category.Mdx,
-                $"[M2] Loaded external animation companion for '{Path.GetFileName(_model.Identity.CanonicalModelPath)}': {resolvedPath}");
+            state = null;
+            RecordSequenceFailure(sequenceIndex, error ?? "Malformed external animation companion.");
+            return false;
         }
 
-        _externalStates[_sequenceIndex] = loadedState;
-        return loadedState;
+        try
+        {
+            M2ExternalAnimationRuntimeState loadedState = M2ExternalAnimationRuntime.Load(chosenState, animation);
+            if (_loggedAnimationPaths.Add(resolvedPath))
+            {
+                ViewerLog.Info(
+                    ViewerLog.Category.Mdx,
+                    $"[M2] Loaded external animation companion for '{Path.GetFileName(_model.Identity.CanonicalModelPath)}': {resolvedPath}");
+            }
+
+            _externalStates[sequenceIndex] = loadedState;
+            state = loadedState;
+            error = null;
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or InvalidDataException)
+        {
+            state = null;
+            error = ex.Message;
+            RecordSequenceFailure(sequenceIndex, error);
+            return false;
+        }
     }
+
+    private void RecordSequenceFailure(int sequenceIndex, string reason)
+    {
+        _sequenceFailures[sequenceIndex] = reason;
+        _externalStates.Remove(sequenceIndex);
+
+        string currentName = _sequences[sequenceIndex].Name;
+        if (!currentName.EndsWith(" [invalid]", StringComparison.Ordinal))
+            _sequences[sequenceIndex] = _sequences[sequenceIndex] with { Name = $"{currentName} [invalid]" };
+    }
+
+    private void LogSequenceFailure(int sequenceIndex, string reason)
+    {
+        RecordSequenceFailure(sequenceIndex, reason);
+        if (_loggedSequenceFailures.Add(sequenceIndex))
+        {
+            ViewerLog.Error(
+                ViewerLog.Category.Mdx,
+                $"[M2] Rejected animation sequence '{GetSequenceName(sequenceIndex)}' for '{Path.GetFileName(_model.Identity.CanonicalModelPath)}': {reason}");
+        }
+    }
+
+    private string GetSequenceName(int sequenceIndex)
+        => (uint)sequenceIndex < (uint)_sequences.Length ? _sequences[sequenceIndex].Name : $"Sequence {sequenceIndex}";
 
     private int GetDurationMs(int sequenceIndex)
     {

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `037-m2-301-embedded-views-adapter`
 **Created**: 2026-06-02
-**Updated**: 2026-06-02 — scope expanded to cover full 2.x / 3.0.1 embedded-views M2 family
+**Updated**: 2026-06-03 — real-data adapter proof plus pre-release viewer no-draw follow-up captured
 **Status**: Draft
 **Input**: User report: the `output/tmp/wowarchive-clients/3_0_1_8303` pre-release
 Wrath client and the older `2.0.0` / `2.x` TBC-era clients carry an M2/MDX
@@ -14,6 +14,15 @@ classes invisible. Three prior attempts to "fix" the general M2 path for
 those builds have already broken the 3.3.5 M2/MDX renderer; this slice must
 land a complete, non-invasive build-profile adapter for the full embedded-views
 M2 family, not a partial patch.
+
+Implementation status note (2026-06-03): the active `wow-viewer` route now has
+bounded real-data proof that the embedded-profile adapter produces renderable
+geometry for staged `3.0.1.8303` samples, and the immediate follow-up viewer
+fix is in `Rendering/ModelRenderer.cs`: pre-release `3.0.1` adapted models no
+longer suppress the normal layer-0 untextured fallback when texture resolution
+is incomplete. Unresolved pre-release character replaceable groups still filter
+out at selection time; the corrected seam is specifically "valid geometry +
+missing texture should stay visible", not a parser redesign.
 
 ## Context — Why This Slice Exists
 

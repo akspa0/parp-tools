@@ -192,6 +192,38 @@
     - `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`
     - `wow-viewer/specs/035-m2-render-parity-recovery/research.md`
   - future action is Ghidra on staged `3.0.1.8303` `wow.exe` plus repo archaeology for older `MD20` handling
+- **M2 3.0.1 embedded-profile viewer no-draw fix (2026-06-03)**
+  - real-data reflection proof now shows the active `WarcraftNetM2Adapter` route produces renderable geometry for the first staged `3.0.1.8303` embedded-profile samples.
+  - bounded follow-up localized the remaining "still do not render" symptom to `wow-viewer/src/viewer/WoWViewer/Rendering/ModelRenderer.cs`:
+    - pre-release `3.0.1` adapted models were suppressing the normal layer-0 missing-texture fallback
+    - valid adapted geometry could therefore become a no-draw when texture resolution was incomplete
+  - landed fix:
+    - removed the `3.0.1`-only no-draw branch for missing textures
+    - kept the normal untextured primary-layer fallback for layer `0`
+    - still skips secondary missing-texture layers
+    - retains unresolved pre-release character-group filtering as the bounded safeguard
+  - focused regression + proof:
+    - `wow-viewer/tests/WowViewer.Core.Tests/M2EmbeddedProfileRealDataTests.cs`
+    - `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug`
+      - result: pass (warnings only)
+    - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter FullyQualifiedName~M2EmbeddedProfileRealDataTests`
+      - result: pass (`3/3`)
+- **Spec 043 chunked classic MDX integration slice (2026-06-03)**
+  - `WowViewer.Core.IO.M2Chunked` partial implementation is now wired into the user-facing surfaces that matter:
+    - `WoWViewer` standalone model-open route now attempts `MDLX` -> generated `MD20` runtime loading first, with legacy `MdxRenderer` fallback only on failure
+    - `WowViewer.Tool.Inspect m2 inspect` now routes chunked `MDLX` inputs through `M2ChunkedModelReader` and prints chunk/conversion/runtime summary
+    - standalone/runtime M2 animation selection now treats invalid alias chains and malformed external `.anim` companions as non-fatal, marking those sequences invalid and falling back instead of crashing the viewer
+  - focused proof:
+    - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter M2ChunkedReaderTests`
+      - result: pass (`6/6`)
+    - `dotnet build wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug`
+      - result: pass (warning only)
+    - `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/build/wowviewer-mdx/bin/ -p:IntermediateOutputPath=i:/parp/parp-tools/output/tmp/build/wowviewer-mdx/obj/`
+      - result: pass (warnings only)
+  - notable cleanup discovered during proof:
+    - `M2ChunkedModelReader.cs` was missing `using WowViewer.Core.Mdx;` and therefore the partial lane did not build cleanly before this pass
+  - remaining gap:
+    - `M2ChunkedModelReader` still does not fully ingest external classic `.skin` / `.anim` companions; current runtime route relies on the generated conversion skin and root-MDX-derived data
 - **M2 3.3.5 wrong-axis animation hotfix (2026-06-01)**
   - `WowViewer.Core.Runtime.M2.M2TrackSampler` now reads `M2CompQuaternion` payloads in the same direct little-endian component order as `M2ToMdxConverter`
   - shared helper added at `WowViewer.Core.M2.M2CompQuaternion.FromRawLittleEndian(...)` so runtime and converter no longer drift on the same on-disk payload

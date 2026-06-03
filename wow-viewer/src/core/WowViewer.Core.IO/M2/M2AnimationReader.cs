@@ -6,6 +6,22 @@ namespace WowViewer.Core.IO.M2;
 
 public static class M2AnimationReader
 {
+    public static bool TryRead(Stream stream, string sourcePath, out M2ExternalAnimationDocument? document, out string? error)
+    {
+        try
+        {
+            document = Read(stream, sourcePath);
+            error = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            document = null;
+            error = ex.Message;
+            return false;
+        }
+    }
+
     public static M2ExternalAnimationDocument Read(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);

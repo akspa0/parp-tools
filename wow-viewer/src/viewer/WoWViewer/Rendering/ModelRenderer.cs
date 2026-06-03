@@ -944,7 +944,6 @@ public class MdxRenderer : IModelRenderer
             bool anyLayerRendered = false;
             bool hasMaterialLayers = false;
             bool hasLayerCandidateForPass = false;
-            bool suppressedMissingTextureFallback = false;
             var geoset = _mdx.Geosets[gb.GeosetIndex];
             if (geoset.MaterialId >= 0 && geoset.MaterialId < _mdx.Materials.Count)
             {
@@ -1098,14 +1097,9 @@ if (isAlphaCutout)
                     }
                     else
                     {
-                        if (_usesPreRelease301M2Profile)
-                        {
-                            suppressedMissingTextureFallback = true;
-                            continue;
-                        }
-
                         _gl.Uniform1(_uHasTexture, l == 0 ? 0 : 1);
-                        if (l > 0) continue;
+                        if (ShouldSkipLayerWhenTextureIsMissing(l))
+                            continue;
                     }
 
                     ApplyLayerUvTransform(layer);
@@ -1142,8 +1136,7 @@ if (isAlphaCutout)
             // draw magenta fallback geometry just because pass filtering skipped every layer.
             if (!anyLayerRendered
                 && (!hasMaterialLayers || hasLayerCandidateForPass)
-                && pass != RenderPass.Transparent
-                && !(_usesPreRelease301M2Profile && suppressedMissingTextureFallback))
+                && pass != RenderPass.Transparent)
             {
                 _gl.Uniform1(_uHasTexture, 0);
                 _gl.Uniform1(_uUvSet, 0);
@@ -2359,6 +2352,13 @@ void main() {
             || layer.AlphaKeys.Count > 0
             || layer.ColorKeys.Count > 0
             || layer.ColorAlphaKeys.Count > 0;
+    }
+
+    private static bool ShouldSkipLayerWhenTextureIsMissing(int layerIndex)
+    {
+        // Keep the primary layer visible even when texture resolution is incomplete.
+        // Secondary layers without a bound texture cannot contribute meaningful output.
+        return layerIndex > 0;
     }
 
     private unsafe uint EnsureWhiteFallbackTexture()
