@@ -1420,6 +1420,9 @@ static void RunMap(string[] args)
 		case "uniqueid-report":
 			RunMapUniqueIdReport(tail);
 			break;
+		case "liquid-types":
+			RunMapLiquidTypes(tail);
+			break;
 		default:
 			Console.Error.WriteLine($"Unknown map command '{command}'.");
 			ShowMapUsage();
@@ -1467,6 +1470,139 @@ static void RunMapInspect(string[] args)
 	MapFileSummary summary = MapFileSummaryReader.Read(input);
 	PrintMapSummary(summary, dumpTexChunks);
 }
+
+static void RunMapLiquidTypes(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? dbcPath = GetOption(args, "--dbc", "-d");
+	string? kindArg = GetOption(args, "--kind", string.Empty);
+	bool onlyWithLayers = HasOption(args, "--only-with-layers");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input ADT file is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!File.Exists(input))
+	{
+		Console.Error.WriteLine($"Error: input ADT file not found: {input}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string kindFilter = kindArg?.ToLowerInvariant() ?? "both";
+	if (kindFilter is not ("mh2o" or "mclq" or "both"))
+	{
+		Console.Error.WriteLine($"Error: --kind must be 'mh2o', 'mclq', or 'both' (got '{kindArg}').");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	DbcLiquidTypeTable? dbcTable = null;
+	if (!string.IsNullOrWhiteSpace(dbcPath))
+	{
+		if (!File.Exists(dbcPath))
+		{
+			Console.Error.WriteLine($"Error: --dbc file not found: {dbcPath}");
+			Environment.ExitCode = 1;
+			return;
+		}
+		try
+		{
+			dbcTable = DbcLiquidTypeTable.Load(dbcPath);
+		}
+		catch (Exception ex)
+		{
+			Console.Error.WriteLine($"Error: failed to load DBC '{dbcPath}': {ex.Message}");
+			Environment.ExitCode = 1;
+			return;
+		}
+	}
+
+	AdtLiquidFile? liquidFile = null;
+	try
+	{
+		using FileStream stream = File.OpenRead(input);
+		MapFileSummary summary = MapFileSummaryReader.Read(stream, Path.GetFullPath(input));
+		liquidFile = AdtLiquidReader.Read(stream, summary, profile: null, dbcTable);
+	}
+	catch (InvalidDataException) when (kindFilter is "mclq" or "both")
+	{
+		liquidFile = null;
+	}
+	catch (Exception ex)
+	{
+		Console.Error.WriteLine($"Error: failed to read MH2O from '{input}': {ex.Message}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	PrintLiquidTypeReport(input, liquidFile, dbcTable, kindFilter, onlyWithLayers);
+
+	if (dbcTable is not null && dbcTable.MissingLiquidTypeIds.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Missing LiquidTypeIds (consulted but not in DBC):");
+		foreach (int id in dbcTable.MissingLiquidTypeIds.OrderBy(static x => x))
+			Console.WriteLine($"  {id}");
+	}
+}
+
+static void PrintLiquidTypeReport(string input, AdtLiquidFile? liquidFile, DbcLiquidTypeTable? dbcTable, string kindFilter, bool onlyWithLayers)
+{
+	Console.WriteLine($"# Liquid type report for: {Path.GetFullPath(input)}");
+	Console.WriteLine($"# Source: {(dbcTable is not null ? $"{dbcTable.RowCount} DBC rows loaded" : "no DBC (using hardcoded 17/19/20 fallback)")}");
+	Console.WriteLine("# chunk_idx  layer_idx  liquid_type_id  basic_type  (vertex_format)  (min_height..max_height)  (w x h)");
+
+	if (liquidFile is null)
+	{
+		if (kindFilter is "mclq" or "both")
+			Console.WriteLine("# (no MH2O payload; only MCLQ fallback path is available, not yet implemented in this subcommand)");
+		else
+			Console.WriteLine("# (no MH2O payload)");
+		return;
+	}
+
+	int totalLayers = 0;
+	int printedRows = 0;
+	for (int chunkIndex = 0; chunkIndex < liquidFile.Chunks.Count; chunkIndex++)
+	{
+		AdtLiquidChunk chunk = liquidFile.Chunks[chunkIndex];
+		if (chunk.Layers.Count == 0)
+		{
+			if (!onlyWithLayers)
+			{
+				Console.WriteLine($"{chunkIndex,10}  {(-1),9}  {0,14}  {"(none)",-10}  {"",-14}  {"",-21}  {"",-7}");
+				printedRows++;
+			}
+			continue;
+		}
+
+		for (int layerIndex = 0; layerIndex < chunk.Layers.Count; layerIndex++)
+		{
+			AdtLiquidLayer layer = chunk.Layers[layerIndex];
+			AdtLiquidBasicType basicType = dbcTable is not null
+				? dbcTable.ResolveBasicType(layer.LiquidTypeId)
+				: AdtLiquidReaderFallback(layer.LiquidTypeId);
+			Console.WriteLine(
+				$"{chunkIndex,10}  {layerIndex,9}  {layer.LiquidTypeId,14}  {basicType,-10}  {layer.VertexFormat,-14}  {layer.MinHeight.ToString("0.###", CultureInfo.InvariantCulture),-9}..{layer.MaxHeight.ToString("0.###", CultureInfo.InvariantCulture),-9}  {layer.Width}x{layer.Height,-3}");
+			printedRows++;
+			totalLayers++;
+		}
+	}
+
+	Console.WriteLine();
+	Console.WriteLine($"# Total chunks: {liquidFile.Chunks.Count}, total layers with liquid: {totalLayers}, rows printed: {printedRows}");
+}
+
+static AdtLiquidBasicType AdtLiquidReaderFallback(ushort liquidTypeId) => liquidTypeId switch
+{
+	17 => AdtLiquidBasicType.Ocean,
+	19 => AdtLiquidBasicType.Magma,
+	20 => AdtLiquidBasicType.Slime,
+	_ => AdtLiquidBasicType.Water,
+};
 
 static void RunMapTerrainPatchReport(string[] args)
 {
@@ -3979,6 +4115,7 @@ static void ShowMapUsage()
 	Console.WriteLine("  map inspect --input <file.wdt|file.adt|file.error> [--dump-tex-chunks]");
 	Console.WriteLine("  map uniqueid-filter --input <report.json> [--min-uniqueid <n>] [--max-uniqueid <n>] [--build <label[,label...]>] [--kind all|m2|wmo] [--invert] [--output <report.json>]");
 	Console.WriteLine("  map uniqueid-report --input <file.wdt|file.adt|directory> [--input <second-source> ...] [--build <label>] [--output <report.json>]");
+	Console.WriteLine("  map liquid-types --input <file.adt> [--dbc <path-to-LiquidType.dbc>] [--kind mh2o|mclq|both] [--only-with-layers]");
 }
 
 static void ShowPm4Usage()

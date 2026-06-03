@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Chunked;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -14,24 +15,34 @@ public static class AdtLiquidReader
 
     public static AdtLiquidFile Read(string path)
     {
-        return Read(path, profile: null);
+        return Read(path, profile: null, dbcTable: null);
     }
 
     public static AdtLiquidFile Read(string path, AdtFormatProfile? profile)
+    {
+        return Read(path, profile, dbcTable: null);
+    }
+
+    public static AdtLiquidFile Read(string path, AdtFormatProfile? profile, DbcLiquidTypeTable? dbcTable)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         using FileStream stream = File.OpenRead(path);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, Path.GetFullPath(path));
-        return Read(stream, fileSummary, profile);
+        return Read(stream, fileSummary, profile, dbcTable);
     }
 
     public static AdtLiquidFile Read(Stream stream, MapFileSummary fileSummary)
     {
-        return Read(stream, fileSummary, profile: null);
+        return Read(stream, fileSummary, profile: null, dbcTable: null);
     }
 
     public static AdtLiquidFile Read(Stream stream, MapFileSummary fileSummary, AdtFormatProfile? profile)
+    {
+        return Read(stream, fileSummary, profile, dbcTable: null);
+    }
+
+    public static AdtLiquidFile Read(Stream stream, MapFileSummary fileSummary, AdtFormatProfile? profile, DbcLiquidTypeTable? dbcTable)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(fileSummary);
@@ -44,7 +55,7 @@ public static class AdtLiquidReader
         if (payload is null)
             return CreateEmpty(fileSummary.SourcePath, fileSummary.Kind);
 
-        return Parse(fileSummary.SourcePath, fileSummary.Kind, payload);
+        return Parse(fileSummary.SourcePath, fileSummary.Kind, payload, dbcTable);
     }
 
     private static byte[]? TryReadMh2oPayloadViaMhdr(Stream stream, MapFileSummary fileSummary, AdtFormatProfile? profile)
@@ -109,7 +120,7 @@ public static class AdtLiquidReader
         }
     }
 
-    private static AdtLiquidFile Parse(string sourcePath, MapFileKind kind, byte[] payload)
+    private static AdtLiquidFile Parse(string sourcePath, MapFileKind kind, byte[] payload, DbcLiquidTypeTable? dbcTable)
     {
         if (payload.Length < ChunkCount * ChunkHeaderSize)
             throw new InvalidDataException($"MH2O payload is too small to contain {ChunkCount} chunk headers.");
@@ -137,7 +148,7 @@ public static class AdtLiquidReader
                 int layerOffset = checked((int)offsetInstances);
                 for (int layerIndex = 0; layerIndex < layerCount && layerOffset + LayerSize <= payload.Length; layerIndex++)
                 {
-                    layers.Add(ParseLayer(payload, layerOffset));
+                    layers.Add(ParseLayer(payload, layerOffset, dbcTable));
                     layerOffset += LayerSize;
                 }
             }
@@ -148,7 +159,7 @@ public static class AdtLiquidReader
         return new AdtLiquidFile(sourcePath, kind, chunks);
     }
 
-    private static AdtLiquidLayer ParseLayer(byte[] payload, int offset)
+    private static AdtLiquidLayer ParseLayer(byte[] payload, int offset, DbcLiquidTypeTable? dbcTable)
     {
         ushort liquidTypeId = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset, 2));
         AdtLiquidVertexFormat vertexFormat = (AdtLiquidVertexFormat)BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset + 2, 2));
@@ -206,7 +217,7 @@ public static class AdtLiquidReader
 
         return new AdtLiquidLayer(
             liquidTypeId,
-            MapLiquidTypeId(liquidTypeId),
+            MapLiquidTypeId(liquidTypeId, dbcTable),
             vertexFormat,
             minHeight,
             maxHeight,
@@ -272,8 +283,11 @@ public static class AdtLiquidReader
         return new AdtLiquidFile(sourcePath, kind, chunks);
     }
 
-    private static AdtLiquidBasicType MapLiquidTypeId(ushort liquidTypeId)
+    private static AdtLiquidBasicType MapLiquidTypeId(ushort liquidTypeId, DbcLiquidTypeTable? dbcTable)
     {
+        if (dbcTable is not null)
+            return dbcTable.ResolveBasicType(liquidTypeId);
+
         return liquidTypeId switch
         {
             17 => AdtLiquidBasicType.Ocean,

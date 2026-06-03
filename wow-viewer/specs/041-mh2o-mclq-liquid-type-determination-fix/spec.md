@@ -136,6 +136,13 @@ As a wow-viewer developer, I want a scriptable pipeline to extract ADT files fro
 - **FR-012**: `wow-viewer/src/core/WowViewer.Core/Maps/AlphaTileData.cs:243-255` `ClassifyLiquid` MUST be replaced with a call to `McnkFlagDecoder.Decode(mcnkFlags)`. The function signature MUST stay the same.
 - **FR-013**: `wow-viewer/src/core/WowViewer.Core.IO/Maps/LkToAlphaConverter.cs:543-549` `ClassifyLkLiquid` MUST be replaced with a call to `McnkFlagDecoder.Decode(flags)`. The function signature MUST stay the same.
 
+#### Round-trip integration fixes (discovered during T-05 empirical validation)
+
+- **FR-018**: `wow-viewer/src/core/WowViewer.Core.IO/Maps/LkToAlphaConverter.cs:599` `BuildAlphaTileFlags` MUST set `tileFlags[(globalY * 8) + globalX] = AlphaLiquidTypeCodec.GetWriterTileTypeNibble(layer.BasicType)` for tiles that exist (passes the `TileExists` check). The original code set the byte to `0`, which strips the type information and forces consumers to fall back to the MCNK flag — lossy for round-trip scenarios where the WDT format normalizes MCNK flags to `0x3C`. The fix preserves the per-tile type information through the LK→Alpha→WDT→Alpha→LK round trip.
+- **FR-019**: `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaToLkConverter.cs:520` `BuildLiquidData` MUST use `AlphaLiquidTypeCodec.ResolveBasicType(liquidChunk.TileFlags, liquidChunk.McnkFlags)` instead of `ResolveLiquidBasicType(liquidChunk.McnkFlags)` alone. The original code only consulted the MCNK flag, which is normalized to `0x3C` (all 4 bits set) by `AlphaWdtWriter.NormalizeAlphaLiquidFlags` (line 1038). The 0x3C normalization causes `McnkFlagDecoder.Decode(0x3C)` to return `Magma` (since 0x10 is checked first), so a WDT round-trip of an Ocean liquid layer returns Magma. Using the tile-nibble-aware resolver (which checks the per-tile nibble first) preserves the original type through the round trip.
+
+#### Inspection command
+
 #### Inspection command
 
 - **FR-014**: `WowViewer.Tool.Inspect` MUST add a new subcommand `map inspect --adt <path> --dump-liquid-types [--dbc <path-to-LiquidType.dbc>] [--out <path-to-json>]` that emits a JSON file with per-tile: `mcnkFlags`, `mclqTileNibble`, `mh2oLiquidTypeId`, `dbcTypeField` (if DBC loaded), `resolvedBasicType` (string enum name). Default output: `<adt-basename>.liquid-types.json` next to the ADT.
@@ -164,6 +171,7 @@ As a wow-viewer developer, I want a scriptable pipeline to extract ADT files fro
 - **SC-004**: Running `WowViewer.Tool.Inspect map inspect --dump-liquid-types` against a real 3.3.5 ADT with `LiquidTypeId=13` and a loaded DBC shows `resolvedBasicType` matching the DBC `type` field, not the hardcoded `else→Water` default.
 - **SC-005**: `dotnet build I:\parp\parp-tools\wow-viewer\WowViewer.slnx -c Debug` succeeds. `dotnet test I:\parp\parp-tools\wow-viewer\WowViewer.slnx -c Debug` passes all liquid-related tests (existing + new). No new warnings introduced.
 - **SC-006**: `Validate-LiquidTypes.ps1` produces a zero-diff report when run against the extracted 1.12/2.4.3/3.3.5 ADT set.
+- **SC-007**: The pre-existing `LkToAlphaRoundTripTests.ConvertTile_ThroughAlphaWdt_BackToLkAdt_PreservesOceanLiquidTypeViaTileFlags` test PASSES after FR-018 + FR-019. This test was failing before this spec was written (test on line 899 expected `TileFlags[0] & 0x0F == 0x02` but got `0`; after the fix on line 906 it expected `BasicType == Ocean` but got `Magma` due to the WDT `0x3C` normalization + MCNK-only `ResolveLiquidBasicType` interaction). The fix lands both behaviors.
 
 ## Assumptions
 
@@ -199,13 +207,14 @@ As a wow-viewer developer, I want a scriptable pipeline to extract ADT files fro
 - **OQ-8**: The `WlToLiquidConverter.MapWlTypeToMh2oTypeId` (line 286-295) maps WL types to DBC row IDs `13/14/17/19/20`. Is this the same set of IDs the actual 3.3.5 `LiquidType.dbc` uses? Spec 040 §4.3 says yes. If a staged 3.3.5 DBC has different row IDs, the fallback chain in `AdtLiquidReader.MapLiquidTypeId` (FR-009) must be updated. **Verify by parsing a real DBC during planning.**
 - **OQ-9** (discovered during T-01): The grep for `ClassifyLiquid`/`ClassifyLiquidType` revealed 2 additional buggy functions NOT in spec 040's "Files to Fix" table: `AlphaWdtReader.cs:988` `ClassifyLiquid` and `AlphaTerrainAdapter.cs:276` `ClassifyLiquidType`. Both use the same broken `((mcnkFlags>>4)&3)` switch. Both MUST be added to the fix list. The spec 040 research did not enumerate these because the grep that produced spec 040 §3 was scoped to the file list in spec 040's Files Inventory; a broader project-wide grep (used during T-01) found the additional copies. **Action**: spec 041 "Files to Fix" table updated to include both.
 - **OQ-10** (T-02 deferral): The spec 041 task list proposed refactoring `LiquidConverter.GetLiquidTypeFromMcnkFlags` (line 240-248) to call `McnkFlagDecoder.Decode`. This refactor is NOT a 1:1 replacement because `LiquidConverter` returns `MclqLiquidType` (which has `River=4` and `Magma=6` values that do not exist in `AdtLiquidBasicType`) and `McnkFlagDecoder.Decode` returns `AdtLiquidBasicType` (with `Water=0, Ocean=1, Magma=2, Slime=3`). A correct refactor would need a `DecodeToMclqLiquidType` adapter on the helper, which is out of scope for the 4-way drift fix. **Decision**: skip T-02 in the initial fix. `LiquidConverter.GetLiquidTypeFromMcnkFlags` is already correct and its output is consumed only by `LiquidConverter.MclqToMh2o` which handles the MclqLiquidType→AdtLiquidBasicType conversion downstream. Document the skip here.
+- **OQ-11** (discovered during T-05 round-trip validation): Two additional pre-existing bugs surfaced when running the WDT round-trip test after T-05. The T-05 fix correctly maps raw MCNK flags to `AdtLiquidBasicType`, but the WDT round-trip test exposed that (a) `BuildAlphaTileFlags` was setting tile nibble to `0` instead of the type-specific value, and (b) `BuildLiquidData` was only consulting MCNK flags (which get normalized to `0x3C` by the WDT format). Both bugs were pre-existing — they had been masked by the broader 4-way MCNK drift because the test was already failing on the tile-nibble assertion before the helper existed. **Action**: FR-018 + FR-019 added to spec 041. Test now passes.
 
 ## Files Inventory (read for this spec, listed for cross-reference)
 
 - Spec 040: `wow-viewer/specs/040-mh2o-mclq-liquid-type-determination/spec.md` (200 lines, 4 stories, 10 FRs, 4 SCs, 9 OQs)
 - Spec 040 research: `wow-viewer/specs/040-mh2o-mclq-liquid-type-determination/research.md` (379 lines, full Ghidra decompilations of `FUN_00439760` and `FUN_0043a730`)
 
-## Files to Touch (5 modified, 2 new, 1 test, 1 inspect subcommand, 2 scripts)
+## Files to Touch (8 modified, 2 new, 1 test, 1 inspect subcommand, 2 scripts)
 
 | File | Action | Spec 040 row |
 |------|--------|--------------|
@@ -218,6 +227,8 @@ As a wow-viewer developer, I want a scriptable pipeline to extract ADT files fro
 | `wow-viewer/src/core/WowViewer.Core.IO/Maps/LkToAlphaConverter.cs:543-549` | MODIFY | FR-013 (spec 040 §3) |
 | `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaWdtReader.cs:988-1000` | MODIFY | discovered during T-01 grep: identical `((mcnkFlags>>4)&3)` switch bug. Not in spec 040's table. |
 | `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaTerrainAdapter.cs:276-287` | MODIFY | discovered during T-01 grep: identical `((mcnkFlags>>4)&3)` switch bug. Not in spec 040's table. |
+| `wow-viewer/src/core/WowViewer.Core.IO/Maps/LkToAlphaConverter.cs:599` | MODIFY | FR-018 (round-trip tile nibble fix, discovered during T-05 validation) |
+| `wow-viewer/src/core/WowViewer.Core.IO/Maps/AlphaToLkConverter.cs:520` | MODIFY | FR-019 (round-trip tile-nibble-aware resolver, discovered during T-05 validation) |
 | `wow-viewer/tests/WowViewer.Core.Tests/Maps/McnkFlagDecoderTests.cs` | **NEW** | spec 041 SC-001 |
 | `wow-viewer/tests/WowViewer.Core.Tests/Dbc/DbcLiquidTypeTableTests.cs` | **NEW** | spec 041 SC-002 |
 | `wow-viewer/src/tools/WowViewer.Tool.Inspect/Commands/MapInspectCommand.cs` | EXTEND | FR-014..FR-015 |
