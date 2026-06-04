@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-24
 
-**Status**: Draft
+**Status**: Superseded — combined normal+height head was attempted but the V18 distill corpus lane (spec 047) follows the per-signal V16.1 architecture instead. Reroute follow-up to `047-v18-distill-corpus-open-source-loop`.
 
 **Input**: Normal model plateaued at epoch 123 best despite 200+ epochs. Height-from-normals numerical integration produces garbage. Combined normal+height prediction in one model solves both.
 

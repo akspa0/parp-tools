@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-24
 
-**Status**: Draft
+**Status**: Superseded — V17.1 contract is implemented in the V16.1 per-signal trainer family and the V18 distill corpus lane (spec 047). Reroute follow-up to `047-v18-distill-corpus-open-source-loop`.
 
 ## Problem Statement
 

@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-24
 
-**Status**: Draft
+**Status**: Superseded — V17 hybrid mode was a workflow alias that has been folded into the V16.1.3 height-channel normal model and the V18 distill corpus lane. Reroute follow-up to `047-v18-distill-corpus-open-source-loop`.
 
 ## Problem Statement
 

@@ -4,7 +4,7 @@
 
 **Created**: 2026-05-23
 
-**Status**: Draft
+**Status**: Superseded — refiner approach failed; V16.1.3 height-channel normal model (spec 016) is the active normal lane. Reroute follow-up to `047-v18-distill-corpus-open-source-loop`.
 
 **Input**: User observation that the V16.1.1 normal model's output is a full-resolution raster (every pixel independently computed by Tanh head), while the ground truth `normal_xyz` from ADT MCNR chunks is interpolated 17x17-per-chunk vertex data. The model never learns the interpolation structure. The height field shares the same interpolation structure, so a refiner model conditioned on height can teach it.
 

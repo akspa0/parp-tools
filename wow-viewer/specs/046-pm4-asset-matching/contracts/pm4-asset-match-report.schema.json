@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wow-viewer/specs/046-pm4-asset-matching/contracts/pm4-asset-match-report.schema.json",
+  "title": "PM4 Asset Match Report",
+  "type": "object",
+  "required": [
+    "runId",
+    "inputPm4Root",
+    "segmentCount",
+    "segments"
+  ],
+  "properties": {
+    "runId": {
+      "type": "string"
+    },
+    "inputPm4Root": {
+      "type": "string"
+    },
+    "assetReferenceCorpus": {
+      "type": "string"
+    },
+    "segmentSignalCorpus": {
+      "type": "string"
+    },
+    "segmentCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "matchedCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ambiguousCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "unresolvedCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/segment"
+      }
+    }
+  },
+  "$defs": {
+    "segment": {
+      "type": "object",
+      "required": [
+        "segmentId",
+        "ck24",
+        "ck24Type",
+        "ck24ObjectId",
+        "tileCoordinates",
+        "candidates"
+      ],
+      "properties": {
+        "segmentId": {
+          "type": "string"
+        },
+        "ck24": {
+          "type": "string"
+        },
+        "ck24Type": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "ck24ObjectId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "tileCoordinates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "field04Values": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "ambiguous",
+            "unresolved",
+            "ineligible"
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/candidate"
+          }
+        },
+        "placementProposal": {
+          "$ref": "#/$defs/placementProposal"
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "required": [
+        "assetId",
+        "assetPath",
+        "assetKind",
+        "rank",
+        "overallScore",
+        "status"
+      ],
+      "properties": {
+        "assetId": {
+          "type": "string"
+        },
+        "assetPath": {
+          "type": "string"
+        },
+        "assetKind": {
+          "type": "string",
+          "enum": [
+            "wmo",
+            "m2"
+          ]
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "overallScore": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "ambiguous",
+            "unresolved",
+            "ineligible"
+          ]
+        },
+        "scoreBreakdown": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "rationale": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "placementProposal": {
+      "type": "object",
+      "required": [
+        "proposalId",
+        "assetId",
+        "targetTileCoordinates",
+        "confidence",
+        "reviewRequired"
+      ],
+      "properties": {
+        "proposalId": {
+          "type": "string"
+        },
+        "assetId": {
+          "type": "string"
+        },
+        "targetTileCoordinates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "worldPosition": {
+          "type": "object",
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "z": {
+              "type": "number"
+            }
+          }
+        },
+        "worldRotation": {
+          "type": "object",
+          "properties": {
+            "yaw": {
+              "type": "number"
+            },
+            "pitch": {
+              "type": "number"
+            },
+            "roll": {
+              "type": "number"
+            }
+          }
+        },
+        "worldScale": {
+          "type": "number"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "reviewRequired": {
+          "type": "boolean"
+        },
+        "provenance": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
