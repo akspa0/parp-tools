@@ -125,6 +125,26 @@
     - `WowViewer.Tool.Inspect m2 inspect` now accepts chunked `MDLX` roots and prints chunk/conversion/runtime summary from the same `M2Chunked` path
     - standalone/runtime animation selection now guards invalid alias chains and malformed external `.anim` companions: bad sequences are logged, marked invalid, and fallback to another usable sequence instead of crashing the viewer
     - focused proof currently covers `M2ChunkedReaderTests` plus bounded `WowViewer.Tool.Inspect` and `WoWViewer` builds; companion `.skin` / `.anim` ingestion inside `M2ChunkedModelReader` itself remains an open follow-up
+  - viewer shell usability now has a bounded active spec owner:
+    - `wow-viewer/specs/044-viewer-shell-usability/spec.md`
+    - first landed shell slice:
+      - `WoWViewer` now actually renders the dockspace host during UI draw when dockable shell mode is enabled
+      - dockable shell mode is now the default/persisted shell path instead of being hard-forced off in settings/reset flows
+      - fixed sidebar splitters no longer render over the dockable shell path
+      - `World Maps` auto-opens when a client load discovers maps from an empty state
+      - stale dataset/conversion entrypoints moved out of `File` into `Tools > Offline Data / Conversion`
+    - current proof is isolated-output `WoWViewer` build success; this is build signoff, not a live viewer click-through
+    - explicit remaining gap: cursor-as-model by client era (MDX/M2) is tracked in spec `044` and remains deferred follow-up work
+  - future viewer-shell inspection direction now has a separate planning owner:
+    - `wow-viewer/specs/045-scene-graph-workbench/spec.md`
+    - purpose:
+      - add a Blender-style hierarchical scene graph workbench to the active `WoWViewer` shell
+      - unify terrain (`ADT` / `AlphaWDT`), placed world objects, and PM4 under one read-only outliner contract
+      - keep selection sync and lazy/filterable tree behavior as first-class requirements
+    - bounded planning decisions:
+      - viewer-owned shell host, library-first scene-graph contract
+      - PM4 uses current `Region -> Object -> Sub-object` ownership with newer field discoveries surfaced as metadata
+      - first slice is read-only inspection, not editing or reparenting
   - staged `3.3.5.12340` wrong-axis M2 animation regression is now localized to runtime compressed-quaternion payload interpretation drift:
     - runtime sampler had been reading `M2CompQuaternion` as a swizzled `(y, -x, z, w)` payload
     - converter/compatibility path was already reading direct little-endian `(x, y, z, w)`
@@ -784,7 +804,13 @@
 - Treat `v16_full_corpus_epoch_rotation*` as baseline evidence, not as the main
   future architecture investment surface.
 - If WL* chunk-fill behavior matters to loss semantics, handle it in the loader/trainer, not by reopening harvest.
-- PM4 follow-up now has a library-owned `MSHD.Field04` region-id seam feeding `MdxViewer` overlay coloring/debug/export, selected-region peer summaries, and LLM-oriented visible-overlay evidence bundles; broader PM4 object-mapping work can build on that without reintroducing viewer-owned decode logic.
+- PM4 follow-up now has a library-owned `MSHD.Field04` grouping seam feeding `MdxViewer` overlay coloring/debug/export, selected-region peer summaries, and LLM-oriented visible-overlay evidence bundles; 2026-06-03 corpus proof ruled out packed tile `XX_YY` semantics (`0/502` direct matches, `73` values reused across multiple tiles), and the next cross-tile pass showed `204/266` cross-tile CK24 objects bridge multiple Field04 buckets, so treat Field04 as a reusable scene/group bucket rather than a per-tile id or the primary multi-tile stitch key.
+- 2026-06-03 PM4 MSLK semantics follow-up is now partially closed in docs/analyzer wording only:
+  - current real-data inspection suggests `MSLK.TypeFlags` carries per-surface family buckets:
+    - `0x03` = M2 top surfaces
+    - `0x10` = interior WMO floors
+    - `0x12` = exterior WMO solid surfaces
+  - keep this distinct from `MSLK.GroupObjectId`; current grouping behavior was not changed in this pass.
 
 ## Ghidra RE Session (2026-05-30)
 

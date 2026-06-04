@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wow-viewer/specs/045-scene-graph-workbench/contracts/scene-graph-snapshot.schema.json",
+  "title": "SceneGraphSnapshot",
+  "type": "object",
+  "required": [
+    "sceneKind",
+    "generatedAtUtc",
+    "domainsPresent",
+    "rootNode"
+  ],
+  "properties": {
+    "sceneKind": {
+      "type": "string"
+    },
+    "generatedAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "domainsPresent": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "nodeCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rootNode": {
+      "$ref": "#/$defs/node"
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": [
+        "nodeId",
+        "kind",
+        "label",
+        "availability"
+      ],
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "availability": {
+          "type": "string",
+          "enum": [
+            "loaded",
+            "unloaded",
+            "unavailable",
+            "deferred"
+          ]
+        },
+        "isSelectable": {
+          "type": "boolean"
+        },
+        "selectionTarget": {
+          "$ref": "#/$defs/selectionTarget"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "integer",
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "selectionTarget": {
+      "type": "object",
+      "required": [
+        "targetKind",
+        "targetIdentity"
+      ],
+      "properties": {
+        "targetKind": {
+          "type": "string"
+        },
+        "targetIdentity": {
+          "type": "string"
+        },
+        "canFrameCamera": {
+          "type": "boolean"
+        },
+        "canHighlight": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

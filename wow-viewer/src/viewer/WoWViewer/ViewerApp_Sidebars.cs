@@ -473,6 +473,9 @@ public partial class ViewerApp
         if (_showFileBrowser && ImGui.CollapsingHeader("File Browser", hasWorldLoaded ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
             DrawFileBrowserContent(hasWorldLoaded ? 260f : 0f);
 
+        if (_autoOpenWorldMapsPanel)
+            ImGui.SetNextItemOpen(true, ImGuiCond.Always);
+
         if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
             DrawMapDiscoveryContent();
 
@@ -1625,6 +1628,9 @@ public partial class ViewerApp
 
     private void DrawFixedSidebarSplitters()
     {
+        if (_useDockspaceUi)
+            return;
+
         if (!IsShellPanelActive(ShellPanelId.Navigator) && !IsShellPanelActive(ShellPanelId.Inspector))
             return;
 

@@ -221,7 +221,7 @@ public partial class ViewerApp : IDisposable
     private static readonly string ProjectsDir = Path.Combine(OutputDir, "projects");
     private static readonly string SettingsDir = Path.Combine(OutputDir, "settings");
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
-    private const int CurrentShellPanelLayoutVersion = 3;
+    private const int CurrentShellPanelLayoutVersion = 4;
     private const int MinimapTeleportConfirmClicks = 3;
     private const float MinimapClickMovementThresholdPixels = 3f;
     private static readonly TimeSpan MinimapTeleportConfirmWindow = TimeSpan.FromSeconds(3);
@@ -284,7 +284,8 @@ public partial class ViewerApp : IDisposable
     private EditorWorkspaceTask _editorWorkspaceTask = EditorWorkspaceTask.Terrain;
     private FixedBottomDrawerTab _activeBottomDrawerTab = FixedBottomDrawerTab.Workspace;
     private FixedBottomDrawerTab? _pendingRightSidebarSection;
-    private bool _useDockspaceUi = false;
+    private bool _useDockspaceUi = true;
+    private bool _autoOpenWorldMapsPanel;
     private Vector2 _dockspaceHostPosition;
     private Vector2 _dockspaceHostSize;
     private AssetCatalogView? _catalogView;
@@ -1539,6 +1540,9 @@ void main() {
 
             DrawToolbar();
 
+            if (_useDockspaceUi)
+                DrawDockspaceHost();
+
             if (HasAnyShellPanelsInLane(ShellPanelLane.Left))
                 DrawLeftSidebar();
             if (HasAnyShellPanelsInLane(ShellPanelLane.Right))
@@ -1627,6 +1631,8 @@ void main() {
 
         DrawSceneHoverAssetOverlay();
         DrawClickSelectionOverlay();
+
+        _autoOpenWorldMapsPanel = false;
     }
 
     private void DrawMenuBar()
@@ -1695,14 +1701,6 @@ void main() {
                     ImGui.EndMenu();
                 }
 
-                if (ImGui.MenuItem("Open MK Dataset..."))
-                    _wantOpenVlmProject = true;
-
-                if (ImGui.MenuItem("Open Zarr Dataset..."))
-                    _wantOpenZarrDataset = true;
-
-                ImGui.Separator();
-
                 if (ImGui.MenuItem("Quit"))
                     _window.Close();
 
@@ -1721,6 +1719,14 @@ void main() {
                     _hideUiChrome = !_hideUiChrome;
 
                 ImGui.Separator();
+
+                bool useDockspaceUi = _useDockspaceUi;
+                if (ImGui.MenuItem("Dockable Shell Panels", "", ref useDockspaceUi))
+                {
+                    _useDockspaceUi = useDockspaceUi;
+                    _forceApplyShellPanelLayout = _useDockspaceUi;
+                    SaveViewerSettings();
+                }
 
                 ImGui.MenuItem("Left Sidebar", "", ref _showLeftSidebar);
                 ImGui.MenuItem("Right Sidebar", "I", ref _showRightSidebar);
@@ -1787,35 +1793,50 @@ void main() {
 
                 ImGui.Separator();
 
-                if (ImGui.MenuItem("Build ML Dataset..."))
+                if (ImGui.BeginMenu("Offline Data / Conversion"))
                 {
-                    PrepareVlmExportDialogInputs();
-                    PrepareMkHarvestDialogInputs();
-                    _showVlmExportDialog = true;
-                }
+                    if (ImGui.MenuItem("Open MK Dataset..."))
+                        _wantOpenVlmProject = true;
 
-                if (ImGui.MenuItem("Train V7 Terrain Model..."))
-                {
-                    PrepareMlTrainingDialogInputs();
-                    _showMlTrainingDialog = true;
-                }
+                    if (ImGui.MenuItem("Open Zarr Dataset..."))
+                        _wantOpenZarrDataset = true;
 
-                if (ImGui.MenuItem("Terrain Texture Transfer..."))
-                {
-                    PrepareTerrainTextureTransferDialogInputs();
-                    _showTerrainTextureTransferDialog = true;
-                }
+                    ImGui.Separator();
 
-                if (ImGui.MenuItem("Map Converter..."))
-                {
-                    PrepareMapConverterDialogInputs();
-                    _showMapConverterDialog = true;
-                }
+                    if (ImGui.MenuItem("Build ML Dataset..."))
+                    {
+                        PrepareVlmExportDialogInputs();
+                        PrepareMkHarvestDialogInputs();
+                        _showVlmExportDialog = true;
+                    }
 
-                if (ImGui.MenuItem("WMO Converter..."))
-                {
-                    PrepareWmoConverterDialogInputs();
-                    _showWmoConverterDialog = true;
+                    if (ImGui.MenuItem("Train V7 Terrain Model..."))
+                    {
+                        PrepareMlTrainingDialogInputs();
+                        _showMlTrainingDialog = true;
+                    }
+
+                    if (ImGui.MenuItem("Terrain Texture Transfer..."))
+                    {
+                        PrepareTerrainTextureTransferDialogInputs();
+                        _showTerrainTextureTransferDialog = true;
+                    }
+
+                    ImGui.Separator();
+
+                    if (ImGui.MenuItem("Map Converter..."))
+                    {
+                        PrepareMapConverterDialogInputs();
+                        _showMapConverterDialog = true;
+                    }
+
+                    if (ImGui.MenuItem("WMO Converter..."))
+                    {
+                        PrepareWmoConverterDialogInputs();
+                        _showWmoConverterDialog = true;
+                    }
+
+                    ImGui.EndMenu();
                 }
 
                 ImGui.Separator();
@@ -9032,8 +9053,11 @@ void main() {
         if (_dataSource == null)
         {
             _discoveredMaps.Clear();
+            _autoOpenWorldMapsPanel = false;
             return;
         }
+
+        int previousDiscoveredMapCount = _discoveredMaps.Count;
 
         if (_dbcProvider != null && !string.IsNullOrWhiteSpace(_dbdDir) && !string.IsNullOrWhiteSpace(_dbcBuild))
         {
@@ -9049,6 +9073,7 @@ void main() {
                 $"Discovered {_discoveredMaps.Count} loose maps without Map.dbc metadata.");
         }
 
+        _autoOpenWorldMapsPanel = _discoveredMaps.Count > 0 && previousDiscoveredMapCount == 0;
         WarmDiscoveredWdlPreviews();
     }
 
@@ -13903,8 +13928,8 @@ void main() {
         _rightSidebarWidth = DefaultSidebarWidth;
         _bottomDrawerHeight = DefaultBottomDrawerHeight;
         _activeBottomDrawerTab = FixedBottomDrawerTab.Workspace;
-        _useDockspaceUi = false;
-        _forceApplyShellPanelLayout = false;
+        _useDockspaceUi = true;
+        _forceApplyShellPanelLayout = true;
         SaveViewerSettings();
     }
 
@@ -14475,7 +14500,9 @@ void main() {
             RenderQualitySettings.EnableTerrainBackfaceCulling = _enableTerrainBackfaceCulling;
             RenderQualitySettings.EnableWmoBackfaceCulling = _enableWmoBackfaceCulling;
             _showMinimapWindow = settings.ShowMinimapWindow;
-            _useDockspaceUi = false;
+            _useDockspaceUi = settings.ShellPanelLayoutVersion < CurrentShellPanelLayoutVersion
+                ? true
+                : settings.UseDockspaceUi;
             _showLeftSidebar = settings.ShowLeftSidebar;
             _showRightSidebar = settings.ShowRightSidebar;
             _showWorkspaceBarsPanel = settings.ShowWorkspaceBarsPanel;
@@ -14679,7 +14706,7 @@ void main() {
                 EnableWmoBackfaceCulling = _enableWmoBackfaceCulling,
                 KnownGoodClientPaths = _knownGoodClientPaths,
                 ShowMinimapWindow = _showMinimapWindow,
-                UseDockspaceUi = false,
+                UseDockspaceUi = _useDockspaceUi,
                 ShowLeftSidebar = _showLeftSidebar,
                 ShowRightSidebar = _showRightSidebar,
                 ShowWorkspaceBarsPanel = _showWorkspaceBarsPanel,

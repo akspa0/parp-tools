@@ -202,6 +202,40 @@
     - kept the normal untextured primary-layer fallback for layer `0`
     - still skips secondary missing-texture layers
     - retains unresolved pre-release character-group filtering as the bounded safeguard
+- **Viewer shell usability slice 1 (2026-06-03)**
+  - new spec owner created: `wow-viewer/specs/044-viewer-shell-usability/`
+  - landed shell fixes in `wow-viewer/src/viewer/WoWViewer/`:
+    - `DrawUI()` now renders the dormant dockspace host before shell panels, so the dockable shell route is actually live
+    - dockable shell mode is now the default and persisted `UseDockspaceUi` setting instead of being hard-forced to `false`
+    - legacy fixed splitters are suppressed while dockable shell mode is active
+    - `World Maps` now auto-opens on the first discovery transition after a client load
+    - `Open MK Dataset...` and `Open Zarr Dataset...` were removed from `File`
+    - old dataset/training/conversion utilities were regrouped under `Tools > Offline Data / Conversion`
+    - `View` now exposes a persisted `Dockable Shell Panels` toggle alongside `Reset Shell Layout`
+  - proof:
+    - direct build against the normal viewer output path was blocked by a live `ParpToolsWoWViewer` process locking binaries
+    - isolated-output proof passed:
+      - `dotnet build i:/parp/parp-tools/wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/build/wowviewer-shell-usability/bin/ -p:IntermediateOutputPath=i:/parp/parp-tools/output/tmp/build/wowviewer-shell-usability/obj/`
+  - bounded remaining gap:
+    - the user-requested cursor-as-model diagnostic surface is spec'd but not yet implemented
+- **Viewer scene graph workbench planning pack (2026-06-03)**
+  - new future-slice spec owner created: `wow-viewer/specs/045-scene-graph-workbench/`
+  - landed planning artifacts:
+    - `spec.md`
+    - `plan.md`
+    - `research.md`
+    - `data-model.md`
+    - `quickstart.md`
+    - `contracts/scene-graph-snapshot.schema.json`
+    - `tasks.md`
+    - `checklists/requirements.md`
+  - planning scope:
+    - one Blender-style outliner for the active `WoWViewer` shell
+    - unified scene-graph coverage for terrain, placed objects, and PM4
+    - selection sync, lazy expansion, and filtering as first-slice requirements
+  - explicit bounded non-goal:
+    - first implementation slice is read-only inspection only, not editing or reparenting
+    - no live viewer click-through was performed in this slice, so docking/map discoverability are build-proven only
   - focused regression + proof:
     - `wow-viewer/tests/WowViewer.Core.Tests/M2EmbeddedProfileRealDataTests.cs`
     - `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug`
@@ -976,7 +1010,18 @@
 - Object segmentation Model A.
 - Global asset vocabulary for instance/asset follow-up work.
 - PM4 cross-reference / object mapping follow-up.
-- PM4 `MSHD.Field04` region-id promotion is now landed in `wow-viewer` and consumed by `MdxViewer` for overlay grouping/coloring/debug export, selected-region peer inspection, and LLM-oriented visible-overlay evidence bundles; the viewer compile blocker from the `M2ToMdxConverter` ambiguity was also cleared.
+- PM4 `MSHD.Field04` grouping promotion remains landed in `wow-viewer` and consumed by `MdxViewer` for overlay grouping/coloring/debug export, selected-region peer inspection, and LLM-oriented visible-overlay evidence bundles; 2026-06-03 corpus proof now rules out packed tile `XX_YY` semantics (`0/502` direct XY or YX matches, `73` Field04 values reused across multiple tiles), and the follow-up cross-tile report shows `204/266` cross-tile CK24 values span multiple Field04 buckets, so Field04 should be treated as a reusable scene/group bucket rather than a per-tile id or primary cross-tile stitch key.
+- **PM4 MSLK surface-family semantics note (2026-06-03)**
+  - user-guided real-data inspection now suggests `MSLK.TypeFlags` is at least partially a per-surface family flag:
+    - `0x03` = top surfaces of M2 objects
+    - `0x10` = solid floors within a WMO
+    - `0x12` = solid exterior WMO surfaces
+  - landed scope this pass:
+    - updated `wow-viewer` PM4 research/spec docs and analyzer wording to treat those buckets as partial semantics instead of fully open
+    - clarified that `MSLK.TypeFlags` must stay distinct from `MSLK.GroupObjectId`
+  - explicitly not changed:
+    - no PM4 grouping/runtime behavior changes yet
+    - no field rename/redecode yet
 
 ## High-Value Open Gaps
 - Forward `AlphaToLk` AreaID wiring.

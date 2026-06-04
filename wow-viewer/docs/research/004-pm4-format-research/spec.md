@@ -18,6 +18,7 @@ The PM4 format has been reverse-engineered piecemeal across multiple codebases (
 - **MSCN contains ~98% unique geometry** not present in MSVT — a separate collision hull layer.
 - **MPRL positions** validate against `_obj0.adt` placement data — these are terrain-object intersection points.
 - **CK24 objects cross tile boundaries** — 21.6% of CK24 values span multiple tiles.
+- **Most cross-tile CK24 objects bridge multiple `MSHD.Field04` buckets** — `204/266` cross-tile CK24 values in the development corpus span 2+ distinct Field04 values, so Field04 is not the stitch key for most multi-tile WMO/M2 objects.
 - **Destructible building chunks** (MDBH/MDOS/MDSF) encode building state, not pathfinding.
 
 The MSHD header chunk (32 bytes, 8x uint32) is completely opaque — fields 0x0C-0x1C are zero across the entire development corpus, and no correlation has been found between MSHD fields and any chunk counts, bounds, or metrics.
@@ -51,7 +52,7 @@ The core unsolved problem is **how to decompose CK24 groups into individual obje
 
 **What we don't know:**
 - Whether CK24 itself encodes a hierarchy (the LSB-as-base-group hypothesis: 0x000000=group 0, 0x000001=group 1). Current evidence is inconclusive — Ck24ObjectId (low 16 bits) shows reuse across type bytes, arguing against clean hierarchy.
-- What MSLK.TypeFlags and MSLK.Subtype actually classify — these could be the missing linking layer.
+- What MSLK.TypeFlags and MSLK.Subtype actually classify — current real-data inspection now suggests `TypeFlags` carries per-surface family buckets (`0x03` = M2 top surfaces, `0x10` = interior WMO floors, `0x12` = exterior WMO solid surfaces), but the mapping is not corpus-closed yet and must stay distinct from `GroupObjectId`.
 - How to properly split a single CK24 value into sub-objects when the same CK24 spans multiple tiles and contains hundreds of surfaces.
 - Whether the low byte of MSUR.PackedParams (bits 0-7, currently discarded by the `>> 8` shift) carries meaningful data.
 
@@ -138,7 +139,7 @@ Plus: any unknown/undecoded trailing chunks found in specific files.
 | Offset | Field | Dev Corpus Value | Status |
 |--------|-------|-----------------|--------|
 | 0x00 | Field00 | Non-zero, varies | **Unknown** — correlates weakly with MSUR count but no exact match |
-| 0x04 | Field04 | **227 distinct values; =1 only on empty tiles** | **Partial** — REGION ID. Clusters in spatially adjacent tiles. 13 tiles share F04=3262 across two tile clusters. Does not encode a per-tile count (surface counts vary 11-6575 within same F04). |
+| 0x04 | Field04 | **227 distinct values; =1 only on empty tiles** | **Partial** — region-like scene bucket, but **not** packed tile `XX_YY`. Corpus proof: `0/502` files match `(TileX << 8) | TileY`, `0/502` match `(TileY << 8) | TileX`, and `73` distinct values are reused across multiple tiles. |
 | 0x08 | Field08 | Non-zero, varies | **Unknown** — often equals Field00 |
 | 0x0C | Field0C | 0 | **Unknown** — zero across all 616 files |
 | 0x10 | Field10 | 0 | **Unknown** — zero across all 616 files |
@@ -149,8 +150,8 @@ Plus: any unknown/undecoded trailing chunks found in specific files.
 **Research questions**:
 1. Are fields 0x0C-0x1C reserved for future use, or do they encode something only populated in non-development builds?
 2. Does Field00/Field08 encode a version, checksum, or memory layout hint? Both favor 534 as dominant value but differ in ~72% of tiles.
-3. **BREAKTHROUGH (2026-05-21)**: Field04 is a REGION ID. Clusters in adjacent tiles. =1 only on empty tiles. Can Field04 be used as the root grouping key for CK24 object decomposition?
-4. What does Field04=3262 mean when it appears across two disconnected tile regions (35_42-36_45 and 45_46-47_51)? Same scene type in different locations?
+3. **BREAKTHROUGH (updated 2026-06-03)**: Field04 is **not** packed tile `XX_YY`. The strongest byte-level coincidence is only `6/502` files, and `73` distinct Field04 values span multiple tiles. It still behaves like a reusable scene/group bucket, not a per-tile coordinate key.
+4. What does Field04 actually encode when values like `3262` are reused across disconnected tile clusters (35_42-36_45 and 45_46-47_51)? Same scene archetype, nav-region family, or authoring bucket?
 
 ### 4.3 MSVT (Mesh Vertices)
 
@@ -216,7 +217,7 @@ Plus: any unknown/undecoded trailing chunks found in specific files.
 
 | Offset | Field | Status | Notes |
 |--------|-------|--------|-------|
-| 0x00 | TypeFlags | **Unknown** | "1=walkable, 2=walls" per spec; not validated |
+| 0x00 | TypeFlags | **Partial** | Real-data inspection now suggests per-surface family buckets: `0x03` = M2 top surfaces, `0x10` = interior WMO floors, `0x12` = exterior WMO solid surfaces. Needs corpus-wide closure and offset-ownership recheck before treating as final. |
 | 0x01 | Subtype | **Unknown** | "Floor level?" — looks layer-like but not closed |
 | 0x02-0x03 | Padding | **Verified** | |
 | 0x04 | GroupObjectId | **Partial** | Low16 maps to CK24ObjectId with reuse; not globally unique |
@@ -227,8 +228,8 @@ Plus: any unknown/undecoded trailing chunks found in specific files.
 | 0x12 | SystemFlag | **Partial** | 0x8000 dominates — likely constant flag |
 
 **Research questions**:
-1. What does TypeFlags actually classify? Walkable vs. obstacle? Or something else?
-2. Is Subtype a floor level, a layer index, or an object part identifier?
+1. Are the observed `TypeFlags` buckets (`0x03`, `0x10`, `0x12`) stable across the full corpus and other client builds, or are they only the first confirmed families?
+2. Is Subtype a floor level, a layer index, or an object part identifier once TypeFlags is held fixed?
 3. What is the RefIndex target when it doesn't map to MSUR? MSPI? MSVI? MSCN? MPRL?
 4. Does MspiIndexCount ambiguity (indices vs triangles) indicate two distinct link types?
 
@@ -327,17 +328,17 @@ Plus: any unknown/undecoded trailing chunks found in specific files.
 
 PM4 is a **compressed server-side pathfinding dataset** from ~2010. The format encodes a navigation graph in which:
 
-- **MSHD.Field04** is a scene-division region key — tiles in the same scene region share the same Field04 value. This is the missing root grouping layer.
+- **MSHD.Field04** is a reusable scene/group bucket, not packed tile coordinates. It is still useful for grouping/coloring/debugging, but the corpus no longer supports treating it as a one-value-per-tile key or as the primary stitch key for most multi-tile WMO/M2 objects.
 - **MSVT + MSVI + MSUR** define collision mesh surfaces (the polygons that define walkable and non-walkable areas)
 - **MSCN** contains the centroid of each MSUR surface — these are the **navigation graph nodes**
-- **MSLK** is the **edge catalog** — each entry links a surface (RefIndex → MSUR) to path geometry (MspiFirstIndex → MSPI → MSPV) with metadata (TypeFlags, Subtype) describing the edge type
+- **MSLK** is the **edge catalog** — each entry links a surface (RefIndex → MSUR) to path geometry (MspiFirstIndex → MSPI → MSPV) with metadata (`TypeFlags`, `Subtype`) describing the surface or edge family. Current partial reads: `0x03` = M2 top surfaces, `0x10` = interior WMO floors, `0x12` = exterior WMO solid surfaces.
 - **MPRL** provides world-space placement anchors for the navigation nodes
 - **MPRR** chains MPRL entries into a graph structure
 - **MDBH/MDOS/MDSF** encode destructible building state (dynamic obstacles in the pathfinding network)
 
 The "peg" or "dowel" points at tile boundaries are cross-tile connection markers — MSCN centroids that exist in adjacent tile space, enabling the pathfinding graph to span multiple tiles.
 
-**CK24 groups surfaces into objects.** Within each object, MSLK edges connect MSCN centroids into a sub-graph. The CK24 type byte (0x00 = terrain, 0x40 = M2, 0x42/0x43 = WMO) classifies the object type, and the object decomposition problem is really "how to identify independent pathfinding sub-graphs within a CK24 group."
+**CK24 groups surfaces into objects.** Within each object, MSLK edges connect MSCN centroids into a sub-graph. The CK24 type byte (0x00 = terrain, 0x40 = M2, 0x42/0x43 = WMO) classifies the object type, and the object decomposition problem is really "how to identify independent pathfinding sub-graphs within a CK24 group." Current corpus proof says the cross-tile stitch more often survives across multiple Field04 buckets than within a single one, so the likely cross-region owner is CK24 plus connector/node evidence, not Field04.
 
 **The format is a compressed dataset** — the user estimates it stores scene data at ~1/1000th the size of the uncompressed equivalent. Each chunk is a data layer optimized for its role, with its own coordinate convention.
 
@@ -347,7 +348,7 @@ MSLK is the glue that connects everything. Every field has a role:
 
 | Field | Role | Links To |
 |-------|------|----------|
-| TypeFlags | Edge type classification | Nothing — used for grouping/clustering |
+| TypeFlags | Per-surface or edge family classification | Current partial buckets: `0x03` M2 tops, `0x10` interior WMO floors, `0x12` exterior WMO solids |
 | Subtype | Edge property / sequence position | Nothing — used for grouping/clustering |
 | GroupObjectId | Sub-object membership | Surfaces via RefIndex (union-find partitioning) |
 | MspiFirstIndex + MspiIndexCount | Path geometry window | MSPI → MSPV (navigation path vertices) |
@@ -366,7 +367,7 @@ The user recalls an experiment that subdivided objects down to every single poly
 - **Low byte**: Instance or sub-object
 - **The discarded low byte of PackedParams (bits 0-7)**: Possibly another key layer
 
-The 2-million-object explosion happened when the code treated every polygon as independent — meaning the sub-object splitting went too far. The correct decomposition is somewhere between "one CK24 = one object" and "one polygon = one object." MSLK.GroupObjectId is the mechanism that finds the right level.
+The 2-million-object explosion happened when the code treated every polygon as independent — meaning the sub-object splitting went too far. The correct decomposition is somewhere between "one CK24 = one object" and "one polygon = one object." `MSLK.GroupObjectId` is still the current sub-object partitioning mechanism, but it must not be conflated with the newly observed `TypeFlags` surface-family buckets.
 
 ---
 
@@ -461,7 +462,7 @@ As a format researcher, I need to determine how to correctly decompose CK24 grou
 **Acceptance Scenarios**:
 
 1. **Given** the CK24 bit layout (`(PackedParams >> 8) & 0xFFFFFF`), **When** the LSB-hierarchy hypothesis is tested (low bits as base groups), **Then** either a clean hierarchical structure is found (r > 0.9 correlation between bit position and object identity) or the hypothesis is rejected with evidence.
-2. **Given** MSLK.TypeFlags and MSLK.Subtype across the development corpus, **When** the values are correlated with object boundaries (ADT placements, CK24 group splits), **Then** either TypeFlags/Subtype encode object-part or layer semantics, or they are classified as unknown.
+2. **Given** MSLK.TypeFlags and MSLK.Subtype across the development corpus, **When** the values are correlated with object boundaries (ADT placements, CK24 group splits), **Then** the observed `TypeFlags` families (`0x03`, `0x10`, `0x12`) are either confirmed corpus-wide and extended, or the field ownership hypothesis is revised with evidence.
 3. **Given** the unused low byte of MSUR.PackedParams (bits 0-7), **When** the byte is extracted and correlated with CK24 splits, **Then** either it carries meaningful grouping data or it is confirmed as padding/unused.
 4. **Given** MSCN positions for a CK24 group, **When** the positions are used to define object boundaries (bounding boxes, containment tests), **Then** the MSCN-based boundaries are compared against MSLK-based and connectivity-based boundaries for accuracy.
 

@@ -3053,6 +3053,22 @@ static void PrintPm4MshdReport(Pm4MshdReport report)
 	foreach (Pm4MshdRelationshipSummary relationship in report.Relationships)
 		Console.WriteLine($"  {relationship.Relationship}: {relationship.MatchCount}/{relationship.FileCount} ({relationship.Notes})");
 
+	if (report.TilePackingHypotheses.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Tile-coordinate hypotheses:");
+		foreach (Pm4MshdTilePackingSummary hypothesis in report.TilePackingHypotheses)
+			Console.WriteLine($"  {hypothesis.Hypothesis}: {hypothesis.MatchCount}/{hypothesis.FileCount} ({hypothesis.Notes})");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine($"Tile reuse: filesWithCoords={report.TileReuse.FilesWithTileCoordinates} distinctTiles={report.TileReuse.DistinctTileCount} distinctField04={report.TileReuse.DistinctField04Count} singleTileValues={report.TileReuse.SingleTileField04Count} multiTileValues={report.TileReuse.MultiTileField04Count}");
+	if (report.TileReuse.TopMultiTileField04Values.Count > 0)
+	{
+		foreach (Pm4MshdField04TileReuseCase reuseCase in report.TileReuse.TopMultiTileField04Values.Take(6))
+			Console.WriteLine($"  Field04={reuseCase.Field04} spans {reuseCase.TileCount} tiles: {string.Join(", ", reuseCase.TileCoordinates)}");
+	}
+
 	if (report.Notes.Count > 0)
 	{
 		Console.WriteLine();
@@ -4066,13 +4082,14 @@ static void PrintPm4CrossTileReport(Pm4CrossTileReport report)
 	Console.WriteLine($"Files: {report.TotalFiles} total, {report.NonEmptyFiles} non-empty");
 	Console.WriteLine($"Distinct CK24 values: {report.TotalDistinctCk24}");
 	Console.WriteLine($"Cross-tile CK24 (span 2+ tiles): {report.CrossTileCk24Count} ({report.CrossTileCk24Count * 100.0 / Math.Max(1, report.TotalDistinctCk24):F1}%)");
+	Console.WriteLine($"Cross-tile CK24 spanning multiple Field04 buckets: {report.CrossTileCk24MultiField04Count}");
 	Console.WriteLine();
 
 	Console.WriteLine("Top cross-tile CK24 objects:");
-	Console.WriteLine("  CK24     Type  ObjectId  Tiles  Surfaces  MSCNrefs");
+	Console.WriteLine("  CK24     Type  ObjectId  Tiles  F04s  Surfaces  MSCNrefs");
 	foreach (Pm4CrossTileCk24Record row in report.TopCrossTileCk24.Where(r => r.TileCoordinates.Count > 1).Take(25))
 	{
-		Console.WriteLine($"  0x{row.Ck24:X6}  0x{row.Ck24Type:X2}   {row.Ck24ObjectId,-8} {row.TileCoordinates.Count,-5}  {row.TotalSurfaces,-8}  {row.TotalMscnRefs,-8}");
+		Console.WriteLine($"  0x{row.Ck24:X6}  0x{row.Ck24Type:X2}   {row.Ck24ObjectId,-8} {row.TileCoordinates.Count,-5}  {row.DistinctField04Count,-4}  {row.TotalSurfaces,-8}  {row.TotalMscnRefs,-8}");
 	}
 
 	Console.WriteLine();

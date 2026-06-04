@@ -130,7 +130,11 @@ public partial class ViewerApp
         if (_showFileBrowser && ImGui.CollapsingHeader("Map / Assets"))
             DrawFileBrowserContent();
 
-        ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
+        if (_autoOpenWorldMapsPanel)
+            ImGui.SetNextItemOpen(true, ImGuiCond.Always);
+        else
+            ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
+
         if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
             DrawMapDiscoveryContent();
     }

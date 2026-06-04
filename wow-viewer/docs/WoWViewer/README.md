@@ -164,6 +164,13 @@ The PM4 data shown in the viewer is still partly reverse-engineered. Some labels
 - `MSLK._0x04` -> local alias: `LinkGroupObjectId`
   - This is a strong current grouping signal for many PM4 object families.
   - The viewer uses it as one clue when splitting or matching PM4 objects.
+- `MSLK._0x00` -> local alias: `TypeFlags`
+  - Current real-data inspection suggests this behaves like a per-surface family tag, not an object identity.
+  - First partial buckets now tracked in research docs:
+    - `0x03` = M2 top surfaces
+    - `0x10` = interior WMO floors
+    - `0x12` = exterior WMO solid surfaces
+  - Treat this as partial semantics only; it does not replace `LinkGroupObjectId`.
 - `part` / `ObjectPartId`
   - This is a viewer-generated split index, not a raw PM4 field.
   - `WoWViewer` assigns it during the current overlay build after `CK24` grouping, dominant `MSLK` grouping, optional `MDOS` split, and optional connectivity split.
@@ -186,7 +193,7 @@ The PM4 data shown in the viewer is still partly reverse-engineered. Some labels
 Practical rule:
 
 - Treat raw chunk names like `MSHD`, `MSLK`, `MSUR`, `MSCN`, and `MPRL` as stable.
-- Treat local aliases like `CK24`, `GroupKey`, `AttributeMask`, `MdosIndex`, and `LinkGroupObjectId` as useful research vocabulary.
+- Treat local aliases like `CK24`, `GroupKey`, `AttributeMask`, `MdosIndex`, `LinkGroupObjectId`, and `TypeFlags` as useful research vocabulary.
 - Treat any undocumented PM4 field meaning as provisional unless a note here says the semantic confidence changed.
 
 ### Rendering and material handling

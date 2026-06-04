@@ -6,6 +6,10 @@ namespace WowViewer.Core.PM4.Research;
 public static class Pm4ResearchMshdAnalyzer
 {
     private sealed record Sample(
+        string TileCoordinate,
+        bool HasTileCoordinates,
+        int TileX,
+        int TileY,
         uint Field00,
         uint Field04,
         uint Field08,
@@ -65,6 +69,22 @@ public static class Pm4ResearchMshdAnalyzer
             BuildRelationship("Field04 == 1", samples, static sample => sample.Field04 == 1, "Checks whether the second field behaves like a common constant or version-like flag in the current corpus.")
         ];
 
+        List<Sample> tileSamples = samples
+            .Where(static sample => sample.HasTileCoordinates)
+            .ToList();
+
+        IReadOnlyList<Pm4MshdTilePackingSummary> tilePackingHypotheses =
+        [
+            BuildTilePackingHypothesis("Field04 == (TileX << 8) | TileY", tileSamples, static sample => sample.Field04 == PackTileBytes(sample.TileX, sample.TileY), "Tests a packed XXYY low-word hypothesis using tile X as the high byte and tile Y as the low byte."),
+            BuildTilePackingHypothesis("Field04 == (TileY << 8) | TileX", tileSamples, static sample => sample.Field04 == PackTileBytes(sample.TileY, sample.TileX), "Tests a packed YYXX low-word hypothesis in case the current XX/YY assumption is byte-swapped."),
+            BuildTilePackingHypothesis("Field04 low byte == TileX", tileSamples, static sample => (sample.Field04 & 0xFFu) == (uint)sample.TileX, "Checks whether the low byte alone acts like the PM4 tile X coordinate."),
+            BuildTilePackingHypothesis("Field04 low byte == TileY", tileSamples, static sample => (sample.Field04 & 0xFFu) == (uint)sample.TileY, "Checks whether the low byte alone acts like the PM4 tile Y coordinate."),
+            BuildTilePackingHypothesis("Field04 high byte == TileX", tileSamples, static sample => ((sample.Field04 >> 8) & 0xFFu) == (uint)sample.TileX, "Checks whether the next byte acts like the PM4 tile X coordinate."),
+            BuildTilePackingHypothesis("Field04 high byte == TileY", tileSamples, static sample => ((sample.Field04 >> 8) & 0xFFu) == (uint)sample.TileY, "Checks whether the next byte acts like the PM4 tile Y coordinate.")
+        ];
+
+        Pm4MshdTileReuseSummary tileReuse = BuildTileReuseSummary(tileSamples);
+
         List<string> notes = new();
         if (samples.Count == 0)
         {
@@ -83,6 +103,32 @@ public static class Pm4ResearchMshdAnalyzer
 
             notes.Add("If MSHD is driving root-group or type-bucket splitting, at least one field should show a strong exact-match or high-correlation signal against distinct link-group, CK24, MDOS, or surface-group metrics. This report measures those signals directly.");
             notes.Add("Treat high correlation without exact matches carefully. It can indicate file-size or scene-density coupling rather than direct semantic ownership.");
+
+            if (tileSamples.Count > 0)
+            {
+                Pm4MshdTilePackingSummary bestPacking = tilePackingHypotheses
+                    .OrderByDescending(static summary => summary.MatchCount)
+                    .ThenBy(static summary => summary.Hypothesis)
+                    .First();
+
+                if (bestPacking.MatchCount == 0)
+                {
+                    notes.Add("None of the tested byte-packed tile-coordinate hypotheses matched MSHD.Field04 anywhere in the current corpus, which weakens the idea that Field04 directly stores XX_YY tile coordinates.");
+                }
+                else
+                {
+                    notes.Add($"Best tile-coordinate packing fit was '{bestPacking.Hypothesis}' at {bestPacking.MatchCount}/{bestPacking.FileCount} files. Treat partial matches cautiously until the non-matching files are explained.");
+                }
+
+                if (tileReuse.MultiTileField04Count > 0)
+                {
+                    notes.Add($"MSHD.Field04 is reused across multiple tiles for {tileReuse.MultiTileField04Count} distinct values in the current corpus, so it does not behave like a one-value-per-tile key.");
+                }
+                else
+                {
+                    notes.Add("Each observed MSHD.Field04 value stayed on a single tile in the current corpus.");
+                }
+            }
         }
 
         return new Pm4MshdReport(
@@ -91,6 +137,8 @@ public static class Pm4ResearchMshdAnalyzer
             samples.Count,
             fields,
             relationships,
+            tilePackingHypotheses,
+            tileReuse,
             notes);
     }
 
@@ -116,7 +164,14 @@ public static class Pm4ResearchMshdAnalyzer
         if (file.KnownChunks.Mdos.Count > 0) nonEmptyChunkFamilyCount++;
         if (file.KnownChunks.Mdsf.Count > 0) nonEmptyChunkFamilyCount++;
 
+        bool hasTileCoordinates = Pm4CoordinateService.TryParseTileCoordinates(file.SourcePath ?? string.Empty, out int tileX, out int tileY);
+        string tileCoordinate = hasTileCoordinates ? $"{tileX}_{tileY}" : "<none>";
+
         return new Sample(
+            tileCoordinate,
+            hasTileCoordinates,
+            tileX,
+            tileY,
             header.Field00,
             header.Field04,
             header.Field08,
@@ -205,6 +260,51 @@ public static class Pm4ResearchMshdAnalyzer
         return new Pm4MshdRelationshipSummary(name, samples.Count(predicate), samples.Count, notes);
     }
 
+    private static Pm4MshdTilePackingSummary BuildTilePackingHypothesis(string name, IReadOnlyList<Sample> samples, Func<Sample, bool> predicate, string notes)
+    {
+        return new Pm4MshdTilePackingSummary(name, samples.Count(predicate), samples.Count, notes);
+    }
+
+    private static Pm4MshdTileReuseSummary BuildTileReuseSummary(IReadOnlyList<Sample> tileSamples)
+    {
+        if (tileSamples.Count == 0)
+        {
+            return new Pm4MshdTileReuseSummary(0, 0, 0, 0, 0, Array.Empty<Pm4MshdField04TileReuseCase>());
+        }
+
+        Dictionary<uint, HashSet<string>> tilesByField04 = new();
+        foreach (Sample sample in tileSamples)
+        {
+            if (!tilesByField04.TryGetValue(sample.Field04, out HashSet<string>? tileCoordinates))
+            {
+                tileCoordinates = new HashSet<string>(StringComparer.Ordinal);
+                tilesByField04[sample.Field04] = tileCoordinates;
+            }
+
+            tileCoordinates.Add(sample.TileCoordinate);
+        }
+
+        List<Pm4MshdField04TileReuseCase> topMultiTileField04Values = tilesByField04
+            .Where(static kv => kv.Value.Count > 1)
+            .OrderByDescending(static kv => kv.Value.Count)
+            .ThenBy(static kv => kv.Key)
+            .Take(12)
+            .Select(static kv => new Pm4MshdField04TileReuseCase(
+                kv.Key,
+                kv.Value.Count,
+                kv.Value.OrderBy(static tile => tile).ToList()))
+            .ToList();
+
+        int singleTileField04Count = tilesByField04.Count(static kv => kv.Value.Count == 1);
+        return new Pm4MshdTileReuseSummary(
+            tileSamples.Count,
+            tileSamples.Select(static sample => sample.TileCoordinate).Distinct(StringComparer.Ordinal).Count(),
+            tilesByField04.Count,
+            singleTileField04Count,
+            tilesByField04.Count - singleTileField04Count,
+            topMultiTileField04Values);
+    }
+
     private static double ComputePearsonCorrelation(IReadOnlyList<double> x, IReadOnlyList<double> y)
     {
         if (x.Count != y.Count || x.Count == 0)
@@ -245,5 +345,10 @@ public static class Pm4ResearchMshdAnalyzer
     {
         counts.TryGetValue(key, out int existing);
         counts[key] = existing + 1;
+    }
+
+    private static uint PackTileBytes(int first, int second)
+    {
+        return ((uint)(byte)first << 8) | (byte)second;
     }
 }

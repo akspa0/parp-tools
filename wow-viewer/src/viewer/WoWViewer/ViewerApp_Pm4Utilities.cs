@@ -79,7 +79,7 @@ public partial class ViewerApp
             return;
 
         ImGui.TextWrapped("The PM4 workbench mixes raw chunk names, viewer aliases, and viewer-generated structure. Not every label here is a proven native PM4 field name.");
-        ImGui.BulletText("MSHD region: promoted from MSHD.Field04. Current research says it behaves like a tile-level region id, useful for grouping/coloring but not yet a proven placement or scoring semantic.");
+        ImGui.BulletText("MSHD region: promoted from MSHD.Field04. Current research says it behaves like a reusable scene/group bucket across tiles, useful for grouping/coloring but not a packed tile coordinate or proven placement semantic.");
         ImGui.BulletText("CK24: viewer alias for the packed MSUR field at 0x1C. Type = high byte, ObjId = low 16 bits.");
         ImGui.BulletText("part / ObjectPartId: viewer-generated split id. WoWViewer assigns it during the current overlay build after CK24 grouping, dominant MSLK grouping, optional MDOS split, then optional connectivity split. It is not a raw PM4 field.");
         ImGui.BulletText("MSLK Group: dominant MSLK.GroupObjectId seen in the current viewer object. Strong grouping hint, not final proof of identity.");
