@@ -51,91 +51,115 @@ internal static class HeadlessValidationCaptureRunner
         int framesObserved = 0;
         int settledFrames = 0;
 
-        while (true)
+        try
         {
-            framesObserved++;
-            ValidationWorldSceneSnapshot sceneSnapshot = sceneAdapter.CaptureSnapshot(request, framesObserved, settledFrames);
-            settledFrames = CanAccumulateSettledFrames(sceneSnapshot, session.ScenePolicy)
-                ? settledFrames + 1
-                : 0;
-
-            ValidationCaptureReadinessState readinessState = ValidationCaptureReadinessEvaluator.Evaluate(new ValidationCaptureReadinessSnapshot(
-                HasSceneContent: sceneSnapshot.HasSceneContent,
-                HasFramebuffer: sceneSnapshot.FramebufferWidth > 0 && sceneSnapshot.FramebufferHeight > 0,
-                FramebufferWidth: sceneSnapshot.FramebufferWidth,
-                FramebufferHeight: sceneSnapshot.FramebufferHeight,
-                RequestedResolution: session.ScenePolicy.RequestedResolution,
-                WaitForSceneReady: true,
-                HasTargetTile: true,
-                TargetTileLoaded: sceneSnapshot.TargetTileLoaded,
-                TerrainStreaming: sceneSnapshot.TerrainStreaming,
-                TrackPendingWorldObjectLoads: true,
-                PendingWorldObjectLoadCount: sceneSnapshot.PendingWorldObjectLoadCount,
-                FramesObserved: framesObserved,
-                SettledFrames: settledFrames,
-                RequiredSettledFrames: session.ScenePolicy.RequiredSettledFrames,
-                MaxFramesBeforeCapture: session.ScenePolicy.MaxFramesBeforeCapture,
-                BatchHasSettled: batchHasSettled,
-                BatchSettledFrames: session.ScenePolicy.BatchSettledFrames,
-                FastSettleAfterBatchReady: session.ScenePolicy.FastSettleAfterBatchReady));
-
-            if (readinessState.IsReady)
+            while (true)
             {
-                float aspectRatio = sceneSnapshot.FramebufferHeight > 0
-                    ? sceneSnapshot.FramebufferWidth / (float)sceneSnapshot.FramebufferHeight
-                    : 1f;
-                float groundHeight = sceneAdapter.ResolveGroundHeight(request.TileX, request.TileY);
-                ValidationCaptureCameraFrame cameraFrame = ValidationCaptureCameraSolver.SolveTopDown(new ValidationCaptureCameraInput(
-                    request.TileX,
-                    request.TileY,
-                    aspectRatio,
-                    groundHeight,
-                    DefaultMapOrigin,
-                    DefaultTileWorldSize,
-                    DefaultTileWorldSize,
-                    DefaultEyeHeightOffset,
-                    DefaultNearPlane,
-                    DefaultFarPlane,
-                    Vector3.UnitX));
+                framesObserved++;
+                ValidationWorldSceneSnapshot sceneSnapshot = sceneAdapter.CaptureSnapshot(request, framesObserved, settledFrames);
+                settledFrames = CanAccumulateSettledFrames(sceneSnapshot, session.ScenePolicy)
+                    ? settledFrames + 1
+                    : 0;
 
-                sceneAdapter.RenderFrame(cameraFrame);
-                byte[] rgbaPixels = sceneAdapter.ReadFramebufferRgba();
-                HeadlessValidationFramebufferExporter.WriteImage(
-                    request.OutputPath,
-                    sceneSnapshot.FramebufferWidth,
-                    sceneSnapshot.FramebufferHeight,
-                    rgbaPixels,
-                    sourceOriginBottomLeft: true);
+                ValidationCaptureReadinessState readinessState = ValidationCaptureReadinessEvaluator.Evaluate(new ValidationCaptureReadinessSnapshot(
+                    HasSceneContent: sceneSnapshot.HasSceneContent,
+                    HasFramebuffer: sceneSnapshot.FramebufferWidth > 0 && sceneSnapshot.FramebufferHeight > 0,
+                    FramebufferWidth: sceneSnapshot.FramebufferWidth,
+                    FramebufferHeight: sceneSnapshot.FramebufferHeight,
+                    RequestedResolution: session.ScenePolicy.RequestedResolution,
+                    WaitForSceneReady: true,
+                    HasTargetTile: true,
+                    TargetTileLoaded: sceneSnapshot.TargetTileLoaded,
+                    TerrainStreaming: sceneSnapshot.TerrainStreaming,
+                    TrackPendingWorldObjectLoads: true,
+                    PendingWorldObjectLoadCount: sceneSnapshot.PendingWorldObjectLoadCount,
+                    FramesObserved: framesObserved,
+                    SettledFrames: settledFrames,
+                    RequiredSettledFrames: session.ScenePolicy.RequiredSettledFrames,
+                    MaxFramesBeforeCapture: session.ScenePolicy.MaxFramesBeforeCapture,
+                    BatchHasSettled: batchHasSettled,
+                    BatchSettledFrames: session.ScenePolicy.BatchSettledFrames,
+                    FastSettleAfterBatchReady: session.ScenePolicy.FastSettleAfterBatchReady));
 
-                return new ValidationCaptureVariantResult(
-                    request.Variant,
-                    request.TileName,
-                    request.TileX,
-                    request.TileY,
-                    request.OutputPath,
-                    readinessState,
-                    succeeded: true,
-                    timedOut: false,
-                    framesObserved,
-                    settledFrames,
-                    failureReason: null);
+                if (readinessState.IsReady)
+                {
+                    float aspectRatio = sceneSnapshot.FramebufferHeight > 0
+                        ? sceneSnapshot.FramebufferWidth / (float)sceneSnapshot.FramebufferHeight
+                        : 1f;
+                    float groundHeight = sceneAdapter.ResolveGroundHeight(request.TileX, request.TileY);
+                    ValidationCaptureCameraFrame cameraFrame = ValidationCaptureCameraSolver.SolveTopDown(new ValidationCaptureCameraInput(
+                        request.TileX,
+                        request.TileY,
+                        aspectRatio,
+                        groundHeight,
+                        DefaultMapOrigin,
+                        DefaultTileWorldSize,
+                        DefaultTileWorldSize,
+                        DefaultEyeHeightOffset,
+                        DefaultNearPlane,
+                        DefaultFarPlane,
+                        Vector3.UnitX));
+
+                    sceneAdapter.RenderFrame(cameraFrame);
+                    byte[] rgbaPixels = sceneAdapter.ReadFramebufferRgba();
+                    HeadlessValidationFramebufferExporter.WriteImage(
+                        request.OutputPath,
+                        sceneSnapshot.FramebufferWidth,
+                        sceneSnapshot.FramebufferHeight,
+                        rgbaPixels,
+                        sourceOriginBottomLeft: true);
+
+                    return new ValidationCaptureVariantResult(
+                        request.Variant,
+                        request.TileName,
+                        request.TileX,
+                        request.TileY,
+                        request.OutputPath,
+                        readinessState,
+                        succeeded: true,
+                        timedOut: false,
+                        framesObserved,
+                        settledFrames,
+                        failureReason: null);
+                }
+
+                if (readinessState.TimedOut)
+                {
+                    return new ValidationCaptureVariantResult(
+                        request.Variant,
+                        request.TileName,
+                        request.TileX,
+                        request.TileY,
+                        request.OutputPath,
+                        readinessState,
+                        succeeded: false,
+                        timedOut: true,
+                        framesObserved,
+                        settledFrames,
+                        failureReason: readinessState.Detail);
+                }
             }
-
-            if (readinessState.TimedOut)
-            {
-                return new ValidationCaptureVariantResult(
-                    request.Variant,
-                    request.TileName,
-                    request.TileX,
-                    request.TileY,
-                    request.OutputPath,
-                    readinessState,
-                    succeeded: false,
-                    timedOut: true,
-                    framesObserved,
-                    settledFrames,
-                    failureReason: readinessState.Detail);
-            }
+        }
+        catch (Exception ex)
+        {
+            return new ValidationCaptureVariantResult(
+                request.Variant,
+                request.TileName,
+                request.TileX,
+                request.TileY,
+                request.OutputPath,
+                new ValidationCaptureReadinessState(
+                    ValidationCaptureReadinessStatus.WaitingForSceneContent,
+                    IsReady: false,
+                    TimedOut: false,
+                    FramesObserved: framesObserved,
+                    SettledFrames: settledFrames,
+                    Detail: ex.Message),
+                succeeded: false,
+                timedOut: false,
+                framesObserved,
+                settledFrames,
+                failureReason: $"{ex.GetType().Name}: {ex.Message}");
         }
     }
 

@@ -795,10 +795,10 @@ def _height_loss(
 ) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["height_norm"].to(device, non_blocking=True)
-    weight = batch["weight_257"].to(device, non_blocking=True)
     pred = model(inp)
-    loss = _weighted_l1(pred, target, weight)
-    return loss, {"height": float(loss.item())}, {"pred": pred, "target": target, "weight": weight}
+    loss = F.l1_loss(pred, target)
+    full_weight = torch.ones_like(target)
+    return loss, {"height": float(loss.item())}, {"pred": pred, "target": target, "weight": full_weight}
 
 
 def _gradient_magnitude_257(x: torch.Tensor) -> torch.Tensor:
@@ -869,95 +869,24 @@ def _normal_loss(
 ) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["normals"].to(device, non_blocking=True)
-    height_raw = batch["height_raw"].to(device, non_blocking=True)
-    height_norm = batch["height_norm"].to(device, non_blocking=True)
     normal_mask = batch["normal_mask"].to(device, non_blocking=True)
-    terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
-    object_weight = batch["weight_257"].to(device, non_blocking=True)
-    object_roof_weight = batch.get("object_roof_weight_257", batch["weight_257"]).to(device, non_blocking=True)
-    mddf_mask = batch["mddf_mask"].to(device, non_blocking=True)
-    modf_mask = batch["modf_mask"].to(device, non_blocking=True)
-    liquid_mask = batch["liquid_mask"].to(device, non_blocking=True)
-    what_plate_flag = batch["what_plate_flag"].to(device, non_blocking=True).view(-1, 1, 1, 1)
-    alpha_painted_cov = batch["alpha_painted_cov"].to(device, non_blocking=True)
-    mcly_cov = batch["mcly_cov"].to(device, non_blocking=True)
-    alpha_painted_256 = batch["alpha_painted_256"].to(device, non_blocking=True)
-    mcly_any_16 = batch["mcly_any_16"].to(device, non_blocking=True)
     pred = model(inp)
     pred_n = F.normalize(pred, dim=1, eps=1e-6)
     target_n = F.normalize(target, dim=1, eps=1e-6)
     cosine = 1.0 - (pred_n * target_n).sum(dim=1, keepdim=True)
-    liquid_mask_257 = _resize_weight(liquid_mask, target_n.shape[-2:])
-    object_presence = torch.maximum(mddf_mask, modf_mask)
-    liquid_weight = 1.0 - (0.85 * liquid_mask_257)
-    instance_weight = 1.0 - (0.75 * object_presence)
-    base_mask = normal_mask * terrain_valid_mask * object_weight * object_roof_weight * liquid_weight * instance_weight
-    base_mask = base_mask * (1.0 - what_plate_flag)
-    hard_region_weight, hard_region_debug = _hard_region_weight_from_targets(
-        height_raw=height_raw,
-        target_normals=target_n,
-        alpha_painted_256=alpha_painted_256,
-        mcly_any_16=mcly_any_16,
-        terrain_valid_mask=terrain_valid_mask,
-        base_mask=base_mask,
-        detail_boost=float(args.normal_detail_boost),
-    )
-    train_mask = base_mask * hard_region_weight
-    vec_l1 = (pred_n - target_n).abs().mean(dim=1, keepdim=True)
-    nz_l2 = (pred_n[:, 2:3] - target_n[:, 2:3]) ** 2
-    loss_cos = _masked_mean(cosine, train_mask)
-    loss_vec = _masked_mean(vec_l1, train_mask)
-    loss_nz = _masked_mean(nz_l2, train_mask)
-    loss = loss_cos + (0.35 * loss_vec) + (0.15 * loss_nz)
-
-    # Neutralize masked/invalid regions so object-heavy areas do not leak into
-    # predicted normals when they are excluded from terrain supervision.
+    train_mask = normal_mask
     invalid_mask = (1.0 - train_mask).clamp(0.0, 1.0)
-    up = torch.zeros_like(pred_n)
-    up[:, 2:3, :, :] = 1.0
-    loss_invalid_neutral = _masked_mean(1.0 - (pred_n * up).sum(dim=1, keepdim=True), invalid_mask)
-    invalid_neutral_weight = float(getattr(args, "invalid_neutral_weight", 0.0))
-    if invalid_neutral_weight > 0.0:
-        loss = loss + (invalid_neutral_weight * loss_invalid_neutral)
-
-    height_sup_weight = float(getattr(args, "height_supervision_weight", 0.0))
-    if str(getattr(args, "resolved_normal_variant", "")) == "v17_1_normals" and height_sup_weight > 0.0:
-        height_teacher = _normals_from_height(height_norm)
-        loss_height_sup = _masked_mean(1.0 - (pred_n * height_teacher).sum(dim=1, keepdim=True), train_mask)
-        loss = loss + (height_sup_weight * loss_height_sup)
-    else:
-        loss_height_sup = torch.zeros((), device=device, dtype=loss.dtype)
+    loss = _masked_mean(cosine, train_mask)
     return loss, {
         "normal": float(loss.item()),
-        "normal_cos": float(loss_cos.item()),
-        "normal_vec": float(loss_vec.item()),
-        "normal_nz": float(loss_nz.item()),
-        "normal_mask_cov": float(base_mask.mean().item()),
-        "object_roof_cov": float((1.0 - object_roof_weight).mean().item()),
-        "normal_detail_mean": float(_masked_mean(hard_region_weight, base_mask).item()),
-        "normal_hard_region_mean": float(_masked_mean(hard_region_debug["hard_region_signal"], base_mask).item()),
-        "normal_transition_mean": float(_masked_mean(hard_region_debug["transition_signal"], base_mask).item()),
-        "normal_height_sup": float(loss_height_sup.item()),
-        "normal_height_sup_weight": float(height_sup_weight),
-        "normal_invalid_neutral": float(loss_invalid_neutral.item()),
-        "normal_invalid_neutral_weight": float(invalid_neutral_weight),
-        "what_plate_rate": float(what_plate_flag.mean().item()),
-        "alpha_painted_cov": float(alpha_painted_cov.mean().item()),
-        "mcly_cov": float(mcly_cov.mean().item()),
+        "normal_cos": float(loss.item()),
+        "normal_mask_cov": float(train_mask.mean().item()),
     }, {
         "pred": pred_n,
         "target": target_n,
         "train_mask": train_mask,
         "invalid_mask": invalid_mask,
-        "base_mask": base_mask,
-        "detail_weight": hard_region_weight,
-        "hard_region_signal": hard_region_debug["hard_region_signal"],
-        "transition_signal": hard_region_debug["transition_signal"],
-        "terrain_valid_mask": terrain_valid_mask,
-        "object_weight": object_weight,
-        "object_roof_weight": object_roof_weight,
-        "liquid_mask": liquid_mask_257,
-        "instance_weight": instance_weight,
+        "base_mask": train_mask,
     }
 
 
@@ -970,60 +899,24 @@ def _combined_loss(
     inp = batch["input"].to(device, non_blocking=True)
     target_normals = batch["normals"].to(device, non_blocking=True)
     target_height = batch["height_norm"].to(device, non_blocking=True)
-    height_raw = batch["height_raw"].to(device, non_blocking=True)
     normal_mask = batch["normal_mask"].to(device, non_blocking=True)
-    terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
-    object_weight = batch["weight_257"].to(device, non_blocking=True)
-    mddf_mask = batch["mddf_mask"].to(device, non_blocking=True)
-    modf_mask = batch["modf_mask"].to(device, non_blocking=True)
-    liquid_mask = batch["liquid_mask"].to(device, non_blocking=True)
-    alpha_painted_256 = batch["alpha_painted_256"].to(device, non_blocking=True)
-    mcly_any_16 = batch["mcly_any_16"].to(device, non_blocking=True)
-    what_plate_flag = batch["what_plate_flag"].to(device, non_blocking=True).view(-1, 1, 1, 1)
 
     pred_normals, pred_height = model(inp)
     pred_n = F.normalize(pred_normals, dim=1, eps=1e-6)
     target_n = F.normalize(target_normals, dim=1, eps=1e-6)
 
-    # ── Normal loss (same as _normal_loss) ──
     cosine = 1.0 - (pred_n * target_n).sum(dim=1, keepdim=True)
-    liquid_mask_257 = _resize_weight(liquid_mask, target_n.shape[-2:])
-    object_presence = torch.maximum(mddf_mask, modf_mask)
-    liquid_weight = 1.0 - (0.85 * liquid_mask_257)
-    instance_weight = 1.0 - (0.75 * object_presence)
-    base_mask = normal_mask * terrain_valid_mask * object_weight * liquid_weight * instance_weight
-    base_mask = base_mask * (1.0 - what_plate_flag)
+    train_mask = normal_mask
+    normal_loss = _masked_mean(cosine, train_mask)
+    height_loss = F.l1_loss(pred_height, target_height)
 
-    hard_region_weight, _hard_debug = _hard_region_weight_from_targets(
-        height_raw=height_raw,
-        target_normals=target_n,
-        alpha_painted_256=alpha_painted_256,
-        mcly_any_16=mcly_any_16,
-        terrain_valid_mask=terrain_valid_mask,
-        base_mask=base_mask,
-        detail_boost=float(args.normal_detail_boost),
-    )
-    train_mask = base_mask * hard_region_weight
-    vec_l1 = (pred_n - target_n).abs().mean(dim=1, keepdim=True)
-    nz_l2 = (pred_n[:, 2:3] - target_n[:, 2:3]) ** 2
-    loss_cos = _masked_mean(cosine, train_mask)
-    loss_vec = _masked_mean(vec_l1, train_mask)
-    loss_nz = _masked_mean(nz_l2, train_mask)
-    normal_loss = loss_cos + (0.35 * loss_vec) + (0.15 * loss_nz)
-
-    # ── Height loss (weighted L1) ──
-    height_loss = _weighted_l1(pred_height, target_height, object_weight)
-
-    # ── Combined ──
     w_normal = float(getattr(args, "normal_weight", 1.0))
     w_height = float(getattr(args, "height_weight", 1.0))
     loss = (w_normal * normal_loss) + (w_height * height_loss)
 
     return loss, {
         "normal": float(normal_loss.item()),
-        "normal_cos": float(loss_cos.item()),
-        "normal_vec": float(loss_vec.item()),
-        "normal_nz": float(loss_nz.item()),
+        "normal_cos": float(normal_loss.item()),
         "height": float(height_loss.item()),
         "combined": float(loss.item()),
     }, {
@@ -1215,16 +1108,23 @@ def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
         ]
         if has_refined:
             panels.append(("refiner_teacher_pred", _normals_to_rgb(outputs["refined_normals"][idx])))
-        panels.extend([
-            ("terrain_valid", outputs["terrain_valid_mask"][idx]),
-            ("base_mask", outputs["base_mask"][idx]),
-            ("hard_region", outputs["hard_region_signal"][idx] / outputs["hard_region_signal"][idx].max().clamp_min(1e-6)),
-            ("transition", outputs["transition_signal"][idx] / outputs["transition_signal"][idx].max().clamp_min(1e-6)),
-            ("detail_weight", outputs["detail_weight"][idx] / outputs["detail_weight"][idx].max().clamp_min(1e-6)),
-            ("train_mask", outputs["train_mask"][idx] / outputs["train_mask"][idx].max().clamp_min(1e-6)),
-            ("liquid_mask", outputs["liquid_mask"][idx]),
-            ("object_weight", outputs["object_weight"][idx]),
-        ])
+        if "terrain_valid_mask" in outputs:
+            panels.extend([
+                ("terrain_valid", outputs["terrain_valid_mask"][idx]),
+                ("base_mask", outputs["base_mask"][idx]),
+                ("hard_region", outputs["hard_region_signal"][idx] / outputs["hard_region_signal"][idx].max().clamp_min(1e-6)),
+                ("transition", outputs["transition_signal"][idx] / outputs["transition_signal"][idx].max().clamp_min(1e-6)),
+                ("detail_weight", outputs["detail_weight"][idx] / outputs["detail_weight"][idx].max().clamp_min(1e-6)),
+                ("train_mask", outputs["train_mask"][idx] / outputs["train_mask"][idx].max().clamp_min(1e-6)),
+                ("liquid_mask", outputs["liquid_mask"][idx]),
+                ("object_weight", outputs["object_weight"][idx]),
+            ])
+        else:
+            panels.extend([
+                ("base_mask", outputs["base_mask"][idx] / outputs["base_mask"][idx].max().clamp_min(1e-6)),
+                ("train_mask", outputs["train_mask"][idx] / outputs["train_mask"][idx].max().clamp_min(1e-6)),
+                ("invalid_mask", outputs["invalid_mask"][idx] / outputs["invalid_mask"][idx].max().clamp_min(1e-6)),
+            ])
         if "object_roof_weight" in outputs:
             panels.append(("object_roof_weight", outputs["object_roof_weight"][idx]))
         rows.append(panels)
@@ -1532,8 +1432,8 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     p.add_argument(
         "--invalid-neutral-weight",
         type=float,
-        default=0.20,
-        help="Weight for neutralizing masked/invalid normal regions toward up-vector (normal task only).",
+        default=0.0,
+        help="Legacy normal-loss term weight. The simplified minimap-only lane leaves this at 0.",
     )
     p.add_argument(
         "--height-channel",
@@ -1550,8 +1450,8 @@ def _parse_args(task_name: str) -> argparse.Namespace:
     p.add_argument(
         "--normal-variant",
         choices=list(_NORMAL_VARIANTS),
-        default="v17_1_normals",
-        help="Explicit normal-trainer variant contract. Use v17_1_normals for minimap->normals with height supervisor-only.",
+        default="v16_1_1_base",
+        help="Explicit normal-trainer variant contract. The active simple lane uses v16_1_1_base for minimap->normals.",
     )
     p.add_argument(
         "--normal-weight",
@@ -1920,8 +1820,9 @@ def run_task(task_name: str) -> None:
         "resolved_refiner_enabled": bool(resolved_refiner_enabled),
         "resolved_input_contract": (
             "minimap_rgb"
-            if task_name == "normal" and normal_variant == "v17_1_normals"
-            else ("minimap_rgb+object_roof_mask" if task_name == "normal" and normal_variant == "v18_object_roof_aux" else "variant_defined")
+            if task_name == "normal" and not bool(resolved_height_channel) and not bool(resolved_object_roof_channel)
+            else ("minimap_rgb+height_norm" if task_name == "normal" and bool(resolved_height_channel)
+                  else ("minimap_rgb+object_roof_mask" if task_name == "normal" and bool(resolved_object_roof_channel) else "variant_defined"))
         ),
         "resolved_output_contract": ("normals_xyz" if task_name == "normal" else "task_defined"),
         "height_supervision_only": bool(task_name == "normal" and normal_variant == "v17_1_normals"),
@@ -1955,14 +1856,19 @@ def run_task(task_name: str) -> None:
             f"height_supervision_weight={float(getattr(args, 'height_supervision_weight', 0.0)):.3f}",
             flush=True,
         )
-        if normal_variant == "v17_1_normals":
+        if not bool(resolved_height_channel) and not bool(resolved_object_roof_channel):
             print(
-                "Normal contract: input=minimap_rgb -> output=normals_xyz | height_supervision_only=true",
+                "Normal contract: input=minimap_rgb -> output=normals_xyz | simplified_loss=true",
                 flush=True,
             )
-        if normal_variant == "v18_object_roof_aux":
+        if bool(resolved_height_channel):
             print(
-                "Normal contract: input=minimap_rgb+object_roof_mask -> output=normals_xyz | terrain_targets_authoritative=true",
+                "Normal contract: input=minimap_rgb+height_norm -> output=normals_xyz",
+                flush=True,
+            )
+        if bool(resolved_object_roof_channel):
+            print(
+                "Normal contract: input=minimap_rgb+object_roof_mask -> output=normals_xyz",
                 flush=True,
             )
     print(f"Device: {device}", flush=True)

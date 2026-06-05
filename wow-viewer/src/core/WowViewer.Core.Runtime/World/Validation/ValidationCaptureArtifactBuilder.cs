@@ -20,15 +20,40 @@ public static class ValidationCaptureArtifactBuilder
     {
         ArgumentNullException.ThrowIfNull(inputs);
 
-        ValidationObjectMaskStrategy strategy = ResolveMaskStrategy(inputs.BuildLabel, policy);
-        byte[] objectVisibilityMask = strategy == ValidationObjectMaskStrategy.DirectObjectsOnlySilhouette
-            ? (inputs.ObjectsOnlyRgbaPixels is not null
-                ? BuildDirectObjectsOnlyMask(inputs.Width, inputs.Height, inputs.ObjectsOnlyRgbaPixels, policy.ObjectsOnlyIntensityThreshold)
-                : BuildDiffMask(inputs.Width, inputs.Height, inputs.PrimaryRgbaPixels, inputs.NoObjectsRgbaPixels, policy.DiffMaskThreshold))
-            : BuildDiffMask(inputs.Width, inputs.Height, inputs.PrimaryRgbaPixels, inputs.NoObjectsRgbaPixels, policy.DiffMaskThreshold);
+        bool havePrimaryAndNoObjects = inputs.PrimaryRgbaPixels is not null && inputs.NoObjectsRgbaPixels is not null;
+        bool haveObjectsOnly = inputs.ObjectsOnlyRgbaPixels is not null;
 
-        byte[] noObjectMinimap = new byte[inputs.NoObjectsRgbaPixels.Length];
-        Buffer.BlockCopy(inputs.NoObjectsRgbaPixels, 0, noObjectMinimap, 0, noObjectMinimap.Length);
+        byte[] objectVisibilityMask;
+        ValidationObjectMaskStrategy preferredStrategy = ResolveMaskStrategy(inputs.BuildLabel, policy);
+        ValidationObjectMaskStrategy strategy;
+        if (preferredStrategy == ValidationObjectMaskStrategy.PrimaryVsNoObjectsDiff && havePrimaryAndNoObjects)
+        {
+            strategy = ValidationObjectMaskStrategy.PrimaryVsNoObjectsDiff;
+            objectVisibilityMask = BuildDiffMask(inputs.Width, inputs.Height, inputs.PrimaryRgbaPixels!, inputs.NoObjectsRgbaPixels!, policy.DiffMaskThreshold);
+        }
+        else if (preferredStrategy == ValidationObjectMaskStrategy.DirectObjectsOnlySilhouette && haveObjectsOnly)
+        {
+            strategy = ValidationObjectMaskStrategy.DirectObjectsOnlySilhouette;
+            objectVisibilityMask = BuildDirectObjectsOnlyMask(inputs.Width, inputs.Height, inputs.ObjectsOnlyRgbaPixels!, policy.ObjectsOnlyIntensityThreshold);
+        }
+        else if (havePrimaryAndNoObjects)
+        {
+            strategy = ValidationObjectMaskStrategy.PrimaryVsNoObjectsDiff;
+            objectVisibilityMask = BuildDiffMask(inputs.Width, inputs.Height, inputs.PrimaryRgbaPixels!, inputs.NoObjectsRgbaPixels!, policy.DiffMaskThreshold);
+        }
+        else if (haveObjectsOnly)
+        {
+            strategy = ValidationObjectMaskStrategy.DirectObjectsOnlySilhouette;
+            objectVisibilityMask = BuildDirectObjectsOnlyMask(inputs.Width, inputs.Height, inputs.ObjectsOnlyRgbaPixels!, policy.ObjectsOnlyIntensityThreshold);
+        }
+        else
+        {
+            throw new InvalidOperationException($"Cannot build object visibility mask for '{inputs.TileName}': need at least ObjectsOnlyRgbaPixels or (PrimaryRgbaPixels + NoObjectsRgbaPixels).");
+        }
+
+        byte[] noObjectMinimap = havePrimaryAndNoObjects
+            ? BuildNoObjectMinimap(inputs.Width, inputs.Height, inputs.NoObjectsRgbaPixels!)
+            : Array.Empty<byte>();
 
         return new ValidationCaptureArtifactOutputs(
             inputs.TileName,
@@ -40,6 +65,13 @@ public static class ValidationCaptureArtifactBuilder
             ComputeHash(inputs.Width, inputs.Height, objectVisibilityMask),
             noObjectMinimap,
             ComputeHash(inputs.Width, inputs.Height, noObjectMinimap));
+    }
+
+    private static byte[] BuildNoObjectMinimap(int width, int height, byte[] noObjectsRgbaPixels)
+    {
+        byte[] noObjectMinimap = new byte[noObjectsRgbaPixels.Length];
+        Buffer.BlockCopy(noObjectsRgbaPixels, 0, noObjectMinimap, 0, noObjectMinimap.Length);
+        return noObjectMinimap;
     }
 
     private static bool IsEarlyBuild(string? buildLabel)

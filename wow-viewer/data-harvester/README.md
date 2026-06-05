@@ -198,7 +198,7 @@ Latest bounded proof status:
   scene state on both staged anchors:
   - `0_5_3_3368 / Azeroth_30_48`
   - `3_3_5_12340 / Azeroth_30_48`
-- a non-dry-run `--gpu-viewer-style` capture on
+- a non-dry-run `--renderer` capture on
   `3_3_5_12340 / Azeroth_30_48` completed `4/4` variants and emitted output
   files, but the captured images were still flat/uniform and the derived
   `object_visibility_mask` was all black

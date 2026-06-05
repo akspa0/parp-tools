@@ -86,9 +86,11 @@ V18_STREAMED_ARRAY_NAMES = {
     "mcly_layer_mask",
 }
 
-# Initial promoted V18 arrays: these are the currently expected post-build
-# signals that should become first-class V18 outputs instead of mandatory patch
-# steps for finalized stores.
+# Initial promoted V18 arrays. `object_visibility_mask` is the canonical
+# renderer-truth object-loss signal for the focused spec 047 Plan A lane.
+# `no_object_minimap` remains supported as an optional legacy QA sidecar when a
+# capture variant emits it, but it is not required for a valid focused-corpus
+# store.
 V18_PROMOTED_ARRAY_NAMES = {
     "object_visibility_mask",
     "no_object_minimap",
@@ -1424,17 +1426,14 @@ def _validate_build_signals(build: str, output_path: Path, strict: bool = True) 
     # V18 promoted renderer-truth signal validation
     object_visibility_count = int(coverage.get("has_object_visibility_mask", 0))
     no_object_count = int(coverage.get("has_no_object_minimap", 0))
-    if object_visibility_count > 0:
-        if object_visibility_count != no_object_count:
-            failures.append(
-                f"object_visibility_mask ({object_visibility_count}) and "
-                f"no_object_minimap ({no_object_count}) tile counts must match when either is >0"
-            )
     if object_visibility_count > 0 or no_object_count > 0:
         warnings_list.append(
             f"Renderer-truth signals present: object_visibility_mask={object_visibility_count}/{tile_count}, "
             f"no_object_minimap={no_object_count}/{tile_count}. "
-            "These are optional quality-of-training signals; coverage is expected to be partial until all builds are captured."
+            "object_visibility_mask is the canonical focused-corpus signal; "
+            "no_object_minimap is an optional legacy QA sidecar when the chosen "
+            "capture variant emits it. Coverage is expected to be partial until "
+            "all focused-build tiles are captured."
         )
 
     object_roof_mask_count = int(coverage.get("has_object_roof_mask", 0))
@@ -1725,13 +1724,14 @@ def _apply_renderer_truth_patch(
             compressors=codec,
             overwrite=True,
         )
-        root.create_array(
-            "no_object_minimap",
-            data=no_object_minimaps,
-            chunks=(1, 256, 256, 3),
-            compressors=codec,
-            overwrite=True,
-        )
+        if int(has_no_object.sum()) > 0:
+            root.create_array(
+                "no_object_minimap",
+                data=no_object_minimaps,
+                chunks=(1, 256, 256, 3),
+                compressors=codec,
+                overwrite=True,
+            )
     finally:
         store.close()
 
@@ -1759,6 +1759,82 @@ def _apply_renderer_truth_patch(
         "matched_tiles": sorted(capture_to_tile_id.keys()),
     }
     report_path = store_path / "renderer_truth_patch_report.json"
+    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return report_path
+
+
+def _clear_renderer_truth_signals(
+    *,
+    build: str,
+    store_path: Path,
+    no_backup: bool,
+    reason: str,
+) -> Path:
+    if not store_path.exists():
+        raise RuntimeError(f"No store at {store_path}")
+
+    print(f"Clearing renderer-truth signals for {build}")
+    print(f"Store: {store_path}")
+
+    index_rows = _read_index_rows(store_path)
+    n_tiles = len(index_rows)
+    if n_tiles <= 0:
+        raise RuntimeError(f"Store index is empty for {build}")
+
+    idx_path = store_path / "index.parquet"
+    if not no_backup:
+        backup_path = store_path / "index.parquet.bak.renderer_truth_clear"
+        if not backup_path.exists():
+            shutil.copy2(idx_path, backup_path)
+            print(f"Backed up {idx_path} -> {backup_path}")
+
+    store = zarr.storage.LocalStore(str(store_path), read_only=False)
+    root = zarr.open_group(store=store, mode="a")
+    try:
+        if "object_visibility_mask" in root:
+            array = root["object_visibility_mask"]
+            shape = array.shape
+            root.create_array(
+                "object_visibility_mask",
+                data=np.zeros(shape, dtype=np.float32),
+                chunks=array.chunks,
+                compressors=array.compressors,
+                overwrite=True,
+            )
+        if "no_object_minimap" in root:
+            array = root["no_object_minimap"]
+            shape = array.shape
+            root.create_array(
+                "no_object_minimap",
+                data=np.zeros(shape, dtype=np.uint8),
+                chunks=array.chunks,
+                compressors=array.compressors,
+                overwrite=True,
+            )
+    finally:
+        store.close()
+
+    for row in index_rows:
+        row["has_object_visibility_mask"] = False
+        row["has_no_object_minimap"] = False
+
+    _write_index(index_rows, store_path)
+
+    patch_report_path = store_path / "renderer_truth_patch_report.json"
+    if patch_report_path.exists():
+        patch_report_path.unlink()
+
+    report = {
+        "build": build,
+        "cleared_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "total_tiles": n_tiles,
+        "reason": reason,
+        "cleared_signals": [
+            "object_visibility_mask",
+            "no_object_minimap",
+        ],
+    }
+    report_path = store_path / "renderer_truth_reset_report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report_path
 
@@ -3732,7 +3808,7 @@ def cmd_generate_viewer_stubs(args: argparse.Namespace) -> None:
             tile_y = int(table.column("tile_y")[i].as_py())
             if not map_name:
                 continue
-            tile_name = f"{map_name}_{tile_y}_{tile_x}"
+            tile_name = f"{map_name}_{tile_x}_{tile_y}"
             json_path = dataset_dir / f"{tile_name}.json"
             stub = {
                 "image": f"images/{tile_name}.png",
@@ -3842,6 +3918,23 @@ def cmd_patch_renderer_truth(args: argparse.Namespace) -> None:
         print(f"  OK: {build} patched -> {report_path}")
 
 
+def cmd_clear_renderer_truth(args: argparse.Namespace) -> None:
+    """Clear renderer-truth signals from V18 Zarr stores when the source is not trusted."""
+    builds = args.builds or [args.build]
+    if not builds[0]:
+        print("ERROR: specify --build or --builds")
+        sys.exit(1)
+
+    for build in builds:
+        report_path = _clear_renderer_truth_signals(
+            build=build,
+            store_path=_DATASET_ROOT / f"{build}.zarr",
+            no_backup=bool(args.no_backup),
+            reason=str(args.reason).strip(),
+        )
+        print(f"  OK: {build} cleared -> {report_path}")
+
+
 def cmd_capture_renderer_truth(args: argparse.Namespace) -> None:
     """Run wow-viewer validation capture-batch from generated ledgers."""
     builds = args.builds or [args.build]
@@ -3859,6 +3952,7 @@ def cmd_capture_renderer_truth(args: argparse.Namespace) -> None:
         for enabled, flag in [
             (bool(args.dry_run), "--dry-run"),
             (bool(args.real_scene_dry_run), "--real-scene-dry-run"),
+            (bool(args.renderer), "--renderer"),
             (bool(args.gpu_viewer_style), "--gpu-viewer-style"),
             (bool(args.native_renderer), "--native-renderer"),
             (bool(args.stub_scene), "--stub-scene"),
@@ -3868,7 +3962,7 @@ def cmd_capture_renderer_truth(args: argparse.Namespace) -> None:
     if len(requested_modes) > 1:
         raise SystemExit(
             "capture-renderer-truth accepts exactly one run mode: "
-            "--dry-run OR --real-scene-dry-run OR --gpu-viewer-style OR --native-renderer OR --stub-scene"
+            "--dry-run OR --real-scene-dry-run OR --renderer OR --native-renderer OR --stub-scene"
         )
     mode_flags = requested_modes or ["--dry-run"]
 
@@ -3926,6 +4020,7 @@ def cmd_capture_renderer_truth(args: argparse.Namespace) -> None:
                 tmp_path = Path(tmp.name)
 
             try:
+                variants_flag = args.variants or "objects-only"
                 cmd = [
                     str(validation_tool),
                     "capture-batch",
@@ -3937,6 +4032,7 @@ def cmd_capture_renderer_truth(args: argparse.Namespace) -> None:
                     "--ledger-path", str(tmp_path),
                     "--build", build.replace("_", "."),
                     "--resolution", str(args.resolution),
+                    "--variants", variants_flag,
                     *mode_flags,
                 ]
                 print(f"    {build}/{map_name}: running capture-batch ({len(map_rows)} pending tiles)")
@@ -4027,14 +4123,20 @@ def main() -> None:
     patch_rt_p.add_argument("--no-backup", action="store_true", help="Skip backing up index.parquet before patching")
     patch_rt_p.add_argument("--curation-manifest", type=str, default=None, help="Optional curation manifest (dir/file). When provided, patch only keep=true tiles in this manifest.")
 
+    clear_rt_p = sub.add_parser("clear-renderer-truth", parents=[common], help="Clear renderer-truth signals from V18 Zarr stores when the capture source is not trusted")
+    clear_rt_p.add_argument("--no-backup", action="store_true", help="Skip backing up index.parquet before clearing")
+    clear_rt_p.add_argument("--reason", type=str, default="untrusted renderer-truth source", help="Reason recorded in renderer_truth_reset_report.json")
+
     capture_rt_p = sub.add_parser("capture-renderer-truth", parents=[common], help="Run wow-viewer validation capture-batch using generated manifest_capture_ledger.json files")
     capture_rt_p.add_argument("--capture-root", type=str, default=None, help="Root directory containing per-build capture output + ledgers (default: output/tmp/mdxviewer_validation_smoke)")
     capture_rt_p.add_argument("--resolution", type=int, default=512, help="Capture resolution forwarded to validation-capture")
     capture_rt_p.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture dry-run mode")
     capture_rt_p.add_argument("--real-scene-dry-run", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture real-scene dry-run mode")
-    capture_rt_p.add_argument("--gpu-viewer-style", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture gpu-viewer-style rendering mode")
-    capture_rt_p.add_argument("--native-renderer", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture native-renderer mode")
+    capture_rt_p.add_argument("--renderer", action=argparse.BooleanOptionalAction, default=False, help="Use the existing WoWViewer renderer path")
+    capture_rt_p.add_argument("--gpu-viewer-style", action=argparse.BooleanOptionalAction, default=False, help="Back-compat alias for --renderer")
+    capture_rt_p.add_argument("--native-renderer", action=argparse.BooleanOptionalAction, default=False, help="Use the stripped native terrain-render path")
     capture_rt_p.add_argument("--stub-scene", action=argparse.BooleanOptionalAction, default=False, help="Use validation-capture stub-scene mode")
+    capture_rt_p.add_argument("--variants", type=str, default="primary,no-objects,objects-only", help="Capture variants to render (default: primary,no-objects,objects-only). Pass 'all' for the full QA set, or a comma-separated list like 'primary,no-objects,objects-only'.")
 
     args = parser.parse_args()
 
@@ -4056,6 +4158,8 @@ def main() -> None:
         cmd_generate_viewer_stubs(args)
     elif args.command == "patch-renderer-truth":
         cmd_patch_renderer_truth(args)
+    elif args.command == "clear-renderer-truth":
+        cmd_clear_renderer_truth(args)
     elif args.command == "capture-renderer-truth":
         cmd_capture_renderer_truth(args)
 

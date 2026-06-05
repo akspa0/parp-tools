@@ -48,18 +48,48 @@
 - prefer startup autotune and larger batch ladders when VRAM headroom allows.
 - validation artifacts are only authoritative when regenerated after behavior changes.
 
-## V18 Distill Corpus and Open-Source Release Loop (spec 047)
+## V18 Focused Two-Build Minimap-to-Terrain Loop (spec 047)
 
-- spec `047-v18-distill-corpus-open-source-loop` is the active owner for the focused 0.5.3 + 3.3.5 corpus and the open-source release loop.
+- spec `047-v18-distill-corpus-open-source-loop` is still the active owner for the focused 0.5.3 + 3.3.5 V18 lane, but the active contract was reset again on 2026-06-04.
 - architecture doc: `wow-viewer/docs/architecture/v18-distill-corpus-open-source-loop-2026-06-04.md`.
-- key decisions:
-  - trim the harvest to `0_5_3_3368` and `3_3_5_12340` only — the other four builds stay out of scope.
-  - promote renderer-truth object-mask coverage to a first-class V18 signal (reuses `WowViewer.Tool.ValidationCapture capture-batch`).
-  - keep the V16.1 / V18 model line as the teacher; no architecture changes.
-  - procedural synthesizer → main-model distillation → small open-source student under MIT/Apache 2.0.
-- the main model and the focused real-data corpus stay in-repo under the Bring Your Own Data policy; only the student and the labeled synthesized corpus are distributable.
-- superseded drafts now reroute to spec 047:
-  - `015-v16-1-2-height-derived-normal-refiner` (refiner failed)
-  - `017-v16-1-4-combined-normal-height-model` (combined head not used)
-  - `022-v17-unified-normal-height-refiner` (V17 hybrid folded)
-  - `023-v17-1-global-minimap-signal-reconstruction` (V17.1 contract is V16.1 + V18)
+- active proof owner:
+  - use `minimap_rgb` only as model input
+  - train `height_257` with plain L1
+  - train `normal_xyz` with masked cosine against `normal_mask`
+- explicitly out of scope for the active iteration:
+  - renderer-truth capture as training truth
+  - object-mask / roof-mask / liquid-derived loss weighting
+  - synthesized-input generation
+  - distillation
+  - open-source student release
+- focused corpus boundary remains:
+  - `0_5_3_3368`
+  - `3_3_5_12340`
+  - other four build stores stay in place but are out of scope
+- landed in the 2026-06-04 simplification pass:
+  - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+    - height loss is plain `F.l1_loss(pred, target)`
+    - normal loss is masked cosine only
+    - default normal route is `v16_1_1_base`
+    - default normal contract logs as `minimap_rgb -> normals_xyz`
+  - `wow-viewer/data-harvester/scripts/train_v18.py`
+    - now defaults `--dataset-dir` to `wow-viewer/output/datasets/v18`
+    - active V18 entrypoint no longer quietly falls back to the V16 dataset root
+  - focused renderer-truth state stays explicitly non-authoritative:
+    - both focused stores remain cleared to `has_object_visibility_mask = 0`
+    - both focused stores remain cleared to `has_no_object_minimap = 0`
+    - carry-over PNG trees are not active signoff evidence
+- bounded proof now exists:
+  - height smoke run: `wow-viewer/models/v18/height/runs/v18_height_focus_minimap_smoke_20260604_r2/`
+    - 1 epoch, batch size 4, 32 train tiles, 8 val tiles
+    - `val_loss = 0.6626`
+  - normal smoke run: `wow-viewer/models/v18/normal/runs/v18_normal_focus_minimap_smoke_20260604_r2/`
+    - 1 epoch, batch size 4, 32 train tiles, 8 val tiles
+    - `val_loss = 0.2251`
+  - one leftover seam was exposed and fixed during that proof:
+    - `_preview_normal(...)` still expected old weighted-loss tensors and crashed after a successful epoch
+    - it now falls back cleanly to simplified-lane preview tensors (`base_mask`, `train_mask`, `invalid_mask`)
+- the next real proof is:
+  - validate the focused stores for minimap/height/normal readiness
+  - scale the height run beyond smoke budget
+  - scale the normal run beyond smoke budget

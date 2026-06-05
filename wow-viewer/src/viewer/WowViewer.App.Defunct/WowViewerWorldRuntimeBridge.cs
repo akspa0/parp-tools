@@ -1074,9 +1074,10 @@ internal static class WowViewerWorldRuntimeBridge
 
     private static string BuildStandardAdtVirtualPath(string mapDirectory, int tileX, int tileY, string suffix = ".adt")
     {
-        // Match MdxViewer's row-major convention: tileX is row (y), tileY is column (x),
-        // while on-disk ADT families are named Map_x_y.
-        return $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileY}_{tileX}{suffix}";
+        // Standard ADT file families on disk are named Map_x_y.adt (X_Y), so the
+        // virtual path here must use (tileX, tileY) directly. The legacy MdxViewer's
+        // "row-major" swap was a viewer-side quirk; on-disk ADT layout is X_Y.
+        return $@"World\Maps\{mapDirectory}\{mapDirectory}_{tileX}_{tileY}{suffix}";
     }
 
     private static List<WorldObjectInstance> BuildWmoInstances(

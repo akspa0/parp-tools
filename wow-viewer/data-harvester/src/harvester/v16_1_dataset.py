@@ -219,15 +219,21 @@ class V161Dataset(Dataset):
         mcnk_flags_16 = root["mcnk_flags_16"][tile_id].astype(np.int32) if "mcnk_flags_16" in root else np.zeros((16, 16), dtype=np.int32)
         liquid_type_16, liquid_type_valid_16 = _flags_to_liquid_type(mcnk_flags_16)
 
-        # Prefer precise mask (rasterized WMO mesh) over filtered (coarse AABB)
+        # The active V18 lane uses only harvested in-store object signals for
+        # terrain-loss gating. Renderer-truth capture is explicitly out of the
+        # training contract until that pipeline is trustworthy.
         if "object_precise_mask" in root:
             object_filtered = root["object_precise_mask"][tile_id].astype(np.float32)
+            weight_257 = 1.0 - np.clip(object_filtered, 0.0, 1.0)
+            weight_256 = _crop_257_to_256(weight_257)
         elif "object_filtered_mask" in root:
             object_filtered = root["object_filtered_mask"][tile_id].astype(np.float32)
+            weight_257 = 1.0 - np.clip(object_filtered, 0.0, 1.0)
+            weight_256 = _crop_257_to_256(weight_257)
         else:
             object_filtered = root["object_mask"][tile_id].astype(np.float32)
-        weight_257 = 1.0 - np.clip(object_filtered, 0.0, 1.0)
-        weight_256 = _crop_257_to_256(weight_257)
+            weight_257 = 1.0 - np.clip(object_filtered, 0.0, 1.0)
+            weight_256 = _crop_257_to_256(weight_257)
         weight_16 = _downsample_256_to_16(weight_256)
         mddf_mask = root["mddf_mask"][tile_id].astype(np.float32) if "mddf_mask" in root else np.zeros((257, 257), dtype=np.float32)
         modf_mask = root["modf_mask"][tile_id].astype(np.float32) if "modf_mask" in root else np.zeros((257, 257), dtype=np.float32)

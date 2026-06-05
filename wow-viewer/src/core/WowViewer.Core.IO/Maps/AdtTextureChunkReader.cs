@@ -93,7 +93,9 @@ public static class AdtTextureChunkReader
             if (!ChunkHeaderReader.TryRead(payload.AsSpan(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
                 break;
 
-            int declaredSize = unchecked((int)header.Size);
+            if (!TryGetChunkDataSize(header, out int declaredSize))
+                break;
+
             int consumedSize = header.Id == AdtChunkIds.Mcnr
                 ? Math.Max(declaredSize, McnrConsumedSize)
                 : declaredSize;
@@ -111,7 +113,9 @@ public static class AdtTextureChunkReader
             else if (header.Id == AdtChunkIds.Mcal)
             {
                 int mcalPayloadSize = declaredSize;
-                if (headerMcalPayloadSize.HasValue && headerMcalPayloadSize.Value > mcalPayloadSize && dataOffset + headerMcalPayloadSize.Value <= payload.Length)
+                if (headerMcalPayloadSize.HasValue
+                    && headerMcalPayloadSize.Value > mcalPayloadSize
+                    && (long)dataOffset + headerMcalPayloadSize.Value <= payload.Length)
                 {
                     mcalPayloadSize = headerMcalPayloadSize.Value;
                     nextOffset = (long)position + ChunkHeader.SizeInBytes + mcalPayloadSize;
@@ -181,7 +185,9 @@ public static class AdtTextureChunkReader
         if (!IsKnownTextureSubchunk(firstSubchunk.Id))
             return false;
 
-        int declaredSize = checked((int)firstSubchunk.Size);
+        if (!TryGetChunkDataSize(firstSubchunk, out int declaredSize))
+            return false;
+
         int consumedSize = firstSubchunk.Id == AdtChunkIds.Mcnr
             ? Math.Max(declaredSize, McnrConsumedSize)
             : declaredSize;
@@ -201,6 +207,18 @@ public static class AdtTextureChunkReader
         }
 
         return true;
+    }
+
+    private static bool TryGetChunkDataSize(ChunkHeader header, out int declaredSize)
+    {
+        if (header.Size > int.MaxValue)
+        {
+            declaredSize = 0;
+            return false;
+        }
+
+        declaredSize = (int)header.Size;
+        return declaredSize >= 0;
     }
 
     private static bool IsKnownTextureSubchunk(FourCC id)

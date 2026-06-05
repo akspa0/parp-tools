@@ -62,7 +62,7 @@ Renderer-truth upgrade truth is narrower than the base V16 corpus truth:
 The replacement `wow-viewer` validation-capture lane now has the same bounded
 proof anchors, and it now emits the bounded derived artifact images too:
 
-- command: `WowViewer.Tool.ValidationCapture capture --gpu-viewer-style`
+- command: `WowViewer.Tool.ValidationCapture capture --renderer`
 - proof anchors:
   - `0_5_3_3368 / Azeroth_30_48`
   - `3_3_5_12340 / Azeroth_30_48`
