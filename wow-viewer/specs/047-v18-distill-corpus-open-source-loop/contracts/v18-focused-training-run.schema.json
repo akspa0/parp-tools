@@ -53,6 +53,21 @@
     "resolved_output_contract": {
       "type": "string"
     },
+    "epoch_sampling_mode": {
+      "type": "string",
+      "enum": [
+        "fixed_epoch_tiles",
+        "bucket_rotation_fraction"
+      ]
+    },
+    "epoch_sampling_fraction": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "exclusiveMinimum": 0,
+      "maximum": 1
+    },
     "best_val": {
       "type": [
         "number",

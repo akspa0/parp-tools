@@ -38,10 +38,11 @@
 
 ## M2 / Runtime Continuity
 
-- standalone classic `MDLX` / chunked M2 support is tracked under spec `043`.
+- standalone classic `MDLX` / chunked M2 support is tracked under spec `043` (now strictly the 0.5.3 / 0.7.0 / 0.8.0 chunked-MDX lane — 1.12.1 moved to spec `048`).
 - bad runtime animation selections now fail soft instead of crashing the viewer.
 - pre-release `3.0.1.8303` embedded-profile M2 no-draw was reduced to the layer-0 missing-texture fallback seam and fixed in the viewer path.
-- **2026-06-05 Ghidra trace against WoW 1.12.1 (Build 5875) Win32**: 1.12.1 `.mdx` files are NOT chunked `MDLX` — they use the `MD20` magic (flat pointer-table format) with the legacy `.mdx` extension. The native cache loader normalizes `.mdl`/`.mdx`/`.m2` to `.m2` and dispatches to the same `MD20` parser regardless. The 1.12.1 `MD20` header layout, view table offset (`0x3c/0x40` instead of `0x44/0x48`), and per-record strides (sequence `0x6c`, light `0xc`, camera `0x2c`, ribbon `0x7c`, particle `0xdc`, light `0xc`) are all different from 3.3.5. The current `M2ModelReaderDispatcher` routes 1.12.1 `.mdx` to the 3.3.5 `M2ModelReader`, which silently misreads the strides. The chunked `M2Chunked` reader is therefore currently a dead branch for 1.12.1 (correctly) but the M2 path is the actual bug. Research doc: `wow-viewer/docs/architecture/m2-mdx-1121-native-trace-2026-06-05.md`. This finding should drive a follow-up spec to add an era-aware MD20 reader or a 1.12.1-specific stride table.
+- **2026-06-05 Ghidra trace against WoW 1.12.1 (Build 5875) Win32**: 1.12.1 `.mdx` files are NOT chunked `MDLX` — they use the `MD20` magic (flat pointer-table format) with the legacy `.mdx` extension. The native cache loader normalizes `.mdl`/`.mdx`/`.m2` to `.m2` and dispatches to the same `MD20` parser regardless. The 1.12.1 `MD20` header layout, view table offset (`0x3c/0x40` instead of `0x44/0x48`), and per-record strides (sequence `0x6c`, light `0xc`, camera `0x2c`, ribbon `0x7c`, particle `0xdc`, light `0xc`) are all different from 3.3.5. The current `M2ModelReaderDispatcher` routes 1.12.1 `.mdx` to the 3.3.5 `M2ModelReader`, which silently misreads the strides. The chunked `M2Chunked` reader is therefore currently a dead branch for 1.12.1 (correctly) but the M2 path is the actual bug. Research doc: `wow-viewer/docs/architecture/m2-mdx-1121-native-trace-2026-06-05.md`.
+- **2026-06-05 spec 048 implemented**: era-aware MD20 reader ships in `wow-viewer/src/core/WowViewer.Core.IO/M2Era1121/`. The dispatcher (`M2ModelReaderDispatcher.DetectEra`) checks the version field (`0x100`/`0x101` = 1.12.1, `0x108` = 3.3.5, `MDLX` = chunked, `0x104` = 2.x TBC → rejected with "see spec 049"). 7 unit tests pass on the real 1.12.1 `Bear.mdx` fixture from the staged 1.12.1 client. Pre-existing 3.3.5 tests unchanged. Spec 043 is revised to defer 1.12.1 to spec 048. The trace doc and the earlier 2026-03-31 research doc both have cross-references to spec 048. 2.x TBC remains a follow-up spec (049).
 
 ## Data Harvester / Training Continuity
 
@@ -161,6 +162,23 @@
       - oversized pool/epoch requests auto-cap to the largest feasible balanced subset
       - focused epoch logging/config now records the effective balanced epoch size
     - this is the active owner fix for the discovered `700` vs `2636` train skew in the focused `v2` manifest/run
+  - landed in the 2026-06-06 rotating-epoch pass:
+    - full-pool replay every epoch is no longer the only focused operator lane
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - now accepts `--train-bucket-rotation-fraction`
+      - when enabled, the train sampler partitions each available build/bucket stratum into deterministic epoch chunks
+      - each epoch trains on a restrained fraction of every available stratum instead of replaying the whole train pool
+      - very small strata can complete their coverage cycle sooner than larger strata; this is intentional
+      - `--train-epoch-tiles` is now rejected when combined with the rotation fraction so the owner surface stays explicit
+      - startup batch autotune no longer rescales epoch size when rotation-fraction mode is active
+      - run config and epoch evidence now record rotation fraction / cycle length
+    - `wow-viewer/data-harvester/scripts/train_v18_focus.py`
+      - now defaults to `--train-bucket-rotation-fraction 0.10` when the user does not explicitly request fixed-count epochs
+      - now defaults focused bucket weighting to `uniform` when that rotation mode is active
+    - proof:
+      - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+      - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q` → `8 passed`
+      - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help` shows the new flag on the focused entrypoint
   - focused docs now steer away from the earlier smoke budget:
     - quickstart/README examples now use larger tile pools and `40` epochs instead of `20`
   - targeted Python proof now exists:
@@ -172,6 +190,6 @@
       - proves strict build-balance equalizes/caps focused subsets as designed
 - the next real proof is:
   - rerun focused curation so the active `kept_tiles.parquet` drops low-trainable liquid-hidden rows
-  - scale the height run beyond smoke budget through `train_v18_focus.py height`
-  - scale the normal run beyond smoke budget through `train_v18_focus.py normal`
-  - confirm live losses fall below the previous liquid-poisoned plateaus after the new manifest + mask path
+  - launch real focused height and normal runs through the new `10%` rotating bucket-coverage default
+  - inspect `train_epoch_bucket_usage.jsonl` and `config.json` for the derived epoch size / cycle length
+  - confirm live losses improve without returning to full-pool-per-epoch wall time

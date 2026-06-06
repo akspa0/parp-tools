@@ -170,3 +170,58 @@ def test_strict_build_balance_caps_oversized_epoch_requests() -> None:
     assert len(sampler) == 5
     assert len(chosen) == 5
     assert counts == {"0_5_3_3368": 2, "3_3_5_12340": 3}
+
+
+def test_bucket_rotation_fraction_covers_all_positions_once_per_cycle() -> None:
+    build_labels = ["0_5_3_3368"] * 100 + ["3_3_5_12340"] * 100
+    bucket_labels = (
+        ["easy"] * 50
+        + ["hard"] * 50
+        + ["easy"] * 50
+        + ["hard"] * 50
+    )
+    seen: set[int] = set()
+    per_epoch_sizes: list[int] = []
+
+    for epoch in range(1, 11):
+        chosen = _train_common._sample_rotating_bucket_positions(
+            len(build_labels),
+            epoch=epoch,
+            seed=11,
+            build_labels=build_labels,
+            build_balanced=True,
+            bucket_labels=bucket_labels,
+            bucket_rotation_fraction=0.10,
+        )
+        per_epoch_sizes.append(len(chosen))
+        assert not (set(chosen) & seen)
+        seen.update(chosen)
+
+    assert seen == set(range(len(build_labels)))
+    assert sum(per_epoch_sizes) == len(build_labels)
+
+
+def test_bucket_rotation_fraction_keeps_epoch_build_counts_near_equal() -> None:
+    build_labels = ["0_5_3_3368"] * 100 + ["3_3_5_12340"] * 100
+    bucket_labels = (
+        ["easy"] * 50
+        + ["hard"] * 50
+        + ["easy"] * 50
+        + ["hard"] * 50
+    )
+    sampler = _train_common._DeterministicEpochSampler(
+        len(build_labels),
+        seed=19,
+        build_labels=build_labels,
+        build_balanced=True,
+        strict_build_balance=True,
+        bucket_labels=bucket_labels,
+        bucket_rotation_fraction=0.10,
+    )
+
+    sampler.set_epoch(1)
+    chosen = list(iter(sampler))
+    counts = _train_common._count_string_values([build_labels[idx] for idx in chosen])
+
+    assert len(sampler) == 20
+    assert counts == {"0_5_3_3368": 10, "3_3_5_12340": 10}

@@ -42,7 +42,7 @@ uv run python scripts/train_v18_focus.py height `
   --device cuda `
   --epochs 40 `
   --train-max-tiles 4096 `
-  --train-epoch-tiles 2048 `
+  --train-bucket-rotation-fraction 0.10 `
   --val-max-tiles 256 `
   --val-interval 1 `
   --run-name v18_height_focus_basic
@@ -57,7 +57,7 @@ uv run python scripts/train_v18_focus.py normal `
   --device cuda `
   --epochs 40 `
   --train-max-tiles 4096 `
-  --train-epoch-tiles 2048 `
+  --train-bucket-rotation-fraction 0.10 `
   --val-max-tiles 256 `
   --val-interval 1 `
   --run-name v18_normal_focus_basic
@@ -83,8 +83,12 @@ uv run python -m py_compile `
   - builds: `0_5_3_3368`, `3_3_5_12340`
   - latest focused `kept_tiles.parquet` if `--curation-manifest` is omitted
   - startup batch autotune against `--target-vram-gb 8`
+  - restrained rotating bucket coverage via `--train-bucket-rotation-fraction 0.10`
   - strict near-equal per-build sampling by default; oversized pool/epoch requests
     auto-cap to the largest feasible balanced subset
+- when bucket rotation is active, the per-epoch subset size is derived from the
+  curated bucket counts; omit `--train-epoch-tiles` unless you intentionally
+  want the older fixed-count epoch sampler
 - the focused curation manifest now rejects tiles with too little surviving
   trainable terrain, so liquid-hidden wipeouts stop entering the active pool
 - the focused height and normal losses now honor terrain-valid masks, so

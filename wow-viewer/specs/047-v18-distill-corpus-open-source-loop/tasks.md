@@ -57,6 +57,7 @@ through a V18-specific wrapper with no manual V16 dataset path wiring.
 - [x] T025 [US3] Default focused training toward the observed 8 GB lane via startup batch autotune instead of the earlier smoke-budget operator defaults.
 - [x] T026 [US3] Default focused two-build training to strict near-equal per-build sampling so skewed manifests cannot silently run full unbalanced epochs.
 - [x] T027 [US3] Restore WMO roof/top-geometry participation in terrain-valid masking and focused preview evidence so active height/normal runs do not regress to basement-only object masking.
+- [x] T028 [US3] Add restrained rotating bucket coverage so focused runs can train on a bounded fraction of each curated bucket per epoch while cycling through the full train pool over later epochs.
 
 **Checkpoint**: the focused V18 training lane is easy to launch and hard to
 misconfigure.

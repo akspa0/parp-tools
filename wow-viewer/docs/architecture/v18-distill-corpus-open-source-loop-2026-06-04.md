@@ -129,6 +129,16 @@ sampling. When one build has fewer eligible rows, oversized pool/epoch requests
 are automatically capped to the largest feasible balanced subset instead of
 quietly running a skewed epoch.
 
+Focused V18 training now also supports restrained rotating bucket coverage:
+
+- `train_v18_focus.py` defaults to `--train-bucket-rotation-fraction 0.10`
+- each epoch trains on roughly ten percent of every available build/bucket
+  stratum in the focused train pool
+- later epochs rotate through the remaining rows instead of replaying the same
+  full curated pool every time
+- very small strata can complete their coverage cycle sooner than larger strata;
+  that is expected and preferred to dead epochs
+
 ## Why This Design Holds
 
 The prior lane kept drifting into weak or misleading supervision surfaces:
@@ -227,8 +237,8 @@ re-enter signoff for this lane.
   `train_v18_focus.py height`.
 - Scale the bounded normal proof into a real multi-epoch run through
   `train_v18_focus.py normal`.
-- Tune focused runs for the observed 8 GB lane via startup autotune and larger
-  epoch pools instead of the earlier smoke-budget settings.
+- Tune focused runs for the observed 8 GB lane via startup autotune and the new
+  rotating bucket-coverage epochs instead of the earlier smoke-budget settings.
 - Keep the focused curation manifest stable unless a specific reject-pattern
   review justifies threshold changes.
 - Keep quilt-level stitching and ADT writeback as the next downstream design

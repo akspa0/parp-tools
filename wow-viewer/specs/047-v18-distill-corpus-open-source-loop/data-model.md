@@ -94,12 +94,16 @@ Represents one focused V18 height training run.
 - `checkpoint_dir`: path
 - `config_path`: path
 - `training_log_path`: path
+- `epoch_sampling_mode`: string
+- `epoch_sampling_fraction`: number | null
 - `best_val`: float | null
 - `best_epoch`: integer | null
 
 ### Validation
 
 - all focused runs must stay under `wow-viewer/models/v18/height/runs/`
+- `epoch_sampling_fraction` must be in `(0, 1]` when `epoch_sampling_mode` is
+  `bucket_rotation_fraction`
 
 ## NormalModelRun
 
@@ -116,12 +120,16 @@ Represents one focused V18 normal training run.
 - `checkpoint_dir`: path
 - `config_path`: path
 - `training_log_path`: path
+- `epoch_sampling_mode`: string
+- `epoch_sampling_fraction`: number | null
 - `best_val`: float | null
 - `best_epoch`: integer | null
 
 ### Validation
 
 - all focused runs must stay under `wow-viewer/models/v18/normal/runs/`
+- `epoch_sampling_fraction` must be in `(0, 1]` when `epoch_sampling_mode` is
+  `bucket_rotation_fraction`
 
 ## TerrainQuiltJob
 

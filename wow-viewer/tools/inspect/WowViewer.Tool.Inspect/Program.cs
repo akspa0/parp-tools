@@ -13,6 +13,7 @@ using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Lit;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.M2Chunked;
+using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Wmo;
@@ -318,12 +319,14 @@ static void RunM2Inspect(string[] args)
 	M2ModelDocument model;
 	M2GeometryDocument? geometry = null;
 	string? geometryError = null;
+	M2Era1121EraTag detectedEra;
 
 	if (isChunkedMdx)
 	{
 		using MemoryStream stream = new(modelBytes, writable: false);
 		chunkedRead = M2ChunkedModelReader.ReadDetailed(stream, sourceLabel, TryReadExactCompanionBytes);
 		model = chunkedRead.Model;
+		detectedEra = M2Era1121EraTag.Mdlx;
 
 		try
 		{
@@ -337,8 +340,10 @@ static void RunM2Inspect(string[] args)
 	}
 	else
 	{
-		using MemoryStream modelStream = new(modelBytes, writable: false);
-		model = M2ModelReader.Read(modelStream, sourceLabel);
+		using MemoryStream dispatchStream = new(modelBytes, writable: false);
+		M2DispatchResult dispatch = M2ModelReaderDispatcher.ReadDetailed(dispatchStream, sourceLabel, TryReadExactCompanionBytes);
+		model = dispatch.Document;
+		detectedEra = dispatch.Era;
 
 		try
 		{
@@ -459,6 +464,7 @@ static void RunM2Inspect(string[] args)
 		}
 	}
 
+	Console.WriteLine($"ERA: {detectedEra.ToDisplayString()}");
 	PrintM2Summary(model, state, geometry, geometryError, renderModel, externalAnimationState, externalAnimationError, animatedRenderState, animatedRenderError, bonePoseState, bonePoseError, skinnedRenderModel, renderConsumerState, effectRuntimeState, sceneSubmissionPlan, renderFrame, visualSnapshot, goldenFrame);
 	if (chunkedRead is not null)
 		PrintChunkedM2ConversionSummary(chunkedRead);

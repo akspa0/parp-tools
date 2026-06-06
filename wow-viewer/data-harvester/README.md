@@ -113,7 +113,7 @@ uv run python -u scripts/train_v18_focus.py height `
   --device cuda `
   --epochs 40 `
   --train-max-tiles 4096 `
-  --train-epoch-tiles 2048 `
+  --train-bucket-rotation-fraction 0.10 `
   --val-max-tiles 256 `
   --val-interval 1 `
   --run-name v18_height_focus_basic
@@ -126,7 +126,7 @@ uv run python -u scripts/train_v18_focus.py normal `
   --device cuda `
   --epochs 40 `
   --train-max-tiles 4096 `
-  --train-epoch-tiles 2048 `
+  --train-bucket-rotation-fraction 0.10 `
   --val-max-tiles 256 `
   --val-interval 1 `
   --run-name v18_normal_focus_basic
@@ -139,9 +139,15 @@ Notes:
 - `train_v18_focus.py` defaults to the V18 dataset root, the two focused
   builds, the latest focused `kept_tiles.parquet` when present, and startup
   batch autotune against `--target-vram-gb 8`.
+- `train_v18_focus.py` also defaults to restrained rotating bucket coverage via
+  `--train-bucket-rotation-fraction 0.10`, so the run can train on a bounded
+  fraction of each curated bucket per epoch instead of replaying the whole pool
+  every epoch.
 - `train_v18_focus.py` also defaults to strict near-equal per-build sampling, so
   oversized pool/epoch requests auto-cap to the largest feasible balanced
   subset instead of silently letting one build dominate.
+- when bucket rotation is active, omit `--train-epoch-tiles` and let the
+  trainer derive the per-epoch subset size from the bucketed manifest itself.
 - focused curation now rejects tiles with too little surviving trainable
   terrain, so liquid-hidden wipeout rows stop entering the active pool.
 - focused `height` and `normal` losses now honor terrain-valid masks, so
@@ -790,6 +796,10 @@ uv run python -u scripts/train_v18.py normal `
 - `--curation-manifest` accepts either a V16.1 curation manifest directory or a V18 refined manifest parquet file
 - `--train-max-tiles` is the persistent curated train pool
 - `--train-epoch-tiles` rotates a fresh per-epoch subset from that pool
+- `--train-bucket-rotation-fraction` rotates a deterministic fraction of every
+  build/bucket stratum each epoch and is the preferred focused-V18 scouting
+  mode when you want faster epochs without throwing away the rest of the
+  curated pool
 - `--epochs` is total run ceiling; resume starts at `checkpoint_epoch + 1`
 - `--num-workers -1` auto-resolves a CUDA-friendly worker count
 - `torch.compile` is enabled by default on CUDA

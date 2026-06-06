@@ -178,6 +178,37 @@
     - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q`
       - `6 passed`
 
+- **V18 restrained rotating bucket coverage (2026-06-06)**
+  - user direction changed from “more epochs on the same large focused pool” to “smaller restrained epochs that still rotate across the whole curated corpus over time”
+  - focused trainer update landed in `wow-viewer/data-harvester/scripts/train_v16_1_common.py`:
+    - new CLI knob: `--train-bucket-rotation-fraction`
+    - when enabled, train epochs are built from deterministic per-build/per-bucket chunks rather than replaying the whole fixed pool every epoch
+    - tiny strata are allowed to complete their coverage cycle earlier than large strata instead of producing dead epochs
+    - `--train-epoch-tiles` is now rejected when combined with the rotation fraction so the operator contract stays explicit
+    - startup batch autotune now leaves the rotation-fraction epoch budget alone instead of silently rescaling it
+    - run config plus epoch evidence now record:
+      - `epoch_sampling_mode`
+      - `epoch_sampling_fraction`
+      - `train_bucket_rotation_cycle_length`
+  - focused wrapper update landed in `wow-viewer/data-harvester/scripts/train_v18_focus.py`:
+    - defaults `--train-bucket-rotation-fraction 0.10` when the user does not explicitly request fixed-count epoch sampling
+    - defaults focused bucket weighting to `uniform` when that rotation mode is active
+  - spec/doc continuity synced:
+    - `wow-viewer/specs/047-v18-distill-corpus-open-source-loop/spec.md`
+    - `plan.md`
+    - `tasks.md`
+    - `quickstart.md`
+    - `data-model.md`
+    - `contracts/v18-focused-training-run.schema.json`
+    - `wow-viewer/data-harvester/README.md`
+    - `wow-viewer/docs/architecture/v18-distill-corpus-open-source-loop-2026-06-04.md`
+  - targeted proof passed:
+    - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+    - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q`
+      - `8 passed`
+    - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help`
+      - focused CLI now exposes `--train-bucket-rotation-fraction`
+
 ## Next Likely Steps
 
 - implement the first `046` slice: deterministic non-freezing PM4 segment export
@@ -186,14 +217,14 @@
 - keep PM4 grouping/spec docs in sync if segmentation ownership changes again
 - spec `047` follow-ups:
   - rerun focused curation so the latest `kept_tiles.parquet` picks up `insufficient_trainable_terrain` rejections
-  - rerun focused height with the new terrain-valid loss masking and 8 GB autotune defaults
-  - rerun focused normal with the new terrain-valid loss masking and 8 GB autotune defaults
-  - confirm the next run logs show near-equal per-build epoch subsets rather than the old `700` vs `2636` full-pool skew
+  - rerun focused height with the new terrain-valid loss masking and `10%` rotating bucket coverage
+  - rerun focused normal with the new terrain-valid loss masking and `10%` rotating bucket coverage
+  - confirm the next run logs show near-equal per-build epoch subsets plus sane rotation-cycle evidence rather than the old `700` vs `2636` full-pool skew
   - confirm the next height preview shows roof/top-geometry occlusion in the actual combined weight path instead of the old basement-only panel
   - compare live loss curves against the earlier liquid-poisoned plateaus before changing architecture again
 
-- **Native 1.12.1 M2/MDX loader trace (2026-06-05)** — research complete; no spec yet
-  - new architecture doc: `wow-viewer/docs/architecture/m2-mdx-1121-native-trace-2026-06-05.md`
+- **Native 1.12.1 M2/MDX loader trace (2026-06-05)** — research complete; spec `048` ships 2026-06-05
+  - architecture doc: `wow-viewer/docs/architecture/m2-mdx-1121-native-trace-2026-06-05.md`
   - Ghidra trace against `WoW.exe` `Build 5875 (Sep 19 2006)` (1.12.1 Win32)
   - top finding: 1.12.1 `.mdx` files use `MD20` magic (flat pointer-table), not chunked `MDLX`
   - the native cache loader normalizes `.mdl`/`.mdx`/`.m2` to `.m2` and dispatches to a single `MD20` parser
@@ -206,8 +237,15 @@
     - particle stride `0xdc` (3.3.5: `0x1dc/0x1ec`)
     - vertex entry `0xc` (separate position + normal tables) (3.3.5: interleaved `0x30-0x40`)
   - 1.12.1 M2 cvar set is smaller than 3.3.5: no `M2BatchParticles`, no `M2ForceAdditiveParticleSort`
-  - gap: `M2ModelReaderDispatcher` routes 1.12.1 `.mdx` (with `MD20` magic) to 3.3.5 `M2ModelReader` which silently misreads the strides
-  - gap: spec `043` assumes 1.12.1 uses chunked `MDLX` — that assumption is now known to be wrong
-  - 1.12.1 cvar bit mapping (0x1/0x2/0x4/0x8/0x10/0x20/0x40/0x80/0x100) is not yet decompiled
-  - 1.12.1 likely has no external `.anim` files (no animation cvar, simpler particle records)
-  - next: write a spec for the 1.12.1 era-aware MD20 reader before any code lands
+  - spec `048-m2-1121-era-aware-md20-reader` (2026-06-05): implementation landed.
+    - new namespace: `wow-viewer/src/core/WowViewer.Core.IO/M2Era1121/`
+    - new files: `M2Era1121Version.cs`, `M2Era1121EraTag.cs`, `M2Era1121Constants.cs`, `M2Era1121ModelReader.cs`
+    - dispatcher updated: `M2ModelReaderDispatcher.ReadDetailed(...)`, `M2DispatchResult`, `DetectEra(...)`, era-aware routing
+    - CLI: `WowViewer.Tool.Inspect m2 inspect` now prints `ERA: <era tag>` as the first line
+    - 7 unit tests in `tests/WowViewer.Core.Tests/M2Era1121ModelReaderTests.cs`, all pass on the real 1.12.1 `Bear.mdx` fixture
+    - pre-existing 3.3.5 tests unchanged (FR-018)
+    - 2.x TBC versions (`0x104`) rejected with "see spec 049"
+  - spec `043` revised to defer 1.12.1 to spec `048` (chunked-MDX lane is 0.5.3 / 0.7.0 / 0.8.0 only)
+  - 1.12.1 cvar bit mapping (0x1/0x2/0x4/0x8/0x10/0x20/0x40/0x80/0x100) remains a follow-up
+  - 1.12.1 vertex/walk of `0x101`-only 0x1f8/29 sub-tables remains a follow-up
+  - 1.12.1 light "record" is confirmed 3 floats (position + radius) per OQ-4 resolution

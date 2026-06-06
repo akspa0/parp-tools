@@ -175,6 +175,7 @@ class _DeterministicEpochSampler(Sampler[int]):
         strict_build_balance: bool = False,
         bucket_labels: list[str] | None = None,
         bucket_sampling_profile: str | None = None,
+        bucket_rotation_fraction: float = 0.0,
         sample_rows: list[dict[str, Any]] | None = None,
     ) -> None:
         self._n = int(n)
@@ -189,22 +190,48 @@ class _DeterministicEpochSampler(Sampler[int]):
         self._bucket_labels = [_normalize_bucket_label(label) for label in bucket_labels] if bucket_labels is not None else None
         self._bucket_sampling_profile = bucket_sampling_profile
         self._bucket_sampling_weights = _bucket_sampling_weights(bucket_sampling_profile)
+        self._bucket_rotation_fraction = max(float(bucket_rotation_fraction), 0.0)
         self._sample_rows = [dict(row) for row in sample_rows] if sample_rows is not None else None
-        requested_take = self._n if self._epoch_size is None else int(self._epoch_size)
-        self._effective_epoch_size = _resolve_effective_sample_take(
-            self._n,
-            requested_take,
-            build_labels=self._build_labels,
-            build_balanced=self._build_balanced,
-            strict_build_balance=self._strict_build_balance,
-        )
+        self._selected_cache_epoch: int | None = None
+        self._selected_cache: list[int] | None = None
+        if self._bucket_rotation_fraction > 0.0 and self._bucket_labels is not None and len(self._bucket_labels) == self._n:
+            self._effective_epoch_size = _resolve_rotating_bucket_epoch_size(
+                self._n,
+                epoch=1,
+                seed=self._seed,
+                build_labels=self._build_labels,
+                build_balanced=self._build_balanced,
+                bucket_labels=self._bucket_labels,
+                bucket_rotation_fraction=self._bucket_rotation_fraction,
+            )
+        else:
+            requested_take = self._n if self._epoch_size is None else int(self._epoch_size)
+            self._effective_epoch_size = _resolve_effective_sample_take(
+                self._n,
+                requested_take,
+                build_labels=self._build_labels,
+                build_balanced=self._build_balanced,
+                strict_build_balance=self._strict_build_balance,
+            )
 
     def set_epoch(self, epoch: int) -> None:
         self._epoch = int(epoch)
+        self._selected_cache_epoch = None
+        self._selected_cache = None
 
     def _sample_subset(self, rng: np.random.RandomState) -> list[int]:
         if self._n <= 0:
             return []
+        if self._bucket_rotation_fraction > 0.0 and self._bucket_labels is not None and len(self._bucket_labels) == self._n:
+            return _sample_rotating_bucket_positions(
+                self._n,
+                epoch=max(int(self._epoch), 1),
+                seed=self._seed,
+                build_labels=self._build_labels,
+                build_balanced=self._build_balanced,
+                bucket_labels=self._bucket_labels,
+                bucket_rotation_fraction=self._bucket_rotation_fraction,
+            )
         if (
             (self._epoch_size is None or self._epoch_size >= self._n)
             and not (self._build_balanced and self._strict_build_balance and self._build_labels and len(self._build_labels) == self._n)
@@ -221,9 +248,16 @@ class _DeterministicEpochSampler(Sampler[int]):
             bucket_sampling_weights=self._bucket_sampling_weights,
         )
 
+    def _selected_positions(self) -> list[int]:
+        if self._selected_cache_epoch != self._epoch or self._selected_cache is None:
+            rng = np.random.RandomState(self._seed + self._epoch)
+            self._selected_cache = list(self._sample_subset(rng))
+            self._selected_cache_epoch = self._epoch
+        return list(self._selected_cache)
+
     def __iter__(self):
         rng = np.random.RandomState(self._seed + self._epoch)
-        selected = self._sample_subset(rng)
+        selected = self._selected_positions()
         order = list(selected)
         rng.shuffle(order)
         available_bucket_counts = _bucket_counts(self._bucket_labels or [])
@@ -238,6 +272,15 @@ class _DeterministicEpochSampler(Sampler[int]):
                 "epoch_size": len(order),
                 "bucket_sampling_profile": self._bucket_sampling_profile,
                 "bucket_sampling_weights": self._bucket_sampling_weights,
+                "bucket_rotation_fraction": self._bucket_rotation_fraction,
+                "bucket_rotation_cycle_length": _resolve_rotating_bucket_cycle_length(
+                    self._n,
+                    seed=self._seed,
+                    build_labels=self._build_labels,
+                    build_balanced=self._build_balanced,
+                    bucket_labels=self._bucket_labels,
+                    bucket_rotation_fraction=self._bucket_rotation_fraction,
+                ),
                 "available_bucket_counts": available_bucket_counts,
                 "selected_bucket_counts": _bucket_counts(selected_bucket_labels),
                 "ordered_bucket_counts": _bucket_counts(ordered_bucket_labels),
@@ -257,6 +300,15 @@ class _DeterministicEpochSampler(Sampler[int]):
                 "epoch_size": len(order),
                 "bucket_sampling_profile": self._bucket_sampling_profile,
                 "bucket_sampling_weights": self._bucket_sampling_weights,
+                "bucket_rotation_fraction": self._bucket_rotation_fraction,
+                "bucket_rotation_cycle_length": _resolve_rotating_bucket_cycle_length(
+                    self._n,
+                    seed=self._seed,
+                    build_labels=self._build_labels,
+                    build_balanced=self._build_balanced,
+                    bucket_labels=self._bucket_labels,
+                    bucket_rotation_fraction=self._bucket_rotation_fraction,
+                ),
                 "available_bucket_counts": available_bucket_counts,
                 "selected_bucket_counts": _bucket_counts(selected_bucket_labels),
                 "selected_build_counts": _count_string_values([row.get("build", "unknown") for row in selected_rows] if selected_rows is not None else []),
@@ -266,6 +318,8 @@ class _DeterministicEpochSampler(Sampler[int]):
         return iter(order)
 
     def __len__(self) -> int:
+        if self._bucket_rotation_fraction > 0.0:
+            return len(self._selected_positions())
         return self._effective_epoch_size
 
 
@@ -422,6 +476,145 @@ def _count_string_values(values: list[str]) -> dict[str, int]:
 def _bucket_counts(bucket_labels: list[str]) -> dict[str, int]:
     counts = _count_string_values([_normalize_bucket_label(label) for label in bucket_labels if str(label or "").strip()])
     return {bucket: counts.get(bucket, 0) for bucket in _DIFFICULTY_BUCKETS if counts.get(bucket, 0) > 0}
+
+
+def _rotation_cycle_length(bucket_rotation_fraction: float) -> int:
+    fraction = min(max(float(bucket_rotation_fraction), 0.0), 1.0)
+    if fraction <= 0.0:
+        return 0
+    return max(1, int(math.ceil(1.0 / fraction)))
+
+
+def _resolve_bucket_rotation_quota(group_size: int, bucket_rotation_fraction: float) -> int:
+    if group_size <= 0:
+        return 0
+    fraction = min(max(float(bucket_rotation_fraction), 0.0), 1.0)
+    if fraction <= 0.0:
+        return 0
+    return max(1, min(int(group_size), int(round(group_size * fraction))))
+
+
+def _rotation_group_seed(seed: int, key: tuple[str, str]) -> int:
+    digest = hashlib.sha256(f"{int(seed)}::{key[0]}::{key[1]}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "little", signed=False)
+
+
+def _bucket_rotation_groups(
+    n: int,
+    *,
+    seed: int,
+    build_labels: list[str] | None = None,
+    build_balanced: bool = False,
+    bucket_labels: list[str] | None = None,
+) -> list[tuple[tuple[str, str], list[int]]]:
+    if n <= 0 or bucket_labels is None or len(bucket_labels) != n:
+        return []
+
+    by_group: dict[tuple[str, str], list[int]] = {}
+    use_build_dimension = bool(build_balanced and build_labels and len(build_labels) == n)
+    for pos in range(n):
+        build_key = str(build_labels[pos]) if use_build_dimension and build_labels is not None else "*"
+        bucket_key = _normalize_bucket_label(bucket_labels[pos])
+        by_group.setdefault((build_key, bucket_key), []).append(pos)
+
+    grouped: list[tuple[tuple[str, str], list[int]]] = []
+    for key in sorted(by_group.keys()):
+        positions = list(by_group[key])
+        rng = np.random.RandomState(_rotation_group_seed(seed, key))
+        rng.shuffle(positions)
+        grouped.append((key, positions))
+    return grouped
+
+
+def _sample_rotating_bucket_positions(
+    n: int,
+    *,
+    epoch: int,
+    seed: int,
+    build_labels: list[str] | None = None,
+    build_balanced: bool = False,
+    bucket_labels: list[str] | None = None,
+    bucket_rotation_fraction: float = 0.0,
+) -> list[int]:
+    if n <= 0:
+        return []
+    cycle_length = _rotation_cycle_length(bucket_rotation_fraction)
+    if cycle_length <= 0:
+        return []
+
+    grouped = _bucket_rotation_groups(
+        n,
+        seed=seed,
+        build_labels=build_labels,
+        build_balanced=build_balanced,
+        bucket_labels=bucket_labels,
+    )
+    if not grouped:
+        return []
+
+    cycle_index = (max(int(epoch), 1) - 1) % cycle_length
+    selected: list[int] = []
+    for _key, positions in grouped:
+        quota = _resolve_bucket_rotation_quota(len(positions), bucket_rotation_fraction)
+        if quota <= 0:
+            continue
+        group_cycle = max(1, int(math.ceil(len(positions) / quota)))
+        group_index = cycle_index % group_cycle
+        start = group_index * quota
+        stop = min(start + quota, len(positions))
+        selected.extend(int(pos) for pos in positions[start:stop])
+
+    rng = np.random.RandomState(int(seed) + max(int(epoch), 1) + 99173)
+    rng.shuffle(selected)
+    return selected
+
+
+def _resolve_rotating_bucket_epoch_size(
+    n: int,
+    *,
+    epoch: int,
+    seed: int,
+    build_labels: list[str] | None = None,
+    build_balanced: bool = False,
+    bucket_labels: list[str] | None = None,
+    bucket_rotation_fraction: float = 0.0,
+) -> int:
+    return len(
+        _sample_rotating_bucket_positions(
+            n,
+            epoch=epoch,
+            seed=seed,
+            build_labels=build_labels,
+            build_balanced=build_balanced,
+            bucket_labels=bucket_labels,
+            bucket_rotation_fraction=bucket_rotation_fraction,
+        )
+    )
+
+
+def _resolve_rotating_bucket_cycle_length(
+    n: int,
+    *,
+    seed: int,
+    build_labels: list[str] | None = None,
+    build_balanced: bool = False,
+    bucket_labels: list[str] | None = None,
+    bucket_rotation_fraction: float = 0.0,
+) -> int:
+    grouped = _bucket_rotation_groups(
+        n,
+        seed=seed,
+        build_labels=build_labels,
+        build_balanced=build_balanced,
+        bucket_labels=bucket_labels,
+    )
+    cycle_length = 0
+    for _key, positions in grouped:
+        quota = _resolve_bucket_rotation_quota(len(positions), bucket_rotation_fraction)
+        if quota <= 0:
+            continue
+        cycle_length = max(cycle_length, int(math.ceil(len(positions) / quota)))
+    return cycle_length
 
 
 def _sample_weighted_positions(
@@ -723,7 +916,8 @@ def _autotune_batch_size(
     tuned_epoch_tiles = int(args.train_epoch_tiles)
     original_epoch_tiles = int(args.train_epoch_tiles)
     original_batch_size = int(base_batch_size)
-    if bool(getattr(args, "autotune_keep_epoch_steps", True)) and original_epoch_tiles > 0 and original_batch_size > 0:
+    keep_epoch_steps = bool(getattr(args, "autotune_keep_epoch_steps", True)) and float(getattr(args, "train_bucket_rotation_fraction", 0.0)) <= 0.0
+    if keep_epoch_steps and original_epoch_tiles > 0 and original_batch_size > 0:
         original_steps = max(1, math.ceil(original_epoch_tiles / original_batch_size))
         tuned_epoch_tiles = min(len(train_ds), chosen_batch_size * original_steps)
 
@@ -737,7 +931,7 @@ def _autotune_batch_size(
         "chosen_batch_size": int(chosen_batch_size),
         "original_train_epoch_tiles": int(original_epoch_tiles),
         "tuned_train_epoch_tiles": int(tuned_epoch_tiles),
-        "keep_epoch_steps": bool(getattr(args, "autotune_keep_epoch_steps", True)),
+        "keep_epoch_steps": keep_epoch_steps,
         "candidate_results": results,
     }
     (evidence_dir / "batch_autotune.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -1408,6 +1602,12 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         help="Per-epoch difficulty-bucket sampling profile used when curated manifests carry bucket metadata.",
     )
     p.add_argument(
+        "--train-bucket-rotation-fraction",
+        type=float,
+        default=0.0,
+        help="If >0, partition each available train build/bucket stratum into a deterministic epoch cycle and train on roughly this fraction of every stratum per epoch so the full bucketed pool is covered over repeated epochs.",
+    )
+    p.add_argument(
         "--val-max-tiles",
         type=int,
         default=0,
@@ -1610,6 +1810,12 @@ def run_task(task_name: str) -> None:
         raise RuntimeError("--train-epoch-tiles must be >= 0")
     if args.val_epoch_tiles < 0:
         raise RuntimeError("--val-epoch-tiles must be >= 0")
+    if args.train_bucket_rotation_fraction < 0.0 or args.train_bucket_rotation_fraction > 1.0:
+        raise RuntimeError("--train-bucket-rotation-fraction must be in [0.0, 1.0]")
+    if args.train_bucket_rotation_fraction > 0.0 and args.train_epoch_tiles > 0:
+        raise RuntimeError(
+            "--train-bucket-rotation-fraction cannot be combined with --train-epoch-tiles; omit --train-epoch-tiles and let the rotation fraction derive the per-epoch subset size."
+        )
     if args.refiner_probe_plateau_epochs < 1:
         raise RuntimeError("--refiner-probe-plateau-epochs must be >= 1")
 
@@ -1760,14 +1966,6 @@ def run_task(task_name: str) -> None:
     )
     _apply_dataset_limit(train_ds, int(args.max_train_samples))
     _apply_dataset_limit(val_ds, int(args.max_val_samples))
-    autotune_result = _autotune_batch_size(
-        task=task,
-        task_name=task_name,
-        train_ds=train_ds,
-        device=device,
-        args=args,
-        evidence_dir=evidence_dir,
-    )
     train_build_labels = [
         str(train_ds._index_entries[global_idx].get("_build", "unknown"))
         for global_idx in train_ds._indices
@@ -1776,6 +1974,28 @@ def run_task(task_name: str) -> None:
         _normalize_bucket_label(train_ds._index_entries[global_idx].get("_curation_difficulty_bucket", ""))
         for global_idx in train_ds._indices
     ]
+    if float(args.train_bucket_rotation_fraction) > 0.0:
+        if not _bucket_counts(train_bucket_labels):
+            raise RuntimeError(
+                "--train-bucket-rotation-fraction requires a curated manifest with difficulty_bucket metadata in the active train pool."
+            )
+        args.train_epoch_tiles = _resolve_rotating_bucket_epoch_size(
+            len(train_ds),
+            epoch=1,
+            seed=int(args.seed),
+            build_labels=train_build_labels,
+            build_balanced=bool(args.train_epoch_build_balanced),
+            bucket_labels=train_bucket_labels,
+            bucket_rotation_fraction=float(args.train_bucket_rotation_fraction),
+        )
+    autotune_result = _autotune_batch_size(
+        task=task,
+        task_name=task_name,
+        train_ds=train_ds,
+        device=device,
+        args=args,
+        evidence_dir=evidence_dir,
+    )
     train_sample_rows = [
         _pool_row(train_ds._index_entries[global_idx], subset_pos=idx, split_pos=idx)
         for idx, global_idx in enumerate(train_ds._indices)
@@ -1793,6 +2013,7 @@ def run_task(task_name: str) -> None:
         strict_build_balance=bool(args.strict_build_balance),
         bucket_labels=train_bucket_labels,
         bucket_sampling_profile=args.bucket_sampling_profile,
+        bucket_rotation_fraction=float(args.train_bucket_rotation_fraction),
         sample_rows=train_sample_rows,
     )
     val_sampler: _DeterministicEpochSampler | None = None
@@ -1933,8 +2154,19 @@ def run_task(task_name: str) -> None:
         "train_epoch_build_balanced": args.train_epoch_build_balanced,
         "strict_build_balance": bool(args.strict_build_balance),
         "effective_train_epoch_tiles": len(train_sampler),
+        "epoch_sampling_mode": ("bucket_rotation_fraction" if float(args.train_bucket_rotation_fraction) > 0.0 else "fixed_epoch_tiles"),
         "bucket_sampling_profile": args.bucket_sampling_profile,
         "bucket_sampling_weights": _bucket_sampling_weights(args.bucket_sampling_profile),
+        "train_bucket_rotation_fraction": float(args.train_bucket_rotation_fraction),
+        "epoch_sampling_fraction": (float(args.train_bucket_rotation_fraction) if float(args.train_bucket_rotation_fraction) > 0.0 else None),
+        "train_bucket_rotation_cycle_length": _resolve_rotating_bucket_cycle_length(
+            len(train_ds),
+            seed=int(args.seed),
+            build_labels=train_build_labels,
+            build_balanced=bool(args.train_epoch_build_balanced),
+            bucket_labels=train_bucket_labels,
+            bucket_rotation_fraction=float(args.train_bucket_rotation_fraction),
+        ),
         "val_max_tiles": args.val_max_tiles,
         "rotate_val_tiles": bool(args.rotate_val_tiles),
         "val_epoch_tiles": int(args.val_epoch_tiles),
@@ -2037,12 +2269,22 @@ def run_task(task_name: str) -> None:
             flush=True,
         )
     if args.train_epoch_tiles > 0:
+        rotation_cycle_length = _resolve_rotating_bucket_cycle_length(
+            len(train_ds),
+            seed=int(args.seed),
+            build_labels=train_build_labels,
+            build_balanced=bool(args.train_epoch_build_balanced),
+            bucket_labels=train_bucket_labels,
+            bucket_rotation_fraction=float(args.train_bucket_rotation_fraction),
+        )
         print(
             "Epoch sampling: "
             f"train_epoch_tiles={len(train_sampler)}/{len(train_ds)} "
             f"build_balanced={bool(args.train_epoch_build_balanced)} "
             f"strict_build_balance={bool(args.strict_build_balance)} "
-            f"bucket_profile={args.bucket_sampling_profile}",
+            f"bucket_profile={args.bucket_sampling_profile} "
+            f"bucket_rotation_fraction={float(args.train_bucket_rotation_fraction):.2f} "
+            f"bucket_rotation_cycle={rotation_cycle_length}",
             flush=True,
         )
     print(

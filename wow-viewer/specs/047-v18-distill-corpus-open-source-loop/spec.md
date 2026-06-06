@@ -4,7 +4,7 @@
 
 **Created**: 2026-06-04
 
-**Status**: Final Design Draft — 2026-06-05
+**Status**: Final Design Draft — 2026-06-06
 
 ## Intent
 
@@ -90,6 +90,11 @@ to work.
    The product must support quilt-level terrain reconstruction. The final
    pipeline includes a post-model stitching stage.
 
+6. **Rotate bucket coverage instead of replaying the whole pool**
+   Focused training should be able to see only a restrained fraction of each
+   curated difficulty bucket per epoch, then rotate across later epochs until
+   the whole bucketed pool has been visited.
+
 ## User Scenarios & Testing
 
 ### User Story 1 — Focus the corpus to the two useful builds (Priority: P1)
@@ -153,7 +158,11 @@ manifest and verify evidence/checkpoints are produced.
 3. **Given** the two-build focused lane, **When** epoch subsets are sampled,
    **Then** neither build may silently dominate because the focused operator
    defaults enforce near-equal per-build sampling when feasible.
-3. **Given** the run finishes, **When** evidence is inspected, **Then** the run
+4. **Given** a focused curated manifest with difficulty buckets, **When**
+   restrained rotating epochs are enabled, **Then** each epoch trains on only a
+   bounded fraction of each bucket while repeated epochs rotate through the
+   full bucketed train pool.
+5. **Given** the run finishes, **When** evidence is inspected, **Then** the run
    records command, seed, manifest, and checkpoint under `models/v18/height/`.
 
 ---
@@ -229,6 +238,10 @@ that consumes predicted terrain tiles and emits a stitch-ready terrain quilt.
 - **FR-010A**: The focused operator workflow MUST keep the two-build train/val
   sampling balanced by default, capping oversized balanced subsets when one
   build has fewer eligible rows.
+- **FR-010B**: The focused operator workflow MUST support deterministic
+  per-bucket epoch rotation so a bounded fraction of each curated bucket can be
+  trained each epoch while the full bucketed train pool is revisited over later
+  epochs.
 - **FR-011**: Height training MAY remain normalized, but the final V18 design
   MUST treat quilt-level stitching as the owner of cross-tile continuity rather
   than isolated tile previews.

@@ -1,10 +1,22 @@
 # Native M2 Client Research - Mar 31, 2026
 
 **See also**: [M2 Render Parity Recovery](../../specs/035-m2-render-parity-recovery/plan.md) — deterministic world route contract and parity evidence for 3.3.5 world M2 rendering.
+**See also (1.12.1)**: [`m2-mdx-1121-native-trace-2026-06-05.md`](m2-mdx-1121-native-trace-2026-06-05.md) — the dedicated 1.12.1 MD20-era native trace. Spec `048-m2-1121-era-aware-md20-reader` ships the 1.12.1 reader on top of that evidence.
 
 Implementation-facing readers should start with `docs/architecture/m2/`.
 
 This file remains the raw native evidence log and build-by-build behavior notebook behind that consolidated doc set.
+
+## 1.12.1 Coverage Note - Jun 5, 2026
+
+The 1.12.1 (Vanilla / Build 5875) native contract is documented separately in [`m2-mdx-1121-native-trace-2026-06-05.md`](m2-mdx-1121-native-trace-2026-06-05.md) and the implementation slice is spec `048-m2-1121-era-aware-md20-reader` (in `wow-viewer/specs/048-m2-1121-era-aware-md20-reader/`). Key findings:
+
+- 1.12.1 models use `MD20` magic (same as 3.0.1+) with version `0x100` or `0x101`; they are NOT chunked-MDX.
+- The view table, sequence stride, light stride, camera stride, ribbon stride, particle stride, and bone layout all differ from 3.3.5. The 3.3.5 reader silently misreads 1.12.1 files.
+- The 048 dispatcher (`M2ModelReaderDispatcher.DetectEra`) checks the version field, not the file extension, and routes `0x100`/`0x101` to the new `M2Era1121ModelReader`.
+- 2.x TBC-era MD20 (e.g. `0x104`) is rejected with "see spec 049" by the 048 dispatcher.
+
+This doc continues to own the 3.3.5 (and earlier 3.0.1+ / 2.0.0) research surface; the 1.12.1 surface is owned by the new trace doc.
 
 ## Scope
 

@@ -168,7 +168,10 @@ focused builds and prefers the latest focused V18 curation manifest.
    autotune, and keep height/normal losses masked to terrain-valid regions.
 6. Default focused runs to strict near-equal per-build sampling so a skewed corpus
    cannot silently dominate full-size epochs.
-7. Keep terrain-valid masking honest by including both WMO basement/object
+7. Default focused runs to restrained rotating bucket coverage so later epochs
+   traverse the full curated pool instead of replaying the same full-pool
+   gradients every epoch.
+8. Keep terrain-valid masking honest by including both WMO basement/object
    footprints and WMO roof/top-geometry occlusion when the harvested store
    carries both signals.
 
@@ -177,6 +180,8 @@ focused builds and prefers the latest focused V18 curation manifest.
 - `--help` and `py_compile` succeed.
 - height/normal focused commands can be launched with shorter, safer operator
   syntax.
+- focused runs can derive their per-epoch subset from a bucket-rotation
+  fraction instead of requiring a fixed `--train-epoch-tiles` count.
 
 ### Phase 2C - Operator Docs
 
