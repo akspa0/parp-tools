@@ -1896,10 +1896,17 @@ void main() {
         _lastLoadResult = DoodadLoadResult.NotFound;
         try
         {
-            string resolvedModelPath = ResolveCanonicalDoodadPath(modelPath);
-            byte[]? modelData = ReadDoodadFileData(resolvedModelPath);
-            if ((modelData == null || modelData.Length == 0) && !resolvedModelPath.Equals(modelPath, StringComparison.OrdinalIgnoreCase))
-                modelData = ReadDoodadFileData(modelPath);
+            string resolvedModelPath;
+            byte[]? modelData;
+            string normalizedModelPath = NormalizeDoodadPath(modelPath);
+
+            if (!TryReadPreferredClassicDoodadData(normalizedModelPath, out resolvedModelPath, out modelData))
+            {
+                resolvedModelPath = ResolveCanonicalDoodadPath(modelPath);
+                modelData = ReadDoodadFileData(resolvedModelPath);
+                if ((modelData == null || modelData.Length == 0) && !resolvedModelPath.Equals(modelPath, StringComparison.OrdinalIgnoreCase))
+                    modelData = ReadDoodadFileData(modelPath);
+            }
 
             if (modelData == null || modelData.Length == 0)
             {
@@ -1910,9 +1917,7 @@ void main() {
                 return null;
             }
 
-            bool isM2Family = resolvedModelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)
-                || WarcraftNetM2Adapter.IsMd20(modelData)
-                || WarcraftNetM2Adapter.IsMd21(modelData);
+            bool isM2Family = WarcraftNetM2Adapter.IsM2FamilyContainer(modelData);
 
             if (isM2Family)
             {
@@ -2174,6 +2179,50 @@ private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string re
     private static string NormalizeDoodadPath(string path)
     {
         return path.Replace('/', '\\');
+    }
+
+    private static bool IsClassicDoodadRequest(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool TryReadPreferredClassicDoodadData(string normalizedPath, out string resolvedPath, out byte[]? data)
+    {
+        resolvedPath = normalizedPath;
+        data = null;
+
+        if (!IsClassicDoodadRequest(normalizedPath))
+            return false;
+
+        foreach (string candidate in EnumeratePreferredClassicDoodadPaths(normalizedPath))
+        {
+            data = ReadDoodadFileData(candidate);
+            if (data == null || data.Length == 0)
+                continue;
+
+            resolvedPath = NormalizeDoodadPath(candidate);
+            return true;
+        }
+
+        data = null;
+        resolvedPath = normalizedPath;
+        return false;
+    }
+
+    private static IEnumerable<string> EnumeratePreferredClassicDoodadPaths(string normalizedPath)
+    {
+        yield return normalizedPath;
+
+        if (normalizedPath.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return normalizedPath[..^4] + ".mdl";
+            yield break;
+        }
+
+        if (normalizedPath.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+            yield return normalizedPath[..^4] + ".mdx";
     }
 
     private static IEnumerable<string> EnumerateAlternateDoodadPaths(string normalizedPath)

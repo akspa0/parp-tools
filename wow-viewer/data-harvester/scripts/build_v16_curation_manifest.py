@@ -41,16 +41,19 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DATASET_ROOT = _PROJECT_ROOT / "output" / "datasets" / "v16"
 _OUTPUT_ROOT = _DATASET_ROOT / "curation"
 _PANEL_SIZE = 256
+_PROFILE_ALIASES = {
+    "v18_focus_terrain_v1": "normal_terrain_v16_1_1",
+}
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Build a reusable V16 dataset curation manifest.")
+    p = argparse.ArgumentParser(description="Build a reusable terrain dataset curation manifest.")
     p.add_argument("--dataset-dir", type=Path, default=_DATASET_ROOT)
     p.add_argument("--build", type=str)
     p.add_argument("--builds", nargs="+")
     p.add_argument(
         "--profile",
-        choices=["basic_v1", "normal_terrain_v1", "normal_terrain_v16_1_1"],
+        choices=["basic_v1", "normal_terrain_v1", "normal_terrain_v16_1_1", "v18_focus_terrain_v1"],
         default="normal_terrain_v16_1_1",
     )
     p.add_argument("--sample-seed", type=int, default=42)
@@ -85,6 +88,12 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=0.75,
         help="Require WMOs to dominate the loss gate by at least this fraction before the wipeout filter can reject a tile.",
+    )
+    p.add_argument(
+        "--min-trainable-cov",
+        type=float,
+        default=0.20,
+        help="Reject a tile when the surviving terrain-valid training area falls below this coverage.",
     )
     p.add_argument("--dilate-radius", type=int, default=2)
     p.add_argument("--worst-k", type=int, default=12)
@@ -418,7 +427,10 @@ def _evaluate_profile(row: dict[str, Any], args: argparse.Namespace) -> tuple[bo
     ):
         return False, {"quality_score": 0.0, "reject_reason": "wmo_loss_wipeout_tile"}
 
-    if args.profile == "normal_terrain_v16_1_1":
+    if row["trainable_cov"] < float(args.min_trainable_cov):
+        return False, {"quality_score": 0.0, "reject_reason": "insufficient_trainable_terrain"}
+
+    if args.profile in {"normal_terrain_v16_1_1", "v18_focus_terrain_v1"}:
         payload = _score_row_v16_1_1(row)
         payload["reject_reason"] = None
         return True, payload
@@ -459,7 +471,8 @@ def _process_chunk(
         for row_meta in row_chunk:
             row = _compute_row(build=build, row_meta=row_meta, root=root, args_dict=args_dict)
             keep, evaluation = _evaluate_profile(row, argparse.Namespace(**args_dict))
-            row["profile"] = args_dict["profile"]
+            row["profile"] = str(args_dict.get("requested_profile", args_dict["profile"]))
+            row["canonical_profile"] = str(args_dict["profile"])
             row["keep"] = bool(keep)
             row.update(evaluation)
             row["quality_score"] = float(row.get("quality_score", 0.0) or 0.0)
@@ -477,6 +490,7 @@ def _process_chunk(
 
 def main() -> None:
     args = _parse_args()
+    canonical_profile = _PROFILE_ALIASES.get(str(args.profile), str(args.profile))
     builds = args.builds or ([args.build] if args.build else [])
     if not builds:
         raise SystemExit("Provide --build or --builds")
@@ -486,8 +500,11 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved_workers = _resolve_workers(int(args.workers))
     args_dict = vars(args).copy()
+    args_dict["profile"] = canonical_profile
+    args_dict["requested_profile"] = str(args.profile)
     print(
-        f"Curation: profile={args.profile} workers={resolved_workers} chunk_size={max(1, int(args.chunk_size))}",
+        f"Curation: profile={args.profile} canonical_profile={canonical_profile} "
+        f"workers={resolved_workers} chunk_size={max(1, int(args.chunk_size))}",
         flush=True,
     )
 
@@ -548,6 +565,7 @@ def main() -> None:
 
     summary = {
         "profile": args.profile,
+        "canonical_profile": canonical_profile,
         "builds": builds,
         "dataset_dir": str(args.dataset_dir),
         "sample_seed": int(args.sample_seed),

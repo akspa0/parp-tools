@@ -795,10 +795,23 @@ def _height_loss(
 ) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["height_norm"].to(device, non_blocking=True)
+    terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
     pred = model(inp)
-    loss = F.l1_loss(pred, target)
-    full_weight = torch.ones_like(target)
-    return loss, {"height": float(loss.item())}, {"pred": pred, "target": target, "weight": full_weight}
+    train_mask = terrain_valid_mask.clamp(0.0, 1.0)
+    invalid_mask = (1.0 - train_mask).clamp(0.0, 1.0)
+    loss = _masked_mean((pred - target).abs(), train_mask)
+    return loss, {
+        "height": float(loss.item()),
+        "height_mask_cov": float(train_mask.mean().item()),
+    }, {
+        "pred": pred,
+        "target": target,
+        "weight": train_mask,
+        "train_mask": train_mask,
+        "invalid_mask": invalid_mask,
+        "base_mask": train_mask,
+        "terrain_valid_mask": train_mask,
+    }
 
 
 def _gradient_magnitude_257(x: torch.Tensor) -> torch.Tensor:
@@ -870,11 +883,12 @@ def _normal_loss(
     inp = batch["input"].to(device, non_blocking=True)
     target = batch["normals"].to(device, non_blocking=True)
     normal_mask = batch["normal_mask"].to(device, non_blocking=True)
+    terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
     pred = model(inp)
     pred_n = F.normalize(pred, dim=1, eps=1e-6)
     target_n = F.normalize(target, dim=1, eps=1e-6)
     cosine = 1.0 - (pred_n * target_n).sum(dim=1, keepdim=True)
-    train_mask = normal_mask
+    train_mask = (normal_mask * terrain_valid_mask).clamp(0.0, 1.0)
     invalid_mask = (1.0 - train_mask).clamp(0.0, 1.0)
     loss = _masked_mean(cosine, train_mask)
     return loss, {
@@ -887,6 +901,7 @@ def _normal_loss(
         "train_mask": train_mask,
         "invalid_mask": invalid_mask,
         "base_mask": train_mask,
+        "terrain_valid_mask": terrain_valid_mask,
     }
 
 
@@ -1219,13 +1234,13 @@ TASKS: dict[str, TaskSpec] = {
 
 
 def _parse_args(task_name: str) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=f"Train V16.1 {task_name} model")
+    p = argparse.ArgumentParser(description=f"Train terrain {task_name} model")
     p.add_argument("--dataset-dir", type=Path, default=_DATASET_ROOT)
     p.add_argument(
         "--curation-manifest",
         type=Path,
         default=None,
-        help="Optional curation manifest directory/file produced by build_v16_curation_manifest.py",
+        help="Optional curation manifest directory/file produced by the terrain curation manifest builder",
     )
     p.add_argument("--builds", nargs="+", default=["3_3_5_12340"])
     p.add_argument("--batch-size", type=int, default=8)

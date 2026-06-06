@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "v18-focused-curation-manifest.schema.json",
+  "title": "V18 Focused Curation Manifest Summary",
+  "type": "object",
+  "required": [
+    "profile",
+    "builds",
+    "dataset_dir",
+    "tile_count",
+    "kept_tiles",
+    "rejected_tiles",
+    "keep_ratio"
+  ],
+  "properties": {
+    "profile": {
+      "type": "string"
+    },
+    "builds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "0_5_3_3368",
+          "3_3_5_12340"
+        ]
+      },
+      "minItems": 1
+    },
+    "dataset_dir": {
+      "type": "string"
+    },
+    "tile_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "kept_tiles": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rejected_tiles": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "keep_ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "reject_reason_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "difficulty_bucket_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  },
+  "additionalProperties": true
+}

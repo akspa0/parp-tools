@@ -1,122 +1,191 @@
-# Implementation Plan: V18 Focused Two-Build Minimap-to-Terrain Loop
+# Implementation Plan: V18 Focused Two-Build Terrain Reconstruction System
 
-**Branch**: `047-v18-distill-corpus-open-source-loop` | **Date**: 2026-06-04 | **Spec**: [`wow-viewer/specs/047-v18-distill-corpus-open-source-loop/spec.md`](spec.md)
+**Branch**: `047-v18-distill-corpus-open-source-loop` | **Date**: 2026-06-05 | **Spec**: [`wow-viewer/specs/047-v18-distill-corpus-open-source-loop/spec.md`](spec.md)
 
-**Input**: Feature specification from [`wow-viewer/specs/047-v18-distill-corpus-open-source-loop/spec.md`](spec.md)
+**Input**: Feature specification from `/specs/047-v18-distill-corpus-open-source-loop/spec.md`
 
 ## Summary
 
-The active plan is intentionally narrow:
+The V18 owner path is:
 
-1. keep the V18 corpus focused on `0_5_3_3368` and `3_3_5_12340`,
-2. use only `minimap_rgb` as the model input,
-3. train height with plain L1 supervision,
-4. train normals with plain masked cosine supervision,
-5. ignore renderer-truth, object-mask, roof-mask, and extra loss surfaces for
-   active signoff.
+1. treat the focused V18 corpus (`0_5_3_3368`, `3_3_5_12340`) as final enough
+   to train on,
+2. generate a dedicated focused V18 curation manifest on those stores,
+3. train two separate V18 models from minimap input:
+   - height
+   - normals
+4. use those outputs later in a quilt-level terrain reconstruction stage aimed
+   at stitched ADT terrain, not isolated tile previews.
 
-This plan does not reopen distillation, open-source release, or capture-truth
-work.
+The implementation slice in this plan is the design closure plus the curation
+and training wrappers that make the focused lane easy to run.
 
 ## Technical Context
 
-- **Languages**: Python 3.11+ via `uv`; existing C# corpus tooling remains in
-  place but is not the active proof owner.
-- **Primary Surfaces**:
-  - `wow-viewer/data-harvester/scripts/build_focused_two_build_corpus.py`
-  - `wow-viewer/data-harvester/scripts/train_v16_1_height.py`
-  - `wow-viewer/data-harvester/scripts/train_v16_1_normal.py`
-  - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
-  - `wow-viewer/data-harvester/src/harvester/v16_1_dataset.py`
-- **Storage**:
-  - `wow-viewer/output/datasets/v18/*.zarr`
-  - `wow-viewer/models/v18/height/runs/`
-  - `wow-viewer/models/v18/normal/runs/`
-- **Trusted Clients**:
-  - `output/tmp/wowarchive-clients/0_5_3_3368/`
-  - `output/tmp/wowarchive-clients/3_3_5_12340/`
+**Language/Version**: Python 3.11+ via `uv`; existing C# / .NET 10 tooling remains the dataset producer and later terrain consumer
+
+**Primary Dependencies**: PyTorch, Zarr v3, PyArrow/Parquet, NumPy, Pillow
+
+**Storage**: V18 Zarr stores under `wow-viewer/output/datasets/v18/`; training artifacts under `wow-viewer/models/v18/`
+
+**Testing**: `uv run python -m py_compile` plus bounded training/capture/validation command proofs
+
+**Target Platform**: local Windows operator workflow with staged WoWArchive clients
+
+**Project Type**: Python CLI/training pipeline inside the `wow-viewer` repo
+
+**Performance Goals**: bounded two-build training runs must be operationally cheap enough to scout quickly on a single local CUDA device
+
+**Constraints**:
+- only the focused corpus builds are in scope
+- no renderer-truth dependency in the active training lane
+- no monolithic multitask model
+- liquid masks remain available to curation/validity logic and terrain-valid
+  loss masking
+
+**Scale/Scope**:
+- two V18 stores
+- two primary model runs
+- one focused curation manifest
+- future quilt/stitch stage documented but not fully implemented in this slice
 
 ## Constitution Check
 
-- **Repo independence**: pass. Active work stays under `wow-viewer/`.
-- **Real-data validation**: required. Signoff uses focused stores plus recorded
-  training evidence.
+*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+
+- **Repo independence**: pass. All planned code and docs stay inside
+  `wow-viewer/`.
+- **Library-first**: pass. No new parser or format-surface duplication is
+  introduced; this slice stays in Python orchestration/training.
+- **Real-data validation**: pass. The focused lane depends on staged 0.5.3 and
+  3.3.5 client roots and V18 Zarr stores derived from them.
+- **Residual model chain**: pass with clarification. Height and normal remain
+  independent models/checkpoints; this plan explicitly rejects a monolithic
+  multitask terrain model.
 - **No untrusted client paths**: pass. Only staged clients under
   `output/tmp/wowarchive-clients/`.
-- **One phase at a time**: pass. Focused stores first, then bounded height and
-  normal training.
-- **No architecture drift**: pass. Existing V16.1 / V18 models remain the
-  implementation owner.
-- **No speculative losses**: pass. Active losses are plain height L1 and plain
-  normal cosine.
+- **Training-script-change validation**: required. Any script changes land with
+  `py_compile` and focused command proof.
 
 ## Project Structure
+
+### Documentation (this feature)
+
+```text
+specs/047-v18-distill-corpus-open-source-loop/
+├── spec.md
+├── plan.md
+├── research.md
+├── data-model.md
+├── quickstart.md
+├── contracts/
+│   ├── v18-focused-curation-manifest.schema.json
+│   └── v18-focused-training-run.schema.json
+└── tasks.md
+```
+
+### Source Code (repository root)
 
 ```text
 wow-viewer/
 ├── data-harvester/
 │   ├── scripts/
 │   │   ├── build_focused_two_build_corpus.py
-│   │   ├── train_v16_1_height.py
-│   │   ├── train_v16_1_normal.py
+│   │   ├── build_v16_curation_manifest.py
+│   │   ├── build_v18_curation_manifest.py
+│   │   ├── train_v18.py
+│   │   ├── train_v18_focus.py
 │   │   └── train_v16_1_common.py
 │   └── src/harvester/
-│       └── v16_1_dataset.py
+│       ├── v16_1_dataset.py
+│       ├── v16_1_models.py
+│       └── v16_curation.py
 ├── docs/architecture/
 │   └── v18-distill-corpus-open-source-loop-2026-06-04.md
-├── output/datasets/
-│   └── v18/
-└── specs/047-v18-distill-corpus-open-source-loop/
-    ├── spec.md
-    ├── plan.md
-    └── tasks.md
+└── output/datasets/v18/
 ```
 
-## Phase A1 - Focused Two-Build Corpus
+**Structure Decision**: keep feature docs under `specs/047-.../` and keep the
+implementation slice in `data-harvester/scripts/` as thin focused wrappers over
+the existing V18/V16.1 training and curation surfaces.
 
-**Goal**: keep the active corpus bounded to `0_5_3_3368` and `3_3_5_12340`.
+## Phase 0: Research
 
-1. Confirm the two staged client roots exist.
-2. Run the focused build / validation path only for those two builds.
-3. Record the exact store roots and validation outputs.
+See [research.md](research.md). The open design questions resolved for this
+feature are:
+
+- which builds remain in scope,
+- whether liquids remain part of the active signal story,
+- whether V18 should be one model or two,
+- whether a focused V18 wrapper layer is needed over the older V16-named
+  scripts,
+- how quilt-level terrain reconstruction fits the final V18 design.
+
+## Phase 1: Design & Contracts
+
+Artifacts produced in this phase:
+
+- [research.md](research.md)
+- [data-model.md](data-model.md)
+- [quickstart.md](quickstart.md)
+- [`contracts/v18-focused-curation-manifest.schema.json`](contracts/v18-focused-curation-manifest.schema.json)
+- [`contracts/v18-focused-training-run.schema.json`](contracts/v18-focused-training-run.schema.json)
+
+Agent context update script is not present under this repo’s `.specify`
+PowerShell surface, so there is no local script to run for that part of the
+template workflow. Continuity updates remain the replacement mechanism here.
+
+## Phase 2: Immediate Implementation
+
+### Phase 2A - Focused Curation Surface
+
+**Goal**: expose a V18-focused curation entrypoint that writes manifests under
+the V18 dataset root and defaults to the two focused builds.
+
+1. Add `build_v18_curation_manifest.py` as a focused wrapper over the existing
+   curation implementation.
+2. Default it to `output/datasets/v18/`.
+3. Default it to the two focused builds and a stable V18 run-name/output root.
+4. Keep low-trainable liquid/object wipeout rows out of the focused manifest.
 
 **Validation**:
 
-- Two focused stores exist.
-- Required arrays for minimap, height, and normals validate cleanly.
+- `--help` and `py_compile` succeed.
+- operators can build a focused manifest without remembering V16 dataset paths
+  or six-build defaults.
 
-## Phase A2 - Simplified Height Surface
+### Phase 2B - Focused Training Surface
 
-**Goal**: prove the height lane works from minimap only.
+**Goal**: expose a V18-focused training entrypoint that defaults to the two
+focused builds and prefers the latest focused V18 curation manifest.
 
-1. Keep the height input contract at `minimap_rgb -> height_257`.
-2. Keep the height loss plain `L1(pred_height, target_height)`.
-3. Record run config, seed, previews, and best checkpoint.
-
-**Validation**:
-
-- A bounded height run completes.
-- Evidence shows the minimap-only input contract explicitly.
-
-## Phase A3 - Simplified Normal Surface
-
-**Goal**: prove the normal lane works from minimap only.
-
-1. Keep the normal input contract at `minimap_rgb -> normal_xyz`.
-2. Keep the normal loss to masked cosine against `normal_mask`.
-3. Record run config, seed, previews, and best checkpoint.
+1. Add `train_v18_focus.py` as a focused wrapper over `train_v18.py`.
+2. Default dataset root to V18.
+3. Default builds to the two focused anchors.
+4. Auto-resolve the latest focused V18 `kept_tiles.parquet` when the user does
+   not pass `--curation-manifest`.
+5. Default focused runs toward the real 8 GB lane through startup batch
+   autotune, and keep height/normal losses masked to terrain-valid regions.
 
 **Validation**:
 
-- A bounded normal run completes.
-- Evidence shows the minimap-only input contract explicitly.
+- `--help` and `py_compile` succeed.
+- height/normal focused commands can be launched with shorter, safer operator
+  syntax.
 
-## Deferred Scope
+### Phase 2C - Operator Docs
 
-These are not part of the active implementation plan:
+**Goal**: make the focused V18 lane discoverable without reading old V16-heavy
+README sections.
 
-- renderer-truth capture as training truth,
-- object/roof/liquid-driven loss weighting,
-- synthesized-input generation,
-- teacher distillation,
-- open-source student-model release.
+1. Add focused V18 curation/training quickstart commands to
+   `data-harvester/README.md`.
+2. Align architecture and memory-bank wording with the final owner design.
+
+**Validation**:
+
+- docs name the focused wrappers and the two-build scope consistently.
+
+## Complexity Tracking
+
+No constitution violations are required for this slice.

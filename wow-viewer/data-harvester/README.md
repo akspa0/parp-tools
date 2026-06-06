@@ -87,6 +87,64 @@ cd wow-viewer/data-harvester
 uv sync
 ```
 
+## Focused V18 Quickstart
+
+Spec `047` now owns a focused two-build V18 lane:
+
+- `0_5_3_3368`
+- `3_3_5_12340`
+
+Use the focused wrappers when you want the active terrain-reconstruction path
+instead of the older broad-corpus operator flow.
+
+Build the focused V18 curation manifest:
+
+```powershell
+uv run python -u scripts/build_v18_curation_manifest.py `
+  --run-name v18_focus_terrain_v1 `
+  --workers -1 `
+  --chunk-size 128
+```
+
+Train the focused V18 height model:
+
+```powershell
+uv run python -u scripts/train_v18_focus.py height `
+  --device cuda `
+  --epochs 40 `
+  --train-max-tiles 4096 `
+  --train-epoch-tiles 2048 `
+  --val-max-tiles 256 `
+  --val-interval 1 `
+  --run-name v18_height_focus_basic
+```
+
+Train the focused V18 normal model:
+
+```powershell
+uv run python -u scripts/train_v18_focus.py normal `
+  --device cuda `
+  --epochs 40 `
+  --train-max-tiles 4096 `
+  --train-epoch-tiles 2048 `
+  --val-max-tiles 256 `
+  --val-interval 1 `
+  --run-name v18_normal_focus_basic
+```
+
+Notes:
+
+- `build_v18_curation_manifest.py` defaults to the V18 dataset root and the two
+  focused builds.
+- `train_v18_focus.py` defaults to the V18 dataset root, the two focused
+  builds, the latest focused `kept_tiles.parquet` when present, and startup
+  batch autotune against `--target-vram-gb 8`.
+- focused curation now rejects tiles with too little surviving trainable
+  terrain, so liquid-hidden wipeout rows stop entering the active pool.
+- focused `height` and `normal` losses now honor terrain-valid masks, so
+  liquid-hidden and object-hidden regions do not contribute loss.
+- The active focused lane keeps height and normal as separate model runs.
+
 ---
 
 ## Why This Multi-Step Pipeline?

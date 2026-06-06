@@ -743,6 +743,33 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
             yield return path[..^3] + ".mdl";
     }
 
+    private static bool IsClassicModelRequest(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsModelRequest(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".m2", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> EnumeratePreferredClassicModelPaths(string normalizedPath)
+    {
+        yield return normalizedPath;
+
+        string? swapped = SwapMdlMdxExtension(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(swapped)
+            && !swapped.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return swapped;
+        }
+    }
+
     private string? TryResolveFromFileSet(string normalizedPath)
     {
         if (_dataSource is not MpqDataSource mpqDataSource)
@@ -756,7 +783,7 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
         }
 
         string baseName = Path.GetFileNameWithoutExtension(normalizedPath);
-        if (string.IsNullOrWhiteSpace(baseName))
+        if (string.IsNullOrWhiteSpace(baseName) || !IsModelRequest(normalizedPath))
             return null;
 
         var indexedMatch = mpqDataSource.FindByBaseName(baseName, GetLikelyModelExtensions(normalizedPath));
@@ -829,6 +856,63 @@ public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer =
 
         resolvedPath = null;
         return null;
+    }
+
+    private byte[]? TryReadExactCandidate(string candidate, out string? resolvedPath)
+    {
+        resolvedPath = NormalizeKey(candidate);
+        _pathProbeAttempts++;
+
+        byte[]? data = _dataSource?.ReadFile(resolvedPath);
+        if (data != null)
+        {
+            _pathProbeResolutions++;
+            return data;
+        }
+
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            string? found = mpqDataSource.FindInFileSet(resolvedPath);
+            if (!string.IsNullOrWhiteSpace(found))
+            {
+                string normalizedFound = NormalizeKey(found);
+                if (!normalizedFound.Equals(resolvedPath, StringComparison.OrdinalIgnoreCase))
+                    data = _dataSource.ReadFile(normalizedFound);
+
+                if (data != null)
+                {
+                    resolvedPath = normalizedFound;
+                    _pathProbeResolutions++;
+                    return data;
+                }
+            }
+        }
+
+        resolvedPath = null;
+        return null;
+    }
+
+    private bool TryReadPreferredClassicModelData(string normalizedKey, out string resolvedPath, out byte[]? data)
+    {
+        resolvedPath = normalizedKey;
+        data = null;
+
+        if (!IsClassicModelRequest(normalizedKey))
+            return false;
+
+        foreach (string candidate in EnumeratePreferredClassicModelPaths(normalizedKey))
+        {
+            data = TryReadExactCandidate(candidate, out string? exactResolvedPath);
+            if (data == null || data.Length == 0 || string.IsNullOrWhiteSpace(exactResolvedPath))
+                continue;
+
+            resolvedPath = NormalizeKey(exactResolvedPath);
+            return true;
+        }
+
+        data = null;
+        resolvedPath = normalizedKey;
+        return false;
     }
 
     private IEnumerable<string> EnumerateReadCandidates(string normalizedPath)
@@ -1012,9 +1096,19 @@ private int _mdxLoadFailCount = 0;
         {
             string resolvedModelPath = ResolveCanonicalModelPath(normalizedKey);
             string buildProfileId = FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId ?? "unknown";
-            byte[]? data = ReadFileData(resolvedModelPath);
-            if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
-                data = ReadFileData(normalizedKey);
+            byte[]? data;
+
+            if (!TryReadPreferredClassicModelData(normalizedKey, out string preferredClassicPath, out data))
+            {
+                data = ReadFileData(resolvedModelPath);
+                if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
+                    data = ReadFileData(normalizedKey);
+            }
+            else
+            {
+                resolvedModelPath = preferredClassicPath;
+            }
+
             if (data == null || data.Length == 0)
             {
                 if (_mdxLoadFailCount++ < 5)
@@ -1022,9 +1116,7 @@ private int _mdxLoadFailCount = 0;
                 return null;
             }
 
-            bool isM2Family = resolvedModelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)
-                || WarcraftNetM2Adapter.IsMd20(data)
-                || WarcraftNetM2Adapter.IsMd21(data);
+            bool isM2Family = WarcraftNetM2Adapter.IsM2FamilyContainer(data);
 
             // Match the final main-branch behavior first: adapt M2 + skin directly into the runtime model.
             // Keep byte-level conversion only as a fallback when the direct adapter path fails.

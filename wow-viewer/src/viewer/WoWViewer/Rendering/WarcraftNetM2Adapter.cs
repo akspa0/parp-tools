@@ -28,6 +28,11 @@ internal static class WarcraftNetM2Adapter
         return data.Length >= 4 && BitConverter.ToUInt32(data, 0) == Md21Magic;
     }
 
+    public static bool IsM2FamilyContainer(byte[] data)
+    {
+        return IsMd20(data) || IsMd21(data);
+    }
+
     public static void ValidateModelProfile(byte[] modelBytes, string modelPath, string? buildVersion)
     {
         var profile = FormatProfileRegistry.ResolveModelProfile(buildVersion);

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "v18-focused-training-run.schema.json",
+  "title": "V18 Focused Training Run Config",
+  "type": "object",
+  "required": [
+    "task",
+    "dataset_dir",
+    "builds",
+    "run_name",
+    "resolved_input_contract"
+  ],
+  "properties": {
+    "task": {
+      "type": "string",
+      "enum": [
+        "height",
+        "normal"
+      ]
+    },
+    "dataset_dir": {
+      "type": "string"
+    },
+    "builds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "0_5_3_3368",
+          "3_3_5_12340"
+        ]
+      },
+      "minItems": 1
+    },
+    "curation_manifest": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "run_name": {
+      "type": "string"
+    },
+    "resolved_input_contract": {
+      "type": "string",
+      "enum": [
+        "minimap_rgb",
+        "minimap_rgb+height_norm",
+        "minimap_rgb+object_roof_mask",
+        "variant_defined"
+      ]
+    },
+    "resolved_output_contract": {
+      "type": "string"
+    },
+    "best_val": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "best_epoch": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

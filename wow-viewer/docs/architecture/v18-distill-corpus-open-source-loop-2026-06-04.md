@@ -1,10 +1,10 @@
-# V18 Focused Two-Build Minimap-to-Terrain Loop — 2026-06-04
+# V18 Focused Two-Build Terrain Reconstruction System — 2026-06-04
 
 ## Purpose
 
 This document is the architecture summary for the active spec-047 lane. It
-compresses the current decisions so future sessions do not keep reopening the
-same failed branches.
+compresses the final owner design so future sessions do not keep reopening old
+branches that already failed.
 
 The active spec pack is:
 
@@ -14,7 +14,7 @@ The active spec pack is:
 
 If this document and the spec disagree, the spec wins.
 
-## Current Truth State
+## Active Boundary
 
 The focused staged client roots are:
 
@@ -26,6 +26,9 @@ The active corpus remains bounded to:
 - `wow-viewer/output/datasets/v18/0_5_3_3368.zarr`
 - `wow-viewer/output/datasets/v18/3_3_5_12340.zarr`
 
+These two stores are the only active corpus owner for V18. The current job is
+to curate and train against them, not to reopen wider build scope.
+
 Renderer-truth capture is not the proof owner for this lane. Both focused
 stores were previously cleared back to honest renderer-truth coverage:
 
@@ -35,7 +38,39 @@ stores were previously cleared back to honest renderer-truth coverage:
 That reset matters only as a guardrail: stale capture artifacts must not be
 mistaken for training truth again.
 
+## What The System Is For
+
+The desired output is not a pretty single-tile preview. The desired output is
+a pipeline that accepts a set of minimap tiles and emits terrain predictions
+that can be quilted back into a believable ADT terrain surface.
+
+The active terrain system is:
+
+1. focused V18 corpus for `0_5_3_3368` and `3_3_5_12340`,
+2. focused curation over minimap, height, normal, terrain-validity, and liquid
+   signals,
+3. one `minimap_rgb -> normalized height` model,
+4. one `minimap_rgb -> normal_xyz` model,
+5. later quilt-level stitching and ADT writeback follow-through.
+
 ## First Bounded Proofs
+
+The first full focused curation run was completed on 2026-06-05:
+
+- command surface: `scripts/build_v18_curation_manifest.py`
+- manifest root: `wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1/`
+- corpus coverage: `6763` audited rows across the two focused builds
+- kept rows: `4096` (`keep_ratio = 0.6056`)
+- dominant reject causes:
+  - `blank_minimap_blank_normals = 2396`
+  - `blank_what_plate_tile = 221`
+  - `normal_minimap_edge_mismatch = 36`
+  - `wmo_loss_wipeout_tile = 14`
+- kept difficulty mix:
+  - `easy = 8`
+  - `medium = 30`
+  - `hard = 3070`
+  - `pathological = 988`
 
 Two bounded smoke runs were completed against the focused V18 stores on
 2026-06-04 using the simplified minimap-only contract:
@@ -59,25 +94,32 @@ still expected old weighted-loss tensors such as `terrain_valid_mask`. That was
 patched so the simplified lane now previews from `base_mask`, `train_mask`, and
 `invalid_mask` instead.
 
-## Scope Reset
+## Active Training Contract
 
-The active lane is now deliberately basic:
+The active lane is deliberately basic:
 
 1. train on `0_5_3_3368` and `3_3_5_12340` only,
 2. use `minimap_rgb` as the only model input,
 3. train one height model and one normal model,
-4. keep the losses plain and local to the target signal.
+4. keep the losses plain and local to the target signal,
+5. use liquids as curation and terrain-validity context rather than as a large
+   auxiliary loss stack.
 
 That means:
 
 - no renderer-truth capture dependency,
-- no object-mask loss gating,
+- no precise object-mask loss gating,
 - no roof-mask loss gating,
-- no liquid weighting,
+- no liquid-derived weighted-loss stack,
 - no refiner-driven active signoff,
 - no synth/distill/open-source loop in this iteration.
 
-## Why This Reset Happened
+The active height and normal runs still mask loss to terrain-valid regions
+derived from the harvested validity tensors. That keeps liquid-hidden and
+object-hidden terrain from poisoning optimization without turning liquids into a
+separate weighted auxiliary objective.
+
+## Why This Design Holds
 
 The prior lane kept drifting into weak or misleading supervision surfaces:
 
@@ -88,14 +130,14 @@ The prior lane kept drifting into weak or misleading supervision surfaces:
   terrain correlation.
 
 The repo does not need another speculative signal stack right now. It needs a
-working `minimap -> terrain` loop.
+working minimap-to-terrain loop with a focused operator surface.
 
 ## Active Model Contracts
 
 ### Height
 
 - input: `minimap_rgb`
-- target: `height_257`
+- target: `normalized height_257`
 - loss: plain `L1(pred_height, target_height)`
 
 ### Normals
@@ -105,9 +147,9 @@ working `minimap -> terrain` loop.
 - validity mask: `normal_mask`
 - loss: masked cosine loss only
 
-These contracts are implemented in the existing V16.1 / V18 trainer surface.
-The active default normal route is the minimap-only variant, not the old
-height/refiner/object-roof branches.
+Height and normals remain separate runs and separate checkpoints. They are used
+together downstream, but they are not trained as one shared-weight multitask
+model.
 
 ## Pipeline Summary
 
@@ -115,15 +157,17 @@ height/refiner/object-roof branches.
 staged 0.5.3 + 3.3.5 client roots
         │
         ▼
-build_focused_two_build_corpus.py
-        │
-        ▼
 focused V18 Zarr stores
         │
-        ├──► train_v16_1_height.py
+        ▼
+build_v18_curation_manifest.py
+        │
+        ├──► kept_tiles.parquet / summary.json
+        │
+        ├──► train_v18_focus.py height
         │     └──► models/v18/height/runs/<run-name>/
         │
-        └──► train_v16_1_normal.py
+        └──► train_v18_focus.py normal
               └──► models/v18/normal/runs/<run-name>/
 ```
 
@@ -136,8 +180,7 @@ up a trustworthy baseline. `0_5_3_3368` and `3_3_5_12340` are enough for that.
 
 ### Decision 2: Minimap-only input is the proof owner
 
-The user asked to go back to basics. The active proof owner is the minimap
-image itself, not auxiliary channels.
+The active proof owner is the minimap image itself, not auxiliary channels.
 
 ### Decision 3: Plain losses beat speculative weighting here
 
@@ -145,7 +188,13 @@ Height uses plain L1. Normals use masked cosine. If that basic lane fails, the
 answer is not to immediately add more loss terms. The answer is to understand
 the corpus or the model.
 
-### Decision 4: Renderer truth is explicitly out of scope
+### Decision 4: Liquids stay in curation
+
+Liquid masks remain useful because water-only and hidden-terrain tiles are a
+real curation problem. They stay in the validity/filtering surface without
+reopening the old large loss stack.
+
+### Decision 5: Renderer truth is explicitly out of scope
 
 Capture output may still be useful later, but it is not allowed to silently
 re-enter signoff for this lane.
@@ -153,16 +202,24 @@ re-enter signoff for this lane.
 ## Risks and Guardrails
 
 - **Spec drift**: do not let spec 047 quietly regain the distill/open-source
-  scope while the active repo work is just minimap-only training.
-- **Signal drift**: do not treat roof/object mismatches as blockers unless a
-  specific active trainer path consumes them again.
+  scope or a giant auxiliary-loss stack.
+- **Signal drift**: do not reintroduce object/roof precision masks as active
+  blockers unless a specific trainer path consumes them again.
 - **Validation drift**: do not call old previews or old checkpoints current
-  proof after changing losses or input contracts.
+  proof after changing losses, curation, or input contracts.
+- **Liquid-hidden overtraining**: if minimap-visible water dominates a tile,
+  reject low-trainable rows in curation and keep terrain-valid masking live in
+  the height/normal losses.
 
 ## Open Follow-Up
 
-- Validate both focused stores specifically for the minimap/height/normal
-  contract.
-- Scale the bounded height proof into a real multi-epoch run.
-- Scale the bounded normal proof into a real multi-epoch run.
-- Use those outputs before reopening any fancier lane.
+- Scale the bounded height proof into a real multi-epoch run through
+  `train_v18_focus.py height`.
+- Scale the bounded normal proof into a real multi-epoch run through
+  `train_v18_focus.py normal`.
+- Tune focused runs for the observed 8 GB lane via startup autotune and larger
+  epoch pools instead of the earlier smoke-budget settings.
+- Keep the focused curation manifest stable unless a specific reject-pattern
+  review justifies threshold changes.
+- Keep quilt-level stitching and ADT writeback as the next downstream design
+  owner instead of smuggling it into trainer changes.

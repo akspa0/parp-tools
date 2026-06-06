@@ -41,6 +41,7 @@
 - standalone classic `MDLX` / chunked M2 support is tracked under spec `043`.
 - bad runtime animation selections now fail soft instead of crashing the viewer.
 - pre-release `3.0.1.8303` embedded-profile M2 no-draw was reduced to the layer-0 missing-texture fallback seam and fixed in the viewer path.
+- **2026-06-05 Ghidra trace against WoW 1.12.1 (Build 5875) Win32**: 1.12.1 `.mdx` files are NOT chunked `MDLX` — they use the `MD20` magic (flat pointer-table format) with the legacy `.mdx` extension. The native cache loader normalizes `.mdl`/`.mdx`/`.m2` to `.m2` and dispatches to the same `MD20` parser regardless. The 1.12.1 `MD20` header layout, view table offset (`0x3c/0x40` instead of `0x44/0x48`), and per-record strides (sequence `0x6c`, light `0xc`, camera `0x2c`, ribbon `0x7c`, particle `0xdc`, light `0xc`) are all different from 3.3.5. The current `M2ModelReaderDispatcher` routes 1.12.1 `.mdx` to the 3.3.5 `M2ModelReader`, which silently misreads the strides. The chunked `M2Chunked` reader is therefore currently a dead branch for 1.12.1 (correctly) but the M2 path is the actual bug. Research doc: `wow-viewer/docs/architecture/m2-mdx-1121-native-trace-2026-06-05.md`. This finding should drive a follow-up spec to add an era-aware MD20 reader or a 1.12.1-specific stride table.
 
 ## Data Harvester / Training Continuity
 
@@ -48,17 +49,20 @@
 - prefer startup autotune and larger batch ladders when VRAM headroom allows.
 - validation artifacts are only authoritative when regenerated after behavior changes.
 
-## V18 Focused Two-Build Minimap-to-Terrain Loop (spec 047)
+## V18 Focused Two-Build Terrain Reconstruction System (spec 047)
 
-- spec `047-v18-distill-corpus-open-source-loop` is still the active owner for the focused 0.5.3 + 3.3.5 V18 lane, but the active contract was reset again on 2026-06-04.
+- spec `047-v18-distill-corpus-open-source-loop` remains the active owner for the focused 0.5.3 + 3.3.5 V18 lane, but the contract is now the final terrain-system design rather than the earlier smoke-only framing.
 - architecture doc: `wow-viewer/docs/architecture/v18-distill-corpus-open-source-loop-2026-06-04.md`.
-- active proof owner:
-  - use `minimap_rgb` only as model input
-  - train `height_257` with plain L1
-  - train `normal_xyz` with masked cosine against `normal_mask`
+- active design owner:
+  - focused corpus only: `0_5_3_3368` and `3_3_5_12340`
+  - build a focused curation manifest from the V18 Zarr stores
+  - train `minimap_rgb -> normalized height_257`
+  - train `minimap_rgb -> normal_xyz`
+  - keep quilt-level stitching and later ADT writeback as downstream follow-through
 - explicitly out of scope for the active iteration:
   - renderer-truth capture as training truth
-  - object-mask / roof-mask / liquid-derived loss weighting
+  - precise object-mask / roof-mask loss lanes
+  - liquid-derived weighted loss stacks
   - synthesized-input generation
   - distillation
   - open-source student release
@@ -79,17 +83,74 @@
     - both focused stores remain cleared to `has_object_visibility_mask = 0`
     - both focused stores remain cleared to `has_no_object_minimap = 0`
     - carry-over PNG trees are not active signoff evidence
-- bounded proof now exists:
-  - height smoke run: `wow-viewer/models/v18/height/runs/v18_height_focus_minimap_smoke_20260604_r2/`
-    - 1 epoch, batch size 4, 32 train tiles, 8 val tiles
-    - `val_loss = 0.6626`
-  - normal smoke run: `wow-viewer/models/v18/normal/runs/v18_normal_focus_minimap_smoke_20260604_r2/`
-    - 1 epoch, batch size 4, 32 train tiles, 8 val tiles
-    - `val_loss = 0.2251`
+- landed in the 2026-06-05 final-design/operator pass:
+  - spec pack was rewritten in place:
+    - `wow-viewer/specs/047-v18-distill-corpus-open-source-loop/spec.md`
+    - `plan.md`
+    - `tasks.md`
+    - `research.md`
+    - `data-model.md`
+    - `quickstart.md`
+    - `contracts/`
+  - focused wrappers now exist:
+    - `wow-viewer/data-harvester/scripts/build_v18_curation_manifest.py`
+      - defaults to `wow-viewer/output/datasets/v18`
+      - defaults to builds `0_5_3_3368` + `3_3_5_12340`
+      - writes under `wow-viewer/output/datasets/v18/curation/<run-name>/`
+    - `wow-viewer/data-harvester/scripts/train_v18_focus.py`
+      - defaults to `wow-viewer/output/datasets/v18`
+      - defaults to builds `0_5_3_3368` + `3_3_5_12340`
+      - auto-picks the latest focused `kept_tiles.parquet` when present
+  - `.specify/feature.json` still points at stale spec `011`; use the `047` directory directly until that pointer is explicitly reopened
+  - bounded proof now exists:
+    - height smoke run: `wow-viewer/models/v18/height/runs/v18_height_focus_minimap_smoke_20260604_r2/`
+      - 1 epoch, batch size 4, 32 train tiles, 8 val tiles
+      - `val_loss = 0.6626`
+    - normal smoke run: `wow-viewer/models/v18/normal/runs/v18_normal_focus_minimap_smoke_20260604_r2/`
+      - 1 epoch, batch size 4, 32 train tiles, 8 val tiles
+      - `val_loss = 0.2251`
+    - focused curation manifest: `wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1/`
+      - audited rows: `6763`
+      - kept rows: `4096`
+      - keep ratio: `0.6056`
+      - dominant reject causes:
+        - `blank_minimap_blank_normals = 2396`
+        - `blank_what_plate_tile = 221`
+        - `normal_minimap_edge_mismatch = 36`
+        - `wmo_loss_wipeout_tile = 14`
+      - kept difficulty mix:
+        - `easy = 8`
+        - `medium = 30`
+        - `hard = 3070`
+        - `pathological = 988`
   - one leftover seam was exposed and fixed during that proof:
     - `_preview_normal(...)` still expected old weighted-loss tensors and crashed after a successful epoch
     - it now falls back cleanly to simplified-lane preview tensors (`base_mask`, `train_mask`, `invalid_mask`)
+- landed in the 2026-06-05 focused-mask/tuning pass:
+  - the earlier simplification had gone too far for active focused training:
+    - curation and dataset tensors still carried liquid/terrain-valid context
+    - but active `height` used full-tile `L1`
+    - and active `normal` used cosine over `normal_mask` only
+  - active focused loss path is now terrain-valid again in `wow-viewer/data-harvester/scripts/train_v16_1_common.py`:
+    - `_height_loss(...)` now masks `abs(pred-target)` by `terrain_valid_mask_257`
+    - `_normal_loss(...)` now masks cosine by `normal_mask * terrain_valid_mask_257`
+    - this keeps liquid-hidden and object-hidden regions out of the loss without restoring a large auxiliary liquid-weight stack
+  - focused curation is now stricter in `wow-viewer/data-harvester/scripts/build_v16_curation_manifest.py`:
+    - rows with `trainable_cov < 0.20` are rejected as `insufficient_trainable_terrain`
+    - this catches liquid-hidden wipeout rows even when they are not WMO-dominated
+  - focused wrapper/operator defaults are now pointed at the actual 8 GB lane:
+    - `wow-viewer/data-harvester/scripts/train_v18_focus.py`
+      - defaults `--target-vram-gb 8`
+      - defaults startup `--autotune-batch-size`
+  - focused docs now steer away from the earlier smoke budget:
+    - quickstart/README examples now use larger tile pools and `40` epochs instead of `20`
+  - targeted Python proof now exists:
+    - `wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+      - proves height loss ignores non-trainable regions
+      - proves normal loss honors terrain-valid masking
+      - proves curation rejects low-trainable tiles
 - the next real proof is:
-  - validate the focused stores for minimap/height/normal readiness
-  - scale the height run beyond smoke budget
-  - scale the normal run beyond smoke budget
+  - rerun focused curation so the active `kept_tiles.parquet` drops low-trainable liquid-hidden rows
+  - scale the height run beyond smoke budget through `train_v18_focus.py height`
+  - scale the normal run beyond smoke budget through `train_v18_focus.py normal`
+  - confirm live losses fall below the previous liquid-poisoned plateaus after the new manifest + mask path

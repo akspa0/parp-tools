@@ -6,6 +6,95 @@ namespace WowViewer.Core.Tests;
 
 public sealed class M2EmbeddedProfileRealDataTests
 {
+    private static Assembly? s_viewerAssembly;
+
+    [Fact]
+    public void IsM2FamilyContainer_UsesRootMagicInsteadOfFilenameConvention()
+    {
+        string viewerAssemblyPath = Path.Combine(
+            GetWowViewerRoot(),
+            "src",
+            "viewer",
+            "WoWViewer",
+            "bin",
+            "Debug",
+            "net10.0-windows",
+            "ParpToolsWoWViewer.dll");
+        Assert.True(File.Exists(viewerAssemblyPath), $"Expected built viewer assembly at '{viewerAssemblyPath}'. Build WoWViewer before running this test.");
+
+        Assembly viewerAssembly = LoadViewerAssembly(viewerAssemblyPath);
+        Type adapterType = viewerAssembly.GetType("WoWViewer.Rendering.WarcraftNetM2Adapter", throwOnError: true)!;
+        MethodInfo isM2FamilyContainer = adapterType.GetMethod(
+            "IsM2FamilyContainer",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        byte[] mdlxBytes = [(byte)'M', (byte)'D', (byte)'L', (byte)'X', 0, 0, 0, 0];
+        byte[] md20Bytes = [(byte)'M', (byte)'D', (byte)'2', (byte)'0', 0, 0, 0, 0];
+        byte[] md21Bytes = [(byte)'M', (byte)'D', (byte)'2', (byte)'1', 0, 0, 0, 0];
+
+        Assert.False((bool)isM2FamilyContainer.Invoke(null, [mdlxBytes])!);
+        Assert.True((bool)isM2FamilyContainer.Invoke(null, [md20Bytes])!);
+        Assert.True((bool)isM2FamilyContainer.Invoke(null, [md21Bytes])!);
+    }
+
+    [Fact]
+    public void WorldAssetManager_ClassicPreferredPaths_DoNotJumpToM2First()
+    {
+        string viewerAssemblyPath = Path.Combine(
+            GetWowViewerRoot(),
+            "src",
+            "viewer",
+            "WoWViewer",
+            "bin",
+            "Debug",
+            "net10.0-windows",
+            "ParpToolsWoWViewer.dll");
+        Assert.True(File.Exists(viewerAssemblyPath), $"Expected built viewer assembly at '{viewerAssemblyPath}'. Build WoWViewer before running this test.");
+
+        Assembly viewerAssembly = LoadViewerAssembly(viewerAssemblyPath);
+        Type worldAssetManagerType = viewerAssembly.GetType("WoWViewer.Terrain.WorldAssetManager", throwOnError: true)!;
+        MethodInfo helper = worldAssetManagerType.GetMethod(
+            "EnumeratePreferredClassicModelPaths",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+
+        string[] mdxCandidates = ((IEnumerable<string>)helper.Invoke(null, ["World\\Generic\\Crate.mdx"])!).ToArray();
+        string[] mdlCandidates = ((IEnumerable<string>)helper.Invoke(null, ["World\\Generic\\Crate.mdl"])!).ToArray();
+
+        Assert.Equal(["World\\Generic\\Crate.mdx", "World\\Generic\\Crate.mdl"], mdxCandidates);
+        Assert.Equal(["World\\Generic\\Crate.mdl", "World\\Generic\\Crate.mdx"], mdlCandidates);
+        Assert.DoesNotContain(mdxCandidates, candidate => candidate.EndsWith(".m2", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mdlCandidates, candidate => candidate.EndsWith(".m2", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void WmoRenderer_ClassicPreferredPaths_DoNotJumpToM2First()
+    {
+        string viewerAssemblyPath = Path.Combine(
+            GetWowViewerRoot(),
+            "src",
+            "viewer",
+            "WoWViewer",
+            "bin",
+            "Debug",
+            "net10.0-windows",
+            "ParpToolsWoWViewer.dll");
+        Assert.True(File.Exists(viewerAssemblyPath), $"Expected built viewer assembly at '{viewerAssemblyPath}'. Build WoWViewer before running this test.");
+
+        Assembly viewerAssembly = LoadViewerAssembly(viewerAssemblyPath);
+        Type wmoRendererType = viewerAssembly.GetType("WoWViewer.Rendering.WmoRenderer", throwOnError: true)!;
+        MethodInfo helper = wmoRendererType.GetMethod(
+            "EnumeratePreferredClassicDoodadPaths",
+            BindingFlags.Static | BindingFlags.NonPublic)!;
+
+        string[] mdxCandidates = ((IEnumerable<string>)helper.Invoke(null, ["World\\Generic\\Crate.mdx"])!).ToArray();
+        string[] mdlCandidates = ((IEnumerable<string>)helper.Invoke(null, ["World\\Generic\\Crate.mdl"])!).ToArray();
+
+        Assert.Equal(["World\\Generic\\Crate.mdx", "World\\Generic\\Crate.mdl"], mdxCandidates);
+        Assert.Equal(["World\\Generic\\Crate.mdl", "World\\Generic\\Crate.mdx"], mdlCandidates);
+        Assert.DoesNotContain(mdxCandidates, candidate => candidate.EndsWith(".m2", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(mdlCandidates, candidate => candidate.EndsWith(".m2", StringComparison.OrdinalIgnoreCase));
+    }
+
     [Fact]
     public void BuildRuntimeModel_PreRelease301_EmbeddedProfileSample_HasRenderableGeometry()
     {
@@ -41,7 +130,7 @@ public sealed class M2EmbeddedProfileRealDataTests
             "ParpToolsWoWViewer.dll");
         Assert.True(File.Exists(viewerAssemblyPath), $"Expected built viewer assembly at '{viewerAssemblyPath}'. Build WoWViewer before running this test.");
 
-        Assembly viewerAssembly = Assembly.LoadFrom(viewerAssemblyPath);
+        Assembly viewerAssembly = LoadViewerAssembly(viewerAssemblyPath);
         Type adapterType = viewerAssembly.GetType("WoWViewer.Rendering.WarcraftNetM2Adapter", throwOnError: true)!;
         MethodInfo buildRuntimeModel = adapterType.GetMethod(
             "BuildRuntimeModel",
@@ -100,7 +189,7 @@ public sealed class M2EmbeddedProfileRealDataTests
             "ParpToolsWoWViewer.dll");
         Assert.True(File.Exists(viewerAssemblyPath), $"Expected built viewer assembly at '{viewerAssemblyPath}'. Build WoWViewer before running this test.");
 
-        Assembly viewerAssembly = Assembly.LoadFrom(viewerAssemblyPath);
+        Assembly viewerAssembly = LoadViewerAssembly(viewerAssemblyPath);
         Type adapterType = viewerAssembly.GetType("WoWViewer.Rendering.WarcraftNetM2Adapter", throwOnError: true)!;
         MethodInfo buildRuntimeModel = adapterType.GetMethod(
             "BuildRuntimeModel",
@@ -165,7 +254,7 @@ public sealed class M2EmbeddedProfileRealDataTests
             "ParpToolsWoWViewer.dll");
         Assert.True(File.Exists(viewerAssemblyPath), $"Expected built viewer assembly at '{viewerAssemblyPath}'. Build WoWViewer before running this test.");
 
-        Assembly viewerAssembly = Assembly.LoadFrom(viewerAssemblyPath);
+        Assembly viewerAssembly = LoadViewerAssembly(viewerAssemblyPath);
         Type rendererType = viewerAssembly.GetType("WoWViewer.Rendering.MdxRenderer", throwOnError: true)!;
         MethodInfo shouldSkipLayerWhenTextureIsMissing = rendererType.GetMethod(
             "ShouldSkipLayerWhenTextureIsMissing",
@@ -190,6 +279,16 @@ public sealed class M2EmbeddedProfileRealDataTests
         }
 
         throw new DirectoryNotFoundException("Could not locate the wow-viewer repository root from the test output directory.");
+    }
+
+    private static Assembly LoadViewerAssembly(string viewerAssemblyPath)
+    {
+        if (s_viewerAssembly != null)
+            return s_viewerAssembly;
+
+        string normalizedTargetPath = Path.GetFullPath(viewerAssemblyPath);
+        s_viewerAssembly = Assembly.LoadFrom(normalizedTargetPath);
+        return s_viewerAssembly;
     }
 
     private static IEnumerable<string> ReadAdditionalListfileEntries()

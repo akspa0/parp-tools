@@ -1,206 +1,266 @@
-# Feature Specification: V18 Focused Two-Build Minimap-to-Terrain Loop
+# Feature Specification: V18 Focused Two-Build Terrain Reconstruction System
 
 **Feature Branch**: `047-v18-distill-corpus-open-source-loop`
 
 **Created**: 2026-06-04
 
-**Status**: Draft — Scope Reset 2026-06-04
+**Status**: Final Design Draft — 2026-06-05
 
-## Scope Reset (2026-06-04)
+## Intent
 
-The active lane was cut back to the simplest useful training surface:
+The V18 lane exists to turn curated minimap tiles into stitchable terrain
+reconstruction for two real corpus anchors only:
 
-1. keep the corpus focused on `0_5_3_3368` and `3_3_5_12340` only,
-2. train from a single `minimap_rgb` input image only,
-3. predict `height_257` and `normal_xyz` with plain supervision,
-4. stop depending on renderer-truth capture, object-mask gating, roof-mask
-   gating, or extra loss contributions for active signoff.
+- `0_5_3_3368`
+- `3_3_5_12340`
 
-Older ideas around synthesized inputs, teacher distillation, and an
-open-source student model are deferred. They are not part of the active
-implementation contract for this spec.
+The desired product is not a pretty single-tile preview. The desired product is
+a pipeline that accepts a set of minimap tile images and emits terrain data
+that can be quilted back into ADT terrain with believable shape and border
+continuity.
 
 ## Problem Statement
 
-The V18 dataset namespace already exists and the V16.1 model family already
-works. The real issue is that the current lane drifted into too many weak
-signals and too much operational noise.
+The project already proved local terrain reconstruction in earlier model lines,
+but the owner workflow drifted into too many secondary signals and too much
+dataset width.
 
-The repo needs one boring, trustworthy loop:
+The actual problems to solve are:
 
-- `minimap_rgb -> height_257`
-- `minimap_rgb -> normal_xyz`
+1. use only the two builds that matter (`0_5_3_3368` and `3_3_5_12340`),
+2. keep only tiles whose minimap/height/normal/liquid data is coherent enough
+   to train against,
+3. train two focused terrain models:
+   - `minimap_rgb -> normalized height field`
+   - `minimap_rgb -> normal field`
+4. use the outputs of those models together in a downstream quilt/inference
+   stage that reconstructs terrain, not just isolated tile previews.
 
-That loop should run on the focused two-build corpus and produce outputs we can
-actually use, without waiting on capture correctness or inventing more loss
-surfaces than the task needs.
+The V18 dataset is considered functionally complete enough to support this lane.
+The work remaining is to finalize the design, lock the focused operator
+workflow, and build the curation/training surfaces that put the existing data
+to work.
 
-## Out of Scope
+## Scope
 
-- Renderer-truth capture as training truth.
-- Object-mask, roof-mask, or liquid-derived loss weighting for the active lane.
-- New model architecture families.
-- Expanding back out to the other four builds.
-- Synthesized-data generation, teacher distillation, or open-source release.
+### In Scope
 
-## Goals
+- focused V18 corpus: `0_5_3_3368` + `3_3_5_12340` only
+- V18 curation manifest generation on the focused V18 stores
+- V18 height training from minimap input
+- V18 normal training from minimap input
+- liquid masks as curation and terrain-validity signals
+- downstream design contract for quilt-level terrain stitching and ADT writeback
 
-- One focused V18 corpus containing only `0_5_3_3368` and `3_3_5_12340`.
-- One bounded height-training proof from `minimap_rgb` only.
-- One bounded normal-training proof from `minimap_rgb` only.
-- One reproducible command surface for rerunning both models on the focused
-  stores.
+### Out of Scope
+
+- all other builds
+- renderer-truth capture as required training truth
+- precise object masks and MDX/M2 omission masks in the active training lane
+- new monolithic multitask terrain models
+- synth/distill/open-source release work
+- reopening alphaWDT writer work
+
+## Design Principles
+
+1. **Two builds only**
+   More corpus width is not the active bottleneck.
+
+2. **Curation over clever losses**
+   Bad tiles are a larger problem than missing auxiliary masks.
+
+3. **Independent models**
+   Height and normals remain separate V18 models. They are used together during
+   terrain reconstruction, but they are not trained as one shared-weight
+   multitask checkpoint.
+
+4. **Liquids matter**
+   Liquid masks remain valid supervisory context because hidden underwater
+   terrain is poorly explained by minimap imagery. They are used to filter or
+   de-emphasize unusable tiles/regions, not to reintroduce a large speculative
+   loss stack.
+
+5. **Tile plausibility is not enough**
+   The product must support quilt-level terrain reconstruction. The final
+   pipeline includes a post-model stitching stage.
 
 ## User Scenarios & Testing
 
-### User Story 1 — Focus the corpus to two builds (Priority: P1)
+### User Story 1 — Focus the corpus to the two useful builds (Priority: P1)
 
-A researcher can work only with `0_5_3_3368` and `3_3_5_12340` and does not
-need the other four builds for this proof lane.
+A researcher can operate only on `0_5_3_3368` and `3_3_5_12340` and avoid the
+other four builds entirely.
 
-**Why this priority**: If the focused stores are not honest and reproducible,
-the training loop is noise no matter how simple the model is.
-
-**Independent Test**: Run the focused corpus path on the two staged builds and
-validate both resulting stores.
+**Independent Test**: build, validate, and curate only the two focused V18
+stores.
 
 **Acceptance Scenarios**:
 
-1. **Given** staged clients for `0_5_3_3368` and `3_3_5_12340`, **When** the
-   focused build runs, **Then** it produces one V18 Zarr store per build under
-   `wow-viewer/output/datasets/v18/`.
-2. **Given** those two stores, **When** validation runs, **Then** required
-   training signals are present and coherent without requiring any of the other
-   four builds.
+1. **Given** the staged client roots for the two focused builds, **When** the
+   focused V18 workflow runs, **Then** only `0_5_3_3368.zarr` and
+   `3_3_5_12340.zarr` are required inputs.
+2. **Given** those two stores, **When** signal validation and curation run,
+   **Then** they produce a focused manifest with no dependency on the other
+   builds.
 
 ---
 
-### User Story 2 — Train height from one minimap input (Priority: P1)
+### User Story 2 — Curate only coherent terrain tiles (Priority: P1)
 
-A researcher can train a height model that consumes only `minimap_rgb` and
-predicts `height_257`.
+A researcher can build a focused curation manifest that rejects the tiles most
+likely to poison terrain learning: blank tiles, liquid-dominated hidden-terrain
+tiles, bad minimap/normal alignment, erased-normal leftovers, and similar
+low-value rows.
 
-**Why this priority**: Height is the simplest core terrain target and gives the
-basic proof that the focused corpus still trains cleanly.
-
-**Independent Test**: Run a bounded height-training pass with plain L1
-supervision and verify the trainer writes checkpoints and validation previews.
+**Independent Test**: run the focused V18 curation manifest builder and inspect
+`summary.json`, `tiles.parquet`, and `kept_tiles.parquet`.
 
 **Acceptance Scenarios**:
 
-1. **Given** the focused two-build corpus, **When** the height trainer runs,
-   **Then** its input contract is `minimap_rgb -> height_257`.
-2. **Given** the active height lane, **When** loss is computed, **Then** it
-   uses plain height supervision with no renderer-truth or object/roof/liquid
-   weighting.
-3. **Given** a bounded run, **When** it completes, **Then** the checkpoint and
-   evidence land under `wow-viewer/models/v18/height/runs/<run-name>/`.
+1. **Given** the focused V18 stores, **When** curation runs, **Then** the same
+   curation surface is applied to both train and validation pools.
+2. **Given** liquid masks and terrain-validity metrics, **When** tiles are
+   scored, **Then** obviously unusable liquid/blank/what-plate rows can be
+   excluded without requiring renderer truth, including rows with too little
+   surviving trainable terrain.
+3. **Given** the focused manifest, **When** a training run consumes it,
+   **Then** both train and validation tile pools are drawn only from curated
+   rows.
 
 ---
 
-### User Story 3 — Train normals from one minimap input (Priority: P1)
+### User Story 3 — Train a V18 height model from minimap tiles (Priority: P1)
 
-A researcher can train a normal model that consumes only `minimap_rgb` and
-predicts `normal_xyz`.
+A researcher can train a focused V18 height model that predicts normalized
+height structure from minimap imagery alone.
 
-**Why this priority**: Normals are the other core terrain output we need for
-useful downstream terrain reconstruction without reopening the old complicated
-loss stack.
-
-**Independent Test**: Run a bounded normal-training pass with masked cosine
-loss and verify the trainer writes checkpoints and validation previews.
+**Independent Test**: run a bounded V18 height training pass with the focused
+manifest and verify evidence/checkpoints are produced.
 
 **Acceptance Scenarios**:
 
-1. **Given** the focused two-build corpus, **When** the normal trainer runs,
-   **Then** its input contract is `minimap_rgb -> normal_xyz`.
-2. **Given** the active normal lane, **When** loss is computed, **Then** it
-   uses plain masked cosine supervision from `normal_mask` with no extra
-   object/roof/liquid weighting and no height-refiner dependency.
-3. **Given** a bounded run, **When** it completes, **Then** the checkpoint and
-   evidence land under `wow-viewer/models/v18/normal/runs/<run-name>/`.
+1. **Given** the focused curated manifest, **When** the V18 height trainer
+   runs, **Then** its input contract is `minimap_rgb -> normalized height`.
+2. **Given** the active height lane, **When** loss is computed, **Then** it is
+   plain height supervision over terrain-valid regions rather than a large
+   auxiliary loss bundle.
+3. **Given** the run finishes, **When** evidence is inspected, **Then** the run
+   records command, seed, manifest, and checkpoint under `models/v18/height/`.
 
-### Edge Cases
+---
 
-- A tile with missing normals must still be indexed honestly and excluded only
-  by the normal loss mask, not silently dropped.
-- A tile with poor roof/object signals must not poison the active lane because
-  those signals are not part of the basic training contract.
-- A rerun with the same seed and same focused stores must reproduce the same
-  train/val split and the same command/config evidence.
+### User Story 4 — Train a V18 normal model from minimap tiles (Priority: P1)
 
-## Requirements *(mandatory)*
+A researcher can train a focused V18 normal model that predicts terrain normals
+from minimap imagery alone.
 
-### Functional Requirements
+**Independent Test**: run a bounded V18 normal training pass with the focused
+manifest and verify evidence/checkpoints are produced.
 
-- **FR-001**: The focused-corpus workflow MUST treat `0_5_3_3368` and
-  `3_3_5_12340` as the canonical build list for this spec.
-- **FR-002**: The active height trainer MUST consume only `minimap_rgb` as
-  model input.
-- **FR-003**: The active height trainer MUST use plain supervision against
-  `height_257` with no renderer/object/roof/liquid loss weighting.
-- **FR-004**: The active normal trainer MUST consume only `minimap_rgb` as
-  model input.
-- **FR-005**: The active normal trainer MUST use masked cosine supervision
-  against `normal_xyz` with `normal_mask` as the only active validity mask.
-- **FR-006**: The active training lane MUST NOT require
-  `object_visibility_mask`, `no_object_minimap`, or any renderer-capture
-  artifact for signoff.
-- **FR-007**: The focused build and both training runs MUST be reproducible
-  from recorded commands, config, and seed.
-- **FR-008**: All active scripts and outputs in this lane MUST remain under
-  `wow-viewer/`.
+**Acceptance Scenarios**:
 
-### Key Entities
+1. **Given** the focused curated manifest, **When** the V18 normal trainer
+   runs, **Then** its input contract is `minimap_rgb -> normal_xyz`.
+2. **Given** the active normal lane, **When** loss is computed, **Then** it is
+   plain masked cosine using terrain-valid normal regions rather than
+   object/roof auxiliary weighting.
+3. **Given** the run finishes, **When** evidence is inspected, **Then** the run
+   records command, seed, manifest, and checkpoint under `models/v18/normal/`.
 
-- **Focused Two-Build Corpus**: the V18 stores for `0_5_3_3368` and
+---
+
+### User Story 5 — Reconstruct a stitched terrain quilt for downstream ADT work (Priority: P2)
+
+A researcher can run height + normal inference over a set of minimap tiles and
+feed those predictions into a quilt-level terrain assembly stage that prepares
+the terrain for ADT writeback.
+
+**Independent Test**: define and document the contract for a quilt inference job
+that consumes predicted terrain tiles and emits a stitch-ready terrain quilt.
+
+**Acceptance Scenarios**:
+
+1. **Given** a set of focused minimap tiles, **When** inference runs for height
+   and normals, **Then** per-tile predictions are emitted with enough metadata
+   to place them back into quilt coordinates.
+2. **Given** neighboring predicted height tiles, **When** the quilt assembly
+   stage runs, **Then** it can solve border continuity rather than treating
+   every tile as an isolated mesh.
+3. **Given** a solved terrain quilt, **When** ADT writeback is reopened in a
+   later implementation slice, **Then** the output contract already names the
+   required terrain arrays and placement metadata.
+
+## Functional Requirements
+
+- **FR-001**: The focused V18 dataset contract MUST use only `0_5_3_3368` and
   `3_3_5_12340`.
-- **Height Model**: the existing V16.1 / V18 height trainer used with the
-  input contract `minimap_rgb -> height_257`.
-- **Normal Model**: the existing V16.1 / V18 normal trainer used with the
-  input contract `minimap_rgb -> normal_xyz`.
-- **Plain Height Supervision**: direct L1 loss against `height_257`.
-- **Plain Normal Supervision**: masked cosine loss against `normal_xyz` using
-  `normal_mask`.
+- **FR-002**: The active V18 curation workflow MUST operate directly on
+  `wow-viewer/output/datasets/v18/*.zarr`.
+- **FR-003**: The active curation workflow MUST score and filter tiles using
+  minimap, height, normal, terrain-validity, and liquid-derived signals.
+- **FR-004**: The active curation workflow MUST produce `tiles.parquet`,
+  `kept_tiles.parquet`, and `summary.json`.
+- **FR-005**: The V18 height trainer MUST consume minimap RGB only.
+- **FR-006**: The V18 normal trainer MUST consume minimap RGB only.
+- **FR-007**: The V18 height and normal trainers MUST remain separate model
+  runs and separate checkpoints.
+- **FR-008**: Liquid masks MUST remain available to the curation and
+  terrain-validity surfaces.
+- **FR-008A**: The active height and normal losses MUST ignore terrain-hidden
+  liquid/object regions via terrain-valid masking, without reintroducing a
+  broad auxiliary liquid-weight stack.
+- **FR-009**: The active training lane MUST NOT require renderer-truth capture
+  arrays.
+- **FR-010**: The focused operator workflow MUST expose dedicated V18
+  curation/training entrypoints instead of relying only on older V16-named
+  scripts.
+- **FR-011**: Height training MAY remain normalized, but the final V18 design
+  MUST treat quilt-level stitching as the owner of cross-tile continuity rather
+  than isolated tile previews.
+- **FR-012**: All active surfaces MUST remain under `wow-viewer/`.
 
-## Success Criteria *(mandatory)*
+## Key Entities
 
-### Measurable Outcomes
+- **Focused V18 Corpus**: the two V18 stores for `0_5_3_3368` and
+  `3_3_5_12340`.
+- **Focused Curation Manifest**: the filtered list of trainable rows produced
+  from the focused V18 corpus.
+- **Height Model Run**: an independent V18 training run for minimap-to-height
+  prediction.
+- **Normal Model Run**: an independent V18 training run for minimap-to-normal
+  prediction.
+- **Liquid Validity Signal**: the liquid-aware terrain-validity context used to
+  reject or de-emphasize poor training rows.
+- **Terrain Quilt Job**: the future inference-stage job that combines per-tile
+  predictions into a stitch-ready terrain quilt.
 
-- **SC-001**: One focused V18 build produces complete, valid stores for
-  `0_5_3_3368` and `3_3_5_12340`.
-- **SC-002**: One bounded height run completes on the focused corpus and writes
-  checkpoint plus validation evidence under `models/v18/height/runs/`.
-- **SC-003**: One bounded normal run completes on the focused corpus and writes
-  checkpoint plus validation evidence under `models/v18/normal/runs/`.
-- **SC-004**: Both active runs log the single-image input contract explicitly:
-  `minimap_rgb -> height_257` and `minimap_rgb -> normal_xyz`.
-- **SC-005**: Active signoff no longer depends on renderer truth, object-mask
-  gating, roof-mask gating, or extra loss terms.
+## Success Criteria
+
+- **SC-001**: A dedicated focused V18 curation manifest is generated from the
+  two V18 stores and is directly consumable by V18 training commands.
+- **SC-002**: One bounded focused V18 height run completes and writes evidence
+  under `models/v18/height/runs/`.
+- **SC-003**: One bounded focused V18 normal run completes and writes evidence
+  under `models/v18/normal/runs/`.
+- **SC-004**: Focused operators no longer need to remember V16 dataset paths or
+  six-build command sets to run the V18 lane.
+- **SC-005**: The final design names a quilt-level terrain assembly contract so
+  the model outputs are explicitly aimed at stitched ADT reconstruction rather
+  than isolated tile previews only.
 
 ## Assumptions
 
-- The existing V16.1 / V18 model family is good enough for the basic proof.
-- The focused stores already contain the minimap, height, and normal arrays
-  needed for this lane.
-- The remaining roof/object signal mismatches may still exist in the stores,
-  but they are not blockers for this minimap-only training contract.
-
-## Deferred Historical Scope
-
-The earlier spec draft also described:
-
-- synthesized-input generation,
-- teacher-on-synthetic distillation,
-- an open-source student model and release artifact.
-
-Those ideas are deferred. If they return, they should reopen this spec or move
-into a follow-up spec instead of silently re-entering the active lane.
+- The focused V18 stores are complete enough to serve as the active training
+  source.
+- The existing curation logic is already strong enough to reject the worst
+  misleading tiles once it is pointed at the focused V18 stores.
+- The short-term objective is to stand up the focused training lane and prove
+  it, not to solve final ADT writeback in the same slice.
 
 ## Relationship to Existing Specs
 
-- **Builds on**: `001-v18-dataset-spec` for the V18 corpus contract.
-- **Reuses**: the existing V16.1 / V18 trainer surface.
-- **Supersedes for active execution**: any older spec-047 wording that made
-  renderer truth, object-mask gating, or distillation part of the required
-  proof path.
+- **Builds on**: `001-v18-dataset-spec`
+- **Supersedes for active execution**: older `047` wording that treated this as
+  only a plain minimap-only smoke lane with no final terrain-system contract
+- **Reuses**: the existing V16.1 / V18 trainer implementation surface, focused
+  V18 corpus builder, and existing curation heuristics
