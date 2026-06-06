@@ -148,6 +148,16 @@ Focused V18 training now also supports restrained rotating bucket coverage:
 - very small strata can complete their coverage cycle sooner than larger strata;
   that is expected and preferred to dead epochs
 
+For super-tiny scouting, the active operator lane is now to derive a separate
+tiny manifest from the focused kept pool rather than silently changing the
+default focused manifest resolver. That keeps the normal two-build lane stable
+while still allowing explicit experiments such as "three tiles per
+build/difficulty bucket".
+
+The focused wrapper now also defaults to bounded plateau stopping. In practice,
+the epoch count is a ceiling for the run budget, while the best-checkpoint
+contract remains the true proof owner for a plateaued training curve.
+
 ## Why This Design Holds
 
 The prior lane kept drifting into weak or misleading supervision surfaces:

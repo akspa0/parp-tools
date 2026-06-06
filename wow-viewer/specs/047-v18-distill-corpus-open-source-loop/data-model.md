@@ -39,10 +39,14 @@ Represents the filtered, scored row set used by focused V18 training.
 - `tiles_path`: path
 - `kept_tiles_path`: path
 - `summary_path`: path
+- `source_manifest`: path | null
+- `selection_recipe`: object | null
 
 ### Relationships
 
 - one `FocusedV18Corpus` produces zero or more `FocusedCurationManifest` runs
+- one `FocusedCurationManifest` may produce zero or more tiny derived manifests
+  for scouting
 
 ## FocusedCurationRow
 

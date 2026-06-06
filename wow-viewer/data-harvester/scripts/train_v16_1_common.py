@@ -592,6 +592,14 @@ def _resolve_rotating_bucket_epoch_size(
     )
 
 
+def _is_new_best_val(current_val: float, best_val: float, min_improvement: float) -> bool:
+    if not np.isfinite(current_val):
+        return False
+    if not np.isfinite(best_val):
+        return True
+    return float(current_val) < float(best_val) - max(float(min_improvement), 0.0)
+
+
 def _resolve_rotating_bucket_cycle_length(
     n: int,
     *,
@@ -1675,6 +1683,18 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         default=1,
         help="If >0, write a supervised-eval preview only when a new best checkpoint is found. 0 disables preview writes.",
     )
+    p.add_argument(
+        "--early-stop-patience",
+        type=int,
+        default=0,
+        help="If >0, stop after this many consecutive validation epochs without a new best val_loss. Use 0 to disable.",
+    )
+    p.add_argument(
+        "--early-stop-min-improvement",
+        type=float,
+        default=0.0,
+        help="Minimum val_loss improvement required to reset early-stop patience.",
+    )
     p.add_argument("--run-name", type=str, default=None)
     p.add_argument("--resume-checkpoint", type=Path, default=None)
     p.add_argument("--no-augment", action="store_true")
@@ -1833,6 +1853,10 @@ def run_task(task_name: str) -> None:
         raise RuntimeError(
             "--train-bucket-rotation-fraction cannot be combined with --train-epoch-tiles; omit --train-epoch-tiles and let the rotation fraction derive the per-epoch subset size."
         )
+    if args.early_stop_patience < 0:
+        raise RuntimeError("--early-stop-patience must be >= 0")
+    if args.early_stop_min_improvement < 0.0:
+        raise RuntimeError("--early-stop-min-improvement must be >= 0.0")
     if args.refiner_probe_plateau_epochs < 1:
         raise RuntimeError("--refiner-probe-plateau-epochs must be >= 1")
 
@@ -2096,8 +2120,11 @@ def run_task(task_name: str) -> None:
     refiner_active = False
     best_val = float("inf")
     best_epoch: int | None = None
+    non_best_val_epochs = 0
     start_epoch = 1
     log_entries: list[dict[str, Any]] = []
+    last_completed_epoch = 0
+    early_stop_triggered = False
 
     if args.resume_checkpoint is not None:
         ckpt = torch.load(args.resume_checkpoint, map_location=device)
@@ -2131,6 +2158,7 @@ def run_task(task_name: str) -> None:
         start_epoch = int(ckpt["epoch"]) + 1
         best_val = float(ckpt.get("best_val", float("inf")))
         best_epoch = int(ckpt["best_epoch"]) if ckpt.get("best_epoch") is not None else None
+        non_best_val_epochs = int(ckpt.get("non_best_val_epochs", 0) or 0)
         if refiner is not None and "refiner_state_dict" in ckpt:
             refiner.load_state_dict(ckpt["refiner_state_dict"])
             refiner_active = bool(ckpt.get("refiner_active", False))
@@ -2161,6 +2189,8 @@ def run_task(task_name: str) -> None:
         "val_fraction": args.val_fraction,
         "target_vram_gb": args.target_vram_gb,
         "autotune_batch_size": args.autotune_batch_size,
+        "early_stop_patience": int(args.early_stop_patience),
+        "early_stop_min_improvement": float(args.early_stop_min_improvement),
         "autotune_batch_candidates": list(args.autotune_batch_candidates) if args.autotune_batch_candidates else None,
         "autotune_keep_epoch_steps": args.autotune_keep_epoch_steps,
         "autotune_safety_factor": args.autotune_safety_factor,
@@ -2338,6 +2368,12 @@ def run_task(task_name: str) -> None:
     if args.resume_checkpoint is not None:
         print(f"Resume checkpoint: {args.resume_checkpoint}", flush=True)
         print(f"Resume scheduler T_max: {getattr(scheduler, 'T_max', 'n/a')}", flush=True)
+    if int(args.early_stop_patience) > 0:
+        print(
+            f"Early stop: patience={int(args.early_stop_patience)} "
+            f"min_improvement={float(args.early_stop_min_improvement):.6f}",
+            flush=True,
+        )
 
     for epoch in range(start_epoch, args.epochs + 1):
         train_sampler.set_epoch(epoch)
@@ -2481,11 +2517,16 @@ def run_task(task_name: str) -> None:
                 entry[f"val_{key}"] = value / n_val
             print(f"        val | loss={entry['val_loss']:.4f}", flush=True)
             is_new_best = False
-            if entry["val_loss"] < best_val:
+            if _is_new_best_val(
+                float(entry["val_loss"]),
+                float(best_val),
+                float(args.early_stop_min_improvement),
+            ):
                 best_val = float(entry["val_loss"])
                 best_epoch = int(epoch)
                 is_new_best = True
                 entry["is_new_best"] = True
+                non_best_val_epochs = 0
 
                 ckpt_payload: dict[str, Any] = {
                     "epoch": epoch,
@@ -2495,6 +2536,7 @@ def run_task(task_name: str) -> None:
                     "scaler_state_dict": scaler.state_dict(),
                     "best_val": best_val,
                     "best_epoch": best_epoch,
+                    "non_best_val_epochs": int(non_best_val_epochs),
                     "task": task_name,
                 }
 
@@ -2551,6 +2593,15 @@ def run_task(task_name: str) -> None:
 
                 torch.save(ckpt_payload, ckpt_dir / f"v16_1_{task_name}_best.pt")
                 print(f"        *** new best val_loss={best_val:.4f}", flush=True)
+            else:
+                non_best_val_epochs += 1
+                entry["non_best_val_epochs"] = int(non_best_val_epochs)
+                if best_epoch is not None:
+                    print(
+                        f"        plateau | best_epoch={best_epoch} "
+                        f"best_val={best_val:.4f} stale_val_epochs={non_best_val_epochs}",
+                        flush=True,
+                    )
             if (
                 is_new_best
                 and preview_batch is not None
@@ -2560,6 +2611,7 @@ def run_task(task_name: str) -> None:
                 task.save_preview(preview_batch, preview_outputs, val_dir / f"best_epoch_{epoch:04d}.png")
 
         log_entries.append(entry)
+        last_completed_epoch = int(epoch)
         last_ckpt: dict[str, Any] = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
@@ -2568,6 +2620,7 @@ def run_task(task_name: str) -> None:
             "scaler_state_dict": scaler.state_dict(),
             "best_val": best_val,
             "best_epoch": best_epoch,
+            "non_best_val_epochs": int(non_best_val_epochs),
             "task": task_name,
         }
         if refiner is not None:
@@ -2575,19 +2628,30 @@ def run_task(task_name: str) -> None:
             last_ckpt["refiner_active"] = bool(refiner_active)
         torch.save(last_ckpt, ckpt_dir / f"v16_1_{task_name}_last.pt")
         (run_dir / "training_log.json").write_text(json.dumps(log_entries, indent=2), encoding="utf-8")
+        if int(args.early_stop_patience) > 0 and non_best_val_epochs >= int(args.early_stop_patience):
+            early_stop_triggered = True
+            print(
+                f"        early-stop | no new best for {non_best_val_epochs} validation epochs; "
+                f"stopping at epoch {epoch}",
+                flush=True,
+            )
+            break
 
     config["best_val"] = best_val if np.isfinite(best_val) else None
     config["best_epoch"] = best_epoch
+    config["early_stop_triggered"] = bool(early_stop_triggered)
+    config["last_completed_epoch"] = int(last_completed_epoch)
     config["finished_at"] = datetime.now(timezone.utc).isoformat()
     (run_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     final_ckpt: dict[str, Any] = {
-        "epoch": args.epochs,
+        "epoch": int(last_completed_epoch),
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict(),
         "scaler_state_dict": scaler.state_dict(),
         "best_val": best_val,
         "best_epoch": best_epoch,
+        "non_best_val_epochs": int(non_best_val_epochs),
         "task": task_name,
     }
     if refiner is not None:

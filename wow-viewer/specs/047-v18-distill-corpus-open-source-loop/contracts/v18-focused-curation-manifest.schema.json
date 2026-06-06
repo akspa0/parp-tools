@@ -60,6 +60,26 @@
         "type": "integer",
         "minimum": 0
       }
+    },
+    "source_manifest": {
+      "type": "string"
+    },
+    "source_kept_tiles": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "build_bucket_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "selection_recipe": {
+      "type": "object"
     }
   },
   "additionalProperties": true

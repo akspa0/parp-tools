@@ -235,6 +235,68 @@
     - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/infer_v18_focus.py --help`
     - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help`
 
+- **V18 super-tiny focused manifest lane (2026-06-06)**
+  - user wanted to test the stronger hypothesis that the main hurdle is still too much data, not too few epochs
+  - new explicit utility landed in `wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py`:
+    - derives a tiny manifest from an existing focused kept pool
+    - defaults source to `wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1/`
+    - caps each build/difficulty-bucket stratum at `3` rows by default
+    - uses map round-robin inside each stratum so the subset is not all from one map
+  - intentionally did not change `train_v18_focus.py` default manifest resolution:
+    - tiny runs must opt in via `--curation-manifest`
+    - tiny-manifest runs should use `--train-bucket-rotation-fraction 1.0`
+  - spec/doc continuity synced:
+    - `wow-viewer/specs/047-v18-distill-corpus-open-source-loop/spec.md`
+    - `plan.md`
+    - `data-model.md`
+    - `quickstart.md`
+    - `contracts/v18-focused-curation-manifest.schema.json`
+    - `wow-viewer/data-harvester/README.md`
+    - `wow-viewer/docs/architecture/v18-distill-corpus-open-source-loop-2026-06-04.md`
+  - real derived-manifest proof now exists:
+    - `wow-viewer/output/datasets/v18/curation/v18_focus_tiny_v1/`
+    - `21` selected rows from `4096` source kept rows
+    - selected bucket counts:
+      - `easy = 5`
+      - `medium = 4`
+      - `hard = 6`
+      - `pathological = 6`
+    - the alpha-era build only had `2 easy` and `1 medium` source rows, so the practical cap is `21`, not `24`
+  - targeted proof passed:
+    - `uv run python -m py_compile wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py wow-viewer/data-harvester/src/harvester/test_v18_tiny_manifest.py`
+    - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_tiny_manifest.py -q`
+      - `3 passed`
+    - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py --help`
+    - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py --source-manifest wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1 --samples-per-bucket-per-build 3 --run-name v18_focus_tiny_v1`
+
+- **V18 focused plateau-stop operator guardrail (2026-06-06)**
+  - user reported the active symptom directly:
+    - best checkpoint at epoch `4`
+    - run still grinding at epoch `35`
+    - only visible change was the cosine LR dropping
+  - trainer guardrail landed in `wow-viewer/data-harvester/scripts/train_v16_1_common.py`:
+    - new CLI knobs:
+      - `--early-stop-patience`
+      - `--early-stop-min-improvement`
+    - a run now stops after N consecutive non-best validation epochs when patience > 0
+    - run state/checkpoints now carry:
+      - `non_best_val_epochs`
+      - `early_stop_triggered`
+      - `last_completed_epoch`
+    - plateau logs now print the current best epoch/best val and stale validation count
+  - focused wrapper default changed in `wow-viewer/data-harvester/scripts/train_v18_focus.py`:
+    - focused runs now default to `--early-stop-patience 8`
+    - the epoch count is treated as a ceiling, not an obligation
+  - spec/doc continuity synced:
+    - `wow-viewer/data-harvester/README.md`
+    - `wow-viewer/specs/047-v18-distill-corpus-open-source-loop/quickstart.md`
+    - `wow-viewer/docs/architecture/v18-distill-corpus-open-source-loop-2026-06-04.md`
+  - targeted proof passed:
+    - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+    - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q`
+      - `9 passed`
+    - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help`
+
 ## Next Likely Steps
 
 - implement the first `046` slice: deterministic non-freezing PM4 segment export
@@ -243,8 +305,10 @@
 - keep PM4 grouping/spec docs in sync if segmentation ownership changes again
 - spec `047` follow-ups:
   - rerun focused curation so the latest `kept_tiles.parquet` picks up `insufficient_trainable_terrain` rejections
-  - rerun focused height with the new terrain-valid loss masking and `10%` rotating bucket coverage
-  - rerun focused normal with the new terrain-valid loss masking and `10%` rotating bucket coverage
+  - launch height on `wow-viewer/output/datasets/v18/curation/v18_focus_tiny_v1/` with `--train-bucket-rotation-fraction 1.0`
+  - launch normal on `wow-viewer/output/datasets/v18/curation/v18_focus_tiny_v1/` with `--train-bucket-rotation-fraction 1.0`
+  - inspect whether the new default `--early-stop-patience 8` stops the current plateaued `800`-ish run close to the real best epoch instead of idling into the 30s
+  - compare that tiny-manifest lane against the existing `10%` rotating large-pool lane before changing architecture again
   - run `infer_v18_focus.py` on the resulting checkpoints so the active proof owner becomes the minimap-only deployment surface rather than trainer val logs
   - confirm the next run logs show near-equal per-build epoch subsets plus sane rotation-cycle evidence rather than the old `700` vs `2636` full-pool skew
   - confirm the next height preview shows roof/top-geometry occlusion in the actual combined weight path instead of the old basement-only panel

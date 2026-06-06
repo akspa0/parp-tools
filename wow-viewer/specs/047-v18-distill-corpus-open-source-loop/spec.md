@@ -137,6 +137,9 @@ low-value rows.
 3. **Given** the focused manifest, **When** a training run consumes it,
    **Then** both train and validation tile pools are drawn only from curated
    rows.
+4. **Given** the focused kept pool, **When** a tiny scouting manifest is
+   derived, **Then** it can cap each build/difficulty-bucket stratum to a very
+   small balanced subset without changing the minimap-only model contract.
 
 ---
 
@@ -248,6 +251,10 @@ that consumes predicted terrain tiles and emits a stitch-ready terrain quilt.
   per-bucket epoch rotation so a bounded fraction of each curated bucket can be
   trained each epoch while the full bucketed train pool is revisited over later
   epochs.
+- **FR-010BA**: The focused operator workflow MUST support a derived tiny
+  curation manifest that caps each build/difficulty-bucket stratum to a very
+  small scouting subset while preserving the same minimap-only training
+  contract.
 - **FR-010C**: The focused operator workflow MUST expose a minimap-only
   inference proof entrypoint distinct from the offline supervised training
   validation path.

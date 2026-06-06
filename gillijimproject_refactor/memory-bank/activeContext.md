@@ -201,6 +201,50 @@
     - proof:
       - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/scripts/infer_v18_focus.py`
       - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/infer_v18_focus.py --help`
+  - landed in the 2026-06-06 super-tiny focused-manifest pass:
+    - user direction shifted again from "10% rotating epochs over a still-large pool" to "try a genuinely tiny corpus first"
+    - new explicit operator utility:
+      - `wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py`
+      - derives a tiny manifest from an existing focused `kept_tiles.parquet`
+      - defaults source manifest to `wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1/`
+      - caps each build/difficulty bucket to `3` rows by default
+      - prefers map round-robin inside each build/bucket stratum so the tiny subset is not single-map collapse
+    - the focused trainer default resolver was intentionally left alone:
+      - tiny runs must pass `--curation-manifest` explicitly
+      - tiny-manifest runs should also pass `--train-bucket-rotation-fraction 1.0` because the manifest itself is already the throttle
+    - real tiny manifest proof now exists:
+      - `wow-viewer/output/datasets/v18/curation/v18_focus_tiny_v1/`
+      - selected rows: `21`
+      - source kept rows: `4096`
+      - selected bucket counts:
+        - `easy = 5`
+        - `medium = 4`
+        - `hard = 6`
+        - `pathological = 6`
+      - reason it is `21` instead of theoretical `24`:
+        - build `0_5_3_3368` only had `2 easy` rows and `1 medium` row in the source kept pool
+    - targeted proof:
+      - `uv run python -m py_compile wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py wow-viewer/data-harvester/src/harvester/test_v18_tiny_manifest.py`
+      - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_tiny_manifest.py -q` → `3 passed`
+      - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py --help`
+      - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/build_v18_tiny_manifest.py --source-manifest wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1 --samples-per-bucket-per-build 3 --run-name v18_focus_tiny_v1`
+  - landed in the 2026-06-06 focused early-stop pass:
+    - user reported a real operator failure mode:
+      - best checkpoint could appear at epoch `4`
+      - later epochs only decayed LR with no further improvement
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - now supports `--early-stop-patience`
+      - now supports `--early-stop-min-improvement`
+      - run state/checkpoints now record `non_best_val_epochs`
+      - config now records `early_stop_triggered` and `last_completed_epoch`
+      - focused logs now print plateau status when val stops improving
+    - `wow-viewer/data-harvester/scripts/train_v18_focus.py`
+      - now defaults focused runs to `--early-stop-patience 8` unless the operator overrides it
+      - `--epochs` is now a ceiling for focused runs rather than an expected full-budget replay
+    - targeted proof:
+      - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+      - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q` → `9 passed`
+      - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help`
   - focused docs now steer away from the earlier smoke budget:
     - quickstart/README examples now use larger tile pools and `40` epochs instead of `20`
   - targeted Python proof now exists:

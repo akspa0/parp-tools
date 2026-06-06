@@ -106,17 +106,26 @@ uv run python -u scripts/build_v18_curation_manifest.py `
   --chunk-size 128
 ```
 
+Derive an explicit super-tiny focused manifest:
+
+```powershell
+uv run python -u scripts/build_v18_tiny_manifest.py `
+  --source-manifest ../output/datasets/v18/curation/v18_focus_terrain_v1 `
+  --samples-per-bucket-per-build 3 `
+  --run-name v18_focus_tiny_v1
+```
+
 Train the focused V18 height model:
 
 ```powershell
 uv run python -u scripts/train_v18_focus.py height `
   --device cuda `
   --epochs 40 `
-  --train-max-tiles 4096 `
-  --train-bucket-rotation-fraction 0.10 `
-  --val-max-tiles 256 `
+  --curation-manifest ../output/datasets/v18/curation/v18_focus_tiny_v1 `
+  --train-bucket-rotation-fraction 1.0 `
+  --val-max-tiles 16 `
   --val-interval 1 `
-  --run-name v18_height_focus_basic
+  --run-name v18_height_focus_tiny_v1
 ```
 
 Train the focused V18 normal model:
@@ -125,11 +134,11 @@ Train the focused V18 normal model:
 uv run python -u scripts/train_v18_focus.py normal `
   --device cuda `
   --epochs 40 `
-  --train-max-tiles 4096 `
-  --train-bucket-rotation-fraction 0.10 `
-  --val-max-tiles 256 `
+  --curation-manifest ../output/datasets/v18/curation/v18_focus_tiny_v1 `
+  --train-bucket-rotation-fraction 1.0 `
+  --val-max-tiles 16 `
   --val-interval 1 `
-  --run-name v18_normal_focus_basic
+  --run-name v18_normal_focus_tiny_v1
 ```
 
 Run minimap-only focused inference proof:
@@ -139,8 +148,8 @@ uv run python -u scripts/infer_v18_focus.py `
   --build 3_3_5_12340 `
   --limit 8 `
   --device cuda `
-  --height-checkpoint ../models/v18/height/runs/v18_height_focus_basic/checkpoints/v16_1_height_best.pt `
-  --normal-checkpoint ../models/v18/normal/runs/v18_normal_focus_basic/checkpoints/v16_1_normal_best.pt `
+  --height-checkpoint ../models/v18/height/runs/v18_height_focus_tiny_v1/checkpoints/v16_1_height_best.pt `
+  --normal-checkpoint ../models/v18/normal/runs/v18_normal_focus_tiny_v1/checkpoints/v16_1_normal_best.pt `
   --run-name v18_focus_minimap_only_proof
 ```
 
@@ -148,6 +157,8 @@ Notes:
 
 - `build_v18_curation_manifest.py` defaults to the V18 dataset root and the two
   focused builds.
+- `build_v18_tiny_manifest.py` derives a tiny balanced scouting manifest from a
+  focused kept pool; the default cap is `3` rows per build/difficulty bucket.
 - `train_v18_focus.py` defaults to the V18 dataset root, the two focused
   builds, the latest focused `kept_tiles.parquet` when present, and startup
   batch autotune against `--target-vram-gb 8`.
@@ -158,8 +169,15 @@ Notes:
 - `train_v18_focus.py` also defaults to strict near-equal per-build sampling, so
   oversized pool/epoch requests auto-cap to the largest feasible balanced
   subset instead of silently letting one build dominate.
+- `train_v18_focus.py` now also defaults to `--early-stop-patience 8`, so the
+  focused lane stops after eight non-improving validation epochs instead of
+  idling all the way to the epoch ceiling.
 - when bucket rotation is active, omit `--train-epoch-tiles` and let the
   trainer derive the per-epoch subset size from the bucketed manifest itself.
+- for tiny-manifest experiments, pass `--train-bucket-rotation-fraction 1.0`
+  so the whole tiny manifest is seen each epoch instead of being sliced again.
+- `--epochs` is now the ceiling, not a guarantee; the focused wrapper can stop
+  earlier on a long plateau while still preserving the best checkpoint.
 - trainer `val_loss` and preview images are offline supervised-eval surfaces:
   they can score against hidden dataset truth, but those tensors are not part
   of the deployed forward path.

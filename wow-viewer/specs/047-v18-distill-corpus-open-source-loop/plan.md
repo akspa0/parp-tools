@@ -93,6 +93,7 @@ wow-viewer/
 │   │   ├── build_focused_two_build_corpus.py
 │   │   ├── build_v16_curation_manifest.py
 │   │   ├── build_v18_curation_manifest.py
+│   │   ├── build_v18_tiny_manifest.py
 │   │   ├── train_v18.py
 │   │   ├── train_v18_focus.py
 │   │   └── train_v16_1_common.py
@@ -176,6 +177,8 @@ focused builds and prefers the latest focused V18 curation manifest.
    carries both signals.
 9. Expose a focused minimap-only inference proof entrypoint so deployment-surface
    validation is distinct from offline supervised training evaluation.
+10. Keep super-tiny experiments explicit by deriving a separate tiny manifest
+    instead of silently changing the default focused manifest resolver.
 
 **Validation**:
 
@@ -186,6 +189,30 @@ focused builds and prefers the latest focused V18 curation manifest.
   fraction instead of requiring a fixed `--train-epoch-tiles` count.
 - focused operators can run a minimap-only inference proof command against V18
   checkpoints without relying on supervision-only tensors during the run.
+
+### Phase 2C - Super-Tiny Focused Corpus Surface
+
+**Goal**: let the operator derive a truly tiny balanced scouting manifest from
+the focused kept pool without changing the trainer contract.
+
+1. Add `build_v18_tiny_manifest.py` as a focused manifest-derivation utility.
+2. Default it to the canonical focused source manifest
+   `v18_focus_terrain_v1`.
+3. Support per-build/per-bucket caps plus an optional fractional cap.
+4. Prefer map diversity inside each selected build/bucket stratum so a tiny run
+   does not collapse to a single map family.
+5. Keep the focused trainer default resolver unchanged; tiny runs pass the tiny
+   manifest explicitly.
+6. Document that tiny-manifest runs should use
+   `--train-bucket-rotation-fraction 1.0` because the tiny manifest itself is
+   already the throttle.
+
+**Validation**:
+
+- `py_compile` succeeds.
+- targeted tests prove the tiny selector keeps build/bucket balance and map
+  round-robin behavior.
+- a real tiny manifest can be generated from the active focused kept pool.
 
 ### Phase 2C - Operator Docs
 

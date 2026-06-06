@@ -10,6 +10,7 @@ _DEFAULT_DATASET_DIR = _PROJECT_ROOT / "output" / "datasets" / "v18"
 _DEFAULT_CURATION_ROOT = _DEFAULT_DATASET_DIR / "curation"
 _DEFAULT_BUILDS = ("0_5_3_3368", "3_3_5_12340")
 _DEFAULT_BUCKET_ROTATION_FRACTION = "0.10"
+_DEFAULT_EARLY_STOP_PATIENCE = "8"
 
 
 def _has_flag(name: str) -> bool:
@@ -58,6 +59,9 @@ def _ensure_defaults() -> None:
 
     if not _has_flag("--train-bucket-rotation-fraction") and not _has_flag("--train-epoch-tiles"):
         sys.argv.extend(["--train-bucket-rotation-fraction", _DEFAULT_BUCKET_ROTATION_FRACTION])
+
+    if not _has_flag("--early-stop-patience"):
+        sys.argv.extend(["--early-stop-patience", _DEFAULT_EARLY_STOP_PATIENCE])
 
     rotation_fraction = _value_after("--train-bucket-rotation-fraction")
     if (

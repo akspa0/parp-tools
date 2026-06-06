@@ -225,3 +225,10 @@ def test_bucket_rotation_fraction_keeps_epoch_build_counts_near_equal() -> None:
 
     assert len(sampler) == 20
     assert counts == {"0_5_3_3368": 10, "3_3_5_12340": 10}
+
+
+def test_is_new_best_val_requires_requested_improvement_margin() -> None:
+    assert _train_common._is_new_best_val(0.40, float("inf"), 0.0) is True
+    assert _train_common._is_new_best_val(0.39, 0.40, 0.0) is True
+    assert _train_common._is_new_best_val(0.395, 0.40, 0.01) is False
+    assert _train_common._is_new_best_val(0.389, 0.40, 0.01) is True
