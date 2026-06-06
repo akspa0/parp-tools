@@ -166,6 +166,11 @@ focused builds and prefers the latest focused V18 curation manifest.
    not pass `--curation-manifest`.
 5. Default focused runs toward the real 8 GB lane through startup batch
    autotune, and keep height/normal losses masked to terrain-valid regions.
+6. Default focused runs to strict near-equal per-build sampling so a skewed corpus
+   cannot silently dominate full-size epochs.
+7. Keep terrain-valid masking honest by including both WMO basement/object
+   footprints and WMO roof/top-geometry occlusion when the harvested store
+   carries both signals.
 
 **Validation**:
 

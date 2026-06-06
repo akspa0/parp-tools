@@ -119,6 +119,16 @@ derived from the harvested validity tensors. That keeps liquid-hidden and
 object-hidden terrain from poisoning optimization without turning liquids into a
 separate weighted auxiliary objective.
 
+Those terrain-valid tensors now explicitly include both the basement/ground
+object masks and the WMO roof/top-geometry mask when present. Preview evidence
+must show the actual combined training weight rather than a basement-only
+object-weight panel.
+
+The focused operator surface also now defaults to strict near-equal per-build
+sampling. When one build has fewer eligible rows, oversized pool/epoch requests
+are automatically capped to the largest feasible balanced subset instead of
+quietly running a skewed epoch.
+
 ## Why This Design Holds
 
 The prior lane kept drifting into weak or misleading supervision surfaces:

@@ -24,6 +24,7 @@ def _load_script_module(name: str, relative_path: str):
 
 _train_common = _load_script_module("train_v16_1_common_test", "scripts/train_v16_1_common.py")
 _curation = _load_script_module("build_v16_curation_manifest_test", "scripts/build_v16_curation_manifest.py")
+_dataset = _load_script_module("v16_1_dataset_test", "src/harvester/v16_1_dataset.py")
 
 
 class _FixedModel(torch.nn.Module):
@@ -83,6 +84,19 @@ def test_normal_loss_respects_terrain_valid_mask() -> None:
     assert torch.equal(outputs["train_mask"], batch["terrain_valid_mask_257"])
 
 
+def test_terrain_valid_mask_includes_object_roof_mask() -> None:
+    terrain_valid = _dataset.compose_terrain_valid_mask_257(
+        normal_mask_257=torch.ones((1, 1, 2, 2), dtype=torch.float32).numpy()[0, 0],
+        object_presence_257=torch.zeros((2, 2), dtype=torch.float32).numpy(),
+        liquid_mask_256=torch.zeros((1, 1), dtype=torch.float32).numpy(),
+        object_roof_weight_257=torch.tensor([[1.0, 0.0], [1.0, 1.0]], dtype=torch.float32).numpy(),
+        what_plate=False,
+    )
+
+    expected = torch.tensor([[1.0, 0.0], [1.0, 1.0]], dtype=torch.float32).numpy()
+    assert (terrain_valid == expected).all()
+
+
 def test_curation_rejects_low_trainable_terrain_tiles() -> None:
     row = {
         "what_plate": False,
@@ -118,3 +132,41 @@ def test_curation_rejects_low_trainable_terrain_tiles() -> None:
 
     assert not keep
     assert payload["reject_reason"] == "insufficient_trainable_terrain"
+
+
+def test_strict_build_balance_equalizes_sample_counts() -> None:
+    labels = ["a", "a", "b", "b", "b", "b"]
+
+    chosen = _train_common._sample_positions(
+        len(labels),
+        seed=42,
+        take=4,
+        build_labels=labels,
+        build_balanced=True,
+        strict_build_balance=True,
+    )
+
+    chosen_labels = [labels[idx] for idx in chosen]
+    counts = _train_common._count_string_values(chosen_labels)
+    assert len(chosen) == 4
+    assert counts == {"a": 2, "b": 2}
+
+
+def test_strict_build_balance_caps_oversized_epoch_requests() -> None:
+    labels = ["0_5_3_3368"] * 2 + ["3_3_5_12340"] * 5
+    sampler = _train_common._DeterministicEpochSampler(
+        len(labels),
+        seed=7,
+        epoch_size=7,
+        build_labels=labels,
+        build_balanced=True,
+        strict_build_balance=True,
+    )
+
+    chosen = list(iter(sampler))
+    chosen_labels = [labels[idx] for idx in chosen]
+    counts = _train_common._count_string_values(chosen_labels)
+
+    assert len(sampler) == 5
+    assert len(chosen) == 5
+    assert counts == {"0_5_3_3368": 2, "3_3_5_12340": 3}

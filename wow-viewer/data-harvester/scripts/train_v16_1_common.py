@@ -172,6 +172,7 @@ class _DeterministicEpochSampler(Sampler[int]):
         epoch_size: int | None = None,
         build_labels: list[str] | None = None,
         build_balanced: bool = False,
+        strict_build_balance: bool = False,
         bucket_labels: list[str] | None = None,
         bucket_sampling_profile: str | None = None,
         sample_rows: list[dict[str, Any]] | None = None,
@@ -184,10 +185,19 @@ class _DeterministicEpochSampler(Sampler[int]):
         self._epoch_size = None if epoch_size is None or int(epoch_size) <= 0 else min(int(epoch_size), self._n)
         self._build_labels = list(build_labels) if build_labels is not None else None
         self._build_balanced = bool(build_balanced)
+        self._strict_build_balance = bool(strict_build_balance)
         self._bucket_labels = [_normalize_bucket_label(label) for label in bucket_labels] if bucket_labels is not None else None
         self._bucket_sampling_profile = bucket_sampling_profile
         self._bucket_sampling_weights = _bucket_sampling_weights(bucket_sampling_profile)
         self._sample_rows = [dict(row) for row in sample_rows] if sample_rows is not None else None
+        requested_take = self._n if self._epoch_size is None else int(self._epoch_size)
+        self._effective_epoch_size = _resolve_effective_sample_take(
+            self._n,
+            requested_take,
+            build_labels=self._build_labels,
+            build_balanced=self._build_balanced,
+            strict_build_balance=self._strict_build_balance,
+        )
 
     def set_epoch(self, epoch: int) -> None:
         self._epoch = int(epoch)
@@ -195,14 +205,18 @@ class _DeterministicEpochSampler(Sampler[int]):
     def _sample_subset(self, rng: np.random.RandomState) -> list[int]:
         if self._n <= 0:
             return []
-        if self._epoch_size is None or self._epoch_size >= self._n:
+        if (
+            (self._epoch_size is None or self._epoch_size >= self._n)
+            and not (self._build_balanced and self._strict_build_balance and self._build_labels and len(self._build_labels) == self._n)
+        ):
             return list(range(self._n))
         return _sample_positions(
             self._n,
             seed=self._seed + self._epoch,
-            take=self._epoch_size,
+            take=self._effective_epoch_size,
             build_labels=self._build_labels,
             build_balanced=self._build_balanced,
+            strict_build_balance=self._strict_build_balance,
             bucket_labels=self._bucket_labels,
             bucket_sampling_weights=self._bucket_sampling_weights,
         )
@@ -252,7 +266,7 @@ class _DeterministicEpochSampler(Sampler[int]):
         return iter(order)
 
     def __len__(self) -> int:
-        return self._epoch_size if self._epoch_size is not None else self._n
+        return self._effective_epoch_size
 
 
 def _sample_positions(
@@ -261,6 +275,7 @@ def _sample_positions(
     take: int,
     build_labels: list[str] | None = None,
     build_balanced: bool = True,
+    strict_build_balance: bool = False,
     bucket_labels: list[str] | None = None,
     bucket_sampling_weights: dict[str, float] | None = None,
 ) -> list[int]:
@@ -285,6 +300,41 @@ def _sample_positions(
 
     build_order = sorted(by_build.keys())
     rng.shuffle(build_order)
+    if strict_build_balance:
+        effective_take = _resolve_effective_sample_take(
+            n,
+            take,
+            build_labels=build_labels,
+            build_balanced=build_balanced,
+            strict_build_balance=True,
+        )
+        if effective_take <= 0:
+            return []
+        base_quota = effective_take // len(build_order)
+        remainder = effective_take % len(build_order)
+        extra_builds = [
+            build
+            for build in build_order
+            if len(by_build[build]) >= (base_quota + 1)
+        ][:remainder]
+        extra_set = set(extra_builds)
+        out: list[int] = []
+        for build in build_order:
+            quota = base_quota + (1 if build in extra_set else 0)
+            if quota <= 0:
+                continue
+            out.extend(
+                _sample_weighted_positions(
+                    by_build[build],
+                    take=quota,
+                    rng=rng,
+                    bucket_labels=bucket_labels,
+                    bucket_sampling_weights=bucket_sampling_weights,
+                )
+            )
+        rng.shuffle(out)
+        return out[:effective_take]
+
     out: list[int] = []
     while len(out) < take:
         progressed = False
@@ -326,6 +376,39 @@ def _sample_positions(
 
     rng.shuffle(out)
     return out[:take]
+
+
+def _resolve_effective_sample_take(
+    n: int,
+    requested_take: int,
+    *,
+    build_labels: list[str] | None = None,
+    build_balanced: bool = False,
+    strict_build_balance: bool = False,
+) -> int:
+    if n <= 0:
+        return 0
+    take = min(max(int(requested_take), 0), int(n))
+    if take <= 0:
+        return 0
+    if not strict_build_balance or not build_balanced or not build_labels or len(build_labels) != n:
+        return take
+
+    build_counts = sorted(_count_string_values(build_labels).values())
+    if not build_counts:
+        return take
+    build_count = len(build_counts)
+    for candidate in range(take, 0, -1):
+        base_quota = candidate // build_count
+        remainder = candidate % build_count
+        if base_quota <= 0:
+            return candidate
+        if build_counts[0] < base_quota:
+            continue
+        extra_eligible = sum(1 for count in build_counts if count >= (base_quota + 1))
+        if extra_eligible >= remainder:
+            return candidate
+    return 0
 
 
 def _count_string_values(values: list[str]) -> dict[str, int]:
@@ -403,6 +486,7 @@ def _apply_dataset_pool(
     seed: int,
     evidence_dir: Path,
     build_balanced: bool = True,
+    strict_build_balance: bool = False,
 ) -> dict[str, Any]:
     available = len(ds._indices)
     build_labels = [
@@ -413,13 +497,17 @@ def _apply_dataset_pool(
         _normalize_bucket_label(ds._index_entries[global_idx].get("_curation_difficulty_bucket", ""))
         for global_idx in ds._indices
     ]
-    selected_positions = _sample_positions(
-        available,
-        seed=seed,
-        take=max_tiles if max_tiles > 0 else available,
-        build_labels=build_labels,
-        build_balanced=build_balanced,
-    )
+    if max_tiles > 0:
+        selected_positions = _sample_positions(
+            available,
+            seed=seed,
+            take=max_tiles,
+            build_labels=build_labels,
+            build_balanced=build_balanced,
+            strict_build_balance=strict_build_balance,
+        )
+    else:
+        selected_positions = list(range(available))
     selected_global_indices = [ds._indices[pos] for pos in selected_positions]
     ds._indices = selected_global_indices
 
@@ -453,6 +541,7 @@ def _apply_dataset_pool(
         "selected_tiles": int(len(ds._indices)),
         "requested_max_tiles": int(max_tiles),
         "build_balanced": bool(build_balanced),
+        "strict_build_balance": bool(strict_build_balance),
         "seed": int(seed),
         "selected_positions_sha256": hashlib.sha256(
             np.asarray(selected_positions, dtype=np.int32).tobytes()
@@ -800,6 +889,7 @@ def _height_loss(
     train_mask = terrain_valid_mask.clamp(0.0, 1.0)
     invalid_mask = (1.0 - train_mask).clamp(0.0, 1.0)
     loss = _masked_mean((pred - target).abs(), train_mask)
+    object_roof_weight = batch.get("object_roof_weight_257")
     return loss, {
         "height": float(loss.item()),
         "height_mask_cov": float(train_mask.mean().item()),
@@ -811,6 +901,11 @@ def _height_loss(
         "invalid_mask": invalid_mask,
         "base_mask": train_mask,
         "terrain_valid_mask": train_mask,
+        "object_roof_weight": (
+            object_roof_weight.to(device, non_blocking=True)
+            if isinstance(object_roof_weight, torch.Tensor)
+            else None
+        ),
     }
 
 
@@ -884,6 +979,7 @@ def _normal_loss(
     target = batch["normals"].to(device, non_blocking=True)
     normal_mask = batch["normal_mask"].to(device, non_blocking=True)
     terrain_valid_mask = batch["terrain_valid_mask_257"].to(device, non_blocking=True)
+    object_roof_weight = batch.get("object_roof_weight_257")
     pred = model(inp)
     pred_n = F.normalize(pred, dim=1, eps=1e-6)
     target_n = F.normalize(target, dim=1, eps=1e-6)
@@ -902,6 +998,11 @@ def _normal_loss(
         "invalid_mask": invalid_mask,
         "base_mask": train_mask,
         "terrain_valid_mask": terrain_valid_mask,
+        "object_roof_weight": (
+            object_roof_weight.to(device, non_blocking=True)
+            if isinstance(object_roof_weight, torch.Tensor)
+            else None
+        ),
     }
 
 
@@ -1098,14 +1199,15 @@ def _preview_height(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
     row_titles = []
     for idx in range(n):
         row_titles.append(_preview_row_title(batch, idx))
-        rows.append(
-            [
-                ("input", batch["input"][idx]),
-                ("height_gt", batch["height_norm"][idx]),
-                ("height_pred", outputs["pred"][idx]),
-                ("weight", batch["weight_257"][idx]),
-            ]
-        )
+        panels: list[tuple[str, torch.Tensor]] = [
+            ("input", batch["input"][idx]),
+            ("height_gt", batch["height_norm"][idx]),
+            ("height_pred", outputs["pred"][idx]),
+            ("weight", outputs["weight"][idx]),
+        ]
+        if "object_roof_weight" in outputs and outputs["object_roof_weight"] is not None:
+            panels.append(("object_roof_weight", outputs["object_roof_weight"][idx]))
+        rows.append(panels)
     _save_preview_grid(rows, out_path, row_titles=row_titles)
 
 
@@ -1292,6 +1394,12 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Balance per-epoch train sampling across builds when possible.",
+    )
+    p.add_argument(
+        "--strict-build-balance",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enforce near-equal per-build subsets without replacement when build balancing is enabled; oversized requests are capped to the largest feasible balanced subset.",
     )
     p.add_argument(
         "--bucket-sampling-profile",
@@ -1639,6 +1747,7 @@ def run_task(task_name: str) -> None:
         seed=curation_seed + 101,
         evidence_dir=evidence_dir,
         build_balanced=True,
+        strict_build_balance=bool(args.strict_build_balance),
     )
     val_pool = _apply_dataset_pool(
         val_ds,
@@ -1647,6 +1756,7 @@ def run_task(task_name: str) -> None:
         seed=curation_seed + 202,
         evidence_dir=evidence_dir,
         build_balanced=True,
+        strict_build_balance=bool(args.strict_build_balance),
     )
     _apply_dataset_limit(train_ds, int(args.max_train_samples))
     _apply_dataset_limit(val_ds, int(args.max_val_samples))
@@ -1680,6 +1790,7 @@ def run_task(task_name: str) -> None:
         epoch_size=int(args.train_epoch_tiles),
         build_labels=train_build_labels,
         build_balanced=bool(args.train_epoch_build_balanced),
+        strict_build_balance=bool(args.strict_build_balance),
         bucket_labels=train_bucket_labels,
         bucket_sampling_profile=args.bucket_sampling_profile,
         sample_rows=train_sample_rows,
@@ -1706,6 +1817,7 @@ def run_task(task_name: str) -> None:
             epoch_size=int(args.val_epoch_tiles),
             build_labels=val_build_labels,
             build_balanced=True,
+            strict_build_balance=bool(args.strict_build_balance),
             bucket_labels=val_bucket_labels,
             bucket_sampling_profile=args.bucket_sampling_profile,
             sample_rows=val_sample_rows,
@@ -1819,11 +1931,14 @@ def run_task(task_name: str) -> None:
         "train_max_tiles": args.train_max_tiles,
         "train_epoch_tiles": args.train_epoch_tiles,
         "train_epoch_build_balanced": args.train_epoch_build_balanced,
+        "strict_build_balance": bool(args.strict_build_balance),
+        "effective_train_epoch_tiles": len(train_sampler),
         "bucket_sampling_profile": args.bucket_sampling_profile,
         "bucket_sampling_weights": _bucket_sampling_weights(args.bucket_sampling_profile),
         "val_max_tiles": args.val_max_tiles,
         "rotate_val_tiles": bool(args.rotate_val_tiles),
         "val_epoch_tiles": int(args.val_epoch_tiles),
+        "effective_val_epoch_tiles": (len(val_sampler) if val_sampler is not None else len(val_ds)),
         "max_train_samples": args.max_train_samples,
         "max_val_samples": args.max_val_samples,
         "normal_detail_boost": args.normal_detail_boost,
@@ -1906,6 +2021,11 @@ def run_task(task_name: str) -> None:
     )
     print(f"Curated build mix (train): {train_pool.get('build_tile_counts', {})}", flush=True)
     print(f"Curated build mix (val): {val_pool.get('build_tile_counts', {})}", flush=True)
+    if bool(args.strict_build_balance):
+        print(
+            "Build balancing: strict near-equal per-build subsets without replacement; oversized pool/epoch requests auto-cap to the largest feasible balanced subset.",
+            flush=True,
+        )
     if train_pool.get("selected_bucket_counts"):
         print(f"Curated difficulty mix (train): {train_pool.get('selected_bucket_counts', {})}", flush=True)
         print(f"Available difficulty mix (train): {train_pool.get('available_bucket_counts', {})}", flush=True)
@@ -1913,14 +2033,15 @@ def run_task(task_name: str) -> None:
         print(f"Curated difficulty mix (val): {val_pool.get('selected_bucket_counts', {})}", flush=True)
     if bool(args.rotate_val_tiles) and int(args.val_epoch_tiles) > 0:
         print(
-            f"Validation rotation: val_epoch_tiles={min(int(args.val_epoch_tiles), len(val_ds))}/{len(val_ds)}",
+            f"Validation rotation: val_epoch_tiles={len(val_sampler) if val_sampler is not None else min(int(args.val_epoch_tiles), len(val_ds))}/{len(val_ds)}",
             flush=True,
         )
     if args.train_epoch_tiles > 0:
         print(
             "Epoch sampling: "
-            f"train_epoch_tiles={min(int(args.train_epoch_tiles), len(train_ds))}/{len(train_ds)} "
+            f"train_epoch_tiles={len(train_sampler)}/{len(train_ds)} "
             f"build_balanced={bool(args.train_epoch_build_balanced)} "
+            f"strict_build_balance={bool(args.strict_build_balance)} "
             f"bucket_profile={args.bucket_sampling_profile}",
             flush=True,
         )

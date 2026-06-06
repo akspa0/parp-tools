@@ -80,6 +80,12 @@ to work.
    de-emphasize unusable tiles/regions, not to reintroduce a large speculative
    loss stack.
 
+5. **WMO roof and basement occlusion both matter**
+   Terrain-valid masking must exclude both underground/basement WMO regions and
+   above-ground roof/top-geometry occlusion. The active lane may stay simple,
+   but it cannot collapse those two visibility seams into one basement-only
+   mask.
+
 5. **Tile plausibility is not enough**
    The product must support quilt-level terrain reconstruction. The final
    pipeline includes a post-model stitching stage.
@@ -144,6 +150,9 @@ manifest and verify evidence/checkpoints are produced.
 2. **Given** the active height lane, **When** loss is computed, **Then** it is
    plain height supervision over terrain-valid regions rather than a large
    auxiliary loss bundle.
+3. **Given** the two-build focused lane, **When** epoch subsets are sampled,
+   **Then** neither build may silently dominate because the focused operator
+   defaults enforce near-equal per-build sampling when feasible.
 3. **Given** the run finishes, **When** evidence is inspected, **Then** the run
    records command, seed, manifest, and checkpoint under `models/v18/height/`.
 
@@ -209,11 +218,17 @@ that consumes predicted terrain tiles and emits a stitch-ready terrain quilt.
 - **FR-008A**: The active height and normal losses MUST ignore terrain-hidden
   liquid/object regions via terrain-valid masking, without reintroducing a
   broad auxiliary liquid-weight stack.
+- **FR-008B**: Terrain-valid masking and focused preview evidence MUST include
+  both WMO basement/ground masks and WMO roof/top-geometry masks when those
+  signals are present in the harvested store.
 - **FR-009**: The active training lane MUST NOT require renderer-truth capture
   arrays.
 - **FR-010**: The focused operator workflow MUST expose dedicated V18
   curation/training entrypoints instead of relying only on older V16-named
   scripts.
+- **FR-010A**: The focused operator workflow MUST keep the two-build train/val
+  sampling balanced by default, capping oversized balanced subsets when one
+  build has fewer eligible rows.
 - **FR-011**: Height training MAY remain normalized, but the final V18 design
   MUST treat quilt-level stitching as the owner of cross-tile continuity rather
   than isolated tile previews.

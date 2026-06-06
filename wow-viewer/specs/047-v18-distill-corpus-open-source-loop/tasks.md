@@ -55,6 +55,8 @@ through a V18-specific wrapper with no manual V16 dataset path wiring.
 - [x] T023 [US2] Document the focused training command surface in [quickstart.md](/I:/parp/parp-tools/wow-viewer/specs/047-v18-distill-corpus-open-source-loop/quickstart.md) and [README.md](/I:/parp/parp-tools/wow-viewer/data-harvester/README.md).
 - [x] T024 [US3] Mask focused `height` and `normal` losses to terrain-valid regions so liquid-hidden/object-hidden terrain no longer dominates optimization.
 - [x] T025 [US3] Default focused training toward the observed 8 GB lane via startup batch autotune instead of the earlier smoke-budget operator defaults.
+- [x] T026 [US3] Default focused two-build training to strict near-equal per-build sampling so skewed manifests cannot silently run full unbalanced epochs.
+- [x] T027 [US3] Restore WMO roof/top-geometry participation in terrain-valid masking and focused preview evidence so active height/normal runs do not regress to basement-only object masking.
 
 **Checkpoint**: the focused V18 training lane is easy to launch and hard to
 misconfigure.

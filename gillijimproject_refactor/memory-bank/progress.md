@@ -133,6 +133,13 @@
     - `wow-viewer/data-harvester/scripts/train_v18_focus.py`
       - now defaults `--target-vram-gb 8`
       - now defaults startup `--autotune-batch-size`
+      - now defaults `--strict-build-balance`
+  - focused build-balance correction landed after the first real masked-height log exposed skew:
+    - prior `build_balanced=True` sampling was only approximate
+    - a run with `train=3336` still produced build mix `700` vs `2636` and full-pool epochs
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py` now supports strict near-equal per-build subsets without replacement
+    - oversized pool/epoch requests auto-cap to the largest feasible balanced subset
+    - effective epoch sizes are now recorded/logged so the operator can see the post-cap count instead of just the requested value
   - focused docs/spec continuity updated:
     - `wow-viewer/specs/047-v18-distill-corpus-open-source-loop/spec.md`
     - `plan.md`
@@ -144,7 +151,32 @@
   - targeted validation passed:
     - `uv run python -m py_compile wow-viewer/data-harvester/scripts/build_v16_curation_manifest.py wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
     - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q`
-      - `3 passed`
+      - `5 passed`
+
+- **V18 roof/top-geometry mask reintegration (2026-06-05)**
+  - user validation exposed that the active WMO masking had regressed to a basement-only read in practice:
+    - harvested `object_roof_mask_256` existed in the stores
+    - but active `terrain_valid_mask_257`, focused curation `trainable_cov`, and height preview weight evidence ignored it
+    - result: preview panels implied only the underground/ground object layer was live
+  - fix landed in `wow-viewer/data-harvester/src/harvester/v16_1_dataset.py`:
+    - added shared `compose_terrain_valid_mask_257(...)`
+    - terrain-valid masks now include:
+      - normal coverage
+      - basement/ground object presence
+      - roof/top-geometry occlusion
+      - liquid de-emphasis
+      - what-plate zeroing
+  - focused curation now uses the same roof-aware validity path in `wow-viewer/data-harvester/scripts/build_v16_curation_manifest.py`:
+    - `terrain_valid_cov` and `trainable_cov` now include roof occlusion
+    - rows now record `roof_cov`
+    - usefulness/pathology scoring now counts roof occlusion as part of low-visible-terrain pressure
+  - focused trainer preview consistency was restored in `wow-viewer/data-harvester/scripts/train_v16_1_common.py`:
+    - height preview now renders `outputs["weight"]` (the real combined training mask)
+    - optional `object_roof_weight` evidence is now available in previews
+  - targeted validation was extended and passed:
+    - `uv run python -m py_compile wow-viewer/data-harvester/src/harvester/v16_1_dataset.py wow-viewer/data-harvester/scripts/build_v16_curation_manifest.py wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+    - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q`
+      - `6 passed`
 
 ## Next Likely Steps
 
@@ -156,6 +188,8 @@
   - rerun focused curation so the latest `kept_tiles.parquet` picks up `insufficient_trainable_terrain` rejections
   - rerun focused height with the new terrain-valid loss masking and 8 GB autotune defaults
   - rerun focused normal with the new terrain-valid loss masking and 8 GB autotune defaults
+  - confirm the next run logs show near-equal per-build epoch subsets rather than the old `700` vs `2636` full-pool skew
+  - confirm the next height preview shows roof/top-geometry occlusion in the actual combined weight path instead of the old basement-only panel
   - compare live loss curves against the earlier liquid-poisoned plateaus before changing architecture again
 
 - **Native 1.12.1 M2/MDX loader trace (2026-06-05)** — research complete; no spec yet

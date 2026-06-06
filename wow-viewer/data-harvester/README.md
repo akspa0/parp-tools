@@ -139,10 +139,16 @@ Notes:
 - `train_v18_focus.py` defaults to the V18 dataset root, the two focused
   builds, the latest focused `kept_tiles.parquet` when present, and startup
   batch autotune against `--target-vram-gb 8`.
+- `train_v18_focus.py` also defaults to strict near-equal per-build sampling, so
+  oversized pool/epoch requests auto-cap to the largest feasible balanced
+  subset instead of silently letting one build dominate.
 - focused curation now rejects tiles with too little surviving trainable
   terrain, so liquid-hidden wipeout rows stop entering the active pool.
 - focused `height` and `normal` losses now honor terrain-valid masks, so
   liquid-hidden and object-hidden regions do not contribute loss.
+- when harvested `object_roof_mask_256` is present, that roof/top-geometry
+  occlusion is also folded into the active terrain-valid mask and the height
+  preview weight panel.
 - The active focused lane keeps height and normal as separate model runs.
 
 ---

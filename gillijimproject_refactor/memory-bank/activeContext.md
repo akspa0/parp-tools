@@ -135,6 +135,17 @@
     - `_height_loss(...)` now masks `abs(pred-target)` by `terrain_valid_mask_257`
     - `_normal_loss(...)` now masks cosine by `normal_mask * terrain_valid_mask_257`
     - this keeps liquid-hidden and object-hidden regions out of the loss without restoring a large auxiliary liquid-weight stack
+  - one more terrain-valid seam was then reopened and fixed:
+    - harvested `object_roof_mask_256` / `object_roof_weight_257` already existed
+    - but active `terrain_valid_mask_257`, focused curation `trainable_cov`, and the height preview still ignored that roof/top-geometry layer
+    - `wow-viewer/data-harvester/src/harvester/v16_1_dataset.py`
+      - now composes terrain-valid masks through a shared helper that includes roof/top-geometry occlusion
+    - `wow-viewer/data-harvester/scripts/build_v16_curation_manifest.py`
+      - now uses the same roof-aware terrain-valid logic for `terrain_valid_cov` / `trainable_cov`
+      - now records `roof_cov`
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - height preview now shows the actual combined masked weight, not the stale basement-only `weight_257`
+      - height/normal preview outputs can surface `object_roof_weight`
   - focused curation is now stricter in `wow-viewer/data-harvester/scripts/build_v16_curation_manifest.py`:
     - rows with `trainable_cov < 0.20` are rejected as `insufficient_trainable_terrain`
     - this catches liquid-hidden wipeout rows even when they are not WMO-dominated
@@ -142,13 +153,23 @@
     - `wow-viewer/data-harvester/scripts/train_v18_focus.py`
       - defaults `--target-vram-gb 8`
       - defaults startup `--autotune-batch-size`
+      - defaults `--strict-build-balance`
+  - focused sampling is now explicitly corrected:
+    - prior `build_balanced=True` behavior was only approximate and could still let the 3.3.5 pool dominate
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - now supports strict near-equal per-build balancing without replacement
+      - oversized pool/epoch requests auto-cap to the largest feasible balanced subset
+      - focused epoch logging/config now records the effective balanced epoch size
+    - this is the active owner fix for the discovered `700` vs `2636` train skew in the focused `v2` manifest/run
   - focused docs now steer away from the earlier smoke budget:
     - quickstart/README examples now use larger tile pools and `40` epochs instead of `20`
   - targeted Python proof now exists:
     - `wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
       - proves height loss ignores non-trainable regions
       - proves normal loss honors terrain-valid masking
+      - proves terrain-valid composition includes roof/top-geometry masks
       - proves curation rejects low-trainable tiles
+      - proves strict build-balance equalizes/caps focused subsets as designed
 - the next real proof is:
   - rerun focused curation so the active `kept_tiles.parquet` drops low-trainable liquid-hidden rows
   - scale the height run beyond smoke budget through `train_v18_focus.py height`

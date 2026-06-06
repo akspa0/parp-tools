@@ -83,6 +83,8 @@ uv run python -m py_compile `
   - builds: `0_5_3_3368`, `3_3_5_12340`
   - latest focused `kept_tiles.parquet` if `--curation-manifest` is omitted
   - startup batch autotune against `--target-vram-gb 8`
+  - strict near-equal per-build sampling by default; oversized pool/epoch requests
+    auto-cap to the largest feasible balanced subset
 - the focused curation manifest now rejects tiles with too little surviving
   trainable terrain, so liquid-hidden wipeouts stop entering the active pool
 - the focused height and normal losses now honor terrain-valid masks, so

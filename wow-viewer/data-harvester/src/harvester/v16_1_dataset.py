@@ -58,6 +58,25 @@ def _downsample_256_to_16(x: np.ndarray) -> np.ndarray:
     return reshaped.mean(axis=(1, 3)).astype(np.float32, copy=False)
 
 
+def compose_terrain_valid_mask_257(
+    *,
+    normal_mask_257: np.ndarray,
+    object_presence_257: np.ndarray,
+    liquid_mask_256: np.ndarray,
+    object_roof_weight_257: np.ndarray | None = None,
+    what_plate: bool = False,
+) -> np.ndarray:
+    terrain_valid_257 = normal_mask_257.astype(np.float32, copy=True)
+    terrain_valid_257 *= 1.0 - np.clip(object_presence_257.astype(np.float32, copy=False), 0.0, 1.0)
+    if object_roof_weight_257 is not None:
+        terrain_valid_257 *= np.clip(object_roof_weight_257.astype(np.float32, copy=False), 0.0, 1.0)
+    liquid_mask_257 = np.pad(liquid_mask_256.astype(np.float32, copy=False), ((0, 1), (0, 1)), mode="edge")
+    terrain_valid_257 *= 1.0 - (0.85 * np.clip(liquid_mask_257, 0.0, 1.0))
+    if what_plate:
+        terrain_valid_257[...] = 0.0
+    return terrain_valid_257
+
+
 def _interpolate_checkerboard_normals(normals: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Fill MCNR checkerboard gaps by averaging valid cardinal neighbors.
 
@@ -258,10 +277,13 @@ class V161Dataset(Dataset):
                 object_cov=object_cov,
             )
         )
-        terrain_valid_mask_257 = normal_mask * (1.0 - np.clip(object_presence_257, 0.0, 1.0))
-        terrain_valid_mask_257 *= (1.0 - np.clip(np.pad(liquid_mask, ((0, 1), (0, 1)), mode="edge"), 0.0, 1.0) * 0.85)
-        if what_plate_flag > 0.5:
-            terrain_valid_mask_257[...] = 0.0
+        terrain_valid_mask_257 = compose_terrain_valid_mask_257(
+            normal_mask_257=normal_mask,
+            object_presence_257=object_presence_257,
+            liquid_mask_256=liquid_mask,
+            object_roof_weight_257=object_roof_weight_257,
+            what_plate=what_plate_flag > 0.5,
+        )
         mcly_any_16 = (mcly_mask.max(axis=2) > 0.05).astype(np.float32, copy=False)
 
         if self.augment:

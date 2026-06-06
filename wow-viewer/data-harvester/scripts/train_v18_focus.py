@@ -43,6 +43,9 @@ def _ensure_defaults() -> None:
     if not _has_flag("--autotune-batch-size") and not _has_flag("--no-autotune-batch-size"):
         sys.argv.append("--autotune-batch-size")
 
+    if not _has_flag("--strict-build-balance") and not _has_flag("--no-strict-build-balance"):
+        sys.argv.append("--strict-build-balance")
+
 
 def main() -> None:
     _ensure_defaults()
