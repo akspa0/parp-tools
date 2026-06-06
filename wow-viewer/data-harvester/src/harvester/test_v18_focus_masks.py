@@ -97,6 +97,16 @@ def test_terrain_valid_mask_includes_object_roof_mask() -> None:
     assert (terrain_valid == expected).all()
 
 
+def test_lightweight_object_loss_weights_fold_in_roof_mask() -> None:
+    weight = _dataset.compose_object_loss_weights_257(
+        object_presence_257=torch.tensor([[0.0, 1.0], [0.5, 0.0]], dtype=torch.float32).numpy(),
+        object_roof_weight_257=torch.tensor([[1.0, 1.0], [0.0, 0.5]], dtype=torch.float32).numpy(),
+    )
+
+    expected = torch.tensor([[1.0, 0.0], [0.0, 0.5]], dtype=torch.float32).numpy()
+    assert (weight == expected).all()
+
+
 def test_curation_rejects_low_trainable_terrain_tiles() -> None:
     row = {
         "what_plate": False,
@@ -232,3 +242,73 @@ def test_is_new_best_val_requires_requested_improvement_margin() -> None:
     assert _train_common._is_new_best_val(0.39, 0.40, 0.0) is True
     assert _train_common._is_new_best_val(0.395, 0.40, 0.01) is False
     assert _train_common._is_new_best_val(0.389, 0.40, 0.01) is True
+
+
+def test_loader_pressure_profile_targets_focused_v18_base_lane() -> None:
+    args = argparse.Namespace(
+        dataset_dir=_ROOT.parent / "output" / "datasets" / "v18",
+        curation_manifest=_ROOT.parent / "output" / "datasets" / "v18" / "curation" / "focused",
+    )
+
+    profile = _train_common._resolve_loader_pressure_profile(
+        args,
+        task_name="normal",
+        normal_variant="v16_1_1_base",
+        resolved_height_channel=False,
+        resolved_refiner_enabled=False,
+        resolved_object_roof_channel=False,
+    )
+
+    assert profile == "focused_object_precise_mask_safe_defaults"
+
+
+def test_loader_pressure_defaults_clamp_only_focused_auto_loader_settings() -> None:
+    args = argparse.Namespace(
+        dataset_dir=_ROOT.parent / "output" / "datasets" / "v18",
+        curation_manifest=_ROOT.parent / "output" / "datasets" / "v18" / "curation" / "focused",
+        num_workers=-1,
+        prefetch_factor=4,
+        persistent_workers=None,
+    )
+
+    result = _train_common._apply_loader_pressure_defaults(
+        args,
+        profile_name="focused_object_precise_mask_safe_defaults",
+    )
+
+    assert result == {
+        "profile_name": "focused_object_precise_mask_safe_defaults",
+        "applied": True,
+        "num_workers": 2,
+        "prefetch_factor": 1,
+        "persistent_workers": False,
+    }
+    assert args.num_workers == 2
+    assert args.prefetch_factor == 1
+    assert args.persistent_workers is False
+
+
+def test_loader_pressure_defaults_preserve_explicit_loader_tuning() -> None:
+    args = argparse.Namespace(
+        dataset_dir=_ROOT.parent / "output" / "datasets" / "v18",
+        curation_manifest=_ROOT.parent / "output" / "datasets" / "v18" / "curation" / "focused",
+        num_workers=6,
+        prefetch_factor=4,
+        persistent_workers=None,
+    )
+
+    result = _train_common._apply_loader_pressure_defaults(
+        args,
+        profile_name="focused_object_precise_mask_safe_defaults",
+    )
+
+    assert result == {
+        "profile_name": "focused_object_precise_mask_safe_defaults",
+        "applied": False,
+        "num_workers": 6,
+        "prefetch_factor": 4,
+        "persistent_workers": None,
+    }
+    assert args.num_workers == 6
+    assert args.prefetch_factor == 4
+    assert args.persistent_workers is None

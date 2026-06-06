@@ -140,6 +140,67 @@ def _resolve_persistent_workers(requested: bool | None, num_workers: int) -> boo
     return bool(requested)
 
 
+def _resolve_loader_pressure_profile(
+    args: argparse.Namespace,
+    *,
+    task_name: str,
+    normal_variant: str,
+    resolved_height_channel: bool,
+    resolved_refiner_enabled: bool,
+    resolved_object_roof_channel: bool,
+) -> str | None:
+    dataset_dir = Path(getattr(args, "dataset_dir", "")).as_posix().lower()
+    is_v18_dataset = dataset_dir.endswith("/output/datasets/v18") or dataset_dir.endswith("/datasets/v18")
+    is_base_minimap_only_lane = (
+        not bool(resolved_height_channel)
+        and not bool(resolved_refiner_enabled)
+        and not bool(resolved_object_roof_channel)
+    )
+    if (
+        is_v18_dataset
+        and getattr(args, "curation_manifest", None) is not None
+        and is_base_minimap_only_lane
+        and (task_name == "height" or (task_name == "normal" and normal_variant == "v16_1_1_base"))
+    ):
+        return "focused_object_precise_mask_safe_defaults"
+    return None
+
+
+def _apply_loader_pressure_defaults(
+    args: argparse.Namespace,
+    *,
+    profile_name: str | None,
+) -> dict[str, Any] | None:
+    if profile_name is None:
+        return None
+
+    original_num_workers = int(args.num_workers)
+    original_prefetch_factor = int(args.prefetch_factor)
+    original_persistent_workers = args.persistent_workers
+
+    if original_num_workers < 0:
+        args.num_workers = 2
+        if int(args.prefetch_factor) > 1:
+            args.prefetch_factor = 1
+        if args.persistent_workers is None:
+            args.persistent_workers = False
+
+    changed = (
+        int(args.num_workers) != original_num_workers
+        or int(args.prefetch_factor) != original_prefetch_factor
+        or args.persistent_workers is not original_persistent_workers
+    )
+    return {
+        "profile_name": profile_name,
+        "applied": bool(changed),
+        "num_workers": int(args.num_workers),
+        "prefetch_factor": int(args.prefetch_factor),
+        "persistent_workers": (
+            None if args.persistent_workers is None else bool(args.persistent_workers)
+        ),
+    }
+
+
 def _resolve_autotune_batch_candidates(base_batch_size: int, requested: list[int] | None) -> list[int]:
     raw = list(requested) if requested else list(_DEFAULT_AUTOTUNE_BATCH_CANDIDATES)
     raw.append(int(base_batch_size))
@@ -1900,6 +1961,19 @@ def run_task(task_name: str) -> None:
             if args.persistent_workers is None:
                 args.persistent_workers = False
 
+    loader_pressure_profile = _resolve_loader_pressure_profile(
+        args,
+        task_name=task_name,
+        normal_variant=normal_variant,
+        resolved_height_channel=bool(resolved_height_channel),
+        resolved_refiner_enabled=bool(resolved_refiner_enabled),
+        resolved_object_roof_channel=bool(resolved_object_roof_channel),
+    )
+    loader_pressure_result = _apply_loader_pressure_defaults(
+        args,
+        profile_name=loader_pressure_profile,
+    )
+
     args.resolved_height_channel = bool(resolved_height_channel)
     args.resolved_refiner_enabled = bool(resolved_refiner_enabled)
     args.resolved_object_roof_channel = bool(resolved_object_roof_channel)
@@ -2178,6 +2252,8 @@ def run_task(task_name: str) -> None:
         "persistent_workers": args.persistent_workers,
         "resolved_persistent_workers": resolved_persistent_workers,
         "prefetch_factor": args.prefetch_factor,
+        "loader_pressure_profile": (loader_pressure_result or {}).get("profile_name"),
+        "loader_pressure_profile_applied": bool((loader_pressure_result or {}).get("applied", False)),
         "epochs": args.epochs,
         "lr": args.lr,
         "weight_decay": args.weight_decay,
@@ -2348,6 +2424,16 @@ def run_task(task_name: str) -> None:
         f"prefetch_factor={(args.prefetch_factor if resolved_num_workers > 0 else 'n/a')}",
         flush=True,
     )
+    if loader_pressure_result is not None:
+        print(
+            "DataLoader pressure profile: "
+            f"{loader_pressure_result['profile_name']} "
+            f"applied={loader_pressure_result['applied']} "
+            f"workers={loader_pressure_result['num_workers']} "
+            f"persistent_workers={loader_pressure_result['persistent_workers']} "
+            f"prefetch_factor={loader_pressure_result['prefetch_factor']}",
+            flush=True,
+        )
     print(
         f"Batching: micro={args.batch_size} accum={args.grad_accum_steps} "
         f"effective={args.batch_size * args.grad_accum_steps}",
