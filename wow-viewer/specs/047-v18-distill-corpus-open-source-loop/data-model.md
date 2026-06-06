@@ -155,3 +155,23 @@ Represents the later-stage stitched terrain reconstruction job.
 
 - every predicted tile must be placeable back into quilt coordinates
 - quilt job must carry enough metadata for later ADT emission
+
+## FocusedInferenceProofRun
+
+Represents a focused minimap-only inference proof over the V18 stores.
+
+### Fields
+
+- `run_name`: string
+- `dataset_dir`: path
+- `build`: string
+- `height_checkpoint`: path | null
+- `normal_checkpoint`: path | null
+- `resolved_input_contract`: literal `minimap_rgb`
+- `prediction_store_path`: path
+
+### Validation
+
+- the forward pass must consume minimap RGB only
+- hidden supervision-only tensors may be used later for offline scoring, but
+  they are not part of the runtime input contract

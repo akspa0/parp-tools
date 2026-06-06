@@ -132,6 +132,18 @@ uv run python -u scripts/train_v18_focus.py normal `
   --run-name v18_normal_focus_basic
 ```
 
+Run minimap-only focused inference proof:
+
+```powershell
+uv run python -u scripts/infer_v18_focus.py `
+  --build 3_3_5_12340 `
+  --limit 8 `
+  --device cuda `
+  --height-checkpoint ../models/v18/height/runs/v18_height_focus_basic/checkpoints/v16_1_height_best.pt `
+  --normal-checkpoint ../models/v18/normal/runs/v18_normal_focus_basic/checkpoints/v16_1_normal_best.pt `
+  --run-name v18_focus_minimap_only_proof
+```
+
 Notes:
 
 - `build_v18_curation_manifest.py` defaults to the V18 dataset root and the two
@@ -148,6 +160,11 @@ Notes:
   subset instead of silently letting one build dominate.
 - when bucket rotation is active, omit `--train-epoch-tiles` and let the
   trainer derive the per-epoch subset size from the bucketed manifest itself.
+- trainer `val_loss` and preview images are offline supervised-eval surfaces:
+  they can score against hidden dataset truth, but those tensors are not part
+  of the deployed forward path.
+- `infer_v18_focus.py` is the focused minimap-only proof surface with V18
+  dataset/output defaults.
 - focused curation now rejects tiles with too little surviving trainable
   terrain, so liquid-hidden wipeout rows stop entering the active pool.
 - focused `height` and `normal` losses now honor terrain-valid masks, so

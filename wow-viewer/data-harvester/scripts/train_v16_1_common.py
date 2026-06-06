@@ -1405,11 +1405,19 @@ def _preview_height(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
     _save_preview_grid(rows, out_path, row_titles=row_titles)
 
 
-def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out_path: Path) -> None:
+def _preview_normal(batch: dict[str, Any], outputs: dict[str, Any], out_path: Path) -> None:
     n = min(int(batch["input"].shape[0]), 8)
     rows = []
     row_titles = []
     has_refined = "refined_normals" in outputs
+
+    def _normalized_panel(key: str, label: str) -> tuple[str, torch.Tensor] | None:
+        if key not in outputs:
+            return None
+        tensor = outputs[key][idx]
+        peak = tensor.max().clamp_min(1e-6)
+        return (label, tensor / peak)
+
     for idx in range(n):
         row_titles.append(_preview_row_title(batch, idx))
         panels: list[tuple[str, torch.Tensor]] = [
@@ -1420,22 +1428,31 @@ def _preview_normal(batch: dict[str, Any], outputs: dict[str, torch.Tensor], out
         if has_refined:
             panels.append(("refiner_teacher_pred", _normals_to_rgb(outputs["refined_normals"][idx])))
         if "terrain_valid_mask" in outputs:
-            panels.extend([
-                ("terrain_valid", outputs["terrain_valid_mask"][idx]),
-                ("base_mask", outputs["base_mask"][idx]),
-                ("hard_region", outputs["hard_region_signal"][idx] / outputs["hard_region_signal"][idx].max().clamp_min(1e-6)),
-                ("transition", outputs["transition_signal"][idx] / outputs["transition_signal"][idx].max().clamp_min(1e-6)),
-                ("detail_weight", outputs["detail_weight"][idx] / outputs["detail_weight"][idx].max().clamp_min(1e-6)),
-                ("train_mask", outputs["train_mask"][idx] / outputs["train_mask"][idx].max().clamp_min(1e-6)),
-                ("liquid_mask", outputs["liquid_mask"][idx]),
-                ("object_weight", outputs["object_weight"][idx]),
-            ])
+            panels.append(("terrain_valid", outputs["terrain_valid_mask"][idx]))
+            if "base_mask" in outputs:
+                panels.append(("base_mask", outputs["base_mask"][idx]))
+            for optional_key, optional_label in (
+                ("hard_region_signal", "hard_region"),
+                ("transition_signal", "transition"),
+                ("detail_weight", "detail_weight"),
+                ("liquid_mask", "liquid_mask"),
+                ("object_weight", "object_weight"),
+            ):
+                panel = _normalized_panel(optional_key, optional_label)
+                if panel is not None:
+                    panels.append(panel)
+            if "train_mask" in outputs:
+                train_mask_peak = outputs["train_mask"][idx].max().clamp_min(1e-6)
+                panels.append(("train_mask", outputs["train_mask"][idx] / train_mask_peak))
         else:
-            panels.extend([
-                ("base_mask", outputs["base_mask"][idx] / outputs["base_mask"][idx].max().clamp_min(1e-6)),
-                ("train_mask", outputs["train_mask"][idx] / outputs["train_mask"][idx].max().clamp_min(1e-6)),
-                ("invalid_mask", outputs["invalid_mask"][idx] / outputs["invalid_mask"][idx].max().clamp_min(1e-6)),
-            ])
+            for optional_key, optional_label in (
+                ("base_mask", "base_mask"),
+                ("train_mask", "train_mask"),
+                ("invalid_mask", "invalid_mask"),
+            ):
+                panel = _normalized_panel(optional_key, optional_label)
+                if panel is not None:
+                    panels.append(panel)
         if "object_roof_weight" in outputs:
             panels.append(("object_roof_weight", outputs["object_roof_weight"][idx]))
         rows.append(panels)
@@ -1656,7 +1673,7 @@ def _parse_args(task_name: str) -> argparse.Namespace:
         "--val-preview-interval",
         type=int,
         default=1,
-        help="If >0, write a validation preview only when a new best checkpoint is found. 0 disables preview writes.",
+        help="If >0, write a supervised-eval preview only when a new best checkpoint is found. 0 disables preview writes.",
     )
     p.add_argument("--run-name", type=str, default=None)
     p.add_argument("--resume-checkpoint", type=Path, default=None)
@@ -2187,6 +2204,9 @@ def run_task(task_name: str) -> None:
                   else ("minimap_rgb+object_roof_mask" if task_name == "normal" and bool(resolved_object_roof_channel) else "variant_defined"))
         ),
         "resolved_output_contract": ("normals_xyz" if task_name == "normal" else "task_defined"),
+        "validation_contract": "offline_supervised_eval_with_truth_targets",
+        "validation_preview_contract": "offline_supervised_eval_preview",
+        "deployment_proof_surface": "infer_v18_focus.py",
         "height_supervision_only": bool(task_name == "normal" and normal_variant == "v17_1_normals"),
         "model_params": sum(p.numel() for p in model.parameters() if p.requires_grad),
         "refiner_enabled": refiner is not None,
@@ -2233,6 +2253,11 @@ def run_task(task_name: str) -> None:
                 "Normal contract: input=minimap_rgb+object_roof_mask -> output=normals_xyz",
                 flush=True,
             )
+    if task_name in {"height", "normal"}:
+        print(
+            "Supervised eval contract: val loss/previews use offline target and mask tensors for scoring only; deployment-surface proof should run infer_v18_focus.py with the model input contract only.",
+            flush=True,
+        )
     print(f"Device: {device}", flush=True)
     print(f"Run dir: {run_dir}", flush=True)
     print(f"Dataset: train={len(train_ds)} val={len(val_ds)}", flush=True)

@@ -69,7 +69,7 @@ public static class M2Era1121ModelReader
         Vector3 boundsMax = ReadFiniteVector3At(data, M2Era1121Constants.BoundsOffset + 0x0C, sourcePath, "boundsMax");
         float boundsRadius = ReadFiniteSingleAt(data, M2Era1121Constants.BoundsRadiusOffset, sourcePath, "boundsRadius");
 
-        return new M2ModelDocument(
+        M2ModelDocument document = new(
             identity,
             data,
             "MD20",
@@ -93,6 +93,26 @@ public static class M2Era1121ModelReader
             bones: [],
             ribbons: ribbons,
             particles: particles);
+
+        IReadOnlyList<M2Era1121VertexIndex> vertexIndices = ReadVertexIndices(data, sourcePath);
+        IReadOnlyList<Vector3> positions = ReadPositions(data, sourcePath);
+        IReadOnlyList<Vector3> normals = ReadNormals(data, sourcePath);
+        IReadOnlyList<Vector2> uvs = ReadUvs(data, sourcePath);
+        IReadOnlyList<ushort> triangles = ReadTriangles(data, sourcePath);
+        IReadOnlyList<M2Era1121Batch> batches = ReadBatches(data, sourcePath);
+
+        if (vertexIndices.Count > 0 && positions.Count > 0 && triangles.Count > 0)
+        {
+            document.InlineEra1121Geometry = new M2Era1121Geometry(
+                vertexIndices,
+                positions,
+                normals,
+                uvs,
+                triangles,
+                batches);
+        }
+
+        return document;
     }
 
     private static string? TryReadName(byte[] data, string sourcePath)
@@ -129,16 +149,16 @@ public static class M2Era1121ModelReader
                 ReadUInt16At(data, entryOffset + 0x00),
                 ReadUInt16At(data, entryOffset + 0x02),
                 ReadUInt32At(data, entryOffset + 0x04),
-                ReadFiniteSingleAt(data, entryOffset + 0x08, sourcePath, $"sequence[{index}].moveSpeed"),
+                ReadLenientSingleAt(data, entryOffset + 0x08, sourcePath, $"sequence[{index}].moveSpeed"),
                 ReadUInt32At(data, entryOffset + 0x0C),
                 ReadInt16At(data, entryOffset + 0x10),
                 ReadUInt32At(data, entryOffset + 0x14),
                 ReadUInt32At(data, entryOffset + 0x18),
                 ReadUInt16At(data, entryOffset + 0x1C),
                 ReadUInt16At(data, entryOffset + 0x1E),
-                ReadFiniteVector3At(data, entryOffset + 0x20, sourcePath, $"sequence[{index}].boundsMin"),
-                ReadFiniteVector3At(data, entryOffset + 0x2C, sourcePath, $"sequence[{index}].boundsMax"),
-                ReadFiniteSingleAt(data, entryOffset + 0x38, sourcePath, $"sequence[{index}].boundsRadius"),
+                ReadLenientVector3At(data, entryOffset + 0x20, sourcePath, $"sequence[{index}].boundsMin"),
+                ReadLenientVector3At(data, entryOffset + 0x2C, sourcePath, $"sequence[{index}].boundsMax"),
+                ReadLenientSingleAt(data, entryOffset + 0x38, sourcePath, $"sequence[{index}].boundsRadius"),
                 ReadInt16At(data, entryOffset + 0x3C),
                 ReadUInt16At(data, entryOffset + 0x3E)));
         }
@@ -242,7 +262,10 @@ public static class M2Era1121ModelReader
     {
         if (!TryReadUInt32At(data, M2Era1121Constants.CameraCountOffset, out uint count)
             || !TryReadUInt32At(data, M2Era1121Constants.CameraOffsetOffset, out uint offset)
-            || count == 0)
+            || count == 0
+            || count > 16
+            || offset == 0
+            || offset >= (uint)data.Length)
         {
             return [];
         }
@@ -278,7 +301,10 @@ public static class M2Era1121ModelReader
     {
         if (!TryReadUInt32At(data, M2Era1121Constants.RibbonCountOffset, out uint count)
             || !TryReadUInt32At(data, M2Era1121Constants.RibbonOffsetOffset, out uint offset)
-            || count == 0)
+            || count == 0
+            || count > 16
+            || offset == 0
+            || offset >= (uint)data.Length)
         {
             return [];
         }
@@ -325,7 +351,10 @@ public static class M2Era1121ModelReader
     {
         if (!TryReadUInt32At(data, M2Era1121Constants.ParticleCountOffset, out uint count)
             || !TryReadUInt32At(data, M2Era1121Constants.ParticleOffsetOffset, out uint offset)
-            || count == 0)
+            || count == 0
+            || count > 256
+            || offset == 0
+            || offset >= (uint)data.Length)
         {
             return [];
         }
@@ -375,6 +404,170 @@ public static class M2Era1121ModelReader
                 emissionAreaWidth,
                 zSource,
                 enabled));
+        }
+
+        return values;
+    }
+
+    private static IReadOnlyList<M2Era1121VertexIndex> ReadVertexIndices(byte[] data, string sourcePath)
+    {
+        if (!TryReadUInt32At(data, M2Era1121Constants.VertexCountOffset, out uint count)
+            || !TryReadUInt32At(data, M2Era1121Constants.VertexOffsetOffset, out uint offset)
+            || count == 0
+            || count > 100000
+            || offset == 0
+            || offset >= (uint)data.Length)
+        {
+            return [];
+        }
+
+        ValidateSpan(count, offset, M2Era1121Constants.VertexIndexStride, data.Length, sourcePath, "vertexIndices");
+
+        List<M2Era1121VertexIndex> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * M2Era1121Constants.VertexIndexStride));
+            uint packed = ReadUInt32At(data, entryOffset);
+            ushort positionIndex = (ushort)(packed & 0xFFFFu);
+            ushort normalIndex = (ushort)((packed >> 16) & 0xFFFFu);
+            values.Add(new M2Era1121VertexIndex(positionIndex, normalIndex));
+        }
+
+        return values;
+    }
+
+    private static IReadOnlyList<Vector3> ReadPositions(byte[] data, string sourcePath)
+    {
+        if (!TryReadUInt32At(data, M2Era1121Constants.PositionCountOffset, out uint count)
+            || !TryReadUInt32At(data, M2Era1121Constants.PositionOffsetOffset, out uint offset)
+            || count == 0
+            || count > 100000
+            || offset == 0
+            || offset >= (uint)data.Length)
+        {
+            return [];
+        }
+
+        ValidateSpan(count, offset, M2Era1121Constants.PositionStride, data.Length, sourcePath, "positions");
+
+        List<Vector3> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * M2Era1121Constants.PositionStride));
+            values.Add(ReadLenientVector3At(data, entryOffset, sourcePath, $"positions[{index}]"));
+        }
+
+        return values;
+    }
+
+    private static IReadOnlyList<Vector3> ReadNormals(byte[] data, string sourcePath)
+    {
+        if (!TryReadUInt32At(data, M2Era1121Constants.NormalCountOffset, out uint count)
+            || !TryReadUInt32At(data, M2Era1121Constants.NormalOffsetOffset, out uint offset)
+            || count == 0
+            || count > 100000
+            || offset == 0
+            || offset >= (uint)data.Length)
+        {
+            return [];
+        }
+
+        ValidateSpan(count, offset, M2Era1121Constants.NormalStride, data.Length, sourcePath, "normals");
+
+        List<Vector3> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * M2Era1121Constants.NormalStride));
+            values.Add(ReadLenientVector3At(data, entryOffset, sourcePath, $"normals[{index}]"));
+        }
+
+        return values;
+    }
+
+    private static IReadOnlyList<Vector2> ReadUvs(byte[] data, string sourcePath)
+    {
+        if (!TryReadUInt32At(data, M2Era1121Constants.UvCountOffset, out uint count)
+            || !TryReadUInt32At(data, M2Era1121Constants.UvOffsetOffset, out uint offset)
+            || count == 0
+            || count > 100000
+            || offset == 0
+            || offset >= (uint)data.Length)
+        {
+            return [];
+        }
+
+        ValidateSpan(count, offset, M2Era1121Constants.UvStride, data.Length, sourcePath, "uvs");
+
+        List<Vector2> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * M2Era1121Constants.UvStride));
+            values.Add(new Vector2(
+                ReadLenientSingleAt(data, entryOffset + 0x00, sourcePath, $"uvs[{index}].u"),
+                ReadLenientSingleAt(data, entryOffset + 0x04, sourcePath, $"uvs[{index}].v")));
+        }
+
+        return values;
+    }
+
+    private static IReadOnlyList<ushort> ReadTriangles(byte[] data, string sourcePath)
+    {
+        if (!TryReadUInt32At(data, M2Era1121Constants.TriangleCountOffset, out uint count)
+            || !TryReadUInt32At(data, M2Era1121Constants.TriangleOffsetOffset, out uint offset)
+            || count == 0
+            || count > 100000
+            || offset == 0
+            || offset >= (uint)data.Length)
+        {
+            return [];
+        }
+
+        ValidateSpan(count, offset, M2Era1121Constants.TriangleStride, data.Length, sourcePath, "triangles");
+
+        List<ushort> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * M2Era1121Constants.TriangleStride));
+            values.Add(ReadUInt16At(data, entryOffset));
+        }
+
+        return values;
+    }
+
+    private static IReadOnlyList<M2Era1121Batch> ReadBatches(byte[] data, string sourcePath)
+    {
+        if (!TryReadUInt32At(data, M2Era1121Constants.BatchCountOffset, out uint count)
+            || !TryReadUInt32At(data, M2Era1121Constants.BatchOffsetOffset, out uint offset)
+            || count == 0
+            || count > 10000
+            || offset == 0
+            || offset >= (uint)data.Length)
+        {
+            return [];
+        }
+
+        ValidateSpan(count, offset, M2Era1121Constants.BatchStride, data.Length, sourcePath, "batches");
+
+        List<M2Era1121Batch> values = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * M2Era1121Constants.BatchStride));
+            values.Add(new M2Era1121Batch(
+                ReadUInt16At(data, entryOffset + 0x00),
+                ReadUInt16At(data, entryOffset + 0x02),
+                ReadUInt16At(data, entryOffset + 0x04),
+                ReadUInt16At(data, entryOffset + 0x06),
+                ReadUInt16At(data, entryOffset + 0x08),
+                ReadUInt16At(data, entryOffset + 0x0A),
+                ReadUInt16At(data, entryOffset + 0x0C),
+                ReadUInt16At(data, entryOffset + 0x0E),
+                ReadUInt16At(data, entryOffset + 0x10),
+                ReadUInt16At(data, entryOffset + 0x12),
+                ReadUInt16At(data, entryOffset + 0x14),
+                ReadUInt16At(data, entryOffset + 0x16),
+                ReadUInt16At(data, entryOffset + 0x18),
+                ReadUInt16At(data, entryOffset + 0x1A),
+                ReadUInt16At(data, entryOffset + 0x1C)));
         }
 
         return values;
@@ -486,12 +679,26 @@ public static class M2Era1121ModelReader
         return value;
     }
 
+    private static float ReadLenientSingleAt(byte[] data, int offset, string sourcePath, string label)
+    {
+        EnsureReadable(data, offset, sizeof(float), sourcePath, label);
+        return BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset, sizeof(float))));
+    }
+
     private static Vector3 ReadFiniteVector3At(byte[] data, int offset, string sourcePath, string label)
     {
         return new Vector3(
             ReadFiniteSingleAt(data, offset + 0x00, sourcePath, $"{label}.x"),
             ReadFiniteSingleAt(data, offset + 0x04, sourcePath, $"{label}.y"),
             ReadFiniteSingleAt(data, offset + 0x08, sourcePath, $"{label}.z"));
+    }
+
+    private static Vector3 ReadLenientVector3At(byte[] data, int offset, string sourcePath, string label)
+    {
+        return new Vector3(
+            ReadLenientSingleAt(data, offset + 0x00, sourcePath, $"{label}.x"),
+            ReadLenientSingleAt(data, offset + 0x04, sourcePath, $"{label}.y"),
+            ReadLenientSingleAt(data, offset + 0x08, sourcePath, $"{label}.z"));
     }
 
     private static string? TryReadStringAt(byte[] data, string sourcePath, string label, uint count, uint offset)

@@ -174,6 +174,8 @@ focused builds and prefers the latest focused V18 curation manifest.
 8. Keep terrain-valid masking honest by including both WMO basement/object
    footprints and WMO roof/top-geometry occlusion when the harvested store
    carries both signals.
+9. Expose a focused minimap-only inference proof entrypoint so deployment-surface
+   validation is distinct from offline supervised training evaluation.
 
 **Validation**:
 
@@ -182,6 +184,8 @@ focused builds and prefers the latest focused V18 curation manifest.
   syntax.
 - focused runs can derive their per-epoch subset from a bucket-rotation
   fraction instead of requiring a fixed `--train-epoch-tiles` count.
+- focused operators can run a minimap-only inference proof command against V18
+  checkpoints without relying on supervision-only tensors during the run.
 
 ### Phase 2C - Operator Docs
 

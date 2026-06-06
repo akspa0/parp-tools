@@ -209,6 +209,32 @@
     - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help`
       - focused CLI now exposes `--train-bucket-rotation-fraction`
 
+- **V18 offline-supervised-eval vs runtime-proof split (2026-06-06)**
+  - user called out a real contract problem: trainer validation was being treated like deployment validation even though it can still rely on hidden dataset truth/mask tensors for scoring
+  - focused trainer clarification landed in `wow-viewer/data-harvester/scripts/train_v16_1_common.py`:
+    - `--val-preview-interval` help now calls the surface a supervised-eval preview
+    - run config now records:
+      - `validation_contract = offline_supervised_eval_with_truth_targets`
+      - `validation_preview_contract = offline_supervised_eval_preview`
+      - `deployment_proof_surface = infer_v18_focus.py`
+    - startup logs now tell the operator that focused height/normal val is offline supervised eval and that deployment proof belongs to `infer_v18_focus.py`
+  - focused runtime-proof wrapper landed in `wow-viewer/data-harvester/scripts/infer_v18_focus.py`:
+    - defaults dataset root to `wow-viewer/output/datasets/v18`
+    - defaults output root to `wow-viewer/output/datasets/v18_inference`
+    - reuses the existing minimap-only forward path from `infer_v16_1.py`
+  - spec/doc continuity synced:
+    - `wow-viewer/specs/047-v18-distill-corpus-open-source-loop/spec.md`
+    - `plan.md`
+    - `quickstart.md`
+    - `data-model.md`
+    - `tasks.md`
+    - `wow-viewer/data-harvester/README.md`
+    - `wow-viewer/docs/architecture/v18-distill-corpus-open-source-loop-2026-06-04.md`
+  - targeted validation passed:
+    - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/scripts/infer_v18_focus.py`
+    - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/infer_v18_focus.py --help`
+    - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help`
+
 ## Next Likely Steps
 
 - implement the first `046` slice: deterministic non-freezing PM4 segment export
@@ -219,6 +245,7 @@
   - rerun focused curation so the latest `kept_tiles.parquet` picks up `insufficient_trainable_terrain` rejections
   - rerun focused height with the new terrain-valid loss masking and `10%` rotating bucket coverage
   - rerun focused normal with the new terrain-valid loss masking and `10%` rotating bucket coverage
+  - run `infer_v18_focus.py` on the resulting checkpoints so the active proof owner becomes the minimap-only deployment surface rather than trainer val logs
   - confirm the next run logs show near-equal per-build epoch subsets plus sane rotation-cycle evidence rather than the old `700` vs `2636` full-pool skew
   - confirm the next height preview shows roof/top-geometry occlusion in the actual combined weight path instead of the old basement-only panel
   - compare live loss curves against the earlier liquid-poisoned plateaus before changing architecture again

@@ -179,6 +179,28 @@
       - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
       - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q` → `8 passed`
       - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help` shows the new flag on the focused entrypoint
+  - landed in the 2026-06-06 validation-contract split:
+    - the focused base model input path was already honest:
+      - `wow-viewer/data-harvester/src/harvester/v16_1_dataset.py`
+      - `input` is minimap RGB only unless the operator explicitly opts into `height_channel` or `object_roof_channel`
+    - the actual bug was contract drift:
+      - trainer `val_loss` / preview images were being talked about like deployment-surface validation
+      - but they are offline supervised eval that can still use hidden truth/mask tensors for scoring
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - now records `validation_contract = offline_supervised_eval_with_truth_targets`
+      - now records `deployment_proof_surface = infer_v18_focus.py`
+      - startup logs now say focused height/normal val is supervised eval, not runtime proof
+    - new focused runtime-proof wrapper:
+      - `wow-viewer/data-harvester/scripts/infer_v18_focus.py`
+      - defaults dataset root to `wow-viewer/output/datasets/v18`
+      - defaults output root to `wow-viewer/output/datasets/v18_inference`
+      - reuses the existing minimap-only forward path from `infer_v16_1.py`
+    - spec/doc continuity now distinguishes the two surfaces:
+      - trainer val = offline supervised eval
+      - `infer_v18_focus.py` = minimap-only deployment proof
+    - proof:
+      - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/scripts/train_v18_focus.py wow-viewer/data-harvester/scripts/infer_v18_focus.py`
+      - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/infer_v18_focus.py --help`
   - focused docs now steer away from the earlier smoke budget:
     - quickstart/README examples now use larger tile pools and `40` epochs instead of `20`
   - targeted Python proof now exists:
@@ -191,5 +213,6 @@
 - the next real proof is:
   - rerun focused curation so the active `kept_tiles.parquet` drops low-trainable liquid-hidden rows
   - launch real focused height and normal runs through the new `10%` rotating bucket-coverage default
+  - run `infer_v18_focus.py` on the resulting checkpoints so the active proof owner is the minimap-only deployment surface, not trainer val logs
   - inspect `train_epoch_bucket_usage.jsonl` and `config.json` for the derived epoch size / cycle length
   - confirm live losses improve without returning to full-pool-per-epoch wall time

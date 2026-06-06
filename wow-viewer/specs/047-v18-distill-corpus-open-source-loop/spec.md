@@ -164,6 +164,9 @@ manifest and verify evidence/checkpoints are produced.
    full bucketed train pool.
 5. **Given** the run finishes, **When** evidence is inspected, **Then** the run
    records command, seed, manifest, and checkpoint under `models/v18/height/`.
+6. **Given** a focused height checkpoint, **When** focused inference proof
+   runs, **Then** the deployed forward path uses minimap RGB only and does not
+   require hidden supervision-only signals during the run.
 
 ---
 
@@ -184,6 +187,9 @@ manifest and verify evidence/checkpoints are produced.
    object/roof auxiliary weighting.
 3. **Given** the run finishes, **When** evidence is inspected, **Then** the run
    records command, seed, manifest, and checkpoint under `models/v18/normal/`.
+4. **Given** a focused normal checkpoint, **When** focused inference proof
+   runs, **Then** the deployed forward path uses minimap RGB only and does not
+   require hidden supervision-only signals during the run.
 
 ---
 
@@ -242,6 +248,9 @@ that consumes predicted terrain tiles and emits a stitch-ready terrain quilt.
   per-bucket epoch rotation so a bounded fraction of each curated bucket can be
   trained each epoch while the full bucketed train pool is revisited over later
   epochs.
+- **FR-010C**: The focused operator workflow MUST expose a minimap-only
+  inference proof entrypoint distinct from the offline supervised training
+  validation path.
 - **FR-011**: Height training MAY remain normalized, but the final V18 design
   MUST treat quilt-level stitching as the owner of cross-tile continuity rather
   than isolated tile previews.
@@ -275,6 +284,8 @@ that consumes predicted terrain tiles and emits a stitch-ready terrain quilt.
 - **SC-005**: The final design names a quilt-level terrain assembly contract so
   the model outputs are explicitly aimed at stitched ADT reconstruction rather
   than isolated tile previews only.
+- **SC-006**: Focused operators can run a minimap-only inference proof command
+  without requiring supervision-only signals during the run.
 
 ## Assumptions
 

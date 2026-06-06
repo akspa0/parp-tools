@@ -119,6 +119,15 @@ derived from the harvested validity tensors. That keeps liquid-hidden and
 object-hidden terrain from poisoning optimization without turning liquids into a
 separate weighted auxiliary objective.
 
+That offline supervised-eval path must not be confused with deployment proof:
+
+- training `val_loss` and preview panels can use hidden truth/mask tensors for
+  scoring and evidence
+- the runtime proof surface for spec `047` is minimap-only inference through
+  `scripts/infer_v18_focus.py`
+- if a question is “can the current checkpoint run with only minimap input?”,
+  the answer must come from that inference surface, not from trainer val logs
+
 Those terrain-valid tensors now explicitly include both the basement/ground
 object masks and the WMO roof/top-geometry mask when present. Preview evidence
 must show the actual combined training weight rather than a basement-only

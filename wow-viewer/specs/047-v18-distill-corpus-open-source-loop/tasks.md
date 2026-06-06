@@ -58,6 +58,8 @@ through a V18-specific wrapper with no manual V16 dataset path wiring.
 - [x] T026 [US3] Default focused two-build training to strict near-equal per-build sampling so skewed manifests cannot silently run full unbalanced epochs.
 - [x] T027 [US3] Restore WMO roof/top-geometry participation in terrain-valid masking and focused preview evidence so active height/normal runs do not regress to basement-only object masking.
 - [x] T028 [US3] Add restrained rotating bucket coverage so focused runs can train on a bounded fraction of each curated bucket per epoch while cycling through the full train pool over later epochs.
+- [x] T029 [US3] Distinguish offline supervised training validation from minimap-only deployment proof and add a focused V18 inference wrapper for the runtime proof surface.
+- [x] T028b [US3] Hotfix: `_preview_normal` accessed `hard_region_signal` / `transition_signal` / `detail_weight` / `liquid_mask` / `object_weight` unconditionally, but the active V18 normal loss (`_normal_loss`) only returns the lean outputs contract. Make the rich/refiner-style preview panels additive (key-existence guarded) so the focused V18 normal run no longer crashes on the first new best val, and verify both the lean and rich preview paths render.
 
 **Checkpoint**: the focused V18 training lane is easy to launch and hard to
 misconfigure.

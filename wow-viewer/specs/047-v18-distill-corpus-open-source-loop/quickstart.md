@@ -65,11 +65,32 @@ uv run python scripts/train_v18_focus.py normal `
 
 ## 4. Validate Python surfaces after changes
 
+Run minimap-only focused inference proof:
+
+```powershell
+cd i:\parp\parp-tools\wow-viewer\data-harvester
+
+uv run python scripts/infer_v18_focus.py `
+  --build 3_3_5_12340 `
+  --limit 8 `
+  --device cuda `
+  --height-checkpoint ..\models\v18\height\runs\v18_height_focus_basic\checkpoints\v16_1_height_best.pt `
+  --normal-checkpoint ..\models\v18\normal\runs\v18_normal_focus_basic\checkpoints\v16_1_normal_best.pt `
+  --run-name v18_focus_minimap_only_proof
+```
+
+This proof path consumes minimap RGB only during the run. It may still compare
+outputs against offline dataset truth later, but those hidden tensors are not
+part of the deployed forward pass.
+
+## 5. Validate Python surfaces after changes
+
 ```powershell
 cd i:\parp\parp-tools
 
 uv run python -m py_compile `
   wow-viewer/data-harvester/scripts/build_v18_curation_manifest.py `
+  wow-viewer/data-harvester/scripts/infer_v18_focus.py `
   wow-viewer/data-harvester/scripts/train_v18_focus.py `
   wow-viewer/data-harvester/scripts/train_v18.py `
   wow-viewer/data-harvester/scripts/train_v16_1_common.py `
@@ -93,6 +114,10 @@ uv run python -m py_compile `
   trainable terrain, so liquid-hidden wipeouts stop entering the active pool
 - the focused height and normal losses now honor terrain-valid masks, so
   liquid-hidden and object-hidden regions do not contribute loss
+- trainer `val_loss` and preview images are offline supervised evaluation
+  surfaces; they can use hidden truth/mask tensors for scoring, but they are
+  not the deployment proof path
+- `infer_v18_focus.py` is the focused minimap-only inference proof entrypoint
 - the focused height and normal runs are independent by design
 - quilt-level terrain stitching and later ADT writeback are downstream work;
   the training lane prepares the terrain predictions they consume

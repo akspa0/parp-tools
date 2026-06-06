@@ -8,7 +8,7 @@ public static class M2Era1121Constants
     public const int VersionFieldSizeBytes = 4;
     public const int DispatchHeaderSizeBytes = SignatureSizeBytes + VersionFieldSizeBytes;
 
-    public const int MinimumHeaderSizeBytes = 0xD4;
+    public const int MinimumHeaderSizeBytes = 0x144;
 
     public const int VersionOffset = 0x04;
     public const int NameCountOffset = 0x08;
@@ -54,21 +54,28 @@ public static class M2Era1121Constants
     public const int AttachOffsetOffset = 0xA8;
     public const int LightCountOffset = 0xAC;
     public const int LightOffsetOffset = 0xB0;
-    public const int CameraCountOffset = 0xB4;
-    public const int CameraOffsetOffset = 0xB8;
-    public const int CameraPerFrameCountOffset = 0xBC;
-    public const int CameraPerFrameOffsetOffset = 0xC0;
-    public const int RibbonCountOffset = 0xC4;
-    public const int RibbonOffsetOffset = 0xC8;
-    public const int ParticleCountOffset = 0xCC;
-    public const int ParticleOffsetOffset = 0xD0;
-    public const int UnkV101Extra0CountOffset = 0xD4;
-    public const int UnkV101Extra0OffsetOffset = 0xD8;
-    public const int UnkV101Extra1CountOffset = 0xDC;
-    public const int UnkV101Extra1OffsetOffset = 0xE0;
 
-    public const int HeaderSizeV100 = 0xD4;
-    public const int HeaderSizeV101 = 0xE8;
+    public const int VertexCountOffset = 0xEC;
+    public const int VertexOffsetOffset = 0xF0;
+    public const int PositionCountOffset = 0xF4;
+    public const int PositionOffsetOffset = 0xF8;
+    public const int NormalCountOffset = 0xFC;
+    public const int NormalOffsetOffset = 0x100;
+    public const int UvCountOffset = 0x104;
+    public const int UvOffsetOffset = 0x108;
+    public const int TriangleCountOffset = 0x10C;
+    public const int TriangleOffsetOffset = 0x110;
+    public const int BatchCountOffset = 0x114;
+    public const int BatchOffsetOffset = 0x118;
+    public const int Extra0CountOffset = 0x11C;
+    public const int Extra0OffsetOffset = 0x120;
+    public const int Extra1CountOffset = 0x124;
+    public const int Extra1OffsetOffset = 0x128;
+    public const int Extra2CountOffset = 0x12C;
+    public const int Extra2OffsetOffset = 0x130;
+
+    public const int HeaderSizeV100 = 0x144;
+    public const int HeaderSizeV101 = 0x144;
 
     public const int SequenceStride = 0x6C;
     public const int SequenceLookupStride = 0x02;
@@ -89,16 +96,39 @@ public static class M2Era1121Constants
     public const int CollisionStride = 0x02;
     public const int AttachStride = 0x0C;
     public const int LightStride = 0x0C;
-    public const int CameraStride = 0x2C;
-    public const int CameraPerFrameStride = 0xD4;
-    public const int RibbonStride = 0x7C;
-    public const int ParticleStride = 0xDC;
-    public const int UnkV101Extra0Stride = 0x02;
-    public const int UnkV101Extra1Stride = 0x1F8;
-    public const int UnkV101Extra1SubTableCount = 29;
+    public const int VertexIndexStride = 0x04;
+    public const int PositionStride = 0x0C;
+    public const int NormalStride = 0x0C;
+    public const int UvStride = 0x08;
+    public const int TriangleStride = 0x02;
+    public const int BatchStride = 0x1C;
+    public const int Extra0Stride = 0x02;
+    public const int Extra1Stride = 0x1F8;
+    public const int Extra1SubTableCount = 29;
+    public const int Extra2Stride = 0x02;
     public const int GlobalLoopStride = 0x04;
     public const int NameStride = 0x01;
 
     public const int BoundsOffset = 0xA0;
     public const int BoundsRadiusOffset = 0xB8;
+
+    public const int CameraCountOffset = Extra0CountOffset;
+    public const int CameraOffsetOffset = Extra0OffsetOffset;
+    public const int CameraStride = 0x2C;
+    public const int CameraPerFrameCountOffset = Extra0CountOffset;
+    public const int CameraPerFrameOffsetOffset = Extra0OffsetOffset;
+    public const int CameraPerFrameStride = 0xD4;
+    public const int RibbonCountOffset = Extra0CountOffset;
+    public const int RibbonOffsetOffset = Extra0OffsetOffset;
+    public const int RibbonStride = 0x7C;
+    public const int ParticleCountOffset = Extra0CountOffset;
+    public const int ParticleOffsetOffset = Extra0OffsetOffset;
+    public const int ParticleStride = 0xDC;
+    public const int UnkV101Extra0CountOffset = Extra0CountOffset;
+    public const int UnkV101Extra0OffsetOffset = Extra0OffsetOffset;
+    public const int UnkV101Extra0Stride = 0x02;
+    public const int UnkV101Extra1CountOffset = Extra1CountOffset;
+    public const int UnkV101Extra1OffsetOffset = Extra1OffsetOffset;
+    public const int UnkV101Extra1Stride = 0x1F8;
+    public const int UnkV101Extra1SubTableCount = 29;
 }

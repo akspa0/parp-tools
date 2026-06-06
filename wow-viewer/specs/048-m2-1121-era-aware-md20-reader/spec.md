@@ -2,10 +2,10 @@
 
 **Feature Branch**: `048-m2-1121-era-aware-md20-reader`
 **Created**: 2026-06-05
-**Status**: Draft
+**Status**: In Progress (Phases 0-12 done, Phase 13 deferred)
 **Input**: Ghidra trace of `WoW.exe` `Build 5875` (1.12.1 Vanilla, image base `0x00400000`, .text `0x00401000-0x007fefff`) and the research document `wow-viewer/docs/architecture/m2-mdx-1121-native-trace-2026-06-05.md`. The 1.12.1 native client loads model files via the function at `FUN_0071cdf0` (`M2Model.cpp`), which expects the flat `MD20` magic (`0x3032444D`) with version `0x100` or `0x101` and a (count, offset) pointer table — NOT the chunked `MDLX` format that spec 043 covers. The current `M2ModelReader` in `wow-viewer/src/core/WowViewer.Core.IO/M2/M2ModelReader.cs` is hard-coded to 3.3.5 stride constants (`ViewCountOffset=0x44`, `SequenceStride=0x40`, `LightStride=0x9C`, `ParticleStrideClassic=0x1dc`, etc.) and the dispatcher routes anything that is not `MDLX` magic to it. Result: 1.12.1 `.mdx` files (which carry `MD20` magic with the legacy `.mdx` extension) are silently parsed as 3.3.5 MD20 and produce invalid models. Spec 043 must be revised to acknowledge 1.12.1 is MD20, not MDLX. The fix is a sibling era-aware MD20 reader that dispatches on the `version` field at offset `0x04` of the header.
 
-**Implementation Status (2026-06-05)**: This spec is a fresh slice. No code yet. The full M2 native trace is in `m2-mdx-1121-native-trace-2026-06-05.md` and is the source of truth for the 1.12.1 header layout, view-record structure, relocator catalog, stride differences vs 3.3.5, and the 6 open questions.
+**Implementation Status (2026-06-06)**: Phases 0-8 of the original plan are complete. The 048 reader was extended in place (Phases 9-12) to parse the 1.12.1 inline geometry (vertex indices, positions, normals, UVs, triangles, batches) and attach it to the `M2ModelDocument` as a new `InlineEra1121Geometry` property. All 9 048 tests pass with real 1.12.1 bear.m2 data (test runtime 3-4 seconds confirms real data, not silent no-op). The viewer's load path (`WorldAssetManager.LoadMdxModel`) is NOT yet wired to use the new geometry — that is Phase 13, deferred to a follow-up session. Until Phase 13 lands, the viewer still produces the 0-vertex fallback error for 1.12.1 .mdx files.
 
 ## User Scenarios & Testing *(mandatory)*
 

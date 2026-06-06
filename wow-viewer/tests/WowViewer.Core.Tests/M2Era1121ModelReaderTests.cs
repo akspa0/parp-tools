@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using System.Text;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.M2;
@@ -32,6 +33,54 @@ public sealed class M2Era1121ModelReaderTests
         Assert.True(document.ViewCount > 0, "Bear fixture must have at least one view.");
         Assert.True(document.LightCount > 0 || document.LightCount == 0, "LightCount must be parsed (any value is acceptable for a creature model).");
         Assert.NotNull(document.ModelName);
+    }
+
+    [Fact]
+    public void M2Era1121ModelReader_Read_TestFixture_PopulatesInlineEra1121Geometry_WhenArchiveIsPresent()
+    {
+        if (!TryReadStagedVirtualFile(
+                "1.X_Retail_Windows_enUS_1.12.1.5875",
+                "creature\\bear\\bear.mdx",
+                out byte[] bytes,
+                out string sourcePath,
+                out _))
+        {
+            return;
+        }
+
+        using MemoryStream stream = new(bytes, writable: false);
+        M2ModelDocument document = M2Era1121ModelReader.Read(stream, sourcePath);
+
+        Assert.NotNull(document.InlineEra1121Geometry);
+        M2Era1121Geometry geometry = document.InlineEra1121Geometry!;
+        Assert.True(geometry.Vertices.Count > 0, "Bear must have at least one vertex index.");
+        Assert.True(geometry.Positions.Count > 0, "Bear must have at least one unique position.");
+        Assert.True(geometry.Normals.Count > 0, "Bear must have at least one unique normal.");
+
+        int validVertices = 0;
+        foreach (M2Era1121VertexIndex v in geometry.Vertices)
+        {
+            if (v.PositionIndex < geometry.Positions.Count && v.NormalIndex < geometry.Normals.Count)
+                validVertices++;
+        }
+        Assert.True(validVertices > 0, "At least one vertex must reference valid position and normal indices.");
+        Assert.True(validVertices >= geometry.Vertices.Count / 2, "Majority of vertices must reference valid position and normal indices.");
+
+        int finitePositions = 0;
+        foreach (Vector3 p in geometry.Positions)
+        {
+            if (float.IsFinite(p.X) && float.IsFinite(p.Y) && float.IsFinite(p.Z))
+                finitePositions++;
+        }
+        Assert.Equal(geometry.Positions.Count, finitePositions);
+
+        int finiteNormals = 0;
+        foreach (Vector3 n in geometry.Normals)
+        {
+            if (float.IsFinite(n.X) && float.IsFinite(n.Y) && float.IsFinite(n.Z))
+                finiteNormals++;
+        }
+        Assert.Equal(geometry.Normals.Count, finiteNormals);
     }
 
     [Fact]
@@ -108,7 +157,7 @@ public sealed class M2Era1121ModelReaderTests
     private static byte[] CreateSynthetic1121Md20(string modelName, uint flags)
     {
         byte[] nameBytes = Encoding.UTF8.GetBytes(modelName + "\0");
-        int nameOffset = 0xE8;
+        int nameOffset = 0x150;
         byte[] data = new byte[nameOffset + nameBytes.Length];
         Encoding.ASCII.GetBytes("MD20").CopyTo(data, 0);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x04, 4), 0x100u);
@@ -122,7 +171,7 @@ public sealed class M2Era1121ModelReaderTests
     private static byte[] CreateSyntheticMd20_3X(string modelName)
     {
         byte[] nameBytes = Encoding.UTF8.GetBytes(modelName + "\0");
-        int nameOffset = 0x120;
+        int nameOffset = 0x180;
         byte[] data = new byte[nameOffset + nameBytes.Length];
         Encoding.ASCII.GetBytes("MD20").CopyTo(data, 0);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x04, 4), 0x108u);
@@ -136,7 +185,7 @@ public sealed class M2Era1121ModelReaderTests
     private static byte[] CreateSyntheticMd20_2X(string modelName)
     {
         byte[] nameBytes = Encoding.UTF8.GetBytes(modelName + "\0");
-        int nameOffset = 0x110;
+        int nameOffset = 0x180;
         byte[] data = new byte[nameOffset + nameBytes.Length];
         Encoding.ASCII.GetBytes("MD20").CopyTo(data, 0);
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(0x04, 4), 0x104u);
@@ -186,29 +235,53 @@ public sealed class M2Era1121ModelReaderTests
             return false;
         }
 
-        try
+        string ext = Path.GetExtension(sourcePath);
+        string[] aliasExtensions = { ".mdx", ".m2", ".mdl" };
+        string requestedPath = sourcePath;
+        string requestedBase = Path.Combine(Path.GetDirectoryName(requestedPath) ?? string.Empty, Path.GetFileNameWithoutExtension(requestedPath));
+        bool isModelExt = aliasExtensions.Any(a => a.Equals(ext, StringComparison.OrdinalIgnoreCase));
+        List<string> candidateList = new() { requestedPath };
+        if (isModelExt)
         {
-            bytes = ArchiveVirtualFileReader.ReadVirtualFile(sourcePath, [clientDataPath], listfilePath);
-            companionReader = path =>
+            foreach (string a in aliasExtensions)
             {
-                try
-                {
-                    return ArchiveVirtualFileReader.ReadVirtualFile(path.Replace('/', '\\'), [clientDataPath], listfilePath);
-                }
-                catch (FileNotFoundException)
-                {
-                    return null;
-                }
-            };
+                if (a.Equals(ext, StringComparison.OrdinalIgnoreCase)) continue;
+                candidateList.Add(requestedBase + a);
+            }
+        }
+        string[] candidatePaths = candidateList.ToArray();
 
-            return true;
-        }
-        catch (FileNotFoundException)
+        string resolvedPath = requestedPath;
+        foreach (string candidate in candidatePaths)
         {
-            bytes = [];
-            companionReader = static _ => null;
-            return false;
+            try
+            {
+                bytes = ArchiveVirtualFileReader.ReadVirtualFile(candidate, [clientDataPath], listfilePath);
+                resolvedPath = candidate;
+                sourcePath = resolvedPath;
+                string clientDataForLambda = clientDataPath;
+                string listfileForLambda = listfilePath;
+                companionReader = path =>
+                {
+                    try
+                    {
+                        return ArchiveVirtualFileReader.ReadVirtualFile(path.Replace('/', '\\'), [clientDataForLambda], listfileForLambda);
+                    }
+                    catch (FileNotFoundException)
+                    {
+                        return null;
+                    }
+                };
+                return true;
+            }
+            catch (FileNotFoundException)
+            {
+            }
         }
+
+        bytes = [];
+        companionReader = static _ => null;
+        return false;
     }
 
     private static string GetWowViewerRoot()
