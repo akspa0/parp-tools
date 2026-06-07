@@ -22,12 +22,14 @@ using WowViewer.Core.M2;
 using WowViewer.Core.Mdx;
 using WowViewer.Core.Maps;
 using WowViewer.Core.PM4;
+using WowViewer.Core.PM4.Matching;
 using WowViewer.Core.PM4.Models;
 using WowViewer.Core.PM4.Research;
 using WowViewer.Core.PM4.Services;
 using WowViewer.Core.Runtime;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Wmo;
+using WowViewer.Tools.Shared.Pm4Matching;
 
 if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
 {
@@ -1687,6 +1689,9 @@ static void RunPm4(string[] args)
 		case "inspect":
 			RunPm4Inspect(tail);
 			break;
+		case "export-segments":
+			RunPm4ExportSegments(tail);
+			break;
 		case "match":
 			RunPm4Match(tail);
 			break;
@@ -1838,6 +1843,43 @@ static void RunPm4Match(string[] args)
 		return;
 
 	Pm4MatchSupport.Print(result);
+}
+
+static void RunPm4ExportSegments(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file or directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	try
+	{
+		Pm4SegmentExportRun exportRun = Pm4SegmentExportService.Export(input);
+		if (!string.IsNullOrWhiteSpace(output))
+		{
+			string outputPath = Path.GetFullPath(output);
+			string? directory = Path.GetDirectoryName(outputPath);
+			if (!string.IsNullOrWhiteSpace(directory))
+				Directory.CreateDirectory(directory);
+
+			Pm4MatchRunManifest manifest = BuildPm4SegmentExportManifest(exportRun);
+			File.WriteAllText(outputPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+			Console.WriteLine($"Wrote {outputPath}");
+			Console.WriteLine($"Exported {exportRun.SegmentCount} PM4 segments from {exportRun.FileCount} file(s).");
+			return;
+		}
+
+		PrintPm4SegmentExportRun(exportRun);
+	}
+	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or DirectoryNotFoundException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
 }
 
 static void RunWmoInspect(string[] args)
@@ -3898,6 +3940,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo> [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect pm4 inspect --input <file.pm4>");
+	Console.WriteLine("  wowviewer-inspect pm4 export-segments --input <file.pm4|directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 mscn --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 unknowns --input <directory> [--output <report.json>]");
@@ -3905,6 +3948,58 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
+}
+
+static Pm4MatchRunManifest BuildPm4SegmentExportManifest(Pm4SegmentExportRun exportRun)
+{
+	List<Pm4MatchReportSegment> segments = exportRun.Files
+		.SelectMany(static file => file.Segments)
+		.OrderBy(static segment => segment.Segment.TileCoordinates[0], StringComparer.Ordinal)
+		.ThenBy(static segment => segment.Segment.SegmentId, StringComparer.Ordinal)
+		.Select(static segment => new Pm4MatchReportSegment(
+			segment.Segment.SegmentId,
+			$"0x{segment.Segment.Ck24:X6}",
+			segment.Segment.Ck24Type,
+			segment.Segment.Ck24ObjectId,
+			segment.Segment.TileCoordinates,
+			segment.Segment.Field04Values,
+			null,
+			Array.Empty<Pm4MatchReportCandidate>(),
+			null))
+		.ToList();
+
+	return new Pm4MatchRunManifest(
+		exportRun.RunId,
+		exportRun.InputPath,
+		exportRun.SegmentCount,
+		segments);
+}
+
+static void PrintPm4SegmentExportRun(Pm4SegmentExportRun exportRun)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 segment export");
+	Console.WriteLine($"Input: {exportRun.InputPath}");
+	Console.WriteLine($"RunId: {exportRun.RunId}");
+	Console.WriteLine($"Files: {exportRun.FileCount} Segments: {exportRun.SegmentCount} Warnings: {exportRun.Warnings.Count}");
+
+	foreach (Pm4SegmentExportFile file in exportRun.Files.Take(8))
+	{
+		Console.WriteLine($"  tile={file.TileX}_{file.TileY} segments={file.SegmentCount} source={Path.GetFileName(file.SourcePath)}");
+		foreach (Pm4BuiltObjectSegment segment in file.Segments.Take(4))
+		{
+			string groupText = segment.Segment.LinkGroupIds.Count > 0
+				? string.Join(",", segment.Segment.LinkGroupIds.Select(static groupId => $"0x{groupId:X}"))
+				: "none";
+			Console.WriteLine(
+				$"    {segment.Segment.SegmentId} ck24=0x{segment.Segment.Ck24:X6} type=0x{segment.Segment.Ck24Type:X2} low16={segment.Segment.Ck24ObjectId} surfaces={segment.Segment.SurfaceCount} indices={segment.Segment.TotalIndexCount} groups={groupText} flags={segment.Segment.ConfidenceFlags}");
+		}
+	}
+
+	if (exportRun.Warnings.Count > 0)
+	{
+		foreach (string warning in exportRun.Warnings)
+			Console.WriteLine($"Warning: {warning}");
+	}
 }
 
 static void ShowAudioUsage()
@@ -4041,6 +4136,7 @@ static void ShowPm4Usage()
 {
 	Console.WriteLine("PM4 commands:");
 	Console.WriteLine("  pm4 inspect --input <file.pm4>");
+	Console.WriteLine("  pm4 export-segments --input <file.pm4|directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 match --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-matches <n>] [--search-range <units>] [--output <report.json>] [--object-output-dir <directory>]");
 	Console.WriteLine("  pm4 hierarchy --input <file.pm4> [--output <report.json>]");
 	Console.WriteLine("  pm4 linkage --input <directory> [--output <report.json>]");

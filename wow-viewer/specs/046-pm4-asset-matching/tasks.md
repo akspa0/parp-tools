@@ -57,7 +57,7 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] Add `pm4 export-segments` command handling to `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs`.
+- [x] T011 [US1] Add `pm4 export-segments` command handling to `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs`.
 - [x] T012 [US1] Implement an export job/service in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` that streams PM4 segment records and signal payloads without viewer-shell ownership.
 - [ ] T013 [US1] Add Zarr-backed PM4 segment corpus writing in `wow-viewer/data-harvester/src/harvester/pm4_asset_matching/pm4_signal_store.py`.
 - [ ] T014 [US1] Add `export_pm4_segment_signals.py` in `wow-viewer/data-harvester/scripts/` for bounded corpus-building automation.
