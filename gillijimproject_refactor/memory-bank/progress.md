@@ -75,7 +75,11 @@
     - aggregates deterministic per-file segment builds into one stable export run id plus per-file segment lists
   - current export artifact contract:
     - JSON report shaped to the shared PM4 match schema surface
-    - each exported segment currently carries identity and grouping fields with an empty candidate list
+    - export rows now carry PM4-owned matching evidence:
+      - predicted asset kind
+      - bounds, footprint hull/area, height stats
+      - anchor signals, topology stats, surface-family histogram
+      - coordinate-mode metadata, confidence flags, and rationale
     - Zarr-backed signal-store writing remains open follow-up work, not silently implied done
   - targeted proof passed:
     - `dotnet build i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug`
@@ -88,6 +92,33 @@
   - one test-runner operational note:
     - stale `testhost` processes locked the PM4 test DLL after earlier timeouts
     - stopping those stale `testhost` processes was required before rerunning filtered PM4 tests cleanly
+
+- **PM4 asset-matching scorer + validation match host slice (2026-06-07)**
+  - first real US2 automation owner now exists in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`:
+    - `Pm4AssetReferenceSignalRecord`
+    - `Pm4SegmentMatchResult`
+    - `Pm4AssetMatchScorer`
+  - scorer behavior now has focused synthetic proof:
+    - matched case prefers the best overlapping candidate
+    - non-WMO/M2-like segment types return `ineligible`
+    - near-tied top candidates return `ambiguous`
+  - inspect host now has the first spec-owned validation matcher:
+    - `pm4 match-assets --input <file.pm4> --archive-root <staged client> [--placements <tile_obj0.adt>] [--max-candidates <n>] [--output <report.json>]`
+    - uses deterministic PM4 segments from `Pm4SegmentExportService`
+    - builds validation asset references from one `_obj0.adt`
+    - resolves WMO/M2 bounds from staged assets when possible and falls back to placement bounds otherwise
+    - emits ranked candidate lists, score breakdowns, per-segment rationale, and matched/ambiguous/unresolved/ineligible states through the shared report schema
+  - targeted proof passed:
+    - `dotnet build i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug`
+    - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --no-build --filter "FullyQualifiedName=WowViewer.Core.PM4.Tests.Pm4AssetMatchScorerTests.ScoreSegment_WmoSegmentPrefersBestOverlappingWmoCandidate|FullyQualifiedName=WowViewer.Core.PM4.Tests.Pm4AssetMatchScorerTests.ScoreSegment_NonMatchableCk24TypeReturnsIneligible|FullyQualifiedName=WowViewer.Core.PM4.Tests.Pm4AssetMatchScorerTests.ScoreSegment_CloseTopCandidatesReturnsAmbiguous"`
+      - `3 passed`
+    - `dotnet build i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug`
+    - `dotnet i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/bin/Debug/net10.0/WowViewer.Tool.Inspect.dll pm4 export-segments --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-export-segments-rich-smoke.json`
+      - wrote richer export smoke successfully
+      - exported `4110` PM4 segments
+    - `dotnet i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/bin/Debug/net10.0/WowViewer.Tool.Inspect.dll pm4 match-assets --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 --placements i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_0_0_obj0.adt --archive-root i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340 --max-candidates 5 --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-match-assets-smoke.json`
+      - wrote validation match smoke successfully
+      - scored `4110` PM4 segments against `25` validation WMO/M2 references
 
 - **V18 focused two-build minimap-to-terrain reset (2026-06-04)**
   - spec `047-v18-distill-corpus-open-source-loop` remains the owner, but the active contract was reset to the most basic useful lane:

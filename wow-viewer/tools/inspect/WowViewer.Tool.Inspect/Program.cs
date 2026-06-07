@@ -1689,12 +1689,15 @@ static void RunPm4(string[] args)
 		case "inspect":
 			RunPm4Inspect(tail);
 			break;
-		case "export-segments":
-			RunPm4ExportSegments(tail);
-			break;
-		case "match":
-			RunPm4Match(tail);
-			break;
+	case "export-segments":
+		RunPm4ExportSegments(tail);
+		break;
+	case "match-assets":
+		RunPm4MatchAssets(tail);
+		break;
+	case "match":
+		RunPm4Match(tail);
+		break;
 			case "hierarchy":
 				RunPm4Hierarchy(tail);
 				break;
@@ -1843,6 +1846,98 @@ static void RunPm4Match(string[] args)
 		return;
 
 	Pm4MatchSupport.Print(result);
+}
+
+static void RunPm4MatchAssets(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? output = GetOption(args, "--output", "-o");
+	string? maxCandidatesText = GetOption(args, "--max-candidates", "-n");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	int maxCandidates = 10;
+	if (!string.IsNullOrWhiteSpace(maxCandidatesText) && (!int.TryParse(maxCandidatesText, out maxCandidates) || maxCandidates <= 0))
+	{
+		Console.Error.WriteLine("Error: --max-candidates must be a positive integer.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!File.Exists(input))
+	{
+		Console.Error.WriteLine($"Error: PM4 input '{input}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root is required for pm4 match-assets so WMO/M2 assets can be read from the staged client.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!Pm4CoordinateService.TryParseTileCoordinates(input, out int tileX, out int tileY))
+	{
+		Console.Error.WriteLine("Error: could not derive tile coordinates from the PM4 filename.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(placements))
+	{
+		string fileName = Path.GetFileNameWithoutExtension(input);
+		int lastUnderscore = fileName.LastIndexOf('_');
+		int previousUnderscore = lastUnderscore > 0 ? fileName.LastIndexOf('_', lastUnderscore - 1) : -1;
+		string mapName = previousUnderscore > 0 ? fileName[..previousUnderscore] : fileName;
+		placements = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input)) ?? string.Empty, $"{mapName}_{tileX}_{tileY}_obj0.adt");
+	}
+
+	if (!File.Exists(placements))
+	{
+		Console.Error.WriteLine($"Error: placement source '{placements}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	try
+	{
+		Pm4SegmentExportRun exportRun = Pm4SegmentExportService.Export(input);
+		Pm4SegmentExportFile file = AssertSinglePm4ExportFile(exportRun, input);
+		Pm4AssetReferenceBuildResult assetBuild = Pm4AssetReferenceSupport.BuildFromPlacements(placements, archiveRoot, archiveBootstrapOptions, tileX, tileY);
+		IReadOnlyList<Pm4SegmentMatchResult> matchResults = Pm4AssetMatchScorer.ScoreSegments(file.Segments, assetBuild.Assets, maxCandidates);
+		Pm4MatchRunManifest manifest = BuildPm4AssetMatchManifest(exportRun, matchResults, placements, assetBuild.Warnings);
+
+		if (!string.IsNullOrWhiteSpace(output))
+		{
+			string outputPath = Path.GetFullPath(output);
+			string? directory = Path.GetDirectoryName(outputPath);
+			if (!string.IsNullOrWhiteSpace(directory))
+				Directory.CreateDirectory(directory);
+
+			File.WriteAllText(outputPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+			Console.WriteLine($"Wrote {outputPath}");
+			Console.WriteLine($"Matched {manifest.SegmentCount} PM4 segments against {assetBuild.Assets.Count} validation asset references.");
+			return;
+		}
+
+		PrintPm4AssetMatchRun(manifest, assetBuild.Assets.Count);
+	}
+	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or DirectoryNotFoundException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
 }
 
 static void RunPm4ExportSegments(string[] args)
@@ -3941,6 +4036,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect pm4 inspect --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-segments --input <file.pm4|directory> [--output <report.json>]");
+	Console.WriteLine("  wowviewer-inspect pm4 match-assets --input <file.pm4> --archive-root <staged client dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 mscn --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 unknowns --input <directory> [--output <report.json>]");
@@ -3950,29 +4046,121 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
 }
 
+static Pm4SegmentExportFile AssertSinglePm4ExportFile(Pm4SegmentExportRun exportRun, string input)
+{
+	if (exportRun.Files.Count != 1)
+		throw new InvalidOperationException($"Expected a single PM4 export file for '{input}', but found {exportRun.Files.Count}.");
+
+	return exportRun.Files[0];
+}
+
 static Pm4MatchRunManifest BuildPm4SegmentExportManifest(Pm4SegmentExportRun exportRun)
 {
 	List<Pm4MatchReportSegment> segments = exportRun.Files
 		.SelectMany(static file => file.Segments)
 		.OrderBy(static segment => segment.Segment.TileCoordinates[0], StringComparer.Ordinal)
 		.ThenBy(static segment => segment.Segment.SegmentId, StringComparer.Ordinal)
-		.Select(static segment => new Pm4MatchReportSegment(
-			segment.Segment.SegmentId,
-			$"0x{segment.Segment.Ck24:X6}",
-			segment.Segment.Ck24Type,
-			segment.Segment.Ck24ObjectId,
-			segment.Segment.TileCoordinates,
-			segment.Segment.Field04Values,
-			null,
-			Array.Empty<Pm4MatchReportCandidate>(),
-			null))
+		.Select(static segment => BuildPm4MatchReportSegment(segment, null))
 		.ToList();
+
+	int ineligibleCount = segments.Count(static segment => string.IsNullOrWhiteSpace(segment.ExpectedAssetKind));
 
 	return new Pm4MatchRunManifest(
 		exportRun.RunId,
 		exportRun.InputPath,
 		exportRun.SegmentCount,
-		segments);
+		segments,
+		AssetReferenceCorpus: null,
+		SegmentSignalCorpus: Pm4SegmentSignalExtractor.CurrentSignalVersion,
+		MatchedCount: 0,
+		AmbiguousCount: 0,
+		UnresolvedCount: 0,
+		IneligibleCount: ineligibleCount,
+		Warnings: exportRun.Warnings);
+}
+
+static Pm4MatchRunManifest BuildPm4AssetMatchManifest(
+	Pm4SegmentExportRun exportRun,
+	IReadOnlyList<Pm4SegmentMatchResult> matchResults,
+	string assetReferenceCorpus,
+	IReadOnlyList<string> warnings)
+{
+	List<Pm4MatchReportSegment> segments = matchResults
+		.OrderBy(static result => result.Segment.Segment.TileCoordinates[0], StringComparer.Ordinal)
+		.ThenBy(static result => result.Segment.Segment.SegmentId, StringComparer.Ordinal)
+		.Select(static result => BuildPm4MatchReportSegment(result.Segment, result))
+		.ToList();
+
+	List<string> allWarnings = exportRun.Warnings.Concat(warnings).ToList();
+	return new Pm4MatchRunManifest(
+		$"{exportRun.RunId}:match-assets:{Path.GetFileNameWithoutExtension(assetReferenceCorpus)}",
+		exportRun.InputPath,
+		segments.Count,
+		segments,
+		Path.GetFullPath(assetReferenceCorpus),
+		Pm4SegmentSignalExtractor.CurrentSignalVersion,
+		segments.Count(static segment => string.Equals(segment.Status, "matched", StringComparison.Ordinal)),
+		segments.Count(static segment => string.Equals(segment.Status, "ambiguous", StringComparison.Ordinal)),
+		segments.Count(static segment => string.Equals(segment.Status, "unresolved", StringComparison.Ordinal)),
+		segments.Count(static segment => string.Equals(segment.Status, "ineligible", StringComparison.Ordinal)),
+		allWarnings);
+}
+
+static Pm4MatchReportSegment BuildPm4MatchReportSegment(Pm4BuiltObjectSegment segment, Pm4SegmentMatchResult? matchResult)
+{
+	IReadOnlyList<string> linkGroupIds = segment.Segment.LinkGroupIds
+		.Select(static groupId => $"0x{groupId:X}")
+		.ToList();
+	IReadOnlyList<string> confidenceFlags = FormatConfidenceFlags(segment.Segment.ConfidenceFlags);
+	string? expectedAssetKind = matchResult?.ExpectedAssetKind ?? PredictAssetKind(segment.Segment.Ck24Type);
+	IReadOnlyList<Pm4MatchReportCandidate> candidates = matchResult is null
+		? Array.Empty<Pm4MatchReportCandidate>()
+		: matchResult.Candidates.Select(ToReportCandidate).ToList();
+
+	return new Pm4MatchReportSegment(
+		segment.Segment.SegmentId,
+		$"0x{segment.Segment.Ck24:X6}",
+		segment.Segment.Ck24Type,
+		segment.Segment.Ck24ObjectId,
+		segment.Segment.TileCoordinates,
+		segment.Segment.Field04Values,
+		expectedAssetKind,
+		matchResult is null ? null : FormatMatchStatus(matchResult.Status),
+		matchResult?.ReviewRequired ?? segment.Segment.ConfidenceFlags != Pm4SegmentConfidenceFlags.None,
+		matchResult?.Rationale ?? BuildExportRationale(segment, expectedAssetKind),
+		confidenceFlags.Count > 0 ? confidenceFlags : null,
+		segment.Segment.SurfaceCount,
+		segment.Segment.TotalIndexCount,
+		linkGroupIds.Count > 0 ? linkGroupIds : null,
+		segment.Segment.DominantLinkGroupId != 0u ? $"0x{segment.Segment.DominantLinkGroupId:X}" : null,
+		segment.CoordinateMode.ToString(),
+		segment.AxisConvention.ToString(),
+		segment.FrameYawDegrees,
+		ToReportBounds(segment.Signal.Bounds),
+		ToReportVector3(segment.CorrelationState.Center),
+		segment.Signal.FootprintHull.Select(static point => new Pm4MatchVector2(point.X, point.Y)).ToList(),
+		segment.CorrelationState.FootprintArea,
+		new Pm4MatchReportHeightStats(
+			segment.Signal.HeightStats.MinimumPlaneDistance,
+			segment.Signal.HeightStats.MaximumPlaneDistance,
+			segment.Signal.HeightStats.AveragePlaneDistance),
+		new Pm4MatchReportTopologyStats(
+			segment.Signal.TopologyStats.SurfaceCount,
+			segment.Signal.TopologyStats.TotalIndexCount,
+			segment.Signal.TopologyStats.AnchorPointCount,
+			segment.Signal.TopologyStats.AnchorNormalCount),
+		new Pm4MatchReportAnchorSignals(
+			segment.Signal.AnchorSignals.LinkedPositionRefCount,
+			segment.Signal.AnchorSignals.NormalHeadingCount,
+			segment.Signal.AnchorSignals.TerminatorCount,
+			segment.Signal.AnchorSignals.FloorMinimum,
+			segment.Signal.AnchorSignals.FloorMaximum,
+			segment.Signal.AnchorSignals.HeadingMinimumDegrees,
+			segment.Signal.AnchorSignals.HeadingMaximumDegrees,
+			segment.Signal.AnchorSignals.HeadingMeanDegrees),
+		segment.Signal.SurfaceFamilyHistogram,
+		candidates,
+		null);
 }
 
 static void PrintPm4SegmentExportRun(Pm4SegmentExportRun exportRun)
@@ -3987,11 +4175,12 @@ static void PrintPm4SegmentExportRun(Pm4SegmentExportRun exportRun)
 		Console.WriteLine($"  tile={file.TileX}_{file.TileY} segments={file.SegmentCount} source={Path.GetFileName(file.SourcePath)}");
 		foreach (Pm4BuiltObjectSegment segment in file.Segments.Take(4))
 		{
-			string groupText = segment.Segment.LinkGroupIds.Count > 0
-				? string.Join(",", segment.Segment.LinkGroupIds.Select(static groupId => $"0x{groupId:X}"))
-				: "none";
+			string? expectedAssetKind = PredictAssetKind(segment.Segment.Ck24Type);
+			string flagText = segment.Segment.ConfidenceFlags == Pm4SegmentConfidenceFlags.None
+				? "none"
+				: string.Join(",", FormatConfidenceFlags(segment.Segment.ConfidenceFlags));
 			Console.WriteLine(
-				$"    {segment.Segment.SegmentId} ck24=0x{segment.Segment.Ck24:X6} type=0x{segment.Segment.Ck24Type:X2} low16={segment.Segment.Ck24ObjectId} surfaces={segment.Segment.SurfaceCount} indices={segment.Segment.TotalIndexCount} groups={groupText} flags={segment.Segment.ConfidenceFlags}");
+				$"    {segment.Segment.SegmentId} kind={expectedAssetKind ?? "ineligible"} ck24=0x{segment.Segment.Ck24:X6} area={segment.CorrelationState.FootprintArea:F1} bounds={FormatVector(segment.CorrelationState.BoundsMin)}..{FormatVector(segment.CorrelationState.BoundsMax)} anchors={segment.Signal.AnchorSignals.LinkedPositionRefCount} flags={flagText}");
 		}
 	}
 
@@ -4000,6 +4189,132 @@ static void PrintPm4SegmentExportRun(Pm4SegmentExportRun exportRun)
 		foreach (string warning in exportRun.Warnings)
 			Console.WriteLine($"Warning: {warning}");
 	}
+}
+
+static void PrintPm4AssetMatchRun(Pm4MatchRunManifest manifest, int assetReferenceCount)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 asset match report");
+	Console.WriteLine($"PM4: {manifest.InputPm4Root}");
+	Console.WriteLine($"Asset references: {manifest.AssetReferenceCorpus}");
+	Console.WriteLine($"RunId: {manifest.RunId}");
+	Console.WriteLine($"Segments: {manifest.SegmentCount} Assets: {assetReferenceCount} matched={manifest.MatchedCount ?? 0} ambiguous={manifest.AmbiguousCount ?? 0} unresolved={manifest.UnresolvedCount ?? 0} ineligible={manifest.IneligibleCount ?? 0}");
+
+	foreach (Pm4MatchReportSegment segment in manifest.Segments
+		.Where(static segment => !string.Equals(segment.Status, "ineligible", StringComparison.Ordinal))
+		.OrderBy(static segment => segment.Status, StringComparer.Ordinal)
+		.ThenBy(static segment => segment.SegmentId, StringComparer.Ordinal)
+		.Take(12))
+	{
+		Console.WriteLine($"  {segment.SegmentId} kind={segment.ExpectedAssetKind ?? "n/a"} status={segment.Status ?? "exported"} area={segment.FootprintArea ?? 0d:F1} flags={(segment.ConfidenceFlags is { Count: > 0 } ? string.Join(",", segment.ConfidenceFlags) : "none")}");
+		foreach (Pm4MatchReportCandidate candidate in segment.Candidates.Take(3))
+			Console.WriteLine($"    rank={candidate.Rank} score={candidate.OverallScore:F3} {candidate.AssetKind} {candidate.AssetPath}");
+	}
+
+	if (manifest.Warnings is { Count: > 0 })
+	{
+		foreach (string warning in manifest.Warnings)
+			Console.WriteLine($"Warning: {warning}");
+	}
+}
+
+static Pm4MatchReportCandidate ToReportCandidate(Pm4AssetMatchCandidate candidate)
+{
+	return new Pm4MatchReportCandidate(
+		candidate.AssetId,
+		candidate.AssetPath,
+		candidate.AssetKind,
+		candidate.Rank,
+		candidate.OverallScore,
+		FormatMatchStatus(candidate.Status),
+		candidate.ScoreBreakdown,
+		candidate.Rationale);
+}
+
+static Pm4MatchReportBounds? ToReportBounds(Pm4Bounds3? bounds)
+{
+	return bounds is null
+		? null
+		: new Pm4MatchReportBounds(ToReportVector3(bounds.Min), ToReportVector3(bounds.Max));
+}
+
+static Pm4MatchVector3 ToReportVector3(Vector3 value)
+{
+	return new Pm4MatchVector3(value.X, value.Y, value.Z);
+}
+
+static IReadOnlyList<string> BuildExportRationale(Pm4BuiltObjectSegment segment, string? expectedAssetKind)
+{
+	List<string> rationale =
+	[
+		$"segment exported from PM4 with {segment.Segment.SurfaceCount} surfaces and {segment.Segment.TotalIndexCount} indices.",
+	];
+
+	if (expectedAssetKind is null)
+		rationale.Add($"ck24Type 0x{segment.Segment.Ck24Type:X2} is not currently classified as WMO/M2-matchable.");
+	else
+		rationale.Add($"ck24Type 0x{segment.Segment.Ck24Type:X2} is currently treated as {expectedAssetKind}-matchable.");
+
+	if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.ZeroCk24Seed))
+		rationale.Add("segment came from the zero-CK24 fallback seed path.");
+	if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.UsedConnectivityFallback))
+		rationale.Add("segment required connectivity fallback splitting.");
+	if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.MissingPositionRefs))
+		rationale.Add("segment is missing linked position refs.");
+	if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.MultipleLinkGroupIds))
+		rationale.Add("segment spans multiple link-group ids.");
+	if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.ReusedLow16ObjectId))
+		rationale.Add("segment reuses a low16 object id across multiple CK24 families.");
+
+	return rationale;
+}
+
+static IReadOnlyList<string> FormatConfidenceFlags(Pm4SegmentConfidenceFlags flags)
+{
+	if (flags == Pm4SegmentConfidenceFlags.None)
+		return Array.Empty<string>();
+
+	List<string> values = [];
+	foreach (Pm4SegmentConfidenceFlags flag in Enum.GetValues<Pm4SegmentConfidenceFlags>())
+	{
+		if (flag == Pm4SegmentConfidenceFlags.None || !flags.HasFlag(flag))
+			continue;
+
+		values.Add(flag switch
+		{
+			Pm4SegmentConfidenceFlags.ZeroCk24Seed => "zero-ck24-seed",
+			Pm4SegmentConfidenceFlags.UsedConnectivityFallback => "connectivity-fallback",
+			Pm4SegmentConfidenceFlags.MultipleLinkGroupIds => "multiple-link-groups",
+			Pm4SegmentConfidenceFlags.MissingPositionRefs => "missing-position-refs",
+			Pm4SegmentConfidenceFlags.ReusedLow16ObjectId => "reused-low16-object-id",
+			Pm4SegmentConfidenceFlags.SpansMultipleField04Values => "multiple-field04",
+			Pm4SegmentConfidenceFlags.HasUnlinkedSurfaces => "unlinked-surfaces",
+			_ => flag.ToString(),
+		});
+	}
+
+	return values;
+}
+
+static string FormatMatchStatus(Pm4AssetMatchStatus status)
+{
+	return status switch
+	{
+		Pm4AssetMatchStatus.Matched => "matched",
+		Pm4AssetMatchStatus.Ambiguous => "ambiguous",
+		Pm4AssetMatchStatus.Unresolved => "unresolved",
+		Pm4AssetMatchStatus.Ineligible => "ineligible",
+		_ => status.ToString().ToLowerInvariant(),
+	};
+}
+
+static string? PredictAssetKind(byte ck24Type)
+{
+	return ck24Type switch
+	{
+		0x42 or 0x43 => "wmo",
+		0x40 or 0x41 or 0xC0 or 0xC1 or 0xC2 or 0xC3 => "m2",
+		_ => null,
+	};
 }
 
 static void ShowAudioUsage()
@@ -4137,6 +4452,7 @@ static void ShowPm4Usage()
 	Console.WriteLine("PM4 commands:");
 	Console.WriteLine("  pm4 inspect --input <file.pm4>");
 	Console.WriteLine("  pm4 export-segments --input <file.pm4|directory> [--output <report.json>]");
+	Console.WriteLine("  pm4 match-assets --input <file.pm4> --archive-root <staged client dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  pm4 match --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-matches <n>] [--search-range <units>] [--output <report.json>] [--object-output-dir <directory>]");
 	Console.WriteLine("  pm4 hierarchy --input <file.pm4> [--output <report.json>]");
 	Console.WriteLine("  pm4 linkage --input <directory> [--output <report.json>]");

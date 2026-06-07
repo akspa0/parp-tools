@@ -38,6 +38,16 @@
       "type": "integer",
       "minimum": 0
     },
+    "ineligibleCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "segments": {
       "type": "array",
       "items": {
@@ -86,6 +96,13 @@
             "minimum": 0
           }
         },
+        "expectedAssetKind": {
+          "type": "string",
+          "enum": [
+            "wmo",
+            "m2"
+          ]
+        },
         "status": {
           "type": "string",
           "enum": [
@@ -94,6 +111,77 @@
             "unresolved",
             "ineligible"
           ]
+        },
+        "reviewRequired": {
+          "type": "boolean"
+        },
+        "rationale": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidenceFlags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "surfaceCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "totalIndexCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "linkGroupIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dominantLinkGroupId": {
+          "type": "string"
+        },
+        "coordinateMode": {
+          "type": "string"
+        },
+        "axisConvention": {
+          "type": "string"
+        },
+        "frameYawDegrees": {
+          "type": "number"
+        },
+        "bounds": {
+          "$ref": "#/$defs/bounds"
+        },
+        "center": {
+          "$ref": "#/$defs/vector3"
+        },
+        "footprintHull": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/vector2"
+          }
+        },
+        "footprintArea": {
+          "type": "number"
+        },
+        "heightStats": {
+          "$ref": "#/$defs/heightStats"
+        },
+        "topologyStats": {
+          "$ref": "#/$defs/topologyStats"
+        },
+        "anchorSignals": {
+          "$ref": "#/$defs/anchorSignals"
+        },
+        "surfaceFamilyHistogram": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
         },
         "candidates": {
           "type": "array",
@@ -157,6 +245,115 @@
           "items": {
             "type": "string"
           }
+        }
+      }
+    },
+    "vector2": {
+      "type": "object",
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    "vector3": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        }
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "required": [
+        "min",
+        "max"
+      ],
+      "properties": {
+        "min": {
+          "$ref": "#/$defs/vector3"
+        },
+        "max": {
+          "$ref": "#/$defs/vector3"
+        }
+      }
+    },
+    "heightStats": {
+      "type": "object",
+      "properties": {
+        "minimumPlaneDistance": {
+          "type": "number"
+        },
+        "maximumPlaneDistance": {
+          "type": "number"
+        },
+        "averagePlaneDistance": {
+          "type": "number"
+        }
+      }
+    },
+    "topologyStats": {
+      "type": "object",
+      "properties": {
+        "surfaceCount": {
+          "type": "integer"
+        },
+        "totalIndexCount": {
+          "type": "integer"
+        },
+        "anchorPointCount": {
+          "type": "integer"
+        },
+        "anchorNormalCount": {
+          "type": "integer"
+        }
+      }
+    },
+    "anchorSignals": {
+      "type": "object",
+      "properties": {
+        "linkedPositionRefCount": {
+          "type": "integer"
+        },
+        "normalHeadingCount": {
+          "type": "integer"
+        },
+        "terminatorCount": {
+          "type": "integer"
+        },
+        "floorMinimum": {
+          "type": "integer"
+        },
+        "floorMaximum": {
+          "type": "integer"
+        },
+        "headingMinimumDegrees": {
+          "type": "number"
+        },
+        "headingMaximumDegrees": {
+          "type": "number"
+        },
+        "headingMeanDegrees": {
+          "type": "number"
         }
       }
     },

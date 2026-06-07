@@ -75,16 +75,16 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 
 ### Tests for User Story 2
 
-- [ ] T016 [P] [US2] Add `Pm4AssetMatchScorerTests.cs` in `wow-viewer/tests/WowViewer.Core.PM4.Tests/` covering deterministic score ordering and unresolved/ambiguous states.
+- [x] T016 [P] [US2] Add `Pm4AssetMatchScorerTests.cs` in `wow-viewer/tests/WowViewer.Core.PM4.Tests/` covering deterministic score ordering and unresolved/ambiguous states.
 - [ ] T017 [P] [US2] Add Python-side smoke validation for Zarr asset-signal corpus compatibility in `wow-viewer/data-harvester/`.
 
 ### Implementation for User Story 2
 
 - [ ] T018 [P] [US2] Implement staged-asset signal extraction in `wow-viewer/data-harvester/src/harvester/pm4_asset_matching/asset_signal_corpus.py`.
 - [ ] T019 [P] [US2] Add `build_pm4_asset_signal_corpus.py` in `wow-viewer/data-harvester/scripts/`.
-- [ ] T020 [US2] Implement `Pm4AssetMatchScorer` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` with deterministic score breakdown output.
+- [x] T020 [US2] Implement `Pm4AssetMatchScorer` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` with deterministic score breakdown output.
 - [ ] T021 [US2] Implement a match-report writer in `wow-viewer/src/tools-shared/WowViewer.Tools.Shared/Pm4Matching/`.
-- [ ] T022 [US2] Add `pm4 match-assets` command handling to `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` to emit ranked candidate reports from PM4 and asset signal corpora.
+- [x] T022 [US2] Add `pm4 match-assets` command handling to `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` to emit ranked candidate reports from PM4 and asset signal corpora.
 
 **Checkpoint**: Automated ranked WMO/M2 candidate lists replace the old manual matching workflow for validation-scale runs.
 
@@ -121,6 +121,7 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 ### Implementation for User Story 4
 
 - [ ] T029 [P] [US4] Extend inspect-tool human-readable report printing for segment export, candidate match, and placement synthesis outputs in `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs`.
+  Current partial state: segment export and candidate-match printing are richer; placement-synthesis printing is still open.
 - [ ] T030 [US4] Add a bounded viewer-side review/import surface only if it consumes the emitted automation report format rather than reintroducing the old manual matching owner.
 - [ ] T031 [US4] Document the automation-first review flow in `wow-viewer/docs/WoWViewer/README.md` or the relevant PM4 workflow note.
 
