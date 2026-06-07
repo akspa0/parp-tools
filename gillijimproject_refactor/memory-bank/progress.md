@@ -61,11 +61,33 @@
     - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --filter Pm4SegmentSignalExtractorTests`
       - `1 passed`
   - still open:
-    - inspect-tool export host (`pm4 export-segments`)
     - directory-scale or cross-tile corpus export owner
     - Zarr signal-store writing
     - WMO/M2 candidate scoring
     - replacement placement synthesis
+
+- **PM4 asset-matching export host slice (2026-06-07)**
+  - first US1 automation host now exists in `WowViewer.Tool.Inspect`
+  - new command:
+    - `pm4 export-segments --input <file.pm4|directory> [--output <report.json>]`
+  - new library owner under `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`:
+    - `Pm4SegmentExportService`
+    - aggregates deterministic per-file segment builds into one stable export run id plus per-file segment lists
+  - current export artifact contract:
+    - JSON report shaped to the shared PM4 match schema surface
+    - each exported segment currently carries identity and grouping fields with an empty candidate list
+    - Zarr-backed signal-store writing remains open follow-up work, not silently implied done
+  - targeted proof passed:
+    - `dotnet build i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug`
+    - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --no-build --filter Pm4SegmentExportServiceTests`
+      - `2 passed`
+    - `dotnet build i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug`
+    - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 export-segments --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-export-segments-smoke.json`
+      - wrote smoke report successfully
+      - exported `4110` segments from the bounded real PM4 tile
+  - one test-runner operational note:
+    - stale `testhost` processes locked the PM4 test DLL after earlier timeouts
+    - stopping those stale `testhost` processes was required before rerunning filtered PM4 tests cleanly
 
 - **V18 focused two-build minimap-to-terrain reset (2026-06-04)**
   - spec `047-v18-distill-corpus-open-source-loop` remains the owner, but the active contract was reset to the most basic useful lane:
@@ -356,8 +378,8 @@
 
 ## Next Likely Steps
 
-- wire the new `046` foundational matching surface into `WowViewer.Tool.Inspect` as the first deterministic `pm4 export-segments` host
-- extend the current single-file segment builder into directory-scale or cross-tile export ownership without creating a second PM4 grouping stack
+- extend the current deterministic export host from JSON report output into the planned Zarr-backed PM4 signal corpus writer
+- add focused report-shape regression coverage for the emitted export manifest
 - validate the current segment identity against known reference tiles before broad automation
 - build the staged-asset Zarr signal corpus and deterministic candidate scorer
 - keep PM4 grouping/spec docs in sync if segmentation ownership changes again

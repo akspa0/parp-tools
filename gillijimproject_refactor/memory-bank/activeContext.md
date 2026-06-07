@@ -34,10 +34,15 @@
   - deterministic single-file `Pm4ObjectSegmentBuilder`
   - `Pm4SegmentSignalExtractor`
   - shared `WowViewer.Tools.Shared/Pm4Matching` report models matching the current schema
-- current proof owner for `046` is library-level, not CLI-level:
+- `046` now also has the first automation host:
+  - `Pm4SegmentExportService` aggregates deterministic segment exports from a PM4 file or directory
+  - `WowViewer.Tool.Inspect pm4 export-segments --input <file|directory> [--output <report.json>]` is now live
+- current proof owner for `046` is now library + inspect CLI:
   - focused tests cover deterministic IDs on the real `development_00_00.pm4` tile
   - synthetic tests cover zero-CK24 connectivity splitting and low16 reuse flags
-  - inspect-tool `pm4 export-segments` / corpus export / Zarr writing are still open follow-ups
+  - bounded export-service tests cover single-file and copied-directory stability
+  - bounded real-data CLI smoke wrote `wow-viewer/output/tmp/pm4-export-segments-smoke.json` from `development_00_00.pm4`
+  - directory-scale corpus export is now CLI-owned, but durable Zarr writing is still open
 - broken manual PM4 matching UI is explicitly not the workflow owner for that lane.
 
 ## Viewer Shell / UI

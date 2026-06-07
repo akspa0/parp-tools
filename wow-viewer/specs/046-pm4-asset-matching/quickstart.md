@@ -16,15 +16,28 @@ Run the future automation lane end-to-end:
 - `wow-viewer` buildable with `.NET 10`
 - Python tooling run only through `wow-viewer/data-harvester` with `uv`
 
-## Planned Commands
+## Current Commands
 
-### 1. Export PM4 Segment Signals
+### 1. Export PM4 Segment Report
+
+The first implemented US1 slice exports deterministic PM4 segment manifests
+through `WowViewer.Tool.Inspect`. Zarr-backed signal-store writing is still a
+follow-up step.
 
 ```powershell
 dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
   pm4 export-segments `
   --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development `
-  --output i:/parp/parp-tools/wow-viewer/output/datasets/pm4_asset_matching/development.pm4-segments.zarr
+  --output i:/parp/parp-tools/wow-viewer/output/datasets/pm4_asset_matching/development.pm4-segments.json
+```
+
+Bounded smoke proof now exists for the real tile:
+
+```powershell
+dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
+  pm4 export-segments `
+  --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 `
+  --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-export-segments-smoke.json
 ```
 
 ### 2. Build Asset Reference Signal Corpus
@@ -59,6 +72,7 @@ dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.
 ## Validation Expectations
 
 - segment export completes without freezing the primary viewer shell
+- the current exported report is JSON-backed; Zarr corpus writing remains a later US1 follow-up
 - every eligible PM4 segment has a ranked candidate list or an explicit unresolved state
 - replacement placement proposals carry provenance back to PM4 segments and chosen candidates
 - validation runs against known placed tiles can measure whether the expected asset appears in the top-ranked candidate set

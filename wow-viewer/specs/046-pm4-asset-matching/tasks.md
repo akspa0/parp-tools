@@ -136,7 +136,7 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 - [ ] T033 [P] Update `wow-viewer/docs/architecture/pm4-region-aware-object-grouping-2026-05-21.md` or successor notes if the automation lane changes the accepted stitch/segmentation owner.
 - [ ] T034 [P] Add schema validation for emitted match reports against `specs/046-pm4-asset-matching/contracts/pm4-asset-match-report.schema.json`.
 - [ ] T035 Run focused PM4 tests, inspect-tool builds, and bounded real-data validation commands from `quickstart.md`.
-- [ ] T036 Update `gillijimproject_refactor/memory-bank/activeContext.md` and `progress.md` with the landed owner, proof surfaces, and remaining gaps.
+- [x] T036 Update `gillijimproject_refactor/memory-bank/activeContext.md` and `progress.md` with the landed owner, proof surfaces, and remaining gaps.
 
 ---
 
