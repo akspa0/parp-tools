@@ -122,6 +122,33 @@ public sealed record Pm4AssetMatchCandidate(
     IReadOnlyDictionary<string, double> ScoreBreakdown,
     IReadOnlyList<string> Rationale);
 
+public sealed record Pm4AssetReferenceSignalRecord(
+    string AssetId,
+    string AssetPath,
+    string AssetKind,
+    string? ClientBuild,
+    IReadOnlyList<string> TileCoordinates,
+    Pm4Bounds3? Bounds,
+    Vector3 Center,
+    IReadOnlyList<Vector2> FootprintHull,
+    float FootprintArea,
+    Vector3? ReferencePosition,
+    Vector3? ReferenceRotation,
+    float? ReferenceScale,
+    IReadOnlyDictionary<string, int> SurfaceFamilyHistogram,
+    IReadOnlyDictionary<string, double> RenderOrCollisionSignals,
+    string SignalVersion,
+    string? SignalStoreRow,
+    IReadOnlyList<string>? ValidationTags);
+
+public sealed record Pm4SegmentMatchResult(
+    Pm4BuiltObjectSegment Segment,
+    string? ExpectedAssetKind,
+    Pm4AssetMatchStatus Status,
+    bool ReviewRequired,
+    IReadOnlyList<string> Rationale,
+    IReadOnlyList<Pm4AssetMatchCandidate> Candidates);
+
 public sealed record Pm4ReplacementPlacementProposal(
     string ProposalId,
     string SegmentId,
