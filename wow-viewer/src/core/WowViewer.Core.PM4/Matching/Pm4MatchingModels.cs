@@ -95,6 +95,23 @@ public sealed record Pm4BuiltObjectSegment(
     Pm4PlanarTransform PlanarTransform,
     float FrameYawDegrees);
 
+public sealed record Pm4SegmentExportFile(
+    string SourcePath,
+    int TileX,
+    int TileY,
+    IReadOnlyList<Pm4BuiltObjectSegment> Segments)
+{
+    public int SegmentCount => Segments.Count;
+}
+
+public sealed record Pm4SegmentExportRun(
+    string RunId,
+    string InputPath,
+    int FileCount,
+    int SegmentCount,
+    IReadOnlyList<Pm4SegmentExportFile> Files,
+    IReadOnlyList<string> Warnings);
+
 public sealed record Pm4AssetMatchCandidate(
     string AssetId,
     string AssetPath,

@@ -53,12 +53,12 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 ### Tests for User Story 1
 
 - [ ] T009 [P] [US1] Add inspect-command tests or focused report-shape tests in `wow-viewer/tests/WowViewer.Core.PM4.Tests/` covering PM4 segment export output.
-- [ ] T010 [P] [US1] Add a bounded directory-scale regression test for cross-tile segment export stability in `wow-viewer/tests/WowViewer.Core.PM4.Tests/`.
+- [x] T010 [P] [US1] Add a bounded directory-scale regression test for cross-tile segment export stability in `wow-viewer/tests/WowViewer.Core.PM4.Tests/`.
 
 ### Implementation for User Story 1
 
 - [ ] T011 [US1] Add `pm4 export-segments` command handling to `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs`.
-- [ ] T012 [US1] Implement an export job/service in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` that streams PM4 segment records and signal payloads without viewer-shell ownership.
+- [x] T012 [US1] Implement an export job/service in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` that streams PM4 segment records and signal payloads without viewer-shell ownership.
 - [ ] T013 [US1] Add Zarr-backed PM4 segment corpus writing in `wow-viewer/data-harvester/src/harvester/pm4_asset_matching/pm4_signal_store.py`.
 - [ ] T014 [US1] Add `export_pm4_segment_signals.py` in `wow-viewer/data-harvester/scripts/` for bounded corpus-building automation.
 - [ ] T015 [US1] Update the viewer PM4 export surface so `Export PM4 Obj Set` becomes a thin trigger/report surface or is explicitly redirected to the new automation owner instead of running the old blocking path.
