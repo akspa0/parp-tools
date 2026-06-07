@@ -29,6 +29,15 @@
   - use Zarr-backed PM4 and staged-asset signal corpora
   - automate WMO/M2 candidate ranking
   - synthesize proposal-grade replacement placements for missing development tiles
+- first `046` foundational code now lives under `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`:
+  - stable `Pm4ObjectSegment` / signal / candidate / proposal contracts
+  - deterministic single-file `Pm4ObjectSegmentBuilder`
+  - `Pm4SegmentSignalExtractor`
+  - shared `WowViewer.Tools.Shared/Pm4Matching` report models matching the current schema
+- current proof owner for `046` is library-level, not CLI-level:
+  - focused tests cover deterministic IDs on the real `development_00_00.pm4` tile
+  - synthetic tests cover zero-CK24 connectivity splitting and low16 reuse flags
+  - inspect-tool `pm4 export-segments` / corpus export / Zarr writing are still open follow-ups
 - broken manual PM4 matching UI is explicitly not the workflow owner for that lane.
 
 ## Viewer Shell / UI

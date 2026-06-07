@@ -2,7 +2,7 @@
 
 **Feature Branch**: `046-pm4-asset-matching`
 **Created**: 2026-06-03
-**Status**: Draft
+**Status**: In Progress
 **Input**: User description - "Export PM4 Obj Set - causes the whole program to freeze up, instead of exporting things via the `ck24ObjectId`, which seems to be the way to segment all the surfaces into individual objects. We need to figure out a way to build a matching algorithm with real WMO's and M2's matching the various surfaces we have access to within the pm4 data, to help us in generating replacement placement data for missing development tiles, soley from the pm4 data. We have rudimentary manual matching tools built in to the ui that don't work, I'd rather we automate that. use zarr for dataset signals, use speckit to implement a plan"
 
 ## Context

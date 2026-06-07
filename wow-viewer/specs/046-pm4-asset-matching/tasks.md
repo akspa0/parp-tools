@@ -22,9 +22,9 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 
 **Purpose**: Create the feature directories and bounded PM4 matching surfaces.
 
-- [ ] T001 Create `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` for shared segmentation, scoring, and placement synthesis types.
+- [x] T001 Create `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` for shared segmentation, scoring, and placement synthesis types.
 - [ ] T002 Create `wow-viewer/data-harvester/src/harvester/pm4_asset_matching/` and `wow-viewer/data-harvester/scripts/` entries for Zarr-backed signal corpus tooling.
-- [ ] T003 [P] Create focused PM4 matching test files under `wow-viewer/tests/WowViewer.Core.PM4.Tests/`.
+- [x] T003 [P] Create focused PM4 matching test files under `wow-viewer/tests/WowViewer.Core.PM4.Tests/`.
 
 ---
 
@@ -34,11 +34,11 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 
 **⚠️ CRITICAL**: No user story work should begin until segment identity, signal records, and run-report contracts are defined and testable.
 
-- [ ] T004 [P] Implement `Pm4ObjectSegment`, `Pm4SegmentSignalRecord`, `Pm4AssetMatchCandidate`, and `Pm4ReplacementPlacementProposal` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`.
-- [ ] T005 [P] Implement `Pm4ObjectSegmentBuilder` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` with deterministic segment-id generation and ambiguity flags.
-- [ ] T006 [P] Implement `Pm4SegmentSignalExtractor` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` for comparable PM4 segment signal derivation.
-- [ ] T007 [P] Add `Pm4ObjectSegmentBuilderTests.cs` and `Pm4SegmentSignalExtractorTests.cs` in `wow-viewer/tests/WowViewer.Core.PM4.Tests/`.
-- [ ] T008 [P] Implement shared inspect/report models in `wow-viewer/src/tools-shared/WowViewer.Tools.Shared/Pm4Matching/` matching `contracts/pm4-asset-match-report.schema.json`.
+- [x] T004 [P] Implement `Pm4ObjectSegment`, `Pm4SegmentSignalRecord`, `Pm4AssetMatchCandidate`, and `Pm4ReplacementPlacementProposal` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`.
+- [x] T005 [P] Implement `Pm4ObjectSegmentBuilder` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` with deterministic segment-id generation and ambiguity flags.
+- [x] T006 [P] Implement `Pm4SegmentSignalExtractor` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` for comparable PM4 segment signal derivation.
+- [x] T007 [P] Add `Pm4ObjectSegmentBuilderTests.cs` and `Pm4SegmentSignalExtractorTests.cs` in `wow-viewer/tests/WowViewer.Core.PM4.Tests/`.
+- [x] T008 [P] Implement shared inspect/report models in `wow-viewer/src/tools-shared/WowViewer.Tools.Shared/Pm4Matching/` matching `contracts/pm4-asset-match-report.schema.json`.
 
 **Checkpoint**: Segment identity and signal contracts are stable; export and corpus tooling can now be built on top.
 

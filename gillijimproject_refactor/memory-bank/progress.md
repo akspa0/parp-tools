@@ -32,6 +32,41 @@
     - no direct map writeback landed
     - no attempt to rescue the old manual PM4 matcher as the primary owner
 
+- **PM4 asset-matching foundational library slice (2026-06-07)**
+  - spec `046-pm4-asset-matching` is no longer planning-only
+  - foundational matching contracts landed in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`:
+    - `Pm4ObjectSegment`
+    - `Pm4SegmentSignalRecord`
+    - `Pm4AssetMatchCandidate`
+    - `Pm4ReplacementPlacementProposal`
+    - `Pm4BuiltObjectSegment`
+  - deterministic segment builder landed in the same surface:
+    - `Pm4ObjectSegmentBuilder`
+    - reuses the existing inspect/research decomposition heuristics instead of inventing a second PM4 grouping stack
+    - segment IDs are now hashed from canonical tile/Field04/CK24/surface/link-group identity
+    - explicit confidence flags now surface:
+      - zero-CK24 fallback seeds
+      - connectivity fallback usage
+      - missing position refs
+      - unlinked surfaces
+      - low16 object-id reuse
+  - comparable PM4 signal extraction landed:
+    - `Pm4SegmentSignalExtractor`
+    - current v1 signal contract records bounds, footprint hull, plane-distance stats, surface-family histogram, and anchor stats
+  - shared schema-aligned report models landed in `wow-viewer/src/tools-shared/WowViewer.Tools.Shared/Pm4Matching/`
+  - targeted proof passed:
+    - `dotnet build i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug`
+    - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --filter Pm4ObjectSegmentBuilderTests`
+      - `2 passed`
+    - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --filter Pm4SegmentSignalExtractorTests`
+      - `1 passed`
+  - still open:
+    - inspect-tool export host (`pm4 export-segments`)
+    - directory-scale or cross-tile corpus export owner
+    - Zarr signal-store writing
+    - WMO/M2 candidate scoring
+    - replacement placement synthesis
+
 - **V18 focused two-build minimap-to-terrain reset (2026-06-04)**
   - spec `047-v18-distill-corpus-open-source-loop` remains the owner, but the active contract was reset to the most basic useful lane:
     - focus on `0_5_3_3368` and `3_3_5_12340` only
@@ -321,8 +356,9 @@
 
 ## Next Likely Steps
 
-- implement the first `046` slice: deterministic non-freezing PM4 segment export
-- validate `ck24ObjectId`-rooted segmentation against known reference tiles before broad automation
+- wire the new `046` foundational matching surface into `WowViewer.Tool.Inspect` as the first deterministic `pm4 export-segments` host
+- extend the current single-file segment builder into directory-scale or cross-tile export ownership without creating a second PM4 grouping stack
+- validate the current segment identity against known reference tiles before broad automation
 - build the staged-asset Zarr signal corpus and deterministic candidate scorer
 - keep PM4 grouping/spec docs in sync if segmentation ownership changes again
 - spec `047` follow-ups:
