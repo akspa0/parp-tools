@@ -158,6 +158,17 @@ The focused wrapper now also defaults to bounded plateau stopping. In practice,
 the epoch count is a ceiling for the run budget, while the best-checkpoint
 contract remains the true proof owner for a plateaued training curve.
 
+Focused full height and base-normal runs now also carry a loader-pressure
+guardrail for the `object_precise_mask` path:
+
+- when the operator leaves `--num-workers` at `-1`, the focused base lane
+  resolves to a safer worker/prefetch profile instead of the broader CUDA
+  default
+- that safeguard is intentionally narrow and must not override explicit
+  `--num-workers`, `--prefetch-factor`, or `--persistent-workers` choices
+- the trainer now records and prints that pressure-profile decision in run
+  evidence
+
 ## Why This Design Holds
 
 The prior lane kept drifting into weak or misleading supervision surfaces:
@@ -252,12 +263,15 @@ re-enter signoff for this lane.
 
 ## Open Follow-Up
 
-- Scale the bounded height proof into a real multi-epoch run through
-  `train_v18_focus.py height`.
-- Scale the bounded normal proof into a real multi-epoch run through
-  `train_v18_focus.py normal`.
+- Run the current full focused height session:
+  - `train_v18_focus.py height --curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_v1 --train-bucket-rotation-fraction 0.10 --epochs 40 --val-max-tiles 32 --val-interval 1 --run-name v18_height_focus_full_v1`
+- Run the current full focused normal session:
+  - `train_v18_focus.py normal --curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_v1 --train-bucket-rotation-fraction 0.10 --epochs 40 --val-max-tiles 32 --val-interval 1 --run-name v18_normal_focus_full_v1`
 - Tune focused runs for the observed 8 GB lane via startup autotune and the new
   rotating bucket-coverage epochs instead of the earlier smoke-budget settings.
+- Confirm on a real CUDA run that the focused auto loader-pressure profile
+  prevents the old worker-side `MemoryError` without changing the
+  `object_precise_mask` supervision contract.
 - Keep the focused curation manifest stable unless a specific reject-pattern
   review justifies threshold changes.
 - Keep quilt-level stitching and ADT writeback as the next downstream design

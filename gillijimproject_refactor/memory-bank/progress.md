@@ -297,6 +297,28 @@
       - `9 passed`
     - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help`
 
+- **V18 focused loader-pressure guardrail + full-run doc sync (2026-06-06)**
+  - user then exposed a real runtime failure:
+    - worker-side `MemoryError` while `object_precise_mask` remained part of the active focused supervision contract
+  - bounded fix landed in `wow-viewer/data-harvester/scripts/train_v16_1_common.py`:
+    - focused base height/base-normal runs now detect the V18 focused manifest lane
+    - when loader tuning is left on auto (`--num-workers -1`), that lane resolves to a narrower safer worker/prefetch profile
+    - explicit `--num-workers`, `--prefetch-factor`, and `--persistent-workers` tuning is preserved
+    - run config/startup logs now record the applied loader-pressure profile
+  - regression coverage was extended in `wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`:
+    - focused profile detection
+    - auto-loader clamp behavior
+    - preservation of explicit loader tuning
+  - focused operator docs were resynced around the real current commands:
+    - primary full-session runs now point at `v18_focus_terrain_v1`
+    - reduced-manifest scouting is still available but explicitly secondary
+    - root `wow-viewer/README.md`, `data-harvester/README.md`, spec `047` quickstart/plan, and the V18 architecture summary now all agree on the current command surface
+  - targeted proof passed:
+    - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+    - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q`
+      - `13 passed`
+    - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help`
+
 ## Next Likely Steps
 
 - implement the first `046` slice: deterministic non-freezing PM4 segment export
@@ -304,11 +326,11 @@
 - build the staged-asset Zarr signal corpus and deterministic candidate scorer
 - keep PM4 grouping/spec docs in sync if segmentation ownership changes again
 - spec `047` follow-ups:
-  - rerun focused curation so the latest `kept_tiles.parquet` picks up `insufficient_trainable_terrain` rejections
-  - launch height on `wow-viewer/output/datasets/v18/curation/v18_focus_tiny_v1/` with `--train-bucket-rotation-fraction 1.0`
-  - launch normal on `wow-viewer/output/datasets/v18/curation/v18_focus_tiny_v1/` with `--train-bucket-rotation-fraction 1.0`
-  - inspect whether the new default `--early-stop-patience 8` stops the current plateaued `800`-ish run close to the real best epoch instead of idling into the 30s
-  - compare that tiny-manifest lane against the existing `10%` rotating large-pool lane before changing architecture again
+  - launch the documented full height run on `wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1/` with `--train-bucket-rotation-fraction 0.10`
+  - launch the documented full normal run on `wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1/` with `--train-bucket-rotation-fraction 0.10`
+  - confirm the loader-pressure profile prevents the old worker-side `MemoryError` on a real CUDA run
+  - inspect whether the default `--early-stop-patience 8` stops the plateau close to the real best epoch instead of idling into the 30s
+  - compare that full focused-manifest lane against the optional reduced-manifest scouting lane before changing architecture again
   - run `infer_v18_focus.py` on the resulting checkpoints so the active proof owner becomes the minimap-only deployment surface rather than trainer val logs
   - confirm the next run logs show near-equal per-build epoch subsets plus sane rotation-cycle evidence rather than the old `700` vs `2636` full-pool skew
   - confirm the next height preview shows roof/top-geometry occlusion in the actual combined weight path instead of the old basement-only panel

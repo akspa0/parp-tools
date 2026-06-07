@@ -179,6 +179,9 @@ focused builds and prefers the latest focused V18 curation manifest.
    validation is distinct from offline supervised training evaluation.
 10. Keep super-tiny experiments explicit by deriving a separate tiny manifest
     instead of silently changing the default focused manifest resolver.
+11. Keep focused base height/base-normal runs operational on the
+    `object_precise_mask` contract by applying safer auto DataLoader defaults
+    only when the operator leaves loader tuning on auto.
 
 **Validation**:
 
@@ -189,6 +192,8 @@ focused builds and prefers the latest focused V18 curation manifest.
   fraction instead of requiring a fixed `--train-epoch-tiles` count.
 - focused operators can run a minimap-only inference proof command against V18
   checkpoints without relying on supervision-only tensors during the run.
+- focused auto-loader safety must not override explicit `--num-workers`,
+  `--prefetch-factor`, or `--persistent-workers` choices.
 
 ### Phase 2C - Super-Tiny Focused Corpus Surface
 
@@ -221,7 +226,9 @@ README sections.
 
 1. Add focused V18 curation/training quickstart commands to
    `data-harvester/README.md`.
-2. Align architecture and memory-bank wording with the final owner design.
+2. Make the full focused-manifest training commands the primary examples and
+   keep smaller-manifest scouting clearly optional.
+3. Align architecture and memory-bank wording with the final owner design.
 
 **Validation**:
 

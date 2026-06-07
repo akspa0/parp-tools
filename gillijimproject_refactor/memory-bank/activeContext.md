@@ -248,15 +248,27 @@
   - focused docs now steer away from the earlier smoke budget:
     - quickstart/README examples now use larger tile pools and `40` epochs instead of `20`
   - targeted Python proof now exists:
-    - `wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+      - `wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
       - proves height loss ignores non-trainable regions
       - proves normal loss honors terrain-valid masking
       - proves terrain-valid composition includes roof/top-geometry masks
       - proves curation rejects low-trainable tiles
       - proves strict build-balance equalizes/caps focused subsets as designed
+  - landed in the 2026-06-06 focused loader-pressure/doc-sync pass:
+    - active supervision contract stays on `object_precise_mask`
+    - `wow-viewer/data-harvester/scripts/train_v16_1_common.py`
+      - now applies a narrower safer loader profile only when the focused base lane is left on auto loader tuning
+      - explicit `--num-workers`, `--prefetch-factor`, and `--persistent-workers` choices remain untouched
+      - run config/startup logs now record the loader-pressure decision
+    - targeted proof:
+      - `uv run python -m py_compile wow-viewer/data-harvester/scripts/train_v16_1_common.py wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py`
+      - `uv run --project wow-viewer/data-harvester pytest wow-viewer/data-harvester/src/harvester/test_v18_focus_masks.py -q` → `13 passed`
+    - focused docs now treat the full focused-manifest runs as primary:
+      - height: `train_v18_focus.py height --curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_v1 --train-bucket-rotation-fraction 0.10 --epochs 40 --val-max-tiles 32 --val-interval 1 --run-name v18_height_focus_full_v1`
+      - normal: `train_v18_focus.py normal --curation-manifest ../output/datasets/v18/curation/v18_focus_terrain_v1 --train-bucket-rotation-fraction 0.10 --epochs 40 --val-max-tiles 32 --val-interval 1 --run-name v18_normal_focus_full_v1`
 - the next real proof is:
-  - rerun focused curation so the active `kept_tiles.parquet` drops low-trainable liquid-hidden rows
-  - launch real focused height and normal runs through the new `10%` rotating bucket-coverage default
+  - launch the current documented full focused height and normal runs through the `10%` rotating bucket-coverage default
   - run `infer_v18_focus.py` on the resulting checkpoints so the active proof owner is the minimap-only deployment surface, not trainer val logs
   - inspect `train_epoch_bucket_usage.jsonl` and `config.json` for the derived epoch size / cycle length
+  - confirm the loader-pressure profile prevents the old worker-side `MemoryError` without changing `object_precise_mask` supervision
   - confirm live losses improve without returning to full-pool-per-epoch wall time
