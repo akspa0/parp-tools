@@ -81,7 +81,7 @@ public partial class ViewerApp
         ImGui.TextWrapped("The PM4 workbench mixes raw chunk names, viewer aliases, and viewer-generated structure. Not every label here is a proven native PM4 field name.");
         ImGui.BulletText("MSHD region: promoted from MSHD.Field04. Current research says it behaves like a reusable scene/group bucket across tiles, useful for grouping/coloring but not a packed tile coordinate or proven placement semantic.");
         ImGui.BulletText("CK24: viewer alias for the packed MSUR field at 0x1C. Type = high byte, ObjId = low 16 bits.");
-        ImGui.BulletText("part / ObjectPartId: viewer-generated split id. WoWViewer assigns it during the current overlay build after CK24 grouping, dominant MSLK grouping, optional MDOS split, then optional connectivity split. It is not a raw PM4 field.");
+        ImGui.BulletText("part / ObjectPartId: viewer-generated split id. WoWViewer assigns it during the current overlay build after CK24 grouping, dominant MSLK grouping, optional MscnRef split, then optional connectivity split. It is not a raw PM4 field.");
         ImGui.BulletText("MSLK Group: dominant MSLK.GroupObjectId seen in the current viewer object. Strong grouping hint, not final proof of identity.");
         ImGui.BulletText("Linked MPRL refs: position-reference rows attached to the current viewer object or its dominant link family. Used as placement evidence.");
         ImGui.BulletText("Group / Attr / MscnRef: dominant MSUR values across the currently selected viewer object. Useful for debugging, not guaranteed unique or authoritative.");
@@ -244,7 +244,7 @@ public partial class ViewerApp
             {
                 ImGui.TextDisabled($"Type=0x{debugInfo.Ck24Type:X2} ObjId={debugInfo.Ck24ObjectId} Surfaces={debugInfo.SurfaceCount}");
                 ImGui.TextDisabled($"MSHD F00={debugInfo.MshdField00} Region={debugInfo.MshdRegionId} F08={debugInfo.MshdField08}");
-                ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} Mdos={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
+                ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} MscnRef={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
                 ImGui.TextDisabled($"MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8} Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
                 if (debugInfo.DistinctTypeFlags != 0)
                 {
@@ -579,7 +579,7 @@ public partial class ViewerApp
         if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
         {
             ImGui.TextDisabled($"Type=0x{debugInfo.Ck24Type:X2} ObjId={debugInfo.Ck24ObjectId} Surfaces={debugInfo.SurfaceCount}");
-            ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} Mdos={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
+            ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} mscnRef={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
             ImGui.TextDisabled($"Part={debugInfo.ObjectPartId} MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8}");
             ImGui.TextDisabled($"Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
             if (debugInfo.DistinctTypeFlags != 0)
@@ -648,7 +648,7 @@ public partial class ViewerApp
                     string headingText = match.MprlHeadingMeanDegrees.HasValue
                         ? $" heading={match.MprlHeadingMeanDegrees.Value:F1} delta={match.HeadingDeltaDegrees?.ToString("F1") ?? "n/a"}"
                         : string.Empty;
-                    ImGui.BulletText($"{match.Family}#{match.FamilyObjectIndex} score={match.SimilarityScore:F2} surfaces={match.SurfaceCount} indices={match.TotalIndexCount} mdos={match.MdosCount} groups={match.GroupKeyCount} linkGroups={match.LinkGroupCount} dominant=0x{match.DominantLinkGroupObjectId:X} mode={match.CoordinateMode} planar=(swap={match.PlanarTransform.SwapPlanarAxes},u={match.PlanarTransform.InvertU},v={match.PlanarTransform.InvertV}) yaw={match.FrameYawDegrees:F1}{headingText} linkedMPRL={match.LinkedMprlRefCount}/{match.LinkedMprlInBoundsCount}");
+                    ImGui.BulletText($"{match.Family}#{match.FamilyObjectIndex} score={match.SimilarityScore:F2} surfaces={match.SurfaceCount} indices={match.TotalIndexCount} mscnRef={match.MdosCount} groups={match.GroupKeyCount} linkGroups={match.LinkGroupCount} dominant=0x{match.DominantLinkGroupObjectId:X} mode={match.CoordinateMode} planar=(swap={match.PlanarTransform.SwapPlanarAxes},u={match.PlanarTransform.InvertU},v={match.PlanarTransform.InvertV}) yaw={match.FrameYawDegrees:F1}{headingText} linkedMPRL={match.LinkedMprlRefCount}/{match.LinkedMprlInBoundsCount}");
                 }
             }
 
@@ -1354,7 +1354,7 @@ public partial class ViewerApp
                     ImGui.TextDisabled(
                         $"planar gap={match.PlanarGap:F2} vertical gap={match.VerticalGap:F2} center={match.CenterDistance:F2} planar overlap={match.PlanarOverlapRatio:F3}");
                     ImGui.TextDisabled(
-                        $"surfaces={match.SurfaceCount} linked refs={match.LinkedPositionRefCount} mdos={match.DominantMdosIndex} avgH={match.AverageSurfaceHeight:F2}");
+                        $"surfaces={match.SurfaceCount} linked refs={match.LinkedPositionRefCount} mscnRef={match.DominantMdosIndex} avgH={match.AverageSurfaceHeight:F2}");
                     ImGui.Separator();
                 }
 
@@ -2005,8 +2005,8 @@ public partial class ViewerApp
             return;
 
         ImGui.TextDisabled("Visible peers from the current camera-window PM4 overlay that share the selected object's MSHD.Field04 region id.");
-        ImGui.TextDisabled($"Region {regionInfo.RegionId} | objects={regionInfo.VisibleObjectCount} tiles={regionInfo.VisibleTileCount} unique CK24={regionInfo.UniqueCk24Count} unique MSLK={regionInfo.UniqueLinkGroupCount} unique MDOS={regionInfo.UniqueMdosCount}");
-        ImGui.TextDisabled($"Same CK24={regionInfo.SameCk24Count} same MSLK={regionInfo.SameLinkGroupCount} same MDOS={regionInfo.SameMdosCount} avg surfaces={regionInfo.AverageSurfaceCount:F1} avg center Z={regionInfo.AverageCenterHeight:F1}");
+        ImGui.TextDisabled($"Region {regionInfo.RegionId} | objects={regionInfo.VisibleObjectCount} tiles={regionInfo.VisibleTileCount} unique CK24={regionInfo.UniqueCk24Count} unique MSLK={regionInfo.UniqueLinkGroupCount} unique MscnRef={regionInfo.UniqueMdosCount}");
+        ImGui.TextDisabled($"Same CK24={regionInfo.SameCk24Count} same MSLK={regionInfo.SameLinkGroupCount} same MscnRef={regionInfo.SameMdosCount} avg surfaces={regionInfo.AverageSurfaceCount:F1} avg center Z={regionInfo.AverageCenterHeight:F1}");
         ImGui.TextDisabled($"Type mix: {FormatPm4TypeBuckets(regionInfo.TypeBuckets)}");
 
         if (ImGui.Button($"Collect Visible Region##{idSuffix}"))
@@ -2028,7 +2028,7 @@ public partial class ViewerApp
                     ImGui.TextUnformatted(label);
 
                 ImGui.TextDisabled(
-                    $"objId={peer.Ck24ObjectId} mslk=0x{peer.LinkGroupObjectId:X8} mdos={peer.DominantMdosIndex} center=({peer.Center.X:F1}, {peer.Center.Y:F1}, {peer.Center.Z:F1}) {FormatPm4PeerFlags(peer)}");
+                    $"objId={peer.Ck24ObjectId} mslk=0x{peer.LinkGroupObjectId:X8} mscnRef={peer.DominantMdosIndex} center=({peer.Center.X:F1}, {peer.Center.Y:F1}, {peer.Center.Z:F1}) {FormatPm4PeerFlags(peer)}");
 
                 ImGui.PushID($"Pm4RegionPeer{idSuffix}_{index}");
                 if (!peer.IsSelected && ImGui.SmallButton("Select"))
@@ -2275,7 +2275,7 @@ public partial class ViewerApp
             builder.AppendLine();
             builder.AppendLine($"- tile=(`{_worldScene.SelectedPm4ObjectKey.Value.tileX}`, `{_worldScene.SelectedPm4ObjectKey.Value.tileY}`) ck24=`0x{selectedDebugInfo.Value.Ck24:X6}` part=`{_worldScene.SelectedPm4ObjectKey.Value.objectPart}` type=`0x{selectedDebugInfo.Value.Ck24Type:X2}` objId=`{selectedDebugInfo.Value.Ck24ObjectId}`");
             builder.AppendLine($"- MSHD: field00=`{selectedDebugInfo.Value.MshdField00}` region=`{selectedDebugInfo.Value.MshdRegionId}` field08=`{selectedDebugInfo.Value.MshdField08}`");
-            builder.AppendLine($"- MSLK group=`0x{selectedDebugInfo.Value.LinkGroupObjectId:X8}` MDOS=`{selectedDebugInfo.Value.DominantMdosIndex}` linked refs=`{selectedDebugInfo.Value.LinkedPositionRefCount}` surfaces=`{selectedDebugInfo.Value.SurfaceCount}`");
+            builder.AppendLine($"- MSLK group=`0x{selectedDebugInfo.Value.LinkGroupObjectId:X8}` MscnRef=`{selectedDebugInfo.Value.DominantMdosIndex}` linked refs=`{selectedDebugInfo.Value.LinkedPositionRefCount}` surfaces=`{selectedDebugInfo.Value.SurfaceCount}`");
             builder.AppendLine($"- center=(`{selectedDebugInfo.Value.Center.X:F1}`, `{selectedDebugInfo.Value.Center.Y:F1}`, `{selectedDebugInfo.Value.Center.Z:F1}`)");
         }
 
@@ -2349,7 +2349,7 @@ public partial class ViewerApp
         builder.AppendLine($"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">""");
         builder.AppendLine("""<rect width="100%" height="100%" fill="#0f1318" />""");
         builder.AppendLine($"""<text x="32" y="38" fill="#f5f7fa" font-family="Consolas, 'Courier New', monospace" font-size="28">Selected PM4 Region {regionInfo.RegionId}</text>""");
-        builder.AppendLine($"""<text x="32" y="64" fill="#aab6c3" font-family="Consolas, 'Courier New', monospace" font-size="16">visible objects={regionInfo.VisibleObjectCount} tiles={regionInfo.VisibleTileCount} sameCK24={regionInfo.SameCk24Count} sameMSLK={regionInfo.SameLinkGroupCount} sameMDOS={regionInfo.SameMdosCount}</text>""");
+        builder.AppendLine($"""<text x="32" y="64" fill="#aab6c3" font-family="Consolas, 'Courier New', monospace" font-size="16">visible objects={regionInfo.VisibleObjectCount} tiles={regionInfo.VisibleTileCount} sameCK24={regionInfo.SameCk24Count} sameMSLK={regionInfo.SameLinkGroupCount} sameMscnRef={regionInfo.SameMdosCount}</text>""");
         builder.AppendLine($"""<rect x="32" y="76" width="1216" height="2" fill="{accent}" />""");
 
         for (int index = 0; index < regionInfo.Peers.Count; index++)
@@ -2461,10 +2461,10 @@ public partial class ViewerApp
         if (!ImGui.CollapsingHeader($"PM4 Graph##{idSuffix}", ImGuiTreeNodeFlags.DefaultOpen))
             return;
 
-        ImGui.TextDisabled("Derived from the current overlay build: CK24 root, MSLK-linked groups, optional MDOS split, then connectivity parts.");
+        ImGui.TextDisabled("Derived from the current overlay build: CK24 root, MSLK-linked groups, optional MscnRef split, then connectivity parts.");
         ImGui.TextDisabled("part/ObjectPartId is a viewer-generated split id from that build, not a raw PM4 field.");
         ImGui.TextDisabled("Treat this as viewer structure, not a claim that PM4 stores matching raw graph nodes.");
-        ImGui.TextDisabled($"Split flags: MDOS={graph.SplitByMdos} Connectivity={graph.SplitByConnectivity}");
+        ImGui.TextDisabled($"Split flags: MscnRef={graph.SplitByMdos} Connectivity={graph.SplitByConnectivity}");
         ImGui.TextDisabled($"Tiles={graph.TileCount} LinkGroups={graph.LinkGroupCount} MdosGroups={graph.MdosGroupCount} Parts={graph.PartCount}");
         ImGui.TextDisabled($"Surfaces={graph.SurfaceCount} Indices={graph.TotalIndexCount} AttrMasks={graph.AttributeMaskCount} GroupKeys={graph.GroupKeyCount}");
         ImGui.TextDisabled("Click a part row to reselect it. Use Frame to move the camera to that exact part.");
@@ -3094,7 +3094,7 @@ public partial class ViewerApp
 
     private static string BuildPm4CollectionSignature(Pm4ObjectDebugInfo debugInfo, Vector3 boundsSize)
     {
-        return FormattableString.Invariant($"ck24=0x{debugInfo.Ck24:X6}|mslk=0x{debugInfo.LinkGroupObjectId:X8}|surf={debugInfo.SurfaceCount}|g=0x{debugInfo.DominantGroupKey:X2}|a=0x{debugInfo.DominantAttributeMask:X2}|mdos={debugInfo.DominantMdosIndex}|size=({boundsSize.X:F2},{boundsSize.Y:F2},{boundsSize.Z:F2})");
+        return FormattableString.Invariant($"ck24=0x{debugInfo.Ck24:X6}|mslk=0x{debugInfo.LinkGroupObjectId:X8}|surf={debugInfo.SurfaceCount}|g=0x{debugInfo.DominantGroupKey:X2}|a=0x{debugInfo.DominantAttributeMask:X2}|mscnRef={debugInfo.DominantMdosIndex}|size=({boundsSize.X:F2},{boundsSize.Y:F2},{boundsSize.Z:F2})");
     }
 
     private static float[] VectorToArray(Vector3 value) => new[] { value.X, value.Y, value.Z };
@@ -3245,7 +3245,7 @@ public partial class ViewerApp
             sw.WriteLine($"- Tile: `({debug.TileX}, {debug.TileY})`");
             sw.WriteLine($"- CK24: `0x{debug.Ck24:X6}` type=`0x{debug.Ck24Type:X2}` objId=`{debug.Ck24ObjectId}`");
             sw.WriteLine($"- MSHD: F00=`{debug.MshdField00}` region=`{debug.MshdRegionId}` F08=`{debug.MshdField08}`");
-            sw.WriteLine($"- MSLK group=`0x{debug.LinkGroupObjectId:X8}` MDOS=`{debug.DominantMdosIndex}` linked refs=`{debug.LinkedPositionRefCount}`");
+            sw.WriteLine($"- MSLK group=`0x{debug.LinkGroupObjectId:X8}` MscnRef=`{debug.DominantMdosIndex}` linked refs=`{debug.LinkedPositionRefCount}`");
             sw.WriteLine($"- Surfaces=`{debug.SurfaceCount}` group=`0x{debug.DominantGroupKey:X2}` attr=`0x{debug.DominantAttributeMask:X2}` avgH=`{debug.AverageSurfaceHeight:F2}`");
             sw.WriteLine($"- Center: `({debug.Center.X:F2}, {debug.Center.Y:F2}, {debug.Center.Z:F2})`");
             sw.WriteLine($"- Bounds: `({debug.BoundsMin.X:F2},{debug.BoundsMin.Y:F2},{debug.BoundsMin.Z:F2})` .. `({debug.BoundsMax.X:F2},{debug.BoundsMax.Y:F2},{debug.BoundsMax.Z:F2})`");
