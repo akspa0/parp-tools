@@ -139,6 +139,10 @@ public partial class ViewerApp
         if (ImGui.Checkbox("Mirror PM4 N/S", ref pm4FlipAllObjY))
             _worldScene.Pm4FlipAllObjectsY = pm4FlipAllObjY;
 
+        ImGui.SameLine();
+        if (ImGui.Button("Export Report"))
+            ExportPm4OverlayReport();
+
         bool showType40 = _worldScene.ShowPm4Type40;
         if (ImGui.Checkbox("CK24 0x40", ref showType40))
             _worldScene.ShowPm4Type40 = showType40;
@@ -3185,5 +3189,84 @@ public partial class ViewerApp
     private static float? JsonFiniteOrNull(float value)
     {
         return float.IsFinite(value) ? value : null;
+    }
+
+    private void ExportPm4OverlayReport()
+    {
+        if (_worldScene == null) return;
+
+        string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+        string outputDir = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "output", "tmp");
+        Directory.CreateDirectory(outputDir);
+        string mdPath = Path.Combine(outputDir, $"pm4_overlay_{timestamp}.md");
+
+        using var sw = new StreamWriter(mdPath);
+        sw.WriteLine("# PM4 Overlay Report");
+        sw.WriteLine();
+        sw.WriteLine($"- Generated: `{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC`");
+        sw.WriteLine($"- Objects: `{_worldScene.Pm4VisibleObjectCount}` loaded, `{_worldScene.Pm4LoadedFiles}` files");
+        sw.WriteLine();
+
+        // Legend
+        Pm4ColorLegendInfo legend = _worldScene.GetPm4ColorLegend();
+        sw.WriteLine($"Color mode: `{_worldScene.Pm4ColorMode}` — {legend.Description}");
+        sw.WriteLine();
+        if (legend.Entries.Count > 0)
+        {
+            sw.WriteLine("| Label | Count |");
+            sw.WriteLine("|-------|-------|");
+            foreach (var entry in legend.Entries)
+                sw.WriteLine($"| {entry.Label} | {entry.ObjectCount} |");
+            sw.WriteLine();
+        }
+
+        // Regions from overlay summary
+        Pm4VisibleOverlaySummaryInfo summary = _worldScene.GetPm4VisibleOverlaySummary(10, 4);
+        if (summary.Regions.Count > 0)
+        {
+            sw.WriteLine("## MSHD Regions");
+            sw.WriteLine();
+            sw.WriteLine("| Region | Objects | Tiles | CK24 | MSLK | Avg Z |");
+            sw.WriteLine("|--------|---------|-------|------|------|-------|");
+            foreach (var r in summary.Regions)
+            {
+                string marker = r.IsSelectedRegion ? " ← selected" : "";
+                sw.WriteLine($"| {r.RegionId} | {r.ObjectCount} | {r.TileCount} | {r.UniqueCk24Count} | {r.UniqueLinkGroupCount} | {r.AverageCenterHeight:F1}{marker} |");
+            }
+            sw.WriteLine();
+        }
+
+        // Selected object
+        if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debug))
+        {
+            sw.WriteLine("## Selected Object");
+            sw.WriteLine();
+            sw.WriteLine($"- Tile: `({debug.TileX}, {debug.TileY})`");
+            sw.WriteLine($"- CK24: `0x{debug.Ck24:X6}` type=`0x{debug.Ck24Type:X2}` objId=`{debug.Ck24ObjectId}`");
+            sw.WriteLine($"- MSHD: F00=`{debug.MshdField00}` region=`{debug.MshdRegionId}` F08=`{debug.MshdField08}`");
+            sw.WriteLine($"- MSLK group=`0x{debug.LinkGroupObjectId:X8}` MDOS=`{debug.DominantMdosIndex}` linked refs=`{debug.LinkedPositionRefCount}`");
+            sw.WriteLine($"- Surfaces=`{debug.SurfaceCount}` group=`0x{debug.DominantGroupKey:X2}` attr=`0x{debug.DominantAttributeMask:X2}` avgH=`{debug.AverageSurfaceHeight:F2}`");
+            sw.WriteLine($"- Center: `({debug.Center.X:F2}, {debug.Center.Y:F2}, {debug.Center.Z:F2})`");
+            sw.WriteLine($"- Bounds: `({debug.BoundsMin.X:F2},{debug.BoundsMin.Y:F2},{debug.BoundsMin.Z:F2})` .. `({debug.BoundsMax.X:F2},{debug.BoundsMax.Y:F2},{debug.BoundsMax.Z:F2})`");
+            sw.WriteLine();
+
+            if (_worldScene.TryGetSelectedPm4ObjectResearchInfo(out Pm4SelectedObjectResearchInfo rinfo))
+            {
+                if (rinfo.MshdRawFields != null)
+                    sw.WriteLine($"- {rinfo.MshdRawFields}");
+                if (rinfo.MslkRawEntries.Count > 0)
+                {
+                    sw.WriteLine();
+                    sw.WriteLine("### MSLK Entries");
+                    sw.WriteLine();
+                    foreach (string mslkLine in rinfo.MslkRawEntries)
+                        sw.WriteLine($"  {mslkLine}");
+                    sw.WriteLine();
+                }
+            }
+        }
+
+        Console.WriteLine($"Wrote PM4 overlay report: {mdPath}");
     }
 }
