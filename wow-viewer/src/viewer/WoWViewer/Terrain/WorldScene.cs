@@ -3689,9 +3689,12 @@ public class WorldScene : ISceneRenderer
                         var mscnWorldPoints = new List<Vector3>(pm4.KnownChunks.Mscn.Count);
                         foreach (Vector3 mscnPt in pm4.KnownChunks.Mscn)
                         {
+                            // MSCN stores (tile_Y * 533 + local_y, tile_X * 533 + local_x, Z)
+                            // MSCN_X is already in the wow_Y axis → renderer_X = MapOrigin - MSCN_X
+                            // MSCN_Y is already in the wow_X axis → renderer_Y = MapOrigin - MSCN_Y
                             mscnWorldPoints.Add(new Vector3(
-                                WoWConstants.MapOrigin - mscnPt.Y,
                                 WoWConstants.MapOrigin - mscnPt.X,
+                                WoWConstants.MapOrigin - mscnPt.Y,
                                 mscnPt.Z));
                         }
                         _pm4TileMscnPoints[(effectiveTileX, effectiveTileY)] = mscnWorldPoints;
