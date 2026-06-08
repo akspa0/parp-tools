@@ -3,8 +3,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Wmo;
+using WowViewer.Core.Maps;
 using WowViewer.Core.Mdx;
 using WowViewer.Core.PM4.Matching;
 using WowViewer.Core.PM4.Models;
@@ -26,7 +28,8 @@ internal static class Pm4AssetSignalCorpusSupport
         ArchiveCatalogBootstrapOptions archiveBootstrapOptions,
         string? assetKindFilter,
         string? pathFilter,
-        int? limit)
+        int? limit,
+        string? seedPlacementsPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(archiveRoot);
 
@@ -34,9 +37,11 @@ internal static class Pm4AssetSignalCorpusSupport
         string buildLabel = Path.GetFileName(fullArchiveRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
         ArchiveCatalogBootstrapResult bootstrap = ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [fullArchiveRoot], archiveBootstrapOptions);
-        IReadOnlyList<string> candidateFiles = bootstrap.AllFiles.Count > 0
-            ? bootstrap.AllFiles
-            : LoadFallbackListfileEntries(archiveBootstrapOptions);
+        IReadOnlyList<string> candidateFiles = !string.IsNullOrWhiteSpace(seedPlacementsPath)
+            ? LoadSeedPlacementAssetPaths(seedPlacementsPath)
+            : bootstrap.AllFiles.Count > 0
+                ? bootstrap.AllFiles
+                : LoadFallbackListfileEntries(archiveBootstrapOptions);
 
         IEnumerable<string> candidates = candidateFiles
             .Where(IsSupportedAssetPath)
@@ -250,6 +255,49 @@ internal static class Pm4AssetSignalCorpusSupport
             .ToArray();
     }
 
+    internal static IReadOnlyList<string> LoadSeedPlacementAssetPaths(string seedPlacementsPath)
+    {
+        string fullSeedPath = Path.GetFullPath(seedPlacementsPath);
+        if (File.Exists(fullSeedPath))
+            return BuildSeedPlacementAssetPaths([fullSeedPath]);
+
+        if (Directory.Exists(fullSeedPath))
+        {
+            IReadOnlyList<string> files = Directory.EnumerateFiles(fullSeedPath, "*_obj0.adt", SearchOption.TopDirectoryOnly)
+                .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            return BuildSeedPlacementAssetPaths(files);
+        }
+
+        throw new DirectoryNotFoundException($"Seed placements path '{fullSeedPath}' does not exist.");
+    }
+
+    private static IReadOnlyList<string> BuildSeedPlacementAssetPaths(IReadOnlyList<string> placementFiles)
+    {
+        HashSet<string> assetPaths = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string placementFile in placementFiles)
+        {
+            AdtPlacementCatalog placements = AdtPlacementReader.Read(placementFile);
+            foreach (AdtWorldModelPlacement placement in placements.WorldModelPlacements)
+            {
+                if (!string.IsNullOrWhiteSpace(placement.ModelPath))
+                    assetPaths.Add(placement.ModelPath);
+            }
+
+            foreach (AdtModelPlacement placement in placements.ModelPlacements)
+            {
+                if (!string.IsNullOrWhiteSpace(placement.ModelPath))
+                    assetPaths.Add(placement.ModelPath);
+            }
+        }
+
+        return assetPaths
+            .OrderBy(static path => BuildPriority(path))
+            .ThenBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     private static string BuildRunId(string buildLabel, IReadOnlyList<Pm4AssetReferenceSignalRecord> assets)
     {
         StringBuilder builder = new();
@@ -318,6 +366,21 @@ internal static class Pm4AssetSignalCorpusSupport
     private static string NormalizeVirtualPath(string assetPath)
     {
         return assetPath.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant();
+    }
+
+    private static int BuildPriority(string assetPath)
+    {
+        string normalized = NormalizeVirtualPath(assetPath);
+        if (normalized.StartsWith("world/wmo/", StringComparison.Ordinal))
+            return 0;
+        if (normalized.StartsWith("world/", StringComparison.Ordinal))
+            return 1;
+        if (normalized.StartsWith("doodads/", StringComparison.Ordinal))
+            return 2;
+        if (normalized.StartsWith("generic/", StringComparison.Ordinal))
+            return 3;
+
+        return 4;
     }
 
     private static bool IsFinite(Vector3 value)

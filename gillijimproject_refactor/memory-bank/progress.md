@@ -441,6 +441,36 @@
     - current bounded corpus quality is weak because the first smoke sample is just a limited validated listfile-backed slice, not a focused world-asset corpus
     - the next improvement should tighten corpus selection/filtering and expand the asset pool before changing placement synthesis architecture
 
+- **PM4 seeded durable corpus lift for missing-ADT matching (2026-06-07)**
+  - the first broad durable corpus proof was too weak because it sampled only a small listfile-backed slice and produced no real hits
+  - `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Pm4AssetSignalCorpusSupport.cs` now supports:
+    - `--seed-placements <tile_obj0.adt|directory>`
+    - extracting durable candidate paths from one or many nearby `_obj0.adt` files
+    - keeping asset identity path-based (`<kind>:<build>:<normalized path>`) instead of slipping back to placement `UniqueID`
+    - priority ordering that prefers `WORLD/WMO`, then `WORLD`, then `DOODADS`, then generic leftovers
+  - `WowViewer.Tool.Inspect` help/quickstart now treat the seeded durable-corpus path as the primary missing-ADT workflow rather than the earlier tiny broad slice
+  - regression coverage landed:
+    - `wow-viewer/tests/WowViewer.Core.PM4.Tests/Pm4AssetSignalCorpusSupportTests.cs`
+    - proves seeded path loading is stable, unique, world-prioritized, and file-vs-directory consistent on the real development placement data
+  - targeted proof passed:
+    - `dotnet build i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug`
+    - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --no-build --filter Pm4AssetSignalCorpusSupportTests`
+      - `2 passed`
+    - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --no-build --filter Pm4AssetMatchScorerTests`
+      - `4 passed`
+    - earlier bounded seeded smoke already produced:
+      - `wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json`
+      - `2101` durable asset references
+      - `wow-viewer/output/tmp/pm4-match-assets-seeded-smoke.json`
+      - `4110` PM4 segments scored
+      - `168 matched`
+      - `161 ambiguous`
+      - `3766 unresolved`
+      - `15 ineligible`
+  - current interpretation:
+    - this is the first useful missing-ADT proof, because the matcher is now scoring against a map-relevant path-based corpus instead of a tiny mostly-irrelevant sample
+    - the next big owner gap is turning these ranked candidates into proposal-grade placement synthesis, not going back to `_obj0.adt` as the main matching surface
+
 ## Next Likely Steps
 
 - extend the current deterministic export host from JSON report output into the planned Zarr-backed PM4 signal corpus writer
@@ -448,6 +478,9 @@
 - validate the current segment identity against known reference tiles before broad automation
 - build the staged-asset Zarr signal corpus and wrap the current JSON durable-corpus contract instead of inventing a second asset identity surface
 - tighten staged-client asset-corpus selection so the missing-ADT matcher scores against relevant world assets instead of a small mostly-character sample
+- build the next `046` slice on top of the seeded durable corpus:
+  - emit proposal-grade placement synthesis from the new ranked matches
+  - keep `_obj0.adt` only as validation evidence, not as the primary owner
 - keep PM4 grouping/spec docs in sync if segmentation ownership changes again
 - spec `047` follow-ups:
   - launch the documented full height run on `wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1/` with `--train-bucket-rotation-fraction 0.10`

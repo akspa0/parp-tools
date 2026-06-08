@@ -51,15 +51,17 @@
     - resolves WMO/M2 bounds from staged assets when possible
     - falls back to placement bounds when asset geometry cannot be opened
   - the first missing-ADT durable-corpus path now also exists:
-    - `WowViewer.Tool.Inspect pm4 export-asset-signals --archive-root <staged client root> [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--output <corpus.json>]`
+    - `WowViewer.Tool.Inspect pm4 export-asset-signals --archive-root <staged client root> [--seed-placements <tile_obj0.adt|directory>] [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--output <corpus.json>]`
     - current proof used the actual staged client root `i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`
-    - current bounded smoke exported `102` durable asset records to `wow-viewer/output/tmp/pm4-asset-signals-smoke.json`
-    - current bounded missing-ADT smoke scored `4110` PM4 segments against that corpus with no `_obj0.adt` file:
-      - `0 matched`
-      - `0 ambiguous`
-      - `4095 unresolved`
+    - current first broad smoke exported `102` durable asset records to `wow-viewer/output/tmp/pm4-asset-signals-smoke.json`
+    - the current stronger missing-ADT corpus path seeds durable asset identities from nearby or directory-wide placement files without using placement `UniqueID` as the asset key
+    - current seeded smoke exported `2101` durable asset records to `wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json`
+    - current seeded missing-ADT smoke scored `4110` PM4 segments against that corpus with no `_obj0.adt` file for the target PM4 itself:
+      - `168 matched`
+      - `161 ambiguous`
+      - `3766 unresolved`
       - `15 ineligible`
-    - current gap is candidate quality and corpus breadth, not command ownership
+    - current gap is no longer basic command ownership; it is match quality, corpus filtering, and later placement synthesis
 - current proof owner for `046` is now library + inspect CLI:
   - focused tests cover deterministic IDs on the real `development_00_00.pm4` tile
   - synthetic tests cover zero-CK24 connectivity splitting and low16 reuse flags
@@ -71,6 +73,8 @@
     - `wow-viewer/output/tmp/pm4-match-assets-smoke.json`
     - `wow-viewer/output/tmp/pm4-asset-signals-smoke.json`
     - `wow-viewer/output/tmp/pm4-match-assets-corpus-smoke.json`
+    - `wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json`
+    - `wow-viewer/output/tmp/pm4-match-assets-seeded-smoke.json`
   - current validation match smoke scored `4110` PM4 segments against `25` `_obj0.adt`-backed WMO/M2 references
   - directory-scale corpus export is now CLI-owned, but durable Zarr writing and stronger corpus filtering/ranking are still open
 - broken manual PM4 matching UI is explicitly not the workflow owner for that lane.

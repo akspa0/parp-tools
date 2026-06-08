@@ -1976,6 +1976,7 @@ static void RunPm4ExportAssetSignals(string[] args)
 	string? output = GetOption(args, "--output", "-o");
 	string? kind = GetOption(args, "--kind", "-k");
 	string? pathFilter = GetOption(args, "--path-filter", "-f");
+	string? seedPlacements = GetOption(args, "--seed-placements", "-s");
 	string? limitText = GetOption(args, "--limit", "-n");
 	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
 		return;
@@ -2009,7 +2010,7 @@ static void RunPm4ExportAssetSignals(string[] args)
 
 	try
 	{
-		Pm4AssetSignalCorpusManifest manifest = Pm4AssetSignalCorpusSupport.BuildFromArchive(archiveRoot, archiveBootstrapOptions, kind, pathFilter, limit);
+		Pm4AssetSignalCorpusManifest manifest = Pm4AssetSignalCorpusSupport.BuildFromArchive(archiveRoot, archiveBootstrapOptions, kind, pathFilter, limit, seedPlacements);
 
 		if (!string.IsNullOrWhiteSpace(output))
 		{
@@ -4129,7 +4130,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect pm4 inspect --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-segments --input <file.pm4|directory> [--output <report.json>]");
-	Console.WriteLine("  wowviewer-inspect pm4 export-asset-signals --archive-root <staged client dir> [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--listfile <listfile.txt>] [--output <corpus.json>]");
+	Console.WriteLine("  wowviewer-inspect pm4 export-asset-signals --archive-root <staged client dir> [--seed-placements <tile_obj0.adt|directory>] [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--listfile <listfile.txt>] [--output <corpus.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 match-assets --input <file.pm4> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 mscn --input <directory> [--output <report.json>]");
@@ -4569,7 +4570,7 @@ static void ShowPm4Usage()
 	Console.WriteLine("PM4 commands:");
 	Console.WriteLine("  pm4 inspect --input <file.pm4>");
 	Console.WriteLine("  pm4 export-segments --input <file.pm4|directory> [--output <report.json>]");
-	Console.WriteLine("  pm4 export-asset-signals --archive-root <staged client dir> [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--listfile <listfile.txt>] [--output <corpus.json>]");
+	Console.WriteLine("  pm4 export-asset-signals --archive-root <staged client dir> [--seed-placements <tile_obj0.adt|directory>] [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--listfile <listfile.txt>] [--output <corpus.json>]");
 	Console.WriteLine("  pm4 match-assets --input <file.pm4> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  pm4 match --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-matches <n>] [--search-range <units>] [--output <report.json>] [--object-output-dir <directory>]");
 	Console.WriteLine("  pm4 hierarchy --input <file.pm4> [--output <report.json>]");

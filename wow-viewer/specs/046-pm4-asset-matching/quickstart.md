@@ -42,29 +42,31 @@ dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.
   --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-export-segments-rich-smoke.json
 ```
 
-### 2. Build Durable Asset Signal Corpus
+### 2. Build Seeded Durable Asset Signal Corpus
 
 The first missing-ADT slice must build a durable candidate corpus keyed by
 asset identity rather than placement `UniqueID`. The initial implementation is
-a JSON-backed staged-client export; the later Python/Zarr lane can wrap the
+a JSON-backed staged-client export; the most useful current mode seeds that
+export from neighboring or directory-wide `_obj0.adt` files so the candidate
+pool stays path-based but map-relevant. The later Python/Zarr lane can wrap the
 same contract for larger corpus runs.
 
 ```powershell
 dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
   pm4 export-asset-signals `
   --archive-root "i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft" `
+  --seed-placements i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development `
   --listfile i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt `
-  --limit 120 `
-  --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-asset-signals-smoke.json
+  --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json
 ```
 
 Current bounded smoke proof for this command:
 
-- output: `wow-viewer/output/tmp/pm4-asset-signals-smoke.json`
+- output: `wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json`
 - current run shape:
-  - `102` durable asset signals exported
+  - `2101` durable asset signals exported
   - staged client root used: `i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`
-  - current bounded sample is biased by the first validated listfile-backed assets, so it proves the non-ADT workflow mechanically but not candidate quality yet
+  - asset identities are durable path-based ids, but the path pool is seeded from the development map placement directory rather than the missing tile's own `UniqueID` values
 
 ### 3. Run Durable-Corpus Automated Matching
 
@@ -72,19 +74,19 @@ Current bounded smoke proof for this command:
 dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
   pm4 match-assets `
   --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 `
-  --asset-corpus i:/parp/parp-tools/wow-viewer/output/tmp/pm4-asset-signals-smoke.json `
+  --asset-corpus i:/parp/parp-tools/wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json `
   --max-candidates 10 `
-  --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-match-assets-corpus-smoke.json
+  --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-match-assets-seeded-smoke.json
 ```
 
 Current bounded smoke proof for this command:
 
-- output: `wow-viewer/output/tmp/pm4-match-assets-corpus-smoke.json`
+- output: `wow-viewer/output/tmp/pm4-match-assets-seeded-smoke.json`
 - current run shape:
   - `4110` PM4 segments scored
-  - `102` durable asset references
-  - `0 matched`, `0 ambiguous`, `4095 unresolved`, `15 ineligible`
-  - this proves the missing-ADT command path runs without `_obj0.adt`; it does not yet prove the bounded corpus is a good candidate pool
+  - `2101` durable asset references
+  - `168 matched`, `161 ambiguous`, `3766 unresolved`, `15 ineligible`
+  - this proves the missing-ADT command path runs without `_obj0.adt` while still using a map-relevant, path-based candidate corpus
 
 ### 4. Run Validation-Tile Matching When Ground Truth Exists
 
@@ -108,7 +110,7 @@ cd i:/parp/parp-tools/wow-viewer/data-harvester
 uv run scripts/build_pm4_asset_signal_corpus.py `
   --client-root "../output/tmp/wowarchive-clients/<build>/World of Warcraft" `
   --asset-zarr ../output/datasets/pm4_asset_matching/<build>.asset-signals.zarr `
-  --source-json ../output/tmp/pm4-asset-signals-smoke.json
+  --source-json ../output/tmp/pm4-asset-signals-seeded-smoke.json
 ```
 
 ### 6. Synthesize Replacement Placements
