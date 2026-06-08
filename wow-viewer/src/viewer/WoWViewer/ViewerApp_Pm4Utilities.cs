@@ -248,22 +248,20 @@ public partial class ViewerApp
                 ImGui.TextDisabled($"MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8} Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
                 if (debugInfo.DistinctTypeFlags != 0)
                 {
-                    List<string> typeFlagLabels = [];
+                    var tf = new List<string>();
                     for (int bit = 1; bit < 32; bit++)
-                    {
                         if ((debugInfo.DistinctTypeFlags & (1u << bit)) != 0)
-                        {
-                            string label = bit switch
-                            {
-                                0x03 => "m2-top(0x03)",
-                                0x10 => "interior-floor(0x10)",
-                                0x12 => "exterior-solid(0x12)",
-                                _ => $"0x{bit:X2}",
-                            };
-                            typeFlagLabels.Add(label);
-                        }
-                    }
-                    ImGui.TextDisabled($"TypeFlags: {string.Join(", ", typeFlagLabels)}");
+                            tf.Add(bit switch { 0x03 => "m2-top", 0x10 => "floor-int", 0x12 => "ext-solid", _ => $"0x{bit:X2}" });
+                    byte gk = debugInfo.DominantGroupKey;
+                    bool match = (debugInfo.DistinctTypeFlags & (1u << gk)) != 0;
+                    string gkl = gk switch { 0x03 => "m2-surf", 0x10 => "floor-int", 0x12 => "ext-solid", 0x13 => "portal-int", _ => $"0x{gk:X2}" };
+                    ImGui.TextDisabled($"GroupKey={gkl} TypeFlags: {string.Join(", ", tf)} {(match ? "MATCH" : "MISMATCH")}");
+                }
+                else
+                {
+                    byte gk = debugInfo.DominantGroupKey;
+                    string gkl = gk switch { 0x03 => "m2-surf", 0x10 => "floor-int", 0x12 => "ext-solid", 0x13 => "portal-int", _ => $"0x{gk:X2}" };
+                    ImGui.TextDisabled($"GroupKey={gkl} TypeFlags: none");
                 }
             }
 
