@@ -73,6 +73,43 @@ public sealed class Pm4AssetMatchScorerTests
         Assert.Equal(Pm4AssetMatchStatus.Ambiguous, result.Candidates[1].Status);
     }
 
+    [Fact]
+    public void ScoreSegment_DurableAssetCorpusPrefersClosestShapeMatch()
+    {
+        Pm4BuiltObjectSegment segment = CreateSegment(
+            ck24Type: 0x42,
+            boundsMin: new Vector3(0f, 0f, 0f),
+            boundsMax: new Vector3(12f, 6f, 8f),
+            anchorPlanarPoint: new Vector2(6f, 3f));
+
+        IReadOnlyList<Pm4AssetReferenceSignalRecord> assets =
+        [
+            CreateAsset(
+                "wmo:build:world/wmo/best.wmo",
+                "world/wmo/best.wmo",
+                "wmo",
+                new Vector3(-6f, -3f, 0f),
+                new Vector3(6f, 3f, 8f),
+                referencePosition: null,
+                tileCoordinates: []),
+            CreateAsset(
+                "wmo:build:world/wmo/bad.wmo",
+                "world/wmo/bad.wmo",
+                "wmo",
+                new Vector3(-20f, -4f, 0f),
+                new Vector3(20f, 4f, 30f),
+                referencePosition: null,
+                tileCoordinates: []),
+        ];
+
+        Pm4SegmentMatchResult result = Pm4AssetMatchScorer.ScoreSegment(segment, assets);
+
+        Assert.Equal(Pm4AssetMatchStatus.Matched, result.Status);
+        Assert.Equal("wmo:build:world/wmo/best.wmo", result.Candidates[0].AssetId);
+        Assert.True(result.Candidates[0].OverallScore > result.Candidates[1].OverallScore);
+        Assert.Contains("sortedSpanScore", result.Candidates[0].ScoreBreakdown.Keys);
+    }
+
     private static Pm4BuiltObjectSegment CreateSegment(
         byte ck24Type,
         Vector3 boundsMin,
@@ -134,7 +171,14 @@ public sealed class Pm4AssetMatchScorerTests
             0f);
     }
 
-    private static Pm4AssetReferenceSignalRecord CreateAsset(string assetId, string assetPath, string assetKind, Vector3 boundsMin, Vector3 boundsMax, Vector3 referencePosition)
+    private static Pm4AssetReferenceSignalRecord CreateAsset(
+        string assetId,
+        string assetPath,
+        string assetKind,
+        Vector3 boundsMin,
+        Vector3 boundsMax,
+        Vector3? referencePosition,
+        IReadOnlyList<string>? tileCoordinates = null)
     {
         Vector3 center = (boundsMin + boundsMax) * 0.5f;
         IReadOnlyList<Vector2> hull =
@@ -150,7 +194,7 @@ public sealed class Pm4AssetMatchScorerTests
             assetPath,
             assetKind,
             "validation-build",
-            ["30_48"],
+            tileCoordinates ?? ["30_48"],
             new Pm4Bounds3(boundsMin, boundsMax),
             center,
             hull,
@@ -159,9 +203,20 @@ public sealed class Pm4AssetMatchScorerTests
             Vector3.Zero,
             1f,
             new Dictionary<string, int>(StringComparer.Ordinal) { [$"assetKind:{assetKind}"] = 1 },
-            new Dictionary<string, double>(StringComparer.Ordinal),
+            new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                ["boundsSpanX"] = boundsMax.X - boundsMin.X,
+                ["boundsSpanY"] = boundsMax.Y - boundsMin.Y,
+                ["boundsSpanZ"] = boundsMax.Z - boundsMin.Z,
+                ["boundsVolume"] = (boundsMax.X - boundsMin.X) * (boundsMax.Y - boundsMin.Y) * (boundsMax.Z - boundsMin.Z),
+                ["footprintDiagonalXY"] = Math.Sqrt(
+                    Math.Pow(boundsMax.X - boundsMin.X, 2d) +
+                    Math.Pow(boundsMax.Y - boundsMin.Y, 2d)),
+            },
             Pm4AssetMatchScorer.CurrentReferenceSignalVersion,
             null,
-            ["validation-placement"]);
+            referencePosition is null
+                ? ["durable-asset-corpus"]
+                : ["validation-placement"]);
     }
 }

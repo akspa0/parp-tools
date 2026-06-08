@@ -1692,6 +1692,9 @@ static void RunPm4(string[] args)
 	case "export-segments":
 		RunPm4ExportSegments(tail);
 		break;
+	case "export-asset-signals":
+		RunPm4ExportAssetSignals(tail);
+		break;
 	case "match-assets":
 		RunPm4MatchAssets(tail);
 		break;
@@ -1761,7 +1764,7 @@ static void RunWmo(string[] args)
 static void RunPm4Match(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
-	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
+string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
 		return;
@@ -1853,6 +1856,7 @@ static void RunPm4MatchAssets(string[] args)
 	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
 	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? assetCorpus = GetOption(args, "--asset-corpus", "-c");
 	string? output = GetOption(args, "--output", "-o");
 	string? maxCandidatesText = GetOption(args, "--max-candidates", "-n");
 	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
@@ -1880,7 +1884,21 @@ static void RunPm4MatchAssets(string[] args)
 		return;
 	}
 
-	if (string.IsNullOrWhiteSpace(archiveRoot))
+	if (!string.IsNullOrWhiteSpace(assetCorpus) && !string.IsNullOrWhiteSpace(placements))
+	{
+		Console.Error.WriteLine("Error: choose either --asset-corpus <report.json> or --placements <tile_obj0.adt>, not both.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!string.IsNullOrWhiteSpace(assetCorpus) && !File.Exists(assetCorpus))
+	{
+		Console.Error.WriteLine($"Error: asset corpus '{assetCorpus}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(assetCorpus) && string.IsNullOrWhiteSpace(archiveRoot))
 	{
 		Console.Error.WriteLine("Error: --archive-root is required for pm4 match-assets so WMO/M2 assets can be read from the staged client.");
 		Environment.ExitCode = 1;
@@ -1894,7 +1912,7 @@ static void RunPm4MatchAssets(string[] args)
 		return;
 	}
 
-	if (string.IsNullOrWhiteSpace(placements))
+	if (string.IsNullOrWhiteSpace(assetCorpus) && string.IsNullOrWhiteSpace(placements))
 	{
 		string fileName = Path.GetFileNameWithoutExtension(input);
 		int lastUnderscore = fileName.LastIndexOf('_');
@@ -1903,7 +1921,7 @@ static void RunPm4MatchAssets(string[] args)
 		placements = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input)) ?? string.Empty, $"{mapName}_{tileX}_{tileY}_obj0.adt");
 	}
 
-	if (!File.Exists(placements))
+	if (string.IsNullOrWhiteSpace(assetCorpus) && !File.Exists(placements))
 	{
 		Console.Error.WriteLine($"Error: placement source '{placements}' does not exist.");
 		Environment.ExitCode = 1;
@@ -1914,9 +1932,21 @@ static void RunPm4MatchAssets(string[] args)
 	{
 		Pm4SegmentExportRun exportRun = Pm4SegmentExportService.Export(input);
 		Pm4SegmentExportFile file = AssertSinglePm4ExportFile(exportRun, input);
-		Pm4AssetReferenceBuildResult assetBuild = Pm4AssetReferenceSupport.BuildFromPlacements(placements, archiveRoot, archiveBootstrapOptions, tileX, tileY);
+		Pm4AssetReferenceBuildResult assetBuild;
+		string assetReferenceSource;
+		if (!string.IsNullOrWhiteSpace(assetCorpus))
+		{
+			assetBuild = Pm4AssetSignalCorpusSupport.LoadFromManifest(assetCorpus);
+			assetReferenceSource = assetCorpus;
+		}
+		else
+		{
+			assetBuild = Pm4AssetReferenceSupport.BuildFromPlacements(placements!, archiveRoot!, archiveBootstrapOptions, tileX, tileY);
+			assetReferenceSource = placements!;
+		}
+
 		IReadOnlyList<Pm4SegmentMatchResult> matchResults = Pm4AssetMatchScorer.ScoreSegments(file.Segments, assetBuild.Assets, maxCandidates);
-		Pm4MatchRunManifest manifest = BuildPm4AssetMatchManifest(exportRun, matchResults, placements, assetBuild.Warnings);
+		Pm4MatchRunManifest manifest = BuildPm4AssetMatchManifest(exportRun, matchResults, assetReferenceSource, assetBuild.Warnings);
 
 		if (!string.IsNullOrWhiteSpace(output))
 		{
@@ -1934,6 +1964,69 @@ static void RunPm4MatchAssets(string[] args)
 		PrintPm4AssetMatchRun(manifest, assetBuild.Assets.Count);
 	}
 	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or DirectoryNotFoundException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
+}
+
+static void RunPm4ExportAssetSignals(string[] args)
+{
+	string? archiveRoot = GetOption(args, "--archive-root", "-r") ?? GetFirstPositionalArgument(args);
+	string? output = GetOption(args, "--output", "-o");
+	string? kind = GetOption(args, "--kind", "-k");
+	string? pathFilter = GetOption(args, "--path-filter", "-f");
+	string? limitText = GetOption(args, "--limit", "-n");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+
+	if (string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!Directory.Exists(archiveRoot))
+	{
+		Console.Error.WriteLine($"Error: archive root '{archiveRoot}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	int? limit = null;
+	if (!string.IsNullOrWhiteSpace(limitText))
+	{
+		if (!int.TryParse(limitText, out int parsedLimit) || parsedLimit <= 0)
+		{
+			Console.Error.WriteLine("Error: --limit must be a positive integer.");
+			Environment.ExitCode = 1;
+			return;
+		}
+
+		limit = parsedLimit;
+	}
+
+	try
+	{
+		Pm4AssetSignalCorpusManifest manifest = Pm4AssetSignalCorpusSupport.BuildFromArchive(archiveRoot, archiveBootstrapOptions, kind, pathFilter, limit);
+
+		if (!string.IsNullOrWhiteSpace(output))
+		{
+			string outputPath = Path.GetFullPath(output);
+			string? directory = Path.GetDirectoryName(outputPath);
+			if (!string.IsNullOrWhiteSpace(directory))
+				Directory.CreateDirectory(directory);
+
+			File.WriteAllText(outputPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+			Console.WriteLine($"Wrote {outputPath}");
+			Console.WriteLine($"Exported {manifest.AssetCount} durable asset signals from {manifest.ClientBuild}.");
+			return;
+		}
+
+		PrintPm4AssetSignalCorpus(manifest);
+	}
+	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or DirectoryNotFoundException or ArgumentOutOfRangeException)
 	{
 		Console.Error.WriteLine($"Error: {ex.Message}");
 		Environment.ExitCode = 1;
@@ -4036,7 +4129,8 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect pm4 inspect --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-segments --input <file.pm4|directory> [--output <report.json>]");
-	Console.WriteLine("  wowviewer-inspect pm4 match-assets --input <file.pm4> --archive-root <staged client dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
+	Console.WriteLine("  wowviewer-inspect pm4 export-asset-signals --archive-root <staged client dir> [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--listfile <listfile.txt>] [--output <corpus.json>]");
+	Console.WriteLine("  wowviewer-inspect pm4 match-assets --input <file.pm4> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 mscn --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 unknowns --input <directory> [--output <report.json>]");
@@ -4187,6 +4281,29 @@ static void PrintPm4SegmentExportRun(Pm4SegmentExportRun exportRun)
 	if (exportRun.Warnings.Count > 0)
 	{
 		foreach (string warning in exportRun.Warnings)
+			Console.WriteLine($"Warning: {warning}");
+	}
+}
+
+static void PrintPm4AssetSignalCorpus(Pm4AssetSignalCorpusManifest manifest)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 durable asset corpus");
+	Console.WriteLine($"Archive root: {manifest.ArchiveRoot}");
+	Console.WriteLine($"Client build: {manifest.ClientBuild}");
+	Console.WriteLine($"RunId: {manifest.RunId}");
+	Console.WriteLine($"Assets: {manifest.AssetCount} warnings={manifest.Warnings.Count}");
+
+	foreach (Pm4AssetReferenceSignalRecord asset in manifest.Assets.Take(12))
+	{
+		Vector3 span = asset.Bounds is null
+			? Vector3.Zero
+			: asset.Bounds.Max - asset.Bounds.Min;
+		Console.WriteLine($"  {asset.AssetKind} {asset.AssetPath} span=({span.X:F1},{span.Y:F1},{span.Z:F1}) area={asset.FootprintArea:F1}");
+	}
+
+	if (manifest.Warnings.Count > 0)
+	{
+		foreach (string warning in manifest.Warnings.Take(12))
 			Console.WriteLine($"Warning: {warning}");
 	}
 }
@@ -4452,7 +4569,8 @@ static void ShowPm4Usage()
 	Console.WriteLine("PM4 commands:");
 	Console.WriteLine("  pm4 inspect --input <file.pm4>");
 	Console.WriteLine("  pm4 export-segments --input <file.pm4|directory> [--output <report.json>]");
-	Console.WriteLine("  pm4 match-assets --input <file.pm4> --archive-root <staged client dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
+	Console.WriteLine("  pm4 export-asset-signals --archive-root <staged client dir> [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--listfile <listfile.txt>] [--output <corpus.json>]");
+	Console.WriteLine("  pm4 match-assets --input <file.pm4> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--listfile <listfile.txt>] [--max-candidates <n>] [--output <report.json>]");
 	Console.WriteLine("  pm4 match --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-matches <n>] [--search-range <units>] [--output <report.json>] [--object-output-dir <directory>]");
 	Console.WriteLine("  pm4 hierarchy --input <file.pm4> [--output <report.json>]");
 	Console.WriteLine("  pm4 linkage --input <directory> [--output <report.json>]");

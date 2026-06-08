@@ -407,12 +407,47 @@
       - `13 passed`
     - `uv run --project wow-viewer/data-harvester python wow-viewer/data-harvester/scripts/train_v18_focus.py normal --help`
 
+- **PM4 durable asset-corpus + missing-ADT match path (2026-06-07)**
+  - first missing-ADT US2 owner now exists in `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/`:
+    - `Pm4AssetSignalCorpusSupport`
+    - `pm4 export-asset-signals`
+    - `pm4 match-assets --asset-corpus <corpus.json>`
+  - current durable identity contract:
+    - asset ids are build-aware and path-based (`<kind>:<build>:<normalized asset path>`)
+    - exported records do not rely on placement `UniqueID`
+    - shape-only scorer path is used when the asset corpus has no world placement anchors
+  - important staged-client correction:
+    - the real 3.3.5 staged client root used for the smoke proof is:
+      - `i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`
+    - the parent `.../3_3_5_12340` directory was only a container and is not the usable archive root
+  - targeted proof passed:
+    - `dotnet build i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug`
+    - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --no-build --filter Pm4AssetMatchScorerTests`
+      - `4 passed`
+    - `dotnet build i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug`
+    - `dotnet i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/bin/Debug/net10.0/WowViewer.Tool.Inspect.dll pm4 export-asset-signals --archive-root "i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft" --listfile i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt --limit 120 --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-asset-signals-smoke.json`
+      - wrote durable asset corpus smoke successfully
+      - exported `102` durable asset signals
+    - `dotnet i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/bin/Debug/net10.0/WowViewer.Tool.Inspect.dll pm4 match-assets --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 --asset-corpus i:/parp/parp-tools/wow-viewer/output/tmp/pm4-asset-signals-smoke.json --max-candidates 8 --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-match-assets-corpus-smoke.json`
+      - wrote missing-ADT match smoke successfully
+      - scored `4110` PM4 segments against `102` durable asset references
+      - current report totals:
+        - `0 matched`
+        - `0 ambiguous`
+        - `4095 unresolved`
+        - `15 ineligible`
+  - current interpretation:
+    - the missing-ADT command path is now real and no longer blocked on `_obj0.adt`
+    - current bounded corpus quality is weak because the first smoke sample is just a limited validated listfile-backed slice, not a focused world-asset corpus
+    - the next improvement should tighten corpus selection/filtering and expand the asset pool before changing placement synthesis architecture
+
 ## Next Likely Steps
 
 - extend the current deterministic export host from JSON report output into the planned Zarr-backed PM4 signal corpus writer
 - add focused report-shape regression coverage for the emitted export manifest
 - validate the current segment identity against known reference tiles before broad automation
-- build the staged-asset Zarr signal corpus and deterministic candidate scorer
+- build the staged-asset Zarr signal corpus and wrap the current JSON durable-corpus contract instead of inventing a second asset identity surface
+- tighten staged-client asset-corpus selection so the missing-ADT matcher scores against relevant world assets instead of a small mostly-character sample
 - keep PM4 grouping/spec docs in sync if segmentation ownership changes again
 - spec `047` follow-ups:
   - launch the documented full height run on `wow-viewer/output/datasets/v18/curation/v18_focus_terrain_v1/` with `--train-bucket-rotation-fraction 0.10`

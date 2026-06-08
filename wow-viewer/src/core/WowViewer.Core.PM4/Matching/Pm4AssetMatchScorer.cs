@@ -130,6 +130,9 @@ public static class Pm4AssetMatchScorer
         if (asset.Bounds is null)
             return null;
 
+        if (IsDurableAssetCorpusRecord(asset))
+            return EvaluateDurableAssetCandidate(segment, asset);
+
         Vector3 referenceCenter = segment.CorrelationState.Center;
         Vector3 candidateCenter = asset.Center;
         Pm4CorrelationMetrics metrics = Pm4CorrelationMath.EvaluateMetrics(
@@ -191,6 +194,96 @@ public static class Pm4AssetMatchScorer
         ];
 
         return new CandidateEvaluation(asset, metrics, anchorPlanarGap, overallScore, scoreBreakdown, rationale);
+    }
+
+    private static CandidateEvaluation? EvaluateDurableAssetCandidate(Pm4BuiltObjectSegment segment, Pm4AssetReferenceSignalRecord asset)
+    {
+        if (segment.Signal.Bounds is null || asset.Bounds is null)
+            return null;
+
+        Vector3 segmentSpan = segment.Signal.Bounds.Max - segment.Signal.Bounds.Min;
+        Vector3 assetSpan = ResolveAssetSpan(asset);
+        if (assetSpan.X <= 0f || assetSpan.Y <= 0f || assetSpan.Z <= 0f)
+            return null;
+
+        float[] sortedSegmentSpans =
+        [
+            segmentSpan.X,
+            segmentSpan.Y,
+            segmentSpan.Z,
+        ];
+        float[] sortedAssetSpans =
+        [
+            assetSpan.X,
+            assetSpan.Y,
+            assetSpan.Z,
+        ];
+        Array.Sort(sortedSegmentSpans);
+        Array.Reverse(sortedSegmentSpans);
+        Array.Sort(sortedAssetSpans);
+        Array.Reverse(sortedAssetSpans);
+
+        double spanScore0 = ScoreRatio(sortedSegmentSpans[0], sortedAssetSpans[0]);
+        double spanScore1 = ScoreRatio(sortedSegmentSpans[1], sortedAssetSpans[1]);
+        double spanScore2 = ScoreRatio(sortedSegmentSpans[2], sortedAssetSpans[2]);
+        double sortedSpanScore = (spanScore0 + spanScore1 + spanScore2) / 3d;
+
+        double segmentDiagonalXY = Math.Sqrt(segmentSpan.X * segmentSpan.X + segmentSpan.Y * segmentSpan.Y);
+        double assetDiagonalXY = ResolveSignal(asset, "footprintDiagonalXY", Math.Sqrt(assetSpan.X * assetSpan.X + assetSpan.Y * assetSpan.Y));
+        double diagonalScore = ScoreRatio(segmentDiagonalXY, assetDiagonalXY);
+
+        double segmentVolume = Math.Max(0d, segmentSpan.X) * Math.Max(0d, segmentSpan.Y) * Math.Max(0d, segmentSpan.Z);
+        double assetVolume = ResolveSignal(asset, "boundsVolume", Math.Max(0d, assetSpan.X) * Math.Max(0d, assetSpan.Y) * Math.Max(0d, assetSpan.Z));
+        double volumeScore = ScoreRatio(segmentVolume, assetVolume);
+
+        double segmentFootprintArea = Math.Max(0d, segment.CorrelationState.FootprintArea);
+        double assetFootprintArea = Math.Max(0d, asset.FootprintArea);
+        double footprintAreaScore = ScoreRatio(segmentFootprintArea, assetFootprintArea);
+
+        double heightScore = ScoreRatio(segmentSpan.Z, assetSpan.Z);
+        double segmentAspect = segmentSpan.Y <= 0f ? 0d : segmentSpan.X / segmentSpan.Y;
+        double assetAspect = assetSpan.Y <= 0f ? 0d : assetSpan.X / assetSpan.Y;
+        double aspectScore = ScoreRatio(segmentAspect, assetAspect);
+
+        Dictionary<string, double> scoreBreakdown = new(StringComparer.Ordinal)
+        {
+            ["sortedSpanScore"] = sortedSpanScore,
+            ["spanXScore"] = ScoreRatio(segmentSpan.X, assetSpan.X),
+            ["spanYScore"] = ScoreRatio(segmentSpan.Y, assetSpan.Y),
+            ["spanZScore"] = heightScore,
+            ["footprintAreaScore"] = footprintAreaScore,
+            ["volumeScore"] = volumeScore,
+            ["footprintDiagonalScore"] = diagonalScore,
+            ["planarAspectScore"] = aspectScore,
+        };
+
+        double overallScore =
+            sortedSpanScore * 0.30d +
+            footprintAreaScore * 0.18d +
+            volumeScore * 0.16d +
+            diagonalScore * 0.14d +
+            heightScore * 0.12d +
+            aspectScore * 0.10d;
+
+        List<string> rationale =
+        [
+            $"sorted span score {sortedSpanScore:F3}",
+            $"footprint area score {footprintAreaScore:F3}",
+            $"volume score {volumeScore:F3}",
+            $"planar diagonal score {diagonalScore:F3}",
+        ];
+
+        Pm4CorrelationMetrics syntheticMetrics = new(
+            0f,
+            0f,
+            0f,
+            (float)sortedSpanScore,
+            (float)volumeScore,
+            (float)diagonalScore,
+            (float)footprintAreaScore,
+            0f);
+
+        return new CandidateEvaluation(asset, syntheticMetrics, float.PositiveInfinity, overallScore, scoreBreakdown, rationale);
     }
 
     private static Pm4AssetMatchStatus ResolveCandidateStatus(
@@ -270,6 +363,41 @@ public static class Pm4AssetMatchScorer
         }
 
         return float.IsFinite(bestDistanceSquared) ? MathF.Sqrt(bestDistanceSquared) : float.PositiveInfinity;
+    }
+
+    private static bool IsDurableAssetCorpusRecord(Pm4AssetReferenceSignalRecord asset)
+    {
+        return asset.ReferencePosition is null
+            && asset.TileCoordinates.Count == 0
+            && asset.ValidationTags?.Contains("durable-asset-corpus", StringComparer.OrdinalIgnoreCase) == true;
+    }
+
+    private static Vector3 ResolveAssetSpan(Pm4AssetReferenceSignalRecord asset)
+    {
+        if (asset.Bounds is null)
+            return Vector3.Zero;
+
+        double spanX = ResolveSignal(asset, "boundsSpanX", asset.Bounds.Max.X - asset.Bounds.Min.X);
+        double spanY = ResolveSignal(asset, "boundsSpanY", asset.Bounds.Max.Y - asset.Bounds.Min.Y);
+        double spanZ = ResolveSignal(asset, "boundsSpanZ", asset.Bounds.Max.Z - asset.Bounds.Min.Z);
+        return new Vector3((float)spanX, (float)spanY, (float)spanZ);
+    }
+
+    private static double ResolveSignal(Pm4AssetReferenceSignalRecord asset, string key, double fallback)
+    {
+        return asset.RenderOrCollisionSignals.TryGetValue(key, out double value) && double.IsFinite(value)
+            ? value
+            : fallback;
+    }
+
+    private static double ScoreRatio(double left, double right)
+    {
+        if (!double.IsFinite(left) || !double.IsFinite(right) || left <= 0d || right <= 0d)
+            return 0d;
+
+        double minimum = Math.Min(left, right);
+        double maximum = Math.Max(left, right);
+        return maximum <= 0d ? 0d : minimum / maximum;
     }
 
     private sealed record CandidateEvaluation(

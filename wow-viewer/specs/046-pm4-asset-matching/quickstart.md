@@ -52,9 +52,19 @@ same contract for larger corpus runs.
 ```powershell
 dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
   pm4 export-asset-signals `
-  --archive-root i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340 `
+  --archive-root "i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft" `
+  --listfile i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt `
+  --limit 120 `
   --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-asset-signals-smoke.json
 ```
+
+Current bounded smoke proof for this command:
+
+- output: `wow-viewer/output/tmp/pm4-asset-signals-smoke.json`
+- current run shape:
+  - `102` durable asset signals exported
+  - staged client root used: `i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`
+  - current bounded sample is biased by the first validated listfile-backed assets, so it proves the non-ADT workflow mechanically but not candidate quality yet
 
 ### 3. Run Durable-Corpus Automated Matching
 
@@ -67,6 +77,15 @@ dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.
   --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-match-assets-corpus-smoke.json
 ```
 
+Current bounded smoke proof for this command:
+
+- output: `wow-viewer/output/tmp/pm4-match-assets-corpus-smoke.json`
+- current run shape:
+  - `4110` PM4 segments scored
+  - `102` durable asset references
+  - `0 matched`, `0 ambiguous`, `4095 unresolved`, `15 ineligible`
+  - this proves the missing-ADT command path runs without `_obj0.adt`; it does not yet prove the bounded corpus is a good candidate pool
+
 ### 4. Run Validation-Tile Matching When Ground Truth Exists
 
 ```powershell
@@ -74,7 +93,7 @@ dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.
   pm4 match-assets `
   --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 `
   --placements i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_0_0_obj0.adt `
-  --archive-root i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340 `
+  --archive-root "i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft" `
   --max-candidates 5 `
   --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-match-assets-validation-smoke.json
 ```
@@ -87,7 +106,7 @@ but it is no longer the primary missing-ADT workflow.
 ```powershell
 cd i:/parp/parp-tools/wow-viewer/data-harvester
 uv run scripts/build_pm4_asset_signal_corpus.py `
-  --client-root ../output/tmp/wowarchive-clients/<build> `
+  --client-root "../output/tmp/wowarchive-clients/<build>/World of Warcraft" `
   --asset-zarr ../output/datasets/pm4_asset_matching/<build>.asset-signals.zarr `
   --source-json ../output/tmp/pm4-asset-signals-smoke.json
 ```

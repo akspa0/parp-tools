@@ -80,11 +80,11 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 
 ### Implementation for User Story 2
 
-- [ ] T018 [US2] Implement staged-client asset signal extraction and durable asset-corpus export in `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/`.
+- [x] T018 [US2] Implement staged-client asset signal extraction and durable asset-corpus export in `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/`.
 - [ ] T019 [P] [US2] Add the follow-on Python/Zarr corpus builder in `wow-viewer/data-harvester/src/harvester/pm4_asset_matching/asset_signal_corpus.py` and `wow-viewer/data-harvester/scripts/build_pm4_asset_signal_corpus.py`.
 - [x] T020 [US2] Implement `Pm4AssetMatchScorer` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` with deterministic score breakdown output.
 - [ ] T021 [US2] Implement a match-report writer in `wow-viewer/src/tools-shared/WowViewer.Tools.Shared/Pm4Matching/`.
-- [ ] T022 [US2] Extend `pm4 match-assets` in `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` so it can score against exported durable asset corpora first and keep `_obj0.adt` placements as validation mode only.
+- [x] T022 [US2] Extend `pm4 match-assets` in `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` so it can score against exported durable asset corpora first and keep `_obj0.adt` placements as validation mode only.
 
 **Checkpoint**: Automated ranked WMO/M2 candidate lists replace the old manual matching workflow for validation-scale runs.
 
@@ -136,7 +136,7 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 - [ ] T032 [P] Update `wow-viewer/docs/research/004-pm4-format-research/spec.md` with any new bounded evidence contracts that the export/matching lane makes authoritative.
 - [ ] T033 [P] Update `wow-viewer/docs/architecture/pm4-region-aware-object-grouping-2026-05-21.md` or successor notes if the automation lane changes the accepted stitch/segmentation owner.
 - [ ] T034 [P] Add schema validation for emitted match reports against `specs/046-pm4-asset-matching/contracts/pm4-asset-match-report.schema.json`.
-- [ ] T035 Run focused PM4 tests, inspect-tool builds, and bounded real-data validation commands from `quickstart.md`.
+- [x] T035 Run focused PM4 tests, inspect-tool builds, and bounded real-data validation commands from `quickstart.md`.
 - [x] T036 Update `gillijimproject_refactor/memory-bank/activeContext.md` and `progress.md` with the landed owner, proof surfaces, and remaining gaps.
 
 ---

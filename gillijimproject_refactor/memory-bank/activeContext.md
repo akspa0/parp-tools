@@ -45,22 +45,34 @@
 - first `046` US2 scoring slice now also lives in the same owner surface:
   - `Pm4AssetMatchScorer` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`
   - synthetic scorer tests cover matched / ambiguous / ineligible status handling
-  - `WowViewer.Tool.Inspect pm4 match-assets --input <file.pm4> --archive-root <staged client> [--placements <tile_obj0.adt>] [--max-candidates <n>] [--output <report.json>]` is now live
+  - `WowViewer.Tool.Inspect pm4 match-assets --input <file.pm4> [--asset-corpus <corpus.json> | --archive-root <staged client> [--placements <tile_obj0.adt>]] [--max-candidates <n>] [--output <report.json>]` is now live
   - the current inspect-side asset-reference builder is validation-tile scoped:
     - reads one `_obj0.adt`
     - resolves WMO/M2 bounds from staged assets when possible
     - falls back to placement bounds when asset geometry cannot be opened
+  - the first missing-ADT durable-corpus path now also exists:
+    - `WowViewer.Tool.Inspect pm4 export-asset-signals --archive-root <staged client root> [--kind all|wmo|m2] [--path-filter <text>] [--limit <n>] [--output <corpus.json>]`
+    - current proof used the actual staged client root `i:/parp/parp-tools/output/tmp/wowarchive-clients/3_3_5_12340/World of Warcraft`
+    - current bounded smoke exported `102` durable asset records to `wow-viewer/output/tmp/pm4-asset-signals-smoke.json`
+    - current bounded missing-ADT smoke scored `4110` PM4 segments against that corpus with no `_obj0.adt` file:
+      - `0 matched`
+      - `0 ambiguous`
+      - `4095 unresolved`
+      - `15 ineligible`
+    - current gap is candidate quality and corpus breadth, not command ownership
 - current proof owner for `046` is now library + inspect CLI:
   - focused tests cover deterministic IDs on the real `development_00_00.pm4` tile
   - synthetic tests cover zero-CK24 connectivity splitting and low16 reuse flags
-  - synthetic scorer tests now cover deterministic ranking plus unresolved and ambiguous states
+  - synthetic scorer tests now cover deterministic ranking plus unresolved and ambiguous states, including durable-corpus shape-only scoring
   - bounded export-service tests cover single-file and copied-directory stability
   - bounded real-data CLI smoke wrote `wow-viewer/output/tmp/pm4-export-segments-smoke.json` from `development_00_00.pm4`
   - bounded real-data CLI smoke now also wrote:
     - `wow-viewer/output/tmp/pm4-export-segments-rich-smoke.json`
     - `wow-viewer/output/tmp/pm4-match-assets-smoke.json`
+    - `wow-viewer/output/tmp/pm4-asset-signals-smoke.json`
+    - `wow-viewer/output/tmp/pm4-match-assets-corpus-smoke.json`
   - current validation match smoke scored `4110` PM4 segments against `25` `_obj0.adt`-backed WMO/M2 references
-  - directory-scale corpus export is now CLI-owned, but durable Zarr writing and corpus-scale asset-reference writing are still open
+  - directory-scale corpus export is now CLI-owned, but durable Zarr writing and stronger corpus filtering/ranking are still open
 - broken manual PM4 matching UI is explicitly not the workflow owner for that lane.
 
 ## Viewer Shell / UI
