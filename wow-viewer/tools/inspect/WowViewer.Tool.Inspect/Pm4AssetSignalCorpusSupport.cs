@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
@@ -20,6 +21,11 @@ internal sealed record Pm4AssetSignalCorpusManifest(
     int AssetCount,
     IReadOnlyList<Pm4AssetReferenceSignalRecord> Assets,
     IReadOnlyList<string> Warnings);
+
+internal sealed record SubPartBounds(
+    int Flags,
+    double MinX, double MinY, double MinZ,
+    double MaxX, double MaxY, double MaxZ);
 
 internal static class Pm4AssetSignalCorpusSupport
 {
@@ -107,7 +113,7 @@ internal static class Pm4AssetSignalCorpusSupport
         if (IsWmoRootPath(assetPath))
         {
             WmoSummary summary = WmoSummaryReader.Read(stream, assetPath);
-            return BuildWmoAssetReference(assetPath, buildLabel, summary);
+            return BuildWmoAssetReference(assetPath, buildLabel, summary, bytes);
         }
 
         MdxSummary mdxSummary = MdxSummaryReader.Read(stream, assetPath);
@@ -117,7 +123,8 @@ internal static class Pm4AssetSignalCorpusSupport
     private static Pm4AssetReferenceSignalRecord BuildWmoAssetReference(
         string assetPath,
         string buildLabel,
-        WmoSummary summary)
+        WmoSummary summary,
+        byte[] rawFileBytes)
     {
         Vector3 boundsMin = summary.BoundsMin;
         Vector3 boundsMax = summary.BoundsMax;
@@ -131,6 +138,11 @@ internal static class Pm4AssetSignalCorpusSupport
         ValidateFiniteSignal(assetPath, "footprintArea", footprintArea);
         ValidateFiniteSignal(assetPath, "diagonalXY", diagonalXY);
         ValidateFiniteSignal(assetPath, "volume", volume);
+
+        IReadOnlyList<SubPartBounds>? groupBounds = ExtractWmoGroupBoundsViaReader(rawFileBytes, assetPath);
+        string? groupBoundsJson = groupBounds is { Count: > 0 }
+            ? JsonSerializer.Serialize(groupBounds)
+            : null;
 
         return new Pm4AssetReferenceSignalRecord(
             BuildAssetId("wmo", buildLabel, assetPath),
@@ -149,6 +161,7 @@ internal static class Pm4AssetSignalCorpusSupport
             {
                 ["assetKind:wmo"] = 1,
                 ["wmo:hasSkybox"] = summary.HasSkybox ? 1 : 0,
+                ["wmoGroupCount"] = summary.GroupInfoCount,
             },
             new Dictionary<string, double>(StringComparer.Ordinal)
             {
@@ -157,12 +170,11 @@ internal static class Pm4AssetSignalCorpusSupport
                 ["boundsSpanZ"] = RequireFiniteSignal(assetPath, "boundsSpanZ", span.Z),
                 ["boundsVolume"] = RequireFiniteSignal(assetPath, "boundsVolume", volume),
                 ["footprintDiagonalXY"] = RequireFiniteSignal(assetPath, "footprintDiagonalXY", diagonalXY),
-                ["wmoGroupCount"] = summary.GroupInfoCount,
                 ["wmoMaterialCount"] = summary.MaterialEntryCount,
                 ["wmoDoodadPlacementCount"] = summary.DoodadPlacementEntryCount,
-            },
+                },
             Pm4AssetMatchScorer.CurrentReferenceSignalVersion,
-            null,
+            groupBoundsJson is not null ? $"subPartBounds:{groupBoundsJson}" : null,
             ["durable-asset-corpus"]);
     }
 
@@ -186,6 +198,11 @@ internal static class Pm4AssetSignalCorpusSupport
         ValidateFiniteSignal(assetPath, "footprintArea", footprintArea);
         ValidateFiniteSignal(assetPath, "diagonalXY", diagonalXY);
         ValidateFiniteSignal(assetPath, "volume", volume);
+
+        IReadOnlyList<SubPartBounds> geosetBounds = ExtractM2GeosetBounds(summary);
+        string? geosetBoundsJson = geosetBounds.Count > 0
+            ? JsonSerializer.Serialize(geosetBounds)
+            : null;
 
         return new Pm4AssetReferenceSignalRecord(
             BuildAssetId("m2", buildLabel, assetPath),
@@ -218,7 +235,7 @@ internal static class Pm4AssetSignalCorpusSupport
                 ["m2TextureCount"] = summary.TextureCount,
             },
             Pm4AssetMatchScorer.CurrentReferenceSignalVersion,
-            null,
+            geosetBoundsJson is not null ? $"subPartBounds:{geosetBoundsJson}" : null,
             ["durable-asset-corpus"]);
     }
 
@@ -381,6 +398,80 @@ internal static class Pm4AssetSignalCorpusSupport
             return 3;
 
         return 4;
+    }
+
+    private static IReadOnlyList<SubPartBounds> ExtractWmoGroupBoundsViaReader(byte[] rawFileBytes, string assetPath)
+    {
+        try
+        {
+            using MemoryStream stream = new(rawFileBytes, writable: false);
+            WmoGroupInfoSummary groupInfo = WmoGroupInfoSummaryReader.Read(stream, assetPath);
+            if (groupInfo.EntryCount == 0)
+                return [];
+
+            List<SubPartBounds> bounds = new(groupInfo.EntryCount);
+            foreach (WmoGroupInfoEntry entry in groupInfo.Entries)
+            {
+                if (!float.IsFinite(entry.BoundsMin.X) || !float.IsFinite(entry.BoundsMin.Y) ||
+                    !float.IsFinite(entry.BoundsMin.Z) || !float.IsFinite(entry.BoundsMax.X) ||
+                    !float.IsFinite(entry.BoundsMax.Y) || !float.IsFinite(entry.BoundsMax.Z))
+                    continue;
+
+                bounds.Add(new SubPartBounds(
+                    (int)entry.Flags,
+                    entry.BoundsMin.X, entry.BoundsMin.Y, entry.BoundsMin.Z,
+                    entry.BoundsMax.X, entry.BoundsMax.Y, entry.BoundsMax.Z));
+            }
+            return bounds;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<SubPartBounds> ExtractM2GeosetBounds(MdxSummary summary)
+    {
+        if (summary.GeosetCount == 0)
+            return [];
+
+        List<SubPartBounds> bounds = new(summary.GeosetCount);
+        foreach (MdxGeosetSummary geoset in summary.Geosets)
+        {
+            if (!geoset.BoundsMin.HasValue || !geoset.BoundsMax.HasValue)
+                continue;
+
+            Vector3 min = geoset.BoundsMin.Value;
+            Vector3 max = geoset.BoundsMax.Value;
+            if (!float.IsFinite(min.X) || !float.IsFinite(min.Y) || !float.IsFinite(min.Z) ||
+                !float.IsFinite(max.X) || !float.IsFinite(max.Y) || !float.IsFinite(max.Z))
+                continue;
+
+            bounds.Add(new SubPartBounds(
+                (int)geoset.Flags,
+                min.X, min.Y, min.Z,
+                max.X, max.Y, max.Z));
+        }
+
+        return bounds;
+    }
+
+    private static int FindChunkOffset(byte[] data, string fourCc)
+    {
+        if (data.Length < 8)
+            return -1;
+
+        uint target = BinaryPrimitives.ReadUInt32LittleEndian(
+            Encoding.ASCII.GetBytes(fourCc).AsSpan());
+
+        for (int i = 0; i <= data.Length - 8; i++)
+        {
+            uint sig = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(i, 4));
+            if (sig == target)
+                return i;
+        }
+
+        return -1;
     }
 
     private static bool IsFinite(Vector3 value)

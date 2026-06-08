@@ -41,6 +41,7 @@ public static class WmoGroupInfoSummaryReader
         int maxNameOffset = 0;
         Vector3 boundsMin = Vector3.Zero;
         Vector3 boundsMax = Vector3.Zero;
+        List<WmoGroupInfoEntry> entries = new(entryCount);
 
         if (entryCount > 0)
         {
@@ -69,6 +70,8 @@ public static class WmoGroupInfoSummaryReader
             maxNameOffset = Math.Max(maxNameOffset, nameOffset);
             boundsMin = Vector3.Min(boundsMin, groupBoundsMin);
             boundsMax = Vector3.Max(boundsMax, groupBoundsMax);
+
+            entries.Add(new WmoGroupInfoEntry(flags, groupBoundsMin, groupBoundsMax, nameOffset));
         }
 
         if (entryCount == 0)
@@ -85,7 +88,8 @@ public static class WmoGroupInfoSummaryReader
             minNameOffset,
             maxNameOffset,
             boundsMin,
-            boundsMax);
+            boundsMax,
+            entries);
     }
 
     private static Vector3 ReadVector3(ReadOnlySpan<byte> bytes)

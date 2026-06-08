@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json;
 using WowViewer.Core.PM4.Models;
 using WowViewer.Core.PM4.Services;
 
@@ -150,15 +151,37 @@ public static class Pm4AssetMatchScorer
         // 1. TypeFlags profile match score
         double profileScore = profileMatchesExpectedKind ? 1.0 : (hasTypeFlagsData ? 0.3 : 0.5);
 
-        // 2. Per-type-class overlap against asset bounds
+        // 2. Per-type-class overlap against asset bounds (and sub-part bounds)
         double typedOverlapScore = 0;
         int typedCount = 0;
+
+        // Try to parse sub-part bounds from asset corpus
+        IReadOnlyList<SubPartBounds>? subParts = TryParseSubPartBounds(asset);
+
         foreach (KeyValuePair<byte, Pm4Bounds3> kv in typedBounds)
         {
             if (kv.Value.Min == kv.Value.Max)
                 continue;
 
             double overlap = ComputeBoundsOverlapRatio(kv.Value, asset.Bounds);
+
+            // Also check against sub-part bounds if available
+            if (subParts is { Count: > 0 })
+            {
+                double bestPartOverlap = 0;
+                foreach (SubPartBounds part in subParts)
+                {
+                    Pm4Bounds3 partBounds = new(
+                        new Vector3((float)part.MinX, (float)part.MinY, (float)part.MinZ),
+                        new Vector3((float)part.MaxX, (float)part.MaxY, (float)part.MaxZ));
+                    double partOverlap = ComputeBoundsOverlapRatio(kv.Value, partBounds);
+                    if (partOverlap > bestPartOverlap)
+                        bestPartOverlap = partOverlap;
+                }
+                // Blend: 40% overall overlap + 60% best-sub-part overlap
+                overlap = overlap * 0.4 + bestPartOverlap * 0.6;
+            }
+
             typedOverlapScore += overlap;
             typedCount++;
         }
@@ -330,6 +353,31 @@ public static class Pm4AssetMatchScorer
             _ => null,
         };
     }
+
+    private static IReadOnlyList<SubPartBounds>? TryParseSubPartBounds(Pm4AssetReferenceSignalRecord asset)
+    {
+        if (string.IsNullOrWhiteSpace(asset.SignalStoreRow))
+            return null;
+
+        const string prefix = "subPartBounds:";
+        if (!asset.SignalStoreRow.StartsWith(prefix, StringComparison.Ordinal))
+            return null;
+
+        string json = asset.SignalStoreRow[prefix.Length..];
+        try
+        {
+            return JsonSerializer.Deserialize<List<SubPartBounds>>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed record SubPartBounds(
+        int Flags,
+        double MinX, double MinY, double MinZ,
+        double MaxX, double MaxY, double MaxZ);
 
     private static double ScoreDistance(double distance, double scale)
     {
