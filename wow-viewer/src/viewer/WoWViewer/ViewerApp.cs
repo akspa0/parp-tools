@@ -1757,10 +1757,6 @@ void main() {
                 ImGui.Separator();
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
-                ImGui.MenuItem("Minimap", "", ref _showMinimapWindow);
-                ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
-                ImGui.MenuItem("Perf", "", ref _showPerfWindow);
-                ImGui.MenuItem("Render Quality", "", ref _showRenderQualityWindow);
                 ImGui.Separator();
                 if (ImGui.MenuItem("Asset Catalog"))
                 {
@@ -1778,50 +1774,56 @@ void main() {
 
             if (ImGui.BeginMenu("Tools"))
             {
-                bool hasTerrainScene = _terrainManager != null || _vlmTerrainManager != null;
-                bool hasTerrainRenderer = _terrainManager?.Renderer != null || _vlmTerrainManager?.Renderer != null;
-                bool hasWorldScene = _worldScene != null;
+                bool hasTerr = _terrainManager != null || _vlmTerrainManager != null;
+                bool hasWorld = _worldScene != null;
+                bool hasTerrRend = _terrainManager?.Renderer != null || _vlmTerrainManager?.Renderer != null;
 
-                if (ImGui.MenuItem("Terrain Tools", "", _showTerrainToolsWindow, hasTerrainScene))
-                    _showTerrainToolsWindow = !_showTerrainToolsWindow;
-
-                if (ImGui.MenuItem("Chunk Clipboard", "", _showChunkClipboardWindow, hasTerrainRenderer))
-                    _showChunkClipboardWindow = !_showChunkClipboardWindow;
-
-                if (ImGui.MenuItem("Terrain Analysis", "", _showTerrainAnalysisWindow, hasTerrainScene))
-                    _showTerrainAnalysisWindow = !_showTerrainAnalysisWindow;
-
-                if (ImGui.MenuItem("MCNK Explorer", "", _showMcnkExplorerWindow, hasTerrainScene))
-                    _showMcnkExplorerWindow = !_showMcnkExplorerWindow;
-
-                if (ImGui.MenuItem("PM4 Workbench", "", false, hasWorldScene))
+                ImGui.TextDisabled("Scene");
+                if (ImGui.MenuItem("Scene Inspector", "", ref _showRightSidebar))
+                    _forceApplyShellPanelLayout = true;
+                if (ImGui.MenuItem("PM4 Workbench", "", false, hasWorld))
                     OpenPm4Workbench(Pm4WorkbenchTab.Selection);
-
-                if (ImGui.MenuItem("PM4 Correlation", "", false, hasWorldScene))
-                    OpenPm4Workbench(Pm4WorkbenchTab.Correlation);
-
+                if (ImGui.MenuItem("PM4 Info", "", ref _showRightSidebar))
+                    _forceApplyShellPanelLayout = true;
                 ImGui.Separator();
 
-                if (ImGui.MenuItem("UniqueId Archaeology", "", _showUniqueIdArchaeologyWindow, hasWorldScene))
-                    _showUniqueIdArchaeologyWindow = !_showUniqueIdArchaeologyWindow;
-
-                if (ImGui.MenuItem("Taxi Panel", "", _showTaxiWindow, hasWorldScene))
-                    _showTaxiWindow = !_showTaxiWindow;
-
-                if (ImGui.MenuItem("Weak Signal Amplifier", "", _showWeakSignalWindow, hasTerrainScene))
-                    _showWeakSignalWindow = !_showWeakSignalWindow;
-
+                ImGui.TextDisabled("PM4");
+                if (ImGui.MenuItem("PM4 Object Match", "", ref _showPm4ObjectMatchWindow, hasWorld))
+                    _showPm4ObjectMatchWindow = _showPm4ObjectMatchWindow;
+                if (ImGui.MenuItem("PM4 Correlation", "", ref _showPm4WmoCorrelationWindow, hasWorld))
+                    _showPm4WmoCorrelationWindow = _showPm4WmoCorrelationWindow;
+                if (ImGui.MenuItem("PM4 Alignment", "", ref _showPm4AlignmentWindow))
+                    _showPm4AlignmentWindow = _showPm4AlignmentWindow;
                 ImGui.Separator();
 
-                if (ImGui.MenuItem("Capture Current View (No UI)"))
-                    QueueCurrentCameraCapture(includeUi: false);
+                ImGui.TextDisabled("Terrain");
+                if (ImGui.MenuItem("Terrain Tools", "", ref _showTerrainToolsWindow, hasTerr))
+                    _showTerrainToolsWindow = _showTerrainToolsWindow;
+                if (ImGui.MenuItem("Chunk Clipboard", "", ref _showChunkClipboardWindow, hasTerrRend))
+                    _showChunkClipboardWindow = _showChunkClipboardWindow;
+                if (ImGui.MenuItem("Terrain Analysis", "", ref _showTerrainAnalysisWindow, hasTerr))
+                    _showTerrainAnalysisWindow = _showTerrainAnalysisWindow;
+                if (ImGui.MenuItem("MCNK Explorer", "", ref _showMcnkExplorerWindow, hasTerr))
+                    _showMcnkExplorerWindow = _showMcnkExplorerWindow;
+                if (ImGui.MenuItem("Weak Signal Amplifier", "", ref _showWeakSignalWindow, hasTerr))
+                    _showWeakSignalWindow = _showWeakSignalWindow;
+                ImGui.Separator();
 
-                if (ImGui.MenuItem("Capture Current View (With UI)"))
-                    QueueCurrentCameraCapture(includeUi: true);
-
+                ImGui.TextDisabled("Utilities");
+                if (ImGui.MenuItem("UniqueId Archaeology", "", ref _showUniqueIdArchaeologyWindow, hasWorld))
+                    _showUniqueIdArchaeologyWindow = _showUniqueIdArchaeologyWindow;
+                if (ImGui.MenuItem("Taxi Panel", "", ref _showTaxiWindow, hasWorld))
+                    _showTaxiWindow = _showTaxiWindow;
+                if (ImGui.MenuItem("Minimap", "", ref _showMinimapWindow))
+                    _showMinimapWindow = _showMinimapWindow;
+                if (ImGui.MenuItem("Log Viewer", "", ref _showLogViewer))
+                    _showLogViewer = _showLogViewer;
+                if (ImGui.MenuItem("Perf", "", ref _showPerfWindow))
+                    _showPerfWindow = _showPerfWindow;
+                if (ImGui.MenuItem("Render Quality", "", ref _showRenderQualityWindow))
+                    _showRenderQualityWindow = _showRenderQualityWindow;
                 if (ImGui.MenuItem("Capture Automation..."))
                     _showCaptureAutomationWindow = true;
-
                 ImGui.Separator();
 
                 if (ImGui.BeginMenu("Offline Data / Conversion"))
