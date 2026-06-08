@@ -349,6 +349,7 @@ public partial class ViewerApp : IDisposable
     private DockPanelState _modelInfoDockState;
     private DockPanelState _minimapDockState;
     private DockPanelState _workspaceBarsDockState;
+    private DockPanelState _sceneInspectorDockState;
     private readonly Dictionary<ShellPanelId, SavedShellPanelLayout> _savedShellPanelLayouts = new();
     private readonly HashSet<ShellPanelId> _pendingShellPanelLayoutRestore = new();
     private bool _forceApplyShellPanelLayout;
@@ -13809,6 +13810,8 @@ void main() {
                 return ref _minimapDockState;
             case ShellPanelId.WorkspaceBars:
                 return ref _workspaceBarsDockState;
+            case ShellPanelId.SceneInspector:
+                return ref _sceneInspectorDockState;
             default:
                 throw new ArgumentOutOfRangeException(nameof(panelId), panelId, null);
         }
@@ -14097,6 +14100,7 @@ void main() {
             || panelId == ShellPanelId.Minimap;
         bool isTopQuadrant = panelId == ShellPanelId.Navigator
             || panelId == ShellPanelId.Inspector
+            || panelId == ShellPanelId.SceneInspector
             || panelId == ShellPanelId.RuntimeStats
             || panelId == ShellPanelId.ModelInfo;
 
