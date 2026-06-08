@@ -120,18 +120,32 @@ public partial class ViewerApp
             return;
         }
 
+        // Keyboard shortcuts: number keys 1-9 select by index
+        for (int keyIndex = 0; keyIndex < Math.Min(_clickSelectionCandidates.Count, 9); keyIndex++)
+        {
+            if (ImGui.IsKeyPressed((ImGuiKey)((int)ImGuiKey._1 + keyIndex)))
+            {
+                Action apply = _clickSelectionCandidates[keyIndex].Apply;
+                ClearPendingClickSelection();
+                apply();
+                return;
+            }
+        }
+
         Vector2 displaySize = ImGui.GetIO().DisplaySize;
         Vector2 overlayPos = new(
-            MathF.Min(_clickSelectionOverlayPosition.X, MathF.Max(8f, displaySize.X - 430f)),
-            MathF.Min(_clickSelectionOverlayPosition.Y, MathF.Max(8f, displaySize.Y - 420f)));
+            MathF.Min(_clickSelectionOverlayPosition.X, MathF.Max(8f, displaySize.X - 480f)),
+            MathF.Min(_clickSelectionOverlayPosition.Y, MathF.Max(8f, displaySize.Y - 460f)));
 
         ImGui.SetNextWindowPos(overlayPos, ImGuiCond.Always);
+        ImGui.SetNextWindowSizeConstraints(new Vector2(320f, 80f), new Vector2(480f, 600f));
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(16f, 14f));
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 2f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 4f);
         ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.04f, 0.05f, 0.09f, 0.985f));
         ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(0.95f, 0.79f, 0.28f, 0.98f));
         ImGui.PushStyleColor(ImGuiCol.Separator, new Vector4(0.88f, 0.73f, 0.22f, 0.82f));
+        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(0.28f, 0.40f, 0.72f, 0.70f));
 
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration
             | ImGuiWindowFlags.AlwaysAutoResize
@@ -145,39 +159,39 @@ public partial class ViewerApp
         if (!ImGui.Begin("##ClickSelectionOverlay", flags))
         {
             ImGui.End();
-            ImGui.PopStyleColor(3);
+            ImGui.PopStyleColor(4);
             ImGui.PopStyleVar(3);
             return;
         }
 
-        ImGui.SetWindowFontScale(1.16f);
+        ImGui.SetWindowFontScale(1.20f);
         ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.38f, 1.0f), "Choose Target");
-        ImGui.SetWindowFontScale(1.0f);
-        ImGui.TextColored(new Vector4(0.82f, 0.86f, 0.94f, 1.0f), "Multiple objects overlap under this click.");
-        ImGui.TextDisabled("Pick the exact thing you meant to select.");
+        ImGui.SetWindowFontScale(0.85f);
+        ImGui.TextColored(new Vector4(0.82f, 0.86f, 0.94f, 1.0f), $"Multiple objects under cursor. Click or press 1-{Math.Min(_clickSelectionCandidates.Count, 9)} to pick.");
         ImGui.Separator();
 
         for (int i = 0; i < _clickSelectionCandidates.Count; i++)
         {
             ClickSelectionCandidate candidate = _clickSelectionCandidates[i];
-            if (ImGui.Selectable($"{candidate.Title}##click_pick_{i}", false, ImGuiSelectableFlags.None, new Vector2(360f, 0f)))
+            string prefix = i < 9 ? $"[{i + 1}] " : "";
+            if (ImGui.Selectable($"{prefix}{candidate.Title}##click_pick_{i}", false, ImGuiSelectableFlags.None, new Vector2(400f, 0f)))
             {
                 pendingAction = candidate.Apply;
                 break;
             }
 
             if (!string.IsNullOrWhiteSpace(candidate.Detail))
-                ImGui.TextColored(new Vector4(0.92f, 0.94f, 0.98f, 1.0f), candidate.Detail);
+                ImGui.TextColored(new Vector4(0.92f, 0.94f, 0.98f, 1.0f), $"  {candidate.Detail}");
 
             if (!string.IsNullOrWhiteSpace(candidate.SecondaryDetail))
             {
-                ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 360f);
-                ImGui.TextColored(new Vector4(0.54f, 0.84f, 0.52f, 1.0f), candidate.SecondaryDetail);
+                ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 400f);
+                ImGui.TextColored(new Vector4(0.54f, 0.84f, 0.52f, 1.0f), $"  {candidate.SecondaryDetail}");
                 ImGui.PopTextWrapPos();
             }
 
             if (candidate.Distance.HasValue)
-                ImGui.TextDisabled($"Hit distance: {candidate.Distance.Value:F1}");
+                ImGui.TextDisabled($"  Hit: {candidate.Distance.Value:F1}");
 
             if (i + 1 < _clickSelectionCandidates.Count)
                 ImGui.Separator();
@@ -190,14 +204,11 @@ public partial class ViewerApp
         }
 
         ImGui.Spacing();
-        if (ImGui.Button("Cancel"))
+        if (ImGui.Button("Cancel") || ImGui.IsKeyPressed(ImGuiKey.Escape))
             shouldClose = true;
 
-        ImGui.SameLine();
-        ImGui.TextDisabled("Esc closes this chooser.");
-
         ImGui.End();
-        ImGui.PopStyleColor(3);
+        ImGui.PopStyleColor(4);
         ImGui.PopStyleVar(3);
 
         if (pendingAction != null)

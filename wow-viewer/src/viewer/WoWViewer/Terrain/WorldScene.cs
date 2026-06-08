@@ -8778,11 +8778,14 @@ public class WorldScene : ISceneRenderer
                         _gl.Disable(EnableCap.Blend);
                     }
 
+                    bool isTypeFlagsMode = _pm4ColorMode == Pm4OverlayColorMode.TypeFlags;
                     bool hasPm4LineGeometry = _pm4VisibleLineCount > 0
                         || _pm4VisiblePositionRefCount > 0
                         || (_showPm4ObjectCentroids && _pm4VisibleObjectCount > 0);
                     if (hasPm4LineGeometry)
                     {
+                        if (isTypeFlagsMode)
+                            _gl.LineWidth(3.0f);
                         if (pm4IgnoreDepth)
                         {
                             _gl.Disable(EnableCap.DepthTest);
@@ -8795,6 +8798,8 @@ public class WorldScene : ISceneRenderer
 
                         _gl.DepthMask(false);
                         _bbRenderer.FlushBatch(view, proj);
+                        if (isTypeFlagsMode)
+                            _gl.LineWidth(1.0f);
                     }
 
                     // Reset default state and clear PM4 primitives so other overlays use their normal pass.
@@ -10386,8 +10391,8 @@ public class WorldScene : ISceneRenderer
             Pm4OverlayColorMode.AttributeMask => ColorFromSeed(obj.DominantAttributeMask),
             Pm4OverlayColorMode.Height => ColorFromHeight(obj.Center.Z),
             Pm4OverlayColorMode.TypeFlags => obj.DistinctTypeFlags != 0
-                ? ColorFromSeed(obj.DistinctTypeFlags)
-                : new Vector3(0.3f, 0.3f, 0.3f),
+                ? GetTypeFlagColor(PickPrimaryTypeFlag(obj.DistinctTypeFlags))
+                : new Vector3(0.25f, 0.25f, 0.25f),
             _ => GetPm4TypeColor(obj.Ck24Type)
         };
     }
@@ -10528,6 +10533,39 @@ public class WorldScene : ISceneRenderer
                         "Continuous gradient by PM4 object center height.",
                         entries.Count,
                         entries);
+                }
+
+                if (_pm4ColorMode == Pm4OverlayColorMode.TypeFlags)
+                {
+                    var bitCounts = new Dictionary<uint, int>();
+                    foreach (((int tileX, int tileY) _, Pm4OverlayObject obj) in EnumerateVisiblePm4OverlayObjects())
+                    {
+                        uint mask = obj.DistinctTypeFlags;
+                        for (int bit = 1; bit < 32; bit++)
+                        {
+                            if ((mask & (1u << bit)) != 0)
+                            {
+                                uint key = (uint)bit;
+                                bitCounts.TryGetValue(key, out int existing);
+                                bitCounts[key] = existing + 1;
+                            }
+                        }
+                    }
+                    List<Pm4ColorLegendEntry> typeFlagEntries = bitCounts
+                        .OrderByDescending(static entry => entry.Value)
+                        .Take(maxEntries)
+                        .Select(entry => new Pm4ColorLegendEntry(
+                            FormatPm4LegendLabel(_pm4ColorMode, entry.Key),
+                            GetTypeFlagColor((byte)entry.Key),
+                            entry.Value,
+                            false))
+                        .ToList();
+                    return new Pm4ColorLegendInfo(
+                        _pm4ColorMode,
+                        isContinuous: false,
+                        "Each swatch is one MSLK.TypeFlags value present in visible objects.",
+                        bitCounts.Count,
+                        typeFlagEntries);
                 }
 
                 if (_pm4ColorMode == Pm4OverlayColorMode.Tile)
@@ -10798,18 +10836,19 @@ public class WorldScene : ISceneRenderer
                     .ToList();
             }
 
-            private static uint GetPm4LegendValue(Pm4OverlayColorMode mode, Pm4OverlayObject obj)
-            {
-                return mode switch
-                {
-                    Pm4OverlayColorMode.Ck24ObjectId => obj.Ck24ObjectId,
-                    Pm4OverlayColorMode.Ck24Key => obj.Ck24,
-                    Pm4OverlayColorMode.MshdRegionId => obj.MshdRegionId,
-                    Pm4OverlayColorMode.GroupKey => obj.DominantGroupKey,
-                    Pm4OverlayColorMode.AttributeMask => obj.DominantAttributeMask,
-                    _ => obj.Ck24Type
-                };
-            }
+    private static uint GetPm4LegendValue(Pm4OverlayColorMode mode, Pm4OverlayObject obj)
+    {
+        return mode switch
+        {
+            Pm4OverlayColorMode.Ck24ObjectId => obj.Ck24ObjectId,
+            Pm4OverlayColorMode.Ck24Key      => obj.Ck24,
+            Pm4OverlayColorMode.MshdRegionId => obj.MshdRegionId,
+            Pm4OverlayColorMode.GroupKey     => obj.DominantGroupKey,
+            Pm4OverlayColorMode.AttributeMask=> obj.DominantAttributeMask,
+            Pm4OverlayColorMode.TypeFlags    => obj.DistinctTypeFlags,
+            _ => obj.Ck24Type   // fallback = Ck24Type
+        };
+    }
 
             private uint? TryGetSelectedPm4LegendValue()
             {
@@ -10824,32 +10863,40 @@ public class WorldScene : ISceneRenderer
                 };
             }
 
-            private string FormatPm4LegendLabel(Pm4OverlayColorMode mode, uint value)
+    private string FormatPm4LegendLabel(Pm4OverlayColorMode mode, uint value)
+    {
+        return mode switch
+        {
+            Pm4OverlayColorMode.Ck24Type       => $"CK24 type 0x{value:X2}",
+            Pm4OverlayColorMode.Ck24ObjectId   => $"CK24 obj {value} (0x{value:X4})",
+            Pm4OverlayColorMode.Ck24Key        => $"CK24 0x{value:X6}",
+            Pm4OverlayColorMode.MshdRegionId   => $"MSHD region {value}",
+            Pm4OverlayColorMode.GroupKey       => $"GroupKey 0x{value:X2}",
+            Pm4OverlayColorMode.AttributeMask  => $"AttrMask 0x{value:X2}",
+            Pm4OverlayColorMode.TypeFlags      => ((byte)value) switch
             {
-                return mode switch
-                {
-                    Pm4OverlayColorMode.Ck24Type => $"CK24 type 0x{value:X2}",
-                    Pm4OverlayColorMode.Ck24ObjectId => $"CK24 obj {value} (0x{value:X4})",
-                    Pm4OverlayColorMode.Ck24Key => $"CK24 0x{value:X6}",
-                    Pm4OverlayColorMode.MshdRegionId => $"MSHD region {value}",
-                    Pm4OverlayColorMode.GroupKey => $"GroupKey 0x{value:X2}",
-                    Pm4OverlayColorMode.AttributeMask => $"AttrMask 0x{value:X2}",
-                    _ => value.ToString(CultureInfo.InvariantCulture)
-                };
-            }
+                0x03 => "TypeFlags 0x03 — M2 top surfaces",
+                0x10 => "TypeFlags 0x10 — interior WMO floors",
+                0x12 => "TypeFlags 0x12 — exterior WMO solids",
+                _ => $"TypeFlags 0x{value:X2} — unknown",
+            },
+            _ => value.ToString(CultureInfo.InvariantCulture)
+        };
+    }
 
-            private Vector3 GetPm4LegendColor(Pm4OverlayColorMode mode, uint value)
-            {
-                return mode switch
-                {
-                    Pm4OverlayColorMode.Ck24ObjectId => ColorFromSeed(value),
-                    Pm4OverlayColorMode.Ck24Key => ColorFromSeed(value),
-                    Pm4OverlayColorMode.MshdRegionId => ColorFromSeed(value),
-                    Pm4OverlayColorMode.GroupKey => ColorFromSeed(value),
-                    Pm4OverlayColorMode.AttributeMask => ColorFromSeed(value),
-                    _ => GetPm4TypeColor((byte)value)
-                };
-            }
+    private Vector3 GetPm4LegendColor(Pm4OverlayColorMode mode, uint value)
+    {
+        return mode switch
+        {
+            Pm4OverlayColorMode.Ck24ObjectId  => ColorFromSeed(value),
+            Pm4OverlayColorMode.Ck24Key       => ColorFromSeed(value),
+            Pm4OverlayColorMode.MshdRegionId  => ColorFromSeed(value),
+            Pm4OverlayColorMode.GroupKey      => ColorFromSeed(value),
+            Pm4OverlayColorMode.AttributeMask => ColorFromSeed(value),
+            Pm4OverlayColorMode.TypeFlags     => GetTypeFlagColor((byte)value),
+            _ => GetPm4TypeColor((byte)value)  // fallback (Ck24Type uses GetPm4TypeColor)
+        };
+    }
     private Vector3 ColorFromHeight(float z)
     {
         float denom = _pm4MaxObjectZ - _pm4MinObjectZ;
@@ -10904,10 +10951,37 @@ public class WorldScene : ISceneRenderer
     {
         return ck24Type switch
         {
-            0x40 => new Vector3(1.0f, 0.55f, 0.10f),
-            0x80 => new Vector3(0.95f, 0.32f, 0.08f),
-            _ => new Vector3(0.95f, 0.48f, 0.08f)
+            0x40 => new Vector3(1.0f, 0.55f, 0.10f),   // Orange
+            0x80 => new Vector3(0.95f, 0.32f, 0.08f),   // Dark orange
+            _ => new Vector3(0.95f, 0.48f, 0.08f)       // Amber
         };
+    }
+
+    private static Vector3 GetTypeFlagColor(byte typeFlag)
+    {
+        // Neon palette for known TypeFlags; rainbow seed for unknown
+        return typeFlag switch
+        {
+            0x03 => new Vector3(0.10f, 1.00f, 0.40f),   // neon green  (M2 top)
+            0x10 => new Vector3(0.10f, 0.60f, 1.00f),   // neon blue   (interior floor)
+            0x12 => new Vector3(1.00f, 0.40f, 0.05f),   // neon orange (exterior solid)
+            _ => HsvToRgb((typeFlag * 0.19f) % 1.0f, 0.95f, 1.0f),
+        };
+    }
+
+    private static byte PickPrimaryTypeFlag(uint mask)
+    {
+        // Prefer known flags in priority order; fall back to lowest set bit
+        if ((mask & (1u << 0x12)) != 0) return 0x12;  // exterior solid
+        if ((mask & (1u << 0x10)) != 0) return 0x10;  // interior floor
+        if ((mask & (1u << 0x03)) != 0) return 0x03;  // M2 top
+        // Pick the lowest set bit for unknown flags
+        for (int bit = 1; bit < 32; bit++)
+        {
+            if ((mask & (1u << bit)) != 0)
+                return (byte)bit;
+        }
+        return 0;
     }
 
     private bool ShouldRenderPm4ObjectType(byte ck24Type)
