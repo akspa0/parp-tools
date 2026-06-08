@@ -724,6 +724,7 @@ public partial class ViewerApp : IDisposable
     private bool _showUniqueIdArchaeologyWindow;
     private bool _showTaxiWindow;
     private bool _showWeakSignalWindow;
+    private bool _showSceneInspector;
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
@@ -1752,7 +1753,7 @@ void main() {
                 ImGui.Separator();
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
-                ImGui.MenuItem("Scene Inspector", "", ref _showRightSidebar);
+                ImGui.MenuItem("Scene Inspector", "", ref _showSceneInspector);
                 ImGui.MenuItem("Minimap", "", ref _showMinimapWindow);
                 ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
                 ImGui.MenuItem("Perf", "", ref _showPerfWindow);
@@ -13826,7 +13827,7 @@ void main() {
             ShellPanelId.ModelInfo => _showRightSidebar && _showModelInfo && !string.IsNullOrWhiteSpace(_modelInfo),
             ShellPanelId.Minimap => _showMinimapWindow,
             ShellPanelId.WorkspaceBars => false,
-            ShellPanelId.SceneInspector => _showRightSidebar && _worldScene != null,
+            ShellPanelId.SceneInspector => _showSceneInspector && _worldScene != null,
             _ => false,
         };
     }
@@ -13839,6 +13840,7 @@ void main() {
             ShellPanelId.Inspector => _suppressRightSidebarForLayout,
             ShellPanelId.Minimap => _suppressMinimapForLayout,
             ShellPanelId.WorkspaceBars => _suppressLeftSidebarForLayout,
+            ShellPanelId.SceneInspector => _suppressRightSidebarForLayout,
             _ => false,
         };
     }
@@ -13907,6 +13909,9 @@ void main() {
                     return;
                 case ShellPanelId.Minimap:
                     _showMinimapWindow = true;
+                    return;
+                case ShellPanelId.SceneInspector:
+                    _showSceneInspector = true;
                     return;
             }
         }
