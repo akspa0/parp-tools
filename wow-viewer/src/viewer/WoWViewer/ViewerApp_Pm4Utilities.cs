@@ -134,6 +134,10 @@ public partial class ViewerApp
         if (ImGui.Checkbox("PM4 Centroids", ref showPm4Centroids))
             _worldScene.ShowPm4ObjectCentroids = showPm4Centroids;
 
+        bool showPm4Mscn = _worldScene.ShowPm4MscnNodes;
+        if (ImGui.Checkbox("MSCN Nodes", ref showPm4Mscn))
+            _worldScene.ShowPm4MscnNodes = showPm4Mscn;
+
         ImGui.SameLine();
         bool pm4FlipAllObjY = _worldScene.Pm4FlipAllObjectsY;
         if (ImGui.Checkbox("Mirror PM4 N/S", ref pm4FlipAllObjY))
