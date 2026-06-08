@@ -337,10 +337,10 @@ public partial class ViewerApp : IDisposable
         new(ShellPanelId.Pm4Info, "PM4 Info", ShellPanelLane.Right, 400f, 280f, 200f, SidebarMaxWidth),
     };
 
-    private static readonly ShellPanelId[] TopLeftQuadrantPanels = { ShellPanelId.WorkspaceBars, ShellPanelId.Navigator };
-    private static readonly ShellPanelId[] TopRightQuadrantPanels = { ShellPanelId.SceneInspector, ShellPanelId.RuntimeStats, ShellPanelId.ModelInfo };
-    private static readonly ShellPanelId[] BottomLeftQuadrantPanels = { ShellPanelId.Pm4Workbench, ShellPanelId.Minimap };
-    private static readonly ShellPanelId[] BottomRightQuadrantPanels = { ShellPanelId.TerrainControls, ShellPanelId.WorldObjects };
+    private static readonly ShellPanelId[] TopLeftQuadrantPanels = { ShellPanelId.Navigator };
+    private static readonly ShellPanelId[] TopRightQuadrantPanels = { ShellPanelId.Inspector, ShellPanelId.WorldObjects, ShellPanelId.ModelInfo, ShellPanelId.RuntimeStats };
+    private static readonly ShellPanelId[] BottomRightQuadrantPanels = { ShellPanelId.Pm4Workbench, ShellPanelId.Pm4Info, ShellPanelId.TerrainControls };
+    private static readonly ShellPanelId[] BottomLeftQuadrantPanels = { ShellPanelId.Minimap };
 
     private DockPanelState _navigatorDockState;
     private DockPanelState _inspectorDockState;
@@ -14135,10 +14135,10 @@ void main() {
     {
         return panelId switch
         {
-            ShellPanelId.WorkspaceBars or ShellPanelId.Navigator => TopLeftQuadrantPanels,
-            ShellPanelId.Inspector or ShellPanelId.RuntimeStats or ShellPanelId.ModelInfo => TopRightQuadrantPanels,
-            ShellPanelId.Pm4Workbench or ShellPanelId.Minimap or ShellPanelId.Pm4Info => BottomLeftQuadrantPanels,
-            ShellPanelId.TerrainControls or ShellPanelId.WorldObjects => BottomRightQuadrantPanels,
+            ShellPanelId.Navigator => TopLeftQuadrantPanels,
+            ShellPanelId.Inspector or ShellPanelId.WorldObjects or ShellPanelId.ModelInfo or ShellPanelId.RuntimeStats => TopRightQuadrantPanels,
+            ShellPanelId.Pm4Workbench or ShellPanelId.Pm4Info or ShellPanelId.TerrainControls => BottomRightQuadrantPanels,
+            ShellPanelId.Minimap => BottomLeftQuadrantPanels,
             _ => TopRightQuadrantPanels,
         };
     }
