@@ -261,7 +261,9 @@ public readonly struct Pm4SelectedObjectResearchInfo
         int matchingCk24HypothesisCount,
         int diagnosticCount,
         IReadOnlyList<string> diagnostics,
-        IReadOnlyList<Pm4ResearchHypothesisMatch> topMatches)
+        IReadOnlyList<Pm4ResearchHypothesisMatch> topMatches,
+        string? mshdRawFields = null,
+        IReadOnlyList<string>? mslkRawEntries = null)
     {
         SourcePath = sourcePath;
         Version = version;
@@ -275,6 +277,8 @@ public readonly struct Pm4SelectedObjectResearchInfo
         DiagnosticCount = diagnosticCount;
         Diagnostics = diagnostics;
         TopMatches = topMatches;
+        MshdRawFields = mshdRawFields;
+        MslkRawEntries = mslkRawEntries ?? Array.Empty<string>();
     }
 
     public string SourcePath { get; }
@@ -289,6 +293,8 @@ public readonly struct Pm4SelectedObjectResearchInfo
     public int DiagnosticCount { get; }
     public IReadOnlyList<string> Diagnostics { get; }
     public IReadOnlyList<Pm4ResearchHypothesisMatch> TopMatches { get; }
+    public string? MshdRawFields { get; }
+    public IReadOnlyList<string> MslkRawEntries { get; }
 }
 
 public readonly struct Pm4ColorLegendEntry
@@ -9912,6 +9918,31 @@ public class WorldScene : ISceneRenderer
             .Select(static audit => audit.InvalidCount)
             .FirstOrDefault();
 
+        // Extract raw MSHD header fields
+        string? mshdRawFields = null;
+        IReadOnlyList<string>? mslkRawEntries = null;
+        if (context.RawDocument != null)
+        {
+            var knownMshd = context.RawDocument.KnownChunks.Mshd;
+            if (knownMshd is not null)
+            {
+                mshdRawFields = $"MSHD: F00={knownMshd.Field00} F04={knownMshd.Field04} F08={knownMshd.Field08} F0C={knownMshd.Field0C} F10={knownMshd.Field10} F14={knownMshd.Field14} F18={knownMshd.Field18} F1C={knownMshd.Field1C}";
+            }
+
+            // Collect MSLK entries referencing the selected object's surfaces by CK24
+            var mslkLines = new List<string>();
+            foreach (MslkEntry mslk in context.RawDocument.KnownChunks.Mslk)
+            {
+                if (mslk.RefIndex >= 0 && (uint)mslk.RefIndex < (uint)context.RawDocument.KnownChunks.Msur.Count
+                    && context.RawDocument.KnownChunks.Msur[mslk.RefIndex].Ck24 == obj.Ck24)
+                {
+                    mslkLines.Add($"MSLK: TypeFlags=0x{mslk.TypeFlags:X2} Subtype=0x{mslk.Subtype:X2} Padding=0x{mslk.Padding:X4} GroupObjectId=0x{mslk.GroupObjectId:X8} MspiFirstIndex={mslk.MspiFirstIndex} MspiIndexCount={mslk.MspiIndexCount} LinkId=0x{mslk.LinkId:X8} RefIndex={mslk.RefIndex} SystemFlag=0x{mslk.SystemFlag:X4}");
+                }
+            }
+            if (mslkLines.Count > 0)
+                mslkRawEntries = mslkLines;
+        }
+
         info = new Pm4SelectedObjectResearchInfo(
             obj.SourcePath,
             context.Snapshot.Version,
@@ -9924,7 +9955,9 @@ public class WorldScene : ISceneRenderer
             allMatches.Count,
             context.Snapshot.Diagnostics.Count,
             context.Snapshot.Diagnostics.Take(3).ToList(),
-            allMatches.Take(8).ToList());
+            allMatches.Take(8).ToList(),
+            mshdRawFields,
+            mslkRawEntries);
 
         return true;
     }
@@ -9955,7 +9988,8 @@ public class WorldScene : ISceneRenderer
                 sourcePath,
                 CorePm4ResearchSnapshotBuilder.CreateSnapshot(researchFile),
                 CorePm4ResearchAuditAnalyzer.Analyze(researchFile),
-                CorePm4ResearchHierarchyAnalyzer.Analyze(researchFile));
+                CorePm4ResearchHierarchyAnalyzer.Analyze(researchFile),
+                researchFile);
             _pm4ResearchBySourcePath[sourcePath] = context;
             return true;
         }
@@ -11708,18 +11742,21 @@ internal sealed class Pm4ResearchContext
         string sourcePath,
         CorePm4ExplorationSnapshot snapshot,
         CorePm4DecodeAuditReport decodeAudit,
-        CorePm4TileObjectHypothesisReport hypothesisReport)
+        CorePm4TileObjectHypothesisReport hypothesisReport,
+        Pm4File? rawDocument = null)
     {
         SourcePath = sourcePath;
         Snapshot = snapshot;
         DecodeAudit = decodeAudit;
         HypothesisReport = hypothesisReport;
+        RawDocument = rawDocument;
     }
 
     public string SourcePath { get; }
     public CorePm4ExplorationSnapshot Snapshot { get; }
     public CorePm4DecodeAuditReport DecodeAudit { get; }
     public CorePm4TileObjectHypothesisReport HypothesisReport { get; }
+    public Pm4File? RawDocument { get; }
 }
 
 internal sealed record Pm4WmoCorrelationSummary(

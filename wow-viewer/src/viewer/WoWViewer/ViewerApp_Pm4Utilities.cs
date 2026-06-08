@@ -647,6 +647,22 @@ public partial class ViewerApp
                     ImGui.BulletText($"{match.Family}#{match.FamilyObjectIndex} score={match.SimilarityScore:F2} surfaces={match.SurfaceCount} indices={match.TotalIndexCount} mdos={match.MdosCount} groups={match.GroupKeyCount} linkGroups={match.LinkGroupCount} dominant=0x{match.DominantLinkGroupObjectId:X} mode={match.CoordinateMode} planar=(swap={match.PlanarTransform.SwapPlanarAxes},u={match.PlanarTransform.InvertU},v={match.PlanarTransform.InvertV}) yaw={match.FrameYawDegrees:F1}{headingText} linkedMPRL={match.LinkedMprlRefCount}/{match.LinkedMprlInBoundsCount}");
                 }
             }
+
+            if (researchInfo.MshdRawFields != null)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled(researchInfo.MshdRawFields);
+            }
+
+            if (researchInfo.MslkRawEntries.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled($"MSLK entries for this CK24 ({researchInfo.MslkRawEntries.Count}):");
+                for (int i = 0; i < researchInfo.MslkRawEntries.Count && i < 16; i++)
+                    ImGui.TextDisabled(researchInfo.MslkRawEntries[i]);
+                if (researchInfo.MslkRawEntries.Count > 16)
+                    ImGui.TextDisabled($"... and {researchInfo.MslkRawEntries.Count - 16} more");
+            }
         }
 
         ImGui.Separator();
