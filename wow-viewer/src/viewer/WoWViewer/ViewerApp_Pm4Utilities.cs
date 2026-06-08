@@ -2284,7 +2284,7 @@ public partial class ViewerApp
             builder.AppendLine("## Selected Region Peers");
             builder.AppendLine();
             builder.AppendLine($"- Region `{selectedRegionInfo.Value.RegionId}` contains `{selectedRegionInfo.Value.VisibleObjectCount}` visible PM4 parts across `{selectedRegionInfo.Value.VisibleTileCount}` tiles.");
-            builder.AppendLine($"- Same CK24 as selection: `{selectedRegionInfo.Value.SameCk24Count}`. Same MSLK group: `{selectedRegionInfo.Value.SameLinkGroupCount}`. Same MDOS index: `{selectedRegionInfo.Value.SameMdosCount}`.");
+            builder.AppendLine($"- Same CK24 as selection: `{selectedRegionInfo.Value.SameCk24Count}`. Same MSLK group: `{selectedRegionInfo.Value.SameLinkGroupCount}`. Same MscnRef index: `{selectedRegionInfo.Value.SameMdosCount}`.");
             builder.AppendLine($"- Type mix: {FormatPm4TypeBuckets(selectedRegionInfo.Value.TypeBuckets)}");
             builder.AppendLine();
             foreach (Pm4RegionPeerSummary peer in selectedRegionInfo.Value.Peers)
@@ -2507,10 +2507,10 @@ public partial class ViewerApp
                     for (int mdosIndex = 0; mdosIndex < linkGroup.MdosGroups.Count; mdosIndex++)
                     {
                         Pm4SelectedObjectGraphMdosNode mdosGroup = linkGroup.MdosGroups[mdosIndex];
-                        string mdosSummary = $"MDOS {mdosGroup.MdosIndex} parts={mdosGroup.PartCount} surfaces={mdosGroup.SurfaceCount} indices={mdosGroup.TotalIndexCount} attrs={FormatPm4ByteList(mdosGroup.AttributeMasks)} groups={FormatPm4ByteList(mdosGroup.GroupKeys)}";
+                        string mdosSummary = $"MscnRef {mdosGroup.MdosIndex} parts={mdosGroup.PartCount} surfaces={mdosGroup.SurfaceCount} indices={mdosGroup.TotalIndexCount} attrs={FormatPm4ByteList(mdosGroup.AttributeMasks)} groups={FormatPm4ByteList(mdosGroup.GroupKeys)}";
                         if (ImGui.TreeNodeEx($"{mdosSummary}##Pm4GraphMdos{idSuffix}_{linkIndex}_{mdosIndex}", ImGuiTreeNodeFlags.DefaultOpen))
                         {
-                            if (ImGui.SmallButton($"Collect MDOS##Pm4GraphCollectMdos{idSuffix}_{linkIndex}_{mdosIndex}"))
+                            if (ImGui.SmallButton($"Collect MscnRef##Pm4GraphCollectMdos{idSuffix}_{linkIndex}_{mdosIndex}"))
                                 AddPm4MdosGroupToCollection(graph, mdosGroup);
 
                             for (int partIndex = 0; partIndex < mdosGroup.Parts.Count; partIndex++)
@@ -2646,8 +2646,8 @@ public partial class ViewerApp
 
         int added = AddPm4ObjectsToCollection(keys);
         _statusMessage = added > 0
-            ? $"Added {added} PM4 parts from MDOS {mdosGroup.MdosIndex} to the collection."
-            : $"All PM4 parts from MDOS {mdosGroup.MdosIndex} were already in the collection.";
+            ? $"Added {added} PM4 parts from MscnRef {mdosGroup.MdosIndex} to the collection."
+            : $"All PM4 parts from MscnRef {mdosGroup.MdosIndex} were already in the collection.";
         SyncPm4CollectionHighlight();
     }
 
@@ -3260,7 +3260,7 @@ public partial class ViewerApp
 
         string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         string outputDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "pm4_reports");
+            AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "output", "tmp");
         Directory.CreateDirectory(outputDir);
         string mdPath = Path.Combine(outputDir, $"pm4_overlay_{timestamp}.md");
 
