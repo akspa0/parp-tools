@@ -98,13 +98,13 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 
 ### Tests for User Story 3
 
-- [ ] T023 [P] [US3] Add `Pm4ReplacementPlacementSynthesizerTests.cs` in `wow-viewer/tests/WowViewer.Core.PM4.Tests/` covering confidence flags, unresolved cases, and provenance retention.
+- [x] T023 [P] [US3] Add `Pm4ReplacementPlacementSynthesizerTests.cs` in `wow-viewer/tests/WowViewer.Core.PM4.Tests/` covering confidence flags, unresolved cases, and provenance retention.
 - [ ] T024 [P] [US3] Add a bounded known-tile validation case that compares synthesized placement output against a tile with existing placements.
 
 ### Implementation for User Story 3
 
-- [ ] T025 [US3] Implement `Pm4ReplacementPlacementSynthesizer` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`.
-- [ ] T026 [US3] Add `pm4 synthesize-placements` command handling to `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs`.
+- [x] T025 [US3] Implement `Pm4ReplacementPlacementSynthesizer` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`.
+- [x] T026 [US3] Add `pm4 synthesize-placements` command handling to `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs`.
 - [ ] T027 [US3] Emit proposal-grade replacement placement manifests and summary reports via `wow-viewer/src/tools-shared/WowViewer.Tools.Shared/Pm4Matching/`.
 - [ ] T028 [US3] Add bounded target-tile filtering and review-required confidence thresholds to the synthesis workflow.
 
@@ -121,7 +121,7 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 ### Implementation for User Story 4
 
 - [ ] T029 [P] [US4] Extend inspect-tool human-readable report printing for segment export, candidate match, and placement synthesis outputs in `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs`.
-  Current partial state: segment export and candidate-match printing are richer; placement-synthesis printing is still open.
+  Current partial state: segment export and candidate-match printing are richer, and placement proposals now print in the match/synthesis report path; dedicated review polish is still open.
 - [ ] T030 [US4] Add a bounded viewer-side review/import surface only if it consumes the emitted automation report format rather than reintroducing the old manual matching owner.
 - [ ] T031 [US4] Document the automation-first review flow in `wow-viewer/docs/WoWViewer/README.md` or the relevant PM4 workflow note.
 

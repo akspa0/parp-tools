@@ -75,8 +75,14 @@
     - `wow-viewer/output/tmp/pm4-match-assets-corpus-smoke.json`
     - `wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json`
     - `wow-viewer/output/tmp/pm4-match-assets-seeded-smoke.json`
+    - `wow-viewer/output/tmp/pm4-synthesize-placements-seeded-smoke.json`
   - current validation match smoke scored `4110` PM4 segments against `25` `_obj0.adt`-backed WMO/M2 references
-  - directory-scale corpus export is now CLI-owned, but durable Zarr writing and stronger corpus filtering/ranking are still open
+  - first placement-synthesis owner now also exists:
+    - `Pm4ReplacementPlacementSynthesizer` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`
+    - `WowViewer.Tool.Inspect pm4 synthesize-placements --input <file.pm4> --target-tiles <x_y[,x_y...]> [--asset-corpus <corpus.json> | --archive-root <staged client> [--placements <tile_obj0.adt>]] [--max-candidates <n>] [--output <report.json>]`
+    - current seeded smoke synthesized `329` placement proposals from `development_00_00.pm4` against the `2101`-asset seeded durable corpus
+    - match reports now also carry proposal records per segment when synthesis succeeds
+  - directory-scale corpus export is now CLI-owned, but durable Zarr writing, stronger corpus filtering/ranking, and known-tile synthesis validation are still open
 - broken manual PM4 matching UI is explicitly not the workflow owner for that lane.
 
 ## Viewer Shell / UI

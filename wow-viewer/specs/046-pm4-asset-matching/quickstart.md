@@ -118,10 +118,19 @@ uv run scripts/build_pm4_asset_signal_corpus.py `
 ```powershell
 dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
   pm4 synthesize-placements `
-  --match-report i:/parp/parp-tools/wow-viewer/output/datasets/pm4_asset_matching/development.match-report.json `
-  --target-tiles 30_48,30_49 `
-  --output i:/parp/parp-tools/wow-viewer/output/datasets/pm4_asset_matching/development.replacement-placements.json
+  --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 `
+  --asset-corpus i:/parp/parp-tools/wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json `
+  --target-tiles 0_0 `
+  --max-candidates 8 `
+  --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-synthesize-placements-seeded-smoke.json
 ```
+
+Current bounded smoke proof for this command:
+
+- output: `wow-viewer/output/tmp/pm4-synthesize-placements-seeded-smoke.json`
+- current run shape:
+  - `329` placement proposals synthesized from the seeded durable-corpus match lane
+  - proposals reuse validation placement transforms when present and otherwise fall back to PM4 center/heading with explicit provenance and `reviewRequired`
 
 ## Validation Expectations
 

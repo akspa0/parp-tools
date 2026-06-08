@@ -471,6 +471,36 @@
     - this is the first useful missing-ADT proof, because the matcher is now scoring against a map-relevant path-based corpus instead of a tiny mostly-irrelevant sample
     - the next big owner gap is turning these ranked candidates into proposal-grade placement synthesis, not going back to `_obj0.adt` as the main matching surface
 
+- **PM4 replacement placement synthesis slice (2026-06-07)**
+  - first US3 owner now exists in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/`:
+    - `Pm4ReplacementPlacementSynthesizer`
+    - chooses the top-ranked candidate for matched/ambiguous segments
+    - reuses validation placement transforms when the asset reference has them
+    - falls back to PM4 center plus PM4 heading-derived yaw and unit scale for durable-corpus-only candidates
+    - carries explicit provenance strings for position/rotation/scale fallback ownership and forces `reviewRequired` when those fallbacks are used
+  - inspect host now exposes:
+    - `pm4 synthesize-placements --input <file.pm4> --target-tiles <x_y[,x_y...]> [--asset-corpus <corpus.json> | --archive-root <staged client dir> [--placements <tile_obj0.adt>]] [--max-candidates <n>] [--output <report.json>]`
+    - `pm4 match-assets` reports now also embed placement proposals when synthesis succeeds
+  - regression coverage landed:
+    - `wow-viewer/tests/WowViewer.Core.PM4.Tests/Pm4ReplacementPlacementSynthesizerTests.cs`
+    - proves reference-transform reuse, PM4 fallback provenance, and target-tile filtering
+  - targeted proof passed:
+    - `dotnet build i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug`
+    - `dotnet build i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug`
+    - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --no-build --filter Pm4ReplacementPlacementSynthesizerTests`
+      - `3 passed`
+    - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --no-build --filter Pm4AssetSignalCorpusSupportTests`
+      - `2 passed`
+    - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --no-build --filter Pm4AssetMatchScorerTests`
+      - `4 passed`
+    - real CLI smoke:
+      - `WowViewer.Tool.Inspect.exe pm4 synthesize-placements --input ...development_00_00.pm4 --asset-corpus ...pm4-asset-signals-seeded-smoke.json --target-tiles 0_0 --max-candidates 8 --output ...pm4-synthesize-placements-seeded-smoke.json`
+      - wrote `wow-viewer/output/tmp/pm4-synthesize-placements-seeded-smoke.json`
+      - synthesized `329` placement proposals from `4110` PM4 segments using `2101` asset references
+  - current interpretation:
+    - the lane now does more than ranking; it produces machine-readable proposal candidates with provenance
+    - the next hard proof is known-tile validation of proposal quality, not rebuilding another matching UI
+
 ## Next Likely Steps
 
 - extend the current deterministic export host from JSON report output into the planned Zarr-backed PM4 signal corpus writer
@@ -479,7 +509,7 @@
 - build the staged-asset Zarr signal corpus and wrap the current JSON durable-corpus contract instead of inventing a second asset identity surface
 - tighten staged-client asset-corpus selection so the missing-ADT matcher scores against relevant world assets instead of a small mostly-character sample
 - build the next `046` slice on top of the seeded durable corpus:
-  - emit proposal-grade placement synthesis from the new ranked matches
+  - validate synthesized placement proposals against known-tile ground truth
   - keep `_obj0.adt` only as validation evidence, not as the primary owner
 - keep PM4 grouping/spec docs in sync if segmentation ownership changes again
 - spec `047` follow-ups:
