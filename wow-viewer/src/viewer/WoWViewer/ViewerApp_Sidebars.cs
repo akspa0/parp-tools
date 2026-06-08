@@ -995,7 +995,64 @@ public partial class ViewerApp
             case ShellPanelId.ModelInfo:
                 DrawModelInfoPanelContent();
                 break;
+            case ShellPanelId.SceneInspector:
+                DrawSceneInspectorPanelContent();
+                break;
         }
+    }
+
+    private int _activeSceneInspectorTab;
+
+    private void DrawSceneInspectorPanelContent()
+    {
+        string[] tabs = ["Selection", "World", "Model", "Stats", "Terrain"];
+        int currentTab = _activeSceneInspectorTab;
+        if (currentTab < 0 || currentTab >= tabs.Length)
+            currentTab = 0;
+
+        ImGui.BeginTabBar("##SceneInspectorTabs");
+        for (int i = 0; i < tabs.Length; i++)
+        {
+            if (ImGui.BeginTabItem(tabs[i]))
+            {
+                _activeSceneInspectorTab = i;
+                switch (i)
+                {
+                    case 0: DrawSceneInspectorSelectionTab(); break;
+                    case 1: DrawSceneInspectorWorldTab(); break;
+                    case 2: DrawSceneInspectorModelTab(); break;
+                    case 3: DrawSceneInspectorStatsTab(); break;
+                    case 4: DrawSceneInspectorTerrainTab(); break;
+                }
+                ImGui.EndTabItem();
+            }
+        }
+        ImGui.EndTabBar();
+    }
+
+    private void DrawSceneInspectorSelectionTab()
+    {
+        DrawSelectionPanelContent();
+    }
+
+    private void DrawSceneInspectorWorldTab()
+    {
+        DrawWorldObjectsPanelContent();
+    }
+
+    private void DrawSceneInspectorModelTab()
+    {
+        DrawModelInfoPanelContent();
+    }
+
+    private void DrawSceneInspectorStatsTab()
+    {
+        DrawRuntimeStatsPanelContent();
+    }
+
+    private void DrawSceneInspectorTerrainTab()
+    {
+        DrawTerrainControlsPanelContent();
     }
 
     private void DrawSelectionPanelContent()

@@ -70,6 +70,7 @@ public partial class ViewerApp : IDisposable
         ModelInfo,
         Minimap,
         WorkspaceBars,
+        SceneInspector,
     }
 
     private enum ShellPanelLane
@@ -331,10 +332,11 @@ public partial class ViewerApp : IDisposable
         new(ShellPanelId.ModelInfo, "Model Info", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
         new(ShellPanelId.Minimap, "Minimap", ShellPanelLane.Floating, 360f, 300f, 260f, 520f),
         new(ShellPanelId.WorkspaceBars, "Workspace Bars", ShellPanelLane.Left, 360f, 280f, 240f, 520f),
+        new(ShellPanelId.SceneInspector, "Scene Inspector", ShellPanelLane.Right, 420f, 300f, 220f, SidebarMaxWidth),
     };
 
     private static readonly ShellPanelId[] TopLeftQuadrantPanels = { ShellPanelId.WorkspaceBars, ShellPanelId.Navigator };
-    private static readonly ShellPanelId[] TopRightQuadrantPanels = { ShellPanelId.Inspector, ShellPanelId.RuntimeStats, ShellPanelId.ModelInfo };
+    private static readonly ShellPanelId[] TopRightQuadrantPanels = { ShellPanelId.SceneInspector, ShellPanelId.RuntimeStats, ShellPanelId.ModelInfo };
     private static readonly ShellPanelId[] BottomLeftQuadrantPanels = { ShellPanelId.Pm4Workbench, ShellPanelId.Minimap };
     private static readonly ShellPanelId[] BottomRightQuadrantPanels = { ShellPanelId.TerrainControls, ShellPanelId.WorldObjects };
 
@@ -1750,6 +1752,7 @@ void main() {
                 ImGui.Separator();
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
+                ImGui.MenuItem("Scene Inspector", "", ref _showRightSidebar);
                 ImGui.MenuItem("Minimap", "", ref _showMinimapWindow);
                 ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
                 ImGui.MenuItem("Perf", "", ref _showPerfWindow);
@@ -13823,6 +13826,7 @@ void main() {
             ShellPanelId.ModelInfo => _showRightSidebar && _showModelInfo && !string.IsNullOrWhiteSpace(_modelInfo),
             ShellPanelId.Minimap => _showMinimapWindow,
             ShellPanelId.WorkspaceBars => false,
+            ShellPanelId.SceneInspector => _showRightSidebar && _worldScene != null,
             _ => false,
         };
     }

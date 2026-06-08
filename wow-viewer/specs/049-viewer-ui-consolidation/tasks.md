@@ -1,0 +1,6 @@
+- [x] T001 Add `ShellPanelId.SceneInspector` enum value  
+- [x] T002 Add shell panel definition in `ShellPanelDefinitions`  
+- [x] T003 Create `DrawSceneInspectorPanelContent()` with 5 tabs (Selection, World, Model, Stats, Terrain)  
+- [x] T004 Wire into `DrawShellPanelContent` switch  
+- [x] T005 Add View menu toggle for Scene Inspector  
+- [x] T006 Build, test, commit
