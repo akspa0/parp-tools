@@ -6,7 +6,7 @@
 
 ## Summary
 
-Replace the freeze-prone PM4 object export workflow with a library-first automation lane that exports deterministic PM4 object segments, derives comparable signal corpora for PM4 segments and staged WMO/M2 assets, ranks candidate matches automatically, and emits replacement-placement proposals for missing development tiles. The design uses Zarr-backed signal stores, shared PM4 matching libraries, thin CLI/report surfaces, and bounded viewer review rather than manual matching as the primary workflow owner.
+Replace the freeze-prone PM4 object export workflow with a library-first automation lane that exports deterministic PM4 object segments, derives comparable signal corpora for PM4 segments and staged WMO/M2 assets, ranks candidate matches automatically, and emits replacement-placement proposals for missing development tiles. The first missing-ADT slice uses a JSON-backed durable asset corpus exported from staged clients so matching no longer depends on tile-local placement IDs, and the later Zarr lane scales that same corpus contract for larger runs.
 
 ## Technical Context
 
@@ -27,6 +27,7 @@ Replace the freeze-prone PM4 object export workflow with a library-first automat
 - PM4 export must avoid blocking/freezing the primary viewer shell
 - corpus-scale export and matching should stream through signal stores rather than loading the whole corpus eagerly into memory
 - validation-scale matching should produce ranked candidate lists and placement proposals in one reproducible run
+- the first non-ADT asset corpus must use durable asset identity (normalized asset path plus build provenance), not placement `UniqueID`
 
 **Constraints**:
 
@@ -34,6 +35,7 @@ Replace the freeze-prone PM4 object export workflow with a library-first automat
 - no new PM4 or client-file parser stacks; reuse existing readers
 - staged clients only; never use `H:\CLIENTS`
 - first slice is automation-first, not an interactive manual matching workflow
+- missing-ADT matching cannot assume a corresponding `_obj0.adt` placement file exists
 - replacement placement output is proposal-grade first, not direct map mutation
 
 **Scale/Scope**:

@@ -76,15 +76,15 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 ### Tests for User Story 2
 
 - [x] T016 [P] [US2] Add `Pm4AssetMatchScorerTests.cs` in `wow-viewer/tests/WowViewer.Core.PM4.Tests/` covering deterministic score ordering and unresolved/ambiguous states.
-- [ ] T017 [P] [US2] Add Python-side smoke validation for Zarr asset-signal corpus compatibility in `wow-viewer/data-harvester/`.
+- [ ] T017 [P] [US2] Add smoke validation for exported durable asset corpora and later Zarr compatibility in `wow-viewer/data-harvester/`.
 
 ### Implementation for User Story 2
 
-- [ ] T018 [P] [US2] Implement staged-asset signal extraction in `wow-viewer/data-harvester/src/harvester/pm4_asset_matching/asset_signal_corpus.py`.
-- [ ] T019 [P] [US2] Add `build_pm4_asset_signal_corpus.py` in `wow-viewer/data-harvester/scripts/`.
+- [ ] T018 [US2] Implement staged-client asset signal extraction and durable asset-corpus export in `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/`.
+- [ ] T019 [P] [US2] Add the follow-on Python/Zarr corpus builder in `wow-viewer/data-harvester/src/harvester/pm4_asset_matching/asset_signal_corpus.py` and `wow-viewer/data-harvester/scripts/build_pm4_asset_signal_corpus.py`.
 - [x] T020 [US2] Implement `Pm4AssetMatchScorer` in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/` with deterministic score breakdown output.
 - [ ] T021 [US2] Implement a match-report writer in `wow-viewer/src/tools-shared/WowViewer.Tools.Shared/Pm4Matching/`.
-- [x] T022 [US2] Add `pm4 match-assets` command handling to `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` to emit ranked candidate reports from PM4 and asset signal corpora.
+- [ ] T022 [US2] Extend `pm4 match-assets` in `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` so it can score against exported durable asset corpora first and keep `_obj0.adt` placements as validation mode only.
 
 **Checkpoint**: Automated ranked WMO/M2 candidate lists replace the old manual matching workflow for validation-scale runs.
 
@@ -164,7 +164,7 @@ description: "Task list for spec 046 - PM4 asset matching and replacement placem
 
 - T004, T005, T006, and T008 can run in parallel across separate matching contract files.
 - T007 can run in parallel once the contract files exist.
-- T018 and T019 can run in parallel as separate asset-corpus tasks.
+- T018 and the current scorer-shape regression updates can run in parallel with the later Python/Zarr wrapper work in T019.
 - T023 and T024 can run in parallel as placement-synthesis validation tasks.
 
 ---
