@@ -788,12 +788,44 @@ public partial class ViewerApp
         ImGui.PopStyleVar();
     }
 
+    private int _activeInspectorTab;
+
     private void DrawUnifiedToolSidebar()
     {
-        DrawRightSidebarSection(FixedBottomDrawerTab.Workspace, "Viewer Settings", DrawUnifiedViewerSettingsSidebarContent, defaultOpen: true);
-        DrawRightSidebarSection(FixedBottomDrawerTab.World, "Selection", DrawUnifiedSelectionSidebarContent, defaultOpen: true);
-        DrawRightSidebarSection(FixedBottomDrawerTab.Pm4, "World Tools", DrawUnifiedWorldToolsSidebarContent, _worldScene != null, defaultOpen: false);
-        DrawRightSidebarSection(FixedBottomDrawerTab.Diagnostics, "Utilities", DrawViewerDiagnosticsSidebarContent, defaultOpen: false);
+        if (_worldScene != null)
+        {
+            string[] tabs = ["Selection", "World", "Model", "Stats", "Settings", "PM4"];
+            int current = _activeInspectorTab;
+            if (current < 0 || current >= tabs.Length)
+                current = 0;
+
+            if (ImGui.BeginTabBar("##InspectorTabs"))
+            {
+                for (int i = 0; i < tabs.Length; i++)
+                {
+                    if (ImGui.BeginTabItem(tabs[i]))
+                    {
+                        _activeInspectorTab = i;
+                        switch (i)
+                        {
+                            case 0: DrawUnifiedSelectionSidebarContent(); break;
+                            case 1: DrawWorldObjectsPanelContent(); break;
+                            case 2: DrawModelInfoPanelContent(); break;
+                            case 3: DrawRuntimeStatsPanelContent(); break;
+                            case 4: DrawUnifiedViewerSettingsSidebarContent(); break;
+                            case 5: DrawPm4WorkbenchInspector(); break;
+                        }
+                        ImGui.EndTabItem();
+                    }
+                }
+                ImGui.EndTabBar();
+            }
+        }
+        else
+        {
+            // No scene loaded — just show settings
+            DrawUnifiedViewerSettingsSidebarContent();
+        }
     }
 
     private void DrawUnifiedViewerSettingsSidebarContent()
@@ -997,6 +1029,9 @@ public partial class ViewerApp
                 break;
             case ShellPanelId.SceneInspector:
                 DrawSceneInspectorPanelContent();
+                break;
+            case ShellPanelId.Pm4Info:
+                DrawPm4InfoPanelContent();
                 break;
         }
     }

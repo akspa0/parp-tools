@@ -283,10 +283,11 @@ public partial class ViewerApp
 
         DrawSelectedPm4RegionSummary("WorkbenchSelectedRegion");
 
-        if (ImGui.CollapsingHeader("Match Suggestions", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader("Match Suggestions"))
             DrawPm4SelectedObjectMatchSuggestions("WorkbenchSelectedPm4", compact: false);
 
-        DrawSelectedPm4ObjectGraph("WorkbenchSelectedObject");
+        if (ImGui.CollapsingHeader("PM4 Graph"))
+            DrawSelectedPm4ObjectGraph("WorkbenchSelectedObject");
     }
 
     private void DrawPm4CorrelationInspectorContent()
@@ -3189,13 +3190,77 @@ public partial class ViewerApp
         return float.IsFinite(value) ? value : null;
     }
 
+    private void DrawPm4InfoPanelContent()
+    {
+        ImGui.PushTextWrapPos(0f);
+        if (_worldScene == null || !_worldScene.HasSelectedPm4Object)
+        {
+            ImGui.TextDisabled("Select a PM4 object to inspect.");
+            ImGui.Spacing();
+            if (ImGui.Button("Export Visible PM4 Report"))
+                ExportPm4OverlayReport();
+            ImGui.SameLine();
+            if (ImGui.Button("Export PM4 LLM Bundle"))
+                ExportPm4LlmEvidenceBundle();
+            ImGui.PopTextWrapPos();
+            return;
+        }
+
+        var key = _worldScene.SelectedPm4ObjectKey.Value;
+        ImGui.Text($"Tile ({key.tileX}, {key.tileY})  CK24 0x{key.ck24:X6}  part {key.objectPart}");
+
+        if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo d))
+        {
+            ImGui.Separator();
+            ImGui.Text($"Type: 0x{d.Ck24Type:X2}  ObjId: {d.Ck24ObjectId}");
+            ImGui.Text($"MSHD: F00={d.MshdField00}  Region={d.MshdRegionId}  F08={d.MshdField08}");
+            ImGui.Text($"MSLK: group=0x{d.LinkGroupObjectId:X8}  refs={d.LinkedPositionRefCount}");
+            ImGui.Text($"GroupKey: 0x{d.DominantGroupKey:X2}  Attr: 0x{d.DominantAttributeMask:X2}  MscnRef: {d.DominantMdosIndex}");
+
+            if (d.DistinctTypeFlags != 0)
+            {
+                var tf = new List<string>();
+                for (int bit = 1; bit < 32; bit++)
+                    if ((d.DistinctTypeFlags & (1u << bit)) != 0)
+                        tf.Add(bit switch { 0x03 => "m2-top", 0x10 => "floor-int", 0x12 => "ext-solid", _ => $"0x{bit:X2}" });
+                byte gk = d.DominantGroupKey;
+                bool match = (d.DistinctTypeFlags & (1u << gk)) != 0;
+                string gkl = gk switch { 0x03 => "m2-surf", 0x10 => "floor-int", 0x12 => "ext-solid", 0x13 => "portal-int", _ => $"0x{gk:X2}" };
+                ImGui.Text($"GroupKey={gkl}  TypeFlags: {string.Join(" ", tf)}  {(match ? "MATCH" : "MISMATCH")}");
+            }
+
+            if (_worldScene.TryGetSelectedPm4ObjectResearchInfo(out var ri) && ri.MslkRawEntries.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled($"MSLK entries ({ri.MslkRawEntries.Count}):");
+                foreach (string line in ri.MslkRawEntries.Take(6))
+                    ImGui.TextUnformatted(line);
+                if (ri.MslkRawEntries.Count > 6)
+                    ImGui.TextDisabled($"+ {ri.MslkRawEntries.Count - 6} more");
+            }
+        }
+
+        ImGui.Separator();
+        ImGui.Spacing();
+        if (ImGui.Button("Export Visible PM4 Report"))
+            ExportPm4OverlayReport();
+        ImGui.SameLine();
+        if (ImGui.Button("Export PM4 LLM Bundle"))
+            ExportPm4LlmEvidenceBundle();
+        ImGui.SameLine();
+        if (ImGui.Button("Dump PM4 JSON"))
+            ExportPm4ObjectsJson();
+
+        ImGui.PopTextWrapPos();
+    }
+
     private void ExportPm4OverlayReport()
     {
         if (_worldScene == null) return;
 
         string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         string outputDir = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "output", "tmp");
+            Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "pm4_reports");
         Directory.CreateDirectory(outputDir);
         string mdPath = Path.Combine(outputDir, $"pm4_overlay_{timestamp}.md");
 
@@ -3265,6 +3330,6 @@ public partial class ViewerApp
             }
         }
 
-        Console.WriteLine($"Wrote PM4 overlay report: {mdPath}");
+        _statusMessage = $"Wrote PM4 overlay report: {mdPath}";
     }
 }

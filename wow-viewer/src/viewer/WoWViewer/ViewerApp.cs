@@ -71,6 +71,7 @@ public partial class ViewerApp : IDisposable
         Minimap,
         WorkspaceBars,
         SceneInspector,
+        Pm4Info,
     }
 
     private enum ShellPanelLane
@@ -333,6 +334,7 @@ public partial class ViewerApp : IDisposable
         new(ShellPanelId.Minimap, "Minimap", ShellPanelLane.Floating, 360f, 300f, 260f, 520f),
         new(ShellPanelId.WorkspaceBars, "Workspace Bars", ShellPanelLane.Left, 360f, 280f, 240f, 520f),
         new(ShellPanelId.SceneInspector, "Scene Inspector", ShellPanelLane.Right, 420f, 300f, 220f, SidebarMaxWidth),
+        new(ShellPanelId.Pm4Info, "PM4 Info", ShellPanelLane.Right, 400f, 280f, 200f, SidebarMaxWidth),
     };
 
     private static readonly ShellPanelId[] TopLeftQuadrantPanels = { ShellPanelId.WorkspaceBars, ShellPanelId.Navigator };
@@ -350,6 +352,7 @@ public partial class ViewerApp : IDisposable
     private DockPanelState _minimapDockState;
     private DockPanelState _workspaceBarsDockState;
     private DockPanelState _sceneInspectorDockState;
+    private DockPanelState _pm4InfoDockState;
     private readonly Dictionary<ShellPanelId, SavedShellPanelLayout> _savedShellPanelLayouts = new();
     private readonly HashSet<ShellPanelId> _pendingShellPanelLayoutRestore = new();
     private bool _forceApplyShellPanelLayout;
@@ -1754,7 +1757,6 @@ void main() {
                 ImGui.Separator();
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
-                ImGui.MenuItem("Scene Inspector", "", ref _showSceneInspector);
                 ImGui.MenuItem("Minimap", "", ref _showMinimapWindow);
                 ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
                 ImGui.MenuItem("Perf", "", ref _showPerfWindow);
@@ -13812,6 +13814,8 @@ void main() {
                 return ref _workspaceBarsDockState;
             case ShellPanelId.SceneInspector:
                 return ref _sceneInspectorDockState;
+            case ShellPanelId.Pm4Info:
+                return ref _pm4InfoDockState;
             default:
                 throw new ArgumentOutOfRangeException(nameof(panelId), panelId, null);
         }
@@ -13831,6 +13835,7 @@ void main() {
             ShellPanelId.Minimap => _showMinimapWindow,
             ShellPanelId.WorkspaceBars => false,
             ShellPanelId.SceneInspector => _showSceneInspector && _worldScene != null,
+            ShellPanelId.Pm4Info => _showRightSidebar && _worldScene != null,
             _ => false,
         };
     }
@@ -13844,6 +13849,7 @@ void main() {
             ShellPanelId.Minimap => _suppressMinimapForLayout,
             ShellPanelId.WorkspaceBars => _suppressLeftSidebarForLayout,
             ShellPanelId.SceneInspector => _suppressRightSidebarForLayout,
+            ShellPanelId.Pm4Info => _suppressRightSidebarForLayout,
             _ => false,
         };
     }
@@ -13915,6 +13921,9 @@ void main() {
                     return;
                 case ShellPanelId.SceneInspector:
                     _showSceneInspector = true;
+                    return;
+                case ShellPanelId.Pm4Info:
+                    _showRightSidebar = true;
                     return;
             }
         }
@@ -14126,7 +14135,7 @@ void main() {
         {
             ShellPanelId.WorkspaceBars or ShellPanelId.Navigator => TopLeftQuadrantPanels,
             ShellPanelId.Inspector or ShellPanelId.RuntimeStats or ShellPanelId.ModelInfo => TopRightQuadrantPanels,
-            ShellPanelId.Pm4Workbench or ShellPanelId.Minimap => BottomLeftQuadrantPanels,
+            ShellPanelId.Pm4Workbench or ShellPanelId.Minimap or ShellPanelId.Pm4Info => BottomLeftQuadrantPanels,
             ShellPanelId.TerrainControls or ShellPanelId.WorldObjects => BottomRightQuadrantPanels,
             _ => TopRightQuadrantPanels,
         };
