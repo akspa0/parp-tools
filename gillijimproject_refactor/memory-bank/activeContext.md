@@ -6,10 +6,10 @@
 - all new code lands in `wow-viewer`.
 - staged clients under `I:/parp/parp-tools/output/tmp/wowarchive-clients/` are the only trusted client roots.
 
-## 046 Status (2026-06-08 Checkpoint)
+## 046 Status (2026-06-08 Checkpoint - End of Session)
 
-- **21/37 tasks complete** — all C# library code, inspect commands, tests, match-report writer, human-readable report printing done; segment builder rewritten for CK24+TypeFlags grouping (18 real objects vs 4110 fragments); scorer rewritten for type-profile matching
-- **16 tasks remaining** — Python/Zarr tooling (T002, T013, T014, T017, T019), schema validation (T034), viewer review surface (T030), known-tile validation (T024), doc updates (T032, T033), polish (T009, T015, T027, T028, T031), viewer TypeFlags filter (T037)
+- **26/42 tasks complete** — All C# library code + inspect commands + tests + match-report writer done; segment builder rewritten (4110→18 segments); scorer rewritten for type-profile matching; WMO sub-part bounds extraction added; cache version bumped for TypeFlags; TypeFlags color mode + CK24Type-vs-TypeFlags mismatch mode + 3px neon lines added; GroupKey vs TypeFlags cross-reference in overlay tab; raw MSLK/MSHD fields displayed; Mdos→MscnRef rename complete; Choose Target picker fixed; Export Report button (writes to Desktop); PM4 Info docked panel; tool windows extracted (UniqueId Archaeology, Taxi, Weak Signal); consolidated right sidebar tabs; Scene Inspector panel
+- **16 tasks remaining** — Python/Zarr tooling (T002, T013, T014, T017, T019), schema validation (T034), known-tile validation (T024), doc updates (T032, T033), polish (T015, T027, T028, T031), focused asset corpus (T038), viewer TypeFlags filter improvements (T037), Obj export fix (T039)
 - **Biggest unproven gap**: Python/Zarr corpus lane is completely unimplemented
 - **Out of scope**: viewer-side review surface, direct map writeback, old manual matcher rescue
 

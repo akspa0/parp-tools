@@ -38,13 +38,10 @@ public partial class ViewerApp
         if (_worldScene == null)
             return false;
 
-        // ImGui overlay is active — don't interfere with its click handling
-        if (ImGui.GetIO().WantCaptureMouse)
-            return false;
-
-        // Block new picks while the overlay is showing
+        // If overlay is already showing, skip the pick but DON'T return false
+        // (that would trigger ClearPendingClickSelection in the caller)
         if (_clickSelectionCandidates.Count > 1)
-            return false;
+            return true;
 
         (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey = null;
         Vector3? clickedWorldPoint = null;

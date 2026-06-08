@@ -517,29 +517,44 @@
 
 - **PM4 human-readable report and visualization slice (2026-06-08)**
   - T029 — Markdown report formatter `Pm4MatchReportFormatter` in Tools.Shared `Pm4Matching/` produces per-tile summary tables + top matched/ambiguous detail
-  - auto-generated `.md` file written alongside every `.json` report (`match-assets`, `synthesize-placements`, `export-segments`)
-  - Python visualization script `data-harvester/scripts/visualize_pm4_matches.py` reads match report JSON + minimap PNG and produces overlay plot
-  - proof: rendered `output/tmp/pm4-overlay-0_0.png` from the seeded smoke report
+  - auto-generated `.md` file written alongside every `.json` report
+  - Python visualization script created (marked as dead-end, not pushed)
 
 - **PM4 segment builder rewrite — CK24+TypeFlags grouping (2026-06-08)**
   - `Pm4ObjectSegmentBuilder` completely rewritten: removed connectivity/MSLK-GroupObjectId/MSCN over-splitting
   - surfaces group by CK24 (one segment per real game object), fallback to (GroupKey,AttributeMask) for zero-CK24
-  - MSLK.TypeFlags lookup per surface via RefIndex → classifies surfaces as roof/floor/exterior/M2-top
-  - `ComputeTypedBounds()` produces per-TypeFlags-class AABB stored in `Pm4SegmentSignalRecord.TypedBounds`
-  - signal version bumped to v2; surface histogram now includes `typeFlags:*` entries
-  - dev tile `development_00_00.pm4`: **4110 → 18 segments** (15 matchable, 3 navmesh ineligible)
-  - `WritePm4Report()` shared helper dispatches between JSON+MD vs MD-only based on output extension
-  - quickstart.md updated with markdown-first examples
+  - MSLK.TypeFlags lookup per surface via RefIndex
+  - `ComputeTypedBounds()` produces per-TypeFlags-class AABB in `Pm4SegmentSignalRecord.TypedBounds`
+  - signal version bumped to v2
+  - dev tile: **4110 → 18 segments** (15 matchable, 3 navmesh ineligible)
+  - `WritePm4Report()` shared helper, markdown-first output
 
 - **PM4 scorer rewrite — type-profile matching (2026-06-08)**
-  - `Pm4AssetMatchScorer` rewritten: replaces footprint/volume/stretch overlap with TypeFlags-profile scoring
-  - three-component score: typed overlap (35%), type profile consistency (15%), shape similarity (50%)
-  - typed overlap: per-TypeFlags-class bounds Jaccard against asset bounds
-  - type profile: checks segment has expected TypeFlags for its asset kind (WMO→0x10/0x12, M2→0x03)
-  - shape fallback: sorted span ratios, footprint area, volume, diagonal, height, aspect, same-tile distance
-  - all 14 tests pass; test for `UsedConnectivityFallback` removed (no longer set)
-  - **current bottleneck**: asset corpus has no per-TypeFlags bounds → typed overlap weight is 0 → falls back to shape-only
-  - T037 added: viewer PM4 overlay filtering by MSLK.TypeFlags for unknown-flag visual inspection
+  - `Pm4AssetMatchScorer` rewritten: typed overlap (35%) + type profile (15%) + shape similarity (50%)
+  - all 14 tests pass
+  - **current bottleneck**: asset corpus has no per-TypeFlags bounds → typed overlap weight is 0
+
+- **PM4 TypeFlags color mode + viewer UI overhaul (2026-06-08)**
+  - `Pm4OverlayColorMode.TypeFlags` added: neon green/blue/orange for known flags, rainbow for unknown
+  - `Pm4OverlayColorMode.Ck24TypeVsTypeFlags` added: green=match, red=anomaly, yellow=untyped carrier
+  - 3px thick lines when TypeFlags mode active (legible over terrain)
+  - GroupKey vs TypeFlags cross-reference displayed per-object in overlay tab
+  - Raw MSLK/MSHD fields shown in overlay tab via research context (cached PM4 document access)
+  - All "Mdos/MDOS" UI labels renamed to "MscnRef"
+  - PM4 Info docked panel created with all details + export buttons in one place
+  - Export Overlay Report writes Markdown to Desktop/pm4_reports/
+  - Choose Target picker fixed: sticky overlay, WantCaptureMouse guard, number keys 1-9
+  - PM4 overlay cache version bumped to 5 (forces TypeFlags data rebuild)
+
+- **Viewer UI consolidation (2026-06-08)**
+  - Right sidebar collapsible sections replaced with tabs (Selection/World/Model/Stats/Settings/PM4)
+  - Scene Inspector panel with 5 tabs (calls same content methods)
+  - UniqueId Archaeology, Taxi Panel, Weak Signal Amplifier extracted to floating tool windows
+  - All tools toggleable via Tools menu
+  - Choose Target overlay font size fixed (was unusably small at 0.85x)
+  - Selection tab "Match Suggestions" and "PM4 Graph" now closed by default (fixes 1fps)
+
+- **Spec 046 tests** — all 14 PM4 matching tests pass
 
 ## Next Likely Steps
 
