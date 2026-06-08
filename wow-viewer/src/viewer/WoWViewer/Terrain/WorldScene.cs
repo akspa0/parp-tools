@@ -68,7 +68,8 @@ public enum Pm4OverlayColorMode
     MshdRegionId,
     GroupKey,
     AttributeMask,
-    Height
+    Height,
+    TypeFlags,
 }
 
 public readonly struct Pm4ObjectDebugInfo
@@ -98,7 +99,8 @@ public readonly struct Pm4ObjectDebugInfo
         bool swapPlanarAxes,
         bool invertU,
         bool invertV,
-        bool invertsWinding)
+        bool invertsWinding,
+        uint distinctTypeFlags = 0)
     {
         Ck24 = ck24;
         Ck24Type = ck24Type;
@@ -111,6 +113,7 @@ public readonly struct Pm4ObjectDebugInfo
         TileY = tileY;
         MshdField00 = mshdField00;
         MshdRegionId = mshdRegionId;
+        DistinctTypeFlags = distinctTypeFlags;
         MshdField08 = mshdField08;
         SurfaceCount = surfaceCount;
         DominantGroupKey = dominantGroupKey;
@@ -139,6 +142,7 @@ public readonly struct Pm4ObjectDebugInfo
     public uint MshdField00 { get; }
     public uint MshdRegionId { get; }
     public uint MshdField08 { get; }
+    public uint DistinctTypeFlags { get; }
     public int SurfaceCount { get; }
     public byte DominantGroupKey { get; }
     public byte DominantAttributeMask { get; }
@@ -4559,6 +4563,25 @@ public class WorldScene : ISceneRenderer
                             linkedRendererFrameRotationRadians,
                             linkedPlanarTransform,
                             linkedConnectorKeys));
+
+                        // Collect MSLK.TypeFlags from surfaces in this component.
+                        // Match MSLK.RefIndex against the MSUR entry at that index position.
+                        uint typeFlagsMask = 0;
+                        if (pm4.KnownChunks.Mslk.Count > 0)
+                        {
+                            foreach (MslkEntry mslk in pm4.KnownChunks.Mslk)
+                            {
+                                if (mslk.TypeFlags == 0)
+                                    continue;
+                                if ((uint)mslk.RefIndex < (uint)pm4.KnownChunks.Msur.Count &&
+                                    component.Contains(pm4.KnownChunks.Msur[mslk.RefIndex]))
+                                {
+                                    typeFlagsMask |= 1u << mslk.TypeFlags;
+                                }
+                            }
+                        }
+                        if (typeFlagsMask != 0)
+                            objects[^1].DistinctTypeFlags = typeFlagsMask;
 
                         tileLineBudget -= lines.Count;
                         tileTriangleBudget -= triangles.Count;
@@ -9824,7 +9847,8 @@ public class WorldScene : ISceneRenderer
             obj.PlanarTransform.SwapPlanarAxes,
             obj.PlanarTransform.InvertU,
             obj.PlanarTransform.InvertV,
-            obj.PlanarTransform.InvertsWinding);
+            obj.PlanarTransform.InvertsWinding,
+            obj.DistinctTypeFlags);
 
         return true;
     }
@@ -10361,6 +10385,9 @@ public class WorldScene : ISceneRenderer
             Pm4OverlayColorMode.GroupKey => ColorFromSeed(obj.DominantGroupKey),
             Pm4OverlayColorMode.AttributeMask => ColorFromSeed(obj.DominantAttributeMask),
             Pm4OverlayColorMode.Height => ColorFromHeight(obj.Center.Z),
+            Pm4OverlayColorMode.TypeFlags => obj.DistinctTypeFlags != 0
+                ? ColorFromSeed(obj.DistinctTypeFlags)
+                : new Vector3(0.3f, 0.3f, 0.3f),
             _ => GetPm4TypeColor(obj.Ck24Type)
         };
     }
@@ -11527,6 +11554,7 @@ internal sealed class Pm4OverlayObject
     public Matrix4x4 BaseTransform { get; }
     public Vector3 BoundsMin { get; }
     public Vector3 BoundsMax { get; }
+    public uint DistinctTypeFlags { get; set; }
     public Vector3 Center { get; }
     public Vector3 PlacementAnchor { get; }
     public float BaseRotationRadians { get; }

@@ -242,6 +242,25 @@ public partial class ViewerApp
                 ImGui.TextDisabled($"MSHD F00={debugInfo.MshdField00} Region={debugInfo.MshdRegionId} F08={debugInfo.MshdField08}");
                 ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} Mdos={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
                 ImGui.TextDisabled($"MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8} Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
+                if (debugInfo.DistinctTypeFlags != 0)
+                {
+                    List<string> typeFlagLabels = [];
+                    for (int bit = 1; bit < 32; bit++)
+                    {
+                        if ((debugInfo.DistinctTypeFlags & (1u << bit)) != 0)
+                        {
+                            string label = bit switch
+                            {
+                                0x03 => "m2-top(0x03)",
+                                0x10 => "interior-floor(0x10)",
+                                0x12 => "exterior-solid(0x12)",
+                                _ => $"0x{bit:X2}",
+                            };
+                            typeFlagLabels.Add(label);
+                        }
+                    }
+                    ImGui.TextDisabled($"TypeFlags: {string.Join(", ", typeFlagLabels)}");
+                }
             }
 
             ImGui.TextDisabled($"Tile layer align: T=({_worldScene.SelectedPm4Ck24LayerTranslation.X:F2}, {_worldScene.SelectedPm4Ck24LayerTranslation.Y:F2}, {_worldScene.SelectedPm4Ck24LayerTranslation.Z:F2}) Rot=({_worldScene.SelectedPm4Ck24LayerRotationDegrees.X:F2}, {_worldScene.SelectedPm4Ck24LayerRotationDegrees.Y:F2}, {_worldScene.SelectedPm4Ck24LayerRotationDegrees.Z:F2})° S=({_worldScene.SelectedPm4Ck24LayerScale.X:F3}, {_worldScene.SelectedPm4Ck24LayerScale.Y:F3}, {_worldScene.SelectedPm4Ck24LayerScale.Z:F3})");
@@ -559,6 +578,25 @@ public partial class ViewerApp
             ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} Mdos={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
             ImGui.TextDisabled($"Part={debugInfo.ObjectPartId} MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8}");
             ImGui.TextDisabled($"Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
+            if (debugInfo.DistinctTypeFlags != 0)
+            {
+                List<string> typeFlagLabels = [];
+                for (int bit = 1; bit < 32; bit++)
+                {
+                    if ((debugInfo.DistinctTypeFlags & (1u << bit)) != 0)
+                    {
+                        string label = bit switch
+                        {
+                            0x03 => "m2-top(0x03)",
+                            0x10 => "interior-floor(0x10)",
+                            0x12 => "exterior-solid(0x12)",
+                            _ => $"0x{bit:X2}",
+                        };
+                        typeFlagLabels.Add(label);
+                    }
+                }
+                ImGui.TextDisabled($"TypeFlags: {string.Join(", ", typeFlagLabels)}");
+            }
             if (debugInfo.LinkedPositionRefSummary.TotalCount > 0)
             {
                 if (debugInfo.LinkedPositionRefSummary.HasNormalHeadings)
@@ -1882,15 +1920,16 @@ public partial class ViewerApp
     {
         return mode switch
         {
-            Pm4OverlayColorMode.Ck24Type => "MSUR._0x1C-derived type byte",
-            Pm4OverlayColorMode.Ck24ObjectId => "MSUR._0x1C-derived low16",
-            Pm4OverlayColorMode.Ck24Key => "MSUR._0x1C-derived key24",
+            Pm4OverlayColorMode.Ck24Type => "CK24 Type",
+            Pm4OverlayColorMode.Ck24ObjectId => "CK24 ObjectId",
+            Pm4OverlayColorMode.Ck24Key => "CK24 Key",
             Pm4OverlayColorMode.Tile => "Tile",
-            Pm4OverlayColorMode.MshdRegionId => "MSHD.Field04 region id",
-            Pm4OverlayColorMode.GroupKey => "MSUR._0x00 (alias GroupKey)",
-            Pm4OverlayColorMode.AttributeMask => "MSUR._0x02 (alias AttributeMask)",
-            Pm4OverlayColorMode.Height => "MSUR._0x10 plane-distance gradient",
-            _ => mode.ToString()
+            Pm4OverlayColorMode.MshdRegionId => "MSHD RegionId",
+            Pm4OverlayColorMode.GroupKey => "Group Key",
+            Pm4OverlayColorMode.AttributeMask => "Attribute Mask",
+            Pm4OverlayColorMode.Height => "Height",
+            Pm4OverlayColorMode.TypeFlags => "TypeFlags",
+            _ => mode.ToString(),
         };
     }
 
