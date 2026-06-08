@@ -2973,4 +2973,152 @@ public partial class ViewerApp
 
         ImGui.TextDisabled("Adds on top of the version-aware WMO MLIQ baseline. Changes are live.");
     }
+
+    // ── Tool windows extracted from right sidebar ──────────────────────
+
+    private void DrawUniqueIdArchaeologyWindow()
+    {
+        ImGui.SetNextWindowSize(new Vector2(420f, 360f), ImGuiCond.FirstUseEver);
+        if (ImGui.Begin("UniqueId Archaeology", ref _showUniqueIdArchaeologyWindow))
+        {
+            DrawUniqueIdArchaeologyContent();
+        }
+        ImGui.End();
+    }
+
+    private void DrawTaxiWindow()
+    {
+        ImGui.SetNextWindowSize(new Vector2(460f, 500f), ImGuiCond.FirstUseEver);
+        if (ImGui.Begin("Taxi Panel", ref _showTaxiWindow))
+        {
+            DrawSelectedTaxiControls();
+        }
+        ImGui.End();
+    }
+
+    private void DrawWeakSignalWindow()
+    {
+        ImGui.SetNextWindowSize(new Vector2(400f, 480f), ImGuiCond.FirstUseEver);
+        if (ImGui.Begin("Weak Signal Amplifier", ref _showWeakSignalWindow))
+        {
+            DrawTerrainControlsAdjustmentWeakSignalContent();
+        }
+        ImGui.End();
+    }
+
+    private void DrawUniqueIdArchaeologyContent()
+    {
+        // Extracted from DrawUnifiedViewerSettingsSidebarContent (ViewerApp.cs ~line 8368)
+        if (_worldScene == null)
+            return;
+
+        ImGui.TextDisabled("Scopes UniqueId placement data into layers by consecutive gap analysis.");
+        ImGui.Spacing();
+
+        int cameraTileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
+        int cameraTileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
+        _worldScene.SetUniqueIdFilterTile(cameraTileX, cameraTileY);
+
+        bool uniqueIdFilterEnabled = _worldScene.UniqueIdFilterEnabled;
+        bool uniqueIdFilterChanged = false;
+        if (ImGui.Checkbox("Filter UniqueId Range", ref uniqueIdFilterEnabled))
+        {
+            _worldScene.UniqueIdFilterEnabled = uniqueIdFilterEnabled;
+            uniqueIdFilterChanged = true;
+        }
+        ImGui.SameLine();
+        UniqueIdVisibilityScope currentScope = _worldScene.UniqueIdVisibilityScope;
+        if (ImGui.BeginCombo("##UniqueIdScope", currentScope == UniqueIdVisibilityScope.PerMap ? "Per-Map" : "Camera Tile"))
+        {
+            if (ImGui.Selectable("Per-Map", currentScope == UniqueIdVisibilityScope.PerMap))
+                _worldScene.UniqueIdVisibilityScope = UniqueIdVisibilityScope.PerMap;
+            if (ImGui.Selectable("Camera Tile", currentScope == UniqueIdVisibilityScope.CameraTile))
+                _worldScene.UniqueIdVisibilityScope = UniqueIdVisibilityScope.CameraTile;
+            ImGui.EndCombo();
+        }
+
+        ImGui.Spacing();
+        IReadOnlyList<UniqueIdArchaeologyLayer> detectedLayers = _worldScene.GetUniqueIdArchaeologyLayers();
+        if (detectedLayers.Count == 0)
+        {
+            ImGui.TextDisabled("No UniqueId data available for the current scope.");
+        }
+        else
+        {
+            if (ImGui.BeginTable("##UniqueIdLayers", 4, ImGuiTableFlags.BordersV | ImGuiTableFlags.RowBg))
+            {
+                ImGui.TableSetupColumn("Layer");
+                ImGui.TableSetupColumn("Range");
+                ImGui.TableSetupColumn("Summary");
+                ImGui.TableSetupColumn("");
+                ImGui.TableHeadersRow();
+
+                for (int i = 0; i < detectedLayers.Count; i++)
+                {
+                    UniqueIdArchaeologyLayer layer = detectedLayers[i];
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted($"Layer {layer.LayerNumber}");
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted($"{layer.MinUniqueId}  —  {layer.MaxUniqueId}");
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted($"{layer.PlacementCount} placements ({layer.WmoCount} WMO, {layer.MdxCount} M2)");
+                    ImGui.TableNextColumn();
+                    if (ImGui.SmallButton($"Show##uid_layer_{i}"))
+                    {
+                        _worldScene.SetUniqueIdFilterRange(layer.MinUniqueId, layer.MaxUniqueId);
+                        _worldScene.UniqueIdFilterEnabled = true;
+                        uniqueIdFilterChanged = true;
+                    }
+                }
+                ImGui.EndTable();
+            }
+        }
+
+        // Clear filter handled by enable/disable toggle above
+    }
+
+    private void DrawTerrainControlsAdjustmentWeakSignalContent()
+    {
+        // Extracted from DrawTerrainControlsAdjustmentContent (this file ~line 2576)
+        if (_terrainManager == null && _vlmTerrainManager == null)
+            return;
+
+        ImGui.Text("Weak Signal Amplifier");
+        ImGui.Spacing();
+
+        bool weakSignalEnabled = _terrainWeakSignalRestoreEnabled;
+        if (ImGui.Checkbox("Restore Weak-Signal Terrain", ref weakSignalEnabled))
+            SetTerrainWeakSignalRestoreEnabled(weakSignalEnabled);
+
+        if (_terrainWeakSignalRestoreEnabled)
+        {
+            ImGui.InputFloat("Restore Range Min Z", ref _terrainWeakSignalRestoreCandidateMinHeight, 1f, 10f);
+            ImGui.InputFloat("Restore Range Max Z", ref _terrainWeakSignalRestoreCandidateMaxHeight, 1f, 10f);
+            ImGui.Spacing();
+
+            if (ImGui.Button("Packed +/-2.778")) { _terrainWeakSignalRestoreCandidateMinHeight = -2.778f; _terrainWeakSignalRestoreCandidateMaxHeight = 2.778f; RefreshTerrainWeakSignalRestoreForLoadedTiles(); }
+            ImGui.SameLine();
+            if (ImGui.Button("Packed +/-3")) { _terrainWeakSignalRestoreCandidateMinHeight = -3f; _terrainWeakSignalRestoreCandidateMaxHeight = 3f; RefreshTerrainWeakSignalRestoreForLoadedTiles(); }
+            ImGui.SameLine();
+            if (ImGui.Button("Early +/-5")) { _terrainWeakSignalRestoreCandidateMinHeight = -5f; _terrainWeakSignalRestoreCandidateMaxHeight = 5f; RefreshTerrainWeakSignalRestoreForLoadedTiles(); }
+            ImGui.SameLine();
+            if (ImGui.Button("Early +/-10")) { _terrainWeakSignalRestoreCandidateMinHeight = -10f; _terrainWeakSignalRestoreCandidateMaxHeight = 10f; RefreshTerrainWeakSignalRestoreForLoadedTiles(); }
+            ImGui.SameLine();
+            if (ImGui.Button("Late -5000..10")) { _terrainWeakSignalRestoreCandidateMinHeight = -5000f; _terrainWeakSignalRestoreCandidateMaxHeight = 10f; RefreshTerrainWeakSignalRestoreForLoadedTiles(); }
+            ImGui.Spacing();
+
+            bool autoFactor = _terrainWeakSignalRestoreUseAutoFactor;
+            if (ImGui.Checkbox("Auto Restore Scale", ref autoFactor))
+                _terrainWeakSignalRestoreUseAutoFactor = autoFactor;
+
+            if (!autoFactor)
+            {
+                ImGui.InputFloat("Restore Scale", ref _terrainWeakSignalRestoreManualFactor, 0.5f, 8f);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_terrainWeakSignalRestoreStatus))
+                ImGui.TextDisabled(_terrainWeakSignalRestoreStatus);
+        }
+    }
 }

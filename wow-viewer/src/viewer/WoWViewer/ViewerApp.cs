@@ -719,6 +719,9 @@ public partial class ViewerApp : IDisposable
     private bool _showTerrainToolsWindow;
     private bool _showMcnkExplorerWindow;
     private bool _showCaptureAutomationWindow = false;
+    private bool _showUniqueIdArchaeologyWindow;
+    private bool _showTaxiWindow;
+    private bool _showWeakSignalWindow;
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
@@ -1595,6 +1598,16 @@ void main() {
             if (_showPm4AlignmentWindow)
                 DrawPm4AlignmentWindow();
 
+            // Tool windows extracted from right sidebar
+            if (_showUniqueIdArchaeologyWindow && _worldScene != null)
+                DrawUniqueIdArchaeologyWindow();
+
+            if (_showTaxiWindow && _worldScene != null)
+                DrawTaxiWindow();
+
+            if (_showWeakSignalWindow && (_terrainManager != null || _vlmTerrainManager != null))
+                DrawWeakSignalWindow();
+
         }
 
         _forceApplyShellPanelLayout = false;
@@ -1779,6 +1792,17 @@ void main() {
 
                 if (ImGui.MenuItem("PM4 Correlation", "", false, hasWorldScene))
                     OpenPm4Workbench(Pm4WorkbenchTab.Correlation);
+
+                ImGui.Separator();
+
+                if (ImGui.MenuItem("UniqueId Archaeology", "", _showUniqueIdArchaeologyWindow, hasWorldScene))
+                    _showUniqueIdArchaeologyWindow = !_showUniqueIdArchaeologyWindow;
+
+                if (ImGui.MenuItem("Taxi Panel", "", _showTaxiWindow, hasWorldScene))
+                    _showTaxiWindow = !_showTaxiWindow;
+
+                if (ImGui.MenuItem("Weak Signal Amplifier", "", _showWeakSignalWindow, hasTerrainScene))
+                    _showWeakSignalWindow = !_showWeakSignalWindow;
 
                 ImGui.Separator();
 
