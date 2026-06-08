@@ -35,18 +35,15 @@ public sealed class Pm4ObjectSegmentBuilderTests
 
         IReadOnlyList<Pm4BuiltObjectSegment> segments = Pm4ObjectSegmentBuilder.Build(document, 30, 48);
 
-        Assert.Equal(4, segments.Count);
+        Assert.Equal(3, segments.Count);
 
         List<Pm4BuiltObjectSegment> zeroSegments = segments.Where(static segment => segment.Segment.Ck24 == 0u).ToList();
-        Assert.Equal(2, zeroSegments.Count);
-        Assert.All(zeroSegments, static segment =>
-        {
-            Assert.True(segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.ZeroCk24Seed));
-            Assert.True(segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.UsedConnectivityFallback));
-            Assert.True(segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.HasUnlinkedSurfaces));
-            Assert.True(segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.MissingPositionRefs));
-            Assert.Equal(1, segment.Segment.SurfaceCount);
-        });
+        Assert.Single(zeroSegments);
+        Pm4BuiltObjectSegment zeroSegment = zeroSegments[0];
+        Assert.True(zeroSegment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.ZeroCk24Seed));
+        Assert.True(zeroSegment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.HasUnlinkedSurfaces));
+        Assert.True(zeroSegment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.MissingPositionRefs));
+        Assert.Equal(2, zeroSegment.Segment.SurfaceCount);
 
         List<Pm4BuiltObjectSegment> reusedLow16Segments = segments
             .Where(static segment => segment.Segment.Ck24 != 0u)

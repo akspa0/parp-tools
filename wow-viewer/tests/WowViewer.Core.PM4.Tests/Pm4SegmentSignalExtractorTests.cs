@@ -49,7 +49,7 @@ public sealed class Pm4SegmentSignalExtractorTests
             new Pm4ObjectSegmentSurface(1, 4, 0x12, 3, 2f, 3, 1, 0x42ABCD00u, 0x42ABCDu, 0x42, 0xABCD, Vector3.UnitZ),
         ];
 
-        Pm4SegmentSignalRecord signal = Pm4SegmentSignalExtractor.Extract(segment, state, anchorSummary, surfaces);
+        Pm4SegmentSignalRecord signal = Pm4SegmentSignalExtractor.Extract(segment, state, anchorSummary, surfaces, new Dictionary<byte, Pm4Bounds3>());
 
         Assert.Equal(Pm4SegmentSignalExtractor.CurrentSignalVersion, signal.SignalVersion);
         Assert.NotNull(signal.Bounds);

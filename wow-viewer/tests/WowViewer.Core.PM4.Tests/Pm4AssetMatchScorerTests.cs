@@ -157,7 +157,7 @@ public sealed class Pm4AssetMatchScorerTests
             new Pm4ObjectSegmentSurface(0, 3, 0x10, 3, center.Z, 0u, 0u, ck24 << 8, ck24, ck24Type, 0x1234, Vector3.UnitZ),
         ];
 
-        Pm4SegmentSignalRecord signal = Pm4SegmentSignalExtractor.Extract(segment, correlationState, anchorSummary, surfaces);
+        Pm4SegmentSignalRecord signal = Pm4SegmentSignalExtractor.Extract(segment, correlationState, anchorSummary, surfaces, new Dictionary<byte, Pm4Bounds3>());
         return new Pm4BuiltObjectSegment(
             segment,
             signal,

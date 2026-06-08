@@ -6,6 +6,13 @@
 - all new code lands in `wow-viewer`.
 - staged clients under `I:/parp/parp-tools/output/tmp/wowarchive-clients/` are the only trusted client roots.
 
+## 046 Status (2026-06-08 Checkpoint)
+
+- **21/37 tasks complete** — all C# library code, inspect commands, tests, match-report writer, human-readable report printing done; segment builder rewritten for CK24+TypeFlags grouping (18 real objects vs 4110 fragments); scorer rewritten for type-profile matching
+- **16 tasks remaining** — Python/Zarr tooling (T002, T013, T014, T017, T019), schema validation (T034), viewer review surface (T030), known-tile validation (T024), doc updates (T032, T033), polish (T009, T015, T027, T028, T031), viewer TypeFlags filter (T037)
+- **Biggest unproven gap**: Python/Zarr corpus lane is completely unimplemented
+- **Out of scope**: viewer-side review surface, direct map writeback, old manual matcher rescue
+
 ## Current wow-viewer Lanes
 
 - PM4 research remains library-first in `wow-viewer/src/core/WowViewer.Core.PM4`.
@@ -21,7 +28,7 @@
   - `0x12` = exterior WMO solid surfaces
 - keep `MSLK.TypeFlags` distinct from `MSLK.GroupObjectId`.
 
-## Planned PM4 Follow-Ups
+## Planned PM4 Follow-Ups (see 046 checkpoint above)
 
 - spec `046-pm4-asset-matching` now owns the future PM4 automation lane:
   - replace freeze-prone `Export PM4 Obj Set`

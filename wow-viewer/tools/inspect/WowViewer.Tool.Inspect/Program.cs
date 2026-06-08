@@ -1961,12 +1961,7 @@ static void RunPm4MatchAssets(string[] args)
 		if (!string.IsNullOrWhiteSpace(output))
 		{
 			string outputPath = Path.GetFullPath(output);
-			string? directory = Path.GetDirectoryName(outputPath);
-			if (!string.IsNullOrWhiteSpace(directory))
-				Directory.CreateDirectory(directory);
-
-			File.WriteAllText(outputPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
-			Console.WriteLine($"Wrote {outputPath}");
+			WritePm4Report(manifest, outputPath);
 			Console.WriteLine($"Matched {manifest.SegmentCount} PM4 segments against {assetBuild.Assets.Count} validation asset references.");
 			Console.WriteLine($"Synthesized {placementProposals.Count} placement proposals from the ranked candidates.");
 			return;
@@ -2097,12 +2092,7 @@ static void RunPm4SynthesizePlacements(string[] args)
 		if (!string.IsNullOrWhiteSpace(output))
 		{
 			string outputPath = Path.GetFullPath(output);
-			string? directory = Path.GetDirectoryName(outputPath);
-			if (!string.IsNullOrWhiteSpace(directory))
-				Directory.CreateDirectory(directory);
-
-			File.WriteAllText(outputPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
-			Console.WriteLine($"Wrote {outputPath}");
+			WritePm4Report(manifest, outputPath);
 			Console.WriteLine($"Synthesized {placementProposals.Count} placement proposals from {manifest.SegmentCount} PM4 segments using {assetBuild.Assets.Count} asset references.");
 			return;
 		}
@@ -2197,13 +2187,8 @@ static void RunPm4ExportSegments(string[] args)
 		if (!string.IsNullOrWhiteSpace(output))
 		{
 			string outputPath = Path.GetFullPath(output);
-			string? directory = Path.GetDirectoryName(outputPath);
-			if (!string.IsNullOrWhiteSpace(directory))
-				Directory.CreateDirectory(directory);
-
 			Pm4MatchRunManifest manifest = BuildPm4SegmentExportManifest(exportRun);
-			File.WriteAllText(outputPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
-			Console.WriteLine($"Wrote {outputPath}");
+			WritePm4Report(manifest, outputPath);
 			Console.WriteLine($"Exported {exportRun.SegmentCount} PM4 segments from {exportRun.FileCount} file(s).");
 			return;
 		}
@@ -4414,6 +4399,26 @@ static Pm4MatchReportSegment BuildPm4MatchReportSegment(
 		segment.Signal.SurfaceFamilyHistogram,
 		candidates,
 		placementProposal is null ? null : ToReportPlacementProposal(placementProposal));
+}
+
+static void WritePm4Report(Pm4MatchRunManifest manifest, string outputPath)
+{
+	string ext = Path.GetExtension(outputPath) ?? "";
+	if (string.Equals(ext, ".json", StringComparison.OrdinalIgnoreCase))
+	{
+		Pm4MatchReportWriter.WriteToFile(manifest, outputPath);
+		Console.WriteLine($"Wrote {outputPath}");
+		string markdownPath = Path.ChangeExtension(outputPath, ".md");
+		Pm4MatchReportFormatter.WriteMarkdownToFile(manifest, markdownPath);
+		Console.WriteLine($"Wrote {markdownPath}");
+	}
+	else
+	{
+		if (!string.Equals(ext, ".md", StringComparison.OrdinalIgnoreCase))
+			outputPath = Path.ChangeExtension(outputPath, ".md");
+		Pm4MatchReportFormatter.WriteMarkdownToFile(manifest, outputPath);
+		Console.WriteLine($"Wrote {outputPath}");
+	}
 }
 
 static void PrintPm4SegmentExportRun(Pm4SegmentExportRun exportRun)

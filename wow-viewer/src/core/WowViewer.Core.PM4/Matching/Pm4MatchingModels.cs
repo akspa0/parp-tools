@@ -67,7 +67,8 @@ public sealed record Pm4SegmentSignalRecord(
     Pm4SegmentTopologyStats TopologyStats,
     Pm4SegmentAnchorSignals AnchorSignals,
     string SignalVersion,
-    string? SignalStoreRow);
+    string? SignalStoreRow,
+    IReadOnlyDictionary<byte, Pm4Bounds3>? TypedBounds = null);
 
 public sealed record Pm4ObjectSegmentSurface(
     int SurfaceIndex,

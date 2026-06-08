@@ -8,7 +8,13 @@ public static class Pm4AssetMatchScorer
 {
     public const double MinimumMatchedScore = 0.45d;
     public const double AmbiguousScoreWindow = 0.03d;
+
     public const string CurrentReferenceSignalVersion = "pm4-asset-reference-signal-v1";
+
+    // Known MSLK.TypeFlags values from real-data inspection
+    private const byte TypeFlag_M2Top = 0x03;
+    private const byte TypeFlag_InteriorFloor = 0x10;
+    private const byte TypeFlag_ExteriorSolid = 0x12;
 
     public static IReadOnlyList<Pm4SegmentMatchResult> ScoreSegments(
         IReadOnlyList<Pm4BuiltObjectSegment> segments,
@@ -38,51 +44,57 @@ public static class Pm4AssetMatchScorer
         if (expectedAssetKind is null)
         {
             rationale.Add($"ck24Type 0x{segment.Segment.Ck24Type:X2} is not currently treated as WMO/M2-matchable.");
-            return new Pm4SegmentMatchResult(
-                segment,
-                null,
-                Pm4AssetMatchStatus.Ineligible,
-                true,
-                rationale,
-                Array.Empty<Pm4AssetMatchCandidate>());
+            return new Pm4SegmentMatchResult(segment, null, Pm4AssetMatchStatus.Ineligible, true, rationale, []);
         }
 
         if (segment.Signal.Bounds is null)
         {
             rationale.Add("segment has no usable bounds, so geometry scoring is not possible.");
-            return new Pm4SegmentMatchResult(
-                segment,
-                expectedAssetKind,
-                Pm4AssetMatchStatus.Unresolved,
-                true,
-                rationale,
-                Array.Empty<Pm4AssetMatchCandidate>());
+            return new Pm4SegmentMatchResult(segment, expectedAssetKind, Pm4AssetMatchStatus.Unresolved, true, rationale, []);
         }
+
+        // Build TypeFlags profile from typed bounds
+        Dictionary<byte, Pm4Bounds3> typedBounds = segment.Signal.TypedBounds is not null
+            ? new Dictionary<byte, Pm4Bounds3>(segment.Signal.TypedBounds)
+            : [];
+        bool hasTypeFlagsData = typedBounds.Count > 0;
+        bool hasExteriorSolid = typedBounds.ContainsKey(TypeFlag_ExteriorSolid);
+        bool hasInteriorFloor = typedBounds.ContainsKey(TypeFlag_InteriorFloor);
+        bool hasM2Top = typedBounds.ContainsKey(TypeFlag_M2Top);
+
+        string typeProfile = DescribeTypeProfile(typedBounds);
+        rationale.Add($"TypeFlags profile: {typeProfile}");
+
+        // Determine expected TypeFlags for this asset kind
+        bool profileMatchesExpectedKind = expectedAssetKind switch
+        {
+            "wmo" => hasExteriorSolid || hasInteriorFloor,
+            "m2" => hasM2Top,
+            _ => false,
+        };
+
+        if (profileMatchesExpectedKind)
+            rationale.Add($"TypeFlags profile is consistent with {expectedAssetKind} expectation.");
+        else if (hasTypeFlagsData)
+            rationale.Add($"TypeFlags profile does not match typical {expectedAssetKind} pattern — scoring with reduced weight.");
+        else
+            rationale.Add("no TypeFlags surface classification available — scoring on shape only.");
 
         List<CandidateEvaluation> evaluations = assetReferences
             .Where(asset => string.Equals(asset.AssetKind, expectedAssetKind, StringComparison.OrdinalIgnoreCase))
-            .Select(asset => EvaluateCandidate(segment, asset))
+            .Select(asset => EvaluateTypedCandidate(segment, asset, typedBounds, profileMatchesExpectedKind, hasTypeFlagsData))
             .Where(static evaluation => evaluation is not null)
             .Select(static evaluation => evaluation!)
             .OrderByDescending(static evaluation => evaluation.OverallScore)
-            .ThenByDescending(static evaluation => evaluation.Metrics.FootprintOverlapRatio)
-            .ThenByDescending(static evaluation => evaluation.Metrics.PlanarOverlapRatio)
-            .ThenBy(static evaluation => evaluation.AnchorPlanarGap)
-            .ThenBy(static evaluation => evaluation.Asset.AssetPath, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(static evaluation => evaluation.Asset.AssetId, StringComparer.OrdinalIgnoreCase)
+            .ThenByDescending(static evaluation => evaluation.TypedOverlapScore)
+            .ThenByDescending(static evaluation => evaluation.ShapeScore)
             .Take(resolvedMaxCandidates)
             .ToList();
 
         if (evaluations.Count == 0)
         {
             rationale.Add($"no {expectedAssetKind} validation references were available to score against this segment.");
-            return new Pm4SegmentMatchResult(
-                segment,
-                expectedAssetKind,
-                Pm4AssetMatchStatus.Unresolved,
-                true,
-                rationale,
-                Array.Empty<Pm4AssetMatchCandidate>());
+            return new Pm4SegmentMatchResult(segment, expectedAssetKind, Pm4AssetMatchStatus.Unresolved, true, rationale, []);
         }
 
         double topScore = evaluations[0].OverallScore;
@@ -125,99 +137,39 @@ public static class Pm4AssetMatchScorer
         return new Pm4SegmentMatchResult(segment, expectedAssetKind, status, reviewRequired, rationale, candidates);
     }
 
-    private static CandidateEvaluation? EvaluateCandidate(Pm4BuiltObjectSegment segment, Pm4AssetReferenceSignalRecord asset)
+    private static CandidateEvaluation? EvaluateTypedCandidate(
+        Pm4BuiltObjectSegment segment,
+        Pm4AssetReferenceSignalRecord asset,
+        Dictionary<byte, Pm4Bounds3> typedBounds,
+        bool profileMatchesExpectedKind,
+        bool hasTypeFlagsData)
     {
-        if (asset.Bounds is null)
+        if (asset.Bounds is null || segment.Signal.Bounds is null)
             return null;
 
-        if (IsDurableAssetCorpusRecord(asset))
-            return EvaluateDurableAssetCandidate(segment, asset);
+        // 1. TypeFlags profile match score
+        double profileScore = profileMatchesExpectedKind ? 1.0 : (hasTypeFlagsData ? 0.3 : 0.5);
 
-        Vector3 referenceCenter = segment.CorrelationState.Center;
-        Vector3 candidateCenter = asset.Center;
-        Pm4CorrelationMetrics metrics = Pm4CorrelationMath.EvaluateMetrics(
-            segment.CorrelationState.BoundsMin,
-            segment.CorrelationState.BoundsMax,
-            referenceCenter,
-            segment.CorrelationState.FootprintHull,
-            segment.CorrelationState.FootprintArea,
-            asset.Bounds.Min,
-            asset.Bounds.Max,
-            candidateCenter,
-            asset.FootprintHull,
-            asset.FootprintArea);
-
-        bool sameTile = asset.TileCoordinates.Count > 0
-            && asset.TileCoordinates.Intersect(segment.Segment.TileCoordinates, StringComparer.OrdinalIgnoreCase).Any();
-
-        float anchorPlanarGap = ComputeAnchorPlanarGap(segment.AnchorPlanarPoints, asset.ReferencePosition ?? asset.Center);
-        double footprintDistanceScore = ScoreDistance(metrics.FootprintDistance, 64f);
-        double planarGapScore = ScoreDistance(metrics.PlanarGap, 48f);
-        double verticalGapScore = ScoreDistance(metrics.VerticalGap, 16f);
-        double anchorGapScore = float.IsFinite(anchorPlanarGap)
-            ? ScoreDistance(anchorPlanarGap, 48f)
-            : 0.5d;
-        double sameTileScore = sameTile ? 1d : 0d;
-
-        Dictionary<string, double> scoreBreakdown = new(StringComparer.Ordinal)
+        // 2. Per-type-class overlap against asset bounds
+        double typedOverlapScore = 0;
+        int typedCount = 0;
+        foreach (KeyValuePair<byte, Pm4Bounds3> kv in typedBounds)
         {
-            ["footprintOverlap"] = metrics.FootprintOverlapRatio,
-            ["planarOverlap"] = metrics.PlanarOverlapRatio,
-            ["volumeOverlap"] = metrics.VolumeOverlapRatio,
-            ["footprintAreaRatio"] = metrics.FootprintAreaRatio,
-            ["footprintDistanceScore"] = footprintDistanceScore,
-            ["planarGapScore"] = planarGapScore,
-            ["verticalGapScore"] = verticalGapScore,
-            ["anchorGapScore"] = anchorGapScore,
-            ["sameTileScore"] = sameTileScore,
-        };
+            if (kv.Value.Min == kv.Value.Max)
+                continue;
 
-        double overallScore =
-            metrics.FootprintOverlapRatio * 0.28d +
-            metrics.PlanarOverlapRatio * 0.16d +
-            metrics.VolumeOverlapRatio * 0.10d +
-            metrics.FootprintAreaRatio * 0.12d +
-            footprintDistanceScore * 0.10d +
-            planarGapScore * 0.08d +
-            verticalGapScore * 0.05d +
-            anchorGapScore * 0.08d +
-            sameTileScore * 0.03d;
+            double overlap = ComputeBoundsOverlapRatio(kv.Value, asset.Bounds);
+            typedOverlapScore += overlap;
+            typedCount++;
+        }
+        typedOverlapScore = typedCount > 0 ? typedOverlapScore / typedCount : 0.5;
 
-        List<string> rationale =
-        [
-            $"footprint overlap {metrics.FootprintOverlapRatio:F3}",
-            $"planar overlap {metrics.PlanarOverlapRatio:F3}",
-            $"footprint area ratio {metrics.FootprintAreaRatio:F3}",
-            float.IsFinite(anchorPlanarGap)
-                ? $"anchor planar gap {anchorPlanarGap:F1}"
-                : "no usable anchor-planar comparison",
-        ];
-
-        return new CandidateEvaluation(asset, metrics, anchorPlanarGap, overallScore, scoreBreakdown, rationale);
-    }
-
-    private static CandidateEvaluation? EvaluateDurableAssetCandidate(Pm4BuiltObjectSegment segment, Pm4AssetReferenceSignalRecord asset)
-    {
-        if (segment.Signal.Bounds is null || asset.Bounds is null)
-            return null;
-
+        // 3. Shape similarity (sorted span ratios, footprint, volume)
         Vector3 segmentSpan = segment.Signal.Bounds.Max - segment.Signal.Bounds.Min;
-        Vector3 assetSpan = ResolveAssetSpan(asset);
-        if (assetSpan.X <= 0f || assetSpan.Y <= 0f || assetSpan.Z <= 0f)
-            return null;
+        Vector3 assetSpan = asset.Bounds.Max - asset.Bounds.Min;
 
-        float[] sortedSegmentSpans =
-        [
-            segmentSpan.X,
-            segmentSpan.Y,
-            segmentSpan.Z,
-        ];
-        float[] sortedAssetSpans =
-        [
-            assetSpan.X,
-            assetSpan.Y,
-            assetSpan.Z,
-        ];
+        double[] sortedSegmentSpans = [segmentSpan.X, segmentSpan.Y, segmentSpan.Z];
+        double[] sortedAssetSpans = [assetSpan.X, assetSpan.Y, assetSpan.Z];
         Array.Sort(sortedSegmentSpans);
         Array.Reverse(sortedSegmentSpans);
         Array.Sort(sortedAssetSpans);
@@ -228,69 +180,115 @@ public static class Pm4AssetMatchScorer
         double spanScore2 = ScoreRatio(sortedSegmentSpans[2], sortedAssetSpans[2]);
         double sortedSpanScore = (spanScore0 + spanScore1 + spanScore2) / 3d;
 
-        double segmentDiagonalXY = Math.Sqrt(segmentSpan.X * segmentSpan.X + segmentSpan.Y * segmentSpan.Y);
-        double assetDiagonalXY = ResolveSignal(asset, "footprintDiagonalXY", Math.Sqrt(assetSpan.X * assetSpan.X + assetSpan.Y * assetSpan.Y));
-        double diagonalScore = ScoreRatio(segmentDiagonalXY, assetDiagonalXY);
+        // Same-tile bonus for validation placements with position overlap
+        double sameTileBonus = 0;
+        if (asset.TileCoordinates.Count > 0 && asset.ReferencePosition.HasValue)
+        {
+            bool sharesTile = asset.TileCoordinates
+                .Intersect(segment.Segment.TileCoordinates, StringComparer.OrdinalIgnoreCase)
+                .Any();
+            if (sharesTile)
+            {
+                // Compute center distance overlap ratio
+                double centerDist = Vector3.Distance(
+                    segment.CorrelationState.Center,
+                    asset.Center);
+                sameTileBonus = ScoreDistance(centerDist, 64f);
+            }
+        }
+
+        double segmentFootprint = Math.Max(0d, segment.CorrelationState.FootprintArea);
+        double assetFootprint = Math.Max(0d, asset.FootprintArea);
+        double footprintScore = ScoreRatio(segmentFootprint, assetFootprint);
 
         double segmentVolume = Math.Max(0d, segmentSpan.X) * Math.Max(0d, segmentSpan.Y) * Math.Max(0d, segmentSpan.Z);
-        double assetVolume = ResolveSignal(asset, "boundsVolume", Math.Max(0d, assetSpan.X) * Math.Max(0d, assetSpan.Y) * Math.Max(0d, assetSpan.Z));
+        double assetVolume = Math.Max(0d, assetSpan.X) * Math.Max(0d, assetSpan.Y) * Math.Max(0d, assetSpan.Z);
         double volumeScore = ScoreRatio(segmentVolume, assetVolume);
 
-        double segmentFootprintArea = Math.Max(0d, segment.CorrelationState.FootprintArea);
-        double assetFootprintArea = Math.Max(0d, asset.FootprintArea);
-        double footprintAreaScore = ScoreRatio(segmentFootprintArea, assetFootprintArea);
+        double segmentDiagonal = Math.Sqrt(segmentSpan.X * segmentSpan.X + segmentSpan.Y * segmentSpan.Y);
+        double assetDiagonal = Math.Sqrt(assetSpan.X * assetSpan.X + assetSpan.Y * assetSpan.Y);
+        double diagonalScore = ScoreRatio(segmentDiagonal, assetDiagonal);
 
         double heightScore = ScoreRatio(segmentSpan.Z, assetSpan.Z);
-        double segmentAspect = segmentSpan.Y <= 0f ? 0d : segmentSpan.X / segmentSpan.Y;
-        double assetAspect = assetSpan.Y <= 0f ? 0d : assetSpan.X / assetSpan.Y;
+        double segmentAspect = segmentSpan.Y > 0 ? segmentSpan.X / segmentSpan.Y : 0;
+        double assetAspect = assetSpan.Y > 0 ? assetSpan.X / assetSpan.Y : 0;
         double aspectScore = ScoreRatio(segmentAspect, assetAspect);
+
+        double shapeScore = sortedSpanScore * 0.25 + footprintScore * 0.15 + volumeScore * 0.15 + diagonalScore * 0.12 + heightScore * 0.10 + aspectScore * 0.08 + sameTileBonus * 0.15;
+
+        // 4. Combined score: type overlap + shape + profile
+        double typeWeight = hasTypeFlagsData ? 0.35 : 0.0;
+        double profileWeight = hasTypeFlagsData ? 0.15 : 0.0;
+        double shapeWeight = 1.0 - typeWeight - profileWeight;
+
+        double overallScore = typedOverlapScore * typeWeight + profileScore * profileWeight + shapeScore * shapeWeight;
 
         Dictionary<string, double> scoreBreakdown = new(StringComparer.Ordinal)
         {
+            ["typeProfileScore"] = profileScore,
+            ["typedOverlapScore"] = typedOverlapScore,
             ["sortedSpanScore"] = sortedSpanScore,
-            ["spanXScore"] = ScoreRatio(segmentSpan.X, assetSpan.X),
-            ["spanYScore"] = ScoreRatio(segmentSpan.Y, assetSpan.Y),
-            ["spanZScore"] = heightScore,
-            ["footprintAreaScore"] = footprintAreaScore,
+            ["footprintAreaScore"] = footprintScore,
             ["volumeScore"] = volumeScore,
-            ["footprintDiagonalScore"] = diagonalScore,
-            ["planarAspectScore"] = aspectScore,
+            ["diagonalScore"] = diagonalScore,
+            ["heightScore"] = heightScore,
+            ["aspectScore"] = aspectScore,
+            ["shapeScore"] = shapeScore,
+            ["typeWeight"] = typeWeight,
+            ["profileWeight"] = profileWeight,
+            ["shapeWeight"] = shapeWeight,
         };
-
-        double overallScore =
-            sortedSpanScore * 0.30d +
-            footprintAreaScore * 0.18d +
-            volumeScore * 0.16d +
-            diagonalScore * 0.14d +
-            heightScore * 0.12d +
-            aspectScore * 0.10d;
 
         List<string> rationale =
         [
-            $"sorted span score {sortedSpanScore:F3}",
-            $"footprint area score {footprintAreaScore:F3}",
-            $"volume score {volumeScore:F3}",
-            $"planar diagonal score {diagonalScore:F3}",
+            $"typed overlap {typedOverlapScore:F3} (typeWeight={typeWeight:F2})",
+            $"shape score {shapeScore:F3} (shapeWeight={shapeWeight:F2})",
+            $"type profile {profileScore:F3} (profileWeight={profileWeight:F2})",
         ];
 
-        Pm4CorrelationMetrics syntheticMetrics = new(
-            0f,
-            0f,
-            0f,
-            (float)sortedSpanScore,
-            (float)volumeScore,
-            (float)diagonalScore,
-            (float)footprintAreaScore,
-            0f);
+        return new CandidateEvaluation(asset, typedOverlapScore, shapeScore, overallScore, scoreBreakdown, rationale);
+    }
 
-        return new CandidateEvaluation(asset, syntheticMetrics, float.PositiveInfinity, overallScore, scoreBreakdown, rationale);
+    private static double ComputeBoundsOverlapRatio(Pm4Bounds3 left, Pm4Bounds3 right)
+    {
+        // Axis-aligned bounding box overlap in XY (footprint plane)
+        double overlapX = Math.Max(0, Math.Min(left.Max.X, right.Max.X) - Math.Max(left.Min.X, right.Min.X));
+        double overlapY = Math.Max(0, Math.Min(left.Max.Y, right.Max.Y) - Math.Max(left.Min.Y, right.Min.Y));
+        double leftArea = (left.Max.X - left.Min.X) * (left.Max.Y - left.Min.Y);
+        double rightArea = (right.Max.X - right.Min.X) * (right.Max.Y - right.Min.Y);
+        double intersectionArea = overlapX * overlapY;
+
+        if (leftArea <= 0 || rightArea <= 0)
+            return 0;
+
+        // Jaccard-like: intersection / union
+        double unionArea = leftArea + rightArea - intersectionArea;
+        return unionArea > 0 ? intersectionArea / unionArea : 0;
+    }
+
+    private static string DescribeTypeProfile(Dictionary<byte, Pm4Bounds3> typedBounds)
+    {
+        if (typedBounds.Count == 0)
+            return "none";
+
+        List<string> parts = [];
+        foreach (byte typeFlag in typedBounds.Keys.Order())
+        {
+            string label = typeFlag switch
+            {
+                TypeFlag_M2Top => "m2-top(0x03)",
+                TypeFlag_InteriorFloor => "interior-floor(0x10)",
+                TypeFlag_ExteriorSolid => "exterior-solid(0x12)",
+                _ => $"0x{typeFlag:X2}",
+            };
+            parts.Add(label);
+        }
+        return string.Join(", ", parts);
     }
 
     private static Pm4AssetMatchStatus ResolveCandidateStatus(
-        Pm4AssetMatchStatus segmentStatus,
-        int index,
-        CandidateEvaluation evaluation,
-        double topScore)
+        Pm4AssetMatchStatus segmentStatus, int index,
+        CandidateEvaluation evaluation, double topScore)
     {
         if (segmentStatus == Pm4AssetMatchStatus.Unresolved)
             return Pm4AssetMatchStatus.Unresolved;
@@ -300,9 +298,7 @@ public static class Pm4AssetMatchScorer
                 ? Pm4AssetMatchStatus.Ambiguous
                 : Pm4AssetMatchStatus.Unresolved;
 
-        return index == 0
-            ? Pm4AssetMatchStatus.Matched
-            : Pm4AssetMatchStatus.Unresolved;
+        return index == 0 ? Pm4AssetMatchStatus.Matched : Pm4AssetMatchStatus.Unresolved;
     }
 
     private static List<string> BuildSegmentRationale(Pm4BuiltObjectSegment segment)
@@ -315,8 +311,6 @@ public static class Pm4AssetMatchScorer
 
         if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.ZeroCk24Seed))
             rationale.Add("segment came from the zero-CK24 fallback seed path.");
-        if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.UsedConnectivityFallback))
-            rationale.Add("segment required connectivity fallback splitting.");
         if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.MissingPositionRefs))
             rationale.Add("segment is missing linked position refs.");
         if (segment.Segment.ConfidenceFlags.HasFlag(Pm4SegmentConfidenceFlags.MultipleLinkGroupIds))
@@ -337,73 +331,28 @@ public static class Pm4AssetMatchScorer
         };
     }
 
-    private static double ScoreDistance(float distance, float scale)
+    private static double ScoreDistance(double distance, double scale)
     {
-        if (!float.IsFinite(distance))
+        if (!double.IsFinite(distance))
             return 0d;
-
-        if (distance <= 0f)
+        if (distance <= 0d)
             return 1d;
-
-        return 1d / (1d + distance / Math.Max(0.001f, scale));
-    }
-
-    private static float ComputeAnchorPlanarGap(IReadOnlyList<Vector2> anchorPlanarPoints, Vector3 referencePosition)
-    {
-        if (anchorPlanarPoints.Count == 0)
-            return float.PositiveInfinity;
-
-        Vector2 target = new(referencePosition.X, referencePosition.Y);
-        float bestDistanceSquared = float.PositiveInfinity;
-        for (int index = 0; index < anchorPlanarPoints.Count; index++)
-        {
-            float distanceSquared = Vector2.DistanceSquared(anchorPlanarPoints[index], target);
-            if (distanceSquared < bestDistanceSquared)
-                bestDistanceSquared = distanceSquared;
-        }
-
-        return float.IsFinite(bestDistanceSquared) ? MathF.Sqrt(bestDistanceSquared) : float.PositiveInfinity;
-    }
-
-    private static bool IsDurableAssetCorpusRecord(Pm4AssetReferenceSignalRecord asset)
-    {
-        return asset.ReferencePosition is null
-            && asset.TileCoordinates.Count == 0
-            && asset.ValidationTags?.Contains("durable-asset-corpus", StringComparer.OrdinalIgnoreCase) == true;
-    }
-
-    private static Vector3 ResolveAssetSpan(Pm4AssetReferenceSignalRecord asset)
-    {
-        if (asset.Bounds is null)
-            return Vector3.Zero;
-
-        double spanX = ResolveSignal(asset, "boundsSpanX", asset.Bounds.Max.X - asset.Bounds.Min.X);
-        double spanY = ResolveSignal(asset, "boundsSpanY", asset.Bounds.Max.Y - asset.Bounds.Min.Y);
-        double spanZ = ResolveSignal(asset, "boundsSpanZ", asset.Bounds.Max.Z - asset.Bounds.Min.Z);
-        return new Vector3((float)spanX, (float)spanY, (float)spanZ);
-    }
-
-    private static double ResolveSignal(Pm4AssetReferenceSignalRecord asset, string key, double fallback)
-    {
-        return asset.RenderOrCollisionSignals.TryGetValue(key, out double value) && double.IsFinite(value)
-            ? value
-            : fallback;
+        return 1d / (1d + distance / Math.Max(0.001, scale));
     }
 
     private static double ScoreRatio(double left, double right)
     {
         if (!double.IsFinite(left) || !double.IsFinite(right) || left <= 0d || right <= 0d)
             return 0d;
-
-        double minimum = Math.Min(left, right);
-        double maximum = Math.Max(left, right);
-        return maximum <= 0d ? 0d : minimum / maximum;
+        double min = Math.Min(left, right);
+        double max = Math.Max(left, right);
+        return max > 0d ? min / max : 0d;
     }
 
     private sealed record CandidateEvaluation(
         Pm4AssetReferenceSignalRecord Asset,
-        Pm4CorrelationMetrics Metrics,
-        float AnchorPlanarGap,
+        double TypedOverlapScore,
+        double ShapeScore,
         double OverallScore,
         IReadOnlyDictionary<string, double> ScoreBreakdown,
         IReadOnlyList<string> Rationale);

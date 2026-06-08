@@ -1,5 +1,11 @@
 # Progress
 
+## 046-PM4-Asset-Matching Checkpoint (2026-06-08)
+
+- **21/37 tasks complete**. All C# library code landed in `Core.PM4/Matching/`: models, builder, extractor, export service, scorer, synthesizer (6 files). All 4 inspect commands live. 14 unit tests pass. 7 smoke proof JSON files in `output/tmp/`. Match-report writer and Markdown formatter in Tools.Shared are done. Python minimap-overlay visualization script exists.
+- **16 tasks remaining**: Python/Zarr tooling (T002, T013, T014, T017, T019), schema validation (T034), viewer review (T030), known-tile validation (T024), polish/doc (T009, T015, T027, T028, T031, T032, T033), viewer TypeFlags filter (T037).
+- **Biggest gap**: Python/Zarr signal-store lane does not exist yet — the `data-harvester/src/harvester/pm4_asset_matching/` package is completely absent. Asset corpus also lacks per-TypeFlags bounds — scorer falls back to shape-only matching.
+
 ## Completed / Landed
 
 - PM4 `MSHD.Field04` corpus analysis was tightened:
@@ -500,6 +506,40 @@
   - current interpretation:
     - the lane now does more than ranking; it produces machine-readable proposal candidates with provenance
     - the next hard proof is known-tile validation of proposal quality, not rebuilding another matching UI
+
+- **PM4 match-report writer slice (2026-06-08)**
+  - T021 — match-report writer now lives in `wow-viewer/src/tools-shared/WowViewer.Tools.Shared/Pm4Matching/Pm4MatchReportWriter.cs`
+  - `Pm4MatchReportWriter` is a static utility class with `ToJson(Pm4MatchRunManifest)`, `WriteToFile(Pm4MatchRunManifest, string)`, and `CreateJsonOptions()` methods
+  - refactored three inline `JsonSerializer.Serialize(manifest, ...)`/`File.WriteAllText` patterns in `Program.cs` (export-segments, match-assets, synthesize-placements) to use the shared writer
+  - all 14 existing PM4 matching tests still pass
+  - no new dependency added to Tools.Shared (writer uses only the existing report model types)
+  - `Pm4MatchRunOptions.cs` from the plan structure still pending
+
+- **PM4 human-readable report and visualization slice (2026-06-08)**
+  - T029 — Markdown report formatter `Pm4MatchReportFormatter` in Tools.Shared `Pm4Matching/` produces per-tile summary tables + top matched/ambiguous detail
+  - auto-generated `.md` file written alongside every `.json` report (`match-assets`, `synthesize-placements`, `export-segments`)
+  - Python visualization script `data-harvester/scripts/visualize_pm4_matches.py` reads match report JSON + minimap PNG and produces overlay plot
+  - proof: rendered `output/tmp/pm4-overlay-0_0.png` from the seeded smoke report
+
+- **PM4 segment builder rewrite — CK24+TypeFlags grouping (2026-06-08)**
+  - `Pm4ObjectSegmentBuilder` completely rewritten: removed connectivity/MSLK-GroupObjectId/MSCN over-splitting
+  - surfaces group by CK24 (one segment per real game object), fallback to (GroupKey,AttributeMask) for zero-CK24
+  - MSLK.TypeFlags lookup per surface via RefIndex → classifies surfaces as roof/floor/exterior/M2-top
+  - `ComputeTypedBounds()` produces per-TypeFlags-class AABB stored in `Pm4SegmentSignalRecord.TypedBounds`
+  - signal version bumped to v2; surface histogram now includes `typeFlags:*` entries
+  - dev tile `development_00_00.pm4`: **4110 → 18 segments** (15 matchable, 3 navmesh ineligible)
+  - `WritePm4Report()` shared helper dispatches between JSON+MD vs MD-only based on output extension
+  - quickstart.md updated with markdown-first examples
+
+- **PM4 scorer rewrite — type-profile matching (2026-06-08)**
+  - `Pm4AssetMatchScorer` rewritten: replaces footprint/volume/stretch overlap with TypeFlags-profile scoring
+  - three-component score: typed overlap (35%), type profile consistency (15%), shape similarity (50%)
+  - typed overlap: per-TypeFlags-class bounds Jaccard against asset bounds
+  - type profile: checks segment has expected TypeFlags for its asset kind (WMO→0x10/0x12, M2→0x03)
+  - shape fallback: sorted span ratios, footprint area, volume, diagonal, height, aspect, same-tile distance
+  - all 14 tests pass; test for `UsedConnectivityFallback` removed (no longer set)
+  - **current bottleneck**: asset corpus has no per-TypeFlags bounds → typed overlap weight is 0 → falls back to shape-only
+  - T037 added: viewer PM4 overlay filtering by MSLK.TypeFlags for unknown-flag visual inspection
 
 ## Next Likely Steps
 

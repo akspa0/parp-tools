@@ -21,25 +21,27 @@ Run the automation lane end-to-end:
 
 ### 1. Export PM4 Segment Report
 
-The current export report is no longer a thin identity dump. Each segment now
-includes PM4-derived bounds, footprint hull, area, height stats, anchor
-signals, surface-family histogram, confidence flags, and the current
+Each segment includes PM4-derived bounds, footprint hull, area, height stats,
+anchor signals, surface-family histogram, confidence flags, and the current
 WMO/M2-eligibility prediction.
 
-```powershell
-dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
-  pm4 export-segments `
-  --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development `
-  --output i:/parp/parp-tools/wow-viewer/output/datasets/pm4_asset_matching/development.pm4-segments.json
-```
-
-Bounded smoke proof now exists for the real tile:
+Output format is Markdown by default (human-readable). Use `.json` extension
+for JSON output (both formats are written for JSON; only Markdown for Markdown).
 
 ```powershell
+# Markdown report (default, human-readable)
 dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
   pm4 export-segments `
   --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 `
-  --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-export-segments-rich-smoke.json
+  --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-export-segments-smoke.md
+```
+
+```powershell
+# JSON output (machine-readable, also writes .md sidecar)
+dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
+  pm4 export-segments `
+  --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 `
+  --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-export-segments-smoke.json
 ```
 
 ### 2. Build Seeded Durable Asset Signal Corpus
@@ -71,11 +73,22 @@ Current bounded smoke proof for this command:
 ### 3. Run Durable-Corpus Automated Matching
 
 ```powershell
+# Markdown report (human-readable)
 dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
   pm4 match-assets `
   --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 `
   --asset-corpus i:/parp/parp-tools/wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json `
-  --max-candidates 10 `
+  --max-candidates 8 `
+  --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-match-assets-seeded-smoke.md
+```
+
+```powershell
+# JSON output (machine-readable, also writes .md sidecar)
+dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
+  pm4 match-assets `
+  --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 `
+  --asset-corpus i:/parp/parp-tools/wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json `
+  --max-candidates 8 `
   --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-match-assets-seeded-smoke.json
 ```
 
@@ -116,6 +129,18 @@ uv run scripts/build_pm4_asset_signal_corpus.py `
 ### 6. Synthesize Replacement Placements
 
 ```powershell
+# Markdown report (human-readable)
+dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
+  pm4 synthesize-placements `
+  --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 `
+  --asset-corpus i:/parp/parp-tools/wow-viewer/output/tmp/pm4-asset-signals-seeded-smoke.json `
+  --target-tiles 0_0 `
+  --max-candidates 8 `
+  --output i:/parp/parp-tools/wow-viewer/output/tmp/pm4-synthesize-placements-seeded-smoke.md
+```
+
+```powershell
+# JSON output (machine-readable, also writes .md sidecar)
 dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- `
   pm4 synthesize-placements `
   --input i:/parp/parp-tools/wow-viewer/test_data/development/World/Maps/development/development_00_00.pm4 `

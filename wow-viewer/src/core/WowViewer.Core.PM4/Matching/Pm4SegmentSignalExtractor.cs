@@ -5,13 +5,14 @@ namespace WowViewer.Core.PM4.Matching;
 
 public static class Pm4SegmentSignalExtractor
 {
-    public const string CurrentSignalVersion = "pm4-segment-signal-v1";
+    public const string CurrentSignalVersion = "pm4-segment-signal-v2";
 
     public static Pm4SegmentSignalRecord Extract(
         Pm4ObjectSegment segment,
         Pm4CorrelationObjectState correlationState,
         Pm4LinkedPositionRefSummary anchorSummary,
-        IReadOnlyList<Pm4ObjectSegmentSurface> surfaces)
+        IReadOnlyList<Pm4ObjectSegmentSurface> surfaces,
+        IReadOnlyDictionary<byte, Pm4Bounds3> typedBounds)
     {
         float minPlaneDistance = 0f;
         float maxPlaneDistance = 0f;
@@ -34,6 +35,19 @@ public static class Pm4SegmentSignalExtractor
         foreach (IGrouping<byte, Pm4ObjectSegmentSurface> group in surfaces.GroupBy(static surface => surface.AttributeMask).OrderBy(static group => group.Key))
             histogram[$"attributeMask:0x{group.Key:X2}"] = group.Count();
 
+        // TypeFlags distribution — which surface roles this object has
+        foreach (KeyValuePair<byte, Pm4Bounds3> kv in typedBounds)
+        {
+            string label = kv.Key switch
+            {
+                0x03 => "typeFlags:m2-top",
+                0x10 => "typeFlags:interior-floor",
+                0x12 => "typeFlags:exterior-solid",
+                _ => $"typeFlags:0x{kv.Key:X2}",
+            };
+            histogram[label] = histogram.TryGetValue(label, out int existing) ? existing + 1 : 1;
+        }
+
         return new Pm4SegmentSignalRecord(
             segment.SegmentId,
             new Pm4Bounds3(correlationState.BoundsMin, correlationState.BoundsMax),
@@ -55,6 +69,7 @@ public static class Pm4SegmentSignalExtractor
                 anchorSummary.HasNormalHeadings ? anchorSummary.HeadingMaxDegrees : null,
                 anchorSummary.HasNormalHeadings ? anchorSummary.HeadingMeanDegrees : null),
             CurrentSignalVersion,
-            null);
+            null,
+            typedBounds);
     }
 }
