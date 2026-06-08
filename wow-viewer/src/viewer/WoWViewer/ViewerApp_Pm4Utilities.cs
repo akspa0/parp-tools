@@ -84,7 +84,7 @@ public partial class ViewerApp
         ImGui.BulletText("part / ObjectPartId: viewer-generated split id. WoWViewer assigns it during the current overlay build after CK24 grouping, dominant MSLK grouping, optional MDOS split, then optional connectivity split. It is not a raw PM4 field.");
         ImGui.BulletText("MSLK Group: dominant MSLK.GroupObjectId seen in the current viewer object. Strong grouping hint, not final proof of identity.");
         ImGui.BulletText("Linked MPRL refs: position-reference rows attached to the current viewer object or its dominant link family. Used as placement evidence.");
-        ImGui.BulletText("Group / Attr / Mdos: dominant MSUR values across the currently selected viewer object. Useful for debugging, not guaranteed unique or authoritative.");
+        ImGui.BulletText("Group / Attr / MscnRef: dominant MSUR values across the currently selected viewer object. Useful for debugging, not guaranteed unique or authoritative.");
         ImGui.BulletText("PM4 Graph: the viewer's current decomposition of the selected object, not a literal raw node graph stored in PM4.");
         ImGui.BulletText("Match uid: nearby MODF/MDDF placement candidate id. It is not a PM4-native object id.");
     }
@@ -176,7 +176,7 @@ public partial class ViewerApp
         }
 
         bool splitCk24ByMdos = _worldScene.Pm4SplitCk24ByMdos;
-        if (ImGui.Checkbox("Split CK24 by MdosIndex", ref splitCk24ByMdos))
+        if (ImGui.Checkbox("Split CK24 by MscnRef", ref splitCk24ByMdos))
         {
             _worldScene.Pm4SplitCk24ByMdos = splitCk24ByMdos;
             _worldScene.ReloadPm4Overlay();

@@ -38,6 +38,14 @@ public partial class ViewerApp
         if (_worldScene == null)
             return false;
 
+        // ImGui overlay is active — don't interfere with its click handling
+        if (ImGui.GetIO().WantCaptureMouse)
+            return false;
+
+        // Block new picks while the overlay is showing
+        if (_clickSelectionCandidates.Count > 1)
+            return false;
+
         (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey = null;
         Vector3? clickedWorldPoint = null;
         TerrainRenderer? terrainRenderer = _terrainManager?.Renderer;
@@ -123,7 +131,7 @@ public partial class ViewerApp
         // Keyboard shortcuts: number keys 1-9 select by index
         for (int keyIndex = 0; keyIndex < Math.Min(_clickSelectionCandidates.Count, 9); keyIndex++)
         {
-            if (ImGui.IsKeyPressed((ImGuiKey)((int)ImGuiKey._1 + keyIndex)))
+            if (ImGui.IsKeyPressed(ImGuiKey._1 + keyIndex))
             {
                 Action apply = _clickSelectionCandidates[keyIndex].Apply;
                 ClearPendingClickSelection();
@@ -166,8 +174,8 @@ public partial class ViewerApp
 
         ImGui.SetWindowFontScale(1.20f);
         ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.38f, 1.0f), "Choose Target");
-        ImGui.SetWindowFontScale(0.85f);
-        ImGui.TextColored(new Vector4(0.82f, 0.86f, 0.94f, 1.0f), $"Multiple objects under cursor. Click or press 1-{Math.Min(_clickSelectionCandidates.Count, 9)} to pick.");
+        ImGui.TextColored(new Vector4(0.82f, 0.86f, 0.94f, 1.0f), "Click or press 1-9 to pick:");
+        ImGui.SetWindowFontScale(1.0f);
         ImGui.Separator();
 
         for (int i = 0; i < _clickSelectionCandidates.Count; i++)
