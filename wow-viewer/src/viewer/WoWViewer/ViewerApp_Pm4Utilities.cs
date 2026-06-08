@@ -1945,6 +1945,7 @@ public partial class ViewerApp
             Pm4OverlayColorMode.AttributeMask => "Attribute Mask",
             Pm4OverlayColorMode.Height => "Height",
             Pm4OverlayColorMode.TypeFlags => "TypeFlags",
+            Pm4OverlayColorMode.Ck24TypeVsTypeFlags => "CK24Type vs TypeFlags",
             _ => mode.ToString(),
         };
     }

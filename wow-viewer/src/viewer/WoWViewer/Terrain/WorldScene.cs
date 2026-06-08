@@ -70,6 +70,7 @@ public enum Pm4OverlayColorMode
     AttributeMask,
     Height,
     TypeFlags,
+    Ck24TypeVsTypeFlags,
 }
 
 public readonly struct Pm4ObjectDebugInfo
@@ -10427,6 +10428,7 @@ public class WorldScene : ISceneRenderer
             Pm4OverlayColorMode.TypeFlags => obj.DistinctTypeFlags != 0
                 ? GetTypeFlagColor(PickPrimaryTypeFlag(obj.DistinctTypeFlags))
                 : new Vector3(0.25f, 0.25f, 0.25f),
+            Pm4OverlayColorMode.Ck24TypeVsTypeFlags => GetCk24TypeVsTypeFlagsColor(obj.Ck24Type, obj.DistinctTypeFlags),
             _ => GetPm4TypeColor(obj.Ck24Type)
         };
     }
@@ -10600,6 +10602,37 @@ public class WorldScene : ISceneRenderer
                         "Each swatch is one MSLK.TypeFlags value present in visible objects.",
                         bitCounts.Count,
                         typeFlagEntries);
+                }
+
+                if (_pm4ColorMode == Pm4OverlayColorMode.Ck24TypeVsTypeFlags)
+                {
+                    int matchCount = 0;
+                    int noTypeFlagsCount = 0;
+                    int untypedCount = 0;
+                    int mismatchCount = 0;
+                    foreach (((int tileX, int tileY) _, Pm4OverlayObject obj) in EnumerateVisiblePm4OverlayObjects())
+                    {
+                        uint mask = obj.DistinctTypeFlags;
+                        if (mask == 0) { noTypeFlagsCount++; continue; }
+                        if (obj.Ck24Type == 0) { untypedCount++; continue; }
+                        if ((mask & (1u << obj.Ck24Type)) != 0) { matchCount++; }
+                        else { mismatchCount++; }
+                    }
+                    var entries = new List<Pm4ColorLegendEntry>();
+                    if (matchCount > 0)
+                        entries.Add(new Pm4ColorLegendEntry("CK24Type matches TypeFlag", new Vector3(0.10f, 0.85f, 0.20f), matchCount, false));
+                    if (untypedCount > 0)
+                        entries.Add(new Pm4ColorLegendEntry("CK24Type=0 (untyped carrier)", new Vector3(1.00f, 0.95f, 0.10f), untypedCount, false));
+                    if (mismatchCount > 0)
+                        entries.Add(new Pm4ColorLegendEntry("CK24Type != any TypeFlag", new Vector3(1.00f, 0.15f, 0.15f), mismatchCount, false));
+                    if (noTypeFlagsCount > 0)
+                        entries.Add(new Pm4ColorLegendEntry("No TypeFlags data", new Vector3(0.25f, 0.25f, 0.25f), noTypeFlagsCount, false));
+                    return new Pm4ColorLegendInfo(
+                        _pm4ColorMode,
+                        isContinuous: false,
+                        "Green = CK24 high byte matches a TypeFlag. Red = no match (anomaly). Yellow = CK24Type=0 carrier object.",
+                        entries.Count,
+                        entries);
                 }
 
                 if (_pm4ColorMode == Pm4OverlayColorMode.Tile)
@@ -10914,6 +10947,14 @@ public class WorldScene : ISceneRenderer
                 0x12 => "TypeFlags 0x12 — exterior WMO solids",
                 _ => $"TypeFlags 0x{value:X2} — unknown",
             },
+            Pm4OverlayColorMode.Ck24TypeVsTypeFlags => value switch
+            {
+                0 => "CK24Type matches TypeFlag",
+                1 => "No TypeFlags data",
+                2 => "CK24Type=0 carrier",
+                3 => "CK24Type != TypeFlag (anomaly)",
+                _ => $"unknown ({value})",
+            },
             _ => value.ToString(CultureInfo.InvariantCulture)
         };
     }
@@ -10928,6 +10969,13 @@ public class WorldScene : ISceneRenderer
             Pm4OverlayColorMode.GroupKey      => ColorFromSeed(value),
             Pm4OverlayColorMode.AttributeMask => ColorFromSeed(value),
             Pm4OverlayColorMode.TypeFlags     => GetTypeFlagColor((byte)value),
+            Pm4OverlayColorMode.Ck24TypeVsTypeFlags => value switch
+            {
+                0 => new Vector3(0.10f, 0.85f, 0.20f),
+                1 => new Vector3(0.25f, 0.25f, 0.25f),
+                2 => new Vector3(1.00f, 0.95f, 0.10f),
+                _ => new Vector3(1.00f, 0.15f, 0.15f),
+            },
             _ => GetPm4TypeColor((byte)value)  // fallback (Ck24Type uses GetPm4TypeColor)
         };
     }
@@ -11001,6 +11049,23 @@ public class WorldScene : ISceneRenderer
             0x12 => new Vector3(1.00f, 0.40f, 0.05f),   // neon orange (exterior solid)
             _ => HsvToRgb((typeFlag * 0.19f) % 1.0f, 0.95f, 1.0f),
         };
+    }
+
+    private static Vector3 GetCk24TypeVsTypeFlagsColor(byte ck24Type, uint typeFlagsMask)
+    {
+        if (typeFlagsMask == 0)
+            return new Vector3(0.25f, 0.25f, 0.25f);  // gray — no TypeFlags data
+
+        // Ck24Type of 0 with non-zero TypeFlags = untyped container carrying classified surfaces
+        if (ck24Type == 0)
+            return new Vector3(1.00f, 0.95f, 0.10f);  // yellow
+
+        // Check if Ck24Type matches any set TypeFlag
+        if ((typeFlagsMask & (1u << ck24Type)) != 0)
+            return new Vector3(0.10f, 0.85f, 0.20f);  // green — match
+
+        // Ck24Type != 0, TypeFlags present, but no match = anomaly
+        return new Vector3(1.00f, 0.15f, 0.15f);       // red — mismatch
     }
 
     private static byte PickPrimaryTypeFlag(uint mask)
