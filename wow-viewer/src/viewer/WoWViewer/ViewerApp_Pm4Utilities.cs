@@ -291,11 +291,30 @@ public partial class ViewerApp
 
         DrawSelectedPm4RegionSummary("WorkbenchSelectedRegion");
 
-        if (ImGui.CollapsingHeader("Match Suggestions"))
-            DrawPm4SelectedObjectMatchSuggestions("WorkbenchSelectedPm4", compact: false);
+        if (ImGui.CollapsingHeader("Match to WMO groups"))
+            DrawPm4WmoGroupMatch();
+    }
 
-        if (ImGui.CollapsingHeader("PM4 Graph"))
-            DrawSelectedPm4ObjectGraph("WorkbenchSelectedObject");
+    private void DrawPm4WmoGroupMatch()
+    {
+        if (_worldScene == null || !_worldScene.HasSelectedPm4Object)
+        { ImGui.TextDisabled("Select a PM4 object to match against WMO groups."); return; }
+        if (!_worldScene.TryGetSelectedPm4ObjectDebugInfo(out var d))
+        { ImGui.TextDisabled("No debug info for selected object."); return; }
+
+        ImGui.TextDisabled($"CK24 0x{d.Ck24:X6} type=0x{d.Ck24Type:X2} objId={d.Ck24ObjectId} region={d.MshdRegionId}");
+        ImGui.Spacing();
+
+        // Determine the WMO path from CK24 type — only WMO types (0x42/0x43) have matching WMO files
+        if (d.Ck24Type != 0x42 && d.Ck24Type != 0x43)
+        { ImGui.TextDisabled("Selected object is not WMO type (0x42/0x43). No WMO matching available."); return; }
+
+        // We need the WMO path. The staged client is the best source, but we don't know
+        // which WMO file corresponds to this PM4 object without the placement data.
+        // For now, show a placeholder for future implementation.
+        ImGui.TextDisabled("WMO matching reads the WMO file's group bounds from the staged");
+        ImGui.TextDisabled("client and compares against PM4 ObjectId surface clusters.");
+        ImGui.TextDisabled("Implementation pending — requires WMO path resolution from PM4 data.");
     }
 
     private void DrawPm4CorrelationInspectorContent()
