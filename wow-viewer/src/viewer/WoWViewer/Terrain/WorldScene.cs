@@ -9725,23 +9725,22 @@ public class WorldScene : ISceneRenderer
         out (int tileX, int tileY, uint ck24)? objectGroupKey,
         out float distance)
     {
+        objectKey = null;
+        objectGroupKey = null;
+        distance = float.MaxValue;
+
         if (!_showPm4Overlay || _pm4TileObjects.Count == 0)
-        {
-            objectKey = null;
-            objectGroupKey = null;
-            distance = float.MaxValue;
             return false;
-        }
 
         Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
         bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
             || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
             || _pm4OverlayScale != Vector3.One;
+        Vector3 padding = new(2f, 2f, 2f);
 
+        // Phase 1: fast CK24-group-level AABB test
         float bestT = float.MaxValue;
-        (int tileX, int tileY, uint ck24, int objectPart)? bestKey = null;
-        (int tileX, int tileY, uint ck24)? bestGroupKey = null;
-
+        (int tx, int ty, uint ck24)? bestGroup = null;
         foreach (var (tileKey, objects) in _pm4TileObjects)
         {
             if (!ShouldRenderPm4Tile(tileKey.tileX, tileKey.tileY))
@@ -9752,27 +9751,58 @@ public class WorldScene : ISceneRenderer
                 if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
                     continue;
 
-                var candidateKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
+                var groupKey = (tileKey.tileX, tileKey.tileY, obj.Ck24);
+                if (!_pm4ObjectGroupBounds.TryGetValue(groupKey, out var gb))
+                    continue;
+
+                Vector3 gmin = gb.min, gmax = gb.max;
+                if (applyPm4Transform)
+                {
+                    var objTransformKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
+                    Matrix4x4 ot = BuildPm4ObjectTransform(objTransformKey, applyPm4Transform, pm4Transform, out _);
+                    TransformBounds(gmin, gmax, ot, out gmin, out gmax);
+                }
+
+                float gt = RayAABBIntersect(rayOrigin, rayDir, gmin - padding, gmax + padding);
+                if (gt >= 0f && gt < bestT && IsHoverPickDistanceAllowed(gt))
+                {
+                    bestT = gt;
+                    bestGroup = groupKey;
+                }
+            }
+        }
+
+        if (bestGroup == null)
+            return false;
+
+        // Phase 2: within the best CK24 group, find the closest individual part
+        (int tileX, int tileY, uint ck24, int objectPart)? bestKey = null;
+        var gk = bestGroup.Value;
+        if (_pm4TileObjects.TryGetValue((gk.tx, gk.ty), out var tileObjects))
+        {
+            foreach (Pm4OverlayObject obj in tileObjects)
+            {
+                if (obj.Ck24 != gk.ck24 || !ShouldRenderPm4ObjectType(obj.Ck24Type))
+                    continue;
+
+                var candidateKey = (gk.tx, gk.ty, obj.Ck24, obj.ObjectPartId);
                 Matrix4x4 objectTransform = BuildPm4ObjectTransform(candidateKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
 
-                Vector3 boundsMin = obj.BoundsMin;
-                Vector3 boundsMax = obj.BoundsMax;
+                Vector3 bmin = obj.BoundsMin, bmax = obj.BoundsMax;
                 if (applyObjectTransform)
-                    TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+                    TransformBounds(bmin, bmax, objectTransform, out bmin, out bmax);
 
-                Vector3 padding = new(2f, 2f, 2f);
-                float t = RayAABBIntersect(rayOrigin, rayDir, boundsMin - padding, boundsMax + padding);
+                float t = RayAABBIntersect(rayOrigin, rayDir, bmin - padding, bmax + padding);
                 if (t >= 0f && t < bestT && IsHoverPickDistanceAllowed(t))
                 {
                     bestT = t;
                     bestKey = candidateKey;
-                    bestGroupKey = ResolvePm4ObjectGroupKey(candidateKey);
                 }
             }
         }
 
         objectKey = bestKey;
-        objectGroupKey = bestGroupKey;
+        objectGroupKey = bestGroup;
         distance = bestT;
         return bestKey.HasValue;
     }
