@@ -3274,8 +3274,12 @@ public partial class ViewerApp
         // Group by region → CK24.ObjectId → TypeFlags bucket → MSLK group
         var groups = new Dictionary<uint, Dictionary<ushort, Dictionary<byte, Dictionary<uint, int>>>>();
         var surfaceLookup = new Dictionary<(uint region, ushort objId, byte typeFlags, uint mslk), List<(int tx, int ty, int partId)>>();
+        var regionTiles = new Dictionary<uint, HashSet<(int tx, int ty)>>();
         foreach (var (tx, ty, ck24, objId, region, mslk, tf, part) in _worldScene.GetPm4ObjectHierarchy())
         {
+            if (!regionTiles.TryGetValue(region, out var tiles))
+                regionTiles[region] = tiles = new();
+            tiles.Add((tx, ty));
             ushort ck24ObjId = (ushort)(ck24 & 0xFFFF);
             if (!groups.TryGetValue(region, out var byObjId))
                 groups[region] = byObjId = new();
@@ -3302,7 +3306,10 @@ public partial class ViewerApp
         foreach (var (regionId, byObjId) in groups.OrderBy(static r => r.Key))
         {
             int regionTotal = byObjId.Sum(static o => o.Value.Sum(static t => t.Value.Sum(static m => m.Value)));
-            string regionLbl = $"Region {regionId}  [{regionTotal} surfaces]";
+            string tileStr = regionTiles.TryGetValue(regionId, out var rTiles) && rTiles.Count > 0
+                ? string.Join(", ", rTiles.OrderBy(static t => t).Select(static t => $"{t.tx}_{t.ty}"))
+                : "?";
+            string regionLbl = $"Region {regionId} (tile {tileStr})  [{regionTotal} surfaces]";
             if (!ImGui.TreeNodeEx($"##R_{regionId}", ImGuiTreeNodeFlags.None, regionLbl))
                 continue;
 
