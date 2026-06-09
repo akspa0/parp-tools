@@ -10794,12 +10794,12 @@ public class WorldScene : ISceneRenderer
                     categoricalEntries);
             }
 
-            public IReadOnlyList<(int tileX, int tileY, uint ck24, uint mshdRegionId, uint linkGroupObjectId, int objectPartId)> GetPm4ObjectHierarchy()
+            public IReadOnlyList<(int tileX, int tileY, uint ck24, uint ck24ObjectId, uint mshdRegionId, uint linkGroupObjectId, uint distinctTypeFlags, int objectPartId)> GetPm4ObjectHierarchy()
             {
-                var list = new List<(int, int, uint, uint, uint, int)>();
+                var list = new List<(int, int, uint, uint, uint, uint, uint, int)>();
                 foreach (var tileEntry in _pm4TileObjects)
                     foreach (var obj in tileEntry.Value)
-                        list.Add((tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.MshdRegionId, obj.LinkGroupObjectId, obj.ObjectPartId));
+                        list.Add((tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.Ck24ObjectId, obj.MshdRegionId, obj.LinkGroupObjectId, obj.DistinctTypeFlags, obj.ObjectPartId));
                 return list;
             }
 
