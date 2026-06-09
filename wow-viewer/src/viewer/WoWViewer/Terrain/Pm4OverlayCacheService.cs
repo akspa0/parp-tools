@@ -10,7 +10,7 @@ namespace WoWViewer.Terrain;
 internal sealed class Pm4OverlayCacheService
 {
     private const string CacheMagic = "PM4C";
-    private const int CacheVersion = 5;
+    private const int CacheVersion = 6;
     private readonly string _cacheRoot;
 
     public Pm4OverlayCacheService(string cacheRoot)

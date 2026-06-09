@@ -3271,64 +3271,49 @@ public partial class ViewerApp
         if (!ImGui.CollapsingHeader("Scene Graph"))
             return;
 
-        // Region → ObjectId → MSLK group → GroupKey (surface type)
-        var buckets = new Dictionary<uint, Dictionary<ushort, Dictionary<uint, Dictionary<byte, List<(int, int, int)>>>>>();
+        // Region(tile) → GroupKey(surface type) → ObjectId → count
         var regionTiles = new Dictionary<uint, HashSet<(int, int)>>();
+        var byRegion = new Dictionary<uint, Dictionary<byte, Dictionary<ushort, int>>>();
 
         foreach (var (tx, ty, ck24, objId, region, mslk, gk, part) in _worldScene.GetPm4ObjectHierarchy())
         {
             if (!regionTiles.TryGetValue(region, out var rt)) regionTiles[region] = rt = new();
             rt.Add((tx, ty));
             ushort oid = (ushort)(ck24 & 0xFFFF);
-            if (!buckets.TryGetValue(region, out var bo)) buckets[region] = bo = new();
-            if (!bo.TryGetValue(oid, out var bm)) bo[oid] = bm = new();
-            if (!bm.TryGetValue(mslk, out var bg)) bm[mslk] = bg = new();
-            if (!bg.TryGetValue(gk, out var sl)) bg[gk] = sl = new();
-            sl.Add((tx, ty, part));
+            if (!byRegion.TryGetValue(region, out var br)) byRegion[region] = br = new();
+            if (!br.TryGetValue(gk, out var bg)) br[gk] = bg = new();
+            bg.TryGetValue(oid, out int e);
+            bg[oid] = e + 1;
         }
 
         int total = 0;
-        foreach (var (rid, bo) in buckets.OrderBy(static r => r.Key))
+        foreach (var (rid, br) in byRegion.OrderBy(static r => r.Key))
         {
-            int rSum = bo.Sum(static o => o.Value.Sum(static m => m.Value.Sum(static g => g.Value.Count)));
+            int rSum = br.Sum(static b => b.Value.Sum(static o => o.Value));
             string ts = regionTiles.TryGetValue(rid, out var rts) && rts.Count > 0
                 ? string.Join(", ", rts.OrderBy(static t => t).Select(static t => $"{t.Item1}_{t.Item2}"))
                 : "?";
             if (!ImGui.TreeNodeEx($"##R{rid}", ImGuiTreeNodeFlags.None, $"Region {rid} (tile {ts})  [{rSum} surfaces]"))
                 continue;
 
-            foreach (var (oid, bm) in bo.OrderBy(static o => o.Key))
+            foreach (var (gk, bg) in br.OrderBy(static b => b.Key))
             {
-                int oSum = bm.Sum(static m => m.Value.Sum(static g => g.Value.Count));
-                if (!ImGui.TreeNodeEx($"##O{rid}_{oid}", ImGuiTreeNodeFlags.None, $"ObjectId 0x{oid:X4}  [{oSum} surfaces]"))
-                    continue;
-
-                foreach (var (mslkId, bg) in bm.OrderBy(static m => m.Key))
+                int gSum = bg.Sum(static o => o.Value);
+                string gkLbl = gk switch
                 {
-                    int mSum = bg.Sum(static g => g.Value.Count);
-                    if (!ImGui.TreeNodeEx($"##M{rid}_{oid}_{mslkId}", ImGuiTreeNodeFlags.None, $"MSLK 0x{mslkId:X8}  [{mSum} surfaces]"))
-                    { total += mSum; continue; }
+                    0x03 => $"GroupKey 0x03 (M2 surf)",
+                    0x10 => $"GroupKey 0x10 (interior floor)",
+                    0x12 => $"GroupKey 0x12 (exterior solid)",
+                    0x13 => $"GroupKey 0x13 (portal int)",
+                    _ => $"GroupKey 0x{gk:X2}",
+                };
+                if (!ImGui.TreeNodeEx($"##G{rid}_{gk}", ImGuiTreeNodeFlags.None, $"{gkLbl}  [{gSum} surfaces]"))
+                { total += gSum; continue; }
 
-                    foreach (var (gk, sl) in bg.OrderBy(static g => g.Key))
-                    {
-                        string gkLbl = gk switch
-                        {
-                            0x03 => $"GroupKey 0x03 (M2 surf)",
-                            0x10 => $"GroupKey 0x10 (interior floor)",
-                            0x12 => $"GroupKey 0x12 (exterior solid)",
-                            0x13 => $"GroupKey 0x13 (portal int)",
-                            _ => $"GroupKey 0x{gk:X2}",
-                        };
-                        if (!ImGui.TreeNodeEx($"##G{rid}_{oid}_{mslkId}_{gk}", ImGuiTreeNodeFlags.None, $"{gkLbl}  [{sl.Count} surfaces]"))
-                        { total += sl.Count; continue; }
-                        foreach (var (sx, sy, sp) in sl.Take(10))
-                            ImGui.TextDisabled($"  Surface {sp} (tile {sx}_{sy})");
-                        if (sl.Count > 10)
-                            ImGui.TextDisabled($"  ... {sl.Count - 10} more");
-                        ImGui.TreePop();
-                        total += sl.Count;
-                    }
-                    ImGui.TreePop();
+                foreach (var (oid, cnt) in bg.OrderByDescending(static o => o.Value))
+                {
+                    ImGui.TextDisabled($"  ObjectId 0x{oid:X4}  [{cnt} surfaces]");
+                    total++;
                 }
                 ImGui.TreePop();
             }
