@@ -137,6 +137,10 @@ public partial class ViewerApp
         bool showPm4Mscn = _worldScene.ShowPm4MscnNodes;
         if (ImGui.Checkbox("MSCN Nodes", ref showPm4Mscn))
             _worldScene.ShowPm4MscnNodes = showPm4Mscn;
+        ImGui.SameLine();
+        bool showPm4Mspv = _worldScene.ShowPm4MspvNodes;
+        if (ImGui.Checkbox("MSPV Nodes", ref showPm4Mspv))
+            _worldScene.ShowPm4MspvNodes = showPm4Mspv;
 
         ImGui.SameLine();
         bool pm4FlipAllObjY = _worldScene.Pm4FlipAllObjectsY;
@@ -3237,10 +3241,10 @@ public partial class ViewerApp
             {
                 ImGui.Separator();
                 ImGui.TextDisabled($"MSLK entries ({ri.MslkRawEntries.Count}):");
-                foreach (string line in ri.MslkRawEntries.Take(6))
+                foreach (string line in ri.MslkRawEntries.Take(5))
                     ImGui.TextUnformatted(line);
-                if (ri.MslkRawEntries.Count > 6)
-                    ImGui.TextDisabled($"+ {ri.MslkRawEntries.Count - 6} more");
+                if (ri.MslkRawEntries.Count > 5)
+                    ImGui.TextDisabled($"+ {ri.MslkRawEntries.Count - 5} more");
             }
         }
 

@@ -944,6 +944,7 @@ public class WorldScene : ISceneRenderer
     private bool _showPm4PositionRefs;
     private bool _showPm4ObjectCentroids;
     private bool _showPm4MscnNodes;
+    private bool _showPm4MspvNodes;
     private bool _pm4SplitCk24ByConnectivity;
     private bool _showPm4Type40 = true;
     private bool _showPm4Type80 = true;
@@ -980,6 +981,7 @@ public class WorldScene : ISceneRenderer
     private bool _hasLastRenderedCameraPosition;
     private readonly Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>> _pm4TileObjects = new();
     private readonly Dictionary<(int tileX, int tileY), List<Vector3>> _pm4TileMscnPoints = new();
+    private readonly Dictionary<(int tileX, int tileY), List<Vector3>> _pm4TileMspvPoints = new();
     private readonly Dictionary<(int tileX, int tileY), Pm4OverlayTileStats> _pm4TileStats = new();
     private readonly Dictionary<(int tileX, int tileY), List<Vector3>> _pm4TilePositionRefs = new();
     private readonly Dictionary<string, Pm4ResearchContext> _pm4ResearchBySourcePath = new(StringComparer.OrdinalIgnoreCase);
@@ -1288,6 +1290,7 @@ public class WorldScene : ISceneRenderer
     public bool ShowPm4PositionRefs { get => _showPm4PositionRefs; set => _showPm4PositionRefs = value; }
     public bool ShowPm4ObjectCentroids { get => _showPm4ObjectCentroids; set => _showPm4ObjectCentroids = value; }
     public bool ShowPm4MscnNodes { get => _showPm4MscnNodes; set => _showPm4MscnNodes = value; }
+    public bool ShowPm4MspvNodes { get => _showPm4MspvNodes; set => _showPm4MspvNodes = value; }
     public bool Pm4SplitCk24ByConnectivity { get => _pm4SplitCk24ByConnectivity; set => _pm4SplitCk24ByConnectivity = value; }
     public bool ShowPm4Type40 { get => _showPm4Type40; set => _showPm4Type40 = value; }
     public bool ShowPm4Type80 { get => _showPm4Type80; set => _showPm4Type80 = value; }
@@ -3689,15 +3692,22 @@ public class WorldScene : ISceneRenderer
                         var mscnWorldPoints = new List<Vector3>(pm4.KnownChunks.Mscn.Count);
                         foreach (Vector3 mscnPt in pm4.KnownChunks.Mscn)
                         {
-                            // MSCN stores (tile_Y * 533 + local_y, tile_X * 533 + local_x, Z)
-                            // MSCN_X is already in the wow_Y axis → renderer_X = MapOrigin - MSCN_X
-                            // MSCN_Y is already in the wow_X axis → renderer_Y = MapOrigin - MSCN_Y
                             mscnWorldPoints.Add(new Vector3(
                                 WoWConstants.MapOrigin - mscnPt.X,
                                 WoWConstants.MapOrigin - mscnPt.Y,
                                 mscnPt.Z));
                         }
                         _pm4TileMscnPoints[(effectiveTileX, effectiveTileY)] = mscnWorldPoints;
+                    }
+                    if (pm4.KnownChunks.Mspv.Count > 0)
+                    {
+                        var worldPts = new List<Vector3>(pm4.KnownChunks.Mspv.Count);
+                        foreach (Vector3 pt in pm4.KnownChunks.Mspv)
+                            worldPts.Add(new Vector3(
+                                WoWConstants.MapOrigin - pt.X,
+                                WoWConstants.MapOrigin - pt.Y,
+                                pt.Z));
+                        _pm4TileMspvPoints[(effectiveTileX, effectiveTileY)] = worldPts;
                     }
 
                     if (remainingPositionRefBudget > 0)
@@ -3813,6 +3823,7 @@ public class WorldScene : ISceneRenderer
         _pm4KnownMapTiles.Clear();
         _pm4TileObjects.Clear();
         _pm4TileMscnPoints.Clear();
+        _pm4TileMspvPoints.Clear();
         _pm4TileStats.Clear();
         _pm4TilePositionRefs.Clear();
         _pm4ResearchBySourcePath.Clear();
@@ -8827,17 +8838,20 @@ public class WorldScene : ISceneRenderer
                         // MSCN node overlay — global point cloud
                         if (_showPm4MscnNodes && _pm4TileMscnPoints.Count > 0)
                         {
-                            Vector3 mscnColor = new(0.30f, 1.00f, 0.60f);
-                            int limit = 50000;
-                            int drawn = 0;
+                            Vector3 c = new(0.30f, 1.00f, 0.60f);
+                            int limit = 50000, drawn = 0;
                             foreach (var (_, pts) in _pm4TileMscnPoints)
-                            {
                                 for (int i = 0; i < pts.Count && drawn < limit; i++)
-                                {
-                                    _bbRenderer.BatchPin(pts[i], 6f, 2f, mscnColor);
-                                    drawn++;
-                                }
-                            }
+                                    { _bbRenderer.BatchPin(pts[i], 6f, 2f, c); drawn++; }
+                            _pm4VisiblePositionRefCount += drawn;
+                        }
+                        if (_showPm4MspvNodes && _pm4TileMspvPoints.Count > 0)
+                        {
+                            Vector3 c = new(1.00f, 0.40f, 0.80f);
+                            int limit = 50000, drawn = 0;
+                            foreach (var (_, pts) in _pm4TileMspvPoints)
+                                for (int i = 0; i < pts.Count && drawn < limit; i++)
+                                    { _bbRenderer.BatchPin(pts[i], 5f, 2f, c); drawn++; }
                             _pm4VisiblePositionRefCount += drawn;
                         }
 
@@ -11505,6 +11519,7 @@ public class WorldScene : ISceneRenderer
         _externalWmoInstances.Clear();
         _pm4TileObjects.Clear();
         _pm4TileMscnPoints.Clear();
+        _pm4TileMspvPoints.Clear();
         _pm4TileStats.Clear();
         _pm4TilePositionRefs.Clear();
         _pm4ResearchBySourcePath.Clear();
