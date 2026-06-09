@@ -86,16 +86,22 @@ public partial class ViewerApp
         if (hoveredPm4Key.HasValue)
             AddPm4ClickSelectionCandidate(addedKeys, hoveredPm4Key.Value, null, "Hovered PM4 object");
 
-        if (_worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out _, out float pm4HitDistance) && pm4HitKey.HasValue)
+        bool pm4Hit = _worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out _, out float pm4HitDistance) && pm4HitKey.HasValue;
+        if (pm4Hit)
             AddPm4ClickSelectionCandidate(addedKeys, pm4HitKey.Value, pm4HitDistance, "Ray hit");
 
-        if (_worldScene.TryPickSceneObjectsByRay(rayOrigin, rayDir, _sceneClickSelectionHits, clickedChunkKey, clickedWorldPoint))
+        // If PM4 overlay is on and we hit a PM4 object, skip scene object picking
+        // (PM4 objects are behind scene WMO/M2 visually, so the ray hits both)
+        if (!pm4Hit || !_worldScene.ShowPm4Overlay)
+        {
+            if (_worldScene.TryPickSceneObjectsByRay(rayOrigin, rayDir, _sceneClickSelectionHits, clickedChunkKey, clickedWorldPoint))
         {
             int sceneHitCount = Math.Min(_sceneClickSelectionHits.Count, MaxSceneClickSelectionHits);
             _clickSelectionSceneHitOverflowCount = Math.Max(0, _sceneClickSelectionHits.Count - sceneHitCount);
 
             for (int i = 0; i < sceneHitCount; i++)
                 AddSceneObjectClickSelectionCandidate(addedKeys, _sceneClickSelectionHits[i]);
+        }
         }
 
         if (_clickSelectionCandidates.Count == 0)

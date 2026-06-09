@@ -9820,6 +9820,22 @@ public class WorldScene : ISceneRenderer
         _selectedPm4ObjectGroupKey = null;
     }
 
+    public bool SelectPm4ObjectGroupKey(uint regionId, ushort ck24ObjectId)
+    {
+        foreach (var kv in _pm4ObjectLookup)
+        {
+            var (tx, ty, ck24, part) = kv.Key;
+            if (kv.Value.MshdRegionId == regionId && (ushort)(ck24 & 0xFFFF) == ck24ObjectId)
+            {
+                var key = (tx, ty, ck24, part);
+                _selectedPm4ObjectKey = key;
+                _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(key);
+                return true;
+            }
+        }
+        return false;
+    }
+
     private float ComputeEffectiveHoveredAssetMaxDistance()
     {
         if (!_limitHoveredAssetRange)

@@ -3313,6 +3313,8 @@ public partial class ViewerApp
                 foreach (var (oid, cnt) in bg.OrderByDescending(static o => o.Value))
                 {
                     ImGui.TextDisabled($"  ObjectId 0x{oid:X4}  [{cnt} surfaces]");
+                    if (ImGui.IsItemClicked(ImGuiMouseButton.Left))
+                        _worldScene.SelectPm4ObjectGroupKey(rid, (ushort)oid);
                     total++;
                 }
                 ImGui.TreePop();
