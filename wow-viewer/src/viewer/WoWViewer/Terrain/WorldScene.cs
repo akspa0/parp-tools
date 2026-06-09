@@ -8839,19 +8839,27 @@ public class WorldScene : ISceneRenderer
                         if (_showPm4MscnNodes && _pm4TileMscnPoints.Count > 0)
                         {
                             Vector3 c = new(0.30f, 1.00f, 0.60f);
-                            int limit = 50000, drawn = 0;
-                            foreach (var (_, pts) in _pm4TileMscnPoints)
+                            int limit = 15000, drawn = 0;
+                            foreach (var kv in _pm4TileMscnPoints)
+                            {
+                                var pts = kv.Value;
+                                if (pts == null) continue;
                                 for (int i = 0; i < pts.Count && drawn < limit; i++)
                                     { _bbRenderer.BatchPin(pts[i], 6f, 2f, c); drawn++; }
+                            }
                             _pm4VisiblePositionRefCount += drawn;
                         }
                         if (_showPm4MspvNodes && _pm4TileMspvPoints.Count > 0)
                         {
                             Vector3 c = new(1.00f, 0.40f, 0.80f);
-                            int limit = 50000, drawn = 0;
-                            foreach (var (_, pts) in _pm4TileMspvPoints)
+                            int limit = 8000, drawn = 0;
+                            foreach (var kv in _pm4TileMspvPoints)
+                            {
+                                var pts = kv.Value;
+                                if (pts == null) continue;
                                 for (int i = 0; i < pts.Count && drawn < limit; i++)
                                     { _bbRenderer.BatchPin(pts[i], 5f, 2f, c); drawn++; }
+                            }
                             _pm4VisiblePositionRefCount += drawn;
                         }
 
