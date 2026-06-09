@@ -3687,28 +3687,8 @@ public class WorldScene : ISceneRenderer
                     }
 
                     // Store MSCN points in global world space (X↔Y swapped relative to tile coords)
-                    if (pm4.KnownChunks.Mscn.Count > 0)
-                    {
-                        var mscnWorldPoints = new List<Vector3>(pm4.KnownChunks.Mscn.Count);
-                        foreach (Vector3 mscnPt in pm4.KnownChunks.Mscn)
-                        {
-                            mscnWorldPoints.Add(new Vector3(
-                                WoWConstants.MapOrigin - mscnPt.X,
-                                WoWConstants.MapOrigin - mscnPt.Y,
-                                mscnPt.Z));
-                        }
-                        _pm4TileMscnPoints[(effectiveTileX, effectiveTileY)] = mscnWorldPoints;
-                    }
-                    if (pm4.KnownChunks.Mspv.Count > 0)
-                    {
-                        var worldPts = new List<Vector3>(pm4.KnownChunks.Mspv.Count);
-                        foreach (Vector3 pt in pm4.KnownChunks.Mspv)
-                            worldPts.Add(new Vector3(
-                                WoWConstants.MapOrigin - pt.X,
-                                WoWConstants.MapOrigin - pt.Y,
-                                pt.Z));
-                        _pm4TileMspvPoints[(effectiveTileX, effectiveTileY)] = worldPts;
-                    }
+                    // MSCN/MSPV extraction removed from construction path — too slow.
+                    // Extracted on-demand via EnsurePm4MscnMspvData() when checkboxes are enabled.
 
                     if (remainingPositionRefBudget > 0)
                     {
@@ -8836,6 +8816,10 @@ public class WorldScene : ISceneRenderer
                         }
 
                         // MSCN node overlay — global point cloud
+                        if (_showPm4MscnNodes)
+                            EnsurePm4MscnData();
+                        if (_showPm4MspvNodes)
+                            EnsurePm4MspvData();
                         if (_showPm4MscnNodes && _pm4TileMscnPoints.Count > 0)
                         {
                             Vector3 c = new(0.30f, 1.00f, 0.60f);
@@ -10061,6 +10045,61 @@ public class WorldScene : ISceneRenderer
             context = null;
             return false;
         }
+    }
+
+    private void EnsurePm4MscnData()
+    {
+        if (_pm4TileMscnPoints.Count > 0 || _pm4TileObjects.Count == 0)
+            return;
+        int loaded = 0;
+        foreach (var tileKey in _pm4TileObjects.Keys)
+        {
+            if (!TryGetPm4ResearchContextForTile(tileKey.tileX, tileKey.tileY, out var ctx) || ctx?.RawDocument == null)
+                continue;
+            var mscn = ctx.RawDocument.KnownChunks.Mscn;
+            if (mscn.Count == 0) continue;
+            var pts = new List<Vector3>(mscn.Count);
+            foreach (var p in mscn)
+                pts.Add(new Vector3(WoWConstants.MapOrigin - p.X, WoWConstants.MapOrigin - p.Y, p.Z));
+            _pm4TileMscnPoints[tileKey] = pts;
+            loaded++;
+        }
+    }
+
+    private void EnsurePm4MspvData()
+    {
+        if (_pm4TileMspvPoints.Count > 0 || _pm4TileObjects.Count == 0)
+            return;
+        int loaded = 0;
+        foreach (var tileKey in _pm4TileObjects.Keys)
+        {
+            if (!TryGetPm4ResearchContextForTile(tileKey.tileX, tileKey.tileY, out var ctx) || ctx?.RawDocument == null)
+                continue;
+            var mspv = ctx.RawDocument.KnownChunks.Mspv;
+            if (mspv.Count == 0) continue;
+            var pts = new List<Vector3>(mspv.Count);
+            foreach (var p in mspv)
+                pts.Add(new Vector3(WoWConstants.MapOrigin - p.X, WoWConstants.MapOrigin - p.Y, p.Z));
+            _pm4TileMspvPoints[tileKey] = pts;
+            loaded++;
+        }
+    }
+
+    private bool TryGetPm4ResearchContextForTile(int tileX, int tileY, out Pm4ResearchContext? ctx)
+    {
+        ctx = null;
+        foreach (var kv in _pm4ResearchBySourcePath)
+        {
+            if (kv.Value == null) continue;
+            if (!Pm4CoordinateService.TryParseTileCoordinates(kv.Key, out int tx, out int ty))
+                continue;
+            if (tx == tileX && ty == tileY)
+            {
+                ctx = kv.Value;
+                return true;
+            }
+        }
+        return false;
     }
 
     private static float ComputePm4ResearchMatchScore(Pm4OverlayObject obj, CorePm4ObjectHypothesis hypothesis)
