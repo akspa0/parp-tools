@@ -10999,7 +10999,7 @@ public class WorldScene : ISceneRenderer
             Pm4OverlayColorMode.Ck24Key        => $"CK24 0x{value:X6}",
             Pm4OverlayColorMode.MshdRegionId   => $"MSHD region {value}",
             Pm4OverlayColorMode.GroupKey       => $"GroupKey 0x{value:X2}",
-            Pm4OverlayColorMode.AttributeMask  => $"AttrMask 0x{value:X2}",
+            Pm4OverlayColorMode.AttributeMask  => FormatAttributeMaskLabel((byte)value),
             Pm4OverlayColorMode.TypeFlags      => ((byte)value) switch
             {
                 0x03 => "TypeFlags 0x03 — M2 top surfaces",
@@ -11126,6 +11126,21 @@ public class WorldScene : ISceneRenderer
 
         // Ck24Type != 0, TypeFlags present, but no match = anomaly
         return new Vector3(1.00f, 0.15f, 0.15f);       // red — mismatch
+    }
+
+    private static string FormatAttributeMaskLabel(byte value)
+    {
+        if (value == 0) return "AttrMask 0x00 (none)";
+        List<string> bits = [];
+        if ((value & 0x01) != 0) bits.Add("bit0");
+        if ((value & 0x02) != 0) bits.Add("bit1");
+        if ((value & 0x04) != 0) bits.Add("bit2");
+        if ((value & 0x08) != 0) bits.Add("bit3");
+        if ((value & 0x10) != 0) bits.Add("bit4");
+        if ((value & 0x20) != 0) bits.Add("bit5");
+        if ((value & 0x40) != 0) bits.Add("bit6");
+        if ((value & 0x80) != 0) bits.Add("bit7");
+        return $"AttrMask 0x{value:X2} ({string.Join("|", bits)})";
     }
 
     private static byte PickPrimaryTypeFlag(uint mask)
