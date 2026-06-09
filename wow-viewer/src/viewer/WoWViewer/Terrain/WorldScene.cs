@@ -10077,30 +10077,39 @@ public class WorldScene : ISceneRenderer
         }
     }
 
+    private byte[]? ReadPm4FileForTile((int tileX, int tileY) tileKey)
+    {
+        // Find any object on this tile to get the directory path
+        string? dir = _pm4ObjectLookup.Values
+            .FirstOrDefault(o => o.SourcePath != null)
+            ?.SourcePath;
+        if (dir != null)
+        {
+            dir = Path.GetDirectoryName(dir);
+            if (dir != null)
+            {
+                string tilePath = Path.Combine(dir, $"development_{tileKey.tileX}_{tileKey.tileY}.pm4");
+                if (File.Exists(tilePath))
+                    return File.ReadAllBytes(tilePath);
+            }
+        }
+        return null;
+    }
+
     private void EnsurePm4MscnData()
     {
         if (_pm4TileMscnPoints.Count > 0 || _pm4TileObjects.Count == 0)
             return;
-        // Copy keys to avoid modification during iteration
-        var tileKeys = _pm4TileObjects.Keys.ToList();
-        foreach (var tileKey in tileKeys)
+        foreach (var tileKey in _pm4TileObjects.Keys.ToList())
         {
             if (_pm4TileMscnPoints.ContainsKey(tileKey))
                 continue;
-            // Find a source path from the object lookup
-            string? srcPath = _pm4ObjectLookup.Values
-                .FirstOrDefault(o => o.SourcePath != null
-                    && Pm4CoordinateService.TryParseTileCoordinates(o.SourcePath, out int tx, out int ty)
-                    && tx == tileKey.tileX && ty == tileKey.tileY)
-                ?.SourcePath;
-            if (srcPath == null || _dataSource == null) continue;
-            var bytes = _dataSource.ReadFile(srcPath);
-            if (bytes == null || bytes.Length == 0) continue;
-            var pm4 = CorePm4DocumentReader.Read(bytes, srcPath);
-            var mscn = pm4.KnownChunks.Mscn;
-            if (mscn.Count == 0) continue;
-            var pts = new List<Vector3>(mscn.Count);
-            foreach (var p in mscn)
+            var bytes = ReadPm4FileForTile(tileKey);
+            if (bytes == null) continue;
+            var pm4 = CorePm4DocumentReader.Read(bytes, $"tile_{tileKey.tileX}_{tileKey.tileY}.pm4");
+            if (pm4.KnownChunks.Mscn.Count == 0) continue;
+            var pts = new List<Vector3>(pm4.KnownChunks.Mscn.Count);
+            foreach (var p in pm4.KnownChunks.Mscn)
                 pts.Add(new Vector3(WoWConstants.MapOrigin - p.X, WoWConstants.MapOrigin - p.Y, p.Z));
             _pm4TileMscnPoints[tileKey] = pts;
         }
@@ -10110,24 +10119,16 @@ public class WorldScene : ISceneRenderer
     {
         if (_pm4TileMspvPoints.Count > 0 || _pm4TileObjects.Count == 0)
             return;
-        var tileKeys = _pm4TileObjects.Keys.ToList();
-        foreach (var tileKey in tileKeys)
+        foreach (var tileKey in _pm4TileObjects.Keys.ToList())
         {
             if (_pm4TileMspvPoints.ContainsKey(tileKey))
                 continue;
-            string? srcPath = _pm4ObjectLookup.Values
-                .FirstOrDefault(o => o.SourcePath != null
-                    && Pm4CoordinateService.TryParseTileCoordinates(o.SourcePath, out int tx, out int ty)
-                    && tx == tileKey.tileX && ty == tileKey.tileY)
-                ?.SourcePath;
-            if (srcPath == null || _dataSource == null) continue;
-            var bytes = _dataSource.ReadFile(srcPath);
-            if (bytes == null || bytes.Length == 0) continue;
-            var pm4 = CorePm4DocumentReader.Read(bytes, srcPath);
-            var mspv = pm4.KnownChunks.Mspv;
-            if (mspv.Count == 0) continue;
-            var pts = new List<Vector3>(mspv.Count);
-            foreach (var p in mspv)
+            var bytes = ReadPm4FileForTile(tileKey);
+            if (bytes == null) continue;
+            var pm4 = CorePm4DocumentReader.Read(bytes, $"tile_{tileKey.tileX}_{tileKey.tileY}.pm4");
+            if (pm4.KnownChunks.Mspv.Count == 0) continue;
+            var pts = new List<Vector3>(pm4.KnownChunks.Mspv.Count);
+            foreach (var p in pm4.KnownChunks.Mspv)
                 pts.Add(new Vector3(WoWConstants.MapOrigin - p.X, WoWConstants.MapOrigin - p.Y, p.Z));
             _pm4TileMspvPoints[tileKey] = pts;
         }
