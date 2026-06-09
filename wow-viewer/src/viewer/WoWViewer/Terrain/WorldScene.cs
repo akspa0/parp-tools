@@ -10051,18 +10051,28 @@ public class WorldScene : ISceneRenderer
     {
         if (_pm4TileMscnPoints.Count > 0 || _pm4TileObjects.Count == 0)
             return;
-        int loaded = 0;
-        foreach (var tileKey in _pm4TileObjects.Keys)
+        // Copy keys to avoid modification during iteration
+        var tileKeys = _pm4TileObjects.Keys.ToList();
+        foreach (var tileKey in tileKeys)
         {
-            if (!TryGetPm4ResearchContextForTile(tileKey.tileX, tileKey.tileY, out var ctx) || ctx?.RawDocument == null)
+            if (_pm4TileMscnPoints.ContainsKey(tileKey))
                 continue;
-            var mscn = ctx.RawDocument.KnownChunks.Mscn;
+            // Find a source path from the object lookup
+            string? srcPath = _pm4ObjectLookup.Values
+                .FirstOrDefault(o => o.SourcePath != null
+                    && Pm4CoordinateService.TryParseTileCoordinates(o.SourcePath, out int tx, out int ty)
+                    && tx == tileKey.tileX && ty == tileKey.tileY)
+                ?.SourcePath;
+            if (srcPath == null || _dataSource == null) continue;
+            var bytes = _dataSource.ReadFile(srcPath);
+            if (bytes == null || bytes.Length == 0) continue;
+            var pm4 = CorePm4DocumentReader.Read(bytes, srcPath);
+            var mscn = pm4.KnownChunks.Mscn;
             if (mscn.Count == 0) continue;
             var pts = new List<Vector3>(mscn.Count);
             foreach (var p in mscn)
                 pts.Add(new Vector3(WoWConstants.MapOrigin - p.X, WoWConstants.MapOrigin - p.Y, p.Z));
             _pm4TileMscnPoints[tileKey] = pts;
-            loaded++;
         }
     }
 
@@ -10070,36 +10080,27 @@ public class WorldScene : ISceneRenderer
     {
         if (_pm4TileMspvPoints.Count > 0 || _pm4TileObjects.Count == 0)
             return;
-        int loaded = 0;
-        foreach (var tileKey in _pm4TileObjects.Keys)
+        var tileKeys = _pm4TileObjects.Keys.ToList();
+        foreach (var tileKey in tileKeys)
         {
-            if (!TryGetPm4ResearchContextForTile(tileKey.tileX, tileKey.tileY, out var ctx) || ctx?.RawDocument == null)
+            if (_pm4TileMspvPoints.ContainsKey(tileKey))
                 continue;
-            var mspv = ctx.RawDocument.KnownChunks.Mspv;
+            string? srcPath = _pm4ObjectLookup.Values
+                .FirstOrDefault(o => o.SourcePath != null
+                    && Pm4CoordinateService.TryParseTileCoordinates(o.SourcePath, out int tx, out int ty)
+                    && tx == tileKey.tileX && ty == tileKey.tileY)
+                ?.SourcePath;
+            if (srcPath == null || _dataSource == null) continue;
+            var bytes = _dataSource.ReadFile(srcPath);
+            if (bytes == null || bytes.Length == 0) continue;
+            var pm4 = CorePm4DocumentReader.Read(bytes, srcPath);
+            var mspv = pm4.KnownChunks.Mspv;
             if (mspv.Count == 0) continue;
             var pts = new List<Vector3>(mspv.Count);
             foreach (var p in mspv)
                 pts.Add(new Vector3(WoWConstants.MapOrigin - p.X, WoWConstants.MapOrigin - p.Y, p.Z));
             _pm4TileMspvPoints[tileKey] = pts;
-            loaded++;
         }
-    }
-
-    private bool TryGetPm4ResearchContextForTile(int tileX, int tileY, out Pm4ResearchContext? ctx)
-    {
-        ctx = null;
-        foreach (var kv in _pm4ResearchBySourcePath)
-        {
-            if (kv.Value == null) continue;
-            if (!Pm4CoordinateService.TryParseTileCoordinates(kv.Key, out int tx, out int ty))
-                continue;
-            if (tx == tileX && ty == tileY)
-            {
-                ctx = kv.Value;
-                return true;
-            }
-        }
-        return false;
     }
 
     private static float ComputePm4ResearchMatchScore(Pm4OverlayObject obj, CorePm4ObjectHypothesis hypothesis)
