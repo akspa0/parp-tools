@@ -3259,7 +3259,90 @@ public partial class ViewerApp
         if (ImGui.Button("Dump PM4 JSON"))
             ExportPm4ObjectsJson();
 
+        ImGui.Separator();
+        DrawPm4SceneGraph();
+
         ImGui.PopTextWrapPos();
+    }
+
+    private void DrawPm4SceneGraph()
+    {
+        if (_worldScene == null) return;
+        if (!ImGui.CollapsingHeader("Scene Graph"))
+            return;
+
+        // Group visible objects by region, then CK24, then MSLK group
+        var regions = new Dictionary<uint, Dictionary<uint, Dictionary<uint, List<(int tx, int ty, int part)>>>>();
+        foreach (var (tx, ty, ck24, region, mslk, part) in _worldScene.GetPm4ObjectHierarchy())
+        {
+            if (!regions.TryGetValue(region, out var byCk24))
+                regions[region] = byCk24 = new();
+            if (!byCk24.TryGetValue(ck24, out var byMslk))
+                byCk24[ck24] = byMslk = new();
+            if (!byMslk.TryGetValue(mslk, out var pts))
+                byMslk[mslk] = pts = new();
+            pts.Add((tx, ty, part));
+        }
+
+        int totalNodes = 0;
+        uint? selRegion = null;
+
+        foreach (var (regionId, byCk24) in regions.OrderBy(static r => r.Key))
+        {
+            int ck24Count = byCk24.Count;
+            int totalParts = byCk24.Sum(static c => c.Value.Sum(static m => m.Value.Count));
+            string regionLabel = selRegion.HasValue && regionId == selRegion.Value
+                ? $"Region {regionId}  [{totalParts} parts]  ◄ selected"
+                : $"Region {regionId}  [{totalParts} parts]";
+            if (!ImGui.TreeNodeEx($"##Region_{regionId}", ImGuiTreeNodeFlags.None, regionLabel))
+                continue;
+
+            foreach (var (ck24, byMslk) in byCk24.OrderBy(static c => c.Key))
+            {
+                int mslkCount = byMslk.Count;
+                int ck24Parts = byMslk.Sum(static m => m.Value.Count);
+                uint ck24Type = (ck24 >> 16) & 0xFF;
+                string typeLabel = ck24Type switch { 0x40 => "M2-int", 0x41 => "M2-int", 0x42 => "WMO", 0x43 => "WMO", 0xC0 => "M2-ext", 0xC1 => "M2-ext", 0xC2 => "M2-ext", 0xC3 => "M2-ext", _ => $"0x{ck24Type:X2}" };
+                string ck24Label = $"CK24 0x{ck24:X6} ({typeLabel})  [{ck24Parts} parts, {mslkCount} groups]";
+                if (!ImGui.TreeNodeEx($"##Ck24_{regionId}_{ck24}", ImGuiTreeNodeFlags.None, ck24Label))
+                {
+                    totalNodes += mslkCount;
+                    continue;
+                }
+
+                foreach (var (mslkId, parts) in byMslk.OrderBy(static m => m.Key))
+                {
+                    string mslkLabel = $"MSLK 0x{mslkId:X8}  [{parts.Count} parts]";
+                    if (!ImGui.TreeNodeEx($"##Mslk_{regionId}_{ck24}_{mslkId}", ImGuiTreeNodeFlags.None, mslkLabel))
+                    {
+                        totalNodes += parts.Count;
+                        continue;
+                    }
+
+                    foreach (var (tx, ty, partId) in parts.Take(20))
+                    {
+                        bool selected = _worldScene.SelectedPm4ObjectKey is var key
+                            && key.HasValue && key.Value.tileX == tx
+                            && key.Value.tileY == ty
+                            && key.Value.ck24 == ck24
+                            && key.Value.objectPart == partId;
+                        if (selected)
+                            ImGui.TextColored(new Vector4(1f, 1f, 0.35f, 1f), $"  Part {partId} (tile {tx}_{ty})  ◄");
+                        else
+                            ImGui.TextDisabled($"  Part {partId} (tile {tx}_{ty})");
+                        totalNodes++;
+                    }
+                    if (parts.Count > 20)
+                        ImGui.TextDisabled($"  ... {parts.Count - 20} more");
+                    ImGui.TreePop();
+                }
+                ImGui.TreePop();
+            }
+            ImGui.TreePop();
+        }
+
+        if (totalNodes == 0)
+            ImGui.TextDisabled("No PM4 objects loaded.");
     }
 
     private void ExportPm4OverlayReport()
