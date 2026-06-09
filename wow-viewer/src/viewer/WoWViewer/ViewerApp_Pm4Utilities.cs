@@ -3271,85 +3271,62 @@ public partial class ViewerApp
         if (!ImGui.CollapsingHeader("Scene Graph"))
             return;
 
-        // Group by region → CK24.ObjectId → TypeFlags bucket → MSLK group
-        var groups = new Dictionary<uint, Dictionary<ushort, Dictionary<byte, Dictionary<uint, int>>>>();
-        var surfaceLookup = new Dictionary<(uint region, ushort objId, byte typeFlags, uint mslk), List<(int tx, int ty, int partId)>>();
-        var regionTiles = new Dictionary<uint, HashSet<(int tx, int ty)>>();
-        foreach (var (tx, ty, ck24, objId, region, mslk, tf, part) in _worldScene.GetPm4ObjectHierarchy())
+        // Region → ObjectId → MSLK group → GroupKey (surface type)
+        var buckets = new Dictionary<uint, Dictionary<ushort, Dictionary<uint, Dictionary<byte, List<(int, int, int)>>>>>();
+        var regionTiles = new Dictionary<uint, HashSet<(int, int)>>();
+
+        foreach (var (tx, ty, ck24, objId, region, mslk, gk, part) in _worldScene.GetPm4ObjectHierarchy())
         {
-            if (!regionTiles.TryGetValue(region, out var tiles))
-                regionTiles[region] = tiles = new();
-            tiles.Add((tx, ty));
-            ushort ck24ObjId = (ushort)(ck24 & 0xFFFF);
-            if (!groups.TryGetValue(region, out var byObjId))
-                groups[region] = byObjId = new();
-            if (!byObjId.TryGetValue(ck24ObjId, out var byTf))
-                byObjId[ck24ObjId] = byTf = new();
-            // Determine primary type flag for this surface
-            byte primaryTf = 0;
-            if (tf != 0)
-            {
-                for (int b = 1; b < 32; b++)
-                    if ((tf & (1u << b)) != 0) { primaryTf = (byte)b; break; }
-            }
-            if (!byTf.TryGetValue(primaryTf, out var byMslk))
-                byTf[primaryTf] = byMslk = new();
-            byMslk.TryGetValue(mslk, out int existing);
-            byMslk[mslk] = existing + 1;
-            var key = (region, ck24ObjId, primaryTf, mslk);
-            if (!surfaceLookup.TryGetValue(key, out var list))
-                surfaceLookup[key] = list = new();
-            list.Add((tx, ty, part));
+            if (!regionTiles.TryGetValue(region, out var rt)) regionTiles[region] = rt = new();
+            rt.Add((tx, ty));
+            ushort oid = (ushort)(ck24 & 0xFFFF);
+            if (!buckets.TryGetValue(region, out var bo)) buckets[region] = bo = new();
+            if (!bo.TryGetValue(oid, out var bm)) bo[oid] = bm = new();
+            if (!bm.TryGetValue(mslk, out var bg)) bm[mslk] = bg = new();
+            if (!bg.TryGetValue(gk, out var sl)) bg[gk] = sl = new();
+            sl.Add((tx, ty, part));
         }
 
-        int totalNodes = 0;
-        foreach (var (regionId, byObjId) in groups.OrderBy(static r => r.Key))
+        int total = 0;
+        foreach (var (rid, bo) in buckets.OrderBy(static r => r.Key))
         {
-            int regionTotal = byObjId.Sum(static o => o.Value.Sum(static t => t.Value.Sum(static m => m.Value)));
-            string tileStr = regionTiles.TryGetValue(regionId, out var rTiles) && rTiles.Count > 0
-                ? string.Join(", ", rTiles.OrderBy(static t => t).Select(static t => $"{t.tx}_{t.ty}"))
+            int rSum = bo.Sum(static o => o.Value.Sum(static m => m.Value.Sum(static g => g.Value.Count)));
+            string ts = regionTiles.TryGetValue(rid, out var rts) && rts.Count > 0
+                ? string.Join(", ", rts.OrderBy(static t => t).Select(static t => $"{t.Item1}_{t.Item2}"))
                 : "?";
-            string regionLbl = $"Region {regionId} (tile {tileStr})  [{regionTotal} surfaces]";
-            if (!ImGui.TreeNodeEx($"##R_{regionId}", ImGuiTreeNodeFlags.None, regionLbl))
+            if (!ImGui.TreeNodeEx($"##R{rid}", ImGuiTreeNodeFlags.None, $"Region {rid} (tile {ts})  [{rSum} surfaces]"))
                 continue;
 
-            foreach (var (objId, byTf) in byObjId.OrderBy(static o => o.Key))
+            foreach (var (oid, bm) in bo.OrderBy(static o => o.Key))
             {
-                int objTotal = byTf.Sum(static t => t.Value.Sum(static m => m.Value));
-                string objLbl = $"ObjectId 0x{objId:X4}  [{objTotal} surfaces]";
-                if (!ImGui.TreeNodeEx($"##O_{regionId}_{objId}", ImGuiTreeNodeFlags.None, objLbl))
+                int oSum = bm.Sum(static m => m.Value.Sum(static g => g.Value.Count));
+                if (!ImGui.TreeNodeEx($"##O{rid}_{oid}", ImGuiTreeNodeFlags.None, $"ObjectId 0x{oid:X4}  [{oSum} surfaces]"))
                     continue;
 
-                foreach (var (tf, byMslk) in byTf.OrderBy(static t => t.Key))
+                foreach (var (mslkId, bg) in bm.OrderBy(static m => m.Key))
                 {
-                    int tfTotal = byMslk.Sum(static m => m.Value);
-                    string tfLbl = tf switch
-                    {
-                        0x03 => $"TypeFlags 0x03 (M2 top)  [{tfTotal} surfaces]",
-                        0x10 => $"TypeFlags 0x10 (interior floor)  [{tfTotal} surfaces]",
-                        0x12 => $"TypeFlags 0x12 (exterior solid)  [{tfTotal} surfaces]",
-                        _ => $"TypeFlags 0x{tf:X2}  [{tfTotal} surfaces]",
-                    };
-                    if (!ImGui.TreeNodeEx($"##TF_{regionId}_{objId}_{tf}", ImGuiTreeNodeFlags.None, tfLbl))
-                        continue;
+                    int mSum = bg.Sum(static g => g.Value.Count);
+                    if (!ImGui.TreeNodeEx($"##M{rid}_{oid}_{mslkId}", ImGuiTreeNodeFlags.None, $"MSLK 0x{mslkId:X8}  [{mSum} surfaces]"))
+                    { total += mSum; continue; }
 
-                    foreach (var (mslkId, count) in byMslk.OrderBy(static m => m.Key))
+                    foreach (var (gk, sl) in bg.OrderBy(static g => g.Key))
                     {
-                        var key = (regionId, objId, tf, mslkId);
-                        var surfaces = surfaceLookup.GetValueOrDefault(key);
-                        int surfCount = surfaces?.Count ?? count;
-                        string mslkLbl = $"MSLK 0x{mslkId:X8}  [{surfCount} surfaces]";
-                        if (!ImGui.TreeNodeEx($"##M_{regionId}_{objId}_{tf}_{mslkId}", ImGuiTreeNodeFlags.None, mslkLbl))
+                        string gkLbl = gk switch
                         {
-                            totalNodes += surfCount;
-                            continue;
-                        }
-                        if (surfaces != null)
-                            foreach (var (sx, sy, sp) in surfaces.Take(10))
-                                ImGui.TextDisabled($"  Surface {sp} (tile {sx}_{sy})");
-                        if (surfaces != null && surfaces.Count > 10)
-                            ImGui.TextDisabled($"  ... {surfaces.Count - 10} more");
+                            0x03 => $"GroupKey 0x03 (M2 surf)",
+                            0x10 => $"GroupKey 0x10 (interior floor)",
+                            0x12 => $"GroupKey 0x12 (exterior solid)",
+                            0x13 => $"GroupKey 0x13 (portal int)",
+                            _ => $"GroupKey 0x{gk:X2}",
+                        };
+                        if (!ImGui.TreeNodeEx($"##G{rid}_{oid}_{mslkId}_{gk}", ImGuiTreeNodeFlags.None, $"{gkLbl}  [{sl.Count} surfaces]"))
+                        { total += sl.Count; continue; }
+                        foreach (var (sx, sy, sp) in sl.Take(10))
+                            ImGui.TextDisabled($"  Surface {sp} (tile {sx}_{sy})");
+                        if (sl.Count > 10)
+                            ImGui.TextDisabled($"  ... {sl.Count - 10} more");
                         ImGui.TreePop();
+                        total += sl.Count;
                     }
                     ImGui.TreePop();
                 }
@@ -3357,8 +3334,7 @@ public partial class ViewerApp
             }
             ImGui.TreePop();
         }
-
-        if (totalNodes == 0 && groups.Count == 0)
+        if (total == 0)
             ImGui.TextDisabled("No PM4 objects loaded.");
     }
 
