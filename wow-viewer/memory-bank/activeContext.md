@@ -15,6 +15,7 @@
 | 053 M2 animation pose farm | 20/105 | Phase 0-1 complete; Phase 2-9 pending |
 | 054 PM4 camera window cache | 17/18 | Nearly complete; 1 real-data test deferred |
 | 044 Viewer shell usability | 10/13 | 3 remaining tasks |
+| 046 PM4 asset matching | 22/39 (+1 file: `Pm4MatchRunOptions`) | WMO group matching phase done; signature matcher unstarted |
 | 035 M2 render parity recovery | 9/28 | Continued fix work needed |
 | 020-036, 042-045, 049, 055 | 0-2% | Not yet started |
 | 056 ViewerApp + GPU + LOD | 0/80 | **NEW 2026-06-10**. Plan + tasks + contracts written. Phase 0 (test project + baselines) is the next step. Supersedes 036. |
@@ -45,6 +46,8 @@
 
 1. Pick the next active spec to implement (046/051/053 are the highest-priority)
 2. Any new work should start with `$speckit-specify` if no spec exists yet
+3. 2026-06-10 small-wins follow-through: launch a focused `WowViewer.Tools.Shared` test project so the new `Pm4MatchRunOptions.Validator` and the rest of the shared lib gain regression coverage
+4. 2026-06-10 small-wins follow-through: spec the per-tile visibility work in `TerrainManager` (currently the no-op stub) so the deferred seam is tracked properly
 
 ## Known Issues
 
