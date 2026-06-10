@@ -1,185 +1,132 @@
 # parp-tools
 
-Preservation, conversion, archaeology, and visualization tooling for World of Warcraft data.
+Preservation, conversion, analysis, and visualization tooling for World of Warcraft game data.
 
-The primary active path in this repository is `gillijimproject_refactor`, with `parp-tools WoW Viewer` as the flagship application and `WoWMapConverter` / `Pm4Research.Core` as the core supporting libraries behind much of the current format and reconstruction work.
+**Active development branch**: `v0.5.0-dev`
+**Active project**: `wow-viewer/`
 
-## Primary Active Project
+The repository also contains `gillijimproject_refactor/` — a legacy codebase that is **read-only reference**. All new code, features, tools, tests, and fixes go in `wow-viewer/`.
 
-### parp-tools WoW Viewer
+---
 
-`parp-tools WoW Viewer` is the active world viewer and research surface in this repository.
+## Active Project: `wow-viewer/`
 
-- Product name: `parp-tools WoW Viewer`
-- Source path: `gillijimproject_refactor/src/MdxViewer`
-- Current release line: `v0.4.5`
-- Detailed project overview: `gillijimproject_refactor/README.md`
-- Detailed viewer guide: `gillijimproject_refactor/src/MdxViewer/README.md`
+A .NET 10 toolkit for WoW format analysis, terrain reconstruction, PM4-based object matching, and ML dataset generation. Includes a full-featured 3D world viewer (`WoWViewer`), CLI format tools, and a Python ML pipeline.
 
-This is no longer just a model viewer. The active app is already being used as a multi-era world viewer, terrain debugger, PM4 inspection surface, asset browser, export front end, SQL-driven spawn viewer, and conversion utility shell.
+**Support range**: Alpha 0.5.3 through LK 3.3.5, with partial Cataclysm-era terrain and PM4 support.
 
-### What The Active Stack Already Does
-
-- views world data from `0.5.3` through `4.0.0.11927`
-- carries additional later-era terrain support paths into parts of `4.3.4`, though that band remains explicitly untested
-- reads and converts WMO `v14`, `v16`, and `v17`
-- supports MDX / M2 inspection and export workflows
-- includes built-in map, terrain, WMO, VLM, and texture-transfer tooling in the active UI
-- supports Alpha-Core SQL-driven NPC and gameobject population injection in the viewer
-- provides PM4 overlay analysis, PM4/WMO correlation, and PM4 export tooling
-
-### Conversion Coverage Worth Calling Out
-
-The repo is stronger on conversion than the current top-level README used to suggest.
-
-- `WoWMapConverter` is an active format and conversion library, not a side experiment
-- the viewer ships built-in UI entry points for map conversion, WMO conversion, VLM export, and terrain texture transfer
-- Alpha-era, Wrath-era, and `4.0.0.11927` era terrain workflows all exist in the active tree
-- the repo contains real cross-era reconstruction work rather than only one-direction viewers or one-off exporters
-
-## Supported Range
-
-- Documented support range: `0.5.3` through `4.0.0.11927`
-- Additional support exists for later `4.0.x` terrain variants
-- Untested support paths also exist through parts of `4.3.4`
-
-That range is the documented target, not a blanket claim that every subsystem has equal runtime signoff on every build. The active documentation distinguishes between build validation and real-data runtime validation, and that distinction matters here.
-
-## Quick Start
-
-From the repository root:
-
-### 1. Bootstrap vendored dependencies
-
-PowerShell:
+### Quick Start
 
 ```powershell
-.\gillijimproject_refactor\setup-libs.ps1
+# Build everything
+dotnet build wow-viewer/WowViewer.slnx -c Debug
+
+# Run the viewer
+dotnet run --project wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug -- <client-root> <map-name>
+
+# Run CLI tools
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug -- m2 inspect --input <model.m2>
+dotnet run --project wow-viewer/tools/animfarm/WowViewer.Tool.AnimFarm -c Debug -- dump --input <model.m2> --output <dir>
 ```
 
-### 2. Build the active viewer
+### Project Structure
+
+```
+wow-viewer/
+├── src/
+│   ├── core/              # Shared libraries
+│   │   ├── WowViewer.Core/          # Data models
+│   │   ├── WowViewer.Core.IO/       # Format readers/writers
+│   │   ├── WowViewer.Core.PM4/      # PM4 chunk analysis
+│   │   ├── WowViewer.Core.Runtime/  # M2 rendering pipeline
+│   │   └── WowViewer.Core.Anim/     # M2 animation pose extraction
+│   └── viewer/
+│       └── WoWViewer/               # 3D world viewer app
+├── tools/                 # CLI tools
+│   ├── inspect/           # Format inspector
+│   ├── converter/         # Format converter
+│   ├── harvest/           # Terrain tensor harvest (NPZ/Zarr)
+│   ├── capture/           # Headless validation capture
+│   └── animfarm/          # M2 animation pose farm
+├── tests/                 # xUnit tests
+├── data-harvester/        # Python ML pipeline
+├── docs/                  # Architecture docs + guides
+├── specs/                 # Feature specifications
+└── memory-bank/           # Session continuity
+```
+
+### Key Documentation
+
+- [WoWViewer README](wow-viewer/README.md) — viewer app overview and quick start
+- [CLI Tools Guide](wow-viewer/docs/CLI-TOOLS.md) — advanced usage for all CLI tools
+- [Plans Overview](wow-viewer/docs/PLANS-OVERVIEW.md) — summary of remaining specs
+- [Memory Bank](wow-viewer/memory-bank/activeContext.md) — current focus and status
+- [Architecture Docs](wow-viewer/docs/architecture/) — PM4 semantics, render plans, model specs
+
+### What's Supported
+
+- **Terrain**: Alpha 0.5.3 monolithic WDT, 0.6.0 split ADTs, LK 3.3.5 split ADTs
+- **WMO**: V14 (Alpha), V17 (LK), with round-trip conversion
+- **M2/MDX**: Classic MD20, era-1121 MD20, chunked MDLX; animation extraction and BVH export
+- **PM4**: Full decode, per-file caching, MSCN/MSPV visualization, WMO group matching
+- **BLP**: Pixel decode and summary inspection
+- **DBC/DB2**: Crosswalk generation and lookup
+- **Audio**: Alpha-area audio catalog inspection
+- **ML Datasets**: V16/V18 terrain tensor extraction and model training pipeline
+
+### Build & Test
 
 ```powershell
-dotnet build .\gillijimproject_refactor\src\MdxViewer\MdxViewer.sln -c Debug
+# Build
+dotnet build wow-viewer/WowViewer.slnx -c Debug
+
+# Run all tests
+dotnet test wow-viewer/WowViewer.slnx -c Debug
+
+# Run specific test project
+dotnet test wow-viewer/tests/WowViewer.Core.Anim.Tests/ -c Debug
+
+# Run specific test category
+dotnet test wow-viewer/tests/WowViewer.Core.PM4.Tests/ -c Debug --filter "FullyQualifiedName~Pm4PerFileCache"
 ```
 
-### 3. Run the active viewer
+---
 
-```powershell
-dotnet run --project .\gillijimproject_refactor\src\MdxViewer\MdxViewer.csproj
-```
+## Legacy: `gillijimproject_refactor/`
 
-Inside the viewer, the intended workflow is:
+**Read-only reference.** This subtree contains the earlier `MdxViewer` and `WoWMapConverter` codebases that served as the foundation for the current `wow-viewer/` project. No new code, features, or bugfixes should be written here.
 
-1. Open a base client through `File > Open Game Folder (MPQ)...`
-2. Choose the correct client build when prompted
-3. Open a world, loose map folder, or standalone asset from the UI
+What `gillijimproject_refactor` is good for:
 
-## Active Highlights
+- **Reference implementation**: How the legacy viewer loaded terrain, WMOs, and MDX models
+- **Test data**: `test_data/development/` — development map split ADTs and PM4 files
+- **Memory bank (archived)**: Historical context at `gillijimproject_refactor/memory-bank/` — the active memory bank has moved to `wow-viewer/memory-bank/`
 
-### Viewer and research workflow
+What `gillijimproject_refactor` is NOT:
 
-- world viewing for Alpha, Wrath-era, and selected Cataclysm-era data paths
-- terrain, liquid, minimap, taxi, and PM4 inspection workflows
-- standalone WMO and MDX/M2 viewing plus GLB export
-- SQL-driven world spawn loading from Alpha-Core
-- render-quality controls, object inspection, and debugging utilities aimed at real dataset archaeology rather than pure presentation
+- A development target: all active work is in `wow-viewer/`
+- A place for new code: see RULE 1 in `AGENTS.md`
 
-### PM4 and reconstruction workflow
+---
 
-- standalone PM4 research library under `gillijimproject_refactor/src/Pm4Research.Core`
-- active PM4 overlay loading inside the viewer
-- PM4/WMO correlation reports and export
-- PM4 OBJ export from the live viewer
+## Supported Game Versions
 
-### Built-in tooling
+| Version | Era | Support |
+|---------|-----|---------|
+| 0.5.3 | Alpha | Terrain, WMO, MDX, BLP, DBC — full read/write |
+| 0.6.0 | Alpha | Terrain, split ADTs — full |
+| 0.7.0 / 0.8.0 | Pre-Release | MDX (chunked) — partial |
+| 1.12.1 | Vanilla | M2 (era-1121 MD20) — full (spec 048) |
+| 2.x | TBC | Not yet supported |
+| 3.0.1 / 3.3.5 | WotLK | Terrain, WMO, M2, PM4 — full |
+| 4.0.0+ | Cataclysm | ADT, PM4 partial; terrain reconstruction path exists |
 
-- map converter UI
-- WMO converter UI
-- VLM export UI
-- terrain texture transfer UI
-- asset-catalog export with automated multi-angle screenshot capture
+## Branch History
 
-## Repository Layout
-
-### Active work
-
-- `gillijimproject_refactor/`
-	- Primary active development tree
-	- Contains `parp-tools WoW Viewer`, `WoWMapConverter`, `Pm4Research.Core`, and the current documentation / memory-bank state
-
-### Important active subprojects inside the refactor tree
-
-- `gillijimproject_refactor/src/MdxViewer/`
-	- Active viewer application
-- `gillijimproject_refactor/src/WoWMapConverter/`
-	- Format and conversion library used by the viewer and related tools
-- `gillijimproject_refactor/src/Pm4Research.Core/`
-	- Standalone PM4 decode and audit foundation
-- `gillijimproject_refactor/src/MDX-L_Tool/`
-	- MDX archaeology and parser utility
-- `gillijimproject_refactor/WoWRollback/`
-	- Supporting rollback, reconstruction, and UniqueID-oriented tooling that now feeds post-`v0.4.5` viewer planning directly
-
-### Other top-level folders
-
-- `parpToolbox/`
-	- Older but still useful PM4 and related format research/tooling
-- `PM4Tool/`
-	- PM4-focused experiments and utilities
-- `ADTPrefabTool/`
-	- Separate tooling path, not the primary active viewer/converter path
-- `archived_projects/`
-	- Historical projects preserved for reference, not primary active work
-
-## Screenshots And Capture
-
-The repo still needs a stronger curated screenshot gallery.
-
-- automated asset-catalog screenshot capture already exists in the active viewer pipeline
-- broader UI, world-scene, and feature-showcase screenshot automation is still a follow-up task rather than a completed repo artifact
-
-## Validation Reality
-
-This repository does not currently have broad first-party automated regression coverage for the active viewer path.
-
-What that means in practice:
-
-- successful builds matter, but build success is not the same as runtime signoff
-- some recent fixes, such as the `v0.4.5` minimap repair, have targeted real-data runtime confirmation
-- many other areas are still build-validated only and should be described that way
-
-If you need exact validation status for a recent viewer or terrain change, check the memory-bank files under `gillijimproject_refactor/memory-bank/` and `gillijimproject_refactor/src/MdxViewer/memory-bank/`.
-
-## Documentation
-
-Start with these files:
-
-- `gillijimproject_refactor/docs/V9_Native_Terrain_Training_Guide.md`
-- `wow-viewer/docs/validation/direct-v9-training-setup.md`
-- `gillijimproject_refactor/README.md`
-- `gillijimproject_refactor/src/MdxViewer/README.md`
-- `gillijimproject_refactor/memory-bank/activeContext.md`
-- `gillijimproject_refactor/memory-bank/progress.md`
-- `gillijimproject_refactor/memory-bank/data-paths.md`
-
-If you are coming here for terrain-model training or dataset generation, start with the two `v9` documents above before falling back to the older general VLM guide.
-
-Those files are more current and more precise than older scattered notes elsewhere in the repository.
-
-## Archived And Experimental Work
-
-This repository also preserves older and experimental work, including:
-
-- Alpha WDT analysis tooling
-- PM4 decoding and reconstruction experiments
-- older toolbox and exporter efforts
-- work-in-progress rewrites and proof-of-concept tools
-
-Those paths remain useful for archaeology and reference, but they should not be treated as the primary maintained surface unless a task explicitly targets them.
+- `v0.5.0-dev` — **Current active branch.** All wow-viewer work.
+- `v0.4.9` — Previous branch, freeze point before the wow-viewer split.
+- `main` / `v0.4.5` — Older branches, legacy MdxViewer era.
 
 ## Disclaimer
 
 This project is not an official Blizzard Entertainment product and is not affiliated with or endorsed by Blizzard Entertainment or World of Warcraft.
-
-
