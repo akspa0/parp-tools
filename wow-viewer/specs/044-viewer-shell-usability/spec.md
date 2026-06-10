@@ -4,7 +4,10 @@
 
 **Created**: 2026-06-03
 
-**Status**: In Progress
+**Status**: Phase 1+2 complete (P1 landed 2026-06-10), US4 (cursor-as-model) deferred P2
+
+**Related specs**:
+- `049-viewer-ui-consolidation` — live continuation lane for categorized Tools menu, floating window extraction, and sidebar consolidation. 044 is the foundation layer; build new viewer shell work on 049.
 
 **Input**: User description: "`Open MK Dataset` is still in the viewer file menu, old tools should be exposed somewhere else, the sidebars are painful and do not allow placing panels into the sidebar containers, `World Maps` never expands after a client is loaded, and the mouse cursor should be rendered as a model so broken model rendering is immediately obvious."
 

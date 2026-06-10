@@ -556,6 +556,23 @@
 
 - **Spec 046 tests** — all 14 PM4 matching tests pass
 
+## Viewer Shell Usability (spec 044) — checklist verified 2026-06-10
+
+- spec 044 is the foundation layer for the active viewer shell; spec 049 (Viewer UI Consolidation) builds on it for categorized Tools menu and floating window extraction.
+- checklist verification (2026-06-10) confirmed all 8 implementation tasks (T001-T008) are landed in `wow-viewer/src/viewer/WoWViewer/`:
+  - T001 dockspace host rendered from `DrawUI()` between toolbar and shell panels (`ViewerApp.cs:1557-1558`)
+  - T002 `_useDockspaceUi = true` default + `settings.UseDockspaceUi` round-trip with version-upgrade logic (`ViewerApp.cs:289`, `:14555-14557`)
+  - T003 fixed sidebar splitters early-out when `_useDockspaceUi` is on (`ViewerApp_Sidebars.cs:1723`)
+  - T004 World Maps auto-opens on `_discoveredMaps.Count == 0 -> >0` transition (`ViewerApp.cs:9113` + `ViewerApp_Sidebars.cs:476` + `ViewerApp_Workspaces.cs:133`)
+  - T005 `View > Reset Shell Layout` and `ResetShellLayoutToDefaults()` aligned with dockable default (`ViewerApp.cs:1759-1760`, `:13970`)
+  - T006 `Open MK Dataset...` / `Open Zarr Dataset...` removed from `File`
+  - T007 moved to `Tools > Offline Data / Conversion` submenu (`ViewerApp.cs:1833-1839`)
+  - T008 `View > Dockable Shell Panels` toggle persists via `SaveViewerSettings()` (`ViewerApp.cs:1748-1753`)
+- T012 build verified green: `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug` -> 0 errors, 163 pre-existing warnings (none from 044 code).
+- US4 (cursor-as-model) remains explicitly deferred P2 and tracked as T009-T011 in `wow-viewer/specs/044-viewer-shell-usability/tasks.md`. It is a real runtime seam, not a non-model substitute; ownership stays with 044 until reopened.
+- spec 049 (`049-viewer-ui-consolidation`) is the live continuation lane for categorized Tools menu, floating window sticky behavior, and right sidebar consolidation. 044 is intentionally closed at the dockable-shell + menu-declutter boundary.
+- missing spec-template artifacts on 044 (no `plan.md`, no `data-model.md`/quickstart/contracts) are accepted for this spec because 044 is small-bounded (8 implementation tasks, 9 FRs) and the actual planning was tracked through tasks.md + 049's plan.md. Reopen if 044 expands (e.g., when T009-T011 ship).
+
 ## Next Likely Steps
 
 - extend the current deterministic export host from JSON report output into the planned Zarr-backed PM4 signal corpus writer

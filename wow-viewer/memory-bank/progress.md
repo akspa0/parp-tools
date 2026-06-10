@@ -50,3 +50,25 @@
 
 ## MotherShip Direction
 Long-range: `theMothership/game-engine/` — universal game engine with WoW plugin. See `wow-engine-modernization-plan-2026-05-14.md`.
+
+## Spec 056 — ViewerApp + GPU + LOD Modernization (NEW 2026-06-10)
+
+Authored the full Spec Kit pack under `wow-viewer/specs/056-viewerapp-gpu-lod-modernization/`:
+
+- `spec.md` (7 user stories, 20 FRs, 10 SCs; locked D1-D8; supersedes 036)
+- `plan.md` (9 phases, 0-8; max 10 steps each; constitution-clean)
+- `research.md` (Phase 0; maps existing `WowViewer.Core.Runtime.World` LOD/visibility surface; per-phase porting risks; reuse-and-adapt map)
+- `data-model.md` (Phase 1; `RenderScene`, `RenderBackend`, `RenderResources`, `TextureCache`, `PerFrameRenderStats`, LOD settings, **WMO pass dispatch types from Ghidra correctness oracle**)
+- `contracts/RenderScene.md`, `RenderBackend.md`, `RenderResources.md`, `TextureCache.md` (Phase 1 backend-neutral interfaces)
+- `quickstart.md` (build/test/validate commands, per-phase baselines, per-phase validation checklist, source-of-truth map)
+- `tasks.md` (81 tasks, 9 phases, max 10 per sub-phase; US1-US7 mapped; MVP = Phase 0+1)
+
+Plus the audit: `docs/architecture/spec056-viewerapp-gpu-lod-modernization-analysis-2026-06-10.md`.
+
+**2026-06-10 source-of-truth correction** (D1 amended, D8 added):
+
+1. **Source of truth = `wow-viewer/src/viewer/WoWViewer/Rendering/*` and `WoWViewer/Terrain/*`**. The new shared library is built by *improving and moving* this code. The legacy `MdxViewer/Rendering/*` is read-only reference (RULE 1) and is **not** the source of truth.
+2. **`wow-viewer/src/viewer/WowViewer.App.Defunct/*` is forbidden** (user instruction 2026-06-10). Do not read, do not port, do not reference. Treated as a poisoned source.
+3. **Ghidra doc is the correctness oracle** for the new WMO renderer (`docs/architecture/wmo-render-pass-architecture-2026-05-30.md`). The new WMO renderer conforms to the dispatch logic in that doc (interior/exterior by `flags & 0x48`, per-batch MOMT flag testing, lightmap pass split, liquid type dispatch, portal-walk visibility, group flag filtering). It is **not** a code source. Added a 4a. WMO pass dispatch section to `data-model.md` (`WmoGroupRenderMode`, `WmoGroupFlags`, `WmoBatchMomtFlags`, `WmoBatchRenderPass`, `WmoLiquidType`, `WmoPortalWalkState`, `WmoInteriorFogState`, `WmoDayNightInfo`). Added US3 acceptance scenarios 5-10 to `spec.md` to test Ghidra conformance.
+
+**Current state**: spec authored, source-of-truth corrected, not yet implemented. Next step when implementation starts: Phase 0 (T001-T009) creates the new test project, locks the contract seams, and records the pre-spec capture baseline.

@@ -1,10 +1,10 @@
 # Active Context — wow-viewer
 
-**Branch**: `v0.5.0-dev` | **Date**: 2026-06-09
+**Branch**: `v0.5.0-dev` | **Date**: 2026-06-10
 
 ## Current Focus
 
-Spec plan consolidation, documentation audit, and memory bank merge. The gillijimproject_refactor memory-bank has been decommissioned; all continuity now lives under `wow-viewer/memory-bank/`. New docs written: README.md, CLI-TOOLS.md, PLANS-OVERVIEW.md, and expanded memory bank with projectbrief/techContext/systemPatterns/dataPaths/codingStandards.
+**Spec 056 — ViewerApp Refactor + GPU Acceleration + LOD Modernization.** New spec, plan, research, data-model, contracts, quickstart, and 80-task breakdown written 2026-06-10. Target: shrink `ViewerApp.cs` (621k bytes) by promoting viewer-app `Rendering/*` (28+ files) into a real shared `WowViewer.Core.Renderer` library, modernize OpenGL via Silk.NET (retained-mode VBO/IBO/UBO + instanced rendering + frustum culling), and add the full LOD matrix (terrain mesh LOD, object LOD, water LOD, light LOD, WDL far horizon, BLP mipmaps). 9 phases (0-8), max 10 tasks each. Supersedes `specs/036-renderer-improvements`. Vulkan primary, compute shaders, async streaming, and the Unreal bridge are explicit out-of-scope follow-ons.
 
 ## Active Specs (by priority)
 
@@ -17,6 +17,7 @@ Spec plan consolidation, documentation audit, and memory bank merge. The gilliji
 | 044 Viewer shell usability | 10/13 | 3 remaining tasks |
 | 035 M2 render parity recovery | 9/28 | Continued fix work needed |
 | 020-036, 042-045, 049, 055 | 0-2% | Not yet started |
+| 056 ViewerApp + GPU + LOD | 0/80 | **NEW 2026-06-10**. Plan + tasks + contracts written. Phase 0 (test project + baselines) is the next step. Supersedes 036. |
 
 ## What Exists (Completed)
 

@@ -95,6 +95,8 @@
 ## Viewer Shell / UI
 
 - spec `044-viewer-shell-usability` owns the dockable shell cleanup and menu/sidebar fixes.
+- spec 044 is the foundation layer (dockable shell host + menu declutter); all 8 P1 implementation tasks verified landed on 2026-06-10. US4 (cursor-as-model) remains deferred P2 (T009-T011) — a real runtime seam, not a non-model substitute.
+- spec `049-viewer-ui-consolidation` is the live continuation: categorized Tools menu, floating window extraction, sidebar consolidation. Build new viewer shell work on 049; reopen 044 only when US4 ships.
 - spec `045-scene-graph-workbench` owns the future Blender-style scene outliner for terrain, objects, and PM4.
 
 ## M2 / Runtime Continuity

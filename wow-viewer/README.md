@@ -33,7 +33,7 @@ A 3D world viewer, format analysis toolkit, and ML dataset pipeline for World of
 ### Prerequisites
 
 - .NET 10 SDK
-- A staged game client in `output/tmp/wowarchive-clients/` (see [data-paths](memory-bank/data-paths.md))
+- A staged game client in `output/tmp/wowarchive-clients/` (see [Data Paths](memory-bank/data-paths.md) for the authoritative list of paths and override environment variables)
 
 ### Build
 
@@ -96,7 +96,8 @@ wow-viewer/
 | [CLI Tools Guide](../docs/CLI-TOOLS.md) | Full reference for all CLI tools with workflow recipes |
 | [Plans Overview](../docs/PLANS-OVERVIEW.md) | Summary of all 25 remaining active specs |
 | [Memory Bank](memory-bank/activeContext.md) | Current focus, spec status, known issues |
-| [Data Paths](memory-bank/data-paths.md) | Trusted game client and test data locations |
+| [Data Paths](memory-bank/data-paths.md) | Game client and test data locations, with env-var overrides |
+| [Coding Standards](memory-bank/coding_standards.md) | Project layout, C#/Python conventions, tests, commits |
 | [Architecture Docs](../docs/architecture/) | PM4 semantics, render plans, model specs |
 | Feature Specs (`specs/`) | Per-feature spec/plan/tasks (Spec Kit) |
 

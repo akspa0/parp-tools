@@ -2,6 +2,9 @@
 
 **Status**: In Progress | **Priority**: P1 | **Owner**: WoWViewer
 
+**Related specs**:
+- `044-viewer-shell-usability` — foundation layer; landed the dockable shell host (`DrawDockspaceHost`), `UseDockspaceUi` default + persistence, fixed-sidebar splitter suppression, `World Maps` auto-open on client load, and `Tools > Offline Data / Conversion` menu declutter. 049 builds the categorized Tools menu, floating window sticky behavior, and right sidebar consolidation on top of that foundation. US4 (cursor-as-model) in 044 remains deferred P2.
+
 ## Problem
 
 The viewer UI has grown organically over 10 months of development. Panels are scattered across a right sidebar with collapsible sections, separate docked panels, and floating windows — all with no consistent organizational principle. Related tools are in different places (e.g., Taxi Panel was buried inside World Objects, Weak Signal inside Terrain Controls). Users waste time hunting for controls.
