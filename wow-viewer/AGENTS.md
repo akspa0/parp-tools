@@ -6,47 +6,65 @@ Spec Kit skills are available as opencode skills under `.opencode/skills/speckit
 
 # wow-viewer Guardrails
 
-- Treat `../AGENTS.md` as the authoritative workspace policy for scope, safety, and repo boundaries.
-- Keep all new implementation work in `wow-viewer/`; do not write new code in `gillijimproject_refactor/` unless explicitly requested.
-- Use Spec Kit skills for non-trivial feature slices:
-  - `speckit-specify` -> write or refine spec (`wow-viewer/specs/<NNN>-<feature>/spec.md`)
-  - `speckit-plan` -> implementation plan (`wow-viewer/specs/<NNN>-<feature>/plan.md`)
-  - `speckit-tasks` -> concrete task breakdown (`wow-viewer/specs/<NNN>-<feature>/tasks.md`)
-  - `speckit-implement` -> execute tasks with validation
-  - `speckit-analyze` -> analyze spec for completeness and risks
-  - `speckit-checklist` -> verify spec/plan/implementation alignment
-- Specs live in `wow-viewer/specs/<NNN>-<feature>/`
-- Architecture docs live in `wow-viewer/docs/architecture/` and must stay aligned with code changes.
-- The Spec Kit constitution is at `wow-viewer/.specify/memory/constitution.md`.
+The rules that keep new work in this repository shippable, findable, and safe to extend.
 
-## Mandatory Review & Rework Process
+For the day-to-day how-to (C#/Python conventions, project layout, tests, commits), see `wow-viewer/memory-bank/coding_standards.md`. For paths and override environment variables, see `wow-viewer/memory-bank/data-paths.md`.
 
-After EVERY implementation pass of a Speckit task, plan slice, or feature, the following steps MUST be completed before moving to the next task:
+## Scope and Boundaries
 
-### Step 1: Review for Bugs and Regressions
-- Read the diff of every changed file (`git diff`)
-- Check for: null reference risks, missing enum cases in switch statements, file-locking build issues, incorrect coordinate transforms, stale cache versions
-- Run `dotnet build` on all affected projects
-- Run `dotnet test` on affected test projects
-- Check that the implementation doesn't violate the spec's "explicitly out of scope" section
-- Verify that no hardcoded paths use `H:\CLIENTS`
+- All new implementation work lives in `wow-viewer/`. Do not add new code in `gillijimproject_refactor/` unless explicitly requested.
+- The top-level `../AGENTS.md` is the authoritative workspace policy for scope, safety, and repo boundaries. When guidance here and there conflict, the top-level file wins.
+- Game client data is read only from `output/tmp/wowarchive-clients/`. Any reference to `H:\CLIENTS` in code, scripts, tests, or documentation is a bug. Replace it with a staged path or remove the reference.
 
-### Step 2: Update Documentation
-- Update `tasks.md` — mark completed tasks `[x]`, add new tasks discovered during implementation, update task counts
-- Update `memory-bank/activeContext.md` — task counts, what's done, what's pending, biggest gaps
-- Update `memory-bank/progress.md` — add a dated entry describing what landed, the proof, and remaining gaps
-- Update `spec.md` if new discoveries change the spec's assumptions or requirements
+## Spec Kit
 
-### Step 3: Commit
-- Stage only intended files (`git add` specific paths, not wildcards)
-- Write a concise commit message describing the "why" not just the "what"
-- Verify no secrets or private paths are committed
+Every non-trivial feature slice starts with a spec, then a plan, then tasks. Use the Spec Kit skills under `.opencode/skills/speckit-*`:
 
-### Step 4: Multi-Pass Self-Review
-Before declaring a task complete, simulate at least one rework pass:
-1. Read the implementation as if you're a new developer seeing it for the first time
-2. Identify at least one thing that could be done more cleanly, safely, or efficiently
-3. Either fix it now or create a follow-up task
-4. Verify the fix compiles and tests still pass
+- `speckit-specify` — write or refine a spec (`wow-viewer/specs/<NNN>-<feature>/spec.md`)
+- `speckit-plan` — implementation plan (`plan.md`)
+- `speckit-tasks` — concrete task breakdown (`tasks.md`)
+- `speckit-implement` — execute the task list with validation
+- `speckit-analyze` — stress-test a spec before committing to it
+- `speckit-checklist` — verify spec/plan/implementation alignment
 
-This process prevents the "weeks of debugging" cycle by catching issues at implementation time rather than after they've accumulated.
+Specs live in `wow-viewer/specs/<NNN>-<feature>/`. The Spec Kit constitution is at `wow-viewer/.specify/memory/constitution.md`.
+
+Architecture docs live in `wow-viewer/docs/architecture/` and must stay aligned with the code that implements them. When a spec changes behavior, update the relevant architecture doc in the same change.
+
+## Phasing and Validation
+
+A spec is a sequence of phases. Do not start phase N+1 until phase N is validated against real data. "Validated" means a real-data proof has been recorded, not just that the code compiles.
+
+Each phase produces a small, independently committable diff. Big-bang commits and big-bang rewrites are out.
+
+## Implementation Pass Checklist
+
+A complete pass on a spec task, plan slice, or feature lands four artifacts: code, documentation, a commit, and a self-review.
+
+**Code and tests**
+
+- The diff addresses the task, the plan, and the spec. Nothing extra.
+- Null references, missing enum cases, file-locking, coordinate-transform, and cache-version regressions are caught before the commit, not after.
+- `dotnet build` and `dotnet test` pass on the affected projects.
+- No path in the diff resolves to `H:\CLIENTS` or any other untrusted client root.
+
+**Documentation**
+
+- `tasks.md` is current: completed items are checked off, new discoveries are added, counts are accurate.
+- `memory-bank/activeContext.md` and `memory-bank/progress.md` reflect what landed, what is open, and the biggest unproven gap. Compress aggressively — a 20-line accurate summary beats a 200-line log.
+- `spec.md` is updated when a discovery changes an assumption or requirement.
+
+**Commit**
+
+- One logical change per commit. A bug fix, a refactor, and a feature do not belong together.
+- Staged by name. `git add .` is a smell.
+- Commit message describes the "why," not the "what." The diff already shows the what.
+- No secrets, no private paths, no `H:\CLIENTS` references.
+
+**Self-review**
+
+- Re-read the diff as a new contributor would. Would they understand the change without a conversation?
+- If a cleaner, safer, or faster version is obvious, either make it now or add it as a follow-up task. Do not leave a known-uglier version in place to ship on schedule.
+- The final state compiles and tests pass.
+
+This four-part checklist is the difference between a one-day change and a one-week debug session. Skipping any of the four parts is how small issues become big ones.
